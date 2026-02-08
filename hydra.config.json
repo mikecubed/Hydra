@@ -65,6 +65,34 @@
       "claude-sonnet-4-5-20250929": 5000000
     }
   },
+  "worktrees": {
+    "enabled": false,
+    "basePath": ".hydra/worktrees",
+    "autoCleanup": true,
+    "branchPrefix": "hydra/"
+  },
+  "crossModelVerification": {
+    "enabled": true,
+    "mode": "on-complex",
+    "pairings": {
+      "claude": "gemini",
+      "gemini": "claude",
+      "codex": "claude"
+    }
+  },
+  "verification": {
+    "onTaskDone": true,
+    "command": "auto",
+    "timeoutMs": 60000
+  },
+  "mcp": {
+    "codex": {
+      "enabled": false,
+      "command": "codex",
+      "args": ["mcp-server"],
+      "sessionTimeout": 300000
+    }
+  },
   "stats": {
     "retentionDays": 30
   }

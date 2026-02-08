@@ -22,7 +22,16 @@ hydra-context.mjs   hydra-ui.mjs
                     picocolors
 
 orchestrator-daemon.mjs ──> hydra-agents, hydra-ui, hydra-config,
-                            hydra-metrics, hydra-usage
+                            hydra-metrics, hydra-usage, hydra-verification,
+                            hydra-worktree, hydra-mcp
+       │
+       └──> daemon/read-routes.mjs + daemon/write-routes.mjs
+
+hydra-mcp-server.mjs ──> HTTP daemon API (standalone stdio MCP server)
+
+hydra-worktree.mjs ──> git CLI (child_process.execSync)
+
+hydra-mcp.mjs ──> Codex MCP server (JSON-RPC over stdio)
 
 orchestrator-client.mjs ──> hydra-utils, hydra-ui, hydra-agents,
                             hydra-usage
@@ -36,23 +45,100 @@ orchestrator-client.mjs ──> hydra-utils, hydra-ui, hydra-agents,
 User prompt
      │
      v
-[Operator] ──> mini-round triage (1 fast council round)
+[Operator] ──> classifyPrompt() ──> tier: simple | moderate | complex
      │
-     ├── recommendation=handoff ──> create daemon handoffs for each agent
-     │                                    │
-     │                              [Agent Heads] poll /next, pick up handoffs
+     ├── simple ──> fast-path delegation (bypass council entirely)
+     │                   │
+     │                   └── bestAgentFor(taskType) ──> single handoff
      │
-     └── recommendation=council ──> full council deliberation
-                                         │
-                                    Claude (propose)
-                                         │
-                                    Gemini (critique)
-                                         │
-                                    Claude (refine)
-                                         │
-                                    Codex (implement)
-                                         │
-                                    publish tasks/decisions/handoffs
+     ├── moderate ──> mini-round triage (1 fast council round)
+     │     │
+     │     ├── recommendation=handoff ──> create daemon handoffs for each agent
+     │     │                                    │
+     │     │                              [Agent Heads] poll /next, pick up handoffs
+     │     │
+     │     └── recommendation=council ──> full council deliberation
+     │
+     └── complex ──> generateSpec() ──> anchoring spec document
+                          │
+                          v
+                     full council deliberation (spec injected into every phase)
+                          │
+                     Claude (propose)
+                          │
+                     Gemini (critique)
+                          │
+                     Claude (refine)
+                          │
+                     Codex (implement)
+                          │
+                     cross-model verification (optional)
+                          │
+                     publish tasks/decisions/handoffs
+```
+
+### Agent Filtering
+
+When `agents=claude,gemini` is specified, only those agents participate:
+- Fast-path: `suggestedAgent` falls back to best match within the filtered set
+- Council: `COUNCIL_FLOW` phases filtered to only include allowed agents
+- Handoffs: only created for agents in the filter
+
+### Cross-Model Verification
+
+```
+Producer agent output
+     │
+     v
+shouldCrossVerify(tier, config) ──> mode: always | on-complex | off
+     │
+     ├── skip ──> return output as-is
+     │
+     └── verify ──> getVerifier(producer) ──> paired verifier agent
+                         │
+                         v
+                    modelCall(verifier, reviewPrompt)
+                         │
+                         v
+                    { approved, issues[], suggestions[] }
+                         │
+                         ├── approved ──> return original output
+                         └── issues ──> append verification notes to result
+```
+
+### Checkpoint Flow
+
+```
+Long-running task (council or multi-step)
+     │
+     ├── phase complete ──> POST /task/checkpoint
+     │                         { taskId, name, context, agent }
+     │                              │
+     │                              v
+     │                         task.checkpoints[] appended
+     │
+     └── failure/timeout ──> GET /task/:id/checkpoints
+                                  │
+                                  v
+                             resume from last checkpoint context
+```
+
+### Session Fork/Spawn
+
+```
+Active session
+     │
+     ├── :fork ──> POST /session/fork
+     │                 │
+     │                 v
+     │            Copy current state snapshot
+     │            Create sibling session (type: 'fork', parentId: original)
+     │
+     └── :spawn focus="subtask" ──> POST /session/spawn
+                                        │
+                                        v
+                                   Fresh session (type: 'spawn', parentId: original)
+                                   Focus field anchors the child's scope
 ```
 
 ### Agent Invocation
@@ -69,6 +155,18 @@ modelCall(agent, prompt, timeout)
      │   └── codex? ──> exec mode with output file
      │
      └── recordCallComplete/Error  [metrics]
+
+modelCallAsync(agent, prompt, timeout, opts)
+     │
+     ├── agent === 'codex' && MCP enabled?
+     │   │
+     │   ├── yes ──> codexMCP(prompt, opts) ──> JSON-RPC over stdio
+     │   │               │
+     │   │               └── threadId? ──> multi-turn via codex-reply tool
+     │   │
+     │   └── no ──> fall back to modelCall() (CLI spawn)
+     │
+     └── other agents ──> modelCall() directly
 ```
 
 ### Model Resolution
@@ -76,9 +174,9 @@ modelCall(agent, prompt, timeout)
 ```
 Priority chain:
   1. HYDRA_CLAUDE_MODEL env var
-  2. hydra.config.json models.claude.active
-  3. hydra.config.json models.claude.default
-  4. Hardcoded in AGENTS registry
+  2. hydra.config.json models.claude.active (when override is not "default")
+  3. hydra.config.json modeTiers[mode].claude preset
+  4. hydra.config.json models.claude.default
 
 Shorthand resolution:
   "sonnet" ──> MODEL_ALIASES.claude.sonnet ──> "claude-sonnet-4-5-20250929"
@@ -92,45 +190,52 @@ Shorthand resolution:
 All state mutations go through `enqueueMutation()`:
 
 ```
-Request ──> enqueueMutation(label, mutator)
+Request ──> enqueueMutation(label, mutator, detail)
                 │
                 v
            readState() ──> mutator(state) ──> writeState(state)
                 │                                    │
                 v                                    v
-           appendSyncLog()                    appendEvent()
-                │
-                v
-           writeStatus()
+           appendSyncLog()                    appendEvent(type, detail)
+                │                                    │
+                v                                    v
+           writeStatus()                   { id, seq, at, type, category, payload }
+                                                     │
+                                                     v
+                                              broadcastEvent() ──> SSE clients
 ```
 
-This ensures serialized writes even with concurrent HTTP requests.
+This ensures serialized writes even with concurrent HTTP requests. The write queue is **fault-tolerant** — a failed mutation does not poison subsequent ones. Each mutation's rejection is isolated while the queue continues processing.
 
 ### State File Structure
 
 `AI_SYNC_STATE.json`:
 - `activeSession` - Current coordination session
-- `tasks[]` - Task queue with status, owner, blockedBy
+- `tasks[]` - Task queue with status, owner, blockedBy, claimToken, worktreePath, checkpoints[]
 - `decisions[]` - Recorded decisions
 - `blockers[]` - Active blockers
 - `handoffs[]` - Agent handoffs (acknowledged or pending)
+- `childSessions[]` - Forked/spawned child sessions with parentId, type, focus
 
 ### Auto-Behaviors
 
 - **Auto-unblock**: When a task completes, blocked dependents move to `todo`
 - **Cycle detection**: `blockedBy` mutations are checked for circular dependencies
 - **Auto-archive**: When >20 completed tasks, move to archive file
-- **Auto-verify**: `tsc --noEmit` runs on task completion
+- **Auto-verify**: Project-aware verification runs on task completion
+  (configurable command or auto-detected by stack)
 
 ## Event System
 
 NDJSON append-only log at `AI_ORCHESTRATOR_EVENTS.ndjson`:
 
 ```json
-{"id":"...", "at":"ISO", "type":"mutation", "payload":{"label":"task:add ..."}}
-{"id":"...", "at":"ISO", "type":"agent_call_start", "payload":{"agent":"claude"}}
-{"id":"...", "at":"ISO", "type":"daemon_start", "payload":{"host":"127.0.0.1","port":4173}}
+{"id":"...", "seq":1, "at":"ISO", "type":"mutation", "category":"task", "payload":{"label":"task:add ..."}}
+{"id":"...", "seq":2, "at":"ISO", "type":"agent_call_start", "category":"system", "payload":{"agent":"claude"}}
+{"id":"...", "seq":3, "at":"ISO", "type":"daemon_start", "category":"system", "payload":{"host":"127.0.0.1","port":4173}}
 ```
+
+Each event has a **monotonic sequence number** (`seq`) and a **category** for filtered replay.
 
 Event types:
 - `daemon_start`, `daemon_stop`
@@ -138,6 +243,22 @@ Event types:
 - `auto_archive`
 - `verification_start`, `verification_complete`
 - `agent_call_start`, `agent_call_complete`, `agent_call_error`
+
+Event categories (auto-classified from event type/label):
+- `task` — task mutations (add, update, claim, checkpoint)
+- `handoff` — handoff creation, acknowledgment
+- `decision` — decision recording
+- `blocker` — blocker creation/resolution
+- `session` — session start, fork, spawn
+- `system` — daemon lifecycle, agent calls, archive, verification
+
+### Event Replay
+
+`GET /events/replay?from=N&category=X` returns all events since sequence number N, optionally filtered by category. On startup, `initEventSeq()` reads the last event from the NDJSON file to restore the sequence counter.
+
+### Atomic Task Claiming
+
+`POST /task/claim` returns a `claimToken` (UUID) on success. Subsequent `/task/update` calls can include the `claimToken` — if it doesn't match, the update is rejected (preventing stale updates from racing agents). Pass `force: true` to override claim validation for operator/human use.
 
 ## Context Tiers
 
@@ -209,3 +330,82 @@ persistMetrics() ──> hydra-metrics.json (every 30s + on shutdown)
 ```
 
 Token estimation: ~0.25 tokens per output character (rough heuristic).
+
+## Git Worktree Isolation
+
+When `worktrees.enabled=true` in config, tasks can be assigned isolated git worktrees:
+
+```
+POST /task/add { ..., worktree: true }
+     │
+     v
+createWorktree(taskId, baseBranch)
+     │
+     ├── git worktree add .hydra/worktrees/<taskId> -b hydra/<taskId>
+     │
+     └── store worktreePath on task record
+            │
+            v
+     modelCall(..., { cwd: worktreePath })  ──> agent works in isolation
+            │
+            v
+     task complete ──> autoCleanup?
+            │
+            ├── yes ──> removeWorktree(taskId)
+            └── no  ──> worktree persists for manual merge
+```
+
+Module: `lib/hydra-worktree.mjs` — exports `createWorktree()`, `removeWorktree()`, `getWorktreePath()`, `listWorktrees()`, `mergeWorktree()`, `isWorktreeEnabled()`.
+
+## Codex MCP Integration
+
+When `mcp.codex.enabled=true`, Codex calls use a persistent MCP server process instead of one-shot CLI spawns:
+
+```
+modelCallAsync('codex', prompt, timeout, opts)
+     │
+     v
+getCodexMCPClient() ──> lazy init MCPClient
+     │
+     ├── MCPClient.start() ──> spawn 'codex mcp-server' subprocess
+     │       │
+     │       └── JSON-RPC over stdin/stdout
+     │
+     ├── codexMCP(prompt) ──> callTool('codex', { prompt })
+     │       │
+     │       └── threadId? ──> callTool('codex-reply', { thread_id, message })
+     │
+     └── idle timeout (300s) ──> auto-close; re-opened on next call
+```
+
+Module: `lib/hydra-mcp.mjs` — exports `MCPClient`, `getCodexMCPClient()`, `codexMCP()`, `closeCodexMCP()`.
+
+## Hydra MCP Server
+
+Hydra can be exposed as an MCP server so that AI agents can self-coordinate:
+
+```
+Agent (Claude/Gemini/Codex)
+     │
+     └── MCP tool call (JSON-RPC over stdio)
+              │
+              v
+         hydra-mcp-server.mjs
+              │
+              └── HTTP request to daemon API
+                       │
+                       v
+                  orchestrator-daemon.mjs
+```
+
+8 exposed MCP tools:
+- `hydra_tasks_list` — list open tasks with filters
+- `hydra_tasks_claim` — claim a task atomically
+- `hydra_tasks_update` — update task status/notes
+- `hydra_tasks_checkpoint` — save checkpoint
+- `hydra_handoffs_pending` — get pending handoffs for an agent
+- `hydra_handoffs_ack` — acknowledge a handoff
+- `hydra_council_request` — request council deliberation
+- `hydra_status` — get daemon health summary
+
+Module: `lib/hydra-mcp-server.mjs` — run with `node lib/hydra-mcp-server.mjs`.

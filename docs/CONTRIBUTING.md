@@ -108,24 +108,34 @@ Users can then: `hydra model claude=experimental`
 
 ## Adding a Daemon Endpoint
 
-1. **Add route handler** in `lib/orchestrator-daemon.mjs` inside the `http.createServer` callback:
+Daemon routes are split into two files under `lib/daemon/`:
+- `read-routes.mjs` — GET and SSE endpoints (read-only)
+- `write-routes.mjs` — POST endpoints (state mutations)
 
+Both export a single handler function that receives `(method, route, requestUrl, req, res, context)` where `context` contains daemon internals (`readState`, `enqueueMutation`, `sendJson`, `readJsonBody`, etc.).
+
+1. **Add route handler** in the appropriate route file:
+
+For read endpoints — `lib/daemon/read-routes.mjs`:
 ```js
 if (method === 'GET' && route === '/my-endpoint') {
-  const data = /* compute response */;
+  const state = readState();
+  const data = /* compute from state */;
   sendJson(res, 200, { ok: true, data });
-  return;
+  return true;  // return true = handled
 }
+```
 
-// For write endpoints (after auth check):
+For write endpoints — `lib/daemon/write-routes.mjs`:
+```js
 if (method === 'POST' && route === '/my-endpoint') {
   const body = await readJsonBody(req);
   const result = await enqueueMutation('my-endpoint', (state) => {
     // mutate state
     return /* result */;
-  });
+  }, { /* optional detail for event log */ });
   sendJson(res, 200, { ok: true, result });
-  return;
+  return true;
 }
 ```
 
@@ -141,6 +151,8 @@ case 'my-command': {
 ```
 
 3. **Add help text** in the `printHelp()` function.
+
+Note: `enqueueMutation()` accepts an optional third `detail` parameter that is included in the NDJSON event log. The event category is auto-classified from the label (e.g., labels starting with `task:` get category `task`).
 
 ## Adding an Operator Command
 
@@ -160,6 +172,37 @@ if (line === ':mycommand' || line.startsWith(':mycommand ')) {
 }
 ```
 
+## Adding an MCP Server Tool
+
+To expose a new tool via the Hydra MCP server (`lib/hydra-mcp-server.mjs`):
+
+1. **Add tool definition** to the `TOOLS` array:
+
+```js
+{
+  name: 'hydra_my_tool',
+  description: 'What it does',
+  inputSchema: {
+    type: 'object',
+    properties: {
+      param: { type: 'string', description: 'Parameter description' },
+    },
+    required: ['param'],
+  },
+}
+```
+
+2. **Add handler** in the `tools/call` switch:
+
+```js
+case 'hydra_my_tool': {
+  const data = await daemonRequest('GET', '/my-endpoint');
+  return { content: [{ type: 'text', text: JSON.stringify(data, null, 2) }] };
+}
+```
+
+The MCP server delegates to the daemon HTTP API — it should not access state directly.
+
 ## Code Style
 
 - **ES Modules**: All `.mjs` files use `import`/`export`
@@ -168,15 +211,49 @@ if (line === ':mycommand' || line.startsWith(':mycommand ')) {
 - **Windows-first**: All paths use forward slashes, stdin piping for long prompts
 - **ANSI formatting**: Use `hydra-ui.mjs` exports (SUCCESS, ERROR, WARNING, DIM, ACCENT, etc.)
 - **Error handling**: Non-critical errors (metrics, usage checks) are silently caught; critical errors throw
-- **State mutations**: Always go through `enqueueMutation()` in the daemon
+- **State mutations**: Always go through `enqueueMutation()` in the daemon; the write queue is fault-tolerant (failed mutations don't poison the queue)
 - **JSON output**: All daemon endpoints return `{ ok: true/false, ... }`
+- **Event logging**: Events include monotonic `seq` numbers and typed `category` fields
 
 ## Testing
 
-Currently no automated tests. To verify changes:
+Run automated tests:
+
+```powershell
+npm test
+```
+
+This runs all test files under `test/` using Node.js built-in test runner (`node:test`):
+
+- `test/orchestrator-daemon.integration.test.mjs` — Integration tests for all daemon endpoints (task CRUD, claiming, checkpoints, events, sessions, worktrees)
+- `test/hydra-mcp.test.mjs` — Unit tests for the MCP client (JSON-RPC over stdio with mock server)
+- `test/hydra-verification.test.mjs` — Unit tests for the verification command resolver
+
+### Writing Tests
+
+Tests use `node:test` and `node:assert`:
+
+```js
+import { describe, it, before, after } from 'node:test';
+import assert from 'node:assert/strict';
+
+describe('My feature', () => {
+  it('does the thing', async () => {
+    // For daemon integration tests, use the shared server from before() hook
+    const res = await fetch(`${BASE}/my-endpoint`);
+    const data = await res.json();
+    assert.ok(data.ok);
+  });
+});
+```
+
+Integration tests spin up a real daemon on a random port via `startDaemon()` in a `before()` hook and shut it down in `after()`. They share a single daemon instance across all tests in the file.
+
+### Manual Verification
 
 1. Start daemon: `npm start`
 2. Run a dispatch: `npm run dispatch -- prompt="test" mode=preview`
 3. Check stats: `npm run stats`
 4. Check model switching: `npm run model -- claude=sonnet` then `npm run model`
 5. Check usage: `npm run usage`
+6. Test agent filter: `node lib/hydra-operator.mjs mode=auto prompt="test" agents=claude,gemini`

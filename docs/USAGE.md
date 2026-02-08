@@ -40,8 +40,9 @@ All client commands use: `node lib/orchestrator-client.mjs <command> [key=value]
 | `task:add title=... [owner=...] [status=todo] [type=...] [files=...] [notes=...] [blockedBy=...]` | Create a task |
 | `task:update taskId=... [status=...] [owner=...] [notes=...] [files=...] [blockedBy=...]` | Update a task |
 | `task:route taskId=...` | Get best agent for a task |
-| `claim agent=... [taskId=... \| title=...]` | Claim/create a task |
-| `verify taskId=...` | Run tsc verification |
+| `claim agent=... [taskId=... \| title=...]` | Claim/create a task (returns claimToken) |
+| `verify taskId=...` | Run project-aware verification |
+| `checkpoint taskId=... name=... context=... [agent=...]` | Save task checkpoint |
 
 ### Agent Coordination
 
@@ -57,6 +58,9 @@ All client commands use: `node lib/orchestrator-client.mjs <command> [key=value]
 | Command | Description |
 |---------|-------------|
 | `session:start focus=... [owner=human] [participants=...] [branch=...]` | Start coordination session |
+| `session:fork` | Fork current session (copy state for alternative exploration) |
+| `session:spawn focus=...` | Spawn child session (fresh state for focused subtask) |
+| `sessions` | List all sessions including forks/spawns |
 | `decision:add title=... [owner=...] [rationale=...] [impact=...]` | Record a decision |
 | `blocker:add title=... [owner=...] [nextStep=...]` | Record a blocker |
 
@@ -79,7 +83,7 @@ node lib/orchestrator-client.mjs model claude=default
 **Shorthand aliases:**
 - Claude: `opus`, `sonnet`, `haiku`, `default`, `fast`, `cheap`
 - Gemini: `pro`, `flash`, `default`, `fast`
-- Codex: `gpt-5`, `o4-mini`, `default`, `fast`
+- Codex: `gpt-5`, `gpt-5.3`, `o4-mini`, `default`, `fast`, `cheap`
 
 ### Utility
 
@@ -115,8 +119,11 @@ node lib/hydra-operator.mjs prompt="..." # One-shot mode
 | `:model claude=sonnet` | Switch agent model |
 | `:usage` | Token usage & contingencies |
 | `:stats` | Agent metrics & performance |
+| `:fork` | Fork current session (explore alternatives) |
+| `:spawn <focus>` | Spawn child session for focused subtask |
 | `:quit` | Exit console |
 | `<any text>` | Dispatch as prompt |
+| `agents=claude,gemini <prompt>` | Dispatch with agent filter |
 
 ### Operator Modes
 
@@ -140,6 +147,7 @@ Options:
 - `publish=true` — Push decisions/tasks to daemon
 - `emit=json` — Output raw JSON instead of summary
 - `save=true` — Save run report to coordination/runs/
+- `agents=claude,gemini` — Limit which agents participate in the council flow
 
 ## Dispatch Mode
 
@@ -173,7 +181,8 @@ Exit code: 0 if normal/warning, 1 if critical.
 
 ```json
 {
-  "version": 1,
+  "version": 2,
+  "mode": "performance",
   "models": {
     "claude": {
       "default": "claude-opus-4-6",
@@ -184,13 +193,20 @@ Exit code: 0 if normal/warning, 1 if critical.
     "gemini": {
       "default": "gemini-2.5-pro",
       "fast": "gemini-2.5-flash",
+      "cheap": "gemini-2.5-flash",
       "active": "default"
     },
     "codex": {
-      "default": "gpt-5",
+      "default": "gpt-5.3",
       "fast": "o4-mini",
+      "cheap": "o4-mini",
       "active": "default"
     }
+  },
+  "modeTiers": {
+    "performance": { "claude": "default", "gemini": "default", "codex": "default" },
+    "balanced": { "claude": "default", "gemini": "default", "codex": "fast" },
+    "economy": { "claude": "fast", "gemini": "fast", "codex": "cheap" }
   },
   "usage": {
     "warningThresholdPercent": 80,
@@ -201,8 +217,36 @@ Exit code: 0 if normal/warning, 1 if critical.
       "claude-sonnet-4-5-20250929": 5000000
     }
   },
+  "verification": {
+    "onTaskDone": true,
+    "command": "auto",
+    "timeoutMs": 60000
+  },
   "stats": {
     "retentionDays": 30
+  },
+  "worktrees": {
+    "enabled": false,
+    "basePath": ".hydra/worktrees",
+    "autoCleanup": true,
+    "branchPrefix": "hydra/"
+  },
+  "crossModelVerification": {
+    "enabled": true,
+    "mode": "on-complex",
+    "pairings": {
+      "claude": "gemini",
+      "gemini": "claude",
+      "codex": "claude"
+    }
+  },
+  "mcp": {
+    "codex": {
+      "enabled": false,
+      "command": "codex",
+      "args": ["mcp-server"],
+      "sessionTimeout": 300000
+    }
   }
 }
 ```
@@ -210,13 +254,41 @@ Exit code: 0 if normal/warning, 1 if critical.
 ### Model Resolution Priority
 
 1. Environment variable: `HYDRA_CLAUDE_MODEL=sonnet`
-2. Config file: `models.claude.active`
-3. Default: `models.claude.default`
+2. Config file explicit override: `models.claude.active` (when not `default`)
+3. Mode tier preset: `modeTiers[mode].claude`
+4. Default: `models.claude.default`
 
 ### Usage Thresholds
 
 - **Warning** (default 80%): One-line alert before agent calls
 - **Critical** (default 90%): Auto-switch to fast model, show contingency menu
+
+### Verification
+
+- `verification.onTaskDone=true`: Run auto-verification whenever a task moves to `done`
+- `verification.command="auto"`: Auto-detect command by project type (`npm run typecheck`, `cargo check`, `go test ./...`, etc.)
+- `verification.command="off"`: Disable verification
+- `verification.command="<custom command>"`: Force a specific command
+
+### Worktrees
+
+- `worktrees.enabled=false`: Disabled by default; enable for per-task git worktree isolation
+- `worktrees.basePath=".hydra/worktrees"`: Directory for worktree checkouts
+- `worktrees.autoCleanup=true`: Automatically remove worktrees when tasks complete
+- `worktrees.branchPrefix="hydra/"`: Branch naming prefix (branches created as `hydra/<taskId>`)
+
+### Cross-Model Verification
+
+- `crossModelVerification.enabled=true`: Enable cross-model review pipeline
+- `crossModelVerification.mode`: `"always"` | `"on-complex"` (default) | `"off"`
+- `crossModelVerification.pairings`: Maps each producer agent to its verifier agent
+
+### MCP (Model Context Protocol)
+
+- `mcp.codex.enabled=false`: Disabled by default; enable to use Codex via persistent MCP server
+- `mcp.codex.command="codex"`: Command to start the MCP server
+- `mcp.codex.args=["mcp-server"]`: Arguments for the MCP server command
+- `mcp.codex.sessionTimeout=300000`: Idle timeout (ms) before auto-closing the MCP server
 
 ## PowerShell Launcher
 
@@ -232,3 +304,62 @@ This starts:
 3. Operator console
 
 One-shot mode: `pwsh -File bin/hydra.ps1 -Prompt "Your objective"`
+
+## Daemon HTTP API
+
+### Read Endpoints
+
+| Endpoint | Description |
+|----------|-------------|
+| `GET /status` | Daemon health check |
+| `GET /state` | Full sync state |
+| `GET /summary` | Dashboard summary |
+| `GET /events?limit=N` | Recent events |
+| `GET /events/stream` | SSE event stream |
+| `GET /events/replay?from=N&category=X` | Replay events since sequence N, optional category filter |
+| `GET /next?agent=NAME` | Suggested next action |
+| `GET /prompt?agent=NAME` | Context prompt for agent |
+| `GET /task/:id/checkpoints` | List checkpoints for a task |
+| `GET /sessions` | List all sessions (root, forks, spawns) |
+| `GET /worktrees` | List active git worktrees |
+
+### Write Endpoints
+
+| Endpoint | Description |
+|----------|-------------|
+| `POST /task/add` | Create task (optional `worktree: true` for isolation) |
+| `POST /task/update` | Update task (supports `claimToken` validation, `force` override) |
+| `POST /task/claim` | Claim task atomically (returns `claimToken`) |
+| `POST /task/route` | Get best agent for a task |
+| `POST /task/checkpoint` | Save intermediate checkpoint on a task |
+| `POST /handoff` | Create agent handoff |
+| `POST /handoff/ack` | Acknowledge handoff |
+| `POST /session/start` | Start coordination session |
+| `POST /session/fork` | Fork current session (copy state) |
+| `POST /session/spawn` | Spawn child session (fresh state with focus) |
+| `POST /decision` | Record decision |
+| `POST /blocker` | Record blocker |
+| `POST /verify` | Run verification for a task |
+| `POST /archive` | Archive completed items |
+| `POST /stop` | Graceful daemon shutdown |
+
+## Hydra MCP Server
+
+Run Hydra as an MCP server for agent self-coordination:
+
+```powershell
+node lib/hydra-mcp-server.mjs
+```
+
+Communicates via JSON-RPC over stdio. Available tools:
+
+| Tool | Description |
+|------|-------------|
+| `hydra_tasks_list` | List open tasks with optional status/agent filters |
+| `hydra_tasks_claim` | Claim a task atomically |
+| `hydra_tasks_update` | Update task status and notes |
+| `hydra_tasks_checkpoint` | Save task checkpoint |
+| `hydra_handoffs_pending` | Get pending handoffs for an agent |
+| `hydra_handoffs_ack` | Acknowledge a handoff |
+| `hydra_council_request` | Request council deliberation on a prompt |
+| `hydra_status` | Get daemon health and summary |
