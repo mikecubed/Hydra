@@ -38,6 +38,7 @@ pwsh -File E:/Dev/Hydra/bin/hydra.ps1
 - **Five orchestration modes**: Auto (triage + delegate), Council (multi-round deliberation), Dispatch (headless pipeline), Smart (auto-select model tier per prompt complexity), Chat (concierge conversation)
 - **Affinity-based task routing**: 7 task types x 3 agents = intelligent work assignment
 - **Per-agent model switching**: `hydra model claude=sonnet` to trade quality for speed/cost
+- **Interactive model picker**: Arrow-key browser with type-to-filter, discovers models via API/CLI, sets reasoning effort
 - **Per-command agent selection**: `agents=claude,gemini` to control which agents participate per-prompt
 - **Token usage monitoring**: Reads Claude Code's stats cache, auto-switches models at critical levels
 - **Metrics dashboard**: Per-agent call counts, response times, estimated tokens, success rates
@@ -106,6 +107,8 @@ hydra/
     hydra-mcp.mjs            # MCP client for Codex (JSON-RPC over stdio)
     hydra-mcp-server.mjs     # Hydra daemon as MCP server (8 tools)
     hydra-metrics.mjs        # Call metrics collection
+    hydra-models.mjs         # Model discovery (API/CLI/config) and listing
+    hydra-models-select.mjs  # Interactive model + reasoning effort picker
     hydra-operator.mjs       # Interactive command center
     hydra-statusbar.mjs      # Persistent 5-line terminal status bar
     hydra-ui.mjs             # Terminal UI components
@@ -140,6 +143,8 @@ hydra/
 | `npm run stats` | View metrics dashboard |
 | `npm run usage` | Check token usage |
 | `npm run model` | Show/set active models |
+| `npm run models` | List all available models per agent |
+| `npm run models:select` | Interactive model + effort picker |
 | `npm run council` | Full multi-round deliberation |
 | `npm run dispatch` | Headless pipeline |
 | `npm test` | Run unit + integration tests |

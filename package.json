@@ -22,6 +22,11 @@
     "nightly:review": "node lib/hydra-nightly-review.mjs review",
     "nightly:status": "node lib/hydra-nightly-review.mjs status",
     "nightly:clean": "node lib/hydra-nightly-review.mjs clean",
+    "evolve": "node lib/hydra-evolve.mjs",
+    "evolve:review": "node lib/hydra-evolve-review.mjs review",
+    "evolve:status": "node lib/hydra-evolve-review.mjs status",
+    "evolve:clean": "node lib/hydra-evolve-review.mjs clean",
+    "evolve:knowledge": "node lib/hydra-evolve-review.mjs knowledge",
     "test": "node --test"
   },
   "dependencies": {

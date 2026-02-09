@@ -136,8 +136,9 @@ node lib/hydra-operator.mjs prompt="..." # One-shot mode
 | `:mode handoff` | Direct handoffs (fast, no triage) |
 | `:mode council` | Full council deliberation |
 | `:mode dispatch` | Headless pipeline |
-| `:model` | Show active models |
+| `:model` | Show active models + reasoning effort |
 | `:model claude=sonnet` | Switch agent model |
+| `:model:select [agent]` | Interactive model + effort picker |
 | `:usage` | Token usage & contingencies |
 | `:stats` | Agent metrics & performance |
 | `:fork` | Fork current session (explore alternatives) |
@@ -268,13 +269,15 @@ Exit code: 0 if normal/warning, 1 if critical.
       "default": "gpt-5.3",
       "fast": "o4-mini",
       "cheap": "o4-mini",
-      "active": "default"
+      "active": "default",
+      "reasoningEffort": null
     },
     "claude": {
       "default": "claude-opus-4-6",
       "fast": "claude-sonnet-4-5-20250929",
       "cheap": "claude-haiku-4-5-20251001",
-      "active": "default"
+      "active": "default",
+      "reasoningEffort": null
     }
   },
   "aliases": {
@@ -285,7 +288,8 @@ Exit code: 0 if normal/warning, 1 if critical.
   "modeTiers": {
     "performance": { "gemini": "default", "codex": "default", "claude": "default" },
     "balanced": { "gemini": "default", "codex": "fast", "claude": "default" },
-    "economy": { "gemini": "fast", "codex": "cheap", "claude": "fast" }
+    "economy": { "gemini": "fast", "codex": "cheap", "claude": "fast" },
+    "custom": { "gemini": "default", "codex": "default", "claude": "default" }
   },
   "usage": {
     "warningThresholdPercent": 80,
@@ -350,6 +354,14 @@ Exit code: 0 if normal/warning, 1 if critical.
 2. Config file explicit override: `models.claude.active` (when not `default`)
 3. Mode tier preset: `modeTiers[mode].claude`
 4. Default: `models.claude.default`
+
+### Custom Mode
+
+When you select a model via the interactive picker (`:model:select`), the mode is set to `custom`. This preserves your per-agent overrides instead of resetting to a tier preset. The `custom` mode tier defaults all agents to `default` but respects explicit `active` overrides.
+
+### Reasoning Effort
+
+Per-agent reasoning effort level stored in `models.<agent>.reasoningEffort`. Values: `low`, `medium`, `high`, `xhigh`, or `null` (default). Currently passed as `--reasoning-effort` CLI flag for Codex. Set via the interactive picker or directly in config.
 
 ### Aliases
 
