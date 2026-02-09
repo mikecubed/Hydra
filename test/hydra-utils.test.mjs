@@ -122,7 +122,7 @@ test('boolFlag uses fallback for empty/undefined', () => {
 // ── parseList ────────────────────────────────────────────────────────────────
 
 test('parseList splits comma-separated values', () => {
-  assert.deepEqual(parseList('claude,gemini,codex'), ['claude', 'gemini', 'codex']);
+  assert.deepEqual(parseList('gemini,codex,claude'), ['gemini', 'codex', 'claude']);
 });
 
 test('parseList splits space-separated values', () => {
@@ -130,7 +130,7 @@ test('parseList splits space-separated values', () => {
 });
 
 test('parseList handles mixed separators and trims', () => {
-  assert.deepEqual(parseList('claude, gemini , codex'), ['claude', 'gemini', 'codex']);
+  assert.deepEqual(parseList('gemini, codex , claude'), ['gemini', 'codex', 'claude']);
 });
 
 test('parseList returns empty for null/empty', () => {

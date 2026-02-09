@@ -202,10 +202,10 @@ test('metrics: getSessionUsage starts at zero', () => {
 
 test('metrics: estimateFlowDuration uses defaults when no history', () => {
   resetMetrics();
-  const flow = [{ agent: 'claude' }, { agent: 'gemini' }, { agent: 'codex' }];
+  const flow = [{ agent: 'gemini' }, { agent: 'codex' }, { agent: 'claude' }];
   const estimate = estimateFlowDuration(flow);
-  // Default: claude=120s, gemini=90s, codex=180s → 390s
-  assert.equal(estimate, 120_000 + 90_000 + 180_000);
+  // Default: gemini=90s, codex=180s, claude=120s → 390s
+  assert.equal(estimate, 90_000 + 180_000 + 120_000);
 });
 
 test('metrics: estimateFlowDuration uses historical averages when positive', () => {

@@ -1,6 +1,6 @@
 param(
   [Parameter(Mandatory = $true)]
-  [ValidateSet("claude", "gemini", "codex")]
+  [ValidateSet("gemini", "codex", "claude")]
   [string]$Agent,
   [string]$Url = $(if ($env:AI_ORCH_URL) { $env:AI_ORCH_URL } else { "http://127.0.0.1:4173" }),
   [int]$PollIntervalMs = 1200
@@ -25,21 +25,21 @@ $MAGENTA = "$ESC[95m"
 $CYAN    = "$ESC[96m"
 
 $AgentColors = @{
-  claude = $ORANGE
   gemini = $CYAN
   codex  = $GREEN
+  claude = $ORANGE
 }
 
 $AgentIcons = @{
-  claude = [char]0x2666  # ♦
   gemini = [char]0x2726  # ✦
   codex  = [char]0x25B6  # ▶
+  claude = [char]0x2666  # ♦
 }
 
 $AgentTaglines = @{
-  claude = "Architect $([char]0x00B7) Planner $([char]0x00B7) Coordinator"
   gemini = "Analyst $([char]0x00B7) Critic $([char]0x00B7) Reviewer"
   codex  = "Implementer $([char]0x00B7) Builder $([char]0x00B7) Executor"
+  claude = "Architect $([char]0x00B7) Planner $([char]0x00B7) Coordinator"
 }
 
 $Color = $AgentColors[$Agent]

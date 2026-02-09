@@ -237,7 +237,7 @@ test('agentBadge includes icon and uppercased name', () => {
 });
 
 test('agentBadge works for all agents', () => {
-  for (const name of ['claude', 'gemini', 'codex']) {
+  for (const name of ['gemini', 'codex', 'claude']) {
     const badge = agentBadge(name);
     const stripped = stripAnsi(badge);
     assert.ok(stripped.includes(name.toUpperCase()));

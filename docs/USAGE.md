@@ -81,9 +81,9 @@ node lib/orchestrator-client.mjs model claude=default
 ```
 
 **Shorthand aliases:**
-- Claude: `opus`, `sonnet`, `haiku`, `default`, `fast`, `cheap`
 - Gemini: `pro`, `flash`, `default`, `fast`
 - Codex: `gpt-5`, `gpt-5.3`, `o4-mini`, `default`, `fast`, `cheap`
+- Claude: `opus`, `sonnet`, `haiku`, `default`, `fast`, `cheap`
 
 ### Utility
 
@@ -206,12 +206,6 @@ Exit code: 0 if normal/warning, 1 if critical.
   "version": 2,
   "mode": "performance",
   "models": {
-    "claude": {
-      "default": "claude-opus-4-6",
-      "fast": "claude-sonnet-4-5-20250929",
-      "cheap": "claude-haiku-4-5-20251001",
-      "active": "default"
-    },
     "gemini": {
       "default": "gemini-2.5-pro",
       "fast": "gemini-2.5-flash",
@@ -223,17 +217,23 @@ Exit code: 0 if normal/warning, 1 if critical.
       "fast": "o4-mini",
       "cheap": "o4-mini",
       "active": "default"
+    },
+    "claude": {
+      "default": "claude-opus-4-6",
+      "fast": "claude-sonnet-4-5-20250929",
+      "cheap": "claude-haiku-4-5-20251001",
+      "active": "default"
     }
   },
   "aliases": {
-    "claude": { "opus": "claude-opus-4-6", "sonnet": "claude-sonnet-4-5-20250929", "haiku": "claude-haiku-4-5-20251001" },
     "gemini": { "pro": "gemini-2.5-pro", "flash": "gemini-2.5-flash" },
-    "codex": { "gpt5": "gpt-5", "gpt-5": "gpt-5", "gpt-5.3": "gpt-5.3", "o4-mini": "o4-mini" }
+    "codex": { "gpt5": "gpt-5", "gpt-5": "gpt-5", "gpt-5.3": "gpt-5.3", "o4-mini": "o4-mini" },
+    "claude": { "opus": "claude-opus-4-6", "sonnet": "claude-sonnet-4-5-20250929", "haiku": "claude-haiku-4-5-20251001" }
   },
   "modeTiers": {
-    "performance": { "claude": "default", "gemini": "default", "codex": "default" },
-    "balanced": { "claude": "default", "gemini": "default", "codex": "fast" },
-    "economy": { "claude": "fast", "gemini": "fast", "codex": "cheap" }
+    "performance": { "gemini": "default", "codex": "default", "claude": "default" },
+    "balanced": { "gemini": "default", "codex": "fast", "claude": "default" },
+    "economy": { "gemini": "fast", "codex": "cheap", "claude": "fast" }
   },
   "usage": {
     "warningThresholdPercent": 80,
@@ -262,9 +262,9 @@ Exit code: 0 if normal/warning, 1 if critical.
     "enabled": true,
     "mode": "on-complex",
     "pairings": {
-      "claude": "gemini",
       "gemini": "claude",
-      "codex": "claude"
+      "codex": "claude",
+      "claude": "gemini"
     }
   },
   "mcp": {
@@ -331,7 +331,7 @@ pwsh -File bin/hydra.ps1 [-Prompt "..."]
 
 This starts:
 1. Daemon (if not running)
-2. Three agent head terminals (Claude, Gemini, Codex)
+2. Three agent head terminals (Gemini, Codex, Claude)
 3. Operator console
 
 One-shot mode: `pwsh -File bin/hydra.ps1 -Prompt "Your objective"`

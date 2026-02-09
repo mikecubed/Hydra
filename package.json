@@ -12,10 +12,15 @@
     "stats": "node lib/orchestrator-client.mjs stats",
     "usage": "node lib/hydra-usage.mjs",
     "model": "node lib/orchestrator-client.mjs model",
+    "models": "node lib/hydra-models.mjs",
     "init": "node lib/orchestrator-client.mjs init",
     "go": "node lib/hydra-operator.mjs mode=auto",
     "council": "node lib/hydra-council.mjs",
     "dispatch": "node lib/hydra-dispatch.mjs",
+    "nightly": "node lib/hydra-nightly.mjs",
+    "nightly:review": "node lib/hydra-nightly-review.mjs review",
+    "nightly:status": "node lib/hydra-nightly-review.mjs status",
+    "nightly:clean": "node lib/hydra-nightly-review.mjs clean",
     "test": "node --test"
   },
   "dependencies": {

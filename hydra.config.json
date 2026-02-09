@@ -2,12 +2,6 @@
   "version": 2,
   "mode": "performance",
   "models": {
-    "claude": {
-      "default": "claude-opus-4-6",
-      "fast": "claude-sonnet-4-5-20250929",
-      "cheap": "claude-haiku-4-5-20251001",
-      "active": "default"
-    },
     "gemini": {
       "default": "gemini-2.5-pro",
       "fast": "gemini-2.5-flash",
@@ -19,14 +13,15 @@
       "fast": "o4-mini",
       "cheap": "o4-mini",
       "active": "default"
+    },
+    "claude": {
+      "default": "claude-opus-4-6",
+      "fast": "claude-sonnet-4-5-20250929",
+      "cheap": "claude-haiku-4-5-20251001",
+      "active": "default"
     }
   },
   "aliases": {
-    "claude": {
-      "opus": "claude-opus-4-6",
-      "sonnet": "claude-sonnet-4-5-20250929",
-      "haiku": "claude-haiku-4-5-20251001"
-    },
     "gemini": {
       "pro": "gemini-2.5-pro",
       "flash": "gemini-2.5-flash"
@@ -37,23 +32,28 @@
       "gpt-5.3": "gpt-5.3",
       "o4-mini": "o4-mini",
       "o4mini": "o4-mini"
+    },
+    "claude": {
+      "opus": "claude-opus-4-6",
+      "sonnet": "claude-sonnet-4-5-20250929",
+      "haiku": "claude-haiku-4-5-20251001"
     }
   },
   "modeTiers": {
     "performance": {
-      "claude": "default",
       "gemini": "default",
-      "codex": "default"
+      "codex": "default",
+      "claude": "default"
     },
     "balanced": {
-      "claude": "default",
       "gemini": "default",
-      "codex": "fast"
+      "codex": "fast",
+      "claude": "default"
     },
     "economy": {
-      "claude": "fast",
       "gemini": "fast",
-      "codex": "cheap"
+      "codex": "cheap",
+      "claude": "fast"
     }
   },
   "usage": {
@@ -75,9 +75,9 @@
     "enabled": true,
     "mode": "on-complex",
     "pairings": {
-      "claude": "gemini",
       "gemini": "claude",
-      "codex": "claude"
+      "codex": "claude",
+      "claude": "gemini"
     }
   },
   "verification": {
@@ -102,5 +102,18 @@
   },
   "stats": {
     "retentionDays": 30
+  },
+  "nightly": {
+    "tokenBudget": {
+      "softLimit": 400000,
+      "hardLimit": 500000,
+      "perTaskEstimate": 80000,
+      "handoffThreshold": 0.70,
+      "warningThreshold": 0.50
+    },
+    "maxTasks": 5,
+    "maxHours": 6,
+    "perTaskTimeoutMin": 15,
+    "handoffModel": "gpt-5.3-codex"
   }
 }

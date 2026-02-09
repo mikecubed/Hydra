@@ -145,9 +145,9 @@ Wait-HydraHealthy -TargetUrl $healthUrl -TimeoutSec $WaitTimeoutSec -IntervalMs 
 
 if (-not $SkipHeads) {
   $headScript = Join-Path $hydraRoot "bin\hydra-head.ps1"
-  Start-HydraTerminal -Title "Hydra Head - CLAUDE" -Command "pwsh -NoProfile -ExecutionPolicy Bypass -File '$headScript' -Agent claude -Url '$urlEscaped'"
   Start-HydraTerminal -Title "Hydra Head - GEMINI" -Command "pwsh -NoProfile -ExecutionPolicy Bypass -File '$headScript' -Agent gemini -Url '$urlEscaped'"
   Start-HydraTerminal -Title "Hydra Head - CODEX" -Command "pwsh -NoProfile -ExecutionPolicy Bypass -File '$headScript' -Agent codex -Url '$urlEscaped'"
+  Start-HydraTerminal -Title "Hydra Head - CLAUDE" -Command "pwsh -NoProfile -ExecutionPolicy Bypass -File '$headScript' -Agent claude -Url '$urlEscaped'"
 }
 
 if ($DryRun) {

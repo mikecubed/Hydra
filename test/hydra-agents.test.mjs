@@ -12,8 +12,8 @@ import {
 
 // ── AGENTS registry ──────────────────────────────────────────────────────────
 
-test('AGENTS has exactly three agents: claude, gemini, codex', () => {
-  assert.deepEqual(Object.keys(AGENTS).sort(), ['claude', 'codex', 'gemini']);
+test('AGENTS has exactly three agents: gemini, codex, claude', () => {
+  assert.deepEqual(new Set(Object.keys(AGENTS)), new Set(['gemini', 'codex', 'claude']));
 });
 
 test('AGENT_NAMES matches AGENTS keys', () => {

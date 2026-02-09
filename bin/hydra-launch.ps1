@@ -96,9 +96,9 @@ if (-not $SkipDaemon) {
 Wait-HydraHealthy -Url $healthUrl -TimeoutSec $WaitTimeoutSec -IntervalMs $PollIntervalMs
 
 $headScript = Join-Path $hydraRoot "bin\hydra-head.ps1"
-Start-HydraTerminal -Title "Hydra Claude" -Command "node '$hydraRoot\lib\orchestrator-client.mjs' next agent=claude; claude"
 Start-HydraTerminal -Title "Hydra Gemini" -Command "node '$hydraRoot\lib\orchestrator-client.mjs' next agent=gemini; gemini"
 Start-HydraTerminal -Title "Hydra Codex" -Command "node '$hydraRoot\lib\orchestrator-client.mjs' next agent=codex; codex"
+Start-HydraTerminal -Title "Hydra Claude" -Command "node '$hydraRoot\lib\orchestrator-client.mjs' next agent=claude; claude"
 
 if ($DryRun) {
   Write-Output "Dry run complete."

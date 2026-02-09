@@ -6,13 +6,13 @@
 |------------|---------|-------|
 | **Node.js** | 20+ | For all Hydra modules |
 | **PowerShell** | 7+ | For launchers and agent heads |
-| **AI CLI (at least one)** | | `claude`, `gemini`, or `codex` |
+| **AI CLI (at least one)** | | `gemini`, `codex`, or `claude` |
 
 ### AI CLI Installation
 
-- **Claude Code**: `npm install -g @anthropic-ai/claude-code`
 - **Gemini CLI**: `npm install -g @anthropic-ai/gemini-cli` (or via Google)
 - **Codex CLI**: `npm install -g @openai/codex`
+- **Claude Code**: `npm install -g @anthropic-ai/claude-code`
 
 ## Installation
 

@@ -129,7 +129,7 @@ findPowerShell() ──> pwsh or powershell
 findWindowsTerminal() ──> wt.exe (optional)
      │
      v
-For each agent (claude, gemini, codex):
+For each agent (gemini, codex, claude):
      │
      ├── Windows Terminal available?
      │   ├── yes ──> wt.exe new-tab -p "PowerShell" -d <cwd> pwsh -EncodedCommand ...
@@ -391,15 +391,15 @@ Context is cached for 60 seconds to avoid redundant file reads.
 
 Each agent has affinity scores (0-1) for 7 task types:
 
-| Task Type | Claude | Gemini | Codex |
-|-----------|--------|--------|-------|
-| planning | 0.95 | 0.50 | 0.20 |
-| architecture | 0.95 | 0.55 | 0.15 |
-| review | 0.85 | 0.90 | 0.40 |
-| refactor | 0.80 | 0.60 | 0.70 |
-| implementation | 0.60 | 0.55 | 0.95 |
-| analysis | 0.75 | 0.95 | 0.30 |
-| testing | 0.50 | 0.60 | 0.85 |
+| Task Type | Gemini | Codex | Claude |
+|-----------|--------|-------|--------|
+| planning | 0.50 | 0.20 | 0.95 |
+| architecture | 0.55 | 0.15 | 0.95 |
+| review | 0.90 | 0.40 | 0.85 |
+| refactor | 0.60 | 0.70 | 0.80 |
+| implementation | 0.55 | 0.95 | 0.60 |
+| analysis | 0.95 | 0.30 | 0.75 |
+| testing | 0.60 | 0.85 | 0.50 |
 
 Task type is auto-classified from title/description via regex patterns. The `POST /task/route` endpoint uses these scores to recommend the best agent.
 
@@ -500,7 +500,7 @@ Module: `lib/hydra-mcp.mjs` — exports `MCPClient`, `getCodexMCPClient()`, `cod
 Hydra can be exposed as an MCP server so that AI agents can self-coordinate:
 
 ```
-Agent (Claude/Gemini/Codex)
+Agent (Gemini/Codex/Claude)
      │
      └── MCP tool call (JSON-RPC over stdio)
               │

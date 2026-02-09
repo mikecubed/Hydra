@@ -1,6 +1,6 @@
 # Hydra
 
-**Multi-Agent AI Orchestrator** for Claude, Gemini, and Codex.
+**Multi-Agent AI Orchestrator** for Gemini, Codex, and Claude.
 
 ```
    \\ | //
@@ -15,7 +15,7 @@
   H Y D R A
 ```
 
-Hydra coordinates three AI coding agents (Claude Code, Gemini CLI, Codex CLI) through a shared task queue, affinity-based routing, and multi-round deliberation. Built for Windows with PowerShell, zero external dependencies beyond Node.js and picocolors.
+Hydra coordinates three AI coding agents (Gemini CLI, Codex CLI, Claude Code) through a shared task queue, affinity-based routing, and multi-round deliberation. Built for Windows with PowerShell, zero external dependencies beyond Node.js and picocolors.
 
 ## Quick Start
 
@@ -74,8 +74,8 @@ pwsh -File E:/Dev/Hydra/bin/hydra.ps1
               +--------+  |  +--------+
               v           v           v
          +---------+ +---------+ +---------+
-         | Claude  | | Gemini  | |  Codex  |
-         | (Opus)  | | (Pro)   | |(GPT-5.3)|
+         | Gemini  | |  Codex  | | Claude  |
+         | (Pro)   | |(GPT-5.3)| | (Opus)  |
          +---------+ +---------+ +---------+
          Architect    Analyst     Implementer
 ```
@@ -151,7 +151,7 @@ hydra/
 
 - Node.js 20+
 - PowerShell 7+ (for launchers)
-- At least one AI CLI: `claude`, `gemini`, or `codex`
+- At least one AI CLI: `gemini`, `codex`, or `claude`
 
 ## License
 
