@@ -36,7 +36,7 @@ pwsh -File E:/Dev/Hydra/bin/hydra.ps1
 
 - **Concierge front-end**: Conversational AI layer powered by `gpt-5.2-codex` — answers questions directly, only escalates to agents when real work is needed
 - **Five orchestration modes**: Auto (triage + delegate), Council (multi-round deliberation), Dispatch (headless pipeline), Smart (auto-select model tier per prompt complexity), Chat (concierge conversation)
-- **Affinity-based task routing**: 7 task types x 3 agents = intelligent work assignment
+- **Affinity-based task routing**: 10 task types x 3 agents = intelligent work assignment
 - **Per-agent model switching**: `hydra model claude=sonnet` to trade quality for speed/cost
 - **Interactive model picker**: Arrow-key browser with type-to-filter, discovers models via API/CLI, sets reasoning effort
 - **Per-command agent selection**: `agents=claude,gemini` to control which agents participate per-prompt
@@ -68,11 +68,20 @@ pwsh -File E:/Dev/Hydra/bin/hydra.ps1
 
 ```
                     +-----------+
-                    |  Operator |  (interactive console)
+                    |  Operator |  (interactive REPL)
                     +-----+-----+
                           |
+                 +--------+--------+
+                 |                 |
+           +-----v-----+    +-----v-----+
+           | Concierge |    |  Workers  |
+           | (chat AI) |    | (headless)|
+           +-----+-----+    +-----+-----+
+                 |                 |
+                 +--------+--------+
+                          |
                     +-----v-----+
-                    |   Daemon  |  (HTTP state manager)
+                    |   Daemon  |  (HTTP state + events)
                     +--+--+--+--+
                        |  |  |
               +--------+  |  +--------+
@@ -81,7 +90,11 @@ pwsh -File E:/Dev/Hydra/bin/hydra.ps1
          | Gemini  | |  Codex  | | Claude  |
          | (Pro)   | |(GPT-5.3)| | (Opus)  |
          +---------+ +---------+ +---------+
-         Architect    Analyst     Implementer
+          Analyst    Implementer  Architect
+
+  Concierge: OpenAI → Anthropic → Google fallback chain
+  Sub-agents: security-reviewer, test-writer, doc-generator,
+              researcher, evolve-researcher (virtual → physical)
 ```
 
 ## Project Structure
