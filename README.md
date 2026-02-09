@@ -34,7 +34,7 @@ pwsh -File E:/Dev/Hydra/bin/hydra.ps1
 
 ## Features
 
-- **Three orchestration modes**: Auto (triage + delegate), Council (multi-round deliberation), Dispatch (headless pipeline)
+- **Four orchestration modes**: Auto (triage + delegate), Council (multi-round deliberation), Dispatch (headless pipeline), Smart (auto-select model tier per prompt complexity)
 - **Affinity-based task routing**: 7 task types x 3 agents = intelligent work assignment
 - **Per-agent model switching**: `hydra model claude=sonnet` to trade quality for speed/cost
 - **Per-command agent selection**: `agents=claude,gemini` to control which agents participate per-prompt
@@ -51,6 +51,11 @@ pwsh -File E:/Dev/Hydra/bin/hydra.ps1
 - **Codex MCP integration**: Multi-turn context via JSON-RPC over stdio (when Codex MCP server available)
 - **Hydra MCP server**: Expose daemon as an MCP server so agents can self-coordinate
 - **Session fork/spawn**: Fork sessions to explore alternatives, spawn children for focused subtasks
+- **Session pause/resume**: Pause active sessions with reason tracking, resume with stale recovery
+- **Fast-path dispatch**: Simple prompts bypass council for lower latency single-agent handoffs
+- **Stale task detection**: Auto-detect tasks idle for 30+ minutes with `/tasks/stale` endpoint
+- **5-line status bar**: Persistent terminal footer with agent activity, token gauge, dispatch context, and rolling event ticker
+- **Agent terminal auto-launch**: Operator spawns Windows Terminal/PowerShell windows per agent head
 - **HTTP daemon**: Shared state management with event sourcing, auto-archiving, and cycle detection
 - **PowerShell-native**: Branded multi-terminal launcher with per-agent polling heads
 - **Project-agnostic**: Works with any Node.js, Rust, Go, or Python project
@@ -98,6 +103,7 @@ hydra/
     hydra-mcp-server.mjs     # Hydra daemon as MCP server (8 tools)
     hydra-metrics.mjs        # Call metrics collection
     hydra-operator.mjs       # Interactive command center
+    hydra-statusbar.mjs      # Persistent 5-line terminal status bar
     hydra-ui.mjs             # Terminal UI components
     hydra-usage.mjs          # Token usage monitor
     hydra-utils.mjs          # Shared utilities (+ spec generation, async model calls)

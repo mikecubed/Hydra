@@ -121,6 +121,9 @@ node lib/hydra-operator.mjs prompt="..." # One-shot mode
 | `:stats` | Agent metrics & performance |
 | `:fork` | Fork current session (explore alternatives) |
 | `:spawn <focus>` | Spawn child session for focused subtask |
+| `:pause [reason]` | Pause the active session |
+| `:unpause` | Resume a paused session |
+| `:resume` | Ack handoffs, reset stale tasks, launch agents |
 | `:quit` | Exit console |
 | `<any text>` | Dispatch as prompt |
 | `agents=claude,gemini <prompt>` | Dispatch with agent filter |
@@ -131,6 +134,25 @@ node lib/hydra-operator.mjs prompt="..." # One-shot mode
 - **handoff**: Direct delegation to all agents (fastest, no triage)
 - **council**: Full multi-round deliberation (Claude propose -> Gemini critique -> Claude refine -> Codex implement)
 - **dispatch**: Headless pipeline (Claude coordinate -> Gemini critique -> Codex synthesize)
+- **smart**: Auto-selects model tier per prompt complexity (simple->economy, medium->balanced, complex->performance)
+
+### Status Bar
+
+When the operator console is running in a TTY terminal, a persistent 5-line status bar is pinned to the bottom of the screen:
+
+| Line | Content |
+|------|---------|
+| 1 | Divider |
+| 2 | Mode icon, open task count, last dispatch route, session cost, today's tokens |
+| 3 | Per-agent status: health indicator, icon, name, current action, model, elapsed time |
+| 4 | Rolling activity ticker (last 3 events with timestamps) |
+| 5 | Spacer |
+
+The status bar uses SSE (`/events/stream`) for real-time updates, falling back to polling when SSE is unavailable. Agent status shows rich metadata including active model, task title, council phase, and step progress.
+
+### Agent Terminal Auto-Launch
+
+On Windows, the operator console automatically launches separate terminal windows for each agent head using `hydra-head.ps1`. It detects Windows Terminal (`wt.exe`) or falls back to PowerShell. Each head polls the daemon for handoffs and tasks to pick up.
 
 ## Council Mode
 
@@ -203,6 +225,11 @@ Exit code: 0 if normal/warning, 1 if critical.
       "active": "default"
     }
   },
+  "aliases": {
+    "claude": { "opus": "claude-opus-4-6", "sonnet": "claude-sonnet-4-5-20250929", "haiku": "claude-haiku-4-5-20251001" },
+    "gemini": { "pro": "gemini-2.5-pro", "flash": "gemini-2.5-flash" },
+    "codex": { "gpt5": "gpt-5", "gpt-5": "gpt-5", "gpt-5.3": "gpt-5.3", "o4-mini": "o4-mini" }
+  },
   "modeTiers": {
     "performance": { "claude": "default", "gemini": "default", "codex": "default" },
     "balanced": { "claude": "default", "gemini": "default", "codex": "fast" },
@@ -258,6 +285,10 @@ Exit code: 0 if normal/warning, 1 if critical.
 3. Mode tier preset: `modeTiers[mode].claude`
 4. Default: `models.claude.default`
 
+### Aliases
+
+The `aliases` section maps shorthand names to full model IDs per agent. These are resolved first when using `hydra model claude=sonnet`. Add custom aliases to avoid typing long model IDs.
+
 ### Usage Thresholds
 
 - **Warning** (default 80%): One-line alert before agent calls
@@ -311,7 +342,7 @@ One-shot mode: `pwsh -File bin/hydra.ps1 -Prompt "Your objective"`
 
 | Endpoint | Description |
 |----------|-------------|
-| `GET /status` | Daemon health check |
+| `GET /health` | Daemon health check |
 | `GET /state` | Full sync state |
 | `GET /summary` | Dashboard summary |
 | `GET /events?limit=N` | Recent events |
@@ -322,6 +353,9 @@ One-shot mode: `pwsh -File bin/hydra.ps1 -Prompt "Your objective"`
 | `GET /task/:id/checkpoints` | List checkpoints for a task |
 | `GET /sessions` | List all sessions (root, forks, spawns) |
 | `GET /worktrees` | List active git worktrees |
+| `GET /session/status` | Session health: stale tasks, pending handoffs, agent suggestions |
+| `GET /tasks/stale` | List tasks marked as stale (30+ min without update) |
+| `GET /stats` | Agent metrics + usage dashboard data |
 
 ### Write Endpoints
 
@@ -340,8 +374,11 @@ One-shot mode: `pwsh -File bin/hydra.ps1 -Prompt "Your objective"`
 | `POST /decision` | Record decision |
 | `POST /blocker` | Record blocker |
 | `POST /verify` | Run verification for a task |
+| `POST /session/pause` | Pause an active session |
+| `POST /session/resume` | Resume a paused session |
 | `POST /archive` | Archive completed items |
-| `POST /stop` | Graceful daemon shutdown |
+| `POST /state/archive` | Archive completed tasks/handoffs to file |
+| `POST /shutdown` | Graceful daemon shutdown |
 
 ## Hydra MCP Server
 

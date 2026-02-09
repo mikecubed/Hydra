@@ -77,6 +77,69 @@ User prompt
                      publish tasks/decisions/handoffs
 ```
 
+### Fast-Path Dispatch
+
+Simple prompts bypass the council entirely for lower latency:
+
+```
+classifyPrompt(prompt) ──> tier: simple
+     │
+     v
+publishFastPathDelegation(prompt, agents)
+     │
+     ├── bestAgentFor(taskType, filteredAgents) ──> recommended agent
+     │
+     └── create single handoff to recommended agent
+           │
+           v
+     [Agent Head] picks up handoff via /next polling
+```
+
+Fast-path respects the `agents=` filter — if only specific agents are allowed, the best match within that set is chosen.
+
+### Smart Mode
+
+Smart mode (`smart`) auto-selects the model tier based on prompt complexity:
+
+```
+User prompt
+     │
+     v
+classifyPrompt(prompt) ──> { tier: simple | moderate | complex }
+     │
+     v
+SMART_TIER_MAP:
+  simple   ──> economy tier   (fast/cheap models)
+  medium   ──> balanced tier   (default + fast mix)
+  complex  ──> performance tier (default/best models)
+     │
+     v
+Temporarily override mode ──> run auto dispatch ──> restore original mode
+```
+
+### Agent Terminal Auto-Launch
+
+On Windows, the operator console can auto-spawn terminal windows for each agent:
+
+```
+Operator init
+     │
+     v
+findPowerShell() ──> pwsh or powershell
+findWindowsTerminal() ──> wt.exe (optional)
+     │
+     v
+For each agent (claude, gemini, codex):
+     │
+     ├── Windows Terminal available?
+     │   ├── yes ──> wt.exe new-tab -p "PowerShell" -d <cwd> pwsh -EncodedCommand ...
+     │   └── no  ──> Start-Process pwsh -EncodedCommand ...
+     │
+     └── Each terminal runs: hydra-head.ps1 -Agent <name> -Url <daemonUrl>
+```
+
+Agent heads poll the daemon and auto-claim handoffs and owned tasks (`claim_owned_task` action).
+
 ### Agent Filtering
 
 When `agents=claude,gemini` is specified, only those agents participate:
@@ -141,6 +204,29 @@ Active session
                                    Focus field anchors the child's scope
 ```
 
+### Session Pause/Resume
+
+```
+:pause [reason]
+     │
+     v
+POST /session/pause { reason }
+     │
+     └── activeSession.status = 'paused'
+         activeSession.pauseReason = reason
+         activeSession.pausedAt = ISO timestamp
+
+:unpause
+     │
+     v
+POST /session/resume
+     │
+     └── activeSession.status = 'active'
+         clear pauseReason/pausedAt
+```
+
+The operator `:resume` command handles stale recovery: acks pending handoffs, resets stale tasks to `todo`, and optionally relaunches agent terminals.
+
 ### Agent Invocation
 
 ```
@@ -182,6 +268,35 @@ Shorthand resolution:
   "sonnet" ──> MODEL_ALIASES.claude.sonnet ──> "claude-sonnet-4-5-20250929"
   "fast"   ──> config.models.claude.fast   ──> "claude-sonnet-4-5-20250929"
 ```
+
+## Status Bar
+
+The operator console renders a persistent 5-line status bar pinned to the terminal bottom using ANSI scroll regions:
+
+```
+initStatusBar(agents)
+     │
+     ├── Set scroll region: rows 1 through (rows - 5)
+     │
+     ├── Register agents ──> initialize agentState Map
+     │
+     └── Listen to metricsEmitter events:
+              │
+              ├── call:start  ──> setAgentActivity(agent, 'working', model)
+              ├── call:complete ──> setAgentActivity(agent, 'idle')
+              └── call:error  ──> setAgentActivity(agent, 'error', message)
+
+Data sources (preferred order):
+  1. SSE /events/stream ──> real-time daemon events (handoffs, claims, task updates)
+  2. Fallback polling /next?agent=... ──> periodic daemon state checks
+  3. metricsEmitter ──> local agent call lifecycle events
+```
+
+Agent activity metadata: `{ status, action, model, taskTitle, phase, step, updatedAt }`.
+
+Context line displays: mode icon, open task count, dispatch context/last route, session cost, and today's token count.
+
+Module: `lib/hydra-statusbar.mjs`.
 
 ## State Management
 
