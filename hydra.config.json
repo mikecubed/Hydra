@@ -26,7 +26,10 @@
   "aliases": {
     "gemini": {
       "pro": "gemini-2.5-pro",
-      "flash": "gemini-2.5-flash"
+      "flash": "gemini-2.5-flash",
+      "g3pro": "gemini-3-pro",
+      "g3flash": "gemini-3-flash",
+      "thinking": "gemini-3-pro-deep-think"
     },
     "codex": {
       "gpt5": "gpt-5",
