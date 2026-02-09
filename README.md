@@ -34,7 +34,7 @@ pwsh -File E:/Dev/Hydra/bin/hydra.ps1
 
 ## Features
 
-- **Concierge front-end**: Conversational AI layer powered by `gpt-5.3-codex` — answers questions directly, only escalates to agents when real work is needed
+- **Concierge front-end**: Conversational AI layer powered by `gpt-5.2-codex` — answers questions directly, only escalates to agents when real work is needed
 - **Five orchestration modes**: Auto (triage + delegate), Council (multi-round deliberation), Dispatch (headless pipeline), Smart (auto-select model tier per prompt complexity), Chat (concierge conversation)
 - **Affinity-based task routing**: 7 task types x 3 agents = intelligent work assignment
 - **Per-agent model switching**: `hydra model claude=sonnet` to trade quality for speed/cost

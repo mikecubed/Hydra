@@ -164,7 +164,7 @@ node lib/hydra-operator.mjs prompt="..." # One-shot mode
 
 ### Concierge
 
-The concierge is a conversational AI layer powered by `gpt-5.3-codex` with `xhigh` reasoning effort. It is **active by default** — every prompt goes to Codex first before anything else.
+The concierge is a conversational AI layer powered by `gpt-5.2-codex` with `xhigh` reasoning effort. It is **active by default** — every prompt goes to Codex first before anything else.
 
 **Behavior:**
 - Questions and discussion are answered directly by the concierge (no agent dispatch)
@@ -310,7 +310,7 @@ Exit code: 0 if normal/warning, 1 if critical.
   },
   "concierge": {
     "enabled": true,
-    "model": "gpt-5.3-codex",
+    "model": "gpt-5.2-codex",
     "reasoningEffort": "xhigh",
     "maxHistoryMessages": 40,
     "autoActivate": true
@@ -395,7 +395,7 @@ The `aliases` section maps shorthand names to full model IDs per agent. These ar
 ### Concierge
 
 - `concierge.enabled=true`: Enable the concierge feature (set `false` to remove it entirely)
-- `concierge.model="gpt-5.3-codex"`: OpenAI model for the conversational layer
+- `concierge.model="gpt-5.2-codex"`: OpenAI model for the conversational layer
 - `concierge.reasoningEffort="xhigh"`: Reasoning effort level sent to the API
 - `concierge.maxHistoryMessages=40`: Maximum conversation history messages (oldest pairs trimmed)
 - `concierge.autoActivate=true`: Concierge is on at startup (set `false` to require `:chat` to enable)

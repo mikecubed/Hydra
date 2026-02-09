@@ -207,7 +207,7 @@ The MCP server delegates to the daemon HTTP API — it should not access state d
 
 ## Concierge Module
 
-The concierge (`lib/hydra-concierge.mjs`) is the conversational front-end powered by OpenAI's `gpt-5.3-codex`. Key points for contributors:
+The concierge (`lib/hydra-concierge.mjs`) is the conversational front-end powered by OpenAI's `gpt-5.2-codex`. Key points for contributors:
 
 - **System prompt**: Rebuilt every 30s with live state. Contains a full command reference — keep it in sync when adding/renaming commands.
 - **Intent detection**: If the model's response starts with `[DISPATCH]`, the text after it becomes the dispatch prompt. Otherwise, the response is streamed directly to the user.

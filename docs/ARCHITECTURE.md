@@ -29,7 +29,7 @@ orchestrator-daemon.mjs ──> hydra-agents, hydra-ui, hydra-config,
 
 hydra-concierge.mjs ──> hydra-config, hydra-agents
        │
-       └──> OpenAI API (gpt-5.3-codex streaming chat completions)
+       └──> OpenAI API (gpt-5.2-codex streaming chat completions)
 
 hydra-mcp-server.mjs ──> HTTP daemon API (standalone stdio MCP server)
 
@@ -123,7 +123,7 @@ Temporarily override mode ──> run auto dispatch ──> restore original mod
 
 ### Concierge (Conversational Front-End)
 
-The concierge is a conversational AI layer powered by `gpt-5.3-codex` that sits in front of the dispatch pipeline. It is active by default (`autoActivate: true`).
+The concierge is a conversational AI layer powered by `gpt-5.2-codex` that sits in front of the dispatch pipeline. It is active by default (`autoActivate: true`).
 
 ```
 User input at hydra⬢> prompt
@@ -165,7 +165,7 @@ Module: `lib/hydra-concierge.mjs`.
 The operator console shows greyed-out placeholder text after the cursor, similar to Claude Code CLI:
 
 ```
-hydra⬢> Chat with gpt-5.3-codex — prefix ! to dispatch
+hydra⬢> Chat with gpt-5.2-codex — prefix ! to dispatch
          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
          dim ghost text, disappears on first keystroke
 ```
