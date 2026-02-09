@@ -10,7 +10,7 @@
 
 ### AI CLI Installation
 
-- **Gemini CLI**: `npm install -g @anthropic-ai/gemini-cli` (or via Google)
+- **Gemini CLI**: `npm install -g @google/gemini-cli`
 - **Codex CLI**: `npm install -g @openai/codex`
 - **Claude Code**: `npm install -g @anthropic-ai/claude-code`
 

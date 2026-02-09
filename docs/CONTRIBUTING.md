@@ -27,6 +27,9 @@ export const AGENTS = {
       implementation: 0.5,
       analysis: 0.5,
       testing: 0.5,
+      research: 0.5,
+      documentation: 0.5,
+      security: 0.5,
     },
     rolePrompt: 'You are a specialist agent...',
     timeout: 5 * 60 * 1000,
@@ -249,11 +252,17 @@ npm test
 
 This runs all test files under `test/` using Node.js built-in test runner (`node:test`):
 
-- `test/orchestrator-daemon.integration.test.mjs` — Integration tests for all daemon endpoints (task CRUD, claiming, checkpoints, events, sessions, worktrees)
-- `test/hydra-mcp.test.mjs` — Unit tests for the MCP client (JSON-RPC over stdio with mock server)
-- `test/hydra-verification.test.mjs` — Unit tests for the verification command resolver
+- `test/orchestrator-daemon.integration.test.mjs` — Integration tests for core daemon endpoints (task CRUD, claiming, checkpoints, events, sessions, worktrees)
+- `test/daemon-extended.integration.test.mjs` — Extended daemon endpoint tests
+- `test/hydra-agents.test.mjs` — Agent registry + sub-agent tests
 - `test/hydra-concierge-providers.test.mjs` — Provider detection, fallback chain building, provider labels
+- `test/hydra-mcp.test.mjs` — Unit tests for the MCP client (JSON-RPC over stdio with mock server)
+- `test/hydra-metrics.test.mjs` — Metrics collection tests
 - `test/hydra-streaming-clients.test.mjs` — Anthropic/Google streaming client exports, concierge multi-provider exports and model switching
+- `test/hydra-sync-md.test.mjs` — HYDRA.md sync tests
+- `test/hydra-ui.test.mjs` — UI formatting + color tests
+- `test/hydra-utils.test.mjs` — Utility function tests
+- `test/hydra-verification.test.mjs` — Unit tests for the verification command resolver
 
 ### Writing Tests
 

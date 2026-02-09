@@ -484,17 +484,20 @@ Context is cached for 60 seconds to avoid redundant file reads.
 
 ## Agent Affinity System
 
-Each agent has affinity scores (0-1) for 7 task types:
+Each agent has affinity scores (0-1) for 10 task types:
 
 | Task Type | Gemini | Codex | Claude |
 |-----------|--------|-------|--------|
-| planning | 0.50 | 0.20 | 0.95 |
-| architecture | 0.55 | 0.15 | 0.95 |
-| review | 0.90 | 0.40 | 0.85 |
-| refactor | 0.60 | 0.70 | 0.80 |
-| implementation | 0.55 | 0.95 | 0.60 |
-| analysis | 0.95 | 0.30 | 0.75 |
-| testing | 0.60 | 0.85 | 0.50 |
+| planning | 0.70 | 0.20 | 0.95 |
+| architecture | 0.75 | 0.15 | 0.95 |
+| review | 0.95 | 0.40 | 0.85 |
+| refactor | 0.65 | 0.70 | 0.80 |
+| implementation | 0.60 | 0.95 | 0.60 |
+| analysis | 0.98 | 0.30 | 0.75 |
+| testing | 0.65 | 0.85 | 0.50 |
+| research | 0.90 | 0.25 | 0.70 |
+| documentation | 0.50 | 0.40 | 0.80 |
+| security | 0.85 | 0.35 | 0.70 |
 
 Task type is auto-classified from title/description via regex patterns. The `POST /task/route` endpoint uses these scores to recommend the best agent.
 
