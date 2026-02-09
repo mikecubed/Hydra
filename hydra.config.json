@@ -93,6 +93,13 @@
       "sessionTimeout": 300000
     }
   },
+  "workers": {
+    "permissionMode": "auto-edit",
+    "autoStart": true,
+    "pollIntervalMs": 1500,
+    "maxOutputBufferKB": 8,
+    "autoChain": true
+  },
   "stats": {
     "retentionDays": 30
   }
