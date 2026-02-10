@@ -137,7 +137,7 @@ Temporarily override mode ──> run auto dispatch ──> restore original mod
 The concierge is a multi-provider conversational AI layer with automatic fallback (OpenAI → Anthropic → Google). It sits in front of the dispatch pipeline and is active by default (`autoActivate: true`).
 
 ```
-User input at hydra⬢[gpt-5.2]> prompt
+User input at hydra⬢[gpt-5]> prompt
      │
      ├── starts with ':'?
      │     │
@@ -178,7 +178,7 @@ User input at hydra⬢[gpt-5.2]> prompt
 The concierge maintains an in-memory conversation history (capped at 40 messages). Its system prompt is rebuilt with context-hash invalidation (fingerprint changes OR TTL expiry) and includes: project name, mode, open tasks, agent models, git branch/status, recent completions, recent errors, and active workers. It includes a full command reference for typo correction.
 
 **Provider fallback chain** (configurable via `concierge.fallbackChain`):
-1. OpenAI (`gpt-5.2-codex`) — primary
+1. OpenAI (`gpt-5`) — primary
 2. Anthropic (`claude-sonnet-4-5-20250929`) — first fallback
 3. Google (`gemini-2.5-flash`) — last resort
 
@@ -190,7 +190,7 @@ Provider modules are lazy-loaded via `await import()` to avoid loading unused on
 - `concierge:error` — on provider errors
 - `concierge:model_switch` — when switching models at runtime
 
-**Prompt shows active model**: `hydra⬢[gpt-5.2]>` or `hydra⬢[sonnet ↓]>` (↓ indicates fallback).
+**Prompt shows active model**: `hydra⬢[gpt-5]>` or `hydra⬢[sonnet ↓]>` (↓ indicates fallback).
 
 Modules: `lib/hydra-concierge.mjs`, `lib/hydra-concierge-providers.mjs`, `lib/hydra-anthropic.mjs`, `lib/hydra-google.mjs`.
 
@@ -199,7 +199,7 @@ Modules: `lib/hydra-concierge.mjs`, `lib/hydra-concierge-providers.mjs`, `lib/hy
 The operator console shows greyed-out placeholder text after the cursor, similar to Claude Code CLI:
 
 ```
-hydra⬢[gpt-5.2]> Chat naturally — prefix ! to dispatch
+hydra⬢[gpt-5]> Chat naturally — prefix ! to dispatch
          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
          dim ghost text, disappears on first keystroke
 ```

@@ -98,8 +98,10 @@ node lib/hydra-models.mjs claude
 
 **Shorthand aliases:**
 - Gemini: `pro`, `flash`, `default`, `fast`
-- Codex: `gpt-5`, `gpt-5.3`, `o4-mini`, `default`, `fast`, `cheap`
+- Codex: `gpt-5`, `gpt-5.3-codex`, `o4-mini`, `default`, `fast`, `cheap`
 - Claude: `opus`, `sonnet`, `haiku`, `default`, `fast`, `cheap`
+
+Legacy Codex aliases `codex-5.3` and `gpt-5.3` are auto-normalized to `gpt-5.3-codex`.
 
 **Reasoning effort** (Codex only — passed as `--reasoning-effort` CLI flag):
 - Levels: `low`, `medium`, `high`, `xhigh`
@@ -151,7 +153,7 @@ node lib/hydra-operator.mjs prompt="..." # One-shot mode
 | `:chat reset` | Clear concierge conversation history |
 | `:chat stats` | Show concierge token usage + provider info |
 | `:chat model` | Show active model + fallback chain |
-| `:chat model <name>` | Switch concierge model (e.g. `sonnet`, `flash`, `gpt-5.2-codex`) |
+| `:chat model <name>` | Switch concierge model (e.g. `sonnet`, `flash`, `gpt-5`) |
 | `:chat export` | Export conversation to JSON file |
 | `:workers` | Show worker status |
 | `:workers start [agent]` | Start worker(s) |
@@ -178,7 +180,7 @@ The concierge is a multi-provider conversational AI layer with automatic fallbac
 - On dispatch, conversation context (last 3 messages) is included so agents understand why
 
 **Visual indicators:**
-- Prompt shows active model: `hydra⬢[gpt-5.2]>` (or `hydra⬢[sonnet ↓]>` for fallback)
+- Prompt shows active model: `hydra⬢[gpt-5]>` (or `hydra⬢[sonnet ↓]>` for fallback)
 - Status bar mode icon shows `⬢` (chat mode)
 - Concierge responses are streamed in blue with cost estimate `[~$0.0042]`
 - Welcome message on first activation shows model, quick help, and available commands
@@ -189,7 +191,7 @@ The concierge is a multi-provider conversational AI layer with automatic fallbac
 - `:chat model` — display active model and full fallback chain with availability
 - `:chat model sonnet` — switch to Anthropic Sonnet at runtime
 - `:chat model flash` — switch to Google Gemini Flash
-- `:chat model gpt-5.2-codex` — switch to specific model ID
+- `:chat model gpt-5` — switch to specific model ID
 
 **Conversation export:**
 - `:chat export` — saves conversation history to `docs/coordination/concierge_export_<timestamp>.json`
@@ -283,7 +285,7 @@ Exit code: 0 if normal/warning, 1 if critical.
       "active": "default"
     },
     "codex": {
-      "default": "gpt-5.3",
+      "default": "gpt-5.3-codex",
       "fast": "o4-mini",
       "cheap": "o4-mini",
       "active": "default",
@@ -299,7 +301,7 @@ Exit code: 0 if normal/warning, 1 if critical.
   },
   "aliases": {
     "gemini": { "pro": "gemini-2.5-pro", "flash": "gemini-2.5-flash" },
-    "codex": { "gpt5": "gpt-5", "gpt-5": "gpt-5", "gpt-5.3": "gpt-5.3", "o4-mini": "o4-mini" },
+    "codex": { "gpt5": "gpt-5", "gpt-5": "gpt-5", "gpt-5.3-codex": "gpt-5.3-codex", "codex-5.3": "gpt-5.3-codex", "gpt-5.3": "gpt-5.3-codex", "o4-mini": "o4-mini" },
     "claude": { "opus": "claude-opus-4-6", "sonnet": "claude-sonnet-4-5-20250929", "haiku": "claude-haiku-4-5-20251001" }
   },
   "modeTiers": {
@@ -327,12 +329,12 @@ Exit code: 0 if normal/warning, 1 if critical.
   },
   "concierge": {
     "enabled": true,
-    "model": "gpt-5.2-codex",
+    "model": "gpt-5",
     "reasoningEffort": "xhigh",
     "maxHistoryMessages": 40,
     "autoActivate": true,
     "fallbackChain": [
-      { "provider": "openai", "model": "gpt-5.2-codex" },
+      { "provider": "openai", "model": "gpt-5" },
       { "provider": "anthropic", "model": "claude-sonnet-4-5-20250929" },
       { "provider": "google", "model": "gemini-2.5-flash" }
     ],
@@ -419,7 +421,7 @@ The `aliases` section maps shorthand names to full model IDs per agent. These ar
 ### Concierge
 
 - `concierge.enabled=true`: Enable the concierge feature (set `false` to remove it entirely)
-- `concierge.model="gpt-5.2-codex"`: Primary model for the conversational layer
+- `concierge.model="gpt-5"`: Primary model for the conversational layer
 - `concierge.reasoningEffort="xhigh"`: Reasoning effort level sent to the API
 - `concierge.maxHistoryMessages=40`: Maximum conversation history messages (oldest pairs trimmed)
 - `concierge.autoActivate=true`: Concierge is on at startup (set `false` to require `:chat` to enable)

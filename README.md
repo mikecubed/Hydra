@@ -121,7 +121,7 @@ pwsh -File E:/Dev/Hydra/bin/hydra.ps1
               v           v           v
          +---------+ +---------+ +---------+
          | Gemini  | |  Codex  | | Claude  |
-         |(3 Pro)  | |(GPT-5.3)| | (Opus)  |
+         |(3 Pro)  | |(GPT-5.3 Codex)| | (Opus)  |
          +---------+ +---------+ +---------+
           Analyst    Implementer  Architect
 

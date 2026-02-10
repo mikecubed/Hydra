@@ -93,7 +93,8 @@ test('shortModelName extracts Gemini model names', () => {
 
 test('shortModelName extracts OpenAI/Codex model names', () => {
   assert.equal(shortModelName('o4-mini'), 'o4-mini');
-  assert.equal(shortModelName('codex-5.3'), 'codex-5.3');
+  assert.equal(shortModelName('codex-5.3'), 'gpt-5.3');
+  assert.equal(shortModelName('gpt-5.3-codex'), 'gpt-5.3');
   assert.equal(shortModelName('gpt-5.2'), 'gpt-5.2');
   assert.equal(shortModelName('gpt-5'), 'gpt-5');
   assert.equal(shortModelName('gpt-4'), 'gpt-4');
@@ -233,7 +234,7 @@ test('colorAgent handles null/empty', () => {
 test('agentBadge includes icon and uppercased name', () => {
   const badge = agentBadge('claude');
   const stripped = stripAnsi(badge);
-  assert.ok(stripped.includes('\u2739'), 'Should contain star icon');
+  assert.ok(stripped.includes('\u274B'), 'Should contain star icon');
   assert.ok(stripped.includes('CLAUDE'), 'Should contain uppercased name');
 });
 

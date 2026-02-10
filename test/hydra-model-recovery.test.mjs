@@ -165,8 +165,8 @@ describe('getFallbackCandidates', () => {
 
   it('returns empty array when all presets match failed model', () => {
     // Create a scenario where the failed model matches all presets
-    // codex default is gpt-5.3, fast and cheap are both o4-mini
-    // If we fail on o4-mini AND gpt-5.3 is somehow also excluded... let's just test with a model
+    // codex default is gpt-5.3-codex, fast and cheap are both o4-mini
+    // If we fail on o4-mini AND gpt-5.3-codex is somehow also excluded... let's just test with a model
     // that happens to be all presets
     const candidates = getFallbackCandidates('codex', 'gpt-5.3');
     // Should still have o4-mini variants

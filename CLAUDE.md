@@ -45,7 +45,7 @@ Operator Console (REPL)
     ├── Concierge (multi-provider streaming: OpenAI → Anthropic → Google fallback)
     └── Daemon (HTTP API, port 4173, event-sourced state)
          ├── Gemini  (analyst role, gemini-3-pro-preview)
-         ├── Codex   (implementer role, codex-5.3)
+         ├── Codex   (implementer role, gpt-5.3-codex)
          └── Claude  (architect role, claude-opus-4-6)
 ```
 
@@ -131,7 +131,7 @@ Two MCP servers are available when working in this project. Use them to get seco
 Invokes the agent CLI headlessly. No daemon needed.
 
 - **`agent: "gemini"`** — Gemini 3 Pro. Best for: code review, architecture critique, analysis, research, identifying edge cases, security review.
-- **`agent: "codex"`** — Codex (GPT-5.3). Best for: implementation, refactoring, code generation, writing tests, quick prototyping.
+- **`agent: "codex"`** — Codex (GPT-5.3 Codex). Best for: implementation, refactoring, code generation, writing tests, quick prototyping.
 
 **When to use:**
 - Reviewing your own generated code for bugs or missed edge cases
