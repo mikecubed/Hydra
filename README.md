@@ -66,6 +66,7 @@ pwsh -File E:/Dev/Hydra/bin/hydra.ps1
 
 - **Token usage monitoring**: Three-tier budget tracking (weekly primary, daily secondary, sliding window) from Claude Code's `stats-cache.json`. Per-agent breakdown in `:usage`. Auto-switches models at critical levels.
 - **Metrics dashboard**: Per-agent call counts, response times, real + estimated tokens, success rates
+- **Model recovery**: Automatic detection and fallback when a configured model is unavailable. Interactive mode offers choice; headless mode auto-selects fallback. Integrated into evolve, workers, and MCP.
 - **Contingency planning**: When approaching rate limits, offers model switching, agent handoff, or progress saving
 - **Project-aware verification**: Auto-detects verification command by stack (or uses explicit config)
 - **5-line status bar**: Persistent terminal footer with agent activity, token gauge, dispatch context, and rolling event ticker

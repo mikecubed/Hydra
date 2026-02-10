@@ -13,7 +13,7 @@
       "default": "gpt-5.3",
       "fast": "o4-mini",
       "cheap": "o4-mini",
-      "active": "default",
+      "active": "gpt-5.3",
       "reasoningEffort": "low"
     },
     "claude": {
@@ -286,6 +286,11 @@
     "autoTest": false,
     "phaseTimeoutMs": 300000,
     "storageDir": "docs/coordination/forge"
+  },
+  "modelRecovery": {
+    "enabled": true,
+    "autoPersist": true,
+    "headlessFallback": true
   },
   "worktrees": {
     "enabled": false,
