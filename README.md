@@ -235,6 +235,8 @@ hydra/
 | `npm run evolve` | Run autonomous self-improvement |
 | `npm run evolve:suggestions` | Manage evolve suggestions backlog |
 | `npm run nightly` | Run nightly task automation |
+| `npm run tasks` | Scan & execute TODO/FIXME/issues autonomously |
+| `npm run tasks:review` | Review tasks runner branches |
 | `npm run evolve:review` | Review evolve round results |
 | `npm run nightly:review` | Review nightly round results |
 | `npm test` | Run unit + integration tests |
@@ -311,6 +313,29 @@ The evolve pipeline maintains a persistent backlog of improvement ideas sourced 
   }
 }
 ```
+
+## Tasks Runner
+
+The tasks runner scans the codebase for actionable work items (TODO/FIXME code comments, unchecked items in `docs/TODO.md`, open GitHub issues) and executes them autonomously with per-task branch isolation.
+
+**Per-task lifecycle:** CLASSIFY → PLAN (complex only) → EXECUTE → VERIFY → DECIDE (council-lite review for complex tasks)
+
+**Features:**
+- Multi-source scanning: code comments, TODO.md, GitHub issues
+- Budget presets (light/medium/heavy) with 4-tier threshold system
+- Branch isolation: `tasks/{date}/{slug}` per task
+- Self-healing via investigator on execution failures
+- Council-lite review: verifier agent reviews diffs for complex tasks
+- JSON + Markdown reports in `docs/coordination/tasks/`
+
+**Operator commands:**
+| Command | Description |
+|---------|-------------|
+| `:tasks scan` | Scan codebase for work items |
+| `:tasks run` | Launch tasks runner |
+| `:tasks review` | Interactive branch review & merge |
+| `:tasks status` | Show latest run report |
+| `:tasks clean` | Delete all tasks/* branches |
 
 ## Documentation
 

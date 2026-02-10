@@ -30,6 +30,10 @@ npm run council -- prompt="..." # Run council deliberation
 npm run evolve              # Run autonomous self-improvement
 npm run evolve:suggestions  # Manage evolve suggestions backlog
 npm run nightly             # Run nightly task automation
+npm run tasks               # Scan & execute TODO/FIXME/issues autonomously
+npm run tasks:review        # Interactive merge of tasks/* branches
+npm run tasks:status        # Show latest tasks run report
+npm run tasks:clean         # Delete all tasks/* branches
 ```
 
 No linter or build step — pure ESM, runs directly with Node.js.
@@ -84,6 +88,9 @@ Operator Console (REPL)
 - **`hydra-evolve-suggestions-cli.mjs`** — Standalone CLI for managing suggestions backlog. Subcommands: `list`, `add`, `remove`, `reset`, `import`, `stats`.
 - **`hydra-activity.mjs`** — Real-time activity digest for concierge situational awareness. `detectSituationalQuery()` classifies "What's going on?" style queries. `buildActivityDigest()` fetches `GET /activity` + merges local state. `formatDigestForPrompt()` renders structured digest. Ring buffer via `pushActivity()`/`getRecentActivity()`. Annotation helpers: `annotateDispatch()`, `annotateHandoff()`, `annotateCompletion()`.
 - **`hydra-codebase-context.mjs`** — Codebase knowledge injection for concierge. `loadCodebaseContext()` parses CLAUDE.md sections + builds module index. `detectCodebaseQuery()` classifies architecture questions by topic. `getTopicContext(topic)` returns focused context (12 topics: dispatch, council, config, workers, agents, concierge, evolve, daemon, ui, modules, github, metrics). `getBaselineContext()` returns permanent baseline for system prompt. `searchKnowledgeBase()` queries evolve KB. `getConfigReference()` formats config sections.
+- **`hydra-tasks-scanner.mjs`** — Aggregates work items from code comments (git grep TODO/FIXME/HACK/XXX), `docs/TODO.md` unchecked items, and GitHub issues. Exports `scanAllSources()`, `scanTodoComments()`, `scanTodoMd()`, `scanGitHubIssues()`, `createUserTask()`, `deduplicateTasks()`, `prioritizeTasks()`. Returns `ScannedTask[]` with id, title, slug, source, taskType, suggestedAgent, complexity, priority.
+- **`hydra-tasks.mjs`** — Autonomous tasks runner. Interactive setup (scan → select → budget) then executes per-task lifecycle: CLASSIFY → PLAN (complex only) → EXECUTE → VERIFY → DECIDE (council-lite for complex). Branch isolation (`tasks/{date}/{slug}`), BudgetTracker with 4 thresholds, investigator self-healing, model recovery. Generates JSON + Markdown reports to `docs/coordination/tasks/`.
+- **`hydra-tasks-review.mjs`** — Post-run interactive review. Subcommands: `review` (walk branches, merge/skip/diff/delete/PR), `status` (show latest report), `clean` (delete all `tasks/*` branches). Same pattern as `hydra-nightly-review.mjs`.
 - **`hydra-mcp-server.mjs`** — MCP server exposing Hydra tools via JSON-RPC over stdio. Two modes: **standalone** (`hydra_ask` works without daemon — directly invokes agent CLIs via `executeAgent()`) and **daemon** (task queue, handoffs, council tools when daemon is running). Registered as `hydra` MCP server for Claude Code.
 - **`hydra-investigator.mjs`** — Re-exports from `hydra-evolve-investigator.mjs`. Self-healing failure diagnosis (shared).
 - **`hydra-knowledge.mjs`** — Re-exports from `hydra-evolve-knowledge.mjs`. Persistent knowledge base (shared).

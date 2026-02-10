@@ -28,6 +28,10 @@
     "evolve:clean": "node lib/hydra-evolve-review.mjs clean",
     "evolve:knowledge": "node lib/hydra-evolve-review.mjs knowledge",
     "evolve:suggestions": "node lib/hydra-evolve-suggestions-cli.mjs",
+    "tasks": "node lib/hydra-tasks.mjs",
+    "tasks:review": "node lib/hydra-tasks-review.mjs review",
+    "tasks:status": "node lib/hydra-tasks-review.mjs status",
+    "tasks:clean": "node lib/hydra-tasks-review.mjs clean",
     "test": "node --test"
   },
   "dependencies": {
