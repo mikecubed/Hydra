@@ -278,7 +278,11 @@ These commands are available inside the interactive operator console (`npm run g
 | `:tasks clean` | Delete all tasks/* branches |
 | `:handoffs` | List pending & recent handoffs |
 | `:cancel <id>` | Cancel a task |
-| `:clear` | Cancel all tasks & ack all handoffs |
+| `:clear` | Interactive menu to select clear target |
+| `:clear all` | Cancel all tasks & ack all handoffs |
+| `:clear concierge` | Clear conversation history |
+| `:clear metrics` | Reset session metrics |
+| `:clear screen` | Clear terminal |
 | `:archive` | Archive completed work & trim events |
 | `:events` | Show recent event log |
 | `:workers` | Show worker status |
