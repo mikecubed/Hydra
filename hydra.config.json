@@ -1,6 +1,6 @@
 {
   "version": 2,
-  "mode": "performance",
+  "mode": "economy",
   "models": {
     "gemini": {
       "default": "gemini-2.5-pro",
@@ -94,7 +94,176 @@
     "model": "gpt-5",
     "reasoningEffort": "xhigh",
     "maxHistoryMessages": 40,
-    "autoActivate": true
+    "autoActivate": true,
+    "showProviderInPrompt": true,
+    "welcomeMessage": true,
+    "fallbackChain": [
+      {
+        "provider": "openai",
+        "model": "gpt-5"
+      },
+      {
+        "provider": "anthropic",
+        "model": "claude-sonnet-4-5-20250929"
+      },
+      {
+        "provider": "google",
+        "model": "gemini-2.5-flash"
+      }
+    ]
+  },
+  "roles": {
+    "concierge": {
+      "agent": "codex",
+      "model": "gpt-5",
+      "reasoningEffort": "xhigh"
+    },
+    "investigator": {
+      "agent": "codex",
+      "model": "gpt-5.3",
+      "reasoningEffort": "high"
+    },
+    "nightlyHandoff": {
+      "agent": "codex",
+      "model": "o4-mini",
+      "reasoningEffort": null
+    },
+    "architect": {
+      "agent": "claude",
+      "model": null,
+      "reasoningEffort": null
+    },
+    "analyst": {
+      "agent": "gemini",
+      "model": null,
+      "reasoningEffort": null
+    },
+    "implementer": {
+      "agent": "codex",
+      "model": null,
+      "reasoningEffort": null
+    }
+  },
+  "recommendations": {
+    "concierge": {
+      "models": [
+        "gpt-5",
+        "claude-sonnet-4-5-20250929"
+      ],
+      "reasoningEffort": "xhigh",
+      "note": "Needs fast streaming + broad knowledge for chat UX"
+    },
+    "investigator": {
+      "models": [
+        "gpt-5.3",
+        "gpt-5"
+      ],
+      "reasoningEffort": "high",
+      "note": "Needs strong reasoning for failure diagnosis"
+    },
+    "nightlyHandoff": {
+      "models": [
+        "o4-mini",
+        "gpt-5"
+      ],
+      "reasoningEffort": null,
+      "note": "Budget-saving agent — prefer cheap + fast"
+    },
+    "architect": {
+      "models": [
+        "claude-opus-4-6",
+        "gpt-5.3"
+      ],
+      "reasoningEffort": null,
+      "note": "Complex planning — use strongest available model"
+    },
+    "analyst": {
+      "models": [
+        "gemini-2.5-pro",
+        "claude-opus-4-6"
+      ],
+      "reasoningEffort": null,
+      "note": "Large context window helps for review tasks"
+    },
+    "implementer": {
+      "models": [
+        "gpt-5.3",
+        "claude-sonnet-4-5-20250929"
+      ],
+      "reasoningEffort": null,
+      "note": "Fast execution with good instruction following"
+    }
+  },
+  "agents": {
+    "subAgents": {
+      "enabled": true,
+      "builtIns": [
+        "security-reviewer",
+        "test-writer",
+        "doc-generator",
+        "researcher",
+        "evolve-researcher"
+      ]
+    },
+    "custom": {}
+  },
+  "evolve": {
+    "maxRounds": 3,
+    "maxHours": 4,
+    "focusAreas": [
+      "orchestration-patterns",
+      "ai-coding-tools",
+      "testing-reliability",
+      "developer-experience",
+      "model-routing",
+      "daemon-architecture"
+    ],
+    "budget": {
+      "softLimit": 600000,
+      "hardLimit": 800000,
+      "perRoundEstimate": 200000,
+      "warnThreshold": 0.6,
+      "reduceScopeThreshold": 0.75,
+      "softStopThreshold": 0.85,
+      "hardStopThreshold": 0.95
+    },
+    "phases": {
+      "researchTimeoutMs": 300000,
+      "deliberateTimeoutMs": 420000,
+      "planTimeoutMs": 300000,
+      "testTimeoutMs": 600000,
+      "implementTimeoutMs": 900000,
+      "analyzeTimeoutMs": 420000
+    },
+    "approval": {
+      "minScore": 7,
+      "requireAllTestsPass": true,
+      "requireNoViolations": true
+    },
+    "baseBranch": "dev",
+    "investigator": {
+      "enabled": true,
+      "model": "gpt-5.3",
+      "reasoningEffort": "high",
+      "maxAttemptsPerPhase": 2,
+      "phases": [
+        "test",
+        "implement",
+        "analyze",
+        "agent"
+      ],
+      "maxTokensBudget": 50000,
+      "tryAlternativeAgent": true,
+      "logToFile": true
+    }
+  },
+  "github": {
+    "enabled": false,
+    "defaultBase": "",
+    "draft": false,
+    "labels": [],
+    "reviewers": [],
+    "prBodyFooter": ""
   },
   "worktrees": {
     "enabled": false,

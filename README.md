@@ -65,6 +65,7 @@ pwsh -File E:/Dev/Hydra/bin/hydra.ps1
 - **Autonomous self-improvement**: 7-phase evolve pipeline with budget tracking, investigator self-healing, and knowledge accumulation
 - **Nightly automation**: Scheduled task processing with safety guardrails and review workflow
 - **Virtual sub-agents**: Role-specialized agents (security-reviewer, test-writer, doc-generator, researcher) that resolve to physical agents for dispatch
+- **GitHub integration**: PR creation from operator (`:pr create`), review flow PR option, repo detection, open PR listing — requires `gh` CLI
 - **5-line status bar**: Persistent terminal footer with agent activity, token gauge, dispatch context, and rolling event ticker
 - **Agent terminal auto-launch**: Operator spawns Windows Terminal/PowerShell windows per agent head
 - **HTTP daemon**: Shared state management with event sourcing, auto-archiving, and cycle detection
@@ -134,6 +135,7 @@ hydra/
     hydra-evolve-investigator.mjs # Self-healing failure diagnosis
     hydra-evolve-knowledge.mjs # Knowledge accumulation across evolve rounds
     hydra-evolve-review.mjs  # Evolve round review and status
+    hydra-github.mjs         # GitHub integration via gh CLI (PRs, repo detection)
     hydra-google.mjs         # Google Gemini API streaming client
     hydra-mcp.mjs            # MCP client for Codex (JSON-RPC over stdio)
     hydra-mcp-server.mjs     # Hydra daemon as MCP server (8 tools)
@@ -172,6 +174,7 @@ hydra/
   test/
     hydra-agents.test.mjs                  # Agent registry + sub-agent tests
     hydra-concierge-providers.test.mjs     # Provider detection + fallback chain tests
+    hydra-github.test.mjs                  # GitHub integration + parseRemoteUrl tests
     hydra-mcp.test.mjs                     # MCP client unit tests
     hydra-metrics.test.mjs                 # Metrics collection tests
     hydra-streaming-clients.test.mjs       # Anthropic/Google client + concierge multi-provider tests
@@ -202,6 +205,41 @@ hydra/
 | `npm run nightly:review` | Review nightly round results |
 | `npm test` | Run unit + integration tests |
 
+## GitHub Integration
+
+Hydra can create pull requests, list PRs, and integrate with the review flow via the `gh` CLI.
+
+**Setup:**
+```bash
+# Install gh CLI: https://cli.github.com
+gh auth login
+```
+
+**Operator commands:**
+| Command | Description |
+|---------|-------------|
+| `:github` | Show GitHub status (gh installed, auth, repo, open PRs) |
+| `:github prs` | List open pull requests |
+| `:pr create [branch]` | Push branch and create a pull request |
+| `:pr list` | List open pull requests |
+| `:pr view <number>` | Show PR details (title, state, changes, URL) |
+
+**Config** (`hydra.config.json`):
+```json
+{
+  "github": {
+    "enabled": false,
+    "defaultBase": "",
+    "draft": false,
+    "labels": [],
+    "reviewers": [],
+    "prBodyFooter": ""
+  }
+}
+```
+
+When `gh` is installed, the evolve and nightly review flows automatically show a `[p]r` option alongside merge/skip/diff/delete.
+
 ## Documentation
 
 - [Installation](docs/INSTALL.md)
@@ -214,6 +252,7 @@ hydra/
 - Node.js 20+
 - PowerShell 7+ (for launchers)
 - At least one AI CLI: `gemini`, `codex`, or `claude`
+- Optional: `gh` CLI for GitHub integration (PRs, repo detection)
 
 ## License
 

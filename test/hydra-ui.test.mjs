@@ -184,11 +184,11 @@ test('AGENT_COLORS produce strings containing the input text', () => {
 // ── AGENT_ICONS ──────────────────────────────────────────────────────────────
 
 test('AGENT_ICONS has correct symbols', () => {
-  assert.equal(AGENT_ICONS.claude, '\u2666');  // ♦
-  assert.equal(AGENT_ICONS.gemini, '\u2726');  // ✦
-  assert.equal(AGENT_ICONS.codex, '\u25B6');   // ▶
-  assert.equal(AGENT_ICONS.human, '\u25C6');   // ◆
-  assert.equal(AGENT_ICONS.system, '\u2699');  // ⚙
+  assert.equal(AGENT_ICONS.claude, '\u2739');    // ✹
+  assert.equal(AGENT_ICONS.gemini, '\u2726');    // ✦
+  assert.equal(AGENT_ICONS.codex, '\u058E');     // ֎
+  assert.equal(AGENT_ICONS.human, '\u{1F16F}');  // 🅯
+  assert.equal(AGENT_ICONS.system, '\u{1F5B3}'); // 🖳
 });
 
 // ── HEALTH_ICONS ─────────────────────────────────────────────────────────────
@@ -232,7 +232,7 @@ test('colorAgent handles null/empty', () => {
 test('agentBadge includes icon and uppercased name', () => {
   const badge = agentBadge('claude');
   const stripped = stripAnsi(badge);
-  assert.ok(stripped.includes('\u2666'), 'Should contain diamond icon');
+  assert.ok(stripped.includes('\u2739'), 'Should contain star icon');
   assert.ok(stripped.includes('CLAUDE'), 'Should contain uppercased name');
 });
 
