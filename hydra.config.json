@@ -13,7 +13,7 @@
       "default": "gpt-5.3-codex",
       "fast": "o4-mini",
       "cheap": "o4-mini",
-      "active": "default",
+      "active": "gpt-5.3-codex",
       "reasoningEffort": "low"
     },
     "claude": {
@@ -289,10 +289,37 @@
     "phaseTimeoutMs": 300000,
     "storageDir": "docs/coordination/forge"
   },
+  "tasks": {
+    "maxTasks": 10,
+    "maxHours": 2,
+    "perTaskTimeoutMs": 900000,
+    "baseBranch": "dev",
+    "sources": {
+      "todoComments": true,
+      "todoMd": true,
+      "githubIssues": true
+    },
+    "budget": {
+      "defaultPreset": "medium",
+      "perTaskEstimate": 100000
+    },
+    "councilLite": {
+      "enabled": true,
+      "complexOnly": true
+    },
+    "investigator": {
+      "enabled": true
+    }
+  },
   "modelRecovery": {
     "enabled": true,
     "autoPersist": true,
     "headlessFallback": true
+  },
+  "rateLimits": {
+    "maxRetries": 3,
+    "baseDelayMs": 5000,
+    "maxDelayMs": 60000
   },
   "worktrees": {
     "enabled": false,
