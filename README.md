@@ -90,7 +90,7 @@ pwsh -File E:/Dev/Hydra/bin/hydra.ps1
 - **Event-sourced mutation log**: Monotonic sequence numbers, typed categories, and full replay support
 - **Git worktree isolation**: Per-task isolated filesystems for true parallel agent work
 - **Codex MCP integration**: Multi-turn context via JSON-RPC over stdio (when Codex MCP server available)
-- **Hydra MCP server**: Expose daemon as an MCP server so agents can self-coordinate
+- **Hydra MCP server**: Expose Hydra as MCP server for Claude Code — `hydra_ask` invokes Gemini/Codex directly (no daemon needed), plus daemon tools for task queue/handoffs/council when running
 - **Ghost text prompts**: Claude Code CLI-style greyed-out placeholder hints that cycle contextually and disappear on keystroke
 - **PowerShell-native**: Branded multi-terminal launcher with per-agent polling heads
 - **Project-agnostic**: Works with any Node.js, Rust, Go, or Python project
@@ -165,7 +165,7 @@ hydra/
     hydra-github.mjs         # GitHub integration via gh CLI (PRs, repo detection)
     hydra-google.mjs         # Google Gemini API streaming client
     hydra-mcp.mjs            # MCP client for Codex (JSON-RPC over stdio)
-    hydra-mcp-server.mjs     # Hydra daemon as MCP server (8 tools)
+    hydra-mcp-server.mjs     # Hydra MCP server (9 tools, standalone + daemon modes)
     hydra-metrics.mjs        # Call metrics collection
     hydra-models.mjs         # Model discovery (API/CLI/config) and listing
     hydra-models-select.mjs  # Interactive model + reasoning effort picker
