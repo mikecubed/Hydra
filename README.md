@@ -61,8 +61,8 @@ pwsh -File E:/Dev/Hydra/bin/hydra.ps1
 
 ### Monitoring & Safety
 
-- **Token usage monitoring**: Reads Claude Code's stats cache, auto-switches models at critical levels
-- **Metrics dashboard**: Per-agent call counts, response times, estimated tokens, success rates
+- **Token usage monitoring**: Real token tracking for Claude (JSON output) and Codex (JSONL `--json` output), with per-agent breakdown in `:usage`. Auto-switches models at critical levels.
+- **Metrics dashboard**: Per-agent call counts, response times, real + estimated tokens, success rates
 - **Contingency planning**: When approaching rate limits, offers model switching, agent handoff, or progress saving
 - **Project-aware verification**: Auto-detects verification command by stack (or uses explicit config)
 - **5-line status bar**: Persistent terminal footer with agent activity, token gauge, dispatch context, and rolling event ticker

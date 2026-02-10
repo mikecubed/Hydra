@@ -120,10 +120,15 @@ function Get-ModelFlags {
         if ($tierPreset -and $tierPreset -ne "default" -and $agentModels.$tierPreset) {
           $modelId = $agentModels.$tierPreset
           $defaultId = $agentModels.default
-          if ($modelId -ne $defaultId) {
+          if ($modelId -ne $defaultId -or $Agent -eq "codex") {
             return @("--model", $modelId)
           }
         }
+      }
+      # Codex always needs explicit --model (its own config may differ from Hydra's)
+      if ($Agent -eq "codex") {
+        $defaultId = $agentModels.default
+        if ($defaultId) { return @("--model", $defaultId) }
       }
       return @()
     }
@@ -132,8 +137,10 @@ function Get-ModelFlags {
     $modelId = if ($agentModels.$activeKey) { $agentModels.$activeKey } else { $activeKey }
     $defaultId = $agentModels.default
 
-    if ($modelId -eq $defaultId) { return @() }
-    return @("--model", $modelId)
+    if ($modelId -ne $defaultId -or $Agent -eq "codex") {
+      return @("--model", $modelId)
+    }
+    return @()
   } catch {
     return @()
   }
