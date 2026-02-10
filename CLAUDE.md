@@ -45,7 +45,7 @@ Operator Console (REPL)
     ├── Concierge (multi-provider streaming: OpenAI → Anthropic → Google fallback)
     └── Daemon (HTTP API, port 4173, event-sourced state)
          ├── Gemini  (analyst role, gemini-3-pro-preview)
-         ├── Codex   (implementer role, gpt-5.3)
+         ├── Codex   (implementer role, codex-5.3)
          └── Claude  (architect role, claude-opus-4-6)
 ```
 

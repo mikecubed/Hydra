@@ -93,7 +93,8 @@ test('shortModelName extracts Gemini model names', () => {
 
 test('shortModelName extracts OpenAI/Codex model names', () => {
   assert.equal(shortModelName('o4-mini'), 'o4-mini');
-  assert.equal(shortModelName('gpt-5.3'), 'gpt-5.3');
+  assert.equal(shortModelName('codex-5.3'), 'codex-5.3');
+  assert.equal(shortModelName('gpt-5.2'), 'gpt-5.2');
   assert.equal(shortModelName('gpt-5'), 'gpt-5');
   assert.equal(shortModelName('gpt-4'), 'gpt-4');
 });
@@ -184,7 +185,7 @@ test('AGENT_COLORS produce strings containing the input text', () => {
 // ── AGENT_ICONS ──────────────────────────────────────────────────────────────
 
 test('AGENT_ICONS has correct symbols', () => {
-  assert.equal(AGENT_ICONS.claude, '\u2739');    // ✹
+  assert.equal(AGENT_ICONS.claude, '\u274B');    // ❋
   assert.equal(AGENT_ICONS.gemini, '\u2726');    // ✦
   assert.equal(AGENT_ICONS.codex, '\u058E');     // ֎
   assert.equal(AGENT_ICONS.human, '\u{1F16F}');  // 🅯

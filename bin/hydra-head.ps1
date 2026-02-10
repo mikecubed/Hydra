@@ -33,7 +33,7 @@ $AgentColors = @{
 $AgentIcons = @{
   gemini = [char]0x2726  # ✦
   codex  = [char]0x58E   # ֎
-  claude = [char]0x2735  # ✵
+  claude = [char]0x274B  # ❋
 }
 
 $AgentTaglines = @{

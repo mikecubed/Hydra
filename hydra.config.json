@@ -10,10 +10,10 @@
       "reasoningEffort": "low"
     },
     "codex": {
-      "default": "gpt-5.3",
+      "default": "codex-5.3",
       "fast": "o4-mini",
       "cheap": "o4-mini",
-      "active": "gpt-5.3",
+      "active": "codex-5.3",
       "reasoningEffort": "low"
     },
     "claude": {
@@ -39,7 +39,8 @@
     "codex": {
       "gpt5": "gpt-5",
       "gpt-5": "gpt-5",
-      "gpt-5.3": "gpt-5.3",
+      "codex-5.3": "codex-5.3",
+      "gpt-5.3": "codex-5.3",
       "o4-mini": "o4-mini",
       "o4mini": "o4-mini"
     },
@@ -129,7 +130,7 @@
     },
     "investigator": {
       "agent": "codex",
-      "model": "gpt-5.3",
+      "model": "gpt-5.2",
       "reasoningEffort": "high"
     },
     "nightlyHandoff": {
@@ -164,7 +165,7 @@
     },
     "investigator": {
       "models": [
-        "gpt-5.3",
+        "gpt-5.2",
         "gpt-5"
       ],
       "reasoningEffort": "high",
@@ -181,7 +182,7 @@
     "architect": {
       "models": [
         "claude-opus-4-6",
-        "gpt-5.3"
+        "codex-5.3"
       ],
       "reasoningEffort": null,
       "note": "Complex planning — use strongest available model"
@@ -196,7 +197,7 @@
     },
     "implementer": {
       "models": [
-        "gpt-5.3",
+        "codex-5.3",
         "claude-sonnet-4-5-20250929"
       ],
       "reasoningEffort": null,
@@ -252,7 +253,7 @@
     "baseBranch": "dev",
     "investigator": {
       "enabled": true,
-      "model": "gpt-5.3",
+      "model": "gpt-5.2",
       "reasoningEffort": "high",
       "maxAttemptsPerPhase": 2,
       "phases": [
