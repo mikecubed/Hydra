@@ -263,6 +263,9 @@ These commands are available inside the interactive operator console (`npm run g
 | `:model:select` | Interactive model picker |
 | `:roles` | Show role->agent->model mapping & recommendations |
 | `:roster` | Edit role->agent->model assignments interactively |
+| `:persona` | Edit personality settings interactively |
+| `:persona show` | Show current personality config |
+| `:persona <preset>` | Apply preset (default/professional/casual/analytical/terse) |
 | `:usage` | Token usage & contingencies |
 | `:stats` | Agent metrics & performance |
 | `:resume` | Scan all resumable state (daemon, evolve, branches, suggestions) |
