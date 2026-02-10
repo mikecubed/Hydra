@@ -80,6 +80,7 @@ Operator Console (REPL)
 - **`hydra-evolve-suggestions-cli.mjs`** — Standalone CLI for managing suggestions backlog. Subcommands: `list`, `add`, `remove`, `reset`, `import`, `stats`.
 - **`hydra-activity.mjs`** — Real-time activity digest for concierge situational awareness. `detectSituationalQuery()` classifies "What's going on?" style queries. `buildActivityDigest()` fetches `GET /activity` + merges local state. `formatDigestForPrompt()` renders structured digest. Ring buffer via `pushActivity()`/`getRecentActivity()`. Annotation helpers: `annotateDispatch()`, `annotateHandoff()`, `annotateCompletion()`.
 - **`hydra-codebase-context.mjs`** — Codebase knowledge injection for concierge. `loadCodebaseContext()` parses CLAUDE.md sections + builds module index. `detectCodebaseQuery()` classifies architecture questions by topic. `getTopicContext(topic)` returns focused context (12 topics: dispatch, council, config, workers, agents, concierge, evolve, daemon, ui, modules, github, metrics). `getBaselineContext()` returns permanent baseline for system prompt. `searchKnowledgeBase()` queries evolve KB. `getConfigReference()` formats config sections.
+- **`hydra-mcp-server.mjs`** — MCP server exposing Hydra tools via JSON-RPC over stdio. Two modes: **standalone** (`hydra_ask` works without daemon — directly invokes agent CLIs via `executeAgent()`) and **daemon** (task queue, handoffs, council tools when daemon is running). Registered as `hydra` MCP server for Claude Code.
 - **`hydra-investigator.mjs`** — Re-exports from `hydra-evolve-investigator.mjs`. Self-healing failure diagnosis (shared).
 - **`hydra-knowledge.mjs`** — Re-exports from `hydra-evolve-knowledge.mjs`. Persistent knowledge base (shared).
 
@@ -116,3 +117,33 @@ import assert from 'node:assert/strict';
 ```
 
 Integration tests (`*.integration.test.mjs`) spin up the daemon on an ephemeral port and test HTTP endpoints.
+
+## MCP Tool Escalation
+
+Two MCP servers are available when working in this project. Use them to get second opinions, delegate work, or cross-verify your reasoning.
+
+### `hydra_ask` — Ask Gemini or Codex directly
+
+Invokes the agent CLI headlessly. No daemon needed.
+
+- **`agent: "gemini"`** — Gemini 3 Pro. Best for: code review, architecture critique, analysis, research, identifying edge cases, security review.
+- **`agent: "codex"`** — Codex (GPT-5.3). Best for: implementation, refactoring, code generation, writing tests, quick prototyping.
+
+**When to use:**
+- Reviewing your own generated code for bugs or missed edge cases
+- Getting an alternative implementation approach
+- Security or concurrency analysis on tricky code
+- When the user explicitly asks for a second opinion
+
+**When NOT to use:**
+- Trivial/obvious changes (a typo fix doesn't need review)
+- Asking questions you already know the answer to
+- Every single code change (be cost-conscious)
+
+### `ask_gpt53` / `ask_gpt_fast` — OpenAI API calls
+
+Direct OpenAI Responses API calls (separate from Hydra's agent CLIs).
+
+- **`ask_gpt_fast`** (gpt-4.1-mini) — Cheap/fast. Quick summaries, small refactors, simple reviews.
+- **`ask_gpt53`** (GPT-5.3) — Deep reasoning. Architecture decisions, complex bugs, security analysis.
+- **`ask_gpt52`** — Alias for `ask_gpt53` (backward compat).
