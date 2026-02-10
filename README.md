@@ -295,7 +295,7 @@ These commands are available inside the interactive operator console (`npm run g
 | `:evolve status` | Show latest evolve report |
 | `:evolve resume` | Resume interrupted session |
 | `:evolve knowledge` | Browse knowledge base |
-| `:nightly` | Launch nightly run (interactive setup) |
+| `:nightly` | Launch nightly run (interactive setup + task selection) |
 | `:nightly dry-run` | Scan & prioritize without executing |
 | `:nightly review` | Interactive branch review & merge |
 | `:nightly status` | Show latest nightly run report |
@@ -471,6 +471,7 @@ Config-driven autonomous overnight pipeline. Scans multiple sources for tasks, o
 node lib/hydra-nightly.mjs                         # defaults from config
 node lib/hydra-nightly.mjs --dry-run               # scan + prioritize only
 node lib/hydra-nightly.mjs --no-discovery          # skip AI discovery
+node lib/hydra-nightly.mjs --interactive           # interactive task selection
 node lib/hydra-nightly.mjs max-tasks=3 max-hours=2 # override limits
 ```
 
