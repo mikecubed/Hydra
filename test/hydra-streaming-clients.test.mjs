@@ -152,7 +152,7 @@ describe('hydra-concierge multi-provider exports', () => {
     concierge.switchConciergeModel('flash');
     const ap = concierge.getActiveProvider();
     assert.equal(ap.provider, 'google');
-    assert.equal(ap.model, 'gemini-2.5-flash');
+    assert.equal(ap.model, 'gemini-3-flash-preview');
   });
 
   it('switchConciergeModel handles full model ID', () => {

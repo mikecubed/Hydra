@@ -46,6 +46,8 @@ pwsh -File E:/Dev/Hydra/bin/hydra.ps1
 ### Concierge Chat
 
 - **Multi-provider front-end**: Conversational AI layer (OpenAI → Anthropic → Google fallback chain) — answers questions directly, only escalates to agents when real work is needed
+- **Situational awareness**: Ask "What's going on?", "What is claude working on?", "What's that handoff about?" — concierge fetches real-time activity digest from daemon and agent state
+- **Codebase knowledge**: Ask "How does dispatch work?", "What config options exist for workers?" — concierge injects topic-specific architecture context from CLAUDE.md, module index, and evolve knowledge base
 - **Command-aware**: Typos and near-miss commands caught locally via fuzzy matching (Levenshtein) before falling back to AI suggestion
 - **Runtime model switching**: `:chat model sonnet` switches the concierge provider/model on the fly
 - **Conversation export**: `:chat export` saves concierge history to JSON for analysis
@@ -117,7 +119,7 @@ pwsh -File E:/Dev/Hydra/bin/hydra.ps1
               v           v           v
          +---------+ +---------+ +---------+
          | Gemini  | |  Codex  | | Claude  |
-         | (Pro)   | |(GPT-5.3)| | (Opus)  |
+         |(3 Pro)  | |(GPT-5.3)| | (Opus)  |
          +---------+ +---------+ +---------+
           Analyst    Implementer  Architect
 
@@ -158,6 +160,8 @@ hydra/
     hydra-evolve-suggestions.mjs # Suggestions backlog for evolve pipeline
     hydra-evolve-suggestions-cli.mjs # CLI for managing evolve suggestions
     hydra-evolve-review.mjs  # Evolve round review and status
+    hydra-activity.mjs       # Real-time activity digest for concierge situational awareness
+    hydra-codebase-context.mjs # Codebase knowledge injection for concierge
     hydra-github.mjs         # GitHub integration via gh CLI (PRs, repo detection)
     hydra-google.mjs         # Google Gemini API streaming client
     hydra-mcp.mjs            # MCP client for Codex (JSON-RPC over stdio)
@@ -195,7 +199,9 @@ hydra/
   hydra.config.json          # Model + usage + worktree + MCP + verification + concierge config
   package.json
   test/
+    hydra-activity.test.mjs                 # Activity digest detection + formatting tests
     hydra-agents.test.mjs                  # Agent registry + sub-agent tests
+    hydra-codebase-context.test.mjs        # Codebase knowledge detection + topic mapping tests
     hydra-concierge-providers.test.mjs     # Provider detection + fallback chain tests
     hydra-evolve-suggestions.test.mjs      # Evolve suggestions backlog tests
     hydra-github.test.mjs                  # GitHub integration + parseRemoteUrl tests

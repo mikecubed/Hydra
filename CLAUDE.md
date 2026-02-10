@@ -44,7 +44,7 @@ Hydra orchestrates three AI coding agents (Claude Code CLI, Gemini CLI, Codex CL
 Operator Console (REPL)
     ├── Concierge (multi-provider streaming: OpenAI → Anthropic → Google fallback)
     └── Daemon (HTTP API, port 4173, event-sourced state)
-         ├── Gemini  (analyst role, gemini-2.5-pro)
+         ├── Gemini  (analyst role, gemini-3-pro-preview)
          ├── Codex   (implementer role, gpt-5.3)
          └── Claude  (architect role, claude-opus-4-6)
 ```
@@ -78,6 +78,8 @@ Operator Console (REPL)
   - `review-common.mjs` — Interactive review helpers: `handleBranchAction()` (with `[p]r` option when `gh` available), `loadLatestReport()`, `cleanBranches()`
 - **`hydra-evolve-suggestions.mjs`** — Persistent suggestions backlog for evolve pipeline. Stores improvement ideas from failed/deferred rounds, user input, and review sessions. Exports `loadSuggestions()`, `saveSuggestions()`, `addSuggestion()`, `updateSuggestion()`, `removeSuggestion()`, `getPendingSuggestions()`, `getSuggestionById()`, `searchSuggestions()`, `createSuggestionFromRound()`, `promptSuggestionPicker()`, `getSuggestionStats()`, `formatSuggestionsForPrompt()`. Storage: `docs/coordination/evolve/SUGGESTIONS.json`.
 - **`hydra-evolve-suggestions-cli.mjs`** — Standalone CLI for managing suggestions backlog. Subcommands: `list`, `add`, `remove`, `reset`, `import`, `stats`.
+- **`hydra-activity.mjs`** — Real-time activity digest for concierge situational awareness. `detectSituationalQuery()` classifies "What's going on?" style queries. `buildActivityDigest()` fetches `GET /activity` + merges local state. `formatDigestForPrompt()` renders structured digest. Ring buffer via `pushActivity()`/`getRecentActivity()`. Annotation helpers: `annotateDispatch()`, `annotateHandoff()`, `annotateCompletion()`.
+- **`hydra-codebase-context.mjs`** — Codebase knowledge injection for concierge. `loadCodebaseContext()` parses CLAUDE.md sections + builds module index. `detectCodebaseQuery()` classifies architecture questions by topic. `getTopicContext(topic)` returns focused context (12 topics: dispatch, council, config, workers, agents, concierge, evolve, daemon, ui, modules, github, metrics). `getBaselineContext()` returns permanent baseline for system prompt. `searchKnowledgeBase()` queries evolve KB. `getConfigReference()` formats config sections.
 - **`hydra-investigator.mjs`** — Re-exports from `hydra-evolve-investigator.mjs`. Self-healing failure diagnosis (shared).
 - **`hydra-knowledge.mjs`** — Re-exports from `hydra-evolve-knowledge.mjs`. Persistent knowledge base (shared).
 
