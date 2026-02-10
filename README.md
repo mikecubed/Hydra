@@ -295,6 +295,11 @@ These commands are available inside the interactive operator console (`npm run g
 | `:evolve status` | Show latest evolve report |
 | `:evolve resume` | Resume interrupted session |
 | `:evolve knowledge` | Browse knowledge base |
+| `:nightly` | Launch nightly run (interactive setup) |
+| `:nightly dry-run` | Scan & prioritize without executing |
+| `:nightly review` | Interactive branch review & merge |
+| `:nightly status` | Show latest nightly run report |
+| `:nightly clean` | Delete all nightly/* branches |
 | `:github` | GitHub status |
 | `:github prs` | List open pull requests |
 | `:pr create [branch]` | Push branch & create PR |
