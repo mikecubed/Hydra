@@ -34,41 +34,62 @@ pwsh -File E:/Dev/Hydra/bin/hydra.ps1
 
 ## Features
 
-- **Concierge front-end**: Multi-provider conversational AI layer (OpenAI → Anthropic → Google fallback chain) — answers questions directly, only escalates to agents when real work is needed
+### Orchestration & Routing
+
 - **Five orchestration modes**: Auto (triage + delegate), Council (multi-round deliberation), Dispatch (headless pipeline), Smart (auto-select model tier per prompt complexity), Chat (concierge conversation)
 - **Affinity-based task routing**: 10 task types x 3 agents = intelligent work assignment
+- **Fast-path dispatch**: Simple prompts bypass council for lower latency single-agent handoffs
+- **Per-command agent selection**: `agents=claude,gemini` to control which agents participate per-prompt
+- **Virtual sub-agents**: Role-specialized agents (security-reviewer, test-writer, doc-generator, researcher) that resolve to physical agents for dispatch
+- **Spec-driven task anchoring**: Complex prompts generate a spec document to anchor all downstream work
+
+### Concierge Chat
+
+- **Multi-provider front-end**: Conversational AI layer (OpenAI → Anthropic → Google fallback chain) — answers questions directly, only escalates to agents when real work is needed
+- **Command-aware**: Typos and near-miss commands caught locally via fuzzy matching (Levenshtein) before falling back to AI suggestion
+- **Runtime model switching**: `:chat model sonnet` switches the concierge provider/model on the fly
+- **Conversation export**: `:chat export` saves concierge history to JSON for analysis
+- **Token cost estimation**: Per-turn cost display after each concierge response
+
+### Agent & Model Management
+
 - **Per-agent model switching**: `hydra model claude=sonnet` to trade quality for speed/cost
 - **Interactive model picker**: Arrow-key browser with type-to-filter, discovers models via API/CLI, sets reasoning effort
-- **Per-command agent selection**: `agents=claude,gemini` to control which agents participate per-prompt
+- **Headless workers**: Background agent execution with claim-execute-report loop, per-agent permission modes
+- **Cross-model verification**: Route output through a paired verifier agent for correctness checks
+- **Agent terminal auto-launch**: Operator spawns Windows Terminal/PowerShell windows per agent head
+
+### Monitoring & Safety
+
 - **Token usage monitoring**: Reads Claude Code's stats cache, auto-switches models at critical levels
 - **Metrics dashboard**: Per-agent call counts, response times, estimated tokens, success rates
 - **Contingency planning**: When approaching rate limits, offers model switching, agent handoff, or progress saving
 - **Project-aware verification**: Auto-detects verification command by stack (or uses explicit config)
-- **Cross-model verification**: Route output through a paired verifier agent for correctness checks
-- **Spec-driven task anchoring**: Complex prompts generate a spec document to anchor all downstream work
+- **5-line status bar**: Persistent terminal footer with agent activity, token gauge, dispatch context, and rolling event ticker
+
+### Task & Session Management
+
 - **Checkpoint/resume**: Save and restore intermediate progress during long-running tasks
-- **Event-sourced mutation log**: Monotonic sequence numbers, typed categories, and full replay support
+- **Session fork/spawn**: Fork sessions to explore alternatives, spawn children for focused subtasks
+- **Session pause/resume**: Pause active sessions with reason tracking, resume with stale recovery
+- **Stale task detection**: Auto-detect tasks idle for 30+ minutes with `/tasks/stale` endpoint
 - **Atomic task claiming**: Claim tokens prevent race conditions in rapid parallel dispatch
+
+### Automation & CI
+
+- **Autonomous self-improvement**: 7-phase evolve pipeline with budget tracking, investigator self-healing, and knowledge accumulation
+- **Evolve suggestions backlog**: Persistent improvement ideas from rejected/deferred rounds, user input, and review sessions — interactive picker at session start, CLI management, Jaccard dedup
+- **Nightly automation**: Scheduled task processing with safety guardrails and review workflow
+- **GitHub integration**: PR creation from operator (`:pr create`), review flow PR option, repo detection, open PR listing — requires `gh` CLI
+
+### Platform & Infrastructure
+
+- **HTTP daemon**: Shared state management with event sourcing, auto-archiving, and cycle detection
+- **Event-sourced mutation log**: Monotonic sequence numbers, typed categories, and full replay support
 - **Git worktree isolation**: Per-task isolated filesystems for true parallel agent work
 - **Codex MCP integration**: Multi-turn context via JSON-RPC over stdio (when Codex MCP server available)
 - **Hydra MCP server**: Expose daemon as an MCP server so agents can self-coordinate
-- **Session fork/spawn**: Fork sessions to explore alternatives, spawn children for focused subtasks
-- **Session pause/resume**: Pause active sessions with reason tracking, resume with stale recovery
-- **Fast-path dispatch**: Simple prompts bypass council for lower latency single-agent handoffs
-- **Stale task detection**: Auto-detect tasks idle for 30+ minutes with `/tasks/stale` endpoint
 - **Ghost text prompts**: Claude Code CLI-style greyed-out placeholder hints that cycle contextually and disappear on keystroke
-- **Command-aware concierge**: Typos and near-miss commands are caught locally via fuzzy matching (Levenshtein) before falling back to AI suggestion
-- **Runtime model switching**: `:chat model sonnet` switches the concierge provider/model on the fly
-- **Conversation export**: `:chat export` saves concierge history to JSON for analysis
-- **Token cost estimation**: Per-turn cost display after each concierge response
-- **Headless workers**: Background agent execution with claim-execute-report loop, per-agent permission modes
-- **Autonomous self-improvement**: 7-phase evolve pipeline with budget tracking, investigator self-healing, and knowledge accumulation
-- **Nightly automation**: Scheduled task processing with safety guardrails and review workflow
-- **Virtual sub-agents**: Role-specialized agents (security-reviewer, test-writer, doc-generator, researcher) that resolve to physical agents for dispatch
-- **GitHub integration**: PR creation from operator (`:pr create`), review flow PR option, repo detection, open PR listing — requires `gh` CLI
-- **5-line status bar**: Persistent terminal footer with agent activity, token gauge, dispatch context, and rolling event ticker
-- **Agent terminal auto-launch**: Operator spawns Windows Terminal/PowerShell windows per agent head
-- **HTTP daemon**: Shared state management with event sourcing, auto-archiving, and cycle detection
 - **PowerShell-native**: Branded multi-terminal launcher with per-agent polling heads
 - **Project-agnostic**: Works with any Node.js, Rust, Go, or Python project
 
@@ -134,6 +155,8 @@ hydra/
     hydra-evolve-guardrails.mjs # Evolve safety guardrails
     hydra-evolve-investigator.mjs # Self-healing failure diagnosis
     hydra-evolve-knowledge.mjs # Knowledge accumulation across evolve rounds
+    hydra-evolve-suggestions.mjs # Suggestions backlog for evolve pipeline
+    hydra-evolve-suggestions-cli.mjs # CLI for managing evolve suggestions
     hydra-evolve-review.mjs  # Evolve round review and status
     hydra-github.mjs         # GitHub integration via gh CLI (PRs, repo detection)
     hydra-google.mjs         # Google Gemini API streaming client
@@ -174,6 +197,7 @@ hydra/
   test/
     hydra-agents.test.mjs                  # Agent registry + sub-agent tests
     hydra-concierge-providers.test.mjs     # Provider detection + fallback chain tests
+    hydra-evolve-suggestions.test.mjs      # Evolve suggestions backlog tests
     hydra-github.test.mjs                  # GitHub integration + parseRemoteUrl tests
     hydra-mcp.test.mjs                     # MCP client unit tests
     hydra-metrics.test.mjs                 # Metrics collection tests
@@ -200,6 +224,7 @@ hydra/
 | `npm run council` | Full multi-round deliberation |
 | `npm run dispatch` | Headless pipeline |
 | `npm run evolve` | Run autonomous self-improvement |
+| `npm run evolve:suggestions` | Manage evolve suggestions backlog |
 | `npm run nightly` | Run nightly task automation |
 | `npm run evolve:review` | Review evolve round results |
 | `npm run nightly:review` | Review nightly round results |
@@ -239,6 +264,44 @@ gh auth login
 ```
 
 When `gh` is installed, the evolve and nightly review flows automatically show a `[p]r` option alongside merge/skip/diff/delete.
+
+## Evolve Suggestions Backlog
+
+The evolve pipeline maintains a persistent backlog of improvement ideas sourced from rejected/deferred rounds, user input, and review sessions. At the start of each evolve session, pending suggestions are presented in an interactive picker.
+
+**How it works:**
+- Rejected evolve rounds with valid improvement text are auto-backlogged (configurable)
+- Deferred rounds can also auto-populate the backlog
+- Jaccard similarity deduplication prevents near-duplicate entries
+- Picking a suggestion skips RESEARCH + DELIBERATE phases — goes straight to PLAN
+- Suggestions track attempts, scores, and learnings across retries
+- Status lifecycle: `pending` → `exploring` → `completed` | `rejected` | `abandoned`
+- During review, `[r]etry` creates a suggestion from the rejected round
+
+**CLI** (`npm run evolve:suggestions`):
+| Subcommand | Description |
+|------------|-------------|
+| `list` | List suggestions (default: pending; `status=all` for all) |
+| `add` | Add a suggestion (interactive or `title=... area=...`) |
+| `remove <ID>` | Mark suggestion as abandoned |
+| `reset <ID>` | Reset suggestion back to pending |
+| `import` | Scan decision artifacts for retryable rounds |
+| `stats` | Show backlog statistics by status and area |
+
+**Config** (`hydra.config.json`):
+```json
+{
+  "evolve": {
+    "suggestions": {
+      "enabled": true,
+      "autoPopulateFromRejected": true,
+      "autoPopulateFromDeferred": true,
+      "maxPendingSuggestions": 50,
+      "maxAttemptsPerSuggestion": 3
+    }
+  }
+}
+```
 
 ## Documentation
 

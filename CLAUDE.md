@@ -28,6 +28,7 @@ npm start                   # Start the daemon (port 4173)
 npm run go                  # Launch operator console (interactive REPL)
 npm run council -- prompt="..." # Run council deliberation
 npm run evolve              # Run autonomous self-improvement
+npm run evolve:suggestions  # Manage evolve suggestions backlog
 npm run nightly             # Run nightly task automation
 ```
 
@@ -53,7 +54,7 @@ Operator Console (REPL)
 - **`hydra-operator.mjs`** — Interactive command center. 5 orchestration modes (auto, council, dispatch, smart, chat). Manages workers, status bar, concierge, model switching. This is the largest module (~115KB).
 - **`orchestrator-daemon.mjs`** — HTTP server with event-sourced state. Routes split into `daemon/read-routes.mjs` and `daemon/write-routes.mjs`. Handles task lifecycle, handoffs, sessions, worktrees.
 - **`hydra-agents.mjs`** — Agent registry. Each agent has CLI commands, invoke modes (interactive/nonInteractive/headless), task affinities, council roles. Contains `getActiveModel()`, task classification, best-agent routing.
-- **`hydra-config.mjs`** — Central config with `HYDRA_ROOT`, project detection, `loadHydraConfig()`/`saveHydraConfig()`, `getRoleConfig(roleName)`. Config file: `hydra.config.json`. Config sections include `github` (enabled, defaultBase, draft, labels, reviewers, prBodyFooter).
+- **`hydra-config.mjs`** — Central config with `HYDRA_ROOT`, project detection, `loadHydraConfig()`/`saveHydraConfig()`, `getRoleConfig(roleName)`. Config file: `hydra.config.json`. Config sections include `github` (enabled, defaultBase, draft, labels, reviewers, prBodyFooter), `evolve.suggestions` (enabled, autoPopulateFromRejected, autoPopulateFromDeferred, maxPendingSuggestions, maxAttemptsPerSuggestion).
 - **`hydra-council.mjs`** — 4-phase deliberation: propose (Claude) → critique (Gemini) → refine (Claude) → implement (Codex).
 - **`hydra-evolve.mjs`** — 7-phase autonomous improvement rounds with budget tracking, investigator self-healing, and knowledge accumulation.
 - **`hydra-concierge.mjs`** — Multi-provider conversational front-end (OpenAI → Anthropic → Google fallback chain). Detects `[DISPATCH]` intent to escalate. Enriched system prompt with git info, recent completions, active workers. Bidirectional daemon communication via `POST /events/push`. Exports `getActiveProvider()`, `getConciergeModelLabel()`, `switchConciergeModel()`, `exportConversation()`, `getRecentContext()`.
@@ -75,6 +76,8 @@ Operator Console (REPL)
   - `budget-tracker.mjs` — Base `BudgetTracker` class with configurable thresholds
   - `agent-executor.mjs` — Unified `executeAgent()` with stdin piping, stderr capture, progress ticking
   - `review-common.mjs` — Interactive review helpers: `handleBranchAction()` (with `[p]r` option when `gh` available), `loadLatestReport()`, `cleanBranches()`
+- **`hydra-evolve-suggestions.mjs`** — Persistent suggestions backlog for evolve pipeline. Stores improvement ideas from failed/deferred rounds, user input, and review sessions. Exports `loadSuggestions()`, `saveSuggestions()`, `addSuggestion()`, `updateSuggestion()`, `removeSuggestion()`, `getPendingSuggestions()`, `getSuggestionById()`, `searchSuggestions()`, `createSuggestionFromRound()`, `promptSuggestionPicker()`, `getSuggestionStats()`, `formatSuggestionsForPrompt()`. Storage: `docs/coordination/evolve/SUGGESTIONS.json`.
+- **`hydra-evolve-suggestions-cli.mjs`** — Standalone CLI for managing suggestions backlog. Subcommands: `list`, `add`, `remove`, `reset`, `import`, `stats`.
 - **`hydra-investigator.mjs`** — Re-exports from `hydra-evolve-investigator.mjs`. Self-healing failure diagnosis (shared).
 - **`hydra-knowledge.mjs`** — Re-exports from `hydra-evolve-knowledge.mjs`. Persistent knowledge base (shared).
 

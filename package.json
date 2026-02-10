@@ -27,6 +27,7 @@
     "evolve:status": "node lib/hydra-evolve-review.mjs status",
     "evolve:clean": "node lib/hydra-evolve-review.mjs clean",
     "evolve:knowledge": "node lib/hydra-evolve-review.mjs knowledge",
+    "evolve:suggestions": "node lib/hydra-evolve-suggestions-cli.mjs",
     "test": "node --test"
   },
   "dependencies": {
