@@ -90,12 +90,21 @@
     "windowTokenBudget": {
       "claude-opus-4-6": 2500000,
       "claude-sonnet-4-5-20250929": 7500000
+    },
+    "sessionBudget": 5000000,
+    "perTaskBudget": 500000,
+    "perAgentBudget": {
+      "claude": 3000000,
+      "gemini": 1000000,
+      "codex": 1000000
     }
   },
   "verification": {
     "onTaskDone": true,
     "command": "auto",
-    "timeoutMs": 60000
+    "timeoutMs": 60000,
+    "secretsScan": true,
+    "maxDiffLines": 10000
   },
   "stats": {
     "retentionDays": 30
@@ -216,7 +225,12 @@
         "evolve-researcher"
       ]
     },
-    "custom": {}
+    "custom": {},
+    "affinityLearning": {
+      "enabled": true,
+      "decayFactor": 0.9,
+      "minSampleSize": 5
+    }
   },
   "evolve": {
     "maxRounds": 3,
@@ -281,7 +295,9 @@
     "draft": false,
     "labels": [],
     "reviewers": [],
-    "prBodyFooter": ""
+    "prBodyFooter": "",
+    "requiredChecks": [],
+    "autolabel": {}
   },
   "forge": {
     "enabled": true,
@@ -353,14 +369,44 @@
     "perTaskTimeoutMin": 15,
     "handoffModel": "o4-mini"
   },
+  "workers": {
+    "permissionMode": "auto-edit",
+    "autoStart": true,
+    "pollIntervalMs": 1500,
+    "maxOutputBufferKB": 8,
+    "autoChain": true,
+    "retry": {
+      "maxAttempts": 3,
+      "backoff": {
+        "baseDelayMs": 5000,
+        "maxDelayMs": 60000
+      }
+    },
+    "deadLetter": {
+      "enabled": true
+    },
+    "concurrency": {
+      "maxInFlight": 3,
+      "adaptivePolling": true
+    }
+  },
   "providers": {
     "openai": {
-      "adminKey": null
+      "adminKey": null,
+      "tier": 3
     },
     "anthropic": {
-      "adminKey": null
+      "adminKey": null,
+      "tier": 1
     },
-    "google": {}
+    "google": {
+      "tier": "free"
+    },
+    "rateLimit": {
+      "openai": 60,
+      "anthropic": 50,
+      "google": 300
+    }
   },
   "doctor": {
     "enabled": true,
@@ -378,12 +424,72 @@
   "modelRecovery": {
     "enabled": true,
     "autoPersist": true,
-    "headlessFallback": true
+    "headlessFallback": true,
+    "circuitBreaker": {
+      "enabled": true,
+      "failureThreshold": 5,
+      "windowMs": 300000
+    }
   },
   "rateLimits": {
     "maxRetries": 3,
     "baseDelayMs": 5000,
     "maxDelayMs": 60000
+  },
+  "cache": {
+    "enabled": true,
+    "maxEntries": 1000,
+    "ttlSec": 300,
+    "negativeCache": {
+      "enabled": true,
+      "ttlSec": 180
+    }
+  },
+  "daemon": {
+    "snapshot": {
+      "everyNEvents": 500,
+      "retentionCount": 5
+    },
+    "retention": {
+      "maxEvents": 2000
+    }
+  },
+  "metrics": {
+    "slo": {
+      "claude": {
+        "maxP95Ms": 180000,
+        "maxErrorRate": 0.1
+      },
+      "gemini": {
+        "maxP95Ms": 120000,
+        "maxErrorRate": 0.15
+      },
+      "codex": {
+        "maxP95Ms": 300000,
+        "maxErrorRate": 0.1
+      }
+    },
+    "alerts": {
+      "enabled": true
+    }
+  },
+  "activity": {
+    "summarizeOnShutdown": true
+  },
+  "dispatch": {
+    "dryRun": false
+  },
+  "confirm": {
+    "perCommand": {
+      "clear": true,
+      "shutdown": true,
+      "cleanup": true
+    }
+  },
+  "eval": {
+    "corpusPaths": [
+      "test/golden/routing-corpus.json"
+    ]
   },
   "persona": {
     "enabled": true,
@@ -466,12 +572,5 @@
       ],
       "sessionTimeout": 300000
     }
-  },
-  "workers": {
-    "permissionMode": "auto-edit",
-    "autoStart": true,
-    "pollIntervalMs": 1500,
-    "maxOutputBufferKB": 8,
-    "autoChain": true
   }
 }

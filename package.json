@@ -32,6 +32,7 @@
     "tasks:review": "node lib/hydra-tasks-review.mjs review",
     "tasks:status": "node lib/hydra-tasks-review.mjs status",
     "tasks:clean": "node lib/hydra-tasks-review.mjs clean",
+    "eval": "node lib/hydra-eval.mjs",
     "test": "node --test"
   },
   "dependencies": {

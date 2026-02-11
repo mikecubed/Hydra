@@ -244,6 +244,7 @@ hydra/
 | `npm run tasks:review` | Review tasks runner branches |
 | `npm run evolve:review` | Review evolve round results |
 | `npm run nightly:review` | Review nightly round results |
+| `npm run eval` | Run routing evaluation against golden corpus |
 | `npm test` | Run unit + integration tests |
 
 ## Operator Commands
@@ -329,6 +330,7 @@ These commands are available inside the interactive operator console (`npm run g
 | `:cleanup` | Scan & clean stale branches, tasks, artifacts |
 | `:sync` | Sync HYDRA.md to agent instruction files |
 | `:confirm` | Show/toggle dispatch confirmations |
+| `:dry-run` | Toggle dry-run mode (preview dispatches without executing) |
 | `:shutdown` | Stop the daemon |
 | `:quit` | Exit operator console |
 | `!<prompt>` | Force dispatch (bypass concierge) |
