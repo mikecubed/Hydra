@@ -15,7 +15,7 @@
   H Y D R A
 ```
 
-Hydra coordinates three AI coding agents (Gemini CLI, Codex CLI, Claude Code) through a shared task queue, affinity-based routing, and multi-round deliberation. Built for Windows with PowerShell, zero external dependencies beyond Node.js and picocolors.
+Hydra coordinates three AI coding agents (Gemini CLI, Codex CLI, Claude Code) through a shared task queue, affinity-based routing, and multi-round deliberation. Built for Windows with PowerShell. Minimal dependencies: `picocolors`, `cross-spawn`, `@modelcontextprotocol/sdk`, `zod`. Optional: `@opentelemetry/api` for distributed tracing.
 
 ## Quick Start
 
@@ -98,7 +98,10 @@ pwsh -File E:/Dev/Hydra/bin/hydra.ps1
 - **Event-sourced mutation log**: Monotonic sequence numbers, typed categories, and full replay support
 - **Git worktree isolation**: Per-task isolated filesystems for true parallel agent work
 - **Codex MCP integration**: Multi-turn context via JSON-RPC over stdio (when Codex MCP server available)
-- **Hydra MCP server**: Expose Hydra as MCP server for Claude Code — `hydra_ask` invokes Gemini/Codex directly (no daemon needed), plus daemon tools for task queue/handoffs/council when running
+- **Hydra MCP server**: Official SDK-based MCP server (protocol 2025-03-26) with 12 tools, 5 resources (`hydra://config`, `hydra://metrics`, `hydra://agents`, `hydra://activity`, `hydra://status`), and 3 prompts. `hydra_ask` invokes Gemini/Codex directly (no daemon needed), plus daemon tools when running
+- **Streaming middleware**: Composable onion-style pipeline for provider API calls — rate limiting, circuit breaking, retry, usage tracking, header capture, telemetry, and latency measurement via PeakEWMA
+- **OTel GenAI tracing**: Optional distributed tracing using OpenTelemetry GenAI semantic conventions. Install `@opentelemetry/api` + your preferred exporter for traces in Jaeger, Grafana, Langfuse, or Arize Phoenix. Zero overhead when OTel not installed
+- **Heartbeat crash recovery**: Workers send periodic heartbeats during task execution. Daemon detects stale heartbeats and requeues tasks or moves to dead-letter queue after max attempts
 - **Ghost text prompts**: Claude Code CLI-style greyed-out placeholder hints that cycle contextually and disappear on keystroke
 - **PowerShell-native**: Branded multi-terminal launcher with per-agent polling heads
 - **Project-agnostic**: Works with any Node.js, Rust, Go, or Python project
@@ -174,7 +177,9 @@ hydra/
     hydra-github.mjs         # GitHub integration via gh CLI (PRs, repo detection)
     hydra-google.mjs         # Google Gemini API streaming client
     hydra-mcp.mjs            # MCP client for Codex (JSON-RPC over stdio)
-    hydra-mcp-server.mjs     # Hydra MCP server (9 tools, standalone + daemon modes)
+    hydra-mcp-server.mjs     # Hydra MCP server (12 tools + 5 resources + 3 prompts, SDK-based)
+    hydra-streaming-middleware.mjs # Composable middleware pipeline + PeakEWMA
+    hydra-telemetry.mjs      # OTel GenAI tracing (optional peer dependency)
     hydra-metrics.mjs        # Call metrics collection
     hydra-models.mjs         # Model discovery (API/CLI/config) and listing
     hydra-models-select.mjs  # Interactive model + reasoning effort picker

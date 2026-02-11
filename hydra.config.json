@@ -375,6 +375,8 @@
     "pollIntervalMs": 1500,
     "maxOutputBufferKB": 8,
     "autoChain": true,
+    "heartbeatIntervalMs": 30000,
+    "heartbeatTimeoutMs": 90000,
     "retry": {
       "maxAttempts": 3,
       "backoff": {
@@ -547,6 +549,9 @@
         "voice": "Maximum brevity. No pleasantries. Facts and actions only."
       }
     }
+  },
+  "telemetry": {
+    "enabled": true
   },
   "worktrees": {
     "enabled": false,
