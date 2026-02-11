@@ -1,27 +1,27 @@
 {
   "version": 2,
-  "mode": "performance",
+  "mode": "custom",
   "models": {
     "gemini": {
       "default": "gemini-3-pro-preview",
       "fast": "gemini-3-flash-preview",
       "cheap": "gemini-3-flash-preview",
-      "active": "default",
-      "reasoningEffort": "low"
+      "active": "gemini-3-flash-preview",
+      "reasoningEffort": null
     },
     "codex": {
       "default": "gpt-5.3-codex",
       "fast": "o4-mini",
       "cheap": "o4-mini",
       "active": "gpt-5.3-codex",
-      "reasoningEffort": "low"
+      "reasoningEffort": null
     },
     "claude": {
       "default": "claude-opus-4-6",
       "fast": "claude-sonnet-4-5-20250929",
       "cheap": "claude-haiku-4-5-20251001",
-      "active": "default",
-      "reasoningEffort": "low"
+      "active": "claude-opus-4-6",
+      "reasoningEffort": "standard"
     }
   },
   "aliases": {
