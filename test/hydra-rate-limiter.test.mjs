@@ -6,7 +6,7 @@ import {
   getRateLimitStats, resetRateLimiter,
   initConcurrency, acquireConcurrencySlot, tryAcquireConcurrencySlot,
   getConcurrencyStats,
-} from '../lib/hydra-rate-limiter.mjs';
+} from '../lib/hydra-rate-limits.mjs';
 
 describe('TokenBucket', () => {
   it('starts with full capacity', () => {

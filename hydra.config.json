@@ -402,7 +402,7 @@
       "tier": 1
     },
     "google": {
-      "tier": "free"
+      "tier": 1
     },
     "rateLimit": {
       "openai": 60,
