@@ -165,7 +165,7 @@
 
 | Attribute | Value |
 |---|---|
-| **Model ID** | `gpt-5.3-codex` |
+| **Model ID** | `gpt-5.2-codex` |
 | **Released** | February 5, 2026 |
 | **Context** | 400K (272K in + 128K out) |
 | **Max Output** | 128K tokens |
@@ -573,7 +573,7 @@
 
 | Preset | Model | Rationale |
 |---|---|---|
-| **default** | `gpt-5.3-codex` | #1 Terminal-Bench (77.3%), fastest (339 tok/s) |
+| **default** | `gpt-5.2-codex` | #1 Terminal-Bench (77.3%), fastest (339 tok/s) |
 | **fast** | `o4-mini` | $1.10/$4.40, SWE-bench 68.1%, great math |
 | **cheap** | `o4-mini` | Same model, best budget reasoning |
 | *alt-default* | `gpt-5.2` | When deep reasoning > speed (GPQA 93.2%) |
@@ -593,7 +593,7 @@
 |---|---|---|---|---|
 | **architect** | claude | `claude-opus-4-6` | adaptive (high) | Best abstract reasoning (ARC-AGI-2 68.8%), best SWE-bench |
 | **analyst** | gemini | `gemini-3-pro-preview` | thinking_level: HIGH | Best Arena ELO, GPQA 91.9%, 1M context |
-| **implementer** | codex | `gpt-5.3-codex` | high | Terminal-Bench SOTA, fastest flagship |
+| **implementer** | codex | `gpt-5.2-codex` | high | Terminal-Bench SOTA, fastest flagship |
 | **concierge** | codex | `gpt-5` | low | Fast streaming, broad knowledge, $1.25/$10 |
 | **investigator** | codex | `gpt-5.2` | xhigh | Best deep reasoning (GPQA 93.2%, FrontierMath 40.3%) |
 | **nightlyHandoff** | codex | `o4-mini` | low | Budget-friendly, decent SWE-bench 68.1%, great math |
@@ -610,7 +610,7 @@
 
 | Tier | Claude | Codex | Gemini |
 |---|---|---|---|
-| **performance** | opus-4-6 | gpt-5.3-codex | gemini-3-pro-preview |
+| **performance** | opus-4-6 | gpt-5.2-codex | gemini-3-pro-preview |
 | **balanced** | sonnet-4-5 | o4-mini | gemini-3-flash-preview |
 | **economy** | haiku-4-5 | o4-mini | gemini-3-flash-preview |
 

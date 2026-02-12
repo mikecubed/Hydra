@@ -40,7 +40,7 @@ describe('hydra-telemetry (no-op mode — OTel not installed)', () => {
   });
 
   it('startProviderSpan returns no-op span', async () => {
-    const span = await startProviderSpan('openai', 'gpt-5.3');
+    const span = await startProviderSpan('openai', 'gpt-5.2');
     assert.ok(span);
     assert.equal(span._noop, true);
   });

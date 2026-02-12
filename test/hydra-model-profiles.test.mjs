@@ -223,7 +223,7 @@ describe('query functions', () => {
 
   it('getShortName returns short names for known models', () => {
     assert.equal(getShortName('claude-opus-4-6'), 'opus');
-    assert.equal(getShortName('gpt-5.3-codex'), 'gpt-5.3');
+    assert.equal(getShortName('gpt-5.2-codex'), 'gpt-5.2c');
     assert.equal(getShortName('gemini-3-pro-preview'), 'pro');
     assert.equal(getShortName('nonexistent'), null);
   });

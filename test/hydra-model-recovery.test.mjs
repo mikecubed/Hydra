@@ -47,12 +47,12 @@ describe('detectModelError', () => {
     const result = {
       ok: false,
       output: '',
-      stderr: 'The model `gpt-5.3` does not exist or you do not have access to it.',
+      stderr: 'The model `gpt-5.2` does not exist or you do not have access to it.',
       error: 'Exit code 1',
     };
     const detection = detectModelError('codex', result);
     assert.equal(detection.isModelError, true);
-    assert.equal(detection.failedModel, 'gpt-5.3');
+    assert.equal(detection.failedModel, 'gpt-5.2');
   });
 
   it('detects Anthropic "model is not available" error', () => {
@@ -143,13 +143,13 @@ describe('detectModelError', () => {
 
 describe('getFallbackCandidates', () => {
   it('returns preset candidates excluding the failed model', () => {
-    const candidates = getFallbackCandidates('codex', 'gpt-5.3');
+    const candidates = getFallbackCandidates('codex', 'gpt-5.2-codex');
     assert.ok(Array.isArray(candidates));
     // Should have at least fast and cheap presets
     assert.ok(candidates.length > 0);
     // None should match the failed model
     for (const c of candidates) {
-      assert.notEqual(c.id.toLowerCase(), 'gpt-5.3');
+      assert.notEqual(c.id.toLowerCase(), 'gpt-5.2-codex');
     }
   });
 
@@ -165,10 +165,10 @@ describe('getFallbackCandidates', () => {
 
   it('returns empty array when all presets match failed model', () => {
     // Create a scenario where the failed model matches all presets
-    // codex default is gpt-5.3-codex, fast and cheap are both o4-mini
-    // If we fail on o4-mini AND gpt-5.3-codex is somehow also excluded... let's just test with a model
+    // codex default is gpt-5.2-codex, fast and cheap are both o4-mini
+    // If we fail on o4-mini AND gpt-5.2-codex is somehow also excluded... let's just test with a model
     // that happens to be all presets
-    const candidates = getFallbackCandidates('codex', 'gpt-5.3');
+    const candidates = getFallbackCandidates('codex', 'gpt-5.2-codex');
     // Should still have o4-mini variants
     assert.ok(candidates.length > 0);
   });

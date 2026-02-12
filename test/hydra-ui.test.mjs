@@ -95,8 +95,8 @@ test('shortModelName extracts Gemini model names', () => {
 
 test('shortModelName extracts OpenAI/Codex model names', () => {
   assert.equal(shortModelName('o4-mini'), 'o4-mini');
-  assert.equal(shortModelName('codex-5.3'), 'gpt-5.3');
-  assert.equal(shortModelName('gpt-5.3-codex'), 'gpt-5.3');
+  assert.equal(shortModelName('codex-5.2'), 'gpt-5.2c');
+  assert.equal(shortModelName('gpt-5.2-codex'), 'gpt-5.2c');
   assert.equal(shortModelName('gpt-5.2'), 'gpt-5.2');
   assert.equal(shortModelName('gpt-5'), 'gpt-5');
   assert.equal(shortModelName('gpt-4'), 'gpt-4');

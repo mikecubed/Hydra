@@ -98,10 +98,10 @@ node lib/hydra-models.mjs claude
 
 **Shorthand aliases:**
 - Gemini: `pro`, `flash`, `default`, `fast`
-- Codex: `gpt-5`, `gpt-5.3-codex`, `o4-mini`, `default`, `fast`, `cheap`
+- Codex: `gpt-5`, `gpt-5.2-codex`, `o4-mini`, `default`, `fast`, `cheap`
 - Claude: `opus`, `sonnet`, `haiku`, `default`, `fast`, `cheap`
 
-Legacy Codex aliases `codex-5.3` and `gpt-5.3` are auto-normalized to `gpt-5.3-codex`.
+Legacy Codex aliases `codex-5.2` and `gpt-5.2-codex` are auto-normalized to `gpt-5.2-codex`.
 
 **Reasoning effort** (Codex only — passed as `--reasoning-effort` CLI flag):
 - Levels: `low`, `medium`, `high`, `xhigh`
@@ -285,7 +285,7 @@ Exit code: 0 if normal/warning, 1 if critical.
       "active": "default"
     },
     "codex": {
-      "default": "gpt-5.3-codex",
+      "default": "gpt-5.2-codex",
       "fast": "o4-mini",
       "cheap": "o4-mini",
       "active": "default",
@@ -301,7 +301,7 @@ Exit code: 0 if normal/warning, 1 if critical.
   },
   "aliases": {
     "gemini": { "pro": "gemini-2.5-pro", "flash": "gemini-2.5-flash" },
-    "codex": { "gpt5": "gpt-5", "gpt-5": "gpt-5", "gpt-5.3-codex": "gpt-5.3-codex", "codex-5.3": "gpt-5.3-codex", "gpt-5.3": "gpt-5.3-codex", "o4-mini": "o4-mini" },
+    "codex": { "gpt5": "gpt-5", "gpt-5": "gpt-5", "gpt-5.2-codex": "gpt-5.2-codex", "codex-5.2": "gpt-5.2-codex", "gpt-5.3": "gpt-5.2-codex", "o4-mini": "o4-mini" },
     "claude": { "opus": "claude-opus-4-6", "sonnet": "claude-sonnet-4-5-20250929", "haiku": "claude-haiku-4-5-20251001" }
   },
   "modeTiers": {
