@@ -70,11 +70,11 @@ test('metrics: multiple calls accumulate correctly', () => {
   resetMetrics();
 
   for (let i = 0; i < 5; i++) {
-    const handle = recordCallStart('codex', 'gpt-5.3');
+    const handle = recordCallStart('codex', 'gpt-5.2-codex');
     recordCallComplete(handle, { stdout: 'output', stderr: '' });
   }
 
-  const handle = recordCallStart('codex', 'gpt-5.3');
+  const handle = recordCallStart('codex', 'gpt-5.2-codex');
   recordCallError(handle, 'network error');
 
   const agent = getAgentMetrics('codex');
