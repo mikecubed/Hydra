@@ -4,6 +4,21 @@
   "description": "Multi-agent AI orchestration system",
   "type": "module",
   "private": true,
+  "bin": {
+    "hydra": "./bin/hydra-cli.mjs",
+    "hydra-client": "./lib/orchestrator-client.mjs",
+    "hydra-daemon": "./lib/orchestrator-daemon.mjs"
+  },
+  "files": [
+    "bin/",
+    "lib/",
+    "docs/*.md",
+    "docs/research/*.md",
+    "hydra.config.json",
+    "recent-projects.json",
+    "CLAUDE.md",
+    "README.md"
+  ],
   "scripts": {
     "start": "node lib/orchestrator-daemon.mjs start",
     "stop": "node lib/orchestrator-client.mjs stop",
@@ -33,7 +48,33 @@
     "tasks:status": "node lib/hydra-tasks-review.mjs status",
     "tasks:clean": "node lib/hydra-tasks-review.mjs clean",
     "eval": "node lib/hydra-eval.mjs",
-    "test": "node --test"
+    "test": "node --test",
+    "package": "node -e \"require('fs').mkdirSync('dist', { recursive: true })\" && npm pack --pack-destination dist",
+    "package:dry-run": "npm pack --dry-run",
+    "build:exe": "node scripts/build-exe.mjs",
+    "build:exe:ci": "node scripts/build-exe.mjs --ci",
+    "install:global": "npm install -g .",
+    "uninstall:global": "npm uninstall -g hydra"
+  },
+  "pkg": {
+    "scripts": [
+      "bin/**/*.cjs",
+      "bin/**/*.mjs",
+      "lib/**/*.mjs"
+    ],
+    "assets": [
+      "bin/*.ps1",
+      "docs/*.md",
+      "docs/research/*.md",
+      "hydra.config.json",
+      "recent-projects.json",
+      "CLAUDE.md",
+      "README.md"
+    ]
+  },
+  "devDependencies": {
+    "@yao-pkg/pkg": "^6.13.1",
+    "esbuild": "^0.25.0"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.26.0",

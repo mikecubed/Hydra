@@ -23,14 +23,32 @@ Hydra coordinates three AI coding agents (Gemini CLI, Codex CLI, Claude Code) th
 # 1. Clone and install
 cd E:\Dev\Hydra
 npm install
+pwsh -File .\bin\install-hydra-cli.ps1
 
 # 2. Initialize for your project
 cd E:\Dev\YourProject
-node E:/Dev/Hydra/lib/orchestrator-client.mjs init
+hydra-client init
 
 # 3. Launch everything (daemon + 3 agent heads + operator)
-pwsh -File E:/Dev/Hydra/bin/hydra.ps1
+hydra --full
+
+# 4. Operator-only mode (recommended default)
+hydra
 ```
+
+## Standalone Windows EXE
+
+Build a single-file executable (no Node.js install required on target machine):
+
+```powershell
+npm install
+npm run build:exe
+.\dist\hydra.exe --help
+```
+
+Notes:
+- `hydra.exe` runs operator/daemon/client flows without external Node.
+- `hydra.exe --full` is intentionally disabled (PowerShell head-launch mode is repo install only).
 
 ## Features
 
@@ -144,12 +162,14 @@ pwsh -File E:/Dev/Hydra/bin/hydra.ps1
 ```
 hydra/
   bin/
+    hydra-cli.mjs            # npm global "hydra" command entrypoint
     hydra.ps1               # Main launcher (daemon + heads + operator)
     hydra-head.ps1           # Agent polling head
     hydra-launch.ps1         # Multi-terminal launcher
     hydra-stats.ps1          # Stats dashboard shortcut
     hydra-evolve.ps1         # Autonomous self-improvement launcher
     hydra-nightly.ps1        # Nightly task automation launcher
+    install-hydra-cli.ps1    # Global npm CLI installer/uninstaller
     install-hydra-profile.ps1 # PowerShell profile installer
   lib/
     daemon/
@@ -251,6 +271,11 @@ hydra/
 | `npm run nightly:review` | Review nightly round results |
 | `npm run eval` | Run routing evaluation against golden corpus |
 | `npm test` | Run unit + integration tests |
+| `npm run package` | Build installable tarball in `dist/` |
+| `npm run build:exe` | Build standalone Windows executable `dist/hydra.exe` |
+| `hydra` | Launch operator console (`mode=auto`) |
+| `hydra --full` | Launch daemon + heads + operator |
+| `hydra-client init` | Initialize current project coordination files |
 
 ## Operator Commands
 

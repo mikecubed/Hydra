@@ -30,23 +30,33 @@ cd E:\Dev\Hydra
 npm install
 ```
 
-This installs the sole dependency: `picocolors` for terminal colors.
-
-### 3. Verify Installation
+### 3. Install Hydra CLI Globally
 
 ```powershell
-# Check that the daemon can start
-node lib/orchestrator-daemon.mjs help
+# From this repo checkout
+pwsh -File .\bin\install-hydra-cli.ps1
 
-# Check agent availability
-node lib/sync.mjs doctor
+# Alternative:
+npm run install:global
 ```
 
-### 4. Initialize for Your Project
+This adds a real `hydra` command to your npm global bin (no PowerShell profile function required).
+
+### 4. Verify Installation
+
+```powershell
+# Check CLI wiring
+hydra --help
+
+# Check that the daemon can start
+node lib/orchestrator-daemon.mjs help
+```
+
+### 5. Initialize for Your Project
 
 ```powershell
 cd E:\Dev\YourProject
-node E:/Dev/Hydra/lib/orchestrator-client.mjs init
+hydra-client init
 ```
 
 This creates the `docs/coordination/` directory with:
@@ -54,15 +64,44 @@ This creates the `docs/coordination/` directory with:
 - `AI_SYNC_LOG.md` - Activity log
 - `AI_ORCHESTRATOR_EVENTS.ndjson` - Event stream
 
-### 5. (Optional) Install PowerShell Profile
+### 6. (Optional) Legacy PowerShell Profile Function
 
 ```powershell
 pwsh -File E:\Dev\Hydra\bin\install-hydra-profile.ps1
 ```
 
-This adds a `hydra` function to your PowerShell profile so you can run `hydra` from any directory.
+Use this only if you want the old profile-function based command. The global npm install already provides `hydra`.
 
 Uninstall: `pwsh -File E:\Dev\Hydra\bin\install-hydra-profile.ps1 -Uninstall`
+
+## Build an Installation Package
+
+Create a distributable tarball:
+
+```powershell
+npm run package
+```
+
+This emits `dist/hydra-<version>.tgz`. Install it on any machine with Node:
+
+```powershell
+npm install -g .\dist\hydra-<version>.tgz
+```
+
+## Build a True Standalone Windows EXE
+
+```powershell
+npm install
+npm run build:exe
+.\dist\hydra.exe --help
+```
+
+This produces a single-file binary at `dist/hydra.exe` that includes Node runtime + Hydra code.
+
+Notes:
+- No Node install is required on the target machine.
+- Standalone mode supports normal operator/daemon/client flows.
+- `--full` mode is disabled in standalone exe builds (PowerShell multi-terminal launcher is repo-install only).
 
 ## Integration with Existing Projects
 
