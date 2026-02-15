@@ -369,6 +369,20 @@
     "perTaskTimeoutMin": 15,
     "handoffModel": "o4-mini"
   },
+  "audit": {
+    "maxFiles": 200,
+    "categories": [
+      "dead-code",
+      "inconsistencies",
+      "architecture",
+      "security",
+      "tests",
+      "types"
+    ],
+    "reportDir": "docs/audit",
+    "timeout": 300000,
+    "economy": false
+  },
   "workers": {
     "permissionMode": "auto-edit",
     "autoStart": true,

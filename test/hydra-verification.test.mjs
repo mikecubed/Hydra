@@ -34,6 +34,25 @@ test('chooseAutoVerificationCommand falls back to language defaults', () => {
   });
 });
 
+test('chooseAutoVerificationCommand uses npm test when test script exists', () => {
+  const selected = chooseAutoVerificationCommand({
+    npmScripts: { test: 'node --test' },
+  });
+
+  assert.deepEqual(selected, {
+    command: 'npm test',
+    reason: 'Detected package.json script: test',
+  });
+});
+
+test('chooseAutoVerificationCommand skips npm-init placeholder test script', () => {
+  const selected = chooseAutoVerificationCommand({
+    npmScripts: { test: 'echo \"Error: no test specified\" && exit 1' },
+  });
+
+  assert.equal(selected, null);
+});
+
 test('resolveVerificationPlan uses explicit config command', () => {
   const plan = resolveVerificationPlan(
     'unused',
@@ -82,4 +101,3 @@ test('resolveVerificationPlan returns disabled auto plan when no signal matches'
   assert.equal(plan.source, 'auto');
   assert.match(plan.reason, /No project-specific verification command/i);
 });
-

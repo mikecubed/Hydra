@@ -7,7 +7,6 @@ import assert from 'node:assert/strict';
 import fs from 'fs';
 import path from 'path';
 import os from 'os';
-import spawn from 'cross-spawn';
 
 import { buildSafetyPrompt } from '../lib/hydra-shared/guardrails.mjs';
 import { stageAndCommit, git } from '../lib/hydra-shared/git-ops.mjs';
@@ -72,13 +71,13 @@ describe('stageAndCommit — trailers', () => {
   beforeEach(() => {
     tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'hydra-attr-test-'));
     // Init a git repo
-    spawn.sync('git', ['init'], { cwd: tmpDir });
-    spawn.sync('git', ['config', 'user.email', 'test@test.com'], { cwd: tmpDir });
-    spawn.sync('git', ['config', 'user.name', 'Test'], { cwd: tmpDir });
+    git(['init'], tmpDir);
+    git(['config', 'user.email', 'test@test.com'], tmpDir);
+    git(['config', 'user.name', 'Test'], tmpDir);
     // Initial commit so we have a HEAD
     fs.writeFileSync(path.join(tmpDir, 'init.txt'), 'init');
-    spawn.sync('git', ['add', '-A'], { cwd: tmpDir });
-    spawn.sync('git', ['commit', '-m', 'init'], { cwd: tmpDir });
+    git(['add', '-A'], tmpDir);
+    git(['commit', '-m', 'init'], tmpDir);
   });
 
   afterEach(() => {

@@ -1,8 +1,21 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { spawnSync } from 'child_process';
 import { MCPClient } from '../lib/hydra-mcp.mjs';
 
-test('MCPClient starts and communicates via JSON-RPC with a mock server', { timeout: 15_000 }, async () => {
+const PIPED_STDIO_SUPPORTED = (() => {
+  try {
+    const r = spawnSync(process.execPath, ['-e', 'process.exit(0)'], { stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true });
+    return !(r.error && String(r.error?.code || '') === 'EPERM');
+  } catch {
+    return false;
+  }
+})();
+
+test('MCPClient starts and communicates via JSON-RPC with a mock server', {
+  timeout: 15_000,
+  skip: PIPED_STDIO_SUPPORTED ? false : 'Environment forbids piped stdio (child_process pipe EPERM)',
+}, async () => {
   // Use node as a mock MCP server that echoes JSON-RPC
   const script = `
     process.stdin.setEncoding('utf8');
@@ -52,7 +65,10 @@ test('MCPClient starts and communicates via JSON-RPC with a mock server', { time
   assert.ok(!client.isAlive());
 });
 
-test('MCPClient handles process exit gracefully', { timeout: 10_000 }, async () => {
+test('MCPClient handles process exit gracefully', {
+  timeout: 10_000,
+  skip: PIPED_STDIO_SUPPORTED ? false : 'Environment forbids piped stdio (child_process pipe EPERM)',
+}, async () => {
   const client = new MCPClient(process.execPath, ['-e', 'process.exit(0)']);
 
   // Start will fail because process exits immediately after init request
