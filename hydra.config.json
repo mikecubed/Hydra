@@ -132,6 +132,15 @@
       }
     ]
   },
+  "selfAwareness": {
+    "enabled": true,
+    "injectIntoConcierge": true,
+    "includeSnapshot": true,
+    "includeIndex": true,
+    "snapshotMaxLines": 80,
+    "indexMaxChars": 7000,
+    "indexRefreshMs": 300000
+  },
   "roles": {
     "architect": {
       "agent": "claude",
