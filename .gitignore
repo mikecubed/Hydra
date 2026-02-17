@@ -5,3 +5,6 @@ docs/coordination/
 .env
 nul
 /docs/AUDIT_REPORT.md
+.build-exe/
+.pkg-cache/
+dist/

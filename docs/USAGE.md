@@ -6,17 +6,20 @@
 ```powershell
 node lib/orchestrator-daemon.mjs start [host=127.0.0.1] [port=4173]
 # or: npm start
+# or: hydra-daemon start
 ```
 
 ### Check Status
 ```powershell
 node lib/orchestrator-daemon.mjs status [url=http://127.0.0.1:4173]
+# or: hydra-daemon status
 ```
 
 ### Stop Daemon
 ```powershell
 node lib/orchestrator-daemon.mjs stop [url=http://127.0.0.1:4173]
 # or: npm run stop
+# or: hydra-daemon stop
 ```
 
 ## Client Commands
@@ -444,7 +447,28 @@ The `aliases` section maps shorthand names to full model IDs per agent. These ar
 - `mcp.codex.args=["mcp-server"]`: Arguments for the MCP server command
 - `mcp.codex.sessionTimeout=300000`: Idle timeout (ms) before auto-closing the MCP server
 
-## PowerShell Launcher
+## Hydra CLI (Global Install)
+
+After running `pwsh -File .\bin\install-hydra-cli.ps1` (or `npm run install:global`), use:
+
+```powershell
+hydra                                 # operator (mode=auto)
+hydra --prompt "Fix flaky tests"      # one-shot prompt
+hydra --mode smart --prompt "..."     # operator options (maps to key=value)
+hydra --full                          # full PowerShell launcher (daemon + heads + operator)
+hydra-client init                     # initialize docs/coordination in current project
+hydra-daemon status                   # daemon utility binary
+```
+
+Standalone exe build:
+
+```powershell
+npm run build:exe
+.\dist\hydra.exe --help
+.\dist\hydra.exe --prompt "triage failing tests"
+```
+
+## Legacy PowerShell Launcher
 
 Full multi-terminal launch:
 

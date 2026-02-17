@@ -4,6 +4,21 @@
   "description": "Multi-agent AI orchestration system",
   "type": "module",
   "private": true,
+  "bin": {
+    "hydra": "./bin/hydra-cli.mjs",
+    "hydra-client": "./lib/orchestrator-client.mjs",
+    "hydra-daemon": "./lib/orchestrator-daemon.mjs"
+  },
+  "files": [
+    "bin/",
+    "lib/",
+    "docs/*.md",
+    "docs/research/*.md",
+    "hydra.config.json",
+    "recent-projects.json",
+    "CLAUDE.md",
+    "README.md"
+  ],
   "scripts": {
     "start": "node lib/orchestrator-daemon.mjs start",
     "stop": "node lib/orchestrator-client.mjs stop",
@@ -19,6 +34,11 @@
     "council": "node lib/hydra-council.mjs",
     "dispatch": "node lib/hydra-dispatch.mjs",
     "nightly": "node lib/hydra-nightly.mjs",
+    "audit": "node lib/hydra-audit.mjs",
+    "actualize": "node lib/hydra-actualize.mjs",
+    "actualize:review": "node lib/hydra-actualize-review.mjs review",
+    "actualize:status": "node lib/hydra-actualize-review.mjs status",
+    "actualize:clean": "node lib/hydra-actualize-review.mjs clean",
     "nightly:review": "node lib/hydra-nightly-review.mjs review",
     "nightly:status": "node lib/hydra-nightly-review.mjs status",
     "nightly:clean": "node lib/hydra-nightly-review.mjs clean",
@@ -33,7 +53,34 @@
     "tasks:status": "node lib/hydra-tasks-review.mjs status",
     "tasks:clean": "node lib/hydra-tasks-review.mjs clean",
     "eval": "node lib/hydra-eval.mjs",
-    "test": "node --test"
+    "test": "node --test",
+    "test:report": "node --test --test-reporter=tap --test-reporter-destination=docs/coordination/test-results.tap",
+    "package": "node -e \"require('fs').mkdirSync('dist', { recursive: true })\" && npm pack --pack-destination dist",
+    "package:dry-run": "npm pack --dry-run",
+    "build:exe": "node scripts/build-exe.mjs",
+    "build:exe:ci": "node scripts/build-exe.mjs --ci",
+    "install:global": "npm install -g .",
+    "uninstall:global": "npm uninstall -g hydra"
+  },
+  "pkg": {
+    "scripts": [
+      "bin/**/*.cjs",
+      "bin/**/*.mjs",
+      "lib/**/*.mjs"
+    ],
+    "assets": [
+      "bin/*.ps1",
+      "docs/*.md",
+      "docs/research/*.md",
+      "hydra.config.json",
+      "recent-projects.json",
+      "CLAUDE.md",
+      "README.md"
+    ]
+  },
+  "devDependencies": {
+    "@yao-pkg/pkg": "^6.13.1",
+    "esbuild": "^0.25.0"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.26.0",

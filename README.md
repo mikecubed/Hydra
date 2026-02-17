@@ -23,14 +23,32 @@ Hydra coordinates three AI coding agents (Gemini CLI, Codex CLI, Claude Code) th
 # 1. Clone and install
 cd E:\Dev\Hydra
 npm install
+pwsh -File .\bin\install-hydra-cli.ps1
 
 # 2. Initialize for your project
 cd E:\Dev\YourProject
-node E:/Dev/Hydra/lib/orchestrator-client.mjs init
+hydra-client init
 
 # 3. Launch everything (daemon + 3 agent heads + operator)
-pwsh -File E:/Dev/Hydra/bin/hydra.ps1
+hydra --full
+
+# 4. Operator-only mode (recommended default)
+hydra
 ```
+
+## Standalone Windows EXE
+
+Build a single-file executable (no Node.js install required on target machine):
+
+```powershell
+npm install
+npm run build:exe
+.\dist\hydra.exe --help
+```
+
+Notes:
+- `hydra.exe` runs operator/daemon/client flows without external Node.
+- `hydra.exe --full` is intentionally disabled (PowerShell head-launch mode is repo install only).
 
 ## Features
 
@@ -144,12 +162,15 @@ pwsh -File E:/Dev/Hydra/bin/hydra.ps1
 ```
 hydra/
   bin/
+    hydra-cli.mjs            # npm global "hydra" command entrypoint
     hydra.ps1               # Main launcher (daemon + heads + operator)
     hydra-head.ps1           # Agent polling head
     hydra-launch.ps1         # Multi-terminal launcher
     hydra-stats.ps1          # Stats dashboard shortcut
     hydra-evolve.ps1         # Autonomous self-improvement launcher
     hydra-nightly.ps1        # Nightly task automation launcher
+    hydra-audit.ps1          # Background audit runner (analysis only)
+    install-hydra-cli.ps1    # Global npm CLI installer/uninstaller
     install-hydra-profile.ps1 # PowerShell profile installer
   lib/
     daemon/
@@ -183,6 +204,7 @@ hydra/
     hydra-metrics.mjs        # Call metrics collection
     hydra-models.mjs         # Model discovery (API/CLI/config) and listing
     hydra-models-select.mjs  # Interactive model + reasoning effort picker
+    hydra-audit.mjs          # Multi-agent code audit and prioritized report generator
     hydra-nightly.mjs        # Nightly 5-phase pipeline (scan/discover/prioritize/execute/report)
     hydra-nightly-discovery.mjs # AI-powered task suggestion for nightly
     hydra-nightly-review.mjs # Nightly review with smart merge
@@ -245,12 +267,18 @@ hydra/
 | `npm run evolve` | Run autonomous self-improvement |
 | `npm run evolve:suggestions` | Manage evolve suggestions backlog |
 | `npm run nightly` | Run nightly task automation |
+| `npm run audit` | Run analysis-only multi-agent code audit |
 | `npm run tasks` | Scan & execute TODO/FIXME/issues autonomously |
 | `npm run tasks:review` | Review tasks runner branches |
 | `npm run evolve:review` | Review evolve round results |
 | `npm run nightly:review` | Review nightly round results |
 | `npm run eval` | Run routing evaluation against golden corpus |
 | `npm test` | Run unit + integration tests |
+| `npm run package` | Build installable tarball in `dist/` |
+| `npm run build:exe` | Build standalone Windows executable `dist/hydra.exe` |
+| `hydra` | Launch operator console (`mode=auto`) |
+| `hydra --full` | Launch daemon + heads + operator |
+| `hydra-client init` | Initialize current project coordination files |
 
 ## Operator Commands
 
@@ -499,6 +527,32 @@ node lib/hydra-nightly.mjs --dry-run               # scan + prioritize only
 node lib/hydra-nightly.mjs --no-discovery          # skip AI discovery
 node lib/hydra-nightly.mjs --interactive           # interactive task selection
 node lib/hydra-nightly.mjs max-tasks=3 max-hours=2 # override limits
+```
+
+## Audit Runner
+
+Analysis-only code audit that fans out category reviews to multiple agents and writes a prioritized punch list to `docs/audit/`.
+
+**Config** (`hydra.config.json`):
+```json
+{
+  "audit": {
+    "maxFiles": 200,
+    "categories": ["dead-code", "inconsistencies", "architecture", "security", "tests", "types"],
+    "reportDir": "docs/audit",
+    "timeout": 300000,
+    "economy": false
+  }
+}
+```
+
+**CLI flags:**
+```bash
+node lib/hydra-audit.mjs                                  # defaults from config
+node lib/hydra-audit.mjs project=E:/Dev/SideQuest         # target another project
+node lib/hydra-audit.mjs categories=security,tests        # category subset
+node lib/hydra-audit.mjs agents=gemini,claude --economy   # agent subset + cheap models
+node lib/hydra-audit.mjs max-files=300 timeout=420000     # override scan cap + per-agent timeout
 ```
 
 ## Tasks Runner

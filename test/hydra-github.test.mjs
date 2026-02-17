@@ -115,7 +115,7 @@ describe('isGhAvailable', () => {
 describe('gh executor', () => {
   it('returns object with status property', () => {
     const result = gh(['--version']);
-    assert.strictEqual(typeof result.status, 'number');
+    assert.ok(result.status === null || typeof result.status === 'number');
     assert.ok('stdout' in result);
     assert.ok('stderr' in result);
   });

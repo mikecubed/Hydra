@@ -235,6 +235,27 @@ test('/verify and /task/update report enabled verification when verify script is
   assert.equal(update.json.verification?.command, 'npm run verify');
 });
 
+test('GET /self returns a structured snapshot with project root and models', { timeout: 60_000 }, async (t) => {
+  const projectRoot = createTempProject({
+    name: 'hydra-it-self',
+    private: true,
+    type: 'module',
+  });
+  let daemon = null;
+  t.after(async () => {
+    await stopDaemon(daemon);
+    await removeDirBestEffort(projectRoot);
+  });
+  daemon = await startDaemon(projectRoot);
+
+  const self = await requestJson(daemon.baseUrl, 'GET', '/self');
+  assert.equal(self.response.status, 200);
+  assert.equal(self.json?.ok, true);
+  assert.ok(self.json?.self);
+  assert.equal(self.json.self.project?.root, projectRoot);
+  assert.ok(self.json.self.models, 'Should include model summary');
+});
+
 // ── Phase 1: Event-Sourced Mutation Log ─────────────────────────────────────
 
 test('events have monotonic seq numbers and category fields', { timeout: 60_000 }, async (t) => {

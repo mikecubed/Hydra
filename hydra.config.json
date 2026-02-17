@@ -13,15 +13,15 @@
       "default": "gpt-5.2-codex",
       "fast": "o4-mini",
       "cheap": "o4-mini",
-      "active": "gpt-5.2-codex",
+      "active": "gpt-5.2",
       "reasoningEffort": null
     },
     "claude": {
-      "default": "claude-opus-4-6",
+      "default": "claude-sonnet-4-6",
       "fast": "claude-sonnet-4-5-20250929",
       "cheap": "claude-haiku-4-5-20251001",
-      "active": "claude-opus-4-6",
-      "reasoningEffort": "standard"
+      "active": "claude-sonnet-4-6",
+      "reasoningEffort": null
     }
   },
   "aliases": {
@@ -132,6 +132,15 @@
       }
     ]
   },
+  "selfAwareness": {
+    "enabled": true,
+    "injectIntoConcierge": true,
+    "includeSnapshot": true,
+    "includeIndex": true,
+    "snapshotMaxLines": 80,
+    "indexMaxChars": 7000,
+    "indexRefreshMs": 300000
+  },
   "roles": {
     "architect": {
       "agent": "claude",
@@ -225,7 +234,42 @@
         "evolve-researcher"
       ]
     },
-    "custom": {},
+    "custom": {
+      "ux-architect": {
+        "baseAgent": "claude",
+        "displayName": "Sensory Ux Architect",
+        "label": "Sensory Ux Architect (claude)",
+        "strengths": [
+          "Mobile-First Responsive Design",
+          "Framer Motion & Micro-interactions",
+          "Information Architecture (Faceted Search)",
+          "Accessibility & Dark Mode (OKLCH)",
+          "Behavioral Design (Habit Loops)"
+        ],
+        "weaknesses": [
+          "scope-limited"
+        ],
+        "tags": [
+          "ui-ux-design",
+          "interaction-engineering",
+          "conversion-optimization"
+        ],
+        "taskAffinity": {
+          "planning": 0.5,
+          "architecture": 0.8,
+          "review": 0.6,
+          "refactor": 0.5,
+          "implementation": 0.7,
+          "analysis": 0.6,
+          "testing": 0.4,
+          "research": 0.5,
+          "documentation": 0.4,
+          "security": 0.1
+        },
+        "rolePrompt": "You are a specialized agent for: UI/UX design expert for mobile-first responsive web apps. Deep domain expertise in rating/review/community platforms (Leafly, Untappd, Vivino, Letterboxd, IMDB, Yelp, RateBeer, Goodreads, TripAdvisor, Weedmaps, AllBud).\n\nCANNABIS/HEMP UX: Strain review platform conventions, terpene profile visualization, cannabinoid breakdowns, COA display, potency indicators, indica/sativa spectrum, effect intensity mapping, vendor trust/verification UX (lab badges, verified purchases, community voting), strain discovery funnels, \"help me choose\" wizards, recommendation engines, comparison tools, age gates, compliance disclaimers.\n\nRESPONSIVE DESIGN: 320px-2560px breakpoints, touch targets (44px min), thumb reach maps, safe area insets, fluid grids, container queries, progressive disclosure, mobile sheets vs desktop dialogs, landscape/tablet/foldable edge cases.\n\nREVIEW/RATING UX: Friction reduction, rating scale psychology (1-5 vs 1-10 vs thumbs), photo upload flows, structured vs freeform input, inline editing, draft autosave, smart defaults, step-by-step guided flows, progress indicators.\n\nUSER FLOW OPTIMIZATION: Task completion funnels, onboarding conversion, cognitive load reduction, Fitts's law, information scent, progressive profiling, skeleton loading, optimistic updates, above-the-fold prioritization.\n\nINFORMATION ARCHITECTURE: Card layouts, filter/sort UX, infinite scroll vs pagination, faceted search, comparison views, data-dense dashboards, gamification loops, trust signals, social proof, moderation UX, notification design.\n\nCONVERSION & GROWTH: Funnel analysis, A/B testing hypotheses, CTA hierarchy, premium upsell moments, time-to-first-value reduction, streak mechanics, habit loops (trigger-action-reward-investment), freemium gating UX, upgrade prompts, review submission conversion, viral loops, share mechanics, embeddable widgets, referral UX.\n\nANIMATION & MOTION: Micro-interactions (button feedback, toggles, shimmer, confetti, error shakes), page transitions, staggered reveals, scroll-driven animations, gesture motion (swipe, pull-to-refresh, drag-reorder, pinch-zoom), Framer Motion (layout animations, AnimatePresence, spring physics, shared layout IDs), 150-300ms micro / 300-500ms macro timing, GPU-accelerated props, reduced-motion respect, gamification motion (XP popups, level-ups, badge unlocks, streak pulses).\n\nACCESSIBILITY: WCAG 2.1 AA, screen readers, keyboard nav, color contrast, focus management. DARK MODE: OKLCH color, elevation via luminance. DESIGN SYSTEMS: Component APIs, variant systems, spacing/typography scales.\n\nSTACK: Next.js App Router, shadcn/ui (Radix), Tailwind CSS v4, React Hook Form, Framer Motion, sm/md/lg/xl/2xl breakpoints.\n\nBEHAVIORAL: Systematic analysis, adapts to project constraints. References Nielsen's 10 heuristics and Shneiderman's 8 golden rules. Considers full device spectrum. Data-driven reasoning — thinks in conversion rates, task completion time, error rates, satisfaction scores. Self-evolving: synthesizes cross-platform insights, refines models based on outcomes.. Follow best practices and provide structured, actionable output.",
+        "enabled": true
+      }
+    },
     "affinityLearning": {
       "enabled": true,
       "decayFactor": 0.9,
@@ -368,6 +412,20 @@
     },
     "perTaskTimeoutMin": 15,
     "handoffModel": "o4-mini"
+  },
+  "audit": {
+    "maxFiles": 200,
+    "categories": [
+      "dead-code",
+      "inconsistencies",
+      "architecture",
+      "security",
+      "tests",
+      "types"
+    ],
+    "reportDir": "docs/audit",
+    "timeout": 300000,
+    "economy": false
   },
   "workers": {
     "permissionMode": "auto-edit",
