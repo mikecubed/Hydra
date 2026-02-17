@@ -78,6 +78,41 @@
 
 ---
 
+#### Claude Sonnet 4.6
+
+| Attribute | Value |
+|---|---|
+| **Model ID** | `claude-sonnet-4-6` |
+| **Released** | February 2026 |
+| **Context** | 200K (1M beta) |
+| **Max Output** | 64K tokens |
+| **Pricing** | $3 / $15 per 1M (in/out) |
+| **Speed** | ~82 tok/s |
+| **TTFT** | ~1.50s |
+| **Thinking** | Adaptive (same generation as Opus 4.6) |
+
+**Key Benchmarks (estimates):**
+
+| Benchmark | Score |
+|---|---|
+| SWE-bench Verified | ~79.2% |
+| GPQA Diamond | ~87.4% |
+| LiveCodeBench | ~72% |
+
+**Strengths:**
+- Same generation as Opus 4.6 with adaptive thinking
+- Strong coding at 40% lower cost than Opus
+- Good balance of speed and quality for agentic tasks
+- 1M context (beta)
+
+**Weaknesses:**
+- Lower max output than Opus (64K vs 128K)
+- Not for highest-complexity abstract reasoning (use Opus 4.6)
+
+**Best For:** General agentic coding, balanced workloads, architect/implementer role, cost-conscious pipelines.
+
+---
+
 #### Claude Sonnet 4.5
 
 | Attribute | Value |
@@ -457,16 +492,16 @@
 
 ### Coding Benchmarks (Flagship Models)
 
-| Benchmark | Opus 4.6 | GPT-5.3-Codex | GPT-5.2 | Gemini 3 Pro | Gemini 3 Flash |
-|---|---|---|---|---|---|
-| SWE-bench Verified | **80.8%** | -- | 80.0% | 76.2% | 78.0% |
-| SWE-bench Pro | -- | **56.8%** | 55.6% | -- | -- |
-| Terminal-Bench 2.0 | 65.4% | **77.3%** | -- | 54.2% | -- |
-| HumanEval | **97.6%** | -- | -- | -- | -- |
-| LiveCodeBench Elo | -- | -- | -- | **2,439** | -- |
-| LiveCodeBench v6 | -- | -- | -- | **91.7%** | -- |
-| Aider Polyglot | 89.4% (4.5) | -- | -- | 82.2% | **95.2%** |
-| Chatbot Arena Coding | **~1,510** | -- | ~1,480 | ~1,470 | -- |
+| Benchmark | Opus 4.6 | Sonnet 4.6 | GPT-5.3-Codex | GPT-5.2 | Gemini 3 Pro | Gemini 3 Flash |
+|---|---|---|---|---|---|---|
+| SWE-bench Verified | **80.8%** | ~79.2% | -- | 80.0% | 76.2% | 78.0% |
+| SWE-bench Pro | -- | -- | **56.8%** | 55.6% | -- | -- |
+| Terminal-Bench 2.0 | 65.4% | -- | **77.3%** | -- | 54.2% | -- |
+| HumanEval | **97.6%** | -- | -- | -- | -- | -- |
+| LiveCodeBench Elo | -- | -- | -- | -- | **2,439** | -- |
+| LiveCodeBench v6 | -- | ~72% | -- | -- | **91.7%** | -- |
+| Aider Polyglot | 89.4% (4.5) | -- | -- | -- | 82.2% | **95.2%** |
+| Chatbot Arena Coding | **~1,510** | -- | -- | ~1,480 | ~1,470 | -- |
 
 ### Reasoning Benchmarks
 
@@ -565,9 +600,10 @@
 
 | Preset | Model | Rationale |
 |---|---|---|
-| **default** | `claude-opus-4-6` | Best reasoning, #1 SWE-bench, #1 agentic |
-| **fast** | `claude-sonnet-4-5-20250929` | 40% cheaper, fast, SWE-bench 77.2% |
+| **default** | `claude-sonnet-4-6` | Same generation as Opus 4.6, adaptive thinking, 40% cheaper |
+| **fast** | `claude-sonnet-4-5-20250929` | Proven, SWE-bench 77.2%, extended thinking |
 | **cheap** | `claude-haiku-4-5-20251001` | 5x cheaper, SWE-bench 73.3%, blazing fast |
+| *performance* | `claude-opus-4-6` | Best reasoning, ARC-AGI-2 #1 — select via model picker |
 
 #### Codex Agent
 
@@ -591,7 +627,7 @@
 
 | Role | Agent | Model | Reasoning | Rationale |
 |---|---|---|---|---|
-| **architect** | claude | `claude-opus-4-6` | adaptive (high) | Best abstract reasoning (ARC-AGI-2 68.8%), best SWE-bench |
+| **architect** | claude | `claude-sonnet-4-6` (default) | adaptive | Strong agentic coding at 40% lower cost; Opus available for highest-complexity |
 | **analyst** | gemini | `gemini-3-pro-preview` | thinking_level: HIGH | Best Arena ELO, GPQA 91.9%, 1M context |
 | **implementer** | codex | `gpt-5.2-codex` | high | Terminal-Bench SOTA, fastest flagship |
 | **concierge** | codex | `gpt-5` | low | Fast streaming, broad knowledge, $1.25/$10 |
