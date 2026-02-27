@@ -6,8 +6,8 @@
       "default": "gemini-3-pro-preview",
       "fast": "gemini-3-flash-preview",
       "cheap": "gemini-3-flash-preview",
-      "active": "gemini-3-flash-preview",
-      "reasoningEffort": null
+      "active": "gemini-3-pro-preview",
+      "reasoningEffort": "deep"
     },
     "codex": {
       "default": "gpt-5.2-codex",
@@ -178,26 +178,26 @@
       "models": [
         "claude-sonnet-4-6",
         "claude-opus-4-6",
-        "gpt-5.2-codex"
+        "gpt-5.3-codex"
       ],
       "reasoningEffort": null,
       "note": "Strong coding + agentic at 40% lower cost than Opus; Opus available for highest-complexity tasks"
     },
     "analyst": {
       "models": [
-        "gemini-3-pro-preview",
+        "gemini-3.1-pro-preview",
         "claude-opus-4-6"
       ],
       "reasoningEffort": null,
-      "note": "Best Arena ELO (1,492), GPQA 91.9%, 1M native context"
+      "note": "Latest SOTA reasoning model, GPQA 91.9%, 1M native context"
     },
     "implementer": {
       "models": [
-        "gpt-5.2-codex",
+        "gpt-5.3-codex",
         "claude-sonnet-4-5-20250929"
       ],
       "reasoningEffort": null,
-      "note": "Terminal-Bench SOTA (77.3%), fastest flagship (339 tok/s)"
+      "note": "Terminal-Bench SOTA, ~25% faster than 5.2 (424 tok/s)"
     },
     "concierge": {
       "models": [
