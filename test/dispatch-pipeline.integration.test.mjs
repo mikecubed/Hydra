@@ -1,5 +1,8 @@
 import { describe, it, test } from 'node:test';
 import assert from 'node:assert/strict';
+import { promises as fs } from 'node:fs';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 
 import { classifyPrompt, selectTandemPair } from '../lib/hydra-utils.mjs';
 import {
@@ -10,6 +13,24 @@ import {
 } from './helpers/mock-agent.mjs';
 
 const ALL_AGENTS = ['claude', 'gemini', 'codex'];
+const EXPECTED_TANDEM_PAIRS = {
+  planning: { lead: 'claude', follow: 'codex' },
+  architecture: { lead: 'claude', follow: 'gemini' },
+  review: { lead: 'gemini', follow: 'claude' },
+  refactor: { lead: 'claude', follow: 'codex' },
+  implementation: { lead: 'claude', follow: 'codex' },
+  analysis: { lead: 'gemini', follow: 'claude' },
+  testing: { lead: 'codex', follow: 'gemini' },
+  security: { lead: 'gemini', follow: 'claude' },
+  research: { lead: 'gemini', follow: 'claude' },
+  documentation: { lead: 'claude', follow: 'codex' },
+};
+
+const TEST_FILE = fileURLToPath(import.meta.url);
+const TEST_DIR = path.dirname(TEST_FILE);
+const PROJECT_ROOT = path.resolve(TEST_DIR, '..');
+const LIB_DIR = path.join(PROJECT_ROOT, 'lib');
+const FIXTURE_DIR = path.join(TEST_DIR, 'fixtures', 'agent-responses');
 
 const [claudeFixtures, geminiFixtures, codexFixtures] = await Promise.all([
   loadAgentFixture('claude'),
@@ -35,6 +56,48 @@ function assertExecuteResultShape(result) {
   assert.equal(result.timedOut, false);
 }
 
+async function walkFiles(dir) {
+  const entries = await fs.readdir(dir, { withFileTypes: true });
+  const files = await Promise.all(entries.map(async (entry) => {
+    const entryPath = path.join(dir, entry.name);
+    if (entry.isDirectory()) {
+      return walkFiles(entryPath);
+    }
+    return [entryPath];
+  }));
+  return files.flat();
+}
+
+test('fixture JSON stays static, hand-authored, and compact', async () => {
+  const fixtureFiles = ['claude.json', 'gemini.json', 'codex.json'];
+  let totalBytes = 0;
+
+  for (const fileName of fixtureFiles) {
+    const filePath = path.join(FIXTURE_DIR, fileName);
+    const raw = await fs.readFile(filePath, 'utf8');
+    const parsed = JSON.parse(raw);
+
+    totalBytes += Buffer.byteLength(raw);
+
+    assert.equal(Array.isArray(parsed), true, `${fileName} must export an array`);
+    assert.ok(parsed.length >= 3, `${fileName} must contain at least three fixture entries`);
+    assert.ok(
+      parsed.some((entry) => entry.matchPattern === null),
+      `${fileName} must include a null-matchPattern default entry`
+    );
+    assert.ok(
+      parsed.some((entry) => entry.matchPattern && entry.response?.ok === true),
+      `${fileName} must include a prompt-matched success entry`
+    );
+    assert.ok(
+      parsed.some((entry) => entry.response?.ok === false),
+      `${fileName} must include a failure entry`
+    );
+  }
+
+  assert.ok(totalBytes < 50 * 1024, 'fixture JSON should stay below 50KB total');
+});
+
 test('loadAgentFixture resolves all static agent fixture sets with validated defaults', () => {
   assert.equal(Array.isArray(claudeFixtures), true);
   assert.equal(Array.isArray(geminiFixtures), true);
@@ -48,6 +111,64 @@ test('loadAgentFixture resolves all static agent fixture sets with validated def
   assert.equal(claudeFixtures.find((entry) => entry.id === 'architecture')?.matchPattern instanceof RegExp, true);
   assert.equal(geminiFixtures.find((entry) => entry.id === 'review')?.matchPattern instanceof RegExp, true);
   assert.equal(codexFixtures.find((entry) => entry.id === 'implementation')?.matchPattern instanceof RegExp, true);
+});
+
+test('mock agent helper is never imported from production modules', async () => {
+  const productionFiles = (await walkFiles(LIB_DIR)).filter((filePath) => filePath.endsWith('.mjs'));
+
+  assert.ok(productionFiles.length > 0, 'expected to scan production .mjs files');
+
+  for (const filePath of productionFiles) {
+    const source = await fs.readFile(filePath, 'utf8');
+    assert.equal(
+      /(?:\.\/|\.\.\/).*mock-agent\.mjs|helpers[\\/]+mock-agent\.mjs|mock-agent\.mjs/.test(source),
+      false,
+      `production module must not import test helper: ${path.relative(PROJECT_ROOT, filePath)}`
+    );
+  }
+});
+
+describe('mock result factories', () => {
+  it('builds the full executeAgent-compatible success shape', () => {
+    const result = makeSuccessResult('successful output', {
+      tokenUsage: { inputTokens: 1, outputTokens: 2, totalTokens: 3 },
+    });
+
+    assertExecuteResultShape(result);
+    assert.deepEqual(result, {
+      ok: true,
+      output: 'successful output',
+      stdout: 'successful output',
+      stderr: '',
+      error: null,
+      exitCode: 0,
+      signal: null,
+      durationMs: 1,
+      timedOut: false,
+      tokenUsage: { inputTokens: 1, outputTokens: 2, totalTokens: 3 },
+    });
+  });
+
+  it('builds the full executeAgent-compatible failure shape', () => {
+    const result = makeFailureResult('synthetic failure', {
+      errorCategory: 'permission',
+      exitCode: 9,
+    });
+
+    assertExecuteResultShape(result);
+    assert.deepEqual(result, {
+      ok: false,
+      output: '',
+      stdout: '',
+      stderr: 'synthetic failure',
+      error: 'synthetic failure',
+      exitCode: 9,
+      signal: null,
+      durationMs: 1,
+      timedOut: false,
+      errorCategory: 'permission',
+    });
+  });
 });
 
 describe('classifyPrompt route strategy', () => {
@@ -102,15 +223,7 @@ describe('classifyPrompt route strategy', () => {
 });
 
 describe('selectTandemPair agent pair resolution', () => {
-  const expectedPairs = [
-    ['implementation', { lead: 'claude', follow: 'codex' }],
-    ['review', { lead: 'gemini', follow: 'claude' }],
-    ['planning', { lead: 'claude', follow: 'codex' }],
-    ['security', { lead: 'gemini', follow: 'claude' }],
-    ['architecture', { lead: 'claude', follow: 'gemini' }],
-  ];
-
-  for (const [taskType, expectedPair] of expectedPairs) {
+  for (const [taskType, expectedPair] of Object.entries(EXPECTED_TANDEM_PAIRS)) {
     it(`returns ${expectedPair.lead}/${expectedPair.follow} for ${taskType}`, () => {
       assert.deepEqual(
         selectTandemPair(taskType, expectedPair.lead, ALL_AGENTS),
@@ -246,9 +359,28 @@ describe('dispatch pipeline integration', () => {
     assert.equal(classification.tandemPair, null);
 
     const result = await mockExecuteAgent(classification.suggestedAgent, prompt, {});
+    const report = {
+      routeStrategy: classification.routeStrategy,
+      taskType: classification.taskType,
+      tandemPair: classification.tandemPair,
+      invocation: {
+        agent: classification.suggestedAgent,
+        ok: result.ok,
+        exitCode: result.exitCode,
+      },
+    };
 
     assertExecuteResultShape(result);
-    assert.equal(result.ok, true);
+    assert.deepEqual(report, {
+      routeStrategy: 'single',
+      taskType: 'documentation',
+      tandemPair: null,
+      invocation: {
+        agent: 'claude',
+        ok: true,
+        exitCode: 0,
+      },
+    });
   });
 
   it('simulates a full tandem pipeline with a threaded lead result', async () => {
@@ -262,12 +394,30 @@ describe('dispatch pipeline integration', () => {
     const leadResult = await mockExecuteAgent(tandemPair.lead, prompt, {});
     const followPrompt = `${leadResult.output}\n\n[follow]\n${prompt}`;
     const followResult = await mockExecuteAgent(tandemPair.follow, followPrompt, {});
+    const report = {
+      routeStrategy: classification.routeStrategy,
+      taskType: classification.taskType,
+      stages: [
+        { agent: tandemPair.lead, ok: leadResult.ok, exitCode: leadResult.exitCode },
+        {
+          agent: tandemPair.follow,
+          ok: followResult.ok,
+          exitCode: followResult.exitCode,
+          receivedLeadOutput: followPrompt.includes(leadResult.output),
+        },
+      ],
+    };
 
     assertExecuteResultShape(leadResult);
     assertExecuteResultShape(followResult);
-    assert.equal(leadResult.ok, true);
-    assert.equal(followResult.ok, true);
-    assert.ok(followPrompt.includes(leadResult.output));
+    assert.deepEqual(report, {
+      routeStrategy: 'tandem',
+      taskType: 'security',
+      stages: [
+        { agent: 'gemini', ok: true, exitCode: 0 },
+        { agent: 'claude', ok: true, exitCode: 0, receivedLeadOutput: true },
+      ],
+    });
   });
 
   it('classifies a council prompt without a tandem pair', () => {
