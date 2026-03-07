@@ -17,6 +17,7 @@ const {
   deregisterSession,
   listSessions,
   checkConflicts,
+  logActivity,
 } = await import('../lib/hydra-hub.mjs');
 
 test.after(() => {
@@ -49,13 +50,14 @@ test('listSessions normalizes cwd: Windows and Unix paths match', () => {
 
 test('updateSession patches fields and touches lastUpdate', async () => {
   const id = registerSession({ agent: 'codex-forge', cwd: '/e/Dev/UpdTest', project: 'UpdTest', focus: 'update test' });
-  await new Promise(r => setTimeout(r, 10)); // ensure different timestamp
+  const before = listSessions({ cwd: '/e/Dev/UpdTest' }).find(s => s.id === id).startedAt;
+  await new Promise(r => setTimeout(r, 10));
   updateSession(id, { focus: 'updated focus', files: ['src/foo.ts'] });
   const sessions = listSessions({ cwd: '/e/Dev/UpdTest' });
   const s = sessions.find(s => s.id === id);
   assert.equal(s.focus, 'updated focus');
   assert.deepEqual(s.files, ['src/foo.ts']);
-  assert.ok(s.lastUpdate >= s.startedAt);
+  assert.ok(s.lastUpdate > before, 'lastUpdate must be strictly after startedAt');
 });
 
 test('deregisterSession removes the file', () => {
@@ -98,4 +100,22 @@ test('listSessions does not filter when no cwd given', () => {
   const id = registerSession({ agent: 'claude-code', cwd: '/e/Dev/AllTest', project: 'AllTest', focus: 'all' });
   const all = listSessions();
   assert.ok(all.some(s => s.id === id));
+});
+
+test('logActivity appends a valid JSON line to activity.ndjson', () => {
+  logActivity({ event: 'test', session: 'test-sess', agent: 'claude-code', project: 'TestProject' });
+  const activityPath = path.join(TEMP_HUB, 'activity.ndjson');
+  assert.ok(fs.existsSync(activityPath), 'activity.ndjson should exist');
+  const lines = fs.readFileSync(activityPath, 'utf8').trim().split('\n').filter(Boolean);
+  const last = JSON.parse(lines[lines.length - 1]);
+  assert.equal(last.event, 'test');
+  assert.equal(last.agent, 'claude-code');
+  assert.ok(last.at, 'should have at timestamp');
+});
+
+test('logActivity does not throw on invalid input', () => {
+  // Should silently swallow — no assertion needed beyond not throwing
+  assert.doesNotThrow(() => logActivity(null));
+  assert.doesNotThrow(() => logActivity(undefined));
+  assert.doesNotThrow(() => logActivity({ circular: undefined }));
 });
