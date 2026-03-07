@@ -9,3 +9,4 @@ nul
 .build-exe/
 .pkg-cache/
 dist/
+recent-projects.json

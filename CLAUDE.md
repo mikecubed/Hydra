@@ -1,5 +1,7 @@
 # CLAUDE.md
 
+> **Note:** This file is internal developer tooling configuration for [Claude Code](https://claude.ai/code). It is not user-facing documentation — see [README.md](README.md) for project overview and usage.
+
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
 ## Branch Workflow
