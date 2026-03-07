@@ -18,6 +18,8 @@ import {
   unregisterCodexMcp,
   generateHydraMdTemplate,
   main,
+  registerCustomAgentMcp,
+  KNOWN_CLI_MCP_PATHS,
 } from '../lib/hydra-setup.mjs';
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
@@ -535,5 +537,53 @@ describe('unregisterCodexMcp', () => {
     const result = unregisterCodexMcp();
     assert.ok('status' in result);
     assert.ok(['removed', 'error', 'not_found'].includes(result.status));
+  });
+});
+
+// ── registerCustomAgentMcp ────────────────────────────────────────────────────
+describe('registerCustomAgentMcp', () => {
+  let tmpDir;
+
+  beforeEach(() => {
+    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'hydra-mcp-test-'));
+  });
+
+  afterEach(() => {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  });
+
+  it('injects mcpServers.hydra into a JSON config file', () => {
+    const configPath = path.join(tmpDir, 'agent.json');
+    fs.writeFileSync(configPath, JSON.stringify({ name: 'test' }), 'utf8');
+    const result = registerCustomAgentMcp({ configPath, format: 'json' });
+    assert.strictEqual(result.status, 'added');
+    const written = JSON.parse(fs.readFileSync(configPath, 'utf8'));
+    assert.ok(written.mcpServers?.hydra, 'should have hydra MCP entry');
+  });
+
+  it('returns exists if hydra entry already present', () => {
+    const configPath = path.join(tmpDir, 'agent.json');
+    const existing = { mcpServers: { hydra: { command: 'node', args: ['existing'] } } };
+    fs.writeFileSync(configPath, JSON.stringify(existing), 'utf8');
+    const result = registerCustomAgentMcp({ configPath, format: 'json' });
+    assert.strictEqual(result.status, 'exists');
+  });
+
+  it('returns manual instructions when configPath is null', () => {
+    const result = registerCustomAgentMcp({ configPath: null });
+    assert.strictEqual(result.status, 'manual');
+    assert.ok(typeof result.instructions === 'string');
+    assert.ok(result.instructions.includes('hydra'));
+  });
+
+  it('returns manual instructions for unknown format', () => {
+    const configPath = path.join(tmpDir, 'agent.yaml');
+    fs.writeFileSync(configPath, 'name: test\n', 'utf8');
+    const result = registerCustomAgentMcp({ configPath, format: 'yaml' });
+    assert.strictEqual(result.status, 'manual');
+  });
+
+  it('KNOWN_CLI_MCP_PATHS exports an object', () => {
+    assert.strictEqual(typeof KNOWN_CLI_MCP_PATHS, 'object');
   });
 });
