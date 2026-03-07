@@ -404,4 +404,17 @@ describe('parseCliResponse', () => {
   it('returns stdout as-is for markdown parser', () => {
     assert.strictEqual(parseCliResponse('# heading', 'markdown'), '# heading');
   });
+
+  it('extracts .message when .content and .text are absent', () => {
+    assert.strictEqual(parseCliResponse(JSON.stringify({ message: 'from-message' }), 'json'), 'from-message');
+  });
+
+  it('extracts .output when .content, .text, .message are absent', () => {
+    assert.strictEqual(parseCliResponse(JSON.stringify({ output: 'from-output' }), 'json'), 'from-output');
+  });
+
+  it('falls back to raw stdout when no known fields present in JSON', () => {
+    const raw = JSON.stringify({ other: 'value' });
+    assert.strictEqual(parseCliResponse(raw, 'json'), raw);
+  });
 });
