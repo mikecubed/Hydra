@@ -178,11 +178,72 @@ For the full command reference (80+ commands organized by category), see [docs/U
 
 ## Configuration
 
-<!-- TODO: config table -->
+Hydra is configured via `hydra.config.json` in the project root. Key sections:
+
+| Section | Controls |
+|---------|----------|
+| `roles` | Role → agent → model mapping (architect, analyst, implementer, etc.) |
+| `models` | Active model per agent, shorthand aliases, mode tier presets |
+| `routing` | Route strategy, council gate, tandem dispatch, intent gate, worktree isolation |
+| `workers` | Headless worker settings, permission modes, poll interval, auto-chain |
+| `concierge` | Provider fallback chain, model, history length, persona |
+| `persona` | Identity, voice, tone, verbosity, formality, humor, presets |
+| `nightly` | Pipeline sources (TODO/GitHub), budget, AI discovery |
+| `evolve` | Self-improvement rounds, suggestions backlog settings |
+| `doctor` | Failure diagnosis, recurring pattern detection |
+| `providers` | API keys, tier levels, rate limits, admin keys for usage queries |
+| `github` | PR defaults, labels, reviewers |
+| `modelRecovery` | Circuit breaker thresholds, fallback behavior, rate limit retry |
+
+See [docs/USAGE.md](docs/USAGE.md#config-file) for the full config reference with all fields and defaults.
 
 ## Architecture
 
-<!-- TODO: diagram -->
+```
+                    +-----------+
+                    |  Operator |  (interactive REPL + concierge)
+                    +-----+-----+
+                          |
+              +-----------+-----------+
+              |                       |
+        +-----v-----+          +------v----+
+        | Concierge |          |  Workers  |
+        | (chat AI) |          | (headless)|
+        +-----+-----+          +------+----+
+              |                       |
+              +-----------+-----------+
+                          |
+                    +-----v-----+
+                    |   Daemon  |  (HTTP, port 4173, event-sourced)
+                    +--+--+--+--+
+                       |  |  |
+          +------------+  |  +-----------+
+          v               v              v
+     +---------+    +-----------+    +--------+
+     | Gemini  |    |  Codex    |    | Claude |
+     | (3 Pro) |    | (GPT-5.4) |    |(Sonnet)|
+     +---------+    +-----------+    +--------+
+       Analyst       Implementer      Architect
+
+  Concierge fallback chain: OpenAI → Anthropic → Google
+  Virtual sub-agents: security-reviewer, test-writer,
+                      doc-generator, researcher
+  Local agent: API-backed (no CLI), routes via OpenAI-compat endpoint
+```
+
+**Routing flow:**
+
+```
+Prompt → Intent Gate → Concierge → Route Classifier
+                                        ↓
+                          single / tandem / council
+                                        ↓
+                              Daemon task queue
+                                        ↓
+                          Worker(s) claim & execute
+                                        ↓
+                              Result + checkpoint
+```
 
 ## Documentation
 
