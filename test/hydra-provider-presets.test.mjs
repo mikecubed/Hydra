@@ -37,3 +37,18 @@ test('all presets have name, baseUrl, defaultModel, envKey, description', () => 
     assert.ok(preset.description);
   }
 });
+
+test('preset can produce a valid customAgent entry shape', () => {
+  const presets = getProviderPresets();
+  const glm = presets.find(p => p.name === 'glm-5');
+  const entry = {
+    name: 'glm',
+    type: 'api',
+    baseUrl: glm.baseUrl,
+    model: glm.defaultModel,
+    enabled: true,
+  };
+  assert.strictEqual(entry.type, 'api');
+  assert.ok(entry.baseUrl.startsWith('https://'));
+  assert.strictEqual(entry.model, 'glm-5');
+});
