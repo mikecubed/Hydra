@@ -94,8 +94,9 @@ describe('resolveNodePath', () => {
 describe('buildMcpServerEntry', () => {
   it('returns claude entry with correct structure', () => {
     const entry = buildMcpServerEntry('claude');
+    const nodePath = resolveNodePath();
     assert.strictEqual(entry.type, 'stdio');
-    assert.strictEqual(entry.command, 'node');
+    assert.strictEqual(entry.command, nodePath);
     assert.ok(Array.isArray(entry.args));
     assert.ok(entry.args.length >= 1);
     assert.ok(entry.args[0].endsWith('hydra-mcp-server.mjs'));
@@ -106,7 +107,8 @@ describe('buildMcpServerEntry', () => {
 
   it('returns gemini entry with timeout and description', () => {
     const entry = buildMcpServerEntry('gemini');
-    assert.strictEqual(entry.command, 'node');
+    const nodePath = resolveNodePath();
+    assert.strictEqual(entry.command, nodePath);
     assert.ok(Array.isArray(entry.args));
     assert.strictEqual(entry.timeout, 600000);
     assert.strictEqual(typeof entry.description, 'string');
@@ -116,8 +118,9 @@ describe('buildMcpServerEntry', () => {
 
   it('returns codex entry as array for CLI command', () => {
     const entry = buildMcpServerEntry('codex');
+    const nodePath = resolveNodePath();
     assert.ok(Array.isArray(entry));
-    assert.strictEqual(entry[0], 'node');
+    assert.strictEqual(entry[0], nodePath);
     assert.ok(entry[1].endsWith('hydra-mcp-server.mjs'));
   });
 });
@@ -196,7 +199,7 @@ describe('mergeClaudeConfig', () => {
     assert.ok(config.mcpServers);
     assert.ok(config.mcpServers.hydra);
     assert.strictEqual(config.mcpServers.hydra.type, 'stdio');
-    assert.strictEqual(config.mcpServers.hydra.command, 'node');
+    assert.strictEqual(config.mcpServers.hydra.command, resolveNodePath());
   });
 
   it('adds hydra to config with no mcpServers key', () => {
@@ -259,7 +262,7 @@ describe('mergeGeminiConfig', () => {
     assert.ok(fs.existsSync(configPath));
     const config = JSON.parse(fs.readFileSync(configPath, 'utf8'));
     assert.ok(config.mcpServers.hydra);
-    assert.strictEqual(config.mcpServers.hydra.command, 'node');
+    assert.strictEqual(config.mcpServers.hydra.command, resolveNodePath());
     assert.strictEqual(config.mcpServers.hydra.timeout, 600000);
   });
 
