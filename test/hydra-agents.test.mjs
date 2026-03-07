@@ -545,7 +545,20 @@ describe('initAgentRegistry — custom physical agents', () => {
   });
 
   it('entry with invalid type is silently skipped', () => {
-    // The registry initialized without error — invalid entries are skipped
-    assert.ok(getAgent('claude'), 'registry is healthy');
+    // The beforeEach fixture only has valid entries, so we add a bad one inline
+    const cfg = loadHydraConfig();
+    const withBadEntry = [
+      ...(cfg.agents?.customAgents || []),
+      { name: 'bad-type-agent', type: 'invalid', displayName: 'Bad' },
+    ];
+    saveHydraConfig({ agents: { customAgents: withBadEntry } });
+    _resetRegistry();
+    initAgentRegistry();
+
+    assert.equal(getAgent('bad-type-agent'), null, 'invalid type should be silently skipped');
+    // Cleanup (afterEach will also restore, but be explicit)
+    saveHydraConfig({ agents: { customAgents: cfg.agents?.customAgents || [] } });
+    _resetRegistry();
+    initAgentRegistry();
   });
 });
