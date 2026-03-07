@@ -18,7 +18,8 @@
       "default": "claude-sonnet-4-6",
       "fast": "claude-sonnet-4-5-20250929",
       "cheap": "claude-haiku-4-5-20251001",
-      "active": "default"
+      "active": "default",
+      "performance": "claude-opus-4-6"
     }
   },
   "aliases": {
@@ -49,7 +50,7 @@
     "performance": {
       "gemini": "default",
       "codex": "default",
-      "claude": "default"
+      "claude": "performance"
     },
     "balanced": {
       "gemini": "fast",
@@ -106,7 +107,7 @@
   "concierge": {
     "enabled": true,
     "model": "gpt-5",
-    "reasoningEffort": "xhigh",
+    "reasoningEffort": "medium",
     "maxHistoryMessages": 40,
     "autoActivate": true,
     "showProviderInPrompt": true,
@@ -118,7 +119,7 @@
       },
       {
         "provider": "anthropic",
-        "model": "claude-sonnet-4-5-20250929"
+        "model": "claude-sonnet-4-6"
       },
       {
         "provider": "google",
@@ -159,7 +160,7 @@
     "investigator": {
       "agent": "codex",
       "model": "gpt-5.2",
-      "reasoningEffort": null
+      "reasoningEffort": "xhigh"
     },
     "nightlyHandoff": {
       "agent": "codex",
@@ -232,12 +233,12 @@
       ]
     },
     "custom": {},
+    "customAgents": [],
     "affinityLearning": {
       "enabled": true,
       "decayFactor": 0.9,
       "minSampleSize": 5
-    },
-    "customAgents": []
+    }
   },
   "evolve": {
     "maxRounds": 3,
@@ -352,7 +353,8 @@
       "agent": "gemini",
       "maxSuggestions": 5,
       "focus": [],
-      "timeoutMs": 300000
+      "timeoutMs": 300000,
+      "model": "gemini-3-flash-preview"
     },
     "budget": {
       "softLimit": 400000,
@@ -459,7 +461,7 @@
     }
   },
   "routing": {
-    "mode": "balanced",
+    "mode": "performance",
     "useLegacyTriage": false,
     "councilGate": true,
     "tandemEnabled": true,
