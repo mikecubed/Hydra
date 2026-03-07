@@ -65,7 +65,7 @@ Operator Console (REPL)
 
 - **ESM only** (`"type": "module"` in package.json). All files use `import`/`export`.
 - **Four dependencies**: `picocolors` (terminal colors), `cross-spawn` (cross-platform spawning), `@modelcontextprotocol/sdk` (MCP server), `zod` (schema validation for MCP tools). Optional peer: `@opentelemetry/api` (tracing, no-op when absent).
-- **Agent names** are always lowercase strings: `claude`, `gemini`, `codex`.
+- **Agent names** are always lowercase strings: `claude`, `gemini`, `codex`, `local`. `local` is the 4th physical agent (API-backed via `hydra-local.mjs`, no CLI). Config: `local.enabled`, `.baseUrl`, `.model`, `.budgetGate`. On ECONNREFUSED falls back transparently to cloud. `routing.mode` (`economy`|`balanced`|`performance`) shifts affinity toward `local` in economy mode.
 - **HTTP helpers**: Use `request()` from `hydra-utils.mjs` for daemon calls. Status bar uses `fetch()` directly (lightweight polling).
 - **Config access**: `loadHydraConfig()` returns cached config. `getRoleConfig(roleName)` for role-specific model/agent lookups.
 - **Model references**: Config-driven via `roles` and `models` sections in `hydra-config.mjs`. Don't hardcode model IDs — use `getActiveModel(agent)` or `getRoleConfig(role)`. Codex always requires an explicit `--model` flag (its own `~/.codex/config.toml` may differ from Hydra's config).

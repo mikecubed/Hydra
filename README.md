@@ -196,6 +196,7 @@ hydra setup --uninstall
 | `:mode handoff` | Direct handoffs (fast, no triage) |
 | `:mode council` | Full council deliberation |
 | `:mode dispatch` | Headless pipeline (Claude→Gemini→Codex) |
+| `:mode [economy\|balanced\|performance]` | Show or set routing mode. Economy boosts local LLM for impl/testing; performance favors cloud. |
 | `:model` | Show mode & active models |
 | `:model claude=sonnet` | Override agent model |
 | `:model reset` | Clear all overrides |
