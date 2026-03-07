@@ -87,6 +87,9 @@ User prompt
                           │
                      Codex (implement)
                           │
+                          v
+     structured synthesis (criteria, challenged assumptions, reversible next step)
+                          │
                      cross-model verification (optional)
                           │
                      publish tasks/decisions/handoffs

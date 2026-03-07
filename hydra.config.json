@@ -447,7 +447,8 @@
   "routing": {
     "useLegacyTriage": false,
     "councilGate": true,
-    "tandemEnabled": true
+    "tandemEnabled": true,
+    "councilMode": "sequential"
   },
   "modelRecovery": {
     "enabled": true,
