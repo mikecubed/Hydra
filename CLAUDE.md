@@ -71,6 +71,10 @@ Operator Console (REPL)
 - **Model references**: Config-driven via `roles` and `models` sections in `hydra-config.mjs`. Don't hardcode model IDs — use `getActiveModel(agent)` or `getRoleConfig(role)`. Codex always requires an explicit `--model` flag (its own `~/.codex/config.toml` may differ from Hydra's config).
 - **Interactive prompts**: Use `promptChoice()` from `hydra-prompt-choice.mjs` with cooperative readline lock. Boxes dynamically size to terminal width (60-120 columns, 90% of terminal width) and word-wrap long context values.
 - **PowerShell launchers** in `bin/` — `hydra.ps1` starts the full system (daemon + agent heads + operator).
+- **Intent gate**: `lib/hydra-intent-gate.mjs` — `gateIntent(text)` pre-screens prompts before dispatch. Config: `routing.intentGate.enabled`, `.confidenceThreshold`.
+- **Hierarchical context**: `lib/hydra-context.mjs` — `buildAgentContext(agent, { promptText })` walks ancestor dirs for scoped HYDRA.md files. Config: `context.hierarchical.enabled`.
+- **Provider presets**: `getProviderPresets()` from `hydra-config.mjs` returns built-in GLM-5 / Kimi K2.5 templates. Used by `:agents add` wizard preset picker.
+- **Task worktree isolation**: `routing.worktreeIsolation.enabled` (default: false) — daemon creates/merges/cleans per-task worktrees at claim/result time. `:cleanup` sweeps stale worktrees via `scanStaleTaskWorktrees()`.
 
 ## Test Patterns
 
