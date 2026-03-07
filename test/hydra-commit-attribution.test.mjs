@@ -66,12 +66,16 @@ describe('buildSafetyPrompt — attribution', () => {
     const result = buildSafetyPrompt('test-branch', {
       runner: 'test-runner',
       reportName: 'test-report',
-      protectedFiles: [],
+      protectedFiles: new Set([]),
       blockedCommands: [],
     });
     assert.ok(
-      result.includes('README.md') && result.includes('ARCHITECTURE.md'),
-      'safety prompt should require updating README.md and docs/ARCHITECTURE.md'
+      result.includes('verify that README.md'),
+      'scope should contain the doc-update verification instruction'
+    );
+    assert.ok(
+      result.includes('docs/ARCHITECTURE.md'),
+      'scope should mention docs/ARCHITECTURE.md'
     );
   });
 });
