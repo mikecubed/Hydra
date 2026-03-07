@@ -2,7 +2,7 @@
  * Tests for agent-executor.mjs diagnostics and unification.
  */
 
-import { describe, it } from 'node:test';
+import { describe, it, beforeEach, afterEach } from 'node:test';
 import assert from 'node:assert/strict';
 
 import {
@@ -416,5 +416,51 @@ describe('parseCliResponse', () => {
   it('falls back to raw stdout when no known fields present in JSON', () => {
     const raw = JSON.stringify({ other: 'value' });
     assert.strictEqual(parseCliResponse(raw, 'json'), raw);
+  });
+});
+
+// ── Custom agent routing in executeAgent() ───────────────────────────────────
+import { executeAgent } from '../lib/hydra-shared/agent-executor.mjs';
+import { registerAgent, unregisterAgent, getAgent as getAgentDef, AGENT_TYPE, _resetRegistry, initAgentRegistry } from '../lib/hydra-agents.mjs';
+
+describe('executeAgent — custom CLI agent routing', () => {
+  beforeEach(() => {
+    // Register a custom CLI agent that calls 'echo' (always available on PATH)
+    registerAgent('test-echo-cli', {
+      type: AGENT_TYPE.PHYSICAL,
+      customType: 'cli',
+      cli: 'echo',
+      invoke: {
+        nonInteractive: { cmd: 'echo', args: ['{prompt}'] },
+        headless: { cmd: 'echo', args: ['{prompt}'] },
+      },
+      responseParser: 'plaintext',
+      contextBudget: 1000,
+      councilRole: null,
+      taskAffinity: {},
+      enabled: true,
+    });
+  });
+
+  afterEach(() => {
+    try { unregisterAgent('test-echo-cli'); } catch { /* ignore */ }
+  });
+
+  it('routes to executeCustomCliAgent for customType=cli', async () => {
+    const result = await executeAgent('test-echo-cli', 'hello');
+    assert.ok(result.ok, `expected ok=true, got errorCategory=${result.errorCategory}`);
+    assert.ok(result.output.includes('hello'), `expected output to include prompt, got: ${result.output}`);
+  });
+
+  it('returns custom-cli-disabled when agent is disabled', async () => {
+    registerAgent('test-disabled-cli', {
+      type: AGENT_TYPE.PHYSICAL,
+      customType: 'cli',
+      cli: null, invoke: null, contextBudget: 1000,
+      councilRole: null, taskAffinity: {}, enabled: false,
+    });
+    const result = await executeAgent('test-disabled-cli', 'hello');
+    assert.strictEqual(result.errorCategory, 'custom-cli-disabled');
+    try { unregisterAgent('test-disabled-cli'); } catch { /* ignore */ }
   });
 });
