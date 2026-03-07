@@ -358,3 +358,50 @@ describe('detectCodexError (hydra-model-recovery)', () => {
     assert.equal(check.category !== 'codex-unknown', true);
   });
 });
+
+// ── expandInvokeArgs ────────────────────────────────────────────────────────
+import { expandInvokeArgs, parseCliResponse } from '../lib/hydra-shared/agent-executor.mjs';
+
+describe('expandInvokeArgs', () => {
+  it('substitutes {prompt} with the prompt value', () => {
+    const result = expandInvokeArgs(['suggest', '-p', '{prompt}'], { prompt: 'hello world' });
+    assert.deepStrictEqual(result, ['suggest', '-p', 'hello world']);
+  });
+
+  it('substitutes {cwd} with cwd value', () => {
+    const result = expandInvokeArgs(['{prompt}', '--cwd', '{cwd}'], { prompt: 'task', cwd: '/tmp/project' });
+    assert.deepStrictEqual(result, ['task', '--cwd', '/tmp/project']);
+  });
+
+  it('leaves unknown placeholders intact', () => {
+    const result = expandInvokeArgs(['{unknown}'], { prompt: 'x' });
+    assert.deepStrictEqual(result, ['{unknown}']);
+  });
+
+  it('handles empty args array', () => {
+    assert.deepStrictEqual(expandInvokeArgs([], { prompt: 'x' }), []);
+  });
+});
+
+describe('parseCliResponse', () => {
+  it('returns stdout as-is for plaintext parser', () => {
+    assert.strictEqual(parseCliResponse('hello output', 'plaintext'), 'hello output');
+  });
+
+  it('extracts .content from JSON for json parser', () => {
+    const stdout = JSON.stringify({ content: 'extracted' });
+    assert.strictEqual(parseCliResponse(stdout, 'json'), 'extracted');
+  });
+
+  it('extracts .text when .content absent', () => {
+    assert.strictEqual(parseCliResponse(JSON.stringify({ text: 'from-text' }), 'json'), 'from-text');
+  });
+
+  it('falls back to raw stdout when JSON parse fails', () => {
+    assert.strictEqual(parseCliResponse('not json', 'json'), 'not json');
+  });
+
+  it('returns stdout as-is for markdown parser', () => {
+    assert.strictEqual(parseCliResponse('# heading', 'markdown'), '# heading');
+  });
+});
