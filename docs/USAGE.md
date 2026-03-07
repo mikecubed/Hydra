@@ -225,7 +225,7 @@ The concierge is a multi-provider conversational AI layer with automatic fallbac
 
 - **auto** (default): Runs a mini-round triage, then either delegates via handoff or escalates to full council
 - **handoff**: Direct delegation to all agents (fastest, no triage)
-- **council**: Full multi-round deliberation (Claude propose -> Gemini critique -> Claude refine -> Codex implement)
+- **council**: Full multi-round deliberation with structured synthesis (Claude propose -> Gemini critique -> Claude refine -> Codex implement)
 - **dispatch**: Headless pipeline (Claude coordinate -> Gemini critique -> Codex synthesize)
 - **smart**: Auto-selects model tier per prompt complexity (simple->economy, medium->balanced, complex->performance)
 - **chat**: Concierge conversation mode (set automatically when concierge is active)
@@ -250,7 +250,7 @@ On Windows, the operator console automatically launches separate terminal window
 
 ## Council Mode
 
-Full multi-round deliberation:
+Full multi-round deliberation with structured synthesis:
 
 ```powershell
 node lib/hydra-council.mjs prompt="..." [rounds=2] [mode=live|preview] [publish=true|false]
@@ -264,6 +264,8 @@ Options:
 - `emit=json` — Output raw JSON instead of summary
 - `save=true` — Save run report to coordination/runs/
 - `agents=claude,gemini` — Limit which agents participate in the council flow
+
+Council convergence is criteria-driven rather than majority-vote based. Each phase can emit options, tradeoffs (`correctness`, `complexity`, `reversibility`, `user_impact`), assumptions, and assumption challenges; the final Codex phase synthesizes those into a single decision, next action, and reversible first step.
 
 ## Dispatch Mode
 

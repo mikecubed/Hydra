@@ -20,7 +20,7 @@
   H Y D R A
 ```
 
-Hydra coordinates three AI coding agents — [Gemini CLI](https://github.com/google-gemini/gemini-cli), [Codex CLI](https://github.com/openai/codex), and [Claude Code](https://docs.anthropic.com/en/docs/claude-code) — through a shared HTTP daemon with a task queue, intelligent routing, and multi-round deliberation.
+Hydra coordinates three AI coding agents — [Gemini CLI](https://github.com/google-gemini/gemini-cli), [Codex CLI](https://github.com/openai/codex), and [Claude Code](https://docs.anthropic.com/en/docs/claude-code) — through a shared HTTP daemon with a task queue, intelligent routing, and structured multi-round deliberation.
 
 ## Why Hydra?
 
@@ -120,7 +120,7 @@ hydra setup --uninstall
 
 ### Orchestration & Routing
 
-- **Five orchestration modes**: Auto (3-way routing), Council (multi-round deliberation), Dispatch (headless pipeline), Smart (auto-tier per complexity), Chat (concierge conversation)
+- **Five orchestration modes**: Auto (3-way routing), Council (multi-round deliberation with structured synthesis), Dispatch (headless pipeline), Smart (auto-tier per complexity), Chat (concierge conversation)
 - **Intelligent route classification**: Local heuristic classifies prompts into single/tandem/council routes — zero agent CLI calls for routing
 - **Tandem dispatch**: 2-agent lead-follow pairs (e.g., Claude analyzes, Codex implements)
 - **Affinity-based task routing**: 10 task types across 3 agents with adaptive learning from outcomes
@@ -172,7 +172,7 @@ hydra setup --uninstall
 |---------|-------------|
 | `npm start` | Start the daemon |
 | `npm run go` | Launch operator console |
-| `npm run council` | Full multi-round deliberation |
+| `npm run council` | Full council deliberation with structured synthesis |
 | `npm run evolve` | Run autonomous self-improvement |
 | `npm run nightly` | Run nightly task automation |
 | `npm run tasks` | Scan & execute TODO/FIXME/issues |
