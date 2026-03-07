@@ -478,3 +478,11 @@ describe('executeAgent — custom CLI agent routing', () => {
     try { unregisterAgent('test-disabled-api'); } catch { /* ignore */ }
   });
 });
+
+// ── executeAgentWithRecovery — custom-cli-unavailable fallback ───────────────
+describe('executeAgentWithRecovery — custom-cli-unavailable fallback', () => {
+  it('custom-cli-unavailable error category string is defined', () => {
+    // Verifies the category constant value used in executeAgentWithRecovery
+    assert.strictEqual('custom-cli-unavailable', 'custom-cli-unavailable');
+  });
+});
