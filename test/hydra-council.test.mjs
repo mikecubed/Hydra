@@ -5,6 +5,9 @@ import {
   buildStepPrompt,
   deriveCouncilRecommendation,
   synthesizeCouncilTranscript,
+  extractAssumptionAttacks,
+  resolveActiveAgents,
+  computeAdversarialResumePoint,
 } from '../lib/hydra-council.mjs';
 
 test('buildStepPrompt adds structured convergence instructions', () => {
@@ -145,4 +148,100 @@ test('deriveCouncilRecommendation keeps council open for human decisions', () =>
   assert.equal(recommendation.recommendedMode, 'council');
   assert.equal(recommendation.nextAction, 'human_decision');
   assert.match(recommendation.rationale, /human_questions=1/);
+});
+
+// ─── Adversarial: ATTACK schema tests ───────────────────────────────────────
+
+test('extractAssumptionAttacks maps attack_vector/target_agent (new schema)', () => {
+  const parsed = {
+    assumption_attacks: [
+      { attack_vector: 'The cache never invalidates under concurrent writes', target_agent: 'claude', impact: 'data loss', by: 'gemini' },
+    ],
+  };
+  const attacks = extractAssumptionAttacks(parsed);
+  assert.equal(attacks.length, 1);
+  assert.equal(attacks[0].challenge, 'The cache never invalidates under concurrent writes');
+  assert.equal(attacks[0].assumption, 'claude');
+});
+
+test('extractAssumptionAttacks backward-compat with challenge/target (old schema)', () => {
+  const parsed = {
+    assumption_attacks: [
+      { challenge: 'The lock is not held across retries', target: 'gemini', impact: 'race', by: 'codex' },
+    ],
+  };
+  const attacks = extractAssumptionAttacks(parsed);
+  assert.equal(attacks.length, 1);
+  assert.equal(attacks[0].challenge, 'The lock is not held across retries');
+  assert.equal(attacks[0].assumption, 'gemini');
+});
+
+test('extractAssumptionAttacks prefers attack_vector over challenge when both present', () => {
+  const parsed = {
+    assumption_attacks: [
+      { attack_vector: 'primary attack', challenge: 'old field', target_agent: 'codex', target: 'claude' },
+    ],
+  };
+  const attacks = extractAssumptionAttacks(parsed);
+  assert.equal(attacks[0].challenge, 'primary attack');
+  assert.equal(attacks[0].assumption, 'codex');
+});
+
+// ─── Adversarial: resolveActiveAgents ───────────────────────────────────────
+
+test('resolveActiveAgents returns defaults when no filter given', () => {
+  const agents = resolveActiveAgents(null);
+  assert.deepEqual(agents, ['claude', 'gemini', 'codex']);
+});
+
+test('resolveActiveAgents filters to single agent preserving order', () => {
+  const agents = resolveActiveAgents(['claude']);
+  assert.deepEqual(agents, ['claude']);
+});
+
+test('resolveActiveAgents filters to subset preserving default order', () => {
+  const agents = resolveActiveAgents(['codex', 'claude']); // input order shouldn't matter
+  assert.deepEqual(agents, ['claude', 'codex']); // default order preserved
+});
+
+test('resolveActiveAgents returns empty array for unknown agents', () => {
+  const agents = resolveActiveAgents(['unknown']);
+  assert.deepEqual(agents, []);
+});
+
+// ─── Adversarial: computeAdversarialResumePoint ──────────────────────────────
+
+test('computeAdversarialResumePoint returns round 1, phase 0 for empty transcript', () => {
+  const { startRound, startPhaseIdx } = computeAdversarialResumePoint([]);
+  assert.equal(startRound, 1);
+  assert.equal(startPhaseIdx, 0);
+});
+
+test('computeAdversarialResumePoint advances to next phase within same round', () => {
+  const transcript = [
+    { round: 1, agent: 'claude', phase: 'diverge' },
+  ];
+  const { startRound, startPhaseIdx } = computeAdversarialResumePoint(transcript);
+  assert.equal(startRound, 1);
+  assert.equal(startPhaseIdx, 1); // next = attack
+});
+
+test('computeAdversarialResumePoint advances to next round after synthesize', () => {
+  const transcript = [
+    { round: 1, agent: 'claude', phase: 'diverge' },
+    { round: 1, agent: 'claude', phase: 'attack' },
+    { round: 1, agent: 'claude', phase: 'synthesize' },
+  ];
+  const { startRound, startPhaseIdx } = computeAdversarialResumePoint(transcript);
+  assert.equal(startRound, 2);
+  assert.equal(startPhaseIdx, 0); // next = diverge in round 2
+});
+
+test('computeAdversarialResumePoint returns Infinity when implement already done', () => {
+  const transcript = [
+    { round: 1, agent: 'claude', phase: 'synthesize' },
+    { round: 1, agent: 'codex', phase: 'implement' },
+  ];
+  const { startRound } = computeAdversarialResumePoint(transcript);
+  assert.equal(startRound, Infinity);
 });
