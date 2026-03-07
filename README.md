@@ -247,12 +247,20 @@ Prompt → Intent Gate → Concierge → Route Classifier
 
 ## Documentation
 
-<!-- TODO: links -->
+| Doc | Contents |
+|-----|----------|
+| [docs/USAGE.md](docs/USAGE.md) | Full command reference, config fields, daemon API, MCP tools |
+| [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | Module reference, dispatch modes, route strategies |
+| [docs/INSTALL.md](docs/INSTALL.md) | Detailed installation and setup |
+| [docs/MODEL_PROFILES.md](docs/MODEL_PROFILES.md) | Agent model options, reasoning effort, aliases |
+| [CONTRIBUTING.md](CONTRIBUTING.md) | Development workflow, test patterns, conventions |
 
 ## Daemon Security
 
-<!-- TODO: security note -->
+The HTTP daemon binds to `127.0.0.1` (localhost only) by default. It is designed for local, single-user use and does not include authentication. Do not expose port 4173 externally.
+
+See [SECURITY.md](SECURITY.md) for vulnerability reporting.
 
 ## License
 
-<!-- TODO: license -->
+[MIT](LICENSE)
