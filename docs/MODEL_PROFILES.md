@@ -641,7 +641,7 @@
 | **default** | `claude-sonnet-4-6` | Same generation as Opus 4.6, adaptive thinking, 40% cheaper |
 | **fast** | `claude-sonnet-4-5-20250929` | Proven, SWE-bench 77.2%, extended thinking |
 | **cheap** | `claude-haiku-4-5-20251001` | 5x cheaper, SWE-bench 73.3%, blazing fast |
-| *performance* | `claude-opus-4-6` | Best reasoning, ARC-AGI-2 #1 — select via model picker |
+| **performance** | `claude-opus-4-6` | Best reasoning, ARC-AGI-2 #1, adaptive thinking — auto-selected in performance mode |
 
 #### Codex Agent
 
@@ -668,7 +668,7 @@
 | **architect** | claude | `claude-sonnet-4-6` (default) | adaptive | Strong agentic coding at 40% lower cost; Opus available for highest-complexity |
 | **analyst** | gemini | `gemini-3-pro-preview` | thinking_level: HIGH | Best Arena ELO, GPQA 91.9%, 1M context |
 | **implementer** | codex | `gpt-5.4` | none | SWE-bench Pro 57.7%, 1.05M context |
-| **concierge** | codex | `gpt-5` | low | Fast streaming, broad knowledge, $1.25/$10 |
+| **concierge** | codex | `gpt-5` | medium | Fast streaming, broad knowledge, $1.25/$10 |
 | **investigator** | codex | `gpt-5.2` | xhigh | Best deep reasoning (GPQA 93.2%, FrontierMath 40.3%) |
 | **nightlyHandoff** | codex | `o4-mini` | low | Budget-friendly, decent SWE-bench 68.1%, great math |
 
@@ -677,7 +677,7 @@
 | Priority | Provider | Model | Rationale |
 |---|---|---|---|
 | 1 | openai | `gpt-5` | Best streaming UX, broad knowledge |
-| 2 | anthropic | `claude-sonnet-4-5-20250929` | Strong fallback, good coding |
+| 2 | anthropic | `claude-sonnet-4-6` | Strong fallback, adaptive thinking, good coding |
 | 3 | google | `gemini-3-flash-preview` | Cheapest, fast, good quality |
 
 ### Smart Mode Tier Mapping
