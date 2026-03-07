@@ -61,6 +61,12 @@ function printHelp() {
     '  hydra --mode smart --prompt "refactor model loading"',
     '  hydra --full --dry-run',
     '',
+    'Subcommands:',
+    '  hydra setup              Register Hydra MCP server in AI CLIs',
+    '  hydra setup --uninstall  Remove MCP registration',
+    '  hydra setup --force      Overwrite existing registration',
+    '  hydra init               Generate HYDRA.md for current project',
+    '',
   ].join('\n'));
 }
 
@@ -351,6 +357,15 @@ async function main() {
     const moduleId = argv[1];
     const moduleArgs = argv.slice(2);
     await runHydraInternalModule(moduleId, moduleArgs, HYDRA_ROOT);
+    return;
+  }
+
+  // Subcommands that bypass the operator
+  const subcommand = argv[0]?.toLowerCase();
+  if (subcommand === 'setup' || subcommand === 'init') {
+    const { main: setupMain } = await import('../lib/hydra-setup.mjs');
+    // main() expects process.argv-shaped array (parseSetupArgs does .slice(2))
+    await setupMain(['_', '_', subcommand, ...argv.slice(1)]);
     return;
   }
 
