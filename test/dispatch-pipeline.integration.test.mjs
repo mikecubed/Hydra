@@ -1,6 +1,7 @@
 import { describe, it, test } from 'node:test';
 import assert from 'node:assert/strict';
 import { promises as fs } from 'node:fs';
+import { createRequire } from 'node:module';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -31,6 +32,8 @@ const TEST_DIR = path.dirname(TEST_FILE);
 const PROJECT_ROOT = path.resolve(TEST_DIR, '..');
 const LIB_DIR = path.join(PROJECT_ROOT, 'lib');
 const FIXTURE_DIR = path.join(TEST_DIR, 'fixtures', 'agent-responses');
+const require = createRequire(import.meta.url);
+const childProcess = require('node:child_process');
 
 const [claudeFixtures, geminiFixtures, codexFixtures] = await Promise.all([
   loadAgentFixture('claude'),
@@ -54,6 +57,30 @@ function assertExecuteResultShape(result) {
   assert.equal(result.signal, null);
   assert.equal(typeof result.durationMs, 'number');
   assert.equal(result.timedOut, false);
+}
+
+async function withNoProcessSpawning(run) {
+  const originalSpawn = childProcess.spawn;
+  const originalSpawnSync = childProcess.spawnSync;
+  const spawnCalls = [];
+
+  childProcess.spawn = (...args) => {
+    spawnCalls.push({ method: 'spawn', args });
+    throw new Error('Unexpected child_process.spawn during in-process pipeline test');
+  };
+  childProcess.spawnSync = (...args) => {
+    spawnCalls.push({ method: 'spawnSync', args });
+    throw new Error('Unexpected child_process.spawnSync during in-process pipeline test');
+  };
+
+  try {
+    await run();
+  } finally {
+    childProcess.spawn = originalSpawn;
+    childProcess.spawnSync = originalSpawnSync;
+  }
+
+  assert.deepEqual(spawnCalls, [], 'simulated mock-agent flows must not spawn child processes');
 }
 
 async function walkFiles(dir) {
@@ -111,6 +138,17 @@ test('loadAgentFixture resolves all static agent fixture sets with validated def
   assert.equal(claudeFixtures.find((entry) => entry.id === 'architecture')?.matchPattern instanceof RegExp, true);
   assert.equal(geminiFixtures.find((entry) => entry.id === 'review')?.matchPattern instanceof RegExp, true);
   assert.equal(codexFixtures.find((entry) => entry.id === 'implementation')?.matchPattern instanceof RegExp, true);
+});
+
+test('mock-agent helper exports the expected callable helpers', () => {
+  assert.equal(typeof createMockExecuteAgent, 'function');
+  assert.equal(createMockExecuteAgent.length, 1);
+  assert.equal(typeof loadAgentFixture, 'function');
+  assert.equal(loadAgentFixture.length, 1);
+  assert.equal(typeof makeSuccessResult, 'function');
+  assert.equal(makeSuccessResult.length, 1);
+  assert.equal(typeof makeFailureResult, 'function');
+  assert.equal(makeFailureResult.length, 1);
 });
 
 test('mock agent helper is never imported from production modules', async () => {
@@ -202,6 +240,12 @@ describe('classifyPrompt route strategy', () => {
     assert.equal(result.tier, 'complex');
   });
 
+  it('is deterministic for identical input', () => {
+    const prompt = 'first analyze the auth module then fix the security issues';
+
+    assert.deepEqual(classifyPrompt(prompt), classifyPrompt(prompt));
+  });
+
   it('handles a prompt on the simple/moderate boundary without throwing', () => {
     const prompt = 'fix auth bug in lib/hydra-utils.mjs before release with focused regression tests today';
 
@@ -256,6 +300,7 @@ describe('mock agent invocation', () => {
     assertExecuteResultShape(result);
     assert.equal(result.ok, false);
     assert.equal(result.exitCode, 1);
+    assert.equal(result.errorCategory, 'rate-limit');
     assert.equal(result.error, 'Error: 429 Too Many Requests');
     assert.match(result.stderr, /429/i);
   });
@@ -281,6 +326,23 @@ describe('mock agent invocation', () => {
 
     assertExecuteResultShape(result);
     assert.equal(result.ok, true);
+  });
+
+  it('returns a deep-cloned result object on every call', async () => {
+    const first = await mockExecuteAgent('codex', 'implement the feature', {});
+    const second = await mockExecuteAgent('codex', 'implement the feature', {});
+
+    assert.notStrictEqual(first, second);
+    assert.notStrictEqual(first.tokenUsage, second.tokenUsage);
+
+    first.output = 'mutated';
+    first.tokenUsage.totalTokens = 999;
+
+    const third = await mockExecuteAgent('codex', 'implement the feature', {});
+    assert.equal(second.output, 'Implementation result: added the requested behavior, covered the main edge cases, and kept the changes scoped to the documented entry points.');
+    assert.equal(second.tokenUsage.totalTokens, 360);
+    assert.equal(third.output, 'Implementation result: added the requested behavior, covered the main edge cases, and kept the changes scoped to the documented entry points.');
+    assert.equal(third.tokenUsage.totalTokens, 360);
   });
 
   it('throws for unknown agents instead of returning undefined', async () => {
@@ -352,85 +414,91 @@ describe('mock agent invocation', () => {
 
 describe('dispatch pipeline integration', () => {
   it('simulates a full single-route pipeline in process', async () => {
-    const prompt = 'fix the typo in README.md';
-    const classification = classifyPrompt(prompt);
+    await withNoProcessSpawning(async () => {
+      const prompt = 'fix the typo in README.md';
+      const classification = classifyPrompt(prompt);
 
-    assert.equal(classification.routeStrategy, 'single');
-    assert.equal(classification.tandemPair, null);
+      assert.equal(classification.routeStrategy, 'single');
+      assert.equal(classification.tandemPair, null);
 
-    const result = await mockExecuteAgent(classification.suggestedAgent, prompt, {});
-    const report = {
-      routeStrategy: classification.routeStrategy,
-      taskType: classification.taskType,
-      tandemPair: classification.tandemPair,
-      invocation: {
-        agent: classification.suggestedAgent,
-        ok: result.ok,
-        exitCode: result.exitCode,
-      },
-    };
+      const result = await mockExecuteAgent(classification.suggestedAgent, prompt, {});
+      const report = {
+        routeStrategy: classification.routeStrategy,
+        taskType: classification.taskType,
+        tandemPair: classification.tandemPair,
+        invocation: {
+          agent: classification.suggestedAgent,
+          ok: result.ok,
+          exitCode: result.exitCode,
+        },
+      };
 
-    assertExecuteResultShape(result);
-    assert.deepEqual(report, {
-      routeStrategy: 'single',
-      taskType: 'documentation',
-      tandemPair: null,
-      invocation: {
-        agent: 'claude',
-        ok: true,
-        exitCode: 0,
-      },
+      assertExecuteResultShape(result);
+      assert.deepEqual(report, {
+        routeStrategy: 'single',
+        taskType: 'documentation',
+        tandemPair: null,
+        invocation: {
+          agent: 'claude',
+          ok: true,
+          exitCode: 0,
+        },
+      });
     });
   });
 
   it('simulates a full tandem pipeline with a threaded lead result', async () => {
-    const prompt = 'first analyze the auth module then fix the security issues';
-    const classification = classifyPrompt(prompt);
-    const tandemPair = selectTandemPair(classification.taskType, classification.suggestedAgent, ALL_AGENTS);
+    await withNoProcessSpawning(async () => {
+      const prompt = 'first analyze the auth module then fix the security issues';
+      const classification = classifyPrompt(prompt);
+      const tandemPair = selectTandemPair(classification.taskType, classification.suggestedAgent, ALL_AGENTS);
 
-    assert.equal(classification.routeStrategy, 'tandem');
-    assert.deepEqual(tandemPair, { lead: 'gemini', follow: 'claude' });
+      assert.equal(classification.routeStrategy, 'tandem');
+      assert.deepEqual(tandemPair, { lead: 'gemini', follow: 'claude' });
 
-    const leadResult = await mockExecuteAgent(tandemPair.lead, prompt, {});
-    const followPrompt = `${leadResult.output}\n\n[follow]\n${prompt}`;
-    const followResult = await mockExecuteAgent(tandemPair.follow, followPrompt, {});
-    const report = {
-      routeStrategy: classification.routeStrategy,
-      taskType: classification.taskType,
-      stages: [
-        { agent: tandemPair.lead, ok: leadResult.ok, exitCode: leadResult.exitCode },
-        {
-          agent: tandemPair.follow,
-          ok: followResult.ok,
-          exitCode: followResult.exitCode,
-          receivedLeadOutput: followPrompt.includes(leadResult.output),
-        },
-      ],
-    };
+      const leadResult = await mockExecuteAgent(tandemPair.lead, prompt, {});
+      const followPrompt = `${leadResult.output}\n\n[follow]\n${prompt}`;
+      const followResult = await mockExecuteAgent(tandemPair.follow, followPrompt, {});
+      const report = {
+        routeStrategy: classification.routeStrategy,
+        taskType: classification.taskType,
+        stages: [
+          { agent: tandemPair.lead, ok: leadResult.ok, exitCode: leadResult.exitCode },
+          {
+            agent: tandemPair.follow,
+            ok: followResult.ok,
+            exitCode: followResult.exitCode,
+            receivedLeadOutput: followPrompt.includes(leadResult.output),
+          },
+        ],
+      };
 
-    assertExecuteResultShape(leadResult);
-    assertExecuteResultShape(followResult);
-    assert.deepEqual(report, {
-      routeStrategy: 'tandem',
-      taskType: 'security',
-      stages: [
-        { agent: 'gemini', ok: true, exitCode: 0 },
-        { agent: 'claude', ok: true, exitCode: 0, receivedLeadOutput: true },
-      ],
+      assertExecuteResultShape(leadResult);
+      assertExecuteResultShape(followResult);
+      assert.deepEqual(report, {
+        routeStrategy: 'tandem',
+        taskType: 'security',
+        stages: [
+          { agent: 'gemini', ok: true, exitCode: 0 },
+          { agent: 'claude', ok: true, exitCode: 0, receivedLeadOutput: true },
+        ],
+      });
     });
   });
 
-  it('classifies a council prompt without a tandem pair', () => {
-    const prompt = [
-      'Should we redesign the dispatch pipeline?',
-      'Compare single, tandem, and council routing trade-offs.',
-      'Decide which strategy is best for reliability.',
-      'Make sure we optimize for developer productivity and failure recovery.',
-    ].join(' ');
+  it('classifies a council prompt without a tandem pair or any mock invocation', async () => {
+    await withNoProcessSpawning(async () => {
+      const prompt = [
+        'Should we redesign the dispatch pipeline?',
+        'Compare single, tandem, and council routing trade-offs.',
+        'Decide which strategy is best for reliability.',
+        'Make sure we optimize for developer productivity and failure recovery.',
+      ].join(' ');
 
-    const result = classifyPrompt(prompt);
+      const result = classifyPrompt(prompt);
 
-    assert.equal(result.routeStrategy, 'council');
-    assert.equal(result.tandemPair, null);
+      assert.equal(result.routeStrategy, 'council');
+      assert.equal(result.tandemPair, null);
+    });
   });
 });

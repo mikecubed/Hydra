@@ -5,33 +5,45 @@ import { fileURLToPath } from 'node:url';
 const HELPERS_DIR = path.dirname(fileURLToPath(import.meta.url));
 const FIXTURES_DIR = path.resolve(HELPERS_DIR, '../fixtures/agent-responses');
 
+function deepClone(value) {
+  if (value === null || value === undefined) {
+    return value;
+  }
+  if (typeof structuredClone === 'function') {
+    return structuredClone(value);
+  }
+  return JSON.parse(JSON.stringify(value));
+}
+
 export function makeSuccessResult(output, opts = {}) {
+  const text = String(output ?? '');
   return {
     ok: true,
-    output,
-    stdout: output,
+    output: text,
+    stdout: text,
     stderr: '',
     error: null,
     exitCode: 0,
     signal: null,
     durationMs: 1,
     timedOut: false,
-    ...opts,
+    ...deepClone(opts),
   };
 }
 
 export function makeFailureResult(error, opts = {}) {
+  const text = String(error ?? 'Mock execution failed');
   return {
     ok: false,
     output: '',
     stdout: '',
-    stderr: error,
-    error,
+    stderr: text,
+    error: text,
     exitCode: 1,
     signal: null,
     durationMs: 1,
     timedOut: false,
-    ...opts,
+    ...deepClone(opts),
   };
 }
 
@@ -54,6 +66,7 @@ function normalizeFixtureEntry(agent, entry, index) {
   return {
     ...entry,
     id,
+    response: deepClone(entry.response),
     matchPattern: matchPattern === null
       ? null
       : matchPattern instanceof RegExp
@@ -83,10 +96,7 @@ function validateFixtures(agent, entries) {
 }
 
 function cloneResult(result) {
-  const cloned = {
-    ...result,
-    tokenUsage: result.tokenUsage ? { ...result.tokenUsage } : result.tokenUsage,
-  };
+  const cloned = deepClone(result);
   if (cloned.error === undefined) {
     cloned.error = cloned.ok ? null : cloned.stderr || 'Mock execution failed';
   }

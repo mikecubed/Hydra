@@ -19,20 +19,29 @@ import {
   initAgentRegistry,
 } from '../lib/hydra-agents.mjs';
 
+const CLOUD_AGENT_NAMES = ['claude', 'gemini', 'codex'];
+
 // ── AGENTS registry (backward compat) ──────────────────────────────────────
 
-test('AGENTS has exactly three physical agents: gemini, codex, claude', () => {
+test('AGENTS includes the cloud physical agents', () => {
   const keys = Object.keys(AGENTS);
-  assert.deepEqual(new Set(keys), new Set(['gemini', 'codex', 'claude']));
+  for (const name of CLOUD_AGENT_NAMES) {
+    assert.ok(keys.includes(name), `AGENTS should include ${name}`);
+  }
+  assert.ok(keys.every((name) => getAgent(name)?.type === 'physical'));
 });
 
 test('AGENT_NAMES returns physical agents only', () => {
   const names = [...AGENT_NAMES];
-  assert.deepEqual(new Set(names), new Set(['claude', 'gemini', 'codex']));
+  for (const name of CLOUD_AGENT_NAMES) {
+    assert.ok(names.includes(name), `AGENT_NAMES should include ${name}`);
+  }
+  assert.ok(names.includes('local'), 'AGENT_NAMES should include local');
+  assert.ok(names.every((name) => getAgent(name)?.type === 'physical'));
 });
 
-test('AGENT_NAMES.length is 3', () => {
-  assert.equal(AGENT_NAMES.length, 3);
+test('AGENT_NAMES.length is at least 3', () => {
+  assert.ok(AGENT_NAMES.length >= 3);
 });
 
 test('AGENT_NAMES.includes works', () => {
@@ -66,15 +75,32 @@ test('TASK_TYPES has 10 types including new ones', () => {
 test('each physical agent has required fields', () => {
   for (const [name, agent] of Object.entries(AGENTS)) {
     assert.ok(agent.label, `${name} should have a label`);
-    assert.ok(agent.cli, `${name} should have a cli command`);
     assert.ok(agent.invoke, `${name} should have invoke methods`);
-    assert.ok(typeof agent.invoke.nonInteractive === 'function', `${name} should have nonInteractive invoke`);
-    assert.ok(typeof agent.invoke.interactive === 'function', `${name} should have interactive invoke`);
+
+    if (agent.cli === null) {
+      assert.equal(name, 'local', 'only local should omit a CLI binary');
+      assert.equal(agent.invoke.nonInteractive, null, `${name} should not expose nonInteractive invoke`);
+      assert.equal(agent.invoke.interactive, null, `${name} should not expose interactive invoke`);
+      assert.equal(agent.invoke.headless, null, `${name} should not expose headless invoke`);
+    } else {
+      assert.equal(typeof agent.cli, 'string', `${name} should have a cli command`);
+      assert.equal(typeof agent.invoke.nonInteractive, 'function', `${name} should have nonInteractive invoke`);
+      assert.equal(typeof agent.invoke.interactive, 'function', `${name} should have interactive invoke`);
+      assert.equal(typeof agent.invoke.headless, 'function', `${name} should have headless invoke`);
+    }
+
     assert.ok(typeof agent.contextBudget === 'number', `${name} should have contextBudget`);
-    assert.ok(agent.contextTier, `${name} should have contextTier`);
+    assert.ok(
+      agent.contextTier === null || typeof agent.contextTier === 'string',
+      `${name} should have a string or null contextTier`
+    );
     assert.ok(Array.isArray(agent.strengths), `${name} should have strengths array`);
     assert.ok(Array.isArray(agent.weaknesses), `${name} should have weaknesses array`);
-    assert.ok(agent.councilRole, `${name} should have councilRole`);
+    if (agent.councilRole === null) {
+      assert.equal(name, 'local', 'only local should omit a council role');
+    } else {
+      assert.ok(agent.councilRole, `${name} should have councilRole`);
+    }
     assert.ok(agent.taskAffinity, `${name} should have taskAffinity`);
     assert.ok(agent.rolePrompt, `${name} should have rolePrompt`);
     assert.ok(typeof agent.timeout === 'number', `${name} should have timeout`);
@@ -101,7 +127,9 @@ test('agent context tiers are assigned correctly', () => {
 });
 
 test('agent council roles are distinct', () => {
-  const roles = [...AGENT_NAMES].map((n) => getAgent(n).councilRole);
+  const roles = [...AGENT_NAMES]
+    .map((n) => getAgent(n).councilRole)
+    .filter((role) => role !== null);
   assert.equal(new Set(roles).size, roles.length, 'Council roles should be unique');
 });
 
@@ -111,7 +139,12 @@ test('getAgent returns agent config for known agents', () => {
   for (const name of AGENT_NAMES) {
     const agent = getAgent(name);
     assert.ok(agent, `getAgent(${name}) should return agent`);
-    assert.equal(agent.cli, name === 'claude' ? 'claude' : name);
+    if (name === 'local') {
+      assert.equal(agent.cli, null);
+      assert.equal(agent.councilRole, null);
+    } else {
+      assert.equal(agent.cli, name === 'claude' ? 'claude' : name);
+    }
   }
 });
 
@@ -287,6 +320,7 @@ test('unregisterAgent refuses to remove built-in physical agents', () => {
   assert.throws(() => unregisterAgent('claude'), /Cannot unregister/);
   assert.throws(() => unregisterAgent('gemini'), /Cannot unregister/);
   assert.throws(() => unregisterAgent('codex'), /Cannot unregister/);
+  assert.throws(() => unregisterAgent('local'), /Cannot unregister/);
 });
 
 test('unregisterAgent returns false for unknown agents', () => {
@@ -296,7 +330,7 @@ test('unregisterAgent returns false for unknown agents', () => {
 // ── resolvePhysicalAgent ─────────────────────────────────────────────────────
 
 test('resolvePhysicalAgent returns physical agent for physical names', () => {
-  for (const name of ['claude', 'gemini', 'codex']) {
+  for (const name of [...CLOUD_AGENT_NAMES, 'local']) {
     const resolved = resolvePhysicalAgent(name);
     assert.ok(resolved);
     assert.equal(resolved.name, name);
@@ -322,17 +356,19 @@ test('resolvePhysicalAgent returns null for unknown agents', () => {
 
 test('listAgents returns all agents when no filter', () => {
   const all = listAgents();
-  assert.ok(all.length >= 3, 'Should have at least 3 agents');
+  assert.ok(all.length >= 4, 'Should have at least 4 physical agents');
   const names = all.map((a) => a.name);
   assert.ok(names.includes('claude'));
   assert.ok(names.includes('gemini'));
   assert.ok(names.includes('codex'));
+  assert.ok(names.includes('local'));
 });
 
 test('listAgents filters by type', () => {
   const physical = listAgents({ type: 'physical' });
-  assert.equal(physical.length, 3);
+  assert.ok(physical.length >= 4);
   for (const a of physical) assert.equal(a.type, 'physical');
+  assert.ok(physical.some((agent) => agent.name === 'local'));
 
   // Register a virtual and check
   registerAgent('filter-test', { type: 'virtual', baseAgent: 'claude', rolePrompt: 'test' });
@@ -355,7 +391,10 @@ test('listAgents filters by enabled', () => {
 
 test('getPhysicalAgentNames returns only physical agents', () => {
   const names = getPhysicalAgentNames();
-  assert.deepEqual(new Set(names), new Set(['claude', 'gemini', 'codex']));
+  for (const name of [...CLOUD_AGENT_NAMES, 'local']) {
+    assert.ok(names.includes(name), `physical agent names should include ${name}`);
+  }
+  assert.ok(names.every((name) => getAgent(name)?.type === 'physical'));
 });
 
 test('getAllAgentNames includes virtual agents when registered', () => {

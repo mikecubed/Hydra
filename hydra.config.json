@@ -444,11 +444,23 @@
     "recurringThreshold": 3,
     "recurringWindowDays": 7
   },
+  "local": {
+    "enabled": false,
+    "baseUrl": "http://localhost:11434/v1",
+    "model": "mistral:7b",
+    "fastModel": "mistral:7b",
+    "budgetGate": {
+      "dailyPct": 80,
+      "weeklyPct": 75
+    }
+  },
   "routing": {
+    "mode": "balanced",
     "useLegacyTriage": false,
     "councilGate": true,
     "tandemEnabled": true,
-    "councilMode": "sequential"
+    "councilMode": "sequential",
+    "councilTimeoutMs": 420000
   },
   "modelRecovery": {
     "enabled": true,
