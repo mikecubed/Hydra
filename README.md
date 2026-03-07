@@ -256,6 +256,9 @@ hydra setup --uninstall
 | `:forge list` | List forged agents |
 | `:forge delete <name>` | Remove a forged agent |
 | `:agents` | List all registered agents |
+| `:agents add` | Register a new custom CLI or API agent |
+| `:agents remove <name>` | Remove a custom agent from config |
+| `:agents test <name>` | Send a test prompt to verify agent works |
 | `:agents info <name>` | Show agent details & config |
 | `:doctor` | Diagnostic stats & recent log entries |
 | `:doctor log` | Show last 25 diagnostic entries |
