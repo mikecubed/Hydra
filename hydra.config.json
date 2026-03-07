@@ -1,27 +1,24 @@
 {
   "version": 2,
-  "mode": "custom",
+  "mode": "performance",
   "models": {
     "gemini": {
-      "default": "gemini-3-pro-preview",
+      "default": "gemini-3.1-pro-preview",
       "fast": "gemini-3-flash-preview",
       "cheap": "gemini-3-flash-preview",
-      "active": "gemini-3-pro-preview",
-      "reasoningEffort": "deep"
+      "active": "default"
     },
     "codex": {
       "default": "gpt-5.4",
       "fast": "o4-mini",
       "cheap": "o4-mini",
-      "active": "gpt-5.4",
-      "reasoningEffort": null
+      "active": "gpt-5.4"
     },
     "claude": {
       "default": "claude-sonnet-4-6",
       "fast": "claude-sonnet-4-5-20250929",
       "cheap": "claude-haiku-4-5-20251001",
-      "active": "claude-sonnet-4-6",
-      "reasoningEffort": null
+      "active": "default"
     }
   },
   "aliases": {
@@ -31,10 +28,7 @@
       "2.5-pro": "gemini-2.5-pro",
       "2.5-flash": "gemini-2.5-flash",
       "3-pro": "gemini-3-pro-preview",
-      "3-flash": "gemini-3-flash-preview",
-      "g3pro": "gemini-3-pro",
-      "g3flash": "gemini-3-flash",
-      "thinking": "gemini-3-pro-deep-think"
+      "3-flash": "gemini-3-flash-preview"
     },
     "codex": {
       "gpt5": "gpt-5",
@@ -43,8 +37,7 @@
       "codex-5.2": "gpt-5.2-codex",
       "5.2-codex": "gpt-5.2-codex",
       "o4-mini": "o4-mini",
-      "o4mini": "o4-mini",
-      "gpt-5.4": "gpt-5.4"
+      "o4mini": "o4-mini"
     },
     "claude": {
       "opus": "claude-opus-4-6",
@@ -113,7 +106,7 @@
   "concierge": {
     "enabled": true,
     "model": "gpt-5",
-    "reasoningEffort": "low",
+    "reasoningEffort": "xhigh",
     "maxHistoryMessages": 40,
     "autoActivate": true,
     "showProviderInPrompt": true,
@@ -161,17 +154,17 @@
     "concierge": {
       "agent": "codex",
       "model": "gpt-5",
-      "reasoningEffort": "xhigh"
+      "reasoningEffort": null
     },
     "investigator": {
       "agent": "codex",
       "model": "gpt-5.2",
-      "reasoningEffort": "high"
+      "reasoningEffort": null
     },
     "nightlyHandoff": {
       "agent": "codex",
       "model": "o4-mini",
-      "reasoningEffort": null
+      "reasoningEffort": "low"
     }
   },
   "recommendations": {
@@ -234,10 +227,12 @@
         "test-writer",
         "doc-generator",
         "researcher",
-        "evolve-researcher"
+        "evolve-researcher",
+        "failure-doctor"
       ]
     },
     "custom": {},
+    "customAgents": [],
     "affinityLearning": {
       "enabled": true,
       "decayFactor": 0.9,
@@ -344,7 +339,7 @@
     "baseBranch": "dev",
     "branchPrefix": "nightly",
     "maxTasks": 5,
-    "maxHours": 6,
+    "maxHours": 4,
     "perTaskTimeoutMs": 900000,
     "sources": {
       "todoMd": true,
@@ -370,16 +365,7 @@
     "tasks": [],
     "investigator": {
       "enabled": true
-    },
-    "tokenBudget": {
-      "softLimit": 400000,
-      "hardLimit": 500000,
-      "perTaskEstimate": 80000,
-      "handoffThreshold": 0.7,
-      "warningThreshold": 0.5
-    },
-    "perTaskTimeoutMin": 15,
-    "handoffModel": "o4-mini"
+    }
   },
   "audit": {
     "maxFiles": 200,
@@ -397,7 +383,7 @@
   },
   "workers": {
     "permissionMode": "auto-edit",
-    "autoStart": true,
+    "autoStart": false,
     "pollIntervalMs": 1500,
     "maxOutputBufferKB": 8,
     "autoChain": true,
@@ -421,14 +407,14 @@
   "providers": {
     "openai": {
       "adminKey": null,
-      "tier": 3
+      "tier": 1
     },
     "anthropic": {
       "adminKey": null,
       "tier": 1
     },
     "google": {
-      "tier": 1
+      "tier": "free"
     },
     "rateLimit": {
       "openai": 60,
@@ -591,30 +577,5 @@
   },
   "telemetry": {
     "enabled": true
-  },
-  "worktrees": {
-    "enabled": false,
-    "basePath": ".hydra/worktrees",
-    "autoCleanup": true,
-    "branchPrefix": "hydra/"
-  },
-  "crossModelVerification": {
-    "enabled": true,
-    "mode": "on-complex",
-    "pairings": {
-      "gemini": "claude",
-      "codex": "claude",
-      "claude": "gemini"
-    }
-  },
-  "mcp": {
-    "codex": {
-      "enabled": false,
-      "command": "codex",
-      "args": [
-        "mcp-server"
-      ],
-      "sessionTimeout": 300000
-    }
   }
 }
