@@ -464,12 +464,14 @@ test('each AFFINITY_PRESETS entry covers all 10 task types with numbers', () => 
 import { describe, it, beforeEach, afterEach } from 'node:test';
 
 describe('initAgentRegistry — custom physical agents', () => {
-  let originalCustomAgents;
+  let originalAgentsCfg;
 
   beforeEach(() => {
-    originalCustomAgents = loadHydraConfig().agents?.customAgents || [];
+    const cfg = loadHydraConfig();
+    originalAgentsCfg = cfg.agents;
     saveHydraConfig({
       agents: {
+        ...cfg.agents,
         customAgents: [
           {
             name: 'test-cli-agent',
@@ -512,7 +514,7 @@ describe('initAgentRegistry — custom physical agents', () => {
   });
 
   afterEach(() => {
-    saveHydraConfig({ agents: { customAgents: originalCustomAgents } });
+    saveHydraConfig({ agents: originalAgentsCfg });
     _resetRegistry();
     initAgentRegistry();
   });
@@ -551,13 +553,13 @@ describe('initAgentRegistry — custom physical agents', () => {
       ...(cfg.agents?.customAgents || []),
       { name: 'bad-type-agent', type: 'invalid', displayName: 'Bad' },
     ];
-    saveHydraConfig({ agents: { customAgents: withBadEntry } });
+    saveHydraConfig({ agents: { ...cfg.agents, customAgents: withBadEntry } });
     _resetRegistry();
     initAgentRegistry();
 
     assert.equal(getAgent('bad-type-agent'), null, 'invalid type should be silently skipped');
     // Cleanup (afterEach will also restore, but be explicit)
-    saveHydraConfig({ agents: { customAgents: cfg.agents?.customAgents || [] } });
+    saveHydraConfig({ agents: cfg.agents });
     _resetRegistry();
     initAgentRegistry();
   });
