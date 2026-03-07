@@ -569,3 +569,151 @@ Communicates via JSON-RPC over stdio. Available tools:
 | `hydra_handoffs_ack` | Acknowledge a handoff |
 | `hydra_council_request` | Request council deliberation on a prompt |
 | `hydra_status` | Get daemon health and summary |
+
+---
+
+## Operator Commands Reference
+
+Full reference for all operator console commands. Access the console with `npm run go`.
+
+### Session & Navigation
+
+| Command | Description |
+|---------|-------------|
+| `:help` | Show all commands |
+| `:status` | Dashboard with agents, tasks, and metrics |
+| `:sitrep` | AI-narrated situation report |
+| `:resume` | Scan all resumable state (daemon, evolve, branches, suggestions) |
+| `:pause [reason]` | Pause the active session |
+| `:unpause` | Resume a paused session |
+| `:fork` | Fork current session (explore alternatives with copied state) |
+| `:spawn <focus>` | Spawn child session (fresh state for focused subtask) |
+| `:events` | Show recent event log |
+| `:archive` | Archive completed work and trim events |
+| `:clear` | Interactive menu to select clear target |
+| `:clear all` | Cancel all tasks & acknowledge all handoffs |
+| `:clear concierge` | Clear concierge conversation history |
+| `:clear metrics` | Reset session metrics |
+| `:clear screen` | Clear terminal |
+| `:dry-run` | Toggle dry-run mode (preview dispatches without executing) |
+| `:confirm` | Show/toggle dispatch confirmation prompts |
+| `:shutdown` | Stop the daemon |
+| `:quit` | Exit operator console |
+
+### Dispatch & Routing
+
+| Command | Description |
+|---------|-------------|
+| `:mode auto` | Triage then route to single / tandem / council |
+| `:mode smart` | Auto-select model tier per prompt complexity |
+| `:mode council` | Full multi-round deliberation |
+| `:mode dispatch` | Headless pipeline (queues to workers) |
+| `:mode handoff` | Direct handoffs, no triage |
+| `:mode economy\|balanced\|performance` | Set routing cost tier |
+| `!<prompt>` | Force dispatch, bypassing the concierge |
+| `agents=claude,gemini <prompt>` | Dispatch with agent filter |
+
+### Agents & Models
+
+| Command | Description |
+|---------|-------------|
+| `:model` | Show active mode and models per agent |
+| `:model claude=sonnet` | Override agent model |
+| `:model reset` | Clear all model overrides |
+| `:model:select [agent]` | Interactive model + reasoning effort picker |
+| `:roles` | Show role → agent → model mapping |
+| `:roster` | Edit role → agent → model assignments interactively |
+| `:agents` | List all registered agents (built-in + custom) |
+| `:agents add` | Add a custom agent via wizard |
+| `:agents remove <name>` | Remove a custom agent |
+| `:agents test <name>` | Test a custom agent with a sample prompt |
+| `:agents info <name>` | Show agent details and config |
+| `:forge` | Interactive agent creation wizard (Agent Forge pipeline) |
+| `:forge list` | List forged agents |
+| `:forge delete <name>` | Remove a forged agent |
+| `:watch <agent>` | Open a visible terminal window for an agent |
+
+### Workers
+
+| Command | Description |
+|---------|-------------|
+| `:workers` | Show worker status |
+| `:workers start [agent]` | Start worker(s) |
+| `:workers stop [agent]` | Stop worker(s) |
+| `:workers restart` | Restart all workers |
+| `:workers mode <mode>` | Change permission mode (`auto-edit` / `full-auto`) |
+
+### Tasks & Handoffs
+
+| Command | Description |
+|---------|-------------|
+| `:tasks` | List active daemon tasks |
+| `:tasks scan` | Scan codebase for TODO/FIXME/issues |
+| `:tasks run` | Launch autonomous tasks runner |
+| `:tasks review` | Interactive branch review & merge |
+| `:tasks status` | Show latest tasks run report |
+| `:tasks clean` | Delete all `tasks/*` branches |
+| `:handoffs` | List pending & recent handoffs |
+| `:cancel <id>` | Cancel a task |
+
+### Automation
+
+| Command | Description |
+|---------|-------------|
+| `:evolve` | Launch self-improvement session |
+| `:evolve status` | Show latest evolve report |
+| `:evolve resume` | Resume interrupted session |
+| `:evolve knowledge` | Browse knowledge base entries |
+| `:nightly` | Interactive nightly run setup (mode, tasks, hours, discovery) |
+| `:nightly dry-run` | Scan & prioritize without executing |
+| `:nightly review` | Interactive branch review & merge |
+| `:nightly status` | Show latest nightly run report |
+| `:nightly clean` | Delete all `nightly/*` branches |
+
+### Monitoring & Diagnostics
+
+| Command | Description |
+|---------|-------------|
+| `:usage` | Token usage breakdown and contingency options |
+| `:stats` | Agent metrics and performance summary |
+| `:doctor` | Diagnostic stats and recent log entries |
+| `:doctor log` | Show last 25 diagnostic log entries |
+| `:doctor fix` | Auto-detect and fix issues via action pipeline |
+| `:doctor diagnose <text>` | Investigate a failure via GPT-5.3 |
+| `:doctor config` | Check for config drift from defaults |
+| `:kb` | Knowledge base stats and recent entries |
+| `:kb <query>` | Search knowledge base |
+| `:cleanup` | Scan and clean stale branches, tasks, and artifacts |
+
+### Concierge Chat
+
+| Command | Description |
+|---------|-------------|
+| `:chat` | Toggle concierge on/off |
+| `:chat model` | Show active model and full fallback chain |
+| `:chat model <name>` | Switch concierge model (e.g. `sonnet`, `flash`, `gpt-5`) |
+| `:chat export` | Export conversation history to file |
+
+### Persona
+
+| Command | Description |
+|---------|-------------|
+| `:persona` | Interactive personality editor |
+| `:persona show` | Show current personality configuration |
+| `:persona <preset>` | Apply preset (default / professional / casual / analytical / terse) |
+
+### GitHub & PRs
+
+| Command | Description |
+|---------|-------------|
+| `:github` | GitHub status |
+| `:github prs` | List open pull requests |
+| `:pr create [branch]` | Push branch and create PR |
+| `:pr list` | List open pull requests |
+| `:pr view <number>` | Show PR details |
+
+### System & Sync
+
+| Command | Description |
+|---------|-------------|
+| `:sync` | Sync `HYDRA.md` to per-agent instruction files |
