@@ -12,8 +12,10 @@
 ## Table of Contents
 
 - [What Is Hydra?](#what-is-hydra)
+- [Why Hydra?](#why-hydra)
 - [Quick Start](#quick-start)
 - [How It Works](#how-it-works)
+- [When to Use It](#when-to-use-it)
 - [Features](#features)
 - [Essential Commands](#essential-commands)
 - [Configuration](#configuration)
@@ -45,6 +47,23 @@ Hydra routes your prompt to the right agent — or orchestrates all three — th
 
 Coordinates [Gemini CLI](https://github.com/google-gemini/gemini-cli), [Codex CLI](https://github.com/openai/codex), and [Claude Code](https://docs.anthropic.com/en/docs/claude-code) through an event-sourced HTTP daemon with task queue, intelligent routing, and multi-round deliberation.
 
+## Why Hydra?
+
+A common question: *"Why not just tell Claude Code to call `gemini -p` and `codex` from CLAUDE.md?"*
+
+That works for one-shot delegation. Hydra gives you an orchestration runtime:
+
+| | CLAUDE.md chaining | Hydra |
+|---|---|---|
+| Multi-round deliberation | Manual, ad-hoc | Structured council with convergence criteria and named decision owner |
+| State persistence | None between sessions | Event-sourced daemon, survives restarts, full replay |
+| Parallel execution | Sequential only | Headless workers claim tasks concurrently from a shared queue |
+| Budget management | None | Three-tier token tracking with automatic model downgrade at thresholds |
+| Task isolation | Shared workspace | Per-task git worktrees, no branch conflicts |
+| Cross-session recovery | Manual | `:resume` scans all resumable state in one command |
+
+Use CLAUDE.md chaining when you need one agent to occasionally consult another. Use Hydra when you want a coordinated runtime that persists, tracks, isolates, and recovers across the full lifecycle of a task.
+
 ## Quick Start
 
 **Requirements:** Node.js 20+, at least one AI CLI installed ([`gemini`](https://github.com/google-gemini/gemini-cli), [`codex`](https://github.com/openai/codex), or [`claude`](https://docs.anthropic.com/en/docs/claude-code))
@@ -64,10 +83,13 @@ node lib/hydra-setup.mjs   # or: hydra setup (after PATH install)
 
 Type a prompt in the operator console. Hydra routes it. Use `:help` to see all commands.
 
+**Platform notes:** `npm run go` works on Linux, macOS, and Windows. The `pwsh ./bin/hydra.ps1` launcher is Windows-only and starts daemon + agent heads + operator together. Linux/macOS users run `npm run go` and `npm start` directly.
+
+**API keys:** Hydra orchestrates your installed AI CLIs using their own auth — no Hydra-specific API keys required. The optional concierge chat layer can use `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, or `GEMINI_API_KEY` for direct streaming responses, but falls back gracefully if none are set.
+
 **Optional dependencies:**
 - [`gh` CLI](https://cli.github.com) — GitHub integration (PRs, issue scanning)
 - [`@opentelemetry/api`](https://www.npmjs.com/package/@opentelemetry/api) — distributed tracing
-- PowerShell 7+ — Windows launchers in `bin/`
 
 ## How It Works
 
@@ -89,6 +111,18 @@ Switch modes with `:mode <name>` at any time. The daemon persists state across m
 - **Council** — all three agents deliberate with structured synthesis
 
 All routing decisions happen via a local heuristic. No API calls are made until an agent is dispatched.
+
+## When to Use It
+
+**Architecture decisions** — unsure which direction to take? Council mode gets Claude to propose, Gemini to challenge assumptions, Claude to refine, and Codex to produce the first implementation. Each perspective surfaces failure modes the others miss.
+
+**Deep code audits** — `:nightly` scans your codebase for TODOs, issues, and improvement opportunities overnight, then executes them autonomously with budget tracking and per-task branch isolation.
+
+**Staying under token limits** — Smart mode routes simple tasks to economy agents and reserves Claude for complex work. Affinity routing learns from outcomes. Budget thresholds auto-downgrade models before you hit a wall.
+
+**Parallel autonomous work** — headless workers claim tasks from the daemon queue and execute concurrently in isolated git worktrees. Kick off a batch and check results later with `:tasks review`.
+
+**Uncertain or high-stakes changes** — tandem mode lets Claude analyze the problem and Codex implement the fix independently, then cross-model verification reviews the result before it lands.
 
 ## Features
 
@@ -258,6 +292,8 @@ Prompt → Intent Gate → Concierge → Route Classifier
 ## Daemon Security
 
 The HTTP daemon binds to `127.0.0.1` (localhost only) by default. It is designed for local, single-user use and does not include authentication. Do not expose port 4173 externally.
+
+**Terms of service:** Hydra invokes the official CLI tools (`claude`, `gemini`, `codex`) as subprocesses using their own authentication. It does not bypass, proxy, or reimplement any provider's auth flow. Each CLI vendor's ToS applies to their own tool; Hydra adds orchestration on top.
 
 See [SECURITY.md](SECURITY.md) for vulnerability reporting.
 
