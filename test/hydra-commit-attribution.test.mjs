@@ -61,6 +61,19 @@ describe('buildSafetyPrompt — attribution', () => {
     assert.ok(result.includes('### Scope'));
     assert.ok(result.includes('### Commit Attribution'));
   });
+
+  it('includes doc-update requirement in scope section', () => {
+    const result = buildSafetyPrompt('test-branch', {
+      runner: 'test-runner',
+      reportName: 'test-report',
+      protectedFiles: [],
+      blockedCommands: [],
+    });
+    assert.ok(
+      result.includes('README.md') && result.includes('ARCHITECTURE.md'),
+      'safety prompt should require updating README.md and docs/ARCHITECTURE.md'
+    );
+  });
 });
 
 // ── stageAndCommit trailer tests ────────────────────────────────────────────
