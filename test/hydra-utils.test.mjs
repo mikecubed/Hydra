@@ -572,7 +572,7 @@ not ok 2 - test b fails
 // ── runProcess ──────────────────────────────────────────────────────────────
 
 test('runProcess returns ok:true for successful command', () => {
-  const result = runProcess('node', ['-e', "console.log('hello')"]);
+  const result = runProcess(process.execPath, ['-e', "console.log('hello')"]);
   assert.equal(result.ok, true);
   assert.equal(result.exitCode, 0);
   assert.ok(result.stdout.includes('hello'));
@@ -581,18 +581,18 @@ test('runProcess returns ok:true for successful command', () => {
 });
 
 test('runProcess returns ok:false for non-zero exit', () => {
-  const result = runProcess('node', ['-e', 'process.exit(42)']);
+  const result = runProcess(process.execPath, ['-e', 'process.exit(42)']);
   assert.equal(result.ok, false);
   assert.equal(result.exitCode, 42);
 });
 
 test('runProcess captures stderr', () => {
-  const result = runProcess('node', ['-e', "console.error('oops')"]);
+  const result = runProcess(process.execPath, ['-e', "console.error('oops')"]);
   assert.ok(result.stderr.includes('oops'));
 });
 
 test('runProcess handles timeout', () => {
-  const result = runProcess('node', ['-e', 'setTimeout(()=>{},10000)'], 500);
+  const result = runProcess(process.execPath, ['-e', 'setTimeout(()=>{},10000)'], 500);
   assert.equal(result.ok, false);
   assert.equal(result.timedOut, true);
 });
@@ -604,13 +604,13 @@ test('runProcess returns ok:false for unknown command', () => {
 });
 
 test('runProcess respects cwd option', () => {
-  const result = runProcess('node', ['-e', "console.log(process.cwd())"], undefined, { cwd: process.cwd() });
+  const result = runProcess(process.execPath, ['-e', "console.log(process.cwd())"], undefined, { cwd: process.cwd() });
   assert.equal(result.ok, true);
   assert.ok(result.stdout.trim().length > 0);
 });
 
 test('runProcess pipes stdin input', () => {
-  const result = runProcess('node', ['-e', "let d='';process.stdin.on('data',c=>d+=c);process.stdin.on('end',()=>console.log(d))"], undefined, { input: 'piped-data' });
+  const result = runProcess(process.execPath, ['-e', "let d='';process.stdin.on('data',c=>d+=c);process.stdin.on('end',()=>console.log(d))"], undefined, { input: 'piped-data' });
   assert.equal(result.ok, true);
   assert.ok(result.stdout.includes('piped-data'));
 });
