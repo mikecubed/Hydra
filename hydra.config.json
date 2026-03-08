@@ -12,7 +12,7 @@
       "default": "gpt-5.4",
       "fast": "o4-mini",
       "cheap": "o4-mini",
-      "active": "default"
+      "active": "gpt-5.4"
     },
     "claude": {
       "default": "claude-sonnet-4-6",
