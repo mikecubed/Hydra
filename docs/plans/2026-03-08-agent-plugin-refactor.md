@@ -1,7 +1,7 @@
 # Agent Plugin Refactor — Level 1
 
 **Date:** 2026-03-08
-**Status:** Draft
+**Status:** Revised (GPT-5.4 review applied 2026-03-08)
 **Unblocks:** custom agents plan, Copilot integration plan
 
 ## Problem
@@ -17,7 +17,8 @@ The agent registry (`PHYSICAL_AGENTS` in `hydra-agents.mjs`) already looks like 
 | `orchestrator-daemon.mjs` | Read instructions, task rules per agent |
 | `hydra-model-recovery.mjs` | Quota API endpoints and patterns |
 | `hydra-operator.mjs` | Role-specific prompt addenda |
-| `hydra-council.mjs` | Agent-specific phase filtering |
+| `hydra-audit.mjs` | Agent commands and economy model hardcodes |
+| `hydra-council.mjs` | Agent-specific phase filtering *(excluded — see scope)* |
 | `hydra-evolve.mjs` | Error handling behavior |
 
 Adding Copilot or any custom agent currently requires touching all of these. This refactor colocates that behavior with the agent definition, making the executor and all callsites data-driven.
@@ -39,16 +40,23 @@ This extends the existing shape (all new fields are optional with defaults):
 
   // ── New: feature flags (executor routing) ─────────────────────────
   features: {
-    executeMode: 'spawn',     // 'spawn' | 'api' | 'gemini-direct'
-                              // 'api' → executeLocalAgent(), 'gemini-direct' → executeGeminiDirect()
+    // Transport for this agent. 'spawn' = shell CLI; 'api' = HTTP (no spawn, used by local).
+    // Do NOT add agent-specific transports here (e.g. no 'gemini-direct') —
+    // the Gemini workaround for CLI v0.27.x lives inside executeGeminiDirect() and is
+    // invoked transparently by Gemini's invoke.headless(). When the CLI is fixed,
+    // only that function changes, not this flag.
+    executeMode: 'spawn',     // 'spawn' | 'api'
     jsonOutput: true,         // stdout is structured JSON/JSONL
     stdinPrompt: true,        // prompt delivered via stdin (not -p flag)
     reasoningEffort: false,   // supports --reasoning-effort flag
   },
 
   // ── New: output parsing ───────────────────────────────────────────
-  // Called by executeAgent() and hydra-metrics.mjs after spawn exits.
-  // Returns { output: string, tokenUsage: object|null, costUsd: number|null }
+  // Called ONCE by executeAgent() after the process exits. The result
+  // { output, tokenUsage, costUsd } is embedded in the return value of
+  // executeAgent() and forwarded to recordCallComplete() by the caller.
+  // hydra-metrics.mjs must NOT re-parse stdout — it receives pre-parsed
+  // tokenUsage from the executeAgent() result object directly.
   parseOutput(stdout, opts) { ... },
 
   // ── New: error patterns ───────────────────────────────────────────
@@ -107,6 +115,8 @@ This extends the existing shape (all new fields are optional with defaults):
 | `economyModel()` | `() => null` |
 | `readInstructions(f)` | `` (f) => `Read ${f} first.` `` |
 | `taskRules` | `[]` |
+
+> **`parseOutput` ownership:** `executeAgent()` is the **sole caller**. It embeds `{ output, tokenUsage, costUsd }` in the result object. `hydra-metrics.mjs` receives `tokenUsage` from that result — it must not attempt to re-parse `stdout`. The current per-agent extraction blocks in `hydra-metrics.mjs` (lines 144–184) are removed in Phase 3; `recordCallComplete()` already prefers caller-supplied `tokenUsage` (line 132), so this is a safe deletion.
 
 ---
 
@@ -172,9 +182,11 @@ taskRules: [
 
 ```javascript
 features: {
-  executeMode: 'gemini-direct',   // routes to executeGeminiDirect()
-  jsonOutput: true,               // -o json flag
-  stdinPrompt: false,             // -p flag
+  executeMode: 'spawn',   // NOT 'gemini-direct' — the CLI workaround is internal to
+                          // invoke.headless(), which calls executeGeminiDirect() when
+                          // the CLI version is broken. The plugin surface stays clean.
+  jsonOutput: true,       // -o json flag
+  stdinPrompt: false,     // -p flag
   reasoningEffort: false,
 },
 
@@ -281,12 +293,13 @@ taskRules: [
 
 ```javascript
 features: {
-  executeMode: 'api',     // routes to executeLocalAgent() — no spawn
+  executeMode: 'api',     // routes to executeLocalAgent() — no spawn, no invoke.headless()
   jsonOutput: false,
   stdinPrompt: false,
   reasoningEffort: false,
 },
-
+// local.invoke.headless remains null — executor MUST check features.executeMode === 'api'
+// before attempting invoke.headless(). Phase 2 must guard: if (agentDef.features.executeMode !== 'spawn') skip arg-building.
 parseOutput: (stdout) => ({ output: stdout, tokenUsage: null, costUsd: null }),
 errorPatterns: {
   networkError: /ECONNREFUSED|ENOTFOUND|connection refused/i,
@@ -370,7 +383,15 @@ Add all new methods/fields to the 4 existing `PHYSICAL_AGENTS` entries. Update `
 Key validation to add in `registerAgent()`:
 ```javascript
 // Apply defaults for plugin interface fields
-entry.features = { executeMode: 'spawn', jsonOutput: false, stdinPrompt: false, reasoningEffort: false, ...def.features };
+// customType:'api' implies executeMode:'api' unless explicitly overridden
+const defaultExecuteMode = def.customType === 'api' ? 'api' : 'spawn';
+entry.features = {
+  executeMode: defaultExecuteMode,
+  jsonOutput: false,
+  stdinPrompt: false,
+  reasoningEffort: false,
+  ...def.features,
+};
 entry.parseOutput = def.parseOutput ?? ((stdout) => ({ output: stdout, tokenUsage: null, costUsd: null }));
 entry.errorPatterns = def.errorPatterns ?? {};
 entry.modelBelongsTo = def.modelBelongsTo ?? (() => false);
@@ -423,16 +444,35 @@ tokenUsage = parsed.tokenUsage;
 costUsd = parsed.costUsd;
 ```
 
-Route `executeMode`:
+Route `executeMode` — **check before building args, not after**:
 ```javascript
-// Before:
+// Before (lines 858-889):
 if (agent === 'gemini') return executeGeminiDirect(prompt, opts);
 if (agent === 'local') return executeLocalAgent(prompt, opts);
+if (customDef?.customType === 'cli') → executeCustomCliAgent();
+if (customDef?.customType === 'api') → executeCustomApiAgent();
 
 // After:
-if (agentDef.features.executeMode === 'gemini-direct') return executeGeminiDirect(prompt, opts);
+const agentDef = getAgent(agent);
 if (agentDef.features.executeMode === 'api') return executeLocalAgent(prompt, opts);
+// 'spawn' path continues — arg building, spawn, output parsing
+
+// Inside the spawn path, guard before calling invoke.headless():
+if (!agentDef.invoke?.headless) {
+  throw new Error(`Agent '${agent}' has no headless invoke but executeMode is 'spawn'`);
+}
+[cmd, args] = agentDef.invoke.headless(prompt, {
+  model: effectiveCliModelId,
+  permissionMode: permissionMode || 'auto-edit',
+  jsonOutput: agentDef.features.jsonOutput,
+  reasoningEffort: agentDef.features.reasoningEffort
+    ? (effortOverride || getReasoningEffort(agent))
+    : undefined,
+  cwd,
+});
 ```
+
+> **Gemini routing note:** `executeGeminiDirect()` is now invoked transparently inside `gemini.invoke.headless()`, not from `executeAgent()`'s routing block. This keeps the workaround internal and removes the last hardcoded agent name from the executor's routing section. If the Gemini CLI bug is fixed, only `invoke.headless()` changes.
 
 ### Phase 3 — Migrate callsites
 
@@ -484,7 +524,23 @@ Once Phase 1–3 are done:
 - `registerAgent()` API is backward-compatible — existing callers unaffected
 - The agent names (`claude`, `gemini`, `codex`, `local`) don't change
 - No external plugin loading, no manifest files, no hot-reload
-- `hydra-council.mjs` phase filtering (`entry.agent === 'claude'`) — these are filtering log entries by agent name, not dispatching behavior. Leave for a follow-up; they're not in the hot path.
+- **`hydra-council.mjs` phase filters** (`entry.agent === 'claude'`) — these filter log *entries* by name, not dispatch behavior. Leave for a follow-up.
+- **`hydra-audit.mjs`** agent command/model hardcodes — in scope for Phase 3 but low risk; can be last.
+
+## Phase 2 Without Phase 3 — Risk Inventory
+
+If Phase 2 (executor refactor) ships without Phase 3 (callsite cleanup) complete, the built-in agents still run correctly — but any **new or non-core agent** (Copilot, custom) will exhibit silent failures:
+
+| Callsite | Symptom if not migrated |
+|---|---|
+| `hydra-usage.mjs modelBelongsToAgent()` | `modelBelongsTo()` returns `false` → usage stats show "unknown agent" or wrong ownership |
+| `hydra-actualize.mjs` economy model | Economy mode ignores the agent's preferred fallback; falls through to `undefined` → uses full model unexpectedly |
+| `orchestrator-daemon.mjs` read instructions | New agent gets hardcoded Claude instructions; wrong context preamble |
+| `hydra-model-recovery.mjs` quota check | Quota verification silently skipped (`undefined` at line 430); agent marked healthy when quota is exhausted |
+| `hydra-operator.mjs` task rules | Generic rules only; agent-specific guidance missing |
+| `hydra-metrics.mjs` token extraction | New agents still get the old per-agent if/else (which won't match) → `tokenUsage: null` → cost accounting silent gap |
+
+**Conclusion:** Phase 2 and Phase 3 must ship together. They are a single atomic PR.
 
 ---
 
@@ -568,10 +624,47 @@ describe('codex parseOutput', () => {
     assert.equal(tokenUsage.inputTokens, 60);
     assert.equal(tokenUsage.outputTokens, 25);
   });
+
+  it('mixed message/usage/error JSONL does not crash and accumulates tokens', () => {
+    const stdout = [
+      JSON.stringify({ type: 'message', content: 'Part 1. ', usage: { input_tokens: 10, output_tokens: 5 } }),
+      JSON.stringify({ type: 'error', message: 'Tool failed' }),
+      JSON.stringify({ type: 'message', content: 'Part 2.', usage: { input_tokens: 8, output_tokens: 3 } }),
+    ].join('\n');
+    const { output, tokenUsage } = getAgent('codex').parseOutput(stdout);
+    assert.ok(output.includes('Part 1'));
+    assert.ok(output.includes('Part 2'));
+    assert.equal(tokenUsage.inputTokens, 18);
+    assert.equal(tokenUsage.outputTokens, 8);
+  });
+
+  it('non-JSON stdout falls back to raw', () => {
+    const { output, tokenUsage } = getAgent('codex').parseOutput('plain text');
+    assert.equal(output, 'plain text');
+    assert.equal(tokenUsage, null);
+  });
+});
+
+describe('executor routing guards', () => {
+  it('local agent has executeMode=api and invoke.headless=null', () => {
+    const a = getAgent('local');
+    assert.equal(a.features.executeMode, 'api');
+    assert.equal(a.invoke.headless, null);
+  });
+
+  it('custom api agent gets executeMode=api default from customType', () => {
+    registerAgent('test-api-agent', {
+      type: 'physical', customType: 'api',
+      invoke: { headless: null },
+    });
+    // executeMode should default to 'api' when customType === 'api'
+    assert.equal(getAgent('test-api-agent').features.executeMode, 'api');
+  });
 });
 ```
 
 ---
 
 *Document created: 2026-03-08*
-*Status: Draft — ready for implementation*
+*Revised: 2026-03-08 — GPT-5.4 review: fixed gemini-direct abstraction leak, local headless null guard, parseOutput double-parse risk, added Phase 2+3 atomicity requirement, added hydra-audit.mjs to scope, expanded test fixtures*
+*Status: Revised — ready for implementation*
