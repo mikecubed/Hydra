@@ -118,10 +118,19 @@ copilot: {
     // nonInteractive runs with plan-mode approval (no --allow flags) to match
     // the permission table above. Callers (daemon, triage) must not expect
     // file-modification side-effects from nonInteractive calls.
-    nonInteractive: (prompt) => ['copilot', ['-p', prompt]],
+    nonInteractive: (prompt, opts = {}) => {
+      const args = ['-p', prompt];
+      // opts.model = cliModelId from MODEL_PROFILES entry (e.g. 'claude-sonnet-4-6')
+      if (opts.model) args.push('--model', opts.model);
+      return ['copilot', args];
+    },
     interactive: (prompt) => ['copilot', [prompt]],
     headless: (prompt, opts = {}) => {
       const args = ['-p', prompt];
+      // opts.model resolved by agent-executor via getCopilotCliModelId()
+      if (opts.model) args.push('--model', opts.model);
+      // JSON output — gated on features.jsonOutput; false until CLI ships the flag
+      if (opts.jsonOutput) args.push('--output-format', 'json');
       if (opts.permissionMode === 'full-auto') {
         args.push('--allow-all-tools');
       } else if (opts.permissionMode === 'auto-edit') {
@@ -133,6 +142,10 @@ copilot: {
   },
   contextBudget: 128_000,
   contextTier: 'medium',
+  // Feature flags — flip jsonOutput to true when Copilot CLI ships --output-format json
+  features: {
+    jsonOutput: false,
+  },
   strengths: [
     'github-integration',
     'issue-pr-awareness',
@@ -140,9 +153,10 @@ copilot: {
     'code-suggestion',
     'real-time-assist',
     'mcp-native',
+    'multi-model',             // Claude Opus/Sonnet 4.6, GPT-5.4, Gemini 3.1 Pro
   ],
   weaknesses: [
-    'no-json-output',          // Structured output not yet supported
+    'no-json-output',          // features.jsonOutput: false — upgrade when CLI ships --output-format json
     'subscription-required',   // Requires active Copilot plan
     'github-account-auth',     // Must be authenticated via GH_TOKEN or device flow
     'complex-architecture',
@@ -175,7 +189,7 @@ Output structure: GitHub context summary → Actionable suggestions → Commands
 },
 ```
 
-**Also update** `initAgentRegistry()` output-format detection in `hydra-shared/agent-executor.mjs` to handle Copilot's text-only output (see Task 3).
+**Also update** `initAgentRegistry()` output-format detection in `hydra-shared/agent-executor.mjs` to handle Copilot's text-only output (see Task 3). Also add `getCopilotCliModelId(profileKey)` helper that returns `MODEL_PROFILES[profileKey]?.cliModelId ?? profileKey`.
 
 ---
 
@@ -218,18 +232,48 @@ export const AGENT_ICONS = {
 **Files:**
 - `lib/hydra-shared/agent-executor.mjs` — Add Copilot-specific output handling
 
-**Context:** Copilot CLI does not support `--output-format json`. Its output is markdown/text. The executor currently parses JSON for Claude and Codex. Gemini uses `-o json` for JSON output.
+**Context:** Copilot CLI currently has no `--output-format json` flag — output is markdown/text. JSON output mode is planned for the next Copilot CLI release and is pre-wired via `features.jsonOutput` (see Task 1). The executor needs to handle both the current text path and the future JSON upgrade path.
 
 **What to change:**
 
-Locate the output parsing section in `executeAgent()` (in `lib/hydra-shared/agent-executor.mjs`, inside the `executeAgent` function after `spawnResult` is obtained) and add a Copilot branch alongside the existing Gemini text-mode handling. Copilot output should be treated as `result.output` (plain text) without JSON parsing — identical to how Gemini text mode works.
-
-In the agent invocation detection block (search for `useStdin` assignment near the top of `executeAgent()`), ensure `useStdin` is set to `false` for Copilot (it uses `-p` flag, not stdin piping):
+In the agent invocation detection block, ensure `useStdin` is `false` for Copilot (it uses `-p` flag, not stdin piping):
 
 ```javascript
 // In the agent → stdin/flag routing
 if (agent === 'copilot') {
   useStdin = false;  // Copilot uses -p flag, not stdin
+}
+```
+
+Add model resolution before building args. Resolve the `cliModelId` from the active profile:
+
+```javascript
+// After: const effectiveModel = modelOverride || getActiveModel(agent) || 'unknown';
+// Add for copilot:
+if (agent === 'copilot') {
+  const copilotProfile = MODEL_PROFILES[effectiveModel];
+  opts.model = copilotProfile?.cliModelId ?? effectiveModel;
+  opts.jsonOutput = getAgent('copilot')?.features?.jsonOutput ?? false;
+}
+```
+
+In the output parsing section, add a Copilot branch:
+
+```javascript
+if (agent === 'copilot') {
+  if (opts.jsonOutput) {
+    // Future: parse structured JSON output once CLI ships --output-format json
+    // Expected shape: { result: { output: string, ... } } — validate when available
+    try {
+      const parsed = JSON.parse(stdout);
+      result.output = parsed?.result?.output ?? parsed?.output ?? stdout;
+    } catch {
+      result.output = stdout;  // Graceful fallback if JSON parse fails
+    }
+  } else {
+    // Current: treat stdout as plain text (same as Gemini text mode)
+    result.output = stdout;
+  }
 }
 ```
 
@@ -241,6 +285,7 @@ copilot: {
   rateLimited: /rate limit|quota exceeded|too many requests/i,
   networkError: /network error|connection refused|ECONNREFUSED/i,
   subscriptionRequired: /copilot plan required|upgrade your plan/i,
+  quotaExhausted: /premium request.*limit|monthly.*quota.*exceeded/i,
 }
 ```
 
@@ -253,63 +298,121 @@ copilot: {
 
 **What to add** to `MODEL_PROFILES`:
 
+> **Note on model IDs:** The `id` field is Hydra's internal profile key (prefixed `copilot-`). The `cliModelId` field is the actual value passed to `copilot --model <id>`. These may differ — validate against `copilot /model` output when the CLI is available.
+
+> **Note on rate limits:** All rate limit values below are estimates. Copilot subscription tiers (Individual = tier 1, Business = tier 2, Enterprise = tier 3) share quota pools across models. The rpm/tpm values reflect sustained throughput, not monthly premium-request quota. Update from GitHub's official rate limit documentation when published.
+
 ```javascript
-'copilot-claude-sonnet-4-5': {
-  id: 'copilot-claude-sonnet-4-5',
+'copilot-claude-sonnet-4-6': {
+  id: 'copilot-claude-sonnet-4-6',
+  cliModelId: 'claude-sonnet-4-6',         // value passed to copilot --model
   provider: 'github',
   agent: 'copilot',
-  displayName: 'Copilot (Claude Sonnet 4.5)',
+  displayName: 'Copilot (Claude Sonnet 4.6)',
   shortName: 'copilot-sonnet',
   tier: 'mid',
   contextWindow: 128_000,
   maxOutput: 64_000,
-  pricePer1M: { input: 0, output: 0 },      // Included in Copilot subscription
+  pricePer1M: { input: 0, output: 0 },     // Included in Copilot subscription
   costPer1K: { input: 0, output: 0 },
-  tokPerSec: 60,
+  tokPerSec: 75,                            // Estimated; inherits Sonnet 4.6 base perf
   ttft: 2.0,
   reasoning: { type: 'none', levels: ['off'], default: 'off' },
-  benchmarks: { sweBench: 77.2 },           // Estimated — inherits Claude Sonnet 4.5 base; actual score may differ due to GitHub-specific tuning. Validate before publishing.
-  qualityScore: 78,
-  valueScore: 90,                            // High — subscription cost amortized
-  speedScore: 28,
-  strengths: ['github-integration', 'pr-awareness', 'code-suggestion', 'mcp-native'],
+  benchmarks: { sweBench: 79.2 },          // Inherits Claude Sonnet 4.6 base; GitHub tuning may vary
+  qualityScore: 85,
+  valueScore: 92,                           // High — subscription cost amortized
+  speedScore: 32,
+  strengths: ['github-integration', 'pr-awareness', 'code-suggestion', 'mcp-native', 'price-performance'],
   bestFor: ['review', 'documentation', 'implementation', 'refactor'],
   rateLimits: {
-    // Note: 'free' and tier 1 share the same *rate* limits (requests per minute /
-    // tokens per minute) but differ in *monthly quota* (premium requests):
-    //   free tier:  10 premium requests/month
-    //   tier 1 (Individual): 300 premium requests/month
-    // The rpm/tpm values below reflect sustained throughput capacity, not quota.
-    // Update when GitHub publishes official rate limit documentation.
     free: { rpm: 10, tpm: 100_000 },
-    1: { rpm: 10, tpm: 100_000 },           // Individual: 300 premium reqs/month quota
-    2: { rpm: 30, tpm: 300_000 },           // Business/Enterprise: higher rate + quota
+    1: { rpm: 10, tpm: 100_000 },          // Individual: 300 premium reqs/month quota
+    2: { rpm: 30, tpm: 300_000 },          // Business/Enterprise: higher rate + quota
+    3: { rpm: 50, tpm: 500_000 },
   },
 },
-'copilot-gpt-5': {
-  id: 'copilot-gpt-5',
+'copilot-claude-opus-4-6': {
+  id: 'copilot-claude-opus-4-6',
+  cliModelId: 'claude-opus-4-6',           // value passed to copilot --model
   provider: 'github',
   agent: 'copilot',
-  displayName: 'Copilot (GPT-5)',
-  shortName: 'copilot-gpt5',
+  displayName: 'Copilot (Claude Opus 4.6)',
+  shortName: 'copilot-opus',
   tier: 'flagship',
   contextWindow: 128_000,
   maxOutput: 64_000,
   pricePer1M: { input: 0, output: 0 },
   costPer1K: { input: 0, output: 0 },
-  tokPerSec: 45,
+  tokPerSec: 55,                            // Estimated; Opus is slower than Sonnet
   ttft: 2.5,
   reasoning: { type: 'none', levels: ['off'], default: 'off' },
-  benchmarks: {},
-  qualityScore: 88,
-  valueScore: 90,
+  benchmarks: { sweBench: 80.8 },          // Inherits Claude Opus 4.6 base
+  qualityScore: 95,
+  valueScore: 88,                           // Premium model, high quality, subscription-included
   speedScore: 22,
-  strengths: ['github-integration', 'reasoning', 'code-generation'],
-  bestFor: ['planning', 'architecture', 'complex-tasks'],
+  strengths: ['github-integration', 'abstract-reasoning', 'agentic', 'code-quality', 'long-context'],
+  bestFor: ['planning', 'architecture', 'security', 'review'],
+  rateLimits: {
+    free: { rpm: 5, tpm: 50_000 },
+    1: { rpm: 5, tpm: 50_000 },            // Individual: lower quota for flagship model
+    2: { rpm: 15, tpm: 150_000 },
+    3: { rpm: 30, tpm: 300_000 },
+  },
+},
+'copilot-gpt-5-4': {
+  id: 'copilot-gpt-5-4',
+  cliModelId: 'gpt-5.4',                   // value passed to copilot --model
+  provider: 'github',
+  agent: 'copilot',
+  displayName: 'Copilot (GPT-5.4)',
+  shortName: 'copilot-gpt5.4',
+  tier: 'flagship',
+  contextWindow: 128_000,
+  maxOutput: 64_000,
+  pricePer1M: { input: 0, output: 0 },
+  costPer1K: { input: 0, output: 0 },
+  tokPerSec: 70,                            // Estimated; GPT-5.4 is faster than Opus
+  ttft: 2.2,
+  reasoning: { type: 'effort', levels: ['none', 'low', 'medium', 'high'], default: 'none' },
+  benchmarks: { sweBenchPro: 57.7, gpqaDiamond: 84.2 }, // Inherits GPT-5.4 base
+  qualityScore: 93,
+  valueScore: 90,
+  speedScore: 40,
+  strengths: ['github-integration', 'reasoning', 'long-context', 'implementation', 'code-generation'],
+  bestFor: ['implementation', 'refactor', 'analysis', 'complex-tasks'],
   rateLimits: {
     free: { rpm: 5, tpm: 50_000 },
     1: { rpm: 10, tpm: 100_000 },
     2: { rpm: 20, tpm: 200_000 },
+    3: { rpm: 40, tpm: 400_000 },
+  },
+},
+'copilot-gemini-3-1-pro': {
+  id: 'copilot-gemini-3-1-pro',
+  cliModelId: 'gemini-3.1-pro',            // value passed to copilot --model
+  provider: 'github',
+  agent: 'copilot',
+  displayName: 'Copilot (Gemini 3.1 Pro)',
+  shortName: 'copilot-gemini',
+  tier: 'flagship',
+  contextWindow: 128_000,                   // Copilot context cap; underlying model is 1M
+  maxOutput: 64_000,
+  pricePer1M: { input: 0, output: 0 },
+  costPer1K: { input: 0, output: 0 },
+  tokPerSec: 120,                           // Estimated; Gemini 3.1 Pro is fast
+  ttft: 1.8,
+  reasoning: { type: 'none', levels: ['off'], default: 'off' },
+  benchmarks: { sweBench: 76.2, gpqaDiamond: 91.9 }, // Inherits Gemini 3.1 Pro base
+  qualityScore: 88,
+  valueScore: 90,
+  speedScore: 55,
+  strengths: ['github-integration', 'algorithmic-coding', 'analysis', 'multimodal', 'speed'],
+  bestFor: ['analysis', 'review', 'research', 'documentation'],
+  rateLimits: {
+    free: { rpm: 5, tpm: 50_000 },
+    1: { rpm: 10, tpm: 100_000 },
+    2: { rpm: 25, tpm: 250_000 },
+    3: { rpm: 50, tpm: 500_000 },
   },
 },
 ```
@@ -318,9 +421,10 @@ copilot: {
 
 ```javascript
 copilot: {
-  default: 'copilot-claude-sonnet-4-5',
-  fast: 'copilot-claude-sonnet-4-5',      // Only one fast model currently available
-  cheap: 'copilot-claude-sonnet-4-5',
+  default: 'copilot-claude-sonnet-4-6',    // Balanced — good for most tasks
+  fast:    'copilot-claude-sonnet-4-6',    // Sonnet is the fastest premium option
+  cheap:   'copilot-claude-sonnet-4-6',    // All models included in subscription; sonnet uses least quota
+  flagship: 'copilot-claude-opus-4-6',     // Highest quality Claude option
 },
 ```
 
@@ -330,7 +434,17 @@ copilot: {
 copilot: {
   role: 'advisor',
   agent: 'copilot',
-  model: 'copilot-claude-sonnet-4-5',
+  model: 'copilot-claude-sonnet-4-6',
+},
+'copilot-reviewer': {
+  role: 'reviewer',
+  agent: 'copilot',
+  model: 'copilot-claude-sonnet-4-6',      // Sonnet is well-suited for review tasks
+},
+'copilot-architect': {
+  role: 'architect',
+  agent: 'copilot',
+  model: 'copilot-claude-opus-4-6',        // Opus for planning/architecture depth
 },
 ```
 
@@ -344,10 +458,11 @@ copilot: {
 **`models` section** — add:
 ```json
 "copilot": {
-  "default": "copilot-claude-sonnet-4-5",
-  "fast": "copilot-claude-sonnet-4-5",
-  "cheap": "copilot-claude-sonnet-4-5",
-  "active": "copilot-claude-sonnet-4-5",
+  "default": "copilot-claude-sonnet-4-6",
+  "fast": "copilot-claude-sonnet-4-6",
+  "cheap": "copilot-claude-sonnet-4-6",
+  "flagship": "copilot-claude-opus-4-6",
+  "active": "copilot-claude-sonnet-4-6",
   "reasoningEffort": null
 }
 ```
@@ -355,25 +470,39 @@ copilot: {
 **`aliases` section** — add:
 ```json
 "copilot": {
-  "sonnet": "copilot-claude-sonnet-4-5",
-  "gpt5": "copilot-gpt-5",
-  "gpt-5": "copilot-gpt-5"
+  "sonnet": "copilot-claude-sonnet-4-6",
+  "opus": "copilot-claude-opus-4-6",
+  "gpt5.4": "copilot-gpt-5-4",
+  "gpt-5.4": "copilot-gpt-5-4",
+  "gemini": "copilot-gemini-3-1-pro"
 }
 ```
 
 **`modeTiers` section** — add `"copilot"` to each tier:
 ```json
-"performance": { "copilot": "default" },
-"balanced": { "copilot": "fast" },
-"economy": { "copilot": "cheap" },
-"custom": { "copilot": "default" }
+"performance": { "copilot": "flagship" },
+"balanced":    { "copilot": "default" },
+"economy":     { "copilot": "fast" },
+"custom":      { "copilot": "default" }
 ```
 
-**`roles` section** — add:
+> `performance` maps to `flagship` (Opus 4.6) for maximum quality. `balanced` and `economy` both use Sonnet 4.6 since all models cost the same quota-wise and Sonnet covers most tasks well.
+
+**`roles` section** — add three roles to support per-task model selection:
 ```json
 "copilot": {
   "agent": "copilot",
   "model": null,
+  "reasoningEffort": null
+},
+"copilot-reviewer": {
+  "agent": "copilot",
+  "model": "copilot-claude-sonnet-4-6",
+  "reasoningEffort": null
+},
+"copilot-architect": {
+  "agent": "copilot",
+  "model": "copilot-claude-opus-4-6",
   "reasoningEffort": null
 }
 ```
@@ -537,9 +666,10 @@ Tasks 9, 10 (COPILOT.md, README/CLAUDE.md updates). Required before merging.
 
 | Risk | Severity | Mitigation |
 |---|---|---|
-| No JSON output from `copilot -p` | **High** | Treat output as plain text (like Gemini text mode); upgrade when upstream adds `--output-format json` |
+| No JSON output from `copilot -p` | **Medium** | Pre-wired via `features.jsonOutput: false`; flip to `true` and validate JSON shape when CLI ships `--output-format json` |
+| `cliModelId` values unverified | **Medium** | Profile `cliModelId` fields (e.g. `'claude-sonnet-4-6'`, `'gpt-5.4'`) are assumed — validate against `copilot /model` interactive output before shipping |
 | Auth flow in CI/headless | **High** | Require `GH_TOKEN` env var; document clearly; skip Copilot tasks when not authenticated |
-| Premium request quota limits | **Medium** | Add Copilot to `hydra-usage.mjs` monitoring; warn when quota is low |
+| Premium request quota limits | **Medium** | Add Copilot to `hydra-usage.mjs` monitoring; warn when quota is low; Opus uses more quota than Sonnet |
 | Copilot CLI still in preview | **Medium** | Pin to versioned install; monitor changelog for breaking changes |
 | `--allow-all-tools` security | **Medium** | Only use in `full-auto` mode; default to explicit tool allowlist |
 | Windows `copilot` binary path | **Low** | Use `cross-spawn` (already used for all agents); test with WinGet install |
@@ -580,6 +710,33 @@ describe('copilot agent definition', () => {
     assert.ok(!args.some(a => a.startsWith('--allow-tool')), 'Unexpected --allow-tool in plan mode');
   });
 
+  it('headless passes --model when opts.model provided', () => {
+    const agent = getAgent('copilot');
+    const [, args] = agent.invoke.headless('test prompt', { model: 'claude-sonnet-4-6' });
+    const modelIdx = args.indexOf('--model');
+    assert.ok(modelIdx !== -1, 'Missing --model flag');
+    assert.equal(args[modelIdx + 1], 'claude-sonnet-4-6');
+  });
+
+  it('headless does NOT pass --model when opts.model is omitted', () => {
+    const agent = getAgent('copilot');
+    const [, args] = agent.invoke.headless('test prompt', {});
+    assert.ok(!args.includes('--model'), 'Unexpected --model flag when no model specified');
+  });
+
+  it('headless does not pass --output-format json when features.jsonOutput is false', () => {
+    const agent = getAgent('copilot');
+    const [, args] = agent.invoke.headless('test prompt', { jsonOutput: false });
+    assert.ok(!args.includes('--output-format'), 'Unexpected --output-format when jsonOutput false');
+  });
+
+  it('headless passes --output-format json when opts.jsonOutput is true', () => {
+    const agent = getAgent('copilot');
+    const [, args] = agent.invoke.headless('test prompt', { jsonOutput: true });
+    assert.ok(args.includes('--output-format'), 'Missing --output-format');
+    assert.equal(args[args.indexOf('--output-format') + 1], 'json');
+  });
+
   it('headless full-auto uses --allow-all-tools', () => {
     const agent = getAgent('copilot');
     const [cmd, args] = agent.invoke.headless('test prompt', { permissionMode: 'full-auto' });
@@ -595,6 +752,11 @@ describe('copilot agent definition', () => {
     assert.ok(args.includes('-p'), 'Missing -p flag');
     assert.ok(args.includes('--allow-tool'), 'Missing --allow-tool in auto-edit mode');
     assert.ok(!args.includes('--allow-all-tools'), 'Unexpected --allow-all-tools in auto-edit mode');
+  });
+
+  it('has features.jsonOutput set to false by default', () => {
+    const agent = getAgent('copilot');
+    assert.equal(agent.features?.jsonOutput, false, 'features.jsonOutput should default to false');
   });
 
   it('has required taskAffinity keys', () => {
@@ -641,6 +803,8 @@ copilot [options] [prompt]
 
 Options:
   -p, --prompt <text>         Run non-interactively with the given prompt
+  --model <id>                Select model (e.g. claude-sonnet-4-6, gpt-5.4, gemini-3.1-pro)
+  --output-format <fmt>       Output format: json (planned, not yet released)
   --allow-all-tools           Allow all tool use without approval
   --allow-tool <tool-spec>    Allow specific tool: shell(cmd), file(path)
   --banner                    Show animated welcome banner
@@ -695,4 +859,5 @@ The project-level config allows teams to automatically give Copilot access to Hy
 ---
 
 *Document created: 2026-03-07*
-*Status: Draft — pending technical validation of Copilot CLI headless JSON output*
+*Updated: 2026-03-08 — expanded model set (Sonnet 4.6, Opus 4.6, GPT-5.4, Gemini 3.1 Pro); added --model flag to invoke functions; added features.jsonOutput gate for upcoming JSON output mode; added per-role model assignments (copilot-reviewer, copilot-architect); downgraded JSON output risk from High to Medium*
+*Status: Draft — cliModelId values require validation against live Copilot CLI; --output-format json flag name TBD pending release*
