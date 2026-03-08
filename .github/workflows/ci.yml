@@ -2,20 +2,46 @@ name: CI
 
 on:
   push:
-    branches: [dev]
+    branches: [main, dev]
   pull_request:
-    branches: [dev, master]
+    branches: [main, dev]
 
 jobs:
-  test:
-    runs-on: ${{ matrix.os }}
+  # Fast syntax check — runs once on Linux before the matrix, catches parse
+  # errors before spinning up 4 runners.
+  syntax:
+    name: Syntax check (Node ${{ matrix.node-version }})
+    runs-on: ubuntu-latest
     strategy:
       matrix:
-        os: [windows-latest, ubuntu-latest]
         node-version: [20, 22]
     steps:
-      - uses: actions/checkout@v6
-      - uses: actions/setup-node@v6
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node-version }}
+          cache: npm
+      - run: npm ci
+      - name: Check syntax of all lib and bin files
+        # node --check parses the file but does not execute it
+        shell: bash
+        run: |
+          find lib bin -name '*.mjs' -print0 | xargs -0 node --check
+          echo "Syntax OK"
+
+  # Full test matrix — cross-platform, two Node versions.
+  test:
+    name: Test (${{ matrix.os }}, Node ${{ matrix.node-version }})
+    needs: syntax
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+        node-version: [20, 22]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
         with:
           node-version: ${{ matrix.node-version }}
           cache: npm
