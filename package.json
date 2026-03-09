@@ -14,7 +14,7 @@
     "url": "https://github.com/PrimeLocus/Hydra/issues"
   },
   "engines": {
-    "node": ">=20.0.0"
+    "node": ">=20.19.0"
   },
   "bin": {
     "hydra": "./bin/hydra-cli.mjs",
@@ -68,6 +68,13 @@
     "tasks:clean": "node lib/hydra-tasks-review.mjs clean",
     "research:todo": "node scripts/gen-research-todo.mjs",
     "eval": "node lib/hydra-eval.mjs",
+    "lint": "eslint .",
+    "lint:fix": "eslint . --fix",
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
+    "typecheck": "tsc --noEmit -p jsconfig.json",
+    "quality": "npm run lint && npm run format:check && npm run typecheck",
+    "setup:hooks": "node scripts/setup-hooks.mjs",
     "test": "node --test",
     "test:report": "node --test --test-reporter=tap --test-reporter-destination=docs/coordination/test-results.tap",
     "package": "node -e \"require('fs').mkdirSync('dist', { recursive: true })\" && npm pack --pack-destination dist",
@@ -75,7 +82,17 @@
     "build:exe": "node scripts/build-exe.mjs",
     "build:exe:ci": "node scripts/build-exe.mjs --ci",
     "install:global": "npm install -g .",
-    "uninstall:global": "npm uninstall -g hydra"
+    "uninstall:global": "npm uninstall -g hydra",
+    "prepare": "husky"
+  },
+  "lint-staged": {
+    "*.mjs": [
+      "eslint --fix",
+      "prettier --write"
+    ],
+    "*.{json,md,yml,yaml}": [
+      "prettier --write"
+    ]
   },
   "pkg": {
     "scripts": [
@@ -94,8 +111,17 @@
     ]
   },
   "devDependencies": {
+    "@eslint/js": "^10.0.1",
     "@yao-pkg/pkg": "^6.14.1",
-    "esbuild": "^0.27.3"
+    "esbuild": "^0.27.3",
+    "eslint": "^10.0.3",
+    "eslint-plugin-n": "^17.24.0",
+    "eslint-plugin-unicorn": "^63.0.0",
+    "globals": "^17.4.0",
+    "husky": "^9.1.7",
+    "lint-staged": "^16.3.2",
+    "prettier": "^3.8.1",
+    "typescript": "^5.9.3"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.27.1",
