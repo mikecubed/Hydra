@@ -47,7 +47,7 @@ console.log();
 
 // ── 1. Install husky hooks ────────────────────────────────────────────────────
 console.log(pc.bold('1. Installing git hooks (husky)'));
-const huskyOk = run('npx --no-install husky', 'husky install');
+const huskyOk = run('npx --no-install husky', 'husky');
 
 // ── 2. Verify hook files exist ────────────────────────────────────────────────
 console.log();
