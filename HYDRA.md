@@ -34,7 +34,7 @@ All agents use the Hydra MCP tools for coordination:
 Claude is the **architect** — responsible for design, planning, code review, and architectural decisions.
 
 - Primary reference: `CLAUDE.md` in this repo (full architecture, commands, conventions)
-- Always work on the `dev` branch. Never commit to `master` directly.
+- Always work on a feature branch. Open a PR targeting `main`. Never commit directly to `main`.
 - Update docs (CLAUDE.md, README.md, docs/ARCHITECTURE.md) before every commit.
 - Use `hydra_ask` with `agent: "gemini"` for critique and `agent: "codex"` for implementation delegation.
 
@@ -55,6 +55,17 @@ Codex is the **implementer** — responsible for code generation, refactoring, a
 - Focus: following specifications precisely, writing `node:test` + `node:assert/strict` tests, quick prototyping
 - Always claim the task first, then report what changed and any tests added via `hydra_tasks_update`
 - Codex always requires an explicit `--model` flag when invoked headlessly
+
+## Quality Gates
+
+Run `npm run quality` before opening a PR — it runs ESLint, Prettier check, and TypeScript type-check in one shot.
+
+Git hooks are installed automatically via `npm install` or `npm ci` (the `prepare` script):
+
+- **`pre-commit`** — auto-fixes ESLint + Prettier on staged files (no manual step needed)
+- **`pre-push`** — runs the full test suite; blocks the push if tests fail
+
+PR titles must follow [Conventional Commits](https://www.conventionalcommits.org/): `feat:`, `fix:`, `docs:`, `chore:`, etc. This is enforced by CI.
 
 ## Testing
 
