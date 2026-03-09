@@ -46,8 +46,15 @@ describe('local agent registration', () => {
 
   it('bestAgentFor returns local for implementation in economy mode', async () => {
     const { bestAgentFor } = await import('../lib/hydra-agents.mjs');
-    const agent = bestAgentFor('implementation', { mode: 'economy' });
-    assert.strictEqual(agent, 'local');
+    const { loadHydraConfig, _setTestConfig, invalidateConfigCache } = await import('../lib/hydra-config.mjs');
+    const original = loadHydraConfig();
+    _setTestConfig({ ...original, local: { ...original.local, enabled: true } });
+    try {
+      const agent = bestAgentFor('implementation', { mode: 'economy' });
+      assert.strictEqual(agent, 'local');
+    } finally {
+      invalidateConfigCache();
+    }
   });
 
   it('bestAgentFor does NOT return local for planning even in economy mode', async () => {

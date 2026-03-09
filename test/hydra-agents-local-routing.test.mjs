@@ -10,8 +10,21 @@ import {
   unregisterAgent,
   _resetRegistry,
 } from '../lib/hydra-agents.mjs';
+import { loadHydraConfig, _setTestConfig, invalidateConfigCache } from '../lib/hydra-config.mjs';
 
 const ROUTING_MODES = ['economy', 'balanced', 'performance'];
+
+/** Enable local in config (in-memory only — no disk write to avoid concurrent test races). */
+function enableLocal() {
+  const original = loadHydraConfig();
+  _setTestConfig({ ...original, local: { ...original.local, enabled: true } });
+  return original;
+}
+
+/** Restore original config. */
+function restoreConfig(_original) {
+  invalidateConfigCache();
+}
 
 beforeEach(() => {
   _resetRegistry();
@@ -66,7 +79,12 @@ describe('bestAgentFor mode-aware routing', () => {
   });
 
   test('economy mode routes implementation work to local', () => {
-    assert.equal(bestAgentFor('implementation', { mode: 'economy' }), 'local');
+    const original = enableLocal();
+    try {
+      assert.equal(bestAgentFor('implementation', { mode: 'economy' }), 'local');
+    } finally {
+      restoreConfig(original);
+    }
   });
 
   test('balanced mode keeps codex ahead of local for implementation work', () => {
@@ -97,7 +115,12 @@ describe('bestAgentFor mode-aware routing', () => {
       weekly: { percentUsed: 10 },
     };
 
-    assert.equal(bestAgentFor('implementation', { mode: 'balanced', budgetState }), 'local');
-    assert.notEqual(bestAgentFor('research', { mode: 'balanced', budgetState }), 'local');
+    const original = enableLocal();
+    try {
+      assert.equal(bestAgentFor('implementation', { mode: 'balanced', budgetState }), 'local');
+      assert.notEqual(bestAgentFor('research', { mode: 'balanced', budgetState }), 'local');
+    } finally {
+      restoreConfig(original);
+    }
   });
 });

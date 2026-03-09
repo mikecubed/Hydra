@@ -116,19 +116,19 @@ test('metrics: extracts real tokens from Claude JSON output', () => {
   resetMetrics();
 
   const handle = recordCallStart('claude', 'claude-opus-4-6');
-  const claudeOutput = JSON.stringify({
-    type: 'result',
-    result: 'Hello',
-    usage: {
-      input_tokens: 1000,
-      output_tokens: 500,
-      cache_creation_input_tokens: 200,
-      cache_read_input_tokens: 100,
+  // tokenUsage is now pre-populated by the executor's parseOutput (agent plugin interface)
+  recordCallComplete(handle, {
+    stdout: '{"type":"result","result":"Hello"}',
+    stderr: '',
+    tokenUsage: {
+      inputTokens: 1000,
+      outputTokens: 500,
+      cacheCreationTokens: 200,
+      cacheReadTokens: 100,
+      totalTokens: 1500,
     },
-    cost_usd: 0.05,
+    costUsd: 0.05,
   });
-
-  recordCallComplete(handle, { stdout: claudeOutput, stderr: '' });
 
   const agent = getAgentMetrics('claude');
   assert.equal(agent.sessionTokens.inputTokens, 1000);
@@ -313,13 +313,13 @@ test('metrics: handles missing stdout/stderr gracefully', () => {
 test('metrics: recordCallComplete accepts result.output as alias for stdout', () => {
   resetMetrics();
   const h = recordCallStart('claude', 'claude-opus-4-6');
-  const claudeOutput = JSON.stringify({
-    type: 'result',
-    result: 'Hello',
-    usage: { input_tokens: 800, output_tokens: 200 },
-    cost_usd: 0.03,
+  // tokenUsage pre-populated by executor's parseOutput
+  recordCallComplete(h, {
+    output: 'Hello',
+    stderr: '',
+    tokenUsage: { inputTokens: 800, outputTokens: 200, cacheCreationTokens: 0, cacheReadTokens: 0, totalTokens: 1000 },
+    costUsd: 0.03,
   });
-  recordCallComplete(h, { output: claudeOutput, stderr: '' });
 
   const agent = getAgentMetrics('claude');
   assert.equal(agent.callsSuccess, 1);
@@ -332,14 +332,14 @@ test('metrics: recordCallComplete accepts result.output as alias for stdout', ()
 test('metrics: result.stdout takes precedence over result.output', () => {
   resetMetrics();
   const h = recordCallStart('claude', 'claude-opus-4-6');
-  const claudeOutput = JSON.stringify({
-    type: 'result',
-    result: 'Hello',
-    usage: { input_tokens: 100, output_tokens: 50 },
-    cost_usd: 0.01,
+  // tokenUsage pre-populated by executor's parseOutput; stdout content is irrelevant to token count
+  recordCallComplete(h, {
+    stdout: 'Hello',
+    output: 'ignored',
+    stderr: '',
+    tokenUsage: { inputTokens: 100, outputTokens: 50, cacheCreationTokens: 0, cacheReadTokens: 0, totalTokens: 150 },
+    costUsd: 0.01,
   });
-  // When both stdout and output are present, stdout wins
-  recordCallComplete(h, { stdout: claudeOutput, output: 'ignored', stderr: '' });
 
   const agent = getAgentMetrics('claude');
   assert.equal(agent.sessionTokens.inputTokens, 100);
@@ -351,18 +351,19 @@ test('metrics: result.stdout takes precedence over result.output', () => {
 test('metrics: history entry contains full realTokens breakdown', () => {
   resetMetrics();
   const h = recordCallStart('claude', 'claude-opus-4-6');
-  const claudeOutput = JSON.stringify({
-    type: 'result',
-    result: 'Hello',
-    usage: {
-      input_tokens: 500,
-      output_tokens: 300,
-      cache_creation_input_tokens: 50,
-      cache_read_input_tokens: 25,
+  // tokenUsage pre-populated by executor's parseOutput
+  recordCallComplete(h, {
+    stdout: 'Hello',
+    stderr: '',
+    tokenUsage: {
+      inputTokens: 500,
+      outputTokens: 300,
+      cacheCreationTokens: 50,
+      cacheReadTokens: 25,
+      totalTokens: 800,
     },
-    cost_usd: 0.02,
+    costUsd: 0.02,
   });
-  recordCallComplete(h, { stdout: claudeOutput, stderr: '' });
 
   const agent = getAgentMetrics('claude');
   const entry = agent.history[0];
@@ -387,14 +388,14 @@ test('metrics: getRecentTokens returns zeros when no data', () => {
 
 test('metrics: getRecentTokens sums tokens from recent calls', () => {
   resetMetrics();
-  // Record a Claude call with real tokens
+  // Record a Claude call with pre-populated tokenUsage (as executor would provide)
   const h1 = recordCallStart('claude', 'claude-opus-4-6');
-  const out1 = JSON.stringify({
-    type: 'result', result: 'ok',
-    usage: { input_tokens: 1000, output_tokens: 500 },
-    cost_usd: 0.04,
+  recordCallComplete(h1, {
+    stdout: 'ok',
+    stderr: '',
+    tokenUsage: { inputTokens: 1000, outputTokens: 500, cacheCreationTokens: 0, cacheReadTokens: 0, totalTokens: 1500 },
+    costUsd: 0.04,
   });
-  recordCallComplete(h1, { stdout: out1, stderr: '' });
 
   // Record a non-Claude call (estimated only)
   const h2 = recordCallStart('gemini', 'pro');
