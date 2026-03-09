@@ -26,7 +26,10 @@ function run(cmd, label) {
     return true;
   } catch (err) {
     console.log(` ${pc.red('✗')}`);
-    console.error(`     ${pc.red(err.stderr?.toString().trim() ?? err.message)}`);
+    const stdout = err.stdout?.toString().trim();
+    const stderr = err.stderr?.toString().trim();
+    const detail = [stderr, stdout].filter(Boolean).join('\n     ') || err.message;
+    console.error(`     ${pc.red(detail)}`);
     return false;
   }
 }
