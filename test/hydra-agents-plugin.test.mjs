@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 
 // getAgent is the public registry accessor
 import { getAgent, registerAgent, unregisterAgent, AGENT_TYPE } from '../lib/hydra-agents.mjs';
+import { loadHydraConfig } from '../lib/hydra-config.mjs';
 
 describe('Agent Plugin Interface', () => {
   // ── Shape tests — all 4 physical agents ──────────────────────────────────
@@ -235,10 +236,19 @@ describe('Agent Plugin Interface', () => {
       assert.equal(codex.modelBelongsTo('claude-opus-4-6'), false);
     });
 
-    it('local owns every model', () => {
+    it('local only matches its configured model, not arbitrary model IDs', () => {
       const local = getAgent('local');
-      assert.equal(local.modelBelongsTo('anything'), true);
-      assert.equal(local.modelBelongsTo('llama-3.1'), true);
+      const cfg = loadHydraConfig();
+      const configuredModel = cfg.local?.model;
+      // Matches exactly the configured model (case-insensitive)
+      if (configuredModel) {
+        assert.equal(local.modelBelongsTo(configuredModel), true);
+        assert.equal(local.modelBelongsTo(configuredModel.toUpperCase()), true);
+      }
+      // Does NOT claim unrelated model IDs
+      assert.equal(local.modelBelongsTo('claude-opus-4-6'), false);
+      assert.equal(local.modelBelongsTo('gpt-5.4'), false);
+      assert.equal(local.modelBelongsTo('gemini-3-pro'), false);
     });
   });
 
