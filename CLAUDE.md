@@ -6,7 +6,9 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Branch Workflow
 
-Always work on `dev`. Never commit to or switch to `master` unless explicitly told (e.g. "merge to master", "push d>m").
+Always work on a feature branch. Never commit directly to `main`. All changes go through pull requests.
+
+Branch naming conventions: `feat/...`, `fix/...`, `docs/...`, `chore/...`, or `copilot/...`.
 
 ### Commit Rules
 
@@ -17,10 +19,7 @@ Always work on `dev`. Never commit to or switch to `master` unless explicitly to
    - Inline code comments — only where logic isn't self-evident.
    - Skip doc updates only if the change is purely cosmetic or has zero doc impact.
 
-2. **Always commit to `dev` first.** Never commit directly to `master`. When the user asks to merge or push to master, the flow is:
-   - Ensure all changes are committed on `dev`.
-   - Checkout `master`, merge `dev` into `master`, then switch back to `dev`.
-   - Shorthand: "push d>m" or "merge to master" triggers this flow.
+2. **Open a PR targeting `main`.** Never push changes directly to `main`. Use `gh pr create` or `:pr create` in the operator console to open a pull request.
 
 ## Commands
 
@@ -49,7 +48,20 @@ npm run quality             # lint + format:check + typecheck combined
 npm run setup:hooks         # Install/verify git pre-commit and pre-push hooks
 ```
 
-Code quality toolchain: ESLint v10 (flat config with @eslint/js), Prettier, TypeScript tsc --checkJs, Husky v9 + lint-staged.
+## Quality Gates
+
+| Tool               | Config              | What it enforces                                                                             |
+| ------------------ | ------------------- | -------------------------------------------------------------------------------------------- |
+| **ESLint v10**     | `eslint.config.mjs` | `no-var`, `prefer-const`, `eqeqeq`, `no-eval`, `node:` protocol, unicorn best-practice rules |
+| **Prettier**       | `.prettierrc.json`  | `singleQuote`, `trailingComma: all`, `printWidth: 100`, LF line endings                      |
+| **TypeScript tsc** | `jsconfig.json`     | `--checkJs` strict type checking across `lib/`, `bin/`, `scripts/`                           |
+
+**Git hooks (Husky v9 + lint-staged)** — install automatically when you run `npm install` (via the `prepare` script). Use `npm run setup:hooks` only to manually reinstall or verify.
+
+- `pre-commit` — runs lint-staged: ESLint `--fix` + Prettier **auto-write** on staged `.mjs` files; Prettier auto-write on staged `.json/.md/.yml`.
+- `pre-push` — runs the full `npm test` suite. Push is blocked if tests fail.
+
+**Always run `npm run quality` before opening a PR.** This runs lint + format:check + typecheck in full (no auto-fix) so you catch issues before CI does.
 
 ## Architecture
 

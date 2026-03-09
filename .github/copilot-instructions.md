@@ -19,11 +19,11 @@ Operator Console (REPL)
 
 ## Critical Rules — Read First
 
-1. **Always work on `dev`**, never commit directly to `master`.
+1. **Always work on a feature branch**, never commit directly to `main`. All changes go through pull requests targeting `main`.
 2. **ESM only** — all files use `import`/`export`. Never use `require()` or CommonJS.
 3. **No build step** — pure ESM, runs directly with `node`. No compilation needed.
 4. **Quality gates must pass** — ESLint, Prettier, and TypeScript type-check run on every PR. Run `npm run quality` before pushing.
-5. **Git hooks run automatically** — `pre-commit` runs lint-staged (ESLint + Prettier on staged files); `pre-push` runs the full test suite. Install hooks once with `npm run setup:hooks`.
+5. **Git hooks install automatically** via the `prepare` script when you run `npm install`. `pre-commit` runs lint-staged (auto-fixes ESLint + Prettier on staged `.mjs` files, auto-formats `.json/.md/.yml`); `pre-push` runs the full test suite and blocks the push on failure. Use `npm run setup:hooks` only to manually reinstall or verify hooks.
 6. **Update docs before committing** — see [Documentation Requirements](#documentation-requirements).
 7. **Agent names are always lowercase strings**: `claude`, `gemini`, `codex`, `local`.
 
@@ -97,27 +97,32 @@ npm run nightly             # Run nightly task automation
 ## Code Conventions
 
 ### Language and Modules
+
 - **ESM only** — `"type": "module"` in `package.json`. Every file is `.mjs`.
 - No TypeScript source files. No compile step. Code is plain JavaScript checked by `tsc --checkJs`.
 - `jsconfig.json` + `tsc --checkJs` for type checking on `lib/`, `bin/`, and `scripts/`.
 
 ### Code Quality Toolchain
+
 The project uses a full quality toolchain. **Always run `npm run quality` before pushing.**
 
-| Tool | Config file | What it enforces |
-|---|---|---|
-| **ESLint v10** | `eslint.config.mjs` | `no-var`, `prefer-const`, `eqeqeq`, `no-eval`, `node:` protocol prefix, unicorn best-practice rules |
-| **Prettier** | `.prettierrc.json` | `singleQuote`, `trailingComma: all`, `printWidth: 100`, LF line endings |
-| **TypeScript tsc** | `jsconfig.json` | `--checkJs` strict type checking across `lib/`, `bin/`, `scripts/` |
+| Tool               | Config file         | What it enforces                                                                                    |
+| ------------------ | ------------------- | --------------------------------------------------------------------------------------------------- |
+| **ESLint v10**     | `eslint.config.mjs` | `no-var`, `prefer-const`, `eqeqeq`, `no-eval`, `node:` protocol prefix, unicorn best-practice rules |
+| **Prettier**       | `.prettierrc.json`  | `singleQuote`, `trailingComma: all`, `printWidth: 100`, LF line endings                             |
+| **TypeScript tsc** | `jsconfig.json`     | `--checkJs` strict type checking across `lib/`, `bin/`, `scripts/`                                  |
 
 **Git hooks (Husky v9 + lint-staged):**
-- `pre-commit` — runs lint-staged: ESLint `--fix` + Prettier on staged `.mjs` files; Prettier on staged `.json/.md/.yml`.
-- `pre-push` — runs the full `npm test` suite.
-- Install hooks once after cloning: `npm run setup:hooks`
+
+- `pre-commit` — runs lint-staged: ESLint `--fix` + Prettier auto-write on staged `.mjs` files; Prettier auto-write on staged `.json/.md/.yml`. Fixes are staged automatically.
+- `pre-push` — runs the full `npm test` suite. Push is blocked if tests fail.
+- Hooks install automatically via `npm install` (the `prepare` script). Use `npm run setup:hooks` to manually reinstall or verify.
 - CI disables hooks with `HUSKY=0` during `npm ci`.
 
 ### Dependencies
+
 Keep dependencies minimal. The four production dependencies are:
+
 - `picocolors` — terminal colors. **Always use `picocolors` (`pc`), never `chalk`.**
 - `cross-spawn` — cross-platform process spawning. **Use for all external CLIs.**
 - `@modelcontextprotocol/sdk` — MCP server/tools
@@ -126,46 +131,57 @@ Keep dependencies minimal. The four production dependencies are:
 Optional peer: `@opentelemetry/api` (tracing, gracefully no-ops when absent).
 
 ### Terminal Colors
+
 ```js
 import pc from 'picocolors';
 console.log(pc.green('Success'));
 ```
 
 ### Spawning External Processes
+
 ```js
-import spawn from 'cross-spawn';  // default import
+import spawn from 'cross-spawn'; // default import
 ```
+
 Use `cross-spawn` for external CLIs — it handles Windows `.cmd`/`.bat` shims without needing `shell: true`.
 
 ### Config Access
+
 ```js
 import { loadHydraConfig, getRoleConfig, getActiveModel } from './hydra-config.mjs';
-const config = await loadHydraConfig();    // cached
-const model = getActiveModel('claude');    // never hardcode model IDs
+const config = await loadHydraConfig(); // cached
+const model = getActiveModel('claude'); // never hardcode model IDs
 ```
 
 ### HTTP Daemon Calls
+
 ```js
 import { request } from './hydra-utils.mjs';
 const result = await request('POST', '/task/submit', payload);
 ```
+
 The status bar uses `fetch()` directly for lightweight polling, but all other daemon calls go through `request()`.
 
 ### Prompt/Interactive UI
+
 Use `promptChoice()` from `hydra-prompt-choice.mjs` with the cooperative readline lock. Boxes dynamically size to terminal width (60-120 columns).
 
 ### Agent Plugin System
+
 Agent behavior is **data-driven** via plugin fields in `hydra-agents.mjs`:
+
 - `features`, `parseOutput`, `modelBelongsTo`, `quotaVerify`, `economyModel`, `readInstructions`, `taskRules`
 - Defaults are applied by `registerAgent()` and consumed by `lib/hydra-shared/agent-executor.mjs`.
 - Never hardcode per-agent logic outside the plugin definition.
 
 ### Truecolor Detection
+
 ```js
-import { isTruecolor } from './hydra-ui.mjs';  // centralized boolean
+import { isTruecolor } from './hydra-ui.mjs'; // centralized boolean
 ```
 
 ### Environment Variables
+
 `lib/hydra-env.mjs` is the minimal `.env` loader. Entrypoints (`hydra-operator.mjs`, `orchestrator-daemon.mjs`) import it early before reading config.
 
 ---
@@ -173,6 +189,7 @@ import { isTruecolor } from './hydra-ui.mjs';  // centralized boolean
 ## Testing
 
 ### Framework
+
 Node.js native `node:test` + `node:assert/strict`. No external test framework.
 
 ```javascript
@@ -181,10 +198,12 @@ import assert from 'node:assert/strict';
 ```
 
 ### Test Types
+
 - **Unit tests** — `test/hydra-*.test.mjs` — import and test module functions directly
 - **Integration tests** — `test/*.integration.test.mjs` — spin up the daemon on an ephemeral port and test HTTP endpoints
 
 ### Config Override in Tests
+
 ```js
 import { _setTestConfig, invalidateConfigCache } from '../lib/hydra-config.mjs';
 // Override config in-memory for a test:
@@ -194,6 +213,7 @@ invalidateConfigCache();
 ```
 
 ### Running Tests
+
 ```bash
 npm test                                    # all tests
 node --test test/hydra-ui.test.mjs          # single file
@@ -206,12 +226,12 @@ node --test test/hydra-agent-executor.test.mjs test/hydra-agents-plugin.test.mjs
 
 Before every commit, update affected docs:
 
-| Changed area | Docs to update |
-|---|---|
-| Architecture, modules, dispatch logic, exports | `docs/ARCHITECTURE.md` |
-| Workflow, commands, conventions | `CLAUDE.md` |
-| User-facing features, setup, operator commands | `README.md` (especially **Operator Commands** table) |
-| Complex logic | Inline comments (only where logic isn't self-evident) |
+| Changed area                                   | Docs to update                                        |
+| ---------------------------------------------- | ----------------------------------------------------- |
+| Architecture, modules, dispatch logic, exports | `docs/ARCHITECTURE.md`                                |
+| Workflow, commands, conventions                | `CLAUDE.md`                                           |
+| User-facing features, setup, operator commands | `README.md` (especially **Operator Commands** table)  |
+| Complex logic                                  | Inline comments (only where logic isn't self-evident) |
 
 Skip doc updates only for purely cosmetic changes with zero doc impact.
 
@@ -220,6 +240,7 @@ Skip doc updates only for purely cosmetic changes with zero doc impact.
 ## Configuration (`hydra.config.json`)
 
 Key sections:
+
 ```json
 {
   "mode": "auto|smart|council|dispatch|chat",
@@ -241,6 +262,7 @@ Key sections:
 ## CI / GitHub Actions
 
 Three workflows:
+
 - **`ci.yml`** — syntax check (`node --check`) + full test matrix (Ubuntu + Windows, Node 20 + 22). PRs must pass before merge.
 - **`quality.yml`** — ESLint, Prettier, TypeScript type-check, and PR title enforcement (conventional commits). Runs on PRs to `main` (changed files only) and on pushes to `main`/`dev`/`fix/**`/`feat/**`/`feature/**` (full codebase). ESLint full-codebase check uses `continue-on-error` until a clean baseline is reached.
 - **`build-windows-exe.yml`** — builds standalone Windows executable; triggered on version tags or `workflow_dispatch`.
@@ -260,29 +282,29 @@ All CI workflows set `HUSKY=0` to skip git hooks during `npm ci`, and use `permi
 
 ## Common Pitfalls
 
-| Mistake | Correct approach |
-|---|---|
-| Using `require()` or `.js` extensions | Use `import`/`export` and `.mjs` extensions |
-| Importing `chalk` | Use `picocolors` (`import pc from 'picocolors'`) |
-| Hardcoding model IDs like `"claude-opus-4-6"` | Use `getActiveModel('claude')` or config lookups |
-| Using `child_process.spawn` for CLIs | Use `cross-spawn` default import |
-| Committing to `master` | Always commit to `dev` |
-| Making daemon HTTP calls with raw `fetch` | Use `request()` from `hydra-utils.mjs` |
-| Adding new dependencies without discussion | Keep deps minimal; check with maintainers |
-| Pushing without running quality checks | Run `npm run quality` before pushing (or let pre-push hook do it) |
-| Skipping lint on staged files | The `pre-commit` hook auto-fixes lint + format on staged files via lint-staged |
+| Mistake                                       | Correct approach                                                                                                 |
+| --------------------------------------------- | ---------------------------------------------------------------------------------------------------------------- |
+| Using `require()` or `.js` extensions         | Use `import`/`export` and `.mjs` extensions                                                                      |
+| Importing `chalk`                             | Use `picocolors` (`import pc from 'picocolors'`)                                                                 |
+| Hardcoding model IDs like `"claude-opus-4-6"` | Use `getActiveModel('claude')` or config lookups                                                                 |
+| Using `child_process.spawn` for CLIs          | Use `cross-spawn` default import                                                                                 |
+| Committing directly to `main`                 | Always use a feature branch and open a PR targeting `main`                                                       |
+| Making daemon HTTP calls with raw `fetch`     | Use `request()` from `hydra-utils.mjs`                                                                           |
+| Adding new dependencies without discussion    | Keep deps minimal; check with maintainers                                                                        |
+| Pushing without running quality checks        | Run `npm run quality` before pushing; `pre-commit` auto-fixes lint+format on staged files; `pre-push` runs tests |
+| Skipping lint on staged files                 | The `pre-commit` hook auto-fixes ESLint + Prettier on staged `.mjs` files via lint-staged                        |
 
 ---
 
 ## Key Files for Common Tasks
 
-| Task | Primary file(s) |
-|---|---|
-| Add/modify operator console command | `lib/hydra-operator.mjs` |
-| Add/modify daemon HTTP endpoint | `lib/orchestrator-daemon.mjs`, `lib/daemon/read-routes.mjs`, `lib/daemon/write-routes.mjs` |
-| Add/modify agent behavior | `lib/hydra-agents.mjs` (plugin definition) + `lib/hydra-shared/agent-executor.mjs` |
-| Change routing logic | `lib/hydra-dispatch.mjs`, `lib/hydra-intent-gate.mjs` |
-| Add config option | `lib/hydra-config.mjs` (add to schema + loader) |
-| Add MCP tool/resource | `lib/hydra-mcp-server.mjs` |
-| Modify council deliberation | `lib/hydra-council.mjs` |
-| Add custom agent preset | `lib/hydra-agents-wizard.mjs` + `hydra.config.json` |
+| Task                                | Primary file(s)                                                                            |
+| ----------------------------------- | ------------------------------------------------------------------------------------------ |
+| Add/modify operator console command | `lib/hydra-operator.mjs`                                                                   |
+| Add/modify daemon HTTP endpoint     | `lib/orchestrator-daemon.mjs`, `lib/daemon/read-routes.mjs`, `lib/daemon/write-routes.mjs` |
+| Add/modify agent behavior           | `lib/hydra-agents.mjs` (plugin definition) + `lib/hydra-shared/agent-executor.mjs`         |
+| Change routing logic                | `lib/hydra-dispatch.mjs`, `lib/hydra-intent-gate.mjs`                                      |
+| Add config option                   | `lib/hydra-config.mjs` (add to schema + loader)                                            |
+| Add MCP tool/resource               | `lib/hydra-mcp-server.mjs`                                                                 |
+| Modify council deliberation         | `lib/hydra-council.mjs`                                                                    |
+| Add custom agent preset             | `lib/hydra-agents-wizard.mjs` + `hydra.config.json`                                        |
