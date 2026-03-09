@@ -2,11 +2,11 @@
 
 ## Prerequisites
 
-| Requirement | Minimum | Notes |
-|------------|---------|-------|
-| **Node.js** | 20+ | For all Hydra modules |
-| **PowerShell** | 7+ | For launchers and agent heads |
-| **AI CLI (at least one)** | | `gemini`, `codex`, or `claude` |
+| Requirement               | Minimum | Notes                          |
+| ------------------------- | ------- | ------------------------------ |
+| **Node.js**               | 20+     | For all Hydra modules          |
+| **PowerShell**            | 7+      | For launchers and agent heads  |
+| **AI CLI (at least one)** |         | `gemini`, `codex`, or `claude` |
 
 ### AI CLI Installation
 
@@ -60,6 +60,7 @@ hydra-client init
 ```
 
 This creates the `docs/coordination/` directory with:
+
 - `AI_SYNC_STATE.json` - Shared state file
 - `AI_SYNC_LOG.md` - Activity log
 - `AI_ORCHESTRATOR_EVENTS.ndjson` - Event stream
@@ -99,6 +100,7 @@ npm run build:exe
 This produces a single-file binary at `dist/hydra.exe` that includes Node runtime + Hydra code.
 
 Notes:
+
 - No Node install is required on the target machine.
 - Standalone mode supports normal operator/daemon/client flows.
 - `--full` mode is disabled in standalone exe builds (PowerShell multi-terminal launcher is repo-install only).
@@ -131,20 +133,20 @@ Add these scripts to your project's `package.json`:
 
 ## Environment Variables
 
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `AI_ORCH_HOST` | `127.0.0.1` | Daemon bind host |
-| `AI_ORCH_PORT` | `4173` | Daemon bind port |
-| `AI_ORCH_URL` | `http://127.0.0.1:4173` | Daemon URL for clients |
-| `AI_ORCH_TOKEN` | (none) | Optional auth token |
-| `HYDRA_PROJECT` | (cwd) | Override target project |
-| `HYDRA_CLAUDE_MODEL` | (config) | Override Claude model |
-| `HYDRA_GEMINI_MODEL` | (config) | Override Gemini model |
-| `HYDRA_CODEX_MODEL` | (config) | Override Codex model |
-| `OPENAI_API_KEY` | (none) | Concierge primary provider (OpenAI models) |
-| `ANTHROPIC_API_KEY` | (none) | Concierge fallback provider (Anthropic models) |
-| `GEMINI_API_KEY` | (none) | Concierge fallback provider (Google Gemini models) |
-| `GOOGLE_API_KEY` | (none) | Alternative to GEMINI_API_KEY for Google provider |
+| Variable             | Default                 | Description                                        |
+| -------------------- | ----------------------- | -------------------------------------------------- |
+| `AI_ORCH_HOST`       | `127.0.0.1`             | Daemon bind host                                   |
+| `AI_ORCH_PORT`       | `4173`                  | Daemon bind port                                   |
+| `AI_ORCH_URL`        | `http://127.0.0.1:4173` | Daemon URL for clients                             |
+| `AI_ORCH_TOKEN`      | (none)                  | Optional auth token                                |
+| `HYDRA_PROJECT`      | (cwd)                   | Override target project                            |
+| `HYDRA_CLAUDE_MODEL` | (config)                | Override Claude model                              |
+| `HYDRA_GEMINI_MODEL` | (config)                | Override Gemini model                              |
+| `HYDRA_CODEX_MODEL`  | (config)                | Override Codex model                               |
+| `OPENAI_API_KEY`     | (none)                  | Concierge primary provider (OpenAI models)         |
+| `ANTHROPIC_API_KEY`  | (none)                  | Concierge fallback provider (Anthropic models)     |
+| `GEMINI_API_KEY`     | (none)                  | Concierge fallback provider (Google Gemini models) |
+| `GOOGLE_API_KEY`     | (none)                  | Alternative to GEMINI_API_KEY for Google provider  |
 
 ## Troubleshooting
 

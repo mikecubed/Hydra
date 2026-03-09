@@ -1,8 +1,6 @@
-#!/usr/bin/env node
-
-import fs from 'fs';
-import path from 'path';
-import { spawnSync } from 'child_process';
+import fs from 'node:fs';
+import path from 'node:path';
+import { spawnSync } from 'node:child_process';
 import { build } from 'esbuild';
 
 const args = process.argv.slice(2);
@@ -10,7 +8,9 @@ const isCi = args.includes('--ci');
 const targetArg = args.find((arg) => arg.startsWith('--target='));
 const outputArg = args.find((arg) => arg.startsWith('--output='));
 
-const target = targetArg ? targetArg.slice('--target='.length) : (process.env.HYDRA_EXE_TARGET || 'node20-win-x64');
+const target = targetArg
+  ? targetArg.slice('--target='.length)
+  : process.env.HYDRA_EXE_TARGET || 'node20-win-x64';
 const output = outputArg ? outputArg.slice('--output='.length) : 'dist/hydra.exe';
 
 const projectRoot = process.cwd();

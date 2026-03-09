@@ -6,20 +6,20 @@
 
 ## Problem
 
-The agent registry (`PHYSICAL_AGENTS` in `hydra-agents.mjs`) already looks like a plugin system — `registerAgent()`, runtime registry, `initAgentRegistry()`. But the *executor* bypasses it entirely. Per-agent behavior is scattered in if/else chains across 9 files:
+The agent registry (`PHYSICAL_AGENTS` in `hydra-agents.mjs`) already looks like a plugin system — `registerAgent()`, runtime registry, `initAgentRegistry()`. But the _executor_ bypasses it entirely. Per-agent behavior is scattered in if/else chains across 9 files:
 
-| File | What it hardcodes |
-|---|---|
-| `hydra-shared/agent-executor.mjs` | Arg building, output parsing, error categorization |
-| `hydra-metrics.mjs` | Token extraction from stdout |
-| `hydra-usage.mjs` | Model ID → agent validation |
-| `hydra-actualize.mjs` | Economy model fallbacks |
-| `orchestrator-daemon.mjs` | Read instructions, task rules per agent |
-| `hydra-model-recovery.mjs` | Quota API endpoints and patterns |
-| `hydra-operator.mjs` | Role-specific prompt addenda |
-| `hydra-audit.mjs` | Agent commands and economy model hardcodes |
-| `hydra-council.mjs` | Agent-specific phase filtering *(excluded — see scope)* |
-| `hydra-evolve.mjs` | Error handling behavior |
+| File                              | What it hardcodes                                       |
+| --------------------------------- | ------------------------------------------------------- |
+| `hydra-shared/agent-executor.mjs` | Arg building, output parsing, error categorization      |
+| `hydra-metrics.mjs`               | Token extraction from stdout                            |
+| `hydra-usage.mjs`                 | Model ID → agent validation                             |
+| `hydra-actualize.mjs`             | Economy model fallbacks                                 |
+| `orchestrator-daemon.mjs`         | Read instructions, task rules per agent                 |
+| `hydra-model-recovery.mjs`        | Quota API endpoints and patterns                        |
+| `hydra-operator.mjs`              | Role-specific prompt addenda                            |
+| `hydra-audit.mjs`                 | Agent commands and economy model hardcodes              |
+| `hydra-council.mjs`               | Agent-specific phase filtering _(excluded — see scope)_ |
+| `hydra-evolve.mjs`                | Error handling behavior                                 |
 
 Adding Copilot or any custom agent currently requires touching all of these. This refactor colocates that behavior with the agent definition, making the executor and all callsites data-driven.
 
@@ -102,19 +102,19 @@ This extends the existing shape (all new fields are optional with defaults):
 
 ### Method defaults (applied by `registerAgent()` when absent)
 
-| Field | Default |
-|---|---|
-| `features.executeMode` | `'spawn'` |
-| `features.jsonOutput` | `false` |
-| `features.stdinPrompt` | `false` |
-| `features.reasoningEffort` | `false` |
-| `parseOutput(stdout)` | `{ output: stdout, tokenUsage: null, costUsd: null }` |
-| `errorPatterns` | `{}` |
-| `modelBelongsTo()` | `() => false` |
-| `quotaVerify()` | `async () => null` |
-| `economyModel()` | `() => null` |
-| `readInstructions(f)` | `` (f) => `Read ${f} first.` `` |
-| `taskRules` | `[]` |
+| Field                      | Default                                               |
+| -------------------------- | ----------------------------------------------------- |
+| `features.executeMode`     | `'spawn'`                                             |
+| `features.jsonOutput`      | `false`                                               |
+| `features.stdinPrompt`     | `false`                                               |
+| `features.reasoningEffort` | `false`                                               |
+| `parseOutput(stdout)`      | `{ output: stdout, tokenUsage: null, costUsd: null }` |
+| `errorPatterns`            | `{}`                                                  |
+| `modelBelongsTo()`         | `() => false`                                         |
+| `quotaVerify()`            | `async () => null`                                    |
+| `economyModel()`           | `() => null`                                          |
+| `readInstructions(f)`      | `` (f) => `Read ${f} first.` ``                       |
+| `taskRules`                | `[]`                                                  |
 
 > **`parseOutput` ownership:** `executeAgent()` is the **sole caller**. It embeds `{ output, tokenUsage, costUsd }` in the result object. `hydra-metrics.mjs` receives `tokenUsage` from that result — it must not attempt to re-parse `stdout`. The current per-agent extraction blocks in `hydra-metrics.mjs` (lines 144–184) are removed in Phase 3; `recordCallComplete()` already prefers caller-supplied `tokenUsage` (line 132), so this is a safe deletion.
 
@@ -362,18 +362,18 @@ taskRules: [],
 
 ## Files to Change
 
-| File | Change |
-|---|---|
-| `lib/hydra-agents.mjs` | Add new fields to each `PHYSICAL_AGENTS` entry; apply defaults in `registerAgent()` |
+| File                                  | Change                                                                                                                                             |
+| ------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `lib/hydra-agents.mjs`                | Add new fields to each `PHYSICAL_AGENTS` entry; apply defaults in `registerAgent()`                                                                |
 | `lib/hydra-shared/agent-executor.mjs` | Replace if/else arg-building with `agentDef.invoke.headless()`; replace output parsing with `agentDef.parseOutput()`; route `features.executeMode` |
-| `lib/hydra-metrics.mjs` | Replace per-agent token extraction with `agentDef.parseOutput()` |
-| `lib/hydra-usage.mjs` | Replace `modelBelongsToAgent()` body with `getAgent(agent)?.modelBelongsTo(modelId)` |
-| `lib/hydra-actualize.mjs` | Replace economy model ternary with `agentDef.economyModel(budgetCfg)` |
-| `lib/orchestrator-daemon.mjs` | Replace `readInstructions` ternary and `taskRules` if/else with `agentDef.readInstructions()` / `agentDef.taskRules` |
-| `lib/hydra-model-recovery.mjs` | Replace 3 if-blocks in quota verification with `agentDef.quotaVerify(apiKey)` |
-| `lib/hydra-operator.mjs` | Replace per-agent prompt addenda with `agentDef.taskRules` |
-| `lib/hydra-evolve.mjs` | Replace Codex error handling special case with `agentDef.errorPatterns` check |
-| `lib/hydra-council.mjs` | Replace agent name filters with `agentDef.councilRole` checks where possible |
+| `lib/hydra-metrics.mjs`               | Replace per-agent token extraction with `agentDef.parseOutput()`                                                                                   |
+| `lib/hydra-usage.mjs`                 | Replace `modelBelongsToAgent()` body with `getAgent(agent)?.modelBelongsTo(modelId)`                                                               |
+| `lib/hydra-actualize.mjs`             | Replace economy model ternary with `agentDef.economyModel(budgetCfg)`                                                                              |
+| `lib/orchestrator-daemon.mjs`         | Replace `readInstructions` ternary and `taskRules` if/else with `agentDef.readInstructions()` / `agentDef.taskRules`                               |
+| `lib/hydra-model-recovery.mjs`        | Replace 3 if-blocks in quota verification with `agentDef.quotaVerify(apiKey)`                                                                      |
+| `lib/hydra-operator.mjs`              | Replace per-agent prompt addenda with `agentDef.taskRules`                                                                                         |
+| `lib/hydra-evolve.mjs`                | Replace Codex error handling special case with `agentDef.errorPatterns` check                                                                      |
+| `lib/hydra-council.mjs`               | Replace agent name filters with `agentDef.councilRole` checks where possible                                                                       |
 
 ---
 
@@ -384,6 +384,7 @@ taskRules: [],
 Add all new methods/fields to the 4 existing `PHYSICAL_AGENTS` entries. Update `registerAgent()` to apply defaults for any missing field. **No behavior changes yet** — the executor still uses the old if/else chains. Tests still pass.
 
 Key validation to add in `registerAgent()`:
+
 ```javascript
 // Apply defaults for plugin interface fields
 // customType:'api' implies executeMode:'api' unless explicitly overridden
@@ -395,7 +396,8 @@ entry.features = {
   reasoningEffort: false,
   ...def.features,
 };
-entry.parseOutput = def.parseOutput ?? ((stdout) => ({ output: stdout, tokenUsage: null, costUsd: null }));
+entry.parseOutput =
+  def.parseOutput ?? ((stdout) => ({ output: stdout, tokenUsage: null, costUsd: null }));
 entry.errorPatterns = def.errorPatterns ?? {};
 entry.modelBelongsTo = def.modelBelongsTo ?? (() => false);
 entry.quotaVerify = def.quotaVerify ?? (async () => null);
@@ -433,6 +435,7 @@ const agentDef = getAgent(agent);
 ```
 
 Replace the output parsing block:
+
 ```javascript
 // Before:
 if (agent === 'codex') {
@@ -448,6 +451,7 @@ costUsd = parsed.costUsd;
 ```
 
 Route `executeMode` — **check before building args, not after**:
+
 ```javascript
 // Before (lines 858-889):
 if (agent === 'gemini') return executeGeminiDirect(prompt, opts);
@@ -488,7 +492,9 @@ function modelBelongsToAgent(modelId, agent) {
 }
 
 // hydra-actualize.mjs economy model
-const modelOverride = useEconomy ? (getAgent(agent)?.economyModel(budgetCfg) ?? undefined) : undefined;
+const modelOverride = useEconomy
+  ? (getAgent(agent)?.economyModel(budgetCfg) ?? undefined)
+  : undefined;
 
 // orchestrator-daemon.mjs
 const readInstructions = getAgent(agent)?.readInstructions(instructionFile);
@@ -527,21 +533,21 @@ Once Phase 1–3 are done:
 - `registerAgent()` API is backward-compatible — existing callers unaffected
 - The agent names (`claude`, `gemini`, `codex`, `local`) don't change
 - No external plugin loading, no manifest files, no hot-reload
-- **`hydra-council.mjs` phase filters** (`entry.agent === 'claude'`) — these filter log *entries* by name, not dispatch behavior. Leave for a follow-up.
+- **`hydra-council.mjs` phase filters** (`entry.agent === 'claude'`) — these filter log _entries_ by name, not dispatch behavior. Leave for a follow-up.
 - **`hydra-audit.mjs`** agent command/model hardcodes — in scope for Phase 3 but low risk; can be last.
 
 ## Phase 2 Without Phase 3 — Risk Inventory
 
 If Phase 2 (executor refactor) ships without Phase 3 (callsite cleanup) complete, the built-in agents still run correctly — but any **new or non-core agent** (Copilot, custom) will exhibit silent failures:
 
-| Callsite | Symptom if not migrated |
-|---|---|
-| `hydra-usage.mjs modelBelongsToAgent()` | `modelBelongsTo()` returns `false` → usage stats show "unknown agent" or wrong ownership |
-| `hydra-actualize.mjs` economy model | Economy mode ignores the agent's preferred fallback; falls through to `undefined` → uses full model unexpectedly |
-| `orchestrator-daemon.mjs` read instructions | New agent gets hardcoded Claude instructions; wrong context preamble |
-| `hydra-model-recovery.mjs` quota check | Quota verification silently skipped (`undefined` at line 430); agent marked healthy when quota is exhausted |
-| `hydra-operator.mjs` task rules | Generic rules only; agent-specific guidance missing |
-| `hydra-metrics.mjs` token extraction | New agents still get the old per-agent if/else (which won't match) → `tokenUsage: null` → cost accounting silent gap |
+| Callsite                                    | Symptom if not migrated                                                                                              |
+| ------------------------------------------- | -------------------------------------------------------------------------------------------------------------------- |
+| `hydra-usage.mjs modelBelongsToAgent()`     | `modelBelongsTo()` returns `false` → usage stats show "unknown agent" or wrong ownership                             |
+| `hydra-actualize.mjs` economy model         | Economy mode ignores the agent's preferred fallback; falls through to `undefined` → uses full model unexpectedly     |
+| `orchestrator-daemon.mjs` read instructions | New agent gets hardcoded Claude instructions; wrong context preamble                                                 |
+| `hydra-model-recovery.mjs` quota check      | Quota verification silently skipped (`undefined` at line 430); agent marked healthy when quota is exhausted          |
+| `hydra-operator.mjs` task rules             | Generic rules only; agent-specific guidance missing                                                                  |
+| `hydra-metrics.mjs` token extraction        | New agents still get the old per-agent if/else (which won't match) → `tokenUsage: null` → cost accounting silent gap |
 
 **Conclusion:** Phase 2 and Phase 3 must ship together. They are a single atomic PR.
 
@@ -587,7 +593,8 @@ describe('plugin interface — all physical agents', () => {
 describe('registerAgent() applies defaults for missing plugin fields', () => {
   it('minimal definition gets all defaults', () => {
     registerAgent('test-minimal', {
-      type: 'physical', invoke: { headless: (p) => ['test', [p]] },
+      type: 'physical',
+      invoke: { headless: (p) => ['test', [p]] },
     });
     const a = getAgent('test-minimal');
     assert.equal(a.features.executeMode, 'spawn');
@@ -600,8 +607,15 @@ describe('registerAgent() applies defaults for missing plugin fields', () => {
 describe('claude parseOutput', () => {
   it('extracts output and tokens from structured JSON', () => {
     const stdout = JSON.stringify({
-      type: 'result', result: 'Done.', cost_usd: 0.002,
-      usage: { input_tokens: 100, output_tokens: 50, cache_creation_input_tokens: 10, cache_read_input_tokens: 20 },
+      type: 'result',
+      result: 'Done.',
+      cost_usd: 0.002,
+      usage: {
+        input_tokens: 100,
+        output_tokens: 50,
+        cache_creation_input_tokens: 10,
+        cache_read_input_tokens: 20,
+      },
     });
     const { output, tokenUsage, costUsd } = getAgent('claude').parseOutput(stdout);
     assert.equal(output, 'Done.');
@@ -619,8 +633,16 @@ describe('claude parseOutput', () => {
 describe('codex parseOutput', () => {
   it('extracts text and accumulates tokens across JSONL lines', () => {
     const stdout = [
-      JSON.stringify({ type: 'message', content: 'Hello ', usage: { input_tokens: 50, output_tokens: 20 } }),
-      JSON.stringify({ type: 'message', content: 'world.',  usage: { input_tokens: 10, output_tokens: 5 } }),
+      JSON.stringify({
+        type: 'message',
+        content: 'Hello ',
+        usage: { input_tokens: 50, output_tokens: 20 },
+      }),
+      JSON.stringify({
+        type: 'message',
+        content: 'world.',
+        usage: { input_tokens: 10, output_tokens: 5 },
+      }),
     ].join('\n');
     const { output, tokenUsage } = getAgent('codex').parseOutput(stdout);
     assert.ok(output.includes('Hello'));
@@ -630,9 +652,17 @@ describe('codex parseOutput', () => {
 
   it('mixed message/usage/error JSONL does not crash and accumulates tokens', () => {
     const stdout = [
-      JSON.stringify({ type: 'message', content: 'Part 1. ', usage: { input_tokens: 10, output_tokens: 5 } }),
+      JSON.stringify({
+        type: 'message',
+        content: 'Part 1. ',
+        usage: { input_tokens: 10, output_tokens: 5 },
+      }),
       JSON.stringify({ type: 'error', message: 'Tool failed' }),
-      JSON.stringify({ type: 'message', content: 'Part 2.', usage: { input_tokens: 8, output_tokens: 3 } }),
+      JSON.stringify({
+        type: 'message',
+        content: 'Part 2.',
+        usage: { input_tokens: 8, output_tokens: 3 },
+      }),
     ].join('\n');
     const { output, tokenUsage } = getAgent('codex').parseOutput(stdout);
     assert.ok(output.includes('Part 1'));
@@ -657,7 +687,8 @@ describe('executor routing guards', () => {
 
   it('custom api agent gets executeMode=api default from customType', () => {
     registerAgent('test-api-agent', {
-      type: 'physical', customType: 'api',
+      type: 'physical',
+      customType: 'api',
       invoke: { headless: null },
     });
     // executeMode should default to 'api' when customType === 'api'
@@ -668,6 +699,6 @@ describe('executor routing guards', () => {
 
 ---
 
-*Document created: 2026-03-08*
-*Revised: 2026-03-08 — GPT-5.4 review: fixed gemini-direct abstraction leak, local headless null guard, parseOutput double-parse risk, added Phase 2+3 atomicity requirement, added hydra-audit.mjs to scope, expanded test fixtures*
-*Status: Revised — ready for implementation*
+_Document created: 2026-03-08_
+_Revised: 2026-03-08 — GPT-5.4 review: fixed gemini-direct abstraction leak, local headless null guard, parseOutput double-parse risk, added Phase 2+3 atomicity requirement, added hydra-audit.mjs to scope, expanded test fixtures_
+_Status: Revised — ready for implementation_

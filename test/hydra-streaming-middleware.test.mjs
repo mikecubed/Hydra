@@ -1,6 +1,12 @@
 import { describe, it, beforeEach } from 'node:test';
 import assert from 'node:assert/strict';
-import { PeakEWMA, compose, createStreamingPipeline, getProviderEWMA, getLatencyEstimates } from '../lib/hydra-streaming-middleware.mjs';
+import {
+  PeakEWMA,
+  compose,
+  createStreamingPipeline,
+  getProviderEWMA,
+  getLatencyEstimates,
+} from '../lib/hydra-streaming-middleware.mjs';
 
 describe('PeakEWMA', () => {
   it('returns 0 when no observations', () => {
@@ -63,7 +69,13 @@ describe('compose', () => {
     const fn = compose([layer1, layer2], core);
     const result = await fn({});
 
-    assert.deepEqual(order, ['layer1-before', 'layer2-before', 'core', 'layer2-after', 'layer1-after']);
+    assert.deepEqual(order, [
+      'layer1-before',
+      'layer2-before',
+      'core',
+      'layer2-after',
+      'layer1-after',
+    ]);
     assert.deepEqual(result, { value: 42 });
   });
 
@@ -82,11 +94,14 @@ describe('compose', () => {
     };
 
     const fn = compose([layer], core);
-    await assert.rejects(() => fn({}), (err) => {
-      assert.equal(err.message, 'core error');
-      assert.equal(err.wrapped, true);
-      return true;
-    });
+    await assert.rejects(
+      () => fn({}),
+      (err) => {
+        assert.equal(err.message, 'core error');
+        assert.equal(err.wrapped, true);
+        return true;
+      },
+    );
   });
 });
 

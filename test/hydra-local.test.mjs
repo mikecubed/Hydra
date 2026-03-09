@@ -10,10 +10,10 @@ describe('hydra-local', () => {
   it('returns local-unavailable on ECONNREFUSED', async () => {
     const { streamLocalCompletion } = await import('../lib/hydra-local.mjs');
     // Port 19999 is almost certainly unused
-    const result = await streamLocalCompletion(
-      [{ role: 'user', content: 'hello' }],
-      { model: 'test', baseUrl: 'http://localhost:19999/v1' }
-    );
+    const result = await streamLocalCompletion([{ role: 'user', content: 'hello' }], {
+      model: 'test',
+      baseUrl: 'http://localhost:19999/v1',
+    });
     assert.strictEqual(result.ok, false);
     assert.strictEqual(result.errorCategory, 'local-unavailable');
     assert.strictEqual(result.output, '');
@@ -22,17 +22,21 @@ describe('hydra-local', () => {
 
 describe('local agent registration', () => {
   it('local agent appears in registry after initAgentRegistry()', async () => {
-    const { initAgentRegistry, listAgents, _resetRegistry } = await import('../lib/hydra-agents.mjs');
+    const { initAgentRegistry, listAgents, _resetRegistry } =
+      await import('../lib/hydra-agents.mjs');
     _resetRegistry();
     initAgentRegistry();
     const agents = listAgents();
-    assert.ok(agents.some(a => a.name === 'local'), 'local agent should be in registry');
+    assert.ok(
+      agents.some((a) => a.name === 'local'),
+      'local agent should be in registry',
+    );
   });
 
   it('local agent is enabled', async () => {
     const { listAgents } = await import('../lib/hydra-agents.mjs');
     const agents = listAgents();
-    const local = agents.find(a => a.name === 'local');
+    const local = agents.find((a) => a.name === 'local');
     assert.ok(local, 'local agent should exist');
     assert.strictEqual(local.enabled, true);
   });
@@ -40,13 +44,14 @@ describe('local agent registration', () => {
   it('local agent has research affinity of 0 (hard excluded)', async () => {
     const { listAgents } = await import('../lib/hydra-agents.mjs');
     const agents = listAgents();
-    const local = agents.find(a => a.name === 'local');
-    assert.strictEqual(local.taskAffinity.research, 0.00);
+    const local = agents.find((a) => a.name === 'local');
+    assert.strictEqual(local.taskAffinity.research, 0.0);
   });
 
   it('bestAgentFor returns local for implementation in economy mode', async () => {
     const { bestAgentFor } = await import('../lib/hydra-agents.mjs');
-    const { loadHydraConfig, _setTestConfig, invalidateConfigCache } = await import('../lib/hydra-config.mjs');
+    const { loadHydraConfig, _setTestConfig, invalidateConfigCache } =
+      await import('../lib/hydra-config.mjs');
     const original = loadHydraConfig();
     _setTestConfig({ ...original, local: { ...original.local, enabled: true } });
     try {

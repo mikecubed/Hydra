@@ -66,7 +66,15 @@ test('TASK_TYPES has 10 types including new ones', () => {
   assert.ok(TASK_TYPES.includes('documentation'));
   assert.ok(TASK_TYPES.includes('security'));
   // Original 7 still present
-  for (const t of ['planning', 'architecture', 'review', 'refactor', 'implementation', 'analysis', 'testing']) {
+  for (const t of [
+    'planning',
+    'architecture',
+    'review',
+    'refactor',
+    'implementation',
+    'analysis',
+    'testing',
+  ]) {
     assert.ok(TASK_TYPES.includes(t), `${t} should be in TASK_TYPES`);
   }
 });
@@ -80,20 +88,32 @@ test('each physical agent has required fields', () => {
 
     if (agent.cli === null) {
       assert.equal(name, 'local', 'only local should omit a CLI binary');
-      assert.equal(agent.invoke.nonInteractive, null, `${name} should not expose nonInteractive invoke`);
+      assert.equal(
+        agent.invoke.nonInteractive,
+        null,
+        `${name} should not expose nonInteractive invoke`,
+      );
       assert.equal(agent.invoke.interactive, null, `${name} should not expose interactive invoke`);
       assert.equal(agent.invoke.headless, null, `${name} should not expose headless invoke`);
     } else {
       assert.equal(typeof agent.cli, 'string', `${name} should have a cli command`);
-      assert.equal(typeof agent.invoke.nonInteractive, 'function', `${name} should have nonInteractive invoke`);
-      assert.equal(typeof agent.invoke.interactive, 'function', `${name} should have interactive invoke`);
+      assert.equal(
+        typeof agent.invoke.nonInteractive,
+        'function',
+        `${name} should have nonInteractive invoke`,
+      );
+      assert.equal(
+        typeof agent.invoke.interactive,
+        'function',
+        `${name} should have interactive invoke`,
+      );
       assert.equal(typeof agent.invoke.headless, 'function', `${name} should have headless invoke`);
     }
 
     assert.ok(typeof agent.contextBudget === 'number', `${name} should have contextBudget`);
     assert.ok(
       agent.contextTier === null || typeof agent.contextTier === 'string',
-      `${name} should have a string or null contextTier`
+      `${name} should have a string or null contextTier`,
     );
     assert.ok(Array.isArray(agent.strengths), `${name} should have strengths array`);
     assert.ok(Array.isArray(agent.weaknesses), `${name} should have weaknesses array`);
@@ -116,7 +136,10 @@ test('all physical agents have affinity scores for all task types', () => {
     for (const taskType of TASK_TYPES) {
       const score = agent.taskAffinity[taskType];
       assert.ok(typeof score === 'number', `${name} should have affinity for ${taskType}`);
-      assert.ok(score >= 0 && score <= 1, `${name}.taskAffinity.${taskType} should be 0-1, got ${score}`);
+      assert.ok(
+        score >= 0 && score <= 1,
+        `${name}.taskAffinity.${taskType} should be 0-1, got ${score}`,
+      );
     }
   }
 });
@@ -306,7 +329,10 @@ test('registerAgent rejects virtual agent without baseAgent', () => {
 });
 
 test('registerAgent rejects virtual agent with unknown baseAgent', () => {
-  assert.throws(() => registerAgent('bad-virtual', { type: 'virtual', baseAgent: 'nonexistent' }), /unknown baseAgent/);
+  assert.throws(
+    () => registerAgent('bad-virtual', { type: 'virtual', baseAgent: 'nonexistent' }),
+    /unknown baseAgent/,
+  );
 });
 
 test('unregisterAgent removes virtual agents', () => {
@@ -380,7 +406,12 @@ test('listAgents filters by type', () => {
 });
 
 test('listAgents filters by enabled', () => {
-  registerAgent('disabled-test', { type: 'virtual', baseAgent: 'claude', rolePrompt: 'test', enabled: false });
+  registerAgent('disabled-test', {
+    type: 'virtual',
+    baseAgent: 'claude',
+    rolePrompt: 'test',
+    enabled: false,
+  });
   const enabled = listAgents({ enabled: true });
   assert.ok(!enabled.find((a) => a.name === 'disabled-test'));
   const disabled = listAgents({ enabled: false });
@@ -454,7 +485,11 @@ test('AFFINITY_PRESETS exports balanced, code-focused, review-focused, research-
 test('each AFFINITY_PRESETS entry covers all 10 task types with numbers', () => {
   for (const [presetName, affinity] of Object.entries(AFFINITY_PRESETS)) {
     for (const tt of TASK_TYPES) {
-      assert.strictEqual(typeof affinity[tt], 'number', `preset "${presetName}" missing task type: ${tt}`);
+      assert.strictEqual(
+        typeof affinity[tt],
+        'number',
+        `preset "${presetName}" missing task type: ${tt}`,
+      );
     }
   }
 });
@@ -485,9 +520,16 @@ describe('initAgentRegistry — custom physical agents', () => {
             contextBudget: 16000,
             councilRole: null,
             taskAffinity: {
-              implementation: 0.70, review: 0.40, research: 0.00,
-              planning: 0.30, architecture: 0.25, refactor: 0.60,
-              analysis: 0.40, testing: 0.55, security: 0.30, documentation: 0.40,
+              implementation: 0.7,
+              review: 0.4,
+              research: 0.0,
+              planning: 0.3,
+              architecture: 0.25,
+              refactor: 0.6,
+              analysis: 0.4,
+              testing: 0.55,
+              security: 0.3,
+              documentation: 0.4,
             },
             enabled: true,
           },
@@ -500,9 +542,16 @@ describe('initAgentRegistry — custom physical agents', () => {
             contextBudget: 8000,
             councilRole: null,
             taskAffinity: {
-              implementation: 0.80, review: 0.50, research: 0.00,
-              planning: 0.35, architecture: 0.30, refactor: 0.75,
-              analysis: 0.45, testing: 0.65, security: 0.25, documentation: 0.45,
+              implementation: 0.8,
+              review: 0.5,
+              research: 0.0,
+              planning: 0.35,
+              architecture: 0.3,
+              refactor: 0.75,
+              analysis: 0.45,
+              testing: 0.65,
+              security: 0.25,
+              documentation: 0.45,
             },
             enabled: true,
           },
@@ -535,7 +584,7 @@ describe('initAgentRegistry — custom physical agents', () => {
   });
 
   it('custom agents appear in listAgents({ type: "physical" })', () => {
-    const names = listAgents({ type: 'physical' }).map(a => a.name);
+    const names = listAgents({ type: 'physical' }).map((a) => a.name);
     assert.ok(names.includes('test-cli-agent'), 'test-cli-agent should be listed');
     assert.ok(names.includes('test-api-agent'), 'test-api-agent should be listed');
   });

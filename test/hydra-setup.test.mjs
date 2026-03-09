@@ -1,8 +1,8 @@
 import { describe, it, beforeEach, afterEach } from 'node:test';
 import assert from 'node:assert/strict';
-import fs from 'fs';
-import path from 'path';
-import os from 'os';
+import fs from 'node:fs';
+import path from 'node:path';
+import os from 'node:os';
 import {
   resolveHydraRoot,
   resolveMcpServerPath,
@@ -132,8 +132,12 @@ describe('buildMcpServerEntry', () => {
 describe('readJsonFile', () => {
   let tmpDir;
 
-  beforeEach(() => { tmpDir = makeTmpDir(); });
-  afterEach(() => { rmDir(tmpDir); });
+  beforeEach(() => {
+    tmpDir = makeTmpDir();
+  });
+  afterEach(() => {
+    rmDir(tmpDir);
+  });
 
   it('returns {} for missing file', () => {
     const result = readJsonFile(path.join(tmpDir, 'nonexistent.json'));
@@ -191,7 +195,9 @@ describe('mergeClaudeConfig', () => {
     tmpDir = makeTmpDir();
     configPath = path.join(tmpDir, '.claude.json');
   });
-  afterEach(() => { rmDir(tmpDir); });
+  afterEach(() => {
+    rmDir(tmpDir);
+  });
 
   it('adds hydra to empty config', () => {
     const result = mergeClaudeConfig({ configPath });
@@ -255,7 +261,9 @@ describe('mergeGeminiConfig', () => {
     tmpDir = makeTmpDir();
     configPath = path.join(tmpDir, 'settings.json');
   });
-  afterEach(() => { rmDir(tmpDir); });
+  afterEach(() => {
+    rmDir(tmpDir);
+  });
 
   it('creates file if missing and adds hydra', () => {
     const result = mergeGeminiConfig({ configPath });
@@ -306,7 +314,9 @@ describe('unmergeClaudeConfig', () => {
     tmpDir = makeTmpDir();
     configPath = path.join(tmpDir, '.claude.json');
   });
-  afterEach(() => { rmDir(tmpDir); });
+  afterEach(() => {
+    rmDir(tmpDir);
+  });
 
   it('removes hydra entry', () => {
     mergeClaudeConfig({ configPath });
@@ -355,7 +365,9 @@ describe('unmergeGeminiConfig', () => {
     tmpDir = makeTmpDir();
     configPath = path.join(tmpDir, 'settings.json');
   });
-  afterEach(() => { rmDir(tmpDir); });
+  afterEach(() => {
+    rmDir(tmpDir);
+  });
 
   it('removes hydra entry', () => {
     mergeGeminiConfig({ configPath });
@@ -437,7 +449,13 @@ describe('main init', () => {
   it('creates HYDRA.md and agent files in the target directory', async () => {
     const targetDir = path.join(tmpDir, 'nested', 'project');
 
-    const result = await main(['node', 'hydra-setup.mjs', 'init', targetDir, '--project-name=TargetProject']);
+    const result = await main([
+      'node',
+      'hydra-setup.mjs',
+      'init',
+      targetDir,
+      '--project-name=TargetProject',
+    ]);
 
     assert.strictEqual(result.ok, true);
     assert.ok(fs.existsSync(path.join(targetDir, 'HYDRA.md')));
@@ -479,7 +497,10 @@ Codex instructions.
     assert.ok(fs.existsSync(path.join(targetDir, 'CLAUDE.md')));
     assert.ok(fs.existsSync(path.join(targetDir, 'GEMINI.md')));
     assert.ok(fs.existsSync(path.join(targetDir, 'AGENTS.md')));
-    assert.match(fs.readFileSync(path.join(targetDir, 'AGENTS.md'), 'utf8'), /Codex instructions\./);
+    assert.match(
+      fs.readFileSync(path.join(targetDir, 'AGENTS.md'), 'utf8'),
+      /Codex instructions\./,
+    );
   });
 
   it('overwrites an existing HYDRA.md when --force is set', async () => {
@@ -489,7 +510,14 @@ Codex instructions.
     fs.mkdirSync(targetDir, { recursive: true });
     fs.writeFileSync(hydraMdPath, '# HYDRA.md\n\nLegacy instructions.\n', 'utf8');
 
-    const result = await main(['node', 'hydra-setup.mjs', 'init', targetDir, '--force', '--project-name=ForcedProject']);
+    const result = await main([
+      'node',
+      'hydra-setup.mjs',
+      'init',
+      targetDir,
+      '--force',
+      '--project-name=ForcedProject',
+    ]);
     const nextContent = fs.readFileSync(hydraMdPath, 'utf8');
 
     assert.strictEqual(result.ok, true);

@@ -1,12 +1,12 @@
-import fs from 'fs';
-import os from 'os';
-import path from 'path';
-import net from 'net';
-import http from 'http';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+import net from 'node:net';
+import http from 'node:http';
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { spawn } from 'child_process';
-import { fileURLToPath } from 'url';
+import { spawn } from 'node:child_process';
+import { fileURLToPath } from 'node:url';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -19,7 +19,11 @@ function sleep(ms) {
 
 function createTempProject(packageJson) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'hydra-daemon-it-'));
-  fs.writeFileSync(path.join(root, 'package.json'), `${JSON.stringify(packageJson, null, 2)}\n`, 'utf8');
+  fs.writeFileSync(
+    path.join(root, 'package.json'),
+    `${JSON.stringify(packageJson, null, 2)}\n`,
+    'utf8',
+  );
   return root;
 }
 
@@ -46,42 +50,45 @@ async function requestJson(baseUrl, method, route, body = null, timeoutMs = 4_00
   const payload = body ? JSON.stringify(body) : '';
 
   return new Promise((resolve, reject) => {
-    const req = http.request({
-      protocol: target.protocol,
-      hostname: target.hostname,
-      port: target.port,
-      path: `${target.pathname}${target.search}`,
-      method,
-      headers: body
-        ? {
-            'Content-Type': 'application/json',
-            'Content-Length': Buffer.byteLength(payload),
-          }
-        : undefined,
-    }, (res) => {
-      let text = '';
-      res.setEncoding('utf8');
-      res.on('data', (chunk) => {
-        text += chunk;
-      });
-      res.on('end', () => {
-        let json = {};
-        try {
-          json = JSON.parse(text);
-        } catch {
-          json = {};
-        }
-        const status = res.statusCode || 0;
-        resolve({
-          response: {
-            status,
-            ok: status >= 200 && status < 300,
-          },
-          json,
-          text,
+    const req = http.request(
+      {
+        protocol: target.protocol,
+        hostname: target.hostname,
+        port: target.port,
+        path: `${target.pathname}${target.search}`,
+        method,
+        headers: body
+          ? {
+              'Content-Type': 'application/json',
+              'Content-Length': Buffer.byteLength(payload),
+            }
+          : undefined,
+      },
+      (res) => {
+        let text = '';
+        res.setEncoding('utf8');
+        res.on('data', (chunk) => {
+          text += chunk;
         });
-      });
-    });
+        res.on('end', () => {
+          let json = {};
+          try {
+            json = JSON.parse(text);
+          } catch {
+            json = {};
+          }
+          const status = res.statusCode || 0;
+          resolve({
+            response: {
+              status,
+              ok: status >= 200 && status < 300,
+            },
+            json,
+            text,
+          });
+        });
+      },
+    );
 
     req.setTimeout(timeoutMs, () => {
       req.destroy(new Error(`Request timeout: ${method} ${route}`));
@@ -136,7 +143,7 @@ async function startDaemon(projectRoot) {
     {
       cwd: REPO_ROOT,
       stdio: ['ignore', 'ignore', 'ignore'],
-    }
+    },
   );
   child.unref();
 
@@ -165,8 +172,8 @@ async function removeDirBestEffort(dirPath, attempts = 8) {
     try {
       fs.rmSync(dirPath, { recursive: true, force: true });
       return;
-    } catch (error) {
-      const code = String(error?.code || '');
+    } catch (err) {
+      const code = String(err?.code || '');
       if (!['EBUSY', 'ENOTEMPTY', 'EPERM'].includes(code) || i === attempts - 1) {
         return;
       }
@@ -175,86 +182,111 @@ async function removeDirBestEffort(dirPath, attempts = 8) {
   }
 }
 
-test('/task/update returns skipped verification when auto-detection finds no command', { timeout: 60_000 }, async (t) => {
-  const projectRoot = createTempProject({
-    name: 'hydra-it-no-verify',
-    private: true,
-    type: 'module',
-  });
-  let daemon = null;
-  t.after(async () => {
-    await stopDaemon(daemon);
-    await removeDirBestEffort(projectRoot);
-  });
-  daemon = await startDaemon(projectRoot);
+test(
+  '/task/update returns skipped verification when auto-detection finds no command',
+  { timeout: 60_000 },
+  async (t) => {
+    const projectRoot = createTempProject({
+      name: 'hydra-it-no-verify',
+      private: true,
+      type: 'module',
+    });
+    let daemon = null;
+    t.after(async () => {
+      await stopDaemon(daemon);
+      await removeDirBestEffort(projectRoot);
+    });
+    daemon = await startDaemon(projectRoot);
 
-  const add = await requestJson(daemon.baseUrl, 'POST', '/task/add', { title: 'integration no-verify task' });
-  assert.equal(add.response.status, 200);
-  const taskId = add.json?.task?.id;
-  assert.ok(taskId);
+    const add = await requestJson(daemon.baseUrl, 'POST', '/task/add', {
+      title: 'integration no-verify task',
+    });
+    assert.equal(add.response.status, 200);
+    const taskId = add.json?.task?.id;
+    assert.ok(taskId);
 
-  const update = await requestJson(daemon.baseUrl, 'POST', '/task/update', { taskId, status: 'done' });
-  assert.equal(update.response.status, 200);
-  assert.equal(update.json.verifying, false);
-  assert.equal(update.json.verification?.enabled, false);
-  assert.equal(update.json.verification?.command, null);
-  assert.match(String(update.json.verification?.reason || ''), /No project-specific verification command/i);
-});
+    const update = await requestJson(daemon.baseUrl, 'POST', '/task/update', {
+      taskId,
+      status: 'done',
+    });
+    assert.equal(update.response.status, 200);
+    assert.equal(update.json.verifying, false);
+    assert.equal(update.json.verification?.enabled, false);
+    assert.equal(update.json.verification?.command, null);
+    assert.match(
+      String(update.json.verification?.reason || ''),
+      /No project-specific verification command/i,
+    );
+  },
+);
 
-test('/verify and /task/update report enabled verification when verify script is present', { timeout: 60_000 }, async (t) => {
-  const projectRoot = createTempProject({
-    name: 'hydra-it-verify',
-    private: true,
-    type: 'module',
-    scripts: {
-      verify: 'node -e "process.exit(0)"',
-    },
-  });
-  let daemon = null;
-  t.after(async () => {
-    await stopDaemon(daemon);
-    await removeDirBestEffort(projectRoot);
-  });
-  daemon = await startDaemon(projectRoot);
+test(
+  '/verify and /task/update report enabled verification when verify script is present',
+  { timeout: 60_000 },
+  async (t) => {
+    const projectRoot = createTempProject({
+      name: 'hydra-it-verify',
+      private: true,
+      type: 'module',
+      scripts: {
+        verify: 'node -e "process.exit(0)"',
+      },
+    });
+    let daemon = null;
+    t.after(async () => {
+      await stopDaemon(daemon);
+      await removeDirBestEffort(projectRoot);
+    });
+    daemon = await startDaemon(projectRoot);
 
-  const add = await requestJson(daemon.baseUrl, 'POST', '/task/add', { title: 'integration verify task' });
-  assert.equal(add.response.status, 200);
-  const taskId = add.json?.task?.id;
-  assert.ok(taskId);
+    const add = await requestJson(daemon.baseUrl, 'POST', '/task/add', {
+      title: 'integration verify task',
+    });
+    assert.equal(add.response.status, 200);
+    const taskId = add.json?.task?.id;
+    assert.ok(taskId);
 
-  const verify = await requestJson(daemon.baseUrl, 'POST', '/verify', { taskId });
-  assert.equal(verify.response.status, 200);
-  assert.equal(verify.json.verification?.enabled, true);
-  assert.equal(verify.json.verification?.command, 'npm run verify');
-  assert.match(String(verify.json.message || ''), /Verification started/i);
+    const verify = await requestJson(daemon.baseUrl, 'POST', '/verify', { taskId });
+    assert.equal(verify.response.status, 200);
+    assert.equal(verify.json.verification?.enabled, true);
+    assert.equal(verify.json.verification?.command, 'npm run verify');
+    assert.match(String(verify.json.message || ''), /Verification started/i);
 
-  const update = await requestJson(daemon.baseUrl, 'POST', '/task/update', { taskId, status: 'done' });
-  assert.equal(update.response.status, 200);
-  assert.equal(update.json.verifying, true);
-  assert.equal(update.json.verification?.enabled, true);
-  assert.equal(update.json.verification?.command, 'npm run verify');
-});
+    const update = await requestJson(daemon.baseUrl, 'POST', '/task/update', {
+      taskId,
+      status: 'done',
+    });
+    assert.equal(update.response.status, 200);
+    assert.equal(update.json.verifying, true);
+    assert.equal(update.json.verification?.enabled, true);
+    assert.equal(update.json.verification?.command, 'npm run verify');
+  },
+);
 
-test('GET /self returns a structured snapshot with project root and models', { timeout: 60_000 }, async (t) => {
-  const projectRoot = createTempProject({
-    name: 'hydra-it-self',
-    private: true,
-    type: 'module',
-  });
-  let daemon = null;
-  t.after(async () => {
-    await stopDaemon(daemon);
-    await removeDirBestEffort(projectRoot);
-  });
-  daemon = await startDaemon(projectRoot);
+test(
+  'GET /self returns a structured snapshot with project root and models',
+  { timeout: 60_000 },
+  async (t) => {
+    const projectRoot = createTempProject({
+      name: 'hydra-it-self',
+      private: true,
+      type: 'module',
+    });
+    let daemon = null;
+    t.after(async () => {
+      await stopDaemon(daemon);
+      await removeDirBestEffort(projectRoot);
+    });
+    daemon = await startDaemon(projectRoot);
 
-  const self = await requestJson(daemon.baseUrl, 'GET', '/self');
-  assert.equal(self.response.status, 200);
-  assert.equal(self.json?.ok, true);
-  assert.ok(self.json?.self);
-  assert.equal(self.json.self.project?.root, projectRoot);
-  assert.ok(self.json.self.models, 'Should include model summary');
-});
+    const self = await requestJson(daemon.baseUrl, 'GET', '/self');
+    assert.equal(self.response.status, 200);
+    assert.equal(self.json?.ok, true);
+    assert.ok(self.json?.self);
+    assert.equal(self.json.self.project?.root, projectRoot);
+    assert.ok(self.json.self.models, 'Should include model summary');
+  },
+);
 
 // ── Phase 1: Event-Sourced Mutation Log ─────────────────────────────────────
 
@@ -274,7 +306,11 @@ test('events have monotonic seq numbers and category fields', { timeout: 60_000 
   // Create a few mutations to generate events
   await requestJson(daemon.baseUrl, 'POST', '/task/add', { title: 'seq test task 1' });
   await requestJson(daemon.baseUrl, 'POST', '/task/add', { title: 'seq test task 2' });
-  await requestJson(daemon.baseUrl, 'POST', '/decision', { title: 'seq test decision', owner: 'human', rationale: 'test' });
+  await requestJson(daemon.baseUrl, 'POST', '/decision', {
+    title: 'seq test decision',
+    owner: 'human',
+    rationale: 'test',
+  });
 
   // Fetch all events
   const events = await requestJson(daemon.baseUrl, 'GET', '/events?limit=500');
@@ -337,54 +373,61 @@ test('/events/replay returns events from a given seq', { timeout: 60_000 }, asyn
 
 // ── Phase 1: Atomic Task Claiming ───────────────────────────────────────────
 
-test('/task/claim returns claimToken and /task/update validates it', { timeout: 60_000 }, async (t) => {
-  const projectRoot = createTempProject({
-    name: 'hydra-it-claim-token',
-    private: true,
-    type: 'module',
-  });
-  let daemon = null;
-  t.after(async () => {
-    await stopDaemon(daemon);
-    await removeDirBestEffort(projectRoot);
-  });
-  daemon = await startDaemon(projectRoot);
+test(
+  '/task/claim returns claimToken and /task/update validates it',
+  { timeout: 60_000 },
+  async (t) => {
+    const projectRoot = createTempProject({
+      name: 'hydra-it-claim-token',
+      private: true,
+      type: 'module',
+    });
+    let daemon = null;
+    t.after(async () => {
+      await stopDaemon(daemon);
+      await removeDirBestEffort(projectRoot);
+    });
+    daemon = await startDaemon(projectRoot);
 
-  // Add a task then claim it
-  const add = await requestJson(daemon.baseUrl, 'POST', '/task/add', { title: 'claimable task' });
-  const taskId = add.json.task.id;
+    // Add a task then claim it
+    const add = await requestJson(daemon.baseUrl, 'POST', '/task/add', { title: 'claimable task' });
+    const taskId = add.json.task.id;
 
-  const claim = await requestJson(daemon.baseUrl, 'POST', '/task/claim', { taskId, agent: 'claude' });
-  assert.equal(claim.response.status, 200);
-  assert.ok(claim.json.task.claimToken, 'Claim should return a claimToken');
-  const token = claim.json.task.claimToken;
+    const claim = await requestJson(daemon.baseUrl, 'POST', '/task/claim', {
+      taskId,
+      agent: 'claude',
+    });
+    assert.equal(claim.response.status, 200);
+    assert.ok(claim.json.task.claimToken, 'Claim should return a claimToken');
+    const token = claim.json.task.claimToken;
 
-  // Update with correct token should succeed
-  const goodUpdate = await requestJson(daemon.baseUrl, 'POST', '/task/update', {
-    taskId,
-    notes: 'progress update',
-    claimToken: token,
-  });
-  assert.equal(goodUpdate.response.status, 200);
+    // Update with correct token should succeed
+    const goodUpdate = await requestJson(daemon.baseUrl, 'POST', '/task/update', {
+      taskId,
+      notes: 'progress update',
+      claimToken: token,
+    });
+    assert.equal(goodUpdate.response.status, 200);
 
-  // Update with wrong token should fail
-  const badUpdate = await requestJson(daemon.baseUrl, 'POST', '/task/update', {
-    taskId,
-    notes: 'rogue update',
-    claimToken: '00000000-0000-0000-0000-000000000000',
-  });
-  assert.equal(badUpdate.response.status, 400);
-  assert.match(String(badUpdate.json.error || ''), /claim token mismatch/i);
+    // Update with wrong token should fail
+    const badUpdate = await requestJson(daemon.baseUrl, 'POST', '/task/update', {
+      taskId,
+      notes: 'rogue update',
+      claimToken: '00000000-0000-0000-0000-000000000000',
+    });
+    assert.equal(badUpdate.response.status, 400);
+    assert.match(String(badUpdate.json.error || ''), /claim token mismatch/i);
 
-  // Force override should work
-  const forceUpdate = await requestJson(daemon.baseUrl, 'POST', '/task/update', {
-    taskId,
-    notes: 'forced update',
-    claimToken: '00000000-0000-0000-0000-000000000000',
-    force: true,
-  });
-  assert.equal(forceUpdate.response.status, 200);
-});
+    // Force override should work
+    const forceUpdate = await requestJson(daemon.baseUrl, 'POST', '/task/update', {
+      taskId,
+      notes: 'forced update',
+      claimToken: '00000000-0000-0000-0000-000000000000',
+      force: true,
+    });
+    assert.equal(forceUpdate.response.status, 200);
+  },
+);
 
 test('/task/claim by title creates task with claimToken', { timeout: 60_000 }, async (t) => {
   const projectRoot = createTempProject({
@@ -411,53 +454,60 @@ test('/task/claim by title creates task with claimToken', { timeout: 60_000 }, a
 
 // ── Phase 2: Checkpoint/Resume ──────────────────────────────────────────────
 
-test('POST /task/checkpoint creates and GET retrieves checkpoints', { timeout: 60_000 }, async (t) => {
-  const projectRoot = createTempProject({
-    name: 'hydra-it-checkpoint',
-    private: true,
-    type: 'module',
-  });
-  let daemon = null;
-  t.after(async () => {
-    await stopDaemon(daemon);
-    await removeDirBestEffort(projectRoot);
-  });
-  daemon = await startDaemon(projectRoot);
+test(
+  'POST /task/checkpoint creates and GET retrieves checkpoints',
+  { timeout: 60_000 },
+  async (t) => {
+    const projectRoot = createTempProject({
+      name: 'hydra-it-checkpoint',
+      private: true,
+      type: 'module',
+    });
+    let daemon = null;
+    t.after(async () => {
+      await stopDaemon(daemon);
+      await removeDirBestEffort(projectRoot);
+    });
+    daemon = await startDaemon(projectRoot);
 
-  const add = await requestJson(daemon.baseUrl, 'POST', '/task/add', { title: 'checkpoint test task', owner: 'claude' });
-  const taskId = add.json.task.id;
+    const add = await requestJson(daemon.baseUrl, 'POST', '/task/add', {
+      title: 'checkpoint test task',
+      owner: 'claude',
+    });
+    const taskId = add.json.task.id;
 
-  // Create first checkpoint
-  const cp1 = await requestJson(daemon.baseUrl, 'POST', '/task/checkpoint', {
-    taskId,
-    name: 'proposal_complete',
-    context: 'Initial proposal drafted with 3 subtasks',
-    agent: 'claude',
-  });
-  assert.equal(cp1.response.status, 200);
-  assert.ok(cp1.json.ok);
-  assert.equal(cp1.json.checkpoint.name, 'proposal_complete');
-  assert.equal(cp1.json.checkpoint.agent, 'claude');
-  assert.ok(cp1.json.checkpoint.savedAt);
+    // Create first checkpoint
+    const cp1 = await requestJson(daemon.baseUrl, 'POST', '/task/checkpoint', {
+      taskId,
+      name: 'proposal_complete',
+      context: 'Initial proposal drafted with 3 subtasks',
+      agent: 'claude',
+    });
+    assert.equal(cp1.response.status, 200);
+    assert.ok(cp1.json.ok);
+    assert.equal(cp1.json.checkpoint.name, 'proposal_complete');
+    assert.equal(cp1.json.checkpoint.agent, 'claude');
+    assert.ok(cp1.json.checkpoint.savedAt);
 
-  // Create second checkpoint
-  const cp2 = await requestJson(daemon.baseUrl, 'POST', '/task/checkpoint', {
-    taskId,
-    name: 'critique_done',
-    context: 'Gemini reviewed and found 2 issues',
-    agent: 'gemini',
-  });
-  assert.equal(cp2.response.status, 200);
-  assert.equal(cp2.json.checkpoint.name, 'critique_done');
+    // Create second checkpoint
+    const cp2 = await requestJson(daemon.baseUrl, 'POST', '/task/checkpoint', {
+      taskId,
+      name: 'critique_done',
+      context: 'Gemini reviewed and found 2 issues',
+      agent: 'gemini',
+    });
+    assert.equal(cp2.response.status, 200);
+    assert.equal(cp2.json.checkpoint.name, 'critique_done');
 
-  // Retrieve checkpoints
-  const list = await requestJson(daemon.baseUrl, 'GET', `/task/${taskId}/checkpoints`);
-  assert.equal(list.response.status, 200);
-  assert.equal(list.json.taskId, taskId);
-  assert.equal(list.json.checkpoints.length, 2);
-  assert.equal(list.json.checkpoints[0].name, 'proposal_complete');
-  assert.equal(list.json.checkpoints[1].name, 'critique_done');
-});
+    // Retrieve checkpoints
+    const list = await requestJson(daemon.baseUrl, 'GET', `/task/${taskId}/checkpoints`);
+    assert.equal(list.response.status, 200);
+    assert.equal(list.json.taskId, taskId);
+    assert.equal(list.json.checkpoints.length, 2);
+    assert.equal(list.json.checkpoints[0].name, 'proposal_complete');
+    assert.equal(list.json.checkpoints[1].name, 'critique_done');
+  },
+);
 
 test('POST /task/checkpoint rejects missing taskId or name', { timeout: 60_000 }, async (t) => {
   const projectRoot = createTempProject({
@@ -478,7 +528,10 @@ test('POST /task/checkpoint rejects missing taskId or name', { timeout: 60_000 }
   const noName = await requestJson(daemon.baseUrl, 'POST', '/task/checkpoint', { taskId: 'T001' });
   assert.equal(noName.response.status, 400);
 
-  const badTask = await requestJson(daemon.baseUrl, 'POST', '/task/checkpoint', { taskId: 'TXXX', name: 'test' });
+  const badTask = await requestJson(daemon.baseUrl, 'POST', '/task/checkpoint', {
+    taskId: 'TXXX',
+    name: 'test',
+  });
   assert.equal(badTask.response.status, 400);
 });
 
@@ -564,48 +617,52 @@ test('POST /session/fork creates a fork of the active session', { timeout: 60_00
   assert.equal(sessions.json.childSessions[0].type, 'fork');
 });
 
-test('POST /session/spawn creates a child session with fresh focus', { timeout: 60_000 }, async (t) => {
-  const projectRoot = createTempProject({
-    name: 'hydra-it-session-spawn',
-    private: true,
-    type: 'module',
-  });
-  let daemon = null;
-  t.after(async () => {
-    await stopDaemon(daemon);
-    await removeDirBestEffort(projectRoot);
-  });
-  daemon = await startDaemon(projectRoot);
+test(
+  'POST /session/spawn creates a child session with fresh focus',
+  { timeout: 60_000 },
+  async (t) => {
+    const projectRoot = createTempProject({
+      name: 'hydra-it-session-spawn',
+      private: true,
+      type: 'module',
+    });
+    let daemon = null;
+    t.after(async () => {
+      await stopDaemon(daemon);
+      await removeDirBestEffort(projectRoot);
+    });
+    daemon = await startDaemon(projectRoot);
 
-  // Start a parent session
-  await requestJson(daemon.baseUrl, 'POST', '/session/start', {
-    focus: 'parent session',
-    owner: 'human',
-  });
+    // Start a parent session
+    await requestJson(daemon.baseUrl, 'POST', '/session/start', {
+      focus: 'parent session',
+      owner: 'human',
+    });
 
-  // Spawn a child
-  const spawn = await requestJson(daemon.baseUrl, 'POST', '/session/spawn', {
-    focus: 'investigate auth module',
-    owner: 'claude',
-  });
-  assert.equal(spawn.response.status, 200);
-  assert.ok(spawn.json.session.id);
-  assert.equal(spawn.json.session.type, 'spawn');
-  assert.equal(spawn.json.session.focus, 'investigate auth module');
-  assert.equal(spawn.json.session.owner, 'claude');
+    // Spawn a child
+    const spawn = await requestJson(daemon.baseUrl, 'POST', '/session/spawn', {
+      focus: 'investigate auth module',
+      owner: 'claude',
+    });
+    assert.equal(spawn.response.status, 200);
+    assert.ok(spawn.json.session.id);
+    assert.equal(spawn.json.session.type, 'spawn');
+    assert.equal(spawn.json.session.focus, 'investigate auth module');
+    assert.equal(spawn.json.session.owner, 'claude');
 
-  // Spawn another
-  const spawn2 = await requestJson(daemon.baseUrl, 'POST', '/session/spawn', {
-    focus: 'optimize database queries',
-    owner: 'gemini',
-  });
-  assert.equal(spawn2.response.status, 200);
+    // Spawn another
+    const spawn2 = await requestJson(daemon.baseUrl, 'POST', '/session/spawn', {
+      focus: 'optimize database queries',
+      owner: 'gemini',
+    });
+    assert.equal(spawn2.response.status, 200);
 
-  // Verify session tree
-  const sessions = await requestJson(daemon.baseUrl, 'GET', '/sessions');
-  assert.equal(sessions.json.childSessions.length, 2);
-  assert.ok(sessions.json.activeSession.children.length >= 2);
-});
+    // Verify session tree
+    const sessions = await requestJson(daemon.baseUrl, 'GET', '/sessions');
+    assert.equal(sessions.json.childSessions.length, 2);
+    assert.ok(sessions.json.activeSession.children.length >= 2);
+  },
+);
 
 test('POST /session/fork rejects when no active session', { timeout: 60_000 }, async (t) => {
   const projectRoot = createTempProject({

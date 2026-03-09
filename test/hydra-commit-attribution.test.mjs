@@ -4,9 +4,9 @@
 
 import { describe, it, beforeEach, afterEach } from 'node:test';
 import assert from 'node:assert/strict';
-import fs from 'fs';
-import path from 'path';
-import os from 'os';
+import fs from 'node:fs';
+import path from 'node:path';
+import os from 'node:os';
 
 import { buildSafetyPrompt } from '../lib/hydra-shared/guardrails.mjs';
 import { stageAndCommit, git } from '../lib/hydra-shared/git-ops.mjs';
@@ -71,12 +71,9 @@ describe('buildSafetyPrompt — attribution', () => {
     });
     assert.ok(
       result.includes('verify that README.md'),
-      'scope should contain the doc-update verification instruction'
+      'scope should contain the doc-update verification instruction',
     );
-    assert.ok(
-      result.includes('docs/ARCHITECTURE.md'),
-      'scope should mention docs/ARCHITECTURE.md'
-    );
+    assert.ok(result.includes('docs/ARCHITECTURE.md'), 'scope should mention docs/ARCHITECTURE.md');
   });
 });
 

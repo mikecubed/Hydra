@@ -12,9 +12,7 @@ import {
   extractCodexErrors,
 } from '../lib/hydra-shared/agent-executor.mjs';
 
-import {
-  detectCodexError,
-} from '../lib/hydra-model-recovery.mjs';
+import { detectCodexError } from '../lib/hydra-model-recovery.mjs';
 
 describe('agent-executor diagnostics', () => {
   describe('diagnoseAgentError()', () => {
@@ -148,7 +146,8 @@ describe('agent-executor diagnostics', () => {
         error: 'Exit code 1',
         stderr: '',
         output: 'some output',
-        stdout: '{"type":"error","message":"Internal server error"}\n{"type":"content","content":"partial"}',
+        stdout:
+          '{"type":"error","message":"Internal server error"}\n{"type":"content","content":"partial"}',
       };
 
       diagnoseAgentError('codex', result);
@@ -189,7 +188,10 @@ describe('agent-executor diagnostics', () => {
 
       // "mystery error" matches AGENT_ERROR_PATTERNS → 'internal' category
       assert.equal(result.errorCategory, 'internal');
-      assert.ok(result.errorDetail.includes('mystery error'), `Expected descriptive detail, got: ${result.errorDetail}`);
+      assert.ok(
+        result.errorDetail.includes('mystery error'),
+        `Expected descriptive detail, got: ${result.errorDetail}`,
+      );
     });
   });
 
@@ -211,7 +213,8 @@ describe('agent-executor diagnostics', () => {
     });
 
     it('extracts errors from error events', () => {
-      const errorJsonl = '{"type":"error","message":"Something went wrong"}\n{"error":{"message":"Another error"}}';
+      const errorJsonl =
+        '{"type":"error","message":"Something went wrong"}\n{"error":{"message":"Another error"}}';
       const errors = extractCodexErrors(errorJsonl);
       assert.deepEqual(errors, ['Something went wrong', 'Another error']);
     });
@@ -233,8 +236,12 @@ describe('detectCodexError (hydra-model-recovery)', () => {
 
   it('delegates to pre-existing errorCategory if not unclassified', () => {
     const result = {
-      ok: false, exitCode: 1, stderr: '', output: '',
-      errorCategory: 'auth', errorDetail: 'Bad key',
+      ok: false,
+      exitCode: 1,
+      stderr: '',
+      output: '',
+      errorCategory: 'auth',
+      errorDetail: 'Bad key',
     };
     const check = detectCodexError('codex', result);
     assert.equal(check.isCodexError, true);
@@ -243,9 +250,11 @@ describe('detectCodexError (hydra-model-recovery)', () => {
 
   it('detects "something went wrong" as internal error', () => {
     const result = {
-      ok: false, exitCode: 1,
+      ok: false,
+      exitCode: 1,
       stderr: 'Error: something went wrong',
-      output: '', error: 'Exit code 1',
+      output: '',
+      error: 'Exit code 1',
     };
     const check = detectCodexError('codex', result);
     assert.equal(check.isCodexError, true);
@@ -255,9 +264,11 @@ describe('detectCodexError (hydra-model-recovery)', () => {
 
   it('detects "internal server error" as internal error', () => {
     const result = {
-      ok: false, exitCode: 1,
+      ok: false,
+      exitCode: 1,
       stderr: 'internal server error',
-      output: '', error: 'Exit code 1',
+      output: '',
+      error: 'Exit code 1',
     };
     const check = detectCodexError('codex', result);
     assert.equal(check.isCodexError, true);
@@ -266,9 +277,11 @@ describe('detectCodexError (hydra-model-recovery)', () => {
 
   it('detects "unexpected error" as internal error', () => {
     const result = {
-      ok: false, exitCode: 1,
+      ok: false,
+      exitCode: 1,
       stderr: 'An unexpected error occurred during processing',
-      output: '', error: 'Exit code 1',
+      output: '',
+      error: 'Exit code 1',
     };
     const check = detectCodexError('codex', result);
     assert.equal(check.isCodexError, true);
@@ -277,9 +290,11 @@ describe('detectCodexError (hydra-model-recovery)', () => {
 
   it('detects context length exceeded as context-overflow', () => {
     const result = {
-      ok: false, exitCode: 1,
+      ok: false,
+      exitCode: 1,
       stderr: 'context length exceeded: max 128000 tokens',
-      output: '', error: 'Exit code 1',
+      output: '',
+      error: 'Exit code 1',
     };
     const check = detectCodexError('codex', result);
     assert.equal(check.isCodexError, true);
@@ -288,9 +303,11 @@ describe('detectCodexError (hydra-model-recovery)', () => {
 
   it('detects configuration errors', () => {
     const result = {
-      ok: false, exitCode: 1,
+      ok: false,
+      exitCode: 1,
       stderr: 'config error: invalid model specification',
-      output: '', error: 'Exit code 1',
+      output: '',
+      error: 'Exit code 1',
     };
     const check = detectCodexError('codex', result);
     assert.equal(check.isCodexError, true);
@@ -299,8 +316,11 @@ describe('detectCodexError (hydra-model-recovery)', () => {
 
   it('catches silent-crash (no output, non-zero exit)', () => {
     const result = {
-      ok: false, exitCode: 1,
-      stderr: '', output: '', error: 'Exit code 1',
+      ok: false,
+      exitCode: 1,
+      stderr: '',
+      output: '',
+      error: 'Exit code 1',
     };
     const check = detectCodexError('codex', result);
     assert.equal(check.isCodexError, true);
@@ -309,8 +329,12 @@ describe('detectCodexError (hydra-model-recovery)', () => {
 
   it('catches signal-based abort', () => {
     const result = {
-      ok: false, exitCode: null, signal: 'SIGTERM',
-      stderr: 'partial output', output: 'some', error: 'Signal SIGTERM',
+      ok: false,
+      exitCode: null,
+      signal: 'SIGTERM',
+      stderr: 'partial output',
+      output: 'some',
+      error: 'Signal SIGTERM',
     };
     const check = detectCodexError('codex', result);
     assert.equal(check.isCodexError, true);
@@ -319,7 +343,8 @@ describe('detectCodexError (hydra-model-recovery)', () => {
 
   it('catch-all: unrecognized non-zero exit returns codex-unknown with context', () => {
     const result = {
-      ok: false, exitCode: 42,
+      ok: false,
+      exitCode: 42,
       stderr: 'some weird error nobody recognizes\nline 2\nline 3',
       output: 'partial output from codex',
       stdout: 'partial output from codex',
@@ -328,30 +353,43 @@ describe('detectCodexError (hydra-model-recovery)', () => {
     const check = detectCodexError('codex', result);
     assert.equal(check.isCodexError, true);
     assert.equal(check.category, 'codex-unknown');
-    assert.ok(check.errorMessage.includes('exit 42'), `Expected exit code in message, got: ${check.errorMessage}`);
-    assert.ok(check.errorMessage.includes('weird error'), `Expected stderr context, got: ${check.errorMessage}`);
+    assert.ok(
+      check.errorMessage.includes('exit 42'),
+      `Expected exit code in message, got: ${check.errorMessage}`,
+    );
+    assert.ok(
+      check.errorMessage.includes('weird error'),
+      `Expected stderr context, got: ${check.errorMessage}`,
+    );
   });
 
   it('catch-all includes JSONL error events in errorMessage', () => {
     const result = {
-      ok: false, exitCode: 1,
+      ok: false,
+      exitCode: 1,
       stderr: '',
-      output: '{"type":"content","content":"partial"}\n{"type":"error","message":"Backend timeout"}',
-      stdout: '{"type":"content","content":"partial"}\n{"type":"error","message":"Backend timeout"}',
+      output:
+        '{"type":"content","content":"partial"}\n{"type":"error","message":"Backend timeout"}',
+      stdout:
+        '{"type":"content","content":"partial"}\n{"type":"error","message":"Backend timeout"}',
       error: 'Exit code 1',
     };
     const check = detectCodexError('codex', result);
     assert.equal(check.isCodexError, true);
     // Could be codex-unknown or codex-jsonl-error depending on diagnoseAgentError running first
-    assert.ok(check.errorMessage.includes('Backend timeout') || check.category === 'codex-unknown',
-      `Expected JSONL context or catch-all, got: ${check.category}: ${check.errorMessage}`);
+    assert.ok(
+      check.errorMessage.includes('Backend timeout') || check.category === 'codex-unknown',
+      `Expected JSONL context or catch-all, got: ${check.category}: ${check.errorMessage}`,
+    );
   });
 
   it('does not return codex-unknown for exit code 0', () => {
     const result = {
-      ok: false, exitCode: 0,
+      ok: false,
+      exitCode: 0,
       stderr: 'warning but not an error',
-      output: '', error: 'JSONL errors: something',
+      output: '',
+      error: 'JSONL errors: something',
     };
     const check = detectCodexError('codex', result);
     // exit code 0 doesn't trigger catch-all
@@ -369,7 +407,10 @@ describe('expandInvokeArgs', () => {
   });
 
   it('substitutes {cwd} with cwd value', () => {
-    const result = expandInvokeArgs(['{prompt}', '--cwd', '{cwd}'], { prompt: 'task', cwd: '/tmp/project' });
+    const result = expandInvokeArgs(['{prompt}', '--cwd', '{cwd}'], {
+      prompt: 'task',
+      cwd: '/tmp/project',
+    });
     assert.deepStrictEqual(result, ['task', '--cwd', '/tmp/project']);
   });
 
@@ -394,7 +435,10 @@ describe('parseCliResponse', () => {
   });
 
   it('extracts .text when .content absent', () => {
-    assert.strictEqual(parseCliResponse(JSON.stringify({ text: 'from-text' }), 'json'), 'from-text');
+    assert.strictEqual(
+      parseCliResponse(JSON.stringify({ text: 'from-text' }), 'json'),
+      'from-text',
+    );
   });
 
   it('falls back to raw stdout when JSON parse fails', () => {
@@ -406,11 +450,17 @@ describe('parseCliResponse', () => {
   });
 
   it('extracts .message when .content and .text are absent', () => {
-    assert.strictEqual(parseCliResponse(JSON.stringify({ message: 'from-message' }), 'json'), 'from-message');
+    assert.strictEqual(
+      parseCliResponse(JSON.stringify({ message: 'from-message' }), 'json'),
+      'from-message',
+    );
   });
 
   it('extracts .output when .content, .text, .message are absent', () => {
-    assert.strictEqual(parseCliResponse(JSON.stringify({ output: 'from-output' }), 'json'), 'from-output');
+    assert.strictEqual(
+      parseCliResponse(JSON.stringify({ output: 'from-output' }), 'json'),
+      'from-output',
+    );
   });
 
   it('falls back to raw stdout when no known fields present in JSON', () => {
@@ -421,7 +471,14 @@ describe('parseCliResponse', () => {
 
 // ── Custom agent routing in executeAgent() ───────────────────────────────────
 import { executeAgent } from '../lib/hydra-shared/agent-executor.mjs';
-import { registerAgent, unregisterAgent, getAgent as getAgentDef, AGENT_TYPE, _resetRegistry, initAgentRegistry } from '../lib/hydra-agents.mjs';
+import {
+  registerAgent,
+  unregisterAgent,
+  getAgent as getAgentDef,
+  AGENT_TYPE,
+  _resetRegistry,
+  initAgentRegistry,
+} from '../lib/hydra-agents.mjs';
 
 describe('executeAgent — custom CLI agent routing', () => {
   beforeEach(() => {
@@ -443,39 +500,63 @@ describe('executeAgent — custom CLI agent routing', () => {
   });
 
   afterEach(() => {
-    try { unregisterAgent('test-echo-cli'); } catch { /* ignore */ }
+    try {
+      unregisterAgent('test-echo-cli');
+    } catch {
+      /* ignore */
+    }
   });
 
   it('routes to executeCustomCliAgent for customType=cli', async () => {
     const result = await executeAgent('test-echo-cli', 'hello');
     assert.ok(result.ok, `expected ok=true, got errorCategory=${result.errorCategory}`);
-    assert.ok(result.output.includes('hello'), `expected output to include prompt, got: ${result.output}`);
+    assert.ok(
+      result.output.includes('hello'),
+      `expected output to include prompt, got: ${result.output}`,
+    );
   });
 
   it('returns custom-cli-disabled when agent is disabled', async () => {
     registerAgent('test-disabled-cli', {
       type: AGENT_TYPE.PHYSICAL,
       customType: 'cli',
-      cli: null, invoke: null, contextBudget: 1000,
-      councilRole: null, taskAffinity: {}, enabled: false,
+      cli: null,
+      invoke: null,
+      contextBudget: 1000,
+      councilRole: null,
+      taskAffinity: {},
+      enabled: false,
     });
     const result = await executeAgent('test-disabled-cli', 'hello');
     assert.strictEqual(result.errorCategory, 'custom-cli-disabled');
-    try { unregisterAgent('test-disabled-cli'); } catch { /* ignore */ }
+    try {
+      unregisterAgent('test-disabled-cli');
+    } catch {
+      /* ignore */
+    }
   });
 
   it('returns custom-api-disabled when customType=api agent is disabled', async () => {
     registerAgent('test-disabled-api', {
       type: AGENT_TYPE.PHYSICAL,
       customType: 'api',
-      cli: null, invoke: null, contextBudget: 1000,
-      councilRole: null, taskAffinity: {}, enabled: false,
-      baseUrl: 'http://localhost:11434/v1', model: 'test-model',
+      cli: null,
+      invoke: null,
+      contextBudget: 1000,
+      councilRole: null,
+      taskAffinity: {},
+      enabled: false,
+      baseUrl: 'http://localhost:11434/v1',
+      model: 'test-model',
     });
     const result = await executeAgent('test-disabled-api', 'hello');
     assert.strictEqual(result.ok, false);
     assert.strictEqual(result.errorCategory, 'custom-api-disabled');
-    try { unregisterAgent('test-disabled-api'); } catch { /* ignore */ }
+    try {
+      unregisterAgent('test-disabled-api');
+    } catch {
+      /* ignore */
+    }
   });
 });
 

@@ -85,13 +85,15 @@ async function withNoProcessSpawning(run) {
 
 async function walkFiles(dir) {
   const entries = await fs.readdir(dir, { withFileTypes: true });
-  const files = await Promise.all(entries.map(async (entry) => {
-    const entryPath = path.join(dir, entry.name);
-    if (entry.isDirectory()) {
-      return walkFiles(entryPath);
-    }
-    return [entryPath];
-  }));
+  const files = await Promise.all(
+    entries.map(async (entry) => {
+      const entryPath = path.join(dir, entry.name);
+      if (entry.isDirectory()) {
+        return walkFiles(entryPath);
+      }
+      return [entryPath];
+    }),
+  );
   return files.flat();
 }
 
@@ -110,15 +112,15 @@ test('fixture JSON stays static, hand-authored, and compact', async () => {
     assert.ok(parsed.length >= 3, `${fileName} must contain at least three fixture entries`);
     assert.ok(
       parsed.some((entry) => entry.matchPattern === null),
-      `${fileName} must include a null-matchPattern default entry`
+      `${fileName} must include a null-matchPattern default entry`,
     );
     assert.ok(
       parsed.some((entry) => entry.matchPattern && entry.response?.ok === true),
-      `${fileName} must include a prompt-matched success entry`
+      `${fileName} must include a prompt-matched success entry`,
     );
     assert.ok(
       parsed.some((entry) => entry.response?.ok === false),
-      `${fileName} must include a failure entry`
+      `${fileName} must include a failure entry`,
     );
   }
 
@@ -135,9 +137,18 @@ test('loadAgentFixture resolves all static agent fixture sets with validated def
   assert.equal(claudeFixtures.find((entry) => entry.id === 'default')?.matchPattern, null);
   assert.equal(geminiFixtures.find((entry) => entry.id === 'default')?.matchPattern, null);
   assert.equal(codexFixtures.find((entry) => entry.id === 'default')?.matchPattern, null);
-  assert.equal(claudeFixtures.find((entry) => entry.id === 'architecture')?.matchPattern instanceof RegExp, true);
-  assert.equal(geminiFixtures.find((entry) => entry.id === 'review')?.matchPattern instanceof RegExp, true);
-  assert.equal(codexFixtures.find((entry) => entry.id === 'implementation')?.matchPattern instanceof RegExp, true);
+  assert.equal(
+    claudeFixtures.find((entry) => entry.id === 'architecture')?.matchPattern instanceof RegExp,
+    true,
+  );
+  assert.equal(
+    geminiFixtures.find((entry) => entry.id === 'review')?.matchPattern instanceof RegExp,
+    true,
+  );
+  assert.equal(
+    codexFixtures.find((entry) => entry.id === 'implementation')?.matchPattern instanceof RegExp,
+    true,
+  );
 });
 
 test('mock-agent helper exports the expected callable helpers', () => {
@@ -152,7 +163,9 @@ test('mock-agent helper exports the expected callable helpers', () => {
 });
 
 test('mock agent helper is never imported from production modules', async () => {
-  const productionFiles = (await walkFiles(LIB_DIR)).filter((filePath) => filePath.endsWith('.mjs'));
+  const productionFiles = (await walkFiles(LIB_DIR)).filter((filePath) =>
+    filePath.endsWith('.mjs'),
+  );
 
   assert.ok(productionFiles.length > 0, 'expected to scan production .mjs files');
 
@@ -161,7 +174,7 @@ test('mock agent helper is never imported from production modules', async () => 
     assert.equal(
       /(?:\.\/|\.\.\/).*mock-agent\.mjs|helpers[\\/]+mock-agent\.mjs|mock-agent\.mjs/.test(source),
       false,
-      `production module must not import test helper: ${path.relative(PROJECT_ROOT, filePath)}`
+      `production module must not import test helper: ${path.relative(PROJECT_ROOT, filePath)}`,
     );
   }
 });
@@ -247,7 +260,8 @@ describe('classifyPrompt route strategy', () => {
   });
 
   it('handles a prompt on the simple/moderate boundary without throwing', () => {
-    const prompt = 'fix auth bug in lib/hydra-utils.mjs before release with focused regression tests today';
+    const prompt =
+      'fix auth bug in lib/hydra-utils.mjs before release with focused regression tests today';
 
     assert.doesNotThrow(() => classifyPrompt(prompt));
     const result = classifyPrompt(prompt);
@@ -269,10 +283,7 @@ describe('classifyPrompt route strategy', () => {
 describe('selectTandemPair agent pair resolution', () => {
   for (const [taskType, expectedPair] of Object.entries(EXPECTED_TANDEM_PAIRS)) {
     it(`returns ${expectedPair.lead}/${expectedPair.follow} for ${taskType}`, () => {
-      assert.deepEqual(
-        selectTandemPair(taskType, expectedPair.lead, ALL_AGENTS),
-        expectedPair
-      );
+      assert.deepEqual(selectTandemPair(taskType, expectedPair.lead, ALL_AGENTS), expectedPair);
     });
   }
 });
@@ -339,31 +350,38 @@ describe('mock agent invocation', () => {
     first.tokenUsage.totalTokens = 999;
 
     const third = await mockExecuteAgent('codex', 'implement the feature', {});
-    assert.equal(second.output, 'Implementation result: added the requested behavior, covered the main edge cases, and kept the changes scoped to the documented entry points.');
+    assert.equal(
+      second.output,
+      'Implementation result: added the requested behavior, covered the main edge cases, and kept the changes scoped to the documented entry points.',
+    );
     assert.equal(second.tokenUsage.totalTokens, 360);
-    assert.equal(third.output, 'Implementation result: added the requested behavior, covered the main edge cases, and kept the changes scoped to the documented entry points.');
+    assert.equal(
+      third.output,
+      'Implementation result: added the requested behavior, covered the main edge cases, and kept the changes scoped to the documented entry points.',
+    );
     assert.equal(third.tokenUsage.totalTokens, 360);
   });
 
   it('throws for unknown agents instead of returning undefined', async () => {
     await assert.rejects(
       mockExecuteAgent('wizard', 'cast a spell', {}),
-      /Unknown mock agent "wizard"/
+      /Unknown mock agent "wizard"/,
     );
   });
 
   it('throws immediately when a fixture map is missing a default entry', () => {
     assert.throws(
-      () => createMockExecuteAgent({
-        claude: [
-          {
-            id: 'only',
-            matchPattern: 'implement',
-            response: makeSuccessResult('No default fixture here'),
-          },
-        ],
-      }),
-      /default entry with matchPattern null/i
+      () =>
+        createMockExecuteAgent({
+          claude: [
+            {
+              id: 'only',
+              matchPattern: 'implement',
+              response: makeSuccessResult('No default fixture here'),
+            },
+          ],
+        }),
+      /default entry with matchPattern null/i,
     );
   });
 
@@ -451,7 +469,11 @@ describe('dispatch pipeline integration', () => {
     await withNoProcessSpawning(async () => {
       const prompt = 'first analyze the auth module then fix the security issues';
       const classification = classifyPrompt(prompt);
-      const tandemPair = selectTandemPair(classification.taskType, classification.suggestedAgent, ALL_AGENTS);
+      const tandemPair = selectTandemPair(
+        classification.taskType,
+        classification.suggestedAgent,
+        ALL_AGENTS,
+      );
 
       assert.equal(classification.routeStrategy, 'tandem');
       assert.deepEqual(tandemPair, { lead: 'gemini', follow: 'claude' });

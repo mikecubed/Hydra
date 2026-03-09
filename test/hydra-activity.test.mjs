@@ -76,7 +76,7 @@ test('activity: non-situational prompt returns false', () => {
 test('activity: empty/null input returns false', () => {
   assert.equal(detectSituationalQuery('').isSituational, false);
   assert.equal(detectSituationalQuery(null).isSituational, false);
-  assert.equal(detectSituationalQuery(undefined).isSituational, false);
+  assert.equal(detectSituationalQuery().isSituational, false);
 });
 
 // ── Annotations ─────────────────────────────────────────────────────────────
@@ -177,21 +177,62 @@ test('activity: formatDigestForPrompt produces valid output', () => {
     generatedAt: new Date().toISOString(),
     session: { status: 'active', startedAt: new Date().toISOString(), focus: 'testing' },
     agents: [
-      { name: 'claude', status: 'working', action: 'Testing', taskTitle: 'Run tests', model: 'opus', phase: null, step: null, execMode: 'worker', elapsedMs: 60000, pendingHandoffs: [], worker: null, metrics: null },
-      { name: 'gemini', status: 'idle', action: 'Waiting', taskTitle: null, model: 'pro', phase: null, step: null, execMode: null, elapsedMs: 0, pendingHandoffs: [], worker: null, metrics: null },
+      {
+        name: 'claude',
+        status: 'working',
+        action: 'Testing',
+        taskTitle: 'Run tests',
+        model: 'opus',
+        phase: null,
+        step: null,
+        execMode: 'worker',
+        elapsedMs: 60000,
+        pendingHandoffs: [],
+        worker: null,
+        metrics: null,
+      },
+      {
+        name: 'gemini',
+        status: 'idle',
+        action: 'Waiting',
+        taskTitle: null,
+        model: 'pro',
+        phase: null,
+        step: null,
+        execMode: null,
+        elapsedMs: 0,
+        pendingHandoffs: [],
+        worker: null,
+        metrics: null,
+      },
     ],
     activeTasks: [
-      { id: 'T001', status: 'in_progress', owner: 'claude', title: 'Run tests', type: 'testing', blockedBy: [] },
+      {
+        id: 'T001',
+        status: 'in_progress',
+        owner: 'claude',
+        title: 'Run tests',
+        type: 'testing',
+        blockedBy: [],
+      },
     ],
-    recentCompletions: [
-      { id: 'T000', owner: 'codex', title: 'Setup', durationMs: 30000 },
-    ],
+    recentCompletions: [{ id: 'T000', owner: 'codex', title: 'Setup', durationMs: 30000 }],
     pendingHandoffs: [],
     recentHandoffs: [
-      { id: 'H001', from: 'human', to: 'claude', summary: 'Run the test suite', acknowledged: true },
+      {
+        id: 'H001',
+        from: 'human',
+        to: 'claude',
+        summary: 'Run the test suite',
+        acknowledged: true,
+      },
     ],
     recentDecisions: [],
-    lastDispatch: { type: 'dispatch', narrative: 'Dispatched "run tests" - simple/testing to claude', at: new Date().toISOString() },
+    lastDispatch: {
+      type: 'dispatch',
+      narrative: 'Dispatched "run tests" - simple/testing to claude',
+      at: new Date().toISOString(),
+    },
     activityLog: [
       { at: new Date().toISOString(), type: 'dispatch', narrative: 'Dispatched run tests' },
     ],
@@ -227,8 +268,30 @@ test('activity: formatDigestForPrompt respects maxChars', () => {
 test('activity: formatDigestForPrompt respects focus filter', () => {
   const digest = {
     agents: [
-      { name: 'claude', status: 'working', action: 'Testing', taskTitle: 'Fix bug', model: null, phase: null, step: null, execMode: null, elapsedMs: 0, pendingHandoffs: [] },
-      { name: 'gemini', status: 'idle', action: '', taskTitle: null, model: null, phase: null, step: null, execMode: null, elapsedMs: 0, pendingHandoffs: [] },
+      {
+        name: 'claude',
+        status: 'working',
+        action: 'Testing',
+        taskTitle: 'Fix bug',
+        model: null,
+        phase: null,
+        step: null,
+        execMode: null,
+        elapsedMs: 0,
+        pendingHandoffs: [],
+      },
+      {
+        name: 'gemini',
+        status: 'idle',
+        action: '',
+        taskTitle: null,
+        model: null,
+        phase: null,
+        step: null,
+        execMode: null,
+        elapsedMs: 0,
+        pendingHandoffs: [],
+      },
     ],
     activeTasks: [
       { id: 'T001', status: 'in_progress', owner: 'claude', title: 'Fix bug', blockedBy: [] },

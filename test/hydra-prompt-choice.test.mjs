@@ -50,9 +50,9 @@ describe('parseMultiSelectInput', () => {
   });
 
   it('returns null for invalid ranges', () => {
-    assert.equal(parseMultiSelectInput('3-1', 5), null);   // reversed
-    assert.equal(parseMultiSelectInput('0-3', 5), null);   // below 1
-    assert.equal(parseMultiSelectInput('3-10', 5), null);  // above max
+    assert.equal(parseMultiSelectInput('3-1', 5), null); // reversed
+    assert.equal(parseMultiSelectInput('0-3', 5), null); // below 1
+    assert.equal(parseMultiSelectInput('3-10', 5), null); // above max
   });
 
   it('returns null for non-numeric input', () => {

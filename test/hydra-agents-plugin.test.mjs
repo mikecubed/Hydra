@@ -15,10 +15,17 @@ describe('Agent Plugin Interface', () => {
 
         // features
         assert.ok(agent.features, 'features must be present');
-        assert.ok(['spawn', 'api'].includes(agent.features.executeMode), 'executeMode must be spawn or api');
+        assert.ok(
+          ['spawn', 'api'].includes(agent.features.executeMode),
+          'executeMode must be spawn or api',
+        );
         assert.equal(typeof agent.features.jsonOutput, 'boolean', 'jsonOutput must be boolean');
         assert.equal(typeof agent.features.stdinPrompt, 'boolean', 'stdinPrompt must be boolean');
-        assert.equal(typeof agent.features.reasoningEffort, 'boolean', 'reasoningEffort must be boolean');
+        assert.equal(
+          typeof agent.features.reasoningEffort,
+          'boolean',
+          'reasoningEffort must be boolean',
+        );
 
         // methods
         assert.equal(typeof agent.parseOutput, 'function', 'parseOutput must be a function');
@@ -26,7 +33,11 @@ describe('Agent Plugin Interface', () => {
         assert.equal(typeof agent.modelBelongsTo, 'function', 'modelBelongsTo must be a function');
         assert.equal(typeof agent.quotaVerify, 'function', 'quotaVerify must be a function');
         assert.equal(typeof agent.economyModel, 'function', 'economyModel must be a function');
-        assert.equal(typeof agent.readInstructions, 'function', 'readInstructions must be a function');
+        assert.equal(
+          typeof agent.readInstructions,
+          'function',
+          'readInstructions must be a function',
+        );
         assert.ok(Array.isArray(agent.taskRules), 'taskRules must be an array');
       });
     }
@@ -87,7 +98,11 @@ describe('Agent Plugin Interface', () => {
 
     after(() => {
       // Clean up the test agent to avoid polluting the shared registry for other tests.
-      try { unregisterAgent(TEST_AGENT); } catch { /* already gone */ }
+      try {
+        unregisterAgent(TEST_AGENT);
+      } catch {
+        /* already gone */
+      }
     });
 
     it('fills all plugin fields with defaults', () => {
@@ -197,7 +212,7 @@ describe('Agent Plugin Interface', () => {
     });
 
     it('skips non-JSON lines without throwing', () => {
-      const stdout = 'Starting up...\n' + JSON.stringify({ type: 'message', content: 'done' }) + '\nnoise';
+      const stdout = `Starting up...\n${JSON.stringify({ type: 'message', content: 'done' })}\nnoise`;
       const result = codex().parseOutput(stdout);
       assert.equal(result.output, 'done');
     });
@@ -268,7 +283,10 @@ describe('Agent Plugin Interface', () => {
     });
 
     it('codex uses handoffModel from budgetCfg when provided', () => {
-      assert.equal(getAgent('codex').economyModel({ handoffModel: 'o4-mini-custom' }), 'o4-mini-custom');
+      assert.equal(
+        getAgent('codex').economyModel({ handoffModel: 'o4-mini-custom' }),
+        'o4-mini-custom',
+      );
     });
 
     it('codex defaults to o4-mini when no budgetCfg', () => {

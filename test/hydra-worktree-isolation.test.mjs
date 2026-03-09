@@ -18,12 +18,12 @@ describe('worktreeIsolation config', () => {
     assert.ok(cfg.routing, 'routing section missing');
     assert.ok(
       Object.prototype.hasOwnProperty.call(cfg.routing, 'worktreeIsolation'),
-      'routing.worktreeIsolation missing'
+      'routing.worktreeIsolation missing',
     );
     assert.strictEqual(
       cfg.routing.worktreeIsolation.enabled,
       false,
-      'worktreeIsolation.enabled should default to false'
+      'worktreeIsolation.enabled should default to false',
     );
   });
 
@@ -33,7 +33,7 @@ describe('worktreeIsolation config', () => {
     assert.strictEqual(
       cfg.routing.worktreeIsolation.worktreeDir,
       '.hydra/worktrees',
-      'worktreeDir should default to .hydra/worktrees'
+      'worktreeDir should default to .hydra/worktrees',
     );
   });
 
@@ -43,7 +43,7 @@ describe('worktreeIsolation config', () => {
     assert.strictEqual(
       cfg.routing.worktreeIsolation.cleanupOnSuccess,
       true,
-      'cleanupOnSuccess should default to true'
+      'cleanupOnSuccess should default to true',
     );
   });
 
@@ -87,7 +87,7 @@ describe('worktreeIsolation dispatch guard', () => {
     assert.strictEqual(
       Boolean(cfg.routing?.worktreeIsolation?.enabled),
       false,
-      'Guard condition must be false by default — no worktrees created unless opt-in'
+      'Guard condition must be false by default — no worktrees created unless opt-in',
     );
   });
 
@@ -106,8 +106,14 @@ describe('worktreeIsolation dispatch guard', () => {
     invalidateConfigCache();
     const cfg = loadHydraConfig();
     // Must be under routing, not at top level
-    assert.ok(!Object.prototype.hasOwnProperty.call(cfg, 'worktreeIsolation'), 'worktreeIsolation must not be top-level key');
-    assert.ok(Object.prototype.hasOwnProperty.call(cfg.routing, 'worktreeIsolation'), 'worktreeIsolation must be under routing');
+    assert.ok(
+      !Object.prototype.hasOwnProperty.call(cfg, 'worktreeIsolation'),
+      'worktreeIsolation must not be top-level key',
+    );
+    assert.ok(
+      Object.prototype.hasOwnProperty.call(cfg.routing, 'worktreeIsolation'),
+      'worktreeIsolation must be under routing',
+    );
   });
 });
 
@@ -124,14 +130,26 @@ describe('worktree lifecycle dispatch hooks (integration stubs)', () => {
   it.todo('mergeTaskWorktree returns { ok: false, conflict: true } and logs warning on conflict');
   it.todo('mergeTaskWorktree returns { ok: false, error } on exception');
   it.todo('cleanupTaskWorktree removes worktree and deletes branch');
-  it.todo('cleanupTaskWorktree force=true passes --force to worktree remove and -D to branch delete');
+  it.todo(
+    'cleanupTaskWorktree force=true passes --force to worktree remove and -D to branch delete',
+  );
   it.todo('cleanupTaskWorktree does not throw on git failure (best-effort cleanup)');
-  it.todo('worktreeIsolation.enabled: false means /task/claim does NOT call createTaskWorktree (daemon integration)');
-  it.todo('worktreeIsolation.enabled: true with mode=tandem creates worktree on /task/claim for new task');
-  it.todo('worktreeIsolation.enabled: true with mode=council creates worktree on /task/claim for new task');
-  it.todo('task completion with worktreePath calls mergeTaskWorktree via /task/result (daemon integration)');
+  it.todo(
+    'worktreeIsolation.enabled: false means /task/claim does NOT call createTaskWorktree (daemon integration)',
+  );
+  it.todo(
+    'worktreeIsolation.enabled: true with mode=tandem creates worktree on /task/claim for new task',
+  );
+  it.todo(
+    'worktreeIsolation.enabled: true with mode=council creates worktree on /task/claim for new task',
+  );
+  it.todo(
+    'task completion with worktreePath calls mergeTaskWorktree via /task/result (daemon integration)',
+  );
   it.todo('clean merge on task result calls cleanupTaskWorktree when cleanupOnSuccess: true');
-  it.todo('conflict merge on task result sets worktreeConflict: true on task, does NOT delete worktree');
+  it.todo(
+    'conflict merge on task result sets worktreeConflict: true on task, does NOT delete worktree',
+  );
   it.todo(':cleanup scanner finds task-* dirs older than 24h in .hydra/worktrees/');
   it.todo(':tasks review shows conflict worktrees when daemon tasks have worktreeConflict: true');
 });

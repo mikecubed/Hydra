@@ -1,8 +1,8 @@
 #!/usr/bin/env node
 
-import path from 'path';
-import { fileURLToPath } from 'url';
-import { spawnSync } from 'child_process';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { spawnSync } from 'node:child_process';
 import {
   HYDRA_INTERNAL_FLAG,
   HYDRA_STANDALONE,
@@ -44,31 +44,33 @@ const POWER_SHELL_CANDIDATES = [
 ];
 
 function printHelp() {
-  process.stdout.write([
-    'Hydra CLI',
-    '',
-    'Usage:',
-    '  hydra [options] [prompt text]',
-    '',
-    'Options:',
-    '  -f, --full             Launch daemon + agent head terminals + operator',
-    '  -p, --prompt <text>    One-shot prompt',
-    '  -h, --help             Show this help',
-    '',
-    'Examples:',
-    '  hydra',
-    '  hydra --prompt "Fix the auth regression"',
-    '  hydra --mode smart --prompt "refactor model loading"',
-    '  hydra --full --dry-run',
-    '',
-    'Subcommands:',
-    '  hydra setup              Register Hydra MCP server in AI CLIs',
-    '  hydra setup --uninstall  Remove MCP registration',
-    '  hydra setup --force      Overwrite existing registration',
-    '  hydra init [path]        Generate HYDRA.md for a project',
-    '  hydra init --force       Overwrite existing HYDRA.md',
-    '',
-  ].join('\n'));
+  process.stdout.write(
+    [
+      'Hydra CLI',
+      '',
+      'Usage:',
+      '  hydra [options] [prompt text]',
+      '',
+      'Options:',
+      '  -f, --full             Launch daemon + agent head terminals + operator',
+      '  -p, --prompt <text>    One-shot prompt',
+      '  -h, --help             Show this help',
+      '',
+      'Examples:',
+      '  hydra',
+      '  hydra --prompt "Fix the auth regression"',
+      '  hydra --mode smart --prompt "refactor model loading"',
+      '  hydra --full --dry-run',
+      '',
+      'Subcommands:',
+      '  hydra setup              Register Hydra MCP server in AI CLIs',
+      '  hydra setup --uninstall  Remove MCP registration',
+      '  hydra setup --force      Overwrite existing registration',
+      '  hydra init [path]        Generate HYDRA.md for a project',
+      '  hydra init --force       Overwrite existing HYDRA.md',
+      '',
+    ].join('\n'),
+  );
 }
 
 function isOptionToken(token) {
@@ -214,7 +216,12 @@ function toOperatorArgs(rawTokens) {
     }
 
     const lowerKey = normalizedKey.toLowerCase();
-    if (value === null && lowerKey.startsWith('no') && key.startsWith('no-') && normalizedKey.length > 2) {
+    if (
+      value === null &&
+      lowerKey.startsWith('no') &&
+      key.startsWith('no-') &&
+      normalizedKey.length > 2
+    ) {
       const positiveKey = normalizedKey[2].toLowerCase() + normalizedKey.slice(3);
       out.push(`${positiveKey}=false`);
       continue;
@@ -305,7 +312,9 @@ function runFull(prompt, rawTokens) {
     throw new Error('`hydra --full` is only available on Windows.');
   }
   if (HYDRA_STANDALONE) {
-    throw new Error('`hydra --full` is not available in standalone .exe builds. Use `hydra` (operator mode) instead.');
+    throw new Error(
+      '`hydra --full` is not available in standalone .exe builds. Use `hydra` (operator mode) instead.',
+    );
   }
 
   const psArgs = [
@@ -385,7 +394,7 @@ async function main() {
   runOperator(prompt, passthrough);
 }
 
-main().catch((error) => {
-  console.error(`Hydra CLI failed: ${error.message}`);
+main().catch((err) => {
+  console.error(`Hydra CLI failed: ${err.message}`);
   process.exit(1);
 });

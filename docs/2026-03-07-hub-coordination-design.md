@@ -28,12 +28,12 @@ Where `<home-slug>` is derived from `os.homedir()` by replacing path separators 
 
 ### Files in the Hub
 
-| File | Purpose |
-|------|---------|
-| `PROTOCOL.md` | Machine-readable spec — any agent reads this to understand the hub |
-| `sess_<timestamp>.json` | Active session registration (one per agent instance) |
-| `handoff_<timestamp>.json` | Work left incomplete, for another agent to pick up |
-| `activity.ndjson` | Append-only event log (register, checkpoint, deregister, handoff, conflict) |
+| File                       | Purpose                                                                     |
+| -------------------------- | --------------------------------------------------------------------------- |
+| `PROTOCOL.md`              | Machine-readable spec — any agent reads this to understand the hub          |
+| `sess_<timestamp>.json`    | Active session registration (one per agent instance)                        |
+| `handoff_<timestamp>.json` | Work left incomplete, for another agent to pick up                          |
+| `activity.ndjson`          | Append-only event log (register, checkpoint, deregister, handoff, conflict) |
 
 ### Session File Format
 
@@ -53,6 +53,7 @@ Where `<home-slug>` is derived from `os.homedir()` by replacing path separators 
 ```
 
 **Field semantics:**
+
 - `agent`: identifies the agent type. Known values: `claude-code`, `gemini-forge`, `codex-forge`, `hydra-tasks`, `hydra-nightly`, `hydra-evolve`
 - `taskId`: links to the Hydra daemon task ID when both are present (optional)
 - `cwd`: canonical project identifier — used for cross-agent filtering
@@ -78,9 +79,9 @@ function deriveHubPath() {
   const home = os.homedir();
   // C:\Users\Chili → C--Users-Chili
   const slug = home
-    .replace(/^([A-Za-z]):/, '$1-')   // drive colon → dash
-    .replace(/[\\/]/g, '-')            // separators → dash
-    .replace(/^-/, '');                // strip leading dash
+    .replace(/^([A-Za-z]):/, '$1-') // drive colon → dash
+    .replace(/[\\/]/g, '-') // separators → dash
+    .replace(/^-/, ''); // strip leading dash
   return path.join(home, '.claude', 'projects', slug, 'memory', 'sessions');
 }
 ```
@@ -105,11 +106,11 @@ logActivity(event)                    // append JSON line to activity.ndjson
 
 The Hydra daemon writes hub session files as part of its task lifecycle, so daemon-managed agents appear in the hub alongside Claude Code sessions.
 
-| Daemon event | Hub action |
-|-------------|------------|
-| `POST /task/claim` | `hub.registerSession({ agent, taskId, project, cwd, focus })` |
-| `POST /task/update` (status → `done`/`cancelled`) | `hub.deregisterSession(sessId)` |
-| `POST /task/update` (other) | `hub.updateSession(sessId, { status, notes })` |
+| Daemon event                                      | Hub action                                                    |
+| ------------------------------------------------- | ------------------------------------------------------------- |
+| `POST /task/claim`                                | `hub.registerSession({ agent, taskId, project, cwd, focus })` |
+| `POST /task/update` (status → `done`/`cancelled`) | `hub.deregisterSession(sessId)`                               |
+| `POST /task/update` (other)                       | `hub.updateSession(sessId, { status, notes })`                |
 
 The daemon derives `cwd` and `project` from `resolveProject()` — the same context it already uses for all other coordination.
 
@@ -141,27 +142,37 @@ hub.deregisterSession(sessId);
 All hub tools work in **standalone mode** (no daemon required) since they operate on the filesystem directly via `hydra-hub.mjs`.
 
 ### `hydra_hub_list`
+
 List active sessions in the hub.
+
 - Input: `{ cwd?: string }` — optional filter for same-project sessions
 - Output: `{ sessions: Session[], hubPath: string }`
 
 ### `hydra_hub_register`
+
 Register a Claude Code session in the hub via MCP (instead of writing files directly).
+
 - Input: `{ agent, project, cwd, focus, files?, taskId? }`
 - Output: `{ id: string, path: string }`
 
 ### `hydra_hub_deregister`
+
 Remove a session from the hub at end of work.
+
 - Input: `{ id: string }`
 - Output: `{ ok: boolean }`
 
 ### `hydra_hub_update`
+
 Update an active session's files, status, or focus.
+
 - Input: `{ id: string, files?: string[], status?: string, focus?: string }`
 - Output: `{ ok: boolean }`
 
 ### `hydra_hub_conflicts`
+
 Check if any planned files are claimed by another active session in the same project.
+
 - Input: `{ files: string[], cwd: string }`
 - Output: `{ conflicts: Array<{ file, claimedBy: Session }> }`
 
@@ -170,12 +181,14 @@ Check if any planned files are claimed by another active session in the same pro
 ## Session-Sync Skill Updates
 
 **In Hydra mode (daemon running):**
+
 - `registerSession` → call `hydra_hub_register` MCP tool
 - Update files mid-session → call `hydra_hub_update`
 - Before claiming files → call `hydra_hub_conflicts`
 - End session → call `hydra_hub_deregister`
 
 **In lite mode (no daemon):**
+
 - Keep writing session files directly (unchanged behavior)
 - Hub module format is identical — just no MCP indirection
 

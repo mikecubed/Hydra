@@ -86,6 +86,8 @@ export default [
       'n/no-unpublished-import': 'off', // devDeps used in tests/scripts are fine
       'n/no-process-exit': 'error', // use process.exitCode instead
       'n/prefer-node-protocol': 'error', // require node: prefix on builtins
+      'n/hashbang': 'warn', // lib files may have intentional shebangs without being in bin
+      'n/no-unsupported-features/node-builtins': ['error', { ignores: ['fetch', 'test.describe'] }], // fetch used intentionally (Node 22 dev runtime); test.describe backport to 20.13 not handled by plugin
 
       // ── Unicorn rules (selective) ──────────────────────────────────────────
       'unicorn/prefer-module': 'error',

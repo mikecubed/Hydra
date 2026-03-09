@@ -61,10 +61,12 @@ describe('hydra-doctor', () => {
 
   describe('diagnose()', () => {
     it('ignores rate limit errors', async () => {
-      const result = await diagnose(makeFailure({
-        error: '429 Too Many Requests',
-        stderr: 'rate limit exceeded',
-      }));
+      const result = await diagnose(
+        makeFailure({
+          error: '429 Too Many Requests',
+          stderr: 'rate limit exceeded',
+        }),
+      );
 
       assert.equal(result.action, 'ignore');
       assert.equal(result.rootCause, 'rate_limit');
@@ -76,18 +78,22 @@ describe('hydra-doctor', () => {
     });
 
     it('ignores RESOURCE_EXHAUSTED errors', async () => {
-      const result = await diagnose(makeFailure({
-        error: 'RESOURCE_EXHAUSTED: quota exceeded',
-      }));
+      const result = await diagnose(
+        makeFailure({
+          error: 'RESOURCE_EXHAUSTED: quota exceeded',
+        }),
+      );
 
       assert.equal(result.action, 'ignore');
       assert.equal(result.rootCause, 'rate_limit');
     });
 
     it('produces a valid diagnosis for non-rate-limit failures', async () => {
-      const result = await diagnose(makeFailure({
-        error: 'Segmentation fault in agent subprocess',
-      }));
+      const result = await diagnose(
+        makeFailure({
+          error: 'Segmentation fault in agent subprocess',
+        }),
+      );
 
       // The action depends on whether the investigator is available,
       // but it must be one of the valid actions
@@ -102,10 +108,12 @@ describe('hydra-doctor', () => {
 
     it('handles timeout failures', async () => {
       // Use unique error to avoid matching stale log entries
-      const result = await diagnose(makeFailure({
-        timedOut: true,
-        error: `Timeout ${Date.now()}-${Math.random().toString(36).slice(2)}`,
-      }));
+      const result = await diagnose(
+        makeFailure({
+          timedOut: true,
+          error: `Timeout ${Date.now()}-${Math.random().toString(36).slice(2)}`,
+        }),
+      );
 
       // Timeouts can be transient (ignore) or escalated if recurring
       assert.ok(['ignore', 'ticket'].includes(result.action));
@@ -136,7 +144,7 @@ describe('hydra-doctor', () => {
       const uniqueError = `Recurrence test ${Date.now()}-${Math.random().toString(36).slice(2)}`;
       const failure = makeFailure({
         error: uniqueError,
-        timedOut: true,  // Use timeout so investigator short-circuits (fast)
+        timedOut: true, // Use timeout so investigator short-circuits (fast)
       });
 
       // First three build up history
@@ -151,7 +159,10 @@ describe('hydra-doctor', () => {
       const r4 = await diagnose(failure);
       assert.equal(r4.recurring, true);
       // Recurring should escalate — not ignore
-      assert.ok(['ticket', 'fix'].includes(r4.action), `recurring should escalate, got: ${r4.action}`);
+      assert.ok(
+        ['ticket', 'fix'].includes(r4.action),
+        `recurring should escalate, got: ${r4.action}`,
+      );
     });
 
     it('returns a well-shaped diagnosis object', async () => {

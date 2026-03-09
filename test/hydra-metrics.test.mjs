@@ -242,7 +242,9 @@ test('metrics: estimateFlowDuration multiplies by rounds', () => {
 test('metrics: emits call:start event', () => {
   resetMetrics();
   let emitted = null;
-  const handler = (evt) => { emitted = evt; };
+  const handler = (evt) => {
+    emitted = evt;
+  };
   metricsEmitter.on('call:start', handler);
 
   recordCallStart('claude', 'opus');
@@ -256,7 +258,9 @@ test('metrics: emits call:start event', () => {
 test('metrics: emits call:complete event', () => {
   resetMetrics();
   let emitted = null;
-  const handler = (evt) => { emitted = evt; };
+  const handler = (evt) => {
+    emitted = evt;
+  };
   metricsEmitter.on('call:complete', handler);
 
   const h = recordCallStart('gemini', 'pro');
@@ -271,7 +275,9 @@ test('metrics: emits call:complete event', () => {
 test('metrics: emits call:error event', () => {
   resetMetrics();
   let emitted = null;
-  const handler = (evt) => { emitted = evt; };
+  const handler = (evt) => {
+    emitted = evt;
+  };
   metricsEmitter.on('call:error', handler);
 
   const h = recordCallStart('codex', 'gpt-5');
@@ -317,7 +323,13 @@ test('metrics: recordCallComplete accepts result.output as alias for stdout', ()
   recordCallComplete(h, {
     output: 'Hello',
     stderr: '',
-    tokenUsage: { inputTokens: 800, outputTokens: 200, cacheCreationTokens: 0, cacheReadTokens: 0, totalTokens: 1000 },
+    tokenUsage: {
+      inputTokens: 800,
+      outputTokens: 200,
+      cacheCreationTokens: 0,
+      cacheReadTokens: 0,
+      totalTokens: 1000,
+    },
     costUsd: 0.03,
   });
 
@@ -337,7 +349,13 @@ test('metrics: result.stdout takes precedence over result.output', () => {
     stdout: 'Hello',
     output: 'ignored',
     stderr: '',
-    tokenUsage: { inputTokens: 100, outputTokens: 50, cacheCreationTokens: 0, cacheReadTokens: 0, totalTokens: 150 },
+    tokenUsage: {
+      inputTokens: 100,
+      outputTokens: 50,
+      cacheCreationTokens: 0,
+      cacheReadTokens: 0,
+      totalTokens: 150,
+    },
     costUsd: 0.01,
   });
 
@@ -393,7 +411,13 @@ test('metrics: getRecentTokens sums tokens from recent calls', () => {
   recordCallComplete(h1, {
     stdout: 'ok',
     stderr: '',
-    tokenUsage: { inputTokens: 1000, outputTokens: 500, cacheCreationTokens: 0, cacheReadTokens: 0, totalTokens: 1500 },
+    tokenUsage: {
+      inputTokens: 1000,
+      outputTokens: 500,
+      cacheCreationTokens: 0,
+      cacheReadTokens: 0,
+      totalTokens: 1500,
+    },
     costUsd: 0.04,
   });
 

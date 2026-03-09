@@ -14,24 +14,25 @@
 
 GitHub Copilot CLI (`copilot`) is a terminal-native agentic coding assistant backed by GitHub's Copilot service. Key properties relevant to Hydra:
 
-| Property | Value |
-|---|---|
-| **Binary** | `copilot` |
-| **npm package** | `@github/copilot` |
-| **Install (macOS/Linux)** | `curl -fsSL https://gh.io/copilot-install \| bash` or `brew install copilot-cli` |
-| **Install (Windows)** | `winget install GitHub.Copilot` |
-| **Install (npm)** | `npm install -g @github/copilot` |
-| **Auth requirement** | GitHub account with active Copilot subscription; `GH_TOKEN`/`GITHUB_TOKEN` env var for PAT auth |
-| **Default model** | Claude Sonnet 4.5 (as of March 2026) |
-| **Other models** | GPT-5 (selectable via `/model` slash command) |
-| **MCP support** | Ships with GitHub MCP server built-in; accepts custom MCP servers via `~/.copilot/mcp.json` or `.github/mcp.json` |
-| **LSP support** | Language Server Protocol via `~/.copilot/lsp-config.json` |
-| **Custom instructions** | Via `.github/copilot-instructions.md` (project-level) |
-| **Context window** | ~128K tokens (Claude Sonnet 4.5 base) |
+| Property                  | Value                                                                                                             |
+| ------------------------- | ----------------------------------------------------------------------------------------------------------------- |
+| **Binary**                | `copilot`                                                                                                         |
+| **npm package**           | `@github/copilot`                                                                                                 |
+| **Install (macOS/Linux)** | `curl -fsSL https://gh.io/copilot-install \| bash` or `brew install copilot-cli`                                  |
+| **Install (Windows)**     | `winget install GitHub.Copilot`                                                                                   |
+| **Install (npm)**         | `npm install -g @github/copilot`                                                                                  |
+| **Auth requirement**      | GitHub account with active Copilot subscription; `GH_TOKEN`/`GITHUB_TOKEN` env var for PAT auth                   |
+| **Default model**         | Claude Sonnet 4.5 (as of March 2026)                                                                              |
+| **Other models**          | GPT-5 (selectable via `/model` slash command)                                                                     |
+| **MCP support**           | Ships with GitHub MCP server built-in; accepts custom MCP servers via `~/.copilot/mcp.json` or `.github/mcp.json` |
+| **LSP support**           | Language Server Protocol via `~/.copilot/lsp-config.json`                                                         |
+| **Custom instructions**   | Via `.github/copilot-instructions.md` (project-level)                                                             |
+| **Context window**        | ~128K tokens (Claude Sonnet 4.5 base)                                                                             |
 
 ### Interfaces
 
 **Interactive mode** (default):
+
 ```bash
 copilot               # Start REPL session with animated banner
 copilot --banner      # Show banner again on launch
@@ -39,6 +40,7 @@ copilot --experimental  # Enable experimental features (Autopilot mode)
 ```
 
 **Programmatic mode** (headless-compatible):
+
 ```bash
 # Single prompt, exits after completion
 copilot -p "prompt text"
@@ -54,17 +56,18 @@ copilot -p "show commits" --allow-tool 'shell(git)'
 
 **Approval flags** (permission model, maps to Hydra's `permissionMode`):
 
-| Hydra `permissionMode` | Copilot flag | Behavior |
-|---|---|---|
-| `plan` | _(none — interactive approval required)_ | Asks before each tool use |
-| `auto-edit` | `--allow-tool 'shell(*)' --allow-tool 'file(*)'` | Allow file + shell, one session |
-| `full-auto` | `--allow-all-tools` | Allow all tools without approval |
+| Hydra `permissionMode` | Copilot flag                                     | Behavior                         |
+| ---------------------- | ------------------------------------------------ | -------------------------------- |
+| `plan`                 | _(none — interactive approval required)_         | Asks before each tool use        |
+| `auto-edit`            | `--allow-tool 'shell(*)' --allow-tool 'file(*)'` | Allow file + shell, one session  |
+| `full-auto`            | `--allow-all-tools`                              | Allow all tools without approval |
 
 ### Known Limitations for Headless Integration
 
 > **⚠️ Investigation Required:** At time of writing, it is not confirmed that `copilot -p` supports a machine-readable JSON output format (`--output-format json` equivalent). The programmatic mode outputs human-readable markdown/text. This is the primary technical risk for Hydra integration.
 
 Mitigation options:
+
 1. **Text parsing** — Parse natural language output (fragile, not recommended)
 2. **Wait for upstream** — Monitor Copilot CLI changelog for JSON/structured output support
 3. **Wrapper mode** — Execute `copilot -p` and capture stdout as raw markdown (like Gemini's text-based output)
@@ -77,8 +80,10 @@ The recommended approach is **option 3** for the initial implementation: treat `
 ## Reference: Copilot CLI Config Locations
 
 ### MCP Server Registration
+
 - **File:** `~/.copilot/mcp.json` (user-level) or `.github/mcp.json` (project-level)
 - **Format:**
+
 ```json
 {
   "mcpServers": {
@@ -92,10 +97,12 @@ The recommended approach is **option 3** for the initial implementation: treat `
 ```
 
 ### Custom Instructions
+
 - **File:** `.github/copilot-instructions.md` (project-level)
 - Contains persistent instructions injected into every Copilot session
 
 ### LSP Configuration
+
 - **File:** `~/.copilot/lsp-config.json` (user-level) or `.github/lsp.json` (project-level)
 
 ---
@@ -103,6 +110,7 @@ The recommended approach is **option 3** for the initial implementation: treat `
 ## Task 1: Agent Definition — `lib/hydra-agents.mjs`
 
 **Files:**
+
 - `lib/hydra-agents.mjs` — Add `copilot` entry to `PHYSICAL_AGENTS`
 
 **What to add** — insert after `codex` in the `PHYSICAL_AGENTS` object:
@@ -196,6 +204,7 @@ Output structure: GitHub context summary → Actionable suggestions → Commands
 ## Task 2: UI Integration — `lib/hydra-ui.mjs`
 
 **Files:**
+
 - `lib/hydra-ui.mjs` — Add Copilot color and icon
 
 **What to add:**
@@ -208,17 +217,17 @@ export const AGENT_COLORS = {
   gemini: pc.cyan,
   codex: pc.green,
   claude: claudeOrange,
-  copilot: copilotBlue,   // ← add this
+  copilot: copilotBlue, // ← add this
   human: pc.yellow,
   system: pc.blue,
 };
 
 export const AGENT_ICONS = {
-  gemini: '\u2726',  // ✦
-  codex: '\u058E',   // ֎
-  claude: '\u274B',  // ❋
+  gemini: '\u2726', // ✦
+  codex: '\u058E', // ֎
+  claude: '\u274B', // ❋
   copilot: '\u29BF', // ⦿ — circled bullet; single-codepoint, matches existing icon style
-  human: '\u{1F16F}',  // 🅯
+  human: '\u{1F16F}', // 🅯
   system: '\u{1F5B3}', // 🖳
 };
 ```
@@ -230,6 +239,7 @@ export const AGENT_ICONS = {
 ## Task 3: Output Parsing — `lib/hydra-shared/agent-executor.mjs`
 
 **Files:**
+
 - `lib/hydra-shared/agent-executor.mjs` — Add Copilot-specific output handling
 
 **Context:** Copilot CLI currently has no `--output-format json` flag — output is markdown/text. JSON output mode is planned for the next Copilot CLI release and is pre-wired via `features.jsonOutput` (see Task 1). The executor needs to handle both the current text path and the future JSON upgrade path.
@@ -241,7 +251,7 @@ In the agent invocation detection block, ensure `useStdin` is `false` for Copilo
 ```javascript
 // In the agent → stdin/flag routing
 if (agent === 'copilot') {
-  useStdin = false;  // Copilot uses -p flag, not stdin
+  useStdin = false; // Copilot uses -p flag, not stdin
 }
 ```
 
@@ -268,7 +278,7 @@ if (agent === 'copilot') {
       const parsed = JSON.parse(stdout);
       result.output = parsed?.result?.output ?? parsed?.output ?? stdout;
     } catch {
-      result.output = stdout;  // Graceful fallback if JSON parse fails
+      result.output = stdout; // Graceful fallback if JSON parse fails
     }
   } else {
     // Current: treat stdout as plain text (same as Gemini text mode)
@@ -294,6 +304,7 @@ copilot: {
 ## Task 4: Model Profiles — `lib/hydra-model-profiles.mjs`
 
 **Files:**
+
 - `lib/hydra-model-profiles.mjs` — Add Copilot model entries
 
 **What to add** to `MODEL_PROFILES`:
@@ -453,9 +464,11 @@ copilot: {
 ## Task 5: Config Updates — `hydra.config.json`
 
 **Files:**
+
 - `hydra.config.json` — Add Copilot model config, aliases, mode tiers, and role
 
 **`models` section** — add:
+
 ```json
 "copilot": {
   "default": "copilot-claude-sonnet-4-6",
@@ -468,6 +481,7 @@ copilot: {
 ```
 
 **`aliases` section** — add:
+
 ```json
 "copilot": {
   "sonnet": "copilot-claude-sonnet-4-6",
@@ -479,6 +493,7 @@ copilot: {
 ```
 
 **`modeTiers` section** — add `"copilot"` to each tier:
+
 ```json
 "performance": { "copilot": "flagship" },
 "balanced":    { "copilot": "default" },
@@ -489,6 +504,7 @@ copilot: {
 > `performance` maps to `flagship` (Opus 4.6) for maximum quality. `balanced` and `economy` both use Sonnet 4.6 since all models cost the same quota-wise and Sonnet covers most tasks well.
 
 **`roles` section** — add three roles to support per-task model selection:
+
 ```json
 "copilot": {
   "agent": "copilot",
@@ -512,6 +528,7 @@ copilot: {
 ## Task 6: Setup & CLI Detection — `lib/hydra-setup.mjs`
 
 **Files:**
+
 - `lib/hydra-setup.mjs` — Add Copilot CLI detection and MCP registration
 
 ### Step 1: CLI Detection
@@ -524,7 +541,7 @@ export function detectInstalledCLIs() {
     claude: commandExists('claude'),
     gemini: commandExists('gemini'),
     codex: commandExists('codex'),
-    copilot: commandExists('copilot'),   // ← add this
+    copilot: commandExists('copilot'), // ← add this
   };
 }
 ```
@@ -568,6 +585,7 @@ export function mergeCopilotConfig(mcpEntry, opts = {}) {
 ```
 
 **MCP entry format** for Copilot:
+
 ```javascript
 {
   command: resolveNodePath(),
@@ -585,6 +603,7 @@ In the `setup` command handler, add Copilot detection + registration alongside t
 ## Task 7: Tandem Pair Routing — `lib/hydra-utils.mjs`
 
 **Files:**
+
 - `lib/hydra-utils.mjs` — Add Copilot to `selectTandemPair()` task type matrix
 
 Copilot is well-suited as a **follow** agent for review and documentation tasks (it has GitHub context to enrich feedback):
@@ -602,6 +621,7 @@ documentation: { lead: 'claude', follow: 'copilot' }, // Claude writes, Copilot 
 ## Task 8: Council Role — `lib/hydra-council.mjs`
 
 **Files:**
+
 - `lib/hydra-council.mjs` — Add Copilot as optional 4th council participant
 
 In the adversarial council mode (`'adversarial'`), Copilot can participate in the **DIVERGE** phase (independent answers) when enabled. It contributes GitHub integration perspective that the other three agents cannot provide.
@@ -615,9 +635,11 @@ This is **optional** — council can function with 3 agents. Copilot participati
 ## Task 9: Documentation — `COPILOT.md`
 
 **Files:**
+
 - `COPILOT.md` — Agent instructions for Copilot (root level, matching `CLAUDE.md` / `GEMINI.md` / `AGENTS.md` pattern)
 
 The file should:
+
 1. Explain Copilot's role in the Hydra orchestration system (`advisor`)
 2. Document how to check for handoffs (`hydra_handoffs_pending` with `agent: "copilot"`)
 3. Document how to claim and report on tasks
@@ -629,6 +651,7 @@ The file should:
 ## Task 10: README & CLAUDE.md Updates
 
 **Files:**
+
 - `README.md` — Add Copilot to agent table, prerequisites, install step
 - `CLAUDE.md` — Update Architecture section to show 4 agents; update `detectInstalledCLIs()` reference
 
@@ -664,15 +687,15 @@ Tasks 9, 10 (COPILOT.md, README/CLAUDE.md updates). Required before merging.
 
 ## Known Risks & Open Questions
 
-| Risk | Severity | Mitigation |
-|---|---|---|
-| No JSON output from `copilot -p` | **Medium** | Pre-wired via `features.jsonOutput: false`; flip to `true` and validate JSON shape when CLI ships `--output-format json` |
-| `cliModelId` values unverified | **Medium** | Profile `cliModelId` fields (e.g. `'claude-sonnet-4-6'`, `'gpt-5.4'`) are assumed — validate against `copilot /model` interactive output before shipping |
-| Auth flow in CI/headless | **High** | Require `GH_TOKEN` env var; document clearly; skip Copilot tasks when not authenticated |
-| Premium request quota limits | **Medium** | Add Copilot to `hydra-usage.mjs` monitoring; warn when quota is low; Opus uses more quota than Sonnet |
-| Copilot CLI still in preview | **Medium** | Pin to versioned install; monitor changelog for breaking changes |
-| `--allow-all-tools` security | **Medium** | Only use in `full-auto` mode; default to explicit tool allowlist |
-| Windows `copilot` binary path | **Low** | Use `cross-spawn` (already used for all agents); test with WinGet install |
+| Risk                             | Severity   | Mitigation                                                                                                                                               |
+| -------------------------------- | ---------- | -------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| No JSON output from `copilot -p` | **Medium** | Pre-wired via `features.jsonOutput: false`; flip to `true` and validate JSON shape when CLI ships `--output-format json`                                 |
+| `cliModelId` values unverified   | **Medium** | Profile `cliModelId` fields (e.g. `'claude-sonnet-4-6'`, `'gpt-5.4'`) are assumed — validate against `copilot /model` interactive output before shipping |
+| Auth flow in CI/headless         | **High**   | Require `GH_TOKEN` env var; document clearly; skip Copilot tasks when not authenticated                                                                  |
+| Premium request quota limits     | **Medium** | Add Copilot to `hydra-usage.mjs` monitoring; warn when quota is low; Opus uses more quota than Sonnet                                                    |
+| Copilot CLI still in preview     | **Medium** | Pin to versioned install; monitor changelog for breaking changes                                                                                         |
+| `--allow-all-tools` security     | **Medium** | Only use in `full-auto` mode; default to explicit tool allowlist                                                                                         |
+| Windows `copilot` binary path    | **Low**    | Use `cross-spawn` (already used for all agents); test with WinGet install                                                                                |
 
 ---
 
@@ -707,7 +730,10 @@ describe('copilot agent definition', () => {
     assert.ok(args.includes('-p'), 'Missing -p flag');
     assert.ok(args.includes('test prompt'), 'Missing prompt in args');
     assert.ok(!args.includes('--allow-all-tools'), 'Unexpected --allow-all-tools in plan mode');
-    assert.ok(!args.some(a => a.startsWith('--allow-tool')), 'Unexpected --allow-tool in plan mode');
+    assert.ok(
+      !args.some((a) => a.startsWith('--allow-tool')),
+      'Unexpected --allow-tool in plan mode',
+    );
   });
 
   it('headless passes --model when opts.model provided', () => {
@@ -727,7 +753,10 @@ describe('copilot agent definition', () => {
   it('headless does not pass --output-format json when features.jsonOutput is false', () => {
     const agent = getAgent('copilot');
     const [, args] = agent.invoke.headless('test prompt', { jsonOutput: false });
-    assert.ok(!args.includes('--output-format'), 'Unexpected --output-format when jsonOutput false');
+    assert.ok(
+      !args.includes('--output-format'),
+      'Unexpected --output-format when jsonOutput false',
+    );
   });
 
   it('headless passes --output-format json when opts.jsonOutput is true', () => {
@@ -751,7 +780,10 @@ describe('copilot agent definition', () => {
     assert.equal(cmd, 'copilot');
     assert.ok(args.includes('-p'), 'Missing -p flag');
     assert.ok(args.includes('--allow-tool'), 'Missing --allow-tool in auto-edit mode');
-    assert.ok(!args.includes('--allow-all-tools'), 'Unexpected --allow-all-tools in auto-edit mode');
+    assert.ok(
+      !args.includes('--allow-all-tools'),
+      'Unexpected --allow-all-tools in auto-edit mode',
+    );
   });
 
   it('has features.jsonOutput set to false by default', () => {
@@ -761,8 +793,18 @@ describe('copilot agent definition', () => {
 
   it('has required taskAffinity keys', () => {
     const agent = getAgent('copilot');
-    const requiredKeys = ['planning', 'architecture', 'review', 'refactor', 'implementation',
-      'analysis', 'testing', 'research', 'documentation', 'security'];
+    const requiredKeys = [
+      'planning',
+      'architecture',
+      'review',
+      'refactor',
+      'implementation',
+      'analysis',
+      'testing',
+      'research',
+      'documentation',
+      'security',
+    ];
     for (const key of requiredKeys) {
       assert.ok(key in agent.taskAffinity, `Missing affinity key: ${key}`);
     }
@@ -829,6 +871,7 @@ Slash commands (interactive mode):
 GitHub Copilot CLI supports two MCP config scopes:
 
 **User-level** (`~/.copilot/mcp.json`):
+
 ```json
 {
   "mcpServers": {
@@ -842,6 +885,7 @@ GitHub Copilot CLI supports two MCP config scopes:
 ```
 
 **Project-level** (`.github/mcp.json` in repository root):
+
 ```json
 {
   "mcpServers": {
@@ -858,6 +902,6 @@ The project-level config allows teams to automatically give Copilot access to Hy
 
 ---
 
-*Document created: 2026-03-07*
-*Updated: 2026-03-08 — expanded model set (Sonnet 4.6, Opus 4.6, GPT-5.4, Gemini 3.1 Pro); added --model flag to invoke functions; added features.jsonOutput gate for upcoming JSON output mode; added per-role model assignments (copilot-reviewer, copilot-architect); downgraded JSON output risk from High to Medium*
-*Status: Draft — cliModelId values require validation against live Copilot CLI; --output-format json flag name TBD pending release*
+_Document created: 2026-03-07_
+_Updated: 2026-03-08 — expanded model set (Sonnet 4.6, Opus 4.6, GPT-5.4, Gemini 3.1 Pro); added --model flag to invoke functions; added features.jsonOutput gate for upcoming JSON output mode; added per-role model assignments (copilot-reviewer, copilot-architect); downgraded JSON output risk from High to Medium_
+_Status: Draft — cliModelId values require validation against live Copilot CLI; --output-format json flag name TBD pending release_

@@ -36,16 +36,16 @@ No new modules needed — wires into `hydra-agents.mjs`, `agent-executor.mjs`, `
   "contextBudget": 32000,
   "councilRole": null,
   "taskAffinity": {
-    "implementation": 0.70,
-    "research": 0.60,
-    "documentation": 0.50,
-    "planning": 0.40,
+    "implementation": 0.7,
+    "research": 0.6,
+    "documentation": 0.5,
+    "planning": 0.4,
     "architecture": 0.35,
     "review": 0.45,
     "refactor": 0.55,
-    "analysis": 0.50,
-    "testing": 0.50,
-    "security": 0.40
+    "analysis": 0.5,
+    "testing": 0.5,
+    "security": 0.4
   },
   "mcp": { "configPath": "~/.config/gh/copilot/settings.json", "format": "json" },
   "enabled": true
@@ -65,15 +65,15 @@ No new modules needed — wires into `hydra-agents.mjs`, `agent-executor.mjs`, `
   "councilRole": null,
   "taskAffinity": {
     "implementation": 0.75,
-    "refactor": 0.80,
-    "testing": 0.70,
+    "refactor": 0.8,
+    "testing": 0.7,
     "documentation": 0.55,
-    "planning": 0.30,
+    "planning": 0.3,
     "architecture": 0.25,
     "review": 0.45,
     "analysis": 0.45,
-    "research": 0.00,
-    "security": 0.30
+    "research": 0.0,
+    "security": 0.3
   },
   "enabled": true
 }
@@ -81,29 +81,29 @@ No new modules needed — wires into `hydra-agents.mjs`, `agent-executor.mjs`, `
 
 ### Template Placeholders (CLI track)
 
-| Placeholder | Description |
-|-------------|-------------|
-| `{prompt}` | The task prompt (required) |
-| `{cwd}` | Project root directory |
+| Placeholder    | Description                                           |
+| -------------- | ----------------------------------------------------- |
+| `{prompt}`     | The task prompt (required)                            |
+| `{cwd}`        | Project root directory                                |
 | `{outputFile}` | Temp file path for agents that write output to a file |
 
 ### Response Parsers
 
-| Value | Behavior |
-|-------|----------|
-| `"plaintext"` | Capture stdout as-is |
-| `"json"` | Parse JSON stdout, extract text content field |
-| `"markdown"` | Capture markdown from stdout |
+| Value         | Behavior                                      |
+| ------------- | --------------------------------------------- |
+| `"plaintext"` | Capture stdout as-is                          |
+| `"json"`      | Parse JSON stdout, extract text content field |
+| `"markdown"`  | Capture markdown from stdout                  |
 
 ### Task Affinity Presets
 
 Wizard lets users pick a preset instead of entering 10 numbers:
 
-| Preset | Boosted affinities |
-|--------|--------------------|
-| `balanced` | All at 0.50 |
-| `code-focused` | implementation, refactor, testing high |
-| `review-focused` | review, analysis, security high |
+| Preset             | Boosted affinities                     |
+| ------------------ | -------------------------------------- |
+| `balanced`         | All at 0.50                            |
+| `code-focused`     | implementation, refactor, testing high |
+| `review-focused`   | review, analysis, security high        |
 | `research-focused` | research, documentation, analysis high |
 
 Power users can edit `hydra.config.json` directly for fine-grained values.
@@ -134,12 +134,12 @@ Power users can edit `hydra.config.json` directly for fine-grained values.
 
 ## Additional Operator Commands
 
-| Command | Description |
-|---------|-------------|
-| `:agents add` | Interactive wizard to register a new custom agent |
-| `:agents list` | Show all agents (built-in + custom) with enabled status |
-| `:agents remove <name>` | Remove a custom agent from config |
-| `:agents test <name>` | Send test prompt to verify agent responds |
+| Command                 | Description                                             |
+| ----------------------- | ------------------------------------------------------- |
+| `:agents add`           | Interactive wizard to register a new custom agent       |
+| `:agents list`          | Show all agents (built-in + custom) with enabled status |
+| `:agents remove <name>` | Remove a custom agent from config                       |
+| `:agents test <name>`   | Send test prompt to verify agent responds               |
 
 ## MCP Registration
 
@@ -156,18 +156,19 @@ Could not auto-register MCP. Add this to your agent's MCP config:
 ```
 
 Known CLI auto-detect targets (extensible):
+
 - `gh` → `~/.config/gh/copilot/` (format varies by version)
 - `aider` → `~/.aider.conf.yml`
 
 ## Error Handling
 
-| Category | Trigger | Behavior |
-|----------|---------|----------|
-| `custom-cli-disabled` | `enabled: false` in config | Skip, no fallback |
-| `custom-cli-unavailable` | CLI not found on PATH (ENOENT) | Warn once, fall back to cloud |
-| `custom-cli-error` | CLI exits non-zero | Task failure, reported normally |
+| Category                  | Trigger                         | Behavior                                      |
+| ------------------------- | ------------------------------- | --------------------------------------------- |
+| `custom-cli-disabled`     | `enabled: false` in config      | Skip, no fallback                             |
+| `custom-cli-unavailable`  | CLI not found on PATH (ENOENT)  | Warn once, fall back to cloud                 |
+| `custom-cli-error`        | CLI exits non-zero              | Task failure, reported normally               |
 | (API) `local-unavailable` | ECONNREFUSED / ENOTFOUND / etc. | Reuses existing category, falls back to cloud |
-| (API) `local-error` | HTTP error from endpoint | Reuses existing category |
+| (API) `local-error`       | HTTP error from endpoint        | Reuses existing category                      |
 
 ## Testing
 
@@ -180,12 +181,12 @@ Known CLI auto-detect targets (extensible):
 
 ## Files to Modify
 
-| File | Change |
-|------|--------|
-| `lib/hydra-agents.mjs` | Load `agents.custom[]` in `initAgentRegistry()`; expand CLI templates in invoke |
-| `lib/hydra-config.mjs` | Add `agents.custom: []` to `DEFAULT_CONFIG`; merge in `mergeWithDefaults()` |
+| File                                  | Change                                                                                                           |
+| ------------------------------------- | ---------------------------------------------------------------------------------------------------------------- | ---- | ------ | ---------------------- |
+| `lib/hydra-agents.mjs`                | Load `agents.custom[]` in `initAgentRegistry()`; expand CLI templates in invoke                                  |
+| `lib/hydra-config.mjs`                | Add `agents.custom: []` to `DEFAULT_CONFIG`; merge in `mergeWithDefaults()`                                      |
 | `lib/hydra-shared/agent-executor.mjs` | Add `"cli-custom"` branch in `executeAgent()`; `custom-cli-unavailable` fallback in `executeAgentWithRecovery()` |
-| `lib/hydra-setup.mjs` | Add `registerCustomAgentMcp()` + known CLI auto-detect targets |
-| `lib/hydra-operator.mjs` | Add `:agents add|list|remove|test` command handlers |
-| `CLAUDE.md` | Document custom agent config schema |
-| `README.md` | Document `:agents` commands |
+| `lib/hydra-setup.mjs`                 | Add `registerCustomAgentMcp()` + known CLI auto-detect targets                                                   |
+| `lib/hydra-operator.mjs`              | Add `:agents add                                                                                                 | list | remove | test` command handlers |
+| `CLAUDE.md`                           | Document custom agent config schema                                                                              |
+| `README.md`                           | Document `:agents` commands                                                                                      |

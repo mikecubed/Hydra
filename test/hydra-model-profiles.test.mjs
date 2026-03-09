@@ -34,17 +34,32 @@ describe('MODEL_PROFILES data integrity', () => {
       assert.ok(p.tier, `${id} missing tier`);
       assert.ok(typeof p.contextWindow === 'number', `${id} contextWindow must be number`);
       assert.ok(typeof p.maxOutput === 'number', `${id} maxOutput must be number`);
-      assert.ok(p.pricePer1M && typeof p.pricePer1M.input === 'number', `${id} missing pricePer1M.input`);
-      assert.ok(p.pricePer1M && typeof p.pricePer1M.output === 'number', `${id} missing pricePer1M.output`);
-      assert.ok(p.costPer1K && typeof p.costPer1K.input === 'number', `${id} missing costPer1K.input`);
-      assert.ok(p.costPer1K && typeof p.costPer1K.output === 'number', `${id} missing costPer1K.output`);
+      assert.ok(
+        p.pricePer1M && typeof p.pricePer1M.input === 'number',
+        `${id} missing pricePer1M.input`,
+      );
+      assert.ok(
+        p.pricePer1M && typeof p.pricePer1M.output === 'number',
+        `${id} missing pricePer1M.output`,
+      );
+      assert.ok(
+        p.costPer1K && typeof p.costPer1K.input === 'number',
+        `${id} missing costPer1K.input`,
+      );
+      assert.ok(
+        p.costPer1K && typeof p.costPer1K.output === 'number',
+        `${id} missing costPer1K.output`,
+      );
       assert.ok(typeof p.qualityScore === 'number', `${id} qualityScore must be number`);
       assert.ok(typeof p.valueScore === 'number', `${id} valueScore must be number`);
       assert.ok(typeof p.speedScore === 'number', `${id} speedScore must be number`);
       assert.ok(p.qualityScore >= 0 && p.qualityScore <= 100, `${id} qualityScore out of range`);
       assert.ok(Array.isArray(p.strengths), `${id} strengths must be array`);
       assert.ok(Array.isArray(p.bestFor), `${id} bestFor must be array`);
-      assert.ok(p.reasoning && typeof p.reasoning.type === 'string', `${id} missing reasoning.type`);
+      assert.ok(
+        p.reasoning && typeof p.reasoning.type === 'string',
+        `${id} missing reasoning.type`,
+      );
     }
   });
 
@@ -54,11 +69,11 @@ describe('MODEL_PROFILES data integrity', () => {
       const expectedOutput = p.pricePer1M.output / 1000;
       assert.ok(
         Math.abs(p.costPer1K.input - expectedInput) < 0.0001,
-        `${id} costPer1K.input (${p.costPer1K.input}) != pricePer1M.input/1000 (${expectedInput})`
+        `${id} costPer1K.input (${p.costPer1K.input}) != pricePer1M.input/1000 (${expectedInput})`,
       );
       assert.ok(
         Math.abs(p.costPer1K.output - expectedOutput) < 0.0001,
-        `${id} costPer1K.output (${p.costPer1K.output}) != pricePer1M.output/1000 (${expectedOutput})`
+        `${id} costPer1K.output (${p.costPer1K.output}) != pricePer1M.output/1000 (${expectedOutput})`,
       );
     }
   });
@@ -80,7 +95,14 @@ describe('MODEL_PROFILES data integrity', () => {
 
 describe('ROLE_DEFAULTS', () => {
   it('has all expected roles', () => {
-    const expected = ['architect', 'analyst', 'implementer', 'concierge', 'investigator', 'nightlyHandoff'];
+    const expected = [
+      'architect',
+      'analyst',
+      'implementer',
+      'concierge',
+      'investigator',
+      'nightlyHandoff',
+    ];
     for (const role of expected) {
       assert.ok(ROLE_DEFAULTS[role], `Missing role: ${role}`);
     }
@@ -132,15 +154,15 @@ describe('query functions', () => {
   it('getProfilesForAgent returns correct profiles', () => {
     const claude = getProfilesForAgent('claude');
     assert.ok(claude.length >= 3);
-    assert.ok(claude.every(p => p.agent === 'claude'));
+    assert.ok(claude.every((p) => p.agent === 'claude'));
 
     const codex = getProfilesForAgent('codex');
     assert.ok(codex.length >= 4);
-    assert.ok(codex.every(p => p.agent === 'codex'));
+    assert.ok(codex.every((p) => p.agent === 'codex'));
 
     const gemini = getProfilesForAgent('gemini');
     assert.ok(gemini.length >= 4);
-    assert.ok(gemini.every(p => p.agent === 'gemini'));
+    assert.ok(gemini.every((p) => p.agent === 'gemini'));
   });
 
   it('getAgentPresets returns correct presets', () => {
@@ -168,7 +190,7 @@ describe('query functions', () => {
   it('getFallbackOrder excludes the failed model and sorts by quality', () => {
     const candidates = getFallbackOrder('claude', 'claude-opus-4-6');
     assert.ok(candidates.length >= 2);
-    assert.ok(!candidates.some(c => c.id === 'claude-opus-4-6'));
+    assert.ok(!candidates.some((c) => c.id === 'claude-opus-4-6'));
     // Should be sorted by qualityScore descending
     for (let i = 1; i < candidates.length; i++) {
       assert.ok(candidates[i - 1].qualityScore >= candidates[i].qualityScore);

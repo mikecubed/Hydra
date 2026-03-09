@@ -34,7 +34,7 @@ test('self: buildSelfIndex includes daemon routes and mcp tools/resources', () =
   assert.ok(Array.isArray(idx.mcp.tools));
   assert.ok(Array.isArray(idx.mcp.resources));
   // Should include at least the standard MCP resources
-  assert.ok(idx.mcp.resources.some((r) => r === 'hydra://config'));
+  assert.ok(idx.mcp.resources.includes('hydra://config'));
 });
 
 test('self: formatSelfIndexForPrompt returns bounded block', () => {
@@ -44,4 +44,3 @@ test('self: formatSelfIndexForPrompt returns bounded block', () => {
   assert.ok(text.includes('=== END INDEX ==='));
   assert.ok(text.length <= 1215);
 });
-

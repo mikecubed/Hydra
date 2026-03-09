@@ -60,7 +60,8 @@ describe('hydra-cleanup', () => {
   });
 
   it('scanners return empty arrays when no data', async () => {
-    const { scanArchivableTasks, scanOldHandoffs, scanStaleTasks } = await import('../lib/hydra-cleanup.mjs');
+    const { scanArchivableTasks, scanOldHandoffs, scanStaleTasks } =
+      await import('../lib/hydra-cleanup.mjs');
 
     // These call the daemon which isn't running — should return []
     const t = await scanArchivableTasks('http://localhost:99999');

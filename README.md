@@ -49,18 +49,18 @@ Coordinates [Gemini CLI](https://github.com/google-gemini/gemini-cli), [Codex CL
 
 ## Why Hydra?
 
-A common question: *"Why not just tell Claude Code to call `gemini -p` and `codex` from CLAUDE.md?"*
+A common question: _"Why not just tell Claude Code to call `gemini -p` and `codex` from CLAUDE.md?"_
 
 That works for one-shot delegation. Hydra gives you an orchestration runtime:
 
-| | CLAUDE.md chaining | Hydra |
-|---|---|---|
-| Multi-round deliberation | Manual, ad-hoc | Structured council with convergence criteria and named decision owner |
-| State persistence | None between sessions | Event-sourced daemon, survives restarts, full replay |
-| Parallel execution | Sequential only | Headless workers claim tasks concurrently from a shared queue |
-| Budget management | None | Three-tier token tracking with automatic model downgrade at thresholds |
-| Task isolation | Shared workspace | Per-task git worktrees, no branch conflicts |
-| Cross-session recovery | Manual | `:resume` scans all resumable state in one command |
+|                          | CLAUDE.md chaining    | Hydra                                                                  |
+| ------------------------ | --------------------- | ---------------------------------------------------------------------- |
+| Multi-round deliberation | Manual, ad-hoc        | Structured council with convergence criteria and named decision owner  |
+| State persistence        | None between sessions | Event-sourced daemon, survives restarts, full replay                   |
+| Parallel execution       | Sequential only       | Headless workers claim tasks concurrently from a shared queue          |
+| Budget management        | None                  | Three-tier token tracking with automatic model downgrade at thresholds |
+| Task isolation           | Shared workspace      | Per-task git worktrees, no branch conflicts                            |
+| Cross-session recovery   | Manual                | `:resume` scans all resumable state in one command                     |
 
 Use CLAUDE.md chaining when you need one agent to occasionally consult another. Use Hydra when you want a coordinated runtime that persists, tracks, isolates, and recovers across the full lifecycle of a task.
 
@@ -88,6 +88,7 @@ Type a prompt in the operator console. Hydra routes it. Use `:help` to see all c
 **API keys:** Hydra orchestrates your installed AI CLIs using their own auth — no Hydra-specific API keys required. The optional concierge chat layer can use `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, or `GEMINI_API_KEY` for direct streaming responses, but falls back gracefully if none are set.
 
 **Optional dependencies:**
+
 - [`gh` CLI](https://cli.github.com) — GitHub integration (PRs, issue scanning)
 - [`@opentelemetry/api`](https://www.npmjs.com/package/@opentelemetry/api) — distributed tracing
 
@@ -95,17 +96,18 @@ Type a prompt in the operator console. Hydra routes it. Use `:help` to see all c
 
 Hydra has five dispatch modes. Pick one or let it choose:
 
-| Mode | What it does |
-|------|-------------|
-| **Auto** | Classifies your prompt locally — zero extra API calls — then routes to a single agent, a tandem pair, or full council |
-| **Smart** | Like Auto, but also auto-selects model tier (economy / balanced / performance) per prompt complexity |
-| **Council** | Multi-round deliberation: Claude proposes → Gemini critiques → Claude refines → Codex implements |
-| **Dispatch** | Headless pipeline — queues tasks for background workers, no interactive waiting |
-| **Chat** | Conversational concierge — answers questions directly, escalates to agents only when real work is needed |
+| Mode         | What it does                                                                                                          |
+| ------------ | --------------------------------------------------------------------------------------------------------------------- |
+| **Auto**     | Classifies your prompt locally — zero extra API calls — then routes to a single agent, a tandem pair, or full council |
+| **Smart**    | Like Auto, but also auto-selects model tier (economy / balanced / performance) per prompt complexity                  |
+| **Council**  | Multi-round deliberation: Claude proposes → Gemini critiques → Claude refines → Codex implements                      |
+| **Dispatch** | Headless pipeline — queues tasks for background workers, no interactive waiting                                       |
+| **Chat**     | Conversational concierge — answers questions directly, escalates to agents only when real work is needed              |
 
 Switch modes with `:mode <name>` at any time. The daemon persists state across mode switches.
 
 **Routing tiers within Auto / Smart:**
+
 - **Single** — one agent handles the full task (fast path)
 - **Tandem** — lead-follow pair: one agent analyzes, another implements
 - **Council** — all three agents deliberate with structured synthesis
@@ -180,33 +182,33 @@ All routing decisions happen via a local heuristic. No API calls are made until 
 
 ### npm scripts
 
-| Command | Description |
-|---------|-------------|
-| `npm run go` | Launch operator console |
-| `npm start` | Start the daemon |
-| `npm test` | Run all tests |
-| `npm run council -- prompt="..."` | Full council deliberation |
-| `npm run evolve` | Autonomous self-improvement |
-| `npm run nightly` | Nightly task automation |
-| `npm run tasks` | Scan & execute TODO/FIXME/issues |
-| `npm run eval` | Routing evaluation against golden corpus |
+| Command                           | Description                              |
+| --------------------------------- | ---------------------------------------- |
+| `npm run go`                      | Launch operator console                  |
+| `npm start`                       | Start the daemon                         |
+| `npm test`                        | Run all tests                            |
+| `npm run council -- prompt="..."` | Full council deliberation                |
+| `npm run evolve`                  | Autonomous self-improvement              |
+| `npm run nightly`                 | Nightly task automation                  |
+| `npm run tasks`                   | Scan & execute TODO/FIXME/issues         |
+| `npm run eval`                    | Routing evaluation against golden corpus |
 
 ### Operator console (inside `npm run go`)
 
-| Command | Description |
-|---------|-------------|
-| `:help` | Show all commands |
-| `:status` | Dashboard with agents & tasks |
-| `:mode auto\|smart\|council\|dispatch\|chat` | Switch dispatch mode |
-| `:model claude=sonnet` | Override agent model |
-| `:model:select` | Interactive model + reasoning effort picker |
-| `:workers start` | Start headless background workers |
-| `:evolve` | Launch self-improvement session |
-| `:nightly` | Interactive nightly run setup |
-| `:doctor fix` | Auto-detect and fix pipeline issues |
-| `:persona` | Edit concierge personality |
-| `:resume` | Scan all resumable state |
-| `!<prompt>` | Force dispatch, bypass concierge |
+| Command                                      | Description                                 |
+| -------------------------------------------- | ------------------------------------------- |
+| `:help`                                      | Show all commands                           |
+| `:status`                                    | Dashboard with agents & tasks               |
+| `:mode auto\|smart\|council\|dispatch\|chat` | Switch dispatch mode                        |
+| `:model claude=sonnet`                       | Override agent model                        |
+| `:model:select`                              | Interactive model + reasoning effort picker |
+| `:workers start`                             | Start headless background workers           |
+| `:evolve`                                    | Launch self-improvement session             |
+| `:nightly`                                   | Interactive nightly run setup               |
+| `:doctor fix`                                | Auto-detect and fix pipeline issues         |
+| `:persona`                                   | Edit concierge personality                  |
+| `:resume`                                    | Scan all resumable state                    |
+| `!<prompt>`                                  | Force dispatch, bypass concierge            |
 
 For the full command reference (80+ commands organized by category), see [docs/USAGE.md](docs/USAGE.md#operator-commands-reference).
 
@@ -214,20 +216,20 @@ For the full command reference (80+ commands organized by category), see [docs/U
 
 Hydra is configured via `hydra.config.json` in the project root. Key sections:
 
-| Section | Controls |
-|---------|----------|
-| `roles` | Role → agent → model mapping (architect, analyst, implementer, etc.) |
-| `models` | Active model per agent, shorthand aliases, mode tier presets |
-| `routing` | Route strategy, council gate, tandem dispatch, intent gate, worktree isolation |
-| `workers` | Headless worker settings, permission modes, poll interval, auto-chain |
-| `concierge` | Provider fallback chain, model, history length, persona |
-| `persona` | Identity, voice, tone, verbosity, formality, humor, presets |
-| `nightly` | Pipeline sources (TODO/GitHub), budget, AI discovery |
-| `evolve` | Self-improvement rounds, suggestions backlog settings |
-| `doctor` | Failure diagnosis, recurring pattern detection |
-| `providers` | API keys, tier levels, rate limits, admin keys for usage queries |
-| `github` | PR defaults, labels, reviewers |
-| `modelRecovery` | Circuit breaker thresholds, fallback behavior, rate limit retry |
+| Section         | Controls                                                                       |
+| --------------- | ------------------------------------------------------------------------------ |
+| `roles`         | Role → agent → model mapping (architect, analyst, implementer, etc.)           |
+| `models`        | Active model per agent, shorthand aliases, mode tier presets                   |
+| `routing`       | Route strategy, council gate, tandem dispatch, intent gate, worktree isolation |
+| `workers`       | Headless worker settings, permission modes, poll interval, auto-chain          |
+| `concierge`     | Provider fallback chain, model, history length, persona                        |
+| `persona`       | Identity, voice, tone, verbosity, formality, humor, presets                    |
+| `nightly`       | Pipeline sources (TODO/GitHub), budget, AI discovery                           |
+| `evolve`        | Self-improvement rounds, suggestions backlog settings                          |
+| `doctor`        | Failure diagnosis, recurring pattern detection                                 |
+| `providers`     | API keys, tier levels, rate limits, admin keys for usage queries               |
+| `github`        | PR defaults, labels, reviewers                                                 |
+| `modelRecovery` | Circuit breaker thresholds, fallback behavior, rate limit retry                |
 
 See [docs/USAGE.md](docs/USAGE.md#config-file) for the full config reference with all fields and defaults.
 
@@ -281,13 +283,13 @@ Prompt → Intent Gate → Concierge → Route Classifier
 
 ## Documentation
 
-| Doc | Contents |
-|-----|----------|
-| [docs/USAGE.md](docs/USAGE.md) | Full command reference, config fields, daemon API, MCP tools |
-| [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | Module reference, dispatch modes, route strategies |
-| [docs/INSTALL.md](docs/INSTALL.md) | Detailed installation and setup |
-| [docs/MODEL_PROFILES.md](docs/MODEL_PROFILES.md) | Agent model options, reasoning effort, aliases |
-| [CONTRIBUTING.md](CONTRIBUTING.md) | Development workflow, test patterns, conventions |
+| Doc                                              | Contents                                                     |
+| ------------------------------------------------ | ------------------------------------------------------------ |
+| [docs/USAGE.md](docs/USAGE.md)                   | Full command reference, config fields, daemon API, MCP tools |
+| [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)     | Module reference, dispatch modes, route strategies           |
+| [docs/INSTALL.md](docs/INSTALL.md)               | Detailed installation and setup                              |
+| [docs/MODEL_PROFILES.md](docs/MODEL_PROFILES.md) | Agent model options, reasoning effort, aliases               |
+| [CONTRIBUTING.md](CONTRIBUTING.md)               | Development workflow, test patterns, conventions             |
 
 ## Daemon Security
 
