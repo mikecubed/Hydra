@@ -49,7 +49,7 @@ npm run quality             # lint + format:check + typecheck combined
 npm run setup:hooks         # Install/verify git pre-commit and pre-push hooks
 ```
 
-Code quality toolchain: ESLint v9 (flat config), Prettier, TypeScript tsc --checkJs, Husky v9 + lint-staged.
+Code quality toolchain: ESLint v10 (flat config with @eslint/js), Prettier, TypeScript tsc --checkJs, Husky v9 + lint-staged.
 
 ## Architecture
 

@@ -44,29 +44,30 @@ console.log();
 
 // ── 1. Install husky hooks ────────────────────────────────────────────────────
 console.log(pc.bold('1. Installing git hooks (husky)'));
-const huskyOk = run('npx husky', 'husky install');
+const huskyOk = run('npx --no-install husky', 'husky install');
 
 // ── 2. Verify hook files exist ────────────────────────────────────────────────
 console.log();
 console.log(pc.bold('2. Verifying hook files'));
 const preCommit = join(ROOT, '.husky', 'pre-commit');
 const prePush = join(ROOT, '.husky', 'pre-push');
-check('pre-commit hook', existsSync(preCommit));
-check('pre-push hook', existsSync(prePush));
+const preCommitOk = check('pre-commit hook', existsSync(preCommit));
+const prePushOk = check('pre-push hook', existsSync(prePush));
 
 // ── 3. Verify toolchain ───────────────────────────────────────────────────────
 console.log();
 console.log(pc.bold('3. Verifying quality toolchain'));
-const eslintOk = run('npx eslint --version', 'ESLint');
-const prettierOk = run('npx prettier --version', 'Prettier');
-const tscOk = run('npx tsc --version', 'TypeScript');
-const lintStagedOk = run('npx lint-staged --version', 'lint-staged');
+const eslintOk = run('npx --no-install eslint --version', 'ESLint');
+const prettierOk = run('npx --no-install prettier --version', 'Prettier');
+const tscOk = run('npx --no-install tsc --version', 'TypeScript');
+const lintStagedOk = run('npx --no-install lint-staged --version', 'lint-staged');
 
 // ── Summary ───────────────────────────────────────────────────────────────────
 console.log();
 console.log(pc.dim('─'.repeat(40)));
 
-const allOk = huskyOk && eslintOk && prettierOk && tscOk && lintStagedOk;
+const allOk =
+  huskyOk && preCommitOk && prePushOk && eslintOk && prettierOk && tscOk && lintStagedOk;
 
 if (allOk) {
   console.log(pc.green(pc.bold('✓ All hooks and tools are configured.')));

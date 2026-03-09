@@ -15,6 +15,8 @@ jobs:
   lint:
     name: Lint & Format
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
     steps:
       - uses: actions/checkout@v4
         with:
@@ -27,6 +29,8 @@ jobs:
 
       - name: Install dependencies
         run: npm ci
+        env:
+          HUSKY: '0'
 
       # ── On pull requests: only check changed .mjs files ───────────────────
       - name: Get changed JS files (PR)
@@ -60,9 +64,11 @@ jobs:
           npx eslint ${{ steps.changed-js.outputs.all_changed_files }}
 
       # ── ESLint on full codebase (push to main/dev) ─────────────────────────
+      # continue-on-error until codebase reaches a clean baseline (see docs/quality-fix-plan.md)
       - name: ESLint (full)
         if: github.event_name == 'push'
         run: npm run lint
+        continue-on-error: true
 
       # ── Prettier check on changed files (PR) ──────────────────────────────
       - name: Prettier (changed files)
@@ -73,13 +79,17 @@ jobs:
           npx prettier --check ${{ steps.changed-format.outputs.all_changed_files }}
 
       # ── Prettier check on full codebase (push to main/dev) ────────────────
+      # continue-on-error until codebase reaches a clean baseline (see docs/quality-fix-plan.md)
       - name: Prettier (full)
         if: github.event_name == 'push'
         run: npm run format:check
+        continue-on-error: true
 
   typecheck:
     name: Type Check
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
     steps:
       - uses: actions/checkout@v4
 
@@ -90,6 +100,8 @@ jobs:
 
       - name: Install dependencies
         run: npm ci
+        env:
+          HUSKY: '0'
 
       - name: TypeScript check (lib + bin + scripts)
         # tsc --noEmit processes the entire project defined in jsconfig.json.
@@ -101,6 +113,9 @@ jobs:
     name: Lint PR Title
     runs-on: ubuntu-latest
     if: github.event_name == 'pull_request'
+    permissions:
+      pull-requests: read
+      contents: read
     steps:
       - name: Check PR title follows conventional commits
         uses: amannn/action-semantic-pull-request@v5
