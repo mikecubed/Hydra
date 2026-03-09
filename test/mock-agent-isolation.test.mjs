@@ -10,6 +10,7 @@ import {
   listAgents,
   unregisterAgent,
 } from '../lib/hydra-agents.mjs';
+import { loadHydraConfig, saveHydraConfig, invalidateConfigCache } from '../lib/hydra-config.mjs';
 import { createMockExecuteAgent, loadAgentFixture } from './helpers/mock-agent.mjs';
 
 const require = createRequire(import.meta.url);
@@ -103,9 +104,16 @@ describe('local agent routing contract', () => {
   });
 
   test('implementation routing follows the documented mode policy without budget pressure', () => {
-    assert.equal(bestAgentFor('implementation', { mode: 'economy' }), 'local');
-    assert.equal(bestAgentFor('implementation', { mode: 'balanced' }), 'codex');
-    assert.notEqual(bestAgentFor('implementation', { mode: 'performance' }), 'local');
+    const original = loadHydraConfig();
+    saveHydraConfig({ ...original, local: { ...original.local, enabled: true } });
+    try {
+      assert.equal(bestAgentFor('implementation', { mode: 'economy' }), 'local');
+      assert.equal(bestAgentFor('implementation', { mode: 'balanced' }), 'codex');
+      assert.notEqual(bestAgentFor('implementation', { mode: 'performance' }), 'local');
+    } finally {
+      saveHydraConfig(original);
+      invalidateConfigCache();
+    }
   });
 
   test('budget gating promotes local implementation work without ever routing research to local', () => {
@@ -114,14 +122,21 @@ describe('local agent routing contract', () => {
       weekly: { percentUsed: 95 },
     };
 
-    assert.equal(bestAgentFor('implementation', { mode: 'balanced', budgetState }), 'local');
+    const original = loadHydraConfig();
+    saveHydraConfig({ ...original, local: { ...original.local, enabled: true } });
+    try {
+      assert.equal(bestAgentFor('implementation', { mode: 'balanced', budgetState }), 'local');
 
-    for (const mode of ROUTING_MODES) {
-      assert.notEqual(
-        bestAgentFor('research', { mode, budgetState }),
-        'local',
-        `research must not route to local in ${mode} mode under budget pressure`
-      );
+      for (const mode of ROUTING_MODES) {
+        assert.notEqual(
+          bestAgentFor('research', { mode, budgetState }),
+          'local',
+          `research must not route to local in ${mode} mode under budget pressure`
+        );
+      }
+    } finally {
+      saveHydraConfig(original);
+      invalidateConfigCache();
     }
   });
 
