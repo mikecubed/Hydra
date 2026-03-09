@@ -22,13 +22,13 @@ Never commit directly to `main`.
 - **ESM only** — `import`/`export`, no CommonJS
 - **No build step** — pure ESM, runs directly with Node.js 20+
 - **Terminal colors** — use `picocolors` (`pc`), never chalk
-- **Agent names** — always lowercase: `claude`, `gemini`, `codex`
+- **Agent names** — always lowercase: `claude`, `gemini`, `codex`, `local`
 - **Tests** — Node.js native `node:test` + `node:assert/strict`
 - **Dependencies** — keep them minimal; check with maintainers before adding new ones
 
 ## Code Quality & Hooks
 
-Git hooks install automatically when you run `npm install` (via the `prepare` script). They enforce quality on every commit and push:
+Git hooks install automatically when you run `npm install` or `npm ci` (via the `prepare` script). They enforce quality on every commit and push:
 
 - **`pre-commit`** — runs lint-staged: auto-fixes ESLint + Prettier on staged `.mjs` files; auto-formats staged `.json/.md/.yml/.yaml` files. Fixes are staged automatically.
 - **`pre-push`** — runs the full test suite (`npm test`). Push is blocked if any tests fail.

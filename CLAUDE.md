@@ -56,7 +56,7 @@ npm run setup:hooks         # Install/verify git pre-commit and pre-push hooks
 | **Prettier**       | `.prettierrc.json`  | `singleQuote`, `trailingComma: all`, `printWidth: 100`, LF line endings                      |
 | **TypeScript tsc** | `jsconfig.json`     | `--checkJs` strict type checking across `lib/`, `bin/`, `scripts/`                           |
 
-**Git hooks (Husky v9 + lint-staged)** — install automatically when you run `npm install` (via the `prepare` script). Use `npm run setup:hooks` only to manually reinstall or verify.
+**Git hooks (Husky v9 + lint-staged)** — install automatically when you run `npm install` or `npm ci` (via the `prepare` script). Use `npm run setup:hooks` only to manually reinstall or verify.
 
 - `pre-commit` — runs lint-staged: ESLint `--fix` + Prettier **auto-write** on staged `.mjs` files; Prettier auto-write on staged `.json/.md/.yml/.yaml`.
 - `pre-push` — runs the full `npm test` suite. Push is blocked if tests fail.

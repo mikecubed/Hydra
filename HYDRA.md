@@ -60,7 +60,7 @@ Codex is the **implementer** — responsible for code generation, refactoring, a
 
 Run `npm run quality` before opening a PR — it runs ESLint, Prettier check, and TypeScript type-check in one shot.
 
-Git hooks are installed automatically via `npm install` (the `prepare` script):
+Git hooks are installed automatically via `npm install` or `npm ci` (the `prepare` script):
 
 - **`pre-commit`** — auto-fixes ESLint + Prettier on staged files (no manual step needed)
 - **`pre-push`** — runs the full test suite; blocks the push if tests fail

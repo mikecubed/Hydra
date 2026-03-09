@@ -25,7 +25,7 @@ designed for local, single-user use.
 
 - **Read routes** (`GET /health`, `/state`, `/events`, etc.) are unauthenticated
   by design so agent CLIs can poll state without configuration.
-- **Write routes** (`POST /tasks`, `/session/start`, etc.) require the
+- **Write routes** (`POST /task/add`, `/session/start`, etc.) require the
   `x-ai-orch-token` header to match `AI_ORCH_TOKEN` when that variable is set.
 
 **Do not expose the daemon port to untrusted networks.** If you must bind to a
