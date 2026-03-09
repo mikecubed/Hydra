@@ -23,9 +23,9 @@ Operator Console (REPL)
 2. **ESM only** — all files use `import`/`export`. Never use `require()` or CommonJS.
 3. **No build step** — pure ESM, runs directly with `node`. No compilation needed.
 4. **Quality gates must pass** — ESLint, Prettier, and TypeScript type-check run on every PR. Run `npm run quality` before pushing.
-5. **Git hooks install automatically** via the `prepare` script when you run `npm install`. `pre-commit` runs lint-staged (auto-fixes ESLint + Prettier on staged `.mjs` files, auto-formats `.json/.md/.yml`); `pre-push` runs the full test suite and blocks the push on failure. Use `npm run setup:hooks` only to manually reinstall or verify hooks.
+5. **Git hooks install automatically** via the `prepare` script when you run `npm install`. `pre-commit` runs lint-staged (auto-fixes ESLint + Prettier on staged `.mjs` files, auto-formats `.json/.md/.yml/.yaml`); `pre-push` runs the full test suite and blocks the push on failure. Use `npm run setup:hooks` only to manually reinstall or verify hooks.
 6. **Update docs before committing** — see [Documentation Requirements](#documentation-requirements).
-7. **Agent names are always lowercase strings**: `claude`, `gemini`, `codex`, `local`.
+7. **Built-in physical agent names** are `claude`, `gemini`, `codex`, `local`. All agent names (including custom agents) must be lowercase (`a-z0-9-`).
 
 ---
 
@@ -114,7 +114,7 @@ The project uses a full quality toolchain. **Always run `npm run quality` before
 
 **Git hooks (Husky v9 + lint-staged):**
 
-- `pre-commit` — runs lint-staged: ESLint `--fix` + Prettier auto-write on staged `.mjs` files; Prettier auto-write on staged `.json/.md/.yml`. Fixes are staged automatically.
+- `pre-commit` — runs lint-staged: ESLint `--fix` + Prettier auto-write on staged `.mjs` files; Prettier auto-write on staged `.json/.md/.yml/.yaml`. Fixes are staged automatically.
 - `pre-push` — runs the full `npm test` suite. Push is blocked if tests fail.
 - Hooks install automatically via `npm install` (the `prepare` script). Use `npm run setup:hooks` to manually reinstall or verify.
 - CI disables hooks with `HUSKY=0` during `npm ci`.
@@ -157,10 +157,10 @@ const model = getActiveModel('claude'); // never hardcode model IDs
 
 ```js
 import { request } from './hydra-utils.mjs';
-const result = await request('POST', '/task/submit', payload);
+const result = await request('POST', baseUrl, '/task/add', payload);
 ```
 
-The status bar uses `fetch()` directly for lightweight polling, but all other daemon calls go through `request()`.
+Prefer `request()` for daemon calls. Some modules (status bar polling, concierge event push, worker heartbeats) use `fetch()` directly for lightweight or streaming use cases.
 
 ### Prompt/Interactive UI
 
@@ -264,7 +264,7 @@ Key sections:
 Three workflows:
 
 - **`ci.yml`** — syntax check (`node --check`) + full test matrix (Ubuntu + Windows, Node 20 + 22). PRs must pass before merge.
-- **`quality.yml`** — ESLint, Prettier, TypeScript type-check, and PR title enforcement (conventional commits). Runs on PRs to `main` (changed files only) and on pushes to `main`/`dev`/`fix/**`/`feat/**`/`feature/**` (full codebase). ESLint full-codebase check uses `continue-on-error` until a clean baseline is reached.
+- **`quality.yml`** — ESLint, Prettier, TypeScript type-check, and PR title enforcement (conventional commits). Runs on PRs to `main` (changed files only) and on pushes to `main`/`dev`/`fix/**`/`feat/**`/`feature/**` (full codebase). ESLint and Prettier full-codebase checks use `continue-on-error` until a clean baseline is reached. TypeScript type-check is also `continue-on-error` — results are reported but do not block PRs yet.
 - **`build-windows-exe.yml`** — builds standalone Windows executable; triggered on version tags or `workflow_dispatch`.
 
 All CI workflows set `HUSKY=0` to skip git hooks during `npm ci`, and use `permissions: {}` (deny-all) at the workflow level with per-job grants.
