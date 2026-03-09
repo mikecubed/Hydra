@@ -40,9 +40,16 @@ npm run tasks:review        # Interactive merge of tasks/* branches
 npm run tasks:status        # Show latest tasks run report
 npm run tasks:clean         # Delete all tasks/* branches
 npm run eval                # Run routing evaluation against golden corpus
+npm run lint                # ESLint on entire codebase
+npm run lint:fix            # ESLint with auto-fix
+npm run format              # Prettier format all files
+npm run format:check        # Prettier check (no write)
+npm run typecheck           # tsc --noEmit type check (jsconfig.json)
+npm run quality             # lint + format:check + typecheck combined
+npm run setup:hooks         # Install/verify git pre-commit and pre-push hooks
 ```
 
-No linter or build step — pure ESM, runs directly with Node.js.
+Code quality toolchain: ESLint v9 (flat config), Prettier, TypeScript tsc --checkJs, Husky v9 + lint-staged.
 
 ## Architecture
 
@@ -99,12 +106,14 @@ Invokes the agent CLI headlessly. No daemon needed.
 - **`agent: "codex"`** — Codex (GPT-5.4). Best for: implementation, refactoring, code generation, writing tests, quick prototyping.
 
 **When to use:**
+
 - Reviewing your own generated code for bugs or missed edge cases
 - Getting an alternative implementation approach
 - Security or concurrency analysis on tricky code
 - When the user explicitly asks for a second opinion
 
 **When NOT to use:**
+
 - Trivial/obvious changes (a typo fix doesn't need review)
 - Asking questions you already know the answer to
 - Every single code change (be cost-conscious)

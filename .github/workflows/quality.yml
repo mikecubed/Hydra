@@ -1,0 +1,123 @@
+name: Code Quality
+
+on:
+  push:
+    branches: [main, dev, 'fix/**', 'feat/**', 'feature/**']
+  pull_request:
+    branches: [main]
+    types: [opened, synchronize, reopened]
+
+concurrency:
+  group: quality-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  lint:
+    name: Lint & Format
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      # ── On pull requests: only check changed .mjs files ───────────────────
+      - name: Get changed JS files (PR)
+        id: changed-js
+        if: github.event_name == 'pull_request'
+        uses: tj-actions/changed-files@v46
+        with:
+          files: |
+            **/*.mjs
+            **/*.js
+
+      - name: Get changed format files (PR)
+        id: changed-format
+        if: github.event_name == 'pull_request'
+        uses: tj-actions/changed-files@v46
+        with:
+          files: |
+            **/*.mjs
+            **/*.js
+            **/*.json
+            **/*.md
+            **/*.yml
+            **/*.yaml
+
+      # ── ESLint on changed files (PR) ──────────────────────────────────────
+      - name: ESLint (changed files)
+        if: github.event_name == 'pull_request' && steps.changed-js.outputs.any_changed == 'true'
+        run: |
+          echo "Linting changed files:"
+          echo "${{ steps.changed-js.outputs.all_changed_files }}"
+          npx eslint ${{ steps.changed-js.outputs.all_changed_files }}
+
+      # ── ESLint on full codebase (push to main/dev) ─────────────────────────
+      - name: ESLint (full)
+        if: github.event_name == 'push'
+        run: npm run lint
+
+      # ── Prettier check on changed files (PR) ──────────────────────────────
+      - name: Prettier (changed files)
+        if: github.event_name == 'pull_request' && steps.changed-format.outputs.any_changed == 'true'
+        run: |
+          echo "Checking formatting of changed files:"
+          echo "${{ steps.changed-format.outputs.all_changed_files }}"
+          npx prettier --check ${{ steps.changed-format.outputs.all_changed_files }}
+
+      # ── Prettier check on full codebase (push to main/dev) ────────────────
+      - name: Prettier (full)
+        if: github.event_name == 'push'
+        run: npm run format:check
+
+  typecheck:
+    name: Type Check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: TypeScript check (lib + bin + scripts)
+        # tsc --noEmit processes the entire project defined in jsconfig.json.
+        # Errors here are informational on PRs — strict enforcement is opt-in.
+        run: npm run typecheck
+        continue-on-error: true # type errors are reported but don't block PRs yet
+
+  lint-pr-title:
+    name: Lint PR Title
+    runs-on: ubuntu-latest
+    if: github.event_name == 'pull_request'
+    steps:
+      - name: Check PR title follows conventional commits
+        uses: amannn/action-semantic-pull-request@v5
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          types: |
+            feat
+            fix
+            docs
+            style
+            refactor
+            perf
+            test
+            build
+            ci
+            chore
+            revert
+          requireScope: false
+          disallowScopes: []

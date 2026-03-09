@@ -1,0 +1,8 @@
+node_modules/
+dist/
+.build-exe/
+.pkg-cache/
+docs/coordination/
+docs/research/
+*.tap
+package-lock.json
