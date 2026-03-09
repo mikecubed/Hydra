@@ -56,13 +56,13 @@ ESLint rule configuration issues that generate false positives.
 
 **Problem**: `n/no-unsupported-features/node-builtins` fires 49 times because `>=20.0.0` is below the minimum for `test.describe` (20.13.0) and `test.it.todo` (20.2.0).
 
-**Fix**: In `package.json`, change:
+**Fix**: In `package.json`, change (already done in this PR):
 
 ```json
-"engines": { "node": ">=20.13.0" }
+"engines": { "node": ">=20.19.0" }
 ```
 
-This resolves 47 of the 68 `n/no-unsupported-features` errors.
+This resolves the `n/no-unsupported-features` errors for `test.describe`, `test.it.todo`, and similar Node 20.x built-ins. The `>=20.19.0` minimum was chosen to satisfy `eslint@10` and `lint-staged@16` engine requirements.
 
 ### 2.2 — Handle `fetch` unsupported-feature warnings
 

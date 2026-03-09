@@ -70,7 +70,7 @@ The engine range `>=20.0.0` is too broad:
 - `test.describe` requires Node 20.13.0 (28 violations) — our test runner uses it
 - `test.it.todo` requires Node 20.2.0 (19 violations)
 
-**Fix**: Update `engines.node` to `>=20.13.0` to resolve the `test.*` false positives. For `fetch`, either add `/* eslint-disable */` where used or disable that specific check.
+**Fix**: Update `engines.node` to `>=20.19.0` (already done in this PR) to resolve the `test.*` false positives and satisfy `eslint@10`/`lint-staged@16` engine requirements. For `fetch`, either add `/* eslint-disable */` where used or disable that specific check.
 
 ---
 
