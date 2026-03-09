@@ -142,9 +142,6 @@ if (method === 'POST' && route === '/my-endpoint') {
       // mutate state
       return /* result */;
     },
-    {
-      /* optional detail for event log */
-    },
   );
   sendJson(res, 200, { ok: true, result });
   return true;
