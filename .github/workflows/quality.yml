@@ -64,7 +64,7 @@ jobs:
         run: |
           echo "Linting changed files:"
           echo "${{ steps.changed-js.outputs.all_changed_files }}"
-          npx eslint ${{ steps.changed-js.outputs.all_changed_files }}
+          npx --no-install eslint -- ${{ steps.changed-js.outputs.all_changed_files }}
 
       # ── ESLint on full codebase (push to main/dev) ─────────────────────────
       # continue-on-error until codebase reaches a clean baseline (see docs/quality-fix-plan.md)
@@ -79,7 +79,7 @@ jobs:
         run: |
           echo "Checking formatting of changed files:"
           echo "${{ steps.changed-format.outputs.all_changed_files }}"
-          npx prettier --check ${{ steps.changed-format.outputs.all_changed_files }}
+          npx --no-install prettier --check -- ${{ steps.changed-format.outputs.all_changed_files }}
 
       # ── Prettier check on full codebase (push to main/dev) ────────────────
       # continue-on-error until codebase reaches a clean baseline (see docs/quality-fix-plan.md)
