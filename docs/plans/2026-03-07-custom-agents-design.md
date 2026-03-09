@@ -182,11 +182,11 @@ Known CLI auto-detect targets (extensible):
 ## Files to Modify
 
 | File                                  | Change                                                                                                           |
-| ------------------------------------- | ---------------------------------------------------------------------------------------------------------------- | ---- | ------ | ---------------------- |
+| ------------------------------------- | ---------------------------------------------------------------------------------------------------------------- |
 | `lib/hydra-agents.mjs`                | Load `agents.custom[]` in `initAgentRegistry()`; expand CLI templates in invoke                                  |
 | `lib/hydra-config.mjs`                | Add `agents.custom: []` to `DEFAULT_CONFIG`; merge in `mergeWithDefaults()`                                      |
 | `lib/hydra-shared/agent-executor.mjs` | Add `"cli-custom"` branch in `executeAgent()`; `custom-cli-unavailable` fallback in `executeAgentWithRecovery()` |
 | `lib/hydra-setup.mjs`                 | Add `registerCustomAgentMcp()` + known CLI auto-detect targets                                                   |
-| `lib/hydra-operator.mjs`              | Add `:agents add                                                                                                 | list | remove | test` command handlers |
+| `lib/hydra-operator.mjs`              | Add `:agents add \| list \| remove \| test` command handlers                                                     |
 | `CLAUDE.md`                           | Document custom agent config schema                                                                              |
 | `README.md`                           | Document `:agents` commands                                                                                      |
