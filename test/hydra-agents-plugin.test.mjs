@@ -1,4 +1,4 @@
-import { describe, it, before } from 'node:test';
+import { describe, it, before, after } from 'node:test';
 import assert from 'node:assert/strict';
 
 // getAgent is the public registry accessor
@@ -83,6 +83,11 @@ describe('Agent Plugin Interface', () => {
           headless: (p) => ['test-cli', [p]],
         },
       });
+    });
+
+    after(() => {
+      // Clean up the test agent to avoid polluting the shared registry for other tests.
+      try { unregisterAgent(TEST_AGENT); } catch { /* already gone */ }
     });
 
     it('fills all plugin fields with defaults', () => {

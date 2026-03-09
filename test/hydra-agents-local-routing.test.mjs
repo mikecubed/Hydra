@@ -10,20 +10,19 @@ import {
   unregisterAgent,
   _resetRegistry,
 } from '../lib/hydra-agents.mjs';
-import { loadHydraConfig, saveHydraConfig, invalidateConfigCache } from '../lib/hydra-config.mjs';
+import { loadHydraConfig, _setTestConfig, invalidateConfigCache } from '../lib/hydra-config.mjs';
 
 const ROUTING_MODES = ['economy', 'balanced', 'performance'];
 
-/** Enable local in config and return original config for restore. */
+/** Enable local in config (in-memory only — no disk write to avoid concurrent test races). */
 function enableLocal() {
   const original = loadHydraConfig();
-  saveHydraConfig({ ...original, local: { ...original.local, enabled: true } });
+  _setTestConfig({ ...original, local: { ...original.local, enabled: true } });
   return original;
 }
 
 /** Restore original config. */
-function restoreConfig(original) {
-  saveHydraConfig(original);
+function restoreConfig(_original) {
   invalidateConfigCache();
 }
 

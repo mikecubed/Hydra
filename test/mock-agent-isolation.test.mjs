@@ -10,7 +10,7 @@ import {
   listAgents,
   unregisterAgent,
 } from '../lib/hydra-agents.mjs';
-import { loadHydraConfig, saveHydraConfig, invalidateConfigCache } from '../lib/hydra-config.mjs';
+import { loadHydraConfig, _setTestConfig, invalidateConfigCache } from '../lib/hydra-config.mjs';
 import { createMockExecuteAgent, loadAgentFixture } from './helpers/mock-agent.mjs';
 
 const require = createRequire(import.meta.url);
@@ -105,13 +105,12 @@ describe('local agent routing contract', () => {
 
   test('implementation routing follows the documented mode policy without budget pressure', () => {
     const original = loadHydraConfig();
-    saveHydraConfig({ ...original, local: { ...original.local, enabled: true } });
+    _setTestConfig({ ...original, local: { ...original.local, enabled: true } });
     try {
       assert.equal(bestAgentFor('implementation', { mode: 'economy' }), 'local');
       assert.equal(bestAgentFor('implementation', { mode: 'balanced' }), 'codex');
       assert.notEqual(bestAgentFor('implementation', { mode: 'performance' }), 'local');
     } finally {
-      saveHydraConfig(original);
       invalidateConfigCache();
     }
   });
@@ -123,7 +122,7 @@ describe('local agent routing contract', () => {
     };
 
     const original = loadHydraConfig();
-    saveHydraConfig({ ...original, local: { ...original.local, enabled: true } });
+    _setTestConfig({ ...original, local: { ...original.local, enabled: true } });
     try {
       assert.equal(bestAgentFor('implementation', { mode: 'balanced', budgetState }), 'local');
 
@@ -135,7 +134,6 @@ describe('local agent routing contract', () => {
         );
       }
     } finally {
-      saveHydraConfig(original);
       invalidateConfigCache();
     }
   });

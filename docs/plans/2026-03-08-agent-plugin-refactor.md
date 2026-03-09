@@ -304,7 +304,10 @@ parseOutput: (stdout) => ({ output: stdout, tokenUsage: null, costUsd: null }),
 errorPatterns: {
   networkError: /ECONNREFUSED|ENOTFOUND|connection refused/i,
 },
-modelBelongsTo: () => true,     // local accepts any model string
+modelBelongsTo: (model, cfg) =>
+  typeof cfg?.local?.model === 'string'
+    ? cfg.local.model.toLowerCase() === String(model).toLowerCase()
+    : false,  // only matches the configured local model (case-insensitive); never claims cloud models
 quotaVerify: async () => null,  // unverifiable
 economyModel: () => null,
 readInstructions: (f) => `Read ${f} first.`,
