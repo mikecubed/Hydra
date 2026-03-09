@@ -158,7 +158,7 @@ describe('agent-executor diagnostics', () => {
       assert.equal(result.errorContext, 'Internal server error');
     });
 
-    it('does not set codex-jsonl-error for non-codex agents', () => {
+    it('does not set codex-jsonl-error for non-jsonOutput agents', () => {
       const result = {
         ok: false,
         exitCode: 1,
@@ -169,9 +169,9 @@ describe('agent-executor diagnostics', () => {
         stdout: '{"type":"error","message":"Some error"}',
       };
 
-      diagnoseAgentError('claude', result);
+      // local agent has features.jsonOutput=false, so JSONL error extraction is skipped
+      diagnoseAgentError('local', result);
 
-      // Claude with exit 1 + no output/stderr = silent-crash (not codex-jsonl-error)
       assert.notEqual(result.errorCategory, 'codex-jsonl-error');
     });
 
