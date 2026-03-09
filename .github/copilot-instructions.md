@@ -22,8 +22,10 @@ Operator Console (REPL)
 1. **Always work on `dev`**, never commit directly to `master`.
 2. **ESM only** — all files use `import`/`export`. Never use `require()` or CommonJS.
 3. **No build step** — pure ESM, runs directly with `node`. No compilation needed.
-4. **Update docs before committing** — see [Documentation Requirements](#documentation-requirements).
-5. **Agent names are always lowercase strings**: `claude`, `gemini`, `codex`, `local`.
+4. **Quality gates must pass** — ESLint, Prettier, and TypeScript type-check run on every PR. Run `npm run quality` before pushing.
+5. **Git hooks run automatically** — `pre-commit` runs lint-staged (ESLint + Prettier on staged files); `pre-push` runs the full test suite. Install hooks once with `npm run setup:hooks`.
+6. **Update docs before committing** — see [Documentation Requirements](#documentation-requirements).
+7. **Agent names are always lowercase strings**: `claude`, `gemini`, `codex`, `local`.
 
 ---
 
@@ -47,7 +49,11 @@ lib/                    # All source modules (ESM .mjs)
 bin/                    # CLI entry points and PowerShell launchers
 test/                   # Tests (Node.js native test runner)
 docs/                   # Architecture, usage, install guides
-scripts/                # Dev utilities (setup-hooks, build-exe, etc.)
+scripts/                # Dev utilities (setup-hooks.mjs, build-exe.mjs, etc.)
+.husky/                 # Git hooks (pre-commit: lint-staged; pre-push: npm test)
+eslint.config.mjs       # ESLint flat config (strict rules + unicorn + node plugins)
+.prettierrc.json        # Prettier config (singleQuote, trailingComma all, printWidth 100, LF)
+jsconfig.json           # TypeScript --checkJs config for lib/, bin/, scripts/
 hydra.config.json       # Primary runtime configuration
 .env.example            # Template for environment variables
 ```
@@ -57,8 +63,22 @@ hydra.config.json       # Primary runtime configuration
 ## Commands
 
 ```bash
+# Testing
 npm test                    # Run all tests (Node.js native test runner)
 node --test test/<file>.mjs # Run a single test file
+
+# Code quality (run before pushing)
+npm run lint                # ESLint on entire codebase
+npm run lint:fix            # ESLint with auto-fix
+npm run format              # Prettier — format all files
+npm run format:check        # Prettier — check only (no write)
+npm run typecheck           # tsc --noEmit type check (jsconfig.json)
+npm run quality             # lint + format:check + typecheck combined
+
+# Git hooks (install once after cloning)
+npm run setup:hooks         # Install/verify pre-commit and pre-push hooks
+
+# Runtime
 npm start                   # Start the daemon (port 4173)
 npm run go                  # Launch operator console (interactive REPL)
 npm run council -- prompt="..." # Run council deliberation
@@ -78,8 +98,23 @@ npm run nightly             # Run nightly task automation
 
 ### Language and Modules
 - **ESM only** — `"type": "module"` in `package.json`. Every file is `.mjs`.
-- No TypeScript. No compile step. `node --check` is used in CI for syntax validation.
-- `jsconfig.json` + `tsc --checkJs` for type checking (dev only).
+- No TypeScript source files. No compile step. Code is plain JavaScript checked by `tsc --checkJs`.
+- `jsconfig.json` + `tsc --checkJs` for type checking on `lib/`, `bin/`, and `scripts/`.
+
+### Code Quality Toolchain
+The project uses a full quality toolchain. **Always run `npm run quality` before pushing.**
+
+| Tool | Config file | What it enforces |
+|---|---|---|
+| **ESLint v10** | `eslint.config.mjs` | `no-var`, `prefer-const`, `eqeqeq`, `no-eval`, `node:` protocol prefix, unicorn best-practice rules |
+| **Prettier** | `.prettierrc.json` | `singleQuote`, `trailingComma: all`, `printWidth: 100`, LF line endings |
+| **TypeScript tsc** | `jsconfig.json` | `--checkJs` strict type checking across `lib/`, `bin/`, `scripts/` |
+
+**Git hooks (Husky v9 + lint-staged):**
+- `pre-commit` — runs lint-staged: ESLint `--fix` + Prettier on staged `.mjs` files; Prettier on staged `.json/.md/.yml`.
+- `pre-push` — runs the full `npm test` suite.
+- Install hooks once after cloning: `npm run setup:hooks`
+- CI disables hooks with `HUSKY=0` during `npm ci`.
 
 ### Dependencies
 Keep dependencies minimal. The four production dependencies are:
@@ -205,11 +240,12 @@ Key sections:
 
 ## CI / GitHub Actions
 
-Two workflows:
+Three workflows:
 - **`ci.yml`** — syntax check (`node --check`) + full test matrix (Ubuntu + Windows, Node 20 + 22). PRs must pass before merge.
+- **`quality.yml`** — ESLint, Prettier, TypeScript type-check, and PR title enforcement (conventional commits). Runs on PRs to `main` (changed files only) and on pushes to `main`/`dev`/`fix/**`/`feat/**`/`feature/**` (full codebase). ESLint full-codebase check uses `continue-on-error` until a clean baseline is reached.
 - **`build-windows-exe.yml`** — builds standalone Windows executable; triggered on version tags or `workflow_dispatch`.
 
-CI runs `npm ci` (not `npm install`) and sets `HUSKY=0` to skip git hooks.
+All CI workflows set `HUSKY=0` to skip git hooks during `npm ci`, and use `permissions: {}` (deny-all) at the workflow level with per-job grants.
 
 ---
 
@@ -233,6 +269,8 @@ CI runs `npm ci` (not `npm install`) and sets `HUSKY=0` to skip git hooks.
 | Committing to `master` | Always commit to `dev` |
 | Making daemon HTTP calls with raw `fetch` | Use `request()` from `hydra-utils.mjs` |
 | Adding new dependencies without discussion | Keep deps minimal; check with maintainers |
+| Pushing without running quality checks | Run `npm run quality` before pushing (or let pre-push hook do it) |
+| Skipping lint on staged files | The `pre-commit` hook auto-fixes lint + format on staged files via lint-staged |
 
 ---
 
