@@ -6,7 +6,7 @@
  *
  *   node scripts/setup-hooks.mjs
  *   # or via npm:
- *   npm run prepare
+ *   npm run setup:hooks
  */
 
 import { execSync } from 'node:child_process';
