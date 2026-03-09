@@ -1,3 +1,4 @@
+#!/usr/bin/env node
 /**
  * gen-research-todo.mjs
  * Generates docs/coordination/RESEARCH_TODO.md from all research docs
