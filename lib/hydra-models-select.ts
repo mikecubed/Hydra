@@ -397,17 +397,17 @@ export async function pickModel(agentName: string) {
 
 // ── Reasoning effort picker ─────────────────────────────────────────────────
 
-interface EffortItem extends EffortResult {
-  id: string | null;
-  label: string;
-  desc: string | null;
-}
-
 interface EffortResult {
   id: string | null;
   label?: string;
   desc?: string | null;
   _skipped?: boolean;
+}
+
+interface EffortItem {
+  id: string | null;
+  label: string;
+  desc: string | null;
 }
 
 export async function pickEffort(
