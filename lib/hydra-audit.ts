@@ -17,6 +17,22 @@ import type { AgentDef, HeadlessOpts } from './types.ts';
 
 const spawn = _spawn as (cmd: string, args: string[], opts?: SpawnOptions) => ChildProcess;
 
+// -- Security ----------------------------------------------------------------
+
+/**
+ * Validate a command name before passing to spawn() as defence-in-depth.
+ * Rejects shell metacharacters and path traversal. spawn() uses shell:false,
+ * but we still guard against arbitrary executable injection from user config.
+ */
+function assertSafeSpawnCmd(cmd: string, context: string): void {
+  if (/[;&|`$<>()\n\r\0]/.test(cmd)) {
+    throw new Error(`${context}: cmd contains unsafe characters and cannot be spawned.`);
+  }
+  if (cmd.includes('..')) {
+    throw new Error(`${context}: cmd contains path traversal (..) and cannot be spawned.`);
+  }
+}
+
 // -- Local types -------------------------------------------------------------
 
 interface FileEntry {
@@ -615,6 +631,7 @@ function dispatchToAgent(
 ): Promise<AgentResponse> {
   return new Promise((resolvePromise) => {
     const { cmd, args: invokeArgs } = getAgentCommand(agent, prompt, economy, projectPath);
+    assertSafeSpawnCmd(cmd, `Agent '${agent}'`);
     const startedAt = Date.now();
 
     if (VERBOSE) {
@@ -662,7 +679,14 @@ function dispatchToAgent(
         const status = code === 0 ? 'ok' : `exit=${codeStr} signal=${signalStr}`;
         console.log(`  [${agent}] ${status} (${elapsedSec}s, ${String(stdout.length)} chars)`);
       }
-      resolvePromise({ agent, stdout, stderr, code: code ?? null, signal: signal ?? null, elapsedSec });
+      resolvePromise({
+        agent,
+        stdout,
+        stderr,
+        code: code ?? null,
+        signal: signal ?? null,
+        elapsedSec,
+      });
     });
 
     proc.on('error', (err) => {
@@ -816,18 +840,24 @@ function deduplicateFindings(findings: Finding[]): Finding[] {
 
 function scoreAndSort(findings: Finding[]): ScoredFinding[] {
   return findings
-    .map((finding): ScoredFinding => ({
-      ...finding,
-      _score:
-        ((SEVERITY_SCORE as Record<string, number>)[finding.severity] ?? 10) *
-        ((EFFORT_SCORE as Record<string, number>)[finding.effort] ?? 2),
-    }))
+    .map(
+      (finding): ScoredFinding => ({
+        ...finding,
+        _score:
+          ((SEVERITY_SCORE as Record<string, number>)[finding.severity] ?? 10) *
+          ((EFFORT_SCORE as Record<string, number>)[finding.effort] ?? 2),
+      }),
+    )
     .sort((a, b) => b._score - a._score);
 }
 
 // -- Report generation -------------------------------------------------------
 
-function generateReport(findings: ScoredFinding[], manifest: FileEntry[], reportMeta: ReportMeta): string {
+function generateReport(
+  findings: ScoredFinding[],
+  manifest: FileEntry[],
+  reportMeta: ReportMeta,
+): string {
   const date = new Date().toISOString().slice(0, 10);
   const time = new Date().toISOString().slice(11, 16);
 
@@ -937,7 +967,9 @@ async function main(): Promise<void> {
   const unknownAgents = AGENTS.filter((agent) => !knownAgents.has(agent));
 
   const requestedCategories = CATEGORIES.includes('all') ? ALL_CATEGORIES : CATEGORIES;
-  const unknownCategories = requestedCategories.filter((category) => !(category in AUDIT_CATEGORIES));
+  const unknownCategories = requestedCategories.filter(
+    (category) => !(category in AUDIT_CATEGORIES),
+  );
   const validCategories = requestedCategories.filter((category) => category in AUDIT_CATEGORIES);
 
   const runnableCategories = validCategories.filter((category) => {

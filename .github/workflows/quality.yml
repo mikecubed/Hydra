@@ -46,6 +46,14 @@ jobs:
             **/*.mjs
             **/*.js
 
+      - name: Get changed TS files (PR)
+        id: changed-ts
+        if: github.event_name == 'pull_request'
+        uses: tj-actions/changed-files@v46
+        with:
+          files: |
+            **/*.ts
+
       - name: Get changed format files (PR)
         id: changed-format
         if: github.event_name == 'pull_request'
@@ -54,6 +62,7 @@ jobs:
           files: |
             **/*.mjs
             **/*.js
+            **/*.ts
             **/*.json
             **/*.md
             **/*.yml
@@ -66,6 +75,15 @@ jobs:
           echo "Linting changed files:"
           echo "${{ steps.changed-js.outputs.all_changed_files }}"
           npx --no-install eslint -- ${{ steps.changed-js.outputs.all_changed_files }}
+
+      # ── ESLint on changed TS files (PR) — informational until baseline is clean
+      - name: ESLint (changed TS files)
+        if: github.event_name == 'pull_request' && steps.changed-ts.outputs.any_changed == 'true'
+        run: |
+          echo "Linting changed TS files:"
+          echo "${{ steps.changed-ts.outputs.all_changed_files }}"
+          npx --no-install eslint -- ${{ steps.changed-ts.outputs.all_changed_files }}
+        continue-on-error: true # TS lint baseline not yet clean; informational only
 
       # ── ESLint on full codebase (push to main/dev) ─────────────────────────
       # continue-on-error until codebase reaches a clean baseline (see docs/quality-fix-plan.md)

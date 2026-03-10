@@ -19,11 +19,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import crypto from 'node:crypto';
-import {
-  getActiveModel,
-  getReasoningEffort,
-  getAgent,
-} from '../hydra-agents.ts';
+import { getActiveModel, getReasoningEffort, getAgent } from '../hydra-agents.ts';
 import {
   detectModelError,
   recoverFromModelError,
@@ -54,7 +50,13 @@ import {
   extractCodexUsage,
   extractCodexErrors as _extractCodexErrors,
 } from './codex-helpers.ts';
-import type { AgentDef, TokenUsage, PermissionMode, CustomAgentDef, HeadlessOpts } from '../types.ts';
+import type {
+  AgentDef,
+  TokenUsage,
+  PermissionMode,
+  CustomAgentDef,
+  HeadlessOpts,
+} from '../types.ts';
 
 // ── Executor-specific types ────────────────────────────────────────────────────
 
@@ -239,7 +241,11 @@ async function getGeminiToken(): Promise<string | null> {
 
   const creds = JSON.parse(fs.readFileSync(credsPath, 'utf8')) as Record<string, unknown>;
 
-  if (creds['access_token'] && creds['expiry_date'] && Date.now() < (creds['expiry_date'] as number) - 60_000) {
+  if (
+    creds['access_token'] &&
+    creds['expiry_date'] &&
+    Date.now() < (creds['expiry_date'] as number) - 60_000
+  ) {
     _geminiToken = creds['access_token'] as string;
     _geminiTokenExpiry = creds['expiry_date'] as number;
     return _geminiToken;
@@ -589,7 +595,10 @@ export function diagnoseAgentError(agent: string, result: ExecuteResult): Execut
   return result;
 }
 
-async function executeGeminiDirect(prompt: string, opts: GeminiDirectOpts = {}): Promise<ExecuteResult> {
+async function executeGeminiDirect(
+  prompt: string,
+  opts: GeminiDirectOpts = {},
+): Promise<ExecuteResult> {
   const { timeoutMs = 300_000, modelOverride, phaseLabel, onProgress, onStatusBar } = opts;
 
   const startTime = Date.now();
@@ -604,7 +613,16 @@ async function executeGeminiDirect(prompt: string, opts: GeminiDirectOpts = {}):
       const err = 'No Gemini OAuth credentials (~/.gemini/oauth_creds.json)';
       recordCallError(metricsHandle, err);
       if (onStatusBar) onStatusBar('gemini', { phase: phaseLabel || 'error', step: 'idle' });
-      return { ok: false, output: '', stderr: '', error: err, exitCode: null, signal: null, durationMs, timedOut: false };
+      return {
+        ok: false,
+        output: '',
+        stderr: '',
+        error: err,
+        exitCode: null,
+        signal: null,
+        durationMs,
+        timedOut: false,
+      };
     }
 
     const projectId = await getGeminiProjectId(token);
@@ -613,7 +631,16 @@ async function executeGeminiDirect(prompt: string, opts: GeminiDirectOpts = {}):
       const err = 'Could not resolve Gemini project ID';
       recordCallError(metricsHandle, err);
       if (onStatusBar) onStatusBar('gemini', { phase: phaseLabel || 'error', step: 'idle' });
-      return { ok: false, output: '', stderr: '', error: err, exitCode: null, signal: null, durationMs, timedOut: false };
+      return {
+        ok: false,
+        output: '',
+        stderr: '',
+        error: err,
+        exitCode: null,
+        signal: null,
+        durationMs,
+        timedOut: false,
+      };
     }
 
     const cfg = loadHydraConfig();
@@ -645,11 +672,22 @@ async function executeGeminiDirect(prompt: string, opts: GeminiDirectOpts = {}):
       if (resp.ok) {
         const data = (await resp.json()) as GeminiContentResponse;
         const text =
-          data?.response?.candidates?.[0]?.content?.parts?.map((p: { text?: string }) => p.text).join('') || '';
+          data?.response?.candidates?.[0]?.content?.parts
+            ?.map((p: { text?: string }) => p.text)
+            .join('') || '';
         const durationMs = Date.now() - startTime;
         recordCallComplete(metricsHandle, { output: text, stderr: '' });
         if (onStatusBar) onStatusBar('gemini', { phase: phaseLabel || 'done', step: 'idle' });
-        return { ok: true, output: text, stderr: '', error: null, exitCode: null, signal: null, durationMs, timedOut: false };
+        return {
+          ok: true,
+          output: text,
+          stderr: '',
+          error: null,
+          exitCode: null,
+          signal: null,
+          durationMs,
+          timedOut: false,
+        };
       }
 
       const errText = await resp.text().catch(() => '');
@@ -660,7 +698,11 @@ async function executeGeminiDirect(prompt: string, opts: GeminiDirectOpts = {}):
           const retryAfterMs = serverRetryAfter
             ? Number.parseInt(serverRetryAfter, 10) * 1000
             : null;
-          const delay = calculateBackoff(attempt, { baseDelayMs, maxDelayMs, retryAfterMs: retryAfterMs ?? undefined });
+          const delay = calculateBackoff(attempt, {
+            baseDelayMs,
+            maxDelayMs,
+            retryAfterMs: retryAfterMs ?? undefined,
+          });
           if (onProgress)
             onProgress(
               Date.now() - startTime,
@@ -721,9 +763,19 @@ async function executeGeminiDirect(prompt: string, opts: GeminiDirectOpts = {}):
 
 // ── Local Agent (OpenAI-compat HTTP) ─────────────────────────────────────────
 
-async function executeLocalAgent(prompt: string, opts: LocalAgentOpts = {}): Promise<ExecuteResult> {
-  const { timeoutMs: _timeoutMs = 3 * 60 * 1000, onProgress, onStatusBar: _onStatusBar, phaseLabel, modelOverride } = opts;
-  void _timeoutMs; void _onStatusBar; // reserved for future use
+async function executeLocalAgent(
+  prompt: string,
+  opts: LocalAgentOpts = {},
+): Promise<ExecuteResult> {
+  const {
+    timeoutMs: _timeoutMs = 3 * 60 * 1000,
+    onProgress,
+    onStatusBar: _onStatusBar,
+    phaseLabel,
+    modelOverride,
+  } = opts;
+  void _timeoutMs;
+  void _onStatusBar; // reserved for future use
 
   const cfg = loadHydraConfig();
   if (!cfg.local?.enabled) {
@@ -749,10 +801,18 @@ async function executeLocalAgent(prompt: string, opts: LocalAgentOpts = {}): Pro
 
   let output = '';
   try {
-    const messages: Array<{ role: 'user' | 'assistant' | 'system'; content: string }> = [{ role: 'user', content: prompt }];
+    const messages: Array<{ role: 'user' | 'assistant' | 'system'; content: string }> = [
+      { role: 'user', content: prompt },
+    ];
     const result = await streamLocalCompletion(
       messages,
-      { baseUrl, model, maxTokens: (cfg.local as unknown as Record<string, unknown>)['maxTokens'] as number | undefined },
+      {
+        baseUrl,
+        model,
+        maxTokens: (cfg.local as unknown as Record<string, unknown>)['maxTokens'] as
+          | number
+          | undefined,
+      },
       (chunk: string) => {
         output += chunk;
         if (onProgress) {
@@ -822,14 +882,33 @@ async function executeLocalAgent(prompt: string, opts: LocalAgentOpts = {}): Pro
  */
 export function expandInvokeArgs(args: string[], vars: Record<string, string>): string[] {
   return args.map((arg: string) =>
-    String(arg).replace(/\{(\w+)\}/g, (match: string, key: string) => (key in vars ? String(vars[key]) : match)),
+    String(arg).replace(/\{(\w+)\}/g, (match: string, key: string) =>
+      key in vars ? String(vars[key]) : match,
+    ),
   );
+}
+
+/**
+ * Validate a command name before passing to spawn() as defence-in-depth.
+ * Rejects shell metacharacters and path traversal. spawn() uses shell:false,
+ * but we still guard against arbitrary executable injection from user config.
+ */
+export function assertSafeSpawnCmd(cmd: string, context: string): void {
+  if (/[;&|`$<>()\n\r\0]/.test(cmd)) {
+    throw new Error(`${context}: cmd contains unsafe characters and cannot be spawned.`);
+  }
+  if (cmd.includes('..')) {
+    throw new Error(`${context}: cmd contains path traversal (..) and cannot be spawned.`);
+  }
 }
 
 /**
  * Parse CLI stdout based on the agent's responseParser setting.
  */
-export function parseCliResponse(stdout: string, parser: 'plaintext' | 'json' | 'markdown'): string {
+export function parseCliResponse(
+  stdout: string,
+  parser: 'plaintext' | 'json' | 'markdown',
+): string {
   if (parser === 'json') {
     try {
       const data = JSON.parse(stdout) as Record<string, string | undefined>;
@@ -843,7 +922,11 @@ export function parseCliResponse(stdout: string, parser: 'plaintext' | 'json' | 
 
 // ── Custom CLI Agent ──────────────────────────────────────────────────────────
 
-async function executeCustomCliAgent(agentName: string, prompt: string, opts: CustomCliOpts = {}): Promise<ExecuteResult> {
+async function executeCustomCliAgent(
+  agentName: string,
+  prompt: string,
+  opts: CustomCliOpts = {},
+): Promise<ExecuteResult> {
   const { cwd, timeoutMs = 3 * 60 * 1000, onProgress, phaseLabel } = opts;
   const cfg = loadHydraConfig();
   // Prefer registry definition (supports programmatically registered agents), fall back to config
@@ -865,10 +948,21 @@ async function executeCustomCliAgent(agentName: string, prompt: string, opts: Cu
     };
   }
 
-  const invokeConfig = def.invoke && 'headless' in def.invoke
-    ? (def.invoke as { headless?: { cmd: string; args: string[] }; nonInteractive?: { cmd: string; args: string[] } }).headless
-      ?? (def.invoke as { headless?: { cmd: string; args: string[] }; nonInteractive?: { cmd: string; args: string[] } }).nonInteractive
-    : undefined;
+  const invokeConfig =
+    def.invoke && 'headless' in def.invoke
+      ? ((
+          def.invoke as {
+            headless?: { cmd: string; args: string[] };
+            nonInteractive?: { cmd: string; args: string[] };
+          }
+        ).headless ??
+        (
+          def.invoke as {
+            headless?: { cmd: string; args: string[] };
+            nonInteractive?: { cmd: string; args: string[] };
+          }
+        ).nonInteractive)
+      : undefined;
   if (!invokeConfig?.cmd || !Array.isArray(invokeConfig?.args)) {
     return {
       ok: false,
@@ -887,6 +981,7 @@ async function executeCustomCliAgent(agentName: string, prompt: string, opts: Cu
   const vars = { prompt, cwd: cwd || process.cwd() };
   const args = expandInvokeArgs(invokeConfig.args, vars);
   const cmd = invokeConfig.cmd;
+  assertSafeSpawnCmd(cmd, `Custom agent '${agentName}'`);
   const startTime = Date.now();
   const metricsHandle = recordCallStart(agentName, agentName);
   const span = await startAgentSpan(agentName, agentName, { phase: phaseLabel });
@@ -978,7 +1073,10 @@ async function executeCustomCliAgent(agentName: string, prompt: string, opts: Cu
         tokenUsage = result.tokenUsage ?? null;
         costUsd = result.costUsd ?? null;
       } else {
-        const parser = ('responseParser' in def ? (def as { responseParser?: string }).responseParser : 'plaintext') || 'plaintext';
+        const parser =
+          ('responseParser' in def
+            ? (def as { responseParser?: string }).responseParser
+            : 'plaintext') || 'plaintext';
         parsedOutput = parseCliResponse(stdout, parser as 'plaintext' | 'json' | 'markdown');
       }
       recordCallComplete(metricsHandle, {
@@ -1008,11 +1106,19 @@ async function executeCustomCliAgent(agentName: string, prompt: string, opts: Cu
 
 // ── Custom API Agent ──────────────────────────────────────────────────────────
 
-async function executeCustomApiAgent(agentName: string, prompt: string, opts: CustomApiOpts = {}): Promise<ExecuteResult> {
+async function executeCustomApiAgent(
+  agentName: string,
+  prompt: string,
+  opts: CustomApiOpts = {},
+): Promise<ExecuteResult> {
   const { timeoutMs = 3 * 60 * 1000, onProgress, phaseLabel } = opts;
   const cfg = loadHydraConfig();
   // Prefer registry definition (supports programmatically registered agents), fall back to config
-  const def: (AgentDef & { baseUrl?: string; model?: string; maxTokens?: number }) | CustomAgentDef | null | undefined =
+  const def:
+    | (AgentDef & { baseUrl?: string; model?: string; maxTokens?: number })
+    | CustomAgentDef
+    | null
+    | undefined =
     getAgent(agentName) || (cfg.agents?.customAgents || []).find((a) => a.name === agentName);
 
   if (!def || ('enabled' in def && def.enabled === false)) {
@@ -1039,8 +1145,10 @@ async function executeCustomApiAgent(agentName: string, prompt: string, opts: Cu
 
   let output = '';
   try {
-    const messages: Array<{ role: 'user' | 'assistant' | 'system'; content: string }> = [{ role: 'user', content: prompt }];
-    const maxTokens = ('maxTokens' in def ? (def as { maxTokens?: number }).maxTokens : undefined);
+    const messages: Array<{ role: 'user' | 'assistant' | 'system'; content: string }> = [
+      { role: 'user', content: prompt },
+    ];
+    const maxTokens = 'maxTokens' in def ? (def as { maxTokens?: number }).maxTokens : undefined;
     const result = await streamLocalCompletion(
       messages,
       { baseUrl, model, maxTokens, signal: abortSignal },
@@ -1104,7 +1212,11 @@ async function executeCustomApiAgent(agentName: string, prompt: string, opts: Cu
 }
 
 /** Execute an agent CLI as a headless subprocess. */
-export async function executeAgent(agent: string, prompt: string, opts: ExecuteAgentOpts = {}): Promise<ExecuteResult> {
+export async function executeAgent(
+  agent: string,
+  prompt: string,
+  opts: ExecuteAgentOpts = {},
+): Promise<ExecuteResult> {
   // Validate agent before any side-effects to prevent hub session leaks
   const agentDef = getAgent(agent);
   if (!agentDef) {
@@ -1171,8 +1283,11 @@ export async function executeAgent(agent: string, prompt: string, opts: ExecuteA
   type HeadlessInvokeFn = ((prompt: string, opts?: HeadlessOpts) => [string, string[]]) | null;
   const headlessInvoke: HeadlessInvokeFn | ((p: string, o: HeadlessOpts) => GeminiSentinel) =
     agentDef.name === 'gemini'
-      ? (p: string, o: HeadlessOpts): GeminiSentinel => ['__gemini_direct__', { prompt: p, opts: o as GeminiDirectOpts }]
-      : agentDef.invoke?.headless ?? null;
+      ? (p: string, o: HeadlessOpts): GeminiSentinel => [
+          '__gemini_direct__',
+          { prompt: p, opts: o as GeminiDirectOpts },
+        ]
+      : (agentDef.invoke?.headless ?? null);
 
   const {
     cwd,
@@ -1268,6 +1383,7 @@ export async function executeAgent(agent: string, prompt: string, opts: ExecuteA
 
   const _headlessCmd = invokeResult[0];
   const _headlessArgs = invokeResult[1] as string[];
+  assertSafeSpawnCmd(_headlessCmd, `Agent '${agent}'`);
 
   return new Promise<ExecuteResult>((resolve) => {
     const cmd = _headlessCmd;
@@ -1372,7 +1488,9 @@ export async function executeAgent(agent: string, prompt: string, opts: ExecuteA
       };
       diagnoseAgentError(agent, result);
       recordCallError(metricsHandle, result.error);
-      spanPromise.then((span) => endAgentSpan(span, { ok: false, error: result.error ?? undefined })).catch(() => {});
+      spanPromise
+        .then((span) => endAgentSpan(span, { ok: false, error: result.error ?? undefined }))
+        .catch(() => {});
       _hubCleanup();
       resolve(result);
     });
@@ -1425,7 +1543,8 @@ export async function executeAgent(agent: string, prompt: string, opts: ExecuteA
         let telemetry = `[Hydra Telemetry] Failed Command: ${fullCmd}\n[Hydra Telemetry] Exit Code: ${code ?? 'null'}\n[Hydra Telemetry] Signal: ${signal ?? 'null'}\n[Hydra Telemetry] Duration: ${String(elapsedMs)}ms`;
         if (elapsedMs < 5000 && !timedOut)
           telemetry += ` (startup failure suspected — exited before doing real work)`;
-        if (hasJsonlErrors) telemetry += `\n[Hydra Telemetry] JSONL Errors: ${String(jsonlErrors.length)}`;
+        if (hasJsonlErrors)
+          telemetry += `\n[Hydra Telemetry] JSONL Errors: ${String(jsonlErrors.length)}`;
         if (timedOut) telemetry += `\n[Hydra Telemetry] Status: Timed Out`;
         stderr = `${stderr}\n\n${telemetry}`.trim();
       }
@@ -1434,7 +1553,8 @@ export async function executeAgent(agent: string, prompt: string, opts: ExecuteA
       if (!isOk) {
         const parts: string[] = [];
         if (signal) parts.push(`Signal ${signal}`);
-        if (code !== null && code !== undefined && code !== 0) parts.push(`Exit code ${String(code)}`);
+        if (code !== null && code !== undefined && code !== 0)
+          parts.push(`Exit code ${String(code)}`);
         if (hasJsonlErrors) parts.push(`JSONL errors: ${jsonlErrors.join('; ')}`);
         if (!parts.length) parts.push('Process terminated abnormally');
         if (timedOut) parts.push('(timed out)');
@@ -1460,13 +1580,20 @@ export async function executeAgent(agent: string, prompt: string, opts: ExecuteA
       };
 
       if (result.ok) {
-        recordCallComplete(metricsHandle, { output: rawOutput, stderr, tokenUsage: tokenUsage ?? undefined, costUsd });
+        recordCallComplete(metricsHandle, {
+          output: rawOutput,
+          stderr,
+          tokenUsage: tokenUsage ?? undefined,
+          costUsd,
+        });
       } else {
         diagnoseAgentError(agent, result);
         recordCallError(metricsHandle, result.error);
       }
 
-      spanPromise.then((span) => endAgentSpan(span, { ok: result.ok, error: result.error ?? undefined })).catch(() => {});
+      spanPromise
+        .then((span) => endAgentSpan(span, { ok: result.ok, error: result.error ?? undefined }))
+        .catch(() => {});
       _hubCleanup();
       resolve(result);
     });
@@ -1474,7 +1601,11 @@ export async function executeAgent(agent: string, prompt: string, opts: ExecuteA
 }
 
 /** Execute an agent with automatic model-error recovery. */
-export async function executeAgentWithRecovery(agent: string, prompt: string, opts: ExecuteAgentOpts = {}): Promise<ExecuteResult> {
+export async function executeAgentWithRecovery(
+  agent: string,
+  prompt: string,
+  opts: ExecuteAgentOpts = {},
+): Promise<ExecuteResult> {
   const cfg = loadHydraConfig();
   const currentModel = opts.modelOverride || null;
   const recoverySpan = await startPipelineSpan('agent-recovery', { 'gen_ai.agent.name': agent });
@@ -1483,7 +1614,9 @@ export async function executeAgentWithRecovery(agent: string, prompt: string, op
   try {
     // Circuit breaker: skip directly to fallback if model is tripped
     if (currentModel && isCircuitOpen(currentModel)) {
-      const recovery = await recoverFromModelError(agent, currentModel, { rl: opts.rl as object | undefined }) as { recovered: boolean; newModel: string | null };
+      const recovery = (await recoverFromModelError(agent, currentModel, {
+        rl: opts.rl as object | undefined,
+      })) as { recovered: boolean; newModel: string | null };
       if (recovery.recovered) {
         const retryResult = await executeAgent(agent, prompt, {
           ...opts,
@@ -1539,9 +1672,14 @@ export async function executeAgentWithRecovery(agent: string, prompt: string, op
     // Pattern matching alone can produce false positives (e.g. Codex echoing
     // documentation that mentions "usage_limit_reached"). A quick GET /models
     // call tells us whether the account is actually quota-exhausted.
-    const usageCheck = detectUsageLimitError(agent, result as unknown as Record<string, unknown>) as { isUsageLimit: boolean; errorMessage: string; resetInSeconds: number | null };
+    const usageCheck = detectUsageLimitError(
+      agent,
+      result as unknown as Record<string, unknown>,
+    ) as { isUsageLimit: boolean; errorMessage: string; resetInSeconds: number | null };
     if (usageCheck.isUsageLimit) {
-      const verification = await verifyAgentQuota(agent, { hintText: usageCheck.errorMessage }) as { verified: boolean | 'unknown' };
+      const verification = (await verifyAgentQuota(agent, {
+        hintText: usageCheck.errorMessage,
+      })) as { verified: boolean | 'unknown' };
       if (verification.verified === true) {
         // API confirmed quota exhausted — hard-disable the agent.
         const resetLabel = formatResetTime(usageCheck.resetInSeconds);
@@ -1580,7 +1718,10 @@ export async function executeAgentWithRecovery(agent: string, prompt: string, op
     }
 
     // Rate limit retry with exponential backoff
-    const rateCheck = detectRateLimitError(agent, result as unknown as Record<string, unknown>) as { isRateLimit: boolean; retryAfterMs: number | null };
+    const rateCheck = detectRateLimitError(agent, result as unknown as Record<string, unknown>) as {
+      isRateLimit: boolean;
+      retryAfterMs: number | null;
+    };
     if (rateCheck.isRateLimit) {
       const rlCfg = (cfg.rateLimits || {}) as Record<string, number>;
       const maxRetries = rlCfg['maxRetries'] || 3;
@@ -1598,7 +1739,10 @@ export async function executeAgentWithRecovery(agent: string, prompt: string, op
           return retryResult;
         }
         // Check if still rate limited
-        const recheck = detectRateLimitError(agent, retryResult as unknown as Record<string, unknown>);
+        const recheck = detectRateLimitError(
+          agent,
+          retryResult as unknown as Record<string, unknown>,
+        );
         if (!recheck.isRateLimit) {
           retryResult.rateLimitRetries = attempt;
           finalResult = retryResult;
@@ -1612,7 +1756,10 @@ export async function executeAgentWithRecovery(agent: string, prompt: string, op
     }
 
     // Model error → fallback
-    const detection = detectModelError(agent, result as unknown as Record<string, unknown>) as { isModelError: boolean; failedModel: string | null };
+    const detection = detectModelError(agent, result as unknown as Record<string, unknown>) as {
+      isModelError: boolean;
+      failedModel: string | null;
+    };
     if (!detection.isModelError) {
       finalResult = result;
       return result;
@@ -1623,9 +1770,9 @@ export async function executeAgentWithRecovery(agent: string, prompt: string, op
       recordModelFailure(detection.failedModel);
     }
 
-    const recovery = await recoverFromModelError(agent, detection.failedModel || '', {
+    const recovery = (await recoverFromModelError(agent, detection.failedModel || '', {
       rl: opts.rl as object | undefined,
-    }) as { recovered: boolean; newModel: string | null };
+    })) as { recovered: boolean; newModel: string | null };
 
     if (!recovery.recovered) {
       result.modelError = detection;
