@@ -7,7 +7,7 @@
  * These are registered into the agent registry at startup when enabled in config.
  */
 
-import { registerAgent, AGENT_TYPE, getAgent, listAgents } from './hydra-agents.mjs';
+import { registerAgent, AGENT_TYPE, getAgent } from './hydra-agents.mjs';
 import { loadHydraConfig } from './hydra-config.mjs';
 
 // ── Built-in Sub-Agent Definitions ───────────────────────────────────────────
@@ -287,8 +287,9 @@ export function registerBuiltInSubAgents() {
       registerAgent(name, def);
     } catch (err) {
       // Non-fatal — log but don't crash
-      if (process.env.HYDRA_DEBUG) {
-        console.error(`[sub-agents] Failed to register ${name}:`, err.message);
+      if (process.env['HYDRA_DEBUG']) {
+        const message = err instanceof Error ? err.message : String(err);
+        console.error(`[sub-agents] Failed to register ${name}:`, message);
       }
     }
   }

@@ -12,7 +12,7 @@ import {
   closePR,
   getGitHubConfig,
   pushBranchAndCreatePR,
-} from '../lib/hydra-github.mjs';
+} from '../lib/hydra-github.ts';
 import { parseRemoteUrl } from '../lib/hydra-shared/git-ops.ts';
 
 // ── parseRemoteUrl ──────────────────────────────────────────────────────────

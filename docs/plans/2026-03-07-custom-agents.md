@@ -4,13 +4,36 @@
 
 **Goal:** Allow users to register arbitrary AI coding agents — CLI-based (any tool that accepts a prompt flag) or API-based (any OpenAI-compatible endpoint) — as first-class Hydra agents with routing, task affinity, and MCP integration.
 
-**Architecture:** Custom agents live in `agents.customAgents[]` in `hydra.config.json`. On startup, `initAgentRegistry()` loads them and calls `registerAgent()` for each. `executeAgent()` detects them by `customType` and dispatches to `executeCustomCliAgent()` or `executeCustomApiAgent()` — the latter reuses the existing `streamLocalCompletion()` from `hydra-local.mjs`. A wizard command `:agents add` guides setup and calls extended `hydra-setup.mjs` for MCP registration.
+**Status:** ✅ Core implementation complete (Tasks 1–8). Remaining work: provider preset picker in wizard, optional advanced plugin field configuration, documentation updates.
+
+**Depends on:** ~~Agent Plugin Refactor (2026-03-08)~~ — **DONE.** The plugin refactor made the executor and all callsites data-driven. `registerAgent()` now applies plugin defaults (`features`, `parseOutput`, `errorPatterns`, `modelBelongsTo`, `quotaVerify`, `economyModel`, `readInstructions`, `taskRules`) to every agent — including custom agents. This means custom agents automatically get sensible defaults without the wizard needing to produce plugin fields.
+
+**Architecture:** Custom agents live in `agents.customAgents[]` in `hydra.config.json`. On startup, `initAgentRegistry()` loads them and calls `registerAgent()` for each — which applies plugin interface defaults. `executeAgent()` routes them via `agentDef.features.executeMode` and `agentDef.customType`:
+- **CLI agents** (`customType: 'cli'`): dispatched to `executeCustomCliAgent()`, which uses `expandInvokeArgs()` for template expansion and `agentDef.parseOutput()` for response parsing
+- **API agents** (`customType: 'api'`, `features.executeMode: 'api'`): dispatched to `executeCustomApiAgent()`, which reuses `streamLocalCompletion()` from `hydra-local.mjs`
+- **CLI-not-found fallback**: `executeAgentWithRecovery()` catches `custom-cli-unavailable` errors and falls back to `claude` transparently
+
+A wizard command `:agents add` guides setup and calls `registerCustomAgentMcp()` from `hydra-setup.mjs` for MCP registration.
 
 **Tech Stack:** Node.js ESM, cross-spawn (already a dependency), `hydra-prompt-choice.mjs` for wizard UI, no new npm packages.
 
 ---
 
-### Task 1: Config schema — add `agents.customAgents` array and affinity presets
+## Post-Plugin-Refactor Notes
+
+The agent plugin refactor (2026-03-08) resolved the core architectural dependency. Key implications for custom agents:
+
+1. **No executor changes needed per-agent.** Custom agents get routed, parsed, and error-handled via the same plugin interface as built-in agents. `registerAgent()` applies defaults for all plugin fields.
+
+2. **Wizard produces config-level fields only.** `buildCustomAgentEntry()` outputs `{ name, type, invoke, responseParser, taskAffinity, ... }` — the plugin fields (`features`, `parseOutput`, `errorPatterns`, etc.) are applied automatically by `registerAgent()` when the agent is loaded on next startup.
+
+3. **Custom CLI agents use static invoke config.** Unlike built-in agents (whose `invoke.headless` is a function), custom CLI agents store `invoke.headless: { cmd, args }` as static template data. `executeCustomCliAgent()` uses `expandInvokeArgs()` to substitute `{prompt}`, `{cwd}`, etc. at call time.
+
+4. **Provider presets** (`getProviderPresets()` from `hydra-config.mjs`) are defined in config but the wizard doesn't yet prompt from them — users must manually enter `baseUrl` and `model` for API agents.
+
+---
+
+### Task 1: Config schema — add `agents.customAgents` array and affinity presets ✅ DONE
 
 **Files:**
 
@@ -165,7 +188,9 @@ git commit -m "feat(agents): add agents.customAgents[] config schema and AFFINIT
 
 ---
 
-### Task 2: Register custom CLI and API agents from config in `initAgentRegistry()`
+### Task 2: Register custom CLI and API agents from config in `initAgentRegistry()` ✅ DONE
+
+> **Implementation note (post-plugin-refactor):** `registerAgent()` now applies all plugin interface defaults (`features`, `parseOutput`, `errorPatterns`, `modelBelongsTo`, `quotaVerify`, `economyModel`, `readInstructions`, `taskRules`). Custom agents loaded from `agents.customAgents[]` automatically get `features.executeMode` defaulting to `'api'` when `customType === 'api'`, or `'spawn'` otherwise. No additional plugin configuration is needed for basic operation.
 
 **Files:**
 
@@ -359,7 +384,9 @@ git commit -m "feat(agents): load customAgents[] physical agents in initAgentReg
 
 ---
 
-### Task 3: Template expansion + `executeCustomCliAgent()` in agent-executor
+### Task 3: Template expansion + `executeCustomCliAgent()` in agent-executor ✅ DONE
+
+> **Implementation note (post-plugin-refactor):** `executeCustomCliAgent()` now calls `def.parseOutput()` if the registered agent definition provides one (falls back to `parseCliResponse()` for legacy custom agents). Error patterns from `agentDef.errorPatterns` are also used for error categorization.
 
 **Files:**
 
@@ -634,7 +661,9 @@ git commit -m "feat(agents): add expandInvokeArgs, parseCliResponse, executeCust
 
 ---
 
-### Task 4: `executeCustomApiAgent()` and routing in `executeAgent()`
+### Task 4: `executeCustomApiAgent()` and routing in `executeAgent()` ✅ DONE
+
+> **Implementation note (post-plugin-refactor):** Routing in `executeAgent()` now checks `agentDef.features.executeMode === 'api'` first (covers both `local` and custom API agents), then `agentDef.customType === 'cli'` for custom CLI agents. All remaining agents (built-in spawn agents) go through the standard `agentDef.invoke.headless()` → spawn → `agentDef.parseOutput()` pipeline. No per-agent if/else chains remain.
 
 **Files:**
 
@@ -822,7 +851,7 @@ git commit -m "feat(agents): add executeCustomApiAgent and route custom agents i
 
 ---
 
-### Task 5: `custom-cli-unavailable` fallback in `executeAgentWithRecovery()`
+### Task 5: `custom-cli-unavailable` fallback in `executeAgentWithRecovery()` ✅ DONE
 
 **Files:**
 
@@ -880,7 +909,7 @@ git commit -m "feat(agents): add custom-cli-unavailable fallback in executeAgent
 
 ---
 
-### Task 6: `registerCustomAgentMcp()` in `hydra-setup.mjs`
+### Task 6: `registerCustomAgentMcp()` in `hydra-setup.mjs` ✅ DONE
 
 **Files:**
 
@@ -1047,7 +1076,9 @@ git commit -m "feat(agents): add registerCustomAgentMcp and KNOWN_CLI_MCP_PATHS 
 
 ---
 
-### Task 7: `:agents add` wizard — new `lib/hydra-agents-wizard.mjs`
+### Task 7: `:agents add` wizard — new `lib/hydra-agents-wizard.mjs` ✅ DONE
+
+> **Implementation note (post-plugin-refactor):** The wizard produces config-level fields only (`name`, `type`, `invoke`, `responseParser`, `taskAffinity`, etc.). Plugin fields (`features`, `parseOutput`, `errorPatterns`, `modelBelongsTo`, `quotaVerify`, `economyModel`, `readInstructions`, `taskRules`) are applied automatically by `registerAgent()` with sensible defaults when the agent is loaded on next startup. The wizard does **not** need to generate these — this is by design.
 
 **Files:**
 
@@ -1427,7 +1458,7 @@ git commit -m "feat(agents): add hydra-agents-wizard with buildCustomAgentEntry 
 
 ---
 
-### Task 8: Wire `:agents add|remove|test` into `hydra-operator.mjs`
+### Task 8: Wire `:agents add|remove|test` into `hydra-operator.mjs` ✅ DONE
 
 **Files:**
 
@@ -1529,6 +1560,14 @@ git commit -m "feat(agents): wire :agents add|remove|test into operator"
 
 ### Task 9: Update docs
 
+> **Status:** Remaining — docs need updating to reflect the plugin-based custom agent architecture.
+
+**Files:**
+
+- Modify: `CLAUDE.md` — add `agents.customAgents` schema, `:agents add|remove|test` commands, new module, note plugin defaults
+- Modify: `README.md` — add `:agents add|remove|test` to operator commands table
+- Modify: `docs/ARCHITECTURE.md` — add `hydra-agents-wizard.mjs` entry, document plugin defaults for custom agents
+
 **Files:**
 
 - Modify: `CLAUDE.md` — add `agents.customAgents` schema, `:agents add|remove|test` commands, new module
@@ -1587,10 +1626,20 @@ git commit -m "docs: document custom agent registration (agents.customAgents, :a
 
 ## Summary
 
-9 tasks, TDD throughout. After completion:
+9 tasks, TDD throughout. **Tasks 1–8 are complete.** After completion:
 
 - Users run `:agents add` in the operator → walk CLI or API track → agent registered in `hydra.config.json`
-- On next daemon/operator start, the agent is registered and available for dispatch
+- On next daemon/operator start, the agent is registered via `initAgentRegistry()` → `registerAgent()` applies plugin defaults → available for dispatch
 - `bestAgentFor()` considers custom agents' task affinities
-- CLI unavailability → transparent cloud fallback
+- CLI unavailability → transparent cloud fallback via `executeAgentWithRecovery()`
 - MCP auto-registration attempted; manual instructions if not possible
+- All plugin interface fields (`features`, `parseOutput`, `errorPatterns`, `modelBelongsTo`, `quotaVerify`, `economyModel`, `readInstructions`, `taskRules`) get sensible defaults from `registerAgent()` — no executor changes needed per-agent
+
+### Remaining Work
+
+| Item | Priority | Description |
+| ---- | -------- | ----------- |
+| **Provider presets picker** | Medium | `getProviderPresets()` returns built-in GLM-5 / Kimi K2.5 templates. The wizard should offer these as pre-filled options for API agents instead of requiring manual `baseUrl`/`model` entry. |
+| **Optional advanced plugin config** | Low | Power users may want to configure custom `errorPatterns`, `readInstructions`, or `taskRules` for their agents. Could be an `:agents edit <name>` command or advanced wizard track. Not needed for MVP — defaults cover most use cases. |
+| **Documentation updates** | Medium | Task 9 — update CLAUDE.md, README.md, docs/ARCHITECTURE.md to reflect custom agent registration and plugin defaults. |
+| **Custom `parseOutput` for known CLIs** | Low | For well-known CLIs (e.g. Aider, Continue), the wizard could auto-set `parseOutput` and `errorPatterns` based on CLI name. Requires knowledge of each CLI's output format. |

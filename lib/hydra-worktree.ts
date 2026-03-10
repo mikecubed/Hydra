@@ -41,7 +41,17 @@ function getWorktreeConfig() {
  * @param {string} [baseBranch] - Branch to base the worktree on (default: current branch)
  * @returns {Promise<{ worktreePath: string, branch: string }>}
  */
-export async function createWorktree(taskId, projectRoot, baseBranch = null) {
+interface WorktreeInfo {
+  path: string;
+  head: string;
+  branch: string;
+}
+
+export async function createWorktree(
+  taskId: string,
+  projectRoot: string,
+  baseBranch: string | undefined = undefined,
+): Promise<{ worktreePath: string; branch: string }> {
   const config = getWorktreeConfig();
   const branch = `${config.branchPrefix}${taskId}`;
   const worktreePath = path.resolve(projectRoot, config.basePath, taskId);
@@ -79,7 +89,11 @@ export async function createWorktree(taskId, projectRoot, baseBranch = null) {
  * @param {{ deleteBranch?: boolean }} [opts]
  * @returns {Promise<void>}
  */
-export async function removeWorktree(taskId, projectRoot, opts = {}) {
+export async function removeWorktree(
+  taskId: string,
+  projectRoot: string,
+  opts: { deleteBranch?: boolean } = {},
+): Promise<void> {
   const config = getWorktreeConfig();
   const worktreePath = path.resolve(projectRoot, config.basePath, taskId);
   const branch = `${config.branchPrefix}${taskId}`;
@@ -107,7 +121,7 @@ export async function removeWorktree(taskId, projectRoot, opts = {}) {
  * @param {string} projectRoot
  * @returns {string}
  */
-export function getWorktreePath(taskId, projectRoot) {
+export function getWorktreePath(taskId: string, projectRoot: string): string {
   const config = getWorktreeConfig();
   return path.resolve(projectRoot, config.basePath, taskId);
 }
@@ -117,17 +131,17 @@ export function getWorktreePath(taskId, projectRoot) {
  * @param {string} projectRoot
  * @returns {Promise<Array<{ path: string, branch: string, head: string }>>}
  */
-export async function listWorktrees(projectRoot) {
+export async function listWorktrees(projectRoot: string): Promise<WorktreeInfo[]> {
   const r = git(['worktree', 'list', '--porcelain'], projectRoot);
   if (r.status !== 0) return [];
   const output = (r.stdout || '').trim();
 
-  const worktrees = [];
-  let current = {};
+  const worktrees: WorktreeInfo[] = [];
+  let current: Partial<WorktreeInfo> = {};
 
   for (const line of output.split('\n')) {
     if (line.startsWith('worktree ')) {
-      if (current.path) worktrees.push(current);
+      if (current.path) worktrees.push(current as WorktreeInfo);
       current = { path: line.slice('worktree '.length).trim() };
     } else if (line.startsWith('HEAD ')) {
       current.head = line.slice('HEAD '.length).trim();
@@ -137,11 +151,11 @@ export async function listWorktrees(projectRoot) {
         .trim()
         .replace(/^refs\/heads\//, '');
     } else if (line === '' && current.path) {
-      worktrees.push(current);
+      worktrees.push(current as WorktreeInfo);
       current = {};
     }
   }
-  if (current.path) worktrees.push(current);
+  if (current.path) worktrees.push(current as WorktreeInfo);
 
   return worktrees;
 }
@@ -153,7 +167,11 @@ export async function listWorktrees(projectRoot) {
  * @param {string} [targetBranch] - Branch to merge into (default: current branch)
  * @returns {Promise<{ ok: boolean, message: string }>}
  */
-export async function mergeWorktree(taskId, projectRoot, targetBranch = null) {
+export async function mergeWorktree(
+  taskId: string,
+  projectRoot: string,
+  targetBranch: string | undefined = undefined,
+): Promise<{ ok: boolean; message: string }> {
   const config = getWorktreeConfig();
   const branch = `${config.branchPrefix}${taskId}`;
   const target = targetBranch || getCurrentBranch(projectRoot) || 'main';

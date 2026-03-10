@@ -29,17 +29,24 @@ const AGENT_HEADING_RE = /^## @(claude|gemini|codex)\s*$/;
  * @param {string} content  Raw HYDRA.md text
  * @returns {{ shared: string, agents: { claude: string, gemini: string, codex: string } }}
  */
-export function parseHydraMd(content) {
+type AgentName = 'claude' | 'gemini' | 'codex';
+
+interface ParsedHydraMd {
+  shared: string;
+  agents: Record<AgentName, string>;
+}
+
+export function parseHydraMd(content: string): ParsedHydraMd {
   const lines = content.split(/\r?\n/);
-  const shared = [];
-  const agents = { claude: [], gemini: [], codex: [] };
-  let currentTarget = 'shared'; // 'shared' | 'claude' | 'gemini' | 'codex'
+  const shared: string[] = [];
+  const agents: Record<AgentName, string[]> = { claude: [], gemini: [], codex: [] };
+  let currentTarget: 'shared' | AgentName = 'shared';
 
   for (const line of lines) {
     // Check for ## @agent heading
     const agentMatch = line.match(AGENT_HEADING_RE);
     if (agentMatch) {
-      currentTarget = agentMatch[1];
+      currentTarget = agentMatch[1] as AgentName;
       continue;
     }
 
@@ -72,7 +79,7 @@ export function parseHydraMd(content) {
  * @param {{ shared: string, agents: { claude: string, gemini: string, codex: string } }} parsed
  * @returns {string}
  */
-export function buildAgentFile(agent, parsed) {
+export function buildAgentFile(agent: AgentName, parsed: ParsedHydraMd): string {
   const parts = [GENERATED_HEADER];
   if (parsed.shared) parts.push(parsed.shared);
   if (parsed.agents[agent]) {
@@ -85,7 +92,7 @@ export function buildAgentFile(agent, parsed) {
 /**
  * Check whether HYDRA.md exists in the given project root.
  */
-export function hasHydraMd(projectRoot) {
+export function hasHydraMd(projectRoot: string): boolean {
   return fs.existsSync(path.join(projectRoot, 'HYDRA.md'));
 }
 
@@ -93,9 +100,9 @@ export function hasHydraMd(projectRoot) {
  * Return the instruction filename that `agent` should read in `projectRoot`.
  * If HYDRA.md exists, returns the agent-specific generated file; otherwise falls back to CLAUDE.md.
  */
-export function getAgentInstructionFile(agent, projectRoot) {
+export function getAgentInstructionFile(agent: string, projectRoot: string): string {
   if (hasHydraMd(projectRoot)) {
-    return AGENT_FILES[agent] || 'CLAUDE.md';
+    return AGENT_FILES[agent as AgentName] || 'CLAUDE.md';
   }
   return 'CLAUDE.md';
 }
@@ -107,7 +114,7 @@ export function getAgentInstructionFile(agent, projectRoot) {
  * @param {string} projectRoot
  * @returns {{ synced: string[], skipped: boolean }}
  */
-export function syncHydraMd(projectRoot) {
+export function syncHydraMd(projectRoot: string): { synced: string[]; skipped: boolean } {
   const hydraMdPath = path.join(projectRoot, 'HYDRA.md');
 
   if (!fs.existsSync(hydraMdPath)) {
@@ -140,7 +147,7 @@ export function syncHydraMd(projectRoot) {
 
   for (const [agent, filename] of Object.entries(AGENT_FILES)) {
     const outPath = path.join(projectRoot, filename);
-    const generated = buildAgentFile(agent, parsed);
+    const generated = buildAgentFile(agent as AgentName, parsed);
 
     // Only write if content actually differs
     let existing = '';

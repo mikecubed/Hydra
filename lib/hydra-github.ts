@@ -11,13 +11,83 @@ import { loadHydraConfig } from './hydra-config.mjs';
 import { pushBranch, getCurrentBranch, getBranchLog } from './hydra-shared/git-ops.ts';
 import { spawnSyncCapture } from './hydra-proc.mjs';
 
+interface GhResult {
+  status: number | null;
+  stdout: string;
+  stderr: string;
+  error: Error | null;
+  signal?: string | null;
+}
+
+interface RepoInfo {
+  owner: string;
+  repo: string;
+  defaultBranch: string;
+}
+
+interface CreatePROptions {
+  cwd?: string;
+  head: string;
+  base: string;
+  title: string;
+  body?: string;
+  draft?: boolean;
+  labels?: string[];
+  reviewers?: string[];
+}
+
+interface PRResult {
+  ok: boolean;
+  url?: string;
+  number?: number;
+  error?: string;
+}
+
+interface ChecksResult {
+  ok: boolean;
+  pending: string[];
+  failed: string[];
+}
+
+interface GitHubCheck {
+  name: string;
+  state: string;
+}
+
+interface GitHubPR {
+  url?: string;
+  number?: number;
+  title?: string;
+  headRefName?: string;
+  author?: { login?: string } | string;
+  state?: string;
+}
+
+interface GitHubConfig {
+  enabled: boolean;
+  defaultBase: string;
+  draft: boolean;
+  labels: string[];
+  reviewers: string[];
+  prBodyFooter: string;
+}
+
+interface PushAndCreatePROpts {
+  cwd?: string;
+  branch?: string;
+  baseBranch?: string;
+  title?: string;
+  body?: string;
+  draft?: boolean;
+}
+
 /**
  * Run a gh CLI command synchronously.
  * @param {string[]} args
  * @param {string} [cwd=process.cwd()]
  * @returns {{ status: number|null, stdout: string, stderr: string, error: Error|null }}
  */
-export function gh(args, cwd = process.cwd()) {
+export function gh(args: string[], cwd = process.cwd()): GhResult {
   const r = spawnSyncCapture('gh', args, {
     cwd,
     encoding: 'utf8',
@@ -59,7 +129,7 @@ export function isGhAuthenticated() {
  * @param {string} [cwd=process.cwd()]
  * @returns {{ owner: string, repo: string, defaultBranch: string } | null}
  */
-export function detectRepo(cwd = process.cwd()) {
+export function detectRepo(cwd = process.cwd()): RepoInfo | null {
   const r = gh(['repo', 'view', '--json', 'owner,name,defaultBranchRef'], cwd);
   if (r.status !== 0) return null;
   try {
@@ -88,7 +158,7 @@ export function createPR({
   draft = false,
   labels = [],
   reviewers = [],
-}) {
+}: CreatePROptions): PRResult {
   const args = [
     'pr',
     'create',
@@ -119,7 +189,12 @@ export function createPR({
  * @param {{ cwd?: string, state?: string, base?: string, head?: string }} [opts={}]
  * @returns {Array<{ number: number, title: string, headRefName: string, author: string, state: string }>}
  */
-export function listPRs({ cwd = process.cwd(), state = 'open', base, head } = {}) {
+export function listPRs({
+  cwd = process.cwd(),
+  state = 'open',
+  base,
+  head,
+}: { cwd?: string; state?: string; base?: string; head?: string } = {}) {
   const args = ['pr', 'list', '--json', 'number,title,headRefName,author,state', '--state', state];
   if (base) args.push('--base', base);
   if (head) args.push('--head', head);
@@ -128,11 +203,14 @@ export function listPRs({ cwd = process.cwd(), state = 'open', base, head } = {}
   if (r.status !== 0) return [];
   try {
     const data = JSON.parse(r.stdout);
-    return data.map((pr) => ({
+    return data.map((pr: GitHubPR) => ({
       number: pr.number,
       title: pr.title,
       headRefName: pr.headRefName,
-      author: pr.author?.login || pr.author || '',
+      author:
+        typeof pr.author === 'object' && pr.author !== null
+          ? pr.author.login || ''
+          : String(pr.author || ''),
       state: pr.state,
     }));
   } catch {
@@ -145,7 +223,7 @@ export function listPRs({ cwd = process.cwd(), state = 'open', base, head } = {}
  * @param {{ cwd?: string, ref: string|number }} opts
  * @returns {object|null}
  */
-export function getPR({ cwd = process.cwd(), ref }) {
+export function getPR({ cwd = process.cwd(), ref }: { cwd?: string; ref: string | number }) {
   const r = gh(
     [
       'pr',
@@ -169,7 +247,17 @@ export function getPR({ cwd = process.cwd(), ref }) {
  * @param {{ cwd?: string, ref: string|number, method?: 'merge'|'squash'|'rebase', deleteAfter?: boolean }} opts
  * @returns {{ ok: boolean, error?: string }}
  */
-export function mergePR({ cwd = process.cwd(), ref, method = 'merge', deleteAfter = true }) {
+export function mergePR({
+  cwd = process.cwd(),
+  ref,
+  method = 'merge',
+  deleteAfter = true,
+}: {
+  cwd?: string;
+  ref: string | number;
+  method?: 'merge' | 'squash' | 'rebase';
+  deleteAfter?: boolean;
+}): PRResult {
   const args = ['pr', 'merge', String(ref), `--${method}`];
   if (deleteAfter) args.push('--delete-branch');
   const r = gh(args, cwd);
@@ -182,7 +270,7 @@ export function mergePR({ cwd = process.cwd(), ref, method = 'merge', deleteAfte
  * @param {{ cwd?: string, ref: string|number }} opts
  * @returns {{ ok: boolean, error?: string }}
  */
-export function closePR({ cwd = process.cwd(), ref }) {
+export function closePR({ cwd = process.cwd(), ref }: { cwd?: string; ref: string | number }): PRResult {
   const r = gh(['pr', 'close', String(ref)], cwd);
   if (r.status === 0) return { ok: true };
   return { ok: false, error: (r.stderr || r.stdout || '').trim() };
@@ -193,7 +281,12 @@ export function closePR({ cwd = process.cwd(), ref }) {
  * @param {{ cwd?: string, state?: string, labels?: string[], limit?: number }} [opts={}]
  * @returns {Array<{ number: number, title: string, body: string, labels: string[], assignees: string[], state: string }>}
  */
-export function listIssues({ cwd = process.cwd(), state = 'open', labels = [], limit = 25 } = {}) {
+export function listIssues({
+  cwd = process.cwd(),
+  state = 'open',
+  labels = [] as string[],
+  limit = 25,
+}: { cwd?: string; state?: string; labels?: string[]; limit?: number } = {}) {
   const args = [
     'issue',
     'list',
@@ -218,7 +311,7 @@ export function listIssues({ cwd = process.cwd(), state = 'open', labels = [], l
  * Get the github config section with defaults.
  * @returns {{ enabled: boolean, defaultBase: string, draft: boolean, labels: string[], reviewers: string[], prBodyFooter: string }}
  */
-export function getGitHubConfig() {
+export function getGitHubConfig(): GitHubConfig {
   const cfg = loadHydraConfig();
   return {
     enabled: false,
@@ -239,7 +332,7 @@ export function getGitHubConfig() {
  * @param {string} projectRoot
  * @returns {string|null} Template content or null
  */
-function detectPRTemplate(projectRoot) {
+function detectPRTemplate(projectRoot: string): string | null {
   const candidates = [
     '.github/pull_request_template.md',
     '.github/PULL_REQUEST_TEMPLATE.md',
@@ -263,13 +356,14 @@ function detectPRTemplate(projectRoot) {
  * @param {Record<string, string[]>} labelConfig - Label → pattern map from config
  * @returns {string[]} Labels to apply
  */
-function detectAutoLabels(changedFiles, labelConfig) {
+function detectAutoLabels(changedFiles: string[], labelConfig: Record<string, unknown>): string[] {
   if (!labelConfig || !changedFiles?.length) return [];
-  const labels = new Set();
+  const labels = new Set<string>();
   for (const [label, patterns] of Object.entries(labelConfig)) {
-    for (const pat of patterns) {
+    if (!Array.isArray(patterns)) continue;
+    for (const pat of patterns as string[]) {
       const regex = new RegExp(pat);
-      if (changedFiles.some((f) => regex.test(f))) {
+      if (changedFiles.some((f: string) => regex.test(f))) {
         labels.add(label);
         break;
       }
@@ -283,7 +377,10 @@ function detectAutoLabels(changedFiles, labelConfig) {
  * @param {{ cwd?: string, ref: string|number }} opts
  * @returns {{ ok: boolean, pending: string[], failed: string[] }}
  */
-export function verifyRequiredChecks({ cwd = process.cwd(), ref }) {
+export function verifyRequiredChecks({
+  cwd = process.cwd(),
+  ref,
+}: { cwd?: string; ref: string | number }): ChecksResult {
   const cfg = loadHydraConfig();
   const required = cfg.github?.requiredChecks || [];
   if (required.length === 0) return { ok: true, pending: [], failed: [] };
@@ -301,7 +398,7 @@ export function verifyRequiredChecks({ cwd = process.cwd(), ref }) {
   const pending = [];
   const failed = [];
   for (const name of required) {
-    const check = checks.find((c) => c.name === name);
+    const check = checks.find((c: GitHubCheck) => c.name === name);
     if (!check) {
       pending.push(name);
       continue;
@@ -319,7 +416,7 @@ export function verifyRequiredChecks({ cwd = process.cwd(), ref }) {
  * @param {{ cwd?: string, branch?: string, baseBranch?: string, title?: string, body?: string, draft?: boolean }} [opts={}]
  * @returns {{ ok: boolean, url?: string, number?: number, error?: string }}
  */
-export function pushBranchAndCreatePR(opts = {}) {
+export function pushBranchAndCreatePR(opts: PushAndCreatePROpts = {}): PRResult {
   const cwd = opts.cwd || process.cwd();
   const branch = opts.branch || getCurrentBranch(cwd);
   const ghCfg = getGitHubConfig();
@@ -371,12 +468,12 @@ export function pushBranchAndCreatePR(opts = {}) {
   }
 
   // Auto-detect labels from changed files
-  const labels = [...(ghCfg.labels || [])];
+  const labels: string[] = [...(ghCfg.labels || [])];
   const autolabelCfg = loadHydraConfig().github?.autolabel;
   if (autolabelCfg) {
     // Get changed files via git diff (works before PR exists)
-    let changedFiles = [];
-    const gitDiff = spawn.sync('git', ['diff', '--name-only', `${baseBranch}...${branch}`], {
+    let changedFiles: string[] = [];
+    const gitDiff = spawnSyncCapture('git', ['diff', '--name-only', `${baseBranch}...${branch}`], {
       cwd,
       encoding: 'utf8',
       timeout: 10_000,
@@ -384,7 +481,7 @@ export function pushBranchAndCreatePR(opts = {}) {
     if (gitDiff.status === 0 && gitDiff.stdout) {
       changedFiles = gitDiff.stdout.trim().split('\n').filter(Boolean);
     }
-    const autoLabels = detectAutoLabels(changedFiles, autolabelCfg);
+    const autoLabels = detectAutoLabels(changedFiles, autolabelCfg as Record<string, unknown>);
     for (const l of autoLabels) {
       if (!labels.includes(l)) labels.push(l);
     }

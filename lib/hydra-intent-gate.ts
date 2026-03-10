@@ -25,7 +25,7 @@ const FILLER_PATTERNS = [
 ];
 
 // ── Abbreviation expansion pairs ─────────────────────────────────────────────
-const ABBREVIATIONS = [
+const ABBREVIATIONS: Array<[RegExp, string]> = [
   [/\bimpl\b/gi, 'implement'],
   [/\bfn\b/g, 'function'],
   [/\bauth\b/gi, 'authentication'],
@@ -46,7 +46,7 @@ const ABBREVIATIONS = [
  * @param {string} text
  * @returns {string}
  */
-export function normalizeIntent(text) {
+export function normalizeIntent(text: string): string {
   if (!text || !text.trim()) return '';
   let result = text.trim();
 
@@ -78,7 +78,14 @@ export function normalizeIntent(text) {
  * @param {Function} [opts.onLlmCall] - Called when LLM path is taken (for testing)
  * @returns {Promise<{text: string, classification: object, normalized: boolean, rewritten: boolean}>}
  */
-export async function gateIntent(text, opts = {}) {
+interface GateIntentOpts {
+  enabled?: boolean;
+  confidenceThreshold?: number;
+  rewriteFn?: ((text: string) => Promise<string | null>) | null;
+  onLlmCall?: (() => void) | null;
+}
+
+export async function gateIntent(text: string, opts: GateIntentOpts = {}) {
   const { enabled = true, confidenceThreshold = 0.55, rewriteFn = null, onLlmCall = null } = opts;
 
   if (!enabled) {
@@ -118,7 +125,7 @@ export async function gateIntent(text, opts = {}) {
  * Default LLM rewrite using the local/fast model via hydra-local.mjs.
  * Dynamic import avoids circular deps at load time.
  */
-async function defaultRewriteFn(text) {
+async function defaultRewriteFn(text: string): Promise<string | null> {
   let streamLocalCompletion;
   try {
     ({ streamLocalCompletion } = await import('./hydra-local.mjs'));
@@ -139,7 +146,7 @@ async function defaultRewriteFn(text) {
   ];
 
   let result = '';
-  await streamLocalCompletion(messages, {}, (chunk) => {
+  await streamLocalCompletion(messages, {} as { model: string; baseUrl: string }, (chunk: string) => {
     result += chunk;
   });
   return result.trim() || null;
