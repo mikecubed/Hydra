@@ -217,6 +217,9 @@ export default [
       // ── Readonly (warn — daemon code has justified mutable state) ─────────
       '@typescript-eslint/prefer-readonly': 'warn',
 
+      // ── Node import resolution (n plugin can't resolve .mjs from .ts context) ──
+      'n/no-missing-import': 'off',
+
       // ── Other ─────────────────────────────────────────────────────────────
       '@typescript-eslint/no-non-null-assertion': 'warn',
       '@typescript-eslint/no-unnecessary-condition': 'error',

@@ -8,26 +8,34 @@
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
-import { git } from './hydra-shared/git-ops.mjs';
+import { git } from './hydra-shared/git-ops.ts';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const pkgPath = join(__dirname, '..', 'package.json');
 const repoRoot = join(__dirname, '..');
 
-let _cached = null;
+interface VersionInfo {
+  semver: string;
+  commitCount: string | null;
+  shortHash: string | null;
+  dirty: boolean;
+  full: string;
+}
 
-function readGit(args) {
+let _cached: VersionInfo | null = null;
+
+function readGit(args: string[]): string | null {
   const r = git(args, repoRoot);
   return r.status === 0 ? (r.stdout || '').trim() || null : null;
 }
 
-export function getVersion() {
+export function getVersion(): VersionInfo {
   if (_cached) return _cached;
 
   let semver = '0.0.0';
   try {
-    const pkg = JSON.parse(readFileSync(pkgPath, 'utf8'));
-    semver = pkg.version || semver;
+    const pkg = JSON.parse(readFileSync(pkgPath, 'utf8')) as { version?: string };
+    semver = pkg.version ?? semver;
   } catch {
     /* use fallback */
   }
@@ -46,6 +54,6 @@ export function getVersion() {
   return _cached;
 }
 
-export function versionString() {
+export function versionString(): string {
   return getVersion().full;
 }

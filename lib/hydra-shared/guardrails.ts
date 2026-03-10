@@ -9,53 +9,53 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { spawnSyncCapture } from '../hydra-proc.mjs';
 
-/**
- * Verify the current git branch matches the expected branch.
- * @param {string} projectRoot
- * @param {string} expectedBranch
- * @returns {{ ok: boolean, currentBranch: string }}
- */
-export function verifyBranch(projectRoot, expectedBranch) {
+export interface ScanViolation {
+  type: string;
+  detail: string;
+  severity: string;
+  totalLines?: number;
+}
+
+/** Verify the current git branch matches the expected branch. */
+export function verifyBranch(projectRoot: string, expectedBranch: string): { ok: boolean; currentBranch: string } {
   const result = spawnSyncCapture('git', ['branch', '--show-current'], {
     cwd: projectRoot,
     encoding: 'utf8',
     timeout: 5_000,
   });
-  const current = (result.stdout || '').trim();
+  const current = result.stdout.trim();
   return { ok: current === expectedBranch, currentBranch: current };
 }
 
-/**
- * Check if working tree is clean.
- * @param {string} projectRoot
- * @returns {boolean}
- */
-export function isCleanWorkingTree(projectRoot) {
+/** Check if working tree is clean. */
+export function isCleanWorkingTree(projectRoot: string): boolean {
   const result = spawnSyncCapture('git', ['status', '--porcelain'], {
     cwd: projectRoot,
     encoding: 'utf8',
     timeout: 5_000,
   });
-  return !(result.stdout || '').trim();
+  return result.stdout.trim() === '';
 }
 
-/**
- * Build the safety rules block injected into autonomous agent prompts.
- *
- * @param {string} branchName - Current branch name
- * @param {object} opts
- * @param {string} opts.runner - Runner name (e.g., 'nightly runner', 'evolve runner')
- * @param {string} opts.reportName - Report name (e.g., 'morning report', 'session report')
- * @param {Set<string>} opts.protectedFiles - Set of protected file paths
- * @param {string[]} opts.blockedCommands - Array of blocked commands
- * @param {string[]} [opts.extraRules] - Additional scope rules
- * @param {{ pipeline: string, agent?: string }} [opts.attribution] - Commit attribution metadata
- * @returns {string}
- */
+/** Build the safety rules block injected into autonomous agent prompts. */
 export function buildSafetyPrompt(
-  branchName,
-  { runner, reportName, protectedFiles, blockedCommands, extraRules = [], attribution },
-) {
+  branchName: string,
+  {
+    runner,
+    reportName,
+    protectedFiles,
+    blockedCommands,
+    extraRules = [],
+    attribution,
+  }: {
+    runner: string;
+    reportName: string;
+    protectedFiles: Set<string>;
+    blockedCommands: string[];
+    extraRules?: string[];
+    attribution?: { pipeline: string; agent?: string };
+  },
+): string {
   const extraSection =
     extraRules.length > 0 ? `\n${extraRules.map((r) => `- ${r}`).join('\n')}` : '';
 
@@ -120,14 +120,9 @@ const SECRETS_CONTENT_PATTERNS = [
   /AIza[0-9A-Za-z_-]{35}/, // Google API key
 ];
 
-/**
- * Scan changed files for potential secrets (filenames and content).
- * @param {string} projectRoot
- * @param {string[]} changedFiles
- * @returns {Array<{type: string, detail: string, severity: string}>}
- */
-export function scanForSecrets(projectRoot, changedFiles) {
-  const violations = [];
+/** Scan changed files for potential secrets (filenames and content). */
+export function scanForSecrets(projectRoot: string, changedFiles: string[]): ScanViolation[] {
+  const violations: ScanViolation[] = [];
 
   for (const file of changedFiles) {
     const normalized = file.replace(/\\/g, '/');
@@ -166,16 +161,12 @@ export function scanForSecrets(projectRoot, changedFiles) {
   return violations;
 }
 
-/**
- * Check total diff size (insertions + deletions) against a limit.
- * @param {string} projectRoot
- * @param {string} branchName
- * @param {object} opts
- * @param {string} [opts.baseBranch='dev']
- * @param {number} [opts.maxDiffLines=10000]
- * @returns {{type: string, detail: string, severity: string, totalLines: number}|null}
- */
-export function checkDiffSize(projectRoot, branchName, opts = {}) {
+/** Check total diff size (insertions + deletions) against a limit. */
+export function checkDiffSize(
+  projectRoot: string,
+  branchName: string,
+  opts: { baseBranch?: string; maxDiffLines?: number } = {},
+): (ScanViolation & { totalLines: number }) | null {
   const { baseBranch = 'dev', maxDiffLines = 10000 } = opts;
 
   const result = spawnSyncCapture('git', ['diff', '--stat', `${baseBranch}...${branchName}`], {
@@ -187,7 +178,7 @@ export function checkDiffSize(projectRoot, branchName, opts = {}) {
   if (result.status !== 0 || !result.stdout) return null;
 
   const lines = result.stdout.trim().split('\n');
-  const summary = lines.at(-1) || '';
+  const summary = lines.at(-1) ?? '';
   const match = summary.match(/(\d+) insertions?\(\+\).*?(\d+) deletions?\(-\)/);
   if (!match) return null;
 
@@ -195,7 +186,7 @@ export function checkDiffSize(projectRoot, branchName, opts = {}) {
   if (totalLines > maxDiffLines) {
     return {
       type: 'diff_too_large',
-      detail: `Diff too large: ${totalLines} lines changed (max: ${maxDiffLines})`,
+      detail: `Diff too large: ${String(totalLines)} lines changed (max: ${String(maxDiffLines)})`,
       severity: 'warning',
       totalLines,
     };
@@ -206,19 +197,10 @@ export function checkDiffSize(projectRoot, branchName, opts = {}) {
 
 /**
  * Scan a branch's diff against the base branch for guardrail violations.
- *
- * @param {string} projectRoot
- * @param {string} branchName
- * @param {object} opts
- * @param {string} [opts.baseBranch='dev'] - Base branch to diff against
- * @param {Set<string>} opts.protectedFiles - Set of protected file paths
- * @param {RegExp[]} opts.protectedPatterns - Array of protected path patterns
- * @param {boolean} [opts.checkDeletedTests=false] - Whether to flag deleted test files
- * @returns {Array<{type: string, detail: string, severity: string}>}
  */
 export function scanBranchViolations(
-  projectRoot,
-  branchName,
+  projectRoot: string,
+  branchName: string,
   {
     baseBranch = 'dev',
     protectedFiles,
@@ -226,9 +208,16 @@ export function scanBranchViolations(
     checkDeletedTests = false,
     secretsScan = false,
     maxDiffLines = 0,
+  }: {
+    baseBranch?: string;
+    protectedFiles: Set<string>;
+    protectedPatterns: RegExp[];
+    checkDeletedTests?: boolean;
+    secretsScan?: boolean;
+    maxDiffLines?: number;
   },
-) {
-  const violations = [];
+): ScanViolation[] {
+  const violations: ScanViolation[] = [];
 
   const diffResult = spawnSyncCapture(
     'git',

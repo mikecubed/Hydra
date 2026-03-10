@@ -7,13 +7,18 @@
 
 import { spawnSyncCapture } from '../hydra-proc.mjs';
 
+interface GitResult {
+  status: number | null;
+  stdout: string;
+  stderr: string;
+  error: Error | null;
+  signal: string | null;
+}
+
 /**
  * Run a git command synchronously.
- * @param {string[]} args - Git arguments
- * @param {string} cwd - Working directory
- * @returns {{ status: number|null, stdout: string, stderr: string, error: Error|null }}
  */
-export function git(args, cwd) {
+export function git(args: string[], cwd: string): GitResult {
   const r = spawnSyncCapture('git', args, {
     cwd,
     encoding: 'utf8',
@@ -26,42 +31,25 @@ export function git(args, cwd) {
 
 /**
  * Get the current branch name.
- * @param {string} cwd
- * @returns {string}
  */
-export function getCurrentBranch(cwd) {
+export function getCurrentBranch(cwd: string): string {
   const r = git(['branch', '--show-current'], cwd);
   return (r.stdout || '').trim();
 }
 
-/**
- * Checkout a branch.
- * @param {string} cwd
- * @param {string} branch
- */
-export function checkoutBranch(cwd, branch) {
+/** Checkout a branch. */
+export function checkoutBranch(cwd: string, branch: string): GitResult {
   return git(['checkout', branch], cwd);
 }
 
-/**
- * Check if a branch exists.
- * @param {string} cwd
- * @param {string} branchName
- * @returns {boolean}
- */
-export function branchExists(cwd, branchName) {
+/** Check if a branch exists. */
+export function branchExists(cwd: string, branchName: string): boolean {
   const r = git(['rev-parse', '--verify', branchName], cwd);
   return r.status === 0;
 }
 
-/**
- * Create a new branch from a base branch. Deletes stale branch if it exists.
- * @param {string} cwd
- * @param {string} branchName
- * @param {string} fromBranch
- * @returns {boolean} success
- */
-export function createBranch(cwd, branchName, fromBranch) {
+/** Create a new branch from a base branch. Deletes stale branch if it exists. Returns true on success. */
+export function createBranch(cwd: string, branchName: string, fromBranch: string): boolean {
   if (branchExists(cwd, branchName)) {
     git(['branch', '-D', branchName], cwd);
   }
@@ -69,26 +57,18 @@ export function createBranch(cwd, branchName, fromBranch) {
   return r.status === 0;
 }
 
-/**
- * Check if a branch has commits beyond baseBranch.
- * @param {string} cwd
- * @param {string} branchName
- * @param {string} [baseBranch='dev']
- * @returns {boolean}
- */
-export function branchHasCommits(cwd, branchName, baseBranch = 'dev') {
+/** Check if a branch has commits beyond baseBranch. */
+export function branchHasCommits(cwd: string, branchName: string, baseBranch = 'dev'): boolean {
   const r = git(['log', `${baseBranch}..${branchName}`, '--oneline'], cwd);
   return (r.stdout || '').trim().length > 0;
 }
 
-/**
- * Get commit count and files changed for a branch vs base.
- * @param {string} cwd
- * @param {string} branchName
- * @param {string} [baseBranch='dev']
- * @returns {{ commits: number, filesChanged: number }}
- */
-export function getBranchStats(cwd, branchName, baseBranch = 'dev') {
+/** Get commit count and files changed for a branch vs base. */
+export function getBranchStats(
+  cwd: string,
+  branchName: string,
+  baseBranch = 'dev',
+): { commits: number; filesChanged: number } {
   const logResult = git(['log', `${baseBranch}..${branchName}`, '--oneline'], cwd);
   const commits = (logResult.stdout || '').trim().split('\n').filter(Boolean).length;
 
@@ -99,26 +79,18 @@ export function getBranchStats(cwd, branchName, baseBranch = 'dev') {
   return { commits, filesChanged };
 }
 
-/**
- * Get the full diff between a branch and its base.
- * @param {string} cwd
- * @param {string} branchName
- * @param {string} [baseBranch='dev']
- * @returns {string}
- */
-export function getBranchDiff(cwd, branchName, baseBranch = 'dev') {
+/** Get the full diff between a branch and its base. */
+export function getBranchDiff(cwd: string, branchName: string, baseBranch = 'dev'): string {
   const r = git(['diff', `${baseBranch}...${branchName}`], cwd);
   return (r.stdout || '').trim();
 }
 
-/**
- * Stage all changes and commit.
- * @param {string} cwd
- * @param {string} message
- * @param {{ originatedBy?: string, executedBy?: string }} [opts]
- * @returns {boolean} success
- */
-export function stageAndCommit(cwd, message, opts = {}) {
+/** Stage all changes and commit. Returns true on success. */
+export function stageAndCommit(
+  cwd: string,
+  message: string,
+  opts: { originatedBy?: string; executedBy?: string } = {},
+): boolean {
   git(['add', '-A'], cwd);
   let fullMessage = message;
   const trailers = [];
@@ -129,16 +101,14 @@ export function stageAndCommit(cwd, message, opts = {}) {
   return r.status === 0;
 }
 
-/**
- * Smart merge: rebase-first strategy with conflict detection.
- * @param {string} cwd
- * @param {string} branchName
- * @param {string} baseBranch
- * @param {{ log?: { info: Function, ok: Function, warn: Function } }} [opts]
- * @returns {{ ok: boolean, method: string, conflicts: string[] }}
- */
-export function smartMerge(cwd, branchName, baseBranch, opts = {}) {
-  const _log = opts.log || { info: () => {}, ok: () => {}, warn: () => {} };
+/** Smart merge: rebase-first strategy with conflict detection. */
+export function smartMerge(
+  cwd: string,
+  branchName: string,
+  baseBranch: string,
+  opts: { log?: { info: (msg: string) => void; ok: (msg: string) => void; warn: (msg: string) => void } } = {},
+): { ok: boolean; method: string; conflicts: string[] } {
+  const _log = opts.log ?? { info: () => {}, ok: () => {}, warn: () => {} };
 
   const isAncestor = git(['merge-base', '--is-ancestor', baseBranch, branchName], cwd);
   const baseDiverged = isAncestor.status !== 0;
@@ -175,14 +145,8 @@ export function smartMerge(cwd, branchName, baseBranch, opts = {}) {
 
 // ── Review-specific git helpers ─────────────────────────────────────────────
 
-/**
- * List branches matching a prefix pattern.
- * @param {string} cwd
- * @param {string} prefix - e.g. 'nightly' or 'evolve'
- * @param {string|null} [dateFilter]
- * @returns {string[]}
- */
-export function listBranches(cwd, prefix, dateFilter = null) {
+/** List branches matching a prefix pattern. */
+export function listBranches(cwd: string, prefix: string, dateFilter: string | null = null): string[] {
   const pattern = dateFilter ? `${prefix}/${dateFilter}/*` : `${prefix}/*`;
   const r = git(['branch', '--list', pattern], cwd);
   if (!r.stdout) return [];
@@ -192,38 +156,20 @@ export function listBranches(cwd, prefix, dateFilter = null) {
     .filter(Boolean);
 }
 
-/**
- * Get diff stat for a branch vs base.
- * @param {string} cwd
- * @param {string} branch
- * @param {string} [baseBranch='dev']
- * @returns {string}
- */
-export function getBranchDiffStat(cwd, branch, baseBranch = 'dev') {
+/** Get diff stat for a branch vs base. */
+export function getBranchDiffStat(cwd: string, branch: string, baseBranch = 'dev'): string {
   const r = git(['diff', '--stat', `${baseBranch}...${branch}`], cwd);
   return (r.stdout || '').trim();
 }
 
-/**
- * Get one-line commit log for a branch vs base.
- * @param {string} cwd
- * @param {string} branch
- * @param {string} [baseBranch='dev']
- * @returns {string}
- */
-export function getBranchLog(cwd, branch, baseBranch = 'dev') {
+/** Get one-line commit log for a branch vs base. */
+export function getBranchLog(cwd: string, branch: string, baseBranch = 'dev'): string {
   const r = git(['log', `${baseBranch}..${branch}`, '--oneline', '--no-decorate'], cwd);
   return (r.stdout || '').trim();
 }
 
-/**
- * Merge a branch into the current branch (or baseBranch).
- * @param {string} cwd
- * @param {string} branch
- * @param {string} [baseBranch='dev']
- * @returns {boolean} success
- */
-export function mergeBranch(cwd, branch, baseBranch = 'dev') {
+/** Merge a branch into the current branch (or baseBranch). Returns true on success. */
+export function mergeBranch(cwd: string, branch: string, baseBranch = 'dev'): boolean {
   const current = getCurrentBranch(cwd);
   if (current !== baseBranch) {
     git(['checkout', baseBranch], cwd);
@@ -232,37 +178,22 @@ export function mergeBranch(cwd, branch, baseBranch = 'dev') {
   return r.status === 0;
 }
 
-/**
- * Delete a branch (force).
- * @param {string} cwd
- * @param {string} branch
- * @returns {boolean} success
- */
-export function deleteBranch(cwd, branch) {
+/** Delete a branch (force). Returns true on success. */
+export function deleteBranch(cwd: string, branch: string): boolean {
   const r = git(['branch', '-D', branch], cwd);
   return r.status === 0;
 }
 
 // ── Remote sync helpers ─────────────────────────────────────────────────────
 
-/**
- * Get the URL of a remote.
- * @param {string} cwd
- * @param {string} [remote='origin']
- * @returns {string} URL or empty string
- */
-export function getRemoteUrl(cwd, remote = 'origin') {
+/** Get the URL of a remote. Returns empty string if not found. */
+export function getRemoteUrl(cwd: string, remote = 'origin'): string {
   const r = git(['remote', 'get-url', remote], cwd);
   return r.status === 0 ? (r.stdout || '').trim() : '';
 }
 
-/**
- * Parse an SSH or HTTPS git remote URL into owner/repo.
- * Handles: git@host:owner/repo.git, https://host/owner/repo.git, etc.
- * @param {string} url
- * @returns {{ host: string, owner: string, repo: string } | null}
- */
-export function parseRemoteUrl(url) {
+/** Parse an SSH or HTTPS git remote URL into owner/repo. */
+export function parseRemoteUrl(url: string): { host: string; owner: string; repo: string } | null {
   if (!url || typeof url !== 'string') return null;
   // SSH: git@github.com:owner/repo.git
   const ssh = url.match(/^[\w+-]+@([^:]+):([^/]+)\/(.+?)(?:\.git)?$/);
@@ -281,26 +212,19 @@ export function parseRemoteUrl(url) {
   return null;
 }
 
-/**
- * Fetch from origin (optionally a specific branch).
- * @param {string} cwd
- * @param {string|null} [branch=null]
- * @returns {{ ok: boolean, stderr: string }}
- */
-export function fetchOrigin(cwd, branch = null) {
+/** Fetch from origin (optionally a specific branch). */
+export function fetchOrigin(cwd: string, branch: string | null = null): { ok: boolean; stderr: string } {
   const args = branch ? ['fetch', 'origin', branch] : ['fetch', 'origin'];
   const r = git(args, cwd);
   return { ok: r.status === 0, stderr: (r.stderr || '').trim() };
 }
 
-/**
- * Push a branch to origin.
- * @param {string} cwd
- * @param {string} branch
- * @param {{ force?: boolean, setUpstream?: boolean }} [opts={}]
- * @returns {{ ok: boolean, stderr: string }}
- */
-export function pushBranch(cwd, branch, opts = {}) {
+/** Push a branch to origin. */
+export function pushBranch(
+  cwd: string,
+  branch: string,
+  opts: { force?: boolean; setUpstream?: boolean } = {},
+): { ok: boolean; stderr: string } {
   const args = ['push', 'origin', branch];
   if (opts.setUpstream) args.splice(1, 0, '-u');
   if (opts.force) args.splice(1, 0, '--force-with-lease');
@@ -308,13 +232,8 @@ export function pushBranch(cwd, branch, opts = {}) {
   return { ok: r.status === 0, stderr: (r.stderr || '').trim() };
 }
 
-/**
- * Check if a named remote exists.
- * @param {string} cwd
- * @param {string} [remote='origin']
- * @returns {boolean}
- */
-export function hasRemote(cwd, remote = 'origin') {
+/** Check if a named remote exists. */
+export function hasRemote(cwd: string, remote = 'origin'): boolean {
   const r = git(['remote'], cwd);
   if (r.status !== 0) return false;
   return (r.stdout || '')
@@ -323,24 +242,15 @@ export function hasRemote(cwd, remote = 'origin') {
     .includes(remote);
 }
 
-/**
- * Get the tracking (upstream) branch for the current or given branch.
- * @param {string} cwd
- * @param {string|null} [branch=null]
- * @returns {string} Tracking branch name or empty string
- */
-export function getTrackingBranch(cwd, branch = null) {
+/** Get the tracking (upstream) branch for the current or given branch. */
+export function getTrackingBranch(cwd: string, branch: string | null = null): string {
   const ref = branch ? `${branch}@{u}` : '@{u}';
   const r = git(['rev-parse', '--abbrev-ref', ref], cwd);
   return r.status === 0 ? (r.stdout || '').trim() : '';
 }
 
-/**
- * Check how many commits the local branch is ahead/behind its remote tracking branch.
- * @param {string} cwd
- * @returns {{ ahead: number, behind: number }}
- */
-export function isAheadOfRemote(cwd) {
+/** Check how many commits the local branch is ahead/behind its remote tracking branch. */
+export function isAheadOfRemote(cwd: string): { ahead: number; behind: number } {
   const r = git(['status', '-b', '--porcelain=v1'], cwd);
   if (r.status !== 0) return { ahead: 0, behind: 0 };
   const first = (r.stdout || '').split('\n')[0] || '';

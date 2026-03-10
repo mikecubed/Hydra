@@ -16,11 +16,11 @@ const HYDRA_ROOT = path.resolve(__dirname, '..');
 
 let _loaded = false;
 
-export function loadEnvFile(filePath) {
+export function loadEnvFile(filePath?: string): void {
   if (_loaded) return;
   _loaded = true;
 
-  const envPath = filePath || path.join(HYDRA_ROOT, '.env');
+  const envPath = filePath ?? path.join(HYDRA_ROOT, '.env');
   let raw;
   try {
     raw = fs.readFileSync(envPath, 'utf8');
@@ -30,7 +30,7 @@ export function loadEnvFile(filePath) {
 
   for (const line of raw.split('\n')) {
     const trimmed = line.trim();
-    if (!trimmed || trimmed.startsWith('#')) continue;
+    if (trimmed === '' || trimmed.startsWith('#')) continue;
 
     const eqIdx = trimmed.indexOf('=');
     if (eqIdx <= 0) continue;
@@ -47,14 +47,12 @@ export function loadEnvFile(filePath) {
     }
 
     // Only set if not already defined (real env vars take priority)
-    if (process.env[key] === undefined) {
-      process.env[key] = value;
-    }
+    process.env[key] ??= value;
   }
 }
 
 /** Check whether a .env file exists at the Hydra root. */
-export function envFileExists() {
+export function envFileExists(): boolean {
   return fs.existsSync(path.join(HYDRA_ROOT, '.env'));
 }
 

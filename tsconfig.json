@@ -24,6 +24,8 @@
     "checkJs": true,
     "declaration": false,
     "sourceMap": false,
+    "noEmit": true,
+    "allowImportingTsExtensions": true,
     "skipLibCheck": true
   },
   "include": [
