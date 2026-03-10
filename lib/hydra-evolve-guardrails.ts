@@ -99,17 +99,17 @@ export class EvolveBudgetTracker {
 
   constructor(budgetOverrides: Record<string, unknown> = {}) {
     const defaults = getEvolveBudgetConfig();
-    this.softLimit = (budgetOverrides['softLimit'] as number) || defaults.softLimit;
-    this.hardLimit = (budgetOverrides['hardLimit'] as number) || defaults.hardLimit;
+    this.softLimit = (budgetOverrides['softLimit'] as number) ?? defaults.softLimit;
+    this.hardLimit = (budgetOverrides['hardLimit'] as number) ?? defaults.hardLimit;
     this.perRoundEstimate =
-      (budgetOverrides['perRoundEstimate'] as number) || defaults.perRoundEstimate;
-    this.warnThreshold = (budgetOverrides['warnThreshold'] as number) || defaults.warnThreshold;
+      (budgetOverrides['perRoundEstimate'] as number) ?? defaults.perRoundEstimate;
+    this.warnThreshold = (budgetOverrides['warnThreshold'] as number) ?? defaults.warnThreshold;
     this.reduceScopeThreshold =
-      (budgetOverrides['reduceScopeThreshold'] as number) || defaults.reduceScopeThreshold;
+      (budgetOverrides['reduceScopeThreshold'] as number) ?? defaults.reduceScopeThreshold;
     this.softStopThreshold =
-      (budgetOverrides['softStopThreshold'] as number) || defaults.softStopThreshold;
+      (budgetOverrides['softStopThreshold'] as number) ?? defaults.softStopThreshold;
     this.hardStopThreshold =
-      (budgetOverrides['hardStopThreshold'] as number) || defaults.hardStopThreshold;
+      (budgetOverrides['hardStopThreshold'] as number) ?? defaults.hardStopThreshold;
 
     this.startTokens = 0;
     this.currentTokens = 0;

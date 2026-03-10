@@ -290,7 +290,7 @@ export function detectCodebaseQuery(message: string) {
 /**
  * Infer a topic category from a freeform text fragment.
  */
-function inferTopic(text: string): string {
+function inferTopic(text: string): string | null {
   const lower = text.toLowerCase();
   let bestTopic: string | null = null;
   let bestScore = 0;
@@ -306,7 +306,7 @@ function inferTopic(text: string): string {
       }
     }
   }
-  return bestTopic ?? '';
+  return bestTopic;
 }
 
 // ── Topic Context Retrieval ─────────────────────────────────────────────────
@@ -573,11 +573,14 @@ export function searchKnowledgeBase(query: string, maxResults = 5) {
   let kb;
   try {
     // Lazy-load to avoid circular dependencies
-    const { loadKnowledgeBase, searchEntries } = loadKBModule()!;
+    const kbModule = loadKBModule();
+    if (!kbModule) return '';
+    const { loadKnowledgeBase, searchEntries } = kbModule;
     kb = loadKnowledgeBase(EVOLVE_DIR);
     if (!kb || !kb.entries || kb.entries.length === 0) return '';
 
-    const results = searchEntries!(kb, query);
+    if (!searchEntries) return '';
+    const results = searchEntries(kb, query);
     if (results.length === 0) return '';
 
     const lines = [`Knowledge base findings for "${query}":`];

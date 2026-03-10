@@ -176,13 +176,13 @@ const pipelinedStream = createStreamingPipeline('google', coreStreamGoogle);
 export async function streamGoogleCompletion(
   messages: unknown[],
   cfg: Record<string, unknown> & { model?: string },
-  onChunk: ((chunk: string) => void) | null,
+  onChunk?: ((chunk: string) => void) | null,
 ): Promise<{
   fullResponse: string;
   usage: { prompt_tokens: number; completion_tokens: number } | null;
   rateLimits: null;
 }> {
-  return pipelinedStream(messages, cfg, onChunk) as Promise<{
+  return pipelinedStream(messages, cfg, onChunk ?? null) as Promise<{
     fullResponse: string;
     usage: { prompt_tokens: number; completion_tokens: number } | null;
     rateLimits: null;
