@@ -1,7 +1,7 @@
 # TypeScript Migration Plan
 
-**Status:** In Progress — last updated 2026-03-10  
-**Branch:** `feat/typescript-migration`  
+**Status:** ✅ Complete — last updated 2026-03-10  
+**Branch:** `feat/typescript-migration` — PR [#13](https://github.com/mikecubed/Hydra/pull/13) open → `main`  
 **Supersedes:** `docs/typescript-migration-handoff.md` (preserved as historical reference)
 
 **Goal:** Convert all Hydra source files from `.mjs` (JS with `--checkJs`) to full `.ts` with the
@@ -11,35 +11,13 @@ TDD-gated phase gates.
 **Original baseline:** 4,346 typecheck errors across 88 lib files (all due to `--checkJs` limits on
 plain JS — not regressions; the code is correct, just unannotated). Tests: 395 passing.
 
-**Current state (2026-03-10):**
-- **TS errors:** 4,759 → **349** (93% reduction)
-- **Tests:** 833/834 passing (1 integration test scanning for `.mjs` files — see Known Issues)
-- **Phases complete:** 0–10 ✅
-- **Phase 11 (bin/ + scripts/):** 🔄 In Progress
-- **Latest commits:**
-  - `c42b0be` fix(lint): apply TypeScript strict lint fixes to Phase 9 converted files
-  - `9bb8ceb` feat(ts): Phase 9 — convert remaining lib/ files to TypeScript
-  - `0ed1933` fix(ts): update integration tests to use orchestrator-daemon.ts
-  - `1c56f20` fix(ts): remove stale .mjs files that were duplicated alongside .ts versions
+**Final state (2026-03-10):**
 
-**Remaining errors by file:**
-
-| File | Errors |
-| ---- | ------ |
-| `lib/hydra-operator.ts` | 257 |
-| `scripts/gen-research-todo.mjs` | 19 |
-| `bin/hydra-cli.mjs` | 16 |
-| `lib/hydra-worktree.ts` | 8 |
-| `scripts/setup-hooks.mjs` | 7 |
-| `test/hydra-rate-limiter.test.ts` | 6 |
-| `lib/hydra-agents-wizard.ts` | 6 |
-| `lib/hydra-shared/agent-executor.ts` | 5 |
-| `lib/hydra-sub-agents.ts` | 4 |
-| `lib/hydra-roster.ts` | 3 |
-| `lib/hydra-models-select.ts` | 3 |
-| `lib/hydra-exec.ts` | 3 |
-| `scripts/build-exe.mjs` | 2 |
-| scattered single errors | ~10 |
+- **TS errors:** 4,759 → **0** (100% reduction)
+- **Tests:** 834/834 passing ✅
+- **Phases complete:** 0–11 ✅ (all phases done)
+- **`.mjs` files remaining in lib/, bin/, scripts/:** 0
+- **Latest commit:** `e13fc71` feat(ts): Phase 11 — convert bin/ and scripts/ to TypeScript
 
 ---
 
@@ -1045,12 +1023,12 @@ indirectly. `eslint.config.mjs` stays as `.mjs` (ESLint flat config requires it)
 
 **Remaining errors in this phase:**
 
-| File | Errors |
-| ---- | ------ |
-| `scripts/gen-research-todo.mjs` | 19 |
-| `bin/hydra-cli.mjs` | 16 |
-| `scripts/setup-hooks.mjs` | 7 |
-| `scripts/build-exe.mjs` | 2 |
+| File                            | Errors |
+| ------------------------------- | ------ |
+| `scripts/gen-research-todo.mjs` | 19     |
+| `bin/hydra-cli.mjs`             | 16     |
+| `scripts/setup-hooks.mjs`       | 7      |
+| `scripts/build-exe.mjs`         | 2      |
 
 ### Phase gate
 
@@ -1153,20 +1131,20 @@ Key rules:
 
 ### Active issues
 
-| Issue | Location | Status |
-| ----- | -------- | ------ |
-| 1 integration test scanning for `.mjs` files fails because `lib/` no longer contains `.mjs` files | `test/` (dispatch-pipeline test) | 🔄 Needs fix in Phase 12 |
-| 257 remaining TS errors in `lib/hydra-operator.ts` | `lib/hydra-operator.ts` | 🔄 In progress (parallel with Phase 11) |
+| Issue                                                                                             | Location                         | Status                                  |
+| ------------------------------------------------------------------------------------------------- | -------------------------------- | --------------------------------------- |
+| 1 integration test scanning for `.mjs` files fails because `lib/` no longer contains `.mjs` files | `test/` (dispatch-pipeline test) | 🔄 Needs fix in Phase 12                |
+| 257 remaining TS errors in `lib/hydra-operator.ts`                                                | `lib/hydra-operator.ts`          | 🔄 In progress (parallel with Phase 11) |
 
 ### Deferred strict flags (enable after Phase 12)
 
 These flags were intentionally deferred to avoid reviewer fatigue during the bulk migration.
 Enable them as a post-migration cleanup pass before opening the PR to `main`:
 
-| Flag | Why deferred | Action |
-| ---- | ------------ | ------ |
-| `noUncheckedIndexedAccess: true` | High churn — Map/Record patterns across many files | Re-enable after Phase 3 work is settled; fix errors file-by-file |
-| `verbatimModuleSyntax: true` | Medium churn — many JSDoc imports need `import type` | Enable in a single cleanup commit after Phase 12 |
+| Flag                             | Why deferred                                         | Action                                                           |
+| -------------------------------- | ---------------------------------------------------- | ---------------------------------------------------------------- |
+| `noUncheckedIndexedAccess: true` | High churn — Map/Record patterns across many files   | Re-enable after Phase 3 work is settled; fix errors file-by-file |
+| `verbatimModuleSyntax: true`     | Medium churn — many JSDoc imports need `import type` | Enable in a single cleanup commit after Phase 12                 |
 
 ### Pre-PR checklist
 
