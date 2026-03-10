@@ -4,12 +4,11 @@ import {
   validateAgentSpec,
   analyzeCodebase,
   loadForgeRegistry,
-  saveForgeRegistry,
   listForgedAgents,
   persistForgedAgent,
   removeForgedAgent,
   generateSamplePrompt,
-} from '../lib/hydra-agent-forge.mjs';
+} from '../lib/hydra-agent-forge.ts';
 import { TASK_TYPES, getAgent, _resetRegistry, initAgentRegistry } from '../lib/hydra-agents.mjs';
 import { registerBuiltInSubAgents } from '../lib/hydra-sub-agents.ts';
 

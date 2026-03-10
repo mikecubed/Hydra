@@ -7,19 +7,36 @@
 
 import os from 'node:os';
 import path from 'node:path';
+import type { Interface as ReadlineInterface } from 'node:readline';
 import { promptChoice } from './hydra-prompt-choice.mjs';
 import { loadHydraConfig, saveHydraConfig, AFFINITY_PRESETS } from './hydra-config.ts';
 import { registerCustomAgentMcp, KNOWN_CLI_MCP_PATHS } from './hydra-setup.ts';
+import type { CustomAgentDef } from './types.ts';
 
 const RESERVED_NAMES = ['claude', 'gemini', 'codex', 'local'];
 
+/** Fields collected by the wizard before building the agent entry. */
+interface WizardFields {
+  name: string;
+  type: 'cli' | 'api';
+  cmd?: string;
+  argsTemplate?: string;
+  responseParser?: string;
+  baseUrl?: string;
+  model?: string;
+  contextBudget?: number;
+  affinityPreset?: string;
+  councilRole?: string | null;
+  displayName?: string;
+  enabled?: boolean;
+}
+
 /**
  * Validate a custom agent name.
- * @param {string} name
- * @returns {string|null} Error message, or null if valid
+ * Returns an error message, or null if valid.
  */
-export function validateAgentName(name) {
-  if (!name || !name.trim()) return 'Name cannot be empty';
+export function validateAgentName(name: string): string | null {
+  if (name.length === 0 || !name.trim()) return 'Name cannot be empty';
   if (RESERVED_NAMES.includes(name.toLowerCase())) return `"${name}" is a reserved agent name`;
   if (!/^[a-z][a-z0-9-]*$/.test(name))
     return 'Name must be lowercase alphanumeric with hyphens (e.g. copilot, my-agent)';
@@ -28,112 +45,109 @@ export function validateAgentName(name) {
 
 /**
  * Split a space-separated args template string into an array.
- * @param {string} template - e.g. "copilot suggest -p {prompt}"
- * @returns {string[]}
+ * e.g. "copilot suggest -p {prompt}" → ['copilot', 'suggest', '-p', '{prompt}']
  */
-export function parseArgsTemplate(template) {
+export function parseArgsTemplate(template: string): string[] {
   return template.trim().split(/\s+/).filter(Boolean);
 }
 
 /**
  * Build a customAgents[] entry from wizard field values.
- * @param {object} fields
- * @returns {object} Agent entry ready for config
  */
-export function buildCustomAgentEntry(fields) {
+export function buildCustomAgentEntry(fields: WizardFields): CustomAgentDef {
   const { name, type, affinityPreset, councilRole, contextBudget, enabled } = fields;
-  const taskAffinity = AFFINITY_PRESETS[affinityPreset] || AFFINITY_PRESETS['balanced'];
+  const taskAffinity =
+    (AFFINITY_PRESETS as Record<string, typeof AFFINITY_PRESETS[keyof typeof AFFINITY_PRESETS] | undefined>)[
+      affinityPreset ?? 'balanced'
+    ] ?? AFFINITY_PRESETS['balanced'];
 
-  const base = {
+  const base: CustomAgentDef = {
     name,
     type,
-    displayName: fields.displayName || name,
+    displayName: fields.displayName ?? name,
     contextBudget: Number(contextBudget) || 32000,
-    councilRole: councilRole || null,
+    councilRole: councilRole ?? null,
     taskAffinity,
     enabled: enabled !== false,
   };
 
   if (type === 'cli') {
-    const args = parseArgsTemplate(fields.argsTemplate || '{prompt}');
-    const invokeEntry = { cmd: fields.cmd, args };
+    const args = parseArgsTemplate(fields.argsTemplate ?? '{prompt}');
+    const invokeEntry = { cmd: fields.cmd ?? '', args };
     return {
       ...base,
       invoke: { nonInteractive: invokeEntry, headless: invokeEntry },
-      responseParser: fields.responseParser || 'plaintext',
+      responseParser: fields.responseParser ?? 'plaintext',
     };
   }
 
   // API type
   return {
     ...base,
-    baseUrl: fields.baseUrl || 'http://localhost:11434/v1',
-    model: fields.model || 'default',
+    baseUrl: fields.baseUrl ?? 'http://localhost:11434/v1',
+    model: fields.model ?? 'default',
   };
 }
 
-/**
- * Interactive wizard for adding a custom agent.
- * @param {import('readline').Interface} rl
- */
-export async function runAgentsWizard(rl) {
+/** Interactive wizard for adding a custom agent. */
+export async function runAgentsWizard(rl: ReadlineInterface): Promise<void> {
   console.log('');
   console.log('  Custom Agent Setup Wizard');
   console.log('  ─────────────────────────');
 
-  function ask(prompt) {
+  function ask(question: string): Promise<string> {
     return new Promise((resolve) => {
-      rl.question(`  ${prompt}: `, (ans) => resolve(ans.trim()));
+      rl.question(`  ${question}: `, (ans) => { resolve(ans.trim()); });
     });
   }
 
   // 1. Name
-  let name;
-  while (true) {
+  let name!: string;
+  let nameError!: string | null;
+  do {
     name = await ask('Agent name (e.g. copilot, mixtral)');
-    const err = validateAgentName(name);
-    if (!err) break;
-    console.log(`  ✗ ${err}`);
-  }
+    nameError = validateAgentName(name);
+    if (nameError) console.log(`  ✗ ${nameError}`);
+  } while (nameError !== null);
 
   // 2. Type
   const typeChoice = await promptChoice(rl, {
-    prompt: 'Agent type',
+    title: 'Agent type',
     choices: [
       {
         value: 'cli',
         label: 'CLI agent',
-        description: 'Spawns a local CLI tool (e.g. gh copilot, aider)',
+        hint: 'Spawns a local CLI tool (e.g. gh copilot, aider)',
       },
       {
         value: 'api',
         label: 'API endpoint',
-        description: 'Calls an OpenAI-compatible HTTP API (e.g. Ollama, LM Studio)',
+        hint: 'Calls an OpenAI-compatible HTTP API (e.g. Ollama, LM Studio)',
       },
     ],
   });
-  const agentType = typeChoice.value;
+  const agentType = typeChoice.value as 'cli' | 'api';
 
-  const fields = { name, type: agentType };
+  const fields: WizardFields = { name, type: agentType };
 
   if (agentType === 'cli') {
     fields.cmd = await ask('CLI command (e.g. gh, aider, continue)');
     fields.argsTemplate = await ask('Args template (e.g. copilot suggest -p {prompt})');
 
     const parserChoice = await promptChoice(rl, {
-      prompt: 'Response parser',
+      title: 'Response parser',
       choices: [
-        { value: 'plaintext', label: 'Plaintext', description: 'Capture stdout as-is' },
+        { value: 'plaintext', label: 'Plaintext', hint: 'Capture stdout as-is' },
         {
           value: 'json',
           label: 'JSON',
-          description: 'Parse JSON stdout, extract .content/.text field',
+          hint: 'Parse JSON stdout, extract .content/.text field',
         },
-        { value: 'markdown', label: 'Markdown', description: 'Capture markdown output as-is' },
+        { value: 'markdown', label: 'Markdown', hint: 'Capture markdown output as-is' },
       ],
-      autoAccept: true,
+      // autoAccept is not a formal promptChoice option — omitted
     });
-    fields.responseParser = parserChoice.value;
+    fields.responseParser = String(parserChoice.value);
   } else {
     fields.baseUrl = await ask('Base URL (e.g. http://localhost:11434/v1)');
     fields.model = await ask('Model name (e.g. mixtral:8x7b, llama3.2)');
@@ -145,61 +159,63 @@ export async function runAgentsWizard(rl) {
 
   // Task profile
   const profileChoice = await promptChoice(rl, {
-    prompt: 'Task affinity profile',
+    title: 'Task affinity profile',
     choices: [
-      { value: 'balanced', label: 'Balanced', description: 'Equal weight across all task types' },
+      { value: 'balanced', label: 'Balanced', hint: 'Equal weight across all task types' },
       {
         value: 'code-focused',
         label: 'Code-focused',
-        description: 'High weight for implementation, refactor, testing',
+        hint: 'High weight for implementation, refactor, testing',
       },
       {
         value: 'review-focused',
         label: 'Review-focused',
-        description: 'High weight for review, analysis, security',
+        hint: 'High weight for review, analysis, security',
       },
       {
         value: 'research-focused',
         label: 'Research-focused',
-        description: 'High weight for research, documentation, analysis',
+        hint: 'High weight for research, documentation, analysis',
       },
     ],
   });
-  fields.affinityPreset = profileChoice.value;
+  fields.affinityPreset = String(profileChoice.value);
 
   // Council role
   const councilChoice = await promptChoice(rl, {
-    prompt: 'Council role',
+    title: 'Council role',
     choices: [
-      { value: null, label: 'None', description: 'Excluded from council deliberation' },
-      { value: 'analyst', label: 'Analyst', description: 'Critique and analysis role' },
-      { value: 'architect', label: 'Architect', description: 'Planning and architecture role' },
-      { value: 'implementer', label: 'Implementer', description: 'Implementation role' },
+      { value: null, label: 'None', hint: 'Excluded from council deliberation' },
+      { value: 'analyst', label: 'Analyst', hint: 'Critique and analysis role' },
+      { value: 'architect', label: 'Architect', hint: 'Planning and architecture role' },
+      { value: 'implementer', label: 'Implementer', hint: 'Implementation role' },
     ],
   });
-  fields.councilRole = councilChoice.value;
+  fields.councilRole = councilChoice.value as string | null;
 
   // Build entry
   const entry = buildCustomAgentEntry(fields);
 
   // MCP setup (CLI agents only)
-  let mcpConfig = null;
+  let mcpConfig: { configPath: string | null; format: string } | null = null;
   if (agentType === 'cli') {
-    const knownPath = KNOWN_CLI_MCP_PATHS[fields.cmd];
+    const knownPath = fields.cmd
+      ? (KNOWN_CLI_MCP_PATHS as Record<string, string | null | undefined>)[fields.cmd]
+      : undefined;
     const mcpChoices = [
       {
         value: 'auto',
         label: 'Auto-detect',
-        description: knownPath ? `Try ${knownPath}` : 'Attempt auto-detection',
+        hint: knownPath ? `Try ${knownPath}` : 'Attempt auto-detection',
       },
       {
         value: 'manual-path',
         label: 'Enter config path',
-        description: "Provide the path to your agent's config file",
+        hint: "Provide the path to your agent's config file",
       },
-      { value: 'skip', label: 'Skip', description: 'Show manual instructions at the end' },
+      { value: 'skip', label: 'Skip', hint: 'Show manual instructions at the end' },
     ];
-    const mcpChoice = await promptChoice(rl, { prompt: 'MCP registration', choices: mcpChoices });
+    const mcpChoice = await promptChoice(rl, { title: 'MCP registration', choices: mcpChoices });
 
     if (mcpChoice.value === 'auto' && knownPath) {
       mcpConfig = { configPath: path.join(os.homedir(), knownPath), format: 'json' };
@@ -212,7 +228,7 @@ export async function runAgentsWizard(rl) {
 
   // Save to config
   const cfg = loadHydraConfig();
-  const customAgents = [...(cfg.agents?.customAgents || [])];
+  const customAgents = [...cfg.agents.customAgents];
   const existing = customAgents.findIndex((a) => a.name === entry.name);
   if (existing >= 0) {
     customAgents[existing] = entry;
