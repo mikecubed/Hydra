@@ -15,11 +15,11 @@ Convert Hydra from plain JavaScript (`.mjs`) to TypeScript (`.ts`). The project 
 
 **How to handle the build step?**
 
-| Option | Dev experience | CI | Recommendation |
-|--------|---------------|-----|----------------|
-| `tsx` for dev, `tsc` for CI/dist | No build step in dev | Compile before test | ✅ Best balance |
-| Node 22 `--experimental-strip-types` | No build step anywhere | Same | ✅ Also good, flag is experimental |
-| Pure `tsc` compile step | Must compile before running | Standard | Works, loses "runs directly" feel |
+| Option                               | Dev experience              | CI                  | Recommendation                     |
+| ------------------------------------ | --------------------------- | ------------------- | ---------------------------------- |
+| `tsx` for dev, `tsc` for CI/dist     | No build step in dev        | Compile before test | ✅ Best balance                    |
+| Node 22 `--experimental-strip-types` | No build step anywhere      | Same                | ✅ Also good, flag is experimental |
+| Pure `tsc` compile step              | Must compile before running | Standard            | Works, loses "runs directly" feel  |
 
 The project's `no-build-step` philosophy is a stated design principle. Recommend **`tsx` + `tsc` for CI** to preserve it.
 
@@ -56,13 +56,14 @@ The project's `no-build-step` philosophy is a stated design principle. Recommend
 **Do NOT convert everything at once.** File-by-file, PR-by-PR. Run `npm test` + `npm run quality` after each batch.
 
 ### Phase 1 — Shared Types (Start Here)
+
 Create `lib/types.ts` with core interfaces. No logic, just types.
 These are the highest-value types to define first:
 
 ```typescript
 // Key types to define
 interface AgentDef { ... }         // from hydra-agents.mjs
-interface HydraConfig { ... }      // from hydra-config.mjs  
+interface HydraConfig { ... }      // from hydra-config.mjs
 interface TaskState { ... }        // from orchestrator-daemon.mjs
 interface SessionState { ... }     // from orchestrator-daemon.mjs
 interface RoutingDecision { ... }  // from hydra-dispatch.mjs
@@ -70,7 +71,9 @@ interface AgentResult { ... }      // from agent-executor.mjs
 ```
 
 ### Phase 2 — Pure Utilities (Mechanical, Low Risk)
+
 Convert in any order — no circular deps, simple types:
+
 - `lib/hydra-env.mjs`
 - `lib/hydra-cache.mjs`
 - `lib/hydra-utils.mjs`
@@ -79,46 +82,52 @@ Convert in any order — no circular deps, simple types:
 - `lib/hydra-telemetry.mjs`
 
 ### Phase 3 — Config & Models (Medium)
+
 - `lib/hydra-config.mjs` — expose `HydraConfig` type properly
 - `lib/hydra-models.mjs`
 - `lib/hydra-model-profiles.mjs`
 
 ### Phase 4 — Agent System (Hard — needs care)
+
 - `lib/hydra-agents.mjs` — plugin registry has dynamic fields, needs careful generics
 - `lib/hydra-shared/agent-executor.mjs` — subprocess piping, streaming
 - `lib/hydra-agents-wizard.mjs`
 - `lib/hydra-agent-forge.mjs`
 
 ### Phase 5 — Daemon & Routes (Medium-Hard)
+
 - `lib/orchestrator-daemon.mjs`
 - `lib/daemon/read-routes.mjs`
 - `lib/daemon/write-routes.mjs`
 - `lib/orchestrator-client.mjs`
 
 ### Phase 6 — Operator & Council (Large files)
+
 - `lib/hydra-dispatch.mjs`
 - `lib/hydra-council.mjs`
 - `lib/hydra-operator.mjs` (6,400 lines — save for last)
 
 ### Phase 7 — Everything Else
+
 - Remaining `lib/` files
 - `bin/` entry points
 - `scripts/`
 
 ### Phase 8 — Tests
+
 Convert test files last. They serve as a regression net during the migration.
 
 ---
 
 ## Known Hard Spots (Flag for Human Review)
 
-| File | Why It's Hard |
-|------|--------------|
-| `lib/hydra-agents.mjs` | Dynamic plugin registry — `registerAgent()` applies defaults; typing `AgentDef` generics correctly without overusing `unknown` |
-| `lib/hydra-config.mjs` | Config merging with deep partial overrides — `_setTestConfig()` and `invalidateConfigCache()` are tricky |
-| `lib/hydra-shared/agent-executor.mjs` | Subprocess stdio types, streaming chunks, per-agent parse callbacks |
-| `lib/hydra-operator.mjs` | 6,400 lines of mixed concerns — type narrowing on the command dispatch switch will be verbose |
-| `lib/hydra-council.mjs` | Multi-round deliberation with dynamic agent results accumulation |
+| File                                  | Why It's Hard                                                                                                                  |
+| ------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------ |
+| `lib/hydra-agents.mjs`                | Dynamic plugin registry — `registerAgent()` applies defaults; typing `AgentDef` generics correctly without overusing `unknown` |
+| `lib/hydra-config.mjs`                | Config merging with deep partial overrides — `_setTestConfig()` and `invalidateConfigCache()` are tricky                       |
+| `lib/hydra-shared/agent-executor.mjs` | Subprocess stdio types, streaming chunks, per-agent parse callbacks                                                            |
+| `lib/hydra-operator.mjs`              | 6,400 lines of mixed concerns — type narrowing on the command dispatch switch will be verbose                                  |
+| `lib/hydra-council.mjs`               | Multi-round deliberation with dynamic agent results accumulation                                                               |
 
 ---
 

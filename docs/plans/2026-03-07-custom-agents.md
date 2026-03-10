@@ -9,6 +9,7 @@
 **Depends on:** ~~Agent Plugin Refactor (2026-03-08)~~ — **DONE.** The plugin refactor made the executor and all callsites data-driven. `registerAgent()` now applies plugin defaults (`features`, `parseOutput`, `errorPatterns`, `modelBelongsTo`, `quotaVerify`, `economyModel`, `readInstructions`, `taskRules`) to every agent — including custom agents. This means custom agents automatically get sensible defaults without the wizard needing to produce plugin fields.
 
 **Architecture:** Custom agents live in `agents.customAgents[]` in `hydra.config.json`. On startup, `initAgentRegistry()` loads them and calls `registerAgent()` for each — which applies plugin interface defaults. `executeAgent()` routes them via `agentDef.features.executeMode` and `agentDef.customType`:
+
 - **CLI agents** (`customType: 'cli'`): dispatched to `executeCustomCliAgent()`, which uses `expandInvokeArgs()` for template expansion and `agentDef.parseOutput()` for response parsing
 - **API agents** (`customType: 'api'`, `features.executeMode: 'api'`): dispatched to `executeCustomApiAgent()`, which reuses `streamLocalCompletion()` from `hydra-local.mjs`
 - **CLI-not-found fallback**: `executeAgentWithRecovery()` catches `custom-cli-unavailable` errors and falls back to `claude` transparently
@@ -1637,9 +1638,9 @@ git commit -m "docs: document custom agent registration (agents.customAgents, :a
 
 ### Remaining Work
 
-| Item | Priority | Description |
-| ---- | -------- | ----------- |
-| **Provider presets picker** | Medium | `getProviderPresets()` returns built-in GLM-5 / Kimi K2.5 templates. The wizard should offer these as pre-filled options for API agents instead of requiring manual `baseUrl`/`model` entry. |
-| **Optional advanced plugin config** | Low | Power users may want to configure custom `errorPatterns`, `readInstructions`, or `taskRules` for their agents. Could be an `:agents edit <name>` command or advanced wizard track. Not needed for MVP — defaults cover most use cases. |
-| **Documentation updates** | Medium | Task 9 — update CLAUDE.md, README.md, docs/ARCHITECTURE.md to reflect custom agent registration and plugin defaults. |
-| **Custom `parseOutput` for known CLIs** | Low | For well-known CLIs (e.g. Aider, Continue), the wizard could auto-set `parseOutput` and `errorPatterns` based on CLI name. Requires knowledge of each CLI's output format. |
+| Item                                    | Priority | Description                                                                                                                                                                                                                            |
+| --------------------------------------- | -------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Provider presets picker**             | Medium   | `getProviderPresets()` returns built-in GLM-5 / Kimi K2.5 templates. The wizard should offer these as pre-filled options for API agents instead of requiring manual `baseUrl`/`model` entry.                                           |
+| **Optional advanced plugin config**     | Low      | Power users may want to configure custom `errorPatterns`, `readInstructions`, or `taskRules` for their agents. Could be an `:agents edit <name>` command or advanced wizard track. Not needed for MVP — defaults cover most use cases. |
+| **Documentation updates**               | Medium   | Task 9 — update CLAUDE.md, README.md, docs/ARCHITECTURE.md to reflect custom agent registration and plugin defaults.                                                                                                                   |
+| **Custom `parseOutput` for known CLIs** | Low      | For well-known CLIs (e.g. Aider, Continue), the wizard could auto-set `parseOutput` and `errorPatterns` based on CLI name. Requires knowledge of each CLI's output format.                                                             |
