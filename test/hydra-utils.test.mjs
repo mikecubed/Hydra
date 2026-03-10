@@ -139,7 +139,7 @@ test('parseList handles mixed separators and trims', () => {
 test('parseList returns empty for null/empty', () => {
   assert.deepEqual(parseList(null), []);
   assert.deepEqual(parseList(''), []);
-  assert.deepEqual(parseList(undefined), []);
+  assert.deepEqual(parseList(), []);
 });
 
 test('parseList passes through arrays', () => {
@@ -321,8 +321,8 @@ test('classifyPrompt rates short imperative prompts as simple', () => {
 test('classifyPrompt rates complex deliberation prompts as complex', () => {
   const result = classifyPrompt(
     'Should we redesign the entire authentication system? We need to compare OAuth vs JWT approaches, ' +
-    'evaluate the trade-offs of each, and decide which strategy to use going forward. ' +
-    'Also investigate whether we should migrate the existing sessions.'
+      'evaluate the trade-offs of each, and decide which strategy to use going forward. ' +
+      'Also investigate whether we should migrate the existing sessions.',
   );
   assert.equal(result.tier, 'complex');
 });
@@ -357,7 +357,10 @@ test('classifyPrompt confidence is between 0 and 1', () => {
   ];
   for (const p of prompts) {
     const result = classifyPrompt(p);
-    assert.ok(result.confidence >= 0 && result.confidence <= 1, `confidence ${result.confidence} out of range for "${p}"`);
+    assert.ok(
+      result.confidence >= 0 && result.confidence <= 1,
+      `confidence ${result.confidence} out of range for "${p}"`,
+    );
   }
 });
 
@@ -377,7 +380,10 @@ test('classifyPrompt routes simple prompts as single', () => {
 
 test('classifyPrompt routes moderate prompts as tandem', () => {
   const result = classifyPrompt('update the user profile page with better validation');
-  if (result.tier === 'moderate' || (result.tier === 'simple' && result.routeStrategy === 'tandem')) {
+  if (
+    result.tier === 'moderate' ||
+    (result.tier === 'simple' && result.routeStrategy === 'tandem')
+  ) {
     assert.equal(result.routeStrategy, 'tandem');
     assert.ok(result.tandemPair);
     assert.ok(result.tandemPair.lead);
@@ -388,8 +394,8 @@ test('classifyPrompt routes moderate prompts as tandem', () => {
 test('classifyPrompt routes high-complexity prompts as council', () => {
   const result = classifyPrompt(
     'Should we redesign the entire authentication system? We need to compare OAuth vs JWT approaches, ' +
-    'evaluate the trade-offs of each, and decide which strategy to use going forward. ' +
-    'Also investigate whether we should migrate the existing sessions.'
+      'evaluate the trade-offs of each, and decide which strategy to use going forward. ' +
+      'Also investigate whether we should migrate the existing sessions.',
   );
   assert.equal(result.routeStrategy, 'council');
 });
@@ -604,13 +610,20 @@ test('runProcess returns ok:false for unknown command', () => {
 });
 
 test('runProcess respects cwd option', () => {
-  const result = runProcess(process.execPath, ['-e', "console.log(process.cwd())"], undefined, { cwd: process.cwd() });
+  const result = runProcess(process.execPath, ['-e', 'console.log(process.cwd())'], undefined, {
+    cwd: process.cwd(),
+  });
   assert.equal(result.ok, true);
   assert.ok(result.stdout.trim().length > 0);
 });
 
 test('runProcess pipes stdin input', () => {
-  const result = runProcess(process.execPath, ['-e', "let d='';process.stdin.on('data',c=>d+=c);process.stdin.on('end',()=>console.log(d))"], undefined, { input: 'piped-data' });
+  const result = runProcess(
+    process.execPath,
+    ['-e', "let d='';process.stdin.on('data',c=>d+=c);process.stdin.on('end',()=>console.log(d))"],
+    undefined,
+    { input: 'piped-data' },
+  );
   assert.equal(result.ok, true);
   assert.ok(result.stdout.includes('piped-data'));
 });

@@ -1,6 +1,11 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
-import { extractPathsFromPrompt, findScopedContextFiles, compileHierarchicalContext, buildAgentContext } from '../lib/hydra-context.mjs';
+import {
+  extractPathsFromPrompt,
+  findScopedContextFiles,
+  compileHierarchicalContext,
+  buildAgentContext,
+} from '../lib/hydra-context.mjs';
 import { mkdirSync, writeFileSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
@@ -8,7 +13,10 @@ import { tmpdir } from 'node:os';
 // ── Helper: create a unique temp directory tree ───────────────────────────────
 
 function makeTmpTree(structure) {
-  const root = join(tmpdir(), `hydra-ctx-test-${Date.now()}-${Math.random().toString(36).slice(2)}`);
+  const root = join(
+    tmpdir(),
+    `hydra-ctx-test-${Date.now()}-${Math.random().toString(36).slice(2)}`,
+  );
   mkdirSync(root, { recursive: true });
 
   for (const [relPath, content] of Object.entries(structure)) {
@@ -21,20 +29,32 @@ function makeTmpTree(structure) {
 }
 
 function cleanTmp(root) {
-  try { rmSync(root, { recursive: true, force: true }); } catch { /* ignore */ }
+  try {
+    rmSync(root, { recursive: true, force: true });
+  } catch {
+    /* ignore */
+  }
 }
 
 // ── extractPathsFromPrompt ─────────────────────────────────────────────────────
 
 describe('extractPathsFromPrompt', () => {
   it('finds a relative path with separators in a sentence', () => {
-    const result = extractPathsFromPrompt('Please update the types in src/foo/bar.ts to add a new field.');
-    assert.ok(result.includes('src/foo/bar.ts'), `Expected src/foo/bar.ts, got: ${JSON.stringify(result)}`);
+    const result = extractPathsFromPrompt(
+      'Please update the types in src/foo/bar.ts to add a new field.',
+    );
+    assert.ok(
+      result.includes('src/foo/bar.ts'),
+      `Expected src/foo/bar.ts, got: ${JSON.stringify(result)}`,
+    );
   });
 
   it('finds a plain filename with an extension', () => {
     const result = extractPathsFromPrompt('Check config.json for the database settings.');
-    assert.ok(result.includes('config.json'), `Expected config.json, got: ${JSON.stringify(result)}`);
+    assert.ok(
+      result.includes('config.json'),
+      `Expected config.json, got: ${JSON.stringify(result)}`,
+    );
   });
 
   it('returns [] for plain text with no file paths', () => {
@@ -43,7 +63,9 @@ describe('extractPathsFromPrompt', () => {
   });
 
   it('deduplicates repeated paths', () => {
-    const result = extractPathsFromPrompt('Edit src/foo/bar.ts — the main logic is in src/foo/bar.ts.');
+    const result = extractPathsFromPrompt(
+      'Edit src/foo/bar.ts — the main logic is in src/foo/bar.ts.',
+    );
     const count = result.filter((p) => p === 'src/foo/bar.ts').length;
     assert.equal(count, 1, 'Duplicate path should appear only once');
   });
@@ -151,7 +173,10 @@ describe('buildAgentContext', () => {
       // No promptText → should fall through to base context only
       const result = buildAgentContext('claude', {}, projectConfig, null);
       // Must not contain the scoped context header
-      assert.ok(!result.includes('--- [src/HYDRA.md] ---'), `Should not include scoped header. Got:\n${result}`);
+      assert.ok(
+        !result.includes('--- [src/HYDRA.md] ---'),
+        `Should not include scoped header. Got:\n${result}`,
+      );
     } finally {
       cleanTmp(root);
     }
@@ -168,12 +193,21 @@ describe('buildAgentContext', () => {
       const prompt = `Please update the function in src/foo/bar.ts to handle null input.`;
       const result = buildAgentContext('claude', {}, projectConfig, prompt);
       // Scoped context header must appear before root context
-      assert.ok(result.includes('--- [src/HYDRA.md] ---'), `Should include scoped header. Got:\n${result}`);
-      assert.ok(result.includes('# Src module context'), `Should include scoped content. Got:\n${result}`);
+      assert.ok(
+        result.includes('--- [src/HYDRA.md] ---'),
+        `Should include scoped header. Got:\n${result}`,
+      );
+      assert.ok(
+        result.includes('# Src module context'),
+        `Should include scoped content. Got:\n${result}`,
+      );
       // Scoped section should come before the root PROJECT CONTEXT block
       const scopedIdx = result.indexOf('--- [src/HYDRA.md] ---');
       const rootIdx = result.indexOf('--- PROJECT CONTEXT');
-      assert.ok(scopedIdx < rootIdx, `Scoped context should precede root context. scopedIdx=${scopedIdx}, rootIdx=${rootIdx}`);
+      assert.ok(
+        scopedIdx < rootIdx,
+        `Scoped context should precede root context. scopedIdx=${scopedIdx}, rootIdx=${rootIdx}`,
+      );
     } finally {
       cleanTmp(root);
     }
@@ -189,7 +223,10 @@ describe('buildAgentContext', () => {
       const projectConfig = { projectRoot: root, projectName: 'test-project' };
       const prompt = `Please update src/foo/bar.ts.`;
       const result = buildAgentContext('claude', {}, projectConfig, prompt);
-      assert.ok(!result.includes('--- [src/'), `Should not include any scoped header. Got:\n${result}`);
+      assert.ok(
+        !result.includes('--- [src/'),
+        `Should not include any scoped header. Got:\n${result}`,
+      );
     } finally {
       cleanTmp(root);
     }

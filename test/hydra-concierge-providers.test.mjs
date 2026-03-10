@@ -22,8 +22,11 @@ describe('detectAvailableProviders', () => {
 
   afterEach(() => {
     for (const [k, v] of Object.entries(saved)) {
-      if (v !== undefined) process.env[k] = v;
-      else delete process.env[k];
+      if (v === undefined) {
+        delete process.env[k];
+      } else {
+        process.env[k] = v;
+      }
     }
   });
 
@@ -87,8 +90,11 @@ describe('buildFallbackChain', () => {
 
   afterEach(() => {
     for (const [k, v] of Object.entries(saved)) {
-      if (v !== undefined) process.env[k] = v;
-      else delete process.env[k];
+      if (v === undefined) {
+        delete process.env[k];
+      } else {
+        process.env[k] = v;
+      }
     }
   });
 

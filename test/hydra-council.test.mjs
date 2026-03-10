@@ -15,12 +15,13 @@ test('buildStepPrompt adds structured convergence instructions', () => {
     {
       agent: 'gemini',
       phase: 'critique',
-      promptLabel: 'Review this plan critically. Identify risks, edge cases, missed files, and regressions. Cite specific code.',
+      promptLabel:
+        'Review this plan critically. Identify risks, edge cases, missed files, and regressions. Cite specific code.',
     },
     'Redesign the task routing system',
     [],
     1,
-    2
+    2,
   );
 
   assert.match(prompt, /Decision criteria for convergence:/);
@@ -155,7 +156,12 @@ test('deriveCouncilRecommendation keeps council open for human decisions', () =>
 test('extractAssumptionAttacks maps attack_vector/target_agent (new schema)', () => {
   const parsed = {
     assumption_attacks: [
-      { attack_vector: 'The cache never invalidates under concurrent writes', target_agent: 'claude', impact: 'data loss', by: 'gemini' },
+      {
+        attack_vector: 'The cache never invalidates under concurrent writes',
+        target_agent: 'claude',
+        impact: 'data loss',
+        by: 'gemini',
+      },
     ],
   };
   const attacks = extractAssumptionAttacks(parsed);
@@ -167,7 +173,12 @@ test('extractAssumptionAttacks maps attack_vector/target_agent (new schema)', ()
 test('extractAssumptionAttacks backward-compat with challenge/target (old schema)', () => {
   const parsed = {
     assumption_attacks: [
-      { challenge: 'The lock is not held across retries', target: 'gemini', impact: 'race', by: 'codex' },
+      {
+        challenge: 'The lock is not held across retries',
+        target: 'gemini',
+        impact: 'race',
+        by: 'codex',
+      },
     ],
   };
   const attacks = extractAssumptionAttacks(parsed);
@@ -179,7 +190,12 @@ test('extractAssumptionAttacks backward-compat with challenge/target (old schema
 test('extractAssumptionAttacks prefers attack_vector over challenge when both present', () => {
   const parsed = {
     assumption_attacks: [
-      { attack_vector: 'primary attack', challenge: 'old field', target_agent: 'codex', target: 'claude' },
+      {
+        attack_vector: 'primary attack',
+        challenge: 'old field',
+        target_agent: 'codex',
+        target: 'claude',
+      },
     ],
   };
   const attacks = extractAssumptionAttacks(parsed);
@@ -218,9 +234,7 @@ test('computeAdversarialResumePoint returns round 1, phase 0 for empty transcrip
 });
 
 test('computeAdversarialResumePoint advances to next phase within same round', () => {
-  const transcript = [
-    { round: 1, agent: 'claude', phase: 'diverge' },
-  ];
+  const transcript = [{ round: 1, agent: 'claude', phase: 'diverge' }];
   const { startRound, startPhaseIdx } = computeAdversarialResumePoint(transcript);
   assert.equal(startRound, 1);
   assert.equal(startPhaseIdx, 1); // next = attack

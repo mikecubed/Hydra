@@ -33,14 +33,18 @@ test('gateIntent returns text and classification', async () => {
 test('gateIntent does not call LLM for high-confidence prompt', async () => {
   let llmCalled = false;
   await gateIntent('fix the auth bug in lib/hydra-operator.mjs', {
-    onLlmCall: () => { llmCalled = true; },
+    onLlmCall: () => {
+      llmCalled = true;
+    },
   });
   assert.equal(llmCalled, false, 'LLM was called for high-confidence prompt');
 });
 
 test('gateIntent falls back gracefully when LLM rewrite throws', async () => {
   const result = await gateIntent('do the thing', {
-    rewriteFn: async () => { throw new Error('LLM failure'); },
+    rewriteFn: async () => {
+      throw new Error('LLM failure');
+    },
     confidenceThreshold: 0.99,
   });
   assert.ok(result.text);

@@ -10,12 +10,7 @@ import {
   removeForgedAgent,
   generateSamplePrompt,
 } from '../lib/hydra-agent-forge.mjs';
-import {
-  TASK_TYPES,
-  getAgent,
-  _resetRegistry,
-  initAgentRegistry,
-} from '../lib/hydra-agents.mjs';
+import { TASK_TYPES, getAgent, _resetRegistry, initAgentRegistry } from '../lib/hydra-agents.mjs';
 import { registerBuiltInSubAgents } from '../lib/hydra-sub-agents.mjs';
 
 // ── validateAgentSpec ─────────────────────────────────────────────────────────
@@ -211,7 +206,11 @@ test('persist and remove a forged agent round-trip', () => {
   const testName = 'forge-test-roundtrip';
 
   // Clean up first in case of previous failed test
-  try { removeForgedAgent(testName); } catch { /* ignore */ }
+  try {
+    removeForgedAgent(testName);
+  } catch {
+    /* ignore */
+  }
 
   const spec = {
     name: testName,
@@ -221,7 +220,7 @@ test('persist and remove a forged agent round-trip', () => {
     weaknesses: ['scope'],
     tags: ['test'],
     taskAffinity: Object.fromEntries(TASK_TYPES.map((t) => [t, 0.4])),
-    rolePrompt: 'Test agent for unit test round-trip validation. ' + 'A'.repeat(100),
+    rolePrompt: `Test agent for unit test round-trip validation. ${'A'.repeat(100)}`,
     enabled: true,
     type: 'virtual',
   };
@@ -245,7 +244,10 @@ test('persist and remove a forged agent round-trip', () => {
 
   // Verify in listForgedAgents
   const list = listForgedAgents();
-  assert.ok(list.some((a) => a.name === testName), 'Should appear in listForgedAgents');
+  assert.ok(
+    list.some((a) => a.name === testName),
+    'Should appear in listForgedAgents',
+  );
 
   // Remove
   removeForgedAgent(testName);

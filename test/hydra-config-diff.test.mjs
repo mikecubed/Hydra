@@ -84,7 +84,10 @@ describe('diffConfig()', () => {
     const { stale } = diffConfig(user, def);
 
     const stalePaths = stale.map((s) => s.path);
-    assert.ok(stalePaths.includes('routing.oldFlag'), 'routing.oldFlag should be reported as stale');
+    assert.ok(
+      stalePaths.includes('routing.oldFlag'),
+      'routing.oldFlag should be reported as stale',
+    );
   });
 
   it('type mismatch at top level is reported in typeMismatches', () => {
@@ -106,7 +109,10 @@ describe('diffConfig()', () => {
     const { typeMismatches } = diffConfig(user, def);
 
     const mismatchPaths = typeMismatches.map((m) => m.path);
-    assert.ok(mismatchPaths.includes('routing.councilGate'), 'routing.councilGate type mismatch should be reported');
+    assert.ok(
+      mismatchPaths.includes('routing.councilGate'),
+      'routing.councilGate type mismatch should be reported',
+    );
     const mismatch = typeMismatches.find((m) => m.path === 'routing.councilGate');
     assert.equal(mismatch.expectedType, 'boolean');
     assert.equal(mismatch.gotType, 'string');
@@ -119,7 +125,10 @@ describe('diffConfig()', () => {
     const { missing } = diffConfig(user, def);
 
     const missingPaths = missing.map((m) => m.path);
-    assert.ok(missingPaths.includes('routing.intentGate'), 'routing.intentGate should be reported missing');
+    assert.ok(
+      missingPaths.includes('routing.intentGate'),
+      'routing.intentGate should be reported missing',
+    );
     // routing itself should NOT be in missing (the key exists)
     assert.ok(!missingPaths.includes('routing'), 'routing should not be reported as missing');
   });

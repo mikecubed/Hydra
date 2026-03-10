@@ -1,8 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import fs from 'fs';
-import path from 'path';
-import os from 'os';
+import fs from 'node:fs';
+import path from 'node:path';
+import os from 'node:os';
 import {
   loadSuggestions,
   saveSuggestions,
@@ -114,7 +114,8 @@ test('addSuggestion deduplicates similar titles', () => {
     description: 'Build a repo map with regex parsing',
   });
   const dupe = addSuggestion(sg, {
-    title: 'Implement a lightweight repository map generator that produces token-budgeted summaries',
+    title:
+      'Implement a lightweight repository map generator that produces token-budgeted summaries',
     description: 'Build a repo map with regex parsing and Node APIs',
   });
   assert.equal(dupe, null);
@@ -124,7 +125,10 @@ test('addSuggestion deduplicates similar titles', () => {
 test('addSuggestion allows sufficiently different entries', () => {
   const sg = emptySuggestions();
   addSuggestion(sg, { title: 'Judge critic quality gate', description: 'Add verifier phase' });
-  const different = addSuggestion(sg, { title: 'Mock agent test layer', description: 'Build test fixtures' });
+  const different = addSuggestion(sg, {
+    title: 'Mock agent test layer',
+    description: 'Build test fixtures',
+  });
   assert.notEqual(different, null);
   assert.equal(sg.entries.length, 2);
 });
@@ -180,14 +184,29 @@ test('getPendingSuggestions filters by status', () => {
 
   const pending = getPendingSuggestions(sg);
   assert.equal(pending.length, 2);
-  assert.ok(pending.every(e => e.status === 'pending'));
+  assert.ok(pending.every((e) => e.status === 'pending'));
 });
 
 test('getPendingSuggestions sorts by priority then date', () => {
   const sg = emptySuggestions();
-  addSuggestion(sg, { title: 'Low', description: 'low priority task', priority: 'low', createdAt: '2026-02-01' });
-  addSuggestion(sg, { title: 'High', description: 'high priority task', priority: 'high', createdAt: '2026-02-03' });
-  addSuggestion(sg, { title: 'Medium', description: 'medium priority task', priority: 'medium', createdAt: '2026-02-02' });
+  addSuggestion(sg, {
+    title: 'Low',
+    description: 'low priority task',
+    priority: 'low',
+    createdAt: '2026-02-01',
+  });
+  addSuggestion(sg, {
+    title: 'High',
+    description: 'high priority task',
+    priority: 'high',
+    createdAt: '2026-02-03',
+  });
+  addSuggestion(sg, {
+    title: 'Medium',
+    description: 'medium priority task',
+    priority: 'medium',
+    createdAt: '2026-02-02',
+  });
 
   const pending = getPendingSuggestions(sg);
   assert.equal(pending[0].priority, 'high');
@@ -213,8 +232,16 @@ test('getSuggestionById returns null for missing ID', () => {
 
 test('searchSuggestions filters by text query', () => {
   const sg = emptySuggestions();
-  addSuggestion(sg, { title: 'Repo map generator', description: 'Build a map', area: 'ai-coding-tools' });
-  addSuggestion(sg, { title: 'Mock agent layer', description: 'Test fixtures', area: 'testing-reliability' });
+  addSuggestion(sg, {
+    title: 'Repo map generator',
+    description: 'Build a map',
+    area: 'ai-coding-tools',
+  });
+  addSuggestion(sg, {
+    title: 'Mock agent layer',
+    description: 'Test fixtures',
+    area: 'testing-reliability',
+  });
 
   const results = searchSuggestions(sg, 'repo map');
   assert.equal(results.length, 1);
@@ -256,7 +283,8 @@ test('createSuggestionFromRound creates suggestion from rejected round', () => {
     },
   };
   const deliberation = {
-    selectedImprovement: 'Implement a lightweight repository map generator that produces token-budgeted codebase summaries',
+    selectedImprovement:
+      'Implement a lightweight repository map generator that produces token-budgeted codebase summaries',
   };
 
   const created = createSuggestionFromRound(sg, roundResult, deliberation, {
@@ -275,23 +303,34 @@ test('createSuggestionFromRound creates suggestion from rejected round', () => {
 
 test('createSuggestionFromRound returns null for empty improvement', () => {
   const sg = emptySuggestions();
-  const result = createSuggestionFromRound(sg, { round: 1, area: 'test', verdict: 'reject', score: 0 }, {
-    selectedImprovement: 'No improvement selected',
-  });
+  const result = createSuggestionFromRound(
+    sg,
+    { round: 1, area: 'test', verdict: 'reject', score: 0 },
+    {
+      selectedImprovement: 'No improvement selected',
+    },
+  );
   assert.equal(result, null);
 });
 
 test('createSuggestionFromRound returns null for short improvement', () => {
   const sg = emptySuggestions();
-  const result = createSuggestionFromRound(sg, { round: 1, area: 'test', verdict: 'reject', score: 0 }, {
-    selectedImprovement: 'short',
-  });
+  const result = createSuggestionFromRound(
+    sg,
+    { round: 1, area: 'test', verdict: 'reject', score: 0 },
+    {
+      selectedImprovement: 'short',
+    },
+  );
   assert.equal(result, null);
 });
 
 test('createSuggestionFromRound deduplicates', () => {
   const sg = emptySuggestions();
-  const delib = { selectedImprovement: 'Implement a lightweight repository map generator that produces token-budgeted summaries' };
+  const delib = {
+    selectedImprovement:
+      'Implement a lightweight repository map generator that produces token-budgeted summaries',
+  };
   const round = { round: 1, area: 'ai-coding-tools', verdict: 'reject', score: 1 };
 
   createSuggestionFromRound(sg, round, delib);
@@ -302,13 +341,22 @@ test('createSuggestionFromRound deduplicates', () => {
 
 test('createSuggestionFromRound sets deferred source for skipped rounds', () => {
   const sg = emptySuggestions();
-  const created = createSuggestionFromRound(sg, {
-    round: 1, area: 'testing', verdict: 'skipped', score: 0,
-  }, {
-    selectedImprovement: 'Build a mock agent layer for deterministic testing of dispatch pipeline',
-  }, {
-    source: 'auto:deferred',
-  });
+  const created = createSuggestionFromRound(
+    sg,
+    {
+      round: 1,
+      area: 'testing',
+      verdict: 'skipped',
+      score: 0,
+    },
+    {
+      selectedImprovement:
+        'Build a mock agent layer for deterministic testing of dispatch pipeline',
+    },
+    {
+      source: 'auto:deferred',
+    },
+  );
   assert.equal(created.source, 'auto:deferred');
 });
 

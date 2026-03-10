@@ -1,8 +1,8 @@
 import { describe, it, beforeEach, afterEach } from 'node:test';
 import assert from 'node:assert/strict';
-import fs from 'fs';
-import path from 'path';
-import os from 'os';
+import fs from 'node:fs';
+import path from 'node:path';
+import os from 'node:os';
 import {
   AGENT_FILES,
   parseHydraMd,
@@ -128,8 +128,12 @@ Gemini specific.
 describe('syncHydraMd', () => {
   let tmpDir;
 
-  beforeEach(() => { tmpDir = makeTmpDir(); });
-  afterEach(() => { rmDir(tmpDir); });
+  beforeEach(() => {
+    tmpDir = makeTmpDir();
+  });
+  afterEach(() => {
+    rmDir(tmpDir);
+  });
 
   it('returns skipped when no HYDRA.md exists', () => {
     const result = syncHydraMd(tmpDir);
@@ -137,7 +141,11 @@ describe('syncHydraMd', () => {
   });
 
   it('creates all three agent files when HYDRA.md exists', () => {
-    fs.writeFileSync(path.join(tmpDir, 'HYDRA.md'), '# Test\nShared.\n\n## @claude\nFor Claude.\n', 'utf8');
+    fs.writeFileSync(
+      path.join(tmpDir, 'HYDRA.md'),
+      '# Test\nShared.\n\n## @claude\nFor Claude.\n',
+      'utf8',
+    );
 
     const result = syncHydraMd(tmpDir);
 
@@ -175,8 +183,12 @@ describe('syncHydraMd', () => {
 describe('hasHydraMd', () => {
   let tmpDir;
 
-  beforeEach(() => { tmpDir = makeTmpDir(); });
-  afterEach(() => { rmDir(tmpDir); });
+  beforeEach(() => {
+    tmpDir = makeTmpDir();
+  });
+  afterEach(() => {
+    rmDir(tmpDir);
+  });
 
   it('returns false when HYDRA.md does not exist', () => {
     assert.equal(hasHydraMd(tmpDir), false);
@@ -193,8 +205,12 @@ describe('hasHydraMd', () => {
 describe('getAgentInstructionFile', () => {
   let tmpDir;
 
-  beforeEach(() => { tmpDir = makeTmpDir(); });
-  afterEach(() => { rmDir(tmpDir); });
+  beforeEach(() => {
+    tmpDir = makeTmpDir();
+  });
+  afterEach(() => {
+    rmDir(tmpDir);
+  });
 
   it('returns CLAUDE.md fallback when no HYDRA.md', () => {
     assert.equal(getAgentInstructionFile('claude', tmpDir), 'CLAUDE.md');

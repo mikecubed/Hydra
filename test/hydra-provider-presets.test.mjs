@@ -10,7 +10,7 @@ test('getProviderPresets returns array', () => {
 
 test('GLM-5 preset has required fields', () => {
   const presets = getProviderPresets();
-  const glm = presets.find(p => p.name === 'glm-5');
+  const glm = presets.find((p) => p.name === 'glm-5');
   assert.ok(glm, 'glm-5 preset missing');
   assert.ok(glm.label);
   assert.strictEqual(glm.baseUrl, 'https://open.bigmodel.cn/api/paas/v4');
@@ -21,7 +21,7 @@ test('GLM-5 preset has required fields', () => {
 
 test('Kimi K2.5 preset has required fields', () => {
   const presets = getProviderPresets();
-  const kimi = presets.find(p => p.name === 'kimi-k2');
+  const kimi = presets.find((p) => p.name === 'kimi-k2');
   assert.ok(kimi, 'kimi-k2 preset missing');
   assert.strictEqual(kimi.baseUrl, 'https://api.moonshot.cn/v1');
   assert.strictEqual(kimi.defaultModel, 'kimi-k2');
@@ -40,7 +40,7 @@ test('all presets have name, baseUrl, defaultModel, envKey, description', () => 
 
 test('preset can produce a valid customAgent entry shape', () => {
   const presets = getProviderPresets();
-  const glm = presets.find(p => p.name === 'glm-5');
+  const glm = presets.find((p) => p.name === 'glm-5');
   const entry = {
     name: 'glm',
     type: 'api',

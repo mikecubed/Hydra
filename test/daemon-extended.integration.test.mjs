@@ -5,15 +5,15 @@
  * /session/pause, /session/resume, /state/archive, /shutdown,
  * and the claim_owned_task flow.
  */
-import fs from 'fs';
-import os from 'os';
-import path from 'path';
-import net from 'net';
-import http from 'http';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+import net from 'node:net';
+import http from 'node:http';
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { spawn } from 'child_process';
-import { fileURLToPath } from 'url';
+import { spawn } from 'node:child_process';
+import { fileURLToPath } from 'node:url';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -26,7 +26,11 @@ function sleep(ms) {
 
 function createTempProject(packageJson) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'hydra-daemon-ext-'));
-  fs.writeFileSync(path.join(root, 'package.json'), `${JSON.stringify(packageJson, null, 2)}\n`, 'utf8');
+  fs.writeFileSync(
+    path.join(root, 'package.json'),
+    `${JSON.stringify(packageJson, null, 2)}\n`,
+    'utf8',
+  );
   return root;
 }
 
@@ -38,7 +42,10 @@ function getFreePort() {
       const address = server.address();
       const port = typeof address === 'object' && address ? address.port : 0;
       server.close((closeErr) => {
-        if (closeErr) { reject(closeErr); return; }
+        if (closeErr) {
+          reject(closeErr);
+          return;
+        }
         resolve(port);
       });
     });
@@ -50,27 +57,38 @@ async function requestJson(baseUrl, method, route, body = null, timeoutMs = 4_00
   const payload = body ? JSON.stringify(body) : '';
 
   return new Promise((resolve, reject) => {
-    const req = http.request({
-      protocol: target.protocol,
-      hostname: target.hostname,
-      port: target.port,
-      path: `${target.pathname}${target.search}`,
-      method,
-      headers: body
-        ? { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(payload) }
-        : undefined,
-    }, (res) => {
-      let text = '';
-      res.setEncoding('utf8');
-      res.on('data', (chunk) => { text += chunk; });
-      res.on('end', () => {
-        let json = {};
-        try { json = JSON.parse(text); } catch { json = {}; }
-        const status = res.statusCode || 0;
-        resolve({ response: { status, ok: status >= 200 && status < 300 }, json, text });
-      });
+    const req = http.request(
+      {
+        protocol: target.protocol,
+        hostname: target.hostname,
+        port: target.port,
+        path: `${target.pathname}${target.search}`,
+        method,
+        headers: body
+          ? { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(payload) }
+          : undefined,
+      },
+      (res) => {
+        let text = '';
+        res.setEncoding('utf8');
+        res.on('data', (chunk) => {
+          text += chunk;
+        });
+        res.on('end', () => {
+          let json = {};
+          try {
+            json = JSON.parse(text);
+          } catch {
+            json = {};
+          }
+          const status = res.statusCode || 0;
+          resolve({ response: { status, ok: status >= 200 && status < 300 }, json, text });
+        });
+      },
+    );
+    req.setTimeout(timeoutMs, () => {
+      req.destroy(new Error(`Request timeout: ${method} ${route}`));
     });
-    req.setTimeout(timeoutMs, () => { req.destroy(new Error(`Request timeout: ${method} ${route}`)); });
     req.on('error', reject);
     if (payload) req.write(payload);
     req.end();
@@ -86,7 +104,9 @@ async function waitForHealth(baseUrl, child, timeoutMs = 10_000) {
     try {
       const { response } = await requestJson(baseUrl, 'GET', '/health');
       if (response.ok) return;
-    } catch { /* retry */ }
+    } catch {
+      /* retry */
+    }
     await sleep(125);
   }
   throw new Error('Timed out waiting for daemon health check');
@@ -96,7 +116,10 @@ async function waitForExit(child, timeoutMs = 4_000) {
   if (child.exitCode !== null) return;
   await new Promise((resolve) => {
     const timer = setTimeout(resolve, timeoutMs);
-    child.once('exit', () => { clearTimeout(timer); resolve(); });
+    child.once('exit', () => {
+      clearTimeout(timer);
+      resolve();
+    });
   });
 }
 
@@ -106,7 +129,7 @@ async function startDaemon(projectRoot) {
   const child = spawn(
     process.execPath,
     [DAEMON_SCRIPT, 'start', 'host=127.0.0.1', `port=${port}`, `project=${projectRoot}`],
-    { cwd: REPO_ROOT, stdio: ['ignore', 'ignore', 'ignore'] }
+    { cwd: REPO_ROOT, stdio: ['ignore', 'ignore', 'ignore'] },
   );
   child.unref();
   await waitForHealth(baseUrl, child);
@@ -117,7 +140,9 @@ async function stopDaemon(instance) {
   if (!instance?.child) return;
   try {
     await requestJson(instance.baseUrl, 'POST', '/shutdown', {}, 1_500);
-  } catch { /* fallback */ }
+  } catch {
+    /* fallback */
+  }
   await waitForExit(instance.child, 1_500);
   if (instance.child.exitCode === null) {
     instance.child.kill();
@@ -127,9 +152,12 @@ async function stopDaemon(instance) {
 
 async function removeDirBestEffort(dirPath, attempts = 8) {
   for (let i = 0; i < attempts; i++) {
-    try { fs.rmSync(dirPath, { recursive: true, force: true }); return; }
-    catch (error) {
-      if (!['EBUSY', 'ENOTEMPTY', 'EPERM'].includes(String(error?.code || '')) || i === attempts - 1) return;
+    try {
+      fs.rmSync(dirPath, { recursive: true, force: true });
+      return;
+    } catch (err) {
+      if (!['EBUSY', 'ENOTEMPTY', 'EPERM'].includes(String(err?.code || '')) || i === attempts - 1)
+        return;
       await sleep(150);
     }
   }
@@ -138,9 +166,16 @@ async function removeDirBestEffort(dirPath, attempts = 8) {
 // ── GET /session/status ──────────────────────────────────────────────────────
 
 test('GET /session/status returns session health data', { timeout: 30_000 }, async (t) => {
-  const projectRoot = createTempProject({ name: 'hydra-ext-session-status', private: true, type: 'module' });
+  const projectRoot = createTempProject({
+    name: 'hydra-ext-session-status',
+    private: true,
+    type: 'module',
+  });
   let daemon = null;
-  t.after(async () => { await stopDaemon(daemon); await removeDirBestEffort(projectRoot); });
+  t.after(async () => {
+    await stopDaemon(daemon);
+    await removeDirBestEffort(projectRoot);
+  });
   daemon = await startDaemon(projectRoot);
 
   // Start a session first
@@ -150,7 +185,10 @@ test('GET /session/status returns session health data', { timeout: 30_000 }, asy
   });
 
   // Add a task so there's data
-  await requestJson(daemon.baseUrl, 'POST', '/task/add', { title: 'Status check task', owner: 'claude' });
+  await requestJson(daemon.baseUrl, 'POST', '/task/add', {
+    title: 'Status check task',
+    owner: 'claude',
+  });
 
   const result = await requestJson(daemon.baseUrl, 'GET', '/session/status');
   assert.equal(result.response.status, 200);
@@ -171,7 +209,10 @@ test('GET /session/status returns session health data', { timeout: 30_000 }, asy
 test('GET /tasks/stale returns stale task list', { timeout: 30_000 }, async (t) => {
   const projectRoot = createTempProject({ name: 'hydra-ext-stale', private: true, type: 'module' });
   let daemon = null;
-  t.after(async () => { await stopDaemon(daemon); await removeDirBestEffort(projectRoot); });
+  t.after(async () => {
+    await stopDaemon(daemon);
+    await removeDirBestEffort(projectRoot);
+  });
   daemon = await startDaemon(projectRoot);
 
   // Fresh tasks should not be stale
@@ -189,7 +230,10 @@ test('GET /tasks/stale returns stale task list', { timeout: 30_000 }, async (t) 
 test('GET /stats returns metrics and usage data', { timeout: 30_000 }, async (t) => {
   const projectRoot = createTempProject({ name: 'hydra-ext-stats', private: true, type: 'module' });
   let daemon = null;
-  t.after(async () => { await stopDaemon(daemon); await removeDirBestEffort(projectRoot); });
+  t.after(async () => {
+    await stopDaemon(daemon);
+    await removeDirBestEffort(projectRoot);
+  });
   daemon = await startDaemon(projectRoot);
 
   const result = await requestJson(daemon.baseUrl, 'GET', '/stats');
@@ -205,7 +249,10 @@ test('GET /stats returns metrics and usage data', { timeout: 30_000 }, async (t)
 test('POST /session/pause and /session/resume lifecycle', { timeout: 30_000 }, async (t) => {
   const projectRoot = createTempProject({ name: 'hydra-ext-pause', private: true, type: 'module' });
   let daemon = null;
-  t.after(async () => { await stopDaemon(daemon); await removeDirBestEffort(projectRoot); });
+  t.after(async () => {
+    await stopDaemon(daemon);
+    await removeDirBestEffort(projectRoot);
+  });
   daemon = await startDaemon(projectRoot);
 
   // Start a session
@@ -238,9 +285,16 @@ test('POST /session/pause and /session/resume lifecycle', { timeout: 30_000 }, a
 });
 
 test('POST /session/pause fails without active session', { timeout: 30_000 }, async (t) => {
-  const projectRoot = createTempProject({ name: 'hydra-ext-pause-nosess', private: true, type: 'module' });
+  const projectRoot = createTempProject({
+    name: 'hydra-ext-pause-nosess',
+    private: true,
+    type: 'module',
+  });
   let daemon = null;
-  t.after(async () => { await stopDaemon(daemon); await removeDirBestEffort(projectRoot); });
+  t.after(async () => {
+    await stopDaemon(daemon);
+    await removeDirBestEffort(projectRoot);
+  });
   daemon = await startDaemon(projectRoot);
 
   // Pause without starting a session
@@ -251,9 +305,16 @@ test('POST /session/pause fails without active session', { timeout: 30_000 }, as
 // ── POST /state/archive ──────────────────────────────────────────────────────
 
 test('POST /state/archive archives completed tasks', { timeout: 30_000 }, async (t) => {
-  const projectRoot = createTempProject({ name: 'hydra-ext-archive', private: true, type: 'module' });
+  const projectRoot = createTempProject({
+    name: 'hydra-ext-archive',
+    private: true,
+    type: 'module',
+  });
   let daemon = null;
-  t.after(async () => { await stopDaemon(daemon); await removeDirBestEffort(projectRoot); });
+  t.after(async () => {
+    await stopDaemon(daemon);
+    await removeDirBestEffort(projectRoot);
+  });
   daemon = await startDaemon(projectRoot);
 
   // Add and complete a task
@@ -269,50 +330,65 @@ test('POST /state/archive archives completed tasks', { timeout: 30_000 }, async 
 
 // ── claim_owned_task flow ────────────────────────────────────────────────────
 
-test('claim_owned_task: agent claims their own task via /next + /task/claim', { timeout: 30_000 }, async (t) => {
-  const projectRoot = createTempProject({ name: 'hydra-ext-claim-owned', private: true, type: 'module' });
-  let daemon = null;
-  t.after(async () => { await stopDaemon(daemon); await removeDirBestEffort(projectRoot); });
-  daemon = await startDaemon(projectRoot);
+test(
+  'claim_owned_task: agent claims their own task via /next + /task/claim',
+  { timeout: 30_000 },
+  async (t) => {
+    const projectRoot = createTempProject({
+      name: 'hydra-ext-claim-owned',
+      private: true,
+      type: 'module',
+    });
+    let daemon = null;
+    t.after(async () => {
+      await stopDaemon(daemon);
+      await removeDirBestEffort(projectRoot);
+    });
+    daemon = await startDaemon(projectRoot);
 
-  // Add a task owned by claude
-  const add = await requestJson(daemon.baseUrl, 'POST', '/task/add', {
-    title: 'Owned task for claude',
-    owner: 'claude',
-  });
-  const taskId = add.json?.task?.id;
-  assert.ok(taskId);
+    // Add a task owned by claude
+    const add = await requestJson(daemon.baseUrl, 'POST', '/task/add', {
+      title: 'Owned task for claude',
+      owner: 'claude',
+    });
+    const taskId = add.json?.task?.id;
+    assert.ok(taskId);
 
-  // Check what claude should do next
-  const next = await requestJson(daemon.baseUrl, 'GET', `/next?agent=claude`);
-  assert.equal(next.response.status, 200);
-  const action = next.json?.next?.action;
-  // Should suggest claiming this task
-  assert.ok(
-    ['claim_owned_task', 'claim_unassigned_task', 'continue_task'].includes(action),
-    `Expected claim action, got: ${action}`
-  );
+    // Check what claude should do next
+    const next = await requestJson(daemon.baseUrl, 'GET', `/next?agent=claude`);
+    assert.equal(next.response.status, 200);
+    const action = next.json?.next?.action;
+    // Should suggest claiming this task
+    assert.ok(
+      ['claim_owned_task', 'claim_unassigned_task', 'continue_task'].includes(action),
+      `Expected claim action, got: ${action}`,
+    );
 
-  // Claim the task
-  const claim = await requestJson(daemon.baseUrl, 'POST', '/task/claim', {
-    agent: 'claude',
-    taskId,
-  });
-  assert.equal(claim.response.status, 200);
-  assert.ok(claim.json.ok);
-  assert.ok(claim.json.claimToken || claim.json.task?.claimToken, 'Should return a claim token');
+    // Claim the task
+    const claim = await requestJson(daemon.baseUrl, 'POST', '/task/claim', {
+      agent: 'claude',
+      taskId,
+    });
+    assert.equal(claim.response.status, 200);
+    assert.ok(claim.json.ok);
+    assert.ok(claim.json.claimToken || claim.json.task?.claimToken, 'Should return a claim token');
 
-  // Verify task is now in_progress
-  const state = await requestJson(daemon.baseUrl, 'GET', '/state');
-  const task = state.json.state?.tasks?.find((t) => t.id === taskId);
-  assert.ok(task);
-  assert.equal(task.status, 'in_progress');
-});
+    // Verify task is now in_progress
+    const state = await requestJson(daemon.baseUrl, 'GET', '/state');
+    const task = state.json.state?.tasks?.find((t) => t.id === taskId);
+    assert.ok(task);
+    assert.equal(task.status, 'in_progress');
+  },
+);
 
 // ── POST /shutdown ───────────────────────────────────────────────────────────
 
 test('POST /shutdown gracefully stops the daemon', { timeout: 30_000 }, async (t) => {
-  const projectRoot = createTempProject({ name: 'hydra-ext-shutdown', private: true, type: 'module' });
+  const projectRoot = createTempProject({
+    name: 'hydra-ext-shutdown',
+    private: true,
+    type: 'module',
+  });
   let daemon = null;
   t.after(async () => {
     // Daemon should already be stopped, but clean up just in case
@@ -337,9 +413,16 @@ test('POST /shutdown gracefully stops the daemon', { timeout: 30_000 }, async (t
 // ── GET /health ──────────────────────────────────────────────────────────────
 
 test('GET /health returns daemon status', { timeout: 30_000 }, async (t) => {
-  const projectRoot = createTempProject({ name: 'hydra-ext-health', private: true, type: 'module' });
+  const projectRoot = createTempProject({
+    name: 'hydra-ext-health',
+    private: true,
+    type: 'module',
+  });
   let daemon = null;
-  t.after(async () => { await stopDaemon(daemon); await removeDirBestEffort(projectRoot); });
+  t.after(async () => {
+    await stopDaemon(daemon);
+    await removeDirBestEffort(projectRoot);
+  });
   daemon = await startDaemon(projectRoot);
 
   const result = await requestJson(daemon.baseUrl, 'GET', '/health');
@@ -351,9 +434,16 @@ test('GET /health returns daemon status', { timeout: 30_000 }, async (t) => {
 // ── Handoff + ack flow ───────────────────────────────────────────────────────
 
 test('handoff lifecycle: create, appear in /next, ack', { timeout: 30_000 }, async (t) => {
-  const projectRoot = createTempProject({ name: 'hydra-ext-handoff', private: true, type: 'module' });
+  const projectRoot = createTempProject({
+    name: 'hydra-ext-handoff',
+    private: true,
+    type: 'module',
+  });
   let daemon = null;
-  t.after(async () => { await stopDaemon(daemon); await removeDirBestEffort(projectRoot); });
+  t.after(async () => {
+    await stopDaemon(daemon);
+    await removeDirBestEffort(projectRoot);
+  });
   daemon = await startDaemon(projectRoot);
 
   // Create a handoff
@@ -389,9 +479,16 @@ test('handoff lifecycle: create, appear in /next, ack', { timeout: 30_000 }, asy
 // ── Session fork creates sibling ─────────────────────────────────────────────
 
 test('session fork + spawn + list lifecycle', { timeout: 30_000 }, async (t) => {
-  const projectRoot = createTempProject({ name: 'hydra-ext-fork-spawn', private: true, type: 'module' });
+  const projectRoot = createTempProject({
+    name: 'hydra-ext-fork-spawn',
+    private: true,
+    type: 'module',
+  });
   let daemon = null;
-  t.after(async () => { await stopDaemon(daemon); await removeDirBestEffort(projectRoot); });
+  t.after(async () => {
+    await stopDaemon(daemon);
+    await removeDirBestEffort(projectRoot);
+  });
   daemon = await startDaemon(projectRoot);
 
   // Start a session

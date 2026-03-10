@@ -51,7 +51,7 @@ describe('parseRemoteUrl', () => {
   it('returns null for empty/null input', () => {
     assert.strictEqual(parseRemoteUrl(''), null);
     assert.strictEqual(parseRemoteUrl(null), null);
-    assert.strictEqual(parseRemoteUrl(undefined), null);
+    assert.strictEqual(parseRemoteUrl(), null);
   });
 
   it('returns null for invalid URLs', () => {
@@ -140,7 +140,7 @@ describe('git-ops remote helpers', () => {
 
 const ghInstalled = isGhAvailable();
 
-describe('detectRepo', { skip: !ghInstalled ? 'gh CLI not installed' : false }, () => {
+describe('detectRepo', { skip: ghInstalled ? false : 'gh CLI not installed' }, () => {
   it('returns object or null', () => {
     const result = detectRepo();
     if (result) {
@@ -153,7 +153,7 @@ describe('detectRepo', { skip: !ghInstalled ? 'gh CLI not installed' : false }, 
   });
 });
 
-describe('listPRs', { skip: !ghInstalled ? 'gh CLI not installed' : false }, () => {
+describe('listPRs', { skip: ghInstalled ? false : 'gh CLI not installed' }, () => {
   it('returns an array', () => {
     const result = listPRs();
     assert.ok(Array.isArray(result));

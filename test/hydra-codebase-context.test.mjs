@@ -68,7 +68,7 @@ test('codebase: non-codebase prompts return false', () => {
 test('codebase: empty/null input returns false', () => {
   assert.equal(detectCodebaseQuery('').isCodebaseQuery, false);
   assert.equal(detectCodebaseQuery(null).isCodebaseQuery, false);
-  assert.equal(detectCodebaseQuery(undefined).isCodebaseQuery, false);
+  assert.equal(detectCodebaseQuery().isCodebaseQuery, false);
 });
 
 test('codebase: short input returns false', () => {
@@ -93,9 +93,18 @@ test('codebase: loadCodebaseContext returns sections and module index', () => {
 test('codebase: module index includes key modules', () => {
   const ctx = loadCodebaseContext();
   const files = ctx.moduleIndex.map((m) => m.file);
-  assert.ok(files.some((f) => f.includes('hydra-operator')), 'Should include hydra-operator');
-  assert.ok(files.some((f) => f.includes('hydra-agents')), 'Should include hydra-agents');
-  assert.ok(files.some((f) => f.includes('hydra-activity')), 'Should include hydra-activity');
+  assert.ok(
+    files.some((f) => f.includes('hydra-operator')),
+    'Should include hydra-operator',
+  );
+  assert.ok(
+    files.some((f) => f.includes('hydra-agents')),
+    'Should include hydra-agents',
+  );
+  assert.ok(
+    files.some((f) => f.includes('hydra-activity')),
+    'Should include hydra-activity',
+  );
 });
 
 // ── getTopicContext ─────────────────────────────────────────────────────────

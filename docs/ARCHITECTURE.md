@@ -68,10 +68,12 @@
 ## Commit Attribution
 
 Automated pipelines (evolve, nightly, tasks) add git trailers to commits for provenance:
+
 ```
 Originated-By: hydra-evolve
 Executed-By: codex
 ```
+
 - `buildSafetyPrompt()` accepts `attribution: { pipeline, agent }` to instruct agents to include trailers
 - `stageAndCommit()` accepts `opts.originatedBy` and `opts.executedBy` to append trailers programmatically
 
@@ -86,6 +88,7 @@ Executed-By: codex
 ## Route Strategies
 
 Auto mode uses `classifyPrompt()` to determine `routeStrategy`:
+
 - **`single`** — Simple prompts: 1 task, 1 handoff, 0 agent CLI calls (fast-path dispatch)
 - **`tandem`** — Moderate prompts: 2 tasks + 2 handoffs (lead→follow pair), 0 agent CLI calls. Task-type matrix selects optimal pair (e.g., planning: claude→codex, review: gemini→claude). Tandem indicators (`first...then`, `review and fix`) can upgrade simple prompts to tandem.
 - **`council`** — Complex prompts (complexScore >= 0.6): full council deliberation, skips mini-round triage (saves 4 agent calls)
@@ -277,6 +280,7 @@ User input at hydra⬢[gpt-5]> prompt
 The concierge maintains an in-memory conversation history (capped at 40 messages). Its system prompt is rebuilt with context-hash invalidation (fingerprint changes OR TTL expiry) and includes: project name, mode, open tasks, agent models, git branch/status, recent completions, recent errors, and active workers. It includes a full command reference for typo correction.
 
 **Provider fallback chain** (configurable via `concierge.fallbackChain`):
+
 1. OpenAI (`gpt-5`) — primary
 2. Anthropic (`claude-sonnet-4-5-20250929`) — first fallback
 3. Google (`gemini-2.5-flash`) — last resort
@@ -284,6 +288,7 @@ The concierge maintains an in-memory conversation history (capped at 40 messages
 Provider modules are lazy-loaded via `await import()` to avoid loading unused ones.
 
 **Bidirectional communication**: The concierge posts events to the daemon via `POST /events/push`:
+
 - `concierge:dispatch` — when escalating to dispatch pipeline (includes conversation context)
 - `concierge:summary` — every 5 turns (turn count, topic, tokens used)
 - `concierge:error` — on provider errors
@@ -304,6 +309,7 @@ hydra⬢[gpt-5]> Chat naturally — prefix ! to dispatch
 ```
 
 Implementation:
+
 - `rl.prompt()` is wrapped to append dim ghost text via ANSI after each fresh prompt
 - A one-shot `stdin` data listener fires `\x1b[K` (erase to EOL) on the first keystroke
 - `rl.prompt(true)` (mid-typing refreshes) does NOT show ghost text
@@ -336,6 +342,7 @@ Agent heads poll the daemon and auto-claim handoffs and owned tasks (`claim_owne
 ### Agent Filtering
 
 When `agents=claude,gemini` is specified, only those agents participate:
+
 - Fast-path: `suggestedAgent` falls back to best match within the filtered set
 - Council: `COUNCIL_FLOW` phases filtered to only include allowed agents
 - Handoffs: only created for agents in the filter
@@ -518,6 +525,7 @@ This ensures serialized writes even with concurrent HTTP requests. The write que
 ### State File Structure
 
 `AI_SYNC_STATE.json`:
+
 - `activeSession` - Current coordination session
 - `tasks[]` - Task queue with status, owner, blockedBy, claimToken, worktreePath, checkpoints[]
 - `decisions[]` - Recorded decisions
@@ -546,6 +554,7 @@ NDJSON append-only log at `AI_ORCHESTRATOR_EVENTS.ndjson`:
 Each event has a **monotonic sequence number** (`seq`) and a **category** for filtered replay.
 
 Event types:
+
 - `daemon_start`, `daemon_stop`
 - `mutation` (any state change)
 - `auto_archive`
@@ -553,6 +562,7 @@ Event types:
 - `agent_call_start`, `agent_call_complete`, `agent_call_error`
 
 Event categories (auto-classified from event type/label):
+
 - `task` — task mutations (add, update, claim, checkpoint)
 - `handoff` — handoff creation, acknowledgment
 - `decision` — decision recording
@@ -573,11 +583,11 @@ Event categories (auto-classified from event type/label):
 
 Three context levels matched to agent capabilities:
 
-| Tier | Agent | Contents |
-|------|-------|----------|
-| **Minimal** | Codex | Task files + types + signatures only |
-| **Medium** | Claude | Summary + priorities + git rules (Claude reads more via tools) |
-| **Large** | Gemini | Full context + recent git changes + TODO.md + task files |
+| Tier        | Agent  | Contents                                                       |
+| ----------- | ------ | -------------------------------------------------------------- |
+| **Minimal** | Codex  | Task files + types + signatures only                           |
+| **Medium**  | Claude | Summary + priorities + git rules (Claude reads more via tools) |
+| **Large**   | Gemini | Full context + recent git changes + TODO.md + task files       |
 
 Context is cached for 60 seconds to avoid redundant file reads.
 
@@ -585,18 +595,18 @@ Context is cached for 60 seconds to avoid redundant file reads.
 
 Each agent has affinity scores (0-1) for 10 task types:
 
-| Task Type | Gemini | Codex | Claude |
-|-----------|--------|-------|--------|
-| planning | 0.70 | 0.20 | 0.95 |
-| architecture | 0.75 | 0.15 | 0.95 |
-| review | 0.95 | 0.40 | 0.85 |
-| refactor | 0.65 | 0.70 | 0.80 |
-| implementation | 0.60 | 0.95 | 0.60 |
-| analysis | 0.98 | 0.30 | 0.75 |
-| testing | 0.65 | 0.85 | 0.50 |
-| research | 0.90 | 0.25 | 0.70 |
-| documentation | 0.50 | 0.40 | 0.80 |
-| security | 0.85 | 0.35 | 0.70 |
+| Task Type      | Gemini | Codex | Claude |
+| -------------- | ------ | ----- | ------ |
+| planning       | 0.70   | 0.20  | 0.95   |
+| architecture   | 0.75   | 0.15  | 0.95   |
+| review         | 0.95   | 0.40  | 0.85   |
+| refactor       | 0.65   | 0.70  | 0.80   |
+| implementation | 0.60   | 0.95  | 0.60   |
+| analysis       | 0.98   | 0.30  | 0.75   |
+| testing        | 0.65   | 0.85  | 0.50   |
+| research       | 0.90   | 0.25  | 0.70   |
+| documentation  | 0.50   | 0.40  | 0.80   |
+| security       | 0.85   | 0.35  | 0.70   |
 
 Task type is auto-classified from title/description via regex patterns. The `POST /task/route` endpoint uses these scores to recommend the best agent.
 
@@ -617,6 +627,7 @@ checkUsage() ──> { level, percent, todayTokens, ... }
 ```
 
 Contingency options:
+
 1. Switch to fast/cheap model
 2. Hand off to Gemini
 3. Hand off to Codex
@@ -741,6 +752,7 @@ Agent (Gemini/Codex/Claude)
 ```
 
 8 exposed MCP tools:
+
 - `hydra_tasks_list` — list open tasks with filters
 - `hydra_tasks_claim` — claim a task atomically
 - `hydra_tasks_update` — update task status/notes

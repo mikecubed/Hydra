@@ -1,6 +1,10 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
-import { buildCustomAgentEntry, parseArgsTemplate, validateAgentName } from '../lib/hydra-agents-wizard.mjs';
+import {
+  buildCustomAgentEntry,
+  parseArgsTemplate,
+  validateAgentName,
+} from '../lib/hydra-agents-wizard.mjs';
 import { AFFINITY_PRESETS } from '../lib/hydra-config.mjs';
 
 describe('validateAgentName', () => {

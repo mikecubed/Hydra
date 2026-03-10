@@ -20,11 +20,11 @@ describe('hydra-anthropic', () => {
     delete process.env.ANTHROPIC_API_KEY;
     try {
       await assert.rejects(
-        () => streamAnthropicCompletion(
-          [{ role: 'user', content: 'test' }],
-          { model: 'claude-sonnet-4-5-20250929' }
-        ),
-        { message: /ANTHROPIC_API_KEY not set/ }
+        () =>
+          streamAnthropicCompletion([{ role: 'user', content: 'test' }], {
+            model: 'claude-sonnet-4-5-20250929',
+          }),
+        { message: /ANTHROPIC_API_KEY not set/ },
       );
     } finally {
       if (saved) process.env.ANTHROPIC_API_KEY = saved;
@@ -36,11 +36,8 @@ describe('hydra-anthropic', () => {
     process.env.ANTHROPIC_API_KEY = 'test-key';
     try {
       await assert.rejects(
-        () => streamAnthropicCompletion(
-          [{ role: 'user', content: 'test' }],
-          {}
-        ),
-        { message: /requires cfg\.model/ }
+        () => streamAnthropicCompletion([{ role: 'user', content: 'test' }], {}),
+        { message: /requires cfg\.model/ },
       );
     } finally {
       if (saved) process.env.ANTHROPIC_API_KEY = saved;
@@ -68,11 +65,11 @@ describe('hydra-google', () => {
     delete process.env.GOOGLE_API_KEY;
     try {
       await assert.rejects(
-        () => streamGoogleCompletion(
-          [{ role: 'user', content: 'test' }],
-          { model: 'gemini-2.5-flash' }
-        ),
-        { message: /GEMINI_API_KEY or GOOGLE_API_KEY not set/ }
+        () =>
+          streamGoogleCompletion([{ role: 'user', content: 'test' }], {
+            model: 'gemini-2.5-flash',
+          }),
+        { message: /GEMINI_API_KEY or GOOGLE_API_KEY not set/ },
       );
     } finally {
       if (savedGemini) process.env.GEMINI_API_KEY = savedGemini;
@@ -84,13 +81,9 @@ describe('hydra-google', () => {
     const saved = process.env.GEMINI_API_KEY;
     process.env.GEMINI_API_KEY = 'test-key';
     try {
-      await assert.rejects(
-        () => streamGoogleCompletion(
-          [{ role: 'user', content: 'test' }],
-          {}
-        ),
-        { message: /requires cfg\.model/ }
-      );
+      await assert.rejects(() => streamGoogleCompletion([{ role: 'user', content: 'test' }], {}), {
+        message: /requires cfg\.model/,
+      });
     } finally {
       if (saved) process.env.GEMINI_API_KEY = saved;
       else delete process.env.GEMINI_API_KEY;

@@ -25,7 +25,12 @@ describe('detectModelError', () => {
   });
 
   it('returns isModelError: false for non-model errors', () => {
-    const result = { ok: false, output: '', stderr: 'ENOENT: file not found', error: 'Exit code 1' };
+    const result = {
+      ok: false,
+      output: '',
+      stderr: 'ENOENT: file not found',
+      error: 'Exit code 1',
+    };
     const detection = detectModelError('codex', result);
     assert.equal(detection.isModelError, false);
   });
@@ -175,7 +180,7 @@ describe('getFallbackCandidates', () => {
 
   it('deduplicates candidates', () => {
     const candidates = getFallbackCandidates('codex', 'nonexistent-model');
-    const ids = candidates.map(c => c.id.toLowerCase());
+    const ids = candidates.map((c) => c.id.toLowerCase());
     const unique = new Set(ids);
     assert.equal(ids.length, unique.size, 'no duplicate model IDs');
   });

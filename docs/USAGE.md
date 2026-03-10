@@ -3,6 +3,7 @@
 ## Daemon Commands
 
 ### Start Daemon
+
 ```powershell
 node lib/orchestrator-daemon.mjs start [host=127.0.0.1] [port=4173]
 # or: npm start
@@ -10,12 +11,14 @@ node lib/orchestrator-daemon.mjs start [host=127.0.0.1] [port=4173]
 ```
 
 ### Check Status
+
 ```powershell
 node lib/orchestrator-daemon.mjs status [url=http://127.0.0.1:4173]
 # or: hydra-daemon status
 ```
 
 ### Stop Daemon
+
 ```powershell
 node lib/orchestrator-daemon.mjs stop [url=http://127.0.0.1:4173]
 # or: npm run stop
@@ -47,44 +50,44 @@ All client commands use: `node lib/orchestrator-client.mjs <command> [key=value]
 
 ### Dashboard & State
 
-| Command | Description |
-|---------|-------------|
-| `summary` | Full dashboard with tasks, agents, handoffs |
-| `status` | Daemon health check |
-| `state` | Raw sync state JSON |
-| `stats` | Agent metrics & usage dashboard |
-| `events [limit=50]` | Recent daemon events |
+| Command             | Description                                 |
+| ------------------- | ------------------------------------------- |
+| `summary`           | Full dashboard with tasks, agents, handoffs |
+| `status`            | Daemon health check                         |
+| `state`             | Raw sync state JSON                         |
+| `stats`             | Agent metrics & usage dashboard             |
+| `events [limit=50]` | Recent daemon events                        |
 
 ### Task Management
 
-| Command | Description |
-|---------|-------------|
-| `task:add title=... [owner=...] [status=todo] [type=...] [files=...] [notes=...] [blockedBy=...]` | Create a task |
-| `task:update taskId=... [status=...] [owner=...] [notes=...] [files=...] [blockedBy=...]` | Update a task |
-| `task:route taskId=...` | Get best agent for a task |
-| `claim agent=... [taskId=... \| title=...]` | Claim/create a task (returns claimToken) |
-| `verify taskId=...` | Run project-aware verification |
-| `checkpoint taskId=... name=... context=... [agent=...]` | Save task checkpoint |
+| Command                                                                                           | Description                              |
+| ------------------------------------------------------------------------------------------------- | ---------------------------------------- |
+| `task:add title=... [owner=...] [status=todo] [type=...] [files=...] [notes=...] [blockedBy=...]` | Create a task                            |
+| `task:update taskId=... [status=...] [owner=...] [notes=...] [files=...] [blockedBy=...]`         | Update a task                            |
+| `task:route taskId=...`                                                                           | Get best agent for a task                |
+| `claim agent=... [taskId=... \| title=...]`                                                       | Claim/create a task (returns claimToken) |
+| `verify taskId=...`                                                                               | Run project-aware verification           |
+| `checkpoint taskId=... name=... context=... [agent=...]`                                          | Save task checkpoint                     |
 
 ### Agent Coordination
 
-| Command | Description |
-|---------|-------------|
-| `next agent=NAME` | Suggested next action for an agent |
-| `prompt agent=NAME` | Context prompt for an agent |
-| `handoff from=... to=... summary=... [nextStep=...] [tasks=...]` | Create handoff |
-| `handoff:ack handoffId=... agent=...` | Acknowledge handoff |
+| Command                                                          | Description                        |
+| ---------------------------------------------------------------- | ---------------------------------- |
+| `next agent=NAME`                                                | Suggested next action for an agent |
+| `prompt agent=NAME`                                              | Context prompt for an agent        |
+| `handoff from=... to=... summary=... [nextStep=...] [tasks=...]` | Create handoff                     |
+| `handoff:ack handoffId=... agent=...`                            | Acknowledge handoff                |
 
 ### Session & Decisions
 
-| Command | Description |
-|---------|-------------|
-| `session:start focus=... [owner=human] [participants=...] [branch=...]` | Start coordination session |
-| `session:fork` | Fork current session (copy state for alternative exploration) |
-| `session:spawn focus=...` | Spawn child session (fresh state for focused subtask) |
-| `sessions` | List all sessions including forks/spawns |
-| `decision:add title=... [owner=...] [rationale=...] [impact=...]` | Record a decision |
-| `blocker:add title=... [owner=...] [nextStep=...]` | Record a blocker |
+| Command                                                                 | Description                                                   |
+| ----------------------------------------------------------------------- | ------------------------------------------------------------- |
+| `session:start focus=... [owner=human] [participants=...] [branch=...]` | Start coordination session                                    |
+| `session:fork`                                                          | Fork current session (copy state for alternative exploration) |
+| `session:spawn focus=...`                                               | Spawn child session (fresh state for focused subtask)         |
+| `sessions`                                                              | List all sessions including forks/spawns                      |
+| `decision:add title=... [owner=...] [rationale=...] [impact=...]`       | Record a decision                                             |
+| `blocker:add title=... [owner=...] [nextStep=...]`                      | Record a blocker                                              |
 
 ### Model Management
 
@@ -112,6 +115,7 @@ node lib/hydra-models.mjs claude
 ```
 
 **Interactive model selector** (`model:select` / `:model:select`):
+
 1. Pick an agent (or pass agent name to skip)
 2. Browse all available models — discovered via REST API, CLI query, or config fallback
 3. Type to filter the model list
@@ -119,6 +123,7 @@ node lib/hydra-models.mjs claude
 5. Selection sets mode to `custom` and persists to `hydra.config.json`
 
 **Shorthand aliases:**
+
 - Gemini: `pro`, `flash`, `default`, `fast`
 - Codex: `gpt-5`, `gpt-5.4`, `gpt-5.2-codex`, `o4-mini`, `default`, `fast`, `cheap`
 - Claude: `opus`, `sonnet`, `haiku`, `default`, `fast`, `cheap`
@@ -126,17 +131,18 @@ node lib/hydra-models.mjs claude
 Legacy Codex aliases `codex-5.2` and `gpt-5.2-codex` are auto-normalized to `gpt-5.2-codex`. The default is now `gpt-5.4`.
 
 **Reasoning effort** (Codex only — passed as `--reasoning-effort` CLI flag):
+
 - Levels: `low`, `medium`, `high`, `xhigh`
 - Set via interactive picker or config: `models.<agent>.reasoningEffort`
 - Shown in `:model` display, model listings, and status bar
 
 ### Utility
 
-| Command | Description |
-|---------|-------------|
-| `init` | Initialize Hydra for the current project |
-| `archive` | Archive completed tasks/handoffs |
-| `archive:status` | Show archive stats |
+| Command          | Description                              |
+| ---------------- | ---------------------------------------- |
+| `init`           | Initialize Hydra for the current project |
+| `archive`        | Archive completed tasks/handoffs         |
+| `archive:status` | Show archive stats                       |
 
 Add `json=true` to any command for raw JSON output.
 
@@ -152,48 +158,49 @@ node lib/hydra-operator.mjs prompt="..." # One-shot mode
 
 ### Interactive Commands
 
-| Command | Description |
-|---------|-------------|
-| `:help` | Show help |
-| `:status` | Dashboard with agents & tasks |
-| `:mode auto` | Mini-round triage then delegate/escalate |
-| `:mode handoff` | Direct handoffs (fast, no triage) |
-| `:mode council` | Full council deliberation |
-| `:mode dispatch` | Headless pipeline |
-| `:model` | Show active models + reasoning effort |
-| `:model claude=sonnet` | Switch agent model |
-| `:model:select [agent]` | Interactive model + effort picker |
-| `:usage` | Token usage & contingencies |
-| `:stats` | Agent metrics & performance |
-| `:fork` | Fork current session (explore alternatives) |
-| `:spawn <focus>` | Spawn child session for focused subtask |
-| `:pause [reason]` | Pause the active session |
-| `:unpause` | Resume a paused session |
-| `:resume` | Ack handoffs, reset stale tasks, launch agents |
-| `:chat` | Toggle concierge on/off |
-| `:chat off` | Disable concierge |
-| `:chat reset` | Clear concierge conversation history |
-| `:chat stats` | Show concierge token usage + provider info |
-| `:chat model` | Show active model + fallback chain |
-| `:chat model <name>` | Switch concierge model (e.g. `sonnet`, `flash`, `gpt-5`) |
-| `:chat export` | Export conversation to JSON file |
-| `:workers` | Show worker status |
-| `:workers start [agent]` | Start worker(s) |
-| `:workers stop [agent]` | Stop worker(s) |
-| `:workers restart` | Restart all workers |
-| `:workers mode <mode>` | Change permission mode (auto-edit/full-auto) |
-| `:watch <agent>` | Open visible terminal for agent observation |
-| `:confirm` | Show/toggle dispatch confirmations |
-| `:quit` | Exit console |
-| `<any text>` | Chat with concierge (or dispatch if concierge is off) |
-| `!<prompt>` | Force dispatch (bypass concierge) |
-| `agents=claude,gemini <prompt>` | Dispatch with agent filter |
+| Command                         | Description                                              |
+| ------------------------------- | -------------------------------------------------------- |
+| `:help`                         | Show help                                                |
+| `:status`                       | Dashboard with agents & tasks                            |
+| `:mode auto`                    | Mini-round triage then delegate/escalate                 |
+| `:mode handoff`                 | Direct handoffs (fast, no triage)                        |
+| `:mode council`                 | Full council deliberation                                |
+| `:mode dispatch`                | Headless pipeline                                        |
+| `:model`                        | Show active models + reasoning effort                    |
+| `:model claude=sonnet`          | Switch agent model                                       |
+| `:model:select [agent]`         | Interactive model + effort picker                        |
+| `:usage`                        | Token usage & contingencies                              |
+| `:stats`                        | Agent metrics & performance                              |
+| `:fork`                         | Fork current session (explore alternatives)              |
+| `:spawn <focus>`                | Spawn child session for focused subtask                  |
+| `:pause [reason]`               | Pause the active session                                 |
+| `:unpause`                      | Resume a paused session                                  |
+| `:resume`                       | Ack handoffs, reset stale tasks, launch agents           |
+| `:chat`                         | Toggle concierge on/off                                  |
+| `:chat off`                     | Disable concierge                                        |
+| `:chat reset`                   | Clear concierge conversation history                     |
+| `:chat stats`                   | Show concierge token usage + provider info               |
+| `:chat model`                   | Show active model + fallback chain                       |
+| `:chat model <name>`            | Switch concierge model (e.g. `sonnet`, `flash`, `gpt-5`) |
+| `:chat export`                  | Export conversation to JSON file                         |
+| `:workers`                      | Show worker status                                       |
+| `:workers start [agent]`        | Start worker(s)                                          |
+| `:workers stop [agent]`         | Stop worker(s)                                           |
+| `:workers restart`              | Restart all workers                                      |
+| `:workers mode <mode>`          | Change permission mode (auto-edit/full-auto)             |
+| `:watch <agent>`                | Open visible terminal for agent observation              |
+| `:confirm`                      | Show/toggle dispatch confirmations                       |
+| `:quit`                         | Exit console                                             |
+| `<any text>`                    | Chat with concierge (or dispatch if concierge is off)    |
+| `!<prompt>`                     | Force dispatch (bypass concierge)                        |
+| `agents=claude,gemini <prompt>` | Dispatch with agent filter                               |
 
 ### Concierge
 
 The concierge is a multi-provider conversational AI layer with automatic fallback: OpenAI → Anthropic → Google. It is **active by default** — every prompt goes through the concierge before anything else.
 
 **Behavior:**
+
 - Questions and discussion are answered directly by the concierge (no agent dispatch)
 - Work requests (code changes, debugging, etc.) are automatically escalated to the dispatch pipeline
 - Unrecognized `:commands` are first matched locally via fuzzy matching (Levenshtein distance ≤ 2), then routed to the concierge for suggestion
@@ -202,6 +209,7 @@ The concierge is a multi-provider conversational AI layer with automatic fallbac
 - On dispatch, conversation context (last 3 messages) is included so agents understand why
 
 **Visual indicators:**
+
 - Prompt shows active model: `hydra⬢[gpt-5]>` (or `hydra⬢[sonnet ↓]>` for fallback)
 - Status bar mode icon shows `⬢` (chat mode)
 - Concierge responses are streamed in blue with cost estimate `[~$0.0042]`
@@ -210,12 +218,14 @@ The concierge is a multi-provider conversational AI layer with automatic fallbac
 - Ghost text placeholder hints cycle contextually after each prompt
 
 **Model switching:**
+
 - `:chat model` — display active model and full fallback chain with availability
 - `:chat model sonnet` — switch to Anthropic Sonnet at runtime
 - `:chat model flash` — switch to Google Gemini Flash
 - `:chat model gpt-5` — switch to specific model ID
 
 **Conversation export:**
+
 - `:chat export` — saves conversation history to `docs/coordination/concierge_export_<timestamp>.json`
 - Includes provider info, turn count, stats, and all messages
 
@@ -234,13 +244,13 @@ The concierge is a multi-provider conversational AI layer with automatic fallbac
 
 When the operator console is running in a TTY terminal, a persistent 5-line status bar is pinned to the bottom of the screen:
 
-| Line | Content |
-|------|---------|
-| 1 | Divider |
-| 2 | Mode icon, open task count, last dispatch route, session cost, today's tokens |
-| 3 | Per-agent status: health indicator, icon, name, current action, model, elapsed time |
-| 4 | Rolling activity ticker (last 3 events with timestamps) |
-| 5 | Spacer |
+| Line | Content                                                                             |
+| ---- | ----------------------------------------------------------------------------------- |
+| 1    | Divider                                                                             |
+| 2    | Mode icon, open task count, last dispatch route, session cost, today's tokens       |
+| 3    | Per-agent status: health indicator, icon, name, current action, model, elapsed time |
+| 4    | Rolling activity ticker (last 3 events with timestamps)                             |
+| 5    | Spacer                                                                              |
 
 The status bar uses SSE (`/events/stream`) for real-time updates, falling back to polling when SSE is unavailable. Agent status shows rich metadata including active model, task title, council phase, and step progress.
 
@@ -258,6 +268,7 @@ node lib/hydra-council.mjs prompt="..." [rounds=2] [mode=live|preview] [publish=
 ```
 
 Options:
+
 - `rounds=2` — Number of deliberation rounds (1-4)
 - `mode=preview` — Dry run without calling agents
 - `publish=true` — Push decisions/tasks to daemon
@@ -286,6 +297,7 @@ node lib/hydra-usage.mjs
 ```
 
 Reads `~/.claude/stats-cache.json` and reports:
+
 - Token consumption vs daily budget
 - Per-model breakdown
 - Activity stats (messages, sessions, tool calls)
@@ -325,8 +337,19 @@ Exit code: 0 if normal/warning, 1 if critical.
   },
   "aliases": {
     "gemini": { "pro": "gemini-2.5-pro", "flash": "gemini-2.5-flash" },
-    "codex": { "gpt5": "gpt-5", "gpt-5": "gpt-5", "gpt-5.4": "gpt-5.4", "gpt-5.2-codex": "gpt-5.2-codex", "codex-5.2": "gpt-5.2-codex", "o4-mini": "o4-mini" },
-    "claude": { "opus": "claude-opus-4-6", "sonnet": "claude-sonnet-4-5-20250929", "haiku": "claude-haiku-4-5-20251001" }
+    "codex": {
+      "gpt5": "gpt-5",
+      "gpt-5": "gpt-5",
+      "gpt-5.4": "gpt-5.4",
+      "gpt-5.2-codex": "gpt-5.2-codex",
+      "codex-5.2": "gpt-5.2-codex",
+      "o4-mini": "o4-mini"
+    },
+    "claude": {
+      "opus": "claude-opus-4-6",
+      "sonnet": "claude-sonnet-4-5-20250929",
+      "haiku": "claude-haiku-4-5-20251001"
+    }
   },
   "modeTiers": {
     "performance": { "gemini": "default", "codex": "default", "claude": "default" },
@@ -498,6 +521,7 @@ pwsh -File bin/hydra.ps1 [-Prompt "..."]
 ```
 
 This starts:
+
 1. Daemon (if not running)
 2. Three agent head terminals (Gemini, Codex, Claude)
 3. Operator console
@@ -508,46 +532,46 @@ One-shot mode: `pwsh -File bin/hydra.ps1 -Prompt "Your objective"`
 
 ### Read Endpoints
 
-| Endpoint | Description |
-|----------|-------------|
-| `GET /health` | Daemon health check |
-| `GET /state` | Full sync state |
-| `GET /summary` | Dashboard summary |
-| `GET /events?limit=N` | Recent events |
-| `GET /events/stream` | SSE event stream |
-| `GET /events/replay?from=N&category=X` | Replay events since sequence N, optional category filter |
-| `GET /next?agent=NAME` | Suggested next action |
-| `GET /prompt?agent=NAME` | Context prompt for agent |
-| `GET /task/:id/checkpoints` | List checkpoints for a task |
-| `GET /sessions` | List all sessions (root, forks, spawns) |
-| `GET /worktrees` | List active git worktrees |
-| `GET /session/status` | Session health: stale tasks, pending handoffs, agent suggestions |
-| `GET /tasks/stale` | List tasks marked as stale (30+ min without update) |
-| `GET /stats` | Agent metrics + usage dashboard data |
+| Endpoint                               | Description                                                      |
+| -------------------------------------- | ---------------------------------------------------------------- |
+| `GET /health`                          | Daemon health check                                              |
+| `GET /state`                           | Full sync state                                                  |
+| `GET /summary`                         | Dashboard summary                                                |
+| `GET /events?limit=N`                  | Recent events                                                    |
+| `GET /events/stream`                   | SSE event stream                                                 |
+| `GET /events/replay?from=N&category=X` | Replay events since sequence N, optional category filter         |
+| `GET /next?agent=NAME`                 | Suggested next action                                            |
+| `GET /prompt?agent=NAME`               | Context prompt for agent                                         |
+| `GET /task/:id/checkpoints`            | List checkpoints for a task                                      |
+| `GET /sessions`                        | List all sessions (root, forks, spawns)                          |
+| `GET /worktrees`                       | List active git worktrees                                        |
+| `GET /session/status`                  | Session health: stale tasks, pending handoffs, agent suggestions |
+| `GET /tasks/stale`                     | List tasks marked as stale (30+ min without update)              |
+| `GET /stats`                           | Agent metrics + usage dashboard data                             |
 
 ### Write Endpoints
 
-| Endpoint | Description |
-|----------|-------------|
-| `POST /task/add` | Create task (optional `worktree: true` for isolation) |
-| `POST /task/update` | Update task (supports `claimToken` validation, `force` override) |
-| `POST /task/claim` | Claim task atomically (returns `claimToken`) |
-| `POST /task/route` | Get best agent for a task |
-| `POST /task/checkpoint` | Save intermediate checkpoint on a task |
-| `POST /handoff` | Create agent handoff |
-| `POST /handoff/ack` | Acknowledge handoff |
-| `POST /session/start` | Start coordination session |
-| `POST /session/fork` | Fork current session (copy state) |
-| `POST /session/spawn` | Spawn child session (fresh state with focus) |
-| `POST /decision` | Record decision |
-| `POST /blocker` | Record blocker |
-| `POST /verify` | Run verification for a task |
-| `POST /session/pause` | Pause an active session |
-| `POST /session/resume` | Resume a paused session |
-| `POST /archive` | Archive completed items |
-| `POST /state/archive` | Archive completed tasks/handoffs to file |
-| `POST /events/push` | Push concierge events (dispatch, summary, error, model_switch) |
-| `POST /shutdown` | Graceful daemon shutdown |
+| Endpoint                | Description                                                      |
+| ----------------------- | ---------------------------------------------------------------- |
+| `POST /task/add`        | Create task (optional `worktree: true` for isolation)            |
+| `POST /task/update`     | Update task (supports `claimToken` validation, `force` override) |
+| `POST /task/claim`      | Claim task atomically (returns `claimToken`)                     |
+| `POST /task/route`      | Get best agent for a task                                        |
+| `POST /task/checkpoint` | Save intermediate checkpoint on a task                           |
+| `POST /handoff`         | Create agent handoff                                             |
+| `POST /handoff/ack`     | Acknowledge handoff                                              |
+| `POST /session/start`   | Start coordination session                                       |
+| `POST /session/fork`    | Fork current session (copy state)                                |
+| `POST /session/spawn`   | Spawn child session (fresh state with focus)                     |
+| `POST /decision`        | Record decision                                                  |
+| `POST /blocker`         | Record blocker                                                   |
+| `POST /verify`          | Run verification for a task                                      |
+| `POST /session/pause`   | Pause an active session                                          |
+| `POST /session/resume`  | Resume a paused session                                          |
+| `POST /archive`         | Archive completed items                                          |
+| `POST /state/archive`   | Archive completed tasks/handoffs to file                         |
+| `POST /events/push`     | Push concierge events (dispatch, summary, error, model_switch)   |
+| `POST /shutdown`        | Graceful daemon shutdown                                         |
 
 ## Hydra MCP Server
 
@@ -559,16 +583,16 @@ node lib/hydra-mcp-server.mjs
 
 Communicates via JSON-RPC over stdio. Available tools:
 
-| Tool | Description |
-|------|-------------|
-| `hydra_tasks_list` | List open tasks with optional status/agent filters |
-| `hydra_tasks_claim` | Claim a task atomically |
-| `hydra_tasks_update` | Update task status and notes |
-| `hydra_tasks_checkpoint` | Save task checkpoint |
-| `hydra_handoffs_pending` | Get pending handoffs for an agent |
-| `hydra_handoffs_ack` | Acknowledge a handoff |
-| `hydra_council_request` | Request council deliberation on a prompt |
-| `hydra_status` | Get daemon health and summary |
+| Tool                     | Description                                        |
+| ------------------------ | -------------------------------------------------- |
+| `hydra_tasks_list`       | List open tasks with optional status/agent filters |
+| `hydra_tasks_claim`      | Claim a task atomically                            |
+| `hydra_tasks_update`     | Update task status and notes                       |
+| `hydra_tasks_checkpoint` | Save task checkpoint                               |
+| `hydra_handoffs_pending` | Get pending handoffs for an agent                  |
+| `hydra_handoffs_ack`     | Acknowledge a handoff                              |
+| `hydra_council_request`  | Request council deliberation on a prompt           |
+| `hydra_status`           | Get daemon health and summary                      |
 
 ---
 
@@ -578,142 +602,142 @@ Full reference for all operator console commands. Access the console with `npm r
 
 ### Session & Navigation
 
-| Command | Description |
-|---------|-------------|
-| `:help` | Show all commands |
-| `:status` | Dashboard with agents, tasks, and metrics |
-| `:sitrep` | AI-narrated situation report |
-| `:resume` | Scan all resumable state (daemon, evolve, branches, suggestions) |
-| `:pause [reason]` | Pause the active session |
-| `:unpause` | Resume a paused session |
-| `:fork` | Fork current session (explore alternatives with copied state) |
-| `:spawn <focus>` | Spawn child session (fresh state for focused subtask) |
-| `:events` | Show recent event log |
-| `:archive` | Archive completed work and trim events |
-| `:clear` | Interactive menu to select clear target |
-| `:clear all` | Cancel all tasks & acknowledge all handoffs |
-| `:clear concierge` | Clear concierge conversation history |
-| `:clear metrics` | Reset session metrics |
-| `:clear screen` | Clear terminal |
-| `:dry-run` | Toggle dry-run mode (preview dispatches without executing) |
-| `:confirm` | Show/toggle dispatch confirmation prompts |
-| `:shutdown` | Stop the daemon |
-| `:quit` | Exit operator console |
+| Command            | Description                                                      |
+| ------------------ | ---------------------------------------------------------------- |
+| `:help`            | Show all commands                                                |
+| `:status`          | Dashboard with agents, tasks, and metrics                        |
+| `:sitrep`          | AI-narrated situation report                                     |
+| `:resume`          | Scan all resumable state (daemon, evolve, branches, suggestions) |
+| `:pause [reason]`  | Pause the active session                                         |
+| `:unpause`         | Resume a paused session                                          |
+| `:fork`            | Fork current session (explore alternatives with copied state)    |
+| `:spawn <focus>`   | Spawn child session (fresh state for focused subtask)            |
+| `:events`          | Show recent event log                                            |
+| `:archive`         | Archive completed work and trim events                           |
+| `:clear`           | Interactive menu to select clear target                          |
+| `:clear all`       | Cancel all tasks & acknowledge all handoffs                      |
+| `:clear concierge` | Clear concierge conversation history                             |
+| `:clear metrics`   | Reset session metrics                                            |
+| `:clear screen`    | Clear terminal                                                   |
+| `:dry-run`         | Toggle dry-run mode (preview dispatches without executing)       |
+| `:confirm`         | Show/toggle dispatch confirmation prompts                        |
+| `:shutdown`        | Stop the daemon                                                  |
+| `:quit`            | Exit operator console                                            |
 
 ### Dispatch & Routing
 
-| Command | Description |
-|---------|-------------|
-| `:mode auto` | Triage then route to single / tandem / council |
-| `:mode smart` | Auto-select model tier per prompt complexity |
-| `:mode council` | Full multi-round deliberation |
-| `:mode dispatch` | Headless pipeline (queues to workers) |
-| `:mode handoff` | Direct handoffs, no triage |
-| `:mode economy\|balanced\|performance` | Set routing cost tier |
-| `!<prompt>` | Force dispatch, bypassing the concierge |
-| `agents=claude,gemini <prompt>` | Dispatch with agent filter |
+| Command                                | Description                                    |
+| -------------------------------------- | ---------------------------------------------- |
+| `:mode auto`                           | Triage then route to single / tandem / council |
+| `:mode smart`                          | Auto-select model tier per prompt complexity   |
+| `:mode council`                        | Full multi-round deliberation                  |
+| `:mode dispatch`                       | Headless pipeline (queues to workers)          |
+| `:mode handoff`                        | Direct handoffs, no triage                     |
+| `:mode economy\|balanced\|performance` | Set routing cost tier                          |
+| `!<prompt>`                            | Force dispatch, bypassing the concierge        |
+| `agents=claude,gemini <prompt>`        | Dispatch with agent filter                     |
 
 ### Agents & Models
 
-| Command | Description |
-|---------|-------------|
-| `:model` | Show active mode and models per agent |
-| `:model claude=sonnet` | Override agent model |
-| `:model reset` | Clear all model overrides |
-| `:model:select [agent]` | Interactive model + reasoning effort picker |
-| `:roles` | Show role → agent → model mapping |
-| `:roster` | Edit role → agent → model assignments interactively |
-| `:agents` | List all registered agents (built-in + custom) |
-| `:agents add` | Add a custom agent via wizard |
-| `:agents remove <name>` | Remove a custom agent |
-| `:agents test <name>` | Test a custom agent with a sample prompt |
-| `:agents info <name>` | Show agent details and config |
-| `:forge` | Interactive agent creation wizard (Agent Forge pipeline) |
-| `:forge list` | List forged agents |
-| `:forge delete <name>` | Remove a forged agent |
-| `:watch <agent>` | Open a visible terminal window for an agent |
+| Command                 | Description                                              |
+| ----------------------- | -------------------------------------------------------- |
+| `:model`                | Show active mode and models per agent                    |
+| `:model claude=sonnet`  | Override agent model                                     |
+| `:model reset`          | Clear all model overrides                                |
+| `:model:select [agent]` | Interactive model + reasoning effort picker              |
+| `:roles`                | Show role → agent → model mapping                        |
+| `:roster`               | Edit role → agent → model assignments interactively      |
+| `:agents`               | List all registered agents (built-in + custom)           |
+| `:agents add`           | Add a custom agent via wizard                            |
+| `:agents remove <name>` | Remove a custom agent                                    |
+| `:agents test <name>`   | Test a custom agent with a sample prompt                 |
+| `:agents info <name>`   | Show agent details and config                            |
+| `:forge`                | Interactive agent creation wizard (Agent Forge pipeline) |
+| `:forge list`           | List forged agents                                       |
+| `:forge delete <name>`  | Remove a forged agent                                    |
+| `:watch <agent>`        | Open a visible terminal window for an agent              |
 
 ### Workers
 
-| Command | Description |
-|---------|-------------|
-| `:workers` | Show worker status |
-| `:workers start [agent]` | Start worker(s) |
-| `:workers stop [agent]` | Stop worker(s) |
-| `:workers restart` | Restart all workers |
-| `:workers mode <mode>` | Change permission mode (`auto-edit` / `full-auto`) |
+| Command                  | Description                                        |
+| ------------------------ | -------------------------------------------------- |
+| `:workers`               | Show worker status                                 |
+| `:workers start [agent]` | Start worker(s)                                    |
+| `:workers stop [agent]`  | Stop worker(s)                                     |
+| `:workers restart`       | Restart all workers                                |
+| `:workers mode <mode>`   | Change permission mode (`auto-edit` / `full-auto`) |
 
 ### Tasks & Handoffs
 
-| Command | Description |
-|---------|-------------|
-| `:tasks` | List active daemon tasks |
-| `:tasks scan` | Scan codebase for TODO/FIXME/issues |
-| `:tasks run` | Launch autonomous tasks runner |
-| `:tasks review` | Interactive branch review & merge |
-| `:tasks status` | Show latest tasks run report |
-| `:tasks clean` | Delete all `tasks/*` branches |
-| `:handoffs` | List pending & recent handoffs |
-| `:cancel <id>` | Cancel a task |
+| Command         | Description                         |
+| --------------- | ----------------------------------- |
+| `:tasks`        | List active daemon tasks            |
+| `:tasks scan`   | Scan codebase for TODO/FIXME/issues |
+| `:tasks run`    | Launch autonomous tasks runner      |
+| `:tasks review` | Interactive branch review & merge   |
+| `:tasks status` | Show latest tasks run report        |
+| `:tasks clean`  | Delete all `tasks/*` branches       |
+| `:handoffs`     | List pending & recent handoffs      |
+| `:cancel <id>`  | Cancel a task                       |
 
 ### Automation
 
-| Command | Description |
-|---------|-------------|
-| `:evolve` | Launch self-improvement session |
-| `:evolve status` | Show latest evolve report |
-| `:evolve resume` | Resume interrupted session |
-| `:evolve knowledge` | Browse knowledge base entries |
-| `:nightly` | Interactive nightly run setup (mode, tasks, hours, discovery) |
-| `:nightly dry-run` | Scan & prioritize without executing |
-| `:nightly review` | Interactive branch review & merge |
-| `:nightly status` | Show latest nightly run report |
-| `:nightly clean` | Delete all `nightly/*` branches |
+| Command             | Description                                                   |
+| ------------------- | ------------------------------------------------------------- |
+| `:evolve`           | Launch self-improvement session                               |
+| `:evolve status`    | Show latest evolve report                                     |
+| `:evolve resume`    | Resume interrupted session                                    |
+| `:evolve knowledge` | Browse knowledge base entries                                 |
+| `:nightly`          | Interactive nightly run setup (mode, tasks, hours, discovery) |
+| `:nightly dry-run`  | Scan & prioritize without executing                           |
+| `:nightly review`   | Interactive branch review & merge                             |
+| `:nightly status`   | Show latest nightly run report                                |
+| `:nightly clean`    | Delete all `nightly/*` branches                               |
 
 ### Monitoring & Diagnostics
 
-| Command | Description |
-|---------|-------------|
-| `:usage` | Token usage breakdown and contingency options |
-| `:stats` | Agent metrics and performance summary |
-| `:doctor` | Diagnostic stats and recent log entries |
-| `:doctor log` | Show last 25 diagnostic log entries |
-| `:doctor fix` | Auto-detect and fix issues via action pipeline |
-| `:doctor diagnose <text>` | Investigate a failure via GPT-5.3 |
-| `:doctor config` | Check for config drift from defaults |
-| `:kb` | Knowledge base stats and recent entries |
-| `:kb <query>` | Search knowledge base |
-| `:cleanup` | Scan and clean stale branches, tasks, and artifacts |
+| Command                   | Description                                         |
+| ------------------------- | --------------------------------------------------- |
+| `:usage`                  | Token usage breakdown and contingency options       |
+| `:stats`                  | Agent metrics and performance summary               |
+| `:doctor`                 | Diagnostic stats and recent log entries             |
+| `:doctor log`             | Show last 25 diagnostic log entries                 |
+| `:doctor fix`             | Auto-detect and fix issues via action pipeline      |
+| `:doctor diagnose <text>` | Investigate a failure via GPT-5.3                   |
+| `:doctor config`          | Check for config drift from defaults                |
+| `:kb`                     | Knowledge base stats and recent entries             |
+| `:kb <query>`             | Search knowledge base                               |
+| `:cleanup`                | Scan and clean stale branches, tasks, and artifacts |
 
 ### Concierge Chat
 
-| Command | Description |
-|---------|-------------|
-| `:chat` | Toggle concierge on/off |
-| `:chat model` | Show active model and full fallback chain |
+| Command              | Description                                              |
+| -------------------- | -------------------------------------------------------- |
+| `:chat`              | Toggle concierge on/off                                  |
+| `:chat model`        | Show active model and full fallback chain                |
 | `:chat model <name>` | Switch concierge model (e.g. `sonnet`, `flash`, `gpt-5`) |
-| `:chat export` | Export conversation history to file |
+| `:chat export`       | Export conversation history to file                      |
 
 ### Persona
 
-| Command | Description |
-|---------|-------------|
-| `:persona` | Interactive personality editor |
-| `:persona show` | Show current personality configuration |
+| Command             | Description                                                         |
+| ------------------- | ------------------------------------------------------------------- |
+| `:persona`          | Interactive personality editor                                      |
+| `:persona show`     | Show current personality configuration                              |
 | `:persona <preset>` | Apply preset (default / professional / casual / analytical / terse) |
 
 ### GitHub & PRs
 
-| Command | Description |
-|---------|-------------|
-| `:github` | GitHub status |
-| `:github prs` | List open pull requests |
+| Command               | Description               |
+| --------------------- | ------------------------- |
+| `:github`             | GitHub status             |
+| `:github prs`         | List open pull requests   |
 | `:pr create [branch]` | Push branch and create PR |
-| `:pr list` | List open pull requests |
-| `:pr view <number>` | Show PR details |
+| `:pr list`            | List open pull requests   |
+| `:pr view <number>`   | Show PR details           |
 
 ### System & Sync
 
-| Command | Description |
-|---------|-------------|
+| Command | Description                                    |
+| ------- | ---------------------------------------------- |
 | `:sync` | Sync `HYDRA.md` to per-agent instruction files |

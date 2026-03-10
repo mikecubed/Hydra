@@ -55,8 +55,14 @@ function normalizeFixtureEntry(agent, entry, index) {
   const id = String(entry.id || `entry-${index}`);
   const { matchPattern } = entry;
 
-  if (matchPattern !== null && typeof matchPattern !== 'string' && !(matchPattern instanceof RegExp)) {
-    throw new Error(`Fixture entry "${id}" for ${agent} must use a string, RegExp, or null matchPattern`);
+  if (
+    matchPattern !== null &&
+    typeof matchPattern !== 'string' &&
+    !(matchPattern instanceof RegExp)
+  ) {
+    throw new Error(
+      `Fixture entry "${id}" for ${agent} must use a string, RegExp, or null matchPattern`,
+    );
   }
 
   if (!entry.response || typeof entry.response !== 'object') {
@@ -67,11 +73,12 @@ function normalizeFixtureEntry(agent, entry, index) {
     ...entry,
     id,
     response: deepClone(entry.response),
-    matchPattern: matchPattern === null
-      ? null
-      : matchPattern instanceof RegExp
-        ? matchPattern
-        : new RegExp(matchPattern, 'i'),
+    matchPattern:
+      matchPattern === null
+        ? null
+        : matchPattern instanceof RegExp
+          ? matchPattern
+          : new RegExp(matchPattern, 'i'),
   };
 }
 
@@ -85,11 +92,15 @@ function validateFixtures(agent, entries) {
   const nullMatchEntries = normalized.filter((entry) => entry.matchPattern === null);
 
   if (!defaultEntry || defaultEntry.matchPattern !== null) {
-    throw new Error(`Fixture list for ${agent} must include a default entry with matchPattern null (id "default")`);
+    throw new Error(
+      `Fixture list for ${agent} must include a default entry with matchPattern null (id "default")`,
+    );
   }
 
   if (nullMatchEntries.length !== 1) {
-    throw new Error(`Fixture list for ${agent} must contain exactly one default entry with matchPattern null`);
+    throw new Error(
+      `Fixture list for ${agent} must contain exactly one default entry with matchPattern null`,
+    );
   }
 
   return normalized;
@@ -108,9 +119,7 @@ function normalizeResponse(response) {
   const error = response.error ?? response.stderr ?? 'Mock execution failed';
 
   return cloneResult(
-    response.ok
-      ? makeSuccessResult(output, response)
-      : makeFailureResult(String(error), response)
+    response.ok ? makeSuccessResult(output, response) : makeFailureResult(String(error), response),
   );
 }
 
@@ -120,10 +129,13 @@ export async function loadAgentFixture(agent) {
     const raw = await fs.readFile(fixturePath, 'utf8');
     const parsed = JSON.parse(raw);
     return validateFixtures(agent, parsed);
-  } catch (error) {
-    throw new Error(`Unable to load mock fixture for ${agent} from ${fixturePath}: ${error.message}`, {
-      cause: error,
-    });
+  } catch (err) {
+    throw new Error(
+      `Unable to load mock fixture for ${agent} from ${fixturePath}: ${err.message}`,
+      {
+        cause: err,
+      },
+    );
   }
 }
 
@@ -133,7 +145,7 @@ export function createMockExecuteAgent(fixtureMap) {
   }
 
   const validatedMap = Object.fromEntries(
-    Object.entries(fixtureMap).map(([agent, entries]) => [agent, validateFixtures(agent, entries)])
+    Object.entries(fixtureMap).map(([agent, entries]) => [agent, validateFixtures(agent, entries)]),
   );
 
   return async function mockExecuteAgent(agent, prompt, opts = {}) {
@@ -145,7 +157,9 @@ export function createMockExecuteAgent(fixtureMap) {
     }
 
     const promptText = String(prompt ?? '');
-    const matched = fixtures.find((entry) => entry.matchPattern instanceof RegExp && entry.matchPattern.test(promptText));
+    const matched = fixtures.find(
+      (entry) => entry.matchPattern instanceof RegExp && entry.matchPattern.test(promptText),
+    );
     const fallback = fixtures.find((entry) => entry.id === 'default');
     const selected = matched || fallback;
 

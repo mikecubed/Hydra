@@ -46,7 +46,7 @@ test('stripAnsi passes plain text unchanged', () => {
 
 test('stripAnsi handles null/undefined gracefully', () => {
   assert.equal(stripAnsi(null), '');
-  assert.equal(stripAnsi(undefined), '');
+  assert.equal(stripAnsi(), '');
 });
 
 // ── formatElapsed ────────────────────────────────────────────────────────────
@@ -75,7 +75,7 @@ test('formatElapsed formats hours correctly', () => {
 test('formatElapsed handles negative and null', () => {
   assert.equal(formatElapsed(-1), '0s');
   assert.equal(formatElapsed(null), '0s');
-  assert.equal(formatElapsed(undefined), '0s');
+  assert.equal(formatElapsed(), '0s');
 });
 
 // ── shortModelName ───────────────────────────────────────────────────────────
@@ -105,7 +105,7 @@ test('shortModelName extracts OpenAI/Codex model names', () => {
 test('shortModelName handles null/empty', () => {
   assert.equal(shortModelName(''), '');
   assert.equal(shortModelName(null), '');
-  assert.equal(shortModelName(undefined), '');
+  assert.equal(shortModelName(), '');
 });
 
 test('shortModelName strips common prefixes for unknown models', () => {
@@ -128,7 +128,8 @@ test('extractTopic strips action verbs', () => {
 });
 
 test('extractTopic truncates long prompts at word boundary', () => {
-  const longPrompt = 'the authentication system needs to be completely redesigned from scratch with new token handling';
+  const longPrompt =
+    'the authentication system needs to be completely redesigned from scratch with new token handling';
   const topic = extractTopic(longPrompt, 30);
   assert.ok(topic.length <= 31); // +1 for ellipsis char
   assert.ok(topic.endsWith('\u2026') || topic.length <= 30);
@@ -142,7 +143,7 @@ test('extractTopic takes first clause on semicolons', () => {
 test('extractTopic returns empty for null/empty', () => {
   assert.equal(extractTopic(''), '');
   assert.equal(extractTopic(null), '');
-  assert.equal(extractTopic(undefined), '');
+  assert.equal(extractTopic(), '');
 });
 
 // ── phaseNarrative ───────────────────────────────────────────────────────────
@@ -173,12 +174,21 @@ test('AGENT_COLORS has entries for all three agents', () => {
 
 test('AGENT_COLORS.claude renders orange (truecolor) or yellow (fallback) and preserves text', () => {
   const colored = AGENT_COLORS.claude('test');
-  assert.ok(colored.includes('test'), `Color function must preserve input text, got: ${JSON.stringify(colored)}`);
+  assert.ok(
+    colored.includes('test'),
+    `Color function must preserve input text, got: ${JSON.stringify(colored)}`,
+  );
   // In truecolor terminals the escape 38;2;232;134;58 is emitted; in others picocolors
   // emits a yellow code or no code at all (NO_COLOR / non-TTY). Either way the text is present.
-  const isTruecolor = process.env.COLORTERM === 'truecolor' || process.env.COLORTERM === '24bit' || Boolean(process.env.WT_SESSION);
+  const isTruecolor =
+    process.env.COLORTERM === 'truecolor' ||
+    process.env.COLORTERM === '24bit' ||
+    Boolean(process.env.WT_SESSION);
   if (isTruecolor) {
-    assert.ok(colored.includes('38;2;232;134;58'), `Expected truecolor orange in truecolor terminal, got: ${JSON.stringify(colored)}`);
+    assert.ok(
+      colored.includes('38;2;232;134;58'),
+      `Expected truecolor orange in truecolor terminal, got: ${JSON.stringify(colored)}`,
+    );
   }
 });
 
@@ -192,10 +202,10 @@ test('AGENT_COLORS produce strings containing the input text', () => {
 // ── AGENT_ICONS ──────────────────────────────────────────────────────────────
 
 test('AGENT_ICONS has correct symbols', () => {
-  assert.equal(AGENT_ICONS.claude, '\u274B');    // ❋
-  assert.equal(AGENT_ICONS.gemini, '\u2726');    // ✦
-  assert.equal(AGENT_ICONS.codex, '\u058E');     // ֎
-  assert.equal(AGENT_ICONS.human, '\u{1F16F}');  // 🅯
+  assert.equal(AGENT_ICONS.claude, '\u274B'); // ❋
+  assert.equal(AGENT_ICONS.gemini, '\u2726'); // ✦
+  assert.equal(AGENT_ICONS.codex, '\u058E'); // ֎
+  assert.equal(AGENT_ICONS.human, '\u{1F16F}'); // 🅯
   assert.equal(AGENT_ICONS.system, '\u{1F5B3}'); // 🖳
 });
 

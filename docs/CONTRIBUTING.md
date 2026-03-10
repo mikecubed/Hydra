@@ -112,6 +112,7 @@ Users can then: `hydra model claude=experimental`
 ## Adding a Daemon Endpoint
 
 Daemon routes are split into two files under `lib/daemon/`:
+
 - `read-routes.mjs` — GET and SSE endpoints (read-only)
 - `write-routes.mjs` — POST endpoints (state mutations)
 
@@ -120,6 +121,7 @@ Both export a single handler function that receives `(method, route, requestUrl,
 1. **Add route handler** in the appropriate route file:
 
 For read endpoints — `lib/daemon/read-routes.mjs`:
+
 ```js
 if (method === 'GET' && route === '/my-endpoint') {
   const state = readState();
@@ -130,13 +132,17 @@ if (method === 'GET' && route === '/my-endpoint') {
 ```
 
 For write endpoints — `lib/daemon/write-routes.mjs`:
+
 ```js
 if (method === 'POST' && route === '/my-endpoint') {
   const body = await readJsonBody(req);
-  const result = await enqueueMutation('my-endpoint', (state) => {
-    // mutate state
-    return /* result */;
-  }, { /* optional detail for event log */ });
+  const result = await enqueueMutation(
+    'my-endpoint',
+    (state) => {
+      // mutate state
+      return /* result */;
+    },
+  );
   sendJson(res, 200, { ok: true, result });
   return true;
 }

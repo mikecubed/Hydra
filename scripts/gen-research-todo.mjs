@@ -32,9 +32,7 @@ const INCLUDE_EXTS = new Set(['.md', '.mdx', '.markdown', '.mdown', '.txt']);
 // --- helpers ---
 
 function toTitleCase(str) {
-  return str
-    .replace(/[-_]+/g, ' ')
-    .replace(/\b\w/g, c => c.toUpperCase());
+  return str.replace(/[-_]+/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase());
 }
 
 function extractTitle(filePath) {
@@ -79,7 +77,7 @@ function extractTitle(filePath) {
   for (; i < lines.length; i++) {
     const line = lines[i];
     // Toggle code block state
-    if (/^```/.test(line)) {
+    if (line.startsWith('```')) {
       inCodeBlock = !inCodeBlock;
       continue;
     }
@@ -188,7 +186,7 @@ function buildOutput(groups) {
   const footer = [
     '',
     '---',
-    `_${total} file${total !== 1 ? 's' : ''} across ${gc} group${gc !== 1 ? 's' : ''}._`,
+    `_${total} file${total === 1 ? '' : 's'} across ${gc} group${gc === 1 ? '' : 's'}._`,
     '',
   ].join('\n');
 
@@ -201,14 +199,10 @@ function applyIdempotent(existing, newBlock) {
 
   if (si === -1 || ei === -1) {
     // Markers missing — append block at end
-    return existing.trimEnd() + '\n\n' + newBlock + '\n';
+    return `${existing.trimEnd()}\n\n${newBlock}\n`;
   }
 
-  return (
-    existing.slice(0, si) +
-    newBlock +
-    existing.slice(ei + MARKER_END.length)
-  );
+  return existing.slice(0, si) + newBlock + existing.slice(ei + MARKER_END.length);
 }
 
 // --- main ---
@@ -239,7 +233,7 @@ function main() {
 
   const { total, groups: gc } = countItems(groups);
   console.log(`Written: docs/coordination/RESEARCH_TODO.md`);
-  console.log(`  ${total} file${total !== 1 ? 's' : ''} across ${gc} group${gc !== 1 ? 's' : ''}`);
+  console.log(`  ${total} file${total === 1 ? '' : 's'} across ${gc} group${gc === 1 ? '' : 's'}`);
 }
 
 main();

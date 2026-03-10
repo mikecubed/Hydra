@@ -1,10 +1,16 @@
 import { describe, it, beforeEach } from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  LRUCache, contentHash,
-  getCached, setCached, invalidateCache,
-  recordNegativeHit, isNegativeHit,
-  getCacheStats, clearAllCaches, pruneExpired,
+  LRUCache,
+  contentHash,
+  getCached,
+  setCached,
+  invalidateCache,
+  recordNegativeHit,
+  isNegativeHit,
+  getCacheStats,
+  clearAllCaches,
+  pruneExpired,
 } from '../lib/hydra-cache.mjs';
 
 describe('LRUCache', () => {
@@ -49,15 +55,17 @@ describe('LRUCache', () => {
     const before = cache.get('x');
     // Wait briefly
     const start = Date.now();
-    while (Date.now() - start < 5) { /* spin */ }
+    while (Date.now() - start < 5) {
+      /* spin */
+    }
     assert.equal(cache.get('x'), undefined);
   });
 
   it('tracks hit/miss stats', () => {
     cache.set('a', 1);
-    cache.get('a');     // hit
-    cache.get('a');     // hit
-    cache.get('miss');  // miss
+    cache.get('a'); // hit
+    cache.get('a'); // hit
+    cache.get('miss'); // miss
     const stats = cache.getStats();
     assert.equal(stats.hits, 2);
     assert.equal(stats.misses, 1);
@@ -87,7 +95,9 @@ describe('LRUCache', () => {
     cache.set('a', 1, 1); // 1ms TTL
     cache.set('b', 2, 60000); // 60s TTL
     const start = Date.now();
-    while (Date.now() - start < 5) { /* spin */ }
+    while (Date.now() - start < 5) {
+      /* spin */
+    }
     const pruned = cache.prune();
     assert.equal(pruned, 1);
     assert.equal(cache.size, 1);

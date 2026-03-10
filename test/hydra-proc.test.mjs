@@ -32,13 +32,17 @@ function withNoPipes(fn) {
 
 describe('spawnSyncCapture (pipe path)', () => {
   it('captures stdout', () => {
-    const r = spawnSyncCapture(process.execPath, ['-e', "console.log('hello-pipe')"], { encoding: 'utf8' });
+    const r = spawnSyncCapture(process.execPath, ['-e', "console.log('hello-pipe')"], {
+      encoding: 'utf8',
+    });
     assert.equal(r.status, 0);
     assert.ok(r.stdout.includes('hello-pipe'));
   });
 
   it('captures stderr', () => {
-    const r = spawnSyncCapture(process.execPath, ['-e', "console.error('err-pipe')"], { encoding: 'utf8' });
+    const r = spawnSyncCapture(process.execPath, ['-e', "console.error('err-pipe')"], {
+      encoding: 'utf8',
+    });
     assert.equal(r.status, 0);
     assert.ok(r.stderr.includes('err-pipe'));
   });
@@ -51,7 +55,10 @@ describe('spawnSyncCapture (pipe path)', () => {
   it('passes stdin input', () => {
     const r = spawnSyncCapture(
       process.execPath,
-      ['-e', "let d='';process.stdin.on('data',c=>d+=c);process.stdin.on('end',()=>console.log(d.trim()))"],
+      [
+        '-e',
+        "let d='';process.stdin.on('data',c=>d+=c);process.stdin.on('end',()=>console.log(d.trim()))",
+      ],
       { encoding: 'utf8', input: 'pipe-stdin' },
     );
     assert.equal(r.status, 0);
@@ -64,7 +71,9 @@ describe('spawnSyncCapture (pipe path)', () => {
 describe('spawnSyncCapture (file-backed fallback, HYDRA_NO_PIPES=1)', () => {
   it('captures stdout via temp files', () => {
     const r = withNoPipes(() =>
-      spawnSyncCapture(process.execPath, ['-e', "console.log('hello-nopipes')"], { encoding: 'utf8' }),
+      spawnSyncCapture(process.execPath, ['-e', "console.log('hello-nopipes')"], {
+        encoding: 'utf8',
+      }),
     );
     assert.equal(r.status, 0);
     assert.ok(r.stdout.includes('hello-nopipes'));
@@ -72,7 +81,9 @@ describe('spawnSyncCapture (file-backed fallback, HYDRA_NO_PIPES=1)', () => {
 
   it('captures stderr via temp files', () => {
     const r = withNoPipes(() =>
-      spawnSyncCapture(process.execPath, ['-e', "console.error('err-nopipes')"], { encoding: 'utf8' }),
+      spawnSyncCapture(process.execPath, ['-e', "console.error('err-nopipes')"], {
+        encoding: 'utf8',
+      }),
     );
     assert.equal(r.status, 0);
     assert.ok(r.stderr.includes('err-nopipes'));
@@ -89,7 +100,10 @@ describe('spawnSyncCapture (file-backed fallback, HYDRA_NO_PIPES=1)', () => {
     const r = withNoPipes(() =>
       spawnSyncCapture(
         process.execPath,
-        ['-e', "let d='';process.stdin.on('data',c=>d+=c);process.stdin.on('end',()=>console.log(d.trim()))"],
+        [
+          '-e',
+          "let d='';process.stdin.on('data',c=>d+=c);process.stdin.on('end',()=>console.log(d.trim()))",
+        ],
         { encoding: 'utf8', input: 'nopipes-stdin' },
       ),
     );

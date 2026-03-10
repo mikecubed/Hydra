@@ -71,8 +71,14 @@ describe('mock agent isolation', () => {
     };
 
     try {
-      const fallbackResult = await mockExecuteAgent('claude', 'unmatched prompt for default fixture', {});
-      const matchedResult = await mockExecuteAgent('codex', 'implement the feature', { cwd: process.cwd() });
+      const fallbackResult = await mockExecuteAgent(
+        'claude',
+        'unmatched prompt for default fixture',
+        {},
+      );
+      const matchedResult = await mockExecuteAgent('codex', 'implement the feature', {
+        cwd: process.cwd(),
+      });
 
       assert.equal(fallbackResult.ok, true);
       assert.equal(matchedResult.ok, true);
@@ -130,7 +136,7 @@ describe('local agent routing contract', () => {
         assert.notEqual(
           bestAgentFor('research', { mode, budgetState }),
           'local',
-          `research must not route to local in ${mode} mode under budget pressure`
+          `research must not route to local in ${mode} mode under budget pressure`,
         );
       }
     } finally {
@@ -139,6 +145,9 @@ describe('local agent routing contract', () => {
   });
 
   test('local remains a built-in physical agent and cannot be unregistered', () => {
-    assert.throws(() => unregisterAgent('local'), /Cannot unregister built-in physical agent "local"/);
+    assert.throws(
+      () => unregisterAgent('local'),
+      /Cannot unregister built-in physical agent "local"/,
+    );
   });
 });

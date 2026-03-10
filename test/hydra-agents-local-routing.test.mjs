@@ -62,7 +62,10 @@ describe('local physical agent registration', () => {
   });
 
   test('unregisterAgent rejects local because it is a built-in physical agent', () => {
-    assert.throws(() => unregisterAgent('local'), /Cannot unregister built-in physical agent "local"/);
+    assert.throws(
+      () => unregisterAgent('local'),
+      /Cannot unregister built-in physical agent "local"/,
+    );
   });
 });
 
@@ -73,7 +76,10 @@ describe('bestAgentFor mode-aware routing', () => {
     for (const taskType of TASK_TYPES) {
       for (const mode of ROUTING_MODES) {
         const agent = bestAgentFor(taskType, { mode });
-        assert.ok(registeredAgents.has(agent), `${agent} should be registered for ${taskType} in ${mode} mode`);
+        assert.ok(
+          registeredAgents.has(agent),
+          `${agent} should be registered for ${taskType} in ${mode} mode`,
+        );
       }
     }
   });
@@ -104,7 +110,7 @@ describe('bestAgentFor mode-aware routing', () => {
       assert.notEqual(
         bestAgentFor('research', { mode }),
         'local',
-        `local must not win research in ${mode} mode`
+        `local must not win research in ${mode} mode`,
       );
     }
   });

@@ -2,9 +2,14 @@ import { describe, it, beforeEach } from 'node:test';
 import assert from 'node:assert/strict';
 import {
   TokenBucket,
-  initRateLimiters, acquireRateLimit, tryAcquireRateLimit,
-  getRateLimitStats, resetRateLimiter,
-  initConcurrency, acquireConcurrencySlot, tryAcquireConcurrencySlot,
+  initRateLimiters,
+  acquireRateLimit,
+  tryAcquireRateLimit,
+  getRateLimitStats,
+  resetRateLimiter,
+  initConcurrency,
+  acquireConcurrencySlot,
+  tryAcquireConcurrencySlot,
   getConcurrencyStats,
 } from '../lib/hydra-rate-limits.mjs';
 
@@ -30,14 +35,14 @@ describe('TokenBucket', () => {
     const bucket = new TokenBucket(10, 100); // 100/sec
     bucket.tryConsume(10); // drain
     assert.equal(bucket.available(), 0);
-    await new Promise(r => setTimeout(r, 60));
+    await new Promise((r) => setTimeout(r, 60));
     const avail = bucket.available();
     assert.ok(avail >= 3, `expected >=3 tokens after 60ms at 100/s, got ${avail}`);
   });
 
   it('does not exceed capacity', async () => {
     const bucket = new TokenBucket(5, 1000); // fast refill
-    await new Promise(r => setTimeout(r, 50));
+    await new Promise((r) => setTimeout(r, 50));
     assert.ok(bucket.available() <= 5);
   });
 
