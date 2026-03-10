@@ -5,13 +5,81 @@
  */
 
 import { execFileSync } from 'node:child_process';
-// @ts-ignore
-import spawn from 'cross-spawn';
+// @ts-expect-error -- cross-spawn has no bundled type declarations
+import _spawn from 'cross-spawn';
 import { existsSync, mkdirSync, readdirSync, statSync, writeFileSync } from 'node:fs';
 import { basename, dirname, isAbsolute, join, relative, resolve } from 'node:path';
+import type { ChildProcess, SpawnOptions } from 'node:child_process';
 import { loadHydraConfig } from './hydra-config.ts';
 import { getAgent } from './hydra-agents.ts';
 import { expandInvokeArgs } from './hydra-shared/agent-executor.ts';
+import type { AgentDef, HeadlessOpts } from './types.ts';
+
+const spawn = _spawn as (cmd: string, args: string[], opts?: SpawnOptions) => ChildProcess;
+
+// -- Local types -------------------------------------------------------------
+
+interface FileEntry {
+  path: string;
+  size: number;
+  ext: string;
+  priority?: string;
+  score?: number;
+}
+
+interface Finding {
+  file: string;
+  line: number | null;
+  severity: string;
+  category: string;
+  title: string;
+  detail: string;
+  effort: string;
+  _score?: number;
+}
+
+type ScoredFinding = Finding & { _score: number };
+
+interface AgentResponse {
+  agent: string;
+  stdout: string;
+  stderr: string;
+  code: number | null;
+  signal: string | null;
+  elapsedSec: string;
+}
+
+interface ManifestStats {
+  candidates: number;
+  selected: number;
+  changed: number;
+  recent: number;
+}
+
+interface PrioritySets {
+  changed: Set<string>;
+  recent: Set<string>;
+}
+
+interface ReportMeta {
+  runId: string;
+  projectName: string;
+  categories: string[];
+  agents: string[];
+  elapsedSec: string;
+  manifestStats: ManifestStats;
+}
+
+interface AuditCategoryDef {
+  agent: string;
+  label: string;
+  prompt: string;
+}
+
+interface AgentCommandResult {
+  cmd: string;
+  args: string[];
+}
 
 // -- Args and config ---------------------------------------------------------
 
@@ -29,7 +97,8 @@ const flags = new Set(
 );
 
 const cfg = loadHydraConfig();
-const auditCfg = cfg.audit && typeof cfg.audit === 'object' ? cfg.audit : {};
+const auditCfg: Record<string, unknown> =
+  cfg.audit != null && typeof cfg.audit === 'object' ? (cfg.audit as Record<string, unknown>) : {};
 
 const ALL_CATEGORIES = [
   'dead-code',
@@ -40,19 +109,18 @@ const ALL_CATEGORIES = [
   'types',
 ];
 const DEFAULT_CATEGORIES =
-  Array.isArray(auditCfg['categories']) && (auditCfg['categories'] as any[]).length > 0
-    ? auditCfg['categories']
+  Array.isArray(auditCfg['categories']) && (auditCfg['categories'] as unknown[]).length > 0
+    ? (auditCfg['categories'] as string[])
     : ALL_CATEGORIES;
 
-const PROJECT = resolve(args['project'] || process.cwd());
-const CATEGORIES = parseCsv(args['categories'] || DEFAULT_CATEGORIES.join(','));
-const AGENTS = parseCsv(args['agents'] || 'gemini,claude,codex');
+const PROJECT = resolve(args['project'] ?? process.cwd());
+const CATEGORIES = parseCsv(args['categories'] ?? DEFAULT_CATEGORIES.join(','));
+const AGENTS = parseCsv(args['agents'] ?? 'gemini,claude,codex');
 const MAX_FILES = parsePositiveInt(args['max-files'], auditCfg['maxFiles'], 200);
-const TIMEOUT_MS = parsePositiveInt(args['timeout'], auditCfg['timeout'], 300000);
+const TIMEOUT_MS = parsePositiveInt(args['timeout'], auditCfg['timeout'], 300_000);
+const reportDirCfg = auditCfg['reportDir'];
 const REPORT_DIR =
-  typeof auditCfg['reportDir'] === 'string' && (auditCfg['reportDir']).trim()
-    ? auditCfg['reportDir']
-    : 'docs/audit';
+  typeof reportDirCfg === 'string' && reportDirCfg.trim().length > 0 ? reportDirCfg : 'docs/audit';
 const REPORT_PATH = args['report']
   ? resolveReportPath(PROJECT, args['report'])
   : join(PROJECT, REPORT_DIR, `${dateStr()}.md`);
@@ -60,14 +128,14 @@ const ECONOMY = flags.has('economy') || auditCfg['economy'] === true;
 const VERBOSE = flags.has('verbose');
 const RUN_ID = `${dateStr()}-${timeStr()}-${Math.random().toString(36).slice(2, 8)}`;
 
-function parseCsv(value: any) {
-  return String(value || '')
+function parseCsv(value: string): string[] {
+  return value
     .split(',')
     .map((s) => s.trim().toLowerCase())
     .filter(Boolean);
 }
 
-function parsePositiveInt(...values: any[]) {
+function parsePositiveInt(...values: unknown[]): number {
   for (const value of values) {
     const parsed = Number.parseInt(String(value), 10);
     if (Number.isFinite(parsed) && parsed > 0) {
@@ -77,7 +145,7 @@ function parsePositiveInt(...values: any[]) {
   return 1;
 }
 
-function resolveReportPath(projectPath: any, reportArg: any) {
+function resolveReportPath(projectPath: string, reportArg: string): string {
   if (isAbsolute(reportArg)) {
     return reportArg;
   }
@@ -94,7 +162,7 @@ function timeStr() {
 
 // -- Category definitions ----------------------------------------------------
 
-const AUDIT_CATEGORIES = {
+const AUDIT_CATEGORIES: Record<string, AuditCategoryDef> = {
   'dead-code': {
     agent: 'gemini',
     label: 'Dead Code and Unused Exports',
@@ -331,9 +399,9 @@ const CODE_EXTENSIONS = new Set([
   '.toml',
 ]);
 
-function getGitPrioritySets(projectPath: any) {
-  const changed = new Set();
-  const recent = new Set();
+function getGitPrioritySets(projectPath: string): PrioritySets {
+  const changed = new Set<string>();
+  const recent = new Set<string>();
 
   const status = gitOutput(projectPath, ['status', '--porcelain']);
   for (const rawLine of status.split('\n')) {
@@ -341,7 +409,7 @@ function getGitPrioritySets(projectPath: any) {
     if (!line) continue;
     let filePath = line.slice(3).trim();
     if (filePath.includes(' -> ')) {
-      filePath = filePath.split(' -> ').pop() || filePath;
+      filePath = filePath.split(' -> ').pop() ?? filePath;
     }
     changed.add(filePath.replace(/\\/g, '/'));
   }
@@ -361,7 +429,7 @@ function getGitPrioritySets(projectPath: any) {
   return { changed, recent };
 }
 
-function gitOutput(projectPath: any, gitArgs: any) {
+function gitOutput(projectPath: string, gitArgs: string[]): string {
   try {
     return execFileSync('git', ['-C', projectPath, ...gitArgs], {
       encoding: 'utf8',
@@ -372,11 +440,14 @@ function gitOutput(projectPath: any, gitArgs: any) {
   }
 }
 
-function buildManifest(projectPath: any, maxFiles: any) {
-  const candidates: any[] = [];
+function buildManifest(
+  projectPath: string,
+  maxFiles: number,
+): { files: FileEntry[]; stats: ManifestStats } {
+  const candidates: FileEntry[] = [];
   const scanLimit = Math.max(maxFiles * 6, 1000);
 
-  function walk(dir: any, depth = 0) {
+  function walk(dir: string, depth = 0) {
     if (depth > 10 || candidates.length >= scanLimit) return;
 
     let entries;
@@ -440,12 +511,14 @@ function buildManifest(projectPath: any, maxFiles: any) {
   };
 }
 
-function rankManifest(files: any, prioritySets: any) {
+function rankManifest(files: FileEntry[], prioritySets: PrioritySets): FileEntry[] {
   return [...files]
     .map((file) => {
       const isChanged = prioritySets.changed.has(file.path);
       const isRecent = prioritySets.recent.has(file.path);
-      const priority = isChanged ? 'changed' : isRecent ? 'recent' : 'normal';
+      let priority = 'normal';
+      if (isChanged) priority = 'changed';
+      else if (isRecent) priority = 'recent';
 
       let score = 0;
       if (isChanged) score += 250;
@@ -461,20 +534,26 @@ function rankManifest(files: any, prioritySets: any) {
     });
 }
 
-function formatManifest(files: any) {
-  const groups: Record<string, any[]> = {};
+function formatManifest(files: FileEntry[]): string {
+  const groups: Partial<Record<string, FileEntry[]>> = {};
   for (const f of files) {
-    const topDir = f.path.includes('/') ? f.path.split('/')[0] : '(root)';
-    if (!groups[topDir]) groups[topDir] = [];
-    groups[topDir].push(f);
+    const topDir = f.path.includes('/') ? (f.path.split('/')[0] ?? '(root)') : '(root)';
+    const existing = groups[topDir];
+    if (existing != null) {
+      existing.push(f);
+    } else {
+      groups[topDir] = [f];
+    }
   }
 
   let out = '';
   for (const [dir, entries] of Object.entries(groups).sort(([a], [b]) => a.localeCompare(b))) {
+    if (entries == null) continue;
     out += `\n${dir}/\n`;
-    for (const file of (entries).sort((a: any, b: any) => a.path.localeCompare(b.path))) {
-      const hint =
-        file.priority === 'changed' ? ' [changed]' : file.priority === 'recent' ? ' [recent]' : '';
+    for (const file of entries.sort((a, b) => a.path.localeCompare(b.path))) {
+      let hint = '';
+      if (file.priority === 'changed') hint = ' [changed]';
+      else if (file.priority === 'recent') hint = ' [recent]';
       out += `  ${file.path}${hint}\n`;
     }
   }
@@ -488,16 +567,33 @@ function formatManifest(files: any) {
  * Handles function-style (built-in agents) and object-style ({ cmd, args })
  * invocations from wizard-created custom CLI agents.
  */
-function buildAuditInvocation(agentDef: any, prompt: any, opts: any = {}) {
-  const ni = agentDef.invoke?.nonInteractive;
+function buildAuditInvocation(
+  agentDef: AgentDef,
+  prompt: string,
+  opts: HeadlessOpts = {},
+): [string, string[]] {
+  // Cast through unknown to handle both typed function invocations and wizard-created
+  // object-style invocations ({ cmd, args }) that don't match the strict AgentInvoke type.
+  const rawInvoke = agentDef.invoke as unknown as {
+    nonInteractive?:
+      | ((prompt: string, opts: HeadlessOpts) => [string, string[]])
+      | { cmd: string; args: string[] }
+      | null;
+  } | null;
+  const ni = rawInvoke?.nonInteractive;
   if (typeof ni === 'function') return ni(prompt, opts);
-  if (ni?.cmd && Array.isArray(ni.args)) {
-    return [ni.cmd, expandInvokeArgs(ni.args, { prompt, cwd: opts.cwd || process.cwd() })];
+  if (ni != null && typeof ni === 'object' && 'cmd' in ni && Array.isArray(ni.args)) {
+    return [ni.cmd, expandInvokeArgs(ni.args, { prompt, cwd: opts.cwd ?? process.cwd() })];
   }
   throw new Error(`Agent "${agentDef.name}" does not support audit dispatch`);
 }
 
-function getAgentCommand(agent: any, prompt: any, economy: any, projectPath: any) {
+function getAgentCommand(
+  agent: string,
+  prompt: string,
+  economy: boolean,
+  projectPath: string,
+): AgentCommandResult {
   const agentDef = getAgent(agent);
   if (!agentDef) throw new Error(`Unknown agent: ${agent}`);
   const [cmd, baseArgs] = buildAuditInvocation(agentDef, prompt, { cwd: projectPath });
@@ -510,16 +606,22 @@ function getAgentCommand(agent: any, prompt: any, economy: any, projectPath: any
   return { cmd, args: [...baseArgs, modelFlag, economyModel] };
 }
 
-function dispatchToAgent(agent: any, prompt: any, projectPath: any, economy: any, timeoutMs: any) {
+function dispatchToAgent(
+  agent: string,
+  prompt: string,
+  projectPath: string,
+  economy: boolean,
+  timeoutMs: number,
+): Promise<AgentResponse> {
   return new Promise((resolvePromise) => {
-    const { cmd, args } = getAgentCommand(agent, prompt, economy, projectPath);
+    const { cmd, args: invokeArgs } = getAgentCommand(agent, prompt, economy, projectPath);
     const startedAt = Date.now();
 
     if (VERBOSE) {
       console.log(`  [${agent}] Dispatching (${cmd} -p ...)`);
     }
 
-    const proc = spawn(cmd, args, {
+    const proc = spawn(cmd, invokeArgs, {
       cwd: projectPath,
       env: { ...process.env },
       stdio: ['ignore', 'pipe', 'pipe'],
@@ -529,11 +631,11 @@ function dispatchToAgent(agent: any, prompt: any, projectPath: any, economy: any
     let stdout = '';
     let stderr = '';
 
-    proc.stdout.on('data', (chunk: any) => {
+    proc.stdout?.on('data', (chunk: Buffer) => {
       stdout += chunk.toString();
     });
 
-    proc.stderr.on('data', (chunk: any) => {
+    proc.stderr?.on('data', (chunk: Buffer) => {
       stderr += chunk.toString();
     });
 
@@ -544,24 +646,26 @@ function dispatchToAgent(agent: any, prompt: any, projectPath: any, economy: any
       resolvePromise({
         agent,
         stdout,
-        stderr: `${stderr}\n[hydra-audit] timed out after ${timeoutMs}ms`,
+        stderr: `${stderr}\n[hydra-audit] timed out after ${String(timeoutMs)}ms`,
         code: null,
         signal: 'SIGTERM',
         elapsedSec: ((Date.now() - startedAt) / 1000).toFixed(1),
       });
     }, timeoutMs);
 
-    proc.on('close', (code: any, signal: any) => {
+    proc.on('close', (code, signal) => {
       clearTimeout(killTimer);
       const elapsedSec = ((Date.now() - startedAt) / 1000).toFixed(1);
       if (VERBOSE) {
-        const status = code === 0 ? 'ok' : `exit=${code ?? 'null'} signal=${signal ?? 'none'}`;
-        console.log(`  [${agent}] ${status} (${elapsedSec}s, ${stdout.length} chars)`);
+        const codeStr = code != null ? String(code) : 'null';
+        const signalStr = signal ?? 'none';
+        const status = code === 0 ? 'ok' : `exit=${codeStr} signal=${signalStr}`;
+        console.log(`  [${agent}] ${status} (${elapsedSec}s, ${String(stdout.length)} chars)`);
       }
-      resolvePromise({ agent, stdout, stderr, code, signal, elapsedSec });
+      resolvePromise({ agent, stdout, stderr, code: code ?? null, signal: signal ?? null, elapsedSec });
     });
 
-    proc.on('error', (err: any) => {
+    proc.on('error', (err) => {
       clearTimeout(killTimer);
       resolvePromise({
         agent,
@@ -583,8 +687,8 @@ const CATEGORY_ALIASES = {
   inconsistency: 'inconsistencies',
 };
 
-function parseFindings(agentResponse: any, fallbackCategory: any) {
-  const rawStdout = String(agentResponse.stdout || '').trim();
+function parseFindings(agentResponse: AgentResponse, fallbackCategory: string): Finding[] {
+  const rawStdout = agentResponse.stdout.trim();
   if (!rawStdout) return [];
 
   // Normalize through the agent's plugin parser so that wrapped output formats
@@ -594,7 +698,7 @@ function parseFindings(agentResponse: any, fallbackCategory: any) {
   if (agentDef?.parseOutput) {
     try {
       const parsed = agentDef.parseOutput(rawStdout);
-      if (parsed && typeof parsed.output === 'string') text = parsed.output || rawStdout;
+      if (parsed.output.trim().length > 0) text = parsed.output;
     } catch {
       /* fall back to raw stdout on plugin error */
     }
@@ -614,10 +718,12 @@ function parseFindings(agentResponse: any, fallbackCategory: any) {
 
   for (const rawCandidate of candidates) {
     try {
-      const parsed = JSON.parse(rawCandidate);
+      const parsed: unknown = JSON.parse(rawCandidate);
       if (!Array.isArray(parsed)) continue;
 
-      return parsed.map((item) => normalizeFinding(item, fallbackCategory)).filter(Boolean);
+      return (parsed as unknown[])
+        .map((item) => normalizeFinding(item, fallbackCategory))
+        .filter((f): f is Finding => f != null);
     } catch {
       // try next candidate
     }
@@ -631,25 +737,44 @@ function parseFindings(agentResponse: any, fallbackCategory: any) {
   return [];
 }
 
-function normalizeFinding(raw: any, fallbackCategory: any) {
-  if (!raw || typeof raw !== 'object') return null;
+function normalizeFinding(raw: unknown, fallbackCategory: string): Finding | null {
+  if (raw == null || typeof raw !== 'object') return null;
+  const r = raw as Record<string, unknown>;
 
-  const severity = String(raw.severity || '').toLowerCase();
+  const severity = typeof r['severity'] === 'string' ? r['severity'].toLowerCase() : '';
   const normalizedSeverity = SEVERITIES.has(severity) ? severity : 'minor';
 
-  const effort = String(raw.effort || '').toLowerCase();
+  const effort = typeof r['effort'] === 'string' ? r['effort'].toLowerCase() : '';
   const normalizedEffort = EFFORTS.has(effort) ? effort : 'medium';
 
-  const categoryRaw = String(raw.category || fallbackCategory || '').toLowerCase();
-  const normalizedCategory =
-    (CATEGORY_ALIASES as Record<string, string>)[categoryRaw] || categoryRaw || fallbackCategory || 'uncategorized';
+  const categoryRaw =
+    typeof r['category'] === 'string' ? r['category'].toLowerCase() : fallbackCategory;
+  const alias = (CATEGORY_ALIASES as Record<string, string | undefined>)[categoryRaw];
+  let normalizedCategory: string;
+  if (alias != null) {
+    normalizedCategory = alias;
+  } else if (categoryRaw.length > 0) {
+    normalizedCategory = categoryRaw;
+  } else if (fallbackCategory.length > 0) {
+    normalizedCategory = fallbackCategory;
+  } else {
+    normalizedCategory = 'uncategorized';
+  }
 
-  const lineNumber = Number.isInteger(raw.line) && raw.line > 0 ? raw.line : null;
-  const file = typeof raw.file === 'string' ? raw.file.replace(/\\/g, '/') : '';
+  const rawLine = r['line'];
+  const lineNumber =
+    typeof rawLine === 'number' && Number.isInteger(rawLine) && rawLine > 0 ? rawLine : null;
+  const file = typeof r['file'] === 'string' ? r['file'].replace(/\\/g, '/') : '';
+  const rawTitle = r['title'];
   const title =
-    typeof raw.title === 'string' && raw.title.trim() ? raw.title.trim() : 'Untitled finding';
+    typeof rawTitle === 'string' && rawTitle.trim().length > 0
+      ? rawTitle.trim()
+      : 'Untitled finding';
+  const rawDetail = r['detail'];
   const detail =
-    typeof raw.detail === 'string' && raw.detail.trim() ? raw.detail.trim() : 'No detail provided.';
+    typeof rawDetail === 'string' && rawDetail.trim().length > 0
+      ? rawDetail.trim()
+      : 'No detail provided.';
 
   return {
     file,
@@ -667,20 +792,20 @@ function normalizeFinding(raw: any, fallbackCategory: any) {
 const SEVERITY_SCORE = { critical: 100, major: 50, minor: 10 };
 const EFFORT_SCORE = { trivial: 4, small: 3, medium: 2, large: 1 };
 
-function deduplicateFindings(findings: any) {
-  const seen = new Map();
+function deduplicateFindings(findings: Finding[]): Finding[] {
+  const seen = new Map<string, Finding>();
 
   for (const finding of findings) {
     const key = `${finding.category}::${finding.file}::${finding.title}`.toLowerCase();
     const existing = seen.get(key);
 
-    if (!existing) {
+    if (existing == null) {
       seen.set(key, finding);
       continue;
     }
 
-    const currentScore = (SEVERITY_SCORE as Record<string, number>)[finding.severity] || 0;
-    const existingScore = (SEVERITY_SCORE as Record<string, number>)[existing.severity] || 0;
+    const currentScore = (SEVERITY_SCORE as Record<string, number>)[finding.severity] ?? 0;
+    const existingScore = (SEVERITY_SCORE as Record<string, number>)[existing.severity] ?? 0;
     if (currentScore > existingScore) {
       seen.set(key, finding);
     }
@@ -689,32 +814,36 @@ function deduplicateFindings(findings: any) {
   return Array.from(seen.values());
 }
 
-function scoreAndSort(findings: any) {
+function scoreAndSort(findings: Finding[]): ScoredFinding[] {
   return findings
-    .map((finding: any) => ({
+    .map((finding): ScoredFinding => ({
       ...finding,
       _score:
-        ((SEVERITY_SCORE as Record<string, number>)[finding.severity] || 10) *
-        ((EFFORT_SCORE as Record<string, number>)[finding.effort] || 2),
+        ((SEVERITY_SCORE as Record<string, number>)[finding.severity] ?? 10) *
+        ((EFFORT_SCORE as Record<string, number>)[finding.effort] ?? 2),
     }))
-    .sort((a: any, b: any) => b._score - a._score);
+    .sort((a, b) => b._score - a._score);
 }
 
 // -- Report generation -------------------------------------------------------
 
-function generateReport(findings: any, manifest: any, reportMeta: any) {
+function generateReport(findings: ScoredFinding[], manifest: FileEntry[], reportMeta: ReportMeta): string {
   const date = new Date().toISOString().slice(0, 10);
   const time = new Date().toISOString().slice(11, 16);
 
-  const criticalCount = findings.filter((f: any) => f.severity === 'critical').length;
-  const majorCount = findings.filter((f: any) => f.severity === 'major').length;
-  const minorCount = findings.filter((f: any) => f.severity === 'minor').length;
+  const criticalCount = findings.filter((f) => f.severity === 'critical').length;
+  const majorCount = findings.filter((f) => f.severity === 'major').length;
+  const minorCount = findings.filter((f) => f.severity === 'minor').length;
 
-  const byCategory: Record<string, any[]> = {};
+  const byCategory: Partial<Record<string, ScoredFinding[]>> = {};
   for (const finding of findings) {
-    const category = finding.category || 'uncategorized';
-    if (!byCategory[category]) byCategory[category] = [];
-    byCategory[category].push(finding);
+    const category = finding.category.length > 0 ? finding.category : 'uncategorized';
+    const existing = byCategory[category];
+    if (existing != null) {
+      existing.push(finding);
+    } else {
+      byCategory[category] = [finding];
+    }
   }
 
   let md = `# Audit Report: ${reportMeta.projectName}
@@ -723,9 +852,9 @@ function generateReport(findings: any, manifest: any, reportMeta: any) {
 **Date:** ${date} ${time}
 **Agents:** ${reportMeta.agents.join(', ')}
 **Categories:** ${reportMeta.categories.join(', ')}
-**Files scanned:** ${manifest.length}
-**Manifest bias:** changed ${reportMeta.manifestStats.changed}, recent ${reportMeta.manifestStats.recent}
-**Findings:** ${findings.length} (${criticalCount} critical, ${majorCount} major, ${minorCount} minor)
+**Files scanned:** ${String(manifest.length)}
+**Manifest bias:** changed ${String(reportMeta.manifestStats.changed)}, recent ${String(reportMeta.manifestStats.recent)}
+**Findings:** ${String(findings.length)} (${String(criticalCount)} critical, ${String(majorCount)} major, ${String(minorCount)} minor)
 **Time:** ${reportMeta.elapsedSec}s
 
 ---
@@ -734,10 +863,10 @@ function generateReport(findings: any, manifest: any, reportMeta: any) {
 
 | Severity | Count |
 |----------|-------|
-| Critical | ${criticalCount} |
-| Major    | ${majorCount} |
-| Minor    | ${minorCount} |
-| **Total** | **${findings.length}** |
+| Critical | ${String(criticalCount)} |
+| Major    | ${String(majorCount)} |
+| Minor    | ${String(minorCount)} |
+| **Total** | **${String(findings.length)}** |
 
 ---
 
@@ -748,18 +877,14 @@ function generateReport(findings: any, manifest: any, reportMeta: any) {
 `;
 
   for (const [i, finding] of findings.entries()) {
-    const severityIcon =
-      finding.severity === 'critical'
-        ? '[CRIT]'
-        : finding.severity === 'major'
-          ? '[MAJOR]'
-          : '[MINOR]';
-    const effortTag = finding.effort ? ` \`${finding.effort}\`` : '';
-    const fileRef = finding.file
-      ? ` - \`${finding.file}\`${finding.line ? `:${finding.line}` : ''}`
-      : '';
+    let severityIcon = '[MINOR]';
+    if (finding.severity === 'critical') severityIcon = '[CRIT]';
+    else if (finding.severity === 'major') severityIcon = '[MAJOR]';
+    const effortTag = finding.effort.length > 0 ? ` \`${finding.effort}\`` : '';
+    const lineRef = finding.line != null ? `:${String(finding.line)}` : '';
+    const fileRef = finding.file.length > 0 ? ` - \`${finding.file}\`${lineRef}` : '';
 
-    md += `${i + 1}. ${severityIcon} **${finding.title}**${effortTag}${fileRef}\n`;
+    md += `${String(i + 1)}. ${severityIcon} **${finding.title}**${effortTag}${fileRef}\n`;
     md += `   ${finding.detail}\n\n`;
   }
 
@@ -768,20 +893,24 @@ function generateReport(findings: any, manifest: any, reportMeta: any) {
   for (const [category, categoryFindings] of Object.entries(byCategory).sort(([a], [b]) =>
     a.localeCompare(b),
   )) {
-    const categoryLabel = (AUDIT_CATEGORIES as any)[category]?.label || category;
-    const categoryAgent = (AUDIT_CATEGORIES as any)[category]?.agent || 'unknown';
+    if (categoryFindings == null) continue;
+    const maybeDef = AUDIT_CATEGORIES[category] as AuditCategoryDef | undefined;
+    const categoryLabel = maybeDef?.label ?? category;
+    const categoryAgent = maybeDef?.agent ?? 'unknown';
     md += `### ${categoryLabel} (${categoryAgent})\n\n`;
 
-    for (const finding of (categoryFindings)) {
+    for (const finding of categoryFindings) {
       md += `- **${finding.title}** \`${finding.severity}\` \`${finding.effort}\`\n`;
-      if (finding.file)
-        md += `  File: \`${finding.file}\`${finding.line ? `:${finding.line}` : ''}\n`;
+      if (finding.file.length > 0) {
+        const lineRef = finding.line != null ? `:${String(finding.line)}` : '';
+        md += `  File: \`${finding.file}\`${lineRef}\n`;
+      }
       md += `  ${finding.detail}\n\n`;
     }
   }
 
   const quickWins = findings.filter(
-    (f: any) =>
+    (f) =>
       (f.effort === 'trivial' || f.effort === 'small') &&
       (f.severity === 'critical' || f.severity === 'major'),
   );
@@ -790,7 +919,7 @@ function generateReport(findings: any, manifest: any, reportMeta: any) {
     md += `---\n\n## Quick Wins\n\n`;
     md += `> High-impact, low-effort items to tackle first.\n\n`;
     for (const finding of quickWins) {
-      md += `- **${finding.title}** - \`${finding.file || 'project-wide'}\` (${finding.severity}, ${finding.effort})\n`;
+      md += `- **${finding.title}** - \`${finding.file.length > 0 ? finding.file : 'project-wide'}\` (${finding.severity}, ${finding.effort})\n`;
     }
     md += '\n';
   }
@@ -802,18 +931,18 @@ function generateReport(findings: any, manifest: any, reportMeta: any) {
 
 // -- Main -------------------------------------------------------------------
 
-async function main() {
+async function main(): Promise<void> {
   const knownAgents = new Set(['gemini', 'claude', 'codex']);
   const activeAgents = AGENTS.filter((agent) => knownAgents.has(agent));
   const unknownAgents = AGENTS.filter((agent) => !knownAgents.has(agent));
 
   const requestedCategories = CATEGORIES.includes('all') ? ALL_CATEGORIES : CATEGORIES;
-  const unknownCategories = requestedCategories.filter((category) => !(AUDIT_CATEGORIES as any)[category]);
-  const validCategories = requestedCategories.filter((category) => (AUDIT_CATEGORIES as any)[category]);
+  const unknownCategories = requestedCategories.filter((category) => !(category in AUDIT_CATEGORIES));
+  const validCategories = requestedCategories.filter((category) => category in AUDIT_CATEGORIES);
 
   const runnableCategories = validCategories.filter((category) => {
-    const assignedAgent = (AUDIT_CATEGORIES as any)[category].agent;
-    return activeAgents.includes(assignedAgent);
+    const def = AUDIT_CATEGORIES[category];
+    return activeAgents.includes(def.agent);
   });
 
   console.log('');
@@ -822,7 +951,7 @@ async function main() {
   console.log(`  Project:    ${PROJECT}`);
   console.log(`  Agents:     ${activeAgents.join(', ') || '(none)'}`);
   console.log(`  Categories: ${runnableCategories.join(', ') || '(none)'}`);
-  console.log(`  Max files:  ${MAX_FILES}`);
+  console.log(`  Max files:  ${String(MAX_FILES)}`);
   if (ECONOMY) {
     console.log('  Models:     economy tier');
   }
@@ -837,13 +966,18 @@ async function main() {
 
   console.log('1) Building file manifest...');
   const { files: manifest, stats: manifestStats } = buildManifest(PROJECT, MAX_FILES);
-  console.log(`   Indexed ${manifest.length} files (from ${manifestStats.candidates} candidates)`);
+  console.log(
+    `   Indexed ${String(manifest.length)} files (from ${String(manifestStats.candidates)} candidates)`,
+  );
   if (manifestStats.changed > 0 || manifestStats.recent > 0) {
-    console.log(`   Prioritized changed=${manifestStats.changed}, recent=${manifestStats.recent}`);
+    console.log(
+      `   Prioritized changed=${String(manifestStats.changed)}, recent=${String(manifestStats.recent)}`,
+    );
   }
 
   if (manifest.length === 0) {
     console.log('   No code files found. Check project path.');
+    // eslint-disable-next-line n/no-process-exit
     process.exit(1);
   }
 
@@ -855,44 +989,51 @@ async function main() {
   const projectName = basename(PROJECT);
 
   const startedAt = Date.now();
-  const allFindings: any[] = [];
+  const allFindings: Finding[] = [];
 
   if (runnableCategories.length > 0) {
     console.log('');
     console.log('2) Dispatching audit categories:');
     for (const category of runnableCategories) {
-      const def = AUDIT_CATEGORIES[category as keyof typeof AUDIT_CATEGORIES];
+      const def = AUDIT_CATEGORIES[category];
       console.log(`   - ${def.label} -> ${def.agent}`);
     }
     console.log('');
 
-    const categoriesByAgent: Record<string, any[]> = {};
+    const categoriesByAgent: Partial<Record<string, string[]>> = {};
     for (const category of runnableCategories) {
-      const agent = (AUDIT_CATEGORIES as any)[category].agent;
-      if (!categoriesByAgent[agent]) categoriesByAgent[agent] = [];
-      categoriesByAgent[agent].push(category);
+      const def = AUDIT_CATEGORIES[category];
+      const { agent } = def;
+      const existing = categoriesByAgent[agent];
+      if (existing != null) {
+        existing.push(category);
+      } else {
+        categoriesByAgent[agent] = [category];
+      }
     }
 
-    const agentPromises = Object.entries(categoriesByAgent).map(async ([agent, categories]) => {
-      const findings: any[] = [];
-      for (const category of categories) {
-        const def = (AUDIT_CATEGORIES as any)[category];
-        const prompt = def.prompt
-          .replace('{{manifest}}', manifestText)
-          .replace('{{projectName}}', projectName);
+    const agentPromises = Object.entries(categoriesByAgent).map(
+      async ([agent, categories]): Promise<Finding[]> => {
+        const findings: Finding[] = [];
+        for (const category of categories ?? []) {
+          const def = AUDIT_CATEGORIES[category];
+          const prompt = def.prompt
+            .replace('{{manifest}}', manifestText)
+            .replace('{{projectName}}', projectName);
 
-        console.log(`  [${agent}] ${def.label}...`);
-        const result: any = await dispatchToAgent(agent, prompt, PROJECT, ECONOMY, TIMEOUT_MS);
-        if (result.code !== 0 && VERBOSE && result.stderr) {
-          console.log(`  [${agent}] stderr: ${result.stderr.slice(0, 300)}`);
+          console.log(`  [${agent}] ${def.label}...`);
+          const result = await dispatchToAgent(agent, prompt, PROJECT, ECONOMY, TIMEOUT_MS);
+          if (result.code !== 0 && VERBOSE && result.stderr.length > 0) {
+            console.log(`  [${agent}] stderr: ${result.stderr.slice(0, 300)}`);
+          }
+
+          const parsed = parseFindings(result, category);
+          console.log(`  [${agent}] ${def.label}: ${String(parsed.length)} findings`);
+          findings.push(...parsed);
         }
-
-        const parsed = parseFindings(result, category);
-        console.log(`  [${agent}] ${def.label}: ${parsed.length} findings`);
-        findings.push(...parsed);
-      }
-      return findings;
-    });
+        return findings;
+      },
+    );
 
     const nested = await Promise.all(agentPromises);
     for (const findings of nested) {
@@ -903,10 +1044,10 @@ async function main() {
   const elapsedSec = ((Date.now() - startedAt) / 1000).toFixed(0);
 
   console.log('');
-  console.log(`3) Processing ${allFindings.length} raw findings...`);
+  console.log(`3) Processing ${String(allFindings.length)} raw findings...`);
   const deduped = deduplicateFindings(allFindings);
   const scored = scoreAndSort(deduped);
-  console.log(`   ${scored.length} unique findings after deduplication`);
+  console.log(`   ${String(scored.length)} unique findings after deduplication`);
 
   console.log('');
   console.log('4) Generating report...');
@@ -927,10 +1068,10 @@ async function main() {
   writeFileSync(REPORT_PATH, report, 'utf8');
   console.log(`   Report saved: ${REPORT_PATH}`);
 
-  const critical = scored.filter((f: any) => f.severity === 'critical').length;
-  const major = scored.filter((f: any) => f.severity === 'major').length;
+  const critical = scored.filter((f) => f.severity === 'critical').length;
+  const major = scored.filter((f) => f.severity === 'major').length;
   const quickWins = scored.filter(
-    (f: any) =>
+    (f) =>
       (f.effort === 'trivial' || f.effort === 'small') &&
       (f.severity === 'critical' || f.severity === 'major'),
   ).length;
@@ -938,14 +1079,16 @@ async function main() {
   console.log('');
   console.log('=== Summary ===');
   console.log(`  Run ID:      ${RUN_ID}`);
-  console.log(`  Critical:    ${critical}`);
-  console.log(`  Major:       ${major}`);
-  console.log(`  Quick wins:  ${quickWins}`);
+  console.log(`  Critical:    ${String(critical)}`);
+  console.log(`  Major:       ${String(major)}`);
+  console.log(`  Quick wins:  ${String(quickWins)}`);
   console.log(`  Time:        ${elapsedSec}s`);
   console.log('');
 }
 
-main().catch((err) => {
-  console.error(`Fatal: ${err.message}`);
+main().catch((err: unknown) => {
+  const message = err instanceof Error ? err.message : String(err);
+  console.error(`Fatal: ${message}`);
+  // eslint-disable-next-line n/no-process-exit
   process.exit(1);
 });

@@ -3,7 +3,7 @@
  */
 
 import { buildSelfSnapshot } from '../hydra-self.ts';
-import type { ReadRouteCtx, ModelSummaryEntry, TaskEntry, HandoffEntry, BlockerEntry, DecisionEntry, ChildSessionEntry } from '../types.ts';
+import type { ReadRouteCtx, TaskEntry, HandoffEntry, BlockerEntry, DecisionEntry, ChildSessionEntry } from '../types.ts';
 
 type EventEntry = { seq: number; at: string; type: string; category?: string; payload?: unknown };
 
@@ -63,7 +63,7 @@ export async function handleReadRoute(ctx: ReadRouteCtx): Promise<boolean> {
   }
 
   if (method === 'GET' && route === '/self') {
-    let status = null;
+    let status: Record<string, unknown> | null;
     try {
       writeStatus();
       status = readStatus();
@@ -74,14 +74,14 @@ export async function handleReadRoute(ctx: ReadRouteCtx): Promise<boolean> {
     const state = readState();
     const summary = getSummary(state);
 
-    let usage = null;
+    let usage: ReturnType<typeof checkUsage> | null;
     try {
       usage = checkUsage();
     } catch {
       usage = null;
     }
 
-    let models = null;
+    let models: ReturnType<typeof getModelSummary> | null;
     try {
       models = getModelSummary();
     } catch {
@@ -89,32 +89,32 @@ export async function handleReadRoute(ctx: ReadRouteCtx): Promise<boolean> {
     }
 
     const self = buildSelfSnapshot({
-      projectRoot: projectRoot || '',
-      projectName: projectName || String((summary as Record<string, unknown>)?.['project'] || ''),
+      projectRoot: projectRoot ?? '',
+      projectName: projectName ?? (summary as Record<string, string | undefined>)['project'] ?? '',
       includeAgents: false,
       includeConfig: true,
       includeMetrics: true,
-    }) as Record<string, unknown>;
+    });
 
     self['daemon'] = {
       ok: true,
-      url: (status as Record<string, unknown>)?.['url'] || null,
-      pid: (status as Record<string, unknown>)?.['pid'] || process.pid,
-      startedAt: (status as Record<string, unknown>)?.['startedAt'] || null,
-      status: status || null,
+      url: status?.['url'] ?? null,
+      pid: status?.['pid'] ?? process.pid,
+      startedAt: status?.['startedAt'] ?? null,
+      status: status ?? null,
     };
 
     self['runtime'] = {
-      updatedAt: state.updatedAt || null,
-      activeSession: state.activeSession || null,
-      summary: summary || null,
-      counts: (summary as Record<string, unknown>)?.['counts'] || null,
-      usage: usage ? { level: usage.level || 'unknown' } : null,
+      updatedAt: state.updatedAt ?? null,
+      activeSession: state.activeSession ?? null,
+      summary: summary ?? null,
+      counts: (summary as Record<string, unknown>)['counts'] ?? null,
+      usage: usage ? { level: usage.level } : null,
       models: models
         ? Object.fromEntries(
             Object.entries(models)
               .filter(([k]) => k !== '_mode')
-              .map(([k, v]) => [k, (v)?.active || 'unknown']),
+              .map(([k, v]) => [k, v.active || 'unknown']),
           )
         : null,
     };
@@ -134,13 +134,13 @@ export async function handleReadRoute(ctx: ReadRouteCtx): Promise<boolean> {
   }
 
   if (method === 'GET' && route === '/prompt') {
-    const agent = (requestUrl.searchParams.get('agent') || 'generic').toLowerCase();
+    const agent = (requestUrl.searchParams.get('agent') ?? 'generic').toLowerCase();
     sendJson(res, 200, { ok: true, agent, prompt: buildPrompt(agent, readState()) });
     return true;
   }
 
   if (method === 'GET' && route === '/next') {
-    const agent = (requestUrl.searchParams.get('agent') || '').toLowerCase();
+    const agent = (requestUrl.searchParams.get('agent') ?? '').toLowerCase();
     if (!agent) {
       sendError(res, 400, 'Missing query param: agent');
       return true;
@@ -157,19 +157,19 @@ export async function handleReadRoute(ctx: ReadRouteCtx): Promise<boolean> {
       sendError(res, 404, `Task ${taskId} not found.`);
       return true;
     }
-    sendJson(res, 200, { ok: true, taskId, checkpoints: task.checkpoints || [] });
+    sendJson(res, 200, { ok: true, taskId, checkpoints: task.checkpoints ?? [] });
     return true;
   }
 
   if (method === 'GET' && route === '/events') {
-    const limit = Number.parseInt(requestUrl.searchParams.get('limit') || '50', 10);
+    const limit = Number.parseInt(requestUrl.searchParams.get('limit') ?? '50', 10);
     sendJson(res, 200, { ok: true, events: readEvents(limit) });
     return true;
   }
 
   if (method === 'GET' && route === '/events/replay') {
-    const fromSeq = Number.parseInt(requestUrl.searchParams.get('from') || '0', 10);
-    const category = requestUrl.searchParams.get('category') || '';
+    const fromSeq = Number.parseInt(requestUrl.searchParams.get('from') ?? '0', 10);
+    const category = requestUrl.searchParams.get('category') ?? '';
     let events = replayEvents(fromSeq);
     if (category) {
       events = events.filter((e: EventEntry) => e.category === category);
@@ -207,13 +207,13 @@ export async function handleReadRoute(ctx: ReadRouteCtx): Promise<boolean> {
     for (const name of ['claude', 'gemini', 'codex']) {
       const nextAction = suggestNext(state, name);
       const currentTask =
-        state.tasks.find((t: TaskEntry) => t.owner === name && t.status === 'in_progress') || null;
+        state.tasks.find((t: TaskEntry) => t.owner === name && t.status === 'in_progress') ?? null;
       const pendingHandoffs = state.handoffs
         .filter((h: HandoffEntry) => h.to === name && !h.acknowledgedAt)
         .map((h: HandoffEntry) => ({
           id: h.id,
           from: h.from,
-          summary: (h.summary || '').slice(0, 200),
+          summary: h.summary.slice(0, 200),
           createdAt: h.createdAt,
         }));
       (agents)[name] = {
@@ -227,7 +227,7 @@ export async function handleReadRoute(ctx: ReadRouteCtx): Promise<boolean> {
             }
           : null,
         pendingHandoffs,
-        suggestedAction: nextAction?.action || 'idle',
+        suggestedAction: nextAction.action,
       };
     }
 
@@ -265,8 +265,8 @@ export async function handleReadRoute(ctx: ReadRouteCtx): Promise<boolean> {
         id: h.id,
         from: h.from,
         to: h.to,
-        summary: (h.summary || '').slice(0, 200),
-        nextStep: (h.nextStep || '').slice(0, 200),
+        summary: h.summary.slice(0, 200),
+        nextStep: (h.nextStep ?? '').slice(0, 200),
         tasks: h.tasks,
         createdAt: h.createdAt,
       }));
@@ -277,8 +277,7 @@ export async function handleReadRoute(ctx: ReadRouteCtx): Promise<boolean> {
         id: h.id,
         from: h.from,
         to: h.to,
-        summary: (h.summary || '').slice(0, 200),
-        acknowledgedAt: h.acknowledgedAt,
+        summary: h.summary.slice(0, 200),
         acknowledgedBy: h.acknowledgedBy,
         createdAt: h.createdAt,
       }));
@@ -288,7 +287,7 @@ export async function handleReadRoute(ctx: ReadRouteCtx): Promise<boolean> {
         id: d.id,
         title: d.title,
         owner: d.owner,
-        rationale: (d.rationale || '').slice(0, 200),
+        rationale: (d.rationale ?? '').slice(0, 200),
         createdAt: d.createdAt,
       }));
 
@@ -352,17 +351,17 @@ export async function handleReadRoute(ctx: ReadRouteCtx): Promise<boolean> {
 
   if (method === 'GET' && route === '/sessions') {
     const state = readState();
-    const active = state.activeSession || null;
-    const children = state.childSessions || [];
+    const active = state.activeSession ?? null;
+    const children = state.childSessions ?? [];
     sendJson(res, 200, {
       ok: true,
       activeSession: active
         ? {
             id: active.id,
-            type: active.type || 'root',
+            type: active.type ?? 'root',
             focus: active.focus,
             status: active.status,
-            children: active.children || [],
+            children: active.children ?? [],
           }
         : null,
       childSessions: children.map((s: ChildSessionEntry) => ({
@@ -371,7 +370,7 @@ export async function handleReadRoute(ctx: ReadRouteCtx): Promise<boolean> {
         parentId: s.parentId,
         focus: s.focus,
         status: s.status,
-        children: s.children || [],
+        children: s.children ?? [],
       })),
     });
     return true;
@@ -439,7 +438,7 @@ export async function handleReadRoute(ctx: ReadRouteCtx): Promise<boolean> {
     }
 
     // Count events since last active session update
-    const lastActiveAt = state.activeSession?.updatedAt || state.updatedAt;
+    const lastActiveAt = state.activeSession?.updatedAt ?? state.updatedAt;
     const lastActiveMs = lastActiveAt ? new Date(lastActiveAt).getTime() : 0;
     let eventsSinceLastActive = 0;
     try {
@@ -458,8 +457,8 @@ export async function handleReadRoute(ctx: ReadRouteCtx): Promise<boolean> {
             status: state.activeSession.status,
             startedAt: state.activeSession.startedAt,
             updatedAt: state.activeSession.updatedAt,
-            pauseReason: state.activeSession.pauseReason || undefined,
-            pausedAt: state.activeSession.pausedAt || undefined,
+            pauseReason: state.activeSession.pauseReason ?? undefined,
+            pausedAt: state.activeSession.pausedAt ?? undefined,
           }
         : null,
       staleTasks,
@@ -468,7 +467,7 @@ export async function handleReadRoute(ctx: ReadRouteCtx): Promise<boolean> {
         title: t.title,
         owner: t.owner,
         updatedAt: t.updatedAt,
-        lastCheckpoint: (t.checkpoints || []).at(-1) || null,
+        lastCheckpoint: (t.checkpoints ?? []).at(-1) ?? null,
       })),
       pendingHandoffs,
       agentSuggestions,
@@ -487,7 +486,7 @@ export async function handleReadRoute(ctx: ReadRouteCtx): Promise<boolean> {
         title: t.title,
         owner: t.owner,
         updatedAt: t.updatedAt,
-        staleSince: t.staleSince || t.updatedAt,
+        staleSince: t.staleSince ?? t.updatedAt,
       }));
     sendJson(res, 200, { ok: true, tasks: staleTasks });
     return true;

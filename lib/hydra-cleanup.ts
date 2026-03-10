@@ -8,31 +8,36 @@
 
 import fs from 'node:fs';
 import path from 'node:path';
+import type { ActionItem, PipelineResult } from './hydra-action-pipeline.ts';
 
 // ── Scanners ─────────────────────────────────────────────────────────────────
 
 /**
  * Scan for completed/cancelled daemon tasks that can be archived.
- * @param {string} baseUrl
- * @returns {Promise<import('./hydra-action-pipeline.ts').ActionItem[]>}
  */
-export async function scanArchivableTasks(baseUrl: any) {
-  const items: any[] = [];
+export async function scanArchivableTasks(baseUrl: string): Promise<ActionItem[]> {
+  const items: ActionItem[] = [];
   try {
     const { request } = await import('./hydra-utils.ts');
     const status = await request('GET', baseUrl, '/status');
-    if (!(status as any)?.tasks) return items;
+    const statusData = status as Record<string, unknown>;
+    const tasks = statusData['tasks'];
+    if (!Array.isArray(tasks)) return items;
 
-    for (const task of (status as any).tasks) {
-      if (task.status === 'done' || task.status === 'cancelled') {
+    for (const task of tasks as Record<string, unknown>[]) {
+      const taskStatus = task['status'] as string;
+      const taskId = task['id'] as string;
+      const taskTitle = task['title'] as string | undefined;
+      const taskCompletedAt = task['completedAt'] as string | undefined;
+      if (taskStatus === 'done' || taskStatus === 'cancelled') {
         items.push({
-          id: `archive-task-${task.id}`,
-          title: `Archive ${task.status} task: ${task.title || task.id}`,
-          description: `Status: ${task.status}, completed ${task.completedAt || 'recently'}`,
+          id: `archive-task-${taskId}`,
+          title: `Archive ${taskStatus} task: ${taskTitle ?? taskId}`,
+          description: `Status: ${taskStatus}, completed ${taskCompletedAt ?? 'recently'}`,
           category: 'archive',
           severity: 'low',
           source: 'daemon',
-          meta: { taskId: task.id, daemonTask: task },
+          meta: { taskId, daemonTask: task },
         });
       }
     }
@@ -44,31 +49,35 @@ export async function scanArchivableTasks(baseUrl: any) {
 
 /**
  * Scan for old acknowledged handoffs.
- * @param {string} baseUrl
- * @returns {Promise<import('./hydra-action-pipeline.ts').ActionItem[]>}
  */
-export async function scanOldHandoffs(baseUrl: any) {
-  const items: any[] = [];
+export async function scanOldHandoffs(baseUrl: string): Promise<ActionItem[]> {
+  const items: ActionItem[] = [];
   try {
     const { request } = await import('./hydra-utils.ts');
     const status = await request('GET', baseUrl, '/status');
-    if (!(status as any)?.handoffs) return items;
+    const statusData = status as Record<string, unknown>;
+    const handoffs = statusData['handoffs'];
+    if (!Array.isArray(handoffs)) return items;
 
     const cutoffMs = 30 * 60 * 1000; // 30 minutes
     const now = Date.now();
 
-    for (const handoff of (status as any).handoffs) {
-      if (handoff.acknowledged) {
-        const age = now - new Date(handoff.ts || handoff.createdAt || 0).getTime();
+    for (const handoff of handoffs as Record<string, unknown>[]) {
+      if (handoff['acknowledged'] === true) {
+        const ts = handoff['ts'] as string | number | undefined;
+        const createdAt = handoff['createdAt'] as string | number | undefined;
+        const age = now - new Date((ts ?? createdAt) ?? 0).getTime();
         if (age > cutoffMs) {
+          const handoffId = handoff['id'] as string;
+          const summary = handoff['summary'] as string | undefined;
           items.push({
-            id: `handoff-${handoff.id}`,
-            title: `Old handoff: ${(handoff.summary || handoff.id).slice(0, 60)}`,
-            description: `Acknowledged ${Math.round(age / 60000)}min ago`,
+            id: `handoff-${handoffId}`,
+            title: `Old handoff: ${(summary ?? handoffId).slice(0, 60)}`,
+            description: `Acknowledged ${String(Math.round(age / 60000))}min ago`,
             category: 'archive',
             severity: 'low',
             source: 'daemon',
-            meta: { handoffId: handoff.id },
+            meta: { handoffId },
           });
         }
       }
@@ -81,11 +90,9 @@ export async function scanOldHandoffs(baseUrl: any) {
 
 /**
  * Scan for unmerged feature branches (evolve/*, nightly/*, tasks/*).
- * @param {string} projectRoot
- * @returns {Promise<import('./hydra-action-pipeline.ts').ActionItem[]>}
  */
-export async function scanStaleBranches(projectRoot: any) {
-  const items: any[] = [];
+export async function scanStaleBranches(projectRoot: string): Promise<ActionItem[]> {
+  const items: ActionItem[] = [];
   try {
     const { listBranches, branchHasCommits } = await import('./hydra-shared/git-ops.ts');
 
@@ -112,34 +119,39 @@ export async function scanStaleBranches(projectRoot: any) {
 
 /**
  * Scan for stale daemon tasks (in_progress but no update for 30+ min).
- * @param {string} baseUrl
- * @returns {Promise<import('./hydra-action-pipeline.ts').ActionItem[]>}
  */
-export async function scanStaleTasks(baseUrl: any) {
-  const items: any[] = [];
+export async function scanStaleTasks(baseUrl: string): Promise<ActionItem[]> {
+  const items: ActionItem[] = [];
   try {
     const { request } = await import('./hydra-utils.ts');
     const status = await request('GET', baseUrl, '/status');
-    if (!(status as any)?.tasks) return items;
+    const statusData = status as Record<string, unknown>;
+    const tasks = statusData['tasks'];
+    if (!Array.isArray(tasks)) return items;
 
     const cutoffMs = 30 * 60 * 1000;
     const now = Date.now();
 
-    for (const task of (status as any).tasks) {
-      if (task.status === 'in_progress') {
-        const lastUpdate = new Date(
-          task.updatedAt || task.claimedAt || task.createdAt || 0,
-        ).getTime();
+    for (const task of tasks as Record<string, unknown>[]) {
+      const taskStatus = task['status'] as string;
+      if (taskStatus === 'in_progress') {
+        const taskId = task['id'] as string;
+        const taskTitle = task['title'] as string | undefined;
+        const updatedAt = task['updatedAt'] as string | undefined;
+        const claimedAt = task['claimedAt'] as string | undefined;
+        const createdAt = task['createdAt'] as string | undefined;
+        const lastUpdate = new Date((updatedAt ?? claimedAt ?? createdAt) ?? 0).getTime();
         const age = now - lastUpdate;
         if (age > cutoffMs) {
+          const ageMin = String(Math.round(age / 60000));
           items.push({
-            id: `stale-task-${task.id}`,
-            title: `Stale task (${Math.round(age / 60000)}min): ${task.title || task.id}`,
-            description: `In progress but no update for ${Math.round(age / 60000)} minutes`,
+            id: `stale-task-${taskId}`,
+            title: `Stale task (${ageMin}min): ${taskTitle ?? taskId}`,
+            description: `In progress but no update for ${ageMin} minutes`,
             category: 'requeue',
             severity: 'medium',
             source: 'daemon',
-            meta: { taskId: task.id, daemonTask: task },
+            meta: { taskId, daemonTask: task },
           });
         }
       }
@@ -152,28 +164,27 @@ export async function scanStaleTasks(baseUrl: any) {
 
 /**
  * Scan for abandoned suggestions (old, multiple failed attempts).
- * @returns {Promise<import('./hydra-action-pipeline.ts').ActionItem[]>}
  */
-export async function scanAbandonedSuggestions() {
-  const items = [];
+export async function scanAbandonedSuggestions(): Promise<ActionItem[]> {
+  const items: ActionItem[] = [];
   try {
     const { loadSuggestions, getPendingSuggestions } =
       await import('./hydra-evolve-suggestions.ts');
-    const sg = loadSuggestions(undefined as any);
+    const sg = loadSuggestions(undefined as unknown as string);
     const pending = getPendingSuggestions(sg);
 
     for (const s of pending) {
-      const attempts = s.attempts || 0;
+      const sAttempts = s.attempts ?? 0;
       const maxAttempts = 3;
-      if (attempts >= maxAttempts) {
+      if (sAttempts >= maxAttempts) {
         items.push({
-          id: `suggestion-${s.id}`,
-          title: `Abandoned suggestion: ${(s.title || s.id)!.slice(0, 60)}`,
-          description: `${attempts} failed attempts, created ${s.createdAt || 'unknown'}`,
+          id: `suggestion-${s.id ?? ''}`,
+          title: `Abandoned suggestion: ${(s.title ?? s.id ?? '').slice(0, 60)}`,
+          description: `${String(sAttempts)} failed attempts, created ${s.createdAt ?? 'unknown'}`,
           category: 'cleanup',
           severity: 'low',
           source: 'suggestions',
-          meta: { suggestionId: s.id, suggestion: s },
+          meta: { suggestionId: s.id, suggestion: s as unknown as Record<string, unknown> },
         });
       }
     }
@@ -185,14 +196,12 @@ export async function scanAbandonedSuggestions() {
 
 /**
  * Scan for old council checkpoint files.
- * @param {string} projectRoot
- * @returns {Promise<import('./hydra-action-pipeline.ts').ActionItem[]>}
  */
-export async function scanOldCheckpoints(projectRoot: any) {
-  const items: any[] = [];
+export function scanOldCheckpoints(projectRoot: string): Promise<ActionItem[]> {
+  const items: ActionItem[] = [];
   try {
     const coordDir = path.join(projectRoot, 'docs', 'coordination');
-    if (!fs.existsSync(coordDir)) return items;
+    if (!fs.existsSync(coordDir)) return Promise.resolve(items);
 
     // Council checkpoints
     const councilDir = path.join(coordDir, 'council');
@@ -209,7 +218,7 @@ export async function scanOldCheckpoints(projectRoot: any) {
           items.push({
             id: `checkpoint-${file}`,
             title: `Old checkpoint: ${file}`,
-            description: `Last modified ${Math.round(age / (24 * 60 * 60 * 1000))} days ago`,
+            description: `Last modified ${String(Math.round(age / (24 * 60 * 60 * 1000)))} days ago`,
             category: 'delete',
             severity: 'low',
             source: 'checkpoints',
@@ -221,19 +230,17 @@ export async function scanOldCheckpoints(projectRoot: any) {
   } catch {
     /* fs unavailable */
   }
-  return items;
+  return Promise.resolve(items);
 }
 
 /**
  * Scan for large/old coordination artifacts (logs, reports).
- * @param {string} projectRoot
- * @returns {Promise<import('./hydra-action-pipeline.ts').ActionItem[]>}
  */
-export async function scanOldArtifacts(projectRoot: any) {
-  const items: any[] = [];
+export function scanOldArtifacts(projectRoot: string): Promise<ActionItem[]> {
+  const items: ActionItem[] = [];
   try {
     const coordDir = path.join(projectRoot, 'docs', 'coordination');
-    if (!fs.existsSync(coordDir)) return items;
+    if (!fs.existsSync(coordDir)) return Promise.resolve(items);
 
     // Check doctor log size
     const doctorLog = path.join(coordDir, 'doctor', 'DOCTOR_LOG.ndjson');
@@ -243,7 +250,7 @@ export async function scanOldArtifacts(projectRoot: any) {
       if (sizeKB > 500) {
         items.push({
           id: 'artifact-doctor-log',
-          title: `Large doctor log (${sizeKB}KB)`,
+          title: `Large doctor log (${String(sizeKB)}KB)`,
           description: 'Truncate old entries to reduce size',
           category: 'cleanup',
           severity: 'low',
@@ -269,7 +276,7 @@ export async function scanOldArtifacts(projectRoot: any) {
           items.push({
             id: `artifact-${subDir}-${file}`,
             title: `Old ${subDir} report: ${file}`,
-            description: `${Math.round(age / (24 * 60 * 60 * 1000))} days old`,
+            description: `${String(Math.round(age / (24 * 60 * 60 * 1000)))} days old`,
             category: 'delete',
             severity: 'low',
             source: 'artifacts',
@@ -281,21 +288,19 @@ export async function scanOldArtifacts(projectRoot: any) {
   } catch {
     /* fs unavailable */
   }
-  return items;
+  return Promise.resolve(items);
 }
 
 /**
  * Scan for stale task worktrees in .hydra/worktrees/task-*.
  * A worktree is considered stale if its directory mtime is older than 24 hours.
- * @param {string} projectRoot
- * @returns {Promise<import('./hydra-action-pipeline.ts').ActionItem[]>}
  */
-export async function scanStaleTaskWorktrees(projectRoot: any) {
-  const items: any[] = [];
+export async function scanStaleTaskWorktrees(projectRoot: string): Promise<ActionItem[]> {
+  const items: ActionItem[] = [];
   try {
     const { loadHydraConfig } = await import('./hydra-config.ts');
     const cfg = loadHydraConfig();
-    const worktreeDir = cfg.routing?.worktreeIsolation?.worktreeDir || '.hydra/worktrees';
+    const worktreeDir = cfg.routing.worktreeIsolation.worktreeDir ?? '.hydra/worktrees';
     const worktreesPath = path.join(projectRoot, worktreeDir);
 
     if (!fs.existsSync(worktreesPath)) return items;
@@ -316,8 +321,8 @@ export async function scanStaleTaskWorktrees(projectRoot: any) {
           const ageHours = Math.round(ageMs / (60 * 60 * 1000));
           items.push({
             id: `worktree-${name}`,
-            title: `Stale task worktree: ${name} (${ageHours}h old)`,
-            description: `Worktree at ${path.relative(projectRoot, fullPath)} has not been updated in ${ageHours} hours. Safe to remove if task is done.`,
+            title: `Stale task worktree: ${name} (${String(ageHours)}h old)`,
+            description: `Worktree at ${path.relative(projectRoot, fullPath)} has not been updated in ${String(ageHours)} hours. Safe to remove if task is done.`,
             category: 'worktree',
             severity: 'medium',
             source: 'worktrees',
@@ -338,69 +343,73 @@ export async function scanStaleTaskWorktrees(projectRoot: any) {
 
 /**
  * Enrich cleanup items with situational context.
- * @param {import('./hydra-action-pipeline.ts').ActionItem[]} items
- * @param {object} opts
- * @returns {Promise<import('./hydra-action-pipeline.ts').ActionItem[]>}
  */
-export async function enrichCleanupWithSitrep(items: any, _opts: any = {}) {
+export function enrichCleanupWithSitrep(
+  items: ActionItem[],
+  _opts?: Record<string, unknown>,
+): Promise<ActionItem[]> {
   // Non-fatal: just return items as-is if enrichment fails
   // Enrichment is less critical for cleanup than for doctor fix
-  return items;
+  return Promise.resolve(items);
 }
 
 // ── Executor ────────────────────────────────────────────────────────────────
 
 /**
  * Execute a single cleanup action based on its category.
- * @param {import('./hydra-action-pipeline.ts').ActionItem} item
- * @param {object} opts
- * @returns {Promise<import('./hydra-action-pipeline.ts').PipelineResult>}
  */
-export async function executeCleanupAction(item: any, opts: any = {}) {
+export async function executeCleanupAction(
+  item: ActionItem,
+  opts: Record<string, unknown> = {},
+): Promise<PipelineResult> {
   const startMs = Date.now();
-  const { baseUrl, projectRoot } = opts;
+  const baseUrl = opts['baseUrl'] as string | undefined;
+  const projectRoot = opts['projectRoot'] as string | undefined;
 
   try {
     switch (item.category) {
       case 'archive': {
-        return await executeArchive(item, baseUrl, startMs);
+        return await executeArchive(item, baseUrl ?? '', startMs);
       }
       case 'delete': {
-        return await executeDelete(item, projectRoot, startMs);
+        return await executeDelete(item, projectRoot ?? '', startMs);
       }
       case 'requeue': {
-        return await executeRequeue(item, baseUrl, startMs);
+        return await executeRequeue(item, baseUrl ?? '', startMs);
       }
       case 'cleanup': {
         return await executeCleanup(item, startMs);
       }
       case 'worktree': {
-        return await executeWorktreeCleanup(item, projectRoot, startMs);
+        return await executeWorktreeCleanup(item, projectRoot ?? '', startMs);
       }
-      default: {
-        return {
-          item,
-          ok: false,
-          error: `Unknown category: ${item.category}`,
-          durationMs: Date.now() - startMs,
-        };
+      case 'fix':
+      case 'acknowledge': {
+        return { item, ok: true, output: 'No action needed', durationMs: Date.now() - startMs };
       }
     }
   } catch (err) {
-    return { item, ok: false, error: (err as Error).message || String(err), durationMs: Date.now() - startMs };
+    return {
+      item,
+      ok: false,
+      error: (err as Error).message,
+      durationMs: Date.now() - startMs,
+    };
   }
 }
 
 // ── Category Executors ──────────────────────────────────────────────────────
 
-async function executeArchive(item: any, baseUrl: any, startMs: any) {
-  if (item.source === 'daemon' && item.meta?.taskId) {
+async function executeArchive(
+  item: ActionItem,
+  baseUrl: string,
+  startMs: number,
+): Promise<PipelineResult> {
+  const taskId = item.meta?.['taskId'] as string | undefined;
+  if (item.source === 'daemon' && taskId !== undefined) {
     try {
       const { request } = await import('./hydra-utils.ts');
-      await request('POST', baseUrl, `/task/update`, {
-        id: item.meta.taskId,
-        status: 'cancelled',
-      });
+      await request('POST', baseUrl, `/task/update`, { id: taskId, status: 'cancelled' });
       return { item, ok: true, output: 'Task archived', durationMs: Date.now() - startMs };
     } catch (err) {
       return { item, ok: false, error: (err as Error).message, durationMs: Date.now() - startMs };
@@ -409,12 +418,19 @@ async function executeArchive(item: any, baseUrl: any, startMs: any) {
   return { item, ok: true, output: 'No action needed', durationMs: Date.now() - startMs };
 }
 
-async function executeDelete(item: any, projectRoot: any, startMs: any) {
+async function executeDelete(
+  item: ActionItem,
+  projectRoot: string,
+  startMs: number,
+): Promise<PipelineResult> {
+  const branch = item.meta?.['branch'] as string | undefined;
+  const filePath = item.meta?.['filePath'] as string | undefined;
+
   // Branch deletion
-  if (item.source === 'branches' && item.meta?.branch) {
+  if (item.source === 'branches' && branch !== undefined) {
     try {
       const { deleteBranch } = await import('./hydra-shared/git-ops.ts');
-      const ok = deleteBranch(projectRoot, item.meta.branch);
+      const ok = deleteBranch(projectRoot, branch);
       return {
         item,
         ok,
@@ -427,9 +443,9 @@ async function executeDelete(item: any, projectRoot: any, startMs: any) {
   }
 
   // File deletion (checkpoints, artifacts)
-  if (item.meta?.filePath) {
+  if (filePath !== undefined) {
     try {
-      fs.unlinkSync(item.meta.filePath);
+      fs.unlinkSync(filePath);
       return { item, ok: true, output: 'File deleted', durationMs: Date.now() - startMs };
     } catch (err) {
       return { item, ok: false, error: (err as Error).message, durationMs: Date.now() - startMs };
@@ -439,14 +455,16 @@ async function executeDelete(item: any, projectRoot: any, startMs: any) {
   return { item, ok: false, error: 'No delete target found', durationMs: Date.now() - startMs };
 }
 
-async function executeRequeue(item: any, baseUrl: any, startMs: any) {
-  if (item.meta?.taskId) {
+async function executeRequeue(
+  item: ActionItem,
+  baseUrl: string,
+  startMs: number,
+): Promise<PipelineResult> {
+  const taskId = item.meta?.['taskId'] as string | undefined;
+  if (taskId !== undefined) {
     try {
       const { request } = await import('./hydra-utils.ts');
-      await request('POST', baseUrl, `/task/update`, {
-        id: item.meta.taskId,
-        status: 'todo',
-      });
+      await request('POST', baseUrl, `/task/update`, { id: taskId, status: 'todo' });
       return { item, ok: true, output: 'Task requeued', durationMs: Date.now() - startMs };
     } catch (err) {
       return { item, ok: false, error: (err as Error).message, durationMs: Date.now() - startMs };
@@ -455,15 +473,18 @@ async function executeRequeue(item: any, baseUrl: any, startMs: any) {
   return { item, ok: false, error: 'No task ID for requeue', durationMs: Date.now() - startMs };
 }
 
-async function executeCleanup(item: any, startMs: any) {
+async function executeCleanup(item: ActionItem, startMs: number): Promise<PipelineResult> {
+  const suggestionId = item.meta?.['suggestionId'] as string | undefined;
+  const filePath = item.meta?.['filePath'] as string | undefined;
+
   // Suggestion removal
-  if (item.source === 'suggestions' && item.meta?.suggestionId) {
+  if (item.source === 'suggestions' && suggestionId !== undefined) {
     try {
       const { loadSuggestions, saveSuggestions, removeSuggestion } =
         await import('./hydra-evolve-suggestions.ts');
-      const sg = loadSuggestions(undefined as any);
-      removeSuggestion(sg, item.meta.suggestionId);
-      saveSuggestions(undefined as any, sg);
+      const sg = loadSuggestions(undefined as unknown as string);
+      removeSuggestion(sg, suggestionId);
+      saveSuggestions(undefined as unknown as string, sg);
       return { item, ok: true, output: 'Suggestion removed', durationMs: Date.now() - startMs };
     } catch (err) {
       return { item, ok: false, error: (err as Error).message, durationMs: Date.now() - startMs };
@@ -471,17 +492,17 @@ async function executeCleanup(item: any, startMs: any) {
   }
 
   // Doctor log truncation
-  if (item.id === 'artifact-doctor-log' && item.meta?.filePath) {
+  if (item.id === 'artifact-doctor-log' && filePath !== undefined) {
     try {
-      const content = fs.readFileSync(item.meta.filePath, 'utf8');
+      const content = fs.readFileSync(filePath, 'utf8');
       const lines = content.split('\n').filter(Boolean);
       // Keep last 100 entries
       const kept = lines.slice(-100);
-      fs.writeFileSync(item.meta.filePath, `${kept.join('\n')}\n`, 'utf8');
+      fs.writeFileSync(filePath, `${kept.join('\n')}\n`, 'utf8');
       return {
         item,
         ok: true,
-        output: `Truncated from ${lines.length} to ${kept.length} entries`,
+        output: `Truncated from ${String(lines.length)} to ${String(kept.length)} entries`,
         durationMs: Date.now() - startMs,
       };
     } catch (err) {
@@ -490,9 +511,9 @@ async function executeCleanup(item: any, startMs: any) {
   }
 
   // Generic file deletion for artifacts
-  if (item.meta?.filePath) {
+  if (filePath !== undefined) {
     try {
-      fs.unlinkSync(item.meta.filePath);
+      fs.unlinkSync(filePath);
       return { item, ok: true, output: 'File removed', durationMs: Date.now() - startMs };
     } catch (err) {
       return { item, ok: false, error: (err as Error).message, durationMs: Date.now() - startMs };
@@ -502,9 +523,15 @@ async function executeCleanup(item: any, startMs: any) {
   return { item, ok: true, output: 'No action needed', durationMs: Date.now() - startMs };
 }
 
-async function executeWorktreeCleanup(item: any, projectRoot: any, startMs: any) {
-  const { worktreePath, branch } = item.meta || {};
-  if (!worktreePath) {
+async function executeWorktreeCleanup(
+  item: ActionItem,
+  projectRoot: string,
+  startMs: number,
+): Promise<PipelineResult> {
+  const worktreePath = (item.meta?.['worktreePath'] ?? '') as string;
+  const branch = item.meta?.['branch'] as string | undefined;
+
+  if (worktreePath === '') {
     return { item, ok: false, error: 'No worktree path found', durationMs: Date.now() - startMs };
   }
 
@@ -524,7 +551,7 @@ async function executeWorktreeCleanup(item: any, projectRoot: any, startMs: any)
     }
 
     // Delete the associated branch (best-effort)
-    if (branch) {
+    if (branch !== undefined) {
       git(['branch', '-D', branch], projectRoot);
     }
 

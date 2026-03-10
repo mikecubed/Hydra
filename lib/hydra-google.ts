@@ -10,12 +10,36 @@
 
 import { createStreamingPipeline } from './hydra-streaming-middleware.ts';
 
+interface GooglePart {
+  text?: string;
+  thought?: boolean;
+}
+
+interface GoogleBody {
+  contents: Array<{ role: string; parts: Array<{ text: string }> }>;
+  systemInstruction?: { parts: Array<{ text: string }> };
+  generationConfig?: {
+    maxOutputTokens?: number;
+    responseMimeType?: string;
+  };
+}
+
+interface GoogleApiError extends Error {
+  status?: number;
+  isRateLimit?: boolean;
+  retryAfterMs?: number | null;
+}
+
 /**
  * Core Google streaming function — ONLY does the HTTP call + SSE parsing.
  * All cross-cutting concerns (rate limit, retry, usage, etc.) are handled by middleware.
  */
-async function coreStreamGoogle(messages: any, cfg: any, onChunk: any) {
-  const apiKey = process.env['GEMINI_API_KEY'] || process.env['GOOGLE_API_KEY'];
+async function coreStreamGoogle(
+  messages: unknown[],
+  cfg: Record<string, unknown> & { model?: string },
+  onChunk: ((chunk: string) => void) | null,
+) {
+  const apiKey = process.env['GEMINI_API_KEY'] ?? process.env['GOOGLE_API_KEY'];
   if (!apiKey) {
     throw new Error('GEMINI_API_KEY or GOOGLE_API_KEY not set');
   }
@@ -26,29 +50,35 @@ async function coreStreamGoogle(messages: any, cfg: any, onChunk: any) {
 
   // Extract system message and map roles
   let systemText = '';
-  const contents = [];
+  const contents: Array<{ role: string; parts: Array<{ text: string }> }> = [];
   for (const msg of messages) {
-    if (msg.role === 'system') {
-      systemText += (systemText ? '\n\n' : '') + msg.content;
+    const m = msg as Record<string, unknown>;
+    const role = m['role'];
+    const content = typeof m['content'] === 'string' ? m['content'] : '';
+    if (role === 'system') {
+      systemText += (systemText ? '\n\n' : '') + content;
     } else {
       // Map assistant → model for Gemini API
-      const role = msg.role === 'assistant' ? 'model' : 'user';
-      contents.push({ role, parts: [{ text: msg.content }] });
+      const mappedRole = role === 'assistant' ? 'model' : 'user';
+      contents.push({ role: mappedRole, parts: [{ text: content }] });
     }
   }
 
-  const body: any = { contents };
+  const body: GoogleBody = { contents };
 
   if (systemText) {
     body.systemInstruction = { parts: [{ text: systemText }] };
   }
 
-  if (cfg.maxTokens) {
-    body.generationConfig = { ...body.generationConfig, maxOutputTokens: cfg.maxTokens };
+  if (cfg['maxTokens']) {
+    body.generationConfig = {
+      ...body.generationConfig,
+      maxOutputTokens: cfg['maxTokens'] as number,
+    };
   }
 
-  if (cfg.responseType === 'json') {
-    if (!body.generationConfig) body.generationConfig = {};
+  if (cfg['responseType'] === 'json') {
+    body.generationConfig ??= {};
     body.generationConfig.responseMimeType = 'application/json';
   }
 
@@ -62,41 +92,46 @@ async function coreStreamGoogle(messages: any, cfg: any, onChunk: any) {
 
   if (!res.ok) {
     const errText = await res.text().catch(() => '');
-    const err = new Error(`Google API error ${res.status}: ${errText.slice(0, 200)}`);
-    (err as any).status = res.status;
+    const err: GoogleApiError = new Error(
+      `Google API error ${String(res.status)}: ${errText.slice(0, 200)}`,
+    );
+    err.status = res.status;
     // Attach rate limit metadata for callers to handle
     if (res.status === 429 || /RESOURCE_EXHAUSTED|QUOTA_EXHAUSTED/i.test(errText)) {
-      (err as any).isRateLimit = true;
-      const retryAfter = res.headers?.get?.('retry-after');
-      (err as any).retryAfterMs = retryAfter ? Number.parseInt(retryAfter, 10) * 1000 : null;
+      err.isRateLimit = true;
+      const retryAfter = res.headers.get('retry-after');
+      err.retryAfterMs = retryAfter ? Number.parseInt(retryAfter, 10) * 1000 : null;
     }
     throw err;
   }
 
   // Parse SSE stream
-  const reader = res.body!.getReader();
+  if (!res.body) throw new Error('Response body is null');
+  const reader = res.body.getReader();
   const decoder = new TextDecoder();
   let buffer = '';
   let fullResponse = '';
-  let usage = null;
+  let usage: { prompt_tokens: number; completion_tokens: number } | null = null;
 
-  while (true) {
-    const { done, value } = await reader.read();
-    if (done) break;
+  for (;;) {
+    const chunk = (await reader.read()) as { done: boolean; value: Uint8Array };
+    if (chunk.done) break;
 
-    buffer += decoder.decode(value, { stream: true });
+    buffer += decoder.decode(chunk.value, { stream: true });
     const lines = buffer.split('\n');
-    buffer = lines.pop() || '';
+    buffer = lines.pop() ?? '';
 
     for (const line of lines) {
       const trimmed = line.trim();
-      if (!trimmed?.startsWith('data: ')) continue;
+      if (!trimmed.startsWith('data: ')) continue;
 
       try {
-        const data = JSON.parse(trimmed.slice(6));
+        const data = JSON.parse(trimmed.slice(6)) as Record<string, unknown>;
 
         // Extract text from candidates (skip thinking/thought parts)
-        const parts = data.candidates?.[0]?.content?.parts;
+        type GeminiCandidate = { content?: { parts?: GooglePart[] } };
+        const candidates = data['candidates'] as GeminiCandidate[] | undefined;
+        const parts = candidates?.[0]?.content?.parts;
         if (parts) {
           for (const part of parts) {
             if (part.text && !part.thought) {
@@ -107,10 +142,12 @@ async function coreStreamGoogle(messages: any, cfg: any, onChunk: any) {
         }
 
         // Extract usage metadata
-        if (data.usageMetadata) {
+        type GeminiUsage = { promptTokenCount?: number; candidatesTokenCount?: number };
+        const usageMetadata = data['usageMetadata'] as GeminiUsage | undefined;
+        if (usageMetadata) {
           usage = {
-            prompt_tokens: data.usageMetadata.promptTokenCount || 0,
-            completion_tokens: data.usageMetadata.candidatesTokenCount || 0,
+            prompt_tokens: usageMetadata.promptTokenCount ?? 0,
+            completion_tokens: usageMetadata.candidatesTokenCount ?? 0,
           };
         }
       } catch {
@@ -136,6 +173,10 @@ const pipelinedStream = createStreamingPipeline('google', coreStreamGoogle);
  * @param {Function} [onChunk] - Called with each streamed text chunk
  * @returns {Promise<{fullResponse: string, usage: {prompt_tokens: number, completion_tokens: number}|null}>}
  */
-export async function streamGoogleCompletion(messages: any, cfg: any, onChunk: any) {
-  return pipelinedStream(messages, cfg, onChunk);
+export async function streamGoogleCompletion(
+  messages: unknown[],
+  cfg: Record<string, unknown> & { model?: string },
+  onChunk: ((chunk: string) => void) | null,
+): Promise<{ fullResponse: string; usage: { prompt_tokens: number; completion_tokens: number } | null; rateLimits: null }> {
+  return pipelinedStream(messages, cfg, onChunk) as Promise<{ fullResponse: string; usage: { prompt_tokens: number; completion_tokens: number } | null; rateLimits: null }>;
 }

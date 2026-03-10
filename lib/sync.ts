@@ -13,6 +13,85 @@ import { getCurrentBranch as getCurrentBranchGit } from './hydra-shared/git-ops.
 import { resolveProject } from './hydra-config.ts';
 import { getAgentInstructionFile } from './hydra-sync-md.ts';
 
+interface AgentRecord {
+  installed: boolean | null;
+  path: string;
+  version: string;
+  lastCheckedAt: string | null;
+}
+
+interface ActiveSession {
+  id: string;
+  focus: string;
+  owner: string;
+  branch: string;
+  participants: string[];
+  status: string;
+  startedAt: string;
+  updatedAt: string;
+}
+
+interface TaskItem {
+  id?: string;
+  title?: string;
+  owner?: string;
+  status?: string;
+  files?: string[];
+  notes?: string;
+  updatedAt?: string;
+  [key: string]: unknown;
+}
+
+interface DecisionItem {
+  id?: string;
+  title?: string;
+  owner?: string;
+  rationale?: string;
+  impact?: string;
+  createdAt?: string;
+  [key: string]: unknown;
+}
+
+interface BlockerItem {
+  id?: string;
+  title?: string;
+  owner?: string;
+  status?: string;
+  nextStep?: string;
+  createdAt?: string;
+  [key: string]: unknown;
+}
+
+interface HandoffItem {
+  id?: string;
+  from?: string;
+  to?: string;
+  summary?: string;
+  nextStep?: string;
+  tasks?: string[];
+  createdAt?: string;
+  [key: string]: unknown;
+}
+
+interface SyncState {
+  schemaVersion: number;
+  project: string;
+  updatedAt: string;
+  activeSession: ActiveSession | null;
+  agents: {
+    codex: AgentRecord;
+    claude: AgentRecord;
+    gemini: AgentRecord;
+    [key: string]: AgentRecord;
+  };
+  tasks: TaskItem[];
+  decisions: DecisionItem[];
+  blockers: BlockerItem[];
+  handoffs: HandoffItem[];
+}
+
+type CliOptions = Record<string, string | boolean>;
+
 const config = resolveProject();
 const ROOT = config.projectRoot;
 const COORD_DIR = config.coordDir;
@@ -35,7 +114,7 @@ function toSessionId(date = new Date()) {
   return `SYNC_${yyyy}${mm}${dd}_${hh}${min}${ss}`;
 }
 
-function createAgentRecord() {
+function createAgentRecord(): AgentRecord {
   return {
     installed: null,
     path: '',
@@ -44,7 +123,7 @@ function createAgentRecord() {
   };
 }
 
-function createDefaultState() {
+function createDefaultState(): SyncState {
   return {
     schemaVersion: 1,
     project: config.projectName,
@@ -62,25 +141,44 @@ function createDefaultState() {
   };
 }
 
-function normalizeState(raw: any) {
+function normalizeState(raw: unknown): SyncState {
   const defaults = createDefaultState();
-  const safe = raw && typeof raw === 'object' ? raw : {};
+  const safe = raw !== null && typeof raw === 'object' ? (raw as Record<string, unknown>) : {};
+  const safeAgents =
+    typeof safe['agents'] === 'object' && safe['agents'] !== null
+      ? (safe['agents'] as Record<string, unknown>)
+      : {};
 
   return {
     ...defaults,
     ...safe,
     agents: {
       ...defaults.agents,
-      ...(safe.agents || {}),
-      codex: { ...defaults.agents.codex, ...(safe.agents?.codex || {}) },
-      claude: { ...defaults.agents.claude, ...(safe.agents?.claude || {}) },
-      gemini: { ...defaults.agents.gemini, ...(safe.agents?.gemini || {}) },
+      ...(safeAgents as Record<string, AgentRecord>),
+      codex: {
+        ...defaults.agents.codex,
+        ...(typeof safeAgents['codex'] === 'object' && safeAgents['codex'] !== null
+          ? (safeAgents['codex'] as Partial<AgentRecord>)
+          : {}),
+      },
+      claude: {
+        ...defaults.agents.claude,
+        ...(typeof safeAgents['claude'] === 'object' && safeAgents['claude'] !== null
+          ? (safeAgents['claude'] as Partial<AgentRecord>)
+          : {}),
+      },
+      gemini: {
+        ...defaults.agents.gemini,
+        ...(typeof safeAgents['gemini'] === 'object' && safeAgents['gemini'] !== null
+          ? (safeAgents['gemini'] as Partial<AgentRecord>)
+          : {}),
+      },
     },
-    tasks: Array.isArray(safe.tasks) ? safe.tasks : [],
-    decisions: Array.isArray(safe.decisions) ? safe.decisions : [],
-    blockers: Array.isArray(safe.blockers) ? safe.blockers : [],
-    handoffs: Array.isArray(safe.handoffs) ? safe.handoffs : [],
-  };
+    tasks: Array.isArray(safe['tasks']) ? (safe['tasks'] as TaskItem[]) : [],
+    decisions: Array.isArray(safe['decisions']) ? (safe['decisions'] as DecisionItem[]) : [],
+    blockers: Array.isArray(safe['blockers']) ? (safe['blockers'] as BlockerItem[]) : [],
+    handoffs: Array.isArray(safe['handoffs']) ? (safe['handoffs'] as HandoffItem[]) : [],
+  } as SyncState;
 }
 
 function ensureCoordFiles() {
@@ -106,18 +204,19 @@ function ensureCoordFiles() {
   }
 }
 
-function readState() {
+function readState(): SyncState {
   ensureCoordFiles();
   try {
-    const raw = fs.readFileSync(STATE_PATH, 'utf8');
-    return normalizeState(JSON.parse(raw));
+    const raw: unknown = JSON.parse(fs.readFileSync(STATE_PATH, 'utf8'));
+    return normalizeState(raw);
   } catch (err) {
     console.error(`Failed to read ${path.relative(ROOT, STATE_PATH)}: ${(err as Error).message}`);
+    // eslint-disable-next-line n/no-process-exit
     process.exit(1);
   }
 }
 
-function writeState(state: any) {
+function writeState(state: SyncState): void {
   const next = normalizeState(state);
   next.updatedAt = nowIso();
   if (next.activeSession?.status === 'active') {
@@ -126,25 +225,25 @@ function writeState(state: any) {
   fs.writeFileSync(STATE_PATH, `${JSON.stringify(next, null, 2)}\n`, 'utf8');
 }
 
-function appendLog(entry: any) {
+function appendLog(entry: string): void {
   ensureCoordFiles();
   fs.appendFileSync(LOG_PATH, `- ${nowIso()} | ${entry}\n`, 'utf8');
 }
 
-function parseList(value: any) {
-  if (!value) {
+function parseList(value: unknown): string[] {
+  if (typeof value !== 'string' || !value) {
     return [];
   }
-  return String(value)
+  return value
     .split(/[,\s]+/)
     .map((part) => part.trim())
     .filter(Boolean);
 }
 
-function parseCli(argv: any) {
+function parseCli(argv: string[]) {
   const [command = 'help', ...rest] = argv.slice(2);
-  const options: Record<string, any> = {};
-  const positionals = [];
+  const options: CliOptions = {};
+  const positionals: string[] = [];
 
   for (let i = 0; i < rest.length; i += 1) {
     const token = rest[i];
@@ -184,32 +283,47 @@ function parseCli(argv: any) {
   return { command, options, positionals };
 }
 
-function getOptionValue(options: any, positionals: any, key: any, positionIndex: any, defaultValue = '') {
-  if (options[key] !== undefined && options[key] !== true) {
-    return String(options[key]);
+function getOptionValue(
+  options: CliOptions,
+  positionals: string[],
+  key: string,
+  positionIndex: number,
+  defaultValue = '',
+): string {
+  const opt = options[key];
+  if (typeof opt === 'string') {
+    return opt;
   }
-  if (positionals[positionIndex] !== undefined) {
-    return String(positionals[positionIndex]);
+  const pos = positionals[positionIndex];
+  if (pos) {
+    return pos;
   }
   return defaultValue;
 }
 
-function getRequiredOption(options: any, positionals: any, key: any, positionIndex: any, helpHint = '') {
+function getRequiredOption(
+  options: CliOptions,
+  positionals: string[],
+  key: string,
+  positionIndex: number,
+  helpHint = '',
+): string {
   const value = getOptionValue(options, positionals, key, positionIndex, '');
-  if (value === undefined || (value as any) === true || value === '') {
+  if (value === '') {
     const extra = helpHint ? `\n${helpHint}` : '';
     console.error(`Missing required option --${key}.${extra}`);
+    // eslint-disable-next-line n/no-process-exit
     process.exit(1);
   }
-  return String(value);
+  return value;
 }
 
-function nextId(prefix: any, items: any) {
+function nextId(prefix: string, items: Array<{ id?: string | null }>): string {
   let max = 0;
   const pattern = new RegExp(`^${prefix}(\\d+)$`);
 
   for (const item of items) {
-    const match = String(item?.id || '').match(pattern);
+    const match = (item.id ?? '').match(pattern);
     if (!match) {
       continue;
     }
@@ -226,21 +340,21 @@ function getCurrentBranch() {
   return getCurrentBranchGit(ROOT) || 'unknown';
 }
 
-function detectCommand(name: any) {
+function detectCommand(name: string) {
   const cmd = process.platform === 'win32' ? 'where' : 'which';
   const r = spawnSyncCapture(cmd, [name], {
     cwd: ROOT,
     encoding: 'utf8',
     windowsHide: true,
   });
-  if (r.status !== 0 || !(r.stdout || '').trim()) {
+  if (r.status !== 0 || !r.stdout.trim()) {
     return { installed: false, path: '' };
   }
-  const firstPath = (r.stdout || '').split(/\r?\n/)[0]?.trim() || '';
+  const firstPath = r.stdout.split(/\r?\n/)[0]?.trim() ?? '';
   return { installed: true, path: firstPath };
 }
 
-function detectVersion(name: any, customCommand: any) {
+function detectVersion(name: string, customCommand: string) {
   const command = customCommand || `${name} --version`;
   // If the command contains quotes or the executable token itself contains a space
   // (e.g. "C:\Program Files\node\node.exe"), fall back to shell parsing.
@@ -253,7 +367,7 @@ function detectVersion(name: any, customCommand: any) {
       windowsHide: true,
       shell: true,
     });
-    return (r.stdout || '').split(/\r?\n/)[0]?.trim() || '';
+    return r.stdout.split(/\r?\n/)[0]?.trim() ?? '';
   }
   const parts = command.split(/\s+/).filter(Boolean);
   const exe = parts[0];
@@ -263,7 +377,7 @@ function detectVersion(name: any, customCommand: any) {
     encoding: 'utf8',
     windowsHide: true,
   });
-  return (r.stdout || '').split(/\r?\n/)[0]?.trim() || '';
+  return r.stdout.split(/\r?\n/)[0]?.trim() ?? '';
 }
 
 function printHelp() {
@@ -290,11 +404,12 @@ Project: ${config.projectName} (${config.projectRoot})
 `);
 }
 
-function ensureStatus(status: any) {
+function ensureStatus(status: string) {
   if (!STATUS_VALUES.has(status)) {
     console.error(
       `Invalid status "${status}". Use one of: ${Array.from(STATUS_VALUES).join(', ')}`,
     );
+    // eslint-disable-next-line n/no-process-exit
     process.exit(1);
   }
 }
@@ -358,7 +473,7 @@ function commandDoctor() {
   }
 }
 
-function commandStart(options: any, positionals: any) {
+function commandStart(options: CliOptions, positionals: string[]) {
   const focus = getRequiredOption(
     options,
     positionals,
@@ -395,7 +510,7 @@ function commandStart(options: any, positionals: any) {
   console.log(`Participants: ${participants.join(', ') || 'none'}`);
 }
 
-function commandTaskAdd(options: any, positionals: any) {
+function commandTaskAdd(options: CliOptions, positionals: string[]) {
   const title = getRequiredOption(options, positionals, 'title', 0);
   const owner = getOptionValue(options, positionals, 'owner', 1, 'unassigned');
   const status = getOptionValue(options, positionals, 'status', 2, 'todo');
@@ -421,13 +536,14 @@ function commandTaskAdd(options: any, positionals: any) {
   console.log(`Added ${task.id}: ${task.title}`);
 }
 
-function commandTaskUpdate(options: any, positionals: any) {
+function commandTaskUpdate(options: CliOptions, positionals: string[]) {
   const id = getRequiredOption(options, positionals, 'id', 0);
   const state = readState();
-  const task = state.tasks.find((item: any) => item.id === id);
+  const task = state.tasks.find((item) => item.id === id);
 
   if (!task) {
     console.error(`Task ${id} not found.`);
+    // eslint-disable-next-line n/no-process-exit
     process.exit(1);
   }
 
@@ -441,22 +557,21 @@ function commandTaskUpdate(options: any, positionals: any) {
   const positionalNotes = positionals[3];
   const positionalFiles = positionals[4];
 
-  const nextStatusFromOption =
-    options.status && options.status !== true ? String(options.status) : '';
+  const nextStatusFromOption = typeof options['status'] === 'string' ? options['status'] : '';
   const nextStatusFromPositional =
-    positionalStatus && STATUS_VALUES.has(String(positionalStatus)) ? String(positionalStatus) : '';
+    positionalStatus && STATUS_VALUES.has(positionalStatus) ? positionalStatus : '';
   const nextStatus = nextStatusFromOption || nextStatusFromPositional;
   if (nextStatus) {
     ensureStatus(nextStatus);
     task.status = nextStatus;
   }
 
-  const ownerFromOption = options.owner && options.owner !== true ? String(options.owner) : '';
+  const ownerFromOption = typeof options['owner'] === 'string' ? options['owner'] : '';
   let ownerFromPositional = '';
-  if (positionalOwner && !STATUS_VALUES.has(String(positionalOwner))) {
-    ownerFromPositional = String(positionalOwner);
-  } else if (positionalStatus && !STATUS_VALUES.has(String(positionalStatus))) {
-    ownerFromPositional = String(positionalStatus);
+  if (positionalOwner && !STATUS_VALUES.has(positionalOwner)) {
+    ownerFromPositional = positionalOwner;
+  } else if (positionalStatus && !STATUS_VALUES.has(positionalStatus)) {
+    ownerFromPositional = positionalStatus;
   }
 
   const nextOwner = ownerFromOption || ownerFromPositional;
@@ -464,22 +579,22 @@ function commandTaskUpdate(options: any, positionals: any) {
     task.owner = nextOwner;
   }
 
-  const nextFilesRaw =
-    options.files && options.files !== true
-      ? String(options.files)
-      : positionalFiles && positionalFiles !== true
-        ? String(positionalFiles)
-        : '';
+  let nextFilesRaw = '';
+  if (typeof options['files'] === 'string') {
+    nextFilesRaw = options['files'];
+  } else if (positionalFiles) {
+    nextFilesRaw = positionalFiles;
+  }
   if (nextFilesRaw) {
     task.files = parseList(nextFilesRaw);
   }
 
-  const nextNoteRaw =
-    options.notes && options.notes !== true
-      ? String(options.notes)
-      : positionalNotes && positionalNotes !== true
-        ? String(positionalNotes)
-        : '';
+  let nextNoteRaw = '';
+  if (typeof options['notes'] === 'string') {
+    nextNoteRaw = options['notes'];
+  } else if (positionalNotes) {
+    nextNoteRaw = positionalNotes;
+  }
   if (nextNoteRaw) {
     const nextNote = nextNoteRaw;
     task.notes = task.notes ? `${task.notes}\n${nextNote}` : nextNote;
@@ -487,12 +602,12 @@ function commandTaskUpdate(options: any, positionals: any) {
 
   task.updatedAt = nowIso();
   writeState(state);
-  appendLog(`Updated task ${task.id} | status=${task.status} | owner=${task.owner}`);
+  appendLog(`Updated task ${task.id ?? ''} | status=${task.status ?? ''} | owner=${task.owner ?? ''}`);
 
-  console.log(`Updated ${task.id}`);
+  console.log(`Updated ${task.id ?? ''}`);
 }
 
-function commandDecisionAdd(options: any, positionals: any) {
+function commandDecisionAdd(options: CliOptions, positionals: string[]) {
   const title = getRequiredOption(options, positionals, 'title', 0);
   const owner = getOptionValue(options, positionals, 'owner', 1, 'human');
   const rationale = getOptionValue(options, positionals, 'rationale', 2, '');
@@ -515,7 +630,7 @@ function commandDecisionAdd(options: any, positionals: any) {
   console.log(`Recorded ${decision.id}`);
 }
 
-function commandBlockerAdd(options: any, positionals: any) {
+function commandBlockerAdd(options: CliOptions, positionals: string[]) {
   const title = getRequiredOption(options, positionals, 'title', 0);
   const owner = getOptionValue(options, positionals, 'owner', 1, 'human');
   const nextStep = getOptionValue(options, positionals, 'next-step', 2, '');
@@ -537,7 +652,7 @@ function commandBlockerAdd(options: any, positionals: any) {
   console.log(`Recorded ${blocker.id}`);
 }
 
-function commandHandoff(options: any, positionals: any) {
+function commandHandoff(options: CliOptions, positionals: string[]) {
   const from = getRequiredOption(options, positionals, 'from', 0);
   const to = getRequiredOption(options, positionals, 'to', 1);
   const summary = getRequiredOption(options, positionals, 'summary', 2);
@@ -564,14 +679,14 @@ function commandHandoff(options: any, positionals: any) {
   console.log(`Recorded ${handoff.id}`);
 }
 
-function formatTask(task: any) {
-  return `${task.id} [${task.status}] owner=${task.owner} :: ${task.title}`;
+function formatTask(task: TaskItem): string {
+  return `${task.id ?? ''} [${task.status ?? ''}] owner=${task.owner ?? ''} :: ${task.title ?? ''}`;
 }
 
 function commandSummary() {
   const state = readState();
-  const openTasks = state.tasks.filter((task: any) => !['done', 'cancelled'].includes(task.status));
-  const activeBlockers = state.blockers.filter((blocker: any) => blocker.status !== 'resolved');
+  const openTasks = state.tasks.filter((task) => !['done', 'cancelled'].includes(task.status ?? ''));
+  const activeBlockers = state.blockers.filter((blocker) => blocker.status !== 'resolved');
   const recentDecisions = state.decisions.slice(-3);
   const recentHandoff = state.handoffs.at(-1);
 
@@ -586,13 +701,13 @@ function commandSummary() {
     console.log(`- focus: ${state.activeSession.focus}`);
     console.log(`- owner: ${state.activeSession.owner}`);
     console.log(`- branch: ${state.activeSession.branch}`);
-    console.log(`- participants: ${(state.activeSession.participants || []).join(', ')}`);
+    console.log(`- participants: ${state.activeSession.participants.join(', ')}`);
   } else {
     console.log('\nActive Session');
     console.log('- none');
   }
 
-  console.log(`\nOpen Tasks (${openTasks.length})`);
+  console.log(`\nOpen Tasks (${String(openTasks.length)})`);
   if (openTasks.length === 0) {
     console.log('- none');
   } else {
@@ -601,31 +716,31 @@ function commandSummary() {
     }
   }
 
-  console.log(`\nOpen Blockers (${activeBlockers.length})`);
+  console.log(`\nOpen Blockers (${String(activeBlockers.length)})`);
   if (activeBlockers.length === 0) {
     console.log('- none');
   } else {
     for (const blocker of activeBlockers) {
-      console.log(`- ${blocker.id} owner=${blocker.owner} :: ${blocker.title}`);
+      console.log(`- ${blocker.id ?? ''} owner=${blocker.owner ?? ''} :: ${blocker.title ?? ''}`);
       if (blocker.nextStep) {
         console.log(`  next: ${blocker.nextStep}`);
       }
     }
   }
 
-  console.log(`\nRecent Decisions (${recentDecisions.length})`);
+  console.log(`\nRecent Decisions (${String(recentDecisions.length)})`);
   if (recentDecisions.length === 0) {
     console.log('- none');
   } else {
     for (const decision of recentDecisions) {
-      console.log(`- ${decision.id} owner=${decision.owner} :: ${decision.title}`);
+      console.log(`- ${decision.id ?? ''} owner=${decision.owner ?? ''} :: ${decision.title ?? ''}`);
     }
   }
 
   console.log('\nLatest Handoff');
   if (recentHandoff) {
-    console.log(`- ${recentHandoff.id} ${recentHandoff.from} -> ${recentHandoff.to}`);
-    console.log(`  summary: ${recentHandoff.summary}`);
+    console.log(`- ${recentHandoff.id ?? ''} ${recentHandoff.from ?? ''} -> ${recentHandoff.to ?? ''}`);
+    console.log(`  summary: ${recentHandoff.summary ?? ''}`);
     if (recentHandoff.nextStep) {
       console.log(`  next: ${recentHandoff.nextStep}`);
     }
@@ -634,19 +749,19 @@ function commandSummary() {
   }
 }
 
-function buildPrompt(agent: any, state: any) {
-  const labelByAgent = {
+function buildPrompt(agent: string, state: SyncState): string {
+  const labelByAgent: Record<string, string> = {
     codex: 'Codex',
     claude: 'Claude Code',
     gemini: 'Gemini Pro',
     generic: 'AI Assistant',
   };
-  const agentLabel = (labelByAgent as any)[agent] || labelByAgent.generic;
+  const agentLabel = labelByAgent[agent] || labelByAgent['generic'] || 'AI Assistant';
 
   const openTasks = state.tasks
-    .filter((task: any) => !['done', 'cancelled'].includes(task.status))
+    .filter((task) => !['done', 'cancelled'].includes(task.status ?? ''))
     .slice(0, 8)
-    .map((task: any) => `- ${formatTask(task)}`)
+    .map((task) => `- ${formatTask(task)}`)
     .join('\n');
 
   const instructionFile = getAgentInstructionFile(agent, ROOT);
@@ -666,16 +781,16 @@ function buildPrompt(agent: any, state: any) {
     '- Record important decisions and blockers in AI_SYNC_STATE.json.',
     '- Before handing off, add a handoff entry with what changed and next step.',
     '',
-    `Current focus: ${state.activeSession?.focus || 'not set'}`,
-    `Current branch: ${state.activeSession?.branch || getCurrentBranch()}`,
+    `Current focus: ${state.activeSession?.focus ?? 'not set'}`,
+    `Current branch: ${state.activeSession?.branch ?? getCurrentBranch()}`,
     '',
     'Open tasks:',
     openTasks || '- none',
   ].join('\n');
 }
 
-function commandPrompt(options: any, positionals: any) {
-  const agent = String(getOptionValue(options, positionals, 'agent', 0, 'generic')).toLowerCase();
+function commandPrompt(options: CliOptions, positionals: string[]) {
+  const agent = getOptionValue(options, positionals, 'agent', 0, 'generic').toLowerCase();
   const state = readState();
   console.log(buildPrompt(agent, state));
 }
@@ -722,6 +837,7 @@ function main() {
     default:
       console.error(`Unknown command: ${command}`);
       printHelp();
+      // eslint-disable-next-line n/no-process-exit
       process.exit(1);
   }
 }

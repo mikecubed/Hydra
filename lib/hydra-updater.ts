@@ -15,32 +15,46 @@ const CACHE_PATH = join(HYDRA_ROOT, 'docs/coordination/.update-check.json');
 const CACHE_TTL_MS = 24 * 60 * 60 * 1000; // 24 hours
 const FETCH_TIMEOUT_MS = 5000;
 
+// ── Types ────────────────────────────────────────────────────────────────────
+
+interface LocalPkg {
+  version: string;
+  repository?: { url?: string };
+}
+
+interface UpdateCacheData {
+  hasUpdate: boolean;
+  remoteVersion?: string;
+  localVersion: string;
+  checkedAt?: number;
+}
+
 // Derive remote URL from package.json repository field
-const LOCAL_PKG = JSON.parse(readFileSync(join(HYDRA_ROOT, 'package.json'), 'utf8'));
-const LOCAL_VERSION = LOCAL_PKG.version;
+const LOCAL_PKG = JSON.parse(readFileSync(join(HYDRA_ROOT, 'package.json'), 'utf8')) as LocalPkg;
+const LOCAL_VERSION: string = LOCAL_PKG.version;
 
 // Extract owner/repo from git URL: "git+https://github.com/Owner/Repo.git"
-function parseRepoUrl(url = '') {
+function parseRepoUrl(url = ''): { owner: string; repo: string } | null {
   const m = url.match(/github\.com[/:]([\w-]+)\/([\w-]+?)(?:\.git)?$/);
   return m ? { owner: m[1], repo: m[2] } : null;
 }
 
-const repoInfo = parseRepoUrl(LOCAL_PKG?.repository?.url || '');
+const repoInfo = parseRepoUrl(LOCAL_PKG.repository?.url ?? '');
 const REMOTE_PKG_URL = repoInfo
   ? `https://raw.githubusercontent.com/${repoInfo.owner}/${repoInfo.repo}/master/package.json`
   : null;
 
 // ── Cache helpers ────────────────────────────────────────────────────────────
 
-function loadCache() {
+function loadCache(): UpdateCacheData | null {
   try {
-    return JSON.parse(readFileSync(CACHE_PATH, 'utf8'));
+    return JSON.parse(readFileSync(CACHE_PATH, 'utf8')) as UpdateCacheData;
   } catch {
     return null;
   }
 }
 
-function saveCache(data: any) {
+function saveCache(data: UpdateCacheData): UpdateCacheData {
   try {
     mkdirSync(dirname(CACHE_PATH), { recursive: true });
     writeFileSync(CACHE_PATH, JSON.stringify({ ...data, checkedAt: Date.now() }, null, 2), 'utf8');
@@ -52,12 +66,12 @@ function saveCache(data: any) {
 
 // ── Semver comparison ────────────────────────────────────────────────────────
 
-function semverGt(a: any, b: any) {
-  const pa = String(a).split('.').map(Number);
-  const pb = String(b).split('.').map(Number);
+function semverGt(a: string, b: string): boolean {
+  const pa = a.split('.').map(Number);
+  const pb = b.split('.').map(Number);
   for (let i = 0; i < 3; i++) {
-    if ((pa[i] || 0) > (pb[i] || 0)) return true;
-    if ((pa[i] || 0) < (pb[i] || 0)) return false;
+    if ((pa[i] ?? 0) > (pb[i] ?? 0)) return true;
+    if ((pa[i] ?? 0) < (pb[i] ?? 0)) return false;
   }
   return false;
 }
@@ -71,7 +85,7 @@ function semverGt(a: any, b: any) {
  * @returns {Promise<{ hasUpdate: boolean, remoteVersion: string, localVersion: string } | null>}
  *   Returns null on network error or when no repo URL is configured.
  */
-export async function checkForUpdates() {
+export async function checkForUpdates(): Promise<UpdateCacheData | null> {
   if (!REMOTE_PKG_URL) return null;
 
   // Serve from cache if fresh
@@ -87,8 +101,8 @@ export async function checkForUpdates() {
     });
     if (!res.ok) return saveCache({ hasUpdate: false, localVersion: LOCAL_VERSION });
 
-    const pkg = await res.json();
-    const remoteVersion = (pkg as any)?.version;
+    const pkg = (await res.json()) as Record<string, unknown>;
+    const remoteVersion = pkg['version'] as string | undefined;
     if (!remoteVersion) return null;
 
     const hasUpdate = semverGt(remoteVersion, LOCAL_VERSION);
@@ -102,7 +116,7 @@ export async function checkForUpdates() {
 /**
  * Invalidate the cached update check (force re-check on next call).
  */
-export function invalidateUpdateCache() {
+export function invalidateUpdateCache(): void {
   try {
     writeFileSync(CACHE_PATH, JSON.stringify({ checkedAt: 0, hasUpdate: false }), 'utf8');
   } catch {

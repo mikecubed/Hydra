@@ -12,7 +12,40 @@ import path from 'node:path';
 import { HYDRA_ROOT, loadHydraConfig } from './hydra-config.ts';
 import { loadCodebaseContext } from './hydra-codebase-context.ts';
 
-function readFileSafe(filePath: any) {
+// ── Internal types ───────────────────────────────────────────────────────────
+
+interface ModuleIndexEntry {
+  file: string;
+  purpose?: string;
+}
+
+interface McpInfo {
+  tools: string[];
+  resources: string[];
+}
+
+interface OperatorInfo {
+  commands: string[];
+}
+
+export interface SelfIndex {
+  generatedAt: string;
+  hydraRoot: string;
+  moduleIndex: ModuleIndexEntry[];
+  moduleExports: Array<{ file: string; exports: string[] }>;
+  daemonRoutes: string[];
+  mcp: McpInfo;
+  operator: OperatorInfo;
+  configKeys: string[];
+}
+
+interface FormatSelfIndexOpts {
+  maxChars?: number;
+}
+
+// ── Helpers ──────────────────────────────────────────────────────────────────
+
+function readFileSafe(filePath: string): string {
   try {
     return fs.readFileSync(filePath, 'utf8');
   } catch {
@@ -20,12 +53,12 @@ function readFileSafe(filePath: any) {
   }
 }
 
-function walkFiles(rootDir: any, filterFn: any) {
-  const out = [];
-  const stack = [rootDir];
+function walkFiles(rootDir: string, filterFn: (f: string) => boolean): string[] {
+  const out: string[] = [];
+  const stack: string[] = [rootDir];
   while (stack.length > 0) {
-    const dir = stack.pop();
-    let entries = [];
+    const dir = stack.pop()!;
+    let entries: fs.Dirent[];
     try {
       entries = fs.readdirSync(dir, { withFileTypes: true });
     } catch {
@@ -43,19 +76,19 @@ function walkFiles(rootDir: any, filterFn: any) {
           continue;
         stack.push(full);
       } else if (ent.isFile()) {
-        if (!filterFn || filterFn(full)) out.push(full);
+        if (filterFn(full)) out.push(full);
       }
     }
   }
   return out;
 }
 
-function uniq(arr: any) {
+function uniq(arr: string[]): string[] {
   return [...new Set(arr.filter(Boolean))];
 }
 
-function extractExports(source: any) {
-  const names: any[] = [];
+function extractExports(source: string): string[] {
+  const names: string[] = [];
   if (!source) return names;
 
   // export function foo / export async function foo
@@ -74,18 +107,20 @@ function extractExports(source: any) {
   for (const m of source.matchAll(/export\s*\{\s*([^}]+)\s*\}/g)) {
     const parts = m[1]
       .split(',')
-      .map((s: any) => s.trim())
+      .map((s) => s.trim())
       .filter(Boolean);
     for (const p of parts) {
-      const [left, right] = p.split(/\s+as\s+/i).map((s: any) => s.trim());
-      names.push(right || left);
+      const splitParts = p.split(/\s+as\s+/i).map((s) => s.trim());
+      const left = splitParts[0] ?? p;
+      const right = splitParts[1] as string | undefined;
+      names.push(right ?? left);
     }
   }
   return uniq(names).sort();
 }
 
-function extractDaemonRoutes(source: any) {
-  const routes: any[] = [];
+function extractDaemonRoutes(source: string): string[] {
+  const routes: string[] = [];
   if (!source) return routes;
   for (const m of source.matchAll(/route\s*===\s*'([^']+)'/g)) routes.push(m[1]);
   for (const m of source.matchAll(/route\s*===\s*"([^"]+)"/g)) routes.push(m[1]);
@@ -96,16 +131,16 @@ function extractDaemonRoutes(source: any) {
   return uniq(routes).sort();
 }
 
-function extractMcpTools(source: any) {
-  const tools: any[] = [];
+function extractMcpTools(source: string): string[] {
+  const tools: string[] = [];
   if (!source) return tools;
   for (const m of source.matchAll(/server\.tool\(\s*'([^']+)'/g)) tools.push(m[1]);
   for (const m of source.matchAll(/server\.tool\(\s*"([^"]+)"/g)) tools.push(m[1]);
   return uniq(tools).sort();
 }
 
-function extractMcpResources(source: any) {
-  const resources: any[] = [];
+function extractMcpResources(source: string): string[] {
+  const resources: string[] = [];
   if (!source) return resources;
   // server.registerResource('name','hydra://uri', ...)
   for (const m of source.matchAll(/server\.registerResource\(\s*'[^']+'\s*,\s*'([^']+)'/g))
@@ -115,8 +150,8 @@ function extractMcpResources(source: any) {
   return uniq(resources).sort();
 }
 
-function extractOperatorCommands(source: any) {
-  const cmds: any[] = [];
+function extractOperatorCommands(source: string): string[] {
+  const cmds: string[] = [];
   if (!source) return cmds;
 
   // Best-effort: parse KNOWN_COMMANDS array literals
@@ -129,12 +164,12 @@ function extractOperatorCommands(source: any) {
   return uniq(cmds).sort();
 }
 
-export function buildSelfIndex(rootDir = HYDRA_ROOT) {
+export function buildSelfIndex(rootDir = HYDRA_ROOT): SelfIndex {
   const libDir = path.join(rootDir, 'lib');
   const codeCtx = loadCodebaseContext();
 
-  const mjsFiles = walkFiles(libDir, (f: any) => f.endsWith('.mjs'));
-  const moduleExports = [];
+  const mjsFiles = walkFiles(libDir, (f) => f.endsWith('.mjs'));
+  const moduleExports: Array<{ file: string; exports: string[] }> = [];
   for (const abs of mjsFiles) {
     const rel = path.relative(rootDir, abs).replace(/\\/g, '/');
     const src = readFileSafe(abs);
@@ -152,13 +187,13 @@ export function buildSelfIndex(rootDir = HYDRA_ROOT) {
   ]).sort();
 
   const mcpSrc = readFileSafe(path.join(libDir, 'hydra-mcp-server.ts'));
-  const mcp = {
+  const mcp: McpInfo = {
     tools: extractMcpTools(mcpSrc),
     resources: extractMcpResources(mcpSrc),
   };
 
   const operatorSrc = readFileSafe(path.join(libDir, 'hydra-operator.mjs'));
-  const operator = {
+  const operator: OperatorInfo = {
     commands: extractOperatorCommands(operatorSrc),
   };
 
@@ -170,12 +205,13 @@ export function buildSelfIndex(rootDir = HYDRA_ROOT) {
     }
   })();
 
-  const configKeys = cfg && typeof cfg === 'object' ? Object.keys(cfg).sort() : [];
+  const configKeys =
+    cfg && typeof cfg === 'object' ? Object.keys(cfg as Record<string, unknown>).sort() : [];
 
   return {
     generatedAt: new Date().toISOString(),
     hydraRoot: rootDir,
-    moduleIndex: codeCtx?.moduleIndex || [],
+    moduleIndex: codeCtx.moduleIndex,
     moduleExports,
     daemonRoutes,
     mcp,
@@ -184,37 +220,36 @@ export function buildSelfIndex(rootDir = HYDRA_ROOT) {
   };
 }
 
-function truncate(text: any, maxChars: any) {
-  const s = String(text || '');
-  if (s.length <= maxChars) return s;
-  return `${s.slice(0, Math.max(0, maxChars - 15))}... (truncated)`;
+function truncate(text: string, maxChars: number): string {
+  if (text.length <= maxChars) return text;
+  return `${text.slice(0, Math.max(0, maxChars - 15))}... (truncated)`;
 }
 
-export function formatSelfIndexForPrompt(index: any, opts = {}) {
-  const maxChars = Number.isFinite((opts as any).maxChars) ? (opts as any).maxChars : 7000;
-  const idx = index && typeof index === 'object' ? index : {};
+export function formatSelfIndexForPrompt(index: SelfIndex, opts: FormatSelfIndexOpts = {}): string {
+  const maxChars = Number.isFinite(opts.maxChars) ? (opts.maxChars as number) : 7000;
+  const idx = index;
   const header = '=== HYDRA SELF INDEX ===\n';
   const footer = '\n=== END INDEX ===';
 
-  const bodyLines = [];
-  if (idx.daemonRoutes?.length) {
+  const bodyLines: string[] = [];
+  if (idx.daemonRoutes.length > 0) {
     bodyLines.push(
       `Daemon routes: ${idx.daemonRoutes.slice(0, 40).join(', ')}${idx.daemonRoutes.length > 40 ? ', ...' : ''}`,
     );
   }
-  if (idx.mcp?.tools?.length) {
+  if (idx.mcp.tools.length > 0) {
     bodyLines.push(`MCP tools: ${idx.mcp.tools.join(', ')}`);
   }
-  if (idx.mcp?.resources?.length) {
+  if (idx.mcp.resources.length > 0) {
     bodyLines.push(`MCP resources: ${idx.mcp.resources.join(', ')}`);
   }
-  if (idx.operator?.commands?.length) {
+  if (idx.operator.commands.length > 0) {
     bodyLines.push(`Operator commands: ${idx.operator.commands.join(', ')}`);
   }
-  if (idx.moduleIndex?.length) {
+  if (idx.moduleIndex.length > 0) {
     const sample = idx.moduleIndex
       .slice(0, 14)
-      .map((m: any) => `- ${m.file}${m.purpose ? `: ${m.purpose}` : ''}`)
+      .map((m) => `- ${m.file}${m.purpose ? `: ${m.purpose}` : ''}`)
       .join('\n');
     bodyLines.push('Key modules:');
     bodyLines.push(sample);

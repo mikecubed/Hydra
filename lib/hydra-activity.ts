@@ -18,6 +18,202 @@ import { detectAvailableProviders, streamWithFallback } from './hydra-concierge-
 import { isPersonaEnabled, getPersonaConfig } from './hydra-persona.ts';
 import { HYDRA_ROOT } from './hydra-config.ts';
 
+// ── Type Definitions ────────────────────────────────────────────────────────
+
+export type ActivityType = 'dispatch' | 'handoff' | 'completion' | 'error' | 'council_phase';
+
+export interface ActivityEntry {
+  at: string;
+  type: ActivityType;
+  narrative: string;
+  meta: Record<string, unknown> | null;
+}
+
+interface Classification {
+  tier?: string;
+  taskType?: string;
+  confidence?: number;
+}
+
+interface DispatchParams {
+  prompt: string;
+  classification?: Classification | null;
+  mode?: string;
+  route?: string;
+  agent?: string;
+}
+
+interface HandoffParams {
+  from?: string;
+  to?: string;
+  summary?: string;
+  taskTitle?: string;
+}
+
+interface CompletionParams {
+  agent?: string;
+  taskId?: string;
+  title?: string;
+  durationMs?: number;
+  outputSummary?: string;
+  status?: string;
+}
+
+interface WorkerState {
+  _state?: string;
+  status?: string;
+  _currentTask?: { taskId?: string; title?: string };
+  _permissionMode?: string;
+}
+
+interface DaemonHandoff {
+  id?: string;
+  from?: string;
+  to?: string;
+  summary?: string;
+  acknowledged?: boolean;
+  nextStep?: string;
+}
+
+interface DaemonTask {
+  id?: string;
+  taskId?: string;
+  title?: string;
+  status?: string;
+  owner?: string;
+  agent?: string;
+  blockedBy?: string[];
+  durationMs?: number;
+}
+
+interface TasksGrouped {
+  inProgress?: DaemonTask[];
+  todo?: DaemonTask[];
+  blocked?: DaemonTask[];
+  recentlyCompleted?: DaemonTask[];
+}
+
+type TasksData = DaemonTask[] | TasksGrouped;
+
+interface DaemonAgentInfo {
+  currentTask?: { title?: string };
+  pendingHandoffs?: DaemonHandoff[];
+}
+
+interface DaemonSession {
+  startedAt?: string;
+  status?: string;
+  focus?: string;
+}
+
+interface DaemonActivityData {
+  _fromSummary?: boolean;
+  summary?: { openTasks?: DaemonTask[] | TasksGrouped } | null;
+  agents?: Record<string, DaemonAgentInfo>;
+  tasks?: TasksData;
+  handoffs?: { pending?: DaemonHandoff[]; recent?: DaemonHandoff[] };
+  session?: DaemonSession;
+  decisions?: { recent?: unknown[] };
+  counts?: { completed?: number; open?: number; blocked?: number };
+}
+
+interface AgentMetricsShape {
+  callsToday?: number;
+  callsSuccess: number;
+  callsTotal: number;
+  avgDurationMs?: number;
+  lastModel?: string | null;
+}
+
+interface AgentDigestEntry {
+  name: string;
+  status: string;
+  action: string;
+  taskTitle: string | null;
+  model: string | null;
+  phase: string | null;
+  step: string | null;
+  execMode: string | null;
+  elapsedMs: number;
+  currentTask: { title?: string } | null;
+  pendingHandoffs: DaemonHandoff[];
+  worker: {
+    status: string;
+    currentTaskId: string | null;
+    currentTaskTitle: string | null;
+    permissionMode: string | null;
+  } | null;
+  metrics: {
+    callsToday: number;
+    successRate: number;
+    avgDurationMs: number;
+    lastModel: string | null;
+  } | null;
+}
+
+export interface ActivityDigest {
+  generatedAt: string;
+  session: DaemonSession | null;
+  agents: AgentDigestEntry[];
+  activeTasks: DaemonTask[];
+  recentCompletions: DaemonTask[];
+  pendingHandoffs: DaemonHandoff[];
+  recentHandoffs: DaemonHandoff[];
+  recentDecisions: unknown[];
+  lastDispatch: ActivityEntry | null;
+  activityLog: ActivityEntry[];
+  counts: { completed?: number; open?: number; blocked?: number } | null;
+  metrics: { totalCalls: number; totalTokens: number; totalCost: number };
+}
+
+interface DigestOpts {
+  maxChars?: number;
+  focus?: string;
+}
+
+interface BudgetStatus {
+  level?: string;
+  weekly?: { level?: string; percentUsed?: number; message?: string };
+  message?: string;
+}
+
+interface StatsData {
+  uptime?: string;
+  totalCalls?: number;
+  totalTokens?: number;
+}
+
+interface BuildDigestOpts {
+  baseUrl: string;
+  workers?: Map<string, WorkerState>;
+  focus?: string;
+}
+
+interface SitrepOpts {
+  baseUrl?: string;
+  workers?: Map<string, WorkerState>;
+  budgetStatus?: BudgetStatus | null;
+  gitBranch?: string;
+  gitLog?: string;
+  statsData?: StatsData | null;
+}
+
+interface SitrepResult {
+  narrative: string;
+  provider?: string;
+  model?: string;
+  usage?: unknown;
+  fallback: boolean;
+  reason?: string;
+  error?: string;
+}
+
+interface SessionSummaryEntry {
+  timestamp: string;
+  summary: string;
+  activityCount: number;
+}
+
 // ── Situational Query Detection ─────────────────────────────────────────────
 
 const SITUATIONAL_PATTERNS = [
@@ -60,11 +256,11 @@ const SITUATIONAL_PATTERNS = [
 
 /**
  * Detect whether a user message is a situational/status query.
- * @param {string} message
+ * @param message
  * @returns {{ isSituational: boolean, focus: string|null }}
  */
-export function detectSituationalQuery(message: any) {
-  if (!message || typeof message !== 'string') {
+export function detectSituationalQuery(message: unknown): { isSituational: boolean; focus: string | null } {
+  if (typeof message !== 'string') {
     return { isSituational: false, focus: null };
   }
   const trimmed = message.trim();
@@ -94,15 +290,15 @@ export function detectSituationalQuery(message: any) {
  * @param {string} [params.agent]
  * @returns {string}
  */
-export function annotateDispatch({ prompt, classification, mode, route, agent }: any) {
-  const shortPrompt = (prompt || '').slice(0, 120);
-  const tier = classification?.tier || 'unknown';
-  const taskType = classification?.taskType || '';
+export function annotateDispatch({ prompt, classification, mode, route, agent }: DispatchParams): string {
+  const shortPrompt = prompt.slice(0, 120);
+  const tier = classification?.tier ?? 'unknown';
+  const taskType = classification?.taskType ?? '';
   const conf =
-    classification?.confidence == null ? '' : ` (${Math.round(classification.confidence * 100)}%)`;
-  const agentStr = agent ? ` to ${agent}` : '';
-  const routeStr = route ? ` via ${route}` : '';
-  return `Dispatched "${shortPrompt}" - ${tier}/${taskType}${conf}${routeStr}${agentStr} [${mode || 'auto'}]`;
+    classification?.confidence == null ? '' : ` (${String(Math.round(classification.confidence * 100))}%)`;
+  const agentStr = agent != null ? ` to ${agent}` : '';
+  const routeStr = route != null ? ` via ${route}` : '';
+  return `Dispatched "${shortPrompt}" - ${tier}/${taskType}${conf}${routeStr}${agentStr} [${mode ?? 'auto'}]`;
 }
 
 /**
@@ -110,10 +306,10 @@ export function annotateDispatch({ prompt, classification, mode, route, agent }:
  * @param {object} params
  * @returns {string}
  */
-export function annotateHandoff({ from, to, summary, taskTitle }: any) {
-  const shortSummary = (summary || '').slice(0, 100);
-  const task = taskTitle ? ` (task: "${taskTitle}")` : '';
-  return `${from || '?'} handed off to ${to || '?'}: "${shortSummary}"${task}`;
+export function annotateHandoff({ from, to, summary, taskTitle }: HandoffParams): string {
+  const shortSummary = (summary ?? '').slice(0, 100);
+  const task = taskTitle != null ? ` (task: "${taskTitle}")` : '';
+  return `${from ?? '?'} handed off to ${to ?? '?'}: "${shortSummary}"${task}`;
 }
 
 /**
@@ -121,18 +317,18 @@ export function annotateHandoff({ from, to, summary, taskTitle }: any) {
  * @param {object} params
  * @returns {string}
  */
-export function annotateCompletion({ agent, taskId, title, durationMs, outputSummary, status }: any) {
-  const elapsed = durationMs ? `${Math.round(durationMs / 1000)}s` : '';
+export function annotateCompletion({ agent, taskId, title, durationMs, outputSummary, status }: CompletionParams): string {
+  const elapsed = durationMs != null ? `${String(Math.round(durationMs / 1000))}s` : '';
   const statusStr = status === 'error' ? 'FAILED' : 'completed';
-  const summary = outputSummary ? `: "${(outputSummary || '').slice(0, 80)}"` : '';
-  const taskStr = title ? ` "${title}"` : '';
-  return `${agent || '?'} ${statusStr} ${taskId || '?'}${taskStr}${elapsed ? ` in ${elapsed}` : ''}${summary}`;
+  const summary = outputSummary != null ? `: "${outputSummary.slice(0, 80)}"` : '';
+  const taskStr = title != null ? ` "${title}"` : '';
+  return `${agent ?? '?'} ${statusStr} ${taskId ?? '?'}${taskStr}${elapsed.length > 0 ? ` in ${elapsed}` : ''}${summary}`;
 }
 
 // ── In-Memory Activity Ring Buffer ──────────────────────────────────────────
 
 const MAX_ACTIVITY_LOG = 50;
-const activityLog: any[] = [];
+const activityLog: ActivityEntry[] = [];
 
 /**
  * @typedef {object} ActivityEntry
@@ -148,12 +344,12 @@ const activityLog: any[] = [];
  * @param {string} narrative
  * @param {object} [meta]
  */
-export function pushActivity(type: any, narrative: any, meta: any) {
+export function pushActivity(type: ActivityType, narrative: string, meta?: Record<string, unknown> | null): void {
   activityLog.push({
     at: new Date().toISOString(),
     type,
     narrative,
-    meta: meta || null,
+    meta: meta ?? null,
   });
   if (activityLog.length > MAX_ACTIVITY_LOG) {
     activityLog.splice(0, activityLog.length - MAX_ACTIVITY_LOG);
@@ -165,14 +361,14 @@ export function pushActivity(type: any, narrative: any, meta: any) {
  * @param {number} [n=20]
  * @returns {ActivityEntry[]}
  */
-export function getRecentActivity(n = 20) {
+export function getRecentActivity(n = 20): ActivityEntry[] {
   return activityLog.slice(-n);
 }
 
 /**
  * Clear the activity log.
  */
-export function clearActivityLog() {
+export function clearActivityLog(): void {
   activityLog.length = 0;
 }
 
@@ -186,103 +382,110 @@ export function clearActivityLog() {
  * @param {string} [opts.focus] - 'all' | agent name | 'tasks' | 'handoffs' | 'dispatch'
  * @returns {Promise<object>} ActivityDigest
  */
-export async function buildActivityDigest({ baseUrl, workers, focus }: any) {
+export async function buildActivityDigest({ baseUrl, workers, focus }: BuildDigestOpts): Promise<ActivityDigest> {
   // Fetch daemon activity snapshot
-  let daemonActivity = null;
+  let daemonActivity: DaemonActivityData | null = null;
   try {
-    const focusParam = focus && focus !== 'all' ? `?focus=${encodeURIComponent(focus)}` : '';
-    const res = await request('GET', baseUrl, `/activity${focusParam}`);
-    daemonActivity = (res as any)?.activity || null;
+    const focusParam = focus != null && focus !== 'all' ? `?focus=${encodeURIComponent(focus)}` : '';
+    const res = await request<{ activity?: DaemonActivityData }>('GET', baseUrl, `/activity${focusParam}`);
+    daemonActivity = res.activity ?? null;
   } catch {
     // Fall back to summary endpoint
     try {
-      const res = await request('GET', baseUrl, '/summary');
-      daemonActivity = { _fromSummary: true, summary: (res as any)?.summary || null };
+      const res = await request<{ summary?: unknown }>('GET', baseUrl, '/summary');
+      daemonActivity = { _fromSummary: true, summary: res.summary as DaemonActivityData['summary'] ?? null };
     } catch {
       /* daemon unreachable */
     }
   }
 
   // Merge local agent state
-  const agents = ['claude', 'gemini', 'codex'].map((name) => {
+  const agents: AgentDigestEntry[] = ['claude', 'gemini', 'codex'].map((name) => {
     const activity = getAgentActivity(name);
-    const metrics = getAgentMetrics(name);
+    const metrics = getAgentMetrics(name) as AgentMetricsShape | null;
     const execMode = getAgentExecMode(name);
     const worker = workers?.get(name);
 
-    const daemonAgent = daemonActivity?.agents?.[name] || {};
+    const daemonAgent: DaemonAgentInfo = daemonActivity?.agents?.[name] ?? {};
 
     return {
       name,
       status: activity.status,
       action: activity.action,
-      taskTitle: activity.taskTitle || daemonAgent.currentTask?.title || null,
+      taskTitle: activity.taskTitle ?? daemonAgent.currentTask?.title ?? null,
       model: activity.model,
       phase: activity.phase,
       step: activity.step,
       execMode,
-      elapsedMs: activity.updatedAt ? Date.now() - activity.updatedAt : 0,
-      currentTask: daemonAgent.currentTask || null,
-      pendingHandoffs: daemonAgent.pendingHandoffs || [],
-      worker: worker
+      elapsedMs: activity.updatedAt > 0 ? Date.now() - activity.updatedAt : 0,
+      currentTask: daemonAgent.currentTask ?? null,
+      pendingHandoffs: daemonAgent.pendingHandoffs ?? [],
+      worker: worker != null
         ? {
-            status: worker._state || worker.status || 'unknown',
-            currentTaskId: worker._currentTask?.taskId || null,
-            currentTaskTitle: worker._currentTask?.title || null,
-            permissionMode: worker._permissionMode || null,
+            status: (worker._state ?? worker.status) ?? 'unknown',
+            currentTaskId: worker._currentTask?.taskId ?? null,
+            currentTaskTitle: worker._currentTask?.title ?? null,
+            permissionMode: worker._permissionMode ?? null,
           }
         : null,
-      metrics: metrics
+      metrics: metrics != null
         ? {
-            callsToday: metrics.callsToday || 0,
+            callsToday: metrics.callsToday ?? 0,
             successRate:
               metrics.callsTotal > 0
                 ? Math.round((metrics.callsSuccess / metrics.callsTotal) * 100)
                 : 100,
-            avgDurationMs: metrics.avgDurationMs || 0,
-            lastModel: metrics.lastModel || null,
+            avgDurationMs: metrics.avgDurationMs ?? 0,
+            lastModel: metrics.lastModel ?? null,
           }
         : null,
     };
   });
 
   // Extract task info from daemon
-  const tasks = daemonActivity?.tasks || daemonActivity?.summary?.openTasks || [];
-  const activeTasks = Array.isArray(tasks)
-    ? tasks
-    : [...(tasks.inProgress || []), ...(tasks.todo || []), ...(tasks.blocked || [])];
-  const recentCompletions = Array.isArray(tasks?.recentlyCompleted) ? tasks.recentlyCompleted : [];
+  const rawTasks: TasksData = daemonActivity?.tasks ?? daemonActivity?.summary?.openTasks ?? [];
+  const activeTasks: DaemonTask[] = Array.isArray(rawTasks)
+    ? rawTasks
+    : [
+        ...(rawTasks.inProgress ?? []),
+        ...(rawTasks.todo ?? []),
+        ...(rawTasks.blocked ?? []),
+      ];
+  const grouped: TasksGrouped = Array.isArray(rawTasks) ? {} : rawTasks;
+  const recentCompletions: DaemonTask[] = Array.isArray(grouped.recentlyCompleted)
+    ? grouped.recentlyCompleted
+    : [];
 
   // Extract handoff info
-  const handoffs = daemonActivity?.handoffs || {};
-  const pendingHandoffs = handoffs.pending || [];
-  const recentHandoffs = handoffs.recent || [];
+  const handoffs = daemonActivity?.handoffs ?? {};
+  const pendingHandoffs: DaemonHandoff[] = handoffs.pending ?? [];
+  const recentHandoffs: DaemonHandoff[] = handoffs.recent ?? [];
 
   // Session metrics
   const sessionUsage = getSessionUsage();
 
   return {
     generatedAt: new Date().toISOString(),
-    session: daemonActivity?.session || null,
+    session: daemonActivity?.session ?? null,
     agents,
     activeTasks,
     recentCompletions: recentCompletions.slice(0, 5),
     pendingHandoffs,
     recentHandoffs: recentHandoffs.slice(0, 5),
-    recentDecisions: daemonActivity?.decisions?.recent || [],
+    recentDecisions: daemonActivity?.decisions?.recent ?? [],
     lastDispatch: getLastDispatchFromLog(),
     activityLog: getRecentActivity(10),
-    counts: daemonActivity?.counts || null,
+    counts: daemonActivity?.counts ?? null,
     metrics: {
-      totalCalls: sessionUsage.callCount || 0,
-      totalTokens: sessionUsage.totalTokens || 0,
-      totalCost: sessionUsage.costUsd || 0,
+      totalCalls: sessionUsage.callCount,
+      totalTokens: sessionUsage.totalTokens,
+      totalCost: sessionUsage.costUsd,
     },
   };
 }
 
 /** Pull the most recent dispatch entry from the activity log. */
-function getLastDispatchFromLog() {
+function getLastDispatchFromLog(): ActivityEntry | null {
   for (let i = activityLog.length - 1; i >= 0; i--) {
     if (activityLog[i].type === 'dispatch') return activityLog[i];
   }
@@ -299,15 +502,15 @@ function getLastDispatchFromLog() {
  * @param {string} [opts.focus]
  * @returns {string}
  */
-export function formatDigestForPrompt(digest: any, opts: any = {}) {
-  const maxChars = opts.maxChars || 6000;
-  const focus = opts.focus || 'all';
+export function formatDigestForPrompt(digest: ActivityDigest, opts: DigestOpts = {}): string {
+  const maxChars = opts.maxChars ?? 6000;
+  const focus = opts.focus ?? 'all';
   const lines = ['=== ACTIVITY DIGEST ==='];
 
   // Session line
-  if (digest.session) {
+  if (digest.session != null) {
     const s = digest.session;
-    const since = s.startedAt
+    const since = s.startedAt != null
       ? new Date(s.startedAt).toLocaleTimeString('en-US', {
           hour: '2-digit',
           minute: '2-digit',
@@ -315,7 +518,7 @@ export function formatDigestForPrompt(digest: any, opts: any = {}) {
         })
       : '?';
     lines.push(
-      `Session: ${s.status || 'active'} since ${since} | Focus: "${(s.focus || 'general').slice(0, 60)}"`,
+      `Session: ${s.status ?? 'active'} since ${since} | Focus: "${(s.focus ?? 'general').slice(0, 60)}"`,
     );
   }
 
@@ -324,17 +527,19 @@ export function formatDigestForPrompt(digest: any, opts: any = {}) {
     lines.push('');
     lines.push('AGENTS:');
     const agentsToShow =
-      focus === 'all' ? digest.agents : digest.agents.filter((a: any) => a.name === focus);
+      focus === 'all' ? digest.agents : digest.agents.filter((a) => a.name === focus);
     for (const a of agentsToShow) {
-      const execTag = a.execMode === 'worker' ? ' [W]' : a.execMode === 'terminal' ? ' [T]' : '';
+      let execTag = '';
+      if (a.execMode === 'worker') execTag = ' [W]';
+      else if (a.execMode === 'terminal') execTag = ' [T]';
       const elapsed = a.elapsedMs > 5000 ? ` ${formatElapsedCompact(a.elapsedMs)}` : '';
-      const model = a.model ? ` (${a.model})` : '';
-      const taskStr = a.taskTitle ? ` "${a.taskTitle.slice(0, 50)}"` : '';
-      const phase = a.phase ? ` [${a.phase}${a.step ? ` ${a.step}` : ''}]` : '';
+      const model = a.model != null ? ` (${a.model})` : '';
+      const taskStr = a.taskTitle != null ? ` "${a.taskTitle.slice(0, 50)}"` : '';
+      const phase = a.phase != null ? ` [${a.phase}${a.step != null ? ` ${a.step}` : ''}]` : '';
       lines.push(`- ${a.name} [${a.status}]${taskStr}${phase}${model}${execTag}${elapsed}`);
       if (a.pendingHandoffs.length > 0) {
         for (const h of a.pendingHandoffs.slice(0, 2)) {
-          lines.push(`  ^ pending handoff from ${h.from}: "${(h.summary || '').slice(0, 60)}"`);
+          lines.push(`  ^ pending handoff from ${h.from ?? '?'}: "${(h.summary ?? '').slice(0, 60)}"`);
         }
       }
     }
@@ -345,19 +550,19 @@ export function formatDigestForPrompt(digest: any, opts: any = {}) {
     const tasksToShow =
       focus === 'all' || focus === 'tasks'
         ? digest.activeTasks
-        : digest.activeTasks.filter((t: any) => t.owner === focus);
+        : digest.activeTasks.filter((t) => t.owner === focus);
 
     if (tasksToShow.length > 0) {
       lines.push('');
-      lines.push(`TASKS (${tasksToShow.length} active):`);
+      lines.push(`TASKS (${String(tasksToShow.length)} active):`);
       for (const t of tasksToShow.slice(0, 8)) {
-        const blocked = t.blockedBy?.length > 0 ? ` (blocked by ${t.blockedBy.join(', ')})` : '';
+        const blocked = (t.blockedBy?.length ?? 0) > 0 ? ` (blocked by ${(t.blockedBy ?? []).join(', ')})` : '';
         lines.push(
-          `- ${t.id} [${t.status}] ${t.owner || 'unassigned'} - "${(t.title || '').slice(0, 60)}"${blocked}`,
+          `- ${t.id ?? t.taskId ?? '?'} [${t.status ?? '?'}] ${t.owner ?? 'unassigned'} - "${(t.title ?? '').slice(0, 60)}"${blocked}`,
         );
       }
       if (tasksToShow.length > 8) {
-        lines.push(`  ... and ${tasksToShow.length - 8} more`);
+        lines.push(`  ... and ${String(tasksToShow.length - 8)} more`);
       }
     }
   }
@@ -370,16 +575,16 @@ export function formatDigestForPrompt(digest: any, opts: any = {}) {
       if (digest.pendingHandoffs.length > 0) {
         lines.push('  Pending:');
         for (const h of digest.pendingHandoffs.slice(0, 3)) {
-          lines.push(`  - ${h.id}: ${h.from} -> ${h.to} "${(h.summary || '').slice(0, 80)}"`);
-          if (h.nextStep) lines.push(`    Next: ${h.nextStep.slice(0, 80)}`);
+          lines.push(`  - ${h.id ?? '?'}: ${h.from ?? '?'} -> ${h.to ?? '?'} "${(h.summary ?? '').slice(0, 80)}"`);
+          if (h.nextStep != null) lines.push(`    Next: ${h.nextStep.slice(0, 80)}`);
         }
       }
       if (digest.recentHandoffs.length > 0) {
         lines.push('  Recent:');
         for (const h of digest.recentHandoffs.slice(0, 3)) {
-          const acked = h.acknowledged ? ' (ack)' : '';
+          const acked = h.acknowledged === true ? ' (ack)' : '';
           lines.push(
-            `  - ${h.id}: ${h.from} -> ${h.to} "${(h.summary || '').slice(0, 80)}"${acked}`,
+            `  - ${h.id ?? '?'}: ${h.from ?? '?'} -> ${h.to ?? '?'} "${(h.summary ?? '').slice(0, 80)}"${acked}`,
           );
         }
       }
@@ -392,9 +597,9 @@ export function formatDigestForPrompt(digest: any, opts: any = {}) {
       lines.push('');
       lines.push('RECENT COMPLETIONS:');
       for (const c of digest.recentCompletions.slice(0, 3)) {
-        const elapsed = c.durationMs ? ` in ${Math.round(c.durationMs / 1000)}s` : '';
+        const elapsed = c.durationMs != null ? ` in ${String(Math.round(c.durationMs / 1000))}s` : '';
         lines.push(
-          `- ${c.id || c.taskId}: ${c.owner || c.agent || '?'} done${elapsed} - "${(c.title || '').slice(0, 60)}"`,
+          `- ${c.id ?? c.taskId ?? '?'}: ${c.owner ?? c.agent ?? '?'} done${elapsed} - "${(c.title ?? '').slice(0, 60)}"`,
         );
       }
     }
@@ -403,16 +608,16 @@ export function formatDigestForPrompt(digest: any, opts: any = {}) {
   // Last dispatch
   if (focus === 'all' || focus === 'dispatch') {
     const lastDispatch = digest.lastDispatch;
-    if (lastDispatch) {
+    if (lastDispatch != null) {
       lines.push('');
       lines.push('LAST DISPATCH:');
-      lines.push(`- ${lastDispatch.narrative || 'unknown'}`);
+      lines.push(`- ${lastDispatch.narrative.length > 0 ? lastDispatch.narrative : 'unknown'}`);
     }
   }
 
   // Activity log
   if (focus === 'all') {
-    const recentLog = digest.activityLog || [];
+    const recentLog = digest.activityLog;
     if (recentLog.length > 0) {
       lines.push('');
       lines.push('ACTIVITY LOG (recent):');
@@ -428,14 +633,14 @@ export function formatDigestForPrompt(digest: any, opts: any = {}) {
   }
 
   // Session metrics footer
-  if (digest.metrics && (digest.metrics.totalCalls > 0 || digest.metrics.totalTokens > 0)) {
+  if (digest.metrics.totalCalls > 0 || digest.metrics.totalTokens > 0) {
     lines.push('');
     const cost = digest.metrics.totalCost > 0 ? ` | ~$${digest.metrics.totalCost.toFixed(2)}` : '';
     const tokens =
       digest.metrics.totalTokens > 0
-        ? ` | ${Math.round(digest.metrics.totalTokens / 1000)}K tokens`
+        ? ` | ${String(Math.round(digest.metrics.totalTokens / 1000))}K tokens`
         : '';
-    lines.push(`Session: ${digest.metrics.totalCalls} calls${cost}${tokens}`);
+    lines.push(`Session: ${String(digest.metrics.totalCalls)} calls${cost}${tokens}`);
   }
 
   lines.push('=== END DIGEST ===');
@@ -448,16 +653,16 @@ export function formatDigestForPrompt(digest: any, opts: any = {}) {
   return result;
 }
 
-function formatElapsedCompact(ms: any) {
-  if (ms < 60_000) return `${Math.round(ms / 1000)}s`;
-  if (ms < 3_600_000) return `${Math.round(ms / 60_000)}m`;
+function formatElapsedCompact(ms: number): string {
+  if (ms < 60_000) return `${String(Math.round(ms / 1000))}s`;
+  if (ms < 3_600_000) return `${String(Math.round(ms / 60_000))}m`;
   return `${(ms / 3_600_000).toFixed(1)}h`;
 }
 
 // ── Situation Report ─────────────────────────────────────────────────────────
 
 function getSitrepSystemPrompt() {
-  const personaName = isPersonaEnabled() ? getPersonaConfig().name || 'Hydra' : 'Hydra';
+  const personaName = isPersonaEnabled() ? getPersonaConfig().name ?? 'Hydra' : 'Hydra';
   const narrator = isPersonaEnabled()
     ? `You are ${personaName}'s situation awareness perspective, narrating the current state of the system.`
     : 'You are a situation report narrator for Hydra, a multi-agent AI coding orchestration system.';
@@ -495,51 +700,51 @@ Rules:
  * @param {object} [opts.statsData] - Daemon /stats response
  * @returns {Promise<{narrative: string, provider?: string, model?: string, usage?: object, fallback: boolean}>}
  */
-export async function generateSitrep(opts: any = {}) {
+export async function generateSitrep(opts: SitrepOpts = {}): Promise<SitrepResult> {
   const { baseUrl, workers, budgetStatus, gitBranch, gitLog, statsData } = opts;
 
   // Build activity digest (reuse existing function)
-  const digest = await buildActivityDigest({ baseUrl, workers, focus: 'all' });
+  const digest = await buildActivityDigest({ baseUrl: baseUrl ?? '', workers, focus: 'all' });
   const formattedDigest = formatDigestForPrompt(digest, { maxChars: 4000 });
 
   // Extract session focus for prominence
-  const sessionFocus = digest.session?.focus || null;
+  const sessionFocus = digest.session?.focus ?? null;
 
   // Append supplemental data not in the digest
-  const supplemental = [];
-  if (sessionFocus) {
+  const supplemental: string[] = [];
+  if (sessionFocus != null) {
     supplemental.push(`Session focus: ${sessionFocus}`);
   }
-  if (gitBranch) {
+  if (gitBranch != null) {
     supplemental.push(`Git branch: ${gitBranch}`);
   }
-  if (gitLog) {
+  if (gitLog != null) {
     supplemental.push(`Recent commits:\n${gitLog}`);
   }
   // Task progress summary from digest counts
-  if (digest.counts) {
+  if (digest.counts != null) {
     const c = digest.counts;
-    const parts = [];
-    if (c.completed != null) parts.push(`${c.completed} completed`);
-    if (c.open != null) parts.push(`${c.open} open`);
-    if (c.blocked != null) parts.push(`${c.blocked} blocked`);
+    const parts: string[] = [];
+    if (c.completed != null) parts.push(`${String(c.completed)} completed`);
+    if (c.open != null) parts.push(`${String(c.open)} open`);
+    if (c.blocked != null) parts.push(`${String(c.blocked)} blocked`);
     if (parts.length > 0) supplemental.push(`Task progress: ${parts.join(', ')}`);
   }
-  if (budgetStatus) {
-    const lvl = budgetStatus.level || budgetStatus.weekly?.level || 'unknown';
+  if (budgetStatus != null) {
+    const lvl = budgetStatus.level ?? budgetStatus.weekly?.level ?? 'unknown';
     const pct =
       budgetStatus.weekly?.percentUsed == null
         ? ''
-        : `${Math.round(budgetStatus.weekly.percentUsed)}%`;
-    const msg = budgetStatus.message || budgetStatus.weekly?.message || '';
-    supplemental.push(`Budget: ${lvl}${pct ? ` (${pct} used)` : ''}${msg ? ` — ${msg}` : ''}`);
+        : `${String(Math.round(budgetStatus.weekly.percentUsed))}%`;
+    const msg = budgetStatus.message ?? budgetStatus.weekly?.message ?? '';
+    supplemental.push(`Budget: ${lvl}${pct.length > 0 ? ` (${pct} used)` : ''}${msg.length > 0 ? ` — ${msg}` : ''}`);
   }
-  if (statsData) {
-    const parts = [];
-    if (statsData.uptime) parts.push(`uptime ${statsData.uptime}`);
-    if (statsData.totalCalls != null) parts.push(`${statsData.totalCalls} total calls`);
+  if (statsData != null) {
+    const parts: string[] = [];
+    if (statsData.uptime != null) parts.push(`uptime ${statsData.uptime}`);
+    if (statsData.totalCalls != null) parts.push(`${String(statsData.totalCalls)} total calls`);
     if (statsData.totalTokens != null)
-      parts.push(`${Math.round(statsData.totalTokens / 1000)}K tokens`);
+      parts.push(`${String(Math.round(statsData.totalTokens / 1000))}K tokens`);
     if (parts.length > 0) supplemental.push(`Daemon: ${parts.join(', ')}`);
   }
 
@@ -552,9 +757,9 @@ export async function generateSitrep(opts: any = {}) {
   const providers = detectAvailableProviders();
   if (providers.length === 0) {
     // Fallback: prepend session focus + branch as big-picture header
-    const headerParts = [];
-    if (sessionFocus) headerParts.push(`Focus: ${sessionFocus}`);
-    if (gitBranch) headerParts.push(`Branch: ${gitBranch}`);
+    const headerParts: string[] = [];
+    if (sessionFocus != null) headerParts.push(`Focus: ${sessionFocus}`);
+    if (gitBranch != null) headerParts.push(`Branch: ${gitBranch}`);
     const header = headerParts.length > 0 ? `${headerParts.join(' | ')}\n\n` : '';
     return { narrative: header + formattedDigest, fallback: true, reason: 'no_provider' };
   }
@@ -571,15 +776,15 @@ export async function generateSitrep(opts: any = {}) {
       { maxTokens: 2000, reasoningEffort: 'low' },
       () => {},
     );
-    const narrative = ((result as any).fullResponse || '').trim();
-    if (!narrative) {
+    const narrative = (typeof result.fullResponse === 'string' ? result.fullResponse : '').trim();
+    if (narrative.length === 0) {
       // AI returned empty response — fall back to raw digest
       return { narrative: formattedDigest, fallback: true, reason: 'empty_response' };
     }
-    return { narrative, provider: (result as any).provider, model: (result as any).model, usage: (result as any).usage, fallback: false };
-  } catch (err) {
+    return { narrative, provider: result.provider, model: result.model, usage: result.usage, fallback: false };
+  } catch (err: unknown) {
     // All providers failed — fall back to raw digest with error detail
-    return { narrative: formattedDigest, fallback: true, reason: 'api_error', error: (err as Error).message };
+    return { narrative: formattedDigest, fallback: true, reason: 'api_error', error: err instanceof Error ? err.message : String(err) };
   }
 }
 
@@ -593,10 +798,10 @@ const SESSION_SUMMARIES_FILE = path.join(
 );
 const MAX_SESSION_SUMMARIES = 10;
 
-function loadSessionSummaries() {
+function loadSessionSummaries(): SessionSummaryEntry[] {
   try {
     const raw = fs.readFileSync(SESSION_SUMMARIES_FILE, 'utf8');
-    const data = JSON.parse(raw);
+    const data = JSON.parse(raw) as { summaries?: SessionSummaryEntry[] };
     return Array.isArray(data.summaries) ? data.summaries : [];
   } catch {
     return [];
@@ -607,8 +812,8 @@ function loadSessionSummaries() {
  * Persist a session summary for cross-session context.
  * @param {string} summary - Brief session summary text
  */
-export function saveSessionSummary(summary: any) {
-  if (!summary || typeof summary !== 'string') return;
+export function saveSessionSummary(summary: string): void {
+  if (summary.length === 0) return;
   const summaries = loadSessionSummaries();
   summaries.push({
     timestamp: new Date().toISOString(),
@@ -628,7 +833,7 @@ export function saveSessionSummary(summary: any) {
  * Get session context for concierge system prompt injection.
  * @returns {{ recentActivity: ActivityEntry[], priorSessions: Array<{timestamp: string, summary: string}> }}
  */
-export function getSessionContext() {
+export function getSessionContext(): { recentActivity: ActivityEntry[]; priorSessions: SessionSummaryEntry[] } {
   const priorSessions = loadSessionSummaries().slice(-3);
   return {
     recentActivity: getRecentActivity(10),

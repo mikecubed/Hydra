@@ -38,7 +38,7 @@ export interface ActionItem {
   id: string;
   title: string;
   description: string;
-  category: 'fix' | 'cleanup' | 'archive' | 'requeue' | 'delete';
+  category: 'fix' | 'cleanup' | 'archive' | 'requeue' | 'delete' | 'worktree' | 'acknowledge';
   severity: 'critical' | 'high' | 'medium' | 'low';
   source: string;
   agent?: string;

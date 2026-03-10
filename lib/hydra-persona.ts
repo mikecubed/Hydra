@@ -7,106 +7,128 @@
  */
 
 import pc from 'picocolors';
+import type { Interface as ReadlineInterface } from 'node:readline';
 import { loadHydraConfig, saveHydraConfig } from './hydra-config.ts';
+
+interface PersonaPreset {
+  tone?: string;
+  verbosity?: string;
+  formality?: string;
+  humor?: boolean;
+  voice?: string;
+}
+
+interface PersonaConfig {
+  enabled?: boolean;
+  name?: string;
+  tone?: string;
+  verbosity?: string;
+  formality?: string;
+  humor?: boolean;
+  voice?: string;
+  identity?: string;
+  presets?: Record<string, PersonaPreset>;
+  agentFraming?: Record<string, string>;
+  processLabels?: Record<string, string>;
+  [key: string]: unknown;
+}
 
 // ── Cache ────────────────────────────────────────────────────────────────────
 
-let _cache: any = null;
+let _cache: PersonaConfig | null = null;
 
-export function invalidatePersonaCache() {
+export function invalidatePersonaCache(): void {
   _cache = null;
 }
 
-export function getPersonaConfig() {
+export function getPersonaConfig(): PersonaConfig {
   if (_cache) return _cache;
   const cfg = loadHydraConfig();
-  _cache = cfg.persona || {};
+  _cache = (cfg.persona as PersonaConfig | undefined) ?? {};
   return _cache;
 }
 
 // ── Queries ──────────────────────────────────────────────────────────────────
 
-export function isPersonaEnabled() {
+export function isPersonaEnabled(): boolean {
   return getPersonaConfig().enabled !== false;
 }
 
-export function listPresets() {
+export function listPresets(): string[] {
   const p = getPersonaConfig();
-  return Object.keys(p.presets || {});
+  return Object.keys(p.presets ?? {});
 }
 
 // ── Tone Modifiers ───────────────────────────────────────────────────────────
 
-const TONE_MODIFIERS = {
+const TONE_MODIFIERS: Record<string, string> = {
   formal: 'Maintain professional distance and precise terminology.',
   balanced: '',
   casual: 'Be approachable and conversational.',
   terse: 'Be extremely brief. No pleasantries.',
 };
 
-const VERBOSITY_MODIFIERS = {
+const VERBOSITY_MODIFIERS: Record<string, string> = {
   minimal: 'Keep responses under 3 sentences where possible.',
   concise: '',
   detailed: 'Provide thorough explanations with examples when helpful.',
 };
 
-const FORMALITY_MODIFIERS = {
+const FORMALITY_MODIFIERS: Record<string, string> = {
   formal: 'Address the developer formally.',
   neutral: '',
   informal: 'Use casual, relaxed language.',
 };
 
-function buildToneBlock(p: any) {
-  const parts = [];
-  const tone = (TONE_MODIFIERS as any)[p.tone] || '';
-  const verb = (VERBOSITY_MODIFIERS as any)[p.verbosity] || '';
-  const form = (FORMALITY_MODIFIERS as any)[p.formality] || '';
+function buildToneBlock(p: PersonaConfig): string {
+  const parts: string[] = [];
+  const tone = TONE_MODIFIERS[p.tone ?? ''] ?? '';
+  const verb = VERBOSITY_MODIFIERS[p.verbosity ?? ''] ?? '';
+  const form = FORMALITY_MODIFIERS[p.formality ?? ''] ?? '';
   if (tone) parts.push(tone);
   if (verb) parts.push(verb);
   if (form) parts.push(form);
   if (p.humor === false) {
     parts.push('Do not use humor, wit, or personality. Stay purely functional.');
   }
-  return parts.length ? parts.join(' ') : '';
+  return parts.length > 0 ? parts.join(' ') : '';
 }
 
 // ── Prompt Builders ──────────────────────────────────────────────────────────
 
-export function getConciergeIdentity() {
+export function getConciergeIdentity(): string | null {
   const p = getPersonaConfig();
   if (!p.enabled) return null; // caller falls back to hardcoded text
 
-  const voice = p.voice || '';
+  const voice = p.voice ?? '';
   const toneBlock = buildToneBlock(p);
   const voiceLine = [voice, toneBlock].filter(Boolean).join(' ');
 
   return [
-    p.identity || '',
+    p.identity ?? '',
     '',
     voiceLine ? `Communication style: ${voiceLine}` : '',
     '',
     'You are the conversational interface. You answer questions directly, help think through problems, and escalate to your specialized perspectives when hands-on work is needed.',
-  ]
-    .filter((l) => l !== undefined)
-    .join('\n');
+  ].join('\n');
 }
 
-export function getAgentFraming(agentName: any) {
+export function getAgentFraming(agentName: string): string {
   const p = getPersonaConfig();
   const name = (agentName || '').toLowerCase();
-  return p.agentFraming?.[name] || `You are ${p.name || 'Hydra'}'s ${name} perspective.`;
+  return p.agentFraming?.[name] ?? `You are ${p.name ?? 'Hydra'}'s ${name} perspective.`;
 }
 
-export function getProcessLabel(processKey: any) {
+export function getProcessLabel(processKey: string): string {
   const p = getPersonaConfig();
-  return p.processLabels?.[processKey] || processKey;
+  return p.processLabels?.[processKey] ?? processKey;
 }
 
 // ── Preset Application ───────────────────────────────────────────────────────
 
-export function applyPreset(presetName: any) {
+export function applyPreset(presetName: string): boolean {
   const cfg = loadHydraConfig();
-  const persona: any = cfg.persona || {};
+  const persona: PersonaConfig = (cfg.persona as PersonaConfig | undefined) ?? {};
   const preset = persona.presets?.[presetName];
   if (!preset) return false;
 
@@ -125,38 +147,42 @@ export function applyPreset(presetName: any) {
 
 // ── Display ──────────────────────────────────────────────────────────────────
 
-export function showPersonaSummary() {
+export function showPersonaSummary(): void {
   const p = getPersonaConfig();
   const enabled = p.enabled !== false;
-  const label = (v: any) => pc.white(v);
-  const dim = (v: any) => pc.dim(v);
+  const label = (v: string) => pc.white(v);
+  const dim = (v: string) => pc.dim(v);
 
   console.log('');
   console.log(`  ${pc.bold(pc.cyan('Persona Configuration'))}`);
   console.log(`  ${dim('─'.repeat(36))}`);
   console.log(`  Enabled     ${enabled ? pc.green('on') : pc.red('off')}`);
-  console.log(`  Name        ${label(p.name || 'Hydra')}`);
-  console.log(`  Tone        ${label(p.tone || 'balanced')}`);
-  console.log(`  Verbosity   ${label(p.verbosity || 'concise')}`);
-  console.log(`  Formality   ${label(p.formality || 'neutral')}`);
+  console.log(`  Name        ${label(p.name ?? 'Hydra')}`);
+  console.log(`  Tone        ${label(p.tone ?? 'balanced')}`);
+  console.log(`  Verbosity   ${label(p.verbosity ?? 'concise')}`);
+  console.log(`  Formality   ${label(p.formality ?? 'neutral')}`);
   console.log(`  Humor       ${p.humor === false ? pc.dim('off') : pc.green('on')}`);
   console.log('');
 }
 
 // ── Interactive Editor ───────────────────────────────────────────────────────
 
-export async function runPersonaEditor(rl: any) {
+interface PromptChoiceResult {
+  value: unknown;
+  timedOut?: boolean;
+}
+
+export async function runPersonaEditor(rl: ReadlineInterface): Promise<void> {
   const { promptChoice } = await import('./hydra-prompt-choice.ts');
 
   const cfg = loadHydraConfig();
-  const persona: any = cfg.persona || {};
-  const changes = [];
+  const persona: PersonaConfig = (cfg.persona as PersonaConfig | undefined) ?? {};
+  const changes: string[] = [];
 
   showPersonaSummary();
 
   // Main menu loop
-  let done = false;
-  while (!done) {
+  for (;;) {
     const action = (await promptChoice(rl, {
       title: 'Persona Editor',
       choices: [
@@ -169,15 +195,14 @@ export async function runPersonaEditor(rl: any) {
         },
         { label: 'Done', value: 'done' },
       ],
-    })) as any;
+    })) as PromptChoiceResult | null;
 
     if (!action || action.value === 'done' || action.timedOut) {
-      done = true;
       break;
     }
 
     if (action.value === 'preset') {
-      const presetNames = Object.keys(persona.presets || {});
+      const presetNames = Object.keys(persona.presets ?? {});
       if (presetNames.length === 0) {
         console.log(`  ${pc.dim('No presets available.')}`);
         continue;
@@ -185,17 +210,18 @@ export async function runPersonaEditor(rl: any) {
       const pick = (await promptChoice(rl, {
         title: 'Select Preset',
         choices: presetNames.map((n) => ({ label: n, value: n })),
-      })) as any;
-      if (pick?.value) {
-        const preset = persona.presets[pick.value];
+      })) as PromptChoiceResult | null;
+      const pickValue = typeof pick?.value === 'string' ? pick.value : '';
+      if (pickValue) {
+        const preset = persona.presets?.[pickValue];
         if (preset) {
           if (preset.tone) persona.tone = preset.tone;
           if (preset.verbosity) persona.verbosity = preset.verbosity;
           if (preset.formality) persona.formality = preset.formality;
           if (preset.humor !== undefined) persona.humor = preset.humor;
           if (preset.voice) persona.voice = preset.voice;
-          changes.push(`preset → ${pick.value}`);
-          console.log(`  ${pc.green('Applied preset:')} ${pick.value}`);
+          changes.push(`preset → ${pickValue}`);
+          console.log(`  ${pc.green('Applied preset:')} ${pickValue}`);
         }
       }
     }
@@ -204,47 +230,50 @@ export async function runPersonaEditor(rl: any) {
       // Tone
       const tone = (await promptChoice(rl, {
         title: 'Tone',
-        context: `Current: ${persona.tone || 'balanced'}`,
+        context: `Current: ${persona.tone ?? 'balanced'}`,
         choices: [
           { label: 'formal', value: 'formal' },
           { label: 'balanced', value: 'balanced' },
           { label: 'casual', value: 'casual' },
           { label: 'terse', value: 'terse' },
         ],
-      })) as any;
-      if (tone?.value) {
-        persona.tone = tone.value;
-        changes.push(`tone → ${tone.value}`);
+      })) as PromptChoiceResult | null;
+      const toneValue = typeof tone?.value === 'string' ? tone.value : '';
+      if (toneValue) {
+        persona.tone = toneValue;
+        changes.push(`tone → ${toneValue}`);
       }
 
       // Verbosity
       const verb = (await promptChoice(rl, {
         title: 'Verbosity',
-        context: `Current: ${persona.verbosity || 'concise'}`,
+        context: `Current: ${persona.verbosity ?? 'concise'}`,
         choices: [
           { label: 'minimal', value: 'minimal' },
           { label: 'concise', value: 'concise' },
           { label: 'detailed', value: 'detailed' },
         ],
-      })) as any;
-      if (verb?.value) {
-        persona.verbosity = verb.value;
-        changes.push(`verbosity → ${verb.value}`);
+      })) as PromptChoiceResult | null;
+      const verbValue = typeof verb?.value === 'string' ? verb.value : '';
+      if (verbValue) {
+        persona.verbosity = verbValue;
+        changes.push(`verbosity → ${verbValue}`);
       }
 
       // Formality
       const form = (await promptChoice(rl, {
         title: 'Formality',
-        context: `Current: ${persona.formality || 'neutral'}`,
+        context: `Current: ${persona.formality ?? 'neutral'}`,
         choices: [
           { label: 'formal', value: 'formal' },
           { label: 'neutral', value: 'neutral' },
           { label: 'informal', value: 'informal' },
         ],
-      })) as any;
-      if (form?.value) {
-        persona.formality = form.value;
-        changes.push(`formality → ${form.value}`);
+      })) as PromptChoiceResult | null;
+      const formValue = typeof form?.value === 'string' ? form.value : '';
+      if (formValue) {
+        persona.formality = formValue;
+        changes.push(`formality → ${formValue}`);
       }
 
       // Humor
@@ -255,32 +284,33 @@ export async function runPersonaEditor(rl: any) {
           { label: 'On', value: true },
           { label: 'Off', value: false },
         ],
-      })) as any;
-      if (humor?.value !== undefined) {
+      })) as PromptChoiceResult | null;
+      if (humor?.value !== undefined && typeof humor.value === 'boolean') {
         persona.humor = humor.value;
-        changes.push(`humor → ${humor.value}`);
+        changes.push(`humor → ${humor.value ? 'on' : 'off'}`);
       }
     }
 
     if (action.value === 'name') {
       const nameResult = (await promptChoice(rl, {
         title: 'Persona Name',
-        context: `Current: ${persona.name || 'Hydra'}`,
+        context: `Current: ${persona.name ?? 'Hydra'}`,
         freeform: true,
         choices: [
           { label: 'Hydra', value: 'Hydra' },
           { label: 'Custom (type below)', value: '__freeform__' },
         ],
-      } as any)) as any;
-      if (nameResult?.value && nameResult.value !== '__freeform__') {
-        persona.name = nameResult.value;
-        changes.push(`name → ${nameResult.value}`);
+      } as Parameters<typeof promptChoice>[1])) as PromptChoiceResult | null;
+      const nameValue = typeof nameResult?.value === 'string' ? nameResult.value : '';
+      if (nameValue && nameValue !== '__freeform__') {
+        persona.name = nameValue;
+        changes.push(`name → ${nameValue}`);
       }
     }
 
     if (action.value === 'toggle') {
       persona.enabled = persona.enabled === false;
-      changes.push(`enabled → ${persona.enabled}`);
+      changes.push(`enabled → ${String(persona.enabled)}`);
       console.log(`  Persona ${persona.enabled ? pc.green('enabled') : pc.red('disabled')}`);
     }
   }
@@ -291,7 +321,7 @@ export async function runPersonaEditor(rl: any) {
     saveHydraConfig(cfg);
     invalidatePersonaCache();
     console.log(
-      `  ${pc.green('Saved')} ${changes.length} change${changes.length === 1 ? '' : 's'}: ${changes.join(', ')}`,
+      `  ${pc.green('Saved')} ${String(changes.length)} change${changes.length === 1 ? '' : 's'}: ${changes.join(', ')}`,
     );
   } else {
     console.log(`  ${pc.dim('No changes.')}`);

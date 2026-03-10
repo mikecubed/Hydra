@@ -14,38 +14,72 @@ import path from 'node:path';
 
 // ── Types ───────────────────────────────────────────────────────────────────
 
-/**
- * @typedef {object} ResumableItem
- * @property {string} source   - Origin scanner (daemon, evolve, council, branches, suggestions)
- * @property {string} label    - Human-readable short label for picker
- * @property {string} hint     - Additional context line
- * @property {string} value    - Machine-readable dispatch key
- * @property {string} [detail] - Optional extra info
- */
+export interface ResumableItem {
+  source: string;
+  label: string;
+  hint: string;
+  value: string;
+  detail?: string;
+}
+
+interface DaemonTask {
+  id: string;
+  owner: string;
+}
+
+interface DaemonHandoff {
+  from: string;
+  to: string;
+}
+
+interface DaemonStatus {
+  activeSession?: { status: string; pauseReason?: string };
+  staleTasks?: DaemonTask[];
+  pendingHandoffs?: DaemonHandoff[];
+  inProgressTasks?: DaemonTask[];
+}
+
+interface EvolveState {
+  resumable?: boolean;
+  status?: string;
+  completedRounds?: unknown[];
+  maxRounds?: number | string;
+  actionNeeded?: string;
+  sessionId?: string;
+}
+
+interface CouncilData {
+  prompt?: string;
+  phase?: string;
+}
 
 // ── Main Export ─────────────────────────────────────────────────────────────
 
 /**
  * Scan all resumable state sources in parallel.
  *
- * @param {object} opts
- * @param {string} opts.baseUrl      - Daemon base URL (e.g. 'http://localhost:4173')
- * @param {string} opts.projectRoot  - Project root directory
- * @returns {Promise<ResumableItem[]>}
+ * @param opts.baseUrl      - Daemon base URL (e.g. 'http://localhost:4173')
+ * @param opts.projectRoot  - Project root directory
  */
-export async function scanResumableState({ baseUrl, projectRoot }: any) {
+export async function scanResumableState({
+  baseUrl,
+  projectRoot,
+}: {
+  baseUrl: string;
+  projectRoot: string;
+}): Promise<ResumableItem[]> {
   const evolveDir = path.join(projectRoot, 'docs', 'coordination', 'evolve');
   const coordDir = path.join(projectRoot, 'docs', 'coordination');
 
   const results = await Promise.allSettled([
     scanDaemon(baseUrl),
-    scanEvolveSession(evolveDir),
-    scanCouncilCheckpoints(coordDir),
+    Promise.resolve(scanEvolveSession(evolveDir)),
+    Promise.resolve(scanCouncilCheckpoints(coordDir)),
     scanUnmergedBranches(projectRoot),
     scanSuggestions(evolveDir),
   ]);
 
-  const items = [];
+  const items: ResumableItem[] = [];
   for (const r of results) {
     if (r.status === 'fulfilled' && r.value) {
       if (Array.isArray(r.value)) {
@@ -60,12 +94,13 @@ export async function scanResumableState({ baseUrl, projectRoot }: any) {
 
 // ── Individual Scanners ─────────────────────────────────────────────────────
 
-async function scanDaemon(baseUrl: any) {
+async function scanDaemon(baseUrl: string): Promise<ResumableItem[] | null> {
   if (!baseUrl) return null;
   try {
     const { request } = await import('./hydra-utils.ts');
-    const status: any = await request('GET', baseUrl, '/session/status');
-    const items = [];
+    const statusUnknown: unknown = await request('GET', baseUrl, '/session/status');
+    const status = statusUnknown as DaemonStatus;
+    const items: ResumableItem[] = [];
 
     // Paused session
     if (status.activeSession?.status === 'paused') {
@@ -79,34 +114,34 @@ async function scanDaemon(baseUrl: any) {
     }
 
     // Stale tasks
-    const stale = status.staleTasks || [];
+    const stale = status.staleTasks ?? [];
     if (stale.length > 0) {
       items.push({
         source: 'daemon',
-        label: `Reset ${stale.length} stale task${stale.length > 1 ? 's' : ''}`,
-        hint: stale.map((t: any) => `${t.id} (${t.owner})`).join(', '),
+        label: `Reset ${String(stale.length)} stale task${stale.length > 1 ? 's' : ''}`,
+        hint: stale.map((t) => `${t.id} (${t.owner})`).join(', '),
         value: 'daemon:stale',
       });
     }
 
     // Pending handoffs
-    const handoffs = status.pendingHandoffs || [];
+    const handoffs = status.pendingHandoffs ?? [];
     if (handoffs.length > 0) {
       items.push({
         source: 'daemon',
-        label: `Ack ${handoffs.length} pending handoff${handoffs.length > 1 ? 's' : ''}`,
-        hint: handoffs.map((h: any) => `${h.from}→${h.to}`).join(', '),
+        label: `Ack ${String(handoffs.length)} pending handoff${handoffs.length > 1 ? 's' : ''}`,
+        hint: handoffs.map((h) => `${h.from}→${h.to}`).join(', '),
         value: 'daemon:handoffs',
       });
     }
 
     // In-progress tasks (agents may need relaunching)
-    const inProgress = status.inProgressTasks || [];
+    const inProgress = status.inProgressTasks ?? [];
     if (inProgress.length > 0 && stale.length === 0 && handoffs.length === 0) {
       items.push({
         source: 'daemon',
-        label: `Resume ${inProgress.length} in-progress task${inProgress.length > 1 ? 's' : ''}`,
-        hint: inProgress.map((t: any) => `${t.id} (${t.owner})`).join(', '),
+        label: `Resume ${String(inProgress.length)} in-progress task${inProgress.length > 1 ? 's' : ''}`,
+        hint: inProgress.map((t) => `${t.id} (${t.owner})`).join(', '),
         value: 'daemon:resume',
       });
     }
@@ -117,23 +152,23 @@ async function scanDaemon(baseUrl: any) {
   }
 }
 
-async function scanEvolveSession(evolveDir: any) {
+function scanEvolveSession(evolveDir: string): ResumableItem | null {
   try {
     const statePath = path.join(evolveDir, 'EVOLVE_SESSION_STATE.json');
     if (!fs.existsSync(statePath)) return null;
-    const state = JSON.parse(fs.readFileSync(statePath, 'utf8'));
+    const state = JSON.parse(fs.readFileSync(statePath, 'utf8')) as EvolveState;
 
     if (!state.resumable) return null;
     const status = state.status;
     if (status !== 'partial' && status !== 'failed' && status !== 'interrupted') return null;
 
-    const completed = (state.completedRounds || []).length;
-    const max = state.maxRounds || '?';
-    const action = state.actionNeeded || `${status} — can resume`;
+    const completed = (state.completedRounds ?? []).length;
+    const max = state.maxRounds ?? '?';
+    const action = state.actionNeeded ?? `${status} — can resume`;
 
     return {
       source: 'evolve',
-      label: `Resume evolve session (${completed}/${max} rounds)`,
+      label: `Resume evolve session (${String(completed)}/${String(max)} rounds)`,
       hint: action,
       value: 'evolve',
       detail: state.sessionId,
@@ -143,7 +178,7 @@ async function scanEvolveSession(evolveDir: any) {
   }
 }
 
-async function scanCouncilCheckpoints(coordDir: any) {
+function scanCouncilCheckpoints(coordDir: string): ResumableItem[] | null {
   try {
     const councilDir = coordDir;
     if (!fs.existsSync(councilDir)) return null;
@@ -153,15 +188,17 @@ async function scanCouncilCheckpoints(coordDir: any) {
       .filter((f) => /^COUNCIL_CHECKPOINT_.*\.json$/i.test(f));
     if (files.length === 0) return null;
 
-    const items = [];
+    const items: ResumableItem[] = [];
     for (const file of files.slice(0, 3)) {
       try {
-        const data = JSON.parse(fs.readFileSync(path.join(councilDir, file), 'utf8'));
+        const data = JSON.parse(
+          fs.readFileSync(path.join(councilDir, file), 'utf8'),
+        ) as CouncilData;
         const hash = file.replace(/^COUNCIL_CHECKPOINT_/, '').replace(/\.json$/, '');
         items.push({
           source: 'council',
-          label: `Council checkpoint: ${(data.prompt || hash).slice(0, 50)}`,
-          hint: `Phase: ${data.phase || 'unknown'}`,
+          label: `Council checkpoint: ${(data.prompt ?? hash).slice(0, 50)}`,
+          hint: `Phase: ${data.phase ?? 'unknown'}`,
           value: `council:${hash}`,
           detail: file,
         });
@@ -175,20 +212,20 @@ async function scanCouncilCheckpoints(coordDir: any) {
   }
 }
 
-async function scanUnmergedBranches(projectRoot: any) {
+async function scanUnmergedBranches(projectRoot: string): Promise<ResumableItem[] | null> {
   try {
     const { listBranches } = await import('./hydra-shared/git-ops.ts');
-    const items = [];
+    const items: ResumableItem[] = [];
 
     for (const prefix of ['evolve', 'nightly', 'tasks']) {
       const branches = listBranches(projectRoot, prefix);
       if (branches.length > 0) {
         items.push({
           source: 'branches',
-          label: `${branches.length} unmerged ${prefix}/* branch${branches.length > 1 ? 'es' : ''}`,
+          label: `${String(branches.length)} unmerged ${prefix}/* branch${branches.length > 1 ? 'es' : ''}`,
           hint:
             branches.slice(0, 3).join(', ') +
-            (branches.length > 3 ? ` +${branches.length - 3} more` : ''),
+            (branches.length > 3 ? ` +${String(branches.length - 3)} more` : ''),
           value: `branches:${prefix}`,
         });
       }
@@ -200,7 +237,7 @@ async function scanUnmergedBranches(projectRoot: any) {
   }
 }
 
-async function scanSuggestions(evolveDir: any) {
+async function scanSuggestions(evolveDir: string): Promise<ResumableItem | null> {
   try {
     const { loadSuggestions, getPendingSuggestions } =
       await import('./hydra-evolve-suggestions.ts');
@@ -214,7 +251,7 @@ async function scanSuggestions(evolveDir: any) {
       .join('; ');
     return {
       source: 'suggestions',
-      label: `${pending.length} pending evolve suggestion${pending.length > 1 ? 's' : ''}`,
+      label: `${String(pending.length)} pending evolve suggestion${pending.length > 1 ? 's' : ''}`,
       hint: topTitles,
       value: 'suggestions',
     };
