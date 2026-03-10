@@ -29,7 +29,7 @@ import {
   HYDRA_ROOT,
   resolveProject,
 } from './hydra-config.ts';
-import { executeAgent } from './hydra-shared/agent-executor.mjs';
+import { executeAgent } from './hydra-shared/agent-executor.ts';
 import { parseJsonLoose } from './hydra-utils.ts';
 import { promptChoice } from './hydra-prompt-choice.mjs';
 import { sectionHeader, DIM, ACCENT, SUCCESS, WARNING, ERROR } from './hydra-ui.mjs';

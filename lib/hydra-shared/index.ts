@@ -7,7 +7,7 @@ export * from './constants.ts';
 export * from './guardrails.ts';
 export { BudgetTracker } from './budget-tracker.ts';
 export type { Threshold, UnitDelta, BudgetCheckResult, BudgetTrackerOpts, BudgetTrackerData } from './budget-tracker.ts';
-export { executeAgent, executeAgentWithRecovery, diagnoseAgentError } from './agent-executor.mjs';
+export { executeAgent, executeAgentWithRecovery, diagnoseAgentError } from './agent-executor.ts';
 export {
   createRL,
   ask,

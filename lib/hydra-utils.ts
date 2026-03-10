@@ -9,7 +9,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { KNOWN_OWNERS, classifyTask, bestAgentFor, AGENT_NAMES } from './hydra-agents.ts';
-import { executeAgent } from './hydra-shared/agent-executor.mjs';
+import { executeAgent } from './hydra-shared/agent-executor.ts';
 import { spawnSyncCapture } from './hydra-proc.mjs';
 
 // Suppress unused import warning for `os` (kept for backwards-compat consumers)

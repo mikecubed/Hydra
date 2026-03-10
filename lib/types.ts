@@ -3,7 +3,7 @@
  *
  * Derived from actual runtime shapes in:
  *   lib/hydra-agents.ts, lib/hydra-config.ts, lib/hydra-model-profiles.mjs,
- *   lib/orchestrator-daemon.mjs, lib/hydra-shared/agent-executor.mjs
+ *   lib/orchestrator-daemon.mjs, lib/hydra-shared/agent-executor.ts
  *
  * No logic — types only.
  */
@@ -47,6 +47,8 @@ export interface HeadlessOpts {
   outputPath?: string;
   /** Request JSON-formatted output from the agent CLI */
   jsonOutput?: boolean;
+  /** Reasoning effort level for models that support it */
+  reasoningEffort?: string | null;
 }
 
 /** All three methods exist on the invoke object; any may be null for agents that don't support it */

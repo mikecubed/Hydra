@@ -2,8 +2,8 @@
  * Codex JSONL helper utilities.
  *
  * Extracted into a standalone module to break the circular ESM dependency
- * between hydra-agents.ts and agent-executor.mjs — both previously needed
- * these functions but importing them from agent-executor.mjs caused a cycle.
+ * between hydra-agents.ts and agent-executor.ts — both previously needed
+ * these functions but importing them from agent-executor.ts caused a cycle.
  */
 
 interface CodexMessageObj {
