@@ -97,7 +97,7 @@ async function getStreamFn(provider: string): Promise<StreamFn> {
   }
   if (provider === 'google') {
     if (!_streamGoogle) {
-      const mod = await import('./hydra-google.mjs');
+      const mod = await import('./hydra-google.ts');
       _streamGoogle = mod.streamGoogleCompletion;
     }
     return _streamGoogle;

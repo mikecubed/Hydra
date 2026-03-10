@@ -177,7 +177,7 @@ const log = {
 // ── Doctor (lazy, fire-and-forget) ───────────────────────────────────────────
 
 function notifyDoctor(failure: unknown) {
-  void import('./hydra-doctor.mjs')
+  void import('./hydra-doctor.ts')
     .then((doc) => {
       if (doc.isDoctorEnabled()) void doc.diagnose(failure as any);
     })

@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { buildSelfSnapshot, getGitInfo, formatSelfSnapshotForPrompt } from '../lib/hydra-self.mjs';
-import { buildSelfIndex, formatSelfIndexForPrompt } from '../lib/hydra-self-index.mjs';
+import { buildSelfSnapshot, getGitInfo, formatSelfSnapshotForPrompt } from '../lib/hydra-self.ts';
+import { buildSelfIndex, formatSelfIndexForPrompt } from '../lib/hydra-self-index.ts';
 import { HYDRA_ROOT } from '../lib/hydra-config.ts';
 
 test('self: getGitInfo returns null for non-repo dirs', () => {

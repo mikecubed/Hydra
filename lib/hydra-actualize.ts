@@ -56,8 +56,8 @@ import {
 } from './hydra-shared/constants.ts';
 import { scanAllSources, deduplicateTasks, prioritizeTasks, type ScannedTask } from './hydra-tasks-scanner.ts';
 import { runDiscovery } from './hydra-nightly-discovery.ts';
-import { buildSelfSnapshot, formatSelfSnapshotForPrompt } from './hydra-self.mjs';
-import { buildSelfIndex, formatSelfIndexForPrompt } from './hydra-self-index.mjs';
+import { buildSelfSnapshot, formatSelfSnapshotForPrompt } from './hydra-self.ts';
+import { buildSelfIndex, formatSelfIndexForPrompt } from './hydra-self-index.ts';
 
 // ── Logging ─────────────────────────────────────────────────────────────────
 

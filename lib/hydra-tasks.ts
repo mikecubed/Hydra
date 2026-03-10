@@ -77,7 +77,7 @@ let _investigator: InvestigatorLike | null = null;
 async function getInvestigator(): Promise<InvestigatorLike | null> {
   if (_investigator !== null) return _investigator;
   try {
-    const mod = (await import('./hydra-investigator.mjs')) as unknown as InvestigatorLike;
+    const mod = (await import('./hydra-investigator.ts')) as unknown as InvestigatorLike;
     _investigator = mod;
     return mod;
   } catch {
@@ -556,7 +556,7 @@ Read ${instructionFile} for project conventions.`;
 
       if (result.phases['execute']['status'] !== 'done') {
         // Doctor notification for persistent failure
-        import('./hydra-doctor.mjs')
+        import('./hydra-doctor.ts')
           .then((doc) => {
             if (doc.isDoctorEnabled())
               doc.diagnose({

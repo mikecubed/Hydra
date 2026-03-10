@@ -1,4 +1,3 @@
-#!/usr/bin/env node
 /**
  * Multi-agent synchronization CLI for Gemini + Codex + Claude Code.
  *
@@ -9,7 +8,7 @@
 
 import fs from 'node:fs';
 import path from 'node:path';
-import { spawnSyncCapture } from './hydra-proc.mjs';
+import { spawnSyncCapture } from './hydra-proc.ts';
 import { getCurrentBranch as getCurrentBranchGit } from './hydra-shared/git-ops.ts';
 import { resolveProject } from './hydra-config.ts';
 import { getAgentInstructionFile } from './hydra-sync-md.ts';
@@ -63,7 +62,7 @@ function createDefaultState() {
   };
 }
 
-function normalizeState(raw) {
+function normalizeState(raw: any) {
   const defaults = createDefaultState();
   const safe = raw && typeof raw === 'object' ? raw : {};
 
@@ -113,12 +112,12 @@ function readState() {
     const raw = fs.readFileSync(STATE_PATH, 'utf8');
     return normalizeState(JSON.parse(raw));
   } catch (err) {
-    console.error(`Failed to read ${path.relative(ROOT, STATE_PATH)}: ${err.message}`);
+    console.error(`Failed to read ${path.relative(ROOT, STATE_PATH)}: ${(err as Error).message}`);
     process.exit(1);
   }
 }
 
-function writeState(state) {
+function writeState(state: any) {
   const next = normalizeState(state);
   next.updatedAt = nowIso();
   if (next.activeSession?.status === 'active') {
@@ -127,12 +126,12 @@ function writeState(state) {
   fs.writeFileSync(STATE_PATH, `${JSON.stringify(next, null, 2)}\n`, 'utf8');
 }
 
-function appendLog(entry) {
+function appendLog(entry: any) {
   ensureCoordFiles();
   fs.appendFileSync(LOG_PATH, `- ${nowIso()} | ${entry}\n`, 'utf8');
 }
 
-function parseList(value) {
+function parseList(value: any) {
   if (!value) {
     return [];
   }
@@ -142,9 +141,9 @@ function parseList(value) {
     .filter(Boolean);
 }
 
-function parseCli(argv) {
+function parseCli(argv: any) {
   const [command = 'help', ...rest] = argv.slice(2);
-  const options = {};
+  const options: Record<string, any> = {};
   const positionals = [];
 
   for (let i = 0; i < rest.length; i += 1) {
@@ -185,7 +184,7 @@ function parseCli(argv) {
   return { command, options, positionals };
 }
 
-function getOptionValue(options, positionals, key, positionIndex, defaultValue = '') {
+function getOptionValue(options: any, positionals: any, key: any, positionIndex: any, defaultValue = '') {
   if (options[key] !== undefined && options[key] !== true) {
     return String(options[key]);
   }
@@ -195,9 +194,9 @@ function getOptionValue(options, positionals, key, positionIndex, defaultValue =
   return defaultValue;
 }
 
-function getRequiredOption(options, positionals, key, positionIndex, helpHint = '') {
+function getRequiredOption(options: any, positionals: any, key: any, positionIndex: any, helpHint = '') {
   const value = getOptionValue(options, positionals, key, positionIndex, '');
-  if (value === undefined || value === true || value === '') {
+  if (value === undefined || (value as any) === true || value === '') {
     const extra = helpHint ? `\n${helpHint}` : '';
     console.error(`Missing required option --${key}.${extra}`);
     process.exit(1);
@@ -205,7 +204,7 @@ function getRequiredOption(options, positionals, key, positionIndex, helpHint = 
   return String(value);
 }
 
-function nextId(prefix, items) {
+function nextId(prefix: any, items: any) {
   let max = 0;
   const pattern = new RegExp(`^${prefix}(\\d+)$`);
 
@@ -227,7 +226,7 @@ function getCurrentBranch() {
   return getCurrentBranchGit(ROOT) || 'unknown';
 }
 
-function detectCommand(name) {
+function detectCommand(name: any) {
   const cmd = process.platform === 'win32' ? 'where' : 'which';
   const r = spawnSyncCapture(cmd, [name], {
     cwd: ROOT,
@@ -241,7 +240,7 @@ function detectCommand(name) {
   return { installed: true, path: firstPath };
 }
 
-function detectVersion(name, customCommand) {
+function detectVersion(name: any, customCommand: any) {
   const command = customCommand || `${name} --version`;
   // If the command contains quotes or the executable token itself contains a space
   // (e.g. "C:\Program Files\node\node.exe"), fall back to shell parsing.
@@ -291,7 +290,7 @@ Project: ${config.projectName} (${config.projectRoot})
 `);
 }
 
-function ensureStatus(status) {
+function ensureStatus(status: any) {
   if (!STATUS_VALUES.has(status)) {
     console.error(
       `Invalid status "${status}". Use one of: ${Array.from(STATUS_VALUES).join(', ')}`,
@@ -359,7 +358,7 @@ function commandDoctor() {
   }
 }
 
-function commandStart(options, positionals) {
+function commandStart(options: any, positionals: any) {
   const focus = getRequiredOption(
     options,
     positionals,
@@ -396,7 +395,7 @@ function commandStart(options, positionals) {
   console.log(`Participants: ${participants.join(', ') || 'none'}`);
 }
 
-function commandTaskAdd(options, positionals) {
+function commandTaskAdd(options: any, positionals: any) {
   const title = getRequiredOption(options, positionals, 'title', 0);
   const owner = getOptionValue(options, positionals, 'owner', 1, 'unassigned');
   const status = getOptionValue(options, positionals, 'status', 2, 'todo');
@@ -422,10 +421,10 @@ function commandTaskAdd(options, positionals) {
   console.log(`Added ${task.id}: ${task.title}`);
 }
 
-function commandTaskUpdate(options, positionals) {
+function commandTaskUpdate(options: any, positionals: any) {
   const id = getRequiredOption(options, positionals, 'id', 0);
   const state = readState();
-  const task = state.tasks.find((item) => item.id === id);
+  const task = state.tasks.find((item: any) => item.id === id);
 
   if (!task) {
     console.error(`Task ${id} not found.`);
@@ -493,7 +492,7 @@ function commandTaskUpdate(options, positionals) {
   console.log(`Updated ${task.id}`);
 }
 
-function commandDecisionAdd(options, positionals) {
+function commandDecisionAdd(options: any, positionals: any) {
   const title = getRequiredOption(options, positionals, 'title', 0);
   const owner = getOptionValue(options, positionals, 'owner', 1, 'human');
   const rationale = getOptionValue(options, positionals, 'rationale', 2, '');
@@ -516,7 +515,7 @@ function commandDecisionAdd(options, positionals) {
   console.log(`Recorded ${decision.id}`);
 }
 
-function commandBlockerAdd(options, positionals) {
+function commandBlockerAdd(options: any, positionals: any) {
   const title = getRequiredOption(options, positionals, 'title', 0);
   const owner = getOptionValue(options, positionals, 'owner', 1, 'human');
   const nextStep = getOptionValue(options, positionals, 'next-step', 2, '');
@@ -538,7 +537,7 @@ function commandBlockerAdd(options, positionals) {
   console.log(`Recorded ${blocker.id}`);
 }
 
-function commandHandoff(options, positionals) {
+function commandHandoff(options: any, positionals: any) {
   const from = getRequiredOption(options, positionals, 'from', 0);
   const to = getRequiredOption(options, positionals, 'to', 1);
   const summary = getRequiredOption(options, positionals, 'summary', 2);
@@ -565,14 +564,14 @@ function commandHandoff(options, positionals) {
   console.log(`Recorded ${handoff.id}`);
 }
 
-function formatTask(task) {
+function formatTask(task: any) {
   return `${task.id} [${task.status}] owner=${task.owner} :: ${task.title}`;
 }
 
 function commandSummary() {
   const state = readState();
-  const openTasks = state.tasks.filter((task) => !['done', 'cancelled'].includes(task.status));
-  const activeBlockers = state.blockers.filter((blocker) => blocker.status !== 'resolved');
+  const openTasks = state.tasks.filter((task: any) => !['done', 'cancelled'].includes(task.status));
+  const activeBlockers = state.blockers.filter((blocker: any) => blocker.status !== 'resolved');
   const recentDecisions = state.decisions.slice(-3);
   const recentHandoff = state.handoffs.at(-1);
 
@@ -635,19 +634,19 @@ function commandSummary() {
   }
 }
 
-function buildPrompt(agent, state) {
+function buildPrompt(agent: any, state: any) {
   const labelByAgent = {
     codex: 'Codex',
     claude: 'Claude Code',
     gemini: 'Gemini Pro',
     generic: 'AI Assistant',
   };
-  const agentLabel = labelByAgent[agent] || labelByAgent.generic;
+  const agentLabel = (labelByAgent as any)[agent] || labelByAgent.generic;
 
   const openTasks = state.tasks
-    .filter((task) => !['done', 'cancelled'].includes(task.status))
+    .filter((task: any) => !['done', 'cancelled'].includes(task.status))
     .slice(0, 8)
-    .map((task) => `- ${formatTask(task)}`)
+    .map((task: any) => `- ${formatTask(task)}`)
     .join('\n');
 
   const instructionFile = getAgentInstructionFile(agent, ROOT);
@@ -675,7 +674,7 @@ function buildPrompt(agent, state) {
   ].join('\n');
 }
 
-function commandPrompt(options, positionals) {
+function commandPrompt(options: any, positionals: any) {
   const agent = String(getOptionValue(options, positionals, 'agent', 0, 'generic')).toLowerCase();
   const state = readState();
   console.log(buildPrompt(agent, state));

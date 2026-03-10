@@ -1,4 +1,3 @@
-#!/usr/bin/env node
 /**
  * Hydra Self Index — lightweight code index for self-awareness.
  *
@@ -13,7 +12,7 @@ import path from 'node:path';
 import { HYDRA_ROOT, loadHydraConfig } from './hydra-config.ts';
 import { loadCodebaseContext } from './hydra-codebase-context.ts';
 
-function readFileSafe(filePath) {
+function readFileSafe(filePath: any) {
   try {
     return fs.readFileSync(filePath, 'utf8');
   } catch {
@@ -21,7 +20,7 @@ function readFileSafe(filePath) {
   }
 }
 
-function walkFiles(rootDir, filterFn) {
+function walkFiles(rootDir: any, filterFn: any) {
   const out = [];
   const stack = [rootDir];
   while (stack.length > 0) {
@@ -51,12 +50,12 @@ function walkFiles(rootDir, filterFn) {
   return out;
 }
 
-function uniq(arr) {
+function uniq(arr: any) {
   return [...new Set(arr.filter(Boolean))];
 }
 
-function extractExports(source) {
-  const names = [];
+function extractExports(source: any) {
+  const names: any[] = [];
   if (!source) return names;
 
   // export function foo / export async function foo
@@ -75,18 +74,18 @@ function extractExports(source) {
   for (const m of source.matchAll(/export\s*\{\s*([^}]+)\s*\}/g)) {
     const parts = m[1]
       .split(',')
-      .map((s) => s.trim())
+      .map((s: any) => s.trim())
       .filter(Boolean);
     for (const p of parts) {
-      const [left, right] = p.split(/\s+as\s+/i).map((s) => s.trim());
+      const [left, right] = p.split(/\s+as\s+/i).map((s: any) => s.trim());
       names.push(right || left);
     }
   }
   return uniq(names).sort();
 }
 
-function extractDaemonRoutes(source) {
-  const routes = [];
+function extractDaemonRoutes(source: any) {
+  const routes: any[] = [];
   if (!source) return routes;
   for (const m of source.matchAll(/route\s*===\s*'([^']+)'/g)) routes.push(m[1]);
   for (const m of source.matchAll(/route\s*===\s*"([^"]+)"/g)) routes.push(m[1]);
@@ -97,16 +96,16 @@ function extractDaemonRoutes(source) {
   return uniq(routes).sort();
 }
 
-function extractMcpTools(source) {
-  const tools = [];
+function extractMcpTools(source: any) {
+  const tools: any[] = [];
   if (!source) return tools;
   for (const m of source.matchAll(/server\.tool\(\s*'([^']+)'/g)) tools.push(m[1]);
   for (const m of source.matchAll(/server\.tool\(\s*"([^"]+)"/g)) tools.push(m[1]);
   return uniq(tools).sort();
 }
 
-function extractMcpResources(source) {
-  const resources = [];
+function extractMcpResources(source: any) {
+  const resources: any[] = [];
   if (!source) return resources;
   // server.registerResource('name','hydra://uri', ...)
   for (const m of source.matchAll(/server\.registerResource\(\s*'[^']+'\s*,\s*'([^']+)'/g))
@@ -116,13 +115,13 @@ function extractMcpResources(source) {
   return uniq(resources).sort();
 }
 
-function extractOperatorCommands(source) {
-  const cmds = [];
+function extractOperatorCommands(source: any) {
+  const cmds: any[] = [];
   if (!source) return cmds;
 
   // Best-effort: parse KNOWN_COMMANDS array literals
   const block = source.match(/const\s+KNOWN_COMMANDS\s*=\s*\[([\s\S]*?)\];/m);
-  if (block && block[1]) {
+  if (block?.[1]) {
     for (const m of block[1].matchAll(/'(:[^']+)'/g)) cmds.push(m[1]);
     for (const m of block[1].matchAll(/"(:[^"]+)"/g)) cmds.push(m[1]);
   }
@@ -134,7 +133,7 @@ export function buildSelfIndex(rootDir = HYDRA_ROOT) {
   const libDir = path.join(rootDir, 'lib');
   const codeCtx = loadCodebaseContext();
 
-  const mjsFiles = walkFiles(libDir, (f) => f.endsWith('.mjs'));
+  const mjsFiles = walkFiles(libDir, (f: any) => f.endsWith('.mjs'));
   const moduleExports = [];
   for (const abs of mjsFiles) {
     const rel = path.relative(rootDir, abs).replace(/\\/g, '/');
@@ -185,14 +184,14 @@ export function buildSelfIndex(rootDir = HYDRA_ROOT) {
   };
 }
 
-function truncate(text, maxChars) {
+function truncate(text: any, maxChars: any) {
   const s = String(text || '');
   if (s.length <= maxChars) return s;
   return `${s.slice(0, Math.max(0, maxChars - 15))}... (truncated)`;
 }
 
-export function formatSelfIndexForPrompt(index, opts = {}) {
-  const maxChars = Number.isFinite(opts.maxChars) ? opts.maxChars : 7000;
+export function formatSelfIndexForPrompt(index: any, opts = {}) {
+  const maxChars = Number.isFinite((opts as any).maxChars) ? (opts as any).maxChars : 7000;
   const idx = index && typeof index === 'object' ? index : {};
   const header = '=== HYDRA SELF INDEX ===\n';
   const footer = '\n=== END INDEX ===';
@@ -215,7 +214,7 @@ export function formatSelfIndexForPrompt(index, opts = {}) {
   if (idx.moduleIndex?.length) {
     const sample = idx.moduleIndex
       .slice(0, 14)
-      .map((m) => `- ${m.file}${m.purpose ? `: ${m.purpose}` : ''}`)
+      .map((m: any) => `- ${m.file}${m.purpose ? `: ${m.purpose}` : ''}`)
       .join('\n');
     bodyLines.push('Key modules:');
     bodyLines.push(sample);

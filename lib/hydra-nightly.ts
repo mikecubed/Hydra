@@ -179,7 +179,7 @@ let _investigator: unknown = null;
 async function getInvestigator() {
   if (_investigator) return _investigator;
   try {
-    _investigator = await import('./hydra-investigator.mjs');
+    _investigator = await import('./hydra-investigator.ts');
     return _investigator;
   } catch {
     return null;
@@ -791,7 +791,7 @@ async function phaseExecute(tasks: ScannedTask[], projectRoot: string, cfg: any,
 
     // Doctor notification on persistent failure
     if (!agentResult.ok) {
-      import('./hydra-doctor.mjs')
+      import('./hydra-doctor.ts')
         .then((doc) => {
           if (doc.isDoctorEnabled())
             doc.diagnose({

@@ -11,7 +11,7 @@ import {
   diagnose,
   getDoctorStats,
   resetDoctor,
-} from '../lib/hydra-doctor.mjs';
+} from '../lib/hydra-doctor.ts';
 
 // ── Helpers ─────────────────────────────────────────────────────────────────
 

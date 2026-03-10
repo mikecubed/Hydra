@@ -53,7 +53,7 @@ describe('hydra-google', () => {
   let streamGoogleCompletion;
 
   beforeEach(async () => {
-    const mod = await import('../lib/hydra-google.mjs');
+    const mod = await import('../lib/hydra-google.ts');
     streamGoogleCompletion = mod.streamGoogleCompletion;
   });
 

@@ -16,8 +16,8 @@ import {
 } from './hydra-concierge-providers.ts';
 import { shortModelName } from './hydra-ui.ts';
 import { COST_PER_1K, estimateCost } from './hydra-provider-usage.ts';
-import { getConciergeIdentity } from './hydra-persona.mjs';
-import { getSessionContext } from './hydra-activity.mjs';
+import { getConciergeIdentity } from './hydra-persona.ts';
+import { getSessionContext } from './hydra-activity.ts';
 
 // Re-export for backward compat (concierge was the original home)
 export { COST_PER_1K };

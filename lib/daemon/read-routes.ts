@@ -1,9 +1,8 @@
-#!/usr/bin/env node
 /**
  * Read-only daemon routes (GET endpoints and SSE stream).
  */
 
-import { buildSelfSnapshot } from '../hydra-self.mjs';
+import { buildSelfSnapshot } from '../hydra-self.ts';
 import type { ReadRouteCtx, ModelSummaryEntry, TaskEntry, HandoffEntry, BlockerEntry, DecisionEntry, ChildSessionEntry } from '../types.ts';
 
 type EventEntry = { seq: number; at: string; type: string; category?: string; payload?: unknown };
@@ -49,7 +48,7 @@ export async function handleReadRoute(ctx: ReadRouteCtx): Promise<boolean> {
     try {
       const summary = getModelSummary();
       models = Object.fromEntries(
-        Object.entries(summary).map(([name, info]) => [name, (info as ModelSummaryEntry).active]),
+        Object.entries(summary).map(([name, info]) => [name, (info).active]),
       );
     } catch {
       // Best effort only.
@@ -115,7 +114,7 @@ export async function handleReadRoute(ctx: ReadRouteCtx): Promise<boolean> {
         ? Object.fromEntries(
             Object.entries(models)
               .filter(([k]) => k !== '_mode')
-              .map(([k, v]) => [k, (v as ModelSummaryEntry)?.active || 'unknown']),
+              .map(([k, v]) => [k, (v)?.active || 'unknown']),
           )
         : null,
     };
@@ -217,7 +216,7 @@ export async function handleReadRoute(ctx: ReadRouteCtx): Promise<boolean> {
           summary: (h.summary || '').slice(0, 200),
           createdAt: h.createdAt,
         }));
-      (agents as Record<string, unknown>)[name] = {
+      (agents)[name] = {
         currentTask: currentTask
           ? {
               id: currentTask.id,
@@ -433,9 +432,9 @@ export async function handleReadRoute(ctx: ReadRouteCtx): Promise<boolean> {
     const agentSuggestions: Record<string, unknown> = {};
     for (const agent of ['gemini', 'codex', 'claude']) {
       try {
-        (agentSuggestions as Record<string, unknown>)[agent] = suggestNext(state, agent);
+        (agentSuggestions)[agent] = suggestNext(state, agent);
       } catch {
-        (agentSuggestions as Record<string, unknown>)[agent] = { action: 'unknown' };
+        (agentSuggestions)[agent] = { action: 'unknown' };
       }
     }
 

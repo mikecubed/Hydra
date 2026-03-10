@@ -16,14 +16,14 @@ import path from 'node:path';
  * @param {string} baseUrl
  * @returns {Promise<import('./hydra-action-pipeline.ts').ActionItem[]>}
  */
-export async function scanArchivableTasks(baseUrl) {
-  const items = [];
+export async function scanArchivableTasks(baseUrl: any) {
+  const items: any[] = [];
   try {
     const { request } = await import('./hydra-utils.ts');
     const status = await request('GET', baseUrl, '/status');
-    if (!status?.tasks) return items;
+    if (!(status as any)?.tasks) return items;
 
-    for (const task of status.tasks) {
+    for (const task of (status as any).tasks) {
       if (task.status === 'done' || task.status === 'cancelled') {
         items.push({
           id: `archive-task-${task.id}`,
@@ -47,17 +47,17 @@ export async function scanArchivableTasks(baseUrl) {
  * @param {string} baseUrl
  * @returns {Promise<import('./hydra-action-pipeline.ts').ActionItem[]>}
  */
-export async function scanOldHandoffs(baseUrl) {
-  const items = [];
+export async function scanOldHandoffs(baseUrl: any) {
+  const items: any[] = [];
   try {
     const { request } = await import('./hydra-utils.ts');
     const status = await request('GET', baseUrl, '/status');
-    if (!status?.handoffs) return items;
+    if (!(status as any)?.handoffs) return items;
 
     const cutoffMs = 30 * 60 * 1000; // 30 minutes
     const now = Date.now();
 
-    for (const handoff of status.handoffs) {
+    for (const handoff of (status as any).handoffs) {
       if (handoff.acknowledged) {
         const age = now - new Date(handoff.ts || handoff.createdAt || 0).getTime();
         if (age > cutoffMs) {
@@ -84,8 +84,8 @@ export async function scanOldHandoffs(baseUrl) {
  * @param {string} projectRoot
  * @returns {Promise<import('./hydra-action-pipeline.ts').ActionItem[]>}
  */
-export async function scanStaleBranches(projectRoot) {
-  const items = [];
+export async function scanStaleBranches(projectRoot: any) {
+  const items: any[] = [];
   try {
     const { listBranches, branchHasCommits } = await import('./hydra-shared/git-ops.ts');
 
@@ -115,17 +115,17 @@ export async function scanStaleBranches(projectRoot) {
  * @param {string} baseUrl
  * @returns {Promise<import('./hydra-action-pipeline.ts').ActionItem[]>}
  */
-export async function scanStaleTasks(baseUrl) {
-  const items = [];
+export async function scanStaleTasks(baseUrl: any) {
+  const items: any[] = [];
   try {
     const { request } = await import('./hydra-utils.ts');
     const status = await request('GET', baseUrl, '/status');
-    if (!status?.tasks) return items;
+    if (!(status as any)?.tasks) return items;
 
     const cutoffMs = 30 * 60 * 1000;
     const now = Date.now();
 
-    for (const task of status.tasks) {
+    for (const task of (status as any).tasks) {
       if (task.status === 'in_progress') {
         const lastUpdate = new Date(
           task.updatedAt || task.claimedAt || task.createdAt || 0,
@@ -159,7 +159,7 @@ export async function scanAbandonedSuggestions() {
   try {
     const { loadSuggestions, getPendingSuggestions } =
       await import('./hydra-evolve-suggestions.ts');
-    const sg = loadSuggestions();
+    const sg = loadSuggestions(undefined as any);
     const pending = getPendingSuggestions(sg);
 
     for (const s of pending) {
@@ -168,7 +168,7 @@ export async function scanAbandonedSuggestions() {
       if (attempts >= maxAttempts) {
         items.push({
           id: `suggestion-${s.id}`,
-          title: `Abandoned suggestion: ${(s.title || s.id).slice(0, 60)}`,
+          title: `Abandoned suggestion: ${(s.title || s.id)!.slice(0, 60)}`,
           description: `${attempts} failed attempts, created ${s.createdAt || 'unknown'}`,
           category: 'cleanup',
           severity: 'low',
@@ -188,8 +188,8 @@ export async function scanAbandonedSuggestions() {
  * @param {string} projectRoot
  * @returns {Promise<import('./hydra-action-pipeline.ts').ActionItem[]>}
  */
-export async function scanOldCheckpoints(projectRoot) {
-  const items = [];
+export async function scanOldCheckpoints(projectRoot: any) {
+  const items: any[] = [];
   try {
     const coordDir = path.join(projectRoot, 'docs', 'coordination');
     if (!fs.existsSync(coordDir)) return items;
@@ -229,8 +229,8 @@ export async function scanOldCheckpoints(projectRoot) {
  * @param {string} projectRoot
  * @returns {Promise<import('./hydra-action-pipeline.ts').ActionItem[]>}
  */
-export async function scanOldArtifacts(projectRoot) {
-  const items = [];
+export async function scanOldArtifacts(projectRoot: any) {
+  const items: any[] = [];
   try {
     const coordDir = path.join(projectRoot, 'docs', 'coordination');
     if (!fs.existsSync(coordDir)) return items;
@@ -290,8 +290,8 @@ export async function scanOldArtifacts(projectRoot) {
  * @param {string} projectRoot
  * @returns {Promise<import('./hydra-action-pipeline.ts').ActionItem[]>}
  */
-export async function scanStaleTaskWorktrees(projectRoot) {
-  const items = [];
+export async function scanStaleTaskWorktrees(projectRoot: any) {
+  const items: any[] = [];
   try {
     const { loadHydraConfig } = await import('./hydra-config.ts');
     const cfg = loadHydraConfig();
@@ -342,7 +342,7 @@ export async function scanStaleTaskWorktrees(projectRoot) {
  * @param {object} opts
  * @returns {Promise<import('./hydra-action-pipeline.ts').ActionItem[]>}
  */
-export async function enrichCleanupWithSitrep(items, opts = {}) {
+export async function enrichCleanupWithSitrep(items: any, _opts: any = {}) {
   // Non-fatal: just return items as-is if enrichment fails
   // Enrichment is less critical for cleanup than for doctor fix
   return items;
@@ -356,7 +356,7 @@ export async function enrichCleanupWithSitrep(items, opts = {}) {
  * @param {object} opts
  * @returns {Promise<import('./hydra-action-pipeline.ts').PipelineResult>}
  */
-export async function executeCleanupAction(item, opts = {}) {
+export async function executeCleanupAction(item: any, opts: any = {}) {
   const startMs = Date.now();
   const { baseUrl, projectRoot } = opts;
 
@@ -387,13 +387,13 @@ export async function executeCleanupAction(item, opts = {}) {
       }
     }
   } catch (err) {
-    return { item, ok: false, error: err.message || String(err), durationMs: Date.now() - startMs };
+    return { item, ok: false, error: (err as Error).message || String(err), durationMs: Date.now() - startMs };
   }
 }
 
 // ── Category Executors ──────────────────────────────────────────────────────
 
-async function executeArchive(item, baseUrl, startMs) {
+async function executeArchive(item: any, baseUrl: any, startMs: any) {
   if (item.source === 'daemon' && item.meta?.taskId) {
     try {
       const { request } = await import('./hydra-utils.ts');
@@ -403,13 +403,13 @@ async function executeArchive(item, baseUrl, startMs) {
       });
       return { item, ok: true, output: 'Task archived', durationMs: Date.now() - startMs };
     } catch (err) {
-      return { item, ok: false, error: err.message, durationMs: Date.now() - startMs };
+      return { item, ok: false, error: (err as Error).message, durationMs: Date.now() - startMs };
     }
   }
   return { item, ok: true, output: 'No action needed', durationMs: Date.now() - startMs };
 }
 
-async function executeDelete(item, projectRoot, startMs) {
+async function executeDelete(item: any, projectRoot: any, startMs: any) {
   // Branch deletion
   if (item.source === 'branches' && item.meta?.branch) {
     try {
@@ -422,7 +422,7 @@ async function executeDelete(item, projectRoot, startMs) {
         durationMs: Date.now() - startMs,
       };
     } catch (err) {
-      return { item, ok: false, error: err.message, durationMs: Date.now() - startMs };
+      return { item, ok: false, error: (err as Error).message, durationMs: Date.now() - startMs };
     }
   }
 
@@ -432,14 +432,14 @@ async function executeDelete(item, projectRoot, startMs) {
       fs.unlinkSync(item.meta.filePath);
       return { item, ok: true, output: 'File deleted', durationMs: Date.now() - startMs };
     } catch (err) {
-      return { item, ok: false, error: err.message, durationMs: Date.now() - startMs };
+      return { item, ok: false, error: (err as Error).message, durationMs: Date.now() - startMs };
     }
   }
 
   return { item, ok: false, error: 'No delete target found', durationMs: Date.now() - startMs };
 }
 
-async function executeRequeue(item, baseUrl, startMs) {
+async function executeRequeue(item: any, baseUrl: any, startMs: any) {
   if (item.meta?.taskId) {
     try {
       const { request } = await import('./hydra-utils.ts');
@@ -449,24 +449,24 @@ async function executeRequeue(item, baseUrl, startMs) {
       });
       return { item, ok: true, output: 'Task requeued', durationMs: Date.now() - startMs };
     } catch (err) {
-      return { item, ok: false, error: err.message, durationMs: Date.now() - startMs };
+      return { item, ok: false, error: (err as Error).message, durationMs: Date.now() - startMs };
     }
   }
   return { item, ok: false, error: 'No task ID for requeue', durationMs: Date.now() - startMs };
 }
 
-async function executeCleanup(item, startMs) {
+async function executeCleanup(item: any, startMs: any) {
   // Suggestion removal
   if (item.source === 'suggestions' && item.meta?.suggestionId) {
     try {
       const { loadSuggestions, saveSuggestions, removeSuggestion } =
         await import('./hydra-evolve-suggestions.ts');
-      const sg = loadSuggestions();
+      const sg = loadSuggestions(undefined as any);
       removeSuggestion(sg, item.meta.suggestionId);
-      saveSuggestions(sg);
+      saveSuggestions(undefined as any, sg);
       return { item, ok: true, output: 'Suggestion removed', durationMs: Date.now() - startMs };
     } catch (err) {
-      return { item, ok: false, error: err.message, durationMs: Date.now() - startMs };
+      return { item, ok: false, error: (err as Error).message, durationMs: Date.now() - startMs };
     }
   }
 
@@ -485,7 +485,7 @@ async function executeCleanup(item, startMs) {
         durationMs: Date.now() - startMs,
       };
     } catch (err) {
-      return { item, ok: false, error: err.message, durationMs: Date.now() - startMs };
+      return { item, ok: false, error: (err as Error).message, durationMs: Date.now() - startMs };
     }
   }
 
@@ -495,14 +495,14 @@ async function executeCleanup(item, startMs) {
       fs.unlinkSync(item.meta.filePath);
       return { item, ok: true, output: 'File removed', durationMs: Date.now() - startMs };
     } catch (err) {
-      return { item, ok: false, error: err.message, durationMs: Date.now() - startMs };
+      return { item, ok: false, error: (err as Error).message, durationMs: Date.now() - startMs };
     }
   }
 
   return { item, ok: true, output: 'No action needed', durationMs: Date.now() - startMs };
 }
 
-async function executeWorktreeCleanup(item, projectRoot, startMs) {
+async function executeWorktreeCleanup(item: any, projectRoot: any, startMs: any) {
   const { worktreePath, branch } = item.meta || {};
   if (!worktreePath) {
     return { item, ok: false, error: 'No worktree path found', durationMs: Date.now() - startMs };
@@ -535,6 +535,6 @@ async function executeWorktreeCleanup(item, projectRoot, startMs) {
       durationMs: Date.now() - startMs,
     };
   } catch (err) {
-    return { item, ok: false, error: err.message, durationMs: Date.now() - startMs };
+    return { item, ok: false, error: (err as Error).message, durationMs: Date.now() - startMs };
   }
 }

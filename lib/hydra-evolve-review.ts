@@ -23,7 +23,7 @@ import path from 'node:path';
 import { resolveProject, loadHydraConfig } from './hydra-config.ts';
 import { parseArgs } from './hydra-utils.ts';
 import { scanBranchViolations } from './hydra-evolve-guardrails.ts';
-import { loadKnowledgeBase, searchEntries, getStats } from './hydra-knowledge.mjs';
+import { loadKnowledgeBase, searchEntries, getStats } from './hydra-knowledge.ts';
 import {
   getCurrentBranch,
   checkoutBranch,

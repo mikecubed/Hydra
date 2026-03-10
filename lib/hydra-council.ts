@@ -50,8 +50,8 @@ import {
 } from './hydra-ui.ts';
 import { executeAgentWithRecovery } from './hydra-shared/agent-executor.ts';
 import { detectRateLimitError, calculateBackoff } from './hydra-model-recovery.ts';
-import { diagnose as notifyDoctor, isDoctorEnabled } from './hydra-doctor.mjs';
-import { isPersonaEnabled, getAgentFraming } from './hydra-persona.mjs';
+import { diagnose as notifyDoctor, isDoctorEnabled } from './hydra-doctor.ts';
+import { isPersonaEnabled, getAgentFraming } from './hydra-persona.ts';
 import pc from 'picocolors';
 
 const config = resolveProject();

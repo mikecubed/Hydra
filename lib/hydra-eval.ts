@@ -1,4 +1,3 @@
-#!/usr/bin/env node
 /**
  * Hydra Eval Harness — Routing accuracy evaluation against golden corpora.
  *
@@ -24,7 +23,7 @@ const EVAL_DIR = path.join(HYDRA_ROOT, 'docs', 'coordination', 'eval');
  * @param {string[]} paths - Paths to corpus JSON files
  * @returns {Array<{prompt: string, expected: object}>}
  */
-export function loadGoldenCorpus(paths) {
+export function loadGoldenCorpus(paths: any) {
   const corpus = [];
   for (const p of paths) {
     const resolved = path.isAbsolute(p) ? p : path.join(HYDRA_ROOT, p);
@@ -37,7 +36,7 @@ export function loadGoldenCorpus(paths) {
         corpus.push(...data);
       }
     } catch (err) {
-      console.error(`Failed to load corpus ${p}: ${err.message}`);
+      console.error(`Failed to load corpus ${p}: ${(err as Error).message}`);
     }
   }
   return corpus;
@@ -48,7 +47,7 @@ export function loadGoldenCorpus(paths) {
  * @param {Array<{prompt: string, expected: object}>} corpus
  * @returns {object} Evaluation results
  */
-export function evaluateRouting(corpus) {
+export function evaluateRouting(corpus: any) {
   let correct = 0;
   const perStrategy = {
     single: { correct: 0, total: 0 },
@@ -73,15 +72,15 @@ export function evaluateRouting(corpus) {
     if (routeMatch) correct++;
 
     // Per-strategy tracking
-    if (perStrategy[expectedRoute]) {
-      perStrategy[expectedRoute].total++;
-      if (routeMatch) perStrategy[expectedRoute].correct++;
+    if ((perStrategy as any)[expectedRoute]) {
+      (perStrategy as any)[expectedRoute].total++;
+      if (routeMatch) (perStrategy as any)[expectedRoute].correct++;
     }
 
     // Per-task-type tracking
-    if (!perTaskType[expectedTaskType]) perTaskType[expectedTaskType] = { correct: 0, total: 0 };
-    perTaskType[expectedTaskType].total++;
-    if (taskTypeMatch) perTaskType[expectedTaskType].correct++;
+    if (!(perTaskType as any)[expectedTaskType]) (perTaskType as any)[expectedTaskType] = { correct: 0, total: 0 };
+    (perTaskType as any)[expectedTaskType].total++;
+    if (taskTypeMatch) (perTaskType as any)[expectedTaskType].correct++;
 
     if (!routeMatch || !taskTypeMatch) {
       mismatches.push({
@@ -106,13 +105,13 @@ export function evaluateRouting(corpus) {
     perStrategy: Object.fromEntries(
       Object.entries(perStrategy).map(([k, v]) => [
         k,
-        { ...v, accuracy: v.total > 0 ? Math.round((v.correct / v.total) * 1000) / 10 : 0 },
+        { ...(v as any), accuracy: (v as any).total > 0 ? Math.round(((v as any).correct / (v as any).total) * 1000) / 10 : 0 },
       ]),
     ),
     perTaskType: Object.fromEntries(
       Object.entries(perTaskType).map(([k, v]) => [
         k,
-        { ...v, accuracy: v.total > 0 ? Math.round((v.correct / v.total) * 1000) / 10 : 0 },
+        { ...(v as any), accuracy: (v as any).total > 0 ? Math.round(((v as any).correct / (v as any).total) * 1000) / 10 : 0 },
       ]),
     ),
     mismatches,
@@ -124,7 +123,7 @@ export function evaluateRouting(corpus) {
  * @param {Array<{prompt: string, expected: object}>} corpus
  * @returns {object}
  */
-export function evaluateAgentSelection(corpus) {
+export function evaluateAgentSelection(corpus: any) {
   let correct = 0;
   const mismatches = [];
 
@@ -144,7 +143,7 @@ export function evaluateAgentSelection(corpus) {
     }
   }
 
-  const withAgent = corpus.filter((e) => e.expected.agent).length;
+  const withAgent = corpus.filter((e: any) => e.expected.agent).length;
   return {
     total: withAgent,
     correct,
@@ -159,7 +158,7 @@ export function evaluateAgentSelection(corpus) {
  * @param {object} [agentResults]
  * @returns {{ jsonPath: string, mdPath: string }}
  */
-export function generateEvalReport(routingResults, agentResults) {
+export function generateEvalReport(routingResults: any, agentResults: any) {
   if (!fs.existsSync(EVAL_DIR)) fs.mkdirSync(EVAL_DIR, { recursive: true });
 
   const timestamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
@@ -190,7 +189,7 @@ export function generateEvalReport(routingResults, agentResults) {
     `|----------|---------|-------|----------|`,
   ];
   for (const [strategy, stats] of Object.entries(routingResults.perStrategy)) {
-    lines.push(`| ${strategy} | ${stats.correct} | ${stats.total} | ${stats.accuracy}% |`);
+    lines.push(`| ${strategy} | ${(stats as any).correct} | ${(stats as any).total} | ${(stats as any).accuracy}% |`);
   }
 
   if (Object.keys(routingResults.perTaskType).length > 0) {
@@ -202,7 +201,7 @@ export function generateEvalReport(routingResults, agentResults) {
       '|------|---------|-------|----------|',
     );
     for (const [type, stats] of Object.entries(routingResults.perTaskType)) {
-      lines.push(`| ${type} | ${stats.correct} | ${stats.total} | ${stats.accuracy}% |`);
+      lines.push(`| ${type} | ${(stats as any).correct} | ${(stats as any).total} | ${(stats as any).accuracy}% |`);
     }
   }
 

@@ -29,8 +29,8 @@ const LOG_PATH = path.join(LOG_DIR, 'DOCTOR_LOG.ndjson');
 // ── Session State ───────────────────────────────────────────────────────────
 
 let _initialized = false;
-let _history = []; // Loaded from log on init
-let _sessionEntries = []; // Timestamps of entries written in this session (for cleanup on reset)
+let _history: any[] = []; // Loaded from log on init
+let _sessionEntries: any[] = []; // Timestamps of entries written in this session (for cleanup on reset)
 let _sessionStats = { total: 0, fixes: 0, tickets: 0, investigations: 0, ignored: 0 };
 
 // ── Config ──────────────────────────────────────────────────────────────────
@@ -131,7 +131,7 @@ export function resetDoctor() {
  * @param {string} [failure.context] - Additional context
  * @returns {Promise<DoctorDiagnosis>}
  */
-export async function diagnose(failure) {
+export async function diagnose(failure: any) {
   if (!_initialized) initDoctor();
 
   const cfg = getDoctorConfig();
@@ -208,7 +208,7 @@ export async function diagnose(failure) {
 
 // ── Triage Logic ────────────────────────────────────────────────────────────
 
-function triage(failure, investigatorDiagnosis, recurring, cfg) {
+function triage(failure: any, investigatorDiagnosis: any, recurring: any, cfg: any) {
   const invDiag = investigatorDiagnosis?.diagnosis;
   let severity, action, explanation, rootCause;
 
@@ -288,7 +288,7 @@ function triage(failure, investigatorDiagnosis, recurring, cfg) {
     action,
     explanation,
     rootCause,
-    followUp: null,
+    followUp: null as any,
     investigatorDiagnosis: investigatorDiagnosis || null,
     recurring,
   };
@@ -296,7 +296,7 @@ function triage(failure, investigatorDiagnosis, recurring, cfg) {
 
 // ── Signature & Recurrence ──────────────────────────────────────────────────
 
-function buildSignature(failure) {
+function buildSignature(failure: any) {
   const agent = failure.agent || 'unknown';
   const phase = failure.phase || 'unknown';
   let errorText = failure.error || '';
@@ -319,7 +319,7 @@ function buildSignature(failure) {
     const stderrClean = failure.stderr.replace(/\[Hydra Telemetry\].*?\n/g, '').trim();
     if (stderrClean) {
       // If it's many lines, take the first non-telemetry line
-      const lines = stderrClean.split('\n').filter((l) => !l.startsWith('[Hydra Telemetry]'));
+      const lines = stderrClean.split('\n').filter((l: any) => !l.startsWith('[Hydra Telemetry]'));
       if (lines.length > 0) {
         const firstLine = lines[0].trim();
         errorText = `${errorText} (${firstLine})`;
@@ -331,7 +331,7 @@ function buildSignature(failure) {
   return `${agent}:${phase}:${errorSnippet}`;
 }
 
-function isRecurring(signature, cfg) {
+function isRecurring(signature: any, cfg: any) {
   const windowMs = cfg.recurringWindowDays * 24 * 60 * 60 * 1000;
   const cutoff = Date.now() - windowMs;
   const matches = _history.filter(
@@ -342,14 +342,14 @@ function isRecurring(signature, cfg) {
 
 // ── Rate Limit Detection (quick filter) ─────────────────────────────────────
 
-function isRateLimitError(failure) {
+function isRateLimitError(failure: any) {
   const text = `${failure.error || ''} ${failure.stderr || ''}`.toLowerCase();
   return /rate.?limit|429|resource.?exhausted|quota.?exhausted|too many requests/i.test(text);
 }
 
 // ── Follow-up Creation ──────────────────────────────────────────────────────
 
-async function createFollowUp(failure, diagnosis, type) {
+async function createFollowUp(failure: any, diagnosis: any, type: any) {
   // Prefer structured error info for the title when available
   const titleDetail =
     failure.errorCategory && failure.errorCategory !== 'unclassified'
@@ -386,7 +386,7 @@ async function createFollowUp(failure, diagnosis, type) {
   return await createSuggestionFollowUp(failure, diagnosis, title, notes);
 }
 
-async function tryCreateDaemonTask(title, notes, preferredAgent) {
+async function tryCreateDaemonTask(title: any, notes: any, preferredAgent: any) {
   try {
     const { request } = await import('./hydra-utils.ts');
     const result = await request('POST', 'http://localhost:4173', '/task/add', {
@@ -395,17 +395,17 @@ async function tryCreateDaemonTask(title, notes, preferredAgent) {
       preferredAgent,
       source: 'doctor',
     });
-    return result && !result.error;
+    return result && !(result as any).error;
   } catch {
     return false;
   }
 }
 
-async function createSuggestionFollowUp(failure, diagnosis, title, notes) {
+async function createSuggestionFollowUp(failure: any, diagnosis: any, title: any, notes: any) {
   try {
     const { loadSuggestions, saveSuggestions, addSuggestion } =
       await import('./hydra-evolve-suggestions.ts');
-    const sg = loadSuggestions();
+    const sg = loadSuggestions(undefined as any);
     const entry = addSuggestion(sg, {
       title,
       description: notes,
@@ -413,7 +413,7 @@ async function createSuggestionFollowUp(failure, diagnosis, title, notes) {
       area: failure.pipeline || 'general',
     });
     if (entry) {
-      saveSuggestions(sg);
+      saveSuggestions(undefined as any, sg);
       return { type: 'suggestion', id: entry.id, title };
     }
     return { type: 'suggestion_dedup', title };
@@ -424,11 +424,11 @@ async function createSuggestionFollowUp(failure, diagnosis, title, notes) {
 
 // ── Knowledge Base ──────────────────────────────────────────────────────────
 
-async function addKBEntry(failure, diagnosis) {
+async function addKBEntry(failure: any, diagnosis: any) {
   try {
     const { loadKnowledgeBase, saveKnowledgeBase, addEntry } =
-      await import('./hydra-knowledge.mjs');
-    const kb = loadKnowledgeBase();
+      await import('./hydra-knowledge.ts');
+    const kb = loadKnowledgeBase(undefined as any);
     const entry = addEntry(kb, {
       area: failure.pipeline || 'unknown',
       finding: `[Doctor] ${diagnosis.explanation} (root cause: ${diagnosis.rootCause})`,
@@ -436,7 +436,7 @@ async function addKBEntry(failure, diagnosis) {
       attempted: false,
       outcome: null,
     });
-    if (entry) saveKnowledgeBase(kb);
+    if (entry) saveKnowledgeBase(undefined as any, kb);
   } catch {
     // Best effort
   }
@@ -446,7 +446,7 @@ async function addKBEntry(failure, diagnosis) {
 
 async function lazyLoadInvestigator() {
   try {
-    return await import('./hydra-investigator.mjs');
+    return await import('./hydra-investigator.ts');
   } catch {
     return null;
   }
@@ -472,7 +472,7 @@ function loadHistory() {
   }
 }
 
-function appendLog(failure, diagnosis, signature) {
+function appendLog(failure: any, diagnosis: any, signature: any) {
   try {
     if (!fs.existsSync(LOG_DIR)) {
       fs.mkdirSync(LOG_DIR, { recursive: true });
@@ -584,7 +584,7 @@ export async function scanDoctorLog() {
  * Uses structured errorCategory from diagnoseAgentError when available.
  * Also checks the log entry fields that may have been persisted.
  */
-function classifyIssueType(entry) {
+function classifyIssueType(entry: any) {
   const error = (entry.error || '').toLowerCase();
   const rootCause = (entry.rootCause || '').toLowerCase();
 
@@ -634,7 +634,7 @@ function classifyIssueType(entry) {
 /**
  * Select the best agent to fix an issue — avoid using the agent that failed.
  */
-function selectFixAgent(entry) {
+function selectFixAgent(entry: any) {
   const failedAgent = entry.agent || 'codex';
   // Prefer claude for code fixes (architect), fall back to gemini if claude failed
   if (failedAgent === 'claude') return 'gemini';
@@ -646,14 +646,14 @@ function selectFixAgent(entry) {
  * @param {string} baseUrl
  * @returns {Promise<import('./hydra-action-pipeline.ts').ActionItem[]>}
  */
-export async function scanDaemonIssues(baseUrl) {
-  const items = [];
+export async function scanDaemonIssues(baseUrl: any) {
+  const items: any[] = [];
   try {
     const { request } = await import('./hydra-utils.ts');
     const status = await request('GET', baseUrl, '/status');
-    if (!status?.tasks) return items;
+    if (!(status as any)?.tasks) return items;
 
-    for (const task of status.tasks) {
+    for (const task of (status as any).tasks) {
       if (task.status === 'blocked' || task.status === 'failed') {
         items.push({
           id: `daemon-task-${task.id}`,
@@ -684,7 +684,7 @@ export async function scanDaemonIssues(baseUrl) {
 export async function scanErrorActivity() {
   const items = [];
   try {
-    const { getRecentActivity } = await import('./hydra-activity.mjs');
+    const { getRecentActivity } = await import('./hydra-activity.ts');
     const activities = getRecentActivity(50);
 
     for (const act of activities) {
@@ -714,12 +714,12 @@ export async function scanErrorActivity() {
  * @param {string} cliContext - Recent CLI output
  * @returns {Promise<import('./hydra-action-pipeline.ts').ActionItem[]>}
  */
-export async function enrichWithDiagnosis(items, cliContext) {
+export async function enrichWithDiagnosis(items: any, cliContext: any) {
   try {
     const { streamWithFallback } = await import('./hydra-concierge-providers.ts');
 
     const itemSummary = items
-      .map((item, i) => `${i + 1}. [${item.severity}] ${item.title} (source: ${item.source})`)
+      .map((item: any, i: any) => `${i + 1}. [${item.severity}] ${item.title} (source: ${item.source})`)
       .join('\n');
 
     const prompt = `You are a DevOps diagnostic assistant. Analyze these issues found in the Hydra orchestration system and the recent CLI output.
@@ -805,7 +805,7 @@ Respond as JSON:
  * @param {object} opts
  * @returns {Promise<import('./hydra-action-pipeline.ts').PipelineResult>}
  */
-export async function executeFixAction(item, opts = {}) {
+export async function executeFixAction(item: any, opts = {}) {
   const startMs = Date.now();
   const issueType = item.meta?.issueType || 'code';
 
@@ -841,11 +841,11 @@ export async function executeFixAction(item, opts = {}) {
     const { executeAgentWithRecovery } = await import('./hydra-shared/agent-executor.ts');
 
     const result = await executeAgentWithRecovery(agent, prompt, {
-      cwd: opts.projectRoot || process.cwd(),
+      cwd: (opts as any).projectRoot || process.cwd(),
       timeoutMs: 5 * 60 * 1000,
     });
 
-    const ok = result.ok !== false && !result.error;
+    const ok = result.ok && !result.error;
 
     // Do NOT call diagnose() here — prevents feedback loop
 
@@ -860,7 +860,7 @@ export async function executeFixAction(item, opts = {}) {
     return {
       item,
       ok: false,
-      error: err.message || String(err),
+      error: (err as any).message || String(err),
       durationMs: Date.now() - startMs,
     };
   }
@@ -869,7 +869,7 @@ export async function executeFixAction(item, opts = {}) {
 /**
  * Remove log entries matching a signature (used when acknowledging transient issues).
  */
-function clearLogEntriesBySignature(signature) {
+function clearLogEntriesBySignature(signature: any) {
   if (!signature) return;
   try {
     if (!fs.existsSync(LOG_PATH)) return;
@@ -893,7 +893,7 @@ function clearLogEntriesBySignature(signature) {
 /**
  * Build a human-readable config suggestion for config-type issues.
  */
-function buildConfigSuggestion(entry) {
+function buildConfigSuggestion(entry: any) {
   const rootCause = entry.rootCause || '';
   const parts = [`Config issue detected: ${entry.explanation || rootCause}`];
 
@@ -910,7 +910,7 @@ function buildConfigSuggestion(entry) {
 
 // ── Fix Prompt Builder ──────────────────────────────────────────────────────
 
-function buildFixPrompt(entry) {
+function buildFixPrompt(entry: any) {
   const parts = [
     `Fix the following issue in the Hydra orchestration system:`,
     '',

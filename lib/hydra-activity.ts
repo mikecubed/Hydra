@@ -1,4 +1,3 @@
-#!/usr/bin/env node
 /**
  * Hydra Activity Digest — Real-time activity summarization for the concierge.
  *
@@ -16,7 +15,7 @@ import { getAgentActivity, getAgentExecMode } from './hydra-statusbar.ts';
 import { getSessionUsage, getAgentMetrics } from './hydra-metrics.ts';
 import { request } from './hydra-utils.ts';
 import { detectAvailableProviders, streamWithFallback } from './hydra-concierge-providers.ts';
-import { isPersonaEnabled, getPersonaConfig } from './hydra-persona.mjs';
+import { isPersonaEnabled, getPersonaConfig } from './hydra-persona.ts';
 import { HYDRA_ROOT } from './hydra-config.ts';
 
 // ── Situational Query Detection ─────────────────────────────────────────────
@@ -64,7 +63,7 @@ const SITUATIONAL_PATTERNS = [
  * @param {string} message
  * @returns {{ isSituational: boolean, focus: string|null }}
  */
-export function detectSituationalQuery(message) {
+export function detectSituationalQuery(message: any) {
   if (!message || typeof message !== 'string') {
     return { isSituational: false, focus: null };
   }
@@ -95,7 +94,7 @@ export function detectSituationalQuery(message) {
  * @param {string} [params.agent]
  * @returns {string}
  */
-export function annotateDispatch({ prompt, classification, mode, route, agent }) {
+export function annotateDispatch({ prompt, classification, mode, route, agent }: any) {
   const shortPrompt = (prompt || '').slice(0, 120);
   const tier = classification?.tier || 'unknown';
   const taskType = classification?.taskType || '';
@@ -111,7 +110,7 @@ export function annotateDispatch({ prompt, classification, mode, route, agent })
  * @param {object} params
  * @returns {string}
  */
-export function annotateHandoff({ from, to, summary, taskTitle }) {
+export function annotateHandoff({ from, to, summary, taskTitle }: any) {
   const shortSummary = (summary || '').slice(0, 100);
   const task = taskTitle ? ` (task: "${taskTitle}")` : '';
   return `${from || '?'} handed off to ${to || '?'}: "${shortSummary}"${task}`;
@@ -122,7 +121,7 @@ export function annotateHandoff({ from, to, summary, taskTitle }) {
  * @param {object} params
  * @returns {string}
  */
-export function annotateCompletion({ agent, taskId, title, durationMs, outputSummary, status }) {
+export function annotateCompletion({ agent, taskId, title, durationMs, outputSummary, status }: any) {
   const elapsed = durationMs ? `${Math.round(durationMs / 1000)}s` : '';
   const statusStr = status === 'error' ? 'FAILED' : 'completed';
   const summary = outputSummary ? `: "${(outputSummary || '').slice(0, 80)}"` : '';
@@ -133,7 +132,7 @@ export function annotateCompletion({ agent, taskId, title, durationMs, outputSum
 // ── In-Memory Activity Ring Buffer ──────────────────────────────────────────
 
 const MAX_ACTIVITY_LOG = 50;
-const activityLog = [];
+const activityLog: any[] = [];
 
 /**
  * @typedef {object} ActivityEntry
@@ -149,7 +148,7 @@ const activityLog = [];
  * @param {string} narrative
  * @param {object} [meta]
  */
-export function pushActivity(type, narrative, meta) {
+export function pushActivity(type: any, narrative: any, meta: any) {
   activityLog.push({
     at: new Date().toISOString(),
     type,
@@ -187,18 +186,18 @@ export function clearActivityLog() {
  * @param {string} [opts.focus] - 'all' | agent name | 'tasks' | 'handoffs' | 'dispatch'
  * @returns {Promise<object>} ActivityDigest
  */
-export async function buildActivityDigest({ baseUrl, workers, focus }) {
+export async function buildActivityDigest({ baseUrl, workers, focus }: any) {
   // Fetch daemon activity snapshot
   let daemonActivity = null;
   try {
     const focusParam = focus && focus !== 'all' ? `?focus=${encodeURIComponent(focus)}` : '';
     const res = await request('GET', baseUrl, `/activity${focusParam}`);
-    daemonActivity = res?.activity || null;
+    daemonActivity = (res as any)?.activity || null;
   } catch {
     // Fall back to summary endpoint
     try {
       const res = await request('GET', baseUrl, '/summary');
-      daemonActivity = { _fromSummary: true, summary: res?.summary || null };
+      daemonActivity = { _fromSummary: true, summary: (res as any)?.summary || null };
     } catch {
       /* daemon unreachable */
     }
@@ -300,7 +299,7 @@ function getLastDispatchFromLog() {
  * @param {string} [opts.focus]
  * @returns {string}
  */
-export function formatDigestForPrompt(digest, opts = {}) {
+export function formatDigestForPrompt(digest: any, opts: any = {}) {
   const maxChars = opts.maxChars || 6000;
   const focus = opts.focus || 'all';
   const lines = ['=== ACTIVITY DIGEST ==='];
@@ -325,7 +324,7 @@ export function formatDigestForPrompt(digest, opts = {}) {
     lines.push('');
     lines.push('AGENTS:');
     const agentsToShow =
-      focus === 'all' ? digest.agents : digest.agents.filter((a) => a.name === focus);
+      focus === 'all' ? digest.agents : digest.agents.filter((a: any) => a.name === focus);
     for (const a of agentsToShow) {
       const execTag = a.execMode === 'worker' ? ' [W]' : a.execMode === 'terminal' ? ' [T]' : '';
       const elapsed = a.elapsedMs > 5000 ? ` ${formatElapsedCompact(a.elapsedMs)}` : '';
@@ -346,7 +345,7 @@ export function formatDigestForPrompt(digest, opts = {}) {
     const tasksToShow =
       focus === 'all' || focus === 'tasks'
         ? digest.activeTasks
-        : digest.activeTasks.filter((t) => t.owner === focus);
+        : digest.activeTasks.filter((t: any) => t.owner === focus);
 
     if (tasksToShow.length > 0) {
       lines.push('');
@@ -449,7 +448,7 @@ export function formatDigestForPrompt(digest, opts = {}) {
   return result;
 }
 
-function formatElapsedCompact(ms) {
+function formatElapsedCompact(ms: any) {
   if (ms < 60_000) return `${Math.round(ms / 1000)}s`;
   if (ms < 3_600_000) return `${Math.round(ms / 60_000)}m`;
   return `${(ms / 3_600_000).toFixed(1)}h`;
@@ -496,7 +495,7 @@ Rules:
  * @param {object} [opts.statsData] - Daemon /stats response
  * @returns {Promise<{narrative: string, provider?: string, model?: string, usage?: object, fallback: boolean}>}
  */
-export async function generateSitrep(opts = {}) {
+export async function generateSitrep(opts: any = {}) {
   const { baseUrl, workers, budgetStatus, gitBranch, gitLog, statsData } = opts;
 
   // Build activity digest (reuse existing function)
@@ -572,21 +571,15 @@ export async function generateSitrep(opts = {}) {
       { maxTokens: 2000, reasoningEffort: 'low' },
       () => {},
     );
-    const narrative = (result.fullResponse || '').trim();
+    const narrative = ((result as any).fullResponse || '').trim();
     if (!narrative) {
       // AI returned empty response — fall back to raw digest
       return { narrative: formattedDigest, fallback: true, reason: 'empty_response' };
     }
-    return {
-      narrative,
-      provider: result.provider,
-      model: result.model,
-      usage: result.usage,
-      fallback: false,
-    };
+    return { narrative, provider: (result as any).provider, model: (result as any).model, usage: (result as any).usage, fallback: false };
   } catch (err) {
     // All providers failed — fall back to raw digest with error detail
-    return { narrative: formattedDigest, fallback: true, reason: 'api_error', error: err.message };
+    return { narrative: formattedDigest, fallback: true, reason: 'api_error', error: (err as Error).message };
   }
 }
 
@@ -614,7 +607,7 @@ function loadSessionSummaries() {
  * Persist a session summary for cross-session context.
  * @param {string} summary - Brief session summary text
  */
-export function saveSessionSummary(summary) {
+export function saveSessionSummary(summary: any) {
   if (!summary || typeof summary !== 'string') return;
   const summaries = loadSessionSummaries();
   summaries.push({

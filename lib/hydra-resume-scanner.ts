@@ -33,7 +33,7 @@ import path from 'node:path';
  * @param {string} opts.projectRoot  - Project root directory
  * @returns {Promise<ResumableItem[]>}
  */
-export async function scanResumableState({ baseUrl, projectRoot }) {
+export async function scanResumableState({ baseUrl, projectRoot }: any) {
   const evolveDir = path.join(projectRoot, 'docs', 'coordination', 'evolve');
   const coordDir = path.join(projectRoot, 'docs', 'coordination');
 
@@ -60,11 +60,11 @@ export async function scanResumableState({ baseUrl, projectRoot }) {
 
 // ── Individual Scanners ─────────────────────────────────────────────────────
 
-async function scanDaemon(baseUrl) {
+async function scanDaemon(baseUrl: any) {
   if (!baseUrl) return null;
   try {
     const { request } = await import('./hydra-utils.ts');
-    const status = await request('GET', baseUrl, '/session/status');
+    const status: any = await request('GET', baseUrl, '/session/status');
     const items = [];
 
     // Paused session
@@ -84,7 +84,7 @@ async function scanDaemon(baseUrl) {
       items.push({
         source: 'daemon',
         label: `Reset ${stale.length} stale task${stale.length > 1 ? 's' : ''}`,
-        hint: stale.map((t) => `${t.id} (${t.owner})`).join(', '),
+        hint: stale.map((t: any) => `${t.id} (${t.owner})`).join(', '),
         value: 'daemon:stale',
       });
     }
@@ -95,7 +95,7 @@ async function scanDaemon(baseUrl) {
       items.push({
         source: 'daemon',
         label: `Ack ${handoffs.length} pending handoff${handoffs.length > 1 ? 's' : ''}`,
-        hint: handoffs.map((h) => `${h.from}→${h.to}`).join(', '),
+        hint: handoffs.map((h: any) => `${h.from}→${h.to}`).join(', '),
         value: 'daemon:handoffs',
       });
     }
@@ -106,7 +106,7 @@ async function scanDaemon(baseUrl) {
       items.push({
         source: 'daemon',
         label: `Resume ${inProgress.length} in-progress task${inProgress.length > 1 ? 's' : ''}`,
-        hint: inProgress.map((t) => `${t.id} (${t.owner})`).join(', '),
+        hint: inProgress.map((t: any) => `${t.id} (${t.owner})`).join(', '),
         value: 'daemon:resume',
       });
     }
@@ -117,7 +117,7 @@ async function scanDaemon(baseUrl) {
   }
 }
 
-async function scanEvolveSession(evolveDir) {
+async function scanEvolveSession(evolveDir: any) {
   try {
     const statePath = path.join(evolveDir, 'EVOLVE_SESSION_STATE.json');
     if (!fs.existsSync(statePath)) return null;
@@ -143,7 +143,7 @@ async function scanEvolveSession(evolveDir) {
   }
 }
 
-async function scanCouncilCheckpoints(coordDir) {
+async function scanCouncilCheckpoints(coordDir: any) {
   try {
     const councilDir = coordDir;
     if (!fs.existsSync(councilDir)) return null;
@@ -175,7 +175,7 @@ async function scanCouncilCheckpoints(coordDir) {
   }
 }
 
-async function scanUnmergedBranches(projectRoot) {
+async function scanUnmergedBranches(projectRoot: any) {
   try {
     const { listBranches } = await import('./hydra-shared/git-ops.ts');
     const items = [];
@@ -200,7 +200,7 @@ async function scanUnmergedBranches(projectRoot) {
   }
 }
 
-async function scanSuggestions(evolveDir) {
+async function scanSuggestions(evolveDir: any) {
   try {
     const { loadSuggestions, getPendingSuggestions } =
       await import('./hydra-evolve-suggestions.ts');

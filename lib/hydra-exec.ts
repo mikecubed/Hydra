@@ -23,7 +23,7 @@ const INTERNAL_MODULE_LOADERS: Record<string, () => Promise<unknown>> = {
   'lib/hydra-nightly-review.mjs': () => import('./hydra-nightly-review.ts'),
   'lib/hydra-evolve.mjs': () => import('./hydra-evolve.ts'),
   'lib/hydra-evolve-review.mjs': () => import('./hydra-evolve-review.ts'),
-  'lib/sync.mjs': () => import('./sync.mjs'),
+  'lib/sync.ts': () => import('./sync.ts'),
   'lib/hydra-setup.ts': () => import('./hydra-setup.ts'),
 };
 

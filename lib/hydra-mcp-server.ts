@@ -26,8 +26,8 @@ import { forgeAgent, listForgedAgents } from './hydra-agent-forge.ts';
 import { loadHydraConfig } from './hydra-config.ts';
 import { getMetricsSummary } from './hydra-metrics.ts';
 import { listAgents } from './hydra-agents.ts';
-import { getRecentActivity } from './hydra-activity.mjs';
-import { buildSelfSnapshot } from './hydra-self.mjs';
+import { getRecentActivity } from './hydra-activity.ts';
+import { buildSelfSnapshot } from './hydra-self.ts';
 import {
   hubPath,
   registerSession as hubRegisterSession,

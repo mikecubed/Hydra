@@ -14,8 +14,8 @@ import { createStreamingPipeline } from './hydra-streaming-middleware.ts';
  * Core Google streaming function — ONLY does the HTTP call + SSE parsing.
  * All cross-cutting concerns (rate limit, retry, usage, etc.) are handled by middleware.
  */
-async function coreStreamGoogle(messages, cfg, onChunk) {
-  const apiKey = process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY;
+async function coreStreamGoogle(messages: any, cfg: any, onChunk: any) {
+  const apiKey = process.env['GEMINI_API_KEY'] || process.env['GOOGLE_API_KEY'];
   if (!apiKey) {
     throw new Error('GEMINI_API_KEY or GOOGLE_API_KEY not set');
   }
@@ -37,7 +37,7 @@ async function coreStreamGoogle(messages, cfg, onChunk) {
     }
   }
 
-  const body = { contents };
+  const body: any = { contents };
 
   if (systemText) {
     body.systemInstruction = { parts: [{ text: systemText }] };
@@ -63,18 +63,18 @@ async function coreStreamGoogle(messages, cfg, onChunk) {
   if (!res.ok) {
     const errText = await res.text().catch(() => '');
     const err = new Error(`Google API error ${res.status}: ${errText.slice(0, 200)}`);
-    err.status = res.status;
+    (err as any).status = res.status;
     // Attach rate limit metadata for callers to handle
     if (res.status === 429 || /RESOURCE_EXHAUSTED|QUOTA_EXHAUSTED/i.test(errText)) {
-      err.isRateLimit = true;
+      (err as any).isRateLimit = true;
       const retryAfter = res.headers?.get?.('retry-after');
-      err.retryAfterMs = retryAfter ? Number.parseInt(retryAfter, 10) * 1000 : null;
+      (err as any).retryAfterMs = retryAfter ? Number.parseInt(retryAfter, 10) * 1000 : null;
     }
     throw err;
   }
 
   // Parse SSE stream
-  const reader = res.body.getReader();
+  const reader = res.body!.getReader();
   const decoder = new TextDecoder();
   let buffer = '';
   let fullResponse = '';
@@ -90,7 +90,7 @@ async function coreStreamGoogle(messages, cfg, onChunk) {
 
     for (const line of lines) {
       const trimmed = line.trim();
-      if (!trimmed || !trimmed.startsWith('data: ')) continue;
+      if (!trimmed?.startsWith('data: ')) continue;
 
       try {
         const data = JSON.parse(trimmed.slice(6));
@@ -136,6 +136,6 @@ const pipelinedStream = createStreamingPipeline('google', coreStreamGoogle);
  * @param {Function} [onChunk] - Called with each streamed text chunk
  * @returns {Promise<{fullResponse: string, usage: {prompt_tokens: number, completion_tokens: number}|null}>}
  */
-export async function streamGoogleCompletion(messages, cfg, onChunk) {
+export async function streamGoogleCompletion(messages: any, cfg: any, onChunk: any) {
   return pipelinedStream(messages, cfg, onChunk);
 }

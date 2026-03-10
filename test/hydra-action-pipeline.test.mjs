@@ -48,7 +48,7 @@ describe('hydra-output-history', () => {
 
 describe('hydra-cleanup', () => {
   it('exports all scanner functions', async () => {
-    const mod = await import('../lib/hydra-cleanup.mjs');
+    const mod = await import('../lib/hydra-cleanup.ts');
     assert.equal(typeof mod.scanArchivableTasks, 'function');
     assert.equal(typeof mod.scanOldHandoffs, 'function');
     assert.equal(typeof mod.scanStaleBranches, 'function');
@@ -61,7 +61,7 @@ describe('hydra-cleanup', () => {
 
   it('scanners return empty arrays when no data', async () => {
     const { scanArchivableTasks, scanOldHandoffs, scanStaleTasks } =
-      await import('../lib/hydra-cleanup.mjs');
+      await import('../lib/hydra-cleanup.ts');
 
     // These call the daemon which isn't running — should return []
     const t = await scanArchivableTasks('http://localhost:99999');
@@ -77,7 +77,7 @@ describe('hydra-cleanup', () => {
 
 describe('hydra-doctor scanners', () => {
   it('exports action pipeline scanner functions', async () => {
-    const mod = await import('../lib/hydra-doctor.mjs');
+    const mod = await import('../lib/hydra-doctor.ts');
     assert.equal(typeof mod.scanDoctorLog, 'function');
     assert.equal(typeof mod.scanDaemonIssues, 'function');
     assert.equal(typeof mod.scanErrorActivity, 'function');
@@ -86,20 +86,20 @@ describe('hydra-doctor scanners', () => {
   });
 
   it('scanDoctorLog returns ActionItem array', async () => {
-    const { scanDoctorLog, resetDoctor } = await import('../lib/hydra-doctor.mjs');
+    const { scanDoctorLog, resetDoctor } = await import('../lib/hydra-doctor.ts');
     resetDoctor();
     const items = await scanDoctorLog();
     assert.ok(Array.isArray(items));
   });
 
   it('scanDaemonIssues returns empty when daemon unavailable', async () => {
-    const { scanDaemonIssues } = await import('../lib/hydra-doctor.mjs');
+    const { scanDaemonIssues } = await import('../lib/hydra-doctor.ts');
     const items = await scanDaemonIssues('http://localhost:99999');
     assert.deepEqual(items, []);
   });
 
   it('scanErrorActivity returns array', async () => {
-    const { scanErrorActivity } = await import('../lib/hydra-doctor.mjs');
+    const { scanErrorActivity } = await import('../lib/hydra-doctor.ts');
     const items = await scanErrorActivity();
     assert.ok(Array.isArray(items));
   });

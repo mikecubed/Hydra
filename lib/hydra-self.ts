@@ -1,4 +1,3 @@
-#!/usr/bin/env node
 /**
  * Hydra Self Snapshot — canonical structured "who/what am I right now?" view.
  *
@@ -18,7 +17,7 @@ import { getModelSummary, listAgents } from './hydra-agents.ts';
 import { getMetricsSummary } from './hydra-metrics.ts';
 import { spawnSyncCapture } from './hydra-proc.ts';
 
-function readJsonSafe(filePath) {
+function readJsonSafe(filePath: any) {
   try {
     const raw = fs.readFileSync(filePath, 'utf8');
     return JSON.parse(raw);
@@ -27,7 +26,7 @@ function readJsonSafe(filePath) {
   }
 }
 
-function safeCall(fn, fallback = null) {
+function safeCall(fn: any, fallback = null) {
   try {
     return fn();
   } catch {
@@ -35,7 +34,7 @@ function safeCall(fn, fallback = null) {
   }
 }
 
-function gitExec(cwd, args) {
+function gitExec(cwd: any, args: any) {
   const r = spawnSyncCapture('git', args, { cwd, encoding: 'utf8', timeout: 5000 });
   if (r.status !== 0) {
     throw new Error(String(r.stderr || r.stdout || r.error?.message || 'git error').trim());
@@ -48,7 +47,7 @@ function gitExec(cwd, args) {
  * Returns null if not a git repo or git is unavailable.
  * @param {string} cwd
  */
-export function getGitInfo(cwd) {
+export function getGitInfo(cwd: any) {
   if (!cwd) return null;
   try {
     const branch = gitExec(cwd, ['rev-parse', '--abbrev-ref', 'HEAD']);
@@ -86,7 +85,7 @@ export function getHydraPackageInfo() {
  * @param {boolean} [opts.includeMetrics=true]
  * @returns {object}
  */
-export function buildSelfSnapshot(opts = {}) {
+export function buildSelfSnapshot(opts: any = {}) {
   const {
     projectRoot = '',
     projectName = '',
@@ -99,13 +98,13 @@ export function buildSelfSnapshot(opts = {}) {
   const cfg = includeConfig ? safeCall(() => loadHydraConfig(), null) : null;
   const models = safeCall(() => getModelSummary(), null);
 
-  const snapshot = {
+  const snapshot: any = {
     generatedAt: new Date().toISOString(),
     hydra: {
       ...hydraPkg,
       root: HYDRA_ROOT,
       runtimeRoot: HYDRA_RUNTIME_ROOT,
-      packaged: Boolean(process.pkg),
+      packaged: Boolean((process as any).pkg),
       node: process.version,
       platform: process.platform,
       pid: process.pid,
@@ -158,7 +157,7 @@ export function buildSelfSnapshot(opts = {}) {
   return snapshot;
 }
 
-function truncateLines(text, maxLines) {
+function truncateLines(text: any, maxLines: any) {
   const lines = String(text || '').split(/\r?\n/);
   if (lines.length <= maxLines) return lines.join('\n');
   return `${lines.slice(0, maxLines).join('\n')}\n... (truncated)`;
@@ -170,8 +169,8 @@ function truncateLines(text, maxLines) {
  * @param {object} [opts]
  * @param {number} [opts.maxLines=80]
  */
-export function formatSelfSnapshotForPrompt(snapshot, opts = {}) {
-  const maxLines = Number.isFinite(opts.maxLines) ? opts.maxLines : 80;
+export function formatSelfSnapshotForPrompt(snapshot: any, opts = {}) {
+  const maxLines = Number.isFinite((opts as any).maxLines) ? (opts as any).maxLines : 80;
   const s = snapshot && typeof snapshot === 'object' ? snapshot : {};
   const lines = [];
 
@@ -210,8 +209,8 @@ export function formatSelfSnapshotForPrompt(snapshot, opts = {}) {
     for (const [agent, info] of Object.entries(s.models)) {
       if (agent === '_mode') continue;
       if (!info || typeof info !== 'object') continue;
-      const active = info.active || 'unknown';
-      const src = info.tierSource ? ` (${info.tierSource})` : '';
+      const active = (info as any).active || 'unknown';
+      const src = (info as any).tierSource ? ` (${(info as any).tierSource})` : '';
       lines.push(`- ${agent}: ${active}${src}`);
     }
   }

@@ -7,10 +7,7 @@
 
 import { readFileSync, writeFileSync, mkdirSync } from 'node:fs';
 import { join, dirname } from 'node:path';
-import { fileURLToPath } from 'node:url';
 import { HYDRA_ROOT } from './hydra-config.ts';
-
-const __dirname = dirname(fileURLToPath(import.meta.url));
 
 // ── Constants ────────────────────────────────────────────────────────────────
 
@@ -43,7 +40,7 @@ function loadCache() {
   }
 }
 
-function saveCache(data) {
+function saveCache(data: any) {
   try {
     mkdirSync(dirname(CACHE_PATH), { recursive: true });
     writeFileSync(CACHE_PATH, JSON.stringify({ ...data, checkedAt: Date.now() }, null, 2), 'utf8');
@@ -55,7 +52,7 @@ function saveCache(data) {
 
 // ── Semver comparison ────────────────────────────────────────────────────────
 
-function semverGt(a, b) {
+function semverGt(a: any, b: any) {
   const pa = String(a).split('.').map(Number);
   const pb = String(b).split('.').map(Number);
   for (let i = 0; i < 3; i++) {
@@ -91,7 +88,7 @@ export async function checkForUpdates() {
     if (!res.ok) return saveCache({ hasUpdate: false, localVersion: LOCAL_VERSION });
 
     const pkg = await res.json();
-    const remoteVersion = pkg?.version;
+    const remoteVersion = (pkg as any)?.version;
     if (!remoteVersion) return null;
 
     const hasUpdate = semverGt(remoteVersion, LOCAL_VERSION);

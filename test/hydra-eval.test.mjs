@@ -8,7 +8,7 @@ import {
   evaluateRouting,
   evaluateAgentSelection,
   generateEvalReport,
-} from '../lib/hydra-eval.mjs';
+} from '../lib/hydra-eval.ts';
 import { initAgentRegistry, _resetRegistry } from '../lib/hydra-agents.ts';
 
 describe('hydra-eval', () => {
