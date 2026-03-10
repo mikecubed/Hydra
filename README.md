@@ -208,6 +208,9 @@ All routing decisions happen via a local heuristic. No API calls are made until 
 | `:doctor fix`                                | Auto-detect and fix pipeline issues         |
 | `:persona`                                   | Edit concierge personality                  |
 | `:resume`                                    | Scan all resumable state                    |
+| `:agents add`                                | Register a new custom CLI or API agent      |
+| `:agents remove <name>`                      | Remove a custom agent                       |
+| `:agents test <name>`                        | Send a test prompt to verify agent works    |
 | `!<prompt>`                                  | Force dispatch, bypass concierge            |
 
 For the full command reference (80+ commands organized by category), see [docs/USAGE.md](docs/USAGE.md#operator-commands-reference).
