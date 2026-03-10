@@ -16,11 +16,59 @@ import readline from 'node:readline';
 import { ensureDir } from './hydra-utils.ts';
 import pc from 'picocolors';
 
+// ── Types ───────────────────────────────────────────────────────────────────
+
+export interface SuggestionEntry {
+  id?: string;
+  createdAt?: string;
+  source?: string;
+  sourceRef?: string | null;
+  area?: string;
+  title?: string;
+  description?: string;
+  specPath?: string | null;
+  priority?: string;
+  status?: string;
+  attempts?: number;
+  maxAttempts?: number;
+  lastAttemptDate?: string | null;
+  lastAttemptVerdict?: string | null;
+  lastAttemptScore?: number | null;
+  lastAttemptLearnings?: string | null;
+  tags?: string[];
+  notes?: string;
+}
+
+interface Suggestions {
+  version?: number;
+  entries: SuggestionEntry[];
+  stats?: Record<string, unknown>;
+}
+
+interface EvolveRoundResult {
+  verdict?: string;
+  score?: number;
+  area?: string;
+  round?: number | string;
+  investigations?: { diagnoses?: Array<{ diagnosis: string }> };
+}
+
+interface EvolveDeliberation {
+  selectedImprovement?: string;
+}
+
+interface CreateFromRoundOpts {
+  source?: string;
+  sessionId?: string;
+  specPath?: string | null;
+  notes?: string;
+}
+
 // ── Constants ───────────────────────────────────────────────────────────────
 
 const SUGGESTIONS_FILENAME = 'SUGGESTIONS.json';
 
-function suggestionsPath(evolveDir) {
+function suggestionsPath(evolveDir: string) {
   return path.join(evolveDir, SUGGESTIONS_FILENAME);
 }
 
@@ -35,7 +83,7 @@ const EMPTY_SUGGESTIONS = {
   },
 };
 
-const PRIORITY_ORDER = { high: 0, medium: 1, low: 2 };
+const PRIORITY_ORDER: Record<string, number> = { high: 0, medium: 1, low: 2 };
 
 // ── Load / Save ─────────────────────────────────────────────────────────────
 
@@ -46,7 +94,7 @@ const PRIORITY_ORDER = { high: 0, medium: 1, low: 2 };
  * @param {string} evolveDir - Path to docs/coordination/evolve/
  * @returns {object} Suggestions object
  */
-export function loadSuggestions(evolveDir) {
+export function loadSuggestions(evolveDir: string): Suggestions {
   const filePath = suggestionsPath(evolveDir);
   try {
     const raw = fs.readFileSync(filePath, 'utf8');
@@ -66,7 +114,7 @@ export function loadSuggestions(evolveDir) {
  * @param {string} evolveDir - Path to docs/coordination/evolve/
  * @param {object} sg - Suggestions object
  */
-export function saveSuggestions(evolveDir, sg) {
+export function saveSuggestions(evolveDir: string, sg: Suggestions) {
   ensureDir(evolveDir);
   sg.stats = computeStats(sg.entries);
   const filePath = suggestionsPath(evolveDir);
@@ -78,9 +126,9 @@ export function saveSuggestions(evolveDir, sg) {
 /**
  * Generate the next suggestion ID based on existing entries.
  */
-function nextId(entries) {
+function nextId(entries: SuggestionEntry[]) {
   if (entries.length === 0) return 'SUG_001';
-  const maxNum = entries.reduce((max, e) => {
+  const maxNum = entries.reduce((max: number, e: SuggestionEntry) => {
     const m = (e.id || '').match(/^SUG_(\d+)$/);
     return m ? Math.max(max, Number.parseInt(m[1], 10)) : max;
   }, 0);
@@ -91,12 +139,12 @@ function nextId(entries) {
  * Check if a title+description is too similar to an existing suggestion.
  * Uses Jaccard similarity on word sets.
  */
-function isTooSimilar(existingEntries, newText, threshold = 0.7) {
+function isTooSimilar(existingEntries: SuggestionEntry[], newText: string, threshold = 0.7) {
   const newWords = new Set(
     newText
       .toLowerCase()
       .split(/\s+/)
-      .filter((w) => w.length > 3),
+      .filter((w: string) => w.length > 3),
   );
   if (newWords.size === 0) return false;
 
@@ -109,11 +157,11 @@ function isTooSimilar(existingEntries, newText, threshold = 0.7) {
       existingText
         .toLowerCase()
         .split(/\s+/)
-        .filter((w) => w.length > 3),
+        .filter((w: string) => w.length > 3),
     );
     if (existingWords.size === 0) continue;
 
-    const intersection = new Set([...newWords].filter((w) => existingWords.has(w)));
+    const intersection = new Set([...newWords].filter((w: string) => existingWords.has(w)));
     const union = new Set([...newWords, ...existingWords]);
     const similarity = intersection.size / union.size;
 
@@ -130,7 +178,7 @@ function isTooSimilar(existingEntries, newText, threshold = 0.7) {
  * @param {object} entry - Suggestion data (without id)
  * @returns {object|null} The added entry or null if deduped
  */
-export function addSuggestion(sg, entry) {
+export function addSuggestion(sg: Suggestions, entry: SuggestionEntry): SuggestionEntry | null {
   const dedupText = `${entry.title || ''} ${entry.description || ''}`;
   if (dedupText.trim() && isTooSimilar(sg.entries, dedupText)) {
     return null;
@@ -170,8 +218,8 @@ export function addSuggestion(sg, entry) {
  * @param {object} updates - Fields to merge
  * @returns {object|null} Updated entry or null if not found
  */
-export function updateSuggestion(sg, id, updates) {
-  const entry = sg.entries.find((e) => e.id === id);
+export function updateSuggestion(sg: Suggestions, id: string, updates: Partial<SuggestionEntry>): SuggestionEntry | null {
+  const entry = sg.entries.find((e: SuggestionEntry) => e.id === id);
   if (!entry) return null;
   Object.assign(entry, updates);
   return entry;
@@ -184,7 +232,7 @@ export function updateSuggestion(sg, id, updates) {
  * @param {string} id - Suggestion ID
  * @returns {object|null} Updated entry or null if not found
  */
-export function removeSuggestion(sg, id) {
+export function removeSuggestion(sg: Suggestions, id: string): SuggestionEntry | null {
   return updateSuggestion(sg, id, { status: 'abandoned' });
 }
 
@@ -196,12 +244,12 @@ export function removeSuggestion(sg, id) {
  * @param {object} sg - Suggestions object
  * @returns {object[]} Pending entries
  */
-export function getPendingSuggestions(sg) {
+export function getPendingSuggestions(sg: Suggestions): SuggestionEntry[] {
   return sg.entries
-    .filter((e) => e.status === 'pending')
-    .sort((a, b) => {
-      const pa = PRIORITY_ORDER[a.priority] ?? 1;
-      const pb = PRIORITY_ORDER[b.priority] ?? 1;
+    .filter((e: SuggestionEntry) => e.status === 'pending')
+    .sort((a: SuggestionEntry, b: SuggestionEntry) => {
+      const pa = PRIORITY_ORDER[a.priority ?? ''] ?? 1;
+      const pb = PRIORITY_ORDER[b.priority ?? ''] ?? 1;
       if (pa !== pb) return pa - pb;
       return (a.createdAt || '').localeCompare(b.createdAt || '');
     });
@@ -214,8 +262,8 @@ export function getPendingSuggestions(sg) {
  * @param {string} id - Suggestion ID
  * @returns {object|null} Entry or null
  */
-export function getSuggestionById(sg, id) {
-  return sg.entries.find((e) => e.id === id) || null;
+export function getSuggestionById(sg: Suggestions, id: string): SuggestionEntry | null {
+  return sg.entries.find((e: SuggestionEntry) => e.id === id) || null;
 }
 
 /**
@@ -226,15 +274,15 @@ export function getSuggestionById(sg, id) {
  * @param {object} [opts] - Filters: { status, area }
  * @returns {object[]} Matching entries
  */
-export function searchSuggestions(sg, query, opts = {}) {
+export function searchSuggestions(sg: Suggestions, query?: string, opts: { status?: string; area?: string } = {}): SuggestionEntry[] {
   let results = [...sg.entries];
 
   if (opts.status) {
-    results = results.filter((e) => e.status === opts.status);
+    results = results.filter((e: SuggestionEntry) => e.status === opts.status);
   }
 
   if (opts.area) {
-    results = results.filter((e) => e.area === opts.area);
+    results = results.filter((e: SuggestionEntry) => e.area === opts.area);
   }
 
   if (query) {
@@ -244,13 +292,13 @@ export function searchSuggestions(sg, query, opts = {}) {
         (e.title || '').toLowerCase().includes(q) ||
         (e.description || '').toLowerCase().includes(q) ||
         (e.area || '').toLowerCase().includes(q) ||
-        (e.tags || []).some((t) => t.toLowerCase().includes(q)),
+        (e.tags || []).some((t: string) => t.toLowerCase().includes(q)),
     );
   }
 
-  return results.sort((a, b) => {
-    const pa = PRIORITY_ORDER[a.priority] ?? 1;
-    const pb = PRIORITY_ORDER[b.priority] ?? 1;
+  return results.sort((a: SuggestionEntry, b: SuggestionEntry) => {
+    const pa = PRIORITY_ORDER[a.priority ?? ''] ?? 1;
+    const pb = PRIORITY_ORDER[b.priority ?? ''] ?? 1;
     if (pa !== pb) return pa - pb;
     return (b.createdAt || '').localeCompare(a.createdAt || '');
   });
@@ -268,7 +316,7 @@ export function searchSuggestions(sg, query, opts = {}) {
  * @param {object} [opts] - { sessionId, specPath, notes, source }
  * @returns {object|null} The created suggestion or null if deduped/invalid
  */
-export function createSuggestionFromRound(sg, roundResult, deliberation, opts = {}) {
+export function createSuggestionFromRound(sg: Suggestions, roundResult: EvolveRoundResult, deliberation: EvolveDeliberation, opts: CreateFromRoundOpts = {}): SuggestionEntry | null {
   const improvement = deliberation?.selectedImprovement;
   if (!improvement || improvement === 'No improvement selected' || improvement.length < 10) {
     return null;
@@ -288,9 +336,9 @@ export function createSuggestionFromRound(sg, roundResult, deliberation, opts = 
 
   // Determine priority based on score
   let priority = 'medium';
-  if (roundResult.score >= 5) priority = 'high';
+  if ((roundResult.score ?? 0) >= 5) priority = 'high';
   if (
-    roundResult.score <= 1 &&
+    (roundResult.score ?? 0) <= 1 &&
     roundResult.investigations?.diagnoses?.every((d) => d.diagnosis === 'transient')
   ) {
     // Low score due to transient failures (timeouts etc.) — likely worth retrying
@@ -306,7 +354,7 @@ export function createSuggestionFromRound(sg, roundResult, deliberation, opts = 
     specPath: opts.specPath || null,
     priority,
     tags: [
-      roundResult.area,
+      roundResult.area ?? '',
       source.split(':')[1] || source,
       ...(roundResult.verdict ? [roundResult.verdict] : []),
     ],
@@ -330,9 +378,9 @@ function createRL() {
 /**
  * Ask a question and return the trimmed answer.
  */
-function askRaw(rl, question) {
+function askRaw(rl: ReturnType<typeof import('node:readline').createInterface>, question: string): Promise<string> {
   return new Promise((resolve) => {
-    rl.question(question, (answer) => resolve(answer.trim()));
+    rl.question(question, (answer: string) => resolve(answer.trim()));
   });
 }
 
@@ -344,7 +392,7 @@ function askRaw(rl, question) {
  * @param {object} [opts] - { maxDisplay: 5 }
  * @returns {Promise<{ action: string, suggestion?: object, text?: string }>}
  */
-export async function promptSuggestionPicker(pending, opts = {}) {
+export async function promptSuggestionPicker(pending: SuggestionEntry[], opts: { maxDisplay?: number } = {}) {
   const maxDisplay = opts.maxDisplay || 5;
   const displayed = pending.slice(0, maxDisplay);
 
@@ -359,13 +407,13 @@ export async function promptSuggestionPicker(pending, opts = {}) {
       const num = pc.bold(pc.white(`  ${i + 1}.`));
       const idTag = pc.dim(`[${s.id}]`);
       const areaTag = pc.yellow(s.area);
-      const titleText = s.title.length > 60 ? `${s.title.slice(0, 57)}...` : s.title;
+      const titleText = (s.title || '').length > 60 ? `${(s.title || '').slice(0, 57)}...` : (s.title || '');
 
       console.error(`${num} ${idTag} ${areaTag}: ${titleText} ${pc.dim(`(${s.priority})`)}`);
 
       // Second line with attempt info
       const parts = [];
-      if (s.attempts > 0) {
+      if ((s.attempts ?? 0) > 0) {
         parts.push(`Last: ${s.lastAttemptVerdict || '?'} (${s.lastAttemptScore ?? '?'}/10)`);
         parts.push(`Attempts: ${s.attempts}/${s.maxAttempts}`);
       }
@@ -422,13 +470,13 @@ export async function promptSuggestionPicker(pending, opts = {}) {
 /**
  * Compute stats from entries.
  */
-function computeStats(entries) {
+function computeStats(entries: SuggestionEntry[]) {
   return {
-    totalPending: entries.filter((e) => e.status === 'pending').length,
-    totalExploring: entries.filter((e) => e.status === 'exploring').length,
-    totalCompleted: entries.filter((e) => e.status === 'completed').length,
-    totalRejected: entries.filter((e) => e.status === 'rejected').length,
-    totalAbandoned: entries.filter((e) => e.status === 'abandoned').length,
+    totalPending: entries.filter((e: SuggestionEntry) => e.status === 'pending').length,
+    totalExploring: entries.filter((e: SuggestionEntry) => e.status === 'exploring').length,
+    totalCompleted: entries.filter((e: SuggestionEntry) => e.status === 'completed').length,
+    totalRejected: entries.filter((e: SuggestionEntry) => e.status === 'rejected').length,
+    totalAbandoned: entries.filter((e: SuggestionEntry) => e.status === 'abandoned').length,
   };
 }
 
@@ -438,7 +486,7 @@ function computeStats(entries) {
  * @param {object} sg - Suggestions object
  * @returns {object} Stats summary
  */
-export function getSuggestionStats(sg) {
+export function getSuggestionStats(sg: Suggestions) {
   return computeStats(sg.entries);
 }
 
@@ -448,7 +496,7 @@ export function getSuggestionStats(sg) {
  * @param {object} sg - Suggestions object
  * @returns {string} Formatted one-liner
  */
-export function formatSuggestionsForPrompt(sg) {
+export function formatSuggestionsForPrompt(sg: Suggestions): string {
   const stats = computeStats(sg.entries);
   return `Suggestions Backlog: ${stats.totalPending} pending, ${stats.totalCompleted} completed, ${stats.totalRejected} rejected`;
 }

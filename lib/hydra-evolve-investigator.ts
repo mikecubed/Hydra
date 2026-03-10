@@ -18,26 +18,71 @@ import { loadHydraConfig } from './hydra-config.ts';
 
 // ── State ────────────────────────────────────────────────────────────────────
 
-let investigatorReady = false;
+interface InvestigatorConfig {
+  enabled: boolean;
+  model: string;
+  reasoningEffort: string;
+  maxAttemptsPerPhase: number;
+  phases: string[];
+  maxTokensBudget: number;
+  tryAlternativeAgent: boolean;
+  logToFile: boolean;
+}
+
+interface DiagnosisResult {
+  diagnosis: string;
+  explanation: string;
+  rootCause: string;
+  corrective: string | null;
+  retryRecommendation: {
+    retryPhase: boolean;
+    modifiedPrompt: string | null;
+    preamble: string | null;
+    retryAgent: string | null;
+  };
+  tokens?: { prompt: number; completion: number };
+}
+
+interface EvolveFailure {
+  phase: string;
+  agent?: string;
+  error?: string;
+  stderr?: string;
+  stdout?: string;
+  timedOut?: boolean;
+  context?: string;
+  attemptNumber?: number;
+  exitCode?: number | null;
+  signal?: string | null;
+  errorCategory?: string;
+  errorDetail?: string;
+  errorContext?: string;
+  command?: string;
+  args?: string[];
+  promptSnippet?: string;
+}
+
+let _investigatorReady = false;
+void _investigatorReady; // suppress noUnusedLocals — state flag written by init/reset
 let stats = { investigations: 0, healed: 0, promptTokens: 0, completionTokens: 0 };
 let tokenBudgetUsed = 0;
-let config = null;
+let config: InvestigatorConfig | null = null;
 
 // ── Config ───────────────────────────────────────────────────────────────────
 
-function getInvestigatorConfig() {
+function getInvestigatorConfig(): InvestigatorConfig {
   if (config) return config;
   const cfg = loadHydraConfig();
-  const inv = cfg.evolve?.investigator || {};
+  const inv = (cfg.evolve?.investigator || {}) as Record<string, unknown>;
   config = {
-    enabled: inv.enabled !== false,
-    model: inv.model || 'gpt-5.2',
-    reasoningEffort: inv.reasoningEffort || 'high',
-    maxAttemptsPerPhase: inv.maxAttemptsPerPhase || 2,
-    phases: inv.phases || ['test', 'implement', 'analyze', 'agent'],
-    maxTokensBudget: inv.maxTokensBudget || 50_000,
-    tryAlternativeAgent: inv.tryAlternativeAgent !== false,
-    logToFile: inv.logToFile !== false,
+    enabled: inv['enabled'] !== false,
+    model: (inv['model'] as string) || 'gpt-5.2',
+    reasoningEffort: (inv['reasoningEffort'] as string) || 'high',
+    maxAttemptsPerPhase: (inv['maxAttemptsPerPhase'] as number) || 2,
+    phases: (inv['phases'] as string[]) || ['test', 'implement', 'analyze', 'agent'],
+    maxTokensBudget: (inv['maxTokensBudget'] as number) || 50_000,
+    tryAlternativeAgent: inv['tryAlternativeAgent'] !== false,
+    logToFile: inv['logToFile'] !== false,
   };
   return config;
 }
@@ -48,7 +93,7 @@ function getInvestigatorConfig() {
  * Initialize the investigator. Validates API key and loads config.
  * @param {object} [overrides] - Optional config overrides
  */
-export function initInvestigator(overrides = {}) {
+export function initInvestigator(overrides: Partial<InvestigatorConfig> = {}) {
   config = null; // Force reload
   const cfg = getInvestigatorConfig();
 
@@ -60,7 +105,7 @@ export function initInvestigator(overrides = {}) {
   config = cfg;
   stats = { investigations: 0, healed: 0, promptTokens: 0, completionTokens: 0 };
   tokenBudgetUsed = 0;
-  investigatorReady = true;
+  _investigatorReady = true;
 }
 
 /**
@@ -69,7 +114,7 @@ export function initInvestigator(overrides = {}) {
 export function isInvestigatorAvailable() {
   const cfg = getInvestigatorConfig();
   if (!cfg.enabled) return false;
-  return Boolean(process.env.OPENAI_API_KEY);
+  return Boolean(process.env['OPENAI_API_KEY']);
 }
 
 /**
@@ -86,7 +131,7 @@ export function resetInvestigator() {
   stats = { investigations: 0, healed: 0, promptTokens: 0, completionTokens: 0 };
   tokenBudgetUsed = 0;
   config = null;
-  investigatorReady = false;
+  _investigatorReady = false;
 }
 
 // ── System Prompt ────────────────────────────────────────────────────────────
@@ -151,7 +196,7 @@ Respond with ONLY a JSON object (no markdown, no explanation outside JSON):
  * @param {number} [failure.attemptNumber] - Which attempt this is (1-based)
  * @returns {Promise<object>} Diagnosis object
  */
-export async function investigate(failure) {
+export async function investigate(failure: EvolveFailure): Promise<DiagnosisResult> {
   const cfg = getInvestigatorConfig();
 
   // Budget guard — don't spend more than our token budget
@@ -244,7 +289,7 @@ Diagnose this failure and provide a structured recommendation.`;
         model: cfg.model,
         reasoningEffort: cfg.reasoningEffort,
       },
-      null,
+      undefined,
     ); // No streaming callback — we just want the final result
 
     // Track token usage
@@ -271,10 +316,11 @@ Diagnose this failure and provide a structured recommendation.`;
   } catch (err) {
     // Investigator itself failed — don't recurse, just return fundamental
     stats.investigations++;
-    const fallback = {
+    const errMsg = err instanceof Error ? err.message : String(err);
+    const fallback: DiagnosisResult = {
       diagnosis: 'fundamental',
-      explanation: `Investigator call failed: ${err.message}`,
-      rootCause: err.message,
+      explanation: `Investigator call failed: ${errMsg}`,
+      rootCause: errMsg,
       corrective: null,
       retryRecommendation: {
         retryPhase: false,
@@ -291,7 +337,7 @@ Diagnose this failure and provide a structured recommendation.`;
 
 // ── Response Parsing ─────────────────────────────────────────────────────────
 
-function parseInvestigatorResponse(raw) {
+function parseInvestigatorResponse(raw: string): DiagnosisResult {
   // Try to extract JSON from the response (may have markdown fencing)
   let text = raw.trim();
 
@@ -334,7 +380,7 @@ function parseInvestigatorResponse(raw) {
 
 // ── Logging ──────────────────────────────────────────────────────────────────
 
-function logInvestigation(failure, diagnosis) {
+function logInvestigation(failure: EvolveFailure, diagnosis: DiagnosisResult) {
   const cfg = getInvestigatorConfig();
   if (!cfg.logToFile) return;
 

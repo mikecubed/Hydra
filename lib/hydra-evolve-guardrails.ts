@@ -86,16 +86,28 @@ function getEvolveBudgetConfig() {
  *   continue      - All good
  */
 export class EvolveBudgetTracker {
-  constructor(budgetOverrides = {}) {
+  softLimit: number;
+  hardLimit: number;
+  perRoundEstimate: number;
+  warnThreshold: number;
+  reduceScopeThreshold: number;
+  softStopThreshold: number;
+  hardStopThreshold: number;
+  startTokens: number;
+  currentTokens: number;
+  roundDeltas: Array<{ round: unknown; area: unknown; tokens: number; durationMs: unknown }>;
+  _startedAt: number;
+
+  constructor(budgetOverrides: Record<string, unknown> = {}) {
     const defaults = getEvolveBudgetConfig();
-    this.softLimit = budgetOverrides.softLimit || defaults.softLimit;
-    this.hardLimit = budgetOverrides.hardLimit || defaults.hardLimit;
-    this.perRoundEstimate = budgetOverrides.perRoundEstimate || defaults.perRoundEstimate;
-    this.warnThreshold = budgetOverrides.warnThreshold || defaults.warnThreshold;
+    this.softLimit = (budgetOverrides['softLimit'] as number) || defaults.softLimit;
+    this.hardLimit = (budgetOverrides['hardLimit'] as number) || defaults.hardLimit;
+    this.perRoundEstimate = (budgetOverrides['perRoundEstimate'] as number) || defaults.perRoundEstimate;
+    this.warnThreshold = (budgetOverrides['warnThreshold'] as number) || defaults.warnThreshold;
     this.reduceScopeThreshold =
-      budgetOverrides.reduceScopeThreshold || defaults.reduceScopeThreshold;
-    this.softStopThreshold = budgetOverrides.softStopThreshold || defaults.softStopThreshold;
-    this.hardStopThreshold = budgetOverrides.hardStopThreshold || defaults.hardStopThreshold;
+      (budgetOverrides['reduceScopeThreshold'] as number) || defaults.reduceScopeThreshold;
+    this.softStopThreshold = (budgetOverrides['softStopThreshold'] as number) || defaults.softStopThreshold;
+    this.hardStopThreshold = (budgetOverrides['hardStopThreshold'] as number) || defaults.hardStopThreshold;
 
     this.startTokens = 0;
     this.currentTokens = 0;
@@ -114,7 +126,7 @@ export class EvolveBudgetTracker {
    * Snapshot current tokens after a round completes.
    * @returns {{ tokens: number }} Delta for this round
    */
-  recordRoundEnd(round, area, durationMs) {
+  recordRoundEnd(round: unknown, area: unknown, durationMs: unknown) {
     const session = getSessionUsage();
     const now = session.totalTokens || 0;
     const delta = now - this.currentTokens;
@@ -136,7 +148,7 @@ export class EvolveBudgetTracker {
   /** Rolling average tokens per round. */
   get avgTokensPerRound() {
     if (this.roundDeltas.length === 0) return this.perRoundEstimate;
-    const sum = this.roundDeltas.reduce((s, d) => s + d.tokens, 0);
+    const sum = this.roundDeltas.reduce((s: number, d: { tokens: number }) => s + d.tokens, 0);
     return Math.round(sum / this.roundDeltas.length);
   }
 
@@ -210,15 +222,15 @@ export class EvolveBudgetTracker {
   }
 
   /** Restore a tracker from serialized checkpoint data. */
-  static deserialize(data) {
+  static deserialize(data: Record<string, unknown>) {
     const tracker = new EvolveBudgetTracker({
-      softLimit: data.softLimit,
-      hardLimit: data.hardLimit,
+      softLimit: data['softLimit'],
+      hardLimit: data['hardLimit'],
     });
-    tracker.startTokens = data.startTokens;
-    tracker.currentTokens = data.currentTokens;
-    tracker.roundDeltas = data.roundDeltas || [];
-    tracker._startedAt = data._startedAt;
+    tracker.startTokens = (data['startTokens'] as number) || 0;
+    tracker.currentTokens = (data['currentTokens'] as number) || 0;
+    tracker.roundDeltas = (data['roundDeltas'] as typeof tracker.roundDeltas) || [];
+    tracker._startedAt = (data['_startedAt'] as number) || Date.now();
     return tracker;
   }
 
@@ -245,7 +257,7 @@ export class EvolveBudgetTracker {
  * @param {string} branchName
  * @param {string} [agentName] - Agent executing the task (for commit attribution)
  */
-export function buildEvolveSafetyPrompt(branchName, agentName) {
+export function buildEvolveSafetyPrompt(branchName: string, agentName?: string) {
   return sharedBuildSafetyPrompt(branchName, {
     runner: 'evolve runner',
     reportName: 'session report',
@@ -268,7 +280,7 @@ export function buildEvolveSafetyPrompt(branchName, agentName) {
  * @param {string} [baseBranch='dev']
  * @returns {Array<{type: string, detail: string, severity: string}>}
  */
-export function scanBranchViolations(projectRoot, branchName, baseBranch = 'dev') {
+export function scanBranchViolations(projectRoot: string, branchName: string, baseBranch = 'dev') {
   return sharedScanBranchViolations(projectRoot, branchName, {
     baseBranch,
     protectedFiles: PROTECTED_FILES,
@@ -280,11 +292,11 @@ export function scanBranchViolations(projectRoot, branchName, baseBranch = 'dev'
 // ── Git Helpers (delegates to shared) ───────────────────────────────────────
 
 /** Verify the current git branch matches the expected branch. */
-export function verifyBranch(projectRoot, expectedBranch) {
+export function verifyBranch(projectRoot: string, expectedBranch: string) {
   return sharedVerifyBranch(projectRoot, expectedBranch);
 }
 
 /** Check if working tree is clean. */
-export function isCleanWorkingTree(projectRoot) {
+export function isCleanWorkingTree(projectRoot: string) {
   return sharedIsCleanWorkingTree(projectRoot);
 }

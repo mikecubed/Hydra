@@ -35,7 +35,8 @@ import {
   getSuggestionById,
   searchSuggestions,
   getSuggestionStats,
-} from './hydra-evolve-suggestions.mjs';
+} from './hydra-evolve-suggestions.ts';
+import { SuggestionEntry } from './hydra-evolve-suggestions.ts';
 import pc from 'picocolors';
 
 // ── Helpers ─────────────────────────────────────────────────────────────────
@@ -44,11 +45,11 @@ function createRL() {
   return readline.createInterface({ input: process.stdin, output: process.stderr, terminal: true });
 }
 
-function askQuestion(rl, question) {
-  return new Promise((resolve) => rl.question(question, (answer) => resolve(answer.trim())));
+function askQuestion(rl: ReturnType<typeof readline.createInterface>, question: string): Promise<string> {
+  return new Promise((resolve) => rl.question(question, (answer: string) => resolve(answer.trim())));
 }
 
-function formatEntry(s) {
+function formatEntry(s: SuggestionEntry) {
   const statusColor =
     s.status === 'pending'
       ? pc.cyan
@@ -66,10 +67,10 @@ function formatEntry(s) {
         ? pc.dim('low')
         : pc.yellow('med');
 
-  console.log(`  ${statusColor(s.id)} ${pc.yellow(s.area)}: ${s.title.slice(0, 80)}`);
+  console.log(`  ${statusColor(s.id)} ${pc.yellow(s.area)}: ${(s.title || '').slice(0, 80)}`);
 
   const parts = [`status: ${statusColor(s.status)}`, `priority: ${priorityBadge}`];
-  if (s.attempts > 0) {
+  if ((s.attempts ?? 0) > 0) {
     parts.push(`attempts: ${s.attempts}/${s.maxAttempts}`);
     if (s.lastAttemptScore != null) parts.push(`last: ${s.lastAttemptScore}/10`);
   }
@@ -88,11 +89,11 @@ function formatEntry(s) {
 
 // ── List Command ────────────────────────────────────────────────────────────
 
-function listCommand(evolveDir, options) {
+function listCommand(evolveDir: string, options: Record<string, string | boolean>) {
   const sg = loadSuggestions(evolveDir);
-  const statusFilter = options.status || null;
-  const areaFilter = options.area || null;
-  const query = options.query || null;
+  const statusFilter = (options['status'] as string) || null;
+  const areaFilter = (options['area'] as string) || undefined;
+  const query = (options['query'] as string) || undefined;
 
   let entries;
   if (statusFilter === 'all') {
@@ -122,17 +123,17 @@ function listCommand(evolveDir, options) {
 
 // ── Add Command ─────────────────────────────────────────────────────────────
 
-async function addCommand(evolveDir, options) {
+async function addCommand(evolveDir: string, options: Record<string, string | boolean>) {
   const sg = loadSuggestions(evolveDir);
-  let title = options.title || '';
-  let area = options.area || '';
-  let description = options.description || '';
-  let priority = options.priority || 'medium';
+  let title = (options['title'] as string) || '';
+  let area = (options['area'] as string) || '';
+  let description = (options['description'] as string) || '';
+  let priority = (options['priority'] as string) || 'medium';
 
   // Interactive mode if title not provided
   if (!title) {
     const cfg = loadHydraConfig();
-    const focusAreas = cfg.evolve?.focusAreas || [];
+    const focusAreas = (cfg.evolve?.focusAreas as string[] | undefined) || [];
 
     const rl = createRL();
     try {
@@ -177,8 +178,8 @@ async function addCommand(evolveDir, options) {
 
 // ── Remove Command ──────────────────────────────────────────────────────────
 
-function removeCommand(evolveDir, options, positionals) {
-  const id = positionals[1] || options.id;
+function removeCommand(evolveDir: string, options: Record<string, string | boolean>, positionals: string[]) {
+  const id = positionals[1] || (options['id'] as string);
   if (!id) {
     console.error(pc.red('  Usage: remove <SUG_ID>'));
     return;
@@ -193,13 +194,13 @@ function removeCommand(evolveDir, options, positionals) {
 
   removeSuggestion(sg, id);
   saveSuggestions(evolveDir, sg);
-  console.log(pc.yellow(`  ${id} marked as abandoned: ${entry.title.slice(0, 60)}`));
+  console.log(pc.yellow(`  ${id} marked as abandoned: ${(entry.title || '').slice(0, 60)}`));
 }
 
 // ── Reset Command ───────────────────────────────────────────────────────────
 
-function resetCommand(evolveDir, options, positionals) {
-  const id = positionals[1] || options.id;
+function resetCommand(evolveDir: string, options: Record<string, string | boolean>, positionals: string[]) {
+  const id = positionals[1] || (options['id'] as string);
   if (!id) {
     console.error(pc.red('  Usage: reset <SUG_ID>'));
     return;
@@ -221,12 +222,12 @@ function resetCommand(evolveDir, options, positionals) {
     lastAttemptLearnings: null,
   });
   saveSuggestions(evolveDir, sg);
-  console.log(pc.green(`  ${id} reset to pending: ${entry.title.slice(0, 60)}`));
+  console.log(pc.green(`  ${id} reset to pending: ${(entry.title || '').slice(0, 60)}`));
 }
 
 // ── Import Command ──────────────────────────────────────────────────────────
 
-function importCommand(evolveDir) {
+function importCommand(evolveDir: string) {
   const decisionsDir = path.join(evolveDir, 'decisions');
   const specsDir = path.join(evolveDir, 'specs');
 
@@ -268,7 +269,7 @@ function importCommand(evolveDir) {
 
         if (entry) {
           created++;
-          console.log(pc.green(`  + ${entry.id}: ${entry.title.slice(0, 70)}`));
+          console.log(pc.green(`  + ${entry.id}: ${(entry.title || '').slice(0, 70)}`));
         }
       }
     } catch {
@@ -289,7 +290,7 @@ function importCommand(evolveDir) {
 
 // ── Stats Command ───────────────────────────────────────────────────────────
 
-function statsCommand(evolveDir) {
+function statsCommand(evolveDir: string) {
   const sg = loadSuggestions(evolveDir);
   const stats = getSuggestionStats(sg);
 
@@ -302,13 +303,14 @@ function statsCommand(evolveDir) {
   console.log(`  Abandoned:      ${pc.dim(String(stats.totalAbandoned))}`);
 
   // Area breakdown
-  const areas = {};
-  for (const e of sg.entries.filter((e) => e.status === 'pending')) {
-    areas[e.area] = (areas[e.area] || 0) + 1;
+  const areas: Record<string, number> = {};
+  for (const e of sg.entries.filter((e: SuggestionEntry) => e.status === 'pending')) {
+    const area = e.area || 'unknown';
+    areas[area] = (areas[area] || 0) + 1;
   }
   if (Object.keys(areas).length > 0) {
     console.log(pc.bold('\n  Pending by area:'));
-    for (const [area, count] of Object.entries(areas).sort((a, b) => b[1] - a[1])) {
+    for (const [area, count] of Object.entries(areas).sort((a: [string, number], b: [string, number]) => b[1] - a[1])) {
       console.log(`    ${pc.yellow(area)}: ${count}`);
     }
   }
@@ -322,11 +324,11 @@ async function main() {
   const { options, positionals } = parseArgs(process.argv);
   const command = positionals[0] || 'list';
 
-  let config;
+  let config: ReturnType<typeof resolveProject> | undefined;
   try {
-    config = resolveProject({ project: options.project });
+    config = resolveProject({ project: options['project'] as string });
   } catch (err) {
-    console.error(pc.red(`Project resolution failed: ${err.message}`));
+    console.error(pc.red(`Project resolution failed: ${err instanceof Error ? err.message : String(err)}`));
     process.exit(1);
   }
 
@@ -360,6 +362,6 @@ async function main() {
 }
 
 main().catch((err) => {
-  console.error(pc.red(`Fatal: ${err.message}`));
+  console.error(pc.red(`Fatal: ${err instanceof Error ? err.message : String(err)}`));
   process.exit(1);
 });
