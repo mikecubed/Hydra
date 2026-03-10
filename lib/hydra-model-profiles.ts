@@ -771,7 +771,7 @@ export function getCostTable(): Record<string, { input: number; output: number }
 
 /**
  * Get reasoning capabilities map in MODEL_REASONING_CAPS format.
- * Uses longest-prefix matching keys, same shape as hydra-agents.mjs.
+ * Uses longest-prefix matching keys, same shape as hydra-agents.ts.
  */
 export function getReasoningCapsMap(): Record<
   string,

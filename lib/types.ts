@@ -2,7 +2,7 @@
  * Hydra — canonical shared type definitions.
  *
  * Derived from actual runtime shapes in:
- *   lib/hydra-agents.mjs, lib/hydra-config.ts, lib/hydra-model-profiles.mjs,
+ *   lib/hydra-agents.ts, lib/hydra-config.ts, lib/hydra-model-profiles.mjs,
  *   lib/orchestrator-daemon.mjs, lib/hydra-shared/agent-executor.mjs
  *
  * No logic — types only.
@@ -118,9 +118,11 @@ export interface AgentDef {
   errorPatterns: ErrorPatterns;
   modelBelongsTo: (modelId: string) => boolean;
   /** Takes optional API key + hint args; returns null when verification is not applicable */
-  quotaVerify: (...args: unknown[]) => Promise<QuotaStatus | null>;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  quotaVerify: (...args: any[]) => Promise<QuotaStatus | null>;
   /** Returns the economy/fallback model ID, or null if the agent has no economy tier */
-  economyModel: (...args: unknown[]) => string | null;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  economyModel: (...args: any[]) => string | null;
   /** Returns file-reading instructions; takes a file path argument */
   readInstructions: ((f: string) => string) | null;
   taskRules: string[];
@@ -141,7 +143,7 @@ export interface AgentDef {
 
 // ── Task system ───────────────────────────────────────────────────────────────
 
-/** Task types from TASK_TYPES constant in hydra-agents.mjs */
+/** Task types from TASK_TYPES constant in hydra-agents.ts */
 export type TaskType =
   | 'planning'
   | 'architecture'

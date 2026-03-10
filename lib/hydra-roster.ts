@@ -17,7 +17,7 @@ import {
   getEffortOptionsForModel,
   getModelReasoningCaps,
   formatEffortDisplay,
-} from './hydra-agents.mjs';
+} from './hydra-agents.ts';
 import { promptChoice } from './hydra-prompt-choice.mjs';
 import { formatBenchmarkAnnotation } from './hydra-model-profiles.ts';
 

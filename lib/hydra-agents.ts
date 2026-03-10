@@ -1,4 +1,3 @@
-#!/usr/bin/env node
 /**
  * Hydra Agent Registry
  *
@@ -12,8 +11,8 @@
  */
 
 import fs from 'node:fs';
-import os from 'node:os';
 import path from 'node:path';
+import type { AgentDef, AgentInvoke, HeadlessOpts, AgentResult, TaskType, ModelConfig } from './types.ts';
 import {
   loadHydraConfig,
   saveHydraConfig,
@@ -29,11 +28,11 @@ export const AGENT_TYPE = { PHYSICAL: 'physical', VIRTUAL: 'virtual' };
 
 // ── Private Registry ─────────────────────────────────────────────────────────
 
-const _registry = new Map();
+const _registry = new Map<string, AgentDef>();
 
 // ── Physical Agent Definitions ───────────────────────────────────────────────
 
-const PHYSICAL_AGENTS = {
+const PHYSICAL_AGENTS: Record<string, Partial<AgentDef>> = {
   claude: {
     name: 'claude',
     type: 'physical',
@@ -41,14 +40,14 @@ const PHYSICAL_AGENTS = {
     label: 'Claude Code (Opus 4.6)',
     cli: 'claude',
     invoke: {
-      nonInteractive: (prompt) => [
+      nonInteractive: (prompt: string): [string, string[]] => [
         'claude',
         ['-p', prompt, '--output-format', 'json', '--permission-mode', 'plan'],
       ],
-      interactive: (prompt) => ['claude', [prompt]],
-      headless: (prompt, opts = {}) => {
-        const PERM = { 'auto-edit': 'acceptEdits', plan: 'plan', 'full-auto': 'bypassPermissions' };
-        const perm = PERM[opts.permissionMode] || opts.permissionMode || 'acceptEdits';
+      interactive: (prompt: string): [string, string[]] => ['claude', [prompt]],
+      headless: (prompt: string, opts: HeadlessOpts = {}): [string, string[]] => {
+        const PERM: Record<string, string> = { 'auto-edit': 'acceptEdits', plan: 'plan', 'full-auto': 'bypassPermissions' };
+        const perm = (opts.permissionMode ? PERM[opts.permissionMode] : undefined) || opts.permissionMode || 'acceptEdits';
         const args = ['--output-format', 'json', '--permission-mode', perm];
         if (!opts.stdinPrompt) {
           args.unshift('-p', prompt);
@@ -93,19 +92,25 @@ Output structure: Plan → Task breakdown → Dependency graph → Risk assessme
     tags: ['architecture', 'planning', 'delegation'],
     enabled: true,
     features: { executeMode: 'spawn', jsonOutput: true, stdinPrompt: true, reasoningEffort: false },
-    parseOutput(stdout) {
+    parseOutput(stdout: string): AgentResult {
       try {
-        const parsed = JSON.parse(stdout);
+        const parsed = JSON.parse(stdout) as {
+          type?: string;
+          result?: string;
+          content?: string;
+          usage?: { input_tokens?: number; output_tokens?: number; cache_creation_input_tokens?: number; cache_read_input_tokens?: number };
+          cost_usd?: number | null;
+        };
         if (parsed?.type === 'result') {
-          const u = parsed.usage || {};
+          const u = parsed.usage ?? {};
           return {
             output: parsed.result ?? parsed.content ?? stdout,
             tokenUsage: {
-              inputTokens: u.input_tokens || 0,
-              outputTokens: u.output_tokens || 0,
-              cacheCreationTokens: u.cache_creation_input_tokens || 0,
-              cacheReadTokens: u.cache_read_input_tokens || 0,
-              totalTokens: (u.input_tokens || 0) + (u.output_tokens || 0),
+              inputTokens: u.input_tokens ?? 0,
+              outputTokens: u.output_tokens ?? 0,
+              cacheCreationTokens: u.cache_creation_input_tokens ?? 0,
+              cacheReadTokens: u.cache_read_input_tokens ?? 0,
+              totalTokens: (u.input_tokens ?? 0) + (u.output_tokens ?? 0),
             },
             costUsd: parsed.cost_usd ?? null,
           };
@@ -119,8 +124,8 @@ Output structure: Plan → Task breakdown → Dependency graph → Risk assessme
       quotaExhausted: /spending_limit|credit_balance|usage_limit/i,
       networkError: /ECONNREFUSED|ENOTFOUND|network error/i,
     },
-    modelBelongsTo: (id) => String(id).toLowerCase().startsWith('claude-'),
-    async quotaVerify(apiKey) {
+    modelBelongsTo: (id: string) => String(id).toLowerCase().startsWith('claude-'),
+    async quotaVerify(apiKey?: string) {
       if (!apiKey)
         return {
           verified: 'unknown',
@@ -140,7 +145,7 @@ Output structure: Plan → Task breakdown → Dependency graph → Risk assessme
       return { verified: 'unknown', status: res.status, reason: `HTTP ${res.status}` };
     },
     economyModel: () => 'claude-sonnet-4-5-20250929',
-    readInstructions: (f) =>
+    readInstructions: (f: string) =>
       `Read these files first:\n1) ${f}\n2) docs/QUICK_REFERENCE.md\n3) docs/coordination/AI_SYNC_STATE.json\n4) docs/coordination/AI_SYNC_LOG.md`,
     taskRules: [
       '- Create detailed task specs for Codex (file paths, signatures, DoD) in your handoffs.',
@@ -153,12 +158,12 @@ Output structure: Plan → Task breakdown → Dependency graph → Risk assessme
     label: 'Gemini 3 Pro',
     cli: 'gemini',
     invoke: {
-      nonInteractive: (prompt) => [
+      nonInteractive: (prompt: string): [string, string[]] => [
         'gemini',
         ['-p', prompt, '--approval-mode', 'plan', '-o', 'json'],
       ],
-      interactive: (prompt) => ['gemini', ['--prompt-interactive', prompt]],
-      headless: (prompt, opts = {}) => [
+      interactive: (prompt: string): [string, string[]] => ['gemini', ['--prompt-interactive', prompt]],
+      headless: (prompt: string, opts: HeadlessOpts = {}): [string, string[]] => [
         'gemini',
         ['-p', prompt, '--approval-mode', opts.permissionMode || 'auto-edit', '-o', 'json'],
       ],
@@ -203,9 +208,9 @@ Output structure: Findings by severity → Code citations → Suggested fixes.`,
       stdinPrompt: false,
       reasoningEffort: false,
     },
-    parseOutput(stdout) {
+    parseOutput(stdout: string): AgentResult {
       try {
-        const parsed = JSON.parse(stdout);
+        const parsed = JSON.parse(stdout) as { response?: string; text?: string };
         return {
           output: parsed?.response ?? parsed?.text ?? stdout,
           tokenUsage: null,
@@ -220,8 +225,8 @@ Output structure: Findings by severity → Code citations → Suggested fixes.`,
       quotaExhausted: /QUOTA_EXHAUSTED.*(?:day|month)|daily.*quota|monthly.*quota/i,
       networkError: /ECONNREFUSED|ENOTFOUND/i,
     },
-    modelBelongsTo: (id) => String(id).toLowerCase().startsWith('gemini-'),
-    async quotaVerify(apiKey) {
+    modelBelongsTo: (id: string) => String(id).toLowerCase().startsWith('gemini-'),
+    async quotaVerify(apiKey?: string) {
       if (!apiKey)
         return {
           verified: 'unknown',
@@ -242,7 +247,7 @@ Output structure: Findings by severity → Code citations → Suggested fixes.`,
       return { verified: 'unknown', status: res.status, reason: `HTTP ${res.status}` };
     },
     economyModel: () => 'gemini-3-flash-preview',
-    readInstructions: (f) =>
+    readInstructions: (f: string) =>
       `Read broadly: ${f}, QUICK_REFERENCE.md, AI_SYNC_STATE.json, AI_SYNC_LOG.md, and all files in your task scope.`,
     taskRules: ['- Cite specific file paths and line numbers in all findings.'],
   },
@@ -253,12 +258,10 @@ Output structure: Findings by severity → Code citations → Suggested fixes.`,
     label: 'GPT-5.4',
     cli: 'codex',
     invoke: {
-      nonInteractive: (prompt, opts = {}) => {
+      nonInteractive: (prompt: string, opts: HeadlessOpts = {}): [string, string[]] => {
         if (!opts.cwd) {
           throw new Error('Codex invoke requires opts.cwd (project root path)');
         }
-        // Only write to a file when the caller explicitly requests it via opts.outputPath.
-        // Audit dispatch reads stdout, so omitting -o keeps output on stdout.
         return [
           'codex',
           [
@@ -272,8 +275,8 @@ Output structure: Findings by severity → Code citations → Suggested fixes.`,
           ],
         ];
       },
-      interactive: (prompt) => ['codex', [prompt]],
-      headless: (prompt, opts = {}) => {
+      interactive: (prompt: string): [string, string[]] => ['codex', [prompt]],
+      headless: (_prompt: string, opts: HeadlessOpts = {}): [string, string[]] => {
         const args = ['exec', '-'];
         if (opts.permissionMode === 'full-auto') {
           console.warn(
@@ -325,9 +328,9 @@ Sandbox-aware: no network access, file-system focused. Work within your sandbox 
     tags: ['implementation', 'coding', 'testing'],
     enabled: true,
     features: { executeMode: 'spawn', jsonOutput: true, stdinPrompt: true, reasoningEffort: true },
-    parseOutput(stdout) {
+    parseOutput(stdout: string): AgentResult {
       return {
-        output: extractCodexText(stdout),
+        output: extractCodexText(stdout) ?? stdout,
         tokenUsage: extractCodexUsage(stdout),
         costUsd: null,
       };
@@ -338,7 +341,7 @@ Sandbox-aware: no network access, file-system focused. Work within your sandbox 
       quotaExhausted: /usage_limit|spending_limit|hard_limit|insufficient_quota/i,
       networkError: /ECONNREFUSED|ENOTFOUND/i,
     },
-    modelBelongsTo: (id) => {
+    modelBelongsTo: (id: string) => {
       const l = String(id).toLowerCase();
       return (
         l.startsWith('gpt-') ||
@@ -349,7 +352,7 @@ Sandbox-aware: no network access, file-system focused. Work within your sandbox 
         l.startsWith('codex')
       );
     },
-    async quotaVerify(apiKey, { hintText } = {}) {
+    async quotaVerify(apiKey?: string, { hintText }: { hintText?: string } = {}) {
       if (hintText && /chatgpt\.com\/codex/i.test(hintText)) {
         return {
           verified: 'unknown',
@@ -370,8 +373,8 @@ Sandbox-aware: no network access, file-system focused. Work within your sandbox 
       }
       return { verified: 'unknown', status: res.status, reason: `HTTP ${res.status}` };
     },
-    economyModel: (budgetCfg) => budgetCfg?.handoffModel || 'o4-mini',
-    readInstructions: (f) =>
+    economyModel: (budgetCfg?: { handoffModel?: string }) => budgetCfg?.handoffModel || 'o4-mini',
+    readInstructions: (f: string) =>
       `Read ${f} for conventions, then read task-specific files listed in your assigned task.`,
     taskRules: ['- Do not redesign — follow the spec. Report exactly what you changed.'],
   },
@@ -407,16 +410,16 @@ Sandbox-aware: no network access, file-system focused. Work within your sandbox 
     tags: ['local', 'free', 'offline'],
     enabled: true,
     features: { executeMode: 'api', jsonOutput: false, stdinPrompt: false, reasoningEffort: false },
-    parseOutput: (stdout) => ({ output: stdout, tokenUsage: null, costUsd: null }),
+    parseOutput: (stdout: string): AgentResult => ({ output: stdout, tokenUsage: null, costUsd: null }),
     errorPatterns: { networkError: /ECONNREFUSED|ENOTFOUND|connection refused/i },
-    modelBelongsTo: (id) => {
+    modelBelongsTo: (id: string) => {
       const cfg = loadHydraConfig();
       const localModel = cfg.local?.model;
       return Boolean(localModel && String(id).toLowerCase() === String(localModel).toLowerCase());
     },
     quotaVerify: async () => null,
     economyModel: () => null,
-    readInstructions: (f) => `Read ${f} first.`,
+    readInstructions: (f: string) => `Read ${f} first.`,
     taskRules: [],
   },
 };
@@ -428,7 +431,7 @@ Sandbox-aware: no network access, file-system focused. Work within your sandbox 
  * @param {string} name - Unique agent name (lowercase, no spaces)
  * @param {object} def - Agent definition object
  */
-export function registerAgent(name, def) {
+export function registerAgent(name: string, def: Partial<AgentDef>): AgentDef {
   if (!name || typeof name !== 'string') {
     throw new Error('Agent name must be a non-empty string');
   }
@@ -436,52 +439,52 @@ export function registerAgent(name, def) {
   if (!/^[a-z][a-z0-9-]*$/.test(lower)) {
     throw new Error(`Invalid agent name "${name}": must be lowercase alphanumeric with hyphens`);
   }
-  const type = def.type || AGENT_TYPE.PHYSICAL;
+  const type = (def.type ?? AGENT_TYPE.PHYSICAL) as AgentDef['type'];
   if (type === AGENT_TYPE.VIRTUAL && !def.baseAgent) {
     throw new Error(`Virtual agent "${name}" must specify a baseAgent`);
   }
-  if (type === AGENT_TYPE.VIRTUAL && !_registry.has(def.baseAgent)) {
+  if (type === AGENT_TYPE.VIRTUAL && !_registry.has(def.baseAgent!)) {
     throw new Error(`Virtual agent "${name}" references unknown baseAgent "${def.baseAgent}"`);
   }
 
-  const entry = {
+  const _defaultExecuteMode = def.customType === 'api' ? ('api' as const) : ('spawn' as const);
+
+  const entry: AgentDef = {
     name: lower,
     type,
-    customType: def.customType || null,
-    baseAgent: def.baseAgent || null,
-    displayName: def.displayName || name,
-    label: def.label || def.displayName || name,
-    cli: type === AGENT_TYPE.PHYSICAL ? (def.cli === undefined ? lower : def.cli) : null,
-    invoke: type === AGENT_TYPE.PHYSICAL ? def.invoke : null,
+    customType: def.customType ?? null,
+    baseAgent: def.baseAgent ?? null,
+    displayName: def.displayName ?? name,
+    label: def.label ?? def.displayName ?? name,
+    cli: type === AGENT_TYPE.PHYSICAL ? (def.cli === undefined ? lower : (def.cli ?? null)) : null,
+    invoke: type === AGENT_TYPE.PHYSICAL ? (def.invoke ?? null) : null,
     contextBudget: def.contextBudget ?? (type === AGENT_TYPE.VIRTUAL ? null : 120_000),
-    contextTier: def.contextTier || null,
-    strengths: def.strengths || [],
-    weaknesses: def.weaknesses || [],
-    councilRole: def.councilRole || null,
-    taskAffinity: def.taskAffinity || {},
-    rolePrompt: def.rolePrompt || '',
+    contextTier: def.contextTier ?? null,
+    strengths: def.strengths ?? [],
+    weaknesses: def.weaknesses ?? [],
+    councilRole: def.councilRole ?? null,
+    taskAffinity: def.taskAffinity ?? {},
+    rolePrompt: def.rolePrompt ?? '',
     timeout: def.timeout ?? null,
-    tags: def.tags || [],
+    tags: def.tags ?? [],
     enabled: def.enabled !== false,
+    // Plugin interface defaults — applied to all agents, including custom
+    features: {
+      executeMode: _defaultExecuteMode,
+      jsonOutput: false,
+      stdinPrompt: false,
+      reasoningEffort: false,
+      ...(def.features ?? {}),
+    },
+    parseOutput:
+      def.parseOutput ?? ((stdout: string): AgentResult => ({ output: stdout, tokenUsage: null, costUsd: null })),
+    errorPatterns: def.errorPatterns ?? {},
+    modelBelongsTo: def.modelBelongsTo ?? (() => false),
+    quotaVerify: def.quotaVerify ?? (async () => null),
+    economyModel: def.economyModel ?? (() => null),
+    readInstructions: def.readInstructions ?? ((f: string) => `Read ${f} first.`),
+    taskRules: def.taskRules ?? [],
   };
-
-  // Plugin interface defaults — applied to all agents, including custom
-  const _defaultExecuteMode = def.customType === 'api' ? 'api' : 'spawn';
-  entry.features = {
-    executeMode: _defaultExecuteMode,
-    jsonOutput: false,
-    stdinPrompt: false,
-    reasoningEffort: false,
-    ...def.features,
-  };
-  entry.parseOutput =
-    def.parseOutput ?? ((stdout) => ({ output: stdout, tokenUsage: null, costUsd: null }));
-  entry.errorPatterns = def.errorPatterns ?? {};
-  entry.modelBelongsTo = def.modelBelongsTo ?? (() => false);
-  entry.quotaVerify = def.quotaVerify ?? (async () => null);
-  entry.economyModel = def.economyModel ?? (() => null);
-  entry.readInstructions = def.readInstructions ?? ((f) => `Read ${f} first.`);
-  entry.taskRules = def.taskRules ?? [];
 
   _registry.set(lower, entry);
   return entry;
@@ -490,11 +493,11 @@ export function registerAgent(name, def) {
 /**
  * Unregister a custom/virtual agent. Cannot unregister built-in physical agents.
  */
-export function unregisterAgent(name) {
+export function unregisterAgent(name: string): boolean {
   const lower = String(name).toLowerCase();
   const entry = _registry.get(lower);
   if (!entry) return false;
-  if (entry.type === AGENT_TYPE.PHYSICAL && PHYSICAL_AGENTS[lower]) {
+  if (entry.type === AGENT_TYPE.PHYSICAL && (PHYSICAL_AGENTS as Record<string, unknown>)[lower]) {
     throw new Error(`Cannot unregister built-in physical agent "${lower}"`);
   }
   _registry.delete(lower);
@@ -504,7 +507,7 @@ export function unregisterAgent(name) {
 /**
  * Get an agent definition by name. Returns null if not found.
  */
-export function getAgent(name) {
+export function getAgent(name: string | null | undefined): AgentDef | null {
   if (!name) return null;
   return _registry.get(String(name).toLowerCase()) || null;
 }
@@ -514,7 +517,7 @@ export function getAgent(name) {
  * For physical agents, returns the agent itself.
  * Follows the baseAgent chain for virtual agents.
  */
-export function resolvePhysicalAgent(name) {
+export function resolvePhysicalAgent(name: string | null | undefined): AgentDef | null {
   if (!name) return null;
   let agent = _registry.get(String(name).toLowerCase());
   if (!agent) return null;
@@ -535,8 +538,13 @@ export function resolvePhysicalAgent(name) {
  * @param {boolean} [opts.enabled] - Filter by enabled status
  * @returns {object[]} Array of agent definitions
  */
-export function listAgents(opts = {}) {
-  const results = [];
+interface ListAgentsOpts {
+  type?: 'physical' | 'virtual';
+  enabled?: boolean;
+}
+
+export function listAgents(opts: ListAgentsOpts = {}): AgentDef[] {
+  const results: AgentDef[] = [];
   for (const agent of _registry.values()) {
     if (opts.type && agent.type !== opts.type) continue;
     if (opts.enabled !== undefined && agent.enabled !== opts.enabled) continue;
@@ -551,25 +559,25 @@ export function listAgents(opts = {}) {
  * AGENTS — backward-compatible object accessor.
  * Returns physical agents by default (existing code works unchanged).
  */
-export const AGENTS = new Proxy(
-  {},
+export const AGENTS: Record<string, AgentDef | undefined> = new Proxy(
+  {} as Record<string, AgentDef | undefined>,
   {
     get(_, prop) {
       if (typeof prop === 'symbol') return;
       // Support Object.keys(), for-in, JSON.stringify
       if (prop === 'toJSON') {
         return () => {
-          const obj = {};
+          const obj: Record<string, AgentDef> = {};
           for (const [k, v] of _registry) {
             if (v.type === AGENT_TYPE.PHYSICAL) obj[k] = v;
           }
           return obj;
         };
       }
-      return _registry.get(prop) || undefined;
+      return _registry.get(String(prop)) ?? undefined;
     },
     has(_, prop) {
-      return _registry.has(prop);
+      return _registry.has(String(prop));
     },
     ownKeys() {
       return [..._registry.entries()]
@@ -577,16 +585,17 @@ export const AGENTS = new Proxy(
         .map(([k]) => k);
     },
     getOwnPropertyDescriptor(_, prop) {
-      const val = _registry.get(prop);
-      if (val && val.type === AGENT_TYPE.PHYSICAL) {
+      const val = _registry.get(String(prop));
+      if (val?.type === AGENT_TYPE.PHYSICAL) {
         return { configurable: true, enumerable: true, writable: false, value: val };
       }
+      return undefined;
     },
   },
 );
 
 /** Physical agent names only — backward-compatible default */
-export const AGENT_NAMES = new Proxy([], {
+export const AGENT_NAMES: string[] = new Proxy([] as string[], {
   get(_, prop) {
     const physicalNames = [..._registry.entries()]
       .filter(([, v]) => v.type === AGENT_TYPE.PHYSICAL)
@@ -612,7 +621,7 @@ export const AGENT_NAMES = new Proxy([], {
     if (prop === 'keys') return physicalNames.keys.bind(physicalNames);
     if (prop === 'values') return physicalNames.values.bind(physicalNames);
     if (typeof prop === 'string' && /^\d+$/.test(prop)) return physicalNames[Number(prop)];
-    return physicalNames[prop];
+    return (physicalNames as unknown as Record<string | symbol, unknown>)[prop];
   },
 });
 
@@ -629,7 +638,7 @@ export function getAllAgentNames() {
 export const AGENT_DISPLAY_ORDER = ['gemini', 'codex', 'claude'];
 
 /** Dynamic KNOWN_OWNERS — derives from registry + human + unassigned */
-export const KNOWN_OWNERS = new Proxy(new Set(), {
+export const KNOWN_OWNERS: Set<string> = new Proxy(new Set<string>(), {
   get(target, prop) {
     const names = new Set([..._registry.keys(), 'human', 'unassigned']);
     if (prop === 'has') return names.has.bind(names);
@@ -639,7 +648,7 @@ export const KNOWN_OWNERS = new Proxy(new Set(), {
     if (prop === 'values') return names.values.bind(names);
     if (prop === 'keys') return names.keys.bind(names);
     if (prop === 'entries') return names.entries.bind(names);
-    return target[prop];
+    return (target as unknown as Record<string | symbol, unknown>)[prop];
   },
 });
 
@@ -662,14 +671,16 @@ export const TASK_TYPES = [
 
 const AFFINITY_FILE = path.join(HYDRA_ROOT, 'docs', 'coordination', 'agent-affinities.json');
 
-let _affinityOverrides = null; // lazy-loaded cache
+type AffinityEntry = { adjustment: number; sampleCount: number; successCount: number };
 
-function loadAffinityOverrides() {
+let _affinityOverrides: Record<string, AffinityEntry> | null = null; // lazy-loaded cache
+
+function loadAffinityOverrides(): Record<string, AffinityEntry> {
   if (_affinityOverrides) return _affinityOverrides;
   try {
     const raw = fs.readFileSync(AFFINITY_FILE, 'utf8');
-    const data = JSON.parse(raw);
-    _affinityOverrides = data.overrides || {};
+    const data = JSON.parse(raw) as { overrides?: Record<string, AffinityEntry> };
+    _affinityOverrides = data.overrides ?? {};
   } catch {
     _affinityOverrides = {};
   }
@@ -692,7 +703,11 @@ function saveAffinityOverrides() {
  * @param {string} taskType - Task type (from TASK_TYPES)
  * @param {'success'|'partial'|'failed'|'rejected'} outcome
  */
-export function recordTaskOutcome(agent, taskType, outcome) {
+export function recordTaskOutcome(
+  agent: string,
+  taskType: string,
+  outcome: 'success' | 'partial' | 'failed' | 'rejected',
+): void {
   const cfg = loadHydraConfig();
   const learning = cfg.agents?.affinityLearning;
   if (!learning?.enabled) return;
@@ -727,30 +742,40 @@ export function invalidateAffinityCache() {
   _affinityOverrides = null;
 }
 
-export function bestAgentFor(taskType, opts = {}) {
-  const includeVirtual = opts.includeVirtual || false;
-  const mode = opts.mode || 'balanced';
-  const budgetState = opts.budgetState || null;
+interface BestAgentOpts {
+  includeVirtual?: boolean;
+  mode?: string;
+  budgetState?: {
+    daily?: { percentUsed?: number };
+    weekly?: { percentUsed?: number; percent?: number };
+    percent?: number;
+  } | null;
+}
+
+export function bestAgentFor(taskType: TaskType | string, opts: BestAgentOpts = {}): string {
+  const includeVirtual = opts.includeVirtual ?? false;
+  const mode = opts.mode ?? 'balanced';
+  const budgetState = opts.budgetState ?? null;
   const cfg = loadHydraConfig();
   const learningEnabled = cfg.agents?.affinityLearning?.enabled;
   const overrides = learningEnabled ? loadAffinityOverrides() : {};
 
   // Budget gate: auto-boost local when cloud usage exceeds thresholds
-  const localGate = cfg.local?.budgetGate || {};
+  const localGate = cfg.local?.budgetGate ?? { dailyPct: 80, weeklyPct: 75 };
   const dailyPct = budgetState?.daily?.percentUsed ?? budgetState?.percent;
   const weeklyPct = budgetState?.weekly?.percentUsed ?? budgetState?.weekly?.percent;
   const budgetTriggered =
-    dailyPct > (localGate.dailyPct ?? 80) || weeklyPct > (localGate.weeklyPct ?? 75);
+    (dailyPct ?? 0) > (localGate.dailyPct ?? 80) || (weeklyPct ?? 0) > (localGate.weeklyPct ?? 75);
 
   const localBoost = mode === 'economy' || budgetTriggered;
   const localPenalty = mode === 'performance';
 
-  const candidates = [];
+  const candidates: Array<{ name: string; score: number }> = [];
   for (const [name, agent] of _registry) {
     if (!agent.enabled) continue;
     if (name === 'local' && !cfg.local?.enabled) continue;
     if (!includeVirtual && agent.type === AGENT_TYPE.VIRTUAL) continue;
-    let score = agent.taskAffinity[taskType] || 0;
+    let score = (agent.taskAffinity as Record<string, number>)[taskType] ?? 0;
     const key = `${name}:${taskType}`;
     if (overrides[key]?.adjustment) {
       score += overrides[key].adjustment;
@@ -766,7 +791,7 @@ export function bestAgentFor(taskType, opts = {}) {
   return candidates[0].name;
 }
 
-export function classifyTask(title, notes = '') {
+export function classifyTask(title: string, notes = ''): TaskType {
   const text = `${title} ${notes}`.toLowerCase();
   if (/security|vulnerab|owasp|cve|auth.?audit|pentest|sanitiz/.test(text)) return 'security';
   if (/research|explore|investigate|understand|discover|map|survey/.test(text)) return 'research';
@@ -783,14 +808,14 @@ export function classifyTask(title, notes = '') {
 /**
  * Get the default verification partner for an agent.
  */
-export function getVerifier(producerAgent) {
+export function getVerifier(producerAgent: string): string {
   const cfg = loadHydraConfig();
-  const pairings = cfg.crossModelVerification?.pairings;
-  if (pairings && pairings[producerAgent]) {
+  const pairings = cfg.crossModelVerification?.pairings as Record<string, string> | undefined;
+  if (pairings?.[producerAgent]) {
     return pairings[producerAgent];
   }
-  const defaults = { gemini: 'claude', codex: 'claude', claude: 'gemini' };
-  return defaults[producerAgent] || 'claude';
+  const defaults: Record<string, string> = { gemini: 'claude', codex: 'claude', claude: 'gemini' };
+  return defaults[producerAgent] ?? 'claude';
 }
 
 // ── Registry Initialization ──────────────────────────────────────────────────
@@ -801,7 +826,7 @@ let _initialized = false;
  * Initialize the agent registry. Called at startup.
  * Registers physical agents, then loads built-in sub-agents and custom agents from config.
  */
-export function initAgentRegistry() {
+export function initAgentRegistry(): void {
   if (_initialized) return;
 
   // 1. Register the 3 physical agents
@@ -830,9 +855,10 @@ export function initAgentRegistry() {
     // Register custom user-defined virtual agents
     if (agentsCfg.custom && typeof agentsCfg.custom === 'object') {
       for (const [name, def] of Object.entries(agentsCfg.custom)) {
-        if (def && def.baseAgent) {
+        const d = def as Record<string, unknown>;
+        if (d?.['baseAgent']) {
           try {
-            registerAgent(name, { ...def, type: AGENT_TYPE.VIRTUAL });
+            registerAgent(name, { ...(d as Partial<AgentDef>), type: AGENT_TYPE.VIRTUAL as AgentDef['type'] });
           } catch {
             /* skip invalid custom agents */
           }
@@ -846,11 +872,11 @@ export function initAgentRegistry() {
         if (!def?.name || !['cli', 'api'].includes(def?.type)) continue;
         try {
           registerAgent(def.name, {
-            ...def,
-            type: AGENT_TYPE.PHYSICAL,
+            ...(def as unknown as Partial<AgentDef>),
+            type: AGENT_TYPE.PHYSICAL as AgentDef['type'],
             customType: def.type,
-            cli: def.type === 'cli' ? def.invoke?.headless?.cmd || def.name : null,
-            invoke: def.invoke || null,
+            cli: def.type === 'cli' ? (def.invoke?.headless?.cmd ?? def.name) : null,
+            invoke: def.invoke as unknown as AgentInvoke | undefined,
           });
         } catch {
           /* skip invalid custom agents silently */
@@ -867,14 +893,11 @@ export function initAgentRegistry() {
 /**
  * Check if the registry has been initialized.
  */
-export function isRegistryInitialized() {
+export function isRegistryInitialized(): boolean {
   return _initialized;
 }
 
-/**
- * Reset registry (for testing only).
- */
-export function _resetRegistry() {
+export function _resetRegistry(): void {
   _registry.clear();
   _initialized = false;
 }
@@ -895,7 +918,9 @@ export const MODEL_REASONING_CAPS = _getReasoningCapsMap();
  * @param {string} modelId - Model identifier
  * @returns {{ type: string, levels?: string[], budgets?: object, variants?: object, default?: string }}
  */
-export function getModelReasoningCaps(modelId) {
+type ReasoningCapsEntry = ReturnType<typeof _getReasoningCapsMap>[string];
+
+export function getModelReasoningCaps(modelId: string): ReasoningCapsEntry {
   if (!modelId) return { type: 'none' };
   let bestKey = '';
   for (const prefix of Object.keys(MODEL_REASONING_CAPS)) {
@@ -906,23 +931,18 @@ export function getModelReasoningCaps(modelId) {
   return bestKey ? MODEL_REASONING_CAPS[bestKey] : { type: 'none' };
 }
 
-/**
- * Get picker-ready options for a model's reasoning/thinking controls.
- * @param {string} modelId
- * @returns {Array<{id: string|null, label: string, hint: string}>}
- */
-export function getEffortOptionsForModel(modelId) {
+export function getEffortOptionsForModel(modelId: string): Array<{ id: string | null; label: string; hint: string }> {
   const caps = getModelReasoningCaps(modelId);
 
   if (caps.type === 'effort') {
     return [
-      { id: null, label: 'default', hint: `model default (${caps.default})` },
-      ...caps.levels.map((l) => ({ id: l, label: l, hint: '' })),
+      { id: null, label: 'default', hint: `model default (${caps.default ?? ''})` },
+      ...(caps.levels ?? []).map((l) => ({ id: l, label: l, hint: '' })),
     ];
   }
 
   if (caps.type === 'thinking') {
-    return caps.levels.map((l) => {
+    return (caps.levels ?? []).map((l) => {
       const budget = caps.budgets?.[l];
       const hint = budget ? `${Math.round(budget / 1024)}K tokens` : '';
       return { id: l, label: l, hint };
@@ -930,10 +950,11 @@ export function getEffortOptionsForModel(modelId) {
   }
 
   if (caps.type === 'model-swap') {
-    return Object.keys(caps.variants).map((k) => ({
+    const variants = caps.variants ?? {};
+    return Object.keys(variants).map((k) => ({
       id: k,
       label: k,
-      hint: caps.variants[k],
+      hint: String(variants[k] ?? ''),
     }));
   }
 
@@ -946,7 +967,7 @@ export function getEffortOptionsForModel(modelId) {
  * @param {string|null} effortValue
  * @returns {string}
  */
-export function formatEffortDisplay(modelId, effortValue) {
+export function formatEffortDisplay(modelId: string, effortValue: string | null | undefined): string {
   if (!effortValue) return '';
   const caps = getModelReasoningCaps(modelId);
 
@@ -971,23 +992,23 @@ export function formatEffortDisplay(modelId, effortValue) {
 
 export const REASONING_EFFORTS = ['low', 'medium', 'high', 'xhigh'];
 
-export function getReasoningEffort(agentName) {
+export function getReasoningEffort(agentName: string): string | null {
   const cfg = loadHydraConfig();
-  return cfg.models?.[agentName]?.reasoningEffort || null;
+  return cfg.models[agentName]?.reasoningEffort ?? null;
 }
 
-export function setReasoningEffort(agentName, level) {
+export function setReasoningEffort(agentName: string, level: string | null): string | null {
   invalidateConfigCache();
   const cfg = loadHydraConfig();
-  if (!cfg.models[agentName]) cfg.models[agentName] = {};
-  cfg.models[agentName].reasoningEffort = level || null;
+  if (!cfg.models[agentName]) cfg.models[agentName] = {} as ModelConfig;
+  cfg.models[agentName].reasoningEffort = level ?? undefined;
   saveHydraConfig(cfg);
   return level;
 }
 
 // ── Model Management ─────────────────────────────────────────────────────────
 
-function normalizeLegacyModelId(agentName, modelId) {
+function normalizeLegacyModelId(agentName: string, modelId: string | null | undefined): string | null | undefined {
   if (!modelId) return modelId;
   const value = String(modelId);
   const lower = value.toLowerCase();
@@ -1000,34 +1021,36 @@ function normalizeLegacyModelId(agentName, modelId) {
   return modelId;
 }
 
-export function resolveModelId(agentName, shorthand) {
+export function resolveModelId(agentName: string, shorthand: string | null | undefined): string | null {
   if (!shorthand) return null;
   const normalized = normalizeLegacyModelId(agentName, shorthand);
   const lower = String(normalized).toLowerCase();
   const cfg = loadHydraConfig();
 
   const aliases = cfg.aliases?.[agentName];
-  if (aliases && aliases[lower]) return aliases[lower];
+  if (aliases?.[lower]) return aliases[lower];
 
   const agentModels = cfg.models?.[agentName];
-  if (agentModels && agentModels[lower]) return agentModels[lower];
+  if (agentModels && (agentModels as Record<string, unknown>)[lower]) {
+    return (agentModels as Record<string, string>)[lower];
+  }
 
-  return normalized;
+  return normalized ?? null;
 }
 
-export function getMode() {
+export function getMode(): string {
   const cfg = loadHydraConfig();
-  return cfg.mode || 'performance';
+  return cfg.mode ?? 'performance';
 }
 
-export function setMode(modeName) {
+export function setMode(modeName: string): string {
   invalidateConfigCache();
   const cfg = loadHydraConfig();
-  const tiers = cfg.modeTiers || {};
+  const tiers = cfg.modeTiers ?? {};
   if (!tiers[modeName]) {
     throw new Error(`Unknown mode "${modeName}". Available: ${Object.keys(tiers).join(', ')}`);
   }
-  cfg.mode = modeName;
+  cfg.mode = modeName as typeof cfg.mode;
   for (const agent of getPhysicalAgentNames()) {
     if (cfg.models[agent]) {
       cfg.models[agent].active = 'default';
@@ -1037,7 +1060,7 @@ export function setMode(modeName) {
   return modeName;
 }
 
-export function resetAgentModel(agentName) {
+export function resetAgentModel(agentName: string): string | null {
   invalidateConfigCache();
   const cfg = loadHydraConfig();
   if (cfg.models[agentName]) {
@@ -1047,7 +1070,7 @@ export function resetAgentModel(agentName) {
   return getActiveModel(agentName);
 }
 
-export function getActiveModel(agentName) {
+export function getActiveModel(agentName: string): string | null {
   const envKey = `HYDRA_${agentName.toUpperCase()}_MODEL`;
   const envVal = process.env[envKey];
   if (envVal) return resolveModelId(agentName, envVal) || envVal;
@@ -1057,10 +1080,10 @@ export function getActiveModel(agentName) {
   if (!agentModels) return null;
 
   const activeKey = agentModels.active || 'default';
-  const normalize = (modelId) => {
+  const normalize = (modelId: string | null | undefined): string | null => {
     if (!modelId) return null;
     const legacyNormalized = normalizeLegacyModelId(agentName, modelId);
-    return resolveModelId(agentName, legacyNormalized) || legacyNormalized;
+    return resolveModelId(agentName, legacyNormalized) ?? legacyNormalized ?? null;
   };
 
   // If reasoning effort is high and it's gemini, prefer the 'thinking' alias if it exists
@@ -1075,31 +1098,31 @@ export function getActiveModel(agentName) {
   }
 
   if (activeKey !== 'default') {
-    const selected = agentModels[activeKey] || activeKey;
-    return normalize(selected) || normalize(agentModels.default);
+    const selected = (agentModels as Record<string, string>)[activeKey] ?? activeKey;
+    return normalize(selected) ?? normalize(agentModels.default);
   }
 
-  const mode = cfg.mode || 'performance';
+  const mode = cfg.mode ?? 'performance';
   const tierPreset = cfg.modeTiers?.[mode]?.[agentName];
-  if (tierPreset && agentModels[tierPreset]) {
-    return normalize(agentModels[tierPreset]);
+  if (tierPreset && (agentModels as Record<string, string>)[tierPreset]) {
+    return normalize((agentModels as Record<string, string>)[tierPreset]);
   }
 
   return normalize(agentModels.default);
 }
 
-export function setActiveModel(agentName, modelKeyOrId) {
+export function setActiveModel(agentName: string, modelKeyOrId: string): string | null {
   invalidateConfigCache();
   const cfg = loadHydraConfig();
   if (!cfg.models[agentName]) {
-    cfg.models[agentName] = {};
+    cfg.models[agentName] = {} as ModelConfig;
   }
 
   const agentModels = cfg.models[agentName];
-  if (['default', 'fast', 'cheap'].includes(modelKeyOrId) && agentModels[modelKeyOrId]) {
+  if (['default', 'fast', 'cheap'].includes(modelKeyOrId) && (agentModels as Record<string, unknown>)[modelKeyOrId]) {
     agentModels.active = modelKeyOrId;
   } else {
-    const resolved = resolveModelId(agentName, modelKeyOrId) || modelKeyOrId;
+    const resolved = resolveModelId(agentName, modelKeyOrId) ?? modelKeyOrId;
     agentModels.active = resolved;
   }
 
@@ -1107,8 +1130,8 @@ export function setActiveModel(agentName, modelKeyOrId) {
   return getActiveModel(agentName);
 }
 
-export function getModelFlags(agentName) {
-  const flags = [];
+export function getModelFlags(agentName: string): string[] {
+  const flags: string[] = [];
   const modelId = getActiveModel(agentName);
   const cfg = loadHydraConfig();
   const defaultId = cfg.models?.[agentName]?.default;
@@ -1119,7 +1142,7 @@ export function getModelFlags(agentName) {
 
   const effort = getReasoningEffort(agentName);
   if (effort) {
-    const caps = getModelReasoningCaps(modelId);
+    const caps = getModelReasoningCaps(modelId ?? '');
 
     if (caps.type === 'effort' && agentName === 'codex') {
       // OpenAI o-series: --reasoning-effort low/medium/high
@@ -1133,10 +1156,10 @@ export function getModelFlags(agentName) {
   return flags;
 }
 
-export function getModelSummary() {
+export function getModelSummary(): Record<string, unknown> {
   const cfg = loadHydraConfig();
-  const mode = cfg.mode || 'performance';
-  const summary = {};
+  const mode = cfg.mode ?? 'performance';
+  const summary: Record<string, unknown> = {};
   const physicalNames = getPhysicalAgentNames();
   const orderedAgents = [
     ...AGENT_DISPLAY_ORDER.filter((agent) => physicalNames.includes(agent)),
@@ -1144,24 +1167,24 @@ export function getModelSummary() {
   ];
   for (const agent of orderedAgents) {
     const activeModel = getActiveModel(agent);
-    const agentModels = cfg.models?.[agent] || {};
-    const activeKey = agentModels.active || 'default';
+    const agentModels = (cfg.models?.[agent] ?? {}) as ModelConfig & Record<string, unknown>;
+    const activeKey = agentModels.active ?? 'default';
     const isOverride = activeKey !== 'default';
-    const tierPreset = cfg.modeTiers?.[mode]?.[agent] || 'default';
+    const tierPreset = cfg.modeTiers?.[mode]?.[agent] ?? 'default';
 
     summary[agent] = {
-      active: activeModel || agentModels.default || 'unknown',
+      active: activeModel ?? agentModels.default ?? 'unknown',
       isDefault: !isOverride && activeModel === agentModels.default,
       isOverride,
       tierSource: isOverride ? 'override' : `${mode} → ${tierPreset}`,
-      reasoningEffort: agentModels.reasoningEffort || null,
+      reasoningEffort: agentModels.reasoningEffort ?? null,
       presets: Object.fromEntries(
         Object.entries(agentModels)
           .filter(([k]) => !['active', 'reasoningEffort'].includes(k))
-          .map(([k, v]) => [k, resolveModelId(agent, v) || v]),
+          .map(([k, v]) => [k, resolveModelId(agent, String(v)) ?? v]),
       ),
     };
   }
-  summary._mode = mode;
+  summary['_mode'] = mode;
   return summary;
 }

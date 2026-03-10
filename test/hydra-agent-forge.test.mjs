@@ -9,7 +9,7 @@ import {
   removeForgedAgent,
   generateSamplePrompt,
 } from '../lib/hydra-agent-forge.ts';
-import { TASK_TYPES, getAgent, _resetRegistry, initAgentRegistry } from '../lib/hydra-agents.mjs';
+import { TASK_TYPES, getAgent, _resetRegistry, initAgentRegistry } from '../lib/hydra-agents.ts';
 import { registerBuiltInSubAgents } from '../lib/hydra-sub-agents.ts';
 
 // ── validateAgentSpec ─────────────────────────────────────────────────────────

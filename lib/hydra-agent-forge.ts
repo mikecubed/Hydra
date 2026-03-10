@@ -21,7 +21,7 @@ import {
   listAgents,
   AGENT_TYPE,
   TASK_TYPES,
-} from './hydra-agents.mjs';
+} from './hydra-agents.ts';
 import {
   loadHydraConfig,
   saveHydraConfig,

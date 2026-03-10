@@ -22,7 +22,7 @@ import path from 'node:path';
 // @ts-ignore — cross-spawn has no bundled types; pre-existing across codebase
 import spawn from 'cross-spawn';
 import { loadHydraConfig } from './hydra-config.ts';
-import { getActiveModel, getReasoningEffort, AGENT_NAMES, AGENTS } from './hydra-agents.mjs';
+import { getActiveModel, getReasoningEffort, AGENT_NAMES, AGENTS } from './hydra-agents.ts';
 import pc from 'picocolors';
 
 // ── HTTP helper ─────────────────────────────────────────────────────────────

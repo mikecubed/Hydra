@@ -9,7 +9,7 @@ import {
   initAgentRegistry,
   listAgents,
   unregisterAgent,
-} from '../lib/hydra-agents.mjs';
+} from '../lib/hydra-agents.ts';
 import { loadHydraConfig, _setTestConfig, invalidateConfigCache } from '../lib/hydra-config.ts';
 import { createMockExecuteAgent, loadAgentFixture } from './helpers/mock-agent.mjs';
 

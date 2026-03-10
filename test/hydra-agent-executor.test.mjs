@@ -478,7 +478,7 @@ import {
   AGENT_TYPE,
   _resetRegistry,
   initAgentRegistry,
-} from '../lib/hydra-agents.mjs';
+} from '../lib/hydra-agents.ts';
 
 describe('executeAgent — custom CLI agent routing', () => {
   beforeEach(() => {

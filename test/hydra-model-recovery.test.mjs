@@ -6,7 +6,7 @@ import {
   recoverFromModelError,
   isModelRecoveryEnabled,
 } from '../lib/hydra-model-recovery.mjs';
-import { _resetRegistry, initAgentRegistry } from '../lib/hydra-agents.mjs';
+import { _resetRegistry, initAgentRegistry } from '../lib/hydra-agents.ts';
 
 // Reset registry before each test to ensure clean state
 beforeEach(() => {

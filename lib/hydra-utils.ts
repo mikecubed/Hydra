@@ -8,7 +8,7 @@
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { KNOWN_OWNERS, classifyTask, bestAgentFor, AGENT_NAMES } from './hydra-agents.mjs';
+import { KNOWN_OWNERS, classifyTask, bestAgentFor, AGENT_NAMES } from './hydra-agents.ts';
 import { executeAgent } from './hydra-shared/agent-executor.mjs';
 import { spawnSyncCapture } from './hydra-proc.mjs';
 

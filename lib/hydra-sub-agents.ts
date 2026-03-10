@@ -7,7 +7,7 @@
  * These are registered into the agent registry at startup when enabled in config.
  */
 
-import { registerAgent, AGENT_TYPE, getAgent } from './hydra-agents.mjs';
+import { registerAgent, AGENT_TYPE, getAgent } from './hydra-agents.ts';
 import { loadHydraConfig } from './hydra-config.ts';
 
 // ── Built-in Sub-Agent Definitions ───────────────────────────────────────────

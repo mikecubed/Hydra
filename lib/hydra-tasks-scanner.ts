@@ -19,7 +19,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import spawnRaw from 'cross-spawn';
-import { classifyTask, bestAgentFor } from './hydra-agents.mjs';
+import { classifyTask, bestAgentFor } from './hydra-agents.ts';
 import { classifyPrompt } from './hydra-utils.ts';
 import { listIssues, isGhAvailable, isGhAuthenticated } from './hydra-github.ts';
 import { loadHydraConfig } from './hydra-config.ts';
@@ -443,7 +443,7 @@ if (isDirectRun) {
     const projectRoot = process.argv[2] || process.cwd();
 
     // Initialize agent registry for classifyTask/bestAgentFor
-    const { initAgentRegistry } = await import('./hydra-agents.mjs');
+    const { initAgentRegistry } = await import('./hydra-agents.ts');
     initAgentRegistry();
 
     console.log(pc.bold('\nHydra Tasks Scanner\n'));

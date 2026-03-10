@@ -27,7 +27,7 @@ import {
   AGENTS,
   AGENT_NAMES,
   AGENT_DISPLAY_ORDER,
-} from './hydra-agents.mjs';
+} from './hydra-agents.ts';
 import { fetchModels } from './hydra-models.ts';
 import { formatBenchmarkAnnotation } from './hydra-model-profiles.ts';
 
@@ -419,7 +419,7 @@ export async function pickEffort(agentName: string, modelId?: string | null): Pr
   }
 
   // Determine picker title based on model type
-  const { getModelReasoningCaps } = await import('./hydra-agents.mjs');
+  const { getModelReasoningCaps } = await import('./hydra-agents.ts');
   const caps = getModelReasoningCaps(effectiveModel);
   const TITLES = {
     effort: 'Reasoning Effort',
