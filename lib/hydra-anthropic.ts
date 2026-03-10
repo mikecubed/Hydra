@@ -136,7 +136,8 @@ async function coreStreamAnthropic(
   }
 
   // Parse SSE stream
-  const reader = res.body!.getReader();
+  if (!res.body) throw new Error('Response body is null');
+  const reader = res.body.getReader();
   const decoder = new TextDecoder();
   let buffer = '';
   let fullResponse = '';

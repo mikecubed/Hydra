@@ -186,7 +186,8 @@ export async function runActionPipeline(
     let pipelineResult: PipelineResult;
 
     try {
-      pipelineResult = await executeFn!(item, opts);
+      if (!executeFn) throw new Error('Pipeline executeFn is required but was not provided');
+      pipelineResult = await executeFn(item, opts);
     } catch (err: unknown) {
       pipelineResult = {
         item,

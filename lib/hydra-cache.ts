@@ -197,7 +197,7 @@ export function invalidateCache(namespace: string, key?: string): void {
 export function recordNegativeHit(namespace: string, key: string, error: unknown): void {
   const negKey = `${namespace}:${key}`;
   _getCache('negative').set(negKey, {
-    error: typeof error === 'string' ? error : (error as Error).message,
+    error: typeof error === 'string' ? error : error instanceof Error ? error.message : 'unknown',
     timestamp: Date.now(),
   });
 }

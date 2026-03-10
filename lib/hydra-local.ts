@@ -74,7 +74,9 @@ export async function streamLocalCompletion(
 
   if (!res.ok) {
     const errText = await res.text().catch(() => '');
-    throw new Error(`Local API error ${res.status}: ${errText.slice(0, 200)}`);
+    const err = new Error(`Local API error ${res.status}: ${errText.slice(0, 200)}`);
+    (err as NodeJS.ErrnoException & { status?: number }).status = res.status;
+    throw err;
   }
 
   if (!res.body) {

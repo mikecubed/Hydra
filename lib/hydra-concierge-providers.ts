@@ -35,6 +35,11 @@ export function detectAvailableProviders() {
 
 // ── Fallback Chain ────────────────────────────────────────────────────────────
 
+interface FallbackChainEntry {
+  provider: string;
+  model: string;
+}
+
 /**
  * Build the fallback chain from config, filtered by available API keys.
  * @returns {Array<{provider: string, model: string, available: boolean}>}
@@ -50,10 +55,10 @@ export function buildFallbackChain() {
   const available = detectAvailableProviders();
   const availableSet = new Set(available.map((a) => a.provider));
 
-  return chain.map((entry: unknown) => ({
-    provider: (entry as { provider: string }).provider,
-    model: (entry as { model: string }).model,
-    available: availableSet.has((entry as { provider: string }).provider),
+  return (chain as FallbackChainEntry[]).map((entry) => ({
+    provider: entry.provider,
+    model: entry.model,
+    available: availableSet.has(entry.provider),
   }));
 }
 

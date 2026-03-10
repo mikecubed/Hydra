@@ -87,7 +87,7 @@ export async function runRosterEditor(rl: unknown): Promise<void> {
 
     const actionResult = await promptChoice(rl, {
       title: `Role: ${role}`,
-      context: contextLines.join('\n') as unknown as object,
+      context: contextLines.join('\n'),
       choices: [
         { label: 'Keep current', value: 'keep' },
         { label: 'Change', value: 'change' },
@@ -117,9 +117,7 @@ export async function runRosterEditor(rl: unknown): Promise<void> {
 
     const agentResult = await promptChoice(rl, {
       title: `${role}: Select Agent`,
-      context: (rec?.models != null
-        ? `Recommended models: ${rec.models.join(', ')}`
-        : '') as unknown as object,
+      context: rec?.models != null ? `Recommended models: ${rec.models.join(', ')}` : '',
       choices: agentChoices,
     });
 
@@ -168,7 +166,7 @@ export async function runRosterEditor(rl: unknown): Promise<void> {
 
     const modelResult = await promptChoice(rl, {
       title: `${role}: Select Model`,
-      context: `Agent: ${newAgent}` as unknown as object,
+      context: `Agent: ${newAgent}`,
       choices: modelChoices,
       allowFreeform: true,
       freeformHint: 'Enter a model ID',
@@ -196,7 +194,7 @@ export async function runRosterEditor(rl: unknown): Promise<void> {
 
       const effortResult = await promptChoice(rl, {
         title: `${role}: ${REASONING_TITLES[caps.type] ?? 'Reasoning'}`,
-        context: `Model: ${effectiveModel}` as unknown as object,
+        context: `Model: ${effectiveModel}`,
         choices: effortChoices,
       });
 

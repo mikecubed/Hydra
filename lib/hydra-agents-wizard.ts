@@ -233,7 +233,7 @@ export async function runAgentsWizard(rl: ReadlineInterface): Promise<void> {
 
   // Save to config
   const cfg = loadHydraConfig();
-  const customAgents = [...cfg.agents.customAgents];
+  const customAgents = [...(cfg.agents?.customAgents ?? [])];
   const existing = customAgents.findIndex((a) => a.name === entry.name);
   if (existing >= 0) {
     customAgents[existing] = entry;

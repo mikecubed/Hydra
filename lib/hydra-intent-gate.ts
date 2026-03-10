@@ -9,6 +9,7 @@
  */
 
 import { classifyPrompt } from './hydra-utils.ts';
+import { loadHydraConfig } from './hydra-config.ts';
 
 // ── Filler phrases stripped from the start of prompts ────────────────────────
 const FILLER_PATTERNS = [
@@ -146,12 +147,13 @@ async function defaultRewriteFn(text: string): Promise<string | null> {
   ];
 
   let result = '';
-  await streamLocalCompletion(
-    messages,
-    {} as { model: string; baseUrl: string },
-    (chunk: string) => {
-      result += chunk;
-    },
-  );
+  const cfg = await loadHydraConfig();
+  const localCfg = {
+    model: (cfg.local?.model as string | undefined) ?? 'llama3',
+    baseUrl: (cfg.local?.baseUrl as string | undefined) ?? 'http://localhost:11434/v1',
+  };
+  await streamLocalCompletion(messages, localCfg, (chunk: string) => {
+    result += chunk;
+  });
   return result.trim() || null;
 }

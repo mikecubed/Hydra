@@ -243,9 +243,9 @@ Stack: Node.js ESM, picocolors for colors, no framework deps`;
   return _projectContextCache;
 }
 
-// Git helpers are now imported from hydra-shared/git-ops.mjs
+// Git helpers are now imported from hydra-shared/git-ops.ts
 
-// getBranchStats, getBranchDiff, stageAndCommit, smartMerge are now imported from hydra-shared/git-ops.mjs
+// getBranchStats, getBranchDiff, stageAndCommit, smartMerge are now imported from hydra-shared/git-ops.ts
 
 // ── Checkpoint & Hot-Restart ─────────────────────────────────────────────────
 
@@ -987,7 +987,7 @@ Respond with a JSON object:
   "existingPatterns": ["pattern1", "pattern2", ...],
   "gaps": ["gap1", "gap2", ...],
   "implementationIdeas": ["idea 1", "idea 2", ...],
-  "relevantFiles": [{"path": "lib/file.mjs", "relevance": "..."}],
+  "relevantFiles": [{"path": "lib/file.ts", "relevance": "..."}],
   "feasibilityNotes": "...",
   "confidence": 0.0-1.0
 }`;
@@ -1427,7 +1427,7 @@ ${learningsBlock}
 
 ## Hydra Project Context
 - Node.js multi-agent orchestration system (Claude/Gemini/Codex)
-- Main modules: hydra-operator.mjs, hydra-utils.mjs, hydra-agents.ts, hydra-ui.mjs, hydra-metrics.ts, hydra-statusbar.mjs
+- Main modules: hydra-operator.ts, hydra-utils.ts, hydra-agents.ts, hydra-ui.ts, hydra-metrics.ts, hydra-statusbar.ts
 - Uses picocolors for terminal colors, no external deps besides that
 - Tests use Node.js built-in test runner (node --test)
 
@@ -1437,7 +1437,7 @@ Respond with JSON:
   "objectives": ["obj1", "obj2", ...],
   "constraints": ["constraint1", ...],
   "acceptanceCriteria": ["criterion1", ...],
-  "filesToModify": [{"path": "lib/file.mjs", "changes": "description"}],
+  "filesToModify": [{"path": "lib/file.ts", "changes": "description"}],
   "testPlan": {
     "scenarios": ["scenario1", ...],
     "edgeCases": ["edge1", ...],
