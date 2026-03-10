@@ -8,6 +8,8 @@
 
 **Depends on:** ~~Agent Plugin Refactor (2026-03-08)~~ — **DONE.** The plugin refactor made the executor data-driven. Adding Copilot now requires **zero executor changes** — only a `PHYSICAL_AGENTS` entry with plugin fields, UI colors, model profiles, config, and setup.
 
+**TypeScript prerequisite:** Phases 1–4 of the [TypeScript Migration Plan](./2026-03-10-typescript-migration.md) should complete before this integration is implemented. Task 11 (`resolveCliModelId`) is written during Phase 3 of that migration. The Copilot plugin (Task 1) is written during/after Phase 4 so it is TypeScript from day one, with proper `AgentDef` types. Implementing in JS and migrating later is a valid fallback if the TS migration stalls.
+
 **Architecture:** Add `copilot` as a new `PHYSICAL_AGENTS` entry in `hydra-agents.mjs` with full plugin interface (`features`, `parseOutput`, `errorPatterns`, `modelBelongsTo`, `quotaVerify`, `economyModel`, `readInstructions`, `taskRules`). Wire it into `hydra-ui.mjs` for colored output, register it in `hydra-model-profiles.mjs` and `hydra.config.json`, add CLI detection in `hydra-setup.mjs`, and create a `COPILOT.md` agent instructions file. The agent's council role is **advisor** — it brings GitHub-integrated context (issues, PRs, CI) that the other agents lack.
 
 **Tech Stack:** Node.js ESM, `copilot` CLI binary (GitHub Copilot CLI), existing Hydra agent infrastructure. No new npm dependencies. No executor changes needed — the plugin architecture handles everything.

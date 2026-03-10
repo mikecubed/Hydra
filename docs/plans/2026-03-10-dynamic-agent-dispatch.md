@@ -13,6 +13,20 @@ nothing more than a plugin definition and a config entry.
 
 ---
 
+## Dependencies
+
+This plan depends on the [TypeScript Migration Plan](./2026-03-10-typescript-migration.md).
+Specifically, Phase 7 of the TS migration (Dispatch & Council) should complete before Task A
+(Dispatch Role Resolution) is implemented, so the refactored `hydra-dispatch.mjs` is written in
+TypeScript from the start. Tasks B–D and Phase 3 of the TS migration (Config & Models) is
+sufficient for `resolveCliModelId()` — no need to wait for Phase 7.
+
+Implementing in JS first is a valid fallback if the TS migration stalls, but the discriminated
+union `DaemonEvent` type and typed `DispatchReport` interface provide significant value if written
+in TS from the start.
+
+---
+
 ## Background
 
 ### Current hardcoded surface area
@@ -435,6 +449,7 @@ added by anyone other than the original author.
 
 - [`2026-03-07-github-copilot-cli-integration.md`](./2026-03-07-github-copilot-cli-integration.md) — Copilot agent plugin (Task D is a prerequisite for Task 1 there)
 - [`2026-03-08-agent-plugin-refactor.md`](./2026-03-08-agent-plugin-refactor.md) — The plugin architecture this builds on
+- [`2026-03-10-typescript-migration.md`](./2026-03-10-typescript-migration.md) — Phase 7 of the TS migration unblocks Task A; Phase 3 unblocks Task D
 
 ---
 
