@@ -1,3 +1,5 @@
+import type { IncomingMessage, ServerResponse, Server } from 'node:http';
+
 /**
  * Hydra — canonical shared type definitions.
  *
@@ -621,4 +623,199 @@ export interface CopilotEventData {
 export interface CopilotJsonlEvent {
   type: CopilotEventType;
   data: CopilotEventData;
+}
+
+// ── Daemon state types ───────────────────────────────────────────────────────
+
+/** Checkpoint record stored in TaskState.checkpoints[] */
+export interface CheckpointEntry {
+  note: string;
+  at: string;
+  [key: string]: unknown;
+}
+
+/** Extended task with runtime fields */
+export interface TaskEntry extends TaskState {
+  checkpoints?: CheckpointEntry[];
+  stale?: boolean;
+  staleSince?: string;
+  [key: string]: unknown;
+}
+
+/** Handoff record in daemon state.handoffs[] */
+export interface HandoffEntry {
+  id: string;
+  from: string;
+  to: string;
+  summary: string;
+  nextStep?: string;
+  tasks?: string[];
+  acknowledgedAt?: string | null;
+  acknowledgedBy?: string;
+  createdAt: string;
+  [key: string]: unknown;
+}
+
+/** Blocker record in daemon state.blockers[] */
+export interface BlockerEntry {
+  id: string;
+  title: string;
+  owner: string;
+  status: string;
+  nextStep?: string;
+  createdAt: string;
+  resolvedAt?: string;
+  [key: string]: unknown;
+}
+
+/** Decision record in daemon state.decisions[] */
+export interface DecisionEntry {
+  id: string;
+  title: string;
+  owner: string;
+  rationale?: string;
+  impact?: string;
+  createdAt: string;
+  [key: string]: unknown;
+}
+
+/** Active session in daemon state.activeSession */
+export interface ActiveSessionEntry {
+  id: string;
+  focus: string;
+  owner: string;
+  branch?: string;
+  participants?: string[];
+  status: string;
+  type?: string;
+  children?: string[];
+  startedAt: string;
+  updatedAt: string;
+  pauseReason?: string;
+  pausedAt?: string;
+  [key: string]: unknown;
+}
+
+/** Child/fork session record */
+export interface ChildSessionEntry {
+  id: string;
+  type: string;
+  parentId: string;
+  focus: string;
+  owner: string;
+  status: string;
+  children?: string[];
+  [key: string]: unknown;
+}
+
+/** Full daemon state shape */
+export interface HydraStateShape {
+  schemaVersion?: number;
+  project?: string;
+  updatedAt?: string;
+  activeSession?: ActiveSessionEntry | null;
+  childSessions?: ChildSessionEntry[];
+  tasks: TaskEntry[];
+  handoffs: HandoffEntry[];
+  blockers: BlockerEntry[];
+  decisions: DecisionEntry[];
+  agents?: Record<string, unknown>;
+  [key: string]: unknown;
+}
+
+/** Archive state shape */
+export interface ArchiveState {
+  tasks: TaskEntry[];
+  handoffs: HandoffEntry[];
+  blockers: BlockerEntry[];
+  archivedAt?: string;
+  [key: string]: unknown;
+}
+
+/** Model summary info entry */
+export interface ModelSummaryEntry {
+  active: string;
+  isDefault?: boolean;
+  isOverride?: boolean;
+  tierSource?: string;
+  reasoningEffort?: string;
+  [key: string]: unknown;
+}
+
+/** Usage check result */
+export interface UsageCheckResult {
+  level: string;
+  percent?: number;
+  todayTokens?: number;
+  message?: string;
+  confidence?: number;
+  model?: string;
+  budget?: number;
+  used?: number;
+  remaining?: number;
+  resetAt?: string;
+  resetInMs?: number;
+  agents?: Record<string, unknown>;
+  [key: string]: unknown;
+}
+
+/** Context object passed to handleReadRoute */
+export interface ReadRouteCtx {
+  method: string;
+  route: string;
+  requestUrl: URL;
+  req: IncomingMessage;
+  res: ServerResponse;
+  sendJson: (res: ServerResponse, status: number, data: unknown) => void;
+  sendError: (res: ServerResponse, status: number, message: string, details?: unknown) => void;
+  writeStatus: () => void;
+  readStatus: () => Record<string, unknown>;
+  checkUsage: () => UsageCheckResult;
+  getModelSummary: () => Record<string, ModelSummaryEntry>;
+  readState: () => HydraStateShape;
+  getSummary: (state: HydraStateShape) => Record<string, unknown> | null;
+  projectRoot?: string;
+  projectName?: string;
+  buildPrompt: (agent: string, state: HydraStateShape) => string;
+  suggestNext: (state: HydraStateShape, agent: string) => { action: string; message?: string; task?: Record<string, unknown>; handoff?: Record<string, unknown> };
+  readEvents: (limit: number) => Array<{ seq: number; at: string; type: string; category?: string; payload?: unknown }>;
+  replayEvents: (fromSeq: number) => Array<{ seq: number; at: string; type: string; category?: string; payload?: unknown }>;
+  sseClients: Set<ServerResponse>;
+  readArchive: () => ArchiveState;
+  getMetricsSummary: () => Record<string, unknown>;
+  getEventCount: () => number;
+}
+
+/** Context object passed to handleWriteRoute */
+export interface WriteRouteCtx extends ReadRouteCtx {
+  readJsonBody: (req: IncomingMessage) => Promise<Record<string, unknown>>;
+  enqueueMutation: <T>(label: string, mutator: (state: HydraStateShape) => T, detail?: Record<string, unknown>) => Promise<T>;
+  ensureKnownAgent: (agent: string, strict?: boolean) => void;
+  ensureKnownStatus: (status: string) => void;
+  parseList: (val: unknown) => string[];
+  getCurrentBranch: () => string;
+  toSessionId: () => string;
+  nowIso: () => string;
+  classifyTask: (title: string, type?: string) => string;
+  nextId: (prefix: string, items: unknown[]) => string;
+  detectCycle: (tasks: TaskEntry[], targetId: string, proposedBlockedBy: string[]) => boolean;
+  autoUnblock: (state: HydraStateShape, completedTaskId?: string) => void;
+  AGENT_NAMES: string[];
+  getAgent: (name: string) => AgentDef | undefined;
+  listAgents: (...args: unknown[]) => AgentDef[];
+  resolveVerificationPlan: (...args: unknown[]) => Record<string, unknown>;
+  runVerification: (...args: unknown[]) => void;
+  archiveState: (state: HydraStateShape) => number;
+  truncateEventsFile: (maxLines?: number) => number;
+  appendEvent: (type: string, payload?: unknown) => void;
+  broadcastEvent: (event: unknown) => void;
+  setIsShuttingDown: (value: boolean) => void;
+  server: Server;
+  createSnapshot: () => Record<string, unknown>;
+  cleanOldSnapshots: () => void;
+  checkIdempotency: ((key: string) => boolean) | null;
+  createTaskWorktree: (taskId: string) => string | null;
+  mergeTaskWorktree: (taskId: string) => Record<string, unknown>;
+  cleanupTaskWorktree: (taskId: string) => void;
+  writeStatus: (extra?: Record<string, unknown>) => void;
 }
