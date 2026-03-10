@@ -4,46 +4,48 @@
  * Inspired by Helicone's Tower middleware architecture: each concern (rate limiting,
  * circuit breaking, retry, usage tracking, telemetry) is an independent layer that
  * wraps the core streaming call in an onion-style pipeline.
- *
- * Usage:
- *   const pipeline = createStreamingPipeline('openai', coreStreamFn);
- *   const result = await pipeline(messages, cfg, onChunk);
- *
- * Each middleware has the signature: (ctx, next) => Promise<result>
- * where ctx carries cross-cutting data (provider, model, timing, headers, usage).
  */
 
 import { acquireRateLimit, recordApiRequest, updateFromHeaders } from './hydra-rate-limits.ts';
-import { recordProviderUsage } from './hydra-provider-usage.mjs';
+import { recordProviderUsage } from './hydra-provider-usage.ts';
 import { isCircuitOpen, recordModelFailure } from './hydra-model-recovery.mjs';
 import { loadHydraConfig } from './hydra-config.ts';
 import { startProviderSpan, endProviderSpan } from './hydra-telemetry.ts';
 
 // ---------------------------------------------------------------------------
+// Interfaces
+// ---------------------------------------------------------------------------
+
+interface MiddlewareCtx {
+  provider: string;
+  model: string;
+  messages: unknown[];
+  cfg: Record<string, unknown> & { model?: string };
+  onChunk: ((chunk: string) => void) | null;
+  latencyMs: number;
+}
+
+// ---------------------------------------------------------------------------
 // PeakEWMA — Exponentially Weighted Moving Average for latency tracking
-// Inspired by Helicone/Linkerd's P2C load balancing algorithm
 // ---------------------------------------------------------------------------
 
 /**
  * Tracks latency using an exponentially weighted moving average.
- * Recent observations have more weight; old observations decay.
  */
 export class PeakEWMA {
-  /**
-   * @param {number} [decayMs=10000] — Half-life in ms. After this period, an observation's weight halves.
-   */
-  constructor(decayMs = 10000) {
+  private _decayMs: number;
+  private _ewma: number;
+  private _lastTs: number;
+  private _count: number;
+
+  constructor(decayMs: number = 10000) {
     this._decayMs = decayMs;
     this._ewma = 0;
     this._lastTs = 0;
     this._count = 0;
   }
 
-  /**
-   * Record a latency observation.
-   * @param {number} latencyMs
-   */
-  observe(latencyMs) {
+  observe(latencyMs: number): void {
     const now = Date.now();
     if (this._count === 0) {
       this._ewma = latencyMs;
@@ -53,31 +55,24 @@ export class PeakEWMA {
     }
 
     const elapsed = now - this._lastTs;
-    // Weight = e^(-elapsed/decay) — how much of the old average survives
     const weight = Math.exp(-elapsed / this._decayMs);
     this._ewma = weight * this._ewma + (1 - weight) * latencyMs;
     this._lastTs = now;
     this._count++;
   }
 
-  /**
-   * Get the current estimated latency (decayed to now).
-   * @returns {number} Estimated latency in ms, or 0 if no observations.
-   */
-  get() {
+  get(): number {
     if (this._count === 0) return 0;
     const elapsed = Date.now() - this._lastTs;
     const weight = Math.exp(-elapsed / this._decayMs);
     return this._ewma * weight;
   }
 
-  /** @returns {number} Total observations recorded */
-  get count() {
+  get count(): number {
     return this._count;
   }
 
-  /** Reset to initial state */
-  reset() {
+  reset(): void {
     this._ewma = 0;
     this._lastTs = 0;
     this._count = 0;
@@ -85,26 +80,23 @@ export class PeakEWMA {
 }
 
 // Per-provider PeakEWMA instances for health scoring
-const providerLatency = new Map();
+const providerLatency = new Map<string, PeakEWMA>();
 
 /**
  * Get the PeakEWMA tracker for a provider. Creates one if needed.
- * @param {string} provider
- * @returns {PeakEWMA}
  */
-export function getProviderEWMA(provider) {
+export function getProviderEWMA(provider: string): PeakEWMA {
   if (!providerLatency.has(provider)) {
     providerLatency.set(provider, new PeakEWMA());
   }
-  return providerLatency.get(provider);
+  return providerLatency.get(provider)!;
 }
 
 /**
  * Get estimated latency for all tracked providers.
- * @returns {Record<string, number>} provider → estimated latency ms
  */
-export function getLatencyEstimates() {
-  const out = {};
+export function getLatencyEstimates(): Record<string, number> {
+  const out: Record<string, number> = {};
   for (const [provider, ewma] of providerLatency) {
     out[provider] = ewma.get();
   }
@@ -115,70 +107,64 @@ export function getLatencyEstimates() {
 // Middleware layers
 // ---------------------------------------------------------------------------
 
-/**
- * Rate limit middleware — waits for token bucket before proceeding.
- */
-function rateLimitMiddleware(ctx, next) {
+function rateLimitMiddleware(ctx: MiddlewareCtx, next: () => Promise<unknown>): Promise<unknown> {
   return acquireRateLimit(ctx.provider).then(() => next());
 }
 
-/**
- * Circuit breaker middleware — checks if model is tripped, records failures.
- */
-async function circuitBreakerMiddleware(ctx, next) {
+async function circuitBreakerMiddleware(
+  ctx: MiddlewareCtx,
+  next: () => Promise<unknown>,
+): Promise<unknown> {
   if (ctx.model && isCircuitOpen(ctx.model)) {
     const err = new Error(`Circuit breaker open for model ${ctx.model}`);
-    err.circuitBreakerOpen = true;
+    (err as Error & { circuitBreakerOpen: boolean }).circuitBreakerOpen = true;
     throw err;
   }
 
   try {
     const result = await next();
     return result;
-  } catch (err) {
-    // Record failure for circuit breaker tracking
-    if (ctx.model && err.status && err.status >= 500) {
+  } catch (err: unknown) {
+    if (ctx.model && (err as any).status && (err as any).status >= 500) {
       recordModelFailure(ctx.model);
     }
     throw err;
   }
 }
 
-/**
- * Retry middleware — retries on 429 rate limit errors with exponential backoff.
- */
-async function retryMiddleware(ctx, next) {
-  const cfg = loadHydraConfig();
+async function retryMiddleware(
+  ctx: MiddlewareCtx,
+  next: () => Promise<unknown>,
+): Promise<unknown> {
+  const cfg = loadHydraConfig() as any;
   const maxRetries = cfg.rateLimits?.maxRetries || 3;
   const baseDelayMs = cfg.rateLimits?.baseDelayMs || 5000;
   const maxDelayMs = cfg.rateLimits?.maxDelayMs || 60000;
 
-  let lastErr;
+  let lastErr: unknown;
   for (let attempt = 0; attempt <= maxRetries; attempt++) {
     try {
       return await next();
-    } catch (err) {
+    } catch (err: unknown) {
       lastErr = err;
-      const is429 = err.status === 429 || err.isRateLimit;
+      const is429 = (err as any).status === 429 || (err as any).isRateLimit;
       if (!is429 || attempt >= maxRetries) throw err;
 
-      // Exponential backoff with jitter
       const delay = Math.min(baseDelayMs * 2 ** attempt, maxDelayMs);
       const jitter = delay * 0.1 * Math.random();
       await new Promise((r) => setTimeout(r, delay + jitter));
 
-      // Re-acquire rate limit token before retry
       await acquireRateLimit(ctx.provider);
     }
   }
   throw lastErr;
 }
 
-/**
- * Usage tracking middleware — records provider usage and API request after completion.
- */
-async function usageTrackingMiddleware(ctx, next) {
-  const result = await next();
+async function usageTrackingMiddleware(
+  ctx: MiddlewareCtx,
+  next: () => Promise<unknown>,
+): Promise<unknown> {
+  const result = await next() as any;
 
   if (result.usage) {
     recordProviderUsage(ctx.provider, {
@@ -192,11 +178,11 @@ async function usageTrackingMiddleware(ctx, next) {
   return result;
 }
 
-/**
- * Header capture middleware — extracts rate limit info from response headers.
- */
-async function headerCaptureMiddleware(ctx, next) {
-  const result = await next();
+async function headerCaptureMiddleware(
+  ctx: MiddlewareCtx,
+  next: () => Promise<unknown>,
+): Promise<unknown> {
+  const result = await next() as any;
 
   if (result.rateLimits) {
     updateFromHeaders(ctx.provider, result.rateLimits);
@@ -205,31 +191,31 @@ async function headerCaptureMiddleware(ctx, next) {
   return result;
 }
 
-/**
- * Telemetry middleware — creates OTel spans for provider calls.
- */
-async function telemetryMiddleware(ctx, next) {
+async function telemetryMiddleware(
+  ctx: MiddlewareCtx,
+  next: () => Promise<unknown>,
+): Promise<unknown> {
   const span = await startProviderSpan(ctx.provider, ctx.model);
   const start = Date.now();
   try {
-    const result = await next();
+    const result = await next() as any;
     await endProviderSpan(span, result.usage, Date.now() - start);
     return result;
-  } catch (err) {
-    // End span with error
-    if (!span._noop) {
-      span.recordException?.(err);
-      span.setStatus?.({ code: 2, message: err.message }); // SpanStatusCode.ERROR = 2
-      span.end?.();
+  } catch (err: unknown) {
+    const s = span as any;
+    if (!s._noop) {
+      s.recordException?.(err);
+      s.setStatus?.({ code: 2, message: (err as Error).message });
+      s.end?.();
     }
     throw err;
   }
 }
 
-/**
- * Latency tracking middleware — feeds response time to PeakEWMA.
- */
-async function latencyMiddleware(ctx, next) {
+async function latencyMiddleware(
+  ctx: MiddlewareCtx,
+  next: () => Promise<unknown>,
+): Promise<unknown> {
   const start = Date.now();
   try {
     const result = await next();
@@ -237,9 +223,8 @@ async function latencyMiddleware(ctx, next) {
     getProviderEWMA(ctx.provider).observe(latencyMs);
     ctx.latencyMs = latencyMs;
     return result;
-  } catch (err) {
-    // Don't track latency for rate limit errors (they skew the average)
-    if (err.status !== 429 && !err.isRateLimit) {
+  } catch (err: unknown) {
+    if ((err as any).status !== 429 && !(err as any).isRateLimit) {
       const latencyMs = Date.now() - start;
       getProviderEWMA(ctx.provider).observe(latencyMs);
     }
@@ -251,17 +236,11 @@ async function latencyMiddleware(ctx, next) {
 // Pipeline composition
 // ---------------------------------------------------------------------------
 
-/**
- * Compose middleware layers into a single function.
- * Layers are applied outside-in: the first layer in the array wraps everything.
- *
- * @param {Array<(ctx, next) => Promise>} layers
- * @param {(ctx) => Promise} core — innermost function
- * @returns {(ctx) => Promise}
- */
-function compose(layers, core) {
+function compose(
+  layers: Array<(ctx: MiddlewareCtx, next: () => Promise<unknown>) => Promise<unknown>>,
+  core: (ctx: MiddlewareCtx) => Promise<unknown>,
+): (ctx: MiddlewareCtx) => Promise<unknown> {
   let fn = core;
-  // Build from inside out
   for (let i = layers.length - 1; i >= 0; i--) {
     const layer = layers[i];
     const next = fn;
@@ -270,12 +249,9 @@ function compose(layers, core) {
   return fn;
 }
 
-/**
- * Default middleware stack order.
- * Outermost (first) to innermost (last):
- *   latency → retry → rateLimit → circuitBreaker → telemetry → headerCapture → usageTracking → [core]
- */
-const DEFAULT_LAYERS = [
+const DEFAULT_LAYERS: Array<
+  (ctx: MiddlewareCtx, next: () => Promise<unknown>) => Promise<unknown>
+> = [
   latencyMiddleware,
   retryMiddleware,
   rateLimitMiddleware,
@@ -287,27 +263,30 @@ const DEFAULT_LAYERS = [
 
 /**
  * Create a streaming pipeline that wraps a core provider function with middleware.
- *
- * The core function should have the signature:
- *   (messages, cfg, onChunk) => Promise<{ fullResponse, usage, rateLimits? }>
- *
- * The returned pipeline has the same signature as the core function.
- *
- * @param {string} provider — Provider name ('openai', 'anthropic', 'google')
- * @param {Function} coreFn — Core streaming function
- * @param {object} [opts]
- * @param {Array} [opts.layers] — Custom middleware layers (default: DEFAULT_LAYERS)
- * @returns {Function} Wrapped streaming function with same signature
  */
-export function createStreamingPipeline(provider, coreFn, opts = {}) {
+export function createStreamingPipeline(
+  provider: string,
+  coreFn: (
+    messages: unknown[],
+    cfg: Record<string, unknown>,
+    onChunk: ((chunk: string) => void) | null,
+  ) => Promise<unknown>,
+  opts: {
+    layers?: Array<(ctx: MiddlewareCtx, next: () => Promise<unknown>) => Promise<unknown>>;
+  } = {},
+) {
   const layers = opts.layers || DEFAULT_LAYERS;
 
   const composed = compose(layers, (ctx) => coreFn(ctx.messages, ctx.cfg, ctx.onChunk));
 
-  return async function pipelinedStream(messages, cfg, onChunk) {
-    const ctx = {
+  return async function pipelinedStream(
+    messages: unknown[],
+    cfg: Record<string, unknown> & { model?: string },
+    onChunk: ((chunk: string) => void) | null,
+  ): Promise<unknown> {
+    const ctx: MiddlewareCtx = {
       provider,
-      model: cfg.model,
+      model: cfg.model || '',
       messages,
       cfg,
       onChunk,
@@ -317,7 +296,6 @@ export function createStreamingPipeline(provider, coreFn, opts = {}) {
   };
 }
 
-// Re-export middleware layers for custom pipeline composition
 export {
   rateLimitMiddleware,
   circuitBreakerMiddleware,

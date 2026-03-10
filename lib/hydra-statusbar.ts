@@ -17,23 +17,29 @@ import pc from 'picocolors';
 import { metricsEmitter, getSessionUsage, checkSLOs } from './hydra-metrics.ts';
 import { loadHydraConfig } from './hydra-config.ts';
 import {
-  AGENT_ICONS,
-  AGENT_COLORS,
-  HEALTH_ICONS,
   formatAgentStatus,
   formatElapsed,
   stripAnsi,
-  compactProgressBar,
   shortModelName,
   DIM,
   ACCENT,
-} from './hydra-ui.mjs';
-import { checkUsage } from './hydra-usage.mjs';
+} from './hydra-ui.ts';
+import { checkUsage } from './hydra-usage.ts';
 
 // ── Agent Activity State ────────────────────────────────────────────────────
 
-const agentState = new Map();
-const agentExecMode = new Map(); // agent -> 'worker' | 'terminal' | null
+interface AgentActivityState {
+  status: string;
+  action: string;
+  model: string | null;
+  taskTitle: string | null;
+  phase: string | null;
+  step: string | null;
+  updatedAt: number;
+}
+
+const agentState = new Map<string, AgentActivityState>();
+const agentExecMode = new Map<string, string | null>(); // agent -> 'worker' | 'terminal' | null
 
 /**
  * Set an agent's activity state.
@@ -46,7 +52,7 @@ const agentExecMode = new Map(); // agent -> 'worker' | 'terminal' | null
  * @param {string} [meta.phase] - Council phase name
  * @param {string} [meta.step] - Progress like "2/4"
  */
-export function setAgentActivity(agent, status, action, meta = {}) {
+export function setAgentActivity(agent: string, status: string, action: string, meta: { model?: string | null; taskTitle?: string | null; phase?: string | null; step?: string | null } = {}) {
   agentState.set(agent.toLowerCase(), {
     status: status || 'inactive',
     action: action || '',
@@ -63,7 +69,7 @@ export function setAgentActivity(agent, status, action, meta = {}) {
  * @param {string} agent
  * @param {'worker'|'terminal'|null} mode
  */
-export function setAgentExecMode(agent, mode) {
+export function setAgentExecMode(agent: string, mode: string | null) {
   agentExecMode.set(agent.toLowerCase(), mode || null);
 }
 
@@ -72,14 +78,14 @@ export function setAgentExecMode(agent, mode) {
  * @param {string} agent
  * @returns {'worker'|'terminal'|null}
  */
-export function getAgentExecMode(agent) {
+export function getAgentExecMode(agent: string) {
   return agentExecMode.get(agent?.toLowerCase()) || null;
 }
 
 /**
  * Get an agent's current activity state.
  */
-export function getAgentActivity(agent) {
+export function getAgentActivity(agent: string) {
   return (
     agentState.get(agent.toLowerCase()) || {
       status: 'inactive',
@@ -96,8 +102,8 @@ export function getAgentActivity(agent) {
 // ── Activity Event Buffer ───────────────────────────────────────────────────
 
 const MAX_TICKER_EVENTS = 3;
-const tickerEvents = [];
-const activityCallbacks = [];
+const tickerEvents: Array<{ time: string; text: string }> = [];
+const activityCallbacks: Array<(event: any) => void> = [];
 
 // Event type icons for visual scanning
 const TICKER_ICONS = {
@@ -113,13 +119,13 @@ const TICKER_ICONS = {
   blocked: '\u26D4', // ⛔
 };
 
-function pushTickerEvent(text, eventType = null) {
+function pushTickerEvent(text: string, eventType: string | null = null) {
   const time = new Date().toLocaleTimeString('en-US', {
     hour12: false,
     hour: '2-digit',
     minute: '2-digit',
   });
-  const icon = eventType && TICKER_ICONS[eventType] ? `${TICKER_ICONS[eventType]} ` : '';
+  const icon = eventType && (TICKER_ICONS as Record<string, string>)[eventType] ? `${(TICKER_ICONS as Record<string, string>)[eventType]} ` : '';
   tickerEvents.push({ time, text: icon + text });
   if (tickerEvents.length > MAX_TICKER_EVENTS) {
     tickerEvents.shift();
@@ -130,13 +136,13 @@ function pushTickerEvent(text, eventType = null) {
  * Register a callback for significant activity events.
  * Callback receives { time, event, agent, detail }.
  */
-export function onActivityEvent(callback) {
+export function onActivityEvent(callback: (event: any) => void) {
   if (typeof callback === 'function') {
     activityCallbacks.push(callback);
   }
 }
 
-function emitActivityEvent(event) {
+function emitActivityEvent(event: any) {
   for (const cb of activityCallbacks) {
     try {
       cb(event);
@@ -151,8 +157,8 @@ function emitActivityEvent(event) {
 const ESC = '\x1b[';
 const STATUS_BAR_HEIGHT = 5; // divider + context/gauge + agents + ticker + spacer
 let statusBarActive = false;
-let registeredAgents = [];
-let refreshInterval = null;
+let registeredAgents: string[] = [];
+let refreshInterval: ReturnType<typeof setInterval> | null = null;
 let _prevStatusBarRows = 0; // track previous terminal height for resize cleanup
 const REFRESH_INTERVAL_MS = 2000; // periodic redraw to keep status bar content fresh
 
@@ -164,14 +170,14 @@ let activeMode = 'auto';
 
 // ── Dispatch Context State ───────────────────────────────────────────────
 
-let dispatchContext = null;
+let dispatchContext: Record<string, any> | null = null;
 
 /**
  * Set active dispatch context for status bar narrative display.
  * @param {{ promptSummary: string, topic: string, tier: string, startedAt: number }} ctx
  */
-export function setDispatchContext(ctx) {
-  dispatchContext = ctx ? { ...ctx, startedAt: ctx.startedAt || Date.now() } : null;
+export function setDispatchContext(ctx: Record<string, any> | null) {
+  dispatchContext = ctx ? { ...ctx, startedAt: ctx['startedAt'] || Date.now() } : null;
 }
 
 /**
@@ -182,28 +188,28 @@ export function clearDispatchContext() {
 }
 
 // Token gauge (cached to avoid expensive disk reads)
-let cachedUsage = null;
+let cachedUsage: any = null;
 let cachedUsageAt = 0;
 const USAGE_CACHE_TTL_MS = 30_000;
 
 /**
  * Record the last dispatch routing decision for the context line.
  */
-export function setLastDispatch(info) {
+export function setLastDispatch(info: Record<string, any>) {
   lastDispatch = { ...lastDispatch, ...info };
 }
 
 /**
  * Set the active operator mode for the context line.
  */
-export function setActiveMode(mode) {
+export function setActiveMode(mode: string) {
   activeMode = String(mode || 'auto');
 }
 
 /**
  * Update the open task count displayed in the context line.
  */
-export function updateTaskCount(count) {
+export function updateTaskCount(count: number) {
   openTaskCount = Math.max(0, Number(count) || 0);
 }
 
@@ -243,9 +249,9 @@ function resetScrollRegion() {
 /**
  * Build the context + token gauge line (line 2 of status bar).
  */
-function buildContextLine(cols) {
+function buildContextLine(cols: number) {
   // Left: mode + tasks + last dispatch
-  const MODE_ICONS = {
+  const MODE_ICONS: Record<string, string> = {
     smart: '\u26A1', // ⚡
     auto: '\u21BB', // ↻
     handoff: '\u2192', // →
@@ -258,9 +264,9 @@ function buildContextLine(cols) {
   const taskPart = `${openTaskCount} task${openTaskCount === 1 ? '' : 's'}`;
   const lastPart = lastDispatch.route ? `last: ${lastDispatch.route}` : '';
   const leftParts = [modePart, DIM(taskPart)];
-  if (dispatchContext && dispatchContext.promptSummary) {
-    const tierBadge = dispatchContext.tier ? `[${dispatchContext.tier}]` : '';
-    leftParts.push(ACCENT(`${tierBadge} ${dispatchContext.promptSummary}`));
+  if (dispatchContext && dispatchContext['promptSummary']) {
+    const tierBadge = dispatchContext['tier'] ? `[${dispatchContext['tier']}]` : '';
+    leftParts.push(ACCENT(`${tierBadge} ${dispatchContext['promptSummary']}`));
   } else if (lastPart) {
     leftParts.push(DIM(lastPart));
   }
@@ -280,8 +286,8 @@ function buildContextLine(cols) {
   let sloIndicator = '';
   try {
     const cfg = loadHydraConfig();
-    if (cfg.metrics?.slo && cfg.metrics?.alerts?.enabled !== false) {
-      const violations = checkSLOs(cfg.metrics.slo);
+    if (cfg.metrics?.['slo'] && (cfg.metrics?.['alerts'] as any)?.enabled !== false) {
+      const violations = checkSLOs(cfg.metrics['slo'] as Record<string, any>);
       if (violations.length > 0) {
         const hasCritical = violations.some((v) => v.metric === 'error_rate');
         sloIndicator = hasCritical ? ` ${pc.red('\u26A0 SLO')}` : ` ${pc.yellow('\u26A0 SLO')}`;
@@ -419,7 +425,7 @@ export function drawStatusBar({ skipCursorSaveRestore = false } = {}) {
 
   // Overwrite each line in one write (content + spaces to fill width).
   // Avoids the erase (\x1b[2K) + write pattern which causes a brief blank flash.
-  const pad = (s) => s + ' '.repeat(Math.max(0, cols - stripAnsi(s).length));
+  const pad = (s: string) => s + ' '.repeat(Math.max(0, cols - stripAnsi(s).length));
 
   // Save cursor position (caller may handle this externally)
   if (!skipCursorSaveRestore) process.stdout.write(`${ESC}s`);
@@ -438,10 +444,10 @@ export function drawStatusBar({ skipCursorSaveRestore = false } = {}) {
  * Initialize the status bar: set scroll region, register agents, paint initial state.
  * @param {string[]} agents - Agent names to display
  */
-export function initStatusBar(agents) {
+export function initStatusBar(agents: string[]) {
   if (!isTTYCapable()) return;
 
-  registeredAgents = (agents || []).map((a) => a.toLowerCase());
+  registeredAgents = (agents || []).map((a: string) => a.toLowerCase());
 
   // Initialize all agents as inactive
   for (const agent of registeredAgents) {
@@ -548,11 +554,11 @@ setupMetricsListener();
 
 // ── SSE Event Stream ────────────────────────────────────────────────────────
 
-let sseRequest = null;
-let sseReconnectTimer = null;
+let sseRequest: import('node:http').ClientRequest | null = null;
+let sseReconnectTimer: ReturnType<typeof setTimeout> | null = null;
 const SSE_RECONNECT_DELAY_MS = 3000;
 
-function handleSSEEvent(data, agents) {
+function handleSSEEvent(data: string, agents: string[]) {
   let event;
   try {
     event = JSON.parse(data);
@@ -681,7 +687,7 @@ function handleSSEEvent(data, agents) {
  * @param {string} baseUrl - Daemon base URL (e.g. http://127.0.0.1:4173)
  * @param {string[]} agents - Agent names to track
  */
-export function startEventStream(baseUrl, agents) {
+export function startEventStream(baseUrl: string, agents: string[]) {
   if (!isTTYCapable()) return;
 
   const agentList = (agents || []).map((a) => a.toLowerCase());
@@ -778,10 +784,10 @@ export function stopEventStream() {
 
 // ── Fallback Polling ────────────────────────────────────────────────────────
 
-let pollInterval = null;
+let pollInterval: ReturnType<typeof setInterval> | null = null;
 const POLL_INTERVAL_MS = 2000;
 
-function fallbackToPolling(baseUrl, agents) {
+function fallbackToPolling(baseUrl: string, agents: string[]) {
   if (pollInterval) return; // already polling
   startFallbackPolling(baseUrl, agents);
 }
@@ -791,7 +797,7 @@ function fallbackToPolling(baseUrl, agents) {
  * @param {string} baseUrl - Daemon base URL
  * @param {string[]} agents - Agent names to poll
  */
-function startFallbackPolling(baseUrl, agents) {
+function startFallbackPolling(baseUrl: string, agents: string[]) {
   if (pollInterval) return;
   if (!isTTYCapable()) return;
 
@@ -807,7 +813,7 @@ function startFallbackPolling(baseUrl, agents) {
         const url = new URL(`/next?agent=${encodeURIComponent(agent)}`, baseUrl);
         const res = await fetch(url.href, { signal: AbortSignal.timeout(1500) });
         if (!res.ok) continue;
-        const data = await res.json();
+        const data = await res.json() as any;
         const action = data?.next?.action;
 
         if (action === 'continue_task' || action === 'pickup_handoff') {
@@ -846,7 +852,7 @@ function stopFallbackPolling() {
 /**
  * @deprecated Use startEventStream() instead. Kept for backward compatibility.
  */
-export function startPolling(baseUrl, agents) {
+export function startPolling(baseUrl: string, agents: string[]) {
   // Try SSE first, fall back to polling automatically
   startEventStream(baseUrl, agents);
 }

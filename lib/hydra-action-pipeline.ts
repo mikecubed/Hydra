@@ -31,8 +31,8 @@ import {
   WARNING,
   createSpinner,
   formatElapsed,
-} from './hydra-ui.mjs';
-import { promptChoice, confirmActionPlan } from './hydra-prompt-choice.mjs';
+} from './hydra-ui.ts';
+import { promptChoice, confirmActionPlan } from './hydra-prompt-choice.ts';
 
 export interface ActionItem {
   id: string;

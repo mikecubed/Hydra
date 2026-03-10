@@ -8,7 +8,7 @@
  * retry, usage tracking, and latency measurement.
  */
 
-import { createStreamingPipeline } from './hydra-streaming-middleware.mjs';
+import { createStreamingPipeline } from './hydra-streaming-middleware.ts';
 
 interface ChatMessage {
   role: string;

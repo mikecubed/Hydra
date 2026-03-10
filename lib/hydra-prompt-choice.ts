@@ -9,8 +9,6 @@
  */
 
 import {
-  sectionHeader,
-  label,
   box,
   DIM,
   ACCENT,
@@ -18,7 +16,7 @@ import {
   ERROR,
   SUCCESS,
   stripAnsi,
-} from './hydra-ui.mjs';
+} from './hydra-ui.ts';
 import pc from 'picocolors';
 
 // ── Auto-Accept Session State ───────────────────────────────────────────────
@@ -29,7 +27,7 @@ export function isAutoAccepting() {
   return sessionAutoAccept;
 }
 
-export function setAutoAccept(value) {
+export function setAutoAccept(value: any) {
   sessionAutoAccept = Boolean(value);
 }
 
@@ -66,7 +64,7 @@ function computeBoxWidth() {
  * @param {number} innerWidth - Available width inside the box
  * @returns {string[]} Array of formatted lines
  */
-function wrapContextValue(key, value, innerWidth) {
+function wrapContextValue(key: string, value: string, innerWidth: number) {
   const keyLabel = DIM(`${key}:`);
   const keyLabelWidth = stripAnsi(keyLabel).length + 1; // +1 for the space
   const firstLineWidth = innerWidth - keyLabelWidth;
@@ -79,7 +77,7 @@ function wrapContextValue(key, value, innerWidth) {
 
   for (const word of words) {
     const testLine = currentLine ? `${currentLine} ${word}` : word;
-    const targetWidth = lines.length === 0 ? firstLineWidth : innerWidth - keyLabelWidth;
+    const targetWidth: number = lines.length === 0 ? firstLineWidth : innerWidth - keyLabelWidth;
 
     if (stripAnsi(testLine).length <= targetWidth) {
       currentLine = testLine;
@@ -112,7 +110,7 @@ function wrapContextValue(key, value, innerWidth) {
   return lines.map((line, i) => (i === 0 ? `${keyLabel} ${line}` : `${continuationIndent}${line}`));
 }
 
-function renderChoiceUI({ title, context, choices }) {
+function renderChoiceUI({ title, context, choices }: { title: string; context: any; choices: any[] }) {
   const boxWidth = computeBoxWidth();
   const padding = 1;
   const innerWidth = boxWidth - 2 - padding * 2;
@@ -122,7 +120,7 @@ function renderChoiceUI({ title, context, choices }) {
   if (context && typeof context === 'object') {
     for (const [key, value] of Object.entries(context)) {
       if (value !== undefined && value !== null && value !== '') {
-        const wrappedLines = wrapContextValue(key, value, innerWidth);
+        const wrappedLines = wrapContextValue(key, value as string, innerWidth);
         boxLines.push(...wrappedLines);
       }
     }
@@ -144,7 +142,7 @@ function renderChoiceUI({ title, context, choices }) {
  * Animate the box drawing in progressively: top → sides → bottom.
  * Returns a promise that resolves when animation completes.
  */
-function animateBoxDrawIn({ title, context, choices }) {
+function animateBoxDrawIn({ title, context, choices }: { title: string; context: any; choices: any[] }) {
   const isTTY = process.stdout?.isTTY;
   if (!isTTY) {
     // No animation in non-TTY
@@ -163,7 +161,7 @@ function animateBoxDrawIn({ title, context, choices }) {
   if (context && typeof context === 'object') {
     for (const [key, value] of Object.entries(context)) {
       if (value !== undefined && value !== null && value !== '') {
-        const wrappedLines = wrapContextValue(key, value, innerWidth);
+        const wrappedLines = wrapContextValue(key, value as string, innerWidth);
         boxLines.push(...wrappedLines);
       }
     }
@@ -195,7 +193,7 @@ function animateBoxDrawIn({ title, context, choices }) {
   const blank = `${s.v}${' '.repeat(totalInner)}${s.v}`;
   const fullBox = [top, blank, ...bodyLines, blank, bot];
 
-  return new Promise((resolve) => {
+  return new Promise<void>((resolve) => {
     console.log(''); // empty line
 
     let lineIdx = 0;
@@ -217,10 +215,10 @@ function animateBoxDrawIn({ title, context, choices }) {
 
 // ── Freeform Sub-Prompt ─────────────────────────────────────────────────────
 
-function collectFreeform(rl) {
+function collectFreeform(rl: any) {
   return new Promise((resolve) => {
     const freeformPrompt = `${ACCENT('hydra')}${pc.yellow(':')}${DIM('>')} `;
-    rl.question(freeformPrompt, (answer) => {
+    rl.question(freeformPrompt, (answer: string) => {
       resolve(String(answer || '').trim());
     });
   });
@@ -234,12 +232,12 @@ function collectFreeform(rl) {
  * @param {number} maxIndex - Maximum valid 1-based index
  * @returns {number[]|'all'|null} Array of 0-based indices, 'all', or null for invalid
  */
-export function parseMultiSelectInput(input, maxIndex) {
+export function parseMultiSelectInput(input: string, maxIndex: number) {
   const trimmed = input.trim().toLowerCase();
   if (trimmed === 'a' || trimmed === 'all') return 'all';
   if (!trimmed) return null;
 
-  const indices = new Set();
+  const indices = new Set<number>();
   const parts = trimmed.split(/[,\s]+/).filter(Boolean);
 
   for (const part of parts) {
@@ -259,7 +257,7 @@ export function parseMultiSelectInput(input, maxIndex) {
   return indices.size > 0 ? [...indices].sort((a, b) => a - b) : null;
 }
 
-function renderMultiSelectUI({ title, context, choices, selected }) {
+function renderMultiSelectUI({ title, context, choices, selected }: { title: string; context: any; choices: any[]; selected: Set<number> }) {
   const boxWidth = computeBoxWidth();
   const padding = 1;
   const innerWidth = boxWidth - 2 - padding * 2;
@@ -268,7 +266,7 @@ function renderMultiSelectUI({ title, context, choices, selected }) {
   if (context && typeof context === 'object') {
     for (const [key, value] of Object.entries(context)) {
       if (value !== undefined && value !== null && value !== '') {
-        const wrappedLines = wrapContextValue(key, value, innerWidth);
+        const wrappedLines = wrapContextValue(key, value as string, innerWidth);
         boxLines.push(...wrappedLines);
       }
     }
@@ -308,7 +306,15 @@ function renderMultiSelectUI({ title, context, choices, selected }) {
  * @param {any[]} [opts.preSelected] - Values to pre-check in multi-select mode
  * @returns {Promise<{value: any, values?: any[], autoAcceptAll: boolean, timedOut: boolean}>}
  */
-export function promptChoice(rl, opts = {}) {
+export function promptChoice(rl: any, opts: {
+  title?: string;
+  context?: any;
+  choices?: any[];
+  defaultValue?: any;
+  timeoutMs?: number;
+  multiSelect?: boolean;
+  preSelected?: any[];
+} = {}) {
   const {
     title = 'Selection',
     context = null,
@@ -346,12 +352,12 @@ export function promptChoice(rl, opts = {}) {
 
     // Track if we've already resolved (timeout vs input race)
     let resolved = false;
-    let timeoutId = null;
+    let timeoutId: ReturnType<typeof setTimeout> | null = null;
 
     const choicePrompt = `${ACCENT('hydra')}${pc.yellow('?')}${DIM('>')} `;
 
     // Find if any choice is freeform
-    const freeformChoice = choices.find((c) => c.freeform);
+    const freeformChoice = choices.find((c: any) => c.freeform);
 
     function cleanup() {
       choiceActive = false;
@@ -370,7 +376,7 @@ export function promptChoice(rl, opts = {}) {
       rl.setPrompt(normalPrompt);
     }
 
-    function finish(result) {
+    function finish(result: any) {
       if (resolved) return;
       resolved = true;
       cleanup();
@@ -385,7 +391,7 @@ export function promptChoice(rl, opts = {}) {
     });
 
     // Install one-shot line handler
-    async function handleLine(input) {
+    async function handleLine(input: string) {
       if (resolved) return;
       const trimmed = String(input || '').trim();
 
@@ -462,9 +468,9 @@ export function promptChoice(rl, opts = {}) {
 
 // ── Multi-Select Mode ───────────────────────────────────────────────────────
 
-function promptMultiSelect(rl, { title, context, choices, preSelected, timeoutMs }) {
+function promptMultiSelect(rl: any, { title, context, choices, preSelected, timeoutMs }: { title: string; context: any; choices: any[]; preSelected: any[]; timeoutMs: number }) {
   // Build initial selection set from preSelected values
-  const selected = new Set();
+  const selected = new Set<number>();
   for (const [i, choice] of choices.entries()) {
     if (preSelected.includes(choice.value)) selected.add(i);
   }
@@ -487,7 +493,7 @@ function promptMultiSelect(rl, { title, context, choices, preSelected, timeoutMs
     rl.removeAllListeners('line');
 
     let resolved = false;
-    let timeoutId = null;
+    let timeoutId: ReturnType<typeof setTimeout> | null = null;
 
     const choicePrompt = `${ACCENT('hydra')}${pc.yellow('+')}${DIM('>')} `;
 
@@ -503,7 +509,7 @@ function promptMultiSelect(rl, { title, context, choices, preSelected, timeoutMs
       rl.setPrompt(normalPrompt);
     }
 
-    function finish(result) {
+    function finish(result: any) {
       if (resolved) return;
       resolved = true;
       cleanup();
@@ -523,7 +529,7 @@ function promptMultiSelect(rl, { title, context, choices, preSelected, timeoutMs
     rl.setPrompt(choicePrompt);
     rl.prompt();
 
-    function handleLine(input) {
+    function handleLine(input: string) {
       if (resolved) return;
       const trimmed = String(input || '').trim();
 
@@ -611,7 +617,13 @@ const SEVERITY_ICONS = {
  * @param {number} [opts.timeoutMs] - Auto-confirm timeout
  * @returns {Promise<boolean>} true if user confirms
  */
-export async function confirmActionPlan(rl, opts = {}) {
+export async function confirmActionPlan(rl: any, opts: {
+  title?: string;
+  context?: any;
+  summary?: string;
+  actions?: any[];
+  timeoutMs?: number;
+} = {}) {
   const { title = 'Action Plan', context, summary, actions = [], timeoutMs = 0 } = opts;
 
   if (actions.length === 0) return true;
@@ -630,7 +642,7 @@ export async function confirmActionPlan(rl, opts = {}) {
   if (context && typeof context === 'object') {
     for (const [key, value] of Object.entries(context)) {
       if (value !== undefined && value !== null && value !== '') {
-        const wrappedLines = wrapContextValue(key, value, innerWidth);
+        const wrappedLines = wrapContextValue(key, value as string, innerWidth);
         boxLines.push(...wrappedLines);
       }
     }
@@ -642,7 +654,7 @@ export async function confirmActionPlan(rl, opts = {}) {
 
   for (const [i, action] of actions.entries()) {
     const num = DIM(`${String(i + 1).padStart(2)}.`);
-    const icon = SEVERITY_ICONS[action.severity] || DIM('\u25CB');
+    const icon = (SEVERITY_ICONS as Record<string, string>)[action.severity] || DIM('\u25CB');
     const agentTag = action.agent ? ` ${DIM(`[${action.agent}]`)}` : '';
     boxLines.push(` ${num} ${icon} ${pc.white(action.label)}${agentTag}`);
     if (action.description) {
@@ -667,5 +679,5 @@ export async function confirmActionPlan(rl, opts = {}) {
     timeoutMs,
   });
 
-  return result.value === true;
+  return (result as any).value === true;
 }

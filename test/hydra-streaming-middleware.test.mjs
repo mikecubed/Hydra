@@ -6,7 +6,7 @@ import {
   createStreamingPipeline,
   getProviderEWMA,
   getLatencyEstimates,
-} from '../lib/hydra-streaming-middleware.mjs';
+} from '../lib/hydra-streaming-middleware.ts';
 
 describe('PeakEWMA', () => {
   it('returns 0 when no observations', () => {

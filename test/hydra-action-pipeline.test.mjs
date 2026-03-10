@@ -19,7 +19,7 @@ describe('hydra-action-pipeline', () => {
 
 describe('hydra-output-history', () => {
   it('exports all expected functions', async () => {
-    const mod = await import('../lib/hydra-output-history.mjs');
+    const mod = await import('../lib/hydra-output-history.ts');
     assert.equal(typeof mod.initOutputHistory, 'function');
     assert.equal(typeof mod.getRecentOutput, 'function');
     assert.equal(typeof mod.getRecentOutputRaw, 'function');
@@ -28,19 +28,19 @@ describe('hydra-output-history', () => {
   });
 
   it('getRecentOutput returns an array', async () => {
-    const { getRecentOutput } = await import('../lib/hydra-output-history.mjs');
+    const { getRecentOutput } = await import('../lib/hydra-output-history.ts');
     const result = getRecentOutput(10);
     assert.ok(Array.isArray(result));
   });
 
   it('getOutputContext returns a string', async () => {
-    const { getOutputContext } = await import('../lib/hydra-output-history.mjs');
+    const { getOutputContext } = await import('../lib/hydra-output-history.ts');
     const result = getOutputContext();
     assert.equal(typeof result, 'string');
   });
 
   it('clearOutputHistory resets the buffer', async () => {
-    const { clearOutputHistory, getRecentOutput } = await import('../lib/hydra-output-history.mjs');
+    const { clearOutputHistory, getRecentOutput } = await import('../lib/hydra-output-history.ts');
     clearOutputHistory();
     assert.deepEqual(getRecentOutput(), []);
   });

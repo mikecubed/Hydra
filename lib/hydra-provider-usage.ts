@@ -22,6 +22,27 @@ const HYDRA_ROOT = path.resolve(__dirname, '..');
 const USAGE_PATH = path.join(HYDRA_ROOT, 'docs', 'coordination', 'provider-usage.json');
 const RETENTION_DAYS = 7;
 
+// ── Interfaces ───────────────────────────────────────────────────────────────
+
+interface UsageCounters {
+  inputTokens: number;
+  outputTokens: number;
+  cost: number;
+  calls: number;
+}
+
+interface ExternalUsage {
+  inputTokens: number;
+  outputTokens: number;
+  cost: number;
+}
+
+interface ProviderUsageEntry {
+  session: UsageCounters;
+  today: UsageCounters;
+  external: ExternalUsage | null;
+}
+
 // ── Cost per 1K tokens (input/output) for known models ──────────────────────
 // Derived from hydra-model-profiles.mjs — single source of truth for pricing.
 
@@ -30,7 +51,15 @@ export const COST_PER_1K = _getCostTable();
 /**
  * Estimate cost for a model given usage tokens.
  */
-export function estimateCost(model, usage) {
+export function estimateCost(
+  model: string,
+  usage: {
+    prompt_tokens?: number;
+    inputTokens?: number;
+    completion_tokens?: number;
+    outputTokens?: number;
+  } | null,
+): number {
   if (!usage) return 0;
   const rates = COST_PER_1K[model];
   if (!rates) return 0;
@@ -41,11 +70,11 @@ export function estimateCost(model, usage) {
 
 // ── In-Memory State ─────────────────────────────────────────────────────────
 
-function emptyCounters() {
+function emptyCounters(): UsageCounters {
   return { inputTokens: 0, outputTokens: 0, cost: 0, calls: 0 };
 }
 
-const _usage = {
+const _usage: Record<string, ProviderUsageEntry> = {
   openai: { session: emptyCounters(), today: emptyCounters(), external: null },
   anthropic: { session: emptyCounters(), today: emptyCounters(), external: null },
   google: { session: emptyCounters(), today: emptyCounters(), external: null },
@@ -57,15 +86,11 @@ const _externalCache = { ts: 0, ttlMs: 10 * 60 * 1000 };
 
 /**
  * Record usage from a streaming API call.
- *
- * @param {'openai'|'anthropic'|'google'} provider
- * @param {object} data
- * @param {number} [data.inputTokens]
- * @param {number} [data.outputTokens]
- * @param {number} [data.cost] - Pre-calculated cost, or computed from model
- * @param {string} [data.model] - Model name for cost estimation
  */
-export function recordProviderUsage(provider, data) {
+export function recordProviderUsage(
+  provider: string,
+  data: { inputTokens?: number; outputTokens?: number; cost?: number; model?: string },
+): void {
   const entry = _usage[provider];
   if (!entry) return;
 
@@ -99,29 +124,28 @@ export function recordProviderUsage(provider, data) {
 export function getProviderUsage() {
   return {
     openai: {
-      session: { ..._usage.openai.session },
-      today: { ..._usage.openai.today },
-      external: _usage.openai.external,
+      session: { ..._usage['openai'].session },
+      today: { ..._usage['openai'].today },
+      external: _usage['openai'].external,
     },
     anthropic: {
-      session: { ..._usage.anthropic.session },
-      today: { ..._usage.anthropic.today },
-      external: _usage.anthropic.external,
+      session: { ..._usage['anthropic'].session },
+      today: { ..._usage['anthropic'].today },
+      external: _usage['anthropic'].external,
     },
     google: {
-      session: { ..._usage.google.session },
-      today: { ..._usage.google.today },
-      external: _usage.google.external,
+      session: { ..._usage['google'].session },
+      today: { ..._usage['google'].today },
+      external: _usage['google'].external,
     },
   };
 }
 
 /**
  * Get a formatted one-liner per provider for display.
- * @returns {string[]}
  */
-export function getProviderSummary() {
-  const lines = [];
+export function getProviderSummary(): string[] {
+  const lines: string[] = [];
   for (const [name, data] of Object.entries(_usage)) {
     const s = data.session;
     if (s.calls === 0) continue;
@@ -139,11 +163,10 @@ export function getProviderSummary() {
 }
 
 /**
- * Get external account usage summary lines (for providers with admin keys).
- * @returns {string[]}
+ * Get external account usage summary lines.
  */
-export function getExternalSummary() {
-  const lines = [];
+export function getExternalSummary(): string[] {
+  const lines: string[] = [];
   for (const [name, data] of Object.entries(_usage)) {
     if (!data.external) continue;
     const e = data.external;
@@ -165,7 +188,7 @@ export function getExternalSummary() {
 /**
  * Reset session counters (call at startup).
  */
-export function resetSessionUsage() {
+export function resetSessionUsage(): void {
   for (const entry of Object.values(_usage)) {
     entry.session = emptyCounters();
   }
@@ -173,15 +196,15 @@ export function resetSessionUsage() {
 
 // ── Persistence (daily rollup) ──────────────────────────────────────────────
 
-function todayKey() {
+function todayKey(): string {
   const d = new Date();
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 }
 
 /**
- * Load persisted daily counters from JSON. Merges into today's in-memory counters.
+ * Load persisted daily counters from JSON.
  */
-export function loadProviderUsage() {
+export function loadProviderUsage(): void {
   try {
     if (!fs.existsSync(USAGE_PATH)) return;
     const raw = JSON.parse(fs.readFileSync(USAGE_PATH, 'utf8'));
@@ -195,7 +218,6 @@ export function loadProviderUsage() {
       }
     }
 
-    // Restore RPD counters for rate limit tracking
     loadRpdState(raw);
   } catch {
     // Best effort
@@ -205,12 +227,12 @@ export function loadProviderUsage() {
 /**
  * Persist daily counters to JSON. Keeps last RETENTION_DAYS days.
  */
-export function saveProviderUsage() {
+export function saveProviderUsage(): void {
   try {
     const dir = path.dirname(USAGE_PATH);
     if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
 
-    let existing = {};
+    let existing: Record<string, unknown> = {};
     try {
       if (fs.existsSync(USAGE_PATH)) {
         existing = JSON.parse(fs.readFileSync(USAGE_PATH, 'utf8'));
@@ -221,15 +243,13 @@ export function saveProviderUsage() {
 
     const key = todayKey();
     existing[key] = {
-      openai: { ..._usage.openai.today },
-      anthropic: { ..._usage.anthropic.today },
-      google: { ..._usage.google.today },
+      openai: { ..._usage['openai'].today },
+      anthropic: { ..._usage['anthropic'].today },
+      google: { ..._usage['google'].today },
     };
 
-    // Persist RPD counters for rate limit tracking across restarts
-    existing.rpd = getRpdState();
+    existing['rpd'] = getRpdState();
 
-    // Prune old entries
     const cutoff = new Date();
     cutoff.setDate(cutoff.getDate() - RETENTION_DAYS);
     const cutoffKey = `${cutoff.getFullYear()}-${String(cutoff.getMonth() + 1).padStart(2, '0')}-${String(cutoff.getDate()).padStart(2, '0')}`;
@@ -246,25 +266,24 @@ export function saveProviderUsage() {
 // ── External API Integration ────────────────────────────────────────────────
 
 function getAdminKeys() {
-  const cfg = loadHydraConfig();
+  const cfg = loadHydraConfig() as any;
   const providers = cfg.providers || {};
   return {
-    openai: process.env.OPENAI_ADMIN_KEY || providers.openai?.adminKey || null,
-    anthropic: process.env.ANTHROPIC_ADMIN_KEY || providers.anthropic?.adminKey || null,
+    openai: process.env['OPENAI_ADMIN_KEY'] || providers.openai?.adminKey || null,
+    anthropic: process.env['ANTHROPIC_ADMIN_KEY'] || providers.anthropic?.adminKey || null,
   };
 }
 
 /**
  * Query external billing APIs for account-wide usage (cached, non-blocking).
- * Silently skips if admin keys are not configured.
  */
-export async function refreshExternalUsage() {
+export async function refreshExternalUsage(): Promise<void> {
   const now = Date.now();
   if (now - _externalCache.ts < _externalCache.ttlMs) return;
   _externalCache.ts = now;
 
   const keys = getAdminKeys();
-  const tasks = [];
+  const tasks: Promise<void>[] = [];
 
   if (keys.openai) tasks.push(fetchOpenAIUsage(keys.openai));
   if (keys.anthropic) tasks.push(fetchAnthropicUsage(keys.anthropic));
@@ -278,7 +297,7 @@ export async function refreshExternalUsage() {
   }
 }
 
-async function fetchOpenAIUsage(adminKey) {
+async function fetchOpenAIUsage(adminKey: string): Promise<void> {
   try {
     const today = todayKey();
     const url = `https://api.openai.com/v1/organization/usage/completions?start_date=${today}`;
@@ -287,8 +306,7 @@ async function fetchOpenAIUsage(adminKey) {
       signal: AbortSignal.timeout(10_000),
     });
     if (!res.ok) return;
-    const data = await res.json();
-    // Sum up tokens across all models
+    const data = await res.json() as any;
     let inputTokens = 0,
       outputTokens = 0;
     for (const bucket of data.data || []) {
@@ -298,13 +316,13 @@ async function fetchOpenAIUsage(adminKey) {
       }
     }
     const cost = estimateCostGeneric('openai', inputTokens, outputTokens);
-    _usage.openai.external = { inputTokens, outputTokens, cost };
+    _usage['openai'].external = { inputTokens, outputTokens, cost };
   } catch {
     // Silently skip
   }
 }
 
-async function fetchAnthropicUsage(adminKey) {
+async function fetchAnthropicUsage(adminKey: string): Promise<void> {
   try {
     const today = todayKey();
     const url = `https://api.anthropic.com/v1/organizations/usage_report/messages?start_date=${today}`;
@@ -316,7 +334,7 @@ async function fetchAnthropicUsage(adminKey) {
       signal: AbortSignal.timeout(10_000),
     });
     if (!res.ok) return;
-    const data = await res.json();
+    const data = await res.json() as any;
     let inputTokens = 0,
       outputTokens = 0;
     for (const entry of data.data || []) {
@@ -324,15 +342,14 @@ async function fetchAnthropicUsage(adminKey) {
       outputTokens += entry.output_tokens || 0;
     }
     const cost = estimateCostGeneric('anthropic', inputTokens, outputTokens);
-    _usage.anthropic.external = { inputTokens, outputTokens, cost };
+    _usage['anthropic'].external = { inputTokens, outputTokens, cost };
   } catch {
     // Silently skip
   }
 }
 
-function estimateCostGeneric(provider, inputTokens, outputTokens) {
-  // Use average rates for the provider as rough estimate
-  const avgRates = {
+export function estimateCostGeneric(provider: string, inputTokens: number, outputTokens: number): number {
+  const avgRates: Record<string, { input: number; output: number }> = {
     openai: { input: 0.002, output: 0.008 },
     anthropic: { input: 0.005, output: 0.025 },
   };

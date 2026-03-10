@@ -7,7 +7,7 @@
  *   hard_stop → soft_stop → (pipeline-specific action) → warn → continue
  */
 
-import { checkUsage } from '../hydra-usage.mjs';
+import { checkUsage } from '../hydra-usage.ts';
 import { getSessionUsage } from '../hydra-metrics.ts';
 
 export interface Threshold {

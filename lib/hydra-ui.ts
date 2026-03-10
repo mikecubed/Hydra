@@ -16,12 +16,12 @@ import { getShortName as _getShortName } from './hydra-model-profiles.ts';
 // Truecolor (24-bit) is supported by most modern terminals but not cmd.exe or
 // older PowerShell. Detect via COLORTERM env var or Windows Terminal session.
 export const isTruecolor =
-  process.env.COLORTERM === 'truecolor' ||
-  process.env.COLORTERM === '24bit' ||
-  Boolean(process.env.WT_SESSION);
+  process.env['COLORTERM'] === 'truecolor' ||
+  process.env['COLORTERM'] === '24bit' ||
+  Boolean(process.env['WT_SESSION']);
 
 // Claude Code's signature orange (truecolor: #E8863A), falls back to yellow
-const claudeOrange = isTruecolor ? (str) => `\x1b[38;2;232;134;58m${str}\x1b[39m` : pc.yellow;
+const claudeOrange = isTruecolor ? (str: string) => `\x1b[38;2;232;134;58m${str}\x1b[39m` : pc.yellow;
 
 export const AGENT_COLORS = {
   gemini: pc.cyan,
@@ -67,7 +67,7 @@ export const SUCCESS = pc.green;
 export const WARNING = pc.yellow;
 
 // ─── ASCII Logo (100 columns) ───────────────────────────────────────────────
-const HYDRA_SPLASH_100 = [
+export const HYDRA_SPLASH_100 = [
   '                                           ▒▒░',
   '                                   ▒▒░    ░▒▓▒░     ░░░',
   '                                   ▒▓▓░░░░░▓██▒▒░░░░▒▓▒',
@@ -125,17 +125,17 @@ export const HYDRA_SPLASH_50 = [
 
 const ESC = '\x1b[';
 const ansiReset = `${ESC}0m`;
-const ansiFg = (r, g, b) => `${ESC}38;2;${r};${g};${b}m`;
+const ansiFg = (r: number, g: number, b: number) => `${ESC}38;2;${r};${g};${b}m`;
 
-const clamp01 = (t) => Math.max(0, Math.min(1, t));
-const lerp = (a, b, t) => Math.round(a + (b - a) * t);
-const lerpRgb = (c1, c2, t) => [
+const clamp01 = (t: number) => Math.max(0, Math.min(1, t));
+const lerp = (a: number, b: number, t: number) => Math.round(a + (b - a) * t);
+const lerpRgb = (c1: number[], c2: number[], t: number) => [
   lerp(c1[0], c2[0], t),
   lerp(c1[1], c2[1], t),
   lerp(c1[2], c2[2], t),
 ];
 
-function hexToRgb(hex) {
+function hexToRgb(hex: string) {
   const h = String(hex).replace('#', '').trim();
   const full =
     h.length === 3
@@ -149,7 +149,7 @@ function hexToRgb(hex) {
 }
 
 // Multi-stop gradient interpolation for richer color bands
-function lerpMultiStop(stops, t) {
+function lerpMultiStop(stops: number[][], t: number) {
   const cT = clamp01(t);
   if (stops.length <= 1) return stops[0].slice();
   const segments = stops.length - 1;
@@ -168,7 +168,7 @@ const HEAD_GRAD = {
 };
 
 // Head centers converge as y increases (necks merge toward body)
-function headCentersAtY(ny) {
+function headCentersAtY(ny: number) {
   const converge = clamp01(ny * 0.8) * 0.4;
   const mid = 50;
   return {
@@ -179,7 +179,7 @@ function headCentersAtY(ny) {
 }
 
 // Proximity-based blending weights (Gaussian falloff from each head center)
-function headWeights(x, ny) {
+function headWeights(x: number, ny: number) {
   const centers = headCentersAtY(ny);
   const sigma = 12 + ny * 8; // tighter at top, wider blend at bottom
   const wL = Math.exp(-0.5 * ((x - centers.left) / sigma) ** 2);
@@ -190,7 +190,7 @@ function headWeights(x, ny) {
 }
 
 // Gradient direction per head (returns 0-1 parameter along the gradient)
-function headGradT(hk, nx, ny) {
+function headGradT(hk: string, nx: number, ny: number) {
   if (hk === 'left') {
     // Blue->Green: diagonal flow, top-left to bottom-right
     return clamp01(nx * 0.55 + ny * 0.45);
@@ -204,7 +204,7 @@ function headGradT(hk, nx, ny) {
 }
 
 // Ink model: makes faces/edges read better by using glyph density.
-function charInk(ch) {
+function charInk(ch: string) {
   switch (ch) {
     case '█':
       return 1.0;
@@ -219,7 +219,7 @@ function charInk(ch) {
   }
 }
 
-function mulRgb(rgb, k) {
+function mulRgb(rgb: number[], k: number) {
   return [
     Math.max(0, Math.min(255, Math.round(rgb[0] * k))),
     Math.max(0, Math.min(255, Math.round(rgb[1] * k))),
@@ -241,7 +241,7 @@ function colorHydraSplashTruecolor() {
       let out = '';
       const ny = clamp01(y / (totalH - 1));
 
-      for (const [x, ch] of line.entries()) {
+      for (const [x, ch] of [...line].entries()) {
         if (ch === ' ') {
           out += ' ';
           continue;
@@ -288,21 +288,21 @@ function colorHydraSplashTruecolor() {
 
 // ─── Gradient Title Letters ──────────────────────────────────────────────────
 
-function colorGradientLetters(text) {
+function colorGradientLetters(text: string) {
   const isTTY = process.stdout?.isTTY;
   const canColor = Boolean(pc.isColorSupported);
   if (!isTTY || !canColor) return pc.bold(pc.magentaBright(text));
 
   // Collect non-space character indices so we can map them across 0→1
   const charPositions = [];
-  for (const [i, element] of text.entries()) {
+  for (const [i, element] of [...text].entries()) {
     if (element !== ' ') charPositions.push(i);
   }
 
   const ny = 0.5; // mid-height: heads still spread for distinct color zones
 
   let out = '';
-  for (const [i, ch] of text.entries()) {
+  for (const [i, ch] of [...text].entries()) {
     if (ch === ' ') {
       out += ' ';
       continue;
@@ -355,7 +355,7 @@ export function hydraLogoCompact() {
 // Lazy resolver for virtual→physical agent lookup.
 // Uses dynamic import to avoid circular dependency (hydra-agents doesn't import hydra-ui).
 // The resolver is populated asynchronously; before it loads, virtual agents fall back gracefully.
-let _resolverSync = null;
+let _resolverSync: ((name: string) => { name: string } | null) | null = null;
 import('./hydra-agents.ts')
   .then((mod) => {
     _resolverSync = mod.resolvePhysicalAgent;
@@ -366,13 +366,13 @@ import('./hydra-agents.ts')
  * Get the display color function for an agent (physical or virtual).
  * Virtual agents inherit their base physical agent's color.
  */
-export function getAgentColor(name) {
+export function getAgentColor(name: string) {
   const lower = String(name || '').toLowerCase();
-  if (AGENT_COLORS[lower]) return AGENT_COLORS[lower];
+  if ((AGENT_COLORS as Record<string, (s: string) => string>)[lower]) return (AGENT_COLORS as Record<string, (s: string) => string>)[lower];
   // Try resolving virtual → physical
   if (_resolverSync) {
     const base = _resolverSync(lower);
-    if (base && AGENT_COLORS[base.name]) return AGENT_COLORS[base.name];
+    if (base && (AGENT_COLORS as Record<string, (s: string) => string>)[base.name]) return (AGENT_COLORS as Record<string, (s: string) => string>)[base.name];
   }
   return AGENT_COLORS.system || pc.white;
 }
@@ -381,20 +381,20 @@ export function getAgentColor(name) {
  * Get the display icon for an agent (physical or virtual).
  * Virtual agents get a distinct sub-icon (◇) to differentiate from physical agents.
  */
-export function getAgentIcon(name) {
+export function getAgentIcon(name: string) {
   const lower = String(name || '').toLowerCase();
-  if (AGENT_ICONS[lower]) return AGENT_ICONS[lower];
+  if ((AGENT_ICONS as Record<string, string>)[lower]) return (AGENT_ICONS as Record<string, string>)[lower];
   // Virtual agents get a diamond outline icon
   return '\u25C7'; // ◇
 }
 
-export function colorAgent(name) {
+export function colorAgent(name: string) {
   const lower = String(name || '').toLowerCase();
   const colorFn = getAgentColor(lower);
   return colorFn(name);
 }
 
-export function agentBadge(name) {
+export function agentBadge(name: string) {
   const lower = String(name || '').toLowerCase();
   const icon = getAgentIcon(lower);
   const colorFn = getAgentColor(lower);
@@ -403,16 +403,16 @@ export function agentBadge(name) {
 
 // ─── Status Formatting ─────────────────────────────────────────────────────
 
-export function colorStatus(status) {
+export function colorStatus(status: string) {
   const lower = String(status || '').toLowerCase();
-  const colorFn = STATUS_COLORS[lower] || pc.white;
-  const icon = STATUS_ICONS[lower] || '\u2022';
+  const colorFn = (STATUS_COLORS as Record<string, (s: string) => string>)[lower] || pc.white;
+  const icon = (STATUS_ICONS as Record<string, string>)[lower] || '\u2022';
   return colorFn(`${icon} ${status}`);
 }
 
 // ─── Task Formatting ────────────────────────────────────────────────────────
 
-export function formatTaskLine(task) {
+export function formatTaskLine(task: any) {
   if (!task) return '';
   const id = pc.bold(pc.white(task.id || '???'));
   const status = colorStatus(task.status || 'todo');
@@ -421,7 +421,7 @@ export function formatTaskLine(task) {
   return `  ${id} ${status}  ${owner}  ${title}`;
 }
 
-export function formatHandoffLine(handoff) {
+export function formatHandoffLine(handoff: any) {
   if (!handoff) return '';
   const id = pc.bold(pc.white(handoff.id || '???'));
   const from = colorAgent(handoff.from || '?');
@@ -434,7 +434,7 @@ export function formatHandoffLine(handoff) {
 
 // ─── Time Formatting ────────────────────────────────────────────────────────
 
-export function relativeTime(iso) {
+export function relativeTime(iso: string) {
   if (!iso) return DIM('never');
   const diff = Date.now() - new Date(iso).getTime();
   if (diff < 0) return DIM('future');
@@ -467,7 +467,7 @@ const BOX_STYLES = {
  * @param {'light'|'heavy'|'rounded'|'double'} [widthOrOpts.style='light'] - Border style
  * @param {number} [widthOrOpts.padding=0] - Internal horizontal padding (spaces)
  */
-export function box(title, lines, widthOrOpts = 60) {
+export function box(title: string, lines: string[], widthOrOpts: number | { style?: string; padding?: number; width?: number } = 60) {
   let width = 60,
     style = 'light',
     padding = 0;
@@ -478,7 +478,7 @@ export function box(title, lines, widthOrOpts = 60) {
     style = widthOrOpts.style || 'light';
     padding = widthOrOpts.padding || 0;
   }
-  const s = BOX_STYLES[style] || BOX_STYLES.light;
+  const s = (BOX_STYLES as Record<string, any>)[style] || BOX_STYLES.light;
   const padStr = ' '.repeat(padding);
   const inner = Math.max(width - 2 - padding * 2, 10);
   const totalInner = inner + padding * 2;
@@ -498,7 +498,7 @@ export function box(title, lines, widthOrOpts = 60) {
   return [top, ...body, bot].join('\n');
 }
 
-export function sectionHeader(title, totalWidth = 60) {
+export function sectionHeader(title: string, totalWidth = 60) {
   const titleText = String(title || '');
   const strippedTitle = stripAnsi(titleText);
   const titleWidth = strippedTitle.length;
@@ -513,7 +513,7 @@ export function sectionHeader(title, totalWidth = 60) {
  * @param {string} title - Section title
  * @param {number} [totalWidth=60] - Total width
  */
-export function animatedSectionHeader(title, totalWidth = 60) {
+export function animatedSectionHeader(title: string, totalWidth = 60) {
   const isTTY = process.stdout?.isTTY;
   const titleText = String(title || '');
   const strippedTitle = stripAnsi(titleText);
@@ -527,18 +527,17 @@ export function animatedSectionHeader(title, totalWidth = 60) {
     return Promise.resolve();
   }
 
-  return new Promise((resolve) => {
+  return new Promise<void>((resolve) => {
     console.log(''); // blank line
     const steps = 5;
     let step = 0;
 
-    const interval = setInterval(() => {
+    const interval: ReturnType<typeof setInterval> = setInterval(() => {
       if (step > steps) {
         clearInterval(interval);
         resolve();
         return;
       }
-
       const progress = step / steps;
       const currentLeft = Math.floor(leftBar * progress);
       const currentRight = Math.floor(rightBar * progress);
@@ -566,9 +565,9 @@ export function divider() {
  * @param {string} label - Label shown before the bar
  * @param {number} width - Bar width in characters
  */
-export function animatedProgressBar(label, width = 30) {
+export function animatedProgressBar(label: string, width = 30) {
   const isTTY = process.stderr?.isTTY;
-  let interval = null;
+  let interval: ReturnType<typeof setInterval> | null = null;
   let currentPercent = 0;
   let shimmerOffset = 0;
 
@@ -605,7 +604,7 @@ export function animatedProgressBar(label, width = 30) {
       render();
       return this;
     },
-    update(percent) {
+    update(percent: number) {
       currentPercent = percent;
       return this;
     },
@@ -622,7 +621,7 @@ export function animatedProgressBar(label, width = 30) {
   };
 }
 
-export function label(key, value) {
+export function label(key: string, value: any) {
   const k = DIM(`${key}:`);
   return `  ${k} ${value}`;
 }
@@ -720,17 +719,17 @@ const STYLE_COLORS = {
  * @param {number} [opts.intervalMs] - Override frame interval (default varies by style)
  * @param {function} [opts.color] - Color function for frames (default: per-style or ACCENT)
  */
-export function createSpinner(message, opts = {}) {
+export function createSpinner(message: string, opts: { estimatedMs?: number; style?: string; intervalMs?: number; color?: (s: string) => string } = {}) {
   const isTTY = process.stderr?.isTTY;
   let frameIdx = 0;
-  let interval = null;
+  let interval: ReturnType<typeof setInterval> | null = null;
   let currentMsg = message;
   const startTime = Date.now();
   const estimatedMs = opts.estimatedMs || 0;
   const style = opts.style || 'braille';
-  const frames = SPINNER_STYLES[style] || SPINNER_STYLES.braille;
-  const intervalMs = opts.intervalMs || STYLE_INTERVALS[style] || 80;
-  const colorFn = opts.color || STYLE_COLORS[style] || ACCENT;
+  const frames = (SPINNER_STYLES as Record<string, string[]>)[style] || SPINNER_STYLES.braille;
+  const intervalMs = opts.intervalMs || (STYLE_INTERVALS as Record<string, number>)[style] || 80;
+  const colorFn = opts.color || (STYLE_COLORS as Record<string, (s: string) => string>)[style] || ACCENT;
 
   function timeSuffix() {
     const elapsed = Date.now() - startTime;
@@ -766,11 +765,11 @@ export function createSpinner(message, opts = {}) {
       render();
       return this;
     },
-    update(msg) {
+    update(msg: string) {
       currentMsg = msg;
       return this;
     },
-    succeed(msg) {
+    succeed(msg: string) {
       clearLine();
       if (interval) clearInterval(interval);
       interval = null;
@@ -778,7 +777,7 @@ export function createSpinner(message, opts = {}) {
       process.stderr.write(`  ${SUCCESS('\u2713')} ${msg || currentMsg} ${DIM(`(${elapsed})`)}\n`);
       return this;
     },
-    fail(msg) {
+    fail(msg: string) {
       clearLine();
       if (interval) clearInterval(interval);
       interval = null;
@@ -814,7 +813,7 @@ function randomTip() {
   return DASHBOARD_TIPS[Math.floor(Math.random() * DASHBOARD_TIPS.length)];
 }
 
-export function renderDashboard(summary, agentNextMap, extras = {}) {
+export function renderDashboard(summary: any, agentNextMap: any, extras: any = {}) {
   const lines = [];
   lines.push(hydraLogoCompact());
   lines.push(divider());
@@ -848,7 +847,7 @@ export function renderDashboard(summary, agentNextMap, extras = {}) {
   // Agent Status
   if (agentNextMap && Object.keys(agentNextMap).length > 0) {
     lines.push(sectionHeader('Agents'));
-    for (const [agent, next] of Object.entries(agentNextMap)) {
+    for (const [agent, next] of Object.entries(agentNextMap) as [string, any][]) {
       const action = next?.action || 'unknown';
       let desc = action;
       if (action === 'continue_task') {
@@ -936,7 +935,7 @@ export function renderDashboard(summary, agentNextMap, extras = {}) {
  * @param {number} [width=30] - Bar width in characters
  * @param {boolean} [fractional=true] - Use fractional block characters for smoother rendering
  */
-export function progressBar(percent, width = 30, fractional = true) {
+export function progressBar(percent: number, width = 30, fractional = true) {
   const clamped = Math.max(0, Math.min(100, percent || 0));
 
   let colorFn = pc.green;
@@ -980,21 +979,21 @@ export function progressBar(percent, width = 30, fractional = true) {
   return `${bar} ${colorFn(`${clamped.toFixed(1)}%`)}`;
 }
 
-function fmtTokens(n) {
+function fmtTokens(n: any) {
   if (!n || n === 0) return '0';
   if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(2)}M`;
   if (n >= 1_000) return `${(n / 1_000).toFixed(1)}K`;
   return String(n);
 }
 
-function fmtCost(usd) {
+function fmtCost(usd: any) {
   if (!usd || usd === 0) return '-';
   if (usd < 0.01) return `$${usd.toFixed(4)}`;
   if (usd < 1) return `$${usd.toFixed(3)}`;
   return `$${usd.toFixed(2)}`;
 }
 
-function fmtDuration(ms) {
+function fmtDuration(ms: any) {
   if (!ms || ms === 0) return '-';
   if (ms < 1000) return `${ms}ms`;
   const secs = (ms / 1000).toFixed(1);
@@ -1004,7 +1003,7 @@ function fmtDuration(ms) {
   return `${mins}m${remSecs}s`;
 }
 
-function fmtReset(ms) {
+function fmtReset(ms: any) {
   if (ms === null || ms === undefined) return '-';
   const clamped = Math.max(0, Number(ms) || 0);
   const totalMinutes = Math.floor(clamped / 60000);
@@ -1018,7 +1017,7 @@ function fmtReset(ms) {
  * @param {object} metrics - From getMetricsSummary()
  * @param {object} usage - From checkUsage()
  */
-export function renderStatsDashboard(metrics, usage) {
+export function renderStatsDashboard(metrics: any, usage: any) {
   const lines = [];
   lines.push('');
   lines.push(hydraLogoCompact());
@@ -1028,7 +1027,7 @@ export function renderStatsDashboard(metrics, usage) {
   if (usage) {
     lines.push(sectionHeader('Token Usage'));
     lines.push(`  ${progressBar(usage.percent || 0)}`);
-    const statusColors = {
+    const statusColors: Record<string, (s: string) => string> = {
       normal: pc.green,
       warning: pc.yellow,
       critical: pc.red,
@@ -1048,10 +1047,10 @@ export function renderStatsDashboard(metrics, usage) {
       for (const agent of ['gemini', 'codex', 'claude']) {
         const row = usage.agents[agent];
         if (!row) continue;
-        const colorFn = AGENT_COLORS[agent] || pc.white;
-        const icon = AGENT_ICONS[agent] || '\u2022';
+        const colorFn = (AGENT_COLORS as Record<string, (s: string) => string>)[agent] || pc.white;
+        const icon = (AGENT_ICONS as Record<string, string>)[agent] || '\u2022';
         const badge = colorFn(`${icon} ${agent.toUpperCase()}`);
-        const rowStatusColors = {
+        const rowStatusColors: Record<string, (s: string) => string> = {
           normal: pc.green,
           warning: pc.yellow,
           critical: pc.red,
@@ -1090,9 +1089,9 @@ export function renderStatsDashboard(metrics, usage) {
   lines.push(DIM(header));
   lines.push(DIM(`  ${'\u2500'.repeat(62)}`));
 
-  for (const [agent, data] of Object.entries(metrics.agents)) {
-    const colorFn = AGENT_COLORS[agent] || pc.white;
-    const icon = AGENT_ICONS[agent] || '\u2022';
+  for (const [agent, data] of Object.entries(metrics.agents) as [string, any][]) {
+    const colorFn = (AGENT_COLORS as Record<string, (s: string) => string>)[agent] || pc.white;
+    const icon = (AGENT_ICONS as Record<string, string>)[agent] || '\u2022';
     const agentLabel = colorFn(`${icon} ${agent.padEnd(8)}`);
     const calls = pc.white(String(data.callsToday || 0).padStart(6));
     // Prefer real session tokens when available, fall back to estimate
@@ -1141,10 +1140,10 @@ export function renderStatsDashboard(metrics, usage) {
 
 // ─── Agent Header ───────────────────────────────────────────────────────────
 
-export function agentHeader(name) {
+export function agentHeader(name: string) {
   const lower = String(name || '').toLowerCase();
-  const colorFn = AGENT_COLORS[lower] || pc.white;
-  const agentConfig = {
+  const colorFn = (AGENT_COLORS as Record<string, (s: string) => string>)[lower] || pc.white;
+  const agentConfig: Record<string, { tagline: string; icon: string }> = {
     gemini: { tagline: 'Analyst \u00B7 Critic \u00B7 Reviewer', icon: '\u2726' },
     codex: { tagline: 'Implementer \u00B7 Builder \u00B7 Executor', icon: '\u25B6' },
     claude: { tagline: 'Architect \u00B7 Planner \u00B7 Coordinator', icon: '\u2666' },
@@ -1162,7 +1161,7 @@ export function agentHeader(name) {
 
 // ─── Utility: Strip ANSI ────────────────────────────────────────────────────
 
-export function stripAnsi(str) {
+export function stripAnsi(str: string) {
   // Removes CSI sequences like \x1b[...m (including 38;2;r;g;b)
   // eslint-disable-next-line no-control-regex
   return String(str || '').replace(/\x1B\[[0-?]*[ -/]*[@-~]/g, '');
@@ -1182,7 +1181,7 @@ export const HEALTH_ICONS = {
  * @param {number} ms - Elapsed time in milliseconds
  * @returns {string} e.g. "2m 15s", "45s", "1h 3m"
  */
-export function formatElapsed(ms) {
+export function formatElapsed(ms: number) {
   if (!ms || ms < 0) return '0s';
   const totalSec = Math.floor(ms / 1000);
   if (totalSec < 60) return `${totalSec}s`;
@@ -1199,7 +1198,7 @@ export function formatElapsed(ms) {
  * @param {number} percent - 0-100
  * @param {number} [width=15] - Bar width in characters
  */
-export function compactProgressBar(percent, width = 15) {
+export function compactProgressBar(percent: number, width = 15) {
   const clamped = Math.max(0, Math.min(100, percent || 0));
 
   let colorFn = pc.green;
@@ -1241,7 +1240,7 @@ export function compactProgressBar(percent, width = 15) {
  * @param {string} modelId - e.g. "claude-sonnet-4-5-20250929"
  * @returns {string} - e.g. "sonnet"
  */
-export function shortModelName(modelId) {
+export function shortModelName(modelId: string) {
   // Try profile-derived short name first (single source of truth)
   const profileName = _getShortName(modelId);
   if (profileName) return profileName;
@@ -1279,7 +1278,7 @@ const ACTION_VERBS =
  * @param {number} [maxLen=30] - Maximum character length
  * @returns {string} A short topic phrase, or '' if nothing meaningful extracted
  */
-export function extractTopic(prompt, maxLen = 30) {
+export function extractTopic(prompt: string, maxLen = 30) {
   if (!prompt) return '';
   let text = String(prompt).trim();
 
@@ -1308,15 +1307,15 @@ export function extractTopic(prompt, maxLen = 30) {
   return text;
 }
 
-const PHASE_NARRATIVES = {
-  propose: (agent, topic) => (topic ? `Analyzing ${topic}` : 'Analyzing the objective'),
-  critique: (agent, topic) =>
+const PHASE_NARRATIVES: Record<string, (agent: string, topic: string) => string> = {
+  propose: (_agent: string, topic: string) => (topic ? `Analyzing ${topic}` : 'Analyzing the objective'),
+  critique: (_agent: string, topic: string) =>
     topic ? `Reviewing plan for ${topic}` : 'Reviewing the proposed plan',
-  refine: (_agent, _topic) => 'Incorporating feedback into plan',
-  implement: (agent, topic) =>
+  refine: (_agent: string, _topic: string) => 'Incorporating feedback into plan',
+  implement: (_agent: string, topic: string) =>
     topic ? `Evaluating approach for ${topic}` : 'Evaluating implementation approach',
-  vote: (_agent, _topic) => 'Casting final vote',
-  summarize: (_agent, _topic) => 'Summarizing council outcome',
+  vote: (_agent: string, _topic: string) => 'Casting final vote',
+  summarize: (_agent: string, _topic: string) => 'Summarizing council outcome',
 };
 
 /**
@@ -1326,18 +1325,18 @@ const PHASE_NARRATIVES = {
  * @param {string} [topic] - Extracted topic from the prompt
  * @returns {string} Human-readable narrative description
  */
-export function phaseNarrative(phase, agent, topic) {
+export function phaseNarrative(phase: string, agent: string, topic: string) {
   const fn = PHASE_NARRATIVES[phase];
   if (fn) return fn(agent, topic);
   // Fallback: capitalize the phase name
   return topic ? `${phase} ${topic}` : `${phase}...`;
 }
 
-export function formatAgentStatus(agent, status, action, maxWidth) {
+export function formatAgentStatus(agent: string, status: string, action: string, maxWidth: number) {
   const lower = String(agent || '').toLowerCase();
-  const icon = AGENT_ICONS[lower] || '\u2022';
-  const colorFn = AGENT_COLORS[lower] || pc.white;
-  const healthIcon = HEALTH_ICONS[status] || HEALTH_ICONS.inactive;
+  const icon = (AGENT_ICONS as Record<string, string>)[lower] || '\u2022';
+  const colorFn = (AGENT_COLORS as Record<string, (s: string) => string>)[lower] || pc.white;
+  const healthIcon = (HEALTH_ICONS as Record<string, string>)[status] || HEALTH_ICONS.inactive;
   const name = String(agent).toUpperCase();
   const actionText = String(action || status || 'Inactive');
 

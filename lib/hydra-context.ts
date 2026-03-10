@@ -18,14 +18,14 @@ import { loadHydraConfig, resolveProject } from './hydra-config.ts';
 import { getCurrentBranch, git } from './hydra-shared/git-ops.ts';
 
 const CACHE_TTL_MS = 60 * 1000;
-let cachedMedium = null;
+let cachedMedium: string | null = null;
 let cachedMediumAt = 0;
 let cachedMediumKey = '';
-let cachedLarge = null;
+let cachedLarge: string | null = null;
 let cachedLargeAt = 0;
 let cachedLargeKey = '';
 
-function readFileSafe(filePath, maxLines = 0) {
+function readFileSafe(filePath: string, maxLines = 0) {
   try {
     const content = fs.readFileSync(filePath, 'utf8');
     if (maxLines > 0) {
@@ -38,14 +38,14 @@ function readFileSafe(filePath, maxLines = 0) {
 }
 
 /** Read HYDRA.md first; fall back to CLAUDE.md. */
-function readInstructionFile(projectRoot, maxLines = 0) {
+function readInstructionFile(projectRoot: string, maxLines = 0) {
   return (
     readFileSafe(path.join(projectRoot, 'HYDRA.md'), maxLines) ||
     readFileSafe(path.join(projectRoot, 'CLAUDE.md'), maxLines)
   );
 }
 
-function getRecentGitDiff(cwd, maxLines = 100) {
+function getRecentGitDiff(cwd: string, maxLines = 100) {
   const r = git(['diff', '--stat', 'HEAD~3..HEAD'], cwd);
   if (r.status !== 0) return '';
   const diff = (r.stdout || '').trim();
@@ -56,19 +56,19 @@ function getRecentGitDiff(cwd, maxLines = 100) {
   return diff;
 }
 
-function extractSection(content, heading) {
+function extractSection(content: string, heading: string) {
   const pattern = new RegExp(`^##\\s+${heading}[^\\n]*\\n`, 'm');
   const match = content.match(pattern);
   if (!match) {
     return '';
   }
-  const start = match.index + match[0].length;
+  const start = match.index! + match[0].length;
   const nextSection = content.indexOf('\n## ', start);
   const end = nextSection === -1 ? content.length : nextSection;
   return content.slice(start, end).trim();
 }
 
-function extractPriorities(todoContent) {
+function extractPriorities(todoContent: string) {
   const lines = todoContent.split(/\r?\n/);
   const priorities = [];
   for (const line of lines) {
@@ -91,7 +91,7 @@ function extractPriorities(todoContent) {
 
 // ── Auto-detect project metadata ─────────────────────────────────────────────
 
-function detectTechStack(projectRoot) {
+function detectTechStack(projectRoot: string) {
   const parts = [];
   try {
     const pkg = JSON.parse(fs.readFileSync(path.join(projectRoot, 'package.json'), 'utf8'));
@@ -116,7 +116,7 @@ function detectTechStack(projectRoot) {
   return parts.length > 0 ? parts.join(', ') : 'unknown stack';
 }
 
-function detectKeyFiles(projectRoot) {
+function detectKeyFiles(projectRoot: string) {
   // Try to extract from HYDRA.md / CLAUDE.md "Code Entry Points" section
   const claudeMd = readInstructionFile(projectRoot);
   if (claudeMd) {
@@ -124,12 +124,12 @@ function detectKeyFiles(projectRoot) {
     if (entryPointsSection) {
       const lines = entryPointsSection
         .split(/\r?\n/)
-        .filter((l) => l.includes('|') && !l.includes('---'));
+        .filter((l: string) => l.includes('|') && !l.includes('---'));
       const files = lines
-        .map((l) => {
+        .map((l: string) => {
           const cells = l
             .split('|')
-            .map((c) => c.trim())
+            .map((c: string) => c.trim())
             .filter(Boolean);
           return cells.length >= 2 ? `${cells[1]} (${cells[0]})` : null;
         })
@@ -141,7 +141,7 @@ function detectKeyFiles(projectRoot) {
   return '';
 }
 
-function detectGitRules(projectRoot) {
+function detectGitRules(projectRoot: string) {
   const claudeMd = readInstructionFile(projectRoot);
   if (!claudeMd) return '';
 
@@ -163,7 +163,7 @@ function detectGitRules(projectRoot) {
  * Minimal context (~500-800 tokens) for Codex.
  * Only task-specific: file paths, relevant type definitions, function signatures.
  */
-function buildMinimalContext(projectConfig, taskContext = {}) {
+function buildMinimalContext(projectConfig: any, taskContext: { files?: string[]; types?: string; signatures?: string } = {}) {
   const branch = getCurrentBranch(projectConfig.projectRoot);
   const techStack = detectTechStack(projectConfig.projectRoot);
   const gitRules = detectGitRules(projectConfig.projectRoot);
@@ -200,7 +200,7 @@ function buildMinimalContext(projectConfig, taskContext = {}) {
  * Medium context (~1500 tokens) for Claude.
  * Claude has full tool access to read files, so summary + priorities is enough.
  */
-function buildMediumContext(projectConfig) {
+function buildMediumContext(projectConfig: any) {
   const now = Date.now();
   const cacheKey = projectConfig.projectRoot;
   if (cachedMedium && now - cachedMediumAt < CACHE_TTL_MS && cachedMediumKey === cacheKey) {
@@ -257,7 +257,7 @@ function buildMediumContext(projectConfig) {
  * Large context (~5000-8000 tokens) for Gemini.
  * Leverages Gemini's massive context window with additional file contents and git history.
  */
-function buildLargeContext(projectConfig, taskContext = {}) {
+function buildLargeContext(projectConfig: any, taskContext: { files?: string[]; types?: string; signatures?: string } = {}) {
   const now = Date.now();
   const cacheKey = projectConfig.projectRoot;
   if (
@@ -331,7 +331,7 @@ function buildLargeContext(projectConfig, taskContext = {}) {
  * @param {string} text - Prompt text to scan
  * @returns {string[]} Unique candidate paths (deduplicated)
  */
-export function extractPathsFromPrompt(text) {
+export function extractPathsFromPrompt(text: string) {
   if (!text) return [];
   const regex = /(?:\.{0,2}\/)?[\w.-]+(?:\/[\w.-]+)*\.[\w]+/g;
   const matches = text.match(regex);
@@ -352,14 +352,14 @@ export function extractPathsFromPrompt(text) {
  * @param {{ maxFiles?: number }} [opts] - Options: maxFiles caps results (default 3)
  * @returns {string[]} Absolute paths to scoped HYDRA.md files, deepest first
  */
-export function findScopedContextFiles(promptText, rootDir, opts = {}) {
+export function findScopedContextFiles(promptText: string, rootDir: string, opts: { maxFiles?: number } = {}) {
   const { maxFiles = 3 } = opts;
   const candidates = extractPathsFromPrompt(promptText);
   if (candidates.length === 0) return [];
 
   const absRoot = path.resolve(rootDir);
   // Use a Map keyed by depth (negative, so higher depth = deeper dir) for ordering
-  const found = new Map(); // absPath → depth (number of segments below rootDir)
+  const found = new Map<string, number>(); // absPath → depth (number of segments below rootDir)
 
   for (const candidate of candidates) {
     // Resolve the candidate relative to rootDir
@@ -410,7 +410,7 @@ export function findScopedContextFiles(promptText, rootDir, opts = {}) {
  * @param {string}   rootDir - Project root for computing relative display paths
  * @returns {string} Combined context string, or '' if files is empty
  */
-export function compileHierarchicalContext(files, rootDir) {
+export function compileHierarchicalContext(files: string[], rootDir: string) {
   if (!files || files.length === 0) return '';
 
   const absRoot = path.resolve(rootDir);
@@ -436,7 +436,7 @@ export function compileHierarchicalContext(files, rootDir) {
  * @param {object} [taskContext] - Optional task-specific context { files, types, signatures }
  * @param {object} [projectConfig] - Optional project config from resolveProject(). If omitted, auto-resolves.
  */
-export function getProjectContext(agentName = 'claude', taskContext = {}, projectConfig = null) {
+export function getProjectContext(agentName = 'claude', taskContext: { files?: string[]; types?: string; signatures?: string } = {}, projectConfig: any = null) {
   if (!projectConfig) {
     projectConfig = resolveProject({ skipValidation: true });
   }
@@ -470,9 +470,9 @@ export function getProjectContext(agentName = 'claude', taskContext = {}, projec
  */
 export function buildAgentContext(
   agentName = 'claude',
-  taskContext = {},
-  projectConfig = null,
-  promptText = null,
+  taskContext: { files?: string[]; types?: string; signatures?: string } = {},
+  projectConfig: any = null,
+  promptText: string | null = null,
 ) {
   if (!projectConfig) {
     projectConfig = resolveProject({ skipValidation: true });

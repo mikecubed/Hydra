@@ -31,8 +31,8 @@ import {
 } from './hydra-config.ts';
 import { executeAgent } from './hydra-shared/agent-executor.ts';
 import { parseJsonLoose } from './hydra-utils.ts';
-import { promptChoice } from './hydra-prompt-choice.mjs';
-import { sectionHeader, DIM, ACCENT, SUCCESS, WARNING, ERROR } from './hydra-ui.mjs';
+import { promptChoice } from './hydra-prompt-choice.ts';
+import { sectionHeader, DIM, ACCENT, SUCCESS, WARNING, ERROR } from './hydra-ui.ts';
 import type { TaskType } from './types.ts';
 
 // ── Interfaces ────────────────────────────────────────────────────────────────

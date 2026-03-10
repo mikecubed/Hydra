@@ -8,7 +8,7 @@
 import os from 'node:os';
 import path from 'node:path';
 import type { Interface as ReadlineInterface } from 'node:readline';
-import { promptChoice } from './hydra-prompt-choice.mjs';
+import { promptChoice } from './hydra-prompt-choice.ts';
 import { loadHydraConfig, saveHydraConfig, AFFINITY_PRESETS } from './hydra-config.ts';
 import { registerCustomAgentMcp, KNOWN_CLI_MCP_PATHS } from './hydra-setup.ts';
 import type { CustomAgentDef } from './types.ts';

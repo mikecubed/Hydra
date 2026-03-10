@@ -5,7 +5,7 @@ import {
   findScopedContextFiles,
   compileHierarchicalContext,
   buildAgentContext,
-} from '../lib/hydra-context.mjs';
+} from '../lib/hydra-context.ts';
 import { mkdirSync, writeFileSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';

@@ -18,7 +18,7 @@ import {
   getModelReasoningCaps,
   formatEffortDisplay,
 } from './hydra-agents.ts';
-import { promptChoice } from './hydra-prompt-choice.mjs';
+import { promptChoice } from './hydra-prompt-choice.ts';
 import { formatBenchmarkAnnotation } from './hydra-model-profiles.ts';
 
 interface RoleConfig {

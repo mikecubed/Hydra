@@ -8,32 +8,31 @@
  * for the clean-text API. Raw output is also available.
  */
 
-import { stripAnsi } from './hydra-ui.mjs';
+import { stripAnsi } from './hydra-ui.ts';
 
 // ── State ────────────────────────────────────────────────────────────────────
 
 let _initialized = false;
-let _maxLines = 200;
-const _lines = []; // ANSI-stripped
-const _linesRaw = []; // With ANSI
-let _partial = ''; // Accumulate incomplete lines
-let _partialRaw = '';
+let _maxLines: number = 200;
+const _lines: string[] = []; // ANSI-stripped
+const _linesRaw: string[] = []; // With ANSI
+let _partial: string = ''; // Accumulate incomplete lines
+let _partialRaw: string = '';
 
-let _origStdoutWrite = null;
-let _origStderrWrite = null;
+let _origStdoutWrite: typeof process.stdout.write | null = null;
+let _origStderrWrite: typeof process.stderr.write | null = null;
 
 // ── Scroll-region filter ─────────────────────────────────────────────────────
 
-// Status bar uses CSI sequences for scroll regions — filter those out
 const SCROLL_REGION_RE = /\x1b\[\d*;\d*r|\x1b\[\d+[ABCDHJ]|\x1b\[s|\x1b\[u|\x1b\[\?25[lh]/;
 
-function isStatusBarLine(raw) {
+function isStatusBarLine(raw: string): boolean {
   return SCROLL_REGION_RE.test(raw);
 }
 
 // ── Core ─────────────────────────────────────────────────────────────────────
 
-function pushLine(clean, raw) {
+function pushLine(clean: string, raw: string): void {
   _lines.push(clean);
   _linesRaw.push(raw);
   while (_lines.length > _maxLines) {
@@ -42,28 +41,24 @@ function pushLine(clean, raw) {
   }
 }
 
-function processChunk(chunk, isRaw) {
-  const str = typeof chunk === 'string' ? chunk : chunk?.toString?.('utf8') || '';
+function processChunk(chunk: string | Uint8Array, _isRaw?: boolean): void {
+  const str = typeof chunk === 'string' ? chunk : (chunk as Uint8Array)?.toString?.() || '';
   if (!str) return;
 
-  // Filter status bar redraws
   if (isStatusBarLine(str)) return;
 
   const rawStr = str;
   const cleanStr = stripAnsi(str);
 
-  // Split on newlines, handling partial lines
   const rawParts = (_partialRaw + rawStr).split('\n');
   const cleanParts = (_partial + cleanStr).split('\n');
 
-  // Last element is a partial (no trailing newline) or empty (trailing newline)
   _partialRaw = rawParts.pop() || '';
   _partial = cleanParts.pop() || '';
 
   for (const [i, clean] of cleanParts.entries()) {
     const raw = rawParts[i] || clean;
     if (clean.trim()) {
-      // Skip blank lines
       pushLine(clean, raw);
     }
   }
@@ -75,7 +70,7 @@ function processChunk(chunk, isRaw) {
  * Start intercepting stdout/stderr writes.
  * Safe to call multiple times — only patches once.
  */
-export function initOutputHistory(opts = {}) {
+export function initOutputHistory(opts: { maxLines?: number } = {}): void {
   if (_initialized) return;
   _maxLines = opts.maxLines || 200;
   _initialized = true;
@@ -83,47 +78,53 @@ export function initOutputHistory(opts = {}) {
   _origStdoutWrite = process.stdout.write.bind(process.stdout);
   _origStderrWrite = process.stderr.write.bind(process.stderr);
 
-  process.stdout.write = function (chunk, encoding, cb) {
+  const patchedStdoutWrite = function (
+    chunk: string | Uint8Array,
+    encodingOrCb?: BufferEncoding | ((e?: Error | null) => void),
+    cb?: (e?: Error | null) => void,
+  ): boolean {
     try {
       processChunk(chunk);
     } catch {
       /* never break output */
     }
-    return _origStdoutWrite(chunk, encoding, cb);
+    return _origStdoutWrite!(chunk as string, encodingOrCb as BufferEncoding, cb!);
   };
+  (process.stdout as NodeJS.WriteStream & { write: unknown }).write = patchedStdoutWrite;
 
-  process.stderr.write = function (chunk, encoding, cb) {
+  const patchedStderrWrite = function (
+    chunk: string | Uint8Array,
+    encodingOrCb?: BufferEncoding | ((e?: Error | null) => void),
+    cb?: (e?: Error | null) => void,
+  ): boolean {
     try {
       processChunk(chunk);
     } catch {
       /* never break output */
     }
-    return _origStderrWrite(chunk, encoding, cb);
+    return _origStderrWrite!(chunk as string, encodingOrCb as BufferEncoding, cb!);
   };
+  (process.stderr as NodeJS.WriteStream & { write: unknown }).write = patchedStderrWrite;
 }
 
 /**
  * Get last n lines of output, ANSI-stripped.
- * @param {number} [n=50]
- * @returns {string[]}
  */
-export function getRecentOutput(n = 50) {
+export function getRecentOutput(n: number = 50): string[] {
   return _lines.slice(-n);
 }
 
 /**
  * Get last n lines of output with ANSI intact.
- * @param {number} [n=50]
- * @returns {string[]}
  */
-export function getRecentOutputRaw(n = 50) {
+export function getRecentOutputRaw(n: number = 50): string[] {
   return _linesRaw.slice(-n);
 }
 
 /**
  * Clear the output buffer.
  */
-export function clearOutputHistory() {
+export function clearOutputHistory(): void {
   _lines.length = 0;
   _linesRaw.length = 0;
   _partial = '';
@@ -132,10 +133,8 @@ export function clearOutputHistory() {
 
 /**
  * Get recent output formatted as a single string for AI consumption.
- * @param {number} [n=50]
- * @returns {string}
  */
-export function getOutputContext(n = 50) {
+export function getOutputContext(n: number = 50): string {
   const lines = getRecentOutput(n);
   if (lines.length === 0) return '(no recent output)';
   return lines.join('\n');

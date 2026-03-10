@@ -11,7 +11,7 @@
 
 import { loadHydraConfig } from './hydra-config.ts';
 import { getRateLimits as getModelRateLimits } from './hydra-model-profiles.ts';
-import { getProviderEWMA } from './hydra-streaming-middleware.mjs';
+import { getProviderEWMA } from './hydra-streaming-middleware.ts';
 
 // ── Types ────────────────────────────────────────────────────────────────────
 

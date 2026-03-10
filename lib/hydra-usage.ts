@@ -10,7 +10,7 @@
  *   node lib/hydra-usage.mjs
  *
  * Programmatic:
- *   import { checkUsage } from './hydra-usage.mjs';
+ *   import { checkUsage } from './hydra-usage.ts';
  *   const result = checkUsage();
  */
 
@@ -21,7 +21,7 @@ import { loadHydraConfig, resolveProject } from './hydra-config.ts';
 import { setActiveModel, AGENT_NAMES, getModelSummary, getAgent } from './hydra-agents.ts';
 import { getMetricsSummary, getRecentTokens } from './hydra-metrics.ts';
 import pc from 'picocolors';
-import { isTruecolor } from './hydra-ui.mjs';
+import { isTruecolor } from './hydra-ui.ts';
 
 // ── Date Helpers ────────────────────────────────────────────────────────────
 
@@ -56,7 +56,7 @@ export function findStatsCache() {
   if (fs.existsSync(standard)) return standard;
 
   // Windows alternative
-  const appData = process.env.APPDATA;
+  const appData = process.env['APPDATA'];
   if (appData) {
     const winPath = path.join(appData, '.claude', 'stats-cache.json');
     if (fs.existsSync(winPath)) return winPath;
@@ -72,7 +72,7 @@ export function findStatsCache() {
  * @param {string} filePath - Path to stats-cache.json
  * @returns {object} Parsed usage data
  */
-export function parseStatsCache(filePath) {
+export function parseStatsCache(filePath: string) {
   if (!filePath || !fs.existsSync(filePath)) {
     return { found: false, error: 'Stats cache not found' };
   }
@@ -84,7 +84,7 @@ export function parseStatsCache(filePath) {
 
     // Extract today's token usage by model
     let dailyTokens = Array.isArray(data.dailyModelTokens)
-      ? data.dailyModelTokens.find((d) => d.date === today)
+      ? data.dailyModelTokens.find((d: any) => d.date === today)
       : null;
 
     // If no data for today, check if the most recent day is yesterday
@@ -104,13 +104,13 @@ export function parseStatsCache(filePath) {
 
     const tokensByModel = dailyTokens?.tokensByModel || {};
     const totalTokensToday = Object.values(tokensByModel).reduce(
-      (sum, n) => sum + (Number(n) || 0),
+      (sum: number, n: unknown) => sum + (Number(n) || 0),
       0,
     );
 
     // Estimate today's tokens from activity if we have no direct data
     const todayActivity = Array.isArray(data.dailyActivity)
-      ? data.dailyActivity.find((d) => d.date === today)
+      ? data.dailyActivity.find((d: any) => d.date === today)
       : null;
     let estimatedFromActivity = 0;
     if (todayActivity && totalTokensToday === 0) {
@@ -120,7 +120,7 @@ export function parseStatsCache(filePath) {
 
     // Extract today's activity
     const dailyActivity = Array.isArray(data.dailyActivity)
-      ? data.dailyActivity.find((d) => d.date === today)
+      ? data.dailyActivity.find((d: any) => d.date === today)
       : null;
 
     // Overall model usage stats (cumulative)
@@ -136,7 +136,7 @@ export function parseStatsCache(filePath) {
     weekAgo.setDate(weekAgo.getDate() - 7);
     const weekAgoStr = getLocalDateString(weekAgo);
 
-    const weeklyTokensByModel = {};
+    const weeklyTokensByModel: Record<string, number> = {};
     let weeklyDayCount = 0;
     if (Array.isArray(data.dailyModelTokens)) {
       for (const entry of data.dailyModelTokens) {
@@ -148,7 +148,7 @@ export function parseStatsCache(filePath) {
         }
       }
     }
-    const totalTokensWeekly = Object.values(weeklyTokensByModel).reduce((s, n) => s + n, 0);
+    const totalTokensWeekly = Object.values(weeklyTokensByModel).reduce((s: number, n: number) => s + n, 0);
 
     // Use activity for today even if token data is stale
     const activityEntry = todayActivity || dailyActivity;
@@ -174,26 +174,26 @@ export function parseStatsCache(filePath) {
       recentDays: recentDays.length,
       version: data.version || 'unknown',
     };
-  } catch (err) {
-    return { found: false, error: `Failed to parse stats cache: ${err.message}` };
+  } catch (err: unknown) {
+    return { found: false, error: `Failed to parse stats cache: ${(err as Error).message}` };
   }
 }
 
-function safeNumber(value) {
+function safeNumber(value: any) {
   const n = Number(value);
   return Number.isFinite(n) ? n : 0;
 }
 
-function sumObjectValues(obj) {
+function sumObjectValues(obj: any) {
   if (!obj || typeof obj !== 'object') return 0;
-  return Object.values(obj).reduce((sum, value) => sum + safeNumber(value), 0);
+  return Object.values(obj).reduce((sum: number, value: unknown) => sum + safeNumber(value), 0);
 }
 
-function roundPercent(value) {
+function roundPercent(value: any) {
   return Math.round(safeNumber(value) * 10) / 10;
 }
 
-function levelFromPercent(percent, warningPct, criticalPct) {
+function levelFromPercent(percent: number, warningPct: number, criticalPct: number) {
   if (!Number.isFinite(percent)) return 'unknown';
   if (percent >= criticalPct) return 'critical';
   if (percent >= warningPct) return 'warning';
@@ -208,18 +208,18 @@ function getDailyResetInfo() {
   return { resetAt: reset.toISOString(), resetInMs };
 }
 
-function deriveConfidence(stats) {
+function deriveConfidence(stats: any) {
   const hoursSinceStart = stats?.activity ? Math.min(stats.activity.sessionCount || 0, 24) : 0;
   if (hoursSinceStart >= 4) return 'high';
   if (hoursSinceStart >= 1) return 'medium';
   return 'low';
 }
 
-function modelBelongsToAgent(modelId, agent) {
+function modelBelongsToAgent(modelId: string, agent: string) {
   return getAgent(agent)?.modelBelongsTo(modelId) ?? false;
 }
 
-function pickHighestTrackedModel(tokensByModel, budgets) {
+function pickHighestTrackedModel(tokensByModel: any, budgets: any) {
   let best = null;
   for (const [modelId, usedRaw] of Object.entries(tokensByModel || {})) {
     const budget = safeNumber(budgets?.[modelId]);
@@ -262,12 +262,12 @@ function collectEstimatedTokensByAgent() {
     const metrics = getMetricsSummary();
     for (const agent of AGENT_NAMES) {
       // Prefer real session tokens (from Claude JSON output) when available
-      const realTokens = safeNumber(metrics?.agents?.[agent]?.sessionTokens?.totalTokens);
+      const realTokens = safeNumber((metrics as any)?.agents?.[agent]?.sessionTokens?.totalTokens);
       if (realTokens > 0) {
         out[agent] = realTokens;
         continue;
       }
-      const live = safeNumber(metrics?.agents?.[agent]?.estimatedTokensToday);
+      const live = safeNumber((metrics as any)?.agents?.[agent]?.estimatedTokensToday);
       out[agent] = Math.max(out[agent] || 0, live);
     }
   } catch {
@@ -285,7 +285,7 @@ function collectEstimatedTokensByAgent() {
  * @param {number} [options.windowHours] - Override window size (default: from config)
  * @returns {object} Window budget assessment
  */
-export function checkWindowBudget(options = {}) {
+export function checkWindowBudget(options: { windowHours?: number } = {}) {
   const cfg = loadHydraConfig();
   const windowHours = options.windowHours || cfg.usage?.windowHours || 5;
   const windowBudgets = cfg.usage?.windowTokenBudget || {};
@@ -293,13 +293,13 @@ export function checkWindowBudget(options = {}) {
   const criticalPct = cfg.usage?.criticalThresholdPercent || 90;
   const windowMs = windowHours * 60 * 60 * 1000;
 
-  const modelSummary = getModelSummary();
-  const agentWindow = {};
+  const modelSummary = getModelSummary() as any;
+  const agentWindow: Record<string, any> = {};
 
   for (const agent of AGENT_NAMES) {
     const recent = getRecentTokens(agent, windowMs);
     const activeModel = modelSummary?.[agent]?.active || null;
-    const windowBudget = activeModel ? safeNumber(windowBudgets[activeModel]) : 0;
+    const windowBudget = activeModel ? safeNumber((windowBudgets as any)[activeModel]) : 0;
 
     const used = recent.total;
     const percent = windowBudget > 0 ? (used / windowBudget) * 100 : 0;
@@ -321,8 +321,8 @@ export function checkWindowBudget(options = {}) {
   }
 
   // Overall: tightest constraint
-  const tracked = Object.values(agentWindow).filter((a) => a.windowBudget > 0);
-  const highest = tracked.reduce((best, a) => (!best || a.percent > best.percent ? a : best), null);
+  const tracked = Object.values(agentWindow).filter((a: any) => a.windowBudget > 0);
+  const highest = tracked.reduce((best: any, a: any) => (!best || a.percent > best.percent ? a : best), null);
 
   return {
     ok: !highest || highest.level !== 'critical',
@@ -342,7 +342,7 @@ export function checkWindowBudget(options = {}) {
  * @param {string} [options.statsPath] - Override stats cache path
  * @returns {object} Usage assessment
  */
-export function checkUsage(options = {}) {
+export function checkUsage(options: { statsPath?: string } = {}) {
   const cfg = loadHydraConfig();
   const warningPct = cfg.usage?.warningThresholdPercent || 80;
   const criticalPct = cfg.usage?.criticalThresholdPercent || 90;
@@ -350,21 +350,21 @@ export function checkUsage(options = {}) {
   const resetInfo = getDailyResetInfo();
 
   const statsPath = options.statsPath || findStatsCache();
-  const stats = parseStatsCache(statsPath);
-  const modelSummary = getModelSummary();
+  const stats = parseStatsCache(statsPath || '');
+  const modelSummary = getModelSummary() as any;
   const estimatedTokensByAgent = collectEstimatedTokensByAgent();
 
   const tokensByModel = stats.found ? stats.tokensByModel || {} : {};
   const defaultConfidence = stats.found ? deriveConfidence(stats) : 'none';
-  const metricsSummary = getMetricsSummary();
-  const agentUsage = {};
+  const metricsSummary = getMetricsSummary() as any;
+  const agentUsage: Record<string, any> = {};
 
   for (const agent of AGENT_NAMES) {
     const activeModel = modelSummary?.[agent]?.active || null;
-    const agentModelTokens = {};
+    const agentModelTokens: Record<string, number> = {};
     for (const [modelId, used] of Object.entries(tokensByModel)) {
       if (modelBelongsToAgent(modelId, agent)) {
-        agentModelTokens[modelId] = safeNumber(used);
+        agentModelTokens[modelId] = safeNumber((used as any));
       }
     }
 
@@ -375,13 +375,13 @@ export function checkUsage(options = {}) {
     const source =
       directUsed > 0 ? 'stats-cache' : estimatedUsed > 0 ? 'hydra-metrics-estimate' : 'none';
 
-    const activeBudget = activeModel ? safeNumber(budgets[activeModel]) : 0;
-    let tracked = null;
+    const activeBudget = activeModel ? safeNumber((budgets as any)[activeModel]) : 0;
+    let tracked: { model: string | null; budget: number; used: number; percent?: number } | null = null;
     if (activeBudget > 0) {
       tracked = {
         model: activeModel,
         budget: activeBudget,
-        used: safeNumber(agentModelTokens[activeModel]) || used,
+        used: safeNumber(agentModelTokens[activeModel!]) || used,
       };
       tracked.percent = tracked.budget > 0 ? (tracked.used / tracked.budget) * 100 : 0;
     } else {
@@ -389,9 +389,9 @@ export function checkUsage(options = {}) {
     }
 
     const hasBudget = Boolean(tracked?.budget && tracked.budget > 0);
-    const percent = hasBudget ? roundPercent(tracked.percent) : 0;
+    const percent = hasBudget ? roundPercent(tracked!.percent) : 0;
     const level = hasBudget ? levelFromPercent(percent, warningPct, criticalPct) : 'unknown';
-    const remaining = hasBudget ? Math.max(0, tracked.budget - tracked.used) : null;
+    const remaining = hasBudget ? Math.max(0, tracked!.budget - tracked!.used) : null;
     // Upgrade confidence when real session tokens are available from metrics
     const hasRealTokens =
       safeNumber(metricsSummary?.agents?.[agent]?.sessionTokens?.totalTokens) > 0;
@@ -419,10 +419,10 @@ export function checkUsage(options = {}) {
       level,
       percent,
       todayTokens: used,
-      used: hasBudget ? tracked.used : used,
-      budget: hasBudget ? tracked.budget : null,
+      used: hasBudget ? tracked!.used : used,
+      budget: hasBudget ? tracked!.budget : null,
       remaining,
-      model: hasBudget ? tracked.model : activeModel,
+      model: hasBudget ? tracked!.model : activeModel,
       activeModel,
       source: sourceLabel,
       tracked: hasBudget,
@@ -433,13 +433,13 @@ export function checkUsage(options = {}) {
     };
   }
 
-  const trackedAgents = Object.values(agentUsage).filter((entry) => entry.tracked);
+  const trackedAgents = Object.values(agentUsage).filter((entry: any) => entry.tracked);
   const highest = trackedAgents.reduce(
-    (best, entry) => (!best || entry.percent > best.percent ? entry : best),
+    (best: any, entry: any) => (!best || entry.percent > best.percent ? entry : best),
     null,
   );
   const totalTokens = Object.values(agentUsage).reduce(
-    (sum, entry) => sum + safeNumber(entry.todayTokens),
+    (sum: number, entry: any) => sum + safeNumber(entry.todayTokens),
     0,
   );
 
@@ -491,20 +491,20 @@ export function checkUsage(options = {}) {
   // ── Weekly budget check (primary metric for Max plans) ────────────
   const weeklyBudgets = cfg.usage?.weeklyTokenBudget || {};
   const weeklyTokensByModel = stats.found ? stats.weeklyTokensByModel || {} : {};
-  const agentWeekly = {};
+  const agentWeekly: Record<string, any> = {};
 
   for (const agent of AGENT_NAMES) {
     const activeModel = modelSummary?.[agent]?.active || null;
-    const agentWeeklyTokens = {};
+    const agentWeeklyTokens: Record<string, number> = {};
     for (const [modelId, used] of Object.entries(weeklyTokensByModel)) {
       if (modelBelongsToAgent(modelId, agent)) {
-        agentWeeklyTokens[modelId] = safeNumber(used);
+        agentWeeklyTokens[modelId] = safeNumber((used as any));
       }
     }
     const weeklyUsed = sumObjectValues(agentWeeklyTokens);
 
     // Find the best budget match — try active model first, then highest-usage model with a budget
-    let weeklyBudget = activeModel ? safeNumber(weeklyBudgets[activeModel]) : 0;
+    let weeklyBudget = activeModel ? safeNumber((weeklyBudgets as any)[activeModel]) : 0;
     let budgetModel = activeModel;
     if (weeklyBudget <= 0) {
       const best = pickHighestTrackedModel(agentWeeklyTokens, weeklyBudgets);
@@ -531,9 +531,9 @@ export function checkUsage(options = {}) {
     };
   }
 
-  const trackedWeekly = Object.values(agentWeekly).filter((a) => a.tracked);
+  const trackedWeekly = Object.values(agentWeekly).filter((a: any) => a.tracked);
   const highestWeekly = trackedWeekly.reduce(
-    (best, a) => (!best || a.percent > best.percent ? a : best),
+    (best: any, a: any) => (!best || a.percent > best.percent ? a : best),
     null,
   );
 
@@ -550,7 +550,7 @@ export function checkUsage(options = {}) {
   // ── Determine overall level ──────────────────────────────────────
   // Weekly is the primary metric (matches Claude's actual limit structure).
   // Daily and window are secondary — only escalate if they're tighter.
-  const LEVEL_ORDER = { normal: 0, warning: 1, critical: 2, unknown: -1 };
+  const LEVEL_ORDER: Record<string, number> = { normal: 0, warning: 1, critical: 2, unknown: -1 };
 
   // Start with weekly as primary
   if (highestWeekly && highestWeekly.level !== 'unknown') {
@@ -604,18 +604,18 @@ export function checkUsage(options = {}) {
  * @param {object} usageResult - Result from checkUsage()
  * @returns {Array} Available contingency actions
  */
-export function getContingencyOptions(usageResult) {
+export function getContingencyOptions(usageResult: any) {
   if (!usageResult || usageResult.level === 'normal') return [];
 
   const options = [];
   const trackedAgents = usageResult.agents
-    ? Object.values(usageResult.agents).filter((entry) => entry && entry.tracked)
+    ? Object.values(usageResult.agents).filter((entry: any) => entry && entry.tracked)
     : [];
   const highestTracked = trackedAgents.reduce(
-    (best, entry) => (!best || entry.percent > best.percent ? entry : best),
+    (best: any, entry: any) => (!best || (entry as any).percent > best.percent ? entry : best),
     null,
   );
-  const targetAgent = highestTracked?.agent || 'claude';
+  const targetAgent = (highestTracked as any)?.agent || 'claude';
 
   if (usageResult.level === 'warning' || usageResult.level === 'critical') {
     options.push({
@@ -660,7 +660,7 @@ export function getContingencyOptions(usageResult) {
  * @param {object} [context] - Additional context (e.g. daemon URL)
  * @returns {object} Result of the action
  */
-export function executeContingency(option, context = {}) {
+export function executeContingency(option: any, _context: any = {}) {
   switch (option.action) {
     case 'setActiveModel': {
       const resolved = setActiveModel(option.args.agent, option.args.model);
@@ -682,7 +682,7 @@ export function executeContingency(option, context = {}) {
 
 // ── CLI Rendering ───────────────────────────────────────────────────────────
 
-function renderUsageBar(percent, width = 30) {
+function renderUsageBar(percent: number, width = 30) {
   const clamped = Math.max(0, Math.min(100, percent));
   const filled = Math.round((clamped / 100) * width);
   const empty = width - filled;
@@ -695,13 +695,13 @@ function renderUsageBar(percent, width = 30) {
   return `${bar} ${colorFn(`${clamped.toFixed(1)}%`)}`;
 }
 
-function formatTokens(n) {
+function formatTokens(n: any) {
   if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(2)}M`;
   if (n >= 1_000) return `${(n / 1_000).toFixed(1)}K`;
   return String(n);
 }
 
-function formatResetCountdown(ms) {
+function formatResetCountdown(ms: any) {
   const clamped = Math.max(0, safeNumber(ms));
   const totalMinutes = Math.floor(clamped / 60000);
   const hours = Math.floor(totalMinutes / 60);
@@ -709,20 +709,20 @@ function formatResetCountdown(ms) {
   return `${hours}h ${minutes}m`;
 }
 
-function agentBadgeCompact(agent) {
-  const map = {
+function agentBadgeCompact(agent: any) {
+  const map: Record<string, { icon: string; color: (s: string) => string }> = {
     gemini: { icon: '\u2726', color: pc.cyan },
     codex: { icon: '\u25B6', color: pc.green },
     claude: {
       icon: '\u2666',
-      color: isTruecolor ? (str) => `\x1b[38;2;232;134;58m${str}\x1b[39m` : pc.yellow,
+      color: isTruecolor ? (str: string) => `\x1b[38;2;232;134;58m${str}\x1b[39m` : pc.yellow,
     },
   };
   const cfg = map[agent] || { icon: '\u2022', color: pc.white };
   return cfg.color(`${cfg.icon} ${String(agent || '').toUpperCase()}`);
 }
 
-function renderUsageDashboard(usage) {
+function renderUsageDashboard(usage: any) {
   const lines = [];
   const d = pc.gray;
   const b = pc.bold;
@@ -800,7 +800,7 @@ function renderUsageDashboard(usage) {
     for (const agent of AGENT_NAMES) {
       const row = usage.agents[agent];
       if (!row) continue;
-      const statusColors = {
+      const statusColors: Record<string, (s: string) => string> = {
         normal: pc.green,
         warning: pc.yellow,
         critical: pc.red,
@@ -829,7 +829,7 @@ function renderUsageDashboard(usage) {
   }
 
   // Status line
-  const statusColors = { normal: pc.green, warning: pc.yellow, critical: pc.red, unknown: pc.gray };
+  const statusColors: Record<string, (s: string) => string> = { normal: pc.green, warning: pc.yellow, critical: pc.red, unknown: pc.gray };
   const statusFn = statusColors[usage.level] || pc.white;
   lines.push('');
   lines.push(
