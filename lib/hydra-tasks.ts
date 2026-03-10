@@ -18,14 +18,20 @@
 
 import fs from 'node:fs';
 import path from 'node:path';
+// @ts-expect-error — cross-spawn has no bundled types; pre-existing across codebase
 import spawn from 'cross-spawn';
 import pc from 'picocolors';
 
 import { resolveProject, loadHydraConfig } from './hydra-config.ts';
-import { parseArgs, classifyPrompt, ensureDir } from './hydra-utils.ts';
-import { initAgentRegistry, classifyTask, bestAgentFor, getVerifier } from './hydra-agents.ts';
+import { parseArgs, classifyPrompt as _classifyPrompt, ensureDir } from './hydra-utils.ts';
+import {
+  initAgentRegistry,
+  classifyTask as _classifyTask,
+  bestAgentFor as _bestAgentFor,
+  getVerifier,
+} from './hydra-agents.ts';
 import { recordCallStart, recordCallComplete } from './hydra-metrics.ts';
-import { checkUsage } from './hydra-usage.ts';
+import { checkUsage as _checkUsage } from './hydra-usage.ts';
 import { resolveVerificationPlan } from './hydra-verification.mjs';
 import { BudgetTracker } from './hydra-shared/budget-tracker.ts';
 import { executeAgentWithRecovery } from './hydra-shared/agent-executor.ts';
@@ -34,6 +40,7 @@ import {
   verifyBranch,
   isCleanWorkingTree,
   scanBranchViolations,
+  type ScanViolation,
 } from './hydra-shared/guardrails.ts';
 import {
   getCurrentBranch,
@@ -49,33 +56,36 @@ import {
   BASE_PROTECTED_PATTERNS,
   BLOCKED_COMMANDS,
 } from './hydra-shared/constants.ts';
-import { scanAllSources, createUserTask, taskToSlug } from './hydra-tasks-scanner.ts';
+import {
+  scanAllSources,
+  createUserTask,
+  taskToSlug as _taskToSlug,
+  type ScannedTask,
+} from './hydra-tasks-scanner.ts';
 import { getAgentInstructionFile } from './hydra-sync-md.ts';
+import type { HydraConfig } from './types.ts';
+
+interface InvestigatorLike {
+  isInvestigatorAvailable(): boolean;
+  investigate(opts: Record<string, unknown>): Promise<{
+    diagnosis: string;
+    retryRecommendation?: { preamble?: string };
+  }>;
+}
 
 // Lazy-load investigator (optional)
-let _investigator = null;
-async function getInvestigator() {
+let _investigator: InvestigatorLike | null = null;
+async function getInvestigator(): Promise<InvestigatorLike | null> {
   if (_investigator) return _investigator;
   try {
-    _investigator = await import('./hydra-investigator.mjs');
+    _investigator = (await import('./hydra-investigator.mjs')) as unknown as InvestigatorLike;
     return _investigator;
   } catch {
     return null;
   }
 }
 
-// Lazy-load promptChoice (optional — falls back to simple readline)
-let _promptChoice = null;
-async function getPromptChoice() {
-  if (_promptChoice) return _promptChoice;
-  try {
-    const mod = await import('./hydra-prompt-choice.ts');
-    _promptChoice = mod.promptChoice;
-    return _promptChoice;
-  } catch {
-    return null;
-  }
-}
+
 
 // ── Constants ───────────────────────────────────────────────────────────────
 
@@ -120,7 +130,7 @@ function todayStr() {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 }
 
-function formatDuration(ms) {
+function formatDuration(ms: number) {
   const s = Math.round(ms / 1000);
   if (s < 60) return `${s}s`;
   const m = Math.floor(s / 60);
@@ -135,15 +145,15 @@ function createRL() {
   return readline.createInterface({ input: process.stdin, output: process.stderr, terminal: true });
 }
 
-function askLine(rl, question) {
-  return new Promise((resolve) => {
-    rl.question(question, (answer) => resolve(answer.trim()));
+function askLine(rl: readline.Interface, question: string) {
+  return new Promise<string>((resolve) => {
+    rl.question(question, (answer: string) => resolve(answer.trim()));
   });
 }
 
 // ── Interactive Task Selection ──────────────────────────────────────────────
 
-async function selectTasks(rl, scannedTasks) {
+async function selectTasks(rl: readline.Interface, scannedTasks: ScannedTask[]) {
   console.log(pc.bold(`\nScanned Tasks (${scannedTasks.length} found):\n`));
 
   const maxShow = Math.min(scannedTasks.length, 20);
@@ -199,13 +209,13 @@ async function selectTasks(rl, scannedTasks) {
 
 // ── Budget Preset Selection ─────────────────────────────────────────────────
 
-async function selectBudget(rl, cfg) {
+async function selectBudget(rl: readline.Interface, cfg: HydraConfig) {
   const defaultPreset = cfg.tasks?.budget?.defaultPreset || 'medium';
 
   console.log(pc.bold('\nBudget Preset:\n'));
   const presetNames = Object.keys(BUDGET_PRESETS);
   for (const [i, name] of presetNames.entries()) {
-    const preset = BUDGET_PRESETS[name];
+    const preset = BUDGET_PRESETS[name as keyof typeof BUDGET_PRESETS];
     const marker = name === defaultPreset ? pc.green(' (default)') : '';
     console.log(`  ${i + 1}. ${preset.label}${marker}`);
   }
@@ -215,7 +225,7 @@ async function selectBudget(rl, cfg) {
   const idx = Number.parseInt(answer, 10) - 1;
 
   if (idx >= 0 && idx < presetNames.length) {
-    return BUDGET_PRESETS[presetNames[idx]];
+    return BUDGET_PRESETS[presetNames[idx] as keyof typeof BUDGET_PRESETS];
   }
 
   if (idx === presetNames.length) {
@@ -231,12 +241,12 @@ async function selectBudget(rl, cfg) {
   }
 
   // Default
-  return BUDGET_PRESETS[defaultPreset];
+  return BUDGET_PRESETS[defaultPreset as keyof typeof BUDGET_PRESETS];
 }
 
 // ── Verification ────────────────────────────────────────────────────────────
 
-function runVerification(projectRoot, cfg) {
+function runVerification(projectRoot: string, cfg: HydraConfig) {
   const plan = resolveVerificationPlan(projectRoot, cfg);
   if (!plan.enabled || !plan.command) {
     return { ran: false, passed: true, output: '', command: '' };
@@ -260,7 +270,12 @@ function runVerification(projectRoot, cfg) {
 
 // ── Council-Lite (DECIDE Phase) ─────────────────────────────────────────────
 
-async function councilLiteReview(agent, diff, projectRoot, cfg) {
+async function councilLiteReview(
+  agent: string,
+  diff: string,
+  projectRoot: string,
+  _cfg: HydraConfig,
+) {
   const verifier = getVerifier(agent);
   const truncatedDiff = diff.length > 8192 ? `${diff.slice(0, 8192)}\n... (truncated)` : diff;
 
@@ -281,13 +296,13 @@ ${truncatedDiff}
 
 Then explain your reasoning briefly.`;
 
-  const handle = recordCallStart(verifier, null);
+  const handle = recordCallStart(verifier, undefined);
   const result = await executeAgentWithRecovery(verifier, reviewPrompt, {
     cwd: projectRoot,
     timeoutMs: 5 * 60 * 1000,
     phaseLabel: 'council-lite review',
   });
-  recordCallComplete(handle, result);
+  recordCallComplete(handle, result as unknown as Parameters<typeof recordCallComplete>[1]);
 
   if (!result.ok || !result.output) {
     return { verdict: 'approve', reason: 'Verifier unavailable — defaulting to approve' };
@@ -307,7 +322,16 @@ Then explain your reasoning briefly.`;
 
 // ── Per-Task Execution ──────────────────────────────────────────────────────
 
-async function executeTask(task, idx, total, projectRoot, baseBranch, cfg, budget, sessionMode) {
+async function executeTask(
+  task: ScannedTask,
+  idx: number,
+  total: number,
+  projectRoot: string,
+  baseBranch: string,
+  cfg: HydraConfig,
+  _budget: unknown,
+  _sessionMode: unknown,
+) {
   const date = todayStr();
   const branchName = `${BRANCH_PREFIX}/${date}/${task.slug}`;
   const startTime = Date.now();
@@ -322,21 +346,21 @@ async function executeTask(task, idx, total, projectRoot, baseBranch, cfg, budge
     taskType: task.taskType,
     complexity: task.complexity,
     status: 'pending',
-    phases: {},
+    phases: {} as Record<string, Record<string, unknown>>,
     tokens: 0,
     durationMs: 0,
     filesChanged: 0,
     commits: 0,
-    verification: null,
-    violations: [],
-    verdict: null,
+    verification: null as { ran: boolean; passed: boolean; command: string } | null,
+    violations: [] as ScanViolation[],
+    verdict: null as string | null,
   };
 
   const phaseLabel = `Task ${idx + 1}/${total}`;
 
   try {
     // ── CLASSIFY ──
-    result.phases.classify = {
+    result.phases['classify'] = {
       status: 'done',
       taskType: task.taskType,
       complexity: task.complexity,
@@ -364,7 +388,7 @@ async function executeTask(task, idx, total, projectRoot, baseBranch, cfg, budge
       return result;
     }
 
-    createBranch(projectRoot, branchName);
+    createBranch(projectRoot, branchName, baseBranch);
     checkoutBranch(projectRoot, branchName);
 
     // ── PLAN (complex tasks only) ──
@@ -385,15 +409,15 @@ Focus on:
 
 Be concise — this is a planning checklist, not a design doc.`;
 
-      const planHandle = recordCallStart('claude', null);
+      const planHandle = recordCallStart('claude', undefined);
       const planResult = await executeAgentWithRecovery('claude', planPrompt, {
         cwd: projectRoot,
         timeoutMs: 3 * 60 * 1000,
         phaseLabel: `${phaseLabel} plan`,
       });
-      recordCallComplete(planHandle, planResult);
+      recordCallComplete(planHandle, planResult as unknown as Parameters<typeof recordCallComplete>[1]);
 
-      result.phases.plan = {
+      result.phases['plan'] = {
         status: planResult.ok ? 'done' : 'failed',
         output: planResult.output?.slice(0, 2048) || '',
       };
@@ -415,7 +439,7 @@ Be concise — this is a planning checklist, not a design doc.`;
     });
 
     const instructionFile = getAgentInstructionFile(task.suggestedAgent, projectRoot);
-    const planOutput = result.phases.plan?.output || '';
+    const planOutput = (result.phases['plan']?.['output'] as string | undefined) || '';
     const planSection = planOutput ? `\n\n## Implementation Plan\n${planOutput}` : '';
 
     const executePrompt = `${safetyRules}
@@ -435,7 +459,7 @@ ${planSection}
 Read ${instructionFile} for project conventions.`;
 
     const timeoutMs = cfg.tasks?.perTaskTimeoutMs || 15 * 60 * 1000;
-    const execHandle = recordCallStart(task.suggestedAgent, null);
+    const execHandle = recordCallStart(task.suggestedAgent, undefined);
     const execResult = await executeAgentWithRecovery(task.suggestedAgent, executePrompt, {
       cwd: projectRoot,
       timeoutMs,
@@ -448,9 +472,9 @@ Read ${instructionFile} for project conventions.`;
       hubProject: path.basename(projectRoot),
       hubAgent: `${task.suggestedAgent}-forge`,
     });
-    recordCallComplete(execHandle, execResult);
+    recordCallComplete(execHandle, execResult as unknown as Parameters<typeof recordCallComplete>[1]);
 
-    result.phases.execute = {
+    result.phases['execute'] = {
       status: execResult.ok ? 'done' : 'failed',
       timedOut: execResult.timedOut || false,
       error: execResult.error || null,
@@ -462,7 +486,7 @@ Read ${instructionFile} for project conventions.`;
 
       // Self-healing via investigator
       const inv = await getInvestigator();
-      if (inv && cfg.tasks?.investigator?.enabled !== false && inv.isInvestigatorAvailable()) {
+      if (inv && cfg.tasks?.investigator?.['enabled'] !== false && inv.isInvestigatorAvailable()) {
         console.log(pc.dim(`  [INVESTIGATE] Diagnosing failure...`));
         try {
           const diagnosis = await inv.investigate({
@@ -473,7 +497,7 @@ Read ${instructionFile} for project conventions.`;
             timedOut: execResult.timedOut || false,
           });
 
-          result.phases.investigate = { diagnosis: diagnosis.diagnosis };
+          result.phases['investigate'] = { diagnosis: diagnosis.diagnosis };
 
           if (diagnosis.diagnosis === 'transient') {
             console.log(pc.yellow(`  [INVESTIGATE] Transient failure — retrying...`));
@@ -485,11 +509,14 @@ Read ${instructionFile} for project conventions.`;
               hubProject: path.basename(projectRoot),
               hubAgent: `${task.suggestedAgent}-forge`,
             });
-            recordCallComplete(recordCallStart(task.suggestedAgent, null), retryResult);
+            recordCallComplete(
+              recordCallStart(task.suggestedAgent, undefined),
+              retryResult as unknown as Parameters<typeof recordCallComplete>[1],
+            );
 
             if (retryResult.ok) {
-              result.phases.execute.status = 'done';
-              result.phases.execute.retried = true;
+              result.phases['execute']['status'] = 'done';
+              result.phases['execute']['retried'] = true;
             }
           } else if (diagnosis.diagnosis === 'fixable' && diagnosis.retryRecommendation?.preamble) {
             console.log(pc.yellow(`  [INVESTIGATE] Fixable — retrying with corrective prompt...`));
@@ -506,21 +533,28 @@ Read ${instructionFile} for project conventions.`;
                 hubAgent: `${task.suggestedAgent}-forge`,
               },
             );
-            recordCallComplete(recordCallStart(task.suggestedAgent, null), retryResult);
+            recordCallComplete(
+              recordCallStart(task.suggestedAgent, undefined),
+              retryResult as unknown as Parameters<typeof recordCallComplete>[1],
+            );
 
             if (retryResult.ok) {
-              result.phases.execute.status = 'done';
-              result.phases.execute.retried = true;
+              result.phases['execute']['status'] = 'done';
+              result.phases['execute']['retried'] = true;
             }
           } else {
             console.log(pc.red(`  [INVESTIGATE] Fundamental failure — skipping task`));
           }
         } catch (invErr) {
-          console.log(pc.dim(`  [INVESTIGATE] Investigation failed: ${invErr.message}`));
+          console.log(
+            pc.dim(
+              `  [INVESTIGATE] Investigation failed: ${invErr instanceof Error ? invErr.message : String(invErr)}`,
+            ),
+          );
         }
       }
 
-      if (result.phases.execute.status !== 'done') {
+      if (result.phases['execute']['status'] !== 'done') {
         // Doctor notification for persistent failure
         import('./hydra-doctor.mjs')
           .then((doc) => {
@@ -543,7 +577,7 @@ Read ${instructionFile} for project conventions.`;
                 timedOut: execResult.timedOut || false,
                 taskTitle: task.title,
                 branchName,
-              });
+              } as unknown as Parameters<typeof doc.diagnose>[0]);
           })
           .catch(() => {});
 
@@ -602,7 +636,7 @@ Read ${instructionFile} for project conventions.`;
       }
     }
 
-    result.phases.verify = {
+    result.phases['verify'] = {
       status: 'done',
       passed: verification.passed,
       violations: violations.length,
@@ -611,9 +645,9 @@ Read ${instructionFile} for project conventions.`;
     // ── DECIDE (council-lite for complex tasks) ──
     const councilCfg = cfg.tasks?.councilLite || {};
     const needsCouncil =
-      councilCfg.enabled !== false &&
+      councilCfg['enabled'] !== false &&
       (task.complexity === 'complex' ||
-        (!councilCfg.complexOnly && (violations.length > 0 || !verification.passed)));
+        (!councilCfg['complexOnly'] && (violations.length > 0 || !verification.passed)));
 
     if (needsCouncil) {
       console.log(pc.dim(`  [DECIDE] Council-lite review...`));
@@ -622,7 +656,7 @@ Read ${instructionFile} for project conventions.`;
       if (diff) {
         const review = await councilLiteReview(task.suggestedAgent, diff, projectRoot, cfg);
         result.verdict = review.verdict;
-        result.phases.decide = { status: 'done', verdict: review.verdict };
+        result.phases['decide'] = { status: 'done', verdict: review.verdict };
 
         const verdictColor =
           review.verdict === 'approve'
@@ -633,7 +667,7 @@ Read ${instructionFile} for project conventions.`;
         console.log(`  [DECIDE] Verdict: ${verdictColor(review.verdict)}`);
       } else {
         result.verdict = 'approve';
-        result.phases.decide = { status: 'skipped', reason: 'no diff' };
+        result.phases['decide'] = { status: 'skipped', reason: 'no diff' };
       }
     } else {
       // Simple tasks: auto-approve if verification passed
@@ -641,14 +675,15 @@ Read ${instructionFile} for project conventions.`;
         (verification.passed || !verification.ran) && violations.length === 0
           ? 'approve'
           : 'needs-review';
-      result.phases.decide = { status: 'auto', verdict: result.verdict };
+      result.phases['decide'] = { status: 'auto', verdict: result.verdict };
     }
 
     result.status = result.verdict === 'reject' ? 'rejected' : 'success';
   } catch (err) {
     result.status = 'error';
-    result.phases.error = { message: err.message };
-    console.log(pc.red(`  [ERROR] ${err.message}`));
+    const errMsg = err instanceof Error ? err.message : String(err);
+    result.phases['error'] = { message: errMsg };
+    console.log(pc.red(`  [ERROR] ${errMsg}`));
   }
 
   result.durationMs = Date.now() - startTime;
@@ -665,7 +700,19 @@ Read ${instructionFile} for project conventions.`;
 
 // ── Report Generation ───────────────────────────────────────────────────────
 
-function generateReport(date, results, budgetSummary, sessionConfig) {
+function generateReport(
+  date: string,
+  results: Array<{
+    status: string;
+    task: string;
+    agent: string;
+    tokens: number;
+    durationMs: number;
+    verdict: string | null;
+  }>,
+  budgetSummary: Record<string, unknown>,
+  sessionConfig: unknown,
+) {
   const successful = results.filter((r) => r.status === 'success').length;
   const failed = results.filter((r) => r.status === 'failed' || r.status === 'error').length;
   const skipped = results.filter((r) => r.status === 'skipped' || r.status === 'empty').length;
@@ -697,9 +744,9 @@ function generateReport(date, results, budgetSummary, sessionConfig) {
   md += `- **Rejected**: ${rejected}\n\n`;
 
   md += `## Budget\n`;
-  md += `- Consumed: ${budgetSummary.consumed?.toLocaleString() || '?'} tokens\n`;
-  md += `- Limit: ${budgetSummary.hardLimit?.toLocaleString() || '?'} tokens\n`;
-  md += `- Duration: ${formatDuration(budgetSummary.durationMs || 0)}\n\n`;
+  md += `- Consumed: ${(budgetSummary['consumed'] as number | undefined)?.toLocaleString() || '?'} tokens\n`;
+  md += `- Limit: ${(budgetSummary['hardLimit'] as number | undefined)?.toLocaleString() || '?'} tokens\n`;
+  md += `- Duration: ${formatDuration((budgetSummary['durationMs'] as number) || 0)}\n\n`;
 
   md += `## Tasks\n\n`;
   md += `| # | Task | Agent | Status | Tokens | Duration | Verdict |\n`;
@@ -720,13 +767,13 @@ function generateReport(date, results, budgetSummary, sessionConfig) {
 async function main() {
   initAgentRegistry();
 
-  const { options, positionals } = parseArgs(process.argv);
+  const { options, positionals: _positionals } = parseArgs(process.argv);
 
   let config;
   try {
-    config = resolveProject({ project: options.project });
+    config = resolveProject({ project: options['project'] as string | undefined });
   } catch (err) {
-    console.error(pc.red(`Project resolution failed: ${err.message}`));
+    console.error(pc.red(`Project resolution failed: ${err instanceof Error ? err.message : String(err)}`));
     process.exit(1);
   }
 
@@ -763,8 +810,8 @@ async function main() {
 
   // Check for preset/cli overrides
   selectedTasks =
-    options.preset || options.max
-      ? scannedTasks.slice(0, Number.parseInt(options.max, 10) || 5)
+    options['preset'] || options['max']
+      ? scannedTasks.slice(0, Number.parseInt(String(options['max'] || ''), 10) || 5)
       : await selectTasks(rl, scannedTasks);
 
   if (!selectedTasks || selectedTasks.length === 0) {
@@ -775,13 +822,14 @@ async function main() {
 
   // ── Budget Selection ──
   let budgetPreset;
-  if (options.preset && BUDGET_PRESETS[options.preset]) {
-    budgetPreset = BUDGET_PRESETS[options.preset];
-  } else if (options.hours || options.budget) {
+  const presetOpt = String(options['preset'] || '');
+  if (presetOpt && BUDGET_PRESETS[presetOpt as keyof typeof BUDGET_PRESETS]) {
+    budgetPreset = BUDGET_PRESETS[presetOpt as keyof typeof BUDGET_PRESETS];
+  } else if (options['hours'] || options['budget']) {
     budgetPreset = {
-      maxHours: Number.parseFloat(options.hours || '1') || 1,
-      budgetPct: Number.parseFloat(options.budget || '20') / 100 || 0.2,
-      maxTasks: Number.parseInt(options.max || '10', 10) || 10,
+      maxHours: Number.parseFloat(String(options['hours'] || '1')) || 1,
+      budgetPct: Number.parseFloat(String(options['budget'] || '20')) / 100 || 0.2,
+      maxTasks: Number.parseInt(String(options['max'] || '10'), 10) || 10,
       label: 'CLI override',
     };
   } else {
@@ -901,7 +949,7 @@ async function main() {
 
   // ── Generate Report ──
   const budgetSummary = budget.getSummary();
-  if (stopReason) budgetSummary.stopReason = stopReason;
+  if (stopReason) budgetSummary['stopReason'] = stopReason;
 
   const report = generateReport(date, results, budgetSummary, {
     preset: budgetPreset.label,
@@ -930,9 +978,9 @@ async function main() {
   console.log(`  Success: ${pc.green(String(successful))}`);
   console.log(`  Failed: ${failed > 0 ? pc.red(String(failed)) : pc.dim('0')}`);
   console.log(
-    `  Budget: ${Math.round(budgetSummary.percentUsed * 100)}% used (${budgetSummary.consumed?.toLocaleString() || '?'} tokens)`,
+    `  Budget: ${Math.round((budgetSummary['percentUsed'] as number) * 100)}% used (${(budgetSummary['consumed'] as number | undefined)?.toLocaleString() || '?'} tokens)`,
   );
-  console.log(`  Duration: ${formatDuration(budgetSummary.durationMs)}`);
+  console.log(`  Duration: ${formatDuration(budgetSummary['durationMs'] as number)}`);
   if (stopReason) console.log(`  Stopped: ${pc.yellow(stopReason)}`);
   console.log(`\n  Report: ${pc.dim(mdPath)}`);
 
