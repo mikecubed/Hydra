@@ -139,4 +139,3 @@ jobs:
             chore
             revert
           requireScope: false
-          disallowScopes: []
