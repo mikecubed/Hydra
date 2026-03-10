@@ -72,10 +72,10 @@
     "lint:fix": "eslint . --fix",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
-    "typecheck": "tsc --noEmit -p jsconfig.json",
+    "typecheck": "tsc --noEmit -p tsconfig.json",
     "quality": "npm run lint && npm run format:check && npm run typecheck",
     "setup:hooks": "node scripts/setup-hooks.mjs",
-    "test": "node --test",
+    "test": "node --test 'test/**/*.test.{ts,mjs}'",
     "test:report": "node --test --test-reporter=tap --test-reporter-destination=docs/coordination/test-results.tap",
     "package": "node -e \"require('fs').mkdirSync('dist', { recursive: true })\" && npm pack --pack-destination dist",
     "package:dry-run": "npm pack --dry-run",
@@ -86,7 +86,7 @@
     "prepare": "husky"
   },
   "lint-staged": {
-    "*.mjs": [
+    "*.{ts,mjs}": [
       "eslint --fix",
       "prettier --write"
     ],
@@ -122,7 +122,9 @@
     "husky": "^9.1.7",
     "lint-staged": "^16.3.2",
     "prettier": "^3.8.1",
-    "typescript": "^5.9.3"
+    "tsx": "^4.21.0",
+    "typescript": "^5.9.3",
+    "typescript-eslint": "^8.57.0"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.27.1",

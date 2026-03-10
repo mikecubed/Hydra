@@ -108,7 +108,7 @@ jobs:
           HUSKY: '0'
 
       - name: TypeScript check (lib + bin + scripts)
-        # tsc --noEmit processes the entire project defined in jsconfig.json.
+        # tsc --noEmit processes the entire project defined in tsconfig.json.
         # Errors here are informational on PRs — strict enforcement is opt-in.
         run: npm run typecheck
         continue-on-error: true # type errors are reported but don't block PRs yet
