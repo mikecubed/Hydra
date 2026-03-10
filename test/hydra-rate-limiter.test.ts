@@ -35,14 +35,18 @@ describe('TokenBucket', () => {
     const bucket = new TokenBucket(10, 100); // 100/sec
     bucket.tryConsume(10); // drain
     assert.equal(bucket.available(), 0);
-    await new Promise<void>((r) => { setTimeout(r, 60); });
+    await new Promise<void>((r) => {
+      setTimeout(r, 60);
+    });
     const avail = bucket.available();
-    assert.ok(avail >= 3, `expected >=3 tokens after 60ms at 100/s, got ${avail}`);
+    assert.ok(avail >= 3, `expected >=3 tokens after 60ms at 100/s, got ${String(avail)}`);
   });
 
   it('does not exceed capacity', async () => {
     const bucket = new TokenBucket(5, 1000); // fast refill
-    await new Promise<void>((r) => { setTimeout(r, 50); });
+    await new Promise<void>((r) => {
+      setTimeout(r, 50);
+    });
     assert.ok(bucket.available() <= 5);
   });
 
@@ -52,7 +56,7 @@ describe('TokenBucket', () => {
     const start = Date.now();
     await bucket.waitForTokens(1);
     const elapsed = Date.now() - start;
-    assert.ok(elapsed < 500, `waited ${elapsed}ms, expected < 500ms`);
+    assert.ok(elapsed < 500, `waited ${String(elapsed)}ms, expected < 500ms`);
   });
 });
 
