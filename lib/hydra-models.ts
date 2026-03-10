@@ -1,4 +1,3 @@
-#!/usr/bin/env node
 /**
  * Hydra Model Discovery — List all available models per agent.
  *

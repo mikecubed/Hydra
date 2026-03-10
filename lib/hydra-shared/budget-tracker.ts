@@ -10,27 +10,69 @@
 import { checkUsage } from '../hydra-usage.mjs';
 import { getSessionUsage } from '../hydra-metrics.ts';
 
-/**
- * @typedef {object} Threshold
- * @property {number} pct - Percentage trigger (0–1)
- * @property {string} action - Action name (e.g., 'hard_stop', 'warn', 'handoff_codex')
- * @property {string} reason - Template string with {pct} and {consumed} placeholders
- * @property {boolean} [once=false] - Only fire once per session
- */
+export interface Threshold {
+  /** Percentage trigger (0–1) */
+  pct: number;
+  /** Action name (e.g., 'hard_stop', 'warn', 'handoff_codex') */
+  action: string;
+  /** Template string with {pct} and {consumed} placeholders */
+  reason: string;
+  /** Only fire once per session */
+  once?: boolean;
+}
+
+export interface UnitDelta {
+  label: string;
+  tokens: number;
+  durationMs: number;
+  [key: string]: unknown;
+}
+
+export interface BudgetCheckResult {
+  consumed: number;
+  percentUsed: number;
+  remaining: number;
+  action: string;
+  reason: string;
+  [key: string]: unknown;
+}
+
+export interface BudgetTrackerOpts {
+  softLimit: number;
+  hardLimit: number;
+  unitEstimate: number;
+  unitLabel?: string;
+  thresholds?: Threshold[];
+}
+
+export interface BudgetTrackerData {
+  startTokens: number;
+  currentTokens: number;
+  unitDeltas?: UnitDelta[];
+  softLimit: number;
+  hardLimit: number;
+  unitEstimate: number;
+  unitLabel?: string;
+  _startedAt: number;
+  _firedOnce?: string[];
+}
 
 /**
  * Base budget tracker. Subclass or configure with pipeline-specific thresholds.
  */
 export class BudgetTracker {
-  /**
-   * @param {object} opts
-   * @param {number} opts.softLimit
-   * @param {number} opts.hardLimit
-   * @param {number} opts.unitEstimate - Estimated tokens per unit (task/round)
-   * @param {string} [opts.unitLabel='task'] - Label for units ('task' or 'round')
-   * @param {Threshold[]} [opts.thresholds] - Custom threshold tiers (ordered high→low)
-   */
-  constructor({ softLimit, hardLimit, unitEstimate, unitLabel = 'task', thresholds = [] }) {
+  softLimit: number;
+  hardLimit: number;
+  unitEstimate: number;
+  unitLabel: string;
+  thresholds: Threshold[];
+  startTokens: number;
+  currentTokens: number;
+  unitDeltas: UnitDelta[];
+  _startedAt: number;
+  _firedOnce: Set<string>;
+
+  constructor({ softLimit, hardLimit, unitEstimate, unitLabel = 'task', thresholds = [] }: BudgetTrackerOpts) {
     this.softLimit = softLimit;
     this.hardLimit = hardLimit;
     this.unitEstimate = unitEstimate;
@@ -39,13 +81,13 @@ export class BudgetTracker {
 
     this.startTokens = 0;
     this.currentTokens = 0;
-    this.unitDeltas = []; // [{ label, tokens, durationMs }]
+    this.unitDeltas = [];
     this._startedAt = Date.now();
     this._firedOnce = new Set();
   }
 
   /** Record initial token state at start of run. */
-  recordStart() {
+  recordStart(): void {
     const session = getSessionUsage();
     this.startTokens = session.totalTokens || 0;
     this.currentTokens = this.startTokens;
@@ -58,7 +100,7 @@ export class BudgetTracker {
    * @param {object} [extra] - Additional fields to store (e.g., { area })
    * @returns {{ tokens: number }}
    */
-  recordUnitEnd(label, durationMs, extra = {}) {
+  recordUnitEnd(label: string, durationMs: number, extra: Record<string, unknown> = {}): { tokens: number } {
     const session = getSessionUsage();
     const now = session.totalTokens || 0;
     const delta = now - this.currentTokens;
@@ -68,17 +110,17 @@ export class BudgetTracker {
   }
 
   /** Total tokens consumed in this session. */
-  get consumed() {
+  get consumed(): number {
     return this.currentTokens - this.startTokens;
   }
 
   /** Budget usage as a fraction (0–1). */
-  get percentUsed() {
+  get percentUsed(): number {
     return this.hardLimit > 0 ? this.consumed / this.hardLimit : 0;
   }
 
   /** Rolling average tokens per unit. */
-  get avgTokensPerUnit() {
+  get avgTokensPerUnit(): number {
     if (this.unitDeltas.length === 0) return this.unitEstimate;
     const sum = this.unitDeltas.reduce((s, d) => s + d.tokens, 0);
     return Math.round(sum / this.unitDeltas.length);
@@ -89,10 +131,10 @@ export class BudgetTracker {
    * Evaluates thresholds in priority order (highest pct first),
    * then falls back to soft limit check using external usage.
    */
-  check() {
+  check(): BudgetCheckResult {
     let externalCritical = false;
     try {
-      const usage = checkUsage();
+      const usage = checkUsage() as { level?: string };
       if (usage.level === 'critical') externalCritical = true;
     } catch {
       /* usage monitor may not have data */
@@ -141,7 +183,7 @@ export class BudgetTracker {
   }
 
   /** Summary for reports. */
-  getSummary() {
+  getSummary(): Record<string, unknown> {
     return {
       startTokens: this.startTokens,
       endTokens: this.currentTokens,
@@ -157,7 +199,7 @@ export class BudgetTracker {
   }
 
   /** Serialize tracker state for checkpoint persistence. */
-  serialize() {
+  serialize(): BudgetTrackerData {
     return {
       startTokens: this.startTokens,
       currentTokens: this.currentTokens,
@@ -172,19 +214,19 @@ export class BudgetTracker {
   }
 
   /** Restore a tracker from serialized checkpoint data. */
-  static deserialize(data, thresholds = []) {
+  static deserialize(data: BudgetTrackerData, thresholds: Threshold[] = []): BudgetTracker {
     const tracker = new BudgetTracker({
       softLimit: data.softLimit,
       hardLimit: data.hardLimit,
       unitEstimate: data.unitEstimate,
-      unitLabel: data.unitLabel || 'task',
+      unitLabel: data.unitLabel ?? 'task',
       thresholds,
     });
     tracker.startTokens = data.startTokens;
     tracker.currentTokens = data.currentTokens;
-    tracker.unitDeltas = data.unitDeltas || [];
+    tracker.unitDeltas = data.unitDeltas ?? [];
     tracker._startedAt = data._startedAt;
-    tracker._firedOnce = new Set(data._firedOnce || []);
+    tracker._firedOnce = new Set(data._firedOnce ?? []);
     return tracker;
   }
 }

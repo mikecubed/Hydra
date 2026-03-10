@@ -1,4 +1,3 @@
-#!/usr/bin/env node
 /**
  * Hydra Metrics Collection
  *
@@ -191,7 +190,7 @@ function ensureAgent(agentName: string): AgentMetrics {
   if (agentEntry && !agentEntry.sessionTokens) {
     agentEntry.sessionTokens = createEmptySessionUsage();
   }
-  return metricsStore.agents[agentName] as AgentMetrics;
+  return metricsStore.agents[agentName];
 }
 
 // ── Recording ───────────────────────────────────────────────────────────────

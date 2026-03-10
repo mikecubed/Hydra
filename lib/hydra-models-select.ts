@@ -1,4 +1,3 @@
-#!/usr/bin/env node
 /**
  * Hydra Interactive Model Selector
  *
@@ -95,7 +94,7 @@ class Picker<T> {
       process.stdin.resume();
       process.stdout.write(HIDE_CURSOR);
 
-      this._handler = (str: string, key: unknown) => this._onKey(str, key as { ctrl?: boolean; name?: string } | null);
+      this._handler = (str: string, key: unknown) => { this._onKey(str, key as { ctrl?: boolean; name?: string } | null); };
       process.stdin.on('keypress', this._handler);
       this._draw();
     });
@@ -105,7 +104,7 @@ class Picker<T> {
 
   _onKey(str: string, key: { ctrl?: boolean; name?: string } | null) {
     if (!key) {
-      if (str && str.length === 1 && str >= ' ') {
+      if (str?.length === 1 && str >= ' ') {
         this.search += str;
         this._filter();
       }
@@ -156,7 +155,7 @@ class Picker<T> {
         }
         break;
       default:
-        if (str && str.length === 1 && str >= ' ') {
+        if (str?.length === 1 && str >= ' ') {
           this.search += str;
           this._filter();
         }
@@ -428,7 +427,7 @@ export async function pickEffort(agentName: string, modelId?: string | null): Pr
     'model-swap': 'Thinking Mode',
   };
   const title =
-    (TITLES as Record<string, string>)[caps.type as string] ?? 'Reasoning Effort';
+    (TITLES as Record<string, string>)[caps.type] ?? 'Reasoning Effort';
 
   const items: EffortItem[] = options.map((opt: { id: string | null; label: string; hint?: string }) => ({
     id: opt.id,
@@ -472,8 +471,8 @@ export function applySelection(agentName: string, modelId: string, effortLevel: 
   const models = cfg.models as Record<string, Record<string, string | null>>;
   if (!models[agentName]) models[agentName] = {} as Record<string, string | null>;
   const resolved = (resolveModelId(agentName, modelId) as string | null) ?? modelId;
-  models[agentName]!['active'] = resolved;
-  models[agentName]!['reasoningEffort'] = effortLevel ?? null;
+  models[agentName]['active'] = resolved;
+  models[agentName]['reasoningEffort'] = effortLevel ?? null;
 
   saveHydraConfig(cfg);
   return resolved;

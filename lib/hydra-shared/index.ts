@@ -3,9 +3,10 @@
  */
 
 export * from './git-ops.ts';
-export * from './constants.mjs';
+export * from './constants.ts';
 export * from './guardrails.ts';
-export { BudgetTracker } from './budget-tracker.mjs';
+export { BudgetTracker } from './budget-tracker.ts';
+export type { Threshold, UnitDelta, BudgetCheckResult, BudgetTrackerOpts, BudgetTrackerData } from './budget-tracker.ts';
 export { executeAgent, executeAgentWithRecovery, diagnoseAgentError } from './agent-executor.mjs';
 export {
   createRL,
@@ -15,4 +16,5 @@ export {
   handleBranchAction,
   handleEmptyBranch,
   cleanBranches,
-} from './review-common.mjs';
+} from './review-common.ts';
+export type { HandleBranchActionOpts } from './review-common.ts';

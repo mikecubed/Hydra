@@ -1,4 +1,3 @@
-#!/usr/bin/env node
 /**
  * Hydra Setup — CLI detection, MCP registration, and project initialization.
  *
@@ -232,7 +231,7 @@ export function unmergeClaudeConfig(opts: MergeConfigOptions = {}) {
 
   const config = readJsonFile(configPath);
   const mcpServers = config['mcpServers'] as Record<string, unknown> | undefined;
-  if (!mcpServers || !mcpServers['hydra']) {
+  if (!mcpServers?.['hydra']) {
     return { status: 'not_found' as const };
   }
 
@@ -297,7 +296,7 @@ export function unmergeGeminiConfig(opts: MergeConfigOptions = {}) {
 
   const config = readJsonFile(configPath);
   const mcpServers = config['mcpServers'] as Record<string, unknown> | undefined;
-  if (!mcpServers || !mcpServers['hydra']) {
+  if (!mcpServers?.['hydra']) {
     return { status: 'not_found' as const };
   }
 

@@ -22,7 +22,7 @@ import {
   smartMerge,
   deleteBranch,
 } from './git-ops.ts';
-import { pushBranchAndCreatePR, isGhAvailable } from '../hydra-github.ts';
+import { pushBranchAndCreatePR } from '../hydra-github.ts';
 
 // ── Interactive Prompt ──────────────────────────────────────────────────────
 
@@ -30,7 +30,7 @@ import { pushBranchAndCreatePR, isGhAvailable } from '../hydra-github.ts';
  * Create a readline interface for interactive prompts.
  * @returns {readline.Interface}
  */
-export function createRL() {
+export function createRL(): readline.Interface {
   return readline.createInterface({
     input: process.stdin,
     output: process.stderr,
@@ -44,9 +44,9 @@ export function createRL() {
  * @param {string} question
  * @returns {Promise<string>}
  */
-export function ask(rl, question) {
+export function ask(rl: readline.Interface, question: string): Promise<string> {
   return new Promise((resolve) => {
-    rl.question(question, (answer) => resolve(answer.trim().toLowerCase()));
+    rl.question(question, (answer) => { resolve(answer.trim().toLowerCase()); });
   });
 }
 
@@ -60,7 +60,7 @@ export function ask(rl, question) {
  * @param {string|null} [dateFilter] - Optional date filter
  * @returns {object|null}
  */
-export function loadLatestReport(reportDir, prefix, dateFilter = null) {
+export function loadLatestReport(reportDir: string, prefix: string, dateFilter: string | null = null): unknown {
   if (!fs.existsSync(reportDir)) return null;
 
   if (dateFilter) {
@@ -98,7 +98,7 @@ export function loadLatestReport(reportDir, prefix, dateFilter = null) {
  * @param {string} baseBranch
  * @returns {{ commitLog: string, diffStat: string }}
  */
-export function displayBranchInfo(projectRoot, branch, baseBranch) {
+export function displayBranchInfo(projectRoot: string, branch: string, baseBranch: string): { commitLog: string; diffStat: string } {
   const diffStat = getBranchDiffStat(projectRoot, branch, baseBranch);
   const commitLog = getBranchLog(projectRoot, branch, baseBranch);
 
@@ -128,7 +128,18 @@ export function displayBranchInfo(projectRoot, branch, baseBranch) {
  * @param {{ enablePR?: boolean }} [opts={}]
  * @returns {Promise<'merged'|'skipped'|'deleted'|'pr-created'>}
  */
-export async function handleBranchAction(rl, projectRoot, branch, baseBranch, opts = {}) {
+export interface HandleBranchActionOpts {
+  enablePR?: boolean;
+  useSmartMerge?: boolean;
+}
+
+export async function handleBranchAction(
+  rl: readline.Interface,
+  projectRoot: string,
+  branch: string,
+  baseBranch: string,
+  opts: HandleBranchActionOpts = {},
+): Promise<'merged' | 'skipped' | 'deleted' | 'pr-created'> {
   const prLabel = opts.enablePR ? `[${pc.magenta('p')}]r  ` : '';
   const answer = await ask(
     rl,
@@ -144,7 +155,7 @@ export async function handleBranchAction(rl, projectRoot, branch, baseBranch, op
       }
       const result = pushBranchAndCreatePR({ cwd: projectRoot, branch, baseBranch });
       if (result.ok) {
-        console.log(pc.green(`  + PR created: ${result.url}`));
+        console.log(pc.green(`  + PR created: ${result.url ?? ''}`));
         const delAnswer = await ask(rl, `  Delete local branch? (y/N) `);
         if (delAnswer === 'y' || delAnswer === 'yes') {
           checkoutBranch(projectRoot, baseBranch);
@@ -153,7 +164,7 @@ export async function handleBranchAction(rl, projectRoot, branch, baseBranch, op
         }
         return 'pr-created';
       } else {
-        console.log(pc.red(`  x PR creation failed: ${result.error || 'unknown error'}`));
+        console.log(pc.red(`  x PR creation failed: ${result.error ?? 'unknown error'}`));
         return 'skipped';
       }
     }
@@ -163,9 +174,9 @@ export async function handleBranchAction(rl, projectRoot, branch, baseBranch, op
       const ok = opts.useSmartMerge
         ? smartMerge(projectRoot, branch, baseBranch, {
             log: {
-              info: (m) => console.log(pc.dim(`  ${m}`)),
-              ok: (m) => console.log(pc.green(`  ${m}`)),
-              warn: (m) => console.log(pc.yellow(`  ${m}`)),
+              info: (m) => { console.log(pc.dim(`  ${m}`)); },
+              ok: (m) => { console.log(pc.green(`  ${m}`)); },
+              warn: (m) => { console.log(pc.yellow(`  ${m}`)); },
             },
           })
         : mergeBranch(projectRoot, branch, baseBranch);
@@ -196,10 +207,10 @@ export async function handleBranchAction(rl, projectRoot, branch, baseBranch, op
       if ((postDiff === 'p' || postDiff === 'pr') && opts.enablePR) {
         const result = pushBranchAndCreatePR({ cwd: projectRoot, branch, baseBranch });
         if (result.ok) {
-          console.log(pc.green(`  + PR created: ${result.url}`));
+          console.log(pc.green(`  + PR created: ${result.url ?? ''}`));
           return 'pr-created';
         } else {
-          console.log(pc.red(`  x PR creation failed: ${result.error || 'unknown error'}`));
+          console.log(pc.red(`  x PR creation failed: ${result.error ?? 'unknown error'}`));
           return 'skipped';
         }
       } else if (postDiff === 'm' || postDiff === 'merge') {
@@ -245,7 +256,7 @@ export async function handleBranchAction(rl, projectRoot, branch, baseBranch, op
  * @param {string} branch
  * @returns {Promise<void>}
  */
-export async function handleEmptyBranch(rl, projectRoot, branch) {
+export async function handleEmptyBranch(rl: readline.Interface, projectRoot: string, branch: string): Promise<void> {
   console.log(pc.dim('  (no commits on this branch)'));
   const cleanAnswer = await ask(rl, `\n  ${pc.yellow('Delete empty branch?')} (y/N) `);
   if (cleanAnswer === 'y' || cleanAnswer === 'yes') {
@@ -261,7 +272,7 @@ export async function handleEmptyBranch(rl, projectRoot, branch) {
  * @param {string} baseBranch
  * @param {string|null} dateFilter
  */
-export function cleanBranches(projectRoot, prefix, baseBranch, dateFilter = null) {
+export function cleanBranches(projectRoot: string, prefix: string, baseBranch: string, dateFilter: string | null = null): void {
   const branches = listBranches(projectRoot, prefix, dateFilter);
 
   if (branches.length === 0) {
@@ -274,7 +285,7 @@ export function cleanBranches(projectRoot, prefix, baseBranch, dateFilter = null
     checkoutBranch(projectRoot, baseBranch);
   }
 
-  console.log(pc.bold(`Cleaning ${branches.length} ${prefix} branch(es)...`));
+  console.log(pc.bold(`Cleaning ${String(branches.length)} ${prefix} branch(es)...`));
 
   let deleted = 0;
   for (const branch of branches) {
@@ -287,5 +298,5 @@ export function cleanBranches(projectRoot, prefix, baseBranch, dateFilter = null
     }
   }
 
-  console.log(pc.green(`\nDone: ${deleted}/${branches.length} branches deleted.`));
+  console.log(pc.green(`\nDone: ${String(deleted)}/${String(branches.length)} branches deleted.`));
 }

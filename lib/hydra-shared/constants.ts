@@ -6,7 +6,7 @@
  */
 
 /** Base set of files that autonomous agents must NEVER modify. */
-export const BASE_PROTECTED_FILES = new Set([
+export const BASE_PROTECTED_FILES: Set<string> = new Set([
   'HYDRA.md',
   'CLAUDE.md',
   'GEMINI.md',
@@ -21,7 +21,7 @@ export const BASE_PROTECTED_FILES = new Set([
 ]);
 
 /** Path patterns that autonomous agents must not touch. */
-export const BASE_PROTECTED_PATTERNS = [
+export const BASE_PROTECTED_PATTERNS: RegExp[] = [
   /^\.github\//,
   /^\.env/,
   /^supabase\/migrations\//,
@@ -29,7 +29,7 @@ export const BASE_PROTECTED_PATTERNS = [
 ];
 
 /** Shell commands that autonomous agents must never execute. */
-export const BLOCKED_COMMANDS = [
+export const BLOCKED_COMMANDS: string[] = [
   'git push',
   'git checkout dev',
   'git checkout staging',
