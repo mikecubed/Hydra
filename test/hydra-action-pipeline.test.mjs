@@ -3,7 +3,7 @@
  * Tests the non-interactive parts (scan, dedup, execute logic).
  */
 
-import { describe, it, beforeEach } from 'node:test';
+import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 
 // We test the module's importability and its core logic.
@@ -12,7 +12,7 @@ import assert from 'node:assert/strict';
 
 describe('hydra-action-pipeline', () => {
   it('exports runActionPipeline', async () => {
-    const mod = await import('../lib/hydra-action-pipeline.mjs');
+    const mod = await import('../lib/hydra-action-pipeline.ts');
     assert.equal(typeof mod.runActionPipeline, 'function');
   });
 });

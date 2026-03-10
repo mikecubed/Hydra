@@ -26,7 +26,6 @@
 import {
   sectionHeader,
   DIM,
-  ACCENT,
   ERROR,
   SUCCESS,
   WARNING,
@@ -34,24 +33,39 @@ import {
   formatElapsed,
 } from './hydra-ui.mjs';
 import { promptChoice, confirmActionPlan } from './hydra-prompt-choice.mjs';
-import pc from 'picocolors';
 
-/**
- * Run the full action pipeline.
- *
- * @param {readline.Interface} rl
- * @param {object} opts
- * @param {string} opts.title - Pipeline title for UI
- * @param {Array<() => Promise<ActionItem[]>>} opts.scanners - Parallel scan functions
- * @param {Function} [opts.enrich] - (items, context) => Promise<ActionItem[]>
- * @param {Function} [opts.preSelectFilter] - (item) => boolean
- * @param {Function} opts.executeFn - (item, opts) => Promise<PipelineResult>
- * @param {Function} [opts.onComplete] - (results) => void
- * @param {string} [opts.projectRoot]
- * @param {string} [opts.baseUrl]
- * @returns {Promise<PipelineResult[]>}
- */
-export async function runActionPipeline(rl, opts = {}) {
+export interface ActionItem {
+  id: string;
+  title: string;
+  description: string;
+  category: 'fix' | 'cleanup' | 'archive' | 'requeue' | 'delete';
+  severity: 'critical' | 'high' | 'medium' | 'low';
+  source: string;
+  agent?: string;
+  actionPrompt?: string;
+  meta?: Record<string, unknown>;
+}
+
+export interface PipelineResult {
+  item: ActionItem;
+  ok: boolean;
+  output?: string;
+  error?: string;
+  durationMs: number;
+}
+
+interface PipelineOpts {
+  title?: string;
+  scanners?: (() => Promise<ActionItem[]>)[];
+  enrich?: (items: ActionItem[]) => Promise<ActionItem[]>;
+  preSelectFilter?: (item: ActionItem) => boolean;
+  executeFn?: (item: ActionItem, opts: PipelineOpts) => Promise<PipelineResult>;
+  onComplete?: (results: PipelineResult[]) => void;
+  projectRoot?: string;
+  baseUrl?: string;
+}
+
+export async function runActionPipeline(rl: unknown, opts: PipelineOpts = {}): Promise<PipelineResult[]> {
   const {
     title = 'Action Pipeline',
     scanners = [],
@@ -66,7 +80,7 @@ export async function runActionPipeline(rl, opts = {}) {
 
   // ── SCAN ─────────────────────────────────────────────────────────────────
   const scanSpinner = createSpinner('Scanning...', { style: 'orbital' });
-  let allItems = [];
+  let allItems: ActionItem[] = [];
 
   try {
     const results = await Promise.allSettled(scanners.map((fn) => fn()));
@@ -80,7 +94,7 @@ export async function runActionPipeline(rl, opts = {}) {
   }
 
   // Deduplicate by id
-  const seen = new Set();
+  const seen = new Set<string>();
   allItems = allItems.filter((item) => {
     if (seen.has(item.id)) return false;
     seen.add(item.id);
@@ -93,7 +107,7 @@ export async function runActionPipeline(rl, opts = {}) {
     return [];
   }
 
-  console.log(`  ${SUCCESS(`Found ${allItems.length} item${allItems.length === 1 ? '' : 's'}`)}`);
+  console.log(`  ${SUCCESS(`Found ${String(allItems.length)} item${allItems.length === 1 ? '' : 's'}`)}`);
 
   // ── ENRICH ───────────────────────────────────────────────────────────────
   if (enrich) {
@@ -124,7 +138,7 @@ export async function runActionPipeline(rl, opts = {}) {
     preSelected: preSelectedIds,
   });
 
-  const selectedIds = new Set(selectResult.values || []);
+  const selectedIds = new Set(selectResult.values ?? []);
   if (selectedIds.size === 0) {
     console.log(`  ${DIM('Nothing selected.')}`);
     console.log('');
@@ -143,7 +157,7 @@ export async function runActionPipeline(rl, opts = {}) {
 
   const confirmed = await confirmActionPlan(rl, {
     title: `${title} — Confirm`,
-    summary: `${selectedItems.length} action${selectedItems.length === 1 ? '' : 's'} to execute`,
+    summary: `${String(selectedItems.length)} action${selectedItems.length === 1 ? '' : 's'} to execute`,
     actions,
   });
 
@@ -157,55 +171,54 @@ export async function runActionPipeline(rl, opts = {}) {
   console.log('');
   console.log(sectionHeader(`${title} — Executing`));
 
-  const results = [];
+  const results: PipelineResult[] = [];
   for (let i = 0; i < selectedItems.length; i++) {
     const item = selectedItems[i];
-    const progress = DIM(`[${i + 1}/${selectedItems.length}]`);
+    const progress = DIM(`[${String(i + 1)}/${String(selectedItems.length)}]`);
     const spinner = createSpinner(`${progress} ${item.title}`, { style: 'solar' });
 
     const startMs = Date.now();
-    let pipelineResult;
+    let pipelineResult: PipelineResult;
 
     try {
-      pipelineResult = await executeFn(item, opts);
-    } catch (err) {
+      pipelineResult = await executeFn!(item, opts);
+    } catch (err: unknown) {
       pipelineResult = {
         item,
         ok: false,
-        error: err.message || String(err),
+        error: err instanceof Error ? err.message : String(err),
         durationMs: Date.now() - startMs,
       };
     } finally {
       spinner.stop();
     }
 
-    // Ensure result has required fields
-    pipelineResult.item = pipelineResult.item || item;
-    pipelineResult.durationMs = pipelineResult.durationMs || Date.now() - startMs;
-
-    const statusIcon = pipelineResult.ok ? SUCCESS('\u2713') : ERROR('\u2718');
-    const elapsed = formatElapsed(pipelineResult.durationMs);
+    const statusIcon = pipelineResult!.ok ? SUCCESS('\u2713') : ERROR('\u2718');
+    const elapsed = formatElapsed(pipelineResult!.durationMs);
     console.log(`  ${statusIcon} ${item.title} ${DIM(elapsed)}`);
-    if (!pipelineResult.ok && pipelineResult.error) {
-      console.log(`    ${ERROR(pipelineResult.error.slice(0, 120))}`);
+    if (!pipelineResult!.ok && pipelineResult!.error) {
+      console.log(`    ${ERROR(pipelineResult!.error.slice(0, 120))}`);
     }
 
-    results.push(pipelineResult);
+    results.push(pipelineResult!);
   }
 
   // ── REPORT ───────────────────────────────────────────────────────────────
   console.log('');
   const succeeded = results.filter((r) => r.ok).length;
   const failed = results.length - succeeded;
-  const totalMs = results.reduce((sum, r) => sum + (r.durationMs || 0), 0);
+  const totalMs = results.reduce((sum, r) => sum + r.durationMs, 0);
 
   const summaryParts = [
-    `${succeeded} succeeded`,
-    failed > 0 ? `${failed} failed` : null,
+    `${String(succeeded)} succeeded`,
+    failed > 0 ? `${String(failed)} failed` : null,
     formatElapsed(totalMs),
-  ].filter(Boolean);
+  ].filter((x): x is string => x !== null);
 
-  const summaryColor = failed === 0 ? SUCCESS : failed === results.length ? ERROR : WARNING;
+  let summaryColor: (s: string) => string;
+  if (failed === 0) summaryColor = SUCCESS;
+  else if (failed === results.length) summaryColor = ERROR;
+  else summaryColor = WARNING;
   console.log(`  ${summaryColor(`${title} complete:`)} ${summaryParts.join(' | ')}`);
   console.log('');
 

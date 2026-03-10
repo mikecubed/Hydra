@@ -10,7 +10,7 @@
  */
 
 import pc from 'picocolors';
-import { loadHydraConfig, saveHydraConfig, getRoleConfig } from './hydra-config.mjs';
+import { loadHydraConfig, saveHydraConfig } from './hydra-config.mjs';
 import {
   getActiveModel,
   getPhysicalAgentNames,
@@ -21,16 +21,45 @@ import {
 import { promptChoice } from './hydra-prompt-choice.mjs';
 import { formatBenchmarkAnnotation } from './hydra-model-profiles.mjs';
 
-/**
- * Run the interactive roster editor.
- * @param {readline.Interface} rl - Readline interface from the operator
- */
-export async function runRosterEditor(rl) {
-  const cfg = loadHydraConfig();
-  const roles = cfg.roles || {};
-  const recs = cfg.recommendations || {};
+interface RoleConfig {
+  agent?: string;
+  model?: string;
+  reasoningEffort?: string | null;
+  [key: string]: unknown;
+}
+
+interface AgentModelPresets {
+  default?: string;
+  fast?: string;
+  cheap?: string;
+  [key: string]: string | undefined;
+}
+
+interface RosterConfig {
+  roles?: Record<string, RoleConfig>;
+  models?: Record<string, AgentModelPresets>;
+  recommendations?: Record<string, { note?: string; models?: string[] }>;
+}
+
+interface RosterChange {
+  role: string;
+  agent: string;
+  model: string | null;
+  reasoningEffort: string | null;
+}
+
+const REASONING_TITLES: Record<string, string> = {
+  effort: 'Reasoning Effort',
+  thinking: 'Thinking Budget',
+  'model-swap': 'Thinking Mode',
+};
+
+export async function runRosterEditor(rl: unknown): Promise<void> {
+  const cfg = loadHydraConfig() as RosterConfig;
+  const roles = cfg.roles ?? {};
+  const recs = cfg.recommendations ?? {};
   const physicalAgents = getPhysicalAgentNames();
-  const changes = [];
+  const changes: RosterChange[] = [];
 
   console.log('');
   console.log(pc.bold('  Roster Editor'));
@@ -39,25 +68,26 @@ export async function runRosterEditor(rl) {
   console.log('');
 
   for (const [role, rc] of Object.entries(roles)) {
-    const rec = recs[role];
-    const currentAgent = rc.agent || 'claude';
-    const currentModel = rc.model || '(agent default)';
-    const currentEffort = rc.reasoningEffort || null;
-    const effDisplay = formatEffortDisplay(rc.model || getActiveModel(currentAgent), currentEffort);
+    const rec = recs[role] as { note?: string; models?: string[] } | undefined;
+    const currentAgent = rc.agent ?? 'claude';
+    const currentModel = rc.model ?? '(agent default)';
+    const currentEffort = rc.reasoningEffort ?? null;
+    const rcModel = (rc.model ?? getActiveModel(currentAgent)) as string;
+    const effDisplay = formatEffortDisplay(rcModel, currentEffort) as string | null;
 
     // Step 1: Show current + ask keep/change/skip
-    const benchAnnotation = formatBenchmarkAnnotation(rc.model || getActiveModel(currentAgent));
+    const benchAnnotation = formatBenchmarkAnnotation(rcModel) as string | null;
     const contextLines = [
       `Agent: ${currentAgent}`,
       `Model: ${currentModel}`,
       benchAnnotation ? `Benchmarks: ${benchAnnotation}` : null,
       effDisplay ? `Reasoning: ${effDisplay}` : null,
-      rec?.note ? `Tip: ${rec.note}` : null,
-    ].filter(Boolean);
+      rec?.note != null ? `Tip: ${rec.note}` : null,
+    ].filter((x): x is string => x !== null);
 
     const actionResult = await promptChoice(rl, {
       title: `Role: ${role}`,
-      context: contextLines.join('\n'),
+      context: contextLines.join('\n') as unknown as object,
       choices: [
         { label: 'Keep current', value: 'keep' },
         { label: 'Change', value: 'change' },
@@ -65,15 +95,15 @@ export async function runRosterEditor(rl) {
       ],
     });
 
-    if (!actionResult || actionResult.value === 'skip') continue;
-    if (actionResult.value === 'keep') continue;
+    if ((actionResult as { value?: string }).value === 'skip') continue;
+    if ((actionResult as { value?: string }).value === 'keep') continue;
 
     // Step 2: Pick agent
-    const agentChoices = physicalAgents.map((a) => {
+    const agentChoices = physicalAgents.map((a: string) => {
       const isCurrent = a === currentAgent;
-      const isRecommended = rec?.models?.some((m) => {
-        const agentModels = cfg.models?.[a] || {};
-        return m === agentModels.default || m === agentModels.fast || m === agentModels.cheap;
+      const isRecommended = rec?.models?.some((m: string) => {
+        const agentModelPresets = cfg.models?.[a] ?? {};
+        return m === agentModelPresets.default || m === agentModelPresets.fast || m === agentModelPresets.cheap;
       });
       let desc = '';
       if (isCurrent) desc = '(current)';
@@ -83,24 +113,24 @@ export async function runRosterEditor(rl) {
 
     const agentResult = await promptChoice(rl, {
       title: `${role}: Select Agent`,
-      context: rec ? `Recommended models: ${rec.models.join(', ')}` : '',
+      context: (rec?.models != null ? `Recommended models: ${rec.models.join(', ')}` : '') as unknown as object,
       choices: agentChoices,
     });
 
-    if (!agentResult) continue;
-    const newAgent = agentResult.value;
+    // agentResult always defined by promptChoice
+    const newAgent = (agentResult as { value: string }).value;
 
     // Step 3: Pick model
-    const agentModels = cfg.models?.[newAgent] || {};
-    const modelChoices = [];
+    const agentModels: AgentModelPresets = cfg.models?.[newAgent] ?? {};
+    const modelChoices: { label: string; value: string | null; description: string }[] = [];
 
     // Add recommended models first
-    const seen = new Set();
-    if (rec?.models) {
+    const seen = new Set<string>();
+    if (rec?.models != null) {
       for (const m of rec.models) {
         if (!seen.has(m)) {
           seen.add(m);
-          const annotation = formatBenchmarkAnnotation(m, { includePrice: false });
+          const annotation = formatBenchmarkAnnotation(m, { includePrice: false }) as string | null;
           const desc = annotation ? `(recommended) ${annotation}` : '(recommended)';
           modelChoices.push({ label: m, value: m, description: desc });
         }
@@ -110,16 +140,16 @@ export async function runRosterEditor(rl) {
     // Add agent presets
     for (const key of ['default', 'fast', 'cheap']) {
       const id = agentModels[key];
-      if (id && !seen.has(id)) {
+      if (id != null && !seen.has(id)) {
         seen.add(id);
-        const annotation = formatBenchmarkAnnotation(id, { includePrice: false });
+        const annotation = formatBenchmarkAnnotation(id, { includePrice: false }) as string | null;
         const desc = annotation ? `(${key} preset) ${annotation}` : `(${key} preset)`;
         modelChoices.push({ label: id, value: id, description: desc });
       }
     }
 
     // Add current if not already listed
-    if (rc.model && !seen.has(rc.model)) {
+    if (rc.model != null && !seen.has(rc.model)) {
       modelChoices.push({ label: rc.model, value: rc.model, description: '(current)' });
     }
 
@@ -132,42 +162,35 @@ export async function runRosterEditor(rl) {
 
     const modelResult = await promptChoice(rl, {
       title: `${role}: Select Model`,
-      context: `Agent: ${newAgent}`,
+      context: `Agent: ${newAgent}` as unknown as object,
       choices: modelChoices,
       allowFreeform: true,
       freeformHint: 'Enter a model ID',
-    });
+    } as Parameters<typeof promptChoice>[1]);
 
-    if (!modelResult) continue;
-    const newModel = modelResult.value;
+    // modelResult always defined by promptChoice
+    const newModel = (modelResult as { value: string | null }).value;
 
     // Step 4: Pick reasoning/thinking (if supported)
-    const effectiveModel = newModel || getActiveModel(newAgent);
-    const effortOptions = getEffortOptionsForModel(effectiveModel);
-    let newEffort = null;
+    const effectiveModel = (newModel ?? getActiveModel(newAgent)) as string;
+    const effortOptions = getEffortOptionsForModel(effectiveModel) as Array<{ label: string; id: string; hint?: string }>;
+    let newEffort: string | null = null;
 
     if (effortOptions.length > 0) {
-      const caps = getModelReasoningCaps(effectiveModel);
-      const TITLES = {
-        effort: 'Reasoning Effort',
-        thinking: 'Thinking Budget',
-        'model-swap': 'Thinking Mode',
-      };
+      const caps = getModelReasoningCaps(effectiveModel) as { type: string };
       const effortChoices = effortOptions.map((opt) => ({
         label: opt.label,
         value: opt.id,
-        description: opt.hint || '',
+        description: opt.hint ?? '',
       }));
 
       const effortResult = await promptChoice(rl, {
-        title: `${role}: ${TITLES[caps.type] || 'Reasoning'}`,
-        context: `Model: ${effectiveModel}`,
+        title: `${role}: ${REASONING_TITLES[caps.type] ?? 'Reasoning'}`,
+        context: `Model: ${effectiveModel}` as unknown as object,
         choices: effortChoices,
       });
 
-      if (effortResult) {
-        newEffort = effortResult.value;
-      }
+      newEffort = (effortResult as { value: string | null }).value;
     }
 
     // Record change
@@ -185,7 +208,7 @@ export async function runRosterEditor(rl) {
   console.log('');
   console.log(pc.bold('  Changes to apply:'));
   for (const c of changes) {
-    const eff = formatEffortDisplay(c.model || getActiveModel(c.agent), c.reasoningEffort);
+    const eff = formatEffortDisplay((c.model ?? getActiveModel(c.agent)) as string, c.reasoningEffort) as string | null;
     const effStr = eff ? pc.yellow(` ${eff}`) : '';
     const modelStr = c.model ? pc.white(c.model) : pc.dim('(agent default)');
     console.log(`  ${pc.cyan(c.role.padEnd(16))} ${c.agent}  ${modelStr}${effStr}`);
@@ -193,18 +216,18 @@ export async function runRosterEditor(rl) {
   console.log('');
 
   // Persist
-  const saveCfg = loadHydraConfig();
+  const saveCfg = loadHydraConfig() as RosterConfig;
   for (const c of changes) {
-    if (!saveCfg.roles) saveCfg.roles = {};
+    saveCfg.roles ??= {};
     saveCfg.roles[c.role] = {
       agent: c.agent,
-      model: c.model,
+      model: c.model ?? undefined,
       reasoningEffort: c.reasoningEffort,
     };
   }
   saveHydraConfig(saveCfg);
   console.log(
-    `  ${pc.green('✓')} Saved ${changes.length} role update${changes.length > 1 ? 's' : ''} to hydra.config.json`,
+    `  ${pc.green('✓')} Saved ${String(changes.length)} role update${changes.length > 1 ? 's' : ''} to hydra.config.json`,
   );
   console.log('');
 }

@@ -1,4 +1,3 @@
-#!/usr/bin/env node
 /**
  * Hydra Tasks Scanner — Aggregate work items from multiple sources.
  *
@@ -13,44 +12,50 @@
  *   createUserTask(), deduplicateTasks(), prioritizeTasks()
  *
  * Usage:
- *   import { scanAllSources } from './hydra-tasks-scanner.mjs';
+ *   import { scanAllSources } from './hydra-tasks-scanner.ts';
  *   const tasks = await scanAllSources(projectRoot);
  */
 
 import fs from 'node:fs';
 import path from 'node:path';
-import spawn from 'cross-spawn';
+import spawnRaw from 'cross-spawn';
 import { classifyTask, bestAgentFor } from './hydra-agents.mjs';
 import { classifyPrompt } from './hydra-utils.mjs';
 import { listIssues, isGhAvailable, isGhAuthenticated } from './hydra-github.ts';
 import { loadHydraConfig } from './hydra-config.mjs';
 import pc from 'picocolors';
 
+interface SpawnSyncResult {
+  status: number | null;
+  stdout: string;
+  stderr?: string;
+}
+
+interface SpawnModule {
+  sync(cmd: string, args: string[], opts?: Record<string, unknown>): SpawnSyncResult;
+}
+
+const spawn = spawnRaw as unknown as SpawnModule;
+
 // ── ScannedTask Shape ───────────────────────────────────────────────────────
 
-/**
- * @typedef {object} ScannedTask
- * @property {string} id           - Unique identifier (source:ref)
- * @property {string} title        - Human-readable title
- * @property {string} slug         - Branch-safe slug
- * @property {string} source       - 'todo-comment' | 'todo-md' | 'github-issue' | 'user-input'
- * @property {string} sourceRef    - 'lib/foo.mjs:42' | 'Backlog Tier 1' | '#42' | 'manual'
- * @property {string} taskType     - From classifyTask(): implementation, testing, etc.
- * @property {string} suggestedAgent - From bestAgentFor()
- * @property {string} complexity   - From classifyPrompt(): simple | moderate | complex
- * @property {string} priority     - 'high' | 'medium' | 'low'
- * @property {string|null} body    - Extended description (GitHub issue body, or null)
- * @property {number|null} issueNumber - GitHub issue # (or null)
- */
+export interface ScannedTask {
+  id: string;
+  title: string;
+  slug: string;
+  source: 'todo-comment' | 'todo-md' | 'github-issue' | 'user-input';
+  sourceRef: string;
+  taskType: string;
+  suggestedAgent: string;
+  complexity: string;
+  priority: 'high' | 'medium' | 'low';
+  body: string | null;
+  issueNumber: number | null;
+}
 
 // ── Slug Generator ──────────────────────────────────────────────────────────
 
-/**
- * Generate a URL-safe branch slug from a task description.
- * @param {string} task
- * @returns {string}
- */
-export function taskToSlug(task) {
+export function taskToSlug(task: string): string {
   return task
     .toLowerCase()
     .replace(/[^a-z0-9\s-]/g, '') // Remove special chars
@@ -82,7 +87,7 @@ const LOW_PRIORITY_PATTERNS = [
   /\bdocs?\b/i,
 ];
 
-function classifyPriority(text) {
+function classifyPriority(text: string): 'high' | 'medium' | 'low' {
   if (HIGH_PRIORITY_PATTERNS.some((p) => p.test(text))) return 'high';
   if (LOW_PRIORITY_PATTERNS.some((p) => p.test(text))) return 'low';
   return 'medium';
@@ -90,10 +95,17 @@ function classifyPriority(text) {
 
 // ── Classify & Build Task ───────────────────────────────────────────────────
 
-function buildTask(id, title, source, sourceRef, body = null, issueNumber = null) {
-  const taskType = classifyTask(title);
-  const agent = bestAgentFor(taskType);
-  const { tier } = classifyPrompt(title);
+function buildTask(
+  id: string,
+  title: string,
+  source: ScannedTask['source'],
+  sourceRef: string,
+  body: string | null = null,
+  issueNumber: number | null = null,
+): ScannedTask {
+  const taskType = classifyTask(title) as string;
+  const agent = bestAgentFor(taskType) as string;
+  const { tier } = classifyPrompt(title) as { tier: string };
   const priority = classifyPriority(title);
 
   return {
@@ -120,7 +132,7 @@ function buildTask(id, title, source, sourceRef, body = null, issueNumber = null
  * @param {string} projectRoot
  * @returns {ScannedTask[]}
  */
-export function scanTodoComments(projectRoot) {
+export function scanTodoComments(projectRoot: string): ScannedTask[] {
   const result = spawn.sync(
     'git',
     [
@@ -153,8 +165,8 @@ export function scanTodoComments(projectRoot) {
 
   if (result.status !== 0 || !result.stdout) return [];
 
-  const tasks = [];
-  const seen = new Set();
+  const tasks: ScannedTask[] = [];
+  const seen = new Set<string>();
 
   for (const line of result.stdout.split('\n')) {
     if (!line.trim()) continue;
@@ -174,7 +186,8 @@ export function scanTodoComments(projectRoot) {
     if (!markerMatch) continue;
 
     const fullComment = markerMatch[1].trim();
-    const commentBody = markerMatch[2]?.trim() || fullComment;
+    const rawComment = markerMatch[2].trim();
+    const commentBody = rawComment.length > 0 ? rawComment : fullComment;
 
     // Skip very short/meaningless comments
     if (commentBody.length < 5) continue;
@@ -213,23 +226,23 @@ const TODO_SECTION_PRIORITY = [
  * @param {string} projectRoot
  * @returns {ScannedTask[]}
  */
-export function scanTodoMd(projectRoot) {
+export function scanTodoMd(projectRoot: string): ScannedTask[] {
   const todoPath = path.join(projectRoot, 'docs', 'TODO.md');
   if (!fs.existsSync(todoPath)) return [];
 
-  let content;
+  let content: string;
   try {
     content = fs.readFileSync(todoPath, 'utf8');
   } catch {
     return [];
   }
 
-  const tasks = [];
+  const tasks: ScannedTask[] = [];
   const lines = content.split('\n');
   let currentSection = '';
 
   // Build section → tasks map
-  const sectionTasks = new Map();
+  const sectionTasks = new Map<string, { text: string; section: string }[]>();
 
   for (const line of lines) {
     const trimmed = line.trim();
@@ -252,7 +265,7 @@ export function scanTodoMd(projectRoot) {
         if (!sectionTasks.has(currentSection)) {
           sectionTasks.set(currentSection, []);
         }
-        sectionTasks.get(currentSection).push({ text: taskText, section: currentSection });
+        sectionTasks.get(currentSection)!.push({ text: taskText, section: currentSection });
       }
     }
   }
@@ -295,22 +308,27 @@ export function scanTodoMd(projectRoot) {
  * @param {{ labels?: string[], limit?: number }} [opts={}]
  * @returns {ScannedTask[]}
  */
-export function scanGitHubIssues(projectRoot, opts = {}) {
+interface GitHubIssueOpts {
+  labels?: string[];
+  limit?: number;
+}
+
+export function scanGitHubIssues(projectRoot: string, opts: GitHubIssueOpts = {}): ScannedTask[] {
   if (!isGhAvailable() || !isGhAuthenticated()) return [];
 
   const issues = listIssues({
     cwd: projectRoot,
     state: 'open',
-    labels: opts.labels || [],
-    limit: opts.limit || 50,
-  });
+    labels: opts.labels ?? [],
+    limit: opts.limit ?? 50,
+  }) as Array<{ title?: string; number: number; body?: string }>;
 
   return issues.map((issue) => {
-    const title = issue.title || `Issue #${issue.number}`;
-    const id = `github:${issue.number}`;
-    const body = issue.body || null;
+    const title = issue.title ?? `Issue #${String(issue.number)}`;
+    const id = `github:${String(issue.number)}`;
+    const body = issue.body ?? null;
 
-    return buildTask(id, title, 'github-issue', `#${issue.number}`, body, issue.number);
+    return buildTask(id, title, 'github-issue', `#${String(issue.number)}`, body, issue.number);
   });
 }
 
@@ -322,7 +340,7 @@ export function scanGitHubIssues(projectRoot, opts = {}) {
  * @param {string} text
  * @returns {ScannedTask}
  */
-export function createUserTask(text) {
+export function createUserTask(text: string): ScannedTask {
   const slug = taskToSlug(text);
   return buildTask(`user:${slug}`, text, 'user-input', 'manual');
 }
@@ -335,9 +353,9 @@ export function createUserTask(text) {
  * @param {ScannedTask[]} tasks
  * @returns {ScannedTask[]}
  */
-export function deduplicateTasks(tasks) {
-  const seen = new Map(); // slug → task
-  const result = [];
+export function deduplicateTasks(tasks: ScannedTask[]): ScannedTask[] {
+  const seen = new Map<string, ScannedTask>();
+  const result: ScannedTask[] = [];
 
   for (const task of tasks) {
     // Normalize slug for comparison
@@ -361,11 +379,13 @@ const COMPLEXITY_ORDER = { simple: 0, moderate: 1, complex: 2 };
  * @param {ScannedTask[]} tasks
  * @returns {ScannedTask[]}
  */
-export function prioritizeTasks(tasks) {
+export function prioritizeTasks(tasks: ScannedTask[]): ScannedTask[] {
   return [...tasks].sort((a, b) => {
-    const pDiff = (PRIORITY_ORDER[a.priority] ?? 1) - (PRIORITY_ORDER[b.priority] ?? 1);
+    const pDiff = PRIORITY_ORDER[a.priority] - PRIORITY_ORDER[b.priority];
     if (pDiff !== 0) return pDiff;
-    return (COMPLEXITY_ORDER[a.complexity] ?? 1) - (COMPLEXITY_ORDER[b.complexity] ?? 1);
+    const aComp = COMPLEXITY_ORDER[a.complexity as keyof typeof COMPLEXITY_ORDER];
+    const bComp = COMPLEXITY_ORDER[b.complexity as keyof typeof COMPLEXITY_ORDER];
+    return aComp - bComp;
   });
 }
 
@@ -378,15 +398,23 @@ export function prioritizeTasks(tasks) {
  * @param {{ todoComments?: boolean, todoMd?: boolean, githubIssues?: boolean, githubLabels?: string[] }} [opts={}]
  * @returns {ScannedTask[]}
  */
-export function scanAllSources(projectRoot, opts = {}) {
-  const cfg = loadHydraConfig();
-  const sources = cfg.tasks?.sources || {};
+interface ScanAllOpts {
+  todoComments?: boolean;
+  todoMd?: boolean;
+  githubIssues?: boolean;
+  githubLabels?: string[];
+}
 
-  const enableComments = opts.todoComments ?? sources.todoComments ?? true;
-  const enableMd = opts.todoMd ?? sources.todoMd ?? true;
-  const enableGh = opts.githubIssues ?? sources.githubIssues ?? true;
+export function scanAllSources(projectRoot: string, opts: ScanAllOpts = {}): ScannedTask[] {
+  const cfg = loadHydraConfig() as { tasks?: { sources?: Record<string, boolean> } };
+  const sources = cfg.tasks?.sources ?? {};
 
-  const allTasks = [];
+  // Sources typed as Record<string, boolean>; ?? true fallback for non-standard source keys
+  const enableComments = opts.todoComments ?? sources['todoComments'];
+  const enableMd = opts.todoMd ?? sources['todoMd'];
+  const enableGh = opts.githubIssues ?? sources['githubIssues'];
+
+  const allTasks: ScannedTask[] = [];
 
   if (enableComments) {
     allTasks.push(...scanTodoComments(projectRoot));
@@ -432,8 +460,10 @@ if (isDirectRun) {
     console.log(`  Total (deduped): ${pc.bold(String(all.length))}\n`);
 
     for (const task of all.slice(0, 30)) {
-      const prioColor =
-        task.priority === 'high' ? pc.red : task.priority === 'low' ? pc.dim : pc.yellow;
+      let prioColor: (s: string) => string;
+      if (task.priority === 'high') prioColor = pc.red;
+      else if (task.priority === 'low') prioColor = pc.dim;
+      else prioColor = pc.yellow;
       console.log(
         `  ${prioColor(task.priority.padEnd(6))} ${pc.dim(task.source.padEnd(13))} ${task.title}`,
       );
@@ -443,12 +473,13 @@ if (isDirectRun) {
     }
 
     if (all.length > 30) {
-      console.log(pc.dim(`\n  ... and ${all.length - 30} more`));
+      console.log(pc.dim(`\n  ... and ${String(all.length - 30)} more`));
     }
 
     console.log('');
-  })().catch((err) => {
-    console.error(err.message || String(err));
+  })().catch((err: unknown) => {
+    console.error(err instanceof Error ? err.message : String(err));
+    // eslint-disable-next-line n/no-process-exit
     process.exit(1);
   });
 }

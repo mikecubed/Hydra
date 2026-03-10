@@ -10,12 +10,55 @@
 
 import { createStreamingPipeline } from './hydra-streaming-middleware.mjs';
 
+interface ChatMessage {
+  role: string;
+  content: string;
+}
+
+interface AnthropicStreamCfg {
+  model: string;
+  maxTokens?: number;
+  thinkingBudget?: number;
+}
+
+interface AnthropicUsage {
+  prompt_tokens: number;
+  completion_tokens: number;
+}
+
+interface AnthropicRateLimits {
+  remainingRequests: number | null;
+  remainingInputTokens: number | null;
+  remainingOutputTokens: number | null;
+  remainingTokens: number | null;
+  resetRequests: string | null;
+}
+
+interface AnthropicStreamResult {
+  fullResponse: string;
+  usage: AnthropicUsage | null;
+  rateLimits: AnthropicRateLimits;
+}
+
+interface AnthropicBody {
+  model: string;
+  messages: { role: string; content: string }[];
+  max_tokens: number;
+  stream: boolean;
+  system?: string;
+  thinking?: { type: 'enabled'; budget_tokens: number };
+}
+
 /**
  * Core Anthropic streaming function — ONLY does the HTTP call + SSE parsing.
  * All cross-cutting concerns (rate limit, retry, usage, etc.) are handled by middleware.
  */
-async function coreStreamAnthropic(messages, cfg, onChunk) {
-  const apiKey = process.env.ANTHROPIC_API_KEY;
+async function coreStreamAnthropic(
+  messages: ChatMessage[],
+  cfg: AnthropicStreamCfg,
+  onChunk: ((chunk: string) => void) | undefined,
+): Promise<AnthropicStreamResult> {
+  const apiKey = process.env['ANTHROPIC_API_KEY'];
   if (!apiKey) {
     throw new Error('ANTHROPIC_API_KEY not set');
   }
@@ -35,10 +78,10 @@ async function coreStreamAnthropic(messages, cfg, onChunk) {
     }
   }
 
-  const body = {
+  const body: AnthropicBody = {
     model: cfg.model,
     messages: filteredMessages,
-    max_tokens: cfg.maxTokens || 4096,
+    max_tokens: cfg.maxTokens ?? 4096,
     stream: true,
   };
 
@@ -65,11 +108,11 @@ async function coreStreamAnthropic(messages, cfg, onChunk) {
   });
 
   // Capture rate limit headers (Anthropic sends these on every response)
-  const parseRateHeader = (h) => {
-    const v = Number.parseInt(h);
+  const parseRateHeader = (h: string | null): number | null => {
+    const v = Number.parseInt(h ?? '');
     return Number.isNaN(v) ? null : v;
   };
-  const rateLimits = {
+  const rateLimits: AnthropicRateLimits = {
     remainingRequests: parseRateHeader(
       res.headers.get('anthropic-ratelimit-requests-remaining'),
     ),
@@ -85,25 +128,27 @@ async function coreStreamAnthropic(messages, cfg, onChunk) {
 
   if (!res.ok) {
     const errText = await res.text().catch(() => '');
-    const err = new Error(`Anthropic API error ${res.status}: ${errText.slice(0, 200)}`);
-    err.status = res.status;
+    const err = Object.assign(new Error(`Anthropic API error ${String(res.status)}: ${errText.slice(0, 200)}`), {
+      status: res.status,
+    });
     throw err;
   }
 
   // Parse SSE stream
-  const reader = res.body.getReader();
+  const reader = res.body!.getReader();
   const decoder = new TextDecoder();
   let buffer = '';
   let fullResponse = '';
-  let usage = null;
+  let usage: AnthropicUsage | null = null;
 
-  while (true) {
-    const { done, value } = await reader.read();
-    if (done) break;
+  for (;;) {
+    const readResult = await reader.read();
+    if (readResult.done) break;
+    const value = readResult.value as Uint8Array;
 
     buffer += decoder.decode(value, { stream: true });
     const lines = buffer.split('\n');
-    buffer = lines.pop() || '';
+    buffer = lines.pop() ?? '';
 
     for (const line of lines) {
       const trimmed = line.trim();
@@ -114,7 +159,18 @@ async function coreStreamAnthropic(messages, cfg, onChunk) {
       if (!trimmed.startsWith('data: ')) continue;
 
       try {
-        const data = JSON.parse(trimmed.slice(6));
+        interface AnthropicSSEDelta {
+          type?: string;
+          text?: string;
+          output_tokens?: number;
+        }
+        interface AnthropicSSEChunk {
+          type?: string;
+          delta?: AnthropicSSEDelta;
+          usage?: { output_tokens?: number };
+          message?: { usage?: { input_tokens?: number } };
+        }
+        const data = JSON.parse(trimmed.slice(6)) as AnthropicSSEChunk;
 
         // content_block_delta → only process text_delta, skip thinking_delta
         if (
@@ -128,14 +184,14 @@ async function coreStreamAnthropic(messages, cfg, onChunk) {
 
         // message_delta → usage (stop reason + output tokens)
         if (data.type === 'message_delta' && data.usage) {
-          usage = usage || { prompt_tokens: 0, completion_tokens: 0 };
-          usage.completion_tokens = data.usage.output_tokens || 0;
+          usage ??= { prompt_tokens: 0, completion_tokens: 0 };
+          usage.completion_tokens = data.usage.output_tokens ?? 0;
         }
 
         // message_start → input usage
         if (data.type === 'message_start' && data.message?.usage) {
-          usage = usage || { prompt_tokens: 0, completion_tokens: 0 };
-          usage.prompt_tokens = data.message.usage.input_tokens || 0;
+          usage ??= { prompt_tokens: 0, completion_tokens: 0 };
+          usage.prompt_tokens = data.message.usage.input_tokens ?? 0;
         }
       } catch {
         // Skip malformed SSE chunks
@@ -147,19 +203,16 @@ async function coreStreamAnthropic(messages, cfg, onChunk) {
 }
 
 // Create the pipeline-wrapped version
-const pipelinedStream = createStreamingPipeline('anthropic', coreStreamAnthropic);
+const pipelinedStream = createStreamingPipeline('anthropic', coreStreamAnthropic) as (
+  messages: ChatMessage[],
+  cfg: AnthropicStreamCfg,
+  onChunk: ((chunk: string) => void) | undefined,
+) => Promise<AnthropicStreamResult>;
 
-/**
- * Stream a chat completion from the Anthropic Messages API.
- *
- * @param {Array<{role: string, content: string}>} messages - Chat messages (system extracted automatically)
- * @param {object} cfg - Configuration
- * @param {string} cfg.model - Model identifier (required)
- * @param {number} [cfg.maxTokens=4096] - Max tokens to generate
- * @param {number} [cfg.thinkingBudget] - Extended thinking budget in tokens (enables thinking when set)
- * @param {Function} [onChunk] - Called with each streamed text chunk
- * @returns {Promise<{fullResponse: string, usage: {prompt_tokens: number, completion_tokens: number}|null}>}
- */
-export async function streamAnthropicCompletion(messages, cfg, onChunk) {
+export function streamAnthropicCompletion(
+  messages: ChatMessage[],
+  cfg: AnthropicStreamCfg,
+  onChunk?: (chunk: string) => void,
+): Promise<AnthropicStreamResult> {
   return pipelinedStream(messages, cfg, onChunk);
 }
