@@ -86,7 +86,15 @@ interface GateIntentOpts {
   onLlmCall?: (() => void) | null;
 }
 
-export async function gateIntent(text: string, opts: GateIntentOpts = {}) {
+export async function gateIntent(
+  text: string,
+  opts: GateIntentOpts = {},
+): Promise<{
+  text: string;
+  classification: ReturnType<typeof classifyPrompt>;
+  normalized: boolean;
+  rewritten: boolean;
+}> {
   const { enabled = true, confidenceThreshold = 0.55, rewriteFn = null, onLlmCall = null } = opts;
 
   if (!enabled) {

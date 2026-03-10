@@ -49,7 +49,7 @@ export function rewriteNodeInvocation(
   command: string,
   args: string[] = [],
   hydraRoot = HYDRA_EMBEDDED_ROOT,
-) {
+): { command: string; args: string[] } {
   if (!HYDRA_STANDALONE || command !== 'node' || !Array.isArray(args) || args.length === 0) {
     return { command, args };
   }
@@ -71,7 +71,7 @@ export function spawnHydraNode(
   scriptArgs: string[] = [],
   options: import('node:child_process').SpawnOptions = {},
   hydraRoot = HYDRA_EMBEDDED_ROOT,
-) {
+): import('node:child_process').ChildProcess {
   const invocation = rewriteNodeInvocation('node', [scriptPath, ...scriptArgs], hydraRoot);
   return spawn(invocation.command, invocation.args, options);
 }
@@ -81,7 +81,7 @@ export function spawnHydraNodeSync(
   scriptArgs: string[] = [],
   options: import('node:child_process').SpawnSyncOptions = {},
   hydraRoot = HYDRA_EMBEDDED_ROOT,
-) {
+): import('node:child_process').SpawnSyncReturns<Buffer | string> {
   const invocation = rewriteNodeInvocation('node', [scriptPath, ...scriptArgs], hydraRoot);
   return spawnSync(invocation.command, invocation.args, options);
 }
@@ -90,7 +90,7 @@ export async function runHydraInternalModule(
   moduleId: unknown,
   moduleArgs: string[] = [],
   hydraRoot = HYDRA_EMBEDDED_ROOT,
-) {
+): Promise<void> {
   const normalized = normalizeModuleId(moduleId);
   if (!normalized) {
     throw new Error('Missing or invalid Hydra internal module id.');

@@ -454,12 +454,12 @@ function getGeneralContext() {
  * @param {string} topic
  * @returns {string|null}
  */
-export function getConfigReference(topic: string): string {
+export function getConfigReference(topic: string): string | null {
   let config;
   try {
     config = loadHydraConfig();
   } catch {
-    return '';
+    return null;
   }
 
   const TOPIC_CONFIG_MAP: Record<string, () => unknown> = {
@@ -481,13 +481,13 @@ export function getConfigReference(topic: string): string {
   };
 
   const getter = TOPIC_CONFIG_MAP[topic];
-  if (!getter) return '';
+  if (!getter) return null;
 
   try {
     const data = getter();
     return `Config (${topic}):\n${JSON.stringify(data, null, 2).slice(0, 1500)}`;
   } catch {
-    return '';
+    return null;
   }
 }
 

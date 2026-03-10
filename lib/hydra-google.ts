@@ -71,10 +71,13 @@ async function coreStreamGoogle(
   }
 
   if (cfg['maxTokens']) {
-    body.generationConfig = {
-      ...body.generationConfig,
-      maxOutputTokens: cfg['maxTokens'] as number,
-    };
+    const maxTokens = Number(cfg['maxTokens']);
+    if (Number.isFinite(maxTokens)) {
+      body.generationConfig = {
+        ...body.generationConfig,
+        maxOutputTokens: maxTokens,
+      };
+    }
   }
 
   if (cfg['responseType'] === 'json') {
@@ -100,7 +103,12 @@ async function coreStreamGoogle(
     if (res.status === 429 || /RESOURCE_EXHAUSTED|QUOTA_EXHAUSTED/i.test(errText)) {
       err.isRateLimit = true;
       const retryAfter = res.headers.get('retry-after');
-      err.retryAfterMs = retryAfter ? Number.parseInt(retryAfter, 10) * 1000 : null;
+      if (retryAfter != null) {
+        const ms = Number.parseInt(retryAfter, 10) * 1000;
+        err.retryAfterMs = Number.isFinite(ms) ? ms : null;
+      } else {
+        err.retryAfterMs = null;
+      }
     }
     throw err;
   }
