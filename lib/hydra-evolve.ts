@@ -25,30 +25,28 @@
 import './hydra-env.ts';
 import { randomBytes } from 'node:crypto';
 import fs from 'node:fs';
-import os from 'node:os';
 import path from 'node:path';
-import { spawn, spawnSync } from 'node:child_process';
+import { spawn } from 'node:child_process';
 import {
   EvolveBudgetTracker,
   buildEvolveSafetyPrompt,
   scanBranchViolations,
   verifyBranch,
   isCleanWorkingTree,
-} from './hydra-evolve-guardrails.mjs';
+} from './hydra-evolve-guardrails.ts';
 import {
   initInvestigator,
   isInvestigatorAvailable,
   investigate,
   getInvestigatorStats,
-  resetInvestigator,
-} from './hydra-evolve-investigator.mjs';
+} from './hydra-evolve-investigator.ts';
 import {
   loadKnowledgeBase,
   saveKnowledgeBase,
   addEntry,
   getPriorLearnings,
   formatStatsForPrompt,
-} from './hydra-evolve-knowledge.mjs';
+} from './hydra-evolve-knowledge.ts';
 import {
   loadSuggestions,
   saveSuggestions,
@@ -58,9 +56,9 @@ import {
   getSuggestionById,
   createSuggestionFromRound,
   promptSuggestionPicker,
-} from './hydra-evolve-suggestions.mjs';
+} from './hydra-evolve-suggestions.ts';
 import { resolveProject, loadHydraConfig, HYDRA_ROOT } from './hydra-config.ts';
-import { getActiveModel, getAgent } from './hydra-agents.ts';
+import { getAgent } from './hydra-agents.ts';
 import {
   detectModelError,
   detectCodexError,
@@ -70,7 +68,7 @@ import {
   formatResetTime,
   calculateBackoff,
   verifyAgentQuota,
-} from './hydra-model-recovery.mjs';
+} from './hydra-model-recovery.ts';
 import {
   runProcess,
   ensureDir,
@@ -78,21 +76,65 @@ import {
   parseJsonLoose,
   parseTestOutput,
 } from './hydra-utils.ts';
-import { recordCallStart, recordCallComplete, recordCallError } from './hydra-metrics.ts';
 import { executeAgent as sharedExecuteAgent } from './hydra-shared/agent-executor.ts';
+import type { ExecuteResult, ExecuteAgentOpts } from './hydra-shared/agent-executor.ts';
+import type { TestFailure } from './hydra-utils.ts';
 import { initStatusBar, destroyStatusBar, setAgentActivity } from './hydra-statusbar.ts';
 import {
   git,
   getCurrentBranch,
   checkoutBranch,
-  branchExists,
   createBranch,
   getBranchStats,
   getBranchDiff,
-  stageAndCommit,
   smartMerge,
 } from './hydra-shared/git-ops.ts';
 import pc from 'picocolors';
+
+
+// ── Local type aliases ───────────────────────────────────────────────────────
+type KnowledgeBase = ReturnType<typeof loadKnowledgeBase>;
+type KBEntry = KnowledgeBase['entries'][number];
+// Extended ExecuteResult with evolve-specific dynamic properties
+type EvolveResult = ExecuteResult & {
+  rateLimited?: boolean;
+  startupFailureDisabled?: boolean;
+  investigation?: unknown;
+  _shouldRetry?: boolean;
+  _corrective?: string | null;
+  _preamble?: string | null;
+  skipped?: boolean;
+  usageLimited?: boolean;
+  usageLimitConfirmed?: boolean;
+  usageLimitFalsePositive?: boolean;
+  usageLimitStructured?: boolean;
+  resetInSeconds?: number;
+  recovered?: boolean;
+  originalModel?: string;
+  newModel?: string;
+  modelError?: unknown;
+  startupFailure?: boolean;
+};
+
+interface RoundResult {
+  round: number;
+  area: string;
+  selectedImprovement: string | null;
+  verdict: string | null;
+  score: number | null;
+  branchName: string | null;
+  learnings: string | null;
+  durationMs: number;
+  researchSummary: string | null;
+  investigations: { count: number; healed: number; diagnoses: Array<{phase: string; diagnosis: string; explanation: string}> } | null;
+  testSummary: { total: number; passed: number; failed: number; summary: string } | null;
+  testFailures: TestFailure[] | null;
+  merged: boolean;
+  mergeMethod: string | null;
+  mergeConflicts: string[] | null;
+  suggestionId: string | null;
+  testsWritten?: number;
+}
 
 // ── Constants ───────────────────────────────────────────────────────────────
 
@@ -120,30 +162,30 @@ const DEFAULT_PHASE_TIMEOUTS = {
 // ── Logging ─────────────────────────────────────────────────────────────────
 
 const log = {
-  info: (msg) => process.stderr.write(`  ${pc.blue('i')} ${msg}\n`),
-  ok: (msg) => process.stderr.write(`  ${pc.green('+')} ${msg}\n`),
-  warn: (msg) => process.stderr.write(`  ${pc.yellow('!')} ${msg}\n`),
-  error: (msg) => process.stderr.write(`  ${pc.red('x')} ${msg}\n`),
-  phase: (msg) => process.stderr.write(`\n${pc.bold(pc.magenta('>>>'))} ${pc.bold(msg)}\n`),
-  round: (msg) =>
+  info: (msg: string) => process.stderr.write(`  ${pc.blue('i')} ${msg}\n`),
+  ok: (msg: string) => process.stderr.write(`  ${pc.green('+')} ${msg}\n`),
+  warn: (msg: string) => process.stderr.write(`  ${pc.yellow('!')} ${msg}\n`),
+  error: (msg: string) => process.stderr.write(`  ${pc.red('x')} ${msg}\n`),
+  phase: (msg: string) => process.stderr.write(`\n${pc.bold(pc.magenta('>>>'))} ${pc.bold(msg)}\n`),
+  round: (msg: string) =>
     process.stderr.write(
       `\n${pc.bold(pc.cyan('=== '))}${pc.bold(msg)}${pc.bold(pc.cyan(' ==='))}\n`,
     ),
-  dim: (msg) => process.stderr.write(`  ${pc.dim(msg)}\n`),
+  dim: (msg: string) => process.stderr.write(`  ${pc.dim(msg)}\n`),
 };
 
 // ── Doctor (lazy, fire-and-forget) ───────────────────────────────────────────
 
-function notifyDoctor(failure) {
+function notifyDoctor(failure: unknown) {
   import('./hydra-doctor.mjs')
     .then((doc) => {
-      if (doc.isDoctorEnabled()) doc.diagnose(failure);
+      if (doc.isDoctorEnabled()) doc.diagnose(failure as any);
     })
     .catch(() => {});
 }
 
 /** Build a doctor notification object from an agent result. */
-function doctorPayload(agent, result, opts, extra = {}) {
+function doctorPayload(agent: string, result: ExecuteResult, opts: ExecuteAgentOpts, extra: Record<string, unknown> = {}) {
   return {
     pipeline: 'evolve',
     phase: opts.phaseLabel || 'agent',
@@ -156,16 +198,16 @@ function doctorPayload(agent, result, opts, extra = {}) {
     promptSnippet: result.promptSnippet,
     stderr: result.stderr,
     stdout: result.output,
-    errorCategory: result.errorCategory || null,
-    errorDetail: result.errorDetail || null,
-    errorContext: result.errorContext || null,
+    errorCategory: result.errorCategory ?? undefined,
+    errorDetail: result.errorDetail ?? undefined,
+    errorContext: result.errorContext ?? undefined,
     ...extra,
   };
 }
 
 // ── Project Context (for Codex prompts) ─────────────────────────────────────
 
-let _projectContextCache = null;
+let _projectContextCache: string | null = null;
 
 function getProjectContext() {
   if (_projectContextCache) return _projectContextCache;
@@ -201,14 +243,14 @@ Stack: Node.js ESM, picocolors for colors, no framework deps`;
 
 const CHECKPOINT_FILE = '.session-checkpoint.json';
 
-function getCheckpointPath(evolveDir) {
+function getCheckpointPath(evolveDir: string) {
   return path.join(evolveDir, CHECKPOINT_FILE);
 }
 
 /**
  * Load a session checkpoint from disk. Returns null if none exists.
  */
-function loadCheckpoint(evolveDir) {
+function loadCheckpoint(evolveDir: string) {
   const cpPath = getCheckpointPath(evolveDir);
   try {
     if (!fs.existsSync(cpPath)) return null;
@@ -222,7 +264,7 @@ function loadCheckpoint(evolveDir) {
 /**
  * Save a session checkpoint to disk for hot-restart.
  */
-function saveCheckpoint(evolveDir, data) {
+function saveCheckpoint(evolveDir: string, data: unknown) {
   const cpPath = getCheckpointPath(evolveDir);
   fs.writeFileSync(cpPath, JSON.stringify(data, null, 2), 'utf8');
   log.ok(`Checkpoint saved: ${cpPath}`);
@@ -231,7 +273,7 @@ function saveCheckpoint(evolveDir, data) {
 /**
  * Delete the checkpoint file (consumed after resume).
  */
-function deleteCheckpoint(evolveDir) {
+function deleteCheckpoint(evolveDir: string) {
   const cpPath = getCheckpointPath(evolveDir);
   try {
     fs.unlinkSync(cpPath);
@@ -244,7 +286,7 @@ function deleteCheckpoint(evolveDir) {
 
 const SESSION_STATE_FILE = 'EVOLVE_SESSION_STATE.json';
 
-function getSessionStatePath(evolveDir) {
+function getSessionStatePath(evolveDir: string) {
   return path.join(evolveDir, SESSION_STATE_FILE);
 }
 
@@ -252,11 +294,11 @@ function getSessionStatePath(evolveDir) {
  * Compute session status from round results.
  * @returns {'running'|'completed'|'partial'|'failed'|'interrupted'}
  */
-function computeSessionStatus(roundResults, maxRounds, stopReason, isRunning) {
+function computeSessionStatus(roundResults: Array<{verdict?: string | null}>, maxRounds: number, stopReason: unknown, isRunning: boolean) {
   if (isRunning) return 'running';
   if (roundResults.length === 0) return 'failed';
 
-  const allErrored = roundResults.every((r) => r.verdict === 'error' || r.verdict === 'reject');
+  const allErrored = roundResults.every((r: {verdict?: string | null}) => r.verdict === 'error' || r.verdict === 'reject');
   if (allErrored) return 'failed';
 
   if (stopReason) return 'partial'; // stopped early by time/budget
@@ -267,7 +309,7 @@ function computeSessionStatus(roundResults, maxRounds, stopReason, isRunning) {
 /**
  * Compute human-readable action needed string.
  */
-function computeActionNeeded(roundResults, maxRounds, status) {
+function computeActionNeeded(roundResults: {length: number}, maxRounds: number, status: string) {
   if (status === 'completed') return 'Session complete. Review branches with :evolve status';
   if (status === 'failed') return 'All rounds failed. Check agent configs and retry';
   if (status === 'partial') {
@@ -278,12 +320,12 @@ function computeActionNeeded(roundResults, maxRounds, status) {
   return 'Session in progress';
 }
 
-function saveSessionState(evolveDir, state) {
+function saveSessionState(evolveDir: string, state: unknown) {
   const statePath = getSessionStatePath(evolveDir);
   fs.writeFileSync(statePath, JSON.stringify(state, null, 2), 'utf8');
 }
 
-function loadSessionState(evolveDir) {
+function loadSessionState(evolveDir: string) {
   const statePath = getSessionStatePath(evolveDir);
   try {
     if (!fs.existsSync(statePath)) return null;
@@ -297,7 +339,7 @@ function loadSessionState(evolveDir) {
  * Check if an evolve branch modified Hydra's own lib/ code (not the target project).
  * Only returns true when the diff touches files in Hydra's own directory.
  */
-function didModifyHydraCode(projectRoot, branchName, baseBranch) {
+function didModifyHydraCode(projectRoot: string, branchName: string, baseBranch: string) {
   // Only relevant when evolve is running against Hydra itself
   const normalizedHydra = path.resolve(HYDRA_ROOT).toLowerCase();
   const normalizedProject = path.resolve(projectRoot).toLowerCase();
@@ -314,7 +356,7 @@ function didModifyHydraCode(projectRoot, branchName, baseBranch) {
 /**
  * Spawn a new detached PowerShell process to resume the evolve session.
  */
-function spawnNewProcess(projectRoot) {
+function spawnNewProcess(projectRoot: string) {
   const ps1Path = path.join(HYDRA_ROOT, 'bin', 'hydra-evolve.ps1');
   const child = spawn(
     'pwsh',
@@ -350,8 +392,8 @@ const disabledAgents = new Set();
 /**
  * Local wrapper for shared executeAgent that adds evolve-specific UI callbacks.
  */
-function executeAgent(agent, prompt, opts = {}) {
-  const label = AGENT_LABELS[agent] || agent;
+function executeAgent(agent: string, prompt: string, opts: ExecuteAgentOpts = {}): Promise<EvolveResult> {
+  const label = (AGENT_LABELS as Record<string, string>)[agent] || agent;
   const context = opts.phaseLabel ? ` [${opts.phaseLabel}]` : '';
 
   return sharedExecuteAgent(agent, prompt, {
@@ -364,9 +406,9 @@ function executeAgent(agent, prompt, opts = {}) {
       log.dim(`${label}: working... ${elapsedStr}${bytes}${statusSuffix}${context}`);
     },
     onStatusBar: (agentName, meta) => {
-      setAgentActivity(agentName, meta.step === 'running' ? 'working' : 'idle', meta.phase);
+      setAgentActivity(agentName, meta.step === 'running' ? 'working' : 'idle', meta.phase ?? '');
     },
-  });
+  }) as Promise<EvolveResult>;
 }
 
 /**
@@ -375,8 +417,8 @@ function executeAgent(agent, prompt, opts = {}) {
  * whether to retry as-is, retry with a modified prompt, or give up.
  * If an agent fails twice, it's disabled for the rest of the session.
  */
-async function executeAgentWithRetry(agent, prompt, opts = {}) {
-  const label = AGENT_LABELS[agent] || agent;
+async function executeAgentWithRetry(agent: string, prompt: string, opts: ExecuteAgentOpts = {}): Promise<EvolveResult> {
+  const label = (AGENT_LABELS as Record<string, string>)[agent] || agent;
 
   // Skip agents that are known-broken this session
   if (disabledAgents.has(agent)) {
@@ -388,7 +430,9 @@ async function executeAgentWithRetry(agent, prompt, opts = {}) {
       durationMs: 0,
       timedOut: false,
       skipped: true,
-    };
+      exitCode: null,
+      signal: null,
+    } as EvolveResult;
   }
 
   const result = await executeAgent(agent, prompt, opts);
@@ -399,7 +443,7 @@ async function executeAgentWithRetry(agent, prompt, opts = {}) {
 
   // ── Usage limit check (multi-day quota — NO retries, immediate disable) ──
   // Verify with API first to avoid false positives from pattern matching.
-  const usageCheck = detectUsageLimitError(agent, result);
+  const usageCheck = detectUsageLimitError(agent, result as unknown as Record<string, unknown>);
   if (usageCheck.isUsageLimit) {
     const verification = await verifyAgentQuota(agent);
     if (verification.verified === true) {
@@ -416,7 +460,7 @@ async function executeAgentWithRetry(agent, prompt, opts = {}) {
       );
       result.usageLimited = true;
       result.usageLimitConfirmed = true;
-      result.resetInSeconds = usageCheck.resetInSeconds;
+      result.resetInSeconds = usageCheck.resetInSeconds ?? undefined;
       return result;
     } else if (
       verification.verified === 'unknown' &&
@@ -439,7 +483,7 @@ async function executeAgentWithRetry(agent, prompt, opts = {}) {
       result.usageLimited = true;
       result.usageLimitConfirmed = true;
       result.usageLimitStructured = true;
-      result.resetInSeconds = usageCheck.resetInSeconds;
+      result.resetInSeconds = usageCheck.resetInSeconds ?? undefined;
       return result;
     } else {
       // verified === false (API says account active) OR verified === 'unknown'
@@ -457,13 +501,13 @@ async function executeAgentWithRetry(agent, prompt, opts = {}) {
   }
 
   // ── Rate limit recovery (cheapest check — no API calls, just backoff) ──
-  const rlCheck = detectRateLimitError(agent, result);
+  const rlCheck = detectRateLimitError(agent, result as unknown as Record<string, unknown>);
   if (rlCheck.isRateLimit) {
     const cfg = loadHydraConfig();
-    const rlCfg = cfg.rateLimits || {};
-    const maxRetries = rlCfg.maxRetries ?? 3;
-    const baseDelayMs = rlCfg.baseDelayMs ?? 5000;
-    const maxDelayMs = rlCfg.maxDelayMs ?? 60_000;
+    const rlCfg = (cfg.rateLimits || {}) as Record<string, unknown>;
+    const maxRetries = (rlCfg['maxRetries'] as number | undefined) ?? 3;
+    const baseDelayMs = (rlCfg['baseDelayMs'] as number | undefined) ?? 5000;
+    const maxDelayMs = (rlCfg['maxDelayMs'] as number | undefined) ?? 60_000;
 
     log.warn(`${label}: rate limited — ${rlCheck.errorMessage.slice(0, 100)}`);
 
@@ -471,7 +515,7 @@ async function executeAgentWithRetry(agent, prompt, opts = {}) {
       const delay = calculateBackoff(attempt, {
         baseDelayMs,
         maxDelayMs,
-        retryAfterMs: rlCheck.retryAfterMs,
+        retryAfterMs: rlCheck.retryAfterMs ?? undefined,
       });
       log.dim(
         `${label}: waiting ${(delay / 1000).toFixed(0)}s before retry (${attempt + 1}/${maxRetries})`,
@@ -486,7 +530,7 @@ async function executeAgentWithRetry(agent, prompt, opts = {}) {
       }
 
       // Check if still rate limited
-      const retryRlCheck = detectRateLimitError(agent, retry);
+      const retryRlCheck = detectRateLimitError(agent, retry as unknown as Record<string, unknown>);
       if (!retryRlCheck.isRateLimit) {
         // Different error — fall through to normal error handling below
         log.dim(`${label}: no longer rate limited, but failed with: ${retry.error}`);
@@ -511,19 +555,19 @@ async function executeAgentWithRetry(agent, prompt, opts = {}) {
   }
 
   // ── Model error recovery (cheap check before expensive investigator) ──
-  const modelCheck = detectModelError(agent, result);
+  const modelCheck = detectModelError(agent, result as unknown as Record<string, unknown>);
   if (modelCheck.isModelError) {
     log.warn(`${label}: model error detected — ${modelCheck.errorMessage}`);
-    const recovery = await recoverFromModelError(agent, modelCheck.failedModel);
+    const recovery = await recoverFromModelError(agent, modelCheck.failedModel ?? '');
     if (recovery.recovered) {
       log.info(`${label}: recovered with fallback model ${recovery.newModel} — retrying`);
       const retryResult = await executeAgent(agent, prompt, {
         ...opts,
-        modelOverride: recovery.newModel,
+        modelOverride: recovery.newModel ?? undefined,
       });
       retryResult.recovered = true;
-      retryResult.originalModel = modelCheck.failedModel;
-      retryResult.newModel = recovery.newModel;
+      retryResult.originalModel = modelCheck.failedModel ?? undefined;
+      retryResult.newModel = recovery.newModel ?? undefined;
       return retryResult;
     }
     // Recovery failed — disable agent and return
@@ -543,9 +587,9 @@ async function executeAgentWithRetry(agent, prompt, opts = {}) {
   // detectCodexError is currently codex-specific; this guard will extend to other
   // jsonOutput agents when they support structured error reporting.
   if (getAgent(agent)?.features?.jsonOutput) {
-    const codexCheck = detectCodexError(agent, result);
+    const codexCheck = detectCodexError(agent, result as unknown as Record<string, unknown>);
     const retryableCodexCategories = ['transient', 'internal', 'codex-jsonl-error'];
-    if (codexCheck.isCodexError && !retryableCodexCategories.includes(codexCheck.category)) {
+    if (codexCheck.isCodexError && !retryableCodexCategories.includes(codexCheck.category as string)) {
       const catLabel = `[${codexCheck.category}] ${codexCheck.errorMessage}`;
       log.warn(`${label}: ${catLabel}`);
       disabledAgents.add(agent);
@@ -564,7 +608,7 @@ async function executeAgentWithRetry(agent, prompt, opts = {}) {
       const diagLabel = `[startup-failure] ${codexCheck.errorMessage || result.errorDetail || result.error}`;
       log.warn(`${label}: ${diagLabel}`);
       log.dim(
-        `  Process exited after ${result.durationMs}ms — check: API key validity, model ID "${result.args?.find((a, i) => result.args[i - 1] === '--model') || 'unknown'}", CLI version, and environment.`,
+        `  Process exited after ${result.durationMs}ms — check: API key validity, model ID "${result.args?.find((_a, i) => result.args?.[i - 1] === '--model') || 'unknown'}", CLI version, and environment.`,
       );
       disabledAgents.add(agent);
       notifyDoctor(
@@ -592,20 +636,19 @@ async function executeAgentWithRetry(agent, prompt, opts = {}) {
     const diagnosis = await investigate({
       phase: 'agent',
       agent,
-      error: structuredError,
-      stderr: (result.stderr || '').slice(-2000),
+      error: structuredError ?? undefined,
       stdout: (result.output || '').slice(-2000),
       timedOut: result.timedOut,
-      durationMs: result.durationMs,
-      startupFailure: result.startupFailure || false,
       exitCode: result.exitCode,
       signal: result.signal,
-      errorCategory: result.errorCategory || null,
-      errorDetail: result.errorDetail || null,
-      errorContext: result.errorContext || null,
+      errorCategory: result.errorCategory ?? undefined,
+      errorDetail: result.errorDetail ?? undefined,
+      errorContext: result.errorContext ?? undefined,
       context: `Phase: ${opts.phaseLabel || 'unknown'}`,
       attemptNumber: 1,
-    });
+      ...(result.durationMs != null ? { durationMs: result.durationMs } : {}),
+      ...(result.startupFailure != null ? { startupFailure: result.startupFailure } : {}),
+    } as Parameters<typeof investigate>[0]);
 
     log.dim(`Investigation: ${diagnosis.diagnosis} — ${diagnosis.explanation}`);
 
@@ -642,7 +685,7 @@ async function executeAgentWithRetry(agent, prompt, opts = {}) {
     await new Promise((r) => setTimeout(r, 2000));
     const retry = await executeAgent(retryAgent, retryPrompt, opts);
     log.dim(
-      `${AGENT_LABELS[retryAgent] || retryAgent} retry: ${retry.ok ? 'OK' : 'FAIL'} (${formatDuration(retry.durationMs)})`,
+      `${(AGENT_LABELS as Record<string, string>)[retryAgent] || retryAgent} retry: ${retry.ok ? 'OK' : 'FAIL'} (${formatDuration(retry.durationMs)})`,
     );
     retry.investigation = diagnosis;
 
@@ -667,7 +710,7 @@ async function executeAgentWithRetry(agent, prompt, opts = {}) {
 
   const retry = await executeAgent(agent, prompt, opts);
   log.dim(
-    `${AGENT_LABELS[agent] || agent} retry: ${retry.ok ? 'OK' : 'FAIL'} (${formatDuration(retry.durationMs)})`,
+    `${(AGENT_LABELS as Record<string, string>)[agent] || agent} retry: ${retry.ok ? 'OK' : 'FAIL'} (${formatDuration(retry.durationMs)})`,
   );
 
   if (!retry.ok) {
@@ -692,7 +735,7 @@ async function executeAgentWithRetry(agent, prompt, opts = {}) {
  * If the parsed object already contains evolve-specific keys, return it directly
  * (it's the final data, not a wrapper) to avoid double-unwrapping that strips payloads.
  */
-function extractOutput(rawOutput) {
+function extractOutput(rawOutput: string | null | undefined): string {
   if (!rawOutput) return '';
   try {
     const parsed = JSON.parse(rawOutput);
@@ -726,9 +769,9 @@ function extractOutput(rawOutput) {
 
 // ── Session-level investigation tracking ─────────────────────────────────────
 
-const sessionInvestigations = { count: 0, healed: 0, diagnoses: [] };
+const sessionInvestigations: { count: number; healed: number; diagnoses: Array<{phase: string; diagnosis: string; explanation: string}> } = { count: 0, healed: 0, diagnoses: [] };
 
-function recordInvestigation(phaseName, diagnosis) {
+function recordInvestigation(phaseName: string, diagnosis: {diagnosis: string; explanation: string; retryRecommendation?: {retryPhase?: boolean}}) {
   sessionInvestigations.count++;
   sessionInvestigations.diagnoses.push({
     phase: phaseName,
@@ -752,7 +795,7 @@ function recordInvestigation(phaseName, diagnosis) {
  * @param {object} context - Additional context for the investigator
  * @returns {Promise<object>} Phase result (possibly from retry)
  */
-async function executePhaseWithInvestigation(phaseName, phaseFn, phaseArgs, context = {}) {
+const _executePhaseWithInvestigation = async (phaseName: string, phaseFn: (...args: unknown[]) => Promise<{ok: boolean; [key: string]: unknown}>, phaseArgs: unknown[], context: Record<string, unknown> = {}) => {
   const result = await phaseFn(...phaseArgs);
 
   // Phase succeeded — return as-is
@@ -762,18 +805,18 @@ async function executePhaseWithInvestigation(phaseName, phaseFn, phaseArgs, cont
   if (!isInvestigatorAvailable()) return result;
 
   const cfg = loadHydraConfig();
-  const maxAttempts = cfg.evolve?.investigator?.maxAttemptsPerPhase || 2;
+  const maxAttempts = (cfg.evolve?.investigator?.['maxAttemptsPerPhase'] as number | undefined) || 2;
   if (maxAttempts <= 1) return result;
 
   log.info(`Phase ${phaseName} failed — investigating...`);
   const diagnosis = await investigate({
     phase: phaseName,
-    agent: context.agent || 'codex',
-    error: result.error || `Phase ${phaseName} returned ok=false`,
-    stderr: (result.stderr || '').slice(-2000),
-    stdout: (result.output || '').slice(-2000),
-    timedOut: result.timedOut || false,
-    context: context.planSummary || '',
+    agent: (context['agent'] as string) || 'codex',
+    error: (result['error'] as string | undefined) || `Phase ${phaseName} returned ok=false`,
+    stderr: ((result['stderr'] as string | undefined) || '').slice(-2000),
+    stdout: ((result['output'] as string | undefined) || '').slice(-2000),
+    timedOut: (result['timedOut'] as boolean | undefined) || false,
+    context: (context['planSummary'] as string) || '',
     attemptNumber: 1,
   });
 
@@ -782,12 +825,12 @@ async function executePhaseWithInvestigation(phaseName, phaseFn, phaseArgs, cont
 
   if (diagnosis.diagnosis === 'fundamental') {
     log.warn(`Phase ${phaseName}: fundamental failure — no retry`);
-    result.investigation = diagnosis;
+    (result as unknown as EvolveResult).investigation = diagnosis;
     return result;
   }
 
   if (!diagnosis.retryRecommendation?.retryPhase) {
-    result.investigation = diagnosis;
+    (result as unknown as EvolveResult).investigation = diagnosis;
     return result;
   }
 
@@ -795,20 +838,21 @@ async function executePhaseWithInvestigation(phaseName, phaseFn, phaseArgs, cont
   // rebuild the phase args. For simplicity, we pass the corrective context
   // through the context object and let the caller handle prompt modification.
   log.info(`Phase ${phaseName}: retrying with investigator guidance...`);
-  result.investigation = diagnosis;
-  result._shouldRetry = true;
-  result._corrective = diagnosis.corrective;
-  result._preamble =
+  (result as unknown as EvolveResult).investigation = diagnosis;
+  (result as unknown as EvolveResult)._shouldRetry = true;
+  (result as unknown as EvolveResult)._corrective = diagnosis.corrective;
+  (result as unknown as EvolveResult)._preamble =
     diagnosis.retryRecommendation?.preamble || diagnosis.retryRecommendation?.modifiedPrompt;
   return result;
-}
+};
+void (_executePhaseWithInvestigation as unknown);
 
 // ── Phase Implementations ───────────────────────────────────────────────────
 
 /**
  * Phase 1: RESEARCH — Agents investigate external systems (web-first).
  */
-async function phaseResearch(area, kb, { cwd, timeouts, evolveDir }) {
+async function phaseResearch(area: string, kb: KnowledgeBase, { cwd, timeouts, evolveDir }: { cwd: string; timeouts: typeof DEFAULT_PHASE_TIMEOUTS; evolveDir: string }) {
   log.phase(`RESEARCH — ${area}`);
 
   const kbContext = formatStatsForPrompt(kb);
@@ -817,7 +861,7 @@ async function phaseResearch(area, kb, { cwd, timeouts, evolveDir }) {
     priorLearnings.length > 0
       ? `\n\nPrior learnings for "${area}":\n${priorLearnings
           .slice(0, 5)
-          .map((e) => `- [${e.outcome || 'researched'}] ${e.finding.slice(0, 200)}`)
+          .map((e: KBEntry) => `- [${e.outcome || 'researched'}] ${e.finding?.slice(0, 200) ?? ''}`)
           .join('\n')}`
       : '';
 
@@ -833,7 +877,7 @@ Search the web for current implementations, changelogs, documentation, GitHub re
 
 Specific search queries to try:
 ${getSearchQueries(area)
-  .map((q) => `- "${q}"`)
+  .map((q: string) => `- "${q}"`)
   .join('\n')}
 
 ${kbContext}${priorContext}
@@ -853,7 +897,7 @@ You are researching "${area}" for the Hydra multi-agent orchestration system. Us
 
 Search for implementations, GitHub repos, documentation, and recent discussions about:
 ${getSearchQueries(area)
-  .map((q) => `- ${q}`)
+  .map((q: string) => `- ${q}`)
   .join('\n')}
 
 Focus on practical patterns that could be applied to a Node.js multi-agent CLI system.
@@ -930,7 +974,7 @@ Respond with a JSON object:
     ['Claude', claudeResult],
     ['Gemini', geminiResult],
     ['Codex', codexResult],
-  ]) {
+  ] as Array<[string, EvolveResult]>) {
     if (!result.ok) {
       const stderrSnippet = result.stderr ? result.stderr.slice(-500).trim() : '';
       log.warn(
@@ -949,7 +993,7 @@ Respond with a JSON object:
     ['Claude', claudeResult, claudeData],
     ['Gemini', geminiResult, geminiData],
     ['Codex', codexResult, codexData],
-  ]) {
+  ] as Array<[string, EvolveResult, unknown]>) {
     if (result.ok && !data) {
       const rawSnippet = extractOutput(result.output).slice(0, 200);
       log.warn(`${name} returned OK but output could not be parsed as JSON`);
@@ -959,14 +1003,9 @@ Respond with a JSON object:
 
   const combined = {
     area,
-    claudeFindings: claudeData || { findings: [], applicableIdeas: [], sources: [] },
-    geminiFindings: geminiData || { findings: [], applicableIdeas: [], sources: [] },
-    codexFindings: codexData || {
-      existingPatterns: [],
-      gaps: [],
-      implementationIdeas: [],
-      relevantFiles: [],
-    },
+    claudeFindings: (claudeData as {findings?: string[]; applicableIdeas?: string[]; sources?: unknown[]} | null) || { findings: [] as string[], applicableIdeas: [] as string[], sources: [] as unknown[] },
+    geminiFindings: (geminiData as {findings?: string[]; applicableIdeas?: string[]; sources?: unknown[]} | null) || { findings: [] as string[], applicableIdeas: [] as string[], sources: [] as unknown[] },
+    codexFindings: (codexData as {existingPatterns?: string[]; gaps?: string[]; implementationIdeas?: string[]; relevantFiles?: unknown[]} | null) || { existingPatterns: [] as string[], gaps: [] as string[], implementationIdeas: [] as string[], relevantFiles: [] as unknown[] },
   };
 
   // Save research artifact
@@ -980,7 +1019,7 @@ Respond with a JSON object:
  * Extract an improvement description from raw agent text when JSON parsing fails.
  * Looks for labeled lines ("Improvement:", "Selected:", etc.) or first substantial sentence.
  */
-function extractImprovementFromText(rawOutput) {
+function extractImprovementFromText(rawOutput: string | null | undefined) {
   if (!rawOutput || typeof rawOutput !== 'string') return null;
   const lines = rawOutput
     .split('\n')
@@ -1008,9 +1047,9 @@ function extractImprovementFromText(rawOutput) {
  * Make a deliberation step resilient: parse JSON, fall back to text extraction.
  * Returns parsed data or a minimal fallback object, plus a warning if fallback was used.
  */
-function resilientParse(rawOutput, resultOk, stepName, fallbackKey) {
+function resilientParse(rawOutput: string | null | undefined, resultOk: boolean, stepName: string, fallbackKey: string): { data: Record<string, unknown> | null; fallback: boolean } {
   const extracted = extractOutput(rawOutput);
-  const parsed = parseJsonLoose(extracted);
+  const parsed = parseJsonLoose(extracted) as Record<string, unknown> | null;
   if (parsed) return { data: parsed, fallback: false };
 
   if (!resultOk) return { data: null, fallback: false };
@@ -1032,7 +1071,7 @@ function resilientParse(rawOutput, resultOk, stepName, fallbackKey) {
 /**
  * Phase 2: DELIBERATE — Council discusses findings.
  */
-async function phaseDeliberate(research, kb, { cwd, timeouts }) {
+async function phaseDeliberate(research: any, kb: KnowledgeBase, { cwd, timeouts }: { cwd: string; timeouts: typeof DEFAULT_PHASE_TIMEOUTS }) {
   log.phase('DELIBERATE');
 
   const kbContext = formatStatsForPrompt(kb);
@@ -1128,7 +1167,7 @@ ${getProjectContext()}
 You are evaluating the implementation feasibility of a proposed improvement to the Hydra project.
 
 ## Proposed Improvement
-${JSON.stringify(synthData?.suggestedImprovement || 'See synthesis', null, 2)}
+${JSON.stringify((synthData as {suggestedImprovement?: string} | null)?.suggestedImprovement || 'See synthesis', null, 2)}
 
 ## Synthesis
 ${JSON.stringify(synthData || {}, null, 2)}
@@ -1218,7 +1257,7 @@ Respond with JSON:
   );
 
   // Determine selected improvement with cascading fallbacks
-  let selectedImprovement = priorityData?.selectedImprovement || synthData?.suggestedImprovement;
+  let selectedImprovement = (priorityData as {selectedImprovement?: string} | null)?.selectedImprovement || (synthData as {suggestedImprovement?: string} | null)?.suggestedImprovement;
 
   // Research-based fallback: extract top idea directly from research findings
   if (!selectedImprovement) {
@@ -1246,7 +1285,7 @@ Respond with JSON:
 /**
  * Phase 3: PLAN — Create improvement spec + test plan.
  */
-async function phasePlan(deliberation, area, kb, { cwd, timeouts, evolveDir, roundNum }) {
+async function phasePlan(deliberation: {selectedImprovement: string; synthesis?: Record<string, unknown> | null; critique?: Record<string, unknown> | null; feasibility?: Record<string, unknown> | null; priority?: Record<string, unknown> | null}, area: string, kb: KnowledgeBase, { cwd, timeouts, evolveDir, roundNum }: { cwd: string; timeouts: typeof DEFAULT_PHASE_TIMEOUTS; evolveDir: string; roundNum: number }) {
   log.phase('PLAN');
 
   const priorLearnings = getPriorLearnings(kb, area);
@@ -1254,7 +1293,7 @@ async function phasePlan(deliberation, area, kb, { cwd, timeouts, evolveDir, rou
     priorLearnings.length > 0
       ? `\n## Prior Learnings for "${area}" (avoid repeating these mistakes)\n${priorLearnings
           .slice(0, 5)
-          .map((e) => `- [${e.outcome}] ${e.learnings || e.finding}`)
+          .map((e: KBEntry) => `- [${e.outcome}] ${e.learnings || e.finding}`)
           .join('\n')}`
       : '';
 
@@ -1266,20 +1305,20 @@ Create a detailed implementation plan for the following improvement to the Hydra
 ${deliberation.selectedImprovement}
 
 ## Rationale
-${deliberation.priority?.rationale || deliberation.synthesis?.rationale || 'N/A'}
+${(deliberation.priority as Record<string, unknown> | null)?.['rationale'] as string || (deliberation.synthesis as Record<string, unknown> | null)?.['rationale'] as string || 'N/A'}
 
 ## Key Patterns Found
-${JSON.stringify(deliberation.synthesis?.topPatterns || [], null, 2)}
+${JSON.stringify((deliberation.synthesis as Record<string, unknown> | null)?.['topPatterns'] || [], null, 2)}
 
 ## Concerns to Watch For
-${JSON.stringify(deliberation.critique?.concerns || [], null, 2)}
+${JSON.stringify((deliberation.critique as Record<string, unknown> | null)?.['concerns'] || [], null, 2)}
 
 ## Implementation Notes (from feasibility assessment)
-${deliberation.feasibility?.implementationNotes || 'N/A'}
+${(deliberation.feasibility as Record<string, unknown> | null)?.['implementationNotes'] as string || 'N/A'}
 
 ## Risks & Constraints
-${JSON.stringify(deliberation.priority?.risks || [], null, 2)}
-${JSON.stringify(deliberation.priority?.constraints || [], null, 2)}
+${JSON.stringify((deliberation.priority as Record<string, unknown> | null)?.['risks'] || [], null, 2)}
+${JSON.stringify((deliberation.priority as Record<string, unknown> | null)?.['constraints'] || [], null, 2)}
 ${learningsBlock}
 
 ## Hydra Project Context
@@ -1309,7 +1348,14 @@ Respond with JSON:
     timeoutMs: timeouts.planTimeoutMs,
     phaseLabel: 'plan: spec',
   });
-  const planData = parseJsonLoose(extractOutput(planResult.output));
+  const planData = (parseJsonLoose(extractOutput(planResult.output)) as unknown) as {
+    objectives?: string[];
+    constraints?: string[];
+    acceptanceCriteria?: string[];
+    filesToModify?: Array<{path: string; changes: string}>;
+    testPlan?: {scenarios?: string[]; edgeCases?: string[]};
+    rollbackCriteria?: string[];
+  } | null;
   log.dim(`Plan: ${planResult.ok ? 'OK' : 'FAIL'} (${formatDuration(planResult.durationMs)})`);
 
   // Save spec artifact
@@ -1322,26 +1368,26 @@ Respond with JSON:
 ${deliberation.selectedImprovement}
 
 ## Objectives
-${(planData?.objectives || []).map((o) => `- ${o}`).join('\n')}
+${(planData?.objectives || []).map((o: string) => `- ${o}`).join('\n')}
 
 ## Constraints
-${(planData?.constraints || []).map((c) => `- ${c}`).join('\n')}
+${(planData?.constraints || []).map((c: string) => `- ${c}`).join('\n')}
 
 ## Acceptance Criteria
-${(planData?.acceptanceCriteria || []).map((a) => `- ${a}`).join('\n')}
+${(planData?.acceptanceCriteria || []).map((a: string) => `- ${a}`).join('\n')}
 
 ## Files to Modify
-${(planData?.filesToModify || []).map((f) => `- \`${f.path}\`: ${f.changes}`).join('\n')}
+${(planData?.filesToModify || []).map((f: {path: string; changes: string}) => `- \`${f.path}\`: ${f.changes}`).join('\n')}
 
 ## Test Plan
 ### Scenarios
-${(planData?.testPlan?.scenarios || []).map((s) => `- ${s}`).join('\n')}
+${(planData?.testPlan?.scenarios || []).map((s: string) => `- ${s}`).join('\n')}
 
 ### Edge Cases
-${(planData?.testPlan?.edgeCases || []).map((e) => `- ${e}`).join('\n')}
+${(planData?.testPlan?.edgeCases || []).map((e: string) => `- ${e}`).join('\n')}
 
 ## Rollback Criteria
-${(planData?.rollbackCriteria || []).map((r) => `- ${r}`).join('\n')}
+${(planData?.rollbackCriteria || []).map((r: string) => `- ${r}`).join('\n')}
 `;
 
   fs.writeFileSync(specPath, specContent, 'utf8');
@@ -1353,7 +1399,7 @@ ${(planData?.rollbackCriteria || []).map((r) => `- ${r}`).join('\n')}
 /**
  * Phase 4: TEST — Write comprehensive tests (TDD).
  */
-async function phaseTest(plan, branchName, safetyPrompt, { cwd, timeouts, investigatorPreamble }) {
+async function phaseTest(plan: {plan?: Record<string, unknown> | null}, _branchName: string, safetyPrompt: string, { cwd, timeouts, investigatorPreamble }: { cwd: string; timeouts: typeof DEFAULT_PHASE_TIMEOUTS; investigatorPreamble?: string }) {
   log.phase('TEST');
 
   const preambleBlock = investigatorPreamble
@@ -1414,17 +1460,17 @@ ${safetyPrompt}`;
  * Phase 5: IMPLEMENT — Make changes on isolated branch.
  */
 async function phaseImplement(
-  plan,
-  branchName,
-  safetyPrompt,
-  { cwd, timeouts, investigatorPreamble, deliberation, agentOverride = null },
+  plan: {plan?: Record<string, unknown> | null},
+  _branchName: string,
+  safetyPrompt: string,
+  { cwd, timeouts, investigatorPreamble, deliberation, agentOverride = null }: { cwd: string; timeouts: typeof DEFAULT_PHASE_TIMEOUTS; investigatorPreamble?: string; deliberation?: any; agentOverride?: string | null },
 ) {
   const implAgent = agentOverride || 'codex';
   log.phase(agentOverride ? `IMPLEMENT (${agentOverride})` : 'IMPLEMENT');
 
   const improvementDesc =
-    deliberation?.selectedImprovement || plan.plan?.objectives?.[0] || 'See plan for details';
-  const acceptanceCriteria = (plan.plan?.acceptanceCriteria || []).map((c) => `- ${c}`).join('\n');
+    deliberation?.selectedImprovement || (plan.plan?.['objectives'] as string[] | undefined)?.[0] || 'See plan for details';
+  const acceptanceCriteria = ((plan.plan?.['acceptanceCriteria'] as string[]) || []).map((c: string) => `- ${c}`).join('\n');
 
   const preambleBlock = investigatorPreamble
     ? `## Investigator Guidance (from prior failure analysis)\n${investigatorPreamble}\n\n`
@@ -1481,15 +1527,15 @@ ${safetyPrompt}`;
 /**
  * Phase 6: ANALYZE — Multi-agent review of results.
  */
-async function phaseAnalyze(diff, branchName, plan, { cwd, timeouts, deliberation } = {}) {
+async function phaseAnalyze(diff: string, _branchName: string, plan: {plan?: Record<string, unknown> | null}, { cwd, timeouts, deliberation }: { cwd: string; timeouts: typeof DEFAULT_PHASE_TIMEOUTS; deliberation?: {selectedImprovement?: string} | null } = { cwd: '', timeouts: DEFAULT_PHASE_TIMEOUTS }) {
   log.phase('ANALYZE');
 
   const diffBlock = diff.length > 8000 ? `${diff.slice(0, 8000)}\n...(truncated)` : diff;
   const improvementGoal =
-    deliberation?.selectedImprovement || plan.plan?.objectives?.[0] || 'See plan for details';
-  const acceptanceCriteria = (plan.plan?.acceptanceCriteria || []).map((c) => `- ${c}`).join('\n');
+    deliberation?.selectedImprovement || (plan.plan?.['objectives'] as string[] | undefined)?.[0] || 'See plan for details';
+  const acceptanceCriteria = ((plan.plan?.['acceptanceCriteria'] as string[]) || []).map((c: string) => `- ${c}`).join('\n');
 
-  const reviewPrompt = (agent, focus) => `# Evolve Analysis: ${focus}
+  const reviewPrompt = (_agent: string, focus: string) => `# Evolve Analysis: ${focus}
 
 Review the implementation diff below for a Hydra improvement.
 
@@ -1547,9 +1593,9 @@ Respond with JSON:
     ),
   ]);
 
-  const claudeAnalysis = parseJsonLoose(extractOutput(claudeResult.output));
-  const geminiAnalysis = parseJsonLoose(extractOutput(geminiResult.output));
-  const codexAnalysis = parseJsonLoose(extractOutput(codexResult.output));
+  const claudeAnalysis = parseJsonLoose(extractOutput(claudeResult.output)) as Record<string, unknown> | null;
+  const geminiAnalysis = parseJsonLoose(extractOutput(geminiResult.output)) as Record<string, unknown> | null;
+  const codexAnalysis = parseJsonLoose(extractOutput(codexResult.output)) as Record<string, unknown> | null;
 
   log.dim(`Claude analysis: ${claudeResult.ok ? 'OK' : 'FAIL'}`);
   log.dim(`Gemini analysis: ${geminiResult.ok ? 'OK' : 'FAIL'}`);
@@ -1588,18 +1634,18 @@ Respond with JSON:
   }
 
   // Aggregate scores
-  const scores = [claudeAnalysis, geminiAnalysis, codexAnalysis].filter(Boolean);
+  const scores = [claudeAnalysis, geminiAnalysis, codexAnalysis].filter((x): x is Record<string, unknown> => Boolean(x));
   const avgQuality =
-    scores.length > 0 ? scores.reduce((s, a) => s + (a.quality || 0), 0) / scores.length : 0;
+    scores.length > 0 ? scores.reduce((s: number, a: Record<string, unknown>) => s + ((a['quality'] as number) || 0), 0) / scores.length : 0;
   const avgConfidence =
-    scores.length > 0 ? scores.reduce((s, a) => s + (a.confidence || 0), 0) / scores.length : 0;
-  const allConcerns = scores.flatMap((s) => s.concerns || []);
+    scores.length > 0 ? scores.reduce((s: number, a: Record<string, unknown>) => s + ((a['confidence'] as number) || 0), 0) / scores.length : 0;
+  const allConcerns = scores.flatMap((s: Record<string, unknown>) => (s['concerns'] as string[]) || []);
 
   // Collect per-agent verdicts
   const agentVerdicts = {
-    claude: claudeAnalysis?.verdict || null,
-    gemini: geminiAnalysis?.verdict || null,
-    codex: codexAnalysis?.verdict || null,
+    claude: (claudeAnalysis?.['verdict'] as string | null) || null,
+    gemini: (geminiAnalysis?.['verdict'] as string | null) || null,
+    codex: (codexAnalysis?.['verdict'] as string | null) || null,
   };
 
   return {
@@ -1617,12 +1663,12 @@ Respond with JSON:
 /**
  * Phase 7: DECIDE — Consensus verdict.
  */
-function phaseDecide(analysis, config) {
+function phaseDecide(analysis: {aggregateScore: number; aggregateConfidence?: number; testsPassed: boolean; concerns: string[]; agentVerdicts: Record<string, string | null>; agentScores?: Record<string, unknown>; testOutput?: string; testDetails?: unknown}, config: Record<string, unknown>) {
   log.phase('DECIDE');
 
   const { aggregateScore, testsPassed, concerns, agentVerdicts } = analysis;
-  const minScore = config.approval?.minScore || 7;
-  const requireAllTests = config.approval?.requireAllTestsPass !== false;
+  const minScore = (config['approval'] as {minScore?: number} | undefined)?.minScore || 7;
+  const requireAllTests = (config['approval'] as {requireAllTestsPass?: boolean} | undefined)?.requireAllTestsPass !== false;
 
   // Count per-agent verdicts
   const verdictEntries = Object.entries(agentVerdicts || {}).filter(([, v]) => v != null);
@@ -1632,10 +1678,10 @@ function phaseDecide(analysis, config) {
 
   // Log per-agent breakdown
   const agentScores = analysis.agentScores || {};
-  const verdictParts = [];
+  const verdictParts: string[] = [];
   for (const agent of ['claude', 'gemini', 'codex']) {
     const v = agentVerdicts?.[agent];
-    const s = agentScores[agent]?.quality;
+    const s = ((agentScores as Record<string, unknown>)[agent] as Record<string, unknown> | null)?.['quality'] as number | undefined;
     if (v || s != null) {
       verdictParts.push(`${agent[0].toUpperCase() + agent.slice(1)}: ${v || '?'}(${s ?? '?'})`);
     }
@@ -1644,13 +1690,13 @@ function phaseDecide(analysis, config) {
   let verdict;
   let reason;
 
-  const hasCriticalConcerns = concerns.some((c) =>
+  const hasCriticalConcerns = concerns.some((c: string) =>
     /critical|breaking|security|data.?loss/i.test(c),
   );
 
   if (hasCriticalConcerns) {
     verdict = 'reject';
-    reason = `Critical concerns identified: ${concerns.filter((c) => /critical|breaking|security|data.?loss/i.test(c)).join('; ')}`;
+    reason = `Critical concerns identified: ${concerns.filter((c: string) => /critical|breaking|security|data.?loss/i.test(c)).join('; ')}`;
   } else if (requireAllTests && !testsPassed) {
     verdict = 'reject';
     reason = 'Tests did not pass';
@@ -1683,7 +1729,7 @@ function phaseDecide(analysis, config) {
 
 // ── Search Query Generation ─────────────────────────────────────────────────
 
-function getSearchQueries(area) {
+function getSearchQueries(area: string): string[] {
   const queries = {
     'orchestration-patterns': [
       'CrewAI task delegation approach 2026',
@@ -1729,7 +1775,7 @@ function getSearchQueries(area) {
     ],
   };
   return (
-    queries[area] || [
+    (queries as Record<string, string[]>)[area] || [
       `${area} best practices 2026`,
       `${area} implementation patterns`,
       `${area} tools and frameworks`,
@@ -1739,7 +1785,7 @@ function getSearchQueries(area) {
 
 // ── Report Generation ───────────────────────────────────────────────────────
 
-function compactTokenBar(tokens, budget, width = 16) {
+function compactTokenBar(tokens: number, budget: number, width = 16) {
   const ratio = Math.min(tokens / (budget || 1), 1);
   const filled = Math.round(ratio * width);
   const bar = '█'.repeat(filled) + '░'.repeat(width - filled);
@@ -1747,7 +1793,7 @@ function compactTokenBar(tokens, budget, width = 16) {
   return pc.dim(`[${bar}] ${pct.padStart(3)}%`);
 }
 
-function formatDuration(ms) {
+function formatDuration(ms: number) {
   const secs = Math.floor(ms / 1000);
   if (secs < 60) return `${secs}s`;
   const mins = Math.floor(secs / 60);
@@ -1758,8 +1804,14 @@ function formatDuration(ms) {
   return `${hrs}h ${remMins}m`;
 }
 
-function generateSessionReport(roundResults, budgetSummary, runMeta, kbDelta, investigatorSummary) {
-  const { startedAt, finishedAt, dateStr, maxRounds } = runMeta;
+function generateSessionReport(
+  roundResults: RoundResult[],
+  budgetSummary: {consumed: number; hardLimit: number; softLimit?: number; percentUsed?: number; roundDeltas: Array<{round: unknown; area: unknown; tokens: number; durationMs: unknown}>; avgPerRound: number; durationMs?: number; startTokens: number; endTokens: number},
+  runMeta: Record<string, unknown>,
+  kbDelta: {added: number; total: number},
+  investigatorSummary: {investigations: number; healed: number; promptTokens: number; completionTokens: number} | null
+): string {
+  const { startedAt, finishedAt, dateStr, maxRounds } = runMeta as { startedAt: number; finishedAt: number; dateStr: string; maxRounds: number };
   const durationStr = formatDuration(finishedAt - startedAt);
   const tokensStr = `~${budgetSummary.consumed.toLocaleString()}`;
 
@@ -1831,7 +1883,7 @@ function generateSessionReport(roundResults, budgetSummary, runMeta, kbDelta, in
     lines.push('|-------|------|--------|----------|');
     for (const d of budgetSummary.roundDeltas) {
       lines.push(
-        `| ${d.round} | ${d.area} | ${d.tokens.toLocaleString()} | ${formatDuration(d.durationMs)} |`,
+        `| ${d.round} | ${String(d.area)} | ${d.tokens.toLocaleString()} | ${formatDuration(d.durationMs as number)} |`,
       );
     }
   }
@@ -1840,7 +1892,13 @@ function generateSessionReport(roundResults, budgetSummary, runMeta, kbDelta, in
   return lines.join('\n');
 }
 
-function generateSessionJSON(roundResults, budgetSummary, runMeta, kbDelta, investigatorSummary) {
+function generateSessionJSON(
+  roundResults: RoundResult[],
+  budgetSummary: {consumed: number; hardLimit: number; softLimit?: number; percentUsed?: number; roundDeltas: Array<{round: unknown; area: unknown; tokens: number; durationMs: unknown}>; avgPerRound: number; durationMs?: number; startTokens: number; endTokens: number},
+  runMeta: Record<string, unknown>,
+  kbDelta: {added: number; total: number},
+  investigatorSummary: {investigations: number; healed: number; promptTokens: number; completionTokens: number} | null
+) {
   return {
     ...runMeta,
     budget: budgetSummary,
@@ -1869,14 +1927,14 @@ function generateSessionJSON(roundResults, budgetSummary, runMeta, kbDelta, inve
 
 async function main() {
   const { options } = parseArgs(process.argv);
-  const isResume = options.resume === '1' || options.resume === 'true';
+  const isResume = options['resume'] === '1' || options['resume'] === 'true';
 
   // ── Resolve project ───────────────────────────────────────────────────
   let projectConfig;
   try {
-    projectConfig = resolveProject({ project: options.project });
-  } catch (err) {
-    log.error(`Project resolution failed: ${err.message}`);
+    projectConfig = resolveProject({ project: options['project'] as string | undefined });
+  } catch (err: unknown) {
+    log.error(`Project resolution failed: ${err instanceof Error ? err.message : String(err)}`);
     process.exit(1);
   }
 
@@ -1920,8 +1978,8 @@ async function main() {
   // ── Check for session checkpoint (resume) ─────────────────────────────
   const checkpoint = loadCheckpoint(evolveDir);
   const existingState = loadSessionState(evolveDir);
-  let startedAt, dateStr, maxRounds, maxHoursMs, focusAreas, timeouts;
-  let roundResults, kbStartCount, budget, startRound, sessionId;
+  let startedAt: number, dateStr: string, maxRounds: number, maxHoursMs: number, focusAreas: string[], timeouts: typeof DEFAULT_PHASE_TIMEOUTS;
+  let roundResults: RoundResult[], kbStartCount: number, budget: EvolveBudgetTracker, startRound: number, sessionId: string;
 
   const kb = loadKnowledgeBase(evolveDir);
 
@@ -1976,11 +2034,11 @@ async function main() {
 
     // Parse options for overrides on resume
     maxRounds = options['max-rounds']
-      ? Number.parseInt(options['max-rounds'], 10)
+      ? Number.parseInt(String(options['max-rounds']), 10)
       : existingState.maxRounds || evolveConfig.maxRounds || DEFAULT_MAX_ROUNDS;
     maxHoursMs =
       (options['max-hours']
-        ? Number.parseFloat(options['max-hours'])
+        ? Number.parseFloat(String(options['max-hours']))
         : existingState.maxHours || evolveConfig.maxHours || DEFAULT_MAX_HOURS) *
       60 *
       60 *
@@ -1996,11 +2054,11 @@ async function main() {
         `Budget restored: ${budget.consumed.toLocaleString()} tokens consumed across ${budget.roundDeltas.length} rounds`,
       );
     } else {
-      const budgetOverrides = {};
+      const budgetOverrides: {hardLimit?: number; softLimit?: number} = {};
       if (options['hard-limit'])
-        budgetOverrides.hardLimit = Number.parseInt(options['hard-limit'], 10);
+        budgetOverrides.hardLimit = Number.parseInt(String(options['hard-limit']), 10);
       if (options['soft-limit'])
-        budgetOverrides.softLimit = Number.parseInt(options['soft-limit'], 10);
+        budgetOverrides.softLimit = Number.parseInt(String(options['soft-limit']), 10);
       budget = new EvolveBudgetTracker(budgetOverrides);
       budget.recordStart();
     }
@@ -2022,23 +2080,23 @@ async function main() {
 
     // Parse options
     maxRounds = options['max-rounds']
-      ? Number.parseInt(options['max-rounds'], 10)
+      ? Number.parseInt(String(options['max-rounds']), 10)
       : evolveConfig.maxRounds || DEFAULT_MAX_ROUNDS;
     maxHoursMs =
       (options['max-hours']
-        ? Number.parseFloat(options['max-hours'])
+        ? Number.parseFloat(String(options['max-hours']))
         : evolveConfig.maxHours || DEFAULT_MAX_HOURS) *
       60 *
       60 *
       1000;
-    focusAreas = options.focus ? [options.focus] : evolveConfig.focusAreas || DEFAULT_FOCUS_AREAS;
+    focusAreas = options['focus'] ? [options['focus'] as string] : evolveConfig.focusAreas || DEFAULT_FOCUS_AREAS;
     timeouts = { ...DEFAULT_PHASE_TIMEOUTS, ...(evolveConfig.phases || {}) };
 
-    const budgetOverrides = {};
+    const budgetOverrides: {hardLimit?: number; softLimit?: number} = {};
     if (options['hard-limit'])
-      budgetOverrides.hardLimit = Number.parseInt(options['hard-limit'], 10);
+      budgetOverrides.hardLimit = Number.parseInt(String(options['hard-limit']), 10);
     if (options['soft-limit'])
-      budgetOverrides.softLimit = Number.parseInt(options['soft-limit'], 10);
+      budgetOverrides.softLimit = Number.parseInt(String(options['soft-limit']), 10);
 
     budget = new EvolveBudgetTracker(budgetOverrides);
     budget.recordStart();
@@ -2059,24 +2117,24 @@ async function main() {
 
       if (pick.action === 'pick') {
         activeSuggestion = pick.suggestion;
-        activeSuggestionId = activeSuggestion.id;
-        updateSuggestion(suggestions, activeSuggestion.id, { status: 'exploring' });
+        activeSuggestionId = activeSuggestion?.id ?? null;
+        updateSuggestion(suggestions, activeSuggestion?.id ?? '', { status: 'exploring' });
         saveSuggestions(evolveDir, suggestions);
-        log.ok(`Using suggestion: ${activeSuggestion.title.slice(0, 80)}`);
+        log.ok(`Using suggestion: ${(activeSuggestion?.title ?? '').slice(0, 80)}`);
       } else if (pick.action === 'freeform' && pick.text) {
         activeSuggestion = addSuggestion(suggestions, {
           source: 'user:manual',
           area: focusAreas[0] || 'general',
-          title: pick.text.slice(0, 100),
-          description: pick.text,
+          title: (pick.text as string).slice(0, 100),
+          description: pick.text as string,
           priority: 'high',
           tags: ['user-submitted'],
         });
         if (activeSuggestion) {
-          activeSuggestionId = activeSuggestion.id;
-          updateSuggestion(suggestions, activeSuggestion.id, { status: 'exploring' });
+          activeSuggestionId = activeSuggestion.id ?? null;
+          updateSuggestion(suggestions, activeSuggestion.id ?? '', { status: 'exploring' });
           saveSuggestions(evolveDir, suggestions);
-          log.ok(`Created suggestion: ${activeSuggestion.title.slice(0, 80)}`);
+          log.ok(`Created suggestion: ${(activeSuggestion.title ?? '').slice(0, 80)}`);
         }
       } else {
         log.dim(pick.action === 'discover' ? 'Agent discovery mode' : 'Skipped suggestions');
@@ -2089,7 +2147,7 @@ async function main() {
       activeSuggestion = getSuggestionById(suggestions, existingSugId);
       if (activeSuggestion && activeSuggestion.status === 'exploring') {
         activeSuggestionId = existingSugId;
-        log.dim(`Resumed with suggestion: ${activeSuggestion.title.slice(0, 80)}`);
+        log.dim(`Resumed with suggestion: ${(activeSuggestion.title ?? '').slice(0, 80)}`);
       } else {
         activeSuggestion = null;
       }
@@ -2175,24 +2233,24 @@ async function main() {
     }
 
     // Select focus area (rotate, skip recently covered)
-    const recentAreas = roundResults.map((r) => r.area);
+    const recentAreas = roundResults.map((r: RoundResult) => r.area);
     let area;
     const usingSuggestion = activeSuggestion && round === startRound;
 
     if (usingSuggestion) {
-      area = activeSuggestion.area || focusAreas[0] || 'general';
+      area = activeSuggestion!.area || focusAreas[0] || 'general';
     } else {
       const areaIndex = (round - 1) % focusAreas.length;
       area = focusAreas[areaIndex];
       // If we only have one focus area specified, use it; otherwise try to avoid repeats
       if (focusAreas.length > 1 && recentAreas.includes(area)) {
-        area = focusAreas.find((a) => !recentAreas.includes(a)) || area;
+        area = focusAreas.find((a: string) => !recentAreas.includes(a)) || area;
       }
     }
 
     log.round(`ROUND ${round}/${maxRounds}: ${area}${usingSuggestion ? ' (suggestion)' : ''}`);
 
-    const roundResult = {
+    const roundResult: RoundResult = {
       round,
       area,
       selectedImprovement: null,
@@ -2212,7 +2270,8 @@ async function main() {
     };
 
     try {
-      let deliberation;
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      let deliberation: any;
 
       if (usingSuggestion) {
         // ── SUGGESTION PATH: Skip RESEARCH + DELIBERATE ────────────────
@@ -2222,22 +2281,22 @@ async function main() {
         log.dim('Skipped — using suggestion from backlog');
 
         deliberation = {
-          synthesis: { suggestedImprovement: activeSuggestion.description },
+          synthesis: { suggestedImprovement: activeSuggestion!.description },
           critique: null,
           feasibility: null,
           priority: {
-            selectedImprovement: activeSuggestion.description,
-            rationale: `From suggestion backlog: ${activeSuggestion.title}`,
-            expectedImpact: activeSuggestion.priority || 'medium',
+            selectedImprovement: activeSuggestion!.description,
+            rationale: `From suggestion backlog: ${activeSuggestion!.title ?? ''}`,
+            expectedImpact: activeSuggestion!.priority || 'medium',
             risks: [],
             constraints: [],
           },
-          selectedImprovement: activeSuggestion.description,
+          selectedImprovement: activeSuggestion!.description,
         };
 
-        roundResult.selectedImprovement = activeSuggestion.description;
-        roundResult.researchSummary = `[Suggestion ${activeSuggestion.id}] ${activeSuggestion.title}`;
-        log.ok(`Selected: ${activeSuggestion.title.slice(0, 100)}`);
+        roundResult.selectedImprovement = activeSuggestion!.description ?? null;
+        roundResult.researchSummary = `[Suggestion ${activeSuggestion!.id ?? ''}] ${activeSuggestion!.title ?? ''}`;
+        log.ok(`Selected: ${(activeSuggestion!.title ?? '').slice(0, 100)}`);
 
         // Clear for subsequent rounds
         activeSuggestion = null;
@@ -2254,8 +2313,8 @@ async function main() {
 
         // Summarize research for report
         const allFindings = [
-          ...(research.claudeFindings?.findings || []),
-          ...(research.geminiFindings?.findings || []),
+          ...((research as {claudeFindings?: {findings?: string[]}}).claudeFindings?.findings || []),
+          ...((research as {geminiFindings?: {findings?: string[]}}).geminiFindings?.findings || []),
         ];
         roundResult.researchSummary =
           allFindings.slice(0, 3).join('; ').slice(0, 200) || 'No findings';
@@ -2282,7 +2341,7 @@ async function main() {
       // If deliberation produced no actionable improvement, skip this round
       if (
         deliberation.selectedImprovement === 'No improvement selected' ||
-        deliberation.selectedImprovement.length < 5
+        (deliberation.selectedImprovement?.length ?? 0) < 5
       ) {
         log.warn('No actionable improvement from deliberation — skipping round');
         roundResult.verdict = 'skipped';
@@ -2329,14 +2388,14 @@ async function main() {
           !roundResult.suggestionId
         ) {
           const sg = loadSuggestions(evolveDir);
-          const created = createSuggestionFromRound(sg, roundResult, deliberation, {
+          const created = createSuggestionFromRound(sg, roundResult as any, deliberation, {
             sessionId,
             source: 'auto:deferred',
             notes: 'Deferred due to budget constraints',
           });
           if (created) {
             saveSuggestions(evolveDir, sg);
-            log.dim(`Suggestion backlogged: ${created.id} — ${created.title.slice(0, 60)}`);
+            log.dim(`Suggestion backlogged: ${created.id} — ${(created.title ?? '').slice(0, 60)}`);
           }
         }
 
@@ -2378,7 +2437,7 @@ async function main() {
 
       if (!testResult.ok) {
         // Skip investigation for usage limits — investigator would also fail
-        const testUsageCheck = detectUsageLimitError('codex', testResult);
+        const testUsageCheck = detectUsageLimitError('codex', testResult as unknown as Record<string, unknown>);
         if (testUsageCheck.isUsageLimit) {
           const resetLabel = formatResetTime(testUsageCheck.resetInSeconds);
           log.warn(
@@ -2405,7 +2464,7 @@ async function main() {
             testResult = await phaseTest(plan, branchName, safetyPrompt, {
               cwd: projectRoot,
               timeouts,
-              investigatorPreamble: testDiag.retryRecommendation?.preamble || testDiag.corrective,
+              investigatorPreamble: testDiag.retryRecommendation?.preamble || testDiag.corrective || undefined,
             });
           }
         }
@@ -2420,7 +2479,7 @@ async function main() {
 
       if (!implResult.ok) {
         // Skip investigation for usage limits — investigator would also fail
-        const implUsageCheck = detectUsageLimitError('codex', implResult);
+        const implUsageCheck = detectUsageLimitError('codex', implResult as unknown as Record<string, unknown>);
         if (implUsageCheck.isUsageLimit) {
           const resetLabel = formatResetTime(implUsageCheck.resetInSeconds);
           log.warn(
@@ -2448,7 +2507,7 @@ async function main() {
               cwd: projectRoot,
               timeouts,
               deliberation,
-              investigatorPreamble: implDiag.retryRecommendation?.preamble || implDiag.corrective,
+              investigatorPreamble: implDiag.retryRecommendation?.preamble || implDiag.corrective || undefined,
             });
           }
         }
@@ -2588,14 +2647,20 @@ ${safetyPrompt}`;
 
       // Save decision artifact
       const decisionPath = path.join(evolveDir, 'decisions', `ROUND_${round}_DECISION.json`);
-      const decisionArtifact = {
+      const decisionArtifact: {
+        round: number; area: string; improvement: string; verdict: string; reason: string;
+        score: number; confidence: number; testsPassed: boolean; violations: number;
+        concerns: string[]; branchName: string;
+        testSummary?: { total: number; passed: number; failed: number; summary: string };
+        testFailures?: Array<{name: string; error?: string | null | undefined}>;
+      } = {
         round,
         area,
         improvement: deliberation.selectedImprovement,
         verdict: decision.verdict,
         reason: decision.reason,
         score: analysis.aggregateScore,
-        confidence: analysis.aggregateConfidence,
+        confidence: analysis.aggregateConfidence ?? 0,
         testsPassed: analysis.testsPassed,
         violations: violations.length,
         concerns: analysis.concerns,
@@ -2603,7 +2668,7 @@ ${safetyPrompt}`;
       };
       if (roundResult.testSummary) {
         decisionArtifact.testSummary = roundResult.testSummary;
-        decisionArtifact.testFailures = (roundResult.testFailures || []).map((f) => ({
+        decisionArtifact.testFailures = (roundResult.testFailures || []).map((f: TestFailure) => ({
           name: f.name,
           error: f.error,
         }));
@@ -2624,7 +2689,7 @@ ${safetyPrompt}`;
         date: dateStr,
         area,
         finding: deliberation.selectedImprovement,
-        applicability: deliberation.priority?.expectedImpact || 'medium',
+        applicability: (deliberation.priority as {expectedImpact?: string} | null)?.expectedImpact || 'medium',
         attempted: true,
         outcome: decision.verdict,
         score: analysis.aggregateScore,
@@ -2639,7 +2704,15 @@ ${safetyPrompt}`;
         const sug = getSuggestionById(sg, roundResult.suggestionId);
         if (sug) {
           const newAttempts = (sug.attempts || 0) + 1;
-          const sugUpdates = {
+          const sugUpdates: {
+            attempts: number;
+            lastAttemptDate: string;
+            lastAttemptVerdict: string;
+            lastAttemptScore: number;
+            lastAttemptLearnings: string;
+            status?: string;
+            notes?: string;
+          } = {
             attempts: newAttempts,
             lastAttemptDate: dateStr,
             lastAttemptVerdict: decision.verdict,
@@ -2654,10 +2727,10 @@ ${safetyPrompt}`;
             (sug.maxAttempts || evolveConfig.suggestions?.maxAttemptsPerSuggestion || 3)
           ) {
             sugUpdates.status = 'rejected';
-            sugUpdates.notes = `${sug.notes ? `${sug.notes}\n` : ''}Exhausted max attempts (${newAttempts}).`;
+            sugUpdates.notes = `${sug.notes ? `${sug.notes as string}\n` : ''}Exhausted max attempts (${newAttempts}).`;
           } else {
             sugUpdates.status = 'pending'; // Return to queue
-            sugUpdates.notes = `${sug.notes ? `${sug.notes}\n` : ''}Attempt ${newAttempts}: ${decision.verdict} (${analysis.aggregateScore}/10).`;
+            sugUpdates.notes = `${sug.notes ? `${sug.notes as string}\n` : ''}Attempt ${newAttempts}: ${decision.verdict} (${analysis.aggregateScore}/10).`;
           }
 
           updateSuggestion(sg, roundResult.suggestionId, sugUpdates);
@@ -2672,14 +2745,14 @@ ${safetyPrompt}`;
       ) {
         // Auto-create suggestion from rejected round with valid improvement
         const sg = loadSuggestions(evolveDir);
-        const created = createSuggestionFromRound(sg, roundResult, deliberation, {
+        const created = createSuggestionFromRound(sg, roundResult as any, deliberation, {
           sessionId,
           specPath: path.join(evolveDir, 'specs', `ROUND_${round}_SPEC.md`),
           notes: `Auto-created from rejected round ${round}. Reason: ${decision.reason}`,
         });
         if (created) {
           saveSuggestions(evolveDir, sg);
-          log.dim(`Suggestion backlogged: ${created.id} — ${created.title.slice(0, 60)}`);
+          log.dim(`Suggestion backlogged: ${created.id} — ${(created.title ?? '').slice(0, 60)}`);
         }
       }
 
@@ -2746,10 +2819,10 @@ ${safetyPrompt}`;
           // Continue without hot-restart — branch stays for manual merge
         }
       }
-    } catch (err) {
-      log.error(`Round ${round} error: ${err.message}`);
+    } catch (err: unknown) {
+      log.error(`Round ${round} error: ${err instanceof Error ? err.message : String(err)}`);
       roundResult.verdict = 'error';
-      roundResult.learnings = err.message;
+      roundResult.learnings = err instanceof Error ? err.message : String(err);
     }
 
     // Return to base branch
@@ -2763,10 +2836,10 @@ ${safetyPrompt}`;
     budget.recordRoundEnd(round, area, roundResult.durationMs);
 
     // ── Incremental session state save ─────────────────────────────────
-    const approved = roundResults.filter((r) => r.verdict === 'approve').length;
-    const rejected = roundResults.filter((r) => r.verdict === 'reject').length;
-    const skippedSoFar = roundResults.filter((r) => r.verdict === 'skipped').length;
-    const errorsSoFar = roundResults.filter((r) => r.verdict === 'error').length;
+    const approved = roundResults.filter((r: RoundResult) => r.verdict === 'approve').length;
+    const rejected = roundResults.filter((r: RoundResult) => r.verdict === 'reject').length;
+    const skippedSoFar = roundResults.filter((r: RoundResult) => r.verdict === 'skipped').length;
+    const errorsSoFar = roundResults.filter((r: RoundResult) => r.verdict === 'error').length;
     saveSessionState(evolveDir, {
       sessionId,
       status: 'running',
@@ -2886,10 +2959,10 @@ ${safetyPrompt}`;
   // ── Finalize session state ──────────────────────────────────────────
   const finalStatus = computeSessionStatus(roundResults, maxRounds, stopReason, false);
   const actionNeeded = computeActionNeeded(roundResults, maxRounds, finalStatus);
-  const finalApproved = roundResults.filter((r) => r.verdict === 'approve').length;
-  const finalRejected = roundResults.filter((r) => r.verdict === 'reject').length;
-  const finalSkipped = roundResults.filter((r) => r.verdict === 'skipped').length;
-  const finalErrors = roundResults.filter((r) => r.verdict === 'error').length;
+  const finalApproved = roundResults.filter((r: RoundResult) => r.verdict === 'approve').length;
+  const finalRejected = roundResults.filter((r: RoundResult) => r.verdict === 'reject').length;
+  const finalSkipped = roundResults.filter((r: RoundResult) => r.verdict === 'skipped').length;
+  const finalErrors = roundResults.filter((r: RoundResult) => r.verdict === 'error').length;
 
   saveSessionState(evolveDir, {
     sessionId,
@@ -2923,7 +2996,7 @@ ${safetyPrompt}`;
   // ── Summary ───────────────────────────────────────────────────────────
   const approved = finalApproved;
   const rejected = finalRejected;
-  const revised = roundResults.filter((r) => r.verdict === 'revise').length;
+  const revised = roundResults.filter((r: RoundResult) => r.verdict === 'revise').length;
   const errors = finalErrors;
   const skipped = finalSkipped;
   const totalTokens = budgetSummary.consumed;
@@ -2999,7 +3072,7 @@ ${safetyPrompt}`;
     for (const d of budgetSummary.roundDeltas) {
       const bar = compactTokenBar(d.tokens, budgetSummary.hardLimit);
       console.log(
-        `    R${d.round} ${d.area.padEnd(24).slice(0, 24)} ${bar} ${d.tokens.toLocaleString().padStart(8)}`,
+        `    R${d.round} ${String(d.area).padEnd(24).slice(0, 24)} ${bar} ${d.tokens.toLocaleString().padStart(8)}`,
       );
     }
   }
@@ -3011,10 +3084,10 @@ ${safetyPrompt}`;
 
   // ── Branches to review ────────────────────────────────────────────
   const mergedBranches = roundResults.filter(
-    (r) => r.branchName && r.verdict === 'approve' && r.merged,
+    (r: RoundResult) => r.branchName && r.verdict === 'approve' && r.merged,
   );
   const conflictBranches = roundResults.filter(
-    (r) => r.branchName && r.verdict === 'approve' && !r.merged,
+    (r: RoundResult) => r.branchName && r.verdict === 'approve' && !r.merged,
   );
 
   if (mergedBranches.length > 0) {
@@ -3037,7 +3110,7 @@ ${safetyPrompt}`;
     }
   }
 
-  const branchesForReview = roundResults.filter((r) => r.branchName && r.verdict === 'revise');
+  const branchesForReview = roundResults.filter((r: RoundResult) => r.branchName && r.verdict === 'revise');
   if (branchesForReview.length > 0) {
     console.log('');
     console.log(`  ${pc.bold(pc.yellow('Branches needing revision:'))}`);
@@ -3056,8 +3129,8 @@ ${safetyPrompt}`;
 
 // ── Entry ───────────────────────────────────────────────────────────────────
 
-main().catch((err) => {
-  log.error(`Fatal: ${err.message}`);
+main().catch((err: unknown) => {
+  log.error(`Fatal: ${err instanceof Error ? err.message : String(err)}`);
   try {
     destroyStatusBar();
   } catch {
@@ -3065,8 +3138,6 @@ main().catch((err) => {
   }
   // Save interrupted session state so it can be resumed
   try {
-    const cfg = loadHydraConfig();
-    const baseBranch = cfg.evolve?.baseBranch || 'dev';
     const projectRoot = process.cwd();
     const pCfg = resolveProject({ project: projectRoot });
     const evolveDir = path.join(pCfg.coordDir, 'evolve');
@@ -3074,7 +3145,7 @@ main().catch((err) => {
     if (existingState && existingState.status === 'running') {
       existingState.status = 'interrupted';
       existingState.resumable = true;
-      existingState.actionNeeded = `Interrupted: ${err.message}. Resume with :evolve resume`;
+      existingState.actionNeeded = `Interrupted: ${err instanceof Error ? err.message : String(err)}. Resume with :evolve resume`;
       existingState.interruptedAt = Date.now();
       saveSessionState(evolveDir, existingState);
       log.warn('Session state saved as interrupted — resume with :evolve resume');
