@@ -129,7 +129,10 @@ const circuitState = new Map<string, CircuitState>(); // model → { failures: [
 export function recordModelFailure(model: string) {
   if (!model) return;
   const cfg = loadHydraConfig();
-  const cbCfg = ((cfg as Record<string, unknown>)['modelRecovery'] as Record<string, unknown> | undefined)?.['circuitBreaker'] as Record<string, unknown> || {};
+  const cbCfg =
+    (((cfg as Record<string, unknown>)['modelRecovery'] as Record<string, unknown> | undefined)?.[
+      'circuitBreaker'
+    ] as Record<string, unknown>) || {};
   if (cbCfg['enabled'] === false) return;
 
   const threshold = (cbCfg['failureThreshold'] as number | undefined) ?? 5;
@@ -161,7 +164,10 @@ export function recordModelFailure(model: string) {
 export function isCircuitOpen(model: string): boolean {
   if (!model) return false;
   const cfg = loadHydraConfig();
-  const cbCfg = ((cfg as Record<string, unknown>)['modelRecovery'] as Record<string, unknown> | undefined)?.['circuitBreaker'] as Record<string, unknown> || {};
+  const cbCfg =
+    (((cfg as Record<string, unknown>)['modelRecovery'] as Record<string, unknown> | undefined)?.[
+      'circuitBreaker'
+    ] as Record<string, unknown>) || {};
   if (cbCfg['enabled'] === false) return false;
 
   const state = circuitState.get(model);
@@ -183,7 +189,10 @@ export function isCircuitOpen(model: string): boolean {
  * Get circuit breaker state for all tracked models.
  * @returns {Object<string, {failures: number, isOpen: boolean, openedAt: number|null}>}
  */
-export function getCircuitState(): Record<string, { failures: number; isOpen: boolean; openedAt: number | null }> {
+export function getCircuitState(): Record<
+  string,
+  { failures: number; isOpen: boolean; openedAt: number | null }
+> {
   const result: Record<string, { failures: number; isOpen: boolean; openedAt: number | null }> = {};
   for (const [model, state] of circuitState) {
     result[model] = {
@@ -298,11 +307,13 @@ function extractModelFromError(text: string): string | null {
  * @returns {{ isUsageLimit: boolean, resetInSeconds: number|null, errorMessage: string }}
  */
 export function detectUsageLimitError(_agent: string, result: Record<string, unknown>) {
-  if (!result || result["ok"]) {
+  if (!result || result['ok']) {
     return { isUsageLimit: false, resetInSeconds: null, errorMessage: '' };
   }
 
-  const sources = [result["stderr"] || '', result["output"] || '', result["error"] || ''].join('\n');
+  const sources = [result['stderr'] || '', result['output'] || '', result['error'] || ''].join(
+    '\n',
+  );
 
   for (const pattern of USAGE_LIMIT_PATTERNS) {
     if (pattern.test(sources)) {
@@ -366,7 +377,7 @@ export function formatResetTime(resetInSeconds: number | null): string {
  * @returns {Promise<{ verified: boolean|'unknown', status?: number, reason?: string }>}
  */
 export async function verifyAgentQuota(agent: string, opts: Record<string, unknown> = {}) {
-  const hintText = opts["hintText"] || '';
+  const hintText = opts['hintText'] || '';
   try {
     const agentDef = getAgent(agent);
     const apiKeyEnvMap: Record<string, string> = {
@@ -375,7 +386,8 @@ export async function verifyAgentQuota(agent: string, opts: Record<string, unkno
       gemini: 'GEMINI_API_KEY',
     };
     const apiKey =
-      process.env[apiKeyEnvMap[agent] ?? ''] || (agent === 'gemini' ? process.env['GOOGLE_API_KEY'] : null);
+      process.env[apiKeyEnvMap[agent] ?? ''] ||
+      (agent === 'gemini' ? process.env['GOOGLE_API_KEY'] : null);
     if (agentDef?.quotaVerify) {
       const rawResult = await agentDef.quotaVerify(apiKey, { hintText });
       if (!rawResult || typeof rawResult !== 'object') {
@@ -402,7 +414,7 @@ export async function verifyAgentQuota(agent: string, opts: Record<string, unkno
  * @returns {{ isRateLimit: boolean, retryAfterMs: number|null, errorMessage: string }}
  */
 export function detectRateLimitError(agent: string, result: Record<string, unknown>) {
-  if (!result || result["ok"]) {
+  if (!result || result['ok']) {
     return { isRateLimit: false, retryAfterMs: null, errorMessage: '' };
   }
 
@@ -412,7 +424,9 @@ export function detectRateLimitError(agent: string, result: Record<string, unkno
     return { isRateLimit: false, retryAfterMs: null, errorMessage: '' };
   }
 
-  const sources = [result["stderr"] || '', result["output"] || '', result["error"] || ''].join('\n');
+  const sources = [result['stderr'] || '', result['output'] || '', result['error'] || ''].join(
+    '\n',
+  );
 
   for (const pattern of RATE_LIMIT_PATTERNS) {
     if (pattern.test(sources)) {
@@ -439,7 +453,10 @@ export function detectRateLimitError(agent: string, result: Record<string, unkno
  * @param {number} [opts.retryAfterMs] - Server-suggested delay (overrides calculation)
  * @returns {number} delay in ms
  */
-export function calculateBackoff(attempt: number, opts: { baseDelayMs?: number; maxDelayMs?: number; retryAfterMs?: number } = {}): number {
+export function calculateBackoff(
+  attempt: number,
+  opts: { baseDelayMs?: number; maxDelayMs?: number; retryAfterMs?: number } = {},
+): number {
   const { baseDelayMs = 5000, maxDelayMs = 60_000, retryAfterMs } = opts;
 
   // Honour server-suggested delay if present
@@ -462,12 +479,14 @@ export function calculateBackoff(attempt: number, opts: { baseDelayMs?: number; 
  * @returns {{ isModelError: boolean, failedModel: string|null, errorMessage: string }}
  */
 export function detectModelError(agent: string, result: Record<string, unknown>) {
-  if (!result || result["ok"]) {
+  if (!result || result['ok']) {
     return { isModelError: false, failedModel: null, errorMessage: '' };
   }
 
   // Combine all text sources to scan
-  const sources = [result["stderr"] || '', result["output"] || '', result["error"] || ''].join('\n');
+  const sources = [result['stderr'] || '', result['output'] || '', result['error'] || ''].join(
+    '\n',
+  );
 
   for (const pattern of MODEL_ERROR_PATTERNS) {
     if (pattern.test(sources)) {
@@ -501,20 +520,22 @@ export function detectModelError(agent: string, result: Record<string, unknown>)
  * @returns {{ isCodexError: boolean, category: string, errorMessage: string }}
  */
 export function detectCodexError(agent: string, result: Record<string, unknown>) {
-  if (!result || result["ok"] || agent !== 'codex') {
+  if (!result || result['ok'] || agent !== 'codex') {
     return { isCodexError: false, category: '', errorMessage: '' };
   }
 
   // If diagnoseAgentError already classified it, use that
-  if (result["errorCategory"] && result["errorCategory"] !== 'unclassified') {
+  if (result['errorCategory'] && result['errorCategory'] !== 'unclassified') {
     return {
       isCodexError: true,
-      category: result["errorCategory"],
-      errorMessage: result["errorDetail"] || result["error"] || '',
+      category: result['errorCategory'],
+      errorMessage: result['errorDetail'] || result['error'] || '',
     };
   }
 
-  const sources = [result["stderr"] || '', result["output"] || '', result["error"] || ''].join('\n');
+  const sources = [result['stderr'] || '', result['output'] || '', result['error'] || ''].join(
+    '\n',
+  );
 
   for (const { pattern, category } of CODEX_ERROR_PATTERNS) {
     if (pattern.test(sources)) {
@@ -529,11 +550,13 @@ export function detectCodexError(agent: string, result: Record<string, unknown>)
 
   // Empty output with non-zero exit or signal = silent crash
   if (
-    ((result["exitCode"] as number | null | undefined) !== 0 || result["signal"]) &&
-    !(String(result["output"] ?? "")).trim() &&
-    !(String(result["stderr"] ?? "")).trim()
+    ((result['exitCode'] as number | null | undefined) !== 0 || result['signal']) &&
+    !String(result['output'] ?? '').trim() &&
+    !String(result['stderr'] ?? '').trim()
   ) {
-    const reason = result["signal"] ? `signal ${result["signal"]}` : `code ${(result["exitCode"] as number | null | undefined)}`;
+    const reason = result['signal']
+      ? `signal ${result['signal']}`
+      : `code ${result['exitCode'] as number | null | undefined}`;
     return {
       isCodexError: true,
       category: 'silent-crash',
@@ -542,31 +565,40 @@ export function detectCodexError(agent: string, result: Record<string, unknown>)
   }
 
   // Handle signal-based aborts even if there was some output
-  if (result["signal"] && !result["ok"]) {
+  if (result['signal'] && !result['ok']) {
     return {
       isCodexError: true,
       category: 'signal',
-      errorMessage: `Codex aborted by signal ${result["signal"]}`,
+      errorMessage: `Codex aborted by signal ${result['signal']}`,
     };
   }
 
   // Catch-all: non-zero exit or null exit with stderr, that didn't match any known pattern.
   // Instead of returning false (which loses the error to "unclassified" limbo),
   // classify it as a Codex-specific unknown error with rich diagnostic context.
-  const hasOutput = (String(result["stderr"] ?? "")).trim() || (String(result["output"] ?? "")).trim();
+  const hasOutput = String(result['stderr'] ?? '').trim() || String(result['output'] ?? '').trim();
   if (
-    ((result["exitCode"] as number | null | undefined) !== 0 || ((result["exitCode"] as number | null | undefined) === null && hasOutput)) &&
-    (result["exitCode"] as number | null | undefined) !== undefined
+    ((result['exitCode'] as number | null | undefined) !== 0 ||
+      ((result['exitCode'] as number | null | undefined) === null && hasOutput)) &&
+    (result['exitCode'] as number | null | undefined) !== undefined
   ) {
     // Gather the best diagnostic context available
-    const stderrTail = (String(result["stderr"] ?? "")).trim().split('\n').slice(-5).join(' | ').slice(0, 300);
-    const errorTail = (String(result["error"] ?? "")).slice(0, 200);
+    const stderrTail = String(result['stderr'] ?? '')
+      .trim()
+      .split('\n')
+      .slice(-5)
+      .join(' | ')
+      .slice(0, 300);
+    const errorTail = String(result['error'] ?? '').slice(0, 200);
     // Check for JSONL error events in raw stdout
     const jsonlErrors = extractCodexErrorsFromResult(result);
     const jsonlContext =
       jsonlErrors.length > 0 ? ` JSONL errors: ${jsonlErrors.join('; ').slice(0, 200)}` : '';
 
-    const exitInfo = (result["exitCode"] as number | null | undefined) === null ? 'terminated' : `exit ${(result["exitCode"] as number | null | undefined)}`;
+    const exitInfo =
+      (result['exitCode'] as number | null | undefined) === null
+        ? 'terminated'
+        : `exit ${result['exitCode'] as number | null | undefined}`;
     return {
       isCodexError: true,
       category: 'codex-unknown',
@@ -588,7 +620,8 @@ export function detectCodexError(agent: string, result: Record<string, unknown>)
  * @returns {string[]} extracted error messages
  */
 function extractCodexErrorsFromResult(result: Record<string, unknown>): string[] {
-  const raw = (result['stdout'] as string | undefined) || (result["output"] as string | undefined) || '';
+  const raw =
+    (result['stdout'] as string | undefined) || (result['output'] as string | undefined) || '';
   if (!raw || typeof raw !== 'string') return [];
   const errors = [];
   for (const line of raw.split('\n')) {
@@ -615,14 +648,28 @@ function extractCodexErrorsFromResult(result: Record<string, unknown>): string[]
  * @param {string} failedModel - The model that failed
  * @returns {Array<{ id: string, label: string, source: string }>}
  */
-export function getFallbackCandidates(agent: string, failedModel: string): Array<{ id: string; label: string; source: string; qualityScore?: number }> {
+export function getFallbackCandidates(
+  agent: string,
+  failedModel: string,
+): Array<{ id: string; label: string; source: string; qualityScore?: number }> {
   const cfg = loadHydraConfig();
-  const agentModels = ((cfg as Record<string, unknown>)['models'] as Record<string, Record<string, string>> | undefined)?.[agent] || {};
-  const aliases = ((cfg as Record<string, unknown>)['aliases'] as Record<string, Record<string, string>> | undefined)?.[agent] || {};
+  const agentModels =
+    (
+      (cfg as Record<string, unknown>)['models'] as
+        | Record<string, Record<string, string>>
+        | undefined
+    )?.[agent] || {};
+  const aliases =
+    (
+      (cfg as Record<string, unknown>)['aliases'] as
+        | Record<string, Record<string, string>>
+        | undefined
+    )?.[agent] || {};
 
   const seen = new Set<string>();
   const failed = (failedModel || '').toLowerCase();
-  const candidates: Array<{ id: string; label: string; source: string; qualityScore?: number }> = [];
+  const candidates: Array<{ id: string; label: string; source: string; qualityScore?: number }> =
+    [];
 
   // 1. Config presets in priority order
   for (const preset of ['default', 'fast', 'cheap']) {
@@ -675,9 +722,15 @@ export function getFallbackCandidates(agent: string, failedModel: string): Array
  * @param {object} [opts["rl"]] - readline interface for interactive mode
  * @returns {Promise<{ recovered: boolean, newModel: string|null }>}
  */
-export async function recoverFromModelError(agent: string, failedModel: string, opts: Record<string, unknown> = {}) {
+export async function recoverFromModelError(
+  agent: string,
+  failedModel: string,
+  opts: Record<string, unknown> = {},
+) {
   const cfg = loadHydraConfig();
-  const recoveryCfg = ((cfg as Record<string, unknown>)['modelRecovery'] as Record<string, unknown> | undefined) || {};
+  const recoveryCfg =
+    ((cfg as Record<string, unknown>)['modelRecovery'] as Record<string, unknown> | undefined) ||
+    {};
 
   if (recoveryCfg['enabled'] === false) {
     return { recovered: false, newModel: null };
@@ -688,7 +741,7 @@ export async function recoverFromModelError(agent: string, failedModel: string, 
     return { recovered: false, newModel: null };
   }
 
-  const isInteractive = opts["rl"] && process.stdout.isTTY;
+  const isInteractive = opts['rl'] && process.stdout.isTTY;
 
   let selected = null;
 
@@ -702,7 +755,7 @@ export async function recoverFromModelError(agent: string, failedModel: string, 
       options.push('Browse all models...');
       options.push('Skip (disable agent)');
 
-      const result = await promptChoice(opts["rl"] as object, {
+      const result = await promptChoice(opts['rl'] as object, {
         title: `Model error: ${failedModel || 'unknown'} is unavailable for ${agent}`,
         context: { 'Failed model': failedModel || 'unknown', Agent: agent },
         choices: options,
@@ -756,5 +809,9 @@ export async function recoverFromModelError(agent: string, failedModel: string, 
  */
 export function isModelRecoveryEnabled() {
   const cfg = loadHydraConfig();
-  return ((cfg as Record<string, unknown>)['modelRecovery'] as Record<string, unknown> | undefined)?.['enabled'] !== false;
+  return (
+    ((cfg as Record<string, unknown>)['modelRecovery'] as Record<string, unknown> | undefined)?.[
+      'enabled'
+    ] !== false
+  );
 }

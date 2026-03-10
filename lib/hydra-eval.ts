@@ -370,8 +370,7 @@ if (isMain) {
     for (const m of routingResults.mismatches.slice(0, 10)) {
       const parts: string[] = [];
       if (!m.routeMatch) parts.push(`route: ${String(m.expectedRoute)}→${m.actualRoute}`);
-      if (!m.taskTypeMatch)
-        parts.push(`type: ${String(m.expectedTaskType)}→${m.actualTaskType}`);
+      if (!m.taskTypeMatch) parts.push(`type: ${String(m.expectedTaskType)}→${m.actualTaskType}`);
       console.log(`  "${m.prompt.slice(0, 60)}" — ${parts.join(', ')}`);
     }
   }

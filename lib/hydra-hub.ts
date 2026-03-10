@@ -114,25 +114,27 @@ function atomicWrite(filePath: string, data: unknown): void {
  * @param {string} [opts.id]        - Override the generated session ID (for daemon use)
  * @returns {string} Session ID
  */
-export function registerSession({
-  agent,
-  cwd,
-  project,
-  focus,
-  files = [],
-  taskId,
-  status = 'working',
-  id,
-}: {
-  agent: string;
-  cwd?: string;
-  project?: string;
-  focus?: string;
-  files?: string[];
-  taskId?: string;
-  status?: string;
-  id?: string;
-} = {} as { agent: string }) {
+export function registerSession(
+  {
+    agent,
+    cwd,
+    project,
+    focus,
+    files = [],
+    taskId,
+    status = 'working',
+    id,
+  }: {
+    agent: string;
+    cwd?: string;
+    project?: string;
+    focus?: string;
+    files?: string[];
+    taskId?: string;
+    status?: string;
+    id?: string;
+  } = {} as { agent: string },
+) {
   ensureHubDir();
   const sessionId = id || makeId();
   const session = {
@@ -259,7 +261,10 @@ export function listSessions({ cwd }: { cwd?: string } = {}): Record<string, unk
  * @param {string} [opts.excludeId] - Session ID to exclude (your own session)
  * @returns {Array<{file: string, claimedBy: object}>} Conflicts found
  */
-export function checkConflicts(plannedFiles: string[], { cwd, excludeId }: { cwd?: string; excludeId?: string } = {}): { file: string; claimedBy: Record<string, unknown> }[] {
+export function checkConflicts(
+  plannedFiles: string[],
+  { cwd, excludeId }: { cwd?: string; excludeId?: string } = {},
+): { file: string; claimedBy: Record<string, unknown> }[] {
   const sessions = listSessions({ cwd });
   const conflicts = [];
   for (const session of sessions) {

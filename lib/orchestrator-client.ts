@@ -94,7 +94,7 @@ async function main() {
         printHelp();
         return;
       case 'status': {
-        const data = await request('GET', baseUrl, '/health') as Record<string, unknown>;
+        const data = (await request('GET', baseUrl, '/health')) as Record<string, unknown>;
         if (jsonMode) {
           print(data);
           return;
@@ -112,7 +112,7 @@ async function main() {
         return;
       }
       case 'summary': {
-        const data = await request('GET', baseUrl, '/summary') as Record<string, unknown>;
+        const data = (await request('GET', baseUrl, '/summary')) as Record<string, unknown>;
         if (jsonMode) {
           print(data);
           return;
@@ -158,7 +158,11 @@ async function main() {
         return;
       case 'next': {
         const agent = requireOption(options, 'agent');
-        const data = await request('GET', baseUrl, `/next?agent=${encodeURIComponent(agent)}`) as Record<string, unknown>;
+        const data = (await request(
+          'GET',
+          baseUrl,
+          `/next?agent=${encodeURIComponent(agent)}`,
+        )) as Record<string, unknown>;
         if (jsonMode) {
           print(data);
           return;
@@ -169,7 +173,9 @@ async function main() {
         console.log(label('Message', String(next['message'] || 'n/a')));
         if (next['task']) {
           const t = next['task'] as Record<string, unknown>;
-          console.log(label('Task', `${pc.bold(t['id'] as string)} ${DIM(String(t['title'] || ''))}`));
+          console.log(
+            label('Task', `${pc.bold(t['id'] as string)} ${DIM(String(t['title'] || ''))}`),
+          );
         }
         if (next['handoff']) {
           const h = next['handoff'] as Record<string, unknown>;
@@ -313,7 +319,12 @@ async function main() {
             print(data);
             return;
           }
-          console.log(renderStatsDashboard((data as Record<string, unknown>)['metrics'], (data as Record<string, unknown>)['usage']));
+          console.log(
+            renderStatsDashboard(
+              (data as Record<string, unknown>)['metrics'],
+              (data as Record<string, unknown>)['usage'],
+            ),
+          );
         } catch {
           // Daemon not available — fall back to standalone usage
           const usage = checkUsage();
@@ -384,8 +395,12 @@ async function main() {
           const typedInfo = info as ModelSummaryEntry;
           const badge = agentBadge(agent);
           const model = typedInfo.isOverride ? pc.white(typedInfo.active) : DIM(typedInfo.active);
-          const tag = typedInfo.isOverride ? WARNING('(override)') : DIM(`(${typedInfo.tierSource})`);
-          const effort = typedInfo.reasoningEffort ? pc.yellow(` [${typedInfo.reasoningEffort}]`) : '';
+          const tag = typedInfo.isOverride
+            ? WARNING('(override)')
+            : DIM(`(${typedInfo.tierSource})`);
+          const effort = typedInfo.reasoningEffort
+            ? pc.yellow(` [${typedInfo.reasoningEffort}]`)
+            : '';
           console.log(`  ${badge}  ${model}${effort} ${tag}`);
         }
         console.log('');

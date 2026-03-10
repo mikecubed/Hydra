@@ -108,7 +108,11 @@ export function supportsPipedStdio() {
  * @param {boolean} [opts.noPipes=false] - force file-backed capture
  * @returns {{ status: number|null, stdout: string, stderr: string, error: Error|null, signal: string|null }}
  */
-export function spawnSyncCapture(command: string, args: string[] = [], opts: SpawnSyncCaptureOpts = {}): SpawnSyncCaptureResult {
+export function spawnSyncCapture(
+  command: string,
+  args: string[] = [],
+  opts: SpawnSyncCaptureOpts = {},
+): SpawnSyncCaptureResult {
   const encoding = opts.encoding || 'utf8';
   const maxOutputBytes: number = Number.isFinite(opts.maxOutputBytes)
     ? opts.maxOutputBytes!

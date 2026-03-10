@@ -34,7 +34,11 @@ export class MCPClient extends EventEmitter {
   lastActivityAt: number | null;
   idleTimer: ReturnType<typeof setTimeout> | null;
 
-  constructor(command: string, args: string[] = [], opts: { cwd?: string; sessionTimeout?: number } = {}) {
+  constructor(
+    command: string,
+    args: string[] = [],
+    opts: { cwd?: string; sessionTimeout?: number } = {},
+  ) {
     super();
     this.command = command;
     this.args = args;
@@ -234,7 +238,11 @@ export class MCPClient extends EventEmitter {
       clearTimeout(pending.timer);
 
       if (msg['error']) {
-        pending.reject(new Error(((msg['error'] as Record<string, unknown>)['message'] as string) || 'MCP error'));
+        pending.reject(
+          new Error(
+            ((msg['error'] as Record<string, unknown>)['message'] as string) || 'MCP error',
+          ),
+        );
       } else {
         pending.resolve(msg['result']);
       }
@@ -310,12 +318,17 @@ export async function codexMCP(prompt: string, opts: { threadId?: string; cwd?: 
     const toolName = opts.threadId ? 'codex-reply' : 'codex';
     const args = opts.threadId ? { thread_id: opts.threadId, prompt } : { prompt };
 
-    const result = await client.callTool(toolName, args, 120_000) as Record<string, unknown> | null;
+    const result = (await client.callTool(toolName, args, 120_000)) as Record<
+      string,
+      unknown
+    > | null;
     const text = Array.isArray(result?.['content'])
       ? (result!['content'] as Array<{ text?: string }>).map((c) => c.text || '').join('\n')
       : String(result?.['content'] || result || '');
 
-    const threadId = (result?.['conversationId'] || result?.['threadId'] || opts.threadId) as string | undefined;
+    const threadId = (result?.['conversationId'] || result?.['threadId'] || opts.threadId) as
+      | string
+      | undefined;
 
     return {
       ok: true,

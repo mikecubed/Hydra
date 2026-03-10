@@ -17,7 +17,10 @@ export interface ScanViolation {
 }
 
 /** Verify the current git branch matches the expected branch. */
-export function verifyBranch(projectRoot: string, expectedBranch: string): { ok: boolean; currentBranch: string } {
+export function verifyBranch(
+  projectRoot: string,
+  expectedBranch: string,
+): { ok: boolean; currentBranch: string } {
   const result = spawnSyncCapture('git', ['branch', '--show-current'], {
     cwd: projectRoot,
     encoding: 'utf8',

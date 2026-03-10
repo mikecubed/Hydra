@@ -12,7 +12,14 @@
 
 import fs from 'node:fs';
 import path from 'node:path';
-import type { AgentDef, AgentInvoke, HeadlessOpts, AgentResult, TaskType, ModelConfig } from './types.ts';
+import type {
+  AgentDef,
+  AgentInvoke,
+  HeadlessOpts,
+  AgentResult,
+  TaskType,
+  ModelConfig,
+} from './types.ts';
 import {
   loadHydraConfig,
   saveHydraConfig,
@@ -46,8 +53,15 @@ const PHYSICAL_AGENTS: Record<string, Partial<AgentDef>> = {
       ],
       interactive: (prompt: string): [string, string[]] => ['claude', [prompt]],
       headless: (prompt: string, opts: HeadlessOpts = {}): [string, string[]] => {
-        const PERM: Record<string, string> = { 'auto-edit': 'acceptEdits', plan: 'plan', 'full-auto': 'bypassPermissions' };
-        const perm = (opts.permissionMode ? PERM[opts.permissionMode] : undefined) || opts.permissionMode || 'acceptEdits';
+        const PERM: Record<string, string> = {
+          'auto-edit': 'acceptEdits',
+          plan: 'plan',
+          'full-auto': 'bypassPermissions',
+        };
+        const perm =
+          (opts.permissionMode ? PERM[opts.permissionMode] : undefined) ||
+          opts.permissionMode ||
+          'acceptEdits';
         const args = ['--output-format', 'json', '--permission-mode', perm];
         if (!opts.stdinPrompt) {
           args.unshift('-p', prompt);
@@ -98,7 +112,12 @@ Output structure: Plan → Task breakdown → Dependency graph → Risk assessme
           type?: string;
           result?: string;
           content?: string;
-          usage?: { input_tokens?: number; output_tokens?: number; cache_creation_input_tokens?: number; cache_read_input_tokens?: number };
+          usage?: {
+            input_tokens?: number;
+            output_tokens?: number;
+            cache_creation_input_tokens?: number;
+            cache_read_input_tokens?: number;
+          };
           cost_usd?: number | null;
         };
         if (parsed?.type === 'result') {
@@ -162,7 +181,10 @@ Output structure: Plan → Task breakdown → Dependency graph → Risk assessme
         'gemini',
         ['-p', prompt, '--approval-mode', 'plan', '-o', 'json'],
       ],
-      interactive: (prompt: string): [string, string[]] => ['gemini', ['--prompt-interactive', prompt]],
+      interactive: (prompt: string): [string, string[]] => [
+        'gemini',
+        ['--prompt-interactive', prompt],
+      ],
       headless: (prompt: string, opts: HeadlessOpts = {}): [string, string[]] => [
         'gemini',
         ['-p', prompt, '--approval-mode', opts.permissionMode || 'auto-edit', '-o', 'json'],
@@ -410,7 +432,11 @@ Sandbox-aware: no network access, file-system focused. Work within your sandbox 
     tags: ['local', 'free', 'offline'],
     enabled: true,
     features: { executeMode: 'api', jsonOutput: false, stdinPrompt: false, reasoningEffort: false },
-    parseOutput: (stdout: string): AgentResult => ({ output: stdout, tokenUsage: null, costUsd: null }),
+    parseOutput: (stdout: string): AgentResult => ({
+      output: stdout,
+      tokenUsage: null,
+      costUsd: null,
+    }),
     errorPatterns: { networkError: /ECONNREFUSED|ENOTFOUND|connection refused/i },
     modelBelongsTo: (id: string) => {
       const cfg = loadHydraConfig();
@@ -477,7 +503,8 @@ export function registerAgent(name: string, def: Partial<AgentDef>): AgentDef {
       ...(def.features ?? {}),
     },
     parseOutput:
-      def.parseOutput ?? ((stdout: string): AgentResult => ({ output: stdout, tokenUsage: null, costUsd: null })),
+      def.parseOutput ??
+      ((stdout: string): AgentResult => ({ output: stdout, tokenUsage: null, costUsd: null })),
     errorPatterns: def.errorPatterns ?? {},
     modelBelongsTo: def.modelBelongsTo ?? (() => false),
     quotaVerify: def.quotaVerify ?? (async () => null),
@@ -858,7 +885,10 @@ export function initAgentRegistry(): void {
         const d = def as Record<string, unknown>;
         if (d?.['baseAgent']) {
           try {
-            registerAgent(name, { ...(d as Partial<AgentDef>), type: AGENT_TYPE.VIRTUAL as AgentDef['type'] });
+            registerAgent(name, {
+              ...(d as Partial<AgentDef>),
+              type: AGENT_TYPE.VIRTUAL as AgentDef['type'],
+            });
           } catch {
             /* skip invalid custom agents */
           }
@@ -931,7 +961,9 @@ export function getModelReasoningCaps(modelId: string): ReasoningCapsEntry {
   return bestKey ? MODEL_REASONING_CAPS[bestKey] : { type: 'none' };
 }
 
-export function getEffortOptionsForModel(modelId: string): Array<{ id: string | null; label: string; hint: string }> {
+export function getEffortOptionsForModel(
+  modelId: string,
+): Array<{ id: string | null; label: string; hint: string }> {
   const caps = getModelReasoningCaps(modelId);
 
   if (caps.type === 'effort') {
@@ -967,7 +999,10 @@ export function getEffortOptionsForModel(modelId: string): Array<{ id: string | 
  * @param {string|null} effortValue
  * @returns {string}
  */
-export function formatEffortDisplay(modelId: string, effortValue: string | null | undefined): string {
+export function formatEffortDisplay(
+  modelId: string,
+  effortValue: string | null | undefined,
+): string {
   if (!effortValue) return '';
   const caps = getModelReasoningCaps(modelId);
 
@@ -1008,7 +1043,10 @@ export function setReasoningEffort(agentName: string, level: string | null): str
 
 // ── Model Management ─────────────────────────────────────────────────────────
 
-function normalizeLegacyModelId(agentName: string, modelId: string | null | undefined): string | null | undefined {
+function normalizeLegacyModelId(
+  agentName: string,
+  modelId: string | null | undefined,
+): string | null | undefined {
   if (!modelId) return modelId;
   const value = String(modelId);
   const lower = value.toLowerCase();
@@ -1021,7 +1059,10 @@ function normalizeLegacyModelId(agentName: string, modelId: string | null | unde
   return modelId;
 }
 
-export function resolveModelId(agentName: string, shorthand: string | null | undefined): string | null {
+export function resolveModelId(
+  agentName: string,
+  shorthand: string | null | undefined,
+): string | null {
   if (!shorthand) return null;
   const normalized = normalizeLegacyModelId(agentName, shorthand);
   const lower = String(normalized).toLowerCase();
@@ -1119,7 +1160,10 @@ export function setActiveModel(agentName: string, modelKeyOrId: string): string 
   }
 
   const agentModels = cfg.models[agentName];
-  if (['default', 'fast', 'cheap'].includes(modelKeyOrId) && (agentModels as Record<string, unknown>)[modelKeyOrId]) {
+  if (
+    ['default', 'fast', 'cheap'].includes(modelKeyOrId) &&
+    (agentModels as Record<string, unknown>)[modelKeyOrId]
+  ) {
     agentModels.active = modelKeyOrId;
   } else {
     const resolved = resolveModelId(agentName, modelKeyOrId) ?? modelKeyOrId;

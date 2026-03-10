@@ -66,9 +66,7 @@ function safeCall<T>(fn: () => T, fallback: T | null = null): T | null {
 function gitExec(cwd: string, args: string[]): string {
   const r = spawnSyncCapture('git', args, { cwd, encoding: 'utf8', timeout: 5000 });
   if (r.status !== 0) {
-    throw new Error(
-      ((r.stderr || r.stdout || r.error?.message) ?? 'git error').trim(),
-    );
+    throw new Error(((r.stderr || r.stdout || r.error?.message) ?? 'git error').trim());
   }
   return (r.stdout || '').trim();
 }
@@ -126,9 +124,10 @@ export function buildSelfSnapshot(opts: SelfSnapshotOpts = {}): Record<string, u
   } = opts;
 
   const hydraPkg = getHydraPackageInfo();
-  const cfg = (
-    includeConfig ? safeCall(() => loadHydraConfig(), null) : null
-  ) as Record<string, unknown> | null;
+  const cfg = (includeConfig ? safeCall(() => loadHydraConfig(), null) : null) as Record<
+    string,
+    unknown
+  > | null;
   const models = safeCall(() => getModelSummary(), null);
 
   const snapshot: Record<string, unknown> = {
@@ -178,9 +177,7 @@ export function buildSelfSnapshot(opts: SelfSnapshotOpts = {}): Record<string, u
             secretsScan: cfgVerification['secretsScan'] !== false,
           }
         : null,
-      modelRecovery: cfgModelRecovery
-        ? { enabled: cfgModelRecovery['enabled'] !== false }
-        : null,
+      modelRecovery: cfgModelRecovery ? { enabled: cfgModelRecovery['enabled'] !== false } : null,
       workers: cfgWorkers ? { enabled: cfgWorkers['enabled'] !== false } : null,
     };
   }

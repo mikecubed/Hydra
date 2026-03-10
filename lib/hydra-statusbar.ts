@@ -52,7 +52,17 @@ const agentExecMode = new Map<string, string | null>(); // agent -> 'worker' | '
  * @param {string} [meta.phase] - Council phase name
  * @param {string} [meta.step] - Progress like "2/4"
  */
-export function setAgentActivity(agent: string, status: string, action: string, meta: { model?: string | null; taskTitle?: string | null; phase?: string | null; step?: string | null } = {}) {
+export function setAgentActivity(
+  agent: string,
+  status: string,
+  action: string,
+  meta: {
+    model?: string | null;
+    taskTitle?: string | null;
+    phase?: string | null;
+    step?: string | null;
+  } = {},
+) {
   agentState.set(agent.toLowerCase(), {
     status: status || 'inactive',
     action: action || '',
@@ -125,7 +135,10 @@ function pushTickerEvent(text: string, eventType: string | null = null) {
     hour: '2-digit',
     minute: '2-digit',
   });
-  const icon = eventType && (TICKER_ICONS as Record<string, string>)[eventType] ? `${(TICKER_ICONS as Record<string, string>)[eventType]} ` : '';
+  const icon =
+    eventType && (TICKER_ICONS as Record<string, string>)[eventType]
+      ? `${(TICKER_ICONS as Record<string, string>)[eventType]} `
+      : '';
   tickerEvents.push({ time, text: icon + text });
   if (tickerEvents.length > MAX_TICKER_EVENTS) {
     tickerEvents.shift();
@@ -813,7 +826,7 @@ function startFallbackPolling(baseUrl: string, agents: string[]) {
         const url = new URL(`/next?agent=${encodeURIComponent(agent)}`, baseUrl);
         const res = await fetch(url.href, { signal: AbortSignal.timeout(1500) });
         if (!res.ok) continue;
-        const data = await res.json() as any;
+        const data = (await res.json()) as any;
         const action = data?.next?.action;
 
         if (action === 'continue_task' || action === 'pickup_handoff') {

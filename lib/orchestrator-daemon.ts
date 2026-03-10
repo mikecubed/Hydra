@@ -25,13 +25,7 @@ import {
 } from './hydra-agents.ts';
 import { registerBuiltInSubAgents } from './hydra-sub-agents.ts';
 import { syncHydraMd, getAgentInstructionFile } from './hydra-sync-md.ts';
-import {
-  hydraSplash,
-  label as uiLabel,
-  divider,
-  SUCCESS,
-  DIM,
-} from './hydra-ui.ts';
+import { hydraSplash, label as uiLabel, divider, SUCCESS, DIM } from './hydra-ui.ts';
 import { resolveProject, loadHydraConfig } from './hydra-config.ts';
 import {
   git,
@@ -44,7 +38,16 @@ import { resolveVerificationPlan } from './hydra-verification.ts';
 import { handleReadRoute } from './daemon/read-routes.ts';
 import { handleWriteRoute } from './daemon/write-routes.ts';
 import type { IncomingMessage, ServerResponse } from 'node:http';
-import type { HydraStateShape, TaskEntry, HandoffEntry, BlockerEntry, WriteRouteCtx, UsageCheckResult, ModelSummaryEntry, AgentDef } from './types.ts';
+import type {
+  HydraStateShape,
+  TaskEntry,
+  HandoffEntry,
+  BlockerEntry,
+  WriteRouteCtx,
+  UsageCheckResult,
+  ModelSummaryEntry,
+  AgentDef,
+} from './types.ts';
 import pc from 'picocolors';
 
 const config = resolveProject();
@@ -113,8 +116,8 @@ function normalizeState(raw: unknown): HydraStateShape {
     ...defaults,
     ...safe,
     agents: {
-      ...defaults.agents as Record<string, unknown>,
-      ...(safe['agents'] || {}) as Record<string, unknown>,
+      ...(defaults.agents as Record<string, unknown>),
+      ...((safe['agents'] || {}) as Record<string, unknown>),
     },
     tasks: Array.isArray(safe['tasks']) ? safe['tasks'] : [],
     decisions: Array.isArray(safe['decisions']) ? safe['decisions'] : [],
@@ -189,7 +192,9 @@ function writeState(state: Record<string, unknown>) {
           fs.unlinkSync(tempPath);
           break;
         } catch (copyErr) {
-          console.error(`Failed to write state: ${(err as Error).message} -> ${(copyErr as Error).message}`);
+          console.error(
+            `Failed to write state: ${(err as Error).message} -> ${(copyErr as Error).message}`,
+          );
           throw copyErr;
         }
       }
@@ -368,7 +373,9 @@ function detectCycle(tasks: TaskEntry[], targetId: string, proposedBlockedBy: st
 
 function autoUnblock(state: HydraStateShape, completedTaskId: string) {
   const completedIds = new Set(
-    state.tasks.filter((t: TaskEntry) => ['done', 'cancelled'].includes(t.status)).map((t: TaskEntry) => t.id),
+    state.tasks
+      .filter((t: TaskEntry) => ['done', 'cancelled'].includes(t.status))
+      .map((t: TaskEntry) => t.id),
   );
   completedIds.add(completedTaskId);
 
@@ -406,8 +413,9 @@ function buildPrompt(agent: string, state: HydraStateShape) {
 
   // Agent-specific file read instructions
   const instructionFile = getAgentInstructionFile(agent, config.projectRoot);
-  const readInstructions =
-    (getAgent(agent)?.readInstructions ?? (() => `Read ${instructionFile} first.`))(instructionFile);
+  const readInstructions = (
+    getAgent(agent)?.readInstructions ?? (() => `Read ${instructionFile} first.`)
+  )(instructionFile);
 
   return [
     `You are ${label} collaborating in the ${config.projectName} repository with Gemini Pro, Codex, and Claude Code.`,
@@ -435,7 +443,9 @@ function buildPrompt(agent: string, state: HydraStateShape) {
 
 function getSummary(state: HydraStateShape) {
   const completedIds = new Set(
-    state.tasks.filter((t: TaskEntry) => ['done', 'cancelled'].includes(t.status)).map((t: TaskEntry) => t.id),
+    state.tasks
+      .filter((t: TaskEntry) => ['done', 'cancelled'].includes(t.status))
+      .map((t: TaskEntry) => t.id),
   );
   const openTasks = state.tasks
     .filter((task: TaskEntry) => !['done', 'cancelled'].includes(task.status))
@@ -468,7 +478,9 @@ function suggestNext(state: HydraStateShape, agent: string) {
   ensureKnownAgent(agent, false);
 
   const completedIds = new Set(
-    state.tasks.filter((t: TaskEntry) => ['done', 'cancelled'].includes(t.status)).map((t: TaskEntry) => t.id),
+    state.tasks
+      .filter((t: TaskEntry) => ['done', 'cancelled'].includes(t.status))
+      .map((t: TaskEntry) => t.id),
   );
   const openTasks = state.tasks.filter((task: TaskEntry) => {
     if (['done', 'cancelled'].includes(task.status)) {
@@ -504,7 +516,9 @@ function suggestNext(state: HydraStateShape, agent: string) {
     };
   }
 
-  const ownedTodo = openTasks.find((task: TaskEntry) => task.owner === agent && task.status === 'todo');
+  const ownedTodo = openTasks.find(
+    (task: TaskEntry) => task.owner === agent && task.status === 'todo',
+  );
   if (ownedTodo) {
     return {
       action: 'claim_owned_task',
@@ -516,16 +530,23 @@ function suggestNext(state: HydraStateShape, agent: string) {
   // Sort unassigned tasks by affinity for the requesting agent
   const agentConfig = getAgent(agent);
   const unassignedTodos = openTasks
-    .filter((task: TaskEntry) => ['unassigned', 'human', ''].includes(task.owner) && task.status === 'todo')
+    .filter(
+      (task: TaskEntry) =>
+        ['unassigned', 'human', ''].includes(task.owner) && task.status === 'todo',
+    )
     .map((task: TaskEntry) => {
       const taskType = task.type || 'implementation';
-      const affinity = (agentConfig?.taskAffinity as Record<string, number> | undefined)?.[taskType] || 0.5;
+      const affinity =
+        (agentConfig?.taskAffinity as Record<string, number> | undefined)?.[taskType] || 0.5;
       // Check if a virtual agent has better affinity for this task type
       let preferredAgent = null;
       const virtualAgents = listAgents({ type: 'virtual', enabled: true });
       for (const va of virtualAgents) {
         const physical = resolvePhysicalAgent(va.name);
-        if (physical?.name === agent && ((va.taskAffinity as Record<string, number> | undefined)?.[taskType] || 0) > affinity) {
+        if (
+          physical?.name === agent &&
+          ((va.taskAffinity as Record<string, number> | undefined)?.[taskType] || 0) > affinity
+        ) {
           preferredAgent = va.name;
         }
       }
@@ -546,7 +567,9 @@ function suggestNext(state: HydraStateShape, agent: string) {
     return suggestion;
   }
 
-  const blockedMine = openTasks.find((task: TaskEntry) => task.owner === agent && task.status === 'blocked');
+  const blockedMine = openTasks.find(
+    (task: TaskEntry) => task.owner === agent && task.status === 'blocked',
+  );
   if (blockedMine) {
     return {
       action: 'resolve_blocker',
@@ -587,7 +610,12 @@ function sendJson(res: ServerResponse, statusCode: number, data: unknown) {
   res.end(body);
 }
 
-function sendError(res: ServerResponse, statusCode: number, message: string, details: unknown = null) {
+function sendError(
+  res: ServerResponse,
+  statusCode: number,
+  message: string,
+  details: unknown = null,
+) {
   sendJson(res, statusCode, {
     ok: false,
     error: message,
@@ -668,7 +696,9 @@ function archiveState(state: HydraStateShape) {
   let moved = 0;
   const oneHourAgo = Date.now() - 60 * 60 * 1000;
 
-  const completedTasks = state.tasks.filter((t: TaskEntry) => ['done', 'cancelled'].includes(t.status));
+  const completedTasks = state.tasks.filter((t: TaskEntry) =>
+    ['done', 'cancelled'].includes(t.status),
+  );
   const completedTaskIds = new Set(completedTasks.map((t: TaskEntry) => t.id));
   if (completedTasks.length > 0) {
     archive.tasks.push(...completedTasks);
@@ -887,7 +917,9 @@ function createTaskWorktree(taskId: string) {
     }
     return worktreePath;
   } catch (err) {
-    console.warn(`[worktree] Exception creating worktree for task ${taskId}: ${(err as Error).message}`);
+    console.warn(
+      `[worktree] Exception creating worktree for task ${taskId}: ${(err as Error).message}`,
+    );
     return null;
   }
 }
@@ -907,7 +939,11 @@ function mergeTaskWorktree(taskId: string) {
   try {
     const result = smartMerge(config.projectRoot, branch, currentBranch);
     if (!result.ok) {
-      const conflictList = (result as Record<string, unknown>)['conflicts'] && ((result as Record<string, unknown>)['conflicts'] as string[]).length > 0 ? ((result as Record<string, unknown>)['conflicts'] as string[]).join(', ') : '(unknown)';
+      const conflictList =
+        (result as Record<string, unknown>)['conflicts'] &&
+        ((result as Record<string, unknown>)['conflicts'] as string[]).length > 0
+          ? ((result as Record<string, unknown>)['conflicts'] as string[]).join(', ')
+          : '(unknown)';
       console.warn(
         `[worktree] Conflict merging task ${taskId} branch into ${currentBranch}: ${conflictList}`,
       );
@@ -941,11 +977,13 @@ function cleanupTaskWorktree(taskId: string, { force = false } = {}) {
     const result = git(removeArgs, config.projectRoot);
     if (result.status !== 0) {
       console.warn(
-        `[worktree] Could not remove worktree for task ${taskId}: ${(String(result.stderr || '')).trim()}`,
+        `[worktree] Could not remove worktree for task ${taskId}: ${String(result.stderr || '').trim()}`,
       );
     }
   } catch (err) {
-    console.warn(`[worktree] Exception removing worktree for task ${taskId}: ${(err as Error).message}`);
+    console.warn(
+      `[worktree] Exception removing worktree for task ${taskId}: ${(err as Error).message}`,
+    );
   }
 
   // Delete branch
@@ -953,7 +991,9 @@ function cleanupTaskWorktree(taskId: string, { force = false } = {}) {
     const branchFlag = force ? '-D' : '-d';
     const result = git(['branch', branchFlag, branch], config.projectRoot);
     if (result.status !== 0) {
-      console.warn(`[worktree] Could not delete branch ${branch}: ${(String(result.stderr || '')).trim()}`);
+      console.warn(
+        `[worktree] Could not delete branch ${branch}: ${String(result.stderr || '').trim()}`,
+      );
     }
   } catch (err) {
     console.warn(`[worktree] Exception deleting branch ${branch}: ${(err as Error).message}`);
@@ -1025,7 +1065,11 @@ function startDaemon(options: Record<string, string>) {
     fs.writeFileSync(STATUS_PATH, `${JSON.stringify(payload, null, 2)}\n`, 'utf8');
   }
 
-  function enqueueMutation<T>(label: string, mutator: (state: HydraStateShape) => T, detail: Record<string, unknown> = {}) {
+  function enqueueMutation<T>(
+    label: string,
+    mutator: (state: HydraStateShape) => T,
+    detail: Record<string, unknown> = {},
+  ) {
     const mutation = writeQueue.then(() => {
       const state = readState();
       const result = mutator(state);
@@ -1191,7 +1235,10 @@ function startDaemon(options: Record<string, string>) {
     } catch (err) {
       // If even the fallback can't start, treat as a failure but never throw.
       try {
-        const msg = String((err as Error)?.message || err || 'Verification failed to start.').slice(0, 500);
+        const msg = String((err as Error)?.message || err || 'Verification failed to start.').slice(
+          0,
+          500,
+        );
         handleVerificationResult(new Error(msg), '', '');
       } catch {
         // ignore
@@ -1282,7 +1329,9 @@ function startDaemon(options: Record<string, string>) {
         AGENT_NAMES,
         getAgent: getAgent as (name: string) => AgentDef | undefined,
         listAgents: listAgents as (...args: unknown[]) => AgentDef[],
-        resolveVerificationPlan: resolveVerificationPlan as unknown as (...args: unknown[]) => Record<string, unknown>,
+        resolveVerificationPlan: resolveVerificationPlan as unknown as (
+          ...args: unknown[]
+        ) => Record<string, unknown>,
         projectRoot: config.projectRoot,
         runVerification: runVerification as (...args: unknown[]) => void,
         archiveState,
@@ -1381,8 +1430,20 @@ function startDaemon(options: Record<string, string>) {
   function markStaleTasks() {
     try {
       const cfg = loadHydraConfig();
-      const heartbeatTimeoutMs = Number(((cfg as Record<string, unknown>)['workers'] as Record<string, unknown> | undefined)?.['heartbeatTimeoutMs']) || 90_000; // 90s default
-      const maxAttempts = Number((((cfg as Record<string, unknown>)['workers'] as Record<string, unknown> | undefined)?.['retry'] as Record<string, unknown> | undefined)?.['maxAttempts']) || 3;
+      const heartbeatTimeoutMs =
+        Number(
+          ((cfg as Record<string, unknown>)['workers'] as Record<string, unknown> | undefined)?.[
+            'heartbeatTimeoutMs'
+          ],
+        ) || 90_000; // 90s default
+      const maxAttempts =
+        Number(
+          (
+            ((cfg as Record<string, unknown>)['workers'] as Record<string, unknown> | undefined)?.[
+              'retry'
+            ] as Record<string, unknown> | undefined
+          )?.['maxAttempts'],
+        ) || 3;
       const state = readState();
       const now = Date.now();
       let changed = false;
@@ -1394,7 +1455,8 @@ function startDaemon(options: Record<string, string>) {
 
         if ((task as Record<string, unknown>)['lastHeartbeat']) {
           // Heartbeat-based detection (fast): 90s default timeout
-          const hbAge = now - new Date((task as Record<string, unknown>)['lastHeartbeat'] as string).getTime();
+          const hbAge =
+            now - new Date((task as Record<string, unknown>)['lastHeartbeat'] as string).getTime();
           isStale = hbAge > heartbeatTimeoutMs;
         } else {
           // Legacy: use updatedAt/checkpoint (30 min)

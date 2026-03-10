@@ -74,7 +74,10 @@ async function reviewCommand(projectRoot: string, options: Record<string, string
 
   // Load latest decision data
   const evolveDir = path.join(projectRoot, 'docs', 'coordination', 'evolve');
-  const reportData = loadLatestReport(evolveDir, 'EVOLVE', dateFilter) as Record<string, unknown> | null;
+  const reportData = loadLatestReport(evolveDir, 'EVOLVE', dateFilter) as Record<
+    string,
+    unknown
+  > | null;
 
   const rl = createRL();
   let merged = 0;
@@ -258,7 +261,10 @@ function statusCommand(projectRoot: string, options: Record<string, string | boo
   }
 
   // Show latest report
-  const report = loadLatestReport(evolveDir, 'EVOLVE', dateFilter) as Record<string, unknown> | null;
+  const report = loadLatestReport(evolveDir, 'EVOLVE', dateFilter) as Record<
+    string,
+    unknown
+  > | null;
 
   if (report) {
     console.log(`\n  Latest Report: ${report['dateStr']}`);
@@ -440,9 +446,13 @@ async function main() {
 
   let config;
   try {
-    config = resolveProject({ project: options['project'] ? String(options['project']) : undefined });
+    config = resolveProject({
+      project: options['project'] ? String(options['project']) : undefined,
+    });
   } catch (err: unknown) {
-    console.error(pc.red(`Project resolution failed: ${err instanceof Error ? err.message : String(err)}`));
+    console.error(
+      pc.red(`Project resolution failed: ${err instanceof Error ? err.message : String(err)}`),
+    );
     process.exit(1);
   }
 

@@ -45,7 +45,11 @@ export function toHydraModuleId(scriptPath: string, hydraRoot = HYDRA_EMBEDDED_R
   return normalizeModuleId(rel);
 }
 
-export function rewriteNodeInvocation(command: string, args: string[] = [], hydraRoot = HYDRA_EMBEDDED_ROOT) {
+export function rewriteNodeInvocation(
+  command: string,
+  args: string[] = [],
+  hydraRoot = HYDRA_EMBEDDED_ROOT,
+) {
   if (!HYDRA_STANDALONE || command !== 'node' || !Array.isArray(args) || args.length === 0) {
     return { command, args };
   }

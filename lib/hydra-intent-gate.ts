@@ -146,8 +146,12 @@ async function defaultRewriteFn(text: string): Promise<string | null> {
   ];
 
   let result = '';
-  await streamLocalCompletion(messages, {} as { model: string; baseUrl: string }, (chunk: string) => {
-    result += chunk;
-  });
+  await streamLocalCompletion(
+    messages,
+    {} as { model: string; baseUrl: string },
+    (chunk: string) => {
+      result += chunk;
+    },
+  );
   return result.trim() || null;
 }

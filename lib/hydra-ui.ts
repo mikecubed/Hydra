@@ -21,7 +21,9 @@ export const isTruecolor =
   Boolean(process.env['WT_SESSION']);
 
 // Claude Code's signature orange (truecolor: #E8863A), falls back to yellow
-const claudeOrange = isTruecolor ? (str: string) => `\x1b[38;2;232;134;58m${str}\x1b[39m` : pc.yellow;
+const claudeOrange = isTruecolor
+  ? (str: string) => `\x1b[38;2;232;134;58m${str}\x1b[39m`
+  : pc.yellow;
 
 export const AGENT_COLORS = {
   gemini: pc.cyan,
@@ -368,11 +370,13 @@ import('./hydra-agents.ts')
  */
 export function getAgentColor(name: string) {
   const lower = String(name || '').toLowerCase();
-  if ((AGENT_COLORS as Record<string, (s: string) => string>)[lower]) return (AGENT_COLORS as Record<string, (s: string) => string>)[lower];
+  if ((AGENT_COLORS as Record<string, (s: string) => string>)[lower])
+    return (AGENT_COLORS as Record<string, (s: string) => string>)[lower];
   // Try resolving virtual → physical
   if (_resolverSync) {
     const base = _resolverSync(lower);
-    if (base && (AGENT_COLORS as Record<string, (s: string) => string>)[base.name]) return (AGENT_COLORS as Record<string, (s: string) => string>)[base.name];
+    if (base && (AGENT_COLORS as Record<string, (s: string) => string>)[base.name])
+      return (AGENT_COLORS as Record<string, (s: string) => string>)[base.name];
   }
   return AGENT_COLORS.system || pc.white;
 }
@@ -383,7 +387,8 @@ export function getAgentColor(name: string) {
  */
 export function getAgentIcon(name: string) {
   const lower = String(name || '').toLowerCase();
-  if ((AGENT_ICONS as Record<string, string>)[lower]) return (AGENT_ICONS as Record<string, string>)[lower];
+  if ((AGENT_ICONS as Record<string, string>)[lower])
+    return (AGENT_ICONS as Record<string, string>)[lower];
   // Virtual agents get a diamond outline icon
   return '\u25C7'; // ◇
 }
@@ -467,7 +472,11 @@ const BOX_STYLES = {
  * @param {'light'|'heavy'|'rounded'|'double'} [widthOrOpts.style='light'] - Border style
  * @param {number} [widthOrOpts.padding=0] - Internal horizontal padding (spaces)
  */
-export function box(title: string, lines: string[], widthOrOpts: number | { style?: string; padding?: number; width?: number } = 60) {
+export function box(
+  title: string,
+  lines: string[],
+  widthOrOpts: number | { style?: string; padding?: number; width?: number } = 60,
+) {
   let width = 60,
     style = 'light',
     padding = 0;
@@ -719,7 +728,15 @@ const STYLE_COLORS = {
  * @param {number} [opts.intervalMs] - Override frame interval (default varies by style)
  * @param {function} [opts.color] - Color function for frames (default: per-style or ACCENT)
  */
-export function createSpinner(message: string, opts: { estimatedMs?: number; style?: string; intervalMs?: number; color?: (s: string) => string } = {}) {
+export function createSpinner(
+  message: string,
+  opts: {
+    estimatedMs?: number;
+    style?: string;
+    intervalMs?: number;
+    color?: (s: string) => string;
+  } = {},
+) {
   const isTTY = process.stderr?.isTTY;
   let frameIdx = 0;
   let interval: ReturnType<typeof setInterval> | null = null;
@@ -729,7 +746,8 @@ export function createSpinner(message: string, opts: { estimatedMs?: number; sty
   const style = opts.style || 'braille';
   const frames = (SPINNER_STYLES as Record<string, string[]>)[style] || SPINNER_STYLES.braille;
   const intervalMs = opts.intervalMs || (STYLE_INTERVALS as Record<string, number>)[style] || 80;
-  const colorFn = opts.color || (STYLE_COLORS as Record<string, (s: string) => string>)[style] || ACCENT;
+  const colorFn =
+    opts.color || (STYLE_COLORS as Record<string, (s: string) => string>)[style] || ACCENT;
 
   function timeSuffix() {
     const elapsed = Date.now() - startTime;
@@ -1308,7 +1326,8 @@ export function extractTopic(prompt: string, maxLen = 30) {
 }
 
 const PHASE_NARRATIVES: Record<string, (agent: string, topic: string) => string> = {
-  propose: (_agent: string, topic: string) => (topic ? `Analyzing ${topic}` : 'Analyzing the objective'),
+  propose: (_agent: string, topic: string) =>
+    topic ? `Analyzing ${topic}` : 'Analyzing the objective',
   critique: (_agent: string, topic: string) =>
     topic ? `Reviewing plan for ${topic}` : 'Reviewing the proposed plan',
   refine: (_agent: string, _topic: string) => 'Incorporating feedback into plan',

@@ -206,9 +206,11 @@ function saveForgeSession(name: string, session: ForgeSession): string {
  * Validate an agent spec before registration.
  * Returns { valid: boolean, errors: string[], warnings: string[] }
  */
-export function validateAgentSpec(
-  spec: Partial<ForgeSpec>,
-): { valid: boolean; errors: string[]; warnings: string[] } {
+export function validateAgentSpec(spec: Partial<ForgeSpec>): {
+  valid: boolean;
+  errors: string[];
+  warnings: string[];
+} {
   const errors: string[] = [];
   const warnings: string[] = [];
 
@@ -246,7 +248,9 @@ export function validateAgentSpec(
       if (score === undefined) {
         warnings.push(`Missing affinity for "${type}", will default to 0`);
       } else if (typeof score !== 'number' || score < 0 || score > 1) {
-        warnings.push(`Affinity for "${type}" out of range (${String(score)}), will be clamped to 0-1`);
+        warnings.push(
+          `Affinity for "${type}" out of range (${String(score)}), will be clamped to 0-1`,
+        );
       }
     }
 
@@ -256,8 +260,7 @@ export function validateAgentSpec(
       if (base) {
         for (const [type, score] of Object.entries(spec.taskAffinity)) {
           const s = score;
-          const baseAffinity =
-            (base.taskAffinity as Partial<Record<string, number>>)[type] ?? 0;
+          const baseAffinity = (base.taskAffinity as Partial<Record<string, number>>)[type] ?? 0;
           if (s > 0.8 && baseAffinity < 0.4) {
             warnings.push(
               `High affinity for "${type}" (${String(s)}) but base agent "${spec.baseAgent}" ` +
@@ -316,7 +319,9 @@ export function analyzeCodebase(): CodebaseProfile {
 
   // Package.json
   try {
-    profile.packageJson = JSON.parse(fs.readFileSync(path.join(root, 'package.json'), 'utf8')) as Record<string, unknown>;
+    profile.packageJson = JSON.parse(
+      fs.readFileSync(path.join(root, 'package.json'), 'utf8'),
+    ) as Record<string, unknown>;
   } catch {
     /* ignore */
   }
@@ -366,10 +371,12 @@ export function analyzeCodebase(): CodebaseProfile {
     profile.existingAgents.push({
       name: (agent as { name: string }).name,
       type: (agent as { type: string }).type,
-      topAffinities: Object.entries((agent as { taskAffinity: Record<string, number> }).taskAffinity)
-        .sort(([, a], [, b]) => (b) - (a))
+      topAffinities: Object.entries(
+        (agent as { taskAffinity: Record<string, number> }).taskAffinity,
+      )
+        .sort(([, a], [, b]) => b - a)
         .slice(0, 3)
-        .map(([t, s]) => `${t}:${((s) * 100).toFixed(0)}%`),
+        .map(([t, s]) => `${t}:${(s * 100).toFixed(0)}%`),
     });
   }
 
@@ -377,7 +384,8 @@ export function analyzeCodebase(): CodebaseProfile {
   for (const type of TASK_TYPES) {
     let bestScore = 0;
     for (const agent of allAgents) {
-      const score = (agent as { taskAffinity: Partial<Record<string, number>> }).taskAffinity[type] ?? 0;
+      const score =
+        (agent as { taskAffinity: Partial<Record<string, number>> }).taskAffinity[type] ?? 0;
       if (score > bestScore) bestScore = score;
     }
     if (bestScore < 0.7) {
@@ -438,7 +446,11 @@ Respond with JSON only:
 \`\`\``;
 }
 
-function buildDesignPrompt(description: string, analysis: AnalysisResult, _profile: CodebaseProfile): string {
+function buildDesignPrompt(
+  description: string,
+  analysis: AnalysisResult,
+  _profile: CodebaseProfile,
+): string {
   return `You are designing a specialized virtual AI agent for the Hydra multi-agent system.
 
 ## User's Intent
@@ -634,8 +646,10 @@ export async function runForgePipeline(
   opts: ForgePipelineOpts = {},
 ): Promise<{ spec: ForgeSpec; phases: ForgePhases; session: ForgeSession }> {
   const cfg = loadHydraConfig();
-  const forgeCfg = ((cfg as Record<string, unknown>)['forge'] as Record<string, unknown> | undefined) ?? {};
-  const timeoutMs = opts.phaseTimeoutMs ?? (forgeCfg['phaseTimeoutMs'] as number | undefined) ?? 300_000;
+  const forgeCfg =
+    ((cfg as Record<string, unknown>)['forge'] as Record<string, unknown> | undefined) ?? {};
+  const timeoutMs =
+    opts.phaseTimeoutMs ?? (forgeCfg['phaseTimeoutMs'] as number | undefined) ?? 300_000;
   const onPhase = opts.onPhase ?? (() => {});
   const profile = codebaseCtx ?? analyzeCodebase();
   const phases: ForgePhases = {};
@@ -656,14 +670,16 @@ export async function runForgePipeline(
     hubProject: path.basename(process.cwd()),
     hubAgent: 'gemini-forge',
   } as ExecuteAgentOpts);
-  const analysis = (parseJsonLoose(analyzeResult.output) as AnalysisResult | null) ?? {
-    recommendedFocus: description || 'general purpose',
-    suggestedName: 'custom-agent',
-    suggestedBase: 'claude',
-    reasoning: 'Fallback — analysis phase failed to produce structured output',
-    targetTaskTypes: ['implementation'],
-    suggestedStrengths: ['general'],
-  } satisfies AnalysisResult;
+  const analysis =
+    (parseJsonLoose(analyzeResult.output) as AnalysisResult | null) ??
+    ({
+      recommendedFocus: description || 'general purpose',
+      suggestedName: 'custom-agent',
+      suggestedBase: 'claude',
+      reasoning: 'Fallback — analysis phase failed to produce structured output',
+      targetTaskTypes: ['implementation'],
+      suggestedStrengths: ['general'],
+    } satisfies AnalysisResult);
   phases.analyze = { result: analysis, durationMs: analyzeResult.durationMs, ok: analyzeResult.ok };
   session.phasesRun.push('analyze');
   onPhase('analyze', 'done', phases.analyze);
@@ -786,9 +802,12 @@ export async function runForgePipeline(
 /**
  * Generate a sample prompt matching the agent's top affinity type.
  */
-export function generateSamplePrompt(spec: Partial<ForgeSpec>, profile?: { projectName?: string }): string {
+export function generateSamplePrompt(
+  spec: Partial<ForgeSpec>,
+  profile?: { projectName?: string },
+): string {
   const topType =
-    Object.entries(spec.taskAffinity ?? {}).sort(([, a], [, b]) => (b) - (a))[0]?.[0] ??
+    Object.entries(spec.taskAffinity ?? {}).sort(([, a], [, b]) => b - a)[0]?.[0] ??
     'implementation';
 
   const projectName = profile?.projectName ?? 'the project';
@@ -839,13 +858,16 @@ export async function testForgedAgent(
 /**
  * Persist a forged agent to config and registry.
  */
-export function persistForgedAgent(spec: ForgeSpec, session: Partial<ForgeSession> = {}): ForgeSpec {
+export function persistForgedAgent(
+  spec: ForgeSpec,
+  session: Partial<ForgeSession> = {},
+): ForgeSpec {
   invalidateConfigCache();
   const cfg = loadHydraConfig();
 
   cfg.agents.custom ??= {};
 
-  (cfg.agents.custom)[spec.name] = {
+  cfg.agents.custom[spec.name] = {
     baseAgent: spec.baseAgent,
     displayName: spec.displayName,
     label: `${spec.displayName} (${spec.baseAgent})`,
@@ -937,9 +959,9 @@ export function listForgedAgents(): Array<{
       description: meta.description,
       topAffinities: spec?.taskAffinity
         ? Object.entries(spec.taskAffinity)
-            .sort(([, a], [, b]) => (b) - (a))
+            .sort(([, a], [, b]) => b - a)
             .slice(0, 3)
-            .map(([t, s]) => `${t}:${((s) * 100).toFixed(0)}%`)
+            .map(([t, s]) => `${t}:${(s * 100).toFixed(0)}%`)
         : [],
     });
   }
@@ -962,7 +984,13 @@ export async function forgeAgent(
   warnings?: string[];
   spec: ForgeSpec;
   validation?: { valid: boolean; errors: string[]; warnings: string[] };
-  testResult?: { ok: boolean; output: string; durationMs: number; prompt: string; error?: string } | null;
+  testResult?: {
+    ok: boolean;
+    output: string;
+    durationMs: number;
+    prompt: string;
+    error?: string;
+  } | null;
   phases?: Record<string, { ok: boolean; durationMs: number }>;
 }> {
   const profile = analyzeCodebase();
@@ -998,7 +1026,10 @@ export async function forgeAgent(
     validation,
     testResult,
     phases: Object.fromEntries(
-      Object.entries(phases).map(([k, v]) => [k, { ok: (v as ForgePhaseResult).ok, durationMs: (v as ForgePhaseResult).durationMs }]),
+      Object.entries(phases).map(([k, v]) => [
+        k,
+        { ok: (v as ForgePhaseResult).ok, durationMs: (v as ForgePhaseResult).durationMs },
+      ]),
     ),
   };
 }
@@ -1011,7 +1042,10 @@ export async function forgeAgent(
  * @param {readline.Interface} rl - Operator readline instance
  * @param {string} [description] - Pre-filled description
  */
-export async function runForgeWizard(rl: ReadlineInterface, description = ''): Promise<ForgeSpec | null> {
+export async function runForgeWizard(
+  rl: ReadlineInterface,
+  description = '',
+): Promise<ForgeSpec | null> {
   console.log('');
   console.log(sectionHeader('Agent Forge'));
   console.log(DIM('  Multi-model agent creation pipeline'));
@@ -1088,7 +1122,7 @@ export async function runForgeWizard(rl: ReadlineInterface, description = ''): P
 
   // Top affinities
   const topAffinities = Object.entries(spec.taskAffinity)
-    .sort(([, a], [, b]) => (b) - (a))
+    .sort(([, a], [, b]) => b - a)
     .slice(0, 5);
   console.log(`  ${pc.bold('Top Affinities:')}`);
   for (const [type, score] of topAffinities) {

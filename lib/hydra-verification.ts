@@ -77,7 +77,9 @@ export function collectProjectSignals(projectRoot: string): ProjectSignals {
   };
 }
 
-export function chooseAutoVerificationCommand(signals: Partial<ProjectSignals> = {}): { command: string; reason: string } | null {
+export function chooseAutoVerificationCommand(
+  signals: Partial<ProjectSignals> = {},
+): { command: string; reason: string } | null {
   const scripts: Record<string, string> =
     signals.npmScripts && typeof signals.npmScripts === 'object' ? signals.npmScripts : {};
 
@@ -131,8 +133,12 @@ export function resolveVerificationPlan(
   hydraConfig: Record<string, unknown> = loadHydraConfig() as Record<string, unknown>,
   signalsOverride: ProjectSignals | null = null,
 ): VerificationPlan {
-  const cfg: Record<string, unknown> = hydraConfig && typeof hydraConfig === 'object' ? hydraConfig : {};
-  const verificationCfg = cfg['verification'] && typeof cfg['verification'] === 'object' ? cfg['verification'] as Record<string, unknown> : {};
+  const cfg: Record<string, unknown> =
+    hydraConfig && typeof hydraConfig === 'object' ? hydraConfig : {};
+  const verificationCfg =
+    cfg['verification'] && typeof cfg['verification'] === 'object'
+      ? (cfg['verification'] as Record<string, unknown>)
+      : {};
 
   const onTaskDone = verificationCfg['onTaskDone'] !== false;
   const timeoutMs = parseTimeoutMs(verificationCfg['timeoutMs']);

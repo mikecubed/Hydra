@@ -190,7 +190,11 @@ export function addEntry(kb: KnowledgeBase, entry: KBEntry): KBEntry | null {
  * @param {object} updates - Fields to merge
  * @returns {object|null} Updated entry or null if not found
  */
-export function updateEntry(kb: KnowledgeBase, id: string, updates: Partial<KBEntry>): KBEntry | null {
+export function updateEntry(
+  kb: KnowledgeBase,
+  id: string,
+  updates: Partial<KBEntry>,
+): KBEntry | null {
   const entry = kb.entries.find((e: KBEntry) => e.id === id);
   if (!entry) return null;
   Object.assign(entry, updates);
@@ -212,7 +216,9 @@ export function searchEntries(kb: KnowledgeBase, query?: string, tags?: string[]
 
   if (tags && tags.length > 0) {
     const tagSet = new Set(tags.map((t: string) => t.toLowerCase()));
-    results = results.filter((e) => (e.tags || []).some((t: string) => tagSet.has(t.toLowerCase())));
+    results = results.filter((e) =>
+      (e.tags || []).some((t: string) => tagSet.has(t.toLowerCase())),
+    );
   }
 
   if (query) {
@@ -247,7 +253,9 @@ export function searchEntries(kb: KnowledgeBase, query?: string, tags?: string[]
 export function getPriorLearnings(kb: KnowledgeBase, area: string): KBEntry[] {
   return kb.entries
     .filter(
-      (e) => e.area === area || (e.tags || []).some((t: string) => t.toLowerCase() === area.toLowerCase()),
+      (e) =>
+        e.area === area ||
+        (e.tags || []).some((t: string) => t.toLowerCase() === area.toLowerCase()),
     )
     .filter((e) => e.learnings || e.outcome)
     .sort((a, b) => (b.date || '').localeCompare(a.date || ''));

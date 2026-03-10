@@ -63,10 +63,18 @@ interface ProviderCandidate {
 // ── Sliding Window State ────────────────────────────────────────────────────
 
 // RPM: array of request timestamps (ms) within the last 60s
-const _requestTimestamps: Partial<Record<string, number[]>> = { openai: [], anthropic: [], google: [] };
+const _requestTimestamps: Partial<Record<string, number[]>> = {
+  openai: [],
+  anthropic: [],
+  google: [],
+};
 
 // TPM: array of { ts, tokens } within the last 60s
-const _tokenTimestamps: Partial<Record<string, TokenTimestamp[]>> = { openai: [], anthropic: [], google: [] };
+const _tokenTimestamps: Partial<Record<string, TokenTimestamp[]>> = {
+  openai: [],
+  anthropic: [],
+  google: [],
+};
 
 // RPD: daily request counter per provider
 const _dailyRequests: Partial<Record<string, DailyCounter>> = {
@@ -93,19 +101,23 @@ function today() {
 
 function pruneWindow(arr: number[]): void {
   const cutoff = Date.now() - WINDOW_MS;
-  while (arr.length > 0 && (arr[0]) < cutoff) arr.shift();
+  while (arr.length > 0 && arr[0] < cutoff) arr.shift();
 }
 
 function pruneTokenWindow(arr: TokenTimestamp[]): void {
   const cutoff = Date.now() - WINDOW_MS;
-  while (arr.length > 0 && (arr[0]).ts < cutoff) arr.shift();
+  while (arr.length > 0 && arr[0].ts < cutoff) arr.shift();
 }
 
 function getProviderTier(provider: string): number | string {
   const cfg = loadHydraConfig() as Record<string, unknown>;
   const providers = cfg['providers'] as Record<string, Record<string, unknown>> | undefined;
   const providerCfg = providers?.[provider] ?? {};
-  const defaults: Partial<Record<string, number | string>> = { openai: 1, anthropic: 1, google: 'free' };
+  const defaults: Partial<Record<string, number | string>> = {
+    openai: 1,
+    anthropic: 1,
+    google: 'free',
+  };
   return (providerCfg['tier'] as number | string | undefined) ?? defaults[provider] ?? 1;
 }
 
@@ -127,7 +139,11 @@ interface UsageRecord {
   outputTokens?: number;
 }
 
-export function recordApiRequest(provider: string, _model: string, usage: UsageRecord | null): void {
+export function recordApiRequest(
+  provider: string,
+  _model: string,
+  usage: UsageRecord | null,
+): void {
   const timestamps = _requestTimestamps[provider];
   if (!timestamps) return;
 
@@ -166,7 +182,9 @@ export function updateFromHeaders(provider: string, headers: Record<string, unkn
   if (!Object.prototype.hasOwnProperty.call(_headerCapacity, provider)) return;
 
   // Only store if we got at least one meaningful value
-  const hasData = Object.values(headers).some((v) => v != null && v !== '' && !Number.isNaN(Number(v)));
+  const hasData = Object.values(headers).some(
+    (v) => v != null && v !== '' && !Number.isNaN(Number(v)),
+  );
   if (!hasData) return;
 
   _headerCapacity[provider] = { ...(headers as Partial<HeaderCapacity>), ts: Date.now() };
@@ -180,7 +198,11 @@ interface CanMakeRequestResult {
   remaining: RemainingCapacity;
 }
 
-export function canMakeRequest(provider: string, model: string, estimatedTokens = 0): CanMakeRequestResult {
+export function canMakeRequest(
+  provider: string,
+  model: string,
+  estimatedTokens = 0,
+): CanMakeRequestResult {
   const limits = getEffectiveLimits(provider, model);
   const remaining = getRemainingCapacity(provider, model);
 
@@ -225,7 +247,14 @@ export function canMakeRequest(provider: string, model: string, estimatedTokens 
 
 export function getRemainingCapacity(provider: string, model?: string): RemainingCapacity {
   const limits = model ? getEffectiveLimits(provider, model) : null;
-  const result: RemainingCapacity = { rpm: null, tpm: null, rpd: null, pctRpm: null, pctTpm: null, pctRpd: null };
+  const result: RemainingCapacity = {
+    rpm: null,
+    tpm: null,
+    rpd: null,
+    pctRpm: null,
+    pctTpm: null,
+    pctRpd: null,
+  };
 
   // Check for fresh header data first
   const headers = _headerCapacity[provider];
@@ -334,11 +363,17 @@ export function getRateLimitSummary(): RateLimitSummaryEntry[] {
     const parts = [];
 
     if (cap.rpm != null)
-      parts.push(`RPM: ${String(cap.rpm)} left${cap.pctRpm == null ? '' : ` (${String(cap.pctRpm)}%)`}`);
+      parts.push(
+        `RPM: ${String(cap.rpm)} left${cap.pctRpm == null ? '' : ` (${String(cap.pctRpm)}%)`}`,
+      );
     if (cap.tpm != null)
-      parts.push(`TPM: ${fmtTokens(cap.tpm)} left${cap.pctTpm == null ? '' : ` (${String(cap.pctTpm)}%)`}`);
+      parts.push(
+        `TPM: ${fmtTokens(cap.tpm)} left${cap.pctTpm == null ? '' : ` (${String(cap.pctTpm)}%)`}`,
+      );
     if (cap.rpd != null)
-      parts.push(`RPD: ${String(cap.rpd)} left${cap.pctRpd == null ? '' : ` (${String(cap.pctRpd)}%)`}`);
+      parts.push(
+        `RPD: ${String(cap.rpd)} left${cap.pctRpd == null ? '' : ` (${String(cap.pctRpd)}%)`}`,
+      );
 
     if (parts.length === 0) parts.push('no tracking data');
 
@@ -401,7 +436,9 @@ export function _resetState(): void {
 // Merged from hydra-rate-limiter.mjs to consolidate rate limiting in one module.
 
 function sleep(ms: number): Promise<void> {
-  return new Promise<void>((resolve) => { setTimeout(resolve, ms); });
+  return new Promise<void>((resolve) => {
+    setTimeout(resolve, ms);
+  });
 }
 
 export class TokenBucket {
@@ -548,7 +585,11 @@ export function tryAcquireConcurrencySlot(): (() => void) | null {
   };
 }
 
-export function getConcurrencyStats(): { active: number; maxInFlight: number; utilization: number } {
+export function getConcurrencyStats(): {
+  active: number;
+  maxInFlight: number;
+  utilization: number;
+} {
   return {
     active: _activeCount,
     maxInFlight: _maxInFlight,

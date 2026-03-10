@@ -163,7 +163,10 @@ function detectGitRules(projectRoot: string) {
  * Minimal context (~500-800 tokens) for Codex.
  * Only task-specific: file paths, relevant type definitions, function signatures.
  */
-function buildMinimalContext(projectConfig: any, taskContext: { files?: string[]; types?: string; signatures?: string } = {}) {
+function buildMinimalContext(
+  projectConfig: any,
+  taskContext: { files?: string[]; types?: string; signatures?: string } = {},
+) {
   const branch = getCurrentBranch(projectConfig.projectRoot);
   const techStack = detectTechStack(projectConfig.projectRoot);
   const gitRules = detectGitRules(projectConfig.projectRoot);
@@ -257,7 +260,10 @@ function buildMediumContext(projectConfig: any) {
  * Large context (~5000-8000 tokens) for Gemini.
  * Leverages Gemini's massive context window with additional file contents and git history.
  */
-function buildLargeContext(projectConfig: any, taskContext: { files?: string[]; types?: string; signatures?: string } = {}) {
+function buildLargeContext(
+  projectConfig: any,
+  taskContext: { files?: string[]; types?: string; signatures?: string } = {},
+) {
   const now = Date.now();
   const cacheKey = projectConfig.projectRoot;
   if (
@@ -352,7 +358,11 @@ export function extractPathsFromPrompt(text: string) {
  * @param {{ maxFiles?: number }} [opts] - Options: maxFiles caps results (default 3)
  * @returns {string[]} Absolute paths to scoped HYDRA.md files, deepest first
  */
-export function findScopedContextFiles(promptText: string, rootDir: string, opts: { maxFiles?: number } = {}) {
+export function findScopedContextFiles(
+  promptText: string,
+  rootDir: string,
+  opts: { maxFiles?: number } = {},
+) {
   const { maxFiles = 3 } = opts;
   const candidates = extractPathsFromPrompt(promptText);
   if (candidates.length === 0) return [];
@@ -436,7 +446,11 @@ export function compileHierarchicalContext(files: string[], rootDir: string) {
  * @param {object} [taskContext] - Optional task-specific context { files, types, signatures }
  * @param {object} [projectConfig] - Optional project config from resolveProject(). If omitted, auto-resolves.
  */
-export function getProjectContext(agentName = 'claude', taskContext: { files?: string[]; types?: string; signatures?: string } = {}, projectConfig: any = null) {
+export function getProjectContext(
+  agentName = 'claude',
+  taskContext: { files?: string[]; types?: string; signatures?: string } = {},
+  projectConfig: any = null,
+) {
   if (!projectConfig) {
     projectConfig = resolveProject({ skipValidation: true });
   }

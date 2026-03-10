@@ -76,9 +76,9 @@ async function apiGemini(): Promise<string[] | null> {
   const data = await httpGet(
     `https://generativelanguage.googleapis.com/v1beta/models?key=${key}&pageSize=200`,
   );
-  return (
-    (data as { models?: Array<{ name: string }> }).models || []
-  ).map((m) => m.name.replace('models/', '')).sort();
+  return ((data as { models?: Array<{ name: string }> }).models || [])
+    .map((m) => m.name.replace('models/', ''))
+    .sort();
 }
 
 // ── Strategy 2: Ask the CLI (cheap model, tiny prompt) ──────────────────────

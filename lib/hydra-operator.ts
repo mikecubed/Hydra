@@ -33,11 +33,7 @@ import {
   formatEffortDisplay,
   bestAgentFor,
 } from './hydra-agents.ts';
-import {
-  checkUsage,
-  renderUsageDashboard,
-  formatTokens,
-} from './hydra-usage.ts';
+import { checkUsage, renderUsageDashboard, formatTokens } from './hydra-usage.ts';
 import { verifyAgentQuota } from './hydra-model-recovery.ts';
 import {
   getSessionUsage,
@@ -195,7 +191,11 @@ let dryRunMode = false;
 
 const workers = new Map<string, AgentWorker>();
 
-function startAgentWorker(agent: string, baseUrl: string, { rl }: { rl?: import('node:readline').Interface } = {}) {
+function startAgentWorker(
+  agent: string,
+  baseUrl: string,
+  { rl }: { rl?: import('node:readline').Interface } = {},
+) {
   const name = agent.toLowerCase();
   if (workers.has(name) && workers.get(name)!.status !== 'stopped') {
     return workers.get(name);
@@ -322,7 +322,8 @@ function stopAllWorkers() {
 }
 
 // @ts-expect-error TS6133 — function kept for debugging use
-function _getWorkerStatus(agent: string) { // eslint-disable-line @typescript-eslint/no-unused-vars
+function _getWorkerStatus(agent: string) {
+  // eslint-disable-line @typescript-eslint/no-unused-vars
   const worker = workers.get(agent.toLowerCase());
   if (!worker) return null;
   return {
@@ -334,7 +335,11 @@ function _getWorkerStatus(agent: string) { // eslint-disable-line @typescript-es
   };
 }
 
-function startAgentWorkers(agentNames: string[], baseUrl: string, opts: { rl?: import('node:readline').Interface } = {}) {
+function startAgentWorkers(
+  agentNames: string[],
+  baseUrl: string,
+  opts: { rl?: import('node:readline').Interface } = {},
+) {
   for (const agent of agentNames) {
     startAgentWorker(agent, baseUrl, opts);
   }
@@ -351,7 +356,7 @@ function formatUptime(ms: number) {
 async function ensureDaemon(baseUrl: string, { quiet = false }: { quiet?: boolean } = {}) {
   // Check if daemon is already running
   try {
-    await request('GET', baseUrl, '/health') as any;
+    (await request('GET', baseUrl, '/health')) as any;
     return true;
   } catch {
     // Not running — try to start it
@@ -374,7 +379,7 @@ async function ensureDaemon(baseUrl: string, { quiet = false }: { quiet?: boolea
   for (let i = 0; i < 32; i++) {
     await new Promise((r) => setTimeout(r, 250));
     try {
-      await request('GET', baseUrl, '/health') as any;
+      (await request('GET', baseUrl, '/health')) as any;
       if (!quiet) {
         process.stderr.write(`  ${SUCCESS('\u2713')} Daemon started\n`);
       }
@@ -475,7 +480,9 @@ function launchAgentTerminals(agentNames: string[], baseUrl: string) {
     }
     exec(cmd, { cwd });
 
-    const icon = ({ gemini: '\u2726', codex: '\u25B6', claude: '\u2666' } as Record<string, string>)[agent] || '\u25CF';
+    const icon =
+      ({ gemini: '\u2726', codex: '\u25B6', claude: '\u2666' } as Record<string, string>)[agent] ||
+      '\u25CF';
     console.log(
       `  ${SUCCESS('\u2713')} ${`${colorAgent(agent)} ${icon} ${agent}`}  terminal launched`,
     );
@@ -515,7 +522,7 @@ async function printWelcome(baseUrl: string) {
 
   // Startup alert: check for in-progress tasks and pending handoffs
   try {
-    const sessionStatus = await request('GET', baseUrl, '/session/status') as any;
+    const sessionStatus = (await request('GET', baseUrl, '/session/status')) as any;
     if (sessionStatus.activeSession?.status === 'paused') {
       const reason = sessionStatus.activeSession.pauseReason;
       console.log(
@@ -549,9 +556,14 @@ async function printWelcome(baseUrl: string) {
     for (const [agent, info] of Object.entries(models)) {
       if (agent === '_mode') continue;
       const colorFn = (AGENT_COLORS as any)[agent] || pc.white;
-      const shortModel = ((info as any).active || '').replace(/^claude-/, '').replace(/^gemini-/, '');
+      const shortModel = ((info as any).active || '')
+        .replace(/^claude-/, '')
+        .replace(/^gemini-/, '');
       const tag = (info as any).isOverride ? pc.yellow(' *') : '';
-      const effLabel = formatEffortDisplay((info as any).active, (info as Record<string, any>)['reasoningEffort']);
+      const effLabel = formatEffortDisplay(
+        (info as any).active,
+        (info as Record<string, any>)['reasoningEffort'],
+      );
       const eff = effLabel ? pc.yellow(` ${effLabel}`) : '';
       parts.push(`${colorFn(agent)}${DIM(':')}${pc.white(shortModel)}${eff}${tag}`);
     }
@@ -609,7 +621,7 @@ async function printWelcome(baseUrl: string) {
 
   // Context-aware next steps on startup
   try {
-    const sessionStatus = await request('GET', baseUrl, '/session/status') as any;
+    const sessionStatus = (await request('GET', baseUrl, '/session/status')) as any;
     printNextSteps({
       agentSuggestions: sessionStatus.agentSuggestions,
       pendingHandoffs: sessionStatus.pendingHandoffs,
@@ -651,7 +663,9 @@ function buildAgentMessage(agent: string, userPrompt: string) {
 
 function buildMiniRoundBrief(agent: string, userPrompt: string, report: any) {
   const agentConfig = getAgent(agent);
-  const tasks = Array.isArray(report?.tasks) ? report.tasks.map((item: any) => normalizeTask(item)).filter(Boolean) : [];
+  const tasks = Array.isArray(report?.tasks)
+    ? report.tasks.map((item: any) => normalizeTask(item)).filter(Boolean)
+    : [];
   const questions = Array.isArray(report?.questions) ? report.questions : [];
   const consensus = String(report?.consensus || '').trim();
 
@@ -795,7 +809,19 @@ function shouldCrossVerify(classification: any) {
   return false;
 }
 
-async function publishMiniRoundDelegation({ baseUrl, from, agents, promptText, report }: { baseUrl: string; from: string; agents: string[]; promptText: string; report: any }) {
+async function publishMiniRoundDelegation({
+  baseUrl,
+  from,
+  agents,
+  promptText,
+  report,
+}: {
+  baseUrl: string;
+  from: string;
+  agents: string[];
+  promptText: string;
+  report: any;
+}) {
   const normalizedTasks = (Array.isArray(report?.tasks) ? report.tasks : [])
     .map(normalizeTask)
     .filter(Boolean);
@@ -811,21 +837,21 @@ async function publishMiniRoundDelegation({ baseUrl, from, agents, promptText, r
 
   const createdTasks = [];
   for (const task of tasksToCreate) {
-    const created = await request('POST', baseUrl, '/task/add', {
+    const created = (await request('POST', baseUrl, '/task/add', {
       title: task.title,
       owner: task.owner,
       status: 'todo',
       notes: task.rationale ? `Mini-round rationale: ${task.rationale}` : '',
-    }) as any;
+    })) as any;
     createdTasks.push(created.task);
   }
 
-  const decision = await request('POST', baseUrl, '/decision', {
+  const decision = (await request('POST', baseUrl, '/decision', {
     title: `Hydra Mini Round: ${short(promptText, 90)}`,
     owner: from,
     rationale: short(report?.consensus || 'Mini-round completed without explicit consensus.', 600),
     impact: `recommended=${report?.recommendedMode || 'handoff'}; tasks=${createdTasks.length}`,
-  }) as any;
+  })) as any;
 
   const handoffs = [];
   for (const agent of agents) {
@@ -833,13 +859,13 @@ async function publishMiniRoundDelegation({ baseUrl, from, agents, promptText, r
       .filter((task: any) => task.owner === agent || task.owner === 'unassigned')
       .map((task) => task.id);
     const summary = buildMiniRoundBrief(agent, promptText, report);
-    const handoff = await request('POST', baseUrl, '/handoff', {
+    const handoff = (await request('POST', baseUrl, '/handoff', {
       from,
       to: agent,
       summary,
       nextStep: 'Acknowledge and execute top-priority delegated task.',
       tasks: agentTaskIds,
-    }) as any;
+    })) as any;
     handoffs.push(handoff.handoff);
   }
 
@@ -863,7 +889,17 @@ async function publishMiniRoundDelegation({ baseUrl, from, agents, promptText, r
   };
 }
 
-async function dispatchPrompt({ baseUrl, from, agents, promptText }: { baseUrl: string; from: string; agents: string[]; promptText: string }) {
+async function dispatchPrompt({
+  baseUrl,
+  from,
+  agents,
+  promptText,
+}: {
+  baseUrl: string;
+  from: string;
+  agents: string[];
+  promptText: string;
+}) {
   const records = [];
   for (const agent of agents) {
     const summary = buildAgentMessage(agent, promptText);
@@ -874,7 +910,7 @@ async function dispatchPrompt({ baseUrl, from, agents, promptText }: { baseUrl: 
       nextStep: 'Start work and report first milestone via hydra:handoff.',
       tasks: [],
     };
-    const result = await request('POST', baseUrl, '/handoff', payload) as any;
+    const result = (await request('POST', baseUrl, '/handoff', payload)) as any;
     records.push({
       agent,
       handoffId: result?.handoff?.id || null,
@@ -890,7 +926,13 @@ async function publishFastPathDelegation({
   promptText,
   classification,
   agents = null,
-}: { baseUrl: string; from: string; promptText: string; classification: any; agents?: string[] | null }) {
+}: {
+  baseUrl: string;
+  from: string;
+  promptText: string;
+  classification: any;
+  agents?: string[] | null;
+}) {
   const { taskType } = classification;
   let { suggestedAgent } = classification;
 
@@ -909,22 +951,22 @@ async function publishFastPathDelegation({
     suggestedAgent = best;
   }
 
-  const task = await request('POST', baseUrl, '/task/add', {
+  const task = (await request('POST', baseUrl, '/task/add', {
     title: short(promptText, 200) as any,
     owner: suggestedAgent,
     status: 'todo',
     type: taskType,
     notes: `Fast-path dispatch (confidence=${classification.confidence}, reason: ${classification.reason})`,
-  }) as any;
+  })) as any;
 
   const summary = buildAgentMessage(suggestedAgent, promptText);
-  const handoff = await request('POST', baseUrl, '/handoff', {
+  const handoff = (await request('POST', baseUrl, '/handoff', {
     from,
     to: suggestedAgent,
     summary,
     nextStep: 'Start work and report first milestone via hydra:handoff.',
     tasks: task.task?.id ? [task.task.id] : [],
-  }) as any;
+  })) as any;
 
   // Record activity annotation
   pushActivity(
@@ -949,7 +991,13 @@ async function publishFastPathDelegation({
 /**
  * Build a role-aware tandem brief for an agent in a tandem pair.
  */
-function buildTandemBrief(agent: any, partner: any, promptText: any, _classification: any, role: any) {
+function buildTandemBrief(
+  agent: any,
+  partner: any,
+  promptText: any,
+  _classification: any,
+  role: any,
+) {
   const agentConfig = getAgent(agent);
   const agentLabel = agentConfig ? agentConfig.label : agent.toUpperCase();
   const partnerLabel = getAgent(partner)?.label || partner.toUpperCase();
@@ -994,7 +1042,13 @@ async function publishTandemDelegation({
   promptText,
   classification,
   agents = null,
-}: { baseUrl: string; from: string; promptText: string; classification: any; agents?: string[] | null }) {
+}: {
+  baseUrl: string;
+  from: string;
+  promptText: string;
+  classification: any;
+  agents?: string[] | null;
+}) {
   let { tandemPair, taskType } = classification;
 
   // Re-resolve pair with agent filter
@@ -1010,42 +1064,42 @@ async function publishTandemDelegation({
   const { lead, follow } = tandemPair;
 
   // Create lead task
-  const leadTask = await request('POST', baseUrl, '/task/add', {
+  const leadTask = (await request('POST', baseUrl, '/task/add', {
     title: `[Lead] ${short(promptText, 180)}`,
     owner: lead,
     status: 'todo',
     type: taskType,
     notes: `Tandem lead (${lead} → ${follow}). Analyze/plan then hand off.`,
-  }) as any;
+  })) as any;
 
   // Create follow task
-  const followTask = await request('POST', baseUrl, '/task/add', {
+  const followTask = (await request('POST', baseUrl, '/task/add', {
     title: `[Follow] ${short(promptText, 180)}`,
     owner: follow,
     status: 'todo',
     type: taskType,
     notes: `Tandem follow (from ${lead}). Execute based on lead's analysis. Ref: task ${leadTask.task?.id || '?'}`,
-  }) as any;
+  })) as any;
 
   // Create lead handoff
   const leadBrief = buildTandemBrief(lead, follow, promptText, classification, 'lead');
-  const leadHandoff = await request('POST', baseUrl, '/handoff', {
+  const leadHandoff = (await request('POST', baseUrl, '/handoff', {
     from,
     to: lead,
     summary: leadBrief,
     nextStep: `Analyze the objective and produce actionable plan. Your output will be forwarded to ${follow}.`,
     tasks: leadTask.task?.id ? [leadTask.task.id] : [],
-  }) as any;
+  })) as any;
 
   // Create follow handoff
   const followBrief = buildTandemBrief(follow, lead, promptText, classification, 'follow');
-  const followHandoff = await request('POST', baseUrl, '/handoff', {
+  const followHandoff = (await request('POST', baseUrl, '/handoff', {
     from,
     to: follow,
     summary: followBrief,
     nextStep: `Build on ${lead}'s analysis and execute. Reference task ${leadTask.task?.id || '?'}.`,
     tasks: followTask.task?.id ? [followTask.task.id] : [],
-  }) as any;
+  })) as any;
 
   // Record activity
   pushActivity(
@@ -1077,7 +1131,12 @@ async function publishTandemDelegation({
  * @param {object} [opts]
  * @param {Function} [onProgress] - Called with parsed JSON progress markers from stderr
  */
-function spawnAsync(cmd: string, args: string[], opts: any = {}, onProgress: ((data: any) => void) | null = null) {
+function spawnAsync(
+  cmd: string,
+  args: string[],
+  opts: any = {},
+  onProgress: ((data: any) => void) | null = null,
+) {
   return new Promise((resolve) => {
     const chunks: { stdout: string[]; stderr: string[] } = { stdout: [], stderr: [] };
     let stderrBuf = '';
@@ -1128,7 +1187,14 @@ async function runCouncilPrompt({
   preview = false,
   onProgress = null,
   agents = null,
-}: { baseUrl: string; promptText: string; rounds?: number; preview?: boolean; onProgress?: ((data: Record<string, unknown>) => void) | null; agents?: string[] | null }) {
+}: {
+  baseUrl: string;
+  promptText: string;
+  rounds?: number;
+  preview?: boolean;
+  onProgress?: ((data: Record<string, unknown>) => void) | null;
+  agents?: string[] | null;
+}) {
   const councilScript = path.join(HYDRA_ROOT, 'lib', 'hydra-council.ts');
   const councilTimeoutMs = (config as any).routing?.councilTimeoutMs ?? 420_000;
   const args = [
@@ -1147,7 +1213,7 @@ async function runCouncilPrompt({
     args.push(`agents=${agents.join(',')}`);
   }
 
-  const result = await spawnAsync('node', args, { cwd: config.projectRoot }, onProgress) as any;
+  const result = (await spawnAsync('node', args, { cwd: config.projectRoot }, onProgress)) as any;
 
   return {
     ok: result.status === 0,
@@ -1165,7 +1231,15 @@ async function runCouncilJson({
   publish = false,
   onProgress = null,
   agents = null,
-}: { baseUrl: string; promptText: string; rounds?: number; preview?: boolean; publish?: boolean; onProgress?: ((data: Record<string, unknown>) => void) | null; agents?: string[] | null }) {
+}: {
+  baseUrl: string;
+  promptText: string;
+  rounds?: number;
+  preview?: boolean;
+  publish?: boolean;
+  onProgress?: ((data: Record<string, unknown>) => void) | null;
+  agents?: string[] | null;
+}) {
   const councilScript = path.join(HYDRA_ROOT, 'lib', 'hydra-council.ts');
   const councilTimeoutMs = (config as any).routing?.councilTimeoutMs ?? 420_000;
   const args = [
@@ -1185,7 +1259,7 @@ async function runCouncilJson({
     args.push(`agents=${agents.join(',')}`);
   }
 
-  const result = await spawnAsync('node', args, { cwd: config.projectRoot }, onProgress) as any;
+  const result = (await spawnAsync('node', args, { cwd: config.projectRoot }, onProgress)) as any;
 
   if (result.status !== 0) {
     return {
@@ -1226,7 +1300,16 @@ async function runAutoPrompt({
   councilRounds,
   preview,
   onProgress = null,
-}: { baseUrl: string; from: string; agents: string[]; promptText: string; miniRounds: number; councilRounds: number; preview: boolean; onProgress?: ((data: Record<string, unknown>) => void) | null }) {
+}: {
+  baseUrl: string;
+  from: string;
+  agents: string[];
+  promptText: string;
+  miniRounds: number;
+  councilRounds: number;
+  preview: boolean;
+  onProgress?: ((data: Record<string, unknown>) => void) | null;
+}) {
   // Intent gate: normalize filler/abbreviations, optionally LLM-rewrite low-confidence prompts
   const _intentCfg = (() => {
     try {
@@ -1415,7 +1498,17 @@ async function runAutoPromptLegacy({
   preview,
   onProgress,
   classification,
-}: { baseUrl: string; from: string; agents: string[]; promptText: string; miniRounds: number; councilRounds: number; preview: boolean; onProgress: ((data: any) => void) | null; classification: any | null }) {
+}: {
+  baseUrl: string;
+  from: string;
+  agents: string[];
+  promptText: string;
+  miniRounds: number;
+  councilRounds: number;
+  preview: boolean;
+  onProgress: ((data: any) => void) | null;
+  classification: any | null;
+}) {
   // Intent gate: skip if classification already provided (caller already gated the prompt).
   // If called directly, normalize and optionally LLM-rewrite low-confidence prompts.
   let effectivePrompt = promptText;
@@ -1554,7 +1647,16 @@ async function runSmartPrompt({
   councilRounds,
   preview,
   onProgress = null,
-}: { baseUrl: string; from: string; agents: string[]; promptText: string; miniRounds: number; councilRounds: number; preview: boolean; onProgress?: ((data: Record<string, unknown>) => void) | null }) {
+}: {
+  baseUrl: string;
+  from: string;
+  agents: string[];
+  promptText: string;
+  miniRounds: number;
+  councilRounds: number;
+  preview: boolean;
+  onProgress?: ((data: Record<string, unknown>) => void) | null;
+}) {
   const classification = classifyPrompt(promptText);
   const targetMode = (SMART_TIER_MAP as Record<string, string>)[classification.tier] || 'balanced';
 
@@ -1605,11 +1707,15 @@ async function runSmartPrompt({
 }
 
 async function printStatus(baseUrl: string, agents: string[]) {
-  const summary = await request('GET', baseUrl, '/summary') as any;
+  const summary = (await request('GET', baseUrl, '/summary')) as any;
   const agentNextMap: any = {};
   for (const agent of agents) {
     try {
-      const next = await request('GET', baseUrl, `/next?agent=${encodeURIComponent(agent)}`) as any;
+      const next = (await request(
+        'GET',
+        baseUrl,
+        `/next?agent=${encodeURIComponent(agent)}`,
+      )) as any;
       agentNextMap[agent] = next.next;
     } catch {
       agentNextMap[agent] = { action: 'unknown' };
@@ -2227,7 +2333,18 @@ async function interactiveLoop({
   autoCouncilRounds,
   autoPreview,
   showWelcome,
-}: { baseUrl: string; from: string; agents: string[]; initialMode: string; councilRounds: number; councilPreview: boolean; autoMiniRounds: number; autoCouncilRounds: number; autoPreview: boolean; showWelcome: boolean }) {
+}: {
+  baseUrl: string;
+  from: string;
+  agents: string[];
+  initialMode: string;
+  councilRounds: number;
+  councilPreview: boolean;
+  autoMiniRounds: number;
+  autoCouncilRounds: number;
+  autoPreview: boolean;
+  showWelcome: boolean;
+}) {
   let mode = initialMode;
   let conciergeActive = false;
   let dispatchDepth = 0; // >0 while a blocking dispatch/council await is in flight
@@ -2439,14 +2556,18 @@ async function interactiveLoop({
   };
 
   // ── Daemon resume helper (extracted for unified :resume) ───────────────────
-  async function executeDaemonResume(baseUrl: string, agents: string[], rl: import('node:readline').Interface) {
+  async function executeDaemonResume(
+    baseUrl: string,
+    agents: string[],
+    rl: import('node:readline').Interface,
+  ) {
     try {
-      const sessionStatus = await request('GET', baseUrl, '/session/status') as any;
+      const sessionStatus = (await request('GET', baseUrl, '/session/status')) as any;
 
       // Unpause if paused
       if (sessionStatus.activeSession?.status === 'paused') {
         try {
-          await request('POST', baseUrl, '/session/unpause') as any;
+          (await request('POST', baseUrl, '/session/unpause')) as any;
           console.log(`  ${SUCCESS('✓')} Session unpaused`);
         } catch (err: unknown) {
           console.log(`  ${WARNING('⚠')} Could not unpause: ${(err as Error).message}`);
@@ -2459,7 +2580,10 @@ async function interactiveLoop({
         console.log('');
         for (const t of stale) {
           try {
-            await request('POST', baseUrl, '/task/update', { taskId: t.id, status: 'todo' }) as any;
+            (await request('POST', baseUrl, '/task/update', {
+              taskId: t.id,
+              status: 'todo',
+            })) as any;
             const mins = Math.round((Date.now() - new Date(t.updatedAt).getTime()) / 60_000);
             console.log(
               `  ${WARNING('↻')} ${pc.white(t.id)} ${colorAgent(t.owner)} reset to todo ${DIM(`(was stale ${mins}m)`)}`,
@@ -2478,7 +2602,10 @@ async function interactiveLoop({
         for (const h of handoffs) {
           const targetAgent = String(h.to || '').toLowerCase();
           try {
-            await request('POST', baseUrl, '/handoff/ack', { handoffId: h.id, agent: targetAgent }) as any;
+            (await request('POST', baseUrl, '/handoff/ack', {
+              handoffId: h.id,
+              agent: targetAgent,
+            })) as any;
             console.log(
               `  ${SUCCESS('✓')} ${pc.white(h.id)} ${colorAgent(h.from)}→${colorAgent(h.to)} acknowledged`,
             );
@@ -2497,7 +2624,11 @@ async function interactiveLoop({
 
       // Agent suggestions
       for (const [agent, suggestion] of Object.entries(sessionStatus.agentSuggestions || {})) {
-        if ((suggestion as any)?.action && (suggestion as any).action !== 'idle' && (suggestion as any).action !== 'unknown') {
+        if (
+          (suggestion as any)?.action &&
+          (suggestion as any).action !== 'idle' &&
+          (suggestion as any).action !== 'unknown'
+        ) {
           agentsToLaunch.add(agent);
         }
       }
@@ -2633,7 +2764,9 @@ async function interactiveLoop({
       if (line.startsWith(':') && line.endsWith('?')) {
         const cmdPart = line.slice(0, -1).trim();
         // Try exact match, then base command (e.g. `:tasks scan ?` → `:tasks`)
-        const cmd = (COMMAND_HELP as Record<string, any>)[cmdPart] ? cmdPart : cmdPart.split(/\s/)[0];
+        const cmd = (COMMAND_HELP as Record<string, any>)[cmdPart]
+          ? cmdPart
+          : cmdPart.split(/\s/)[0];
         printCommandHelp(cmd);
         rl.prompt();
         return;
@@ -2699,7 +2832,7 @@ async function interactiveLoop({
         const gitInfo = getGitInfo();
         let statsData = null;
         try {
-          statsData = await request('GET', baseUrl, '/stats') as any;
+          statsData = (await request('GET', baseUrl, '/stats')) as any;
         } catch {
           /* skip */
         }
@@ -2733,7 +2866,7 @@ async function interactiveLoop({
             budgetStatus,
             gitBranch: gitInfo?.branch,
             gitLog: gitLog ?? undefined,
-            statsData: /** @type {any} */ (statsData),
+            statsData: /** @type {any} */ statsData,
           });
           if (spinner) spinner.stop();
 
@@ -2775,7 +2908,7 @@ async function interactiveLoop({
 
         let self = null;
         try {
-          const resp = await request('GET', baseUrl, '/self') as any;
+          const resp = (await request('GET', baseUrl, '/self')) as any;
           self = resp?.self || null;
         } catch {
           self = null;
@@ -2990,7 +3123,7 @@ async function interactiveLoop({
       }
       if (line === ':stats') {
         try {
-          const statsData = await request('GET', baseUrl, '/stats') as any;
+          const statsData = (await request('GET', baseUrl, '/stats')) as any;
           console.log(renderStatsDashboard(statsData.metrics, statsData.usage));
         } catch {
           // Fallback to just usage if daemon is down
@@ -3019,7 +3152,7 @@ async function interactiveLoop({
             console.log(`  ${ACCENT('→')} ${items[0].label}`);
             console.log(`    ${DIM(items[0].hint)}`);
           } else {
-            const choice = await promptChoice(rl, {
+            const choice = (await promptChoice(rl, {
               message: 'What would you like to resume?',
               choices: items.map((it) => ({
                 label: it.label,
@@ -3027,7 +3160,7 @@ async function interactiveLoop({
                 description: it.hint,
               })),
               timeout: 60_000,
-            }) as any;
+            })) as any;
             if (!choice.value) {
               rl.prompt();
               return;
@@ -3082,7 +3215,7 @@ async function interactiveLoop({
       if (line === ':pause' || line.startsWith(':pause ')) {
         const reason = line.slice(':pause'.length).trim();
         try {
-          await request('POST', baseUrl, '/session/pause', { reason }) as any;
+          (await request('POST', baseUrl, '/session/pause', { reason })) as any;
           console.log(`  ${SUCCESS('\u2713')} Session paused${reason ? `: "${reason}"` : ''}`);
         } catch (err: unknown) {
           console.log(`  ${ERROR((err as Error).message)}`);
@@ -3092,7 +3225,7 @@ async function interactiveLoop({
       }
       if (line === ':unpause') {
         try {
-          await request('POST', baseUrl, '/session/resume', {}) as any;
+          (await request('POST', baseUrl, '/session/resume', {})) as any;
           console.log(`  ${SUCCESS('\u2713')} Session resumed`);
         } catch (err: unknown) {
           console.log(`  ${ERROR((err as Error).message)}`);
@@ -3272,7 +3405,7 @@ async function interactiveLoop({
       if (line === ':fork' || line.startsWith(':fork ')) {
         const reason = line.slice(':fork'.length).trim();
         try {
-          const result = await request('POST', baseUrl, '/session/fork', { reason }) as any;
+          const result = (await request('POST', baseUrl, '/session/fork', { reason })) as any;
           console.log(`  ${SUCCESS('\u2713')} Session forked: ${pc.white(result.session.id)}`);
           if (reason) console.log(`  ${DIM('Reason:')} ${reason}`);
         } catch (err: unknown) {
@@ -3289,7 +3422,7 @@ async function interactiveLoop({
           return;
         }
         try {
-          const result = await request('POST', baseUrl, '/session/spawn', { focus }) as any;
+          const result = (await request('POST', baseUrl, '/session/spawn', { focus })) as any;
           console.log(
             `  ${SUCCESS('\u2713')} Child session spawned: ${pc.white(result.session.id)}`,
           );
@@ -3389,7 +3522,7 @@ async function interactiveLoop({
 
         // Interactive menu when no target specified
         if (!what) {
-          const pick = await promptChoice(rl, {
+          const pick = (await promptChoice(rl, {
             title: 'Clear Target',
             context: { Warning: 'Select what to clear' },
             choices: [
@@ -3401,7 +3534,7 @@ async function interactiveLoop({
 
               { label: 'Screen', value: 'screen', hint: 'clear terminal' },
             ],
-          }) as any;
+          })) as any;
           if (!pick.value) {
             rl.prompt();
             return;
@@ -3431,7 +3564,7 @@ async function interactiveLoop({
 
         // Destructive targets — confirmation gate
         if (what === 'all' || what === 'tasks' || what === 'handoffs') {
-          const clearConfirm = await promptChoice(rl, {
+          const clearConfirm = (await promptChoice(rl, {
             title: 'Confirm Clear',
             context: {
               Scope: what === 'all' ? 'all tasks & handoffs' : what,
@@ -3442,14 +3575,14 @@ async function interactiveLoop({
               { label: 'No, cancel', value: 'no', hint: 'abort' },
             ],
             defaultValue: 'yes',
-          }) as any;
+          })) as any;
           if (clearConfirm.value === 'no') {
             console.log(`  ${DIM('Cancelled.')}`);
             rl.prompt();
             return;
           }
           try {
-            const { state } = await request('GET', baseUrl, '/state') as any;
+            const { state } = (await request('GET', baseUrl, '/state')) as any;
             let ackedCount = 0;
             let cancelledCount = 0;
 
@@ -3457,7 +3590,7 @@ async function interactiveLoop({
               const pending = state.handoffs.filter((h: any) => !h.acknowledgedAt);
               for (const h of pending) {
                 const agent = String(h.to || 'human').toLowerCase();
-                await request('POST', baseUrl, '/handoff/ack', { handoffId: h.id, agent }) as any;
+                (await request('POST', baseUrl, '/handoff/ack', { handoffId: h.id, agent })) as any;
                 ackedCount++;
               }
             }
@@ -3467,10 +3600,10 @@ async function interactiveLoop({
                 (t: any) => t.status === 'todo' || t.status === 'in_progress',
               );
               for (const t of open) {
-                await request('POST', baseUrl, '/task/update', {
+                (await request('POST', baseUrl, '/task/update', {
                   taskId: t.id,
                   status: 'cancelled',
-                }) as any;
+                })) as any;
                 cancelledCount++;
               }
             }
@@ -3502,10 +3635,10 @@ async function interactiveLoop({
       if (line.startsWith(':cancel ')) {
         const id = line.slice(':cancel '.length).trim().toUpperCase();
         try {
-          const result = await request('POST', baseUrl, '/task/update', {
+          const result = (await request('POST', baseUrl, '/task/update', {
             taskId: id,
             status: 'cancelled',
-          }) as any;
+          })) as any;
           console.log(
             `  ${SUCCESS('\u2713')} ${pc.white(result.task.id)} cancelled ${DIM(result.task.title)}`,
           ) as any;
@@ -3593,7 +3726,7 @@ async function interactiveLoop({
           child.on('close', async () => {
             // After branch review, surface any conflict worktrees from daemon tasks
             try {
-              const { state } = await request('GET', baseUrl, '/state') as any;
+              const { state } = (await request('GET', baseUrl, '/state')) as any;
               const conflictTasks = (state.tasks || []).filter((t: any) => t.worktreeConflict);
               if (conflictTasks.length > 0) {
                 console.log('');
@@ -3663,8 +3796,10 @@ async function interactiveLoop({
 
         // Default: list daemon tasks (original behavior)
         try {
-          const { state } = await request('GET', baseUrl, '/state') as any;
-          const active = state.tasks.filter((t: any) => t.status !== 'cancelled' && t.status !== 'done');
+          const { state } = (await request('GET', baseUrl, '/state')) as any;
+          const active = state.tasks.filter(
+            (t: any) => t.status !== 'cancelled' && t.status !== 'done',
+          );
           if (active.length === 0) {
             console.log(`  ${DIM('No active tasks')}`);
           } else {
@@ -3687,7 +3822,7 @@ async function interactiveLoop({
 
       if (line === ':handoffs') {
         try {
-          const { state } = await request('GET', baseUrl, '/state') as any;
+          const { state } = (await request('GET', baseUrl, '/state')) as any;
           const pending = state.handoffs.filter((h: any) => !h.acknowledgedAt);
           const recent = state.handoffs.filter((h: any) => h.acknowledgedAt).slice(-5);
           if (pending.length === 0 && recent.length === 0) {
@@ -3722,7 +3857,7 @@ async function interactiveLoop({
 
       if (line === ':archive') {
         try {
-          const result = await request('POST', baseUrl, '/state/archive') as any;
+          const result = (await request('POST', baseUrl, '/state/archive')) as any;
           console.log(
             `  ${SUCCESS('\u2713')} Archived: ${result.moved.tasks} tasks, ${result.moved.handoffs} handoffs, ${result.moved.blockers} blockers${result.eventsTrimmed ? `, ${result.eventsTrimmed} events trimmed` : ''}`,
           );
@@ -3735,7 +3870,7 @@ async function interactiveLoop({
 
       if (line === ':events') {
         try {
-          const result = await request('GET', baseUrl, '/events') as any;
+          const result = (await request('GET', baseUrl, '/events')) as any;
           const events = result.events || [];
           if (events.length === 0) {
             console.log(`  ${DIM('No events')}`);
@@ -3778,7 +3913,7 @@ async function interactiveLoop({
       }
 
       if (line === ':shutdown') {
-        const shutdownConfirm = await promptChoice(rl, {
+        const shutdownConfirm = (await promptChoice(rl, {
           title: 'Confirm Shutdown',
           context: { Warning: 'This will stop the daemon and all agent activity' },
           choices: [
@@ -3786,7 +3921,7 @@ async function interactiveLoop({
             { label: 'No, cancel', value: 'no', hint: 'abort' },
           ],
           defaultValue: 'yes',
-        }) as any;
+        })) as any;
         if (shutdownConfirm.value === 'no') {
           console.log(`  ${DIM('Cancelled.')}`);
           rl.prompt();
@@ -3794,7 +3929,7 @@ async function interactiveLoop({
         }
         stopAllWorkers();
         try {
-          await request('POST', baseUrl, '/shutdown') as any;
+          (await request('POST', baseUrl, '/shutdown')) as any;
           console.log(`  ${SUCCESS('\u2713')} Daemon shutting down`);
         } catch (err: unknown) {
           console.log(`  ${ERROR((err as Error).message)}`);
@@ -4154,8 +4289,8 @@ async function interactiveLoop({
               ),
             );
             const recent =
-              /** @type {Array<{severity?: string, ts?: number|string, action?: string, pipeline?: string, explanation?: string}>} */ (
-                getDoctorLog(10)
+              /** @type {Array<{severity?: string, ts?: number|string, action?: string, pipeline?: string, explanation?: string}>} */ getDoctorLog(
+                10,
               );
             if (recent.length > 0) {
               console.log('');
@@ -4179,8 +4314,8 @@ async function interactiveLoop({
           } else if (doctorArg === 'log') {
             // Show last 25 entries
             const entries =
-              /** @type {Array<{severity?: string, ts?: number|string, action?: string, pipeline?: string, explanation?: string, recurring?: boolean}>} */ (
-                getDoctorLog(25)
+              /** @type {Array<{severity?: string, ts?: number|string, action?: string, pipeline?: string, explanation?: string, recurring?: boolean}>} */ getDoctorLog(
+                25,
               );
             console.log('');
             console.log(sectionHeader('Doctor Log'));
@@ -4223,7 +4358,8 @@ async function interactiveLoop({
                   () => scanErrorActivity(),
                 ],
                 enrich: (items) => enrichWithDiagnosis(items, getOutputContext()),
-                preSelectFilter: (item) => item['severity'] === 'critical' || item['severity'] === 'high',
+                preSelectFilter: (item) =>
+                  item['severity'] === 'critical' || item['severity'] === 'high',
                 executeFn: (item) =>
                   executeFixAction(item, { projectRoot: config.projectRoot, rl }),
                 projectRoot: config.projectRoot,
@@ -4916,7 +5052,7 @@ async function interactiveLoop({
           encoding: 'utf8',
         }).stdout.trim();
         if (status) {
-          const confirm = await promptChoice(rl, {
+          const confirm = (await promptChoice(rl, {
             message: 'Working tree is not clean. Auto-commit before actualize?',
             choices: [
               { label: 'Yes — commit all changes', value: 'yes' },
@@ -4924,7 +5060,7 @@ async function interactiveLoop({
             ],
             defaultIndex: 0,
             timeout: 30_000,
-          }) as any;
+          })) as any;
           if (confirm.value !== 'yes') {
             console.log(`  ${WARNING('Aborted — commit or stash changes first.')}`);
             rl.prompt();
@@ -4942,7 +5078,7 @@ async function interactiveLoop({
         if (isDryRun) actualizeArgs.push('--dry-run');
 
         if (!isDryRun) {
-          const modeChoice = await promptChoice(rl, {
+          const modeChoice = (await promptChoice(rl, {
             message: 'Actualize intensity?',
             context: { default: 'balanced' },
             choices: [
@@ -4956,12 +5092,12 @@ async function interactiveLoop({
             ],
             defaultIndex: 0,
             timeout: 60_000,
-          }) as any;
+          })) as any;
 
           if (modeChoice.value === 'quick') actualizeArgs.push('max-tasks=3', 'max-hours=1');
           else if (modeChoice.value === 'deep') actualizeArgs.push('max-tasks=8', 'max-hours=6');
 
-          const discoveryChoice = await promptChoice(rl, {
+          const discoveryChoice = (await promptChoice(rl, {
             message: 'Enable AI discovery? (agent suggests improvement tasks)',
             context: { default: 'on' },
             choices: [
@@ -4970,11 +5106,11 @@ async function interactiveLoop({
             ],
             defaultIndex: 0,
             timeout: 20_000,
-          }) as any;
+          })) as any;
           if (discoveryChoice.value === 'no') actualizeArgs.push('--no-discovery');
 
           // Let the user choose tasks if they want
-          const selectChoice = await promptChoice(rl, {
+          const selectChoice = (await promptChoice(rl, {
             message: 'Select tasks interactively?',
             context: { default: 'yes' },
             choices: [
@@ -4987,7 +5123,7 @@ async function interactiveLoop({
             ],
             defaultIndex: 0,
             timeout: 20_000,
-          }) as any;
+          })) as any;
           if (selectChoice.value === 'yes') actualizeArgs.push('--interactive');
         }
 
@@ -5100,7 +5236,7 @@ async function interactiveLoop({
           encoding: 'utf8',
         }).stdout.trim();
         if (status) {
-          const confirm = await promptChoice(rl, {
+          const confirm = (await promptChoice(rl, {
             message: 'Working tree is not clean. Auto-commit before nightly?',
             choices: [
               { label: 'Yes \u2014 commit all changes', value: 'yes' },
@@ -5108,7 +5244,7 @@ async function interactiveLoop({
             ],
             defaultIndex: 0,
             timeout: 30_000,
-          }) as any;
+          })) as any;
           if (confirm.value !== 'yes') {
             console.log(`  ${WARNING('Aborted \u2014 commit or stash changes first.')}`);
             rl.prompt();
@@ -5131,7 +5267,7 @@ async function interactiveLoop({
 
         if (!isDryRun) {
           // 1. Execution mode
-          const modeChoice = await promptChoice(rl, {
+          const modeChoice = (await promptChoice(rl, {
             message: 'Execution mode?',
             context: { default: 'balanced' },
             choices: [
@@ -5158,7 +5294,7 @@ async function interactiveLoop({
             ],
             defaultIndex: 0,
             timeout: 60_000,
-          }) as any;
+          })) as any;
 
           if (modeChoice.value === 'quick') {
             nightlyArgs.push('max-tasks=3', 'max-hours=1');
@@ -5180,7 +5316,7 @@ async function interactiveLoop({
                   ? '7'
                   : String(nightlyCfg!.maxTasks || 5);
 
-          const tasksChoice = await promptChoice(rl, {
+          const tasksChoice = (await promptChoice(rl, {
             message: `Max tasks to execute?`,
             context: { default: maxTasksDefault },
             choices: [
@@ -5192,7 +5328,7 @@ async function interactiveLoop({
             defaultIndex: 0,
             freeform: true,
             timeout: 30_000,
-          }) as any;
+          })) as any;
           const maxTasks = Number.parseInt(tasksChoice.value, 10);
           if (!isNaN(maxTasks) && maxTasks > 0) {
             // Remove any previous max-tasks from mode preset
@@ -5211,7 +5347,7 @@ async function interactiveLoop({
                   ? '6'
                   : String(nightlyCfg!.maxHours || 4);
 
-          const hoursChoice = await promptChoice(rl, {
+          const hoursChoice = (await promptChoice(rl, {
             message: `Max hours?`,
             context: { default: maxHoursDefault },
             choices: [
@@ -5223,7 +5359,7 @@ async function interactiveLoop({
             defaultIndex: 0,
             freeform: true,
             timeout: 30_000,
-          }) as any;
+          })) as any;
           const maxHours = Number.parseFloat(hoursChoice.value);
           if (!isNaN(maxHours) && maxHours > 0) {
             const idx = nightlyArgs.findIndex((a) => a.startsWith('max-hours='));
@@ -5232,7 +5368,7 @@ async function interactiveLoop({
           }
 
           // 4. AI discovery toggle
-          const discoveryChoice = await promptChoice(rl, {
+          const discoveryChoice = (await promptChoice(rl, {
             message: 'Enable AI discovery? (agent suggests improvement tasks)',
             context: { default: nightlyCfg!.sources?.['aiDiscovery'] === false ? 'off' : 'on' },
             choices: [
@@ -5241,7 +5377,7 @@ async function interactiveLoop({
             ],
             defaultIndex: nightlyCfg!.sources?.['aiDiscovery'] === false ? 1 : 0,
             timeout: 20_000,
-          }) as any;
+          })) as any;
           if (discoveryChoice.value === 'no') {
             nightlyArgs.push('--no-discovery');
           }
@@ -5332,7 +5468,7 @@ async function interactiveLoop({
             encoding: 'utf8',
           }).stdout.trim();
           if (status) {
-            const confirm = await promptChoice(rl, {
+            const confirm = (await promptChoice(rl, {
               message: 'Working tree is not clean. Auto-commit before evolve resume?',
               choices: [
                 { label: 'Yes \u2014 commit all changes', value: 'yes' },
@@ -5340,7 +5476,7 @@ async function interactiveLoop({
               ],
               defaultIndex: 0,
               timeout: 30_000,
-            }) as any;
+            })) as any;
             if (confirm.value !== 'yes') {
               console.log(`  ${WARNING('Aborted \u2014 commit or stash changes first.')}`);
               rl.prompt();
@@ -5412,7 +5548,7 @@ async function interactiveLoop({
             encoding: 'utf8',
           }).stdout.trim();
           if (status) {
-            const confirm = await promptChoice(rl, {
+            const confirm = (await promptChoice(rl, {
               message: 'Working tree is not clean. Auto-commit before evolve?',
               choices: [
                 { label: 'Yes \u2014 commit all changes', value: 'yes' },
@@ -5420,7 +5556,7 @@ async function interactiveLoop({
               ],
               defaultIndex: 0,
               timeout: 30_000,
-            }) as any;
+            })) as any;
             if (confirm.value !== 'yes') {
               console.log(`  ${WARNING('Aborted \u2014 commit or stash changes first.')}`);
               rl.prompt();
@@ -5478,7 +5614,8 @@ async function interactiveLoop({
             const cmdResult = await conciergeTurn(hint, {
               context: { projectName: config.projectName, projectRoot: config.projectRoot, mode },
             });
-            const cmdResponse = (cmdResult as any).response || (cmdResult as any).fullResponse || '';
+            const cmdResponse =
+              (cmdResult as any).response || (cmdResult as any).fullResponse || '';
             if (cmdResponse) {
               process.stdout.write(`\n  ${pc.blue('\u2B22')} ${DIM(modelLbl)}\n  `);
               process.stdout.write(pc.blue(cmdResponse));
@@ -5565,7 +5702,11 @@ async function interactiveLoop({
       // ── Concierge Intercept ────────────────────────────────────────────
       else if (conciergeActive && !line.startsWith(':') && !isChoiceActive()) {
         // Gather enriched context for the system prompt
-        const context: any = { projectName: config.projectName, projectRoot: config.projectRoot, mode };
+        const context: any = {
+          projectName: config.projectName,
+          projectRoot: config.projectRoot,
+          mode,
+        };
         try {
           context.knownProjects = getRecentProjects();
         } catch {
@@ -5583,7 +5724,7 @@ async function interactiveLoop({
           /* skip */
         }
         try {
-          const sessionStatus = await request('GET', baseUrl, '/session/status') as any;
+          const sessionStatus = (await request('GET', baseUrl, '/session/status')) as any;
           context.openTasks =
             (sessionStatus.inProgressTasks || []).length +
             (sessionStatus.pendingHandoffs || []).length;
@@ -5598,10 +5739,16 @@ async function interactiveLoop({
           /* skip */
         }
         try {
-          const events = await request('GET', baseUrl, '/events/replay?category=task&from=0') as any[];
+          const events = (await request(
+            'GET',
+            baseUrl,
+            '/events/replay?category=task&from=0',
+          )) as any[];
           if (Array.isArray(events)) {
             context.recentCompletions = events
-              .filter((e: any) => e.payload?.status === 'done' || e.payload?.event === 'task_result')
+              .filter(
+                (e: any) => e.payload?.status === 'done' || e.payload?.event === 'task_result',
+              )
               .slice(-3)
               .map((e: any) => ({
                 agent: e.payload?.agent || e.payload?.owner || 'unknown',
@@ -5686,7 +5833,11 @@ async function interactiveLoop({
         try {
           const { isSituational, focus } = detectSituationalQuery(line);
           if (isSituational) {
-            const digest = await buildActivityDigest({ baseUrl, workers: workers as any, focus: focus ?? undefined });
+            const digest = await buildActivityDigest({
+              baseUrl,
+              workers: workers as any,
+              focus: focus ?? undefined,
+            });
             context.activityDigest = formatDigestForPrompt(digest, { focus: focus ?? undefined });
           }
         } catch {
@@ -5785,7 +5936,7 @@ async function interactiveLoop({
               : classification.routeStrategy === 'council'
                 ? 'council deliberation'
                 : `mini-round triage → delegated`;
-        const preDispatch = await promptChoice(rl, {
+        const preDispatch = (await promptChoice(rl, {
           title: 'Pre-dispatch Review',
           context: {
             Classification: `${classification.tier} (${classification.confidence} confidence)`,
@@ -5809,7 +5960,7 @@ async function interactiveLoop({
             },
           ],
           defaultValue: 'proceed',
-        }) as any;
+        })) as any;
 
         if (preDispatch.value === 'cancel') {
           console.log(`  ${DIM('Dispatch cancelled.')}`);
@@ -5969,7 +6120,12 @@ async function interactiveLoop({
         }
         console.log(label('Signals', DIM(classification.reason)));
         if ((auto as any).smartTier) {
-          console.log(label('Tier', `${ACCENT((auto as any).smartTier)} → ${DIM((auto as any).smartMode)} models`));
+          console.log(
+            label(
+              'Tier',
+              `${ACCENT((auto as any).smartTier)} → ${DIM((auto as any).smartMode)} models`,
+            ),
+          );
         }
         if (auto.triage) {
           console.log(label('Rationale', DIM(auto.triage.recommendationRationale || 'n/a')));
@@ -5983,7 +6139,7 @@ async function interactiveLoop({
           console.log(label('Handoffs queued', pc.white(String(auto.published.handoffs.length))));
           const handoffAgents = extractHandoffAgents(auto);
           if (handoffAgents.length > 0) {
-            const postDispatch = await promptChoice(rl, {
+            const postDispatch = (await promptChoice(rl, {
               title: 'Post-dispatch',
               context: {
                 Tasks: `${auto.published.tasks.length} created`,
@@ -6003,7 +6159,7 @@ async function interactiveLoop({
                 { label: 'Skip', value: 'skip', hint: 'tasks dispatched, no execution' },
               ],
               defaultValue: 'workers',
-            }) as any;
+            })) as any;
             if (postDispatch.value === 'workers') {
               startAgentWorkers(handoffAgents as string[], baseUrl, { rl });
             } else if (postDispatch.value === 'launch') {
@@ -6031,7 +6187,7 @@ async function interactiveLoop({
               : gateClassification.tandemPair
                 ? `tandem: ${gateClassification.tandemPair.lead} → ${gateClassification.tandemPair.follow}`
                 : `fast-path → ${gateClassification.suggestedAgent}`;
-          const gateChoice = await promptChoice(rl, {
+          const gateChoice = (await promptChoice(rl, {
             title: 'Council Gate',
             context: {
               Classification: `${gateClassification.tier} (${gateClassification.confidence} confidence)`,
@@ -6048,7 +6204,7 @@ async function interactiveLoop({
               { label: 'Cancel', value: 'cancel', hint: 'abort' },
             ],
             defaultValue: 'efficient',
-          }) as any;
+          })) as any;
           if (gateChoice.value === 'cancel') {
             console.log(`  ${DIM('Dispatch cancelled.')}`);
             rl.prompt();
@@ -6131,8 +6287,14 @@ async function interactiveLoop({
             preview: councilPreview,
             onProgress: (evt) => {
               if (evt['action'] === 'start') {
-                const narrative = phaseNarrative(evt['phase'] as string, evt['agent'] as string, councilTopic);
-                councilSpinner.update(`Council: ${narrative} [${evt['step']}/${evt['totalSteps']}]`);
+                const narrative = phaseNarrative(
+                  evt['phase'] as string,
+                  evt['agent'] as string,
+                  councilTopic,
+                );
+                councilSpinner.update(
+                  `Council: ${narrative} [${evt['step']}/${evt['totalSteps']}]`,
+                );
                 setAgentActivity(evt['agent'] as string, 'working', narrative, {
                   phase: evt['phase'] as string,
                   step: `${evt['step']}/${evt['totalSteps']}`,
@@ -6298,7 +6460,12 @@ async function main() {
       console.log(label('Saved', DIM('skipped mini-round triage (4 agent calls)')));
     }
     if ((auto as any).smartTier) {
-      console.log(label('Tier', `${ACCENT((auto as any).smartTier)} → ${DIM((auto as any).smartMode)} models`));
+      console.log(
+        label(
+          'Tier',
+          `${ACCENT((auto as any).smartTier)} → ${DIM((auto as any).smartMode)} models`,
+        ),
+      );
     }
     if (auto.triage) {
       console.log(label('Rationale', DIM(auto.triage.recommendationRationale || 'n/a')));

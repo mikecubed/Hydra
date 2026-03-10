@@ -148,7 +148,10 @@ export function parseStatsCache(filePath: string) {
         }
       }
     }
-    const totalTokensWeekly = Object.values(weeklyTokensByModel).reduce((s: number, n: number) => s + n, 0);
+    const totalTokensWeekly = Object.values(weeklyTokensByModel).reduce(
+      (s: number, n: number) => s + n,
+      0,
+    );
 
     // Use activity for today even if token data is stale
     const activityEntry = todayActivity || dailyActivity;
@@ -322,7 +325,10 @@ export function checkWindowBudget(options: { windowHours?: number } = {}) {
 
   // Overall: tightest constraint
   const tracked = Object.values(agentWindow).filter((a: any) => a.windowBudget > 0);
-  const highest = tracked.reduce((best: any, a: any) => (!best || a.percent > best.percent ? a : best), null);
+  const highest = tracked.reduce(
+    (best: any, a: any) => (!best || a.percent > best.percent ? a : best),
+    null,
+  );
 
   return {
     ok: !highest || highest.level !== 'critical',
@@ -364,7 +370,7 @@ export function checkUsage(options: { statsPath?: string } = {}) {
     const agentModelTokens: Record<string, number> = {};
     for (const [modelId, used] of Object.entries(tokensByModel)) {
       if (modelBelongsToAgent(modelId, agent)) {
-        agentModelTokens[modelId] = safeNumber((used as any));
+        agentModelTokens[modelId] = safeNumber(used as any);
       }
     }
 
@@ -376,7 +382,8 @@ export function checkUsage(options: { statsPath?: string } = {}) {
       directUsed > 0 ? 'stats-cache' : estimatedUsed > 0 ? 'hydra-metrics-estimate' : 'none';
 
     const activeBudget = activeModel ? safeNumber((budgets as any)[activeModel]) : 0;
-    let tracked: { model: string | null; budget: number; used: number; percent?: number } | null = null;
+    let tracked: { model: string | null; budget: number; used: number; percent?: number } | null =
+      null;
     if (activeBudget > 0) {
       tracked = {
         model: activeModel,
@@ -498,7 +505,7 @@ export function checkUsage(options: { statsPath?: string } = {}) {
     const agentWeeklyTokens: Record<string, number> = {};
     for (const [modelId, used] of Object.entries(weeklyTokensByModel)) {
       if (modelBelongsToAgent(modelId, agent)) {
-        agentWeeklyTokens[modelId] = safeNumber((used as any));
+        agentWeeklyTokens[modelId] = safeNumber(used as any);
       }
     }
     const weeklyUsed = sumObjectValues(agentWeeklyTokens);
@@ -829,7 +836,12 @@ function renderUsageDashboard(usage: any) {
   }
 
   // Status line
-  const statusColors: Record<string, (s: string) => string> = { normal: pc.green, warning: pc.yellow, critical: pc.red, unknown: pc.gray };
+  const statusColors: Record<string, (s: string) => string> = {
+    normal: pc.green,
+    warning: pc.yellow,
+    critical: pc.red,
+    unknown: pc.gray,
+  };
   const statusFn = statusColors[usage.level] || pc.white;
   lines.push('');
   lines.push(

@@ -106,7 +106,9 @@ export function smartMerge(
   cwd: string,
   branchName: string,
   baseBranch: string,
-  opts: { log?: { info: (msg: string) => void; ok: (msg: string) => void; warn: (msg: string) => void } } = {},
+  opts: {
+    log?: { info: (msg: string) => void; ok: (msg: string) => void; warn: (msg: string) => void };
+  } = {},
 ): { ok: boolean; method: string; conflicts: string[] } {
   const _log = opts.log ?? { info: () => {}, ok: () => {}, warn: () => {} };
 
@@ -146,7 +148,11 @@ export function smartMerge(
 // ── Review-specific git helpers ─────────────────────────────────────────────
 
 /** List branches matching a prefix pattern. */
-export function listBranches(cwd: string, prefix: string, dateFilter: string | null = null): string[] {
+export function listBranches(
+  cwd: string,
+  prefix: string,
+  dateFilter: string | null = null,
+): string[] {
   const pattern = dateFilter ? `${prefix}/${dateFilter}/*` : `${prefix}/*`;
   const r = git(['branch', '--list', pattern], cwd);
   if (!r.stdout) return [];
@@ -213,7 +219,10 @@ export function parseRemoteUrl(url: string): { host: string; owner: string; repo
 }
 
 /** Fetch from origin (optionally a specific branch). */
-export function fetchOrigin(cwd: string, branch: string | null = null): { ok: boolean; stderr: string } {
+export function fetchOrigin(
+  cwd: string,
+  branch: string | null = null,
+): { ok: boolean; stderr: string } {
   const args = branch ? ['fetch', 'origin', branch] : ['fetch', 'origin'];
   const r = git(args, cwd);
   return { ok: r.status === 0, stderr: (r.stderr || '').trim() };

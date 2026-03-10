@@ -217,7 +217,11 @@ export function addSuggestion(sg: Suggestions, entry: SuggestionEntry): Suggesti
  * @param {object} updates - Fields to merge
  * @returns {object|null} Updated entry or null if not found
  */
-export function updateSuggestion(sg: Suggestions, id: string, updates: Partial<SuggestionEntry>): SuggestionEntry | null {
+export function updateSuggestion(
+  sg: Suggestions,
+  id: string,
+  updates: Partial<SuggestionEntry>,
+): SuggestionEntry | null {
   const entry = sg.entries.find((e: SuggestionEntry) => e.id === id);
   if (!entry) return null;
   Object.assign(entry, updates);
@@ -273,7 +277,11 @@ export function getSuggestionById(sg: Suggestions, id: string): SuggestionEntry 
  * @param {object} [opts] - Filters: { status, area }
  * @returns {object[]} Matching entries
  */
-export function searchSuggestions(sg: Suggestions, query?: string, opts: { status?: string; area?: string } = {}): SuggestionEntry[] {
+export function searchSuggestions(
+  sg: Suggestions,
+  query?: string,
+  opts: { status?: string; area?: string } = {},
+): SuggestionEntry[] {
   let results = [...sg.entries];
 
   if (opts.status) {
@@ -315,7 +323,12 @@ export function searchSuggestions(sg: Suggestions, query?: string, opts: { statu
  * @param {object} [opts] - { sessionId, specPath, notes, source }
  * @returns {object|null} The created suggestion or null if deduped/invalid
  */
-export function createSuggestionFromRound(sg: Suggestions, roundResult: EvolveRoundResult, deliberation: EvolveDeliberation, opts: CreateFromRoundOpts = {}): SuggestionEntry | null {
+export function createSuggestionFromRound(
+  sg: Suggestions,
+  roundResult: EvolveRoundResult,
+  deliberation: EvolveDeliberation,
+  opts: CreateFromRoundOpts = {},
+): SuggestionEntry | null {
   const improvement = deliberation?.selectedImprovement;
   if (!improvement || improvement === 'No improvement selected' || improvement.length < 10) {
     return null;
@@ -377,9 +390,14 @@ function createRL() {
 /**
  * Ask a question and return the trimmed answer.
  */
-function askRaw(rl: ReturnType<typeof import('node:readline').createInterface>, question: string): Promise<string> {
+function askRaw(
+  rl: ReturnType<typeof import('node:readline').createInterface>,
+  question: string,
+): Promise<string> {
   return new Promise((resolve) => {
-    rl.question(question, (answer: string) => { resolve(answer.trim()); });
+    rl.question(question, (answer: string) => {
+      resolve(answer.trim());
+    });
   });
 }
 
@@ -391,7 +409,10 @@ function askRaw(rl: ReturnType<typeof import('node:readline').createInterface>, 
  * @param {object} [opts] - { maxDisplay: 5 }
  * @returns {Promise<{ action: string, suggestion?: object, text?: string }>}
  */
-export async function promptSuggestionPicker(pending: SuggestionEntry[], opts: { maxDisplay?: number } = {}) {
+export async function promptSuggestionPicker(
+  pending: SuggestionEntry[],
+  opts: { maxDisplay?: number } = {},
+) {
   const maxDisplay = opts.maxDisplay || 5;
   const displayed = pending.slice(0, maxDisplay);
 
@@ -406,7 +427,8 @@ export async function promptSuggestionPicker(pending: SuggestionEntry[], opts: {
       const num = pc.bold(pc.white(`  ${i + 1}.`));
       const idTag = pc.dim(`[${s.id}]`);
       const areaTag = pc.yellow(s.area);
-      const titleText = (s.title || '').length > 60 ? `${(s.title || '').slice(0, 57)}...` : (s.title || '');
+      const titleText =
+        (s.title || '').length > 60 ? `${(s.title || '').slice(0, 57)}...` : s.title || '';
 
       console.error(`${num} ${idTag} ${areaTag}: ${titleText} ${pc.dim(`(${s.priority})`)}`);
 

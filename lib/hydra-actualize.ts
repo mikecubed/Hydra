@@ -54,7 +54,12 @@ import {
   BASE_PROTECTED_PATTERNS,
   BLOCKED_COMMANDS,
 } from './hydra-shared/constants.ts';
-import { scanAllSources, deduplicateTasks, prioritizeTasks, type ScannedTask } from './hydra-tasks-scanner.ts';
+import {
+  scanAllSources,
+  deduplicateTasks,
+  prioritizeTasks,
+  type ScannedTask,
+} from './hydra-tasks-scanner.ts';
 import { runDiscovery } from './hydra-nightly-discovery.ts';
 import { buildSelfSnapshot, formatSelfSnapshotForPrompt } from './hydra-self.ts';
 import { buildSelfIndex, formatSelfIndexForPrompt } from './hydra-self-index.ts';
@@ -84,7 +89,9 @@ function formatDuration(ms: number) {
 
 function askLine(rl: readline.Interface, question: string) {
   return new Promise<string>((resolve) => {
-    rl.question(question, (answer: string) => { resolve(answer.trim()); });
+    rl.question(question, (answer: string) => {
+      resolve(answer.trim());
+    });
   });
 }
 
@@ -141,7 +148,13 @@ function buildThresholds(budgetCfg: any) {
 
 // ── Prompt Builder ──────────────────────────────────────────────────────────
 
-function buildTaskPrompt(task: ScannedTask, branchName: string, projectRoot: string, agent: string, opts: { selfSnapshotText?: string; selfIndexText?: string } = {}) {
+function buildTaskPrompt(
+  task: ScannedTask,
+  branchName: string,
+  projectRoot: string,
+  agent: string,
+  opts: { selfSnapshotText?: string; selfIndexText?: string } = {},
+) {
   const instructionFile = getAgentInstructionFile(agent, projectRoot);
 
   const selfSnapshot = opts.selfSnapshotText || '';
@@ -478,7 +491,13 @@ async function main() {
         },
       });
     } catch (err) {
-      agentResult = { ok: false, output: '', stderr: '', error: err instanceof Error ? err.message : String(err), durationMs: 0 };
+      agentResult = {
+        ok: false,
+        output: '',
+        stderr: '',
+        error: err instanceof Error ? err.message : String(err),
+        durationMs: 0,
+      };
     }
     process.stderr.write(`\r${' '.repeat(100)}\r`);
 

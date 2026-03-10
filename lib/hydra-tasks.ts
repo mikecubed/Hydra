@@ -85,8 +85,6 @@ async function getInvestigator(): Promise<InvestigatorLike | null> {
   }
 }
 
-
-
 // ── Constants ───────────────────────────────────────────────────────────────
 
 const RUNNER_NAME = 'tasks runner';
@@ -147,7 +145,9 @@ function createRL() {
 
 function askLine(rl: readline.Interface, question: string) {
   return new Promise<string>((resolve) => {
-    rl.question(question, (answer: string) => { resolve(answer.trim()); });
+    rl.question(question, (answer: string) => {
+      resolve(answer.trim());
+    });
   });
 }
 
@@ -415,7 +415,10 @@ Be concise — this is a planning checklist, not a design doc.`;
         timeoutMs: 3 * 60 * 1000,
         phaseLabel: `${phaseLabel} plan`,
       });
-      recordCallComplete(planHandle, planResult as unknown as Parameters<typeof recordCallComplete>[1]);
+      recordCallComplete(
+        planHandle,
+        planResult as unknown as Parameters<typeof recordCallComplete>[1],
+      );
 
       result.phases['plan'] = {
         status: planResult.ok ? 'done' : 'failed',
@@ -472,7 +475,10 @@ Read ${instructionFile} for project conventions.`;
       hubProject: path.basename(projectRoot),
       hubAgent: `${task.suggestedAgent}-forge`,
     });
-    recordCallComplete(execHandle, execResult as unknown as Parameters<typeof recordCallComplete>[1]);
+    recordCallComplete(
+      execHandle,
+      execResult as unknown as Parameters<typeof recordCallComplete>[1],
+    );
 
     result.phases['execute'] = {
       status: execResult.ok ? 'done' : 'failed',
@@ -773,7 +779,9 @@ async function main() {
   try {
     config = resolveProject({ project: options['project'] as string | undefined });
   } catch (err) {
-    console.error(pc.red(`Project resolution failed: ${err instanceof Error ? err.message : String(err)}`));
+    console.error(
+      pc.red(`Project resolution failed: ${err instanceof Error ? err.message : String(err)}`),
+    );
     process.exit(1);
   }
 

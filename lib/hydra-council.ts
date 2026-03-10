@@ -88,7 +88,14 @@ function loadCheckpoint(promptHash: string, prompt: string) {
   }
 }
 
-function saveCheckpoint(promptHash: string, prompt: string, round: number, stepIdx: number, transcript: unknown[], specContent: string | null) {
+function saveCheckpoint(
+  promptHash: string,
+  prompt: string,
+  round: number,
+  stepIdx: number,
+  transcript: unknown[],
+  specContent: string | null,
+) {
   ensureDir(RUNS_DIR);
   const data = {
     promptHash,
@@ -97,7 +104,7 @@ function saveCheckpoint(promptHash: string, prompt: string, round: number, stepI
     stepIdx,
     transcript,
     specContent: specContent || null,
-    startedAt: (transcript[0] as Record<string, unknown>)?.['startedAt'] as string || nowIso(),
+    startedAt: ((transcript[0] as Record<string, unknown>)?.['startedAt'] as string) || nowIso(),
     updatedAt: nowIso(),
   };
   fs.writeFileSync(checkpointPath(promptHash), `${JSON.stringify(data, null, 2)}\n`, 'utf8');
@@ -219,7 +226,9 @@ function normalizeDecisionOption(item: unknown, index: number) {
 
 function mergeTruthy(base: unknown, update: unknown) {
   const out = { ...(base && typeof base === 'object' ? (base as Record<string, unknown>) : {}) };
-  for (const [key, value] of Object.entries(update && typeof update === 'object' ? (update as Record<string, unknown>) : {})) {
+  for (const [key, value] of Object.entries(
+    update && typeof update === 'object' ? (update as Record<string, unknown>) : {},
+  )) {
     if (value === null || value === undefined) {
       continue;
     }
@@ -469,7 +478,10 @@ export function extractAssumptions(parsed: unknown) {
       });
     }
   }
-  return dedupeBy(out, (item: unknown) => (item as Record<string, unknown>)['assumption'] as string);
+  return dedupeBy(
+    out,
+    (item: unknown) => (item as Record<string, unknown>)['assumption'] as string,
+  );
 }
 
 export function extractAssumptionAttacks(parsed: unknown) {
@@ -477,11 +489,7 @@ export function extractAssumptionAttacks(parsed: unknown) {
     return [];
   }
   const p = parsed as Record<string, unknown>;
-  const buckets = [
-    p['assumption_attacks'],
-    p['assumption_challenges'],
-    p['counterarguments'],
-  ];
+  const buckets = [p['assumption_attacks'], p['assumption_challenges'], p['counterarguments']];
   const out = [];
   for (const bucket of buckets) {
     if (!Array.isArray(bucket)) {
@@ -542,12 +550,18 @@ function extractDisagreements(parsed: unknown) {
   return [...new Set(out)];
 }
 
-export function extractFinalDecision(parsed: unknown, fallback: { agent?: string; phase?: string } = {}) {
+export function extractFinalDecision(
+  parsed: unknown,
+  fallback: { agent?: string; phase?: string } = {},
+) {
   if (!parsed || typeof parsed !== 'object') {
     return null;
   }
   const p = parsed as Record<string, unknown>;
-  const decisionRaw = p['decision'] && typeof p['decision'] === 'object' ? p['decision'] as Record<string, unknown> : {} as Record<string, unknown>;
+  const decisionRaw =
+    p['decision'] && typeof p['decision'] === 'object'
+      ? (p['decision'] as Record<string, unknown>)
+      : ({} as Record<string, unknown>);
   const summary = cleanText(
     decisionRaw['summary'] ||
       decisionRaw['choice'] ||
@@ -556,15 +570,22 @@ export function extractFinalDecision(parsed: unknown, fallback: { agent?: string
       p['view'],
   );
   const why = cleanText(
-    decisionRaw['why'] || decisionRaw['rationale'] || decisionRaw['reason'] || p['decision_rationale'],
+    decisionRaw['why'] ||
+      decisionRaw['rationale'] ||
+      decisionRaw['reason'] ||
+      p['decision_rationale'],
   );
-  const owner = sanitizeOwner(String(decisionRaw['owner'] || decisionRaw['decider'] || fallback.agent || 'unassigned'));
+  const owner = sanitizeOwner(
+    String(decisionRaw['owner'] || decisionRaw['decider'] || fallback.agent || 'unassigned'),
+  );
   const confidence = normalizeConfidence(decisionRaw['confidence'] || p['confidence']);
   const nextAction = normalizeNextAction(
     decisionRaw['next_action'] || decisionRaw['nextAction'] || p['next_action'],
   );
   const reversibleFirstStep = cleanText(
-    decisionRaw['reversible_first_step'] || decisionRaw['reversibleFirstStep'] || p['reversible_first_step'],
+    decisionRaw['reversible_first_step'] ||
+      decisionRaw['reversibleFirstStep'] ||
+      p['reversible_first_step'],
   );
   const tradeoffs = normalizeTradeoffs(
     decisionRaw['tradeoffs'] || decisionRaw['criteria'] || p['tradeoffs'] || p['decision_criteria'],
@@ -674,10 +695,14 @@ export function synthesizeCouncilTranscript(prompt: string, transcript: unknown[
 
   for (const entry of parsedEntries) {
     taskCandidates.push(...extractTasksFromOutput(entry['parsed'], entry['agent'] as string));
-    questions.push(...extractQuestions(entry['parsed']) as Array<{ to: string; question: string }>);
+    questions.push(
+      ...(extractQuestions(entry['parsed']) as Array<{ to: string; question: string }>),
+    );
     risks.push(...extractRisks(entry['parsed']));
     decisionOptions.push(...extractDecisionOptions(entry['parsed']));
-    assumptions.push(...extractAssumptions(entry['parsed']) as Array<{ status: string; [key: string]: unknown }>);
+    assumptions.push(
+      ...(extractAssumptions(entry['parsed']) as Array<{ status: string; [key: string]: unknown }>),
+    );
     assumptionAttacks.push(...extractAssumptionAttacks(entry['parsed']));
     disagreements.push(...extractDisagreements(entry['parsed']));
 
@@ -691,7 +716,10 @@ export function synthesizeCouncilTranscript(prompt: string, transcript: unknown[
       });
     }
 
-    const decision = extractFinalDecision(entry['parsed'], { agent: entry['agent'] as string, phase: entry['phase'] as string });
+    const decision = extractFinalDecision(entry['parsed'], {
+      agent: entry['agent'] as string,
+      phase: entry['phase'] as string,
+    });
     if (decision) {
       decisions.push(decision);
     }
@@ -702,21 +730,18 @@ export function synthesizeCouncilTranscript(prompt: string, transcript: unknown[
     return `${q.to}|${q.question}`;
   });
   const dedupedRisks = [...new Set(risks.map((item: unknown) => cleanText(item)).filter(Boolean))];
-  const dedupedDecisionOptions = dedupeBy(
-    decisionOptions,
-    (item: unknown) => {
-      const d = item as { option: string; summary: string };
-      return `${d.option}|${d.summary}`;
-    },
+  const dedupedDecisionOptions = dedupeBy(decisionOptions, (item: unknown) => {
+    const d = item as { option: string; summary: string };
+    return `${d.option}|${d.summary}`;
+  });
+  const dedupedAssumptions = dedupeBy(
+    assumptions,
+    (item: unknown) => (item as Record<string, unknown>)['assumption'] as string,
   );
-  const dedupedAssumptions = dedupeBy(assumptions, (item: unknown) => (item as Record<string, unknown>)['assumption'] as string);
-  const dedupedAssumptionAttacks = dedupeBy(
-    assumptionAttacks,
-    (item: unknown) => {
-      const a = item as { assumption: unknown; challenge: unknown };
-      return `${a.assumption}|${a.challenge}`;
-    },
-  );
+  const dedupedAssumptionAttacks = dedupeBy(assumptionAttacks, (item: unknown) => {
+    const a = item as { assumption: unknown; challenge: unknown };
+    return `${a.assumption}|${a.challenge}`;
+  });
   const dedupedDisagreements = [
     ...new Set(disagreements.map((item: unknown) => cleanText(item)).filter(Boolean)),
   ];
@@ -740,7 +765,10 @@ export function synthesizeCouncilTranscript(prompt: string, transcript: unknown[
   return {
     prompt,
     consensus,
-    tasks: taskCandidates.length > 0 ? dedupeTasks(taskCandidates as Parameters<typeof dedupeTasks>[0]) : defaultTasks(prompt),
+    tasks:
+      taskCandidates.length > 0
+        ? dedupeTasks(taskCandidates as Parameters<typeof dedupeTasks>[0])
+        : defaultTasks(prompt),
     questions: dedupedQuestions,
     risks: dedupedRisks,
     councilVotes,
@@ -924,15 +952,21 @@ function colorOwner(owner: string) {
 
 function buildAgentBrief(agent: string, objective: string, report: Record<string, unknown>) {
   const agentConfig = getAgent(agent);
-  const tasks = Array.isArray(report?.['tasks']) ? (report['tasks'] as Array<Record<string, unknown>>) : [];
-  const questions = Array.isArray(report?.['questions']) ? (report['questions'] as Array<Record<string, unknown>>) : [];
+  const tasks = Array.isArray(report?.['tasks'])
+    ? (report['tasks'] as Array<Record<string, unknown>>)
+    : [];
+  const questions = Array.isArray(report?.['questions'])
+    ? (report['questions'] as Array<Record<string, unknown>>)
+    : [];
   const transcript = Array.isArray(report?.['transcript']) ? report['transcript'] : [];
   const consensus = cleanText(report?.['consensus']);
   const finalDecision = (report?.['finalDecision'] as Record<string, unknown> | null) || null;
   const myTasks = tasks.filter((t) => t['owner'] === agent || t['owner'] === 'unassigned');
   const myQuestions = questions.filter((q) => q['to'] === agent || q['to'] === 'human');
   const unresolvedAssumptions = Array.isArray(report?.['assumptions'])
-    ? (report['assumptions'] as Array<Record<string, unknown>>).filter((item) => item['status'] !== 'validated')
+    ? (report['assumptions'] as Array<Record<string, unknown>>).filter(
+        (item) => item['status'] !== 'validated',
+      )
     : [];
 
   const taskText =
@@ -1035,7 +1069,12 @@ function buildDivergePrompt(agent: string, userPrompt: string, specContent: stri
     .join('\n');
 }
 
-function buildAttackPrompt(agent: string, userPrompt: string, divergeEntries: Array<Record<string, unknown>>, specContent: string | null) {
+function buildAttackPrompt(
+  agent: string,
+  userPrompt: string,
+  divergeEntries: Array<Record<string, unknown>>,
+  specContent: string | null,
+) {
   const agentConfig = getAgent(agent);
   const context = buildAgentContext(agent, {}, config, userPrompt);
   const framing = isPersonaEnabled() ? getAgentFraming(agent) : `You are ${agentConfig!.label}`;
@@ -1077,7 +1116,12 @@ function buildAttackPrompt(agent: string, userPrompt: string, divergeEntries: Ar
     .join('\n');
 }
 
-function buildSynthesizePrompt(userPrompt: string, divergeEntries: Array<Record<string, unknown>>, attackEntries: Array<Record<string, unknown>>, specContent: string | null) {
+function buildSynthesizePrompt(
+  userPrompt: string,
+  divergeEntries: Array<Record<string, unknown>>,
+  attackEntries: Array<Record<string, unknown>>,
+  specContent: string | null,
+) {
   const agentConfig = getAgent('claude');
   const context = buildAgentContext('claude', {}, config, userPrompt);
   const framing = isPersonaEnabled() ? getAgentFraming('claude') : `You are ${agentConfig!.label}`;
@@ -1086,13 +1130,13 @@ function buildSynthesizePrompt(userPrompt: string, divergeEntries: Array<Record<
   const allDiverge = divergeEntries
     .map(
       (e) =>
-        `${String(e['agent']).toUpperCase()} independent view:\n${short(e['parsed'] ? JSON.stringify(e['parsed']) : e['rawText'] as string, 1000)}`,
+        `${String(e['agent']).toUpperCase()} independent view:\n${short(e['parsed'] ? JSON.stringify(e['parsed']) : (e['rawText'] as string), 1000)}`,
     )
     .join('\n\n');
   const allAttacks = attackEntries
     .map(
       (e) =>
-        `${String(e['agent']).toUpperCase()} attacks:\n${short(e['parsed'] ? JSON.stringify(e['parsed']) : e['rawText'] as string, 800)}`,
+        `${String(e['agent']).toUpperCase()} attacks:\n${short(e['parsed'] ? JSON.stringify(e['parsed']) : (e['rawText'] as string), 800)}`,
     )
     .join('\n\n');
   return [
@@ -1147,7 +1191,10 @@ function buildSynthesizePrompt(userPrompt: string, divergeEntries: Array<Record<
  * Resolve the ordered list of active agents for adversarial council.
  * Preserves default ordering ['claude','gemini','codex'] and filters to the allowlist.
  */
-export function resolveActiveAgents(agentsFilter: string[] | null, defaults = ['claude', 'gemini', 'codex']) {
+export function resolveActiveAgents(
+  agentsFilter: string[] | null,
+  defaults = ['claude', 'gemini', 'codex'],
+) {
   if (!agentsFilter || !agentsFilter.length) return [...defaults];
   return defaults.filter((a) => agentsFilter.includes(a));
 }
@@ -1181,7 +1228,14 @@ async function runAdversarialCouncil(
     specId?: string;
     [key: string]: unknown;
   },
-  { preview, timeoutMs, specContent, promptHash, agentsFilter, rounds }: {
+  {
+    preview,
+    timeoutMs,
+    specContent,
+    promptHash,
+    agentsFilter,
+    rounds,
+  }: {
     preview: boolean;
     timeoutMs: number;
     specContent: string | null;
@@ -1482,7 +1536,10 @@ async function main() {
   const mode = String(options['mode'] || 'live').toLowerCase();
   const preview = mode === 'preview' || boolFlag(options['preview'], false);
   const publish = boolFlag(options['publish'], !preview);
-  const rounds = Math.max(1, Math.min(4, Number.parseInt(String(options['rounds'] || '2'), 10) || 2));
+  const rounds = Math.max(
+    1,
+    Math.min(4, Number.parseInt(String(options['rounds'] || '2'), 10) || 2),
+  );
   const timeoutMs = Number.parseInt(String(options['timeoutMs'] || DEFAULT_TIMEOUT_MS), 10);
   const url = String(options['url'] || DEFAULT_URL);
   const emit = String(options['emit'] || 'summary').toLowerCase();
@@ -1524,23 +1581,45 @@ async function main() {
       compactedRetry?: boolean;
     }>,
     consensus: '',
-    tasks: [] as Array<{ owner?: string; title?: string; description?: string; rationale?: string; done?: string }>,
+    tasks: [] as Array<{
+      owner?: string;
+      title?: string;
+      description?: string;
+      rationale?: string;
+      done?: string;
+    }>,
     questions: [] as Array<{ to: string; question: string }>,
     risks: [] as unknown[],
     decisionOptions: [] as unknown[],
     assumptions: [] as Array<{ status: string; [key: string]: unknown }>,
     assumptionAttacks: [] as Array<{ challenge?: string; assumption?: string }>,
     disagreements: [] as unknown[],
-    finalDecision: null as null | { owner?: string; confidence?: string; nextAction?: string; reversibleFirstStep?: string; summary?: string; why?: string; tradeoffs?: unknown },
+    finalDecision: null as null | {
+      owner?: string;
+      confidence?: string;
+      nextAction?: string;
+      reversibleFirstStep?: string;
+      summary?: string;
+      why?: string;
+      tradeoffs?: unknown;
+    },
     councilVotes: [] as unknown[],
     recommendedMode: 'handoff',
     recommendedNextAction: 'handoff',
     recommendationRationale: '',
-    published: null as null | { ok: boolean; skipped?: boolean; error?: string; decision?: unknown; tasks?: unknown[]; handoffs?: unknown[]; reason?: string },
+    published: null as null | {
+      ok: boolean;
+      skipped?: boolean;
+      error?: string;
+      decision?: unknown;
+      tasks?: unknown[];
+      handoffs?: unknown[];
+      reason?: string;
+    },
   };
 
   try {
-    const summaryResponse = await request('GET', url, '/summary') as Record<string, unknown>;
+    const summaryResponse = (await request('GET', url, '/summary')) as Record<string, unknown>;
     report.daemonSummary = summaryResponse['summary'];
   } catch {
     report.daemonSummary = null;
@@ -1717,7 +1796,9 @@ async function main() {
           const rlCheck = detectRateLimitError(step.agent, result);
           if (rlCheck.isRateLimit) {
             const delay = calculateBackoff(0, { retryAfterMs: rlCheck.retryAfterMs ?? undefined });
-            spinner.update(`${colorAgent(step.agent)} ${DIM(step.phase)} rate limited, retrying in ${(delay / 1000).toFixed(0)}s...`);
+            spinner.update(
+              `${colorAgent(step.agent)} ${DIM(step.phase)} rate limited, retrying in ${(delay / 1000).toFixed(0)}s...`,
+            );
             await new Promise((r) => globalThis.setTimeout(r, delay));
             result = await callAgentAsync(step.agent, promptText, timeoutMs);
           }
@@ -1726,7 +1807,9 @@ async function main() {
         // Timeout retry: strip transcript context and retry once with bare prompt
         if (!result.ok && result.timedOut) {
           const compactedPrompt = buildStepPrompt(step, prompt, [], round, rounds, specContent);
-          spinner.update(`${colorAgent(step.agent)} ${DIM(step.phase)} timed out — retrying with compacted context...`);
+          spinner.update(
+            `${colorAgent(step.agent)} ${DIM(step.phase)} timed out — retrying with compacted context...`,
+          );
           result = await callAgentAsync(step.agent, compactedPrompt, timeoutMs);
           if (result.ok) {
             result._compactedRetry = true;
@@ -1811,24 +1894,24 @@ async function main() {
 
   if (publish) {
     try {
-      const health = await request('GET', url, '/health') as Record<string, unknown>;
+      const health = (await request('GET', url, '/health')) as Record<string, unknown>;
       if (!health['ok']) {
         throw new Error('Hydra daemon is not healthy.');
       }
 
       const createdTasks: unknown[] = [];
       for (const task of report.tasks) {
-        const created = await request('POST', url, '/task/add', {
+        const created = (await request('POST', url, '/task/add', {
           title: task.title,
           owner: task.owner,
           status: 'todo',
           notes: task.rationale ? `Council rationale: ${task.rationale}` : '',
-        }) as Record<string, unknown>;
+        })) as Record<string, unknown>;
         createdTasks.push(created['task']);
       }
 
       const decisionTitle = `Hydra Council: ${short(prompt, 90)}`;
-      const decisionResult = await request('POST', url, '/decision', {
+      const decisionResult = (await request('POST', url, '/decision', {
         title: decisionTitle,
         owner: 'human',
         rationale:
@@ -1836,22 +1919,26 @@ async function main() {
           report.consensus ||
           'Council completed without explicit consensus.',
         impact: `Rounds=${rounds}; Tasks=${createdTasks.length}; Flow=Claude\u2192Gemini\u2192Claude\u2192Codex; next=${report.recommendedNextAction || report.recommendedMode}`,
-      }) as Record<string, unknown>;
+      })) as Record<string, unknown>;
 
       const handoffs: unknown[] = [];
       const publishAgents = agentsFilter || AGENT_NAMES;
       for (const agent of publishAgents) {
-        const agentTaskIds = (createdTasks as Array<{ owner?: string; id?: string; }>)
+        const agentTaskIds = (createdTasks as Array<{ owner?: string; id?: string }>)
           .filter((t) => t.owner === agent || t.owner === 'unassigned')
           .map((t) => t.id);
-        const summary = buildAgentBrief(agent, prompt, report as unknown as Record<string, unknown>);
-        const handoff = await request('POST', url, '/handoff', {
+        const summary = buildAgentBrief(
+          agent,
+          prompt,
+          report as unknown as Record<string, unknown>,
+        );
+        const handoff = (await request('POST', url, '/handoff', {
           from: 'human',
           to: agent,
           summary,
           nextStep: 'Acknowledge this council handoff and start highest-priority task.',
           tasks: agentTaskIds,
-        }) as Record<string, unknown>;
+        })) as Record<string, unknown>;
         handoffs.push(handoff['handoff']);
       }
 

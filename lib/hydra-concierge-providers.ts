@@ -116,7 +116,11 @@ async function getStreamFn(provider: string): Promise<StreamFn> {
  * @param {Function} [onChunk] - Called with each streamed text chunk
  * @returns {Promise<{fullResponse: string, usage: object|null, provider: string, model: string, isFallback: boolean}>}
  */
-export async function streamWithFallback(messages: unknown[], cfg: Record<string, unknown>, onChunk: (chunk: string) => void) {
+export async function streamWithFallback(
+  messages: unknown[],
+  cfg: Record<string, unknown>,
+  onChunk: (chunk: string) => void,
+) {
   let chain = buildFallbackChain().filter((e) => e.available);
 
   if (chain.length === 0) {
@@ -154,8 +158,14 @@ export async function streamWithFallback(messages: unknown[], cfg: Record<string
       if (cfg['reasoningEffort'] && entry.provider === 'anthropic') {
         const caps = getModelReasoningCaps(entry.model);
         if (caps.type === 'thinking') {
-          const LEGACY_MAP: Record<string, string> = { high: 'deep', xhigh: 'deep', medium: 'standard', low: 'light' };
-          const normalized = LEGACY_MAP[cfg['reasoningEffort'] as string] || (cfg['reasoningEffort'] as string);
+          const LEGACY_MAP: Record<string, string> = {
+            high: 'deep',
+            xhigh: 'deep',
+            medium: 'standard',
+            low: 'light',
+          };
+          const normalized =
+            LEGACY_MAP[cfg['reasoningEffort'] as string] || (cfg['reasoningEffort'] as string);
           const budget = caps.budgets?.[normalized];
           if (budget && normalized !== 'off') {
             providerCfg['thinkingBudget'] = budget;
@@ -165,7 +175,7 @@ export async function streamWithFallback(messages: unknown[], cfg: Record<string
       // OpenAI: reasoningEffort passed through as-is (already handled by streamCompletion)
       // Google: no reasoning params needed
 
-      const result = await streamFn(messages, providerCfg, onChunk) as Record<string, unknown>;
+      const result = (await streamFn(messages, providerCfg, onChunk)) as Record<string, unknown>;
 
       return {
         fullResponse: result['fullResponse'],

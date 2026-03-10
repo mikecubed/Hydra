@@ -265,14 +265,17 @@ Output structure:
 export function registerBuiltInSubAgents() {
   const cfg = loadHydraConfig();
   const agentsCfg = cfg.agents || {};
-  const subAgentsCfg = (agentsCfg as unknown as Record<string, unknown>)['subAgents'] as Record<string, unknown> | undefined ?? {};
+  const subAgentsCfg =
+    ((agentsCfg as unknown as Record<string, unknown>)['subAgents'] as
+      | Record<string, unknown>
+      | undefined) ?? {};
 
   // If sub-agents are explicitly disabled, skip
   if (subAgentsCfg['enabled'] === false) return;
 
   // Get the list of enabled built-in names (default: all)
   const enabledList = Array.isArray(subAgentsCfg['builtIns'])
-    ? subAgentsCfg['builtIns'] as string[]
+    ? (subAgentsCfg['builtIns'] as string[])
     : Object.keys(BUILT_IN_SUB_AGENTS);
 
   const enabledSet = new Set(enabledList);

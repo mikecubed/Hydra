@@ -560,7 +560,10 @@ export async function conciergeTurn(userMsg: string, opts: ConciergeTurnOpts = {
   }
 
   // Estimate cost
-  const cost = estimateCost(result.model, result.usage as { prompt_tokens?: number; completion_tokens?: number } | null);
+  const cost = estimateCost(
+    result.model,
+    result.usage as { prompt_tokens?: number; completion_tokens?: number } | null,
+  );
 
   // Add assistant response to history
   history.push({ role: 'assistant', content: result.fullResponse as string });
@@ -626,7 +629,10 @@ const SUGGEST_SYSTEM_PROMPT = `You suggest a single actionable prompt the user c
  * @param {number} [opts.maxTokens=80] - Max output tokens
  * @returns {Promise<{suggestion: string, provider: string, model: string}|null>}
  */
-export async function conciergeSuggest(contextDescription: string, opts: { maxTokens?: number } = {}) {
+export async function conciergeSuggest(
+  contextDescription: string,
+  opts: { maxTokens?: number } = {},
+) {
   const cfg = getConciergeConfig();
   if (!cfg.enabled) return null;
 

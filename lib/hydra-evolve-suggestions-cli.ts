@@ -44,8 +44,15 @@ function createRL() {
   return readline.createInterface({ input: process.stdin, output: process.stderr, terminal: true });
 }
 
-function askQuestion(rl: ReturnType<typeof readline.createInterface>, question: string): Promise<string> {
-  return new Promise((resolve) => { rl.question(question, (answer: string) => { resolve(answer.trim()); }); });
+function askQuestion(
+  rl: ReturnType<typeof readline.createInterface>,
+  question: string,
+): Promise<string> {
+  return new Promise((resolve) => {
+    rl.question(question, (answer: string) => {
+      resolve(answer.trim());
+    });
+  });
 }
 
 function formatEntry(s: SuggestionEntry) {
@@ -61,7 +68,9 @@ function formatEntry(s: SuggestionEntry) {
   else if (s.priority === 'low') priorityBadge = pc.dim('low');
   else priorityBadge = pc.yellow('med');
 
-  console.log(`  ${statusColor(s.id ?? '')} ${pc.yellow(s.area ?? '')}: ${(s.title ?? '').slice(0, 80)}`);
+  console.log(
+    `  ${statusColor(s.id ?? '')} ${pc.yellow(s.area ?? '')}: ${(s.title ?? '').slice(0, 80)}`,
+  );
 
   const parts = [`status: ${statusColor(s.status ?? '')}`, `priority: ${priorityBadge}`];
   if ((s.attempts ?? 0) > 0) {
@@ -127,7 +136,7 @@ async function addCommand(evolveDir: string, options: Record<string, string | bo
   // Interactive mode if title not provided
   if (!title) {
     const cfg = loadHydraConfig();
-    const focusAreas = (cfg.evolve?.focusAreas) || [];
+    const focusAreas = cfg.evolve?.focusAreas || [];
 
     const rl = createRL();
     try {
@@ -172,7 +181,11 @@ async function addCommand(evolveDir: string, options: Record<string, string | bo
 
 // ── Remove Command ──────────────────────────────────────────────────────────
 
-function removeCommand(evolveDir: string, options: Record<string, string | boolean>, positionals: string[]) {
+function removeCommand(
+  evolveDir: string,
+  options: Record<string, string | boolean>,
+  positionals: string[],
+) {
   const id = positionals[1] || (options['id'] as string);
   if (!id) {
     console.error(pc.red('  Usage: remove <SUG_ID>'));
@@ -193,7 +206,11 @@ function removeCommand(evolveDir: string, options: Record<string, string | boole
 
 // ── Reset Command ───────────────────────────────────────────────────────────
 
-function resetCommand(evolveDir: string, options: Record<string, string | boolean>, positionals: string[]) {
+function resetCommand(
+  evolveDir: string,
+  options: Record<string, string | boolean>,
+  positionals: string[],
+) {
   const id = positionals[1] || (options['id'] as string);
   if (!id) {
     console.error(pc.red('  Usage: reset <SUG_ID>'));
@@ -304,7 +321,9 @@ function statsCommand(evolveDir: string) {
   }
   if (Object.keys(areas).length > 0) {
     console.log(pc.bold('\n  Pending by area:'));
-    for (const [area, count] of Object.entries(areas).sort((a: [string, number], b: [string, number]) => b[1] - a[1])) {
+    for (const [area, count] of Object.entries(areas).sort(
+      (a: [string, number], b: [string, number]) => b[1] - a[1],
+    )) {
       console.log(`    ${pc.yellow(area)}: ${count}`);
     }
   }
@@ -322,7 +341,9 @@ async function main() {
   try {
     config = resolveProject({ project: options['project'] as string });
   } catch (err) {
-    console.error(pc.red(`Project resolution failed: ${err instanceof Error ? err.message : String(err)}`));
+    console.error(
+      pc.red(`Project resolution failed: ${err instanceof Error ? err.message : String(err)}`),
+    );
     process.exit(1);
   }
 

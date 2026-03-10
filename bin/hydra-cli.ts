@@ -355,7 +355,9 @@ function runFull(prompt: string, rawTokens: string[]) {
   }
 
   if (lastError) {
-    throw new Error(`Unable to launch PowerShell (${(lastError as NodeJS.ErrnoException).code || lastError.message}).`);
+    throw new Error(
+      `Unable to launch PowerShell (${(lastError as NodeJS.ErrnoException).code || lastError.message}).`,
+    );
   }
 
   throw new Error('Could not find `pwsh` or `powershell` in PATH.');

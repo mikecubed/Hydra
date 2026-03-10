@@ -57,9 +57,12 @@ export function parseArgsTemplate(template: string): string[] {
 export function buildCustomAgentEntry(fields: WizardFields): CustomAgentDef {
   const { name, type, affinityPreset, councilRole, contextBudget, enabled } = fields;
   const taskAffinity =
-    (AFFINITY_PRESETS as Record<string, typeof AFFINITY_PRESETS[keyof typeof AFFINITY_PRESETS] | undefined>)[
-      affinityPreset ?? 'balanced'
-    ] ?? AFFINITY_PRESETS['balanced'];
+    (
+      AFFINITY_PRESETS as Record<
+        string,
+        (typeof AFFINITY_PRESETS)[keyof typeof AFFINITY_PRESETS] | undefined
+      >
+    )[affinityPreset ?? 'balanced'] ?? AFFINITY_PRESETS['balanced'];
 
   const base: CustomAgentDef = {
     name,
@@ -97,7 +100,9 @@ export async function runAgentsWizard(rl: ReadlineInterface): Promise<void> {
 
   function ask(question: string): Promise<string> {
     return new Promise((resolve) => {
-      rl.question(`  ${question}: `, (ans) => { resolve(ans.trim()); });
+      rl.question(`  ${question}: `, (ans) => {
+        resolve(ans.trim());
+      });
     });
   }
 

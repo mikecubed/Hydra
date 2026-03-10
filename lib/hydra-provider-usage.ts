@@ -306,7 +306,7 @@ async function fetchOpenAIUsage(adminKey: string): Promise<void> {
       signal: AbortSignal.timeout(10_000),
     });
     if (!res.ok) return;
-    const data = await res.json() as any;
+    const data = (await res.json()) as any;
     let inputTokens = 0,
       outputTokens = 0;
     for (const bucket of data.data || []) {
@@ -334,7 +334,7 @@ async function fetchAnthropicUsage(adminKey: string): Promise<void> {
       signal: AbortSignal.timeout(10_000),
     });
     if (!res.ok) return;
-    const data = await res.json() as any;
+    const data = (await res.json()) as any;
     let inputTokens = 0,
       outputTokens = 0;
     for (const entry of data.data || []) {
@@ -348,7 +348,11 @@ async function fetchAnthropicUsage(adminKey: string): Promise<void> {
   }
 }
 
-export function estimateCostGeneric(provider: string, inputTokens: number, outputTokens: number): number {
+export function estimateCostGeneric(
+  provider: string,
+  inputTokens: number,
+  outputTokens: number,
+): number {
   const avgRates: Record<string, { input: number; output: number }> = {
     openai: { input: 0.002, output: 0.008 },
     anthropic: { input: 0.005, output: 0.025 },

@@ -75,7 +75,7 @@ let config: InvestigatorConfig | null = null;
 function getInvestigatorConfig(): InvestigatorConfig {
   if (config) return config;
   const cfg = loadHydraConfig();
-  const inv = (cfg.evolve?.investigator) ?? {};
+  const inv = cfg.evolve?.investigator ?? {};
   config = {
     enabled: inv['enabled'] !== false,
     model: (inv['model'] as string) ?? 'gpt-5.2',
@@ -285,13 +285,10 @@ Diagnose this failure and provide a structured recommendation.`;
   ];
 
   try {
-    const { fullResponse, usage } = await streamCompletion(
-      messages,
-      {
-        model: cfg.model,
-        reasoningEffort: cfg.reasoningEffort,
-      },
-    ); // No streaming callback — we just want the final result
+    const { fullResponse, usage } = await streamCompletion(messages, {
+      model: cfg.model,
+      reasoningEffort: cfg.reasoningEffort,
+    }); // No streaming callback — we just want the final result
 
     // Track token usage
     const promptTokens = usage?.prompt_tokens || 0;

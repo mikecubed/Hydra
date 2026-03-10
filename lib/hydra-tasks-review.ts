@@ -66,14 +66,19 @@ async function reviewCommand(projectRoot: string, options: Record<string, string
 
   // Load the latest report if available
   const reportDir = path.join(projectRoot, 'docs', 'coordination', 'tasks');
-  const reportData = loadLatestReport(reportDir, REPORT_PREFIX, dateFilter) as Record<string, unknown> | null;
+  const reportData = loadLatestReport(reportDir, REPORT_PREFIX, dateFilter) as Record<
+    string,
+    unknown
+  > | null;
 
   const rl = createRL();
   let merged = 0;
   let skipped = 0;
 
   for (const branch of branches) {
-    const reportEntry = (reportData?.['results'] as Record<string, unknown>[] | undefined)?.find((r: Record<string, unknown>) => r['branch'] === branch);
+    const reportEntry = (reportData?.['results'] as Record<string, unknown>[] | undefined)?.find(
+      (r: Record<string, unknown>) => r['branch'] === branch,
+    );
 
     console.log(pc.bold(pc.cyan(`\n── ${branch} ──`)));
 
@@ -115,7 +120,10 @@ async function reviewCommand(projectRoot: string, options: Record<string, string
       protectedFiles: PROTECTED_FILES,
       protectedPatterns: BASE_PROTECTED_PATTERNS,
     });
-    if (liveViolations.length > 0 && !(reportEntry?.['violations'] as unknown[] | undefined)?.length) {
+    if (
+      liveViolations.length > 0 &&
+      !(reportEntry?.['violations'] as unknown[] | undefined)?.length
+    ) {
       console.log(pc.red(`\n  Live violation scan: ${liveViolations.length} issue(s)`));
       for (const v of liveViolations) {
         console.log(pc.red(`    [${v.severity}] ${v.detail}`));
@@ -157,7 +165,10 @@ function statusCommand(projectRoot: string, options: Record<string, string | boo
 
   // Show latest report
   const reportDir = path.join(projectRoot, 'docs', 'coordination', 'tasks');
-  const report = loadLatestReport(reportDir, REPORT_PREFIX, dateFilter) as Record<string, unknown> | null;
+  const report = loadLatestReport(reportDir, REPORT_PREFIX, dateFilter) as Record<
+    string,
+    unknown
+  > | null;
   if (report) {
     console.log(`\n  Latest Report: ${report['date']}`);
     console.log(`  Tasks: ${report['processedTasks']}/${report['totalTasks']}`);
@@ -200,9 +211,13 @@ async function main() {
 
   let config;
   try {
-    config = resolveProject({ project: options['project'] ? String(options['project']) : undefined });
+    config = resolveProject({
+      project: options['project'] ? String(options['project']) : undefined,
+    });
   } catch (err: unknown) {
-    console.error(pc.red(`Project resolution failed: ${err instanceof Error ? err.message : String(err)}`));
+    console.error(
+      pc.red(`Project resolution failed: ${err instanceof Error ? err.message : String(err)}`),
+    );
     process.exit(1);
   }
 

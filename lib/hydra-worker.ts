@@ -13,9 +13,7 @@
 
 import { EventEmitter } from 'node:events';
 import { ChildProcess } from 'node:child_process';
-import {
-  getAgent,
-} from './hydra-agents.ts';
+import { getAgent } from './hydra-agents.ts';
 import { request, short } from './hydra-utils.ts';
 import { loadHydraConfig } from './hydra-config.ts';
 import {
@@ -115,7 +113,20 @@ export class AgentWorker extends EventEmitter {
    * @param {string} [opts.permissionMode] - 'auto-edit' or 'full-auto'
    * @param {boolean} [opts.autoChain] - Auto-loop to next task on completion
    */
-  constructor(agent: string, { baseUrl, projectRoot, permissionMode, autoChain }: { baseUrl?: string; projectRoot?: string; permissionMode?: string; autoChain?: boolean } = {}) {
+  constructor(
+    agent: string,
+    {
+      baseUrl,
+      projectRoot,
+      permissionMode,
+      autoChain,
+    }: {
+      baseUrl?: string;
+      projectRoot?: string;
+      permissionMode?: string;
+      autoChain?: boolean;
+    } = {},
+  ) {
     super();
     this.agent = agent.toLowerCase();
     this.baseUrl = baseUrl ?? '';
@@ -337,7 +348,10 @@ export class AgentWorker extends EventEmitter {
         // ── Error recovery (headless auto-fallback) ─────────────────
         if (!result.ok) {
           // 1. Check for account-level usage limits FIRST — no retry possible
-          const usageCheck = detectUsageLimitError(this.agent, result as unknown as Record<string, unknown>);
+          const usageCheck = detectUsageLimitError(
+            this.agent,
+            result as unknown as Record<string, unknown>,
+          );
           if (usageCheck.isUsageLimit) {
             const resetMsg = usageCheck.resetInSeconds
               ? ` (resets in ${formatResetTime(usageCheck.resetInSeconds)})`
@@ -353,7 +367,10 @@ export class AgentWorker extends EventEmitter {
             // 2. Check for Codex-specific errors (auth/sandbox/invocation)
             // — these should NOT be retried with a different model
           } else {
-            const codexCheck = detectCodexError(this.agent, result as unknown as Record<string, unknown>);
+            const codexCheck = detectCodexError(
+              this.agent,
+              result as unknown as Record<string, unknown>,
+            );
             if (codexCheck.isCodexError) {
               this.emit('task:progress', {
                 agent: this.agent,
@@ -363,9 +380,15 @@ export class AgentWorker extends EventEmitter {
               // Don't attempt model fallback — this is an env/config issue
             } else {
               // Model error → try fallback model
-              const modelCheck = detectModelError(this.agent, result as unknown as Record<string, unknown>);
+              const modelCheck = detectModelError(
+                this.agent,
+                result as unknown as Record<string, unknown>,
+              );
               if (modelCheck.isModelError) {
-                const recovery = await recoverFromModelError(this.agent, modelCheck.failedModel ?? '') as { recovered: boolean; newModel: string | null };
+                const recovery = (await recoverFromModelError(
+                  this.agent,
+                  modelCheck.failedModel ?? '',
+                )) as { recovered: boolean; newModel: string | null };
                 if (recovery.recovered) {
                   this.emit('task:progress', {
                     agent: this.agent,
@@ -452,7 +475,10 @@ export class AgentWorker extends EventEmitter {
 
           // If this is a usage limit (e.g. ChatGPT Codex quota exhausted),
           // stop the worker — no point processing more tasks until it resets.
-          const usageCheck = detectUsageLimitError(this.agent, result as unknown as Record<string, unknown>);
+          const usageCheck = detectUsageLimitError(
+            this.agent,
+            result as unknown as Record<string, unknown>,
+          );
           if (usageCheck.isUsageLimit) {
             const resetLabel = usageCheck.resetInSeconds
               ? ` (resets in ${formatResetTime(usageCheck.resetInSeconds)})`

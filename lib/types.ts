@@ -600,7 +600,10 @@ export interface ModelProfile {
   speedScore?: number;
   strengths?: string[];
   bestFor?: string[];
-  rateLimits?: Record<string | number, { rpm: number; tpm?: number; itpm?: number; otpm?: number; rpd?: number }>;
+  rateLimits?: Record<
+    string | number,
+    { rpm: number; tpm?: number; itpm?: number; otpm?: number; rpd?: number }
+  >;
   /** CLI-specific model ID override (e.g. for Copilot agent where CLI name differs from API ID) */
   cliModelId?: string;
 }
@@ -777,9 +780,21 @@ export interface ReadRouteCtx {
   projectRoot?: string;
   projectName?: string;
   buildPrompt: (agent: string, state: HydraStateShape) => string;
-  suggestNext: (state: HydraStateShape, agent: string) => { action: string; message?: string; task?: Record<string, unknown>; handoff?: Record<string, unknown> };
-  readEvents: (limit: number) => Array<{ seq: number; at: string; type: string; category?: string; payload?: unknown }>;
-  replayEvents: (fromSeq: number) => Array<{ seq: number; at: string; type: string; category?: string; payload?: unknown }>;
+  suggestNext: (
+    state: HydraStateShape,
+    agent: string,
+  ) => {
+    action: string;
+    message?: string;
+    task?: Record<string, unknown>;
+    handoff?: Record<string, unknown>;
+  };
+  readEvents: (
+    limit: number,
+  ) => Array<{ seq: number; at: string; type: string; category?: string; payload?: unknown }>;
+  replayEvents: (
+    fromSeq: number,
+  ) => Array<{ seq: number; at: string; type: string; category?: string; payload?: unknown }>;
   sseClients: Set<ServerResponse>;
   readArchive: () => ArchiveState;
   getMetricsSummary: () => Record<string, unknown>;
@@ -789,7 +804,11 @@ export interface ReadRouteCtx {
 /** Context object passed to handleWriteRoute */
 export interface WriteRouteCtx extends ReadRouteCtx {
   readJsonBody: (req: IncomingMessage) => Promise<Record<string, unknown>>;
-  enqueueMutation: <T>(label: string, mutator: (state: HydraStateShape) => T, detail?: Record<string, unknown>) => Promise<T>;
+  enqueueMutation: <T>(
+    label: string,
+    mutator: (state: HydraStateShape) => T,
+    detail?: Record<string, unknown>,
+  ) => Promise<T>;
   ensureKnownAgent: (agent: string, strict?: boolean) => void;
   ensureKnownStatus: (status: string) => void;
   parseList: (val: unknown) => string[];

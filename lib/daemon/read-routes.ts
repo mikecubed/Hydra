@@ -3,7 +3,14 @@
  */
 
 import { buildSelfSnapshot } from '../hydra-self.ts';
-import type { ReadRouteCtx, TaskEntry, HandoffEntry, BlockerEntry, DecisionEntry, ChildSessionEntry } from '../types.ts';
+import type {
+  ReadRouteCtx,
+  TaskEntry,
+  HandoffEntry,
+  BlockerEntry,
+  DecisionEntry,
+  ChildSessionEntry,
+} from '../types.ts';
 
 type EventEntry = { seq: number; at: string; type: string; category?: string; payload?: unknown };
 
@@ -48,7 +55,7 @@ export async function handleReadRoute(ctx: ReadRouteCtx): Promise<boolean> {
     try {
       const summary = getModelSummary();
       models = Object.fromEntries(
-        Object.entries(summary).map(([name, info]) => [name, (info).active]),
+        Object.entries(summary).map(([name, info]) => [name, info.active]),
       );
     } catch {
       // Best effort only.
@@ -216,7 +223,7 @@ export async function handleReadRoute(ctx: ReadRouteCtx): Promise<boolean> {
           summary: h.summary.slice(0, 200),
           createdAt: h.createdAt,
         }));
-      (agents)[name] = {
+      agents[name] = {
         currentTask: currentTask
           ? {
               id: currentTask.id,
@@ -232,7 +239,9 @@ export async function handleReadRoute(ctx: ReadRouteCtx): Promise<boolean> {
     }
 
     const completedIds = new Set(
-      state.tasks.filter((t: TaskEntry) => ['done', 'cancelled'].includes(t.status)).map((t: TaskEntry) => t.id),
+      state.tasks
+        .filter((t: TaskEntry) => ['done', 'cancelled'].includes(t.status))
+        .map((t: TaskEntry) => t.id),
     );
     const inProgress = state.tasks
       .filter((t: TaskEntry) => t.status === 'in_progress')
@@ -252,11 +261,21 @@ export async function handleReadRoute(ctx: ReadRouteCtx): Promise<boolean> {
           t.status === 'blocked' ||
           (Array.isArray(t.blockedBy) && t.blockedBy.some((dep: string) => !completedIds.has(dep))),
       )
-      .map((t: TaskEntry) => ({ id: t.id, title: t.title, owner: t.owner, blockedBy: t.blockedBy }));
+      .map((t: TaskEntry) => ({
+        id: t.id,
+        title: t.title,
+        owner: t.owner,
+        blockedBy: t.blockedBy,
+      }));
     const recentlyCompleted = state.tasks
       .filter((t: TaskEntry) => t.status === 'done')
       .slice(-5)
-      .map((t: TaskEntry) => ({ id: t.id, title: t.title, owner: t.owner, updatedAt: t.updatedAt }));
+      .map((t: TaskEntry) => ({
+        id: t.id,
+        title: t.title,
+        owner: t.owner,
+        updatedAt: t.updatedAt,
+      }));
 
     const pendingHandoffs = state.handoffs
       .filter((h: HandoffEntry) => !h.acknowledgedAt)
@@ -281,25 +300,21 @@ export async function handleReadRoute(ctx: ReadRouteCtx): Promise<boolean> {
         acknowledgedBy: h.acknowledgedBy,
         createdAt: h.createdAt,
       }));
-    const recentDecisions = state.decisions
-      .slice(-3)
-      .map((d: DecisionEntry) => ({
-        id: d.id,
-        title: d.title,
-        owner: d.owner,
-        rationale: (d.rationale ?? '').slice(0, 200),
-        createdAt: d.createdAt,
-      }));
+    const recentDecisions = state.decisions.slice(-3).map((d: DecisionEntry) => ({
+      id: d.id,
+      title: d.title,
+      owner: d.owner,
+      rationale: (d.rationale ?? '').slice(0, 200),
+      createdAt: d.createdAt,
+    }));
 
-    const recentEvents = events
-      .slice(-20)
-      .map((e: EventEntry) => ({
-        seq: e.seq,
-        at: e.at,
-        type: e.type,
-        category: e.category,
-        payload: e.payload,
-      }));
+    const recentEvents = events.slice(-20).map((e: EventEntry) => ({
+      seq: e.seq,
+      at: e.at,
+      type: e.type,
+      category: e.category,
+      payload: e.payload,
+    }));
 
     sendJson(res, 200, {
       ok: true,
@@ -393,7 +408,12 @@ export async function handleReadRoute(ctx: ReadRouteCtx): Promise<boolean> {
         })),
       });
     } catch (err) {
-      sendJson(res, 200, { ok: true, enabled: false, worktrees: [], error: (err as Error).message });
+      sendJson(res, 200, {
+        ok: true,
+        enabled: false,
+        worktrees: [],
+        error: (err as Error).message,
+      });
     }
     return true;
   }
@@ -431,9 +451,9 @@ export async function handleReadRoute(ctx: ReadRouteCtx): Promise<boolean> {
     const agentSuggestions: Record<string, unknown> = {};
     for (const agent of ['gemini', 'codex', 'claude']) {
       try {
-        (agentSuggestions)[agent] = suggestNext(state, agent);
+        agentSuggestions[agent] = suggestNext(state, agent);
       } catch {
-        (agentSuggestions)[agent] = { action: 'unknown' };
+        agentSuggestions[agent] = { action: 'unknown' };
       }
     }
 
@@ -443,7 +463,9 @@ export async function handleReadRoute(ctx: ReadRouteCtx): Promise<boolean> {
     let eventsSinceLastActive = 0;
     try {
       const events = readEvents(500);
-      eventsSinceLastActive = events.filter((e: EventEntry) => new Date(e.at).getTime() > lastActiveMs).length;
+      eventsSinceLastActive = events.filter(
+        (e: EventEntry) => new Date(e.at).getTime() > lastActiveMs,
+      ).length;
     } catch {
       /* skip */
     }

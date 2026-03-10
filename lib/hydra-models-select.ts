@@ -94,7 +94,9 @@ class Picker<T> {
       process.stdin.resume();
       process.stdout.write(HIDE_CURSOR);
 
-      this._handler = (str: string, key: unknown) => { this._onKey(str, key as { ctrl?: boolean; name?: string } | null); };
+      this._handler = (str: string, key: unknown) => {
+        this._onKey(str, key as { ctrl?: boolean; name?: string } | null);
+      };
       process.stdin.on('keypress', this._handler);
       this._draw();
     });
@@ -408,7 +410,10 @@ interface EffortResult {
   _skipped?: boolean;
 }
 
-export async function pickEffort(agentName: string, modelId?: string | null): Promise<EffortResult | null | undefined> {
+export async function pickEffort(
+  agentName: string,
+  modelId?: string | null,
+): Promise<EffortResult | null | undefined> {
   const current = getReasoningEffort(agentName);
   const effectiveModel = modelId || getActiveModel(agentName) || '';
   const options = getEffortOptionsForModel(effectiveModel);
@@ -426,14 +431,15 @@ export async function pickEffort(agentName: string, modelId?: string | null): Pr
     thinking: 'Thinking Budget',
     'model-swap': 'Thinking Mode',
   };
-  const title =
-    (TITLES as Record<string, string>)[caps.type] ?? 'Reasoning Effort';
+  const title = (TITLES as Record<string, string>)[caps.type] ?? 'Reasoning Effort';
 
-  const items: EffortItem[] = options.map((opt: { id: string | null; label: string; hint?: string }) => ({
-    id: opt.id,
-    label: opt.label,
-    desc: opt.hint ?? null,
-  }));
+  const items: EffortItem[] = options.map(
+    (opt: { id: string | null; label: string; hint?: string }) => ({
+      id: opt.id,
+      label: opt.label,
+      desc: opt.hint ?? null,
+    }),
+  );
 
   const initialIdx = current
     ? Math.max(
@@ -462,7 +468,11 @@ export async function pickEffort(agentName: string, modelId?: string | null): Pr
 
 // ── Apply selection ─────────────────────────────────────────────────────────
 
-export function applySelection(agentName: string, modelId: string, effortLevel: string | null): string {
+export function applySelection(
+  agentName: string,
+  modelId: string,
+  effortLevel: string | null,
+): string {
   invalidateConfigCache();
   const cfg = loadHydraConfig();
 

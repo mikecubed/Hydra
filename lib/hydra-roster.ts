@@ -103,7 +103,11 @@ export async function runRosterEditor(rl: unknown): Promise<void> {
       const isCurrent = a === currentAgent;
       const isRecommended = rec?.models?.some((m: string) => {
         const agentModelPresets = cfg.models?.[a] ?? {};
-        return m === agentModelPresets.default || m === agentModelPresets.fast || m === agentModelPresets.cheap;
+        return (
+          m === agentModelPresets.default ||
+          m === agentModelPresets.fast ||
+          m === agentModelPresets.cheap
+        );
       });
       let desc = '';
       if (isCurrent) desc = '(current)';
@@ -113,7 +117,9 @@ export async function runRosterEditor(rl: unknown): Promise<void> {
 
     const agentResult = await promptChoice(rl, {
       title: `${role}: Select Agent`,
-      context: (rec?.models != null ? `Recommended models: ${rec.models.join(', ')}` : '') as unknown as object,
+      context: (rec?.models != null
+        ? `Recommended models: ${rec.models.join(', ')}`
+        : '') as unknown as object,
       choices: agentChoices,
     });
 
@@ -173,7 +179,11 @@ export async function runRosterEditor(rl: unknown): Promise<void> {
 
     // Step 4: Pick reasoning/thinking (if supported)
     const effectiveModel = (newModel ?? getActiveModel(newAgent)) as string;
-    const effortOptions = getEffortOptionsForModel(effectiveModel) as Array<{ label: string; id: string; hint?: string }>;
+    const effortOptions = getEffortOptionsForModel(effectiveModel) as Array<{
+      label: string;
+      id: string;
+      hint?: string;
+    }>;
     let newEffort: string | null = null;
 
     if (effortOptions.length > 0) {
@@ -208,7 +218,10 @@ export async function runRosterEditor(rl: unknown): Promise<void> {
   console.log('');
   console.log(pc.bold('  Changes to apply:'));
   for (const c of changes) {
-    const eff = formatEffortDisplay((c.model ?? getActiveModel(c.agent)) as string, c.reasoningEffort) as string | null;
+    const eff = formatEffortDisplay(
+      (c.model ?? getActiveModel(c.agent)) as string,
+      c.reasoningEffort,
+    ) as string | null;
     const effStr = eff ? pc.yellow(` ${eff}`) : '';
     const modelStr = c.model ? pc.white(c.model) : pc.dim('(agent default)');
     console.log(`  ${pc.cyan(c.role.padEnd(16))} ${c.agent}  ${modelStr}${effStr}`);

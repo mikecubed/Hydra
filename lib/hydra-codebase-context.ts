@@ -312,7 +312,10 @@ function inferTopic(text: string): string {
 // ── Topic Context Retrieval ─────────────────────────────────────────────────
 
 /** Map topic names to CLAUDE.md section keys and supplementary info. */
-const TOPIC_SECTIONS: Record<string, { keys: string[]; filter?: string; supplementWith: string | null }> = {
+const TOPIC_SECTIONS: Record<
+  string,
+  { keys: string[]; filter?: string; supplementWith: string | null }
+> = {
   dispatch: { keys: ['dispatch-modes', 'task-routing'], supplementWith: 'functions' },
   council: { keys: ['key-modules'], filter: 'council', supplementWith: 'functions' },
   config: { keys: ['code-conventions'], supplementWith: 'config' },
@@ -581,7 +584,9 @@ export function searchKnowledgeBase(query: string, maxResults = 5) {
     for (const entry of results.slice(0, maxResults)) {
       const e = entry as Record<string, unknown>;
       const status = e['attempted'] ? (e['outcome'] as string) || 'attempted' : 'researched';
-      lines.push(`- [${(e['area'] as string) || 'general'}] ${(e['finding'] as string).slice(0, 120)} (${status})`);
+      lines.push(
+        `- [${(e['area'] as string) || 'general'}] ${(e['finding'] as string).slice(0, 120)} (${status})`,
+      );
       if (e['learnings']) {
         lines.push(`  Learnings: ${(e['learnings'] as string).slice(0, 100)}`);
       }
@@ -592,7 +597,10 @@ export function searchKnowledgeBase(query: string, maxResults = 5) {
   }
 }
 
-let _kbModule: { loadKnowledgeBase: (dir: string) => { entries: unknown[] }; searchEntries?: (kb: { entries: unknown[] }, query: string, maxResults?: number) => unknown[] } | null = null;
+let _kbModule: {
+  loadKnowledgeBase: (dir: string) => { entries: unknown[] };
+  searchEntries?: (kb: { entries: unknown[] }, query: string, maxResults?: number) => unknown[];
+} | null = null;
 function loadKBModule() {
   if (_kbModule) return _kbModule;
   // Synchronous dynamic require — the module is pure Node.js
@@ -612,17 +620,15 @@ function loadKBModule() {
       searchEntries: (kb: { entries: unknown[] }, query: string) => {
         if (!kb?.entries) return [];
         const q = query.toLowerCase();
-        return kb.entries.filter(
-          (e) => {
-            const entry = e as Record<string, unknown>;
-            return (
-              ((entry['finding'] as string) || '').toLowerCase().includes(q) ||
-              ((entry['area'] as string) || '').toLowerCase().includes(q) ||
-              ((entry['learnings'] as string) || '').toLowerCase().includes(q) ||
-              ((entry['tags'] as string[]) || []).some((t) => t.toLowerCase().includes(q))
-            );
-          },
-        );
+        return kb.entries.filter((e) => {
+          const entry = e as Record<string, unknown>;
+          return (
+            ((entry['finding'] as string) || '').toLowerCase().includes(q) ||
+            ((entry['area'] as string) || '').toLowerCase().includes(q) ||
+            ((entry['learnings'] as string) || '').toLowerCase().includes(q) ||
+            ((entry['tags'] as string[]) || []).some((t) => t.toLowerCase().includes(q))
+          );
+        });
       },
     };
     return _kbModule;

@@ -169,7 +169,12 @@ function buildGeminiPrompt(userPrompt: string, claudePlan: unknown, daemonSummar
   ].join('\n');
 }
 
-function buildCodexPrompt(userPrompt: string, claudePlan: unknown, geminiReview: unknown, daemonSummary: unknown) {
+function buildCodexPrompt(
+  userPrompt: string,
+  claudePlan: unknown,
+  geminiReview: unknown,
+  daemonSummary: unknown,
+) {
   const agentConfig = getAgent('codex');
 
   return [
@@ -228,10 +233,37 @@ async function main() {
     project: config.projectName,
     daemonUrl,
     daemonSummary: null as unknown | null,
-    claude: null as { ok?: boolean; preview?: boolean; command?: unknown; parsed?: unknown; stdout?: string; lastMessage?: string } | null,
-    gemini: null as { ok?: boolean; preview?: boolean; command?: unknown; parsed?: unknown; stdout?: string } | null,
-    codex: null as { ok?: boolean; preview?: boolean; command?: unknown; parsed?: unknown; stdout?: string; lastMessage?: string } | null,
-    outputSummary: null as { claudeOk: boolean; geminiOk: boolean; codexOk: boolean; claudeSnippet: string; geminiSnippet: string; codexSnippet: string } | null,
+    claude: null as {
+      ok?: boolean;
+      preview?: boolean;
+      command?: unknown;
+      parsed?: unknown;
+      stdout?: string;
+      lastMessage?: string;
+    } | null,
+    gemini: null as {
+      ok?: boolean;
+      preview?: boolean;
+      command?: unknown;
+      parsed?: unknown;
+      stdout?: string;
+    } | null,
+    codex: null as {
+      ok?: boolean;
+      preview?: boolean;
+      command?: unknown;
+      parsed?: unknown;
+      stdout?: string;
+      lastMessage?: string;
+    } | null,
+    outputSummary: null as {
+      claudeOk: boolean;
+      geminiOk: boolean;
+      codexOk: boolean;
+      claudeSnippet: string;
+      geminiSnippet: string;
+      codexSnippet: string;
+    } | null,
   };
 
   report.daemonSummary = await fetchDaemonSummary(daemonUrl);

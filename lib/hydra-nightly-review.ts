@@ -64,7 +64,10 @@ async function reviewCommand(projectRoot: string, options: Record<string, string
 
   // Load the latest nightly report to determine baseBranch
   const nightlyDir = path.join(projectRoot, 'docs', 'coordination', 'nightly');
-  const reportData = loadLatestReport(nightlyDir, 'NIGHTLY', dateFilter) as Record<string, unknown> | null;
+  const reportData = loadLatestReport(nightlyDir, 'NIGHTLY', dateFilter) as Record<
+    string,
+    unknown
+  > | null;
   const baseBranch = (reportData?.['baseBranch'] as string | undefined) ?? 'dev';
 
   // Ensure we're on baseBranch
@@ -81,7 +84,9 @@ async function reviewCommand(projectRoot: string, options: Record<string, string
   let skipped = 0;
 
   for (const branch of branches) {
-    const reportEntry = (reportData?.['results'] as any[] | undefined)?.find((r: Record<string, unknown>) => r['branch'] === branch);
+    const reportEntry = (reportData?.['results'] as any[] | undefined)?.find(
+      (r: Record<string, unknown>) => r['branch'] === branch,
+    );
 
     console.log(pc.bold(pc.cyan(`\n── ${branch} ──`)));
 
@@ -157,7 +162,10 @@ function statusCommand(projectRoot: string, options: Record<string, string | boo
 
   // Load report first to determine baseBranch
   const nightlyDir = path.join(projectRoot, 'docs', 'coordination', 'nightly');
-  const report = loadLatestReport(nightlyDir, 'NIGHTLY', dateFilter) as Record<string, unknown> | null;
+  const report = loadLatestReport(nightlyDir, 'NIGHTLY', dateFilter) as Record<
+    string,
+    unknown
+  > | null;
   const baseBranch = (report?.['baseBranch'] as string | undefined) || 'dev';
 
   console.log(pc.bold('\nNightly Status'));
@@ -203,7 +211,11 @@ function statusCommand(projectRoot: string, options: Record<string, string | boo
 
 function cleanCommand(projectRoot: string, options: Record<string, string | boolean>) {
   const nightlyDir = path.join(projectRoot, 'docs', 'coordination', 'nightly');
-  const report = loadLatestReport(nightlyDir, 'NIGHTLY', (options['date'] as string) || null) as Record<string, unknown> | null;
+  const report = loadLatestReport(
+    nightlyDir,
+    'NIGHTLY',
+    (options['date'] as string) || null,
+  ) as Record<string, unknown> | null;
   const baseBranch = (report?.['baseBranch'] as string | undefined) || 'dev';
   cleanBranches(projectRoot, 'nightly', baseBranch, (options['date'] as string) || null);
 }
@@ -216,9 +228,13 @@ async function main() {
 
   let config;
   try {
-    config = resolveProject({ project: options['project'] ? String(options['project']) : undefined });
+    config = resolveProject({
+      project: options['project'] ? String(options['project']) : undefined,
+    });
   } catch (err: unknown) {
-    console.error(pc.red(`Project resolution failed: ${err instanceof Error ? err.message : String(err)}`));
+    console.error(
+      pc.red(`Project resolution failed: ${err instanceof Error ? err.message : String(err)}`),
+    );
     process.exit(1);
   }
 

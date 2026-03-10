@@ -193,8 +193,9 @@ server.registerTool(
   },
   async ({ status, owner, limit, offset }) => {
     await requireDaemon();
-    const data = await request('GET', baseUrl, '/summary') as Record<string, unknown>;
-    let tasks = ((data['summary'] as Record<string, unknown> | undefined)?.['openTasks'] as unknown[]) || [];
+    const data = (await request('GET', baseUrl, '/summary')) as Record<string, unknown>;
+    let tasks =
+      ((data['summary'] as Record<string, unknown> | undefined)?.['openTasks'] as unknown[]) || [];
     if (status) tasks = tasks.filter((t) => (t as Record<string, unknown>)['status'] === status);
     if (owner) tasks = tasks.filter((t) => (t as Record<string, unknown>)['owner'] === owner);
 
@@ -202,11 +203,11 @@ server.registerTool(
     const page = tasks.slice(offset, offset + limit).map((t) => {
       const task = t as Record<string, unknown>;
       return {
-      id: task['id'],
-      title: task['title'],
-      status: task['status'],
-      owner: task['owner'],
-      type: task['type'],
+        id: task['id'],
+        title: task['title'],
+        status: task['status'],
+        owner: task['owner'],
+        type: task['type'],
       };
     });
 
@@ -266,7 +267,7 @@ server.registerTool(
     if (taskId) body['taskId'] = taskId;
     if (title) body['title'] = title;
     if (notes) body['notes'] = notes;
-    const result = await request('POST', baseUrl, '/task/claim', body) as Record<string, unknown>;
+    const result = (await request('POST', baseUrl, '/task/claim', body)) as Record<string, unknown>;
     const output = { task: result['task'] };
     return {
       content: [{ type: 'text', text: JSON.stringify(output) }],
@@ -312,7 +313,10 @@ server.registerTool(
     if (status) body['status'] = status;
     if (notes) body['notes'] = notes;
     if (claimToken) body['claimToken'] = claimToken;
-    const result = await request('POST', baseUrl, '/task/update', body) as Record<string, unknown>;
+    const result = (await request('POST', baseUrl, '/task/update', body)) as Record<
+      string,
+      unknown
+    >;
     const output = { task: result['task'] };
     return {
       content: [{ type: 'text', text: JSON.stringify(output) }],
@@ -351,13 +355,13 @@ server.registerTool(
   },
   async ({ taskId, name, context, agent }) => {
     await requireDaemon();
-    const result = await request('POST', baseUrl, '/task/checkpoint', {
+    const result = (await request('POST', baseUrl, '/task/checkpoint', {
       taskId,
       name,
       context: context || '',
       agent: agent || '',
-    }) as Record<string, unknown>;
-    const output = { checkpoint: (result as Record<string, unknown>)["checkpoint"] };
+    })) as Record<string, unknown>;
+    const output = { checkpoint: (result as Record<string, unknown>)['checkpoint'] };
     return {
       content: [{ type: 'text', text: JSON.stringify(output) }],
       structuredContent: output,
@@ -389,7 +393,7 @@ server.registerTool(
   },
   async ({ agent }) => {
     await requireDaemon();
-    const stateData = await request('GET', baseUrl, '/state') as Record<string, unknown>;
+    const stateData = (await request('GET', baseUrl, '/state')) as Record<string, unknown>;
     const stateObj = stateData['state'] as Record<string, unknown> | undefined;
     const handoffs = ((stateObj?.['handoffs'] || []) as Array<Record<string, unknown>>).filter(
       (h) => h['to'] === agent && !h['acknowledgedAt'],
@@ -428,7 +432,10 @@ server.registerTool(
   },
   async ({ handoffId, agent }) => {
     await requireDaemon();
-    const result = await request('POST', baseUrl, '/handoff/ack', { handoffId, agent }) as Record<string, unknown>;
+    const result = (await request('POST', baseUrl, '/handoff/ack', { handoffId, agent })) as Record<
+      string,
+      unknown
+    >;
     const output = { handoff: result['handoff'] };
     return {
       content: [{ type: 'text', text: JSON.stringify(output) }],
@@ -462,12 +469,12 @@ server.registerTool(
   },
   async ({ prompt }) => {
     await requireDaemon();
-    const result = await request('POST', baseUrl, '/decision', {
+    const result = (await request('POST', baseUrl, '/decision', {
       title: `Council requested: ${prompt.slice(0, 80)}`,
       owner: 'human',
       rationale: `Agent requested council deliberation for: ${prompt}`,
       impact: 'pending council review',
-    }) as Record<string, unknown>;
+    })) as Record<string, unknown>;
     const output = {
       queued: true,
       decision: result['decision'],
@@ -1010,7 +1017,8 @@ server.registerPrompt(
 
 async function main() {
   const { options } = parseArgs(process.argv);
-  baseUrl = (options['url'] as string | undefined) || process.env['AI_ORCH_URL'] || 'http://127.0.0.1:4173';
+  baseUrl =
+    (options['url'] as string | undefined) || process.env['AI_ORCH_URL'] || 'http://127.0.0.1:4173';
 
   // Check daemon availability on startup (non-blocking for standalone tools)
   daemonAvailable = await checkDaemon();

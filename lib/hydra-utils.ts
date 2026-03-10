@@ -151,7 +151,11 @@ export function parseArgsWithCommand(argv: string[]): ParsedArgsWithCommand {
   return { command, options, positionals };
 }
 
-export function getOption(options: Record<string, string | boolean>, key: string, fallback = ''): string {
+export function getOption(
+  options: Record<string, string | boolean>,
+  key: string,
+  fallback = '',
+): string {
   const val = (options as Record<string, string | boolean | undefined>)[key];
   if (val !== undefined) {
     return String(val);
@@ -159,7 +163,11 @@ export function getOption(options: Record<string, string | boolean>, key: string
   return fallback;
 }
 
-export function requireOption(options: Record<string, string | boolean>, key: string, help = ''): string {
+export function requireOption(
+  options: Record<string, string | boolean>,
+  key: string,
+  help = '',
+): string {
   const value = getOption(options, key, '');
   if (!value) {
     const suffix = help ? `\n${help}` : '';
@@ -168,7 +176,10 @@ export function requireOption(options: Record<string, string | boolean>, key: st
   return value;
 }
 
-export function getPrompt(options: Record<string, string | boolean>, positionals: string[]): string {
+export function getPrompt(
+  options: Record<string, string | boolean>,
+  positionals: string[],
+): string {
   if (options['prompt']) {
     return String(options['prompt']);
   }
@@ -269,7 +280,12 @@ export function parseJsonLoose(text: unknown): unknown {
  * @param timeoutMs - Timeout in ms
  * @param extraOpts - Additional options
  */
-export function runProcess(command: string, args: string[], timeoutMs = DEFAULT_TIMEOUT_MS, extraOpts: RunProcessOpts = {}): RunProcessResult {
+export function runProcess(
+  command: string,
+  args: string[],
+  timeoutMs = DEFAULT_TIMEOUT_MS,
+  extraOpts: RunProcessOpts = {},
+): RunProcessResult {
   const spawnOpts = {
     cwd: extraOpts.cwd ?? process.cwd(),
     encoding: 'utf8' as BufferEncoding,
@@ -415,7 +431,9 @@ export async function request<T = unknown>(
       if (attempt >= NETWORK_RETRY_COUNT) {
         break;
       }
-      await new Promise<void>((resolve) => { setTimeout(resolve, NETWORK_RETRY_DELAY_MS * attempt); });
+      await new Promise<void>((resolve) => {
+        setTimeout(resolve, NETWORK_RETRY_DELAY_MS * attempt);
+      });
     }
   }
 
@@ -425,7 +443,7 @@ export async function request<T = unknown>(
     );
   }
 
-  const payload = await response!.json().catch(() => ({})) as { error?: string };
+  const payload = (await response!.json().catch(() => ({}))) as { error?: string };
   if (!response!.ok) {
     throw new Error(payload.error ?? `HTTP ${String(response!.status)}`);
   }
@@ -516,7 +534,11 @@ const TANDEM_PAIRS: Record<string, TandemPair> = {
  * Respects agent filter — if one is excluded, swaps with best available.
  * If only 1 agent available, returns null (degrade to single).
  */
-export function selectTandemPair(taskType: string, _suggestedAgent: string, agents: string[] | null = null): TandemPair | null {
+export function selectTandemPair(
+  taskType: string,
+  _suggestedAgent: string,
+  agents: string[] | null = null,
+): TandemPair | null {
   const pair = TANDEM_PAIRS[taskType] ?? TANDEM_PAIRS['implementation'];
   let { lead, follow } = pair;
 

@@ -56,7 +56,10 @@ async function reviewCommand(projectRoot: string, options: Record<string, string
   }
 
   const reportDir = path.join(projectRoot, 'docs', 'coordination', 'actualize');
-  const reportData = loadLatestReport(reportDir, 'ACTUALIZE', dateFilter) as Record<string, unknown> | null;
+  const reportData = loadLatestReport(reportDir, 'ACTUALIZE', dateFilter) as Record<
+    string,
+    unknown
+  > | null;
   const baseBranch = (reportData?.['baseBranch'] as string | undefined) ?? 'dev';
 
   const current = getCurrentBranch(projectRoot);
@@ -72,7 +75,9 @@ async function reviewCommand(projectRoot: string, options: Record<string, string
   let skipped = 0;
 
   for (const branch of branches) {
-    const reportEntry = (reportData?.['results'] as any[] | undefined)?.find((r: Record<string, unknown>) => r['branch'] === branch);
+    const reportEntry = (reportData?.['results'] as any[] | undefined)?.find(
+      (r: Record<string, unknown>) => r['branch'] === branch,
+    );
 
     console.log(pc.bold(pc.cyan(`\n── ${branch} ──`)));
 
@@ -139,7 +144,10 @@ function statusCommand(projectRoot: string, options: Record<string, string | boo
   const branches = listBranches(projectRoot, 'actualize', dateFilter);
 
   const reportDir = path.join(projectRoot, 'docs', 'coordination', 'actualize');
-  const report = loadLatestReport(reportDir, 'ACTUALIZE', dateFilter) as Record<string, unknown> | null;
+  const report = loadLatestReport(reportDir, 'ACTUALIZE', dateFilter) as Record<
+    string,
+    unknown
+  > | null;
   const baseBranch = (report?.['baseBranch'] as string | undefined) || 'dev';
 
   console.log(pc.bold('\nActualize Status'));
@@ -162,7 +170,8 @@ function statusCommand(projectRoot: string, options: Record<string, string | boo
     console.log(`  Tokens: ~${(report['budget'] as any)?.consumed?.toLocaleString() || '?'}`);
     if ((report['artifacts'] as any)?.selfSnapshot)
       console.log(`  Self snapshot: ${(report['artifacts'] as any).selfSnapshot}`);
-    if ((report['artifacts'] as any)?.selfIndex) console.log(`  Self index: ${(report['artifacts'] as any).selfIndex}`);
+    if ((report['artifacts'] as any)?.selfIndex)
+      console.log(`  Self index: ${(report['artifacts'] as any).selfIndex}`);
   } else {
     console.log(pc.dim('\n  No actualize report found.'));
   }
@@ -172,7 +181,11 @@ function statusCommand(projectRoot: string, options: Record<string, string | boo
 
 function cleanCommand(projectRoot: string, options: Record<string, string | boolean>) {
   const reportDir = path.join(projectRoot, 'docs', 'coordination', 'actualize');
-  const report = loadLatestReport(reportDir, 'ACTUALIZE', (options['date'] as string) || null) as Record<string, unknown> | null;
+  const report = loadLatestReport(
+    reportDir,
+    'ACTUALIZE',
+    (options['date'] as string) || null,
+  ) as Record<string, unknown> | null;
   const baseBranch = (report?.['baseBranch'] as string | undefined) || 'dev';
   cleanBranches(projectRoot, 'actualize', baseBranch, (options['date'] as string) || null);
 }
@@ -183,9 +196,13 @@ async function main() {
 
   let config;
   try {
-    config = resolveProject({ project: options['project'] ? String(options['project']) : undefined });
+    config = resolveProject({
+      project: options['project'] ? String(options['project']) : undefined,
+    });
   } catch (err: unknown) {
-    console.error(pc.red(`Project resolution failed: ${err instanceof Error ? err.message : String(err)}`));
+    console.error(
+      pc.red(`Project resolution failed: ${err instanceof Error ? err.message : String(err)}`),
+    );
     process.exit(1);
   }
 

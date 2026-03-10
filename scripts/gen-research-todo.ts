@@ -128,7 +128,9 @@ function groupFiles(files: string[]) {
 
   // Sort each group by title
   for (const g of Object.values(groups)) {
-    (g as { title: string; link: string }[]).sort((a: { title: string }, b: { title: string }) => a.title.localeCompare(b.title, undefined, { sensitivity: 'base' }));
+    (g as { title: string; link: string }[]).sort((a: { title: string }, b: { title: string }) =>
+      a.title.localeCompare(b.title, undefined, { sensitivity: 'base' }),
+    );
   }
 
   return groups;

@@ -305,14 +305,16 @@ function triage(
       const signalInfo = failure.signal ? ` (signal ${failure.signal})` : '';
       const stderrHint =
         !failure.error && failure.stderr
-          ? (failure.stderr ?? '')
+          ? ((failure.stderr ?? '')
               .replace(/\[Hydra Telemetry\].*?\n/g, '')
               .trim()
               .split('\n')[0]
-              ?.slice(0, 150) ?? ''
+              ?.slice(0, 150) ?? '')
           : '';
       explanation =
-        ((failure.error ?? '').slice(0, 200) || stderrHint || 'Unknown failure without investigator') +
+        ((failure.error ?? '').slice(0, 200) ||
+          stderrHint ||
+          'Unknown failure without investigator') +
         exitInfo +
         signalInfo;
       rootCause = 'unknown';
@@ -360,7 +362,9 @@ function buildSignature(failure: FailureInfo): string {
   if (isGeneric && failure.stderr) {
     const stderrClean = failure.stderr.replace(/\[Hydra Telemetry\].*?\n/g, '').trim();
     if (stderrClean) {
-      const lines = stderrClean.split('\n').filter((l: string) => !l.startsWith('[Hydra Telemetry]'));
+      const lines = stderrClean
+        .split('\n')
+        .filter((l: string) => !l.startsWith('[Hydra Telemetry]'));
       if (lines.length > 0) {
         const firstLine = lines[0].trim();
         errorText = `${errorText} (${firstLine})`;
@@ -477,8 +481,7 @@ async function createSuggestionFollowUp(
 
 async function addKBEntry(failure: FailureInfo, diagnosis: DoctorDiagnosis): Promise<void> {
   try {
-    const { loadKnowledgeBase, saveKnowledgeBase, addEntry } =
-      await import('./hydra-knowledge.ts');
+    const { loadKnowledgeBase, saveKnowledgeBase, addEntry } = await import('./hydra-knowledge.ts');
     const kb = loadKnowledgeBase(undefined as unknown as string);
     const entry = addEntry(kb, {
       area: failure.pipeline,
@@ -811,7 +814,9 @@ export async function enrichWithDiagnosis(
     const { streamWithFallback } = await import('./hydra-concierge-providers.ts');
 
     const itemSummary = items
-      .map((item, i) => `${String(i + 1)}. [${item.severity}] ${item.title} (source: ${item.source})`)
+      .map(
+        (item, i) => `${String(i + 1)}. [${item.severity}] ${item.title} (source: ${item.source})`,
+      )
       .join('\n');
 
     const prompt = `You are a DevOps diagnostic assistant. Analyze these issues found in the Hydra orchestration system and the recent CLI output.
@@ -847,7 +852,8 @@ Respond as JSON:
         for (const enrichment of parsed['enriched'] as Array<Record<string, unknown>>) {
           const idx = enrichment['index'] as number;
           if (idx >= 0 && idx < items.length) {
-            if (enrichment['actionPrompt']) items[idx]['actionPrompt'] = enrichment['actionPrompt'] as string;
+            if (enrichment['actionPrompt'])
+              items[idx]['actionPrompt'] = enrichment['actionPrompt'] as string;
             if (enrichment['severity'])
               items[idx]['severity'] = enrichment['severity'] as ActionItem['severity'];
           }

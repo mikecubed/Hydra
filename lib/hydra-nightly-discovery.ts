@@ -171,9 +171,11 @@ export async function runDiscovery(
 
   const agent = opts.agent || (discoveryCfg['agent'] as string | undefined) || 'gemini';
   const modelOverride = opts.model || (discoveryCfg['model'] as string | undefined) || null;
-  const maxSuggestions = opts.maxSuggestions || (discoveryCfg['maxSuggestions'] as number | undefined) || 5;
+  const maxSuggestions =
+    opts.maxSuggestions || (discoveryCfg['maxSuggestions'] as number | undefined) || 5;
   const focus = opts.focus || (discoveryCfg['focus'] as string[] | undefined) || [];
-  const timeoutMs = opts.timeoutMs || (discoveryCfg['timeoutMs'] as number | undefined) || 5 * 60 * 1000;
+  const timeoutMs =
+    opts.timeoutMs || (discoveryCfg['timeoutMs'] as number | undefined) || 5 * 60 * 1000;
   const existingTasks = opts.existingTasks || [];
   const profile = opts.profile || 'nightly';
   const extraContext = opts.extraContext || '';

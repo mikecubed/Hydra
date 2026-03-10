@@ -134,7 +134,10 @@ const TOKENS_PER_CHAR_ESTIMATE = 0.25; // rough estimate: 4 chars ≈ 1 token
 
 // ── Percentile Calculation ──────────────────────────────────────────────────
 
-function calculatePercentiles(values: number[], percentiles: number[] = [50, 95, 99]): PercentileResult {
+function calculatePercentiles(
+  values: number[],
+  percentiles: number[] = [50, 95, 99],
+): PercentileResult {
   if (values.length === 0) return {};
   const sorted = [...values].sort((a, b) => a - b);
   const result: PercentileResult = {};
@@ -419,7 +422,10 @@ export function getSessionUsage() {
  * @param {number} windowMs - Time window in milliseconds
  * @returns {{ real: number, estimated: number, total: number, entries: number }}
  */
-export function getRecentTokens(agentName: string | null | undefined, windowMs: number): TokenWindowResult {
+export function getRecentTokens(
+  agentName: string | null | undefined,
+  windowMs: number,
+): TokenWindowResult {
   const cutoff = Date.now() - windowMs;
   let real = 0;
   let estimated = 0;
@@ -476,7 +482,9 @@ export function getCostByOutcome(agentName?: string | null): Record<string, Outc
  * @param {object} sloConfig - e.g. { claude: { maxP95Ms: 180000, maxErrorRate: 0.10 }, ... }
  * @returns {Array<{agent: string, metric: string, value: number, threshold: number}>}
  */
-export function checkSLOs(sloConfig: Record<string, SloThresholds> | null | undefined): SloViolation[] {
+export function checkSLOs(
+  sloConfig: Record<string, SloThresholds> | null | undefined,
+): SloViolation[] {
   if (!sloConfig) return [];
   const violations: SloViolation[] = [];
 
@@ -533,7 +541,10 @@ export function estimateFlowDuration(flow: FlowStep[], rounds = 1): number {
   for (const step of flow) {
     const data = metricsStore.agents[step.agent];
     const avg = data?.avgDurationMs || 0;
-    total += avg > 0 ? avg : (DEFAULT_AGENT_DURATION_MS as Record<string, number>)[step.agent] ?? 120_000;
+    total +=
+      avg > 0
+        ? avg
+        : ((DEFAULT_AGENT_DURATION_MS as Record<string, number>)[step.agent] ?? 120_000);
   }
   return total * rounds;
 }

@@ -66,7 +66,7 @@ export async function scanOldHandoffs(baseUrl: string): Promise<ActionItem[]> {
       if (handoff['acknowledged'] === true) {
         const ts = handoff['ts'] as string | number | undefined;
         const createdAt = handoff['createdAt'] as string | number | undefined;
-        const age = now - new Date((ts ?? createdAt) ?? 0).getTime();
+        const age = now - new Date(ts ?? createdAt ?? 0).getTime();
         if (age > cutoffMs) {
           const handoffId = handoff['id'] as string;
           const summary = handoff['summary'] as string | undefined;
@@ -140,7 +140,7 @@ export async function scanStaleTasks(baseUrl: string): Promise<ActionItem[]> {
         const updatedAt = task['updatedAt'] as string | undefined;
         const claimedAt = task['claimedAt'] as string | undefined;
         const createdAt = task['createdAt'] as string | undefined;
-        const lastUpdate = new Date((updatedAt ?? claimedAt ?? createdAt) ?? 0).getTime();
+        const lastUpdate = new Date(updatedAt ?? claimedAt ?? createdAt ?? 0).getTime();
         const age = now - lastUpdate;
         if (age > cutoffMs) {
           const ageMin = String(Math.round(age / 60000));

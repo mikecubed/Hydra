@@ -270,7 +270,13 @@ export function mergePR({
  * @param {{ cwd?: string, ref: string|number }} opts
  * @returns {{ ok: boolean, error?: string }}
  */
-export function closePR({ cwd = process.cwd(), ref }: { cwd?: string; ref: string | number }): PRResult {
+export function closePR({
+  cwd = process.cwd(),
+  ref,
+}: {
+  cwd?: string;
+  ref: string | number;
+}): PRResult {
   const r = gh(['pr', 'close', String(ref)], cwd);
   if (r.status === 0) return { ok: true };
   return { ok: false, error: (r.stderr || r.stdout || '').trim() };
@@ -380,7 +386,10 @@ function detectAutoLabels(changedFiles: string[], labelConfig: Record<string, un
 export function verifyRequiredChecks({
   cwd = process.cwd(),
   ref,
-}: { cwd?: string; ref: string | number }): ChecksResult {
+}: {
+  cwd?: string;
+  ref: string | number;
+}): ChecksResult {
   const cfg = loadHydraConfig();
   const required = cfg.github?.requiredChecks || [];
   if (required.length === 0) return { ok: true, pending: [], failed: [] };

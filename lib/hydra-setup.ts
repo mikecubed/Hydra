@@ -328,7 +328,7 @@ export function registerCodexMcp() {
     }
     return {
       status: 'error' as const,
-      error: (String(result.stderr ?? '')).trim() || `exit code ${String(result.status)}`,
+      error: String(result.stderr ?? '').trim() || `exit code ${String(result.status)}`,
     };
   } catch (err: unknown) {
     return { status: 'error' as const, error: (err as Error).message };
@@ -351,7 +351,7 @@ export function unregisterCodexMcp() {
     if (result.status === 0) {
       return { status: 'removed' as const };
     }
-    const stderr = (String(result.stderr ?? '')).trim();
+    const stderr = String(result.stderr ?? '').trim();
     if (stderr.includes('not found') || stderr.includes('does not exist')) {
       return { status: 'not_found' as const };
     }
@@ -433,7 +433,11 @@ Options:
  * @param {string[]} argv
  * @returns {{ subcommand: string, flags: object }}
  */
-function parseSetupArgs(argv: string[]): { subcommand: string; flags: SetupFlags; positionals: string[] } {
+function parseSetupArgs(argv: string[]): {
+  subcommand: string;
+  flags: SetupFlags;
+  positionals: string[];
+} {
   const args = argv.slice(2);
   const flags: SetupFlags = {};
   const positionals: string[] = [];
@@ -630,7 +634,10 @@ function runSetup(flags: SetupFlags): { ok: boolean; message: string } {
  * @param {object} flags
  * @returns {{ ok: boolean, message: string }}
  */
-async function runInit(flags: SetupFlags, positionals: string[] = []): Promise<{ ok: boolean; message: string }> {
+async function runInit(
+  flags: SetupFlags,
+  positionals: string[] = [],
+): Promise<{ ok: boolean; message: string }> {
   if (positionals.length > 1) {
     const message = `Expected at most one target path for init, received ${positionals.length}.`;
     console.error(message);

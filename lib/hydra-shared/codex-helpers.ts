@@ -62,7 +62,9 @@ export function extractCodexText(raw: string | null | undefined): string | null 
 }
 
 /** Extract token usage from Codex --json JSONL output. Returns null if not found. */
-export function extractCodexUsage(raw: string | null | undefined): { inputTokens: number; outputTokens: number; totalTokens: number } | null {
+export function extractCodexUsage(
+  raw: string | null | undefined,
+): { inputTokens: number; outputTokens: number; totalTokens: number } | null {
   if (!raw || typeof raw !== 'string') return null;
   const lines = raw.split('\n');
   let usage: { inputTokens: number; outputTokens: number; totalTokens: number } | null = null;
@@ -73,11 +75,11 @@ export function extractCodexUsage(raw: string | null | undefined): { inputTokens
     const u = o.usage ?? o.token_usage;
     if (u) {
       usage ??= { inputTokens: 0, outputTokens: 0, totalTokens: 0 };
-      const inputTokens = (u.input_tokens ?? u.prompt_tokens) ?? 0;
-      const outputTokens = (u.output_tokens ?? u.completion_tokens) ?? 0;
+      const inputTokens = u.input_tokens ?? u.prompt_tokens ?? 0;
+      const outputTokens = u.output_tokens ?? u.completion_tokens ?? 0;
       usage.inputTokens += inputTokens;
       usage.outputTokens += outputTokens;
-      usage.totalTokens += u.total_tokens ?? (inputTokens + outputTokens);
+      usage.totalTokens += u.total_tokens ?? inputTokens + outputTokens;
     }
   }
   return usage;

@@ -72,7 +72,13 @@ export class BudgetTracker {
   _startedAt: number;
   _firedOnce: Set<string>;
 
-  constructor({ softLimit, hardLimit, unitEstimate, unitLabel = 'task', thresholds = [] }: BudgetTrackerOpts) {
+  constructor({
+    softLimit,
+    hardLimit,
+    unitEstimate,
+    unitLabel = 'task',
+    thresholds = [],
+  }: BudgetTrackerOpts) {
     this.softLimit = softLimit;
     this.hardLimit = hardLimit;
     this.unitEstimate = unitEstimate;
@@ -100,7 +106,11 @@ export class BudgetTracker {
    * @param {object} [extra] - Additional fields to store (e.g., { area })
    * @returns {{ tokens: number }}
    */
-  recordUnitEnd(label: string, durationMs: number, extra: Record<string, unknown> = {}): { tokens: number } {
+  recordUnitEnd(
+    label: string,
+    durationMs: number,
+    extra: Record<string, unknown> = {},
+  ): { tokens: number } {
     const session = getSessionUsage();
     const now = session.totalTokens || 0;
     const delta = now - this.currentTokens;

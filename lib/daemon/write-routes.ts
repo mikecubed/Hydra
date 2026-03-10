@@ -4,7 +4,13 @@
  */
 
 import crypto from 'node:crypto';
-import type { WriteRouteCtx, HydraStateShape, TaskEntry, HandoffEntry, ChildSessionEntry } from '../types.ts';
+import type {
+  WriteRouteCtx,
+  HydraStateShape,
+  TaskEntry,
+  HandoffEntry,
+  ChildSessionEntry,
+} from '../types.ts';
 import path from 'node:path';
 import { createWorktree, removeWorktree, isWorktreeEnabled } from '../hydra-worktree.ts';
 import {
@@ -324,9 +330,12 @@ export async function handleWriteRoute(ctx: WriteRouteCtx): Promise<boolean> {
 
     // Create worktree after mutation succeeds (uses task.id)
     let worktreeInfo: Record<string, unknown> | null = null;
-    if (wantWorktree && (task as Record<string, unknown>)["id"]) {
+    if (wantWorktree && (task as Record<string, unknown>)['id']) {
       try {
-        worktreeInfo = await createWorktree((task as Record<string, unknown>)["id"] as string, projectRoot as string) as Record<string, unknown>;
+        worktreeInfo = (await createWorktree(
+          (task as Record<string, unknown>)['id'] as string,
+          projectRoot as string,
+        )) as Record<string, unknown>;
         // Update task record with worktree path via another mutation
         await enqueueMutation(
           `task:worktree id=${(task as Record<string, unknown>)['id']}`,
@@ -376,7 +385,7 @@ export async function handleWriteRoute(ctx: WriteRouteCtx): Promise<boolean> {
 
           existing.owner = agent;
           existing.status = 'in_progress';
-          (existing as Record<string, unknown>)["claimToken"] = crypto.randomUUID();
+          (existing as Record<string, unknown>)['claimToken'] = crypto.randomUUID();
           if (files.length > 0) {
             existing.files = files;
           }
@@ -473,7 +482,8 @@ export async function handleWriteRoute(ctx: WriteRouteCtx): Promise<boolean> {
     }
 
     const updateStatus = body['status'] === undefined ? undefined : String(body['status']);
-    const updateOwner = body['owner'] === undefined ? undefined : String(body['owner']).toLowerCase();
+    const updateOwner =
+      body['owner'] === undefined ? undefined : String(body['owner']).toLowerCase();
     const task = await enqueueMutation(
       `task:update id=${taskId}`,
       (state: HydraStateShape) => {
@@ -484,7 +494,10 @@ export async function handleWriteRoute(ctx: WriteRouteCtx): Promise<boolean> {
 
         // Atomic claim token validation: if caller provides claimToken, it must match
         if (body['claimToken'] && !body['force']) {
-          if ((existing as Record<string, unknown>)["claimToken"] && (existing as Record<string, unknown>)["claimToken"] !== body['claimToken']) {
+          if (
+            (existing as Record<string, unknown>)['claimToken'] &&
+            (existing as Record<string, unknown>)['claimToken'] !== body['claimToken']
+          ) {
             throw new Error(
               `Claim token mismatch for ${taskId}. Task is owned by another claim. Use force=true to override.`,
             );
@@ -511,7 +524,7 @@ export async function handleWriteRoute(ctx: WriteRouteCtx): Promise<boolean> {
         if (body['status'] !== undefined) {
           const status = String(body['status']);
           ensureKnownStatus(status);
-          (existing as Record<string, unknown>)["status"] = status;
+          (existing as Record<string, unknown>)['status'] = status;
         }
         if (body['files'] !== undefined) {
           existing.files = parseList(body['files']);
@@ -523,9 +536,9 @@ export async function handleWriteRoute(ctx: WriteRouteCtx): Promise<boolean> {
           }
         }
         existing.updatedAt = nowIso();
-        if ((existing as Record<string, unknown>)["stale"]) {
-          (existing as Record<string, unknown>)["stale"] = false;
-          delete (existing as Record<string, unknown>)["staleSince"];
+        if ((existing as Record<string, unknown>)['stale']) {
+          (existing as Record<string, unknown>)['stale'] = false;
+          delete (existing as Record<string, unknown>)['staleSince'];
         }
 
         if (['done', 'cancelled'].includes(existing.status)) {
@@ -538,9 +551,15 @@ export async function handleWriteRoute(ctx: WriteRouteCtx): Promise<boolean> {
     );
 
     // Auto-cleanup worktree when task completes
-    if (['done', 'cancelled'].includes((task as Record<string, unknown>)["status"] as string) && (task as Record<string, unknown>)["worktreePath"] && isWorktreeEnabled()) {
+    if (
+      ['done', 'cancelled'].includes((task as Record<string, unknown>)['status'] as string) &&
+      (task as Record<string, unknown>)['worktreePath'] &&
+      isWorktreeEnabled()
+    ) {
       try {
-        await removeWorktree(taskId, projectRoot as string, { deleteBranch: (task as Record<string, unknown>)['status'] === 'cancelled' });
+        await removeWorktree(taskId, projectRoot as string, {
+          deleteBranch: (task as Record<string, unknown>)['status'] === 'cancelled',
+        });
       } catch {
         /* non-critical */
       }
@@ -562,7 +581,8 @@ export async function handleWriteRoute(ctx: WriteRouteCtx): Promise<boolean> {
       /* hub sync is non-critical */
     }
 
-    const shouldVerify = (task as Record<string, unknown>)["status"] === 'done' && body['verify'] !== false;
+    const shouldVerify =
+      (task as Record<string, unknown>)['status'] === 'done' && body['verify'] !== false;
     const verifyPlan = resolveVerificationPlan(projectRoot);
     const isVerifying = shouldVerify && verifyPlan['enabled'];
     if (isVerifying) {
@@ -618,7 +638,10 @@ export async function handleWriteRoute(ctx: WriteRouteCtx): Promise<boolean> {
       for (const va of virtualAgents) {
         const score = (va.taskAffinity as Record<string, number> | undefined)?.[taskType] || 0;
         (virtualScores as Record<string, number>)[va.name] = score;
-        if (!virtualRecommended || score > ((virtualScores as Record<string, number>)[virtualRecommended!] || 0)) {
+        if (
+          !virtualRecommended ||
+          score > ((virtualScores as Record<string, number>)[virtualRecommended!] || 0)
+        ) {
           virtualRecommended = va.name;
         }
       }
@@ -730,18 +753,21 @@ export async function handleWriteRoute(ctx: WriteRouteCtx): Promise<boolean> {
     ensureKnownAgent(owner, false);
     const nextStep = String(body['nextStep'] || '');
 
-    const blocker = await enqueueMutation(`blocker:add owner=${owner}`, (state: HydraStateShape) => {
-      const item = {
-        id: nextId('B', state.blockers),
-        title,
-        owner,
-        status: 'open',
-        nextStep,
-        createdAt: nowIso(),
-      };
-      state.blockers.push(item);
-      return item;
-    });
+    const blocker = await enqueueMutation(
+      `blocker:add owner=${owner}`,
+      (state: HydraStateShape) => {
+        const item = {
+          id: nextId('B', state.blockers),
+          title,
+          owner,
+          status: 'open',
+          nextStep,
+          createdAt: nowIso(),
+        };
+        state.blockers.push(item);
+        return item;
+      },
+    );
 
     sendJson(res, 200, { ok: true, blocker });
     return true;
@@ -869,26 +895,29 @@ export async function handleWriteRoute(ctx: WriteRouteCtx): Promise<boolean> {
             autoUnblock(state, taskId);
           } else if (resultStatus === 'error') {
             // Increment fail count; move to DLQ if exceeded threshold
-            (task as Record<string, unknown>)["failCount"] = (((task as Record<string, unknown>)["failCount"] as number) || 0) + 1;
+            (task as Record<string, unknown>)['failCount'] =
+              (((task as Record<string, unknown>)['failCount'] as number) || 0) + 1;
             const maxAttempts = 3; // config-driven in future
-            if (((task as Record<string, unknown>)["failCount"] as number) >= maxAttempts) {
+            if (((task as Record<string, unknown>)['failCount'] as number) >= maxAttempts) {
               // Move to dead-letter queue
-              if (!Array.isArray((state as Record<string, unknown>)["deadLetter"])) (state as Record<string, unknown>)["deadLetter"] = [];
-              (task as Record<string, unknown>)["status"] = 'cancelled';
-              (task as Record<string, unknown>)["deadLetteredAt"] = nowIso();
-              ((state as Record<string, unknown>)["deadLetter"] as unknown[]).push({ ...task });
+              if (!Array.isArray((state as Record<string, unknown>)['deadLetter']))
+                (state as Record<string, unknown>)['deadLetter'] = [];
+              (task as Record<string, unknown>)['status'] = 'cancelled';
+              (task as Record<string, unknown>)['deadLetteredAt'] = nowIso();
+              ((state as Record<string, unknown>)['deadLetter'] as unknown[]).push({ ...task });
               state.tasks = state.tasks.filter((t: TaskEntry) => t.id !== taskId);
             } else {
               task.status = 'blocked';
-              (task as Record<string, unknown>)['blockedReason'] = output.slice(0, 500) || 'Agent reported error';
+              (task as Record<string, unknown>)['blockedReason'] =
+                output.slice(0, 500) || 'Agent reported error';
             }
           }
         }
 
         // Mark stale reset
-        if ((task as Record<string, unknown>)["stale"]) {
-          (task as Record<string, unknown>)["stale"] = false;
-          delete (task as Record<string, unknown>)["staleSince"];
+        if ((task as Record<string, unknown>)['stale']) {
+          (task as Record<string, unknown>)['stale'] = false;
+          delete (task as Record<string, unknown>)['staleSince'];
         }
 
         return { task, entry };
@@ -897,7 +926,9 @@ export async function handleWriteRoute(ctx: WriteRouteCtx): Promise<boolean> {
     );
 
     // Worktree merge on task completion (worktreeIsolation.enabled guard inside)
-    const completedTask = (result as Record<string, unknown>)?.['task'] as Record<string, unknown> | undefined;
+    const completedTask = (result as Record<string, unknown>)?.['task'] as
+      | Record<string, unknown>
+      | undefined;
     const taskDone = completedTask ? ['done'].includes(completedTask?.['status'] as string) : false;
     if (taskDone && completedTask?.['worktreePath'] && typeof mergeTaskWorktree === 'function') {
       try {
@@ -916,7 +947,7 @@ export async function handleWriteRoute(ctx: WriteRouteCtx): Promise<boolean> {
             (state: HydraStateShape) => {
               const t = state.tasks.find((x: TaskEntry) => x.id === taskId);
               if (t) {
-                (t as Record<string, unknown>)["worktreeConflict"] = true;
+                (t as Record<string, unknown>)['worktreeConflict'] = true;
                 t.updatedAt = nowIso();
               }
             },
@@ -966,9 +997,9 @@ export async function handleWriteRoute(ctx: WriteRouteCtx): Promise<boolean> {
         };
         (task.checkpoints as unknown[]).push(cp);
         task.updatedAt = nowIso();
-        if ((task as Record<string, unknown>)["stale"]) {
-          (task as Record<string, unknown>)["stale"] = false;
-          delete (task as Record<string, unknown>)["staleSince"];
+        if ((task as Record<string, unknown>)['stale']) {
+          (task as Record<string, unknown>)['stale'] = false;
+          delete (task as Record<string, unknown>)['staleSince'];
         }
         return cp;
       },
@@ -998,9 +1029,9 @@ export async function handleWriteRoute(ctx: WriteRouteCtx): Promise<boolean> {
         }
 
         const now = nowIso();
-        (task as Record<string, unknown>)["lastHeartbeat"] = now;
+        (task as Record<string, unknown>)['lastHeartbeat'] = now;
         task.updatedAt = now;
-        (task as Record<string, unknown>)["lastHeartbeatDetail"] = {
+        (task as Record<string, unknown>)['lastHeartbeatDetail'] = {
           agent: agent || task.owner || 'unknown',
           progress: body['progress'] || null,
           outputBytes: body['outputBytes'] || 0,
@@ -1008,9 +1039,9 @@ export async function handleWriteRoute(ctx: WriteRouteCtx): Promise<boolean> {
         };
 
         // Reset stale flag
-        if ((task as Record<string, unknown>)["stale"]) {
-          (task as Record<string, unknown>)["stale"] = false;
-          delete (task as Record<string, unknown>)["staleSince"];
+        if ((task as Record<string, unknown>)['stale']) {
+          (task as Record<string, unknown>)['stale'] = false;
+          delete (task as Record<string, unknown>)['staleSince'];
         }
 
         return { taskId, heartbeat: now };
@@ -1036,7 +1067,7 @@ export async function handleWriteRoute(ctx: WriteRouteCtx): Promise<boolean> {
 
   if (method === 'GET' && route === '/dead-letter') {
     const state = readState();
-    sendJson(res, 200, { ok: true, items: (state as Record<string, unknown>)["deadLetter"] || [] });
+    sendJson(res, 200, { ok: true, items: (state as Record<string, unknown>)['deadLetter'] || [] });
     return true;
   }
 
@@ -1052,13 +1083,15 @@ export async function handleWriteRoute(ctx: WriteRouteCtx): Promise<boolean> {
       `dlq:retry id=${dlId}`,
       (state: HydraStateShape) => {
         if (!Array.isArray(state['deadLetter'])) state['deadLetter'] = [];
-        const idx = (state['deadLetter'] as Array<Record<string, unknown>>).findIndex((t: Record<string, unknown>) => t['id'] === dlId);
+        const idx = (state['deadLetter'] as Array<Record<string, unknown>>).findIndex(
+          (t: Record<string, unknown>) => t['id'] === dlId,
+        );
         if (idx === -1) throw new Error(`DLQ entry ${dlId} not found.`);
         const item = (state['deadLetter'] as Array<Record<string, unknown>>).splice(idx, 1)[0];
-        (item as Record<string, unknown>)["status"] = 'todo';
-        (item as Record<string, unknown>)["failCount"] = 0;
-        (item as Record<string, unknown>)["retriedAt"] = nowIso();
-        delete (item as Record<string, unknown>)["deadLetteredAt"];
+        (item as Record<string, unknown>)['status'] = 'todo';
+        (item as Record<string, unknown>)['failCount'] = 0;
+        (item as Record<string, unknown>)['retriedAt'] = nowIso();
+        delete (item as Record<string, unknown>)['deadLetteredAt'];
         state.tasks.push(item as unknown as TaskEntry);
         return item;
       },

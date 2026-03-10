@@ -8,15 +8,7 @@
  * Dependency: picocolors (via hydra-ui.mjs)
  */
 
-import {
-  box,
-  DIM,
-  ACCENT,
-  WARNING,
-  ERROR,
-  SUCCESS,
-  stripAnsi,
-} from './hydra-ui.ts';
+import { box, DIM, ACCENT, WARNING, ERROR, SUCCESS, stripAnsi } from './hydra-ui.ts';
 import pc from 'picocolors';
 
 // ── Auto-Accept Session State ───────────────────────────────────────────────
@@ -110,7 +102,15 @@ function wrapContextValue(key: string, value: string, innerWidth: number) {
   return lines.map((line, i) => (i === 0 ? `${keyLabel} ${line}` : `${continuationIndent}${line}`));
 }
 
-function renderChoiceUI({ title, context, choices }: { title: string; context: any; choices: any[] }) {
+function renderChoiceUI({
+  title,
+  context,
+  choices,
+}: {
+  title: string;
+  context: any;
+  choices: any[];
+}) {
   const boxWidth = computeBoxWidth();
   const padding = 1;
   const innerWidth = boxWidth - 2 - padding * 2;
@@ -142,7 +142,15 @@ function renderChoiceUI({ title, context, choices }: { title: string; context: a
  * Animate the box drawing in progressively: top → sides → bottom.
  * Returns a promise that resolves when animation completes.
  */
-function animateBoxDrawIn({ title, context, choices }: { title: string; context: any; choices: any[] }) {
+function animateBoxDrawIn({
+  title,
+  context,
+  choices,
+}: {
+  title: string;
+  context: any;
+  choices: any[];
+}) {
   const isTTY = process.stdout?.isTTY;
   if (!isTTY) {
     // No animation in non-TTY
@@ -257,7 +265,17 @@ export function parseMultiSelectInput(input: string, maxIndex: number) {
   return indices.size > 0 ? [...indices].sort((a, b) => a - b) : null;
 }
 
-function renderMultiSelectUI({ title, context, choices, selected }: { title: string; context: any; choices: any[]; selected: Set<number> }) {
+function renderMultiSelectUI({
+  title,
+  context,
+  choices,
+  selected,
+}: {
+  title: string;
+  context: any;
+  choices: any[];
+  selected: Set<number>;
+}) {
   const boxWidth = computeBoxWidth();
   const padding = 1;
   const innerWidth = boxWidth - 2 - padding * 2;
@@ -306,17 +324,20 @@ function renderMultiSelectUI({ title, context, choices, selected }: { title: str
  * @param {any[]} [opts.preSelected] - Values to pre-check in multi-select mode
  * @returns {Promise<{value: any, values?: any[], autoAcceptAll: boolean, timedOut: boolean}>}
  */
-export function promptChoice(rl: any, opts: {
-  title?: string;
-  context?: any;
-  choices?: any[];
-  defaultValue?: any;
-  timeoutMs?: number;
-  multiSelect?: boolean;
-  preSelected?: any[];
-  message?: string;
-  [key: string]: unknown;
-} = {}) {
+export function promptChoice(
+  rl: any,
+  opts: {
+    title?: string;
+    context?: any;
+    choices?: any[];
+    defaultValue?: any;
+    timeoutMs?: number;
+    multiSelect?: boolean;
+    preSelected?: any[];
+    message?: string;
+    [key: string]: unknown;
+  } = {},
+) {
   const {
     title = 'Selection',
     context = null,
@@ -470,7 +491,16 @@ export function promptChoice(rl: any, opts: {
 
 // ── Multi-Select Mode ───────────────────────────────────────────────────────
 
-function promptMultiSelect(rl: any, { title, context, choices, preSelected, timeoutMs }: { title: string; context: any; choices: any[]; preSelected: any[]; timeoutMs: number }) {
+function promptMultiSelect(
+  rl: any,
+  {
+    title,
+    context,
+    choices,
+    preSelected,
+    timeoutMs,
+  }: { title: string; context: any; choices: any[]; preSelected: any[]; timeoutMs: number },
+) {
   // Build initial selection set from preSelected values
   const selected = new Set<number>();
   for (const [i, choice] of choices.entries()) {
@@ -619,13 +649,16 @@ const SEVERITY_ICONS = {
  * @param {number} [opts.timeoutMs] - Auto-confirm timeout
  * @returns {Promise<boolean>} true if user confirms
  */
-export async function confirmActionPlan(rl: any, opts: {
-  title?: string;
-  context?: any;
-  summary?: string;
-  actions?: any[];
-  timeoutMs?: number;
-} = {}) {
+export async function confirmActionPlan(
+  rl: any,
+  opts: {
+    title?: string;
+    context?: any;
+    summary?: string;
+    actions?: any[];
+    timeoutMs?: number;
+  } = {},
+) {
   const { title = 'Action Plan', context, summary, actions = [], timeoutMs = 0 } = opts;
 
   if (actions.length === 0) return true;

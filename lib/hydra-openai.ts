@@ -109,9 +109,12 @@ async function coreStreamOpenAI(
 
   if (!res.ok) {
     const errText = await res.text().catch(() => '');
-    const err = Object.assign(new Error(`OpenAI API error ${String(res.status)}: ${errText.slice(0, 200)}`), {
-      status: res.status,
-    });
+    const err = Object.assign(
+      new Error(`OpenAI API error ${String(res.status)}: ${errText.slice(0, 200)}`),
+      {
+        status: res.status,
+      },
+    );
     throw err;
   }
 
@@ -161,11 +164,14 @@ async function coreStreamOpenAI(
 }
 
 // Create the pipeline-wrapped version
-const pipelinedStream = createStreamingPipeline('openai', coreStreamOpenAI as unknown as (
-  messages: unknown[],
-  cfg: Record<string, unknown>,
-  onChunk: ((chunk: string) => void) | null,
-) => Promise<unknown>) as (
+const pipelinedStream = createStreamingPipeline(
+  'openai',
+  coreStreamOpenAI as unknown as (
+    messages: unknown[],
+    cfg: Record<string, unknown>,
+    onChunk: ((chunk: string) => void) | null,
+  ) => Promise<unknown>,
+) as (
   messages: ChatMessage[],
   cfg: StreamCfg,
   onChunk: ((chunk: string) => void) | undefined,

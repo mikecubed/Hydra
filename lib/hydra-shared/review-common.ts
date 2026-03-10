@@ -46,7 +46,9 @@ export function createRL(): readline.Interface {
  */
 export function ask(rl: readline.Interface, question: string): Promise<string> {
   return new Promise((resolve) => {
-    rl.question(question, (answer) => { resolve(answer.trim().toLowerCase()); });
+    rl.question(question, (answer) => {
+      resolve(answer.trim().toLowerCase());
+    });
   });
 }
 
@@ -60,7 +62,11 @@ export function ask(rl: readline.Interface, question: string): Promise<string> {
  * @param {string|null} [dateFilter] - Optional date filter
  * @returns {object|null}
  */
-export function loadLatestReport(reportDir: string, prefix: string, dateFilter: string | null = null): unknown {
+export function loadLatestReport(
+  reportDir: string,
+  prefix: string,
+  dateFilter: string | null = null,
+): unknown {
   if (!fs.existsSync(reportDir)) return null;
 
   if (dateFilter) {
@@ -98,7 +104,11 @@ export function loadLatestReport(reportDir: string, prefix: string, dateFilter: 
  * @param {string} baseBranch
  * @returns {{ commitLog: string, diffStat: string }}
  */
-export function displayBranchInfo(projectRoot: string, branch: string, baseBranch: string): { commitLog: string; diffStat: string } {
+export function displayBranchInfo(
+  projectRoot: string,
+  branch: string,
+  baseBranch: string,
+): { commitLog: string; diffStat: string } {
   const diffStat = getBranchDiffStat(projectRoot, branch, baseBranch);
   const commitLog = getBranchLog(projectRoot, branch, baseBranch);
 
@@ -174,9 +184,15 @@ export async function handleBranchAction(
       const ok = opts.useSmartMerge
         ? smartMerge(projectRoot, branch, baseBranch, {
             log: {
-              info: (m) => { console.log(pc.dim(`  ${m}`)); },
-              ok: (m) => { console.log(pc.green(`  ${m}`)); },
-              warn: (m) => { console.log(pc.yellow(`  ${m}`)); },
+              info: (m) => {
+                console.log(pc.dim(`  ${m}`));
+              },
+              ok: (m) => {
+                console.log(pc.green(`  ${m}`));
+              },
+              warn: (m) => {
+                console.log(pc.yellow(`  ${m}`));
+              },
             },
           })
         : mergeBranch(projectRoot, branch, baseBranch);
@@ -256,7 +272,11 @@ export async function handleBranchAction(
  * @param {string} branch
  * @returns {Promise<void>}
  */
-export async function handleEmptyBranch(rl: readline.Interface, projectRoot: string, branch: string): Promise<void> {
+export async function handleEmptyBranch(
+  rl: readline.Interface,
+  projectRoot: string,
+  branch: string,
+): Promise<void> {
   console.log(pc.dim('  (no commits on this branch)'));
   const cleanAnswer = await ask(rl, `\n  ${pc.yellow('Delete empty branch?')} (y/N) `);
   if (cleanAnswer === 'y' || cleanAnswer === 'yes') {
@@ -272,7 +292,12 @@ export async function handleEmptyBranch(rl: readline.Interface, projectRoot: str
  * @param {string} baseBranch
  * @param {string|null} dateFilter
  */
-export function cleanBranches(projectRoot: string, prefix: string, baseBranch: string, dateFilter: string | null = null): void {
+export function cleanBranches(
+  projectRoot: string,
+  prefix: string,
+  baseBranch: string,
+  dateFilter: string | null = null,
+): void {
   const branches = listBranches(projectRoot, prefix, dateFilter);
 
   if (branches.length === 0) {

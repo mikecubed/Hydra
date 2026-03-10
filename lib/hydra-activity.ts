@@ -259,7 +259,10 @@ const SITUATIONAL_PATTERNS = [
  * @param message
  * @returns {{ isSituational: boolean, focus: string|null }}
  */
-export function detectSituationalQuery(message: unknown): { isSituational: boolean; focus: string | null } {
+export function detectSituationalQuery(message: unknown): {
+  isSituational: boolean;
+  focus: string | null;
+} {
   if (typeof message !== 'string') {
     return { isSituational: false, focus: null };
   }
@@ -290,12 +293,20 @@ export function detectSituationalQuery(message: unknown): { isSituational: boole
  * @param {string} [params.agent]
  * @returns {string}
  */
-export function annotateDispatch({ prompt, classification, mode, route, agent }: DispatchParams): string {
+export function annotateDispatch({
+  prompt,
+  classification,
+  mode,
+  route,
+  agent,
+}: DispatchParams): string {
   const shortPrompt = prompt.slice(0, 120);
   const tier = classification?.tier ?? 'unknown';
   const taskType = classification?.taskType ?? '';
   const conf =
-    classification?.confidence == null ? '' : ` (${String(Math.round(classification.confidence * 100))}%)`;
+    classification?.confidence == null
+      ? ''
+      : ` (${String(Math.round(classification.confidence * 100))}%)`;
   const agentStr = agent != null ? ` to ${agent}` : '';
   const routeStr = route != null ? ` via ${route}` : '';
   return `Dispatched "${shortPrompt}" - ${tier}/${taskType}${conf}${routeStr}${agentStr} [${mode ?? 'auto'}]`;
@@ -317,7 +328,14 @@ export function annotateHandoff({ from, to, summary, taskTitle }: HandoffParams)
  * @param {object} params
  * @returns {string}
  */
-export function annotateCompletion({ agent, taskId, title, durationMs, outputSummary, status }: CompletionParams): string {
+export function annotateCompletion({
+  agent,
+  taskId,
+  title,
+  durationMs,
+  outputSummary,
+  status,
+}: CompletionParams): string {
   const elapsed = durationMs != null ? `${String(Math.round(durationMs / 1000))}s` : '';
   const statusStr = status === 'error' ? 'FAILED' : 'completed';
   const summary = outputSummary != null ? `: "${outputSummary.slice(0, 80)}"` : '';
@@ -344,7 +362,11 @@ const activityLog: ActivityEntry[] = [];
  * @param {string} narrative
  * @param {object} [meta]
  */
-export function pushActivity(type: ActivityType, narrative: string, meta?: Record<string, unknown> | null): void {
+export function pushActivity(
+  type: ActivityType,
+  narrative: string,
+  meta?: Record<string, unknown> | null,
+): void {
   activityLog.push({
     at: new Date().toISOString(),
     type,
@@ -382,18 +404,30 @@ export function clearActivityLog(): void {
  * @param {string} [opts.focus] - 'all' | agent name | 'tasks' | 'handoffs' | 'dispatch'
  * @returns {Promise<object>} ActivityDigest
  */
-export async function buildActivityDigest({ baseUrl, workers, focus }: BuildDigestOpts): Promise<ActivityDigest> {
+export async function buildActivityDigest({
+  baseUrl,
+  workers,
+  focus,
+}: BuildDigestOpts): Promise<ActivityDigest> {
   // Fetch daemon activity snapshot
   let daemonActivity: DaemonActivityData | null = null;
   try {
-    const focusParam = focus != null && focus !== 'all' ? `?focus=${encodeURIComponent(focus)}` : '';
-    const res = await request<{ activity?: DaemonActivityData }>('GET', baseUrl, `/activity${focusParam}`);
+    const focusParam =
+      focus != null && focus !== 'all' ? `?focus=${encodeURIComponent(focus)}` : '';
+    const res = await request<{ activity?: DaemonActivityData }>(
+      'GET',
+      baseUrl,
+      `/activity${focusParam}`,
+    );
     daemonActivity = res.activity ?? null;
   } catch {
     // Fall back to summary endpoint
     try {
       const res = await request<{ summary?: unknown }>('GET', baseUrl, '/summary');
-      daemonActivity = { _fromSummary: true, summary: res.summary as DaemonActivityData['summary'] ?? null };
+      daemonActivity = {
+        _fromSummary: true,
+        summary: (res.summary as DaemonActivityData['summary']) ?? null,
+      };
     } catch {
       /* daemon unreachable */
     }
@@ -420,25 +454,27 @@ export async function buildActivityDigest({ baseUrl, workers, focus }: BuildDige
       elapsedMs: activity.updatedAt > 0 ? Date.now() - activity.updatedAt : 0,
       currentTask: daemonAgent.currentTask ?? null,
       pendingHandoffs: daemonAgent.pendingHandoffs ?? [],
-      worker: worker != null
-        ? {
-            status: (worker._state ?? worker.status) ?? 'unknown',
-            currentTaskId: worker._currentTask?.taskId ?? null,
-            currentTaskTitle: worker._currentTask?.title ?? null,
-            permissionMode: worker._permissionMode ?? null,
-          }
-        : null,
-      metrics: metrics != null
-        ? {
-            callsToday: metrics.callsToday ?? 0,
-            successRate:
-              metrics.callsTotal > 0
-                ? Math.round((metrics.callsSuccess / metrics.callsTotal) * 100)
-                : 100,
-            avgDurationMs: metrics.avgDurationMs ?? 0,
-            lastModel: metrics.lastModel ?? null,
-          }
-        : null,
+      worker:
+        worker != null
+          ? {
+              status: worker._state ?? worker.status ?? 'unknown',
+              currentTaskId: worker._currentTask?.taskId ?? null,
+              currentTaskTitle: worker._currentTask?.title ?? null,
+              permissionMode: worker._permissionMode ?? null,
+            }
+          : null,
+      metrics:
+        metrics != null
+          ? {
+              callsToday: metrics.callsToday ?? 0,
+              successRate:
+                metrics.callsTotal > 0
+                  ? Math.round((metrics.callsSuccess / metrics.callsTotal) * 100)
+                  : 100,
+              avgDurationMs: metrics.avgDurationMs ?? 0,
+              lastModel: metrics.lastModel ?? null,
+            }
+          : null,
     };
   });
 
@@ -446,11 +482,7 @@ export async function buildActivityDigest({ baseUrl, workers, focus }: BuildDige
   const rawTasks: TasksData = daemonActivity?.tasks ?? daemonActivity?.summary?.openTasks ?? [];
   const activeTasks: DaemonTask[] = Array.isArray(rawTasks)
     ? rawTasks
-    : [
-        ...(rawTasks.inProgress ?? []),
-        ...(rawTasks.todo ?? []),
-        ...(rawTasks.blocked ?? []),
-      ];
+    : [...(rawTasks.inProgress ?? []), ...(rawTasks.todo ?? []), ...(rawTasks.blocked ?? [])];
   const grouped: TasksGrouped = Array.isArray(rawTasks) ? {} : rawTasks;
   const recentCompletions: DaemonTask[] = Array.isArray(grouped.recentlyCompleted)
     ? grouped.recentlyCompleted
@@ -510,13 +542,14 @@ export function formatDigestForPrompt(digest: ActivityDigest, opts: DigestOpts =
   // Session line
   if (digest.session != null) {
     const s = digest.session;
-    const since = s.startedAt != null
-      ? new Date(s.startedAt).toLocaleTimeString('en-US', {
-          hour: '2-digit',
-          minute: '2-digit',
-          hour12: false,
-        })
-      : '?';
+    const since =
+      s.startedAt != null
+        ? new Date(s.startedAt).toLocaleTimeString('en-US', {
+            hour: '2-digit',
+            minute: '2-digit',
+            hour12: false,
+          })
+        : '?';
     lines.push(
       `Session: ${s.status ?? 'active'} since ${since} | Focus: "${(s.focus ?? 'general').slice(0, 60)}"`,
     );
@@ -539,7 +572,9 @@ export function formatDigestForPrompt(digest: ActivityDigest, opts: DigestOpts =
       lines.push(`- ${a.name} [${a.status}]${taskStr}${phase}${model}${execTag}${elapsed}`);
       if (a.pendingHandoffs.length > 0) {
         for (const h of a.pendingHandoffs.slice(0, 2)) {
-          lines.push(`  ^ pending handoff from ${h.from ?? '?'}: "${(h.summary ?? '').slice(0, 60)}"`);
+          lines.push(
+            `  ^ pending handoff from ${h.from ?? '?'}: "${(h.summary ?? '').slice(0, 60)}"`,
+          );
         }
       }
     }
@@ -556,7 +591,8 @@ export function formatDigestForPrompt(digest: ActivityDigest, opts: DigestOpts =
       lines.push('');
       lines.push(`TASKS (${String(tasksToShow.length)} active):`);
       for (const t of tasksToShow.slice(0, 8)) {
-        const blocked = (t.blockedBy?.length ?? 0) > 0 ? ` (blocked by ${(t.blockedBy ?? []).join(', ')})` : '';
+        const blocked =
+          (t.blockedBy?.length ?? 0) > 0 ? ` (blocked by ${(t.blockedBy ?? []).join(', ')})` : '';
         lines.push(
           `- ${t.id ?? t.taskId ?? '?'} [${t.status ?? '?'}] ${t.owner ?? 'unassigned'} - "${(t.title ?? '').slice(0, 60)}"${blocked}`,
         );
@@ -575,7 +611,9 @@ export function formatDigestForPrompt(digest: ActivityDigest, opts: DigestOpts =
       if (digest.pendingHandoffs.length > 0) {
         lines.push('  Pending:');
         for (const h of digest.pendingHandoffs.slice(0, 3)) {
-          lines.push(`  - ${h.id ?? '?'}: ${h.from ?? '?'} -> ${h.to ?? '?'} "${(h.summary ?? '').slice(0, 80)}"`);
+          lines.push(
+            `  - ${h.id ?? '?'}: ${h.from ?? '?'} -> ${h.to ?? '?'} "${(h.summary ?? '').slice(0, 80)}"`,
+          );
           if (h.nextStep != null) lines.push(`    Next: ${h.nextStep.slice(0, 80)}`);
         }
       }
@@ -597,7 +635,8 @@ export function formatDigestForPrompt(digest: ActivityDigest, opts: DigestOpts =
       lines.push('');
       lines.push('RECENT COMPLETIONS:');
       for (const c of digest.recentCompletions.slice(0, 3)) {
-        const elapsed = c.durationMs != null ? ` in ${String(Math.round(c.durationMs / 1000))}s` : '';
+        const elapsed =
+          c.durationMs != null ? ` in ${String(Math.round(c.durationMs / 1000))}s` : '';
         lines.push(
           `- ${c.id ?? c.taskId ?? '?'}: ${c.owner ?? c.agent ?? '?'} done${elapsed} - "${(c.title ?? '').slice(0, 60)}"`,
         );
@@ -662,7 +701,7 @@ function formatElapsedCompact(ms: number): string {
 // ── Situation Report ─────────────────────────────────────────────────────────
 
 function getSitrepSystemPrompt() {
-  const personaName = isPersonaEnabled() ? getPersonaConfig().name ?? 'Hydra' : 'Hydra';
+  const personaName = isPersonaEnabled() ? (getPersonaConfig().name ?? 'Hydra') : 'Hydra';
   const narrator = isPersonaEnabled()
     ? `You are ${personaName}'s situation awareness perspective, narrating the current state of the system.`
     : 'You are a situation report narrator for Hydra, a multi-agent AI coding orchestration system.';
@@ -737,7 +776,9 @@ export async function generateSitrep(opts: SitrepOpts = {}): Promise<SitrepResul
         ? ''
         : `${String(Math.round(budgetStatus.weekly.percentUsed))}%`;
     const msg = budgetStatus.message ?? budgetStatus.weekly?.message ?? '';
-    supplemental.push(`Budget: ${lvl}${pct.length > 0 ? ` (${pct} used)` : ''}${msg.length > 0 ? ` — ${msg}` : ''}`);
+    supplemental.push(
+      `Budget: ${lvl}${pct.length > 0 ? ` (${pct} used)` : ''}${msg.length > 0 ? ` — ${msg}` : ''}`,
+    );
   }
   if (statsData != null) {
     const parts: string[] = [];
@@ -781,10 +822,21 @@ export async function generateSitrep(opts: SitrepOpts = {}): Promise<SitrepResul
       // AI returned empty response — fall back to raw digest
       return { narrative: formattedDigest, fallback: true, reason: 'empty_response' };
     }
-    return { narrative, provider: result.provider, model: result.model, usage: result.usage, fallback: false };
+    return {
+      narrative,
+      provider: result.provider,
+      model: result.model,
+      usage: result.usage,
+      fallback: false,
+    };
   } catch (err: unknown) {
     // All providers failed — fall back to raw digest with error detail
-    return { narrative: formattedDigest, fallback: true, reason: 'api_error', error: err instanceof Error ? err.message : String(err) };
+    return {
+      narrative: formattedDigest,
+      fallback: true,
+      reason: 'api_error',
+      error: err instanceof Error ? err.message : String(err),
+    };
   }
 }
 
@@ -833,7 +885,10 @@ export function saveSessionSummary(summary: string): void {
  * Get session context for concierge system prompt injection.
  * @returns {{ recentActivity: ActivityEntry[], priorSessions: Array<{timestamp: string, summary: string}> }}
  */
-export function getSessionContext(): { recentActivity: ActivityEntry[]; priorSessions: SessionSummaryEntry[] } {
+export function getSessionContext(): {
+  recentActivity: ActivityEntry[];
+  priorSessions: SessionSummaryEntry[];
+} {
   const priorSessions = loadSessionSummaries().slice(-3);
   return {
     recentActivity: getRecentActivity(10),

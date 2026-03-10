@@ -665,8 +665,13 @@ export function getProfilesForAgent(agent: string): ModelProfile[] {
 /**
  * Get agent presets (default/fast/cheap model IDs).
  */
-export function getAgentPresets(agent: string): { default: string; fast: string; cheap: string } | null {
-  return (AGENT_PRESETS as Record<string, { default: string; fast: string; cheap: string }>)[agent] ?? null;
+export function getAgentPresets(
+  agent: string,
+): { default: string; fast: string; cheap: string } | null {
+  return (
+    (AGENT_PRESETS as Record<string, { default: string; fast: string; cheap: string }>)[agent] ??
+    null
+  );
 }
 
 /**
@@ -679,7 +684,20 @@ export function getRoleRecommendation(role: string): {
   models: string[];
   note: string;
 } | null {
-  return (ROLE_DEFAULTS as Record<string, { agent: string; model: string | null; reasoningEffort: string | null; models: string[]; note: string }>)[role] ?? null;
+  return (
+    (
+      ROLE_DEFAULTS as Record<
+        string,
+        {
+          agent: string;
+          model: string | null;
+          reasoningEffort: string | null;
+          models: string[];
+          note: string;
+        }
+      >
+    )[role] ?? null
+  );
 }
 
 /**
@@ -736,10 +754,19 @@ export function formatBenchmarkAnnotation(
  */
 export function getDefaultRoles(): {
   roles: Record<string, { agent: string; model: string | null; reasoningEffort: string | null }>;
-  recommendations: Record<string, { models: string[]; reasoningEffort: string | null; note: string }>;
+  recommendations: Record<
+    string,
+    { models: string[]; reasoningEffort: string | null; note: string }
+  >;
 } {
-  const roles: Record<string, { agent: string; model: string | null; reasoningEffort: string | null }> = {};
-  const recommendations: Record<string, { models: string[]; reasoningEffort: string | null; note: string }> = {};
+  const roles: Record<
+    string,
+    { agent: string; model: string | null; reasoningEffort: string | null }
+  > = {};
+  const recommendations: Record<
+    string,
+    { models: string[]; reasoningEffort: string | null; note: string }
+  > = {};
 
   for (const [role, rd] of Object.entries(ROLE_DEFAULTS)) {
     roles[role] = {
@@ -775,11 +802,23 @@ export function getCostTable(): Record<string, { input: number; output: number }
  */
 export function getReasoningCapsMap(): Record<
   string,
-  { type: string; levels?: string[]; budgets?: Record<string, number>; variants?: Record<string, unknown>; default?: string }
+  {
+    type: string;
+    levels?: string[];
+    budgets?: Record<string, number>;
+    variants?: Record<string, unknown>;
+    default?: string;
+  }
 > {
   // Build prefix-based map from profiles, same key style as the old hardcoded map.
   // Deduplicate by prefix — use the primary model for each prefix.
-  type ReasoningEntry = { type: string; levels?: string[]; budgets?: Record<string, number>; variants?: Record<string, unknown>; default?: string };
+  type ReasoningEntry = {
+    type: string;
+    levels?: string[];
+    budgets?: Record<string, number>;
+    variants?: Record<string, unknown>;
+    default?: string;
+  };
   const map: Record<string, ReasoningEntry> = {};
 
   // OpenAI o-series

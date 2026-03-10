@@ -113,9 +113,7 @@ async function coreStreamAnthropic(
     return Number.isNaN(v) ? null : v;
   };
   const rateLimits: AnthropicRateLimits = {
-    remainingRequests: parseRateHeader(
-      res.headers.get('anthropic-ratelimit-requests-remaining'),
-    ),
+    remainingRequests: parseRateHeader(res.headers.get('anthropic-ratelimit-requests-remaining')),
     remainingInputTokens: parseRateHeader(
       res.headers.get('anthropic-ratelimit-input-tokens-remaining'),
     ),
@@ -128,9 +126,12 @@ async function coreStreamAnthropic(
 
   if (!res.ok) {
     const errText = await res.text().catch(() => '');
-    const err = Object.assign(new Error(`Anthropic API error ${String(res.status)}: ${errText.slice(0, 200)}`), {
-      status: res.status,
-    });
+    const err = Object.assign(
+      new Error(`Anthropic API error ${String(res.status)}: ${errText.slice(0, 200)}`),
+      {
+        status: res.status,
+      },
+    );
     throw err;
   }
 
@@ -203,11 +204,14 @@ async function coreStreamAnthropic(
 }
 
 // Create the pipeline-wrapped version
-const pipelinedStream = createStreamingPipeline('anthropic', coreStreamAnthropic as unknown as (
-  messages: unknown[],
-  cfg: Record<string, unknown>,
-  onChunk: ((chunk: string) => void) | null,
-) => Promise<unknown>) as (
+const pipelinedStream = createStreamingPipeline(
+  'anthropic',
+  coreStreamAnthropic as unknown as (
+    messages: unknown[],
+    cfg: Record<string, unknown>,
+    onChunk: ((chunk: string) => void) | null,
+  ) => Promise<unknown>,
+) as (
   messages: ChatMessage[],
   cfg: AnthropicStreamCfg,
   onChunk: ((chunk: string) => void) | undefined,

@@ -602,7 +602,9 @@ function commandTaskUpdate(options: CliOptions, positionals: string[]) {
 
   task.updatedAt = nowIso();
   writeState(state);
-  appendLog(`Updated task ${task.id ?? ''} | status=${task.status ?? ''} | owner=${task.owner ?? ''}`);
+  appendLog(
+    `Updated task ${task.id ?? ''} | status=${task.status ?? ''} | owner=${task.owner ?? ''}`,
+  );
 
   console.log(`Updated ${task.id ?? ''}`);
 }
@@ -685,7 +687,9 @@ function formatTask(task: TaskItem): string {
 
 function commandSummary() {
   const state = readState();
-  const openTasks = state.tasks.filter((task) => !['done', 'cancelled'].includes(task.status ?? ''));
+  const openTasks = state.tasks.filter(
+    (task) => !['done', 'cancelled'].includes(task.status ?? ''),
+  );
   const activeBlockers = state.blockers.filter((blocker) => blocker.status !== 'resolved');
   const recentDecisions = state.decisions.slice(-3);
   const recentHandoff = state.handoffs.at(-1);
@@ -733,13 +737,17 @@ function commandSummary() {
     console.log('- none');
   } else {
     for (const decision of recentDecisions) {
-      console.log(`- ${decision.id ?? ''} owner=${decision.owner ?? ''} :: ${decision.title ?? ''}`);
+      console.log(
+        `- ${decision.id ?? ''} owner=${decision.owner ?? ''} :: ${decision.title ?? ''}`,
+      );
     }
   }
 
   console.log('\nLatest Handoff');
   if (recentHandoff) {
-    console.log(`- ${recentHandoff.id ?? ''} ${recentHandoff.from ?? ''} -> ${recentHandoff.to ?? ''}`);
+    console.log(
+      `- ${recentHandoff.id ?? ''} ${recentHandoff.from ?? ''} -> ${recentHandoff.to ?? ''}`,
+    );
     console.log(`  summary: ${recentHandoff.summary ?? ''}`);
     if (recentHandoff.nextStep) {
       console.log(`  next: ${recentHandoff.nextStep}`);

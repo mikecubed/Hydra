@@ -113,7 +113,13 @@ function buildThresholds(budgetCfg: Record<string, unknown>) {
 
 // ── Prompt Builder ──────────────────────────────────────────────────────────
 
-function buildTaskPrompt(task: ScannedTask, branchName: string, projectRoot: string, agent: string, opts: { isHandoff?: boolean } = {}) {
+function buildTaskPrompt(
+  task: ScannedTask,
+  branchName: string,
+  projectRoot: string,
+  agent: string,
+  opts: { isHandoff?: boolean } = {},
+) {
   const instructionFile = getAgentInstructionFile(agent, projectRoot);
   const safetyBlock = buildSafetyPrompt(branchName, {
     runner: 'nightly runner',
@@ -378,7 +384,9 @@ function sourceRank(source: string) {
 
 function askLine(rl: readline.Interface, question: string) {
   return new Promise<string>((resolve) => {
-    rl.question(question, (answer: string) => { resolve(answer.trim()); });
+    rl.question(question, (answer: string) => {
+      resolve(answer.trim());
+    });
   });
 }
 
@@ -550,7 +558,14 @@ function truncate(str: string, maxLen: number) {
   return `${str.slice(0, maxLen - 1)}\u2026`;
 }
 
-function renderProgress(tasks: ScannedTask[], results: any[], budget: BudgetTracker, startedAt: number, maxHoursMs: number, currentIdx: number) {
+function renderProgress(
+  tasks: ScannedTask[],
+  results: any[],
+  budget: BudgetTracker,
+  startedAt: number,
+  maxHoursMs: number,
+  currentIdx: number,
+) {
   const lines = [];
   const elapsed = Date.now() - startedAt;
   const elapsedStr = formatDuration(elapsed);
@@ -588,7 +603,10 @@ function renderProgress(tasks: ScannedTask[], results: any[], budget: BudgetTrac
 
   // Budget gauge
   const summary = budget.getSummary();
-  const pct = (summary['hardLimit'] as number) > 0 ? ((summary['consumed'] as number) / (summary['hardLimit'] as number)) * 100 : 0;
+  const pct =
+    (summary['hardLimit'] as number) > 0
+      ? ((summary['consumed'] as number) / (summary['hardLimit'] as number)) * 100
+      : 0;
   const gauge = compactProgressBar(pct, 15);
   const remaining = tasks.length - results.length;
   const remainStr = remaining > 0 ? `  Remaining: ~${remaining} tasks` : '';
@@ -602,7 +620,12 @@ function renderProgress(tasks: ScannedTask[], results: any[], budget: BudgetTrac
 
 // ── Phase 4: EXECUTE ────────────────────────────────────────────────────────
 
-async function phaseExecute(tasks: ScannedTask[], projectRoot: string, cfg: any, startedAt: number) {
+async function phaseExecute(
+  tasks: ScannedTask[],
+  projectRoot: string,
+  cfg: any,
+  startedAt: number,
+) {
   log.phase('EXECUTE');
 
   const nightlyCfg = cfg.nightly;
@@ -784,7 +807,9 @@ async function phaseExecute(tasks: ScannedTask[], projectRoot: string, cfg: any,
             });
           }
         } catch (invErr) {
-          log.dim(`Investigator error: ${invErr instanceof Error ? invErr.message : String(invErr)}`);
+          log.dim(
+            `Investigator error: ${invErr instanceof Error ? invErr.message : String(invErr)}`,
+          );
         }
       }
     }
@@ -967,7 +992,8 @@ async function main() {
   const baseBranch = nightlyCfg.baseBranch;
 
   // Apply CLI overrides
-  if (options['max-tasks']) nightlyCfg.maxTasks = Number.parseInt(options['max-tasks'] as string, 10);
+  if (options['max-tasks'])
+    nightlyCfg.maxTasks = Number.parseInt(options['max-tasks'] as string, 10);
   if (options['max-hours']) nightlyCfg.maxHours = Number.parseFloat(options['max-hours'] as string);
   if (options['no-discovery'] && nightlyCfg.sources) nightlyCfg.sources['aiDiscovery'] = false;
 

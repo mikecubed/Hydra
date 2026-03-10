@@ -132,10 +132,7 @@ async function circuitBreakerMiddleware(
   }
 }
 
-async function retryMiddleware(
-  ctx: MiddlewareCtx,
-  next: () => Promise<unknown>,
-): Promise<unknown> {
+async function retryMiddleware(ctx: MiddlewareCtx, next: () => Promise<unknown>): Promise<unknown> {
   const cfg = loadHydraConfig() as any;
   const maxRetries = cfg.rateLimits?.maxRetries || 3;
   const baseDelayMs = cfg.rateLimits?.baseDelayMs || 5000;
@@ -164,7 +161,7 @@ async function usageTrackingMiddleware(
   ctx: MiddlewareCtx,
   next: () => Promise<unknown>,
 ): Promise<unknown> {
-  const result = await next() as any;
+  const result = (await next()) as any;
 
   if (result.usage) {
     recordProviderUsage(ctx.provider, {
@@ -182,7 +179,7 @@ async function headerCaptureMiddleware(
   ctx: MiddlewareCtx,
   next: () => Promise<unknown>,
 ): Promise<unknown> {
-  const result = await next() as any;
+  const result = (await next()) as any;
 
   if (result.rateLimits) {
     updateFromHeaders(ctx.provider, result.rateLimits);
@@ -198,7 +195,7 @@ async function telemetryMiddleware(
   const span = await startProviderSpan(ctx.provider, ctx.model);
   const start = Date.now();
   try {
-    const result = await next() as any;
+    const result = (await next()) as any;
     await endProviderSpan(span, result.usage, Date.now() - start);
     return result;
   } catch (err: unknown) {

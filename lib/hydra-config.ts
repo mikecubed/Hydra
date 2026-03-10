@@ -550,15 +550,23 @@ const DEFAULT_CONFIG = {
   },
 };
 
-function deepMergeSection(def: Record<string, unknown> | undefined, user: unknown): Record<string, unknown> {
+function deepMergeSection(
+  def: Record<string, unknown> | undefined,
+  user: unknown,
+): Record<string, unknown> {
   if (user === null || user === undefined || typeof user !== 'object') {
     return { ...(def ?? {}) };
   }
   const merged: Record<string, unknown> = { ...(def ?? {}) };
   for (const [k, v] of Object.entries(user as Record<string, unknown>)) {
     merged[k] =
-      v !== null && v !== undefined && typeof v === 'object' && !Array.isArray(v) &&
-      merged[k] !== null && merged[k] !== undefined && typeof merged[k] === 'object'
+      v !== null &&
+      v !== undefined &&
+      typeof v === 'object' &&
+      !Array.isArray(v) &&
+      merged[k] !== null &&
+      merged[k] !== undefined &&
+      typeof merged[k] === 'object'
         ? { ...(merged[k] as Record<string, unknown>), ...(v as Record<string, unknown>) }
         : v;
   }
@@ -566,9 +574,10 @@ function deepMergeSection(def: Record<string, unknown> | undefined, user: unknow
 }
 
 function mergeWithDefaults(config: unknown): HydraConfig {
-  const parsed = config !== null && config !== undefined && typeof config === 'object'
-    ? (config as Record<string, unknown>)
-    : {};
+  const parsed =
+    config !== null && config !== undefined && typeof config === 'object'
+      ? (config as Record<string, unknown>)
+      : {};
   const def = DEFAULT_CONFIG as unknown as Record<string, unknown>;
   return {
     ...def,
@@ -578,10 +587,16 @@ function mergeWithDefaults(config: unknown): HydraConfig {
     modeTiers: deepMergeSection(def['modeTiers'] as Record<string, unknown>, parsed['modeTiers']),
     local: deepMergeSection(def['local'] as Record<string, unknown>, parsed['local']),
     usage: { ...(def['usage'] as object), ...(parsed['usage'] as object | undefined) },
-    verification: { ...(def['verification'] as object), ...(parsed['verification'] as object | undefined) },
+    verification: {
+      ...(def['verification'] as object),
+      ...(parsed['verification'] as object | undefined),
+    },
     stats: { ...(def['stats'] as object), ...(parsed['stats'] as object | undefined) },
     concierge: { ...(def['concierge'] as object), ...(parsed['concierge'] as object | undefined) },
-    selfAwareness: deepMergeSection(def['selfAwareness'] as Record<string, unknown>, parsed['selfAwareness']),
+    selfAwareness: deepMergeSection(
+      def['selfAwareness'] as Record<string, unknown>,
+      parsed['selfAwareness'],
+    ),
     roles: deepMergeSection(def['roles'] as Record<string, unknown>, parsed['roles']),
     recommendations: def['recommendations'] as Record<string, unknown>,
     agents: deepMergeSection(def['agents'] as Record<string, unknown>, parsed['agents']),
@@ -595,8 +610,14 @@ function mergeWithDefaults(config: unknown): HydraConfig {
     providers: deepMergeSection(def['providers'] as Record<string, unknown>, parsed['providers']),
     doctor: { ...(def['doctor'] as object), ...(parsed['doctor'] as object | undefined) },
     routing: deepMergeSection(def['routing'] as Record<string, unknown>, parsed['routing']),
-    modelRecovery: deepMergeSection(def['modelRecovery'] as Record<string, unknown>, parsed['modelRecovery']),
-    rateLimits: { ...(def['rateLimits'] as object | undefined), ...(parsed['rateLimits'] as object | undefined) },
+    modelRecovery: deepMergeSection(
+      def['modelRecovery'] as Record<string, unknown>,
+      parsed['modelRecovery'],
+    ),
+    rateLimits: {
+      ...(def['rateLimits'] as object | undefined),
+      ...(parsed['rateLimits'] as object | undefined),
+    },
     cache: deepMergeSection(def['cache'] as Record<string, unknown>, parsed['cache']),
     daemon: deepMergeSection(def['daemon'] as Record<string, unknown>, parsed['daemon']),
     metrics: deepMergeSection(def['metrics'] as Record<string, unknown>, parsed['metrics']),
@@ -647,8 +668,11 @@ export function loadHydraConfig(): HydraConfig {
     const raw = fs.readFileSync(CONFIG_PATH, 'utf8');
     const parsed = JSON.parse(raw) as Record<string, unknown>;
     // Migrate v1 → v2 if needed
-    if ((parsed['version'] === undefined || parsed['version'] === null) ||
-        (parsed['version'] as number) < 2) {
+    if (
+      parsed['version'] === undefined ||
+      parsed['version'] === null ||
+      (parsed['version'] as number) < 2
+    ) {
       migrateConfig(parsed);
     }
     _configCache = mergeWithDefaults(parsed);
@@ -719,7 +743,11 @@ export function getProviderTier(provider: string): string | number {
  */
 export function getProviderPresets(): Array<Record<string, string>> {
   const presets = (DEFAULT_CONFIG as unknown as Record<string, unknown>)['providers'];
-  return ((presets as Record<string, unknown> | undefined)?.['presets'] as Array<Record<string, string>> | undefined) ?? [];
+  return (
+    ((presets as Record<string, unknown> | undefined)?.['presets'] as
+      | Array<Record<string, string>>
+      | undefined) ?? []
+  );
 }
 
 // ── Config Diff ──────────────────────────────────────────────────────────────
@@ -829,7 +857,9 @@ export function addRecentProject(projectPath: string): void {
 function detectProjectName(projectRoot: string): string {
   // Try package.json name first
   try {
-    const pkg = JSON.parse(fs.readFileSync(path.join(projectRoot, 'package.json'), 'utf8')) as Record<string, unknown>;
+    const pkg = JSON.parse(
+      fs.readFileSync(path.join(projectRoot, 'package.json'), 'utf8'),
+    ) as Record<string, unknown>;
     if (typeof pkg['name'] === 'string' && pkg['name'].length > 0) return pkg['name'];
   } catch {
     /* ignore */

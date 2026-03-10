@@ -65,7 +65,10 @@ interface PipelineOpts {
   baseUrl?: string;
 }
 
-export async function runActionPipeline(rl: unknown, opts: PipelineOpts = {}): Promise<PipelineResult[]> {
+export async function runActionPipeline(
+  rl: unknown,
+  opts: PipelineOpts = {},
+): Promise<PipelineResult[]> {
   const {
     title = 'Action Pipeline',
     scanners = [],
@@ -107,7 +110,9 @@ export async function runActionPipeline(rl: unknown, opts: PipelineOpts = {}): P
     return [];
   }
 
-  console.log(`  ${SUCCESS(`Found ${String(allItems.length)} item${allItems.length === 1 ? '' : 's'}`)}`);
+  console.log(
+    `  ${SUCCESS(`Found ${String(allItems.length)} item${allItems.length === 1 ? '' : 's'}`)}`,
+  );
 
   // ── ENRICH ───────────────────────────────────────────────────────────────
   if (enrich) {
