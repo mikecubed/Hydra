@@ -32,7 +32,8 @@
     "bin/**/*.ts",
     "bin/**/*.mjs",
     "scripts/**/*.ts",
-    "scripts/**/*.mjs"
+    "scripts/**/*.mjs",
+    "test/**/*.ts"
   ],
-  "exclude": ["node_modules", "dist", ".tsbuild", ".build-exe", ".pkg-cache", "test"]
+  "exclude": ["node_modules", "dist", ".tsbuild", ".build-exe", ".pkg-cache"]
 }
