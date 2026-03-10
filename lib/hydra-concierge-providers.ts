@@ -133,7 +133,7 @@ export async function streamWithFallback(
   chain = getHealthiestProvider(chain);
 
   const errors: Array<{ provider: string; model: string; error: string }> = [];
-  void chain[0]?.provider; // Track who was first after reordering (unused but informational)
+  // Primary provider after reordering: chain[0]?.provider (informational)
 
   for (let i = 0; i < chain.length; i++) {
     const entry = chain[i];

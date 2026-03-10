@@ -15,10 +15,10 @@
  *   7. DECIDE      — Consensus: keep/reject + document
  *
  * Usage:
- *   node lib/hydra-evolve.mjs                              # defaults
- *   node lib/hydra-evolve.mjs project=/path/to/YourProject # explicit project
- *   node lib/hydra-evolve.mjs max-rounds=1 max-hours=1     # overrides
- *   node lib/hydra-evolve.mjs focus=testing-reliability     # specific area
+ *   node lib/hydra-evolve.ts                              # defaults
+ *   node lib/hydra-evolve.ts project=/path/to/YourProject # explicit project
+ *   node lib/hydra-evolve.ts max-rounds=1 max-hours=1     # overrides
+ *   node lib/hydra-evolve.ts focus=testing-reliability     # specific area
  */
 
 import './hydra-env.ts';
@@ -221,21 +221,21 @@ function getProjectContext() {
   if (_projectContextCache) return _projectContextCache;
   _projectContextCache = `## Hydra Project Context
 Key modules:
-  lib/hydra-operator.mjs — Interactive REPL + dispatch pipeline (main entry)
+  lib/hydra-operator.ts — Interactive REPL + dispatch pipeline (main entry)
   lib/hydra-agents.ts — Agent definitions, invoke commands, model config
-  lib/hydra-utils.mjs — HTTP helpers, classifyPrompt, parseJsonLoose
-  lib/hydra-ui.mjs — Terminal colors (picocolors), formatters, dashboard
+  lib/hydra-utils.ts — HTTP helpers, classifyPrompt, parseJsonLoose
+  lib/hydra-ui.ts — Terminal colors (picocolors), formatters, dashboard
   lib/hydra-metrics.ts — In-memory + file metrics, EventEmitter
-  lib/hydra-statusbar.mjs — ANSI scroll region status bar
-  lib/hydra-worker.mjs — Headless background agent workers
-  lib/hydra-council.mjs — Multi-agent deliberation
-  lib/hydra-dispatch.mjs — Task dispatch to agents
-  lib/hydra-worktree.mjs — Git worktree isolation
-  lib/hydra-concierge.mjs — Conversational front-end
+  lib/hydra-statusbar.ts — ANSI scroll region status bar
+  lib/hydra-worker.ts — Headless background agent workers
+  lib/hydra-council.ts — Multi-agent deliberation
+  lib/hydra-dispatch.ts — Task dispatch to agents
+  lib/hydra-worktree.ts — Git worktree isolation
+  lib/hydra-concierge.ts — Conversational front-end
   lib/hydra-config.ts — Config loading (hydra.config.json)
-  lib/hydra-evolve.mjs — Self-improvement runner (this system)
-  lib/hydra-evolve-guardrails.mjs — Safety guardrails for evolve
-  lib/hydra-evolve-knowledge.mjs — Knowledge base persistence
+  lib/hydra-evolve.ts — Self-improvement runner (this system)
+  lib/hydra-evolve-guardrails.ts — Safety guardrails for evolve
+  lib/hydra-evolve-knowledge.ts — Knowledge base persistence
 
 Test files: test/hydra-*.test.mjs (node:test + assert/strict)
 Config: hydra.config.json

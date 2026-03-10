@@ -5,8 +5,8 @@
  * Generates JSON + Markdown reports to docs/coordination/eval/.
  *
  * Usage:
- *   node lib/hydra-eval.mjs                     # Run with default corpus
- *   node lib/hydra-eval.mjs path/to/corpus.json  # Run with custom corpus
+ *   node lib/hydra-eval.ts                     # Run with default corpus
+ *   node lib/hydra-eval.ts path/to/corpus.json  # Run with custom corpus
  */
 
 import fs from 'node:fs';

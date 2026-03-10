@@ -5,9 +5,9 @@
  * server with each, and provides a project init workflow for HYDRA.md.
  *
  * Usage:
- *   node lib/hydra-setup.mjs setup [--force] [--uninstall]
- *   node lib/hydra-setup.mjs init [--project-name=MyProject]
- *   node lib/hydra-setup.mjs --help
+ *   node lib/hydra-setup.ts setup [--force] [--uninstall]
+ *   node lib/hydra-setup.ts init [--project-name=MyProject]
+ *   node lib/hydra-setup.ts --help
  */
 
 import fs from 'node:fs';
@@ -413,9 +413,9 @@ const HELP_TEXT = `
 hydra-setup — Register Hydra MCP server with AI CLIs and initialize projects.
 
 Usage:
-  node lib/hydra-setup.mjs setup [--force] [--uninstall]
-  node lib/hydra-setup.mjs init  [path] [--project-name=Name] [--force]
-  node lib/hydra-setup.mjs --help
+  node lib/hydra-setup.ts setup [--force] [--uninstall]
+  node lib/hydra-setup.ts init  [path] [--project-name=Name] [--force]
+  node lib/hydra-setup.ts --help
 
 Commands:
   setup       Register (or unregister) Hydra's MCP server with installed CLIs

@@ -191,7 +191,7 @@ export interface RoutingDecision {
 // ── Config types ──────────────────────────────────────────────────────────────
 
 /**
- * Top-level Hydra mode — controls which model tier tier is active.
+ * Top-level Hydra mode — controls which model tier is active.
  * Maps to keys in config.modeTiers (from getModeTiers()).
  */
 export type HydraMode = 'performance' | 'balanced' | 'economy' | 'custom';

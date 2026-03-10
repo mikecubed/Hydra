@@ -13,7 +13,7 @@ import type {
   TaskState,
   CopilotJsonlEvent,
   ParseOutputOpts,
-} from '../lib/types.js';
+} from '../lib/types.ts';
 
 describe('types compile-time validation', () => {
   it('AgentResult satisfies expected shape', () => {

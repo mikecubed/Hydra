@@ -32,19 +32,19 @@ import {
 export const PROTECTED_FILES = new Set([
   ...BASE_PROTECTED_FILES,
   // Evolve cannot modify itself
-  'lib/hydra-evolve.mjs',
-  'lib/hydra-evolve-guardrails.mjs',
-  'lib/hydra-evolve-knowledge.mjs',
-  'lib/hydra-evolve-review.mjs',
-  'lib/hydra-evolve-investigator.mjs',
-  'lib/hydra-openai.mjs',
+  'lib/hydra-evolve.ts',
+  'lib/hydra-evolve-guardrails.ts',
+  'lib/hydra-evolve-knowledge.ts',
+  'lib/hydra-evolve-review.ts',
+  'lib/hydra-evolve-investigator.ts',
+  'lib/hydra-openai.ts',
   // Cannot touch nightly system
-  'lib/hydra-nightly.mjs',
-  'lib/hydra-nightly-discovery.mjs',
-  'lib/hydra-nightly-review.mjs',
+  'lib/hydra-nightly.ts',
+  'lib/hydra-nightly-discovery.ts',
+  'lib/hydra-nightly-review.ts',
   // Config loader off-limits
   'lib/hydra-config.ts',
-  // Knowledge base is only written by hydra-evolve-knowledge.mjs
+  // Knowledge base is only written by hydra-evolve-knowledge.ts
   'docs/coordination/evolve/KNOWLEDGE_BASE.json',
 ]);
 

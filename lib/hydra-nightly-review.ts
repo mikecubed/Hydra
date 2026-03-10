@@ -29,7 +29,6 @@ import {
 import { BASE_PROTECTED_FILES, BASE_PROTECTED_PATTERNS } from './hydra-shared/constants.ts';
 import {
   createRL,
-  ask as _ask,
   loadLatestReport,
   displayBranchInfo,
   handleBranchAction,

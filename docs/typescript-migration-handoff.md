@@ -133,14 +133,14 @@ Convert test files last. They serve as a regression net during the migration.
 
 ## Import Path Convention
 
-TypeScript with `NodeNext` module resolution requires explicit extensions on imports. When converting a file, all imports must use `.js` extension (not `.ts`) per NodeNext rules:
+This project uses `allowImportingTsExtensions: true` with `noEmit: true` in `tsconfig.json`. All imports use `.ts` extensions (not `.js`):
 
 ```typescript
 // CORRECT
-import { loadHydraConfig } from './hydra-config.js';
+import { loadHydraConfig } from './hydra-config.ts';
 
 // WRONG
-import { loadHydraConfig } from './hydra-config.ts';
+import { loadHydraConfig } from './hydra-config.js';
 import { loadHydraConfig } from './hydra-config';
 ```
 
@@ -159,7 +159,7 @@ Rules:
 1. Rename to lib/[filename].ts
 2. Convert JSDoc @param/@returns to inline TypeScript types
 3. Import types from lib/types.ts where they exist
-4. All imports must use .js extension (NodeNext resolution)
+4. All imports must use .ts extension (allowImportingTsExtensions is enabled)
 5. No `any` types — use `unknown` if truly unknown, then narrow
 6. Prefer explicit return types on all exported functions
 7. Run `npm run typecheck` and `npm test` after — fix all errors before finishing

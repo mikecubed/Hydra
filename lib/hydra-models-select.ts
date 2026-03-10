@@ -5,10 +5,10 @@
  * Sets global mode to 'custom' on selection.
  *
  * Usage:
- *   node lib/hydra-models-select.mjs           # pick agent first
- *   node lib/hydra-models-select.mjs claude     # straight to claude models
- *   node lib/hydra-models-select.mjs codex
- *   node lib/hydra-models-select.mjs gemini
+ *   node lib/hydra-models-select.ts           # pick agent first
+ *   node lib/hydra-models-select.ts claude     # straight to claude models
+ *   node lib/hydra-models-select.ts codex
+ *   node lib/hydra-models-select.ts gemini
  *
  * npm scripts:
  *   npm run models:select                       # all

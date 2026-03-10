@@ -270,7 +270,7 @@ export class MCPClient extends EventEmitter {
       this.emit('idle');
       this.close();
     }, this.sessionTimeout);
-    (this.idleTimer as ReturnType<typeof setTimeout> & { unref?(): void })?.unref?.(); // Don't prevent process exit when idle
+    this.idleTimer?.unref?.(); // Don't prevent process exit when idle
   }
 }
 

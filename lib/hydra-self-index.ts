@@ -179,8 +179,8 @@ export function buildSelfIndex(rootDir = HYDRA_ROOT): SelfIndex {
   }
 
   // Special maps
-  const daemonRead = readFileSafe(path.join(libDir, 'daemon', 'read-routes.mjs'));
-  const daemonWrite = readFileSafe(path.join(libDir, 'daemon', 'write-routes.mjs'));
+  const daemonRead = readFileSafe(path.join(libDir, 'daemon', 'read-routes.ts'));
+  const daemonWrite = readFileSafe(path.join(libDir, 'daemon', 'write-routes.ts'));
   const daemonRoutes = uniq([
     ...extractDaemonRoutes(daemonRead),
     ...extractDaemonRoutes(daemonWrite),
@@ -192,7 +192,7 @@ export function buildSelfIndex(rootDir = HYDRA_ROOT): SelfIndex {
     resources: extractMcpResources(mcpSrc),
   };
 
-  const operatorSrc = readFileSafe(path.join(libDir, 'hydra-operator.mjs'));
+  const operatorSrc = readFileSafe(path.join(libDir, 'hydra-operator.ts'));
   const operator: OperatorInfo = {
     commands: extractOperatorCommands(operatorSrc),
   };
