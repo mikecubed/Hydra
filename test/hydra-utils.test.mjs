@@ -19,7 +19,7 @@ import {
   nowIso,
   runId,
   runProcess,
-} from '../lib/hydra-utils.mjs';
+} from '../lib/hydra-utils.ts';
 
 // ── parseArgs ────────────────────────────────────────────────────────────────
 

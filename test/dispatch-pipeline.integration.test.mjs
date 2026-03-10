@@ -5,7 +5,7 @@ import { createRequire } from 'node:module';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-import { classifyPrompt, selectTandemPair } from '../lib/hydra-utils.mjs';
+import { classifyPrompt, selectTandemPair } from '../lib/hydra-utils.ts';
 import {
   createMockExecuteAgent,
   loadAgentFixture,

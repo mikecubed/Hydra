@@ -20,7 +20,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import spawnRaw from 'cross-spawn';
 import { classifyTask, bestAgentFor } from './hydra-agents.mjs';
-import { classifyPrompt } from './hydra-utils.mjs';
+import { classifyPrompt } from './hydra-utils.ts';
 import { listIssues, isGhAvailable, isGhAuthenticated } from './hydra-github.ts';
 import { loadHydraConfig } from './hydra-config.mjs';
 import pc from 'picocolors';

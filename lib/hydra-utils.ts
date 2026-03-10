@@ -1,4 +1,3 @@
-#!/usr/bin/env node
 /**
  * Hydra shared utilities.
  *
@@ -13,18 +12,94 @@ import { KNOWN_OWNERS, classifyTask, bestAgentFor, AGENT_NAMES } from './hydra-a
 import { executeAgent } from './hydra-shared/agent-executor.mjs';
 import { spawnSyncCapture } from './hydra-proc.mjs';
 
-const ORCH_TOKEN = process.env.AI_ORCH_TOKEN || '';
+// Suppress unused import warning for `os` (kept for backwards-compat consumers)
+void os;
+
+// ── Types ─────────────────────────────────────────────────────────────────────
+
+export interface ParsedArgs {
+  options: Record<string, string | boolean>;
+  positionals: string[];
+}
+
+export interface ParsedArgsWithCommand extends ParsedArgs {
+  command: string;
+}
+
+interface RunProcessOpts {
+  cwd?: string;
+  input?: string;
+}
+
+export interface RunProcessResult {
+  ok: boolean;
+  exitCode: number | null;
+  stdout: string;
+  stderr: string;
+  error: string;
+  timedOut: boolean;
+}
+
+export interface TestFailure {
+  name: string;
+  error: string;
+}
+
+export interface ParseTestOutputResult {
+  total: number;
+  passed: number;
+  failed: number;
+  durationMs: number;
+  failures: TestFailure[];
+  summary: string;
+}
+
+export interface NormalizedTask {
+  owner: string;
+  title: string;
+  done: string;
+  rationale: string;
+}
+
+interface TandemPair {
+  lead: string;
+  follow: string;
+}
+
+export interface ClassifyPromptResult {
+  tier: 'simple' | 'moderate' | 'complex';
+  taskType: string;
+  suggestedAgent: string;
+  confidence: number;
+  reason: string;
+  routeStrategy?: 'single' | 'tandem' | 'council';
+  tandemPair?: TandemPair | null;
+}
+
+export interface GenerateSpecResult {
+  specId: string;
+  specPath: string;
+  specContent: string;
+}
+
+interface GenerateSpecOpts {
+  specsDir?: string;
+  fastModel?: string;
+  cwd?: string;
+}
+
+const ORCH_TOKEN = process.env['AI_ORCH_TOKEN'] ?? '';
 const NETWORK_RETRY_COUNT = 4;
 const NETWORK_RETRY_DELAY_MS = 300;
 const DEFAULT_TIMEOUT_MS = 1000 * 60 * 7;
 
 // --- Timestamp ---
 
-export function nowIso() {
+export function nowIso(): string {
   return new Date().toISOString();
 }
 
-export function runId(prefix = 'HYDRA') {
+export function runId(prefix = 'HYDRA'): string {
   const d = new Date();
   const yyyy = String(d.getFullYear());
   const mm = String(d.getMonth() + 1).padStart(2, '0');
@@ -37,9 +112,9 @@ export function runId(prefix = 'HYDRA') {
 
 // --- CLI Argument Parsing ---
 
-export function parseArgs(argv) {
-  const options = {};
-  const positionals = [];
+export function parseArgs(argv: string[]): ParsedArgs {
+  const options: Record<string, string | boolean> = {};
+  const positionals: string[] = [];
   for (const token of argv.slice(2)) {
     if (token.startsWith('--')) {
       options[token.slice(2)] = true;
@@ -56,10 +131,10 @@ export function parseArgs(argv) {
   return { options, positionals };
 }
 
-export function parseArgsWithCommand(argv) {
+export function parseArgsWithCommand(argv: string[]): ParsedArgsWithCommand {
   const [command = 'help', ...rest] = argv.slice(2);
-  const options = {};
-  const positionals = [];
+  const options: Record<string, string | boolean> = {};
+  const positionals: string[] = [];
   for (const token of rest) {
     if (token.startsWith('--')) {
       options[token.slice(2)] = true;
@@ -76,14 +151,15 @@ export function parseArgsWithCommand(argv) {
   return { command, options, positionals };
 }
 
-export function getOption(options, key, fallback = '') {
-  if (options[key] !== undefined) {
-    return String(options[key]);
+export function getOption(options: Record<string, string | boolean>, key: string, fallback = ''): string {
+  const val = (options as Record<string, string | boolean | undefined>)[key];
+  if (val !== undefined) {
+    return String(val);
   }
   return fallback;
 }
 
-export function requireOption(options, key, help = '') {
+export function requireOption(options: Record<string, string | boolean>, key: string, help = ''): string {
   const value = getOption(options, key, '');
   if (!value) {
     const suffix = help ? `\n${help}` : '';
@@ -92,9 +168,9 @@ export function requireOption(options, key, help = '') {
   return value;
 }
 
-export function getPrompt(options, positionals) {
-  if (options.prompt) {
-    return String(options.prompt);
+export function getPrompt(options: Record<string, string | boolean>, positionals: string[]): string {
+  if (options['prompt']) {
+    return String(options['prompt']);
   }
   if (positionals.length > 0) {
     return positionals.join(' ');
@@ -102,27 +178,26 @@ export function getPrompt(options, positionals) {
   return '';
 }
 
-export function boolFlag(value, fallback = false) {
+export function boolFlag(value: unknown, fallback = false): boolean {
   if (value === undefined || value === '') {
+    return fallback;
+  }
+  if (typeof value !== 'string' && typeof value !== 'number' && typeof value !== 'boolean') {
     return fallback;
   }
   const normalized = String(value).toLowerCase();
   return ['1', 'true', 'yes', 'y', 'on'].includes(normalized);
 }
 
-/**
- * Split a value into a trimmed string array. Splits on commas only.
- * @param {string | string[] | null | undefined} value
- * @returns {string[]}
- */
-export function parseList(value) {
+/** Split a value into a trimmed string array. Splits on commas only. */
+export function parseList(value: string | string[] | null | undefined): string[] {
   if (!value) {
     return [];
   }
   if (Array.isArray(value)) {
-    return value.map((x) => String(x).trim()).filter(Boolean);
+    return value.map((x) => x.trim()).filter(Boolean);
   }
-  return String(value)
+  return value
     .split(/,\s*/)
     .map((x) => x.trim())
     .filter(Boolean);
@@ -130,10 +205,18 @@ export function parseList(value) {
 
 // --- Text Helpers ---
 
-export function short(text, max = 300) {
-  const cleaned = String(text || '')
-    .replace(/\s+/g, ' ')
-    .trim();
+export function short(text: unknown, max = 300): string {
+  let raw: string;
+  if (text == null) {
+    raw = '';
+  } else if (typeof text === 'string') {
+    raw = text;
+  } else if (typeof text === 'number' || typeof text === 'boolean') {
+    raw = String(text);
+  } else {
+    raw = JSON.stringify(text);
+  }
+  const cleaned = raw.replace(/\s+/g, ' ').trim();
   if (cleaned.length <= max) {
     return cleaned;
   }
@@ -142,11 +225,13 @@ export function short(text, max = 300) {
 
 // --- JSON Parsing ---
 
-export function parseJsonLoose(text) {
-  if (!text || !String(text).trim()) {
+export function parseJsonLoose(text: unknown): unknown {
+  if (text == null) return null;
+  if (typeof text !== 'string') return null;
+  const raw = text.trim();
+  if (!raw) {
     return null;
   }
-  const raw = String(text).trim();
 
   try {
     return JSON.parse(raw);
@@ -179,17 +264,14 @@ export function parseJsonLoose(text) {
 
 /**
  * Run a command synchronously and return structured results.
- * @param {string} command - The command to execute
- * @param {string[]} args - Arguments for the command
- * @param {number} [timeoutMs=420000] - Timeout in ms
- * @param {object} [extraOpts] - Additional options
- * @param {string} [extraOpts.cwd] - Working directory
- * @param {string} [extraOpts.input] - Data to pipe to stdin
- * @returns {{ ok: boolean, exitCode: number|null, stdout: string, stderr: string, error: string, timedOut: boolean }}
+ * @param command - The command to execute
+ * @param args - Arguments for the command
+ * @param timeoutMs - Timeout in ms
+ * @param extraOpts - Additional options
  */
-export function runProcess(command, args, timeoutMs = DEFAULT_TIMEOUT_MS, extraOpts = {}) {
+export function runProcess(command: string, args: string[], timeoutMs = DEFAULT_TIMEOUT_MS, extraOpts: RunProcessOpts = {}): RunProcessResult {
   const spawnOpts = {
-    cwd: extraOpts.cwd || process.cwd(),
+    cwd: extraOpts.cwd ?? process.cwd(),
     encoding: 'utf8',
     timeout: timeoutMs,
     maxOutputBytes: 1024 * 1024 * 8,
@@ -209,7 +291,7 @@ export function runProcess(command, args, timeoutMs = DEFAULT_TIMEOUT_MS, extraO
       stdout,
       stderr,
       error: result.error.message,
-      timedOut: Boolean(result.signal === 'SIGTERM'),
+      timedOut: result.signal === 'SIGTERM',
     };
   }
 
@@ -219,7 +301,7 @@ export function runProcess(command, args, timeoutMs = DEFAULT_TIMEOUT_MS, extraO
     stdout,
     stderr,
     error: '',
-    timedOut: Boolean(result.signal === 'SIGTERM'),
+    timedOut: result.signal === 'SIGTERM',
   };
 }
 
@@ -228,12 +310,8 @@ export function runProcess(command, args, timeoutMs = DEFAULT_TIMEOUT_MS, extraO
 /**
  * Parse Node.js test runner output (TAP / spec reporter) into structured results.
  * Gracefully returns zeros when output can't be parsed.
- *
- * @param {string} stdout - stdout from `node --test`
- * @param {string} stderr - stderr from `node --test`
- * @returns {{ total: number, passed: number, failed: number, durationMs: number, failures: Array<{name: string, error: string}>, summary: string }}
  */
-export function parseTestOutput(stdout = '', stderr = '') {
+export function parseTestOutput(stdout = '', stderr = ''): ParseTestOutputResult {
   const combined = `${stdout}\n${stderr}`;
   let total = 0,
     passed = 0,
@@ -293,9 +371,9 @@ export function parseTestOutput(stdout = '', stderr = '') {
       const names = failures
         .slice(0, 5)
         .map((f) => (f.name.length > 40 ? `${f.name.slice(0, 37)}...` : f.name));
-      summary = `${failed}/${total} failed${names.length > 0 ? `: ${names.join(', ')}` : ''}`;
+      summary = `${String(failed)}/${String(total)} failed${names.length > 0 ? `: ${names.join(', ')}` : ''}`;
     } else {
-      summary = `${passed}/${total} passed`;
+      summary = `${String(passed)}/${String(total)} passed`;
     }
   }
 
@@ -304,8 +382,13 @@ export function parseTestOutput(stdout = '', stderr = '') {
 
 // --- HTTP Client (with retry) ---
 
-export async function request(method, baseUrl, route, body = null) {
-  const headers = {
+export async function request<T = unknown>(
+  method: string,
+  baseUrl: string,
+  route: string,
+  body: unknown = null,
+): Promise<T> {
+  const headers: Record<string, string> = {
     Accept: 'application/json',
   };
   if (ORCH_TOKEN) {
@@ -315,8 +398,8 @@ export async function request(method, baseUrl, route, body = null) {
     headers['Content-Type'] = 'application/json';
   }
 
-  let response;
-  let lastNetworkError = null;
+  let response: Awaited<ReturnType<typeof fetch>> | undefined;
+  let lastNetworkError: unknown = null;
 
   for (let attempt = 1; attempt <= NETWORK_RETRY_COUNT; attempt += 1) {
     try {
@@ -332,7 +415,7 @@ export async function request(method, baseUrl, route, body = null) {
       if (attempt >= NETWORK_RETRY_COUNT) {
         break;
       }
-      await new Promise((resolve) => setTimeout(resolve, NETWORK_RETRY_DELAY_MS * attempt));
+      await new Promise<void>((resolve) => { setTimeout(resolve, NETWORK_RETRY_DELAY_MS * attempt); });
     }
   }
 
@@ -342,17 +425,17 @@ export async function request(method, baseUrl, route, body = null) {
     );
   }
 
-  const payload = await response.json().catch(() => ({}));
-  if (!response.ok) {
-    throw new Error(payload.error || `HTTP ${response.status}`);
+  const payload = await response!.json().catch(() => ({})) as { error?: string };
+  if (!response!.ok) {
+    throw new Error(payload.error ?? `HTTP ${String(response!.status)}`);
   }
 
-  return payload;
+  return payload as T;
 }
 
 // --- Filesystem ---
 
-export function ensureDir(dir) {
+export function ensureDir(dir: string): void {
   if (!fs.existsSync(dir)) {
     fs.mkdirSync(dir, { recursive: true });
   }
@@ -360,36 +443,41 @@ export function ensureDir(dir) {
 
 // --- Task Normalization ---
 
-export function sanitizeOwner(owner) {
-  const candidate = String(owner || '').toLowerCase();
+export function sanitizeOwner(owner: unknown): string {
+  const candidate = (typeof owner === 'string' ? owner : '').toLowerCase();
   if (KNOWN_OWNERS.has(candidate)) {
     return candidate;
   }
   return 'unassigned';
 }
 
-export function normalizeTask(item, fallbackOwner = 'unassigned') {
+export function normalizeTask(item: unknown, fallbackOwner = 'unassigned'): NormalizedTask | null {
   if (!item || typeof item !== 'object') {
     return null;
   }
-  const title = String(item.title || item.task || '').trim();
+  const record = item as Record<string, unknown>;
+  const str = (key: string): string => {
+    const v = record[key];
+    return typeof v === 'string' ? v : '';
+  };
+  const title = (str('title') || str('task')).trim();
   if (!title) {
     return null;
   }
-  const owner = sanitizeOwner(item.owner || fallbackOwner);
-  const done = String(item.definition_of_done || item.done || item.acceptance || '').trim();
-  const rationale = String(item.rationale || item.why || '').trim();
+  const owner = sanitizeOwner(str('owner') || fallbackOwner);
+  const done = (str('definition_of_done') || str('done') || str('acceptance')).trim();
+  const rationale = (str('rationale') || str('why')).trim();
   return { owner, title, done, rationale };
 }
 
-export function dedupeTasks(tasks) {
-  const out = [];
-  const seen = new Set();
+export function dedupeTasks(tasks: Array<NormalizedTask | null | undefined>): NormalizedTask[] {
+  const out: NormalizedTask[] = [];
+  const seen = new Set<string>();
   for (const task of tasks) {
     if (!task) {
       continue;
     }
-    const key = `${task.owner}::${String(task.title || '').toLowerCase()}`;
+    const key = `${task.owner}::${task.title.toLowerCase()}`;
     if (seen.has(key)) {
       continue;
     }
@@ -410,7 +498,7 @@ const TANDEM_INDICATORS =
   /\b(?:first\s+\w+(?:\s+\w+){0,5}\s+then\b|review\s+and\s+fix|analyze\s+and\s+implement|plan\s+(?:and\s+|then\s+)?build|assess\s+(?:and|then)\s+(?:fix|implement|refactor)|research\s+(?:and|then)\s+(?:implement|build|write)|check\s+(?:and|then)\s+(?:fix|update|refactor))/i;
 
 // Task-type → tandem pair mapping
-const TANDEM_PAIRS = {
+const TANDEM_PAIRS: Record<string, TandemPair> = {
   planning: { lead: 'claude', follow: 'codex' },
   architecture: { lead: 'claude', follow: 'gemini' },
   review: { lead: 'gemini', follow: 'claude' },
@@ -428,8 +516,8 @@ const TANDEM_PAIRS = {
  * Respects agent filter — if one is excluded, swaps with best available.
  * If only 1 agent available, returns null (degrade to single).
  */
-export function selectTandemPair(taskType, suggestedAgent, agents = null) {
-  const pair = TANDEM_PAIRS[taskType] || TANDEM_PAIRS.implementation;
+export function selectTandemPair(taskType: string, _suggestedAgent: string, agents: string[] | null = null): TandemPair | null {
+  const pair = TANDEM_PAIRS[taskType] ?? TANDEM_PAIRS['implementation'];
   let { lead, follow } = pair;
 
   if (!agents || agents.length === 0) return { lead, follow };
@@ -444,10 +532,10 @@ export function selectTandemPair(taskType, suggestedAgent, agents = null) {
 
   // Swap out missing member with best available alternative
   if (!leadOk) {
-    lead = agents.find((a) => a !== follow) || agents[0];
+    lead = agents.find((a) => a !== follow) ?? agents[0];
   }
   if (!followOk) {
-    follow = agents.find((a) => a !== lead) || agents[0];
+    follow = agents.find((a) => a !== lead) ?? agents[0];
   }
 
   // Still same agent after substitution → can't tandem
@@ -465,8 +553,8 @@ export function selectTandemPair(taskType, suggestedAgent, agents = null) {
  *   - moderate: run mini-round triage (default)
  *   - complex:  full council deliberation
  */
-export function classifyPrompt(promptText) {
-  const text = String(promptText || '').trim();
+export function classifyPrompt(promptText: unknown): ClassifyPromptResult {
+  const text = (typeof promptText === 'string' ? promptText : '').trim();
   if (!text) {
     return {
       tier: 'moderate',
@@ -524,7 +612,7 @@ export function classifyPrompt(promptText) {
   }
 
   // Agent name mention → user targeting specific agent
-  const mentionedAgent = AGENT_NAMES.find((a) => lowerText.includes(a));
+  const mentionedAgent = (AGENT_NAMES as string[]).find((a) => lowerText.includes(a));
   if (mentionedAgent) {
     simpleScore += 0.2;
     signals.push(`mentions agent: ${mentionedAgent}`);
@@ -546,7 +634,7 @@ export function classifyPrompt(promptText) {
   const sentenceCount = text.split(/[.!?]+/).filter((s) => s.trim().length > 5).length;
   if (sentenceCount >= 3) {
     complexScore += 0.2;
-    signals.push(`${sentenceCount} sentences`);
+    signals.push(`${String(sentenceCount)} sentences`);
   }
 
   // Question marks suggest uncertainty
@@ -558,7 +646,7 @@ export function classifyPrompt(promptText) {
   // Multiple verb phrases joined by "and" → multi-objective
   const verbPhrasePattern =
     /\b(fix|add|create|implement|update|refactor|remove|delete|write|build|change|move|rename)\b/gi;
-  const verbMatches = lowerText.match(verbPhrasePattern) || [];
+  const verbMatches = lowerText.match(verbPhrasePattern) ?? [];
   if (verbMatches.length >= 2 && MULTI_OBJECTIVE.test(lowerText)) {
     complexScore += 0.2;
     signals.push('multiple objectives');
@@ -566,8 +654,8 @@ export function classifyPrompt(promptText) {
 
   // Determine tier
   const netScore = simpleScore - complexScore;
-  let tier;
-  let confidence;
+  let tier: 'simple' | 'moderate' | 'complex';
+  let confidence: number;
 
   if (netScore >= 0.3) {
     tier = 'simple';
@@ -587,10 +675,10 @@ export function classifyPrompt(promptText) {
   }
 
   // Suggested agent
-  const suggestedAgent = mentionedAgent || bestAgentFor(taskType);
+  const suggestedAgent: string = mentionedAgent ?? (bestAgentFor(taskType) as string);
 
   // Route strategy: single / tandem / council
-  let routeStrategy;
+  let routeStrategy: 'single' | 'tandem' | 'council';
   if (tier === 'simple' && !hasTandemIndicator) {
     routeStrategy = 'single';
   } else if (tier === 'complex' && complexScore >= 0.6) {
@@ -632,32 +720,40 @@ Objective: `;
  * Generate a spec document for a complex prompt using a fast model call.
  * Returns { specId, specPath, specContent } or null if generation fails.
  */
-export async function generateSpec(promptText, taskId, opts = {}) {
-  const specsDir = opts.specsDir || path.join(process.cwd(), 'docs', 'coordination', 'specs');
+export async function generateSpec(
+  promptText: string,
+  taskId: string | null | undefined,
+  opts: GenerateSpecOpts = {},
+): Promise<GenerateSpecResult | null> {
+  const specsDir = opts.specsDir ?? path.join(process.cwd(), 'docs', 'coordination', 'specs');
   ensureDir(specsDir);
 
-  const specId = `SPEC_${taskId || runId('TASK')}`;
+  const specId = `SPEC_${taskId ?? runId('TASK')}`;
   const specPath = path.join(specsDir, `${specId}.md`);
 
   try {
     const result = await executeAgent('claude', `${SPEC_PROMPT_TEMPLATE}${promptText}`, {
       timeoutMs: 30_000,
-      modelOverride: opts.fastModel || undefined,
-      cwd: opts.cwd || process.cwd(),
+      modelOverride: opts.fastModel,
+      cwd: opts.cwd ?? process.cwd(),
       permissionMode: 'plan',
     });
 
-    if (!result.ok || !result.stdout) {
+    if (!result.ok || !result.output) {
       return null;
     }
 
     // Extract text content from JSON response if needed
-    let content = result.stdout;
+    let content = result.output;
     try {
-      const parsed = JSON.parse(content);
-      if (parsed.result) content = parsed.result;
-      else if (parsed.content) content = parsed.content;
-      else if (typeof parsed === 'string') content = parsed;
+      const parsed: unknown = JSON.parse(content);
+      if (parsed !== null && typeof parsed === 'object') {
+        const rec = parsed as Record<string, unknown>;
+        if (typeof rec['result'] === 'string') content = rec['result'];
+        else if (typeof rec['content'] === 'string') content = rec['content'];
+      } else if (typeof parsed === 'string') {
+        content = parsed;
+      }
     } catch {
       /* use raw output */
     }

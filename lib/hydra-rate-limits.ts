@@ -10,30 +10,76 @@
  */
 
 import { loadHydraConfig } from './hydra-config.mjs';
-import { getRateLimits as getModelRateLimits, getProfile } from './hydra-model-profiles.ts';
-import { getProviderEWMA, getLatencyEstimates } from './hydra-streaming-middleware.mjs';
+import { getRateLimits as getModelRateLimits } from './hydra-model-profiles.ts';
+import { getProviderEWMA } from './hydra-streaming-middleware.mjs';
+
+// ── Types ────────────────────────────────────────────────────────────────────
+
+/** Supported provider names. */
+export type Provider = 'openai' | 'anthropic' | 'google';
+
+interface TokenTimestamp {
+  ts: number;
+  tokens: number;
+}
+
+interface DailyCounter {
+  date: string | null;
+  count: number;
+}
+
+interface HeaderCapacity {
+  remainingRequests?: number | null;
+  remainingTokens?: number | null;
+  remainingInputTokens?: number | null;
+  remainingOutputTokens?: number | null;
+  resetAt?: string | null;
+  ts: number;
+}
+
+interface RateLimits {
+  rpm?: number;
+  tpm?: number;
+  itpm?: number;
+  otpm?: number;
+  rpd?: number;
+}
+
+interface RemainingCapacity {
+  rpm: number | null;
+  tpm: number | null;
+  rpd: number | null;
+  pctRpm: number | null;
+  pctTpm: number | null;
+  pctRpd: number | null;
+}
+
+interface ProviderCandidate {
+  provider: string;
+  model: string;
+  available: boolean;
+}
 
 // ── Sliding Window State ────────────────────────────────────────────────────
 
 // RPM: array of request timestamps (ms) within the last 60s
-const _requestTimestamps = { openai: [], anthropic: [], google: [] };
+const _requestTimestamps: Partial<Record<string, number[]>> = { openai: [], anthropic: [], google: [] };
 
 // TPM: array of { ts, tokens } within the last 60s
-const _tokenTimestamps = { openai: [], anthropic: [], google: [] };
+const _tokenTimestamps: Partial<Record<string, TokenTimestamp[]>> = { openai: [], anthropic: [], google: [] };
 
 // RPD: daily request counter per provider
-const _dailyRequests = {
+const _dailyRequests: Partial<Record<string, DailyCounter>> = {
   openai: { date: null, count: 0 },
   anthropic: { date: null, count: 0 },
   google: { date: null, count: 0 },
 };
 
 // Real remaining capacity from provider response headers
-// Overrides estimated tracking when fresh (< HEADER_TTL_MS old)
-const _headerCapacity = {
-  openai: null, // { remainingRequests, remainingTokens, resetAt, ts }
-  anthropic: null, // { remainingRequests, remainingInputTokens, remainingOutputTokens, ts }
-  google: null, // (Google doesn't send these on success)
+const _headerCapacity: Record<string, HeaderCapacity | null> = {
+  openai: null,
+  anthropic: null,
+  google: null,
 };
 
 const WINDOW_MS = 60_000; // 60-second sliding window
@@ -45,104 +91,96 @@ function today() {
   return new Date().toISOString().slice(0, 10);
 }
 
-function pruneWindow(arr) {
+function pruneWindow(arr: number[]): void {
   const cutoff = Date.now() - WINDOW_MS;
-  while (arr.length > 0 && arr[0] < cutoff) arr.shift();
+  while (arr.length > 0 && (arr[0]) < cutoff) arr.shift();
 }
 
-function pruneTokenWindow(arr) {
+function pruneTokenWindow(arr: TokenTimestamp[]): void {
   const cutoff = Date.now() - WINDOW_MS;
-  while (arr.length > 0 && arr[0].ts < cutoff) arr.shift();
+  while (arr.length > 0 && (arr[0]).ts < cutoff) arr.shift();
 }
 
-function getProviderTier(provider) {
-  const cfg = loadHydraConfig();
-  const providerCfg = cfg.providers?.[provider] || {};
-  const defaults = { openai: 1, anthropic: 1, google: 'free' };
-  return providerCfg.tier ?? defaults[provider] ?? 1;
+function getProviderTier(provider: string): number | string {
+  const cfg = loadHydraConfig() as Record<string, unknown>;
+  const providers = cfg['providers'] as Record<string, Record<string, unknown>> | undefined;
+  const providerCfg = providers?.[provider] ?? {};
+  const defaults: Partial<Record<string, number | string>> = { openai: 1, anthropic: 1, google: 'free' };
+  return (providerCfg['tier'] as number | string | undefined) ?? defaults[provider] ?? 1;
 }
 
-/**
- * Get effective rate limits for a provider+model at the user's configured tier.
- * @param {string} provider
- * @param {string} [model] - Model ID; if omitted, uses a sensible default
- * @returns {{ rpm?: number, tpm?: number, itpm?: number, otpm?: number, rpd?: number }|null}
- */
-function getEffectiveLimits(provider, model) {
+function getEffectiveLimits(provider: string, model?: string): RateLimits | null {
   const tier = getProviderTier(provider);
   if (model) {
-    const limits = getModelRateLimits(model, tier);
-    if (limits) return limits;
+    const limits = getModelRateLimits(model, tier as number);
+    if (limits) return limits as RateLimits;
   }
   return null;
 }
 
 // ── Recording ───────────────────────────────────────────────────────────────
 
-/**
- * Record that an API request was made to a provider.
- * Called from streaming clients after each successful request.
- *
- * @param {string} provider - 'openai' | 'anthropic' | 'google'
- * @param {string} model - Model ID used
- * @param {{ prompt_tokens?: number, completion_tokens?: number, inputTokens?: number, outputTokens?: number }|null} usage
- */
-export function recordApiRequest(provider, model, usage) {
-  if (!_requestTimestamps[provider]) return;
+interface UsageRecord {
+  prompt_tokens?: number;
+  completion_tokens?: number;
+  inputTokens?: number;
+  outputTokens?: number;
+}
+
+export function recordApiRequest(provider: string, _model: string, usage: UsageRecord | null): void {
+  const timestamps = _requestTimestamps[provider];
+  if (!timestamps) return;
 
   const now = Date.now();
 
   // RPM: add timestamp
-  _requestTimestamps[provider].push(now);
-  pruneWindow(_requestTimestamps[provider]);
+  timestamps.push(now);
+  pruneWindow(timestamps);
 
   // TPM: add token count
   const totalTokens =
-    (usage?.prompt_tokens || usage?.inputTokens || 0) +
-    (usage?.completion_tokens || usage?.outputTokens || 0);
+    (usage?.prompt_tokens ?? usage?.inputTokens ?? 0) +
+    (usage?.completion_tokens ?? usage?.outputTokens ?? 0);
   if (totalTokens > 0) {
-    _tokenTimestamps[provider].push({ ts: now, tokens: totalTokens });
-    pruneTokenWindow(_tokenTimestamps[provider]);
+    const tt = _tokenTimestamps[provider];
+    if (tt) {
+      tt.push({ ts: now, tokens: totalTokens });
+      pruneTokenWindow(tt);
+    }
   }
 
   // RPD: increment daily counter
   const d = today();
   const daily = _dailyRequests[provider];
-  if (daily.date !== d) {
-    daily.date = d;
-    daily.count = 0;
+  if (daily) {
+    if (daily.date !== d) {
+      daily.date = d;
+      daily.count = 0;
+    }
+    daily.count++;
   }
-  daily.count++;
 }
 
-/**
- * Update remaining capacity from provider response headers.
- * Called from streaming clients immediately after fetch().
- *
- * @param {string} provider
- * @param {object} headers - Parsed header values (provider-specific)
- */
-export function updateFromHeaders(provider, headers) {
-  if (!headers || !_headerCapacity.hasOwnProperty(provider)) return;
+/** Update remaining capacity from provider response headers. */
+export function updateFromHeaders(provider: string, headers: Record<string, unknown>): void {
+  if (!Object.prototype.hasOwnProperty.call(_headerCapacity, provider)) return;
 
   // Only store if we got at least one meaningful value
-  const hasData = Object.values(headers).some((v) => v != null && v !== '' && !isNaN(v));
+  const hasData = Object.values(headers).some((v) => v != null && v !== '' && !Number.isNaN(Number(v)));
   if (!hasData) return;
 
-  _headerCapacity[provider] = { ...headers, ts: Date.now() };
+  _headerCapacity[provider] = { ...(headers as Partial<HeaderCapacity>), ts: Date.now() };
 }
 
 // ── Querying ────────────────────────────────────────────────────────────────
 
-/**
- * Check whether a request can be made to a provider without exceeding limits.
- *
- * @param {string} provider
- * @param {string} model - Model ID
- * @param {number} [estimatedTokens=0] - Estimated total tokens for the request
- * @returns {{ allowed: boolean, reason: string, remaining: { rpm: number|null, tpm: number|null, rpd: number|null } }}
- */
-export function canMakeRequest(provider, model, estimatedTokens = 0) {
+interface CanMakeRequestResult {
+  allowed: boolean;
+  reason: string;
+  remaining: RemainingCapacity;
+}
+
+export function canMakeRequest(provider: string, model: string, estimatedTokens = 0): CanMakeRequestResult {
   const limits = getEffectiveLimits(provider, model);
   const remaining = getRemainingCapacity(provider, model);
 
@@ -153,19 +191,19 @@ export function canMakeRequest(provider, model, estimatedTokens = 0) {
 
   // Check RPM
   if (limits.rpm && remaining.rpm != null && remaining.rpm <= 0) {
-    return { allowed: false, reason: `RPM exhausted (${limits.rpm}/min)`, remaining };
+    return { allowed: false, reason: `RPM exhausted (${String(limits.rpm)}/min)`, remaining };
   }
 
   // Check TPM (use either tpm or itpm depending on provider)
-  const tpmLimit = limits.tpm || limits.itpm;
+  const tpmLimit = limits.tpm ?? limits.itpm;
   if (tpmLimit && remaining.tpm != null) {
     if (remaining.tpm <= 0) {
-      return { allowed: false, reason: `TPM exhausted (${tpmLimit}/min)`, remaining };
+      return { allowed: false, reason: `TPM exhausted (${String(tpmLimit)}/min)`, remaining };
     }
     if (estimatedTokens > 0 && remaining.tpm < estimatedTokens) {
       return {
         allowed: false,
-        reason: `insufficient TPM (need ~${estimatedTokens}, have ${remaining.tpm})`,
+        reason: `insufficient TPM (need ~${String(estimatedTokens)}, have ${String(remaining.tpm)})`,
         remaining,
       };
     }
@@ -173,29 +211,21 @@ export function canMakeRequest(provider, model, estimatedTokens = 0) {
 
   // Check RPD (critical for Google free tier)
   if (limits.rpd && remaining.rpd != null && remaining.rpd <= 0) {
-    return { allowed: false, reason: `RPD exhausted (${limits.rpd}/day)`, remaining };
+    return { allowed: false, reason: `RPD exhausted (${String(limits.rpd)}/day)`, remaining };
   }
 
   // Warn threshold: allow but note when approaching limits
   const RPM_WARN_PCT = 0.1; // warn at 10% remaining
   if (limits.rpm && remaining.rpm != null && remaining.rpm < limits.rpm * RPM_WARN_PCT) {
-    return { allowed: true, reason: `RPM low (${remaining.rpm} remaining)`, remaining };
+    return { allowed: true, reason: `RPM low (${String(remaining.rpm)} remaining)`, remaining };
   }
 
   return { allowed: true, reason: 'ok', remaining };
 }
 
-/**
- * Get remaining capacity for a provider.
- * Uses header data when fresh, otherwise estimates from sliding windows.
- *
- * @param {string} provider
- * @param {string} [model] - Model ID for limit lookup
- * @returns {{ rpm: number|null, tpm: number|null, rpd: number|null, pctRpm: number|null, pctTpm: number|null, pctRpd: number|null }}
- */
-export function getRemainingCapacity(provider, model) {
+export function getRemainingCapacity(provider: string, model?: string): RemainingCapacity {
   const limits = model ? getEffectiveLimits(provider, model) : null;
-  const result = { rpm: null, tpm: null, rpd: null, pctRpm: null, pctTpm: null, pctRpd: null };
+  const result: RemainingCapacity = { rpm: null, tpm: null, rpd: null, pctRpm: null, pctTpm: null, pctRpd: null };
 
   // Check for fresh header data first
   const headers = _headerCapacity[provider];
@@ -206,14 +236,14 @@ export function getRemainingCapacity(provider, model) {
     result.rpm = headers.remainingRequests;
     if (limits?.rpm) result.pctRpm = Math.round((result.rpm / limits.rpm) * 100);
   } else if (limits?.rpm) {
-    pruneWindow(_requestTimestamps[provider] || []);
-    const used = (_requestTimestamps[provider] || []).length;
+    pruneWindow(_requestTimestamps[provider] ?? []);
+    const used = (_requestTimestamps[provider] ?? []).length;
     result.rpm = Math.max(0, limits.rpm - used);
     result.pctRpm = Math.round((result.rpm / limits.rpm) * 100);
   }
 
   // TPM
-  const tpmLimit = limits?.tpm || limits?.itpm;
+  const tpmLimit = limits?.tpm ?? limits?.itpm;
   if (headersFresh && headers.remainingTokens != null) {
     result.tpm = headers.remainingTokens;
     if (tpmLimit) result.pctTpm = Math.round((result.tpm / tpmLimit) * 100);
@@ -221,8 +251,8 @@ export function getRemainingCapacity(provider, model) {
     result.tpm = headers.remainingInputTokens;
     if (tpmLimit) result.pctTpm = Math.round((result.tpm / tpmLimit) * 100);
   } else if (tpmLimit) {
-    pruneTokenWindow(_tokenTimestamps[provider] || []);
-    const usedTokens = (_tokenTimestamps[provider] || []).reduce((sum, e) => sum + e.tokens, 0);
+    pruneTokenWindow(_tokenTimestamps[provider] ?? []);
+    const usedTokens = (_tokenTimestamps[provider] ?? []).reduce((sum, e) => sum + e.tokens, 0);
     result.tpm = Math.max(0, tpmLimit - usedTokens);
     result.pctTpm = Math.round((result.tpm / tpmLimit) * 100);
   }
@@ -231,7 +261,7 @@ export function getRemainingCapacity(provider, model) {
   if (limits?.rpd) {
     const d = today();
     const daily = _dailyRequests[provider];
-    const used = daily && daily.date === d ? daily.count : 0;
+    const used = daily?.date === d ? daily.count : 0;
     result.rpd = Math.max(0, limits.rpd - used);
     result.pctRpd = Math.round((result.rpd / limits.rpd) * 100);
   }
@@ -239,15 +269,8 @@ export function getRemainingCapacity(provider, model) {
   return result;
 }
 
-/**
- * Score and sort provider candidates by remaining capacity (healthiest first).
- * Candidates with exhausted limits are pushed to the end.
- *
- * @param {Array<{ provider: string, model: string, available: boolean }>} candidates
- * @returns {Array<{ provider: string, model: string, available: boolean }>} Sorted copy
- */
-export function getHealthiestProvider(candidates) {
-  if (!candidates || candidates.length <= 1) return candidates;
+export function getHealthiestProvider(candidates: ProviderCandidate[]): ProviderCandidate[] {
+  if (candidates.length <= 1) return candidates;
 
   return [...candidates].sort((a, b) => {
     const capA = getRemainingCapacity(a.provider, a.model);
@@ -261,7 +284,7 @@ export function getHealthiestProvider(candidates) {
   });
 }
 
-function computeHealthScore(cap, provider) {
+function computeHealthScore(cap: RemainingCapacity, provider: string): number {
   // Weight RPD higher (most critical constraint, especially for Google free tier)
   let score = 0;
   let weight = 0;
@@ -296,15 +319,14 @@ function computeHealthScore(cap, provider) {
 
 // ── Display ─────────────────────────────────────────────────────────────────
 
-/**
- * Get a formatted rate limit summary for all providers.
- * Suitable for display in :usage command output.
- *
- * @returns {Array<{ provider: string, summary: string, model?: string }>}
- */
-export function getRateLimitSummary() {
-  const cfg = loadHydraConfig();
-  const results = [];
+/** Get a formatted rate limit summary for all providers (for :usage command). */
+interface RateLimitSummaryEntry {
+  provider: string;
+  summary: string;
+}
+
+export function getRateLimitSummary(): RateLimitSummaryEntry[] {
+  const results: RateLimitSummaryEntry[] = [];
 
   for (const provider of ['openai', 'anthropic', 'google']) {
     const tier = getProviderTier(provider);
@@ -312,24 +334,24 @@ export function getRateLimitSummary() {
     const parts = [];
 
     if (cap.rpm != null)
-      parts.push(`RPM: ${cap.rpm} left${cap.pctRpm == null ? '' : ` (${cap.pctRpm}%)`}`);
+      parts.push(`RPM: ${String(cap.rpm)} left${cap.pctRpm == null ? '' : ` (${String(cap.pctRpm)}%)`}`);
     if (cap.tpm != null)
-      parts.push(`TPM: ${fmtTokens(cap.tpm)} left${cap.pctTpm == null ? '' : ` (${cap.pctTpm}%)`}`);
+      parts.push(`TPM: ${fmtTokens(cap.tpm)} left${cap.pctTpm == null ? '' : ` (${String(cap.pctTpm)}%)`}`);
     if (cap.rpd != null)
-      parts.push(`RPD: ${cap.rpd} left${cap.pctRpd == null ? '' : ` (${cap.pctRpd}%)`}`);
+      parts.push(`RPD: ${String(cap.rpd)} left${cap.pctRpd == null ? '' : ` (${String(cap.pctRpd)}%)`}`);
 
     if (parts.length === 0) parts.push('no tracking data');
 
     results.push({
       provider,
-      summary: `Tier ${tier} — ${parts.join(' | ')}`,
+      summary: `Tier ${String(tier)} — ${parts.join(' | ')}`,
     });
   }
 
   return results;
 }
 
-function fmtTokens(n) {
+function fmtTokens(n: number): string {
   if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
   if (n >= 1_000) return `${(n / 1_000).toFixed(0)}K`;
   return String(n);
@@ -338,28 +360,25 @@ function fmtTokens(n) {
 // ── RPD Persistence ─────────────────────────────────────────────────────────
 // Load/save daily request counts alongside provider-usage.json
 
-/**
- * Load persisted RPD state (called on startup).
- * @param {object} data - Parsed provider-usage.json content
- */
-export function loadRpdState(data) {
+interface PersistedRpdState {
+  rpd?: Record<string, { date: string; count: number } | null>;
+}
+
+export function loadRpdState(data: PersistedRpdState | null | undefined): void {
   if (!data?.rpd) return;
   for (const [provider, state] of Object.entries(data.rpd)) {
-    if (_dailyRequests[provider] && state?.date && state?.count) {
-      _dailyRequests[provider].date = state.date;
-      _dailyRequests[provider].count = state.count;
+    const daily = _dailyRequests[provider];
+    if (daily && state?.date && state.count) {
+      daily.date = state.date;
+      daily.count = state.count;
     }
   }
 }
 
-/**
- * Get current RPD state for persistence.
- * @returns {object} RPD state keyed by provider
- */
-export function getRpdState() {
-  const out = {};
+export function getRpdState(): Record<string, { date: string; count: number }> {
+  const out: Record<string, { date: string; count: number }> = {};
   for (const [provider, state] of Object.entries(_dailyRequests)) {
-    if (state.date) {
+    if (state?.date) {
       out[provider] = { date: state.date, count: state.count };
     }
   }
@@ -368,7 +387,7 @@ export function getRpdState() {
 
 // ── Reset (for testing) ─────────────────────────────────────────────────────
 
-export function _resetState() {
+export function _resetState(): void {
   for (const p of ['openai', 'anthropic', 'google']) {
     _requestTimestamps[p] = [];
     _tokenTimestamps[p] = [];
@@ -381,30 +400,31 @@ export function _resetState() {
 // Pre-request enforcement: blocks until tokens are available.
 // Merged from hydra-rate-limiter.mjs to consolidate rate limiting in one module.
 
-function sleep(ms) {
-  return new Promise((resolve) => setTimeout(resolve, ms));
+function sleep(ms: number): Promise<void> {
+  return new Promise<void>((resolve) => { setTimeout(resolve, ms); });
 }
 
 export class TokenBucket {
-  /**
-   * @param {number} capacity    Max tokens (burst limit)
-   * @param {number} refillRate  Tokens per second
-   */
-  constructor(capacity, refillRate) {
+  capacity: number;
+  tokens: number;
+  refillRate: number;
+  private _lastRefill: number;
+
+  constructor(capacity: number, refillRate: number) {
     this.capacity = capacity;
     this.tokens = capacity;
     this.refillRate = refillRate;
     this._lastRefill = Date.now();
   }
 
-  _refill() {
+  private _refill(): void {
     const now = Date.now();
     const elapsed = (now - this._lastRefill) / 1000;
     this.tokens = Math.min(this.capacity, this.tokens + elapsed * this.refillRate);
     this._lastRefill = now;
   }
 
-  tryConsume(n = 1) {
+  tryConsume(n = 1): boolean {
     this._refill();
     if (this.tokens >= n) {
       this.tokens -= n;
@@ -413,7 +433,7 @@ export class TokenBucket {
     return false;
   }
 
-  async waitForTokens(n = 1) {
+  async waitForTokens(n = 1): Promise<void> {
     while (!this.tryConsume(n)) {
       const deficit = n - this.tokens;
       const waitMs = Math.max(50, Math.ceil((deficit / this.refillRate) * 1000));
@@ -421,7 +441,7 @@ export class TokenBucket {
     }
   }
 
-  available() {
+  available(): number {
     this._refill();
     return Math.floor(this.tokens);
   }
@@ -429,15 +449,15 @@ export class TokenBucket {
 
 // ── Per-Provider Limiters ───────────────────────────────────────────────────
 
-const _limiters = new Map();
+const _limiters = new Map<string, TokenBucket>();
 
-const DEFAULT_BUCKET_LIMITS = {
-  openai: 60, // 60 req/min
-  anthropic: 50, // 50 req/min
-  google: 300, // 300 req/min
+const DEFAULT_BUCKET_LIMITS: Record<string, number> = {
+  openai: 60,
+  anthropic: 50,
+  google: 300,
 };
 
-export function initRateLimiters(rpsConfig = {}) {
+export function initRateLimiters(rpsConfig: Record<string, number> = {}): void {
   const limits = { ...DEFAULT_BUCKET_LIMITS, ...rpsConfig };
   for (const [provider, rps] of Object.entries(limits)) {
     const perSecond = rps / 60;
@@ -445,30 +465,33 @@ export function initRateLimiters(rpsConfig = {}) {
   }
 }
 
-function _getLimiter(provider) {
+function _getLimiter(provider: string): TokenBucket {
   if (!_limiters.has(provider)) {
-    const rps = DEFAULT_BUCKET_LIMITS[provider] || 60;
+    const rps = DEFAULT_BUCKET_LIMITS[provider] ?? 60;
     const perSecond = rps / 60;
     _limiters.set(provider, new TokenBucket(Math.max(1, Math.ceil(rps / 6)), perSecond));
   }
-  return _limiters.get(provider);
+  return _limiters.get(provider)!;
 }
 
-/**
- * Acquire a rate limit token for a provider. Waits if necessary.
- * @param {string} provider  'openai' | 'anthropic' | 'google'
- */
-export async function acquireRateLimit(provider) {
+/** Acquire a rate limit token for a provider. Waits if necessary. */
+export async function acquireRateLimit(provider: string): Promise<void> {
   const limiter = _getLimiter(provider);
   await limiter.waitForTokens(1);
 }
 
-export function tryAcquireRateLimit(provider) {
+export function tryAcquireRateLimit(provider: string): boolean {
   return _getLimiter(provider).tryConsume(1);
 }
 
-export function getRateLimitStats() {
-  const stats = {};
+interface RateLimitStats {
+  available: number;
+  capacity: number;
+  refillRate: number;
+}
+
+export function getRateLimitStats(): Record<string, RateLimitStats> {
+  const stats: Record<string, RateLimitStats> = {};
   for (const [provider, limiter] of _limiters) {
     stats[provider] = {
       available: limiter.available(),
@@ -479,7 +502,7 @@ export function getRateLimitStats() {
   return stats;
 }
 
-export function resetRateLimiter(provider) {
+export function resetRateLimiter(provider?: string): void {
   if (provider) {
     const limiter = _limiters.get(provider);
     if (limiter) limiter.tokens = limiter.capacity;
@@ -495,11 +518,11 @@ export function resetRateLimiter(provider) {
 let _activeCount = 0;
 let _maxInFlight = 3;
 
-export function initConcurrency(maxInFlight = 3) {
+export function initConcurrency(maxInFlight = 3): void {
   _maxInFlight = maxInFlight;
 }
 
-export async function acquireConcurrencySlot() {
+export async function acquireConcurrencySlot(): Promise<() => void> {
   while (_activeCount >= _maxInFlight) {
     await sleep(250);
   }
@@ -513,7 +536,7 @@ export async function acquireConcurrencySlot() {
   };
 }
 
-export function tryAcquireConcurrencySlot() {
+export function tryAcquireConcurrencySlot(): (() => void) | null {
   if (_activeCount >= _maxInFlight) return null;
   _activeCount++;
   let released = false;
@@ -525,7 +548,7 @@ export function tryAcquireConcurrencySlot() {
   };
 }
 
-export function getConcurrencyStats() {
+export function getConcurrencyStats(): { active: number; maxInFlight: number; utilization: number } {
   return {
     active: _activeCount,
     maxInFlight: _maxInFlight,

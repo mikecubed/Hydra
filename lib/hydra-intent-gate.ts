@@ -8,7 +8,7 @@
  *   2. LLM rewrite — async, only triggered when classifyPrompt confidence is low
  */
 
-import { classifyPrompt } from './hydra-utils.mjs';
+import { classifyPrompt } from './hydra-utils.ts';
 
 // ── Filler phrases stripped from the start of prompts ────────────────────────
 const FILLER_PATTERNS = [

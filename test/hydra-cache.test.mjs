@@ -10,8 +10,7 @@ import {
   isNegativeHit,
   getCacheStats,
   clearAllCaches,
-  pruneExpired,
-} from '../lib/hydra-cache.mjs';
+} from '../lib/hydra-cache.ts';
 
 describe('LRUCache', () => {
   let cache;
@@ -52,7 +51,7 @@ describe('LRUCache', () => {
     cache = new LRUCache({ maxEntries: 10, ttlSec: 0 }); // 0 sec TTL
     cache.set('x', 42, 1); // 1ms TTL
     // Immediately expired
-    const before = cache.get('x');
+    const _before = cache.get('x');
     // Wait briefly
     const start = Date.now();
     while (Date.now() - start < 5) {
