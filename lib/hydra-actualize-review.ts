@@ -1,4 +1,3 @@
-#!/usr/bin/env node
 /**
  * Hydra Actualize Review — review/merge/clean branches created by hydra-actualize.
  *
@@ -58,7 +57,7 @@ async function reviewCommand(projectRoot: string, options: Record<string, string
 
   const reportDir = path.join(projectRoot, 'docs', 'coordination', 'actualize');
   const reportData = loadLatestReport(reportDir, 'ACTUALIZE', dateFilter) as Record<string, unknown> | null;
-  const baseBranch = (reportData?.['baseBranch'] as string | undefined) || 'dev';
+  const baseBranch = (reportData?.['baseBranch'] as string | undefined) ?? 'dev';
 
   const current = getCurrentBranch(projectRoot);
   if (current !== baseBranch) {
@@ -66,7 +65,7 @@ async function reviewCommand(projectRoot: string, options: Record<string, string
     checkoutBranch(projectRoot, baseBranch);
   }
 
-  console.log(pc.bold(`\nActualize Review — ${branches.length} branch(es)\n`));
+  console.log(pc.bold(`\nActualize Review — ${String(branches.length)} branch(es)\n`));
 
   const rl = createRL();
   let merged = 0;

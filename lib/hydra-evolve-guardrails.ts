@@ -1,4 +1,3 @@
-#!/usr/bin/env node
 /**
  * Hydra Evolve Guardrails — Budget tracking, safety rules, and violation scanning
  * for autonomous self-improvement sessions.
@@ -59,16 +58,16 @@ export const BLOCKED_COMMANDS = [...SHARED_BLOCKED_COMMANDS, 'git checkout maste
 
 function getEvolveBudgetConfig() {
   const cfg = loadHydraConfig();
-  const evolve = cfg.evolve || {};
-  const budget = evolve.budget || {};
+  const evolve = cfg.evolve ?? {};
+  const budget = evolve.budget ?? {};
   return {
-    softLimit: budget.softLimit || 600_000,
-    hardLimit: budget.hardLimit || 800_000,
-    perRoundEstimate: budget.perRoundEstimate || 200_000,
-    warnThreshold: budget.warnThreshold || 0.6,
-    reduceScopeThreshold: budget.reduceScopeThreshold || 0.75,
-    softStopThreshold: budget.softStopThreshold || 0.85,
-    hardStopThreshold: budget.hardStopThreshold || 0.95,
+    softLimit: budget.softLimit ?? 600_000,
+    hardLimit: budget.hardLimit ?? 800_000,
+    perRoundEstimate: budget.perRoundEstimate ?? 200_000,
+    warnThreshold: budget.warnThreshold ?? 0.6,
+    reduceScopeThreshold: budget.reduceScopeThreshold ?? 0.75,
+    softStopThreshold: budget.softStopThreshold ?? 0.85,
+    hardStopThreshold: budget.hardStopThreshold ?? 0.95,
   };
 }
 
@@ -116,7 +115,7 @@ export class EvolveBudgetTracker {
   }
 
   /** Record initial token state at start of session. */
-  recordStart() {
+  recordStart(): void {
     const session = getSessionUsage();
     this.startTokens = session.totalTokens || 0;
     this.currentTokens = this.startTokens;

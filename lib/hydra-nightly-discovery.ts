@@ -1,4 +1,3 @@
-#!/usr/bin/env node
 /**
  * Hydra Nightly Discovery — AI-powered task suggestion via agent analysis.
  *
@@ -109,8 +108,8 @@ ${guidelineBlock}`;
 function extractJsonArray(text: string) {
   // Try direct parse first
   try {
-    const parsed = JSON.parse(text);
-    if (Array.isArray(parsed)) return parsed;
+    const parsed = JSON.parse(text) as unknown;
+    if (Array.isArray(parsed)) return parsed as unknown[];
   } catch {
     /* continue */
   }

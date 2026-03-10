@@ -60,6 +60,8 @@ interface EvolveFailure {
   command?: string;
   args?: string[];
   promptSnippet?: string;
+  durationMs?: number;
+  startupFailure?: boolean;
 }
 
 let _investigatorReady = false;
@@ -73,13 +75,13 @@ let config: InvestigatorConfig | null = null;
 function getInvestigatorConfig(): InvestigatorConfig {
   if (config) return config;
   const cfg = loadHydraConfig();
-  const inv = (cfg.evolve?.investigator || {}) as Record<string, unknown>;
+  const inv = (cfg.evolve?.investigator) ?? {};
   config = {
     enabled: inv['enabled'] !== false,
-    model: (inv['model'] as string) || 'gpt-5.2',
-    reasoningEffort: (inv['reasoningEffort'] as string) || 'high',
-    maxAttemptsPerPhase: (inv['maxAttemptsPerPhase'] as number) || 2,
-    phases: (inv['phases'] as string[]) || ['test', 'implement', 'analyze', 'agent'],
+    model: (inv['model'] as string) ?? 'gpt-5.2',
+    reasoningEffort: (inv['reasoningEffort'] as string) ?? 'high',
+    maxAttemptsPerPhase: (inv['maxAttemptsPerPhase'] as number) ?? 2,
+    phases: (inv['phases'] as string[]) ?? ['test', 'implement', 'analyze', 'agent'],
     maxTokensBudget: (inv['maxTokensBudget'] as number) || 50_000,
     tryAlternativeAgent: inv['tryAlternativeAgent'] !== false,
     logToFile: inv['logToFile'] !== false,
@@ -289,7 +291,6 @@ Diagnose this failure and provide a structured recommendation.`;
         model: cfg.model,
         reasoningEffort: cfg.reasoningEffort,
       },
-      undefined,
     ); // No streaming callback — we just want the final result
 
     // Track token usage

@@ -1,4 +1,3 @@
-#!/usr/bin/env node
 /**
  * Hydra Actualize — experimental self-actualization runner.
  *
@@ -55,41 +54,41 @@ import {
   BASE_PROTECTED_PATTERNS,
   BLOCKED_COMMANDS,
 } from './hydra-shared/constants.ts';
-import { scanAllSources, deduplicateTasks, prioritizeTasks } from './hydra-tasks-scanner.ts';
-import { runDiscovery } from './hydra-nightly-discovery.mjs';
+import { scanAllSources, deduplicateTasks, prioritizeTasks, type ScannedTask } from './hydra-tasks-scanner.ts';
+import { runDiscovery } from './hydra-nightly-discovery.ts';
 import { buildSelfSnapshot, formatSelfSnapshotForPrompt } from './hydra-self.mjs';
 import { buildSelfIndex, formatSelfIndexForPrompt } from './hydra-self-index.mjs';
 
 // ── Logging ─────────────────────────────────────────────────────────────────
 
 const log = {
-  info: (msg) => process.stderr.write(`  ${pc.blue('i')} ${msg}\n`),
-  ok: (msg) => process.stderr.write(`  ${pc.green('+')} ${msg}\n`),
-  warn: (msg) => process.stderr.write(`  ${pc.yellow('!')} ${msg}\n`),
-  error: (msg) => process.stderr.write(`  ${pc.red('x')} ${msg}\n`),
-  phase: (name) => process.stderr.write(`\n${pc.bold(pc.magenta(`[${name}]`))}\n`),
-  task: (msg) => process.stderr.write(`\n${pc.bold(pc.cyan('>'))} ${pc.bold(msg)}\n`),
-  dim: (msg) => process.stderr.write(`  ${pc.dim(msg)}\n`),
+  info: (msg: string) => process.stderr.write(`  ${pc.blue('i')} ${msg}\n`),
+  ok: (msg: string) => process.stderr.write(`  ${pc.green('+')} ${msg}\n`),
+  warn: (msg: string) => process.stderr.write(`  ${pc.yellow('!')} ${msg}\n`),
+  error: (msg: string) => process.stderr.write(`  ${pc.red('x')} ${msg}\n`),
+  phase: (name: string) => process.stderr.write(`\n${pc.bold(pc.magenta(`[${name}]`))}\n`),
+  task: (msg: string) => process.stderr.write(`\n${pc.bold(pc.cyan('>'))} ${pc.bold(msg)}\n`),
+  dim: (msg: string) => process.stderr.write(`  ${pc.dim(msg)}\n`),
 };
 
-function formatDuration(ms) {
+function formatDuration(ms: number) {
   const secs = Math.floor(ms / 1000);
-  if (secs < 60) return `${secs}s`;
+  if (secs < 60) return `${String(secs)}s`;
   const mins = Math.floor(secs / 60);
   const remSecs = secs % 60;
-  if (mins < 60) return `${mins}m ${remSecs}s`;
+  if (mins < 60) return `${String(mins)}m ${String(remSecs)}s`;
   const hrs = Math.floor(mins / 60);
   const remMins = mins % 60;
-  return `${hrs}h ${remMins}m`;
+  return `${String(hrs)}h ${String(remMins)}m`;
 }
 
-function askLine(rl, question) {
-  return new Promise((resolve) => {
-    rl.question(question, (answer) => resolve(answer.trim()));
+function askLine(rl: readline.Interface, question: string) {
+  return new Promise<string>((resolve) => {
+    rl.question(question, (answer: string) => { resolve(answer.trim()); });
   });
 }
 
-async function phaseSelect(sortedTasks, maxTasks) {
+async function phaseSelect(sortedTasks: ScannedTask[], maxTasks: number) {
   const rl = readline.createInterface({ input: process.stdin, output: process.stderr });
   try {
     console.log(pc.bold(`\nSelect up to ${maxTasks} task(s) to run:\n`));
@@ -122,7 +121,7 @@ async function phaseSelect(sortedTasks, maxTasks) {
 
 // ── Budget Thresholds ───────────────────────────────────────────────────────
 
-function buildThresholds(budgetCfg) {
+function buildThresholds(budgetCfg: any) {
   return [
     { pct: 0.95, action: 'hard_stop', reason: 'Hard limit reached: {pct}% of budget used' },
     {
@@ -142,7 +141,7 @@ function buildThresholds(budgetCfg) {
 
 // ── Prompt Builder ──────────────────────────────────────────────────────────
 
-function buildTaskPrompt(task, branchName, projectRoot, agent, opts = {}) {
+function buildTaskPrompt(task: ScannedTask, branchName: string, projectRoot: string, agent: string, opts: { selfSnapshotText?: string; selfIndexText?: string } = {}) {
   const instructionFile = getAgentInstructionFile(agent, projectRoot);
 
   const selfSnapshot = opts.selfSnapshotText || '';
@@ -198,7 +197,7 @@ Start working on the task now.`;
 
 // ── Verification ────────────────────────────────────────────────────────────
 
-function runVerification(projectRoot, cfg) {
+function runVerification(projectRoot: string, cfg: any) {
   const plan = resolveVerificationPlan(projectRoot, cfg);
   if (!plan.enabled || !plan.command) {
     return { ran: false, passed: true, command: '', output: '', reason: plan.reason || 'disabled' };
@@ -226,10 +225,10 @@ async function main() {
   // Resolve project (default: Hydra itself)
   let projectConfig;
   try {
-    const projectOpt = options.project || HYDRA_ROOT;
+    const projectOpt = (options['project'] as string | undefined) || HYDRA_ROOT;
     projectConfig = resolveProject({ project: projectOpt });
   } catch (err) {
-    log.error(`Project resolution failed: ${err.message}`);
+    log.error(`Project resolution failed: ${err instanceof Error ? err.message : String(err)}`);
     process.exit(1);
   }
 
@@ -242,9 +241,9 @@ async function main() {
   const baseBranch = String(
     options['base-branch'] || cfg.evolve?.baseBranch || cfg.nightly?.baseBranch || 'dev',
   );
-  const branchPrefix = String(options['branch-prefix'] || 'actualize');
-  const maxTasks = options['max-tasks'] ? Number.parseInt(options['max-tasks'], 10) : 5;
-  const maxHours = options['max-hours'] ? Number.parseFloat(options['max-hours']) : 4;
+  const branchPrefix = String((options['branch-prefix'] as string) || 'actualize');
+  const maxTasks = options['max-tasks'] ? Number.parseInt(options['max-tasks'] as string, 10) : 5;
+  const maxHours = options['max-hours'] ? Number.parseFloat(options['max-hours'] as string) : 4;
   const isDryRun = !!options['dry-run'];
   const isInteractive = !!options['interactive'];
   const noDiscovery = !!options['no-discovery'];
@@ -285,21 +284,21 @@ async function main() {
   log.info(`Scanned ${scanned.length} task(s) from TODO comments / TODO.md / GitHub issues`);
 
   // ── Phase: DISCOVER ──
-  let discovered = [];
+  let discovered: unknown[] = [];
   if (noDiscovery) {
     log.dim('AI discovery: disabled');
   } else {
     log.phase('DISCOVER');
     const discoveryCfg = cfg.nightly?.aiDiscovery || {};
     const discoveryAgent = String(options['discovery-agent'] || discoveryCfg.agent || 'gemini');
-    const focus = options.focus
-      ? String(options.focus)
+    const focus = options['focus']
+      ? String(options['focus'])
           .split(',')
           .map((s) => s.trim())
           .filter(Boolean)
       : discoveryCfg.focus || [];
     const maxSuggestions = options['discover-max']
-      ? Number.parseInt(options['discover-max'], 10)
+      ? Number.parseInt(options['discover-max'] as string, 10)
       : discoveryCfg.maxSuggestions || 6;
 
     const extraContext = [snapshotText, indexText].join('\n\n');
@@ -317,7 +316,7 @@ async function main() {
 
   // Merge + prioritize
   log.phase('PRIORITIZE');
-  const all = [...scanned, ...discovered];
+  const all = [...scanned, ...discovered] as ScannedTask[];
   const deduped = deduplicateTasks(all);
   const sorted = prioritizeTasks(deduped);
   let selected = sorted.slice(0, Math.max(1, maxTasks));
@@ -357,9 +356,9 @@ async function main() {
     perTaskEstimate: 100_000,
   };
   const budget = new BudgetTracker({
-    softLimit: budgetCfg.softLimit,
-    hardLimit: budgetCfg.hardLimit,
-    unitEstimate: budgetCfg.perTaskEstimate,
+    softLimit: budgetCfg.softLimit ?? 0,
+    hardLimit: budgetCfg.hardLimit ?? 0,
+    unitEstimate: budgetCfg.perTaskEstimate ?? 0,
     unitLabel: 'task',
     thresholds: buildThresholds(budgetCfg),
   });
@@ -479,11 +478,11 @@ async function main() {
         },
       });
     } catch (err) {
-      agentResult = { ok: false, output: '', stderr: '', error: err.message, durationMs: 0 };
+      agentResult = { ok: false, output: '', stderr: '', error: err instanceof Error ? err.message : String(err), durationMs: 0 };
     }
     process.stderr.write(`\r${' '.repeat(100)}\r`);
 
-    if (agentResult.ok) recordCallComplete(handle, agentResult);
+    if (agentResult.ok) recordCallComplete(handle, agentResult as any);
     else recordCallError(handle, new Error(agentResult.error || 'unknown'));
 
     const taskDurationMs = agentResult.durationMs || 0;
@@ -574,7 +573,7 @@ async function main() {
   };
 
   const budgetSummary = budget.getSummary();
-  if (stopReason) budgetSummary.stopReason = stopReason;
+  if (stopReason) budgetSummary['stopReason'] = stopReason;
 
   const jsonReport = {
     ...runMeta,
@@ -605,10 +604,10 @@ async function main() {
   md.push('');
   md.push('## Budget');
   md.push(
-    `- Consumed: ${budgetSummary.consumed?.toLocaleString?.() || budgetSummary.consumed} of ${budgetSummary.hardLimit?.toLocaleString?.() || budgetSummary.hardLimit}`,
+    `- Consumed: ${budgetSummary['consumed']?.toLocaleString?.() || budgetSummary['consumed']} of ${budgetSummary['hardLimit']?.toLocaleString?.() || budgetSummary['hardLimit']}`,
   );
   md.push(
-    `- Avg per task: ${(budgetSummary.avgPerTask || 0).toLocaleString?.() || budgetSummary.avgPerTask}`,
+    `- Avg per task: ${(budgetSummary['avgPerTask'] || 0).toLocaleString?.() || budgetSummary['avgPerTask']}`,
   );
   md.push('');
   md.push('## Next');

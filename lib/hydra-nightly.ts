@@ -1,4 +1,3 @@
-#!/usr/bin/env node
 /**
  * Hydra Nightly Runner — Autonomous, config-driven task execution pipeline.
  *
@@ -37,7 +36,7 @@ import { recordCallStart, recordCallComplete, recordCallError } from './hydra-me
 import { getAgentInstructionFile } from './hydra-sync-md.ts';
 import { BudgetTracker } from './hydra-shared/budget-tracker.ts';
 import { executeAgentWithRecovery } from './hydra-shared/agent-executor.ts';
-import { compactProgressBar, AGENT_COLORS, AGENT_ICONS } from './hydra-ui.ts';
+import { compactProgressBar, AGENT_COLORS, AGENT_ICONS as _AGENT_ICONS } from './hydra-ui.ts';
 import {
   buildSafetyPrompt,
   verifyBranch,
@@ -62,38 +61,39 @@ import {
   createUserTask,
   deduplicateTasks,
   prioritizeTasks,
-  taskToSlug,
+  taskToSlug as _taskToSlug,
+  type ScannedTask,
 } from './hydra-tasks-scanner.ts';
-import { runDiscovery } from './hydra-nightly-discovery.mjs';
+import { runDiscovery } from './hydra-nightly-discovery.ts';
 
 // ── Logging ─────────────────────────────────────────────────────────────────
 
 const log = {
-  info: (msg) => process.stderr.write(`  ${pc.blue('i')} ${msg}\n`),
-  ok: (msg) => process.stderr.write(`  ${pc.green('+')} ${msg}\n`),
-  warn: (msg) => process.stderr.write(`  ${pc.yellow('!')} ${msg}\n`),
-  error: (msg) => process.stderr.write(`  ${pc.red('x')} ${msg}\n`),
-  task: (msg) => process.stderr.write(`\n${pc.bold(pc.cyan('>'))} ${pc.bold(msg)}\n`),
-  dim: (msg) => process.stderr.write(`  ${pc.dim(msg)}\n`),
-  phase: (name) => process.stderr.write(`\n${pc.bold(pc.magenta(`[${name}]`))}\n`),
+  info: (msg: string) => process.stderr.write(`  ${pc.blue('i')} ${msg}\n`),
+  ok: (msg: string) => process.stderr.write(`  ${pc.green('+')} ${msg}\n`),
+  warn: (msg: string) => process.stderr.write(`  ${pc.yellow('!')} ${msg}\n`),
+  error: (msg: string) => process.stderr.write(`  ${pc.red('x')} ${msg}\n`),
+  task: (msg: string) => process.stderr.write(`\n${pc.bold(pc.cyan('>'))} ${pc.bold(msg)}\n`),
+  dim: (msg: string) => process.stderr.write(`  ${pc.dim(msg)}\n`),
+  phase: (name: string) => process.stderr.write(`\n${pc.bold(pc.magenta(`[${name}]`))}\n`),
 };
 
 // ── Helpers ─────────────────────────────────────────────────────────────────
 
-function formatDuration(ms) {
+function formatDuration(ms: number) {
   const secs = Math.floor(ms / 1000);
-  if (secs < 60) return `${secs}s`;
+  if (secs < 60) return `${String(secs)}s`;
   const mins = Math.floor(secs / 60);
   const remSecs = secs % 60;
-  if (mins < 60) return `${mins}m ${remSecs}s`;
+  if (mins < 60) return `${String(mins)}m ${String(remSecs)}s`;
   const hrs = Math.floor(mins / 60);
   const remMins = mins % 60;
-  return `${hrs}h ${remMins}m`;
+  return `${String(hrs)}h ${String(remMins)}m`;
 }
 
 // ── Budget Thresholds ───────────────────────────────────────────────────────
 
-function buildThresholds(budgetCfg) {
+function buildThresholds(budgetCfg: Record<string, unknown>) {
   return [
     { pct: 0.95, action: 'hard_stop', reason: 'Hard limit reached: {pct}% of budget used' },
     {
@@ -102,7 +102,7 @@ function buildThresholds(budgetCfg) {
       reason: 'Soft limit reached: {pct}% budget ({consumed} tokens)',
     },
     {
-      pct: budgetCfg.handoffThreshold || 0.7,
+      pct: (budgetCfg['handoffThreshold'] as number | undefined) ?? 0.7,
       action: 'handoff',
       reason: '{pct}% budget — handing remaining tasks to handoff agent',
       once: true,
@@ -113,7 +113,7 @@ function buildThresholds(budgetCfg) {
 
 // ── Prompt Builder ──────────────────────────────────────────────────────────
 
-function buildTaskPrompt(task, branchName, projectRoot, agent, opts = {}) {
+function buildTaskPrompt(task: ScannedTask, branchName: string, projectRoot: string, agent: string, opts: { isHandoff?: boolean } = {}) {
   const instructionFile = getAgentInstructionFile(agent, projectRoot);
   const safetyBlock = buildSafetyPrompt(branchName, {
     runner: 'nightly runner',
@@ -155,7 +155,7 @@ Start working on the task now.`;
 
 // ── Verification ────────────────────────────────────────────────────────────
 
-function runVerification(projectRoot) {
+function runVerification(projectRoot: string) {
   const plan = resolveVerificationPlan(projectRoot);
   if (!plan.enabled) {
     return { ran: false, passed: true, command: '', output: '' };
@@ -175,7 +175,7 @@ function runVerification(projectRoot) {
 
 // ── Investigator (lazy-load) ────────────────────────────────────────────────
 
-let _investigator = null;
+let _investigator: unknown = null;
 async function getInvestigator() {
   if (_investigator) return _investigator;
   try {
@@ -188,7 +188,7 @@ async function getInvestigator() {
 
 // ── Report Generation ───────────────────────────────────────────────────────
 
-function generateReportJSON(results, budgetSummary, runMeta) {
+function generateReportJSON(results: any[], budgetSummary: any, runMeta: any) {
   return {
     ...runMeta,
     budget: budgetSummary,
@@ -210,7 +210,7 @@ function generateReportJSON(results, budgetSummary, runMeta) {
   };
 }
 
-function generateReportMd(results, budgetSummary, runMeta) {
+function generateReportMd(results: any[], budgetSummary: any, runMeta: any) {
   const {
     startedAt,
     finishedAt,
@@ -228,7 +228,7 @@ function generateReportMd(results, budgetSummary, runMeta) {
   const tokensStr = `~${budgetSummary.consumed.toLocaleString()}`;
 
   const sourceSummary = Object.entries(sources || {})
-    .filter(([, v]) => v > 0)
+    .filter(([, v]) => (v as number) > 0)
     .map(([k, v]) => `${k}: ${v}`)
     .join(', ');
 
@@ -293,10 +293,10 @@ function generateReportMd(results, budgetSummary, runMeta) {
 
 // ── Phase 1: SCAN ───────────────────────────────────────────────────────────
 
-function phaseScan(projectRoot, cfg) {
+function phaseScan(projectRoot: string, cfg: any) {
   log.phase('SCAN');
   const sources = cfg.nightly.sources;
-  const sourceCounts = {};
+  const sourceCounts: Record<string, number> = {};
 
   // Multi-source scan via tasks-scanner
   const scanned = scanAllSources(projectRoot, {
@@ -330,7 +330,7 @@ function phaseScan(projectRoot, cfg) {
 
 // ── Phase 2: DISCOVER ───────────────────────────────────────────────────────
 
-async function phaseDiscover(projectRoot, existingTasks, cfg) {
+async function phaseDiscover(projectRoot: string, existingTasks: ScannedTask[], cfg: any) {
   if (!cfg.nightly.sources.aiDiscovery) {
     log.dim('AI discovery: disabled');
     return [];
@@ -352,7 +352,7 @@ async function phaseDiscover(projectRoot, existingTasks, cfg) {
 
 // ── Phase 3: PRIORITIZE ─────────────────────────────────────────────────────
 
-function phasePrioritize(allTasks, maxTasks) {
+function phasePrioritize(allTasks: ScannedTask[], maxTasks: number) {
   log.phase('PRIORITIZE');
   const deduped = deduplicateTasks(allTasks);
   const sorted = prioritizeTasks(deduped);
@@ -371,18 +371,18 @@ function phasePrioritize(allTasks, maxTasks) {
 
 const SOURCE_ORDER = ['todo-md', 'todo-comment', 'github-issue', 'config', 'ai-discovery'];
 
-function sourceRank(source) {
+function sourceRank(source: string) {
   const idx = SOURCE_ORDER.indexOf(source);
   return idx >= 0 ? idx : SOURCE_ORDER.length;
 }
 
-function askLine(rl, question) {
-  return new Promise((resolve) => {
-    rl.question(question, (answer) => resolve(answer.trim()));
+function askLine(rl: readline.Interface, question: string) {
+  return new Promise<string>((resolve) => {
+    rl.question(question, (answer: string) => { resolve(answer.trim()); });
   });
 }
 
-async function phaseSelect(sortedTasks, maxTasks) {
+async function phaseSelect(sortedTasks: ScannedTask[], maxTasks: number) {
   log.phase('SELECT');
 
   if (sortedTasks.length === 0) {
@@ -524,7 +524,7 @@ async function phaseSelect(sortedTasks, maxTasks) {
     return selected;
   } catch (err) {
     rl.close();
-    log.error(`Selection error: ${err.message}`);
+    log.error(`Selection error: ${err instanceof Error ? err.message : String(err)}`);
     return null;
   }
 }
@@ -541,16 +541,16 @@ const STATUS_ICONS = {
   partial: pc.yellow('[~]'),
 };
 
-function getAgentColor(agent) {
-  return AGENT_COLORS[agent] || pc.white;
+function getAgentColor(agent: string) {
+  return (AGENT_COLORS as Record<string, (str: string) => string>)[agent] || pc.white;
 }
 
-function truncate(str, maxLen) {
+function truncate(str: string, maxLen: number) {
   if (str.length <= maxLen) return str;
   return `${str.slice(0, maxLen - 1)}\u2026`;
 }
 
-function renderProgress(tasks, results, budget, startedAt, maxHoursMs, currentIdx) {
+function renderProgress(tasks: ScannedTask[], results: any[], budget: BudgetTracker, startedAt: number, maxHoursMs: number, currentIdx: number) {
   const lines = [];
   const elapsed = Date.now() - startedAt;
   const elapsedStr = formatDuration(elapsed);
@@ -567,7 +567,7 @@ function renderProgress(tasks, results, budget, startedAt, maxHoursMs, currentId
 
     if (r) {
       // Completed task
-      const icon = STATUS_ICONS[r.status] || STATUS_ICONS.pending;
+      const icon = (STATUS_ICONS as Record<string, string>)[r.status] || STATUS_ICONS.pending;
       const dur = formatDuration(r.durationMs);
       const tok = r.tokensUsed > 0 ? `~${(r.tokensUsed / 1000).toFixed(0)}K tok` : '';
       lines.push(
@@ -588,7 +588,7 @@ function renderProgress(tasks, results, budget, startedAt, maxHoursMs, currentId
 
   // Budget gauge
   const summary = budget.getSummary();
-  const pct = summary.hardLimit > 0 ? (summary.consumed / summary.hardLimit) * 100 : 0;
+  const pct = (summary['hardLimit'] as number) > 0 ? ((summary['consumed'] as number) / (summary['hardLimit'] as number)) * 100 : 0;
   const gauge = compactProgressBar(pct, 15);
   const remaining = tasks.length - results.length;
   const remainStr = remaining > 0 ? `  Remaining: ~${remaining} tasks` : '';
@@ -602,7 +602,7 @@ function renderProgress(tasks, results, budget, startedAt, maxHoursMs, currentId
 
 // ── Phase 4: EXECUTE ────────────────────────────────────────────────────────
 
-async function phaseExecute(tasks, projectRoot, cfg, startedAt) {
+async function phaseExecute(tasks: ScannedTask[], projectRoot: string, cfg: any, startedAt: number) {
   log.phase('EXECUTE');
 
   const nightlyCfg = cfg.nightly;
@@ -624,7 +624,7 @@ async function phaseExecute(tasks, projectRoot, cfg, startedAt) {
   budget.recordStart();
   log.info(`Budget: ${budget.hardLimit.toLocaleString()} token hard limit`);
 
-  const results = [];
+  const results: any[] = [];
   let stopReason = null;
   let useHandoff = false;
 
@@ -667,7 +667,7 @@ async function phaseExecute(tasks, projectRoot, cfg, startedAt) {
       log.warn(budgetCheck.reason);
     }
 
-    if (!budgetCheck.canFitNextTask && i > 0) {
+    if (!budgetCheck['canFitNextTask'] && i > 0) {
       stopReason = 'predicted budget exceeded';
       log.warn(`Predicted next task would exceed remaining budget. Stopping.`);
       break;
@@ -764,7 +764,7 @@ async function phaseExecute(tasks, projectRoot, cfg, startedAt) {
       if (inv) {
         try {
           log.dim('Investigating failure...');
-          const diagnosis = await inv.investigate({
+          const diagnosis = await (inv as any).investigate({
             agent,
             prompt,
             error: agentResult.error || agentResult.stderr || '',
@@ -784,7 +784,7 @@ async function phaseExecute(tasks, projectRoot, cfg, startedAt) {
             });
           }
         } catch (invErr) {
-          log.dim(`Investigator error: ${invErr.message}`);
+          log.dim(`Investigator error: ${invErr instanceof Error ? invErr.message : String(invErr)}`);
         }
       }
     }
@@ -812,13 +812,13 @@ async function phaseExecute(tasks, projectRoot, cfg, startedAt) {
               timedOut: agentResult.timedOut || false,
               taskTitle: task.title,
               branchName,
-            });
+            } as any);
         })
         .catch(() => {});
     }
 
     if (agentResult.ok) {
-      recordCallComplete(handle, agentResult);
+      recordCallComplete(handle, agentResult as any);
     } else {
       recordCallError(handle, new Error(agentResult.error || 'unknown'));
     }
@@ -912,7 +912,7 @@ async function phaseExecute(tasks, projectRoot, cfg, startedAt) {
 
 // ── Phase 5: REPORT ─────────────────────────────────────────────────────────
 
-function phaseReport(results, budget, runMeta, coordDir) {
+function phaseReport(results: any[], budget: any, runMeta: any, coordDir: string) {
   log.phase('REPORT');
 
   const nightlyDir = path.join(coordDir, 'nightly');
@@ -945,9 +945,9 @@ async function main() {
   // Resolve project
   let projectConfig;
   try {
-    projectConfig = resolveProject({ project: options.project });
+    projectConfig = resolveProject({ project: options['project'] as string | undefined });
   } catch (err) {
-    log.error(`Project resolution failed: ${err.message}`);
+    log.error(`Project resolution failed: ${err instanceof Error ? err.message : String(err)}`);
     process.exit(1);
   }
 
@@ -960,12 +960,16 @@ async function main() {
   // Load config
   const cfg = loadHydraConfig();
   const nightlyCfg = cfg.nightly;
+  if (!nightlyCfg) {
+    log.error('Nightly config not found in hydra.config.json');
+    process.exit(1);
+  }
   const baseBranch = nightlyCfg.baseBranch;
 
   // Apply CLI overrides
-  if (options['max-tasks']) nightlyCfg.maxTasks = Number.parseInt(options['max-tasks'], 10);
-  if (options['max-hours']) nightlyCfg.maxHours = Number.parseFloat(options['max-hours']);
-  if (options['no-discovery']) nightlyCfg.sources.aiDiscovery = false;
+  if (options['max-tasks']) nightlyCfg.maxTasks = Number.parseInt(options['max-tasks'] as string, 10);
+  if (options['max-hours']) nightlyCfg.maxHours = Number.parseFloat(options['max-hours'] as string);
+  if (options['no-discovery'] && nightlyCfg.sources) nightlyCfg.sources['aiDiscovery'] = false;
 
   const isDryRun = !!options['dry-run'];
 
@@ -988,7 +992,7 @@ async function main() {
 
   // Phase 2: DISCOVER
   const discoveredTasks = await phaseDiscover(projectRoot, scannedTasks, cfg);
-  const allTasks = [...scannedTasks, ...discoveredTasks];
+  const allTasks = [...scannedTasks, ...discoveredTasks] as ScannedTask[];
   if (discoveredTasks.length > 0) {
     sourceCounts['ai-discovery'] = discoveredTasks.length;
   }
@@ -1004,14 +1008,14 @@ async function main() {
     const sorted = prioritizeTasks(deduped);
     log.info(`${allTasks.length} total -> ${deduped.length} unique -> interactive selection`);
 
-    const userSelected = await phaseSelect(sorted, nightlyCfg.maxTasks);
+    const userSelected = await phaseSelect(sorted, nightlyCfg.maxTasks ?? 5);
     if (!userSelected || userSelected.length === 0) {
       log.warn('Cancelled.');
       process.exit(0);
     }
     selectedTasks = userSelected;
   } else {
-    selectedTasks = phasePrioritize(allTasks, nightlyCfg.maxTasks);
+    selectedTasks = phasePrioritize(allTasks, nightlyCfg.maxTasks ?? 5);
   }
 
   if (selectedTasks.length === 0) {

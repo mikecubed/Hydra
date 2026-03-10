@@ -18,6 +18,7 @@
 
 import fs from 'node:fs';
 import path from 'node:path';
+// @ts-expect-error — cross-spawn has no bundled types; pre-existing across codebase
 import spawnRaw from 'cross-spawn';
 import { classifyTask, bestAgentFor } from './hydra-agents.ts';
 import { classifyPrompt } from './hydra-utils.ts';
@@ -103,8 +104,8 @@ function buildTask(
   body: string | null = null,
   issueNumber: number | null = null,
 ): ScannedTask {
-  const taskType = classifyTask(title) as string;
-  const agent = bestAgentFor(taskType) as string;
+  const taskType = classifyTask(title);
+  const agent = bestAgentFor(taskType);
   const { tier } = classifyPrompt(title) as { tier: string };
   const priority = classifyPriority(title);
 

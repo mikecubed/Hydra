@@ -1,4 +1,3 @@
-#!/usr/bin/env node
 /**
  * Hydra Tasks Runner — Scan codebase for work items and execute them autonomously.
  *
@@ -76,10 +75,11 @@ interface InvestigatorLike {
 // Lazy-load investigator (optional)
 let _investigator: InvestigatorLike | null = null;
 async function getInvestigator(): Promise<InvestigatorLike | null> {
-  if (_investigator) return _investigator;
+  if (_investigator !== null) return _investigator;
   try {
-    _investigator = (await import('./hydra-investigator.mjs')) as unknown as InvestigatorLike;
-    return _investigator;
+    const mod = (await import('./hydra-investigator.mjs')) as unknown as InvestigatorLike;
+    _investigator = mod;
+    return mod;
   } catch {
     return null;
   }
@@ -147,7 +147,7 @@ function createRL() {
 
 function askLine(rl: readline.Interface, question: string) {
   return new Promise<string>((resolve) => {
-    rl.question(question, (answer: string) => resolve(answer.trim()));
+    rl.question(question, (answer: string) => { resolve(answer.trim()); });
   });
 }
 
@@ -296,7 +296,7 @@ ${truncatedDiff}
 
 Then explain your reasoning briefly.`;
 
-  const handle = recordCallStart(verifier, undefined);
+  const handle = recordCallStart(verifier);
   const result = await executeAgentWithRecovery(verifier, reviewPrompt, {
     cwd: projectRoot,
     timeoutMs: 5 * 60 * 1000,
@@ -409,7 +409,7 @@ Focus on:
 
 Be concise — this is a planning checklist, not a design doc.`;
 
-      const planHandle = recordCallStart('claude', undefined);
+      const planHandle = recordCallStart('claude');
       const planResult = await executeAgentWithRecovery('claude', planPrompt, {
         cwd: projectRoot,
         timeoutMs: 3 * 60 * 1000,
@@ -459,7 +459,7 @@ ${planSection}
 Read ${instructionFile} for project conventions.`;
 
     const timeoutMs = cfg.tasks?.perTaskTimeoutMs || 15 * 60 * 1000;
-    const execHandle = recordCallStart(task.suggestedAgent, undefined);
+    const execHandle = recordCallStart(task.suggestedAgent);
     const execResult = await executeAgentWithRecovery(task.suggestedAgent, executePrompt, {
       cwd: projectRoot,
       timeoutMs,
@@ -510,7 +510,7 @@ Read ${instructionFile} for project conventions.`;
               hubAgent: `${task.suggestedAgent}-forge`,
             });
             recordCallComplete(
-              recordCallStart(task.suggestedAgent, undefined),
+              recordCallStart(task.suggestedAgent),
               retryResult as unknown as Parameters<typeof recordCallComplete>[1],
             );
 
@@ -534,7 +534,7 @@ Read ${instructionFile} for project conventions.`;
               },
             );
             recordCallComplete(
-              recordCallStart(task.suggestedAgent, undefined),
+              recordCallStart(task.suggestedAgent),
               retryResult as unknown as Parameters<typeof recordCallComplete>[1],
             );
 

@@ -1,4 +1,3 @@
-#!/usr/bin/env node
 /**
  * Hydra Evolve Suggestions — Persistent backlog of improvement ideas.
  *
@@ -98,7 +97,7 @@ export function loadSuggestions(evolveDir: string): Suggestions {
   const filePath = suggestionsPath(evolveDir);
   try {
     const raw = fs.readFileSync(filePath, 'utf8');
-    const parsed = JSON.parse(raw);
+    const parsed = JSON.parse(raw) as Record<string, unknown>;
     if (!parsed.entries || !Array.isArray(parsed.entries)) {
       return { ...EMPTY_SUGGESTIONS, entries: [], stats: { ...EMPTY_SUGGESTIONS.stats } };
     }
@@ -114,7 +113,7 @@ export function loadSuggestions(evolveDir: string): Suggestions {
  * @param {string} evolveDir - Path to docs/coordination/evolve/
  * @param {object} sg - Suggestions object
  */
-export function saveSuggestions(evolveDir: string, sg: Suggestions) {
+export function saveSuggestions(evolveDir: string, sg: Suggestions): void {
   ensureDir(evolveDir);
   sg.stats = computeStats(sg.entries);
   const filePath = suggestionsPath(evolveDir);
@@ -380,7 +379,7 @@ function createRL() {
  */
 function askRaw(rl: ReturnType<typeof import('node:readline').createInterface>, question: string): Promise<string> {
   return new Promise((resolve) => {
-    rl.question(question, (answer: string) => resolve(answer.trim()));
+    rl.question(question, (answer: string) => { resolve(answer.trim()); });
   });
 }
 

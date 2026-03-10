@@ -1,4 +1,3 @@
-#!/usr/bin/env node
 /**
  * Hydra Nightly Review — Morning review, interactive merge, and cleanup.
  *
@@ -66,7 +65,7 @@ async function reviewCommand(projectRoot: string, options: Record<string, string
   // Load the latest nightly report to determine baseBranch
   const nightlyDir = path.join(projectRoot, 'docs', 'coordination', 'nightly');
   const reportData = loadLatestReport(nightlyDir, 'NIGHTLY', dateFilter) as Record<string, unknown> | null;
-  const baseBranch = (reportData?.['baseBranch'] as string | undefined) || 'dev';
+  const baseBranch = (reportData?.['baseBranch'] as string | undefined) ?? 'dev';
 
   // Ensure we're on baseBranch
   const current = getCurrentBranch(projectRoot);
@@ -75,7 +74,7 @@ async function reviewCommand(projectRoot: string, options: Record<string, string
     checkoutBranch(projectRoot, baseBranch);
   }
 
-  console.log(pc.bold(`\nNightly Review — ${branches.length} branch(es)\n`));
+  console.log(pc.bold(`\nNightly Review — ${String(branches.length)} branch(es)\n`));
 
   const rl = createRL();
   let merged = 0;

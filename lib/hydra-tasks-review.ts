@@ -1,4 +1,3 @@
-#!/usr/bin/env node
 /**
  * Hydra Tasks Review — Post-run interactive review, status, and cleanup.
  *
@@ -63,7 +62,7 @@ async function reviewCommand(projectRoot: string, options: Record<string, string
     checkoutBranch(projectRoot, BASE_BRANCH);
   }
 
-  console.log(pc.bold(`\nTasks Review — ${branches.length} branch(es)\n`));
+  console.log(pc.bold(`\nTasks Review — ${String(branches.length)} branch(es)\n`));
 
   // Load the latest report if available
   const reportDir = path.join(projectRoot, 'docs', 'coordination', 'tasks');
@@ -74,7 +73,7 @@ async function reviewCommand(projectRoot: string, options: Record<string, string
   let skipped = 0;
 
   for (const branch of branches) {
-    const reportEntry = (reportData?.['results'] as any[] | undefined)?.find((r: Record<string, unknown>) => r['branch'] === branch);
+    const reportEntry = (reportData?.['results'] as Record<string, unknown>[] | undefined)?.find((r: Record<string, unknown>) => r['branch'] === branch);
 
     console.log(pc.bold(pc.cyan(`\n── ${branch} ──`)));
 

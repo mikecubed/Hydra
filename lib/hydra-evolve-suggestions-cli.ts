@@ -1,4 +1,3 @@
-#!/usr/bin/env node
 /**
  * Hydra Evolve Suggestions CLI — Manage the improvement suggestions backlog.
  *
@@ -36,7 +35,7 @@ import {
   searchSuggestions,
   getSuggestionStats,
 } from './hydra-evolve-suggestions.ts';
-import { SuggestionEntry } from './hydra-evolve-suggestions.ts';
+import { type SuggestionEntry } from './hydra-evolve-suggestions.ts';
 import pc from 'picocolors';
 
 // ── Helpers ─────────────────────────────────────────────────────────────────
@@ -46,28 +45,23 @@ function createRL() {
 }
 
 function askQuestion(rl: ReturnType<typeof readline.createInterface>, question: string): Promise<string> {
-  return new Promise((resolve) => rl.question(question, (answer: string) => resolve(answer.trim())));
+  return new Promise((resolve) => { rl.question(question, (answer: string) => { resolve(answer.trim()); }); });
 }
 
 function formatEntry(s: SuggestionEntry) {
-  const statusColor =
-    s.status === 'pending'
-      ? pc.cyan
-      : s.status === 'completed'
-        ? pc.green
-        : s.status === 'rejected'
-          ? pc.red
-          : s.status === 'exploring'
-            ? pc.yellow
-            : pc.dim;
-  const priorityBadge =
-    s.priority === 'high'
-      ? pc.red('HIGH')
-      : s.priority === 'low'
-        ? pc.dim('low')
-        : pc.yellow('med');
+  let statusColor: (s: string) => string;
+  if (s.status === 'pending') statusColor = pc.cyan;
+  else if (s.status === 'completed') statusColor = pc.green;
+  else if (s.status === 'rejected') statusColor = pc.red;
+  else if (s.status === 'exploring') statusColor = pc.yellow;
+  else statusColor = pc.dim;
 
-  console.log(`  ${statusColor(s.id)} ${pc.yellow(s.area)}: ${(s.title || '').slice(0, 80)}`);
+  let priorityBadge: string;
+  if (s.priority === 'high') priorityBadge = pc.red('HIGH');
+  else if (s.priority === 'low') priorityBadge = pc.dim('low');
+  else priorityBadge = pc.yellow('med');
+
+  console.log(`  ${statusColor(s.id)} ${pc.yellow(s.area)}: ${(s.title ?? '').slice(0, 80)}`);
 
   const parts = [`status: ${statusColor(s.status)}`, `priority: ${priorityBadge}`];
   if ((s.attempts ?? 0) > 0) {
@@ -133,7 +127,7 @@ async function addCommand(evolveDir: string, options: Record<string, string | bo
   // Interactive mode if title not provided
   if (!title) {
     const cfg = loadHydraConfig();
-    const focusAreas = (cfg.evolve?.focusAreas as string[] | undefined) || [];
+    const focusAreas = (cfg.evolve?.focusAreas) || [];
 
     const rl = createRL();
     try {

@@ -1,4 +1,3 @@
-#!/usr/bin/env node
 /**
  * Hydra Evolve Review — Post-session review, merge, cleanup, and knowledge browsing.
  *
@@ -54,7 +53,7 @@ import pc from 'picocolors';
 
 async function reviewCommand(projectRoot: string, options: Record<string, string | boolean>) {
   const cfg = loadHydraConfig();
-  const baseBranch = cfg.evolve?.baseBranch || 'dev';
+  const baseBranch = cfg.evolve?.baseBranch ?? 'dev';
   const dateFilter = (options['date'] as string) || null;
   const branches = listBranches(projectRoot, 'evolve', dateFilter);
 
@@ -71,7 +70,7 @@ async function reviewCommand(projectRoot: string, options: Record<string, string
     checkoutBranch(projectRoot, baseBranch);
   }
 
-  console.log(pc.bold(`\nEvolve Review — ${branches.length} branch(es)\n`));
+  console.log(pc.bold(`\nEvolve Review — ${String(branches.length)} branch(es)\n`));
 
   // Load latest decision data
   const evolveDir = path.join(projectRoot, 'docs', 'coordination', 'evolve');
@@ -182,7 +181,7 @@ function loadSessionState(evolveDir: string) {
 
 function statusCommand(projectRoot: string, options: Record<string, string | boolean>) {
   const cfg = loadHydraConfig();
-  const baseBranch = cfg.evolve?.baseBranch || 'dev';
+  const baseBranch = cfg.evolve?.baseBranch ?? 'dev';
   const dateFilter = (options['date'] as string) || null;
   const branches = listBranches(projectRoot, 'evolve', dateFilter);
   const evolveDir = path.join(projectRoot, 'docs', 'coordination', 'evolve');
@@ -309,7 +308,7 @@ function statusCommand(projectRoot: string, options: Record<string, string | boo
 
 function cleanCommand(projectRoot: string, options: Record<string, string | boolean>) {
   const cfg = loadHydraConfig();
-  const baseBranch = cfg.evolve?.baseBranch || 'dev';
+  const baseBranch = cfg.evolve?.baseBranch ?? 'dev';
   cleanBranches(projectRoot, 'evolve', baseBranch, (options['date'] as string) || null);
 }
 

@@ -1,4 +1,3 @@
-#!/usr/bin/env node
 /**
  * Hydra Evolve — Autonomous self-improvement runner.
  *
@@ -177,9 +176,9 @@ const log = {
 // ── Doctor (lazy, fire-and-forget) ───────────────────────────────────────────
 
 function notifyDoctor(failure: unknown) {
-  import('./hydra-doctor.mjs')
+  void import('./hydra-doctor.mjs')
     .then((doc) => {
-      if (doc.isDoctorEnabled()) doc.diagnose(failure as any);
+      if (doc.isDoctorEnabled()) void doc.diagnose(failure as any);
     })
     .catch(() => {});
 }
@@ -504,7 +503,7 @@ async function executeAgentWithRetry(agent: string, prompt: string, opts: Execut
   const rlCheck = detectRateLimitError(agent, result as unknown as Record<string, unknown>);
   if (rlCheck.isRateLimit) {
     const cfg = loadHydraConfig();
-    const rlCfg = (cfg.rateLimits || {}) as Record<string, unknown>;
+    const rlCfg = (cfg.rateLimits || {});
     const maxRetries = (rlCfg['maxRetries'] as number | undefined) ?? 3;
     const baseDelayMs = (rlCfg['baseDelayMs'] as number | undefined) ?? 5000;
     const maxDelayMs = (rlCfg['maxDelayMs'] as number | undefined) ?? 60_000;
@@ -646,8 +645,8 @@ async function executeAgentWithRetry(agent: string, prompt: string, opts: Execut
       errorContext: result.errorContext ?? undefined,
       context: `Phase: ${opts.phaseLabel || 'unknown'}`,
       attemptNumber: 1,
-      ...(result.durationMs != null ? { durationMs: result.durationMs } : {}),
-      ...(result.startupFailure != null ? { startupFailure: result.startupFailure } : {}),
+      ...(result.durationMs == null ? {} : { durationMs: result.durationMs }),
+      ...(result.startupFailure == null ? {} : { startupFailure: result.startupFailure }),
     } as Parameters<typeof investigate>[0]);
 
     log.dim(`Investigation: ${diagnosis.diagnosis} — ${diagnosis.explanation}`);
@@ -1348,7 +1347,7 @@ Respond with JSON:
     timeoutMs: timeouts.planTimeoutMs,
     phaseLabel: 'plan: spec',
   });
-  const planData = (parseJsonLoose(extractOutput(planResult.output)) as unknown) as {
+  const planData = (parseJsonLoose(extractOutput(planResult.output))) as {
     objectives?: string[];
     constraints?: string[];
     acceptanceCriteria?: string[];
@@ -1681,7 +1680,7 @@ function phaseDecide(analysis: {aggregateScore: number; aggregateConfidence?: nu
   const verdictParts: string[] = [];
   for (const agent of ['claude', 'gemini', 'codex']) {
     const v = agentVerdicts?.[agent];
-    const s = ((agentScores as Record<string, unknown>)[agent] as Record<string, unknown> | null)?.['quality'] as number | undefined;
+    const s = ((agentScores)[agent] as Record<string, unknown> | null)?.['quality'] as number | undefined;
     if (v || s != null) {
       verdictParts.push(`${agent[0].toUpperCase() + agent.slice(1)}: ${v || '?'}(${s ?? '?'})`);
     }
@@ -2125,8 +2124,8 @@ async function main() {
         activeSuggestion = addSuggestion(suggestions, {
           source: 'user:manual',
           area: focusAreas[0] || 'general',
-          title: (pick.text as string).slice(0, 100),
-          description: pick.text as string,
+          title: (pick.text).slice(0, 100),
+          description: pick.text,
           priority: 'high',
           tags: ['user-submitted'],
         });
@@ -2145,7 +2144,7 @@ async function main() {
     const existingSugId = existingState?.activeSuggestionId || checkpoint?.activeSuggestionId;
     if (existingSugId) {
       activeSuggestion = getSuggestionById(suggestions, existingSugId);
-      if (activeSuggestion && activeSuggestion.status === 'exploring') {
+      if (activeSuggestion?.status === 'exploring') {
         activeSuggestionId = existingSugId;
         log.dim(`Resumed with suggestion: ${(activeSuggestion.title ?? '').slice(0, 80)}`);
       } else {
@@ -2238,7 +2237,7 @@ async function main() {
     const usingSuggestion = activeSuggestion && round === startRound;
 
     if (usingSuggestion) {
-      area = activeSuggestion!.area || focusAreas[0] || 'general';
+      area = activeSuggestion.area || focusAreas[0] || 'general';
     } else {
       const areaIndex = (round - 1) % focusAreas.length;
       area = focusAreas[areaIndex];
@@ -2281,22 +2280,22 @@ async function main() {
         log.dim('Skipped — using suggestion from backlog');
 
         deliberation = {
-          synthesis: { suggestedImprovement: activeSuggestion!.description },
+          synthesis: { suggestedImprovement: activeSuggestion.description },
           critique: null,
           feasibility: null,
           priority: {
-            selectedImprovement: activeSuggestion!.description,
-            rationale: `From suggestion backlog: ${activeSuggestion!.title ?? ''}`,
-            expectedImpact: activeSuggestion!.priority || 'medium',
+            selectedImprovement: activeSuggestion.description,
+            rationale: `From suggestion backlog: ${activeSuggestion.title ?? ''}`,
+            expectedImpact: activeSuggestion.priority || 'medium',
             risks: [],
             constraints: [],
           },
-          selectedImprovement: activeSuggestion!.description,
+          selectedImprovement: activeSuggestion.description,
         };
 
-        roundResult.selectedImprovement = activeSuggestion!.description ?? null;
-        roundResult.researchSummary = `[Suggestion ${activeSuggestion!.id ?? ''}] ${activeSuggestion!.title ?? ''}`;
-        log.ok(`Selected: ${(activeSuggestion!.title ?? '').slice(0, 100)}`);
+        roundResult.selectedImprovement = activeSuggestion.description ?? null;
+        roundResult.researchSummary = `[Suggestion ${activeSuggestion.id ?? ''}] ${activeSuggestion.title ?? ''}`;
+        log.ok(`Selected: ${(activeSuggestion.title ?? '').slice(0, 100)}`);
 
         // Clear for subsequent rounds
         activeSuggestion = null;
@@ -2727,10 +2726,10 @@ ${safetyPrompt}`;
             (sug.maxAttempts || evolveConfig.suggestions?.maxAttemptsPerSuggestion || 3)
           ) {
             sugUpdates.status = 'rejected';
-            sugUpdates.notes = `${sug.notes ? `${sug.notes as string}\n` : ''}Exhausted max attempts (${newAttempts}).`;
+            sugUpdates.notes = `${sug.notes ? `${sug.notes}\n` : ''}Exhausted max attempts (${newAttempts}).`;
           } else {
             sugUpdates.status = 'pending'; // Return to queue
-            sugUpdates.notes = `${sug.notes ? `${sug.notes as string}\n` : ''}Attempt ${newAttempts}: ${decision.verdict} (${analysis.aggregateScore}/10).`;
+            sugUpdates.notes = `${sug.notes ? `${sug.notes}\n` : ''}Attempt ${newAttempts}: ${decision.verdict} (${analysis.aggregateScore}/10).`;
           }
 
           updateSuggestion(sg, roundResult.suggestionId, sugUpdates);
@@ -3142,7 +3141,7 @@ main().catch((err: unknown) => {
     const pCfg = resolveProject({ project: projectRoot });
     const evolveDir = path.join(pCfg.coordDir, 'evolve');
     const existingState = loadSessionState(evolveDir);
-    if (existingState && existingState.status === 'running') {
+    if (existingState?.status === 'running') {
       existingState.status = 'interrupted';
       existingState.resumable = true;
       existingState.actionNeeded = `Interrupted: ${err instanceof Error ? err.message : String(err)}. Resume with :evolve resume`;

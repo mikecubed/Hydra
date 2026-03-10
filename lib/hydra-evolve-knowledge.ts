@@ -1,4 +1,3 @@
-#!/usr/bin/env node
 /**
  * Hydra Evolve Knowledge Base — Persistent learning across evolve sessions.
  *
@@ -70,7 +69,7 @@ export function loadKnowledgeBase(evolveDir: string): KnowledgeBase {
   const filePath = knowledgePath(evolveDir);
   try {
     const raw = fs.readFileSync(filePath, 'utf8');
-    const parsed = JSON.parse(raw);
+    const parsed = JSON.parse(raw) as Record<string, unknown>;
     if (!parsed.entries || !Array.isArray(parsed.entries)) {
       return { ...EMPTY_KB };
     }
@@ -86,7 +85,7 @@ export function loadKnowledgeBase(evolveDir: string): KnowledgeBase {
  * @param {string} evolveDir - Path to docs/coordination/evolve/
  * @param {object} kb - Knowledge base object
  */
-export function saveKnowledgeBase(evolveDir: string, kb: KnowledgeBase) {
+export function saveKnowledgeBase(evolveDir: string, kb: KnowledgeBase): void {
   ensureDir(evolveDir);
   kb.stats = computeStats(kb.entries);
   const filePath = knowledgePath(evolveDir);
