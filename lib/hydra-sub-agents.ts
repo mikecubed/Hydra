@@ -8,7 +8,7 @@
  */
 
 import { registerAgent, AGENT_TYPE, getAgent } from './hydra-agents.mjs';
-import { loadHydraConfig } from './hydra-config.mjs';
+import { loadHydraConfig } from './hydra-config.ts';
 
 // ── Built-in Sub-Agent Definitions ───────────────────────────────────────────
 

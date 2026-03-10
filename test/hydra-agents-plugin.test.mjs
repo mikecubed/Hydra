@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 
 // getAgent is the public registry accessor
 import { getAgent, registerAgent, unregisterAgent, AGENT_TYPE } from '../lib/hydra-agents.mjs';
-import { loadHydraConfig } from '../lib/hydra-config.mjs';
+import { loadHydraConfig } from '../lib/hydra-config.ts';
 
 describe('Agent Plugin Interface', () => {
   // ── Shape tests — all 4 physical agents ──────────────────────────────────

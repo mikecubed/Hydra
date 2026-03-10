@@ -18,7 +18,7 @@ import {
   _resetRegistry,
   initAgentRegistry,
 } from '../lib/hydra-agents.mjs';
-import { AFFINITY_PRESETS, loadHydraConfig, saveHydraConfig } from '../lib/hydra-config.mjs';
+import { AFFINITY_PRESETS, loadHydraConfig, saveHydraConfig } from '../lib/hydra-config.ts';
 
 const CLOUD_AGENT_NAMES = ['claude', 'gemini', 'codex'];
 

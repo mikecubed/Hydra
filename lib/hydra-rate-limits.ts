@@ -9,7 +9,7 @@
  * Sliding windows pruned lazily on access.
  */
 
-import { loadHydraConfig } from './hydra-config.mjs';
+import { loadHydraConfig } from './hydra-config.ts';
 import { getRateLimits as getModelRateLimits } from './hydra-model-profiles.ts';
 import { getProviderEWMA } from './hydra-streaming-middleware.mjs';
 

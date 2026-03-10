@@ -10,7 +10,7 @@ import {
   listAgents,
   unregisterAgent,
 } from '../lib/hydra-agents.mjs';
-import { loadHydraConfig, _setTestConfig, invalidateConfigCache } from '../lib/hydra-config.mjs';
+import { loadHydraConfig, _setTestConfig, invalidateConfigCache } from '../lib/hydra-config.ts';
 import { createMockExecuteAgent, loadAgentFixture } from './helpers/mock-agent.mjs';
 
 const require = createRequire(import.meta.url);

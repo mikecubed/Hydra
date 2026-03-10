@@ -9,7 +9,7 @@
 
 import fs from 'node:fs';
 import path from 'node:path';
-import { loadHydraConfig } from './hydra-config.mjs';
+import { loadHydraConfig } from './hydra-config.ts';
 import { git, getCurrentBranch } from './hydra-shared/git-ops.ts';
 
 /**

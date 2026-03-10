@@ -10,7 +10,7 @@
  */
 
 import pc from 'picocolors';
-import { loadHydraConfig, saveHydraConfig } from './hydra-config.mjs';
+import { loadHydraConfig, saveHydraConfig } from './hydra-config.ts';
 import {
   getActiveModel,
   getPhysicalAgentNames,

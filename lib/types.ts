@@ -2,7 +2,7 @@
  * Hydra — canonical shared type definitions.
  *
  * Derived from actual runtime shapes in:
- *   lib/hydra-agents.mjs, lib/hydra-config.mjs, lib/hydra-model-profiles.mjs,
+ *   lib/hydra-agents.mjs, lib/hydra-config.ts, lib/hydra-model-profiles.mjs,
  *   lib/orchestrator-daemon.mjs, lib/hydra-shared/agent-executor.mjs
  *
  * No logic — types only.
@@ -199,6 +199,9 @@ export interface ModelConfig {
   fast: string;
   cheap: string;
   active: string;
+  /** Optional reasoning effort tier (e.g. 'high', 'medium', 'low') */
+  reasoningEffort?: string;
+  [key: string]: unknown;
 }
 
 /** Role-specific agent+model assignment from config.roles[roleName] */
@@ -297,6 +300,220 @@ export interface LocalConfig {
   };
 }
 
+// ── Named config section interfaces (replace Record<string, unknown> in HydraConfig) ──
+
+export interface VerificationConfig {
+  onTaskDone?: boolean;
+  command?: string;
+  timeoutMs?: number;
+  secretsScan?: boolean;
+  maxDiffLines?: number;
+  [key: string]: unknown;
+}
+
+export interface ConciergeConfig {
+  enabled?: boolean;
+  model?: string;
+  reasoningEffort?: string;
+  maxHistoryMessages?: number;
+  autoActivate?: boolean;
+  showProviderInPrompt?: boolean;
+  welcomeMessage?: boolean;
+  summarizeOnTrim?: boolean;
+  fallbackChain?: unknown[];
+  [key: string]: unknown;
+}
+
+export interface SelfAwarenessConfig {
+  enabled?: boolean;
+  injectIntoConcierge?: boolean;
+  includeSnapshot?: boolean;
+  includeIndex?: boolean;
+  snapshotMaxLines?: number;
+  indexMaxChars?: number;
+  indexRefreshMs?: number;
+  [key: string]: unknown;
+}
+
+export interface EvolveConfig {
+  enabled?: boolean;
+  maxRounds?: number;
+  maxHours?: number;
+  baseBranch?: string;
+  focusAreas?: string[];
+  budget?: {
+    softLimit?: number;
+    hardLimit?: number;
+    perRoundEstimate?: number;
+    warnThreshold?: number;
+    reduceScopeThreshold?: number;
+    softStopThreshold?: number;
+    hardStopThreshold?: number;
+    [key: string]: unknown;
+  };
+  phases?: Record<string, unknown>;
+  approval?: Record<string, unknown>;
+  suggestions?: {
+    enabled?: boolean;
+    autoPopulateFromRejected?: boolean;
+    autoPopulateFromDeferred?: boolean;
+    maxPendingSuggestions?: number;
+    maxAttemptsPerSuggestion?: number;
+    [key: string]: unknown;
+  };
+  investigator?: Record<string, unknown>;
+  [key: string]: unknown;
+}
+
+export interface TasksConfig {
+  baseBranch?: string;
+  maxTasks?: number;
+  maxHours?: number;
+  perTaskTimeoutMs?: number;
+  sources?: Record<string, boolean>;
+  budget?: {
+    defaultPreset?: string;
+    perTaskEstimate?: number;
+    softLimit?: number;
+    hardLimit?: number;
+    [key: string]: unknown;
+  };
+  councilLite?: Record<string, unknown>;
+  investigator?: Record<string, unknown>;
+  [key: string]: unknown;
+}
+
+export interface NightlyConfig {
+  enabled?: boolean;
+  baseBranch?: string;
+  branchPrefix?: string;
+  maxTasks?: number;
+  maxHours?: number;
+  perTaskTimeoutMs?: number;
+  sources?: Record<string, unknown>;
+  aiDiscovery?: {
+    agent?: string;
+    maxSuggestions?: number;
+    focus?: string[];
+    timeoutMs?: number;
+    [key: string]: unknown;
+  };
+  budget?: {
+    softLimit?: number;
+    hardLimit?: number;
+    perTaskEstimate?: number;
+    handoffThreshold?: number;
+    handoffAgent?: string;
+    handoffModel?: string;
+    [key: string]: unknown;
+  };
+  tasks?: unknown[];
+  investigator?: Record<string, unknown>;
+  [key: string]: unknown;
+}
+
+export interface WorkersConfig {
+  permissionMode?: string;
+  autoStart?: boolean;
+  pollIntervalMs?: number;
+  maxOutputBufferKB?: number;
+  autoChain?: boolean;
+  heartbeatIntervalMs?: number;
+  heartbeatTimeoutMs?: number;
+  retry?: Record<string, unknown>;
+  deadLetter?: Record<string, unknown>;
+  concurrency?: Record<string, unknown>;
+  [key: string]: unknown;
+}
+
+export interface ProvidersConfig {
+  openai?: Record<string, unknown>;
+  anthropic?: Record<string, unknown>;
+  google?: Record<string, unknown>;
+  rateLimit?: Record<string, unknown>;
+  presets?: Array<Record<string, string>>;
+  [key: string]: unknown;
+}
+
+export interface DoctorConfig {
+  enabled?: boolean;
+  autoCreateTasks?: boolean;
+  autoCreateSuggestions?: boolean;
+  addToKnowledgeBase?: boolean;
+  recurringThreshold?: number;
+  recurringWindowDays?: number;
+  [key: string]: unknown;
+}
+
+export interface GithubConfig {
+  enabled?: boolean;
+  defaultBase?: string;
+  draft?: boolean;
+  labels?: string[];
+  reviewers?: string[];
+  prBodyFooter?: string;
+  requiredChecks?: string[];
+  autolabel?: Record<string, unknown>;
+  [key: string]: unknown;
+}
+
+export interface ForgeConfig {
+  enabled?: boolean;
+  autoTest?: boolean;
+  phaseTimeoutMs?: number;
+  storageDir?: string;
+  [key: string]: unknown;
+}
+
+export interface AuditConfig {
+  maxFiles?: number;
+  categories?: string[];
+  reportDir?: string;
+  timeout?: number;
+  economy?: boolean;
+  [key: string]: unknown;
+}
+
+export interface DispatchConfig {
+  dryRun?: boolean;
+  [key: string]: unknown;
+}
+
+export interface EvalConfig {
+  corpusPaths?: string[];
+  [key: string]: unknown;
+}
+
+export interface PersonaConfig {
+  enabled?: boolean;
+  name?: string;
+  tone?: string;
+  verbosity?: string;
+  formality?: string;
+  humor?: boolean;
+  voice?: string;
+  identity?: string;
+  presets?: Record<string, unknown>;
+  agentFraming?: Record<string, string>;
+  processLabels?: Record<string, string>;
+  [key: string]: unknown;
+}
+
+export interface TelemetryConfig {
+  enabled?: boolean;
+  [key: string]: unknown;
+}
+
+export interface StatsConfig {
+  retentionDays?: number;
+  [key: string]: unknown;
+}
+
+export interface ActivityConfig {
+  summarizeOnShutdown?: boolean;
+  [key: string]: unknown;
+}
+
 /** Top-level Hydra config object (hydra.config.json after mergeWithDefaults) */
 export interface HydraConfig {
   version?: number;
@@ -311,31 +528,38 @@ export interface HydraConfig {
   routing: RoutingConfig;
   local: LocalConfig;
   context: ContextConfig;
-  // Remaining top-level sections typed loosely — narrow as needed
-  verification?: Record<string, unknown>;
-  concierge?: Record<string, unknown>;
-  selfAwareness?: Record<string, unknown>;
-  evolve?: Record<string, unknown>;
-  tasks?: Record<string, unknown>;
-  nightly?: Record<string, unknown>;
-  workers?: Record<string, unknown>;
-  providers?: Record<string, unknown>;
-  doctor?: Record<string, unknown>;
+  verification?: VerificationConfig;
+  concierge?: ConciergeConfig;
+  selfAwareness?: SelfAwarenessConfig;
+  evolve?: EvolveConfig;
+  tasks?: TasksConfig;
+  nightly?: NightlyConfig;
+  workers?: WorkersConfig;
+  providers?: ProvidersConfig;
+  doctor?: DoctorConfig;
   modelRecovery?: Record<string, unknown>;
   rateLimits?: Record<string, unknown>;
   cache?: Record<string, unknown>;
   daemon?: Record<string, unknown>;
   metrics?: Record<string, unknown>;
-  github?: Record<string, unknown>;
-  forge?: Record<string, unknown>;
-  audit?: Record<string, unknown>;
-  dispatch?: Record<string, unknown>;
+  github?: GithubConfig;
+  forge?: ForgeConfig;
+  audit?: AuditConfig;
+  dispatch?: DispatchConfig;
   confirm?: Record<string, unknown>;
-  eval?: Record<string, unknown>;
-  persona?: Record<string, unknown>;
-  telemetry?: Record<string, unknown>;
-  stats?: Record<string, unknown>;
-  activity?: Record<string, unknown>;
+  eval?: EvalConfig;
+  persona?: PersonaConfig;
+  telemetry?: TelemetryConfig;
+  stats?: StatsConfig;
+  activity?: ActivityConfig;
+  // Additional runtime properties that may appear on the config object
+  crossModelVerification?: {
+    enabled?: boolean;
+    pairings?: Record<string, unknown>;
+    [key: string]: unknown;
+  };
+  worktrees?: Record<string, unknown>;
+  [key: string]: unknown;
 }
 
 // ── Model profiles ────────────────────────────────────────────────────────────

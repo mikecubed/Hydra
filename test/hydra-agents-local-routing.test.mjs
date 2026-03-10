@@ -10,7 +10,7 @@ import {
   unregisterAgent,
   _resetRegistry,
 } from '../lib/hydra-agents.mjs';
-import { loadHydraConfig, _setTestConfig, invalidateConfigCache } from '../lib/hydra-config.mjs';
+import { loadHydraConfig, _setTestConfig, invalidateConfigCache } from '../lib/hydra-config.ts';
 
 const ROUTING_MODES = ['economy', 'balanced', 'performance'];
 

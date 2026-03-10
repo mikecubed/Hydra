@@ -1,4 +1,3 @@
-#!/usr/bin/env node
 /**
  * Hydra Configuration & Project Detection
  *
@@ -18,30 +17,36 @@ import {
   getModeTiers as _getModeTiers,
   getConciergeFallbackChain as _getConciergeFallbackChain,
 } from './hydra-model-profiles.ts';
+import type { HydraConfig, RoleConfig } from './types.ts';
+
+/** Recursively make all properties optional — used for partial config overrides in tests. */
+type DeepPartial<T> = T extends object ? { [P in keyof T]?: DeepPartial<T[P]> } : T;
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 /** Absolute path to the Hydra installation root */
 export const HYDRA_ROOT = path.resolve(__dirname, '..');
-const HYDRA_IS_PACKAGED = Boolean(process.pkg);
+// `process.pkg` is injected by the `pkg` bundler for packaged executables.
+const HYDRA_IS_PACKAGED = Boolean((process as NodeJS.Process & { pkg?: unknown }).pkg);
 
 /**
  * Runtime root for packaged builds.
  * No TTY or window manager required; safe for TTY-only, SSH, daemon, systemd, headless.
  */
-function getPackagedRuntimeRoot() {
+function getPackagedRuntimeRoot(): string {
+  // eslint-disable-next-line @typescript-eslint/switch-exhaustiveness-check
   switch (process.platform) {
     case 'win32':
       return path.join(
-        process.env.LOCALAPPDATA || path.join(os.homedir(), 'AppData', 'Local'),
+        process.env['LOCALAPPDATA'] ?? path.join(os.homedir(), 'AppData', 'Local'),
         'Hydra',
       );
     case 'darwin':
       return path.join(os.homedir(), 'Library', 'Application Support', 'Hydra');
-    default: // linux and others — XDG_DATA_HOME when set, else ~/.local/share (no display/session needed)
+    default: // linux and other platforms — XDG_DATA_HOME when set, else ~/.local/share
       return path.join(
-        process.env.XDG_DATA_HOME || path.join(os.homedir(), '.local', 'share'),
+        process.env['XDG_DATA_HOME'] ?? path.join(os.homedir(), '.local', 'share'),
         'Hydra',
       );
   }
@@ -61,7 +66,7 @@ function ensureRuntimeRoot() {
   }
 }
 
-function seedRuntimeFile(runtimePath, embeddedPath, fallback = '') {
+function seedRuntimeFile(runtimePath: string, embeddedPath: string, fallback = ''): void {
   if (fs.existsSync(runtimePath)) {
     return;
   }
@@ -82,7 +87,7 @@ function seedRuntimeFile(runtimePath, embeddedPath, fallback = '') {
 // ── Derive model defaults from profiles ──────────────────────────────────────
 
 const _profileModels = (() => {
-  const models = {};
+  const models: Record<string, unknown> = {};
   for (const agent of ['gemini', 'codex', 'claude']) {
     const presets = _getAgentPresets(agent);
     models[agent] = presets ? { ...presets, active: 'default' } : { active: 'default' };
@@ -545,84 +550,91 @@ const DEFAULT_CONFIG = {
   },
 };
 
-function deepMergeSection(def, user) {
-  if (!user || typeof user !== 'object') {
-    return { ...def };
+function deepMergeSection(def: Record<string, unknown> | undefined, user: unknown): Record<string, unknown> {
+  if (user === null || user === undefined || typeof user !== 'object') {
+    return { ...(def ?? {}) };
   }
-  const merged = { ...def };
-  for (const [k, v] of Object.entries(user)) {
+  const merged: Record<string, unknown> = { ...(def ?? {}) };
+  for (const [k, v] of Object.entries(user as Record<string, unknown>)) {
     merged[k] =
-      v && typeof v === 'object' && !Array.isArray(v) && merged[k] && typeof merged[k] === 'object'
-        ? { ...merged[k], ...v }
+      v !== null && v !== undefined && typeof v === 'object' && !Array.isArray(v) &&
+      merged[k] !== null && merged[k] !== undefined && typeof merged[k] === 'object'
+        ? { ...(merged[k] as Record<string, unknown>), ...(v as Record<string, unknown>) }
         : v;
   }
   return merged;
 }
 
-function mergeWithDefaults(config) {
-  const parsed = config && typeof config === 'object' ? config : {};
+function mergeWithDefaults(config: unknown): HydraConfig {
+  const parsed = config !== null && config !== undefined && typeof config === 'object'
+    ? (config as Record<string, unknown>)
+    : {};
+  const def = DEFAULT_CONFIG as unknown as Record<string, unknown>;
   return {
-    ...DEFAULT_CONFIG,
+    ...def,
     ...parsed,
-    models: deepMergeSection(DEFAULT_CONFIG.models, parsed.models),
-    aliases: deepMergeSection(DEFAULT_CONFIG.aliases, parsed.aliases),
-    modeTiers: deepMergeSection(DEFAULT_CONFIG.modeTiers, parsed.modeTiers),
-    local: deepMergeSection(DEFAULT_CONFIG.local, parsed.local),
-    usage: { ...DEFAULT_CONFIG.usage, ...parsed.usage },
-    verification: { ...DEFAULT_CONFIG.verification, ...parsed.verification },
-    stats: { ...DEFAULT_CONFIG.stats, ...parsed.stats },
-    concierge: { ...DEFAULT_CONFIG.concierge, ...parsed.concierge },
-    selfAwareness: deepMergeSection(DEFAULT_CONFIG.selfAwareness, parsed.selfAwareness),
-    roles: deepMergeSection(DEFAULT_CONFIG.roles, parsed.roles),
-    recommendations: DEFAULT_CONFIG.recommendations,
-    agents: deepMergeSection(DEFAULT_CONFIG.agents, parsed.agents),
-    evolve: deepMergeSection(DEFAULT_CONFIG.evolve, parsed.evolve),
-    github: { ...DEFAULT_CONFIG.github, ...parsed.github },
-    tasks: deepMergeSection(DEFAULT_CONFIG.tasks, parsed.tasks),
-    nightly: deepMergeSection(DEFAULT_CONFIG.nightly, parsed.nightly),
-    audit: deepMergeSection(DEFAULT_CONFIG.audit, parsed.audit),
-    forge: { ...DEFAULT_CONFIG.forge, ...parsed.forge },
-    workers: deepMergeSection(DEFAULT_CONFIG.workers, parsed.workers),
-    providers: deepMergeSection(DEFAULT_CONFIG.providers, parsed.providers),
-    doctor: { ...DEFAULT_CONFIG.doctor, ...parsed.doctor },
-    routing: deepMergeSection(DEFAULT_CONFIG.routing, parsed.routing),
-    modelRecovery: deepMergeSection(DEFAULT_CONFIG.modelRecovery, parsed.modelRecovery),
-    rateLimits: { ...DEFAULT_CONFIG.rateLimits, ...parsed.rateLimits },
-    cache: deepMergeSection(DEFAULT_CONFIG.cache, parsed.cache),
-    daemon: deepMergeSection(DEFAULT_CONFIG.daemon, parsed.daemon),
-    metrics: deepMergeSection(DEFAULT_CONFIG.metrics, parsed.metrics),
-    activity: { ...DEFAULT_CONFIG.activity, ...parsed.activity },
-    dispatch: { ...DEFAULT_CONFIG.dispatch, ...parsed.dispatch },
-    confirm: deepMergeSection(DEFAULT_CONFIG.confirm, parsed.confirm),
-    eval: { ...DEFAULT_CONFIG.eval, ...parsed.eval },
-    persona: deepMergeSection(DEFAULT_CONFIG.persona, parsed.persona),
-    telemetry: { ...DEFAULT_CONFIG.telemetry, ...parsed.telemetry },
-    context: deepMergeSection(DEFAULT_CONFIG.context, parsed.context),
-  };
+    models: deepMergeSection(def['models'] as Record<string, unknown>, parsed['models']),
+    aliases: deepMergeSection(def['aliases'] as Record<string, unknown>, parsed['aliases']),
+    modeTiers: deepMergeSection(def['modeTiers'] as Record<string, unknown>, parsed['modeTiers']),
+    local: deepMergeSection(def['local'] as Record<string, unknown>, parsed['local']),
+    usage: { ...(def['usage'] as object), ...(parsed['usage'] as object | undefined) },
+    verification: { ...(def['verification'] as object), ...(parsed['verification'] as object | undefined) },
+    stats: { ...(def['stats'] as object), ...(parsed['stats'] as object | undefined) },
+    concierge: { ...(def['concierge'] as object), ...(parsed['concierge'] as object | undefined) },
+    selfAwareness: deepMergeSection(def['selfAwareness'] as Record<string, unknown>, parsed['selfAwareness']),
+    roles: deepMergeSection(def['roles'] as Record<string, unknown>, parsed['roles']),
+    recommendations: def['recommendations'] as Record<string, unknown>,
+    agents: deepMergeSection(def['agents'] as Record<string, unknown>, parsed['agents']),
+    evolve: deepMergeSection(def['evolve'] as Record<string, unknown>, parsed['evolve']),
+    github: { ...(def['github'] as object), ...(parsed['github'] as object | undefined) },
+    tasks: deepMergeSection(def['tasks'] as Record<string, unknown>, parsed['tasks']),
+    nightly: deepMergeSection(def['nightly'] as Record<string, unknown>, parsed['nightly']),
+    audit: deepMergeSection(def['audit'] as Record<string, unknown>, parsed['audit']),
+    forge: { ...(def['forge'] as object), ...(parsed['forge'] as object | undefined) },
+    workers: deepMergeSection(def['workers'] as Record<string, unknown>, parsed['workers']),
+    providers: deepMergeSection(def['providers'] as Record<string, unknown>, parsed['providers']),
+    doctor: { ...(def['doctor'] as object), ...(parsed['doctor'] as object | undefined) },
+    routing: deepMergeSection(def['routing'] as Record<string, unknown>, parsed['routing']),
+    modelRecovery: deepMergeSection(def['modelRecovery'] as Record<string, unknown>, parsed['modelRecovery']),
+    rateLimits: { ...(def['rateLimits'] as object | undefined), ...(parsed['rateLimits'] as object | undefined) },
+    cache: deepMergeSection(def['cache'] as Record<string, unknown>, parsed['cache']),
+    daemon: deepMergeSection(def['daemon'] as Record<string, unknown>, parsed['daemon']),
+    metrics: deepMergeSection(def['metrics'] as Record<string, unknown>, parsed['metrics']),
+    activity: { ...(def['activity'] as object), ...(parsed['activity'] as object | undefined) },
+    dispatch: { ...(def['dispatch'] as object), ...(parsed['dispatch'] as object | undefined) },
+    confirm: deepMergeSection(def['confirm'] as Record<string, unknown>, parsed['confirm']),
+    eval: { ...(def['eval'] as object), ...(parsed['eval'] as object | undefined) },
+    persona: deepMergeSection(def['persona'] as Record<string, unknown>, parsed['persona']),
+    telemetry: { ...(def['telemetry'] as object), ...(parsed['telemetry'] as object | undefined) },
+    context: deepMergeSection(def['context'] as Record<string, unknown>, parsed['context']),
+  } as unknown as HydraConfig;
 }
 
 /**
  * Migrate v1 config to v2 schema. Backfills missing sections from defaults.
  */
-function migrateConfig(parsed) {
-  if (!parsed.mode) parsed.mode = DEFAULT_CONFIG.mode;
-  if (!parsed.aliases) parsed.aliases = { ...DEFAULT_CONFIG.aliases };
-  if (!parsed.modeTiers) parsed.modeTiers = { ...DEFAULT_CONFIG.modeTiers };
-  if (!parsed.verification) parsed.verification = { ...DEFAULT_CONFIG.verification };
+function migrateConfig(parsed: Record<string, unknown>): Record<string, unknown> {
+  const def = DEFAULT_CONFIG as unknown as Record<string, unknown>;
+  parsed['mode'] ??= def['mode'];
+  parsed['aliases'] ??= { ...(def['aliases'] as object) };
+  parsed['modeTiers'] ??= { ...(def['modeTiers'] as object) };
+  parsed['verification'] ??= { ...(def['verification'] as object) };
   // Backfill cheap tier for agents that didn't have it in v1
+  const defModels = def['models'] as Record<string, Record<string, unknown>>;
+  const parsedModels = parsed['models'] as Record<string, Record<string, unknown>> | undefined;
   for (const agent of ['gemini', 'codex']) {
-    if (parsed.models?.[agent] && !parsed.models[agent].cheap) {
-      parsed.models[agent].cheap = DEFAULT_CONFIG.models[agent].cheap;
+    if (parsedModels?.[agent] !== undefined && parsedModels[agent]['cheap'] === undefined) {
+      parsedModels[agent]['cheap'] = defModels[agent]['cheap'];
     }
   }
-  parsed.version = 2;
+  parsed['version'] = 2;
   return parsed;
 }
 
-let _configCache = null;
+let _configCache: HydraConfig | null = null;
 
-export function loadHydraConfig() {
-  if (_configCache) return _configCache;
+export function loadHydraConfig(): HydraConfig {
+  if (_configCache !== null) return _configCache;
   ensureRuntimeRoot();
   if (HYDRA_IS_PACKAGED) {
     seedRuntimeFile(
@@ -633,9 +645,10 @@ export function loadHydraConfig() {
   }
   try {
     const raw = fs.readFileSync(CONFIG_PATH, 'utf8');
-    const parsed = JSON.parse(raw);
+    const parsed = JSON.parse(raw) as Record<string, unknown>;
     // Migrate v1 → v2 if needed
-    if (!parsed.version || parsed.version < 2) {
+    if ((parsed['version'] === undefined || parsed['version'] === null) ||
+        (parsed['version'] as number) < 2) {
       migrateConfig(parsed);
     }
     _configCache = mergeWithDefaults(parsed);
@@ -646,7 +659,7 @@ export function loadHydraConfig() {
   }
 }
 
-export function saveHydraConfig(config) {
+export function saveHydraConfig(config: DeepPartial<HydraConfig>): HydraConfig {
   ensureRuntimeRoot();
   const merged = mergeWithDefaults(config);
   fs.writeFileSync(CONFIG_PATH, `${JSON.stringify(merged, null, 2)}\n`, 'utf8');
@@ -654,7 +667,7 @@ export function saveHydraConfig(config) {
   return merged;
 }
 
-export function invalidateConfigCache() {
+export function invalidateConfigCache(): void {
   _configCache = null;
 }
 
@@ -664,7 +677,7 @@ export function invalidateConfigCache() {
  * Call invalidateConfigCache() afterward to restore normal disk-backed reads.
  * @param {object} config - Partial or full config to merge with defaults.
  */
-export function _setTestConfig(config) {
+export function _setTestConfig(config: DeepPartial<HydraConfig>): void {
   _configCache = mergeWithDefaults(config);
 }
 
@@ -672,11 +685,12 @@ export function _setTestConfig(config) {
  * Get the merged role configuration for a named role.
  * Returns { agent, model, reasoningEffort } with user overrides applied on top of defaults.
  */
-export function getRoleConfig(roleName) {
+export function getRoleConfig(roleName: string): RoleConfig | undefined {
   const cfg = loadHydraConfig();
-  const defaults = DEFAULT_CONFIG.roles[roleName] || {};
-  const userOverrides = cfg.roles?.[roleName] || {};
-  return { ...defaults, ...userOverrides };
+  const defaults = (DEFAULT_CONFIG.roles as Record<string, RoleConfig> | undefined)?.[roleName];
+  const userOverrides = (cfg.roles as Record<string, RoleConfig | undefined>)[roleName];
+  if (defaults === undefined && userOverrides === undefined) return undefined;
+  return { ...defaults, ...userOverrides } as RoleConfig;
 }
 
 /**
@@ -684,11 +698,13 @@ export function getRoleConfig(roleName) {
  * @param {'openai'|'anthropic'|'google'} provider
  * @returns {string|number} Tier identifier (e.g. 1, 2, 3, 'free')
  */
-export function getProviderTier(provider) {
+export function getProviderTier(provider: string): string | number {
   const cfg = loadHydraConfig();
-  const providerCfg = cfg.providers?.[provider] || {};
-  const defaults = { openai: 1, anthropic: 1, google: 'free' };
-  return providerCfg.tier ?? defaults[provider] ?? 1;
+  const providerCfg = cfg.providers?.[provider] as Record<string, unknown> | undefined;
+  const tier = providerCfg?.['tier'];
+  const defaults: Record<string, string | number> = { openai: 1, anthropic: 1, google: 'free' };
+  if (tier !== undefined && tier !== null) return tier as string | number;
+  return defaults[provider] ?? 1;
 }
 
 /**
@@ -701,8 +717,9 @@ export function getProviderTier(provider) {
  *
  * @returns {Array<{name, label, baseUrl, defaultModel, envKey, description}>}
  */
-export function getProviderPresets() {
-  return DEFAULT_CONFIG.providers.presets || [];
+export function getProviderPresets(): Array<Record<string, string>> {
+  const presets = (DEFAULT_CONFIG as unknown as Record<string, unknown>)['providers'];
+  return ((presets as Record<string, unknown> | undefined)?.['presets'] as Array<Record<string, string>> | undefined) ?? [];
 }
 
 // ── Config Diff ──────────────────────────────────────────────────────────────
@@ -718,12 +735,20 @@ export function getProviderPresets() {
  *             stale:   Array<{path:string, userValue:*}>,
  *             typeMismatches: Array<{path:string, expectedType:string, gotType:string}> }}
  */
-export function diffConfig(userConfig, defaultConfig = DEFAULT_CONFIG) {
+export function diffConfig(
+  userConfig: Record<string, unknown>,
+  defaultConfig: Record<string, unknown> = DEFAULT_CONFIG as unknown as Record<string, unknown>,
+): {
+  missing: Array<{ path: string; defaultValue: unknown }>;
+  stale: Array<{ path: string; userValue: unknown }>;
+  typeMismatches: Array<{ path: string; expectedType: string; gotType: string }>;
+} {
   const missing = [];
   const stale = [];
   const typeMismatches = [];
 
-  const isPlainObject = (v) => v !== null && typeof v === 'object' && !Array.isArray(v);
+  const isPlainObject = (v: unknown): v is Record<string, unknown> =>
+    v !== null && typeof v === 'object' && !Array.isArray(v);
 
   // Walk top-level keys of defaultConfig
   for (const key of Object.keys(defaultConfig)) {
@@ -776,21 +801,21 @@ export function diffConfig(userConfig, defaultConfig = DEFAULT_CONFIG) {
 
 // ── Recent Projects ──────────────────────────────────────────────────────────
 
-export function getRecentProjects() {
+export function getRecentProjects(): string[] {
   ensureRuntimeRoot();
   if (HYDRA_IS_PACKAGED) {
     seedRuntimeFile(RECENT_PROJECTS_PATH, EMBEDDED_RECENT_PROJECTS_PATH, '[]\n');
   }
   try {
     const raw = fs.readFileSync(RECENT_PROJECTS_PATH, 'utf8');
-    const parsed = JSON.parse(raw);
-    return Array.isArray(parsed) ? parsed : [];
+    const parsed = JSON.parse(raw) as unknown;
+    return Array.isArray(parsed) ? (parsed as string[]) : [];
   } catch {
     return [];
   }
 }
 
-export function addRecentProject(projectPath) {
+export function addRecentProject(projectPath: string): void {
   ensureRuntimeRoot();
   const normalized = path.resolve(projectPath);
   const recent = getRecentProjects().filter((p) => path.resolve(p) !== normalized);
@@ -801,11 +826,11 @@ export function addRecentProject(projectPath) {
 
 // ── Project Detection ────────────────────────────────────────────────────────
 
-function detectProjectName(projectRoot) {
+function detectProjectName(projectRoot: string): string {
   // Try package.json name first
   try {
-    const pkg = JSON.parse(fs.readFileSync(path.join(projectRoot, 'package.json'), 'utf8'));
-    if (pkg.name) return pkg.name;
+    const pkg = JSON.parse(fs.readFileSync(path.join(projectRoot, 'package.json'), 'utf8')) as Record<string, unknown>;
+    if (typeof pkg['name'] === 'string' && pkg['name'].length > 0) return pkg['name'];
   } catch {
     /* ignore */
   }
@@ -814,7 +839,7 @@ function detectProjectName(projectRoot) {
   return path.basename(projectRoot);
 }
 
-function isValidProject(dir) {
+function isValidProject(dir: string): boolean {
   const markers = [
     'package.json',
     '.git',
@@ -825,6 +850,24 @@ function isValidProject(dir) {
     'go.mod',
   ];
   return markers.some((m) => fs.existsSync(path.join(dir, m)));
+}
+
+export interface ProjectConfig {
+  projectRoot: string;
+  projectName: string;
+  coordDir: string;
+  statePath: string;
+  logPath: string;
+  statusPath: string;
+  eventsPath: string;
+  archivePath: string;
+  runsDir: string;
+  hydraRoot: string;
+}
+
+export interface ResolveProjectOptions {
+  project?: string;
+  skipValidation?: boolean;
 }
 
 /**
@@ -841,33 +884,34 @@ function isValidProject(dir) {
  * @param {boolean} [options.skipValidation] - Skip project marker check
  * @returns {object} Project config with all derived paths
  */
-export function resolveProject(options = {}) {
-  let projectRoot = options.project || '';
+export function resolveProject(options: ResolveProjectOptions = {}): ProjectConfig {
+  let projectRoot = options.project ?? '';
 
   // Check CLI args for --project=<path> or project=<path>
-  if (!projectRoot) {
+  if (projectRoot.length === 0) {
     for (const arg of process.argv.slice(2)) {
       const match = arg.match(/^(?:--)?project=(.+)$/);
-      if (match) {
-        projectRoot = match[1];
+      if (match !== null) {
+        projectRoot = match[1]; // capture group (.+) is always defined when match succeeds
         break;
       }
     }
   }
 
   // Check env var
-  if (!projectRoot && process.env.HYDRA_PROJECT) {
-    projectRoot = process.env.HYDRA_PROJECT;
+  const hydraProject = process.env['HYDRA_PROJECT'];
+  if (projectRoot.length === 0 && hydraProject !== undefined) {
+    projectRoot = hydraProject;
   }
 
   // Fall back to cwd
-  if (!projectRoot) {
+  if (projectRoot.length === 0) {
     projectRoot = process.cwd();
   }
 
   projectRoot = path.resolve(projectRoot);
 
-  if (!options.skipValidation && !isValidProject(projectRoot)) {
+  if (options.skipValidation !== true && !isValidProject(projectRoot)) {
     throw new Error(
       `Not a valid project directory: ${projectRoot}\n` +
         'Expected one of: package.json, .git, CLAUDE.md, Cargo.toml, pyproject.toml, go.mod',
@@ -897,7 +941,7 @@ export function resolveProject(options = {}) {
  *
  * @returns {Promise<object>} Project config
  */
-export async function selectProjectInteractive() {
+export async function selectProjectInteractive(): Promise<ProjectConfig> {
   const cwd = process.cwd();
   const cwdValid = isValidProject(cwd);
   const recent = getRecentProjects().filter((p) => p !== cwd && fs.existsSync(p));
@@ -907,7 +951,7 @@ export async function selectProjectInteractive() {
     const answer = await askLine(`Detected project: ${name} (${cwd}). Work here? (Y/n/browse) `);
     const trimmed = answer.trim().toLowerCase();
 
-    if (!trimmed || trimmed === 'y' || trimmed === 'yes') {
+    if (trimmed.length === 0 || trimmed === 'y' || trimmed === 'yes') {
       addRecentProject(cwd);
       return resolveProject({ project: cwd });
     }
@@ -924,9 +968,9 @@ export async function selectProjectInteractive() {
     console.log('\nRecent projects:');
     for (const [i, p] of recent.entries()) {
       const name = detectProjectName(p);
-      console.log(`  ${i + 1}) ${name} (${p})`);
+      console.log(`  ${String(i + 1)}) ${name} (${p})`);
     }
-    console.log(`  ${recent.length + 1}) Enter a new path`);
+    console.log(`  ${String(recent.length + 1)}) Enter a new path`);
 
     const choice = await askLine('Select project: ');
     const idx = Number.parseInt(choice, 10) - 1;
@@ -939,7 +983,7 @@ export async function selectProjectInteractive() {
 
   // Manual path entry
   const manualPath = await askLine('Enter project path: ');
-  if (!manualPath.trim()) {
+  if (manualPath.trim().length === 0) {
     throw new Error('No project path provided.');
   }
   addRecentProject(manualPath.trim());
@@ -948,7 +992,7 @@ export async function selectProjectInteractive() {
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
-function askLine(prompt) {
+function askLine(prompt: string): Promise<string> {
   return new Promise((resolve) => {
     const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
     rl.question(prompt, (answer) => {

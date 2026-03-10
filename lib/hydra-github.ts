@@ -7,7 +7,7 @@
 
 import fs from 'node:fs';
 import path from 'node:path';
-import { loadHydraConfig } from './hydra-config.mjs';
+import { loadHydraConfig } from './hydra-config.ts';
 import { pushBranch, getCurrentBranch, getBranchLog } from './hydra-shared/git-ops.ts';
 import { spawnSyncCapture } from './hydra-proc.mjs';
 

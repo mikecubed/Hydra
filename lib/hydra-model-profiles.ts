@@ -6,7 +6,7 @@
  * pricing, and UI annotations across the system.
  *
  * IMPORTANT: Zero Hydra imports — this module sits at the very bottom of the
- * import tree. hydra-config.mjs imports it, and hydra-config is imported by
+ * import tree. hydra-config.ts imports it, and hydra-config is imported by
  * nearly everything else.
  */
 

@@ -5,7 +5,7 @@ import {
   parseArgsTemplate,
   validateAgentName,
 } from '../lib/hydra-agents-wizard.mjs';
-import { AFFINITY_PRESETS } from '../lib/hydra-config.mjs';
+import { AFFINITY_PRESETS } from '../lib/hydra-config.ts';
 
 describe('validateAgentName', () => {
   it('accepts valid lowercase names', () => {
