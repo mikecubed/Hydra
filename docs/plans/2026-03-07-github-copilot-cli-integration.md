@@ -747,6 +747,96 @@ Tasks 7, 8 (tandem pairs, council participation). Upgrades Copilot from passive 
 
 Tasks 9, 10 (COPILOT.md, README/CLAUDE.md updates). Required before merging.
 
+### Phase 5 — Dynamic Dispatch & Extensibility (See separate plan)
+
+Task 11 (below) is the Phase 1 prerequisite from the dynamic dispatch plan. The broader work —
+role-configurable dispatch, registry-driven CLI detection, availability-filtered routing — is
+tracked in **[`2026-03-10-dynamic-agent-dispatch.md`](./2026-03-10-dynamic-agent-dispatch.md)**.
+That plan's implementation phases are independent of this integration and can proceed in parallel.
+
+---
+
+## Task 11: Fix `invoke.headless()` Model ID Translation
+
+**Files:** `lib/hydra-model-profiles.mjs`, `lib/hydra-agents.mjs` (Copilot plugin)
+
+**Prerequisite for:** Task 1 (Copilot agent definition). Must be done before Copilot can be used
+with `--model` flag in headless mode.
+
+**Problem:**  
+The executor calls `invoke.headless(prompt, { model: getActiveModel('copilot') })`. `getActiveModel`
+returns the Hydra internal model ID (e.g. `copilot-claude-sonnet-4-6`), but the CLI `--model` flag
+requires the actual CLI model ID (e.g. `claude-sonnet-4.6`). Passing the Hydra internal ID to
+`--model` results in "unknown model" errors.
+
+This is Copilot-specific because existing agents (`claude`, `gemini`, `codex`) happen to use the
+same identifier for both. Copilot's internal IDs are prefixed (`copilot-*`) to avoid collision.
+
+**Solution:**  
+Add `resolveCliModelId(modelId)` to `lib/hydra-model-profiles.mjs` that returns
+`MODEL_PROFILES[modelId]?.cliModelId ?? modelId`. Apply it in Copilot's `invoke.headless()`:
+
+```javascript
+import { resolveCliModelId } from '../hydra-model-profiles.mjs';
+
+headless: (prompt, opts = {}) => {
+  const args = ['-p', prompt, '--output-format', 'json', '--silent', '--no-ask-user'];
+  if (opts.model) args.push('--model', resolveCliModelId(opts.model));
+  // ...
+  return ['copilot', args];
+},
+```
+
+Each `MODEL_PROFILES` entry for a Copilot model carries a `cliModelId` field:
+
+```javascript
+'copilot-claude-sonnet-4-6': {
+  name: 'Claude Sonnet 4.6 (via Copilot)',
+  agent: 'copilot',
+  tier: 'default',
+  contextWindow: 200000,
+  cliModelId: 'claude-sonnet-4.6',     // ← CLI flag value (dots, not hyphens)
+},
+'copilot-gemini-3-pro-preview': {
+  name: 'Gemini 3 Pro Preview (via Copilot)',
+  agent: 'copilot',
+  tier: 'premium',
+  contextWindow: 1000000,
+  cliModelId: 'gemini-3-pro-preview',  // ← matches live --model choice
+},
+// ...
+```
+
+`resolveCliModelId` falls back to the input value unchanged, so existing agents (`claude`, `gemini`,
+`codex`) that already use the correct CLI IDs require **no changes**.
+
+> This pattern is now the **documented convention** for all future agent plugins. See
+> [Task E in `2026-03-10-dynamic-agent-dispatch.md`](./2026-03-10-dynamic-agent-dispatch.md#task-e-extensibility-contract--future-agent-guide)
+> for the extensibility contract every new agent must follow.
+
+**Tests:**
+
+```javascript
+describe('resolveCliModelId', () => {
+  it('returns cliModelId when present in MODEL_PROFILES', () => {
+    // Copilot internal ID → CLI flag value
+    assert.equal(resolveCliModelId('copilot-claude-sonnet-4-6'), 'claude-sonnet-4.6');
+    assert.equal(resolveCliModelId('copilot-gemini-3-pro-preview'), 'gemini-3-pro-preview');
+    assert.equal(resolveCliModelId('copilot-gpt-5-4'), 'gpt-5.4');
+  });
+
+  it('returns input unchanged for IDs already matching CLI format', () => {
+    // Existing agents — IDs are their own cliModelId
+    assert.equal(resolveCliModelId('claude-sonnet-4.6'), 'claude-sonnet-4.6');
+    assert.equal(resolveCliModelId('gpt-5.4'), 'gpt-5.4');
+  });
+
+  it('returns input unchanged for unknown IDs (safe fallback)', () => {
+    assert.equal(resolveCliModelId('some-unknown-model'), 'some-unknown-model');
+  });
+});
+```
+
 ---
 
 ## Known Risks & Open Questions
@@ -1112,8 +1202,20 @@ The project-level config allows teams to automatically give Copilot access to Hy
 
 ---
 
+## Related Plans
+
+- [`2026-03-10-dynamic-agent-dispatch.md`](./2026-03-10-dynamic-agent-dispatch.md) — Makes dispatch
+  role-configurable and adds extensibility contract for future agents (opencode, etc.). Task 11
+  above (the `resolveCliModelId` helper) is Phase 1 of that plan and also a prerequisite for this
+  integration's Task 1.
+- [`2026-03-08-agent-plugin-refactor.md`](./2026-03-08-agent-plugin-refactor.md) — The data-driven
+  plugin architecture that eliminates the need for executor changes in this integration.
+
+---
+
 _Document created: 2026-03-07_
 _Updated: 2026-03-08 — expanded model set (Sonnet 4.6, Opus 4.6, GPT-5.4, Gemini 3.1 Pro); added --model flag to invoke functions; added features.jsonOutput gate for upcoming JSON output mode; added per-role model assignments (copilot-reviewer, copilot-architect); downgraded JSON output risk from High to Medium_
 _Updated: 2026-03-10 — aligned with agent plugin refactor (2026-03-08). Task 1 now includes full plugin interface (features, parseOutput, errorPatterns, modelBelongsTo, quotaVerify, economyModel, readInstructions, taskRules). Task 3 eliminated — no executor changes needed. Task 6 updated to leverage existing registerCustomAgentMcp() infra. Tests expanded to cover all plugin fields. Implementation phases simplified._
 _Updated: 2026-03-10 (v2) — validated against live CLI. **`--output-format json` is now live** (JSONL event stream). `features.jsonOutput` set to `true`. `parseOutput()` rewritten for JSONL schema (assistant.message content + result.usage.premiumRequests). `cliModelId` values validated: Claude uses dots (`claude-sonnet-4.6`), Gemini is `gemini-3-pro-preview`. MCP config path corrected to `~/.copilot/mcp-config.json`. Added `--silent`, `--no-ask-user` to headless invocation. Auto-edit permission flags updated to `shell(git:*)` / `write`. Risk table updated: JSON output risk resolved, cliModelId risk downgraded to Low. Appendix flag reference rewritten from live `--help` output._
+_Updated: 2026-03-10 (v3) — Added Task 11 (`resolveCliModelId` translation helper — prerequisite for Task 1). Added Phase 5 reference to dynamic dispatch plan. Added Related Plans section linking to `2026-03-10-dynamic-agent-dispatch.md`._
 _Status: **Ready for implementation** — all CLI options validated against live binary_
