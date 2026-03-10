@@ -19,7 +19,7 @@ import {
   formatEffortDisplay,
 } from './hydra-agents.mjs';
 import { promptChoice } from './hydra-prompt-choice.mjs';
-import { formatBenchmarkAnnotation } from './hydra-model-profiles.mjs';
+import { formatBenchmarkAnnotation } from './hydra-model-profiles.ts';
 
 interface RoleConfig {
   agent?: string;

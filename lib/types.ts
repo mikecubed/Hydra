@@ -355,13 +355,14 @@ export interface ModelProfile {
   maxOutput?: number;
   pricePer1M?: { input: number; output: number };
   costPer1K?: { input: number; output: number };
-  tokPerSec?: number;
-  ttft?: number;
+  tokPerSec?: number | null;
+  ttft?: number | null;
   reasoning?: {
     type: string;
-    levels: string[];
+    levels?: string[];
     budgets?: Record<string, number>;
-    default: string;
+    variants?: Record<string, string>;
+    default?: string;
   };
   benchmarks?: Record<string, number>;
   qualityScore: number;
@@ -369,7 +370,7 @@ export interface ModelProfile {
   speedScore?: number;
   strengths?: string[];
   bestFor?: string[];
-  rateLimits?: Record<string | number, { rpm: number; itpm: number; otpm: number }>;
+  rateLimits?: Record<string | number, { rpm: number; tpm?: number; itpm?: number; otpm?: number; rpd?: number }>;
   /** CLI-specific model ID override (e.g. for Copilot agent where CLI name differs from API ID) */
   cliModelId?: string;
 }

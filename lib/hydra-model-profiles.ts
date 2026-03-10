@@ -10,11 +10,13 @@
  * nearly everything else.
  */
 
+import type { ModelProfile } from './types.ts';
+
 // ── MODEL_PROFILES ──────────────────────────────────────────────────────────
 // Keyed by exact model ID. Each entry contains benchmark, pricing, speed,
 // and capability data sourced from docs/MODEL_PROFILES.md.
 
-export const MODEL_PROFILES = {
+export const MODEL_PROFILES: Record<string, ModelProfile> = {
   'claude-opus-4-6': {
     id: 'claude-opus-4-6',
     provider: 'anthropic',
@@ -646,52 +648,50 @@ export const AGENT_PRESETS = {
 
 /**
  * Get a single model profile by exact ID.
- * @param {string} modelId
- * @returns {object|null}
  */
-export function getProfile(modelId) {
-  if (!modelId) return null;
-  return MODEL_PROFILES[modelId] || null;
+export function getProfile(modelId: string): ModelProfile | null {
+  if (modelId === '') return null;
+  return MODEL_PROFILES[modelId] ?? null;
 }
 
 /**
  * Get all profiles for a specific agent.
- * @param {string} agent - 'claude', 'codex', or 'gemini'
- * @returns {object[]}
  */
-export function getProfilesForAgent(agent) {
-  if (!agent) return [];
+export function getProfilesForAgent(agent: string): ModelProfile[] {
+  if (agent === '') return [];
   return Object.values(MODEL_PROFILES).filter((p) => p.agent === agent);
 }
 
 /**
  * Get agent presets (default/fast/cheap model IDs).
- * @param {string} agent
- * @returns {{ default: string, fast: string, cheap: string }|null}
  */
-export function getAgentPresets(agent) {
-  return AGENT_PRESETS[agent] || null;
+export function getAgentPresets(agent: string): { default: string; fast: string; cheap: string } | null {
+  return (AGENT_PRESETS as Record<string, { default: string; fast: string; cheap: string }>)[agent] ?? null;
 }
 
 /**
  * Get role recommendation data.
- * @param {string} role
- * @returns {{ agent: string, model: string|null, reasoningEffort: string|null, models: string[], note: string }|null}
  */
-export function getRoleRecommendation(role) {
-  return ROLE_DEFAULTS[role] || null;
+export function getRoleRecommendation(role: string): {
+  agent: string;
+  model: string | null;
+  reasoningEffort: string | null;
+  models: string[];
+  note: string;
+} | null {
+  return (ROLE_DEFAULTS as Record<string, { agent: string; model: string | null; reasoningEffort: string | null; models: string[]; note: string }>)[role] ?? null;
 }
 
 /**
  * Get fallback candidates for an agent, sorted by qualityScore descending.
  * Excludes the specified model ID.
- * @param {string} agent
- * @param {string} excludeId - Model ID to exclude (the failed one)
- * @returns {Array<{ id: string, qualityScore: number, displayName: string }>}
  */
-export function getFallbackOrder(agent, excludeId) {
+export function getFallbackOrder(
+  agent: string,
+  excludeId: string,
+): Array<{ id: string; qualityScore: number; displayName: string }> {
   const profiles = getProfilesForAgent(agent);
-  const exclude = (excludeId || '').toLowerCase();
+  const exclude = excludeId.toLowerCase();
   return profiles
     .filter((p) => p.id.toLowerCase() !== exclude)
     .sort((a, b) => b.qualityScore - a.qualityScore)
@@ -700,32 +700,30 @@ export function getFallbackOrder(agent, excludeId) {
 
 /**
  * Format a compact benchmark annotation for display.
- * @param {string} modelId
- * @param {object} [opts]
- * @param {boolean} [opts.includePrice=true]
- * @param {boolean} [opts.includeSpeed=true]
- * @param {boolean} [opts.includeSwe=true]
- * @returns {string} e.g. "SWE 80.8% | 66 tok/s | $5/$25"
+ * e.g. "SWE 80.8% | 66 tok/s | $5/$25"
  */
-export function formatBenchmarkAnnotation(modelId, opts = {}) {
+export function formatBenchmarkAnnotation(
+  modelId: string,
+  opts: { includePrice?: boolean; includeSpeed?: boolean; includeSwe?: boolean } = {},
+): string {
   const profile = getProfile(modelId);
   if (!profile) return '';
 
-  const parts = [];
+  const parts: string[] = [];
   const { includePrice = true, includeSpeed = true, includeSwe = true } = opts;
 
-  if (includeSwe && profile.benchmarks.sweBench) {
-    parts.push(`SWE ${profile.benchmarks.sweBench}%`);
+  if (includeSwe && profile.benchmarks?.['sweBench'] != null) {
+    parts.push(`SWE ${String(profile.benchmarks['sweBench'])}%`);
   }
 
-  if (includeSpeed && profile.tokPerSec) {
-    parts.push(`${profile.tokPerSec} tok/s`);
+  if (includeSpeed && profile.tokPerSec != null) {
+    parts.push(`${String(profile.tokPerSec)} tok/s`);
   }
 
-  if (includePrice) {
+  if (includePrice && profile.pricePer1M) {
     const inp = profile.pricePer1M.input;
     const out = profile.pricePer1M.output;
-    const fmt = (v) => (v >= 1 ? `$${v}` : `$${v.toFixed(2)}`);
+    const fmt = (v: number) => (v >= 1 ? `$${String(v)}` : `$${v.toFixed(2)}`);
     parts.push(`${fmt(inp)}/${fmt(out)}`);
   }
 
@@ -735,11 +733,13 @@ export function formatBenchmarkAnnotation(modelId, opts = {}) {
 /**
  * Get all role defaults as an object.
  * Returns { roles, recommendations } suitable for DEFAULT_CONFIG.
- * @returns {{ roles: object, recommendations: object }}
  */
-export function getDefaultRoles() {
-  const roles = {};
-  const recommendations = {};
+export function getDefaultRoles(): {
+  roles: Record<string, { agent: string; model: string | null; reasoningEffort: string | null }>;
+  recommendations: Record<string, { models: string[]; reasoningEffort: string | null; note: string }>;
+} {
+  const roles: Record<string, { agent: string; model: string | null; reasoningEffort: string | null }> = {};
+  const recommendations: Record<string, { models: string[]; reasoningEffort: string | null; note: string }> = {};
 
   for (const [role, rd] of Object.entries(ROLE_DEFAULTS)) {
     roles[role] = {
@@ -760,12 +760,11 @@ export function getDefaultRoles() {
 /**
  * Get cost table in COST_PER_1K format (model ID → { input, output }).
  * Compatible with hydra-provider-usage.mjs.
- * @returns {Object<string, { input: number, output: number }>}
  */
-export function getCostTable() {
-  const table = {};
+export function getCostTable(): Record<string, { input: number; output: number }> {
+  const table: Record<string, { input: number; output: number }> = {};
   for (const profile of Object.values(MODEL_PROFILES)) {
-    table[profile.id] = { ...profile.costPer1K };
+    if (profile.costPer1K) table[profile.id] = { ...profile.costPer1K };
   }
   return table;
 }
@@ -773,12 +772,15 @@ export function getCostTable() {
 /**
  * Get reasoning capabilities map in MODEL_REASONING_CAPS format.
  * Uses longest-prefix matching keys, same shape as hydra-agents.mjs.
- * @returns {Object<string, { type: string, levels?: string[], budgets?: object, variants?: object, default?: string }>}
  */
-export function getReasoningCapsMap() {
+export function getReasoningCapsMap(): Record<
+  string,
+  { type: string; levels?: string[]; budgets?: Record<string, number>; variants?: Record<string, unknown>; default?: string }
+> {
   // Build prefix-based map from profiles, same key style as the old hardcoded map.
   // Deduplicate by prefix — use the primary model for each prefix.
-  const map = {};
+  type ReasoningEntry = { type: string; levels?: string[]; budgets?: Record<string, number>; variants?: Record<string, unknown>; default?: string };
+  const map: Record<string, ReasoningEntry> = {};
 
   // OpenAI o-series
   map['o1'] = { type: 'effort', levels: ['low', 'medium', 'high'], default: 'medium' };
@@ -786,32 +788,31 @@ export function getReasoningCapsMap() {
 
   // Derive from profiles
   const o4 = MODEL_PROFILES['o4-mini'];
-  if (o4)
+  if (o4.reasoning)
     map['o4-mini'] = {
       type: o4.reasoning.type,
       levels: o4.reasoning.levels,
       default: o4.reasoning.default,
     };
 
-  const gpt5 = MODEL_PROFILES['gpt-5'];
-  if (gpt5) map['gpt-5'] = { type: 'none' };
+  map['gpt-5'] = { type: 'none' };
 
   const opus = MODEL_PROFILES['claude-opus-4-6'];
-  if (opus) map['claude-opus'] = { ...opus.reasoning };
+  if (opus.reasoning) map['claude-opus'] = { ...opus.reasoning };
 
   const sonnet46 = MODEL_PROFILES['claude-sonnet-4-6'];
-  if (sonnet46) map['claude-sonnet-4-6'] = { ...sonnet46.reasoning };
+  if (sonnet46.reasoning) map['claude-sonnet-4-6'] = { ...sonnet46.reasoning };
 
   const sonnet = MODEL_PROFILES['claude-sonnet-4-5-20250929'];
-  if (sonnet) map['claude-sonnet'] = { ...sonnet.reasoning };
+  if (sonnet.reasoning) map['claude-sonnet'] = { ...sonnet.reasoning };
 
   map['claude-haiku'] = { type: 'none' };
 
   const gem31pro = MODEL_PROFILES['gemini-3.1-pro-preview'];
-  if (gem31pro) map['gemini-3.1-pro'] = { ...gem31pro.reasoning };
+  if (gem31pro.reasoning) map['gemini-3.1-pro'] = { ...gem31pro.reasoning };
 
   const gem3pro = MODEL_PROFILES['gemini-3-pro-preview'];
-  if (gem3pro) map['gemini-3-pro'] = { ...gem3pro.reasoning };
+  if (gem3pro.reasoning) map['gemini-3-pro'] = { ...gem3pro.reasoning };
 
   map['gemini-3-flash'] = { type: 'none' };
   map['gemini-2.5'] = { type: 'none' };
@@ -821,26 +822,22 @@ export function getReasoningCapsMap() {
 
 /**
  * Get short display name for a model ID.
- * @param {string} modelId
- * @returns {string|null} Short name or null if not in profiles
  */
-export function getShortName(modelId) {
+export function getShortName(modelId: string): string | null {
   const profile = getProfile(modelId);
-  return profile ? profile.shortName : null;
+  return profile ? (profile.shortName ?? null) : null;
 }
 
 /**
  * Get the concierge fallback chain derived from ROLE_DEFAULTS.
- * @returns {Array<{ provider: string, model: string }>}
  */
-export function getConciergeFallbackChain() {
+export function getConciergeFallbackChain(): Array<{ provider: string; model: string }> {
   const concierge = ROLE_DEFAULTS.concierge;
-  if (!concierge) return [];
 
   // Primary: concierge model
-  const chain = [];
+  const chain: Array<{ provider: string; model: string }> = [];
   const primaryProfile = getProfile(concierge.model);
-  if (primaryProfile) {
+  if (primaryProfile !== null) {
     chain.push({ provider: primaryProfile.provider, model: primaryProfile.id });
   }
 
@@ -848,12 +845,12 @@ export function getConciergeFallbackChain() {
   for (const modelId of concierge.models) {
     if (modelId === concierge.model) continue;
     const p = getProfile(modelId);
-    if (p) chain.push({ provider: p.provider, model: p.id });
+    if (p !== null) chain.push({ provider: p.provider, model: p.id });
   }
 
   // Final fallback: cheapest flash model
   const flash = getProfile('gemini-3-flash-preview');
-  if (flash && !chain.some((c) => c.model === flash.id)) {
+  if (flash !== null && !chain.some((c) => c.model === flash.id)) {
     chain.push({ provider: flash.provider, model: flash.id });
   }
 
@@ -862,30 +859,56 @@ export function getConciergeFallbackChain() {
 
 /**
  * Get rate limits for a model at a specific provider tier.
- * @param {string} modelId
- * @param {string|number} tier - Provider tier (e.g. 1, 2, 3, 'free')
- * @returns {{ rpm: number, tpm?: number, itpm?: number, otpm?: number, rpd?: number }|null}
  */
-export function getRateLimits(modelId, tier) {
+export function getRateLimits(
+  modelId: string,
+  tier: string | number,
+): { rpm: number; tpm?: number; itpm?: number; otpm?: number; rpd?: number } | null {
   const profile = getProfile(modelId);
-  if (!profile?.rateLimits) return null;
-  // Try exact match, then fall back to lowest available tier
-  const limits = profile.rateLimits[tier] || profile.rateLimits[String(tier)];
-  if (limits) return limits;
+  if (profile?.rateLimits === undefined) return null;
+  // Cast to allow undefined for runtime key misses (noUncheckedIndexedAccess is off)
+  type RateLimitEntry = { rpm: number; tpm?: number; itpm?: number; otpm?: number; rpd?: number };
+  const limits = profile.rateLimits as Record<string | number, RateLimitEntry | undefined>;
+  const entry = limits[tier] ?? limits[String(tier)];
+  if (entry !== undefined) return entry;
   // Fallback: return lowest tier limits (most conservative)
   const keys = Object.keys(profile.rateLimits);
-  return keys.length > 0 ? profile.rateLimits[keys[0]] : null;
+  return keys.length > 0 ? (limits[keys[0]] ?? null) : null;
 }
 
 /**
  * Get smart mode tier mappings derived from agent presets.
- * @returns {{ performance: object, balanced: object, economy: object }}
  */
-export function getModeTiers() {
+export function getModeTiers(): {
+  performance: Record<string, string>;
+  balanced: Record<string, string>;
+  economy: Record<string, string>;
+  custom: Record<string, string>;
+} {
   return {
     performance: { gemini: 'default', codex: 'default', claude: 'default' },
     balanced: { gemini: 'fast', codex: 'fast', claude: 'fast' },
     economy: { gemini: 'cheap', codex: 'cheap', claude: 'cheap' },
     custom: { gemini: 'default', codex: 'default', claude: 'default' },
   };
+}
+
+/**
+ * Resolves a Hydra-internal model ID to the CLI-specific model ID string.
+ * Used when invoking agent CLIs that have different model ID formats.
+ * Falls back to the input modelId if no override is registered.
+ */
+export function resolveCliModelId(modelId: string, agent?: string): string {
+  // Check agent-specific profile first (agent match narrows lookup)
+  if (agent !== undefined && agent !== '') {
+    const agentProfile = Object.values(MODEL_PROFILES).find(
+      (p) => p.agent === agent && p.id === modelId,
+    );
+    if (agentProfile?.cliModelId !== undefined && agentProfile.cliModelId !== '') {
+      return agentProfile.cliModelId;
+    }
+  }
+  // Global lookup — use getProfile() to safely handle unknown model IDs
+  const profile = getProfile(modelId);
+  return profile?.cliModelId ?? modelId;
 }
