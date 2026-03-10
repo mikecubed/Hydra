@@ -55,6 +55,7 @@ import {
   getSuggestionById,
   createSuggestionFromRound,
   promptSuggestionPicker,
+  type SuggestionEntry,
 } from './hydra-evolve-suggestions.ts';
 import { resolveProject, loadHydraConfig, HYDRA_ROOT } from './hydra-config.ts';
 import { getAgent } from './hydra-agents.ts';
@@ -2103,7 +2104,7 @@ async function main() {
 
   // ── Suggestions backlog ─────────────────────────────────────────────
   const suggestions = loadSuggestions(evolveDir);
-  let activeSuggestion = null;
+  let activeSuggestion: SuggestionEntry | null = null;
   let activeSuggestionId = null;
 
   if (!isResume && evolveConfig.suggestions?.enabled !== false) {
@@ -2115,7 +2116,7 @@ async function main() {
       });
 
       if (pick.action === 'pick') {
-        activeSuggestion = pick.suggestion;
+        activeSuggestion = pick.suggestion ?? null;
         activeSuggestionId = activeSuggestion?.id ?? null;
         updateSuggestion(suggestions, activeSuggestion?.id ?? '', { status: 'exploring' });
         saveSuggestions(evolveDir, suggestions);
@@ -2234,10 +2235,10 @@ async function main() {
     // Select focus area (rotate, skip recently covered)
     const recentAreas = roundResults.map((r: RoundResult) => r.area);
     let area;
-    const usingSuggestion = activeSuggestion && round === startRound;
+    const usingSuggestion = activeSuggestion !== null && round === startRound;
 
-    if (usingSuggestion) {
-      area = activeSuggestion.area || focusAreas[0] || 'general';
+    if (usingSuggestion && activeSuggestion !== null) {
+      area = activeSuggestion.area ?? focusAreas[0] ?? 'general';
     } else {
       const areaIndex = (round - 1) % focusAreas.length;
       area = focusAreas[areaIndex];
@@ -2272,7 +2273,7 @@ async function main() {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       let deliberation: any;
 
-      if (usingSuggestion) {
+      if (usingSuggestion && activeSuggestion !== null) {
         // ── SUGGESTION PATH: Skip RESEARCH + DELIBERATE ────────────────
         log.phase('RESEARCH');
         log.dim('Skipped — using suggestion from backlog');

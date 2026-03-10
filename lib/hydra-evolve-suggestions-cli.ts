@@ -61,9 +61,9 @@ function formatEntry(s: SuggestionEntry) {
   else if (s.priority === 'low') priorityBadge = pc.dim('low');
   else priorityBadge = pc.yellow('med');
 
-  console.log(`  ${statusColor(s.id)} ${pc.yellow(s.area)}: ${(s.title ?? '').slice(0, 80)}`);
+  console.log(`  ${statusColor(s.id ?? '')} ${pc.yellow(s.area ?? '')}: ${(s.title ?? '').slice(0, 80)}`);
 
-  const parts = [`status: ${statusColor(s.status)}`, `priority: ${priorityBadge}`];
+  const parts = [`status: ${statusColor(s.status ?? '')}`, `priority: ${priorityBadge}`];
   if ((s.attempts ?? 0) > 0) {
     parts.push(`attempts: ${s.attempts}/${s.maxAttempts}`);
     if (s.lastAttemptScore != null) parts.push(`last: ${s.lastAttemptScore}/10`);

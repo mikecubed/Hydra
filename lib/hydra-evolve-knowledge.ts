@@ -69,7 +69,7 @@ export function loadKnowledgeBase(evolveDir: string): KnowledgeBase {
   const filePath = knowledgePath(evolveDir);
   try {
     const raw = fs.readFileSync(filePath, 'utf8');
-    const parsed = JSON.parse(raw) as Record<string, unknown>;
+    const parsed = JSON.parse(raw) as KnowledgeBase;
     if (!parsed.entries || !Array.isArray(parsed.entries)) {
       return { ...EMPTY_KB };
     }

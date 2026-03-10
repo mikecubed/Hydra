@@ -79,19 +79,24 @@ async function reviewCommand(projectRoot: string, options: Record<string, string
 
     // Show report info if available
     if (reportEntry) {
-      const statusColor = reportEntry.status === 'success' ? pc.green : pc.yellow;
-      console.log(`  Status: ${statusColor(reportEntry.status.toUpperCase())}`);
-      console.log(`  Agent: ${reportEntry.agent || '?'}`);
-      if (reportEntry.tokens) console.log(`  Tokens: ~${reportEntry.tokens.toLocaleString()}`);
-      if (reportEntry.verdict) console.log(`  Verdict: ${reportEntry.verdict}`);
-      if (reportEntry.verification?.command) {
-        const vIcon = reportEntry.verification.passed ? pc.green('pass') : pc.red('FAIL');
-        console.log(`  Verification: ${vIcon} (${reportEntry.verification.command})`);
+      const status = reportEntry['status'] as string | undefined;
+      const statusColor = status === 'success' ? pc.green : pc.yellow;
+      console.log(`  Status: ${statusColor((status ?? '').toUpperCase())}`);
+      console.log(`  Agent: ${String(reportEntry['agent'] ?? '?')}`);
+      const tokens = reportEntry['tokens'] as number | undefined;
+      if (tokens) console.log(`  Tokens: ~${tokens.toLocaleString()}`);
+      const verdict = reportEntry['verdict'] as string | undefined;
+      if (verdict) console.log(`  Verdict: ${verdict}`);
+      const verification = reportEntry['verification'] as Record<string, unknown> | undefined;
+      if (verification?.['command']) {
+        const vIcon = verification['passed'] ? pc.green('pass') : pc.red('FAIL');
+        console.log(`  Verification: ${vIcon} (${String(verification['command'])})`);
       }
-      if (reportEntry.violations?.length > 0) {
-        console.log(pc.red(`  Violations: ${reportEntry.violations.length}`));
-        for (const v of reportEntry.violations) {
-          console.log(pc.red(`    [${v.severity}] ${v.detail}`));
+      const violations = reportEntry['violations'] as Array<Record<string, unknown>> | undefined;
+      if (violations && violations.length > 0) {
+        console.log(pc.red(`  Violations: ${String(violations.length)}`));
+        for (const v of violations) {
+          console.log(pc.red(`    [${String(v['severity'])}] ${String(v['detail'])}`));
         }
       }
     }
@@ -110,7 +115,7 @@ async function reviewCommand(projectRoot: string, options: Record<string, string
       protectedFiles: PROTECTED_FILES,
       protectedPatterns: BASE_PROTECTED_PATTERNS,
     });
-    if (liveViolations.length > 0 && !reportEntry?.violations?.length) {
+    if (liveViolations.length > 0 && !(reportEntry?.['violations'] as unknown[] | undefined)?.length) {
       console.log(pc.red(`\n  Live violation scan: ${liveViolations.length} issue(s)`));
       for (const v of liveViolations) {
         console.log(pc.red(`    [${v.severity}] ${v.detail}`));

@@ -97,7 +97,7 @@ export function loadSuggestions(evolveDir: string): Suggestions {
   const filePath = suggestionsPath(evolveDir);
   try {
     const raw = fs.readFileSync(filePath, 'utf8');
-    const parsed = JSON.parse(raw) as Record<string, unknown>;
+    const parsed = JSON.parse(raw) as Suggestions;
     if (!parsed.entries || !Array.isArray(parsed.entries)) {
       return { ...EMPTY_SUGGESTIONS, entries: [], stats: { ...EMPTY_SUGGESTIONS.stats } };
     }
