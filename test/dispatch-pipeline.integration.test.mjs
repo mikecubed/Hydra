@@ -164,15 +164,15 @@ test('mock-agent helper exports the expected callable helpers', () => {
 
 test('mock agent helper is never imported from production modules', async () => {
   const productionFiles = (await walkFiles(LIB_DIR)).filter((filePath) =>
-    filePath.endsWith('.mjs'),
+    filePath.endsWith('.mjs') || filePath.endsWith('.ts'),
   );
 
-  assert.ok(productionFiles.length > 0, 'expected to scan production .mjs files');
+  assert.ok(productionFiles.length > 0, 'expected to scan production .mjs/.ts files');
 
   for (const filePath of productionFiles) {
     const source = await fs.readFile(filePath, 'utf8');
     assert.equal(
-      /(?:\.\/|\.\.\/).*mock-agent\.mjs|helpers[\\/]+mock-agent\.mjs|mock-agent\.mjs/.test(source),
+      /(?:\.\/|\.\.\/).*mock-agent(?:\.mjs|\.ts)|helpers[\\/]+mock-agent(?:\.mjs|\.ts)|mock-agent(?:\.mjs|\.ts)/.test(source),
       false,
       `production module must not import test helper: ${path.relative(PROJECT_ROOT, filePath)}`,
     );

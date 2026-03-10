@@ -31,7 +31,7 @@ import pc from 'picocolors';
 import { loadHydraConfig, resolveProject } from './hydra-config.ts';
 import { initAgentRegistry, classifyTask, bestAgentFor, getActiveModel } from './hydra-agents.ts';
 import { parseArgs, ensureDir, runProcess } from './hydra-utils.ts';
-import { resolveVerificationPlan } from './hydra-verification.mjs';
+import { resolveVerificationPlan } from './hydra-verification.ts';
 import { recordCallStart, recordCallComplete, recordCallError } from './hydra-metrics.ts';
 import { getAgentInstructionFile } from './hydra-sync-md.ts';
 import { BudgetTracker } from './hydra-shared/budget-tracker.ts';

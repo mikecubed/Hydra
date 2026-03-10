@@ -31,7 +31,7 @@ import {
 } from './hydra-agents.ts';
 import { recordCallStart, recordCallComplete } from './hydra-metrics.ts';
 import { checkUsage as _checkUsage } from './hydra-usage.ts';
-import { resolveVerificationPlan } from './hydra-verification.mjs';
+import { resolveVerificationPlan } from './hydra-verification.ts';
 import { BudgetTracker } from './hydra-shared/budget-tracker.ts';
 import { executeAgentWithRecovery } from './hydra-shared/agent-executor.ts';
 import {

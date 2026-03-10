@@ -1,10 +1,10 @@
 /**
- * scripts/setup-hooks.mjs
+ * scripts/setup-hooks.ts
  *
  * Installs Hydra's git hooks (husky) and verifies the quality toolchain.
  * Run this after cloning the repo or when hooks need to be re-installed:
  *
- *   node scripts/setup-hooks.mjs
+ *   node scripts/setup-hooks.ts
  *   # or via npm:
  *   npm run setup:hooks
  */
@@ -18,23 +18,24 @@ const ROOT = fileURLToPath(new URL('..', import.meta.url));
 
 const pc = await import('picocolors').then((m) => m.default);
 
-function run(cmd, label) {
+function run(cmd: string, label: string) {
   process.stdout.write(`  ${pc.dim('→')} ${label}…`);
   try {
     execSync(cmd, { cwd: ROOT, stdio: 'pipe' });
     console.log(` ${pc.green('✓')}`);
     return true;
-  } catch (err) {
+  } catch (err: unknown) {
     console.log(` ${pc.red('✗')}`);
-    const stdout = err.stdout?.toString().trim();
-    const stderr = err.stderr?.toString().trim();
-    const detail = [stderr, stdout].filter(Boolean).join('\n     ') || err.message;
+    const e = err as { stdout?: Buffer; stderr?: Buffer; message?: string };
+    const stdout = e.stdout?.toString().trim();
+    const stderr = e.stderr?.toString().trim();
+    const detail = [stderr, stdout].filter(Boolean).join('\n     ') || e.message || '';
     console.error(`     ${pc.red(detail)}`);
     return false;
   }
 }
 
-function check(label, condition) {
+function check(label: string, condition: boolean) {
   const icon = condition ? pc.green('✓') : pc.red('✗');
   console.log(`  ${icon} ${label}`);
   return condition;

@@ -314,6 +314,8 @@ export function promptChoice(rl: any, opts: {
   timeoutMs?: number;
   multiSelect?: boolean;
   preSelected?: any[];
+  message?: string;
+  [key: string]: unknown;
 } = {}) {
   const {
     title = 'Selection',

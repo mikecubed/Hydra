@@ -133,16 +133,16 @@ async function defaultRewriteFn(text: string): Promise<string | null> {
     return null;
   }
 
-  const messages = [
+  const messages: { role: 'system' | 'user' | 'assistant'; content: string }[] = [
     {
-      role: 'system',
+      role: 'system' as const,
       content: [
         "Rewrite the user's instruction as a clear, direct, one-sentence technical task.",
         'Remove ambiguity. Keep it concise.',
         'Output only the rewritten task, no explanation.',
       ].join(' '),
     },
-    { role: 'user', content: text },
+    { role: 'user' as const, content: text },
   ];
 
   let result = '';

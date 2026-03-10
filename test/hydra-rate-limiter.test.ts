@@ -79,17 +79,17 @@ describe('provider rate limiters', () => {
 
   it('getRateLimitStats returns per-provider info', () => {
     const stats = getRateLimitStats();
-    assert.ok(stats.openai);
-    assert.ok(typeof stats.openai.available === 'number');
-    assert.ok(typeof stats.openai.capacity === 'number');
+    assert.ok(stats['openai']);
+    assert.ok(typeof stats['openai'].available === 'number');
+    assert.ok(typeof stats['openai'].capacity === 'number');
   });
 
   it('resetRateLimiter restores tokens', () => {
     tryAcquireRateLimit('openai');
     tryAcquireRateLimit('openai');
-    const before = getRateLimitStats().openai.available;
+    const before = getRateLimitStats()['openai'].available;
     resetRateLimiter('openai');
-    const after = getRateLimitStats().openai.available;
+    const after = getRateLimitStats()['openai'].available;
     assert.ok(after >= before);
   });
 });
@@ -121,7 +121,7 @@ describe('concurrency', () => {
     initConcurrency(2);
     const release = tryAcquireConcurrencySlot();
     assert.equal(typeof release, 'function');
-    release();
+    release!();
   });
 
   it('release is idempotent', async () => {

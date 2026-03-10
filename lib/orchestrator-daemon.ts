@@ -1282,7 +1282,7 @@ function startDaemon(options: Record<string, string>) {
         AGENT_NAMES,
         getAgent: getAgent as (name: string) => AgentDef | undefined,
         listAgents: listAgents as (...args: unknown[]) => AgentDef[],
-        resolveVerificationPlan: resolveVerificationPlan as (...args: unknown[]) => Record<string, unknown>,
+        resolveVerificationPlan: resolveVerificationPlan as unknown as (...args: unknown[]) => Record<string, unknown>,
         projectRoot: config.projectRoot,
         runVerification: runVerification as (...args: unknown[]) => void,
         archiveState,

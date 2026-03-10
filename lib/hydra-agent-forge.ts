@@ -866,7 +866,7 @@ export function persistForgedAgent(spec: ForgeSpec, session: Partial<ForgeSessio
     /* ignore */
   }
 
-  registerAgent(spec.name, { ...spec, type: AGENT_TYPE.VIRTUAL });
+  registerAgent(spec.name, { ...spec, type: AGENT_TYPE.VIRTUAL as import('./types.ts').AgentType });
 
   const registry = loadForgeRegistry();
   registry[spec.name] = {

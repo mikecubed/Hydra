@@ -16,7 +16,7 @@ import './hydra-env.ts';
 import readline from 'node:readline';
 import path from 'node:path';
 import { exec, spawn, spawnSync } from 'node:child_process';
-import { getProjectContext, buildAgentContext } from './hydra-context.ts';
+import { buildAgentContext } from './hydra-context.ts';
 import { rewriteNodeInvocation, spawnHydraNode, spawnHydraNodeSync } from './hydra-exec.ts';
 import {
   getAgent,
@@ -29,20 +29,14 @@ import {
   resetAgentModel,
   getVerifier,
   listAgents,
-  resolvePhysicalAgent,
   AGENT_TYPE,
-  registerAgent,
-  unregisterAgent,
   formatEffortDisplay,
   bestAgentFor,
 } from './hydra-agents.ts';
 import {
   checkUsage,
   renderUsageDashboard,
-  renderUsageBar,
   formatTokens,
-  getContingencyOptions,
-  executeContingency,
 } from './hydra-usage.ts';
 import { verifyAgentQuota } from './hydra-model-recovery.ts';
 import {
@@ -57,9 +51,7 @@ import {
   HYDRA_RUNTIME_ROOT,
   loadHydraConfig,
   saveHydraConfig,
-  getRoleConfig,
   getRecentProjects,
-  getProviderPresets,
   diffConfig,
 } from './hydra-config.ts';
 import { envFileExists } from './hydra-env.ts';
@@ -81,11 +73,9 @@ import {
   hydraLogoCompact,
   renderDashboard,
   renderStatsDashboard,
-  progressBar,
   agentBadge,
   label,
   sectionHeader,
-  divider,
   colorAgent,
   createSpinner,
   extractTopic,
@@ -132,7 +122,6 @@ import {
   getConciergeModelLabel,
   switchConciergeModel,
   exportConversation,
-  getRecentContext,
   setConciergeBaseUrl,
 } from './hydra-concierge.ts';
 import { buildFallbackChain, detectAvailableProviders } from './hydra-concierge-providers.ts';
@@ -155,7 +144,6 @@ import {
   generateSitrep,
   pushActivity,
   annotateDispatch,
-  annotateHandoff,
   annotateCompletion,
 } from './hydra-activity.ts';
 import {
@@ -172,11 +160,7 @@ import {
   listForgedAgents,
   removeForgedAgent,
   testForgedAgent,
-  validateAgentSpec,
   loadForgeRegistry,
-  analyzeCodebase as forgeAnalyzeCodebase,
-  runForgePipeline,
-  persistForgedAgent,
 } from './hydra-agent-forge.ts';
 import { scanResumableState } from './hydra-resume-scanner.ts';
 import { checkForUpdates } from './hydra-updater.ts';
@@ -201,7 +185,7 @@ import {
 import pc from 'picocolors';
 
 const config = resolveProject();
-const DEFAULT_URL = process.env.AI_ORCH_URL || 'http://127.0.0.1:4173';
+const DEFAULT_URL = process.env['AI_ORCH_URL'] || 'http://127.0.0.1:4173';
 
 // ── Dry-Run Mode ─────────────────────────────────────────────────────────────
 
@@ -209,11 +193,11 @@ let dryRunMode = false;
 
 // ── Agent Workers (headless background execution) ────────────────────────────
 
-const workers = new Map(); // agent -> AgentWorker
+const workers = new Map<string, AgentWorker>();
 
-function startAgentWorker(agent, baseUrl, { rl } = {}) {
+function startAgentWorker(agent: string, baseUrl: string, { rl }: { rl?: import('node:readline').Interface } = {}) {
   const name = agent.toLowerCase();
-  if (workers.has(name) && workers.get(name).status !== 'stopped') {
+  if (workers.has(name) && workers.get(name)!.status !== 'stopped') {
     return workers.get(name);
   }
 
@@ -223,7 +207,7 @@ function startAgentWorker(agent, baseUrl, { rl } = {}) {
   });
 
   // Wire worker events to status bar
-  worker.on('task:start', ({ agent: a, taskId, title }) => {
+  worker.on('task:start', ({ agent: a, taskId: _taskId, title }) => {
     setAgentActivity(a, 'working', title || 'Working', { taskTitle: title });
     drawStatusBar();
   });
@@ -305,7 +289,7 @@ function startAgentWorker(agent, baseUrl, { rl } = {}) {
     drawStatusBar();
   });
 
-  worker.on('worker:stop', ({ agent: a, reason }) => {
+  worker.on('worker:stop', ({ agent: a, reason: _reason }) => {
     setAgentExecMode(a, null);
     setAgentActivity(a, 'inactive', 'Stopped');
     drawStatusBar();
@@ -321,7 +305,7 @@ function startAgentWorker(agent, baseUrl, { rl } = {}) {
   return worker;
 }
 
-function stopAgentWorker(agent) {
+function stopAgentWorker(agent: string) {
   const name = agent.toLowerCase();
   const worker = workers.get(name);
   if (!worker) return;
@@ -337,7 +321,8 @@ function stopAllWorkers() {
   workers.clear();
 }
 
-function getWorkerStatus(agent) {
+// @ts-expect-error TS6133 — function kept for debugging use
+function _getWorkerStatus(agent: string) { // eslint-disable-line @typescript-eslint/no-unused-vars
   const worker = workers.get(agent.toLowerCase());
   if (!worker) return null;
   return {
@@ -349,13 +334,13 @@ function getWorkerStatus(agent) {
   };
 }
 
-function startAgentWorkers(agentNames, baseUrl, opts = {}) {
+function startAgentWorkers(agentNames: string[], baseUrl: string, opts: { rl?: import('node:readline').Interface } = {}) {
   for (const agent of agentNames) {
     startAgentWorker(agent, baseUrl, opts);
   }
 }
 
-function formatUptime(ms) {
+function formatUptime(ms: number) {
   if (ms < 60_000) return `${Math.round(ms / 1000)}s`;
   if (ms < 3600_000) return `${Math.round(ms / 60_000)}m`;
   return `${(ms / 3600_000).toFixed(1)}h`;
@@ -363,10 +348,10 @@ function formatUptime(ms) {
 
 // ── Daemon Auto-Start ────────────────────────────────────────────────────────
 
-async function ensureDaemon(baseUrl, { quiet = false } = {}) {
+async function ensureDaemon(baseUrl: string, { quiet = false }: { quiet?: boolean } = {}) {
   // Check if daemon is already running
   try {
-    await request('GET', baseUrl, '/health');
+    await request('GET', baseUrl, '/health') as any;
     return true;
   } catch {
     // Not running — try to start it
@@ -389,7 +374,7 @@ async function ensureDaemon(baseUrl, { quiet = false } = {}) {
   for (let i = 0; i < 32; i++) {
     await new Promise((r) => setTimeout(r, 250));
     try {
-      await request('GET', baseUrl, '/health');
+      await request('GET', baseUrl, '/health') as any;
       if (!quiet) {
         process.stderr.write(`  ${SUCCESS('\u2713')} Daemon started\n`);
       }
@@ -449,9 +434,9 @@ function findWindowsTerminal() {
  * Uses -EncodedCommand to avoid escaping issues, and exec(start ...) for
  * reliable window visibility on Windows.
  */
-function launchAgentTerminals(agentNames, baseUrl) {
+function launchAgentTerminals(agentNames: string[], baseUrl: string) {
   if (process.platform !== 'win32' || agentNames.length === 0) return;
-  if (process.pkg) {
+  if ((process as any).pkg) {
     console.log(
       `  ${DIM('(standalone build: terminal launch disabled; use :workers start instead)')}`,
     );
@@ -490,9 +475,9 @@ function launchAgentTerminals(agentNames, baseUrl) {
     }
     exec(cmd, { cwd });
 
-    const icon = { gemini: '\u2726', codex: '\u25B6', claude: '\u2666' }[agent] || '\u25CF';
+    const icon = ({ gemini: '\u2726', codex: '\u25B6', claude: '\u2666' } as Record<string, string>)[agent] || '\u25CF';
     console.log(
-      `  ${SUCCESS('\u2713')} ${colorAgent(agent, `${icon} ${agent}`)}  terminal launched`,
+      `  ${SUCCESS('\u2713')} ${`${colorAgent(agent)} ${icon} ${agent}`}  terminal launched`,
     );
   }
 }
@@ -500,8 +485,8 @@ function launchAgentTerminals(agentNames, baseUrl) {
 /**
  * Extract unique agent names from auto/smart dispatch result.
  */
-function extractHandoffAgents(result) {
-  const handoffs = result?.published?.handoffs;
+function extractHandoffAgents(result: Record<string, unknown>) {
+  const handoffs = (result as any)?.published?.handoffs;
   if (!Array.isArray(handoffs) || handoffs.length === 0) return [];
   const seen = new Set();
   for (const h of handoffs) {
@@ -513,7 +498,7 @@ function extractHandoffAgents(result) {
 
 // ── Welcome Screen ───────────────────────────────────────────────────────────
 
-async function printWelcome(baseUrl) {
+async function printWelcome(baseUrl: string) {
   console.log(hydraSplash());
   console.log(label('Project', pc.white(config.projectName)));
   // Sync HYDRA.md → agent instruction files on startup
@@ -530,7 +515,7 @@ async function printWelcome(baseUrl) {
 
   // Startup alert: check for in-progress tasks and pending handoffs
   try {
-    const sessionStatus = await request('GET', baseUrl, '/session/status');
+    const sessionStatus = await request('GET', baseUrl, '/session/status') as any;
     if (sessionStatus.activeSession?.status === 'paused') {
       const reason = sessionStatus.activeSession.pauseReason;
       console.log(
@@ -558,15 +543,15 @@ async function printWelcome(baseUrl) {
   // Mode & Models
   try {
     const models = getModelSummary();
-    const currentMode = models._mode || getMode();
+    const currentMode = (models['_mode'] || getMode()) as string;
     console.log(label('Mode', ACCENT(currentMode)));
     const parts = [];
     for (const [agent, info] of Object.entries(models)) {
       if (agent === '_mode') continue;
-      const colorFn = AGENT_COLORS[agent] || pc.white;
-      const shortModel = (info.active || '').replace(/^claude-/, '').replace(/^gemini-/, '');
-      const tag = info.isOverride ? pc.yellow(' *') : '';
-      const effLabel = formatEffortDisplay(info.active, info.reasoningEffort);
+      const colorFn = (AGENT_COLORS as any)[agent] || pc.white;
+      const shortModel = ((info as any).active || '').replace(/^claude-/, '').replace(/^gemini-/, '');
+      const tag = (info as any).isOverride ? pc.yellow(' *') : '';
+      const effLabel = formatEffortDisplay((info as any).active, (info as Record<string, any>)['reasoningEffort']);
       const eff = effLabel ? pc.yellow(` ${effLabel}`) : '';
       parts.push(`${colorFn(agent)}${DIM(':')}${pc.white(shortModel)}${eff}${tag}`);
     }
@@ -624,7 +609,7 @@ async function printWelcome(baseUrl) {
 
   // Context-aware next steps on startup
   try {
-    const sessionStatus = await request('GET', baseUrl, '/session/status');
+    const sessionStatus = await request('GET', baseUrl, '/session/status') as any;
     printNextSteps({
       agentSuggestions: sessionStatus.agentSuggestions,
       pendingHandoffs: sessionStatus.pendingHandoffs,
@@ -636,7 +621,7 @@ async function printWelcome(baseUrl) {
   }
 }
 
-function buildAgentMessage(agent, userPrompt) {
+function buildAgentMessage(agent: string, userPrompt: string) {
   const agentConfig = getAgent(agent);
   const rolePrompt = agentConfig
     ? agentConfig.rolePrompt
@@ -664,21 +649,21 @@ function buildAgentMessage(agent, userPrompt) {
     .join('\n');
 }
 
-function buildMiniRoundBrief(agent, userPrompt, report) {
+function buildMiniRoundBrief(agent: string, userPrompt: string, report: any) {
   const agentConfig = getAgent(agent);
-  const tasks = Array.isArray(report?.tasks) ? report.tasks.map(normalizeTask).filter(Boolean) : [];
+  const tasks = Array.isArray(report?.tasks) ? report.tasks.map((item: any) => normalizeTask(item)).filter(Boolean) : [];
   const questions = Array.isArray(report?.questions) ? report.questions : [];
   const consensus = String(report?.consensus || '').trim();
 
-  const myTasks = tasks.filter((task) => task.owner === agent || task.owner === 'unassigned');
-  const myQuestions = questions.filter((q) => q && (q.to === agent || q.to === 'human'));
+  const myTasks = tasks.filter((task: any) => task.owner === agent || task.owner === 'unassigned');
+  const myQuestions = questions.filter((q: any) => q && (q.to === agent || q.to === 'human'));
 
   const taskText =
     myTasks.length === 0
       ? '- No explicit task assigned. Start by proposing first concrete step.'
       : myTasks
           .map(
-            (task) =>
+            (task: any) =>
               `- ${task.title}${task.done ? ` (DoD: ${task.done})` : ''}${task.rationale ? ` [${task.rationale}]` : ''}`,
           )
           .join('\n');
@@ -687,7 +672,7 @@ function buildMiniRoundBrief(agent, userPrompt, report) {
     myQuestions.length === 0
       ? '- none'
       : myQuestions
-          .map((q) => {
+          .map((q: any) => {
             const to = String(q.to || 'human');
             const question = String(q.question || '').trim();
             return question ? `- to ${to}: ${question}` : null;
@@ -722,10 +707,10 @@ function buildMiniRoundBrief(agent, userPrompt, report) {
  * Returns { approved, issues, suggestions } or null if verification is skipped/fails.
  */
 async function runCrossVerification(
-  producerAgent,
-  producerOutput,
-  originalPrompt,
-  specContent = null,
+  producerAgent: string,
+  producerOutput: string,
+  originalPrompt: string,
+  specContent: string | null = null,
 ) {
   const cfg = loadHydraConfig();
   const cvConfig = cfg.crossModelVerification;
@@ -801,16 +786,16 @@ async function runCrossVerification(
 /**
  * Check if cross-model verification should run for a given classification.
  */
-function shouldCrossVerify(classification) {
+function shouldCrossVerify(classification: any) {
   const cfg = loadHydraConfig();
   const cvConfig = cfg.crossModelVerification;
   if (!cvConfig?.enabled) return false;
-  if (cvConfig.mode === 'always') return true;
-  if (cvConfig.mode === 'on-complex') return classification.tier === 'complex';
+  if (cvConfig['mode'] === 'always') return true;
+  if (cvConfig['mode'] === 'on-complex') return classification.tier === 'complex';
   return false;
 }
 
-async function publishMiniRoundDelegation({ baseUrl, from, agents, promptText, report }) {
+async function publishMiniRoundDelegation({ baseUrl, from, agents, promptText, report }: { baseUrl: string; from: string; agents: string[]; promptText: string; report: any }) {
   const normalizedTasks = (Array.isArray(report?.tasks) ? report.tasks : [])
     .map(normalizeTask)
     .filter(Boolean);
@@ -831,7 +816,7 @@ async function publishMiniRoundDelegation({ baseUrl, from, agents, promptText, r
       owner: task.owner,
       status: 'todo',
       notes: task.rationale ? `Mini-round rationale: ${task.rationale}` : '',
-    });
+    }) as any;
     createdTasks.push(created.task);
   }
 
@@ -840,12 +825,12 @@ async function publishMiniRoundDelegation({ baseUrl, from, agents, promptText, r
     owner: from,
     rationale: short(report?.consensus || 'Mini-round completed without explicit consensus.', 600),
     impact: `recommended=${report?.recommendedMode || 'handoff'}; tasks=${createdTasks.length}`,
-  });
+  }) as any;
 
   const handoffs = [];
   for (const agent of agents) {
     const agentTaskIds = createdTasks
-      .filter((task) => task.owner === agent || task.owner === 'unassigned')
+      .filter((task: any) => task.owner === agent || task.owner === 'unassigned')
       .map((task) => task.id);
     const summary = buildMiniRoundBrief(agent, promptText, report);
     const handoff = await request('POST', baseUrl, '/handoff', {
@@ -854,7 +839,7 @@ async function publishMiniRoundDelegation({ baseUrl, from, agents, promptText, r
       summary,
       nextStep: 'Acknowledge and execute top-priority delegated task.',
       tasks: agentTaskIds,
-    });
+    }) as any;
     handoffs.push(handoff.handoff);
   }
 
@@ -867,7 +852,7 @@ async function publishMiniRoundDelegation({ baseUrl, from, agents, promptText, r
       mode: 'auto',
       route: 'mini-round',
       agent: agents[0],
-    }),
+    }) as any,
     { agents, taskCount: createdTasks.length },
   );
 
@@ -878,7 +863,7 @@ async function publishMiniRoundDelegation({ baseUrl, from, agents, promptText, r
   };
 }
 
-async function dispatchPrompt({ baseUrl, from, agents, promptText }) {
+async function dispatchPrompt({ baseUrl, from, agents, promptText }: { baseUrl: string; from: string; agents: string[]; promptText: string }) {
   const records = [];
   for (const agent of agents) {
     const summary = buildAgentMessage(agent, promptText);
@@ -889,7 +874,7 @@ async function dispatchPrompt({ baseUrl, from, agents, promptText }) {
       nextStep: 'Start work and report first milestone via hydra:handoff.',
       tasks: [],
     };
-    const result = await request('POST', baseUrl, '/handoff', payload);
+    const result = await request('POST', baseUrl, '/handoff', payload) as any;
     records.push({
       agent,
       handoffId: result?.handoff?.id || null,
@@ -905,7 +890,7 @@ async function publishFastPathDelegation({
   promptText,
   classification,
   agents = null,
-}) {
+}: { baseUrl: string; from: string; promptText: string; classification: any; agents?: string[] | null }) {
   const { taskType } = classification;
   let { suggestedAgent } = classification;
 
@@ -915,7 +900,7 @@ async function publishFastPathDelegation({
     let bestScore = 0;
     for (const a of agents) {
       const cfg = getAgent(a);
-      const score = cfg?.taskAffinity?.[taskType] || 0.5;
+      const score = (cfg?.taskAffinity as any)?.[taskType] || 0.5;
       if (score > bestScore) {
         bestScore = score;
         best = a;
@@ -925,12 +910,12 @@ async function publishFastPathDelegation({
   }
 
   const task = await request('POST', baseUrl, '/task/add', {
-    title: short(promptText, 200),
+    title: short(promptText, 200) as any,
     owner: suggestedAgent,
     status: 'todo',
     type: taskType,
     notes: `Fast-path dispatch (confidence=${classification.confidence}, reason: ${classification.reason})`,
-  });
+  }) as any;
 
   const summary = buildAgentMessage(suggestedAgent, promptText);
   const handoff = await request('POST', baseUrl, '/handoff', {
@@ -939,7 +924,7 @@ async function publishFastPathDelegation({
     summary,
     nextStep: 'Start work and report first milestone via hydra:handoff.',
     tasks: task.task?.id ? [task.task.id] : [],
-  });
+  }) as any;
 
   // Record activity annotation
   pushActivity(
@@ -950,7 +935,7 @@ async function publishFastPathDelegation({
       mode: 'auto',
       route: 'fast-path',
       agent: suggestedAgent,
-    }),
+    }) as any,
     { agent: suggestedAgent, taskId: task.task?.id },
   );
 
@@ -964,7 +949,7 @@ async function publishFastPathDelegation({
 /**
  * Build a role-aware tandem brief for an agent in a tandem pair.
  */
-function buildTandemBrief(agent, partner, promptText, classification, role) {
+function buildTandemBrief(agent: any, partner: any, promptText: any, _classification: any, role: any) {
   const agentConfig = getAgent(agent);
   const agentLabel = agentConfig ? agentConfig.label : agent.toUpperCase();
   const partnerLabel = getAgent(partner)?.label || partner.toUpperCase();
@@ -1009,7 +994,7 @@ async function publishTandemDelegation({
   promptText,
   classification,
   agents = null,
-}) {
+}: { baseUrl: string; from: string; promptText: string; classification: any; agents?: string[] | null }) {
   let { tandemPair, taskType } = classification;
 
   // Re-resolve pair with agent filter
@@ -1031,7 +1016,7 @@ async function publishTandemDelegation({
     status: 'todo',
     type: taskType,
     notes: `Tandem lead (${lead} → ${follow}). Analyze/plan then hand off.`,
-  });
+  }) as any;
 
   // Create follow task
   const followTask = await request('POST', baseUrl, '/task/add', {
@@ -1040,7 +1025,7 @@ async function publishTandemDelegation({
     status: 'todo',
     type: taskType,
     notes: `Tandem follow (from ${lead}). Execute based on lead's analysis. Ref: task ${leadTask.task?.id || '?'}`,
-  });
+  }) as any;
 
   // Create lead handoff
   const leadBrief = buildTandemBrief(lead, follow, promptText, classification, 'lead');
@@ -1050,7 +1035,7 @@ async function publishTandemDelegation({
     summary: leadBrief,
     nextStep: `Analyze the objective and produce actionable plan. Your output will be forwarded to ${follow}.`,
     tasks: leadTask.task?.id ? [leadTask.task.id] : [],
-  });
+  }) as any;
 
   // Create follow handoff
   const followBrief = buildTandemBrief(follow, lead, promptText, classification, 'follow');
@@ -1060,7 +1045,7 @@ async function publishTandemDelegation({
     summary: followBrief,
     nextStep: `Build on ${lead}'s analysis and execute. Reference task ${leadTask.task?.id || '?'}.`,
     tasks: followTask.task?.id ? [followTask.task.id] : [],
-  });
+  }) as any;
 
   // Record activity
   pushActivity(
@@ -1071,7 +1056,7 @@ async function publishTandemDelegation({
       mode: 'auto',
       route: `tandem: ${lead} → ${follow}`,
       agent: lead,
-    }),
+    }) as any,
     { agent: lead, taskId: leadTask.task?.id },
   );
 
@@ -1092,9 +1077,9 @@ async function publishTandemDelegation({
  * @param {object} [opts]
  * @param {Function} [onProgress] - Called with parsed JSON progress markers from stderr
  */
-function spawnAsync(cmd, args, opts = {}, onProgress = null) {
+function spawnAsync(cmd: string, args: string[], opts: any = {}, onProgress: ((data: any) => void) | null = null) {
   return new Promise((resolve) => {
-    const chunks = { stdout: [], stderr: [] };
+    const chunks: { stdout: string[]; stderr: string[] } = { stdout: [], stderr: [] };
     let stderrBuf = '';
     const invocation = rewriteNodeInvocation(cmd, args, HYDRA_ROOT);
     const child = spawn(invocation.command, invocation.args, {
@@ -1110,7 +1095,7 @@ function spawnAsync(cmd, args, opts = {}, onProgress = null) {
       if (onProgress) {
         stderrBuf += d;
         const lines = stderrBuf.split('\n');
-        stderrBuf = lines.pop(); // keep incomplete last line
+        stderrBuf = lines.pop() ?? ''; // keep incomplete last line
         for (const line of lines) {
           const trimmed = line.trim();
           if (!trimmed || trimmed[0] !== '{') continue;
@@ -1124,7 +1109,7 @@ function spawnAsync(cmd, args, opts = {}, onProgress = null) {
       }
     });
     child.on('error', (err) => {
-      resolve({ status: 1, stdout: '', stderr: err.message });
+      resolve({ status: 1, stdout: '', stderr: (err as Error).message });
     });
     child.on('close', (code) => {
       resolve({
@@ -1143,9 +1128,9 @@ async function runCouncilPrompt({
   preview = false,
   onProgress = null,
   agents = null,
-}) {
+}: { baseUrl: string; promptText: string; rounds?: number; preview?: boolean; onProgress?: ((data: Record<string, unknown>) => void) | null; agents?: string[] | null }) {
   const councilScript = path.join(HYDRA_ROOT, 'lib', 'hydra-council.ts');
-  const councilTimeoutMs = config.routing?.councilTimeoutMs ?? 420_000;
+  const councilTimeoutMs = (config as any).routing?.councilTimeoutMs ?? 420_000;
   const args = [
     councilScript,
     `prompt=${promptText}`,
@@ -1162,7 +1147,7 @@ async function runCouncilPrompt({
     args.push(`agents=${agents.join(',')}`);
   }
 
-  const result = await spawnAsync('node', args, { cwd: config.projectRoot }, onProgress);
+  const result = await spawnAsync('node', args, { cwd: config.projectRoot }, onProgress) as any;
 
   return {
     ok: result.status === 0,
@@ -1180,9 +1165,9 @@ async function runCouncilJson({
   publish = false,
   onProgress = null,
   agents = null,
-}) {
+}: { baseUrl: string; promptText: string; rounds?: number; preview?: boolean; publish?: boolean; onProgress?: ((data: Record<string, unknown>) => void) | null; agents?: string[] | null }) {
   const councilScript = path.join(HYDRA_ROOT, 'lib', 'hydra-council.ts');
-  const councilTimeoutMs = config.routing?.councilTimeoutMs ?? 420_000;
+  const councilTimeoutMs = (config as any).routing?.councilTimeoutMs ?? 420_000;
   const args = [
     councilScript,
     `prompt=${promptText}`,
@@ -1200,7 +1185,7 @@ async function runCouncilJson({
     args.push(`agents=${agents.join(',')}`);
   }
 
-  const result = await spawnAsync('node', args, { cwd: config.projectRoot }, onProgress);
+  const result = await spawnAsync('node', args, { cwd: config.projectRoot }, onProgress) as any;
 
   if (result.status !== 0) {
     return {
@@ -1221,12 +1206,12 @@ async function runCouncilJson({
       stderr: result.stderr || '',
       report: parsed.report || null,
     };
-  } catch (err) {
+  } catch (err: unknown) {
     return {
       ok: false,
       status: result.status,
       stdout: result.stdout || '',
-      stderr: `Failed to parse council JSON: ${err.message}`,
+      stderr: `Failed to parse council JSON: ${(err as Error).message}`,
       report: null,
     };
   }
@@ -1241,7 +1226,7 @@ async function runAutoPrompt({
   councilRounds,
   preview,
   onProgress = null,
-}) {
+}: { baseUrl: string; from: string; agents: string[]; promptText: string; miniRounds: number; councilRounds: number; preview: boolean; onProgress?: ((data: Record<string, unknown>) => void) | null }) {
   // Intent gate: normalize filler/abbreviations, optionally LLM-rewrite low-confidence prompts
   const _intentCfg = (() => {
     try {
@@ -1254,8 +1239,8 @@ async function runAutoPrompt({
   let _gatedText, classification;
   try {
     ({ text: _gatedText, classification } = await gateIntent(promptText, {
-      enabled: _intentCfg.enabled !== false,
-      confidenceThreshold: _intentCfg.confidenceThreshold ?? 0.55,
+      enabled: (_intentCfg as any).enabled !== false,
+      confidenceThreshold: (_intentCfg as any).confidenceThreshold ?? 0.55,
     }));
   } catch {
     _gatedText = promptText;
@@ -1263,7 +1248,7 @@ async function runAutoPrompt({
   }
   const effectivePrompt = _gatedText;
 
-  const routingConfig = config.routing || {};
+  const routingConfig = (config as any).routing || {};
 
   // Re-resolve route strategy with agent filter
   let { routeStrategy } = classification;
@@ -1343,8 +1328,8 @@ async function runAutoPrompt({
       classification,
       agents,
     });
-    const pair = published.lead
-      ? { lead: published.lead, follow: published.follow }
+    const pair = (published as any).lead
+      ? { lead: (published as any).lead, follow: (published as any).follow }
       : tandemPair || { lead: '?', follow: '?' };
     return {
       mode: 'tandem',
@@ -1352,7 +1337,7 @@ async function runAutoPrompt({
       route: `tandem: ${pair.lead} → ${pair.follow} (${classification.taskType})`,
       classification,
       triage: null,
-      published: { tasks: published.tasks, handoffs: published.handoffs },
+      published: { tasks: (published as any).tasks, handoffs: (published as any).handoffs },
       escalatedToCouncil: false,
     };
   }
@@ -1430,7 +1415,7 @@ async function runAutoPromptLegacy({
   preview,
   onProgress,
   classification,
-}) {
+}: { baseUrl: string; from: string; agents: string[]; promptText: string; miniRounds: number; councilRounds: number; preview: boolean; onProgress: ((data: any) => void) | null; classification: any | null }) {
   // Intent gate: skip if classification already provided (caller already gated the prompt).
   // If called directly, normalize and optionally LLM-rewrite low-confidence prompts.
   let effectivePrompt = promptText;
@@ -1447,8 +1432,8 @@ async function runAutoPromptLegacy({
       let _gatedClassification;
       let _gatedText;
       ({ text: _gatedText, classification: _gatedClassification } = await gateIntent(promptText, {
-        enabled: _intentCfg.enabled !== false,
-        confidenceThreshold: _intentCfg.confidenceThreshold ?? 0.55,
+        enabled: (_intentCfg as any).enabled !== false,
+        confidenceThreshold: (_intentCfg as any).confidenceThreshold ?? 0.55,
       }));
       classification = _gatedClassification;
       effectivePrompt = _gatedText;
@@ -1569,9 +1554,9 @@ async function runSmartPrompt({
   councilRounds,
   preview,
   onProgress = null,
-}) {
+}: { baseUrl: string; from: string; agents: string[]; promptText: string; miniRounds: number; councilRounds: number; preview: boolean; onProgress?: ((data: Record<string, unknown>) => void) | null }) {
   const classification = classifyPrompt(promptText);
-  const targetMode = SMART_TIER_MAP[classification.tier] || 'balanced';
+  const targetMode = (SMART_TIER_MAP as Record<string, string>)[classification.tier] || 'balanced';
 
   // Save current mode to restore after dispatch
   const previousMode = getMode();
@@ -1596,8 +1581,8 @@ async function runSmartPrompt({
     });
 
     // Annotate result with smart routing info
-    result.smartTier = classification.tier;
-    result.smartMode = targetMode;
+    (result as any).smartTier = classification.tier;
+    (result as any).smartMode = targetMode;
     result.route = `${classification.tier}\u2192${result.route}`;
 
     // Update status bar dispatch info
@@ -1619,12 +1604,12 @@ async function runSmartPrompt({
   }
 }
 
-async function printStatus(baseUrl, agents) {
-  const summary = await request('GET', baseUrl, '/summary');
-  const agentNextMap = {};
+async function printStatus(baseUrl: string, agents: string[]) {
+  const summary = await request('GET', baseUrl, '/summary') as any;
+  const agentNextMap: any = {};
   for (const agent of agents) {
     try {
-      const next = await request('GET', baseUrl, `/next?agent=${encodeURIComponent(agent)}`);
+      const next = await request('GET', baseUrl, `/next?agent=${encodeURIComponent(agent)}`) as any;
       agentNextMap[agent] = next.next;
     } catch {
       agentNextMap[agent] = { action: 'unknown' };
@@ -1641,12 +1626,12 @@ async function printStatus(baseUrl, agents) {
  * Shows concrete commands the user can type at the hydra> prompt.
  */
 function printNextSteps({
-  agentSuggestions,
+  agentSuggestions: _agentSuggestions,
   pendingHandoffs,
   staleTasks,
   inProgressTasks,
   summary,
-} = {}) {
+}: any = {}) {
   const steps = [];
 
   // Derive counts from summary if available
@@ -2075,8 +2060,8 @@ const COMMAND_HELP = {
   ':exit': { usage: [':exit'], desc: 'Exit operator console (alias: :quit)' },
 };
 
-function printCommandHelp(cmd) {
-  const help = COMMAND_HELP[cmd];
+function printCommandHelp(cmd: string) {
+  const help = (COMMAND_HELP as Record<string, any>)[cmd];
   if (!help) {
     console.log(`  ${DIM('No help available for')} ${ACCENT(cmd)}`);
     return;
@@ -2090,7 +2075,7 @@ function printCommandHelp(cmd) {
   console.log('');
 }
 
-function levenshtein(a, b) {
+function levenshtein(a: string, b: string) {
   const m = a.length,
     n = b.length;
   const dp = Array.from({ length: m + 1 }, (_, i) => {
@@ -2110,7 +2095,7 @@ function levenshtein(a, b) {
   return dp[m][n];
 }
 
-function fuzzyMatchCommand(input) {
+function fuzzyMatchCommand(input: string) {
   const normalized = input.toLowerCase().split(/\s/)[0];
   const target = normalized.startsWith(':') ? normalized : `:${normalized}`;
   let best = null;
@@ -2129,7 +2114,7 @@ function fuzzyMatchCommand(input) {
 
 let _selfIndexCache = { block: '', builtAt: 0, key: '' };
 
-function normalizeSimpleCommandText(input) {
+function normalizeSimpleCommandText(input: any) {
   return String(input || '')
     .toLowerCase()
     .replace(/[^\w\s]/g, ' ')
@@ -2137,7 +2122,7 @@ function normalizeSimpleCommandText(input) {
     .trim();
 }
 
-function parseSelfAwarenessPlaintextCommand(input) {
+function parseSelfAwarenessPlaintextCommand(input: any) {
   const raw = String(input || '').trim();
   if (!raw) return null;
   if (raw.startsWith(':') || raw.startsWith('!')) return null;
@@ -2167,7 +2152,7 @@ function parseSelfAwarenessPlaintextCommand(input) {
   return null;
 }
 
-function getSelfAwarenessSummary(sa = {}) {
+function getSelfAwarenessSummary(sa: any = {}) {
   const obj = sa && typeof sa === 'object' ? sa : {};
   const enabled = obj.enabled !== false;
   const includeSnapshot = obj.includeSnapshot !== false;
@@ -2176,7 +2161,7 @@ function getSelfAwarenessSummary(sa = {}) {
   return { enabled, includeSnapshot, includeIndex, level };
 }
 
-function printSelfAwarenessStatus(sa = {}) {
+function printSelfAwarenessStatus(sa: any = {}) {
   const s = getSelfAwarenessSummary(sa);
   const value = s.enabled ? pc.green(s.level) : pc.red('off');
   console.log(label('Hyper-awareness', value));
@@ -2203,7 +2188,7 @@ async function applySelfAwarenessPatch(patch = {}) {
 
 // ── Git Info Cache ────────────────────────────────────────────────────────────
 
-let _gitInfoCache = { data: null, at: 0 };
+let _gitInfoCache: { data: any; at: number } = { data: null, at: 0 };
 const GIT_CACHE_TTL = 30_000;
 
 function getGitInfo() {
@@ -2242,7 +2227,7 @@ async function interactiveLoop({
   autoCouncilRounds,
   autoPreview,
   showWelcome,
-}) {
+}: { baseUrl: string; from: string; agents: string[]; initialMode: string; councilRounds: number; councilPreview: boolean; autoMiniRounds: number; autoCouncilRounds: number; autoPreview: boolean; showWelcome: boolean }) {
   let mode = initialMode;
   let conciergeActive = false;
   let dispatchDepth = 0; // >0 while a blocking dispatch/council await is in flight
@@ -2279,7 +2264,7 @@ async function interactiveLoop({
   }
 
   // First-run hint: suggest copying .env.example if no .env and no OPENAI_API_KEY
-  if (!envFileExists() && !process.env.OPENAI_API_KEY) {
+  if (!envFileExists() && !process.env['OPENAI_API_KEY']) {
     console.log(DIM('  Tip: Copy .env.example to .env and add your API keys to get started.'));
     console.log('');
   }
@@ -2289,15 +2274,15 @@ async function interactiveLoop({
     updateCheckPromise,
     new Promise((r) => setTimeout(() => r(null), 0)),
   ]);
-  if (updateResult?.hasUpdate) {
+  if ((updateResult as any)?.hasUpdate) {
     console.log(
-      `  ${pc.yellow('Update available:')} ${DIM(updateResult.localVersion)} → ${pc.bold(pc.yellow(updateResult.remoteVersion))}  ${DIM('git pull origin master')}`,
+      `  ${pc.yellow('Update available:')} ${DIM((updateResult as any).localVersion)} → ${pc.bold(pc.yellow((updateResult as any).remoteVersion))}  ${DIM('git pull origin master')}`,
     );
     console.log('');
   }
 
   // Wrap ANSI escapes for readline so cursor position is calculated correctly
-  const rlSafe = (s) => s.replace(/(\x1b\[[0-9;]*m)/g, '\x01$1\x02');
+  const rlSafe = (s: string) => s.replace(/(\x1b\[[0-9;]*m)/g, '\x01$1\x02');
 
   function buildConciergePrompt() {
     const modelLabel = getConciergeModelLabel();
@@ -2324,8 +2309,8 @@ async function interactiveLoop({
   // ── Multi-line paste buffer for concierge ──────────────────────────────────
   // When concierge is active, buffer rapidly-arriving lines (typical of paste)
   // and process them as a single input after a short debounce.
-  let _pasteBuffer = [];
-  let _pasteTimer = null;
+  let _pasteBuffer: string[] = [];
+  let _pasteTimer: ReturnType<typeof setTimeout> | null = null;
   let _isPastedInput = false;
   const PASTE_DEBOUNCE_MS = 120;
 
@@ -2336,8 +2321,8 @@ async function interactiveLoop({
   // Shows dim hint text after the prompt cursor. Disappears on first keystroke.
   // Re-appears on blank line submissions or after command completion.
   // When _acceptableGhostText is set, Tab accepts + submits the ghost text.
-  let _ghostCleanup = null;
-  let _acceptableGhostText = null; // Text that Tab would accept+submit
+  let _ghostCleanup: ((...args: any[]) => void) | null = null;
+  let _acceptableGhostText: string | null = null; // Text that Tab would accept+submit
   let _ghostUpgradeAborted = false; // Set true when user types; prevents async AI upgrade
 
   const GHOST_HINTS_CONCIERGE = [
@@ -2365,7 +2350,7 @@ async function interactiveLoop({
    * @param {string} [overrideText] - Custom text instead of cycling hints
    * @param {string} [acceptableText] - If set, Tab will accept+submit this text
    */
-  function showGhostAfterPrompt(overrideText, acceptableText) {
+  function showGhostAfterPrompt(overrideText?: any, acceptableText?: any) {
     if (!process.stdout.isTTY) return;
     const base = overrideText || getGhostText();
     if (!base) return;
@@ -2402,7 +2387,7 @@ async function interactiveLoop({
    * Upgrade displayed ghost text with an AI-generated suggestion.
    * No-op if user has already started typing.
    */
-  function upgradeGhostText(newText) {
+  function upgradeGhostText(newText: string) {
     if (_ghostUpgradeAborted) return;
     if (!process.stdout.isTTY) return;
     if (rl.line && rl.line.length > 0) {
@@ -2432,8 +2417,8 @@ async function interactiveLoop({
   // ── Tab Interception (accept + submit ghost text) ──────────────────────────
   // Override readline's internal _ttyWrite to intercept Tab when acceptable
   // ghost text is displayed. Standard pattern used by inquirer/ora.
-  const _origTtyWrite = rl._ttyWrite.bind(rl);
-  rl._ttyWrite = function (s, key) {
+  const _origTtyWrite = (rl as any)._ttyWrite.bind(rl);
+  (rl as any)._ttyWrite = function (s: any, key: any) {
     if (key?.name === 'tab' && _acceptableGhostText && (!rl.line || !rl.line.length)) {
       // Clear ghost visual
       process.stdout.write('\x1b[K');
@@ -2454,17 +2439,17 @@ async function interactiveLoop({
   };
 
   // ── Daemon resume helper (extracted for unified :resume) ───────────────────
-  async function executeDaemonResume(baseUrl, agents, rl) {
+  async function executeDaemonResume(baseUrl: string, agents: string[], rl: import('node:readline').Interface) {
     try {
-      const sessionStatus = await request('GET', baseUrl, '/session/status');
+      const sessionStatus = await request('GET', baseUrl, '/session/status') as any;
 
       // Unpause if paused
       if (sessionStatus.activeSession?.status === 'paused') {
         try {
-          await request('POST', baseUrl, '/session/unpause');
+          await request('POST', baseUrl, '/session/unpause') as any;
           console.log(`  ${SUCCESS('✓')} Session unpaused`);
-        } catch (err) {
-          console.log(`  ${WARNING('⚠')} Could not unpause: ${err.message}`);
+        } catch (err: unknown) {
+          console.log(`  ${WARNING('⚠')} Could not unpause: ${(err as Error).message}`);
         }
       }
 
@@ -2474,7 +2459,7 @@ async function interactiveLoop({
         console.log('');
         for (const t of stale) {
           try {
-            await request('POST', baseUrl, '/task/update', { taskId: t.id, status: 'todo' });
+            await request('POST', baseUrl, '/task/update', { taskId: t.id, status: 'todo' }) as any;
             const mins = Math.round((Date.now() - new Date(t.updatedAt).getTime()) / 60_000);
             console.log(
               `  ${WARNING('↻')} ${pc.white(t.id)} ${colorAgent(t.owner)} reset to todo ${DIM(`(was stale ${mins}m)`)}`,
@@ -2493,13 +2478,13 @@ async function interactiveLoop({
         for (const h of handoffs) {
           const targetAgent = String(h.to || '').toLowerCase();
           try {
-            await request('POST', baseUrl, '/handoff/ack', { handoffId: h.id, agent: targetAgent });
+            await request('POST', baseUrl, '/handoff/ack', { handoffId: h.id, agent: targetAgent }) as any;
             console.log(
               `  ${SUCCESS('✓')} ${pc.white(h.id)} ${colorAgent(h.from)}→${colorAgent(h.to)} acknowledged`,
             );
             if (targetAgent) agentsToLaunch.add(targetAgent);
-          } catch (err) {
-            console.log(`  ${ERROR('✗')} ${pc.white(h.id)} ${err.message}`);
+          } catch (err: unknown) {
+            console.log(`  ${ERROR('✗')} ${pc.white(h.id)} ${(err as Error).message}`);
           }
         }
       }
@@ -2512,16 +2497,16 @@ async function interactiveLoop({
 
       // Agent suggestions
       for (const [agent, suggestion] of Object.entries(sessionStatus.agentSuggestions || {})) {
-        if (suggestion?.action && suggestion.action !== 'idle' && suggestion.action !== 'unknown') {
+        if ((suggestion as any)?.action && (suggestion as any).action !== 'idle' && (suggestion as any).action !== 'unknown') {
           agentsToLaunch.add(agent);
         }
       }
 
       // Launch workers
-      const launchList = [...agentsToLaunch].filter((a) => agents.includes(a));
+      const launchList = ([...agentsToLaunch] as string[]).filter((a) => agents.includes(a));
       if (launchList.length > 0) {
         console.log('');
-        startAgentWorkers(launchList, baseUrl, { rl });
+        startAgentWorkers(launchList as string[], baseUrl, { rl });
       }
 
       // Summary
@@ -2536,8 +2521,8 @@ async function interactiveLoop({
         console.log('');
         console.log(`  ${SUCCESS('✓')} ${actions.join(', ')}`);
       }
-    } catch (err) {
-      console.log(`  ${ERROR(err.message)}`);
+    } catch (err: unknown) {
+      console.log(`  ${ERROR((err as Error).message)}`);
     }
   }
 
@@ -2648,7 +2633,7 @@ async function interactiveLoop({
       if (line.startsWith(':') && line.endsWith('?')) {
         const cmdPart = line.slice(0, -1).trim();
         // Try exact match, then base command (e.g. `:tasks scan ?` → `:tasks`)
-        const cmd = COMMAND_HELP[cmdPart] ? cmdPart : cmdPart.split(/\s/)[0];
+        const cmd = (COMMAND_HELP as Record<string, any>)[cmdPart] ? cmdPart : cmdPart.split(/\s/)[0];
         printCommandHelp(cmd);
         rl.prompt();
         return;
@@ -2664,7 +2649,7 @@ async function interactiveLoop({
 
         // Smart ghost: nudge about blocked tasks
         const blockedTasks = (summary?.openTasks || []).filter(
-          (t) =>
+          (t: any) =>
             t.status === 'blocked' || (t.pendingDependencies && t.pendingDependencies.length > 0),
         );
 
@@ -2675,7 +2660,7 @@ async function interactiveLoop({
           const deterministicHint =
             blockedTasks.length === 1
               ? `Investigate why ${first.id} is blocked${deps ? ` (waiting on ${deps})` : ''}`
-              : `Investigate ${blockedTasks.length} blocked tasks: ${blockedTasks.map((t) => t.id).join(', ')}`;
+              : `Investigate ${blockedTasks.length} blocked tasks: ${blockedTasks.map((t: any) => t.id).join(', ')}`;
 
           _origPrompt();
           showGhostAfterPrompt(deterministicHint, deterministicHint);
@@ -2684,7 +2669,7 @@ async function interactiveLoop({
           if (conciergeActive && isConciergeAvailable()) {
             const contextDesc = blockedTasks
               .map(
-                (t) =>
+                (t: any) =>
                   `Task ${t.id} "${(t.title || 'untitled').slice(0, 60)}" is blocked, waiting on: ${(t.pendingDependencies || []).join(', ') || 'unknown'}`,
               )
               .join('. ');
@@ -2714,7 +2699,7 @@ async function interactiveLoop({
         const gitInfo = getGitInfo();
         let statsData = null;
         try {
-          statsData = await request('GET', baseUrl, '/stats');
+          statsData = await request('GET', baseUrl, '/stats') as any;
         } catch {
           /* skip */
         }
@@ -2744,7 +2729,7 @@ async function interactiveLoop({
         try {
           const result = await generateSitrep({
             baseUrl,
-            workers,
+            workers: workers as any,
             budgetStatus,
             gitBranch: gitInfo?.branch,
             gitLog: gitLog ?? undefined,
@@ -2769,7 +2754,7 @@ async function interactiveLoop({
             console.log(`  ${result.narrative.split('\n').join('\n  ')}`);
             // Cost estimate from usage data
             if (result.usage) {
-              const usage = /** @type {any} */ (result.usage);
+              const usage = result.usage as any;
               const inTok = usage.input_tokens || usage.prompt_tokens || 0;
               const outTok = usage.output_tokens || usage.completion_tokens || 0;
               if (inTok + outTok > 0) {
@@ -2778,9 +2763,9 @@ async function interactiveLoop({
             }
           }
           console.log('');
-        } catch (err) {
+        } catch (err: unknown) {
           if (spinner) spinner.stop();
-          console.log(`  ${ERROR('Sitrep error:')} ${err.message}`);
+          console.log(`  ${ERROR('Sitrep error:')} ${(err as Error).message}`);
         }
         rl.prompt();
         return;
@@ -2790,7 +2775,7 @@ async function interactiveLoop({
 
         let self = null;
         try {
-          const resp = await request('GET', baseUrl, '/self');
+          const resp = await request('GET', baseUrl, '/self') as any;
           self = resp?.self || null;
         } catch {
           self = null;
@@ -2878,7 +2863,7 @@ async function interactiveLoop({
       ) {
         const modeArg = line.slice(5).trim().toLowerCase();
         const cfg = loadHydraConfig();
-        cfg.routing = { ...(cfg.routing || {}), mode: modeArg };
+        cfg.routing = { ...(cfg.routing || {}), mode: modeArg as any };
         saveHydraConfig(cfg);
         const chip =
           modeArg === 'economy'
@@ -2916,13 +2901,13 @@ async function interactiveLoop({
             try {
               const summary = getMetricsSummary();
               const agentsWithTokens = Object.entries(summary.agents || {}).filter(
-                ([, a]) => a.sessionTokens?.callCount > 0,
+                ([, a]: any) => (a as any).sessionTokens?.callCount > 0,
               );
               if (agentsWithTokens.length > 1) {
                 lines.push('');
                 lines.push(DIM('  Per-agent:'));
                 for (const [name, a] of agentsWithTokens) {
-                  const t = a.sessionTokens;
+                  const t = (a as any).sessionTokens;
                   lines.push(
                     `    ${pc.bold(name.padEnd(8))} ${formatTokens(t.totalTokens)} tokens  ${t.costUsd > 0 ? `$${t.costUsd.toFixed(4)}` : ''}  (${t.callCount} calls)`,
                   );
@@ -2984,7 +2969,7 @@ async function interactiveLoop({
             ['codex', 'claude', 'gemini'].map(async (a) => [a, await verifyAgentQuota(a)]),
           );
           const qLines = [];
-          for (const [a, v] of verifications) {
+          for (const [a, v] of verifications as any) {
             const icon =
               v.verified === false
                 ? pc.green('✓ active')
@@ -3005,7 +2990,7 @@ async function interactiveLoop({
       }
       if (line === ':stats') {
         try {
-          const statsData = await request('GET', baseUrl, '/stats');
+          const statsData = await request('GET', baseUrl, '/stats') as any;
           console.log(renderStatsDashboard(statsData.metrics, statsData.usage));
         } catch {
           // Fallback to just usage if daemon is down
@@ -3042,7 +3027,7 @@ async function interactiveLoop({
                 description: it.hint,
               })),
               timeout: 60_000,
-            });
+            }) as any;
             if (!choice.value) {
               rl.prompt();
               return;
@@ -3088,8 +3073,8 @@ async function interactiveLoop({
           }
 
           console.log('');
-        } catch (err) {
-          console.log(`  ${ERROR(err.message)}`);
+        } catch (err: unknown) {
+          console.log(`  ${ERROR((err as Error).message)}`);
         }
         rl.prompt();
         return;
@@ -3097,20 +3082,20 @@ async function interactiveLoop({
       if (line === ':pause' || line.startsWith(':pause ')) {
         const reason = line.slice(':pause'.length).trim();
         try {
-          await request('POST', baseUrl, '/session/pause', { reason });
+          await request('POST', baseUrl, '/session/pause', { reason }) as any;
           console.log(`  ${SUCCESS('\u2713')} Session paused${reason ? `: "${reason}"` : ''}`);
-        } catch (err) {
-          console.log(`  ${ERROR(err.message)}`);
+        } catch (err: unknown) {
+          console.log(`  ${ERROR((err as Error).message)}`);
         }
         rl.prompt();
         return;
       }
       if (line === ':unpause') {
         try {
-          await request('POST', baseUrl, '/session/resume', {});
+          await request('POST', baseUrl, '/session/resume', {}) as any;
           console.log(`  ${SUCCESS('\u2713')} Session resumed`);
-        } catch (err) {
-          console.log(`  ${ERROR(err.message)}`);
+        } catch (err: unknown) {
+          console.log(`  ${ERROR((err as Error).message)}`);
         }
         rl.prompt();
         return;
@@ -3138,8 +3123,8 @@ async function interactiveLoop({
                 try {
                   setMode(value);
                   console.log(`  ${SUCCESS('\u2713')} Mode ${DIM('\u2192')} ${ACCENT(value)}`);
-                } catch (err) {
-                  console.log(`  ${ERROR(err.message)}`);
+                } catch (err: unknown) {
+                  console.log(`  ${ERROR((err as Error).message)}`);
                 }
               } else if (AGENT_NAMES.includes(key)) {
                 if (value === 'default') {
@@ -3160,10 +3145,10 @@ async function interactiveLoop({
           }
         } else {
           const summary = getModelSummary();
-          const currentMode = summary._mode || getMode();
+          const currentMode = summary['_mode'] || getMode();
           console.log('');
-          console.log(`  ${pc.bold('Mode:')} ${ACCENT(currentMode)}`);
-          for (const [agent, info] of Object.entries(summary)) {
+          console.log(`  ${pc.bold('Mode:')} ${ACCENT(currentMode as string)}`);
+          for (const [agent, info] of Object.entries(summary) as any) {
             if (agent === '_mode') continue;
             const model = info.isOverride ? pc.white(info.active) : DIM(info.active);
             const tag = info.isOverride ? WARNING('(override)') : DIM(`(${info.tierSource})`);
@@ -3207,10 +3192,10 @@ async function interactiveLoop({
         console.log(pc.bold('  Role → Agent → Model mapping'));
         console.log('');
         for (const [role, rc] of Object.entries(roles)) {
-          const rec = recs[role];
+          const rec = (recs as any)[role];
           const modelStr = rc.model ? pc.white(rc.model) : DIM('(agent default)');
           const roleEffLabel = formatEffortDisplay(
-            rc.model || getActiveModel(rc.agent),
+            (rc.model || getActiveModel(rc.agent as string)) as string,
             rc.reasoningEffort,
           );
           const effortStr = roleEffLabel ? pc.yellow(` [${roleEffLabel}]`) : '';
@@ -3234,8 +3219,8 @@ async function interactiveLoop({
         try {
           const { runRosterEditor } = await import('./hydra-roster.ts');
           await runRosterEditor(rl);
-        } catch (err) {
-          console.log(`  ${ERROR('Roster editor error:')} ${err.message}`);
+        } catch (err: unknown) {
+          console.log(`  ${ERROR('Roster editor error:')} ${(err as Error).message}`);
         }
         rl.prompt();
         return;
@@ -3245,8 +3230,8 @@ async function interactiveLoop({
         try {
           const { runPersonaEditor } = await import('./hydra-persona.ts');
           await runPersonaEditor(rl);
-        } catch (err) {
-          console.log(`  ${ERROR('Persona editor error:')} ${err.message}`);
+        } catch (err: unknown) {
+          console.log(`  ${ERROR('Persona editor error:')} ${(err as Error).message}`);
         }
         rl.prompt();
         return;
@@ -3287,11 +3272,11 @@ async function interactiveLoop({
       if (line === ':fork' || line.startsWith(':fork ')) {
         const reason = line.slice(':fork'.length).trim();
         try {
-          const result = await request('POST', baseUrl, '/session/fork', { reason });
+          const result = await request('POST', baseUrl, '/session/fork', { reason }) as any;
           console.log(`  ${SUCCESS('\u2713')} Session forked: ${pc.white(result.session.id)}`);
           if (reason) console.log(`  ${DIM('Reason:')} ${reason}`);
-        } catch (err) {
-          console.log(`  ${ERROR(err.message)}`);
+        } catch (err: unknown) {
+          console.log(`  ${ERROR((err as Error).message)}`);
         }
         rl.prompt();
         return;
@@ -3304,13 +3289,13 @@ async function interactiveLoop({
           return;
         }
         try {
-          const result = await request('POST', baseUrl, '/session/spawn', { focus });
+          const result = await request('POST', baseUrl, '/session/spawn', { focus }) as any;
           console.log(
             `  ${SUCCESS('\u2713')} Child session spawned: ${pc.white(result.session.id)}`,
           );
           console.log(`  ${DIM('Focus:')} ${focus}`);
-        } catch (err) {
-          console.log(`  ${ERROR(err.message)}`);
+        } catch (err: unknown) {
+          console.log(`  ${ERROR((err as Error).message)}`);
         }
         rl.prompt();
         return;
@@ -3413,9 +3398,10 @@ async function interactiveLoop({
               { label: 'Handoffs only', value: 'handoffs', hint: 'ack all pending handoffs' },
               { label: 'Concierge history', value: 'concierge', hint: 'clear conversation' },
               { label: 'Session metrics', value: 'metrics', hint: 'reset counters' },
+
               { label: 'Screen', value: 'screen', hint: 'clear terminal' },
             ],
-          });
+          }) as any;
           if (!pick.value) {
             rl.prompt();
             return;
@@ -3456,35 +3442,35 @@ async function interactiveLoop({
               { label: 'No, cancel', value: 'no', hint: 'abort' },
             ],
             defaultValue: 'yes',
-          });
+          }) as any;
           if (clearConfirm.value === 'no') {
             console.log(`  ${DIM('Cancelled.')}`);
             rl.prompt();
             return;
           }
           try {
-            const { state } = await request('GET', baseUrl, '/state');
+            const { state } = await request('GET', baseUrl, '/state') as any;
             let ackedCount = 0;
             let cancelledCount = 0;
 
             if (what === 'all' || what === 'handoffs') {
-              const pending = state.handoffs.filter((h) => !h.acknowledgedAt);
+              const pending = state.handoffs.filter((h: any) => !h.acknowledgedAt);
               for (const h of pending) {
                 const agent = String(h.to || 'human').toLowerCase();
-                await request('POST', baseUrl, '/handoff/ack', { handoffId: h.id, agent });
+                await request('POST', baseUrl, '/handoff/ack', { handoffId: h.id, agent }) as any;
                 ackedCount++;
               }
             }
 
             if (what === 'all' || what === 'tasks') {
               const open = state.tasks.filter(
-                (t) => t.status === 'todo' || t.status === 'in_progress',
+                (t: any) => t.status === 'todo' || t.status === 'in_progress',
               );
               for (const t of open) {
                 await request('POST', baseUrl, '/task/update', {
                   taskId: t.id,
                   status: 'cancelled',
-                });
+                }) as any;
                 cancelledCount++;
               }
             }
@@ -3498,9 +3484,9 @@ async function interactiveLoop({
               parts.length > 0
                 ? `  ${SUCCESS('\u2713')} ${parts.join(', ')}`
                 : `  ${DIM('Nothing to clear')}`,
-            );
-          } catch (err) {
-            console.log(`  ${ERROR(err.message)}`);
+            ) as any;
+          } catch (err: unknown) {
+            console.log(`  ${ERROR((err as Error).message)}`);
           }
           rl.prompt();
           return;
@@ -3519,12 +3505,12 @@ async function interactiveLoop({
           const result = await request('POST', baseUrl, '/task/update', {
             taskId: id,
             status: 'cancelled',
-          });
+          }) as any;
           console.log(
             `  ${SUCCESS('\u2713')} ${pc.white(result.task.id)} cancelled ${DIM(result.task.title)}`,
-          );
-        } catch (err) {
-          console.log(`  ${ERROR(err.message)}`);
+          ) as any;
+        } catch (err: unknown) {
+          console.log(`  ${ERROR((err as Error).message)}`);
         }
         rl.prompt();
         return;
@@ -3557,8 +3543,8 @@ async function interactiveLoop({
               }
               console.log('');
             }
-          } catch (err) {
-            console.log(`  ${ERROR(err.message)}`);
+          } catch (err: unknown) {
+            console.log(`  ${ERROR((err as Error).message)}`);
           }
           rl.prompt();
           return;
@@ -3607,8 +3593,8 @@ async function interactiveLoop({
           child.on('close', async () => {
             // After branch review, surface any conflict worktrees from daemon tasks
             try {
-              const { state } = await request('GET', baseUrl, '/state');
-              const conflictTasks = (state.tasks || []).filter((t) => t.worktreeConflict);
+              const { state } = await request('GET', baseUrl, '/state') as any;
+              const conflictTasks = (state.tasks || []).filter((t: any) => t.worktreeConflict);
               if (conflictTasks.length > 0) {
                 console.log('');
                 console.log(sectionHeader('Conflict Worktrees'));
@@ -3617,7 +3603,6 @@ async function interactiveLoop({
                 );
                 console.log('');
                 for (const t of conflictTasks) {
-                  const worktreePath = t.worktreePath || `<unknown>`;
                   const relPath = t.worktreePath
                     ? path.relative(config.projectRoot, t.worktreePath)
                     : `hydra/task/${t.id}`;
@@ -3678,8 +3663,8 @@ async function interactiveLoop({
 
         // Default: list daemon tasks (original behavior)
         try {
-          const { state } = await request('GET', baseUrl, '/state');
-          const active = state.tasks.filter((t) => t.status !== 'cancelled' && t.status !== 'done');
+          const { state } = await request('GET', baseUrl, '/state') as any;
+          const active = state.tasks.filter((t: any) => t.status !== 'cancelled' && t.status !== 'done');
           if (active.length === 0) {
             console.log(`  ${DIM('No active tasks')}`);
           } else {
@@ -3693,8 +3678,8 @@ async function interactiveLoop({
             }
             console.log('');
           }
-        } catch (err) {
-          console.log(`  ${ERROR(err.message)}`);
+        } catch (err: unknown) {
+          console.log(`  ${ERROR((err as Error).message)}`);
         }
         rl.prompt();
         return;
@@ -3702,9 +3687,9 @@ async function interactiveLoop({
 
       if (line === ':handoffs') {
         try {
-          const { state } = await request('GET', baseUrl, '/state');
-          const pending = state.handoffs.filter((h) => !h.acknowledgedAt);
-          const recent = state.handoffs.filter((h) => h.acknowledgedAt).slice(-5);
+          const { state } = await request('GET', baseUrl, '/state') as any;
+          const pending = state.handoffs.filter((h: any) => !h.acknowledgedAt);
+          const recent = state.handoffs.filter((h: any) => h.acknowledgedAt).slice(-5);
           if (pending.length === 0 && recent.length === 0) {
             console.log(`  ${DIM('No handoffs')}`);
           } else {
@@ -3728,8 +3713,8 @@ async function interactiveLoop({
             }
             console.log('');
           }
-        } catch (err) {
-          console.log(`  ${ERROR(err.message)}`);
+        } catch (err: unknown) {
+          console.log(`  ${ERROR((err as Error).message)}`);
         }
         rl.prompt();
         return;
@@ -3737,12 +3722,12 @@ async function interactiveLoop({
 
       if (line === ':archive') {
         try {
-          const result = await request('POST', baseUrl, '/state/archive');
+          const result = await request('POST', baseUrl, '/state/archive') as any;
           console.log(
             `  ${SUCCESS('\u2713')} Archived: ${result.moved.tasks} tasks, ${result.moved.handoffs} handoffs, ${result.moved.blockers} blockers${result.eventsTrimmed ? `, ${result.eventsTrimmed} events trimmed` : ''}`,
           );
-        } catch (err) {
-          console.log(`  ${ERROR(err.message)}`);
+        } catch (err: unknown) {
+          console.log(`  ${ERROR((err as Error).message)}`);
         }
         rl.prompt();
         return;
@@ -3750,7 +3735,7 @@ async function interactiveLoop({
 
       if (line === ':events') {
         try {
-          const result = await request('GET', baseUrl, '/events');
+          const result = await request('GET', baseUrl, '/events') as any;
           const events = result.events || [];
           if (events.length === 0) {
             console.log(`  ${DIM('No events')}`);
@@ -3766,8 +3751,8 @@ async function interactiveLoop({
             }
             console.log('');
           }
-        } catch (err) {
-          console.log(`  ${ERROR(err.message)}`);
+        } catch (err: unknown) {
+          console.log(`  ${ERROR((err as Error).message)}`);
         }
         rl.prompt();
         return;
@@ -3785,8 +3770,8 @@ async function interactiveLoop({
           } else {
             console.log(`  ${DIM('All agent files up to date.')}`);
           }
-        } catch (err) {
-          console.log(`  ${ERROR(err.message)}`);
+        } catch (err: unknown) {
+          console.log(`  ${ERROR((err as Error).message)}`);
         }
         rl.prompt();
         return;
@@ -3801,7 +3786,7 @@ async function interactiveLoop({
             { label: 'No, cancel', value: 'no', hint: 'abort' },
           ],
           defaultValue: 'yes',
-        });
+        }) as any;
         if (shutdownConfirm.value === 'no') {
           console.log(`  ${DIM('Cancelled.')}`);
           rl.prompt();
@@ -3809,10 +3794,10 @@ async function interactiveLoop({
         }
         stopAllWorkers();
         try {
-          await request('POST', baseUrl, '/shutdown');
+          await request('POST', baseUrl, '/shutdown') as any;
           console.log(`  ${SUCCESS('\u2713')} Daemon shutting down`);
-        } catch (err) {
-          console.log(`  ${ERROR(err.message)}`);
+        } catch (err: unknown) {
+          console.log(`  ${ERROR((err as Error).message)}`);
         }
         rl.close();
         return;
@@ -3828,8 +3813,8 @@ async function interactiveLoop({
           // Interactive wizard
           try {
             await runForgeWizard(rl);
-          } catch (err) {
-            console.log(`  ${ERROR('Forge error:')} ${err.message}`);
+          } catch (err: unknown) {
+            console.log(`  ${ERROR('Forge error:')} ${(err as Error).message}`);
           }
         } else if (forgeSubCmd === 'list') {
           const forged = listForgedAgents();
@@ -3867,8 +3852,8 @@ async function interactiveLoop({
                 console.log(
                   `  ${pc.bold('Enabled:')}   ${agentDef.enabled ? SUCCESS('yes') : ERROR('no')}`,
                 );
-                console.log(`  ${pc.bold('Strengths:')} ${agentDef.strengths.join(', ')}`);
-                console.log(`  ${pc.bold('Tags:')}      ${agentDef.tags.join(', ')}`);
+                console.log(`  ${pc.bold('Strengths:')} ${agentDef.strengths!.join(', ')}`);
+                console.log(`  ${pc.bold('Tags:')}      ${agentDef.tags!.join(', ')}`);
               }
               if (meta) {
                 console.log(`  ${pc.bold('Forged:')}    ${meta.forgedAt}`);
@@ -3896,7 +3881,7 @@ async function interactiveLoop({
                 `  ${ACCENT('\u25B6')} Testing ${targetName} ${DIM(`(${agentDef.baseAgent}...)`)}`,
               );
               try {
-                const result = await testForgedAgent(agentDef);
+                const result = await testForgedAgent(agentDef as any);
                 console.log(
                   `  ${result.ok ? SUCCESS('\u2713') : ERROR('\u2718')} Test ${result.ok ? 'passed' : 'failed'} ${DIM(`(${(result.durationMs / 1000).toFixed(1)}s)`)}`,
                 );
@@ -3905,8 +3890,8 @@ async function interactiveLoop({
                   for (const l of preview) console.log(`    ${DIM(l.slice(0, 120))}`);
                   if (result.output.split('\n').length > 8) console.log(`    ${DIM('...')}`);
                 }
-              } catch (err) {
-                console.log(`  ${ERROR('Test error:')} ${err.message}`);
+              } catch (err: unknown) {
+                console.log(`  ${ERROR('Test error:')} ${(err as Error).message}`);
               }
             } else {
               console.log(`  ${ERROR('Unknown agent:')} ${targetName}`);
@@ -3942,8 +3927,8 @@ async function interactiveLoop({
               try {
                 const desc = meta?.description || agentDef.displayName;
                 await runForgeWizard(rl, desc);
-              } catch (err) {
-                console.log(`  ${ERROR('Forge error:')} ${err.message}`);
+              } catch (err: unknown) {
+                console.log(`  ${ERROR('Forge error:')} ${(err as Error).message}`);
               }
             } else {
               console.log(`  ${ERROR('Unknown agent:')} ${targetName}`);
@@ -3955,8 +3940,8 @@ async function interactiveLoop({
           // Treat the whole arg string as a description
           try {
             await runForgeWizard(rl, forgeArgs);
-          } catch (err) {
-            console.log(`  ${ERROR('Forge error:')} ${err.message}`);
+          } catch (err: unknown) {
+            console.log(`  ${ERROR('Forge error:')} ${(err as Error).message}`);
           }
         }
 
@@ -4010,7 +3995,7 @@ async function interactiveLoop({
           console.log('');
         } else if (agentSubCmd === 'list') {
           const filterType = agentParts[1] || 'all';
-          const opts = {};
+          const opts: any = {};
           if (filterType === 'virtual') opts.type = 'virtual';
           else if (filterType === 'physical') opts.type = 'physical';
           const list = listAgents(opts);
@@ -4042,11 +4027,11 @@ async function interactiveLoop({
               if (agentDef.councilRole) {
                 console.log(`  ${pc.bold('Council:')}   ${agentDef.councilRole}`);
               }
-              if (agentDef.strengths.length > 0) {
-                console.log(`  ${pc.bold('Strengths:')} ${agentDef.strengths.join(', ')}`);
+              if (agentDef.strengths!.length > 0) {
+                console.log(`  ${pc.bold('Strengths:')} ${agentDef.strengths!.join(', ')}`);
               }
-              if (agentDef.tags.length > 0) {
-                console.log(`  ${pc.bold('Tags:')}      ${agentDef.tags.join(', ')}`);
+              if (agentDef.tags!.length > 0) {
+                console.log(`  ${pc.bold('Tags:')}      ${agentDef.tags!.join(', ')}`);
               }
               // Show task affinities sorted by score
               const affinities = Object.entries(agentDef.taskAffinity || {}).sort(
@@ -4127,8 +4112,8 @@ async function interactiveLoop({
                     `  ${ERROR('FAIL')} ${result.errorCategory}: ${result.stderr?.slice(0, 200)}`,
                   );
                 }
-              } catch (err) {
-                console.log(`  ${ERROR('ERROR')} ${err.message}`);
+              } catch (err: unknown) {
+                console.log(`  ${ERROR('ERROR')} ${(err as Error).message}`);
               }
             } else {
               console.log(`  ${ERROR('Not found:')} agent "${targetName}" not in registry`);
@@ -4175,16 +4160,16 @@ async function interactiveLoop({
             if (recent.length > 0) {
               console.log('');
               console.log(DIM('  Recent diagnoses:'));
-              for (const e of recent) {
+              for (const e of recent as any) {
                 const sev =
-                  e.severity === 'critical' || e.severity === 'high'
-                    ? ERROR(e.severity)
-                    : e.severity === 'medium'
-                      ? WARNING(e.severity)
-                      : DIM(e.severity ?? '');
-                const ts = e.ts ? new Date(/** @type {number|string} */ (e.ts)).toLocaleTimeString() : '';
+                  e['severity'] === 'critical' || e['severity'] === 'high'
+                    ? ERROR(e['severity'])
+                    : e['severity'] === 'medium'
+                      ? WARNING(e['severity'])
+                      : DIM(e['severity'] ?? '');
+                const ts = e['ts'] ? new Date(e['ts'] as any).toLocaleTimeString() : '';
                 console.log(
-                  `    ${DIM(ts)} ${sev} ${pc.white(e.action ?? '')} ${DIM(e.pipeline || '')} ${(e.explanation || '').slice(0, 60)}`,
+                  `    ${DIM(ts)} ${sev} ${pc.white(e['action'] ?? '')} ${DIM(e['pipeline'] || '')} ${(e['explanation'] || '').slice(0, 60)}`,
                 );
               }
             } else {
@@ -4202,18 +4187,18 @@ async function interactiveLoop({
             if (entries.length === 0) {
               console.log(`  ${DIM('No diagnostic entries yet')}`);
             } else {
-              for (const e of entries) {
+              for (const e of entries as any) {
                 const sev =
-                  e.severity === 'critical' || e.severity === 'high'
-                    ? ERROR(e.severity.padEnd(8))
-                    : e.severity === 'medium'
-                      ? WARNING(e.severity.padEnd(8))
-                      : DIM((e.severity ?? '').padEnd(8));
-                const ts = e.ts ? new Date(/** @type {number|string} */ (e.ts)).toLocaleString() : '';
+                  e['severity'] === 'critical' || e['severity'] === 'high'
+                    ? ERROR(e['severity'].padEnd(8))
+                    : e['severity'] === 'medium'
+                      ? WARNING(e['severity'].padEnd(8))
+                      : DIM((e['severity'] ?? '').padEnd(8));
+                const ts = e['ts'] ? new Date(e['ts'] as any).toLocaleString() : '';
                 console.log(
-                  `  ${DIM(ts)} ${sev} [${e.action}] ${e.pipeline || ''}: ${(e.explanation || '').slice(0, 80)}`,
+                  `  ${DIM(ts)} ${sev} [${e['action']}] ${e['pipeline'] || ''}: ${(e['explanation'] || '').slice(0, 80)}`,
                 );
-                if (e.recurring) console.log(`    ${WARNING('↻ recurring')}`);
+                if (e['recurring']) console.log(`    ${WARNING('↻ recurring')}`);
               }
             }
             console.log('');
@@ -4238,14 +4223,14 @@ async function interactiveLoop({
                   () => scanErrorActivity(),
                 ],
                 enrich: (items) => enrichWithDiagnosis(items, getOutputContext()),
-                preSelectFilter: (item) => item.severity === 'critical' || item.severity === 'high',
+                preSelectFilter: (item) => item['severity'] === 'critical' || item['severity'] === 'high',
                 executeFn: (item) =>
                   executeFixAction(item, { projectRoot: config.projectRoot, rl }),
                 projectRoot: config.projectRoot,
                 baseUrl,
               });
-            } catch (err) {
-              console.log(`  ${ERROR(err.message)}`);
+            } catch (err: unknown) {
+              console.log(`  ${ERROR((err as Error).message)}`);
             }
           } else if (doctorArg === 'config') {
             // Compare user hydra.config.json against DEFAULT_CONFIG
@@ -4323,8 +4308,8 @@ async function interactiveLoop({
                 );
               }
               console.log('');
-            } catch (err) {
-              console.log(`  ${ERROR(err.message)}`);
+            } catch (err: unknown) {
+              console.log(`  ${ERROR((err as Error).message)}`);
             }
           } else if (doctorArg.startsWith('diagnose ')) {
             const errorText = doctorArg.slice('diagnose '.length).trim();
@@ -4380,9 +4365,9 @@ async function interactiveLoop({
                   spinner.stop();
                   console.log(`  ${ERROR('Investigator unavailable')} — OPENAI_API_KEY required`);
                 }
-              } catch (err) {
+              } catch (err: unknown) {
                 spinner.stop();
-                console.log(`  ${ERROR(err.message)}`);
+                console.log(`  ${ERROR((err as Error).message)}`);
               }
               console.log('');
             } else {
@@ -4392,8 +4377,8 @@ async function interactiveLoop({
             console.log(`  ${ERROR('Unknown subcommand:')} ${doctorArg}`);
             console.log(`  ${DIM('Usage: :doctor [stats|log|fix|config|diagnose <text>]')}`);
           }
-        } catch (err) {
-          console.log(`  ${ERROR(err.message)}`);
+        } catch (err: unknown) {
+          console.log(`  ${ERROR((err as Error).message)}`);
         }
         rl.prompt();
         return;
@@ -4438,13 +4423,13 @@ async function interactiveLoop({
             // Stats + 10 most recent entries
             console.log('');
             console.log(sectionHeader('Knowledge Base'));
-            const stats = getStats(kb);
+            const stats = getStats(kb) as any;
             console.log(
               label('Entries', pc.white(String(stats.totalEntries || kb.entries?.length || 0))),
             );
             if (stats.byArea && Object.keys(stats.byArea).length > 0) {
               const areas = Object.entries(stats.byArea)
-                .sort(([, a], [, b]) => b - a)
+                .sort(([, a], [, b]) => (b as number) - (a as number))
                 .slice(0, 5);
               console.log(label('Top areas', areas.map(([a, c]) => `${a} (${c})`).join(', ')));
             }
@@ -4470,8 +4455,8 @@ async function interactiveLoop({
             }
             console.log('');
           }
-        } catch (err) {
-          console.log(`  ${ERROR(err.message)}`);
+        } catch (err: unknown) {
+          console.log(`  ${ERROR((err as Error).message)}`);
         }
         rl.prompt();
         return;
@@ -4514,8 +4499,8 @@ async function interactiveLoop({
             projectRoot: config.projectRoot,
             baseUrl,
           });
-        } catch (err) {
-          console.log(`  ${ERROR(err.message)}`);
+        } catch (err: unknown) {
+          console.log(`  ${ERROR((err as Error).message)}`);
         }
         rl.prompt();
         return;
@@ -4778,10 +4763,10 @@ async function interactiveLoop({
               const ap = getActiveProvider();
               rl.setPrompt(buildConciergePrompt());
               console.log(
-                `  ${SUCCESS('\u2713')} Concierge model switched to ${ACCENT(ap.model)} ${DIM(`(${ap.provider})`)}`,
+                `  ${SUCCESS('\u2713')} Concierge model switched to ${ACCENT(ap!.model)} ${DIM(`(${ap!.provider})`)}`,
               );
-            } catch (err) {
-              console.log(`  ${ERROR('Failed to switch model:')} ${err.message}`);
+            } catch (err: unknown) {
+              console.log(`  ${ERROR('Failed to switch model:')} ${(err as Error).message}`);
             }
           } else {
             // Show active model + fallback chain
@@ -4818,8 +4803,8 @@ async function interactiveLoop({
             console.log(
               `  ${SUCCESS('\u2713')} Conversation exported to ${DIM(path.relative(config.projectRoot, exportPath))}`,
             );
-          } catch (err) {
-            console.log(`  ${ERROR('Export failed:')} ${err.message}`);
+          } catch (err: unknown) {
+            console.log(`  ${ERROR('Export failed:')} ${(err as Error).message}`);
           }
         } else {
           // Toggle
@@ -4939,7 +4924,7 @@ async function interactiveLoop({
             ],
             defaultIndex: 0,
             timeout: 30_000,
-          });
+          }) as any;
           if (confirm.value !== 'yes') {
             console.log(`  ${WARNING('Aborted — commit or stash changes first.')}`);
             rl.prompt();
@@ -4971,7 +4956,7 @@ async function interactiveLoop({
             ],
             defaultIndex: 0,
             timeout: 60_000,
-          });
+          }) as any;
 
           if (modeChoice.value === 'quick') actualizeArgs.push('max-tasks=3', 'max-hours=1');
           else if (modeChoice.value === 'deep') actualizeArgs.push('max-tasks=8', 'max-hours=6');
@@ -4985,7 +4970,7 @@ async function interactiveLoop({
             ],
             defaultIndex: 0,
             timeout: 20_000,
-          });
+          }) as any;
           if (discoveryChoice.value === 'no') actualizeArgs.push('--no-discovery');
 
           // Let the user choose tasks if they want
@@ -5002,7 +4987,7 @@ async function interactiveLoop({
             ],
             defaultIndex: 0,
             timeout: 20_000,
-          });
+          }) as any;
           if (selectChoice.value === 'yes') actualizeArgs.push('--interactive');
         }
 
@@ -5084,7 +5069,7 @@ async function interactiveLoop({
         // Interactive setup: mode, limits, discovery
         const cfg = loadHydraConfig();
         const nightlyCfg = cfg.nightly;
-        const baseBranch = nightlyCfg.baseBranch || 'dev';
+        const baseBranch = nightlyCfg!.baseBranch || 'dev';
         const cwd = config.projectRoot;
 
         // Pre-flight: must be on base branch
@@ -5123,7 +5108,7 @@ async function interactiveLoop({
             ],
             defaultIndex: 0,
             timeout: 30_000,
-          });
+          }) as any;
           if (confirm.value !== 'yes') {
             console.log(`  ${WARNING('Aborted \u2014 commit or stash changes first.')}`);
             rl.prompt();
@@ -5173,7 +5158,7 @@ async function interactiveLoop({
             ],
             defaultIndex: 0,
             timeout: 60_000,
-          });
+          }) as any;
 
           if (modeChoice.value === 'quick') {
             nightlyArgs.push('max-tasks=3', 'max-hours=1');
@@ -5193,7 +5178,7 @@ async function interactiveLoop({
                 ? '10'
                 : modeChoice.value === 'auto'
                   ? '7'
-                  : String(nightlyCfg.maxTasks || 5);
+                  : String(nightlyCfg!.maxTasks || 5);
 
           const tasksChoice = await promptChoice(rl, {
             message: `Max tasks to execute?`,
@@ -5207,7 +5192,7 @@ async function interactiveLoop({
             defaultIndex: 0,
             freeform: true,
             timeout: 30_000,
-          });
+          }) as any;
           const maxTasks = Number.parseInt(tasksChoice.value, 10);
           if (!isNaN(maxTasks) && maxTasks > 0) {
             // Remove any previous max-tasks from mode preset
@@ -5224,7 +5209,7 @@ async function interactiveLoop({
                 ? '8'
                 : modeChoice.value === 'auto'
                   ? '6'
-                  : String(nightlyCfg.maxHours || 4);
+                  : String(nightlyCfg!.maxHours || 4);
 
           const hoursChoice = await promptChoice(rl, {
             message: `Max hours?`,
@@ -5238,7 +5223,7 @@ async function interactiveLoop({
             defaultIndex: 0,
             freeform: true,
             timeout: 30_000,
-          });
+          }) as any;
           const maxHours = Number.parseFloat(hoursChoice.value);
           if (!isNaN(maxHours) && maxHours > 0) {
             const idx = nightlyArgs.findIndex((a) => a.startsWith('max-hours='));
@@ -5249,14 +5234,14 @@ async function interactiveLoop({
           // 4. AI discovery toggle
           const discoveryChoice = await promptChoice(rl, {
             message: 'Enable AI discovery? (agent suggests improvement tasks)',
-            context: { default: nightlyCfg.sources?.aiDiscovery === false ? 'off' : 'on' },
+            context: { default: nightlyCfg!.sources?.['aiDiscovery'] === false ? 'off' : 'on' },
             choices: [
               { label: 'Yes \u2014 discover + scan', value: 'yes' },
               { label: 'No \u2014 scan only', value: 'no' },
             ],
-            defaultIndex: nightlyCfg.sources?.aiDiscovery === false ? 1 : 0,
+            defaultIndex: nightlyCfg!.sources?.['aiDiscovery'] === false ? 1 : 0,
             timeout: 20_000,
-          });
+          }) as any;
           if (discoveryChoice.value === 'no') {
             nightlyArgs.push('--no-discovery');
           }
@@ -5355,7 +5340,7 @@ async function interactiveLoop({
               ],
               defaultIndex: 0,
               timeout: 30_000,
-            });
+            }) as any;
             if (confirm.value !== 'yes') {
               console.log(`  ${WARNING('Aborted \u2014 commit or stash changes first.')}`);
               rl.prompt();
@@ -5435,7 +5420,7 @@ async function interactiveLoop({
               ],
               defaultIndex: 0,
               timeout: 30_000,
-            });
+            }) as any;
             if (confirm.value !== 'yes') {
               console.log(`  ${WARNING('Aborted \u2014 commit or stash changes first.')}`);
               rl.prompt();
@@ -5493,7 +5478,7 @@ async function interactiveLoop({
             const cmdResult = await conciergeTurn(hint, {
               context: { projectName: config.projectName, projectRoot: config.projectRoot, mode },
             });
-            const cmdResponse = cmdResult.response || cmdResult.fullResponse || '';
+            const cmdResponse = (cmdResult as any).response || (cmdResult as any).fullResponse || '';
             if (cmdResponse) {
               process.stdout.write(`\n  ${pc.blue('\u2B22')} ${DIM(modelLbl)}\n  `);
               process.stdout.write(pc.blue(cmdResponse));
@@ -5526,7 +5511,7 @@ async function interactiveLoop({
           return;
         }
         const sidecarModel = getConciergeModelLabel();
-        const sidecarContext = {
+        const sidecarContext: any = {
           projectName: config.projectName,
           projectRoot: config.projectRoot,
           mode,
@@ -5550,7 +5535,7 @@ async function interactiveLoop({
         sidecaring = true;
         try {
           const sidecarResult = await conciergeTurn(line, { context: sidecarContext });
-          const sidecarText = sidecarResult.response || '';
+          const sidecarText = String(sidecarResult.response || '');
           if (sidecarText) {
             process.stdout.write(`\r\x1b[2K  ${pc.blue('\u2B22')} ${DIM(sidecarModel)}\n  `);
             process.stdout.write(pc.blue(sidecarText));
@@ -5558,7 +5543,7 @@ async function interactiveLoop({
           }
         } catch (sidecarErr) {
           process.stdout.write(
-            `\r\x1b[2K  ${DIM(`${pc.blue('\u2B22')} concierge error: ${sidecarErr.message.slice(0, 60)}`)}\n`,
+            `\r\x1b[2K  ${DIM(`${pc.blue('\u2B22')} concierge error: ${(sidecarErr as any).message.slice(0, 60)}`)}\n`,
           );
         } finally {
           sidecaring = false;
@@ -5580,7 +5565,7 @@ async function interactiveLoop({
       // ── Concierge Intercept ────────────────────────────────────────────
       else if (conciergeActive && !line.startsWith(':') && !isChoiceActive()) {
         // Gather enriched context for the system prompt
-        const context = { projectName: config.projectName, projectRoot: config.projectRoot, mode };
+        const context: any = { projectName: config.projectName, projectRoot: config.projectRoot, mode };
         try {
           context.knownProjects = getRecentProjects();
         } catch {
@@ -5588,17 +5573,17 @@ async function interactiveLoop({
         }
         try {
           const models = getModelSummary();
-          const agentModels = {};
+          const agentModels: any = {};
           for (const [agent, info] of Object.entries(models)) {
             if (agent === '_mode') continue;
-            agentModels[agent] = info.active || 'unknown';
+            agentModels[agent] = (info as any).active || 'unknown';
           }
           context.agentModels = agentModels;
         } catch {
           /* skip */
         }
         try {
-          const sessionStatus = await request('GET', baseUrl, '/session/status');
+          const sessionStatus = await request('GET', baseUrl, '/session/status') as any;
           context.openTasks =
             (sessionStatus.inProgressTasks || []).length +
             (sessionStatus.pendingHandoffs || []).length;
@@ -5613,20 +5598,20 @@ async function interactiveLoop({
           /* skip */
         }
         try {
-          const events = await request('GET', baseUrl, '/events/replay?category=task&from=0');
+          const events = await request('GET', baseUrl, '/events/replay?category=task&from=0') as any[];
           if (Array.isArray(events)) {
             context.recentCompletions = events
-              .filter((e) => e.payload?.status === 'done' || e.payload?.event === 'task_result')
+              .filter((e: any) => e.payload?.status === 'done' || e.payload?.event === 'task_result')
               .slice(-3)
-              .map((e) => ({
+              .map((e: any) => ({
                 agent: e.payload?.agent || e.payload?.owner || 'unknown',
                 title: e.payload?.title || e.payload?.taskId || '',
                 taskId: e.payload?.taskId || '',
               }));
             context.recentErrors = events
-              .filter((e) => e.payload?.passed === false || e.payload?.status === 'error')
+              .filter((e: any) => e.payload?.passed === false || e.payload?.status === 'error')
               .slice(-3)
-              .map((e) => ({
+              .map((e: any) => ({
                 agent: e.payload?.agent || 'system',
                 error: e.payload?.snippet || e.payload?.error || 'verification failed',
               }));
@@ -5679,7 +5664,7 @@ async function interactiveLoop({
               if (
                 !_selfIndexCache.block ||
                 _selfIndexCache.key !== key ||
-                now - _selfIndexCache.builtAt > refreshMs
+                now - _selfIndexCache.builtAt > refreshMs!
               ) {
                 const idx = buildSelfIndex(HYDRA_ROOT);
                 _selfIndexCache = {
@@ -5701,8 +5686,8 @@ async function interactiveLoop({
         try {
           const { isSituational, focus } = detectSituationalQuery(line);
           if (isSituational) {
-            const digest = await buildActivityDigest({ baseUrl, workers, focus });
-            context.activityDigest = formatDigestForPrompt(digest, { focus });
+            const digest = await buildActivityDigest({ baseUrl, workers: workers as any, focus: focus ?? undefined });
+            context.activityDigest = formatDigestForPrompt(digest, { focus: focus ?? undefined });
           }
         } catch {
           /* fall back to sparse context */
@@ -5735,7 +5720,7 @@ async function interactiveLoop({
           spinner.stop();
 
           // Display complete response at once
-          const responseText = result.response || result.fullResponse || '';
+          const responseText = (result as any).response || (result as any).fullResponse || '';
           if (responseText) {
             process.stdout.write(`\n  ${pc.blue('\u2B22')} ${DIM(modelLbl)}\n  `);
             process.stdout.write(pc.blue(responseText));
@@ -5751,19 +5736,19 @@ async function interactiveLoop({
 
           if (result.intent === 'dispatch') {
             console.log(
-              `  ${ACCENT('\u2192')} Routing to dispatch: ${DIM(result.dispatchPrompt.slice(0, 80))}${result.dispatchPrompt.length > 80 ? '...' : ''}`,
+              `  ${ACCENT('\u2192')} Routing to dispatch: ${DIM(result.dispatchPrompt!.slice(0, 80))}${result.dispatchPrompt!.length > 80 ? '...' : ''}`,
             );
             console.log('');
-            dispatchLine = result.dispatchPrompt;
+            dispatchLine = result.dispatchPrompt!;
             // Fall through to normal dispatch below
           } else {
             rl.prompt();
             return;
           }
-        } catch (err) {
+        } catch (err: unknown) {
           spinner.stop();
-          console.log(`  ${ERROR('Concierge error:')} ${err.message}`);
-          if (err.status === 401 || err.status === 403) {
+          console.log(`  ${ERROR('Concierge error:')} ${(err as Error).message}`);
+          if ((err as any).status === 401 || (err as any).status === 403) {
             conciergeActive = false;
             setActiveMode(mode);
             rl.setPrompt(normalPrompt);
@@ -5824,7 +5809,7 @@ async function interactiveLoop({
             },
           ],
           defaultValue: 'proceed',
-        });
+        }) as any;
 
         if (preDispatch.value === 'cancel') {
           console.log(`  ${DIM('Dispatch cancelled.')}`);
@@ -5859,7 +5844,7 @@ async function interactiveLoop({
               : estimateFlowDuration(COUNCIL_AGENTS, autoCouncilRounds);
         const smartLabel =
           mode === 'smart'
-            ? `Smart (${classification.tier}→${SMART_TIER_MAP[classification.tier] || 'balanced'}) `
+            ? `Smart (${classification.tier}→${(SMART_TIER_MAP as Record<string, string>)[classification.tier] || 'balanced'}) `
             : '';
         const tandemLabel =
           rs === 'tandem' && classification.tandemPair
@@ -5888,7 +5873,7 @@ async function interactiveLoop({
           tier: classification.tier,
         });
 
-        const onProgress = (evt) => {
+        const onProgress = (evt: any) => {
           if (evt.action === 'start') {
             const narrative = phaseNarrative(evt.phase, evt.agent, topic);
             const prefix = classification.tier === 'complex' ? 'Council' : 'Mini-round';
@@ -5927,8 +5912,8 @@ async function interactiveLoop({
                 ? `Tandem dispatched: ${auto.route}`
                 : `${auto.mode} complete`;
           spinner.succeed(succeedMsg);
-        } catch (err) {
-          spinner.fail(err.message);
+        } catch (err: unknown) {
+          spinner.fail((err as Error).message);
           clearDispatchContext();
           throw err;
         } finally {
@@ -5983,15 +5968,15 @@ async function interactiveLoop({
           console.log(label('Saved', DIM('skipped mini-round triage (4 agent calls)')));
         }
         console.log(label('Signals', DIM(classification.reason)));
-        if (auto.smartTier) {
-          console.log(label('Tier', `${ACCENT(auto.smartTier)} → ${DIM(auto.smartMode)} models`));
+        if ((auto as any).smartTier) {
+          console.log(label('Tier', `${ACCENT((auto as any).smartTier)} → ${DIM((auto as any).smartMode)} models`));
         }
         if (auto.triage) {
           console.log(label('Rationale', DIM(auto.triage.recommendationRationale || 'n/a')));
         }
-        if (auto.escalatedToCouncil) {
-          if (auto.councilOutput) {
-            console.log(auto.councilOutput);
+        if ((auto as any).escalatedToCouncil) {
+          if ((auto as any).councilOutput) {
+            console.log((auto as any).councilOutput);
           }
         } else if (auto.published) {
           console.log(label('Tasks created', pc.white(String(auto.published.tasks.length))));
@@ -6018,12 +6003,12 @@ async function interactiveLoop({
                 { label: 'Skip', value: 'skip', hint: 'tasks dispatched, no execution' },
               ],
               defaultValue: 'workers',
-            });
+            }) as any;
             if (postDispatch.value === 'workers') {
-              startAgentWorkers(handoffAgents, baseUrl, { rl });
+              startAgentWorkers(handoffAgents as string[], baseUrl, { rl });
             } else if (postDispatch.value === 'launch') {
-              for (const a of handoffAgents) setAgentExecMode(a, 'terminal');
-              launchAgentTerminals(handoffAgents, baseUrl);
+              for (const a of handoffAgents as string[]) setAgentExecMode(a, 'terminal');
+              launchAgentTerminals(handoffAgents as string[], baseUrl);
             }
           }
         } else {
@@ -6033,9 +6018,8 @@ async function interactiveLoop({
         const councilTopic = extractTopic(dispatchLine);
 
         // Council gate: check if council is overkill
-        const routingCfg = config.routing || {};
+        const routingCfg = (config as any).routing || {};
         const gateClassification = classifyPrompt(dispatchLine);
-        let useCouncil = true;
         if (
           routingCfg.councilGate !== false &&
           gateClassification.routeStrategy !== 'council' &&
@@ -6064,14 +6048,13 @@ async function interactiveLoop({
               { label: 'Cancel', value: 'cancel', hint: 'abort' },
             ],
             defaultValue: 'efficient',
-          });
+          }) as any;
           if (gateChoice.value === 'cancel') {
             console.log(`  ${DIM('Dispatch cancelled.')}`);
             rl.prompt();
             return;
           }
           if (gateChoice.value === 'efficient') {
-            useCouncil = false;
             // Route through auto dispatch with the gate classification
             if (dispatchDepth === 0 && isConciergeAvailable()) {
               process.stdout.write(
@@ -6107,7 +6090,7 @@ async function interactiveLoop({
               );
               const handoffAgents = extractHandoffAgents(autoResult);
               if (handoffAgents.length > 0) {
-                startAgentWorkers(handoffAgents, baseUrl, { rl });
+                startAgentWorkers(handoffAgents as string[], baseUrl, { rl });
               }
             }
             rl.prompt();
@@ -6147,12 +6130,12 @@ async function interactiveLoop({
             rounds: councilRounds,
             preview: councilPreview,
             onProgress: (evt) => {
-              if (evt.action === 'start') {
-                const narrative = phaseNarrative(evt.phase, evt.agent, councilTopic);
-                councilSpinner.update(`Council: ${narrative} [${evt.step}/${evt.totalSteps}]`);
-                setAgentActivity(evt.agent, 'working', narrative, {
-                  phase: evt.phase,
-                  step: `${evt.step}/${evt.totalSteps}`,
+              if (evt['action'] === 'start') {
+                const narrative = phaseNarrative(evt['phase'] as string, evt['agent'] as string, councilTopic);
+                councilSpinner.update(`Council: ${narrative} [${evt['step']}/${evt['totalSteps']}]`);
+                setAgentActivity(evt['agent'] as string, 'working', narrative, {
+                  phase: evt['phase'] as string,
+                  step: `${evt['step']}/${evt['totalSteps']}`,
                 });
                 drawStatusBar();
               }
@@ -6210,8 +6193,8 @@ async function interactiveLoop({
           startAgentWorkers(handoffAgents, baseUrl, { rl });
         }
       }
-    } catch (err) {
-      console.error(`Error: ${err.message}`);
+    } catch (err: unknown) {
+      console.error(`Error: ${(err as Error).message}`);
     }
 
     drawStatusBar();
@@ -6235,31 +6218,31 @@ async function interactiveLoop({
 
 async function main() {
   const { options, positionals } = parseArgs(process.argv);
-  const baseUrl = String(options.url || DEFAULT_URL);
-  const from = String(options.from || 'human').toLowerCase();
-  const agents = parseList(options.agents || 'gemini,codex,claude');
-  const mode = String(options.mode || 'auto').toLowerCase();
+  const baseUrl = String(options['url'] || DEFAULT_URL);
+  const from = String(options['from'] || 'human').toLowerCase();
+  const agents = parseList(String(options['agents'] || 'gemini,codex,claude'));
+  const mode = String(options['mode'] || 'auto').toLowerCase();
   const councilRounds = Math.max(
     1,
-    Math.min(4, Number.parseInt(String(options.councilRounds || '2'), 10) || 2),
+    Math.min(4, Number.parseInt(String(options['councilRounds'] || '2'), 10) || 2),
   );
-  const councilPreview = boolFlag(options.councilPreview, false);
+  const councilPreview = boolFlag(options['councilPreview'], false);
   const autoMiniRounds = Math.max(
     1,
-    Math.min(2, Number.parseInt(String(options.autoMiniRounds || '1'), 10) || 1),
+    Math.min(2, Number.parseInt(String(options['autoMiniRounds'] || '1'), 10) || 1),
   );
   const autoCouncilRounds = Math.max(
     1,
     Math.min(
       4,
-      Number.parseInt(String(options.autoCouncilRounds || String(councilRounds)), 10) ||
+      Number.parseInt(String(options['autoCouncilRounds'] || String(councilRounds)), 10) ||
         councilRounds,
     ),
   );
-  const autoPreview = boolFlag(options.autoPreview, false);
+  const autoPreview = boolFlag(options['autoPreview'], false);
   const promptText = getPrompt(options, positionals);
   const interactive = !promptText;
-  const showWelcome = boolFlag(options.welcome, interactive);
+  const showWelcome = boolFlag(options['welcome'], interactive);
 
   // Register built-in virtual sub-agents
   registerBuiltInSubAgents();
@@ -6314,21 +6297,21 @@ async function main() {
     if (auto.mode === 'tandem') {
       console.log(label('Saved', DIM('skipped mini-round triage (4 agent calls)')));
     }
-    if (auto.smartTier) {
-      console.log(label('Tier', `${ACCENT(auto.smartTier)} → ${DIM(auto.smartMode)} models`));
+    if ((auto as any).smartTier) {
+      console.log(label('Tier', `${ACCENT((auto as any).smartTier)} → ${DIM((auto as any).smartMode)} models`));
     }
     if (auto.triage) {
       console.log(label('Rationale', DIM(auto.triage.recommendationRationale || 'n/a')));
     }
-    if (auto.escalatedToCouncil) {
-      if (auto.councilOutput) {
-        console.log(auto.councilOutput);
+    if ((auto as any).escalatedToCouncil) {
+      if ((auto as any).councilOutput) {
+        console.log((auto as any).councilOutput);
       }
     } else if (auto.published) {
       console.log(label('Tasks created', pc.white(String(auto.published.tasks.length))));
       console.log(label('Handoffs queued', pc.white(String(auto.published.handoffs.length))));
       const handoffAgents = extractHandoffAgents(auto);
-      if (handoffAgents.length > 0) startAgentWorkers(handoffAgents, baseUrl);
+      if (handoffAgents.length > 0) startAgentWorkers(handoffAgents as string[], baseUrl);
     } else {
       console.log(label('Route', DIM('preview')));
     }
@@ -6361,7 +6344,7 @@ async function main() {
     // Headless dispatch pipeline: spawn hydra-dispatch.mjs
     const dispatchScript = path.join(HYDRA_ROOT, 'lib', 'hydra-dispatch.ts');
     const args = [dispatchScript, `prompt=${promptText}`, `url=${baseUrl}`];
-    if (boolFlag(options.preview, false)) {
+    if (boolFlag(options['preview'], false)) {
       args.push('mode=preview');
     }
     const result = spawnHydraNodeSync(args[0], args.slice(1), {
@@ -6394,6 +6377,6 @@ async function main() {
 }
 
 main().catch((err) => {
-  console.error(`Hydra operator failed: ${err.message}`);
+  console.error(`Hydra operator failed: ${(err as Error).message}`);
   process.exit(1);
 });

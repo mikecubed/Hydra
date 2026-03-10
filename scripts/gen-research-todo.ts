@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * gen-research-todo.mjs
+ * gen-research-todo.ts
  * Generates docs/coordination/RESEARCH_TODO.md from all research docs
  * under docs/coordination/research/ (recursively).
  *
@@ -9,7 +9,7 @@
  * - Uses relative links from the output file's location (research/...)
  *   not repo-root-prefixed paths that would double-resolve in GitHub/VS Code
  *
- * Usage: node scripts/gen-research-todo.mjs
+ * Usage: node scripts/gen-research-todo.ts
  */
 
 import fs from 'node:fs';
@@ -31,11 +31,11 @@ const INCLUDE_EXTS = new Set(['.md', '.mdx', '.markdown', '.mdown', '.txt']);
 
 // --- helpers ---
 
-function toTitleCase(str) {
-  return str.replace(/[-_]+/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase());
+function toTitleCase(str: string) {
+  return str.replace(/[-_]+/g, ' ').replace(/\b\w/g, (c: string) => c.toUpperCase());
 }
 
-function extractTitle(filePath) {
+function extractTitle(filePath: string) {
   let raw;
   try {
     raw = fs.readFileSync(filePath, 'utf8');
@@ -89,11 +89,11 @@ function extractTitle(filePath) {
   return null;
 }
 
-function collectFiles(dir) {
-  const results = [];
+function collectFiles(dir: string): string[] {
+  const results: string[] = [];
   if (!fs.existsSync(dir)) return results;
 
-  function walk(current) {
+  function walk(current: string) {
     for (const entry of fs.readdirSync(current, { withFileTypes: true })) {
       const full = path.join(current, entry.name);
       if (entry.isSymbolicLink()) continue; // skip symlinks
@@ -109,8 +109,8 @@ function collectFiles(dir) {
   return results;
 }
 
-function groupFiles(files) {
-  const groups = {};
+function groupFiles(files: string[]) {
+  const groups: Record<string, { title: string; link: string }[]> = {};
 
   for (const f of files) {
     const rel = path.relative(RESEARCH_DIR, f); // e.g. "topic/file.md" or "file.md"
@@ -128,13 +128,13 @@ function groupFiles(files) {
 
   // Sort each group by title
   for (const g of Object.values(groups)) {
-    g.sort((a, b) => a.title.localeCompare(b.title, undefined, { sensitivity: 'base' }));
+    (g as { title: string; link: string }[]).sort((a: { title: string }, b: { title: string }) => a.title.localeCompare(b.title, undefined, { sensitivity: 'base' }));
   }
 
   return groups;
 }
 
-function renderBlock(groups) {
+function renderBlock(groups: Record<string, { title: string; link: string }[]>) {
   const groupNames = Object.keys(groups).sort((a, b) => {
     if (a === 'root') return -1;
     if (b === 'root') return 1;
@@ -163,13 +163,13 @@ function renderBlock(groups) {
   return lines.join('\n');
 }
 
-function countItems(groups) {
+function countItems(groups: Record<string, unknown[]>) {
   let total = 0;
-  for (const items of Object.values(groups)) total += items.length;
+  for (const items of Object.values(groups)) total += (items as unknown[]).length;
   return { total, groups: Object.keys(groups).length };
 }
 
-function buildOutput(groups) {
+function buildOutput(groups: Record<string, { title: string; link: string }[]>) {
   const ts = new Date().toISOString().replace('T', ' ').slice(0, 19);
   const { total, groups: gc } = countItems(groups);
 
@@ -193,7 +193,7 @@ function buildOutput(groups) {
   return header + block + footer;
 }
 
-function applyIdempotent(existing, newBlock) {
+function applyIdempotent(existing: string, newBlock: string) {
   const si = existing.indexOf(MARKER_START);
   const ei = existing.indexOf(MARKER_END);
 

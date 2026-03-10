@@ -203,7 +203,11 @@ async function coreStreamAnthropic(
 }
 
 // Create the pipeline-wrapped version
-const pipelinedStream = createStreamingPipeline('anthropic', coreStreamAnthropic) as (
+const pipelinedStream = createStreamingPipeline('anthropic', coreStreamAnthropic as unknown as (
+  messages: unknown[],
+  cfg: Record<string, unknown>,
+  onChunk: ((chunk: string) => void) | null,
+) => Promise<unknown>) as (
   messages: ChatMessage[],
   cfg: AnthropicStreamCfg,
   onChunk: ((chunk: string) => void) | undefined,

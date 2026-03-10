@@ -13,7 +13,7 @@ import {
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const HYDRA_ROOT = path.resolve(__dirname, '..');
-const HYDRA_OPERATOR = path.join(HYDRA_ROOT, 'lib', 'hydra-operator.mjs');
+const HYDRA_OPERATOR = path.join(HYDRA_ROOT, 'lib', 'hydra-operator.ts');
 const HYDRA_POWERSHELL = path.join(HYDRA_ROOT, 'bin', 'hydra.ps1');
 
 const POWER_SHELL_ARG_MAP = {
@@ -73,15 +73,15 @@ function printHelp() {
   );
 }
 
-function isOptionToken(token) {
+function isOptionToken(token: string) {
   return /^-{1,2}[A-Za-z]/.test(token);
 }
 
-function looksLikeOption(token) {
+function looksLikeOption(token: string) {
   return Boolean(token) && isOptionToken(token);
 }
 
-function parseOptionToken(token) {
+function parseOptionToken(token: string) {
   if (!isOptionToken(token)) {
     return null;
   }
@@ -116,7 +116,7 @@ function parseOptionToken(token) {
   };
 }
 
-function normalizeKey(rawKey) {
+function normalizeKey(rawKey: string) {
   const key = String(rawKey || '').trim();
   if (!key) {
     return '';
@@ -126,25 +126,25 @@ function normalizeKey(rawKey) {
   return camel[0].toLowerCase() + camel.slice(1);
 }
 
-function normalizeOperatorKey(rawKey) {
+function normalizeOperatorKey(rawKey: string) {
   const normalized = normalizeKey(rawKey);
   if (!normalized) {
     return normalized;
   }
 
   const noPunctuation = normalized.replace(/[^a-zA-Z0-9]/g, '');
-  const alias = OPERATOR_KEY_ALIASES[noPunctuation.toLowerCase()];
+  const alias = (OPERATOR_KEY_ALIASES as Record<string, string>)[noPunctuation.toLowerCase()];
   if (alias) {
     return alias;
   }
   return normalized;
 }
 
-function parseCommonArgs(argv) {
+function parseCommonArgs(argv: string[]) {
   let full = false;
   let prompt = '';
   let showHelp = false;
-  const passthrough = [];
+  const passthrough: string[] = [];
 
   for (let i = 0; i < argv.length; i += 1) {
     const token = argv[i];
@@ -181,7 +181,7 @@ function parseCommonArgs(argv) {
   return { full, prompt, showHelp, passthrough };
 }
 
-function toOperatorArgs(rawTokens) {
+function toOperatorArgs(rawTokens: string[]) {
   const out = [];
 
   for (let i = 0; i < rawTokens.length; i += 1) {
@@ -233,7 +233,7 @@ function toOperatorArgs(rawTokens) {
   return out;
 }
 
-function toPowerShellArgs(rawTokens) {
+function toPowerShellArgs(rawTokens: string[]) {
   const out = [];
 
   for (let i = 0; i < rawTokens.length; i += 1) {
@@ -257,7 +257,7 @@ function toPowerShellArgs(rawTokens) {
     }
 
     const normalized = key.replace(/[^a-zA-Z0-9]/g, '').toLowerCase();
-    const psParam = POWER_SHELL_ARG_MAP[normalized];
+    const psParam = (POWER_SHELL_ARG_MAP as Record<string, string>)[normalized];
     if (!psParam) {
       out.push(token);
       continue;
@@ -278,7 +278,7 @@ function toPowerShellArgs(rawTokens) {
   return out;
 }
 
-function runOperator(prompt, rawTokens) {
+function runOperator(prompt: string, rawTokens: string[]) {
   const operatorArgs = toOperatorArgs(rawTokens);
   const hasMode = operatorArgs.some((arg) => /^mode=/i.test(arg));
   const hasPrompt = operatorArgs.some((arg) => /^prompt=/i.test(arg));
@@ -307,7 +307,7 @@ function runOperator(prompt, rawTokens) {
   process.exit(1);
 }
 
-function runFull(prompt, rawTokens) {
+function runFull(prompt: string, rawTokens: string[]) {
   if (process.platform !== 'win32') {
     throw new Error('`hydra --full` is only available on Windows.');
   }
@@ -347,7 +347,7 @@ function runFull(prompt, rawTokens) {
       process.exit(1);
     }
 
-    if (result.error.code === 'ENOENT') {
+    if ((result.error as NodeJS.ErrnoException).code === 'ENOENT') {
       continue;
     }
 
@@ -355,7 +355,7 @@ function runFull(prompt, rawTokens) {
   }
 
   if (lastError) {
-    throw new Error(`Unable to launch PowerShell (${lastError.code || lastError.message}).`);
+    throw new Error(`Unable to launch PowerShell (${(lastError as NodeJS.ErrnoException).code || lastError.message}).`);
   }
 
   throw new Error('Could not find `pwsh` or `powershell` in PATH.');

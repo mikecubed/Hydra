@@ -138,7 +138,7 @@ export async function runActionPipeline(rl: unknown, opts: PipelineOpts = {}): P
     preSelected: preSelectedIds,
   });
 
-  const selectedIds = new Set(selectResult.values ?? []);
+  const selectedIds = new Set((selectResult as { values?: string[] }).values ?? []);
   if (selectedIds.size === 0) {
     console.log(`  ${DIM('Nothing selected.')}`);
     console.log('');

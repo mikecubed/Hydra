@@ -161,7 +161,11 @@ async function coreStreamOpenAI(
 }
 
 // Create the pipeline-wrapped version
-const pipelinedStream = createStreamingPipeline('openai', coreStreamOpenAI) as (
+const pipelinedStream = createStreamingPipeline('openai', coreStreamOpenAI as unknown as (
+  messages: unknown[],
+  cfg: Record<string, unknown>,
+  onChunk: ((chunk: string) => void) | null,
+) => Promise<unknown>) as (
   messages: ChatMessage[],
   cfg: StreamCfg,
   onChunk: ((chunk: string) => void) | undefined,

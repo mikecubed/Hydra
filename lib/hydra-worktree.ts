@@ -17,7 +17,8 @@ import { git, getCurrentBranch } from './hydra-shared/git-ops.ts';
  */
 function getWorktreeConfig() {
   const cfg = loadHydraConfig();
-  const branchPrefix = cfg.worktrees?.branchPrefix || 'hydra/';
+  const wt = cfg.worktrees as Record<string, unknown> | undefined;
+  const branchPrefix = (wt?.['branchPrefix'] as string) || 'hydra/';
 
   // Security: Validate branchPrefix to prevent shell injection
   if (!/^[\w\/\.-]+$/.test(branchPrefix)) {
@@ -27,9 +28,9 @@ function getWorktreeConfig() {
   }
 
   return {
-    enabled: cfg.worktrees?.enabled || false,
-    basePath: cfg.worktrees?.basePath || '.hydra/worktrees',
-    autoCleanup: cfg.worktrees?.autoCleanup !== false,
+    enabled: (wt?.['enabled'] as boolean) || false,
+    basePath: (wt?.['basePath'] as string) || '.hydra/worktrees',
+    autoCleanup: wt?.['autoCleanup'] !== false,
     branchPrefix,
   };
 }

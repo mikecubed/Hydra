@@ -621,9 +621,9 @@ export function animatedProgressBar(label: string, width = 30) {
   };
 }
 
-export function label(key: string, value: any) {
+export function label(key: string, value?: any) {
   const k = DIM(`${key}:`);
-  return `  ${k} ${value}`;
+  return value !== undefined ? `  ${k} ${value}` : `  ${k}`;
 }
 
 // ─── Spinner ────────────────────────────────────────────────────────────────

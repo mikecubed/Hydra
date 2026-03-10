@@ -126,7 +126,7 @@ export async function runAgentsWizard(rl: ReadlineInterface): Promise<void> {
       },
     ],
   });
-  const agentType = typeChoice.value as 'cli' | 'api';
+  const agentType = (typeChoice as { value: string }).value as 'cli' | 'api';
 
   const fields: WizardFields = { name, type: agentType };
 
@@ -147,7 +147,7 @@ export async function runAgentsWizard(rl: ReadlineInterface): Promise<void> {
       ],
       // autoAccept is not a formal promptChoice option — omitted
     });
-    fields.responseParser = String(parserChoice.value);
+    fields.responseParser = String((parserChoice as { value: string }).value);
   } else {
     fields.baseUrl = await ask('Base URL (e.g. http://localhost:11434/v1)');
     fields.model = await ask('Model name (e.g. mixtral:8x7b, llama3.2)');
@@ -179,7 +179,7 @@ export async function runAgentsWizard(rl: ReadlineInterface): Promise<void> {
       },
     ],
   });
-  fields.affinityPreset = String(profileChoice.value);
+  fields.affinityPreset = String((profileChoice as { value: string }).value);
 
   // Council role
   const councilChoice = await promptChoice(rl, {
@@ -191,7 +191,7 @@ export async function runAgentsWizard(rl: ReadlineInterface): Promise<void> {
       { value: 'implementer', label: 'Implementer', hint: 'Implementation role' },
     ],
   });
-  fields.councilRole = councilChoice.value as string | null;
+  fields.councilRole = (councilChoice as { value: string | null }).value as string | null;
 
   // Build entry
   const entry = buildCustomAgentEntry(fields);
@@ -217,9 +217,9 @@ export async function runAgentsWizard(rl: ReadlineInterface): Promise<void> {
     ];
     const mcpChoice = await promptChoice(rl, { title: 'MCP registration', choices: mcpChoices });
 
-    if (mcpChoice.value === 'auto' && knownPath) {
+    if ((mcpChoice as { value: string }).value === 'auto' && knownPath) {
       mcpConfig = { configPath: path.join(os.homedir(), knownPath), format: 'json' };
-    } else if (mcpChoice.value === 'manual-path') {
+    } else if ((mcpChoice as { value: string }).value === 'manual-path') {
       const rawPath = await ask('Path to agent config file (absolute path)');
       const fmt = await ask('Config format (json / other)');
       mcpConfig = { configPath: rawPath, format: fmt };

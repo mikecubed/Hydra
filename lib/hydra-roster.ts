@@ -55,7 +55,7 @@ const REASONING_TITLES: Record<string, string> = {
 };
 
 export async function runRosterEditor(rl: unknown): Promise<void> {
-  const cfg = loadHydraConfig() as RosterConfig;
+  const cfg = loadHydraConfig() as unknown as RosterConfig;
   const roles = cfg.roles ?? {};
   const recs = cfg.recommendations ?? {};
   const physicalAgents = getPhysicalAgentNames();
@@ -216,7 +216,7 @@ export async function runRosterEditor(rl: unknown): Promise<void> {
   console.log('');
 
   // Persist
-  const saveCfg = loadHydraConfig() as RosterConfig;
+  const saveCfg = loadHydraConfig() as unknown as RosterConfig;
   for (const c of changes) {
     saveCfg.roles ??= {};
     saveCfg.roles[c.role] = {
@@ -225,7 +225,7 @@ export async function runRosterEditor(rl: unknown): Promise<void> {
       reasoningEffort: c.reasoningEffort,
     };
   }
-  saveHydraConfig(saveCfg);
+  saveHydraConfig(saveCfg as unknown as Parameters<typeof saveHydraConfig>[0]);
   console.log(
     `  ${pc.green('✓')} Saved ${String(changes.length)} role update${changes.length > 1 ? 's' : ''} to hydra.config.json`,
   );

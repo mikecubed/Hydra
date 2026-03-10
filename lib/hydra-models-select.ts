@@ -291,7 +291,7 @@ export async function pickAgent() {
     name,
     label: (AGENTS as Record<string, { label?: string }>)[name]?.label ?? name,
     active: getActiveModel(name) ?? 'unknown',
-    effort: formatEffortDisplay(getActiveModel(name), getReasoningEffort(name)),
+    effort: formatEffortDisplay(getActiveModel(name) ?? '', getReasoningEffort(name)),
   }));
 
   const picked = await new Picker(items, {
@@ -410,7 +410,7 @@ interface EffortResult {
 
 export async function pickEffort(agentName: string, modelId?: string | null): Promise<EffortResult | null | undefined> {
   const current = getReasoningEffort(agentName);
-  const effectiveModel = modelId || getActiveModel(agentName);
+  const effectiveModel = modelId || getActiveModel(agentName) || '';
   const options = getEffortOptionsForModel(effectiveModel);
 
   // Model doesn't support reasoning controls — skip picker

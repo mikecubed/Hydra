@@ -11,9 +11,9 @@ export const HYDRA_STANDALONE = Boolean((process as NodeJS.Process & { pkg?: unk
 export const HYDRA_INTERNAL_FLAG = '--hydra-internal';
 
 const INTERNAL_MODULE_LOADERS: Record<string, () => Promise<unknown>> = {
-  'lib/hydra-operator.mjs': () => import('./hydra-operator.mjs'),
-  'lib/orchestrator-daemon.mjs': () => import('./orchestrator-daemon.mjs'),
-  'lib/orchestrator-client.mjs': () => import('./orchestrator-client.mjs'),
+  'lib/hydra-operator.mjs': () => import('./hydra-operator.ts'),
+  'lib/orchestrator-daemon.mjs': () => import('./orchestrator-daemon.ts'),
+  'lib/orchestrator-client.mjs': () => import('./orchestrator-client.ts'),
   'lib/hydra-council.mjs': () => import('./hydra-council.ts'),
   'lib/hydra-dispatch.mjs': () => import('./hydra-dispatch.ts'),
   'lib/hydra-models-select.ts': () => import('./hydra-models-select.ts'),

@@ -272,7 +272,7 @@ export function parseJsonLoose(text: unknown): unknown {
 export function runProcess(command: string, args: string[], timeoutMs = DEFAULT_TIMEOUT_MS, extraOpts: RunProcessOpts = {}): RunProcessResult {
   const spawnOpts = {
     cwd: extraOpts.cwd ?? process.cwd(),
-    encoding: 'utf8',
+    encoding: 'utf8' as BufferEncoding,
     timeout: timeoutMs,
     maxOutputBytes: 1024 * 1024 * 8,
     windowsHide: true,

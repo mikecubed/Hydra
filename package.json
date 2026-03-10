@@ -17,7 +17,7 @@
     "node": ">=20.19.0"
   },
   "bin": {
-    "hydra": "./bin/hydra-cli.mjs",
+    "hydra": "./bin/hydra-cli.ts",
     "hydra-client": "./lib/orchestrator-client.mjs",
     "hydra-daemon": "./lib/orchestrator-daemon.mjs"
   },
@@ -66,7 +66,7 @@
     "tasks:review": "node lib/hydra-tasks-review.mjs review",
     "tasks:status": "node lib/hydra-tasks-review.mjs status",
     "tasks:clean": "node lib/hydra-tasks-review.mjs clean",
-    "research:todo": "node scripts/gen-research-todo.mjs",
+    "research:todo": "node scripts/gen-research-todo.ts",
     "eval": "node lib/hydra-eval.mjs",
     "lint": "eslint .",
     "lint:fix": "eslint . --fix",
@@ -74,13 +74,13 @@
     "format:check": "prettier --check .",
     "typecheck": "tsc --noEmit -p tsconfig.json",
     "quality": "npm run lint && npm run format:check && npm run typecheck",
-    "setup:hooks": "node scripts/setup-hooks.mjs",
+    "setup:hooks": "node scripts/setup-hooks.ts",
     "test": "node --test 'test/**/*.test.{ts,mjs}'",
     "test:report": "node --test --test-reporter=tap --test-reporter-destination=docs/coordination/test-results.tap",
     "package": "node -e \"require('fs').mkdirSync('dist', { recursive: true })\" && npm pack --pack-destination dist",
     "package:dry-run": "npm pack --dry-run",
-    "build:exe": "node scripts/build-exe.mjs",
-    "build:exe:ci": "node scripts/build-exe.mjs --ci",
+    "build:exe": "node scripts/build-exe.ts",
+    "build:exe:ci": "node scripts/build-exe.ts --ci",
     "install:global": "npm install -g .",
     "uninstall:global": "npm uninstall -g hydra",
     "prepare": "husky"

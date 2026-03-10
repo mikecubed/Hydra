@@ -13,6 +13,7 @@
  *   - Timeout + kill
  */
 
+// @ts-expect-error cross-spawn has no type declarations
 import spawn from 'cross-spawn';
 import fs from 'node:fs';
 import os from 'node:os';
@@ -1538,7 +1539,7 @@ export async function executeAgentWithRecovery(agent: string, prompt: string, op
     // Pattern matching alone can produce false positives (e.g. Codex echoing
     // documentation that mentions "usage_limit_reached"). A quick GET /models
     // call tells us whether the account is actually quota-exhausted.
-    const usageCheck = detectUsageLimitError(agent, result) as { isUsageLimit: boolean; errorMessage: string; resetInSeconds: number | null };
+    const usageCheck = detectUsageLimitError(agent, result as unknown as Record<string, unknown>) as { isUsageLimit: boolean; errorMessage: string; resetInSeconds: number | null };
     if (usageCheck.isUsageLimit) {
       const verification = await verifyAgentQuota(agent, { hintText: usageCheck.errorMessage }) as { verified: boolean | 'unknown' };
       if (verification.verified === true) {
@@ -1579,7 +1580,7 @@ export async function executeAgentWithRecovery(agent: string, prompt: string, op
     }
 
     // Rate limit retry with exponential backoff
-    const rateCheck = detectRateLimitError(agent, result) as { isRateLimit: boolean; retryAfterMs: number | null };
+    const rateCheck = detectRateLimitError(agent, result as unknown as Record<string, unknown>) as { isRateLimit: boolean; retryAfterMs: number | null };
     if (rateCheck.isRateLimit) {
       const rlCfg = (cfg.rateLimits || {}) as Record<string, number>;
       const maxRetries = rlCfg['maxRetries'] || 3;
@@ -1597,7 +1598,7 @@ export async function executeAgentWithRecovery(agent: string, prompt: string, op
           return retryResult;
         }
         // Check if still rate limited
-        const recheck = detectRateLimitError(agent, retryResult);
+        const recheck = detectRateLimitError(agent, retryResult as unknown as Record<string, unknown>);
         if (!recheck.isRateLimit) {
           retryResult.rateLimitRetries = attempt;
           finalResult = retryResult;
@@ -1611,7 +1612,7 @@ export async function executeAgentWithRecovery(agent: string, prompt: string, op
     }
 
     // Model error → fallback
-    const detection = detectModelError(agent, result) as { isModelError: boolean; failedModel: string | null };
+    const detection = detectModelError(agent, result as unknown as Record<string, unknown>) as { isModelError: boolean; failedModel: string | null };
     if (!detection.isModelError) {
       finalResult = result;
       return result;
