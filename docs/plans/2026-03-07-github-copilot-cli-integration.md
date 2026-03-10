@@ -8,7 +8,7 @@
 
 **Depends on:** ~~Agent Plugin Refactor (2026-03-08)~~ — **DONE.** The plugin refactor made the executor data-driven. Adding Copilot now requires **zero executor changes** — only a `PHYSICAL_AGENTS` entry with plugin fields, UI colors, model profiles, config, and setup.
 
-**TypeScript prerequisite:** Phases 1–4 of the [TypeScript Migration Plan](./2026-03-10-typescript-migration.md) should complete before this integration is implemented. Task 11 (`resolveCliModelId`) is written during Phase 3 of that migration. The Copilot plugin (Task 1) is written during/after Phase 4 so it is TypeScript from day one, with proper `AgentDef` types. Implementing in JS and migrating later is a valid fallback if the TS migration stalls.
+**TypeScript prerequisite (preferred, not required):** Phases 1–4 of the [TypeScript Migration Plan](./2026-03-10-typescript-migration.md) are _preferred_ before implementing this integration so the Copilot plugin is written in TypeScript from day one. However, Tasks 1 and 11 **may be implemented in JSDoc-typed JavaScript first** and converted to TypeScript during Phase 3/4 of the migration. This avoids blocking feature delivery on a long-running refactor. Choose based on current team priority.
 
 **Architecture:** Add `copilot` as a new `PHYSICAL_AGENTS` entry in `hydra-agents.mjs` with full plugin interface (`features`, `parseOutput`, `errorPatterns`, `modelBelongsTo`, `quotaVerify`, `economyModel`, `readInstructions`, `taskRules`). Wire it into `hydra-ui.mjs` for colored output, register it in `hydra-model-profiles.mjs` and `hydra.config.json`, add CLI detection in `hydra-setup.mjs`, and create a `COPILOT.md` agent instructions file. The agent's council role is **advisor** — it brings GitHub-integrated context (issues, PRs, CI) that the other agents lack.
 
@@ -140,9 +140,11 @@ copilot: {
     // nonInteractive runs with plan-mode approval (no --allow flags) to match
     // the permission table above. Callers (daemon, triage) must not expect
     // file-modification side-effects from nonInteractive calls.
+    // NOTE: resolveCliModelId() must be applied to both headless() and nonInteractive()
+    // — anywhere opts.model is passed to --model.
     nonInteractive: (prompt, opts = {}) => {
       const args = ['-p', prompt];
-      if (opts.model) args.push('--model', opts.model);
+      if (opts.model) args.push('--model', resolveCliModelId(opts.model));
       return ['copilot', args];
     },
     interactive: (prompt) => ['copilot', [prompt]],
@@ -306,6 +308,9 @@ Because the executor is now data-driven, adding this single `PHYSICAL_AGENTS` en
 
 - `lib/hydra-ui.mjs` — Add Copilot color and icon
 
+> - Update `agentHeader()` in `hydra-ui.mjs` which may have 3-agent hardcoded layout assumptions
+> - Review usage/metrics rendering loops in `hydra-usage.mjs` for any hardcoded `['claude','gemini','codex']` arrays that need to become registry-driven
+
 **What to add:**
 
 ```javascript
@@ -453,8 +458,8 @@ export const AGENT_ICONS = {
     3: { rpm: 40, tpm: 400_000 },
   },
 },
-'copilot-gemini-3-1-pro': {
-  id: 'copilot-gemini-3-1-pro',
+'copilot-gemini-3-pro-preview': {
+  id: 'copilot-gemini-3-pro-preview',
   cliModelId: 'gemini-3-pro-preview',      // value passed to copilot --model (confirmed from --model choices)
   provider: 'github',
   agent: 'copilot',
@@ -543,8 +548,8 @@ copilot: {
   "opus": "copilot-claude-opus-4-6",
   "gpt5.4": "copilot-gpt-5-4",
   "gpt-5.4": "copilot-gpt-5-4",
-  "gemini": "copilot-gemini-3-1-pro",
-  "gemini-3-pro-preview": "copilot-gemini-3-1-pro"
+  "gemini": "copilot-gemini-3-pro-preview",
+  "gemini-3-pro-preview": "copilot-gemini-3-pro-preview"
 }
 ```
 
@@ -843,15 +848,17 @@ describe('resolveCliModelId', () => {
 
 ## Known Risks & Open Questions
 
-| Risk                                 | Severity   | Mitigation                                                                                                                                             |
-| ------------------------------------ | ---------- | ------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| ~~No JSON output from `copilot -p`~~ | ~~Medium~~ | **RESOLVED** — `--output-format json` is live. Output is JSONL (event stream). `parseOutput()` parses line-by-line; see Task 1 for schema details.     |
-| `cliModelId` values                  | **Low**    | **VALIDATED** against live `--model` choices. Claude uses dots (`claude-sonnet-4.6`); Gemini is `gemini-3-pro-preview`. Keep in sync with CLI version. |
-| Auth flow in CI/headless             | **High**   | Require `GH_TOKEN` env var; document clearly; skip Copilot tasks when not authenticated                                                                |
-| Premium request quota limits         | **Medium** | `modelBelongsTo()` plugin method enables `hydra-usage.mjs` tracking automatically; `premiumRequests` from JSONL `result` event provides usage data     |
-| Copilot CLI still in preview         | **Medium** | Pin to versioned install; monitor changelog for breaking changes (especially JSONL schema evolution)                                                   |
-| `--allow-all-tools` security         | **Medium** | Only used when `permissionMode === 'full-auto'`; handled by `invoke.headless()` — default is no allow flags                                            |
-| Windows `copilot` binary path        | **Low**    | Use `cross-spawn` (already used for all agents via `features.executeMode: 'spawn'`); test with WinGet install                                          |
+| Risk                                    | Severity   | Mitigation                                                                                                                                                                                                                                                                                                                          |
+| --------------------------------------- | ---------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| ~~No JSON output from `copilot -p`~~    | ~~Medium~~ | **RESOLVED** — `--output-format json` is live. Output is JSONL (event stream). `parseOutput()` parses line-by-line; see Task 1 for schema details.                                                                                                                                                                                  |
+| `cliModelId` values                     | **Low**    | **VALIDATED** against live `--model` choices. Claude uses dots (`claude-sonnet-4.6`); Gemini is `gemini-3-pro-preview`. Keep in sync with CLI version.                                                                                                                                                                              |
+| Auth flow in CI/headless                | **High**   | Require `GH_TOKEN` env var; document clearly; skip Copilot tasks when not authenticated                                                                                                                                                                                                                                             |
+| Premium request quota limits            | **Medium** | `modelBelongsTo()` plugin method enables `hydra-usage.mjs` tracking automatically; `premiumRequests` from JSONL `result` event provides usage data                                                                                                                                                                                  |
+| Copilot CLI still in preview            | **Medium** | Pin to versioned install; monitor changelog for breaking changes (especially JSONL schema evolution)                                                                                                                                                                                                                                |
+| `--allow-all-tools` security            | **Medium** | Only used when `permissionMode === 'full-auto'`; handled by `invoke.headless()` — default is no allow flags                                                                                                                                                                                                                         |
+| Windows `copilot` binary path           | **Low**    | Use `cross-spawn` (already used for all agents via `features.executeMode: 'spawn'`); test with WinGet install                                                                                                                                                                                                                       |
+| JSONL schema versioning                 | **Medium** | Copilot CLI updates may change event types silently; `parseOutput` returns empty string with no warning. Add assertion: if no `assistant.message` event found after full stream, log a `warn` with the raw first 200 chars for debugging. Pin CLI version in CI.                                                                    |
+| Copilot installed but not authenticated | **Medium** | `detectInstalledCLIs()` checks binary existence only; an unauthenticated Copilot install routes tasks then fails. Extend `quotaVerify()` in the Copilot plugin to run `copilot auth status` (or check `~/.copilot/token` existence) and return `{ verified: false, status: 'unauthenticated', reason: 'Run: copilot auth login' }`. |
 
 ---
 

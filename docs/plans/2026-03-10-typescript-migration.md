@@ -57,8 +57,8 @@ Phases 5–12 can proceed alongside or after those features.
     "verbatimModuleSyntax": true,
     "isolatedModules": true,
     "resolveJsonModule": true,
-    "allowJs": false,
-    "checkJs": false,
+    "allowJs": true,
+    "checkJs": true,
 
     "declaration": true,
     "declarationMap": true,
@@ -70,18 +70,22 @@ Phases 5–12 can proceed alongside or after those features.
 }
 ```
 
+> **Note:** `allowJs` and `checkJs` are `true` throughout the migration so existing `.mjs` files retain type checking. They flip to `false` only in Phase 12 when all files are converted.
+
 **Why each non-`strict` flag matters:**
 
-| Flag                                 | Why enabled                                                                                                                                                                           | Expected churn                                   |
-| ------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------ |
-| `noUncheckedIndexedAccess`           | `obj[key]` and `arr[i]` return `T \| undefined` — forces null-check before use                                                                                                        | High — most common exception site                |
-| `noPropertyAccessFromIndexSignature` | Dot notation on index signatures is banned; must use bracket notation                                                                                                                 | Low                                              |
-| `exactOptionalPropertyTypes`         | `{ foo?: string }` cannot receive `{ foo: undefined }` — eliminates a class of subtle bugs                                                                                            | Medium                                           |
-| `noImplicitOverride`                 | Methods overriding a base must use `override` keyword                                                                                                                                 | Low (few class hierarchies)                      |
-| `verbatimModuleSyntax`               | Enforces `import type` for type-only imports — required for `isolatedModules`                                                                                                         | Medium — many JSDoc imports become `import type` |
-| `isolatedModules`                    | Each file compiles independently — required for `tsx` (esbuild-based) dev runner                                                                                                      | Low                                              |
-| `allowUnreachableCode: false`        | Compiler errors on dead code                                                                                                                                                          | Low                                              |
+| Flag                                 | Why enabled                                                                                                                                                                           | Expected churn                                                                   |
+| ------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------- |
+| `noUncheckedIndexedAccess`           | `obj[key]` and `arr[i]` return `T \| undefined` — forces null-check before use                                                                                                        | High — enable after Phase 3 (once Map/Record patterns are typed; not at Phase 0) |
+| `noPropertyAccessFromIndexSignature` | Dot notation on index signatures is banned; must use bracket notation                                                                                                                 | Low                                                                              |
+| `exactOptionalPropertyTypes`         | `{ foo?: string }` cannot receive `{ foo: undefined }` — eliminates a class of subtle bugs                                                                                            | Medium                                                                           |
+| `noImplicitOverride`                 | Methods overriding a base must use `override` keyword                                                                                                                                 | Low (few class hierarchies)                                                      |
+| `verbatimModuleSyntax`               | Enforces `import type` for type-only imports — required for `isolatedModules`                                                                                                         | Medium — many JSDoc imports become `import type`                                 |
+| `isolatedModules`                    | Each file compiles independently — required for `tsx` (esbuild-based) dev runner                                                                                                      | Low                                                                              |
+| `allowUnreachableCode: false`        | Compiler errors on dead code                                                                                                                                                          | Low                                                                              |
 | `skipLibCheck: true`                 | `node_modules/string_decoder` has 73 pre-existing TS errors in its type declarations. This is the **only general exception** — all other rules are file-specific inline suppressions. |
+
+> **`noUncheckedIndexedAccess` rollout strategy:** Set to `false` in Phase 0. After Phase 3 converts the Map-heavy config and metrics files, re-enable it as a targeted sub-task and fix the resulting errors file-by-file. This avoids reviewer fatigue across 88 files simultaneously.
 
 **`noUncheckedIndexedAccess` exception policy** (the strictest rule, most suppressed):
 
@@ -128,7 +132,6 @@ import tseslint from 'typescript-eslint';
 
 // ─── TypeScript files — type-aware strict rules ───────────────────────────
 ...tseslint.configs.strictTypeChecked,
-...tseslint.configs.stylisticTypeChecked,
 {
   files: ['**/*.ts'],
   languageOptions: {
@@ -166,8 +169,9 @@ import tseslint from 'typescript-eslint';
     '@typescript-eslint/no-misused-promises': ['error', { checksVoidReturn: { attributes: false } }],
 
     // ── Strict boolean expressions ────────────────────────────────────────
+    // Phase in as error after Phase 6; hundreds of existing if(value) patterns need updating first
     '@typescript-eslint/strict-boolean-expressions': [
-      'error',
+      'warn',
       {
         allowString: false,
         allowNumber: false,
@@ -187,18 +191,16 @@ import tseslint from 'typescript-eslint';
     '@typescript-eslint/consistent-type-exports': 'error',
 
     // ── Explicit return types on public API ───────────────────────────────
-    '@typescript-eslint/explicit-function-return-type': [
-      'error',
-      { allowExpressions: true, allowTypedFunctionExpressions: true },
-    ],
     '@typescript-eslint/explicit-module-boundary-types': 'error',
+    // explicit-function-return-type omitted — covered by module-boundary-types on exports;
+    // internal functions use inference
 
     // ── Nullish coalescing and optional chaining ──────────────────────────
     '@typescript-eslint/prefer-nullish-coalescing': 'error',
     '@typescript-eslint/prefer-optional-chain': 'error',
 
     // ── Readonly where possible ───────────────────────────────────────────
-    '@typescript-eslint/prefer-readonly': 'error',
+    '@typescript-eslint/prefer-readonly': 'warn', // warn not error — daemon/event loop code has justified mutable state
     '@typescript-eslint/prefer-readonly-parameter-types': 'off', // too strict for Node APIs
 
     // ── Other strictness ──────────────────────────────────────────────────
@@ -369,7 +371,8 @@ types only.
 // ── Agent system ────────────────────────────────────────────────────────────
 
 export type AgentName = 'claude' | 'gemini' | 'codex' | 'local' | 'copilot' | string;
-export type AgentType = 'physical' | 'virtual' | 'api';
+export type AgentType = 'physical' | 'virtual';
+// Note: API agents (e.g. local) use features.executeMode = 'api'; AgentType distinguishes plugin architecture only
 export type ExecuteMode = 'spawn' | 'api';
 
 export interface AgentFeatures {
@@ -382,7 +385,9 @@ export interface AgentFeatures {
 }
 
 export interface AgentInvoke {
-  headless: (prompt: string, opts?: HeadlessOpts) => [string, string[]];
+  nonInteractive: ((prompt: string, opts?: HeadlessOpts) => [string, string[]]) | null;
+  interactive: ((prompt: string) => [string, string[]]) | null;
+  headless: ((prompt: string, opts?: HeadlessOpts) => [string, string[]]) | null;
 }
 
 export interface HeadlessOpts {
@@ -404,6 +409,13 @@ export interface AgentResult {
 
 export type PermissionMode = 'plan' | 'auto-edit' | 'full-auto';
 
+export type ErrorPatterns = Partial<
+  Record<
+    'authRequired' | 'rateLimited' | 'quotaExhausted' | 'networkError' | 'subscriptionRequired',
+    RegExp
+  >
+>;
+
 export interface AgentDef {
   name: AgentName;
   label: string;
@@ -413,11 +425,11 @@ export interface AgentDef {
   invoke: AgentInvoke;
   parseOutput: (stdout: string, opts?: ParseOutputOpts) => AgentResult;
   taskAffinity: Record<TaskType, number>;
-  errorPatterns: RegExp[];
+  errorPatterns: ErrorPatterns;
   modelBelongsTo: (modelId: string) => boolean;
   quotaVerify: () => Promise<QuotaStatus | null>;
   economyModel: () => string | null;
-  readInstructions: string | null;
+  readInstructions: (() => string) | null;
   taskRules: string[];
 }
 
@@ -555,9 +567,9 @@ export interface TokenUsage {
 }
 
 export interface QuotaStatus {
-  remaining: number;
-  resetAt?: number;
-  exceeded: boolean;
+  verified: boolean;
+  status: string;
+  reason?: string;
 }
 
 // ── Copilot JSONL event stream ───────────────────────────────────────────────
@@ -594,6 +606,7 @@ export interface CopilotEventData {
 export interface ParseOutputOpts {
   model?: string;
   agent?: AgentName;
+  jsonOutput?: boolean;
 }
 ```
 
@@ -612,14 +625,15 @@ import type {
 } from '../lib/types.js';
 
 // Structural assignment checks — tsc validates these at compile time
-const _agentResult: AgentResult = { output: 'ok', tokenUsage: null, costUsd: null };
-const _profile: ModelProfile = {
+// satisfies validates shape at compile time without triggering noUnusedLocals
+const _agentResult = { output: 'ok', tokenUsage: null, costUsd: null } satisfies AgentResult;
+const _profile = {
   name: 'Test Model',
-  agent: 'copilot',
-  tier: 'default',
+  agent: 'copilot' as AgentName,
+  tier: 'default' as const,
   contextWindow: 128000,
   cliModelId: 'claude-sonnet-4.6',
-};
+} satisfies ModelProfile;
 ```
 
 ### Phase gate
@@ -1081,6 +1095,17 @@ _setTestConfig({ routing: { mode: 'economy' } } as DeepPartial<HydraConfig>);
 | `eslint.config.mjs`                            | ESLint flat config requires `.mjs` |
 | `.husky/pre-commit`, `.husky/pre-push`         | Shell scripts                      |
 | Any file in `test/fixtures/` or `test/golden/` | Test data                          |
+
+### Mixed .mjs / .ts State Risk
+
+During Phases 2–11, the codebase contains both `.mjs` and `.ts` files importing each other.
+Key rules:
+
+- All imports use `.js` extension regardless of source extension (NodeNext resolution)
+- `tsconfig.json` `include` covers both `**/*.ts` and `**/*.mjs` while `allowJs: true`
+- After each phase, run: `node --import tsx/esm --test 'test/**/*.test.{ts,mjs}'`
+  to catch cross-extension import failures before they accumulate
+- Never rename a file without updating all its import sites in the same commit
 
 ---
 

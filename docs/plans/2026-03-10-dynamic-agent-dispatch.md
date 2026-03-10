@@ -98,11 +98,19 @@ function getRoleAgent(roleName, installedCLIs) {
     return preferred;
   }
   // Fallback: find first installed agent from preference order
+  // Prefer listed order; treat local specially (API agent, no binary to detect)
   const preference = ['claude', 'copilot', 'gemini', 'codex', 'local'];
   for (const name of preference) {
-    if (installedCLIs[name]) return name;
+    if (name === 'local') {
+      if (cfg?.local?.enabled) return name;
+    } else if (installedCLIs[name] === true) {
+      return name;
+    }
   }
-  return preferred || 'claude'; // last resort
+  // Last resort: any available installed agent
+  const anyInstalled = Object.entries(installedCLIs).find(([, v]) => v === true);
+  if (anyInstalled) return anyInstalled[0];
+  throw new Error('No agents available: install at least one agent CLI or enable local');
 }
 ```
 
@@ -208,14 +216,8 @@ export function detectInstalledCLIs() {
   for (const [name, agentDef] of getRegisteredAgents()) {
     if (agentDef.type !== AGENT_TYPE.PHYSICAL) continue;
     if (agentDef.features?.executeMode !== 'spawn') continue;
-    // CLI binary is the first element returned by invoke.headless('', {})
-    let binaryName;
-    try {
-      const [cmd] = agentDef.invoke?.headless?.('', {}) ?? [];
-      binaryName = cmd || name;
-    } catch {
-      binaryName = name;
-    }
+    // Use agentDef.cli field directly — clean, no side effects
+    const binaryName = agentDef.cli ?? name;
     result[name] = commandExists(binaryName);
   }
   return result;
@@ -420,6 +422,8 @@ defaults system.
 `installedOnly` option; `hydra-actualize.mjs` passes `installedOnly: true`. Low risk — opt-in
 flag, existing callers unaffected.
 
+> **Important:** Task B must be implemented _before_ the Copilot integration's Task 6 (CLI detection). If Copilot Task 6 is done first, its manual `detectInstalledCLIs` edit becomes immediate technical debt deleted by Task B. The correct order is: Task B first → Copilot plugin registers itself → detection works automatically with no manual edits.
+
 ### Phase 3 — Dynamic Dispatch (Nice-to-Have, significant change)
 
 **Tasks A** — Refactor `hydra-dispatch.mjs`. Higher risk because prompt templates change and
@@ -435,13 +439,15 @@ added by anyone other than the original author.
 
 ## Known Risks
 
-| Risk                                                                                        | Severity   | Mitigation                                                                                                    |
-| ------------------------------------------------------------------------------------------- | ---------- | ------------------------------------------------------------------------------------------------------------- |
-| Dispatch prompt template quality degrades when non-Claude fills coordinator slot            | Medium     | Generic templates use `agentDef.rolePrompt`; quality validated per agent before promoting to coordinator role |
-| `detectInstalledCLIs()` calling `invoke.headless('', {})` may have side effects             | Low        | Call site guarded with try/catch; empty prompt is safe for all current agents                                 |
-| `installedOnly: true` in actualize breaks on machines where no preferred agent is installed | Medium     | `bestAgentFor` always returns a fallback (`'claude'`) when no candidates pass the filter                      |
-| Changing `report.claude` → `report.coordinator` breaks callers reading the report JSON      | Low        | Backward compat aliases preserved; existing consumers unaffected                                              |
-| `resolveCliModelId` adds a `MODEL_PROFILES` lookup on every headless invocation             | Negligible | Synchronous hash map lookup; no I/O                                                                           |
+| Risk                                                                                        | Severity   | Mitigation                                                                                                                                                                                                                                           |
+| ------------------------------------------------------------------------------------------- | ---------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Dispatch prompt template quality degrades when non-Claude fills coordinator slot            | Medium     | Generic templates use `agentDef.rolePrompt`; quality validated per agent before promoting to coordinator role                                                                                                                                        |
+| `detectInstalledCLIs()` using `agentDef.cli` field                                          | Negligible | Direct field access; no side effects. Falls back to agent name if `cli` field absent.                                                                                                                                                                |
+| `installedOnly: true` in actualize breaks on machines where no preferred agent is installed | Medium     | `bestAgentFor` always returns a fallback (`'claude'`) when no candidates pass the filter                                                                                                                                                             |
+| Changing `report.claude` → `report.coordinator` breaks callers reading the report JSON      | Low        | Backward compat aliases preserved; existing consumers unaffected                                                                                                                                                                                     |
+| `resolveCliModelId` adds a `MODEL_PROFILES` lookup on every headless invocation             | Negligible | Synchronous hash map lookup; no I/O                                                                                                                                                                                                                  |
+| Task B executed after Copilot Task 6                                                        | Low        | Creates duplicate/conflicting detectInstalledCLIs edits. Mitigation: always implement Task B first per Implementation Phases ordering.                                                                                                               |
+| No agents available at dispatch time                                                        | Medium     | If all installed agents are unavailable (uninstalled, unauthed, over quota), getRoleAgent now throws rather than returning a broken default. Mitigation: catch at call site; fall back to returning a user-facing error rather than crashing daemon. |
 
 ---
 
