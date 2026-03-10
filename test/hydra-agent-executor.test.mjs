@@ -12,7 +12,7 @@ import {
   extractCodexErrors,
 } from '../lib/hydra-shared/agent-executor.ts';
 
-import { detectCodexError } from '../lib/hydra-model-recovery.mjs';
+import { detectCodexError } from '../lib/hydra-model-recovery.ts';
 
 describe('agent-executor diagnostics', () => {
   describe('diagnoseAgentError()', () => {

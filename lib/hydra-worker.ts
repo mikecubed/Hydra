@@ -12,25 +12,19 @@
  */
 
 import { EventEmitter } from 'node:events';
-import { spawn } from 'node:child_process';
+import { ChildProcess } from 'node:child_process';
 import {
   getAgent,
-  AGENTS,
-  resolvePhysicalAgent,
-  getActiveModel,
-  getModelReasoningCaps,
-  getReasoningEffort,
 } from './hydra-agents.ts';
 import { request, short } from './hydra-utils.ts';
 import { loadHydraConfig } from './hydra-config.ts';
-import { recordCallStart, recordCallComplete, recordCallError } from './hydra-metrics.ts';
 import {
   detectModelError,
   recoverFromModelError,
   detectCodexError,
   detectUsageLimitError,
   formatResetTime,
-} from './hydra-model-recovery.mjs';
+} from './hydra-model-recovery.ts';
 import { executeAgent } from './hydra-shared/agent-executor.ts';
 
 // ── Global Concurrency ──────────────────────────────────────────────────────
@@ -52,17 +46,41 @@ export function getWorkerConcurrencyStats() {
 
 // ── Default Configuration ───────────────────────────────────────────────────
 
-const DEFAULTS = {
+interface WorkerNextAction {
+  action: string;
+  handoff?: {
+    id?: string;
+    summary?: string;
+    nextStep?: string;
+    tasks?: string[];
+  };
+  task?: Record<string, unknown>;
+}
+
+interface WorkerConfig {
+  permissionMode: string;
+  pollIntervalMs: number;
+  maxOutputBufferKB: number;
+  autoChain: boolean;
+  heartbeatIntervalMs?: number;
+  concurrency?: {
+    adaptivePolling?: boolean;
+    maxInFlight?: number;
+  };
+  [key: string]: unknown;
+}
+
+const DEFAULTS: WorkerConfig = {
   permissionMode: 'auto-edit',
   pollIntervalMs: 1500,
   maxOutputBufferKB: 8,
   autoChain: true,
 };
 
-function getWorkerConfig() {
+function getWorkerConfig(): WorkerConfig {
   try {
     const cfg = loadHydraConfig();
-    return { ...DEFAULTS, ...cfg.workers };
+    return { ...DEFAULTS, ...(cfg.workers as Partial<WorkerConfig>) };
   } catch {
     return { ...DEFAULTS };
   }
@@ -71,6 +89,24 @@ function getWorkerConfig() {
 // ── AgentWorker Class ───────────────────────────────────────────────────────
 
 export class AgentWorker extends EventEmitter {
+  agent: string;
+  baseUrl: string;
+  projectRoot: string;
+  permissionMode: string;
+  autoChain: boolean;
+  basePollIntervalMs: number;
+  pollIntervalMs: number;
+  maxOutputBytes: number;
+  adaptivePolling: boolean;
+  _status: string;
+  _currentTask: { taskId: string; title: string; startedAt: number } | null;
+  _stopped: boolean;
+  _childProcess: ChildProcess | null;
+  _loopPromise: Promise<void> | null;
+  _startedAt: number | null;
+  _failedTasks: Set<string>;
+  _outputBuffer: string;
+
   /**
    * @param {string} agent - Agent name (gemini, codex, claude)
    * @param {object} opts
@@ -79,11 +115,11 @@ export class AgentWorker extends EventEmitter {
    * @param {string} [opts.permissionMode] - 'auto-edit' or 'full-auto'
    * @param {boolean} [opts.autoChain] - Auto-loop to next task on completion
    */
-  constructor(agent, { baseUrl, projectRoot, permissionMode, autoChain } = {}) {
+  constructor(agent: string, { baseUrl, projectRoot, permissionMode, autoChain }: { baseUrl?: string; projectRoot?: string; permissionMode?: string; autoChain?: boolean } = {}) {
     super();
     this.agent = agent.toLowerCase();
-    this.baseUrl = baseUrl;
-    this.projectRoot = projectRoot;
+    this.baseUrl = baseUrl ?? '';
+    this.projectRoot = projectRoot ?? '';
 
     const workerCfg = getWorkerConfig();
     this.permissionMode = permissionMode || workerCfg.permissionMode;
@@ -104,6 +140,7 @@ export class AgentWorker extends EventEmitter {
     this._loopPromise = null;
     this._startedAt = null;
     this._failedTasks = new Set(); // taskIds that failed — skip if re-assigned
+    this._outputBuffer = '';
   }
 
   get status() {
@@ -129,9 +166,9 @@ export class AgentWorker extends EventEmitter {
     this._startedAt = Date.now();
     this.emit('worker:start', { agent: this.agent });
 
-    this._loopPromise = this._workLoop().catch((err) => {
+    this._loopPromise = this._workLoop().catch((err: unknown) => {
       this._status = 'error';
-      this.emit('worker:stop', { agent: this.agent, reason: err.message });
+      this.emit('worker:stop', { agent: this.agent, reason: (err as Error).message });
     });
   }
 
@@ -168,7 +205,7 @@ export class AgentWorker extends EventEmitter {
   /**
    * Update the permission mode at runtime.
    */
-  setPermissionMode(mode) {
+  setPermissionMode(mode: string) {
     this.permissionMode = mode;
   }
 
@@ -211,7 +248,7 @@ export class AgentWorker extends EventEmitter {
         }
 
         // We have work to do
-        let prompt, taskId, title;
+        let prompt: string, taskId: string, title: string;
 
         if (next.action === 'pickup_handoff') {
           // Acknowledge the handoff
@@ -233,8 +270,8 @@ export class AgentWorker extends EventEmitter {
           next.action === 'continue_task'
         ) {
           const task = next.task;
-          taskId = task?.id || 'unknown';
-          title = task?.title || 'Untitled task';
+          taskId = (task?.['id'] as string) || 'unknown';
+          title = (task?.['title'] as string) || 'Untitled task';
 
           // Claim the task
           try {
@@ -246,7 +283,7 @@ export class AgentWorker extends EventEmitter {
             /* may already be claimed */
           }
 
-          prompt = this._buildTaskPrompt(task);
+          prompt = this._buildTaskPrompt(task ?? null);
         } else {
           // Unknown action — sleep and retry
           await this._sleep(this.pollIntervalMs);
@@ -300,7 +337,7 @@ export class AgentWorker extends EventEmitter {
         // ── Error recovery (headless auto-fallback) ─────────────────
         if (!result.ok) {
           // 1. Check for account-level usage limits FIRST — no retry possible
-          const usageCheck = detectUsageLimitError(this.agent, result);
+          const usageCheck = detectUsageLimitError(this.agent, result as unknown as Record<string, unknown>);
           if (usageCheck.isUsageLimit) {
             const resetMsg = usageCheck.resetInSeconds
               ? ` (resets in ${formatResetTime(usageCheck.resetInSeconds)})`
@@ -316,7 +353,7 @@ export class AgentWorker extends EventEmitter {
             // 2. Check for Codex-specific errors (auth/sandbox/invocation)
             // — these should NOT be retried with a different model
           } else {
-            const codexCheck = detectCodexError(this.agent, result);
+            const codexCheck = detectCodexError(this.agent, result as unknown as Record<string, unknown>);
             if (codexCheck.isCodexError) {
               this.emit('task:progress', {
                 agent: this.agent,
@@ -326,9 +363,9 @@ export class AgentWorker extends EventEmitter {
               // Don't attempt model fallback — this is an env/config issue
             } else {
               // Model error → try fallback model
-              const modelCheck = detectModelError(this.agent, result);
+              const modelCheck = detectModelError(this.agent, result as unknown as Record<string, unknown>);
               if (modelCheck.isModelError) {
-                const recovery = await recoverFromModelError(this.agent, modelCheck.failedModel);
+                const recovery = await recoverFromModelError(this.agent, modelCheck.failedModel ?? '') as { recovered: boolean; newModel: string | null };
                 if (recovery.recovered) {
                   this.emit('task:progress', {
                     agent: this.agent,
@@ -337,8 +374,8 @@ export class AgentWorker extends EventEmitter {
                   });
                   result = await this._executeAgent(prompt);
                   result.recovered = true;
-                  result.originalModel = modelCheck.failedModel;
-                  result.newModel = recovery.newModel;
+                  result.originalModel = modelCheck.failedModel ?? undefined;
+                  result.newModel = recovery.newModel ?? undefined;
                 }
               }
             }
@@ -415,7 +452,7 @@ export class AgentWorker extends EventEmitter {
 
           // If this is a usage limit (e.g. ChatGPT Codex quota exhausted),
           // stop the worker — no point processing more tasks until it resets.
-          const usageCheck = detectUsageLimitError(this.agent, result);
+          const usageCheck = detectUsageLimitError(this.agent, result as unknown as Record<string, unknown>);
           if (usageCheck.isUsageLimit) {
             const resetLabel = usageCheck.resetInSeconds
               ? ` (resets in ${formatResetTime(usageCheck.resetInSeconds)})`
@@ -438,14 +475,14 @@ export class AgentWorker extends EventEmitter {
           // If not auto-chaining, wait for explicit restart
           this._stopped = true;
         }
-      } catch (err) {
+      } catch (err: unknown) {
         if (this._status === 'working') activeTaskCount = Math.max(0, activeTaskCount - 1);
         this._status = 'error';
         this.emit('task:error', {
           agent: this.agent,
           taskId: this._currentTask?.taskId || 'unknown',
           title: this._currentTask?.title || '',
-          error: err.message,
+          error: (err as Error).message,
         });
         this._currentTask = null;
 
@@ -469,7 +506,7 @@ export class AgentWorker extends EventEmitter {
         this.baseUrl,
         `/next?agent=${encodeURIComponent(this.agent)}`,
       );
-      return data?.next || null;
+      return (data as { next?: WorkerNextAction })?.next ?? null;
     } catch {
       return null;
     }
@@ -479,13 +516,13 @@ export class AgentWorker extends EventEmitter {
    * Build a prompt string from a task object.
    * If the task has a preferredAgent that's a virtual agent, use its rolePrompt.
    */
-  _buildTaskPrompt(task) {
+  _buildTaskPrompt(task: Record<string, unknown> | null) {
     if (!task) return 'Continue assigned work.';
 
     // Use virtual agent's rolePrompt if task specifies one
     let rolePrompt = '';
-    if (task.preferredAgent) {
-      const preferred = getAgent(task.preferredAgent);
+    if (task['preferredAgent']) {
+      const preferred = getAgent(task['preferredAgent'] as string);
       if (preferred?.rolePrompt) {
         rolePrompt = preferred.rolePrompt;
       }
@@ -495,9 +532,9 @@ export class AgentWorker extends EventEmitter {
       rolePrompt = agentConfig?.rolePrompt || '';
     }
 
-    const parts = [`Task: ${task.title || 'Untitled'}`];
-    if (task.notes) parts.push(`Notes: ${task.notes}`);
-    if (task.done) parts.push(`Definition of Done: ${task.done}`);
+    const parts = [`Task: ${task['title'] || 'Untitled'}`];
+    if (task['notes']) parts.push(`Notes: ${task['notes']}`);
+    if (task['done']) parts.push(`Definition of Done: ${task['done']}`);
     if (rolePrompt) parts.push('', rolePrompt);
     parts.push('', 'Execute this task. Report exactly what you changed.');
 
@@ -509,12 +546,12 @@ export class AgentWorker extends EventEmitter {
    * Resolves virtual agents to their physical CLI backend.
    * Returns { ok, output, error, tokenUsage }.
    */
-  async _executeAgent(prompt) {
+  async _executeAgent(prompt: string) {
     const result = await executeAgent(this.agent, prompt, {
       cwd: this.projectRoot,
       permissionMode: this.permissionMode,
       maxOutputBytes: this.maxOutputBytes,
-      onProgress: (elapsed, outputKB, status) => {
+      onProgress: (_elapsed: number, outputKB: number, status?: string) => {
         this.emit('task:progress', {
           agent: this.agent,
           taskId: this._currentTask?.taskId,
@@ -526,7 +563,7 @@ export class AgentWorker extends EventEmitter {
     return result;
   }
 
-  _sleep(ms) {
+  _sleep(ms: number) {
     return new Promise((resolve) => {
       const id = setTimeout(resolve, ms);
       // Don't block process exit

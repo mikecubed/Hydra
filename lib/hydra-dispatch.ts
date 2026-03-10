@@ -15,8 +15,8 @@
 import './hydra-env.ts';
 import fs from 'node:fs';
 import path from 'node:path';
-import { getProjectContext, buildAgentContext } from './hydra-context.ts';
-import { getAgent, setActiveModel, getActiveModel, getMode, setMode } from './hydra-agents.ts';
+import { buildAgentContext } from './hydra-context.ts';
+import { getAgent, getMode, setMode } from './hydra-agents.ts';
 import { resolveProject } from './hydra-config.ts';
 import {
   nowIso,
@@ -46,17 +46,17 @@ import pc from 'picocolors';
 const config = resolveProject();
 const RUNS_DIR = config.runsDir;
 
-const DEFAULT_DAEMON_URL = process.env.AI_ORCH_URL || 'http://127.0.0.1:4173';
+const DEFAULT_DAEMON_URL = process.env['AI_ORCH_URL'] || 'http://127.0.0.1:4173';
 const DEFAULT_TIMEOUT_MS = 1000 * 60 * 7;
 
 const MODE_DOWNSHIFT = { performance: 'balanced', balanced: 'economy' };
 
-function usageGuard(agent) {
+function usageGuard(_agent: string) {
   try {
     const usage = checkUsage();
     if (usage.level === 'critical') {
       const currentMode = getMode();
-      const nextMode = MODE_DOWNSHIFT[currentMode];
+      const nextMode = (MODE_DOWNSHIFT as Record<string, string>)[currentMode];
       if (nextMode) {
         console.log(
           WARNING(
@@ -79,12 +79,12 @@ function usageGuard(agent) {
   }
 }
 
-async function callAgent(agent, prompt, timeoutMs) {
+async function callAgent(agent: string, prompt: string, timeoutMs: number) {
   usageGuard(agent);
   return executeAgent(agent, prompt, { cwd: config.projectRoot, timeoutMs });
 }
 
-async function fetchDaemonSummary(baseUrl) {
+async function fetchDaemonSummary(baseUrl: string) {
   try {
     const response = await fetch(`${baseUrl}/summary`, {
       method: 'GET',
@@ -94,13 +94,13 @@ async function fetchDaemonSummary(baseUrl) {
       return null;
     }
     const payload = await response.json();
-    return payload?.summary || null;
+    return (payload as Record<string, unknown>)?.['summary'] ?? null;
   } catch {
     return null;
   }
 }
 
-function buildClaudeCoordinatorPrompt(userPrompt, daemonSummary) {
+function buildClaudeCoordinatorPrompt(userPrompt: string, daemonSummary: unknown) {
   const agentConfig = getAgent('claude');
   const schemaHint = {
     understanding: 'string',
@@ -120,9 +120,9 @@ function buildClaudeCoordinatorPrompt(userPrompt, daemonSummary) {
   };
 
   return [
-    `${isPersonaEnabled() ? getAgentFraming('claude') : `You are ${agentConfig.label}`} Acting as coordinator for ${config.projectName}.`,
+    `${isPersonaEnabled() ? getAgentFraming('claude') : `You are ${agentConfig!.label}`} Acting as coordinator for ${config.projectName}.`,
     '',
-    agentConfig.rolePrompt,
+    agentConfig!.rolePrompt,
     '',
     buildAgentContext('claude', {}, config, userPrompt),
     '',
@@ -143,13 +143,13 @@ function buildClaudeCoordinatorPrompt(userPrompt, daemonSummary) {
   ].join('\n');
 }
 
-function buildGeminiPrompt(userPrompt, claudePlan, daemonSummary) {
+function buildGeminiPrompt(userPrompt: string, claudePlan: unknown, daemonSummary: unknown) {
   const agentConfig = getAgent('gemini');
 
   return [
-    `${isPersonaEnabled() ? getAgentFraming('gemini') : `You are ${agentConfig.label}`} Triage mode for ${config.projectName}.`,
+    `${isPersonaEnabled() ? getAgentFraming('gemini') : `You are ${agentConfig!.label}`} Triage mode for ${config.projectName}.`,
     '',
-    agentConfig.rolePrompt,
+    agentConfig!.rolePrompt,
     '',
     buildAgentContext('gemini', {}, config, userPrompt),
     '',
@@ -169,13 +169,13 @@ function buildGeminiPrompt(userPrompt, claudePlan, daemonSummary) {
   ].join('\n');
 }
 
-function buildCodexPrompt(userPrompt, claudePlan, geminiReview, daemonSummary) {
+function buildCodexPrompt(userPrompt: string, claudePlan: unknown, geminiReview: unknown, daemonSummary: unknown) {
   const agentConfig = getAgent('codex');
 
   return [
-    `${isPersonaEnabled() ? getAgentFraming('codex') : `You are ${agentConfig.label}`} Generating the final execution packet.`,
+    `${isPersonaEnabled() ? getAgentFraming('codex') : `You are ${agentConfig!.label}`} Generating the final execution packet.`,
     '',
-    agentConfig.rolePrompt,
+    agentConfig!.rolePrompt,
     '',
     buildAgentContext('codex', { files: [] }, config, userPrompt),
     '',
@@ -210,11 +210,11 @@ async function main() {
     process.exit(1);
   }
 
-  const mode = String(options.mode || 'live').toLowerCase();
-  const isPreview = mode === 'preview' || boolFlag(options.preview, false);
-  const save = boolFlag(options.save, true);
-  const daemonUrl = String(options.url || DEFAULT_DAEMON_URL);
-  const timeoutMs = Number.parseInt(String(options.timeoutMs || DEFAULT_TIMEOUT_MS), 10);
+  const mode = String(options['mode'] || 'live').toLowerCase();
+  const isPreview = mode === 'preview' || boolFlag(options['preview'], false);
+  const save = boolFlag(options['save'], true);
+  const daemonUrl = String(options['url'] || DEFAULT_DAEMON_URL);
+  const timeoutMs = Number.parseInt(String(options['timeoutMs'] || DEFAULT_TIMEOUT_MS), 10);
 
   const id = runId('HYDRA_RUN');
   const startedAt = nowIso();
@@ -222,16 +222,16 @@ async function main() {
   const report = {
     id,
     startedAt,
-    finishedAt: null,
+    finishedAt: null as string | null,
     mode: isPreview ? 'preview' : 'live',
     prompt,
     project: config.projectName,
     daemonUrl,
-    daemonSummary: null,
-    claude: null,
-    gemini: null,
-    codex: null,
-    outputSummary: null,
+    daemonSummary: null as unknown | null,
+    claude: null as { ok?: boolean; preview?: boolean; command?: unknown; parsed?: unknown; stdout?: string; lastMessage?: string } | null,
+    gemini: null as { ok?: boolean; preview?: boolean; command?: unknown; parsed?: unknown; stdout?: string } | null,
+    codex: null as { ok?: boolean; preview?: boolean; command?: unknown; parsed?: unknown; stdout?: string; lastMessage?: string } | null,
+    outputSummary: null as { claudeOk: boolean; geminiOk: boolean; codexOk: boolean; claudeSnippet: string; geminiSnippet: string; codexSnippet: string } | null,
   };
 
   report.daemonSummary = await fetchDaemonSummary(daemonUrl);
@@ -245,17 +245,17 @@ async function main() {
     report.claude = {
       ok: true,
       preview: true,
-      command: claudeConfig.invoke.nonInteractive('<coordinator-prompt>'),
+      command: claudeConfig!.invoke!.nonInteractive!('<coordinator-prompt>'),
     };
     report.gemini = {
       ok: true,
       preview: true,
-      command: geminiConfig.invoke.nonInteractive('<gemini-prompt>'),
+      command: geminiConfig!.invoke!.nonInteractive!('<gemini-prompt>'),
     };
     report.codex = {
       ok: true,
       preview: true,
-      command: codexConfig.invoke.nonInteractive('<codex-prompt>', {
+      command: codexConfig!.invoke!.nonInteractive!('<codex-prompt>', {
         outputPath: '<tempfile>',
         cwd: config.projectRoot,
       }),
@@ -335,12 +335,12 @@ async function main() {
   console.log(label('Run ID', DIM(id)));
   console.log(label('Project', pc.white(config.projectName)));
   console.log(label('Mode', pc.white(report.mode)));
-  console.log(label('Claude', report.outputSummary.claudeOk ? SUCCESS('ok') : ERROR('failed')));
-  console.log(label('Gemini', report.outputSummary.geminiOk ? SUCCESS('ok') : ERROR('failed')));
-  console.log(label('Codex', report.outputSummary.codexOk ? SUCCESS('ok') : ERROR('failed')));
-  console.log(label('Claude snippet', DIM(report.outputSummary.claudeSnippet)));
-  console.log(label('Gemini snippet', DIM(report.outputSummary.geminiSnippet)));
-  console.log(label('Codex snippet', DIM(report.outputSummary.codexSnippet)));
+  console.log(label('Claude', report.outputSummary!.claudeOk ? SUCCESS('ok') : ERROR('failed')));
+  console.log(label('Gemini', report.outputSummary!.geminiOk ? SUCCESS('ok') : ERROR('failed')));
+  console.log(label('Codex', report.outputSummary!.codexOk ? SUCCESS('ok') : ERROR('failed')));
+  console.log(label('Claude snippet', DIM(report.outputSummary!.claudeSnippet)));
+  console.log(label('Gemini snippet', DIM(report.outputSummary!.geminiSnippet)));
+  console.log(label('Codex snippet', DIM(report.outputSummary!.codexSnippet)));
 }
 
 main().catch((err) => {

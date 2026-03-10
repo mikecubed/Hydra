@@ -10,7 +10,7 @@
 
 import { describe, it, before, after } from 'node:test';
 import assert from 'node:assert/strict';
-import { spawnSyncCapture } from '../lib/hydra-proc.mjs';
+import { spawnSyncCapture } from '../lib/hydra-proc.ts';
 
 // ── helpers ──────────────────────────────────────────────────────────────────
 

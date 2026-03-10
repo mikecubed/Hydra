@@ -7,7 +7,7 @@
 
 import fs from 'node:fs';
 import path from 'node:path';
-import { spawnSyncCapture } from '../hydra-proc.mjs';
+import { spawnSyncCapture } from '../hydra-proc.ts';
 
 export interface ScanViolation {
   type: string;

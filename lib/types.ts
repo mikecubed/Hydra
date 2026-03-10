@@ -819,3 +819,98 @@ export interface WriteRouteCtx extends ReadRouteCtx {
   cleanupTaskWorktree: (taskId: string) => void;
   writeStatus: (extra?: Record<string, unknown>) => void;
 }
+
+// ── Dispatch types ────────────────────────────────────────────────────────────
+
+export interface DispatchOpts {
+  agent?: string;
+  mode?: 'auto' | 'smart' | 'council' | 'dispatch' | 'chat';
+  prompt: string;
+  timeout?: number;
+  onChunk?: (chunk: string) => void;
+}
+
+export interface DispatchResult {
+  output: string;
+  agent: string;
+  tokenUsage?: TokenUsage;
+  costUsd?: number;
+}
+
+// ── Council types ─────────────────────────────────────────────────────────────
+
+export interface CouncilProposal {
+  agent: string;
+  content: string;
+  confidence?: number;
+}
+
+export interface CouncilRound {
+  round: number;
+  proposals: CouncilProposal[];
+  synthesis?: string;
+}
+
+// ── Verification types ────────────────────────────────────────────────────────
+
+export interface VerificationPlan {
+  enabled: boolean;
+  timeoutMs: number;
+  command: string;
+  source: 'config' | 'auto';
+  reason: string;
+}
+
+// ── Hub types ─────────────────────────────────────────────────────────────────
+
+export interface HubSession {
+  id: string;
+  agent: string;
+  cwd: string;
+  project: string;
+  focus: string;
+  files: string[];
+  taskId?: string;
+  status: string;
+  registeredAt: string;
+  updatedAt: string;
+}
+
+export interface ConflictResult {
+  file: string;
+  sessionId: string;
+  agent: string;
+  focus: string;
+}
+
+// ── Worker types ──────────────────────────────────────────────────────────────
+
+export interface WorkerState {
+  running: number;
+  queued: number;
+  max: number;
+}
+
+// ── MCP types ─────────────────────────────────────────────────────────────────
+
+export interface MCPCallResult {
+  ok: boolean;
+  result: string;
+  threadId?: string;
+  viaMCP: boolean;
+  error?: string;
+}
+
+// ── Concierge types ───────────────────────────────────────────────────────────
+
+export interface ConciergeStats {
+  turns: number;
+  promptTokens: number;
+  completionTokens: number;
+}
+
+export interface ActiveProvider {
+  provider: string;
+  model: string;
+  isFallback: boolean;
+}

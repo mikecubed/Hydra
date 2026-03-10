@@ -8,13 +8,12 @@
 
 import path from 'node:path';
 import { loadHydraConfig } from './hydra-config.ts';
-import { getMode, getModelSummary } from './hydra-agents.ts';
+// hydra-agents utilities used in other modules
 import {
   detectAvailableProviders,
   buildFallbackChain,
   streamWithFallback,
-  providerLabel,
-} from './hydra-concierge-providers.mjs';
+} from './hydra-concierge-providers.ts';
 import { shortModelName } from './hydra-ui.ts';
 import { COST_PER_1K, estimateCost } from './hydra-provider-usage.ts';
 import { getConciergeIdentity } from './hydra-persona.mjs';
@@ -25,10 +24,10 @@ export { COST_PER_1K };
 
 // ── State ────────────────────────────────────────────────────────────────────
 
-let history = []; // {role, content}[]
+let history: Array<{ role: string; content: string }> = []; // {role, content}[]
 let stats = { turns: 0, promptTokens: 0, completionTokens: 0 };
 let systemPromptCache = { text: '', builtAt: 0, fingerprint: '' };
-let activeProvider = null; // {provider, model, isFallback}
+let activeProvider: { provider: string; model: string; isFallback: boolean } | null = null; // {provider, model, isFallback}
 const SYSTEM_PROMPT_TTL_MS = 30_000;
 
 // ── Config ───────────────────────────────────────────────────────────────────
@@ -63,7 +62,7 @@ export function isConciergeAvailable() {
 
 // ── Init ─────────────────────────────────────────────────────────────────────
 
-export function initConcierge(opts = {}) {
+export function initConcierge(_opts: Record<string, unknown> = {}) {
   const chain = buildFallbackChain().filter((e) => e.available);
   if (chain.length === 0) {
     throw new Error(
@@ -107,7 +106,7 @@ export function getConciergeModelLabel() {
   }
   // Fallback to config primary
   const cfg = getConciergeConfig();
-  return shortModelName(cfg.model);
+  return shortModelName(cfg.model ?? '');
 }
 
 /**
@@ -115,7 +114,7 @@ export function getConciergeModelLabel() {
  * Inserts the specified model at the front of the fallback chain.
  * @param {string} modelSpec - Model name or alias (e.g. "sonnet", "gpt-5", "flash")
  */
-export function switchConciergeModel(modelSpec) {
+export function switchConciergeModel(modelSpec: string) {
   // Resolve common aliases
   const ALIASES = {
     opus: 'claude-opus-4-6',
@@ -125,7 +124,7 @@ export function switchConciergeModel(modelSpec) {
     pro: 'gemini-3-pro-preview',
   };
 
-  const resolved = ALIASES[modelSpec.toLowerCase()] || modelSpec;
+  const resolved = (ALIASES as Record<string, string>)[modelSpec.toLowerCase()] || modelSpec;
 
   // Detect provider from model name
   let provider = 'openai';
@@ -161,7 +160,7 @@ export function getRecentContext(n = 3) {
     .map((m) => m.content.slice(0, 200));
 }
 
-function trimHistory(maxMessages) {
+function trimHistory(maxMessages: number) {
   if (history.length <= maxMessages) return;
   // Summarize trimmed messages before discarding
   const cfg = loadHydraConfig();
@@ -190,7 +189,27 @@ function trimHistory(maxMessages) {
 
 // ── System Prompt ────────────────────────────────────────────────────────────
 
-function buildSystemPrompt(context = {}) {
+interface ConciergeContext {
+  mode?: string;
+  openTasks?: number;
+  gitInfo?: { branch?: string; modifiedFiles?: number };
+  recentCompletions?: Array<{ agent: string; title?: string; taskId?: string }>;
+  selfAwarenessKey?: string;
+  projectName?: string;
+  projectRoot?: string;
+  agentModels?: Record<string, string>;
+  knownProjects?: string[];
+  recentErrors?: Array<{ agent?: string; error?: string; message?: string }>;
+  activeWorkers?: string[];
+  codebaseBaseline?: string;
+  selfSnapshotBlock?: string;
+  selfIndexBlock?: string;
+  activityDigest?: string;
+  codebaseContext?: string;
+  [key: string]: unknown;
+}
+
+function buildSystemPrompt(context: ConciergeContext = {}) {
   const now = Date.now();
 
   // Context-hash fingerprint for cache invalidation
@@ -417,17 +436,17 @@ Important constraints:
 
 // ── Event Posting (bidirectional) ────────────────────────────────────────────
 
-let _daemonBaseUrl = null;
+let _daemonBaseUrl: string | null = null;
 
 /**
  * Set the daemon base URL for event posting.
  * @param {string} baseUrl
  */
-export function setConciergeBaseUrl(baseUrl) {
+export function setConciergeBaseUrl(baseUrl: string) {
   _daemonBaseUrl = baseUrl;
 }
 
-async function postConciergeEvent(type, payload) {
+async function postConciergeEvent(type: string, payload: unknown) {
   if (!_daemonBaseUrl) return;
   try {
     await fetch(`${_daemonBaseUrl}/events/push`, {
@@ -436,13 +455,19 @@ async function postConciergeEvent(type, payload) {
       body: JSON.stringify({ type, payload }),
       signal: AbortSignal.timeout(2000),
     });
-  } catch (err) {
+  } catch (err: unknown) {
     // Best-effort, but log error for debugging
-    console.error(`[Concierge] Event post failed: ${err.message}`);
+    console.error(`[Concierge] Event post failed: ${(err as Error).message}`);
   }
 }
 
 // ── Main Turn ────────────────────────────────────────────────────────────────
+
+interface ConciergeTurnOpts {
+  onChunk?: (chunk: string) => void;
+  onFirstChunk?: () => void;
+  context?: ConciergeContext;
+}
 
 /**
  * Process one conversational turn.
@@ -453,7 +478,7 @@ async function postConciergeEvent(type, payload) {
  * @param {object} [opts.context] - Live state for system prompt
  * @returns {Promise<{intent: 'chat'|'dispatch', response: string, dispatchPrompt?: string, provider?: string, model?: string, isFallback?: boolean, estimatedCost?: number}>}
  */
-export async function conciergeTurn(userMsg, opts = {}) {
+export async function conciergeTurn(userMsg: string, opts: ConciergeTurnOpts = {}) {
   const cfg = getConciergeConfig();
   const systemPrompt = buildSystemPrompt(opts.context || {});
 
@@ -471,7 +496,7 @@ export async function conciergeTurn(userMsg, opts = {}) {
   let chunkCount = 0;
   let firstChunkFired = false;
 
-  const onChunk = (chunk) => {
+  const onChunk = (chunk: string) => {
     responseBuffer += chunk;
     chunkCount++;
 
@@ -529,15 +554,16 @@ export async function conciergeTurn(userMsg, opts = {}) {
   // Update stats
   stats.turns++;
   if (result.usage) {
-    stats.promptTokens += result.usage.prompt_tokens || 0;
-    stats.completionTokens += result.usage.completion_tokens || 0;
+    const usage = result.usage as { prompt_tokens?: number; completion_tokens?: number };
+    stats.promptTokens += usage.prompt_tokens || 0;
+    stats.completionTokens += usage.completion_tokens || 0;
   }
 
   // Estimate cost
-  const cost = estimateCost(result.model, result.usage);
+  const cost = estimateCost(result.model, result.usage as { prompt_tokens?: number; completion_tokens?: number } | null);
 
   // Add assistant response to history
-  history.push({ role: 'assistant', content: result.fullResponse });
+  history.push({ role: 'assistant', content: result.fullResponse as string });
 
   // Post summary event every 5 turns
   if (stats.turns % 5 === 0) {
@@ -554,7 +580,7 @@ export async function conciergeTurn(userMsg, opts = {}) {
   }
 
   // Determine intent
-  const trimmedResponse = result.fullResponse.trimStart();
+  const trimmedResponse = (result.fullResponse as string).trimStart();
   if (trimmedResponse.startsWith('[DISPATCH]')) {
     const dispatchPrompt = trimmedResponse.slice('[DISPATCH]'.length).trim();
 
@@ -600,7 +626,7 @@ const SUGGEST_SYSTEM_PROMPT = `You suggest a single actionable prompt the user c
  * @param {number} [opts.maxTokens=80] - Max output tokens
  * @returns {Promise<{suggestion: string, provider: string, model: string}|null>}
  */
-export async function conciergeSuggest(contextDescription, opts = {}) {
+export async function conciergeSuggest(contextDescription: string, opts: { maxTokens?: number } = {}) {
   const cfg = getConciergeConfig();
   if (!cfg.enabled) return null;
 
@@ -616,7 +642,7 @@ export async function conciergeSuggest(contextDescription, opts = {}) {
 
   try {
     const result = await streamWithFallback(messages, streamCfg, () => {});
-    const suggestion = (result.fullResponse || '').trim();
+    const suggestion = ((result.fullResponse as string) || '').trim();
     if (!suggestion || suggestion.length > 150) return null;
     return { suggestion, provider: result.provider, model: result.model };
   } catch {

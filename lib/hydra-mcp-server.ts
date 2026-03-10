@@ -35,7 +35,7 @@ import {
   deregisterSession as hubDeregisterSession,
   listSessions as hubListSessions,
   checkConflicts as hubCheckConflicts,
-} from './hydra-hub.mjs';
+} from './hydra-hub.ts';
 
 const CHARACTER_LIMIT = 25000;
 
@@ -62,7 +62,7 @@ async function requireDaemon() {
   }
 }
 
-function truncate(text, limit = CHARACTER_LIMIT) {
+function truncate(text: string, limit = CHARACTER_LIMIT) {
   if (text.length <= limit) return { text, truncated: false };
   return {
     text: `${text.slice(0, limit)}\n\n[Output truncated at ${limit} chars. Use a more specific prompt or request a summary.]`,
@@ -70,7 +70,7 @@ function truncate(text, limit = CHARACTER_LIMIT) {
   };
 }
 
-function errResponse(msg) {
+function errResponse(msg: string) {
   return { content: [{ type: 'text', text: msg }], isError: true };
 }
 
@@ -118,6 +118,7 @@ server.registerTool(
       openWorldHint: true,
     },
   },
+  // @ts-expect-error — MCP SDK handler type mismatch (async callback vs sync signature)
   async ({ agent, prompt, system, model }) => {
     const fullPrompt = system ? `${system}\n\n---\n\n${prompt}` : prompt;
     const execOpts = {
@@ -136,7 +137,8 @@ server.registerTool(
     }
 
     let text = result.output || '';
-    if (agent === 'claude') {
+    // eslint-disable-next-line @typescript-eslint/no-unnecessary-type-assertion
+    if ((agent as string) === 'claude') {
       try {
         const parsed = JSON.parse(text);
         text = parsed.result || parsed.content || text;
@@ -191,19 +193,22 @@ server.registerTool(
   },
   async ({ status, owner, limit, offset }) => {
     await requireDaemon();
-    const result = await request('GET', baseUrl, '/summary');
-    let tasks = result.summary?.openTasks || [];
-    if (status) tasks = tasks.filter((t) => t.status === status);
-    if (owner) tasks = tasks.filter((t) => t.owner === owner);
+    const data = await request('GET', baseUrl, '/summary') as Record<string, unknown>;
+    let tasks = ((data['summary'] as Record<string, unknown> | undefined)?.['openTasks'] as unknown[]) || [];
+    if (status) tasks = tasks.filter((t) => (t as Record<string, unknown>)['status'] === status);
+    if (owner) tasks = tasks.filter((t) => (t as Record<string, unknown>)['owner'] === owner);
 
     const total = tasks.length;
-    const page = tasks.slice(offset, offset + limit).map((t) => ({
-      id: t.id,
-      title: t.title,
-      status: t.status,
-      owner: t.owner,
-      type: t.type,
-    }));
+    const page = tasks.slice(offset, offset + limit).map((t) => {
+      const task = t as Record<string, unknown>;
+      return {
+      id: task['id'],
+      title: task['title'],
+      status: task['status'],
+      owner: task['owner'],
+      type: task['type'],
+      };
+    });
 
     const output = {
       tasks: page,
@@ -249,6 +254,7 @@ server.registerTool(
       openWorldHint: true,
     },
   },
+  // @ts-expect-error — MCP SDK handler type mismatch (async callback vs sync signature)
   async ({ agent, taskId, title, notes }) => {
     await requireDaemon();
     if (!taskId && !title) {
@@ -256,12 +262,12 @@ server.registerTool(
         'Error: Either taskId or title is required. Provide taskId to claim an existing task (use hydra_tasks_list to find one), or title to create a new task.',
       );
     }
-    const body = { agent };
-    if (taskId) body.taskId = taskId;
-    if (title) body.title = title;
-    if (notes) body.notes = notes;
-    const result = await request('POST', baseUrl, '/task/claim', body);
-    const output = { task: result.task };
+    const body: Record<string, string | undefined> = { agent };
+    if (taskId) body['taskId'] = taskId;
+    if (title) body['title'] = title;
+    if (notes) body['notes'] = notes;
+    const result = await request('POST', baseUrl, '/task/claim', body) as Record<string, unknown>;
+    const output = { task: result['task'] };
     return {
       content: [{ type: 'text', text: JSON.stringify(output) }],
       structuredContent: output,
@@ -302,12 +308,12 @@ server.registerTool(
   },
   async ({ taskId, status, notes, claimToken }) => {
     await requireDaemon();
-    const body = { taskId };
-    if (status) body.status = status;
-    if (notes) body.notes = notes;
-    if (claimToken) body.claimToken = claimToken;
-    const result = await request('POST', baseUrl, '/task/update', body);
-    const output = { task: result.task };
+    const body: Record<string, string | undefined> = { taskId };
+    if (status) body['status'] = status;
+    if (notes) body['notes'] = notes;
+    if (claimToken) body['claimToken'] = claimToken;
+    const result = await request('POST', baseUrl, '/task/update', body) as Record<string, unknown>;
+    const output = { task: result['task'] };
     return {
       content: [{ type: 'text', text: JSON.stringify(output) }],
       structuredContent: output,
@@ -350,8 +356,8 @@ server.registerTool(
       name,
       context: context || '',
       agent: agent || '',
-    });
-    const output = { checkpoint: result.checkpoint };
+    }) as Record<string, unknown>;
+    const output = { checkpoint: (result as Record<string, unknown>)["checkpoint"] };
     return {
       content: [{ type: 'text', text: JSON.stringify(output) }],
       structuredContent: output,
@@ -383,9 +389,10 @@ server.registerTool(
   },
   async ({ agent }) => {
     await requireDaemon();
-    const state = await request('GET', baseUrl, '/state');
-    const handoffs = (state.state?.handoffs || []).filter(
-      (h) => h.to === agent && !h.acknowledgedAt,
+    const stateData = await request('GET', baseUrl, '/state') as Record<string, unknown>;
+    const stateObj = stateData['state'] as Record<string, unknown> | undefined;
+    const handoffs = ((stateObj?.['handoffs'] || []) as Array<Record<string, unknown>>).filter(
+      (h) => h['to'] === agent && !h['acknowledgedAt'],
     );
     const output = { handoffs, count: handoffs.length };
     return {
@@ -421,8 +428,8 @@ server.registerTool(
   },
   async ({ handoffId, agent }) => {
     await requireDaemon();
-    const result = await request('POST', baseUrl, '/handoff/ack', { handoffId, agent });
-    const output = { handoff: result.handoff };
+    const result = await request('POST', baseUrl, '/handoff/ack', { handoffId, agent }) as Record<string, unknown>;
+    const output = { handoff: result['handoff'] };
     return {
       content: [{ type: 'text', text: JSON.stringify(output) }],
       structuredContent: output,
@@ -460,10 +467,10 @@ server.registerTool(
       owner: 'human',
       rationale: `Agent requested council deliberation for: ${prompt}`,
       impact: 'pending council review',
-    });
+    }) as Record<string, unknown>;
     const output = {
       queued: true,
-      decision: result.decision,
+      decision: result['decision'],
       message:
         'Council request recorded. Open the Hydra operator console (`npm run go`) and run `:council` to begin deliberation.',
     };
@@ -491,7 +498,8 @@ server.registerTool(
       openWorldHint: true,
     },
   },
-  async () => {
+  // @ts-expect-error — MCP SDK handler type mismatch (async callback vs sync signature)
+  async (_args: unknown) => {
     await requireDaemon();
     const health = await request('GET', baseUrl, '/health');
     return {
@@ -537,6 +545,7 @@ server.registerTool(
       openWorldHint: true,
     },
   },
+  // @ts-expect-error — MCP SDK handler type mismatch (async callback vs sync signature)
   async ({ description, name, baseAgent, skipTest }) => {
     const result = await forgeAgent(description, {
       name: name || undefined,
@@ -584,7 +593,7 @@ server.registerTool(
       openWorldHint: false,
     },
   },
-  async () => {
+  async (_args: unknown) => {
     const forged = listForgedAgents();
     const output = { agents: forged, count: forged.length };
     return {
@@ -696,10 +705,10 @@ server.registerTool(
     },
   },
   async ({ id, files, status, focus }) => {
-    const updates = {};
-    if (files !== undefined) updates.files = files;
-    if (status !== undefined) updates.status = status;
-    if (focus !== undefined) updates.focus = focus;
+    const updates: Record<string, unknown> = {};
+    if (files !== undefined) updates['files'] = files;
+    if (status !== undefined) updates['status'] = status;
+    if (focus !== undefined) updates['focus'] = focus;
     hubUpdateSession(id, updates);
     const output = { ok: true };
     return { content: [{ type: 'text', text: JSON.stringify(output) }], structuredContent: output };
@@ -776,7 +785,7 @@ server.registerResource(
   'config',
   'hydra://config',
   { description: 'Current Hydra configuration (hydra.config.json)', mimeType: 'application/json' },
-  async () => ({
+  async (_args: unknown) => ({
     contents: [
       {
         uri: 'hydra://config',
@@ -791,7 +800,7 @@ server.registerResource(
   'metrics',
   'hydra://metrics',
   { description: 'Session metrics and SLO status', mimeType: 'application/json' },
-  async () => ({
+  async (_args: unknown) => ({
     contents: [
       {
         uri: 'hydra://metrics',
@@ -806,7 +815,7 @@ server.registerResource(
   'agents',
   'hydra://agents',
   { description: 'Agent registry with models and affinities', mimeType: 'application/json' },
-  async () => ({
+  async (_args: unknown) => ({
     contents: [
       {
         uri: 'hydra://agents',
@@ -821,7 +830,7 @@ server.registerResource(
   'activity',
   'hydra://activity',
   { description: 'Recent activity digest (last 20 events)', mimeType: 'application/json' },
-  async () => ({
+  async (_args: unknown) => ({
     contents: [
       {
         uri: 'hydra://activity',
@@ -836,7 +845,7 @@ server.registerResource(
   'status',
   'hydra://status',
   { description: 'Daemon status (if available)', mimeType: 'application/json' },
-  async () => {
+  async (_args: unknown) => {
     try {
       const health = await fetch(`${baseUrl}/health`, { signal: AbortSignal.timeout(2000) });
       const data = health.ok ? await health.json() : { available: false };
@@ -870,7 +879,7 @@ server.registerResource(
     description: 'Hydra self snapshot (version, git, models, config, metrics)',
     mimeType: 'application/json',
   },
-  async () => ({
+  async (_args: unknown) => ({
     contents: [
       {
         uri: 'hydra://self',
@@ -1001,7 +1010,7 @@ server.registerPrompt(
 
 async function main() {
   const { options } = parseArgs(process.argv);
-  baseUrl = options.url || process.env.AI_ORCH_URL || 'http://127.0.0.1:4173';
+  baseUrl = (options['url'] as string | undefined) || process.env['AI_ORCH_URL'] || 'http://127.0.0.1:4173';
 
   // Check daemon availability on startup (non-blocking for standalone tools)
   daemonAvailable = await checkDaemon();

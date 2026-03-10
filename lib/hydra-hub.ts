@@ -18,9 +18,9 @@ const STALE_MS = 3 * 60 * 60 * 1000; // 3 hours
 
 // ── Hub Path ──────────────────────────────────────────────────────────────────
 
-function deriveHubPath() {
-  if (process.env.HYDRA_HUB_OVERRIDE) {
-    return process.env.HYDRA_HUB_OVERRIDE;
+function deriveHubPath(): string {
+  if (process.env['HYDRA_HUB_OVERRIDE']) {
+    return process.env['HYDRA_HUB_OVERRIDE'];
   }
   const home = os.homedir(); // e.g. C:\Users\Chili
   // Convert to Claude project slug: C:\Users\Chili → C--Users-Chili
@@ -44,7 +44,7 @@ export function hubPath() {
  * Normalize a cwd for cross-platform comparison.
  * /e/Dev/PepperScale and E:\Dev\PepperScale both become e:/dev/pepperscale
  */
-function normalizeCwd(cwd) {
+function normalizeCwd(cwd: unknown): string {
   if (!cwd || typeof cwd !== 'string') return '';
   return cwd
     .replace(/\\/g, '/') // backslashes → forward slashes
@@ -56,7 +56,7 @@ function ensureHubDir() {
   fs.mkdirSync(HUB_DIR, { recursive: true });
 }
 
-function sessionFilePath(id) {
+function sessionFilePath(id: string): string {
   return path.join(HUB_DIR, `sess_${id}.json`);
 }
 
@@ -82,7 +82,7 @@ function makeId() {
 }
 
 /** Atomic write: temp file + rename to avoid partial reads from concurrent agents. */
-function atomicWrite(filePath, data) {
+function atomicWrite(filePath: string, data: unknown): void {
   const dir = path.dirname(filePath);
   const tmp = path.join(dir, `.tmp.${crypto.randomBytes(4).toString('hex')}`);
   fs.writeFileSync(tmp, JSON.stringify(data, null, 2), 'utf8');
@@ -123,7 +123,16 @@ export function registerSession({
   taskId,
   status = 'working',
   id,
-} = {}) {
+}: {
+  agent: string;
+  cwd?: string;
+  project?: string;
+  focus?: string;
+  files?: string[];
+  taskId?: string;
+  status?: string;
+  id?: string;
+} = {} as { agent: string }) {
   ensureHubDir();
   const sessionId = id || makeId();
   const session = {
@@ -157,7 +166,7 @@ export function registerSession({
  * @param {string} id       - Session ID returned by registerSession
  * @param {object} updates  - Fields to merge: { files?, status?, focus? }
  */
-export function updateSession(id, updates) {
+export function updateSession(id: string, updates: Record<string, unknown>): void {
   const p = sessionFilePath(id);
   if (!fs.existsSync(p)) return;
   let session;
@@ -176,7 +185,7 @@ export function updateSession(id, updates) {
  *
  * @param {string} id - Session ID
  */
-export function deregisterSession(id) {
+export function deregisterSession(id: string): void {
   const p = sessionFilePath(id);
   if (!fs.existsSync(p)) return;
   let agent = 'unknown';
@@ -191,7 +200,7 @@ export function deregisterSession(id) {
   try {
     fs.unlinkSync(p);
   } catch (err) {
-    if (err.code !== 'ENOENT') throw err;
+    if ((err as NodeJS.ErrnoException).code !== 'ENOENT') throw err;
   }
   logActivity({ event: 'deregister', session: id, agent, project });
 }
@@ -203,7 +212,7 @@ export function deregisterSession(id) {
  * @param {string} [opts.cwd] - If provided, only return sessions for this project
  * @returns {object[]} Array of session objects
  */
-export function listSessions({ cwd } = {}) {
+export function listSessions({ cwd }: { cwd?: string } = {}): Record<string, unknown>[] {
   ensureHubDir();
   const now = Date.now();
   const sessions = [];
@@ -225,7 +234,7 @@ export function listSessions({ cwd } = {}) {
         try {
           fs.unlinkSync(p);
         } catch (err) {
-          if (err.code !== 'ENOENT') throw err;
+          if ((err as NodeJS.ErrnoException).code !== 'ENOENT') throw err;
           // ENOENT = concurrently deleted, safe to skip
         }
         continue;
@@ -250,14 +259,14 @@ export function listSessions({ cwd } = {}) {
  * @param {string} [opts.excludeId] - Session ID to exclude (your own session)
  * @returns {Array<{file: string, claimedBy: object}>} Conflicts found
  */
-export function checkConflicts(plannedFiles, { cwd, excludeId } = {}) {
+export function checkConflicts(plannedFiles: string[], { cwd, excludeId }: { cwd?: string; excludeId?: string } = {}): { file: string; claimedBy: Record<string, unknown> }[] {
   const sessions = listSessions({ cwd });
   const conflicts = [];
   for (const session of sessions) {
-    if (excludeId && session.id === excludeId) continue;
-    if (!Array.isArray(session.files)) continue;
+    if (excludeId && session['id'] === excludeId) continue;
+    if (!Array.isArray(session['files'])) continue;
     for (const file of plannedFiles) {
-      if (session.files.includes(file)) {
+      if ((session['files'] as string[]).includes(file)) {
         conflicts.push({ file, claimedBy: session });
       }
     }
@@ -271,7 +280,7 @@ export function checkConflicts(plannedFiles, { cwd, excludeId } = {}) {
  *
  * @param {object} event - Event fields (merged with { at: ISO timestamp })
  */
-export function logActivity(event) {
+export function logActivity(event: Record<string, unknown>): void {
   try {
     ensureHubDir();
     const line = `${JSON.stringify({ at: nowIso(), ...event })}\n`;

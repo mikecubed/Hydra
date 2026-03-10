@@ -18,7 +18,7 @@ const {
   listSessions,
   checkConflicts,
   logActivity,
-} = await import('../lib/hydra-hub.mjs');
+} = await import('../lib/hydra-hub.ts');
 
 test.after(() => {
   fs.rmSync(TEMP_HUB, { recursive: true, force: true });

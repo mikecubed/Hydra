@@ -5,7 +5,7 @@ import {
   getFallbackCandidates,
   recoverFromModelError,
   isModelRecoveryEnabled,
-} from '../lib/hydra-model-recovery.mjs';
+} from '../lib/hydra-model-recovery.ts';
 import { _resetRegistry, initAgentRegistry } from '../lib/hydra-agents.ts';
 
 // Reset registry before each test to ensure clean state

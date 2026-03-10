@@ -14,6 +14,12 @@ import { loadHydraConfig } from './hydra-config.ts';
 import { getActiveModel, setActiveModel, getAgent } from './hydra-agents.ts';
 import { getProfile } from './hydra-model-profiles.ts';
 
+interface CircuitState {
+  failures: Array<{ ts: number }>;
+  isOpen: boolean;
+  openedAt: number | null;
+}
+
 // ── Usage Limit Detection Patterns ──────────────────────────────────────────
 // These are long-term quota exhaustions (hours/days), NOT transient rate limits.
 // Key distinction: usage limits reset after days, rate limits reset after seconds.
@@ -65,7 +71,7 @@ const RATE_LIMIT_PATTERNS = [
  * Extract a Retry-After delay (in ms) from error text, if present.
  * Looks for "Retry-After: N" header or "retry after N seconds" prose.
  */
-function extractRetryAfterMs(text) {
+function extractRetryAfterMs(text: string) {
   // "Retry-After: 30" (HTTP header style)
   const header = text.match(/retry[- ]after[:\s]+(\d+)/i);
   if (header) {
@@ -89,7 +95,7 @@ function extractRetryAfterMs(text) {
  * @param {string} text - Combined error text
  * @returns {number|null} Seconds until reset, or null if not found
  */
-function extractResetSeconds(text) {
+function extractResetSeconds(text: string) {
   const match = text.match(/"resets_in_seconds"\s*:\s*(\d+)/);
   if (match) return Number.parseInt(match[1], 10);
   // "try again at Feb 13th, 2026 11:43 PM" — parse as future date
@@ -113,21 +119,21 @@ function extractResetSeconds(text) {
 // When failures exceed threshold, the circuit "opens" and callers skip
 // directly to fallback instead of wasting time on a known-bad model.
 
-const circuitState = new Map(); // model → { failures: [{ts}], isOpen, openedAt }
+const circuitState = new Map<string, CircuitState>(); // model → { failures: [{ts}], isOpen, openedAt }
 
 /**
  * Record a model failure for circuit breaker tracking.
  * Opens the circuit if failures exceed threshold within window.
  * @param {string} model - Model ID that failed
  */
-export function recordModelFailure(model) {
+export function recordModelFailure(model: string) {
   if (!model) return;
   const cfg = loadHydraConfig();
-  const cbCfg = cfg.modelRecovery?.circuitBreaker || {};
-  if (cbCfg.enabled === false) return;
+  const cbCfg = ((cfg as Record<string, unknown>)['modelRecovery'] as Record<string, unknown> | undefined)?.['circuitBreaker'] as Record<string, unknown> || {};
+  if (cbCfg['enabled'] === false) return;
 
-  const threshold = cbCfg.failureThreshold || 5;
-  const windowMs = cbCfg.windowMs || 300_000;
+  const threshold = (cbCfg['failureThreshold'] as number | undefined) ?? 5;
+  const windowMs = (cbCfg['windowMs'] as number | undefined) ?? 300_000;
   const now = Date.now();
 
   let state = circuitState.get(model);
@@ -152,18 +158,18 @@ export function recordModelFailure(model) {
  * @param {string} model - Model ID
  * @returns {boolean}
  */
-export function isCircuitOpen(model) {
+export function isCircuitOpen(model: string): boolean {
   if (!model) return false;
   const cfg = loadHydraConfig();
-  const cbCfg = cfg.modelRecovery?.circuitBreaker || {};
-  if (cbCfg.enabled === false) return false;
+  const cbCfg = ((cfg as Record<string, unknown>)['modelRecovery'] as Record<string, unknown> | undefined)?.['circuitBreaker'] as Record<string, unknown> || {};
+  if (cbCfg['enabled'] === false) return false;
 
   const state = circuitState.get(model);
   if (!state || !state.isOpen) return false;
 
   // Auto-reset after window elapses
-  const windowMs = cbCfg.windowMs || 300_000;
-  if (Date.now() - state.openedAt > windowMs) {
+  const windowMs2 = (cbCfg['windowMs'] as number | undefined) ?? 300_000;
+  if (Date.now() - (state.openedAt ?? 0) > windowMs2) {
     state.isOpen = false;
     state.openedAt = null;
     state.failures = [];
@@ -177,8 +183,8 @@ export function isCircuitOpen(model) {
  * Get circuit breaker state for all tracked models.
  * @returns {Object<string, {failures: number, isOpen: boolean, openedAt: number|null}>}
  */
-export function getCircuitState() {
-  const result = {};
+export function getCircuitState(): Record<string, { failures: number; isOpen: boolean; openedAt: number | null }> {
+  const result: Record<string, { failures: number; isOpen: boolean; openedAt: number | null }> = {};
   for (const [model, state] of circuitState) {
     result[model] = {
       failures: state.failures.length,
@@ -193,7 +199,7 @@ export function getCircuitState() {
  * Reset circuit breaker for a specific model or all models.
  * @param {string} [model] - Model ID, or undefined to reset all
  */
-export function resetCircuitBreaker(model) {
+export function resetCircuitBreaker(model?: string): void {
   if (model) {
     circuitState.delete(model);
   } else {
@@ -259,7 +265,7 @@ const CODEX_ERROR_PATTERNS = [
 /**
  * Extract the failed model ID from an error message, if possible.
  */
-function extractModelFromError(text) {
+function extractModelFromError(text: string): string | null {
   // "The model `gpt-999` does not exist" / "model 'gpt-999' not found"
   const quoted = text.match(/model\s+[`'"]([\w.:-]+)[`'"]/i);
   if (quoted) return quoted[1];
@@ -291,12 +297,12 @@ function extractModelFromError(text) {
  * @param {object} result - executeAgent result: { ok, output, stderr, error }
  * @returns {{ isUsageLimit: boolean, resetInSeconds: number|null, errorMessage: string }}
  */
-export function detectUsageLimitError(agent, result) {
-  if (!result || result.ok) {
+export function detectUsageLimitError(_agent: string, result: Record<string, unknown>) {
+  if (!result || result["ok"]) {
     return { isUsageLimit: false, resetInSeconds: null, errorMessage: '' };
   }
 
-  const sources = [result.stderr || '', result.output || '', result.error || ''].join('\n');
+  const sources = [result["stderr"] || '', result["output"] || '', result["error"] || ''].join('\n');
 
   for (const pattern of USAGE_LIMIT_PATTERNS) {
     if (pattern.test(sources)) {
@@ -334,7 +340,7 @@ export function detectUsageLimitError(agent, result) {
  * @param {number|null} resetInSeconds
  * @returns {string}
  */
-export function formatResetTime(resetInSeconds) {
+export function formatResetTime(resetInSeconds: number | null): string {
   if (!resetInSeconds || resetInSeconds <= 0) return 'unknown';
   if (resetInSeconds >= 86400) return `${(resetInSeconds / 86400).toFixed(1)} days`;
   if (resetInSeconds >= 3600) return `${(resetInSeconds / 3600).toFixed(1)} hours`;
@@ -356,20 +362,20 @@ export function formatResetTime(resetInSeconds) {
  *
  * @param {string} agent - 'codex', 'claude', or 'gemini'
  * @param {object} [opts]
- * @param {string} [opts.hintText] - Error text from the agent, used to detect quota type
+ * @param {string} [opts["hintText"]] - Error text from the agent, used to detect quota type
  * @returns {Promise<{ verified: boolean|'unknown', status?: number, reason?: string }>}
  */
-export async function verifyAgentQuota(agent, opts = {}) {
-  const hintText = opts.hintText || '';
+export async function verifyAgentQuota(agent: string, opts: Record<string, unknown> = {}) {
+  const hintText = opts["hintText"] || '';
   try {
     const agentDef = getAgent(agent);
-    const apiKeyEnvMap = {
+    const apiKeyEnvMap: Record<string, string> = {
       codex: 'OPENAI_API_KEY',
       claude: 'ANTHROPIC_API_KEY',
       gemini: 'GEMINI_API_KEY',
     };
     const apiKey =
-      process.env[apiKeyEnvMap[agent]] || (agent === 'gemini' ? process.env.GOOGLE_API_KEY : null);
+      process.env[apiKeyEnvMap[agent] ?? ''] || (agent === 'gemini' ? process.env['GOOGLE_API_KEY'] : null);
     if (agentDef?.quotaVerify) {
       const rawResult = await agentDef.quotaVerify(apiKey, { hintText });
       if (!rawResult || typeof rawResult !== 'object') {
@@ -381,8 +387,8 @@ export async function verifyAgentQuota(agent, opts = {}) {
       return rawResult;
     }
     return { verified: 'unknown', reason: `unknown agent: ${agent}` };
-  } catch (err) {
-    return { verified: 'unknown', reason: err.message?.slice(0, 80) || 'network error' };
+  } catch (err: unknown) {
+    return { verified: 'unknown', reason: (err as Error).message?.slice(0, 80) || 'network error' };
   }
 }
 
@@ -395,8 +401,8 @@ export async function verifyAgentQuota(agent, opts = {}) {
  * @param {object} result - executeAgent result: { ok, output, stderr, error }
  * @returns {{ isRateLimit: boolean, retryAfterMs: number|null, errorMessage: string }}
  */
-export function detectRateLimitError(agent, result) {
-  if (!result || result.ok) {
+export function detectRateLimitError(agent: string, result: Record<string, unknown>) {
+  if (!result || result["ok"]) {
     return { isRateLimit: false, retryAfterMs: null, errorMessage: '' };
   }
 
@@ -406,7 +412,7 @@ export function detectRateLimitError(agent, result) {
     return { isRateLimit: false, retryAfterMs: null, errorMessage: '' };
   }
 
-  const sources = [result.stderr || '', result.output || '', result.error || ''].join('\n');
+  const sources = [result["stderr"] || '', result["output"] || '', result["error"] || ''].join('\n');
 
   for (const pattern of RATE_LIMIT_PATTERNS) {
     if (pattern.test(sources)) {
@@ -433,7 +439,7 @@ export function detectRateLimitError(agent, result) {
  * @param {number} [opts.retryAfterMs] - Server-suggested delay (overrides calculation)
  * @returns {number} delay in ms
  */
-export function calculateBackoff(attempt, opts = {}) {
+export function calculateBackoff(attempt: number, opts: { baseDelayMs?: number; maxDelayMs?: number; retryAfterMs?: number } = {}): number {
   const { baseDelayMs = 5000, maxDelayMs = 60_000, retryAfterMs } = opts;
 
   // Honour server-suggested delay if present
@@ -455,13 +461,13 @@ export function calculateBackoff(attempt, opts = {}) {
  * @param {object} result - executeAgent result: { ok, output, stderr, error }
  * @returns {{ isModelError: boolean, failedModel: string|null, errorMessage: string }}
  */
-export function detectModelError(agent, result) {
-  if (!result || result.ok) {
+export function detectModelError(agent: string, result: Record<string, unknown>) {
+  if (!result || result["ok"]) {
     return { isModelError: false, failedModel: null, errorMessage: '' };
   }
 
   // Combine all text sources to scan
-  const sources = [result.stderr || '', result.output || '', result.error || ''].join('\n');
+  const sources = [result["stderr"] || '', result["output"] || '', result["error"] || ''].join('\n');
 
   for (const pattern of MODEL_ERROR_PATTERNS) {
     if (pattern.test(sources)) {
@@ -494,21 +500,21 @@ export function detectModelError(agent, result) {
  * @param {object} result - executeAgent result: { ok, output, stderr, error, exitCode, errorCategory }
  * @returns {{ isCodexError: boolean, category: string, errorMessage: string }}
  */
-export function detectCodexError(agent, result) {
-  if (!result || result.ok || agent !== 'codex') {
+export function detectCodexError(agent: string, result: Record<string, unknown>) {
+  if (!result || result["ok"] || agent !== 'codex') {
     return { isCodexError: false, category: '', errorMessage: '' };
   }
 
   // If diagnoseAgentError already classified it, use that
-  if (result.errorCategory && result.errorCategory !== 'unclassified') {
+  if (result["errorCategory"] && result["errorCategory"] !== 'unclassified') {
     return {
       isCodexError: true,
-      category: result.errorCategory,
-      errorMessage: result.errorDetail || result.error || '',
+      category: result["errorCategory"],
+      errorMessage: result["errorDetail"] || result["error"] || '',
     };
   }
 
-  const sources = [result.stderr || '', result.output || '', result.error || ''].join('\n');
+  const sources = [result["stderr"] || '', result["output"] || '', result["error"] || ''].join('\n');
 
   for (const { pattern, category } of CODEX_ERROR_PATTERNS) {
     if (pattern.test(sources)) {
@@ -523,11 +529,11 @@ export function detectCodexError(agent, result) {
 
   // Empty output with non-zero exit or signal = silent crash
   if (
-    (result.exitCode !== 0 || result.signal) &&
-    !(result.output || '').trim() &&
-    !(result.stderr || '').trim()
+    ((result["exitCode"] as number | null | undefined) !== 0 || result["signal"]) &&
+    !(String(result["output"] ?? "")).trim() &&
+    !(String(result["stderr"] ?? "")).trim()
   ) {
-    const reason = result.signal ? `signal ${result.signal}` : `code ${result.exitCode}`;
+    const reason = result["signal"] ? `signal ${result["signal"]}` : `code ${(result["exitCode"] as number | null | undefined)}`;
     return {
       isCodexError: true,
       category: 'silent-crash',
@@ -536,31 +542,31 @@ export function detectCodexError(agent, result) {
   }
 
   // Handle signal-based aborts even if there was some output
-  if (result.signal && !result.ok) {
+  if (result["signal"] && !result["ok"]) {
     return {
       isCodexError: true,
       category: 'signal',
-      errorMessage: `Codex aborted by signal ${result.signal}`,
+      errorMessage: `Codex aborted by signal ${result["signal"]}`,
     };
   }
 
   // Catch-all: non-zero exit or null exit with stderr, that didn't match any known pattern.
   // Instead of returning false (which loses the error to "unclassified" limbo),
   // classify it as a Codex-specific unknown error with rich diagnostic context.
-  const hasOutput = (result.stderr || '').trim() || (result.output || '').trim();
+  const hasOutput = (String(result["stderr"] ?? "")).trim() || (String(result["output"] ?? "")).trim();
   if (
-    (result.exitCode !== 0 || (result.exitCode === null && hasOutput)) &&
-    result.exitCode !== undefined
+    ((result["exitCode"] as number | null | undefined) !== 0 || ((result["exitCode"] as number | null | undefined) === null && hasOutput)) &&
+    (result["exitCode"] as number | null | undefined) !== undefined
   ) {
     // Gather the best diagnostic context available
-    const stderrTail = (result.stderr || '').trim().split('\n').slice(-5).join(' | ').slice(0, 300);
-    const errorTail = (result.error || '').slice(0, 200);
+    const stderrTail = (String(result["stderr"] ?? "")).trim().split('\n').slice(-5).join(' | ').slice(0, 300);
+    const errorTail = (String(result["error"] ?? "")).slice(0, 200);
     // Check for JSONL error events in raw stdout
     const jsonlErrors = extractCodexErrorsFromResult(result);
     const jsonlContext =
       jsonlErrors.length > 0 ? ` JSONL errors: ${jsonlErrors.join('; ').slice(0, 200)}` : '';
 
-    const exitInfo = result.exitCode === null ? 'terminated' : `exit ${result.exitCode}`;
+    const exitInfo = (result["exitCode"] as number | null | undefined) === null ? 'terminated' : `exit ${(result["exitCode"] as number | null | undefined)}`;
     return {
       isCodexError: true,
       category: 'codex-unknown',
@@ -581,8 +587,8 @@ export function detectCodexError(agent, result) {
  * @param {object} result - executeAgent result
  * @returns {string[]} extracted error messages
  */
-function extractCodexErrorsFromResult(result) {
-  const raw = result.stdout || result.output || '';
+function extractCodexErrorsFromResult(result: Record<string, unknown>): string[] {
+  const raw = (result['stdout'] as string | undefined) || (result["output"] as string | undefined) || '';
   if (!raw || typeof raw !== 'string') return [];
   const errors = [];
   for (const line of raw.split('\n')) {
@@ -609,14 +615,14 @@ function extractCodexErrorsFromResult(result) {
  * @param {string} failedModel - The model that failed
  * @returns {Array<{ id: string, label: string, source: string }>}
  */
-export function getFallbackCandidates(agent, failedModel) {
+export function getFallbackCandidates(agent: string, failedModel: string): Array<{ id: string; label: string; source: string; qualityScore?: number }> {
   const cfg = loadHydraConfig();
-  const agentModels = cfg.models?.[agent] || {};
-  const aliases = cfg.aliases?.[agent] || {};
+  const agentModels = ((cfg as Record<string, unknown>)['models'] as Record<string, Record<string, string>> | undefined)?.[agent] || {};
+  const aliases = ((cfg as Record<string, unknown>)['aliases'] as Record<string, Record<string, string>> | undefined)?.[agent] || {};
 
-  const seen = new Set();
+  const seen = new Set<string>();
   const failed = (failedModel || '').toLowerCase();
-  const candidates = [];
+  const candidates: Array<{ id: string; label: string; source: string; qualityScore?: number }> = [];
 
   // 1. Config presets in priority order
   for (const preset of ['default', 'fast', 'cheap']) {
@@ -647,21 +653,18 @@ export function getFallbackCandidates(agent, failedModel) {
     }
   }
 
-  // Sort: presets first, then by qualityScore descending within each group
-  candidates.sort((a, b) => {
+  return (candidates as Array<{ qualityScore: number; source: string }>).sort((a, b) => {
     if (a.source === 'preset' && b.source !== 'preset') return -1;
     if (a.source !== 'preset' && b.source === 'preset') return 1;
     return b.qualityScore - a.qualityScore;
-  });
-
-  return candidates;
+  }) as Array<{ id: string; label: string; source: string; qualityScore?: number }>;
 }
 
 /**
  * Attempt to recover from a model error by selecting a fallback model.
  *
  * Two modes:
- * - **Interactive** (opts.rl + TTY): Uses promptChoice() for user selection
+ * - **Interactive** (opts["rl"] + TTY): Uses promptChoice() for user selection
  * - **Headless** (no rl / no TTY): Auto-selects the first candidate
  *
  * On success, persists via setActiveModel() if autoPersist is enabled.
@@ -669,14 +672,14 @@ export function getFallbackCandidates(agent, failedModel) {
  * @param {string} agent - Agent name
  * @param {string} failedModel - The model that failed
  * @param {object} [opts]
- * @param {object} [opts.rl] - readline interface for interactive mode
+ * @param {object} [opts["rl"]] - readline interface for interactive mode
  * @returns {Promise<{ recovered: boolean, newModel: string|null }>}
  */
-export async function recoverFromModelError(agent, failedModel, opts = {}) {
+export async function recoverFromModelError(agent: string, failedModel: string, opts: Record<string, unknown> = {}) {
   const cfg = loadHydraConfig();
-  const recoveryCfg = cfg.modelRecovery || {};
+  const recoveryCfg = ((cfg as Record<string, unknown>)['modelRecovery'] as Record<string, unknown> | undefined) || {};
 
-  if (recoveryCfg.enabled === false) {
+  if (recoveryCfg['enabled'] === false) {
     return { recovered: false, newModel: null };
   }
 
@@ -685,7 +688,7 @@ export async function recoverFromModelError(agent, failedModel, opts = {}) {
     return { recovered: false, newModel: null };
   }
 
-  const isInteractive = opts.rl && process.stdout.isTTY;
+  const isInteractive = opts["rl"] && process.stdout.isTTY;
 
   let selected = null;
 
@@ -699,11 +702,12 @@ export async function recoverFromModelError(agent, failedModel, opts = {}) {
       options.push('Browse all models...');
       options.push('Skip (disable agent)');
 
-      const { value } = await promptChoice(opts.rl, {
+      const result = await promptChoice(opts["rl"] as object, {
         title: `Model error: ${failedModel || 'unknown'} is unavailable for ${agent}`,
         context: { 'Failed model': failedModel || 'unknown', Agent: agent },
-        options,
+        choices: options,
       });
+      const value = (result as { value?: string })?.value;
 
       if (value === 'Skip (disable agent)') {
         return { recovered: false, newModel: null };
@@ -728,7 +732,7 @@ export async function recoverFromModelError(agent, failedModel, opts = {}) {
     }
   } else {
     // Headless mode — auto-select first candidate
-    if (recoveryCfg.headlessFallback === false) {
+    if (recoveryCfg['headlessFallback'] === false) {
       return { recovered: false, newModel: null };
     }
     selected = candidates[0].id;
@@ -739,7 +743,7 @@ export async function recoverFromModelError(agent, failedModel, opts = {}) {
   }
 
   // Persist the new model selection
-  if (recoveryCfg.autoPersist !== false) {
+  if (recoveryCfg['autoPersist'] !== false) {
     setActiveModel(agent, selected);
   }
 
@@ -752,5 +756,5 @@ export async function recoverFromModelError(agent, failedModel, opts = {}) {
  */
 export function isModelRecoveryEnabled() {
   const cfg = loadHydraConfig();
-  return cfg.modelRecovery?.enabled !== false;
+  return ((cfg as Record<string, unknown>)['modelRecovery'] as Record<string, unknown> | undefined)?.['enabled'] !== false;
 }

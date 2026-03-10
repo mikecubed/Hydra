@@ -4,7 +4,7 @@ import {
   chooseAutoVerificationCommand,
   resolveVerificationPlan,
   isVerificationCommandShellSafe,
-} from '../lib/hydra-verification.mjs';
+} from '../lib/hydra-verification.ts';
 
 test('chooseAutoVerificationCommand prefers package typecheck script', () => {
   const selected = chooseAutoVerificationCommand({

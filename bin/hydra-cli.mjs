@@ -8,7 +8,7 @@ import {
   HYDRA_STANDALONE,
   runHydraInternalModule,
   spawnHydraNodeSync,
-} from '../lib/hydra-exec.mjs';
+} from '../lib/hydra-exec.ts';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);

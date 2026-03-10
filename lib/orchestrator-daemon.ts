@@ -40,7 +40,7 @@ import {
 } from './hydra-shared/git-ops.ts';
 import { getMetricsSummary, persistMetrics, loadPersistedMetrics } from './hydra-metrics.ts';
 import { checkUsage } from './hydra-usage.ts';
-import { resolveVerificationPlan } from './hydra-verification.mjs';
+import { resolveVerificationPlan } from './hydra-verification.ts';
 import { handleReadRoute } from './daemon/read-routes.ts';
 import { handleWriteRoute } from './daemon/write-routes.ts';
 import type { IncomingMessage, ServerResponse } from 'node:http';
@@ -1520,7 +1520,7 @@ function startDaemon(options: Record<string, string>) {
     }
     sseClients.clear();
     // Close MCP clients
-    import('./hydra-mcp.mjs').then((m) => m.closeCodexMCP()).catch(() => {});
+    import('./hydra-mcp.ts').then((m) => m.closeCodexMCP()).catch(() => {});
     persistMetrics(COORD_DIR);
     clearInterval(statusInterval);
     clearInterval(metricsInterval);

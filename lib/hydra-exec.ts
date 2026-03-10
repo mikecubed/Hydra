@@ -7,15 +7,15 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 export const HYDRA_EMBEDDED_ROOT = path.resolve(__dirname, '..');
-export const HYDRA_STANDALONE = Boolean(process.pkg);
+export const HYDRA_STANDALONE = Boolean((process as NodeJS.Process & { pkg?: unknown }).pkg);
 export const HYDRA_INTERNAL_FLAG = '--hydra-internal';
 
-const INTERNAL_MODULE_LOADERS = {
+const INTERNAL_MODULE_LOADERS: Record<string, () => Promise<unknown>> = {
   'lib/hydra-operator.mjs': () => import('./hydra-operator.mjs'),
   'lib/orchestrator-daemon.mjs': () => import('./orchestrator-daemon.mjs'),
   'lib/orchestrator-client.mjs': () => import('./orchestrator-client.mjs'),
-  'lib/hydra-council.mjs': () => import('./hydra-council.mjs'),
-  'lib/hydra-dispatch.mjs': () => import('./hydra-dispatch.mjs'),
+  'lib/hydra-council.mjs': () => import('./hydra-council.ts'),
+  'lib/hydra-dispatch.mjs': () => import('./hydra-dispatch.ts'),
   'lib/hydra-models-select.ts': () => import('./hydra-models-select.ts'),
   'lib/hydra-tasks.mjs': () => import('./hydra-tasks.mjs'),
   'lib/hydra-tasks-review.mjs': () => import('./hydra-tasks-review.mjs'),
@@ -27,7 +27,7 @@ const INTERNAL_MODULE_LOADERS = {
   'lib/hydra-setup.ts': () => import('./hydra-setup.ts'),
 };
 
-function normalizeModuleId(moduleId) {
+function normalizeModuleId(moduleId: unknown): string {
   const normalized = String(moduleId || '')
     .replace(/\\/g, '/')
     .replace(/^\.?\//, '');
@@ -36,7 +36,7 @@ function normalizeModuleId(moduleId) {
   return normalized;
 }
 
-export function toHydraModuleId(scriptPath, hydraRoot = HYDRA_EMBEDDED_ROOT) {
+export function toHydraModuleId(scriptPath: string, hydraRoot = HYDRA_EMBEDDED_ROOT): string {
   const absolute = path.resolve(scriptPath);
   const rel = path.relative(hydraRoot, absolute).replace(/\\/g, '/');
   if (!rel || rel.startsWith('..')) {
@@ -45,7 +45,7 @@ export function toHydraModuleId(scriptPath, hydraRoot = HYDRA_EMBEDDED_ROOT) {
   return normalizeModuleId(rel);
 }
 
-export function rewriteNodeInvocation(command, args = [], hydraRoot = HYDRA_EMBEDDED_ROOT) {
+export function rewriteNodeInvocation(command: string, args: string[] = [], hydraRoot = HYDRA_EMBEDDED_ROOT) {
   if (!HYDRA_STANDALONE || command !== 'node' || !Array.isArray(args) || args.length === 0) {
     return { command, args };
   }
@@ -63,9 +63,9 @@ export function rewriteNodeInvocation(command, args = [], hydraRoot = HYDRA_EMBE
 }
 
 export function spawnHydraNode(
-  scriptPath,
-  scriptArgs = [],
-  options = {},
+  scriptPath: string,
+  scriptArgs: string[] = [],
+  options: import('node:child_process').SpawnOptions = {},
   hydraRoot = HYDRA_EMBEDDED_ROOT,
 ) {
   const invocation = rewriteNodeInvocation('node', [scriptPath, ...scriptArgs], hydraRoot);
@@ -73,9 +73,9 @@ export function spawnHydraNode(
 }
 
 export function spawnHydraNodeSync(
-  scriptPath,
-  scriptArgs = [],
-  options = {},
+  scriptPath: string,
+  scriptArgs: string[] = [],
+  options: import('node:child_process').SpawnSyncOptions = {},
   hydraRoot = HYDRA_EMBEDDED_ROOT,
 ) {
   const invocation = rewriteNodeInvocation('node', [scriptPath, ...scriptArgs], hydraRoot);
@@ -83,8 +83,8 @@ export function spawnHydraNodeSync(
 }
 
 export async function runHydraInternalModule(
-  moduleId,
-  moduleArgs = [],
+  moduleId: unknown,
+  moduleArgs: string[] = [],
   hydraRoot = HYDRA_EMBEDDED_ROOT,
 ) {
   const normalized = normalizeModuleId(moduleId);

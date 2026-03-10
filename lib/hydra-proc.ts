@@ -16,7 +16,27 @@ import { spawnSync } from 'node:child_process';
 
 const DEFAULT_MAX_OUTPUT_BYTES = 1024 * 1024 * 8;
 
-function safeRm(dirPath) {
+interface SpawnSyncCaptureOpts {
+  cwd?: string;
+  env?: NodeJS.ProcessEnv;
+  timeout?: number;
+  encoding?: BufferEncoding;
+  windowsHide?: boolean;
+  shell?: boolean;
+  input?: string | Buffer;
+  maxOutputBytes?: number;
+  noPipes?: boolean;
+}
+
+interface SpawnSyncCaptureResult {
+  status: number | null;
+  stdout: string;
+  stderr: string;
+  error: Error | null;
+  signal: string | null;
+}
+
+function safeRm(dirPath: string) {
   if (!dirPath) return;
   try {
     fs.rmSync(dirPath, { recursive: true, force: true });
@@ -25,7 +45,7 @@ function safeRm(dirPath) {
   }
 }
 
-function readFileTruncated(filePath, maxBytes, encoding) {
+function readFileTruncated(filePath: string, maxBytes: number, encoding: BufferEncoding): string {
   try {
     const st = fs.statSync(filePath);
     const limit = Number.isFinite(maxBytes) && maxBytes > 0 ? maxBytes : DEFAULT_MAX_OUTPUT_BYTES;
@@ -61,7 +81,7 @@ export function supportsPipedStdio() {
       windowsHide: true,
       timeout: 5_000,
     });
-    if (r.error && String(r.error?.code || '') === 'EPERM') {
+    if (r.error && String((r.error as NodeJS.ErrnoException)?.code || '') === 'EPERM') {
       return false;
     }
     return true;
@@ -88,12 +108,12 @@ export function supportsPipedStdio() {
  * @param {boolean} [opts.noPipes=false] - force file-backed capture
  * @returns {{ status: number|null, stdout: string, stderr: string, error: Error|null, signal: string|null }}
  */
-export function spawnSyncCapture(command, args = [], opts = {}) {
+export function spawnSyncCapture(command: string, args: string[] = [], opts: SpawnSyncCaptureOpts = {}): SpawnSyncCaptureResult {
   const encoding = opts.encoding || 'utf8';
-  const maxOutputBytes = Number.isFinite(opts.maxOutputBytes)
-    ? opts.maxOutputBytes
+  const maxOutputBytes: number = Number.isFinite(opts.maxOutputBytes)
+    ? opts.maxOutputBytes!
     : DEFAULT_MAX_OUTPUT_BYTES;
-  const forceNoPipes = Boolean(opts.noPipes || process.env.HYDRA_NO_PIPES);
+  const forceNoPipes = Boolean(opts.noPipes || process.env['HYDRA_NO_PIPES']);
 
   if (!forceNoPipes) {
     const r = spawnSync(command, Array.isArray(args) ? args : [], {
@@ -107,20 +127,20 @@ export function spawnSyncCapture(command, args = [], opts = {}) {
       maxBuffer: maxOutputBytes,
     });
 
-    const stdout =
+    const stdout: string =
       typeof r.stdout === 'string'
         ? r.stdout
         : r.stdout
-          ? Buffer.from(r.stdout).toString(encoding)
+          ? Buffer.from(r.stdout as Buffer).toString(encoding)
           : '';
-    const stderr =
+    const stderr: string =
       typeof r.stderr === 'string'
         ? r.stderr
         : r.stderr
-          ? Buffer.from(r.stderr).toString(encoding)
+          ? Buffer.from(r.stderr as Buffer).toString(encoding)
           : '';
 
-    if (!(r.error && String(r.error?.code || '') === 'EPERM')) {
+    if (!(r.error && String((r.error as NodeJS.ErrnoException)?.code || '') === 'EPERM')) {
       return {
         status: r.status ?? null,
         stdout,
@@ -133,7 +153,7 @@ export function spawnSyncCapture(command, args = [], opts = {}) {
 
   // Fallback: no pipes. Use temp files for stdio.
   let tmpDir = '';
-  let stdinFd = 'ignore';
+  let stdinFd: number | 'ignore' = 'ignore';
   let stdoutFd = null;
   let stderrFd = null;
 

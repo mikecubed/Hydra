@@ -37,7 +37,7 @@ import {
 import { checkUsage } from './hydra-usage.ts';
 import type { ModelSummaryEntry } from './types.ts';
 import pc from 'picocolors';
-import { spawnHydraNodeSync } from './hydra-exec.mjs';
+import { spawnHydraNodeSync } from './hydra-exec.ts';
 
 const DEFAULT_URL = process.env['AI_ORCH_URL'] || 'http://127.0.0.1:4173';
 

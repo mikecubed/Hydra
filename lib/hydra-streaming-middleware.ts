@@ -8,7 +8,7 @@
 
 import { acquireRateLimit, recordApiRequest, updateFromHeaders } from './hydra-rate-limits.ts';
 import { recordProviderUsage } from './hydra-provider-usage.ts';
-import { isCircuitOpen, recordModelFailure } from './hydra-model-recovery.mjs';
+import { isCircuitOpen, recordModelFailure } from './hydra-model-recovery.ts';
 import { loadHydraConfig } from './hydra-config.ts';
 import { startProviderSpan, endProviderSpan } from './hydra-telemetry.ts';
 

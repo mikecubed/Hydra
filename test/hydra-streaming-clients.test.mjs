@@ -102,7 +102,7 @@ describe('hydra-concierge multi-provider exports', () => {
   let concierge;
 
   beforeEach(async () => {
-    concierge = await import('../lib/hydra-concierge.mjs');
+    concierge = await import('../lib/hydra-concierge.ts');
   });
 
   it('exports getActiveProvider', () => {

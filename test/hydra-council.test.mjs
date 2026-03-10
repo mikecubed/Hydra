@@ -8,7 +8,7 @@ import {
   extractAssumptionAttacks,
   resolveActiveAgents,
   computeAdversarialResumePoint,
-} from '../lib/hydra-council.mjs';
+} from '../lib/hydra-council.ts';
 
 test('buildStepPrompt adds structured convergence instructions', () => {
   const prompt = buildStepPrompt(

@@ -11,7 +11,7 @@ import {
   registerSession as hubRegister,
   deregisterSession as hubDeregister,
   updateSession as hubUpdate,
-} from '../hydra-hub.mjs';
+} from '../hydra-hub.ts';
 
 export async function handleWriteRoute(ctx: WriteRouteCtx): Promise<boolean> {
   const {

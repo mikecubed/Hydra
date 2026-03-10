@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { MCPClient } from '../lib/hydra-mcp.mjs';
+import { MCPClient } from '../lib/hydra-mcp.ts';
 
 const PIPED_STDIO_SUPPORTED = (() => {
   try {

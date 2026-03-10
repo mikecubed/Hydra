@@ -7,7 +7,7 @@ import {
   getBaselineContext,
   searchKnowledgeBase,
   getConfigReference,
-} from '../lib/hydra-codebase-context.mjs';
+} from '../lib/hydra-codebase-context.ts';
 
 // ── detectCodebaseQuery ─────────────────────────────────────────────────────
 
@@ -151,9 +151,9 @@ test('codebase: getConfigReference returns config for concierge', () => {
   assert.ok(result.includes('concierge'));
 });
 
-test('codebase: getConfigReference returns null for unknown topic', () => {
+test('codebase: getConfigReference returns empty string for unknown topic', () => {
   const result = getConfigReference('nonexistent');
-  assert.equal(result, null);
+  assert.equal(result, '');
 });
 
 // ── searchKnowledgeBase ─────────────────────────────────────────────────────

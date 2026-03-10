@@ -5,7 +5,7 @@
  * Nightly callers simply pass baseBranch='dev'.
  */
 
-import { spawnSyncCapture } from '../hydra-proc.mjs';
+import { spawnSyncCapture } from '../hydra-proc.ts';
 
 interface GitResult {
   status: number | null;

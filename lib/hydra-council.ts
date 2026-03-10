@@ -15,7 +15,7 @@ import './hydra-env.ts';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { getProjectContext, buildAgentContext } from './hydra-context.ts';
+import { buildAgentContext } from './hydra-context.ts';
 import { getAgent, AGENT_NAMES, getMode, setMode } from './hydra-agents.ts';
 import { resolveProject, loadHydraConfig } from './hydra-config.ts';
 import { checkUsage } from './hydra-usage.ts';
@@ -46,11 +46,10 @@ import {
   WARNING,
   DIM,
   ACCENT,
-  HIGHLIGHT,
   formatElapsed,
 } from './hydra-ui.ts';
 import { executeAgentWithRecovery } from './hydra-shared/agent-executor.ts';
-import { detectRateLimitError, calculateBackoff } from './hydra-model-recovery.mjs';
+import { detectRateLimitError, calculateBackoff } from './hydra-model-recovery.ts';
 import { diagnose as notifyDoctor, isDoctorEnabled } from './hydra-doctor.mjs';
 import { isPersonaEnabled, getAgentFraming } from './hydra-persona.mjs';
 import pc from 'picocolors';
@@ -61,7 +60,7 @@ const RUNS_DIR = config.runsDir;
 /**
  * Simple deterministic hash of a string, returns first 12 hex chars.
  */
-function simpleHash(str) {
+function simpleHash(str: string) {
   let h = 0;
   for (let i = 0; i < str.length; i++) {
     h = ((h << 5) - h + str.charCodeAt(i)) | 0;
@@ -73,11 +72,11 @@ function simpleHash(str) {
   return (hex + h2.toString(16).padStart(8, '0')).slice(0, 12);
 }
 
-function checkpointPath(promptHash) {
+function checkpointPath(promptHash: string) {
   return path.join(RUNS_DIR, `COUNCIL_CHECKPOINT_${promptHash}.json`);
 }
 
-function loadCheckpoint(promptHash, prompt) {
+function loadCheckpoint(promptHash: string, prompt: string) {
   const cpPath = checkpointPath(promptHash);
   if (!fs.existsSync(cpPath)) return null;
   try {
@@ -89,7 +88,7 @@ function loadCheckpoint(promptHash, prompt) {
   }
 }
 
-function saveCheckpoint(promptHash, prompt, round, stepIdx, transcript, specContent) {
+function saveCheckpoint(promptHash: string, prompt: string, round: number, stepIdx: number, transcript: unknown[], specContent: string | null) {
   ensureDir(RUNS_DIR);
   const data = {
     promptHash,
@@ -98,13 +97,13 @@ function saveCheckpoint(promptHash, prompt, round, stepIdx, transcript, specCont
     stepIdx,
     transcript,
     specContent: specContent || null,
-    startedAt: transcript[0]?.startedAt || nowIso(),
+    startedAt: (transcript[0] as Record<string, unknown>)?.['startedAt'] as string || nowIso(),
     updatedAt: nowIso(),
   };
   fs.writeFileSync(checkpointPath(promptHash), `${JSON.stringify(data, null, 2)}\n`, 'utf8');
 }
 
-function deleteCheckpoint(promptHash) {
+function deleteCheckpoint(promptHash: string) {
   const cpPath = checkpointPath(promptHash);
   try {
     fs.unlinkSync(cpPath);
@@ -113,7 +112,7 @@ function deleteCheckpoint(promptHash) {
   }
 }
 
-const DEFAULT_URL = process.env.AI_ORCH_URL || 'http://127.0.0.1:4173';
+const DEFAULT_URL = process.env['AI_ORCH_URL'] || 'http://127.0.0.1:4173';
 const DEFAULT_TIMEOUT_MS = 1000 * 60 * 7;
 
 /**
@@ -156,16 +155,16 @@ export const COUNCIL_DECISION_CRITERIA = [
 
 const HUMAN_OWNERS = new Set(['human', 'unassigned']);
 
-function cleanText(value) {
+function cleanText(value: unknown) {
   return typeof value === 'string' ? value.trim() : '';
 }
 
-function normalizeConfidence(value) {
+function normalizeConfidence(value: unknown) {
   const normalized = cleanText(value).toLowerCase();
   return ['low', 'medium', 'high'].includes(normalized) ? normalized : '';
 }
 
-function normalizeNextAction(value) {
+function normalizeNextAction(value: unknown) {
   const normalized = cleanText(value).toLowerCase().replace(/\s+/g, '_');
   if (!normalized) {
     return '';
@@ -182,14 +181,15 @@ function normalizeNextAction(value) {
   return '';
 }
 
-function normalizeTradeoffs(raw) {
+function normalizeTradeoffs(raw: unknown) {
   if (!raw || typeof raw !== 'object' || Array.isArray(raw)) {
     return null;
   }
-  const entries = {};
+  const r = raw as Record<string, unknown>;
+  const entries: Record<string, string> = {};
   for (const { key } of COUNCIL_DECISION_CRITERIA) {
     const camelKey = key.replace(/_([a-z])/g, (_m, c) => c.toUpperCase());
-    const value = cleanText(raw[key] ?? raw[camelKey]);
+    const value = cleanText(r[key] ?? r[camelKey]);
     if (value) {
       entries[key] = value;
     }
@@ -197,14 +197,15 @@ function normalizeTradeoffs(raw) {
   return Object.keys(entries).length > 0 ? entries : null;
 }
 
-function normalizeDecisionOption(item, index) {
+function normalizeDecisionOption(item: unknown, index: number) {
   if (!item || typeof item !== 'object') {
     return null;
   }
-  const option = cleanText(item.option || item.name || item.title);
-  const summary = cleanText(item.summary || item.description || item.view);
-  const tradeoffs = normalizeTradeoffs(item.tradeoffs || item.criteria || item.decision_criteria);
-  const preferred = item.preferred === true;
+  const i = item as Record<string, unknown>;
+  const option = cleanText(i['option'] || i['name'] || i['title']);
+  const summary = cleanText(i['summary'] || i['description'] || i['view']);
+  const tradeoffs = normalizeTradeoffs(i['tradeoffs'] || i['criteria'] || i['decision_criteria']);
+  const preferred = i['preferred'] === true;
   if (!option && !summary && !tradeoffs) {
     return null;
   }
@@ -216,9 +217,9 @@ function normalizeDecisionOption(item, index) {
   };
 }
 
-function mergeTruthy(base, update) {
-  const out = { ...(base || {}) };
-  for (const [key, value] of Object.entries(update || {})) {
+function mergeTruthy(base: unknown, update: unknown) {
+  const out = { ...(base && typeof base === 'object' ? (base as Record<string, unknown>) : {}) };
+  for (const [key, value] of Object.entries(update && typeof update === 'object' ? (update as Record<string, unknown>) : {})) {
     if (value === null || value === undefined) {
       continue;
     }
@@ -233,7 +234,7 @@ function mergeTruthy(base, update) {
   return out;
 }
 
-function dedupeBy(items, keySelector) {
+function dedupeBy(items: unknown[], keySelector: (item: unknown) => string) {
   const seen = new Map();
   for (const item of items) {
     if (!item) {
@@ -249,12 +250,12 @@ function dedupeBy(items, keySelector) {
   return [...seen.values()];
 }
 
-function usageGuard(agent) {
+function usageGuard(_agent: string) {
   try {
     const usage = checkUsage();
     if (usage.level === 'critical') {
       const currentMode = getMode();
-      const nextMode = MODE_DOWNSHIFT[currentMode];
+      const nextMode = (MODE_DOWNSHIFT as Record<string, string>)[currentMode];
       if (nextMode) {
         process.stderr.write(
           `  ${WARNING('\u26A0')} Token usage CRITICAL (${usage.percent.toFixed(1)}%) \u2014 downshifting mode: ${currentMode} \u2192 ${nextMode}\n`,
@@ -278,13 +279,14 @@ function usageGuard(agent) {
  * Replaces the old sync callAgent → modelCall path, fixing stdin issues
  * and adding defense-in-depth on par with evolve.
  */
-async function callAgentAsync(agent, prompt, timeoutMs) {
+async function callAgentAsync(agent: string, prompt: string, timeoutMs: number) {
   usageGuard(agent);
   const result = await executeAgentWithRecovery(agent, prompt, {
     timeoutMs,
     useStdin: true,
     cwd: config.projectRoot,
   });
+  const raw = result as unknown as Record<string, unknown>;
   return {
     ok: result.ok,
     stdout: result.output || result.stdout || '',
@@ -297,18 +299,26 @@ async function callAgentAsync(agent, prompt, timeoutMs) {
     recovered: result.recovered || false,
     originalModel: result.originalModel,
     newModel: result.newModel,
+    timedOut: raw['timedOut'] as boolean | undefined,
+    signal: raw['signal'] as string | null | undefined,
+    output: raw['output'] as string | undefined,
+    errorCategory: raw['errorCategory'] as string | null | undefined,
+    errorDetail: raw['errorDetail'] as string | null | undefined,
+    errorContext: raw['errorContext'] as string | null | undefined,
+    _compactedRetry: false as boolean | undefined,
   };
 }
 
-function extractTasksFromOutput(parsed, fallbackOwner = 'unassigned') {
+function extractTasksFromOutput(parsed: unknown, fallbackOwner = 'unassigned') {
   if (!parsed || typeof parsed !== 'object') {
     return [];
   }
+  const p = parsed as Record<string, unknown>;
   const buckets = [
-    parsed.task_allocations,
-    parsed.recommended_tasks,
-    parsed.tasks,
-    parsed.delegation?.task_splits,
+    p['task_allocations'],
+    p['recommended_tasks'],
+    p['tasks'],
+    (p['delegation'] as Record<string, unknown> | undefined)?.['task_splits'],
   ];
   const out = [];
   for (const bucket of buckets) {
@@ -325,12 +335,13 @@ function extractTasksFromOutput(parsed, fallbackOwner = 'unassigned') {
   return out;
 }
 
-function extractQuestions(parsed) {
+function extractQuestions(parsed: unknown) {
   if (!parsed || typeof parsed !== 'object') {
     return [];
   }
+  const p = parsed as Record<string, unknown>;
   const questions = [];
-  const buckets = [parsed.questions, parsed.final_questions, parsed.open_questions];
+  const buckets = [p['questions'], p['final_questions'], p['open_questions']];
   for (const bucket of buckets) {
     if (!Array.isArray(bucket)) {
       continue;
@@ -339,12 +350,13 @@ function extractQuestions(parsed) {
       if (typeof q === 'string' && q.trim()) {
         questions.push({ to: 'human', question: q.trim() });
       } else if (q && typeof q === 'object') {
-        const question = String(q.question || q.text || '').trim();
+        const qi = q as Record<string, unknown>;
+        const question = String(qi['question'] || qi['text'] || '').trim();
         if (!question) {
           continue;
         }
         questions.push({
-          to: sanitizeOwner(q.to || 'human'),
+          to: sanitizeOwner(String(qi['to'] || 'human')),
           question,
         });
       }
@@ -353,12 +365,13 @@ function extractQuestions(parsed) {
   return questions;
 }
 
-function extractRisks(parsed) {
+function extractRisks(parsed: unknown) {
   if (!parsed || typeof parsed !== 'object') {
     return [];
   }
+  const p = parsed as Record<string, unknown>;
   const risks = [];
-  const buckets = [parsed.risks, parsed.sanity_checks, parsed.edge_cases];
+  const buckets = [p['risks'], p['sanity_checks'], p['edge_cases']];
   for (const bucket of buckets) {
     if (!Array.isArray(bucket)) {
       continue;
@@ -372,11 +385,12 @@ function extractRisks(parsed) {
   return risks;
 }
 
-function extractCouncilSignal(parsed) {
+function extractCouncilSignal(parsed: unknown) {
   if (!parsed || typeof parsed !== 'object') {
     return null;
   }
-  const boolCandidates = [parsed.should_open_council, parsed.needs_council, parsed.council_needed];
+  const p = parsed as Record<string, unknown>;
+  const boolCandidates = [p['should_open_council'], p['needs_council'], p['council_needed']];
   let vote = null;
   for (const candidate of boolCandidates) {
     if (typeof candidate === 'boolean') {
@@ -387,15 +401,16 @@ function extractCouncilSignal(parsed) {
   if (vote === null) {
     return null;
   }
-  const reason = String(parsed.council_reason || parsed.reason || '').trim();
+  const reason = String(p['council_reason'] || p['reason'] || '').trim();
   return { vote, reason };
 }
 
-export function extractDecisionOptions(parsed) {
+export function extractDecisionOptions(parsed: unknown) {
   if (!parsed || typeof parsed !== 'object') {
     return [];
   }
-  const buckets = [parsed.decision_options, parsed.options, parsed.candidate_options];
+  const p = parsed as Record<string, unknown>;
+  const buckets = [p['decision_options'], p['options'], p['candidate_options']];
   const out = [];
   for (const bucket of buckets) {
     if (!Array.isArray(bucket)) {
@@ -408,14 +423,18 @@ export function extractDecisionOptions(parsed) {
       }
     }
   }
-  return dedupeBy(out, (item) => `${item.option}|${item.summary}`);
+  return dedupeBy(out, (item: unknown) => {
+    const d = item as { option: string; summary: string };
+    return `${d.option}|${d.summary}`;
+  });
 }
 
-export function extractAssumptions(parsed) {
+export function extractAssumptions(parsed: unknown) {
   if (!parsed || typeof parsed !== 'object') {
     return [];
   }
-  const buckets = [parsed.assumptions, parsed.open_assumptions, parsed.key_assumptions];
+  const p = parsed as Record<string, unknown>;
+  const buckets = [p['assumptions'], p['open_assumptions'], p['key_assumptions']];
   const out = [];
   for (const bucket of buckets) {
     if (!Array.isArray(bucket)) {
@@ -435,31 +454,33 @@ export function extractAssumptions(parsed) {
       if (!item || typeof item !== 'object') {
         continue;
       }
-      const assumption = cleanText(item.assumption || item.name || item.summary || item.question);
+      const i = item as Record<string, unknown>;
+      const assumption = cleanText(i['assumption'] || i['name'] || i['summary'] || i['question']);
       if (!assumption) {
         continue;
       }
-      const status = cleanText(item.status).toLowerCase();
+      const status = cleanText(i['status']).toLowerCase();
       out.push({
         assumption,
         status: ['validated', 'open', 'rejected'].includes(status) ? status : 'open',
-        evidence: cleanText(item.evidence || item.basis),
-        impact: cleanText(item.impact || item.risk),
-        owner: sanitizeOwner(item.owner || item.to || 'unassigned'),
+        evidence: cleanText(i['evidence'] || i['basis']),
+        impact: cleanText(i['impact'] || i['risk']),
+        owner: sanitizeOwner(String(i['owner'] || i['to'] || 'unassigned')),
       });
     }
   }
-  return dedupeBy(out, (item) => item.assumption);
+  return dedupeBy(out, (item: unknown) => (item as Record<string, unknown>)['assumption'] as string);
 }
 
-export function extractAssumptionAttacks(parsed) {
+export function extractAssumptionAttacks(parsed: unknown) {
   if (!parsed || typeof parsed !== 'object') {
     return [];
   }
+  const p = parsed as Record<string, unknown>;
   const buckets = [
-    parsed.assumption_attacks,
-    parsed.assumption_challenges,
-    parsed.counterarguments,
+    p['assumption_attacks'],
+    p['assumption_challenges'],
+    p['counterarguments'],
   ];
   const out = [];
   for (const bucket of buckets) {
@@ -479,29 +500,34 @@ export function extractAssumptionAttacks(parsed) {
       if (!item || typeof item !== 'object') {
         continue;
       }
+      const i = item as Record<string, unknown>;
       const challenge = cleanText(
-        item.attack_vector ?? item.challenge ?? item.critique ?? item.text,
+        i['attack_vector'] ?? i['challenge'] ?? i['critique'] ?? i['text'],
       );
-      const assumption = cleanText(item.target_agent ?? item.assumption ?? item.target);
+      const assumption = cleanText(i['target_agent'] ?? i['assumption'] ?? i['target']);
       if (!challenge && !assumption) {
         continue;
       }
       out.push({
         assumption,
         challenge,
-        impact: cleanText(item.impact || item.risk),
-        by: sanitizeOwner(item.by || item.owner || 'unassigned'),
+        impact: cleanText(i['impact'] || i['risk']),
+        by: sanitizeOwner(String(i['by'] || i['owner'] || 'unassigned')),
       });
     }
   }
-  return dedupeBy(out, (item) => `${item.assumption}|${item.challenge}`);
+  return dedupeBy(out, (item: unknown) => {
+    const i = item as Record<string, unknown>;
+    return `${i['assumption']}|${i['challenge']}`;
+  });
 }
 
-function extractDisagreements(parsed) {
+function extractDisagreements(parsed: unknown) {
   if (!parsed || typeof parsed !== 'object') {
     return [];
   }
-  const buckets = [parsed.disagreements, parsed.unresolved_tensions, parsed.conflicts];
+  const p = parsed as Record<string, unknown>;
+  const buckets = [p['disagreements'], p['unresolved_tensions'], p['conflicts']];
   const out = [];
   for (const bucket of buckets) {
     if (!Array.isArray(bucket)) {
@@ -516,31 +542,32 @@ function extractDisagreements(parsed) {
   return [...new Set(out)];
 }
 
-export function extractFinalDecision(parsed, fallback = {}) {
+export function extractFinalDecision(parsed: unknown, fallback: { agent?: string; phase?: string } = {}) {
   if (!parsed || typeof parsed !== 'object') {
     return null;
   }
-  const decision = parsed.decision && typeof parsed.decision === 'object' ? parsed.decision : {};
+  const p = parsed as Record<string, unknown>;
+  const decisionRaw = p['decision'] && typeof p['decision'] === 'object' ? p['decision'] as Record<string, unknown> : {} as Record<string, unknown>;
   const summary = cleanText(
-    decision.summary ||
-      decision.choice ||
-      decision.recommendation ||
-      parsed.consensus ||
-      parsed.view,
+    decisionRaw['summary'] ||
+      decisionRaw['choice'] ||
+      decisionRaw['recommendation'] ||
+      p['consensus'] ||
+      p['view'],
   );
   const why = cleanText(
-    decision.why || decision.rationale || decision.reason || parsed.decision_rationale,
+    decisionRaw['why'] || decisionRaw['rationale'] || decisionRaw['reason'] || p['decision_rationale'],
   );
-  const owner = sanitizeOwner(decision.owner || decision.decider || fallback.agent || 'unassigned');
-  const confidence = normalizeConfidence(decision.confidence || parsed.confidence);
+  const owner = sanitizeOwner(String(decisionRaw['owner'] || decisionRaw['decider'] || fallback.agent || 'unassigned'));
+  const confidence = normalizeConfidence(decisionRaw['confidence'] || p['confidence']);
   const nextAction = normalizeNextAction(
-    decision.next_action || decision.nextAction || parsed.next_action,
+    decisionRaw['next_action'] || decisionRaw['nextAction'] || p['next_action'],
   );
   const reversibleFirstStep = cleanText(
-    decision.reversible_first_step || decision.reversibleFirstStep || parsed.reversible_first_step,
+    decisionRaw['reversible_first_step'] || decisionRaw['reversibleFirstStep'] || p['reversible_first_step'],
   );
   const tradeoffs = normalizeTradeoffs(
-    decision.tradeoffs || decision.criteria || parsed.tradeoffs || parsed.decision_criteria,
+    decisionRaw['tradeoffs'] || decisionRaw['criteria'] || p['tradeoffs'] || p['decision_criteria'],
   );
 
   if (!summary && !why && !confidence && !nextAction && !reversibleFirstStep && !tradeoffs) {
@@ -560,18 +587,25 @@ export function extractFinalDecision(parsed, fallback = {}) {
   };
 }
 
-function countOpenAssumptions(assumptions) {
-  return assumptions.filter((item) => item.status !== 'validated').length;
+function countOpenAssumptions(assumptions: Array<{ status: string }>) {
+  return assumptions.filter((item: { status: string }) => item.status !== 'validated').length;
 }
 
 export function deriveCouncilRecommendation({
   finalDecision,
-  assumptions = [],
-  questions = [],
-  risks = [],
-  disagreements = [],
-  councilVotes = [],
-}) {
+  assumptions = [] as Array<{ status: string }>,
+  questions = [] as Array<{ to: string }>,
+  risks = [] as unknown[],
+  disagreements = [] as unknown[],
+  councilVotes = [] as Array<{ vote: boolean }>,
+}: {
+  finalDecision?: { nextAction?: string; confidence?: string; owner?: string } | null;
+  assumptions?: Array<{ status: string }>;
+  questions?: Array<{ to: string }>;
+  risks?: unknown[];
+  disagreements?: unknown[];
+  councilVotes?: Array<{ vote: boolean }>;
+} = {}) {
   const openAssumptions = countOpenAssumptions(assumptions);
   const humanQuestions = questions.filter((q) => q.to === 'human').length;
   const crossAgentQuestions = questions.filter((q) =>
@@ -617,72 +651,82 @@ export function deriveCouncilRecommendation({
   return { recommendedMode, nextAction, rationale };
 }
 
-export function synthesizeCouncilTranscript(prompt, transcript) {
-  const parsedEntries = transcript.filter(
-    (entry) => entry.parsed && typeof entry.parsed === 'object',
+export function synthesizeCouncilTranscript(prompt: string, transcript: unknown[]) {
+  const parsedEntries = (transcript as Array<Record<string, unknown>>).filter(
+    (entry) => entry['parsed'] && typeof entry['parsed'] === 'object',
   );
-  const codexEntries = parsedEntries.filter((entry) => entry.agent === 'codex');
+  const codexEntries = parsedEntries.filter((entry) => entry['agent'] === 'codex');
   const lastCodex = codexEntries.at(-1);
   const lastClaudeRefine = parsedEntries
-    .filter((entry) => entry.agent === 'claude' && entry.phase === 'refine')
+    .filter((entry) => entry['agent'] === 'claude' && entry['phase'] === 'refine')
     .at(-1);
-  const lastClaude = parsedEntries.filter((entry) => entry.agent === 'claude').at(-1);
+  const lastClaude = parsedEntries.filter((entry) => entry['agent'] === 'claude').at(-1);
 
-  const taskCandidates = [];
-  const questions = [];
-  const risks = [];
-  const councilVotes = [];
-  const decisionOptions = [];
-  const assumptions = [];
-  const assumptionAttacks = [];
-  const disagreements = [];
-  const decisions = [];
+  const taskCandidates: unknown[] = [];
+  const questions: Array<{ to: string; question: string }> = [];
+  const risks: unknown[] = [];
+  const councilVotes: Array<{ agent: unknown; phase: unknown; vote: boolean; reason: string }> = [];
+  const decisionOptions: unknown[] = [];
+  const assumptions: Array<{ status: string; [key: string]: unknown }> = [];
+  const assumptionAttacks: unknown[] = [];
+  const disagreements: unknown[] = [];
+  const decisions: unknown[] = [];
 
   for (const entry of parsedEntries) {
-    taskCandidates.push(...extractTasksFromOutput(entry.parsed, entry.agent));
-    questions.push(...extractQuestions(entry.parsed));
-    risks.push(...extractRisks(entry.parsed));
-    decisionOptions.push(...extractDecisionOptions(entry.parsed));
-    assumptions.push(...extractAssumptions(entry.parsed));
-    assumptionAttacks.push(...extractAssumptionAttacks(entry.parsed));
-    disagreements.push(...extractDisagreements(entry.parsed));
+    taskCandidates.push(...extractTasksFromOutput(entry['parsed'], entry['agent'] as string));
+    questions.push(...extractQuestions(entry['parsed']) as Array<{ to: string; question: string }>);
+    risks.push(...extractRisks(entry['parsed']));
+    decisionOptions.push(...extractDecisionOptions(entry['parsed']));
+    assumptions.push(...extractAssumptions(entry['parsed']) as Array<{ status: string; [key: string]: unknown }>);
+    assumptionAttacks.push(...extractAssumptionAttacks(entry['parsed']));
+    disagreements.push(...extractDisagreements(entry['parsed']));
 
-    const signal = extractCouncilSignal(entry.parsed);
+    const signal = extractCouncilSignal(entry['parsed']);
     if (signal) {
       councilVotes.push({
-        agent: entry.agent,
-        phase: entry.phase,
+        agent: entry['agent'],
+        phase: entry['phase'],
         vote: signal.vote,
         reason: signal.reason,
       });
     }
 
-    const decision = extractFinalDecision(entry.parsed, { agent: entry.agent, phase: entry.phase });
+    const decision = extractFinalDecision(entry['parsed'], { agent: entry['agent'] as string, phase: entry['phase'] as string });
     if (decision) {
       decisions.push(decision);
     }
   }
 
-  const dedupedQuestions = dedupeBy(questions, (item) => `${item.to}|${item.question}`);
-  const dedupedRisks = [...new Set(risks.map((item) => cleanText(item)).filter(Boolean))];
+  const dedupedQuestions = dedupeBy(questions, (item: unknown) => {
+    const q = item as { to: string; question: string };
+    return `${q.to}|${q.question}`;
+  });
+  const dedupedRisks = [...new Set(risks.map((item: unknown) => cleanText(item)).filter(Boolean))];
   const dedupedDecisionOptions = dedupeBy(
     decisionOptions,
-    (item) => `${item.option}|${item.summary}`,
+    (item: unknown) => {
+      const d = item as { option: string; summary: string };
+      return `${d.option}|${d.summary}`;
+    },
   );
-  const dedupedAssumptions = dedupeBy(assumptions, (item) => item.assumption);
+  const dedupedAssumptions = dedupeBy(assumptions, (item: unknown) => (item as Record<string, unknown>)['assumption'] as string);
   const dedupedAssumptionAttacks = dedupeBy(
     assumptionAttacks,
-    (item) => `${item.assumption}|${item.challenge}`,
+    (item: unknown) => {
+      const a = item as { assumption: unknown; challenge: unknown };
+      return `${a.assumption}|${a.challenge}`;
+    },
   );
   const dedupedDisagreements = [
-    ...new Set(disagreements.map((item) => cleanText(item)).filter(Boolean)),
+    ...new Set(disagreements.map((item: unknown) => cleanText(item)).filter(Boolean)),
   ];
   const finalDecision = decisions.at(-1) || null;
+  const finalDecisionObj = finalDecision as null | Record<string, unknown>;
   const consensus = cleanText(
-    finalDecision?.summary ||
-      lastCodex?.parsed?.consensus ||
-      lastClaudeRefine?.parsed?.view ||
-      lastClaude?.parsed?.view,
+    finalDecisionObj?.['summary'] ||
+      (lastCodex?.['parsed'] as Record<string, unknown> | undefined)?.['consensus'] ||
+      (lastClaudeRefine?.['parsed'] as Record<string, unknown> | undefined)?.['view'] ||
+      (lastClaude?.['parsed'] as Record<string, unknown> | undefined)?.['view'],
   );
   const recommendation = deriveCouncilRecommendation({
     finalDecision,
@@ -696,7 +740,7 @@ export function synthesizeCouncilTranscript(prompt, transcript) {
   return {
     prompt,
     consensus,
-    tasks: taskCandidates.length > 0 ? dedupeTasks(taskCandidates) : defaultTasks(prompt),
+    tasks: taskCandidates.length > 0 ? dedupeTasks(taskCandidates as Parameters<typeof dedupeTasks>[0]) : defaultTasks(prompt),
     questions: dedupedQuestions,
     risks: dedupedRisks,
     councilVotes,
@@ -711,12 +755,12 @@ export function synthesizeCouncilTranscript(prompt, transcript) {
   };
 }
 
-function buildContextSummary(transcript) {
-  return transcript
+function buildContextSummary(transcript: unknown[]) {
+  return (transcript as Array<Record<string, unknown>>)
     .slice(-6)
     .map((entry) => {
-      const content = entry.parsed ? JSON.stringify(entry.parsed) : entry.rawText;
-      return `${entry.agent.toUpperCase()} (${entry.phase || `R${entry.round}`}): ${short(content, 500)}`;
+      const content = entry['parsed'] ? JSON.stringify(entry['parsed']) : entry['rawText'];
+      return `${String(entry['agent']).toUpperCase()} (${entry['phase'] || `R${entry['round']}`}): ${short(content as string, 500)}`;
     })
     .join('\n');
 }
@@ -726,12 +770,12 @@ function formatCriteriaInstruction() {
 }
 
 export function buildStepPrompt(
-  step,
-  userPrompt,
-  transcript,
-  round,
-  totalRounds,
-  specContent = null,
+  step: { agent: string; phase: string; promptLabel: string },
+  userPrompt: string,
+  transcript: unknown[],
+  round: number,
+  totalRounds: number,
+  specContent: string | null = null,
 ) {
   const { agent, phase, promptLabel } = step;
   const agentConfig = getAgent(agent);
@@ -805,17 +849,17 @@ export function buildStepPrompt(
     ].join('\n'),
   };
 
-  const framing = isPersonaEnabled() ? getAgentFraming(agent) : `You are ${agentConfig.label}`;
+  const framing = isPersonaEnabled() ? getAgentFraming(agent) : `You are ${agentConfig!.label}`;
 
   return [
     `${framing} Council round ${round}/${totalRounds}, phase: ${phase}.`,
     '',
-    agentConfig.rolePrompt,
+    agentConfig!.rolePrompt,
     '',
     context,
     '',
     'Return JSON only with keys:',
-    jsonSchemas[phase],
+    (jsonSchemas as Record<string, string>)[phase],
     '',
     `Objective: ${userPrompt}`,
     '',
@@ -841,7 +885,7 @@ export function buildStepPrompt(
   ].join('\n');
 }
 
-function defaultTasks(userPrompt) {
+function defaultTasks(userPrompt: string) {
   return [
     {
       owner: 'claude',
@@ -864,30 +908,31 @@ function defaultTasks(userPrompt) {
   ];
 }
 
-function formatTradeoffs(tradeoffs, bulletPrefix = '- ') {
+function formatTradeoffs(tradeoffs: unknown, bulletPrefix = '- ') {
   if (!tradeoffs || typeof tradeoffs !== 'object') {
     return [];
   }
-  return COUNCIL_DECISION_CRITERIA.filter((item) => cleanText(tradeoffs[item.key])).map(
-    (item) => `${bulletPrefix}${item.label}: ${tradeoffs[item.key]}`,
+  const t = tradeoffs as Record<string, unknown>;
+  return COUNCIL_DECISION_CRITERIA.filter((item) => cleanText(t[item.key])).map(
+    (item) => `${bulletPrefix}${item.label}: ${t[item.key]}`,
   );
 }
 
-function colorOwner(owner) {
+function colorOwner(owner: string) {
   return HUMAN_OWNERS.has(owner) ? pc.white(owner) : colorAgent(owner);
 }
 
-function buildAgentBrief(agent, objective, report) {
+function buildAgentBrief(agent: string, objective: string, report: Record<string, unknown>) {
   const agentConfig = getAgent(agent);
-  const tasks = Array.isArray(report?.tasks) ? report.tasks : [];
-  const questions = Array.isArray(report?.questions) ? report.questions : [];
-  const transcript = Array.isArray(report?.transcript) ? report.transcript : [];
-  const consensus = cleanText(report?.consensus);
-  const finalDecision = report?.finalDecision || null;
-  const myTasks = tasks.filter((t) => t.owner === agent || t.owner === 'unassigned');
-  const myQuestions = questions.filter((q) => q.to === agent || q.to === 'human');
-  const unresolvedAssumptions = Array.isArray(report?.assumptions)
-    ? report.assumptions.filter((item) => item.status !== 'validated')
+  const tasks = Array.isArray(report?.['tasks']) ? (report['tasks'] as Array<Record<string, unknown>>) : [];
+  const questions = Array.isArray(report?.['questions']) ? (report['questions'] as Array<Record<string, unknown>>) : [];
+  const transcript = Array.isArray(report?.['transcript']) ? report['transcript'] : [];
+  const consensus = cleanText(report?.['consensus']);
+  const finalDecision = (report?.['finalDecision'] as Record<string, unknown> | null) || null;
+  const myTasks = tasks.filter((t) => t['owner'] === agent || t['owner'] === 'unassigned');
+  const myQuestions = questions.filter((q) => q['to'] === agent || q['to'] === 'human');
+  const unresolvedAssumptions = Array.isArray(report?.['assumptions'])
+    ? (report['assumptions'] as Array<Record<string, unknown>>).filter((item) => item['status'] !== 'validated')
     : [];
 
   const taskText =
@@ -896,22 +941,22 @@ function buildAgentBrief(agent, objective, report) {
       : myTasks
           .map(
             (t) =>
-              `- ${t.title}${t.done ? ` (DoD: ${t.done})` : ''}${t.rationale ? ` [${t.rationale}]` : ''}`,
+              `- ${t['title']}${t['done'] ? ` (DoD: ${t['done']})` : ''}${t['rationale'] ? ` [${t['rationale']}]` : ''}`,
           )
           .join('\n');
 
   const questionText =
     myQuestions.length === 0
       ? '- none'
-      : myQuestions.map((q) => `- to ${q.to}: ${q.question}`).join('\n');
+      : myQuestions.map((q) => `- to ${q['to']}: ${q['question']}`).join('\n');
 
   const decisionLines = finalDecision
     ? [
-        `Decision owner: ${finalDecision.owner}`,
-        `Decision confidence: ${finalDecision.confidence || 'n/a'}`,
-        `Next action: ${report?.recommendedNextAction || finalDecision.nextAction || report?.recommendedMode || 'handoff'}`,
-        `Reversible first step: ${finalDecision.reversibleFirstStep || 'not specified'}`,
-        ...formatTradeoffs(finalDecision.tradeoffs),
+        `Decision owner: ${finalDecision['owner']}`,
+        `Decision confidence: ${finalDecision['confidence'] || 'n/a'}`,
+        `Next action: ${report?.['recommendedNextAction'] || finalDecision['nextAction'] || report?.['recommendedMode'] || 'handoff'}`,
+        `Reversible first step: ${finalDecision['reversibleFirstStep'] || 'not specified'}`,
+        ...formatTradeoffs(finalDecision['tradeoffs']),
       ]
     : ['- No explicit final decision captured; use transcript summary.'];
 
@@ -922,7 +967,7 @@ function buildAgentBrief(agent, objective, report) {
           .slice(0, 5)
           .map(
             (item) =>
-              `- ${item.assumption}${item.owner && item.owner !== 'unassigned' ? ` [owner: ${item.owner}]` : ''}`,
+              `- ${item['assumption']}${item['owner'] && item['owner'] !== 'unassigned' ? ` [owner: ${item['owner']}]` : ''}`,
           )
           .join('\n');
 
@@ -954,16 +999,16 @@ function buildAgentBrief(agent, objective, report) {
 // assumption targeting) → SYNTHESIZE (Claude as decider) → IMPLEMENT (Codex)
 // ─────────────────────────────────────────────────────────────
 
-function buildDivergePrompt(agent, userPrompt, specContent) {
+function buildDivergePrompt(agent: string, userPrompt: string, specContent: string | null) {
   const agentConfig = getAgent(agent);
   const context = buildAgentContext(agent, {}, config, userPrompt);
-  const framing = isPersonaEnabled() ? getAgentFraming(agent) : `You are ${agentConfig.label}`;
+  const framing = isPersonaEnabled() ? getAgentFraming(agent) : `You are ${agentConfig!.label}`;
   const tradeoffsSchema =
     '{"correctness":"string","complexity":"string","reversibility":"string","user_impact":"string"}';
   return [
     `${framing} You are in the DIVERGE phase of an adversarial council.`,
     '',
-    agentConfig.rolePrompt,
+    agentConfig!.rolePrompt,
     '',
     context,
     '',
@@ -990,21 +1035,21 @@ function buildDivergePrompt(agent, userPrompt, specContent) {
     .join('\n');
 }
 
-function buildAttackPrompt(agent, userPrompt, divergeEntries, specContent) {
+function buildAttackPrompt(agent: string, userPrompt: string, divergeEntries: Array<Record<string, unknown>>, specContent: string | null) {
   const agentConfig = getAgent(agent);
   const context = buildAgentContext(agent, {}, config, userPrompt);
-  const framing = isPersonaEnabled() ? getAgentFraming(agent) : `You are ${agentConfig.label}`;
+  const framing = isPersonaEnabled() ? getAgentFraming(agent) : `You are ${agentConfig!.label}`;
   const othersOutput = divergeEntries
-    .filter((e) => e.agent !== agent)
+    .filter((e) => e['agent'] !== agent)
     .map((e) => {
-      const content = e.parsed ? JSON.stringify(e.parsed) : e.rawText;
-      return `${e.agent.toUpperCase()} independent view:\n${short(content, 1200)}`;
+      const content = e['parsed'] ? JSON.stringify(e['parsed']) : e['rawText'];
+      return `${String(e['agent']).toUpperCase()} independent view:\n${short(content as string, 1200)}`;
     })
     .join('\n\n');
   return [
     `${framing} You are in the ATTACK phase of an adversarial council.`,
     '',
-    agentConfig.rolePrompt,
+    agentConfig!.rolePrompt,
     '',
     context,
     '',
@@ -1032,28 +1077,28 @@ function buildAttackPrompt(agent, userPrompt, divergeEntries, specContent) {
     .join('\n');
 }
 
-function buildSynthesizePrompt(userPrompt, divergeEntries, attackEntries, specContent) {
+function buildSynthesizePrompt(userPrompt: string, divergeEntries: Array<Record<string, unknown>>, attackEntries: Array<Record<string, unknown>>, specContent: string | null) {
   const agentConfig = getAgent('claude');
   const context = buildAgentContext('claude', {}, config, userPrompt);
-  const framing = isPersonaEnabled() ? getAgentFraming('claude') : `You are ${agentConfig.label}`;
+  const framing = isPersonaEnabled() ? getAgentFraming('claude') : `You are ${agentConfig!.label}`;
   const tradeoffsSchema =
     '{"correctness":"string","complexity":"string","reversibility":"string","user_impact":"string"}';
   const allDiverge = divergeEntries
     .map(
       (e) =>
-        `${e.agent.toUpperCase()} independent view:\n${short(e.parsed ? JSON.stringify(e.parsed) : e.rawText, 1000)}`,
+        `${String(e['agent']).toUpperCase()} independent view:\n${short(e['parsed'] ? JSON.stringify(e['parsed']) : e['rawText'] as string, 1000)}`,
     )
     .join('\n\n');
   const allAttacks = attackEntries
     .map(
       (e) =>
-        `${e.agent.toUpperCase()} attacks:\n${short(e.parsed ? JSON.stringify(e.parsed) : e.rawText, 800)}`,
+        `${String(e['agent']).toUpperCase()} attacks:\n${short(e['parsed'] ? JSON.stringify(e['parsed']) : e['rawText'] as string, 800)}`,
     )
     .join('\n\n');
   return [
     `${framing} You are in the SYNTHESIZE phase of an adversarial council. You are the designated decision owner.`,
     '',
-    agentConfig.rolePrompt,
+    agentConfig!.rolePrompt,
     '',
     context,
     '',
@@ -1102,7 +1147,7 @@ function buildSynthesizePrompt(userPrompt, divergeEntries, attackEntries, specCo
  * Resolve the ordered list of active agents for adversarial council.
  * Preserves default ordering ['claude','gemini','codex'] and filters to the allowlist.
  */
-export function resolveActiveAgents(agentsFilter, defaults = ['claude', 'gemini', 'codex']) {
+export function resolveActiveAgents(agentsFilter: string[] | null, defaults = ['claude', 'gemini', 'codex']) {
   if (!agentsFilter || !agentsFilter.length) return [...defaults];
   return defaults.filter((a) => agentsFilter.includes(a));
 }
@@ -1115,12 +1160,12 @@ const ADV_PHASE_ORDER = Object.freeze(['diverge', 'attack', 'synthesize']);
  * Returns { startRound, startPhaseIdx } where startPhaseIdx indexes ADV_PHASE_ORDER.
  * Returns { startRound: Infinity } when implement was already completed.
  */
-export function computeAdversarialResumePoint(transcript) {
+export function computeAdversarialResumePoint(transcript: unknown[]) {
   if (!transcript.length) return { startRound: 1, startPhaseIdx: 0 };
-  const last = transcript.at(-1);
-  if (last.phase === 'implement') return { startRound: Infinity, startPhaseIdx: 0 };
-  const lastPhaseIdx = ADV_PHASE_ORDER.indexOf(last.phase);
-  const lastRound = last.round || 1;
+  const last = transcript.at(-1) as Record<string, unknown>;
+  if (last['phase'] === 'implement') return { startRound: Infinity, startPhaseIdx: 0 };
+  const lastPhaseIdx = ADV_PHASE_ORDER.indexOf(last['phase'] as string);
+  const lastRound = (last['round'] as number) || 1;
   // After synthesize (last phase in a round), advance to next round
   if (lastPhaseIdx < 0 || lastPhaseIdx >= ADV_PHASE_ORDER.length - 1) {
     return { startRound: lastRound + 1, startPhaseIdx: 0 };
@@ -1129,9 +1174,21 @@ export function computeAdversarialResumePoint(transcript) {
 }
 
 async function runAdversarialCouncil(
-  prompt,
-  report,
-  { preview, timeoutMs, specContent, promptHash, agentsFilter, rounds },
+  prompt: string,
+  report: {
+    transcript: Array<Record<string, unknown>>;
+    councilFlow: string[];
+    specId?: string;
+    [key: string]: unknown;
+  },
+  { preview, timeoutMs, specContent, promptHash, agentsFilter, rounds }: {
+    preview: boolean;
+    timeoutMs: number;
+    specContent: string | null;
+    promptHash: string;
+    agentsFilter: string[] | null;
+    rounds: number;
+  },
 ) {
   const activeAgents = resolveActiveAgents(agentsFilter);
   // Synthesize phase: prefer claude; fall back to first active agent
@@ -1240,7 +1297,7 @@ async function runAdversarialCouncil(
 
     // Collect diverge entries for this round (context for attack phase)
     const divergeEntries = report.transcript.filter(
-      (e) => e.phase === 'diverge' && e.round === round,
+      (e) => e['phase'] === 'diverge' && e['round'] === round,
     );
 
     // ── Phase 1: ATTACK (parallel, each sees all diverge outputs) ──
@@ -1307,7 +1364,7 @@ async function runAdversarialCouncil(
 
     // Collect attack entries for this round (context for synthesize phase)
     const attackEntries = report.transcript.filter(
-      (e) => e.phase === 'attack' && e.round === round,
+      (e) => e['phase'] === 'attack' && e['round'] === round,
     );
 
     // ── Phase 2: SYNTHESIZE (designated decider) ──
@@ -1375,7 +1432,7 @@ async function runAdversarialCouncil(
 
   // ── Phase 3: IMPLEMENT (once, after all rounds; only if codex is active and not preview) ──
   if (!implementAlreadyDone && activeAgents.includes('codex') && !preview) {
-    const implementStep = COUNCIL_FLOW.find((s) => s.phase === 'implement');
+    const implementStep = COUNCIL_FLOW.find((s) => s.phase === 'implement')!;
     process.stderr.write(
       `${JSON.stringify({ type: 'council_phase', action: 'start', phase: 'implement', agent: 'codex' })}\n`,
     );
@@ -1422,25 +1479,25 @@ async function main() {
     process.exit(1);
   }
 
-  const mode = String(options.mode || 'live').toLowerCase();
-  const preview = mode === 'preview' || boolFlag(options.preview, false);
-  const publish = boolFlag(options.publish, !preview);
-  const rounds = Math.max(1, Math.min(4, Number.parseInt(String(options.rounds || '2'), 10) || 2));
-  const timeoutMs = Number.parseInt(String(options.timeoutMs || DEFAULT_TIMEOUT_MS), 10);
-  const url = String(options.url || DEFAULT_URL);
-  const emit = String(options.emit || 'summary').toLowerCase();
-  const save = boolFlag(options.save, emit !== 'json');
-  const agentsFilter = options.agents
-    ? options.agents
+  const mode = String(options['mode'] || 'live').toLowerCase();
+  const preview = mode === 'preview' || boolFlag(options['preview'], false);
+  const publish = boolFlag(options['publish'], !preview);
+  const rounds = Math.max(1, Math.min(4, Number.parseInt(String(options['rounds'] || '2'), 10) || 2));
+  const timeoutMs = Number.parseInt(String(options['timeoutMs'] || DEFAULT_TIMEOUT_MS), 10);
+  const url = String(options['url'] || DEFAULT_URL);
+  const emit = String(options['emit'] || 'summary').toLowerCase();
+  const save = boolFlag(options['save'], emit !== 'json');
+  const agentsFilter = options['agents']
+    ? String(options['agents'])
         .split(',')
-        .map((a) => a.trim().toLowerCase())
+        .map((a: string) => a.trim().toLowerCase())
         .filter(Boolean)
     : null;
 
   const report = {
     id: runId('HYDRA_COUNCIL'),
     startedAt: nowIso(),
-    finishedAt: null,
+    finishedAt: null as string | null,
     prompt,
     mode: preview ? 'preview' : 'live',
     publish,
@@ -1451,27 +1508,40 @@ async function main() {
     ).map((s) => `${s.agent}:${s.phase}`),
     url,
     project: config.projectName,
-    daemonSummary: null,
-    transcript: [],
+    daemonSummary: null as unknown | null,
+    specId: undefined as string | undefined,
+    transcript: [] as Array<{
+      round: number;
+      agent: string;
+      phase: string;
+      ok: boolean;
+      rawText: string;
+      parsed: unknown;
+      error: string;
+      recovered: boolean;
+      recoveredFrom?: string;
+      recoveredTo?: string;
+      compactedRetry?: boolean;
+    }>,
     consensus: '',
-    tasks: [],
-    questions: [],
-    risks: [],
-    decisionOptions: [],
-    assumptions: [],
-    assumptionAttacks: [],
-    disagreements: [],
-    finalDecision: null,
-    councilVotes: [],
+    tasks: [] as Array<{ owner?: string; title?: string; description?: string; rationale?: string; done?: string }>,
+    questions: [] as Array<{ to: string; question: string }>,
+    risks: [] as unknown[],
+    decisionOptions: [] as unknown[],
+    assumptions: [] as Array<{ status: string; [key: string]: unknown }>,
+    assumptionAttacks: [] as Array<{ challenge?: string; assumption?: string }>,
+    disagreements: [] as unknown[],
+    finalDecision: null as null | { owner?: string; confidence?: string; nextAction?: string; reversibleFirstStep?: string; summary?: string; why?: string; tradeoffs?: unknown },
+    councilVotes: [] as unknown[],
     recommendedMode: 'handoff',
     recommendedNextAction: 'handoff',
     recommendationRationale: '',
-    published: null,
+    published: null as null | { ok: boolean; skipped?: boolean; error?: string; decision?: unknown; tasks?: unknown[]; handoffs?: unknown[]; reason?: string },
   };
 
   try {
-    const summaryResponse = await request('GET', url, '/summary');
-    report.daemonSummary = summaryResponse.summary;
+    const summaryResponse = await request('GET', url, '/summary') as Record<string, unknown>;
+    report.daemonSummary = summaryResponse['summary'];
   } catch {
     report.daemonSummary = null;
   }
@@ -1615,8 +1685,9 @@ async function main() {
             phase: step.phase,
             ok: true,
             rawText: JSON.stringify(parsed),
-            parsed,
+            parsed: parsed as unknown,
             error: '',
+            recovered: false,
           });
           continue;
         }
@@ -1644,9 +1715,9 @@ async function main() {
         // Rate limit retry (1 attempt with backoff)
         if (!result.ok) {
           const rlCheck = detectRateLimitError(step.agent, result);
-          if (rlCheck.isRateLimited) {
-            const delay = calculateBackoff(0, { retryAfterMs: rlCheck.retryAfterMs });
-            spinner.text = `${colorAgent(step.agent)} ${DIM(step.phase)} rate limited, retrying in ${(delay / 1000).toFixed(0)}s...`;
+          if (rlCheck.isRateLimit) {
+            const delay = calculateBackoff(0, { retryAfterMs: rlCheck.retryAfterMs ?? undefined });
+            spinner.update(`${colorAgent(step.agent)} ${DIM(step.phase)} rate limited, retrying in ${(delay / 1000).toFixed(0)}s...`);
             await new Promise((r) => globalThis.setTimeout(r, delay));
             result = await callAgentAsync(step.agent, promptText, timeoutMs);
           }
@@ -1655,7 +1726,7 @@ async function main() {
         // Timeout retry: strip transcript context and retry once with bare prompt
         if (!result.ok && result.timedOut) {
           const compactedPrompt = buildStepPrompt(step, prompt, [], round, rounds, specContent);
-          spinner.text = `${colorAgent(step.agent)} ${DIM(step.phase)} timed out — retrying with compacted context...`;
+          spinner.update(`${colorAgent(step.agent)} ${DIM(step.phase)} timed out — retrying with compacted context...`);
           result = await callAgentAsync(step.agent, compactedPrompt, timeoutMs);
           if (result.ok) {
             result._compactedRetry = true;
@@ -1682,18 +1753,11 @@ async function main() {
               pipeline: 'council',
               phase: step.phase,
               agent: step.agent,
-              round,
               error: result.error || result.stderr || 'unknown failure',
               exitCode: result.exitCode ?? null,
-              signal: result.signal || null,
-              command: result.command,
-              args: result.args,
-              promptSnippet: result.promptSnippet,
+              signal: result.signal ?? null,
               stderr: result.stderr,
-              stdout: result.output || result.stdout,
-              errorCategory: result.errorCategory || null,
-              errorDetail: result.errorDetail || null,
-              errorContext: result.errorContext || null,
+              stdout: result.output ?? result.stdout,
               context: `Council phase ${step.phase} failed in round ${round}`,
             });
           } catch {
@@ -1747,24 +1811,24 @@ async function main() {
 
   if (publish) {
     try {
-      const health = await request('GET', url, '/health');
-      if (!health.ok) {
+      const health = await request('GET', url, '/health') as Record<string, unknown>;
+      if (!health['ok']) {
         throw new Error('Hydra daemon is not healthy.');
       }
 
-      const createdTasks = [];
+      const createdTasks: unknown[] = [];
       for (const task of report.tasks) {
         const created = await request('POST', url, '/task/add', {
           title: task.title,
           owner: task.owner,
           status: 'todo',
           notes: task.rationale ? `Council rationale: ${task.rationale}` : '',
-        });
-        createdTasks.push(created.task);
+        }) as Record<string, unknown>;
+        createdTasks.push(created['task']);
       }
 
       const decisionTitle = `Hydra Council: ${short(prompt, 90)}`;
-      const decision = await request('POST', url, '/decision', {
+      const decisionResult = await request('POST', url, '/decision', {
         title: decisionTitle,
         owner: 'human',
         rationale:
@@ -1772,35 +1836,35 @@ async function main() {
           report.consensus ||
           'Council completed without explicit consensus.',
         impact: `Rounds=${rounds}; Tasks=${createdTasks.length}; Flow=Claude\u2192Gemini\u2192Claude\u2192Codex; next=${report.recommendedNextAction || report.recommendedMode}`,
-      });
+      }) as Record<string, unknown>;
 
-      const handoffs = [];
+      const handoffs: unknown[] = [];
       const publishAgents = agentsFilter || AGENT_NAMES;
       for (const agent of publishAgents) {
-        const agentTaskIds = createdTasks
+        const agentTaskIds = (createdTasks as Array<{ owner?: string; id?: string; }>)
           .filter((t) => t.owner === agent || t.owner === 'unassigned')
           .map((t) => t.id);
-        const summary = buildAgentBrief(agent, prompt, report);
+        const summary = buildAgentBrief(agent, prompt, report as unknown as Record<string, unknown>);
         const handoff = await request('POST', url, '/handoff', {
           from: 'human',
           to: agent,
           summary,
           nextStep: 'Acknowledge this council handoff and start highest-priority task.',
           tasks: agentTaskIds,
-        });
-        handoffs.push(handoff.handoff);
+        }) as Record<string, unknown>;
+        handoffs.push(handoff['handoff']);
       }
 
       report.published = {
         ok: true,
-        decision: decision.decision,
+        decision: decisionResult['decision'],
         tasks: createdTasks,
         handoffs,
       };
     } catch (err) {
       report.published = {
         ok: false,
-        error: err.message,
+        error: (err as Error).message,
       };
     }
   } else {
@@ -1841,7 +1905,7 @@ async function main() {
   console.log(label('Mode', ACCENT(report.mode)));
   console.log(label('Rounds', pc.white(String(rounds))));
   if (report.startedAt && report.finishedAt) {
-    const durationMs = new Date(report.finishedAt) - new Date(report.startedAt);
+    const durationMs = new Date(report.finishedAt).getTime() - new Date(report.startedAt).getTime();
     if (durationMs > 0) console.log(label('Duration', pc.white(formatElapsed(durationMs))));
   }
 
@@ -1871,8 +1935,8 @@ async function main() {
   console.log(sectionHeader('Convergence'));
   if (report.finalDecision) {
     const decision = report.finalDecision;
-    console.log(label('Decision owner', colorOwner(decision.owner)));
-    console.log(label('Confidence', pc.white(decision.confidence || 'n/a')));
+    console.log(label('Decision owner', colorOwner(String(decision.owner || 'unassigned'))));
+    console.log(label('Confidence', pc.white(String(decision.confidence || 'n/a'))));
     console.log(
       label(
         'Next action',
@@ -1939,8 +2003,9 @@ async function main() {
     console.log('');
     console.log(sectionHeader('Risks'));
     for (const risk of report.risks) {
+      const r = risk as Record<string, unknown> | string;
       const text =
-        typeof risk === 'string' ? risk : risk.risk || risk.description || JSON.stringify(risk);
+        typeof r === 'string' ? r : String(r['risk'] || r['description'] || JSON.stringify(r));
       console.log(`  ${WARNING('\u26A0')} ${pc.white(short(text, 72))}`);
     }
   }

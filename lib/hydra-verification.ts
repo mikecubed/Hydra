@@ -10,6 +10,15 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { loadHydraConfig } from './hydra-config.ts';
+import type { VerificationPlan } from './types.ts';
+
+interface ProjectSignals {
+  npmScripts: Record<string, string>;
+  hasTypeScriptConfig: boolean;
+  hasCargoToml: boolean;
+  hasGoMod: boolean;
+  hasPyproject: boolean;
+}
 
 const DEFAULT_TIMEOUT_MS = 60_000;
 const DISABLED_COMMANDS = new Set(['off', 'none', 'disabled', 'false']);
@@ -37,12 +46,12 @@ const SAFE_COMMAND_PATTERN = /^[a-zA-Z0-9 _./:@=-]+$/;
  * @param {string} command
  * @returns {boolean}
  */
-export function isVerificationCommandShellSafe(command) {
+export function isVerificationCommandShellSafe(command: string): boolean {
   if (!command || typeof command !== 'string') return false;
   return SAFE_COMMAND_PATTERN.test(command.trim());
 }
 
-function readPackageJson(projectRoot) {
+function readPackageJson(projectRoot: string): { scripts?: Record<string, string> } | null {
   try {
     const raw = fs.readFileSync(path.join(projectRoot, 'package.json'), 'utf8');
     return JSON.parse(raw);
@@ -51,11 +60,11 @@ function readPackageJson(projectRoot) {
   }
 }
 
-function hasFile(projectRoot, fileName) {
+function hasFile(projectRoot: string, fileName: string): boolean {
   return fs.existsSync(path.join(projectRoot, fileName));
 }
 
-export function collectProjectSignals(projectRoot) {
+export function collectProjectSignals(projectRoot: string): ProjectSignals {
   const pkg = readPackageJson(projectRoot);
   const npmScripts = pkg?.scripts && typeof pkg.scripts === 'object' ? pkg.scripts : {};
 
@@ -68,22 +77,22 @@ export function collectProjectSignals(projectRoot) {
   };
 }
 
-export function chooseAutoVerificationCommand(signals = {}) {
-  const scripts =
+export function chooseAutoVerificationCommand(signals: Partial<ProjectSignals> = {}): { command: string; reason: string } | null {
+  const scripts: Record<string, string> =
     signals.npmScripts && typeof signals.npmScripts === 'object' ? signals.npmScripts : {};
 
-  if (scripts.typecheck) {
+  if (scripts['typecheck']) {
     return { command: 'npm run typecheck', reason: 'Detected package.json script: typecheck' };
   }
 
-  if (scripts.verify) {
+  if (scripts['verify']) {
     return { command: 'npm run verify', reason: 'Detected package.json script: verify' };
   }
 
   // If there's a test script, use it as a safe Node default.
   // Skip the npm-init placeholder: echo "Error: no test specified" && exit 1
-  if (scripts.test) {
-    const raw = String(scripts.test).trim();
+  if (scripts['test']) {
+    const raw = String(scripts['test']).trim();
     const isPlaceholder = /no test specified/i.test(raw) && /\bexit\s+1\b/i.test(raw);
     if (!isPlaceholder) {
       return { command: 'npm test', reason: 'Detected package.json script: test' };
@@ -109,7 +118,7 @@ export function chooseAutoVerificationCommand(signals = {}) {
   return null;
 }
 
-function parseTimeoutMs(value) {
+function parseTimeoutMs(value: unknown): number {
   const parsed = Number.parseInt(String(value ?? ''), 10);
   if (!Number.isFinite(parsed) || parsed <= 0) {
     return DEFAULT_TIMEOUT_MS;
@@ -118,17 +127,16 @@ function parseTimeoutMs(value) {
 }
 
 export function resolveVerificationPlan(
-  projectRoot,
-  hydraConfig = loadHydraConfig(),
-  signalsOverride = null,
-) {
-  const cfg = hydraConfig && typeof hydraConfig === 'object' ? hydraConfig : {};
-  const verification =
-    cfg.verification && typeof cfg.verification === 'object' ? cfg.verification : {};
+  projectRoot: string,
+  hydraConfig: Record<string, unknown> = loadHydraConfig() as Record<string, unknown>,
+  signalsOverride: ProjectSignals | null = null,
+): VerificationPlan {
+  const cfg: Record<string, unknown> = hydraConfig && typeof hydraConfig === 'object' ? hydraConfig : {};
+  const verificationCfg = cfg['verification'] && typeof cfg['verification'] === 'object' ? cfg['verification'] as Record<string, unknown> : {};
 
-  const onTaskDone = verification.onTaskDone !== false;
-  const timeoutMs = parseTimeoutMs(verification.timeoutMs);
-  const rawCommand = String(verification.command ?? 'auto').trim();
+  const onTaskDone = verificationCfg['onTaskDone'] !== false;
+  const timeoutMs = parseTimeoutMs(verificationCfg['timeoutMs']);
+  const rawCommand = String(verificationCfg['command'] ?? 'auto').trim();
   const lowered = rawCommand.toLowerCase();
 
   if (!onTaskDone) {

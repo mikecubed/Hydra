@@ -13,9 +13,9 @@ import { canMakeRequest, getHealthiestProvider } from './hydra-rate-limits.ts';
 // ── Provider Detection ────────────────────────────────────────────────────────
 
 const PROVIDER_KEYS = {
-  openai: () => process.env.OPENAI_API_KEY,
-  anthropic: () => process.env.ANTHROPIC_API_KEY,
-  google: () => process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY,
+  openai: () => process.env['OPENAI_API_KEY'],
+  anthropic: () => process.env['ANTHROPIC_API_KEY'],
+  google: () => process.env['GEMINI_API_KEY'] || process.env['GOOGLE_API_KEY'],
 };
 
 /**
@@ -50,10 +50,10 @@ export function buildFallbackChain() {
   const available = detectAvailableProviders();
   const availableSet = new Set(available.map((a) => a.provider));
 
-  return chain.map((entry) => ({
-    provider: entry.provider,
-    model: entry.model,
-    available: availableSet.has(entry.provider),
+  return chain.map((entry: unknown) => ({
+    provider: (entry as { provider: string }).provider,
+    model: (entry as { model: string }).model,
+    available: availableSet.has((entry as { provider: string }).provider),
   }));
 }
 
@@ -66,7 +66,7 @@ export function buildFallbackChain() {
  * @param {boolean} isFallback - Whether this is a fallback (not the primary)
  * @returns {string}
  */
-export function providerLabel(provider, model, isFallback) {
+export function providerLabel(provider: string, model: string, isFallback: boolean): string {
   const suffix = isFallback ? ' \u2193' : ''; // ↓ for fallback
   return `${provider}:${model}${suffix}`;
 }
@@ -74,11 +74,13 @@ export function providerLabel(provider, model, isFallback) {
 // ── Streaming with Fallback ───────────────────────────────────────────────────
 
 // Lazy-loaded provider modules
-let _streamOpenAI = null;
-let _streamAnthropic = null;
-let _streamGoogle = null;
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+type StreamFn = (...args: any[]) => Promise<unknown>;
+let _streamOpenAI: StreamFn | null = null;
+let _streamAnthropic: StreamFn | null = null;
+let _streamGoogle: StreamFn | null = null;
 
-async function getStreamFn(provider) {
+async function getStreamFn(provider: string): Promise<StreamFn> {
   if (provider === 'openai') {
     if (!_streamOpenAI) {
       const mod = await import('./hydra-openai.ts');
@@ -114,7 +116,7 @@ async function getStreamFn(provider) {
  * @param {Function} [onChunk] - Called with each streamed text chunk
  * @returns {Promise<{fullResponse: string, usage: object|null, provider: string, model: string, isFallback: boolean}>}
  */
-export async function streamWithFallback(messages, cfg, onChunk) {
+export async function streamWithFallback(messages: unknown[], cfg: Record<string, unknown>, onChunk: (chunk: string) => void) {
   let chain = buildFallbackChain().filter((e) => e.available);
 
   if (chain.length === 0) {
@@ -126,8 +128,8 @@ export async function streamWithFallback(messages, cfg, onChunk) {
   // Dynamic reordering: sort by remaining capacity (healthiest provider first)
   chain = getHealthiestProvider(chain);
 
-  const errors = [];
-  const configPrimary = chain[0]?.provider; // Track who was first after reordering
+  const errors: Array<{ provider: string; model: string; error: string }> = [];
+  void chain[0]?.provider; // Track who was first after reordering (unused but informational)
 
   for (let i = 0; i < chain.length; i++) {
     const entry = chain[i];
@@ -146,34 +148,34 @@ export async function streamWithFallback(messages, cfg, onChunk) {
 
     try {
       const streamFn = await getStreamFn(entry.provider);
-      const providerCfg = { ...cfg, model: entry.model };
+      const providerCfg: Record<string, unknown> = { ...cfg, model: entry.model };
 
       // Map reasoning effort to provider-specific params
-      if (cfg.reasoningEffort && entry.provider === 'anthropic') {
+      if (cfg['reasoningEffort'] && entry.provider === 'anthropic') {
         const caps = getModelReasoningCaps(entry.model);
         if (caps.type === 'thinking') {
-          const LEGACY_MAP = { high: 'deep', xhigh: 'deep', medium: 'standard', low: 'light' };
-          const normalized = LEGACY_MAP[cfg.reasoningEffort] || cfg.reasoningEffort;
+          const LEGACY_MAP: Record<string, string> = { high: 'deep', xhigh: 'deep', medium: 'standard', low: 'light' };
+          const normalized = LEGACY_MAP[cfg['reasoningEffort'] as string] || (cfg['reasoningEffort'] as string);
           const budget = caps.budgets?.[normalized];
           if (budget && normalized !== 'off') {
-            providerCfg.thinkingBudget = budget;
+            providerCfg['thinkingBudget'] = budget;
           }
         }
       }
       // OpenAI: reasoningEffort passed through as-is (already handled by streamCompletion)
       // Google: no reasoning params needed
 
-      const result = await streamFn(messages, providerCfg, onChunk);
+      const result = await streamFn(messages, providerCfg, onChunk) as Record<string, unknown>;
 
       return {
-        fullResponse: result.fullResponse,
-        usage: result.usage,
+        fullResponse: result['fullResponse'],
+        usage: result['usage'],
         provider: entry.provider,
         model: entry.model,
         isFallback,
       };
-    } catch (err) {
-      errors.push({ provider: entry.provider, model: entry.model, error: err.message });
+    } catch (err: unknown) {
+      errors.push({ provider: entry.provider, model: entry.model, error: (err as Error).message });
       // Continue to next provider
     }
   }

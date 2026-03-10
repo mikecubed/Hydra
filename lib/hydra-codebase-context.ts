@@ -14,6 +14,17 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { HYDRA_ROOT, loadHydraConfig } from './hydra-config.ts';
 
+interface ModuleIndexEntry {
+  file: string;
+  purpose?: string;
+}
+
+interface CodebaseContextCache {
+  sections: Record<string, string>;
+  moduleIndex: ModuleIndexEntry[];
+  loadedAt: number;
+}
+
 // ── Constants ───────────────────────────────────────────────────────────────
 
 const CLAUDE_MD_PATH = path.join(HYDRA_ROOT, 'CLAUDE.md');
@@ -22,7 +33,7 @@ const EVOLVE_DIR = path.join(HYDRA_ROOT, 'docs', 'coordination', 'evolve');
 
 // ── Codebase Context Cache ──────────────────────────────────────────────────
 
-let _cache = null;
+let _cache: CodebaseContextCache | null = null;
 
 /**
  * Load and parse CLAUDE.md into structured sections + build module index.
@@ -32,7 +43,7 @@ let _cache = null;
 export function loadCodebaseContext() {
   if (_cache) return _cache;
 
-  const sections = {};
+  const sections: Record<string, string> = {};
   let claudeMd = '';
   try {
     claudeMd = fs.readFileSync(CLAUDE_MD_PATH, 'utf8');
@@ -67,8 +78,8 @@ export function loadCodebaseContext() {
  * Get the cached codebase context, loading if needed.
  * @returns {object}
  */
-export function getCodebaseContext() {
-  return _cache || loadCodebaseContext();
+export function getCodebaseContext(): CodebaseContextCache {
+  return _cache ?? loadCodebaseContext();
 }
 
 /**
@@ -81,7 +92,7 @@ export function reloadCodebaseContext() {
 
 // ── Section Key Normalization ───────────────────────────────────────────────
 
-function normalizeKey(heading) {
+function normalizeKey(heading: string): string {
   return heading
     .toLowerCase()
     .replace(/[^a-z0-9\s]/g, '')
@@ -144,7 +155,7 @@ function buildModuleIndex() {
 /**
  * Extract the first doc comment or purpose line from a module.
  */
-function extractModulePurpose(filePath) {
+function extractModulePurpose(filePath: string): string {
   try {
     const content = fs.readFileSync(filePath, 'utf8');
     // Look for top-of-file JSDoc: /** ... */
@@ -247,7 +258,7 @@ const CODEBASE_QUERY_PATTERNS = [
  * @param {string} message
  * @returns {{ isCodebaseQuery: boolean, topic: string|null }}
  */
-export function detectCodebaseQuery(message) {
+export function detectCodebaseQuery(message: string) {
   if (!message || typeof message !== 'string') {
     return { isCodebaseQuery: false, topic: null };
   }
@@ -279,9 +290,9 @@ export function detectCodebaseQuery(message) {
 /**
  * Infer a topic category from a freeform text fragment.
  */
-function inferTopic(text) {
+function inferTopic(text: string): string {
   const lower = text.toLowerCase();
-  let bestTopic = null;
+  let bestTopic: string | null = null;
   let bestScore = 0;
 
   for (const [topic, keywords] of Object.entries(TOPIC_KEYWORDS)) {
@@ -295,13 +306,13 @@ function inferTopic(text) {
       }
     }
   }
-  return bestTopic;
+  return bestTopic ?? '';
 }
 
 // ── Topic Context Retrieval ─────────────────────────────────────────────────
 
 /** Map topic names to CLAUDE.md section keys and supplementary info. */
-const TOPIC_SECTIONS = {
+const TOPIC_SECTIONS: Record<string, { keys: string[]; filter?: string; supplementWith: string | null }> = {
   dispatch: { keys: ['dispatch-modes', 'task-routing'], supplementWith: 'functions' },
   council: { keys: ['key-modules'], filter: 'council', supplementWith: 'functions' },
   config: { keys: ['code-conventions'], supplementWith: 'config' },
@@ -324,7 +335,7 @@ const TOPIC_SECTIONS = {
  * @param {string} topic
  * @returns {string} Formatted context block
  */
-export function getTopicContext(topic) {
+export function getTopicContext(topic: string): string {
   const ctx = getCodebaseContext();
   const topicDef = TOPIC_SECTIONS[topic];
   if (!topicDef) return getGeneralContext();
@@ -381,7 +392,7 @@ export function getTopicContext(topic) {
 
   // Add relevant modules from index
   const relevantModules = ctx.moduleIndex.filter((m) => {
-    const lower = `${m.file.toLowerCase()} ${m.purpose.toLowerCase()}`;
+    const lower = `${m.file.toLowerCase()} ${(m.purpose ?? '').toLowerCase()}`;
     return new RegExp(topicDef.filter || topic, 'i').test(lower);
   });
   if (relevantModules.length > 0) {
@@ -440,15 +451,15 @@ function getGeneralContext() {
  * @param {string} topic
  * @returns {string|null}
  */
-export function getConfigReference(topic) {
+export function getConfigReference(topic: string): string {
   let config;
   try {
     config = loadHydraConfig();
   } catch {
-    return null;
+    return '';
   }
 
-  const TOPIC_CONFIG_MAP = {
+  const TOPIC_CONFIG_MAP: Record<string, () => unknown> = {
     config: () => ({
       models: config.models,
       modeTiers: config.modeTiers,
@@ -467,19 +478,19 @@ export function getConfigReference(topic) {
   };
 
   const getter = TOPIC_CONFIG_MAP[topic];
-  if (!getter) return null;
+  if (!getter) return '';
 
   try {
     const data = getter();
     return `Config (${topic}):\n${JSON.stringify(data, null, 2).slice(0, 1500)}`;
   } catch {
-    return null;
+    return '';
   }
 }
 
 /** Key functions reference by topic. */
-function getFunctionReference(topic) {
-  const REFS = {
+function getFunctionReference(topic: string): string {
+  const REFS: Record<string, string> = {
     dispatch: `Key functions:
 - classifyPrompt(text) -> { tier, taskType, suggestedAgent, confidence, reason } [hydra-utils.mjs]
 - classifyTask(text) -> taskType [hydra-agents.ts]
@@ -519,7 +530,7 @@ Convergence: explicit criteria (correctness, complexity, reversibility, user imp
 
 Fallback chain: OpenAI -> Anthropic -> Google (configurable)`,
   };
-  return REFS[topic] || null;
+  return REFS[topic] || '';
 }
 
 /** Daemon HTTP endpoints reference. */
@@ -555,23 +566,24 @@ WRITE:
  * @param {number} [maxResults=5]
  * @returns {string} Formatted findings or empty string
  */
-export function searchKnowledgeBase(query, maxResults = 5) {
+export function searchKnowledgeBase(query: string, maxResults = 5) {
   let kb;
   try {
     // Lazy-load to avoid circular dependencies
-    const { loadKnowledgeBase, searchEntries } = loadKBModule();
+    const { loadKnowledgeBase, searchEntries } = loadKBModule()!;
     kb = loadKnowledgeBase(EVOLVE_DIR);
     if (!kb || !kb.entries || kb.entries.length === 0) return '';
 
-    const results = searchEntries(kb, query);
+    const results = searchEntries!(kb, query);
     if (results.length === 0) return '';
 
     const lines = [`Knowledge base findings for "${query}":`];
     for (const entry of results.slice(0, maxResults)) {
-      const status = entry.attempted ? entry.outcome || 'attempted' : 'researched';
-      lines.push(`- [${entry.area || 'general'}] ${entry.finding.slice(0, 120)} (${status})`);
-      if (entry.learnings) {
-        lines.push(`  Learnings: ${entry.learnings.slice(0, 100)}`);
+      const e = entry as Record<string, unknown>;
+      const status = e['attempted'] ? (e['outcome'] as string) || 'attempted' : 'researched';
+      lines.push(`- [${(e['area'] as string) || 'general'}] ${(e['finding'] as string).slice(0, 120)} (${status})`);
+      if (e['learnings']) {
+        lines.push(`  Learnings: ${(e['learnings'] as string).slice(0, 100)}`);
       }
     }
     return lines.join('\n');
@@ -580,13 +592,12 @@ export function searchKnowledgeBase(query, maxResults = 5) {
   }
 }
 
-let _kbModule = null;
+let _kbModule: { loadKnowledgeBase: (dir: string) => { entries: unknown[] }; searchEntries?: (kb: { entries: unknown[] }, query: string, maxResults?: number) => unknown[] } | null = null;
 function loadKBModule() {
   if (_kbModule) return _kbModule;
   // Synchronous dynamic require — the module is pure Node.js
   try {
     // Use a lazy approach: read and evaluate at first call
-    const modPath = path.join(LIB_DIR, 'hydra-evolve-knowledge.mjs');
     // Since we can't synchronously import ESM, we'll read the KB file directly
     _kbModule = {
       loadKnowledgeBase: (dir) => {
@@ -598,15 +609,19 @@ function loadKBModule() {
           return { entries: [] };
         }
       },
-      searchEntries: (kb, query) => {
+      searchEntries: (kb: { entries: unknown[] }, query: string) => {
         if (!kb?.entries) return [];
         const q = query.toLowerCase();
         return kb.entries.filter(
-          (e) =>
-            (e.finding || '').toLowerCase().includes(q) ||
-            (e.area || '').toLowerCase().includes(q) ||
-            (e.learnings || '').toLowerCase().includes(q) ||
-            (e.tags || []).some((t) => t.toLowerCase().includes(q)),
+          (e) => {
+            const entry = e as Record<string, unknown>;
+            return (
+              ((entry['finding'] as string) || '').toLowerCase().includes(q) ||
+              ((entry['area'] as string) || '').toLowerCase().includes(q) ||
+              ((entry['learnings'] as string) || '').toLowerCase().includes(q) ||
+              ((entry['tags'] as string[]) || []).some((t) => t.toLowerCase().includes(q))
+            );
+          },
         );
       },
     };
@@ -624,7 +639,7 @@ function loadKBModule() {
  * @returns {string}
  */
 export function getBaselineContext() {
-  const ctx = getCodebaseContext();
+  void getCodebaseContext(); // ensure cache is loaded
 
   const lines = [
     'Codebase expertise:',

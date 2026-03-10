@@ -34,7 +34,7 @@ import {
   isCircuitOpen,
   recordModelFailure,
   verifyAgentQuota,
-} from '../hydra-model-recovery.mjs';
+} from '../hydra-model-recovery.ts';
 import { loadHydraConfig } from '../hydra-config.ts';
 import {
   startAgentSpan,
@@ -47,7 +47,7 @@ import { streamLocalCompletion } from '../hydra-local.ts';
 import {
   registerSession as hubRegister,
   deregisterSession as hubDeregister,
-} from '../hydra-hub.mjs';
+} from '../hydra-hub.ts';
 import {
   extractCodexText,
   extractCodexUsage,
