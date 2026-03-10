@@ -34,7 +34,6 @@ describe('hydra-anthropic', () => {
 
   it('throws when model is missing', async () => {
     const saved = process.env['ANTHROPIC_API_KEY'];
-    // eslint-disable-next-line require-atomic-updates
     process.env['ANTHROPIC_API_KEY'] = 'test-key';
     try {
       await assert.rejects(
@@ -84,7 +83,6 @@ describe('hydra-google', () => {
 
   it('throws when model is missing', async () => {
     const saved = process.env['GEMINI_API_KEY'];
-    // eslint-disable-next-line require-atomic-updates
     process.env['GEMINI_API_KEY'] = 'test-key';
     try {
       await assert.rejects(() => streamGoogleCompletion([{ role: 'user', content: 'test' }], {}), {

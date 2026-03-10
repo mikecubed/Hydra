@@ -8,7 +8,7 @@
  * behaviour. Run with HYDRA_NO_PIPES=1 to exercise the file-backed fallback path.
  */
 
-import { describe, it, before, after } from 'node:test';
+import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawnSyncCapture } from '../lib/hydra-proc.ts';
 

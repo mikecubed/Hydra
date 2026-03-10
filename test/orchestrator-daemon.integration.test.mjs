@@ -14,7 +14,9 @@ const REPO_ROOT = path.resolve(__dirname, '..');
 const DAEMON_SCRIPT = path.join(REPO_ROOT, 'lib', 'orchestrator-daemon.ts');
 
 function sleep(ms) {
-  return new Promise((resolve) => setTimeout(resolve, ms));
+  return new Promise((resolve) => {
+    setTimeout(resolve, ms);
+  });
 }
 
 function createTempProject(packageJson) {
@@ -75,7 +77,7 @@ async function requestJson(baseUrl, method, route, body = null, timeoutMs = 4_00
           try {
             json = JSON.parse(text);
           } catch {
-            json = {};
+            // json stays as fallback {}
           }
           const status = res.statusCode || 0;
           resolve({

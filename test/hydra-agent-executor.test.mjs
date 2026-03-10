@@ -471,14 +471,7 @@ describe('parseCliResponse', () => {
 
 // ── Custom agent routing in executeAgent() ───────────────────────────────────
 import { executeAgent } from '../lib/hydra-shared/agent-executor.ts';
-import {
-  registerAgent,
-  unregisterAgent,
-  getAgent as getAgentDef,
-  AGENT_TYPE,
-  _resetRegistry,
-  initAgentRegistry,
-} from '../lib/hydra-agents.ts';
+import { registerAgent, unregisterAgent, AGENT_TYPE, _resetRegistry } from '../lib/hydra-agents.ts';
 
 describe('executeAgent — custom CLI agent routing', () => {
   beforeEach(() => {

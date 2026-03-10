@@ -85,9 +85,13 @@ describe('mock agent isolation', () => {
       assert.match(fallbackResult.output, /default summary/i);
       assert.match(matchedResult.output, /implementation result/i);
     } finally {
+      // eslint-disable-next-line require-atomic-updates -- intentional mock restore
       fsModule.promises.readFile = originalReadFile;
+      // eslint-disable-next-line require-atomic-updates -- intentional mock restore
       fsModule.readFileSync = originalReadFileSync;
+      // eslint-disable-next-line require-atomic-updates -- intentional mock restore
       childProcess.spawn = originalSpawn;
+      // eslint-disable-next-line require-atomic-updates -- intentional mock restore
       childProcess.spawnSync = originalSpawnSync;
     }
 
