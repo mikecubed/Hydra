@@ -23,7 +23,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { resolveProject, loadHydraConfig } from './hydra-config.ts';
 import { parseArgs } from './hydra-utils.ts';
-import { scanBranchViolations } from './hydra-evolve-guardrails.mjs';
+import { scanBranchViolations } from './hydra-evolve-guardrails.ts';
 import { loadKnowledgeBase, searchEntries, getStats } from './hydra-knowledge.mjs';
 import {
   getCurrentBranch,
@@ -47,15 +47,15 @@ import {
   addSuggestion,
   getPendingSuggestions,
   getSuggestionStats,
-} from './hydra-evolve-suggestions.mjs';
+} from './hydra-evolve-suggestions.ts';
 import pc from 'picocolors';
 
 // ── Review Command ──────────────────────────────────────────────────────────
 
-async function reviewCommand(projectRoot, options) {
+async function reviewCommand(projectRoot: string, options: Record<string, string | boolean>) {
   const cfg = loadHydraConfig();
   const baseBranch = cfg.evolve?.baseBranch || 'dev';
-  const dateFilter = options.date || null;
+  const dateFilter = (options['date'] as string) || null;
   const branches = listBranches(projectRoot, 'evolve', dateFilter);
 
   if (branches.length === 0) {
@@ -75,7 +75,7 @@ async function reviewCommand(projectRoot, options) {
 
   // Load latest decision data
   const evolveDir = path.join(projectRoot, 'docs', 'coordination', 'evolve');
-  const reportData = loadLatestReport(evolveDir, 'EVOLVE', dateFilter);
+  const reportData = loadLatestReport(evolveDir, 'EVOLVE', dateFilter) as Record<string, unknown> | null;
 
   const rl = createRL();
   let merged = 0;
@@ -85,7 +85,9 @@ async function reviewCommand(projectRoot, options) {
     // Try to find matching decision
     const roundMatch = branch.match(/\/(\d+)$/);
     const roundNum = roundMatch ? Number.parseInt(roundMatch[1], 10) : null;
-    const roundEntry = reportData?.rounds?.find((r) => r.round === roundNum);
+    const roundEntry = (reportData?.['rounds'] as any[] | undefined)?.find(
+      (r: Record<string, unknown>) => r['round'] === roundNum,
+    );
 
     console.log(pc.bold(pc.cyan(`\n-- ${branch} --`)));
 
@@ -168,7 +170,7 @@ async function reviewCommand(projectRoot, options) {
 
 // ── Status Command ──────────────────────────────────────────────────────────
 
-function loadSessionState(evolveDir) {
+function loadSessionState(evolveDir: string) {
   const statePath = path.join(evolveDir, 'EVOLVE_SESSION_STATE.json');
   try {
     if (!fs.existsSync(statePath)) return null;
@@ -178,10 +180,10 @@ function loadSessionState(evolveDir) {
   }
 }
 
-function statusCommand(projectRoot, options) {
+function statusCommand(projectRoot: string, options: Record<string, string | boolean>) {
   const cfg = loadHydraConfig();
   const baseBranch = cfg.evolve?.baseBranch || 'dev';
-  const dateFilter = options.date || null;
+  const dateFilter = (options['date'] as string) || null;
   const branches = listBranches(projectRoot, 'evolve', dateFilter);
   const evolveDir = path.join(projectRoot, 'docs', 'coordination', 'evolve');
 
@@ -190,14 +192,15 @@ function statusCommand(projectRoot, options) {
   // ── Session state (live tracking) ───────────────────────────────────
   const sessionState = loadSessionState(evolveDir);
   if (sessionState) {
-    const statusColors = {
+    type Formatter = (s: string) => string;
+    const statusColors: Record<string, Formatter> = {
       running: pc.blue,
       completed: pc.green,
       partial: pc.yellow,
       failed: pc.red,
       interrupted: pc.red,
     };
-    const statusColor = statusColors[sessionState.status] || pc.dim;
+    const statusColor = statusColors[String(sessionState.status)] || pc.dim;
     console.log(`\n  Session: ${pc.bold(sessionState.sessionId || '?')}`);
     console.log(`  Status:  ${statusColor(pc.bold(sessionState.status.toUpperCase()))}`);
 
@@ -256,17 +259,17 @@ function statusCommand(projectRoot, options) {
   }
 
   // Show latest report
-  const report = loadLatestReport(evolveDir, 'EVOLVE', dateFilter);
+  const report = loadLatestReport(evolveDir, 'EVOLVE', dateFilter) as Record<string, unknown> | null;
 
   if (report) {
-    console.log(`\n  Latest Report: ${report.dateStr}`);
-    console.log(`  Rounds: ${report.processedRounds}/${report.maxRounds}`);
-    if (report.stopReason) console.log(`  Stopped: ${report.stopReason}`);
-    console.log(`  Tokens: ~${report.budget?.consumed?.toLocaleString() || '?'}`);
+    console.log(`\n  Latest Report: ${report['dateStr']}`);
+    console.log(`  Rounds: ${report['processedRounds']}/${report['maxRounds']}`);
+    if (report['stopReason']) console.log(`  Stopped: ${report['stopReason']}`);
+    console.log(`  Tokens: ~${(report['budget'] as any)?.consumed?.toLocaleString() || '?'}`);
 
-    if (report.rounds && !sessionState) {
+    if (report['rounds'] && !sessionState) {
       console.log('');
-      for (const r of report.rounds) {
+      for (const r of report['rounds'] as any[]) {
         const icon =
           r.verdict === 'approve'
             ? pc.green('+')
@@ -304,15 +307,15 @@ function statusCommand(projectRoot, options) {
 
 // ── Clean Command ───────────────────────────────────────────────────────────
 
-function cleanCommand(projectRoot, options) {
+function cleanCommand(projectRoot: string, options: Record<string, string | boolean>) {
   const cfg = loadHydraConfig();
   const baseBranch = cfg.evolve?.baseBranch || 'dev';
-  cleanBranches(projectRoot, 'evolve', baseBranch, options.date || null);
+  cleanBranches(projectRoot, 'evolve', baseBranch, (options['date'] as string) || null);
 }
 
 // ── Knowledge Command ───────────────────────────────────────────────────────
 
-function knowledgeCommand(projectRoot, options) {
+function knowledgeCommand(projectRoot: string, options: Record<string, string | boolean>) {
   const evolveDir = path.join(projectRoot, 'docs', 'coordination', 'evolve');
   const kb = loadKnowledgeBase(evolveDir);
   const stats = getStats(kb);
@@ -332,8 +335,8 @@ function knowledgeCommand(projectRoot, options) {
   }
 
   // Search if query provided
-  const query = options.query || options.search || '';
-  const tags = options.tags ? options.tags.split(',') : [];
+  const query = (options['query'] as string) || (options['search'] as string) || '';
+  const tags = options['tags'] ? (options['tags'] as string).split(',') : [];
 
   if (query || tags.length > 0) {
     const results = searchEntries(kb, query, tags);
@@ -347,7 +350,7 @@ function knowledgeCommand(projectRoot, options) {
             : entry.outcome === 'revise'
               ? pc.yellow('~')
               : pc.dim('?');
-      console.log(`    ${icon} [${entry.id}] ${entry.area}: ${entry.finding.slice(0, 80)}`);
+      console.log(`    ${icon} [${entry.id}] ${entry.area}: ${(entry.finding ?? '').slice(0, 80)}`);
       if (entry.learnings) {
         console.log(pc.dim(`      Learnings: ${entry.learnings.slice(0, 80)}`));
       }
@@ -366,7 +369,7 @@ function knowledgeCommand(projectRoot, options) {
             : entry.outcome === 'revise'
               ? pc.yellow('~')
               : pc.dim('?');
-      console.log(`    ${icon} [${entry.id}] ${entry.area}: ${entry.finding.slice(0, 80)}`);
+      console.log(`    ${icon} [${entry.id}] ${entry.area}: ${(entry.finding ?? '').slice(0, 80)}`);
     }
   }
 
@@ -375,12 +378,12 @@ function knowledgeCommand(projectRoot, options) {
 
 // ── Suggestions Command ─────────────────────────────────────────────────────
 
-function suggestionsCommand(projectRoot, options) {
+function suggestionsCommand(projectRoot: string, options: Record<string, string | boolean>) {
   const evolveDir = path.join(projectRoot, 'docs', 'coordination', 'evolve');
   const sg = loadSuggestions(evolveDir);
-  const statusFilter = options.status || null;
+  const statusFilter = (options['status'] as string) || null;
   const entries = statusFilter
-    ? sg.entries.filter((e) => e.status === statusFilter)
+    ? sg.entries.filter((e: { status?: unknown }) => e.status === statusFilter)
     : getPendingSuggestions(sg);
 
   const label = statusFilter ? `${statusFilter} suggestions` : 'pending suggestions';
@@ -410,9 +413,9 @@ function suggestionsCommand(projectRoot, options) {
           ? pc.dim('low')
           : pc.yellow('med');
 
-    console.log(`  ${statusColor(s.id)} ${pc.yellow(s.area)}: ${s.title.slice(0, 80)}`);
+    console.log(`  ${statusColor(s.id)} ${pc.yellow(s.area)}: ${(s.title ?? '').slice(0, 80)}`);
     const parts = [`status: ${statusColor(s.status)}`, `priority: ${priorityBadge}`];
-    if (s.attempts > 0) {
+    if ((s.attempts ?? 0) > 0) {
       parts.push(`attempts: ${s.attempts}/${s.maxAttempts}`);
       if (s.lastAttemptScore != null) parts.push(`last: ${s.lastAttemptScore}/10`);
     }
@@ -434,13 +437,13 @@ function suggestionsCommand(projectRoot, options) {
 
 async function main() {
   const { options, positionals } = parseArgs(process.argv);
-  const command = positionals[0] || options.command || 'status';
+  const command = positionals[0] || options['command'] || 'status';
 
   let config;
   try {
-    config = resolveProject({ project: options.project });
-  } catch (err) {
-    console.error(pc.red(`Project resolution failed: ${err.message}`));
+    config = resolveProject({ project: options['project'] ? String(options['project']) : undefined });
+  } catch (err: unknown) {
+    console.error(pc.red(`Project resolution failed: ${err instanceof Error ? err.message : String(err)}`));
     process.exit(1);
   }
 

@@ -30,7 +30,7 @@ import {
 import { BASE_PROTECTED_FILES, BASE_PROTECTED_PATTERNS } from './hydra-shared/constants.ts';
 import {
   createRL,
-  ask,
+  ask as _ask,
   loadLatestReport,
   displayBranchInfo,
   handleBranchAction,
@@ -42,7 +42,7 @@ import pc from 'picocolors';
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
-function hasBaseAdvanced(projectRoot, branch, baseBranch) {
+function hasBaseAdvanced(projectRoot: string, branch: string, baseBranch: string) {
   try {
     const r = git(['merge-base', '--is-ancestor', baseBranch, branch], projectRoot);
     return r.status !== 0; // diverged if baseBranch is NOT ancestor of branch
@@ -53,8 +53,8 @@ function hasBaseAdvanced(projectRoot, branch, baseBranch) {
 
 // ── Review Command ──────────────────────────────────────────────────────────
 
-async function reviewCommand(projectRoot, options) {
-  const dateFilter = options.date || null;
+async function reviewCommand(projectRoot: string, options: Record<string, string | boolean>) {
+  const dateFilter = (options['date'] as string) || null;
   const branches = listBranches(projectRoot, 'nightly', dateFilter);
 
   if (branches.length === 0) {
@@ -65,8 +65,8 @@ async function reviewCommand(projectRoot, options) {
 
   // Load the latest nightly report to determine baseBranch
   const nightlyDir = path.join(projectRoot, 'docs', 'coordination', 'nightly');
-  const reportData = loadLatestReport(nightlyDir, 'NIGHTLY', dateFilter);
-  const baseBranch = reportData?.baseBranch || 'dev';
+  const reportData = loadLatestReport(nightlyDir, 'NIGHTLY', dateFilter) as Record<string, unknown> | null;
+  const baseBranch = (reportData?.['baseBranch'] as string | undefined) || 'dev';
 
   // Ensure we're on baseBranch
   const current = getCurrentBranch(projectRoot);
@@ -82,7 +82,7 @@ async function reviewCommand(projectRoot, options) {
   let skipped = 0;
 
   for (const branch of branches) {
-    const reportEntry = reportData?.results?.find((r) => r.branch === branch);
+    const reportEntry = (reportData?.['results'] as any[] | undefined)?.find((r: Record<string, unknown>) => r['branch'] === branch);
 
     console.log(pc.bold(pc.cyan(`\n── ${branch} ──`)));
 
@@ -152,14 +152,14 @@ async function reviewCommand(projectRoot, options) {
 
 // ── Status Command ──────────────────────────────────────────────────────────
 
-function statusCommand(projectRoot, options) {
-  const dateFilter = options.date || null;
+function statusCommand(projectRoot: string, options: Record<string, string | boolean>) {
+  const dateFilter = (options['date'] as string) || null;
   const branches = listBranches(projectRoot, 'nightly', dateFilter);
 
   // Load report first to determine baseBranch
   const nightlyDir = path.join(projectRoot, 'docs', 'coordination', 'nightly');
-  const report = loadLatestReport(nightlyDir, 'NIGHTLY', dateFilter);
-  const baseBranch = report?.baseBranch || 'dev';
+  const report = loadLatestReport(nightlyDir, 'NIGHTLY', dateFilter) as Record<string, unknown> | null;
+  const baseBranch = (report?.['baseBranch'] as string | undefined) || 'dev';
 
   console.log(pc.bold('\nNightly Status'));
 
@@ -175,14 +175,14 @@ function statusCommand(projectRoot, options) {
     }
   }
   if (report) {
-    console.log(`\n  Latest Report: ${report.date}`);
-    console.log(`  Tasks: ${report.processedTasks}/${report.totalTasks}`);
-    if (report.stopReason) console.log(`  Stopped: ${report.stopReason}`);
-    console.log(`  Tokens: ~${report.budget?.consumed?.toLocaleString() || '?'}`);
+    console.log(`\n  Latest Report: ${report['date']}`);
+    console.log(`  Tasks: ${report['processedTasks']}/${report['totalTasks']}`);
+    if (report['stopReason']) console.log(`  Stopped: ${report['stopReason']}`);
+    console.log(`  Tokens: ~${(report['budget'] as any)?.consumed?.toLocaleString() || '?'}`);
 
-    if (report.results) {
+    if (report['results']) {
       console.log('');
-      for (const r of report.results) {
+      for (const r of report['results'] as any[]) {
         const icon =
           r.status === 'success'
             ? pc.green('✓')
@@ -202,24 +202,24 @@ function statusCommand(projectRoot, options) {
 
 // ── Clean Command ───────────────────────────────────────────────────────────
 
-function cleanCommand(projectRoot, options) {
+function cleanCommand(projectRoot: string, options: Record<string, string | boolean>) {
   const nightlyDir = path.join(projectRoot, 'docs', 'coordination', 'nightly');
-  const report = loadLatestReport(nightlyDir, 'NIGHTLY', options.date || null);
-  const baseBranch = report?.baseBranch || 'dev';
-  cleanBranches(projectRoot, 'nightly', baseBranch, options.date || null);
+  const report = loadLatestReport(nightlyDir, 'NIGHTLY', (options['date'] as string) || null) as Record<string, unknown> | null;
+  const baseBranch = (report?.['baseBranch'] as string | undefined) || 'dev';
+  cleanBranches(projectRoot, 'nightly', baseBranch, (options['date'] as string) || null);
 }
 
 // ── Main ────────────────────────────────────────────────────────────────────
 
 async function main() {
   const { options, positionals } = parseArgs(process.argv);
-  const command = positionals[0] || options.command || 'status';
+  const command = positionals[0] || options['command'] || 'status';
 
   let config;
   try {
-    config = resolveProject({ project: options.project });
-  } catch (err) {
-    console.error(pc.red(`Project resolution failed: ${err.message}`));
+    config = resolveProject({ project: options['project'] ? String(options['project']) : undefined });
+  } catch (err: unknown) {
+    console.error(pc.red(`Project resolution failed: ${err instanceof Error ? err.message : String(err)}`));
     process.exit(1);
   }
 

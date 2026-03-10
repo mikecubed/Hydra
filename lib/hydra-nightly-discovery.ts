@@ -21,15 +21,24 @@ import pc from 'picocolors';
 // ── Logging ─────────────────────────────────────────────────────────────────
 
 const log = {
-  info: (msg) => process.stderr.write(`  ${pc.blue('i')} ${msg}\n`),
-  ok: (msg) => process.stderr.write(`  ${pc.green('+')} ${msg}\n`),
-  warn: (msg) => process.stderr.write(`  ${pc.yellow('!')} ${msg}\n`),
-  dim: (msg) => process.stderr.write(`  ${pc.dim(msg)}\n`),
+  info: (msg: string) => process.stderr.write(`  ${pc.blue('i')} ${msg}\n`),
+  ok: (msg: string) => process.stderr.write(`  ${pc.green('+')} ${msg}\n`),
+  warn: (msg: string) => process.stderr.write(`  ${pc.yellow('!')} ${msg}\n`),
+  dim: (msg: string) => process.stderr.write(`  ${pc.dim(msg)}\n`),
 };
 
 // ── Prompt Builder ──────────────────────────────────────────────────────────
 
-function buildDiscoveryPrompt(projectRoot, opts = {}) {
+function buildDiscoveryPrompt(
+  projectRoot: string,
+  opts: {
+    existingTasks?: string[];
+    focus?: string[];
+    instructionFile?: string;
+    profile?: string;
+    extraContext?: string;
+  } = {},
+) {
   const {
     existingTasks = [],
     focus = [],
@@ -97,7 +106,7 @@ ${guidelineBlock}`;
 
 // ── JSON Extraction ─────────────────────────────────────────────────────────
 
-function extractJsonArray(text) {
+function extractJsonArray(text: string) {
   // Try direct parse first
   try {
     const parsed = JSON.parse(text);
@@ -145,15 +154,27 @@ function extractJsonArray(text) {
  * @param {string[]} [opts.existingTasks=[]] - Already-queued task titles for dedup
  * @returns {Promise<import('./hydra-tasks-scanner.ts').ScannedTask[]>}
  */
-export async function runDiscovery(projectRoot, opts = {}) {
+export async function runDiscovery(
+  projectRoot: string,
+  opts: {
+    agent?: string;
+    model?: string;
+    maxSuggestions?: number;
+    focus?: string[];
+    timeoutMs?: number;
+    existingTasks?: string[];
+    profile?: string;
+    extraContext?: string;
+  } = {},
+) {
   const cfg = loadHydraConfig();
-  const discoveryCfg = cfg.nightly?.aiDiscovery || {};
+  const discoveryCfg = (cfg.nightly?.aiDiscovery || {}) as Record<string, unknown>;
 
-  const agent = opts.agent || discoveryCfg.agent || 'gemini';
-  const modelOverride = opts.model || discoveryCfg.model || null;
-  const maxSuggestions = opts.maxSuggestions || discoveryCfg.maxSuggestions || 5;
-  const focus = opts.focus || discoveryCfg.focus || [];
-  const timeoutMs = opts.timeoutMs || discoveryCfg.timeoutMs || 5 * 60 * 1000;
+  const agent = opts.agent || (discoveryCfg['agent'] as string | undefined) || 'gemini';
+  const modelOverride = opts.model || (discoveryCfg['model'] as string | undefined) || null;
+  const maxSuggestions = opts.maxSuggestions || (discoveryCfg['maxSuggestions'] as number | undefined) || 5;
+  const focus = opts.focus || (discoveryCfg['focus'] as string[] | undefined) || [];
+  const timeoutMs = opts.timeoutMs || (discoveryCfg['timeoutMs'] as number | undefined) || 5 * 60 * 1000;
   const existingTasks = opts.existingTasks || [];
   const profile = opts.profile || 'nightly';
   const extraContext = opts.extraContext || '';
@@ -177,9 +198,9 @@ export async function runDiscovery(projectRoot, opts = {}) {
       timeoutMs,
       ...(modelOverride && { modelOverride }),
     });
-  } catch (err) {
-    recordCallError(handle, err);
-    log.warn(`Discovery agent failed: ${err.message}`);
+  } catch (err: unknown) {
+    recordCallError(handle, err instanceof Error ? err : new Error(String(err)));
+    log.warn(`Discovery agent failed: ${err instanceof Error ? err.message : String(err)}`);
     return [];
   }
 
@@ -189,7 +210,7 @@ export async function runDiscovery(projectRoot, opts = {}) {
     return [];
   }
 
-  recordCallComplete(handle, result);
+  recordCallComplete(handle, result as unknown as Parameters<typeof recordCallComplete>[1]);
 
   // Parse response
   const output = result.stdout || result.output || '';

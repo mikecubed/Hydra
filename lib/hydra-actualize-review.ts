@@ -37,7 +37,7 @@ import {
 import { isGhAvailable } from './hydra-github.ts';
 import pc from 'picocolors';
 
-function hasBaseAdvanced(projectRoot, branch, baseBranch) {
+function hasBaseAdvanced(projectRoot: string, branch: string, baseBranch: string) {
   try {
     const r = git(['merge-base', '--is-ancestor', baseBranch, branch], projectRoot);
     return r.status !== 0;
@@ -46,8 +46,8 @@ function hasBaseAdvanced(projectRoot, branch, baseBranch) {
   }
 }
 
-async function reviewCommand(projectRoot, options) {
-  const dateFilter = options.date || null;
+async function reviewCommand(projectRoot: string, options: Record<string, string | boolean>) {
+  const dateFilter = (options['date'] as string) || null;
   const branches = listBranches(projectRoot, 'actualize', dateFilter);
 
   if (branches.length === 0) {
@@ -57,8 +57,8 @@ async function reviewCommand(projectRoot, options) {
   }
 
   const reportDir = path.join(projectRoot, 'docs', 'coordination', 'actualize');
-  const reportData = loadLatestReport(reportDir, 'ACTUALIZE', dateFilter);
-  const baseBranch = reportData?.baseBranch || 'dev';
+  const reportData = loadLatestReport(reportDir, 'ACTUALIZE', dateFilter) as Record<string, unknown> | null;
+  const baseBranch = (reportData?.['baseBranch'] as string | undefined) || 'dev';
 
   const current = getCurrentBranch(projectRoot);
   if (current !== baseBranch) {
@@ -73,7 +73,7 @@ async function reviewCommand(projectRoot, options) {
   let skipped = 0;
 
   for (const branch of branches) {
-    const reportEntry = reportData?.results?.find((r) => r.branch === branch);
+    const reportEntry = (reportData?.['results'] as any[] | undefined)?.find((r: Record<string, unknown>) => r['branch'] === branch);
 
     console.log(pc.bold(pc.cyan(`\n── ${branch} ──`)));
 
@@ -135,13 +135,13 @@ async function reviewCommand(projectRoot, options) {
   console.log(pc.bold(`\nDone: ${merged} merged, ${skipped} skipped`));
 }
 
-function statusCommand(projectRoot, options) {
-  const dateFilter = options.date || null;
+function statusCommand(projectRoot: string, options: Record<string, string | boolean>) {
+  const dateFilter = (options['date'] as string) || null;
   const branches = listBranches(projectRoot, 'actualize', dateFilter);
 
   const reportDir = path.join(projectRoot, 'docs', 'coordination', 'actualize');
-  const report = loadLatestReport(reportDir, 'ACTUALIZE', dateFilter);
-  const baseBranch = report?.baseBranch || 'dev';
+  const report = loadLatestReport(reportDir, 'ACTUALIZE', dateFilter) as Record<string, unknown> | null;
+  const baseBranch = (report?.['baseBranch'] as string | undefined) || 'dev';
 
   console.log(pc.bold('\nActualize Status'));
 
@@ -157,13 +157,13 @@ function statusCommand(projectRoot, options) {
   }
 
   if (report) {
-    console.log(`\n  Latest Report: ${report.date}`);
-    console.log(`  Tasks: ${report.processedTasks}/${report.totalTasks}`);
-    if (report.stopReason) console.log(`  Stopped: ${report.stopReason}`);
-    console.log(`  Tokens: ~${report.budget?.consumed?.toLocaleString() || '?'}`);
-    if (report.artifacts?.selfSnapshot)
-      console.log(`  Self snapshot: ${report.artifacts.selfSnapshot}`);
-    if (report.artifacts?.selfIndex) console.log(`  Self index: ${report.artifacts.selfIndex}`);
+    console.log(`\n  Latest Report: ${report['date']}`);
+    console.log(`  Tasks: ${report['processedTasks']}/${report['totalTasks']}`);
+    if (report['stopReason']) console.log(`  Stopped: ${report['stopReason']}`);
+    console.log(`  Tokens: ~${(report['budget'] as any)?.consumed?.toLocaleString() || '?'}`);
+    if ((report['artifacts'] as any)?.selfSnapshot)
+      console.log(`  Self snapshot: ${(report['artifacts'] as any).selfSnapshot}`);
+    if ((report['artifacts'] as any)?.selfIndex) console.log(`  Self index: ${(report['artifacts'] as any).selfIndex}`);
   } else {
     console.log(pc.dim('\n  No actualize report found.'));
   }
@@ -171,22 +171,22 @@ function statusCommand(projectRoot, options) {
   console.log('');
 }
 
-function cleanCommand(projectRoot, options) {
+function cleanCommand(projectRoot: string, options: Record<string, string | boolean>) {
   const reportDir = path.join(projectRoot, 'docs', 'coordination', 'actualize');
-  const report = loadLatestReport(reportDir, 'ACTUALIZE', options.date || null);
-  const baseBranch = report?.baseBranch || 'dev';
-  cleanBranches(projectRoot, 'actualize', baseBranch, options.date || null);
+  const report = loadLatestReport(reportDir, 'ACTUALIZE', (options['date'] as string) || null) as Record<string, unknown> | null;
+  const baseBranch = (report?.['baseBranch'] as string | undefined) || 'dev';
+  cleanBranches(projectRoot, 'actualize', baseBranch, (options['date'] as string) || null);
 }
 
 async function main() {
   const { options, positionals } = parseArgs(process.argv);
-  const command = positionals[0] || options.command || 'status';
+  const command = positionals[0] || options['command'] || 'status';
 
   let config;
   try {
-    config = resolveProject({ project: options.project });
-  } catch (err) {
-    console.error(pc.red(`Project resolution failed: ${err.message}`));
+    config = resolveProject({ project: options['project'] ? String(options['project']) : undefined });
+  } catch (err: unknown) {
+    console.error(pc.red(`Project resolution failed: ${err instanceof Error ? err.message : String(err)}`));
     process.exit(1);
   }
 

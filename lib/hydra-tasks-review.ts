@@ -22,11 +22,11 @@ import {
   checkoutBranch,
   listBranches,
   getBranchLog,
-  deleteBranch,
+  deleteBranch as _deleteBranch,
 } from './hydra-shared/git-ops.ts';
 import {
   createRL,
-  ask,
+  ask as _ask,
   loadLatestReport,
   displayBranchInfo,
   handleBranchAction,
@@ -46,8 +46,8 @@ const PROTECTED_FILES = new Set([...BASE_PROTECTED_FILES, 'hydra.config.json']);
 
 // ── Review Command ──────────────────────────────────────────────────────────
 
-async function reviewCommand(projectRoot, options) {
-  const dateFilter = options.date || null;
+async function reviewCommand(projectRoot: string, options: Record<string, string | boolean>) {
+  const dateFilter = (options['date'] as string) || null;
   const branches = listBranches(projectRoot, BRANCH_PREFIX, dateFilter);
 
   if (branches.length === 0) {
@@ -67,14 +67,14 @@ async function reviewCommand(projectRoot, options) {
 
   // Load the latest report if available
   const reportDir = path.join(projectRoot, 'docs', 'coordination', 'tasks');
-  const reportData = loadLatestReport(reportDir, REPORT_PREFIX, dateFilter);
+  const reportData = loadLatestReport(reportDir, REPORT_PREFIX, dateFilter) as Record<string, unknown> | null;
 
   const rl = createRL();
   let merged = 0;
   let skipped = 0;
 
   for (const branch of branches) {
-    const reportEntry = reportData?.results?.find((r) => r.branch === branch);
+    const reportEntry = (reportData?.['results'] as any[] | undefined)?.find((r: Record<string, unknown>) => r['branch'] === branch);
 
     console.log(pc.bold(pc.cyan(`\n── ${branch} ──`)));
 
@@ -133,8 +133,8 @@ async function reviewCommand(projectRoot, options) {
 
 // ── Status Command ──────────────────────────────────────────────────────────
 
-function statusCommand(projectRoot, options) {
-  const dateFilter = options.date || null;
+function statusCommand(projectRoot: string, options: Record<string, string | boolean>) {
+  const dateFilter = (options['date'] as string) || null;
   const branches = listBranches(projectRoot, BRANCH_PREFIX, dateFilter);
 
   console.log(pc.bold('\nTasks Status'));
@@ -153,18 +153,18 @@ function statusCommand(projectRoot, options) {
 
   // Show latest report
   const reportDir = path.join(projectRoot, 'docs', 'coordination', 'tasks');
-  const report = loadLatestReport(reportDir, REPORT_PREFIX, dateFilter);
+  const report = loadLatestReport(reportDir, REPORT_PREFIX, dateFilter) as Record<string, unknown> | null;
   if (report) {
-    console.log(`\n  Latest Report: ${report.date}`);
-    console.log(`  Tasks: ${report.processedTasks}/${report.totalTasks}`);
-    console.log(`  Successful: ${report.successful || 0}`);
-    console.log(`  Failed: ${report.failed || 0}`);
-    if (report.stopReason) console.log(`  Stopped: ${report.stopReason}`);
-    console.log(`  Tokens: ~${report.budget?.consumed?.toLocaleString() || '?'}`);
+    console.log(`\n  Latest Report: ${report['date']}`);
+    console.log(`  Tasks: ${report['processedTasks']}/${report['totalTasks']}`);
+    console.log(`  Successful: ${(report['successful'] as number) || 0}`);
+    console.log(`  Failed: ${(report['failed'] as number) || 0}`);
+    if (report['stopReason']) console.log(`  Stopped: ${report['stopReason']}`);
+    console.log(`  Tokens: ~${(report['budget'] as any)?.consumed?.toLocaleString() || '?'}`);
 
-    if (report.results) {
+    if (report['results']) {
       console.log('');
-      for (const r of report.results) {
+      for (const r of report['results'] as any[]) {
         const icon =
           r.status === 'success'
             ? pc.green('pass')
@@ -184,21 +184,21 @@ function statusCommand(projectRoot, options) {
 
 // ── Clean Command ───────────────────────────────────────────────────────────
 
-function cleanCommand(projectRoot, options) {
-  cleanBranches(projectRoot, BRANCH_PREFIX, BASE_BRANCH, options.date || null);
+function cleanCommand(projectRoot: string, options: Record<string, string | boolean>) {
+  cleanBranches(projectRoot, BRANCH_PREFIX, BASE_BRANCH, (options['date'] as string) || null);
 }
 
 // ── Main ────────────────────────────────────────────────────────────────────
 
 async function main() {
   const { options, positionals } = parseArgs(process.argv);
-  const command = positionals[0] || options.command || 'status';
+  const command = positionals[0] || options['command'] || 'status';
 
   let config;
   try {
-    config = resolveProject({ project: options.project });
-  } catch (err) {
-    console.error(pc.red(`Project resolution failed: ${err.message}`));
+    config = resolveProject({ project: options['project'] ? String(options['project']) : undefined });
+  } catch (err: unknown) {
+    console.error(pc.red(`Project resolution failed: ${err instanceof Error ? err.message : String(err)}`));
     process.exit(1);
   }
 
