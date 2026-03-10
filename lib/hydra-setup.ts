@@ -14,12 +14,34 @@
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { spawnSync as nodeSpawnSync } from 'node:child_process';
+// @ts-ignore — cross-spawn has no bundled types; pre-existing across codebase
 import crossSpawn from 'cross-spawn';
 import { fileURLToPath } from 'node:url';
 
+// ── Types ─────────────────────────────────────────────────────────────────────
+
+export interface RegisterMcpOptions {
+  configPath?: string | null;
+  format?: string;
+  force?: boolean;
+}
+
+interface MergeConfigOptions {
+  configPath?: string;
+  force?: boolean;
+}
+
+interface SetupFlags {
+  uninstall?: boolean;
+  force?: boolean;
+  help?: boolean;
+  'project-name'?: string;
+  [key: string]: boolean | string | undefined;
+}
+
 /** Cross-platform spawnSync — uses cross-spawn on Windows for .cmd/.bat shim support. */
-const spawnSync = (cmd, args, opts) => crossSpawn.sync(cmd, args, opts);
+const spawnSync = (cmd: string, args: string[], opts: Record<string, unknown>) =>
+  crossSpawn.sync(cmd, args, opts as Parameters<typeof crossSpawn.sync>[2]);
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -59,7 +81,7 @@ export function resolveNodePath() {
  * @param {string} name
  * @returns {boolean}
  */
-function commandExists(name) {
+function commandExists(name: string): boolean {
   try {
     const cmd = process.platform === 'win32' ? 'where' : 'which';
     const result = spawnSync(cmd, [name], {
@@ -94,7 +116,7 @@ export function detectInstalledCLIs() {
  * @param {'claude'|'gemini'|'codex'} agent
  * @returns {object|string[]} Entry object for claude/gemini, or args array for codex
  */
-export function buildMcpServerEntry(agent) {
+export function buildMcpServerEntry(agent: string): Record<string, unknown> | string[] {
   const mcpPath = resolveMcpServerPath();
 
   switch (agent) {
@@ -131,7 +153,7 @@ export function buildMcpServerEntry(agent) {
  * @param {string} filePath
  * @returns {object}
  */
-export function readJsonFile(filePath) {
+export function readJsonFile(filePath: string): Record<string, unknown> {
   try {
     const raw = fs.readFileSync(filePath, 'utf8');
     if (!raw.trim()) return {};
@@ -147,7 +169,7 @@ export function readJsonFile(filePath) {
  * @param {string} filePath
  * @param {object} data
  */
-function writeJsonFile(filePath, data) {
+function writeJsonFile(filePath: string, data: Record<string, unknown>): void {
   const dir = path.dirname(filePath);
   if (!fs.existsSync(dir)) {
     fs.mkdirSync(dir, { recursive: true });
@@ -173,21 +195,22 @@ function defaultClaudeConfigPath() {
  * @param {boolean} [opts.force] Overwrite existing entry
  * @returns {{ status: 'added'|'exists'|'updated' }}
  */
-export function mergeClaudeConfig(opts = {}) {
-  const configPath = opts.configPath || defaultClaudeConfigPath();
+export function mergeClaudeConfig(opts: MergeConfigOptions = {}) {
+  const configPath = opts.configPath ?? defaultClaudeConfigPath();
   const force = Boolean(opts.force);
 
   const config = readJsonFile(configPath);
-  if (!config.mcpServers) {
-    config.mcpServers = {};
+  if (!config['mcpServers']) {
+    config['mcpServers'] = {};
+  }
+  const mcpServers = config['mcpServers'] as Record<string, unknown>;
+
+  if (mcpServers['hydra'] && !force) {
+    return { status: 'exists' as const };
   }
 
-  if (config.mcpServers.hydra && !force) {
-    return { status: 'exists' };
-  }
-
-  const status = config.mcpServers.hydra ? 'updated' : 'added';
-  config.mcpServers.hydra = buildMcpServerEntry('claude');
+  const status = mcpServers['hydra'] ? ('updated' as const) : ('added' as const);
+  mcpServers['hydra'] = buildMcpServerEntry('claude');
   writeJsonFile(configPath, config);
 
   return { status };
@@ -200,22 +223,23 @@ export function mergeClaudeConfig(opts = {}) {
  * @param {string} [opts.configPath] Override config path (for testing)
  * @returns {{ status: 'removed'|'not_found' }}
  */
-export function unmergeClaudeConfig(opts = {}) {
-  const configPath = opts.configPath || defaultClaudeConfigPath();
+export function unmergeClaudeConfig(opts: MergeConfigOptions = {}) {
+  const configPath = opts.configPath ?? defaultClaudeConfigPath();
 
   if (!fs.existsSync(configPath)) {
-    return { status: 'not_found' };
+    return { status: 'not_found' as const };
   }
 
   const config = readJsonFile(configPath);
-  if (!config.mcpServers || !config.mcpServers.hydra) {
-    return { status: 'not_found' };
+  const mcpServers = config['mcpServers'] as Record<string, unknown> | undefined;
+  if (!mcpServers || !mcpServers['hydra']) {
+    return { status: 'not_found' as const };
   }
 
-  delete config.mcpServers.hydra;
+  delete mcpServers['hydra'];
   writeJsonFile(configPath, config);
 
-  return { status: 'removed' };
+  return { status: 'removed' as const };
 }
 
 // ── Gemini CLI Config ───────────────────────────────────────────────────────
@@ -236,21 +260,22 @@ function defaultGeminiConfigPath() {
  * @param {boolean} [opts.force] Overwrite existing entry
  * @returns {{ status: 'added'|'exists'|'updated' }}
  */
-export function mergeGeminiConfig(opts = {}) {
-  const configPath = opts.configPath || defaultGeminiConfigPath();
+export function mergeGeminiConfig(opts: MergeConfigOptions = {}) {
+  const configPath = opts.configPath ?? defaultGeminiConfigPath();
   const force = Boolean(opts.force);
 
   const config = readJsonFile(configPath);
-  if (!config.mcpServers) {
-    config.mcpServers = {};
+  if (!config['mcpServers']) {
+    config['mcpServers'] = {};
+  }
+  const mcpServers = config['mcpServers'] as Record<string, unknown>;
+
+  if (mcpServers['hydra'] && !force) {
+    return { status: 'exists' as const };
   }
 
-  if (config.mcpServers.hydra && !force) {
-    return { status: 'exists' };
-  }
-
-  const status = config.mcpServers.hydra ? 'updated' : 'added';
-  config.mcpServers.hydra = buildMcpServerEntry('gemini');
+  const status = mcpServers['hydra'] ? ('updated' as const) : ('added' as const);
+  mcpServers['hydra'] = buildMcpServerEntry('gemini');
   writeJsonFile(configPath, config);
 
   return { status };
@@ -263,22 +288,23 @@ export function mergeGeminiConfig(opts = {}) {
  * @param {string} [opts.configPath] Override config path (for testing)
  * @returns {{ status: 'removed'|'not_found' }}
  */
-export function unmergeGeminiConfig(opts = {}) {
-  const configPath = opts.configPath || defaultGeminiConfigPath();
+export function unmergeGeminiConfig(opts: MergeConfigOptions = {}) {
+  const configPath = opts.configPath ?? defaultGeminiConfigPath();
 
   if (!fs.existsSync(configPath)) {
-    return { status: 'not_found' };
+    return { status: 'not_found' as const };
   }
 
   const config = readJsonFile(configPath);
-  if (!config.mcpServers || !config.mcpServers.hydra) {
-    return { status: 'not_found' };
+  const mcpServers = config['mcpServers'] as Record<string, unknown> | undefined;
+  if (!mcpServers || !mcpServers['hydra']) {
+    return { status: 'not_found' as const };
   }
 
-  delete config.mcpServers.hydra;
+  delete mcpServers['hydra'];
   writeJsonFile(configPath, config);
 
-  return { status: 'removed' };
+  return { status: 'removed' as const };
 }
 
 // ── Codex CLI Config ────────────────────────────────────────────────────────
@@ -289,7 +315,8 @@ export function unmergeGeminiConfig(opts = {}) {
  * @returns {{ status: 'added'|'error', error?: string }}
  */
 export function registerCodexMcp() {
-  const [nodePath, mcpPath] = buildMcpServerEntry('codex');
+  const codexEntry = buildMcpServerEntry('codex') as string[];
+  const [nodePath, mcpPath] = codexEntry;
   try {
     const result = spawnSync('codex', ['mcp', 'add', 'hydra', '--', nodePath, mcpPath], {
       encoding: 'utf8',
@@ -298,11 +325,14 @@ export function registerCodexMcp() {
       stdio: ['ignore', 'pipe', 'pipe'],
     });
     if (result.status === 0) {
-      return { status: 'added' };
+      return { status: 'added' as const };
     }
-    return { status: 'error', error: (result.stderr || '').trim() || `exit code ${result.status}` };
-  } catch (err) {
-    return { status: 'error', error: err.message };
+    return {
+      status: 'error' as const,
+      error: (String(result.stderr ?? '')).trim() || `exit code ${String(result.status)}`,
+    };
+  } catch (err: unknown) {
+    return { status: 'error' as const, error: (err as Error).message };
   }
 }
 
@@ -320,15 +350,15 @@ export function unregisterCodexMcp() {
       stdio: ['ignore', 'pipe', 'pipe'],
     });
     if (result.status === 0) {
-      return { status: 'removed' };
+      return { status: 'removed' as const };
     }
-    const stderr = (result.stderr || '').trim();
+    const stderr = (String(result.stderr ?? '')).trim();
     if (stderr.includes('not found') || stderr.includes('does not exist')) {
-      return { status: 'not_found' };
+      return { status: 'not_found' as const };
     }
-    return { status: 'error', error: stderr || `exit code ${result.status}` };
-  } catch (err) {
-    return { status: 'error', error: err.message };
+    return { status: 'error' as const, error: stderr || `exit code ${String(result.status)}` };
+  } catch (err: unknown) {
+    return { status: 'error' as const, error: (err as Error).message };
   }
 }
 
@@ -341,7 +371,7 @@ export function unregisterCodexMcp() {
  * @param {string} [opts.projectName] Project name for the header
  * @returns {string}
  */
-export function generateHydraMdTemplate(opts = {}) {
+export function generateHydraMdTemplate(opts: { projectName?: string } = {}) {
   const name = opts.projectName || 'My Project';
 
   return `# HYDRA.md
@@ -404,10 +434,10 @@ Options:
  * @param {string[]} argv
  * @returns {{ subcommand: string, flags: object }}
  */
-function parseSetupArgs(argv) {
-  const args = argv.slice(2); // skip node + script path
-  const flags = {};
-  const positionals = [];
+function parseSetupArgs(argv: string[]): { subcommand: string; flags: SetupFlags; positionals: string[] } {
+  const args = argv.slice(2);
+  const flags: SetupFlags = {};
+  const positionals: string[] = [];
   let subcommand = '';
 
   for (let i = 0; i < args.length; i += 1) {
@@ -458,7 +488,7 @@ export const KNOWN_CLI_MCP_PATHS = {
  * @param {boolean} [opts.force] - Overwrite existing entry
  * @returns {{ status: 'added'|'exists'|'updated'|'manual'|'error', instructions?: string }}
  */
-export function registerCustomAgentMcp(opts = {}) {
+export function registerCustomAgentMcp(opts: RegisterMcpOptions = {}) {
   const { configPath, format, force = false } = opts;
   const mcpPath = resolveMcpServerPath();
   const nodePath = resolveNodePath();
@@ -466,19 +496,20 @@ export function registerCustomAgentMcp(opts = {}) {
   const manualInstructions = `Add this to your agent's MCP configuration:\n\n  Name: hydra\n  Command: ${nodePath}\n  Args: ${mcpPath}\n\nOr if your agent uses a JSON config with an "mcpServers" field:\n  {\n    "mcpServers": {\n      "hydra": {\n        "type": "stdio",\n        "command": "${nodePath}",\n        "args": ["${mcpPath}"]\n      }\n    }\n  }`;
 
   if (!configPath || format !== 'json') {
-    return { status: 'manual', instructions: manualInstructions };
+    return { status: 'manual' as const, instructions: manualInstructions };
   }
 
   try {
     const config = readJsonFile(configPath);
-    if (!config.mcpServers) config.mcpServers = {};
+    if (!config['mcpServers']) config['mcpServers'] = {};
+    const mcpServers = config['mcpServers'] as Record<string, unknown>;
 
-    if (config.mcpServers.hydra && !force) {
-      return { status: 'exists' };
+    if (mcpServers['hydra'] && !force) {
+      return { status: 'exists' as const };
     }
 
-    const status = config.mcpServers.hydra ? 'updated' : 'added';
-    config.mcpServers.hydra = {
+    const status = mcpServers['hydra'] ? ('updated' as const) : ('added' as const);
+    mcpServers['hydra'] = {
       type: 'stdio',
       command: nodePath,
       args: [mcpPath],
@@ -490,7 +521,7 @@ export function registerCustomAgentMcp(opts = {}) {
 
     return { status };
   } catch {
-    return { status: 'manual', instructions: manualInstructions };
+    return { status: 'manual' as const, instructions: manualInstructions };
   }
 }
 
@@ -500,7 +531,7 @@ export function registerCustomAgentMcp(opts = {}) {
  * @param {string[]} [argv] Override process.argv for testing
  * @returns {{ ok: boolean, message: string }}
  */
-export async function main(argv) {
+export async function main(argv?: string[]): Promise<{ ok: boolean; message: string }> {
   const effectiveArgv = argv || process.argv;
   const { subcommand, flags, positionals } = parseSetupArgs(effectiveArgv);
 
@@ -533,12 +564,12 @@ export async function main(argv) {
  * @param {object} flags
  * @returns {{ ok: boolean, message: string }}
  */
-function runSetup(flags) {
+function runSetup(flags: SetupFlags): { ok: boolean; message: string } {
   const uninstall = Boolean(flags.uninstall);
   const force = Boolean(flags.force);
 
   const clis = detectInstalledCLIs();
-  const results = [];
+  const results: string[] = [];
 
   if (uninstall) {
     // Unregister from all
@@ -600,7 +631,7 @@ function runSetup(flags) {
  * @param {object} flags
  * @returns {{ ok: boolean, message: string }}
  */
-async function runInit(flags, positionals = []) {
+async function runInit(flags: SetupFlags, positionals: string[] = []): Promise<{ ok: boolean; message: string }> {
   if (positionals.length > 1) {
     const message = `Expected at most one target path for init, received ${positionals.length}.`;
     console.error(message);
@@ -651,9 +682,10 @@ async function runInit(flags, positionals = []) {
     } else {
       console.log('All agent files are up to date.');
     }
-  } catch (err) {
-    console.error(`Failed to sync agent files: ${err.message}`);
-    return { ok: false, message: `Init completed but sync failed: ${err.message}` };
+  } catch (err: unknown) {
+    const errMsg = (err as Error).message;
+    console.error(`Failed to sync agent files: ${errMsg}`);
+    return { ok: false, message: `Init completed but sync failed: ${errMsg}` };
   }
 
   return { ok: true, message: `Initialized HYDRA.md in ${projectRoot}` };
@@ -662,7 +694,7 @@ async function runInit(flags, positionals = []) {
 // ── Direct CLI entry ────────────────────────────────────────────────────────
 
 const isDirectRun =
-  process.argv[1] && path.resolve(process.argv[1]).replace(/\\/g, '/').endsWith('hydra-setup.mjs');
+  process.argv[1] && path.resolve(process.argv[1]).replace(/\\/g, '/').endsWith('hydra-setup.ts');
 
 if (isDirectRun) {
   main().catch((err) => {

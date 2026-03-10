@@ -20,6 +20,7 @@
 
 import https from 'node:https';
 import path from 'node:path';
+// @ts-ignore — cross-spawn has no bundled types; pre-existing across codebase
 import spawn from 'cross-spawn';
 import { loadHydraConfig } from './hydra-config.ts';
 import { getActiveModel, getReasoningEffort, AGENT_NAMES, AGENTS } from './hydra-agents.mjs';
@@ -27,11 +28,11 @@ import pc from 'picocolors';
 
 // ── HTTP helper ─────────────────────────────────────────────────────────────
 
-function httpGet(url, headers = {}) {
+function httpGet(url: string, headers: Record<string, string> = {}): Promise<unknown> {
   return new Promise((resolve, reject) => {
     const req = https.request(url, { headers, timeout: 10_000 }, (res) => {
       let data = '';
-      res.on('data', (chunk) => (data += chunk));
+      res.on('data', (chunk) => (data += String(chunk)));
       res.on('end', () => {
         try {
           resolve(JSON.parse(data));
@@ -51,32 +52,34 @@ function httpGet(url, headers = {}) {
 
 // ── Strategy 1: REST API with env key ───────────────────────────────────────
 
-async function apiClaude() {
-  const key = process.env.ANTHROPIC_API_KEY;
+async function apiClaude(): Promise<string[] | null> {
+  const key = process.env['ANTHROPIC_API_KEY'];
   if (!key) return null;
   const data = await httpGet('https://api.anthropic.com/v1/models?limit=100', {
     'x-api-key': key,
     'anthropic-version': '2023-06-01',
   });
-  return (data.data || []).map((m) => m.id).sort();
+  return ((data as { data?: Array<{ id: string }> }).data || []).map((m) => m.id).sort();
 }
 
-async function apiCodex() {
-  const key = process.env.OPENAI_API_KEY;
+async function apiCodex(): Promise<string[] | null> {
+  const key = process.env['OPENAI_API_KEY'];
   if (!key) return null;
   const data = await httpGet('https://api.openai.com/v1/models', {
     Authorization: `Bearer ${key}`,
   });
-  return (data.data || []).map((m) => m.id).sort();
+  return ((data as { data?: Array<{ id: string }> }).data || []).map((m) => m.id).sort();
 }
 
-async function apiGemini() {
-  const key = process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY;
+async function apiGemini(): Promise<string[] | null> {
+  const key = process.env['GEMINI_API_KEY'] ?? process.env['GOOGLE_API_KEY'];
   if (!key) return null;
   const data = await httpGet(
     `https://generativelanguage.googleapis.com/v1beta/models?key=${key}&pageSize=200`,
   );
-  return (data.models || []).map((m) => m.name.replace('models/', '')).sort();
+  return (
+    (data as { models?: Array<{ name: string }> }).models || []
+  ).map((m) => m.name.replace('models/', '')).sort();
 }
 
 // ── Strategy 2: Ask the CLI (cheap model, tiny prompt) ──────────────────────
@@ -114,7 +117,7 @@ function cliCodex() {
 }
 
 /** Parse one-per-line model IDs from noisy CLI output. */
-function parseModelLines(raw) {
+function parseModelLines(raw: string | null | undefined): string[] | null {
   if (!raw) return null;
   const ids = raw
     .split('\n')
@@ -134,8 +137,8 @@ const STRATEGIES = {
   gemini: { api: apiGemini, cli: cliGemini },
 };
 
-export async function fetchModels(agentName) {
-  const strat = STRATEGIES[agentName];
+export async function fetchModels(agentName: string) {
+  const strat = (STRATEGIES as Record<string, typeof STRATEGIES.claude>)[agentName];
   if (!strat) return { models: [], source: 'none' };
 
   // 1. Try API
@@ -160,12 +163,12 @@ export async function fetchModels(agentName) {
 
 // ── Display ─────────────────────────────────────────────────────────────────
 
-function displayAgent(agentName, fetchResult) {
+function displayAgent(agentName: string, fetchResult: { models: string[]; source: string }) {
   const cfg = loadHydraConfig();
-  const agentModels = cfg.models?.[agentName] || {};
-  const aliases = cfg.aliases?.[agentName] || {};
+  const agentModels = (cfg.models as Record<string, Record<string, string>>)?.[agentName] ?? {};
+  const aliases = (cfg.aliases as Record<string, Record<string, string>>)?.[agentName] ?? {};
   const activeModel = getActiveModel(agentName);
-  const agentInfo = AGENTS[agentName];
+  const agentInfo = (AGENTS as Record<string, { label?: string }>)[agentName];
   const mode = cfg.mode || 'performance';
   const tierPreset = cfg.modeTiers?.[mode]?.[agentName] || 'default';
 
@@ -258,7 +261,7 @@ async function main() {
   console.log(pc.bold('Discovering models...'));
 
   // Fetch all in parallel
-  const results = {};
+  const results: Record<string, { models: string[]; source: string }> = {};
   await Promise.all(
     agents.map(async (agent) => {
       results[agent] = await fetchModels(agent);
@@ -266,7 +269,7 @@ async function main() {
   );
 
   for (const agent of agents) {
-    displayAgent(agent, results[agent]);
+    displayAgent(agent, results[agent] ?? { models: [], source: 'none' });
   }
 
   console.log('');

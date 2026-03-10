@@ -6,7 +6,7 @@
  * durations, estimated tokens, and success rates.
  *
  * Usage:
- *   import { recordCallStart, recordCallComplete, getMetrics } from './hydra-metrics.mjs';
+ *   import { recordCallStart, recordCallComplete, getMetrics } from './hydra-metrics.ts';
  *   const handle = recordCallStart('claude', 'claude-opus-4-6');
  *   // ... agent call ...
  *   recordCallComplete(handle, result);
@@ -15,6 +15,116 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { EventEmitter } from 'node:events';
+
+// ── Types ────────────────────────────────────────────────────────────────────
+
+interface SessionUsage {
+  inputTokens: number;
+  outputTokens: number;
+  cacheCreationTokens: number;
+  cacheReadTokens: number;
+  totalTokens: number;
+  costUsd: number;
+  callCount: number;
+}
+
+interface RealTokens {
+  inputTokens: number;
+  outputTokens: number;
+  cacheCreationTokens: number;
+  cacheReadTokens: number;
+  totalTokens: number;
+}
+
+interface HistoryEntry {
+  at: string;
+  model: string;
+  durationMs: number;
+  estimatedTokens: number;
+  realTokens?: RealTokens | null;
+  costUsd?: number | null;
+  ok: boolean;
+  outputLen?: number;
+  outcome?: string;
+  error?: string;
+}
+
+interface AgentMetrics {
+  callsTotal: number;
+  callsToday: number;
+  callsSuccess: number;
+  callsFailed: number;
+  estimatedTokensToday: number;
+  totalDurationMs: number;
+  avgDurationMs: number;
+  lastCallAt: string | null;
+  lastModel: string | null;
+  history: HistoryEntry[];
+  sessionTokens: SessionUsage;
+}
+
+interface MetricsStore {
+  startedAt: string;
+  agents: Record<string, AgentMetrics>;
+  sessionUsage: SessionUsage;
+}
+
+interface ActiveHandle {
+  agent: string;
+  model: string;
+  startedAt: number;
+  startIso: string;
+}
+
+interface CallResult {
+  stdout?: string;
+  output?: string;
+  stderr?: string;
+  tokenUsage?: {
+    inputTokens?: number;
+    outputTokens?: number;
+    cacheCreationTokens?: number;
+    cacheReadTokens?: number;
+    totalTokens?: number;
+  };
+  costUsd?: number | null;
+  outcome?: string;
+}
+
+interface PercentileResult {
+  p50?: number;
+  p95?: number;
+  p99?: number;
+  [key: string]: number | undefined;
+}
+
+interface SloThresholds {
+  maxP95Ms?: number;
+  maxErrorRate?: number;
+}
+
+interface SloViolation {
+  agent: string;
+  metric: string;
+  value: number;
+  threshold: number;
+}
+
+interface FlowStep {
+  agent: string;
+}
+
+interface TokenWindowResult {
+  real: number;
+  estimated: number;
+  total: number;
+  entries: number;
+}
+
+interface OutcomeResult {
+  count: number;
+  totalCost: number;
+}
 
 // ── Metrics Event Emitter ───────────────────────────────────────────────────
 
@@ -25,22 +135,22 @@ const TOKENS_PER_CHAR_ESTIMATE = 0.25; // rough estimate: 4 chars ≈ 1 token
 
 // ── Percentile Calculation ──────────────────────────────────────────────────
 
-function calculatePercentiles(values, percentiles = [50, 95, 99]) {
+function calculatePercentiles(values: number[], percentiles: number[] = [50, 95, 99]): PercentileResult {
   if (values.length === 0) return {};
   const sorted = [...values].sort((a, b) => a - b);
-  const result = {};
+  const result: PercentileResult = {};
   for (const p of percentiles) {
     const idx = Math.max(0, Math.ceil((p / 100) * sorted.length) - 1);
-    result[`p${p}`] = sorted[idx];
+    result[`p${String(p)}`] = sorted[idx];
   }
   return result;
 }
 
 // ── Metrics Store ───────────────────────────────────────────────────────────
 
-let metricsStore = createEmptyStore();
+let metricsStore: MetricsStore = createEmptyStore();
 
-function createEmptySessionUsage() {
+function createEmptySessionUsage(): SessionUsage {
   return {
     inputTokens: 0,
     outputTokens: 0,
@@ -52,7 +162,7 @@ function createEmptySessionUsage() {
   };
 }
 
-function createEmptyStore() {
+function createEmptyStore(): MetricsStore {
   return {
     startedAt: new Date().toISOString(),
     agents: {},
@@ -60,7 +170,7 @@ function createEmptyStore() {
   };
 }
 
-function ensureAgent(agentName) {
+function ensureAgent(agentName: string): AgentMetrics {
   if (!metricsStore.agents[agentName]) {
     metricsStore.agents[agentName] = {
       callsTotal: 0,
@@ -77,16 +187,17 @@ function ensureAgent(agentName) {
     };
   }
   // Backfill sessionTokens for stores loaded from disk before this field existed
-  if (!metricsStore.agents[agentName].sessionTokens) {
-    metricsStore.agents[agentName].sessionTokens = createEmptySessionUsage();
+  const agentEntry = metricsStore.agents[agentName];
+  if (agentEntry && !agentEntry.sessionTokens) {
+    agentEntry.sessionTokens = createEmptySessionUsage();
   }
-  return metricsStore.agents[agentName];
+  return metricsStore.agents[agentName] as AgentMetrics;
 }
 
 // ── Recording ───────────────────────────────────────────────────────────────
 
 let handleCounter = 0;
-const activeHandles = new Map();
+const activeHandles = new Map<string, ActiveHandle>();
 
 /**
  * Record the start of an agent call.
@@ -94,7 +205,7 @@ const activeHandles = new Map();
  * @param {string} [model] - Model ID being used
  * @returns {string} Handle ID for recordCallComplete/Error
  */
-export function recordCallStart(agentName, model) {
+export function recordCallStart(agentName: string, model?: string): string {
   handleCounter += 1;
   const handle = `call_${handleCounter}_${Date.now()}`;
   activeHandles.set(handle, {
@@ -112,7 +223,7 @@ export function recordCallStart(agentName, model) {
  * @param {string} handle - Handle from recordCallStart
  * @param {object} result - Process result with stdout/stderr
  */
-export function recordCallComplete(handle, result) {
+export function recordCallComplete(handle: string, result: CallResult): void {
   const meta = activeHandles.get(handle);
   if (!meta) return;
   activeHandles.delete(handle);
@@ -131,14 +242,14 @@ export function recordCallComplete(handle, result) {
 
   // Accept pre-parsed tokenUsage from callers (e.g. executor after parseOutput)
   if (result?.tokenUsage) {
+    const tu = result.tokenUsage;
     realTokens = {
-      inputTokens: result.tokenUsage.inputTokens || 0,
-      outputTokens: result.tokenUsage.outputTokens || 0,
-      cacheCreationTokens: result.tokenUsage.cacheCreationTokens || 0,
-      cacheReadTokens: result.tokenUsage.cacheReadTokens || 0,
+      inputTokens: tu.inputTokens ?? 0,
+      outputTokens: tu.outputTokens ?? 0,
+      cacheCreationTokens: tu.cacheCreationTokens ?? 0,
+      cacheReadTokens: tu.cacheReadTokens ?? 0,
+      totalTokens: tu.totalTokens ?? (tu.inputTokens ?? 0) + (tu.outputTokens ?? 0),
     };
-    realTokens.totalTokens =
-      result.tokenUsage.totalTokens ?? realTokens.inputTokens + realTokens.outputTokens;
   }
   if (result?.costUsd != null) {
     costUsd = result.costUsd;
@@ -194,7 +305,7 @@ export function recordCallComplete(handle, result) {
  * @param {string} handle - Handle from recordCallStart
  * @param {Error|string} error - Error info
  */
-export function recordCallError(handle, error) {
+export function recordCallError(handle: string, error: Error | string | unknown): void {
   const meta = activeHandles.get(handle);
   if (!meta) return;
   activeHandles.delete(handle);
@@ -216,7 +327,7 @@ export function recordCallError(handle, error) {
     durationMs,
     estimatedTokens: 0,
     ok: false,
-    error: String(error?.message || error || 'unknown'),
+    error: String((error as Error)?.message ?? error ?? 'unknown'),
     outcome: 'failed',
   });
   if (agent.history.length > MAX_HISTORY) {
@@ -224,7 +335,7 @@ export function recordCallError(handle, error) {
   }
   metricsEmitter.emit('call:error', {
     agent: meta.agent,
-    error: String(error?.message || error || 'unknown'),
+    error: String((error as Error)?.message ?? error ?? 'unknown'),
   });
 }
 
@@ -240,7 +351,7 @@ export function getMetrics() {
 /**
  * Get metrics for a specific agent, including latency percentiles.
  */
-export function getAgentMetrics(agentName) {
+export function getAgentMetrics(agentName: string) {
   const agent = metricsStore.agents[agentName];
   if (!agent) return null;
 
@@ -257,7 +368,7 @@ export function getAgentMetrics(agentName) {
  * Get a summary suitable for dashboard display.
  */
 export function getMetricsSummary() {
-  const agents = {};
+  const agents: Record<string, unknown> = {};
   let totalCalls = 0;
   let totalTokens = 0;
   let totalDurationMs = 0;
@@ -309,7 +420,7 @@ export function getSessionUsage() {
  * @param {number} windowMs - Time window in milliseconds
  * @returns {{ real: number, estimated: number, total: number, entries: number }}
  */
-export function getRecentTokens(agentName, windowMs) {
+export function getRecentTokens(agentName: string | null | undefined, windowMs: number): TokenWindowResult {
   const cutoff = Date.now() - windowMs;
   let real = 0;
   let estimated = 0;
@@ -344,8 +455,8 @@ export function getRecentTokens(agentName, windowMs) {
  * @param {string} [agentName] - Agent name, or null/undefined for all
  * @returns {Object<string, {count: number, totalCost: number}>}
  */
-export function getCostByOutcome(agentName) {
-  const result = {};
+export function getCostByOutcome(agentName?: string | null): Record<string, OutcomeResult> {
+  const result: Record<string, OutcomeResult> = {};
   const agentNames = agentName ? [agentName] : Object.keys(metricsStore.agents);
 
   for (const name of agentNames) {
@@ -366,9 +477,9 @@ export function getCostByOutcome(agentName) {
  * @param {object} sloConfig - e.g. { claude: { maxP95Ms: 180000, maxErrorRate: 0.10 }, ... }
  * @returns {Array<{agent: string, metric: string, value: number, threshold: number}>}
  */
-export function checkSLOs(sloConfig) {
+export function checkSLOs(sloConfig: Record<string, SloThresholds> | null | undefined): SloViolation[] {
   if (!sloConfig) return [];
-  const violations = [];
+  const violations: SloViolation[] = [];
 
   for (const [agentName, thresholds] of Object.entries(sloConfig)) {
     const agent = metricsStore.agents[agentName];
@@ -418,12 +529,12 @@ const DEFAULT_AGENT_DURATION_MS = { gemini: 90_000, codex: 180_000, claude: 120_
  * @param {number} [rounds=1] - Number of rounds through the flow
  * @returns {number} Estimated total duration in ms
  */
-export function estimateFlowDuration(flow, rounds = 1) {
+export function estimateFlowDuration(flow: FlowStep[], rounds = 1): number {
   let total = 0;
   for (const step of flow) {
     const data = metricsStore.agents[step.agent];
     const avg = data?.avgDurationMs || 0;
-    total += avg > 0 ? avg : DEFAULT_AGENT_DURATION_MS[step.agent] || 120_000;
+    total += avg > 0 ? avg : (DEFAULT_AGENT_DURATION_MS as Record<string, number>)[step.agent] ?? 120_000;
   }
   return total * rounds;
 }
@@ -435,7 +546,7 @@ const METRICS_FILENAME = 'hydra-metrics.json';
 /**
  * Save metrics to a JSON file in the given directory.
  */
-export function persistMetrics(coordDir) {
+export function persistMetrics(coordDir: string): void {
   if (!coordDir) return;
   try {
     if (!fs.existsSync(coordDir)) {
@@ -451,7 +562,7 @@ export function persistMetrics(coordDir) {
 /**
  * Load previously persisted metrics.
  */
-export function loadPersistedMetrics(coordDir) {
+export function loadPersistedMetrics(coordDir: string): void {
   if (!coordDir) return;
   try {
     const filePath = path.join(coordDir, METRICS_FILENAME);

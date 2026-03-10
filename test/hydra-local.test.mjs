@@ -3,12 +3,12 @@ import assert from 'node:assert/strict';
 
 describe('hydra-local', () => {
   it('exports streamLocalCompletion', async () => {
-    const mod = await import('../lib/hydra-local.mjs');
+    const mod = await import('../lib/hydra-local.ts');
     assert.strictEqual(typeof mod.streamLocalCompletion, 'function');
   });
 
   it('returns local-unavailable on ECONNREFUSED', async () => {
-    const { streamLocalCompletion } = await import('../lib/hydra-local.mjs');
+    const { streamLocalCompletion } = await import('../lib/hydra-local.ts');
     // Port 19999 is almost certainly unused
     const result = await streamLocalCompletion([{ role: 'user', content: 'hello' }], {
       model: 'test',

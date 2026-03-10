@@ -13,21 +13,80 @@
 
 import { loadHydraConfig } from './hydra-config.ts';
 
+// ── Types ─────────────────────────────────────────────────────────────────────
+
+interface OTelApi {
+  trace: {
+    getTracer(name: string, version?: string): OTelTracer;
+    setSpan(ctx: unknown, span: unknown): unknown;
+  };
+  context: { active(): unknown };
+  SpanKind: { CLIENT: number; INTERNAL: number };
+  SpanStatusCode: { OK: number; ERROR: number };
+}
+
+interface OTelTracer {
+  startSpan(name: string, opts?: unknown): OTelSpan;
+}
+
+interface OTelSpan {
+  setAttribute(key: string, value: string | number | boolean): this;
+  setAttributes(attrs: Record<string, string | number | boolean>): this;
+  addEvent(name: string): this;
+  setStatus(status: { code: number; message?: string }): this;
+  end(): void;
+  recordException(err: Error): void;
+  isRecording(): boolean;
+}
+
+interface AgentSpanOpts {
+  phase?: string;
+  taskType?: string;
+  parentSpan?: OTelSpan & { _noop?: boolean };
+  context?: unknown;
+}
+
+interface AgentResult {
+  ok?: boolean;
+  durationMs?: number;
+  exitCode?: number;
+  timedOut?: boolean;
+  recovered?: boolean;
+  originalModel?: string;
+  newModel?: string;
+  error?: string;
+}
+
+interface ProviderSpanOpts {
+  operation?: string;
+}
+
+interface TokenUsage {
+  prompt_tokens?: number;
+  completion_tokens?: number;
+}
+
+interface PipelineSpanOpts {
+  ok?: boolean;
+  error?: string;
+}
+
 // ── Lazy OTel loading ──────────────────────────────────────────────────────
 
-let _otelApi = null; // cached module or false (not-found sentinel)
-let _tracer = null; // cached Tracer instance
+let _otelApi: OTelApi | false | null = null; // cached module or false (not-found sentinel)
+let _tracer: OTelTracer | null = null; // cached Tracer instance
 
 /**
  * Attempt to load @opentelemetry/api. Returns the module or null.
  * Result is cached — subsequent calls are instant.
  */
-async function loadOTel() {
+async function loadOTel(): Promise<OTelApi | null> {
   if (_otelApi === false) return null; // already tried, not found
   if (_otelApi) return _otelApi; // already loaded
 
   try {
-    _otelApi = await import('@opentelemetry/api');
+    // @ts-ignore — optional peer dep, may not be installed
+    _otelApi = (await import('@opentelemetry/api')) as OTelApi;
     return _otelApi;
   } catch {
     _otelApi = false; // sentinel: don't try again
@@ -37,20 +96,18 @@ async function loadOTel() {
 
 /**
  * Check if tracing is enabled (OTel available + config allows it).
- * @returns {Promise<boolean>}
  */
-export async function isTracingEnabled() {
+export async function isTracingEnabled(): Promise<boolean> {
   const cfg = loadHydraConfig();
-  if (cfg.telemetry?.enabled === false) return false;
+  if ((cfg.telemetry as { enabled?: boolean })?.enabled === false) return false;
   const api = await loadOTel();
   return api !== null;
 }
 
 /**
  * Get (or create) the Hydra tracer.
- * @returns {Promise<object|null>} OTel Tracer or null
  */
-export async function getTracer() {
+export async function getTracer(): Promise<OTelTracer | null> {
   if (_tracer) return _tracer;
   const api = await loadOTel();
   if (!api) return null;
@@ -94,28 +151,31 @@ const NOOP_SPAN = {
  * @param {string} [opts.parentSpan] - Parent span to nest under
  * @returns {Promise<object>} Span object (or NOOP_SPAN)
  */
-export async function startAgentSpan(agent, model, opts = {}) {
+export async function startAgentSpan(
+  agent: string,
+  model: string,
+  opts: AgentSpanOpts = {},
+): Promise<OTelSpan | typeof NOOP_SPAN> {
   const api = await loadOTel();
   if (!api) return NOOP_SPAN;
   const tracer = await getTracer();
   if (!tracer) return NOOP_SPAN;
 
-  const spanOpts = {};
+  const spanOpts: Record<string, unknown> = {};
   if (opts.parentSpan && !opts.parentSpan._noop) {
     const ctx = api.trace.setSpan(api.context.active(), opts.parentSpan);
-    spanOpts.context = ctx;
+    spanOpts['context'] = ctx;
   }
 
   const spanName = opts.phase ? `${agent}/${opts.phase}` : `${agent}/execute`;
 
-  // Use startActiveSpan so child spans auto-inherit
   const span = tracer.startSpan(spanName, {
     kind: api.SpanKind.CLIENT,
     attributes: {
       'gen_ai.system': agent,
       'gen_ai.request.model': model || 'unknown',
       'gen_ai.agent.name': agent,
-      'gen_ai.operation.name': opts.phase || 'execute',
+      'gen_ai.operation.name': opts.phase ?? 'execute',
     },
     ...spanOpts,
   });
@@ -133,7 +193,10 @@ export async function startAgentSpan(agent, model, opts = {}) {
  * @param {object} span - Span from startAgentSpan()
  * @param {object} result - executeAgent() result
  */
-export async function endAgentSpan(span, result) {
+export async function endAgentSpan(
+  span: OTelSpan & { _noop?: boolean },
+  result: AgentResult,
+): Promise<void> {
   if (!span || span._noop) return;
 
   const api = await loadOTel();
@@ -177,13 +240,17 @@ export async function endAgentSpan(span, result) {
  * @param {string} [opts.operation] - Operation name (default: 'chat')
  * @returns {Promise<object>} Span object (or NOOP_SPAN)
  */
-export async function startProviderSpan(provider, model, opts = {}) {
+export async function startProviderSpan(
+  provider: string,
+  model: string,
+  opts: ProviderSpanOpts = {},
+): Promise<OTelSpan | typeof NOOP_SPAN> {
   const api = await loadOTel();
   if (!api) return NOOP_SPAN;
   const tracer = await getTracer();
   if (!tracer) return NOOP_SPAN;
 
-  const operation = opts.operation || 'chat';
+  const operation = opts.operation ?? 'chat';
   const span = tracer.startSpan(`${provider}/${operation}`, {
     kind: api.SpanKind.CLIENT,
     attributes: {
@@ -203,7 +270,11 @@ export async function startProviderSpan(provider, model, opts = {}) {
  * @param {object} [usage] - Token usage: { prompt_tokens, completion_tokens }
  * @param {number} [latencyMs] - Request latency
  */
-export async function endProviderSpan(span, usage, latencyMs) {
+export async function endProviderSpan(
+  span: OTelSpan & { _noop?: boolean },
+  usage?: TokenUsage | null,
+  latencyMs?: number | null,
+): Promise<void> {
   if (!span || span._noop) return;
 
   const api = await loadOTel();
@@ -230,7 +301,10 @@ export async function endProviderSpan(span, usage, latencyMs) {
  * @param {object} [attrs] - Additional attributes
  * @returns {Promise<object>} Span object (or NOOP_SPAN)
  */
-export async function startPipelineSpan(name, attrs = {}) {
+export async function startPipelineSpan(
+  name: string,
+  attrs: Record<string, string | number | boolean> = {},
+): Promise<OTelSpan | typeof NOOP_SPAN> {
   const api = await loadOTel();
   if (!api) return NOOP_SPAN;
   const tracer = await getTracer();
@@ -255,7 +329,10 @@ export async function startPipelineSpan(name, attrs = {}) {
  * @param {boolean} [opts.ok=true] - Whether pipeline succeeded
  * @param {string} [opts.error] - Error message if failed
  */
-export async function endPipelineSpan(span, opts = {}) {
+export async function endPipelineSpan(
+  span: OTelSpan & { _noop?: boolean },
+  opts: PipelineSpanOpts = {},
+): Promise<void> {
   if (!span || span._noop) return;
 
   const api = await loadOTel();

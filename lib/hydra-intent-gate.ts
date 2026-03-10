@@ -122,13 +122,13 @@ export async function gateIntent(text: string, opts: GateIntentOpts = {}) {
 }
 
 /**
- * Default LLM rewrite using the local/fast model via hydra-local.mjs.
+ * Default LLM rewrite using the local/fast model via hydra-local.ts.
  * Dynamic import avoids circular deps at load time.
  */
 async function defaultRewriteFn(text: string): Promise<string | null> {
   let streamLocalCompletion;
   try {
-    ({ streamLocalCompletion } = await import('./hydra-local.mjs'));
+    ({ streamLocalCompletion } = await import('./hydra-local.ts'));
   } catch {
     return null;
   }

@@ -12,7 +12,7 @@ import {
   estimateFlowDuration,
   resetMetrics,
   metricsEmitter,
-} from '../lib/hydra-metrics.mjs';
+} from '../lib/hydra-metrics.ts';
 
 // Reset metrics before each test group to ensure isolation
 test('metrics: reset clears all state', () => {

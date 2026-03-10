@@ -23,14 +23,13 @@ import {
   getActiveModel,
   resolveModelId,
   getReasoningEffort,
-  REASONING_EFFORTS,
   getEffortOptionsForModel,
   formatEffortDisplay,
   AGENTS,
   AGENT_NAMES,
   AGENT_DISPLAY_ORDER,
 } from './hydra-agents.mjs';
-import { fetchModels } from './hydra-models.mjs';
+import { fetchModels } from './hydra-models.ts';
 import { formatBenchmarkAnnotation } from './hydra-model-profiles.ts';
 
 // ── ANSI helpers ────────────────────────────────────────────────────────────
@@ -40,49 +39,63 @@ const CLEAR_LINE = `${CSI}2K`;
 const CLEAR_BELOW = `${CSI}0J`;
 const HIDE_CURSOR = `${CSI}?25l`;
 const SHOW_CURSOR = `${CSI}?25h`;
-const up = (n) => (n > 0 ? `${CSI}${n}A` : '');
+const up = (n: number): string => (n > 0 ? `${CSI}${String(n)}A` : '');
 
 // Ensure cursor is always restored
 process.on('exit', () => process.stdout.write(SHOW_CURSOR));
 
+// ── Picker option types ────────────────────────────────────────────────────
+
+interface PickerOpts<T> {
+  title?: string;
+  renderItem?: (item: T, isSelected: boolean) => string;
+  filterKey?: (item: T) => string;
+  pageSize?: number;
+  initialIndex?: number;
+}
+
 // ── Interactive Picker ─────────────────────────────────────────────────────
 
-class Picker {
-  /**
-   * @param {Array} items       - Objects to choose from
-   * @param {object} opts
-   * @param {string}   opts.title      - Header line
-   * @param {function} opts.renderItem - (item, isSelected) => display string
-   * @param {function} opts.filterKey  - (item) => searchable text
-   * @param {number}   opts.pageSize   - Visible rows (default 18)
-   * @param {number}   opts.initialIndex
-   */
-  constructor(items, opts = {}) {
+class Picker<T> {
+  items: T[];
+  filtered: T[];
+  cursor: number;
+  search: string;
+  title: string;
+  renderItem: (item: T, isSelected: boolean) => string;
+  filterKey: (item: T) => string;
+  pageSize: number;
+  scroll: number;
+  _lines: number;
+  _handler: ((str: string, key: unknown) => void) | null;
+  _resolve: ((value: T | null) => void) | null;
+
+  constructor(items: T[], opts: PickerOpts<T> = {}) {
     this.items = items;
     this.filtered = [...items];
-    this.cursor = Math.min(opts.initialIndex || 0, Math.max(0, items.length - 1));
+    this.cursor = Math.min(opts.initialIndex ?? 0, Math.max(0, items.length - 1));
     this.search = '';
-    this.title = opts.title || '';
-    this.renderItem = opts.renderItem || ((item) => String(item));
-    this.filterKey = opts.filterKey || ((item) => String(item));
-    this.pageSize = opts.pageSize || 18;
+    this.title = opts.title ?? '';
+    this.renderItem = opts.renderItem ?? ((item) => String(item));
+    this.filterKey = opts.filterKey ?? ((item) => String(item));
+    this.pageSize = opts.pageSize ?? 18;
     this.scroll = 0;
     this._lines = 0;
     this._handler = null;
     this._resolve = null;
   }
 
-  run() {
+  run(): Promise<T | null> {
     if (!process.stdin.isTTY) return this._fallback();
 
-    return new Promise((resolve) => {
+    return new Promise<T | null>((resolve) => {
       this._resolve = resolve;
       readline.emitKeypressEvents(process.stdin);
       process.stdin.setRawMode(true);
       process.stdin.resume();
       process.stdout.write(HIDE_CURSOR);
 
-      this._handler = (str, key) => this._onKey(str, key);
+      this._handler = (str: string, key: unknown) => this._onKey(str, key as { ctrl?: boolean; name?: string } | null);
       process.stdin.on('keypress', this._handler);
       this._draw();
     });
@@ -90,7 +103,7 @@ class Picker {
 
   // ── Key handling ──────────────────────────────────────────────────────────
 
-  _onKey(str, key) {
+  _onKey(str: string, key: { ctrl?: boolean; name?: string } | null) {
     if (!key) {
       if (str && str.length === 1 && str >= ' ') {
         this.search += str;
@@ -226,7 +239,7 @@ class Picker {
 
   // ── Lifecycle ─────────────────────────────────────────────────────────────
 
-  _finish(result) {
+  _finish(result: T | null) {
     if (this._handler) process.stdin.removeListener('keypress', this._handler);
     if (process.stdin.isTTY) process.stdin.setRawMode(false);
     process.stdin.pause();
@@ -243,7 +256,7 @@ class Picker {
 
   // ── Non-TTY fallback ─────────────────────────────────────────────────────
 
-  async _fallback() {
+  async _fallback(): Promise<T | null> {
     console.log('');
     if (this.title) console.log(`  ${this.title}\n`);
     for (const [i, item] of this.items.entries()) {
@@ -252,7 +265,7 @@ class Picker {
     console.log('');
 
     const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
-    return new Promise((resolve) => {
+    return new Promise<T | null>((resolve) => {
       rl.question('  Enter number (q to cancel): ', (ans) => {
         rl.close();
         const t = ans.trim();
@@ -261,7 +274,7 @@ class Picker {
           return;
         }
         const idx = Number.parseInt(t, 10) - 1;
-        resolve(idx >= 0 && idx < this.items.length ? this.items[idx] : null);
+        resolve(idx >= 0 && idx < this.items.length ? (this.items[idx] ?? null) : null);
       });
     });
   }
@@ -277,8 +290,8 @@ export async function pickAgent() {
 
   const items = order.map((name) => ({
     name,
-    label: AGENTS[name]?.label || name,
-    active: getActiveModel(name) || 'unknown',
+    label: (AGENTS as Record<string, { label?: string }>)[name]?.label ?? name,
+    active: getActiveModel(name) ?? 'unknown',
     effort: formatEffortDisplay(getActiveModel(name), getReasoningEffort(name)),
   }));
 
@@ -293,17 +306,17 @@ export async function pickAgent() {
     },
   }).run();
 
-  return picked?.name || null;
+  return picked?.name ?? null;
 }
 
 // ── Model picker ────────────────────────────────────────────────────────────
 
-export async function pickModel(agentName) {
-  const agentInfo = AGENTS[agentName];
+export async function pickModel(agentName: string) {
+  const agentInfo = (AGENTS as Record<string, { label?: string }>)[agentName];
   const currentModel = getActiveModel(agentName);
   const cfg = loadHydraConfig();
-  const agentModels = cfg.models?.[agentName] || {};
-  const aliases = cfg.aliases?.[agentName] || {};
+  const agentModels = (cfg.models as Record<string, Record<string, string>>)?.[agentName] ?? {};
+  const aliases = (cfg.aliases as Record<string, Record<string, string>>)?.[agentName] ?? {};
 
   // Loading indicator
   process.stdout.write(`  ${pc.dim(`Fetching ${agentInfo?.label || agentName} models...`)}`);
@@ -322,8 +335,8 @@ export async function pickModel(agentName) {
   }
 
   // Build item list: presets first (deduped), then discovered models
-  const seen = new Set();
-  const items = [];
+  const seen = new Set<string>();
+  const items: Array<{ id: string; preset: string | null; active: boolean }> = [];
 
   for (const key of ['default', 'fast', 'cheap']) {
     const id = agentModels[key];
@@ -383,7 +396,20 @@ export async function pickModel(agentName) {
 
 // ── Reasoning effort picker ─────────────────────────────────────────────────
 
-export async function pickEffort(agentName, modelId) {
+interface EffortItem extends EffortResult {
+  id: string | null;
+  label: string;
+  desc: string | null;
+}
+
+interface EffortResult {
+  id: string | null;
+  label?: string;
+  desc?: string | null;
+  _skipped?: boolean;
+}
+
+export async function pickEffort(agentName: string, modelId?: string | null): Promise<EffortResult | null | undefined> {
   const current = getReasoningEffort(agentName);
   const effectiveModel = modelId || getActiveModel(agentName);
   const options = getEffortOptionsForModel(effectiveModel);
@@ -401,12 +427,13 @@ export async function pickEffort(agentName, modelId) {
     thinking: 'Thinking Budget',
     'model-swap': 'Thinking Mode',
   };
-  const title = TITLES[caps.type] || 'Reasoning Effort';
+  const title =
+    (TITLES as Record<string, string>)[caps.type as string] ?? 'Reasoning Effort';
 
-  const items = options.map((opt) => ({
+  const items: EffortItem[] = options.map((opt: { id: string | null; label: string; hint?: string }) => ({
     id: opt.id,
     label: opt.label,
-    desc: opt.hint || null,
+    desc: opt.hint ?? null,
   }));
 
   const initialIdx = current
@@ -436,20 +463,17 @@ export async function pickEffort(agentName, modelId) {
 
 // ── Apply selection ─────────────────────────────────────────────────────────
 
-export function applySelection(agentName, modelId, effortLevel) {
+export function applySelection(agentName: string, modelId: string, effortLevel: string | null): string {
   invalidateConfigCache();
   const cfg = loadHydraConfig();
 
-  // Set mode to custom
   cfg.mode = 'custom';
 
-  // Set active model
-  if (!cfg.models[agentName]) cfg.models[agentName] = {};
-  const resolved = resolveModelId(agentName, modelId) || modelId;
-  cfg.models[agentName].active = resolved;
-
-  // Set reasoning effort (null clears it)
-  cfg.models[agentName].reasoningEffort = effortLevel || null;
+  const models = cfg.models as Record<string, Record<string, string | null>>;
+  if (!models[agentName]) models[agentName] = {} as Record<string, string | null>;
+  const resolved = (resolveModelId(agentName, modelId) as string | null) ?? modelId;
+  models[agentName]!['active'] = resolved;
+  models[agentName]!['reasoningEffort'] = effortLevel ?? null;
 
   saveHydraConfig(cfg);
   return resolved;

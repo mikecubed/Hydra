@@ -373,7 +373,7 @@ async function main() {
   // Subcommands that bypass the operator
   const subcommand = argv[0]?.toLowerCase();
   if (subcommand === 'setup' || subcommand === 'init') {
-    const { main: setupMain } = await import('../lib/hydra-setup.mjs');
+    const { main: setupMain } = await import('../lib/hydra-setup.ts');
     // main() expects process.argv-shaped array (parseSetupArgs does .slice(2))
     await setupMain(['_', '_', subcommand, ...argv.slice(1)]);
     return;

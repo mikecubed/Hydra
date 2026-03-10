@@ -6,22 +6,39 @@
  * OpenAI-compatible runtime.
  */
 
+interface LocalMessage {
+  role: 'user' | 'assistant' | 'system';
+  content: string;
+}
+
+interface LocalCompletionConfig {
+  model: string;
+  baseUrl: string;
+  maxTokens?: number;
+  signal?: AbortSignal;
+}
+
+interface LocalCompletionResult {
+  ok: boolean;
+  fullResponse: string;
+  output: string;
+  usage: Record<string, number> | null;
+  rateLimits: null;
+  errorCategory?: string;
+}
+
 /**
  * Stream a chat completion from a local OpenAI-compatible endpoint.
- *
- * @param {Array<{role: string, content: string}>} messages
- * @param {object} cfg
- * @param {string} cfg.model - Model identifier (e.g. 'mistral:7b')
- * @param {string} cfg.baseUrl - Base URL (e.g. 'http://localhost:11434/v1')
- * @param {number} [cfg.maxTokens] - Optional max tokens
- * @param {Function} [onChunk] - Called with each streamed text chunk
- * @returns {Promise<{ok: boolean, fullResponse: string, usage: object|null, rateLimits: null, output: string, errorCategory?: string}>}
  */
-export async function streamLocalCompletion(messages, cfg, onChunk) {
+export async function streamLocalCompletion(
+  messages: LocalMessage[],
+  cfg: LocalCompletionConfig,
+  onChunk?: (chunk: string) => void,
+): Promise<LocalCompletionResult> {
   const { baseUrl, model, maxTokens, signal } = cfg;
 
-  const body = { model, messages, stream: true };
-  if (maxTokens) body.max_tokens = maxTokens;
+  const body: Record<string, unknown> = { model, messages, stream: true };
+  if (maxTokens) body['max_tokens'] = maxTokens;
 
   let res;
   try {
@@ -31,8 +48,9 @@ export async function streamLocalCompletion(messages, cfg, onChunk) {
       body: JSON.stringify(body),
       ...(signal ? { signal } : {}),
     });
-  } catch (err) {
-    const errCode = err.cause?.code || err.code;
+  } catch (err: unknown) {
+    const e = err as NodeJS.ErrnoException & { cause?: NodeJS.ErrnoException };
+    const errCode = e.cause?.code || e.code;
     const unreachable = [
       'ECONNREFUSED',
       'ENOTFOUND',
@@ -41,7 +59,7 @@ export async function streamLocalCompletion(messages, cfg, onChunk) {
       'EHOSTUNREACH',
       'ENETUNREACH',
     ];
-    if (unreachable.includes(errCode)) {
+    if (unreachable.includes(errCode ?? '')) {
       return {
         ok: false,
         errorCategory: 'local-unavailable',
@@ -56,11 +74,12 @@ export async function streamLocalCompletion(messages, cfg, onChunk) {
 
   if (!res.ok) {
     const errText = await res.text().catch(() => '');
-    const err = new Error(`Local API error ${res.status}: ${errText.slice(0, 200)}`);
-    err.status = res.status;
-    throw err;
+    throw new Error(`Local API error ${res.status}: ${errText.slice(0, 200)}`);
   }
 
+  if (!res.body) {
+    throw new Error('Local API response has no body');
+  }
   const reader = res.body.getReader();
   const decoder = new TextDecoder();
   let buffer = '';
