@@ -93,6 +93,7 @@ Operator Console (REPL)
 - **Intent gate**: `lib/hydra-intent-gate.mjs` — `gateIntent(text)` pre-screens prompts before dispatch. Config: `routing.intentGate.enabled`, `.confidenceThreshold`.
 - **Hierarchical context**: `lib/hydra-context.mjs` — `buildAgentContext(agent, { promptText })` walks ancestor dirs for scoped HYDRA.md files. Config: `context.hierarchical.enabled`.
 - **Provider presets**: `getProviderPresets()` from `hydra-config.mjs` returns built-in GLM-5 / Kimi K2.5 templates. Used by `:agents add` wizard preset picker.
+- **Custom agent wizard**: `lib/hydra-agents-wizard.mjs` — `runAgentsWizard(rl)` guides CLI or API agent setup, writes to `agents.customAgents[]`, calls `registerCustomAgentMcp()`. Exports `buildCustomAgentEntry()`, `parseArgsTemplate()`, `validateAgentName()`. Accessed via `:agents add`. `lib/hydra-setup.mjs` exports `registerCustomAgentMcp({ configPath, format, force? })` and `KNOWN_CLI_MCP_PATHS` for MCP injection into custom agent config files.
 - **Task worktree isolation**: `routing.worktreeIsolation.enabled` (default: false) — daemon creates/merges/cleans per-task worktrees at claim/result time. `:cleanup` sweeps stale worktrees via `scanStaleTaskWorktrees()`.
 
 ## Test Patterns
