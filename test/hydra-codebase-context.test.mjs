@@ -151,9 +151,9 @@ test('codebase: getConfigReference returns config for concierge', () => {
   assert.ok(result.includes('concierge'));
 });
 
-test('codebase: getConfigReference returns empty string for unknown topic', () => {
+test('codebase: getConfigReference returns null for unknown topic', () => {
   const result = getConfigReference('nonexistent');
-  assert.equal(result, '');
+  assert.equal(result, null);
 });
 
 // ── searchKnowledgeBase ─────────────────────────────────────────────────────
