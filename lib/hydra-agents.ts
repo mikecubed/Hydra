@@ -4,7 +4,7 @@
  * Dynamic agent registry with support for physical agents (CLI-backed)
  * and virtual sub-agents (specialized roles running on a physical agent's CLI).
  *
- * Physical agents: claude, gemini, codex — the 3 CLI execution backends.
+ * Physical agents: claude, gemini, codex, local, copilot — the CLI execution backends.
  * Virtual agents: specialized roles (e.g. security-reviewer, test-writer)
  * that inherit CLI/invoke from a base physical agent but carry their own
  * prompts, affinities, and tags.
@@ -26,7 +26,10 @@ import {
   invalidateConfigCache,
   HYDRA_ROOT,
 } from './hydra-config.ts';
-import { getReasoningCapsMap as _getReasoningCapsMap } from './hydra-model-profiles.ts';
+import {
+  getReasoningCapsMap as _getReasoningCapsMap,
+  resolveCliModelId,
+} from './hydra-model-profiles.ts';
 import { extractCodexText, extractCodexUsage } from './hydra-shared/codex-helpers.ts';
 
 // ── Agent Type Enum ──────────────────────────────────────────────────────────
@@ -447,6 +450,142 @@ Sandbox-aware: no network access, file-system focused. Work within your sandbox 
     economyModel: () => null,
     readInstructions: (f: string) => `Read ${f} first.`,
     taskRules: [],
+  },
+  copilot: {
+    name: 'copilot',
+    type: 'physical',
+    displayName: 'Copilot',
+    label: 'GitHub Copilot CLI',
+    cli: 'copilot',
+    invoke: {
+      // nonInteractive: plan-mode approval (no --allow flags); callers must not expect
+      // file-modification side-effects from nonInteractive calls.
+      nonInteractive: (prompt: string, opts: HeadlessOpts = {}): [string, string[]] => {
+        const args = ['-p', prompt];
+        if (opts.model) args.push('--model', resolveCliModelId(opts.model));
+        return ['copilot', args];
+      },
+      interactive: (prompt: string): [string, string[]] => ['copilot', [prompt]],
+      headless: (prompt: string, opts: HeadlessOpts = {}): [string, string[]] => {
+        const args = ['-p', prompt, '--silent'];
+        if (opts.model) args.push('--model', resolveCliModelId(opts.model));
+        // JSON output — enabled by default (features.jsonOutput: true)
+        if (opts.jsonOutput !== false) args.push('--output-format', 'json');
+        // Disable ask_user so agent does not stall waiting for input in headless mode
+        args.push('--no-ask-user');
+        if (opts.permissionMode === 'full-auto') {
+          args.push('--allow-all-tools');
+        } else if (opts.permissionMode === 'auto-edit') {
+          args.push('--allow-tool', 'shell(git:*)', '--allow-tool', 'write');
+        }
+        // Default (plan): no --allow flags
+        return ['copilot', args];
+      },
+    },
+    contextBudget: 128_000,
+    contextTier: 'medium',
+
+    features: {
+      executeMode: 'spawn',
+      jsonOutput: true,      // --output-format json is live; output is JSONL event stream
+      stdinPrompt: false,    // uses -p flag, not stdin
+      reasoningEffort: false,
+    },
+
+    parseOutput(stdout: string, opts?: { jsonOutput?: boolean }): AgentResult {
+      if (opts?.jsonOutput) {
+        try {
+          const lines = stdout.split('\n').filter(Boolean);
+          const events = lines.map((l) => JSON.parse(l) as Record<string, unknown>);
+
+          // Find the last assistant.message that is a final text response
+          // (toolRequests is empty, meaning it is the final answer turn)
+          const messages = events.filter(
+            (e) =>
+              e['type'] === 'assistant.message' &&
+              Array.isArray((e['data'] as Record<string, unknown>)['toolRequests']) &&
+              ((e['data'] as Record<string, unknown>)['toolRequests'] as unknown[]).length === 0,
+          );
+          const lastMsg = messages.at(-1);
+          const lastMsgData = lastMsg?.['data'] as Record<string, unknown> | undefined;
+          const output = (lastMsgData?.['content'] as string | undefined) ?? stdout;
+
+          // Extract usage from the final result event
+          const resultEvent = [...events].reverse().find((e) => e['type'] === 'result');
+          const resultUsage = resultEvent?.['usage'] as Record<string, unknown> | undefined;
+          const premiumRequests =
+            typeof resultUsage?.['premiumRequests'] === 'number'
+              ? (resultUsage['premiumRequests'] as number)
+              : null;
+
+          return {
+            output,
+            tokenUsage: premiumRequests !== null ? { premiumRequests } : null,
+            costUsd: null,
+          };
+        } catch {
+          // Fall through to plain text
+        }
+      }
+      return { output: stdout, tokenUsage: null, costUsd: null };
+    },
+
+    errorPatterns: {
+      authRequired:
+        /not logged in|authentication required|copilot subscription|no copilot access/i,
+      rateLimited: /rate limit|quota exceeded|too many requests/i,
+      quotaExhausted: /premium request.*limit|monthly.*quota.*exceeded/i,
+      networkError: /network error|connection refused|ECONNREFUSED|ENOTFOUND/i,
+      subscriptionRequired: /copilot plan required|upgrade your plan/i,
+    },
+
+    modelBelongsTo: (id: string) => id.toLowerCase().startsWith('copilot-'),
+
+    // Optimistic auth — no proactive check. Browser-based device flow means there is
+    // no env var or status command to verify. Auth failures surface at task-execution time.
+    quotaVerify: () => Promise.resolve(null),
+
+    economyModel: () => 'copilot-claude-sonnet-4-6',
+
+    readInstructions: (f: string) =>
+      `Read ${f} and any relevant GitHub context (issues, PRs) before responding.`,
+
+    taskRules: ['- Cross-reference with open issues and CI history when reviewing code.'],
+
+    strengths: [
+      'github-integration',
+      'issue-pr-awareness',
+      'ci-workflow',
+      'code-suggestion',
+      'real-time-assist',
+      'mcp-native',
+      'multi-model',
+    ],
+    weaknesses: ['subscription-required', 'github-account-auth', 'complex-architecture'],
+    councilRole: 'advisor',
+    taskAffinity: {
+      planning: 0.65,
+      architecture: 0.55,
+      review: 0.8,
+      refactor: 0.7,
+      implementation: 0.75,
+      analysis: 0.65,
+      testing: 0.7,
+      research: 0.6,
+      documentation: 0.75,
+      security: 0.7,
+    },
+    rolePrompt: `You are the GitHub integration advisor. Your responsibilities:
+
+1. **GitHub Context**: Leverage your built-in access to GitHub issues, PRs, CI workflows, and repository context. Always use this context to inform your suggestions.
+2. **Workflow Automation**: Identify opportunities to automate GitHub workflows — CI improvements, PR templates, issue triage, branch protection.
+3. **Code Review Integration**: When reviewing code, cross-reference with open issues, related PRs, and CI failure patterns.
+4. **Practical Suggestions**: Prioritize actionable changes over theoretical improvements. Provide \`git\`/\`gh\` CLI commands the team can run immediately.
+
+Output structure: GitHub context summary → Actionable suggestions → Commands to run.`,
+    timeout: 7 * 60 * 1000,
+    tags: ['github', 'integration', 'copilot', 'advisory'],
+    enabled: true,
   },
 };
 

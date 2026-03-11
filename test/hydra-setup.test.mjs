@@ -170,11 +170,12 @@ describe('readJsonFile', () => {
 // ── detectInstalledCLIs ─────────────────────────────────────────────────────
 
 describe('detectInstalledCLIs', () => {
-  it('returns an object with claude, gemini, codex keys', () => {
+  it('returns an object with claude, gemini, codex, copilot keys', () => {
     const result = detectInstalledCLIs();
     assert.ok('claude' in result);
     assert.ok('gemini' in result);
     assert.ok('codex' in result);
+    assert.ok('copilot' in result, 'Missing copilot key from detectInstalledCLIs()');
   });
 
   it('each value is a boolean', () => {
@@ -182,6 +183,7 @@ describe('detectInstalledCLIs', () => {
     assert.strictEqual(typeof result.claude, 'boolean');
     assert.strictEqual(typeof result.gemini, 'boolean');
     assert.strictEqual(typeof result.codex, 'boolean');
+    assert.strictEqual(typeof result.copilot, 'boolean');
   });
 });
 

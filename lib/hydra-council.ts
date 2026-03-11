@@ -125,6 +125,7 @@ const DEFAULT_TIMEOUT_MS = 1000 * 60 * 7;
 /**
  * Council flow: Claude→Gemini→Claude→Codex
  * Each step has a specific phase and agent-aware prompt.
+ * Copilot is an optional advisor step appended when available.
  */
 const COUNCIL_FLOW = [
   {
@@ -149,6 +150,13 @@ const COUNCIL_FLOW = [
     phase: 'implement',
     promptLabel:
       'Given this finalized plan, produce exact file paths, function signatures, and implementation steps for each task.',
+  },
+  {
+    agent: 'copilot',
+    phase: 'advise',
+    optional: true,
+    promptLabel:
+      'Review the plan and implementation from a GitHub integration perspective. Identify relevant open issues, CI concerns, PR workflow improvements, or GitHub Actions optimizations.',
   },
 ];
 
@@ -1640,10 +1648,17 @@ async function main() {
     }
   }
 
-  // Filter council flow to only include agents in the filter (if provided)
-  const activeFlow = agentsFilter
+  // Filter council flow to only include agents in the filter (if provided).
+  // Optional steps (e.g., copilot advise) are skipped when the agent is not registered.
+  const activeFlow = (agentsFilter
     ? COUNCIL_FLOW.filter((step) => agentsFilter.includes(step.agent))
-    : COUNCIL_FLOW;
+    : COUNCIL_FLOW
+  ).filter((step) => {
+    if (!('optional' in step) || !step.optional) return true;
+    // Skip optional steps when the agent is not registered and enabled
+    const agentDef = getAgent(step.agent);
+    return Boolean(agentDef?.enabled);
+  });
 
   // Checkpoint resume: check for existing checkpoint and restore state
   const promptHash = simpleHash(prompt);

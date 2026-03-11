@@ -25,10 +25,16 @@ const claudeOrange = isTruecolor
   ? (str: string) => `\x1b[38;2;232;134;58m${str}\x1b[39m`
   : pc.yellow;
 
+// GitHub Copilot brand blue (#1F6FEB)
+const copilotBlue = isTruecolor
+  ? (str: string) => `\x1b[38;2;31;111;235m${str}\x1b[39m`
+  : pc.blue;
+
 export const AGENT_COLORS = {
   gemini: pc.cyan,
   codex: pc.green,
   claude: claudeOrange,
+  copilot: copilotBlue,
   human: pc.yellow,
   system: pc.blue,
 };
@@ -37,6 +43,7 @@ export const AGENT_ICONS = {
   gemini: '\u2726', // ✦
   codex: '\u058E', // ֎
   claude: '\u274B', // ❋
+  copilot: '\u29BF', // ⦿
   human: '\u{1F16F}', // 🅯
   system: '\u{1F5B3}', // 🖳
 };

@@ -78,8 +78,8 @@ describe('MODEL_PROFILES data integrity', () => {
     }
   });
 
-  it('every agent in profiles is one of claude/codex/gemini', () => {
-    const validAgents = new Set(['claude', 'codex', 'gemini']);
+  it('every agent in profiles is one of claude/codex/gemini/copilot', () => {
+    const validAgents = new Set(['claude', 'codex', 'gemini', 'copilot']);
     for (const [id, p] of Object.entries(MODEL_PROFILES)) {
       assert.ok(validAgents.has(p.agent), `${id} has invalid agent: ${p.agent}`);
     }

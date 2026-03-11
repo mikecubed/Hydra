@@ -516,17 +516,19 @@ const TANDEM_INDICATORS =
   /\b(?:first\s+\w+(?:\s+\w+){0,5}\s+then\b|review\s+and\s+fix|analyze\s+and\s+implement|plan\s+(?:and\s+|then\s+)?build|assess\s+(?:and|then)\s+(?:fix|implement|refactor)|research\s+(?:and|then)\s+(?:implement|build|write)|check\s+(?:and|then)\s+(?:fix|update|refactor))/i;
 
 // Task-type → tandem pair mapping
+// For review and documentation, copilot is preferred as follow agent when available
+// (adds GitHub context). selectTandemPair() substitutes when copilot is absent.
 const TANDEM_PAIRS: Record<string, TandemPair> = {
   planning: { lead: 'claude', follow: 'codex' },
   architecture: { lead: 'claude', follow: 'gemini' },
-  review: { lead: 'gemini', follow: 'claude' },
+  review: { lead: 'gemini', follow: 'copilot' },
   refactor: { lead: 'claude', follow: 'codex' },
   implementation: { lead: 'claude', follow: 'codex' },
   analysis: { lead: 'gemini', follow: 'claude' },
   testing: { lead: 'codex', follow: 'gemini' },
   security: { lead: 'gemini', follow: 'claude' },
   research: { lead: 'gemini', follow: 'claude' },
-  documentation: { lead: 'claude', follow: 'codex' },
+  documentation: { lead: 'claude', follow: 'copilot' },
 };
 
 /**

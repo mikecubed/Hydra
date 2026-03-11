@@ -104,6 +104,7 @@ export function detectInstalledCLIs() {
     claude: commandExists('claude'),
     gemini: commandExists('gemini'),
     codex: commandExists('codex'),
+    copilot: commandExists('copilot'),
   };
 }
 
@@ -480,6 +481,8 @@ export const KNOWN_CLI_MCP_PATHS = {
   aider: null,
   // Continue — JSON config
   continue: path.join('.continue', 'config.json'),
+  // GitHub Copilot CLI — user-level MCP config
+  copilot: path.join('.copilot', 'mcp-config.json'),
 };
 
 /**
@@ -529,13 +532,76 @@ export function registerCustomAgentMcp(opts: RegisterMcpOptions = {}) {
 }
 
 /**
+ * Register the Hydra MCP server with GitHub Copilot CLI.
+ * Config file: ~/.copilot/mcp-config.json
+ * Copilot's MCP format uses a `description` field that registerCustomAgentMcp() doesn't handle.
+ */
+export function mergeCopilotConfig(opts: { force?: boolean } = {}): {
+  status: 'registered' | 'already_registered';
+  path: string;
+} {
+  const configPath = path.join(os.homedir(), '.copilot', 'mcp-config.json');
+  let config: Record<string, unknown> = {};
+
+  if (fs.existsSync(configPath)) {
+    try {
+      config = JSON.parse(fs.readFileSync(configPath, 'utf8')) as Record<string, unknown>;
+    } catch {
+      // Corrupt config — start fresh
+    }
+  }
+
+  config['mcpServers'] ??= {};
+  const mcpServers = config['mcpServers'] as Record<string, unknown>;
+
+  if (!opts.force && mcpServers['hydra']) {
+    return { status: 'already_registered', path: configPath };
+  }
+
+  mcpServers['hydra'] = {
+    command: resolveNodePath(),
+    args: [resolveMcpServerPath()],
+    description: 'Hydra multi-agent orchestration',
+  };
+
+  fs.mkdirSync(path.dirname(configPath), { recursive: true });
+  fs.writeFileSync(configPath, `${JSON.stringify(config, null, 2)}\n`, 'utf8');
+  return { status: 'registered', path: configPath };
+}
+
+/**
+ * Remove the Hydra MCP server entry from GitHub Copilot CLI config.
+ */
+export function unmergeCopilotConfig(): { status: 'unregistered' | 'not_found'; path: string } {
+  const configPath = path.join(os.homedir(), '.copilot', 'mcp-config.json');
+
+  if (!fs.existsSync(configPath)) {
+    return { status: 'not_found', path: configPath };
+  }
+
+  let config: Record<string, unknown>;
+  try {
+    config = JSON.parse(fs.readFileSync(configPath, 'utf8')) as Record<string, unknown>;
+  } catch {
+    return { status: 'not_found', path: configPath };
+  }
+
+  const mcpServers = config['mcpServers'] as Record<string, unknown> | undefined;
+  if (!mcpServers?.['hydra']) {
+    return { status: 'not_found', path: configPath };
+  }
+
+  delete mcpServers['hydra'];
+  fs.writeFileSync(configPath, `${JSON.stringify(config, null, 2)}\n`, 'utf8');
+  return { status: 'unregistered', path: configPath };
+}
+
+/**
  * Main CLI entry point.
- *
- * @param {string[]} [argv] Override process.argv for testing
  * @returns {{ ok: boolean, message: string }}
  */
 export async function main(argv?: string[]): Promise<{ ok: boolean; message: string }> {
-  const effectiveArgv = argv || process.argv;
+  const effectiveArgv = argv ?? process.argv;
   const { subcommand, flags, positionals } = parseSetupArgs(effectiveArgv);
 
   // --help
@@ -597,6 +663,13 @@ function runSetup(flags: SetupFlags): { ok: boolean; message: string } {
       results.push('Codex: not installed');
     }
 
+    if (clis.copilot) {
+      const r = unmergeCopilotConfig();
+      results.push(`Copilot: ${r.status}`);
+    } else {
+      results.push('Copilot: not installed');
+    }
+
     const msg = `Unregistered Hydra MCP:\n  ${results.join('\n  ')}`;
     console.log(msg);
     return { ok: true, message: msg };
@@ -622,6 +695,13 @@ function runSetup(flags: SetupFlags): { ok: boolean; message: string } {
     results.push(`Codex: ${r.status}`);
   } else {
     results.push('Codex: not installed');
+  }
+
+  if (clis.copilot) {
+    const r = mergeCopilotConfig({ force });
+    results.push(`Copilot: ${r.status}`);
+  } else {
+    results.push('Copilot: not installed');
   }
 
   const msg = `Registered Hydra MCP:\n  ${results.join('\n  ')}`;

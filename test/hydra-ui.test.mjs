@@ -164,10 +164,11 @@ test('phaseNarrative falls back for unknown phases', () => {
 
 // ── AGENT_COLORS ─────────────────────────────────────────────────────────────
 
-test('AGENT_COLORS has entries for all three agents', () => {
+test('AGENT_COLORS has entries for all agents including copilot', () => {
   assert.ok(typeof AGENT_COLORS.claude === 'function');
   assert.ok(typeof AGENT_COLORS.gemini === 'function');
   assert.ok(typeof AGENT_COLORS.codex === 'function');
+  assert.ok(typeof AGENT_COLORS.copilot === 'function', 'Missing AGENT_COLORS.copilot');
   assert.ok(typeof AGENT_COLORS.human === 'function');
   assert.ok(typeof AGENT_COLORS.system === 'function');
 });
@@ -205,6 +206,7 @@ test('AGENT_ICONS has correct symbols', () => {
   assert.equal(AGENT_ICONS.claude, '\u274B'); // ❋
   assert.equal(AGENT_ICONS.gemini, '\u2726'); // ✦
   assert.equal(AGENT_ICONS.codex, '\u058E'); // ֎
+  assert.equal(AGENT_ICONS.copilot, '\u29BF'); // ⦿
   assert.equal(AGENT_ICONS.human, '\u{1F16F}'); // 🅯
   assert.equal(AGENT_ICONS.system, '\u{1F5B3}'); // 🖳
 });

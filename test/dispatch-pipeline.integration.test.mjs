@@ -13,18 +13,18 @@ import {
   makeSuccessResult,
 } from './helpers/mock-agent.mjs';
 
-const ALL_AGENTS = ['claude', 'gemini', 'codex'];
+const ALL_AGENTS = ['claude', 'gemini', 'codex', 'copilot'];
 const EXPECTED_TANDEM_PAIRS = {
   planning: { lead: 'claude', follow: 'codex' },
   architecture: { lead: 'claude', follow: 'gemini' },
-  review: { lead: 'gemini', follow: 'claude' },
+  review: { lead: 'gemini', follow: 'copilot' },
   refactor: { lead: 'claude', follow: 'codex' },
   implementation: { lead: 'claude', follow: 'codex' },
   analysis: { lead: 'gemini', follow: 'claude' },
   testing: { lead: 'codex', follow: 'gemini' },
   security: { lead: 'gemini', follow: 'claude' },
   research: { lead: 'gemini', follow: 'claude' },
-  documentation: { lead: 'claude', follow: 'codex' },
+  documentation: { lead: 'claude', follow: 'copilot' },
 };
 
 const TEST_FILE = fileURLToPath(import.meta.url);
