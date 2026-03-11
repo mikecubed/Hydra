@@ -96,13 +96,13 @@ Type a prompt in the operator console. Hydra routes it. Use `:help` to see all c
 
 Hydra has five dispatch modes. Pick one or let it choose:
 
-| Mode         | What it does                                                                                                          |
-| ------------ | --------------------------------------------------------------------------------------------------------------------- |
-| **Auto**     | Classifies your prompt locally — zero extra API calls — then routes to a single agent, a tandem pair, or full council |
-| **Smart**    | Like Auto, but also auto-selects model tier (economy / balanced / performance) per prompt complexity                  |
-| **Council**  | Multi-round deliberation: Claude proposes → Gemini critiques → Claude refines → Codex implements → Copilot advises (optional)  |
-| **Dispatch** | Headless pipeline — queues tasks for background workers, no interactive waiting                                       |
-| **Chat**     | Conversational concierge — answers questions directly, escalates to agents only when real work is needed              |
+| Mode         | What it does                                                                                                                  |
+| ------------ | ----------------------------------------------------------------------------------------------------------------------------- |
+| **Auto**     | Classifies your prompt locally — zero extra API calls — then routes to a single agent, a tandem pair, or full council         |
+| **Smart**    | Like Auto, but also auto-selects model tier (economy / balanced / performance) per prompt complexity                          |
+| **Council**  | Multi-round deliberation: Claude proposes → Gemini critiques → Claude refines → Codex implements → Copilot advises (optional) |
+| **Dispatch** | Headless pipeline — queues tasks for background workers, no interactive waiting                                               |
+| **Chat**     | Conversational concierge — answers questions directly, escalates to agents only when real work is needed                      |
 
 Switch modes with `:mode <name>` at any time. The daemon persists state across mode switches.
 

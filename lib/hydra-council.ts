@@ -1650,9 +1650,8 @@ async function main() {
 
   // Filter council flow to only include agents in the filter (if provided).
   // Optional steps (e.g., copilot advise) are skipped when the agent is not registered.
-  const activeFlow = (agentsFilter
-    ? COUNCIL_FLOW.filter((step) => agentsFilter.includes(step.agent))
-    : COUNCIL_FLOW
+  const activeFlow = (
+    agentsFilter ? COUNCIL_FLOW.filter((step) => agentsFilter.includes(step.agent)) : COUNCIL_FLOW
   ).filter((step) => {
     if (!('optional' in step) || !step.optional) return true;
     // Skip optional steps when the agent is not registered and enabled

@@ -26,9 +26,7 @@ const claudeOrange = isTruecolor
   : pc.yellow;
 
 // GitHub Copilot brand blue (#1F6FEB)
-const copilotBlue = isTruecolor
-  ? (str: string) => `\x1b[38;2;31;111;235m${str}\x1b[39m`
-  : pc.blue;
+const copilotBlue = isTruecolor ? (str: string) => `\x1b[38;2;31;111;235m${str}\x1b[39m` : pc.blue;
 
 export const AGENT_COLORS = {
   gemini: pc.cyan,

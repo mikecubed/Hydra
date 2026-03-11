@@ -487,8 +487,8 @@ Sandbox-aware: no network access, file-system focused. Work within your sandbox 
 
     features: {
       executeMode: 'spawn',
-      jsonOutput: true,      // --output-format json is live; output is JSONL event stream
-      stdinPrompt: false,    // uses -p flag, not stdin
+      jsonOutput: true, // --output-format json is live; output is JSONL event stream
+      stdinPrompt: false, // uses -p flag, not stdin
       reasoningEffort: false,
     },
 
@@ -531,8 +531,7 @@ Sandbox-aware: no network access, file-system focused. Work within your sandbox 
     },
 
     errorPatterns: {
-      authRequired:
-        /not logged in|authentication required|copilot subscription|no copilot access/i,
+      authRequired: /not logged in|authentication required|copilot subscription|no copilot access/i,
       rateLimited: /rate limit|quota exceeded|too many requests/i,
       quotaExhausted: /premium request.*limit|monthly.*quota.*exceeded/i,
       networkError: /network error|connection refused|ECONNREFUSED|ENOTFOUND/i,

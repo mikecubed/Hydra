@@ -704,13 +704,7 @@ export const MODEL_PROFILES: Record<string, ModelProfile> = {
     qualityScore: 88,
     valueScore: 90,
     speedScore: 55,
-    strengths: [
-      'github-integration',
-      'algorithmic-coding',
-      'analysis',
-      'multimodal',
-      'speed',
-    ],
+    strengths: ['github-integration', 'algorithmic-coding', 'analysis', 'multimodal', 'speed'],
     bestFor: ['analysis', 'review', 'research', 'documentation'],
     rateLimits: {
       free: { rpm: 5, tpm: 50_000 },
