@@ -1,5 +1,8 @@
-import { describe, it, beforeEach } from 'node:test';
+import { describe, it, beforeEach, afterEach } from 'node:test';
 import assert from 'node:assert/strict';
+import os from 'node:os';
+import path from 'node:path';
+import fs from 'node:fs';
 import {
   detectModelError,
   getFallbackCandidates,
@@ -7,11 +10,26 @@ import {
   isModelRecoveryEnabled,
 } from '../lib/hydra-model-recovery.ts';
 import { _resetRegistry, initAgentRegistry } from '../lib/hydra-agents.ts';
+import { _setTestConfigPath, invalidateConfigCache, saveHydraConfig } from '../lib/hydra-config.ts';
 
-// Reset registry before each test to ensure clean state
+/** @type {string} */
+let _tmpDir;
+
+// Redirect config writes to a temp dir so the real hydra.config.json is never mutated
 beforeEach(() => {
+  _tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'hydra-recovery-test-'));
+  _setTestConfigPath(path.join(_tmpDir, 'hydra.config.json'));
+  saveHydraConfig({});
   _resetRegistry();
   initAgentRegistry();
+});
+
+afterEach(() => {
+  _setTestConfigPath(null);
+  invalidateConfigCache();
+  _resetRegistry();
+  initAgentRegistry();
+  fs.rmSync(_tmpDir, { recursive: true, force: true });
 });
 
 // ── detectModelError ────────────────────────────────────────────────────────

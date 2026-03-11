@@ -657,19 +657,28 @@ function migrateConfig(parsed: Record<string, unknown>): Record<string, unknown>
 }
 
 let _configCache: HydraConfig | null = null;
+let _testConfigPath: string | null = null;
+
+/** Returns the active config file path (real or test-overridden). */
+function activeConfigPath(): string {
+  return _testConfigPath ?? CONFIG_PATH;
+}
 
 export function loadHydraConfig(): HydraConfig {
   if (_configCache !== null) return _configCache;
-  ensureRuntimeRoot();
-  if (HYDRA_IS_PACKAGED) {
-    seedRuntimeFile(
-      CONFIG_PATH,
-      EMBEDDED_CONFIG_PATH,
-      `${JSON.stringify(DEFAULT_CONFIG, null, 2)}\n`,
-    );
+  const cfgPath = activeConfigPath();
+  if (!_testConfigPath) {
+    ensureRuntimeRoot();
+    if (HYDRA_IS_PACKAGED) {
+      seedRuntimeFile(
+        cfgPath,
+        EMBEDDED_CONFIG_PATH,
+        `${JSON.stringify(DEFAULT_CONFIG, null, 2)}\n`,
+      );
+    }
   }
   try {
-    const raw = fs.readFileSync(CONFIG_PATH, 'utf8');
+    const raw = fs.readFileSync(cfgPath, 'utf8');
     const parsed = JSON.parse(raw) as Record<string, unknown>;
     // Migrate v1 → v2 if needed
     if (
@@ -688,14 +697,25 @@ export function loadHydraConfig(): HydraConfig {
 }
 
 export function saveHydraConfig(config: DeepPartial<HydraConfig>): HydraConfig {
-  ensureRuntimeRoot();
+  const cfgPath = activeConfigPath();
+  if (!_testConfigPath) ensureRuntimeRoot();
   const merged = mergeWithDefaults(config);
-  fs.writeFileSync(CONFIG_PATH, `${JSON.stringify(merged, null, 2)}\n`, 'utf8');
+  fs.writeFileSync(cfgPath, `${JSON.stringify(merged, null, 2)}\n`, 'utf8');
   _configCache = merged;
   return merged;
 }
 
 export function invalidateConfigCache(): void {
+  _configCache = null;
+}
+
+/**
+ * Test-only: redirect config reads/writes to a temp file path.
+ * Pass null to restore the real config path.
+ * Always invalidates the cache so the next read picks up the new path.
+ */
+export function _setTestConfigPath(p: string | null): void {
+  _testConfigPath = p;
   _configCache = null;
 }
 

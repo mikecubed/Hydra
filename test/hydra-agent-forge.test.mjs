@@ -1,5 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import os from 'node:os';
+import path from 'node:path';
+import fs from 'node:fs';
 import {
   validateAgentSpec,
   analyzeCodebase,
@@ -8,9 +11,31 @@ import {
   persistForgedAgent,
   removeForgedAgent,
   generateSamplePrompt,
+  _setTestForgeDir,
 } from '../lib/hydra-agent-forge.ts';
 import { TASK_TYPES, getAgent, _resetRegistry, initAgentRegistry } from '../lib/hydra-agents.ts';
 import { registerBuiltInSubAgents } from '../lib/hydra-sub-agents.ts';
+import { _setTestConfigPath, invalidateConfigCache, saveHydraConfig } from '../lib/hydra-config.ts';
+
+// ── Test isolation: redirect config + forge writes to a tmp directory ──────────
+/** @type {string} */
+let _tmpDir;
+
+function setupTmp() {
+  _tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'hydra-forge-test-'));
+  _setTestConfigPath(path.join(_tmpDir, 'hydra.config.json'));
+  _setTestForgeDir(path.join(_tmpDir, 'forge'));
+  saveHydraConfig({});
+}
+
+function teardownTmp() {
+  _setTestConfigPath(null);
+  _setTestForgeDir(null);
+  invalidateConfigCache();
+  _resetRegistry();
+  initAgentRegistry();
+  fs.rmSync(_tmpDir, { recursive: true, force: true });
+}
 
 // ── validateAgentSpec ─────────────────────────────────────────────────────────
 
@@ -202,60 +227,58 @@ test('listForgedAgents returns array', () => {
 // ── persistForgedAgent + removeForgedAgent round-trip ──────────────────────────
 
 test('persist and remove a forged agent round-trip', () => {
-  const testName = 'forge-test-roundtrip';
-
-  // Clean up first in case of previous failed test
+  setupTmp();
   try {
+    const testName = 'forge-test-roundtrip';
+
+    const spec = {
+      name: testName,
+      displayName: 'Forge Test Roundtrip',
+      baseAgent: 'claude',
+      strengths: ['testing'],
+      weaknesses: ['scope'],
+      tags: ['test'],
+      taskAffinity: Object.fromEntries(TASK_TYPES.map((t) => [t, 0.4])),
+      rolePrompt: `Test agent for unit test round-trip validation. ${'A'.repeat(100)}`,
+      enabled: true,
+      type: 'virtual',
+    };
+
+    // Persist
+    persistForgedAgent(spec, {
+      description: 'Unit test round-trip',
+      phasesRun: ['analyze', 'design', 'critique', 'refine'],
+    });
+
+    // Verify registered
+    const agent = getAgent(testName);
+    assert.ok(agent, 'Agent should be registered after persist');
+    assert.equal(agent.displayName, 'Forge Test Roundtrip');
+    assert.equal(agent.baseAgent, 'claude');
+
+    // Verify in forge registry
+    const registry = loadForgeRegistry();
+    assert.ok(registry[testName], 'Should be in forge registry');
+    assert.equal(registry[testName].description, 'Unit test round-trip');
+
+    // Verify in listForgedAgents
+    const list = listForgedAgents();
+    assert.ok(
+      list.some((a) => a.name === testName),
+      'Should appear in listForgedAgents',
+    );
+
+    // Remove
     removeForgedAgent(testName);
-  } catch {
-    /* ignore */
+
+    // Verify removed from live registry
+    const afterRemove = getAgent(testName);
+    assert.ok(!afterRemove, 'Agent should be unregistered after remove');
+
+    // Verify removed from forge registry
+    const registryAfter = loadForgeRegistry();
+    assert.ok(!registryAfter[testName], 'Should be removed from forge registry');
+  } finally {
+    teardownTmp();
   }
-
-  const spec = {
-    name: testName,
-    displayName: 'Forge Test Roundtrip',
-    baseAgent: 'claude',
-    strengths: ['testing'],
-    weaknesses: ['scope'],
-    tags: ['test'],
-    taskAffinity: Object.fromEntries(TASK_TYPES.map((t) => [t, 0.4])),
-    rolePrompt: `Test agent for unit test round-trip validation. ${'A'.repeat(100)}`,
-    enabled: true,
-    type: 'virtual',
-  };
-
-  // Persist
-  persistForgedAgent(spec, {
-    description: 'Unit test round-trip',
-    phasesRun: ['analyze', 'design', 'critique', 'refine'],
-  });
-
-  // Verify registered
-  const agent = getAgent(testName);
-  assert.ok(agent, 'Agent should be registered after persist');
-  assert.equal(agent.displayName, 'Forge Test Roundtrip');
-  assert.equal(agent.baseAgent, 'claude');
-
-  // Verify in forge registry
-  const registry = loadForgeRegistry();
-  assert.ok(registry[testName], 'Should be in forge registry');
-  assert.equal(registry[testName].description, 'Unit test round-trip');
-
-  // Verify in listForgedAgents
-  const list = listForgedAgents();
-  assert.ok(
-    list.some((a) => a.name === testName),
-    'Should appear in listForgedAgents',
-  );
-
-  // Remove
-  removeForgedAgent(testName);
-
-  // Verify removed from live registry
-  const afterRemove = getAgent(testName);
-  assert.ok(!afterRemove, 'Agent should be unregistered after remove');
-
-  // Verify removed from forge registry
-  const registryAfter = loadForgeRegistry();
-  assert.ok(!registryAfter[testName], 'Should be removed from forge registry');
 });

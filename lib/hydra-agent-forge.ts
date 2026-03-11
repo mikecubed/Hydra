@@ -33,7 +33,7 @@ import { executeAgent } from './hydra-shared/agent-executor.ts';
 import { parseJsonLoose } from './hydra-utils.ts';
 import { promptChoice } from './hydra-prompt-choice.ts';
 import { sectionHeader, DIM, ACCENT, SUCCESS, WARNING, ERROR } from './hydra-ui.ts';
-import type { TaskType } from './types.ts';
+import type { TaskType, AgentType } from './types.ts';
 
 // ── Interfaces ────────────────────────────────────────────────────────────────
 
@@ -160,8 +160,15 @@ const PHASE_NAMES = ['analyze', 'design', 'critique', 'refine'];
 
 // ── Storage Helpers ───────────────────────────────────────────────────────────
 
+let _testForgeDir: string | null = null;
+
+/** Test-only: redirect forge reads/writes to a temp directory. Pass null to restore. */
+export function _setTestForgeDir(p: string | null): void {
+  _testForgeDir = p;
+}
+
 function forgeDir() {
-  return path.join(HYDRA_ROOT, FORGE_DIR_REL);
+  return _testForgeDir ?? path.join(HYDRA_ROOT, FORGE_DIR_REL);
 }
 
 function ensureForgeDir() {
@@ -888,7 +895,7 @@ export function persistForgedAgent(
     /* ignore */
   }
 
-  registerAgent(spec.name, { ...spec, type: AGENT_TYPE.VIRTUAL as import('./types.ts').AgentType });
+  registerAgent(spec.name, { ...spec, type: AGENT_TYPE.VIRTUAL as AgentType });
 
   const registry = loadForgeRegistry();
   registry[spec.name] = {

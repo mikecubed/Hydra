@@ -20,7 +20,6 @@ import {
 } from '../lib/hydra-agents.ts';
 import {
   AFFINITY_PRESETS,
-  loadHydraConfig,
   saveHydraConfig,
   _setTestConfig,
   invalidateConfigCache,
@@ -560,73 +559,77 @@ test('each AFFINITY_PRESETS entry covers all 10 task types with numbers', () => 
 // ── Custom physical agents (CLI + API) ────────────────────────────────────────
 
 import { describe, it, beforeEach, afterEach } from 'node:test';
+import os from 'node:os';
+import path from 'node:path';
+import fs from 'node:fs';
+import { _setTestConfigPath } from '../lib/hydra-config.ts';
 
 describe('initAgentRegistry — custom physical agents', () => {
-  let originalAgentsCfg;
+  let tmpDir;
+
+  const CUSTOM_AGENTS = [
+    {
+      name: 'test-cli-agent',
+      type: 'cli',
+      displayName: 'Test CLI',
+      invoke: {
+        nonInteractive: { cmd: 'echo', args: ['{prompt}'] },
+        headless: { cmd: 'echo', args: ['{prompt}'] },
+      },
+      responseParser: 'plaintext',
+      contextBudget: 16000,
+      councilRole: null,
+      taskAffinity: {
+        implementation: 0.7,
+        review: 0.4,
+        research: 0.0,
+        planning: 0.3,
+        architecture: 0.25,
+        refactor: 0.6,
+        analysis: 0.4,
+        testing: 0.55,
+        security: 0.3,
+        documentation: 0.4,
+      },
+      enabled: true,
+    },
+    {
+      name: 'test-api-agent',
+      type: 'api',
+      displayName: 'Test API',
+      baseUrl: 'http://localhost:9999/v1',
+      model: 'test-model',
+      contextBudget: 8000,
+      councilRole: null,
+      taskAffinity: {
+        implementation: 0.8,
+        review: 0.5,
+        research: 0.0,
+        planning: 0.35,
+        architecture: 0.3,
+        refactor: 0.75,
+        analysis: 0.45,
+        testing: 0.65,
+        security: 0.25,
+        documentation: 0.45,
+      },
+      enabled: true,
+    },
+  ];
 
   beforeEach(() => {
-    const cfg = loadHydraConfig();
-    originalAgentsCfg = cfg.agents;
-    saveHydraConfig({
-      agents: {
-        ...cfg.agents,
-        customAgents: [
-          {
-            name: 'test-cli-agent',
-            type: 'cli',
-            displayName: 'Test CLI',
-            invoke: {
-              nonInteractive: { cmd: 'echo', args: ['{prompt}'] },
-              headless: { cmd: 'echo', args: ['{prompt}'] },
-            },
-            responseParser: 'plaintext',
-            contextBudget: 16000,
-            councilRole: null,
-            taskAffinity: {
-              implementation: 0.7,
-              review: 0.4,
-              research: 0.0,
-              planning: 0.3,
-              architecture: 0.25,
-              refactor: 0.6,
-              analysis: 0.4,
-              testing: 0.55,
-              security: 0.3,
-              documentation: 0.4,
-            },
-            enabled: true,
-          },
-          {
-            name: 'test-api-agent',
-            type: 'api',
-            displayName: 'Test API',
-            baseUrl: 'http://localhost:9999/v1',
-            model: 'test-model',
-            contextBudget: 8000,
-            councilRole: null,
-            taskAffinity: {
-              implementation: 0.8,
-              review: 0.5,
-              research: 0.0,
-              planning: 0.35,
-              architecture: 0.3,
-              refactor: 0.75,
-              analysis: 0.45,
-              testing: 0.65,
-              security: 0.25,
-              documentation: 0.45,
-            },
-            enabled: true,
-          },
-        ],
-      },
-    });
+    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'hydra-test-'));
+    const tmpCfg = path.join(tmpDir, 'hydra.config.json');
+    _setTestConfigPath(tmpCfg);
+    saveHydraConfig({ agents: { customAgents: CUSTOM_AGENTS } });
     _resetRegistry();
     initAgentRegistry();
   });
 
   afterEach(() => {
-    saveHydraConfig({ agents: originalAgentsCfg });
+    _setTestConfigPath(null);
+    invalidateConfigCache();
+    fs.rmSync(tmpDir, { recursive: true, force: true });
     _resetRegistry();
     initAgentRegistry();
   });
@@ -659,20 +662,14 @@ describe('initAgentRegistry — custom physical agents', () => {
   });
 
   it('entry with invalid type is silently skipped', () => {
-    // The beforeEach fixture only has valid entries, so we add a bad one inline
-    const cfg = loadHydraConfig();
     const withBadEntry = [
-      ...(cfg.agents?.customAgents || []),
+      ...CUSTOM_AGENTS,
       { name: 'bad-type-agent', type: 'invalid', displayName: 'Bad' },
     ];
-    saveHydraConfig({ agents: { ...cfg.agents, customAgents: withBadEntry } });
+    saveHydraConfig({ agents: { customAgents: withBadEntry } });
     _resetRegistry();
     initAgentRegistry();
 
     assert.equal(getAgent('bad-type-agent'), null, 'invalid type should be silently skipped');
-    // Cleanup (afterEach will also restore, but be explicit)
-    saveHydraConfig({ agents: cfg.agents });
-    _resetRegistry();
-    initAgentRegistry();
   });
 });
