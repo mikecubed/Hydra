@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { normalizeIntent, gateIntent } from '../lib/hydra-intent-gate.mjs';
+import { normalizeIntent, gateIntent } from '../lib/hydra-intent-gate.ts';
 
 test('normalizeIntent strips leading filler words', () => {
   assert.equal(normalizeIntent('please fix the bug in auth'), 'fix the bug in authentication');

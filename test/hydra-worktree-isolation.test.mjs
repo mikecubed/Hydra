@@ -9,7 +9,7 @@
 
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
-import { loadHydraConfig, invalidateConfigCache } from '../lib/hydra-config.mjs';
+import { loadHydraConfig, invalidateConfigCache } from '../lib/hydra-config.ts';
 
 describe('worktreeIsolation config', () => {
   it('DEFAULT_CONFIG has worktreeIsolation with enabled: false', () => {

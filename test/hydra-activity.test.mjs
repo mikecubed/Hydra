@@ -9,7 +9,7 @@ import {
   getRecentActivity,
   clearActivityLog,
   formatDigestForPrompt,
-} from '../lib/hydra-activity.mjs';
+} from '../lib/hydra-activity.ts';
 
 // ── detectSituationalQuery ──────────────────────────────────────────────────
 

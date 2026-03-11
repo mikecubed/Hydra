@@ -9,7 +9,7 @@ import {
   endProviderSpan,
   startPipelineSpan,
   endPipelineSpan,
-} from '../lib/hydra-telemetry.mjs';
+} from '../lib/hydra-telemetry.ts';
 
 describe('hydra-telemetry (no-op mode — OTel not installed)', () => {
   it('isTracingEnabled returns false when OTel not installed', async () => {

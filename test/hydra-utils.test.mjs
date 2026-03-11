@@ -19,7 +19,7 @@ import {
   nowIso,
   runId,
   runProcess,
-} from '../lib/hydra-utils.mjs';
+} from '../lib/hydra-utils.ts';
 
 // ── parseArgs ────────────────────────────────────────────────────────────────
 
@@ -344,7 +344,7 @@ test('classifyPrompt detects agent mentions', () => {
 });
 
 test('classifyPrompt detects file paths as simple signal', () => {
-  const result = classifyPrompt('update lib/hydra-config.mjs with new defaults');
+  const result = classifyPrompt('update lib/hydra-config.ts with new defaults');
   assert.equal(result.tier, 'simple');
   assert.ok(result.reason.includes('file paths'));
 });

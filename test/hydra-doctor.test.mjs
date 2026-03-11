@@ -5,13 +5,7 @@
 import { describe, it, beforeEach, afterEach } from 'node:test';
 import assert from 'node:assert/strict';
 
-import {
-  initDoctor,
-  isDoctorEnabled,
-  diagnose,
-  getDoctorStats,
-  resetDoctor,
-} from '../lib/hydra-doctor.mjs';
+import { isDoctorEnabled, diagnose, getDoctorStats, resetDoctor } from '../lib/hydra-doctor.ts';
 
 // ── Helpers ─────────────────────────────────────────────────────────────────
 

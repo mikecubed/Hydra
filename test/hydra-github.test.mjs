@@ -12,8 +12,8 @@ import {
   closePR,
   getGitHubConfig,
   pushBranchAndCreatePR,
-} from '../lib/hydra-github.mjs';
-import { parseRemoteUrl } from '../lib/hydra-shared/git-ops.mjs';
+} from '../lib/hydra-github.ts';
+import { parseRemoteUrl } from '../lib/hydra-shared/git-ops.ts';
 
 // ── parseRemoteUrl ──────────────────────────────────────────────────────────
 
@@ -125,7 +125,7 @@ describe('gh executor', () => {
 
 describe('git-ops remote helpers', () => {
   it('exports all remote sync functions', async () => {
-    const gitOps = await import('../lib/hydra-shared/git-ops.mjs');
+    const gitOps = await import('../lib/hydra-shared/git-ops.ts');
     assert.strictEqual(typeof gitOps.getRemoteUrl, 'function');
     assert.strictEqual(typeof gitOps.parseRemoteUrl, 'function');
     assert.strictEqual(typeof gitOps.fetchOrigin, 'function');

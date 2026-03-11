@@ -15,7 +15,7 @@ import {
   createSuggestionFromRound,
   getSuggestionStats,
   formatSuggestionsForPrompt,
-} from '../lib/hydra-evolve-suggestions.mjs';
+} from '../lib/hydra-evolve-suggestions.ts';
 
 // ── Helpers ─────────────────────────────────────────────────────────────────
 

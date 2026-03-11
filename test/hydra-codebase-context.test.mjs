@@ -7,7 +7,7 @@ import {
   getBaselineContext,
   searchKnowledgeBase,
   getConfigReference,
-} from '../lib/hydra-codebase-context.mjs';
+} from '../lib/hydra-codebase-context.ts';
 
 // ── detectCodebaseQuery ─────────────────────────────────────────────────────
 

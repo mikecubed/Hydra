@@ -9,8 +9,8 @@ import {
   initAgentRegistry,
   listAgents,
   unregisterAgent,
-} from '../lib/hydra-agents.mjs';
-import { loadHydraConfig, _setTestConfig, invalidateConfigCache } from '../lib/hydra-config.mjs';
+} from '../lib/hydra-agents.ts';
+import { loadHydraConfig, _setTestConfig, invalidateConfigCache } from '../lib/hydra-config.ts';
 import { createMockExecuteAgent, loadAgentFixture } from './helpers/mock-agent.mjs';
 
 const require = createRequire(import.meta.url);
@@ -85,9 +85,13 @@ describe('mock agent isolation', () => {
       assert.match(fallbackResult.output, /default summary/i);
       assert.match(matchedResult.output, /implementation result/i);
     } finally {
+      // eslint-disable-next-line require-atomic-updates -- intentional mock restore
       fsModule.promises.readFile = originalReadFile;
+      // eslint-disable-next-line require-atomic-updates -- intentional mock restore
       fsModule.readFileSync = originalReadFileSync;
+      // eslint-disable-next-line require-atomic-updates -- intentional mock restore
       childProcess.spawn = originalSpawn;
+      // eslint-disable-next-line require-atomic-updates -- intentional mock restore
       childProcess.spawnSync = originalSpawnSync;
     }
 

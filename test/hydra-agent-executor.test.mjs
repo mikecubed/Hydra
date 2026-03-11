@@ -1,5 +1,5 @@
 /**
- * Tests for agent-executor.mjs diagnostics and unification.
+ * Tests for agent-executor.ts diagnostics and unification.
  */
 
 import { describe, it, beforeEach, afterEach } from 'node:test';
@@ -10,9 +10,9 @@ import {
   extractCodexText,
   extractCodexUsage,
   extractCodexErrors,
-} from '../lib/hydra-shared/agent-executor.mjs';
+} from '../lib/hydra-shared/agent-executor.ts';
 
-import { detectCodexError } from '../lib/hydra-model-recovery.mjs';
+import { detectCodexError } from '../lib/hydra-model-recovery.ts';
 
 describe('agent-executor diagnostics', () => {
   describe('diagnoseAgentError()', () => {
@@ -398,7 +398,7 @@ describe('detectCodexError (hydra-model-recovery)', () => {
 });
 
 // ── expandInvokeArgs ────────────────────────────────────────────────────────
-import { expandInvokeArgs, parseCliResponse } from '../lib/hydra-shared/agent-executor.mjs';
+import { expandInvokeArgs, parseCliResponse } from '../lib/hydra-shared/agent-executor.ts';
 
 describe('expandInvokeArgs', () => {
   it('substitutes {prompt} with the prompt value', () => {
@@ -470,15 +470,8 @@ describe('parseCliResponse', () => {
 });
 
 // ── Custom agent routing in executeAgent() ───────────────────────────────────
-import { executeAgent } from '../lib/hydra-shared/agent-executor.mjs';
-import {
-  registerAgent,
-  unregisterAgent,
-  getAgent as getAgentDef,
-  AGENT_TYPE,
-  _resetRegistry,
-  initAgentRegistry,
-} from '../lib/hydra-agents.mjs';
+import { executeAgent } from '../lib/hydra-shared/agent-executor.ts';
+import { registerAgent, unregisterAgent, AGENT_TYPE, _resetRegistry } from '../lib/hydra-agents.ts';
 
 describe('executeAgent — custom CLI agent routing', () => {
   beforeEach(() => {

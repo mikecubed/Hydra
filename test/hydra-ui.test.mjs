@@ -26,7 +26,7 @@ import {
   sectionHeader,
   divider,
   label,
-} from '../lib/hydra-ui.mjs';
+} from '../lib/hydra-ui.ts';
 
 // ── stripAnsi ────────────────────────────────────────────────────────────────
 

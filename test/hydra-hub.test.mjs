@@ -18,7 +18,7 @@ const {
   listSessions,
   checkConflicts,
   logActivity,
-} = await import('../lib/hydra-hub.mjs');
+} = await import('../lib/hydra-hub.ts');
 
 test.after(() => {
   fs.rmSync(TEMP_HUB, { recursive: true, force: true });
@@ -71,7 +71,9 @@ test('updateSession patches fields and touches lastUpdate', async () => {
     focus: 'update test',
   });
   const before = listSessions({ cwd: '/e/Dev/UpdTest' }).find((s) => s.id === id).startedAt;
-  await new Promise((r) => setTimeout(r, 10));
+  await new Promise((r) => {
+    setTimeout(r, 10);
+  });
   updateSession(id, { focus: 'updated focus', files: ['src/foo.ts'] });
   const sessions = listSessions({ cwd: '/e/Dev/UpdTest' });
   const s = sessions.find((s) => s.id === id);

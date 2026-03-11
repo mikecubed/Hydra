@@ -1,4 +1,4 @@
-import { describe, it, beforeEach, afterEach } from 'node:test';
+import { describe, it, beforeEach } from 'node:test';
 import assert from 'node:assert/strict';
 
 // These tests verify module structure and error handling without making real API calls.
@@ -7,7 +7,7 @@ describe('hydra-anthropic', () => {
   let streamAnthropicCompletion;
 
   beforeEach(async () => {
-    const mod = await import('../lib/hydra-anthropic.mjs');
+    const mod = await import('../lib/hydra-anthropic.ts');
     streamAnthropicCompletion = mod.streamAnthropicCompletion;
   });
 
@@ -16,8 +16,8 @@ describe('hydra-anthropic', () => {
   });
 
   it('throws when ANTHROPIC_API_KEY is not set', async () => {
-    const saved = process.env.ANTHROPIC_API_KEY;
-    delete process.env.ANTHROPIC_API_KEY;
+    const saved = process.env['ANTHROPIC_API_KEY'];
+    delete process.env['ANTHROPIC_API_KEY'];
     try {
       await assert.rejects(
         () =>
@@ -27,21 +27,23 @@ describe('hydra-anthropic', () => {
         { message: /ANTHROPIC_API_KEY not set/ },
       );
     } finally {
-      if (saved) process.env.ANTHROPIC_API_KEY = saved;
+      // eslint-disable-next-line require-atomic-updates
+      if (saved) process.env['ANTHROPIC_API_KEY'] = saved;
     }
   });
 
   it('throws when model is missing', async () => {
-    const saved = process.env.ANTHROPIC_API_KEY;
-    process.env.ANTHROPIC_API_KEY = 'test-key';
+    const saved = process.env['ANTHROPIC_API_KEY'];
+    process.env['ANTHROPIC_API_KEY'] = 'test-key';
     try {
       await assert.rejects(
         () => streamAnthropicCompletion([{ role: 'user', content: 'test' }], {}),
         { message: /requires cfg\.model/ },
       );
     } finally {
-      if (saved) process.env.ANTHROPIC_API_KEY = saved;
-      else delete process.env.ANTHROPIC_API_KEY;
+      // eslint-disable-next-line require-atomic-updates
+      if (saved) process.env['ANTHROPIC_API_KEY'] = saved;
+      else delete process.env['ANTHROPIC_API_KEY'];
     }
   });
 });
@@ -50,7 +52,7 @@ describe('hydra-google', () => {
   let streamGoogleCompletion;
 
   beforeEach(async () => {
-    const mod = await import('../lib/hydra-google.mjs');
+    const mod = await import('../lib/hydra-google.ts');
     streamGoogleCompletion = mod.streamGoogleCompletion;
   });
 
@@ -59,10 +61,10 @@ describe('hydra-google', () => {
   });
 
   it('throws when no API key is set', async () => {
-    const savedGemini = process.env.GEMINI_API_KEY;
-    const savedGoogle = process.env.GOOGLE_API_KEY;
-    delete process.env.GEMINI_API_KEY;
-    delete process.env.GOOGLE_API_KEY;
+    const savedGemini = process.env['GEMINI_API_KEY'];
+    const savedGoogle = process.env['GOOGLE_API_KEY'];
+    delete process.env['GEMINI_API_KEY'];
+    delete process.env['GOOGLE_API_KEY'];
     try {
       await assert.rejects(
         () =>
@@ -72,21 +74,24 @@ describe('hydra-google', () => {
         { message: /GEMINI_API_KEY or GOOGLE_API_KEY not set/ },
       );
     } finally {
-      if (savedGemini) process.env.GEMINI_API_KEY = savedGemini;
-      if (savedGoogle) process.env.GOOGLE_API_KEY = savedGoogle;
+      // eslint-disable-next-line require-atomic-updates
+      if (savedGemini) process.env['GEMINI_API_KEY'] = savedGemini;
+      // eslint-disable-next-line require-atomic-updates
+      if (savedGoogle) process.env['GOOGLE_API_KEY'] = savedGoogle;
     }
   });
 
   it('throws when model is missing', async () => {
-    const saved = process.env.GEMINI_API_KEY;
-    process.env.GEMINI_API_KEY = 'test-key';
+    const saved = process.env['GEMINI_API_KEY'];
+    process.env['GEMINI_API_KEY'] = 'test-key';
     try {
       await assert.rejects(() => streamGoogleCompletion([{ role: 'user', content: 'test' }], {}), {
         message: /requires cfg\.model/,
       });
     } finally {
-      if (saved) process.env.GEMINI_API_KEY = saved;
-      else delete process.env.GEMINI_API_KEY;
+      // eslint-disable-next-line require-atomic-updates
+      if (saved) process.env['GEMINI_API_KEY'] = saved;
+      else delete process.env['GEMINI_API_KEY'];
     }
   });
 });
@@ -95,7 +100,7 @@ describe('hydra-concierge multi-provider exports', () => {
   let concierge;
 
   beforeEach(async () => {
-    concierge = await import('../lib/hydra-concierge.mjs');
+    concierge = await import('../lib/hydra-concierge.ts');
   });
 
   it('exports getActiveProvider', () => {

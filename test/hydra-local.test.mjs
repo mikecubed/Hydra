@@ -3,12 +3,12 @@ import assert from 'node:assert/strict';
 
 describe('hydra-local', () => {
   it('exports streamLocalCompletion', async () => {
-    const mod = await import('../lib/hydra-local.mjs');
+    const mod = await import('../lib/hydra-local.ts');
     assert.strictEqual(typeof mod.streamLocalCompletion, 'function');
   });
 
   it('returns local-unavailable on ECONNREFUSED', async () => {
-    const { streamLocalCompletion } = await import('../lib/hydra-local.mjs');
+    const { streamLocalCompletion } = await import('../lib/hydra-local.ts');
     // Port 19999 is almost certainly unused
     const result = await streamLocalCompletion([{ role: 'user', content: 'hello' }], {
       model: 'test',
@@ -23,7 +23,7 @@ describe('hydra-local', () => {
 describe('local agent registration', () => {
   it('local agent appears in registry after initAgentRegistry()', async () => {
     const { initAgentRegistry, listAgents, _resetRegistry } =
-      await import('../lib/hydra-agents.mjs');
+      await import('../lib/hydra-agents.ts');
     _resetRegistry();
     initAgentRegistry();
     const agents = listAgents();
@@ -34,7 +34,7 @@ describe('local agent registration', () => {
   });
 
   it('local agent is enabled', async () => {
-    const { listAgents } = await import('../lib/hydra-agents.mjs');
+    const { listAgents } = await import('../lib/hydra-agents.ts');
     const agents = listAgents();
     const local = agents.find((a) => a.name === 'local');
     assert.ok(local, 'local agent should exist');
@@ -42,16 +42,16 @@ describe('local agent registration', () => {
   });
 
   it('local agent has research affinity of 0 (hard excluded)', async () => {
-    const { listAgents } = await import('../lib/hydra-agents.mjs');
+    const { listAgents } = await import('../lib/hydra-agents.ts');
     const agents = listAgents();
     const local = agents.find((a) => a.name === 'local');
     assert.strictEqual(local.taskAffinity.research, 0.0);
   });
 
   it('bestAgentFor returns local for implementation in economy mode', async () => {
-    const { bestAgentFor } = await import('../lib/hydra-agents.mjs');
+    const { bestAgentFor } = await import('../lib/hydra-agents.ts');
     const { loadHydraConfig, _setTestConfig, invalidateConfigCache } =
-      await import('../lib/hydra-config.mjs');
+      await import('../lib/hydra-config.ts');
     const original = loadHydraConfig();
     _setTestConfig({ ...original, local: { ...original.local, enabled: true } });
     try {
@@ -63,13 +63,13 @@ describe('local agent registration', () => {
   });
 
   it('bestAgentFor does NOT return local for planning even in economy mode', async () => {
-    const { bestAgentFor } = await import('../lib/hydra-agents.mjs');
+    const { bestAgentFor } = await import('../lib/hydra-agents.ts');
     const agent = bestAgentFor('planning', { mode: 'economy' });
     assert.notStrictEqual(agent, 'local');
   });
 
   it('bestAgentFor never returns local for research in any mode', async () => {
-    const { bestAgentFor } = await import('../lib/hydra-agents.mjs');
+    const { bestAgentFor } = await import('../lib/hydra-agents.ts');
     for (const mode of ['economy', 'balanced', 'performance']) {
       const agent = bestAgentFor('research', { mode });
       assert.notStrictEqual(agent, 'local', `local must not win research in ${mode} mode`);
@@ -77,7 +77,7 @@ describe('local agent registration', () => {
   });
 
   it('bestAgentFor returns cloud agent for implementation in balanced mode', async () => {
-    const { bestAgentFor } = await import('../lib/hydra-agents.mjs');
+    const { bestAgentFor } = await import('../lib/hydra-agents.ts');
     const agent = bestAgentFor('implementation', { mode: 'balanced' });
     // In balanced mode, local gets no boost: local=0.82 vs codex=0.85 → codex wins
     assert.notStrictEqual(agent, 'local');

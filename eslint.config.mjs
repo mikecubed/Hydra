@@ -2,6 +2,11 @@ import js from '@eslint/js';
 import pluginN from 'eslint-plugin-n';
 import unicorn from 'eslint-plugin-unicorn';
 import globals from 'globals';
+import tseslint from 'typescript-eslint';
+import { fileURLToPath } from 'node:url';
+import { dirname } from 'node:path';
+
+const __dirname = dirname(fileURLToPath(import.meta.url));
 
 export default [
   // ─── Global ignores ───────────────────────────────────────────────────────
@@ -138,6 +143,105 @@ export default [
     files: ['scripts/**/*.mjs'],
     rules: {
       'n/no-unpublished-import': 'off',
+    },
+  },
+
+  // ─── TypeScript files — type-aware strict rules ───────────────────────────
+  ...tseslint.config({
+    files: ['**/*.ts'],
+    extends: [tseslint.configs.strictTypeChecked],
+    languageOptions: {
+      parserOptions: {
+        project: true,
+        tsconfigRootDir: __dirname,
+      },
+    },
+    rules: {
+      // ── Replace JS rules with TS-aware equivalents ────────────────────────
+      'no-unused-vars': 'off',
+      '@typescript-eslint/no-unused-vars': [
+        'error',
+        { argsIgnorePattern: '^_', varsIgnorePattern: '^_', caughtErrorsIgnorePattern: '^_' },
+      ],
+      'no-shadow': 'off',
+      '@typescript-eslint/no-shadow': 'error',
+      'no-throw-literal': 'off',
+      '@typescript-eslint/only-throw-error': 'error',
+      'require-await': 'off',
+      '@typescript-eslint/require-await': 'error',
+
+      // ── Type safety ───────────────────────────────────────────────────────
+      '@typescript-eslint/no-explicit-any': 'warn',
+      '@typescript-eslint/no-unsafe-assignment': 'warn',
+      '@typescript-eslint/no-unsafe-call': 'warn',
+      '@typescript-eslint/no-unsafe-member-access': 'warn',
+      '@typescript-eslint/no-unsafe-return': 'warn',
+      '@typescript-eslint/no-unsafe-argument': 'warn',
+
+      // ── Promise / async correctness ───────────────────────────────────────
+      '@typescript-eslint/no-floating-promises': 'error',
+      '@typescript-eslint/await-thenable': 'error',
+      '@typescript-eslint/no-misused-promises': [
+        'error',
+        { checksVoidReturn: { attributes: false } },
+      ],
+
+      // ── Strict boolean expressions (warn first, elevate after Phase 6) ───
+      '@typescript-eslint/strict-boolean-expressions': [
+        'warn',
+        {
+          allowString: false,
+          allowNumber: false,
+          allowNullableObject: true,
+          allowNullableBoolean: false,
+          allowNullableString: false,
+          allowNullableNumber: false,
+          allowAny: false,
+        },
+      ],
+
+      // ── Type imports ──────────────────────────────────────────────────────
+      '@typescript-eslint/consistent-type-imports': [
+        'error',
+        { prefer: 'type-imports', fixStyle: 'inline-type-imports' },
+      ],
+      '@typescript-eslint/consistent-type-exports': 'error',
+
+      // ── Explicit return types on exported API ─────────────────────────────
+      '@typescript-eslint/explicit-module-boundary-types': 'error',
+
+      // ── Nullish coalescing ────────────────────────────────────────────────
+      '@typescript-eslint/prefer-nullish-coalescing': 'error',
+      '@typescript-eslint/prefer-optional-chain': 'error',
+
+      // ── Readonly (warn — daemon code has justified mutable state) ─────────
+      '@typescript-eslint/prefer-readonly': 'warn',
+
+      // ── Node import resolution (n plugin can't resolve .mjs from .ts context) ──
+      'n/no-missing-import': 'off',
+
+      // ── Other ─────────────────────────────────────────────────────────────
+      '@typescript-eslint/no-non-null-assertion': 'warn',
+      '@typescript-eslint/no-unnecessary-condition': 'error',
+      '@typescript-eslint/no-unnecessary-type-assertion': 'error',
+      '@typescript-eslint/use-unknown-in-catch-callback-variable': 'error',
+      '@typescript-eslint/switch-exhaustiveness-check': 'error',
+    },
+  }),
+
+  // ─── Test files — relax strict TS rules ──────────────────────────────────
+  {
+    files: ['test/**/*.ts'],
+    rules: {
+      '@typescript-eslint/no-unsafe-assignment': 'off',
+      '@typescript-eslint/no-unsafe-member-access': 'off',
+      '@typescript-eslint/no-floating-promises': 'off',
+      '@typescript-eslint/explicit-module-boundary-types': 'off',
+      '@typescript-eslint/strict-boolean-expressions': 'off',
+      'n/no-unsupported-features/node-builtins': ['error', { ignores: ['fetch', 'test.describe'] }],
+      'no-shadow': 'off',
+      'n/no-unpublished-import': 'off',
+      'n/no-missing-import': 'off',
     },
   },
 ];
