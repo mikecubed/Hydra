@@ -1,7 +1,7 @@
 # TypeScript Migration Plan
 
 **Status:** ✅ Complete — last updated 2026-03-10  
-**Branch:** `feat/typescript-migration` — PR [#13](https://github.com/mikecubed/Hydra/pull/13) open → `main`  
+**Branch:** `feat/typescript-migration` — PR [#13](https://github.com/mikecubed/Hydra/pull/13) **merged** → `main`  
 **Supersedes:** `docs/typescript-migration-handoff.md` (preserved as historical reference)
 
 **Goal:** Convert all Hydra source files from `.mjs` (JS with `--checkJs`) to full `.ts` with the
@@ -23,17 +23,17 @@ plain JS — not regressions; the code is correct, just unannotated). Tests: 395
 
 ## Dependency on Other Plans
 
-This migration is a **prerequisite** for parts of the Copilot integration and dynamic dispatch
-work. Specifically:
+This migration was a **prerequisite** for parts of the Copilot integration and dynamic dispatch
+work. **All prerequisites are now satisfied ✅**
 
-| TS migration phase           | Unblocks                                                                                                              |
-| ---------------------------- | --------------------------------------------------------------------------------------------------------------------- |
-| Phase 3 (config & models)    | Task D + Task 11 in `2026-03-07-github-copilot-cli-integration.md` — `resolveCliModelId()` written in TS from day one |
-| Phase 4 (agent system)       | Task 1 — Copilot plugin written in TS with proper `AgentDef` types                                                    |
-| Phase 7 (dispatch & council) | Task A in `2026-03-10-dynamic-agent-dispatch.md` — dispatch refactor written in TS                                    |
+| TS migration phase           | Unblocks                                                                                                              | Status       |
+| ---------------------------- | --------------------------------------------------------------------------------------------------------------------- | ------------ |
+| Phase 3 (config & models)    | Task D + Task 11 in `2026-03-07-github-copilot-cli-integration.md` — `resolveCliModelId()` written in TS from day one | ✅ Unblocked |
+| Phase 4 (agent system)       | Task 1 — Copilot plugin written in TS with proper `AgentDef` types from `lib/types.ts`                                | ✅ Unblocked |
+| Phase 7 (dispatch & council) | Task A in `2026-03-10-dynamic-agent-dispatch.md` — dispatch refactor written in TS (plan superseded; work merged)     | ✅ Unblocked |
 
-Phases 1–4 of this plan should complete before the Copilot/dispatch implementation starts.
-Phases 5–12 can proceed alongside or after those features.
+The Copilot CLI integration (`2026-03-07-github-copilot-cli-integration.md`) is ready for immediate
+implementation — no migration prerequisites remain.
 
 ---
 

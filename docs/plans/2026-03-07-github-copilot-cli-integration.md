@@ -4,13 +4,13 @@
 
 **Goal:** Integrate [GitHub Copilot CLI](https://github.com/github/copilot-cli) as a fifth physical agent in Hydra, enabling `copilot` alongside `claude`, `gemini`, `codex`, and `local` in all dispatch modes, council deliberation, worker pools, and MCP tooling.
 
-**Status:** Ready for implementation — validated against live CLI 2026-03-10
+**Status:** Ready for implementation — validated against live CLI 2026-03-10; TypeScript prerequisite satisfied 2026-03-11
 
 **Depends on:** ~~Agent Plugin Refactor (2026-03-08)~~ — **DONE.** The plugin refactor made the executor data-driven. Adding Copilot now requires **zero executor changes** — only a `PHYSICAL_AGENTS` entry with plugin fields, UI colors, model profiles, config, and setup.
 
-**TypeScript prerequisite (preferred, not required):** Phases 1–4 of the [TypeScript Migration Plan](./2026-03-10-typescript-migration.md) are _preferred_ before implementing this integration so the Copilot plugin is written in TypeScript from day one. However, Tasks 1 and 11 **may be implemented in JSDoc-typed JavaScript first** and converted to TypeScript during Phase 3/4 of the migration. This avoids blocking feature delivery on a long-running refactor. Choose based on current team priority.
+**TypeScript prerequisite: ✅ SATISFIED** — The [TypeScript Migration Plan](./2026-03-10-typescript-migration.md) is complete (PR #13). All Hydra source files are TypeScript. Implement the Copilot plugin directly in TypeScript using the `AgentDef` interface from `lib/types.ts`.
 
-**Architecture:** Add `copilot` as a new `PHYSICAL_AGENTS` entry in `hydra-agents.mjs` with full plugin interface (`features`, `parseOutput`, `errorPatterns`, `modelBelongsTo`, `quotaVerify`, `economyModel`, `readInstructions`, `taskRules`). Wire it into `hydra-ui.mjs` for colored output, register it in `hydra-model-profiles.mjs` and `hydra.config.json`, add CLI detection in `hydra-setup.mjs`, and create a `COPILOT.md` agent instructions file. The agent's council role is **advisor** — it brings GitHub-integrated context (issues, PRs, CI) that the other agents lack.
+**Architecture:** Add `copilot` as a new `PHYSICAL_AGENTS` entry in `hydra-agents.ts` with full plugin interface (`features`, `parseOutput`, `errorPatterns`, `modelBelongsTo`, `quotaVerify`, `economyModel`, `readInstructions`, `taskRules`). Wire it into `hydra-ui.ts` for colored output, register it in `hydra-model-profiles.ts` and `hydra.config.json`, add CLI detection in `hydra-setup.ts`, and create a `COPILOT.md` agent instructions file. The agent's council role is **advisor** — it brings GitHub-integrated context (issues, PRs, CI) that the other agents lack.
 
 **Tech Stack:** Node.js ESM, `copilot` CLI binary (GitHub Copilot CLI), existing Hydra agent infrastructure. No new npm dependencies. No executor changes needed — the plugin architecture handles everything.
 
@@ -103,7 +103,7 @@ The `parseOutput()` plugin method handles both JSONL (when `features.jsonOutput:
   "mcpServers": {
     "hydra": {
       "command": "node",
-      "args": ["/path/to/hydra-mcp-server.mjs"],
+      "args": ["/path/to/hydra-mcp-server.ts"],
       "description": "Hydra multi-agent orchestration"
     }
   }
@@ -121,15 +121,18 @@ The `parseOutput()` plugin method handles both JSONL (when `features.jsonOutput:
 
 ---
 
-## Task 1: Agent Definition — `lib/hydra-agents.mjs`
+## Task 1: Agent Definition — `lib/hydra-agents.ts`
 
 **Files:**
 
-- `lib/hydra-agents.mjs` — Add `copilot` entry to `PHYSICAL_AGENTS` with full plugin interface
+- `lib/hydra-agents.ts` — Add `copilot` entry to `PHYSICAL_AGENTS` with full plugin interface
 
 **What to add** — insert after `local` in the `PHYSICAL_AGENTS` object. The entry includes all plugin fields that the executor, metrics, usage, actualize, daemon, and recovery modules consume via the data-driven plugin interface:
 
-```javascript
+```typescript
+// import type { AgentDef } from './types.ts'; // add to imports at top of file
+
+// In PHYSICAL_AGENTS — add after `local`:
 copilot: {
   name: 'copilot',
   type: 'physical',
@@ -285,31 +288,31 @@ Output structure: GitHub context summary → Actionable suggestions → Commands
 
 Because the executor is now data-driven, adding this single `PHYSICAL_AGENTS` entry gives Copilot:
 
-| Capability            | Plugin field used      | Where consumed                                                                    |
-| --------------------- | ---------------------- | --------------------------------------------------------------------------------- |
-| CLI arg building      | `invoke.headless()`    | `agent-executor.mjs` — args built via `agentDef.invoke.headless(prompt, opts)`    |
-| Output parsing        | `parseOutput()`        | `agent-executor.mjs` — output parsed via `agentDef.parseOutput(rawOutput, opts)`  |
-| Error categorization  | `errorPatterns`        | `agent-executor.mjs`, `hydra-evolve.mjs` — pattern matching against stderr/stdout |
-| Model ownership       | `modelBelongsTo()`     | `hydra-usage.mjs` — tracks which models belong to Copilot                         |
-| Economy fallback      | `economyModel()`       | `hydra-actualize.mjs` — economy mode model selection                              |
-| Quota verification    | `quotaVerify()`        | `hydra-model-recovery.mjs` — returns null (GitHub-managed)                        |
-| Instructions preamble | `readInstructions()`   | `orchestrator-daemon.mjs` — context preamble for agent tasks                      |
-| Task rules            | `taskRules`            | `orchestrator-daemon.mjs`, `hydra-operator.mjs` — appended to task prompts        |
-| Routing               | `features.executeMode` | `agent-executor.mjs` — routes to spawn path                                       |
-| Stdin vs flag         | `features.stdinPrompt` | `agent-executor.mjs` — uses `-p` flag, not stdin                                  |
+| Capability            | Plugin field used      | Where consumed                                                                  |
+| --------------------- | ---------------------- | ------------------------------------------------------------------------------- |
+| CLI arg building      | `invoke.headless()`    | `agent-executor.ts` — args built via `agentDef.invoke.headless(prompt, opts)`   |
+| Output parsing        | `parseOutput()`        | `agent-executor.ts` — output parsed via `agentDef.parseOutput(rawOutput, opts)` |
+| Error categorization  | `errorPatterns`        | `agent-executor.ts`, `hydra-evolve.ts` — pattern matching against stderr/stdout |
+| Model ownership       | `modelBelongsTo()`     | `hydra-usage.ts` — tracks which models belong to Copilot                        |
+| Economy fallback      | `economyModel()`       | `hydra-actualize.ts` — economy mode model selection                             |
+| Quota verification    | `quotaVerify()`        | `hydra-model-recovery.ts` — returns null (GitHub-managed)                       |
+| Instructions preamble | `readInstructions()`   | `orchestrator-daemon.ts` — context preamble for agent tasks                     |
+| Task rules            | `taskRules`            | `orchestrator-daemon.ts`, `hydra-operator.ts` — appended to task prompts        |
+| Routing               | `features.executeMode` | `agent-executor.ts` — routes to spawn path                                      |
+| Stdin vs flag         | `features.stdinPrompt` | `agent-executor.ts` — uses `-p` flag, not stdin                                 |
 
-**No changes to `agent-executor.mjs`, `hydra-metrics.mjs`, `hydra-usage.mjs`, `hydra-actualize.mjs`, `orchestrator-daemon.mjs`, `hydra-model-recovery.mjs`, or `hydra-evolve.mjs` are needed.**
+**No changes to `agent-executor.ts`, `hydra-metrics.ts`, `hydra-usage.ts`, `hydra-actualize.ts`, `orchestrator-daemon.ts`, `hydra-model-recovery.ts`, or `hydra-evolve.ts` are needed.**
 
 ---
 
-## Task 2: UI Integration — `lib/hydra-ui.mjs`
+## Task 2: UI Integration — `lib/hydra-ui.ts`
 
 **Files:**
 
-- `lib/hydra-ui.mjs` — Add Copilot color and icon
+- `lib/hydra-ui.ts` — Add Copilot color and icon
 
-> - Update `agentHeader()` in `hydra-ui.mjs` which may have 3-agent hardcoded layout assumptions
-> - Review usage/metrics rendering loops in `hydra-usage.mjs` for any hardcoded `['claude','gemini','codex']` arrays that need to become registry-driven
+> - Update `agentHeader()` in `hydra-ui.ts` which may have 3-agent hardcoded layout assumptions
+> - Review usage/metrics rendering loops in `hydra-usage.ts` for any hardcoded `['claude','gemini','codex']` arrays that need to become registry-driven
 
 **What to add:**
 
@@ -355,17 +358,17 @@ export const AGENT_ICONS = {
 > 2. `agentDef.parseOutput(rawOutput, opts)` extracts output, tokenUsage, costUsd
 > 3. `agentDef.errorPatterns` are checked against stderr/stdout for error categorization
 >
-> **No files need to be modified in `agent-executor.mjs`, `hydra-metrics.mjs`, or `hydra-evolve.mjs`.**
+> **No files need to be modified in `agent-executor.ts`, `hydra-metrics.ts`, or `hydra-evolve.ts`.**
 >
 > The `features.jsonOutput: false → true` flip is the **only change needed** when the Copilot CLI ships `--output-format json`. The `parseOutput()` method already handles both paths.
 
 ---
 
-## Task 4: Model Profiles — `lib/hydra-model-profiles.mjs`
+## Task 4: Model Profiles — `lib/hydra-model-profiles.ts`
 
 **Files:**
 
-- `lib/hydra-model-profiles.mjs` — Add Copilot model entries
+- `lib/hydra-model-profiles.ts` — Add Copilot model entries
 
 **What to add** to `MODEL_PROFILES`:
 
@@ -586,11 +589,11 @@ copilot: {
 
 ---
 
-## Task 6: Setup & CLI Detection — `lib/hydra-setup.mjs`
+## Task 6: Setup & CLI Detection — `lib/hydra-setup.ts`
 
 **Files:**
 
-- `lib/hydra-setup.mjs` — Add Copilot CLI detection and MCP registration
+- `lib/hydra-setup.ts` — Add Copilot CLI detection and MCP registration
 
 ### Step 1: CLI Detection
 
@@ -609,7 +612,7 @@ export function detectInstalledCLIs() {
 
 ### Step 2: MCP Registration for Copilot
 
-> **Post-plugin-refactor note:** `registerCustomAgentMcp({ configPath, format })` already exists in `hydra-setup.mjs` and handles JSON config files generically. For Copilot, we can either:
+> **Post-plugin-refactor note:** `registerCustomAgentMcp({ configPath, format })` already exists in `hydra-setup.ts` and handles JSON config files generically. For Copilot, we can either:
 >
 > 1. **Reuse `registerCustomAgentMcp()`** with `configPath: ~/.copilot/mcp-config.json` and `format: 'json'` — simplest approach
 > 2. **Add a dedicated `mergeCopilotConfig()`** — gives more control over Copilot-specific entry format (e.g. `description` field)
@@ -677,11 +680,11 @@ In the `setup` command handler, add Copilot detection + registration alongside t
 
 ---
 
-## Task 7: Tandem Pair Routing — `lib/hydra-utils.mjs`
+## Task 7: Tandem Pair Routing — `lib/hydra-utils.ts`
 
 **Files:**
 
-- `lib/hydra-utils.mjs` — Add Copilot to `selectTandemPair()` task type matrix
+- `lib/hydra-utils.ts` — Add Copilot to `selectTandemPair()` task type matrix
 
 Copilot is well-suited as a **follow** agent for review and documentation tasks (it has GitHub context to enrich feedback):
 
@@ -695,11 +698,11 @@ documentation: { lead: 'claude', follow: 'copilot' }, // Claude writes, Copilot 
 
 ---
 
-## Task 8: Council Role — `lib/hydra-council.mjs`
+## Task 8: Council Role — `lib/hydra-council.ts`
 
 **Files:**
 
-- `lib/hydra-council.mjs` — Add Copilot as optional 4th council participant
+- `lib/hydra-council.ts` — Add Copilot as optional 4th council participant
 
 In the adversarial council mode (`'adversarial'`), Copilot can participate in the **DIVERGE** phase (independent answers) when enabled. It contributes GitHub integration perspective that the other three agents cannot provide.
 
@@ -757,15 +760,15 @@ Tasks 9, 10 (COPILOT.md, README/CLAUDE.md updates). Required before merging.
 ### Phase 5 — Dynamic Dispatch & Extensibility (See separate plan)
 
 Task 11 (below) is the Phase 1 prerequisite from the dynamic dispatch plan. The broader work —
-role-configurable dispatch, registry-driven CLI detection, availability-filtered routing — is
-tracked in **[`2026-03-10-dynamic-agent-dispatch.md`](./2026-03-10-dynamic-agent-dispatch.md)**.
+role-configurable dispatch, registry-driven CLI detection, availability-filtered routing — was
+tracked in **`2026-03-10-dynamic-agent-dispatch.md`** (now superseded).
 That plan's implementation phases are independent of this integration and can proceed in parallel.
 
 ---
 
 ## Task 11: Fix `invoke.headless()` Model ID Translation
 
-**Files:** `lib/hydra-model-profiles.mjs`, `lib/hydra-agents.mjs` (Copilot plugin)
+**Files:** `lib/hydra-model-profiles.ts`, `lib/hydra-agents.ts` (Copilot plugin)
 
 **Prerequisite for:** Task 1 (Copilot agent definition). Must be done before Copilot can be used
 with `--model` flag in headless mode.
@@ -780,11 +783,11 @@ This is Copilot-specific because existing agents (`claude`, `gemini`, `codex`) h
 same identifier for both. Copilot's internal IDs are prefixed (`copilot-*`) to avoid collision.
 
 **Solution:**  
-Add `resolveCliModelId(modelId)` to `lib/hydra-model-profiles.mjs` that returns
+Add `resolveCliModelId(modelId)` to `lib/hydra-model-profiles.ts` that returns
 `MODEL_PROFILES[modelId]?.cliModelId ?? modelId`. Apply it in Copilot's `invoke.headless()`:
 
-```javascript
-import { resolveCliModelId } from '../hydra-model-profiles.mjs';
+```typescript
+import { resolveCliModelId } from '../hydra-model-profiles.ts';
 
 headless: (prompt, opts = {}) => {
   const args = ['-p', prompt, '--output-format', 'json', '--silent', '--no-ask-user'];
@@ -818,7 +821,7 @@ Each `MODEL_PROFILES` entry for a Copilot model carries a `cliModelId` field:
 `codex`) that already use the correct CLI IDs require **no changes**.
 
 > This pattern is now the **documented convention** for all future agent plugins. See
-> [Task E in `2026-03-10-dynamic-agent-dispatch.md`](./2026-03-10-dynamic-agent-dispatch.md#task-e-extensibility-contract--future-agent-guide)
+> the extensibility contract in the dynamic agent dispatch plan (~~[`2026-03-10-dynamic-agent-dispatch.md`](./2026-03-10-dynamic-agent-dispatch.md)~~ — superseded)
 > for the extensibility contract every new agent must follow.
 
 **Tests:**
@@ -853,7 +856,7 @@ describe('resolveCliModelId', () => {
 | ~~No JSON output from `copilot -p`~~    | ~~Medium~~ | **RESOLVED** — `--output-format json` is live. Output is JSONL (event stream). `parseOutput()` parses line-by-line; see Task 1 for schema details.                                                                                                                                                                                  |
 | `cliModelId` values                     | **Low**    | **VALIDATED** against live `--model` choices. Claude uses dots (`claude-sonnet-4.6`); Gemini is `gemini-3-pro-preview`. Keep in sync with CLI version.                                                                                                                                                                              |
 | Auth flow in CI/headless                | **High**   | Require `GH_TOKEN` env var; document clearly; skip Copilot tasks when not authenticated                                                                                                                                                                                                                                             |
-| Premium request quota limits            | **Medium** | `modelBelongsTo()` plugin method enables `hydra-usage.mjs` tracking automatically; `premiumRequests` from JSONL `result` event provides usage data                                                                                                                                                                                  |
+| Premium request quota limits            | **Medium** | `modelBelongsTo()` plugin method enables `hydra-usage.ts` tracking automatically; `premiumRequests` from JSONL `result` event provides usage data                                                                                                                                                                                   |
 | Copilot CLI still in preview            | **Medium** | Pin to versioned install; monitor changelog for breaking changes (especially JSONL schema evolution)                                                                                                                                                                                                                                |
 | `--allow-all-tools` security            | **Medium** | Only used when `permissionMode === 'full-auto'`; handled by `invoke.headless()` — default is no allow flags                                                                                                                                                                                                                         |
 | Windows `copilot` binary path           | **Low**    | Use `cross-spawn` (already used for all agents via `features.executeMode: 'spawn'`); test with WinGet install                                                                                                                                                                                                                       |
@@ -866,9 +869,9 @@ describe('resolveCliModelId', () => {
 
 Tests follow the existing `node:test` + `node:assert/strict` pattern.
 
-### Unit Tests — `test/hydra-agents-copilot.test.mjs`
+### Unit Tests — `test/hydra-agents-copilot.test.ts`
 
-```javascript
+```typescript
 import { describe, it, before } from 'node:test';
 import assert from 'node:assert/strict';
 
@@ -876,7 +879,7 @@ describe('copilot agent definition', () => {
   let initAgentRegistry, getAgent;
 
   before(async () => {
-    ({ initAgentRegistry, getAgent } = await import('../lib/hydra-agents.mjs'));
+    ({ initAgentRegistry, getAgent } = await import('../lib/hydra-agents.ts'));
     initAgentRegistry();
   });
 
@@ -1178,7 +1181,7 @@ GitHub Copilot CLI supports two MCP config scopes:
   "mcpServers": {
     "hydra": {
       "command": "node",
-      "args": ["/absolute/path/to/hydra-mcp-server.mjs"],
+      "args": ["/absolute/path/to/hydra-mcp-server.ts"],
       "description": "Hydra multi-agent orchestration"
     }
   }
@@ -1192,7 +1195,7 @@ GitHub Copilot CLI supports two MCP config scopes:
   "mcpServers": {
     "hydra": {
       "command": "node",
-      "args": ["/absolute/path/to/hydra-mcp-server.mjs"],
+      "args": ["/absolute/path/to/hydra-mcp-server.ts"],
       "description": "Hydra multi-agent orchestration"
     }
   }
@@ -1202,21 +1205,18 @@ GitHub Copilot CLI supports two MCP config scopes:
 **Per-session injection** (no file edit needed, good for CI):
 
 ```bash
-copilot -p "..." --additional-mcp-config '{"mcpServers":{"hydra":{"command":"node","args":["/path/to/hydra-mcp-server.mjs"]}}}'
+copilot -p "..." --additional-mcp-config '{"mcpServers":{"hydra":{"command":"node","args":["/path/to/hydra-mcp-server.ts"]}}}'
 # Or from file:
 copilot -p "..." --additional-mcp-config @/path/to/mcp-entry.json
 ```
 
-The project-level config allows teams to automatically give Copilot access to Hydra's MCP tools without each developer needing to set up the user-level config. The `hydra init` command (from `hydra-setup.mjs`) could optionally write this file when initializing a project.
+The project-level config allows teams to automatically give Copilot access to Hydra's MCP tools without each developer needing to set up the user-level config. The `hydra init` command (from `hydra-setup.ts`) could optionally write this file when initializing a project.
 
 ---
 
 ## Related Plans
 
-- [`2026-03-10-dynamic-agent-dispatch.md`](./2026-03-10-dynamic-agent-dispatch.md) — Makes dispatch
-  role-configurable and adds extensibility contract for future agents (opencode, etc.). Task 11
-  above (the `resolveCliModelId` helper) is Phase 1 of that plan and also a prerequisite for this
-  integration's Task 1.
+- ~~[`2026-03-10-dynamic-agent-dispatch.md`](./2026-03-10-dynamic-agent-dispatch.md)~~ — **Superseded.** Made dispatch role-configurable and added extensibility contract for future agents (opencode, etc.). Task 11 above (the `resolveCliModelId` helper) was Phase 1 of that plan and also a prerequisite for this integration's Task 1.
 - [`2026-03-08-agent-plugin-refactor.md`](./2026-03-08-agent-plugin-refactor.md) — The data-driven
   plugin architecture that eliminates the need for executor changes in this integration.
 
@@ -1227,4 +1227,5 @@ _Updated: 2026-03-08 — expanded model set (Sonnet 4.6, Opus 4.6, GPT-5.4, Gemi
 _Updated: 2026-03-10 — aligned with agent plugin refactor (2026-03-08). Task 1 now includes full plugin interface (features, parseOutput, errorPatterns, modelBelongsTo, quotaVerify, economyModel, readInstructions, taskRules). Task 3 eliminated — no executor changes needed. Task 6 updated to leverage existing registerCustomAgentMcp() infra. Tests expanded to cover all plugin fields. Implementation phases simplified._
 _Updated: 2026-03-10 (v2) — validated against live CLI. **`--output-format json` is now live** (JSONL event stream). `features.jsonOutput` set to `true`. `parseOutput()` rewritten for JSONL schema (assistant.message content + result.usage.premiumRequests). `cliModelId` values validated: Claude uses dots (`claude-sonnet-4.6`), Gemini is `gemini-3-pro-preview`. MCP config path corrected to `~/.copilot/mcp-config.json`. Added `--silent`, `--no-ask-user` to headless invocation. Auto-edit permission flags updated to `shell(git:*)` / `write`. Risk table updated: JSON output risk resolved, cliModelId risk downgraded to Low. Appendix flag reference rewritten from live `--help` output._
 _Updated: 2026-03-10 (v3) — Added Task 11 (`resolveCliModelId` translation helper — prerequisite for Task 1). Added Phase 5 reference to dynamic dispatch plan. Added Related Plans section linking to `2026-03-10-dynamic-agent-dispatch.md`._
+_Updated: 2026-03-11 — TypeScript migration complete (PR #13, all 88 source files). All `.mjs` source file references updated to `.ts`. TypeScript prerequisite marked SATISFIED. Test file updated to `.ts`. Dynamic dispatch plan marked superseded. Import paths in code snippets updated to `.ts` extension._
 _Status: **Ready for implementation** — all CLI options validated against live binary_
