@@ -63,6 +63,7 @@ import {
 import { runDiscovery } from './hydra-nightly-discovery.ts';
 import { buildSelfSnapshot, formatSelfSnapshotForPrompt } from './hydra-self.ts';
 import { buildSelfIndex, formatSelfIndexForPrompt } from './hydra-self-index.ts';
+import { detectInstalledCLIs } from './hydra-setup.ts';
 
 // ── Logging ─────────────────────────────────────────────────────────────────
 
@@ -414,9 +415,10 @@ async function main() {
     const date = new Date().toISOString().split('T')[0];
     const branchName = `${branchPrefix}/${date}/${task.slug}`;
 
-    // Choose agent (simple heuristic)
+    // Choose agent — filter to installed CLIs to avoid dispatching to unavailable agents
     const taskType = classifyTask(task.title);
-    const agent = task.suggestedAgent || bestAgentFor(taskType);
+    const agent =
+      task.suggestedAgent || bestAgentFor(taskType, { installedCLIs: detectInstalledCLIs() });
     const modelOverride = useEconomy
       ? (getAgent(agent)?.economyModel(budgetCfg) ?? undefined)
       : undefined;

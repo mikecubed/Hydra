@@ -938,12 +938,15 @@ interface BestAgentOpts {
     weekly?: { percentUsed?: number; percent?: number };
     percent?: number;
   } | null;
+  /** When provided, CLI agents (executeMode:'spawn') with a `false` entry are skipped. */
+  installedCLIs?: Record<string, boolean | undefined> | null;
 }
 
 export function bestAgentFor(taskType: TaskType | string, opts: BestAgentOpts = {}): string {
   const includeVirtual = opts.includeVirtual ?? false;
   const mode = opts.mode ?? 'balanced';
   const budgetState = opts.budgetState ?? null;
+  const installedCLIs = opts.installedCLIs ?? null;
   const cfg = loadHydraConfig();
   const learningEnabled = cfg.agents?.affinityLearning?.enabled;
   const overrides = learningEnabled ? loadAffinityOverrides() : {};
@@ -963,6 +966,10 @@ export function bestAgentFor(taskType: TaskType | string, opts: BestAgentOpts = 
     if (!agent.enabled) continue;
     if (name === 'local' && !cfg.local?.enabled) continue;
     if (!includeVirtual && agent.type === AGENT_TYPE.VIRTUAL) continue;
+    // Skip CLI agents explicitly marked as not installed
+    if (installedCLIs && agent.features?.executeMode === 'spawn' && installedCLIs[name] === false) {
+      continue;
+    }
     let score = (agent.taskAffinity as Record<string, number>)[taskType] ?? 0;
     const key = `${name}:${taskType}`;
     if (overrides[key]?.adjustment) {

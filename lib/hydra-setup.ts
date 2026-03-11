@@ -16,6 +16,7 @@ import path from 'node:path';
 // @ts-ignore — cross-spawn has no bundled types; pre-existing across codebase
 import crossSpawn from 'cross-spawn';
 import { fileURLToPath } from 'node:url';
+import { listAgents } from './hydra-agents.ts';
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -97,16 +98,21 @@ export function commandExists(name: string): boolean {
 }
 
 /**
- * Detect which AI CLIs are installed and accessible on PATH.
- * @returns {{ claude: boolean, gemini: boolean, codex: boolean, copilot: boolean }}
+ * Detect which agent CLIs are installed and accessible on PATH.
+ * Enumerates all registered physical agents with executeMode:'spawn' and checks
+ * whether their CLI binary exists on PATH. New agents are picked up automatically
+ * once registered — no manual edits required.
+ *
+ * @returns {Record<string, boolean>} agent name → installed
  */
-export function detectInstalledCLIs() {
-  return {
-    claude: commandExists('claude'),
-    gemini: commandExists('gemini'),
-    codex: commandExists('codex'),
-    copilot: commandExists('copilot'),
-  };
+export function detectInstalledCLIs(): Record<string, boolean> {
+  const result: Record<string, boolean> = {};
+  for (const agentDef of listAgents({ type: 'physical' })) {
+    if (agentDef.features.executeMode !== 'spawn') continue;
+    const binaryName = agentDef.cli ?? agentDef.name;
+    result[agentDef.name] = commandExists(binaryName);
+  }
+  return result;
 }
 
 // ── MCP Server Entry Builders ───────────────────────────────────────────────

@@ -764,3 +764,101 @@ Agent (Gemini/Codex/Claude)
 - `hydra_status` — get daemon health summary
 
 Module: `lib/hydra-mcp-server.mjs` — run with `node lib/hydra-mcp-server.mjs`.
+
+---
+
+## Agent Extensibility Contract
+
+### Adding a New Physical Agent
+
+New agents (opencode, aider, continue.dev, etc.) are registered as plugin definitions.
+Once registered, **CLI detection and routing are automatic** — no other files need editing.
+
+#### Minimum viable plugin (add to `lib/hydra-agents.ts` `PHYSICAL_AGENTS`)
+
+```typescript
+{
+  name: 'opencode',                        // lowercase a-z0-9-
+  label: 'OpenCode',
+  type: AGENT_TYPE.PHYSICAL,
+  cli: 'opencode',                         // binary name; defaults to agent name if omitted
+  features: {
+    executeMode: 'spawn',                  // 'spawn' | 'api'
+    jsonOutput: false,                     // true if CLI supports --output-format json
+    stdinPrompt: false,                    // true if prompt goes via stdin
+    reasoningEffort: false,               // true if --reasoning-effort flag supported
+  },
+  invoke: {
+    headless: (prompt, opts = {}) => {
+      const args = ['-p', prompt];
+      if (opts.model) args.push('--model', resolveCliModelId(opts.model));
+      return ['opencode', args];
+    },
+  },
+  parseOutput(stdout) {
+    return { output: stdout, tokenUsage: null, costUsd: null };
+  },
+  taskAffinity: {
+    planning: 0.6, architecture: 0.6, review: 0.7, refactor: 0.9,
+    implementation: 0.9, analysis: 0.7, testing: 0.8,
+    research: 0.5, documentation: 0.6, security: 0.6,
+  },
+}
+```
+
+#### Always use `resolveCliModelId()` in `invoke.headless()`
+
+```typescript
+import { resolveCliModelId } from '../hydra-model-profiles.ts';
+
+// ✅ Correct — translates Hydra internal IDs to CLI flag values
+if (opts.model) args.push('--model', resolveCliModelId(opts.model));
+
+// ❌ Wrong — passes Hydra internal ID directly; may fail for copilot-* IDs
+if (opts.model) args.push('--model', opts.model);
+```
+
+#### Checklist for adding a new agent
+
+1. **Plugin definition** — add entry to `PHYSICAL_AGENTS` in `lib/hydra-agents.ts`
+2. **Model profiles** — add `MODEL_PROFILES` entries in `lib/hydra-model-profiles.ts` with
+   `cliModelId` where the CLI accepts a different ID than Hydra's internal ID
+3. **Config defaults** — add `models.<agentName>` entry in `DEFAULT_CONFIG` in `lib/hydra-config.ts`
+4. **UI** — add color and icon in `lib/hydra-ui.ts`
+5. **CLI detection** — automatic via `detectInstalledCLIs()` (enumerates `listAgents({type:'physical'})`)
+6. **Routing** — automatic via `bestAgentFor()` (uses `taskAffinity` scores)
+7. **Dispatch roles** — update `roles.coordinator/critic/synthesizer` in `hydra.config.json` if desired
+8. **MCP** — add `KNOWN_CLI_MCP_PATHS` entry in `lib/hydra-setup.ts` if the agent supports MCP config
+9. **Docs** — `COPILOT.md`-style agent instructions file (optional but recommended)
+
+Steps 5 and 6 require **zero code changes** once the plugin is registered — they happen automatically.
+
+### Dynamic Dispatch Roles
+
+`hydra-dispatch.ts` maps three logical dispatch slots to agents via config roles:
+
+| Role          | Default agent | Purpose                                       |
+| ------------- | ------------- | --------------------------------------------- |
+| `coordinator` | `claude`      | Decomposes prompt, delegates sub-tasks        |
+| `critic`      | `gemini`      | Reviews coordinator output for risks and gaps |
+| `synthesizer` | `codex`       | Produces the final execution packet           |
+
+Override in `hydra.config.json`:
+
+```json
+"roles": {
+  "coordinator": { "agent": "copilot", "model": null },
+  "critic":      { "agent": "claude",  "model": null },
+  "synthesizer": { "agent": "gemini",  "model": null }
+}
+```
+
+Resolution order when the configured agent is not installed:
+
+1. Config `roles.<role>.agent`
+2. First installed agent from: `claude → copilot → gemini → codex → local`
+3. Any installed agent
+4. Throws `Error('No agents available...')` — caught by the daemon
+
+`getRoleAgent(roleName, installedCLIs)` is exported from `lib/hydra-dispatch.ts`.
+`installedCLIs` comes from `detectInstalledCLIs()` in `lib/hydra-setup.ts`.

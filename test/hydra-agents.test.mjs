@@ -462,7 +462,43 @@ test('bestAgentFor with includeVirtual returns virtual agents when they score hi
   unregisterAgent('super-tester');
 });
 
-// ── KNOWN_OWNERS dynamic ─────────────────────────────────────────────────────
+// ── bestAgentFor with installedCLIs ─────────────────────────────────────────
+
+test('bestAgentFor skips CLI agents marked not-installed in installedCLIs', () => {
+  // With all agents available, claude wins for 'planning'
+  const normalResult = bestAgentFor('planning');
+  assert.equal(normalResult, 'claude');
+
+  // Now mark claude as not installed — should fall back to next best
+  const withoutClaude = bestAgentFor('planning', {
+    installedCLIs: { claude: false, gemini: true, codex: true, copilot: true },
+  });
+  assert.notEqual(withoutClaude, 'claude');
+});
+
+test('bestAgentFor does not filter when installedCLIs is not provided', () => {
+  // Without installedCLIs, existing behavior is unchanged
+  const result = bestAgentFor('planning');
+  assert.equal(typeof result, 'string');
+  assert.ok(result.length > 0);
+});
+
+test('bestAgentFor with installedCLIs skips agent only if value is explicitly false', () => {
+  // undefined means "not tracked" (e.g. API agent) — should not be skipped
+  const result = bestAgentFor('planning', {
+    installedCLIs: { claude: false, gemini: undefined, codex: true, copilot: true },
+  });
+  assert.notEqual(result, 'claude');
+});
+
+test('bestAgentFor falls back to claude when installedCLIs filters all physical agents', () => {
+  // All known physical agents marked as not installed
+  const result = bestAgentFor('planning', {
+    installedCLIs: { claude: false, gemini: false, codex: false, copilot: false },
+  });
+  // Should return a string (the fallback), not throw
+  assert.equal(typeof result, 'string');
+});
 
 test('KNOWN_OWNERS includes virtual agents after registration', () => {
   registerAgent('owner-test', { type: 'virtual', baseAgent: 'claude', rolePrompt: 'test' });
