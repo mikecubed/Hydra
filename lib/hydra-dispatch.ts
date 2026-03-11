@@ -447,16 +447,18 @@ async function main() {
       timeoutMs,
       coordinatorModel,
     );
-    const coordParsed = parseJsonLoose(coordResult.stdout);
+    const coordParsed = parseJsonLoose(coordResult.output);
     report.coordinator = { ...coordResult, parsed: coordParsed };
-    coordResult.ok
-      ? spinCoord.succeed(`${colorAgent(coordinatorAgent)} coordination complete`)
-      : spinCoord.fail(`${colorAgent(coordinatorAgent)} coordination failed`);
+    if (coordResult.ok) {
+      spinCoord.succeed(`${colorAgent(coordinatorAgent)} coordination complete`);
+    } else {
+      spinCoord.fail(`${colorAgent(coordinatorAgent)} coordination failed`);
+    }
 
     const criticPromptText = buildCriticPrompt(
       criticAgent,
       prompt,
-      coordParsed ?? coordResult.stdout,
+      coordParsed ?? coordResult.output,
       report.daemonSummary,
     );
     const spinCritic = createSpinner(`${colorAgent(criticAgent)} ${DIM('critiquing...')}`, {
@@ -464,17 +466,19 @@ async function main() {
     });
     spinCritic.start();
     const criticResult = await callAgent(criticAgent, criticPromptText, timeoutMs, criticModel);
-    const criticParsed = parseJsonLoose(criticResult.stdout);
+    const criticParsed = parseJsonLoose(criticResult.output);
     report.critic = { ...criticResult, parsed: criticParsed };
-    criticResult.ok
-      ? spinCritic.succeed(`${colorAgent(criticAgent)} critique complete`)
-      : spinCritic.fail(`${colorAgent(criticAgent)} critique failed`);
+    if (criticResult.ok) {
+      spinCritic.succeed(`${colorAgent(criticAgent)} critique complete`);
+    } else {
+      spinCritic.fail(`${colorAgent(criticAgent)} critique failed`);
+    }
 
     const synthPromptText = buildSynthesizerPrompt(
       synthesizerAgent,
       prompt,
-      coordParsed ?? coordResult.stdout,
-      criticParsed ?? criticResult.stdout,
+      coordParsed ?? coordResult.output,
+      criticParsed ?? criticResult.output,
       report.daemonSummary,
     );
     const spinSynth = createSpinner(`${colorAgent(synthesizerAgent)} ${DIM('synthesizing...')}`, {
@@ -488,9 +492,11 @@ async function main() {
       synthesizerModel,
     );
     report.synthesizer = { ...synthResult, lastMessage: synthResult.stdout };
-    synthResult.ok
-      ? spinSynth.succeed(`${colorAgent(synthesizerAgent)} synthesis complete`)
-      : spinSynth.fail(`${colorAgent(synthesizerAgent)} synthesis failed`);
+    if (synthResult.ok) {
+      spinSynth.succeed(`${colorAgent(synthesizerAgent)} synthesis complete`);
+    } else {
+      spinSynth.fail(`${colorAgent(synthesizerAgent)} synthesis failed`);
+    }
   }
 
   // Set backward-compat aliases so existing consumers reading report.claude etc. still work
@@ -508,9 +514,9 @@ async function main() {
       'Hydra dispatch invariant violated: coordinator, critic, and synthesizer slots must be populated before computing outputSummary.',
     );
   }
-  const coordSnippet = short(coord.stdout ?? JSON.stringify(coord.parsed ?? {}), 280);
-  const criticSnippet = short(critic.stdout ?? JSON.stringify(critic.parsed ?? {}), 280);
-  const synthSnippet = short(synth.lastMessage ?? synth.stdout ?? '', 280);
+  const coordSnippet = short(coord.output ?? JSON.stringify(coord.parsed ?? {}), 280);
+  const criticSnippet = short(critic.output ?? JSON.stringify(critic.parsed ?? {}), 280);
+  const synthSnippet = short(synth.lastMessage ?? synth.output ?? '', 280);
   report.outputSummary = {
     coordinatorOk: Boolean(coord.ok),
     criticOk: Boolean(critic.ok),
