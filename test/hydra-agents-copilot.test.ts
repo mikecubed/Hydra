@@ -217,10 +217,7 @@ describe('copilot agent definition', () => {
     assert.ok(args.includes('--silent'), 'Missing --silent flag');
     assert.ok(args.includes('--no-ask-user'), 'Missing --no-ask-user flag');
     assert.ok(!args.includes('--allow-all-tools'), 'Unexpected --allow-all-tools in plan mode');
-    assert.ok(
-      !args.some((a: string) => a === '--allow-tool'),
-      'Unexpected --allow-tool in plan mode',
-    );
+    assert.ok(!args.includes('--allow-tool'), 'Unexpected --allow-tool in plan mode');
   });
 
   it('headless passes --model when opts.model provided', () => {

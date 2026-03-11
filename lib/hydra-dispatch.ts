@@ -328,6 +328,7 @@ async function main() {
     command?: unknown;
     parsed?: unknown;
     stdout?: string;
+    output?: string;
     lastMessage?: string;
   };
 
