@@ -66,7 +66,7 @@ Use CLAUDE.md chaining when you need one agent to occasionally consult another. 
 
 ## Quick Start
 
-**Requirements:** Node.js 20+, at least one AI CLI installed ([`gemini`](https://github.com/google-gemini/gemini-cli), [`codex`](https://github.com/openai/codex), [`claude`](https://docs.anthropic.com/en/docs/claude-code), or [`copilot`](https://github.com/github/copilot-cli))
+**Requirements:** Node.js 22.18.0+, at least one AI CLI installed ([`gemini`](https://github.com/google-gemini/gemini-cli), [`codex`](https://github.com/openai/codex), [`claude`](https://docs.anthropic.com/en/docs/claude-code), or [`copilot`](https://github.com/github/copilot-cli))
 
 ```bash
 # 1. Install
@@ -78,7 +78,7 @@ npm start              # daemon only
 pwsh ./bin/hydra.ps1   # Windows: daemon + agent heads + operator
 
 # 3. Register with your AI CLIs (one-time)
-node lib/hydra-setup.mjs   # or: hydra setup (after PATH install)
+node lib/hydra-setup.ts   # or: hydra setup (after PATH install)
 ```
 
 Type a prompt in the operator console. Hydra routes it. Use `:help` to see all commands.

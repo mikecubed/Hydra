@@ -495,7 +495,7 @@ Sandbox-aware: no network access, file-system focused. Work within your sandbox 
     parseOutput(stdout: string, opts?: { jsonOutput?: boolean }): AgentResult {
       if (opts?.jsonOutput) {
         try {
-          const lines = stdout.split('\n').filter(Boolean);
+          const lines = stdout.split(/\r?\n/).filter(Boolean);
 
           // Parse JSONL line-by-line — skip non-JSON lines (warnings, prompts, etc.)
           const events: Record<string, unknown>[] = [];
