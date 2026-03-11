@@ -8,7 +8,7 @@ import { loadHydraConfig } from '../lib/hydra-config.ts';
 describe('Agent Plugin Interface', () => {
   // ── Shape tests — all 4 physical agents ──────────────────────────────────
   describe('plugin interface shape', () => {
-    for (const name of ['claude', 'gemini', 'codex', 'local']) {
+    for (const name of ['claude', 'gemini', 'codex', 'local', 'copilot']) {
       it(`${name} has all required plugin fields`, () => {
         const agent = getAgent(name);
         assert.ok(agent, `getAgent('${name}') must return a definition`);

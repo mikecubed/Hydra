@@ -41,11 +41,11 @@
   H Y D R A
 ```
 
-Each AI coding agent has a distinct strength: Claude architects, Gemini analyzes, Codex implements. Running them separately means picking one perspective per task.
+Each AI coding agent has a distinct strength: Claude architects, Gemini analyzes, Codex implements, Copilot advises with GitHub context. Running them separately means picking one perspective per task.
 
-Hydra routes your prompt to the right agent — or orchestrates all three — through a shared daemon with intelligent dispatch, headless workers, and autonomous pipelines. One interface, every perspective.
+Hydra routes your prompt to the right agent — or orchestrates all — through a shared daemon with intelligent dispatch, headless workers, and autonomous pipelines. One interface, every perspective.
 
-Coordinates [Gemini CLI](https://github.com/google-gemini/gemini-cli), [Codex CLI](https://github.com/openai/codex), and [Claude Code](https://docs.anthropic.com/en/docs/claude-code) through an event-sourced HTTP daemon with task queue, intelligent routing, and multi-round deliberation.
+Coordinates [Gemini CLI](https://github.com/google-gemini/gemini-cli), [Codex CLI](https://github.com/openai/codex), [Claude Code](https://docs.anthropic.com/en/docs/claude-code), and [GitHub Copilot CLI](https://github.com/github/copilot-cli) through an event-sourced HTTP daemon with task queue, intelligent routing, and multi-round deliberation.
 
 ## Why Hydra?
 
@@ -66,7 +66,7 @@ Use CLAUDE.md chaining when you need one agent to occasionally consult another. 
 
 ## Quick Start
 
-**Requirements:** Node.js 20+, at least one AI CLI installed ([`gemini`](https://github.com/google-gemini/gemini-cli), [`codex`](https://github.com/openai/codex), or [`claude`](https://docs.anthropic.com/en/docs/claude-code))
+**Requirements:** Node.js 22.18.0+, at least one AI CLI installed ([`gemini`](https://github.com/google-gemini/gemini-cli), [`codex`](https://github.com/openai/codex), [`claude`](https://docs.anthropic.com/en/docs/claude-code), or [`copilot`](https://github.com/github/copilot-cli))
 
 ```bash
 # 1. Install
@@ -78,7 +78,7 @@ npm start              # daemon only
 pwsh ./bin/hydra.ps1   # Windows: daemon + agent heads + operator
 
 # 3. Register with your AI CLIs (one-time)
-node lib/hydra-setup.mjs   # or: hydra setup (after PATH install)
+node lib/hydra-setup.ts   # or: hydra setup (after PATH install)
 ```
 
 Type a prompt in the operator console. Hydra routes it. Use `:help` to see all commands.
@@ -96,13 +96,13 @@ Type a prompt in the operator console. Hydra routes it. Use `:help` to see all c
 
 Hydra has five dispatch modes. Pick one or let it choose:
 
-| Mode         | What it does                                                                                                          |
-| ------------ | --------------------------------------------------------------------------------------------------------------------- |
-| **Auto**     | Classifies your prompt locally — zero extra API calls — then routes to a single agent, a tandem pair, or full council |
-| **Smart**    | Like Auto, but also auto-selects model tier (economy / balanced / performance) per prompt complexity                  |
-| **Council**  | Multi-round deliberation: Claude proposes → Gemini critiques → Claude refines → Codex implements                      |
-| **Dispatch** | Headless pipeline — queues tasks for background workers, no interactive waiting                                       |
-| **Chat**     | Conversational concierge — answers questions directly, escalates to agents only when real work is needed              |
+| Mode         | What it does                                                                                                                  |
+| ------------ | ----------------------------------------------------------------------------------------------------------------------------- |
+| **Auto**     | Classifies your prompt locally — zero extra API calls — then routes to a single agent, a tandem pair, or full council         |
+| **Smart**    | Like Auto, but also auto-selects model tier (economy / balanced / performance) per prompt complexity                          |
+| **Council**  | Multi-round deliberation: Claude proposes → Gemini critiques → Claude refines → Codex implements → Copilot advises (optional) |
+| **Dispatch** | Headless pipeline — queues tasks for background workers, no interactive waiting                                               |
+| **Chat**     | Conversational concierge — answers questions directly, escalates to agents only when real work is needed                      |
 
 Switch modes with `:mode <name>` at any time. The daemon persists state across mode switches.
 

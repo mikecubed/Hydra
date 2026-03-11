@@ -417,7 +417,7 @@ test('selectTandemPair returns correct pair for each task type', () => {
   const pairs = {
     planning: { lead: 'claude', follow: 'codex' },
     architecture: { lead: 'claude', follow: 'gemini' },
-    review: { lead: 'gemini', follow: 'claude' },
+    review: { lead: 'gemini', follow: 'copilot' },
     testing: { lead: 'codex', follow: 'gemini' },
     security: { lead: 'gemini', follow: 'claude' },
   };

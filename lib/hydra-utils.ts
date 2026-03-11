@@ -9,6 +9,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { KNOWN_OWNERS, classifyTask, bestAgentFor, AGENT_NAMES } from './hydra-agents.ts';
+
 import { executeAgent } from './hydra-shared/agent-executor.ts';
 import { spawnSyncCapture } from './hydra-proc.ts';
 
@@ -515,18 +516,21 @@ const MULTI_OBJECTIVE = /\b(?:and|also|plus|additionally)\b/i;
 const TANDEM_INDICATORS =
   /\b(?:first\s+\w+(?:\s+\w+){0,5}\s+then\b|review\s+and\s+fix|analyze\s+and\s+implement|plan\s+(?:and\s+|then\s+)?build|assess\s+(?:and|then)\s+(?:fix|implement|refactor)|research\s+(?:and|then)\s+(?:implement|build|write)|check\s+(?:and|then)\s+(?:fix|update|refactor))/i;
 
-// Task-type → tandem pair mapping
+// Task-type → tandem pair mapping.
+// For review and documentation, copilot is preferred as follow agent when available
+// (adds GitHub context). Pass an availability-filtered agents list to selectTandemPair()
+// so the dispatch layer can substitute unavailable agents.
 const TANDEM_PAIRS: Record<string, TandemPair> = {
   planning: { lead: 'claude', follow: 'codex' },
   architecture: { lead: 'claude', follow: 'gemini' },
-  review: { lead: 'gemini', follow: 'claude' },
+  review: { lead: 'gemini', follow: 'copilot' },
   refactor: { lead: 'claude', follow: 'codex' },
   implementation: { lead: 'claude', follow: 'codex' },
   analysis: { lead: 'gemini', follow: 'claude' },
   testing: { lead: 'codex', follow: 'gemini' },
   security: { lead: 'gemini', follow: 'claude' },
   research: { lead: 'gemini', follow: 'claude' },
-  documentation: { lead: 'claude', follow: 'codex' },
+  documentation: { lead: 'claude', follow: 'copilot' },
 };
 
 /**
@@ -575,7 +579,7 @@ export function selectTandemPair(
  *   - moderate: run mini-round triage (default)
  *   - complex:  full council deliberation
  */
-export function classifyPrompt(promptText: unknown): ClassifyPromptResult {
+export function classifyPrompt(promptText: unknown, agents?: string[]): ClassifyPromptResult {
   const text = (typeof promptText === 'string' ? promptText : '').trim();
   if (!text) {
     return {
@@ -709,8 +713,11 @@ export function classifyPrompt(promptText: unknown): ClassifyPromptResult {
     routeStrategy = 'tandem';
   }
 
-  // Resolve tandem pair (null for single/council)
-  const tandemPair = routeStrategy === 'tandem' ? selectTandemPair(taskType, suggestedAgent) : null;
+  // Resolve tandem pair (null for single/council). When an agents list is
+  // provided (e.g. from the dispatch layer with availability-filtered agents),
+  // it is passed through so unavailable agents are skipped.
+  const tandemPair =
+    routeStrategy === 'tandem' ? selectTandemPair(taskType, suggestedAgent, agents) : null;
 
   return {
     tier,

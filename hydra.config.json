@@ -49,22 +49,26 @@
     "performance": {
       "gemini": "default",
       "codex": "default",
-      "claude": "default"
+      "claude": "default",
+      "copilot": "flagship"
     },
     "balanced": {
       "gemini": "fast",
       "codex": "fast",
-      "claude": "fast"
+      "claude": "fast",
+      "copilot": "default"
     },
     "economy": {
       "gemini": "cheap",
       "codex": "cheap",
-      "claude": "cheap"
+      "claude": "cheap",
+      "copilot": "fast"
     },
     "custom": {
       "gemini": "default",
       "codex": "default",
-      "claude": "default"
+      "claude": "default",
+      "copilot": "default"
     }
   },
   "usage": {
@@ -165,6 +169,21 @@
       "agent": "codex",
       "model": "o4-mini",
       "reasoningEffort": "low"
+    },
+    "copilot": {
+      "agent": "copilot",
+      "model": "copilot-claude-sonnet-4-6",
+      "reasoningEffort": null
+    },
+    "copilot-reviewer": {
+      "agent": "copilot",
+      "model": "copilot-claude-sonnet-4-6",
+      "reasoningEffort": null
+    },
+    "copilot-architect": {
+      "agent": "copilot",
+      "model": "copilot-claude-opus-4-6",
+      "reasoningEffort": null
     }
   },
   "recommendations": {
@@ -197,6 +216,21 @@
       "models": ["o4-mini", "gpt-5"],
       "reasoningEffort": "low",
       "note": "Budget-friendly, SWE-bench 68.1%, o4-mini supports low/medium/high effort"
+    },
+    "copilot": {
+      "models": ["copilot-claude-sonnet-4-6", "copilot-claude-opus-4-6", "copilot-gpt-5-4"],
+      "reasoningEffort": null,
+      "note": "GitHub-integrated advisor; cross-references issues, PRs, and CI in every response"
+    },
+    "copilot-reviewer": {
+      "models": ["copilot-claude-sonnet-4-6"],
+      "reasoningEffort": null,
+      "note": "Sonnet is well-suited for review tasks with GitHub context"
+    },
+    "copilot-architect": {
+      "models": ["copilot-claude-opus-4-6"],
+      "reasoningEffort": null,
+      "note": "Opus for planning/architecture depth with GitHub workflow awareness"
     }
   },
   "agents": {

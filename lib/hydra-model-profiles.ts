@@ -577,6 +577,142 @@ export const MODEL_PROFILES: Record<string, ModelProfile> = {
       5: { rpm: 15_000, tpm: 40_000_000 },
     },
   },
+
+  // ── GitHub Copilot CLI models ─────────────────────────────────────────────
+  // cliModelId is the value passed to `copilot --model <id>`.
+  // Claude models use dots (claude-sonnet-4.6), Gemini uses gemini-3-pro-preview.
+  // pricePer1M / costPer1K are zero — all included in Copilot subscription.
+
+  'copilot-claude-sonnet-4-6': {
+    id: 'copilot-claude-sonnet-4-6',
+    cliModelId: 'claude-sonnet-4.6',
+    provider: 'github',
+    agent: 'copilot',
+    displayName: 'Copilot (Claude Sonnet 4.6)',
+    shortName: 'copilot-sonnet',
+    tier: 'mid',
+    contextWindow: 128_000,
+    maxOutput: 64_000,
+    pricePer1M: { input: 0, output: 0 },
+    costPer1K: { input: 0, output: 0 },
+    tokPerSec: 75,
+    ttft: 2.0,
+    reasoning: { type: 'none', levels: ['off'], default: 'off' },
+    benchmarks: { sweBench: 79.2 },
+    qualityScore: 85,
+    valueScore: 92,
+    speedScore: 32,
+    strengths: [
+      'github-integration',
+      'pr-awareness',
+      'code-suggestion',
+      'mcp-native',
+      'price-performance',
+    ],
+    bestFor: ['review', 'documentation', 'implementation', 'refactor'],
+    rateLimits: {
+      free: { rpm: 10, tpm: 100_000 },
+      1: { rpm: 10, tpm: 100_000 },
+      2: { rpm: 30, tpm: 300_000 },
+      3: { rpm: 50, tpm: 500_000 },
+    },
+  },
+  'copilot-claude-opus-4-6': {
+    id: 'copilot-claude-opus-4-6',
+    cliModelId: 'claude-opus-4.6',
+    provider: 'github',
+    agent: 'copilot',
+    displayName: 'Copilot (Claude Opus 4.6)',
+    shortName: 'copilot-opus',
+    tier: 'flagship',
+    contextWindow: 128_000,
+    maxOutput: 64_000,
+    pricePer1M: { input: 0, output: 0 },
+    costPer1K: { input: 0, output: 0 },
+    tokPerSec: 55,
+    ttft: 2.5,
+    reasoning: { type: 'none', levels: ['off'], default: 'off' },
+    benchmarks: { sweBench: 80.8 },
+    qualityScore: 95,
+    valueScore: 88,
+    speedScore: 22,
+    strengths: [
+      'github-integration',
+      'abstract-reasoning',
+      'agentic',
+      'code-quality',
+      'long-context',
+    ],
+    bestFor: ['planning', 'architecture', 'security', 'review'],
+    rateLimits: {
+      free: { rpm: 5, tpm: 50_000 },
+      1: { rpm: 5, tpm: 50_000 },
+      2: { rpm: 15, tpm: 150_000 },
+      3: { rpm: 30, tpm: 300_000 },
+    },
+  },
+  'copilot-gpt-5-4': {
+    id: 'copilot-gpt-5-4',
+    cliModelId: 'gpt-5.4',
+    provider: 'github',
+    agent: 'copilot',
+    displayName: 'Copilot (GPT-5.4)',
+    shortName: 'copilot-gpt5.4',
+    tier: 'flagship',
+    contextWindow: 128_000,
+    maxOutput: 64_000,
+    pricePer1M: { input: 0, output: 0 },
+    costPer1K: { input: 0, output: 0 },
+    tokPerSec: 70,
+    ttft: 2.2,
+    reasoning: { type: 'effort', levels: ['none', 'low', 'medium', 'high'], default: 'none' },
+    benchmarks: { sweBenchPro: 57.7, gpqaDiamond: 84.2 },
+    qualityScore: 93,
+    valueScore: 90,
+    speedScore: 40,
+    strengths: [
+      'github-integration',
+      'reasoning',
+      'long-context',
+      'implementation',
+      'code-generation',
+    ],
+    bestFor: ['implementation', 'refactor', 'analysis', 'complex-tasks'],
+    rateLimits: {
+      free: { rpm: 5, tpm: 50_000 },
+      1: { rpm: 10, tpm: 100_000 },
+      2: { rpm: 20, tpm: 200_000 },
+      3: { rpm: 40, tpm: 400_000 },
+    },
+  },
+  'copilot-gemini-3-pro-preview': {
+    id: 'copilot-gemini-3-pro-preview',
+    cliModelId: 'gemini-3-pro-preview',
+    provider: 'github',
+    agent: 'copilot',
+    displayName: 'Copilot (Gemini 3 Pro)',
+    shortName: 'copilot-gemini',
+    tier: 'flagship',
+    contextWindow: 128_000, // Copilot context cap; underlying model supports 1M
+    maxOutput: 64_000,
+    pricePer1M: { input: 0, output: 0 },
+    costPer1K: { input: 0, output: 0 },
+    tokPerSec: 120,
+    ttft: 1.8,
+    reasoning: { type: 'none', levels: ['off'], default: 'off' },
+    benchmarks: { sweBench: 76.2, gpqaDiamond: 91.9 },
+    qualityScore: 88,
+    valueScore: 90,
+    speedScore: 55,
+    strengths: ['github-integration', 'algorithmic-coding', 'analysis', 'multimodal', 'speed'],
+    bestFor: ['analysis', 'review', 'research', 'documentation'],
+    rateLimits: {
+      free: { rpm: 5, tpm: 50_000 },
+      1: { rpm: 10, tpm: 100_000 },
+      2: { rpm: 25, tpm: 250_000 },
+      3: { rpm: 50, tpm: 500_000 },
+    },
+  },
 };
 
 // ── ROLE_DEFAULTS ───────────────────────────────────────────────────────────
@@ -625,6 +761,30 @@ export const ROLE_DEFAULTS = {
     models: ['o4-mini', 'gpt-5'],
     note: 'Budget-friendly, SWE-bench 68.1%, o4-mini supports low/medium/high effort',
   },
+  copilot: {
+    role: 'advisor',
+    agent: 'copilot',
+    model: 'copilot-claude-sonnet-4-6',
+    reasoningEffort: null,
+    models: ['copilot-claude-sonnet-4-6', 'copilot-claude-opus-4-6', 'copilot-gpt-5-4'],
+    note: 'GitHub-integrated advisor; cross-references issues, PRs, and CI in every response',
+  },
+  'copilot-reviewer': {
+    role: 'reviewer',
+    agent: 'copilot',
+    model: 'copilot-claude-sonnet-4-6',
+    reasoningEffort: null,
+    models: ['copilot-claude-sonnet-4-6'],
+    note: 'Sonnet is well-suited for review tasks with GitHub context',
+  },
+  'copilot-architect': {
+    role: 'architect',
+    agent: 'copilot',
+    model: 'copilot-claude-opus-4-6',
+    reasoningEffort: null,
+    models: ['copilot-claude-opus-4-6'],
+    note: 'Opus for planning/architecture depth with GitHub workflow awareness',
+  },
 };
 
 // ── AGENT_PRESETS ───────────────────────────────────────────────────────────
@@ -641,6 +801,12 @@ export const AGENT_PRESETS = {
     default: 'gemini-3.1-pro-preview',
     fast: 'gemini-3-flash-preview',
     cheap: 'gemini-3-flash-preview',
+  },
+  copilot: {
+    default: 'copilot-claude-sonnet-4-6',
+    fast: 'copilot-claude-sonnet-4-6',
+    cheap: 'copilot-claude-sonnet-4-6',
+    flagship: 'copilot-claude-opus-4-6',
   },
 };
 
@@ -925,10 +1091,10 @@ export function getModeTiers(): {
   custom: Record<string, string>;
 } {
   return {
-    performance: { gemini: 'default', codex: 'default', claude: 'default' },
-    balanced: { gemini: 'fast', codex: 'fast', claude: 'fast' },
-    economy: { gemini: 'cheap', codex: 'cheap', claude: 'cheap' },
-    custom: { gemini: 'default', codex: 'default', claude: 'default' },
+    performance: { gemini: 'default', codex: 'default', claude: 'default', copilot: 'flagship' },
+    balanced: { gemini: 'fast', codex: 'fast', claude: 'fast', copilot: 'default' },
+    economy: { gemini: 'cheap', codex: 'cheap', claude: 'cheap', copilot: 'fast' },
+    custom: { gemini: 'default', codex: 'default', claude: 'default', copilot: 'default' },
   };
 }
 
