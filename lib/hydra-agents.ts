@@ -584,7 +584,8 @@ Sandbox-aware: no network access, file-system focused. Work within your sandbox 
 Output structure: GitHub context summary → Actionable suggestions → Commands to run.`,
     timeout: 7 * 60 * 1000,
     tags: ['github', 'integration', 'copilot', 'advisory'],
-    enabled: true,
+    // Disabled by default — enable after installing the GitHub Copilot CLI.
+    enabled: false,
   },
 };
 

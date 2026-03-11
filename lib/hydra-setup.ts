@@ -56,12 +56,13 @@ export function resolveHydraRoot() {
 }
 
 /**
- * Resolve the absolute path to hydra-mcp-server.mjs with forward slashes.
+ * Resolve the absolute path to hydra-mcp-server.ts with forward slashes.
+ * Node >=22.18 runs .ts files directly; no .mjs build artifact is needed.
  * Forward slashes ensure cross-platform MCP config compatibility.
  * @returns {string}
  */
 export function resolveMcpServerPath() {
-  return path.join(resolveHydraRoot(), 'lib', 'hydra-mcp-server.mjs').replace(/\\/g, '/');
+  return path.join(resolveHydraRoot(), 'lib', 'hydra-mcp-server.ts').replace(/\\/g, '/');
 }
 
 /**
@@ -560,8 +561,7 @@ export function mergeCopilotConfig(opts: { force?: boolean } = {}): {
 
   mcpServers['hydra'] = {
     command: resolveNodePath(),
-    // Use .ts path — Node >=22.18 runs TS directly; no .mjs build artifact exists
-    args: [path.join(resolveHydraRoot(), 'lib', 'hydra-mcp-server.ts').replace(/\\/g, '/')],
+    args: [resolveMcpServerPath()],
     description: 'Hydra multi-agent orchestration',
   };
 

@@ -127,7 +127,12 @@ test('each physical agent has required fields', () => {
     assert.ok(typeof agent.timeout === 'number', `${name} should have timeout`);
     assert.equal(agent.type, 'physical', `${name} should be a physical agent`);
     assert.ok(Array.isArray(agent.tags), `${name} should have tags array`);
-    assert.equal(agent.enabled, true, `${name} should be enabled`);
+    // copilot is disabled by default — requires CLI installation
+    if (name === 'copilot') {
+      assert.equal(agent.enabled, false, 'copilot should be disabled by default');
+    } else {
+      assert.equal(agent.enabled, true, `${name} should be enabled`);
+    }
   }
 });
 

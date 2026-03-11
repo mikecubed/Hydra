@@ -25,9 +25,9 @@ describe('copilot agent definition', () => {
     assert.equal(agent.cli, 'copilot');
   });
 
-  it('has enabled flag set to true', () => {
+  it('is disabled by default (requires CLI installation)', () => {
     const agent = getAgent('copilot');
-    assert.equal(agent.enabled, true);
+    assert.equal(agent.enabled, false);
   });
 
   // ── Plugin interface tests ──────────────────────────────────────────────

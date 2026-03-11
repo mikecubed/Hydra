@@ -70,9 +70,9 @@ describe('resolveHydraRoot', () => {
 // ── resolveMcpServerPath ────────────────────────────────────────────────────
 
 describe('resolveMcpServerPath', () => {
-  it('returns path ending with hydra-mcp-server.mjs', () => {
+  it('returns path ending with hydra-mcp-server.ts', () => {
     const p = resolveMcpServerPath();
-    assert.ok(p.endsWith('hydra-mcp-server.mjs'));
+    assert.ok(p.endsWith('hydra-mcp-server.ts'));
   });
 
   it('uses forward slashes', () => {
@@ -101,7 +101,7 @@ describe('buildMcpServerEntry', () => {
     assert.strictEqual(entry.command, nodePath);
     assert.ok(Array.isArray(entry.args));
     assert.ok(entry.args.length >= 1);
-    assert.ok(entry.args[0].endsWith('hydra-mcp-server.mjs'));
+    assert.ok(entry.args[0].endsWith('hydra-mcp-server.ts'));
     assert.ok(!entry.args[0].includes('\\'), 'args should use forward slashes');
     assert.ok('env' in entry);
     assert.deepStrictEqual(entry.env, {});
@@ -123,7 +123,7 @@ describe('buildMcpServerEntry', () => {
     const nodePath = resolveNodePath();
     assert.ok(Array.isArray(entry));
     assert.strictEqual(entry[0], nodePath);
-    assert.ok(entry[1].endsWith('hydra-mcp-server.mjs'));
+    assert.ok(entry[1].endsWith('hydra-mcp-server.ts'));
   });
 });
 
