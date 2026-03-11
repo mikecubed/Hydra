@@ -606,7 +606,7 @@ Sandbox-aware: no network access, file-system focused. Work within your sandbox 
 Output structure: GitHub context summary → Actionable suggestions → Commands to run.`,
     timeout: 7 * 60 * 1000,
     tags: ['github', 'integration', 'copilot', 'advisory'],
-    // Disabled by default — enable after installing the GitHub Copilot CLI.
+    // Disabled by default — set copilot.enabled: true in hydra.config.json after installing the CLI.
     enabled: false,
   },
 };
@@ -695,9 +695,29 @@ export function unregisterAgent(name: string): boolean {
 /**
  * Get an agent definition by name. Returns null if not found.
  */
+/**
+ * Apply config-driven enabled overrides to a registry entry without mutating it.
+ * Agents like `copilot` are disabled in PHYSICAL_AGENTS and activated via config.
+ * This is evaluated on every getAgent/listAgents call so _setTestConfig works in tests
+ * without needing _resetRegistry.
+ */
+function _resolveEnabled(entry: AgentDef): boolean {
+  if (entry.name === 'copilot') {
+    try {
+      const cfg = loadHydraConfig();
+      return Boolean(cfg.copilot?.enabled);
+    } catch {
+      return false;
+    }
+  }
+  return entry.enabled;
+}
+
 export function getAgent(name: string | null | undefined): AgentDef | null {
   if (!name) return null;
-  return _registry.get(String(name).toLowerCase()) || null;
+  const entry = _registry.get(String(name).toLowerCase());
+  if (!entry) return null;
+  return { ...entry, enabled: _resolveEnabled(entry) };
 }
 
 /**
@@ -735,8 +755,9 @@ export function listAgents(opts: ListAgentsOpts = {}): AgentDef[] {
   const results: AgentDef[] = [];
   for (const agent of _registry.values()) {
     if (opts.type && agent.type !== opts.type) continue;
-    if (opts.enabled !== undefined && agent.enabled !== opts.enabled) continue;
-    results.push(agent);
+    const enabled = _resolveEnabled(agent);
+    if (opts.enabled !== undefined && enabled !== opts.enabled) continue;
+    results.push({ ...agent, enabled });
   }
   return results;
 }
@@ -757,12 +778,13 @@ export const AGENTS: Record<string, AgentDef | undefined> = new Proxy(
         return () => {
           const obj: Record<string, AgentDef> = {};
           for (const [k, v] of _registry) {
-            if (v.type === AGENT_TYPE.PHYSICAL) obj[k] = v;
+            if (v.type === AGENT_TYPE.PHYSICAL) obj[k] = { ...v, enabled: _resolveEnabled(v) };
           }
           return obj;
         };
       }
-      return _registry.get(String(prop)) ?? undefined;
+      const entry = _registry.get(String(prop));
+      return entry ? { ...entry, enabled: _resolveEnabled(entry) } : undefined;
     },
     has(_, prop) {
       return _registry.has(String(prop));
@@ -775,7 +797,12 @@ export const AGENTS: Record<string, AgentDef | undefined> = new Proxy(
     getOwnPropertyDescriptor(_, prop) {
       const val = _registry.get(String(prop));
       if (val?.type === AGENT_TYPE.PHYSICAL) {
-        return { configurable: true, enumerable: true, writable: false, value: val };
+        return {
+          configurable: true,
+          enumerable: true,
+          writable: false,
+          value: { ...val, enabled: _resolveEnabled(val) },
+        };
       }
       return undefined;
     },
@@ -963,7 +990,7 @@ export function bestAgentFor(taskType: TaskType | string, opts: BestAgentOpts = 
 
   const candidates: Array<{ name: string; score: number }> = [];
   for (const [name, agent] of _registry) {
-    if (!agent.enabled) continue;
+    if (!_resolveEnabled(agent)) continue;
     if (name === 'local' && !cfg.local?.enabled) continue;
     if (!includeVirtual && agent.type === AGENT_TYPE.VIRTUAL) continue;
     // Skip CLI agents explicitly marked as not installed
@@ -987,7 +1014,7 @@ export function bestAgentFor(taskType: TaskType | string, opts: BestAgentOpts = 
       const preferenceOrder = ['claude', 'copilot', 'gemini', 'codex', 'local'] as const;
       for (const name of preferenceOrder) {
         const agentDef = _registry.get(name);
-        if (!agentDef?.enabled) continue;
+        if (!agentDef || !_resolveEnabled(agentDef)) continue;
         if (!includeVirtual && agentDef.type === AGENT_TYPE.VIRTUAL) continue;
         if (name === 'local' && !cfg.local?.enabled) continue;
         if (installedCLIs[name] === false) continue;
@@ -997,7 +1024,7 @@ export function bestAgentFor(taskType: TaskType | string, opts: BestAgentOpts = 
       const registryBackedFallback = Object.entries(installedCLIs).find(([cliName, v]) => {
         if (!v) return false;
         const agentDef = _registry.get(cliName);
-        if (!agentDef?.enabled) return false;
+        if (!agentDef || !_resolveEnabled(agentDef)) return false;
         if (!includeVirtual && agentDef.type === AGENT_TYPE.VIRTUAL) return false;
         return true;
       });

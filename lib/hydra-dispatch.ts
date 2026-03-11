@@ -80,9 +80,13 @@ function usageGuard(_agent: string) {
   }
 }
 
-async function callAgent(agent: string, prompt: string, timeoutMs: number) {
+async function callAgent(agent: string, prompt: string, timeoutMs: number, model?: string | null) {
   usageGuard(agent);
-  return executeAgent(agent, prompt, { cwd: config.projectRoot, timeoutMs });
+  return executeAgent(agent, prompt, {
+    cwd: config.projectRoot,
+    timeoutMs,
+    ...(model ? { modelOverride: model } : {}),
+  });
 }
 
 async function fetchDaemonSummary(baseUrl: string) {
@@ -313,6 +317,11 @@ async function main() {
   const criticAgent = getRoleAgent('critic', installedCLIs);
   const synthesizerAgent = getRoleAgent('synthesizer', installedCLIs);
 
+  // Resolve per-role model overrides (null means "use agent default")
+  const coordinatorModel = getRoleConfig('coordinator')?.model ?? null;
+  const criticModel = getRoleConfig('critic')?.model ?? null;
+  const synthesizerModel = getRoleConfig('synthesizer')?.model ?? null;
+
   type DispatchSlot = {
     ok?: boolean;
     preview?: boolean;
@@ -392,11 +401,16 @@ async function main() {
     const coordConfig = getAgent(coordinatorAgent);
     const criticConfig = getAgent(criticAgent);
     const synthConfig = getAgent(synthesizerAgent);
-    const coordCmd = coordConfig?.invoke?.nonInteractive?.('<coordinator-prompt>');
-    const criticCmd = criticConfig?.invoke?.nonInteractive?.('<critic-prompt>');
+    const coordCmd = coordConfig?.invoke?.nonInteractive?.('<coordinator-prompt>', {
+      model: coordinatorModel ?? undefined,
+    });
+    const criticCmd = criticConfig?.invoke?.nonInteractive?.('<critic-prompt>', {
+      model: criticModel ?? undefined,
+    });
     const synthCmd = synthConfig?.invoke?.nonInteractive?.('<synthesizer-prompt>', {
       outputPath: '<tempfile>',
       cwd: config.projectRoot,
+      model: synthesizerModel ?? undefined,
     });
     report.coordinator = {
       ok: coordCmd !== undefined,
@@ -427,7 +441,12 @@ async function main() {
       style: 'solar',
     });
     spinCoord.start();
-    const coordResult = await callAgent(coordinatorAgent, coordinatorPromptText, timeoutMs);
+    const coordResult = await callAgent(
+      coordinatorAgent,
+      coordinatorPromptText,
+      timeoutMs,
+      coordinatorModel,
+    );
     const coordParsed = parseJsonLoose(coordResult.stdout);
     report.coordinator = { ...coordResult, parsed: coordParsed };
     coordResult.ok
@@ -444,7 +463,7 @@ async function main() {
       style: 'solar',
     });
     spinCritic.start();
-    const criticResult = await callAgent(criticAgent, criticPromptText, timeoutMs);
+    const criticResult = await callAgent(criticAgent, criticPromptText, timeoutMs, criticModel);
     const criticParsed = parseJsonLoose(criticResult.stdout);
     report.critic = { ...criticResult, parsed: criticParsed };
     criticResult.ok
@@ -462,7 +481,12 @@ async function main() {
       style: 'solar',
     });
     spinSynth.start();
-    const synthResult = await callAgent(synthesizerAgent, synthPromptText, timeoutMs);
+    const synthResult = await callAgent(
+      synthesizerAgent,
+      synthPromptText,
+      timeoutMs,
+      synthesizerModel,
+    );
     report.synthesizer = { ...synthResult, lastMessage: synthResult.stdout };
     synthResult.ok
       ? spinSynth.succeed(`${colorAgent(synthesizerAgent)} synthesis complete`)

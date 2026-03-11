@@ -17,7 +17,7 @@ import {
   getModeTiers as _getModeTiers,
   getConciergeFallbackChain as _getConciergeFallbackChain,
 } from './hydra-model-profiles.ts';
-import type { HydraConfig, RoleConfig } from './types.ts';
+import type { HydraConfig, RoleConfig, CopilotConfig } from './types.ts';
 
 /** Recursively make all properties optional — used for partial config overrides in tests. */
 type DeepPartial<T> = T extends object ? { [P in keyof T]?: DeepPartial<T[P]> } : T;
@@ -417,6 +417,9 @@ const DEFAULT_CONFIG = {
     fastModel: 'mistral:7b',
     budgetGate: { dailyPct: 80, weeklyPct: 75 },
   },
+  copilot: {
+    enabled: false,
+  } satisfies CopilotConfig,
   routing: {
     mode: 'balanced', // 'economy' | 'balanced' | 'performance'
     useLegacyTriage: false,
@@ -586,6 +589,7 @@ function mergeWithDefaults(config: unknown): HydraConfig {
     aliases: deepMergeSection(def['aliases'] as Record<string, unknown>, parsed['aliases']),
     modeTiers: deepMergeSection(def['modeTiers'] as Record<string, unknown>, parsed['modeTiers']),
     local: deepMergeSection(def['local'] as Record<string, unknown>, parsed['local']),
+    copilot: deepMergeSection(def['copilot'] as Record<string, unknown>, parsed['copilot']),
     usage: { ...(def['usage'] as object), ...(parsed['usage'] as object | undefined) },
     verification: {
       ...(def['verification'] as object),

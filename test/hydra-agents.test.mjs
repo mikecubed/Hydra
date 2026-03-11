@@ -18,7 +18,13 @@ import {
   _resetRegistry,
   initAgentRegistry,
 } from '../lib/hydra-agents.ts';
-import { AFFINITY_PRESETS, loadHydraConfig, saveHydraConfig } from '../lib/hydra-config.ts';
+import {
+  AFFINITY_PRESETS,
+  loadHydraConfig,
+  saveHydraConfig,
+  _setTestConfig,
+  invalidateConfigCache,
+} from '../lib/hydra-config.ts';
 
 const CLOUD_AGENT_NAMES = ['claude', 'gemini', 'codex'];
 
@@ -82,57 +88,71 @@ test('TASK_TYPES has 10 types including new ones', () => {
 // ── Agent structure ──────────────────────────────────────────────────────────
 
 test('each physical agent has required fields', () => {
-  for (const [name, agent] of Object.entries(AGENTS)) {
-    assert.ok(agent.label, `${name} should have a label`);
-    assert.ok(agent.invoke, `${name} should have invoke methods`);
+  // Ensure copilot appears disabled regardless of runtime config file
+  _setTestConfig({ copilot: { enabled: false } });
+  try {
+    for (const [name, agent] of Object.entries(AGENTS)) {
+      assert.ok(agent.label, `${name} should have a label`);
+      assert.ok(agent.invoke, `${name} should have invoke methods`);
 
-    if (agent.cli === null) {
-      assert.equal(name, 'local', 'only local should omit a CLI binary');
-      assert.equal(
-        agent.invoke.nonInteractive,
-        null,
-        `${name} should not expose nonInteractive invoke`,
-      );
-      assert.equal(agent.invoke.interactive, null, `${name} should not expose interactive invoke`);
-      assert.equal(agent.invoke.headless, null, `${name} should not expose headless invoke`);
-    } else {
-      assert.equal(typeof agent.cli, 'string', `${name} should have a cli command`);
-      assert.equal(
-        typeof agent.invoke.nonInteractive,
-        'function',
-        `${name} should have nonInteractive invoke`,
-      );
-      assert.equal(
-        typeof agent.invoke.interactive,
-        'function',
-        `${name} should have interactive invoke`,
-      );
-      assert.equal(typeof agent.invoke.headless, 'function', `${name} should have headless invoke`);
-    }
+      if (agent.cli === null) {
+        assert.equal(name, 'local', 'only local should omit a CLI binary');
+        assert.equal(
+          agent.invoke.nonInteractive,
+          null,
+          `${name} should not expose nonInteractive invoke`,
+        );
+        assert.equal(
+          agent.invoke.interactive,
+          null,
+          `${name} should not expose interactive invoke`,
+        );
+        assert.equal(agent.invoke.headless, null, `${name} should not expose headless invoke`);
+      } else {
+        assert.equal(typeof agent.cli, 'string', `${name} should have a cli command`);
+        assert.equal(
+          typeof agent.invoke.nonInteractive,
+          'function',
+          `${name} should have nonInteractive invoke`,
+        );
+        assert.equal(
+          typeof agent.invoke.interactive,
+          'function',
+          `${name} should have interactive invoke`,
+        );
+        assert.equal(
+          typeof agent.invoke.headless,
+          'function',
+          `${name} should have headless invoke`,
+        );
+      }
 
-    assert.ok(typeof agent.contextBudget === 'number', `${name} should have contextBudget`);
-    assert.ok(
-      agent.contextTier === null || typeof agent.contextTier === 'string',
-      `${name} should have a string or null contextTier`,
-    );
-    assert.ok(Array.isArray(agent.strengths), `${name} should have strengths array`);
-    assert.ok(Array.isArray(agent.weaknesses), `${name} should have weaknesses array`);
-    if (agent.councilRole === null) {
-      assert.equal(name, 'local', 'only local should omit a council role');
-    } else {
-      assert.ok(agent.councilRole, `${name} should have councilRole`);
+      assert.ok(typeof agent.contextBudget === 'number', `${name} should have contextBudget`);
+      assert.ok(
+        agent.contextTier === null || typeof agent.contextTier === 'string',
+        `${name} should have a string or null contextTier`,
+      );
+      assert.ok(Array.isArray(agent.strengths), `${name} should have strengths array`);
+      assert.ok(Array.isArray(agent.weaknesses), `${name} should have weaknesses array`);
+      if (agent.councilRole === null) {
+        assert.equal(name, 'local', 'only local should omit a council role');
+      } else {
+        assert.ok(agent.councilRole, `${name} should have councilRole`);
+      }
+      assert.ok(agent.taskAffinity, `${name} should have taskAffinity`);
+      assert.ok(agent.rolePrompt, `${name} should have rolePrompt`);
+      assert.ok(typeof agent.timeout === 'number', `${name} should have timeout`);
+      assert.equal(agent.type, 'physical', `${name} should be a physical agent`);
+      assert.ok(Array.isArray(agent.tags), `${name} should have tags array`);
+      // copilot is disabled by default; copilot.enabled: true in config activates it
+      if (name === 'copilot') {
+        assert.equal(agent.enabled, false, 'copilot should be disabled by default');
+      } else {
+        assert.equal(agent.enabled, true, `${name} should be enabled`);
+      }
     }
-    assert.ok(agent.taskAffinity, `${name} should have taskAffinity`);
-    assert.ok(agent.rolePrompt, `${name} should have rolePrompt`);
-    assert.ok(typeof agent.timeout === 'number', `${name} should have timeout`);
-    assert.equal(agent.type, 'physical', `${name} should be a physical agent`);
-    assert.ok(Array.isArray(agent.tags), `${name} should have tags array`);
-    // copilot is disabled by default — requires CLI installation
-    if (name === 'copilot') {
-      assert.equal(agent.enabled, false, 'copilot should be disabled by default');
-    } else {
-      assert.equal(agent.enabled, true, `${name} should be enabled`);
-    }
+  } finally {
+    invalidateConfigCache();
   }
 });
 
