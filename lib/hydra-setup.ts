@@ -652,28 +652,28 @@ function runSetup(flags: SetupFlags): { ok: boolean; message: string } {
 
   if (uninstall) {
     // Unregister from all
-    if (clis.claude) {
+    if (clis['claude']) {
       const r = unmergeClaudeConfig();
       results.push(`Claude: ${r.status}`);
     } else {
       results.push('Claude: not installed');
     }
 
-    if (clis.gemini) {
+    if (clis['gemini']) {
       const r = unmergeGeminiConfig();
       results.push(`Gemini: ${r.status}`);
     } else {
       results.push('Gemini: not installed');
     }
 
-    if (clis.codex) {
+    if (clis['codex']) {
       const r = unregisterCodexMcp();
       results.push(`Codex: ${r.status}`);
     } else {
       results.push('Codex: not installed');
     }
 
-    if (clis.copilot) {
+    if (clis['copilot']) {
       const r = unmergeCopilotConfig();
       results.push(`Copilot: ${r.status}`);
     } else {
@@ -686,28 +686,28 @@ function runSetup(flags: SetupFlags): { ok: boolean; message: string } {
   }
 
   // Register with all installed CLIs
-  if (clis.claude) {
+  if (clis['claude']) {
     const r = mergeClaudeConfig({ force });
     results.push(`Claude: ${r.status}`);
   } else {
     results.push('Claude: not installed');
   }
 
-  if (clis.gemini) {
+  if (clis['gemini']) {
     const r = mergeGeminiConfig({ force });
     results.push(`Gemini: ${r.status}`);
   } else {
     results.push('Gemini: not installed');
   }
 
-  if (clis.codex) {
+  if (clis['codex']) {
     const r = registerCodexMcp();
     results.push(`Codex: ${r.status}`);
   } else {
     results.push('Codex: not installed');
   }
 
-  if (clis.copilot) {
+  if (clis['copilot']) {
     const r = mergeCopilotConfig({ force });
     results.push(`Copilot: ${r.status}`);
   } else {

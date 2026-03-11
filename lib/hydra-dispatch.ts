@@ -125,10 +125,24 @@ export function getRoleAgent(
   const cfg = loadHydraConfig();
   const roleCfg = getRoleConfig(roleName);
   const preferred = roleCfg?.agent;
-  if (preferred && installedCLIs[preferred] !== false) {
-    // undefined means not tracked (e.g. API agent) — allow through
-    return preferred;
+
+  if (preferred) {
+    if (preferred === 'local') {
+      // Only dispatch to local if explicitly enabled
+      if (cfg.local.enabled) return preferred;
+    } else if (installedCLIs[preferred] !== false) {
+      // Validate the agent is known and enabled before returning it
+      try {
+        const agentDef = getAgent(preferred);
+        if (agentDef && (agentDef as { enabled?: boolean }).enabled !== false) {
+          return preferred;
+        }
+      } catch {
+        // Unknown agent name — fall through to preference chain
+      }
+    }
   }
+
   // Fallback: first installed agent from preference order
   for (const name of DISPATCH_PREFERENCE_ORDER) {
     if (name === 'local') {

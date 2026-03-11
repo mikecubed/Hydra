@@ -809,7 +809,7 @@ Once registered, **CLI detection and routing are automatic** — no other files 
 #### Always use `resolveCliModelId()` in `invoke.headless()`
 
 ```typescript
-import { resolveCliModelId } from '../hydra-model-profiles.ts';
+import { resolveCliModelId } from './hydra-model-profiles.ts';
 
 // ✅ Correct — translates Hydra internal IDs to CLI flag values
 if (opts.model) args.push('--model', resolveCliModelId(opts.model));
@@ -858,7 +858,7 @@ Resolution order when the configured agent is not installed:
 1. Config `roles.<role>.agent`
 2. First installed agent from: `claude → copilot → gemini → codex → local`
 3. Any installed agent
-4. Throws `Error('No agents available...')` — caught by the daemon
+4. Throws `Error('No agents available...')` — surfaces to the caller (CLI entrypoint/operator) for handling
 
 `getRoleAgent(roleName, installedCLIs)` is exported from `lib/hydra-dispatch.ts`.
 `installedCLIs` comes from `detectInstalledCLIs()` in `lib/hydra-setup.ts`.

@@ -384,6 +384,7 @@ async function main() {
   let useEconomy = false;
   let stopReason = null;
 
+  const installedCLIs = detectInstalledCLIs();
   for (let i = 0; i < selected.length; i++) {
     const task = selected[i];
 
@@ -417,8 +418,7 @@ async function main() {
 
     // Choose agent — filter to installed CLIs to avoid dispatching to unavailable agents
     const taskType = classifyTask(task.title);
-    const agent =
-      task.suggestedAgent || bestAgentFor(taskType, { installedCLIs: detectInstalledCLIs() });
+    const agent = task.suggestedAgent || bestAgentFor(taskType, { installedCLIs });
     const modelOverride = useEconomy
       ? (getAgent(agent)?.economyModel(budgetCfg) ?? undefined)
       : undefined;

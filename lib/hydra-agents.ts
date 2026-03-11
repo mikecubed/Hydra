@@ -981,7 +981,14 @@ export function bestAgentFor(taskType: TaskType | string, opts: BestAgentOpts = 
     }
     candidates.push({ name, score });
   }
-  if (candidates.length === 0) return 'claude';
+  if (candidates.length === 0) {
+    // When installedCLIs is provided, don't return an agent that was explicitly excluded
+    if (installedCLIs) {
+      const fallback = Object.entries(installedCLIs).find(([, v]) => v === true);
+      if (fallback) return fallback[0];
+    }
+    return 'claude';
+  }
   candidates.sort((a, b) => b.score - a.score);
   return candidates[0].name;
 }
