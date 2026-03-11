@@ -763,7 +763,7 @@ Agent (Gemini/Codex/Claude)
 - `hydra_council_request` — request council deliberation
 - `hydra_status` — get daemon health summary
 
-Module: `lib/hydra-mcp-server.mjs` — run with `node lib/hydra-mcp-server.mjs`.
+Module: `lib/hydra-mcp-server.ts` — run with `node lib/hydra-mcp-server.ts`.
 
 ---
 

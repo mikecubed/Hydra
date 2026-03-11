@@ -983,14 +983,29 @@ export function bestAgentFor(taskType: TaskType | string, opts: BestAgentOpts = 
   }
   if (candidates.length === 0) {
     if (installedCLIs) {
-      // Prefer local when enabled and not explicitly excluded
-      if (cfg.local?.enabled && installedCLIs['local'] !== false) return 'local';
-      const fallback = Object.entries(installedCLIs).find(([, v]) => v === true);
-      if (fallback) return fallback[0];
-      // Only fall back to claude if it wasn't explicitly marked as unavailable
-      if (installedCLIs['claude'] !== false) return 'claude';
-      // All entries explicitly false — return local as a sentinel
-      return 'local';
+      // Iterate a stable preference order, checking the registry for enabled+registered agents
+      const preferenceOrder = ['local', 'claude', 'gemini', 'codex'] as const;
+      for (const name of preferenceOrder) {
+        const agentDef = _registry.get(name);
+        if (!agentDef?.enabled) continue;
+        if (!includeVirtual && agentDef.type === AGENT_TYPE.VIRTUAL) continue;
+        if (name === 'local' && !cfg.local?.enabled) continue;
+        if (installedCLIs[name] === false) continue;
+        return name;
+      }
+      // Secondary: any installed CLI backed by a registered, enabled agent
+      const registryBackedFallback = Object.entries(installedCLIs).find(([cliName, v]) => {
+        if (!v) return false;
+        const agentDef = _registry.get(cliName);
+        if (!agentDef?.enabled) return false;
+        if (!includeVirtual && agentDef.type === AGENT_TYPE.VIRTUAL) return false;
+        return true;
+      });
+      if (registryBackedFallback) return registryBackedFallback[0];
+      throw new Error(
+        'Hydra routing error: no enabled agents available. All installedCLIs entries are false' +
+          ' and the local agent is disabled by configuration.',
+      );
     }
     return 'claude';
   }

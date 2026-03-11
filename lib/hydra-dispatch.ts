@@ -293,7 +293,7 @@ async function main() {
 
   if (!prompt) {
     console.error(
-      'Missing prompt. Example: node hydra-dispatch.mjs prompt="Plan offline sync rollout"',
+      'Missing prompt. Example: node lib/hydra-dispatch.ts prompt="Plan offline sync rollout"',
     );
     process.exit(1);
   }

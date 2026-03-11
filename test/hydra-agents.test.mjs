@@ -491,13 +491,15 @@ test('bestAgentFor with installedCLIs skips agent only if value is explicitly fa
   assert.notEqual(result, 'claude');
 });
 
-test('bestAgentFor falls back to claude when installedCLIs filters all physical agents', () => {
-  // All known physical agents marked as not installed
-  const result = bestAgentFor('planning', {
-    installedCLIs: { claude: false, gemini: false, codex: false, copilot: false },
-  });
-  // Should return a string (the fallback), not throw
-  assert.equal(typeof result, 'string');
+test('bestAgentFor throws when installedCLIs marks all known agents as unavailable', () => {
+  // All known physical agents marked as not installed — no valid fallback
+  assert.throws(
+    () =>
+      bestAgentFor('planning', {
+        installedCLIs: { claude: false, gemini: false, codex: false, copilot: false },
+      }),
+    /Hydra routing error: no enabled agents available/,
+  );
 });
 
 test('KNOWN_OWNERS includes virtual agents after registration', () => {
