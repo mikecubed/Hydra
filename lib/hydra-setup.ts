@@ -80,7 +80,7 @@ export function resolveNodePath() {
  * @param {string} name
  * @returns {boolean}
  */
-function commandExists(name: string): boolean {
+export function commandExists(name: string): boolean {
   try {
     const cmd = process.platform === 'win32' ? 'where' : 'which';
     const result = spawnSync(cmd, [name], {
@@ -97,7 +97,7 @@ function commandExists(name: string): boolean {
 
 /**
  * Detect which AI CLIs are installed and accessible on PATH.
- * @returns {{ claude: boolean, gemini: boolean, codex: boolean }}
+ * @returns {{ claude: boolean, gemini: boolean, codex: boolean, copilot: boolean }}
  */
 export function detectInstalledCLIs() {
   return {
@@ -560,7 +560,8 @@ export function mergeCopilotConfig(opts: { force?: boolean } = {}): {
 
   mcpServers['hydra'] = {
     command: resolveNodePath(),
-    args: [resolveMcpServerPath()],
+    // Use .ts path — Node >=22.18 runs TS directly; no .mjs build artifact exists
+    args: [path.join(resolveHydraRoot(), 'lib', 'hydra-mcp-server.ts').replace(/\\/g, '/')],
     description: 'Hydra multi-agent orchestration',
   };
 

@@ -690,7 +690,7 @@ export const MODEL_PROFILES: Record<string, ModelProfile> = {
     cliModelId: 'gemini-3-pro-preview',
     provider: 'github',
     agent: 'copilot',
-    displayName: 'Copilot (Gemini 3.1 Pro)',
+    displayName: 'Copilot (Gemini 3 Pro)',
     shortName: 'copilot-gemini',
     tier: 'flagship',
     contextWindow: 128_000, // Copilot context cap; underlying model supports 1M

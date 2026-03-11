@@ -17,6 +17,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { buildAgentContext } from './hydra-context.ts';
 import { getAgent, AGENT_NAMES, getMode, setMode } from './hydra-agents.ts';
+import { commandExists } from './hydra-setup.ts';
 import { resolveProject, loadHydraConfig } from './hydra-config.ts';
 import { checkUsage } from './hydra-usage.ts';
 import {
@@ -1654,9 +1655,10 @@ async function main() {
     agentsFilter ? COUNCIL_FLOW.filter((step) => agentsFilter.includes(step.agent)) : COUNCIL_FLOW
   ).filter((step) => {
     if (!('optional' in step) || !step.optional) return true;
-    // Skip optional steps when the agent is not registered and enabled
+    // Skip optional steps when the agent's CLI is not installed on PATH
     const agentDef = getAgent(step.agent);
-    return Boolean(agentDef?.enabled);
+    const cliName = agentDef?.cli ?? step.agent;
+    return Boolean(agentDef?.enabled) && commandExists(cliName);
   });
 
   // Checkpoint resume: check for existing checkpoint and restore state
