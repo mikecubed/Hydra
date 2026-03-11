@@ -2,7 +2,7 @@
 
 **Status:** Draft — 2026-03-10
 
-**Problem:** `hydra-dispatch.mjs`, `detectInstalledCLIs()`, and `bestAgentFor()` all hardcode
+**Problem:** `hydra-dispatch.ts`, `detectInstalledCLIs()`, and `bestAgentFor()` all hardcode
 `claude / gemini / codex` by name. Adding Copilot (or any future agent like opencode, aider,
 etc.) requires modifying multiple call sites. There is also no translation layer between Hydra's
 internal model IDs and the CLI `--model` flag values each agent binary expects.
@@ -15,15 +15,9 @@ nothing more than a plugin definition and a config entry.
 
 ## Dependencies
 
-This plan depends on the [TypeScript Migration Plan](./2026-03-10-typescript-migration.md).
-Specifically, Phase 7 of the TS migration (Dispatch & Council) should complete before Task A
-(Dispatch Role Resolution) is implemented, so the refactored `hydra-dispatch.mjs` is written in
-TypeScript from the start. Tasks B–D and Phase 3 of the TS migration (Config & Models) is
-sufficient for `resolveCliModelId()` — no need to wait for Phase 7.
-
-Implementing in JS first is a valid fallback if the TS migration stalls, but the discriminated
-union `DaemonEvent` type and typed `DispatchReport` interface provide significant value if written
-in TS from the start.
+The [TypeScript migration](./2026-03-10-typescript-migration.md) is **complete** — all modules
+are already `.ts`. Tasks A–D can be implemented directly in TypeScript with no migration
+prerequisite.
 
 ---
 
@@ -33,9 +27,9 @@ in TS from the start.
 
 | Location                              | Hardcoded agents                                                   | Impact                                                                                               |
 | ------------------------------------- | ------------------------------------------------------------------ | ---------------------------------------------------------------------------------------------------- |
-| `lib/hydra-dispatch.mjs:268,287,307`  | `callAgent('claude')`, `callAgent('gemini')`, `callAgent('codex')` | Smart dispatch always uses these three regardless of config                                          |
-| `lib/hydra-setup.mjs:83-85`           | `{ claude, gemini, codex }`                                        | `detectInstalledCLIs()` never returns `copilot` or any future agent                                  |
-| `lib/hydra-agents.mjs:bestAgentFor()` | Scores all registered agents equally                               | No filter for whether the agent's CLI is actually installed                                          |
+| `lib/hydra-dispatch.ts:268,287,307`   | `callAgent('claude')`, `callAgent('gemini')`, `callAgent('codex')` | Smart dispatch always uses these three regardless of config                                          |
+| `lib/hydra-setup.ts:83-85`            | `{ claude, gemini, codex }`                                        | `detectInstalledCLIs()` never returns `copilot` or any future agent                                  |
+| `lib/hydra-agents.ts:bestAgentFor()`  | Scores all registered agents equally                               | No filter for whether the agent's CLI is actually installed                                          |
 | `invoke.headless()` in each agent def | Passes `opts.model` directly to `--model`                          | Hydra internal IDs (e.g. `copilot-claude-sonnet-4-6`) differ from CLI IDs (e.g. `claude-sonnet-4.6`) |
 
 ### Desired end state
@@ -43,18 +37,18 @@ in TS from the start.
 ```
 hydra.config.json  ←  user sets roles.coordinator / .critic / .synthesizer
         ↓
-hydra-dispatch.mjs  →  getRoleAgent('coordinator') → resolved agent name (e.g. 'copilot')
+hydra-dispatch.ts  →  getRoleAgent('coordinator') → resolved agent name (e.g. 'copilot')
         ↓
-agent-executor.mjs  →  invoke.headless(prompt, { model: resolveCliModelId(effectiveModel) })
+agent-executor.ts  →  invoke.headless(prompt, { model: resolveCliModelId(effectiveModel) })
         ↓
 copilot -p "..." --model claude-sonnet-4.6 --output-format json ...
 ```
 
 ---
 
-## Task A: Dispatch Role Resolution — `lib/hydra-dispatch.mjs`
+## Task A: Dispatch Role Resolution — `lib/hydra-dispatch.ts`
 
-**Files:** `lib/hydra-dispatch.mjs`, `lib/hydra-config.mjs`
+**Files:** `lib/hydra-dispatch.ts`, `lib/hydra-config.ts`
 
 ### New roles in `hydra.config.json`
 
@@ -70,12 +64,12 @@ pipeline specifically.
 }
 ```
 
-Defaults live in `hydra-config.mjs` `DEFAULT_CONFIG.roles` so they are always present even if
+Defaults live in `hydra-config.ts` `DEFAULT_CONFIG.roles` so they are always present even if
 omitted from the user's config.
 
 ### `getRoleAgent(roleName, installedCLIs)` helper
 
-Add to `hydra-dispatch.mjs` (private, not exported):
+Add to `hydra-dispatch.ts` (private, not exported):
 
 ```javascript
 /**
@@ -114,7 +108,7 @@ function getRoleAgent(roleName, installedCLIs) {
 }
 ```
 
-### Refactor `main()` in `hydra-dispatch.mjs`
+### Refactor `main()` in `hydra-dispatch.ts`
 
 Replace hardcoded calls:
 
@@ -181,9 +175,9 @@ report.codex = report.synthesizer;
 
 ---
 
-## Task B: Registry-Driven CLI Detection — `lib/hydra-setup.mjs`
+## Task B: Registry-Driven CLI Detection — `lib/hydra-setup.ts`
 
-**Files:** `lib/hydra-setup.mjs`, `lib/hydra-agents.mjs`
+**Files:** `lib/hydra-setup.ts`, `lib/hydra-agents.ts`
 
 ### Problem
 
@@ -224,7 +218,7 @@ export function detectInstalledCLIs() {
 }
 ```
 
-> `getRegisteredAgents()` — export from `lib/hydra-agents.mjs`, returns an iterator over `_registry`.
+> `getRegisteredAgents()` — export from `lib/hydra-agents.ts`, returns an iterator over `_registry`.
 > Already a natural addition since `_registry` is used internally.
 
 This makes `detectInstalledCLIs()` automatically include every CLI agent (copilot, opencode,
@@ -237,9 +231,9 @@ considered "available" when `local.enabled: true` in config — that check stays
 
 ---
 
-## Task C: Availability-Filtered Routing — `lib/hydra-agents.mjs`
+## Task C: Availability-Filtered Routing — `lib/hydra-agents.ts`
 
-**Files:** `lib/hydra-agents.mjs`, `lib/hydra-actualize.mjs`
+**Files:** `lib/hydra-agents.ts`, `lib/hydra-actualize.ts`
 
 ### Problem
 
@@ -270,16 +264,16 @@ export function bestAgentFor(taskType, opts = {}) {
 
 ### Call sites
 
-- `lib/hydra-actualize.mjs:407` — pass `{ installedOnly: true }` so tasks aren't dispatched to
+- `lib/hydra-actualize.ts:407` — pass `{ installedOnly: true }` so tasks aren't dispatched to
   unavailable agents
-- `lib/hydra-dispatch.mjs` — use `detectInstalledCLIs()` directly (already done in Task A)
+- `lib/hydra-dispatch.ts` — use `detectInstalledCLIs()` directly (already done in Task A)
 - Default is `false` — existing callers are unaffected
 
 ---
 
 ## Task D: `cliModelId` Translation Convention
 
-**Files:** `lib/hydra-model-profiles.mjs`, plugin `invoke.headless()` for each agent
+**Files:** `lib/hydra-model-profiles.ts`, plugin `invoke.headless()` for each agent
 
 ### Problem
 
@@ -293,7 +287,7 @@ match the CLI flag values. This is a fragile coincidence, not a contract.
 
 ### Solution — `resolveCliModelId()` helper
 
-Add to `lib/hydra-model-profiles.mjs`:
+Add to `lib/hydra-model-profiles.ts`:
 
 ```javascript
 /**
@@ -315,7 +309,7 @@ export function resolveCliModelId(modelId) {
 
 ```javascript
 // ✅ CORRECT — any agent that may receive a Hydra internal model ID
-import { resolveCliModelId } from '../hydra-model-profiles.mjs';
+import { resolveCliModelId } from '../hydra-model-profiles.ts';
 
 headless: (prompt, opts = {}) => {
   const args = ['-p', prompt];
@@ -342,7 +336,7 @@ headless: (prompt, opts = {}) => {
 
 ## Task E: Extensibility Contract — Future Agent Guide
 
-**Files:** `docs/ARCHITECTURE.md` (new section), inline JSDoc in `lib/hydra-agents.mjs`
+**Files:** `docs/ARCHITECTURE.md` (new section), inline JSDoc in `lib/hydra-agents.ts`
 
 ### Purpose
 
@@ -353,7 +347,7 @@ defaults system.
 ### Minimum viable agent plugin
 
 ```javascript
-// In lib/hydra-agents.mjs PHYSICAL_AGENTS (or a future lib/hydra-agents-<name>.mjs)
+// In lib/hydra-agents.ts PHYSICAL_AGENTS (or a future lib/hydra-agents-<name>.ts)
 {
   name: 'opencode',                       // lowercase a-z0-9-
   label: 'OpenCode',
@@ -393,15 +387,15 @@ defaults system.
 
 ### Checklist for adding a new agent
 
-1. **Plugin definition** — add entry to `PHYSICAL_AGENTS` in `lib/hydra-agents.mjs`
-2. **Model profiles** — add `MODEL_PROFILES` entries in `lib/hydra-model-profiles.mjs` with
+1. **Plugin definition** — add entry to `PHYSICAL_AGENTS` in `lib/hydra-agents.ts`
+2. **Model profiles** — add `MODEL_PROFILES` entries in `lib/hydra-model-profiles.ts` with
    `cliModelId` where needed
-3. **Config defaults** — add `models.<agentName>` entry in `DEFAULT_CONFIG` in `lib/hydra-config.mjs`
-4. **UI** — add color (`AGENT_COLORS`) and icon (`AGENT_ICONS`) in `lib/hydra-ui.mjs`
+3. **Config defaults** — add `models.<agentName>` entry in `DEFAULT_CONFIG` in `lib/hydra-config.ts`
+4. **UI** — add color (`AGENT_COLORS`) and icon (`AGENT_ICONS`) in `lib/hydra-ui.ts`
 5. **Setup** — `detectInstalledCLIs()` picks it up automatically (Task B)
 6. **Routing** — `bestAgentFor()` picks it up automatically from `taskAffinity` scores
 7. **Dispatch** — update `roles.coordinator/critic/synthesizer` in `hydra.config.json` if desired
-8. **MCP** — add `KNOWN_CLI_MCP_PATHS` entry in `lib/hydra-setup.mjs` if the agent supports MCP config
+8. **MCP** — add `KNOWN_CLI_MCP_PATHS` entry in `lib/hydra-setup.ts` if the agent supports MCP config
 9. **Docs** — `COPILOT.md`-style agent instructions file (optional but recommended)
 
 > The registry-driven design (Tasks B, C) means steps 5 and 6 require **zero code changes** once
@@ -413,20 +407,20 @@ defaults system.
 
 ### Phase 1 — Model ID Translation (Must-Have, unblocks Copilot)
 
-**Task D** — Add `resolveCliModelId()` to `hydra-model-profiles.mjs`. Apply to Copilot
+**Task D** — Add `resolveCliModelId()` to `hydra-model-profiles.ts`. Apply to Copilot
 `invoke.headless()`. No behavior change for existing agents. Very low risk.
 
 ### Phase 2 — Registry-Driven Detection + Availability Filtering (Should-Have)
 
 **Tasks B, C** — `detectInstalledCLIs()` enumerates registry; `bestAgentFor()` gains
-`installedOnly` option; `hydra-actualize.mjs` passes `installedOnly: true`. Low risk — opt-in
+`installedOnly` option; `hydra-actualize.ts` passes `installedOnly: true`. Low risk — opt-in
 flag, existing callers unaffected.
 
 > **Important:** Task B must be implemented _before_ the Copilot integration's Task 6 (CLI detection). If Copilot Task 6 is done first, its manual `detectInstalledCLIs` edit becomes immediate technical debt deleted by Task B. The correct order is: Task B first → Copilot plugin registers itself → detection works automatically with no manual edits.
 
 ### Phase 3 — Dynamic Dispatch (Nice-to-Have, significant change)
 
-**Tasks A** — Refactor `hydra-dispatch.mjs`. Higher risk because prompt templates change and
+**Tasks A** — Refactor `hydra-dispatch.ts`. Higher risk because prompt templates change and
 `report` key names change. Backward compat aliases (`report.claude`, `.gemini`, `.codex`)
 mitigate downstream breakage. Requires full dispatch integration testing.
 

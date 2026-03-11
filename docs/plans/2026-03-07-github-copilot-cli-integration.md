@@ -764,10 +764,12 @@ Tasks 9, 10 (COPILOT.md, README/CLAUDE.md updates). Required before merging.
 
 ### Phase 5 — Dynamic Dispatch & Extensibility (See separate plan)
 
-Task 11 (below) is the Phase 1 prerequisite from the dynamic dispatch plan. The broader work —
-role-configurable dispatch, registry-driven CLI detection, availability-filtered routing — was
-tracked in **`2026-03-10-dynamic-agent-dispatch.md`** (now superseded).
-That plan's implementation phases are independent of this integration and can proceed in parallel.
+Task 11 (below) is the Phase 1 prerequisite pulled from the broader dynamic dispatch roadmap.
+The rest of that work — role-configurable dispatch, registry-driven CLI detection,
+availability-filtered routing — is captured in the separate draft plan
+**`2026-03-10-dynamic-agent-dispatch.md`**. That document remains a standalone architecture
+plan; only its Task‑11 prerequisite is in scope for this Copilot integration. The remaining
+dynamic dispatch phases are independent of this integration and can proceed in parallel.
 
 ---
 

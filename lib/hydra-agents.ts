@@ -496,27 +496,49 @@ Sandbox-aware: no network access, file-system focused. Work within your sandbox 
       if (opts?.jsonOutput) {
         try {
           const lines = stdout.split('\n').filter(Boolean);
-          const events = lines.map((l) => JSON.parse(l) as Record<string, unknown>);
+
+          // Parse JSONL line-by-line — skip non-JSON lines (warnings, prompts, etc.)
+          const events: Record<string, unknown>[] = [];
+          for (const line of lines) {
+            try {
+              const parsed = JSON.parse(line) as unknown;
+              if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+                events.push(parsed as Record<string, unknown>);
+              }
+            } catch {
+              // Skip lines that are not valid JSON
+            }
+          }
 
           // Find the last assistant.message that is a final text response
           // (toolRequests is empty, meaning it is the final answer turn)
-          const messages = events.filter(
-            (e) =>
-              e['type'] === 'assistant.message' &&
-              Array.isArray((e['data'] as Record<string, unknown>)['toolRequests']) &&
-              ((e['data'] as Record<string, unknown>)['toolRequests'] as unknown[]).length === 0,
-          );
+          const messages = events.filter((e) => {
+            if (e['type'] !== 'assistant.message') return false;
+            const data = e['data'];
+            if (!data || typeof data !== 'object' || Array.isArray(data)) return false;
+            const toolRequests = (data as Record<string, unknown>)['toolRequests'];
+            return Array.isArray(toolRequests) && toolRequests.length === 0;
+          });
           const lastMsg = messages.at(-1);
-          const lastMsgData = lastMsg?.['data'] as Record<string, unknown> | undefined;
-          const output = (lastMsgData?.['content'] as string | undefined) ?? stdout;
+          const lastMsgData =
+            lastMsg?.['data'] &&
+            typeof lastMsg['data'] === 'object' &&
+            !Array.isArray(lastMsg['data'])
+              ? (lastMsg['data'] as Record<string, unknown>)
+              : undefined;
+          const content = lastMsgData?.['content'];
+          const output = typeof content === 'string' ? content : stdout;
 
           // Extract usage from the final result event
           const resultEvent = [...events].reverse().find((e) => e['type'] === 'result');
-          const resultUsage = resultEvent?.['usage'] as Record<string, unknown> | undefined;
-          const premiumRequests =
-            typeof resultUsage?.['premiumRequests'] === 'number'
-              ? (resultUsage['premiumRequests'] as number)
-              : null;
+          let premiumRequests: number | null = null;
+          if (resultEvent) {
+            const usage = resultEvent['usage'];
+            if (usage && typeof usage === 'object' && !Array.isArray(usage)) {
+              const pr = (usage as Record<string, unknown>)['premiumRequests'];
+              if (typeof pr === 'number') premiumRequests = pr;
+            }
+          }
 
           return {
             output,

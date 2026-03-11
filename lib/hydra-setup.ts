@@ -546,9 +546,12 @@ export function mergeCopilotConfig(opts: { force?: boolean } = {}): {
 
   if (fs.existsSync(configPath)) {
     try {
-      config = JSON.parse(fs.readFileSync(configPath, 'utf8')) as Record<string, unknown>;
+      const parsed = JSON.parse(fs.readFileSync(configPath, 'utf8')) as unknown;
+      if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+        config = parsed as Record<string, unknown>;
+      }
     } catch {
-      // Corrupt config — start fresh
+      // Corrupt config or non-JSON content — start fresh with empty object
     }
   }
 
