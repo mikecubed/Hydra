@@ -2,13 +2,13 @@
  * Hydra single-terminal dispatch runner.
  *
  * Runs one prompt across:
- * 1) Claude (coordination/delegation)
- * 2) Gemini (critique/second-opinion)
- * 3) Codex (final synthesis in read-only mode)
+ * 1) Coordinator (coordination/delegation)
+ * 2) Critic (critique/second-opinion)
+ * 3) Synthesizer (final synthesis in read-only mode)
  *
  * Usage:
- *   node hydra-dispatch.mjs prompt="Your request"
- *   node hydra-dispatch.mjs prompt="Your request" mode=preview
+ *   node lib/hydra-dispatch.ts prompt="Your request"
+ *   node lib/hydra-dispatch.ts prompt="Your request" mode=preview
  */
 
 import './hydra-env.ts';
@@ -143,17 +143,37 @@ export function getRoleAgent(
     }
   }
 
-  // Fallback: first installed agent from preference order
+  // Fallback: first installed AND enabled agent from preference order
   for (const name of DISPATCH_PREFERENCE_ORDER) {
     if (name === 'local') {
       if (cfg.local.enabled) return name;
     } else if (installedCLIs[name] === true) {
-      return name;
+      try {
+        const agentDef = getAgent(name);
+        if (agentDef && (agentDef as { enabled?: boolean }).enabled !== false) {
+          return name;
+        }
+      } catch {
+        // Unknown agent name in preference order — skip
+      }
     }
   }
-  // Last resort: any installed agent
-  const anyInstalled = Object.entries(installedCLIs).find(([, v]) => v === true);
-  if (anyInstalled) return anyInstalled[0];
+  // Last resort: any installed, registered, and enabled agent
+  for (const [name, v] of Object.entries(installedCLIs)) {
+    if (v !== true) continue;
+    if (name === 'local') {
+      if (cfg.local.enabled) return name;
+      continue;
+    }
+    try {
+      const agentDef = getAgent(name);
+      if (agentDef && (agentDef as { enabled?: boolean }).enabled !== false) {
+        return name;
+      }
+    } catch {
+      // Unknown agent — skip
+    }
+  }
   throw new Error('No agents available: install at least one agent CLI or enable local');
 }
 
@@ -436,10 +456,15 @@ async function main() {
   report.codex = report.synthesizer;
 
   report.finishedAt = nowIso();
-  // TypeScript control flow: coordinator/critic/synthesizer are non-null here (assigned in both branches above)
   const coord = report.coordinator;
   const critic = report.critic;
   const synth = report.synthesizer;
+
+  if (!coord || !critic || !synth) {
+    throw new Error(
+      'Hydra dispatch invariant violated: coordinator, critic, and synthesizer slots must be populated before computing outputSummary.',
+    );
+  }
   const coordSnippet = short(coord.stdout ?? JSON.stringify(coord.parsed ?? {}), 280);
   const criticSnippet = short(critic.stdout ?? JSON.stringify(critic.parsed ?? {}), 280);
   const synthSnippet = short(synth.lastMessage ?? synth.stdout ?? '', 280);

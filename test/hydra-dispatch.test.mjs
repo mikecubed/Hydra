@@ -1,10 +1,26 @@
-import { describe, it } from 'node:test';
+import { describe, it, beforeEach, afterEach } from 'node:test';
 import assert from 'node:assert/strict';
 import { getRoleAgent } from '../lib/hydra-dispatch.ts';
+import { _setTestConfig, invalidateConfigCache } from '../lib/hydra-config.ts';
 
 // ── getRoleAgent ──────────────────────────────────────────────────────────────
 
+/** Deterministic roles config used by all tests — avoids reading live hydra.config.json */
+const TEST_ROLES = {
+  coordinator: { agent: 'claude', model: null },
+  critic: { agent: 'gemini', model: null },
+  synthesizer: { agent: 'codex', model: null },
+};
+
 describe('getRoleAgent', () => {
+  beforeEach(() => {
+    _setTestConfig({ roles: TEST_ROLES });
+  });
+
+  afterEach(() => {
+    invalidateConfigCache();
+  });
+
   it('returns configured agent when installed', () => {
     const clis = { claude: true, gemini: true, codex: true, copilot: false };
     // Default coordinator is 'claude', which is installed
@@ -30,10 +46,11 @@ describe('getRoleAgent', () => {
     assert.ok(agent.length > 0);
   });
 
-  it('returns copilot when it is installed and preferred agents are not', () => {
-    const clis = { claude: false, gemini: false, codex: false, copilot: true };
+  it('returns gemini from preference chain when earlier agents are unavailable', () => {
+    // claude=false, copilot=false → gemini is the next enabled+installed agent
+    const clis = { claude: false, gemini: true, codex: false, copilot: false };
     const agent = getRoleAgent('coordinator', clis);
-    assert.equal(agent, 'copilot');
+    assert.equal(agent, 'gemini');
   });
 
   it('throws when no agents are available', () => {

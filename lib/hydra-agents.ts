@@ -982,10 +982,15 @@ export function bestAgentFor(taskType: TaskType | string, opts: BestAgentOpts = 
     candidates.push({ name, score });
   }
   if (candidates.length === 0) {
-    // When installedCLIs is provided, don't return an agent that was explicitly excluded
     if (installedCLIs) {
+      // Prefer local when enabled and not explicitly excluded
+      if (cfg.local?.enabled && installedCLIs['local'] !== false) return 'local';
       const fallback = Object.entries(installedCLIs).find(([, v]) => v === true);
       if (fallback) return fallback[0];
+      // Only fall back to claude if it wasn't explicitly marked as unavailable
+      if (installedCLIs['claude'] !== false) return 'claude';
+      // All entries explicitly false — return local as a sentinel
+      return 'local';
     }
     return 'claude';
   }
