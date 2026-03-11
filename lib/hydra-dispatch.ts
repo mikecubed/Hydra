@@ -392,22 +392,34 @@ async function main() {
     const coordConfig = getAgent(coordinatorAgent);
     const criticConfig = getAgent(criticAgent);
     const synthConfig = getAgent(synthesizerAgent);
+    const coordCmd = coordConfig?.invoke?.nonInteractive?.('<coordinator-prompt>');
+    const criticCmd = criticConfig?.invoke?.nonInteractive?.('<critic-prompt>');
+    const synthCmd = synthConfig?.invoke?.nonInteractive?.('<synthesizer-prompt>', {
+      outputPath: '<tempfile>',
+      cwd: config.projectRoot,
+    });
     report.coordinator = {
-      ok: true,
+      ok: coordCmd !== undefined,
       preview: true,
-      command: coordConfig?.invoke?.nonInteractive?.('<coordinator-prompt>'),
+      command: coordCmd,
+      ...(coordCmd === undefined && {
+        lastMessage: `${coordinatorAgent} does not support nonInteractive preview`,
+      }),
     };
     report.critic = {
-      ok: true,
+      ok: criticCmd !== undefined,
       preview: true,
-      command: criticConfig?.invoke?.nonInteractive?.('<critic-prompt>'),
+      command: criticCmd,
+      ...(criticCmd === undefined && {
+        lastMessage: `${criticAgent} does not support nonInteractive preview`,
+      }),
     };
     report.synthesizer = {
-      ok: true,
+      ok: synthCmd !== undefined,
       preview: true,
-      command: synthConfig?.invoke?.nonInteractive?.('<synthesizer-prompt>', {
-        outputPath: '<tempfile>',
-        cwd: config.projectRoot,
+      command: synthCmd,
+      ...(synthCmd === undefined && {
+        lastMessage: `${synthesizerAgent} does not support nonInteractive preview`,
       }),
     };
   } else {

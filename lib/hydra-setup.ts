@@ -16,6 +16,7 @@ import path from 'node:path';
 // @ts-ignore — cross-spawn has no bundled types; pre-existing across codebase
 import crossSpawn from 'cross-spawn';
 import { fileURLToPath } from 'node:url';
+import { detectInstalledCLIs } from './hydra-cli-detect.ts';
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -76,7 +77,6 @@ export function resolveNodePath() {
 // ── CLI Detection ───────────────────────────────────────────────────────────
 // Implementations live in hydra-cli-detect.ts; re-exported here for backward compatibility.
 export { commandExists, detectInstalledCLIs } from './hydra-cli-detect.ts';
-import { detectInstalledCLIs } from './hydra-cli-detect.ts';
 
 // ── MCP Server Entry Builders ───────────────────────────────────────────────
 
