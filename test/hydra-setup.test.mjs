@@ -20,7 +20,7 @@ import {
   main,
   registerCustomAgentMcp,
   KNOWN_CLI_MCP_PATHS,
-} from '../lib/hydra-setup.mjs';
+} from '../lib/hydra-setup.ts';
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -451,7 +451,7 @@ describe('main init', () => {
 
     const result = await main([
       'node',
-      'hydra-setup.mjs',
+      'hydra-setup.ts',
       'init',
       targetDir,
       '--project-name=TargetProject',
@@ -490,7 +490,7 @@ Codex instructions.
     fs.mkdirSync(targetDir, { recursive: true });
     fs.writeFileSync(hydraMdPath, existingHydraMd, 'utf8');
 
-    const result = await main(['node', 'hydra-setup.mjs', 'init', targetDir]);
+    const result = await main(['node', 'hydra-setup.ts', 'init', targetDir]);
 
     assert.strictEqual(result.ok, true);
     assert.strictEqual(fs.readFileSync(hydraMdPath, 'utf8'), existingHydraMd);
@@ -512,7 +512,7 @@ Codex instructions.
 
     const result = await main([
       'node',
-      'hydra-setup.mjs',
+      'hydra-setup.ts',
       'init',
       targetDir,
       '--force',
@@ -528,7 +528,7 @@ Codex instructions.
   it('rejects multiple target paths', async () => {
     const result = await main([
       'node',
-      'hydra-setup.mjs',
+      'hydra-setup.ts',
       'init',
       path.join(tmpDir, 'one'),
       path.join(tmpDir, 'two'),
@@ -542,7 +542,7 @@ Codex instructions.
     const fileTarget = path.join(tmpDir, 'not-a-directory');
     fs.writeFileSync(fileTarget, 'content', 'utf8');
 
-    const result = await main(['node', 'hydra-setup.mjs', 'init', fileTarget]);
+    const result = await main(['node', 'hydra-setup.ts', 'init', fileTarget]);
 
     assert.strictEqual(result.ok, false);
     assert.match(result.message, /not a directory/i);

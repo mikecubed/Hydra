@@ -10,7 +10,7 @@ import {
   syncHydraMd,
   hasHydraMd,
   getAgentInstructionFile,
-} from '../lib/hydra-sync-md.mjs';
+} from '../lib/hydra-sync-md.ts';
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 

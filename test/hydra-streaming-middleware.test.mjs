@@ -1,12 +1,11 @@
-import { describe, it, beforeEach } from 'node:test';
+import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import {
   PeakEWMA,
   compose,
-  createStreamingPipeline,
   getProviderEWMA,
   getLatencyEstimates,
-} from '../lib/hydra-streaming-middleware.mjs';
+} from '../lib/hydra-streaming-middleware.ts';
 
 describe('PeakEWMA', () => {
   it('returns 0 when no observations', () => {
@@ -61,7 +60,7 @@ describe('compose', () => {
       return result;
     };
 
-    const core = async (ctx) => {
+    const core = async (_ctx) => {
       order.push('core');
       return { value: 42 };
     };

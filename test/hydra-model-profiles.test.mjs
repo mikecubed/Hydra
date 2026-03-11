@@ -16,7 +16,7 @@ import {
   getShortName,
   getConciergeFallbackChain,
   getModeTiers,
-} from '../lib/hydra-model-profiles.mjs';
+} from '../lib/hydra-model-profiles.ts';
 
 describe('MODEL_PROFILES data integrity', () => {
   it('contains expected number of profiles', () => {

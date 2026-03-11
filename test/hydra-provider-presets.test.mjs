@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { getProviderPresets } from '../lib/hydra-config.mjs';
+import { getProviderPresets } from '../lib/hydra-config.ts';
 
 test('getProviderPresets returns array', () => {
   const presets = getProviderPresets();

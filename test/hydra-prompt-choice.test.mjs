@@ -5,7 +5,7 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 
-import { parseMultiSelectInput } from '../lib/hydra-prompt-choice.mjs';
+import { parseMultiSelectInput } from '../lib/hydra-prompt-choice.ts';
 
 describe('parseMultiSelectInput', () => {
   it('returns "all" for "a" input', () => {

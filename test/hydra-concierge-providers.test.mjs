@@ -4,7 +4,7 @@ import {
   detectAvailableProviders,
   buildFallbackChain,
   providerLabel,
-} from '../lib/hydra-concierge-providers.mjs';
+} from '../lib/hydra-concierge-providers.ts';
 
 describe('detectAvailableProviders', () => {
   const saved = {};

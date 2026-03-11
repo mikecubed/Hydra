@@ -12,5 +12,8 @@ dist/
 recent-projects.json
 /docs/audit/
 /docs/coordination/
-/docs/plans/
+#/docs/plans/
 /docs/research/
+
+# TypeScript build output
+.tsbuild/

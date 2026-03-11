@@ -136,13 +136,10 @@ For write endpoints — `lib/daemon/write-routes.mjs`:
 ```js
 if (method === 'POST' && route === '/my-endpoint') {
   const body = await readJsonBody(req);
-  const result = await enqueueMutation(
-    'my-endpoint',
-    (state) => {
-      // mutate state
-      return /* result */;
-    },
-  );
+  const result = await enqueueMutation('my-endpoint', (state) => {
+    // mutate state
+    return /* result */;
+  });
   sendJson(res, 200, { ok: true, result });
   return true;
 }

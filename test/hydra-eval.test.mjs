@@ -8,8 +8,8 @@ import {
   evaluateRouting,
   evaluateAgentSelection,
   generateEvalReport,
-} from '../lib/hydra-eval.mjs';
-import { initAgentRegistry, _resetRegistry } from '../lib/hydra-agents.mjs';
+} from '../lib/hydra-eval.ts';
+import { initAgentRegistry, _resetRegistry } from '../lib/hydra-agents.ts';
 
 describe('hydra-eval', () => {
   let tmpDir;

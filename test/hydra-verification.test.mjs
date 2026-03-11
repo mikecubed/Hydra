@@ -4,7 +4,7 @@ import {
   chooseAutoVerificationCommand,
   resolveVerificationPlan,
   isVerificationCommandShellSafe,
-} from '../lib/hydra-verification.mjs';
+} from '../lib/hydra-verification.ts';
 
 test('chooseAutoVerificationCommand prefers package typecheck script', () => {
   const selected = chooseAutoVerificationCommand({
@@ -51,7 +51,7 @@ test('chooseAutoVerificationCommand uses npm test when test script exists', () =
 
 test('chooseAutoVerificationCommand skips npm-init placeholder test script', () => {
   const selected = chooseAutoVerificationCommand({
-    npmScripts: { test: 'echo \"Error: no test specified\" && exit 1' },
+    npmScripts: { test: 'echo "Error: no test specified" && exit 1' },
   });
 
   assert.equal(selected, null);

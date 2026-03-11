@@ -6,15 +6,19 @@ on:
   pull_request:
     branches: [main, dev]
 
+permissions: {}
+
 jobs:
   # Fast syntax check — runs once on Linux before the matrix, catches parse
   # errors before spinning up 4 runners.
   syntax:
     name: Syntax check (Node ${{ matrix.node-version }})
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
     strategy:
       matrix:
-        node-version: ['20.19', 22]
+        node-version: [22]
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -24,23 +28,23 @@ jobs:
       - run: npm ci
         env:
           HUSKY: '0'
-      - name: Check syntax of all lib and bin files
-        # node --check parses the file but does not execute it
-        shell: bash
-        run: |
-          find lib bin -name '*.mjs' -print0 | xargs -0 node --check
-          echo "Syntax OK"
+      - name: Check TypeScript compiles (no emit)
+        run: npx tsc --noEmit -p tsconfig.json
+        env:
+          HUSKY: '0'
 
-  # Full test matrix — cross-platform, two Node versions.
+  # Full test matrix — cross-platform, Node 22.
   test:
     name: Test (${{ matrix.os }}, Node ${{ matrix.node-version }})
     needs: syntax
     runs-on: ${{ matrix.os }}
+    permissions:
+      contents: read
     strategy:
       fail-fast: false
       matrix:
         os: [ubuntu-latest, windows-latest]
-        node-version: ['20.19', 22]
+        node-version: [22]
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4

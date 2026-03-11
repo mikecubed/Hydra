@@ -8,8 +8,8 @@ import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
 
-import { buildSafetyPrompt } from '../lib/hydra-shared/guardrails.mjs';
-import { stageAndCommit, git } from '../lib/hydra-shared/git-ops.mjs';
+import { buildSafetyPrompt } from '../lib/hydra-shared/guardrails.ts';
+import { stageAndCommit, git } from '../lib/hydra-shared/git-ops.ts';
 
 // ── buildSafetyPrompt attribution tests ─────────────────────────────────────
 

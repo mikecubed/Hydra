@@ -1,5 +1,5 @@
 /**
- * Tests for diffConfig() in hydra-config.mjs.
+ * Tests for diffConfig() in hydra-config.ts.
  *
  * diffConfig compares a raw user config object against DEFAULT_CONFIG and
  * returns { missing, stale, typeMismatches } without touching the filesystem.
@@ -7,7 +7,7 @@
 
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
-import { diffConfig } from '../lib/hydra-config.mjs';
+import { diffConfig } from '../lib/hydra-config.ts';
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 

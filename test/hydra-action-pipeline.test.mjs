@@ -3,7 +3,7 @@
  * Tests the non-interactive parts (scan, dedup, execute logic).
  */
 
-import { describe, it, beforeEach } from 'node:test';
+import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 
 // We test the module's importability and its core logic.
@@ -12,14 +12,14 @@ import assert from 'node:assert/strict';
 
 describe('hydra-action-pipeline', () => {
   it('exports runActionPipeline', async () => {
-    const mod = await import('../lib/hydra-action-pipeline.mjs');
+    const mod = await import('../lib/hydra-action-pipeline.ts');
     assert.equal(typeof mod.runActionPipeline, 'function');
   });
 });
 
 describe('hydra-output-history', () => {
   it('exports all expected functions', async () => {
-    const mod = await import('../lib/hydra-output-history.mjs');
+    const mod = await import('../lib/hydra-output-history.ts');
     assert.equal(typeof mod.initOutputHistory, 'function');
     assert.equal(typeof mod.getRecentOutput, 'function');
     assert.equal(typeof mod.getRecentOutputRaw, 'function');
@@ -28,19 +28,19 @@ describe('hydra-output-history', () => {
   });
 
   it('getRecentOutput returns an array', async () => {
-    const { getRecentOutput } = await import('../lib/hydra-output-history.mjs');
+    const { getRecentOutput } = await import('../lib/hydra-output-history.ts');
     const result = getRecentOutput(10);
     assert.ok(Array.isArray(result));
   });
 
   it('getOutputContext returns a string', async () => {
-    const { getOutputContext } = await import('../lib/hydra-output-history.mjs');
+    const { getOutputContext } = await import('../lib/hydra-output-history.ts');
     const result = getOutputContext();
     assert.equal(typeof result, 'string');
   });
 
   it('clearOutputHistory resets the buffer', async () => {
-    const { clearOutputHistory, getRecentOutput } = await import('../lib/hydra-output-history.mjs');
+    const { clearOutputHistory, getRecentOutput } = await import('../lib/hydra-output-history.ts');
     clearOutputHistory();
     assert.deepEqual(getRecentOutput(), []);
   });
@@ -48,7 +48,7 @@ describe('hydra-output-history', () => {
 
 describe('hydra-cleanup', () => {
   it('exports all scanner functions', async () => {
-    const mod = await import('../lib/hydra-cleanup.mjs');
+    const mod = await import('../lib/hydra-cleanup.ts');
     assert.equal(typeof mod.scanArchivableTasks, 'function');
     assert.equal(typeof mod.scanOldHandoffs, 'function');
     assert.equal(typeof mod.scanStaleBranches, 'function');
@@ -61,7 +61,7 @@ describe('hydra-cleanup', () => {
 
   it('scanners return empty arrays when no data', async () => {
     const { scanArchivableTasks, scanOldHandoffs, scanStaleTasks } =
-      await import('../lib/hydra-cleanup.mjs');
+      await import('../lib/hydra-cleanup.ts');
 
     // These call the daemon which isn't running — should return []
     const t = await scanArchivableTasks('http://localhost:99999');
@@ -77,7 +77,7 @@ describe('hydra-cleanup', () => {
 
 describe('hydra-doctor scanners', () => {
   it('exports action pipeline scanner functions', async () => {
-    const mod = await import('../lib/hydra-doctor.mjs');
+    const mod = await import('../lib/hydra-doctor.ts');
     assert.equal(typeof mod.scanDoctorLog, 'function');
     assert.equal(typeof mod.scanDaemonIssues, 'function');
     assert.equal(typeof mod.scanErrorActivity, 'function');
@@ -86,20 +86,20 @@ describe('hydra-doctor scanners', () => {
   });
 
   it('scanDoctorLog returns ActionItem array', async () => {
-    const { scanDoctorLog, resetDoctor } = await import('../lib/hydra-doctor.mjs');
+    const { scanDoctorLog, resetDoctor } = await import('../lib/hydra-doctor.ts');
     resetDoctor();
     const items = await scanDoctorLog();
     assert.ok(Array.isArray(items));
   });
 
   it('scanDaemonIssues returns empty when daemon unavailable', async () => {
-    const { scanDaemonIssues } = await import('../lib/hydra-doctor.mjs');
+    const { scanDaemonIssues } = await import('../lib/hydra-doctor.ts');
     const items = await scanDaemonIssues('http://localhost:99999');
     assert.deepEqual(items, []);
   });
 
   it('scanErrorActivity returns array', async () => {
-    const { scanErrorActivity } = await import('../lib/hydra-doctor.mjs');
+    const { scanErrorActivity } = await import('../lib/hydra-doctor.ts');
     const items = await scanErrorActivity();
     assert.ok(Array.isArray(items));
   });
