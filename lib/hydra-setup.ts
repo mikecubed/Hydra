@@ -107,10 +107,16 @@ export function commandExists(name: string): boolean {
  */
 export function detectInstalledCLIs(): Record<string, boolean> {
   const result: Record<string, boolean> = {};
+  const binaryCache = new Map<string, boolean>();
   for (const agentDef of listAgents({ type: 'physical' })) {
     if (agentDef.features.executeMode !== 'spawn') continue;
     const binaryName = agentDef.cli ?? agentDef.name;
-    result[agentDef.name] = commandExists(binaryName);
+    let isInstalled = binaryCache.get(binaryName);
+    if (isInstalled === undefined) {
+      isInstalled = commandExists(binaryName);
+      binaryCache.set(binaryName, isInstalled);
+    }
+    result[agentDef.name] = isInstalled;
   }
   return result;
 }

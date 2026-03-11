@@ -331,6 +331,8 @@ async function main() {
     project: string;
     daemonUrl: string;
     daemonSummary: unknown;
+    // Role → agent mapping for this run
+    roleAgents: Record<string, string>;
     // Role-based keys (canonical)
     coordinator: DispatchSlot | null;
     critic: DispatchSlot | null;
@@ -366,6 +368,11 @@ async function main() {
     coordinator: null,
     critic: null,
     synthesizer: null,
+    roleAgents: {
+      coordinator: coordinatorAgent,
+      critic: criticAgent,
+      synthesizer: synthesizerAgent,
+    },
     // Backward-compat aliases — set after role slots are populated
     claude: null,
     gemini: null,

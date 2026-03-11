@@ -983,8 +983,8 @@ export function bestAgentFor(taskType: TaskType | string, opts: BestAgentOpts = 
   }
   if (candidates.length === 0) {
     if (installedCLIs) {
-      // Iterate a stable preference order, checking the registry for enabled+registered agents
-      const preferenceOrder = ['local', 'claude', 'gemini', 'codex'] as const;
+      // Mirrors DISPATCH_PREFERENCE_ORDER in hydra-dispatch.ts (not imported to avoid circular dep)
+      const preferenceOrder = ['claude', 'copilot', 'gemini', 'codex', 'local'] as const;
       for (const name of preferenceOrder) {
         const agentDef = _registry.get(name);
         if (!agentDef?.enabled) continue;
