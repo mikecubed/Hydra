@@ -63,7 +63,7 @@ import {
 import { runDiscovery } from './hydra-nightly-discovery.ts';
 import { buildSelfSnapshot, formatSelfSnapshotForPrompt } from './hydra-self.ts';
 import { buildSelfIndex, formatSelfIndexForPrompt } from './hydra-self-index.ts';
-import { detectInstalledCLIs } from './hydra-setup.ts';
+import { detectInstalledCLIs } from './hydra-cli-detect.ts';
 
 // ── Logging ─────────────────────────────────────────────────────────────────
 

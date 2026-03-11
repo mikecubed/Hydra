@@ -41,7 +41,7 @@ import {
 } from './hydra-ui.ts';
 import { checkUsage } from './hydra-usage.ts';
 import { isPersonaEnabled, getAgentFraming } from './hydra-persona.ts';
-import { detectInstalledCLIs } from './hydra-setup.ts';
+import { detectInstalledCLIs } from './hydra-cli-detect.ts';
 import pc from 'picocolors';
 
 const config = resolveProject();
