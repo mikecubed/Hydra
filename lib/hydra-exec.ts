@@ -30,7 +30,8 @@ const INTERNAL_MODULE_LOADERS: Record<string, () => Promise<unknown>> = {
 function normalizeModuleId(moduleId: unknown): string {
   const normalized = String(moduleId || '')
     .replace(/\\/g, '/')
-    .replace(/^\.?\//, '');
+    .replace(/^\.?\//, '')
+    .replace(/\.mjs$/, '.ts'); // normalize legacy .mjs IDs to .ts
   if (!normalized) return '';
   if (normalized.includes('..')) return '';
   return normalized;

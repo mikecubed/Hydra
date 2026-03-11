@@ -1,10 +1,10 @@
 /**
  * Hydra Google — Streaming client for Google Gemini Generative Language API.
  *
- * Mirrors hydra-openai.mjs pattern for the Google Gemini API.
+ * Mirrors hydra-openai.ts pattern for the Google Gemini API.
  * Used by the concierge fallback chain when OpenAI and Anthropic are unavailable.
  *
- * Uses hydra-streaming-middleware.mjs for rate limiting, circuit breaking,
+ * Uses hydra-streaming-middleware.ts for rate limiting, circuit breaking,
  * retry, usage tracking, and latency measurement.
  */
 
@@ -70,14 +70,11 @@ async function coreStreamGoogle(
     body.systemInstruction = { parts: [{ text: systemText }] };
   }
 
-  if (cfg['maxTokens']) {
-    const maxTokens = Number(cfg['maxTokens']);
-    if (Number.isFinite(maxTokens)) {
-      body.generationConfig = {
-        ...body.generationConfig,
-        maxOutputTokens: maxTokens,
-      };
-    }
+  if (cfg['maxTokens'] !== undefined) {
+    body.generationConfig = {
+      ...body.generationConfig,
+      maxOutputTokens: cfg['maxTokens'] as number,
+    };
   }
 
   if (cfg['responseType'] === 'json') {
