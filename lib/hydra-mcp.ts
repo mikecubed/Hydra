@@ -1,4 +1,3 @@
-#!/usr/bin/env node
 /**
  * Hydra MCP Client
  *
@@ -64,13 +63,17 @@ export class MCPClient extends EventEmitter {
       windowsHide: true,
     });
 
-    this.child.stdout!.setEncoding('utf8');
-    this.child.stderr!.setEncoding('utf8');
-
-    this.child.stdout!.on('data', (data) => {
-      this._onData(data);
-    });
-    this.child.stderr!.on('data', (data) => this.emit('stderr', data));
+    // stdout and stderr are always defined with stdio: ['pipe', 'pipe', 'pipe']
+    if (this.child.stdout) {
+      this.child.stdout.setEncoding('utf8');
+      this.child.stdout.on('data', (data: unknown) => {
+        this._onData(String(data));
+      });
+    }
+    if (this.child.stderr) {
+      this.child.stderr.setEncoding('utf8');
+      this.child.stderr.on('data', (data: unknown) => this.emit('stderr', data));
+    }
 
     this.child.on('error', (err) => {
       this.emit('error', err);
@@ -136,7 +139,11 @@ export class MCPClient extends EventEmitter {
   /**
    * Call an MCP tool.
    */
-  async callTool(toolName: string, args: Record<string, unknown> = {}, timeoutMs = 60_000): Promise<unknown> {
+  async callTool(
+    toolName: string,
+    args: Record<string, unknown> = {},
+    timeoutMs = 60_000,
+  ): Promise<unknown> {
     return this.call('tools/call', { name: toolName, arguments: args }, timeoutMs);
   }
 
@@ -161,7 +168,7 @@ export class MCPClient extends EventEmitter {
     this._rejectAll(new Error('MCP client closing'));
 
     try {
-      this.child.stdin!.end();
+      this.child.stdin?.end();
     } catch {
       /* ignore */
     }
@@ -200,13 +207,13 @@ export class MCPClient extends EventEmitter {
    * Get uptime in milliseconds.
    */
   uptimeMs(): number {
-    return this.startedAt ? Date.now() - this.startedAt : 0;
+    return this.startedAt == null ? 0 : Date.now() - this.startedAt;
   }
 
   // ── Internal ──────────────────────────────────────────────────────────────
 
   _send(obj: Record<string, unknown>): void {
-    if (!this.child?.stdin?.writable) return;
+    if (this.child?.stdin?.writable !== true) return;
     const json = JSON.stringify(obj);
     try {
       this.child.stdin.write(`${json}\n`);
@@ -222,9 +229,9 @@ export class MCPClient extends EventEmitter {
 
     for (const line of lines) {
       const trimmed = line.trim();
-      if (!trimmed) continue;
+      if (trimmed === '') continue;
       try {
-        const msg = JSON.parse(trimmed);
+        const msg = JSON.parse(trimmed) as Record<string, unknown>;
         this._handleMessage(msg);
       } catch {
         /* skip non-JSON lines */
@@ -235,24 +242,26 @@ export class MCPClient extends EventEmitter {
   _handleMessage(msg: Record<string, unknown>): void {
     // Response to a request
     if (msg['id'] !== undefined && this.pending.has(msg['id'] as number)) {
-      const pending = this.pending.get(msg['id'] as number)!;
+      const pending = this.pending.get(msg['id'] as number);
+      if (pending == null) return;
       this.pending.delete(msg['id'] as number);
       clearTimeout(pending.timer);
 
-      if (msg['error']) {
-        pending.reject(
-          new Error(
-            ((msg['error'] as Record<string, unknown>)['message'] as string) || 'MCP error',
-          ),
-        );
-      } else {
+      if (msg['error'] == null) {
         pending.resolve(msg['result']);
+      } else {
+        const errRecord = msg['error'] as Record<string, unknown>;
+        const errMsg =
+          typeof errRecord['message'] === 'string' && errRecord['message'] !== ''
+            ? errRecord['message']
+            : 'MCP error';
+        pending.reject(new Error(errMsg));
       }
       return;
     }
 
     // Notification (no id)
-    if (msg['method']) {
+    if (msg['method'] != null) {
       this.emit('notification', msg);
     }
   }
@@ -287,10 +296,9 @@ export function getCodexMCPClient(opts: { cwd?: string } = {}): MCPClient | null
   const mcpConfig = (cfg as Record<string, unknown>)['mcp'] as Record<string, unknown> | undefined;
   const codexMcpConfig = mcpConfig?.['codex'] as Record<string, unknown> | undefined;
 
-  if (!codexMcpConfig?.['enabled']) return null;
-  if (codexClient?.isAlive()) return codexClient;
+  if (codexMcpConfig?.['enabled'] !== true) return null;
+  if (codexClient?.isAlive() === true) return codexClient;
 
-  // eslint-disable-next-line require-atomic-updates -- singleton pattern: races produce identical clients
   codexClient = new MCPClient(
     (codexMcpConfig['command'] as string | undefined) ?? 'codex',
     (codexMcpConfig['args'] as string[] | undefined) ?? ['mcp-server'],
@@ -306,7 +314,10 @@ export function getCodexMCPClient(opts: { cwd?: string } = {}): MCPClient | null
 /**
  * Call Codex via MCP with optional multi-turn context.
  */
-export async function codexMCP(prompt: string, opts: { threadId?: string; cwd?: string } = {}): Promise<{ ok: boolean; result: string; viaMCP: boolean; error?: string; threadId?: string }> {
+export async function codexMCP(
+  prompt: string,
+  opts: { threadId?: string; cwd?: string } = {},
+): Promise<{ ok: boolean; result: string; viaMCP: boolean; error?: string; threadId?: string }> {
   const client = getCodexMCPClient({ cwd: opts.cwd });
   if (!client) {
     return { ok: false, result: '', viaMCP: false, error: 'MCP not enabled' };
@@ -317,8 +328,8 @@ export async function codexMCP(prompt: string, opts: { threadId?: string; cwd?: 
       await client.start();
     }
 
-    const toolName = opts.threadId ? 'codex-reply' : 'codex';
-    const args = opts.threadId ? { thread_id: opts.threadId, prompt } : { prompt };
+    const toolName = opts.threadId == null ? 'codex' : 'codex-reply';
+    const args = opts.threadId == null ? { prompt } : { thread_id: opts.threadId, prompt };
 
     const result = (await client.callTool(toolName, args, 120_000)) as Record<
       string,
