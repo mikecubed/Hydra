@@ -19,7 +19,7 @@
 
 import https from 'node:https';
 import path from 'node:path';
-// @ts-ignore — cross-spawn has no bundled types; pre-existing across codebase
+// @ts-expect-error — cross-spawn has no bundled types; pre-existing across codebase
 import spawn from 'cross-spawn';
 import { loadHydraConfig } from './hydra-config.ts';
 import { getActiveModel, getReasoningEffort, AGENT_NAMES, AGENTS } from './hydra-agents.ts';
@@ -58,7 +58,7 @@ async function apiClaude(): Promise<string[] | null> {
     'x-api-key': key,
     'anthropic-version': '2023-06-01',
   });
-  return ((data as { data?: Array<{ id: string }> }).data || []).map((m) => m.id).sort();
+  return ((data as { data?: Array<{ id: string }> }).data ?? []).map((m) => m.id).sort();
 }
 
 async function apiCodex(): Promise<string[] | null> {
@@ -67,7 +67,7 @@ async function apiCodex(): Promise<string[] | null> {
   const data = await httpGet('https://api.openai.com/v1/models', {
     Authorization: `Bearer ${key}`,
   });
-  return ((data as { data?: Array<{ id: string }> }).data || []).map((m) => m.id).sort();
+  return ((data as { data?: Array<{ id: string }> }).data ?? []).map((m) => m.id).sort();
 }
 
 async function apiGemini(): Promise<string[] | null> {
@@ -76,7 +76,7 @@ async function apiGemini(): Promise<string[] | null> {
   const data = await httpGet(
     `https://generativelanguage.googleapis.com/v1beta/models?key=${key}&pageSize=200`,
   );
-  return ((data as { models?: Array<{ name: string }> }).models || [])
+  return ((data as { models?: Array<{ name: string }> }).models ?? [])
     .map((m) => m.name.replace('models/', ''))
     .sort();
 }
@@ -136,8 +136,10 @@ const STRATEGIES = {
   gemini: { api: apiGemini, cli: cliGemini },
 };
 
-export async function fetchModels(agentName: string) {
-  const strat = (STRATEGIES as Record<string, typeof STRATEGIES.claude>)[agentName];
+export async function fetchModels(
+  agentName: string,
+): Promise<{ models: string[]; source: string }> {
+  const strat = (STRATEGIES as Record<string, typeof STRATEGIES.claude | undefined>)[agentName];
   if (!strat) return { models: [], source: 'none' };
 
   // 1. Try API
@@ -164,21 +166,23 @@ export async function fetchModels(agentName: string) {
 
 function displayAgent(agentName: string, fetchResult: { models: string[]; source: string }) {
   const cfg = loadHydraConfig();
-  const agentModels = (cfg.models as Record<string, Record<string, string>>)?.[agentName] ?? {};
-  const aliases = (cfg.aliases as Record<string, Record<string, string>>)?.[agentName] ?? {};
+  const agentModels =
+    (cfg.models as Record<string, Record<string, string> | undefined>)[agentName] ?? {};
+  const aliases =
+    (cfg.aliases as Record<string, Record<string, string> | undefined>)[agentName] ?? {};
   const activeModel = getActiveModel(agentName);
   const agentInfo = (AGENTS as Record<string, { label?: string }>)[agentName];
-  const mode = cfg.mode || 'performance';
-  const tierPreset = cfg.modeTiers?.[mode]?.[agentName] || 'default';
+  const mode = cfg.mode;
+  const tierPreset = cfg.modeTiers?.[mode]?.[agentName] ?? 'default';
 
   console.log('');
-  console.log(pc.bold(pc.cyan(`═══ ${agentInfo?.label || agentName} ═══`)));
+  console.log(pc.bold(pc.cyan(`═══ ${agentInfo.label ?? agentName} ═══`)));
 
   // Active model + reasoning effort
   const effort = getReasoningEffort(agentName);
   const effortStr = effort ? pc.yellow(` [${effort}]`) : '';
   console.log(
-    `  Active:  ${pc.green(activeModel || 'unknown')}${effortStr} ${pc.dim(`(mode: ${mode} → ${tierPreset})`)}`,
+    `  Active:  ${pc.green(activeModel ?? 'unknown')}${effortStr} ${pc.dim(`(mode: ${mode} → ${tierPreset})`)}`,
   );
 
   // Presets
@@ -211,8 +215,14 @@ function displayAgent(agentName: string, fetchResult: { models: string[]; source
 
   // Discovered models
   const { models, source } = fetchResult;
-  const sourceLabel =
-    source === 'api' ? 'REST API' : source === 'cli' ? 'CLI query' : 'config only';
+  let sourceLabel: string;
+  if (source === 'api') {
+    sourceLabel = 'REST API';
+  } else if (source === 'cli') {
+    sourceLabel = 'CLI query';
+  } else {
+    sourceLabel = 'config only';
+  }
 
   if (models.length === 0) {
     console.log(pc.bold(`  Available Models ${pc.dim(`(${sourceLabel})`)}:`));
@@ -230,7 +240,9 @@ function displayAgent(agentName: string, fetchResult: { models: string[]; source
   }
   for (const modelId of Object.values(aliases)) knownIds.add(modelId);
 
-  console.log(pc.bold(`  Available Models (${models.length}) ${pc.dim(`[${sourceLabel}]`)}:`));
+  console.log(
+    pc.bold(`  Available Models (${String(models.length)}) ${pc.dim(`[${sourceLabel}]`)}:`),
+  );
   for (const model of models) {
     const isActive = model === activeModel;
     const isConfigured = knownIds.has(model);
@@ -254,7 +266,8 @@ async function main() {
   if (arg && !AGENT_NAMES.includes(arg)) {
     console.error(pc.red(`Unknown agent: ${arg}`));
     console.error(`Available: ${AGENT_NAMES.join(', ')}`);
-    process.exit(1);
+    process.exitCode = 1;
+    return;
   }
 
   console.log(pc.bold('Discovering models...'));
@@ -278,8 +291,8 @@ async function main() {
 const __self = new URL(import.meta.url).pathname.replace(/^\/([A-Z]:)/, '$1');
 const __argv1 = path.resolve(process.argv[1] || '');
 if (__argv1 === path.resolve(__self)) {
-  main().catch((err) => {
-    console.error(pc.red(`Error: ${err.message}`));
-    process.exit(1);
+  main().catch((err: unknown) => {
+    console.error(pc.red(`Error: ${(err as Error).message}`));
+    process.exitCode = 1;
   });
 }

@@ -117,7 +117,7 @@ function parseOptionToken(token: string) {
 }
 
 function normalizeKey(rawKey: string) {
-  const key = String(rawKey || '').trim();
+  const key = (rawKey || '').trim();
   if (!key) {
     return '';
   }
@@ -193,12 +193,12 @@ function toOperatorArgs(rawTokens: string[]) {
     }
 
     const parsed = parseOptionToken(token);
-    if (!parsed || !parsed.key) {
+    if (!parsed?.key) {
       out.push(token);
       continue;
     }
 
-    const key = String(parsed.key || '').trim();
+    const key = parsed.key.trim();
     if (!key) {
       out.push(token);
       continue;
@@ -227,7 +227,7 @@ function toOperatorArgs(rawTokens: string[]) {
       continue;
     }
 
-    out.push(`${normalizedKey}=${value === null ? 'true' : value}`);
+    out.push(`${normalizedKey}=${value ?? 'true'}`);
   }
 
   return out;
@@ -245,12 +245,12 @@ function toPowerShellArgs(rawTokens: string[]) {
     }
 
     const parsed = parseOptionToken(token);
-    if (!parsed || !parsed.key) {
+    if (!parsed?.key) {
       out.push(token);
       continue;
     }
 
-    const key = String(parsed.key || '').trim();
+    const key = parsed.key.trim();
     if (!key) {
       out.push(token);
       continue;
@@ -297,14 +297,15 @@ function runOperator(prompt: string, rawTokens: string[]) {
   });
 
   if (typeof result.status === 'number') {
-    process.exit(result.status);
+    process.exitCode = result.status;
+    return;
   }
 
   if (result.error) {
     throw result.error;
   }
 
-  process.exit(1);
+  process.exitCode = 1;
 }
 
 function runFull(prompt: string, rawTokens: string[]) {
@@ -341,10 +342,8 @@ function runFull(prompt: string, rawTokens: string[]) {
     });
 
     if (!result.error) {
-      if (typeof result.status === 'number') {
-        process.exit(result.status);
-      }
-      process.exit(1);
+      process.exitCode = typeof result.status === 'number' ? result.status : 1;
+      return;
     }
 
     if ((result.error as NodeJS.ErrnoException).code === 'ENOENT') {
@@ -356,7 +355,7 @@ function runFull(prompt: string, rawTokens: string[]) {
 
   if (lastError) {
     throw new Error(
-      `Unable to launch PowerShell (${(lastError as NodeJS.ErrnoException).code || lastError.message}).`,
+      `Unable to launch PowerShell (${(lastError as NodeJS.ErrnoException).code ?? lastError.message}).`,
     );
   }
 
@@ -385,7 +384,7 @@ async function main() {
 
   if (showHelp) {
     printHelp();
-    process.exit(0);
+    return;
   }
 
   if (full) {
@@ -396,7 +395,7 @@ async function main() {
   runOperator(prompt, passthrough);
 }
 
-main().catch((err) => {
-  console.error(`Hydra CLI failed: ${err.message}`);
-  process.exit(1);
+main().catch((err: unknown) => {
+  console.error(`Hydra CLI failed: ${(err as Error).message}`);
+  process.exitCode = 1;
 });

@@ -102,7 +102,7 @@ export function gh(args: string[], cwd = process.cwd()): GhResult {
  * Check if `gh` CLI is installed and accessible.
  * @returns {boolean}
  */
-export function isGhAvailable() {
+export function isGhAvailable(): boolean {
   try {
     const r = gh(['--version']);
     return r.status === 0;
@@ -115,7 +115,7 @@ export function isGhAvailable() {
  * Check if `gh` is authenticated with GitHub.
  * @returns {boolean}
  */
-export function isGhAuthenticated() {
+export function isGhAuthenticated(): boolean {
   try {
     const r = gh(['auth', 'status']);
     return r.status === 0;
@@ -135,9 +135,9 @@ export function detectRepo(cwd = process.cwd()): RepoInfo | null {
   try {
     const data = JSON.parse(r.stdout);
     return {
-      owner: data.owner?.login || data.owner || '',
-      repo: data.name || '',
-      defaultBranch: data.defaultBranchRef?.name || 'main',
+      owner: data.owner?.login ?? data.owner ?? '',
+      repo: data.name ?? '',
+      defaultBranch: data.defaultBranchRef?.name ?? 'main',
     };
   } catch {
     return null;
@@ -189,6 +189,7 @@ export function createPR({
  * @param {{ cwd?: string, state?: string, base?: string, head?: string }} [opts={}]
  * @returns {Array<{ number: number, title: string, headRefName: string, author: string, state: string }>}
  */
+// eslint-disable-next-line @typescript-eslint/explicit-module-boundary-types
 export function listPRs({
   cwd = process.cwd(),
   state = 'open',
@@ -208,9 +209,9 @@ export function listPRs({
       title: pr.title,
       headRefName: pr.headRefName,
       author:
-        typeof pr.author === 'object' && pr.author !== null
-          ? pr.author.login || ''
-          : String(pr.author || ''),
+        typeof pr.author === 'object'
+          ? (pr.author.login ?? '')
+          : (pr.author ?? ''),
       state: pr.state,
     }));
   } catch {
@@ -223,6 +224,7 @@ export function listPRs({
  * @param {{ cwd?: string, ref: string|number }} opts
  * @returns {object|null}
  */
+// eslint-disable-next-line @typescript-eslint/explicit-module-boundary-types
 export function getPR({ cwd = process.cwd(), ref }: { cwd?: string; ref: string | number }) {
   const r = gh(
     [
@@ -287,6 +289,7 @@ export function closePR({
  * @param {{ cwd?: string, state?: string, labels?: string[], limit?: number }} [opts={}]
  * @returns {Array<{ number: number, title: string, body: string, labels: string[], assignees: string[], state: string }>}
  */
+// eslint-disable-next-line @typescript-eslint/explicit-module-boundary-types
 export function listIssues({
   cwd = process.cwd(),
   state = 'open',
@@ -363,7 +366,7 @@ function detectPRTemplate(projectRoot: string): string | null {
  * @returns {string[]} Labels to apply
  */
 function detectAutoLabels(changedFiles: string[], labelConfig: Record<string, unknown>): string[] {
-  if (!labelConfig || !changedFiles?.length) return [];
+  if (!changedFiles.length) return [];
   const labels = new Set<string>();
   for (const [label, patterns] of Object.entries(labelConfig)) {
     if (!Array.isArray(patterns)) continue;
@@ -391,7 +394,7 @@ export function verifyRequiredChecks({
   ref: string | number;
 }): ChecksResult {
   const cfg = loadHydraConfig();
-  const required = cfg.github?.requiredChecks || [];
+  const required = cfg.github?.requiredChecks ?? [];
   if (required.length === 0) return { ok: true, pending: [], failed: [] };
 
   const r = gh(['pr', 'checks', String(ref), '--json', 'name,state'], cwd);
@@ -426,15 +429,15 @@ export function verifyRequiredChecks({
  * @returns {{ ok: boolean, url?: string, number?: number, error?: string }}
  */
 export function pushBranchAndCreatePR(opts: PushAndCreatePROpts = {}): PRResult {
-  const cwd = opts.cwd || process.cwd();
-  const branch = opts.branch || getCurrentBranch(cwd);
+  const cwd = opts.cwd ?? process.cwd();
+  const branch = opts.branch ?? getCurrentBranch(cwd);
   const ghCfg = getGitHubConfig();
 
   // Determine base branch
-  let baseBranch = opts.baseBranch || ghCfg.defaultBase;
+  let baseBranch = opts.baseBranch ?? ghCfg.defaultBase;
   if (!baseBranch) {
     const repo = detectRepo(cwd);
-    baseBranch = repo?.defaultBranch || 'main';
+    baseBranch = repo?.defaultBranch ?? 'main';
   }
 
   // Push the branch
@@ -445,16 +448,16 @@ export function pushBranchAndCreatePR(opts: PushAndCreatePROpts = {}): PRResult 
 
   // Auto-generate title from branch name if not provided
   const title =
-    opts.title ||
-    branch
+    opts.title ??
+    (branch
       .replace(/^(evolve|nightly)\//, '')
       .replace(/[/_-]/g, ' ')
       .replace(/\b\w/g, (c) => c.toUpperCase())
       .trim() ||
-    branch;
+    branch);
 
   // Auto-generate body from commit log if not provided
-  let body = opts.body || '';
+  let body = opts.body ?? '';
   if (!body) {
     // Try injecting PR template first
     const template = detectPRTemplate(cwd);
@@ -477,7 +480,7 @@ export function pushBranchAndCreatePR(opts: PushAndCreatePROpts = {}): PRResult 
   }
 
   // Auto-detect labels from changed files
-  const labels: string[] = [...(ghCfg.labels || [])];
+  const labels: string[] = [...ghCfg.labels];
   const autolabelCfg = loadHydraConfig().github?.autolabel;
   if (autolabelCfg) {
     // Get changed files via git diff (works before PR exists)
@@ -490,13 +493,13 @@ export function pushBranchAndCreatePR(opts: PushAndCreatePROpts = {}): PRResult 
     if (gitDiff.status === 0 && gitDiff.stdout) {
       changedFiles = gitDiff.stdout.trim().split('\n').filter(Boolean);
     }
-    const autoLabels = detectAutoLabels(changedFiles, autolabelCfg as Record<string, unknown>);
+    const autoLabels = detectAutoLabels(changedFiles, autolabelCfg);
     for (const l of autoLabels) {
       if (!labels.includes(l)) labels.push(l);
     }
   }
 
-  const draft = opts.draft === undefined ? ghCfg.draft : opts.draft;
+  const draft = opts.draft ?? ghCfg.draft;
 
   return createPR({
     cwd,

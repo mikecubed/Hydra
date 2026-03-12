@@ -40,11 +40,11 @@ let _cache: CodebaseContextCache | null = null;
  * Cached in memory — call once at operator startup.
  * @returns {object} Parsed context with sections and module index
  */
-export function loadCodebaseContext() {
+export function loadCodebaseContext(): CodebaseContextCache {
   if (_cache) return _cache;
 
   const sections: Record<string, string> = {};
-  let claudeMd = '';
+  let claudeMd: string;
   try {
     claudeMd = fs.readFileSync(CLAUDE_MD_PATH, 'utf8');
   } catch {
@@ -85,7 +85,7 @@ export function getCodebaseContext(): CodebaseContextCache {
 /**
  * Force reload (e.g. after doc updates).
  */
-export function reloadCodebaseContext() {
+export function reloadCodebaseContext(): CodebaseContextCache {
   _cache = null;
   return loadCodebaseContext();
 }
@@ -258,7 +258,7 @@ const CODEBASE_QUERY_PATTERNS = [
  * @param {string} message
  * @returns {{ isCodebaseQuery: boolean, topic: string|null }}
  */
-export function detectCodebaseQuery(message: string) {
+export function detectCodebaseQuery(message: string): { isCodebaseQuery: boolean; topic: string | null } {
   if (!message || typeof message !== 'string') {
     return { isCodebaseQuery: false, topic: null };
   }
@@ -312,10 +312,10 @@ function inferTopic(text: string): string | null {
 // ── Topic Context Retrieval ─────────────────────────────────────────────────
 
 /** Map topic names to CLAUDE.md section keys and supplementary info. */
-const TOPIC_SECTIONS: Record<
+const TOPIC_SECTIONS: Partial<Record<
   string,
   { keys: string[]; filter?: string; supplementWith: string | null }
-> = {
+>> = {
   dispatch: { keys: ['dispatch-modes', 'task-routing'], supplementWith: 'functions' },
   council: { keys: ['key-modules'], filter: 'council', supplementWith: 'functions' },
   config: { keys: ['code-conventions'], supplementWith: 'config' },
@@ -341,6 +341,7 @@ const TOPIC_SECTIONS: Record<
 export function getTopicContext(topic: string): string {
   const ctx = getCodebaseContext();
   const topicDef = TOPIC_SECTIONS[topic];
+  // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition -- Record key may be absent at runtime
   if (!topicDef) return getGeneralContext();
 
   const lines = [`=== CODEBASE CONTEXT: ${topic} ===`, ''];
@@ -396,7 +397,7 @@ export function getTopicContext(topic: string): string {
   // Add relevant modules from index
   const relevantModules = ctx.moduleIndex.filter((m) => {
     const lower = `${m.file.toLowerCase()} ${(m.purpose ?? '').toLowerCase()}`;
-    return new RegExp(topicDef.filter || topic, 'i').test(lower);
+    return new RegExp(topicDef.filter ?? topic, 'i').test(lower);
   });
   if (relevantModules.length > 0) {
     lines.push('Related modules:');
@@ -462,14 +463,14 @@ export function getConfigReference(topic: string): string | null {
     return null;
   }
 
-  const TOPIC_CONFIG_MAP: Record<string, () => unknown> = {
+  const TOPIC_CONFIG_MAP: Partial<Record<string, () => unknown>> = {
     config: () => ({
       models: config.models,
       modeTiers: config.modeTiers,
       concierge: config.concierge,
     }),
     workers: () =>
-      config.workers || {
+      config.workers ?? {
         note: 'workers.permissionMode, workers.autoStart, workers.pollIntervalMs, workers.maxOutputBufferKB, workers.autoChain',
       },
     concierge: () => config.concierge,
@@ -569,15 +570,14 @@ WRITE:
  * @param {number} [maxResults=5]
  * @returns {string} Formatted findings or empty string
  */
-export function searchKnowledgeBase(query: string, maxResults = 5) {
+export function searchKnowledgeBase(query: string, maxResults = 5): string {
   let kb;
   try {
     // Lazy-load to avoid circular dependencies
     const kbModule = loadKBModule();
-    if (!kbModule) return '';
     const { loadKnowledgeBase, searchEntries } = kbModule;
     kb = loadKnowledgeBase(EVOLVE_DIR);
-    if (!kb || !kb.entries || kb.entries.length === 0) return '';
+    if (kb.entries.length === 0) return '';
 
     if (!searchEntries) return '';
     const results = searchEntries(kb, query);
@@ -621,7 +621,7 @@ function loadKBModule() {
         }
       },
       searchEntries: (kb: { entries: unknown[] }, query: string) => {
-        if (!kb?.entries) return [];
+        if (kb.entries.length === 0) return [];
         const q = query.toLowerCase();
         return kb.entries.filter((e) => {
           const entry = e as Record<string, unknown>;
@@ -629,7 +629,7 @@ function loadKBModule() {
             ((entry['finding'] as string) || '').toLowerCase().includes(q) ||
             ((entry['area'] as string) || '').toLowerCase().includes(q) ||
             ((entry['learnings'] as string) || '').toLowerCase().includes(q) ||
-            ((entry['tags'] as string[]) || []).some((t) => t.toLowerCase().includes(q))
+            ((entry['tags'] as string[] | undefined) ?? []).some((t) => t.toLowerCase().includes(q))
           );
         });
       },
@@ -647,7 +647,7 @@ function loadKBModule() {
  * concierge system prompt. Provides architecture awareness for any query.
  * @returns {string}
  */
-export function getBaselineContext() {
+export function getBaselineContext(): string {
   void getCodebaseContext(); // ensure cache is loaded
 
   const lines = [

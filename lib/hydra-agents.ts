@@ -1327,8 +1327,8 @@ export function resolveModelId(
   const aliasVal = aliases?.[lower];
   if (aliasVal != null && aliasVal !== '') return aliasVal;
 
-  const agentModels = cfg.models[agentName];
-  if ((agentModels as Record<string, unknown>)[lower] != null) {
+  const agentModels = (cfg.models as Record<string, ModelConfig | undefined>)[agentName];
+  if (agentModels && (agentModels as Record<string, unknown>)[lower] != null) {
     return (agentModels as Record<string, string>)[lower];
   }
 
@@ -1472,15 +1472,13 @@ export function getModelSummary(): Record<string, unknown> {
   ];
   for (const agent of orderedAgents) {
     const activeModel = getActiveModel(agent);
-    const agentModels = (cfg.models[agent] ?? {}) as ModelConfig & Record<string, unknown>;
-    // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition -- active may be absent at runtime
-    const activeKey = agentModels.active ?? 'default';
+    const agentModels = ((cfg.models as Record<string, ModelConfig | undefined>)[agent] ?? {}) as ModelConfig & Record<string, unknown>;
+    const activeKey = (agentModels as Record<string, string | undefined>)['active'] ?? 'default';
     const isOverride = activeKey !== 'default';
     const tierPreset = cfg.modeTiers?.[mode]?.[agent] ?? 'default';
 
     summary[agent] = {
-      // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition -- default may be absent for agents without full model config
-      active: activeModel ?? agentModels.default ?? 'unknown',
+      active: activeModel ?? (agentModels.default as string | undefined) ?? 'unknown',
       isDefault: !isOverride && activeModel === agentModels.default,
       isOverride,
       tierSource: isOverride ? 'override' : `${mode} → ${tierPreset}`,
