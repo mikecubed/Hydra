@@ -120,7 +120,7 @@ async function phaseSelect(sortedTasks: ScannedTask[], maxTasks: number) {
     }
     console.log(pc.dim(`\n  Enter numbers (e.g. 1,3,5) or press Enter for top ${String(maxTasks)}.`));
     const answer = await askLine(rl, pc.bold('  Select: '));
-    if (!answer) return sortedTasks.slice(0, maxTasks);
+    if (answer.length === 0) return sortedTasks.slice(0, maxTasks);
 
     const indices = answer
       .split(',')
@@ -136,7 +136,15 @@ async function phaseSelect(sortedTasks: ScannedTask[], maxTasks: number) {
 
 // ── Budget Thresholds ───────────────────────────────────────────────────────
 
-function buildThresholds(budgetCfg: any) {
+interface BudgetCfg {
+  handoffThreshold?: number;
+  softLimit?: number;
+  hardLimit?: number;
+  perTaskEstimate?: number;
+  perTaskTimeoutMs?: number;
+}
+
+function buildThresholds(budgetCfg: BudgetCfg) {
   return [
     { pct: 0.95, action: 'hard_stop', reason: 'Hard limit reached: {pct}% of budget used' },
     {
@@ -145,8 +153,7 @@ function buildThresholds(budgetCfg: any) {
       reason: 'Soft limit reached: {pct}% budget ({consumed} tokens)',
     },
     {
-      // eslint-disable-next-line @typescript-eslint/prefer-nullish-coalescing -- 0 is a valid threshold (no handoff); || 0.7 is intentional
-      pct: budgetCfg.handoffThreshold || 0.7,
+      pct: (budgetCfg.handoffThreshold !== undefined && budgetCfg.handoffThreshold > 0) ? budgetCfg.handoffThreshold : 0.7,
       action: 'handoff',
       reason: '{pct}% budget — switching remaining tasks to economy models',
       once: true,
@@ -177,11 +184,12 @@ function buildTaskPrompt(
     attribution: { pipeline: 'hydra-actualize', agent },
   });
 
-  const bodySection = task.body ? `\n## Details\n${task.body}\n` : '';
+  const bodySection = task.body !== null && task.body.length > 0 ? `\n## Details\n${task.body}\n` : '';
 
-  const sourceNote = task.sourceRef
-    ? `**Source:** ${task.source} (${task.sourceRef})`
-    : `**Source:** ${task.source}`;
+  const sourceNote =
+    task.sourceRef.length > 0
+      ? `**Source:** ${task.source} (${task.sourceRef})`
+      : `**Source:** ${task.source}`;
 
   const intent = `You are Hydra improving itself. Be bold, but keep scope bounded and verifiable.
 - Prefer changes that increase self-awareness, diagnostics, safety, and autonomy.
@@ -219,10 +227,10 @@ Start working on the task now.`;
 
 // ── Verification ────────────────────────────────────────────────────────────
 
-function runVerification(projectRoot: string, cfg: any) {
+function runVerification(projectRoot: string, cfg: Record<string, unknown>) {
   const plan = resolveVerificationPlan(projectRoot, cfg);
-  if (!plan.enabled || !plan.command) {
-    return { ran: false, passed: true, command: '', output: '', reason: plan.reason || 'disabled' };
+  if (!plan.enabled || plan.command.length === 0) {
+    return { ran: false, passed: true, command: '', output: '', reason: plan.reason.length > 0 ? plan.reason : 'disabled' };
   }
 
   log.dim(`Verifying: ${plan.command}`);
@@ -232,8 +240,8 @@ function runVerification(projectRoot: string, cfg: any) {
     ran: true,
     passed: result.ok,
     command: plan.command,
-    output: (result.stdout || '').slice(-2000) + (result.stderr || '').slice(-1000),
-    reason: plan.reason || '',
+    output: (result.stdout.length > 0 ? result.stdout : '').slice(-2000) + (result.stderr.length > 0 ? result.stderr : '').slice(-1000),
+    reason: plan.reason.length > 0 ? plan.reason : '',
   };
 }
 
@@ -261,16 +269,16 @@ async function main() {
   initAgentRegistry();
 
   const cfg = loadHydraConfig();
-  const baseBranch = String(
-    // eslint-disable-next-line @typescript-eslint/prefer-nullish-coalescing -- options['base-branch'] can be false (boolean flag); || is intentional
-    options['base-branch'] || cfg.evolve?.baseBranch ?? cfg.nightly?.baseBranch ?? 'dev',
-  );
-  const branchPrefix = (options['branch-prefix'] as string) || 'actualize';
-  const maxTasks = options['max-tasks'] ? Number.parseInt(options['max-tasks'] as string, 10) : 5;
-  const maxHours = options['max-hours'] ? Number.parseFloat(options['max-hours'] as string) : 4;
-  const isDryRun = !!options['dry-run'];
-  const isInteractive = !!options['interactive'];
-  const noDiscovery = !!options['no-discovery'];
+  const baseBranch =
+    typeof options['base-branch'] === 'string' && options['base-branch'].length > 0
+      ? options['base-branch']
+      : cfg.evolve?.baseBranch ?? cfg.nightly?.baseBranch ?? 'dev';
+  const branchPrefix = typeof options['branch-prefix'] === 'string' && options['branch-prefix'].length > 0 ? options['branch-prefix'] : 'actualize';
+  const maxTasks = typeof options['max-tasks'] === 'string' ? Number.parseInt(options['max-tasks'], 10) : 5;
+  const maxHours = typeof options['max-hours'] === 'string' ? Number.parseFloat(options['max-hours']) : 4;
+  const isDryRun = options['dry-run'] === true;
+  const isInteractive = options['interactive'] === true;
+  const noDiscovery = options['no-discovery'] === true;
 
   // Preconditions
   const currentBranch = getCurrentBranch(projectRoot);
@@ -316,16 +324,18 @@ async function main() {
   } else {
     log.phase('DISCOVER');
     const discoveryCfg = cfg.nightly?.aiDiscovery ?? {};
-    // eslint-disable-next-line @typescript-eslint/prefer-nullish-coalescing -- options value can be false (boolean flag); || is intentional
-    const discoveryAgent = String(options['discovery-agent'] || discoveryCfg.agent || 'gemini');
-    const focus = options['focus']
-      ? String(options['focus'])
-          .split(',')
-          .map((s) => s.trim())
-          .filter(Boolean)
-      : discoveryCfg.focus ?? [];
-    const maxSuggestions = options['discover-max']
-      ? Number.parseInt(options['discover-max'] as string, 10)
+    let discoveryAgent = 'gemini';
+    if (typeof options['discovery-agent'] === 'string' && options['discovery-agent'].length > 0) {
+      discoveryAgent = options['discovery-agent'];
+    } else if (discoveryCfg.agent != null && discoveryCfg.agent.length > 0) {
+      discoveryAgent = discoveryCfg.agent;
+    }
+    const focus =
+      typeof options['focus'] === 'string' && options['focus'].length > 0
+        ? options['focus'].split(',').map((s) => s.trim()).filter((s) => s.length > 0)
+        : discoveryCfg.focus ?? [];
+    const maxSuggestions = typeof options['discover-max'] === 'string'
+      ? Number.parseInt(options['discover-max'], 10)
       : discoveryCfg.maxSuggestions ?? 6;
 
     const extraContext = [snapshotText, indexText].join('\n\n');
@@ -334,7 +344,6 @@ async function main() {
       agent: discoveryAgent,
       maxSuggestions,
       focus,
-      // eslint-disable-next-line @typescript-eslint/prefer-nullish-coalescing -- 0ms timeout is invalid; || is intentional
       timeoutMs: discoveryCfg.timeoutMs ?? 5 * 60 * 1000,
       existingTasks: scanned.map((t) => t.title),
       profile: 'actualize',
@@ -444,12 +453,12 @@ async function main() {
     // dispatching to an unavailable or disabled agent when the suggestion is stale.
     const taskType = classifyTask(task.title);
     let agent = task.suggestedAgent;
-    if (agent) {
+    if (agent.length > 0) {
       const agentDef = getAgent(agent);
       const isInstalled = !(agent in installedCLIs) || installedCLIs[agent];
       // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition -- cfg.local may be undefined at runtime despite types
       const isLocalDisabled = agent === 'local' && !cfg.local?.enabled;
-      if (!agentDef?.enabled || !isInstalled || isLocalDisabled) {
+      if (agentDef?.enabled !== true || !isInstalled || isLocalDisabled) {
         agent = bestAgentFor(taskType, { installedCLIs });
       }
     } else {
@@ -468,7 +477,7 @@ async function main() {
         title: task.title,
         branch: branchName,
         source: task.source,
-        taskType: task.taskType || 'unknown',
+        taskType: task.taskType.length > 0 ? task.taskType : 'unknown',
         status: 'skipped',
         agent,
         tokensUsed: 0,
@@ -488,7 +497,7 @@ async function main() {
         title: task.title,
         branch: branchName,
         source: task.source,
-        taskType: task.taskType || 'unknown',
+        taskType: task.taskType.length > 0 ? task.taskType : 'unknown',
         status: 'error',
         agent,
         tokensUsed: 0,
@@ -509,17 +518,16 @@ async function main() {
       selfIndexText: indexText,
     });
 
-    // eslint-disable-next-line @typescript-eslint/prefer-nullish-coalescing -- empty string is not a valid model name
-    const effectiveModel = modelOverride || getActiveModel(agent) || 'default';
+    const effectiveModel = (modelOverride != null && modelOverride.length > 0 ? modelOverride : null) ?? getActiveModel(agent) ?? 'default';
     const handle = recordCallStart(agent, effectiveModel);
-    log.dim(`Dispatching ${agent}${modelOverride ? ` (${modelOverride})` : ''}...`);
+    log.dim(`Dispatching ${agent}${modelOverride != null && modelOverride.length > 0 ? ` (${modelOverride})` : ''}...`);
 
     let agentResult;
     try {
+      // eslint-disable-next-line no-await-in-loop -- tasks run sequentially for branch isolation
       agentResult = await executeAgentWithRecovery(agent, prompt, {
         cwd: projectRoot,
-        // eslint-disable-next-line @typescript-eslint/prefer-nullish-coalescing -- 0ms timeout is invalid; || is intentional
-        timeoutMs: cfg.nightly?.perTaskTimeoutMs || 15 * 60 * 1000,
+        timeoutMs: (cfg.nightly?.perTaskTimeoutMs ?? 0) > 0 ? cfg.nightly.perTaskTimeoutMs : 15 * 60 * 1000,
         modelOverride,
         progressIntervalMs: 15_000,
         onProgress: (elapsed, outputKB) => {
@@ -541,11 +549,11 @@ async function main() {
     }
     process.stderr.write(`\r${' '.repeat(100)}\r`);
 
+    // eslint-disable-next-line @typescript-eslint/no-unsafe-argument, @typescript-eslint/no-explicit-any -- agentResult matches CallResult shape at runtime
     if (agentResult.ok) recordCallComplete(handle, agentResult as any);
-    // eslint-disable-next-line @typescript-eslint/prefer-nullish-coalescing -- empty string error should fall through to 'unknown'
-    else recordCallError(handle, new Error(agentResult.error || 'unknown'));
+    else recordCallError(handle, new Error(agentResult.error.length > 0 ? agentResult.error : 'unknown'));
 
-    const taskDurationMs = agentResult.durationMs || 0;
+    const taskDurationMs = agentResult.durationMs;
     const tokenDelta = budget.recordUnitEnd(task.slug, taskDurationMs);
 
     // Branch integrity
@@ -601,8 +609,7 @@ async function main() {
       title: task.title,
       branch: branchName,
       source: task.source,
-      taskType: task.taskType || 'unknown',
-      status,
+      taskType: task.taskType.length > 0 ? task.taskType : 'unknown',
       agent,
       tokensUsed: tokenDelta.tokens,
       durationMs: taskDurationMs,
@@ -640,7 +647,7 @@ async function main() {
   };
 
   const budgetSummary = budget.getSummary();
-  if (stopReason) budgetSummary['stopReason'] = stopReason;
+  if (stopReason !== null) budgetSummary['stopReason'] = stopReason;
 
   const jsonReport = {
     ...runMeta,
@@ -655,7 +662,7 @@ async function main() {
   md.push(`- Base branch: \`${runMeta.baseBranch}\``);
   md.push(`- Branch prefix: \`${runMeta.branchPrefix}\``);
   md.push(`- Tasks: ${String(runMeta.processedTasks)}/${String(runMeta.totalTasks)}`);
-  if (runMeta.stopReason) md.push(`- Stopped: ${runMeta.stopReason}`);
+  if (runMeta.stopReason != null) md.push(`- Stopped: ${runMeta.stopReason}`);
   md.push(`- Self snapshot: \`${runMeta.artifacts.selfSnapshot}\``);
   md.push(`- Self index: \`${runMeta.artifacts.selfIndex}\``);
   md.push('');
@@ -664,9 +671,8 @@ async function main() {
   md.push('| # | Task | Agent | Status | Verification | Branch |');
   md.push('|---|------|-------|--------|--------------|--------|');
   for (const [i, r] of results.entries()) {
-    md.push(
-      `| ${String(i + 1)} | ${r.title.slice(0, 60)} | ${r.agent} | ${r.status} | ${r.verification} | \`${r.branch}\` |`,
-    );
+    // eslint-disable-next-line @typescript-eslint/restrict-template-expressions -- r.verification is always string at this point
+    md.push(`| ${String(i + 1)} | ${r.title.slice(0, 60)} | ${r.agent} | ${r.status} | ${r.verification} | \`${r.branch}\` |`);
   }
   md.push('');
   md.push('## Budget');
