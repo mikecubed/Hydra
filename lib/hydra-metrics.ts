@@ -592,6 +592,10 @@ export function loadPersistedMetrics(coordDir: string): void {
     if (loaded && typeof loaded === 'object' && loaded.agents) {
       // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment -- loaded from disk
       metricsStore = loaded;
+      // Backfill startedAt if missing or invalid (older/corrupt files)
+      if (typeof metricsStore.startedAt !== 'string') {
+        metricsStore.startedAt = new Date().toISOString();
+      }
       // Backfill sessionUsage if loaded from older format
       // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition, @typescript-eslint/strict-boolean-expressions
       if (!metricsStore.sessionUsage) {

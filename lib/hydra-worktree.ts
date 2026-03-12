@@ -66,7 +66,7 @@ export function createWorktree(
   const gitPath = worktreePath.replace(/\\/g, '/');
 
   // Determine base branch
-  const base = baseBranch ?? getCurrentBranch(projectRoot);
+  const base = (baseBranch ?? getCurrentBranch(projectRoot)) || 'HEAD';
 
   // Create branch and worktree
   const r = git(['worktree', 'add', '-b', branch, gitPath, base], projectRoot);
@@ -174,7 +174,7 @@ export function mergeWorktree(
 ): { ok: boolean; message: string } {
   const config = getWorktreeConfig();
   const branch = `${config.branchPrefix}${taskId}`;
-  const target = targetBranch ?? getCurrentBranch(projectRoot);
+  const target = (targetBranch ?? getCurrentBranch(projectRoot)) || 'main';
 
   const r = git(['merge', branch, '--no-edit'], projectRoot);
   if (r.status === 0) {

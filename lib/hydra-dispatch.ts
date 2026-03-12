@@ -58,8 +58,8 @@ function usageGuard(_agent: string) {
     const usage = checkUsage();
     if (usage.level === 'critical') {
       const currentMode = getMode();
-      const nextMode = (MODE_DOWNSHIFT as Record<string, string>)[currentMode];
-      if (nextMode === '') {
+      const nextMode = (MODE_DOWNSHIFT as Record<string, string | undefined>)[currentMode];
+      if (nextMode == null || nextMode === '') {
         console.log(
           WARNING(
             `  \u26A0 Token usage CRITICAL (${usage.percent.toFixed(1)}%) \u2014 already in economy mode`,

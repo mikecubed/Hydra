@@ -43,7 +43,7 @@ function pushLine(clean: string, raw: string): void {
 }
 
 function processChunk(chunk: string | Uint8Array, _isRaw?: boolean): void {
-  const str = typeof chunk === 'string' ? chunk : chunk.toString();
+  const str = typeof chunk === 'string' ? chunk : Buffer.from(chunk).toString('utf8');
   if (!str) return;
 
   if (isStatusBarLine(str)) return;
