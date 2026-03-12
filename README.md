@@ -251,50 +251,47 @@ See [docs/USAGE.md](docs/USAGE.md#config-file) for the full config reference wit
 
 ## Architecture
 
-```
-                    +-----------+
-                    |  Operator |  (interactive REPL + concierge)
-                    +-----+-----+
-                          |
-              +-----------+-----------+
-              |                       |
-        +-----v-----+          +------v----+
-        | Concierge |          |  Workers  |
-        | (chat AI) |          | (headless)|
-        +-----+-----+          +------+----+
-              |                       |
-              +-----------+-----------+
-                          |
-                    +-----v-----+
-                    |   Daemon  |  (HTTP, port 4173, event-sourced)
-                    +--+--+--+--+
-                       |  |  |
-          +------------+  |  +-----------+
-          v               v              v
-     +---------+    +-----------+    +--------+
-     | Gemini  |    |  Codex    |    | Claude |
-     | (3 Pro) |    | (GPT-5.4) |    |(Sonnet)|
-     +---------+    +-----------+    +--------+
-       Analyst       Implementer      Architect
+```mermaid
+flowchart TD
+    Operator[Operator<br/>interactive REPL + concierge]
+    Concierge[Concierge<br/>multi-provider chat]
+    Workers[Workers<br/>headless executors]
+    Daemon[Daemon<br/>HTTP API, port 4173, event-sourced]
 
-  Concierge fallback chain: OpenAI → Anthropic → Google
-  Virtual sub-agents: security-reviewer, test-writer,
-                      doc-generator, researcher
-  Local agent: API-backed (no CLI), routes via OpenAI-compat endpoint
+    Gemini[Gemini<br/>analyst]
+    Codex[Codex<br/>implementer]
+    Claude[Claude<br/>architect]
+    Copilot[Copilot<br/>advisor]
+    Local[Local<br/>OpenAI-compatible endpoint]
+
+    Operator --> Concierge
+    Operator --> Workers
+    Concierge --> Daemon
+    Workers --> Daemon
+    Daemon --> Gemini
+    Daemon --> Codex
+    Daemon --> Claude
+    Daemon -. optional .-> Copilot
+    Daemon -. API-backed .-> Local
 ```
+
+**Notes:**
+
+- Concierge fallback chain: OpenAI → Anthropic → Google
+- Virtual sub-agents include `security-reviewer`, `test-writer`, `doc-generator`, and `researcher`
+- `local` is API-backed and routes through an OpenAI-compatible endpoint rather than a CLI
 
 **Routing flow:**
 
-```
-Prompt → Intent Gate → Concierge → Route Classifier
-                                        ↓
-                          single / tandem / council
-                                        ↓
-                              Daemon task queue
-                                        ↓
-                          Worker(s) claim & execute
-                                        ↓
-                              Result + checkpoint
+```mermaid
+flowchart LR
+    Prompt[Prompt] --> Intent[Intent Gate]
+    Intent --> ConciergeFlow[Concierge]
+    ConciergeFlow --> Router[Route Classifier]
+    Router --> RouteChoice[single / tandem / council]
+    RouteChoice --> Queue[Daemon task queue]
+    Queue --> WorkerExec[Worker(s) claim and execute]
+    WorkerExec --> Result[Result + checkpoint]
 ```
 
 ## Documentation

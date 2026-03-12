@@ -15,7 +15,7 @@ You have access to Hydra MCP tools. Use them to coordinate with other agents:
 ## Architecture Reference
 
 See CLAUDE.md in this repo for full architecture documentation.
-Key points: ESM-only, `picocolors` for terminal colors, agent names always lowercase (`claude`/`gemini`/`codex`).
+Key points: ESM + TypeScript, `picocolors` for terminal colors, explicit `.ts` imports where applicable, and lowercase agent names (`claude`/`gemini`/`codex`/`local`/`copilot`).
 
 ## Your Role
 
@@ -24,5 +24,13 @@ Key points: ESM-only, `picocolors` for terminal colors, agent names always lower
 - Prototyping and quick iteration
 - Following specifications precisely
 
-When implementing, claim the task first, then report what you changed
-and any tests you added via `hydra_tasks_update`.
+## Current Implementation Conventions
+
+- Prefer `.ts` for new or updated runtime code unless you are working in a file that intentionally remains legacy `.mjs`.
+- Keep ESM imports/exports only. Do not introduce CommonJS.
+- Use explicit `.ts` import extensions when importing TypeScript source files.
+- Use `request()` from `hydra-utils.ts` for daemon calls and `cross-spawn` for external CLIs.
+- Keep model selection config-driven with `getActiveModel()` or `getRoleConfig()` instead of hardcoding model IDs.
+- Use Node's native test runner. The standard commands are `npm test` and `node --test test/<file>.test.ts`.
+
+When implementing, claim the task first, then report what you changed and any tests you added via `hydra_tasks_update`.

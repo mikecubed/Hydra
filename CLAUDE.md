@@ -25,7 +25,7 @@ Branch naming conventions: `feat/...`, `fix/...`, `docs/...`, `chore/...`, or `c
 
 ```bash
 npm test                    # Run all tests (Node.js native test runner)
-node --test test/hydra-ui.test.mjs  # Run a single test file
+node --test test/hydra-ui.test.ts   # Run a single test file
 npm start                   # Start the daemon (port 4173)
 npm run go                  # Launch operator console (interactive REPL)
 npm run council -- prompt="..." # Run council deliberation
@@ -54,7 +54,7 @@ npm run setup:hooks         # Install/verify git pre-commit and pre-push hooks
 | ------------------ | ------------------- | -------------------------------------------------------------------------------------------- |
 | **ESLint v10**     | `eslint.config.mjs` | `no-var`, `prefer-const`, `eqeqeq`, `no-eval`, `node:` protocol, unicorn best-practice rules |
 | **Prettier**       | `.prettierrc.json`  | `singleQuote`, `trailingComma: all`, `printWidth: 100`, LF line endings                      |
-| **TypeScript tsc** | `jsconfig.json`     | `--checkJs` strict type checking across `lib/`, `bin/`, `scripts/`                           |
+| **TypeScript tsc** | `tsconfig.json`     | `--noEmit` type checking across `lib/`, `bin/`, `scripts/`, and `test/`                      |
 
 **Git hooks (Husky v9 + lint-staged)** — install automatically when you run `npm install` or `npm ci` (via the `prepare` script). Use `npm run setup:hooks` only to manually reinstall or verify.
 
@@ -69,21 +69,34 @@ Hydra orchestrates three AI coding agents (Claude Code CLI, Gemini CLI, Codex CL
 
 ### Core Flow
 
-```
-Operator Console (REPL)
-    ├── Concierge (multi-provider streaming: OpenAI → Anthropic → Google fallback)
-    └── Daemon (HTTP API, port 4173, event-sourced state)
-         ├── Gemini  (analyst role, gemini-3.1-pro-preview)
-         ├── Codex   (implementer role, gpt-5.4)
-         ├── Claude  (architect role, claude-opus-4-6)
-         └── Copilot (advisor role, claude-sonnet-4.6 — optional, requires active subscription)
+```mermaid
+flowchart TD
+    Operator[Operator Console<br/>REPL + concierge]
+    Concierge[Concierge<br/>OpenAI -> Anthropic -> Google fallback]
+    Daemon[Daemon<br/>HTTP API, port 4173]
+    Gemini[Gemini<br/>analyst]
+    Codex[Codex<br/>implementer]
+    Claude[Claude<br/>architect]
+    Copilot[Copilot<br/>advisor]
+    Local[Local<br/>API-backed physical agent]
+
+    Operator --> Concierge
+    Operator --> Daemon
+    Daemon --> Gemini
+    Daemon --> Codex
+    Daemon --> Claude
+    Daemon -. optional .-> Copilot
+    Daemon -. optional .-> Local
 ```
 
 > For full module reference, dispatch modes, route strategies, and architectural patterns, see [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md).
 
 ## Code Conventions
 
-- **ESM only** (`"type": "module"` in package.json). All files use `import`/`export`.
+- **ESM + TypeScript** (`"type": "module"` in package.json). Runtime code is primarily `.ts` with `import`/`export`; avoid CommonJS and prefer `.ts` for new code.
+- **No build step for normal development** — Node.js 22.18+ runs the TypeScript sources directly. `tsc` is used for verification, not for emitted runtime artifacts.
+- **Mixed `.ts` and legacy `.mjs` repo** — prefer existing patterns in the file you are editing, but default to `.ts` for new runtime modules and tests.
+- **Import extensions must match source files** — `.ts` files import other `.ts` files with explicit `.ts` extensions.
 - **Four dependencies**: `picocolors` (terminal colors), `cross-spawn` (cross-platform spawning), `@modelcontextprotocol/sdk` (MCP server), `zod` (schema validation for MCP tools). Optional peer: `@opentelemetry/api` (tracing, no-op when absent).
 - **Agent names** are always lowercase strings: `claude`, `gemini`, `codex`, `local`, `copilot`, plus any user-defined names from `agents.customAgents[]`. `local` is the 4th built-in physical agent (API-backed via `hydra-local.ts`, no CLI). `copilot` is the 5th built-in physical agent (GitHub Copilot CLI, requires active subscription and browser-based device-flow auth). Custom agents are registered via `:agents add` (wizard) or directly in `hydra.config.json`; type `cli` spawns a local CLI tool, type `api` calls an OpenAI-compatible endpoint. CLI agents missing from PATH fall back to cloud transparently via `executeAgentWithRecovery`. Config: `agents.customAgents[]` (see `hydra-agents-wizard.ts`), `local.enabled`, `.baseUrl`, `.model`, `.budgetGate`. `routing.mode` (`economy`|`balanced`|`performance`) shifts affinity toward `local` in economy mode.
 - **HTTP helpers**: Use `request()` from `hydra-utils.ts` for daemon calls. Status bar uses `fetch()` directly (lightweight polling).
@@ -106,7 +119,7 @@ import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 ```
 
-Integration tests (`*.integration.test.mjs`) spin up the daemon on an ephemeral port and test HTTP endpoints.
+Integration tests (`*.integration.test.ts`, plus any remaining legacy `.mjs` tests) spin up the daemon on an ephemeral port and test HTTP endpoints.
 
 ## MCP Tool Escalation
 
