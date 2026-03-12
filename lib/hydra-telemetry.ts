@@ -202,7 +202,8 @@ export async function endAgentSpan(
   span: OTelSpan & { _noop?: boolean },
   result: AgentResult,
 ): Promise<void> {
-  if (span._noop === true) return;
+  // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition -- span may be null at runtime
+  if (span == null || span._noop === true) return;
 
   const api = await loadOTel();
   if (!api) return;
@@ -280,7 +281,8 @@ export async function endProviderSpan(
   usage?: TokenUsage | null,
   latencyMs?: number | null,
 ): Promise<void> {
-  if (span._noop === true) return;
+  // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition -- span may be null at runtime
+  if (span == null || span._noop === true) return;
 
   const api = await loadOTel();
   if (!api) return;
@@ -338,7 +340,8 @@ export async function endPipelineSpan(
   span: OTelSpan & { _noop?: boolean },
   opts: PipelineSpanOpts = {},
 ): Promise<void> {
-  if (span._noop === true) return;
+  // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition -- span may be null at runtime
+  if (span == null || span._noop === true) return;
 
   const api = await loadOTel();
   if (!api) return;

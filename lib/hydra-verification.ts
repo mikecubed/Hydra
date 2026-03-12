@@ -1,4 +1,3 @@
-#!/usr/bin/env node
 /**
  * Hydra verification command resolution.
  *
@@ -121,7 +120,8 @@ export function chooseAutoVerificationCommand(
 }
 
 function parseTimeoutMs(value: unknown): number {
-  const parsed = Number.parseInt(typeof value === 'string' ? value : '', 10);
+  const parsed =
+    typeof value === 'number' ? value : Number.parseInt(typeof value === 'string' ? value : '', 10);
   if (!Number.isFinite(parsed) || parsed <= 0) {
     return DEFAULT_TIMEOUT_MS;
   }

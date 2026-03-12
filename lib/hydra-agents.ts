@@ -1472,13 +1472,15 @@ export function getModelSummary(): Record<string, unknown> {
   ];
   for (const agent of orderedAgents) {
     const activeModel = getActiveModel(agent);
-    const agentModels = cfg.models[agent] as ModelConfig & Record<string, unknown>;
-    const activeKey = agentModels.active;
+    const agentModels = (cfg.models[agent] ?? {}) as ModelConfig & Record<string, unknown>;
+    // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition -- active may be absent at runtime
+    const activeKey = agentModels.active ?? 'default';
     const isOverride = activeKey !== 'default';
     const tierPreset = cfg.modeTiers?.[mode]?.[agent] ?? 'default';
 
     summary[agent] = {
-      active: activeModel ?? agentModels.default,
+      // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition -- default may be absent for agents without full model config
+      active: activeModel ?? agentModels.default ?? 'unknown',
       isDefault: !isOverride && activeModel === agentModels.default,
       isOverride,
       tierSource: isOverride ? 'override' : `${mode} → ${tierPreset}`,
