@@ -85,7 +85,7 @@ interface CallResult {
     cacheCreationTokens?: number;
     cacheReadTokens?: number;
     totalTokens?: number;
-  };
+  } | null;
   costUsd?: number | null;
   outcome?: string;
 }

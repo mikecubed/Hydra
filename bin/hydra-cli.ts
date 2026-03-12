@@ -196,7 +196,7 @@ function toOperatorArgs(rawTokens: string[]) {
 
     const parsed = parseOptionToken(token);
     const parsedKey = parsed?.key;
-    if (parsedKey == null || parsedKey === '') {
+    if (parsed == null || parsedKey == null || parsedKey === '') {
       out.push(token);
       continue;
     }
@@ -249,7 +249,7 @@ function toPowerShellArgs(rawTokens: string[]) {
 
     const parsed = parseOptionToken(token);
     const parsedKey2 = parsed?.key;
-    if (parsedKey2 == null || parsedKey2 === '') {
+    if (parsed == null || parsedKey2 == null || parsedKey2 === '') {
       out.push(token);
       continue;
     }

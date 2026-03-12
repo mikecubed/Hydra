@@ -166,7 +166,13 @@ async function main() {
           /* ignore */
         }
         console.log('');
-        console.log(renderDashboard(data['summary'], agentNextMap, extras));
+        console.log(
+          renderDashboard(
+            data['summary'] as Parameters<typeof renderDashboard>[0],
+            agentNextMap as Parameters<typeof renderDashboard>[1],
+            extras,
+          ),
+        );
         return;
       }
       case 'state':
@@ -346,14 +352,20 @@ async function main() {
           }
           console.log(
             renderStatsDashboard(
-              (data as Record<string, unknown>)['metrics'],
-              (data as Record<string, unknown>)['usage'],
+              (data as Record<string, unknown>)['metrics'] as Parameters<
+                typeof renderStatsDashboard
+              >[0],
+              (data as Record<string, unknown>)['usage'] as Parameters<
+                typeof renderStatsDashboard
+              >[1],
             ),
           );
         } catch {
           // Daemon not available — fall back to standalone usage
           const usage = checkUsage();
-          console.log(renderStatsDashboard(null, usage));
+          console.log(
+            renderStatsDashboard(null, usage as Parameters<typeof renderStatsDashboard>[1]),
+          );
         }
         return;
       }

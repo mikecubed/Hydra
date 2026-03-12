@@ -558,7 +558,9 @@ async function main() {
       agentResult = await executeAgentWithRecovery(agent, prompt, {
         cwd: projectRoot,
         timeoutMs:
-          (cfg.nightly?.perTaskTimeoutMs ?? 0) > 0 ? cfg.nightly.perTaskTimeoutMs : 15 * 60 * 1000,
+          (cfg.nightly?.perTaskTimeoutMs ?? 0) > 0
+            ? (cfg.nightly?.perTaskTimeoutMs as number)
+            : 15 * 60 * 1000,
         modelOverride,
         progressIntervalMs: 15_000,
         onProgress: (elapsed, outputKB) => {
@@ -585,7 +587,7 @@ async function main() {
     else
       recordCallError(
         handle,
-        new Error(agentResult.error.length > 0 ? agentResult.error : 'unknown'),
+        new Error((agentResult.error ?? '').length > 0 ? agentResult.error! : 'unknown'),
       );
 
     const taskDurationMs = agentResult.durationMs;

@@ -344,7 +344,7 @@ function generateReportMd(
     lines.push('');
     lines.push('| Task | Tokens | Duration |');
     lines.push('|------|--------|----------|');
-    for (const d of budgetSummary.taskDeltas) {
+    for (const d of budgetSummary.taskDeltas!) {
       lines.push(`| ${d.label} | ${d.tokens.toLocaleString()} | ${formatDuration(d.durationMs)} |`);
     }
   }
@@ -719,9 +719,9 @@ async function phaseExecute(
 
   // Initialize budget tracker
   const budget = new BudgetTracker({
-    softLimit: budgetCfg.softLimit,
-    hardLimit: budgetCfg.hardLimit,
-    unitEstimate: budgetCfg.perTaskEstimate,
+    softLimit: budgetCfg.softLimit ?? 0,
+    hardLimit: budgetCfg.hardLimit ?? 0,
+    unitEstimate: budgetCfg.perTaskEstimate ?? 0,
     unitLabel: 'task',
     thresholds: buildThresholds(budgetCfg),
   });
@@ -846,7 +846,7 @@ async function phaseExecute(
     });
 
     // Dispatch agent with progress feedback
-    const handle = recordCallStart(agent, modelOverride ?? getActiveModel(agent));
+    const handle = recordCallStart(agent, modelOverride ?? getActiveModel(agent) ?? undefined);
     log.dim(`Dispatching ${agent}${modelOverride == null ? '' : ` (${modelOverride})`}...`);
 
     // eslint-disable-next-line no-await-in-loop -- task loop; intentionally sequential

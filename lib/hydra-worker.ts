@@ -422,7 +422,7 @@ export class AgentWorker extends EventEmitter {
           }
         }
 
-        const durationMs = Date.now() - this._currentTask.startedAt;
+        const durationMs = this._currentTask == null ? 0 : Date.now() - this._currentTask.startedAt;
         const outputSummary = short(result.output, 200);
 
         // Report result to daemon (include structured error info for telemetry)

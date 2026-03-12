@@ -79,9 +79,9 @@ interface AgentUsageRow {
   level?: string;
   percent?: number;
   used?: number;
-  budget?: number;
-  remaining?: number;
-  resetInMs?: number;
+  budget?: number | null;
+  remaining?: number | null;
+  resetInMs?: number | null;
   todayTokens?: number;
   source?: string;
 }

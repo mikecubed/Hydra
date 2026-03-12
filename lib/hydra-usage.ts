@@ -845,8 +845,8 @@ export function executeContingency(
 ): { ok: boolean; message: string; requiresDaemon?: boolean; instruction?: ContingencyOption } {
   switch (option.action) {
     case 'setActiveModel': {
-      const resolved = setActiveModel(option.args.agent, option.args.model);
-      return { ok: true, message: `Switched ${option.args.agent} to ${String(resolved)}` };
+      const resolved = setActiveModel(option.args['agent'], option.args['model']);
+      return { ok: true, message: `Switched ${option.args['agent']} to ${String(resolved)}` };
     }
     case 'handoff':
     case 'save_progress':

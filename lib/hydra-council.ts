@@ -115,8 +115,7 @@ function saveCheckpoint(
     transcript,
     specContent: specContent ?? null,
     startedAt:
-      ((transcript[0] as Record<string, unknown>)[['startedAt'] as string] as string | undefined) ??
-      nowIso(),
+      ((transcript[0] as Record<string, unknown>)['startedAt'] as string | undefined) ?? nowIso(),
     updatedAt: nowIso(),
   };
   fs.writeFileSync(checkpointPath(promptHash), `${JSON.stringify(data, null, 2)}\n`, 'utf8');
@@ -828,8 +827,8 @@ export function synthesizeCouncilTranscript(
   );
   const recommendation = deriveCouncilRecommendation({
     finalDecision,
-    assumptions: dedupedAssumptions,
-    questions: dedupedQuestions,
+    assumptions: dedupedAssumptions as Array<{ status: string }>,
+    questions: dedupedQuestions as Array<{ to: string }>,
     risks: dedupedRisks,
     disagreements: dedupedDisagreements,
     councilVotes,
@@ -1724,7 +1723,7 @@ async function main() {
 
   try {
     const summaryResponse = await request('GET', url, '/summary');
-    report.daemonSummary = summaryResponse['summary'];
+    report.daemonSummary = (summaryResponse as Record<string, unknown>)['summary'];
   } catch {
     report.daemonSummary = null;
   }
@@ -1768,7 +1767,7 @@ async function main() {
       Array.isArray(checkpoint.transcript) &&
       checkpoint.transcript.length > 0
     ) {
-      report.transcript = checkpoint.transcript;
+      report.transcript = checkpoint.transcript as typeof report.transcript;
       if (
         checkpoint.specContent != null &&
         checkpoint.specContent !== '' &&
@@ -1978,7 +1977,7 @@ async function main() {
               exitCode: result.exitCode ?? null,
               signal: result.signal ?? null,
               stderr: result.stderr,
-              stdout: (result.output ?? result.stdout) as string | null,
+              stdout: result.output ?? result.stdout,
               context: `Council phase ${step.phase} failed in round ${String(round)}`,
             });
           } catch {
@@ -2006,7 +2005,7 @@ async function main() {
           agent: step.agent,
           phase: step.phase,
           ok: result.ok,
-          rawText: result.stdout,
+          rawText: result.stdout ?? '',
           parsed,
           error: result.error === '' ? result.stderr : result.error,
           recovered: result.recovered,
@@ -2031,7 +2030,7 @@ async function main() {
   if (publish) {
     try {
       const health = await request('GET', url, '/health');
-      if (health['ok'] !== true) {
+      if ((health as Record<string, unknown>)['ok'] !== true) {
         throw new Error('Hydra daemon is not healthy.');
       }
 
@@ -2047,7 +2046,7 @@ async function main() {
               ? `Council rationale: ${task.rationale}`
               : '',
         });
-        createdTasks.push(created['task']);
+        createdTasks.push((created as Record<string, unknown>)['task']);
       }
 
       const councilRationale = report.finalDecision?.why ?? report.consensus;
@@ -2081,12 +2080,12 @@ async function main() {
           nextStep: 'Acknowledge this council handoff and start highest-priority task.',
           tasks: agentTaskIds,
         });
-        handoffs.push(handoff['handoff']);
+        handoffs.push((handoff as Record<string, unknown>)['handoff']);
       }
 
       report.published = {
         ok: true,
-        decision: decisionResult['decision'],
+        decision: (decisionResult as Record<string, unknown>)['decision'],
         tasks: createdTasks,
         handoffs,
       };

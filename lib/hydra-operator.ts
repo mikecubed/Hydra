@@ -11,14 +11,12 @@
  *   node hydra-operator.mjs mode=dispatch prompt="..."  # dispatch pipeline
  */
 /* eslint-disable @typescript-eslint/no-explicit-any, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-argument, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-return -- T7A: operator uses polymorphic any for dynamic dispatch */
-/* eslint-disable @typescript-eslint/strict-boolean-expressions, @typescript-eslint/no-non-null-assertion, @typescript-eslint/no-unnecessary-condition -- T7A: standard JS truthiness; type narrowing tracked as follow-up */
-/* eslint-disable @typescript-eslint/prefer-nullish-coalescing, no-nested-ternary, @typescript-eslint/no-unnecessary-type-assertion, @typescript-eslint/no-unnecessary-type-conversion -- T7A: operator uses || for truthiness-based defaults */
+/* eslint-disable @typescript-eslint/strict-boolean-expressions, @typescript-eslint/no-non-null-assertion -- T7A: standard JS truthiness; type narrowing tracked as follow-up */
+/* eslint-disable @typescript-eslint/no-unnecessary-type-assertion, @typescript-eslint/no-unnecessary-type-conversion -- T7A: operator uses || for truthiness-based defaults */
 /* eslint-disable n/no-process-exit, @typescript-eslint/no-misused-promises, require-atomic-updates, @typescript-eslint/no-redundant-type-constituents -- T7A: CLI entry point */
-/* eslint-disable no-await-in-loop, unicorn/prefer-ternary, no-promise-executor-return, @typescript-eslint/no-base-to-string -- T7A: sequential processing */
-/* eslint-disable @typescript-eslint/restrict-template-expressions, @typescript-eslint/restrict-plus-operands, @typescript-eslint/no-shadow -- T7A: template expressions with dynamic types */
-/* eslint-disable @typescript-eslint/no-confusing-void-expression, @typescript-eslint/consistent-type-imports, @typescript-eslint/no-unnecessary-template-expression -- T7A: void expressions in dispatch chains */
-/* eslint-disable prefer-const, @typescript-eslint/prefer-optional-chain, no-param-reassign, unicorn/prefer-number-properties -- T7A: minor patterns */
-/* eslint-disable @typescript-eslint/no-floating-promises, unicorn/no-new-array, no-control-regex, @typescript-eslint/use-unknown-in-catch-callback-variable -- T7A: intentional patterns */
+/* eslint-disable no-await-in-loop, unicorn/prefer-ternary, @typescript-eslint/no-base-to-string -- T7A: sequential processing */
+
+/* eslint-disable unicorn/no-new-array, no-control-regex -- T7A: intentional patterns */
 
 import './hydra-env.ts';
 import readline from 'node:readline';
@@ -1513,7 +1511,7 @@ async function runAutoPromptLegacy({
   councilRounds: number;
   preview: boolean;
   onProgress: ((data: any) => void) | null;
-  // eslint-disable-next-line @typescript-eslint/no-redundant-type-constituents
+
   classification: any | null;
 }) {
   // Intent gate: skip if classification already provided (caller already gated the prompt).
@@ -2195,7 +2193,6 @@ function levenshtein(a: string, b: string) {
   const m = a.length,
     n = b.length;
   const dp = Array.from({ length: m + 1 }, (_, i) => {
-    // eslint-disable-next-line unicorn/no-new-array
     const row = new Array(n + 1);
     row[0] = i;
     return row;
@@ -2423,7 +2420,7 @@ async function interactiveLoop({
   }
 
   // Wrap ANSI escapes for readline so cursor position is calculated correctly
-  // eslint-disable-next-line no-control-regex -- intentional ANSI escape regex
+
   const rlSafe = (s: string) => s.replace(/(\x1b\[[0-9;]*m)/g, '\x01$1\x02');
 
   function buildConciergePrompt() {
@@ -2701,7 +2698,6 @@ async function interactiveLoop({
 
   rl.prompt();
 
-  // eslint-disable-next-line @typescript-eslint/no-misused-promises
   rl.on('line', async (lineRaw) => {
     const line = (lineRaw || '').trim();
 
@@ -3161,7 +3157,9 @@ async function interactiveLoop({
         } catch {
           // Fallback to just usage if daemon is down
           const usage = checkUsage();
-          console.log(renderStatsDashboard(null, usage));
+          console.log(
+            renderStatsDashboard(null, usage as Parameters<typeof renderStatsDashboard>[1]),
+          );
         }
         rl.prompt();
         return;
@@ -3772,7 +3770,7 @@ async function interactiveLoop({
             stdio: 'inherit',
             shell: process.platform === 'win32',
           });
-          // eslint-disable-next-line @typescript-eslint/no-misused-promises
+
           child.on('close', async () => {
             // After branch review, surface any conflict worktrees from daemon tasks
             try {
@@ -5736,7 +5734,7 @@ async function interactiveLoop({
         sidecaring = true;
         try {
           const sidecarResult = await conciergeTurn(line, { context: sidecarContext });
-          // eslint-disable-next-line @typescript-eslint/no-base-to-string
+
           const sidecarText = String(sidecarResult.response ?? '');
           if (sidecarText) {
             process.stdout.write(`\r\x1b[2K  ${pc.blue('\u2B22')} ${DIM(sidecarModel)}\n  `);
@@ -5748,7 +5746,6 @@ async function interactiveLoop({
             `\r\x1b[2K  ${DIM(`${pc.blue('\u2B22')} concierge error: ${String((sidecarErr as any).message.slice(0, 60))}`)}\n`,
           );
         } finally {
-          // eslint-disable-next-line require-atomic-updates -- intentional async flag
           sidecaring = false;
           rl.prompt(true);
         }
@@ -5941,7 +5938,9 @@ async function interactiveLoop({
 
           // Cost display
           const costStr =
-            result.estimatedCost > 0 ? ` ${DIM(`[~$${result.estimatedCost.toFixed(4)}]`)}` : '';
+            result.estimatedCost != null && result.estimatedCost > 0
+              ? ` ${DIM(`[~$${result.estimatedCost.toFixed(4)}]`)}`
+              : '';
           process.stdout.write(`\n${costStr}\n`);
 
           // Update prompt in case model changed (fallback)
@@ -5962,7 +5961,6 @@ async function interactiveLoop({
           spinner.stop();
           console.log(`  ${ERROR('Concierge error:')} ${(err as Error).message}`);
           if ((err as any).status === 401 || (err as any).status === 403) {
-            // eslint-disable-next-line require-atomic-updates -- intentional async flag
             conciergeActive = false;
             setActiveMode(mode);
             rl.setPrompt(normalPrompt);
@@ -6454,7 +6452,7 @@ async function interactiveLoop({
     stopEventStream();
     destroyStatusBar();
     console.log('Hydra operator console closed.');
-    // eslint-disable-next-line n/no-process-exit -- CLI entry point
+
     process.exit(0);
   });
 }
@@ -6502,7 +6500,7 @@ async function main() {
   if (!daemonOk) {
     console.error(`Hydra daemon unreachable at ${baseUrl}.`);
     console.error('Start manually: npm run hydra:start');
-    // eslint-disable-next-line n/no-process-exit -- CLI entry point
+
     process.exit(1);
   }
 
@@ -6604,7 +6602,6 @@ async function main() {
       stdio: 'inherit',
     });
     if (result.status !== 0) {
-      // eslint-disable-next-line n/no-process-exit -- CLI entry point
       process.exit(result.status ?? 1);
     }
   } else {
@@ -6628,6 +6625,6 @@ async function main() {
 
 main().catch((err: unknown) => {
   console.error(`Hydra operator failed: ${(err as Error).message}`);
-  // eslint-disable-next-line n/no-process-exit -- CLI entry point
+
   process.exit(1);
 });
