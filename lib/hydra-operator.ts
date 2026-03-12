@@ -2677,12 +2677,11 @@ async function interactiveLoop({
   startEventStream(baseUrl, agents);
 
   // Subscribe to significant activity events and show them inline
-  onActivityEvent((raw) => {
-    const { event, agent, detail } = raw as { event: string; agent?: string; detail?: string };
+  onActivityEvent(({ event, agent, detail }) => {
     const significant = ['handoff_ack', 'task_done', 'verify'];
     if (!significant.includes(event)) return;
     const prefix = event === 'verify' ? WARNING('\u2691') : SUCCESS('\u2713');
-    const msg = `  ${prefix} ${DIM(event.replace(/_/g, ' '))}${agent ? ` ${colorAgent(agent)}` : ''} ${DIM(detail ?? '')}`;
+    const msg = `  ${prefix} ${DIM(event.replace(/_/g, ' '))}${agent ? ` ${colorAgent(agent)}` : ''} ${DIM(detail)}`;
     // Clear current prompt line, print event, re-show prompt
     process.stdout.write(`\r\x1b[2K${msg}\n`);
     // Don't flash normal prompt while a choice selection is active

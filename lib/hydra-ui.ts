@@ -11,6 +11,128 @@ import pc from 'picocolors';
 import { versionString } from './hydra-version.ts';
 import { getShortName as _getShortName } from './hydra-model-profiles.ts';
 
+// ─── Shared Interfaces ───────────────────────────────────────────────────────
+
+export interface TaskLike {
+  id?: string | null;
+  status?: string | null;
+  owner?: string | null;
+  title?: string | null;
+}
+
+export interface HandoffLike {
+  id?: string | null;
+  from?: string | null;
+  to?: string | null;
+  acknowledgedAt?: string | null;
+  summary?: string | null;
+}
+
+interface AgentNextAction {
+  action?: string;
+  task?: { id?: string };
+  handoff?: { id?: string };
+}
+
+interface DashboardSession {
+  focus?: string;
+  branch?: string;
+  status?: string;
+}
+
+interface DashboardCounts {
+  tasksOpen?: number;
+  blockersOpen?: number;
+  decisions?: number;
+  handoffs?: number;
+}
+
+interface DashboardBlocker {
+  id: string;
+  owner: string;
+  title?: string;
+}
+
+interface DashboardSummary {
+  activeSession?: DashboardSession;
+  counts?: DashboardCounts;
+  openTasks?: TaskLike[];
+  openBlockers?: DashboardBlocker[];
+  latestHandoff?: HandoffLike;
+  updatedAt?: string;
+}
+
+interface DashboardUsage {
+  level?: string;
+  percent?: number;
+}
+
+interface DashboardExtras {
+  usage?: DashboardUsage;
+  models?: Record<string, string>;
+  metrics?: Record<string, { successRate?: number }>;
+}
+
+interface AgentUsageRow {
+  level?: string;
+  percent?: number;
+  used?: number;
+  budget?: number;
+  remaining?: number;
+  resetInMs?: number;
+  todayTokens?: number;
+  source?: string;
+}
+
+interface AgentMetrics {
+  callsToday?: number;
+  sessionTokens?: { totalTokens?: number; costUsd?: number };
+  estimatedTokensToday?: number;
+  avgDurationMs?: number;
+  successRate?: number;
+}
+
+interface SessionUsage {
+  callCount?: number;
+  inputTokens?: number;
+  outputTokens?: number;
+  totalTokens?: number;
+  cacheCreationTokens?: number;
+  cacheReadTokens?: number;
+  costUsd?: number;
+}
+
+interface MetricsSummary {
+  agents?: Record<string, AgentMetrics>;
+  sessionUsage?: SessionUsage;
+  totalCalls?: number;
+  totalTokens?: number;
+  totalDurationMs?: number;
+  uptimeSec?: number;
+}
+
+interface UsageSummary {
+  percent?: number;
+  level?: string;
+  todayTokens?: number;
+  message?: string;
+  agents?: Partial<Record<string, AgentUsageRow>>;
+}
+
+export interface SpinnerHandle {
+  start(): SpinnerHandle;
+  update(msg: string): SpinnerHandle;
+  succeed(msg: string): SpinnerHandle;
+  fail(msg: string): SpinnerHandle;
+  stop(): SpinnerHandle;
+}
+
+export interface ProgressBarHandle {
+  start(): ProgressBarHandle;
+  update(percent: number): ProgressBarHandle;
+  stop(): ProgressBarHandle;
+}
+
 // ─── Agent Colors ───────────────────────────────────────────────────────────
 
 // Truecolor (24-bit) is supported by most modern terminals but not cmd.exe or
@@ -132,7 +254,8 @@ export const HYDRA_SPLASH_50 = [
 
 const ESC = '\x1b[';
 const ansiReset = `${ESC}0m`;
-const ansiFg = (r: number, g: number, b: number) => `${ESC}38;2;${r};${g};${b}m`;
+const ansiFg = (r: number, g: number, b: number) =>
+  `${ESC}38;2;${String(r)};${String(g)};${String(b)}m`;
 
 const clamp01 = (t: number) => Math.max(0, Math.min(1, t));
 const lerp = (a: number, b: number, t: number) => Math.round(a + (b - a) * t);
@@ -143,7 +266,7 @@ const lerpRgb = (c1: number[], c2: number[], t: number) => [
 ];
 
 function hexToRgb(hex: string) {
-  const h = String(hex).replace('#', '').trim();
+  const h = hex.replace('#', '').trim();
   const full =
     h.length === 3
       ? h
@@ -235,8 +358,8 @@ function mulRgb(rgb: number[], k: number) {
 }
 
 function colorHydraSplashTruecolor() {
-  const isTTY = process.stdout?.isTTY;
-  const canColor = Boolean(pc.isColorSupported);
+  const isTTY = process.stdout.isTTY;
+  const canColor = pc.isColorSupported;
   if (!isTTY || !canColor) return HYDRA_SPLASH_50;
 
   const lines = HYDRA_SPLASH_50.split('\n');
@@ -248,6 +371,7 @@ function colorHydraSplashTruecolor() {
       let out = '';
       const ny = clamp01(y / (totalH - 1));
 
+      // eslint-disable-next-line @typescript-eslint/no-misused-spread -- intentional character-level split for terminal width calculation; emoji handling is acceptable for this display utility
       for (const [x, ch] of [...line].entries()) {
         if (ch === ' ') {
           out += ' ';
@@ -296,12 +420,13 @@ function colorHydraSplashTruecolor() {
 // ─── Gradient Title Letters ──────────────────────────────────────────────────
 
 function colorGradientLetters(text: string) {
-  const isTTY = process.stdout?.isTTY;
-  const canColor = Boolean(pc.isColorSupported);
+  const isTTY = process.stdout.isTTY;
+  const canColor = pc.isColorSupported;
   if (!isTTY || !canColor) return pc.bold(pc.magentaBright(text));
 
   // Collect non-space character indices so we can map them across 0→1
   const charPositions = [];
+  // eslint-disable-next-line @typescript-eslint/no-misused-spread -- intentional character-level split for terminal width calculation; emoji handling is acceptable for this display utility
   for (const [i, element] of [...text].entries()) {
     if (element !== ' ') charPositions.push(i);
   }
@@ -309,6 +434,7 @@ function colorGradientLetters(text: string) {
   const ny = 0.5; // mid-height: heads still spread for distinct color zones
 
   let out = '';
+  // eslint-disable-next-line @typescript-eslint/no-misused-spread -- intentional character-level split for terminal width calculation; emoji handling is acceptable for this display utility
   for (const [i, ch] of [...text].entries()) {
     if (ch === ' ') {
       out += ' ';
@@ -341,7 +467,7 @@ function colorGradientLetters(text: string) {
 
 // ─── Splash + Compact ───────────────────────────────────────────────────────
 
-export function hydraSplash() {
+export function hydraSplash(): string {
   const ver = pc.dim(`v${versionString()}`);
   return [
     '',
@@ -353,7 +479,7 @@ export function hydraSplash() {
   ].join('\n');
 }
 
-export function hydraLogoCompact() {
+export function hydraLogoCompact(): string {
   return `${pc.bold(ACCENT('HYDRA'))} ${DIM('|')} ${DIM('Hybrid Yielding Deliberation & Routing Automaton')}`;
 }
 
@@ -373,90 +499,93 @@ import('./hydra-agents.ts')
  * Get the display color function for an agent (physical or virtual).
  * Virtual agents inherit their base physical agent's color.
  */
-export function getAgentColor(name: string) {
-  const lower = String(name || '').toLowerCase();
-  if ((AGENT_COLORS as Record<string, (s: string) => string>)[lower])
-    return (AGENT_COLORS as Record<string, (s: string) => string>)[lower];
+export function getAgentColor(name: string): (s: string) => string {
+  const lower = (name || '').toLowerCase();
+  const directColor = (AGENT_COLORS as Partial<Record<string, (s: string) => string>>)[lower];
+  if (directColor) return directColor;
   // Try resolving virtual → physical
   if (_resolverSync) {
     const base = _resolverSync(lower);
-    if (base && (AGENT_COLORS as Record<string, (s: string) => string>)[base.name])
-      return (AGENT_COLORS as Record<string, (s: string) => string>)[base.name];
+    if (base) {
+      const baseColor = (AGENT_COLORS as Partial<Record<string, (s: string) => string>>)[base.name];
+      if (baseColor) return baseColor;
+    }
   }
-  return AGENT_COLORS.system || pc.white;
+  return AGENT_COLORS.system;
 }
 
 /**
  * Get the display icon for an agent (physical or virtual).
  * Virtual agents get a distinct sub-icon (◇) to differentiate from physical agents.
  */
-export function getAgentIcon(name: string) {
-  const lower = String(name || '').toLowerCase();
-  if ((AGENT_ICONS as Record<string, string>)[lower])
-    return (AGENT_ICONS as Record<string, string>)[lower];
+export function getAgentIcon(name: string): string {
+  const lower = (name || '').toLowerCase();
+  const icon = (AGENT_ICONS as Partial<Record<string, string>>)[lower];
+  if (icon) return icon;
   // Virtual agents get a diamond outline icon
   return '\u25C7'; // ◇
 }
 
-export function colorAgent(name: string) {
-  const lower = String(name || '').toLowerCase();
+export function colorAgent(name: string): string {
+  const lower = (name || '').toLowerCase();
   const colorFn = getAgentColor(lower);
   return colorFn(name);
 }
 
-export function agentBadge(name: string) {
-  const lower = String(name || '').toLowerCase();
+export function agentBadge(name: string): string {
+  const lower = (name || '').toLowerCase();
   const icon = getAgentIcon(lower);
   const colorFn = getAgentColor(lower);
-  return colorFn(`${icon} ${String(name).toUpperCase()}`);
+  return colorFn(`${icon} ${name.toUpperCase()}`);
 }
 
 // ─── Status Formatting ─────────────────────────────────────────────────────
 
-export function colorStatus(status: string) {
-  const lower = String(status || '').toLowerCase();
-  const colorFn = (STATUS_COLORS as Record<string, (s: string) => string>)[lower] || pc.white;
-  const icon = (STATUS_ICONS as Record<string, string>)[lower] || '\u2022';
+export function colorStatus(status: string): string {
+  const lower = (status || '').toLowerCase();
+  const colorFn =
+    (STATUS_COLORS as Partial<Record<string, (s: string) => string>>)[lower] ?? pc.white;
+  const icon = (STATUS_ICONS as Partial<Record<string, string>>)[lower] ?? '\u2022';
   return colorFn(`${icon} ${status}`);
 }
 
 // ─── Task Formatting ────────────────────────────────────────────────────────
 
-export function formatTaskLine(task: any) {
+export function formatTaskLine(task: TaskLike | null | undefined): string {
   if (!task) return '';
-  const id = pc.bold(pc.white(task.id || '???'));
-  const status = colorStatus(task.status || 'todo');
-  const owner = colorAgent(task.owner || 'unassigned');
-  const title = DIM(String(task.title || '').slice(0, 60));
+  const id = pc.bold(pc.white(task.id ?? '???'));
+  const status = colorStatus(task.status ?? 'todo');
+  const owner = colorAgent(task.owner ?? 'unassigned');
+  const title = DIM((task.title ?? '').slice(0, 60));
   return `  ${id} ${status}  ${owner}  ${title}`;
 }
 
-export function formatHandoffLine(handoff: any) {
+export function formatHandoffLine(handoff: HandoffLike | null | undefined): string {
   if (!handoff) return '';
-  const id = pc.bold(pc.white(handoff.id || '???'));
-  const from = colorAgent(handoff.from || '?');
-  const to = colorAgent(handoff.to || '?');
+  const id = pc.bold(pc.white(handoff.id ?? '???'));
+  const from = colorAgent(handoff.from ?? '?');
+  const to = colorAgent(handoff.to ?? '?');
   const arrow = DIM('\u2192'); // →
   const ack = handoff.acknowledgedAt ? SUCCESS('\u2713 ack') : WARNING('pending');
-  const summary = DIM(String(handoff.summary || '').slice(0, 50));
+  const summary = DIM((handoff.summary ?? '').slice(0, 50));
   return `  ${id} ${from} ${arrow} ${to}  ${ack}  ${summary}`;
 }
 
 // ─── Time Formatting ────────────────────────────────────────────────────────
 
-export function relativeTime(iso: string) {
+export function relativeTime(iso: string): string {
   if (!iso) return DIM('never');
   const diff = Date.now() - new Date(iso).getTime();
   if (diff < 0) return DIM('future');
   const secs = Math.floor(diff / 1000);
   if (secs < 10) return DIM('just now');
-  if (secs < 60) return DIM(`${secs}s ago`);
+  if (secs < 60) return DIM(`${String(secs)}s ago`);
   const mins = Math.floor(secs / 60);
-  if (mins < 60) return DIM(`${mins}m ago`);
+  if (mins < 60) return DIM(`${String(mins)}m ago`);
   const hours = Math.floor(mins / 60);
-  if (hours < 24) return DIM(`${hours}h ago`);
+  if (hours < 24) return DIM(`${String(hours)}h ago`);
   const days = Math.floor(hours / 24);
-  return DIM(`${days}d ago`);
+  return DIM(`${String(days)}d ago`);
 }
 
 // ─── Layout Helpers ─────────────────────────────────────────────────────────
@@ -481,18 +610,21 @@ export function box(
   title: string,
   lines: string[],
   widthOrOpts: number | { style?: string; padding?: number; width?: number } = 60,
-) {
-  let width = 60,
-    style = 'light',
-    padding = 0;
+): string {
+  let width: number;
+  let style: string;
+  let padding: number;
   if (typeof widthOrOpts === 'number') {
     width = widthOrOpts;
-  } else if (typeof widthOrOpts === 'object' && widthOrOpts !== null) {
-    width = widthOrOpts.width || 60;
-    style = widthOrOpts.style || 'light';
-    padding = widthOrOpts.padding || 0;
+    style = 'light';
+    padding = 0;
+  } else {
+    width = widthOrOpts.width ?? 60;
+    style = widthOrOpts.style ?? 'light';
+    padding = widthOrOpts.padding ?? 0;
   }
-  const s = (BOX_STYLES as Record<string, any>)[style] || BOX_STYLES.light;
+  const s =
+    (BOX_STYLES as Partial<Record<string, typeof BOX_STYLES.light>>)[style] ?? BOX_STYLES.light;
   const padStr = ' '.repeat(padding);
   const inner = Math.max(width - 2 - padding * 2, 10);
   const totalInner = inner + padding * 2;
@@ -500,7 +632,7 @@ export function box(
   const topPad = totalInner - titleStr.length;
   const top = `${s.tl}${titleStr}${s.h.repeat(Math.max(topPad, 0))}${s.tr}`;
   const bot = `${s.bl}${s.h.repeat(totalInner)}${s.br}`;
-  const body = (lines || []).map((line) => {
+  const body = lines.map((line) => {
     const stripped = stripAnsi(line);
     const pad = Math.max(inner - stripped.length, 0);
     return `${s.v}${padStr}${line}${' '.repeat(pad)}${padStr}${s.v}`;
@@ -512,8 +644,8 @@ export function box(
   return [top, ...body, bot].join('\n');
 }
 
-export function sectionHeader(title: string, totalWidth = 60) {
-  const titleText = String(title || '');
+export function sectionHeader(title: string, totalWidth = 60): string {
+  const titleText = title || '';
   const strippedTitle = stripAnsi(titleText);
   const titleWidth = strippedTitle.length;
   const barWidth = Math.max(totalWidth - titleWidth - 2, 4); // -2 for spaces around title
@@ -527,9 +659,9 @@ export function sectionHeader(title: string, totalWidth = 60) {
  * @param {string} title - Section title
  * @param {number} [totalWidth=60] - Total width
  */
-export function animatedSectionHeader(title: string, totalWidth = 60) {
-  const isTTY = process.stdout?.isTTY;
-  const titleText = String(title || '');
+export function animatedSectionHeader(title: string, totalWidth = 60): Promise<void> {
+  const isTTY = process.stdout.isTTY;
+  const titleText = title || '';
   const strippedTitle = stripAnsi(titleText);
   const titleWidth = strippedTitle.length;
   const barWidth = Math.max(totalWidth - titleWidth - 2, 4);
@@ -567,7 +699,7 @@ export function animatedSectionHeader(title: string, totalWidth = 60) {
   });
 }
 
-export function divider() {
+export function divider(): string {
   return DIM('─'.repeat(56));
 }
 
@@ -579,8 +711,8 @@ export function divider() {
  * @param {string} label - Label shown before the bar
  * @param {number} width - Bar width in characters
  */
-export function animatedProgressBar(label: string, width = 30) {
-  const isTTY = process.stderr?.isTTY;
+export function animatedProgressBar(barLabel: string, width = 30): ProgressBarHandle {
+  const isTTY = process.stderr.isTTY;
   let interval: ReturnType<typeof setInterval> | null = null;
   let currentPercent = 0;
   let shimmerOffset = 0;
@@ -603,7 +735,7 @@ export function animatedProgressBar(label: string, width = 30) {
     }
     bar += pc.gray('\u2591'.repeat(empty));
 
-    const line = `  ${label} ${bar} ${colorFn(`${clamped.toFixed(1)}%`)}`;
+    const line = `  ${barLabel} ${bar} ${colorFn(`${clamped.toFixed(1)}%`)}`;
     process.stderr.write(`\r\x1b[2K${line}`);
     shimmerOffset++;
   }
@@ -611,7 +743,7 @@ export function animatedProgressBar(label: string, width = 30) {
   return {
     start() {
       if (!isTTY) {
-        process.stderr.write(`  ${label} ${currentPercent.toFixed(1)}%\n`);
+        process.stderr.write(`  ${barLabel} ${currentPercent.toFixed(1)}%\n`);
         return this;
       }
       interval = setInterval(render, 150);
@@ -635,9 +767,9 @@ export function animatedProgressBar(label: string, width = 30) {
   };
 }
 
-export function label(key: string, value?: any) {
+export function label(key: string, value?: string | number | boolean): string {
   const k = DIM(`${key}:`);
-  return value !== undefined ? `  ${k} ${value}` : `  ${k}`;
+  return value === undefined ? `  ${k}` : `  ${k} ${String(value)}`;
 }
 
 // ─── Spinner ────────────────────────────────────────────────────────────────
@@ -741,18 +873,20 @@ export function createSpinner(
     intervalMs?: number;
     color?: (s: string) => string;
   } = {},
-) {
-  const isTTY = process.stderr?.isTTY;
+): SpinnerHandle {
+  const isTTY = process.stderr.isTTY;
   let frameIdx = 0;
   let interval: ReturnType<typeof setInterval> | null = null;
   let currentMsg = message;
   const startTime = Date.now();
-  const estimatedMs = opts.estimatedMs || 0;
-  const style = opts.style || 'braille';
-  const frames = (SPINNER_STYLES as Record<string, string[]>)[style] || SPINNER_STYLES.braille;
-  const intervalMs = opts.intervalMs || (STYLE_INTERVALS as Record<string, number>)[style] || 80;
+  const estimatedMs = opts.estimatedMs ?? 0;
+  const style = opts.style ?? 'braille';
+  const frames =
+    (SPINNER_STYLES as Partial<Record<string, string[]>>)[style] ?? SPINNER_STYLES.braille;
+  const intervalMs =
+    opts.intervalMs ?? (STYLE_INTERVALS as Partial<Record<string, number>>)[style] ?? 80;
   const colorFn =
-    opts.color || (STYLE_COLORS as Record<string, (s: string) => string>)[style] || ACCENT;
+    opts.color ?? (STYLE_COLORS as Partial<Record<string, (s: string) => string>>)[style] ?? ACCENT;
 
   function timeSuffix() {
     const elapsed = Date.now() - startTime;
@@ -836,65 +970,72 @@ function randomTip() {
   return DASHBOARD_TIPS[Math.floor(Math.random() * DASHBOARD_TIPS.length)];
 }
 
-export function renderDashboard(summary: any, agentNextMap: any, extras: any = {}) {
-  const lines = [];
+export function renderDashboard(
+  summary: DashboardSummary,
+  agentNextMap: Record<string, AgentNextAction>,
+  extras: DashboardExtras = {},
+): string {
+  const lines: string[] = [];
   lines.push(hydraLogoCompact());
   lines.push(divider());
 
   // Session
-  const session = summary?.activeSession;
+  const session = summary.activeSession;
   if (session) {
     lines.push(sectionHeader('Session'));
-    lines.push(label('Focus', pc.white(session.focus || 'not set')));
-    lines.push(label('Branch', pc.white(session.branch || '?')));
-    lines.push(label('Status', colorStatus(session.status || 'active')));
-    lines.push(label('Updated', relativeTime(summary.updatedAt)));
+    lines.push(label('Focus', pc.white(session.focus ?? 'not set')));
+    lines.push(label('Branch', pc.white(session.branch ?? '?')));
+    lines.push(label('Status', colorStatus(session.status ?? 'active')));
+    lines.push(label('Updated', relativeTime(summary.updatedAt ?? '')));
   }
 
   // Counts
-  const counts = summary?.counts || {};
+  const counts = summary.counts ?? {};
   lines.push(sectionHeader('Overview'));
   lines.push(label('Open tasks', counts.tasksOpen ?? '?'));
   lines.push(
     label(
       'Open blockers',
-      counts.blockersOpen > 0 ? ERROR(String(counts.blockersOpen)) : SUCCESS('0'),
+      (counts.blockersOpen ?? 0) > 0 ? ERROR(String(counts.blockersOpen ?? 0)) : SUCCESS('0'),
     ),
   );
-  lines.push(label('Decisions', String(counts.decisions ?? '?')));
-  lines.push(label('Handoffs', String(counts.handoffs ?? '?')));
+  lines.push(label('Decisions', counts.decisions ?? '?'));
+  lines.push(label('Handoffs', counts.handoffs ?? '?'));
   if (extras.usage && extras.usage.level !== 'unknown') {
-    lines.push(label('Token usage', progressBar(extras.usage.percent || 0, 20)));
+    lines.push(label('Token usage', progressBar(extras.usage.percent ?? 0, 20)));
   }
 
   // Agent Status
-  if (agentNextMap && Object.keys(agentNextMap).length > 0) {
+  if (Object.keys(agentNextMap).length > 0) {
     lines.push(sectionHeader('Agents'));
-    for (const [agent, next] of Object.entries(agentNextMap) as [string, any][]) {
-      const action = next?.action || 'unknown';
-      let desc = action;
+    for (const [agent, next] of Object.entries(agentNextMap)) {
+      const action = next.action ?? 'unknown';
+      let desc: string = action;
       if (action === 'continue_task') {
-        desc = `working on ${pc.bold(next.task?.id || '?')}`;
+        desc = `working on ${pc.bold(next.task?.id ?? '?')}`;
       } else if (action === 'pickup_handoff') {
-        desc = WARNING(`handoff ${next.handoff?.id || '?'} waiting`);
+        desc = WARNING(`handoff ${next.handoff?.id ?? '?'} waiting`);
       } else if (action === 'claim_owned_task' || action === 'claim_unassigned_task') {
-        desc = `can claim ${pc.bold(next.task?.id || '?')}`;
+        desc = `can claim ${pc.bold(next.task?.id ?? '?')}`;
       } else if (action === 'idle') {
         desc = DIM('idle');
       } else if (action === 'resolve_blocker') {
-        desc = ERROR(`blocked on ${next.task?.id || '?'}`);
+        desc = ERROR(`blocked on ${next.task?.id ?? '?'}`);
       }
       const modelLabel = extras.models?.[agent] ? DIM(` [${extras.models[agent]}]`) : '';
 
       // Mood indicator based on success rate (if available)
       let mood = '';
-      if (extras.metrics?.[agent]?.successRate !== undefined) {
-        const rate = extras.metrics[agent].successRate;
-        if (rate >= 90)
+      const agentMetrics = extras.metrics?.[agent];
+      if (agentMetrics?.successRate !== undefined) {
+        const rate = agentMetrics.successRate;
+        if (rate >= 90) {
           mood = ' \u{1F60A}'; // 😊
-        else if (rate >= 50)
+        } else if (rate >= 50) {
           mood = ' \u{1F610}'; // 😐
-        else mood = ' \u{1F61F}'; // 😟
+        } else {
+          mood = ' \u{1F61F}'; // 😟
+        }
       }
 
       lines.push(`  ${agentBadge(agent)}  ${desc}${modelLabel}${mood}`);
@@ -902,14 +1043,14 @@ export function renderDashboard(summary: any, agentNextMap: any, extras: any = {
   }
 
   // Open Tasks
-  const tasks = summary?.openTasks || [];
+  const tasks = summary.openTasks ?? [];
   if (tasks.length > 0) {
     lines.push(sectionHeader('Open Tasks'));
     for (const task of tasks.slice(0, 10)) {
       lines.push(formatTaskLine(task));
     }
     if (tasks.length > 10) {
-      lines.push(DIM(`  ... and ${tasks.length - 10} more`));
+      lines.push(DIM(`  ... and ${String(tasks.length - 10)} more`));
     }
   } else {
     // All clear! Show a congratulatory message
@@ -926,18 +1067,18 @@ export function renderDashboard(summary: any, agentNextMap: any, extras: any = {
   }
 
   // Open Blockers
-  const blockers = summary?.openBlockers || [];
+  const blockers = summary.openBlockers ?? [];
   if (blockers.length > 0) {
     lines.push(sectionHeader('Blockers'));
     for (const b of blockers) {
       lines.push(
-        `  ${ERROR('\u2717')} ${pc.bold(b.id)} ${colorAgent(b.owner)} ${DIM(String(b.title || '').slice(0, 50))}`,
+        `  ${ERROR('\u2717')} ${pc.bold(b.id)} ${colorAgent(b.owner)} ${DIM((b.title ?? '').slice(0, 50))}`,
       );
     }
   }
 
   // Latest Handoff
-  const handoff = summary?.latestHandoff;
+  const handoff = summary.latestHandoff;
   if (handoff) {
     lines.push(sectionHeader('Latest Handoff'));
     lines.push(formatHandoffLine(handoff));
@@ -958,7 +1099,7 @@ export function renderDashboard(summary: any, agentNextMap: any, extras: any = {
  * @param {number} [width=30] - Bar width in characters
  * @param {boolean} [fractional=true] - Use fractional block characters for smoother rendering
  */
-export function progressBar(percent: number, width = 30, fractional = true) {
+export function progressBar(percent: number, width = 30, fractional = true): string {
   const clamped = Math.max(0, Math.min(100, percent || 0));
 
   let colorFn = pc.green;
@@ -1002,37 +1143,37 @@ export function progressBar(percent: number, width = 30, fractional = true) {
   return `${bar} ${colorFn(`${clamped.toFixed(1)}%`)}`;
 }
 
-function fmtTokens(n: any) {
-  if (!n || n === 0) return '0';
+function fmtTokens(n: number): string {
+  if (n === 0) return '0';
   if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(2)}M`;
   if (n >= 1_000) return `${(n / 1_000).toFixed(1)}K`;
   return String(n);
 }
 
-function fmtCost(usd: any) {
-  if (!usd || usd === 0) return '-';
+function fmtCost(usd: number): string {
+  if (usd === 0) return '-';
   if (usd < 0.01) return `$${usd.toFixed(4)}`;
   if (usd < 1) return `$${usd.toFixed(3)}`;
   return `$${usd.toFixed(2)}`;
 }
 
-function fmtDuration(ms: any) {
-  if (!ms || ms === 0) return '-';
-  if (ms < 1000) return `${ms}ms`;
+function fmtDuration(ms: number): string {
+  if (ms === 0) return '-';
+  if (ms < 1000) return `${String(ms)}ms`;
   const secs = (ms / 1000).toFixed(1);
   if (ms < 60000) return `${secs}s`;
   const mins = Math.floor(ms / 60000);
   const remSecs = Math.round((ms % 60000) / 1000);
-  return `${mins}m${remSecs}s`;
+  return `${String(mins)}m${String(remSecs)}s`;
 }
 
-function fmtReset(ms: any) {
+function fmtReset(ms: number | null | undefined): string {
   if (ms === null || ms === undefined) return '-';
-  const clamped = Math.max(0, Number(ms) || 0);
+  const clamped = Math.max(0, ms);
   const totalMinutes = Math.floor(clamped / 60000);
   const hours = Math.floor(totalMinutes / 60);
   const minutes = totalMinutes % 60;
-  return `${hours}h ${minutes}m`;
+  return `${String(hours)}h ${String(minutes)}m`;
 }
 
 /**
@@ -1040,8 +1181,11 @@ function fmtReset(ms: any) {
  * @param {object} metrics - From getMetricsSummary()
  * @param {object} usage - From checkUsage()
  */
-export function renderStatsDashboard(metrics: any, usage: any) {
-  const lines = [];
+export function renderStatsDashboard(
+  metrics: MetricsSummary | null | undefined,
+  usage: UsageSummary | null | undefined,
+): string {
+  const lines: string[] = [];
   lines.push('');
   lines.push(hydraLogoCompact());
   lines.push(DIM('\u2500'.repeat(56)));
@@ -1049,15 +1193,17 @@ export function renderStatsDashboard(metrics: any, usage: any) {
   // Usage bar
   if (usage) {
     lines.push(sectionHeader('Token Usage'));
-    lines.push(`  ${progressBar(usage.percent || 0)}`);
+    lines.push(`  ${progressBar(usage.percent ?? 0)}`);
     const statusColors: Record<string, (s: string) => string> = {
       normal: pc.green,
       warning: pc.yellow,
       critical: pc.red,
       unknown: pc.gray,
     };
-    const statusFn = statusColors[usage.level] || pc.white;
-    lines.push(label('Status', statusFn(String(usage.level || 'unknown').toUpperCase())));
+    const statusFn =
+      (statusColors as Partial<Record<string, (s: string) => string>>)[usage.level ?? ''] ??
+      pc.white;
+    lines.push(label('Status', statusFn((usage.level ?? 'unknown').toUpperCase())));
     if (usage.todayTokens) {
       lines.push(label('Today', pc.white(fmtTokens(usage.todayTokens))));
     }
@@ -1070,8 +1216,9 @@ export function renderStatsDashboard(metrics: any, usage: any) {
       for (const agent of ['gemini', 'codex', 'claude']) {
         const row = usage.agents[agent];
         if (!row) continue;
-        const colorFn = (AGENT_COLORS as Record<string, (s: string) => string>)[agent] || pc.white;
-        const icon = (AGENT_ICONS as Record<string, string>)[agent] || '\u2022';
+        const colorFn =
+          (AGENT_COLORS as Partial<Record<string, (s: string) => string>>)[agent] ?? pc.white;
+        const icon = (AGENT_ICONS as Partial<Record<string, string>>)[agent] ?? '\u2022';
         const badge = colorFn(`${icon} ${agent.toUpperCase()}`);
         const rowStatusColors: Record<string, (s: string) => string> = {
           normal: pc.green,
@@ -1079,26 +1226,28 @@ export function renderStatsDashboard(metrics: any, usage: any) {
           critical: pc.red,
           unknown: pc.gray,
         };
-        const rowStatusFn = rowStatusColors[row.level] || pc.white;
-        const status = rowStatusFn(String(row.level || 'unknown').toUpperCase());
+        const rowStatusFn =
+          (rowStatusColors as Partial<Record<string, (s: string) => string>>)[row.level ?? ''] ??
+          pc.white;
+        const status = rowStatusFn((row.level ?? 'unknown').toUpperCase());
         if (row.budget) {
           lines.push(
-            `    ${badge} ${status} ${pc.white(`${(row.percent || 0).toFixed(1)}%`)}  ` +
-              `${DIM('used')} ${pc.white(fmtTokens(row.used || 0))}/${pc.white(fmtTokens(row.budget || 0))}  ` +
-              `${DIM('left')} ${pc.white(fmtTokens(row.remaining || 0))}  ` +
+            `    ${badge} ${status} ${pc.white(`${(row.percent ?? 0).toFixed(1)}%`)}  ` +
+              `${DIM('used')} ${pc.white(fmtTokens(row.used ?? 0))}/${pc.white(fmtTokens(row.budget ?? 0))}  ` +
+              `${DIM('left')} ${pc.white(fmtTokens(row.remaining ?? 0))}  ` +
               `${DIM('reset')} ${pc.white(fmtReset(row.resetInMs))}`,
           );
         } else {
           lines.push(
-            `    ${badge} ${status} ${DIM('used')} ${pc.white(fmtTokens(row.todayTokens || 0))}  ` +
-              `${DIM('budget')} ${pc.white('n/a')}  ${DIM('source')} ${pc.white(row.source || 'none')}`,
+            `    ${badge} ${status} ${DIM('used')} ${pc.white(fmtTokens(row.todayTokens ?? 0))}  ` +
+              `${DIM('budget')} ${pc.white('n/a')}  ${DIM('source')} ${pc.white(row.source ?? 'none')}`,
           );
         }
       }
     }
   }
 
-  if (!metrics || !metrics.agents || Object.keys(metrics.agents).length === 0) {
+  if (!metrics?.agents || Object.keys(metrics.agents).length === 0) {
     lines.push('');
     lines.push(`  ${DIM('No agent calls recorded yet.')}`);
     lines.push('');
@@ -1112,26 +1261,35 @@ export function renderStatsDashboard(metrics: any, usage: any) {
   lines.push(DIM(header));
   lines.push(DIM(`  ${'\u2500'.repeat(62)}`));
 
-  for (const [agent, data] of Object.entries(metrics.agents) as [string, any][]) {
-    const colorFn = (AGENT_COLORS as Record<string, (s: string) => string>)[agent] || pc.white;
-    const icon = (AGENT_ICONS as Record<string, string>)[agent] || '\u2022';
+  for (const [agent, data] of Object.entries(metrics.agents)) {
+    const colorFn =
+      (AGENT_COLORS as Partial<Record<string, (s: string) => string>>)[agent] ?? pc.white;
+    const icon = (AGENT_ICONS as Partial<Record<string, string>>)[agent] ?? '\u2022';
     const agentLabel = colorFn(`${icon} ${agent.padEnd(8)}`);
-    const calls = pc.white(String(data.callsToday || 0).padStart(6));
+    const calls = pc.white(String(data.callsToday ?? 0).padStart(6));
     // Prefer real session tokens when available, fall back to estimate
     const st = data.sessionTokens;
-    const hasReal = st && st.totalTokens > 0;
-    const tokenVal = hasReal ? st.totalTokens : data.estimatedTokensToday || 0;
+    const hasReal = st && (st.totalTokens ?? 0) > 0;
+    const tokenVal = hasReal ? (st.totalTokens ?? 0) : (data.estimatedTokensToday ?? 0);
     const tokenStr = fmtTokens(tokenVal).padStart(10);
     const tokens = hasReal ? pc.white(tokenStr) : DIM(tokenStr);
-    const costVal = hasReal ? st.costUsd : 0;
+    const costVal = hasReal ? (st.costUsd ?? 0) : 0;
     const cost = costVal > 0 ? pc.white(fmtCost(costVal).padStart(8)) : DIM('-'.padStart(8));
-    const avgTime = pc.white(fmtDuration(data.avgDurationMs || 0).padStart(9));
-    const rate =
-      data.successRate === undefined
-        ? DIM('   -'.padStart(8))
-        : (data.successRate >= 100 ? pc.green : data.successRate >= 80 ? pc.yellow : pc.red)(
-            `${data.successRate}%`.padStart(8),
-          );
+    const avgTime = pc.white(fmtDuration(data.avgDurationMs ?? 0).padStart(9));
+    let rate: string;
+    if (data.successRate === undefined) {
+      rate = DIM('   -'.padStart(8));
+    } else {
+      let rateColorFn: (s: string) => string;
+      if (data.successRate >= 100) {
+        rateColorFn = pc.green;
+      } else if (data.successRate >= 80) {
+        rateColorFn = pc.yellow;
+      } else {
+        rateColorFn = pc.red;
+      }
+      rate = rateColorFn(`${String(data.successRate)}%`.padStart(8));
+    }
     lines.push(
       `  ${agentLabel}${sep}${calls}${sep}${tokens}${sep}${cost}${sep}${avgTime}${sep}${rate}`,
     );
@@ -1139,23 +1297,23 @@ export function renderStatsDashboard(metrics: any, usage: any) {
 
   // Session totals
   const su = metrics.sessionUsage;
-  const hasSessionData = su && su.callCount > 0;
+  const hasSessionData = su && (su.callCount ?? 0) > 0;
   lines.push(sectionHeader('Session Totals'));
-  lines.push(label('Total calls', pc.white(String(metrics.totalCalls || 0))));
+  lines.push(label('Total calls', pc.white(String(metrics.totalCalls ?? 0))));
   if (hasSessionData) {
-    lines.push(label('Input tokens', pc.white(fmtTokens(su.inputTokens))));
-    lines.push(label('Output tokens', pc.white(fmtTokens(su.outputTokens))));
-    lines.push(label('Total tokens', pc.white(fmtTokens(su.totalTokens))));
-    if (su.cacheCreationTokens > 0 || su.cacheReadTokens > 0) {
-      lines.push(label('Cache create', pc.white(fmtTokens(su.cacheCreationTokens))));
-      lines.push(label('Cache read', pc.white(fmtTokens(su.cacheReadTokens))));
+    lines.push(label('Input tokens', pc.white(fmtTokens(su.inputTokens ?? 0))));
+    lines.push(label('Output tokens', pc.white(fmtTokens(su.outputTokens ?? 0))));
+    lines.push(label('Total tokens', pc.white(fmtTokens(su.totalTokens ?? 0))));
+    if ((su.cacheCreationTokens ?? 0) > 0 || (su.cacheReadTokens ?? 0) > 0) {
+      lines.push(label('Cache create', pc.white(fmtTokens(su.cacheCreationTokens ?? 0))));
+      lines.push(label('Cache read', pc.white(fmtTokens(su.cacheReadTokens ?? 0))));
     }
-    lines.push(label('Cost', pc.white(fmtCost(su.costUsd))));
+    lines.push(label('Cost', pc.white(fmtCost(su.costUsd ?? 0))));
   } else {
-    lines.push(label('Est. tokens', pc.white(fmtTokens(metrics.totalTokens || 0))));
+    lines.push(label('Est. tokens', pc.white(fmtTokens(metrics.totalTokens ?? 0))));
   }
-  lines.push(label('Total time', pc.white(fmtDuration(metrics.totalDurationMs || 0))));
-  lines.push(label('Uptime', pc.white(fmtDuration((metrics.uptimeSec || 0) * 1000))));
+  lines.push(label('Total time', pc.white(fmtDuration(metrics.totalDurationMs ?? 0))));
+  lines.push(label('Uptime', pc.white(fmtDuration((metrics.uptimeSec ?? 0) * 1000))));
 
   lines.push('');
   return lines.join('\n');
@@ -1163,18 +1321,22 @@ export function renderStatsDashboard(metrics: any, usage: any) {
 
 // ─── Agent Header ───────────────────────────────────────────────────────────
 
-export function agentHeader(name: string) {
-  const lower = String(name || '').toLowerCase();
-  const colorFn = (AGENT_COLORS as Record<string, (s: string) => string>)[lower] || pc.white;
+export function agentHeader(name: string): string {
+  const lower = (name || '').toLowerCase();
+  const colorFn =
+    (AGENT_COLORS as Partial<Record<string, (s: string) => string>>)[lower] ?? pc.white;
   const agentConfig: Record<string, { tagline: string; icon: string }> = {
     gemini: { tagline: 'Analyst \u00B7 Critic \u00B7 Reviewer', icon: '\u2726' },
     codex: { tagline: 'Implementer \u00B7 Builder \u00B7 Executor', icon: '\u25B6' },
     claude: { tagline: 'Architect \u00B7 Planner \u00B7 Coordinator', icon: '\u2666' },
   };
-  const cfg = agentConfig[lower] || { tagline: 'Agent', icon: '\u2022' };
+  const cfg = (agentConfig as Partial<typeof agentConfig>)[lower] ?? {
+    tagline: 'Agent',
+    icon: '\u2022',
+  };
   const lines = [
     '',
-    colorFn(`  ${cfg.icon} ${String(name).toUpperCase()}`),
+    colorFn(`  ${cfg.icon} ${name.toUpperCase()}`),
     DIM(`  ${cfg.tagline}`),
     colorFn('─'.repeat(42)),
     '',
@@ -1184,10 +1346,10 @@ export function agentHeader(name: string) {
 
 // ─── Utility: Strip ANSI ────────────────────────────────────────────────────
 
-export function stripAnsi(str: string) {
+export function stripAnsi(str: string): string {
   // Removes CSI sequences like \x1b[...m (including 38;2;r;g;b)
   // eslint-disable-next-line no-control-regex
-  return String(str || '').replace(/\x1B\[[0-?]*[ -/]*[@-~]/g, '');
+  return (str || '').replace(/\x1B\[[0-?]*[ -/]*[@-~]/g, '');
 }
 
 // ─── Health Icons (for status bar) ──────────────────────────────────────────
@@ -1204,16 +1366,16 @@ export const HEALTH_ICONS = {
  * @param {number} ms - Elapsed time in milliseconds
  * @returns {string} e.g. "2m 15s", "45s", "1h 3m"
  */
-export function formatElapsed(ms: number) {
+export function formatElapsed(ms: number): string {
   if (!ms || ms < 0) return '0s';
   const totalSec = Math.floor(ms / 1000);
-  if (totalSec < 60) return `${totalSec}s`;
+  if (totalSec < 60) return `${String(totalSec)}s`;
   const mins = Math.floor(totalSec / 60);
   const secs = totalSec % 60;
-  if (mins < 60) return secs > 0 ? `${mins}m ${secs}s` : `${mins}m`;
+  if (mins < 60) return secs > 0 ? `${String(mins)}m ${String(secs)}s` : `${String(mins)}m`;
   const hours = Math.floor(mins / 60);
   const remMins = mins % 60;
-  return remMins > 0 ? `${hours}h ${remMins}m` : `${hours}h`;
+  return remMins > 0 ? `${String(hours)}h ${String(remMins)}m` : `${String(hours)}h`;
 }
 
 /**
@@ -1221,7 +1383,7 @@ export function formatElapsed(ms: number) {
  * @param {number} percent - 0-100
  * @param {number} [width=15] - Bar width in characters
  */
-export function compactProgressBar(percent: number, width = 15) {
+export function compactProgressBar(percent: number, width = 15): string {
   const clamped = Math.max(0, Math.min(100, percent || 0));
 
   let colorFn = pc.green;
@@ -1263,13 +1425,13 @@ export function compactProgressBar(percent: number, width = 15) {
  * @param {string} modelId - e.g. "claude-sonnet-4-5-20250929"
  * @returns {string} - e.g. "sonnet"
  */
-export function shortModelName(modelId: string) {
+export function shortModelName(modelId: string): string {
   // Try profile-derived short name first (single source of truth)
   const profileName = _getShortName(modelId);
   if (profileName) return profileName;
 
   // Fallback for unknown models not in profiles
-  const id = String(modelId || '').toLowerCase();
+  const id = (modelId || '').toLowerCase();
   if (id.includes('opus')) return 'opus';
   if (id.includes('sonnet')) return 'sonnet';
   if (id.includes('haiku')) return 'haiku';
@@ -1301,9 +1463,9 @@ const ACTION_VERBS =
  * @param {number} [maxLen=30] - Maximum character length
  * @returns {string} A short topic phrase, or '' if nothing meaningful extracted
  */
-export function extractTopic(prompt: string, maxLen = 30) {
+export function extractTopic(prompt: string, maxLen = 30): string {
   if (!prompt) return '';
-  let text = String(prompt).trim();
+  let text = prompt.trim();
 
   // Strip leading filler phrases
   text = text.replace(LEADING_VERBS, '');
@@ -1349,20 +1511,29 @@ const PHASE_NARRATIVES: Record<string, (agent: string, topic: string) => string>
  * @param {string} [topic] - Extracted topic from the prompt
  * @returns {string} Human-readable narrative description
  */
-export function phaseNarrative(phase: string, agent: string, topic: string) {
-  const fn = PHASE_NARRATIVES[phase];
+export function phaseNarrative(phase: string, agent: string, topic: string): string {
+  const fn = (
+    PHASE_NARRATIVES as Partial<Record<string, (agent: string, topic: string) => string>>
+  )[phase];
   if (fn) return fn(agent, topic);
   // Fallback: capitalize the phase name
   return topic ? `${phase} ${topic}` : `${phase}...`;
 }
 
-export function formatAgentStatus(agent: string, status: string, action: string, maxWidth: number) {
-  const lower = String(agent || '').toLowerCase();
-  const icon = (AGENT_ICONS as Record<string, string>)[lower] || '\u2022';
-  const colorFn = (AGENT_COLORS as Record<string, (s: string) => string>)[lower] || pc.white;
-  const healthIcon = (HEALTH_ICONS as Record<string, string>)[status] || HEALTH_ICONS.inactive;
-  const name = String(agent).toUpperCase();
-  const actionText = String(action || status || 'Inactive');
+export function formatAgentStatus(
+  agent: string,
+  status: string,
+  action: string,
+  maxWidth: number,
+): string {
+  const lower = (agent || '').toLowerCase();
+  const icon = (AGENT_ICONS as Partial<Record<string, string>>)[lower] ?? '\u2022';
+  const colorFn =
+    (AGENT_COLORS as Partial<Record<string, (s: string) => string>>)[lower] ?? pc.white;
+  const healthIcon =
+    (HEALTH_ICONS as Partial<Record<string, string>>)[status] ?? HEALTH_ICONS.inactive;
+  const name = agent.toUpperCase();
+  const actionText = action || status || 'Inactive';
 
   // Measure visible width (action may contain ANSI codes like DIM)
   const raw = `${name} ${stripAnsi(actionText)}`;
