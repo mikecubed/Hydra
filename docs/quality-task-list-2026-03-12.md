@@ -8,10 +8,11 @@
 
 - Every task must preserve or improve real behavioral coverage.
 - Do **not** disable, skip, weaken, or over-mock tests to get green.
-- Do **not** leave `todo` tests behind.
+- Do **not** leave `todo` tests behind (see T0 for the intentional stubs exception).
 - If a check, rule, or test must be relaxed temporarily, the reason must be documented in the relevant task PR and in the touched file when appropriate.
 - Every modified code file must pass linting and type-checking before merge.
 - Use the narrowest possible test run while developing, then run the phase-level validation before merge.
+- **Rollback policy:** If a parallel lane breaks passing tests on merge, revert the offending PR immediately. Do not hotfix a broken merge in-place. Re-land only after root cause is identified and the failing test is green on the feature branch.
 
 ## Canonical validation commands
 
@@ -35,21 +36,28 @@ npm run lint:mermaid
 
 ```text
 T0  test-integrity-audit
-T1  baseline-lock                    depends on T0
-T2  node24-runtime                   depends on T1
+T2  node24-runtime                   depends on T0
 T3  ci-node24                        depends on T2
 T4  docs-node24                      depends on T2
-T5  test-hardening                   depends on T0, T1
+T5  test-hardening                   depends on T0  ← can run in parallel with T2
 T6A operator-ui-errors               depends on T2, T5
 T6B pipeline-errors                  depends on T2, T5
 T6C daemon-route-errors              depends on T2, T5
 T6D shared-runtime-errors            depends on T2, T5
+T6E council-deliberation-errors      depends on T2, T5
+T6F supplemental-errors              depends on T2, T5
 T7A operator-ui-warnings             depends on T6A
 T7B pipeline-warnings                depends on T6B
 T7C daemon-route-warnings            depends on T6C
 T7D shared-runtime-warnings          depends on T6D
-T8  ci-tightening                    depends on T7A, T7B, T7C, T7D
+T7E council-deliberation-warnings    depends on T6E
+T7F supplemental-warnings            depends on T6F
+T8  ci-tightening                    depends on T7A, T7B, T7C, T7D, T7E, T7F
 ```
+
+> **T1 (Baseline lock) has been folded into T0's exit criteria.** There is no separate blocking T1 gate — updating `docs/quality-baseline-2026-03-12.md` with T0 findings is part of T0.
+>
+> **T5 can start immediately after T0**, in parallel with T2. Test hardening files do not require Node 24 to be running — they only require the test suite to be trustworthy (T0 complete).
 
 ## Task list
 
@@ -59,9 +67,14 @@ T8  ci-tightening                    depends on T7A, T7B, T7C, T7D
 
 ### Deliverables
 
-- Enumerate the current test `todo`s and implement them or document why they are invalid/outdated coverage candidates.
+- **Todo stubs:** All 19 `todo` tests are in `test/hydra-worktree-isolation.test.mjs`. They are **intentional integration stubs** for daemon-internal functions that are not exported (`createTaskWorktree`, `mergeTaskWorktree`, `cleanupTaskWorktree`). The file header documents why. For each stub: confirm it still describes valid future work and record it formally in the baseline doc as "accepted deferred integration coverage". Record what export/refactor changes would unblock them.
 - Audit tests that use fakes where real code paths are available.
 - Produce a removal/rewrite candidate list for stale or low-value tests.
+- Update `docs/quality-baseline-2026-03-12.md` with any anomalies found (this replaces the former T1 "baseline lock" gate).
+
+### Coverage gap note
+
+50 of 82 `lib/*.ts` files have no corresponding test file. The hotspot files (`hydra-operator.ts`, `hydra-evolve.ts`, `hydra-council.ts`, etc.) are all in this group. T0 should record this gap; adding coverage for uncovered files is a T5 responsibility, not a T0 blocker.
 
 ### Suggested validation
 
@@ -72,21 +85,6 @@ T8  ci-tightening                    depends on T7A, T7B, T7C, T7D
 
 - This task blocks everything else.
 - Prefer documenting questionable tests in a dedicated appendix or follow-up doc instead of deleting them in the same pass.
-
-## T1 — Baseline lock
-
-**Objective:** Freeze the live baseline and the working rules for all follow-up branches.
-
-### Deliverables
-
-- Confirm `docs/quality-baseline-2026-03-12.md` remains current.
-- Confirm the phase structure and branch sequencing.
-- Record any baseline anomalies discovered during T0.
-
-### Suggested validation
-
-- verify docs only
-- `./node_modules/.bin/prettier --check docs/**/*.md`
 
 ## T2 — Node 24 runtime foundation
 
@@ -243,18 +241,157 @@ T8  ci-tightening                    depends on T7A, T7B, T7C, T7D
 - targeted shared-runtime tests
 - `npm run typecheck`
 
-## T7A-T7D — Warning reduction by subsystem
+## T6E — Council and deliberation error cleanup
 
-After each error lane is green, the same subsystem owner should continue into warnings:
+**Target files**
 
-- unsafe member access / assignment / argument / call / return
-- `no-await-in-loop`
-- `strict-boolean-expressions`
+- `lib/hydra-council.ts` (192E/241W)
+- `lib/hydra-concierge.ts`
+- `lib/hydra-context.ts`
+- `lib/hydra-streaming-middleware.ts`
+
+### Priority rules
+
+- `@typescript-eslint/prefer-nullish-coalescing`
+- `@typescript-eslint/restrict-template-expressions`
+- `@typescript-eslint/no-unnecessary-condition`
+- `@typescript-eslint/explicit-module-boundary-types`
+
+### Suggested validation
+
+- targeted council/concierge tests
+- `npm run typecheck`
+
+## T6F — Supplemental error cleanup
+
+**Target files** (owner claims files from this list to avoid double-work; list is representative)
+
+- `lib/hydra-usage.ts` (110E/406W)
+- `lib/hydra-tasks.ts` (71E/75W)
+- `lib/hydra-worker.ts` (54E/55W)
+- `lib/hydra-evolve-suggestions.ts` (57E/46W)
+- `lib/hydra-evolve-investigator.ts`
+- `lib/hydra-nightly-review.ts`
+- `lib/hydra-actualize-review.ts`
+- `lib/hydra-models-select.ts`
+- `lib/hydra-github.ts`
+- `lib/hydra-codebase-context.ts`
+- `lib/hydra-metrics.ts`
+- `lib/hydra-tasks-review.ts`
+- `lib/hydra-evolve-suggestions-cli.ts`
+- `lib/hydra-nightly-discovery.ts`
+- `lib/hydra-actualize-review.ts`
+- `lib/hydra-provider-usage.ts`
+- `lib/hydra-setup.ts`
+- `lib/hydra-proc.ts`
+- `lib/hydra-models.ts`
+- `lib/hydra-dispatch.ts`
+- `lib/hydra-intent-gate.ts`
+- `lib/hydra-hub.ts`
+- `lib/hydra-telemetry.ts`
+- `lib/hydra-evolve-knowledge.ts`
+- `lib/hydra-evolve-guardrails.ts`
+- `lib/hydra-output-history.ts`
+- `lib/hydra-agents-wizard.ts`
+- `bin/hydra-cli.ts`
+- `scripts/build-exe.ts`
+- `scripts/gen-research-todo.ts`
+- all remaining files with errors not owned by T6A–T6E
+
+### Priority rules
+
+- same rule families as T6A–T6E
+- `n/no-process-exit` — each call site must be categorized; bulk replace is not acceptable
+
+### Suggested validation
+
+- targeted tests for every file touched
+- `npm run typecheck`
+- full `npm run lint` before merge
+
+## T7A — Operator/UI warning reduction
+
+After T6A is green, same owner continues into warnings for:
+
+- `lib/hydra-operator.ts`
+- `lib/hydra-ui.ts`
+- `lib/hydra-statusbar.ts`
+- `lib/hydra-prompt-choice.ts`
 
 ### Constraints
 
 - `strict-boolean-expressions` changes require behavior-aware review.
 - `no-await-in-loop` fixes require proof that concurrency is safe; otherwise document why serial execution remains intentional.
+
+## T7B — Pipeline warning reduction
+
+After T6B is green, same owner continues into warnings for:
+
+- `lib/hydra-evolve.ts`
+- `lib/hydra-nightly.ts`
+- `lib/hydra-actualize.ts`
+- related review/status modules
+
+### Constraints
+
+Same as T7A.
+
+## T7C — Daemon/route warning reduction
+
+After T6C is green, same owner continues into warnings for:
+
+- `lib/orchestrator-daemon.ts`
+- `lib/daemon/write-routes.ts`
+- `lib/orchestrator-client.ts`
+
+### Constraints
+
+Same as T7A.
+
+## T7D — Shared runtime warning reduction
+
+After T6D is green, same owner continues into warnings for:
+
+- `lib/hydra-shared/agent-executor.ts`
+- `lib/hydra-agents.ts`
+- `lib/hydra-model-recovery.ts`
+- `lib/hydra-mcp-server.ts`
+- `lib/hydra-mcp.ts`
+
+### Constraints
+
+Same as T7A.
+
+## T7E — Council warning reduction
+
+After T6E is green, same owner continues into warnings for:
+
+- `lib/hydra-council.ts`
+- `lib/hydra-concierge.ts`
+- `lib/hydra-context.ts`
+- `lib/hydra-streaming-middleware.ts`
+
+### Constraints
+
+Same as T7A.
+
+## T7F — Supplemental warning reduction
+
+After T6F is green, same owner continues into warnings for the supplemental file set.
+
+### Constraints
+
+Same as T7A.
+
+**Warning families for all T7 lanes:**
+
+- `@typescript-eslint/no-unsafe-member-access`
+- `@typescript-eslint/no-unsafe-assignment`
+- `@typescript-eslint/no-unsafe-argument`
+- `@typescript-eslint/no-unsafe-call`
+- `@typescript-eslint/no-unsafe-return`
+- `no-await-in-loop`
+- `@typescript-eslint/strict-boolean-expressions`
 
 ## T8 — CI tightening
 
@@ -273,22 +410,31 @@ After each error lane is green, the same subsystem owner should continue into wa
 
 ## Parallel execution recommendation
 
-### Sequential gates
+### Sequential gate
 
-Tasks `T0`, `T1`, and `T2` should land in order.
+`T0` must land first. All downstream work depends on a trustworthy test suite.
 
 ### First parallel fan-out
 
-After `T2`, `T3`, `T4`, and `T5` can proceed in parallel.
+After `T0`, three workstreams can start simultaneously:
+
+- `T2` (Node 24 runtime)
+- `T5` (test hardening — does not need Node 24; only needs T0)
+
+### Second fan-out after T2
+
+After `T2` lands, `T3` (CI alignment) and `T4` (docs alignment) can proceed in parallel with each other and with ongoing `T5` work.
 
 ### Main parallel fan-out
 
-After `T5`, run `T6A`, `T6B`, `T6C`, and `T6D` in parallel.
+After both `T2` and `T5` are complete, all six error lanes run in parallel:
 
-### Secondary parallel fan-out
+- `T6A`, `T6B`, `T6C`, `T6D`, `T6E`, `T6F`
 
-After each T6 lane is complete, the corresponding T7 lane can start without waiting for the others.
+### Warning reduction (per-lane)
+
+After each T6 lane completes, the corresponding T7 lane starts immediately without waiting for the other T6 lanes.
 
 ### Final join
 
-`T8` starts only after all warning lanes are resolved or explicitly deferred with documented rationale.
+`T8` starts only after all warning lanes (T7A–T7F) are resolved or any deferrals are documented with rationale.

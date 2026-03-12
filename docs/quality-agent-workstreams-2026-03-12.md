@@ -178,31 +178,80 @@ All later work depends on the suite being trustworthy.
 - shared helper tests
 - MCP/agent executor tests
 
+## Lane H — Council and deliberation cleanup
+
+**Owned files**
+
+- `lib/hydra-council.ts` (192E/241W — third hottest file in the codebase)
+- `lib/hydra-concierge.ts`
+- `lib/hydra-context.ts`
+- `lib/hydra-streaming-middleware.ts`
+
+### Rule focus
+
+- nullish/defaulting cleanup
+- unsafe-member-access reduction in the council deliberation pipeline
+- template expression safety
+- explicit return types on exported helpers
+
+### Required tests
+
+- council unit tests
+- concierge/streaming tests
+
+## Lane I — Supplemental cleanup
+
+**Scope:** All files with lint debt not already owned by Lanes D–H. Owner triages and claims files from the uncovered list in the task doc to avoid double-work with other lanes.
+
+**Representative high-debt files:**
+
+- `lib/hydra-usage.ts` (110E/406W)
+- `lib/hydra-tasks.ts` (71E/75W)
+- `lib/hydra-worker.ts` (54E/55W)
+- `lib/hydra-evolve-suggestions.ts` (57E/46W)
+- `lib/hydra-evolve-investigator.ts`, `lib/hydra-nightly-review.ts`, `lib/hydra-actualize-review.ts`
+- `lib/hydra-models-select.ts`, `lib/hydra-github.ts`, `lib/hydra-codebase-context.ts`
+- `lib/hydra-metrics.ts`, `lib/hydra-tasks-review.ts`, `lib/hydra-provider-usage.ts`
+- all remaining files with errors
+
+### Rule focus
+
+- same rule families as other lanes
+- `n/no-process-exit` must be categorized per call site — bulk replacement is not safe
+
+### Required tests
+
+- targeted tests for every modified file
+
 ## Merge cadence
 
 ## Wave 0
 
-- Lane A only
+- Lane A only (T0 — test integrity)
+- On completion: update baseline doc with any anomalies; this replaces the former "baseline lock" gate
 
 ## Wave 1
 
-- Lane B
+- Lane B (T2 — Node 24 runtime) **and** the test-hardening supplemental pass (T5) in parallel
+- T5 only needs T0 complete, not Node 24; it touches test files, not runtime config
 
 ## Wave 2
 
-- Lane C in parallel with the shared test-hardening work that emerges from Lane A
+- Lane C (T3 CI alignment + T4 docs alignment, parallel with each other) — starts once Wave 1's Lane B lands
+- T5 work continues to merge as ready
 
 ## Wave 3
 
-- Lanes D, E, F, and G in parallel
+- Lanes D, E, F, G, H, and I in parallel — starts once both T2 and T5 are complete
 
 ## Wave 4
 
-- warning-reduction follow-up passes owned by the same lane owners to minimize handoff cost
+- Warning-reduction follow-up passes (T7A–T7F) owned by the same lane owners
+- Each can start as soon as its corresponding T6 lane is merged — no need to wait for the full wave
 
 ## Wave 5
 
-- coordinator runs CI-tightening pass after all subsystem lanes are merged
+- Coordinator runs CI-tightening pass (T8) after all subsystem warning lanes are merged or deferrals are documented
 
 ## Conflict minimization rules
 

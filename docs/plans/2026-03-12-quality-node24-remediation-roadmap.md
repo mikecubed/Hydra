@@ -54,7 +54,9 @@ The work should proceed in **phases**, with **parallel workstreams inside each p
 #### 0A — Todo test conversion
 
 - Enumerate the current `todo` tests.
-- Implement each one or classify it in documentation as invalid/outdated coverage requiring review.
+- The 19 `todo` tests in `test/hydra-worktree-isolation.test.mjs` are **intentional integration stubs** — the file header explicitly documents that `createTaskWorktree`, `mergeTaskWorktree`, and `cleanupTaskWorktree` are daemon-internal and not exported. These cannot be unit-tested without refactoring the daemon's exports.
+- For these stubs: confirm they still describe valid future integration work, document them formally as "accepted deferred integration coverage", and record what export/daemon changes would be needed to make them testable.
+- Any `todo` test outside this file, or any newly discovered one, must be implemented or classified as invalid/outdated coverage requiring documented review.
 
 #### 0B — Real-path audit
 
@@ -77,28 +79,13 @@ The work should proceed in **phases**, with **parallel workstreams inside each p
 - Any questionable tests are documented for follow-up review.
 - The suite is judged trustworthy enough to guard later refactors.
 
-## Phase 1 — Baseline lock and execution guardrails
+## Phase 1 — Baseline lock _(folded into T0 exit criteria)_
 
-**Objective:** Start from verified data and prevent stale assumptions from steering the work.
+**Note:** This phase has no independent deliverables. Its outcome is captured as part of T0's exit criteria. When T0 completes, `docs/quality-baseline-2026-03-12.md` should be updated with any anomalies found during the test audit, and the baseline doc is considered locked.
 
-### Deliverables
-
-- Keep `docs/quality-baseline-2026-03-12.md` as the source of truth for current counts.
-- Confirm the branch for execution work is based on `chore/quality-node24-plan`.
-- Record the canonical validation commands for every follow-up branch:
-  - `npm run lint`
-  - `npm run format:check`
-  - `npm run typecheck`
-  - `node --test 'test/**/*.test.{ts,mjs}'`
-
-### Parallelism
-
-- None required; this is the dependency gate for all later phases.
-
-### Exit criteria
-
-- Everyone is using the live baseline numbers.
-- Follow-up work items are split by subsystem and phase rather than by stale doc sections.
+- Confirm `docs/quality-baseline-2026-03-12.md` is current with any anomalies found during Phase 0.
+- Record canonical validation commands (see task list).
+- This is **not a blocking gate** — it merges with T0.
 
 ## Phase 2 — Node 24 foundation
 
@@ -124,18 +111,18 @@ The work should proceed in **phases**, with **parallel workstreams inside each p
 
 ### Parallel workstreams
 
-#### 1A — Runtime and dependency lane
+#### 2A — Runtime and dependency lane
 
 - Update Node engine and `@types/node`
 - Refresh the lockfile
 - Decide whether `tsx` removal is same-phase or a follow-up
 
-#### 1B — CI lane
+#### 2B — CI lane
 
 - Move required workflows to Node 24
 - Keep any temporary compatibility checks non-blocking if they remain at all
 
-#### 1C — Documentation lane
+#### 2C — Documentation lane
 
 - Update all developer- and user-facing minimum-version references
 - Document whether `--strip-types` is now the preferred runtime path
@@ -169,15 +156,15 @@ The work should proceed in **phases**, with **parallel workstreams inside each p
 
 ### Parallel workstreams
 
-#### 2A — CLI contract tests
+#### 3A — CLI contract tests
 
 - Add tests that assert exit code, stderr/stdout shape, and non-abrupt termination behavior for CLI entrypoints and error paths
 
-#### 2B — Async behavior tests
+#### 3B — Async behavior tests
 
 - Add tests for sequencing-sensitive loops before converting any to batched or helper-based flows
 
-#### 2C — Config/defaulting tests
+#### 3C — Config/defaulting tests
 
 - Lock down behavior around optional values before `prefer-nullish-coalescing` and `no-unnecessary-condition` fixes
 
@@ -196,11 +183,16 @@ The work should proceed in **phases**, with **parallel workstreams inside each p
 3. `@typescript-eslint/no-unnecessary-condition` — 357
 4. `@typescript-eslint/explicit-module-boundary-types` — 194
 5. `no-nested-ternary` — 84
-6. `n/no-process-exit` — 75
+6. `n/no-process-exit` — 75 (see note below)
 7. `@typescript-eslint/no-unnecessary-type-conversion` — 69
 8. `@typescript-eslint/no-unnecessary-type-assertion` — 61
-9. `@typescript-eslint/restrict-plus-operands` — 18
-10. `require-atomic-updates` / `no-promise-executor-return` / `n/hashbang` and smaller tails
+9. `@typescript-eslint/require-await` — 17 (may require interface changes)
+10. `@typescript-eslint/restrict-plus-operands` — 18
+11. `require-atomic-updates` / `no-promise-executor-return` / `n/hashbang` and smaller tails
+
+> **`n/no-process-exit` note:** 87 occurrences across the codebase. Simple replacements with `process.exitCode = X; return` only work when the call-site can actually return to a caller. Calls inside callbacks, event handlers, and deeply nested async functions require case-by-case categorization. This rule must be treated as a dedicated subtask inside each subsystem lane — not a bulk find-and-replace.
+
+> **Coverage gap:** The four primary lanes below cover the hottest 16 files (approximately 62% of all errors). An additional 1,140 errors and 2,255 warnings exist across 65+ smaller files. These are assigned to lanes 3E and 3F and the shared-supplemental pass in Phase 5.
 
 ### Parallel subsystem workstreams
 
@@ -265,6 +257,41 @@ Focus:
 - safer stringification
 - helper extraction for repeated narrowing patterns
 
+#### 3E — Council and deliberation
+
+Primary files:
+
+- `lib/hydra-council.ts` (192E/241W — third hottest file)
+- `lib/hydra-concierge.ts`
+- `lib/hydra-context.ts`
+- `lib/hydra-streaming-middleware.ts`
+
+Focus:
+
+- nullish/defaulting cleanup
+- unsafe-member-access reduction in council pipeline
+- template expression safety
+- explicit return types on exported helpers
+
+#### 3F — Supplemental high-debt files
+
+Primary files (representative subset; owner triages remaining files):
+
+- `lib/hydra-usage.ts` (110E/406W)
+- `lib/hydra-tasks.ts` (71E/75W)
+- `lib/hydra-worker.ts` (54E/55W)
+- `lib/hydra-evolve-suggestions.ts` (57E/46W)
+- `lib/hydra-evolve-investigator.ts`
+- `lib/hydra-nightly-review.ts`
+- `lib/hydra-actualize-review.ts`
+- `lib/hydra-models-select.ts`
+- all remaining files with errors not covered by lanes 3A-3E
+
+Focus:
+
+- same rule priorities as other lanes
+- owner claims files from the uncovered list in the task doc to avoid double-work
+
 ### Recommended working pattern inside each stream
 
 1. Write or extend tests for the target behavior.
@@ -297,7 +324,7 @@ Focus:
 
 ### Parallelism
 
-Reuse the same four subsystem streams from Phase 3 so owners can keep context and tests.
+Reuse the same six subsystem streams from Phase 4 so owners can keep context and tests.
 
 ### Exit criteria
 
@@ -328,17 +355,25 @@ Reuse the same four subsystem streams from Phase 3 so owners can keep context an
 
 ## Recommended execution order across branches
 
-1. `phase-1/node24-foundation`
-2. `phase-2/baseline-lock`
-3. `phase-3/test-guardrails`
-4. `phase-4a/operator-ui-errors`
-5. `phase-4b/pipeline-errors`
-6. `phase-4c/daemon-errors`
-7. `phase-4d/shared-runtime-errors`
-8. `phase-5/warnings-burn-down`
-9. `phase-6/ci-tightening`
+**Phase 0 must land before anything else.**
 
-Phase 0 must land before the rest. Phase 4A-4D are the main parallel lanes once Phases 1-3 land.
+1. `phase-0/test-integrity` (T0 — Lane A)
+2. `phase-2/node24-foundation` (T2 — Lane B) — runs once T0 merges; T5 can start in parallel on a separate branch
+3. `phase-3/test-guardrails` (T5 — supplemental test hardening; can parallel with T2)
+4. `phase-2b/ci-node24` (T3 — Lane C; starts once T2 merges)
+5. `phase-2c/docs-node24` (T4 — Lane C; parallel with T3)
+6. `phase-4a/operator-ui-errors` (T6A — Lane D)
+7. `phase-4b/pipeline-errors` (T6B — Lane E)
+8. `phase-4c/daemon-errors` (T6C — Lane F)
+9. `phase-4d/shared-runtime-errors` (T6D — Lane G)
+10. `phase-4e/council-errors` (T6E — Lane H)
+11. `phase-4f/supplemental-errors` (T6F — Lane I)
+12. `phase-5/warnings-burn-down` (T7A-T7F — parallel by subsystem)
+13. `phase-6/ci-tightening` (T8)
+
+Branches 6–11 are fully parallel once T2 and T5 both land. Each branch is owned by its lane.
+
+> **Note:** Phase 1 ("Baseline lock") is folded into T0's exit criteria. The working branch for all execution is the one created from `chore/quality-node24-plan`.
 
 ## What should get tests as a hard rule
 
