@@ -13,6 +13,7 @@
  */
 
 import http from 'node:http';
+import type { ClientRequest } from 'node:http';
 import pc from 'picocolors';
 import { metricsEmitter, getSessionUsage, checkSLOs } from './hydra-metrics.ts';
 import { loadHydraConfig } from './hydra-config.ts';
@@ -62,14 +63,14 @@ export function setAgentActivity(
     phase?: string | null;
     step?: string | null;
   } = {},
-) {
+): void {
   agentState.set(agent.toLowerCase(), {
     status: status || 'inactive',
     action: action || '',
-    model: meta.model || null,
-    taskTitle: meta.taskTitle || null,
-    phase: meta.phase || null,
-    step: meta.step || null,
+    model: meta.model ?? null,
+    taskTitle: meta.taskTitle ?? null,
+    phase: meta.phase ?? null,
+    step: meta.step ?? null,
     updatedAt: Date.now(),
   });
 }
@@ -79,8 +80,8 @@ export function setAgentActivity(
  * @param {string} agent
  * @param {'worker'|'terminal'|null} mode
  */
-export function setAgentExecMode(agent: string, mode: string | null) {
-  agentExecMode.set(agent.toLowerCase(), mode || null);
+export function setAgentExecMode(agent: string, mode: string | null): void {
+  agentExecMode.set(agent.toLowerCase(), mode ?? null);
 }
 
 /**
@@ -88,16 +89,24 @@ export function setAgentExecMode(agent: string, mode: string | null) {
  * @param {string} agent
  * @returns {'worker'|'terminal'|null}
  */
-export function getAgentExecMode(agent: string) {
-  return agentExecMode.get(agent?.toLowerCase()) || null;
+export function getAgentExecMode(agent: string): string | null {
+  return agentExecMode.get(agent.toLowerCase()) ?? null;
 }
 
 /**
  * Get an agent's current activity state.
  */
-export function getAgentActivity(agent: string) {
+export function getAgentActivity(agent: string): {
+  status: string;
+  action: string;
+  model: string | null;
+  taskTitle: string | null;
+  phase: string | null;
+  step: string | null;
+  updatedAt: number;
+} {
   return (
-    agentState.get(agent.toLowerCase()) || {
+    agentState.get(agent.toLowerCase()) ?? {
       status: 'inactive',
       action: '',
       model: null,
@@ -149,7 +158,9 @@ function pushTickerEvent(text: string, eventType: string | null = null) {
  * Register a callback for significant activity events.
  * Callback receives { time, event, agent, detail }.
  */
-export function onActivityEvent(callback: (event: any) => void) {
+export function onActivityEvent(
+  callback: (event: { event: string; agent: string; detail: string }) => void,
+): void {
   if (typeof callback === 'function') {
     activityCallbacks.push(callback);
   }
@@ -189,14 +200,14 @@ let dispatchContext: Record<string, any> | null = null;
  * Set active dispatch context for status bar narrative display.
  * @param {{ promptSummary: string, topic: string, tier: string, startedAt: number }} ctx
  */
-export function setDispatchContext(ctx: Record<string, any> | null) {
-  dispatchContext = ctx ? { ...ctx, startedAt: ctx['startedAt'] || Date.now() } : null;
+export function setDispatchContext(ctx: Record<string, unknown> | null): void {
+  dispatchContext = ctx ? { ...ctx, startedAt: ctx['startedAt'] ?? Date.now() } : null;
 }
 
 /**
  * Clear active dispatch context (call after dispatch completes).
  */
-export function clearDispatchContext() {
+export function clearDispatchContext(): void {
   dispatchContext = null;
 }
 
@@ -208,26 +219,26 @@ const USAGE_CACHE_TTL_MS = 30_000;
 /**
  * Record the last dispatch routing decision for the context line.
  */
-export function setLastDispatch(info: Record<string, any>) {
+export function setLastDispatch(info: Record<string, unknown>): void {
   lastDispatch = { ...lastDispatch, ...info };
 }
 
 /**
  * Set the active operator mode for the context line.
  */
-export function setActiveMode(mode: string) {
-  activeMode = String(mode || 'auto');
+export function setActiveMode(mode: string): void {
+  activeMode = mode || 'auto';
 }
 
 /**
  * Update the open task count displayed in the context line.
  */
-export function updateTaskCount(count: number) {
-  openTaskCount = Math.max(0, Number(count) || 0);
+export function updateTaskCount(count: number): void {
+  openTaskCount = Math.max(0, count || 0);
 }
 
 function isTTYCapable() {
-  return Boolean(process.stdout.isTTY) && (process.stdout.rows || 0) >= 10;
+  return process.stdout.isTTY && (process.stdout.rows || 0) >= 10;
 }
 
 function getTermSize() {
@@ -245,9 +256,9 @@ function setScrollRegion() {
   const { rows } = getTermSize();
   const scrollBottom = rows - STATUS_BAR_HEIGHT;
   // Set scroll region: rows 1 through (rows - STATUS_BAR_HEIGHT)
-  process.stdout.write(`${ESC}1;${scrollBottom}r`);
+  process.stdout.write(`${ESC}1;${String(scrollBottom)}r`);
   // Move cursor back into the scroll region
-  process.stdout.write(`${ESC}${scrollBottom};1H`);
+  process.stdout.write(`${ESC}${String(scrollBottom)};1H`);
 }
 
 /**
@@ -255,8 +266,8 @@ function setScrollRegion() {
  */
 function resetScrollRegion() {
   const { rows } = getTermSize();
-  process.stdout.write(`${ESC}1;${rows}r`);
-  process.stdout.write(`${ESC}${rows};1H`);
+  process.stdout.write(`${ESC}1;${String(rows)}r`);
+  process.stdout.write(`${ESC}${String(rows)};1H`);
 }
 
 /**
@@ -274,23 +285,25 @@ function buildContextLine(cols: number) {
   };
   const modeIcon = MODE_ICONS[activeMode] || '\u2022';
   const modePart = ACCENT(`${modeIcon} ${activeMode}`);
-  const taskPart = `${openTaskCount} task${openTaskCount === 1 ? '' : 's'}`;
+  const taskPart = `${String(openTaskCount)} task${openTaskCount === 1 ? '' : 's'}`;
   const lastPart = lastDispatch.route ? `last: ${lastDispatch.route}` : '';
   const leftParts = [modePart, DIM(taskPart)];
-  if (dispatchContext && dispatchContext['promptSummary']) {
-    const tierBadge = dispatchContext['tier'] ? `[${dispatchContext['tier']}]` : '';
-    leftParts.push(ACCENT(`${tierBadge} ${dispatchContext['promptSummary']}`));
+  if (dispatchContext?.['promptSummary']) {
+    const tierBadge = dispatchContext['tier'] ? `[${String(dispatchContext['tier'])}]` : '';
+    leftParts.push(ACCENT(`${tierBadge} ${String(dispatchContext['promptSummary'])}`));
   } else if (lastPart) {
     leftParts.push(DIM(lastPart));
   }
   // Routing mode chip (non-default modes only)
-  const routingMode = loadHydraConfig().routing?.mode || 'balanced';
-  const modeChip =
-    routingMode === 'economy'
-      ? pc.yellow('\u25C6ECO')
-      : routingMode === 'performance'
-        ? pc.cyan('\u25C6PERF')
-        : '';
+  const routingMode = loadHydraConfig().routing.mode;
+  let modeChip: string;
+  if (routingMode === 'economy') {
+    modeChip = pc.yellow('\u25C6ECO');
+  } else if (routingMode === 'performance') {
+    modeChip = pc.cyan('\u25C6PERF');
+  } else {
+    modeChip = '';
+  }
   if (modeChip) leftParts.push(modeChip);
 
   const leftText = ` ${leftParts.join(DIM('  \u2502  '))}`;
@@ -299,8 +312,12 @@ function buildContextLine(cols: number) {
   let sloIndicator = '';
   try {
     const cfg = loadHydraConfig();
-    if (cfg.metrics?.['slo'] && (cfg.metrics?.['alerts'] as any)?.enabled !== false) {
-      const violations = checkSLOs(cfg.metrics['slo'] as Record<string, any>);
+    const cfgMetrics = cfg.metrics;
+    if (
+      cfgMetrics?.['slo'] &&
+      (cfgMetrics['alerts'] as Record<string, unknown>)['enabled'] !== false
+    ) {
+      const violations = checkSLOs(cfgMetrics['slo'] as Record<string, never>);
       if (violations.length > 0) {
         const hasCritical = violations.some((v) => v.metric === 'error_rate');
         sloIndicator = hasCritical ? ` ${pc.red('\u26A0 SLO')}` : ` ${pc.yellow('\u26A0 SLO')}`;
@@ -332,14 +349,16 @@ function buildContextLine(cols: number) {
     }
 
     // Show today's actual token count from stats-cache
-    const todayTokens = usage?.todayTokens || 0;
+    const todayTokens = usage?.todayTokens ?? 0;
     if (todayTokens > 0) {
-      const tokenStr =
-        todayTokens >= 1_000_000
-          ? `${(todayTokens / 1_000_000).toFixed(1)}M`
-          : todayTokens >= 1_000
-            ? `${(todayTokens / 1_000).toFixed(0)}K`
-            : String(todayTokens);
+      let tokenStr: string;
+      if (todayTokens >= 1_000_000) {
+        tokenStr = `${(todayTokens / 1_000_000).toFixed(1)}M`;
+      } else if (todayTokens >= 1_000) {
+        tokenStr = `${(todayTokens / 1_000).toFixed(0)}K`;
+      } else {
+        tokenStr = String(todayTokens);
+      }
       const parts = [];
       if (costStr) parts.push(DIM(costStr));
       parts.push(DIM(`${tokenStr} today`));
@@ -402,15 +421,21 @@ function buildStatusBar() {
 
     // Execution mode indicator
     const execMode = agentExecMode.get(agent);
-    const modeSuffix =
-      execMode === 'worker' ? DIM('[W]') : execMode === 'terminal' ? DIM('[T]') : '';
+    let modeSuffix: string;
+    if (execMode === 'worker') {
+      modeSuffix = DIM('[W]');
+    } else if (execMode === 'terminal') {
+      modeSuffix = DIM('[T]');
+    } else {
+      modeSuffix = '';
+    }
     const actionWithElapsed = `${actionText}${elapsed}${modeSuffix ? ` ${modeSuffix}` : ''}`;
     segments.push(formatAgentStatus(agent, state.status, actionWithElapsed, maxPerAgent));
   }
   const agentLine = segments.join(DIM(agentSep));
 
   // Line 4: activity ticker
-  let tickerLine = '';
+  let tickerLine: string;
   if (tickerEvents.length > 0) {
     const parts = tickerEvents.map((e) => `${DIM(e.time)} ${e.text}`);
     tickerLine = `  \u21B3 ${parts.join(DIM('  \u00B7  '))}`;
@@ -431,7 +456,7 @@ function buildStatusBar() {
 /**
  * Paint the status bar at the bottom of the terminal.
  */
-export function drawStatusBar({ skipCursorSaveRestore = false } = {}) {
+export function drawStatusBar({ skipCursorSaveRestore = false } = {}): void {
   if (!statusBarActive || !isTTYCapable()) return;
   const { rows, cols } = getTermSize();
   const { dividerLine, contextLine, agentLine, tickerLine, spacerLine } = buildStatusBar();
@@ -443,11 +468,11 @@ export function drawStatusBar({ skipCursorSaveRestore = false } = {}) {
   // Save cursor position (caller may handle this externally)
   if (!skipCursorSaveRestore) process.stdout.write(`${ESC}s`);
 
-  process.stdout.write(`${ESC}${rows - 4};1H${pad(dividerLine)}`); // divider
-  process.stdout.write(`${ESC}${rows - 3};1H${pad(contextLine)}`); // context + gauge
-  process.stdout.write(`${ESC}${rows - 2};1H${pad(agentLine)}`); // agent status
-  process.stdout.write(`${ESC}${rows - 1};1H${pad(tickerLine)}`); // activity ticker
-  process.stdout.write(`${ESC}${rows};1H${pad(spacerLine)}`); // spacer
+  process.stdout.write(`${ESC}${String(rows - 4)};1H${pad(dividerLine)}`); // divider
+  process.stdout.write(`${ESC}${String(rows - 3)};1H${pad(contextLine)}`); // context + gauge
+  process.stdout.write(`${ESC}${String(rows - 2)};1H${pad(agentLine)}`); // agent status
+  process.stdout.write(`${ESC}${String(rows - 1)};1H${pad(tickerLine)}`); // activity ticker
+  process.stdout.write(`${ESC}${String(rows)};1H${pad(spacerLine)}`); // spacer
 
   // Restore cursor position (caller may handle this externally)
   if (!skipCursorSaveRestore) process.stdout.write(`${ESC}u`);
@@ -457,10 +482,10 @@ export function drawStatusBar({ skipCursorSaveRestore = false } = {}) {
  * Initialize the status bar: set scroll region, register agents, paint initial state.
  * @param {string[]} agents - Agent names to display
  */
-export function initStatusBar(agents: string[]) {
+export function initStatusBar(agents: string[]): void {
   if (!isTTYCapable()) return;
 
-  registeredAgents = (agents || []).map((a: string) => a.toLowerCase());
+  registeredAgents = agents.map((a: string) => a.toLowerCase());
 
   // Initialize all agents as inactive
   for (const agent of registeredAgents) {
@@ -491,13 +516,13 @@ export function initStatusBar(agents: string[]) {
       process.stdout.write(`${ESC}u`);
     }
   }, REFRESH_INTERVAL_MS);
-  if (refreshInterval.unref) refreshInterval.unref();
+  refreshInterval.unref();
 }
 
 /**
  * Destroy the status bar: reset scroll region, clear footer lines.
  */
-export function destroyStatusBar() {
+export function destroyStatusBar(): void {
   if (!statusBarActive) return;
   statusBarActive = false;
 
@@ -512,7 +537,7 @@ export function destroyStatusBar() {
 
     // Clear the status bar lines
     for (let i = STATUS_BAR_HEIGHT - 1; i >= 0; i--) {
-      process.stdout.write(`${ESC}${rows - i};1H`);
+      process.stdout.write(`${ESC}${String(rows - i)};1H`);
       process.stdout.write(`${ESC}2K`);
     }
 
@@ -531,7 +556,7 @@ function onResize() {
   // Without this, stale lines at the old terminal height remain on screen.
   if (_prevStatusBarRows > 0 && _prevStatusBarRows !== newRows) {
     for (let i = STATUS_BAR_HEIGHT - 1; i >= 0; i--) {
-      process.stdout.write(`${ESC}${_prevStatusBarRows - i};1H${ESC}2K`);
+      process.stdout.write(`${ESC}${String(_prevStatusBarRows - i)};1H${ESC}2K`);
     }
   }
   _prevStatusBarRows = newRows;
@@ -556,7 +581,7 @@ function setupMetricsListener() {
   });
 
   metricsEmitter.on('call:error', ({ agent, error }) => {
-    const errorShort = String(error || 'Error').slice(0, 30);
+    const errorShort = String(error ?? 'Error').slice(0, 30);
     setAgentActivity(agent, 'error', errorShort);
     drawStatusBar();
   });
@@ -567,7 +592,7 @@ setupMetricsListener();
 
 // ── SSE Event Stream ────────────────────────────────────────────────────────
 
-let sseRequest: import('node:http').ClientRequest | null = null;
+let sseRequest: ClientRequest | null = null;
 let sseReconnectTimer: ReturnType<typeof setTimeout> | null = null;
 const SSE_RECONNECT_DELAY_MS = 3000;
 
@@ -586,22 +611,22 @@ function handleSSEEvent(data: string, agents: string[]) {
 
   switch (payload.event) {
     case 'handoff_ack': {
-      const agent = String(payload.agent || '').toLowerCase();
+      const agent = String(payload.agent ?? '').toLowerCase();
       if (agentList.has(agent)) {
         const hSummary = payload.summary ? ` (${String(payload.summary).slice(0, 30)})` : '';
-        setAgentActivity(agent, 'working', `Ack'd ${payload.handoffId || '?'}`);
-        pushTickerEvent(`${agent} ack'd ${payload.handoffId || '?'}${hSummary}`, 'handoff');
+        setAgentActivity(agent, 'working', `Ack'd ${String(payload.handoffId ?? '?')}`);
+        pushTickerEvent(`${agent} ack'd ${String(payload.handoffId ?? '?')}${hSummary}`, 'handoff');
         emitActivityEvent({
           event: 'handoff_ack',
           agent,
-          detail: `${payload.handoffId}${hSummary}`,
+          detail: `${String(payload.handoffId ?? '')}${hSummary}`,
         });
       }
       break;
     }
     case 'handoff': {
-      const to = String(payload.to || '').toLowerCase();
-      const from = String(payload.from || '').toLowerCase();
+      const to = String(payload.to ?? '').toLowerCase();
+      const from = String(payload.from ?? '').toLowerCase();
       const hSummary = payload.summary ? ` (${String(payload.summary).slice(0, 30)})` : '';
       if (agentList.has(to)) {
         // Don't clobber rich task-title status set within the last 5 seconds
@@ -617,51 +642,53 @@ function handleSSEEvent(data: string, agents: string[]) {
       break;
     }
     case 'task_claim': {
-      const agent = String(payload.agent || '').toLowerCase();
+      const agent = String(payload.agent ?? '').toLowerCase();
       if (agentList.has(agent)) {
-        const title = String(payload.title || '').slice(0, 40);
-        setAgentActivity(agent, 'working', title || 'Working', { taskTitle: title || null });
-        pushTickerEvent(`${agent} claimed ${title || 'task'}`, 'claim');
+        const title = String(payload.title ?? '').slice(0, 40);
+        setAgentActivity(agent, 'working', title.length > 0 ? title : 'Working', {
+          taskTitle: title.length > 0 ? title : null,
+        });
+        pushTickerEvent(`${agent} claimed ${title.length > 0 ? title : 'task'}`, 'claim');
         emitActivityEvent({ event: 'task_claim', agent, detail: title });
       }
       break;
     }
     case 'task_add': {
-      const owner = String(payload.owner || '').toLowerCase();
-      const title = String(payload.title || '').slice(0, 40);
+      const owner = String(payload.owner ?? '').toLowerCase();
+      const title = String(payload.title ?? '').slice(0, 40);
       openTaskCount++;
-      pushTickerEvent(`${title}`, 'add');
+      pushTickerEvent(title, 'add');
       if (agentList.has(owner)) {
         emitActivityEvent({ event: 'task_add', agent: owner, detail: title });
       }
       break;
     }
     case 'task_update': {
-      const status = String(payload.status || '').toLowerCase();
-      const owner = String(payload.owner || '').toLowerCase();
+      const status = String(payload.status ?? '').toLowerCase();
+      const owner = String(payload.owner ?? '').toLowerCase();
       const tTitle = payload.title ? ` (${String(payload.title).slice(0, 30)})` : '';
       if (status === 'done') {
         openTaskCount = Math.max(0, openTaskCount - 1);
         if (agentList.has(owner)) {
           setAgentActivity(owner, 'idle', 'Done');
         }
-        pushTickerEvent(`${payload.taskId || '?'}${tTitle} done`, 'done');
+        pushTickerEvent(`${String(payload.taskId ?? '?')}${tTitle} done`, 'done');
         emitActivityEvent({
           event: 'task_done',
           agent: owner,
-          detail: `${payload.taskId}${tTitle}`,
+          detail: `${String(payload.taskId ?? '')}${tTitle}`,
         });
       } else if (status === 'blocked') {
         if (agentList.has(owner)) {
-          setAgentActivity(owner, 'error', `Blocked \u2014 ${payload.taskId || '?'}`);
+          setAgentActivity(owner, 'error', `Blocked \u2014 ${String(payload.taskId ?? '?')}`);
         }
-        pushTickerEvent(`${payload.taskId || '?'}${tTitle} blocked`, 'blocked');
+        pushTickerEvent(`${String(payload.taskId ?? '?')}${tTitle} blocked`, 'blocked');
       }
       break;
     }
     case 'verify': {
       const passed = payload.passed;
-      const taskId = payload.taskId || '?';
+      const taskId = String(payload.taskId ?? '?');
       pushTickerEvent(
         `verify ${taskId}: ${passed ? 'PASS' : 'FAIL'}`,
         passed ? 'verify_pass' : 'verify_fail',
@@ -674,17 +701,17 @@ function handleSSEEvent(data: string, agents: string[]) {
       break;
     }
     case 'decision': {
-      const title = String(payload.title || '').slice(0, 40);
-      pushTickerEvent(`${title}`, 'decision');
+      const title = String(payload.title ?? '').slice(0, 40);
+      pushTickerEvent(title, 'decision');
       break;
     }
     case 'task_stale': {
-      const owner = String(payload.owner || '').toLowerCase();
+      const owner = String(payload.owner ?? '').toLowerCase();
       const sTitle = payload.title ? ` (${String(payload.title).slice(0, 30)})` : '';
       if (agentList.has(owner)) {
-        setAgentActivity(owner, 'error', `${payload.taskId} stale`);
+        setAgentActivity(owner, 'error', `${String(payload.taskId ?? '')} stale`);
       }
-      pushTickerEvent(`${payload.taskId || '?'}${sTitle} stale (${owner})`, 'stale');
+      pushTickerEvent(`${String(payload.taskId ?? '?')}${sTitle} stale (${owner})`, 'stale');
       break;
     }
     default:
@@ -700,10 +727,10 @@ function handleSSEEvent(data: string, agents: string[]) {
  * @param {string} baseUrl - Daemon base URL (e.g. http://127.0.0.1:4173)
  * @param {string[]} agents - Agent names to track
  */
-export function startEventStream(baseUrl: string, agents: string[]) {
+export function startEventStream(baseUrl: string, agents: string[]): void {
   if (!isTTYCapable()) return;
 
-  const agentList = (agents || []).map((a) => a.toLowerCase());
+  const agentList = agents.map((a) => a.toLowerCase());
   const url = new URL('/events/stream', baseUrl);
 
   function connect() {
@@ -730,11 +757,11 @@ export function startEventStream(baseUrl: string, agents: string[]) {
       let buffer = '';
 
       res.on('data', (chunk) => {
-        buffer += chunk;
+        buffer += String(chunk);
         // Process complete SSE messages (terminated by \n\n)
         const messages = buffer.split('\n\n');
         // Keep the last incomplete chunk
-        buffer = messages.pop() || '';
+        buffer = messages.pop() ?? '';
 
         for (const msg of messages) {
           const lines = msg.split('\n');
@@ -749,13 +776,17 @@ export function startEventStream(baseUrl: string, agents: string[]) {
 
       res.on('end', () => {
         // Connection closed — reconnect after delay
-        sseReconnectTimer = setTimeout(() => connect(), SSE_RECONNECT_DELAY_MS);
-        if (sseReconnectTimer.unref) sseReconnectTimer.unref();
+        sseReconnectTimer = setTimeout(() => {
+          connect();
+        }, SSE_RECONNECT_DELAY_MS);
+        sseReconnectTimer.unref();
       });
 
       res.on('error', () => {
-        sseReconnectTimer = setTimeout(() => connect(), SSE_RECONNECT_DELAY_MS);
-        if (sseReconnectTimer.unref) sseReconnectTimer.unref();
+        sseReconnectTimer = setTimeout(() => {
+          connect();
+        }, SSE_RECONNECT_DELAY_MS);
+        sseReconnectTimer.unref();
       });
     });
 
@@ -765,11 +796,9 @@ export function startEventStream(baseUrl: string, agents: string[]) {
     });
 
     // Don't keep process alive
-    if (sseRequest.socket) {
-      sseRequest.socket.unref();
-    }
+    sseRequest.socket?.unref();
     sseRequest.on('socket', (socket) => {
-      if (socket.unref) socket.unref();
+      socket.unref();
     });
   }
 
@@ -779,7 +808,7 @@ export function startEventStream(baseUrl: string, agents: string[]) {
 /**
  * Stop the SSE event stream and any reconnect timers.
  */
-export function stopEventStream() {
+export function stopEventStream(): void {
   if (sseRequest) {
     try {
       sseRequest.destroy();
@@ -814,43 +843,43 @@ function startFallbackPolling(baseUrl: string, agents: string[]) {
   if (pollInterval) return;
   if (!isTTYCapable()) return;
 
-  const agentList = (agents || []).map((a) => a.toLowerCase());
+  const agentList = agents.map((a) => a.toLowerCase());
 
-  pollInterval = setInterval(async () => {
-    for (const agent of agentList) {
-      const current = getAgentActivity(agent);
-      // Don't overwrite real-time working state from metrics events
-      if (current.status === 'working') continue;
+  pollInterval = setInterval(() => {
+    void (async () => {
+      for (const agent of agentList) {
+        const current = getAgentActivity(agent);
+        // Don't overwrite real-time working state from metrics events
+        if (current.status === 'working') continue;
 
-      try {
-        const url = new URL(`/next?agent=${encodeURIComponent(agent)}`, baseUrl);
-        const res = await fetch(url.href, { signal: AbortSignal.timeout(1500) });
-        if (!res.ok) continue;
-        const data = (await res.json()) as any;
-        const action = data?.next?.action;
+        try {
+          const url = new URL(`/next?agent=${encodeURIComponent(agent)}`, baseUrl);
+          const res = await fetch(url.href, { signal: AbortSignal.timeout(1500) });
+          if (!res.ok) continue;
+          const data = (await res.json()) as { next?: { action?: string } };
+          const action = data.next?.action;
 
-        if (action === 'continue_task' || action === 'pickup_handoff') {
-          setAgentActivity(agent, 'idle', `Pending: ${action.replace(/_/g, ' ')}`);
-        } else if (action === 'idle') {
-          setAgentActivity(agent, 'idle', 'Idle');
-        } else if (action === 'resolve_blocker') {
-          setAgentActivity(agent, 'error', 'Blocked');
-        } else if (action && action !== 'unknown') {
-          setAgentActivity(agent, 'idle', action.replace(/_/g, ' '));
-        } else if (current.status === 'inactive') {
-          setAgentActivity(agent, 'idle', 'Idle');
+          if (action === 'continue_task' || action === 'pickup_handoff') {
+            setAgentActivity(agent, 'idle', `Pending: ${action.replace(/_/g, ' ')}`);
+          } else if (action === 'idle') {
+            setAgentActivity(agent, 'idle', 'Idle');
+          } else if (action === 'resolve_blocker') {
+            setAgentActivity(agent, 'error', 'Blocked');
+          } else if (action && action !== 'unknown') {
+            setAgentActivity(agent, 'idle', action.replace(/_/g, ' '));
+          } else if (current.status === 'inactive') {
+            setAgentActivity(agent, 'idle', 'Idle');
+          }
+        } catch {
+          // Network error - don't change state, just skip
         }
-      } catch {
-        // Network error - don't change state, just skip
       }
-    }
-    drawStatusBar();
+      drawStatusBar();
+    })();
   }, POLL_INTERVAL_MS);
 
   // Don't let the poll interval keep the process alive
-  if (pollInterval.unref) {
-    pollInterval.unref();
-  }
+  pollInterval.unref();
 }
 
 function stopFallbackPolling() {
@@ -865,7 +894,7 @@ function stopFallbackPolling() {
 /**
  * @deprecated Use startEventStream() instead. Kept for backward compatibility.
  */
-export function startPolling(baseUrl: string, agents: string[]) {
+export function startPolling(baseUrl: string, agents: string[]): void {
   // Try SSE first, fall back to polling automatically
   startEventStream(baseUrl, agents);
 }
@@ -873,6 +902,6 @@ export function startPolling(baseUrl: string, agents: string[]) {
 /**
  * @deprecated Use stopEventStream() instead. Kept for backward compatibility.
  */
-export function stopPolling() {
+export function stopPolling(): void {
   stopEventStream();
 }
