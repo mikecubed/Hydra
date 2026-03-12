@@ -449,12 +449,12 @@ export function pushBranchAndCreatePR(opts: PushAndCreatePROpts = {}): PRResult 
   // Auto-generate title from branch name if not provided
   const title =
     opts.title ??
-    branch
+    (branch
       .replace(/^(evolve|nightly)\//, '')
       .replace(/[/_-]/g, ' ')
       .replace(/\b\w/g, (c) => c.toUpperCase())
       .trim() ||
-    branch;
+    branch);
 
   // Auto-generate body from commit log if not provided
   let body = opts.body ?? '';

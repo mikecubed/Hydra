@@ -201,7 +201,7 @@ export async function endAgentSpan(
   span: OTelSpan & { _noop?: boolean },
   result: AgentResult,
 ): Promise<void> {
-  if (span._noop) return;
+  if (!span || span._noop) return;
 
   const api = await loadOTel();
   if (!api) return;
@@ -279,7 +279,7 @@ export async function endProviderSpan(
   usage?: TokenUsage | null,
   latencyMs?: number | null,
 ): Promise<void> {
-  if (span._noop) return;
+  if (!span || span._noop) return;
 
   const api = await loadOTel();
   if (!api) return;
@@ -337,7 +337,7 @@ export async function endPipelineSpan(
   span: OTelSpan & { _noop?: boolean },
   opts: PipelineSpanOpts = {},
 ): Promise<void> {
-  if (span._noop) return;
+  if (!span || span._noop) return;
 
   const api = await loadOTel();
   if (!api) return;
