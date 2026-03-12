@@ -66,7 +66,7 @@ Use CLAUDE.md chaining when you need one agent to occasionally consult another. 
 
 ## Quick Start
 
-**Requirements:** Node.js 22.18.0+, at least one AI CLI installed ([`gemini`](https://github.com/google-gemini/gemini-cli), [`codex`](https://github.com/openai/codex), [`claude`](https://docs.anthropic.com/en/docs/claude-code), or [`copilot`](https://github.com/github/copilot-cli))
+**Requirements:** Node.js 24.0.0+, at least one AI CLI installed ([`gemini`](https://github.com/google-gemini/gemini-cli), [`codex`](https://github.com/openai/codex), [`claude`](https://docs.anthropic.com/en/docs/claude-code), or [`copilot`](https://github.com/github/copilot-cli))
 
 ```bash
 # 1. Install

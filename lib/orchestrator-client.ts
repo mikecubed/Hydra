@@ -39,7 +39,7 @@ import type { ModelSummaryEntry } from './types.ts';
 import pc from 'picocolors';
 import { spawnHydraNodeSync } from './hydra-exec.ts';
 
-const DEFAULT_URL = process.env['AI_ORCH_URL'] || 'http://127.0.0.1:4173';
+const DEFAULT_URL = process.env['AI_ORCH_URL'] ?? 'http://127.0.0.1:4173';
 
 function print(data: unknown) {
   console.log(JSON.stringify(data, null, 2));
@@ -83,7 +83,7 @@ function printHelp() {
 
 async function main() {
   const { command, options } = parseArgsWithCommand(process.argv);
-  const baseUrl = String(getOption(options, 'url', DEFAULT_URL));
+  const baseUrl = getOption(options, 'url', DEFAULT_URL);
   const jsonMode = getOption(options, 'json', 'false') === 'true';
 
   try {
@@ -94,7 +94,7 @@ async function main() {
         printHelp();
         return;
       case 'status': {
-        const data = (await request('GET', baseUrl, '/health')) as Record<string, unknown>;
+        const data = await request<Record<string, unknown>>('GET', baseUrl, '/health');
         if (jsonMode) {
           print(data);
           return;
@@ -102,17 +102,29 @@ async function main() {
         console.log('');
         console.log(hydraLogoCompact());
         console.log(label('Status', data['running'] ? SUCCESS('running') : ERROR('stopped')));
-        console.log(label('PID', pc.white(String(data['pid'] || '?'))));
-        console.log(label('Uptime', pc.white(`${data['uptimeSec'] || 0}s`)));
-        console.log(label('Project', pc.white(String(data['project'] || '?'))));
-        console.log(label('Events', pc.white(String(data['eventsRecorded'] || 0))));
+        console.log(label('PID', pc.white((data['pid'] as string | null | undefined) ?? '?')));
+        console.log(
+          label(
+            'Uptime',
+            pc.white(`${String((data['uptimeSec'] as number | null | undefined) ?? 0)}s`),
+          ),
+        );
+        console.log(
+          label('Project', pc.white((data['project'] as string | null | undefined) ?? '?')),
+        );
+        console.log(
+          label(
+            'Events',
+            pc.white(String((data['eventsRecorded'] as number | null | undefined) ?? 0)),
+          ),
+        );
         console.log(label('Last event', relativeTime(data['lastEventAt'] as string)));
         console.log(label('State updated', relativeTime(data['stateUpdatedAt'] as string)));
         console.log('');
         return;
       }
       case 'summary': {
-        const data = (await request('GET', baseUrl, '/summary')) as Record<string, unknown>;
+        const data = await request<Record<string, unknown>>('GET', baseUrl, '/summary');
         if (jsonMode) {
           print(data);
           return;
@@ -158,11 +170,11 @@ async function main() {
         return;
       case 'next': {
         const agent = requireOption(options, 'agent');
-        const data = (await request(
+        const data = await request<Record<string, unknown>>(
           'GET',
           baseUrl,
           `/next?agent=${encodeURIComponent(agent)}`,
-        )) as Record<string, unknown>;
+        );
         if (jsonMode) {
           print(data);
           return;
@@ -170,16 +182,21 @@ async function main() {
         const next = data['next'] as Record<string, unknown>;
         console.log('');
         console.log(`  ${agentBadge(agent)}  ${pc.white(next['action'] as string)}`);
-        console.log(label('Message', String(next['message'] || 'n/a')));
+        console.log(label('Message', (next['message'] as string | null | undefined) ?? 'n/a'));
         if (next['task']) {
           const t = next['task'] as Record<string, unknown>;
           console.log(
-            label('Task', `${pc.bold(t['id'] as string)} ${DIM(String(t['title'] || ''))}`),
+            label(
+              'Task',
+              `${pc.bold(t['id'] as string)} ${DIM((t['title'] as string | null | undefined) ?? '')}`,
+            ),
           );
         }
         if (next['handoff']) {
           const h = next['handoff'] as Record<string, unknown>;
-          console.log(label('Handoff', `${pc.bold(h['id'] as string)} from ${h['from']}`));
+          console.log(
+            label('Handoff', `${pc.bold(h['id'] as string)} from ${h['from'] as string}`),
+          );
         }
         console.log('');
         return;
@@ -235,22 +252,22 @@ async function main() {
         const payload: Record<string, unknown> = {
           taskId: requireOption(options, 'taskId'),
         };
-        if (options['status'] !== undefined) {
+        if ('status' in options) {
           payload['status'] = getOption(options, 'status');
         }
-        if (options['owner'] !== undefined) {
+        if ('owner' in options) {
           payload['owner'] = getOption(options, 'owner');
         }
-        if (options['notes'] !== undefined) {
+        if ('notes' in options) {
           payload['notes'] = getOption(options, 'notes');
         }
-        if (options['files'] !== undefined) {
+        if ('files' in options) {
           payload['files'] = parseList(getOption(options, 'files'));
         }
-        if (options['title'] !== undefined) {
+        if ('title' in options) {
           payload['title'] = getOption(options, 'title');
         }
-        if (options['blockedBy'] !== undefined) {
+        if ('blockedBy' in options) {
           payload['blockedBy'] = parseList(getOption(options, 'blockedBy'));
         }
 
@@ -298,7 +315,11 @@ async function main() {
       case 'events': {
         const limit = Number.parseInt(getOption(options, 'limit', '50'), 10);
         print(
-          await request('GET', baseUrl, `/events?limit=${Number.isFinite(limit) ? limit : 50}`),
+          await request(
+            'GET',
+            baseUrl,
+            `/events?limit=${String(Number.isFinite(limit) ? limit : 50)}`,
+          ),
         );
         return;
       }
@@ -344,7 +365,7 @@ async function main() {
         }
 
         // Handle mode= switch
-        const modeVal = String(getOption(options, 'mode', ''));
+        const modeVal = getOption(options, 'mode', '');
         if (modeVal) {
           try {
             setMode(modeVal);
@@ -372,7 +393,7 @@ async function main() {
                 `  ${SUCCESS('\u2713')} ${pc.bold(agent)} ${DIM('\u2192')} ${pc.white(resolved)} ${DIM('(following mode)')}`,
               );
             } else {
-              const resolved = setActiveModel(agent, String(model));
+              const resolved = setActiveModel(agent, model as string);
               console.log(
                 `  ${SUCCESS('\u2713')} ${pc.bold(agent)} ${DIM('\u2192')} ${pc.white(resolved)}`,
               );
@@ -384,11 +405,11 @@ async function main() {
 
         // Show current models with mode info
         const summary = getModelSummary();
-        const currentMode = (summary as Record<string, unknown>)['_mode'] || getMode();
+        const currentMode = (summary['_mode'] as string | undefined) ?? getMode();
         console.log('');
         console.log(hydraLogoCompact());
         console.log(sectionHeader('Active Models'));
-        console.log(`  ${pc.bold('Mode:')} ${ACCENT(String(currentMode))}`);
+        console.log(`  ${pc.bold('Mode:')} ${ACCENT(currentMode)}`);
         console.log('');
         for (const [agent, info] of Object.entries(summary)) {
           if (agent === '_mode') continue;
@@ -397,7 +418,7 @@ async function main() {
           const model = typedInfo.isOverride ? pc.white(typedInfo.active) : DIM(typedInfo.active);
           const tag = typedInfo.isOverride
             ? WARNING('(override)')
-            : DIM(`(${typedInfo.tierSource})`);
+            : DIM(`(${typedInfo.tierSource ?? ''})`);
           const effort = typedInfo.reasoningEffort
             ? pc.yellow(` [${typedInfo.reasoningEffort}]`)
             : '';
@@ -448,21 +469,21 @@ async function main() {
         }
 
         console.log('');
-        const modelId = await pickModel(agentName as string);
+        const modelId = await pickModel(agentName);
         if (!modelId) {
           console.log(DIM('  Cancelled.\n'));
           return;
         }
 
-        const current = getActiveModel(agentName as string);
+        const current = getActiveModel(agentName);
         if (modelId === current) {
           console.log(`\n  ${DIM(`${modelId} is already active for ${agentName}.`)}\n`);
           return;
         }
 
-        const resolved = applySelection(agentName as string, modelId, null);
+        const resolved = applySelection(agentName, modelId, null);
         console.log(
-          `\n  ${SUCCESS('\u2713')} ${pc.bold(agentName as string)} → ${pc.white(resolved)}  ${DIM('(mode → custom)')}\n`,
+          `\n  ${SUCCESS('\u2713')} ${pc.bold(agentName)} → ${pc.white(resolved)}  ${DIM('(mode → custom)')}\n`,
         );
         return;
       }
@@ -489,7 +510,9 @@ async function main() {
         if (initResult.status === 0) {
           console.log(`  ${SUCCESS('\u2713')} Coordination files created`);
         } else {
-          console.log(`  ${WARNING('\u26A0')} ${initResult.stderr || 'init had warnings'}`);
+          console.log(
+            `  ${WARNING('\u26A0')} ${(initResult.stderr as string) || 'init had warnings'}`,
+          );
         }
 
         // Run doctor
@@ -513,8 +536,8 @@ async function main() {
     }
   } catch (err) {
     console.error(`Error: ${(err as Error).message}`);
-    process.exit(1);
+    process.exitCode = 1;
   }
 }
 
-main();
+void main();
