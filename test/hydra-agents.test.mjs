@@ -1,5 +1,8 @@
-import test from 'node:test';
+import test, { describe, it, beforeEach, afterEach } from 'node:test';
 import assert from 'node:assert/strict';
+import os from 'node:os';
+import path from 'node:path';
+import fs from 'node:fs';
 import {
   AGENTS,
   AGENT_NAMES,
@@ -22,6 +25,7 @@ import {
   AFFINITY_PRESETS,
   saveHydraConfig,
   _setTestConfig,
+  _setTestConfigPath,
   invalidateConfigCache,
 } from '../lib/hydra-config.ts';
 
@@ -563,12 +567,6 @@ test('each AFFINITY_PRESETS entry covers all 10 task types with numbers', () => 
 });
 
 // ── Custom physical agents (CLI + API) ────────────────────────────────────────
-
-import { describe, it, beforeEach, afterEach } from 'node:test';
-import os from 'node:os';
-import path from 'node:path';
-import fs from 'node:fs';
-import { _setTestConfigPath } from '../lib/hydra-config.ts';
 
 describe('initAgentRegistry — custom physical agents', () => {
   let tmpDir;

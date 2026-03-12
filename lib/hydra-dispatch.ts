@@ -317,10 +317,26 @@ async function main() {
   const criticAgent = getRoleAgent('critic', installedCLIs);
   const synthesizerAgent = getRoleAgent('synthesizer', installedCLIs);
 
-  // Resolve per-role model overrides (null means "use agent default")
-  const coordinatorModel = getRoleConfig('coordinator')?.model ?? null;
-  const criticModel = getRoleConfig('critic')?.model ?? null;
-  const synthesizerModel = getRoleConfig('synthesizer')?.model ?? null;
+  // Resolve per-role model overrides, validating each against the resolved agent.
+  // If the configured model doesn't belong to the resolved agent (e.g., role configured
+  // for copilot with a copilot-* model but copilot isn't installed and fell back to claude),
+  // clear the override so the agent uses its own default model.
+  const _coordinatorModelRaw = getRoleConfig('coordinator')?.model ?? null;
+  const _criticModelRaw = getRoleConfig('critic')?.model ?? null;
+  const _synthesizerModelRaw = getRoleConfig('synthesizer')?.model ?? null;
+
+  const coordinatorModel =
+    _coordinatorModelRaw && getAgent(coordinatorAgent)?.modelBelongsTo(_coordinatorModelRaw)
+      ? _coordinatorModelRaw
+      : null;
+  const criticModel =
+    _criticModelRaw && getAgent(criticAgent)?.modelBelongsTo(_criticModelRaw)
+      ? _criticModelRaw
+      : null;
+  const synthesizerModel =
+    _synthesizerModelRaw && getAgent(synthesizerAgent)?.modelBelongsTo(_synthesizerModelRaw)
+      ? _synthesizerModelRaw
+      : null;
 
   type DispatchSlot = {
     ok?: boolean;
