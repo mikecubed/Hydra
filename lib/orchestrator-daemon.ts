@@ -43,6 +43,8 @@ import type {
   TaskEntry,
   HandoffEntry,
   BlockerEntry,
+  DecisionEntry,
+  ArchiveState,
   WriteRouteCtx,
   UsageCheckResult,
   ModelSummaryEntry,
@@ -110,7 +112,7 @@ function createDefaultState() {
 
 function normalizeState(raw: unknown): HydraStateShape {
   const defaults = createDefaultState();
-  const safe = (raw && typeof raw === 'object' ? raw : {}) as Record<string, unknown>;
+  const safe = (raw != null && typeof raw === 'object' ? raw : {}) as Record<string, unknown>;
 
   return {
     ...defaults,
@@ -119,10 +121,10 @@ function normalizeState(raw: unknown): HydraStateShape {
       ...(defaults.agents as Record<string, unknown>),
       ...((safe['agents'] ?? {}) as Record<string, unknown>),
     },
-    tasks: Array.isArray(safe['tasks']) ? safe['tasks'] : [],
-    decisions: Array.isArray(safe['decisions']) ? safe['decisions'] : [],
-    blockers: Array.isArray(safe['blockers']) ? safe['blockers'] : [],
-    handoffs: Array.isArray(safe['handoffs']) ? safe['handoffs'] : [],
+    tasks: Array.isArray(safe['tasks']) ? (safe['tasks'] as TaskEntry[]) : [],
+    decisions: Array.isArray(safe['decisions']) ? (safe['decisions'] as DecisionEntry[]) : [],
+    blockers: Array.isArray(safe['blockers']) ? (safe['blockers'] as BlockerEntry[]) : [],
+    handoffs: Array.isArray(safe['handoffs']) ? (safe['handoffs'] as HandoffEntry[]) : [],
     deadLetter: Array.isArray(safe['deadLetter']) ? safe['deadLetter'] : [],
     childSessions: Array.isArray(safe['childSessions']) ? safe['childSessions'] : [],
   };
@@ -219,7 +221,7 @@ function initEventSeq() {
   const lines = raw.split(/\r?\n/).filter(Boolean);
   for (let i = lines.length - 1; i >= 0; i--) {
     try {
-      const parsed = JSON.parse(lines[i]);
+      const parsed = JSON.parse(lines[i]) as { seq?: number };
       if (typeof parsed.seq === 'number' && parsed.seq > eventSeq) {
         eventSeq = parsed.seq;
       }
@@ -260,16 +262,18 @@ function appendEvent(type: string, payload?: unknown) {
   fs.appendFileSync(EVENTS_PATH, `${line}\n`, 'utf8');
 }
 
-function replayEvents(fromSeq = 0) {
+type EventRecord = { seq: number; at: string; type: string; category?: string; payload?: unknown };
+
+function replayEvents(fromSeq = 0): EventRecord[] {
   if (!fs.existsSync(EVENTS_PATH)) return [];
   const raw = fs.readFileSync(EVENTS_PATH, 'utf8');
   const lines = raw.split(/\r?\n/).filter(Boolean);
-  const events = [];
+  const events: EventRecord[] = [];
   for (const line of lines) {
     try {
-      const parsed = JSON.parse(line);
+      const parsed = JSON.parse(line) as { seq?: number } & Partial<EventRecord>;
       if (typeof parsed.seq === 'number' && parsed.seq >= fromSeq) {
-        events.push(parsed);
+        events.push(parsed as EventRecord);
       }
     } catch {
       /* skip malformed */
@@ -304,7 +308,7 @@ function nextId(prefix: string, items: unknown[]) {
  * @returns {string[]}
  */
 function parseList(value: unknown): string[] {
-  if (!value) {
+  if (value == null) {
     return [];
   }
   if (Array.isArray(value)) {
@@ -330,7 +334,8 @@ function runCommand(command: string) {
 }
 
 function getCurrentBranch() {
-  return runCommand('git branch --show-current') || 'unknown';
+  const branch = runCommand('git branch --show-current');
+  return branch === '' ? 'unknown' : branch;
 }
 
 function ensureKnownStatus(status: string) {
@@ -393,7 +398,7 @@ function autoUnblock(state: HydraStateShape, completedTaskId: string) {
     if (allDepsComplete) {
       task.status = 'todo';
       const note = `[AUTO] All dependencies completed (${task.blockedBy.join(',')}), moved to todo.`;
-      task.notes = task.notes ? `${task.notes}\n${note}` : note;
+      task.notes = task.notes === '' ? note : `${task.notes}\n${note}`;
       task.updatedAt = nowIso();
     }
   }
@@ -441,7 +446,7 @@ function buildPrompt(agent: string, state: HydraStateShape) {
     `Current branch: ${state.activeSession?.branch ?? getCurrentBranch()}`,
     '',
     'Open tasks:',
-    openTasks || '- none',
+    openTasks === '' ? '- none' : openTasks,
   ]
     .filter(Boolean)
     .join('\n');
@@ -509,11 +514,15 @@ function suggestNext(state: HydraStateShape, agent: string) {
 
   const pendingHandoff = [...state.handoffs]
     .reverse()
-    .find((handoff: HandoffEntry) => handoff.to === agent && !handoff.acknowledgedAt);
+    .find(
+      (handoff: HandoffEntry) =>
+        handoff.to === agent && (handoff.acknowledgedAt == null || handoff.acknowledgedAt === ''),
+    );
   if (pendingHandoff) {
-    const relatedTask = pendingHandoff.tasks
-      ? openTasks.find((task: TaskEntry) => pendingHandoff.tasks!.includes(task.id))
-      : null;
+    const relatedTask =
+      pendingHandoff.tasks == null
+        ? null
+        : openTasks.find((task: TaskEntry) => (pendingHandoff.tasks as string[]).includes(task.id));
     return {
       action: 'pickup_handoff',
       message: `${agent} has an unacknowledged handoff ${pendingHandoff.id}.`,
@@ -541,7 +550,7 @@ function suggestNext(state: HydraStateShape, agent: string) {
         ['unassigned', 'human', ''].includes(task.owner) && task.status === 'todo',
     )
     .map((task: TaskEntry) => {
-      const taskType = task.type || 'implementation';
+      const taskType = task.type === '' ? 'implementation' : task.type;
       const affinity =
         (agentConfig?.taskAffinity as Record<string, number> | undefined)?.[taskType] ?? 0.5;
       // Check if a virtual agent has better affinity for this task type
@@ -567,7 +576,7 @@ function suggestNext(state: HydraStateShape, agent: string) {
       message: `${agent} can claim ${unassignedTodo.id} (type=${unassignedTodo.type}, affinity=${String(unassignedTodos[0].affinity)}).`,
       task: unassignedTodo,
     };
-    if (unassignedTodos[0].preferredAgent) {
+    if (unassignedTodos[0].preferredAgent != null && unassignedTodos[0].preferredAgent !== '') {
       (suggestion as Record<string, unknown>)['preferredAgent'] = unassignedTodos[0].preferredAgent;
     }
     return suggestion;
@@ -598,7 +607,7 @@ function parseArgs(argv: string[]) {
     if (token.includes('=')) {
       const [rawKey, ...rawValue] = token.split('=');
       const key = rawKey.trim();
-      if (key) {
+      if (key !== '') {
         options[key] = rawValue.join('=').trim();
       }
     }
@@ -630,7 +639,7 @@ function sendError(
 }
 
 function isAuthorized(req: IncomingMessage) {
-  if (!ORCH_TOKEN) {
+  if (ORCH_TOKEN === '') {
     return true;
   }
   return req.headers['x-ai-orch-token'] === ORCH_TOKEN;
@@ -654,10 +663,10 @@ async function readJsonBody(req: IncomingMessage) {
   }
 
   const raw = Buffer.concat(chunks).toString('utf8').trim();
-  if (!raw) {
+  if (raw === '') {
     return {};
   }
-  return JSON.parse(raw);
+  return JSON.parse(raw) as Record<string, unknown>;
 }
 
 function readEvents(limit = 50) {
@@ -670,10 +679,10 @@ function readEvents(limit = 50) {
     .map((line: string) => line.trim())
     .filter(Boolean);
 
-  const parsed = [];
+  const parsed: EventRecord[] = [];
   for (const line of lines) {
     try {
-      parsed.push(JSON.parse(line));
+      parsed.push(JSON.parse(line) as EventRecord);
     } catch {
       // Skip malformed lines.
     }
@@ -681,19 +690,19 @@ function readEvents(limit = 50) {
   return parsed.slice(-Math.max(1, Math.min(limit, 500)));
 }
 
-function readArchive() {
+function readArchive(): ArchiveState {
   if (!fs.existsSync(ARCHIVE_PATH)) {
-    return { archivedAt: null, tasks: [], handoffs: [], blockers: [] };
+    return { tasks: [], handoffs: [], blockers: [] };
   }
   try {
-    return JSON.parse(fs.readFileSync(ARCHIVE_PATH, 'utf8'));
+    return JSON.parse(fs.readFileSync(ARCHIVE_PATH, 'utf8')) as ArchiveState;
   } catch {
-    return { archivedAt: null, tasks: [], handoffs: [], blockers: [] };
+    return { tasks: [], handoffs: [], blockers: [] };
   }
 }
 
-function writeArchive(archive: Record<string, unknown>) {
-  archive['archivedAt'] = nowIso();
+function writeArchive(archive: ArchiveState) {
+  archive.archivedAt = nowIso();
   fs.writeFileSync(ARCHIVE_PATH, `${JSON.stringify(archive, null, 2)}\n`, 'utf8');
 }
 
@@ -719,7 +728,7 @@ function archiveState(state: HydraStateShape) {
   }
 
   const oldHandoffs = state.handoffs.filter((h: HandoffEntry) => {
-    if (!h.acknowledgedAt) {
+    if (h.acknowledgedAt == null || h.acknowledgedAt === '') {
       return false;
     }
     return new Date(h.acknowledgedAt).getTime() < oneHourAgo;
@@ -814,7 +823,7 @@ const idempotencyLog = new Map(); // key → timestamp
 const IDEMPOTENCY_TTL_MS = 5 * 60 * 1000;
 
 function checkIdempotency(key: string) {
-  if (!key) return false;
+  if (key === '') return false;
   const now = Date.now();
   // Prune stale entries periodically
   if (idempotencyLog.size > 200) {
@@ -831,7 +840,7 @@ async function requestJson(method: string, url: string, body: unknown = null) {
   const headers: Record<string, string> = {
     Accept: 'application/json',
   };
-  if (ORCH_TOKEN) {
+  if (ORCH_TOKEN !== '') {
     headers['x-ai-orch-token'] = ORCH_TOKEN;
   }
   if (body !== null) {
@@ -919,8 +928,9 @@ function createTaskWorktree(taskId: string) {
   try {
     const result = git(['worktree', 'add', worktreePath, '-b', branch, 'HEAD'], config.projectRoot);
     if (result.status !== 0) {
-      const errMsg = (result.stderr || result.stdout || '').trim();
-      console.warn(`[worktree] Failed to create worktree for task ${taskId}: ${errMsg}`);
+      const errMsg = ([result.stderr, result.stdout] as string[]).find((s) => s !== '') ?? '';
+      const errMsgTrimmed = errMsg.trim();
+      console.warn(`[worktree] Failed to create worktree for task ${taskId}: ${errMsgTrimmed}`);
       return null;
     }
     return worktreePath;
@@ -948,7 +958,7 @@ function mergeTaskWorktree(taskId: string) {
     const result = smartMerge(config.projectRoot, branch, currentBranch);
     if (!result.ok) {
       const conflictList =
-        (result as Record<string, unknown>)['conflicts'] &&
+        (result as Record<string, unknown>)['conflicts'] != null &&
         ((result as Record<string, unknown>)['conflicts'] as string[]).length > 0
           ? ((result as Record<string, unknown>)['conflicts'] as string[]).join(', ')
           : '(unknown)';
@@ -1103,7 +1113,7 @@ function startDaemon(options: Record<string, string>) {
   }
 
   function runVerification(taskId: string, plan: Record<string, unknown>) {
-    if (!plan['enabled'] || !plan['command']) {
+    if (plan['enabled'] !== true || plan['command'] == null || plan['command'] === '') {
       return;
     }
 
@@ -1111,15 +1121,16 @@ function startDaemon(options: Record<string, string>) {
 
     function handleVerificationResult(error: Error | null, stdout: string, stderr: string) {
       if (error) {
-        const snippet = (stderr || stdout || error.message).slice(0, 500);
+        const snippet = ([stderr, stdout, error.message] as string[]).find((s) => s !== '') ?? '';
+        const snippetSliced = snippet.slice(0, 500);
         void enqueueMutation(
           `verify:fail id=${taskId}`,
           (state: HydraStateShape) => {
             const task = state.tasks.find((t: TaskEntry) => t.id === taskId);
             if (task) {
               task.status = 'blocked';
-              const note = `[AUTO-VERIFY FAILED] ${String(plan['command'])}:\n${snippet}`;
-              task.notes = task.notes ? `${task.notes}\n${note}` : note;
+              const note = `[AUTO-VERIFY FAILED] ${String(plan['command'])}:\n${snippetSliced}`;
+              task.notes = task.notes === '' ? note : `${task.notes}\n${note}`;
               task.updatedAt = nowIso();
             }
           },
@@ -1129,7 +1140,7 @@ function startDaemon(options: Record<string, string>) {
           taskId,
           passed: false,
           command: plan['command'],
-          snippet,
+          snippet: snippetSliced,
         });
         return;
       }
@@ -1140,7 +1151,7 @@ function startDaemon(options: Record<string, string>) {
           const task = state.tasks.find((t) => t.id === taskId);
           if (task) {
             const note = `[AUTO-VERIFY PASSED] ${String(plan['command'])} completed cleanly.`;
-            task.notes = task.notes ? `${task.notes}\n${note}` : note;
+            task.notes = task.notes === '' ? note : `${task.notes}\n${note}`;
             task.updatedAt = nowIso();
           }
         },
@@ -1205,7 +1216,7 @@ function startDaemon(options: Record<string, string>) {
             /* ignore */
           }
         },
-        Math.max(1, (plan['timeoutMs'] as number) || 60_000),
+        Math.max(1, (plan['timeoutMs'] as number) === 0 ? 60_000 : (plan['timeoutMs'] as number)),
       );
 
       function finish(err: Error | null, code: number | null) {
@@ -1246,7 +1257,9 @@ function startDaemon(options: Record<string, string>) {
     } catch (err) {
       // If even the fallback can't start, treat as a failure but never throw.
       try {
-        const msg = ((err as Error).message || 'Verification failed to start.').slice(0, 500);
+        const msg = (
+          (err as Error).message === '' ? 'Verification failed to start.' : (err as Error).message
+        ).slice(0, 500);
         handleVerificationResult(new Error(msg), '', '');
       } catch {
         // ignore
@@ -1293,7 +1306,8 @@ function startDaemon(options: Record<string, string>) {
         sendJson,
         sendError,
         writeStatus,
-        readStatus: () => JSON.parse(fs.readFileSync(STATUS_PATH, 'utf8')),
+        readStatus: () =>
+          JSON.parse(fs.readFileSync(STATUS_PATH, 'utf8')) as Record<string, unknown>,
         checkUsage: checkUsage as unknown as () => UsageCheckResult,
         getModelSummary: getModelSummary as () => Record<string, ModelSummaryEntry>,
         readState,
@@ -1368,7 +1382,7 @@ function startDaemon(options: Record<string, string>) {
 
       sendError(res, 404, `Route not found: ${method} ${route}`);
     } catch (err) {
-      sendError(res, 400, (err as Error).message || 'Bad request');
+      sendError(res, 400, (err as Error).message === '' ? 'Bad request' : (err as Error).message);
     }
   });
 
@@ -1448,20 +1462,20 @@ function startDaemon(options: Record<string, string>) {
   function markStaleTasks() {
     try {
       const cfg = loadHydraConfig();
-      const heartbeatTimeoutMs =
-        Number(
+      const heartbeatTimeoutMsRaw = Number(
+        ((cfg as Record<string, unknown>)['workers'] as Record<string, unknown> | undefined)?.[
+          'heartbeatTimeoutMs'
+        ],
+      );
+      const heartbeatTimeoutMs = heartbeatTimeoutMsRaw === 0 ? 90_000 : heartbeatTimeoutMsRaw; // 90s default
+      const maxAttemptsRaw = Number(
+        (
           ((cfg as Record<string, unknown>)['workers'] as Record<string, unknown> | undefined)?.[
-            'heartbeatTimeoutMs'
-          ],
-        ) || 90_000; // 90s default
-      const maxAttempts =
-        Number(
-          (
-            ((cfg as Record<string, unknown>)['workers'] as Record<string, unknown> | undefined)?.[
-              'retry'
-            ] as Record<string, unknown> | undefined
-          )?.['maxAttempts'],
-        ) || 3;
+            'retry'
+          ] as Record<string, unknown> | undefined
+        )?.['maxAttempts'],
+      );
+      const maxAttempts = maxAttemptsRaw === 0 ? 3 : maxAttemptsRaw;
       const state = readState();
       const now = Date.now();
       let changed = false;
@@ -1471,30 +1485,42 @@ function startDaemon(options: Record<string, string>) {
 
         let isStale = false;
 
-        if ((task as Record<string, unknown>)['lastHeartbeat']) {
-          // Heartbeat-based detection (fast): 90s default timeout
-          const hbAge =
-            now - new Date((task as Record<string, unknown>)['lastHeartbeat'] as string).getTime();
-          isStale = hbAge > heartbeatTimeoutMs;
-        } else {
+        if ((task as Record<string, unknown>)['lastHeartbeat'] == null) {
           // Legacy: use updatedAt/checkpoint (30 min)
-          let lastActivity = task.updatedAt ? new Date(task.updatedAt).getTime() : 0;
+          let lastActivity = task.updatedAt === '' ? 0 : new Date(task.updatedAt).getTime();
           if (Array.isArray(task.checkpoints) && task.checkpoints.length > 0) {
             const lastCp = task.checkpoints.at(-1);
             const cpTime = lastCp ? new Date(lastCp['savedAt'] as string).getTime() : 0;
             if (cpTime > lastActivity) lastActivity = cpTime;
           }
           isStale = now - lastActivity > STALE_THRESHOLD_MS;
+        } else {
+          const hbAge =
+            now - new Date((task as Record<string, unknown>)['lastHeartbeat'] as string).getTime();
+          isStale = hbAge > heartbeatTimeoutMs;
         }
 
-        if (isStale && !task.stale) {
+        if (isStale && task.stale !== true) {
           task.stale = true;
           task.staleSince = nowIso();
           changed = true;
 
           // Heartbeat timeout: requeue or dead-letter based on failCount
-          if ((task as Record<string, unknown>)['lastHeartbeat']) {
-            const failCount = (((task as Record<string, unknown>)['failCount'] as number) || 0) + 1;
+          if ((task as Record<string, unknown>)['lastHeartbeat'] == null) {
+            broadcastEvent({
+              type: 'mutation',
+              payload: {
+                event: 'task_stale',
+                taskId: task.id,
+                owner: task.owner,
+                title: task.title,
+              },
+            });
+          } else {
+            const currentFailCount = (task as Record<string, unknown>)['failCount'] as
+              | number
+              | undefined;
+            const failCount = (currentFailCount ?? 0) + 1;
             (task as Record<string, unknown>)['failCount'] = failCount;
 
             if (failCount < maxAttempts) {
@@ -1551,18 +1577,8 @@ function startDaemon(options: Record<string, string>) {
                 category: 'heartbeat',
               });
             }
-          } else {
-            broadcastEvent({
-              type: 'mutation',
-              payload: {
-                event: 'task_stale',
-                taskId: task.id,
-                owner: task.owner,
-                title: task.title,
-              },
-            });
           }
-        } else if (!isStale && task.stale) {
+        } else if (!isStale && task.stale === true) {
           task.stale = false;
           delete task.staleSince;
           changed = true;
