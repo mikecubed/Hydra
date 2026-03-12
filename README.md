@@ -285,13 +285,13 @@ flowchart TD
 
 ```mermaid
 flowchart LR
-    Prompt[Prompt] --> Intent[Intent Gate]
-    Intent --> ConciergeFlow[Concierge]
-    ConciergeFlow --> Router[Route Classifier]
-    Router --> RouteChoice[single / tandem / council]
-    RouteChoice --> Queue[Daemon task queue]
-    Queue --> WorkerExec[Worker(s) claim and execute]
-    WorkerExec --> Result[Result + checkpoint]
+    Prompt["Prompt"] --> Intent["Intent Gate"]
+    Intent --> ConciergeFlow["Concierge"]
+    ConciergeFlow --> Router["Route Classifier"]
+    Router --> RouteChoice["single / tandem / council"]
+    RouteChoice --> Queue["Daemon task queue"]
+    Queue --> WorkerExec["Worker(s) claim and execute"]
+    WorkerExec --> Result["Result + checkpoint"]
 ```
 
 ## Documentation
