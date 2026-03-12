@@ -85,8 +85,10 @@ async function loadOTel(): Promise<OTelApi | null> {
   if (_otelApi) return _otelApi; // already loaded
 
   try {
-    // @ts-ignore — optional peer dep, may not be installed
-    _otelApi = (await import('@opentelemetry/api')) as OTelApi;
+    // @ts-expect-error — optional peer dep, may not be installed
+    const loadedApi = (await import('@opentelemetry/api')) as OTelApi;
+    // eslint-disable-next-line require-atomic-updates -- intentional: concurrent calls set same value
+    _otelApi = loadedApi;
     return _otelApi;
   } catch {
     _otelApi = false; // sentinel: don't try again
@@ -99,7 +101,7 @@ async function loadOTel(): Promise<OTelApi | null> {
  */
 export async function isTracingEnabled(): Promise<boolean> {
   const cfg = loadHydraConfig();
-  if ((cfg.telemetry as { enabled?: boolean })?.enabled === false) return false;
+  if ((cfg.telemetry as { enabled?: boolean }).enabled === false) return false;
   const api = await loadOTel();
   return api !== null;
 }
@@ -111,7 +113,9 @@ export async function getTracer(): Promise<OTelTracer | null> {
   if (_tracer) return _tracer;
   const api = await loadOTel();
   if (!api) return null;
-  _tracer = api.trace.getTracer('hydra', '1.0.0');
+  const tracer = api.trace.getTracer('hydra', '1.0.0');
+  // eslint-disable-next-line require-atomic-updates -- intentional: concurrent calls set same value
+  _tracer = tracer;
   return _tracer;
 }
 
@@ -197,7 +201,7 @@ export async function endAgentSpan(
   span: OTelSpan & { _noop?: boolean },
   result: AgentResult,
 ): Promise<void> {
-  if (!span || span._noop) return;
+  if (span._noop) return;
 
   const api = await loadOTel();
   if (!api) return;
@@ -213,14 +217,14 @@ export async function endAgentSpan(
   }
   if (result.recovered) {
     span.setAttribute('hydra.recovered', true);
-    span.setAttribute('hydra.original_model', result.originalModel || '');
-    span.setAttribute('hydra.new_model', result.newModel || '');
+    span.setAttribute('hydra.original_model', result.originalModel ?? '');
+    span.setAttribute('hydra.new_model', result.newModel ?? '');
   }
 
   if (result.ok) {
     span.setStatus({ code: api.SpanStatusCode.OK });
   } else {
-    span.setStatus({ code: api.SpanStatusCode.ERROR, message: result.error || 'agent failed' });
+    span.setStatus({ code: api.SpanStatusCode.ERROR, message: result.error ?? 'agent failed' });
     if (result.error) {
       span.recordException(new Error(result.error));
     }
@@ -275,14 +279,14 @@ export async function endProviderSpan(
   usage?: TokenUsage | null,
   latencyMs?: number | null,
 ): Promise<void> {
-  if (!span || span._noop) return;
+  if (span._noop) return;
 
   const api = await loadOTel();
   if (!api) return;
 
   if (usage) {
-    span.setAttribute('gen_ai.usage.input_tokens', usage.prompt_tokens || 0);
-    span.setAttribute('gen_ai.usage.output_tokens', usage.completion_tokens || 0);
+    span.setAttribute('gen_ai.usage.input_tokens', usage.prompt_tokens ?? 0);
+    span.setAttribute('gen_ai.usage.output_tokens', usage.completion_tokens ?? 0);
   }
   if (latencyMs != null) {
     span.setAttribute('hydra.latency_ms', latencyMs);
@@ -333,13 +337,13 @@ export async function endPipelineSpan(
   span: OTelSpan & { _noop?: boolean },
   opts: PipelineSpanOpts = {},
 ): Promise<void> {
-  if (!span || span._noop) return;
+  if (span._noop) return;
 
   const api = await loadOTel();
   if (!api) return;
 
   if (opts.ok === false) {
-    span.setStatus({ code: api.SpanStatusCode.ERROR, message: opts.error || 'pipeline failed' });
+    span.setStatus({ code: api.SpanStatusCode.ERROR, message: opts.error ?? 'pipeline failed' });
     if (opts.error) span.recordException(new Error(opts.error));
   } else {
     span.setStatus({ code: api.SpanStatusCode.OK });
