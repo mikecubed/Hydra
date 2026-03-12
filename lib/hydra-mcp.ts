@@ -340,8 +340,15 @@ export async function codexMCP(
       text = (result['content'] as Array<{ text?: string }>).map((c) => c.text ?? '').join('\n');
     } else if (typeof result?.['content'] === 'string') {
       text = result['content'];
-    } else {
+    } else if (result == null) {
       text = '';
+    } else {
+      // Fallback: preserve non-standard MCP responses instead of silently dropping them
+      try {
+        text = JSON.stringify(result);
+      } catch {
+        text = '';
+      }
     }
 
     const threadId = (result?.['conversationId'] ?? result?.['threadId'] ?? opts.threadId) as

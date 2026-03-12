@@ -101,7 +101,7 @@ async function loadOTel(): Promise<OTelApi | null> {
  */
 export async function isTracingEnabled(): Promise<boolean> {
   const cfg = loadHydraConfig();
-  if ((cfg.telemetry as { enabled?: boolean }).enabled === false) return false;
+  if ((cfg.telemetry as { enabled?: boolean } | undefined)?.enabled === false) return false;
   const api = await loadOTel();
   return api !== null;
 }

@@ -17,14 +17,14 @@ node --test 'test/**/*.test.{ts,mjs}'
 All T0–T8 phases have landed on `chore/quality-node24-plan` (PR #17). The branch is
 clean and all CI checks pass.
 
-| Check      | Baseline (start)              | Final state                    |
-| ---------- | ----------------------------- | ------------------------------ |
-| ESLint     | 2,975 errors / 5,777 warnings | **0 errors / 567 warnings**    |
-| Prettier   | Clean                         | **Clean**                      |
-| TypeScript | Clean                         | **Clean** (0 `tsc` errors)     |
+| Check      | Baseline (start)              | Final state                     |
+| ---------- | ----------------------------- | ------------------------------- |
+| ESLint     | 2,975 errors / 5,777 warnings | **0 errors / 567 warnings**     |
+| Prettier   | Clean                         | **Clean**                       |
+| TypeScript | Clean                         | **Clean** (0 `tsc` errors)      |
 | Tests      | 887 pass / 19 todo / 0 fail   | **939 pass / 19 todo / 0 fail** |
-| Node min   | 22 LTS                        | **24 LTS**                     |
-| CI matrix  | Node 20 + 22                  | **Node 24 only, strict gates** |
+| Node min   | 22 LTS                        | **24 LTS**                      |
+| CI matrix  | Node 20 + 22                  | **Node 24 only, strict gates**  |
 
 The 19 todo tests are intentional integration stubs in
 `test/hydra-worktree-isolation.test.mjs` — see the T0 audit section below.
@@ -289,7 +289,6 @@ lib/orchestrator-daemon.ts    (integration tests in orchestrator-daemon.integrat
 lib/sync.ts
 lib/types.ts                  (partially tested in hydra-types.test.ts)
 ```
-
 
 ### Highest-volume rules
 
