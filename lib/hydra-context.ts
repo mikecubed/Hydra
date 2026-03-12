@@ -1,4 +1,3 @@
-#!/usr/bin/env node
 /**
  * Project context builder for Hydra agent prompts.
  *
@@ -16,6 +15,11 @@ import path from 'node:path';
 import { getAgent } from './hydra-agents.ts';
 import { loadHydraConfig, resolveProject } from './hydra-config.ts';
 import { getCurrentBranch, git } from './hydra-shared/git-ops.ts';
+
+interface ProjectConfig {
+  projectRoot: string;
+  projectName?: string;
+}
 
 const CACHE_TTL_MS = 60 * 1000;
 let cachedMedium: string | null = null;
@@ -38,17 +42,15 @@ function readFileSafe(filePath: string, maxLines = 0) {
 }
 
 /** Read HYDRA.md first; fall back to CLAUDE.md. */
-function readInstructionFile(projectRoot: string, maxLines = 0) {
-  return (
-    readFileSafe(path.join(projectRoot, 'HYDRA.md'), maxLines) ||
-    readFileSafe(path.join(projectRoot, 'CLAUDE.md'), maxLines)
-  );
+function readInstructionFile(projectRoot: string, maxLines = 0): string {
+  const hydra = readFileSafe(path.join(projectRoot, 'HYDRA.md'), maxLines);
+  return hydra === '' ? readFileSafe(path.join(projectRoot, 'CLAUDE.md'), maxLines) : hydra;
 }
 
 function getRecentGitDiff(cwd: string, maxLines = 100) {
   const r = git(['diff', '--stat', 'HEAD~3..HEAD'], cwd);
   if (r.status !== 0) return '';
-  const diff = (r.stdout || '').trim();
+  const diff = r.stdout.trim();
   const lines = diff.split(/\r?\n/);
   if (lines.length > maxLines) {
     return `${lines.slice(0, maxLines).join('\n')}\n... (truncated)`;
@@ -62,7 +64,7 @@ function extractSection(content: string, heading: string) {
   if (!match) {
     return '';
   }
-  const start = match.index! + match[0].length;
+  const start = (match.index ?? 0) + match[0].length;
   const nextSection = content.indexOf('\n## ', start);
   const end = nextSection === -1 ? content.length : nextSection;
   return content.slice(start, end).trim();
@@ -78,7 +80,7 @@ function extractPriorities(todoContent: string) {
         .replace(/^- \[.\] \*\*/, '')
         .replace(/\*\*.*/, '')
         .trim();
-      if (cleaned) {
+      if (cleaned !== '') {
         priorities.push(cleaned);
       }
     }
@@ -94,17 +96,20 @@ function extractPriorities(todoContent: string) {
 function detectTechStack(projectRoot: string) {
   const parts = [];
   try {
-    const pkg = JSON.parse(fs.readFileSync(path.join(projectRoot, 'package.json'), 'utf8'));
-    const deps = { ...pkg.dependencies, ...pkg.devDependencies };
-    if (deps['react-native']) parts.push(`React Native ${String(deps['react-native'])}`);
-    if (deps['expo']) parts.push(`Expo ${String(deps['expo'])}`);
-    if (deps['next']) parts.push(`Next.js ${String(deps['next'])}`);
-    if (deps['react'] && !deps['react-native'] && !deps['next'])
-      parts.push(`React ${String(deps['react'])}`);
-    if (deps['vue']) parts.push(`Vue ${String(deps['vue'])}`);
-    if (deps['@supabase/supabase-js']) parts.push('Supabase');
-    if (deps['prisma'] || deps['@prisma/client']) parts.push('Prisma');
-    if (deps['typescript'] || deps['ts-node']) parts.push('TypeScript');
+    const pkg = JSON.parse(fs.readFileSync(path.join(projectRoot, 'package.json'), 'utf8')) as {
+      dependencies?: Record<string, string | undefined>;
+      devDependencies?: Record<string, string | undefined>;
+    };
+    const deps: Record<string, string | undefined> = { ...pkg.dependencies, ...pkg.devDependencies };
+    if (deps['react-native'] != null) parts.push(`React Native ${deps['react-native']}`);
+    if (deps['expo'] != null) parts.push(`Expo ${deps['expo']}`);
+    if (deps['next'] != null) parts.push(`Next.js ${deps['next']}`);
+    if (deps['react'] != null && deps['react-native'] == null && deps['next'] == null)
+      parts.push(`React ${deps['react']}`);
+    if (deps['vue'] != null) parts.push(`Vue ${deps['vue']}`);
+    if (deps['@supabase/supabase-js'] != null) parts.push('Supabase');
+    if (deps['prisma'] != null || deps['@prisma/client'] != null) parts.push('Prisma');
+    if (deps['typescript'] != null || deps['ts-node'] != null) parts.push('TypeScript');
   } catch {
     /* ignore */
   }
@@ -119,9 +124,9 @@ function detectTechStack(projectRoot: string) {
 function detectKeyFiles(projectRoot: string) {
   // Try to extract from HYDRA.md / CLAUDE.md "Code Entry Points" section
   const claudeMd = readInstructionFile(projectRoot);
-  if (claudeMd) {
+  if (claudeMd !== '') {
     const entryPointsSection = extractSection(claudeMd, 'Code Entry Points');
-    if (entryPointsSection) {
+    if (entryPointsSection !== '') {
       const lines = entryPointsSection
         .split(/\r?\n/)
         .filter((l: string) => l.includes('|') && !l.includes('---'));
@@ -143,11 +148,11 @@ function detectKeyFiles(projectRoot: string) {
 
 function detectGitRules(projectRoot: string) {
   const claudeMd = readInstructionFile(projectRoot);
-  if (!claudeMd) return '';
+  if (claudeMd === '') return '';
 
   // Look for branch strategy
   const gitSection = extractSection(claudeMd, 'Git Branching');
-  if (gitSection) {
+  if (gitSection !== '') {
     // Extract key rules
     const rules = [];
     if (/only commit to.*dev/i.test(gitSection)) rules.push('ONLY commit to dev branch');
@@ -164,7 +169,7 @@ function detectGitRules(projectRoot: string) {
  * Only task-specific: file paths, relevant type definitions, function signatures.
  */
 function buildMinimalContext(
-  projectConfig: any,
+  projectConfig: ProjectConfig,
   taskContext: { files?: string[]; types?: string; signatures?: string } = {},
 ) {
   const branch = getCurrentBranch(projectConfig.projectRoot);
@@ -172,12 +177,12 @@ function buildMinimalContext(
   const gitRules = detectGitRules(projectConfig.projectRoot);
   const lines = [
     '--- PROJECT CONTEXT (minimal) ---',
-    `Project: ${String(projectConfig.projectName)} (${techStack})`,
-    `Branch: ${branch}${gitRules ? ` — ${gitRules}` : ''}`,
+    `Project: ${projectConfig.projectName ?? 'unknown'} (${techStack})`,
+    `Branch: ${branch}${gitRules === '' ? '' : ` — ${gitRules}`}`,
   ];
 
   const keyFiles = detectKeyFiles(projectConfig.projectRoot);
-  if (keyFiles) {
+  if (keyFiles !== '') {
     lines.push(`Key files: ${keyFiles}`);
   }
 
@@ -185,12 +190,12 @@ function buildMinimalContext(
     lines.push(`Task files: ${taskContext.files.join(', ')}`);
   }
 
-  if (taskContext.types) {
+  if (taskContext.types != null && taskContext.types !== '') {
     lines.push('Relevant types:');
     lines.push(taskContext.types);
   }
 
-  if (taskContext.signatures) {
+  if (taskContext.signatures != null && taskContext.signatures !== '') {
     lines.push('Function signatures:');
     lines.push(taskContext.signatures);
   }
@@ -203,10 +208,10 @@ function buildMinimalContext(
  * Medium context (~1500 tokens) for Claude.
  * Claude has full tool access to read files, so summary + priorities is enough.
  */
-function buildMediumContext(projectConfig: any) {
+function buildMediumContext(projectConfig: ProjectConfig) {
   const now = Date.now();
   const cacheKey = projectConfig.projectRoot;
-  if (cachedMedium && now - cachedMediumAt < CACHE_TTL_MS && cachedMediumKey === cacheKey) {
+  if (cachedMedium != null && cachedMedium !== '' && now - cachedMediumAt < CACHE_TTL_MS && cachedMediumKey === cacheKey) {
     return cachedMedium;
   }
 
@@ -218,27 +223,27 @@ function buildMediumContext(projectConfig: any) {
 
   const lines = [
     '--- PROJECT CONTEXT ---',
-    `Project: ${String(projectConfig.projectName)}`,
+    `Project: ${projectConfig.projectName ?? 'unknown'}`,
     `Tech: ${techStack}`,
     `Branch: ${branch}`,
   ];
 
-  if (gitRules) {
+  if (gitRules !== '') {
     lines.push(`Git: ${gitRules}`);
   }
 
   const keyFiles = detectKeyFiles(projectConfig.projectRoot);
-  if (keyFiles) {
+  if (keyFiles !== '') {
     lines.push(`Key files: ${keyFiles}`);
   }
 
   // Extract additional context from HYDRA.md / CLAUDE.md if available
   const claudeMd = readInstructionFile(projectConfig.projectRoot, 200);
-  if (claudeMd) {
+  if (claudeMd !== '') {
     const overview = extractSection(claudeMd, 'Project Overview');
-    if (overview) {
+    if (overview !== '') {
       const firstParagraph = overview.split(/\n\n/)[0]?.trim();
-      if (firstParagraph && firstParagraph.length < 200) {
+      if (firstParagraph !== '' && firstParagraph.length < 200) {
         lines.push(`Description: ${firstParagraph}`);
       }
     }
@@ -261,13 +266,14 @@ function buildMediumContext(projectConfig: any) {
  * Leverages Gemini's massive context window with additional file contents and git history.
  */
 function buildLargeContext(
-  projectConfig: any,
+  projectConfig: ProjectConfig,
   taskContext: { files?: string[]; types?: string; signatures?: string } = {},
 ) {
   const now = Date.now();
   const cacheKey = projectConfig.projectRoot;
   if (
-    cachedLarge &&
+    cachedLarge != null &&
+    cachedLarge !== '' &&
     now - cachedLargeAt < CACHE_TTL_MS &&
     cachedLargeKey === cacheKey &&
     !taskContext.files
@@ -280,7 +286,7 @@ function buildLargeContext(
 
   // Add recent git changes
   const diff = getRecentGitDiff(projectConfig.projectRoot, 60);
-  if (diff) {
+  if (diff !== '') {
     extraLines.push('');
     extraLines.push('--- RECENT CHANGES (last 3 commits) ---');
     extraLines.push(diff);
@@ -289,7 +295,7 @@ function buildLargeContext(
 
   // Add TODO priorities (full section, not just titles)
   const todoContent = readFileSafe(path.join(projectConfig.projectRoot, 'docs', 'TODO.md'), 80);
-  if (todoContent) {
+  if (todoContent !== '') {
     extraLines.push('');
     extraLines.push('--- CURRENT TODO (top 80 lines) ---');
     extraLines.push(todoContent);
@@ -305,7 +311,7 @@ function buildLargeContext(
         ? filePath
         : path.join(projectConfig.projectRoot, filePath);
       const content = readFileSafe(fullPath, 100);
-      if (content) {
+      if (content !== '') {
         extraLines.push(`\n// ${filePath} (first 100 lines)`);
         extraLines.push(content);
       }
@@ -338,7 +344,7 @@ function buildLargeContext(
  * @returns {string[]} Unique candidate paths (deduplicated)
  */
 export function extractPathsFromPrompt(text: string): string[] {
-  if (!text) return [];
+  if (text === '') return [];
   const regex = /(?:\.{0,2}\/)?[\w.-]+(?:\/[\w.-]+)*\.[\w]+/g;
   const matches = text.match(regex);
   if (!matches) return [];
@@ -420,9 +426,8 @@ export function findScopedContextFiles(
  * @param {string}   rootDir - Project root for computing relative display paths
  * @returns {string} Combined context string, or '' if files is empty
  */
-export function compileHierarchicalContext(files: string[], rootDir: string): string {
-  // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition -- runtime callers may pass null despite types
-  if (!files || files.length === 0) return '';
+export function compileHierarchicalContext(files: string[] | null, rootDir: string): string {
+  if (files == null || files.length === 0) return '';
 
   const absRoot = path.resolve(rootDir);
   const sections = [];
@@ -450,9 +455,9 @@ export function compileHierarchicalContext(files: string[], rootDir: string): st
 export function getProjectContext(
   agentName = 'claude',
   taskContext: { files?: string[]; types?: string; signatures?: string } = {},
-  projectConfig: any = null,
+  projectConfig: ProjectConfig | null = null,
 ): string {
-  const resolvedConfig: any = projectConfig ?? resolveProject({ skipValidation: true });
+  const resolvedConfig = projectConfig ?? (resolveProject({ skipValidation: true }) as ProjectConfig);
 
   const agent = getAgent(agentName);
   const tier = agent?.contextTier ?? 'medium';
@@ -484,16 +489,16 @@ export function getProjectContext(
 export function buildAgentContext(
   agentName = 'claude',
   taskContext: { files?: string[]; types?: string; signatures?: string } = {},
-  projectConfig: any = null,
+  projectConfig: ProjectConfig | null = null,
   promptText: string | null = null,
 ): string {
-  const resolvedConfig: any = projectConfig ?? resolveProject({ skipValidation: true });
+  const resolvedConfig = projectConfig ?? (resolveProject({ skipValidation: true }) as ProjectConfig);
 
   // Base context — same as existing getProjectContext behavior
   const baseContext = getProjectContext(agentName, taskContext, resolvedConfig);
 
   // Hierarchical injection — only when promptText is provided and feature is enabled
-  if (!promptText) {
+  if (promptText == null || promptText === '') {
     return baseContext;
   }
 
@@ -512,7 +517,7 @@ export function buildAgentContext(
   }
 
   const scopedContext = compileHierarchicalContext(scopedFiles, resolvedConfig.projectRoot);
-  if (!scopedContext) {
+  if (scopedContext === '') {
     return baseContext;
   }
 
