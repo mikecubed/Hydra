@@ -158,7 +158,7 @@ function isTooSimilar(existingEntries: KBEntry[], newFinding: string, threshold 
  */
 export function addEntry(kb: KnowledgeBase, entry: KBEntry): KBEntry | null {
   // Dedup check
-  if (entry.finding && isTooSimilar(kb.entries, entry.finding)) {
+  if (entry.finding !== undefined && entry.finding !== '' && isTooSimilar(kb.entries, entry.finding)) {
     return null;
   }
 
@@ -221,7 +221,7 @@ export function searchEntries(kb: KnowledgeBase, query?: string, tags?: string[]
     );
   }
 
-  if (query) {
+  if (query !== undefined && query !== '') {
     const q = query.toLowerCase();
     results = results.filter(
       (e) =>
@@ -234,8 +234,8 @@ export function searchEntries(kb: KnowledgeBase, query?: string, tags?: string[]
 
   // Sort: attempted+outcome entries first, then by date descending
   results.sort((a: KBEntry, b: KBEntry) => {
-    if (a.attempted && !b.attempted) return -1;
-    if (!a.attempted && b.attempted) return 1;
+    if (a.attempted === true && b.attempted !== true) return -1;
+    if (a.attempted !== true && b.attempted === true) return 1;
     return (b.date ?? '').localeCompare(a.date ?? '');
   });
 
@@ -257,7 +257,7 @@ export function getPriorLearnings(kb: KnowledgeBase, area: string): KBEntry[] {
         e.area === area ||
         (e.tags ?? []).some((t: string) => t.toLowerCase() === area.toLowerCase()),
     )
-    .filter((e) => e.learnings ?? e.outcome)
+    .filter((e) => (e.learnings !== undefined && e.learnings !== '') || (e.outcome != null && e.outcome !== ''))
     .sort((a, b) => (b.date ?? '').localeCompare(a.date ?? ''));
 }
 
@@ -268,7 +268,7 @@ export function getPriorLearnings(kb: KnowledgeBase, area: string): KBEntry[] {
  */
 function computeStats(entries: KBEntry[]) {
   const totalResearched = entries.length;
-  const totalAttempted = entries.filter((e: KBEntry) => e.attempted).length;
+  const totalAttempted = entries.filter((e: KBEntry) => e.attempted === true).length;
   const totalApproved = entries.filter((e: KBEntry) => e.outcome === 'approve').length;
   const totalRejected = entries.filter((e: KBEntry) => e.outcome === 'reject').length;
   const totalRevised = entries.filter((e: KBEntry) => e.outcome === 'revise').length;
@@ -277,7 +277,7 @@ function computeStats(entries: KBEntry[]) {
   const areaCounts: Record<string, number> = {};
   for (const e of entries) {
     const area = e.area ?? 'unknown';
-    areaCounts[area] = (areaCounts[area] || 0) + 1;
+    areaCounts[area] = (areaCounts[area] ?? 0) + 1;
   }
   const topAreas = Object.entries(areaCounts)
     .sort((a: [string, number], b: [string, number]) => b[1] - a[1])
