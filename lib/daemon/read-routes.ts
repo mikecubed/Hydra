@@ -121,7 +121,7 @@ export async function handleReadRoute(ctx: ReadRouteCtx): Promise<boolean> {
         ? Object.fromEntries(
             Object.entries(models)
               .filter(([k]) => k !== '_mode')
-              .map(([k, v]) => [k, v.active || 'unknown']),
+              .map(([k, v]) => [k, v.active === '' ? 'unknown' : v.active]),
           )
         : null,
     };
@@ -148,7 +148,7 @@ export async function handleReadRoute(ctx: ReadRouteCtx): Promise<boolean> {
 
   if (method === 'GET' && route === '/next') {
     const agent = (requestUrl.searchParams.get('agent') ?? '').toLowerCase();
-    if (!agent) {
+    if (agent === '') {
       sendError(res, 400, 'Missing query param: agent');
       return true;
     }
@@ -178,7 +178,7 @@ export async function handleReadRoute(ctx: ReadRouteCtx): Promise<boolean> {
     const fromSeq = Number.parseInt(requestUrl.searchParams.get('from') ?? '0', 10);
     const category = requestUrl.searchParams.get('category') ?? '';
     let events = replayEvents(fromSeq);
-    if (category) {
+    if (category !== '') {
       events = events.filter((e: EventEntry) => e.category === category);
     }
     sendJson(res, 200, { ok: true, count: events.length, events });
@@ -216,7 +216,10 @@ export async function handleReadRoute(ctx: ReadRouteCtx): Promise<boolean> {
       const currentTask =
         state.tasks.find((t: TaskEntry) => t.owner === name && t.status === 'in_progress') ?? null;
       const pendingHandoffs = state.handoffs
-        .filter((h: HandoffEntry) => h.to === name && !h.acknowledgedAt)
+        .filter(
+          (h: HandoffEntry) =>
+            h.to === name && (h.acknowledgedAt == null || h.acknowledgedAt === ''),
+        )
         .map((h: HandoffEntry) => ({
           id: h.id,
           from: h.from,
@@ -278,7 +281,7 @@ export async function handleReadRoute(ctx: ReadRouteCtx): Promise<boolean> {
       }));
 
     const pendingHandoffs = state.handoffs
-      .filter((h: HandoffEntry) => !h.acknowledgedAt)
+      .filter((h: HandoffEntry) => h.acknowledgedAt == null || h.acknowledgedAt === '')
       .slice(-5)
       .map((h: HandoffEntry) => ({
         id: h.id,
@@ -290,7 +293,7 @@ export async function handleReadRoute(ctx: ReadRouteCtx): Promise<boolean> {
         createdAt: h.createdAt,
       }));
     const recentHandoffs = state.handoffs
-      .filter((h: HandoffEntry) => h.acknowledgedAt)
+      .filter((h: HandoffEntry) => h.acknowledgedAt != null && h.acknowledgedAt !== '')
       .slice(-5)
       .map((h: HandoffEntry) => ({
         id: h.id,
@@ -396,7 +399,9 @@ export async function handleReadRoute(ctx: ReadRouteCtx): Promise<boolean> {
       const { isWorktreeEnabled } = await import('../hydra-worktree.ts');
       const enabled = isWorktreeEnabled();
       const state = readState();
-      const tasksWithWorktrees = state.tasks.filter((t: TaskEntry) => t.worktreePath);
+      const tasksWithWorktrees = state.tasks.filter(
+        (t: TaskEntry) => t.worktreePath != null && t.worktreePath !== '',
+      );
       sendJson(res, 200, {
         ok: true,
         enabled,
@@ -426,7 +431,7 @@ export async function handleReadRoute(ctx: ReadRouteCtx): Promise<boolean> {
     const inProgressTasks = state.tasks.filter((t: TaskEntry) => t.status === 'in_progress');
     const staleTasks = inProgressTasks
       .filter((t: TaskEntry) => {
-        const lastUpdate = t.updatedAt ? new Date(t.updatedAt).getTime() : 0;
+        const lastUpdate = t.updatedAt === '' ? 0 : new Date(t.updatedAt).getTime();
         return now - lastUpdate > STALE_THRESHOLD_MS;
       })
       .map((t: TaskEntry) => ({
@@ -439,7 +444,7 @@ export async function handleReadRoute(ctx: ReadRouteCtx): Promise<boolean> {
       }));
 
     const pendingHandoffs = state.handoffs
-      .filter((h: HandoffEntry) => !h.acknowledgedAt)
+      .filter((h: HandoffEntry) => h.acknowledgedAt == null || h.acknowledgedAt === '')
       .map((h: HandoffEntry) => ({
         id: h.id,
         from: h.from,
@@ -459,7 +464,8 @@ export async function handleReadRoute(ctx: ReadRouteCtx): Promise<boolean> {
 
     // Count events since last active session update
     const lastActiveAt = state.activeSession?.updatedAt ?? state.updatedAt;
-    const lastActiveMs = lastActiveAt ? new Date(lastActiveAt).getTime() : 0;
+    const lastActiveMs =
+      lastActiveAt != null && lastActiveAt !== '' ? new Date(lastActiveAt).getTime() : 0;
     let eventsSinceLastActive = 0;
     try {
       const events = readEvents(500);
