@@ -63,9 +63,7 @@ const PHYSICAL_AGENTS: Record<string, Partial<AgentDef>> = {
           'full-auto': 'bypassPermissions',
         };
         const perm =
-          (opts.permissionMode != null && opts.permissionMode !== ''
-            ? PERM[opts.permissionMode]
-            : undefined) ??
+          (opts.permissionMode == null ? undefined : PERM[opts.permissionMode]) ??
           opts.permissionMode ??
           'acceptEdits';
         const args = ['--output-format', 'json', '--permission-mode', perm];
@@ -832,14 +830,13 @@ export const AGENTS: Record<string, AgentDef | undefined> = new Proxy(
     },
     getOwnPropertyDescriptor(_, prop) {
       const val = _registry.get(String(prop));
-      if (val?.type === AGENT_TYPE.PHYSICAL) {
-        return {
-          configurable: true,
-          enumerable: true,
-          writable: false,
-          value: { ...val, enabled: _resolveEnabled(val) },
-        };
-      }
+      if (val?.type !== AGENT_TYPE.PHYSICAL) return;
+      return {
+        configurable: true,
+        enumerable: true,
+        writable: false,
+        value: { ...val, enabled: _resolveEnabled(val) },
+      };
     },
   },
 );
@@ -1335,7 +1332,7 @@ export function resolveModelId(
     return (agentModels as Record<string, string>)[lower];
   }
 
-  return normalized;
+  return normalized ?? null;
 }
 
 export function getMode(): string {
