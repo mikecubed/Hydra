@@ -73,12 +73,11 @@ function normalizeFixtureEntry(agent, entry, index) {
     ...entry,
     id,
     response: deepClone(entry.response),
-    matchPattern:
-      matchPattern === null
-        ? null
-        : matchPattern instanceof RegExp
-          ? matchPattern
-          : new RegExp(matchPattern, 'i'),
+    matchPattern: (() => {
+      if (matchPattern === null) return null;
+      if (matchPattern instanceof RegExp) return matchPattern;
+      return new RegExp(matchPattern, 'i');
+    })(),
   };
 }
 

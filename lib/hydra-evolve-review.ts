@@ -49,17 +49,38 @@ import {
 } from './hydra-evolve-suggestions.ts';
 import pc from 'picocolors';
 
+interface EvolveRoundEntry {
+  round?: number;
+  verdict?: string;
+  area?: string;
+  score?: number;
+  selectedImprovement?: string;
+  learnings?: string;
+}
+interface EvolveSessionState {
+  status?: string;
+  sessionId?: string;
+  summary?: { approved?: number; rejected?: number; skipped?: number; errors?: number };
+  completedRounds?: Array<{ verdict?: string; round?: number; area?: string; score?: number }>;
+  actionNeeded?: string;
+  resumable?: boolean;
+}
+interface ReportBudget {
+  consumed?: number;
+}
+
 // ── Review Command ──────────────────────────────────────────────────────────
 
 async function reviewCommand(projectRoot: string, options: Record<string, string | boolean>) {
   const cfg = loadHydraConfig();
   const baseBranch = cfg.evolve?.baseBranch ?? 'dev';
-  const dateFilter = (options['date'] as string) || null;
+  const dateFilter =
+    typeof options['date'] === 'string' && options['date'].length > 0 ? options['date'] : null;
   const branches = listBranches(projectRoot, 'evolve', dateFilter);
 
   if (branches.length === 0) {
     console.log(pc.yellow('No evolve branches found.'));
-    if (dateFilter) console.log(pc.dim(`  Filter: evolve/${dateFilter}/*`));
+    if (dateFilter !== null) console.log(pc.dim(`  Filter: evolve/${dateFilter}/*`));
     return;
   }
 
@@ -87,27 +108,30 @@ async function reviewCommand(projectRoot: string, options: Record<string, string
     // Try to find matching decision
     const roundMatch = branch.match(/\/(\d+)$/);
     const roundNum = roundMatch ? Number.parseInt(roundMatch[1], 10) : null;
-    const roundEntry = (reportData?.['rounds'] as any[] | undefined)?.find(
-      (r: Record<string, unknown>) => r['round'] === roundNum,
+    const roundEntry = (reportData?.['rounds'] as EvolveRoundEntry[] | undefined)?.find(
+      (r: EvolveRoundEntry) => r.round === roundNum,
     );
 
     console.log(pc.bold(pc.cyan(`\n-- ${branch} --`)));
 
     // Show decision info if available
-    if (roundEntry) {
-      const verdictColor =
-        roundEntry.verdict === 'approve'
-          ? pc.green
-          : roundEntry.verdict === 'revise'
-            ? pc.yellow
-            : pc.red;
-      console.log(`  Area: ${roundEntry.area}`);
-      console.log(`  Verdict: ${verdictColor(roundEntry.verdict?.toUpperCase() || '?')}`);
-      if (roundEntry.score) console.log(`  Score: ${roundEntry.score}/10`);
-      if (roundEntry.selectedImprovement) {
+    if (roundEntry != null) {
+      let verdictColor: (s: string) => string;
+      if (roundEntry.verdict === 'approve') {
+        verdictColor = pc.green;
+      } else if (roundEntry.verdict === 'revise') {
+        verdictColor = pc.yellow;
+      } else {
+        verdictColor = pc.red;
+      }
+      console.log(`  Area: ${roundEntry.area ?? ''}`);
+      console.log(`  Verdict: ${verdictColor((roundEntry.verdict ?? '?').toUpperCase())}`);
+      if (roundEntry.score != null && roundEntry.score > 0)
+        console.log(`  Score: ${String(roundEntry.score)}/10`);
+      if (roundEntry.selectedImprovement != null && roundEntry.selectedImprovement.length > 0) {
         console.log(`  Improvement: ${roundEntry.selectedImprovement.slice(0, 100)}`);
       }
-      if (roundEntry.learnings) {
+      if (roundEntry.learnings != null && roundEntry.learnings.length > 0) {
         console.log(`  Learnings: ${roundEntry.learnings.slice(0, 150)}`);
       }
     }
@@ -115,7 +139,8 @@ async function reviewCommand(projectRoot: string, options: Record<string, string
     // Show diff stat and commit log
     const { commitLog } = displayBranchInfo(projectRoot, branch, baseBranch);
 
-    if (!commitLog) {
+    if (commitLog.length === 0) {
+      // eslint-disable-next-line no-await-in-loop -- sequential interactive user prompts
       await handleEmptyBranch(rl, projectRoot, branch);
       continue;
     }
@@ -123,7 +148,7 @@ async function reviewCommand(projectRoot: string, options: Record<string, string
     // Live violation scan
     const violations = scanBranchViolations(projectRoot, branch, baseBranch);
     if (violations.length > 0) {
-      console.log(pc.red(`\n  Violations: ${violations.length}`));
+      console.log(pc.red(`\n  Violations: ${String(violations.length)}`));
       for (const v of violations) {
         console.log(pc.red(`    [${v.severity}] ${v.detail}`));
       }
@@ -131,26 +156,28 @@ async function reviewCommand(projectRoot: string, options: Record<string, string
 
     // Offer retry-as-suggestion for rejected/revise rounds
     if (
-      roundEntry &&
+      roundEntry != null &&
       (roundEntry.verdict === 'reject' || roundEntry.verdict === 'revise') &&
-      roundEntry.selectedImprovement
+      roundEntry.selectedImprovement != null &&
+      roundEntry.selectedImprovement.length > 0
     ) {
+      // eslint-disable-next-line no-await-in-loop -- sequential interactive user prompts
       const retryAnswer = await ask(rl, `  ${pc.magenta('[r]')}etry as suggestion? (r/n) `);
       if (retryAnswer === 'r' || retryAnswer === 'retry') {
         const sg = loadSuggestions(evolveDir);
         const created = addSuggestion(sg, {
           source: 'review:retry',
           sourceRef: branch,
-          area: roundEntry.area,
-          title: (roundEntry.selectedImprovement || '').slice(0, 100),
-          description: roundEntry.selectedImprovement || '',
+          area: roundEntry.area ?? '',
+          title: roundEntry.selectedImprovement.slice(0, 100),
+          description: roundEntry.selectedImprovement,
           priority: 'high',
-          tags: [roundEntry.area, 'retry', 'review-flagged'],
-          notes: `Flagged during review. Original score: ${roundEntry.score || '?'}/10. ${roundEntry.learnings || ''}`,
+          tags: [roundEntry.area ?? '', 'retry', 'review-flagged'],
+          notes: `Flagged during review. Original score: ${String(roundEntry.score ?? '?')}/10. ${roundEntry.learnings ?? ''}`,
         });
         if (created) {
           saveSuggestions(evolveDir, sg);
-          console.log(pc.green(`  + Suggestion created: ${created.id}`));
+          console.log(pc.green(`  + Suggestion created: ${created.id ?? ''}`));
         } else {
           console.log(pc.dim('  (similar suggestion already exists)'));
         }
@@ -159,6 +186,7 @@ async function reviewCommand(projectRoot: string, options: Record<string, string
 
     // Prompt
     console.log('');
+    // eslint-disable-next-line no-await-in-loop -- sequential interactive user prompts
     const result = await handleBranchAction(rl, projectRoot, branch, baseBranch, {
       enablePR: isGhAvailable(),
     });
@@ -167,16 +195,16 @@ async function reviewCommand(projectRoot: string, options: Record<string, string
   }
 
   rl.close();
-  console.log(pc.bold(`\nDone: ${merged} merged, ${skipped} skipped`));
+  console.log(pc.bold(`\nDone: ${String(merged)} merged, ${String(skipped)} skipped`));
 }
 
 // ── Status Command ──────────────────────────────────────────────────────────
 
-function loadSessionState(evolveDir: string) {
+function loadSessionState(evolveDir: string): EvolveSessionState | null {
   const statePath = path.join(evolveDir, 'EVOLVE_SESSION_STATE.json');
   try {
     if (!fs.existsSync(statePath)) return null;
-    return JSON.parse(fs.readFileSync(statePath, 'utf8'));
+    return JSON.parse(fs.readFileSync(statePath, 'utf8')) as EvolveSessionState;
   } catch {
     return null;
   }
@@ -185,7 +213,8 @@ function loadSessionState(evolveDir: string) {
 function statusCommand(projectRoot: string, options: Record<string, string | boolean>) {
   const cfg = loadHydraConfig();
   const baseBranch = cfg.evolve?.baseBranch ?? 'dev';
-  const dateFilter = (options['date'] as string) || null;
+  const dateFilter =
+    typeof options['date'] === 'string' && options['date'].length > 0 ? options['date'] : null;
   const branches = listBranches(projectRoot, 'evolve', dateFilter);
   const evolveDir = path.join(projectRoot, 'docs', 'coordination', 'evolve');
 
@@ -193,55 +222,58 @@ function statusCommand(projectRoot: string, options: Record<string, string | boo
 
   // ── Session state (live tracking) ───────────────────────────────────
   const sessionState = loadSessionState(evolveDir);
-  if (sessionState) {
-    type Formatter = (s: string) => string;
-    const statusColors: Record<string, Formatter> = {
+  if (sessionState != null) {
+    const statusColors: Partial<Record<string, (s: string) => string>> = {
       running: pc.blue,
       completed: pc.green,
       partial: pc.yellow,
       failed: pc.red,
       interrupted: pc.red,
     };
-    const statusColor = statusColors[String(sessionState.status)] || pc.dim;
-    console.log(`\n  Session: ${pc.bold(sessionState.sessionId || '?')}`);
-    console.log(`  Status:  ${statusColor(pc.bold(sessionState.status.toUpperCase()))}`);
+    const statusColor = statusColors[sessionState.status ?? ''] ?? pc.dim;
+    console.log(`\n  Session: ${pc.bold(sessionState.sessionId ?? '?')}`);
+    console.log(`  Status:  ${statusColor(pc.bold((sessionState.status ?? '').toUpperCase()))}`);
 
-    if (sessionState.summary) {
+    if (sessionState.summary != null) {
       const s = sessionState.summary;
       const parts = [];
-      if (s.approved > 0) parts.push(pc.green(`${s.approved} approved`));
-      if (s.rejected > 0) parts.push(pc.red(`${s.rejected} rejected`));
-      if (s.skipped > 0) parts.push(pc.dim(`${s.skipped} skipped`));
-      if (s.errors > 0) parts.push(pc.red(`${s.errors} errors`));
+      if ((s.approved ?? 0) > 0) parts.push(pc.green(`${String(s.approved)} approved`));
+      if ((s.rejected ?? 0) > 0) parts.push(pc.red(`${String(s.rejected)} rejected`));
+      if ((s.skipped ?? 0) > 0) parts.push(pc.dim(`${String(s.skipped)} skipped`));
+      if ((s.errors ?? 0) > 0) parts.push(pc.red(`${String(s.errors)} errors`));
       if (parts.length > 0) {
         console.log(`  Summary: ${parts.join(pc.dim(' / '))}`);
       }
     }
 
     // Per-round breakdown
-    if (sessionState.completedRounds?.length > 0) {
+    if (sessionState.completedRounds != null && sessionState.completedRounds.length > 0) {
       console.log('');
       for (const r of sessionState.completedRounds) {
-        const icon =
-          r.verdict === 'approve'
-            ? pc.green('+')
-            : r.verdict === 'reject'
-              ? pc.red('x')
-              : r.verdict === 'skipped'
-                ? pc.dim('-')
-                : r.verdict === 'error'
-                  ? pc.red('!')
-                  : pc.dim('?');
-        const scoreStr = r.score == null ? '' : pc.dim(` (${r.score}/10)`);
-        console.log(`    ${icon} Round ${r.round}: ${r.area} — ${r.verdict || '?'}${scoreStr}`);
+        let icon: string;
+        if (r.verdict === 'approve') {
+          icon = pc.green('+');
+        } else if (r.verdict === 'reject') {
+          icon = pc.red('x');
+        } else if (r.verdict === 'skipped') {
+          icon = pc.dim('-');
+        } else if (r.verdict === 'error') {
+          icon = pc.red('!');
+        } else {
+          icon = pc.dim('?');
+        }
+        const scoreStr = r.score == null ? '' : pc.dim(` (${String(r.score)}/10)`);
+        console.log(
+          `    ${icon} Round ${String(r.round ?? '')}: ${r.area ?? ''} — ${r.verdict ?? '?'}${scoreStr}`,
+        );
       }
     }
 
-    if (sessionState.actionNeeded) {
+    if (sessionState.actionNeeded != null && sessionState.actionNeeded.length > 0) {
       console.log(`\n  ${pc.yellow(sessionState.actionNeeded)}`);
     }
 
-    if (sessionState.resumable) {
+    if (sessionState.resumable === true) {
       console.log(`  ${pc.dim('Tip:')} ${pc.cyan(':evolve resume')} to continue this session`);
     }
 
@@ -252,11 +284,11 @@ function statusCommand(projectRoot: string, options: Record<string, string | boo
   if (branches.length === 0) {
     console.log(pc.dim('  No evolve branches found.'));
   } else {
-    console.log(`  Branches (${branches.length}):`);
+    console.log(`  Branches (${String(branches.length)}):`);
     for (const b of branches) {
       const commitLog = getBranchLog(projectRoot, b, baseBranch);
-      const commitCount = commitLog ? commitLog.split('\n').length : 0;
-      console.log(`    ${b} (${commitCount} commit${commitCount === 1 ? '' : 's'})`);
+      const commitCount = commitLog.length > 0 ? commitLog.split('\n').length : 0;
+      console.log(`    ${b} (${String(commitCount)} commit${commitCount === 1 ? '' : 's'})`);
     }
   }
 
@@ -266,43 +298,50 @@ function statusCommand(projectRoot: string, options: Record<string, string | boo
     unknown
   > | null;
 
-  if (report) {
-    console.log(`\n  Latest Report: ${report['dateStr']}`);
-    console.log(`  Rounds: ${report['processedRounds']}/${report['maxRounds']}`);
-    if (report['stopReason']) console.log(`  Stopped: ${report['stopReason']}`);
-    console.log(`  Tokens: ~${(report['budget'] as any)?.consumed?.toLocaleString() || '?'}`);
+  if (report == null && sessionState == null) {
+    console.log(pc.dim('\n  No evolve report found.'));
+  } else if (report != null) {
+    console.log(`\n  Latest Report: ${(report['dateStr'] as string | undefined) ?? ''}`);
+    console.log(
+      `  Rounds: ${String((report['processedRounds'] as number | undefined) ?? '')}/${String((report['maxRounds'] as number | undefined) ?? '')}`,
+    );
+    if (report['stopReason'] != null)
+      console.log(`  Stopped: ${(report['stopReason'] as string | undefined) ?? ''}`);
+    console.log(
+      `  Tokens: ~${(report['budget'] as ReportBudget | undefined)?.consumed?.toLocaleString() ?? '?'}`,
+    );
 
-    if (report['rounds'] && !sessionState) {
+    if (report['rounds'] != null && sessionState == null) {
       console.log('');
-      for (const r of report['rounds'] as any[]) {
-        const icon =
-          r.verdict === 'approve'
-            ? pc.green('+')
-            : r.verdict === 'revise'
-              ? pc.yellow('~')
-              : r.verdict === 'skipped'
-                ? pc.dim('-')
-                : pc.red('x');
+      for (const r of report['rounds'] as EvolveRoundEntry[]) {
+        let icon: string;
+        if (r.verdict === 'approve') {
+          icon = pc.green('+');
+        } else if (r.verdict === 'revise') {
+          icon = pc.yellow('~');
+        } else if (r.verdict === 'skipped') {
+          icon = pc.dim('-');
+        } else {
+          icon = pc.red('x');
+        }
         console.log(
-          `    ${icon} Round ${r.round}: ${r.area} — ${r.verdict || '?'}${r.score ? ` (${r.score}/10)` : ''}`,
+          `    ${icon} Round ${String(r.round ?? '')}: ${r.area ?? ''} — ${r.verdict ?? '?'}${r.score != null && r.score > 0 ? ` (${String(r.score)}/10)` : ''}`,
         );
       }
     }
-  } else if (!sessionState) {
-    console.log(pc.dim('\n  No evolve report found.'));
   }
 
   // Knowledge base summary
   const kb = loadKnowledgeBase(evolveDir);
   const stats = getStats(kb);
   console.log(
-    `\n  Knowledge Base: ${stats.totalResearched} entries, ${stats.totalApproved} approved, ${stats.totalRejected} rejected`,
+    `\n  Knowledge Base: ${String(stats.totalResearched)} entries, ${String(stats.totalApproved)} approved, ${String(stats.totalRejected)} rejected`,
   );
   if (stats.topAreas.length > 0) {
     console.log(
       `  Top areas: ${stats.topAreas
         .slice(0, 5)
-        .map((a) => `${a.area}(${a.count})`)
+        .map((a) => `${a.area}(${String(a.count)})`)
         .join(', ')}`,
     );
   }
@@ -315,7 +354,12 @@ function statusCommand(projectRoot: string, options: Record<string, string | boo
 function cleanCommand(projectRoot: string, options: Record<string, string | boolean>) {
   const cfg = loadHydraConfig();
   const baseBranch = cfg.evolve?.baseBranch ?? 'dev';
-  cleanBranches(projectRoot, 'evolve', baseBranch, (options['date'] as string) || null);
+  cleanBranches(
+    projectRoot,
+    'evolve',
+    baseBranch,
+    typeof options['date'] === 'string' && options['date'].length > 0 ? options['date'] : null,
+  );
 }
 
 // ── Knowledge Command ───────────────────────────────────────────────────────
@@ -326,8 +370,8 @@ function knowledgeCommand(projectRoot: string, options: Record<string, string | 
   const stats = getStats(kb);
 
   console.log(pc.bold('\nEvolve Knowledge Base'));
-  console.log(`  Entries: ${stats.totalResearched}`);
-  console.log(`  Attempted: ${stats.totalAttempted}`);
+  console.log(`  Entries: ${String(stats.totalResearched)}`);
+  console.log(`  Attempted: ${String(stats.totalAttempted)}`);
   console.log(`  Approved: ${pc.green(String(stats.totalApproved))}`);
   console.log(`  Rejected: ${pc.red(String(stats.totalRejected))}`);
   console.log(`  Revised: ${pc.yellow(String(stats.totalRevised))}`);
@@ -335,46 +379,62 @@ function knowledgeCommand(projectRoot: string, options: Record<string, string | 
   if (stats.topAreas.length > 0) {
     console.log('\n  Areas:');
     for (const a of stats.topAreas) {
-      console.log(`    ${a.area}: ${a.count} entries`);
+      console.log(`    ${a.area}: ${String(a.count)} entries`);
     }
   }
 
   // Search if query provided
-  const query = (options['query'] as string) || (options['search'] as string) || '';
-  const tags = options['tags'] ? (options['tags'] as string).split(',') : [];
+  let query = '';
+  if (typeof options['query'] === 'string' && options['query'].length > 0) {
+    query = options['query'];
+  } else if (typeof options['search'] === 'string' && options['search'].length > 0) {
+    query = options['search'];
+  }
+  const tags =
+    typeof options['tags'] === 'string' && options['tags'].length > 0
+      ? options['tags'].split(',')
+      : [];
 
-  if (query || tags.length > 0) {
+  if (query.length > 0 || tags.length > 0) {
     const results = searchEntries(kb, query, tags);
-    console.log(`\n  Search results (${results.length}):`);
+    console.log(`\n  Search results (${String(results.length)}):`);
     for (const entry of results.slice(0, 20)) {
-      const icon =
-        entry.outcome === 'approve'
-          ? pc.green('+')
-          : entry.outcome === 'reject'
-            ? pc.red('x')
-            : entry.outcome === 'revise'
-              ? pc.yellow('~')
-              : pc.dim('?');
-      console.log(`    ${icon} [${entry.id}] ${entry.area}: ${(entry.finding ?? '').slice(0, 80)}`);
-      if (entry.learnings) {
+      let icon: string;
+      if (entry.outcome === 'approve') {
+        icon = pc.green('+');
+      } else if (entry.outcome === 'reject') {
+        icon = pc.red('x');
+      } else if (entry.outcome === 'revise') {
+        icon = pc.yellow('~');
+      } else {
+        icon = pc.dim('?');
+      }
+      console.log(
+        `    ${icon} [${entry.id ?? ''}] ${entry.area ?? ''}: ${(entry.finding ?? '').slice(0, 80)}`,
+      );
+      if (entry.learnings != null && entry.learnings.length > 0) {
         console.log(pc.dim(`      Learnings: ${entry.learnings.slice(0, 80)}`));
       }
     }
   } else if (kb.entries.length > 0) {
     console.log('\n  Recent entries:');
     const recent = [...kb.entries]
-      .sort((a, b) => (b.date || '').localeCompare(a.date || ''))
+      .sort((a, b) => (b.date ?? '').localeCompare(a.date ?? ''))
       .slice(0, 10);
     for (const entry of recent) {
-      const icon =
-        entry.outcome === 'approve'
-          ? pc.green('+')
-          : entry.outcome === 'reject'
-            ? pc.red('x')
-            : entry.outcome === 'revise'
-              ? pc.yellow('~')
-              : pc.dim('?');
-      console.log(`    ${icon} [${entry.id}] ${entry.area}: ${(entry.finding ?? '').slice(0, 80)}`);
+      let icon: string;
+      if (entry.outcome === 'approve') {
+        icon = pc.green('+');
+      } else if (entry.outcome === 'reject') {
+        icon = pc.red('x');
+      } else if (entry.outcome === 'revise') {
+        icon = pc.yellow('~');
+      } else {
+        icon = pc.dim('?');
+      }
+      console.log(
+        `    ${icon} [${entry.id ?? ''}] ${entry.area ?? ''}: ${(entry.finding ?? '').slice(0, 80)}`,
+      );
     }
   }
 
@@ -386,13 +446,17 @@ function knowledgeCommand(projectRoot: string, options: Record<string, string | 
 function suggestionsCommand(projectRoot: string, options: Record<string, string | boolean>) {
   const evolveDir = path.join(projectRoot, 'docs', 'coordination', 'evolve');
   const sg = loadSuggestions(evolveDir);
-  const statusFilter = (options['status'] as string) || null;
-  const entries = statusFilter
-    ? sg.entries.filter((e: { status?: unknown }) => e.status === statusFilter)
-    : getPendingSuggestions(sg);
+  const statusFilter =
+    typeof options['status'] === 'string' && options['status'].length > 0
+      ? options['status']
+      : null;
+  const entries =
+    statusFilter === null
+      ? getPendingSuggestions(sg)
+      : sg.entries.filter((e: { status?: unknown }) => e.status === statusFilter);
 
-  const label = statusFilter ? `${statusFilter} suggestions` : 'pending suggestions';
-  console.log(pc.bold(`\nEvolve Suggestions — ${entries.length} ${label}\n`));
+  const label = statusFilter === null ? 'pending suggestions' : `${statusFilter} suggestions`;
+  console.log(pc.bold(`\nEvolve Suggestions — ${String(entries.length)} ${label}\n`));
 
   if (entries.length === 0) {
     console.log(pc.dim('  No suggestions found.'));
@@ -401,30 +465,36 @@ function suggestionsCommand(projectRoot: string, options: Record<string, string 
   }
 
   for (const s of entries) {
-    const statusColor =
-      s.status === 'pending'
-        ? pc.cyan
-        : s.status === 'completed'
-          ? pc.green
-          : s.status === 'rejected'
-            ? pc.red
-            : s.status === 'exploring'
-              ? pc.yellow
-              : pc.dim;
-    const priorityBadge =
-      s.priority === 'high'
-        ? pc.red('HIGH')
-        : s.priority === 'low'
-          ? pc.dim('low')
-          : pc.yellow('med');
-
-    console.log(`  ${statusColor(s.id)} ${pc.yellow(s.area)}: ${(s.title ?? '').slice(0, 80)}`);
-    const parts = [`status: ${statusColor(s.status)}`, `priority: ${priorityBadge}`];
-    if ((s.attempts ?? 0) > 0) {
-      parts.push(`attempts: ${s.attempts}/${s.maxAttempts}`);
-      if (s.lastAttemptScore != null) parts.push(`last: ${s.lastAttemptScore}/10`);
+    let statusColor: (t: string) => string;
+    if (s.status === 'pending') {
+      statusColor = pc.cyan;
+    } else if (s.status === 'completed') {
+      statusColor = pc.green;
+    } else if (s.status === 'rejected') {
+      statusColor = pc.red;
+    } else if (s.status === 'exploring') {
+      statusColor = pc.yellow;
+    } else {
+      statusColor = pc.dim;
     }
-    if (s.specPath) parts.push('has spec');
+    let priorityBadge: string;
+    if (s.priority === 'high') {
+      priorityBadge = pc.red('HIGH');
+    } else if (s.priority === 'low') {
+      priorityBadge = pc.dim('low');
+    } else {
+      priorityBadge = pc.yellow('med');
+    }
+
+    console.log(
+      `  ${statusColor(s.id ?? '')} ${pc.yellow(s.area ?? '')}: ${(s.title ?? '').slice(0, 80)}`,
+    );
+    const parts = [`status: ${statusColor(s.status ?? '')}`, `priority: ${priorityBadge}`];
+    if ((s.attempts ?? 0) > 0) {
+      parts.push(`attempts: ${String(s.attempts ?? '')}/${String(s.maxAttempts ?? '')}`);
+      if (s.lastAttemptScore != null) parts.push(`last: ${String(s.lastAttemptScore ?? '')}/10`);
+    }
+    if (s.specPath != null && s.specPath.length > 0) parts.push('has spec');
     console.log(`    ${pc.dim(parts.join(' | '))}`);
     console.log('');
   }
@@ -432,7 +502,7 @@ function suggestionsCommand(projectRoot: string, options: Record<string, string 
   const stats = getSuggestionStats(sg);
   console.log(
     pc.dim(
-      `  Stats: ${stats.totalPending} pending, ${stats.totalCompleted} completed, ${stats.totalRejected} rejected, ${stats.totalAbandoned} abandoned`,
+      `  Stats: ${String(stats.totalPending)} pending, ${String(stats.totalCompleted)} completed, ${String(stats.totalRejected)} rejected, ${String(stats.totalAbandoned)} abandoned`,
     ),
   );
   console.log('');
@@ -442,18 +512,30 @@ function suggestionsCommand(projectRoot: string, options: Record<string, string 
 
 async function main() {
   const { options, positionals } = parseArgs(process.argv);
-  const command = positionals[0] || options['command'] || 'status';
+
+  let command: string;
+  if (typeof positionals[0] === 'string' && positionals[0].length > 0) {
+    command = positionals[0];
+  } else if (typeof options['command'] === 'string' && options['command'].length > 0) {
+    command = options['command'];
+  } else {
+    command = 'status';
+  }
 
   let config;
   try {
     config = resolveProject({
-      project: options['project'] ? String(options['project']) : undefined,
+      project:
+        typeof options['project'] === 'string' && options['project'].length > 0
+          ? options['project']
+          : undefined,
     });
   } catch (err: unknown) {
     console.error(
       pc.red(`Project resolution failed: ${err instanceof Error ? err.message : String(err)}`),
     );
-    process.exit(1);
+    process.exitCode = 1;
+    return;
   }
 
   const { projectRoot } = config;
@@ -477,11 +559,12 @@ async function main() {
     default:
       console.error(pc.red(`Unknown command: ${command}`));
       console.error('Usage: hydra-evolve-review.mjs [review|status|clean|knowledge|suggestions]');
-      process.exit(1);
+      process.exitCode = 1;
   }
 }
 
-main().catch((err) => {
-  console.error(pc.red(`Fatal: ${err.message}`));
+main().catch((err: unknown) => {
+  console.error(pc.red(`Fatal: ${err instanceof Error ? err.message : String(err)}`));
+  // eslint-disable-next-line n/no-process-exit -- inside .catch() callback; return does not propagate
   process.exit(1);
 });

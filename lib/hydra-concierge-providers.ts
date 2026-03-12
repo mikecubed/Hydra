@@ -15,14 +15,14 @@ import { canMakeRequest, getHealthiestProvider } from './hydra-rate-limits.ts';
 const PROVIDER_KEYS = {
   openai: () => process.env['OPENAI_API_KEY'],
   anthropic: () => process.env['ANTHROPIC_API_KEY'],
-  google: () => process.env['GEMINI_API_KEY'] || process.env['GOOGLE_API_KEY'],
+  google: () => process.env['GEMINI_API_KEY'] ?? process.env['GOOGLE_API_KEY'],
 };
 
 /**
  * Detect which providers have API keys configured.
  * @returns {Array<{provider: string, apiKey: string}>}
  */
-export function detectAvailableProviders() {
+export function detectAvailableProviders(): Array<{ provider: string; apiKey: string }> {
   const available = [];
   for (const [provider, getKey] of Object.entries(PROVIDER_KEYS)) {
     const key = getKey();
@@ -44,9 +44,13 @@ interface FallbackChainEntry {
  * Build the fallback chain from config, filtered by available API keys.
  * @returns {Array<{provider: string, model: string, available: boolean}>}
  */
-export function buildFallbackChain() {
+export function buildFallbackChain(): Array<{
+  provider: string;
+  model: string;
+  available: boolean;
+}> {
   const cfg = loadHydraConfig();
-  const chain = cfg.concierge?.fallbackChain || [
+  const chain = cfg.concierge?.fallbackChain ?? [
     { provider: 'openai', model: 'gpt-5' },
     { provider: 'anthropic', model: 'claude-sonnet-4-5-20250929' },
     { provider: 'google', model: 'gemini-3-flash-preview' },
@@ -78,34 +82,21 @@ export function providerLabel(provider: string, model: string, isFallback: boole
 
 // ── Streaming with Fallback ───────────────────────────────────────────────────
 
-// Lazy-loaded provider modules
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type StreamFn = (...args: any[]) => Promise<unknown>;
-let _streamOpenAI: StreamFn | null = null;
-let _streamAnthropic: StreamFn | null = null;
-let _streamGoogle: StreamFn | null = null;
 
 async function getStreamFn(provider: string): Promise<StreamFn> {
   if (provider === 'openai') {
-    if (!_streamOpenAI) {
-      const mod = await import('./hydra-openai.ts');
-      _streamOpenAI = mod.streamCompletion;
-    }
-    return _streamOpenAI;
+    const mod = await import('./hydra-openai.ts');
+    return mod.streamCompletion;
   }
   if (provider === 'anthropic') {
-    if (!_streamAnthropic) {
-      const mod = await import('./hydra-anthropic.ts');
-      _streamAnthropic = mod.streamAnthropicCompletion;
-    }
-    return _streamAnthropic;
+    const mod = await import('./hydra-anthropic.ts');
+    return mod.streamAnthropicCompletion;
   }
   if (provider === 'google') {
-    if (!_streamGoogle) {
-      const mod = await import('./hydra-google.ts');
-      _streamGoogle = mod.streamGoogleCompletion;
-    }
-    return _streamGoogle;
+    const mod = await import('./hydra-google.ts');
+    return mod.streamGoogleCompletion;
   }
   throw new Error(`Unknown provider: ${provider}`);
 }
@@ -125,7 +116,13 @@ export async function streamWithFallback(
   messages: unknown[],
   cfg: Record<string, unknown>,
   onChunk: (chunk: string) => void,
-) {
+): Promise<{
+  fullResponse: unknown;
+  usage: unknown;
+  provider: string;
+  model: string;
+  isFallback: boolean;
+}> {
   let chain = buildFallbackChain().filter((e) => e.available);
 
   if (chain.length === 0) {

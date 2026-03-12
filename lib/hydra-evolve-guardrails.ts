@@ -99,17 +99,19 @@ export class EvolveBudgetTracker {
 
   constructor(budgetOverrides: Record<string, unknown> = {}) {
     const defaults = getEvolveBudgetConfig();
-    this.softLimit = (budgetOverrides['softLimit'] as number) ?? defaults.softLimit;
-    this.hardLimit = (budgetOverrides['hardLimit'] as number) ?? defaults.hardLimit;
+    this.softLimit = (budgetOverrides['softLimit'] as number | undefined) ?? defaults.softLimit;
+    this.hardLimit = (budgetOverrides['hardLimit'] as number | undefined) ?? defaults.hardLimit;
     this.perRoundEstimate =
-      (budgetOverrides['perRoundEstimate'] as number) ?? defaults.perRoundEstimate;
-    this.warnThreshold = (budgetOverrides['warnThreshold'] as number) ?? defaults.warnThreshold;
+      (budgetOverrides['perRoundEstimate'] as number | undefined) ?? defaults.perRoundEstimate;
+    this.warnThreshold =
+      (budgetOverrides['warnThreshold'] as number | undefined) ?? defaults.warnThreshold;
     this.reduceScopeThreshold =
-      (budgetOverrides['reduceScopeThreshold'] as number) ?? defaults.reduceScopeThreshold;
+      (budgetOverrides['reduceScopeThreshold'] as number | undefined) ??
+      defaults.reduceScopeThreshold;
     this.softStopThreshold =
-      (budgetOverrides['softStopThreshold'] as number) ?? defaults.softStopThreshold;
+      (budgetOverrides['softStopThreshold'] as number | undefined) ?? defaults.softStopThreshold;
     this.hardStopThreshold =
-      (budgetOverrides['hardStopThreshold'] as number) ?? defaults.hardStopThreshold;
+      (budgetOverrides['hardStopThreshold'] as number | undefined) ?? defaults.hardStopThreshold;
 
     this.startTokens = 0;
     this.currentTokens = 0;
@@ -120,7 +122,7 @@ export class EvolveBudgetTracker {
   /** Record initial token state at start of session. */
   recordStart(): void {
     const session = getSessionUsage();
-    this.startTokens = session.totalTokens || 0;
+    this.startTokens = session.totalTokens;
     this.currentTokens = this.startTokens;
   }
 
@@ -128,9 +130,9 @@ export class EvolveBudgetTracker {
    * Snapshot current tokens after a round completes.
    * @returns {{ tokens: number }} Delta for this round
    */
-  recordRoundEnd(round: unknown, area: unknown, durationMs: unknown) {
+  recordRoundEnd(round: unknown, area: unknown, durationMs: unknown): { tokens: number } {
     const session = getSessionUsage();
-    const now = session.totalTokens || 0;
+    const now = session.totalTokens;
     const delta = now - this.currentTokens;
     this.currentTokens = now;
     this.roundDeltas.push({ round, area, tokens: delta, durationMs });
@@ -138,17 +140,17 @@ export class EvolveBudgetTracker {
   }
 
   /** Total tokens consumed in this evolve session. */
-  get consumed() {
+  get consumed(): number {
     return this.currentTokens - this.startTokens;
   }
 
   /** Budget usage as a fraction (0-1). */
-  get percentUsed() {
+  get percentUsed(): number {
     return this.hardLimit > 0 ? this.consumed / this.hardLimit : 0;
   }
 
   /** Rolling average tokens per round. */
-  get avgTokensPerRound() {
+  get avgTokensPerRound(): number {
     if (this.roundDeltas.length === 0) return this.perRoundEstimate;
     const sum = this.roundDeltas.reduce((s: number, d: { tokens: number }) => s + d.tokens, 0);
     return Math.round(sum / this.roundDeltas.length);
@@ -157,6 +159,7 @@ export class EvolveBudgetTracker {
   /**
    * Check budget state and return an action recommendation.
    */
+  // eslint-disable-next-line @typescript-eslint/explicit-module-boundary-types -- complex action union return
   check() {
     let externalCritical = false;
     try {
@@ -180,7 +183,7 @@ export class EvolveBudgetTracker {
         action: 'hard_stop',
         reason: externalCritical
           ? 'External usage monitor reports critical level'
-          : `Hard limit reached: ${Math.round(pct * 100)}% of budget used`,
+          : `Hard limit reached: ${String(Math.round(pct * 100))}% of budget used`,
       };
     }
 
@@ -188,7 +191,7 @@ export class EvolveBudgetTracker {
       return {
         ...base,
         action: 'soft_stop',
-        reason: `Soft limit reached: ${Math.round(pct * 100)}% budget (${consumed.toLocaleString()} tokens)`,
+        reason: `Soft limit reached: ${String(Math.round(pct * 100))}% budget (${consumed.toLocaleString()} tokens)`,
       };
     }
 
@@ -196,7 +199,7 @@ export class EvolveBudgetTracker {
       return {
         ...base,
         action: 'reduce_scope',
-        reason: `${Math.round(pct * 100)}% budget — switching to research-only rounds (no implement phase)`,
+        reason: `${String(Math.round(pct * 100))}% budget — switching to research-only rounds (no implement phase)`,
       };
     }
 
@@ -204,7 +207,7 @@ export class EvolveBudgetTracker {
       return {
         ...base,
         action: 'warn',
-        reason: `${Math.round(pct * 100)}% budget used (${consumed.toLocaleString()} tokens)`,
+        reason: `${String(Math.round(pct * 100))}% budget used (${consumed.toLocaleString()} tokens)`,
       };
     }
 
@@ -212,6 +215,7 @@ export class EvolveBudgetTracker {
   }
 
   /** Serialize tracker state for checkpoint persistence. */
+  // eslint-disable-next-line @typescript-eslint/explicit-module-boundary-types -- serialization object
   serialize() {
     return {
       startTokens: this.startTokens,
@@ -224,19 +228,20 @@ export class EvolveBudgetTracker {
   }
 
   /** Restore a tracker from serialized checkpoint data. */
-  static deserialize(data: Record<string, unknown>) {
+  static deserialize(data: Record<string, unknown>): EvolveBudgetTracker {
     const tracker = new EvolveBudgetTracker({
       softLimit: data['softLimit'],
       hardLimit: data['hardLimit'],
     });
-    tracker.startTokens = (data['startTokens'] as number) || 0;
-    tracker.currentTokens = (data['currentTokens'] as number) || 0;
-    tracker.roundDeltas = (data['roundDeltas'] as typeof tracker.roundDeltas) || [];
-    tracker._startedAt = (data['_startedAt'] as number) || Date.now();
+    tracker.startTokens = (data['startTokens'] as number | undefined) ?? 0;
+    tracker.currentTokens = (data['currentTokens'] as number | undefined) ?? 0;
+    tracker.roundDeltas = (data['roundDeltas'] as typeof tracker.roundDeltas | undefined) ?? [];
+    tracker._startedAt = (data['_startedAt'] as number | undefined) ?? Date.now();
     return tracker;
   }
 
   /** Summary for the session report. */
+  // eslint-disable-next-line @typescript-eslint/explicit-module-boundary-types -- summary object
   getSummary() {
     return {
       startTokens: this.startTokens,
@@ -259,7 +264,7 @@ export class EvolveBudgetTracker {
  * @param {string} branchName
  * @param {string} [agentName] - Agent executing the task (for commit attribution)
  */
-export function buildEvolveSafetyPrompt(branchName: string, agentName?: string) {
+export function buildEvolveSafetyPrompt(branchName: string, agentName?: string): string {
   return sharedBuildSafetyPrompt(branchName, {
     runner: 'evolve runner',
     reportName: 'session report',
@@ -269,7 +274,7 @@ export function buildEvolveSafetyPrompt(branchName: string, agentName?: string) 
       'Do NOT modify the evolve system itself (self-modification is blocked)',
       'Do NOT delete existing test files',
     ],
-    attribution: { pipeline: 'hydra-evolve', agent: agentName || undefined },
+    attribution: { pipeline: 'hydra-evolve', agent: agentName ?? undefined },
   });
 }
 
@@ -282,6 +287,7 @@ export function buildEvolveSafetyPrompt(branchName: string, agentName?: string) 
  * @param {string} [baseBranch='dev']
  * @returns {Array<{type: string, detail: string, severity: string}>}
  */
+// eslint-disable-next-line @typescript-eslint/explicit-module-boundary-types -- shared helper return
 export function scanBranchViolations(projectRoot: string, branchName: string, baseBranch = 'dev') {
   return sharedScanBranchViolations(projectRoot, branchName, {
     baseBranch,
@@ -294,11 +300,13 @@ export function scanBranchViolations(projectRoot: string, branchName: string, ba
 // ── Git Helpers (delegates to shared) ───────────────────────────────────────
 
 /** Verify the current git branch matches the expected branch. */
+// eslint-disable-next-line @typescript-eslint/explicit-module-boundary-types -- shared helper return
 export function verifyBranch(projectRoot: string, expectedBranch: string) {
   return sharedVerifyBranch(projectRoot, expectedBranch);
 }
 
 /** Check if working tree is clean. */
+// eslint-disable-next-line @typescript-eslint/explicit-module-boundary-types -- shared helper return
 export function isCleanWorkingTree(projectRoot: string) {
   return sharedIsCleanWorkingTree(projectRoot);
 }

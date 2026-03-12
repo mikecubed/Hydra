@@ -106,7 +106,7 @@ class Picker<T> {
 
   _onKey(str: string, key: { ctrl?: boolean; name?: string } | null) {
     if (!key) {
-      if (str?.length === 1 && str >= ' ') {
+      if (str.length === 1 && str >= ' ') {
         this.search += str;
         this._filter();
       }
@@ -114,7 +114,7 @@ class Picker<T> {
       return;
     }
 
-    if (key.ctrl && key.name === 'c') {
+    if (key.ctrl === true && key.name === 'c') {
       this._finish(null);
       return;
     }
@@ -156,8 +156,9 @@ class Picker<T> {
           this._filter();
         }
         break;
+      case undefined:
       default:
-        if (str?.length === 1 && str >= ' ') {
+        if (str.length === 1 && str >= ' ') {
           this.search += str;
           this._filter();
         }
@@ -169,12 +170,12 @@ class Picker<T> {
   // ── Filtering ─────────────────────────────────────────────────────────────
 
   _filter() {
-    if (this.search) {
-      const q = this.search.toLowerCase();
-      this.filtered = this.items.filter((item) => this.filterKey(item).toLowerCase().includes(q));
-    } else {
-      this.filtered = [...this.items];
-    }
+    this.filtered =
+      this.search === ''
+        ? [...this.items]
+        : this.items.filter((item) =>
+            this.filterKey(item).toLowerCase().includes(this.search.toLowerCase()),
+          );
     this.cursor = Math.min(this.cursor, Math.max(0, this.filtered.length - 1));
     this.scroll = 0;
     this._scrollTo();
@@ -195,17 +196,17 @@ class Picker<T> {
     const lines = [];
 
     // Title
-    if (this.title) lines.push(`  ${pc.bold(pc.cyan(this.title))}`);
+    if (this.title !== '') lines.push(`  ${pc.bold(pc.cyan(this.title))}`);
 
     // Search bar / hint
-    if (this.search) {
+    if (this.search === '') {
+      lines.push(`  ${pc.dim(`${String(this.items.length)} items — type to filter`)}`);
+    } else {
       const cnt =
         this.filtered.length < this.items.length
-          ? `${this.filtered.length}/${this.items.length}`
-          : `${this.items.length}`;
+          ? `${String(this.filtered.length)}/${String(this.items.length)}`
+          : String(this.items.length);
       lines.push(`  ${pc.dim('Filter:')} ${this.search}${pc.dim('│')}  ${pc.dim(`(${cnt})`)}`);
-    } else {
-      lines.push(`  ${pc.dim(`${this.items.length} items — type to filter`)}`);
     }
     lines.push('');
 
@@ -216,7 +217,7 @@ class Picker<T> {
       const start = this.scroll;
       const end = Math.min(start + this.pageSize, this.filtered.length);
 
-      if (start > 0) lines.push(`  ${pc.dim(`  ↑ ${start} more`)}`);
+      if (start > 0) lines.push(`  ${pc.dim(`  ↑ ${String(start)} more`)}`);
 
       for (let i = start; i < end; i++) {
         const sel = i === this.cursor;
@@ -225,7 +226,7 @@ class Picker<T> {
       }
 
       const remaining = this.filtered.length - end;
-      if (remaining > 0) lines.push(`  ${pc.dim(`  ↓ ${remaining} more`)}`);
+      if (remaining > 0) lines.push(`  ${pc.dim(`  ↓ ${String(remaining)} more`)}`);
     }
 
     // Footer
@@ -259,7 +260,7 @@ class Picker<T> {
 
   async _fallback(): Promise<T | null> {
     console.log('');
-    if (this.title) console.log(`  ${this.title}\n`);
+    if (this.title !== '') console.log(`  ${this.title}\n`);
     for (const [i, item] of this.items.entries()) {
       console.log(`  ${pc.dim(`${String(i + 1).padStart(3)})`)} ${this.renderItem(item, false)}`);
     }
@@ -270,7 +271,7 @@ class Picker<T> {
       rl.question('  Enter number (q to cancel): ', (ans) => {
         rl.close();
         const t = ans.trim();
-        if (!t || t === 'q') {
+        if (t === '' || t === 'q') {
           resolve(null);
           return;
         }
@@ -283,7 +284,7 @@ class Picker<T> {
 
 // ── Agent picker ────────────────────────────────────────────────────────────
 
-export async function pickAgent() {
+export async function pickAgent(): Promise<string | null> {
   const order = [
     ...AGENT_DISPLAY_ORDER.filter((a) => AGENT_NAMES.includes(a)),
     ...AGENT_NAMES.filter((a) => !AGENT_DISPLAY_ORDER.includes(a)),
@@ -291,7 +292,7 @@ export async function pickAgent() {
 
   const items = order.map((name) => ({
     name,
-    label: (AGENTS as Record<string, { label?: string }>)[name]?.label ?? name,
+    label: (AGENTS as Record<string, { label?: string }>)[name].label ?? name,
     active: getActiveModel(name) ?? 'unknown',
     effort: formatEffortDisplay(getActiveModel(name) ?? '', getReasoningEffort(name)),
   }));
@@ -302,7 +303,7 @@ export async function pickAgent() {
     renderItem: (item, sel) => {
       const pad = ' '.repeat(Math.max(1, 30 - item.label.length));
       const label = sel ? pc.white(item.label) : item.label;
-      const eff = item.effort ? pc.yellow(` [${item.effort}]`) : '';
+      const eff = item.effort === '' ? '' : pc.yellow(` [${item.effort}]`);
       return `${label}${pad}${pc.dim(item.active)}${eff}`;
     },
   }).run();
@@ -312,27 +313,33 @@ export async function pickAgent() {
 
 // ── Model picker ────────────────────────────────────────────────────────────
 
-export async function pickModel(agentName: string) {
+export async function pickModel(agentName: string): Promise<string | null> {
   const agentInfo = (AGENTS as Record<string, { label?: string }>)[agentName];
   const currentModel = getActiveModel(agentName);
   const cfg = loadHydraConfig();
-  const agentModels = (cfg.models as Record<string, Record<string, string>>)?.[agentName] ?? {};
-  const aliases = (cfg.aliases as Record<string, Record<string, string>>)?.[agentName] ?? {};
+  const agentModels =
+    (cfg.models as Record<string, Record<string, string> | undefined>)[agentName] ?? {};
+  const aliases =
+    (cfg.aliases as Record<string, Record<string, string> | undefined>)[agentName] ?? {};
 
   // Loading indicator
-  process.stdout.write(`  ${pc.dim(`Fetching ${agentInfo?.label || agentName} models...`)}`);
+  process.stdout.write(`  ${pc.dim(`Fetching ${agentInfo.label ?? agentName} models...`)}`);
   const { models, source } = await fetchModels(agentName);
   process.stdout.write(`\r${CLEAR_LINE}`);
 
   // Preset + alias maps
   const presetOf = new Map();
   for (const key of ['default', 'fast', 'cheap']) {
-    if (agentModels[key]) presetOf.set(agentModels[key], key);
+    if (agentModels[key] !== '') presetOf.set(agentModels[key], key);
   }
-  const aliasOf = new Map();
+  const aliasOf = new Map<string, string[]>();
   for (const [alias, id] of Object.entries(aliases)) {
-    if (!aliasOf.has(id)) aliasOf.set(id, []);
-    aliasOf.get(id).push(alias);
+    const existing = aliasOf.get(id);
+    if (existing) {
+      existing.push(alias);
+    } else {
+      aliasOf.set(id, [alias]);
+    }
   }
 
   // Build item list: presets first (deduped), then discovered models
@@ -341,7 +348,7 @@ export async function pickModel(agentName: string) {
 
   for (const key of ['default', 'fast', 'cheap']) {
     const id = agentModels[key];
-    if (id && !seen.has(id)) {
+    if (id !== '' && !seen.has(id)) {
       seen.add(id);
       items.push({ id, preset: key, active: id === currentModel });
     }
@@ -359,40 +366,55 @@ export async function pickModel(agentName: string) {
     return null;
   }
 
-  const sourceLabel = source === 'api' ? 'REST API' : source === 'cli' ? 'CLI' : 'config only';
+  let sourceLabel: string;
+  if (source === 'api') {
+    sourceLabel = 'REST API';
+  } else if (source === 'cli') {
+    sourceLabel = 'CLI';
+  } else {
+    sourceLabel = 'config only';
+  }
   const currentEffort = getReasoningEffort(agentName);
-  const effortTag = currentEffort ? ` effort:${currentEffort}` : '';
+  const effortTag = currentEffort != null && currentEffort !== '' ? ` effort:${currentEffort}` : '';
   const initialIdx = Math.max(
     0,
     items.findIndex((i) => i.active),
   );
 
   const picked = await new Picker(items, {
-    title: `${agentInfo?.label || agentName} — ${items.length} models [${sourceLabel}]${effortTag}`,
+    title: `${agentInfo.label ?? agentName} — ${String(items.length)} models [${sourceLabel}]${effortTag}`,
     initialIndex: initialIdx,
     pageSize: 18,
     filterKey: (item) => {
       const parts = [item.id];
-      if (item.preset) parts.push(item.preset);
+      if (item.preset != null && item.preset !== '') parts.push(item.preset);
       const als = aliasOf.get(item.id);
       if (als) parts.push(...als);
       return parts.join(' ');
     },
     renderItem: (item, sel) => {
       const tags = [];
-      if (item.preset) tags.push(pc.magenta(item.preset));
+      if (item.preset != null && item.preset !== '') tags.push(pc.magenta(item.preset));
       if (item.active) tags.push(pc.green('◀ active'));
       const als = aliasOf.get(item.id);
-      if (als && !item.preset) tags.push(pc.dim(`(${als.join(', ')})`));
+      if (als && (item.preset == null || item.preset === ''))
+        tags.push(pc.dim(`(${als.join(', ')})`));
       const annotation = formatBenchmarkAnnotation(item.id);
-      if (annotation) tags.push(pc.dim(annotation));
+      if (annotation !== '') tags.push(pc.dim(annotation));
       const suffix = tags.length > 0 ? `  ${tags.join(' ')}` : '';
-      const name = item.active ? pc.green(item.id) : sel ? pc.white(item.id) : item.id;
+      let name: string;
+      if (item.active) {
+        name = pc.green(item.id);
+      } else if (sel) {
+        name = pc.white(item.id);
+      } else {
+        name = item.id;
+      }
       return `${name}${suffix}`;
     },
   }).run();
 
-  return picked?.id || null;
+  return picked?.id ?? null;
 }
 
 // ── Reasoning effort picker ─────────────────────────────────────────────────
@@ -415,7 +437,7 @@ export async function pickEffort(
   modelId?: string | null,
 ): Promise<EffortResult | null | undefined> {
   const current = getReasoningEffort(agentName);
-  const effectiveModel = modelId || getActiveModel(agentName) || '';
+  const effectiveModel = modelId ?? getActiveModel(agentName) ?? '';
   const options = getEffortOptionsForModel(effectiveModel);
 
   // Model doesn't support reasoning controls — skip picker
@@ -441,29 +463,39 @@ export async function pickEffort(
     }),
   );
 
-  const initialIdx = current
-    ? Math.max(
-        0,
-        items.findIndex((i) => i.id === current),
-      )
-    : 0;
+  const initialIdx =
+    current != null && current !== ''
+      ? Math.max(
+          0,
+          items.findIndex((i) => i.id === current),
+        )
+      : 0;
 
   const picked = await new Picker(items, {
     title,
     initialIndex: initialIdx,
     filterKey: (item) => item.label,
     renderItem: (item, sel) => {
-      const active = item.id === current || (!item.id && !current);
-      const name = active ? pc.green(item.label) : sel ? pc.white(item.label) : item.label;
+      const active =
+        item.id === current ||
+        ((item.id == null || item.id === '') && (current == null || current === ''));
+      let name: string;
+      if (active) {
+        name = pc.green(item.label);
+      } else if (sel) {
+        name = pc.white(item.label);
+      } else {
+        name = item.label;
+      }
       const tags = [];
       if (active) tags.push(pc.green('◀ current'));
-      if (item.desc) tags.push(pc.dim(item.desc));
+      if (item.desc != null && item.desc !== '') tags.push(pc.dim(item.desc));
       const suffix = tags.length > 0 ? `  ${tags.join(' ')}` : '';
       return `${name}${suffix}`;
     },
   }).run();
 
-  return picked === undefined ? undefined : picked; // null = cancel, object = selection
+  return picked; // null = cancel, object = selection
 }
 
 // ── Apply selection ─────────────────────────────────────────────────────────
@@ -478,9 +510,9 @@ export function applySelection(
 
   cfg.mode = 'custom';
 
-  const models = cfg.models as Record<string, Record<string, string | null>>;
-  if (!models[agentName]) models[agentName] = {} as Record<string, string | null>;
-  const resolved = (resolveModelId(agentName, modelId) as string | null) ?? modelId;
+  const models = cfg.models as Record<string, Record<string, string | null> | undefined>;
+  models[agentName] ??= {};
+  const resolved = resolveModelId(agentName, modelId) ?? modelId;
   models[agentName]['active'] = resolved;
   models[agentName]['reasoningEffort'] = effortLevel ?? null;
 
@@ -495,27 +527,28 @@ async function main() {
 
   // Agent selection
   let agentName;
-  if (arg && AGENT_NAMES.includes(arg)) {
+  if (arg !== '' && AGENT_NAMES.includes(arg)) {
     agentName = arg;
-  } else if (arg) {
-    console.error(pc.red(`Unknown agent: ${arg}`));
-    console.error(`Available: ${AGENT_NAMES.join(', ')}`);
-    process.exit(1);
-  } else {
+  } else if (arg === '') {
     console.log('');
     agentName = await pickAgent();
-    if (!agentName) {
+    if (agentName == null || agentName === '') {
       console.log(pc.dim('  Cancelled.\n'));
-      process.exit(0);
+      return;
     }
+  } else {
+    console.error(pc.red(`Unknown agent: ${arg}`));
+    console.error(`Available: ${AGENT_NAMES.join(', ')}`);
+    process.exitCode = 1;
+    return;
   }
 
   // Model selection
   console.log('');
   const modelId = await pickModel(agentName);
-  if (!modelId) {
+  if (modelId == null || modelId === '') {
     console.log(pc.dim('  Cancelled.\n'));
-    process.exit(0);
+    return;
   }
 
   // Reasoning effort selection
@@ -523,9 +556,9 @@ async function main() {
   const effortPick = await pickEffort(agentName, modelId);
   if (effortPick === null) {
     console.log(pc.dim('  Cancelled.\n'));
-    process.exit(0);
+    return;
   }
-  if (effortPick?._skipped) {
+  if (effortPick?._skipped === true) {
     console.log(pc.dim(`  (No reasoning controls for this model — skipped)\n`));
   }
   const effortLevel = effortPick?.id ?? null; // null = "default" (clear override)
@@ -535,17 +568,20 @@ async function main() {
   const currentEffort = getReasoningEffort(agentName);
   if (modelId === currentModel && effortLevel === currentEffort) {
     console.log(`\n  ${pc.dim('No changes — already set.')}\n`);
-    process.exit(0);
+    return;
   }
 
   // Apply
   const resolved = applySelection(agentName, modelId, effortLevel);
   const effortDisplay = formatEffortDisplay(resolved, effortLevel);
-  const effortTag = effortDisplay
-    ? pc.yellow(effortDisplay)
-    : effortLevel
-      ? pc.yellow(effortLevel)
-      : pc.dim('default');
+  let effortTag: string;
+  if (effortDisplay !== '') {
+    effortTag = pc.yellow(effortDisplay);
+  } else if (effortLevel != null && effortLevel !== '') {
+    effortTag = pc.yellow(effortLevel);
+  } else {
+    effortTag = pc.dim('default');
+  }
   console.log(
     `\n  ${pc.green('✓')} ${pc.bold(agentName)} → ${pc.white(resolved)} ${effortTag}  ${pc.dim('(mode → custom)')}\n`,
   );
@@ -554,10 +590,11 @@ async function main() {
 // Only run when invoked directly
 import path from 'node:path';
 const __self = new URL(import.meta.url).pathname.replace(/^\/([A-Z]:)/, '$1');
-if (path.resolve(process.argv[1] || '') === path.resolve(__self)) {
-  main().catch((err) => {
+if (path.resolve(process.argv[1] === '' ? '' : process.argv[1]) === path.resolve(__self)) {
+  main().catch((err: unknown) => {
     process.stdout.write(SHOW_CURSOR);
-    console.error(pc.red(`\nError: ${err.message}`));
-    process.exit(1);
+    const msg = err instanceof Error ? err.message : String(err);
+    console.error(pc.red(`\nError: ${msg}`));
+    process.exitCode = 1;
   });
 }

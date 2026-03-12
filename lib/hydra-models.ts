@@ -19,7 +19,7 @@
 
 import https from 'node:https';
 import path from 'node:path';
-// @ts-ignore — cross-spawn has no bundled types; pre-existing across codebase
+// @ts-expect-error — cross-spawn has no bundled types; pre-existing across codebase
 import spawn from 'cross-spawn';
 import { loadHydraConfig } from './hydra-config.ts';
 import { getActiveModel, getReasoningEffort, AGENT_NAMES, AGENTS } from './hydra-agents.ts';
@@ -53,30 +53,30 @@ function httpGet(url: string, headers: Record<string, string> = {}): Promise<unk
 
 async function apiClaude(): Promise<string[] | null> {
   const key = process.env['ANTHROPIC_API_KEY'];
-  if (!key) return null;
+  if (key == null || key === '') return null;
   const data = await httpGet('https://api.anthropic.com/v1/models?limit=100', {
     'x-api-key': key,
     'anthropic-version': '2023-06-01',
   });
-  return ((data as { data?: Array<{ id: string }> }).data || []).map((m) => m.id).sort();
+  return ((data as { data?: Array<{ id: string }> }).data ?? []).map((m) => m.id).sort();
 }
 
 async function apiCodex(): Promise<string[] | null> {
   const key = process.env['OPENAI_API_KEY'];
-  if (!key) return null;
+  if (key == null || key === '') return null;
   const data = await httpGet('https://api.openai.com/v1/models', {
     Authorization: `Bearer ${key}`,
   });
-  return ((data as { data?: Array<{ id: string }> }).data || []).map((m) => m.id).sort();
+  return ((data as { data?: Array<{ id: string }> }).data ?? []).map((m) => m.id).sort();
 }
 
 async function apiGemini(): Promise<string[] | null> {
   const key = process.env['GEMINI_API_KEY'] ?? process.env['GOOGLE_API_KEY'];
-  if (!key) return null;
+  if (key == null || key === '') return null;
   const data = await httpGet(
     `https://generativelanguage.googleapis.com/v1beta/models?key=${key}&pageSize=200`,
   );
-  return ((data as { models?: Array<{ name: string }> }).models || [])
+  return ((data as { models?: Array<{ name: string }> }).models ?? [])
     .map((m) => m.name.replace('models/', ''))
     .sort();
 }
@@ -89,23 +89,29 @@ const GEMINI_PROMPT =
   'List every Gemini model ID currently available. Output ONLY the model IDs, one per line. No markdown, no commentary, no explanation.';
 
 function cliClaude() {
+  // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-member-access
   const r = spawn.sync('claude', ['-p', '--model', 'haiku', '--output-format', 'text'], {
     input: CLAUDE_PROMPT,
     encoding: 'utf8',
     timeout: 30_000,
     windowsHide: true,
   });
-  if (r.status !== 0 && !r.stdout) return null;
+  // eslint-disable-next-line @typescript-eslint/no-unsafe-member-access
+  if (r.status !== 0 && r.stdout == null) return null;
+  // eslint-disable-next-line @typescript-eslint/no-unsafe-argument, @typescript-eslint/no-unsafe-member-access
   return parseModelLines(r.stdout);
 }
 
 function cliGemini() {
+  // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-member-access
   const r = spawn.sync(
     'gemini',
     ['-p', GEMINI_PROMPT, '-o', 'text', '-m', 'gemini-3-flash-preview'],
     { encoding: 'utf8', timeout: 30_000, windowsHide: true },
   );
-  if (r.status !== 0 && !r.stdout) return null;
+  // eslint-disable-next-line @typescript-eslint/no-unsafe-member-access
+  if (r.status !== 0 && r.stdout == null) return null;
+  // eslint-disable-next-line @typescript-eslint/no-unsafe-argument, @typescript-eslint/no-unsafe-member-access
   return parseModelLines(r.stdout);
 }
 
@@ -117,11 +123,11 @@ function cliCodex() {
 
 /** Parse one-per-line model IDs from noisy CLI output. */
 function parseModelLines(raw: string | null | undefined): string[] | null {
-  if (!raw) return null;
+  if (raw == null || raw === '') return null;
   const ids = raw
     .split('\n')
     .map((l) => l.trim())
-    .filter((l) => l && !l.startsWith('#') && !l.startsWith('-') && !l.startsWith('*'))
+    .filter((l) => l !== '' && !l.startsWith('#') && !l.startsWith('-') && !l.startsWith('*'))
     .filter((l) => !l.startsWith('Loaded') && !l.startsWith('Hook'))
     .filter((l) => !l.includes(' ')) // model IDs shouldn't have spaces
     .filter((l) => /^[a-z0-9]/.test(l)); // starts with lowercase/digit
@@ -136,8 +142,10 @@ const STRATEGIES = {
   gemini: { api: apiGemini, cli: cliGemini },
 };
 
-export async function fetchModels(agentName: string) {
-  const strat = (STRATEGIES as Record<string, typeof STRATEGIES.claude>)[agentName];
+export async function fetchModels(
+  agentName: string,
+): Promise<{ models: string[]; source: string }> {
+  const strat = (STRATEGIES as Record<string, typeof STRATEGIES.claude | undefined>)[agentName];
   if (!strat) return { models: [], source: 'none' };
 
   // 1. Try API
@@ -164,28 +172,30 @@ export async function fetchModels(agentName: string) {
 
 function displayAgent(agentName: string, fetchResult: { models: string[]; source: string }) {
   const cfg = loadHydraConfig();
-  const agentModels = (cfg.models as Record<string, Record<string, string>>)?.[agentName] ?? {};
-  const aliases = (cfg.aliases as Record<string, Record<string, string>>)?.[agentName] ?? {};
+  const agentModels =
+    (cfg.models as Record<string, Record<string, string> | undefined>)[agentName] ?? {};
+  const aliases =
+    (cfg.aliases as Record<string, Record<string, string> | undefined>)[agentName] ?? {};
   const activeModel = getActiveModel(agentName);
   const agentInfo = (AGENTS as Record<string, { label?: string }>)[agentName];
-  const mode = cfg.mode || 'performance';
-  const tierPreset = cfg.modeTiers?.[mode]?.[agentName] || 'default';
+  const mode = cfg.mode;
+  const tierPreset = cfg.modeTiers?.[mode]?.[agentName] ?? 'default';
 
   console.log('');
-  console.log(pc.bold(pc.cyan(`═══ ${agentInfo?.label || agentName} ═══`)));
+  console.log(pc.bold(pc.cyan(`═══ ${agentInfo.label ?? agentName} ═══`)));
 
   // Active model + reasoning effort
   const effort = getReasoningEffort(agentName);
-  const effortStr = effort ? pc.yellow(` [${effort}]`) : '';
+  const effortStr = effort != null && effort !== '' ? pc.yellow(` [${effort}]`) : '';
   console.log(
-    `  Active:  ${pc.green(activeModel || 'unknown')}${effortStr} ${pc.dim(`(mode: ${mode} → ${tierPreset})`)}`,
+    `  Active:  ${pc.green(activeModel ?? 'unknown')}${effortStr} ${pc.dim(`(mode: ${mode} → ${tierPreset})`)}`,
   );
 
   // Presets
   const presetKeys = ['default', 'fast', 'cheap'];
   console.log(pc.bold('  Presets:'));
   for (const key of presetKeys) {
-    if (agentModels[key]) {
+    if (agentModels[key] !== '') {
       const marker = agentModels[key] === activeModel ? pc.green(' ◀') : '';
       console.log(`    ${pc.dim(key.padEnd(8))} ${agentModels[key]}${marker}`);
     }
@@ -198,7 +208,7 @@ function displayAgent(agentName: string, fetchResult: { models: string[]; source
     .map((e) => (e === effort ? pc.green(e) + pc.green(' ◀') : pc.dim(e)))
     .join('  ');
   console.log(
-    `    ${effort ? effortLine : `${pc.dim('default')}  (${effortLevels.map((e) => pc.dim(e)).join(' | ')})`}`,
+    `    ${effort != null && effort !== '' ? effortLine : `${pc.dim('default')}  (${effortLevels.map((e) => pc.dim(e)).join(' | ')})`}`,
   );
 
   // Aliases
@@ -211,8 +221,14 @@ function displayAgent(agentName: string, fetchResult: { models: string[]; source
 
   // Discovered models
   const { models, source } = fetchResult;
-  const sourceLabel =
-    source === 'api' ? 'REST API' : source === 'cli' ? 'CLI query' : 'config only';
+  let sourceLabel: string;
+  if (source === 'api') {
+    sourceLabel = 'REST API';
+  } else if (source === 'cli') {
+    sourceLabel = 'CLI query';
+  } else {
+    sourceLabel = 'config only';
+  }
 
   if (models.length === 0) {
     console.log(pc.bold(`  Available Models ${pc.dim(`(${sourceLabel})`)}:`));
@@ -226,11 +242,13 @@ function displayAgent(agentName: string, fetchResult: { models: string[]; source
   // Build known-set for highlighting
   const knownIds = new Set();
   for (const key of presetKeys) {
-    if (agentModels[key]) knownIds.add(agentModels[key]);
+    if (agentModels[key] !== '') knownIds.add(agentModels[key]);
   }
   for (const modelId of Object.values(aliases)) knownIds.add(modelId);
 
-  console.log(pc.bold(`  Available Models (${models.length}) ${pc.dim(`[${sourceLabel}]`)}:`));
+  console.log(
+    pc.bold(`  Available Models (${String(models.length)}) ${pc.dim(`[${sourceLabel}]`)}:`),
+  );
   for (const model of models) {
     const isActive = model === activeModel;
     const isConfigured = knownIds.has(model);
@@ -249,12 +267,13 @@ function displayAgent(agentName: string, fetchResult: { models: string[]; source
 async function main() {
   const arg = process.argv[2]?.toLowerCase();
 
-  const agents = arg && AGENT_NAMES.includes(arg) ? [arg] : AGENT_NAMES;
+  const agents = arg !== '' && AGENT_NAMES.includes(arg) ? [arg] : AGENT_NAMES;
 
-  if (arg && !AGENT_NAMES.includes(arg)) {
+  if (arg !== '' && !AGENT_NAMES.includes(arg)) {
     console.error(pc.red(`Unknown agent: ${arg}`));
     console.error(`Available: ${AGENT_NAMES.join(', ')}`);
-    process.exit(1);
+    process.exitCode = 1;
+    return;
   }
 
   console.log(pc.bold('Discovering models...'));
@@ -276,10 +295,10 @@ async function main() {
 
 // Only run when invoked directly (not when imported by hydra-models-select.mjs)
 const __self = new URL(import.meta.url).pathname.replace(/^\/([A-Z]:)/, '$1');
-const __argv1 = path.resolve(process.argv[1] || '');
+const __argv1 = path.resolve(process.argv[1] === '' ? '' : process.argv[1]);
 if (__argv1 === path.resolve(__self)) {
-  main().catch((err) => {
-    console.error(pc.red(`Error: ${err.message}`));
-    process.exit(1);
+  main().catch((err: unknown) => {
+    console.error(pc.red(`Error: ${(err as Error).message}`));
+    process.exitCode = 1;
   });
 }

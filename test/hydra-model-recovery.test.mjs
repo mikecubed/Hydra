@@ -235,11 +235,11 @@ describe('recoverFromModelError', () => {
   });
 
   it('returns recovered: false when recovery is disabled', async () => {
-    // We can't easily disable config in a unit test without mocking,
-    // but we can verify the function handles the case structurally.
-    // The real test is that when enabled (default), it works:
-    const recovery = await recoverFromModelError('codex', 'nonexistent-model');
-    assert.equal(recovery.recovered, true);
+    saveHydraConfig({ modelRecovery: { enabled: false } });
+    invalidateConfigCache();
+    const recovery = await recoverFromModelError('codex', 'bogus-model-xyz');
+    assert.equal(recovery.recovered, false);
+    assert.equal(recovery.newModel, null);
   });
 });
 

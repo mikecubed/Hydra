@@ -99,21 +99,30 @@ function askLine(rl: readline.Interface, question: string) {
 async function phaseSelect(sortedTasks: ScannedTask[], maxTasks: number) {
   const rl = readline.createInterface({ input: process.stdin, output: process.stderr });
   try {
-    console.log(pc.bold(`\nSelect up to ${maxTasks} task(s) to run:\n`));
+    console.log(pc.bold(`\nSelect up to ${String(maxTasks)} task(s) to run:\n`));
     for (let i = 0; i < Math.min(sortedTasks.length, 20); i++) {
       const t = sortedTasks[i];
-      const prioColor = t.priority === 'high' ? pc.red : t.priority === 'low' ? pc.dim : pc.yellow;
+      let prioColor: (s: string) => string;
+      if (t.priority === 'high') {
+        prioColor = pc.red;
+      } else if (t.priority === 'low') {
+        prioColor = pc.dim;
+      } else {
+        prioColor = pc.yellow;
+      }
       console.log(
         `  ${pc.bold(String(i + 1).padStart(2))}. ${prioColor(t.priority.padEnd(6))} [${t.source}] ${t.title}`,
       );
       console.log(`      ${pc.dim(`[${t.taskType}] → ${t.suggestedAgent} | ${t.sourceRef}`)}`);
     }
     if (sortedTasks.length > 20) {
-      console.log(pc.dim(`\n  ... and ${sortedTasks.length - 20} more`));
+      console.log(pc.dim(`\n  ... and ${String(sortedTasks.length - 20)} more`));
     }
-    console.log(pc.dim(`\n  Enter numbers (e.g. 1,3,5) or press Enter for top ${maxTasks}.`));
+    console.log(
+      pc.dim(`\n  Enter numbers (e.g. 1,3,5) or press Enter for top ${String(maxTasks)}.`),
+    );
     const answer = await askLine(rl, pc.bold('  Select: '));
-    if (!answer) return sortedTasks.slice(0, maxTasks);
+    if (answer.length === 0) return sortedTasks.slice(0, maxTasks);
 
     const indices = answer
       .split(',')
@@ -129,7 +138,15 @@ async function phaseSelect(sortedTasks: ScannedTask[], maxTasks: number) {
 
 // ── Budget Thresholds ───────────────────────────────────────────────────────
 
-function buildThresholds(budgetCfg: any) {
+interface BudgetCfg {
+  handoffThreshold?: number;
+  softLimit?: number;
+  hardLimit?: number;
+  perTaskEstimate?: number;
+  perTaskTimeoutMs?: number;
+}
+
+function buildThresholds(budgetCfg: BudgetCfg) {
   return [
     { pct: 0.95, action: 'hard_stop', reason: 'Hard limit reached: {pct}% of budget used' },
     {
@@ -138,7 +155,10 @@ function buildThresholds(budgetCfg: any) {
       reason: 'Soft limit reached: {pct}% budget ({consumed} tokens)',
     },
     {
-      pct: budgetCfg.handoffThreshold || 0.7,
+      pct:
+        budgetCfg.handoffThreshold !== undefined && budgetCfg.handoffThreshold > 0
+          ? budgetCfg.handoffThreshold
+          : 0.7,
       action: 'handoff',
       reason: '{pct}% budget — switching remaining tasks to economy models',
       once: true,
@@ -158,8 +178,8 @@ function buildTaskPrompt(
 ) {
   const instructionFile = getAgentInstructionFile(agent, projectRoot);
 
-  const selfSnapshot = opts.selfSnapshotText || '';
-  const selfIndex = opts.selfIndexText || '';
+  const selfSnapshot = opts.selfSnapshotText ?? '';
+  const selfIndex = opts.selfIndexText ?? '';
 
   const safetyBlock = buildSafetyPrompt(branchName, {
     runner: 'actualize runner',
@@ -169,11 +189,13 @@ function buildTaskPrompt(
     attribution: { pipeline: 'hydra-actualize', agent },
   });
 
-  const bodySection = task.body ? `\n## Details\n${task.body}\n` : '';
+  const bodySection =
+    task.body !== null && task.body.length > 0 ? `\n## Details\n${task.body}\n` : '';
 
-  const sourceNote = task.sourceRef
-    ? `**Source:** ${task.source} (${task.sourceRef})`
-    : `**Source:** ${task.source}`;
+  const sourceNote =
+    task.sourceRef.length > 0
+      ? `**Source:** ${task.source} (${task.sourceRef})`
+      : `**Source:** ${task.source}`;
 
   const intent = `You are Hydra improving itself. Be bold, but keep scope bounded and verifiable.
 - Prefer changes that increase self-awareness, diagnostics, safety, and autonomy.
@@ -211,10 +233,16 @@ Start working on the task now.`;
 
 // ── Verification ────────────────────────────────────────────────────────────
 
-function runVerification(projectRoot: string, cfg: any) {
+function runVerification(projectRoot: string, cfg: Record<string, unknown>) {
   const plan = resolveVerificationPlan(projectRoot, cfg);
-  if (!plan.enabled || !plan.command) {
-    return { ran: false, passed: true, command: '', output: '', reason: plan.reason || 'disabled' };
+  if (!plan.enabled || plan.command.length === 0) {
+    return {
+      ran: false,
+      passed: true,
+      command: '',
+      output: '',
+      reason: plan.reason.length > 0 ? plan.reason : 'disabled',
+    };
   }
 
   log.dim(`Verifying: ${plan.command}`);
@@ -224,8 +252,10 @@ function runVerification(projectRoot: string, cfg: any) {
     ran: true,
     passed: result.ok,
     command: plan.command,
-    output: (result.stdout || '').slice(-2000) + (result.stderr || '').slice(-1000),
-    reason: plan.reason || '',
+    output:
+      (result.stdout.length > 0 ? result.stdout : '').slice(-2000) +
+      (result.stderr.length > 0 ? result.stderr : '').slice(-1000),
+    reason: plan.reason.length > 0 ? plan.reason : '',
   };
 }
 
@@ -239,11 +269,12 @@ async function main() {
   // Resolve project (default: Hydra itself)
   let projectConfig;
   try {
-    const projectOpt = (options['project'] as string | undefined) || HYDRA_ROOT;
+    const projectOpt = (options['project'] as string | undefined) ?? HYDRA_ROOT;
     projectConfig = resolveProject({ project: projectOpt });
   } catch (err) {
     log.error(`Project resolution failed: ${err instanceof Error ? err.message : String(err)}`);
-    process.exit(1);
+    process.exitCode = 1;
+    return;
   }
 
   const { projectRoot, coordDir } = projectConfig;
@@ -252,25 +283,33 @@ async function main() {
   initAgentRegistry();
 
   const cfg = loadHydraConfig();
-  const baseBranch = String(
-    options['base-branch'] || cfg.evolve?.baseBranch || cfg.nightly?.baseBranch || 'dev',
-  );
-  const branchPrefix = String((options['branch-prefix'] as string) || 'actualize');
-  const maxTasks = options['max-tasks'] ? Number.parseInt(options['max-tasks'] as string, 10) : 5;
-  const maxHours = options['max-hours'] ? Number.parseFloat(options['max-hours'] as string) : 4;
-  const isDryRun = !!options['dry-run'];
-  const isInteractive = !!options['interactive'];
-  const noDiscovery = !!options['no-discovery'];
+  const baseBranch =
+    typeof options['base-branch'] === 'string' && options['base-branch'].length > 0
+      ? options['base-branch']
+      : (cfg.evolve?.baseBranch ?? cfg.nightly?.baseBranch ?? 'dev');
+  const branchPrefix =
+    typeof options['branch-prefix'] === 'string' && options['branch-prefix'].length > 0
+      ? options['branch-prefix']
+      : 'actualize';
+  const maxTasks =
+    typeof options['max-tasks'] === 'string' ? Number.parseInt(options['max-tasks'], 10) : 5;
+  const maxHours =
+    typeof options['max-hours'] === 'string' ? Number.parseFloat(options['max-hours']) : 4;
+  const isDryRun = options['dry-run'] === true;
+  const isInteractive = options['interactive'] === true;
+  const noDiscovery = options['no-discovery'] === true;
 
   // Preconditions
   const currentBranch = getCurrentBranch(projectRoot);
   if (currentBranch !== baseBranch) {
     log.error(`Must be on '${baseBranch}' branch (currently on '${currentBranch}')`);
-    process.exit(1);
+    process.exitCode = 1;
+    return;
   }
   if (!isCleanWorkingTree(projectRoot)) {
     log.error('Working tree is not clean. Commit or stash changes first.');
-    process.exit(1);
+    process.exitCode = 1;
+    return;
   }
   log.ok(`Preconditions met: on ${baseBranch}, clean working tree`);
 
@@ -295,7 +334,9 @@ async function main() {
   // ── Phase: SCAN ──
   log.phase('SCAN');
   const scanned = scanAllSources(projectRoot);
-  log.info(`Scanned ${scanned.length} task(s) from TODO comments / TODO.md / GitHub issues`);
+  log.info(
+    `Scanned ${String(scanned.length)} task(s) from TODO comments / TODO.md / GitHub issues`,
+  );
 
   // ── Phase: DISCOVER ──
   let discovered: unknown[] = [];
@@ -303,17 +344,24 @@ async function main() {
     log.dim('AI discovery: disabled');
   } else {
     log.phase('DISCOVER');
-    const discoveryCfg = cfg.nightly?.aiDiscovery || {};
-    const discoveryAgent = String(options['discovery-agent'] || discoveryCfg.agent || 'gemini');
-    const focus = options['focus']
-      ? String(options['focus'])
-          .split(',')
-          .map((s) => s.trim())
-          .filter(Boolean)
-      : discoveryCfg.focus || [];
-    const maxSuggestions = options['discover-max']
-      ? Number.parseInt(options['discover-max'] as string, 10)
-      : discoveryCfg.maxSuggestions || 6;
+    const discoveryCfg = cfg.nightly?.aiDiscovery ?? {};
+    let discoveryAgent = 'gemini';
+    if (typeof options['discovery-agent'] === 'string' && options['discovery-agent'].length > 0) {
+      discoveryAgent = options['discovery-agent'];
+    } else if (discoveryCfg.agent != null && discoveryCfg.agent.length > 0) {
+      discoveryAgent = discoveryCfg.agent;
+    }
+    const focus =
+      typeof options['focus'] === 'string' && options['focus'].length > 0
+        ? options['focus']
+            .split(',')
+            .map((s) => s.trim())
+            .filter((s) => s.length > 0)
+        : (discoveryCfg.focus ?? []);
+    const maxSuggestions =
+      typeof options['discover-max'] === 'string'
+        ? Number.parseInt(options['discover-max'], 10)
+        : (discoveryCfg.maxSuggestions ?? 6);
 
     const extraContext = [snapshotText, indexText].join('\n\n');
 
@@ -321,7 +369,7 @@ async function main() {
       agent: discoveryAgent,
       maxSuggestions,
       focus,
-      timeoutMs: discoveryCfg.timeoutMs || 5 * 60 * 1000,
+      timeoutMs: discoveryCfg.timeoutMs ?? 5 * 60 * 1000,
       existingTasks: scanned.map((t) => t.title),
       profile: 'actualize',
       extraContext,
@@ -341,29 +389,39 @@ async function main() {
 
   if (selected.length === 0) {
     log.warn('No tasks to execute. Nothing to do.');
+    // eslint-disable-next-line n/no-process-exit -- top-level main function; safe to exit cleanly
     process.exit(0);
   }
 
-  log.info(`Selected ${selected.length} task(s)`);
+  log.info(`Selected ${String(selected.length)} task(s)`);
   for (const t of selected) {
-    const prioColor = t.priority === 'high' ? pc.red : t.priority === 'low' ? pc.dim : pc.yellow;
-    log.dim(`  ${prioColor(t.priority.padEnd(6))} [${t.source}] ${t.title}`);
+    let prioColor2: (s: string) => string;
+    if (t.priority === 'high') {
+      prioColor2 = pc.red;
+    } else if (t.priority === 'low') {
+      prioColor2 = pc.dim;
+    } else {
+      prioColor2 = pc.yellow;
+    }
+    log.dim(`  ${prioColor2(t.priority.padEnd(6))} [${t.source}] ${t.title}`);
   }
 
   if (isDryRun) {
     console.log('');
     console.log(pc.bold('=== Dry Run Complete ==='));
-    console.log(`  Would execute ${selected.length} task(s):`);
+    console.log(`  Would execute ${String(selected.length)} task(s):`);
     for (const t of selected) {
       console.log(`    - [${t.source}] ${t.title} -> ${t.suggestedAgent}`);
     }
     console.log('');
+    // eslint-disable-next-line n/no-process-exit -- top-level main function; safe to exit cleanly
     process.exit(0);
   }
 
   // ── Phase: EXECUTE ──
   log.phase('EXECUTE');
 
+  // eslint-disable-next-line @typescript-eslint/prefer-nullish-coalescing -- fallback object needed
   const budgetCfg = cfg.nightly?.budget || {
     softLimit: 300_000,
     hardLimit: 450_000,
@@ -420,11 +478,12 @@ async function main() {
     // dispatching to an unavailable or disabled agent when the suggestion is stale.
     const taskType = classifyTask(task.title);
     let agent = task.suggestedAgent;
-    if (agent) {
+    if (agent.length > 0) {
       const agentDef = getAgent(agent);
       const isInstalled = !(agent in installedCLIs) || installedCLIs[agent];
+      // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition -- cfg.local may be undefined at runtime despite types
       const isLocalDisabled = agent === 'local' && !cfg.local?.enabled;
-      if (!agentDef?.enabled || !isInstalled || isLocalDisabled) {
+      if (agentDef?.enabled !== true || !isInstalled || isLocalDisabled) {
         agent = bestAgentFor(taskType, { installedCLIs });
       }
     } else {
@@ -434,7 +493,7 @@ async function main() {
       ? (getAgent(agent)?.economyModel(budgetCfg) ?? undefined)
       : undefined;
 
-    log.task(`Task ${i + 1}/${selected.length}: ${task.title} [${agent}]`);
+    log.task(`Task ${String(i + 1)}/${String(selected.length)}: ${task.title} [${agent}]`);
 
     if (branchExists(projectRoot, branchName)) {
       log.warn(`Branch already exists: ${branchName} — skipping`);
@@ -443,7 +502,7 @@ async function main() {
         title: task.title,
         branch: branchName,
         source: task.source,
-        taskType: task.taskType || 'unknown',
+        taskType: task.taskType.length > 0 ? task.taskType : 'unknown',
         status: 'skipped',
         agent,
         tokensUsed: 0,
@@ -463,7 +522,7 @@ async function main() {
         title: task.title,
         branch: branchName,
         source: task.source,
-        taskType: task.taskType || 'unknown',
+        taskType: task.taskType.length > 0 ? task.taskType : 'unknown',
         status: 'error',
         agent,
         tokensUsed: 0,
@@ -484,20 +543,29 @@ async function main() {
       selfIndexText: indexText,
     });
 
-    const effectiveModel = modelOverride || getActiveModel(agent) || 'default';
+    const effectiveModel =
+      (modelOverride != null && modelOverride.length > 0 ? modelOverride : null) ??
+      getActiveModel(agent) ??
+      'default';
     const handle = recordCallStart(agent, effectiveModel);
-    log.dim(`Dispatching ${agent}${modelOverride ? ` (${modelOverride})` : ''}...`);
+    log.dim(
+      `Dispatching ${agent}${modelOverride != null && modelOverride.length > 0 ? ` (${modelOverride})` : ''}...`,
+    );
 
     let agentResult;
     try {
+      // eslint-disable-next-line no-await-in-loop -- tasks run sequentially for branch isolation
       agentResult = await executeAgentWithRecovery(agent, prompt, {
         cwd: projectRoot,
-        timeoutMs: cfg.nightly?.perTaskTimeoutMs || 15 * 60 * 1000,
+        timeoutMs:
+          (cfg.nightly?.perTaskTimeoutMs ?? 0) > 0
+            ? (cfg.nightly?.perTaskTimeoutMs as number)
+            : 15 * 60 * 1000,
         modelOverride,
         progressIntervalMs: 15_000,
         onProgress: (elapsed, outputKB) => {
           const elStr = formatDuration(elapsed);
-          const kbStr = outputKB > 0 ? ` | ${outputKB}KB` : '';
+          const kbStr = outputKB > 0 ? ` | ${String(outputKB)}KB` : '';
           process.stderr.write(
             `\r  ${pc.dim(`${agent}: working... ${elStr}${kbStr}`)}${' '.repeat(20)}`,
           );
@@ -514,10 +582,15 @@ async function main() {
     }
     process.stderr.write(`\r${' '.repeat(100)}\r`);
 
+    // eslint-disable-next-line @typescript-eslint/no-unsafe-argument, @typescript-eslint/no-explicit-any -- agentResult matches CallResult shape at runtime
     if (agentResult.ok) recordCallComplete(handle, agentResult as any);
-    else recordCallError(handle, new Error(agentResult.error || 'unknown'));
+    else
+      recordCallError(
+        handle,
+        new Error((agentResult.error ?? '').length > 0 ? agentResult.error! : 'unknown'),
+      );
 
-    const taskDurationMs = agentResult.durationMs || 0;
+    const taskDurationMs = agentResult.durationMs;
     const tokenDelta = budget.recordUnitEnd(task.slug, taskDurationMs);
 
     // Branch integrity
@@ -535,7 +608,14 @@ async function main() {
 
     // Verification
     const verification = runVerification(projectRoot, cfg);
-    const verificationStatus = verification.ran ? (verification.passed ? 'PASS' : 'FAIL') : 'SKIP';
+    let verificationStatus: string;
+    if (!verification.ran) {
+      verificationStatus = 'SKIP';
+    } else if (verification.passed) {
+      verificationStatus = 'PASS';
+    } else {
+      verificationStatus = 'FAIL';
+    }
     if (verification.ran) {
       if (verification.passed) log.ok('Verification: PASS');
       else log.warn('Verification: FAIL');
@@ -548,7 +628,7 @@ async function main() {
       protectedPatterns: [...BASE_PROTECTED_PATTERNS],
     });
     if (violations.length > 0) {
-      log.warn(`${violations.length} violation(s) detected`);
+      log.warn(`${String(violations.length)} violation(s) detected`);
       for (const v of violations) log.dim(`  [${v.severity}] ${v.detail}`);
     }
 
@@ -558,7 +638,7 @@ async function main() {
     else if (verification.ran && !verification.passed) status = 'partial';
 
     log.ok(
-      `Done: ${status} | ${stats.commits} commits | ${stats.filesChanged} files | ~${tokenDelta.tokens.toLocaleString()} tokens | ${formatDuration(taskDurationMs)}`,
+      `Done: ${status} | ${String(stats.commits)} commits | ${String(stats.filesChanged)} files | ~${tokenDelta.tokens.toLocaleString()} tokens | ${formatDuration(taskDurationMs)}`,
     );
 
     results.push({
@@ -566,7 +646,7 @@ async function main() {
       title: task.title,
       branch: branchName,
       source: task.source,
-      taskType: task.taskType || 'unknown',
+      taskType: task.taskType.length > 0 ? task.taskType : 'unknown',
       status,
       agent,
       tokensUsed: tokenDelta.tokens,
@@ -605,7 +685,7 @@ async function main() {
   };
 
   const budgetSummary = budget.getSummary();
-  if (stopReason) budgetSummary['stopReason'] = stopReason;
+  if (stopReason !== null) budgetSummary['stopReason'] = stopReason;
 
   const jsonReport = {
     ...runMeta,
@@ -619,8 +699,8 @@ async function main() {
   md.push(`- Project: \`${runMeta.projectRoot}\``);
   md.push(`- Base branch: \`${runMeta.baseBranch}\``);
   md.push(`- Branch prefix: \`${runMeta.branchPrefix}\``);
-  md.push(`- Tasks: ${runMeta.processedTasks}/${runMeta.totalTasks}`);
-  if (runMeta.stopReason) md.push(`- Stopped: ${runMeta.stopReason}`);
+  md.push(`- Tasks: ${String(runMeta.processedTasks)}/${String(runMeta.totalTasks)}`);
+  if (runMeta.stopReason != null) md.push(`- Stopped: ${runMeta.stopReason}`);
   md.push(`- Self snapshot: \`${runMeta.artifacts.selfSnapshot}\``);
   md.push(`- Self index: \`${runMeta.artifacts.selfIndex}\``);
   md.push('');
@@ -630,16 +710,16 @@ async function main() {
   md.push('|---|------|-------|--------|--------------|--------|');
   for (const [i, r] of results.entries()) {
     md.push(
-      `| ${i + 1} | ${String(r.title || '').slice(0, 60)} | ${r.agent} | ${r.status} | ${r.verification} | \`${r.branch}\` |`,
+      `| ${String(i + 1)} | ${r.title.slice(0, 60)} | ${r.agent} | ${r.status} | ${r.verification} | \`${r.branch}\` |`,
     );
   }
   md.push('');
   md.push('## Budget');
   md.push(
-    `- Consumed: ${budgetSummary['consumed']?.toLocaleString?.() || budgetSummary['consumed']} of ${budgetSummary['hardLimit']?.toLocaleString?.() || budgetSummary['hardLimit']}`,
+    `- Consumed: ${((budgetSummary['consumed'] as number | undefined) ?? 0).toLocaleString()} of ${((budgetSummary['hardLimit'] as number | undefined) ?? 0).toLocaleString()}`,
   );
   md.push(
-    `- Avg per task: ${(budgetSummary['avgPerTask'] || 0).toLocaleString?.() || budgetSummary['avgPerTask']}`,
+    `- Avg per task: ${((budgetSummary['avgPerTask'] as number | undefined) ?? 0).toLocaleString()}`,
   );
   md.push('');
   md.push('## Next');
@@ -657,7 +737,8 @@ async function main() {
   log.ok(`Review: node lib/hydra-actualize-review.mjs review`);
 }
 
-main().catch((err) => {
-  process.stderr.write(pc.red(`Fatal: ${err.message}\n`));
+main().catch((err: unknown) => {
+  process.stderr.write(pc.red(`Fatal: ${err instanceof Error ? err.message : String(err)}\n`));
+  // eslint-disable-next-line n/no-process-exit -- inside .catch() callback; return does not propagate
   process.exit(1);
 });

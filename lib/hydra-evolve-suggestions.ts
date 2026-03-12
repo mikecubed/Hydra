@@ -98,7 +98,7 @@ export function loadSuggestions(evolveDir: string): Suggestions {
   try {
     const raw = fs.readFileSync(filePath, 'utf8');
     const parsed = JSON.parse(raw) as Suggestions;
-    if (!parsed.entries || !Array.isArray(parsed.entries)) {
+    if (!Array.isArray(parsed.entries)) {
       return { ...EMPTY_SUGGESTIONS, entries: [], stats: { ...EMPTY_SUGGESTIONS.stats } };
     }
     return parsed;
@@ -128,7 +128,7 @@ export function saveSuggestions(evolveDir: string, sg: Suggestions): void {
 function nextId(entries: SuggestionEntry[]) {
   if (entries.length === 0) return 'SUG_001';
   const maxNum = entries.reduce((max: number, e: SuggestionEntry) => {
-    const m = (e.id || '').match(/^SUG_(\d+)$/);
+    const m = (e.id ?? '').match(/^SUG_(\d+)$/);
     return m ? Math.max(max, Number.parseInt(m[1], 10)) : max;
   }, 0);
   return `SUG_${String(maxNum + 1).padStart(3, '0')}`;
@@ -151,7 +151,7 @@ function isTooSimilar(existingEntries: SuggestionEntry[], newText: string, thres
     // Only dedup against non-terminal entries
     if (entry.status === 'abandoned') continue;
 
-    const existingText = `${entry.title || ''} ${entry.description || ''}`;
+    const existingText = `${entry.title ?? ''} ${entry.description ?? ''}`;
     const existingWords = new Set(
       existingText
         .toLowerCase()
@@ -178,31 +178,31 @@ function isTooSimilar(existingEntries: SuggestionEntry[], newText: string, thres
  * @returns {object|null} The added entry or null if deduped
  */
 export function addSuggestion(sg: Suggestions, entry: SuggestionEntry): SuggestionEntry | null {
-  const dedupText = `${entry.title || ''} ${entry.description || ''}`;
-  if (dedupText.trim() && isTooSimilar(sg.entries, dedupText)) {
+  const dedupText = `${entry.title ?? ''} ${entry.description ?? ''}`;
+  if (dedupText.trim() !== '' && isTooSimilar(sg.entries, dedupText)) {
     return null;
   }
 
   const id = nextId(sg.entries);
   const fullEntry = {
     id,
-    createdAt: entry.createdAt || new Date().toISOString().split('T')[0],
-    source: entry.source || 'user:manual',
-    sourceRef: entry.sourceRef || null,
-    area: entry.area || 'general',
-    title: entry.title || '',
-    description: entry.description || '',
-    specPath: entry.specPath || null,
-    priority: entry.priority || 'medium',
+    createdAt: entry.createdAt ?? new Date().toISOString().split('T')[0],
+    source: entry.source ?? 'user:manual',
+    sourceRef: entry.sourceRef ?? null,
+    area: entry.area ?? 'general',
+    title: entry.title ?? '',
+    description: entry.description ?? '',
+    specPath: entry.specPath ?? null,
+    priority: entry.priority ?? 'medium',
     status: 'pending',
-    attempts: entry.attempts || 0,
-    maxAttempts: entry.maxAttempts || 3,
-    lastAttemptDate: entry.lastAttemptDate || null,
-    lastAttemptVerdict: entry.lastAttemptVerdict || null,
-    lastAttemptScore: entry.lastAttemptScore || null,
-    lastAttemptLearnings: entry.lastAttemptLearnings || null,
-    tags: entry.tags || [],
-    notes: entry.notes || '',
+    attempts: entry.attempts ?? 0,
+    maxAttempts: entry.maxAttempts ?? 3,
+    lastAttemptDate: entry.lastAttemptDate ?? null,
+    lastAttemptVerdict: entry.lastAttemptVerdict ?? null,
+    lastAttemptScore: entry.lastAttemptScore ?? null,
+    lastAttemptLearnings: entry.lastAttemptLearnings ?? null,
+    tags: entry.tags ?? [],
+    notes: entry.notes ?? '',
   };
 
   sg.entries.push(fullEntry);
@@ -254,7 +254,7 @@ export function getPendingSuggestions(sg: Suggestions): SuggestionEntry[] {
       const pa = PRIORITY_ORDER[a.priority ?? ''] ?? 1;
       const pb = PRIORITY_ORDER[b.priority ?? ''] ?? 1;
       if (pa !== pb) return pa - pb;
-      return (a.createdAt || '').localeCompare(b.createdAt || '');
+      return (a.createdAt ?? '').localeCompare(b.createdAt ?? '');
     });
 }
 
@@ -266,7 +266,7 @@ export function getPendingSuggestions(sg: Suggestions): SuggestionEntry[] {
  * @returns {object|null} Entry or null
  */
 export function getSuggestionById(sg: Suggestions, id: string): SuggestionEntry | null {
-  return sg.entries.find((e: SuggestionEntry) => e.id === id) || null;
+  return sg.entries.find((e: SuggestionEntry) => e.id === id) ?? null;
 }
 
 /**
@@ -284,22 +284,22 @@ export function searchSuggestions(
 ): SuggestionEntry[] {
   let results = [...sg.entries];
 
-  if (opts.status) {
+  if (opts.status != null && opts.status !== '') {
     results = results.filter((e: SuggestionEntry) => e.status === opts.status);
   }
 
-  if (opts.area) {
+  if (opts.area != null && opts.area !== '') {
     results = results.filter((e: SuggestionEntry) => e.area === opts.area);
   }
 
-  if (query) {
+  if (query != null && query !== '') {
     const q = query.toLowerCase();
     results = results.filter(
       (e) =>
-        (e.title || '').toLowerCase().includes(q) ||
-        (e.description || '').toLowerCase().includes(q) ||
-        (e.area || '').toLowerCase().includes(q) ||
-        (e.tags || []).some((t: string) => t.toLowerCase().includes(q)),
+        (e.title ?? '').toLowerCase().includes(q) ||
+        (e.description ?? '').toLowerCase().includes(q) ||
+        (e.area ?? '').toLowerCase().includes(q) ||
+        (e.tags ?? []).some((t: string) => t.toLowerCase().includes(q)),
     );
   }
 
@@ -307,7 +307,7 @@ export function searchSuggestions(
     const pa = PRIORITY_ORDER[a.priority ?? ''] ?? 1;
     const pb = PRIORITY_ORDER[b.priority ?? ''] ?? 1;
     if (pa !== pb) return pa - pb;
-    return (b.createdAt || '').localeCompare(a.createdAt || '');
+    return (b.createdAt ?? '').localeCompare(a.createdAt ?? '');
   });
 }
 
@@ -329,8 +329,13 @@ export function createSuggestionFromRound(
   deliberation: EvolveDeliberation,
   opts: CreateFromRoundOpts = {},
 ): SuggestionEntry | null {
-  const improvement = deliberation?.selectedImprovement;
-  if (!improvement || improvement === 'No improvement selected' || improvement.length < 10) {
+  const improvement = deliberation.selectedImprovement;
+  if (
+    improvement == null ||
+    improvement === '' ||
+    improvement === 'No improvement selected' ||
+    improvement.length < 10
+  ) {
     return null;
   }
 
@@ -338,20 +343,21 @@ export function createSuggestionFromRound(
   const title = improvement.length > 100 ? `${improvement.slice(0, 97)}...` : improvement;
 
   // Determine source
-  const source =
-    opts.source ||
-    (roundResult.verdict === 'reject'
-      ? 'auto:rejected-round'
-      : roundResult.verdict === 'skipped'
-        ? 'auto:deferred'
-        : 'auto:rejected-round');
+  let source: string;
+  if (opts.source != null) {
+    source = opts.source;
+  } else if (roundResult.verdict === 'skipped') {
+    source = 'auto:deferred';
+  } else {
+    source = 'auto:rejected-round';
+  }
 
   // Determine priority based on score
   let priority = 'medium';
   if ((roundResult.score ?? 0) >= 5) priority = 'high';
   if (
     (roundResult.score ?? 0) <= 1 &&
-    roundResult.investigations?.diagnoses?.every((d) => d.diagnosis === 'transient')
+    roundResult.investigations?.diagnoses?.every((d) => d.diagnosis === 'transient') === true
   ) {
     // Low score due to transient failures (timeouts etc.) — likely worth retrying
     priority = 'high';
@@ -359,18 +365,21 @@ export function createSuggestionFromRound(
 
   return addSuggestion(sg, {
     source,
-    sourceRef: opts.sessionId ? `${opts.sessionId}/round-${roundResult.round}` : null,
+    sourceRef:
+      opts.sessionId != null && opts.sessionId !== ''
+        ? `${opts.sessionId}/round-${String(roundResult.round ?? '')}`
+        : null,
     area: roundResult.area,
     title,
     description: improvement,
-    specPath: opts.specPath || null,
+    specPath: opts.specPath ?? null,
     priority,
     tags: [
       roundResult.area ?? '',
-      source.split(':')[1] || source,
-      ...(roundResult.verdict ? [roundResult.verdict] : []),
+      source.split(':')[1] === '' ? source : source.split(':')[1],
+      ...(roundResult.verdict != null && roundResult.verdict !== '' ? [roundResult.verdict] : []),
     ],
-    notes: opts.notes || '',
+    notes: opts.notes ?? '',
   });
 }
 
@@ -391,7 +400,7 @@ function createRL() {
  * Ask a question and return the trimmed answer.
  */
 function askRaw(
-  rl: ReturnType<typeof import('node:readline').createInterface>,
+  rl: ReturnType<typeof readline.createInterface>,
   question: string,
 ): Promise<string> {
   return new Promise((resolve) => {
@@ -412,33 +421,35 @@ function askRaw(
 export async function promptSuggestionPicker(
   pending: SuggestionEntry[],
   opts: { maxDisplay?: number } = {},
-) {
-  const maxDisplay = opts.maxDisplay || 5;
+): Promise<{ action: string; suggestion?: SuggestionEntry; text?: string }> {
+  const maxDisplay = opts.maxDisplay ?? 5;
   const displayed = pending.slice(0, maxDisplay);
 
   const rl = createRL();
 
   try {
     console.error('');
-    console.error(pc.bold(pc.cyan(`  Pending Suggestions (${pending.length}):`)));
+    console.error(pc.bold(pc.cyan(`  Pending Suggestions (${String(pending.length)}):`)));
     console.error('');
 
     for (const [i, s] of displayed.entries()) {
-      const num = pc.bold(pc.white(`  ${i + 1}.`));
-      const idTag = pc.dim(`[${s.id}]`);
+      const num = pc.bold(pc.white(`  ${String(i + 1)}.`));
+      const idTag = pc.dim(`[${s.id ?? ''}]`);
       const areaTag = pc.yellow(s.area);
       const titleText =
-        (s.title || '').length > 60 ? `${(s.title || '').slice(0, 57)}...` : s.title || '';
+        (s.title ?? '').length > 60 ? `${(s.title ?? '').slice(0, 57)}...` : (s.title ?? '');
 
-      console.error(`${num} ${idTag} ${areaTag}: ${titleText} ${pc.dim(`(${s.priority})`)}`);
+      console.error(`${num} ${idTag} ${areaTag}: ${titleText} ${pc.dim(`(${s.priority ?? ''})`)}`);
 
       // Second line with attempt info
       const parts = [];
       if ((s.attempts ?? 0) > 0) {
-        parts.push(`Last: ${s.lastAttemptVerdict || '?'} (${s.lastAttemptScore ?? '?'}/10)`);
-        parts.push(`Attempts: ${s.attempts}/${s.maxAttempts}`);
+        parts.push(
+          `Last: ${s.lastAttemptVerdict ?? '?'} (${s.lastAttemptScore == null ? '?' : String(s.lastAttemptScore)}/10)`,
+        );
+        parts.push(`Attempts: ${String(s.attempts ?? 0)}/${String(s.maxAttempts ?? 0)}`);
       }
-      if (s.specPath) {
+      if (s.specPath != null && s.specPath !== '') {
         parts.push('has spec');
       }
       if (parts.length > 0) {
@@ -448,12 +459,12 @@ export async function promptSuggestionPicker(
     }
 
     if (pending.length > maxDisplay) {
-      console.error(pc.dim(`     ... and ${pending.length - maxDisplay} more`));
+      console.error(pc.dim(`     ... and ${String(pending.length - maxDisplay)} more`));
       console.error('');
     }
 
     const prompt = `${pc.cyan(
-      `  [1-${displayed.length}]`,
+      `  [1-${String(displayed.length)}]`,
     )} pick, ${pc.dim('[s]')}kip, ${pc.dim('[f]')}reeform, ${pc.dim('[d]')}iscover: `;
 
     const answer = await askRaw(rl, prompt);
@@ -507,7 +518,13 @@ function computeStats(entries: SuggestionEntry[]) {
  * @param {object} sg - Suggestions object
  * @returns {object} Stats summary
  */
-export function getSuggestionStats(sg: Suggestions) {
+export function getSuggestionStats(sg: Suggestions): {
+  totalPending: number;
+  totalExploring: number;
+  totalCompleted: number;
+  totalRejected: number;
+  totalAbandoned: number;
+} {
   return computeStats(sg.entries);
 }
 
@@ -519,5 +536,5 @@ export function getSuggestionStats(sg: Suggestions) {
  */
 export function formatSuggestionsForPrompt(sg: Suggestions): string {
   const stats = computeStats(sg.entries);
-  return `Suggestions Backlog: ${stats.totalPending} pending, ${stats.totalCompleted} completed, ${stats.totalRejected} rejected`;
+  return `Suggestions Backlog: ${String(stats.totalPending)} pending, ${String(stats.totalCompleted)} completed, ${String(stats.totalRejected)} rejected`;
 }

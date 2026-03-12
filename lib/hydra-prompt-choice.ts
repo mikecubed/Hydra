@@ -8,6 +8,8 @@
  * Dependency: picocolors (via hydra-ui.mjs)
  */
 
+/* eslint-disable @typescript-eslint/strict-boolean-expressions, @typescript-eslint/no-explicit-any, @typescript-eslint/no-unsafe-argument, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-return -- prompt-choice handles dynamic readline state */
+
 import { box, DIM, ACCENT, WARNING, ERROR, SUCCESS, stripAnsi } from './hydra-ui.ts';
 import pc from 'picocolors';
 
@@ -15,15 +17,15 @@ import pc from 'picocolors';
 
 let sessionAutoAccept = false;
 
-export function isAutoAccepting() {
+export function isAutoAccepting(): boolean {
   return sessionAutoAccept;
 }
 
-export function setAutoAccept(value: any) {
-  sessionAutoAccept = Boolean(value);
+export function setAutoAccept(value: boolean): void {
+  sessionAutoAccept = value;
 }
 
-export function resetAutoAccept() {
+export function resetAutoAccept(): void {
   sessionAutoAccept = false;
 }
 
@@ -31,7 +33,7 @@ export function resetAutoAccept() {
 
 let choiceActive = false;
 
-export function isChoiceActive() {
+export function isChoiceActive(): boolean {
   return choiceActive;
 }
 
@@ -42,7 +44,7 @@ export function isChoiceActive() {
  * Clamps between 60 and 120 columns.
  */
 function computeBoxWidth() {
-  const termWidth = process.stdout?.columns || 80;
+  const termWidth = process.stdout.columns || 80;
   const targetWidth = Math.floor(termWidth * 0.9);
   return Math.max(60, Math.min(120, targetWidth));
 }
@@ -62,7 +64,7 @@ function wrapContextValue(key: string, value: string, innerWidth: number) {
   const firstLineWidth = innerWidth - keyLabelWidth;
   const continuationIndent = ' '.repeat(keyLabelWidth);
 
-  const valueStr = String(value);
+  const valueStr = value;
   const words = valueStr.split(/\s+/);
   const lines = [];
   let currentLine = '';
@@ -77,7 +79,6 @@ function wrapContextValue(key: string, value: string, innerWidth: number) {
       // If current line has content, save it
       if (currentLine) {
         lines.push(currentLine);
-        currentLine = '';
       }
 
       // Handle words longer than target width by breaking them
@@ -131,7 +132,7 @@ function renderChoiceUI({
   for (const [i, choice] of choices.entries()) {
     const num = ACCENT(String(i + 1).padStart(2));
     const choiceLabel = pc.white(choice.label);
-    const hint = choice.hint ? DIM(`  ${choice.hint}`) : '';
+    const hint = choice.hint ? DIM(`  ${String(choice.hint)}`) : '';
     boxLines.push(` ${num}  ${choiceLabel}${hint}`);
   }
 
@@ -151,7 +152,7 @@ function animateBoxDrawIn({
   context: any;
   choices: any[];
 }) {
-  const isTTY = process.stdout?.isTTY;
+  const isTTY = process.stdout.isTTY;
   if (!isTTY) {
     // No animation in non-TTY
     console.log(renderChoiceUI({ title, context, choices }));
@@ -179,7 +180,7 @@ function animateBoxDrawIn({
   for (const [i, choice] of choices.entries()) {
     const num = ACCENT(String(i + 1).padStart(2));
     const choiceLabel = pc.white(choice.label);
-    const hint = choice.hint ? DIM(`  ${choice.hint}`) : '';
+    const hint = choice.hint ? DIM(`  ${String(choice.hint)}`) : '';
     boxLines.push(` ${num}  ${choiceLabel}${hint}`);
   }
 
@@ -227,7 +228,7 @@ function collectFreeform(rl: any) {
   return new Promise((resolve) => {
     const freeformPrompt = `${ACCENT('hydra')}${pc.yellow(':')}${DIM('>')} `;
     rl.question(freeformPrompt, (answer: string) => {
-      resolve(String(answer || '').trim());
+      resolve((answer || '').trim());
     });
   });
 }
@@ -240,7 +241,7 @@ function collectFreeform(rl: any) {
  * @param {number} maxIndex - Maximum valid 1-based index
  * @returns {number[]|'all'|null} Array of 0-based indices, 'all', or null for invalid
  */
-export function parseMultiSelectInput(input: string, maxIndex: number) {
+export function parseMultiSelectInput(input: string, maxIndex: number): number[] | 'all' | null {
   const trimmed = input.trim().toLowerCase();
   if (trimmed === 'a' || trimmed === 'all') return 'all';
   if (!trimmed) return null;
@@ -257,7 +258,7 @@ export function parseMultiSelectInput(input: string, maxIndex: number) {
       for (let i = start; i <= end; i++) indices.add(i - 1);
     } else {
       const num = Number.parseInt(part, 10);
-      if (isNaN(num) || num < 1 || num > maxIndex) return null;
+      if (Number.isNaN(num) || num < 1 || num > maxIndex) return null;
       indices.add(num - 1);
     }
   }
@@ -295,7 +296,7 @@ function renderMultiSelectUI({
     const num = ACCENT(String(i + 1).padStart(2));
     const check = selected.has(i) ? SUCCESS('[x]') : DIM('[ ]');
     const choiceLabel = pc.white(choice.label);
-    const hint = choice.hint ? DIM(`  ${choice.hint}`) : '';
+    const hint = choice.hint ? DIM(`  ${String(choice.hint)}`) : '';
     boxLines.push(` ${num} ${check} ${choiceLabel}${hint}`);
   }
 
@@ -325,7 +326,7 @@ function renderMultiSelectUI({
  * @returns {Promise<{value: any, values?: any[], autoAcceptAll: boolean, timedOut: boolean}>}
  */
 export function promptChoice(
-  rl: any,
+  rl: any, // eslint-disable-line @typescript-eslint/explicit-module-boundary-types -- callers pass readline instances typed as unknown; full typing requires codebase-wide refactor
   opts: {
     title?: string;
     context?: any;
@@ -337,7 +338,7 @@ export function promptChoice(
     message?: string;
     [key: string]: unknown;
   } = {},
-) {
+): Promise<{ value?: unknown; values?: unknown[]; autoAcceptAll: boolean; timedOut: boolean }> {
   const {
     title = 'Selection',
     context = null,
@@ -354,7 +355,7 @@ export function promptChoice(
   }
 
   // Non-TTY or auto-accept: return default immediately
-  if (!process.stdout?.isTTY || sessionAutoAccept) {
+  if (!process.stdout.isTTY || sessionAutoAccept) {
     return Promise.resolve({
       value: defaultValue,
       autoAcceptAll: sessionAutoAccept,
@@ -407,7 +408,7 @@ export function promptChoice(
     }
 
     // Render the choice UI with animation
-    animateBoxDrawIn({ title, context, choices }).then(() => {
+    void animateBoxDrawIn({ title, context, choices }).then(() => {
       // After animation completes, show the prompt
       rl.setPrompt(choicePrompt);
       rl.prompt();
@@ -416,7 +417,7 @@ export function promptChoice(
     // Install one-shot line handler
     async function handleLine(input: string) {
       if (resolved) return;
-      const trimmed = String(input || '').trim();
+      const trimmed = (input || '').trim();
 
       if (!trimmed) {
         // Empty input: re-prompt
@@ -444,7 +445,9 @@ export function promptChoice(
           const text = await collectFreeform(rl);
           // Re-attach our handler in case of empty text
           if (!text) {
-            rl.on('line', handleLine);
+            rl.on('line', (lineInput: string) => {
+              void handleLine(lineInput);
+            });
             console.log(`  ${ERROR('Empty input, try again.')}`);
             rl.setPrompt(choicePrompt);
             rl.prompt();
@@ -471,20 +474,24 @@ export function promptChoice(
       rl.prompt();
     }
 
-    rl.on('line', handleLine);
+    rl.on('line', (lineInput: string) => {
+      void handleLine(lineInput);
+    });
 
     // Timeout
     if (timeoutMs > 0) {
       timeoutId = setTimeout(() => {
         if (!resolved) {
           console.log(
-            DIM(`  (timed out after ${Math.round(timeoutMs / 1000)}s, auto-selecting default)`),
+            DIM(
+              `  (timed out after ${String(Math.round(timeoutMs / 1000))}s, auto-selecting default)`,
+            ),
           );
           finish({ value: defaultValue, autoAcceptAll: false, timedOut: true });
         }
       }, timeoutMs);
       // Don't keep process alive for timeout
-      if (timeoutId.unref) timeoutId.unref();
+      timeoutId.unref();
     }
   });
 }
@@ -500,7 +507,7 @@ function promptMultiSelect(
     preSelected,
     timeoutMs,
   }: { title: string; context: any; choices: any[]; preSelected: any[]; timeoutMs: number },
-) {
+): Promise<{ value?: unknown; values?: unknown[]; autoAcceptAll: boolean; timedOut: boolean }> {
   // Build initial selection set from preSelected values
   const selected = new Set<number>();
   for (const [i, choice] of choices.entries()) {
@@ -508,7 +515,7 @@ function promptMultiSelect(
   }
 
   // Non-TTY or auto-accept: return preSelected (or all if none)
-  if (!process.stdout?.isTTY || sessionAutoAccept) {
+  if (!process.stdout.isTTY || sessionAutoAccept) {
     const values =
       selected.size > 0 ? [...selected].map((i) => choices[i].value) : choices.map((c) => c.value);
     return Promise.resolve({ values, autoAcceptAll: sessionAutoAccept, timedOut: false });
@@ -552,7 +559,7 @@ function promptMultiSelect(
       const count = selected.size;
       const total = choices.length;
       console.log(
-        `  ${DIM(`Selected: ${count}/${total}`)}${count > 0 ? ` ${SUCCESS('\u2713')}` : ''}`,
+        `  ${DIM(`Selected: ${String(count)}/${String(total)}`)}${count > 0 ? ` ${SUCCESS('\u2713')}` : ''}`,
       );
     }
 
@@ -563,7 +570,7 @@ function promptMultiSelect(
 
     function handleLine(input: string) {
       if (resolved) return;
-      const trimmed = String(input || '').trim();
+      const trimmed = (input || '').trim();
 
       // Empty enter = confirm selection
       if (!trimmed) {
@@ -623,7 +630,7 @@ function promptMultiSelect(
           finish({ values, autoAcceptAll: false, timedOut: true });
         }
       }, timeoutMs);
-      if (timeoutId.unref) timeoutId.unref();
+      timeoutId.unref();
     }
   });
 }
@@ -650,7 +657,7 @@ const SEVERITY_ICONS = {
  * @returns {Promise<boolean>} true if user confirms
  */
 export async function confirmActionPlan(
-  rl: any,
+  rl: any, // eslint-disable-line @typescript-eslint/explicit-module-boundary-types -- callers pass readline instances typed as unknown; full typing requires codebase-wide refactor
   opts: {
     title?: string;
     context?: any;
@@ -658,15 +665,17 @@ export async function confirmActionPlan(
     actions?: any[];
     timeoutMs?: number;
   } = {},
-) {
+): Promise<boolean> {
   const { title = 'Action Plan', context, summary, actions = [], timeoutMs = 0 } = opts;
 
   if (actions.length === 0) return true;
 
   // Build context with action list
-  const planContext = { ...(context || {}) };
+  const planContext: Record<string, string> = context
+    ? { ...(context as Record<string, string>) }
+    : {};
   if (summary) planContext['Summary'] = summary;
-  planContext['Actions'] = `${actions.length} item${actions.length === 1 ? '' : 's'}`;
+  planContext['Actions'] = `${String(actions.length)} item${actions.length === 1 ? '' : 's'}`;
 
   // Print the action list
   const boxWidth = computeBoxWidth();
@@ -689,8 +698,9 @@ export async function confirmActionPlan(
 
   for (const [i, action] of actions.entries()) {
     const num = DIM(`${String(i + 1).padStart(2)}.`);
-    const icon = (SEVERITY_ICONS as Record<string, string>)[action.severity] || DIM('\u25CB');
-    const agentTag = action.agent ? ` ${DIM(`[${action.agent}]`)}` : '';
+    const severity = (action.severity as string | undefined) ?? '';
+    const icon = (SEVERITY_ICONS as Record<string, string>)[severity] ?? DIM('\u25CB');
+    const agentTag = action.agent ? ` ${DIM(`[${String(action.agent)}]`)}` : '';
     boxLines.push(` ${num} ${icon} ${pc.white(action.label)}${agentTag}`);
     if (action.description) {
       boxLines.push(`      ${DIM(action.description.slice(0, innerWidth - 6))}`);
@@ -706,7 +716,7 @@ export async function confirmActionPlan(
       {
         label: 'Proceed',
         value: true,
-        hint: `execute ${actions.length} action${actions.length === 1 ? '' : 's'}`,
+        hint: `execute ${String(actions.length)} action${actions.length === 1 ? '' : 's'}`,
       },
       { label: 'Cancel', value: false },
     ],
@@ -714,5 +724,5 @@ export async function confirmActionPlan(
     timeoutMs,
   });
 
-  return (result as any).value === true;
+  return (result as { value: unknown }).value === true;
 }

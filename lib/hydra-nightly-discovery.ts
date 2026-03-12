@@ -11,7 +11,7 @@
 import { loadHydraConfig } from './hydra-config.ts';
 import { classifyTask, bestAgentFor } from './hydra-agents.ts';
 import { classifyPrompt } from './hydra-utils.ts';
-import { taskToSlug } from './hydra-tasks-scanner.ts';
+import { taskToSlug, type ScannedTask } from './hydra-tasks-scanner.ts';
 import { executeAgentWithRecovery } from './hydra-shared/agent-executor.ts';
 import { getAgentInstructionFile } from './hydra-sync-md.ts';
 import { recordCallStart, recordCallComplete, recordCallError } from './hydra-metrics.ts';
@@ -72,7 +72,7 @@ function buildDiscoveryPrompt(
 - Do NOT suggest tasks already in the queue above
 - Return 3-5 suggestions, sorted by priority`;
 
-  const ctxBlock = extraContext ? `\n## Extra Context\n${extraContext}\n` : '';
+  const ctxBlock = extraContext === '' ? '' : `\n## Extra Context\n${extraContext}\n`;
 
   return `${header}
 
@@ -118,7 +118,9 @@ function extractJsonArray(text: string) {
   const fenceMatch = text.match(/```(?:json)?\s*\n?([\s\S]*?)```/);
   if (fenceMatch) {
     try {
+      // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment -- JSON.parse result
       const parsed = JSON.parse(fenceMatch[1].trim());
+      // eslint-disable-next-line @typescript-eslint/no-unsafe-return -- JSON.parse result
       if (Array.isArray(parsed)) return parsed;
     } catch {
       /* continue */
@@ -129,7 +131,9 @@ function extractJsonArray(text: string) {
   const bracketMatch = text.match(/\[[\s\S]*\]/);
   if (bracketMatch) {
     try {
+      // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment -- JSON.parse result
       const parsed = JSON.parse(bracketMatch[0]);
+      // eslint-disable-next-line @typescript-eslint/no-unsafe-return -- JSON.parse result
       if (Array.isArray(parsed)) return parsed;
     } catch {
       /* continue */
@@ -165,20 +169,20 @@ export async function runDiscovery(
     profile?: string;
     extraContext?: string;
   } = {},
-) {
+): Promise<ScannedTask[]> {
   const cfg = loadHydraConfig();
-  const discoveryCfg = (cfg.nightly?.aiDiscovery || {}) as Record<string, unknown>;
+  const discoveryCfg = (cfg.nightly?.aiDiscovery ?? {}) as Record<string, unknown>;
 
-  const agent = opts.agent || (discoveryCfg['agent'] as string | undefined) || 'gemini';
-  const modelOverride = opts.model || (discoveryCfg['model'] as string | undefined) || null;
+  const agent = opts.agent ?? (discoveryCfg['agent'] as string | undefined) ?? 'gemini';
+  const modelOverride = opts.model ?? (discoveryCfg['model'] as string | undefined) ?? null;
   const maxSuggestions =
-    opts.maxSuggestions || (discoveryCfg['maxSuggestions'] as number | undefined) || 5;
-  const focus = opts.focus || (discoveryCfg['focus'] as string[] | undefined) || [];
+    opts.maxSuggestions ?? (discoveryCfg['maxSuggestions'] as number | undefined) ?? 5;
+  const focus = opts.focus ?? (discoveryCfg['focus'] as string[] | undefined) ?? [];
   const timeoutMs =
-    opts.timeoutMs || (discoveryCfg['timeoutMs'] as number | undefined) || 5 * 60 * 1000;
-  const existingTasks = opts.existingTasks || [];
-  const profile = opts.profile || 'nightly';
-  const extraContext = opts.extraContext || '';
+    opts.timeoutMs ?? (discoveryCfg['timeoutMs'] as number | undefined) ?? 5 * 60 * 1000;
+  const existingTasks = opts.existingTasks ?? [];
+  const profile = opts.profile ?? 'nightly';
+  const extraContext = opts.extraContext ?? '';
 
   const instructionFile = getAgentInstructionFile(agent, projectRoot);
   const prompt = buildDiscoveryPrompt(projectRoot, {
@@ -197,7 +201,7 @@ export async function runDiscovery(
     result = await executeAgentWithRecovery(agent, prompt, {
       cwd: projectRoot,
       timeoutMs,
-      ...(modelOverride && { modelOverride }),
+      ...(modelOverride != null && modelOverride !== '' && { modelOverride }),
     });
   } catch (err: unknown) {
     recordCallError(handle, err instanceof Error ? err : new Error(String(err)));
@@ -206,15 +210,15 @@ export async function runDiscovery(
   }
 
   if (!result.ok) {
-    recordCallError(handle, new Error(result.error || 'agent returned non-ok'));
-    log.warn(`Discovery agent returned error: ${result.error || 'unknown'}`);
+    recordCallError(handle, new Error(result.error ?? 'agent returned non-ok'));
+    log.warn(`Discovery agent returned error: ${result.error ?? 'unknown'}`);
     return [];
   }
 
   recordCallComplete(handle, result as unknown as Parameters<typeof recordCallComplete>[1]);
 
   // Parse response
-  const output = result.stdout || result.output || '';
+  const output = result.stdout ?? result.output;
   const items = extractJsonArray(output);
 
   if (!items || items.length === 0) {
@@ -223,32 +227,39 @@ export async function runDiscovery(
   }
 
   // Convert to ScannedTask shape
-  const tasks = [];
+  const tasks: ScannedTask[] = [];
   for (const item of items.slice(0, maxSuggestions)) {
+    // eslint-disable-next-line @typescript-eslint/no-unsafe-member-access, @typescript-eslint/strict-boolean-expressions -- untyped data
     if (!item.title || typeof item.title !== 'string') continue;
 
+    // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-member-access -- untyped data
     const title = item.title.trim();
+    // eslint-disable-next-line @typescript-eslint/no-unsafe-argument -- untyped data
     const slug = taskToSlug(title);
-    const taskType = item.taskType || classifyTask(title);
+    // eslint-disable-next-line @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-argument -- untyped data
+    const taskType = (item.taskType ?? classifyTask(title)) as string;
     const suggestedAgent = bestAgentFor(taskType);
     const { tier } = classifyPrompt(title);
 
     tasks.push({
       id: `ai-discovery:${slug}`,
+      // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment -- untyped data
       title,
       slug,
-      source: 'ai-discovery',
+      source: 'ai-discovery' as ScannedTask['source'],
       sourceRef: `${agent}-discovery`,
       taskType,
       suggestedAgent,
       complexity: tier,
-      priority: item.priority || 'medium',
-      body: item.description || null,
+      // eslint-disable-next-line @typescript-eslint/no-unsafe-member-access -- untyped data
+      priority: (item.priority ?? 'medium') as ScannedTask['priority'],
+      // eslint-disable-next-line @typescript-eslint/no-unsafe-member-access -- untyped data
+      body: (item.description ?? null) as string | null,
       issueNumber: null,
     });
   }
 
-  log.ok(`Discovery: ${tasks.length} task(s) suggested`);
+  log.ok(`Discovery: ${String(tasks.length)} task(s) suggested`);
   for (const t of tasks) {
     log.dim(`  - [${t.priority}] ${t.title}`);
   }

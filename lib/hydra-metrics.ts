@@ -85,7 +85,7 @@ interface CallResult {
     cacheCreationTokens?: number;
     cacheReadTokens?: number;
     totalTokens?: number;
-  };
+  } | null;
   costUsd?: number | null;
   outcome?: string;
 }
@@ -173,6 +173,7 @@ function createEmptyStore(): MetricsStore {
 }
 
 function ensureAgent(agentName: string): AgentMetrics {
+  // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition, @typescript-eslint/strict-boolean-expressions
   if (!metricsStore.agents[agentName]) {
     metricsStore.agents[agentName] = {
       callsTotal: 0,
@@ -190,6 +191,7 @@ function ensureAgent(agentName: string): AgentMetrics {
   }
   // Backfill sessionTokens for stores loaded from disk before this field existed
   const agentEntry = metricsStore.agents[agentName];
+  // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition, @typescript-eslint/strict-boolean-expressions
   if (agentEntry && !agentEntry.sessionTokens) {
     agentEntry.sessionTokens = createEmptySessionUsage();
   }
@@ -209,14 +211,14 @@ const activeHandles = new Map<string, ActiveHandle>();
  */
 export function recordCallStart(agentName: string, model?: string): string {
   handleCounter += 1;
-  const handle = `call_${handleCounter}_${Date.now()}`;
+  const handle = `call_${String(handleCounter)}_${String(Date.now())}`;
   activeHandles.set(handle, {
     agent: agentName,
-    model: model || 'unknown',
+    model: model ?? 'unknown',
     startedAt: Date.now(),
     startIso: new Date().toISOString(),
   });
-  metricsEmitter.emit('call:start', { agent: agentName, model: model || 'unknown' });
+  metricsEmitter.emit('call:start', { agent: agentName, model: model ?? 'unknown' });
   return handle;
 }
 
@@ -233,8 +235,8 @@ export function recordCallComplete(handle: string, result: CallResult): void {
   const durationMs = Date.now() - meta.startedAt;
   const agent = ensureAgent(meta.agent);
   // Accept both field names: shared agent-executor returns 'output', workers return 'stdout'
-  const stdout = result?.stdout || result?.output || '';
-  const stderr = result?.stderr || '';
+  const stdout = result.stdout ?? result.output ?? '';
+  const stderr = result.stderr ?? '';
   const outputLen = stdout.length + stderr.length;
   const estimatedTokens = Math.round(outputLen * TOKENS_PER_CHAR_ESTIMATE);
 
@@ -243,7 +245,7 @@ export function recordCallComplete(handle: string, result: CallResult): void {
   let costUsd = 0;
 
   // Accept pre-parsed tokenUsage from callers (e.g. executor after parseOutput)
-  if (result?.tokenUsage) {
+  if (result.tokenUsage) {
     const tu = result.tokenUsage;
     realTokens = {
       inputTokens: tu.inputTokens ?? 0,
@@ -253,7 +255,7 @@ export function recordCallComplete(handle: string, result: CallResult): void {
       totalTokens: tu.totalTokens ?? (tu.inputTokens ?? 0) + (tu.outputTokens ?? 0),
     };
   }
-  if (result?.costUsd != null) {
+  if (result.costUsd != null) {
     costUsd = result.costUsd;
   }
 
@@ -291,10 +293,10 @@ export function recordCallComplete(handle: string, result: CallResult): void {
     durationMs,
     estimatedTokens,
     realTokens: realTokens ? { ...realTokens } : null,
-    costUsd: costUsd || null,
+    costUsd: costUsd === 0 ? null : costUsd,
     ok: true,
     outputLen,
-    outcome: result?.outcome || 'success',
+    outcome: result.outcome ?? 'success',
   });
   if (agent.history.length > MAX_HISTORY) {
     agent.history = agent.history.slice(-MAX_HISTORY);
@@ -307,7 +309,7 @@ export function recordCallComplete(handle: string, result: CallResult): void {
  * @param {string} handle - Handle from recordCallStart
  * @param {Error|string} error - Error info
  */
-export function recordCallError(handle: string, error: Error | string | unknown): void {
+export function recordCallError(handle: string, error: unknown): void {
   const meta = activeHandles.get(handle);
   if (!meta) return;
   activeHandles.delete(handle);
@@ -329,7 +331,7 @@ export function recordCallError(handle: string, error: Error | string | unknown)
     durationMs,
     estimatedTokens: 0,
     ok: false,
-    error: String((error as Error)?.message ?? error ?? 'unknown'),
+    error: error instanceof Error ? error.message : String(error),
     outcome: 'failed',
   });
   if (agent.history.length > MAX_HISTORY) {
@@ -337,7 +339,7 @@ export function recordCallError(handle: string, error: Error | string | unknown)
   }
   metricsEmitter.emit('call:error', {
     agent: meta.agent,
-    error: String((error as Error)?.message ?? error ?? 'unknown'),
+    error: error instanceof Error ? error.message : String(error),
   });
 }
 
@@ -346,15 +348,17 @@ export function recordCallError(handle: string, error: Error | string | unknown)
 /**
  * Get the full metrics store.
  */
-export function getMetrics() {
+export function getMetrics(): MetricsStore {
   return { ...metricsStore };
 }
 
 /**
  * Get metrics for a specific agent, including latency percentiles.
  */
+// eslint-disable-next-line @typescript-eslint/explicit-module-boundary-types
 export function getAgentMetrics(agentName: string) {
   const agent = metricsStore.agents[agentName];
+  // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition, @typescript-eslint/strict-boolean-expressions
   if (!agent) return null;
 
   const durations = agent.history.filter((h) => h.ok).map((h) => h.durationMs);
@@ -369,6 +373,7 @@ export function getAgentMetrics(agentName: string) {
 /**
  * Get a summary suitable for dashboard display.
  */
+// eslint-disable-next-line @typescript-eslint/explicit-module-boundary-types
 export function getMetricsSummary() {
   const agents: Record<string, unknown> = {};
   let totalCalls = 0;
@@ -376,7 +381,7 @@ export function getMetricsSummary() {
   let totalDurationMs = 0;
 
   for (const [name, data] of Object.entries(metricsStore.agents)) {
-    const durations = (data.history || []).filter((h) => h.ok).map((h) => h.durationMs);
+    const durations = data.history.filter((h) => h.ok).map((h) => h.durationMs);
     agents[name] = {
       callsToday: data.callsToday,
       callsSuccess: data.callsSuccess,
@@ -388,7 +393,7 @@ export function getMetricsSummary() {
       lastCallAt: data.lastCallAt,
       successRate:
         data.callsTotal > 0 ? Math.round((data.callsSuccess / data.callsTotal) * 100) : 100,
-      sessionTokens: data.sessionTokens || createEmptySessionUsage(),
+      sessionTokens: data.sessionTokens,
     };
     totalCalls += data.callsToday;
     totalTokens += data.estimatedTokensToday;
@@ -404,15 +409,15 @@ export function getMetricsSummary() {
     totalTokens,
     totalDurationMs,
     agents,
-    sessionUsage: metricsStore.sessionUsage || createEmptySessionUsage(),
+    sessionUsage: metricsStore.sessionUsage,
   };
 }
 
 /**
  * Get session-level real token usage (accumulated from Claude JSON output).
  */
-export function getSessionUsage() {
-  return metricsStore.sessionUsage || createEmptySessionUsage();
+export function getSessionUsage(): SessionUsage {
+  return metricsStore.sessionUsage;
 }
 
 /**
@@ -431,9 +436,11 @@ export function getRecentTokens(
   let estimated = 0;
   let entries = 0;
 
-  const agentNames = agentName ? [agentName] : Object.keys(metricsStore.agents);
+  const agentNames =
+    agentName != null && agentName !== '' ? [agentName] : Object.keys(metricsStore.agents);
   for (const name of agentNames) {
     const agent = metricsStore.agents[name];
+    // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition, @typescript-eslint/strict-boolean-expressions
     if (!agent?.history) continue;
     for (const entry of agent.history) {
       if (!entry.ok) continue;
@@ -441,13 +448,9 @@ export function getRecentTokens(
       if (entryTime < cutoff) continue;
       entries++;
       if (entry.realTokens) {
-        const total =
-          typeof entry.realTokens === 'object'
-            ? entry.realTokens.totalTokens || 0
-            : entry.realTokens || 0;
-        real += total;
+        real += entry.realTokens.totalTokens;
       } else {
-        estimated += entry.estimatedTokens || 0;
+        estimated += entry.estimatedTokens;
       }
     }
   }
@@ -462,16 +465,19 @@ export function getRecentTokens(
  */
 export function getCostByOutcome(agentName?: string | null): Record<string, OutcomeResult> {
   const result: Record<string, OutcomeResult> = {};
-  const agentNames = agentName ? [agentName] : Object.keys(metricsStore.agents);
+  const agentNames =
+    agentName != null && agentName !== '' ? [agentName] : Object.keys(metricsStore.agents);
 
   for (const name of agentNames) {
     const agent = metricsStore.agents[name];
+    // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition, @typescript-eslint/strict-boolean-expressions
     if (!agent?.history) continue;
     for (const entry of agent.history) {
-      const outcome = entry.outcome || (entry.ok ? 'success' : 'failed');
+      const outcome = entry.outcome ?? (entry.ok ? 'success' : 'failed');
+      // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition, @typescript-eslint/strict-boolean-expressions
       if (!result[outcome]) result[outcome] = { count: 0, totalCost: 0 };
       result[outcome].count += 1;
-      result[outcome].totalCost += entry.costUsd || 0;
+      result[outcome].totalCost += entry.costUsd ?? 0;
     }
   }
   return result;
@@ -490,13 +496,14 @@ export function checkSLOs(
 
   for (const [agentName, thresholds] of Object.entries(sloConfig)) {
     const agent = metricsStore.agents[agentName];
+    // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition, @typescript-eslint/strict-boolean-expressions
     if (!agent) continue;
 
     // Latency SLO
-    if (thresholds.maxP95Ms) {
-      const durations = (agent.history || []).filter((h) => h.ok).map((h) => h.durationMs);
+    if (thresholds.maxP95Ms != null && thresholds.maxP95Ms !== 0) {
+      const durations = agent.history.filter((h) => h.ok).map((h) => h.durationMs);
       const pcts = calculatePercentiles(durations);
-      if (pcts.p95 && pcts.p95 > thresholds.maxP95Ms) {
+      if (pcts.p95 != null && pcts.p95 > thresholds.maxP95Ms) {
         violations.push({
           agent: agentName,
           metric: 'p95_latency',
@@ -540,7 +547,8 @@ export function estimateFlowDuration(flow: FlowStep[], rounds = 1): number {
   let total = 0;
   for (const step of flow) {
     const data = metricsStore.agents[step.agent];
-    const avg = data?.avgDurationMs || 0;
+    // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
+    const avg = data?.avgDurationMs ?? 0;
     total +=
       avg > 0
         ? avg
@@ -557,7 +565,7 @@ const METRICS_FILENAME = 'hydra-metrics.json';
  * Save metrics to a JSON file in the given directory.
  */
 export function persistMetrics(coordDir: string): void {
-  if (!coordDir) return;
+  if (coordDir === '') return;
   try {
     if (!fs.existsSync(coordDir)) {
       fs.mkdirSync(coordDir, { recursive: true });
@@ -573,21 +581,29 @@ export function persistMetrics(coordDir: string): void {
  * Load previously persisted metrics.
  */
 export function loadPersistedMetrics(coordDir: string): void {
-  if (!coordDir) return;
+  if (coordDir === '') return;
   try {
     const filePath = path.join(coordDir, METRICS_FILENAME);
     if (!fs.existsSync(filePath)) return;
     const raw = fs.readFileSync(filePath, 'utf8');
+    // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment -- JSON.parse result
     const loaded = JSON.parse(raw);
+    // eslint-disable-next-line @typescript-eslint/strict-boolean-expressions, @typescript-eslint/no-unsafe-member-access -- dynamic value
     if (loaded && typeof loaded === 'object' && loaded.agents) {
+      // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment -- loaded from disk
       metricsStore = loaded;
+      // Backfill startedAt if missing or invalid (older/corrupt files)
+      if (typeof metricsStore.startedAt !== 'string') {
+        metricsStore.startedAt = new Date().toISOString();
+      }
       // Backfill sessionUsage if loaded from older format
+      // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition, @typescript-eslint/strict-boolean-expressions
       if (!metricsStore.sessionUsage) {
         metricsStore.sessionUsage = createEmptySessionUsage();
       }
       // Reset today counters if date changed
       const today = new Date().toISOString().slice(0, 10);
-      const startDate = (metricsStore.startedAt || '').slice(0, 10);
+      const startDate = metricsStore.startedAt.slice(0, 10);
       if (startDate !== today) {
         for (const agent of Object.values(metricsStore.agents)) {
           agent.callsToday = 0;
@@ -606,6 +622,6 @@ export function loadPersistedMetrics(coordDir: string): void {
 /**
  * Reset all metrics.
  */
-export function resetMetrics() {
+export function resetMetrics(): void {
   metricsStore = createEmptyStore();
 }

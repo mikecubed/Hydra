@@ -28,7 +28,7 @@ jobs:
 
       - uses: actions/setup-node@v4
         with:
-          node-version: 22
+          node-version: 24
           cache: npm
 
       - name: Install dependencies
@@ -91,14 +91,11 @@ jobs:
           echo "Linting changed TS files:"
           echo "${{ steps.changed-ts.outputs.all_changed_files }}"
           npx --no-install eslint -- ${{ steps.changed-ts.outputs.all_changed_files }}
-        continue-on-error: true # TS lint baseline not yet clean; informational only
 
       # ── ESLint on full codebase (push to main/dev) ─────────────────────────
-      # continue-on-error until codebase reaches a clean baseline (see docs/quality-fix-plan.md)
       - name: ESLint (full)
         if: github.event_name == 'push'
         run: npm run lint
-        continue-on-error: true
 
       # ── Prettier check on changed files (PR) ──────────────────────────────
       - name: Prettier (changed files)
@@ -109,11 +106,9 @@ jobs:
           npx --no-install prettier --check -- ${{ steps.changed-format.outputs.all_changed_files }}
 
       # ── Prettier check on full codebase (push to main/dev) ────────────────
-      # continue-on-error until codebase reaches a clean baseline (see docs/quality-fix-plan.md)
       - name: Prettier (full)
         if: github.event_name == 'push'
         run: npm run format:check
-        continue-on-error: true
 
       # ── Mermaid lint on changed markdown (PR) ───────────────────────────────
       - name: Mermaid lint (changed markdown)
@@ -141,7 +136,7 @@ jobs:
 
       - uses: actions/setup-node@v4
         with:
-          node-version: 22
+          node-version: 24
           cache: npm
 
       - name: Install dependencies
@@ -150,10 +145,7 @@ jobs:
           HUSKY: '0'
 
       - name: TypeScript check (lib + bin + scripts)
-        # tsc --noEmit processes the entire project defined in tsconfig.json.
-        # Errors here are informational on PRs — strict enforcement is opt-in.
         run: npm run typecheck
-        continue-on-error: true # type errors are reported but don't block PRs yet
 
   lint-pr-title:
     name: Lint PR Title

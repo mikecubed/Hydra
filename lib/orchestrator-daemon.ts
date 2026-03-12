@@ -43,6 +43,8 @@ import type {
   TaskEntry,
   HandoffEntry,
   BlockerEntry,
+  DecisionEntry,
+  ArchiveState,
   WriteRouteCtx,
   UsageCheckResult,
   ModelSummaryEntry,
@@ -59,9 +61,9 @@ const STATUS_PATH = config.statusPath;
 const EVENTS_PATH = config.eventsPath;
 const ARCHIVE_PATH = config.archivePath;
 
-const DEFAULT_HOST = process.env['AI_ORCH_HOST'] || '127.0.0.1';
-const DEFAULT_PORT = Number.parseInt(process.env['AI_ORCH_PORT'] || '4173', 10);
-const ORCH_TOKEN = process.env['AI_ORCH_TOKEN'] || '';
+const DEFAULT_HOST = process.env['AI_ORCH_HOST'] ?? '127.0.0.1';
+const DEFAULT_PORT = Number.parseInt(process.env['AI_ORCH_PORT'] ?? '4173', 10);
+const ORCH_TOKEN = process.env['AI_ORCH_TOKEN'] ?? '';
 
 const STATUS_VALUES = new Set(['todo', 'in_progress', 'blocked', 'done', 'cancelled']);
 const KNOWN_AGENTS = KNOWN_OWNERS;
@@ -110,19 +112,19 @@ function createDefaultState() {
 
 function normalizeState(raw: unknown): HydraStateShape {
   const defaults = createDefaultState();
-  const safe = (raw && typeof raw === 'object' ? raw : {}) as Record<string, unknown>;
+  const safe = (raw != null && typeof raw === 'object' ? raw : {}) as Record<string, unknown>;
 
   return {
     ...defaults,
     ...safe,
     agents: {
       ...(defaults.agents as Record<string, unknown>),
-      ...((safe['agents'] || {}) as Record<string, unknown>),
+      ...((safe['agents'] ?? {}) as Record<string, unknown>),
     },
-    tasks: Array.isArray(safe['tasks']) ? safe['tasks'] : [],
-    decisions: Array.isArray(safe['decisions']) ? safe['decisions'] : [],
-    blockers: Array.isArray(safe['blockers']) ? safe['blockers'] : [],
-    handoffs: Array.isArray(safe['handoffs']) ? safe['handoffs'] : [],
+    tasks: Array.isArray(safe['tasks']) ? (safe['tasks'] as TaskEntry[]) : [],
+    decisions: Array.isArray(safe['decisions']) ? (safe['decisions'] as DecisionEntry[]) : [],
+    blockers: Array.isArray(safe['blockers']) ? (safe['blockers'] as BlockerEntry[]) : [],
+    handoffs: Array.isArray(safe['handoffs']) ? (safe['handoffs'] as HandoffEntry[]) : [],
     deadLetter: Array.isArray(safe['deadLetter']) ? safe['deadLetter'] : [],
     childSessions: Array.isArray(safe['childSessions']) ? safe['childSessions'] : [],
   };
@@ -179,7 +181,7 @@ function writeState(state: Record<string, unknown>) {
   fs.writeFileSync(tempPath, data, 'utf8');
 
   let retries = 0;
-  while (true) {
+  for (;;) {
     try {
       fs.renameSync(tempPath, STATE_PATH);
       break;
@@ -219,7 +221,7 @@ function initEventSeq() {
   const lines = raw.split(/\r?\n/).filter(Boolean);
   for (let i = lines.length - 1; i >= 0; i--) {
     try {
-      const parsed = JSON.parse(lines[i]);
+      const parsed = JSON.parse(lines[i]) as { seq?: number };
       if (typeof parsed.seq === 'number' && parsed.seq > eventSeq) {
         eventSeq = parsed.seq;
       }
@@ -232,7 +234,8 @@ function initEventSeq() {
 
 function categorizeEvent(type: string, payload: unknown) {
   if (type === 'mutation') {
-    const label = String((payload as Record<string, unknown>)?.['label'] || '');
+    const label =
+      ((payload as Record<string, unknown>)['label'] as string | null | undefined) ?? '';
     if (label.startsWith('task:')) return 'task';
     if (label.startsWith('handoff:')) return 'handoff';
     if (label.startsWith('decision:')) return 'decision';
@@ -249,7 +252,7 @@ function appendEvent(type: string, payload?: unknown) {
   eventSeq += 1;
   const category = categorizeEvent(type, payload);
   const line = JSON.stringify({
-    id: `${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+    id: `${String(Date.now())}_${Math.random().toString(36).slice(2, 8)}`,
     seq: eventSeq,
     at: nowIso(),
     type,
@@ -259,16 +262,18 @@ function appendEvent(type: string, payload?: unknown) {
   fs.appendFileSync(EVENTS_PATH, `${line}\n`, 'utf8');
 }
 
-function replayEvents(fromSeq = 0) {
+type EventRecord = { seq: number; at: string; type: string; category?: string; payload?: unknown };
+
+function replayEvents(fromSeq = 0): EventRecord[] {
   if (!fs.existsSync(EVENTS_PATH)) return [];
   const raw = fs.readFileSync(EVENTS_PATH, 'utf8');
   const lines = raw.split(/\r?\n/).filter(Boolean);
-  const events = [];
+  const events: EventRecord[] = [];
   for (const line of lines) {
     try {
-      const parsed = JSON.parse(line);
+      const parsed = JSON.parse(line) as { seq?: number } & Partial<EventRecord>;
       if (typeof parsed.seq === 'number' && parsed.seq >= fromSeq) {
-        events.push(parsed);
+        events.push(parsed as EventRecord);
       }
     } catch {
       /* skip malformed */
@@ -282,7 +287,9 @@ function nextId(prefix: string, items: unknown[]) {
   const pattern = new RegExp(`^${prefix}(\\d+)$`);
 
   for (const item of items) {
-    const match = String((item as Record<string, unknown>)?.['id'] || '').match(pattern);
+    const match = (
+      ((item as Record<string, unknown>)['id'] as string | null | undefined) ?? ''
+    ).match(pattern);
     if (!match) {
       continue;
     }
@@ -301,13 +308,13 @@ function nextId(prefix: string, items: unknown[]) {
  * @returns {string[]}
  */
 function parseList(value: unknown): string[] {
-  if (!value) {
+  if (value == null) {
     return [];
   }
   if (Array.isArray(value)) {
     return value.map((item: unknown) => String(item).trim()).filter(Boolean);
   }
-  return String(value)
+  return (value as string)
     .split(/,\s*/)
     .map((part) => part.trim())
     .filter(Boolean);
@@ -327,7 +334,8 @@ function runCommand(command: string) {
 }
 
 function getCurrentBranch() {
-  return runCommand('git branch --show-current') || 'unknown';
+  const branch = runCommand('git branch --show-current');
+  return branch === '' ? 'unknown' : branch;
 }
 
 function ensureKnownStatus(status: string) {
@@ -390,7 +398,7 @@ function autoUnblock(state: HydraStateShape, completedTaskId: string) {
     if (allDepsComplete) {
       task.status = 'todo';
       const note = `[AUTO] All dependencies completed (${task.blockedBy.join(',')}), moved to todo.`;
-      task.notes = task.notes ? `${task.notes}\n${note}` : note;
+      task.notes = task.notes === '' ? note : `${task.notes}\n${note}`;
       task.updatedAt = nowIso();
     }
   }
@@ -398,11 +406,14 @@ function autoUnblock(state: HydraStateShape, completedTaskId: string) {
 
 function buildPrompt(agent: string, state: HydraStateShape) {
   const agentConfig = getAgent(agent);
-  const label = agentConfig
-    ? agentConfig.label
-    : agent === 'human'
-      ? 'Human Operator'
-      : 'AI Assistant';
+  let label: string;
+  if (agentConfig) {
+    label = agentConfig.label;
+  } else if (agent === 'human') {
+    label = 'Human Operator';
+  } else {
+    label = 'AI Assistant';
+  }
   const rolePrompt = agentConfig ? agentConfig.rolePrompt : '';
 
   const openTasks = state.tasks
@@ -420,7 +431,7 @@ function buildPrompt(agent: string, state: HydraStateShape) {
   return [
     `You are ${label} collaborating in the ${config.projectName} repository with Gemini Pro, Codex, and Claude Code.`,
     '',
-    rolePrompt ? rolePrompt : '',
+    rolePrompt ?? '',
     '',
     readInstructions,
     '',
@@ -431,11 +442,11 @@ function buildPrompt(agent: string, state: HydraStateShape) {
     '- Add a handoff entry before switching agents.',
     ...(getAgent(agent)?.taskRules ?? []),
     '',
-    `Current focus: ${state.activeSession?.focus || 'not set'}`,
-    `Current branch: ${state.activeSession?.branch || getCurrentBranch()}`,
+    `Current focus: ${state.activeSession?.focus ?? 'not set'}`,
+    `Current branch: ${state.activeSession?.branch ?? getCurrentBranch()}`,
     '',
     'Open tasks:',
-    openTasks || '- none',
+    openTasks === '' ? '- none' : openTasks,
   ]
     .filter(Boolean)
     .join('\n');
@@ -455,8 +466,8 @@ function getSummary(state: HydraStateShape) {
       return { ...task, pendingDependencies };
     });
   const openBlockers = state.blockers.filter((item: BlockerEntry) => item.status !== 'resolved');
-  const recentDecision = state.decisions.at(-1) || null;
-  const latestHandoff = state.handoffs.at(-1) || null;
+  const recentDecision = state.decisions.at(-1) ?? null;
+  const latestHandoff = state.handoffs.at(-1) ?? null;
 
   return {
     updatedAt: state.updatedAt,
@@ -503,11 +514,15 @@ function suggestNext(state: HydraStateShape, agent: string) {
 
   const pendingHandoff = [...state.handoffs]
     .reverse()
-    .find((handoff: HandoffEntry) => handoff.to === agent && !handoff.acknowledgedAt);
+    .find(
+      (handoff: HandoffEntry) =>
+        handoff.to === agent && (handoff.acknowledgedAt == null || handoff.acknowledgedAt === ''),
+    );
   if (pendingHandoff) {
-    const relatedTask = pendingHandoff.tasks
-      ? openTasks.find((task: TaskEntry) => pendingHandoff.tasks!.includes(task.id))
-      : null;
+    const relatedTask =
+      pendingHandoff.tasks == null
+        ? null
+        : openTasks.find((task: TaskEntry) => (pendingHandoff.tasks as string[]).includes(task.id));
     return {
       action: 'pickup_handoff',
       message: `${agent} has an unacknowledged handoff ${pendingHandoff.id}.`,
@@ -535,9 +550,9 @@ function suggestNext(state: HydraStateShape, agent: string) {
         ['unassigned', 'human', ''].includes(task.owner) && task.status === 'todo',
     )
     .map((task: TaskEntry) => {
-      const taskType = task.type || 'implementation';
+      const taskType = task.type === '' ? 'implementation' : task.type;
       const affinity =
-        (agentConfig?.taskAffinity as Record<string, number> | undefined)?.[taskType] || 0.5;
+        (agentConfig?.taskAffinity as Record<string, number> | undefined)?.[taskType] ?? 0.5;
       // Check if a virtual agent has better affinity for this task type
       let preferredAgent = null;
       const virtualAgents = listAgents({ type: 'virtual', enabled: true });
@@ -545,7 +560,7 @@ function suggestNext(state: HydraStateShape, agent: string) {
         const physical = resolvePhysicalAgent(va.name);
         if (
           physical?.name === agent &&
-          ((va.taskAffinity as Record<string, number> | undefined)?.[taskType] || 0) > affinity
+          ((va.taskAffinity as Record<string, number> | undefined)?.[taskType] ?? 0) > affinity
         ) {
           preferredAgent = va.name;
         }
@@ -554,14 +569,14 @@ function suggestNext(state: HydraStateShape, agent: string) {
     })
     .sort((a: { affinity: number }, b: { affinity: number }) => b.affinity - a.affinity);
 
-  const unassignedTodo = unassignedTodos[0]?.task;
-  if (unassignedTodo) {
+  if (unassignedTodos.length > 0) {
+    const unassignedTodo = unassignedTodos[0].task;
     const suggestion = {
       action: 'claim_unassigned_task',
-      message: `${agent} can claim ${unassignedTodo.id} (type=${unassignedTodo.type || 'implementation'}, affinity=${unassignedTodos[0].affinity}).`,
+      message: `${agent} can claim ${unassignedTodo.id} (type=${unassignedTodo.type}, affinity=${String(unassignedTodos[0].affinity)}).`,
       task: unassignedTodo,
     };
-    if (unassignedTodos[0].preferredAgent) {
+    if (unassignedTodos[0].preferredAgent != null && unassignedTodos[0].preferredAgent !== '') {
       (suggestion as Record<string, unknown>)['preferredAgent'] = unassignedTodos[0].preferredAgent;
     }
     return suggestion;
@@ -592,7 +607,7 @@ function parseArgs(argv: string[]) {
     if (token.includes('=')) {
       const [rawKey, ...rawValue] = token.split('=');
       const key = rawKey.trim();
-      if (key) {
+      if (key !== '') {
         options[key] = rawValue.join('=').trim();
       }
     }
@@ -624,7 +639,7 @@ function sendError(
 }
 
 function isAuthorized(req: IncomingMessage) {
-  if (!ORCH_TOKEN) {
+  if (ORCH_TOKEN === '') {
     return true;
   }
   return req.headers['x-ai-orch-token'] === ORCH_TOKEN;
@@ -636,7 +651,7 @@ async function readJsonBody(req: IncomingMessage) {
   const maxSize = 1024 * 1024;
 
   for await (const chunk of req) {
-    size += chunk.length;
+    size += (chunk as Buffer).length;
     if (size > maxSize) {
       throw new Error('Payload too large.');
     }
@@ -648,10 +663,10 @@ async function readJsonBody(req: IncomingMessage) {
   }
 
   const raw = Buffer.concat(chunks).toString('utf8').trim();
-  if (!raw) {
+  if (raw === '') {
     return {};
   }
-  return JSON.parse(raw);
+  return JSON.parse(raw) as Record<string, unknown>;
 }
 
 function readEvents(limit = 50) {
@@ -664,10 +679,10 @@ function readEvents(limit = 50) {
     .map((line: string) => line.trim())
     .filter(Boolean);
 
-  const parsed = [];
+  const parsed: EventRecord[] = [];
   for (const line of lines) {
     try {
-      parsed.push(JSON.parse(line));
+      parsed.push(JSON.parse(line) as EventRecord);
     } catch {
       // Skip malformed lines.
     }
@@ -675,19 +690,19 @@ function readEvents(limit = 50) {
   return parsed.slice(-Math.max(1, Math.min(limit, 500)));
 }
 
-function readArchive() {
+function readArchive(): ArchiveState {
   if (!fs.existsSync(ARCHIVE_PATH)) {
-    return { archivedAt: null, tasks: [], handoffs: [], blockers: [] };
+    return { tasks: [], handoffs: [], blockers: [] };
   }
   try {
-    return JSON.parse(fs.readFileSync(ARCHIVE_PATH, 'utf8'));
+    return JSON.parse(fs.readFileSync(ARCHIVE_PATH, 'utf8')) as ArchiveState;
   } catch {
-    return { archivedAt: null, tasks: [], handoffs: [], blockers: [] };
+    return { tasks: [], handoffs: [], blockers: [] };
   }
 }
 
-function writeArchive(archive: Record<string, unknown>) {
-  archive['archivedAt'] = nowIso();
+function writeArchive(archive: ArchiveState) {
+  archive.archivedAt = nowIso();
   fs.writeFileSync(ARCHIVE_PATH, `${JSON.stringify(archive, null, 2)}\n`, 'utf8');
 }
 
@@ -713,7 +728,7 @@ function archiveState(state: HydraStateShape) {
   }
 
   const oldHandoffs = state.handoffs.filter((h: HandoffEntry) => {
-    if (!h.acknowledgedAt) {
+    if (h.acknowledgedAt == null || h.acknowledgedAt === '') {
       return false;
     }
     return new Date(h.acknowledgedAt).getTime() < oneHourAgo;
@@ -769,7 +784,7 @@ function createSnapshot() {
       createdAt: nowIso(),
       state,
     };
-    const filename = `snapshot_${eventSeq}_${Date.now()}.json`;
+    const filename = `snapshot_${String(eventSeq)}_${String(Date.now())}.json`;
     fs.writeFileSync(
       path.join(SNAPSHOT_DIR, filename),
       `${JSON.stringify(snapshot, null, 2)}\n`,
@@ -808,7 +823,7 @@ const idempotencyLog = new Map(); // key → timestamp
 const IDEMPOTENCY_TTL_MS = 5 * 60 * 1000;
 
 function checkIdempotency(key: string) {
-  if (!key) return false;
+  if (key === '') return false;
   const now = Date.now();
   // Prune stale entries periodically
   if (idempotencyLog.size > 200) {
@@ -825,7 +840,7 @@ async function requestJson(method: string, url: string, body: unknown = null) {
   const headers: Record<string, string> = {
     Accept: 'application/json',
   };
-  if (ORCH_TOKEN) {
+  if (ORCH_TOKEN !== '') {
     headers['x-ai-orch-token'] = ORCH_TOKEN;
   }
   if (body !== null) {
@@ -859,36 +874,38 @@ Environment:
 }
 
 async function commandStatus(options: Record<string, string>) {
-  const url = options['url'] || `http://${DEFAULT_HOST}:${DEFAULT_PORT}`;
+  const url = options['url'] ?? `http://${DEFAULT_HOST}:${String(DEFAULT_PORT)}`;
   try {
     const { response, payload } = await requestJson('GET', `${url}/health`);
     if (!response.ok) {
       console.error(
-        `Daemon status check failed (${response.status}): ${(payload as Record<string, unknown>)['error'] || 'unknown error'}`,
+        `Daemon status check failed (${String(response.status)}): ${((payload as Record<string, unknown>)['error'] as string | null | undefined) ?? 'unknown error'}`,
       );
-      process.exit(1);
+      process.exitCode = 1;
+      return;
     }
     console.log(JSON.stringify(payload, null, 2));
   } catch (err) {
     console.error(`Daemon not reachable at ${url}: ${(err as Error).message}`);
-    process.exit(1);
+    process.exitCode = 1;
   }
 }
 
 async function commandStop(options: Record<string, string>) {
-  const url = options['url'] || `http://${DEFAULT_HOST}:${DEFAULT_PORT}`;
+  const url = options['url'] ?? `http://${DEFAULT_HOST}:${String(DEFAULT_PORT)}`;
   try {
     const { response, payload } = await requestJson('POST', `${url}/shutdown`);
     if (!response.ok) {
       console.error(
-        `Failed to stop daemon (${response.status}): ${(payload as Record<string, unknown>)['error'] || 'unknown error'}`,
+        `Failed to stop daemon (${String(response.status)}): ${((payload as Record<string, unknown>)['error'] as string | null | undefined) ?? 'unknown error'}`,
       );
-      process.exit(1);
+      process.exitCode = 1;
+      return;
     }
     console.log('Stop signal sent to orchestrator daemon.');
   } catch (err) {
     console.error(`Unable to reach daemon at ${url}: ${(err as Error).message}`);
-    process.exit(1);
+    process.exitCode = 1;
   }
 }
 
@@ -904,15 +921,16 @@ async function commandStop(options: Record<string, string>) {
  */
 function createTaskWorktree(taskId: string) {
   const cfg = loadHydraConfig();
-  const worktreeDir = cfg.routing?.worktreeIsolation?.worktreeDir || '.hydra/worktrees';
+  const worktreeDir = cfg.routing.worktreeIsolation.worktreeDir ?? '.hydra/worktrees';
   const worktreePath = path.resolve(config.projectRoot, worktreeDir, `task-${taskId}`);
   const branch = `hydra/task/${taskId}`;
 
   try {
     const result = git(['worktree', 'add', worktreePath, '-b', branch, 'HEAD'], config.projectRoot);
     if (result.status !== 0) {
-      const errMsg = (result.stderr || result.stdout || '').trim();
-      console.warn(`[worktree] Failed to create worktree for task ${taskId}: ${errMsg}`);
+      const errMsg = ([result.stderr, result.stdout] as string[]).find((s) => s !== '') ?? '';
+      const errMsgTrimmed = errMsg.trim();
+      console.warn(`[worktree] Failed to create worktree for task ${taskId}: ${errMsgTrimmed}`);
       return null;
     }
     return worktreePath;
@@ -940,7 +958,7 @@ function mergeTaskWorktree(taskId: string) {
     const result = smartMerge(config.projectRoot, branch, currentBranch);
     if (!result.ok) {
       const conflictList =
-        (result as Record<string, unknown>)['conflicts'] &&
+        (result as Record<string, unknown>)['conflicts'] != null &&
         ((result as Record<string, unknown>)['conflicts'] as string[]).length > 0
           ? ((result as Record<string, unknown>)['conflicts'] as string[]).join(', ')
           : '(unknown)';
@@ -965,7 +983,7 @@ function mergeTaskWorktree(taskId: string) {
  */
 function cleanupTaskWorktree(taskId: string, { force = false } = {}) {
   const cfg = loadHydraConfig();
-  const worktreeDir = cfg.routing?.worktreeIsolation?.worktreeDir || '.hydra/worktrees';
+  const worktreeDir = cfg.routing.worktreeIsolation.worktreeDir ?? '.hydra/worktrees';
   const worktreePath = path.resolve(config.projectRoot, worktreeDir, `task-${taskId}`);
   const branch = `hydra/task/${taskId}`;
 
@@ -977,7 +995,7 @@ function cleanupTaskWorktree(taskId: string, { force = false } = {}) {
     const result = git(removeArgs, config.projectRoot);
     if (result.status !== 0) {
       console.warn(
-        `[worktree] Could not remove worktree for task ${taskId}: ${String(result.stderr || '').trim()}`,
+        `[worktree] Could not remove worktree for task ${taskId}: ${result.stderr.trim()}`,
       );
     }
   } catch (err) {
@@ -991,9 +1009,7 @@ function cleanupTaskWorktree(taskId: string, { force = false } = {}) {
     const branchFlag = force ? '-D' : '-d';
     const result = git(['branch', branchFlag, branch], config.projectRoot);
     if (result.status !== 0) {
-      console.warn(
-        `[worktree] Could not delete branch ${branch}: ${String(result.stderr || '').trim()}`,
-      );
+      console.warn(`[worktree] Could not delete branch ${branch}: ${result.stderr.trim()}`);
     }
   } catch (err) {
     console.warn(`[worktree] Exception deleting branch ${branch}: ${(err as Error).message}`);
@@ -1017,11 +1033,12 @@ function startDaemon(options: Record<string, string>) {
     /* non-critical */
   }
 
-  const host = options['host'] || DEFAULT_HOST;
-  const port = Number.parseInt(options['port'] || String(DEFAULT_PORT), 10);
+  const host = options['host'] ?? DEFAULT_HOST;
+  const port = Number.parseInt(options['port'] ?? String(DEFAULT_PORT), 10);
   if (!Number.isFinite(port) || port <= 0) {
     console.error(`Invalid port: ${options['port']}`);
-    process.exit(1);
+    process.exitCode = 1;
+    return;
   }
 
   let isShuttingDown = false;
@@ -1057,7 +1074,7 @@ function startDaemon(options: Record<string, string>) {
       updatedAt: nowIso(),
       uptimeSec: Math.floor(process.uptime()),
       stateUpdatedAt: state.updatedAt,
-      activeSessionId: state.activeSession?.id || null,
+      activeSessionId: state.activeSession?.id ?? null,
       eventsRecorded: eventCount,
       lastEventAt,
       ...extra,
@@ -1077,7 +1094,7 @@ function startDaemon(options: Record<string, string>) {
       appendSyncLog(`[orch] ${label}`);
       const at = nowIso();
       const event = {
-        id: `${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+        id: `${String(Date.now())}_${Math.random().toString(36).slice(2, 8)}`,
         seq: eventSeq + 1,
         at,
         type: 'mutation',
@@ -1096,7 +1113,7 @@ function startDaemon(options: Record<string, string>) {
   }
 
   function runVerification(taskId: string, plan: Record<string, unknown>) {
-    if (!plan?.['enabled'] || !plan['command']) {
+    if (plan['enabled'] !== true || plan['command'] == null || plan['command'] === '') {
       return;
     }
 
@@ -1104,15 +1121,16 @@ function startDaemon(options: Record<string, string>) {
 
     function handleVerificationResult(error: Error | null, stdout: string, stderr: string) {
       if (error) {
-        const snippet = String(stderr || stdout || error.message).slice(0, 500);
-        enqueueMutation(
+        const snippet = ([stderr, stdout, error.message] as string[]).find((s) => s !== '') ?? '';
+        const snippetSliced = snippet.slice(0, 500);
+        void enqueueMutation(
           `verify:fail id=${taskId}`,
           (state: HydraStateShape) => {
             const task = state.tasks.find((t: TaskEntry) => t.id === taskId);
             if (task) {
               task.status = 'blocked';
-              const note = `[AUTO-VERIFY FAILED] ${plan['command']}:\n${snippet}`;
-              task.notes = task.notes ? `${task.notes}\n${note}` : note;
+              const note = `[AUTO-VERIFY FAILED] ${String(plan['command'])}:\n${snippetSliced}`;
+              task.notes = task.notes === '' ? note : `${task.notes}\n${note}`;
               task.updatedAt = nowIso();
             }
           },
@@ -1122,18 +1140,18 @@ function startDaemon(options: Record<string, string>) {
           taskId,
           passed: false,
           command: plan['command'],
-          snippet,
+          snippet: snippetSliced,
         });
         return;
       }
 
-      enqueueMutation(
+      void enqueueMutation(
         `verify:pass id=${taskId}`,
         (state) => {
           const task = state.tasks.find((t) => t.id === taskId);
           if (task) {
-            const note = `[AUTO-VERIFY PASSED] ${plan['command']} completed cleanly.`;
-            task.notes = task.notes ? `${task.notes}\n${note}` : note;
+            const note = `[AUTO-VERIFY PASSED] ${String(plan['command'])} completed cleanly.`;
+            task.notes = task.notes === '' ? note : `${task.notes}\n${note}`;
             task.updatedAt = nowIso();
           }
         },
@@ -1151,7 +1169,7 @@ function startDaemon(options: Record<string, string>) {
         handleVerificationResult,
       );
       return;
-    } catch (err) {
+    } catch {
       // Fall through to spawn-based implementation below.
     }
 
@@ -1198,7 +1216,7 @@ function startDaemon(options: Record<string, string>) {
             /* ignore */
           }
         },
-        Math.max(1, (plan['timeoutMs'] as number) || 60_000),
+        Math.max(1, (plan['timeoutMs'] as number) === 0 ? 60_000 : (plan['timeoutMs'] as number)),
       );
 
       function finish(err: Error | null, code: number | null) {
@@ -1218,9 +1236,9 @@ function startDaemon(options: Record<string, string>) {
           /* ignore */
         }
         const effectiveError =
-          err ||
+          err ??
           (timedOut || code !== 0
-            ? new Error(timedOut ? 'Verification timed out.' : `Exit ${code}`)
+            ? new Error(timedOut ? 'Verification timed out.' : `Exit ${String(code)}`)
             : null);
         handleVerificationResult(effectiveError, out, errText);
         try {
@@ -1230,15 +1248,18 @@ function startDaemon(options: Record<string, string>) {
         }
       }
 
-      child.on('error', (err: Error) => finish(err, null));
-      child.on('close', (code: number | null) => finish(null, code));
+      child.on('error', (err: Error) => {
+        finish(err, null);
+      });
+      child.on('close', (code: number | null) => {
+        finish(null, code);
+      });
     } catch (err) {
       // If even the fallback can't start, treat as a failure but never throw.
       try {
-        const msg = String((err as Error)?.message || err || 'Verification failed to start.').slice(
-          0,
-          500,
-        );
+        const msg = (
+          (err as Error).message === '' ? 'Verification failed to start.' : (err as Error).message
+        ).slice(0, 500);
         handleVerificationResult(new Error(msg), '', '');
       } catch {
         // ignore
@@ -1266,10 +1287,14 @@ function startDaemon(options: Record<string, string>) {
     }
   }
 
+  // eslint-disable-next-line @typescript-eslint/no-misused-promises -- async HTTP handler, errors caught in try/catch block
   const server = http.createServer(async (req, res) => {
-    const requestUrl = new URL(req.url || '/', `http://${req.headers.host || `${host}:${port}`}`);
+    const requestUrl = new URL(
+      req.url ?? '/',
+      `http://${req.headers.host ?? `${host}:${String(port)}`}`,
+    );
     const route = requestUrl.pathname;
-    const method = req.method || 'GET';
+    const method = req.method ?? 'GET';
 
     try {
       const handledReadRoute = await handleReadRoute({
@@ -1281,7 +1306,8 @@ function startDaemon(options: Record<string, string>) {
         sendJson,
         sendError,
         writeStatus,
-        readStatus: () => JSON.parse(fs.readFileSync(STATUS_PATH, 'utf8')),
+        readStatus: () =>
+          JSON.parse(fs.readFileSync(STATUS_PATH, 'utf8')) as Record<string, unknown>,
         checkUsage: checkUsage as unknown as () => UsageCheckResult,
         getModelSummary: getModelSummary as () => Record<string, ModelSummaryEntry>,
         readState,
@@ -1292,7 +1318,7 @@ function startDaemon(options: Record<string, string>) {
         suggestNext,
         readEvents,
         replayEvents,
-        sseClients: sseClients as Set<ServerResponse>,
+        sseClients,
         readArchive,
         getMetricsSummary,
         getEventCount: () => eventCount,
@@ -1340,7 +1366,7 @@ function startDaemon(options: Record<string, string>) {
         appendEvent,
         broadcastEvent,
         setIsShuttingDown: (value: boolean) => {
-          isShuttingDown = Boolean(value);
+          isShuttingDown = value;
         },
         server,
         createSnapshot,
@@ -1356,17 +1382,18 @@ function startDaemon(options: Record<string, string>) {
 
       sendError(res, 404, `Route not found: ${method} ${route}`);
     } catch (err) {
-      sendError(res, 400, (err as Error).message || 'Bad request');
+      sendError(res, 400, (err as Error).message === '' ? 'Bad request' : (err as Error).message);
     }
   });
 
   server.on('error', (error: Error) => {
     console.error(`Orchestrator server error: ${error.message}`);
+    // eslint-disable-next-line n/no-process-exit -- server error handler requires forced exit
     process.exit(1);
   });
 
   function autoArchiveIfNeeded() {
-    enqueueMutation('auto_archive', (state: HydraStateShape) => {
+    void enqueueMutation('auto_archive', (state: HydraStateShape) => {
       const completedCount = state.tasks.filter((t: TaskEntry) =>
         ['done', 'cancelled'].includes(t.status),
       ).length;
@@ -1380,7 +1407,7 @@ function startDaemon(options: Record<string, string>) {
       return { moved: 0 };
     })
       .then((result: Record<string, unknown>) => {
-        if (result && (result['moved'] as number) > 0) {
+        if ((result['moved'] as number) > 0) {
           appendEvent('auto_archive', { moved: result['moved'] });
         }
       })
@@ -1391,8 +1418,13 @@ function startDaemon(options: Record<string, string>) {
   loadPersistedMetrics(COORD_DIR);
 
   server.listen(port, host, () => {
-    appendSyncLog(`[orch] daemon started at http://${host}:${port}`);
-    appendEvent('daemon_start', { host, port, pid: process.pid, project: config.projectName });
+    appendSyncLog(`[orch] daemon started at http://${host}:${String(port)}`);
+    appendEvent('daemon_start', {
+      host,
+      port: String(port),
+      pid: process.pid,
+      project: config.projectName,
+    });
     writeStatus();
 
     autoArchiveIfNeeded();
@@ -1400,7 +1432,7 @@ function startDaemon(options: Record<string, string>) {
     console.log(hydraSplash());
     console.log(uiLabel('Project', pc.white(config.projectName)));
     console.log(uiLabel('Root', DIM(config.projectRoot)));
-    console.log(uiLabel('URL', pc.white(`http://${host}:${port}`)));
+    console.log(uiLabel('URL', pc.white(`http://${host}:${String(port)}`)));
     console.log(uiLabel('PID', pc.white(String(process.pid))));
     console.log(uiLabel('State', DIM(path.relative(config.projectRoot, STATE_PATH))));
     console.log(uiLabel('Status', DIM(path.relative(config.projectRoot, STATUS_PATH))));
@@ -1430,20 +1462,20 @@ function startDaemon(options: Record<string, string>) {
   function markStaleTasks() {
     try {
       const cfg = loadHydraConfig();
-      const heartbeatTimeoutMs =
-        Number(
+      const heartbeatTimeoutMsRaw = Number(
+        ((cfg as Record<string, unknown>)['workers'] as Record<string, unknown> | undefined)?.[
+          'heartbeatTimeoutMs'
+        ],
+      );
+      const heartbeatTimeoutMs = heartbeatTimeoutMsRaw === 0 ? 90_000 : heartbeatTimeoutMsRaw; // 90s default
+      const maxAttemptsRaw = Number(
+        (
           ((cfg as Record<string, unknown>)['workers'] as Record<string, unknown> | undefined)?.[
-            'heartbeatTimeoutMs'
-          ],
-        ) || 90_000; // 90s default
-      const maxAttempts =
-        Number(
-          (
-            ((cfg as Record<string, unknown>)['workers'] as Record<string, unknown> | undefined)?.[
-              'retry'
-            ] as Record<string, unknown> | undefined
-          )?.['maxAttempts'],
-        ) || 3;
+            'retry'
+          ] as Record<string, unknown> | undefined
+        )?.['maxAttempts'],
+      );
+      const maxAttempts = maxAttemptsRaw === 0 ? 3 : maxAttemptsRaw;
       const state = readState();
       const now = Date.now();
       let changed = false;
@@ -1453,30 +1485,42 @@ function startDaemon(options: Record<string, string>) {
 
         let isStale = false;
 
-        if ((task as Record<string, unknown>)['lastHeartbeat']) {
-          // Heartbeat-based detection (fast): 90s default timeout
-          const hbAge =
-            now - new Date((task as Record<string, unknown>)['lastHeartbeat'] as string).getTime();
-          isStale = hbAge > heartbeatTimeoutMs;
-        } else {
+        if ((task as Record<string, unknown>)['lastHeartbeat'] == null) {
           // Legacy: use updatedAt/checkpoint (30 min)
-          let lastActivity = task.updatedAt ? new Date(task.updatedAt).getTime() : 0;
+          let lastActivity = task.updatedAt === '' ? 0 : new Date(task.updatedAt).getTime();
           if (Array.isArray(task.checkpoints) && task.checkpoints.length > 0) {
-            const lastCp = task.checkpoints!.at(-1) as Record<string, unknown> | undefined;
+            const lastCp = task.checkpoints.at(-1);
             const cpTime = lastCp ? new Date(lastCp['savedAt'] as string).getTime() : 0;
             if (cpTime > lastActivity) lastActivity = cpTime;
           }
           isStale = now - lastActivity > STALE_THRESHOLD_MS;
+        } else {
+          const hbAge =
+            now - new Date((task as Record<string, unknown>)['lastHeartbeat'] as string).getTime();
+          isStale = hbAge > heartbeatTimeoutMs;
         }
 
-        if (isStale && !task.stale) {
+        if (isStale && task.stale !== true) {
           task.stale = true;
           task.staleSince = nowIso();
           changed = true;
 
           // Heartbeat timeout: requeue or dead-letter based on failCount
-          if ((task as Record<string, unknown>)['lastHeartbeat']) {
-            const failCount = (((task as Record<string, unknown>)['failCount'] as number) || 0) + 1;
+          if ((task as Record<string, unknown>)['lastHeartbeat'] == null) {
+            broadcastEvent({
+              type: 'mutation',
+              payload: {
+                event: 'task_stale',
+                taskId: task.id,
+                owner: task.owner,
+                title: task.title,
+              },
+            });
+          } else {
+            const currentFailCount = (task as Record<string, unknown>)['failCount'] as
+              | number
+              | undefined;
+            const failCount = (currentFailCount ?? 0) + 1;
             (task as Record<string, unknown>)['failCount'] = failCount;
 
             if (failCount < maxAttempts) {
@@ -1533,18 +1577,8 @@ function startDaemon(options: Record<string, string>) {
                 category: 'heartbeat',
               });
             }
-          } else {
-            broadcastEvent({
-              type: 'mutation',
-              payload: {
-                event: 'task_stale',
-                taskId: task.id,
-                owner: task.owner,
-                title: task.title,
-              },
-            });
           }
-        } else if (!isStale && task.stale) {
+        } else if (!isStale && task.stale === true) {
           task.stale = false;
           delete task.staleSince;
           changed = true;
@@ -1582,7 +1616,7 @@ function startDaemon(options: Record<string, string>) {
     }
     sseClients.clear();
     // Close MCP clients
-    import('./hydra-mcp.ts').then((m) => m.closeCodexMCP()).catch(() => {});
+    void import('./hydra-mcp.ts').then((m) => m.closeCodexMCP()).catch(() => {});
     persistMetrics(COORD_DIR);
     clearInterval(statusInterval);
     clearInterval(metricsInterval);
@@ -1592,14 +1626,19 @@ function startDaemon(options: Record<string, string>) {
     server.close(() => {
       writeStatus({ running: false, stoppedAt: nowIso(), signal });
       console.log(SUCCESS('  Daemon stopped'));
+      // eslint-disable-next-line n/no-process-exit -- server.close callback requires forced exit after cleanup
       process.exit(0);
     });
   }
 
   // SIGTERM is not reliably delivered on Windows; use HTTP POST /stop for graceful shutdown there.
-  process.on('SIGINT', () => gracefulExit('SIGINT'));
+  process.on('SIGINT', () => {
+    gracefulExit('SIGINT');
+  });
   if (process.platform !== 'win32') {
-    process.on('SIGTERM', () => gracefulExit('SIGTERM'));
+    process.on('SIGTERM', () => {
+      gracefulExit('SIGTERM');
+    });
   }
 }
 
@@ -1624,8 +1663,8 @@ async function main() {
     default:
       console.error(`Unknown command: ${command}`);
       printHelp();
-      process.exit(1);
+      process.exitCode = 1;
   }
 }
 
-main();
+void main();

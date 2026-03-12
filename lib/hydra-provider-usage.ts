@@ -61,10 +61,12 @@ export function estimateCost(
   } | null,
 ): number {
   if (!usage) return 0;
-  const rates = COST_PER_1K[model];
+  const rates = (COST_PER_1K as Record<string, { input: number; output: number } | undefined>)[
+    model
+  ];
   if (!rates) return 0;
-  const inputCost = ((usage.prompt_tokens || usage.inputTokens || 0) / 1000) * rates.input;
-  const outputCost = ((usage.completion_tokens || usage.outputTokens || 0) / 1000) * rates.output;
+  const inputCost = ((usage.prompt_tokens ?? usage.inputTokens ?? 0) / 1000) * rates.input;
+  const outputCost = ((usage.completion_tokens ?? usage.outputTokens ?? 0) / 1000) * rates.output;
   return inputCost + outputCost;
 }
 
@@ -91,14 +93,14 @@ export function recordProviderUsage(
   provider: string,
   data: { inputTokens?: number; outputTokens?: number; cost?: number; model?: string },
 ): void {
-  const entry = _usage[provider];
+  const entry = (_usage as Record<string, ProviderUsageEntry | undefined>)[provider];
   if (!entry) return;
 
-  const input = data.inputTokens || 0;
-  const output = data.outputTokens || 0;
+  const input = data.inputTokens ?? 0;
+  const output = data.outputTokens ?? 0;
   const cost =
-    data.cost ||
-    (data.model
+    data.cost ??
+    (data.model != null && data.model !== ''
       ? estimateCost(data.model, {
           prompt_tokens: input,
           completion_tokens: output,
@@ -121,6 +123,7 @@ export function recordProviderUsage(
 /**
  * Get full usage snapshot for all providers.
  */
+// eslint-disable-next-line @typescript-eslint/explicit-module-boundary-types -- complex return type
 export function getProviderUsage() {
   return {
     openai: {
@@ -150,12 +153,14 @@ export function getProviderSummary(): string[] {
     const s = data.session;
     if (s.calls === 0) continue;
     const totalTokens = s.inputTokens + s.outputTokens;
-    const tokenStr =
-      totalTokens >= 1_000_000
-        ? `${(totalTokens / 1_000_000).toFixed(1)}M`
-        : totalTokens >= 1_000
-          ? `${(totalTokens / 1_000).toFixed(0)}K`
-          : String(totalTokens);
+    let tokenStr: string;
+    if (totalTokens >= 1_000_000) {
+      tokenStr = `${(totalTokens / 1_000_000).toFixed(1)}M`;
+    } else if (totalTokens >= 1_000) {
+      tokenStr = `${(totalTokens / 1_000).toFixed(0)}K`;
+    } else {
+      tokenStr = String(totalTokens);
+    }
     const costStr = s.cost > 0 ? `$${s.cost.toFixed(2)}` : '~';
     lines.push(`${name}: ${tokenStr} (${costStr})`);
   }
@@ -170,13 +175,15 @@ export function getExternalSummary(): string[] {
   for (const [name, data] of Object.entries(_usage)) {
     if (!data.external) continue;
     const e = data.external;
-    const totalTokens = (e.inputTokens || 0) + (e.outputTokens || 0);
-    const tokenStr =
-      totalTokens >= 1_000_000
-        ? `${(totalTokens / 1_000_000).toFixed(1)}M`
-        : totalTokens >= 1_000
-          ? `${(totalTokens / 1_000).toFixed(0)}K`
-          : String(totalTokens);
+    const totalTokens = e.inputTokens + e.outputTokens;
+    let tokenStr: string;
+    if (totalTokens >= 1_000_000) {
+      tokenStr = `${(totalTokens / 1_000_000).toFixed(1)}M`;
+    } else if (totalTokens >= 1_000) {
+      tokenStr = `${(totalTokens / 1_000).toFixed(0)}K`;
+    } else {
+      tokenStr = String(totalTokens);
+    }
     const costStr = e.cost > 0 ? `$${e.cost.toFixed(2)} today` : '~';
     lines.push(`${name}: ${tokenStr} (${costStr})`);
   }
@@ -198,7 +205,7 @@ export function resetSessionUsage(): void {
 
 function todayKey(): string {
   const d = new Date();
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+  return `${String(d.getFullYear())}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 }
 
 /**
@@ -207,18 +214,22 @@ function todayKey(): string {
 export function loadProviderUsage(): void {
   try {
     if (!fs.existsSync(USAGE_PATH)) return;
-    const raw = JSON.parse(fs.readFileSync(USAGE_PATH, 'utf8'));
+    const raw = JSON.parse(fs.readFileSync(USAGE_PATH, 'utf8')) as Record<string, unknown>;
     const key = todayKey();
-    const today = raw[key];
-    if (!today) return;
+    const today = raw[key] as Record<string, unknown> | undefined;
+    if (today == null) return;
 
     for (const provider of ['openai', 'anthropic', 'google']) {
-      if (today[provider]) {
-        _usage[provider].today = { ...emptyCounters(), ...today[provider] };
+      const providerData = today[provider];
+      if (providerData != null) {
+        _usage[provider].today = {
+          ...emptyCounters(),
+          ...(providerData as Partial<UsageCounters>),
+        };
       }
     }
 
-    loadRpdState(raw);
+    loadRpdState(raw as Parameters<typeof loadRpdState>[0]);
   } catch {
     // Best effort
   }
@@ -235,7 +246,7 @@ export function saveProviderUsage(): void {
     let existing: Record<string, unknown> = {};
     try {
       if (fs.existsSync(USAGE_PATH)) {
-        existing = JSON.parse(fs.readFileSync(USAGE_PATH, 'utf8'));
+        existing = JSON.parse(fs.readFileSync(USAGE_PATH, 'utf8')) as Record<string, unknown>;
       }
     } catch {
       /* start fresh */
@@ -252,12 +263,12 @@ export function saveProviderUsage(): void {
 
     const cutoff = new Date();
     cutoff.setDate(cutoff.getDate() - RETENTION_DAYS);
-    const cutoffKey = `${cutoff.getFullYear()}-${String(cutoff.getMonth() + 1).padStart(2, '0')}-${String(cutoff.getDate()).padStart(2, '0')}`;
-    for (const k of Object.keys(existing)) {
-      if (k < cutoffKey) delete existing[k];
-    }
+    const cutoffKey = `${String(cutoff.getFullYear())}-${String(cutoff.getMonth() + 1).padStart(2, '0')}-${String(cutoff.getDate()).padStart(2, '0')}`;
+    const prunedExisting = Object.fromEntries(
+      Object.entries(existing).filter(([k]) => k >= cutoffKey),
+    );
 
-    fs.writeFileSync(USAGE_PATH, `${JSON.stringify(existing, null, 2)}\n`, 'utf8');
+    fs.writeFileSync(USAGE_PATH, `${JSON.stringify(prunedExisting, null, 2)}\n`, 'utf8');
   } catch {
     // Best effort
   }
@@ -266,11 +277,13 @@ export function saveProviderUsage(): void {
 // ── External API Integration ────────────────────────────────────────────────
 
 function getAdminKeys() {
-  const cfg = loadHydraConfig() as any;
-  const providers = cfg.providers || {};
+  const cfg = loadHydraConfig() as unknown as {
+    providers?: { openai?: { adminKey?: string | null }; anthropic?: { adminKey?: string | null } };
+  };
+  const providers = cfg.providers ?? {};
   return {
-    openai: process.env['OPENAI_ADMIN_KEY'] || providers.openai?.adminKey || null,
-    anthropic: process.env['ANTHROPIC_ADMIN_KEY'] || providers.anthropic?.adminKey || null,
+    openai: process.env['OPENAI_ADMIN_KEY'] ?? providers.openai?.adminKey ?? null,
+    anthropic: process.env['ANTHROPIC_ADMIN_KEY'] ?? providers.anthropic?.adminKey ?? null,
   };
 }
 
@@ -285,8 +298,9 @@ export async function refreshExternalUsage(): Promise<void> {
   const keys = getAdminKeys();
   const tasks: Promise<void>[] = [];
 
-  if (keys.openai) tasks.push(fetchOpenAIUsage(keys.openai));
-  if (keys.anthropic) tasks.push(fetchAnthropicUsage(keys.anthropic));
+  if (keys.openai != null && keys.openai !== '') tasks.push(fetchOpenAIUsage(keys.openai));
+  if (keys.anthropic != null && keys.anthropic !== '')
+    tasks.push(fetchAnthropicUsage(keys.anthropic));
 
   if (tasks.length === 0) return;
 
@@ -306,13 +320,13 @@ async function fetchOpenAIUsage(adminKey: string): Promise<void> {
       signal: AbortSignal.timeout(10_000),
     });
     if (!res.ok) return;
-    const data = (await res.json()) as any;
+    const data = await res.json();
     let inputTokens = 0,
       outputTokens = 0;
-    for (const bucket of data.data || []) {
-      for (const result of bucket.results || []) {
-        inputTokens += result.input_tokens || 0;
-        outputTokens += result.output_tokens || 0;
+    for (const bucket of (data as { data?: unknown[] }).data ?? []) {
+      for (const result of (bucket as { results?: unknown[] }).results ?? []) {
+        inputTokens += (result as { input_tokens?: number }).input_tokens ?? 0;
+        outputTokens += (result as { output_tokens?: number }).output_tokens ?? 0;
       }
     }
     const cost = estimateCostGeneric('openai', inputTokens, outputTokens);
@@ -334,12 +348,12 @@ async function fetchAnthropicUsage(adminKey: string): Promise<void> {
       signal: AbortSignal.timeout(10_000),
     });
     if (!res.ok) return;
-    const data = (await res.json()) as any;
+    const data = await res.json();
     let inputTokens = 0,
       outputTokens = 0;
-    for (const entry of data.data || []) {
-      inputTokens += entry.input_tokens || 0;
-      outputTokens += entry.output_tokens || 0;
+    for (const entry of (data as { data?: unknown[] }).data ?? []) {
+      inputTokens += (entry as { input_tokens?: number }).input_tokens ?? 0;
+      outputTokens += (entry as { output_tokens?: number }).output_tokens ?? 0;
     }
     const cost = estimateCostGeneric('anthropic', inputTokens, outputTokens);
     _usage['anthropic'].external = { inputTokens, outputTokens, cost };
@@ -353,7 +367,7 @@ export function estimateCostGeneric(
   inputTokens: number,
   outputTokens: number,
 ): number {
-  const avgRates: Record<string, { input: number; output: number }> = {
+  const avgRates: Record<string, { input: number; output: number } | undefined> = {
     openai: { input: 0.002, output: 0.008 },
     anthropic: { input: 0.005, output: 0.025 },
   };

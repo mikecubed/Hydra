@@ -1,4 +1,3 @@
-#!/usr/bin/env node
 /**
  * Hydra Hub — Universal multi-agent coordination hub.
  *
@@ -19,7 +18,7 @@ const STALE_MS = 3 * 60 * 60 * 1000; // 3 hours
 // ── Hub Path ──────────────────────────────────────────────────────────────────
 
 function deriveHubPath(): string {
-  if (process.env['HYDRA_HUB_OVERRIDE']) {
+  if (process.env['HYDRA_HUB_OVERRIDE'] != null && process.env['HYDRA_HUB_OVERRIDE'] !== '') {
     return process.env['HYDRA_HUB_OVERRIDE'];
   }
   const home = os.homedir(); // e.g. C:\Users\Chili
@@ -34,7 +33,7 @@ function deriveHubPath(): string {
 const HUB_DIR = deriveHubPath();
 
 /** Returns the absolute path to the hub sessions directory. */
-export function hubPath() {
+export function hubPath(): string {
   return HUB_DIR;
 }
 
@@ -45,7 +44,7 @@ export function hubPath() {
  * /e/Dev/PepperScale and E:\Dev\PepperScale both become e:/dev/pepperscale
  */
 function normalizeCwd(cwd: unknown): string {
-  if (!cwd || typeof cwd !== 'string') return '';
+  if (cwd == null || typeof cwd !== 'string') return '';
   return cwd
     .replace(/\\/g, '/') // backslashes → forward slashes
     .replace(/^\/([a-z])\//i, '$1:/') // /e/ → e:/
@@ -134,9 +133,9 @@ export function registerSession(
     status?: string;
     id?: string;
   } = {} as { agent: string },
-) {
+): string {
   ensureHubDir();
-  const sessionId = id || makeId();
+  const sessionId = id ?? makeId();
   const session = {
     id: sessionId,
     agent,
@@ -147,7 +146,7 @@ export function registerSession(
     files: Array.isArray(files) ? files : [],
     startedAt: nowIso(),
     lastUpdate: nowIso(),
-    ...(taskId ? { taskId } : {}),
+    ...(taskId != null && taskId !== '' ? { taskId } : {}),
   };
   atomicWrite(sessionFilePath(sessionId), session);
   logActivity({
@@ -171,9 +170,9 @@ export function registerSession(
 export function updateSession(id: string, updates: Record<string, unknown>): void {
   const p = sessionFilePath(id);
   if (!fs.existsSync(p)) return;
-  let session;
+  let session: Record<string, unknown>;
   try {
-    session = JSON.parse(fs.readFileSync(p, 'utf8'));
+    session = JSON.parse(fs.readFileSync(p, 'utf8')) as Record<string, unknown>;
   } catch {
     return;
   }
@@ -193,9 +192,9 @@ export function deregisterSession(id: string): void {
   let agent = 'unknown';
   let project = 'unknown';
   try {
-    const s = JSON.parse(fs.readFileSync(p, 'utf8'));
-    agent = s.agent;
-    project = s.project;
+    const s = JSON.parse(fs.readFileSync(p, 'utf8')) as { agent?: string; project?: string };
+    agent = s.agent ?? 'unknown';
+    project = s.project ?? 'unknown';
   } catch {
     /* best-effort */
   }
@@ -217,7 +216,7 @@ export function deregisterSession(id: string): void {
 export function listSessions({ cwd }: { cwd?: string } = {}): Record<string, unknown>[] {
   ensureHubDir();
   const now = Date.now();
-  const sessions = [];
+  const sessions: Record<string, unknown>[] = [];
 
   let entries;
   try {
@@ -230,8 +229,10 @@ export function listSessions({ cwd }: { cwd?: string } = {}): Record<string, unk
     if (!file.startsWith('sess_') || !file.endsWith('.json')) continue;
     const p = path.join(HUB_DIR, file);
     try {
-      const session = JSON.parse(fs.readFileSync(p, 'utf8'));
-      const lastUpdate = new Date(session.lastUpdate || session.startedAt).getTime();
+      const session = JSON.parse(fs.readFileSync(p, 'utf8')) as Record<string, unknown>;
+      const lastUpdate = new Date(
+        (session['lastUpdate'] ?? session['startedAt']) as string,
+      ).getTime();
       if (now - lastUpdate > STALE_MS) {
         try {
           fs.unlinkSync(p);
@@ -247,9 +248,9 @@ export function listSessions({ cwd }: { cwd?: string } = {}): Record<string, unk
     }
   }
 
-  if (!cwd) return sessions;
+  if (cwd == null || cwd === '') return sessions;
   const normalizedCwd = normalizeCwd(cwd);
-  return sessions.filter((s) => (s.cwd || '') === normalizedCwd);
+  return sessions.filter((s) => ((s['cwd'] as string | undefined) ?? '') === normalizedCwd);
 }
 
 /**
@@ -268,7 +269,7 @@ export function checkConflicts(
   const sessions = listSessions({ cwd });
   const conflicts = [];
   for (const session of sessions) {
-    if (excludeId && session['id'] === excludeId) continue;
+    if (excludeId != null && excludeId !== '' && session['id'] === excludeId) continue;
     if (!Array.isArray(session['files'])) continue;
     for (const file of plannedFiles) {
       if ((session['files'] as string[]).includes(file)) {

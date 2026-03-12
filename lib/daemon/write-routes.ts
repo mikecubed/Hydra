@@ -1,16 +1,9 @@
-#!/usr/bin/env node
 /**
  * Mutating daemon routes (POST endpoints).
  */
 
 import crypto from 'node:crypto';
-import type {
-  WriteRouteCtx,
-  HydraStateShape,
-  TaskEntry,
-  HandoffEntry,
-  ChildSessionEntry,
-} from '../types.ts';
+import type { WriteRouteCtx, HydraStateShape, TaskEntry, HandoffEntry } from '../types.ts';
 import path from 'node:path';
 import { createWorktree, removeWorktree, isWorktreeEnabled } from '../hydra-worktree.ts';
 import {
@@ -63,7 +56,7 @@ export async function handleWriteRoute(ctx: WriteRouteCtx): Promise<boolean> {
   // ── Idempotency Check ──────────────────────────────────────────────────
   if (method === 'POST' && checkIdempotency) {
     const idempotencyKey = req.headers['idempotency-key'] as string | undefined;
-    if (idempotencyKey && checkIdempotency(idempotencyKey)) {
+    if (idempotencyKey != null && idempotencyKey !== '' && checkIdempotency(idempotencyKey)) {
       sendJson(res, 409, { ok: false, error: 'Duplicate request (idempotency key already seen)' });
       return true;
     }
@@ -72,8 +65,8 @@ export async function handleWriteRoute(ctx: WriteRouteCtx): Promise<boolean> {
   // ── Concierge Event Push ──────────────────────────────────────────────────
   if (method === 'POST' && route === '/events/push') {
     const body = await readJsonBody(req);
-    const type = String(body['type'] || '').trim();
-    const payload = body['payload'] || {};
+    const type = ((body['type'] as string | null | undefined) ?? '').trim();
+    const payload = body['payload'] ?? {};
 
     const ALLOWED_TYPES = [
       'concierge:dispatch',
@@ -81,7 +74,7 @@ export async function handleWriteRoute(ctx: WriteRouteCtx): Promise<boolean> {
       'concierge:error',
       'concierge:model_switch',
     ];
-    if (!type || !ALLOWED_TYPES.includes(type)) {
+    if (type === '' || !ALLOWED_TYPES.includes(type)) {
       sendError(res, 400, `Invalid event type. Allowed: ${ALLOWED_TYPES.join(', ')}`);
       return true;
     }
@@ -94,16 +87,16 @@ export async function handleWriteRoute(ctx: WriteRouteCtx): Promise<boolean> {
 
   if (method === 'POST' && route === '/session/start') {
     const body = await readJsonBody(req);
-    const focus = String(body['focus'] || '').trim();
-    if (!focus) {
+    const focus = ((body['focus'] as string | null | undefined) ?? '').trim();
+    if (focus === '') {
       sendError(res, 400, 'Field "focus" is required.');
       return true;
     }
 
-    const owner = String(body['owner'] || 'human').toLowerCase();
+    const owner = ((body['owner'] as string | null | undefined) ?? 'human').toLowerCase();
     ensureKnownAgent(owner, false);
-    const participants = parseList(body['participants'] || 'human,gemini,codex,claude');
-    const branch = String(body['branch'] || getCurrentBranch());
+    const participants = parseList(body['participants'] ?? 'human,gemini,codex,claude');
+    const branch = (body['branch'] as string | null | undefined) ?? getCurrentBranch();
 
     const session = await enqueueMutation(
       `session:start owner=${owner} focus="${focus}"`,
@@ -128,7 +121,7 @@ export async function handleWriteRoute(ctx: WriteRouteCtx): Promise<boolean> {
 
   if (method === 'POST' && route === '/session/fork') {
     const body = await readJsonBody(req);
-    const reason = String(body['reason'] || '').trim();
+    const reason = ((body['reason'] as string | null | undefined) ?? '').trim();
 
     const result = await enqueueMutation(
       'session:fork',
@@ -154,9 +147,9 @@ export async function handleWriteRoute(ctx: WriteRouteCtx): Promise<boolean> {
           focus: parent.focus,
           owner: parent.owner,
           branch: parent.branch,
-          participants: [...(parent.participants || [])],
+          participants: [...(parent.participants ?? [])],
           status: 'active',
-          reason: reason || 'Forked from parent session',
+          reason: reason === '' ? 'Forked from parent session' : reason,
           contextSnapshot: JSON.stringify({
             tasks: state.tasks.map((t: TaskEntry) => ({
               id: t.id,
@@ -175,7 +168,7 @@ export async function handleWriteRoute(ctx: WriteRouteCtx): Promise<boolean> {
         if (!Array.isArray(state.childSessions)) {
           state.childSessions = [];
         }
-        state.childSessions!.push(fork as ChildSessionEntry);
+        state.childSessions.push(fork);
 
         return fork;
       },
@@ -188,18 +181,18 @@ export async function handleWriteRoute(ctx: WriteRouteCtx): Promise<boolean> {
 
   if (method === 'POST' && route === '/session/spawn') {
     const body = await readJsonBody(req);
-    const focus = String(body['focus'] || '').trim();
-    if (!focus) {
+    const focus = ((body['focus'] as string | null | undefined) ?? '').trim();
+    if (focus === '') {
       sendError(res, 400, 'Field "focus" is required for spawn.');
       return true;
     }
-    const owner = String(body['owner'] || 'human').toLowerCase();
+    const owner = ((body['owner'] as string | null | undefined) ?? 'human').toLowerCase();
 
     const result = await enqueueMutation(
       `session:spawn focus="${focus}"`,
       (state: HydraStateShape) => {
-        const parentId: string = state.activeSession?.id || '';
-        const spawnId = `${parentId || 'ROOT'}_SPAWN_${Date.now().toString(36)}`;
+        const parentId: string = state.activeSession?.id ?? '';
+        const spawnId = `${parentId === '' ? 'ROOT' : parentId}_SPAWN_${Date.now().toString(36)}`;
 
         // Track on parent if exists
         if (state.activeSession) {
@@ -226,7 +219,7 @@ export async function handleWriteRoute(ctx: WriteRouteCtx): Promise<boolean> {
         if (!Array.isArray(state.childSessions)) {
           state.childSessions = [];
         }
-        state.childSessions!.push(child as ChildSessionEntry);
+        state.childSessions.push(child);
 
         return child;
       },
@@ -239,7 +232,7 @@ export async function handleWriteRoute(ctx: WriteRouteCtx): Promise<boolean> {
 
   if (method === 'POST' && route === '/session/pause') {
     const body = await readJsonBody(req);
-    const reason = String(body['reason'] || '').trim();
+    const reason = ((body['reason'] as string | null | undefined) ?? '').trim();
 
     const session = await enqueueMutation(
       'session:pause',
@@ -251,7 +244,7 @@ export async function handleWriteRoute(ctx: WriteRouteCtx): Promise<boolean> {
           throw new Error('Session is already paused.');
         }
         state.activeSession.status = 'paused';
-        state.activeSession.pauseReason = reason || undefined;
+        state.activeSession.pauseReason = reason === '' ? undefined : reason;
         state.activeSession.pausedAt = nowIso();
         return state.activeSession;
       },
@@ -289,22 +282,25 @@ export async function handleWriteRoute(ctx: WriteRouteCtx): Promise<boolean> {
 
   if (method === 'POST' && route === '/task/add') {
     const body = await readJsonBody(req);
-    const title = String(body['title'] || '').trim();
-    if (!title) {
+    const title = ((body['title'] as string | null | undefined) ?? '').trim();
+    if (title === '') {
       sendError(res, 400, 'Field "title" is required.');
       return true;
     }
 
-    const owner = String(body['owner'] || 'unassigned').toLowerCase();
+    const owner = ((body['owner'] as string | null | undefined) ?? 'unassigned').toLowerCase();
     ensureKnownAgent(owner);
 
-    const status = String(body['status'] || 'todo');
+    const status = (body['status'] as string | null | undefined) ?? 'todo';
     ensureKnownStatus(status);
 
-    const files = parseList(body['files'] || []);
-    const notes = String(body['notes'] || '').trim();
-    const blockedBy = parseList(body['blockedBy'] || []);
-    const taskType = String(body['type'] || '').trim() || classifyTask(title, notes);
+    const files = parseList(body['files'] ?? []);
+    const notes = ((body['notes'] as string | null | undefined) ?? '').trim();
+    const blockedBy = parseList(body['blockedBy'] ?? []);
+    const taskType = (() => {
+      const bodyType = ((body['type'] as string | null | undefined) ?? '').trim();
+      return bodyType === '' ? classifyTask(title, notes) : bodyType;
+    })();
 
     const wantWorktree = Boolean(body['worktree']) && isWorktreeEnabled();
 
@@ -330,20 +326,20 @@ export async function handleWriteRoute(ctx: WriteRouteCtx): Promise<boolean> {
 
     // Create worktree after mutation succeeds (uses task.id)
     let worktreeInfo: Record<string, unknown> | null = null;
-    if (wantWorktree && (task as Record<string, unknown>)['id']) {
+    if (wantWorktree && (task as Record<string, unknown>)['id'] != null) {
       try {
-        worktreeInfo = (await createWorktree(
+        worktreeInfo = createWorktree(
           (task as Record<string, unknown>)['id'] as string,
           projectRoot as string,
-        )) as Record<string, unknown>;
+        ) as Record<string, unknown>;
         // Update task record with worktree path via another mutation
         await enqueueMutation(
-          `task:worktree id=${(task as Record<string, unknown>)['id']}`,
+          `task:worktree id=${(task as Record<string, unknown>)['id'] as string}`,
           (state: HydraStateShape) => {
             const t = state.tasks.find((x: TaskEntry) => x.id === task.id);
-            if (t) {
-              t.worktreePath = worktreeInfo!['worktreePath'] as string;
-              t.worktreeBranch = worktreeInfo!['branch'] as string;
+            if (t && worktreeInfo != null) {
+              t.worktreePath = worktreeInfo['worktreePath'] as string;
+              t.worktreeBranch = worktreeInfo['branch'] as string;
             }
           },
           { event: 'worktree_create', taskId: task.id },
@@ -359,19 +355,23 @@ export async function handleWriteRoute(ctx: WriteRouteCtx): Promise<boolean> {
 
   if (method === 'POST' && route === '/task/claim') {
     const body = await readJsonBody(req);
-    const agent = String(body['agent'] || '').toLowerCase();
+    const agent = ((body['agent'] as string | null | undefined) ?? '').toLowerCase();
     ensureKnownAgent(agent, false);
 
-    const claimTitle = String(body['title'] || body['taskId'] || '').trim();
+    const claimTitle = (
+      (body['title'] as string | null | undefined) ??
+      (body['taskId'] as string | null | undefined) ??
+      ''
+    ).trim();
     const task = await enqueueMutation(
       `task:claim agent=${agent}`,
       (state: HydraStateShape) => {
-        const taskId = String(body['taskId'] || '').trim();
-        const title = String(body['title'] || '').trim();
+        const taskId = ((body['taskId'] as string | null | undefined) ?? '').trim();
+        const title = ((body['title'] as string | null | undefined) ?? '').trim();
         const files = parseList(body['files']);
-        const notes = String(body['notes'] || '').trim();
+        const notes = ((body['notes'] as string | null | undefined) ?? '').trim();
 
-        if (taskId) {
+        if (taskId !== '') {
           const existing = state.tasks.find((item: TaskEntry) => item.id === taskId);
           if (!existing) {
             throw new Error(`Task ${taskId} not found.`);
@@ -389,18 +389,18 @@ export async function handleWriteRoute(ctx: WriteRouteCtx): Promise<boolean> {
           if (files.length > 0) {
             existing.files = files;
           }
-          if (notes) {
-            existing.notes = existing.notes ? `${existing.notes}\n${notes}` : notes;
+          if (notes !== '') {
+            existing.notes = existing.notes === '' ? notes : `${existing.notes}\n${notes}`;
           }
           existing.updatedAt = nowIso();
           return existing;
         }
 
-        if (!title) {
+        if (title === '') {
           throw new Error('Either taskId or title is required.');
         }
 
-        const claimBlockedBy = parseList(body['blockedBy'] || []);
+        const claimBlockedBy = parseList(body['blockedBy'] ?? []);
         const newTask = {
           id: nextId('T', state.tasks),
           title,
@@ -421,8 +421,8 @@ export async function handleWriteRoute(ctx: WriteRouteCtx): Promise<boolean> {
     // Create worktree for newly-created tasks when worktreeIsolation is enabled
     // and the dispatch mode is tandem or council (or worktree is explicitly requested).
     // Only applies when a NEW task was created (not when claiming an existing one).
-    const isNewTask = !body['taskId'];
-    const dispatchMode = String(body['mode'] || '').toLowerCase();
+    const isNewTask = body['taskId'] == null || body['taskId'] === '';
+    const dispatchMode = ((body['mode'] as string | null | undefined) ?? '').toLowerCase();
     const wantsWorktree =
       isNewTask &&
       typeof createTaskWorktree === 'function' &&
@@ -431,12 +431,12 @@ export async function handleWriteRoute(ctx: WriteRouteCtx): Promise<boolean> {
       try {
         const { loadHydraConfig } = await import('../hydra-config.ts');
         const cfg = loadHydraConfig();
-        if (cfg.routing?.worktreeIsolation?.enabled) {
+        if (cfg.routing.worktreeIsolation.enabled) {
           const worktreePath = createTaskWorktree(task.id);
-          if (worktreePath) {
+          if (worktreePath != null && worktreePath !== '') {
             const branch = `hydra/task/${task.id}`;
             await enqueueMutation(
-              `task:worktree id=${(task as Record<string, unknown>)['id']}`,
+              `task:worktree id=${(task as Record<string, unknown>)['id'] as string}`,
               (state: HydraStateShape) => {
                 const t = state.tasks.find((x: TaskEntry) => x.id === task.id);
                 if (t) {
@@ -456,12 +456,12 @@ export async function handleWriteRoute(ctx: WriteRouteCtx): Promise<boolean> {
     // Sync to coordination hub (non-critical — must never fail the request)
     try {
       hubRegister({
-        id: `daemon_${(task as Record<string, unknown>)['id']}`,
+        id: `daemon_${(task as Record<string, unknown>)['id'] as string}`,
         agent: (task as Record<string, unknown>)['owner'] as string,
         cwd: projectRoot as string,
         project: path.basename(projectRoot as string),
         focus: (task as Record<string, unknown>)['title'] as string,
-        files: ((task as Record<string, unknown>)['files'] as string[]) || [],
+        files: (task as Record<string, unknown>)['files'] as string[],
         taskId: (task as Record<string, unknown>)['id'] as string,
         status: 'working',
       });
@@ -475,15 +475,15 @@ export async function handleWriteRoute(ctx: WriteRouteCtx): Promise<boolean> {
 
   if (method === 'POST' && route === '/task/update') {
     const body = await readJsonBody(req);
-    const taskId = String(body['taskId'] || '').trim();
-    if (!taskId) {
+    const taskId = ((body['taskId'] as string | null | undefined) ?? '').trim();
+    if (taskId === '') {
       sendError(res, 400, 'Field "taskId" is required.');
       return true;
     }
 
-    const updateStatus = body['status'] === undefined ? undefined : String(body['status']);
+    const updateStatus = body['status'] === undefined ? undefined : (body['status'] as string);
     const updateOwner =
-      body['owner'] === undefined ? undefined : String(body['owner']).toLowerCase();
+      body['owner'] === undefined ? undefined : (body['owner'] as string).toLowerCase();
     const task = await enqueueMutation(
       `task:update id=${taskId}`,
       (state: HydraStateShape) => {
@@ -493,9 +493,9 @@ export async function handleWriteRoute(ctx: WriteRouteCtx): Promise<boolean> {
         }
 
         // Atomic claim token validation: if caller provides claimToken, it must match
-        if (body['claimToken'] && !body['force']) {
+        if (body['claimToken'] != null && body['force'] !== true) {
           if (
-            (existing as Record<string, unknown>)['claimToken'] &&
+            (existing as Record<string, unknown>)['claimToken'] != null &&
             (existing as Record<string, unknown>)['claimToken'] !== body['claimToken']
           ) {
             throw new Error(
@@ -505,10 +505,10 @@ export async function handleWriteRoute(ctx: WriteRouteCtx): Promise<boolean> {
         }
 
         if (body['title'] !== undefined) {
-          existing.title = String(body['title']);
+          existing.title = body['title'] as string;
         }
         if (body['owner'] !== undefined) {
-          const owner = String(body['owner']).toLowerCase();
+          const owner = (body['owner'] as string).toLowerCase();
           ensureKnownAgent(owner);
           existing.owner = owner;
         }
@@ -522,7 +522,7 @@ export async function handleWriteRoute(ctx: WriteRouteCtx): Promise<boolean> {
           existing.blockedBy = proposed;
         }
         if (body['status'] !== undefined) {
-          const status = String(body['status']);
+          const status = body['status'] as string;
           ensureKnownStatus(status);
           (existing as Record<string, unknown>)['status'] = status;
         }
@@ -530,13 +530,13 @@ export async function handleWriteRoute(ctx: WriteRouteCtx): Promise<boolean> {
           existing.files = parseList(body['files']);
         }
         if (body['notes'] !== undefined) {
-          const notes = String(body['notes']).trim();
-          if (notes) {
-            existing.notes = existing.notes ? `${existing.notes}\n${notes}` : notes;
+          const notes = (body['notes'] as string).trim();
+          if (notes !== '') {
+            existing.notes = existing.notes === '' ? notes : `${existing.notes}\n${notes}`;
           }
         }
         existing.updatedAt = nowIso();
-        if ((existing as Record<string, unknown>)['stale']) {
+        if ((existing as Record<string, unknown>)['stale'] === true) {
           (existing as Record<string, unknown>)['stale'] = false;
           delete (existing as Record<string, unknown>)['staleSince'];
         }
@@ -553,11 +553,11 @@ export async function handleWriteRoute(ctx: WriteRouteCtx): Promise<boolean> {
     // Auto-cleanup worktree when task completes
     if (
       ['done', 'cancelled'].includes((task as Record<string, unknown>)['status'] as string) &&
-      (task as Record<string, unknown>)['worktreePath'] &&
+      (task as Record<string, unknown>)['worktreePath'] != null &&
       isWorktreeEnabled()
     ) {
       try {
-        await removeWorktree(taskId, projectRoot as string, {
+        removeWorktree(taskId, projectRoot as string, {
           deleteBranch: (task as Record<string, unknown>)['status'] === 'cancelled',
         });
       } catch {
@@ -567,13 +567,13 @@ export async function handleWriteRoute(ctx: WriteRouteCtx): Promise<boolean> {
 
     // Sync status change to coordination hub
     try {
-      const hubSessId = `daemon_${(task as Record<string, unknown>)['id']}`;
+      const hubSessId = `daemon_${(task as Record<string, unknown>)['id'] as string}`;
       if (['done', 'cancelled'].includes((task as Record<string, unknown>)['status'] as string)) {
         hubDeregister(hubSessId);
       } else {
         hubUpdate(hubSessId, {
           status: (task as Record<string, unknown>)['status'] === 'blocked' ? 'blocked' : 'working',
-          files: ((task as Record<string, unknown>)['files'] as string[]) || [],
+          files: (task as Record<string, unknown>)['files'] as string[],
           focus: (task as Record<string, unknown>)['title'] as string,
         });
       }
@@ -584,7 +584,7 @@ export async function handleWriteRoute(ctx: WriteRouteCtx): Promise<boolean> {
     const shouldVerify =
       (task as Record<string, unknown>)['status'] === 'done' && body['verify'] !== false;
     const verifyPlan = resolveVerificationPlan(projectRoot);
-    const isVerifying = shouldVerify && verifyPlan['enabled'];
+    const isVerifying = shouldVerify && verifyPlan['enabled'] === true;
     if (isVerifying) {
       runVerification(taskId, verifyPlan);
     }
@@ -595,7 +595,10 @@ export async function handleWriteRoute(ctx: WriteRouteCtx): Promise<boolean> {
       verification: {
         enabled: verifyPlan['enabled'],
         source: verifyPlan['source'],
-        command: verifyPlan['command'] || null,
+        command: (() => {
+          const cmd = verifyPlan['command'] as string | null | undefined;
+          return cmd == null || cmd === '' ? null : cmd;
+        })(),
         reason: verifyPlan['reason'],
       },
     });
@@ -604,9 +607,9 @@ export async function handleWriteRoute(ctx: WriteRouteCtx): Promise<boolean> {
 
   if (method === 'POST' && route === '/task/route') {
     const body = await readJsonBody(req);
-    const taskId = String(body['taskId'] || '').trim();
+    const taskId = ((body['taskId'] as string | null | undefined) ?? '').trim();
     const includeVirtual = body['includeVirtual'] === true;
-    if (!taskId) {
+    if (taskId === '') {
       sendError(res, 400, 'Field "taskId" is required.');
       return true;
     }
@@ -616,15 +619,15 @@ export async function handleWriteRoute(ctx: WriteRouteCtx): Promise<boolean> {
       sendError(res, 404, `Task ${taskId} not found.`);
       return true;
     }
-    const taskType = target.type || classifyTask(target.title, target.notes || '');
+    const taskType = target.type === '' ? classifyTask(target.title, target.notes) : target.type;
     const scores: Record<string, number> = {};
     let recommended = AGENT_NAMES[0];
     let bestScore = 0;
     // Score physical agents
     for (const name of AGENT_NAMES) {
       const cfg = getAgent(name);
-      const score = (cfg?.taskAffinity as Record<string, number> | undefined)?.[taskType] || 0.5;
-      (scores as Record<string, number>)[name] = score;
+      const score = (cfg?.taskAffinity as Record<string, number> | undefined)?.[taskType] ?? 0.5;
+      scores[name] = score;
       if (score > bestScore) {
         bestScore = score;
         recommended = name;
@@ -633,14 +636,15 @@ export async function handleWriteRoute(ctx: WriteRouteCtx): Promise<boolean> {
     // Optionally score virtual agents
     const virtualScores: Record<string, number> = {};
     let virtualRecommended = null;
-    if (includeVirtual && ctx.listAgents) {
+    if (includeVirtual) {
       const virtualAgents = ctx.listAgents({ type: 'virtual', enabled: true });
       for (const va of virtualAgents) {
-        const score = (va.taskAffinity as Record<string, number> | undefined)?.[taskType] || 0;
-        (virtualScores as Record<string, number>)[va.name] = score;
+        const score = (va.taskAffinity as Record<string, number> | undefined)?.[taskType] ?? 0;
+        virtualScores[va.name] = score;
         if (
-          !virtualRecommended ||
-          score > ((virtualScores as Record<string, number>)[virtualRecommended!] || 0)
+          virtualRecommended == null ||
+          virtualRecommended === '' ||
+          score > (virtualScores[virtualRecommended] ?? 0)
         ) {
           virtualRecommended = va.name;
         }
@@ -652,7 +656,7 @@ export async function handleWriteRoute(ctx: WriteRouteCtx): Promise<boolean> {
       taskType,
       recommended,
       scores,
-      reason: `${taskType} task best suited for ${recommended} (affinity=${bestScore})`,
+      reason: `${taskType} task best suited for ${recommended} (affinity=${String(bestScore)})`,
     };
     if (includeVirtual && Object.keys(virtualScores).length > 0) {
       response['virtualScores'] = virtualScores;
@@ -664,8 +668,8 @@ export async function handleWriteRoute(ctx: WriteRouteCtx): Promise<boolean> {
 
   if (method === 'POST' && route === '/verify') {
     const body = await readJsonBody(req);
-    const verifyTaskId = String(body['taskId'] || '').trim();
-    if (!verifyTaskId) {
+    const verifyTaskId = ((body['taskId'] as string | null | undefined) ?? '').trim();
+    if (verifyTaskId === '') {
       sendError(res, 400, 'Field "taskId" is required.');
       return true;
     }
@@ -677,7 +681,7 @@ export async function handleWriteRoute(ctx: WriteRouteCtx): Promise<boolean> {
     }
 
     const verifyPlan = resolveVerificationPlan(projectRoot);
-    if (!verifyPlan['enabled']) {
+    if (verifyPlan['enabled'] !== true) {
       sendJson(res, 200, {
         ok: true,
         taskId: verifyTaskId,
@@ -709,16 +713,16 @@ export async function handleWriteRoute(ctx: WriteRouteCtx): Promise<boolean> {
 
   if (method === 'POST' && route === '/decision') {
     const body = await readJsonBody(req);
-    const title = String(body['title'] || '').trim();
-    if (!title) {
+    const title = ((body['title'] as string | null | undefined) ?? '').trim();
+    if (title === '') {
       sendError(res, 400, 'Field "title" is required.');
       return true;
     }
 
-    const owner = String(body['owner'] || 'human').toLowerCase();
+    const owner = ((body['owner'] as string | null | undefined) ?? 'human').toLowerCase();
     ensureKnownAgent(owner, false);
-    const rationale = String(body['rationale'] || '');
-    const impact = String(body['impact'] || '');
+    const rationale = (body['rationale'] as string | null | undefined) ?? '';
+    const impact = (body['impact'] as string | null | undefined) ?? '';
 
     const decision = await enqueueMutation(
       `decision:add owner=${owner}`,
@@ -743,15 +747,15 @@ export async function handleWriteRoute(ctx: WriteRouteCtx): Promise<boolean> {
 
   if (method === 'POST' && route === '/blocker') {
     const body = await readJsonBody(req);
-    const title = String(body['title'] || '').trim();
-    if (!title) {
+    const title = ((body['title'] as string | null | undefined) ?? '').trim();
+    if (title === '') {
       sendError(res, 400, 'Field "title" is required.');
       return true;
     }
 
-    const owner = String(body['owner'] || 'human').toLowerCase();
+    const owner = ((body['owner'] as string | null | undefined) ?? 'human').toLowerCase();
     ensureKnownAgent(owner, false);
-    const nextStep = String(body['nextStep'] || '');
+    const nextStep = (body['nextStep'] as string | null | undefined) ?? '';
 
     const blocker = await enqueueMutation(
       `blocker:add owner=${owner}`,
@@ -775,13 +779,13 @@ export async function handleWriteRoute(ctx: WriteRouteCtx): Promise<boolean> {
 
   if (method === 'POST' && route === '/handoff') {
     const body = await readJsonBody(req);
-    const from = String(body['from'] || '').toLowerCase();
-    const to = String(body['to'] || '').toLowerCase();
-    const summary = String(body['summary'] || '').trim();
-    const nextStep = String(body['nextStep'] || '');
+    const from = ((body['from'] as string | null | undefined) ?? '').toLowerCase();
+    const to = ((body['to'] as string | null | undefined) ?? '').toLowerCase();
+    const summary = ((body['summary'] as string | null | undefined) ?? '').trim();
+    const nextStep = (body['nextStep'] as string | null | undefined) ?? '';
     const tasks = parseList(body['tasks']);
 
-    if (!from || !to || !summary) {
+    if (from === '' || to === '' || summary === '') {
       sendError(res, 400, 'Fields "from", "to", and "summary" are required.');
       return true;
     }
@@ -804,7 +808,7 @@ export async function handleWriteRoute(ctx: WriteRouteCtx): Promise<boolean> {
         state.handoffs.push(item);
         return item;
       },
-      { event: 'handoff', from, to, summary: String(summary || '').slice(0, 60) },
+      { event: 'handoff', from, to, summary: summary.slice(0, 60) },
     );
 
     sendJson(res, 200, { ok: true, handoff });
@@ -813,9 +817,9 @@ export async function handleWriteRoute(ctx: WriteRouteCtx): Promise<boolean> {
 
   if (method === 'POST' && route === '/handoff/ack') {
     const body = await readJsonBody(req);
-    const handoffId = String(body['handoffId'] || '').trim();
-    const agent = String(body['agent'] || '').toLowerCase();
-    if (!handoffId || !agent) {
+    const handoffId = ((body['handoffId'] as string | null | undefined) ?? '').trim();
+    const agent = ((body['agent'] as string | null | undefined) ?? '').toLowerCase();
+    if (handoffId === '' || agent === '') {
       sendError(res, 400, 'Fields "handoffId" and "agent" are required.');
       return true;
     }
@@ -841,17 +845,18 @@ export async function handleWriteRoute(ctx: WriteRouteCtx): Promise<boolean> {
 
   if (method === 'POST' && route === '/task/result') {
     const body = await readJsonBody(req);
-    const taskId = String(body['taskId'] || '').trim();
-    const agent = String(body['agent'] || '').toLowerCase();
-    if (!taskId || !agent) {
+    const taskId = ((body['taskId'] as string | null | undefined) ?? '').trim();
+    const agent = ((body['agent'] as string | null | undefined) ?? '').toLowerCase();
+    if (taskId === '' || agent === '') {
       sendError(res, 400, 'Fields "taskId" and "agent" are required.');
       return true;
     }
     ensureKnownAgent(agent, false);
 
-    const output = String(body['output'] || '').trim();
-    const resultStatus = String(body['status'] || 'completed'); // completed | needs_followup | aborted
-    const durationMs = Number(body['durationMs']) || 0;
+    const output = ((body['output'] as string | null | undefined) ?? '').trim();
+    const resultStatus = (body['status'] as string | null | undefined) ?? 'completed'; // completed | needs_followup | aborted
+    const durationMsRaw = Number(body['durationMs']);
+    const durationMs = Number.isNaN(durationMsRaw) ? 0 : durationMsRaw;
 
     const result = await enqueueMutation(
       `task:result id=${taskId} agent=${agent} status=${resultStatus}`,
@@ -873,16 +878,19 @@ export async function handleWriteRoute(ctx: WriteRouteCtx): Promise<boolean> {
           submittedAt: nowIso(),
         };
         // Attach structured error info from worker (if present)
-        if (body['errorInfo']) {
+        if (body['errorInfo'] != null) {
           const errInfo = body['errorInfo'] as Record<string, unknown>;
           entry['errorInfo'] = {
             exitCode: errInfo['exitCode'] ?? null,
-            signal: errInfo['signal'] || null,
-            stderr: String(errInfo['stderr'] || '').slice(0, 1000),
-            error: String(errInfo['error'] || '').slice(0, 500),
-            errorCategory: errInfo['errorCategory'] || null,
-            errorDetail: errInfo['errorDetail'] || null,
-            errorContext: String(errInfo['errorContext'] || '').slice(0, 500),
+            signal: (errInfo['signal'] as string | null | undefined) ?? null,
+            stderr: ((errInfo['stderr'] as string | null | undefined) ?? '').slice(0, 1000),
+            error: ((errInfo['error'] as string | null | undefined) ?? '').slice(0, 500),
+            errorCategory: (errInfo['errorCategory'] as string | null | undefined) ?? null,
+            errorDetail: (errInfo['errorDetail'] as string | null | undefined) ?? null,
+            errorContext: ((errInfo['errorContext'] as string | null | undefined) ?? '').slice(
+              0,
+              500,
+            ),
           };
         }
         ((task as Record<string, unknown>)['results'] as unknown[]).push(entry);
@@ -895,8 +903,10 @@ export async function handleWriteRoute(ctx: WriteRouteCtx): Promise<boolean> {
             autoUnblock(state, taskId);
           } else if (resultStatus === 'error') {
             // Increment fail count; move to DLQ if exceeded threshold
-            (task as Record<string, unknown>)['failCount'] =
-              (((task as Record<string, unknown>)['failCount'] as number) || 0) + 1;
+            const currentFailCount = (task as Record<string, unknown>)['failCount'] as
+              | number
+              | undefined;
+            (task as Record<string, unknown>)['failCount'] = (currentFailCount ?? 0) + 1;
             const maxAttempts = 3; // config-driven in future
             if (((task as Record<string, unknown>)['failCount'] as number) >= maxAttempts) {
               // Move to dead-letter queue
@@ -909,13 +919,13 @@ export async function handleWriteRoute(ctx: WriteRouteCtx): Promise<boolean> {
             } else {
               task.status = 'blocked';
               (task as Record<string, unknown>)['blockedReason'] =
-                output.slice(0, 500) || 'Agent reported error';
+                output.slice(0, 500) === '' ? 'Agent reported error' : output.slice(0, 500);
             }
           }
         }
 
         // Mark stale reset
-        if ((task as Record<string, unknown>)['stale']) {
+        if ((task as Record<string, unknown>)['stale'] === true) {
           (task as Record<string, unknown>)['stale'] = false;
           delete (task as Record<string, unknown>)['staleSince'];
         }
@@ -926,21 +936,25 @@ export async function handleWriteRoute(ctx: WriteRouteCtx): Promise<boolean> {
     );
 
     // Worktree merge on task completion (worktreeIsolation.enabled guard inside)
-    const completedTask = (result as Record<string, unknown>)?.['task'] as
+    const completedTask = (result as Record<string, unknown>)['task'] as
       | Record<string, unknown>
       | undefined;
-    const taskDone = completedTask ? ['done'].includes(completedTask?.['status'] as string) : false;
-    if (taskDone && completedTask?.['worktreePath'] && typeof mergeTaskWorktree === 'function') {
+    const taskDone = completedTask ? ['done'].includes(completedTask['status'] as string) : false;
+    if (
+      taskDone &&
+      completedTask?.['worktreePath'] != null &&
+      typeof mergeTaskWorktree === 'function'
+    ) {
       try {
         const mergeResult = mergeTaskWorktree(taskId);
-        if (mergeResult['ok']) {
+        if (mergeResult['ok'] === true) {
           // Clean merge: clean up worktree if cleanupOnSuccess (default true)
           const { loadHydraConfig } = await import('../hydra-config.ts');
           const cfg = loadHydraConfig();
-          if (cfg.routing?.worktreeIsolation?.cleanupOnSuccess !== false) {
+          if (cfg.routing.worktreeIsolation.cleanupOnSuccess !== false) {
             cleanupTaskWorktree(taskId);
           }
-        } else if (mergeResult['conflict']) {
+        } else if (mergeResult['conflict'] === true) {
           // Conflict: preserve worktree, flag task for :tasks review
           await enqueueMutation(
             `task:worktree_conflict id=${taskId}`,
@@ -966,18 +980,18 @@ export async function handleWriteRoute(ctx: WriteRouteCtx): Promise<boolean> {
 
   if (method === 'POST' && route === '/task/checkpoint') {
     const body = await readJsonBody(req);
-    const taskId = String(body['taskId'] || '').trim();
-    if (!taskId) {
+    const taskId = ((body['taskId'] as string | null | undefined) ?? '').trim();
+    if (taskId === '') {
       sendError(res, 400, 'Field "taskId" is required.');
       return true;
     }
-    const name = String(body['name'] || '').trim();
-    if (!name) {
+    const name = ((body['name'] as string | null | undefined) ?? '').trim();
+    if (name === '') {
       sendError(res, 400, 'Field "name" is required.');
       return true;
     }
-    const context = String(body['context'] || '').trim();
-    const agent = String(body['agent'] || '').toLowerCase();
+    const context = ((body['context'] as string | null | undefined) ?? '').trim();
+    const agent = ((body['agent'] as string | null | undefined) ?? '').toLowerCase();
 
     const checkpoint = await enqueueMutation(
       `task:checkpoint id=${taskId} name=${name}`,
@@ -993,11 +1007,11 @@ export async function handleWriteRoute(ctx: WriteRouteCtx): Promise<boolean> {
           name,
           savedAt: nowIso(),
           context,
-          agent: agent || task.owner || 'unknown',
+          agent: ([agent, task.owner] as string[]).find((s) => s !== '') ?? 'unknown',
         };
         (task.checkpoints as unknown[]).push(cp);
         task.updatedAt = nowIso();
-        if ((task as Record<string, unknown>)['stale']) {
+        if ((task as Record<string, unknown>)['stale'] === true) {
           (task as Record<string, unknown>)['stale'] = false;
           delete (task as Record<string, unknown>)['staleSince'];
         }
@@ -1013,12 +1027,12 @@ export async function handleWriteRoute(ctx: WriteRouteCtx): Promise<boolean> {
   // ── Heartbeat ─────────────────────────────────────────────────────────
   if (method === 'POST' && route.startsWith('/task/') && route.endsWith('/heartbeat')) {
     const taskId = route.slice('/task/'.length, -'/heartbeat'.length);
-    if (!taskId) {
+    if (taskId === '') {
       sendError(res, 400, 'Task ID required in URL.');
       return true;
     }
     const body = await readJsonBody(req);
-    const agent = String(body['agent'] || '').toLowerCase();
+    const agent = ((body['agent'] as string | null | undefined) ?? '').toLowerCase();
 
     const result = await enqueueMutation(
       `task:heartbeat id=${taskId}`,
@@ -1032,14 +1046,14 @@ export async function handleWriteRoute(ctx: WriteRouteCtx): Promise<boolean> {
         (task as Record<string, unknown>)['lastHeartbeat'] = now;
         task.updatedAt = now;
         (task as Record<string, unknown>)['lastHeartbeatDetail'] = {
-          agent: agent || task.owner || 'unknown',
-          progress: body['progress'] || null,
-          outputBytes: body['outputBytes'] || 0,
-          phase: body['phase'] || null,
+          agent: ([agent, task.owner] as string[]).find((s) => s !== '') ?? 'unknown',
+          progress: body['progress'] ?? null,
+          outputBytes: body['outputBytes'] ?? 0,
+          phase: body['phase'] ?? null,
         };
 
         // Reset stale flag
-        if ((task as Record<string, unknown>)['stale']) {
+        if ((task as Record<string, unknown>)['stale'] === true) {
           (task as Record<string, unknown>)['stale'] = false;
           delete (task as Record<string, unknown>)['staleSince'];
         }
@@ -1067,14 +1081,14 @@ export async function handleWriteRoute(ctx: WriteRouteCtx): Promise<boolean> {
 
   if (method === 'GET' && route === '/dead-letter') {
     const state = readState();
-    sendJson(res, 200, { ok: true, items: (state as Record<string, unknown>)['deadLetter'] || [] });
+    sendJson(res, 200, { ok: true, items: (state as Record<string, unknown>)['deadLetter'] ?? [] });
     return true;
   }
 
   if (method === 'POST' && route === '/dead-letter/retry') {
     const body = await readJsonBody(req);
-    const dlId = String(body['id'] || '').trim();
-    if (!dlId) {
+    const dlId = ((body['id'] as string | null | undefined) ?? '').trim();
+    if (dlId === '') {
       sendError(res, 400, 'Field "id" is required.');
       return true;
     }
@@ -1088,10 +1102,10 @@ export async function handleWriteRoute(ctx: WriteRouteCtx): Promise<boolean> {
         );
         if (idx === -1) throw new Error(`DLQ entry ${dlId} not found.`);
         const item = (state['deadLetter'] as Array<Record<string, unknown>>).splice(idx, 1)[0];
-        (item as Record<string, unknown>)['status'] = 'todo';
-        (item as Record<string, unknown>)['failCount'] = 0;
-        (item as Record<string, unknown>)['retriedAt'] = nowIso();
-        delete (item as Record<string, unknown>)['deadLetteredAt'];
+        item['status'] = 'todo';
+        item['failCount'] = 0;
+        item['retriedAt'] = nowIso();
+        delete item['deadLetteredAt'];
         state.tasks.push(item as unknown as TaskEntry);
         return item;
       },
@@ -1105,10 +1119,8 @@ export async function handleWriteRoute(ctx: WriteRouteCtx): Promise<boolean> {
   // ── Admin: Snapshot & Compaction ──────────────────────────────────────
 
   if (method === 'POST' && route === '/admin/compact') {
-    const result: Record<string, unknown> = _createSnapshot
-      ? _createSnapshot()
-      : { ok: false, error: 'Snapshots not available' };
-    if (result['ok']) {
+    const result: Record<string, unknown> = _createSnapshot();
+    if (result['ok'] === true) {
       const trimmed = truncateEventsFile(500);
       result['eventsTrimmed'] = trimmed;
     }
@@ -1124,6 +1136,7 @@ export async function handleWriteRoute(ctx: WriteRouteCtx): Promise<boolean> {
     setTimeout(() => {
       server.close(() => {
         ctx.writeStatus({ running: false, stoppedAt: nowIso() });
+        // eslint-disable-next-line n/no-process-exit -- server.close callback requires forced exit after cleanup
         process.exit(0);
       });
     }, 100);

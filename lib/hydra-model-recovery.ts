@@ -103,7 +103,7 @@ function extractResetSeconds(text: string) {
   if (dateMatch) {
     try {
       const resetDate = new Date(dateMatch[1]);
-      if (!isNaN(resetDate.getTime())) {
+      if (!Number.isNaN(resetDate.getTime())) {
         const seconds = Math.round((resetDate.getTime() - Date.now()) / 1000);
         if (seconds > 0) return seconds;
       }
@@ -126,13 +126,13 @@ const circuitState = new Map<string, CircuitState>(); // model → { failures: [
  * Opens the circuit if failures exceed threshold within window.
  * @param {string} model - Model ID that failed
  */
-export function recordModelFailure(model: string) {
-  if (!model) return;
+export function recordModelFailure(model: string): void {
+  if (model === '') return;
   const cfg = loadHydraConfig();
   const cbCfg =
     (((cfg as Record<string, unknown>)['modelRecovery'] as Record<string, unknown> | undefined)?.[
       'circuitBreaker'
-    ] as Record<string, unknown>) || {};
+    ] as Record<string, unknown> | undefined) ?? {};
   if (cbCfg['enabled'] === false) return;
 
   const threshold = (cbCfg['failureThreshold'] as number | undefined) ?? 5;
@@ -162,16 +162,16 @@ export function recordModelFailure(model: string) {
  * @returns {boolean}
  */
 export function isCircuitOpen(model: string): boolean {
-  if (!model) return false;
+  if (model === '') return false;
   const cfg = loadHydraConfig();
   const cbCfg =
     (((cfg as Record<string, unknown>)['modelRecovery'] as Record<string, unknown> | undefined)?.[
       'circuitBreaker'
-    ] as Record<string, unknown>) || {};
+    ] as Record<string, unknown> | undefined) ?? {};
   if (cbCfg['enabled'] === false) return false;
 
   const state = circuitState.get(model);
-  if (!state || !state.isOpen) return false;
+  if (state?.isOpen !== true) return false;
 
   // Auto-reset after window elapses
   const windowMs2 = (cbCfg['windowMs'] as number | undefined) ?? 300_000;
@@ -209,7 +209,7 @@ export function getCircuitState(): Record<
  * @param {string} [model] - Model ID, or undefined to reset all
  */
 export function resetCircuitBreaker(model?: string): void {
-  if (model) {
+  if (model != null && model !== '') {
     circuitState.delete(model);
   } else {
     circuitState.clear();
@@ -306,18 +306,24 @@ function extractModelFromError(text: string): string | null {
  * @param {object} result - executeAgent result: { ok, output, stderr, error }
  * @returns {{ isUsageLimit: boolean, resetInSeconds: number|null, errorMessage: string }}
  */
-export function detectUsageLimitError(_agent: string, result: Record<string, unknown>) {
-  if (!result || result['ok']) {
+export function detectUsageLimitError(
+  _agent: string,
+  result: Record<string, unknown>,
+): { isUsageLimit: boolean; resetInSeconds: number | null; errorMessage: string } {
+  // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition -- runtime callers may pass null despite types
+  if (result == null || result['ok'] === true) {
     return { isUsageLimit: false, resetInSeconds: null, errorMessage: '' };
   }
 
-  const sources = [result['stderr'] || '', result['output'] || '', result['error'] || ''].join(
-    '\n',
-  );
+  const sources = [
+    (result['stderr'] as string | undefined) ?? '',
+    (result['output'] as string | undefined) ?? '',
+    (result['error'] as string | undefined) ?? '',
+  ].join('\n');
 
   for (const pattern of USAGE_LIMIT_PATTERNS) {
     if (pattern.test(sources)) {
-      const matchLine = sources.split('\n').find((l) => pattern.test(l)) || sources.slice(0, 200);
+      const matchLine = sources.split('\n').find((l) => pattern.test(l)) ?? sources.slice(0, 200);
 
       // If the matched line mentions per-minute/per-hour/rate-limit language, it's a
       // transient rate limit (not an account-level quota) — skip this pattern so
@@ -352,11 +358,11 @@ export function detectUsageLimitError(_agent: string, result: Record<string, unk
  * @returns {string}
  */
 export function formatResetTime(resetInSeconds: number | null): string {
-  if (!resetInSeconds || resetInSeconds <= 0) return 'unknown';
+  if (resetInSeconds == null || resetInSeconds <= 0) return 'unknown';
   if (resetInSeconds >= 86400) return `${(resetInSeconds / 86400).toFixed(1)} days`;
   if (resetInSeconds >= 3600) return `${(resetInSeconds / 3600).toFixed(1)} hours`;
-  if (resetInSeconds >= 60) return `${Math.round(resetInSeconds / 60)} min`;
-  return `${resetInSeconds}s`;
+  if (resetInSeconds >= 60) return `${String(Math.round(resetInSeconds / 60))} min`;
+  return `${String(resetInSeconds)}s`;
 }
 
 /**
@@ -376,8 +382,11 @@ export function formatResetTime(resetInSeconds: number | null): string {
  * @param {string} [opts["hintText"]] - Error text from the agent, used to detect quota type
  * @returns {Promise<{ verified: boolean|'unknown', status?: number, reason?: string }>}
  */
-export async function verifyAgentQuota(agent: string, opts: Record<string, unknown> = {}) {
-  const hintText = opts['hintText'] || '';
+export async function verifyAgentQuota(
+  agent: string,
+  opts: Record<string, unknown> = {},
+): Promise<Record<string, unknown>> {
+  const hintText = opts['hintText'] ?? '';
   try {
     const agentDef = getAgent(agent);
     const apiKeyEnvMap: Record<string, string> = {
@@ -386,7 +395,7 @@ export async function verifyAgentQuota(agent: string, opts: Record<string, unkno
       gemini: 'GEMINI_API_KEY',
     };
     const apiKey =
-      process.env[apiKeyEnvMap[agent] ?? ''] ||
+      process.env[apiKeyEnvMap[agent] ?? ''] ??
       (agent === 'gemini' ? process.env['GOOGLE_API_KEY'] : null);
     if (agentDef?.quotaVerify) {
       const rawResult = await agentDef.quotaVerify(apiKey, { hintText });
@@ -394,13 +403,14 @@ export async function verifyAgentQuota(agent: string, opts: Record<string, unkno
         return { verified: 'unknown', reason: 'quota verification unavailable' };
       }
       if (!Object.prototype.hasOwnProperty.call(rawResult, 'verified')) {
-        return { ...rawResult, verified: 'unknown' };
+        return { ...rawResult, verified: 'unknown' as const };
       }
-      return rawResult;
+      return { ...rawResult };
     }
     return { verified: 'unknown', reason: `unknown agent: ${agent}` };
   } catch (err: unknown) {
-    return { verified: 'unknown', reason: (err as Error).message?.slice(0, 80) || 'network error' };
+    const errMsg = (err as Error).message.slice(0, 80);
+    return { verified: 'unknown', reason: errMsg === '' ? 'network error' : errMsg };
   }
 }
 
@@ -413,8 +423,12 @@ export async function verifyAgentQuota(agent: string, opts: Record<string, unkno
  * @param {object} result - executeAgent result: { ok, output, stderr, error }
  * @returns {{ isRateLimit: boolean, retryAfterMs: number|null, errorMessage: string }}
  */
-export function detectRateLimitError(agent: string, result: Record<string, unknown>) {
-  if (!result || result['ok']) {
+export function detectRateLimitError(
+  agent: string,
+  result: Record<string, unknown>,
+): { isRateLimit: boolean; retryAfterMs: number | null; errorMessage: string } {
+  // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition -- runtime callers may pass null despite types
+  if (result == null || result['ok'] === true) {
     return { isRateLimit: false, retryAfterMs: null, errorMessage: '' };
   }
 
@@ -424,14 +438,16 @@ export function detectRateLimitError(agent: string, result: Record<string, unkno
     return { isRateLimit: false, retryAfterMs: null, errorMessage: '' };
   }
 
-  const sources = [result['stderr'] || '', result['output'] || '', result['error'] || ''].join(
-    '\n',
-  );
+  const sources = [
+    (result['stderr'] as string | undefined) ?? '',
+    (result['output'] as string | undefined) ?? '',
+    (result['error'] as string | undefined) ?? '',
+  ].join('\n');
 
   for (const pattern of RATE_LIMIT_PATTERNS) {
     if (pattern.test(sources)) {
       const retryAfterMs = extractRetryAfterMs(sources);
-      const matchLine = sources.split('\n').find((l) => pattern.test(l)) || sources.slice(0, 200);
+      const matchLine = sources.split('\n').find((l) => pattern.test(l)) ?? sources.slice(0, 200);
       return {
         isRateLimit: true,
         retryAfterMs,
@@ -460,7 +476,7 @@ export function calculateBackoff(
   const { baseDelayMs = 5000, maxDelayMs = 60_000, retryAfterMs } = opts;
 
   // Honour server-suggested delay if present
-  if (retryAfterMs && retryAfterMs > 0) {
+  if (retryAfterMs != null && retryAfterMs > 0) {
     return Math.min(retryAfterMs, maxDelayMs);
   }
 
@@ -478,21 +494,26 @@ export function calculateBackoff(
  * @param {object} result - executeAgent result: { ok, output, stderr, error }
  * @returns {{ isModelError: boolean, failedModel: string|null, errorMessage: string }}
  */
-export function detectModelError(agent: string, result: Record<string, unknown>) {
-  if (!result || result['ok']) {
+export function detectModelError(
+  agent: string,
+  result: Record<string, unknown>,
+): { isModelError: boolean; failedModel: string | null; errorMessage: string } {
+  // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition -- runtime callers may pass null despite types
+  if (result == null || result['ok'] === true) {
     return { isModelError: false, failedModel: null, errorMessage: '' };
   }
 
-  // Combine all text sources to scan
-  const sources = [result['stderr'] || '', result['output'] || '', result['error'] || ''].join(
-    '\n',
-  );
+  const sources = [
+    (result['stderr'] as string | undefined) ?? '',
+    (result['output'] as string | undefined) ?? '',
+    (result['error'] as string | undefined) ?? '',
+  ].join('\n');
 
   for (const pattern of MODEL_ERROR_PATTERNS) {
     if (pattern.test(sources)) {
-      const failedModel = extractModelFromError(sources) || getActiveModel(agent) || null;
+      const failedModel = extractModelFromError(sources) ?? getActiveModel(agent) ?? null;
       // Find the matching line for a descriptive error message
-      const matchLine = sources.split('\n').find((l) => pattern.test(l)) || sources.slice(0, 200);
+      const matchLine = sources.split('\n').find((l) => pattern.test(l)) ?? sources.slice(0, 200);
       return {
         isModelError: true,
         failedModel,
@@ -519,27 +540,40 @@ export function detectModelError(agent: string, result: Record<string, unknown>)
  * @param {object} result - executeAgent result: { ok, output, stderr, error, exitCode, errorCategory }
  * @returns {{ isCodexError: boolean, category: string, errorMessage: string }}
  */
-export function detectCodexError(agent: string, result: Record<string, unknown>) {
-  if (!result || result['ok'] || agent !== 'codex') {
+export function detectCodexError(
+  agent: string,
+  result: Record<string, unknown>,
+): { isCodexError: boolean; category: string; errorMessage: string } {
+  // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition -- runtime callers may pass null despite types
+  if (result == null || result['ok'] === true || agent !== 'codex') {
     return { isCodexError: false, category: '', errorMessage: '' };
   }
 
   // If diagnoseAgentError already classified it, use that
-  if (result['errorCategory'] && result['errorCategory'] !== 'unclassified') {
+  if (
+    typeof result['errorCategory'] === 'string' &&
+    result['errorCategory'] !== '' &&
+    result['errorCategory'] !== 'unclassified'
+  ) {
     return {
       isCodexError: true,
       category: result['errorCategory'],
-      errorMessage: result['errorDetail'] || result['error'] || '',
+      errorMessage:
+        (result['errorDetail'] as string | undefined) ??
+        (result['error'] as string | undefined) ??
+        '',
     };
   }
 
-  const sources = [result['stderr'] || '', result['output'] || '', result['error'] || ''].join(
-    '\n',
-  );
+  const sources = [
+    (result['stderr'] as string | undefined) ?? '',
+    (result['output'] as string | undefined) ?? '',
+    (result['error'] as string | undefined) ?? '',
+  ].join('\n');
 
   for (const { pattern, category } of CODEX_ERROR_PATTERNS) {
     if (pattern.test(sources)) {
-      const matchLine = sources.split('\n').find((l) => pattern.test(l)) || sources.slice(0, 200);
+      const matchLine = sources.split('\n').find((l) => pattern.test(l)) ?? sources.slice(0, 200);
       return {
         isCodexError: true,
         category,
@@ -550,13 +584,14 @@ export function detectCodexError(agent: string, result: Record<string, unknown>)
 
   // Empty output with non-zero exit or signal = silent crash
   if (
-    ((result['exitCode'] as number | null | undefined) !== 0 || result['signal']) &&
-    !String(result['output'] ?? '').trim() &&
-    !String(result['stderr'] ?? '').trim()
+    ((result['exitCode'] as number | null | undefined) !== 0 || result['signal'] != null) &&
+    ((result['output'] as string | undefined) ?? '').trim() === '' &&
+    ((result['stderr'] as string | undefined) ?? '').trim() === ''
   ) {
-    const reason = result['signal']
-      ? `signal ${result['signal']}`
-      : `code ${result['exitCode'] as number | null | undefined}`;
+    const reason =
+      result['signal'] == null
+        ? `code ${String((result['exitCode'] as number | null) ?? '')}`
+        : `signal ${(result['signal'] as string | null) ?? ''}`;
     return {
       isCodexError: true,
       category: 'silent-crash',
@@ -565,31 +600,33 @@ export function detectCodexError(agent: string, result: Record<string, unknown>)
   }
 
   // Handle signal-based aborts even if there was some output
-  if (result['signal'] && !result['ok']) {
+  if (result['signal'] != null && result['ok'] !== true) {
     return {
       isCodexError: true,
       category: 'signal',
-      errorMessage: `Codex aborted by signal ${result['signal']}`,
+      errorMessage: `Codex aborted by signal ${(result['signal'] as string | null) ?? ''}`,
     };
   }
 
   // Catch-all: non-zero exit or null exit with stderr, that didn't match any known pattern.
   // Instead of returning false (which loses the error to "unclassified" limbo),
   // classify it as a Codex-specific unknown error with rich diagnostic context.
-  const hasOutput = String(result['stderr'] ?? '').trim() || String(result['output'] ?? '').trim();
+  const hasOutput =
+    ((result['stderr'] as string | undefined) ?? '').trim() !== '' ||
+    ((result['output'] as string | undefined) ?? '').trim() !== '';
   if (
     ((result['exitCode'] as number | null | undefined) !== 0 ||
       ((result['exitCode'] as number | null | undefined) === null && hasOutput)) &&
     (result['exitCode'] as number | null | undefined) !== undefined
   ) {
     // Gather the best diagnostic context available
-    const stderrTail = String(result['stderr'] ?? '')
+    const stderrTail = ((result['stderr'] as string | undefined) ?? '')
       .trim()
       .split('\n')
       .slice(-5)
       .join(' | ')
       .slice(0, 300);
-    const errorTail = String(result['error'] ?? '').slice(0, 200);
+    const errorTail = ((result['error'] as string | undefined) ?? '').slice(0, 200);
     // Check for JSONL error events in raw stdout
     const jsonlErrors = extractCodexErrorsFromResult(result);
     const jsonlContext =
@@ -598,15 +635,16 @@ export function detectCodexError(agent: string, result: Record<string, unknown>)
     const exitInfo =
       (result['exitCode'] as number | null | undefined) === null
         ? 'terminated'
-        : `exit ${result['exitCode'] as number | null | undefined}`;
+        : `exit ${String((result['exitCode'] as number | null) ?? '')}`;
     return {
       isCodexError: true,
       category: 'codex-unknown',
-      errorMessage:
-        `Codex ${exitInfo}: ${stderrTail || errorTail || 'no context'}${jsonlContext}`.slice(
-          0,
-          500,
-        ),
+      errorMessage: (() => {
+        let diagCtx = 'no context';
+        if (stderrTail !== '') diagCtx = stderrTail;
+        else if (errorTail !== '') diagCtx = errorTail;
+        return `Codex ${exitInfo}: ${diagCtx}${jsonlContext}`.slice(0, 500);
+      })(),
     };
   }
 
@@ -621,17 +659,22 @@ export function detectCodexError(agent: string, result: Record<string, unknown>)
  */
 function extractCodexErrorsFromResult(result: Record<string, unknown>): string[] {
   const raw =
-    (result['stdout'] as string | undefined) || (result['output'] as string | undefined) || '';
-  if (!raw || typeof raw !== 'string') return [];
-  const errors = [];
+    (result['stdout'] as string | undefined) ?? (result['output'] as string | undefined) ?? '';
+  if (raw === '') return [];
+  const errors: string[] = [];
   for (const line of raw.split('\n')) {
     const trimmed = line.trim();
-    if (!trimmed || trimmed[0] !== '{') continue;
+    if (!trimmed.startsWith('{')) continue;
     try {
-      const obj = JSON.parse(trimmed);
-      if (obj.type === 'error' && obj.message) errors.push(obj.message);
-      else if (obj.error?.message) errors.push(obj.error.message);
-      else if (obj.error && typeof obj.error === 'string') errors.push(obj.error);
+      const obj = JSON.parse(trimmed) as { type?: unknown; message?: unknown; error?: unknown };
+      if (obj.type === 'error' && typeof obj.message === 'string') errors.push(obj.message);
+      else if (
+        obj.error != null &&
+        typeof obj.error === 'object' &&
+        typeof (obj.error as Record<string, unknown>)['message'] === 'string'
+      )
+        errors.push((obj.error as Record<string, unknown>)['message'] as string);
+      else if (typeof obj.error === 'string' && obj.error !== '') errors.push(obj.error);
     } catch {
       /* skip non-JSON */
     }
@@ -653,28 +696,33 @@ export function getFallbackCandidates(
   failedModel: string,
 ): Array<{ id: string; label: string; source: string; qualityScore?: number }> {
   const cfg = loadHydraConfig();
-  const agentModels =
+  const agentModels: Partial<Record<string, string>> =
     (
       (cfg as Record<string, unknown>)['models'] as
         | Record<string, Record<string, string>>
         | undefined
-    )?.[agent] || {};
+    )?.[agent] ?? {};
   const aliases =
     (
       (cfg as Record<string, unknown>)['aliases'] as
         | Record<string, Record<string, string>>
         | undefined
-    )?.[agent] || {};
+    )?.[agent] ?? {};
 
   const seen = new Set<string>();
-  const failed = (failedModel || '').toLowerCase();
+  const failed = failedModel.toLowerCase();
   const candidates: Array<{ id: string; label: string; source: string; qualityScore?: number }> =
     [];
 
   // 1. Config presets in priority order
   for (const preset of ['default', 'fast', 'cheap']) {
     const modelId = agentModels[preset];
-    if (modelId && modelId.toLowerCase() !== failed && !seen.has(modelId.toLowerCase())) {
+    if (
+      modelId != null &&
+      modelId !== '' &&
+      modelId.toLowerCase() !== failed &&
+      !seen.has(modelId.toLowerCase())
+    ) {
       seen.add(modelId.toLowerCase());
       const profile = getProfile(modelId);
       candidates.push({
@@ -688,7 +736,7 @@ export function getFallbackCandidates(
 
   // 2. Aliases (deduplicated)
   for (const [alias, modelId] of Object.entries(aliases)) {
-    if (modelId && modelId.toLowerCase() !== failed && !seen.has(modelId.toLowerCase())) {
+    if (modelId !== '' && modelId.toLowerCase() !== failed && !seen.has(modelId.toLowerCase())) {
       seen.add(modelId.toLowerCase());
       const profile = getProfile(modelId);
       candidates.push({
@@ -726,10 +774,10 @@ export async function recoverFromModelError(
   agent: string,
   failedModel: string,
   opts: Record<string, unknown> = {},
-) {
+): Promise<{ recovered: boolean; newModel: string | null }> {
   const cfg = loadHydraConfig();
   const recoveryCfg =
-    ((cfg as Record<string, unknown>)['modelRecovery'] as Record<string, unknown> | undefined) ||
+    ((cfg as Record<string, unknown>)['modelRecovery'] as Record<string, unknown> | undefined) ??
     {};
 
   if (recoveryCfg['enabled'] === false) {
@@ -741,9 +789,9 @@ export async function recoverFromModelError(
     return { recovered: false, newModel: null };
   }
 
-  const isInteractive = opts['rl'] && process.stdout.isTTY;
+  const isInteractive = opts['rl'] != null && process.stdout.isTTY;
 
-  let selected = null;
+  let selected: string | null | undefined;
 
   if (isInteractive) {
     // Interactive mode — use promptChoice if available
@@ -756,11 +804,11 @@ export async function recoverFromModelError(
       options.push('Skip (disable agent)');
 
       const result = await promptChoice(opts['rl'] as object, {
-        title: `Model error: ${failedModel || 'unknown'} is unavailable for ${agent}`,
-        context: { 'Failed model': failedModel || 'unknown', Agent: agent },
+        title: `Model error: ${failedModel === '' ? 'unknown' : failedModel} is unavailable for ${agent}`,
+        context: { 'Failed model': failedModel === '' ? 'unknown' : failedModel, Agent: agent },
         choices: options,
       });
-      const value = (result as { value?: string })?.value;
+      const value = (result as { value?: string }).value;
 
       if (value === 'Skip (disable agent)') {
         return { recovered: false, newModel: null };
@@ -769,7 +817,7 @@ export async function recoverFromModelError(
       if (value === 'Browse all models...') {
         // Delegate to full model picker
         const pickedModel = await pickModel(agent);
-        if (pickedModel) {
+        if (pickedModel != null && pickedModel !== '') {
           selected = pickedModel;
         } else {
           return { recovered: false, newModel: null };
@@ -791,7 +839,7 @@ export async function recoverFromModelError(
     selected = candidates[0].id;
   }
 
-  if (!selected) {
+  if (selected == null || selected === '') {
     return { recovered: false, newModel: null };
   }
 
@@ -807,7 +855,7 @@ export async function recoverFromModelError(
  * Check whether model recovery is enabled in config.
  * @returns {boolean}
  */
-export function isModelRecoveryEnabled() {
+export function isModelRecoveryEnabled(): boolean {
   const cfg = loadHydraConfig();
   return (
     ((cfg as Record<string, unknown>)['modelRecovery'] as Record<string, unknown> | undefined)?.[

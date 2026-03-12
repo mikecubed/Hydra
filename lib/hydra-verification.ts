@@ -1,4 +1,3 @@
-#!/usr/bin/env node
 /**
  * Hydra verification command resolution.
  *
@@ -94,7 +93,7 @@ export function chooseAutoVerificationCommand(
   // If there's a test script, use it as a safe Node default.
   // Skip the npm-init placeholder: echo "Error: no test specified" && exit 1
   if (scripts['test']) {
-    const raw = String(scripts['test']).trim();
+    const raw = (scripts['test'] ?? '').trim();
     const isPlaceholder = /no test specified/i.test(raw) && /\bexit\s+1\b/i.test(raw);
     if (!isPlaceholder) {
       return { command: 'npm test', reason: 'Detected package.json script: test' };
@@ -121,7 +120,8 @@ export function chooseAutoVerificationCommand(
 }
 
 function parseTimeoutMs(value: unknown): number {
-  const parsed = Number.parseInt(String(value ?? ''), 10);
+  const parsed =
+    typeof value === 'number' ? value : Number.parseInt(typeof value === 'string' ? value : '', 10);
   if (!Number.isFinite(parsed) || parsed <= 0) {
     return DEFAULT_TIMEOUT_MS;
   }
@@ -133,8 +133,7 @@ export function resolveVerificationPlan(
   hydraConfig: Record<string, unknown> = loadHydraConfig() as Record<string, unknown>,
   signalsOverride: ProjectSignals | null = null,
 ): VerificationPlan {
-  const cfg: Record<string, unknown> =
-    hydraConfig && typeof hydraConfig === 'object' ? hydraConfig : {};
+  const cfg: Record<string, unknown> = hydraConfig;
   const verificationCfg =
     cfg['verification'] && typeof cfg['verification'] === 'object'
       ? (cfg['verification'] as Record<string, unknown>)
@@ -142,7 +141,8 @@ export function resolveVerificationPlan(
 
   const onTaskDone = verificationCfg['onTaskDone'] !== false;
   const timeoutMs = parseTimeoutMs(verificationCfg['timeoutMs']);
-  const rawCommand = String(verificationCfg['command'] ?? 'auto').trim();
+  const cmdValue = verificationCfg['command'];
+  const rawCommand = (typeof cmdValue === 'string' ? cmdValue : 'auto').trim();
   const lowered = rawCommand.toLowerCase();
 
   if (!onTaskDone) {
@@ -184,7 +184,7 @@ export function resolveVerificationPlan(
     };
   }
 
-  const signals = signalsOverride || collectProjectSignals(projectRoot);
+  const signals = signalsOverride ?? collectProjectSignals(projectRoot);
   const detected = chooseAutoVerificationCommand(signals);
   if (!detected) {
     return {

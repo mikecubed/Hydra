@@ -38,6 +38,25 @@ import {
 import { isGhAvailable } from './hydra-github.ts';
 import pc from 'picocolors';
 
+interface ReportEntry {
+  branch?: string;
+  status?: string;
+  agent?: string;
+  source?: string;
+  taskType?: string;
+  tokensUsed?: number;
+  verification?: string;
+  violations?: Array<{ severity: string; detail: string }>;
+}
+interface NightlyResult {
+  status?: string;
+  agent?: string;
+  slug?: string;
+}
+interface ReportBudget {
+  consumed?: number;
+}
+
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
 function hasBaseAdvanced(projectRoot: string, branch: string, baseBranch: string) {
@@ -52,12 +71,13 @@ function hasBaseAdvanced(projectRoot: string, branch: string, baseBranch: string
 // ── Review Command ──────────────────────────────────────────────────────────
 
 async function reviewCommand(projectRoot: string, options: Record<string, string | boolean>) {
-  const dateFilter = (options['date'] as string) || null;
+  const dateFilter =
+    typeof options['date'] === 'string' && options['date'].length > 0 ? options['date'] : null;
   const branches = listBranches(projectRoot, 'nightly', dateFilter);
 
   if (branches.length === 0) {
     console.log(pc.yellow('No nightly branches found.'));
-    if (dateFilter) console.log(pc.dim(`  Filter: nightly/${dateFilter}/*`));
+    if (dateFilter !== null) console.log(pc.dim(`  Filter: nightly/${dateFilter}/*`));
     return;
   }
 
@@ -83,26 +103,26 @@ async function reviewCommand(projectRoot: string, options: Record<string, string
   let skipped = 0;
 
   for (const branch of branches) {
-    const reportEntry = (reportData?.['results'] as any[] | undefined)?.find(
-      (r: Record<string, unknown>) => r['branch'] === branch,
+    const reportEntry = (reportData?.['results'] as ReportEntry[] | undefined)?.find(
+      (r: ReportEntry) => r.branch === branch,
     );
 
     console.log(pc.bold(pc.cyan(`\n── ${branch} ──`)));
 
     // Show report info if available
-    if (reportEntry) {
+    if (reportEntry != null) {
       const statusColor = reportEntry.status === 'success' ? pc.green : pc.yellow;
-      console.log(`  Status: ${statusColor(reportEntry.status.toUpperCase())}`);
-      console.log(`  Agent: ${reportEntry.agent || 'claude'}`);
-      if (reportEntry.source)
+      console.log(`  Status: ${statusColor((reportEntry.status ?? '').toUpperCase())}`);
+      console.log(`  Agent: ${reportEntry.agent ?? 'claude'}`);
+      if (reportEntry.source != null && reportEntry.source.length > 0)
         console.log(
-          `  Source: ${reportEntry.source}${reportEntry.taskType ? ` (${reportEntry.taskType})` : ''}`,
+          `  Source: ${reportEntry.source}${reportEntry.taskType != null && reportEntry.taskType.length > 0 ? ` (${reportEntry.taskType})` : ''}`,
         );
-      if (reportEntry.tokensUsed)
+      if (reportEntry.tokensUsed != null && reportEntry.tokensUsed > 0)
         console.log(`  Tokens: ~${reportEntry.tokensUsed.toLocaleString()}`);
-      console.log(`  Verification: ${reportEntry.verification || '?'}`);
-      if (reportEntry.violations?.length > 0) {
-        console.log(pc.red(`  Violations: ${reportEntry.violations.length}`));
+      console.log(`  Verification: ${reportEntry.verification ?? '?'}`);
+      if (reportEntry.violations != null && reportEntry.violations.length > 0) {
+        console.log(pc.red(`  Violations: ${String(reportEntry.violations.length)}`));
         for (const v of reportEntry.violations) {
           console.log(pc.red(`    [${v.severity}] ${v.detail}`));
         }
@@ -121,7 +141,8 @@ async function reviewCommand(projectRoot: string, options: Record<string, string
     // Show diff stat and commit log
     const { commitLog } = displayBranchInfo(projectRoot, branch, baseBranch);
 
-    if (!commitLog) {
+    if (commitLog.length === 0) {
+      // eslint-disable-next-line no-await-in-loop -- sequential interactive user prompts
       await handleEmptyBranch(rl, projectRoot, branch);
       continue;
     }
@@ -132,8 +153,11 @@ async function reviewCommand(projectRoot: string, options: Record<string, string
       protectedFiles: new Set(BASE_PROTECTED_FILES),
       protectedPatterns: [...BASE_PROTECTED_PATTERNS],
     });
-    if (liveViolations.length > 0 && !reportEntry?.violations?.length) {
-      console.log(pc.red(`\n  Live violation scan: ${liveViolations.length} issue(s)`));
+    if (
+      liveViolations.length > 0 &&
+      !(reportEntry?.violations != null && reportEntry.violations.length > 0)
+    ) {
+      console.log(pc.red(`\n  Live violation scan: ${String(liveViolations.length)} issue(s)`));
       for (const v of liveViolations) {
         console.log(pc.red(`    [${v.severity}] ${v.detail}`));
       }
@@ -141,6 +165,7 @@ async function reviewCommand(projectRoot: string, options: Record<string, string
 
     // Prompt: merge / skip / diff / delete / pr
     console.log('');
+    // eslint-disable-next-line no-await-in-loop -- sequential interactive user prompts
     const result = await handleBranchAction(rl, projectRoot, branch, baseBranch, {
       enablePR: isGhAvailable(),
       useSmartMerge: true,
@@ -150,13 +175,14 @@ async function reviewCommand(projectRoot: string, options: Record<string, string
   }
 
   rl.close();
-  console.log(pc.bold(`\nDone: ${merged} merged, ${skipped} skipped`));
+  console.log(pc.bold(`\nDone: ${String(merged)} merged, ${String(skipped)} skipped`));
 }
 
 // ── Status Command ──────────────────────────────────────────────────────────
 
 function statusCommand(projectRoot: string, options: Record<string, string | boolean>) {
-  const dateFilter = (options['date'] as string) || null;
+  const dateFilter =
+    typeof options['date'] === 'string' && options['date'].length > 0 ? options['date'] : null;
   const branches = listBranches(projectRoot, 'nightly', dateFilter);
 
   // Load report first to determine baseBranch
@@ -165,7 +191,7 @@ function statusCommand(projectRoot: string, options: Record<string, string | boo
     string,
     unknown
   > | null;
-  const baseBranch = (report?.['baseBranch'] as string | undefined) || 'dev';
+  const baseBranch = (report?.['baseBranch'] as string | undefined) ?? 'dev';
 
   console.log(pc.bold('\nNightly Status'));
 
@@ -173,34 +199,41 @@ function statusCommand(projectRoot: string, options: Record<string, string | boo
   if (branches.length === 0) {
     console.log(pc.dim('  No nightly branches found.'));
   } else {
-    console.log(`\n  Branches (${branches.length}):`);
+    console.log(`\n  Branches (${String(branches.length)}):`);
     for (const b of branches) {
       const branchLog = getBranchLog(projectRoot, b, baseBranch);
-      const commitCount = branchLog ? branchLog.split('\n').length : 0;
-      console.log(`    ${b} (${commitCount} commit${commitCount === 1 ? '' : 's'})`);
+      const commitCount = branchLog.length > 0 ? branchLog.split('\n').length : 0;
+      console.log(`    ${b} (${String(commitCount)} commit${commitCount === 1 ? '' : 's'})`);
     }
   }
-  if (report) {
-    console.log(`\n  Latest Report: ${report['date']}`);
-    console.log(`  Tasks: ${report['processedTasks']}/${report['totalTasks']}`);
-    if (report['stopReason']) console.log(`  Stopped: ${report['stopReason']}`);
-    console.log(`  Tokens: ~${(report['budget'] as any)?.consumed?.toLocaleString() || '?'}`);
+  if (report == null) {
+    console.log(pc.dim('\n  No nightly report found.'));
+  } else {
+    console.log(`\n  Latest Report: ${(report['date'] as string | undefined) ?? ''}`);
+    console.log(
+      `  Tasks: ${String((report['processedTasks'] as string | number | undefined) ?? '')}/${String((report['totalTasks'] as string | number | undefined) ?? '')}`,
+    );
+    if (report['stopReason'] != null)
+      console.log(`  Stopped: ${(report['stopReason'] as string | undefined) ?? ''}`);
+    console.log(
+      `  Tokens: ~${(report['budget'] as ReportBudget | undefined)?.consumed?.toLocaleString() ?? '?'}`,
+    );
 
-    if (report['results']) {
+    if (report['results'] != null) {
       console.log('');
-      for (const r of report['results'] as any[]) {
-        const icon =
-          r.status === 'success'
-            ? pc.green('✓')
-            : r.status === 'partial'
-              ? pc.yellow('~')
-              : pc.red('✗');
-        const agentTag = r.agent === 'claude' ? '' : pc.dim(` [${r.agent}]`);
-        console.log(`    ${icon} ${r.slug} — ${r.status}${agentTag}`);
+      for (const r of report['results'] as NightlyResult[]) {
+        let icon: string;
+        if (r.status === 'success') {
+          icon = pc.green('✓');
+        } else if (r.status === 'partial') {
+          icon = pc.yellow('~');
+        } else {
+          icon = pc.red('✗');
+        }
+        const agentTag = r.agent === 'claude' ? '' : pc.dim(` [${r.agent ?? ''}]`);
+        console.log(`    ${icon} ${r.slug ?? ''} — ${r.status ?? ''}${agentTag}`);
       }
     }
-  } else {
-    console.log(pc.dim('\n  No nightly report found.'));
   }
 
   console.log('');
@@ -210,31 +243,39 @@ function statusCommand(projectRoot: string, options: Record<string, string | boo
 
 function cleanCommand(projectRoot: string, options: Record<string, string | boolean>) {
   const nightlyDir = path.join(projectRoot, 'docs', 'coordination', 'nightly');
-  const report = loadLatestReport(
-    nightlyDir,
-    'NIGHTLY',
-    (options['date'] as string) || null,
-  ) as Record<string, unknown> | null;
-  const baseBranch = (report?.['baseBranch'] as string | undefined) || 'dev';
-  cleanBranches(projectRoot, 'nightly', baseBranch, (options['date'] as string) || null);
+  const dateOpt =
+    typeof options['date'] === 'string' && options['date'].length > 0 ? options['date'] : null;
+  const report = loadLatestReport(nightlyDir, 'NIGHTLY', dateOpt) as Record<string, unknown> | null;
+  const baseBranch = (report?.['baseBranch'] as string | undefined) ?? 'dev';
+
+  cleanBranches(projectRoot, 'nightly', baseBranch, dateOpt);
 }
 
 // ── Main ────────────────────────────────────────────────────────────────────
 
 async function main() {
   const { options, positionals } = parseArgs(process.argv);
-  const command = positionals[0] || options['command'] || 'status';
+  let command = 'status';
+  if (positionals.length > 0 && positionals[0].length > 0) {
+    command = positionals[0];
+  } else if (typeof options['command'] === 'string' && options['command'].length > 0) {
+    command = options['command'];
+  }
 
   let config;
   try {
     config = resolveProject({
-      project: options['project'] ? String(options['project']) : undefined,
+      project:
+        typeof options['project'] === 'string' && options['project'].length > 0
+          ? options['project']
+          : undefined,
     });
   } catch (err: unknown) {
     console.error(
       pc.red(`Project resolution failed: ${err instanceof Error ? err.message : String(err)}`),
     );
-    process.exit(1);
+    process.exitCode = 1;
+    return;
   }
 
   const { projectRoot } = config;
@@ -252,11 +293,12 @@ async function main() {
     default:
       console.error(pc.red(`Unknown command: ${command}`));
       console.error('Usage: hydra-nightly-review.mjs [review|status|clean]');
-      process.exit(1);
+      process.exitCode = 1;
   }
 }
 
-main().catch((err) => {
-  console.error(pc.red(`Fatal: ${err.message}`));
+main().catch((err: unknown) => {
+  console.error(pc.red(`Fatal: ${err instanceof Error ? err.message : String(err)}`));
+  // eslint-disable-next-line n/no-process-exit -- inside .catch() callback; return does not propagate
   process.exit(1);
 });

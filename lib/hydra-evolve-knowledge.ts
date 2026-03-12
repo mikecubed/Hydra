@@ -70,7 +70,7 @@ export function loadKnowledgeBase(evolveDir: string): KnowledgeBase {
   try {
     const raw = fs.readFileSync(filePath, 'utf8');
     const parsed = JSON.parse(raw) as KnowledgeBase;
-    if (!parsed.entries || !Array.isArray(parsed.entries)) {
+    if (!Array.isArray(parsed.entries)) {
       return { ...EMPTY_KB };
     }
     return parsed;
@@ -100,7 +100,7 @@ export function saveKnowledgeBase(evolveDir: string, kb: KnowledgeBase): void {
 function nextId(entries: KBEntry[]) {
   if (entries.length === 0) return 'KB_001';
   const maxNum = entries.reduce((max: number, e: KBEntry) => {
-    const m = (e.id || '').match(/^KB_(\d+)$/);
+    const m = (e.id ?? '').match(/^KB_(\d+)$/);
     return m ? Math.max(max, Number.parseInt(m[1], 10)) : max;
   }, 0);
   return `KB_${String(maxNum + 1).padStart(3, '0')}`;
@@ -121,7 +121,7 @@ function isTooSimilar(existingEntries: KBEntry[], newFinding: string, threshold 
 
   for (const entry of existingEntries) {
     const existingWords = new Set(
-      (entry.finding || '')
+      (entry.finding ?? '')
         .toLowerCase()
         .split(/\s+/)
         .filter((w: string) => w.length > 3),
@@ -158,24 +158,28 @@ function isTooSimilar(existingEntries: KBEntry[], newFinding: string, threshold 
  */
 export function addEntry(kb: KnowledgeBase, entry: KBEntry): KBEntry | null {
   // Dedup check
-  if (entry.finding && isTooSimilar(kb.entries, entry.finding)) {
+  if (
+    entry.finding !== undefined &&
+    entry.finding !== '' &&
+    isTooSimilar(kb.entries, entry.finding)
+  ) {
     return null;
   }
 
   const id = nextId(kb.entries);
   const fullEntry = {
     id,
-    round: entry.round || 0,
-    date: entry.date || new Date().toISOString().split('T')[0],
-    area: entry.area || 'unknown',
-    finding: entry.finding || '',
-    applicability: entry.applicability || 'medium',
-    attempted: entry.attempted || false,
-    outcome: entry.outcome || null,
-    score: entry.score || null,
-    learnings: entry.learnings || '',
-    relatedEntries: entry.relatedEntries || [],
-    tags: entry.tags || [],
+    round: entry.round ?? 0,
+    date: entry.date ?? new Date().toISOString().split('T')[0],
+    area: entry.area ?? 'unknown',
+    finding: entry.finding ?? '',
+    applicability: entry.applicability ?? 'medium',
+    attempted: entry.attempted ?? false,
+    outcome: entry.outcome ?? null,
+    score: entry.score ?? null,
+    learnings: entry.learnings ?? '',
+    relatedEntries: entry.relatedEntries ?? [],
+    tags: entry.tags ?? [],
   };
 
   kb.entries.push(fullEntry);
@@ -217,26 +221,26 @@ export function searchEntries(kb: KnowledgeBase, query?: string, tags?: string[]
   if (tags && tags.length > 0) {
     const tagSet = new Set(tags.map((t: string) => t.toLowerCase()));
     results = results.filter((e) =>
-      (e.tags || []).some((t: string) => tagSet.has(t.toLowerCase())),
+      (e.tags ?? []).some((t: string) => tagSet.has(t.toLowerCase())),
     );
   }
 
-  if (query) {
+  if (query !== undefined && query !== '') {
     const q = query.toLowerCase();
     results = results.filter(
       (e) =>
-        (e.finding || '').toLowerCase().includes(q) ||
-        (e.area || '').toLowerCase().includes(q) ||
-        (e.learnings || '').toLowerCase().includes(q) ||
-        (e.tags || []).some((t: string) => t.toLowerCase().includes(q)),
+        (e.finding ?? '').toLowerCase().includes(q) ||
+        (e.area ?? '').toLowerCase().includes(q) ||
+        (e.learnings ?? '').toLowerCase().includes(q) ||
+        (e.tags ?? []).some((t: string) => t.toLowerCase().includes(q)),
     );
   }
 
   // Sort: attempted+outcome entries first, then by date descending
   results.sort((a: KBEntry, b: KBEntry) => {
-    if (a.attempted && !b.attempted) return -1;
-    if (!a.attempted && b.attempted) return 1;
-    return (b.date || '').localeCompare(a.date || '');
+    if (a.attempted === true && b.attempted !== true) return -1;
+    if (a.attempted !== true && b.attempted === true) return 1;
+    return (b.date ?? '').localeCompare(a.date ?? '');
   });
 
   return results;
@@ -255,10 +259,14 @@ export function getPriorLearnings(kb: KnowledgeBase, area: string): KBEntry[] {
     .filter(
       (e) =>
         e.area === area ||
-        (e.tags || []).some((t: string) => t.toLowerCase() === area.toLowerCase()),
+        (e.tags ?? []).some((t: string) => t.toLowerCase() === area.toLowerCase()),
     )
-    .filter((e) => e.learnings || e.outcome)
-    .sort((a, b) => (b.date || '').localeCompare(a.date || ''));
+    .filter(
+      (e) =>
+        (e.learnings !== undefined && e.learnings !== '') ||
+        (e.outcome != null && e.outcome !== ''),
+    )
+    .sort((a, b) => (b.date ?? '').localeCompare(a.date ?? ''));
 }
 
 // ── Stats ───────────────────────────────────────────────────────────────────
@@ -268,7 +276,7 @@ export function getPriorLearnings(kb: KnowledgeBase, area: string): KBEntry[] {
  */
 function computeStats(entries: KBEntry[]) {
   const totalResearched = entries.length;
-  const totalAttempted = entries.filter((e: KBEntry) => e.attempted).length;
+  const totalAttempted = entries.filter((e: KBEntry) => e.attempted === true).length;
   const totalApproved = entries.filter((e: KBEntry) => e.outcome === 'approve').length;
   const totalRejected = entries.filter((e: KBEntry) => e.outcome === 'reject').length;
   const totalRevised = entries.filter((e: KBEntry) => e.outcome === 'revise').length;
@@ -276,8 +284,8 @@ function computeStats(entries: KBEntry[]) {
   // Top areas by entry count
   const areaCounts: Record<string, number> = {};
   for (const e of entries) {
-    const area = e.area || 'unknown';
-    areaCounts[area] = (areaCounts[area] || 0) + 1;
+    const area = e.area ?? 'unknown';
+    areaCounts[area] = (areaCounts[area] ?? 0) + 1;
   }
   const topAreas = Object.entries(areaCounts)
     .sort((a: [string, number], b: [string, number]) => b[1] - a[1])
@@ -300,7 +308,7 @@ function computeStats(entries: KBEntry[]) {
  * @param {object} kb - Knowledge base object
  * @returns {object} Stats summary
  */
-export function getStats(kb: KnowledgeBase) {
+export function getStats(kb: KnowledgeBase): ReturnType<typeof computeStats> {
   return computeStats(kb.entries);
 }
 
@@ -313,10 +321,12 @@ export function getStats(kb: KnowledgeBase) {
 export function formatStatsForPrompt(kb: KnowledgeBase): string {
   const stats = computeStats(kb.entries);
   const lines = [
-    `Knowledge Base: ${stats.totalResearched} findings, ${stats.totalAttempted} attempted, ${stats.totalApproved} approved, ${stats.totalRejected} rejected`,
+    `Knowledge Base: ${String(stats.totalResearched)} findings, ${String(stats.totalAttempted)} attempted, ${String(stats.totalApproved)} approved, ${String(stats.totalRejected)} rejected`,
   ];
   if (stats.topAreas.length > 0) {
-    lines.push(`Top areas: ${stats.topAreas.map((a) => `${a.area}(${a.count})`).join(', ')}`);
+    lines.push(
+      `Top areas: ${stats.topAreas.map((a) => `${a.area}(${String(a.count)})`).join(', ')}`,
+    );
   }
   return lines.join('\n');
 }
