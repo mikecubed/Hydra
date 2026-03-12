@@ -426,8 +426,8 @@ export function findScopedContextFiles(
  * @param {string}   rootDir - Project root for computing relative display paths
  * @returns {string} Combined context string, or '' if files is empty
  */
-export function compileHierarchicalContext(files: string[], rootDir: string): string {
-  if (files.length === 0) return '';
+export function compileHierarchicalContext(files: string[] | null, rootDir: string): string {
+  if (files == null || files.length === 0) return '';
 
   const absRoot = path.resolve(rootDir);
   const sections = [];
