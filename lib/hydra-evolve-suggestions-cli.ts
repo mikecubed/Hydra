@@ -74,8 +74,8 @@ function formatEntry(s: SuggestionEntry) {
 
   const parts = [`status: ${statusColor(s.status ?? '')}`, `priority: ${priorityBadge}`];
   if ((s.attempts ?? 0) > 0) {
-    parts.push(`attempts: ${s.attempts}/${s.maxAttempts}`);
-    if (s.lastAttemptScore != null) parts.push(`last: ${s.lastAttemptScore}/10`);
+    parts.push(`attempts: ${String(s.attempts ?? 0)}/${String(s.maxAttempts ?? 0)}`);
+    if (s.lastAttemptScore != null) parts.push(`last: ${String(s.lastAttemptScore)}/10`);
   }
   if (s.specPath) parts.push('has spec');
   if (s.source) parts.push(`source: ${s.source}`);
@@ -110,8 +110,8 @@ function listCommand(evolveDir: string, options: Record<string, string | boolean
         : getPendingSuggestions(sg);
   }
 
-  const label = statusFilter === 'all' ? 'all' : statusFilter || 'pending';
-  console.log(pc.bold(`\nSuggestions — ${entries.length} ${label}\n`));
+  const label = statusFilter === 'all' ? 'all' : statusFilter ?? 'pending';
+  console.log(pc.bold(`\nSuggestions — ${String(entries.length)} ${label}\n`));
 
   if (entries.length === 0) {
     console.log(pc.dim('  No suggestions found.'));
@@ -136,7 +136,7 @@ async function addCommand(evolveDir: string, options: Record<string, string | bo
   // Interactive mode if title not provided
   if (!title) {
     const cfg = loadHydraConfig();
-    const focusAreas = cfg.evolve?.focusAreas || [];
+    const focusAreas = cfg.evolve?.focusAreas ?? [];
 
     const rl = createRL();
     try {
@@ -172,7 +172,7 @@ async function addCommand(evolveDir: string, options: Record<string, string | bo
 
   if (created) {
     saveSuggestions(evolveDir, sg);
-    console.log(pc.green(`\n  + Created: ${created.id} — ${created.title}`));
+    console.log(pc.green(`\n  + Created: ${created.id ?? ''} — ${created.title ?? ''}`));
   } else {
     console.log(pc.yellow('\n  Similar suggestion already exists.'));
   }
@@ -201,7 +201,7 @@ function removeCommand(
 
   removeSuggestion(sg, id);
   saveSuggestions(evolveDir, sg);
-  console.log(pc.yellow(`  ${id} marked as abandoned: ${(entry.title || '').slice(0, 60)}`));
+  console.log(pc.yellow(`  ${id} marked as abandoned: ${(entry.title ?? '').slice(0, 60)}`));
 }
 
 // ── Reset Command ───────────────────────────────────────────────────────────
@@ -233,7 +233,7 @@ function resetCommand(
     lastAttemptLearnings: null,
   });
   saveSuggestions(evolveDir, sg);
-  console.log(pc.green(`  ${id} reset to pending: ${(entry.title || '').slice(0, 60)}`));
+  console.log(pc.green(`  ${id} reset to pending: ${(entry.title ?? '').slice(0, 60)}`));
 }
 
 // ── Import Command ──────────────────────────────────────────────────────────
@@ -267,20 +267,20 @@ function importCommand(evolveDir: string) {
 
         const entry = addSuggestion(sg, {
           source: 'auto:rejected-round',
-          sourceRef: `${decision.branchName || file}`,
-          area: decision.area || 'general',
+          sourceRef: String(decision.branchName ?? file),
+          area: decision.area ?? 'general',
           title: decision.improvement.slice(0, 100),
           description: decision.improvement,
           specPath: hasSpec ? specPath : null,
           priority: decision.score >= 5 ? 'high' : 'medium',
           tags: [decision.area, 'imported', decision.verdict].filter(Boolean),
           notes:
-            `Imported from ${file}. Score: ${decision.score}/10. ${decision.reason || ''}`.trim(),
+            `Imported from ${file}. Score: ${String(decision.score as number)}/10. ${(decision.reason as string | undefined) ?? ''}`.trim(),
         });
 
         if (entry) {
           created++;
-          console.log(pc.green(`  + ${entry.id}: ${(entry.title || '').slice(0, 70)}`));
+          console.log(pc.green(`  + ${entry.id ?? ''}: ${(entry.title ?? '').slice(0, 70)}`));
         }
       }
     } catch {
@@ -290,7 +290,7 @@ function importCommand(evolveDir: string) {
 
   if (created > 0) {
     saveSuggestions(evolveDir, sg);
-    console.log(pc.bold(`\n  Imported ${created} suggestion(s).`));
+    console.log(pc.bold(`\n  Imported ${String(created)} suggestion(s).`));
   } else {
     console.log(
       pc.dim('  No new suggestions to import (all already exist or no retryable rounds).'),
@@ -306,7 +306,7 @@ function statsCommand(evolveDir: string) {
   const stats = getSuggestionStats(sg);
 
   console.log(pc.bold('\nSuggestions Backlog Stats\n'));
-  console.log(`  Total entries:  ${sg.entries.length}`);
+  console.log(`  Total entries:  ${String(sg.entries.length)}`);
   console.log(`  Pending:        ${pc.cyan(String(stats.totalPending))}`);
   console.log(`  Exploring:      ${pc.yellow(String(stats.totalExploring || 0))}`);
   console.log(`  Completed:      ${pc.green(String(stats.totalCompleted))}`);
@@ -315,16 +315,16 @@ function statsCommand(evolveDir: string) {
 
   // Area breakdown
   const areas: Record<string, number> = {};
-  for (const e of sg.entries.filter((e: SuggestionEntry) => e.status === 'pending')) {
-    const area = e.area || 'unknown';
-    areas[area] = (areas[area] || 0) + 1;
+  for (const e of sg.entries.filter((entry: SuggestionEntry) => entry.status === 'pending')) {
+    const area = e.area ?? 'unknown';
+    areas[area] = (areas[area] ?? 0) + 1;
   }
   if (Object.keys(areas).length > 0) {
     console.log(pc.bold('\n  Pending by area:'));
     for (const [area, count] of Object.entries(areas).sort(
       (a: [string, number], b: [string, number]) => b[1] - a[1],
     )) {
-      console.log(`    ${pc.yellow(area)}: ${count}`);
+      console.log(`    ${pc.yellow(area)}: ${String(count)}`);
     }
   }
 
@@ -340,11 +340,12 @@ async function main() {
   let config: ReturnType<typeof resolveProject> | undefined;
   try {
     config = resolveProject({ project: options['project'] as string });
-  } catch (err) {
+  } catch (err: unknown) {
     console.error(
       pc.red(`Project resolution failed: ${err instanceof Error ? err.message : String(err)}`),
     );
-    process.exit(1);
+    process.exitCode = 1;
+    return;
   }
 
   const { projectRoot } = config;
@@ -372,11 +373,11 @@ async function main() {
     default:
       console.error(pc.red(`Unknown command: ${command}`));
       console.error('Usage: hydra-evolve-suggestions-cli.mjs [list|add|remove|reset|import|stats]');
-      process.exit(1);
+      process.exitCode = 1;
   }
 }
 
-main().catch((err) => {
+main().catch((err: unknown) => {
   console.error(pc.red(`Fatal: ${err instanceof Error ? err.message : String(err)}`));
-  process.exit(1);
+  process.exitCode = 1;
 });
