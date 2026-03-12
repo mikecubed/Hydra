@@ -61,7 +61,13 @@ T8  ci-tightening                    depends on T7A, T7B, T7C, T7D, T7E, T7F
 
 ## Task list
 
+> **✅ ALL TASKS COMPLETE** — T0–T8 fully merged into `chore/quality-node24-plan` (PR #17).
+> Final state: 0 ESLint errors / 567 warnings / 0 TypeScript errors / 939 tests pass.
+> CI is fully green with no `continue-on-error` bypasses remaining.
+
 ## T0 — Test integrity audit
+
+**Status: ✅ DONE** — merged PR #18  
 
 **Objective:** Make the suite trustworthy before it becomes the safety net for refactors.
 
@@ -88,6 +94,8 @@ T8  ci-tightening                    depends on T7A, T7B, T7C, T7D, T7E, T7F
 
 ## T2 — Node 24 runtime foundation
 
+**Status: ✅ DONE** — merged PR #19  
+
 **Objective:** Raise the minimum supported runtime to Node 24 LTS in code and dependencies.
 
 ### Deliverables
@@ -110,6 +118,8 @@ T8  ci-tightening                    depends on T7A, T7B, T7C, T7D, T7E, T7F
 
 ## T3 — CI Node 24 alignment
 
+**Status: ✅ DONE** — merged PR #20  
+
 **Objective:** Make GitHub Actions match the supported runtime story.
 
 ### Deliverables
@@ -127,6 +137,8 @@ T8  ci-tightening                    depends on T7A, T7B, T7C, T7D, T7E, T7F
 
 ## T4 — Docs Node 24 alignment
 
+**Status: ✅ DONE** — merged PR #21  
+
 **Objective:** Update all human-facing runtime and workflow documentation.
 
 ### Deliverables
@@ -143,6 +155,8 @@ T8  ci-tightening                    depends on T7A, T7B, T7C, T7D, T7E, T7F
 
 ## T5 — Shared test hardening
 
+**Status: ✅ DONE** — merged PR #22  
+
 **Objective:** Add the tests needed to make the lint cleanup safe.
 
 ### Deliverables
@@ -158,6 +172,8 @@ T8  ci-tightening                    depends on T7A, T7B, T7C, T7D, T7E, T7F
 - `npm run typecheck`
 
 ## T6A — Operator/UI error cleanup
+
+**Status: ✅ DONE** — merged PR #33  
 
 **Target files**
 
@@ -182,6 +198,8 @@ T8  ci-tightening                    depends on T7A, T7B, T7C, T7D, T7E, T7F
 
 ## T6B — Pipeline error cleanup
 
+**Status: ✅ DONE** — merged PR #23  
+
 **Target files**
 
 - `lib/hydra-evolve.ts`
@@ -199,6 +217,8 @@ T8  ci-tightening                    depends on T7A, T7B, T7C, T7D, T7E, T7F
 - `npm run typecheck`
 
 ## T6C — Daemon/route error cleanup
+
+**Status: ✅ DONE** — merged PR #24  
 
 **Target files**
 
@@ -220,6 +240,8 @@ T8  ci-tightening                    depends on T7A, T7B, T7C, T7D, T7E, T7F
 - `npm run typecheck`
 
 ## T6D — Shared runtime error cleanup
+
+**Status: ✅ DONE** — merged PR #25  
 
 **Target files**
 
@@ -243,6 +265,8 @@ T8  ci-tightening                    depends on T7A, T7B, T7C, T7D, T7E, T7F
 
 ## T6E — Council and deliberation error cleanup
 
+**Status: ✅ DONE** — merged PR #31  
+
 **Target files**
 
 - `lib/hydra-council.ts` (192E/241W)
@@ -263,6 +287,8 @@ T8  ci-tightening                    depends on T7A, T7B, T7C, T7D, T7E, T7F
 - `npm run typecheck`
 
 ## T6F — Supplemental error cleanup
+
+**Status: ✅ DONE** — merged PR #26  
 
 **Target files** (owner claims files from this list to avoid double-work; list is representative)
 
@@ -311,6 +337,8 @@ T8  ci-tightening                    depends on T7A, T7B, T7C, T7D, T7E, T7F
 
 ## T7A — Operator/UI warning reduction
 
+**Status: ✅ DONE** — merged PR #35  
+
 After T6A is green, same owner continues into warnings for:
 
 - `lib/hydra-operator.ts`
@@ -325,6 +353,8 @@ After T6A is green, same owner continues into warnings for:
 
 ## T7B — Pipeline warning reduction
 
+**Status: ✅ DONE** — merged PR #30  
+
 After T6B is green, same owner continues into warnings for:
 
 - `lib/hydra-evolve.ts`
@@ -338,6 +368,8 @@ Same as T7A.
 
 ## T7C — Daemon/route warning reduction
 
+**Status: ✅ DONE** — merged PR #34  
+
 After T6C is green, same owner continues into warnings for:
 
 - `lib/orchestrator-daemon.ts`
@@ -349,6 +381,8 @@ After T6C is green, same owner continues into warnings for:
 Same as T7A.
 
 ## T7D — Shared runtime warning reduction
+
+**Status: ✅ DONE** — merged PR #28  
 
 After T6D is green, same owner continues into warnings for:
 
@@ -364,6 +398,8 @@ Same as T7A.
 
 ## T7E — Council warning reduction
 
+**Status: ✅ DONE** — merged PR #32  
+
 After T6E is green, same owner continues into warnings for:
 
 - `lib/hydra-council.ts`
@@ -376,6 +412,8 @@ After T6E is green, same owner continues into warnings for:
 Same as T7A.
 
 ## T7F — Supplemental warning reduction
+
+**Status: ✅ DONE** — merged PR #29  
 
 After T6F is green, same owner continues into warnings for the supplemental file set.
 
@@ -394,6 +432,8 @@ Same as T7A.
 - `@typescript-eslint/strict-boolean-expressions`
 
 ## T8 — CI tightening
+
+**Status: ✅ DONE** — merged PR #36  
 
 **Objective:** Make the new clean baseline enforceable.
 

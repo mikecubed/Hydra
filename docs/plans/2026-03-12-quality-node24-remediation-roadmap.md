@@ -1,8 +1,24 @@
 # Quality + Node 24 Remediation Roadmap
 
-**Status:** Proposed  
+**Status:** ✅ COMPLETE  
 **Branch:** `chore/quality-node24-plan`  
+**PR:** [#17](https://github.com/mikecubed/Hydra/pull/17) — merged  
 **Inputs:** `docs/quality-baseline-2026-03-12.md`, `docs/plans/2026-03-11-node24-upgrade.md`
+
+## Final results
+
+| Check      | Before                        | After                           |
+| ---------- | ----------------------------- | ------------------------------- |
+| ESLint     | 2,975 errors / 5,777 warnings | **0 errors / 567 warnings**     |
+| TypeScript | Clean                         | **Clean** (strict, no bypasses) |
+| Prettier   | Clean                         | **Clean**                       |
+| Tests      | 887 pass / 19 todo / 0 fail   | **939 pass / 19 todo / 0 fail** |
+| Node min   | 22 LTS                        | **24 LTS**                      |
+| CI         | `continue-on-error` on 4 jobs | **All gates strict**            |
+
+All 17 PRs (#18–#36) merged into `chore/quality-node24-plan`. CI is green with no bypasses.
+
+---
 
 ## Goal
 
