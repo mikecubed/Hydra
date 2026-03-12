@@ -77,9 +77,9 @@ let _investigator: InvestigatorLike | null = null;
 async function getInvestigator(): Promise<InvestigatorLike | null> {
   if (_investigator !== null) return _investigator;
   try {
-    const mod = (await import('./hydra-investigator.ts')) as unknown as InvestigatorLike;
-    _investigator = mod;
-    return mod;
+    const loaded = (await import('./hydra-investigator.ts')) as unknown as InvestigatorLike;
+    _investigator ??= loaded;
+    return _investigator;
   } catch {
     return null;
   }
@@ -125,14 +125,14 @@ const PROTECTED_FILES = new Set([...BASE_PROTECTED_FILES, 'hydra.config.json']);
 
 function todayStr() {
   const d = new Date();
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+  return `${String(d.getFullYear())}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 }
 
 function formatDuration(ms: number) {
   const s = Math.round(ms / 1000);
-  if (s < 60) return `${s}s`;
+  if (s < 60) return `${String(s)}s`;
   const m = Math.floor(s / 60);
-  return `${m}m ${s % 60}s`;
+  return `${String(m)}m ${String(s % 60)}s`;
 }
 
 // ── Simple Readline Fallback ────────────────────────────────────────────────
@@ -154,12 +154,19 @@ function askLine(rl: readline.Interface, question: string) {
 // ── Interactive Task Selection ──────────────────────────────────────────────
 
 async function selectTasks(rl: readline.Interface, scannedTasks: ScannedTask[]) {
-  console.log(pc.bold(`\nScanned Tasks (${scannedTasks.length} found):\n`));
+  console.log(pc.bold(`\nScanned Tasks (${String(scannedTasks.length)} found):\n`));
 
   const maxShow = Math.min(scannedTasks.length, 20);
   for (let i = 0; i < maxShow; i++) {
     const t = scannedTasks[i];
-    const prioColor = t.priority === 'high' ? pc.red : t.priority === 'low' ? pc.dim : pc.yellow;
+    let prioColor;
+    if (t.priority === 'high') {
+      prioColor = pc.red;
+    } else if (t.priority === 'low') {
+      prioColor = pc.dim;
+    } else {
+      prioColor = pc.yellow;
+    }
     const num = pc.bold(String(i + 1).padStart(3));
     console.log(`  ${num}. ${prioColor(t.priority.padEnd(6))} ${t.title}`);
     console.log(
@@ -169,7 +176,9 @@ async function selectTasks(rl: readline.Interface, scannedTasks: ScannedTask[]) 
 
   if (scannedTasks.length > maxShow) {
     console.log(
-      pc.dim(`\n  ... and ${scannedTasks.length - maxShow} more (enter 'all' to see full list)`),
+      pc.dim(
+        `\n  ... and ${String(scannedTasks.length - maxShow)} more (enter 'all' to see full list)`,
+      ),
     );
   }
 
@@ -210,18 +219,18 @@ async function selectTasks(rl: readline.Interface, scannedTasks: ScannedTask[]) 
 // ── Budget Preset Selection ─────────────────────────────────────────────────
 
 async function selectBudget(rl: readline.Interface, cfg: HydraConfig) {
-  const defaultPreset = cfg.tasks?.budget?.defaultPreset || 'medium';
+  const defaultPreset = cfg.tasks?.budget?.defaultPreset ?? 'medium';
 
   console.log(pc.bold('\nBudget Preset:\n'));
   const presetNames = Object.keys(BUDGET_PRESETS);
   for (const [i, name] of presetNames.entries()) {
     const preset = BUDGET_PRESETS[name as keyof typeof BUDGET_PRESETS];
     const marker = name === defaultPreset ? pc.green(' (default)') : '';
-    console.log(`  ${i + 1}. ${preset.label}${marker}`);
+    console.log(`  ${String(i + 1)}. ${preset.label}${marker}`);
   }
-  console.log(`  ${presetNames.length + 1}. Custom`);
+  console.log(`  ${String(presetNames.length + 1)}. Custom`);
 
-  const answer = await askLine(rl, pc.bold(`\n  Select [1-${presetNames.length + 1}]: `));
+  const answer = await askLine(rl, pc.bold(`\n  Select [1-${String(presetNames.length + 1)}]: `));
   const idx = Number.parseInt(answer, 10) - 1;
 
   if (idx >= 0 && idx < presetNames.length) {
@@ -236,7 +245,7 @@ async function selectBudget(rl: readline.Interface, cfg: HydraConfig) {
       maxHours: hours,
       budgetPct: pct,
       maxTasks: max,
-      label: `Custom (${hours}hr, ${Math.round(pct * 100)}%, ${max} tasks)`,
+      label: `Custom (${String(hours)}hr, ${String(Math.round(pct * 100))}%, ${String(max)} tasks)`,
     };
   }
 
@@ -258,12 +267,12 @@ function runVerification(projectRoot: string, cfg: HydraConfig) {
     encoding: 'utf8',
     timeout: plan.timeoutMs || 60_000,
     windowsHide: true,
-  });
+  }) as { status: number | null; stdout: string; stderr: string };
 
   return {
     ran: true,
     passed: result.status === 0,
-    output: ((result.stdout || '') + (result.stderr || '')).slice(0, 4096),
+    output: (result.stdout + result.stderr).slice(0, 4096),
     command: plan.command,
   };
 }
@@ -356,7 +365,7 @@ async function executeTask(
     verdict: null as string | null,
   };
 
-  const phaseLabel = `Task ${idx + 1}/${total}`;
+  const phaseLabel = `Task ${String(idx + 1)}/${String(total)}`;
 
   try {
     // ── CLASSIFY ──
@@ -422,7 +431,7 @@ Be concise — this is a planning checklist, not a design doc.`;
 
       result.phases['plan'] = {
         status: planResult.ok ? 'done' : 'failed',
-        output: planResult.output?.slice(0, 2048) || '',
+        output: planResult.output.slice(0, 2048) || '',
       };
 
       if (!planResult.ok) {
@@ -442,7 +451,7 @@ Be concise — this is a planning checklist, not a design doc.`;
     });
 
     const instructionFile = getAgentInstructionFile(task.suggestedAgent, projectRoot);
-    const planOutput = (result.phases['plan']?.['output'] as string | undefined) || '';
+    const planOutput = (result.phases['plan']['output'] as string | undefined) ?? '';
     const planSection = planOutput ? `\n\n## Implementation Plan\n${planOutput}` : '';
 
     const executePrompt = `${safetyRules}
@@ -461,7 +470,7 @@ ${planSection}
 
 Read ${instructionFile} for project conventions.`;
 
-    const timeoutMs = cfg.tasks?.perTaskTimeoutMs || 15 * 60 * 1000;
+    const timeoutMs = cfg.tasks?.perTaskTimeoutMs ?? 15 * 60 * 1000;
     const execHandle = recordCallStart(task.suggestedAgent);
     const execResult = await executeAgentWithRecovery(task.suggestedAgent, executePrompt, {
       cwd: projectRoot,
@@ -482,13 +491,13 @@ Read ${instructionFile} for project conventions.`;
 
     result.phases['execute'] = {
       status: execResult.ok ? 'done' : 'failed',
-      timedOut: execResult.timedOut || false,
-      error: execResult.error || null,
-      recovered: execResult.recovered || false,
+      timedOut: execResult.timedOut,
+      error: execResult.error ?? null,
+      recovered: execResult.recovered ?? false,
     };
 
     if (!execResult.ok) {
-      console.log(pc.red(`  [EXECUTE] Failed: ${execResult.error || 'unknown error'}`));
+      console.log(pc.red(`  [EXECUTE] Failed: ${execResult.error ?? 'unknown error'}`));
 
       // Self-healing via investigator
       const inv = await getInvestigator();
@@ -498,8 +507,8 @@ Read ${instructionFile} for project conventions.`;
           const diagnosis = await inv.investigate({
             phase: 'agent',
             agent: task.suggestedAgent,
-            error: execResult.error || execResult.stderr || 'Agent execution failed',
-            output: execResult.output?.slice(0, 2048) || '',
+            error: execResult.error ?? execResult.stderr,
+            output: execResult.output.slice(0, 2048) || '',
             timedOut: execResult.timedOut || false,
           });
 
@@ -562,24 +571,24 @@ Read ${instructionFile} for project conventions.`;
 
       if (result.phases['execute']['status'] !== 'done') {
         // Doctor notification for persistent failure
-        import('./hydra-doctor.ts')
+        void import('./hydra-doctor.ts')
           .then((doc) => {
             if (doc.isDoctorEnabled())
-              doc.diagnose({
+              void doc.diagnose({
                 pipeline: 'tasks',
                 phase: 'execute',
                 agent: task.suggestedAgent,
-                error: execResult.error || execResult.stderr || '',
+                error: execResult.error ?? execResult.stderr,
                 exitCode: execResult.exitCode ?? null,
-                signal: execResult.signal || null,
+                signal: execResult.signal ?? null,
                 command: execResult.command,
                 args: execResult.args,
                 promptSnippet: execResult.promptSnippet,
                 stderr: execResult.stderr,
                 stdout: execResult.output,
-                errorCategory: execResult.errorCategory || null,
-                errorDetail: execResult.errorDetail || null,
-                errorContext: execResult.errorContext || null,
+                errorCategory: execResult.errorCategory ?? null,
+                errorDetail: execResult.errorDetail ?? null,
+                errorContext: execResult.errorContext ?? null,
                 timedOut: execResult.timedOut || false,
                 taskTitle: task.title,
                 branchName,
@@ -636,7 +645,7 @@ Read ${instructionFile} for project conventions.`;
     result.violations = violations;
 
     if (violations.length > 0) {
-      console.log(pc.red(`  [VERIFY] ${violations.length} violation(s) detected`));
+      console.log(pc.red(`  [VERIFY] ${String(violations.length)} violation(s) detected`));
       for (const v of violations) {
         console.log(pc.red(`    [${v.severity}] ${v.detail}`));
       }
@@ -649,7 +658,7 @@ Read ${instructionFile} for project conventions.`;
     };
 
     // ── DECIDE (council-lite for complex tasks) ──
-    const councilCfg = cfg.tasks?.councilLite || {};
+    const councilCfg = cfg.tasks?.councilLite ?? {};
     const needsCouncil =
       councilCfg['enabled'] !== false &&
       (task.complexity === 'complex' ||
@@ -664,12 +673,14 @@ Read ${instructionFile} for project conventions.`;
         result.verdict = review.verdict;
         result.phases['decide'] = { status: 'done', verdict: review.verdict };
 
-        const verdictColor =
-          review.verdict === 'approve'
-            ? pc.green
-            : review.verdict === 'reject'
-              ? pc.red
-              : pc.yellow;
+        let verdictColor;
+        if (review.verdict === 'approve') {
+          verdictColor = pc.green;
+        } else if (review.verdict === 'reject') {
+          verdictColor = pc.red;
+        } else {
+          verdictColor = pc.yellow;
+        }
         console.log(`  [DECIDE] Verdict: ${verdictColor(review.verdict)}`);
       } else {
         result.verdict = 'approve';
@@ -743,24 +754,27 @@ function generateReport(
   // Markdown report
   let md = `# Hydra Tasks Report — ${date}\n\n`;
   md += `## Summary\n`;
-  md += `- **Total tasks**: ${results.length}\n`;
-  md += `- **Successful**: ${successful}\n`;
-  md += `- **Failed**: ${failed}\n`;
-  md += `- **Skipped**: ${skipped}\n`;
-  md += `- **Rejected**: ${rejected}\n\n`;
+  md += `- **Total tasks**: ${String(results.length)}\n`;
+  md += `- **Successful**: ${String(successful)}\n`;
+  md += `- **Failed**: ${String(failed)}\n`;
+  md += `- **Skipped**: ${String(skipped)}\n`;
+  md += `- **Rejected**: ${String(rejected)}\n\n`;
 
   md += `## Budget\n`;
-  md += `- Consumed: ${(budgetSummary['consumed'] as number | undefined)?.toLocaleString() || '?'} tokens\n`;
-  md += `- Limit: ${(budgetSummary['hardLimit'] as number | undefined)?.toLocaleString() || '?'} tokens\n`;
-  md += `- Duration: ${formatDuration((budgetSummary['durationMs'] as number) || 0)}\n\n`;
+  md += `- Consumed: ${(budgetSummary['consumed'] as number | undefined)?.toLocaleString() ?? '?'} tokens\n`;
+  md += `- Limit: ${(budgetSummary['hardLimit'] as number | undefined)?.toLocaleString() ?? '?'} tokens\n`;
+  md += `- Duration: ${formatDuration((budgetSummary['durationMs'] as number | undefined) ?? 0)}\n\n`;
 
   md += `## Tasks\n\n`;
   md += `| # | Task | Agent | Status | Tokens | Duration | Verdict |\n`;
   md += `|---|------|-------|--------|--------|----------|----------|\n`;
 
   for (const [i, r] of results.entries()) {
-    const statusIcon = r.status === 'success' ? 'pass' : r.status === 'failed' ? 'FAIL' : r.status;
-    md += `| ${i + 1} | ${r.task.slice(0, 40)} | ${r.agent} | ${statusIcon} | ${r.tokens || '?'} | ${formatDuration(r.durationMs)} | ${r.verdict || '-'} |\n`;
+    let statusIcon: string;
+    if (r.status === 'success') statusIcon = 'PASS';
+    else if (r.status === 'failed') statusIcon = 'FAIL';
+    else statusIcon = r.status;
+    md += `| ${String(i + 1)} | ${r.task.slice(0, 40)} | ${r.agent} | ${statusIcon} | ${String(r.tokens)} | ${formatDuration(r.durationMs)} | ${(r.verdict as string | null | undefined) ?? '-'} |\n`;
   }
 
   md += '\n';
@@ -782,12 +796,13 @@ async function main() {
     console.error(
       pc.red(`Project resolution failed: ${err instanceof Error ? err.message : String(err)}`),
     );
-    process.exit(1);
+    process.exitCode = 1;
+    return;
   }
 
   const { projectRoot } = config;
   const cfg = loadHydraConfig();
-  const baseBranch = cfg.tasks?.baseBranch || 'dev';
+  const baseBranch = cfg.tasks?.baseBranch ?? 'dev';
 
   // ── Preconditions ──
   const branchCheck = verifyBranch(projectRoot, baseBranch);
@@ -798,7 +813,8 @@ async function main() {
 
   if (!isCleanWorkingTree(projectRoot)) {
     console.error(pc.red('Working tree is not clean. Commit or stash changes first.'));
-    process.exit(1);
+    process.exitCode = 1;
+    return;
   }
 
   // ── Scan ──
@@ -809,7 +825,7 @@ async function main() {
 
   if (scannedTasks.length === 0) {
     console.log(pc.yellow('\nNo tasks found. Add TODO/FIXME comments or create GitHub issues.'));
-    process.exit(0);
+    return;
   }
 
   // ── Interactive Selection ──
@@ -825,13 +841,13 @@ async function main() {
   if (!selectedTasks || selectedTasks.length === 0) {
     console.log(pc.dim('\nNo tasks selected. Exiting.'));
     rl.close();
-    process.exit(0);
+    return;
   }
 
   // ── Budget Selection ──
   let budgetPreset;
   const presetOpt = String(options['preset'] || '');
-  if (presetOpt && BUDGET_PRESETS[presetOpt as keyof typeof BUDGET_PRESETS]) {
+  if (presetOpt !== '' && presetOpt in BUDGET_PRESETS) {
     budgetPreset = BUDGET_PRESETS[presetOpt as keyof typeof BUDGET_PRESETS];
   } else if (options['hours'] || options['budget']) {
     budgetPreset = {
@@ -850,9 +866,9 @@ async function main() {
   selectedTasks = selectedTasks.slice(0, budgetPreset.maxTasks);
 
   // ── Budget Tracker Setup ──
-  const weeklyBudget = cfg.usage?.weeklyTokenBudget?.['claude-opus-4-6'] || 25_000_000;
+  const weeklyBudget = cfg.usage.weeklyTokenBudget?.['claude-opus-4-6'] ?? 25_000_000;
   const tokenBudget = Math.round(weeklyBudget * budgetPreset.budgetPct);
-  const perTaskEstimate = cfg.tasks?.budget?.perTaskEstimate || 100_000;
+  const perTaskEstimate = cfg.tasks?.budget?.perTaskEstimate ?? 100_000;
 
   const budget = new BudgetTracker({
     softLimit: Math.round(tokenBudget * 0.85),
@@ -870,7 +886,7 @@ async function main() {
   console.log(`  Tasks: ${pc.cyan(String(selectedTasks.length))}`);
   console.log(`  Budget: ${pc.cyan(budgetPreset.label)}`);
   console.log(`  Token limit: ${pc.cyan(tokenBudget.toLocaleString())}`);
-  console.log(`  Time limit: ${pc.cyan(`${budgetPreset.maxHours}hr`)}`);
+  console.log(`  Time limit: ${pc.cyan(`${String(budgetPreset.maxHours)}hr`)}`);
   console.log(`  Base branch: ${pc.cyan(baseBranch)}`);
   console.log('');
 
@@ -892,7 +908,7 @@ async function main() {
     // Time check
     const elapsed = Date.now() - sessionStart;
     if (elapsed >= maxMs) {
-      stopReason = `Time limit reached (${budgetPreset.maxHours}hr)`;
+      stopReason = `Time limit reached (${String(budgetPreset.maxHours)}hr)`;
       console.log(pc.yellow(`\n  ${stopReason}`));
       break;
     }
@@ -912,12 +928,14 @@ async function main() {
       useCheapMode = true;
       console.log(
         pc.yellow(
-          `\n  Budget at ${Math.round(budgetCheck.percentUsed * 100)}% — switching to economy tier`,
+          `\n  Budget at ${String(Math.round(budgetCheck.percentUsed * 100))}% — switching to economy tier`,
         ),
       );
     }
     if (budgetCheck.action === 'warn') {
-      console.log(pc.yellow(`  Budget: ${Math.round(budgetCheck.percentUsed * 100)}% used`));
+      console.log(
+        pc.yellow(`  Budget: ${String(Math.round(budgetCheck.percentUsed * 100))}% used`),
+      );
     }
 
     const result = await executeTask(
@@ -937,12 +955,14 @@ async function main() {
     const budgetDelta = budget.recordUnitEnd(task.slug, result.durationMs);
     result.tokens = budgetDelta.tokens;
 
-    const statusIcon =
-      result.status === 'success'
-        ? pc.green('PASS')
-        : result.status === 'failed'
-          ? pc.red('FAIL')
-          : pc.yellow(result.status.toUpperCase());
+    let statusIcon;
+    if (result.status === 'success') {
+      statusIcon = pc.green('PASS');
+    } else if (result.status === 'failed') {
+      statusIcon = pc.red('FAIL');
+    } else {
+      statusIcon = pc.yellow(result.status.toUpperCase());
+    }
     console.log(`\n  ${statusIcon} ${task.title} (${formatDuration(result.durationMs)})`);
 
     if (stopReason) break;
@@ -982,11 +1002,11 @@ async function main() {
   const failed = results.filter((r) => r.status === 'failed' || r.status === 'error').length;
 
   console.log(pc.bold('\n── Tasks Runner Complete ──\n'));
-  console.log(`  Processed: ${results.length}/${selectedTasks.length}`);
+  console.log(`  Processed: ${String(results.length)}/${String(selectedTasks.length)}`);
   console.log(`  Success: ${pc.green(String(successful))}`);
   console.log(`  Failed: ${failed > 0 ? pc.red(String(failed)) : pc.dim('0')}`);
   console.log(
-    `  Budget: ${Math.round((budgetSummary['percentUsed'] as number) * 100)}% used (${(budgetSummary['consumed'] as number | undefined)?.toLocaleString() || '?'} tokens)`,
+    `  Budget: ${String(Math.round((budgetSummary['percentUsed'] as number) * 100))}% used (${(budgetSummary['consumed'] as number | undefined)?.toLocaleString() ?? '?'} tokens)`,
   );
   console.log(`  Duration: ${formatDuration(budgetSummary['durationMs'] as number)}`);
   if (stopReason) console.log(`  Stopped: ${pc.yellow(stopReason)}`);
@@ -1001,7 +1021,8 @@ async function main() {
   console.log('');
 }
 
-main().catch((err) => {
-  console.error(pc.red(`Fatal: ${err.message}`));
+main().catch((err: unknown) => {
+  console.error(pc.red(`Fatal: ${err instanceof Error ? err.message : String(err)}`));
+  // eslint-disable-next-line n/no-process-exit -- catch callback exit
   process.exit(1);
 });
