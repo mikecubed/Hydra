@@ -82,7 +82,7 @@ function getInvestigatorConfig(): InvestigatorConfig {
     reasoningEffort: (inv['reasoningEffort'] as string | undefined) ?? 'high',
     maxAttemptsPerPhase: (inv['maxAttemptsPerPhase'] as number | undefined) ?? 2,
     phases: (inv['phases'] as string[] | undefined) ?? ['test', 'implement', 'analyze', 'agent'],
-    maxTokensBudget: (inv['maxTokensBudget'] as number) || 50_000,
+    maxTokensBudget: (inv['maxTokensBudget'] as number | undefined) ?? 50_000,
     tryAlternativeAgent: inv['tryAlternativeAgent'] !== false,
     logToFile: inv['logToFile'] !== false,
   };
@@ -100,9 +100,11 @@ export function initInvestigator(overrides: Partial<InvestigatorConfig> = {}): v
   const cfg = getInvestigatorConfig();
 
   // Apply overrides
-  if (overrides.model) cfg.model = overrides.model;
-  if (overrides.reasoningEffort) cfg.reasoningEffort = overrides.reasoningEffort;
-  if (overrides.maxTokensBudget) cfg.maxTokensBudget = overrides.maxTokensBudget;
+  if (overrides.model !== undefined && overrides.model !== '') cfg.model = overrides.model;
+  if (overrides.reasoningEffort !== undefined && overrides.reasoningEffort !== '')
+    cfg.reasoningEffort = overrides.reasoningEffort;
+  if (overrides.maxTokensBudget !== undefined && overrides.maxTokensBudget !== 0 && !Number.isNaN(overrides.maxTokensBudget))
+    cfg.maxTokensBudget = overrides.maxTokensBudget;
 
   config = cfg;
   stats = { investigations: 0, healed: 0, promptTokens: 0, completionTokens: 0 };
@@ -243,7 +245,7 @@ export async function investigate(failure: EvolveFailure): Promise<DiagnosisResu
   }
 
   // Quick classification for obvious transients
-  if (failure.timedOut) {
+  if (failure.timedOut === true) {
     const result = {
       diagnosis: 'transient',
       explanation: `${failure.agent ?? failure.phase} timed out`,
@@ -270,19 +272,19 @@ export async function investigate(failure: EvolveFailure): Promise<DiagnosisResu
   const userMessage = `## Failed Phase: ${failure.phase}
 Agent: ${failure.agent ?? 'N/A'}
 Attempt: ${String(failure.attemptNumber ?? 1)}
-Exit Code: ${failure.exitCode != null ? String(failure.exitCode) : 'N/A'}
+Exit Code: ${failure.exitCode == null ? 'N/A' : String(failure.exitCode)}
 Signal: ${failure.signal ?? 'N/A'}
 Error: ${failure.error ?? 'Unknown'}
-${failure.errorCategory ? `Error Category: ${failure.errorCategory}` : ''}
-${failure.errorDetail ? `Error Detail: ${failure.errorDetail}` : ''}
-${failure.errorContext ? `Error Context: ${failure.errorContext}` : ''}
+${failure.errorCategory !== undefined && failure.errorCategory !== '' ? `Error Category: ${failure.errorCategory}` : ''}
+${failure.errorDetail !== undefined && failure.errorDetail !== '' ? `Error Detail: ${failure.errorDetail}` : ''}
+${failure.errorContext !== undefined && failure.errorContext !== '' ? `Error Context: ${failure.errorContext}` : ''}
 Timed Out: no
-${failure.command ? `Command: ${failure.command} ${failure.args?.join(' ') ?? ''}` : ''}
-${failure.promptSnippet ? `Prompt Snippet: ${failure.promptSnippet}...` : ''}
+${failure.command !== undefined && failure.command !== '' ? `Command: ${failure.command} ${failure.args?.join(' ') ?? ''}` : ''}
+${failure.promptSnippet !== undefined && failure.promptSnippet !== '' ? `Prompt Snippet: ${failure.promptSnippet}...` : ''}
 
-${stderrSnippet ? `## stderr (last 2KB)\n\`\`\`\n${stderrSnippet}\n\`\`\`\n` : ''}
-${stdoutSnippet ? `## stdout (last 2KB)\n\`\`\`\n${stdoutSnippet}\n\`\`\`\n` : ''}
-${contextSnippet ? `## Additional Context\n${contextSnippet}\n` : ''}
+${stderrSnippet.length > 0 ? `## stderr (last 2KB)\n\`\`\`\n${stderrSnippet}\n\`\`\`\n` : ''}
+${stdoutSnippet.length > 0 ? `## stdout (last 2KB)\n\`\`\`\n${stdoutSnippet}\n\`\`\`\n` : ''}
+${contextSnippet.length > 0 ? `## Additional Context\n${contextSnippet}\n` : ''}
 
 Diagnose this failure and provide a structured recommendation.`;
 
@@ -342,6 +344,19 @@ Diagnose this failure and provide a structured recommendation.`;
 
 // ── Response Parsing ─────────────────────────────────────────────────────────
 
+interface ParsedDiagnosis {
+  diagnosis?: unknown;
+  explanation?: unknown;
+  rootCause?: unknown;
+  corrective?: unknown;
+  retryRecommendation?: {
+    retryPhase?: unknown;
+    modifiedPrompt?: unknown;
+    preamble?: unknown;
+    retryAgent?: unknown;
+  };
+}
+
 function parseInvestigatorResponse(raw: string): DiagnosisResult {
   // Try to extract JSON from the response (may have markdown fencing)
   let text = raw.trim();
@@ -353,17 +368,17 @@ function parseInvestigatorResponse(raw: string): DiagnosisResult {
   }
 
   try {
-    const parsed = JSON.parse(text);
+    const parsed = JSON.parse(text) as ParsedDiagnosis;
     return {
-      diagnosis: parsed.diagnosis ?? 'fundamental',
-      explanation: parsed.explanation ?? 'No explanation provided',
-      rootCause: parsed.rootCause ?? 'Unknown',
-      corrective: parsed.corrective ?? null,
+      diagnosis: typeof parsed.diagnosis === 'string' ? parsed.diagnosis : 'fundamental',
+      explanation: typeof parsed.explanation === 'string' ? parsed.explanation : 'No explanation provided',
+      rootCause: typeof parsed.rootCause === 'string' ? parsed.rootCause : 'Unknown',
+      corrective: typeof parsed.corrective === 'string' ? parsed.corrective : null,
       retryRecommendation: {
-        retryPhase: parsed.retryRecommendation?.retryPhase ?? false,
-        modifiedPrompt: parsed.retryRecommendation?.modifiedPrompt ?? null,
-        preamble: parsed.retryRecommendation?.preamble ?? null,
-        retryAgent: parsed.retryRecommendation?.retryAgent ?? null,
+        retryPhase: typeof parsed.retryRecommendation?.retryPhase === 'boolean' ? parsed.retryRecommendation.retryPhase : false,
+        modifiedPrompt: typeof parsed.retryRecommendation?.modifiedPrompt === 'string' ? parsed.retryRecommendation.modifiedPrompt : null,
+        preamble: typeof parsed.retryRecommendation?.preamble === 'string' ? parsed.retryRecommendation.preamble : null,
+        retryAgent: typeof parsed.retryRecommendation?.retryAgent === 'string' ? parsed.retryRecommendation.retryAgent : null,
       },
     };
   } catch {
