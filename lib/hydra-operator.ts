@@ -2677,7 +2677,8 @@ async function interactiveLoop({
   startEventStream(baseUrl, agents);
 
   // Subscribe to significant activity events and show them inline
-  onActivityEvent(({ event, agent, detail }) => {
+  onActivityEvent((raw) => {
+    const { event, agent, detail } = raw as { event: string; agent?: string; detail?: string };
     const significant = ['handoff_ack', 'task_done', 'verify'];
     if (!significant.includes(event)) return;
     const prefix = event === 'verify' ? WARNING('\u2691') : SUCCESS('\u2713');
