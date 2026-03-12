@@ -11,7 +11,7 @@
 import { loadHydraConfig } from './hydra-config.ts';
 import { classifyTask, bestAgentFor } from './hydra-agents.ts';
 import { classifyPrompt } from './hydra-utils.ts';
-import { taskToSlug } from './hydra-tasks-scanner.ts';
+import { taskToSlug, type ScannedTask } from './hydra-tasks-scanner.ts';
 import { executeAgentWithRecovery } from './hydra-shared/agent-executor.ts';
 import { getAgentInstructionFile } from './hydra-sync-md.ts';
 import { recordCallStart, recordCallComplete, recordCallError } from './hydra-metrics.ts';
@@ -165,20 +165,20 @@ export async function runDiscovery(
     profile?: string;
     extraContext?: string;
   } = {},
-) {
+): Promise<ScannedTask[]> {
   const cfg = loadHydraConfig();
-  const discoveryCfg = (cfg.nightly?.aiDiscovery || {}) as Record<string, unknown>;
+  const discoveryCfg = (cfg.nightly?.aiDiscovery ?? {}) as Record<string, unknown>;
 
-  const agent = opts.agent || (discoveryCfg['agent'] as string | undefined) || 'gemini';
-  const modelOverride = opts.model || (discoveryCfg['model'] as string | undefined) || null;
+  const agent = opts.agent ?? (discoveryCfg['agent'] as string | undefined) ?? 'gemini';
+  const modelOverride = opts.model ?? (discoveryCfg['model'] as string | undefined) ?? null;
   const maxSuggestions =
-    opts.maxSuggestions || (discoveryCfg['maxSuggestions'] as number | undefined) || 5;
-  const focus = opts.focus || (discoveryCfg['focus'] as string[] | undefined) || [];
+    opts.maxSuggestions ?? (discoveryCfg['maxSuggestions'] as number | undefined) ?? 5;
+  const focus = opts.focus ?? (discoveryCfg['focus'] as string[] | undefined) ?? [];
   const timeoutMs =
-    opts.timeoutMs || (discoveryCfg['timeoutMs'] as number | undefined) || 5 * 60 * 1000;
-  const existingTasks = opts.existingTasks || [];
-  const profile = opts.profile || 'nightly';
-  const extraContext = opts.extraContext || '';
+    opts.timeoutMs ?? (discoveryCfg['timeoutMs'] as number | undefined) ?? 5 * 60 * 1000;
+  const existingTasks = opts.existingTasks ?? [];
+  const profile = opts.profile ?? 'nightly';
+  const extraContext = opts.extraContext ?? '';
 
   const instructionFile = getAgentInstructionFile(agent, projectRoot);
   const prompt = buildDiscoveryPrompt(projectRoot, {
@@ -206,15 +206,15 @@ export async function runDiscovery(
   }
 
   if (!result.ok) {
-    recordCallError(handle, new Error(result.error || 'agent returned non-ok'));
-    log.warn(`Discovery agent returned error: ${result.error || 'unknown'}`);
+    recordCallError(handle, new Error(result.error ?? 'agent returned non-ok'));
+    log.warn(`Discovery agent returned error: ${result.error ?? 'unknown'}`);
     return [];
   }
 
   recordCallComplete(handle, result as unknown as Parameters<typeof recordCallComplete>[1]);
 
   // Parse response
-  const output = result.stdout || result.output || '';
+  const output = result.stdout ?? result.output;
   const items = extractJsonArray(output);
 
   if (!items || items.length === 0) {
@@ -223,13 +223,13 @@ export async function runDiscovery(
   }
 
   // Convert to ScannedTask shape
-  const tasks = [];
+  const tasks: ScannedTask[] = [];
   for (const item of items.slice(0, maxSuggestions)) {
     if (!item.title || typeof item.title !== 'string') continue;
 
     const title = item.title.trim();
     const slug = taskToSlug(title);
-    const taskType = item.taskType || classifyTask(title);
+    const taskType = (item.taskType ?? classifyTask(title)) as string;
     const suggestedAgent = bestAgentFor(taskType);
     const { tier } = classifyPrompt(title);
 
@@ -237,18 +237,18 @@ export async function runDiscovery(
       id: `ai-discovery:${slug}`,
       title,
       slug,
-      source: 'ai-discovery',
+      source: 'ai-discovery' as ScannedTask['source'],
       sourceRef: `${agent}-discovery`,
       taskType,
       suggestedAgent,
       complexity: tier,
-      priority: item.priority || 'medium',
-      body: item.description || null,
+      priority: (item.priority ?? 'medium') as ScannedTask['priority'],
+      body: (item.description ?? null) as string | null,
       issueNumber: null,
     });
   }
 
-  log.ok(`Discovery: ${tasks.length} task(s) suggested`);
+  log.ok(`Discovery: ${String(tasks.length)} task(s) suggested`);
   for (const t of tasks) {
     log.dim(`  - [${t.priority}] ${t.title}`);
   }
