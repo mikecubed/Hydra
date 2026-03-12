@@ -101,7 +101,9 @@ async function main() {
         }
         console.log('');
         console.log(hydraLogoCompact());
-        console.log(label('Status', data['running'] ? SUCCESS('running') : ERROR('stopped')));
+        console.log(
+          label('Status', data['running'] === true ? SUCCESS('running') : ERROR('stopped')),
+        );
         console.log(label('PID', pc.white((data['pid'] as string | null | undefined) ?? '?')));
         console.log(
           label(
@@ -132,6 +134,7 @@ async function main() {
         const agentNextMap: Record<string, unknown> = {};
         for (const agent of ['gemini', 'codex', 'claude']) {
           try {
+            // eslint-disable-next-line no-await-in-loop -- sequential: each agent's next-action depends on independent daemon state
             const nextData = await request(
               'GET',
               baseUrl,
@@ -155,8 +158,9 @@ async function main() {
           extras['models'] = {};
           for (const [agent, info] of Object.entries(modelSummary)) {
             const typedInfo = info as ModelSummaryEntry;
-            const short = (typedInfo.active || '').replace(/^claude-/, '').replace(/^gemini-/, '');
-            if (!typedInfo.isDefault) (extras['models'] as Record<string, string>)[agent] = short;
+            const short = typedInfo.active.replace(/^claude-/, '').replace(/^gemini-/, '');
+            if (typedInfo.isDefault !== true)
+              (extras['models'] as Record<string, string>)[agent] = short;
           }
         } catch {
           /* ignore */
@@ -183,7 +187,7 @@ async function main() {
         console.log('');
         console.log(`  ${agentBadge(agent)}  ${pc.white(next['action'] as string)}`);
         console.log(label('Message', (next['message'] as string | null | undefined) ?? 'n/a'));
-        if (next['task']) {
+        if (next['task'] != null) {
           const t = next['task'] as Record<string, unknown>;
           console.log(
             label(
@@ -192,7 +196,7 @@ async function main() {
             ),
           );
         }
-        if (next['handoff']) {
+        if (next['handoff'] != null) {
           const h = next['handoff'] as Record<string, unknown>;
           console.log(
             label('Handoff', `${pc.bold(h['id'] as string)} from ${h['from'] as string}`),
@@ -366,7 +370,7 @@ async function main() {
 
         // Handle mode= switch
         const modeVal = getOption(options, 'mode', '');
-        if (modeVal) {
+        if (modeVal !== '') {
           try {
             setMode(modeVal);
             console.log(`  ${SUCCESS('\u2713')} Mode ${DIM('\u2192')} ${ACCENT(modeVal)}`);
@@ -415,13 +419,16 @@ async function main() {
           if (agent === '_mode') continue;
           const typedInfo = info as ModelSummaryEntry;
           const badge = agentBadge(agent);
-          const model = typedInfo.isOverride ? pc.white(typedInfo.active) : DIM(typedInfo.active);
-          const tag = typedInfo.isOverride
-            ? WARNING('(override)')
-            : DIM(`(${typedInfo.tierSource ?? ''})`);
-          const effort = typedInfo.reasoningEffort
-            ? pc.yellow(` [${typedInfo.reasoningEffort}]`)
-            : '';
+          const model =
+            typedInfo.isOverride === true ? pc.white(typedInfo.active) : DIM(typedInfo.active);
+          const tag =
+            typedInfo.isOverride === true
+              ? WARNING('(override)')
+              : DIM(`(${typedInfo.tierSource ?? ''})`);
+          const effort =
+            typedInfo.reasoningEffort != null && typedInfo.reasoningEffort !== ''
+              ? pc.yellow(` [${typedInfo.reasoningEffort}]`)
+              : '';
           console.log(`  ${badge}  ${model}${effort} ${tag}`);
         }
         console.log('');
@@ -449,7 +456,7 @@ async function main() {
           }
         }
         // Also check positionals
-        if (!agentName) {
+        if (agentName == null || agentName === '') {
           for (const arg of process.argv.slice(3)) {
             const name = arg.toLowerCase().replace(/^--?/, '');
             if (AGENT_NAMES.includes(name)) {
@@ -459,10 +466,10 @@ async function main() {
           }
         }
 
-        if (!agentName) {
+        if (agentName == null || agentName === '') {
           console.log('');
           agentName = await pickAgent();
-          if (!agentName) {
+          if (agentName == null || agentName === '') {
             console.log(DIM('  Cancelled.\n'));
             return;
           }
@@ -470,7 +477,7 @@ async function main() {
 
         console.log('');
         const modelId = await pickModel(agentName);
-        if (!modelId) {
+        if (modelId == null || modelId === '') {
           console.log(DIM('  Cancelled.\n'));
           return;
         }
@@ -511,7 +518,7 @@ async function main() {
           console.log(`  ${SUCCESS('\u2713')} Coordination files created`);
         } else {
           console.log(
-            `  ${WARNING('\u26A0')} ${(initResult.stderr as string) || 'init had warnings'}`,
+            `  ${WARNING('\u26A0')} ${(initResult.stderr as string) === '' ? 'init had warnings' : (initResult.stderr as string)}`,
           );
         }
 
@@ -522,7 +529,7 @@ async function main() {
           encoding: 'utf8',
           windowsHide: true,
         });
-        console.log(doctorResult.stdout || '');
+        console.log((doctorResult.stdout as string | null | undefined) ?? '');
 
         console.log(`  ${SUCCESS('\u2713')} Hydra initialized for ${process.cwd()}`);
         console.log('');

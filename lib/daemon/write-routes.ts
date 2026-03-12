@@ -56,7 +56,7 @@ export async function handleWriteRoute(ctx: WriteRouteCtx): Promise<boolean> {
   // ── Idempotency Check ──────────────────────────────────────────────────
   if (method === 'POST' && checkIdempotency) {
     const idempotencyKey = req.headers['idempotency-key'] as string | undefined;
-    if (idempotencyKey && checkIdempotency(idempotencyKey)) {
+    if (idempotencyKey != null && idempotencyKey !== '' && checkIdempotency(idempotencyKey)) {
       sendJson(res, 409, { ok: false, error: 'Duplicate request (idempotency key already seen)' });
       return true;
     }
@@ -74,7 +74,7 @@ export async function handleWriteRoute(ctx: WriteRouteCtx): Promise<boolean> {
       'concierge:error',
       'concierge:model_switch',
     ];
-    if (!type || !ALLOWED_TYPES.includes(type)) {
+    if (type === '' || !ALLOWED_TYPES.includes(type)) {
       sendError(res, 400, `Invalid event type. Allowed: ${ALLOWED_TYPES.join(', ')}`);
       return true;
     }
@@ -88,7 +88,7 @@ export async function handleWriteRoute(ctx: WriteRouteCtx): Promise<boolean> {
   if (method === 'POST' && route === '/session/start') {
     const body = await readJsonBody(req);
     const focus = ((body['focus'] as string | null | undefined) ?? '').trim();
-    if (!focus) {
+    if (focus === '') {
       sendError(res, 400, 'Field "focus" is required.');
       return true;
     }
@@ -149,7 +149,7 @@ export async function handleWriteRoute(ctx: WriteRouteCtx): Promise<boolean> {
           branch: parent.branch,
           participants: [...(parent.participants ?? [])],
           status: 'active',
-          reason: reason || 'Forked from parent session',
+          reason: reason === '' ? 'Forked from parent session' : reason,
           contextSnapshot: JSON.stringify({
             tasks: state.tasks.map((t: TaskEntry) => ({
               id: t.id,
@@ -182,7 +182,7 @@ export async function handleWriteRoute(ctx: WriteRouteCtx): Promise<boolean> {
   if (method === 'POST' && route === '/session/spawn') {
     const body = await readJsonBody(req);
     const focus = ((body['focus'] as string | null | undefined) ?? '').trim();
-    if (!focus) {
+    if (focus === '') {
       sendError(res, 400, 'Field "focus" is required for spawn.');
       return true;
     }
@@ -192,7 +192,7 @@ export async function handleWriteRoute(ctx: WriteRouteCtx): Promise<boolean> {
       `session:spawn focus="${focus}"`,
       (state: HydraStateShape) => {
         const parentId: string = state.activeSession?.id ?? '';
-        const spawnId = `${parentId || 'ROOT'}_SPAWN_${Date.now().toString(36)}`;
+        const spawnId = `${parentId === '' ? 'ROOT' : parentId}_SPAWN_${Date.now().toString(36)}`;
 
         // Track on parent if exists
         if (state.activeSession) {
@@ -244,7 +244,7 @@ export async function handleWriteRoute(ctx: WriteRouteCtx): Promise<boolean> {
           throw new Error('Session is already paused.');
         }
         state.activeSession.status = 'paused';
-        state.activeSession.pauseReason = reason || undefined;
+        state.activeSession.pauseReason = reason === '' ? undefined : reason;
         state.activeSession.pausedAt = nowIso();
         return state.activeSession;
       },
@@ -283,7 +283,7 @@ export async function handleWriteRoute(ctx: WriteRouteCtx): Promise<boolean> {
   if (method === 'POST' && route === '/task/add') {
     const body = await readJsonBody(req);
     const title = ((body['title'] as string | null | undefined) ?? '').trim();
-    if (!title) {
+    if (title === '') {
       sendError(res, 400, 'Field "title" is required.');
       return true;
     }
@@ -297,8 +297,10 @@ export async function handleWriteRoute(ctx: WriteRouteCtx): Promise<boolean> {
     const files = parseList(body['files'] ?? []);
     const notes = ((body['notes'] as string | null | undefined) ?? '').trim();
     const blockedBy = parseList(body['blockedBy'] ?? []);
-    const taskType =
-      ((body['type'] as string | null | undefined) ?? '').trim() || classifyTask(title, notes);
+    const taskType = (() => {
+      const bodyType = ((body['type'] as string | null | undefined) ?? '').trim();
+      return bodyType === '' ? classifyTask(title, notes) : bodyType;
+    })();
 
     const wantWorktree = Boolean(body['worktree']) && isWorktreeEnabled();
 
@@ -324,7 +326,7 @@ export async function handleWriteRoute(ctx: WriteRouteCtx): Promise<boolean> {
 
     // Create worktree after mutation succeeds (uses task.id)
     let worktreeInfo: Record<string, unknown> | null = null;
-    if (wantWorktree && (task as Record<string, unknown>)['id']) {
+    if (wantWorktree && (task as Record<string, unknown>)['id'] != null) {
       try {
         worktreeInfo = (await createWorktree(
           (task as Record<string, unknown>)['id'] as string,
@@ -335,9 +337,9 @@ export async function handleWriteRoute(ctx: WriteRouteCtx): Promise<boolean> {
           `task:worktree id=${(task as Record<string, unknown>)['id'] as string}`,
           (state: HydraStateShape) => {
             const t = state.tasks.find((x: TaskEntry) => x.id === task.id);
-            if (t) {
-              t.worktreePath = worktreeInfo!['worktreePath'] as string;
-              t.worktreeBranch = worktreeInfo!['branch'] as string;
+            if (t && worktreeInfo != null) {
+              t.worktreePath = worktreeInfo['worktreePath'] as string;
+              t.worktreeBranch = worktreeInfo['branch'] as string;
             }
           },
           { event: 'worktree_create', taskId: task.id },
@@ -369,7 +371,7 @@ export async function handleWriteRoute(ctx: WriteRouteCtx): Promise<boolean> {
         const files = parseList(body['files']);
         const notes = ((body['notes'] as string | null | undefined) ?? '').trim();
 
-        if (taskId) {
+        if (taskId !== '') {
           const existing = state.tasks.find((item: TaskEntry) => item.id === taskId);
           if (!existing) {
             throw new Error(`Task ${taskId} not found.`);
@@ -387,14 +389,14 @@ export async function handleWriteRoute(ctx: WriteRouteCtx): Promise<boolean> {
           if (files.length > 0) {
             existing.files = files;
           }
-          if (notes) {
-            existing.notes = existing.notes ? `${existing.notes}\n${notes}` : notes;
+          if (notes !== '') {
+            existing.notes = existing.notes === '' ? notes : `${existing.notes}\n${notes}`;
           }
           existing.updatedAt = nowIso();
           return existing;
         }
 
-        if (!title) {
+        if (title === '') {
           throw new Error('Either taskId or title is required.');
         }
 
@@ -419,7 +421,7 @@ export async function handleWriteRoute(ctx: WriteRouteCtx): Promise<boolean> {
     // Create worktree for newly-created tasks when worktreeIsolation is enabled
     // and the dispatch mode is tandem or council (or worktree is explicitly requested).
     // Only applies when a NEW task was created (not when claiming an existing one).
-    const isNewTask = !body['taskId'];
+    const isNewTask = body['taskId'] == null || body['taskId'] === '';
     const dispatchMode = ((body['mode'] as string | null | undefined) ?? '').toLowerCase();
     const wantsWorktree =
       isNewTask &&
@@ -431,7 +433,7 @@ export async function handleWriteRoute(ctx: WriteRouteCtx): Promise<boolean> {
         const cfg = loadHydraConfig();
         if (cfg.routing.worktreeIsolation.enabled) {
           const worktreePath = createTaskWorktree(task.id);
-          if (worktreePath) {
+          if (worktreePath != null && worktreePath !== '') {
             const branch = `hydra/task/${task.id}`;
             await enqueueMutation(
               `task:worktree id=${(task as Record<string, unknown>)['id'] as string}`,
@@ -474,7 +476,7 @@ export async function handleWriteRoute(ctx: WriteRouteCtx): Promise<boolean> {
   if (method === 'POST' && route === '/task/update') {
     const body = await readJsonBody(req);
     const taskId = ((body['taskId'] as string | null | undefined) ?? '').trim();
-    if (!taskId) {
+    if (taskId === '') {
       sendError(res, 400, 'Field "taskId" is required.');
       return true;
     }
@@ -491,9 +493,9 @@ export async function handleWriteRoute(ctx: WriteRouteCtx): Promise<boolean> {
         }
 
         // Atomic claim token validation: if caller provides claimToken, it must match
-        if (body['claimToken'] && !body['force']) {
+        if (body['claimToken'] != null && body['force'] !== true) {
           if (
-            (existing as Record<string, unknown>)['claimToken'] &&
+            (existing as Record<string, unknown>)['claimToken'] != null &&
             (existing as Record<string, unknown>)['claimToken'] !== body['claimToken']
           ) {
             throw new Error(
@@ -529,12 +531,12 @@ export async function handleWriteRoute(ctx: WriteRouteCtx): Promise<boolean> {
         }
         if (body['notes'] !== undefined) {
           const notes = (body['notes'] as string).trim();
-          if (notes) {
-            existing.notes = existing.notes ? `${existing.notes}\n${notes}` : notes;
+          if (notes !== '') {
+            existing.notes = existing.notes === '' ? notes : `${existing.notes}\n${notes}`;
           }
         }
         existing.updatedAt = nowIso();
-        if ((existing as Record<string, unknown>)['stale']) {
+        if ((existing as Record<string, unknown>)['stale'] === true) {
           (existing as Record<string, unknown>)['stale'] = false;
           delete (existing as Record<string, unknown>)['staleSince'];
         }
@@ -551,7 +553,7 @@ export async function handleWriteRoute(ctx: WriteRouteCtx): Promise<boolean> {
     // Auto-cleanup worktree when task completes
     if (
       ['done', 'cancelled'].includes((task as Record<string, unknown>)['status'] as string) &&
-      (task as Record<string, unknown>)['worktreePath'] &&
+      (task as Record<string, unknown>)['worktreePath'] != null &&
       isWorktreeEnabled()
     ) {
       try {
@@ -582,7 +584,7 @@ export async function handleWriteRoute(ctx: WriteRouteCtx): Promise<boolean> {
     const shouldVerify =
       (task as Record<string, unknown>)['status'] === 'done' && body['verify'] !== false;
     const verifyPlan = resolveVerificationPlan(projectRoot);
-    const isVerifying = shouldVerify && verifyPlan['enabled'];
+    const isVerifying = shouldVerify && verifyPlan['enabled'] === true;
     if (isVerifying) {
       runVerification(taskId, verifyPlan);
     }
@@ -593,9 +595,10 @@ export async function handleWriteRoute(ctx: WriteRouteCtx): Promise<boolean> {
       verification: {
         enabled: verifyPlan['enabled'],
         source: verifyPlan['source'],
-        command: (verifyPlan['command'] as string | null | undefined)
-          ? (verifyPlan['command'] as string)
-          : null,
+        command: (() => {
+          const cmd = verifyPlan['command'] as string | null | undefined;
+          return cmd == null || cmd === '' ? null : cmd;
+        })(),
         reason: verifyPlan['reason'],
       },
     });
@@ -606,7 +609,7 @@ export async function handleWriteRoute(ctx: WriteRouteCtx): Promise<boolean> {
     const body = await readJsonBody(req);
     const taskId = ((body['taskId'] as string | null | undefined) ?? '').trim();
     const includeVirtual = body['includeVirtual'] === true;
-    if (!taskId) {
+    if (taskId === '') {
       sendError(res, 400, 'Field "taskId" is required.');
       return true;
     }
@@ -616,7 +619,7 @@ export async function handleWriteRoute(ctx: WriteRouteCtx): Promise<boolean> {
       sendError(res, 404, `Task ${taskId} not found.`);
       return true;
     }
-    const taskType = target.type || classifyTask(target.title, target.notes || '');
+    const taskType = target.type === '' ? classifyTask(target.title, target.notes) : target.type;
     const scores: Record<string, number> = {};
     let recommended = AGENT_NAMES[0];
     let bestScore = 0;
@@ -638,7 +641,11 @@ export async function handleWriteRoute(ctx: WriteRouteCtx): Promise<boolean> {
       for (const va of virtualAgents) {
         const score = (va.taskAffinity as Record<string, number> | undefined)?.[taskType] ?? 0;
         virtualScores[va.name] = score;
-        if (!virtualRecommended || score > (virtualScores[virtualRecommended] ?? 0)) {
+        if (
+          virtualRecommended == null ||
+          virtualRecommended === '' ||
+          score > (virtualScores[virtualRecommended] ?? 0)
+        ) {
           virtualRecommended = va.name;
         }
       }
@@ -662,7 +669,7 @@ export async function handleWriteRoute(ctx: WriteRouteCtx): Promise<boolean> {
   if (method === 'POST' && route === '/verify') {
     const body = await readJsonBody(req);
     const verifyTaskId = ((body['taskId'] as string | null | undefined) ?? '').trim();
-    if (!verifyTaskId) {
+    if (verifyTaskId === '') {
       sendError(res, 400, 'Field "taskId" is required.');
       return true;
     }
@@ -674,7 +681,7 @@ export async function handleWriteRoute(ctx: WriteRouteCtx): Promise<boolean> {
     }
 
     const verifyPlan = resolveVerificationPlan(projectRoot);
-    if (!verifyPlan['enabled']) {
+    if (verifyPlan['enabled'] !== true) {
       sendJson(res, 200, {
         ok: true,
         taskId: verifyTaskId,
@@ -707,7 +714,7 @@ export async function handleWriteRoute(ctx: WriteRouteCtx): Promise<boolean> {
   if (method === 'POST' && route === '/decision') {
     const body = await readJsonBody(req);
     const title = ((body['title'] as string | null | undefined) ?? '').trim();
-    if (!title) {
+    if (title === '') {
       sendError(res, 400, 'Field "title" is required.');
       return true;
     }
@@ -741,7 +748,7 @@ export async function handleWriteRoute(ctx: WriteRouteCtx): Promise<boolean> {
   if (method === 'POST' && route === '/blocker') {
     const body = await readJsonBody(req);
     const title = ((body['title'] as string | null | undefined) ?? '').trim();
-    if (!title) {
+    if (title === '') {
       sendError(res, 400, 'Field "title" is required.');
       return true;
     }
@@ -778,7 +785,7 @@ export async function handleWriteRoute(ctx: WriteRouteCtx): Promise<boolean> {
     const nextStep = (body['nextStep'] as string | null | undefined) ?? '';
     const tasks = parseList(body['tasks']);
 
-    if (!from || !to || !summary) {
+    if (from === '' || to === '' || summary === '') {
       sendError(res, 400, 'Fields "from", "to", and "summary" are required.');
       return true;
     }
@@ -812,7 +819,7 @@ export async function handleWriteRoute(ctx: WriteRouteCtx): Promise<boolean> {
     const body = await readJsonBody(req);
     const handoffId = ((body['handoffId'] as string | null | undefined) ?? '').trim();
     const agent = ((body['agent'] as string | null | undefined) ?? '').toLowerCase();
-    if (!handoffId || !agent) {
+    if (handoffId === '' || agent === '') {
       sendError(res, 400, 'Fields "handoffId" and "agent" are required.');
       return true;
     }
@@ -840,7 +847,7 @@ export async function handleWriteRoute(ctx: WriteRouteCtx): Promise<boolean> {
     const body = await readJsonBody(req);
     const taskId = ((body['taskId'] as string | null | undefined) ?? '').trim();
     const agent = ((body['agent'] as string | null | undefined) ?? '').toLowerCase();
-    if (!taskId || !agent) {
+    if (taskId === '' || agent === '') {
       sendError(res, 400, 'Fields "taskId" and "agent" are required.');
       return true;
     }
@@ -848,7 +855,8 @@ export async function handleWriteRoute(ctx: WriteRouteCtx): Promise<boolean> {
 
     const output = ((body['output'] as string | null | undefined) ?? '').trim();
     const resultStatus = (body['status'] as string | null | undefined) ?? 'completed'; // completed | needs_followup | aborted
-    const durationMs = Number(body['durationMs']) || 0;
+    const durationMsRaw = Number(body['durationMs']);
+    const durationMs = Number.isNaN(durationMsRaw) ? 0 : durationMsRaw;
 
     const result = await enqueueMutation(
       `task:result id=${taskId} agent=${agent} status=${resultStatus}`,
@@ -870,7 +878,7 @@ export async function handleWriteRoute(ctx: WriteRouteCtx): Promise<boolean> {
           submittedAt: nowIso(),
         };
         // Attach structured error info from worker (if present)
-        if (body['errorInfo']) {
+        if (body['errorInfo'] != null) {
           const errInfo = body['errorInfo'] as Record<string, unknown>;
           entry['errorInfo'] = {
             exitCode: errInfo['exitCode'] ?? null,
@@ -895,8 +903,10 @@ export async function handleWriteRoute(ctx: WriteRouteCtx): Promise<boolean> {
             autoUnblock(state, taskId);
           } else if (resultStatus === 'error') {
             // Increment fail count; move to DLQ if exceeded threshold
-            (task as Record<string, unknown>)['failCount'] =
-              (((task as Record<string, unknown>)['failCount'] as number) || 0) + 1;
+            const currentFailCount = (task as Record<string, unknown>)['failCount'] as
+              | number
+              | undefined;
+            (task as Record<string, unknown>)['failCount'] = (currentFailCount ?? 0) + 1;
             const maxAttempts = 3; // config-driven in future
             if (((task as Record<string, unknown>)['failCount'] as number) >= maxAttempts) {
               // Move to dead-letter queue
@@ -909,13 +919,13 @@ export async function handleWriteRoute(ctx: WriteRouteCtx): Promise<boolean> {
             } else {
               task.status = 'blocked';
               (task as Record<string, unknown>)['blockedReason'] =
-                output.slice(0, 500) || 'Agent reported error';
+                output.slice(0, 500) === '' ? 'Agent reported error' : output.slice(0, 500);
             }
           }
         }
 
         // Mark stale reset
-        if ((task as Record<string, unknown>)['stale']) {
+        if ((task as Record<string, unknown>)['stale'] === true) {
           (task as Record<string, unknown>)['stale'] = false;
           delete (task as Record<string, unknown>)['staleSince'];
         }
@@ -930,17 +940,21 @@ export async function handleWriteRoute(ctx: WriteRouteCtx): Promise<boolean> {
       | Record<string, unknown>
       | undefined;
     const taskDone = completedTask ? ['done'].includes(completedTask['status'] as string) : false;
-    if (taskDone && completedTask?.['worktreePath'] && typeof mergeTaskWorktree === 'function') {
+    if (
+      taskDone &&
+      completedTask?.['worktreePath'] != null &&
+      typeof mergeTaskWorktree === 'function'
+    ) {
       try {
         const mergeResult = mergeTaskWorktree(taskId);
-        if (mergeResult['ok']) {
+        if (mergeResult['ok'] === true) {
           // Clean merge: clean up worktree if cleanupOnSuccess (default true)
           const { loadHydraConfig } = await import('../hydra-config.ts');
           const cfg = loadHydraConfig();
           if (cfg.routing.worktreeIsolation.cleanupOnSuccess !== false) {
             cleanupTaskWorktree(taskId);
           }
-        } else if (mergeResult['conflict']) {
+        } else if (mergeResult['conflict'] === true) {
           // Conflict: preserve worktree, flag task for :tasks review
           await enqueueMutation(
             `task:worktree_conflict id=${taskId}`,
@@ -967,12 +981,12 @@ export async function handleWriteRoute(ctx: WriteRouteCtx): Promise<boolean> {
   if (method === 'POST' && route === '/task/checkpoint') {
     const body = await readJsonBody(req);
     const taskId = ((body['taskId'] as string | null | undefined) ?? '').trim();
-    if (!taskId) {
+    if (taskId === '') {
       sendError(res, 400, 'Field "taskId" is required.');
       return true;
     }
     const name = ((body['name'] as string | null | undefined) ?? '').trim();
-    if (!name) {
+    if (name === '') {
       sendError(res, 400, 'Field "name" is required.');
       return true;
     }
@@ -993,11 +1007,11 @@ export async function handleWriteRoute(ctx: WriteRouteCtx): Promise<boolean> {
           name,
           savedAt: nowIso(),
           context,
-          agent: agent || task.owner || 'unknown',
+          agent: ([agent, task.owner] as string[]).find((s) => s !== '') ?? 'unknown',
         };
         (task.checkpoints as unknown[]).push(cp);
         task.updatedAt = nowIso();
-        if ((task as Record<string, unknown>)['stale']) {
+        if ((task as Record<string, unknown>)['stale'] === true) {
           (task as Record<string, unknown>)['stale'] = false;
           delete (task as Record<string, unknown>)['staleSince'];
         }
@@ -1013,7 +1027,7 @@ export async function handleWriteRoute(ctx: WriteRouteCtx): Promise<boolean> {
   // ── Heartbeat ─────────────────────────────────────────────────────────
   if (method === 'POST' && route.startsWith('/task/') && route.endsWith('/heartbeat')) {
     const taskId = route.slice('/task/'.length, -'/heartbeat'.length);
-    if (!taskId) {
+    if (taskId === '') {
       sendError(res, 400, 'Task ID required in URL.');
       return true;
     }
@@ -1032,14 +1046,14 @@ export async function handleWriteRoute(ctx: WriteRouteCtx): Promise<boolean> {
         (task as Record<string, unknown>)['lastHeartbeat'] = now;
         task.updatedAt = now;
         (task as Record<string, unknown>)['lastHeartbeatDetail'] = {
-          agent: agent || task.owner || 'unknown',
+          agent: ([agent, task.owner] as string[]).find((s) => s !== '') ?? 'unknown',
           progress: body['progress'] ?? null,
           outputBytes: body['outputBytes'] ?? 0,
           phase: body['phase'] ?? null,
         };
 
         // Reset stale flag
-        if ((task as Record<string, unknown>)['stale']) {
+        if ((task as Record<string, unknown>)['stale'] === true) {
           (task as Record<string, unknown>)['stale'] = false;
           delete (task as Record<string, unknown>)['staleSince'];
         }
@@ -1074,7 +1088,7 @@ export async function handleWriteRoute(ctx: WriteRouteCtx): Promise<boolean> {
   if (method === 'POST' && route === '/dead-letter/retry') {
     const body = await readJsonBody(req);
     const dlId = ((body['id'] as string | null | undefined) ?? '').trim();
-    if (!dlId) {
+    if (dlId === '') {
       sendError(res, 400, 'Field "id" is required.');
       return true;
     }
@@ -1106,7 +1120,7 @@ export async function handleWriteRoute(ctx: WriteRouteCtx): Promise<boolean> {
 
   if (method === 'POST' && route === '/admin/compact') {
     const result: Record<string, unknown> = _createSnapshot();
-    if (result['ok']) {
+    if (result['ok'] === true) {
       const trimmed = truncateEventsFile(500);
       result['eventsTrimmed'] = trimmed;
     }
