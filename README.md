@@ -204,6 +204,7 @@ For scenario walkthroughs, Mermaid diagrams, and example interactions, start wit
 | `npm run evolve`                  | Autonomous self-improvement              |
 | `npm run nightly`                 | Nightly task automation                  |
 | `npm run tasks`                   | Scan & execute TODO/FIXME/issues         |
+| `npm run lint:mermaid`            | Validate Mermaid diagrams in Markdown    |
 | `npm run eval`                    | Routing evaluation against golden corpus |
 
 ### Operator console (inside `npm run go`)

@@ -41,9 +41,10 @@ npm run tasks:clean         # Delete all tasks/* branches
 npm run eval                # Run routing evaluation against golden corpus
 npm run lint                # ESLint on entire codebase
 npm run lint:fix            # ESLint with auto-fix
+npm run lint:mermaid        # Validate Mermaid diagrams in Markdown
 npm run format              # Prettier format all files
 npm run format:check        # Prettier check (no write)
-npm run typecheck           # tsc --noEmit type check (jsconfig.json)
+npm run typecheck           # tsc --noEmit type check (tsconfig.json)
 npm run quality             # lint + format:check + typecheck combined
 npm run setup:hooks         # Install/verify git pre-commit and pre-push hooks
 ```
@@ -58,7 +59,7 @@ npm run setup:hooks         # Install/verify git pre-commit and pre-push hooks
 
 **Git hooks (Husky v9 + lint-staged)** — install automatically when you run `npm install` or `npm ci` (via the `prepare` script). Use `npm run setup:hooks` only to manually reinstall or verify.
 
-- `pre-commit` — runs lint-staged: ESLint `--fix` + Prettier **auto-write** on staged `.mjs` files; Prettier auto-write on staged `.json/.md/.yml/.yaml`.
+- `pre-commit` — runs lint-staged: ESLint `--fix` + Prettier **auto-write** on staged `.ts/.mjs` files; Mermaid validation + Prettier on staged `.md`; Prettier auto-write on staged `.json/.yml/.yaml`.
 - `pre-push` — runs the full `npm test` suite. Push is blocked if tests fail.
 
 **Always run `npm run quality` before opening a PR.** This runs lint + format:check + typecheck in full (no auto-fix) so you catch issues before CI does.
