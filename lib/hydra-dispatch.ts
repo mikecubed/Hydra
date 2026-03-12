@@ -568,7 +568,15 @@ async function main() {
   console.log(label('Synthesizer snippet', DIM(report.outputSummary.synthesizerSnippet)));
 }
 
-const _isMain = fileURLToPath(import.meta.url) === path.resolve(process.argv[1] ?? '');
+const _isMain = (() => {
+  try {
+    const a = fileURLToPath(import.meta.url);
+    const b = path.resolve(process.argv[1] ?? '');
+    return process.platform === 'win32' ? a.toLowerCase() === b.toLowerCase() : a === b;
+  } catch {
+    return false;
+  }
+})();
 
 if (_isMain) {
   main().catch((err: unknown) => {

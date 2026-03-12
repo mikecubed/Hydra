@@ -205,12 +205,18 @@ test('getAgent returns null for unknown agents', () => {
 // ── bestAgentFor ─────────────────────────────────────────────────────────────
 
 test('bestAgentFor returns correct agents for each task type', () => {
-  assert.equal(bestAgentFor('planning'), 'claude');
-  assert.equal(bestAgentFor('architecture'), 'claude');
-  assert.equal(bestAgentFor('analysis'), 'gemini');
-  assert.equal(bestAgentFor('review'), 'gemini');
-  assert.equal(bestAgentFor('implementation'), 'codex');
-  assert.equal(bestAgentFor('testing'), 'codex');
+  // Pin routing mode so local config overrides don't affect expected results
+  _setTestConfig({ routing: { mode: 'balanced' } });
+  try {
+    assert.equal(bestAgentFor('planning'), 'claude');
+    assert.equal(bestAgentFor('architecture'), 'claude');
+    assert.equal(bestAgentFor('analysis'), 'gemini');
+    assert.equal(bestAgentFor('review'), 'gemini');
+    assert.equal(bestAgentFor('implementation'), 'codex');
+    assert.equal(bestAgentFor('testing'), 'codex');
+  } finally {
+    invalidateConfigCache();
+  }
 });
 
 test('bestAgentFor returns a valid agent name for all task types', () => {

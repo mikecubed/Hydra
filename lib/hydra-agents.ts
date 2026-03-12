@@ -693,9 +693,6 @@ export function unregisterAgent(name: string): boolean {
 }
 
 /**
- * Get an agent definition by name. Returns null if not found.
- */
-/**
  * Apply config-driven enabled overrides to a registry entry without mutating it.
  * Agents like `copilot` are disabled in PHYSICAL_AGENTS and activated via config.
  * This is evaluated on every getAgent/listAgents call so _setTestConfig works in tests
@@ -705,7 +702,7 @@ function _resolveEnabled(entry: AgentDef): boolean {
   if (entry.name === 'copilot') {
     try {
       const cfg = loadHydraConfig();
-      return Boolean(cfg.copilot?.enabled);
+      return cfg.copilot.enabled;
     } catch {
       return false;
     }
@@ -713,11 +710,26 @@ function _resolveEnabled(entry: AgentDef): boolean {
   return entry.enabled;
 }
 
+/**
+ * Get an agent definition by name. Returns null if not found.
+ */
 export function getAgent(name: string | null | undefined): AgentDef | null {
   if (!name) return null;
   const entry = _registry.get(String(name).toLowerCase());
   if (!entry) return null;
   return { ...entry, enabled: _resolveEnabled(entry) };
+}
+
+/**
+ * Enable or disable an agent by name. Updates the live registry entry in-place.
+ * Returns true if the agent was found and updated, false otherwise.
+ */
+export function setAgentEnabled(name: string, enabled: boolean): boolean {
+  const lower = name.toLowerCase();
+  const entry = _registry.get(lower);
+  if (!entry) return false;
+  entry.enabled = enabled;
+  return true;
 }
 
 /**

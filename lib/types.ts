@@ -538,7 +538,7 @@ export interface HydraConfig {
   agents: AgentsConfig;
   routing: RoutingConfig;
   local: LocalConfig;
-  copilot?: CopilotConfig;
+  copilot: CopilotConfig;
   context: ContextConfig;
   verification?: VerificationConfig;
   concierge?: ConciergeConfig;
