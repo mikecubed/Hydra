@@ -422,8 +422,9 @@ async function main() {
     let agent = task.suggestedAgent;
     if (agent) {
       const agentDef = getAgent(agent);
-      const isInstalled = installedCLIs ? installedCLIs[agent] !== false : true;
-      if (!agentDef?.enabled || !isInstalled) {
+      const isInstalled = !(agent in installedCLIs) || installedCLIs[agent];
+      const isLocalDisabled = agent === 'local' && !cfg.local?.enabled;
+      if (!agentDef?.enabled || !isInstalled || isLocalDisabled) {
         agent = bestAgentFor(taskType, { installedCLIs });
       }
     } else {
