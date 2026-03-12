@@ -152,7 +152,7 @@ export async function runAgentsWizard(rl: ReadlineInterface): Promise<void> {
       ],
       // autoAccept is not a formal promptChoice option — omitted
     });
-    fields.responseParser = String((parserChoice as { value: string }).value);
+    fields.responseParser = (parserChoice as { value: string }).value;
   } else {
     fields.baseUrl = await ask('Base URL (e.g. http://localhost:11434/v1)');
     fields.model = await ask('Model name (e.g. mixtral:8x7b, llama3.2)');
@@ -184,7 +184,7 @@ export async function runAgentsWizard(rl: ReadlineInterface): Promise<void> {
       },
     ],
   });
-  fields.affinityPreset = String((profileChoice as { value: string }).value);
+  fields.affinityPreset = (profileChoice as { value: string }).value;
 
   // Council role
   const councilChoice = await promptChoice(rl, {
@@ -196,7 +196,7 @@ export async function runAgentsWizard(rl: ReadlineInterface): Promise<void> {
       { value: 'implementer', label: 'Implementer', hint: 'Implementation role' },
     ],
   });
-  fields.councilRole = (councilChoice as { value: string | null }).value as string | null;
+  fields.councilRole = (councilChoice as { value: string | null }).value;
 
   // Build entry
   const entry = buildCustomAgentEntry(fields);
@@ -233,7 +233,7 @@ export async function runAgentsWizard(rl: ReadlineInterface): Promise<void> {
 
   // Save to config
   const cfg = loadHydraConfig();
-  const customAgents = [...(cfg.agents?.customAgents ?? [])];
+  const customAgents = [...cfg.agents.customAgents];
   const existing = customAgents.findIndex((a) => a.name === entry.name);
   if (existing >= 0) {
     customAgents[existing] = entry;

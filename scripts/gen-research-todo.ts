@@ -117,11 +117,11 @@ function groupFiles(files: string[]) {
     const parts = rel.split(path.sep);
     const group = parts.length > 1 ? parts[0] : 'root';
 
-    if (!groups[group]) groups[group] = [];
+    if (!(group in groups)) groups[group] = [];
 
     // Link is relative to OUTPUT_DIR
     const linkRel = path.relative(OUTPUT_DIR, f).replace(/\\/g, '/');
-    const title = extractTitle(f) || toTitleCase(path.basename(f, path.extname(f)));
+    const title = extractTitle(f) ?? toTitleCase(path.basename(f, path.extname(f)));
 
     groups[group].push({ title, link: linkRel });
   }
@@ -167,7 +167,7 @@ function renderBlock(groups: Record<string, { title: string; link: string }[]>) 
 
 function countItems(groups: Record<string, unknown[]>) {
   let total = 0;
-  for (const items of Object.values(groups)) total += (items as unknown[]).length;
+  for (const items of Object.values(groups)) total += items.length;
   return { total, groups: Object.keys(groups).length };
 }
 
@@ -188,7 +188,7 @@ function buildOutput(groups: Record<string, { title: string; link: string }[]>) 
   const footer = [
     '',
     '---',
-    `_${total} file${total === 1 ? '' : 's'} across ${gc} group${gc === 1 ? '' : 's'}._`,
+    `_${String(total)} file${total === 1 ? '' : 's'} across ${String(gc)} group${gc === 1 ? '' : 's'}._`,
     '',
   ].join('\n');
 
@@ -235,7 +235,7 @@ function main() {
 
   const { total, groups: gc } = countItems(groups);
   console.log(`Written: docs/coordination/RESEARCH_TODO.md`);
-  console.log(`  ${total} file${total === 1 ? '' : 's'} across ${gc} group${gc === 1 ? '' : 's'}`);
+  console.log(`  ${String(total)} file${total === 1 ? '' : 's'} across ${String(gc)} group${gc === 1 ? '' : 's'}`);
 }
 
 main();

@@ -12,7 +12,7 @@
  */
 
 import { EventEmitter } from 'node:events';
-import { ChildProcess } from 'node:child_process';
+import type { ChildProcess } from 'node:child_process';
 import { getAgent } from './hydra-agents.ts';
 import { request, short } from './hydra-utils.ts';
 import { loadHydraConfig } from './hydra-config.ts';
@@ -34,7 +34,11 @@ let globalMaxInFlight = 3;
  * Get current worker concurrency stats.
  * @returns {{ active: number, maxInFlight: number, utilization: number }}
  */
-export function getWorkerConcurrencyStats() {
+export function getWorkerConcurrencyStats(): {
+  active: number;
+  maxInFlight: number;
+  utilization: number;
+} {
   return {
     active: activeTaskCount,
     maxInFlight: globalMaxInFlight,
@@ -133,11 +137,11 @@ export class AgentWorker extends EventEmitter {
     this.projectRoot = projectRoot ?? '';
 
     const workerCfg = getWorkerConfig();
-    this.permissionMode = permissionMode || workerCfg.permissionMode;
-    this.autoChain = autoChain === undefined ? workerCfg.autoChain : autoChain;
+    this.permissionMode = permissionMode ?? workerCfg.permissionMode;
+    this.autoChain = autoChain ?? workerCfg.autoChain;
     this.basePollIntervalMs = workerCfg.pollIntervalMs;
     this.pollIntervalMs = workerCfg.pollIntervalMs;
-    this.maxOutputBytes = (workerCfg.maxOutputBufferKB || 8) * 1024;
+    this.maxOutputBytes = workerCfg.maxOutputBufferKB * 1024;
     this.adaptivePolling = workerCfg.concurrency?.adaptivePolling !== false;
 
     // Update global concurrency limit from config
@@ -154,22 +158,22 @@ export class AgentWorker extends EventEmitter {
     this._outputBuffer = '';
   }
 
-  get status() {
+  get status(): string {
     return this._status;
   }
 
-  get currentTask() {
+  get currentTask(): { taskId: string; title: string; startedAt: number } | null {
     return this._currentTask;
   }
 
-  get uptime() {
+  get uptime(): number {
     return this._startedAt ? Date.now() - this._startedAt : 0;
   }
 
   /**
    * Start the work loop. Polls daemon for tasks, executes, reports, repeats.
    */
-  start() {
+  start(): void {
     if (this._status === 'working' || this._status === 'idle') return;
 
     this._stopped = false;
@@ -186,7 +190,7 @@ export class AgentWorker extends EventEmitter {
   /**
    * Graceful shutdown: finish current task, then exit loop.
    */
-  stop() {
+  stop(): void {
     this._stopped = true;
     if (this._status === 'idle') {
       this._status = 'stopped';
@@ -198,7 +202,7 @@ export class AgentWorker extends EventEmitter {
   /**
    * Immediate kill: abort current process and exit.
    */
-  kill() {
+  kill(): void {
     this._stopped = true;
     if (this._childProcess) {
       try {
@@ -216,20 +220,19 @@ export class AgentWorker extends EventEmitter {
   /**
    * Update the permission mode at runtime.
    */
-  setPermissionMode(mode: string) {
+  setPermissionMode(mode: string): void {
     this.permissionMode = mode;
   }
 
   // ── Internal Work Loop ──────────────────────────────────────────────────
 
-  async _workLoop() {
+  async _workLoop(): Promise<void> {
     while (!this._stopped) {
       try {
         // Concurrency gate: wait if too many tasks running globally
-        while (activeTaskCount >= globalMaxInFlight && !this._stopped) {
+        while (activeTaskCount >= globalMaxInFlight) {
           await this._sleep(500);
         }
-        if (this._stopped) break;
 
         const next = await this._pollNext();
 
@@ -272,8 +275,8 @@ export class AgentWorker extends EventEmitter {
             /* non-critical */
           }
 
-          prompt = next.handoff?.summary || next.handoff?.nextStep || 'Continue assigned work.';
-          taskId = next.handoff?.tasks?.[0] || next.handoff?.id || 'unknown';
+          prompt = next.handoff?.summary ?? next.handoff?.nextStep ?? 'Continue assigned work.';
+          taskId = next.handoff?.tasks?.[0] ?? next.handoff?.id ?? 'unknown';
           title = short(prompt, 80);
         } else if (
           next.action === 'claim_owned_task' ||
@@ -324,14 +327,14 @@ export class AgentWorker extends EventEmitter {
 
         // Heartbeat interval: send periodic pings to daemon during execution
         const workerCfg = getWorkerConfig();
-        const hbIntervalMs = workerCfg.heartbeatIntervalMs || 30_000;
+        const hbIntervalMs = workerCfg.heartbeatIntervalMs ?? 30_000;
         const hbInterval = setInterval(() => {
           fetch(`${this.baseUrl}/task/${taskId}/heartbeat`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
               agent: this.agent,
-              outputBytes: this._outputBuffer?.length || 0,
+              outputBytes: this._outputBuffer.length,
               phase: 'executing',
             }),
             signal: AbortSignal.timeout(5000),
@@ -372,10 +375,13 @@ export class AgentWorker extends EventEmitter {
               result as unknown as Record<string, unknown>,
             );
             if (codexCheck.isCodexError) {
+              const codexCat = typeof codexCheck.category === 'string' ? codexCheck.category : '';
+              const codexMsg =
+                typeof codexCheck.errorMessage === 'string' ? codexCheck.errorMessage : '';
               this.emit('task:progress', {
                 agent: this.agent,
                 taskId,
-                output: `[${codexCheck.category}] ${codexCheck.errorMessage}`,
+                output: `[${codexCat}] ${codexMsg}`,
               });
               // Don't attempt model fallback — this is an env/config issue
             } else {
@@ -393,7 +399,7 @@ export class AgentWorker extends EventEmitter {
                   this.emit('task:progress', {
                     agent: this.agent,
                     taskId,
-                    output: `Model recovery: ${modelCheck.failedModel} → ${recovery.newModel}`,
+                    output: `Model recovery: ${modelCheck.failedModel ?? ''} → ${recovery.newModel ?? ''}`,
                   });
                   result = await this._executeAgent(prompt);
                   result.recovered = true;
@@ -413,12 +419,12 @@ export class AgentWorker extends EventEmitter {
           ? undefined
           : {
               exitCode: result.exitCode,
-              signal: result.signal || null,
+              signal: result.signal ?? null,
               stderr: short(result.stderr || '', 500),
               error: result.error,
-              errorCategory: result.errorCategory || null,
-              errorDetail: result.errorDetail || null,
-              errorContext: result.errorContext || null,
+              errorCategory: result.errorCategory ?? null,
+              errorDetail: result.errorDetail ?? null,
+              errorContext: result.errorContext ?? null,
             };
         try {
           await request('POST', this.baseUrl, '/task/result', {
@@ -437,7 +443,7 @@ export class AgentWorker extends EventEmitter {
               status: result.ok ? 'done' : 'blocked',
               notes: result.ok
                 ? `Worker output: ${outputSummary}`
-                : `Worker error: ${result.error || outputSummary}`,
+                : `Worker error: ${result.error ?? outputSummary}`,
             });
           } catch {
             /* daemon may be down */
@@ -463,13 +469,13 @@ export class AgentWorker extends EventEmitter {
             taskId,
             title,
             error: result.errorCategory
-              ? `[${result.errorCategory}] ${result.errorDetail || result.error}`
+              ? `[${result.errorCategory}] ${result.errorDetail ?? result.error}`
               : result.error,
             exitCode: result.exitCode,
-            signal: result.signal || null,
-            errorCategory: result.errorCategory || null,
-            errorDetail: result.errorDetail || null,
-            errorContext: result.errorContext || null,
+            signal: result.signal ?? null,
+            errorCategory: result.errorCategory ?? null,
+            errorDetail: result.errorDetail ?? null,
+            errorContext: result.errorContext ?? null,
             stderr: short(result.stderr || '', 300),
           });
 
@@ -506,8 +512,8 @@ export class AgentWorker extends EventEmitter {
         this._status = 'error';
         this.emit('task:error', {
           agent: this.agent,
-          taskId: this._currentTask?.taskId || 'unknown',
-          title: this._currentTask?.title || '',
+          taskId: this._currentTask?.taskId ?? 'unknown',
+          title: this._currentTask?.title ?? '',
           error: (err as Error).message,
         });
         this._currentTask = null;
@@ -525,14 +531,14 @@ export class AgentWorker extends EventEmitter {
   /**
    * Poll daemon for next available work.
    */
-  async _pollNext() {
+  async _pollNext(): Promise<WorkerNextAction | null> {
     try {
       const data = await request(
         'GET',
         this.baseUrl,
         `/next?agent=${encodeURIComponent(this.agent)}`,
       );
-      return (data as { next?: WorkerNextAction })?.next ?? null;
+      return (data as { next?: WorkerNextAction }).next ?? null;
     } catch {
       return null;
     }
@@ -542,7 +548,7 @@ export class AgentWorker extends EventEmitter {
    * Build a prompt string from a task object.
    * If the task has a preferredAgent that's a virtual agent, use its rolePrompt.
    */
-  _buildTaskPrompt(task: Record<string, unknown> | null) {
+  _buildTaskPrompt(task: Record<string, unknown> | null): string {
     if (!task) return 'Continue assigned work.';
 
     // Use virtual agent's rolePrompt if task specifies one
@@ -555,12 +561,20 @@ export class AgentWorker extends EventEmitter {
     }
     if (!rolePrompt) {
       const agentConfig = getAgent(this.agent);
-      rolePrompt = agentConfig?.rolePrompt || '';
+      rolePrompt = agentConfig?.rolePrompt ?? '';
     }
 
-    const parts = [`Task: ${task['title'] || 'Untitled'}`];
-    if (task['notes']) parts.push(`Notes: ${task['notes']}`);
-    if (task['done']) parts.push(`Definition of Done: ${task['done']}`);
+    const title = typeof task['title'] === 'string' ? task['title'] : 'Untitled';
+    const parts = [`Task: ${title}`];
+    if (task['notes']) {
+      const notes =
+        typeof task['notes'] === 'string' ? task['notes'] : JSON.stringify(task['notes']);
+      parts.push(`Notes: ${notes}`);
+    }
+    if (task['done']) {
+      const done = typeof task['done'] === 'string' ? task['done'] : JSON.stringify(task['done']);
+      parts.push(`Definition of Done: ${done}`);
+    }
     if (rolePrompt) parts.push('', rolePrompt);
     parts.push('', 'Execute this task. Report exactly what you changed.');
 
@@ -572,7 +586,7 @@ export class AgentWorker extends EventEmitter {
    * Resolves virtual agents to their physical CLI backend.
    * Returns { ok, output, error, tokenUsage }.
    */
-  async _executeAgent(prompt: string) {
+  async _executeAgent(prompt: string): Promise<Awaited<ReturnType<typeof executeAgent>>> {
     const result = await executeAgent(this.agent, prompt, {
       cwd: this.projectRoot,
       permissionMode: this.permissionMode,
@@ -581,7 +595,7 @@ export class AgentWorker extends EventEmitter {
         this.emit('task:progress', {
           agent: this.agent,
           taskId: this._currentTask?.taskId,
-          output: status || `${outputKB}KB received`,
+          output: status ?? `${String(outputKB)}KB received`,
         });
       },
     });
@@ -589,11 +603,11 @@ export class AgentWorker extends EventEmitter {
     return result;
   }
 
-  _sleep(ms: number) {
+  _sleep(ms: number): Promise<void> {
     return new Promise((resolve) => {
       const id = setTimeout(resolve, ms);
       // Don't block process exit
-      if (id.unref) id.unref();
+      id.unref();
     });
   }
 }
