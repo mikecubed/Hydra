@@ -14,7 +14,9 @@
  */
 
 // @ts-expect-error cross-spawn has no type declarations
-import spawn from 'cross-spawn';
+import _spawn from 'cross-spawn';
+import type { ChildProcess, SpawnOptions } from 'node:child_process';
+const spawn = _spawn as (cmd: string, args: string[], opts?: SpawnOptions) => ChildProcess;
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -211,7 +213,7 @@ const CLAUDE_PERM_MAP: Record<string, string> = {
   default: 'default',
 };
 function _resolveClaudePerm(mode: string): string {
-  return CLAUDE_PERM_MAP[mode] || mode; // pass through if already a valid CLI value
+  return CLAUDE_PERM_MAP[mode] === '' ? mode : CLAUDE_PERM_MAP[mode]; // pass through if already a valid CLI value
 }
 void _resolveClaudePerm; // retain for future use
 
@@ -234,7 +236,7 @@ let _geminiTokenExpiry = 0;
 let _geminiProjectId: string | null = null;
 
 async function getGeminiToken(): Promise<string | null> {
-  if (_geminiToken && Date.now() < _geminiTokenExpiry - 60_000) return _geminiToken;
+  if (_geminiToken != null && Date.now() < _geminiTokenExpiry - 60_000) return _geminiToken;
 
   const credsPath = path.join(os.homedir(), '.gemini', 'oauth_creds.json');
   if (!fs.existsSync(credsPath)) return null;
@@ -242,19 +244,20 @@ async function getGeminiToken(): Promise<string | null> {
   const creds = JSON.parse(fs.readFileSync(credsPath, 'utf8')) as Record<string, unknown>;
 
   if (
-    creds['access_token'] &&
-    creds['expiry_date'] &&
-    Date.now() < (creds['expiry_date'] as number) - 60_000
+    typeof creds['access_token'] === 'string' &&
+    creds['access_token'] !== '' &&
+    typeof creds['expiry_date'] === 'number' &&
+    Date.now() < creds['expiry_date'] - 60_000
   ) {
-    _geminiToken = creds['access_token'] as string;
-    _geminiTokenExpiry = creds['expiry_date'] as number;
+    _geminiToken = creds['access_token'];
+    _geminiTokenExpiry = creds['expiry_date'];
     return _geminiToken;
   }
 
-  if (!creds['refresh_token']) return null;
+  if (creds['refresh_token'] == null) return null;
 
   // Require the client secret from the environment — refuse to proceed without it.
-  if (!GEMINI_OAUTH.clientSecret) {
+  if (GEMINI_OAUTH.clientSecret === '') {
     throw new Error(
       'Gemini OAuth token refresh requires GEMINI_OAUTH_CLIENT_SECRET to be set. ' +
         'See .env.example for setup instructions.',
@@ -293,7 +296,7 @@ async function getGeminiToken(): Promise<string | null> {
 }
 
 async function getGeminiProjectId(token: string): Promise<string | null> {
-  if (_geminiProjectId) return _geminiProjectId;
+  if (_geminiProjectId != null) return _geminiProjectId;
 
   const resp = await fetch(`${CODE_ASSIST_ENDPOINT}:loadCodeAssist`, {
     method: 'POST',
@@ -491,14 +494,14 @@ export function diagnoseAgentError(agent: string, result: ExecuteResult): Execut
       result.errorDetail = detail;
       // Extract the matching line for context
       const matchLine = combined.split('\n').find((l) => pattern.test(l));
-      if (matchLine) result.errorContext = matchLine.trim().slice(0, 300);
+      if (matchLine != null) result.errorContext = matchLine.trim().slice(0, 300);
       return result;
     }
   }
 
   // 2. Interpret signal (process killed by signal — code may be null)
   const signal = result.signal;
-  if (signal) {
+  if (signal != null) {
     const signalMap: Partial<Record<string, SignalInfo>> = {
       SIGKILL: { category: 'oom', detail: 'killed (SIGKILL / OOM)' },
       SIGTERM: { category: 'signal', detail: 'terminated (SIGTERM)' },
@@ -514,7 +517,7 @@ export function diagnoseAgentError(agent: string, result: ExecuteResult): Execut
   }
 
   // 3. For agents with --json output, extract JSONL error events (higher signal than exit code 1)
-  if (getAgent(agent)?.features.jsonOutput) {
+  if (getAgent(agent)?.features.jsonOutput === true) {
     const jsonlErrors = extractCodexErrors(result.stdout ?? result.output);
     if (jsonlErrors.length > 0) {
       result.errorCategory = agent === 'codex' ? 'codex-jsonl-error' : 'jsonl-error';
@@ -525,7 +528,11 @@ export function diagnoseAgentError(agent: string, result: ExecuteResult): Execut
   }
 
   // 4. Interpret exit code (only if not already classified, e.g. by JSONL extraction)
-  if (!result.errorCategory && code !== null && EXIT_CODE_LABELS[code]) {
+  if (
+    (result.errorCategory == null || result.errorCategory === '') &&
+    code !== null &&
+    code in EXIT_CODE_LABELS
+  ) {
     let errorCategory: string;
     if (code === 127) errorCategory = 'invocation';
     else if (code === 126) errorCategory = 'permission';
@@ -541,30 +548,35 @@ export function diagnoseAgentError(agent: string, result: ExecuteResult): Execut
   // 5. Null exit code with no signal = process died without normal exit
   if (code === null) {
     const stderrTrimmed = stderr.replace(/\[Hydra Telemetry\].*?\n/g, '').trim();
-    if (stderrTrimmed) {
+    if (stderrTrimmed === '') {
+      result.errorCategory = 'silent-crash';
+      result.errorDetail = `${agent} terminated without exit code or signal — possible spawn failure, missing binary, or env issue`;
+      if (result.error != null) result.errorContext = result.error.slice(0, 300);
+    } else {
       result.errorCategory = 'unclassified';
       result.errorDetail = `${agent} terminated without exit code, but produced stderr`;
       result.errorContext = stderrTrimmed.split('\n').slice(0, 3).join(' | ').slice(0, 300);
-    } else {
-      result.errorCategory = 'silent-crash';
-      result.errorDetail = `${agent} terminated without exit code or signal — possible spawn failure, missing binary, or env issue`;
-      if (result.error) result.errorContext = result.error.slice(0, 300);
     }
     return result;
   }
 
   // 6. Empty output with non-zero exit = likely process died before producing output
-  if (!result.errorCategory && code !== 0 && !stdout.trim() && !stderr.trim()) {
+  if (
+    (result.errorCategory == null || result.errorCategory === '') &&
+    code !== 0 &&
+    stdout.trim() === '' &&
+    stderr.trim() === ''
+  ) {
     result.errorCategory = 'silent-crash';
     result.errorDetail = `${agent} exited with code ${String(code)} but produced no output — possible early crash, missing binary, or env issue`;
     return result;
   }
 
   // 7. Non-zero exit with stderr but no pattern match = unclassified
-  if (code !== 0 && !result.errorCategory) {
+  if (code !== 0 && (result.errorCategory == null || result.errorCategory === '')) {
     result.errorCategory = 'unclassified';
     result.errorDetail = `Exit code ${String(code)}`;
-    if (stderr.trim()) {
+    if (stderr.trim() !== '') {
       result.errorContext = stderr.trim().split('\n').slice(-3).join(' | ').slice(0, 300);
     }
   }
@@ -574,7 +586,7 @@ export function diagnoseAgentError(agent: string, result: ExecuteResult): Execut
     const originalError = result.error ?? '';
     // If error is non-existent, vague, or just the exit code, replace it with the diagnosis
     const isGeneric =
-      !originalError ||
+      originalError === '' ||
       originalError.includes('Exit code') ||
       originalError.includes('Spawn error') ||
       originalError.includes('Process terminated') ||
@@ -582,12 +594,9 @@ export function diagnoseAgentError(agent: string, result: ExecuteResult): Execut
       originalError.includes('something went wrong');
 
     if (isGeneric) {
-      const signalPart = result.signal ? ` (signal ${result.signal})` : '';
-      const codePart =
-        result.exitCode !== null
-          ? ` (exit code ${String(result.exitCode)})`
-          : '';
-      result.error = `[${result.errorCategory ?? ''}] ${result.errorDetail ?? ''}${signalPart || codePart}`;
+      const signalPart = result.signal == null ? '' : ` (signal ${result.signal})`;
+      const codePart = result.exitCode === null ? '' : ` (exit code ${String(result.exitCode)})`;
+      result.error = `[${result.errorCategory ?? ''}] ${result.errorDetail ?? ''}${signalPart === '' ? codePart : signalPart}`;
     }
   }
 
@@ -607,7 +616,7 @@ async function executeGeminiDirect(
 
   try {
     const token = await getGeminiToken();
-    if (!token) {
+    if (token == null) {
       const durationMs = Date.now() - startTime;
       const err = 'No Gemini OAuth credentials (~/.gemini/oauth_creds.json)';
       recordCallError(metricsHandle, err);
@@ -625,7 +634,7 @@ async function executeGeminiDirect(
     }
 
     const projectId = await getGeminiProjectId(token);
-    if (!projectId) {
+    if (projectId == null) {
       const durationMs = Date.now() - startTime;
       const err = 'Could not resolve Gemini project ID';
       recordCallError(metricsHandle, err);
@@ -650,6 +659,8 @@ async function executeGeminiDirect(
 
     let lastError: string | null = null;
     for (let attempt = 0; attempt <= maxRetries; attempt++) {
+      // sequential: each iteration depends on previous response (retry loop)
+      // eslint-disable-next-line no-await-in-loop
       const resp = await fetch(`${CODE_ASSIST_ENDPOINT}:generateContent`, {
         method: 'POST',
         headers: {
@@ -669,6 +680,7 @@ async function executeGeminiDirect(
       });
 
       if (resp.ok) {
+        // eslint-disable-next-line no-await-in-loop
         const data = (await resp.json()) as GeminiContentResponse;
         const text =
           data.response?.candidates?.[0]?.content?.parts
@@ -689,14 +701,14 @@ async function executeGeminiDirect(
         };
       }
 
+      // eslint-disable-next-line no-await-in-loop
       const errText = await resp.text().catch(() => '');
 
       if (resp.status === 429 || /RESOURCE_EXHAUSTED|QUOTA_EXHAUSTED/i.test(errText)) {
         if (attempt < maxRetries) {
           const serverRetryAfter = resp.headers.get('retry-after');
-          const retryAfterMs = serverRetryAfter
-            ? Number.parseInt(serverRetryAfter, 10) * 1000
-            : null;
+          const retryAfterMs =
+            serverRetryAfter == null ? null : Number.parseInt(serverRetryAfter, 10) * 1000;
           const delay = calculateBackoff(attempt, {
             baseDelayMs,
             maxDelayMs,
@@ -708,7 +720,10 @@ async function executeGeminiDirect(
               0,
               `Rate limited, retrying in ${(delay / 1000).toFixed(0)}s`,
             );
-          await new Promise<void>((r) => { setTimeout(r, delay); });
+          // eslint-disable-next-line no-await-in-loop
+          await new Promise<void>((r) => {
+            setTimeout(r, delay);
+          });
           continue;
         }
         lastError = `Gemini API 429 (exhausted ${String(maxRetries)} retries)`;
@@ -881,9 +896,7 @@ async function executeLocalAgent(
  */
 export function expandInvokeArgs(args: string[], vars: Record<string, string>): string[] {
   return args.map((arg: string) =>
-    arg.replace(/\{(\w+)\}/g, (match: string, key: string) =>
-      key in vars ? vars[key] : match,
-    ),
+    arg.replace(/\{(\w+)\}/g, (match: string, key: string) => (key in vars ? vars[key] : match)),
   );
 }
 
@@ -962,7 +975,7 @@ async function executeCustomCliAgent(
           }
         ).nonInteractive)
       : undefined;
-  if (!invokeConfig?.cmd || !Array.isArray(invokeConfig.args)) {
+  if (invokeConfig?.cmd == null || invokeConfig.cmd === '' || !Array.isArray(invokeConfig.args)) {
     return {
       ok: false,
       output: '',
@@ -996,6 +1009,7 @@ async function executeCustomCliAgent(
       stdio: ['ignore', 'pipe', 'pipe'],
       windowsHide: true,
     });
+    // spawn is typed as returning ChildProcess via the typed wrapper at top of file
 
     let timer: ReturnType<typeof setTimeout> | undefined;
     if (timeoutMs > 0) {
@@ -1005,102 +1019,107 @@ async function executeCustomCliAgent(
       }, timeoutMs);
     }
 
-    child.on('error', async (err: NodeJS.ErrnoException) => {
-      if (settled) return;
-      settled = true;
-      if (timer) clearTimeout(timer);
-      const durationMs = Date.now() - startTime;
-      const isUnavailable = err.code === 'ENOENT';
-      const errorCategory = isUnavailable ? 'custom-cli-unavailable' : 'custom-cli-error';
-      recordCallError(metricsHandle, errorCategory);
-      await endAgentSpan(span, { ok: false, error: errorCategory });
-      resolve({
-        ok: false,
-        output: '',
-        stdout: '',
-        stderr: err.message,
-        error: errorCategory,
-        errorCategory,
-        exitCode: null,
-        signal: null,
-        durationMs,
-        timedOut: false,
-      });
-    });
-
-    child.stdout!.setEncoding('utf8');
-    child.stderr!.setEncoding('utf8');
-    child.stdout!.on('data', (d: string) => {
-      stdout += d;
-      if (onProgress) onProgress(Date.now() - startTime, Math.round(stdout.length / 1024));
-    });
-    child.stderr!.on('data', (d: string) => {
-      stderr += d;
-    });
-
-    child.on('close', async (code: number | null, signal: string | null) => {
-      if (settled) return;
-      settled = true;
-      if (timer) clearTimeout(timer);
-      const durationMs = Date.now() - startTime;
-      const isFailure = (code !== 0 || Boolean(signal)) && !timedOut;
-      if (isFailure) {
-        recordCallError(metricsHandle, 'custom-cli-error');
-        await endAgentSpan(span, { ok: false, error: 'custom-cli-error' });
+    child.on('error', (err: NodeJS.ErrnoException) => {
+      void (async () => {
+        if (settled) return;
+        settled = true;
+        if (timer) clearTimeout(timer);
+        const durationMs = Date.now() - startTime;
+        const isUnavailable = err.code === 'ENOENT';
+        const errorCategory = isUnavailable ? 'custom-cli-unavailable' : 'custom-cli-error';
+        recordCallError(metricsHandle, errorCategory);
+        await endAgentSpan(span, { ok: false, error: errorCategory });
         resolve({
           ok: false,
           output: '',
-          stdout,
-          stderr,
-          error: 'custom-cli-error',
-          errorCategory: 'custom-cli-error',
-          exitCode: code,
-          signal,
+          stdout: '',
+          stderr: err.message,
+          error: errorCategory,
+          errorCategory,
+          exitCode: null,
+          signal: null,
           durationMs,
           timedOut: false,
         });
-        return;
-      }
-      // Prefer plugin parseOutput (set by registerAgent) for token/cost extraction.
-      // Fall back to legacy responseParser for config-only agents not in the registry.
-      let parsedOutput: string;
-      let tokenUsage: TokenUsage | null = null;
-      let costUsd: number | null = null;
-      if ('parseOutput' in def && typeof def.parseOutput === 'function') {
-        const result = (def as AgentDef).parseOutput(stdout, {
-          jsonOutput: (def as AgentDef).features.jsonOutput,
+      })();
+    });
+
+    // stdout and stderr are always defined with stdio: ['ignore', 'pipe', 'pipe']
+    child.stdout?.setEncoding('utf8');
+    child.stderr?.setEncoding('utf8');
+    child.stdout?.on('data', (d: string) => {
+      stdout += d;
+      if (onProgress) onProgress(Date.now() - startTime, Math.round(stdout.length / 1024));
+    });
+    child.stderr?.on('data', (d: string) => {
+      stderr += d;
+    });
+
+    child.on('close', (code: number | null, signal: string | null) => {
+      void (async () => {
+        if (settled) return;
+        settled = true;
+        if (timer) clearTimeout(timer);
+        const durationMs = Date.now() - startTime;
+        const isFailure = (code !== 0 || Boolean(signal)) && !timedOut;
+        if (isFailure) {
+          recordCallError(metricsHandle, 'custom-cli-error');
+          await endAgentSpan(span, { ok: false, error: 'custom-cli-error' });
+          resolve({
+            ok: false,
+            output: '',
+            stdout,
+            stderr,
+            error: 'custom-cli-error',
+            errorCategory: 'custom-cli-error',
+            exitCode: code,
+            signal,
+            durationMs,
+            timedOut: false,
+          });
+          return;
+        }
+        // Prefer plugin parseOutput (set by registerAgent) for token/cost extraction.
+        // Fall back to legacy responseParser for config-only agents not in the registry.
+        let parsedOutput: string;
+        let tokenUsage: TokenUsage | null = null;
+        let costUsd: number | null = null;
+        if ('parseOutput' in def && typeof def.parseOutput === 'function') {
+          const result = (def as AgentDef).parseOutput(stdout, {
+            jsonOutput: (def as AgentDef).features.jsonOutput,
+          });
+          parsedOutput = result.output;
+          tokenUsage = result.tokenUsage ?? null;
+          costUsd = result.costUsd ?? null;
+        } else {
+          const parser =
+            ('responseParser' in def
+              ? (def as { responseParser?: string }).responseParser
+              : 'plaintext') ?? 'plaintext';
+          parsedOutput = parseCliResponse(stdout, parser as 'plaintext' | 'json' | 'markdown');
+        }
+        recordCallComplete(metricsHandle, {
+          output: parsedOutput,
+          stdout: parsedOutput,
+          tokenUsage: tokenUsage ?? undefined,
+          costUsd,
         });
-        parsedOutput = result.output;
-        tokenUsage = result.tokenUsage ?? null;
-        costUsd = result.costUsd ?? null;
-      } else {
-        const parser =
-          ('responseParser' in def
-            ? (def as { responseParser?: string }).responseParser
-            : 'plaintext') ?? 'plaintext';
-        parsedOutput = parseCliResponse(stdout, parser as 'plaintext' | 'json' | 'markdown');
-      }
-      recordCallComplete(metricsHandle, {
-        output: parsedOutput,
-        stdout: parsedOutput,
-        tokenUsage: tokenUsage ?? undefined,
-        costUsd,
-      });
-      await endAgentSpan(span, { ok: !timedOut });
-      resolve({
-        ok: !timedOut,
-        output: parsedOutput,
-        stdout: parsedOutput,
-        stderr,
-        tokenUsage,
-        costUsd,
-        error: timedOut ? 'timeout' : null,
-        errorCategory: timedOut ? 'custom-cli-error' : undefined,
-        exitCode: code,
-        signal,
-        durationMs,
-        timedOut,
-      });
+        await endAgentSpan(span, { ok: !timedOut });
+        resolve({
+          ok: !timedOut,
+          output: parsedOutput,
+          stdout: parsedOutput,
+          stderr,
+          tokenUsage,
+          costUsd,
+          error: timedOut ? 'timeout' : null,
+          errorCategory: timedOut ? 'custom-cli-error' : undefined,
+          exitCode: code,
+          signal,
+          durationMs,
+          timedOut,
+        });
+      })();
     });
   });
 }
@@ -1119,8 +1138,7 @@ async function executeCustomApiAgent(
     | (AgentDef & { baseUrl?: string; model?: string; maxTokens?: number })
     | CustomAgentDef
     | null
-    | undefined =
-    getAgent(agentName) ?? cfg.agents.customAgents.find((a) => a.name === agentName);
+    | undefined = getAgent(agentName) ?? cfg.agents.customAgents.find((a) => a.name === agentName);
 
   if (!def || ('enabled' in def && def.enabled === false)) {
     return {
@@ -1226,7 +1244,7 @@ export async function executeAgent(
 
   // Hub registration (opt-in via opts.hubCwd)
   let _hubSessId: string | null = null;
-  if (opts.hubCwd) {
+  if (opts.hubCwd != null && opts.hubCwd !== '') {
     try {
       _hubSessId = hubRegister({
         agent: opts.hubAgent ?? `${agent}-forge`,
@@ -1240,7 +1258,7 @@ export async function executeAgent(
   }
 
   const _hubCleanup = () => {
-    if (_hubSessId) {
+    if (_hubSessId != null) {
       try {
         hubDeregister(_hubSessId);
       } catch {
@@ -1306,7 +1324,7 @@ export async function executeAgent(
     permissionMode,
   } = opts;
 
-  if (modelOverride && !/^[a-zA-Z0-9-.:]+$/.test(modelOverride)) {
+  if (modelOverride != null && modelOverride !== '' && !/^[a-zA-Z0-9-.:]+$/.test(modelOverride)) {
     _hubCleanup();
     return {
       ok: false,
@@ -1358,11 +1376,11 @@ export async function executeAgent(
     };
   }
   const invokeResult = headlessInvoke(prompt, {
-    model: effectiveModel || undefined,
+    model: effectiveModel === '' ? undefined : effectiveModel,
     permissionMode: (permissionMode ?? 'auto-edit') as PermissionMode,
     jsonOutput: agentDef.features.jsonOutput,
     reasoningEffort: agentDef.features.reasoningEffort
-      ? effortOverride ?? getReasoningEffort(agent) ?? undefined
+      ? (effortOverride ?? getReasoningEffort(agent) ?? undefined)
       : undefined,
     cwd,
     stdinPrompt: useStdin && agentDef.features.stdinPrompt,
@@ -1409,29 +1427,30 @@ export async function executeAgent(
       stdio: [stdinMode, 'pipe', 'pipe'],
     });
 
-    if (useStdinForPrompt && child.stdin) {
+    if (useStdinForPrompt && child.stdin != null) {
       child.stdin.write(prompt);
       child.stdin.end();
     }
 
-    child.stdout!.setEncoding('utf8');
-    child.stderr!.setEncoding('utf8');
+    // stdout and stderr are always defined with stdio: [..., 'pipe', 'pipe']
+    child.stdout?.setEncoding('utf8');
+    child.stderr?.setEncoding('utf8');
 
-    child.stdout!.on('data', (d: string) => {
+    child.stdout?.on('data', (d: string) => {
       stdoutBytes += Buffer.byteLength(d);
       stdoutChunks.push(d);
       while (stdoutBytes > maxOutputBytes && stdoutChunks.length > 1) {
-        const dropped = stdoutChunks.shift()!;
+        const dropped = stdoutChunks.shift() ?? '';
         stdoutBytes -= Buffer.byteLength(dropped);
       }
     });
 
     if (collectStderr) {
-      child.stderr!.on('data', (d: string) => {
+      child.stderr?.on('data', (d: string) => {
         stderrBytes += Buffer.byteLength(d);
         stderrChunks.push(d);
         while (stderrBytes > maxStderrBytes && stderrChunks.length > 1) {
-          const dropped = stderrChunks.shift()!;
+          const dropped = stderrChunks.shift() ?? '';
           stderrBytes -= Buffer.byteLength(dropped);
         }
       });
@@ -1526,7 +1545,7 @@ export async function executeAgent(
           }
         }
         // JSONL error extraction for agents with JSON output
-        if (_agentDef?.features.jsonOutput) {
+        if (_agentDef?.features.jsonOutput === true) {
           try {
             jsonlErrors = extractCodexErrors(rawOutput);
           } catch {
@@ -1536,7 +1555,7 @@ export async function executeAgent(
       }
 
       const hasJsonlErrors = jsonlErrors.length > 0;
-      const isOk = code === 0 && !signal && !hasJsonlErrors;
+      const isOk = code === 0 && signal == null && !hasJsonlErrors;
       const elapsedMs = Date.now() - startTime;
 
       if (!isOk) {
@@ -1553,11 +1572,10 @@ export async function executeAgent(
       let error: string | null = null;
       if (!isOk) {
         const parts: string[] = [];
-        if (signal) parts.push(`Signal ${signal}`);
-        if (code !== null && code !== 0)
-          parts.push(`Exit code ${String(code)}`);
+        if (signal != null) parts.push(`Signal ${signal}`);
+        if (code !== null && code !== 0) parts.push(`Exit code ${String(code)}`);
         if (hasJsonlErrors) parts.push(`JSONL errors: ${jsonlErrors.join('; ')}`);
-        if (!parts.length) parts.push('Process terminated abnormally');
+        if (parts.length === 0) parts.push('Process terminated abnormally');
         if (timedOut) parts.push('(timed out)');
         error = parts.join(', ');
       }
@@ -1614,7 +1632,7 @@ export async function executeAgentWithRecovery(
   let finalResult: ExecuteResult | undefined;
   try {
     // Circuit breaker: skip directly to fallback if model is tripped
-    if (currentModel && isCircuitOpen(currentModel)) {
+    if (currentModel != null && currentModel !== '' && isCircuitOpen(currentModel)) {
       const recovery = (await recoverFromModelError(agent, currentModel, {
         rl: opts.rl as object | undefined,
       })) as { recovered: boolean; newModel: string | null };
@@ -1732,7 +1750,12 @@ export async function executeAgentWithRecovery(
           maxDelayMs: rlCfg['maxDelayMs'] as number | undefined,
           retryAfterMs: rateCheck.retryAfterMs ?? undefined,
         });
-        await new Promise<void>((r) => { setTimeout(r, delayMs); });
+        // sequential: each iteration depends on previous result (rate-limit retry)
+        // eslint-disable-next-line no-await-in-loop
+        await new Promise<void>((r) => {
+          setTimeout(r, delayMs);
+        });
+        // eslint-disable-next-line no-await-in-loop
         const retryResult = await executeAgent(agent, prompt, opts);
         if (retryResult.ok) {
           retryResult.rateLimitRetries = attempt;
@@ -1767,7 +1790,7 @@ export async function executeAgentWithRecovery(
     }
 
     // Record failure for circuit breaker
-    if (detection.failedModel) {
+    if (detection.failedModel != null && detection.failedModel !== '') {
       recordModelFailure(detection.failedModel);
     }
 
