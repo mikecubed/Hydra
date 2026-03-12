@@ -95,20 +95,22 @@ async function reviewCommand(projectRoot: string, options: Record<string, string
 
     // Show decision info if available
     if (roundEntry) {
-      const verdictColor =
-        roundEntry.verdict === 'approve'
-          ? pc.green
-          : roundEntry.verdict === 'revise'
-            ? pc.yellow
-            : pc.red;
-      console.log(`  Area: ${roundEntry.area}`);
-      console.log(`  Verdict: ${verdictColor(roundEntry.verdict?.toUpperCase() || '?')}`);
-      if (roundEntry.score) console.log(`  Score: ${roundEntry.score}/10`);
+      let verdictColor: (s: string) => string;
+      if (roundEntry.verdict === 'approve') {
+        verdictColor = pc.green;
+      } else if (roundEntry.verdict === 'revise') {
+        verdictColor = pc.yellow;
+      } else {
+        verdictColor = pc.red;
+      }
+      console.log(`  Area: ${String(roundEntry.area ?? '')}`);
+      console.log(`  Verdict: ${verdictColor(String(roundEntry.verdict ?? '?').toUpperCase())}`);
+      if (roundEntry.score) console.log(`  Score: ${String(roundEntry.score ?? '')}/10`);
       if (roundEntry.selectedImprovement) {
-        console.log(`  Improvement: ${roundEntry.selectedImprovement.slice(0, 100)}`);
+        console.log(`  Improvement: ${String(roundEntry.selectedImprovement ?? '').slice(0, 100)}`);
       }
       if (roundEntry.learnings) {
-        console.log(`  Learnings: ${roundEntry.learnings.slice(0, 150)}`);
+        console.log(`  Learnings: ${String(roundEntry.learnings ?? '').slice(0, 150)}`);
       }
     }
 
@@ -123,7 +125,7 @@ async function reviewCommand(projectRoot: string, options: Record<string, string
     // Live violation scan
     const violations = scanBranchViolations(projectRoot, branch, baseBranch);
     if (violations.length > 0) {
-      console.log(pc.red(`\n  Violations: ${violations.length}`));
+      console.log(pc.red(`\n  Violations: ${String(violations.length)}`));
       for (const v of violations) {
         console.log(pc.red(`    [${v.severity}] ${v.detail}`));
       }
@@ -142,15 +144,15 @@ async function reviewCommand(projectRoot: string, options: Record<string, string
           source: 'review:retry',
           sourceRef: branch,
           area: roundEntry.area,
-          title: (roundEntry.selectedImprovement || '').slice(0, 100),
-          description: roundEntry.selectedImprovement || '',
+          title: (roundEntry.selectedImprovement ?? '').slice(0, 100),
+          description: roundEntry.selectedImprovement ?? '',
           priority: 'high',
           tags: [roundEntry.area, 'retry', 'review-flagged'],
-          notes: `Flagged during review. Original score: ${roundEntry.score || '?'}/10. ${roundEntry.learnings || ''}`,
+          notes: `Flagged during review. Original score: ${String(roundEntry.score ?? '?')}/10. ${String(roundEntry.learnings ?? '')}`,
         });
         if (created) {
           saveSuggestions(evolveDir, sg);
-          console.log(pc.green(`  + Suggestion created: ${created.id}`));
+          console.log(pc.green(`  + Suggestion created: ${created.id ?? ''}`));
         } else {
           console.log(pc.dim('  (similar suggestion already exists)'));
         }
@@ -167,7 +169,7 @@ async function reviewCommand(projectRoot: string, options: Record<string, string
   }
 
   rl.close();
-  console.log(pc.bold(`\nDone: ${merged} merged, ${skipped} skipped`));
+  console.log(pc.bold(`\nDone: ${String(merged)} merged, ${String(skipped)} skipped`));
 }
 
 // ── Status Command ──────────────────────────────────────────────────────────
@@ -194,25 +196,26 @@ function statusCommand(projectRoot: string, options: Record<string, string | boo
   // ── Session state (live tracking) ───────────────────────────────────
   const sessionState = loadSessionState(evolveDir);
   if (sessionState) {
-    type Formatter = (s: string) => string;
-    const statusColors: Record<string, Formatter> = {
+    const statusColors: Partial<Record<string, (s: string) => string>> = {
       running: pc.blue,
       completed: pc.green,
       partial: pc.yellow,
       failed: pc.red,
       interrupted: pc.red,
     };
-    const statusColor = statusColors[String(sessionState.status)] || pc.dim;
-    console.log(`\n  Session: ${pc.bold(sessionState.sessionId || '?')}`);
-    console.log(`  Status:  ${statusColor(pc.bold(sessionState.status.toUpperCase()))}`);
+    const statusColor = statusColors[String(sessionState.status)] ?? pc.dim;
+    console.log(`\n  Session: ${pc.bold(String(sessionState.sessionId ?? '?'))}`);
+    console.log(
+      `  Status:  ${statusColor(pc.bold(String(sessionState.status ?? '').toUpperCase()))}`,
+    );
 
     if (sessionState.summary) {
       const s = sessionState.summary;
       const parts = [];
-      if (s.approved > 0) parts.push(pc.green(`${s.approved} approved`));
-      if (s.rejected > 0) parts.push(pc.red(`${s.rejected} rejected`));
-      if (s.skipped > 0) parts.push(pc.dim(`${s.skipped} skipped`));
-      if (s.errors > 0) parts.push(pc.red(`${s.errors} errors`));
+      if (s.approved > 0) parts.push(pc.green(`${String(s.approved)} approved`));
+      if (s.rejected > 0) parts.push(pc.red(`${String(s.rejected)} rejected`));
+      if (s.skipped > 0) parts.push(pc.dim(`${String(s.skipped)} skipped`));
+      if (s.errors > 0) parts.push(pc.red(`${String(s.errors)} errors`));
       if (parts.length > 0) {
         console.log(`  Summary: ${parts.join(pc.dim(' / '))}`);
       }
@@ -222,18 +225,22 @@ function statusCommand(projectRoot: string, options: Record<string, string | boo
     if (sessionState.completedRounds?.length > 0) {
       console.log('');
       for (const r of sessionState.completedRounds) {
-        const icon =
-          r.verdict === 'approve'
-            ? pc.green('+')
-            : r.verdict === 'reject'
-              ? pc.red('x')
-              : r.verdict === 'skipped'
-                ? pc.dim('-')
-                : r.verdict === 'error'
-                  ? pc.red('!')
-                  : pc.dim('?');
-        const scoreStr = r.score == null ? '' : pc.dim(` (${r.score}/10)`);
-        console.log(`    ${icon} Round ${r.round}: ${r.area} — ${r.verdict || '?'}${scoreStr}`);
+        let icon: string;
+        if (r.verdict === 'approve') {
+          icon = pc.green('+');
+        } else if (r.verdict === 'reject') {
+          icon = pc.red('x');
+        } else if (r.verdict === 'skipped') {
+          icon = pc.dim('-');
+        } else if (r.verdict === 'error') {
+          icon = pc.red('!');
+        } else {
+          icon = pc.dim('?');
+        }
+        const scoreStr = r.score == null ? '' : pc.dim(` (${String(r.score ?? '')}/10)`);
+        console.log(
+          `    ${icon} Round ${String(r.round ?? '')}: ${String(r.area ?? '')} — ${String(r.verdict ?? '?')}${scoreStr}`,
+        );
       }
     }
 
@@ -252,11 +259,11 @@ function statusCommand(projectRoot: string, options: Record<string, string | boo
   if (branches.length === 0) {
     console.log(pc.dim('  No evolve branches found.'));
   } else {
-    console.log(`  Branches (${branches.length}):`);
+    console.log(`  Branches (${String(branches.length)}):`);
     for (const b of branches) {
       const commitLog = getBranchLog(projectRoot, b, baseBranch);
       const commitCount = commitLog ? commitLog.split('\n').length : 0;
-      console.log(`    ${b} (${commitCount} commit${commitCount === 1 ? '' : 's'})`);
+      console.log(`    ${b} (${String(commitCount)} commit${commitCount === 1 ? '' : 's'})`);
     }
   }
 
@@ -267,24 +274,31 @@ function statusCommand(projectRoot: string, options: Record<string, string | boo
   > | null;
 
   if (report) {
-    console.log(`\n  Latest Report: ${report['dateStr']}`);
-    console.log(`  Rounds: ${report['processedRounds']}/${report['maxRounds']}`);
-    if (report['stopReason']) console.log(`  Stopped: ${report['stopReason']}`);
-    console.log(`  Tokens: ~${(report['budget'] as any)?.consumed?.toLocaleString() || '?'}`);
+    console.log(`\n  Latest Report: ${(report['dateStr'] as string | undefined) ?? ''}`);
+    console.log(
+      `  Rounds: ${String((report['processedRounds'] as number | undefined) ?? '')}/${String((report['maxRounds'] as number | undefined) ?? '')}`,
+    );
+    if (report['stopReason'])
+      console.log(`  Stopped: ${(report['stopReason'] as string | undefined) ?? ''}`);
+    console.log(
+      `  Tokens: ~${String((report['budget'] as any)?.consumed?.toLocaleString() ?? '?')}`,
+    );
 
     if (report['rounds'] && !sessionState) {
       console.log('');
       for (const r of report['rounds'] as any[]) {
-        const icon =
-          r.verdict === 'approve'
-            ? pc.green('+')
-            : r.verdict === 'revise'
-              ? pc.yellow('~')
-              : r.verdict === 'skipped'
-                ? pc.dim('-')
-                : pc.red('x');
+        let icon: string;
+        if (r.verdict === 'approve') {
+          icon = pc.green('+');
+        } else if (r.verdict === 'revise') {
+          icon = pc.yellow('~');
+        } else if (r.verdict === 'skipped') {
+          icon = pc.dim('-');
+        } else {
+          icon = pc.red('x');
+        }
         console.log(
-          `    ${icon} Round ${r.round}: ${r.area} — ${r.verdict || '?'}${r.score ? ` (${r.score}/10)` : ''}`,
+          `    ${icon} Round ${String(r.round ?? '')}: ${String(r.area ?? '')} — ${String(r.verdict ?? '?')}${r.score ? ` (${String(r.score ?? '')}/10)` : ''}`,
         );
       }
     }
@@ -296,13 +310,13 @@ function statusCommand(projectRoot: string, options: Record<string, string | boo
   const kb = loadKnowledgeBase(evolveDir);
   const stats = getStats(kb);
   console.log(
-    `\n  Knowledge Base: ${stats.totalResearched} entries, ${stats.totalApproved} approved, ${stats.totalRejected} rejected`,
+    `\n  Knowledge Base: ${String(stats.totalResearched)} entries, ${String(stats.totalApproved)} approved, ${String(stats.totalRejected)} rejected`,
   );
   if (stats.topAreas.length > 0) {
     console.log(
       `  Top areas: ${stats.topAreas
         .slice(0, 5)
-        .map((a) => `${a.area}(${a.count})`)
+        .map((a) => `${a.area}(${String(a.count)})`)
         .join(', ')}`,
     );
   }
@@ -326,8 +340,8 @@ function knowledgeCommand(projectRoot: string, options: Record<string, string | 
   const stats = getStats(kb);
 
   console.log(pc.bold('\nEvolve Knowledge Base'));
-  console.log(`  Entries: ${stats.totalResearched}`);
-  console.log(`  Attempted: ${stats.totalAttempted}`);
+  console.log(`  Entries: ${String(stats.totalResearched)}`);
+  console.log(`  Attempted: ${String(stats.totalAttempted)}`);
   console.log(`  Approved: ${pc.green(String(stats.totalApproved))}`);
   console.log(`  Rejected: ${pc.red(String(stats.totalRejected))}`);
   console.log(`  Revised: ${pc.yellow(String(stats.totalRevised))}`);
@@ -335,7 +349,7 @@ function knowledgeCommand(projectRoot: string, options: Record<string, string | 
   if (stats.topAreas.length > 0) {
     console.log('\n  Areas:');
     for (const a of stats.topAreas) {
-      console.log(`    ${a.area}: ${a.count} entries`);
+      console.log(`    ${a.area}: ${String(a.count)} entries`);
     }
   }
 
@@ -345,17 +359,21 @@ function knowledgeCommand(projectRoot: string, options: Record<string, string | 
 
   if (query || tags.length > 0) {
     const results = searchEntries(kb, query, tags);
-    console.log(`\n  Search results (${results.length}):`);
+    console.log(`\n  Search results (${String(results.length)}):`);
     for (const entry of results.slice(0, 20)) {
-      const icon =
-        entry.outcome === 'approve'
-          ? pc.green('+')
-          : entry.outcome === 'reject'
-            ? pc.red('x')
-            : entry.outcome === 'revise'
-              ? pc.yellow('~')
-              : pc.dim('?');
-      console.log(`    ${icon} [${entry.id}] ${entry.area}: ${(entry.finding ?? '').slice(0, 80)}`);
+      let icon: string;
+      if (entry.outcome === 'approve') {
+        icon = pc.green('+');
+      } else if (entry.outcome === 'reject') {
+        icon = pc.red('x');
+      } else if (entry.outcome === 'revise') {
+        icon = pc.yellow('~');
+      } else {
+        icon = pc.dim('?');
+      }
+      console.log(
+        `    ${icon} [${entry.id ?? ''}] ${entry.area ?? ''}: ${(entry.finding ?? '').slice(0, 80)}`,
+      );
       if (entry.learnings) {
         console.log(pc.dim(`      Learnings: ${entry.learnings.slice(0, 80)}`));
       }
@@ -363,18 +381,22 @@ function knowledgeCommand(projectRoot: string, options: Record<string, string | 
   } else if (kb.entries.length > 0) {
     console.log('\n  Recent entries:');
     const recent = [...kb.entries]
-      .sort((a, b) => (b.date || '').localeCompare(a.date || ''))
+      .sort((a, b) => (b.date ?? '').localeCompare(a.date ?? ''))
       .slice(0, 10);
     for (const entry of recent) {
-      const icon =
-        entry.outcome === 'approve'
-          ? pc.green('+')
-          : entry.outcome === 'reject'
-            ? pc.red('x')
-            : entry.outcome === 'revise'
-              ? pc.yellow('~')
-              : pc.dim('?');
-      console.log(`    ${icon} [${entry.id}] ${entry.area}: ${(entry.finding ?? '').slice(0, 80)}`);
+      let icon: string;
+      if (entry.outcome === 'approve') {
+        icon = pc.green('+');
+      } else if (entry.outcome === 'reject') {
+        icon = pc.red('x');
+      } else if (entry.outcome === 'revise') {
+        icon = pc.yellow('~');
+      } else {
+        icon = pc.dim('?');
+      }
+      console.log(
+        `    ${icon} [${entry.id ?? ''}] ${entry.area ?? ''}: ${(entry.finding ?? '').slice(0, 80)}`,
+      );
     }
   }
 
@@ -392,7 +414,7 @@ function suggestionsCommand(projectRoot: string, options: Record<string, string 
     : getPendingSuggestions(sg);
 
   const label = statusFilter ? `${statusFilter} suggestions` : 'pending suggestions';
-  console.log(pc.bold(`\nEvolve Suggestions — ${entries.length} ${label}\n`));
+  console.log(pc.bold(`\nEvolve Suggestions — ${String(entries.length)} ${label}\n`));
 
   if (entries.length === 0) {
     console.log(pc.dim('  No suggestions found.'));
@@ -401,28 +423,34 @@ function suggestionsCommand(projectRoot: string, options: Record<string, string 
   }
 
   for (const s of entries) {
-    const statusColor =
-      s.status === 'pending'
-        ? pc.cyan
-        : s.status === 'completed'
-          ? pc.green
-          : s.status === 'rejected'
-            ? pc.red
-            : s.status === 'exploring'
-              ? pc.yellow
-              : pc.dim;
-    const priorityBadge =
-      s.priority === 'high'
-        ? pc.red('HIGH')
-        : s.priority === 'low'
-          ? pc.dim('low')
-          : pc.yellow('med');
+    let statusColor: (t: string) => string;
+    if (s.status === 'pending') {
+      statusColor = pc.cyan;
+    } else if (s.status === 'completed') {
+      statusColor = pc.green;
+    } else if (s.status === 'rejected') {
+      statusColor = pc.red;
+    } else if (s.status === 'exploring') {
+      statusColor = pc.yellow;
+    } else {
+      statusColor = pc.dim;
+    }
+    let priorityBadge: string;
+    if (s.priority === 'high') {
+      priorityBadge = pc.red('HIGH');
+    } else if (s.priority === 'low') {
+      priorityBadge = pc.dim('low');
+    } else {
+      priorityBadge = pc.yellow('med');
+    }
 
-    console.log(`  ${statusColor(s.id)} ${pc.yellow(s.area)}: ${(s.title ?? '').slice(0, 80)}`);
-    const parts = [`status: ${statusColor(s.status)}`, `priority: ${priorityBadge}`];
+    console.log(
+      `  ${statusColor(s.id ?? '')} ${pc.yellow(s.area ?? '')}: ${(s.title ?? '').slice(0, 80)}`,
+    );
+    const parts = [`status: ${statusColor(s.status ?? '')}`, `priority: ${priorityBadge}`];
     if ((s.attempts ?? 0) > 0) {
-      parts.push(`attempts: ${s.attempts}/${s.maxAttempts}`);
-      if (s.lastAttemptScore != null) parts.push(`last: ${s.lastAttemptScore}/10`);
+      parts.push(`attempts: ${String(s.attempts ?? '')}/${String(s.maxAttempts ?? '')}`);
+      if (s.lastAttemptScore != null) parts.push(`last: ${String(s.lastAttemptScore ?? '')}/10`);
     }
     if (s.specPath) parts.push('has spec');
     console.log(`    ${pc.dim(parts.join(' | '))}`);
@@ -432,7 +460,7 @@ function suggestionsCommand(projectRoot: string, options: Record<string, string 
   const stats = getSuggestionStats(sg);
   console.log(
     pc.dim(
-      `  Stats: ${stats.totalPending} pending, ${stats.totalCompleted} completed, ${stats.totalRejected} rejected, ${stats.totalAbandoned} abandoned`,
+      `  Stats: ${String(stats.totalPending)} pending, ${String(stats.totalCompleted)} completed, ${String(stats.totalRejected)} rejected, ${String(stats.totalAbandoned)} abandoned`,
     ),
   );
   console.log('');
@@ -442,7 +470,7 @@ function suggestionsCommand(projectRoot: string, options: Record<string, string 
 
 async function main() {
   const { options, positionals } = parseArgs(process.argv);
-  const command = positionals[0] || options['command'] || 'status';
+  const command = String(positionals[0] || options['command'] || 'status');
 
   let config;
   try {
@@ -453,7 +481,8 @@ async function main() {
     console.error(
       pc.red(`Project resolution failed: ${err instanceof Error ? err.message : String(err)}`),
     );
-    process.exit(1);
+    process.exitCode = 1;
+    return;
   }
 
   const { projectRoot } = config;
@@ -477,11 +506,12 @@ async function main() {
     default:
       console.error(pc.red(`Unknown command: ${command}`));
       console.error('Usage: hydra-evolve-review.mjs [review|status|clean|knowledge|suggestions]');
-      process.exit(1);
+      process.exitCode = 1;
   }
 }
 
-main().catch((err) => {
-  console.error(pc.red(`Fatal: ${err.message}`));
+main().catch((err: unknown) => {
+  console.error(pc.red(`Fatal: ${err instanceof Error ? err.message : String(err)}`));
+  // eslint-disable-next-line n/no-process-exit -- inside .catch() callback; return does not propagate
   process.exit(1);
 });

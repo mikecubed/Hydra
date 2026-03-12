@@ -92,19 +92,19 @@ async function reviewCommand(projectRoot: string, options: Record<string, string
     // Show report info if available
     if (reportEntry) {
       const statusColor = reportEntry.status === 'success' ? pc.green : pc.yellow;
-      console.log(`  Status: ${statusColor(reportEntry.status.toUpperCase())}`);
-      console.log(`  Agent: ${reportEntry.agent || 'claude'}`);
+      console.log(`  Status: ${statusColor(String(reportEntry.status ?? '').toUpperCase())}`);
+      console.log(`  Agent: ${String(reportEntry.agent ?? 'claude')}`);
       if (reportEntry.source)
         console.log(
-          `  Source: ${reportEntry.source}${reportEntry.taskType ? ` (${reportEntry.taskType})` : ''}`,
+          `  Source: ${String(reportEntry.source ?? '')}${reportEntry.taskType ? ` (${String(reportEntry.taskType)})` : ''}`,
         );
       if (reportEntry.tokensUsed)
-        console.log(`  Tokens: ~${reportEntry.tokensUsed.toLocaleString()}`);
-      console.log(`  Verification: ${reportEntry.verification || '?'}`);
+        console.log(`  Tokens: ~${String(reportEntry.tokensUsed?.toLocaleString() ?? '')}`);
+      console.log(`  Verification: ${String(reportEntry.verification ?? '?')}`);
       if (reportEntry.violations?.length > 0) {
-        console.log(pc.red(`  Violations: ${reportEntry.violations.length}`));
+        console.log(pc.red(`  Violations: ${String(reportEntry.violations.length)}`));
         for (const v of reportEntry.violations) {
-          console.log(pc.red(`    [${v.severity}] ${v.detail}`));
+          console.log(pc.red(`    [${String(v.severity)}] ${String(v.detail)}`));
         }
       }
     }
@@ -133,7 +133,7 @@ async function reviewCommand(projectRoot: string, options: Record<string, string
       protectedPatterns: [...BASE_PROTECTED_PATTERNS],
     });
     if (liveViolations.length > 0 && !reportEntry?.violations?.length) {
-      console.log(pc.red(`\n  Live violation scan: ${liveViolations.length} issue(s)`));
+      console.log(pc.red(`\n  Live violation scan: ${String(liveViolations.length)} issue(s)`));
       for (const v of liveViolations) {
         console.log(pc.red(`    [${v.severity}] ${v.detail}`));
       }
@@ -150,7 +150,7 @@ async function reviewCommand(projectRoot: string, options: Record<string, string
   }
 
   rl.close();
-  console.log(pc.bold(`\nDone: ${merged} merged, ${skipped} skipped`));
+  console.log(pc.bold(`\nDone: ${String(merged)} merged, ${String(skipped)} skipped`));
 }
 
 // ── Status Command ──────────────────────────────────────────────────────────
@@ -165,7 +165,7 @@ function statusCommand(projectRoot: string, options: Record<string, string | boo
     string,
     unknown
   > | null;
-  const baseBranch = (report?.['baseBranch'] as string | undefined) || 'dev';
+  const baseBranch = (report?.['baseBranch'] as string | undefined) ?? 'dev';
 
   console.log(pc.bold('\nNightly Status'));
 
@@ -173,30 +173,37 @@ function statusCommand(projectRoot: string, options: Record<string, string | boo
   if (branches.length === 0) {
     console.log(pc.dim('  No nightly branches found.'));
   } else {
-    console.log(`\n  Branches (${branches.length}):`);
+    console.log(`\n  Branches (${String(branches.length)}):`);
     for (const b of branches) {
       const branchLog = getBranchLog(projectRoot, b, baseBranch);
       const commitCount = branchLog ? branchLog.split('\n').length : 0;
-      console.log(`    ${b} (${commitCount} commit${commitCount === 1 ? '' : 's'})`);
+      console.log(`    ${b} (${String(commitCount)} commit${commitCount === 1 ? '' : 's'})`);
     }
   }
   if (report) {
-    console.log(`\n  Latest Report: ${report['date']}`);
-    console.log(`  Tasks: ${report['processedTasks']}/${report['totalTasks']}`);
-    if (report['stopReason']) console.log(`  Stopped: ${report['stopReason']}`);
-    console.log(`  Tokens: ~${(report['budget'] as any)?.consumed?.toLocaleString() || '?'}`);
+    console.log(`\n  Latest Report: ${(report['date'] as string | undefined) ?? ''}`);
+    console.log(
+      `  Tasks: ${String((report['processedTasks'] as string | number | undefined) ?? '')}/${String((report['totalTasks'] as string | number | undefined) ?? '')}`,
+    );
+    if (report['stopReason'])
+      console.log(`  Stopped: ${(report['stopReason'] as string | undefined) ?? ''}`);
+    console.log(
+      `  Tokens: ~${String((report['budget'] as any)?.consumed?.toLocaleString() ?? '?')}`,
+    );
 
     if (report['results']) {
       console.log('');
       for (const r of report['results'] as any[]) {
-        const icon =
-          r.status === 'success'
-            ? pc.green('✓')
-            : r.status === 'partial'
-              ? pc.yellow('~')
-              : pc.red('✗');
-        const agentTag = r.agent === 'claude' ? '' : pc.dim(` [${r.agent}]`);
-        console.log(`    ${icon} ${r.slug} — ${r.status}${agentTag}`);
+        let icon: string;
+        if (r.status === 'success') {
+          icon = pc.green('✓');
+        } else if (r.status === 'partial') {
+          icon = pc.yellow('~');
+        } else {
+          icon = pc.red('✗');
+        }
+        const agentTag = r.agent === 'claude' ? '' : pc.dim(` [${String(r.agent ?? '')}]`);
+        console.log(`    ${icon} ${String(r.slug ?? '')} — ${String(r.status ?? '')}${agentTag}`);
       }
     }
   } else {
@@ -215,7 +222,8 @@ function cleanCommand(projectRoot: string, options: Record<string, string | bool
     'NIGHTLY',
     (options['date'] as string) || null,
   ) as Record<string, unknown> | null;
-  const baseBranch = (report?.['baseBranch'] as string | undefined) || 'dev';
+  const baseBranch = (report?.['baseBranch'] as string | undefined) ?? 'dev';
+
   cleanBranches(projectRoot, 'nightly', baseBranch, (options['date'] as string) || null);
 }
 
@@ -223,7 +231,7 @@ function cleanCommand(projectRoot: string, options: Record<string, string | bool
 
 async function main() {
   const { options, positionals } = parseArgs(process.argv);
-  const command = positionals[0] || options['command'] || 'status';
+  const command = String(positionals[0] || options['command'] || 'status');
 
   let config;
   try {
@@ -234,7 +242,8 @@ async function main() {
     console.error(
       pc.red(`Project resolution failed: ${err instanceof Error ? err.message : String(err)}`),
     );
-    process.exit(1);
+    process.exitCode = 1;
+    return;
   }
 
   const { projectRoot } = config;
@@ -252,11 +261,12 @@ async function main() {
     default:
       console.error(pc.red(`Unknown command: ${command}`));
       console.error('Usage: hydra-nightly-review.mjs [review|status|clean]');
-      process.exit(1);
+      process.exitCode = 1;
   }
 }
 
-main().catch((err) => {
-  console.error(pc.red(`Fatal: ${err.message}`));
+main().catch((err: unknown) => {
+  console.error(pc.red(`Fatal: ${err instanceof Error ? err.message : String(err)}`));
+  // eslint-disable-next-line n/no-process-exit -- inside .catch() callback; return does not propagate
   process.exit(1);
 });
