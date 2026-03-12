@@ -29,7 +29,10 @@ afterEach(() => {
   invalidateConfigCache();
   _resetRegistry();
   initAgentRegistry();
-  fs.rmSync(_tmpDir, { recursive: true, force: true });
+  if (_tmpDir) {
+    fs.rmSync(_tmpDir, { recursive: true, force: true });
+    _tmpDir = '';
+  }
 });
 
 // ── detectModelError ────────────────────────────────────────────────────────

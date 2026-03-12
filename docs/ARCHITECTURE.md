@@ -50,7 +50,7 @@
 - **`hydra-nightly.mjs`** — Autonomous overnight task execution. 6-phase pipeline: SCAN → DISCOVER → PRIORITIZE → SELECT (optional, `--interactive`) → EXECUTE → REPORT. SELECT phase presents tasks grouped by source with interactive pick/add/confirm. EXECUTE phase renders a live progress dashboard (task checklist with status icons, budget gauge, elapsed time, per-task agent progress). Config-driven via `nightly` section. Supports `--dry-run`, `--no-discovery`, `--interactive`, CLI overrides.
 - **`hydra-nightly-discovery.mjs`** — AI discovery phase for nightly pipeline. Dispatches an agent (default: gemini) to analyze the codebase and propose improvement tasks. Returns `ScannedTask[]` for merging. Non-blocking (failures return `[]`). Exports `runDiscovery(projectRoot, opts)`. Respects `nightly.aiDiscovery.model` config to pin the discovery model regardless of routing mode (passed as `modelOverride` to `executeAgentWithRecovery`); defaults to `gemini-3-flash-preview` for cost efficiency.
 - **`hydra-nightly-review.mjs`** — Post-run interactive review. Reads `baseBranch` from report JSON. Smart merge via `smartMerge()` (auto-rebases when base has advanced). Dev-advanced detection warns when base has diverged. Subcommands: `review`, `status`, `clean`.
-- **`hydra-mcp-server.mjs`** — MCP server using official `@modelcontextprotocol/sdk` (protocol 2025-03-26). Exposes 11 tools (Zod-validated schemas), 5 resources (`hydra://config`, `hydra://metrics`, `hydra://agents`, `hydra://activity`, `hydra://status`), and 3 prompts (`hydra_council`, `hydra_review`, `hydra_analyze`). Two modes: **standalone** (`hydra_ask` + `hydra_forge` work without daemon) and **daemon** (task queue, handoffs, council, status). Dependencies: `@modelcontextprotocol/sdk`, `zod`.
+- **`hydra-mcp-server.ts`** — MCP server using official `@modelcontextprotocol/sdk` (protocol 2025-03-26). Exposes 11 tools (Zod-validated schemas), 5 resources (`hydra://config`, `hydra://metrics`, `hydra://agents`, `hydra://activity`, `hydra://status`), and 3 prompts (`hydra_council`, `hydra_review`, `hydra_analyze`). Two modes: **standalone** (`hydra_ask` + `hydra_forge` work without daemon) and **daemon** (task queue, handoffs, council, status). Dependencies: `@modelcontextprotocol/sdk`, `zod`.
 - **`hydra-investigator.mjs`** — Re-exports from `hydra-evolve-investigator.mjs`. Self-healing failure diagnosis (shared).
 - **`hydra-knowledge.mjs`** — Re-exports from `hydra-evolve-knowledge.mjs`. Persistent knowledge base (shared).
 - **`hydra-doctor.mjs`** — Higher-level failure diagnostic and triage layer. Fires on non-trivial failures in evolve/nightly/tasks. Calls existing investigator for diagnosis, triages into follow-ups (daemon task, suggestion backlog entry, or KB learning), and tracks recurring error patterns via append-only NDJSON log. Exports `initDoctor()`, `isDoctorEnabled()`, `diagnose(failure)`, `getDoctorStats()`, `getDoctorLog(limit)`, `resetDoctor()`. `resetDoctor()` removes entries written during the current session from the persistent log file (tracked via `_sessionEntries`), making it safe for test `beforeEach/afterEach` hooks without contaminating the production log. Action pipeline scanners: `scanDoctorLog()`, `scanDaemonIssues(baseUrl)`, `scanErrorActivity()`, `enrichWithDiagnosis(items, cliContext)`, `executeFixAction(item, opts)`. Storage: `docs/coordination/doctor/DOCTOR_LOG.ndjson`. Config: `doctor.enabled`, `.autoCreateTasks`, `.autoCreateSuggestions`, `.addToKnowledgeBase`, `.recurringThreshold`, `.recurringWindowDays`. Accessible via `:doctor` and `:doctor fix` operator commands.
@@ -142,7 +142,7 @@ hydra-google.mjs ──> Google Gemini Generative Language API (SSE streaming)
 
 hydra-sub-agents.mjs ──> hydra-agents (registerAgent), hydra-config
 
-hydra-mcp-server.mjs ──> HTTP daemon API (standalone stdio MCP server)
+hydra-mcp-server.ts ──> HTTP daemon API (standalone stdio MCP server)
 
 hydra-worktree.mjs ──> git CLI (child_process.execSync)
 
@@ -744,7 +744,7 @@ Agent (Gemini/Codex/Claude)
      └── MCP tool call (JSON-RPC over stdio)
               │
               v
-         hydra-mcp-server.mjs
+         hydra-mcp-server.ts
               │
               └── HTTP request to daemon API
                        │
@@ -861,4 +861,4 @@ Resolution order when the configured agent is not installed:
 4. Throws `Error('No agents available...')` — surfaces to the caller (CLI entrypoint/operator) for handling
 
 `getRoleAgent(roleName, installedCLIs)` is exported from `lib/hydra-dispatch.ts`.
-`installedCLIs` comes from `detectInstalledCLIs()` in `lib/hydra-setup.ts`.
+`installedCLIs` comes from `detectInstalledCLIs()` in `lib/hydra-cli-detect.ts` (re-exported by `lib/hydra-setup.ts` for backward compatibility).

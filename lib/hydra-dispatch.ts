@@ -508,7 +508,7 @@ async function main() {
       timeoutMs,
       synthesizerModel,
     );
-    report.synthesizer = { ...synthResult, lastMessage: synthResult.stdout };
+    report.synthesizer = { ...synthResult, lastMessage: synthResult.output ?? synthResult.stdout };
     if (synthResult.ok) {
       spinSynth.succeed(`${colorAgent(synthesizerAgent)} synthesis complete`);
     } else {
