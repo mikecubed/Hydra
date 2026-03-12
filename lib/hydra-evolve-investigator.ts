@@ -78,10 +78,10 @@ function getInvestigatorConfig(): InvestigatorConfig {
   const inv = cfg.evolve?.investigator ?? {};
   config = {
     enabled: inv['enabled'] !== false,
-    model: (inv['model'] as string) ?? 'gpt-5.2',
-    reasoningEffort: (inv['reasoningEffort'] as string) ?? 'high',
-    maxAttemptsPerPhase: (inv['maxAttemptsPerPhase'] as number) ?? 2,
-    phases: (inv['phases'] as string[]) ?? ['test', 'implement', 'analyze', 'agent'],
+    model: (inv['model'] as string | undefined) ?? 'gpt-5.2',
+    reasoningEffort: (inv['reasoningEffort'] as string | undefined) ?? 'high',
+    maxAttemptsPerPhase: (inv['maxAttemptsPerPhase'] as number | undefined) ?? 2,
+    phases: (inv['phases'] as string[] | undefined) ?? ['test', 'implement', 'analyze', 'agent'],
     maxTokensBudget: (inv['maxTokensBudget'] as number) || 50_000,
     tryAlternativeAgent: inv['tryAlternativeAgent'] !== false,
     logToFile: inv['logToFile'] !== false,
@@ -95,7 +95,7 @@ function getInvestigatorConfig(): InvestigatorConfig {
  * Initialize the investigator. Validates API key and loads config.
  * @param {object} [overrides] - Optional config overrides
  */
-export function initInvestigator(overrides: Partial<InvestigatorConfig> = {}) {
+export function initInvestigator(overrides: Partial<InvestigatorConfig> = {}): void {
   config = null; // Force reload
   const cfg = getInvestigatorConfig();
 
@@ -113,7 +113,7 @@ export function initInvestigator(overrides: Partial<InvestigatorConfig> = {}) {
 /**
  * Check if the investigator is available (enabled + API key present).
  */
-export function isInvestigatorAvailable() {
+export function isInvestigatorAvailable(): boolean {
   const cfg = getInvestigatorConfig();
   if (!cfg.enabled) return false;
   return Boolean(process.env['OPENAI_API_KEY']);
@@ -122,14 +122,21 @@ export function isInvestigatorAvailable() {
 /**
  * Get session stats for the investigator.
  */
-export function getInvestigatorStats() {
+export function getInvestigatorStats(): {
+  investigations: number;
+  healed: number;
+  promptTokens: number;
+  completionTokens: number;
+  tokenBudgetUsed: number;
+  tokenBudgetMax: number;
+} {
   return { ...stats, tokenBudgetUsed, tokenBudgetMax: getInvestigatorConfig().maxTokensBudget };
 }
 
 /**
  * Reset investigator state for a new session.
  */
-export function resetInvestigator() {
+export function resetInvestigator(): void {
   stats = { investigations: 0, healed: 0, promptTokens: 0, completionTokens: 0 };
   tokenBudgetUsed = 0;
   config = null;
@@ -206,7 +213,7 @@ export async function investigate(failure: EvolveFailure): Promise<DiagnosisResu
     return {
       diagnosis: 'fundamental',
       explanation: 'Investigator token budget exhausted',
-      rootCause: `Used ${tokenBudgetUsed}/${cfg.maxTokensBudget} tokens`,
+      rootCause: `Used ${String(tokenBudgetUsed)}/${String(cfg.maxTokensBudget)} tokens`,
       corrective: null,
       retryRecommendation: {
         retryPhase: false,
@@ -239,7 +246,7 @@ export async function investigate(failure: EvolveFailure): Promise<DiagnosisResu
   if (failure.timedOut) {
     const result = {
       diagnosis: 'transient',
-      explanation: `${failure.agent || failure.phase} timed out`,
+      explanation: `${failure.agent ?? failure.phase} timed out`,
       rootCause: 'Operation exceeded timeout limit',
       corrective: null,
       retryRecommendation: {
@@ -256,21 +263,21 @@ export async function investigate(failure: EvolveFailure): Promise<DiagnosisResu
   }
 
   // Build the user message with failure context
-  const stderrSnippet = (failure.stderr || '').slice(-2000);
-  const stdoutSnippet = (failure.stdout || '').slice(-2000);
-  const contextSnippet = (failure.context || '').slice(-3000);
+  const stderrSnippet = (failure.stderr ?? '').slice(-2000);
+  const stdoutSnippet = (failure.stdout ?? '').slice(-2000);
+  const contextSnippet = (failure.context ?? '').slice(-3000);
 
   const userMessage = `## Failed Phase: ${failure.phase}
-Agent: ${failure.agent || 'N/A'}
-Attempt: ${failure.attemptNumber || 1}
-Exit Code: ${failure.exitCode ?? 'N/A'}
+Agent: ${failure.agent ?? 'N/A'}
+Attempt: ${String(failure.attemptNumber ?? 1)}
+Exit Code: ${failure.exitCode != null ? String(failure.exitCode) : 'N/A'}
 Signal: ${failure.signal ?? 'N/A'}
-Error: ${failure.error || 'Unknown'}
+Error: ${failure.error ?? 'Unknown'}
 ${failure.errorCategory ? `Error Category: ${failure.errorCategory}` : ''}
 ${failure.errorDetail ? `Error Detail: ${failure.errorDetail}` : ''}
 ${failure.errorContext ? `Error Context: ${failure.errorContext}` : ''}
-Timed Out: ${failure.timedOut ? 'yes' : 'no'}
-${failure.command ? `Command: ${failure.command} ${failure.args?.join(' ') || ''}` : ''}
+Timed Out: no
+${failure.command ? `Command: ${failure.command} ${failure.args?.join(' ') ?? ''}` : ''}
 ${failure.promptSnippet ? `Prompt Snippet: ${failure.promptSnippet}...` : ''}
 
 ${stderrSnippet ? `## stderr (last 2KB)\n\`\`\`\n${stderrSnippet}\n\`\`\`\n` : ''}
@@ -291,8 +298,8 @@ Diagnose this failure and provide a structured recommendation.`;
     }); // No streaming callback — we just want the final result
 
     // Track token usage
-    const promptTokens = usage?.prompt_tokens || 0;
-    const completionTokens = usage?.completion_tokens || 0;
+    const promptTokens = usage?.prompt_tokens ?? 0;
+    const completionTokens = usage?.completion_tokens ?? 0;
     stats.promptTokens += promptTokens;
     stats.completionTokens += completionTokens;
     tokenBudgetUsed += promptTokens + completionTokens;
@@ -304,7 +311,7 @@ Diagnose this failure and provide a structured recommendation.`;
 
     // Track heals
     if (diagnosis.diagnosis === 'fixable' || diagnosis.diagnosis === 'transient') {
-      if (diagnosis.retryRecommendation?.retryPhase) {
+      if (diagnosis.retryRecommendation.retryPhase) {
         stats.healed++;
       }
     }
@@ -348,15 +355,15 @@ function parseInvestigatorResponse(raw: string): DiagnosisResult {
   try {
     const parsed = JSON.parse(text);
     return {
-      diagnosis: parsed.diagnosis || 'fundamental',
-      explanation: parsed.explanation || 'No explanation provided',
-      rootCause: parsed.rootCause || 'Unknown',
-      corrective: parsed.corrective || null,
+      diagnosis: parsed.diagnosis ?? 'fundamental',
+      explanation: parsed.explanation ?? 'No explanation provided',
+      rootCause: parsed.rootCause ?? 'Unknown',
+      corrective: parsed.corrective ?? null,
       retryRecommendation: {
         retryPhase: parsed.retryRecommendation?.retryPhase ?? false,
-        modifiedPrompt: parsed.retryRecommendation?.modifiedPrompt || null,
-        preamble: parsed.retryRecommendation?.preamble || null,
-        retryAgent: parsed.retryRecommendation?.retryAgent || null,
+        modifiedPrompt: parsed.retryRecommendation?.modifiedPrompt ?? null,
+        preamble: parsed.retryRecommendation?.preamble ?? null,
+        retryAgent: parsed.retryRecommendation?.retryAgent ?? null,
       },
     };
   } catch {
@@ -399,16 +406,16 @@ function logInvestigation(failure: EvolveFailure, diagnosis: DiagnosisResult) {
     const entry = {
       ts: new Date().toISOString(),
       phase: failure.phase,
-      agent: failure.agent || null,
-      error: (failure.error || '').slice(0, 500),
-      timedOut: failure.timedOut || false,
-      attempt: failure.attemptNumber || 1,
+      agent: failure.agent ?? null,
+      error: (failure.error ?? '').slice(0, 500),
+      timedOut: failure.timedOut ?? false,
+      attempt: failure.attemptNumber ?? 1,
       diagnosis: diagnosis.diagnosis,
       explanation: diagnosis.explanation,
       rootCause: diagnosis.rootCause,
       corrective: diagnosis.corrective,
-      retryPhase: diagnosis.retryRecommendation?.retryPhase || false,
-      tokens: diagnosis.tokens || { prompt: 0, completion: 0 },
+      retryPhase: diagnosis.retryRecommendation.retryPhase,
+      tokens: diagnosis.tokens ?? { prompt: 0, completion: 0 },
     };
 
     fs.appendFileSync(logPath, `${JSON.stringify(entry)}\n`, 'utf8');
