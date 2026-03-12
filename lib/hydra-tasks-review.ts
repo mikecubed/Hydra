@@ -87,7 +87,7 @@ async function reviewCommand(projectRoot: string, options: Record<string, string
       const status = reportEntry['status'] as string | undefined;
       const statusColor = status === 'success' ? pc.green : pc.yellow;
       console.log(`  Status: ${statusColor((status ?? '').toUpperCase())}`);
-      console.log(`  Agent: ${String(reportEntry['agent'] ?? '?')}`);
+      console.log(`  Agent: ${(reportEntry['agent'] as string | undefined) ?? '?'}`);
       const tokens = reportEntry['tokens'] as number | undefined;
       if (tokens) console.log(`  Tokens: ~${tokens.toLocaleString()}`);
       const verdict = reportEntry['verdict'] as string | undefined;
@@ -95,7 +95,7 @@ async function reviewCommand(projectRoot: string, options: Record<string, string
       const verification = reportEntry['verification'] as Record<string, unknown> | undefined;
       if (verification?.['command']) {
         const vIcon = verification['passed'] ? pc.green('pass') : pc.red('FAIL');
-        console.log(`  Verification: ${vIcon} (${String(verification['command'])})`);
+        console.log(`  Verification: ${vIcon} (${verification['command'] as string})`);
       }
       const violations = reportEntry['violations'] as Array<Record<string, unknown>> | undefined;
       if (violations && violations.length > 0) {
@@ -124,7 +124,7 @@ async function reviewCommand(projectRoot: string, options: Record<string, string
       liveViolations.length > 0 &&
       !(reportEntry?.['violations'] as unknown[] | undefined)?.length
     ) {
-      console.log(pc.red(`\n  Live violation scan: ${liveViolations.length} issue(s)`));
+      console.log(pc.red(`\n  Live violation scan: ${String(liveViolations.length)} issue(s)`));
       for (const v of liveViolations) {
         console.log(pc.red(`    [${v.severity}] ${v.detail}`));
       }
@@ -140,7 +140,7 @@ async function reviewCommand(projectRoot: string, options: Record<string, string
   }
 
   rl.close();
-  console.log(pc.bold(`\nDone: ${merged} merged, ${skipped} skipped`));
+  console.log(pc.bold(`\nDone: ${String(merged)} merged, ${String(skipped)} skipped`));
 }
 
 // ── Status Command ──────────────────────────────────────────────────────────
@@ -155,11 +155,11 @@ function statusCommand(projectRoot: string, options: Record<string, string | boo
   if (branches.length === 0) {
     console.log(pc.dim('  No tasks branches found.'));
   } else {
-    console.log(`\n  Branches (${branches.length}):`);
+    console.log(`\n  Branches (${String(branches.length)}):`);
     for (const b of branches) {
       const log = getBranchLog(projectRoot, b, BASE_BRANCH);
       const commitCount = log ? log.split('\n').length : 0;
-      console.log(`    ${b} (${commitCount} commit${commitCount === 1 ? '' : 's'})`);
+      console.log(`    ${b} (${String(commitCount)} commit${commitCount === 1 ? '' : 's'})`);
     }
   }
 
@@ -170,24 +170,28 @@ function statusCommand(projectRoot: string, options: Record<string, string | boo
     unknown
   > | null;
   if (report) {
-    console.log(`\n  Latest Report: ${report['date']}`);
-    console.log(`  Tasks: ${report['processedTasks']}/${report['totalTasks']}`);
-    console.log(`  Successful: ${(report['successful'] as number) || 0}`);
-    console.log(`  Failed: ${(report['failed'] as number) || 0}`);
-    if (report['stopReason']) console.log(`  Stopped: ${report['stopReason']}`);
-    console.log(`  Tokens: ~${(report['budget'] as any)?.consumed?.toLocaleString() || '?'}`);
+    console.log(`\n  Latest Report: ${String(report['date'])}`);
+    console.log(`  Tasks: ${String(report['processedTasks'])}/${String(report['totalTasks'])}`);
+    console.log(`  Successful: ${String((report['successful'] as number | undefined) ?? 0)}`);
+    console.log(`  Failed: ${String((report['failed'] as number | undefined) ?? 0)}`);
+    if (report['stopReason']) console.log(`  Stopped: ${report['stopReason'] as string}`);
+    const budget = report['budget'] as Record<string, unknown> | undefined;
+    const tokensConsumed = typeof budget?.['consumed'] === 'number' ? budget['consumed'].toLocaleString() : '?';
+    console.log(`  Tokens: ~${tokensConsumed}`);
 
     if (report['results']) {
       console.log('');
       for (const r of report['results'] as any[]) {
-        const icon =
-          r.status === 'success'
-            ? pc.green('pass')
-            : r.status === 'failed'
-              ? pc.red('FAIL')
-              : pc.yellow(r.status);
-        const agentTag = pc.dim(` [${r.agent}]`);
-        console.log(`    ${icon} ${r.slug || r.task?.slice(0, 40)} — ${r.status}${agentTag}`);
+        let icon: string;
+        if (r.status === 'success') {
+          icon = pc.green('pass');
+        } else if (r.status === 'failed') {
+          icon = pc.red('FAIL');
+        } else {
+          icon = pc.yellow(String(r.status));
+        }
+        const agentTag = pc.dim(` [${String(r.agent)}]`);
+        console.log(`    ${icon} ${String(r.slug ?? r.task?.slice(0, 40) ?? '')} — ${String(r.status)}${agentTag}`);
       }
     }
   } else {
@@ -207,7 +211,7 @@ function cleanCommand(projectRoot: string, options: Record<string, string | bool
 
 async function main() {
   const { options, positionals } = parseArgs(process.argv);
-  const command = positionals[0] || options['command'] || 'status';
+  const command = (positionals[0] as string | undefined) ?? (options['command'] as string | true | undefined) ?? 'status';
 
   let config;
   try {
@@ -218,11 +222,13 @@ async function main() {
     console.error(
       pc.red(`Project resolution failed: ${err instanceof Error ? err.message : String(err)}`),
     );
-    process.exit(1);
+    process.exitCode = 1;
+    return;
   }
 
   const { projectRoot } = config;
 
+  // eslint-disable-next-line @typescript-eslint/switch-exhaustiveness-check -- 'true' from boolean CLI flag falls to default
   switch (command) {
     case 'review':
       await reviewCommand(projectRoot, options);
@@ -234,13 +240,13 @@ async function main() {
       cleanCommand(projectRoot, options);
       break;
     default:
-      console.error(pc.red(`Unknown command: ${command}`));
+      console.error(pc.red(`Unknown command: ${String(command)}`));
       console.error('Usage: hydra-tasks-review.mjs [review|status|clean]');
-      process.exit(1);
+      process.exitCode = 1;
   }
 }
 
-main().catch((err) => {
-  console.error(pc.red(`Fatal: ${err.message}`));
-  process.exit(1);
+main().catch((err: unknown) => {
+  console.error(pc.red(`Fatal: ${err instanceof Error ? err.message : String(err)}`));
+  process.exitCode = 1;
 });
