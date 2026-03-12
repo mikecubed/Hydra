@@ -1,4 +1,3 @@
-#!/usr/bin/env node
 /**
  * Hydra process helpers.
  *
@@ -56,8 +55,8 @@ function readFileTruncated(filePath: string, maxBytes: number, encoding: BufferE
     try {
       const buf = Buffer.allocUnsafe(limit);
       const bytesRead = fs.readSync(fd, buf, 0, limit, 0);
-      const suffix = `\n... (truncated, showing first ${bytesRead} bytes)`;
-      return buf.slice(0, bytesRead).toString(encoding) + suffix;
+      const suffix = `\n... (truncated, showing first ${String(bytesRead)} bytes)`;
+      return buf.subarray(0, bytesRead).toString(encoding) + suffix;
     } finally {
       try {
         fs.closeSync(fd);
@@ -74,14 +73,14 @@ function readFileTruncated(filePath: string, maxBytes: number, encoding: BufferE
  * Detect if this environment supports spawning child processes with piped stdio.
  * @returns {boolean}
  */
-export function supportsPipedStdio() {
+export function supportsPipedStdio(): boolean {
   try {
     const r = spawnSync(process.execPath, ['-e', 'process.exit(0)'], {
       stdio: ['ignore', 'pipe', 'pipe'],
       windowsHide: true,
       timeout: 5_000,
     });
-    if (r.error && String((r.error as NodeJS.ErrnoException)?.code || '') === 'EPERM') {
+    if (r.error && ((r.error as NodeJS.ErrnoException).code ?? '') === 'EPERM') {
       return false;
     }
     return true;
@@ -113,11 +112,11 @@ export function spawnSyncCapture(
   args: string[] = [],
   opts: SpawnSyncCaptureOpts = {},
 ): SpawnSyncCaptureResult {
-  const encoding = opts.encoding || 'utf8';
+  const encoding = opts.encoding ?? 'utf8';
   const maxOutputBytes: number = Number.isFinite(opts.maxOutputBytes)
     ? opts.maxOutputBytes!
     : DEFAULT_MAX_OUTPUT_BYTES;
-  const forceNoPipes = Boolean(opts.noPipes || process.env['HYDRA_NO_PIPES']);
+  const forceNoPipes = Boolean(opts.noPipes ?? process.env['HYDRA_NO_PIPES']);
 
   if (!forceNoPipes) {
     const r = spawnSync(command, Array.isArray(args) ? args : [], {
@@ -131,26 +130,16 @@ export function spawnSyncCapture(
       maxBuffer: maxOutputBytes,
     });
 
-    const stdout: string =
-      typeof r.stdout === 'string'
-        ? r.stdout
-        : r.stdout
-          ? Buffer.from(r.stdout as Buffer).toString(encoding)
-          : '';
-    const stderr: string =
-      typeof r.stderr === 'string'
-        ? r.stderr
-        : r.stderr
-          ? Buffer.from(r.stderr as Buffer).toString(encoding)
-          : '';
+    const stdout: string = r.stdout;
+    const stderr: string = r.stderr;
 
-    if (!(r.error && String((r.error as NodeJS.ErrnoException)?.code || '') === 'EPERM')) {
+    if (!(r.error && ((r.error as NodeJS.ErrnoException).code ?? '') === 'EPERM')) {
       return {
         status: r.status ?? null,
         stdout,
         stderr,
-        error: r.error || null,
-        signal: r.signal || null,
+        error: r.error ?? null,
+        signal: r.signal ?? null,
       };
     }
   }
@@ -171,9 +160,7 @@ export function spawnSyncCapture(
     stderrFd = fs.openSync(_stderrPath, 'w');
 
     if (opts.input !== undefined) {
-      const buf = Buffer.isBuffer(opts.input)
-        ? opts.input
-        : Buffer.from(String(opts.input), encoding);
+      const buf = Buffer.isBuffer(opts.input) ? opts.input : Buffer.from(opts.input, encoding);
       fs.writeFileSync(_stdinPath, buf);
       stdinFd = fs.openSync(_stdinPath, 'r');
     }
@@ -217,8 +204,8 @@ export function spawnSyncCapture(
       status: r.status ?? null,
       stdout,
       stderr,
-      error: r.error || null,
-      signal: r.signal || null,
+      error: r.error ?? null,
+      signal: r.signal ?? null,
     };
   } finally {
     // In case of early exceptions, close what we can.
