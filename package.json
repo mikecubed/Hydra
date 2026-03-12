@@ -14,7 +14,7 @@
     "url": "https://github.com/PrimeLocus/Hydra/issues"
   },
   "engines": {
-    "node": ">=22.18.0"
+    "node": ">=24.0.0"
   },
   "bin": {
     "hydra": "./bin/hydra-cli.ts",
@@ -118,7 +118,7 @@
   "devDependencies": {
     "@a24z/mermaid-parser": "^1.0.0",
     "@eslint/js": "^10.0.1",
-    "@types/node": "^22.19.15",
+    "@types/node": "^24.0.0",
     "@yao-pkg/pkg": "^6.14.1",
     "esbuild": "^0.27.3",
     "eslint": "^10.0.3",
@@ -128,7 +128,6 @@
     "husky": "^9.1.7",
     "lint-staged": "^16.3.2",
     "prettier": "^3.8.1",
-    "tsx": "^4.21.0",
     "typescript": "^5.9.3",
     "typescript-eslint": "^8.57.0"
   },
