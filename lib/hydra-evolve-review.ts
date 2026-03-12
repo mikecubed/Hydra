@@ -49,17 +49,38 @@ import {
 } from './hydra-evolve-suggestions.ts';
 import pc from 'picocolors';
 
+interface EvolveRoundEntry {
+  round?: number;
+  verdict?: string;
+  area?: string;
+  score?: number;
+  selectedImprovement?: string;
+  learnings?: string;
+}
+interface EvolveSessionState {
+  status?: string;
+  sessionId?: string;
+  summary?: { approved?: number; rejected?: number; skipped?: number; errors?: number };
+  completedRounds?: Array<{ verdict?: string; round?: number; area?: string; score?: number }>;
+  actionNeeded?: string;
+  resumable?: boolean;
+}
+interface ReportBudget {
+  consumed?: number;
+}
+
 // ── Review Command ──────────────────────────────────────────────────────────
 
 async function reviewCommand(projectRoot: string, options: Record<string, string | boolean>) {
   const cfg = loadHydraConfig();
   const baseBranch = cfg.evolve?.baseBranch ?? 'dev';
-  const dateFilter = (options['date'] as string) || null;
+  const dateFilter =
+    typeof options['date'] === 'string' && options['date'].length > 0 ? options['date'] : null;
   const branches = listBranches(projectRoot, 'evolve', dateFilter);
 
   if (branches.length === 0) {
     console.log(pc.yellow('No evolve branches found.'));
-    if (dateFilter) console.log(pc.dim(`  Filter: evolve/${dateFilter}/*`));
+    if (dateFilter !== null) console.log(pc.dim(`  Filter: evolve/${dateFilter}/*`));
     return;
   }
 
@@ -87,14 +108,14 @@ async function reviewCommand(projectRoot: string, options: Record<string, string
     // Try to find matching decision
     const roundMatch = branch.match(/\/(\d+)$/);
     const roundNum = roundMatch ? Number.parseInt(roundMatch[1], 10) : null;
-    const roundEntry = (reportData?.['rounds'] as any[] | undefined)?.find(
-      (r: Record<string, unknown>) => r['round'] === roundNum,
+    const roundEntry = (reportData?.['rounds'] as EvolveRoundEntry[] | undefined)?.find(
+      (r: EvolveRoundEntry) => r.round === roundNum,
     );
 
     console.log(pc.bold(pc.cyan(`\n-- ${branch} --`)));
 
     // Show decision info if available
-    if (roundEntry) {
+    if (roundEntry != null) {
       let verdictColor: (s: string) => string;
       if (roundEntry.verdict === 'approve') {
         verdictColor = pc.green;
@@ -103,21 +124,23 @@ async function reviewCommand(projectRoot: string, options: Record<string, string
       } else {
         verdictColor = pc.red;
       }
-      console.log(`  Area: ${String(roundEntry.area ?? '')}`);
-      console.log(`  Verdict: ${verdictColor(String(roundEntry.verdict ?? '?').toUpperCase())}`);
-      if (roundEntry.score) console.log(`  Score: ${String(roundEntry.score ?? '')}/10`);
-      if (roundEntry.selectedImprovement) {
-        console.log(`  Improvement: ${String(roundEntry.selectedImprovement ?? '').slice(0, 100)}`);
+      console.log(`  Area: ${roundEntry.area ?? ''}`);
+      console.log(`  Verdict: ${verdictColor((roundEntry.verdict ?? '?').toUpperCase())}`);
+      if (roundEntry.score != null && roundEntry.score > 0)
+        console.log(`  Score: ${String(roundEntry.score)}/10`);
+      if (roundEntry.selectedImprovement != null && roundEntry.selectedImprovement.length > 0) {
+        console.log(`  Improvement: ${roundEntry.selectedImprovement.slice(0, 100)}`);
       }
-      if (roundEntry.learnings) {
-        console.log(`  Learnings: ${String(roundEntry.learnings ?? '').slice(0, 150)}`);
+      if (roundEntry.learnings != null && roundEntry.learnings.length > 0) {
+        console.log(`  Learnings: ${roundEntry.learnings.slice(0, 150)}`);
       }
     }
 
     // Show diff stat and commit log
     const { commitLog } = displayBranchInfo(projectRoot, branch, baseBranch);
 
-    if (!commitLog) {
+    if (commitLog.length === 0) {
+      // eslint-disable-next-line no-await-in-loop -- sequential interactive user prompts
       await handleEmptyBranch(rl, projectRoot, branch);
       continue;
     }
@@ -133,22 +156,24 @@ async function reviewCommand(projectRoot: string, options: Record<string, string
 
     // Offer retry-as-suggestion for rejected/revise rounds
     if (
-      roundEntry &&
+      roundEntry != null &&
       (roundEntry.verdict === 'reject' || roundEntry.verdict === 'revise') &&
-      roundEntry.selectedImprovement
+      roundEntry.selectedImprovement != null &&
+      roundEntry.selectedImprovement.length > 0
     ) {
+      // eslint-disable-next-line no-await-in-loop -- sequential interactive user prompts
       const retryAnswer = await ask(rl, `  ${pc.magenta('[r]')}etry as suggestion? (r/n) `);
       if (retryAnswer === 'r' || retryAnswer === 'retry') {
         const sg = loadSuggestions(evolveDir);
         const created = addSuggestion(sg, {
           source: 'review:retry',
           sourceRef: branch,
-          area: roundEntry.area,
-          title: (roundEntry.selectedImprovement ?? '').slice(0, 100),
-          description: roundEntry.selectedImprovement ?? '',
+          area: roundEntry.area ?? '',
+          title: roundEntry.selectedImprovement.slice(0, 100),
+          description: roundEntry.selectedImprovement,
           priority: 'high',
-          tags: [roundEntry.area, 'retry', 'review-flagged'],
-          notes: `Flagged during review. Original score: ${String(roundEntry.score ?? '?')}/10. ${String(roundEntry.learnings ?? '')}`,
+          tags: [roundEntry.area ?? '', 'retry', 'review-flagged'],
+          notes: `Flagged during review. Original score: ${String(roundEntry.score ?? '?')}/10. ${roundEntry.learnings ?? ''}`,
         });
         if (created) {
           saveSuggestions(evolveDir, sg);
@@ -161,6 +186,7 @@ async function reviewCommand(projectRoot: string, options: Record<string, string
 
     // Prompt
     console.log('');
+    // eslint-disable-next-line no-await-in-loop -- sequential interactive user prompts
     const result = await handleBranchAction(rl, projectRoot, branch, baseBranch, {
       enablePR: isGhAvailable(),
     });
@@ -174,11 +200,11 @@ async function reviewCommand(projectRoot: string, options: Record<string, string
 
 // ── Status Command ──────────────────────────────────────────────────────────
 
-function loadSessionState(evolveDir: string) {
+function loadSessionState(evolveDir: string): EvolveSessionState | null {
   const statePath = path.join(evolveDir, 'EVOLVE_SESSION_STATE.json');
   try {
     if (!fs.existsSync(statePath)) return null;
-    return JSON.parse(fs.readFileSync(statePath, 'utf8'));
+    return JSON.parse(fs.readFileSync(statePath, 'utf8')) as EvolveSessionState;
   } catch {
     return null;
   }
@@ -187,7 +213,8 @@ function loadSessionState(evolveDir: string) {
 function statusCommand(projectRoot: string, options: Record<string, string | boolean>) {
   const cfg = loadHydraConfig();
   const baseBranch = cfg.evolve?.baseBranch ?? 'dev';
-  const dateFilter = (options['date'] as string) || null;
+  const dateFilter =
+    typeof options['date'] === 'string' && options['date'].length > 0 ? options['date'] : null;
   const branches = listBranches(projectRoot, 'evolve', dateFilter);
   const evolveDir = path.join(projectRoot, 'docs', 'coordination', 'evolve');
 
@@ -195,7 +222,7 @@ function statusCommand(projectRoot: string, options: Record<string, string | boo
 
   // ── Session state (live tracking) ───────────────────────────────────
   const sessionState = loadSessionState(evolveDir);
-  if (sessionState) {
+  if (sessionState != null) {
     const statusColors: Partial<Record<string, (s: string) => string>> = {
       running: pc.blue,
       completed: pc.green,
@@ -203,26 +230,26 @@ function statusCommand(projectRoot: string, options: Record<string, string | boo
       failed: pc.red,
       interrupted: pc.red,
     };
-    const statusColor = statusColors[String(sessionState.status)] ?? pc.dim;
-    console.log(`\n  Session: ${pc.bold(String(sessionState.sessionId ?? '?'))}`);
+    const statusColor = statusColors[sessionState.status ?? ''] ?? pc.dim;
+    console.log(`\n  Session: ${pc.bold(sessionState.sessionId ?? '?')}`);
     console.log(
-      `  Status:  ${statusColor(pc.bold(String(sessionState.status ?? '').toUpperCase()))}`,
+      `  Status:  ${statusColor(pc.bold((sessionState.status ?? '').toUpperCase()))}`,
     );
 
-    if (sessionState.summary) {
+    if (sessionState.summary != null) {
       const s = sessionState.summary;
       const parts = [];
-      if (s.approved > 0) parts.push(pc.green(`${String(s.approved)} approved`));
-      if (s.rejected > 0) parts.push(pc.red(`${String(s.rejected)} rejected`));
-      if (s.skipped > 0) parts.push(pc.dim(`${String(s.skipped)} skipped`));
-      if (s.errors > 0) parts.push(pc.red(`${String(s.errors)} errors`));
+      if ((s.approved ?? 0) > 0) parts.push(pc.green(`${String(s.approved)} approved`));
+      if ((s.rejected ?? 0) > 0) parts.push(pc.red(`${String(s.rejected)} rejected`));
+      if ((s.skipped ?? 0) > 0) parts.push(pc.dim(`${String(s.skipped)} skipped`));
+      if ((s.errors ?? 0) > 0) parts.push(pc.red(`${String(s.errors)} errors`));
       if (parts.length > 0) {
         console.log(`  Summary: ${parts.join(pc.dim(' / '))}`);
       }
     }
 
     // Per-round breakdown
-    if (sessionState.completedRounds?.length > 0) {
+    if (sessionState.completedRounds != null && sessionState.completedRounds.length > 0) {
       console.log('');
       for (const r of sessionState.completedRounds) {
         let icon: string;
@@ -237,18 +264,18 @@ function statusCommand(projectRoot: string, options: Record<string, string | boo
         } else {
           icon = pc.dim('?');
         }
-        const scoreStr = r.score == null ? '' : pc.dim(` (${String(r.score ?? '')}/10)`);
+        const scoreStr = r.score == null ? '' : pc.dim(` (${String(r.score)}/10)`);
         console.log(
-          `    ${icon} Round ${String(r.round ?? '')}: ${String(r.area ?? '')} — ${String(r.verdict ?? '?')}${scoreStr}`,
+          `    ${icon} Round ${String(r.round ?? '')}: ${r.area ?? ''} — ${r.verdict ?? '?'}${scoreStr}`,
         );
       }
     }
 
-    if (sessionState.actionNeeded) {
+    if (sessionState.actionNeeded != null && sessionState.actionNeeded.length > 0) {
       console.log(`\n  ${pc.yellow(sessionState.actionNeeded)}`);
     }
 
-    if (sessionState.resumable) {
+    if (sessionState.resumable === true) {
       console.log(`  ${pc.dim('Tip:')} ${pc.cyan(':evolve resume')} to continue this session`);
     }
 
@@ -262,7 +289,7 @@ function statusCommand(projectRoot: string, options: Record<string, string | boo
     console.log(`  Branches (${String(branches.length)}):`);
     for (const b of branches) {
       const commitLog = getBranchLog(projectRoot, b, baseBranch);
-      const commitCount = commitLog ? commitLog.split('\n').length : 0;
+      const commitCount = commitLog.length > 0 ? commitLog.split('\n').length : 0;
       console.log(`    ${b} (${String(commitCount)} commit${commitCount === 1 ? '' : 's'})`);
     }
   }
@@ -273,20 +300,22 @@ function statusCommand(projectRoot: string, options: Record<string, string | boo
     unknown
   > | null;
 
-  if (report) {
+  if (report == null && sessionState == null) {
+    console.log(pc.dim('\n  No evolve report found.'));
+  } else if (report != null) {
     console.log(`\n  Latest Report: ${(report['dateStr'] as string | undefined) ?? ''}`);
     console.log(
       `  Rounds: ${String((report['processedRounds'] as number | undefined) ?? '')}/${String((report['maxRounds'] as number | undefined) ?? '')}`,
     );
-    if (report['stopReason'])
+    if (report['stopReason'] != null)
       console.log(`  Stopped: ${(report['stopReason'] as string | undefined) ?? ''}`);
     console.log(
-      `  Tokens: ~${String((report['budget'] as any)?.consumed?.toLocaleString() ?? '?')}`,
+      `  Tokens: ~${(report['budget'] as ReportBudget | undefined)?.consumed?.toLocaleString() ?? '?'}`,
     );
 
-    if (report['rounds'] && !sessionState) {
+    if (report['rounds'] != null && sessionState == null) {
       console.log('');
-      for (const r of report['rounds'] as any[]) {
+      for (const r of report['rounds'] as EvolveRoundEntry[]) {
         let icon: string;
         if (r.verdict === 'approve') {
           icon = pc.green('+');
@@ -298,12 +327,10 @@ function statusCommand(projectRoot: string, options: Record<string, string | boo
           icon = pc.red('x');
         }
         console.log(
-          `    ${icon} Round ${String(r.round ?? '')}: ${String(r.area ?? '')} — ${String(r.verdict ?? '?')}${r.score ? ` (${String(r.score ?? '')}/10)` : ''}`,
+          `    ${icon} Round ${String(r.round ?? '')}: ${r.area ?? ''} — ${r.verdict ?? '?'}${r.score != null && r.score > 0 ? ` (${String(r.score)}/10)` : ''}`,
         );
       }
     }
-  } else if (!sessionState) {
-    console.log(pc.dim('\n  No evolve report found.'));
   }
 
   // Knowledge base summary
@@ -329,7 +356,12 @@ function statusCommand(projectRoot: string, options: Record<string, string | boo
 function cleanCommand(projectRoot: string, options: Record<string, string | boolean>) {
   const cfg = loadHydraConfig();
   const baseBranch = cfg.evolve?.baseBranch ?? 'dev';
-  cleanBranches(projectRoot, 'evolve', baseBranch, (options['date'] as string) || null);
+  cleanBranches(
+    projectRoot,
+    'evolve',
+    baseBranch,
+    typeof options['date'] === 'string' && options['date'].length > 0 ? options['date'] : null,
+  );
 }
 
 // ── Knowledge Command ───────────────────────────────────────────────────────
@@ -354,10 +386,18 @@ function knowledgeCommand(projectRoot: string, options: Record<string, string | 
   }
 
   // Search if query provided
-  const query = (options['query'] as string) || (options['search'] as string) || '';
-  const tags = options['tags'] ? (options['tags'] as string).split(',') : [];
+  let query = '';
+  if (typeof options['query'] === 'string' && options['query'].length > 0) {
+    query = options['query'];
+  } else if (typeof options['search'] === 'string' && options['search'].length > 0) {
+    query = options['search'];
+  }
+  const tags =
+    typeof options['tags'] === 'string' && options['tags'].length > 0
+      ? options['tags'].split(',')
+      : [];
 
-  if (query || tags.length > 0) {
+  if (query.length > 0 || tags.length > 0) {
     const results = searchEntries(kb, query, tags);
     console.log(`\n  Search results (${String(results.length)}):`);
     for (const entry of results.slice(0, 20)) {
@@ -374,7 +414,7 @@ function knowledgeCommand(projectRoot: string, options: Record<string, string | 
       console.log(
         `    ${icon} [${entry.id ?? ''}] ${entry.area ?? ''}: ${(entry.finding ?? '').slice(0, 80)}`,
       );
-      if (entry.learnings) {
+      if (entry.learnings != null && entry.learnings.length > 0) {
         console.log(pc.dim(`      Learnings: ${entry.learnings.slice(0, 80)}`));
       }
     }
@@ -408,12 +448,16 @@ function knowledgeCommand(projectRoot: string, options: Record<string, string | 
 function suggestionsCommand(projectRoot: string, options: Record<string, string | boolean>) {
   const evolveDir = path.join(projectRoot, 'docs', 'coordination', 'evolve');
   const sg = loadSuggestions(evolveDir);
-  const statusFilter = (options['status'] as string) || null;
-  const entries = statusFilter
-    ? sg.entries.filter((e: { status?: unknown }) => e.status === statusFilter)
-    : getPendingSuggestions(sg);
+  const statusFilter =
+    typeof options['status'] === 'string' && options['status'].length > 0
+      ? options['status']
+      : null;
+  const entries =
+    statusFilter === null
+      ? getPendingSuggestions(sg)
+      : sg.entries.filter((e: { status?: unknown }) => e.status === statusFilter);
 
-  const label = statusFilter ? `${statusFilter} suggestions` : 'pending suggestions';
+  const label = statusFilter === null ? 'pending suggestions' : `${statusFilter} suggestions`;
   console.log(pc.bold(`\nEvolve Suggestions — ${String(entries.length)} ${label}\n`));
 
   if (entries.length === 0) {
@@ -452,7 +496,7 @@ function suggestionsCommand(projectRoot: string, options: Record<string, string 
       parts.push(`attempts: ${String(s.attempts ?? '')}/${String(s.maxAttempts ?? '')}`);
       if (s.lastAttemptScore != null) parts.push(`last: ${String(s.lastAttemptScore ?? '')}/10`);
     }
-    if (s.specPath) parts.push('has spec');
+    if (s.specPath != null && s.specPath.length > 0) parts.push('has spec');
     console.log(`    ${pc.dim(parts.join(' | '))}`);
     console.log('');
   }
@@ -470,12 +514,23 @@ function suggestionsCommand(projectRoot: string, options: Record<string, string 
 
 async function main() {
   const { options, positionals } = parseArgs(process.argv);
-  const command = String(positionals[0] || options['command'] || 'status');
+
+  let command: string;
+  if (typeof positionals[0] === 'string' && positionals[0].length > 0) {
+    command = positionals[0];
+  } else if (typeof options['command'] === 'string' && options['command'].length > 0) {
+    command = options['command'];
+  } else {
+    command = 'status';
+  }
 
   let config;
   try {
     config = resolveProject({
-      project: options['project'] ? String(options['project']) : undefined,
+      project:
+        typeof options['project'] === 'string' && options['project'].length > 0
+          ? options['project']
+          : undefined,
     });
   } catch (err: unknown) {
     console.error(

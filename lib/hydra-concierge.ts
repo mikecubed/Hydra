@@ -8,6 +8,7 @@
 
 import path from 'node:path';
 import { loadHydraConfig } from './hydra-config.ts';
+import type { ConciergeConfig, ConciergeStats, ActiveProvider } from './types.ts';
 // hydra-agents utilities used in other modules
 import {
   detectAvailableProviders,
@@ -32,10 +33,10 @@ const SYSTEM_PROMPT_TTL_MS = 30_000;
 
 // ── Config ───────────────────────────────────────────────────────────────────
 
-export function getConciergeConfig() {
+export function getConciergeConfig(): ConciergeConfig {
   const cfg = loadHydraConfig();
   return (
-    cfg.concierge || {
+    cfg.concierge ?? {
       enabled: true,
       model: 'gpt-5',
       reasoningEffort: 'xhigh',
@@ -54,7 +55,7 @@ export function getConciergeConfig() {
 
 // ── Availability ─────────────────────────────────────────────────────────────
 
-export function isConciergeAvailable() {
+export function isConciergeAvailable(): boolean {
   const cfg = getConciergeConfig();
   if (!cfg.enabled) return false;
   return detectAvailableProviders().length > 0;
@@ -62,7 +63,7 @@ export function isConciergeAvailable() {
 
 // ── Init ─────────────────────────────────────────────────────────────────────
 
-export function initConcierge(_opts: Record<string, unknown> = {}) {
+export function initConcierge(_opts: Record<string, unknown> = {}): void {
   const chain = buildFallbackChain().filter((e) => e.available);
   if (chain.length === 0) {
     throw new Error(
@@ -77,13 +78,13 @@ export function initConcierge(_opts: Record<string, unknown> = {}) {
 
 // ── Conversation Management ──────────────────────────────────────────────────
 
-export function resetConversation() {
+export function resetConversation(): void {
   history = [];
   stats.turns = 0;
   systemPromptCache = { text: '', builtAt: 0, fingerprint: '' };
 }
 
-export function getConciergeStats() {
+export function getConciergeStats(): ConciergeStats {
   return { ...stats };
 }
 
@@ -91,7 +92,7 @@ export function getConciergeStats() {
  * Get info about the currently active provider.
  * @returns {{provider: string, model: string, isFallback: boolean}|null}
  */
-export function getActiveProvider() {
+export function getActiveProvider(): ActiveProvider | null {
   return activeProvider ? { ...activeProvider } : null;
 }
 
@@ -99,7 +100,7 @@ export function getActiveProvider() {
  * Get a short display label for the active concierge model.
  * @returns {string}
  */
-export function getConciergeModelLabel() {
+export function getConciergeModelLabel(): string {
   if (activeProvider) {
     const short = shortModelName(activeProvider.model);
     return activeProvider.isFallback ? `${short} \u2193` : short;
@@ -114,7 +115,7 @@ export function getConciergeModelLabel() {
  * Inserts the specified model at the front of the fallback chain.
  * @param {string} modelSpec - Model name or alias (e.g. "sonnet", "gpt-5", "flash")
  */
-export function switchConciergeModel(modelSpec: string) {
+export function switchConciergeModel(modelSpec: string): void {
   // Resolve common aliases
   const ALIASES = {
     opus: 'claude-opus-4-6',
@@ -138,7 +139,13 @@ export function switchConciergeModel(modelSpec: string) {
  * Export the conversation history for archiving.
  * @returns {object}
  */
-export function exportConversation() {
+export function exportConversation(): {
+  exportedAt: string;
+  provider: string;
+  turns: number;
+  stats: ConciergeStats;
+  messages: { role: string; content: string }[];
+} {
   return {
     exportedAt: new Date().toISOString(),
     provider: activeProvider ? `${activeProvider.provider}:${activeProvider.model}` : 'unknown',
@@ -153,7 +160,7 @@ export function exportConversation() {
  * @param {number} n
  * @returns {string[]}
  */
-export function getRecentContext(n = 3) {
+export function getRecentContext(n = 3): string[] {
   return history
     .filter((m) => m.role === 'user')
     .slice(-n)
@@ -214,11 +221,11 @@ function buildSystemPrompt(context: ConciergeContext = {}) {
 
   // Context-hash fingerprint for cache invalidation
   const fingerprint = JSON.stringify([
-    context.mode || '',
+    context.mode ?? '',
     context.openTasks ?? 0,
-    context.gitInfo?.branch || '',
-    (context.recentCompletions || []).length,
-    context.selfAwarenessKey || '',
+    context.gitInfo?.branch ?? '',
+    (context.recentCompletions ?? []).length,
+    context.selfAwarenessKey ?? '',
   ]);
 
   if (
@@ -229,12 +236,12 @@ function buildSystemPrompt(context: ConciergeContext = {}) {
     return systemPromptCache.text;
   }
 
-  const project = context.projectName || 'unknown';
-  const projectRoot = context.projectRoot || '';
-  const mode = context.mode || 'auto';
+  const project = context.projectName ?? 'unknown';
+  const projectRoot = context.projectRoot ?? '';
+  const mode = context.mode ?? 'auto';
   const openTasks = context.openTasks ?? 0;
-  const agentModels = context.agentModels || {};
-  const knownProjects = context.knownProjects || [];
+  const agentModels = context.agentModels ?? {};
+  const knownProjects = context.knownProjects ?? [];
 
   const modelLines = Object.entries(agentModels)
     .map(([agent, model]) => `  - ${agent}: ${model}`)
@@ -251,9 +258,9 @@ function buildSystemPrompt(context: ConciergeContext = {}) {
   // Git info
   if (context.gitInfo) {
     const gi = context.gitInfo;
-    awarenessBlock += `\n- Git branch: ${gi.branch || 'unknown'}`;
+    awarenessBlock += `\n- Git branch: ${gi.branch ?? 'unknown'}`;
     if (gi.modifiedFiles != null) {
-      awarenessBlock += ` (${gi.modifiedFiles} modified file${gi.modifiedFiles === 1 ? '' : 's'})`;
+      awarenessBlock += ` (${String(gi.modifiedFiles)} modified file${gi.modifiedFiles === 1 ? '' : 's'})`;
     }
   }
 
@@ -261,7 +268,7 @@ function buildSystemPrompt(context: ConciergeContext = {}) {
   if (context.recentCompletions && context.recentCompletions.length > 0) {
     awarenessBlock += '\n- Recently completed tasks:';
     for (const c of context.recentCompletions.slice(0, 3)) {
-      awarenessBlock += `\n  - [${c.agent}] ${c.title || c.taskId || 'untitled'}`;
+      awarenessBlock += `\n  - [${c.agent}] ${c.title ?? c.taskId ?? 'untitled'}`;
     }
   }
 
@@ -269,7 +276,7 @@ function buildSystemPrompt(context: ConciergeContext = {}) {
   if (context.recentErrors && context.recentErrors.length > 0) {
     awarenessBlock += '\n- Recent errors:';
     for (const e of context.recentErrors.slice(0, 3)) {
-      awarenessBlock += `\n  - [${e.agent || 'system'}] ${(e.error || e.message || 'unknown').slice(0, 80)}`;
+      awarenessBlock += `\n  - [${e.agent ?? 'system'}] ${(e.error ?? e.message ?? 'unknown').slice(0, 80)}`;
     }
   }
 
@@ -320,7 +327,7 @@ function buildSystemPrompt(context: ConciergeContext = {}) {
 
   // Persona-aware identity block (falls back to hardcoded text when persona disabled)
   const openingParagraph =
-    getConciergeIdentity() ||
+    getConciergeIdentity() ??
     'You are the Hydra Concierge \u2014 the conversational front-end for the Hydra multi-agent orchestration system.';
 
   const text = `${openingParagraph}
@@ -328,7 +335,7 @@ function buildSystemPrompt(context: ConciergeContext = {}) {
 Current state:
 - Project: ${project} (${projectRoot})
 - Operator mode: ${mode}
-- Open tasks: ${openTasks}
+- Open tasks: ${String(openTasks)}
 - Agent models:
 ${modelLines || '  (none loaded)'}${awarenessBlock}
 ${otherProjects ? `\nOther known projects:\n${otherProjects}` : ''}
@@ -442,7 +449,7 @@ let _daemonBaseUrl: string | null = null;
  * Set the daemon base URL for event posting.
  * @param {string} baseUrl
  */
-export function setConciergeBaseUrl(baseUrl: string) {
+export function setConciergeBaseUrl(baseUrl: string): void {
   _daemonBaseUrl = baseUrl;
 }
 
@@ -478,48 +485,71 @@ interface ConciergeTurnOpts {
  * @param {object} [opts.context] - Live state for system prompt
  * @returns {Promise<{intent: 'chat'|'dispatch', response: string, dispatchPrompt?: string, provider?: string, model?: string, isFallback?: boolean, estimatedCost?: number}>}
  */
-export async function conciergeTurn(userMsg: string, opts: ConciergeTurnOpts = {}) {
+export async function conciergeTurn(
+  userMsg: string,
+  opts: ConciergeTurnOpts = {},
+): Promise<
+  | {
+      intent: 'dispatch';
+      response: unknown;
+      dispatchPrompt: string;
+      provider: string;
+      model: string;
+      isFallback: boolean;
+      estimatedCost: number | null;
+    }
+  | {
+      intent: 'chat';
+      response: unknown;
+      provider: string;
+      model: string;
+      isFallback: boolean;
+      estimatedCost: number | null;
+    }
+> {
   const cfg = getConciergeConfig();
-  const systemPrompt = buildSystemPrompt(opts.context || {});
+  const systemPrompt = buildSystemPrompt(opts.context ?? {});
 
   // Add user message to history
   history.push({ role: 'user', content: userMsg });
-  trimHistory(cfg.maxHistoryMessages || 40);
+  trimHistory(cfg.maxHistoryMessages ?? 40);
 
   // Build messages array
   const messages = [{ role: 'system', content: systemPrompt }, ...history];
 
   // Track whether we've detected [DISPATCH] prefix
-  let isDispatch = false;
-  let dispatchDetected = false;
-  let responseBuffer = '';
-  let chunkCount = 0;
-  let firstChunkFired = false;
+  const state = {
+    isDispatch: false,
+    dispatchDetected: false,
+    responseBuffer: '',
+    chunkCount: 0,
+    firstChunkFired: false,
+  };
 
   const onChunk = (chunk: string) => {
-    responseBuffer += chunk;
-    chunkCount++;
+    state.responseBuffer += chunk;
+    state.chunkCount++;
 
     // Notify on first chunk (for spinner)
-    if (!firstChunkFired && opts.onFirstChunk) {
-      firstChunkFired = true;
+    if (!state.firstChunkFired && opts.onFirstChunk) {
+      state.firstChunkFired = true;
       opts.onFirstChunk();
     }
 
     // Check for [DISPATCH] prefix in first few chunks
-    if (!dispatchDetected && chunkCount <= 5) {
-      const trimmed = responseBuffer.trimStart();
+    if (!state.dispatchDetected && state.chunkCount <= 5) {
+      const trimmed = state.responseBuffer.trimStart();
       if (trimmed.startsWith('[DISPATCH]')) {
-        isDispatch = true;
-        dispatchDetected = true;
+        state.isDispatch = true;
+        state.dispatchDetected = true;
         return;
       } else if (trimmed.length > 12) {
-        dispatchDetected = true;
+        state.dispatchDetected = true;
       }
     }
 
     // Stream to user only if it's a chat response
-    if (dispatchDetected && !isDispatch && opts.onChunk) {
+    if (state.dispatchDetected && !state.isDispatch && opts.onChunk) {
       opts.onChunk(chunk);
     }
   };
@@ -535,6 +565,7 @@ export async function conciergeTurn(userMsg: string, opts: ConciergeTurnOpts = {
   const result = await streamWithFallback(messages, streamCfg, onChunk);
 
   // Update active provider info
+  // eslint-disable-next-line require-atomic-updates -- assignment uses result.provider/model, not prior activeProvider value
   activeProvider = {
     provider: result.provider,
     model: result.model,
@@ -542,12 +573,12 @@ export async function conciergeTurn(userMsg: string, opts: ConciergeTurnOpts = {
   };
 
   // If we buffered early chunks waiting for dispatch detection, flush them now
-  if (!isDispatch && !dispatchDetected && opts.onChunk) {
-    opts.onChunk(responseBuffer);
+  if (!state.isDispatch && !state.dispatchDetected && opts.onChunk) {
+    opts.onChunk(state.responseBuffer);
   }
 
   // Fire onFirstChunk if nothing came through (empty response edge case)
-  if (!firstChunkFired && opts.onFirstChunk) {
+  if (!state.firstChunkFired && opts.onFirstChunk) {
     opts.onFirstChunk();
   }
 
@@ -555,8 +586,8 @@ export async function conciergeTurn(userMsg: string, opts: ConciergeTurnOpts = {
   stats.turns++;
   if (result.usage) {
     const usage = result.usage as { prompt_tokens?: number; completion_tokens?: number };
-    stats.promptTokens += usage.prompt_tokens || 0;
-    stats.completionTokens += usage.completion_tokens || 0;
+    stats.promptTokens += usage.prompt_tokens ?? 0;
+    stats.completionTokens += usage.completion_tokens ?? 0;
   }
 
   // Estimate cost
@@ -574,8 +605,8 @@ export async function conciergeTurn(userMsg: string, opts: ConciergeTurnOpts = {
       history
         .filter((m) => m.role === 'user')
         .at(-1)
-        ?.content.slice(0, 80) || '';
-    postConciergeEvent('concierge:summary', {
+        ?.content.slice(0, 80) ?? '';
+    void postConciergeEvent('concierge:summary', {
       turns: stats.turns,
       lastTopic,
       tokensUsed: stats.promptTokens + stats.completionTokens,
@@ -588,7 +619,7 @@ export async function conciergeTurn(userMsg: string, opts: ConciergeTurnOpts = {
     const dispatchPrompt = trimmedResponse.slice('[DISPATCH]'.length).trim();
 
     // Post dispatch event
-    postConciergeEvent('concierge:dispatch', {
+    void postConciergeEvent('concierge:dispatch', {
       dispatchPrompt: dispatchPrompt.slice(0, 200),
       conversationContext: getRecentContext(3),
       provider: result.provider,
@@ -632,7 +663,7 @@ const SUGGEST_SYSTEM_PROMPT = `You suggest a single actionable prompt the user c
 export async function conciergeSuggest(
   contextDescription: string,
   opts: { maxTokens?: number } = {},
-) {
+): Promise<{ suggestion: string; provider: string; model: string } | null> {
   const cfg = getConciergeConfig();
   if (!cfg.enabled) return null;
 
@@ -641,7 +672,7 @@ export async function conciergeSuggest(
     { role: 'user', content: contextDescription },
   ];
 
-  const streamCfg = { ...cfg, maxTokens: opts.maxTokens || 300 };
+  const streamCfg = { ...cfg, maxTokens: opts.maxTokens ?? 300 };
   if (activeProvider) {
     streamCfg.model = activeProvider.model;
   }
