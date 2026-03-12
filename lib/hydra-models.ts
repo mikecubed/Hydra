@@ -53,7 +53,7 @@ function httpGet(url: string, headers: Record<string, string> = {}): Promise<unk
 
 async function apiClaude(): Promise<string[] | null> {
   const key = process.env['ANTHROPIC_API_KEY'];
-  if (!key) return null;
+  if (key == null || key === '') return null;
   const data = await httpGet('https://api.anthropic.com/v1/models?limit=100', {
     'x-api-key': key,
     'anthropic-version': '2023-06-01',
@@ -63,7 +63,7 @@ async function apiClaude(): Promise<string[] | null> {
 
 async function apiCodex(): Promise<string[] | null> {
   const key = process.env['OPENAI_API_KEY'];
-  if (!key) return null;
+  if (key == null || key === '') return null;
   const data = await httpGet('https://api.openai.com/v1/models', {
     Authorization: `Bearer ${key}`,
   });
@@ -72,7 +72,7 @@ async function apiCodex(): Promise<string[] | null> {
 
 async function apiGemini(): Promise<string[] | null> {
   const key = process.env['GEMINI_API_KEY'] ?? process.env['GOOGLE_API_KEY'];
-  if (!key) return null;
+  if (key == null || key === '') return null;
   const data = await httpGet(
     `https://generativelanguage.googleapis.com/v1beta/models?key=${key}&pageSize=200`,
   );
@@ -89,23 +89,29 @@ const GEMINI_PROMPT =
   'List every Gemini model ID currently available. Output ONLY the model IDs, one per line. No markdown, no commentary, no explanation.';
 
 function cliClaude() {
+  // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-member-access
   const r = spawn.sync('claude', ['-p', '--model', 'haiku', '--output-format', 'text'], {
     input: CLAUDE_PROMPT,
     encoding: 'utf8',
     timeout: 30_000,
     windowsHide: true,
   });
-  if (r.status !== 0 && !r.stdout) return null;
+  // eslint-disable-next-line @typescript-eslint/no-unsafe-member-access
+  if (r.status !== 0 && r.stdout == null) return null;
+  // eslint-disable-next-line @typescript-eslint/no-unsafe-argument, @typescript-eslint/no-unsafe-member-access
   return parseModelLines(r.stdout);
 }
 
 function cliGemini() {
+  // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-member-access
   const r = spawn.sync(
     'gemini',
     ['-p', GEMINI_PROMPT, '-o', 'text', '-m', 'gemini-3-flash-preview'],
     { encoding: 'utf8', timeout: 30_000, windowsHide: true },
   );
-  if (r.status !== 0 && !r.stdout) return null;
+  // eslint-disable-next-line @typescript-eslint/no-unsafe-member-access
+  if (r.status !== 0 && r.stdout == null) return null;
+  // eslint-disable-next-line @typescript-eslint/no-unsafe-argument, @typescript-eslint/no-unsafe-member-access
   return parseModelLines(r.stdout);
 }
 
@@ -117,11 +123,11 @@ function cliCodex() {
 
 /** Parse one-per-line model IDs from noisy CLI output. */
 function parseModelLines(raw: string | null | undefined): string[] | null {
-  if (!raw) return null;
+  if (raw == null || raw === '') return null;
   const ids = raw
     .split('\n')
     .map((l) => l.trim())
-    .filter((l) => l && !l.startsWith('#') && !l.startsWith('-') && !l.startsWith('*'))
+    .filter((l) => l !== '' && !l.startsWith('#') && !l.startsWith('-') && !l.startsWith('*'))
     .filter((l) => !l.startsWith('Loaded') && !l.startsWith('Hook'))
     .filter((l) => !l.includes(' ')) // model IDs shouldn't have spaces
     .filter((l) => /^[a-z0-9]/.test(l)); // starts with lowercase/digit
@@ -180,7 +186,7 @@ function displayAgent(agentName: string, fetchResult: { models: string[]; source
 
   // Active model + reasoning effort
   const effort = getReasoningEffort(agentName);
-  const effortStr = effort ? pc.yellow(` [${effort}]`) : '';
+  const effortStr = effort != null && effort !== '' ? pc.yellow(` [${effort}]`) : '';
   console.log(
     `  Active:  ${pc.green(activeModel ?? 'unknown')}${effortStr} ${pc.dim(`(mode: ${mode} → ${tierPreset})`)}`,
   );
@@ -189,7 +195,7 @@ function displayAgent(agentName: string, fetchResult: { models: string[]; source
   const presetKeys = ['default', 'fast', 'cheap'];
   console.log(pc.bold('  Presets:'));
   for (const key of presetKeys) {
-    if (agentModels[key]) {
+    if (agentModels[key] !== '') {
       const marker = agentModels[key] === activeModel ? pc.green(' ◀') : '';
       console.log(`    ${pc.dim(key.padEnd(8))} ${agentModels[key]}${marker}`);
     }
@@ -202,7 +208,7 @@ function displayAgent(agentName: string, fetchResult: { models: string[]; source
     .map((e) => (e === effort ? pc.green(e) + pc.green(' ◀') : pc.dim(e)))
     .join('  ');
   console.log(
-    `    ${effort ? effortLine : `${pc.dim('default')}  (${effortLevels.map((e) => pc.dim(e)).join(' | ')})`}`,
+    `    ${effort != null && effort !== '' ? effortLine : `${pc.dim('default')}  (${effortLevels.map((e) => pc.dim(e)).join(' | ')})`}`,
   );
 
   // Aliases
@@ -236,7 +242,7 @@ function displayAgent(agentName: string, fetchResult: { models: string[]; source
   // Build known-set for highlighting
   const knownIds = new Set();
   for (const key of presetKeys) {
-    if (agentModels[key]) knownIds.add(agentModels[key]);
+    if (agentModels[key] !== '') knownIds.add(agentModels[key]);
   }
   for (const modelId of Object.values(aliases)) knownIds.add(modelId);
 
@@ -261,9 +267,9 @@ function displayAgent(agentName: string, fetchResult: { models: string[]; source
 async function main() {
   const arg = process.argv[2]?.toLowerCase();
 
-  const agents = arg && AGENT_NAMES.includes(arg) ? [arg] : AGENT_NAMES;
+  const agents = arg !== '' && AGENT_NAMES.includes(arg) ? [arg] : AGENT_NAMES;
 
-  if (arg && !AGENT_NAMES.includes(arg)) {
+  if (arg !== '' && !AGENT_NAMES.includes(arg)) {
     console.error(pc.red(`Unknown agent: ${arg}`));
     console.error(`Available: ${AGENT_NAMES.join(', ')}`);
     process.exitCode = 1;
@@ -289,7 +295,7 @@ async function main() {
 
 // Only run when invoked directly (not when imported by hydra-models-select.mjs)
 const __self = new URL(import.meta.url).pathname.replace(/^\/([A-Z]:)/, '$1');
-const __argv1 = path.resolve(process.argv[1] || '');
+const __argv1 = path.resolve(process.argv[1] === '' ? '' : process.argv[1]);
 if (__argv1 === path.resolve(__self)) {
   main().catch((err: unknown) => {
     console.error(pc.red(`Error: ${(err as Error).message}`));

@@ -72,7 +72,7 @@ function buildDiscoveryPrompt(
 - Do NOT suggest tasks already in the queue above
 - Return 3-5 suggestions, sorted by priority`;
 
-  const ctxBlock = extraContext ? `\n## Extra Context\n${extraContext}\n` : '';
+  const ctxBlock = extraContext === '' ? '' : `\n## Extra Context\n${extraContext}\n`;
 
   return `${header}
 
@@ -118,7 +118,9 @@ function extractJsonArray(text: string) {
   const fenceMatch = text.match(/```(?:json)?\s*\n?([\s\S]*?)```/);
   if (fenceMatch) {
     try {
+      // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment -- JSON.parse result
       const parsed = JSON.parse(fenceMatch[1].trim());
+      // eslint-disable-next-line @typescript-eslint/no-unsafe-return -- JSON.parse result
       if (Array.isArray(parsed)) return parsed;
     } catch {
       /* continue */
@@ -129,7 +131,9 @@ function extractJsonArray(text: string) {
   const bracketMatch = text.match(/\[[\s\S]*\]/);
   if (bracketMatch) {
     try {
+      // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment -- JSON.parse result
       const parsed = JSON.parse(bracketMatch[0]);
+      // eslint-disable-next-line @typescript-eslint/no-unsafe-return -- JSON.parse result
       if (Array.isArray(parsed)) return parsed;
     } catch {
       /* continue */
@@ -197,7 +201,7 @@ export async function runDiscovery(
     result = await executeAgentWithRecovery(agent, prompt, {
       cwd: projectRoot,
       timeoutMs,
-      ...(modelOverride && { modelOverride }),
+      ...(modelOverride != null && modelOverride !== '' && { modelOverride }),
     });
   } catch (err: unknown) {
     recordCallError(handle, err instanceof Error ? err : new Error(String(err)));
@@ -225,16 +229,21 @@ export async function runDiscovery(
   // Convert to ScannedTask shape
   const tasks: ScannedTask[] = [];
   for (const item of items.slice(0, maxSuggestions)) {
+    // eslint-disable-next-line @typescript-eslint/no-unsafe-member-access, @typescript-eslint/strict-boolean-expressions -- untyped data
     if (!item.title || typeof item.title !== 'string') continue;
 
+    // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-member-access -- untyped data
     const title = item.title.trim();
+    // eslint-disable-next-line @typescript-eslint/no-unsafe-argument -- untyped data
     const slug = taskToSlug(title);
+    // eslint-disable-next-line @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-argument -- untyped data
     const taskType = (item.taskType ?? classifyTask(title)) as string;
     const suggestedAgent = bestAgentFor(taskType);
     const { tier } = classifyPrompt(title);
 
     tasks.push({
       id: `ai-discovery:${slug}`,
+      // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment -- untyped data
       title,
       slug,
       source: 'ai-discovery' as ScannedTask['source'],
@@ -242,7 +251,9 @@ export async function runDiscovery(
       taskType,
       suggestedAgent,
       complexity: tier,
+      // eslint-disable-next-line @typescript-eslint/no-unsafe-member-access -- untyped data
       priority: (item.priority ?? 'medium') as ScannedTask['priority'],
+      // eslint-disable-next-line @typescript-eslint/no-unsafe-member-access -- untyped data
       body: (item.description ?? null) as string | null,
       issueNumber: null,
     });

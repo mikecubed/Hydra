@@ -173,7 +173,7 @@ function createEmptyStore(): MetricsStore {
 }
 
 function ensureAgent(agentName: string): AgentMetrics {
-  // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
+  // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition, @typescript-eslint/strict-boolean-expressions
   if (!metricsStore.agents[agentName]) {
     metricsStore.agents[agentName] = {
       callsTotal: 0,
@@ -191,7 +191,7 @@ function ensureAgent(agentName: string): AgentMetrics {
   }
   // Backfill sessionTokens for stores loaded from disk before this field existed
   const agentEntry = metricsStore.agents[agentName];
-  // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
+  // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition, @typescript-eslint/strict-boolean-expressions
   if (agentEntry && !agentEntry.sessionTokens) {
     agentEntry.sessionTokens = createEmptySessionUsage();
   }
@@ -293,7 +293,7 @@ export function recordCallComplete(handle: string, result: CallResult): void {
     durationMs,
     estimatedTokens,
     realTokens: realTokens ? { ...realTokens } : null,
-    costUsd: costUsd || null,
+    costUsd: costUsd === 0 ? null : costUsd,
     ok: true,
     outputLen,
     outcome: result.outcome ?? 'success',
@@ -358,7 +358,7 @@ export function getMetrics(): MetricsStore {
 // eslint-disable-next-line @typescript-eslint/explicit-module-boundary-types
 export function getAgentMetrics(agentName: string) {
   const agent = metricsStore.agents[agentName];
-  // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
+  // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition, @typescript-eslint/strict-boolean-expressions
   if (!agent) return null;
 
   const durations = agent.history.filter((h) => h.ok).map((h) => h.durationMs);
@@ -436,10 +436,11 @@ export function getRecentTokens(
   let estimated = 0;
   let entries = 0;
 
-  const agentNames = agentName ? [agentName] : Object.keys(metricsStore.agents);
+  const agentNames =
+    agentName != null && agentName !== '' ? [agentName] : Object.keys(metricsStore.agents);
   for (const name of agentNames) {
     const agent = metricsStore.agents[name];
-    // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
+    // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition, @typescript-eslint/strict-boolean-expressions
     if (!agent?.history) continue;
     for (const entry of agent.history) {
       if (!entry.ok) continue;
@@ -449,7 +450,7 @@ export function getRecentTokens(
       if (entry.realTokens) {
         real += entry.realTokens.totalTokens;
       } else {
-        estimated += entry.estimatedTokens || 0;
+        estimated += entry.estimatedTokens;
       }
     }
   }
@@ -464,15 +465,16 @@ export function getRecentTokens(
  */
 export function getCostByOutcome(agentName?: string | null): Record<string, OutcomeResult> {
   const result: Record<string, OutcomeResult> = {};
-  const agentNames = agentName ? [agentName] : Object.keys(metricsStore.agents);
+  const agentNames =
+    agentName != null && agentName !== '' ? [agentName] : Object.keys(metricsStore.agents);
 
   for (const name of agentNames) {
     const agent = metricsStore.agents[name];
-    // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
+    // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition, @typescript-eslint/strict-boolean-expressions
     if (!agent?.history) continue;
     for (const entry of agent.history) {
       const outcome = entry.outcome ?? (entry.ok ? 'success' : 'failed');
-      // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
+      // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition, @typescript-eslint/strict-boolean-expressions
       if (!result[outcome]) result[outcome] = { count: 0, totalCost: 0 };
       result[outcome].count += 1;
       result[outcome].totalCost += entry.costUsd ?? 0;
@@ -494,14 +496,14 @@ export function checkSLOs(
 
   for (const [agentName, thresholds] of Object.entries(sloConfig)) {
     const agent = metricsStore.agents[agentName];
-    // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
+    // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition, @typescript-eslint/strict-boolean-expressions
     if (!agent) continue;
 
     // Latency SLO
-    if (thresholds.maxP95Ms) {
+    if (thresholds.maxP95Ms != null && thresholds.maxP95Ms !== 0) {
       const durations = agent.history.filter((h) => h.ok).map((h) => h.durationMs);
       const pcts = calculatePercentiles(durations);
-      if (pcts.p95 && pcts.p95 > thresholds.maxP95Ms) {
+      if (pcts.p95 != null && pcts.p95 > thresholds.maxP95Ms) {
         violations.push({
           agent: agentName,
           metric: 'p95_latency',
@@ -563,7 +565,7 @@ const METRICS_FILENAME = 'hydra-metrics.json';
  * Save metrics to a JSON file in the given directory.
  */
 export function persistMetrics(coordDir: string): void {
-  if (!coordDir) return;
+  if (coordDir === '') return;
   try {
     if (!fs.existsSync(coordDir)) {
       fs.mkdirSync(coordDir, { recursive: true });
@@ -579,22 +581,25 @@ export function persistMetrics(coordDir: string): void {
  * Load previously persisted metrics.
  */
 export function loadPersistedMetrics(coordDir: string): void {
-  if (!coordDir) return;
+  if (coordDir === '') return;
   try {
     const filePath = path.join(coordDir, METRICS_FILENAME);
     if (!fs.existsSync(filePath)) return;
     const raw = fs.readFileSync(filePath, 'utf8');
+    // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment -- JSON.parse result
     const loaded = JSON.parse(raw);
+    // eslint-disable-next-line @typescript-eslint/strict-boolean-expressions, @typescript-eslint/no-unsafe-member-access -- dynamic value
     if (loaded && typeof loaded === 'object' && loaded.agents) {
+      // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment -- loaded from disk
       metricsStore = loaded;
       // Backfill sessionUsage if loaded from older format
-      // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
+      // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition, @typescript-eslint/strict-boolean-expressions
       if (!metricsStore.sessionUsage) {
         metricsStore.sessionUsage = createEmptySessionUsage();
       }
       // Reset today counters if date changed
       const today = new Date().toISOString().slice(0, 10);
-      const startDate = (metricsStore.startedAt || '').slice(0, 10);
+      const startDate = metricsStore.startedAt.slice(0, 10);
       if (startDate !== today) {
         for (const agent of Object.values(metricsStore.agents)) {
           agent.callsToday = 0;

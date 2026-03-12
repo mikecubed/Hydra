@@ -1,4 +1,3 @@
-#!/usr/bin/env node
 /**
  * gen-research-todo.ts
  * Generates docs/coordination/RESEARCH_TODO.md from all research docs
@@ -57,7 +56,7 @@ function extractTitle(filePath: string) {
     // First non-empty line
     for (const line of content.split('\n')) {
       const t = line.trim();
-      if (t) return t;
+      if (t !== '') return t;
     }
     return null;
   }
@@ -235,7 +234,9 @@ function main() {
 
   const { total, groups: gc } = countItems(groups);
   console.log(`Written: docs/coordination/RESEARCH_TODO.md`);
-  console.log(`  ${String(total)} file${total === 1 ? '' : 's'} across ${String(gc)} group${gc === 1 ? '' : 's'}`);
+  console.log(
+    `  ${String(total)} file${total === 1 ? '' : 's'} across ${String(gc)} group${gc === 1 ? '' : 's'}`,
+  );
 }
 
 main();

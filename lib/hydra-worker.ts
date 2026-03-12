@@ -146,7 +146,7 @@ export class AgentWorker extends EventEmitter {
 
     // Update global concurrency limit from config
     const maxFromCfg = workerCfg.concurrency?.maxInFlight;
-    if (maxFromCfg && maxFromCfg > 0) globalMaxInFlight = maxFromCfg;
+    if (maxFromCfg != null && maxFromCfg > 0) globalMaxInFlight = maxFromCfg;
 
     this._status = 'stopped'; // 'idle' | 'working' | 'stopped' | 'error'
     this._currentTask = null; // { taskId, title, startedAt }
@@ -167,7 +167,7 @@ export class AgentWorker extends EventEmitter {
   }
 
   get uptime(): number {
-    return this._startedAt ? Date.now() - this._startedAt : 0;
+    return this._startedAt == null ? 0 : Date.now() - this._startedAt;
   }
 
   /**
@@ -231,9 +231,11 @@ export class AgentWorker extends EventEmitter {
       try {
         // Concurrency gate: wait if too many tasks running globally
         while (activeTaskCount >= globalMaxInFlight) {
+          // eslint-disable-next-line no-await-in-loop -- concurrency gate
           await this._sleep(500);
         }
 
+        // eslint-disable-next-line no-await-in-loop -- sequential task polling
         const next = await this._pollNext();
 
         if (!next || next.action === 'idle') {
@@ -257,6 +259,7 @@ export class AgentWorker extends EventEmitter {
             }
           }
 
+          // eslint-disable-next-line no-await-in-loop -- sequential worker loop
           await this._sleep(this.pollIntervalMs);
           continue;
         }
@@ -267,6 +270,7 @@ export class AgentWorker extends EventEmitter {
         if (next.action === 'pickup_handoff') {
           // Acknowledge the handoff
           try {
+            // eslint-disable-next-line no-await-in-loop -- sequential worker loop
             await request('POST', this.baseUrl, '/handoff/ack', {
               handoffId: next.handoff?.id,
               agent: this.agent,
@@ -284,11 +288,12 @@ export class AgentWorker extends EventEmitter {
           next.action === 'continue_task'
         ) {
           const task = next.task;
-          taskId = (task?.['id'] as string) || 'unknown';
-          title = (task?.['title'] as string) || 'Untitled task';
+          taskId = (task?.['id'] as string | undefined) ?? 'unknown';
+          title = (task?.['title'] as string | undefined) ?? 'Untitled task';
 
           // Claim the task
           try {
+            // eslint-disable-next-line no-await-in-loop -- sequential worker loop
             await request('POST', this.baseUrl, '/task/claim', {
               taskId,
               agent: this.agent,
@@ -300,6 +305,7 @@ export class AgentWorker extends EventEmitter {
           prompt = this._buildTaskPrompt(task ?? null);
         } else {
           // Unknown action — sleep and retry
+          // eslint-disable-next-line no-await-in-loop -- sequential worker loop
           await this._sleep(this.pollIntervalMs);
           continue;
         }
@@ -307,6 +313,7 @@ export class AgentWorker extends EventEmitter {
         // Skip tasks that already failed on this worker (prevent infinite retry)
         if (this._failedTasks.has(taskId)) {
           try {
+            // eslint-disable-next-line no-await-in-loop -- sequential worker loop
             await request('POST', this.baseUrl, '/task/update', {
               taskId,
               status: 'blocked',
@@ -315,12 +322,12 @@ export class AgentWorker extends EventEmitter {
           } catch {
             /* daemon may be down */
           }
+          // eslint-disable-next-line no-await-in-loop -- sequential worker: blocked task backoff
           await this._sleep(this.pollIntervalMs);
           continue;
         }
 
         // Execute
-        this._currentTask = { taskId, title, startedAt: Date.now() };
         this._status = 'working';
         activeTaskCount++;
         this.emit('task:start', { agent: this.agent, taskId, title });
@@ -343,6 +350,7 @@ export class AgentWorker extends EventEmitter {
 
         let result;
         try {
+          // eslint-disable-next-line no-await-in-loop -- sequential retry after model error
           result = await this._executeAgent(prompt);
         } finally {
           clearInterval(hbInterval);
@@ -356,9 +364,10 @@ export class AgentWorker extends EventEmitter {
             result as unknown as Record<string, unknown>,
           );
           if (usageCheck.isUsageLimit) {
-            const resetMsg = usageCheck.resetInSeconds
-              ? ` (resets in ${formatResetTime(usageCheck.resetInSeconds)})`
-              : '';
+            const resetMsg =
+              usageCheck.resetInSeconds != null && usageCheck.resetInSeconds !== 0
+                ? ` (resets in ${formatResetTime(usageCheck.resetInSeconds)})`
+                : '';
             this.emit('task:progress', {
               agent: this.agent,
               taskId,
@@ -391,6 +400,7 @@ export class AgentWorker extends EventEmitter {
                 result as unknown as Record<string, unknown>,
               );
               if (modelCheck.isModelError) {
+                // eslint-disable-next-line no-await-in-loop -- sequential model error recovery
                 const recovery = (await recoverFromModelError(
                   this.agent,
                   modelCheck.failedModel ?? '',
@@ -401,6 +411,7 @@ export class AgentWorker extends EventEmitter {
                     taskId,
                     output: `Model recovery: ${modelCheck.failedModel ?? ''} → ${recovery.newModel ?? ''}`,
                   });
+                  // eslint-disable-next-line no-await-in-loop -- sequential retry after recovery
                   result = await this._executeAgent(prompt);
                   result.recovered = true;
                   result.originalModel = modelCheck.failedModel ?? undefined;
@@ -420,13 +431,14 @@ export class AgentWorker extends EventEmitter {
           : {
               exitCode: result.exitCode,
               signal: result.signal ?? null,
-              stderr: short(result.stderr || '', 500),
+              stderr: short(result.stderr, 500),
               error: result.error,
               errorCategory: result.errorCategory ?? null,
               errorDetail: result.errorDetail ?? null,
               errorContext: result.errorContext ?? null,
             };
         try {
+          // eslint-disable-next-line no-await-in-loop -- sequential worker loop
           await request('POST', this.baseUrl, '/task/result', {
             taskId,
             agent: this.agent,
@@ -438,6 +450,7 @@ export class AgentWorker extends EventEmitter {
         } catch {
           // Fallback: try task/update if /task/result doesn't exist
           try {
+            // eslint-disable-next-line no-await-in-loop -- sequential worker loop fallback
             await request('POST', this.baseUrl, '/task/update', {
               taskId,
               status: result.ok ? 'done' : 'blocked',
@@ -462,21 +475,22 @@ export class AgentWorker extends EventEmitter {
           outputSummary,
         });
 
-        if (result.error) {
+        if (result.error != null && result.error !== '') {
           this._failedTasks.add(taskId);
           this.emit('task:error', {
             agent: this.agent,
             taskId,
             title,
-            error: result.errorCategory
-              ? `[${result.errorCategory}] ${result.errorDetail ?? result.error}`
-              : result.error,
+            error:
+              result.errorCategory != null && result.errorCategory !== ''
+                ? `[${result.errorCategory}] ${result.errorDetail ?? result.error}`
+                : result.error,
             exitCode: result.exitCode,
             signal: result.signal ?? null,
             errorCategory: result.errorCategory ?? null,
             errorDetail: result.errorDetail ?? null,
             errorContext: result.errorContext ?? null,
-            stderr: short(result.stderr || '', 300),
+            stderr: short(result.stderr, 300),
           });
 
           // If this is a usage limit (e.g. ChatGPT Codex quota exhausted),
@@ -486,9 +500,10 @@ export class AgentWorker extends EventEmitter {
             result as unknown as Record<string, unknown>,
           );
           if (usageCheck.isUsageLimit) {
-            const resetLabel = usageCheck.resetInSeconds
-              ? ` (resets in ${formatResetTime(usageCheck.resetInSeconds)})`
-              : '';
+            const resetLabel =
+              usageCheck.resetInSeconds != null && usageCheck.resetInSeconds !== 0
+                ? ` (resets in ${formatResetTime(usageCheck.resetInSeconds)})`
+                : '';
             this.emit('task:progress', {
               agent: this.agent,
               taskId,
@@ -499,6 +514,7 @@ export class AgentWorker extends EventEmitter {
           }
 
           // Backoff after task failure before polling for next work
+          // eslint-disable-next-line no-await-in-loop -- failure backoff
           await this._sleep(Math.min(this.pollIntervalMs * 3, 8_000));
         }
 
@@ -519,6 +535,7 @@ export class AgentWorker extends EventEmitter {
         this._currentTask = null;
 
         // Backoff on errors
+        // eslint-disable-next-line no-await-in-loop -- sequential error backoff
         await this._sleep(Math.min(this.pollIntervalMs * 4, 10_000));
         this._status = 'idle';
       }
@@ -549,33 +566,33 @@ export class AgentWorker extends EventEmitter {
    * If the task has a preferredAgent that's a virtual agent, use its rolePrompt.
    */
   _buildTaskPrompt(task: Record<string, unknown> | null): string {
-    if (!task) return 'Continue assigned work.';
+    if (task == null) return 'Continue assigned work.';
 
     // Use virtual agent's rolePrompt if task specifies one
     let rolePrompt = '';
-    if (task['preferredAgent']) {
+    if (task['preferredAgent'] != null) {
       const preferred = getAgent(task['preferredAgent'] as string);
-      if (preferred?.rolePrompt) {
+      if (preferred?.rolePrompt != null && preferred.rolePrompt !== '') {
         rolePrompt = preferred.rolePrompt;
       }
     }
-    if (!rolePrompt) {
+    if (rolePrompt === '') {
       const agentConfig = getAgent(this.agent);
       rolePrompt = agentConfig?.rolePrompt ?? '';
     }
 
     const title = typeof task['title'] === 'string' ? task['title'] : 'Untitled';
     const parts = [`Task: ${title}`];
-    if (task['notes']) {
+    if (task['notes'] != null) {
       const notes =
         typeof task['notes'] === 'string' ? task['notes'] : JSON.stringify(task['notes']);
       parts.push(`Notes: ${notes}`);
     }
-    if (task['done']) {
+    if (task['done'] != null) {
       const done = typeof task['done'] === 'string' ? task['done'] : JSON.stringify(task['done']);
       parts.push(`Definition of Done: ${done}`);
     }
-    if (rolePrompt) parts.push('', rolePrompt);
+    if (rolePrompt !== '') parts.push('', rolePrompt);
     parts.push('', 'Execute this task. Report exactly what you changed.');
 
     return parts.join('\n');

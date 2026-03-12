@@ -87,7 +87,7 @@ function parseOptionToken(token: string) {
   }
 
   const stripped = token.replace(/^-+/, '');
-  if (!stripped) {
+  if (stripped === '') {
     return null;
   }
 
@@ -117,24 +117,26 @@ function parseOptionToken(token: string) {
 }
 
 function normalizeKey(rawKey: string) {
-  const key = (rawKey || '').trim();
-  if (!key) {
+  const key = rawKey.trim();
+  if (key === '') {
     return '';
   }
 
-  const camel = key.replace(/-([a-zA-Z])/g, (_, c) => c.toUpperCase());
+  const camel = key.replace(/-([a-zA-Z])/g, (_, c: string) => c.toUpperCase());
   return camel[0].toLowerCase() + camel.slice(1);
 }
 
 function normalizeOperatorKey(rawKey: string) {
   const normalized = normalizeKey(rawKey);
-  if (!normalized) {
+  if (normalized === '') {
     return normalized;
   }
 
   const noPunctuation = normalized.replace(/[^a-zA-Z0-9]/g, '');
-  const alias = (OPERATOR_KEY_ALIASES as Record<string, string>)[noPunctuation.toLowerCase()];
-  if (alias) {
+  const alias = (OPERATOR_KEY_ALIASES as Record<string, string | undefined>)[
+    noPunctuation.toLowerCase()
+  ];
+  if (alias !== undefined && alias !== '') {
     return alias;
   }
   return normalized;
@@ -162,7 +164,7 @@ function parseCommonArgs(argv: string[]) {
 
     const promptInlineMatch = token.match(/^(?:--prompt|-p|-prompt)[:=](.*)$/i);
     if (promptInlineMatch) {
-      prompt = promptInlineMatch[1] || '';
+      prompt = promptInlineMatch[1];
       continue;
     }
 
@@ -193,13 +195,14 @@ function toOperatorArgs(rawTokens: string[]) {
     }
 
     const parsed = parseOptionToken(token);
-    if (!parsed?.key) {
+    const parsedKey = parsed?.key;
+    if (parsedKey == null || parsedKey === '') {
       out.push(token);
       continue;
     }
 
-    const key = parsed.key.trim();
-    if (!key) {
+    const key = parsedKey.trim();
+    if (key === '') {
       out.push(token);
       continue;
     }
@@ -211,7 +214,7 @@ function toOperatorArgs(rawTokens: string[]) {
     }
 
     const normalizedKey = normalizeOperatorKey(key);
-    if (!normalizedKey) {
+    if (normalizedKey === '') {
       continue;
     }
 
@@ -245,20 +248,21 @@ function toPowerShellArgs(rawTokens: string[]) {
     }
 
     const parsed = parseOptionToken(token);
-    if (!parsed?.key) {
+    const parsedKey2 = parsed?.key;
+    if (parsedKey2 == null || parsedKey2 === '') {
       out.push(token);
       continue;
     }
 
-    const key = parsed.key.trim();
-    if (!key) {
+    const key = parsedKey2.trim();
+    if (key === '') {
       out.push(token);
       continue;
     }
 
     const normalized = key.replace(/[^a-zA-Z0-9]/g, '').toLowerCase();
-    const psParam = (POWER_SHELL_ARG_MAP as Record<string, string>)[normalized];
-    if (!psParam) {
+    const psParam = (POWER_SHELL_ARG_MAP as Record<string, string | undefined>)[normalized];
+    if (psParam === undefined || psParam === '') {
       out.push(token);
       continue;
     }
@@ -286,7 +290,7 @@ function runOperator(prompt: string, rawTokens: string[]) {
   if (!hasMode) {
     operatorArgs.push('mode=auto');
   }
-  if (prompt && !hasPrompt) {
+  if (prompt !== '' && !hasPrompt) {
     operatorArgs.push(`prompt=${prompt}`);
   }
 
@@ -328,7 +332,7 @@ function runFull(prompt: string, rawTokens: string[]) {
     ...toPowerShellArgs(rawTokens),
   ];
 
-  if (prompt) {
+  if (prompt !== '') {
     psArgs.push('-Prompt', prompt);
   }
 

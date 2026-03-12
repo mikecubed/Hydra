@@ -1,4 +1,3 @@
-#!/usr/bin/env node
 /**
  * Hydra Codebase Context — Deep codebase knowledge for the concierge.
  *
@@ -52,7 +51,7 @@ export function loadCodebaseContext(): CodebaseContextCache {
   }
 
   // Parse CLAUDE.md into named sections
-  if (claudeMd) {
+  if (claudeMd !== '') {
     const sectionRegex = /^##\s+(.+)$/gm;
     const headings = [];
     let match;
@@ -258,8 +257,11 @@ const CODEBASE_QUERY_PATTERNS = [
  * @param {string} message
  * @returns {{ isCodebaseQuery: boolean, topic: string|null }}
  */
-export function detectCodebaseQuery(message: string): { isCodebaseQuery: boolean; topic: string | null } {
-  if (!message || typeof message !== 'string') {
+export function detectCodebaseQuery(message: string): {
+  isCodebaseQuery: boolean;
+  topic: string | null;
+} {
+  if (message === '' || typeof message !== 'string') {
     return { isCodebaseQuery: false, topic: null };
   }
   const trimmed = message.trim();
@@ -271,13 +273,13 @@ export function detectCodebaseQuery(message: string): { isCodebaseQuery: boolean
     const match = trimmed.match(pattern);
     if (!match) continue;
 
-    if (fixedTopic) {
+    if (fixedTopic != null && fixedTopic !== '') {
       return { isCodebaseQuery: true, topic: fixedTopic };
     }
 
-    if (extractor === 'topic_from_capture' && match[1]) {
+    if (extractor === 'topic_from_capture' && match[1] !== '') {
       const topic = inferTopic(match[1]);
-      if (topic) return { isCodebaseQuery: true, topic };
+      if (topic != null && topic !== '') return { isCodebaseQuery: true, topic };
     }
     if (extractor === 'config_focus') {
       return { isCodebaseQuery: true, topic: 'config' };
@@ -312,10 +314,9 @@ function inferTopic(text: string): string | null {
 // ── Topic Context Retrieval ─────────────────────────────────────────────────
 
 /** Map topic names to CLAUDE.md section keys and supplementary info. */
-const TOPIC_SECTIONS: Partial<Record<
-  string,
-  { keys: string[]; filter?: string; supplementWith: string | null }
->> = {
+const TOPIC_SECTIONS: Partial<
+  Record<string, { keys: string[]; filter?: string; supplementWith: string | null }>
+> = {
   dispatch: { keys: ['dispatch-modes', 'task-routing'], supplementWith: 'functions' },
   council: { keys: ['key-modules'], filter: 'council', supplementWith: 'functions' },
   config: { keys: ['code-conventions'], supplementWith: 'config' },
@@ -341,7 +342,6 @@ const TOPIC_SECTIONS: Partial<Record<
 export function getTopicContext(topic: string): string {
   const ctx = getCodebaseContext();
   const topicDef = TOPIC_SECTIONS[topic];
-  // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition -- Record key may be absent at runtime
   if (!topicDef) return getGeneralContext();
 
   const lines = [`=== CODEBASE CONTEXT: ${topic} ===`, ''];
@@ -349,9 +349,9 @@ export function getTopicContext(topic: string): string {
   // Pull relevant CLAUDE.md sections
   for (const key of topicDef.keys) {
     const section = ctx.sections[key];
-    if (!section) continue;
+    if (section === '') continue;
 
-    if (topicDef.filter) {
+    if (topicDef.filter != null && topicDef.filter !== '') {
       // Filter to paragraphs mentioning the topic
       const filterRe = new RegExp(topicDef.filter, 'i');
       const filtered = section
@@ -375,7 +375,7 @@ export function getTopicContext(topic: string): string {
   // Supplement with additional info
   if (topicDef.supplementWith === 'config') {
     const configRef = getConfigReference(topic);
-    if (configRef) {
+    if (configRef != null && configRef !== '') {
       lines.push(configRef);
       lines.push('');
     }
@@ -383,7 +383,7 @@ export function getTopicContext(topic: string): string {
 
   if (topicDef.supplementWith === 'functions') {
     const funcRef = getFunctionReference(topic);
-    if (funcRef) {
+    if (funcRef !== '') {
       lines.push(funcRef);
       lines.push('');
     }
@@ -402,7 +402,7 @@ export function getTopicContext(topic: string): string {
   if (relevantModules.length > 0) {
     lines.push('Related modules:');
     for (const m of relevantModules.slice(0, 10)) {
-      lines.push(`- ${m.file}${m.purpose ? ` - ${m.purpose}` : ''}`);
+      lines.push(`- ${m.file}${m.purpose != null && m.purpose !== '' ? ` - ${m.purpose}` : ''}`);
     }
   }
 
@@ -429,19 +429,19 @@ function getGeneralContext() {
   const lines = ['=== CODEBASE CONTEXT: general ===', ''];
 
   // Architecture + Core Flow
-  if (ctx.sections['architecture']) {
+  if (ctx.sections['architecture'] !== '') {
     lines.push(ctx.sections['architecture'].slice(0, 2000));
   }
 
   // Dispatch Modes
-  if (ctx.sections['dispatch-modes']) {
+  if (ctx.sections['dispatch-modes'] !== '') {
     lines.push('', ctx.sections['dispatch-modes']);
   }
 
   // Module index summary
   lines.push('', 'Module index:');
   for (const m of ctx.moduleIndex.slice(0, 25)) {
-    lines.push(`- ${m.file}${m.purpose ? ` - ${m.purpose}` : ''}`);
+    lines.push(`- ${m.file}${m.purpose != null && m.purpose !== '' ? ` - ${m.purpose}` : ''}`);
   }
 
   lines.push('', '=== END CONTEXT ===');
@@ -534,7 +534,7 @@ Convergence: explicit criteria (correctness, complexity, reversibility, user imp
 
 Fallback chain: OpenAI -> Anthropic -> Google (configurable)`,
   };
-  return REFS[topic] || '';
+  return (REFS[topic] as string | undefined) ?? '';
 }
 
 /** Daemon HTTP endpoints reference. */
@@ -586,11 +586,14 @@ export function searchKnowledgeBase(query: string, maxResults = 5): string {
     const lines = [`Knowledge base findings for "${query}":`];
     for (const entry of results.slice(0, maxResults)) {
       const e = entry as Record<string, unknown>;
-      const status = e['attempted'] ? (e['outcome'] as string) || 'attempted' : 'researched';
+      const status =
+        e['attempted'] == null
+          ? 'researched'
+          : ((e['outcome'] as string | undefined) ?? 'attempted');
       lines.push(
-        `- [${(e['area'] as string) || 'general'}] ${(e['finding'] as string).slice(0, 120)} (${status})`,
+        `- [${(e['area'] as string | undefined) ?? 'general'}] ${(e['finding'] as string).slice(0, 120)} (${status})`,
       );
-      if (e['learnings']) {
+      if (e['learnings'] != null) {
         lines.push(`  Learnings: ${(e['learnings'] as string).slice(0, 100)}`);
       }
     }
@@ -615,6 +618,7 @@ function loadKBModule() {
         const filePath = path.join(dir, 'KNOWLEDGE_BASE.json');
         try {
           const raw = fs.readFileSync(filePath, 'utf8');
+          // eslint-disable-next-line @typescript-eslint/no-unsafe-return -- parsing raw JSON file
           return JSON.parse(raw);
         } catch {
           return { entries: [] };
@@ -626,9 +630,9 @@ function loadKBModule() {
         return kb.entries.filter((e) => {
           const entry = e as Record<string, unknown>;
           return (
-            ((entry['finding'] as string) || '').toLowerCase().includes(q) ||
-            ((entry['area'] as string) || '').toLowerCase().includes(q) ||
-            ((entry['learnings'] as string) || '').toLowerCase().includes(q) ||
+            ((entry['finding'] as string | undefined) ?? '').toLowerCase().includes(q) ||
+            ((entry['area'] as string | undefined) ?? '').toLowerCase().includes(q) ||
+            ((entry['learnings'] as string | undefined) ?? '').toLowerCase().includes(q) ||
             ((entry['tags'] as string[] | undefined) ?? []).some((t) => t.toLowerCase().includes(q))
           );
         });
