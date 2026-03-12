@@ -126,6 +126,19 @@ All routing decisions happen via a local heuristic. No API calls are made until 
 
 **Uncertain or high-stakes changes** — tandem mode lets Claude analyze the problem and Codex implement the fix independently, then cross-model verification reviews the result before it lands.
 
+### Workflow chooser
+
+| Goal                                                     | Recommended workflow                                 | Why                                                                     |
+| -------------------------------------------------------- | ---------------------------------------------------- | ----------------------------------------------------------------------- |
+| Understand the repo, discuss options, then make a change | `npm run go` in **Auto** or **Smart** mode           | Starts conversationally, then dispatches real work only when needed     |
+| Make an architectural or high-risk product decision      | `:mode council` or `npm run council -- prompt="..."` | Forces proposal, critique, refinement, and implementation into one loop |
+| Build a feature end to end                               | Operator console + optional workers                  | Good balance of planning, implementation, verification, and iteration   |
+| Run through a backlog of TODOs or issues                 | `npm run tasks`                                      | Curated autonomous execution with review flow afterward                 |
+| Let Hydra hunt for improvements overnight                | `npm run nightly`                                    | Scans, prioritizes, executes, and reports autonomously                  |
+| Improve Hydra or your project continuously               | `npm run evolve`                                     | Long-form self-improvement pipeline with suggestions backlog            |
+
+For scenario walkthroughs, Mermaid diagrams, and example interactions, start with [docs/EFFECTIVE_BUILDING.md](docs/EFFECTIVE_BUILDING.md) and [docs/WORKFLOW_SCENARIOS.md](docs/WORKFLOW_SCENARIOS.md).
+
 ## Features
 
 ### Intelligent Routing
@@ -286,13 +299,15 @@ Prompt → Intent Gate → Concierge → Route Classifier
 
 ## Documentation
 
-| Doc                                              | Contents                                                     |
-| ------------------------------------------------ | ------------------------------------------------------------ |
-| [docs/USAGE.md](docs/USAGE.md)                   | Full command reference, config fields, daemon API, MCP tools |
-| [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)     | Module reference, dispatch modes, route strategies           |
-| [docs/INSTALL.md](docs/INSTALL.md)               | Detailed installation and setup                              |
-| [docs/MODEL_PROFILES.md](docs/MODEL_PROFILES.md) | Agent model options, reasoning effort, aliases               |
-| [CONTRIBUTING.md](CONTRIBUTING.md)               | Development workflow, test patterns, conventions             |
+| Doc                                                      | Contents                                                        |
+| -------------------------------------------------------- | --------------------------------------------------------------- |
+| [docs/USAGE.md](docs/USAGE.md)                           | Full command reference, config fields, daemon API, MCP tools    |
+| [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)             | Module reference, dispatch modes, route strategies              |
+| [docs/INSTALL.md](docs/INSTALL.md)                       | Detailed installation and setup                                 |
+| [docs/EFFECTIVE_BUILDING.md](docs/EFFECTIVE_BUILDING.md) | How to use Hydra to build software effectively, end to end      |
+| [docs/WORKFLOW_SCENARIOS.md](docs/WORKFLOW_SCENARIOS.md) | Scenario walkthroughs for operator, council, tasks, and nightly |
+| [docs/MODEL_PROFILES.md](docs/MODEL_PROFILES.md)         | Agent model options, reasoning effort, aliases                  |
+| [CONTRIBUTING.md](CONTRIBUTING.md)                       | Development workflow, test patterns, conventions                |
 
 ## Daemon Security
 

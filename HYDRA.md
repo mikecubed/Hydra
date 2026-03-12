@@ -29,6 +29,29 @@ All agents use the Hydra MCP tools for coordination:
 4. **Get second opinions** — `hydra_ask` to consult another agent
 5. **Council deliberation** — `hydra_council_request` for complex architectural decisions
 
+```mermaid
+sequenceDiagram
+    participant Agent
+    participant MCP as Hydra MCP
+    participant Daemon
+    participant Peer as Peer agent
+
+    Agent->>MCP: hydra_handoffs_pending(agent)
+    MCP->>Daemon: read pending handoffs
+    Daemon-->>MCP: handoffs
+    MCP-->>Agent: pending work
+    Agent->>MCP: hydra_tasks_claim(...)
+    MCP->>Daemon: claim task
+    Daemon-->>MCP: claim token + context
+    MCP-->>Agent: claimed task
+    Agent->>Peer: hydra_ask(...) or hydra_council_request(...)
+    Peer-->>Agent: critique / second opinion
+    Agent->>MCP: hydra_tasks_update(...)
+    MCP->>Daemon: persist result, checkpoint, status
+```
+
+For narrative walkthroughs and practical examples, see [docs/EFFECTIVE_BUILDING.md](docs/EFFECTIVE_BUILDING.md) and [docs/WORKFLOW_SCENARIOS.md](docs/WORKFLOW_SCENARIOS.md).
+
 ## @claude
 
 Claude is the **architect** — responsible for design, planning, code review, and architectural decisions.

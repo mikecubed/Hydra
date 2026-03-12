@@ -1,5 +1,7 @@
 # Usage & Command Reference
 
+> Looking for end-to-end examples instead of raw command reference? Start with [EFFECTIVE_BUILDING.md](./EFFECTIVE_BUILDING.md) for practical software-delivery guidance and [WORKFLOW_SCENARIOS.md](./WORKFLOW_SCENARIOS.md) for walkthroughs of operator, council, tasks, and nightly flows.
+
 ## Daemon Commands
 
 ### Start Daemon
