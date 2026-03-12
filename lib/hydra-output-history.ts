@@ -89,6 +89,9 @@ export function initOutputHistory(opts: { maxLines?: number } = {}): void {
     } catch {
       /* never break output */
     }
+    if (typeof encodingOrCb === 'function') {
+      return _origStdoutWrite!(chunk, encodingOrCb);
+    }
     return _origStdoutWrite!(chunk, encodingOrCb, cb);
   };
   (process.stdout as NodeJS.WriteStream & { write: unknown }).write = patchedStdoutWrite;
@@ -102,6 +105,9 @@ export function initOutputHistory(opts: { maxLines?: number } = {}): void {
       processChunk(chunk);
     } catch {
       /* never break output */
+    }
+    if (typeof encodingOrCb === 'function') {
+      return _origStderrWrite!(chunk, encodingOrCb);
     }
     return _origStderrWrite!(chunk, encodingOrCb, cb);
   };

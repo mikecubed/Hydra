@@ -1473,7 +1473,7 @@ export function getModelSummary(): Record<string, unknown> {
   for (const agent of orderedAgents) {
     const activeModel = getActiveModel(agent);
     const agentModels = ((cfg.models as Record<string, ModelConfig | undefined>)[agent] ?? {}) as ModelConfig & Record<string, unknown>;
-    const activeKey = (agentModels as Record<string, string | undefined>).active ?? 'default';
+    const activeKey = (agentModels as Record<string, string | undefined>)['active'] ?? 'default';
     const isOverride = activeKey !== 'default';
     const tierPreset = cfg.modeTiers?.[mode]?.[agent] ?? 'default';
 
