@@ -93,7 +93,7 @@ export function chooseAutoVerificationCommand(
   // If there's a test script, use it as a safe Node default.
   // Skip the npm-init placeholder: echo "Error: no test specified" && exit 1
   if (scripts['test']) {
-    const raw = String(scripts['test'] ?? '').trim();
+    const raw = (scripts['test'] ?? '').trim();
     const isPlaceholder = /no test specified/i.test(raw) && /\bexit\s+1\b/i.test(raw);
     if (!isPlaceholder) {
       return { command: 'npm test', reason: 'Detected package.json script: test' };

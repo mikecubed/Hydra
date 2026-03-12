@@ -638,7 +638,7 @@ export function classifyPrompt(promptText: unknown, agents?: string[]): Classify
   }
 
   // Agent name mention → user targeting specific agent
-  const mentionedAgent = (AGENT_NAMES as string[]).find((a) => lowerText.includes(a));
+  const mentionedAgent = AGENT_NAMES.find((a) => lowerText.includes(a));
   if (mentionedAgent) {
     simpleScore += 0.2;
     signals.push(`mentions agent: ${mentionedAgent}`);
@@ -701,7 +701,7 @@ export function classifyPrompt(promptText: unknown, agents?: string[]): Classify
   }
 
   // Suggested agent
-  const suggestedAgent: string = mentionedAgent ?? (bestAgentFor(taskType) as string);
+  const suggestedAgent: string = mentionedAgent ?? bestAgentFor(taskType);
 
   // Route strategy: single / tandem / council
   let routeStrategy: 'single' | 'tandem' | 'council';

@@ -9,6 +9,7 @@
 
 import { registerAgent, AGENT_TYPE, getAgent } from './hydra-agents.ts';
 import { loadHydraConfig } from './hydra-config.ts';
+import type { AgentDef } from './types.ts';
 
 // ── Built-in Sub-Agent Definitions ───────────────────────────────────────────
 
@@ -262,9 +263,9 @@ Output structure:
  * Register all enabled built-in sub-agents into the registry.
  * Respects config.agents.subAgents.enabled and config.agents.subAgents.builtIns.
  */
-export function registerBuiltInSubAgents() {
+export function registerBuiltInSubAgents(): void {
   const cfg = loadHydraConfig();
-  const agentsCfg = cfg.agents || {};
+  const agentsCfg = cfg.agents;
   const subAgentsCfg =
     ((agentsCfg as unknown as Record<string, unknown>)['subAgents'] as
       | Record<string, unknown>
@@ -287,7 +288,7 @@ export function registerBuiltInSubAgents() {
     if (getAgent(name)) continue;
 
     try {
-      registerAgent(name, def as Partial<import('./types.ts').AgentDef>);
+      registerAgent(name, def as Partial<AgentDef>);
     } catch (err) {
       // Non-fatal — log but don't crash
       if (process.env['HYDRA_DEBUG']) {

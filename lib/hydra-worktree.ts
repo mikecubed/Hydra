@@ -1,4 +1,3 @@
-#!/usr/bin/env node
 /**
  * Hydra Git Worktree Isolation
  *
@@ -17,11 +16,11 @@ import { git, getCurrentBranch } from './hydra-shared/git-ops.ts';
  */
 function getWorktreeConfig() {
   const cfg = loadHydraConfig();
-  const wt = cfg.worktrees as Record<string, unknown> | undefined;
+  const wt = cfg.worktrees;
   const branchPrefix = (wt?.['branchPrefix'] as string) || 'hydra/';
 
   // Security: Validate branchPrefix to prevent shell injection
-  if (!/^[\w\/\.-]+$/.test(branchPrefix)) {
+  if (!/^[\w/.-]+$/.test(branchPrefix)) {
     throw new Error(
       `Invalid branchPrefix "${branchPrefix}". Only alphanumeric, /, ., -, and _ are allowed.`,
     );
@@ -48,11 +47,11 @@ interface WorktreeInfo {
   branch: string;
 }
 
-export async function createWorktree(
+export function createWorktree(
   taskId: string,
   projectRoot: string,
-  baseBranch: string | undefined = undefined,
-): Promise<{ worktreePath: string; branch: string }> {
+  baseBranch?: string,
+): { worktreePath: string; branch: string } {
   const config = getWorktreeConfig();
   const branch = `${config.branchPrefix}${taskId}`;
   const worktreePath = path.resolve(projectRoot, config.basePath, taskId);
@@ -67,7 +66,7 @@ export async function createWorktree(
   const gitPath = worktreePath.replace(/\\/g, '/');
 
   // Determine base branch
-  const base = baseBranch || getCurrentBranch(projectRoot) || 'HEAD';
+  const base = baseBranch ?? getCurrentBranch(projectRoot);
 
   // Create branch and worktree
   const r = git(['worktree', 'add', '-b', branch, gitPath, base], projectRoot);
@@ -90,11 +89,11 @@ export async function createWorktree(
  * @param {{ deleteBranch?: boolean }} [opts]
  * @returns {Promise<void>}
  */
-export async function removeWorktree(
+export function removeWorktree(
   taskId: string,
   projectRoot: string,
   opts: { deleteBranch?: boolean } = {},
-): Promise<void> {
+): void {
   const config = getWorktreeConfig();
   const worktreePath = path.resolve(projectRoot, config.basePath, taskId);
   const branch = `${config.branchPrefix}${taskId}`;
@@ -132,7 +131,7 @@ export function getWorktreePath(taskId: string, projectRoot: string): string {
  * @param {string} projectRoot
  * @returns {Promise<Array<{ path: string, branch: string, head: string }>>}
  */
-export async function listWorktrees(projectRoot: string): Promise<WorktreeInfo[]> {
+export function listWorktrees(projectRoot: string): WorktreeInfo[] {
   const r = git(['worktree', 'list', '--porcelain'], projectRoot);
   if (r.status !== 0) return [];
   const output = (r.stdout || '').trim();
@@ -168,14 +167,14 @@ export async function listWorktrees(projectRoot: string): Promise<WorktreeInfo[]
  * @param {string} [targetBranch] - Branch to merge into (default: current branch)
  * @returns {Promise<{ ok: boolean, message: string }>}
  */
-export async function mergeWorktree(
+export function mergeWorktree(
   taskId: string,
   projectRoot: string,
-  targetBranch: string | undefined = undefined,
-): Promise<{ ok: boolean; message: string }> {
+  targetBranch?: string,
+): { ok: boolean; message: string } {
   const config = getWorktreeConfig();
   const branch = `${config.branchPrefix}${taskId}`;
-  const target = targetBranch || getCurrentBranch(projectRoot) || 'main';
+  const target = targetBranch ?? getCurrentBranch(projectRoot);
 
   const r = git(['merge', branch, '--no-edit'], projectRoot);
   if (r.status === 0) {
@@ -190,6 +189,6 @@ export async function mergeWorktree(
 /**
  * Check if worktree isolation is enabled in config.
  */
-export function isWorktreeEnabled() {
+export function isWorktreeEnabled(): boolean {
   return getWorktreeConfig().enabled;
 }
