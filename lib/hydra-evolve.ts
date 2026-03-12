@@ -196,11 +196,11 @@ function doctorPayload(
 ) {
   return {
     pipeline: 'evolve',
-    phase: opts.phaseLabel || 'agent',
+    phase: opts.phaseLabel ?? 'agent',
     agent,
     error: result.error,
     exitCode: result.exitCode,
-    signal: result.signal || null,
+    signal: result.signal ?? null,
     command: result.command,
     args: result.args,
     promptSnippet: result.promptSnippet,
@@ -329,7 +329,7 @@ function computeActionNeeded(roundResults: { length: number }, maxRounds: number
   if (status === 'failed') return 'All rounds failed. Check agent configs and retry';
   if (status === 'partial') {
     const remaining = maxRounds - roundResults.length;
-    return `${remaining} round(s) remaining. Resume with :evolve resume`;
+    return `${String(remaining)} round(s) remaining. Resume with :evolve resume`;
   }
   if (status === 'interrupted') return 'Session was interrupted. Resume with :evolve resume';
   return 'Session in progress';
@@ -393,7 +393,7 @@ function spawnNewProcess(projectRoot: string) {
     },
   );
   child.unref();
-  log.ok(`Spawned new evolve process (PID ${child.pid})`);
+  log.ok(`Spawned new evolve process (PID ${String(child.pid)})`);
 }
 
 // ── Agent Execution ─────────────────────────────────────────────────────────
@@ -420,7 +420,7 @@ function executeAgent(
     ...opts,
     onProgress: (elapsed, outputKB, status) => {
       const elapsedStr = formatDuration(elapsed);
-      const bytes = outputKB > 0 ? ` | ${outputKB}KB received` : '';
+      const bytes = outputKB > 0 ? ` | ${String(outputKB)}KB received` : '';
       const statusSuffix = status ? ` | ${status}` : '';
       log.dim(`${label}: working... ${elapsedStr}${bytes}${statusSuffix}${context}`);
     },
@@ -515,11 +515,12 @@ async function executeAgentWithRetry(
       const reason =
         verification.verified === false
           ? 'API says account is active (false positive)'
-          : `cannot verify — ${verification.reason || 'no API key'}`;
+          : `cannot verify — ${verification.reason ?? 'no API key'}`;
       log.dim(
         `${label}: usage limit pattern matched but ${reason} — pattern: "${usageCheck.errorMessage.slice(0, 80)}"`,
       );
-      result.usageLimitFalsePositive = true;
+      const localRef = result;
+      localRef.usageLimitFalsePositive = true;
     }
   }
 
@@ -527,7 +528,7 @@ async function executeAgentWithRetry(
   const rlCheck = detectRateLimitError(agent, result as unknown as Record<string, unknown>);
   if (rlCheck.isRateLimit) {
     const cfg = loadHydraConfig();
-    const rlCfg = cfg.rateLimits || {};
+    const rlCfg = cfg.rateLimits ?? {};
     const maxRetries = (rlCfg['maxRetries'] as number | undefined) ?? 3;
     const baseDelayMs = (rlCfg['baseDelayMs'] as number | undefined) ?? 5000;
     const maxDelayMs = (rlCfg['maxDelayMs'] as number | undefined) ?? 60_000;
@@ -541,10 +542,10 @@ async function executeAgentWithRetry(
         retryAfterMs: rlCheck.retryAfterMs ?? undefined,
       });
       log.dim(
-        `${label}: waiting ${(delay / 1000).toFixed(0)}s before retry (${attempt + 1}/${maxRetries})`,
+        `${label}: waiting ${(delay / 1000).toFixed(0)}s before retry (${String(attempt + 1)}/${String(maxRetries)})`,
       );
-      setAgentActivity(agent, 'waiting', `Rate limited, retry ${attempt + 1}/${maxRetries}`);
-      await new Promise((r) => setTimeout(r, delay));
+      setAgentActivity(agent, 'waiting', `Rate limited, retry ${String(attempt + 1)}/${String(maxRetries)}`);
+      await new Promise<void>((r) => { setTimeout(r, delay); });
 
       const retry = await executeAgent(agent, prompt, opts);
       if (retry.ok) {
@@ -556,7 +557,7 @@ async function executeAgentWithRetry(
       const retryRlCheck = detectRateLimitError(agent, retry as unknown as Record<string, unknown>);
       if (!retryRlCheck.isRateLimit) {
         // Different error — fall through to normal error handling below
-        log.dim(`${label}: no longer rate limited, but failed with: ${retry.error}`);
+        log.dim(`${label}: no longer rate limited, but failed with: ${String(retry.error)}`);
         // Don't disable — let the investigator handle it if available
         return retry;
       }
@@ -566,11 +567,11 @@ async function executeAgentWithRetry(
 
     // Exhausted rate limit retries — disable agent
     disabledAgents.add(agent);
-    log.warn(`${label} disabled for session (rate limited after ${maxRetries} retries)`);
+    log.warn(`${label} disabled for session (rate limited after ${String(maxRetries)} retries)`);
     notifyDoctor(
       doctorPayload(agent, result, opts, {
-        error: result.error || 'rate limited',
-        context: `Rate limited after ${maxRetries} retries`,
+        error: result.error ?? 'rate limited',
+        context: `Rate limited after ${String(maxRetries)} retries`,
       }),
     );
     result.rateLimited = true;
@@ -583,7 +584,7 @@ async function executeAgentWithRetry(
     log.warn(`${label}: model error detected — ${modelCheck.errorMessage}`);
     const recovery = await recoverFromModelError(agent, modelCheck.failedModel ?? '');
     if (recovery.recovered) {
-      log.info(`${label}: recovered with fallback model ${recovery.newModel} — retrying`);
+      log.info(`${label}: recovered with fallback model ${String(recovery.newModel)} — retrying`);
       const retryResult = await executeAgent(agent, prompt, {
         ...opts,
         modelOverride: recovery.newModel ?? undefined,
@@ -599,7 +600,7 @@ async function executeAgentWithRetry(
     notifyDoctor(
       doctorPayload(agent, result, opts, {
         error: modelCheck.errorMessage,
-        context: `Model error: ${modelCheck.failedModel}`,
+        context: `Model error: ${String(modelCheck.failedModel)}`,
       }),
     );
     result.modelError = modelCheck;
@@ -609,20 +610,20 @@ async function executeAgentWithRetry(
   // ── JSONL structured error check (auth/sandbox/invocation — no model fallback) ──
   // detectCodexError is currently codex-specific; this guard will extend to other
   // jsonOutput agents when they support structured error reporting.
-  if (getAgent(agent)?.features?.jsonOutput) {
+  if (getAgent(agent)?.features.jsonOutput) {
     const codexCheck = detectCodexError(agent, result as unknown as Record<string, unknown>);
     const retryableCodexCategories = ['transient', 'internal', 'codex-jsonl-error'];
     if (
       codexCheck.isCodexError &&
       !retryableCodexCategories.includes(codexCheck.category as string)
     ) {
-      const catLabel = `[${codexCheck.category}] ${codexCheck.errorMessage}`;
+      const catLabel = `[${String(codexCheck.category)}] ${String(codexCheck.errorMessage)}`; // eslint-disable-line @typescript-eslint/no-base-to-string -- wrapped in String()
       log.warn(`${label}: ${catLabel}`);
       disabledAgents.add(agent);
       notifyDoctor(
         doctorPayload(agent, result, opts, {
           error: catLabel,
-          context: `Codex error: ${codexCheck.category}`,
+          context: `Codex error: ${String(codexCheck.category)}`, // eslint-disable-line @typescript-eslint/no-base-to-string -- wrapped in String()
         }),
       );
       return result;
@@ -631,16 +632,16 @@ async function executeAgentWithRetry(
     // "something went wrong" within 5s of startup = config/env issue, not a transient runtime error.
     // Don't waste an investigator call — disable and report immediately with actionable guidance.
     if (codexCheck.isCodexError && codexCheck.category === 'internal' && result.startupFailure) {
-      const diagLabel = `[startup-failure] ${codexCheck.errorMessage || result.errorDetail || result.error}`;
+      const diagLabel = `[startup-failure] ${String(codexCheck.errorMessage || result.errorDetail || result.error)}`; // eslint-disable-line @typescript-eslint/no-base-to-string, @typescript-eslint/no-unnecessary-condition, @typescript-eslint/prefer-nullish-coalescing -- runtime fallback chain with {} type
       log.warn(`${label}: ${diagLabel}`);
       log.dim(
-        `  Process exited after ${result.durationMs}ms — check: API key validity, model ID "${result.args?.find((_a, i) => result.args?.[i - 1] === '--model') || 'unknown'}", CLI version, and environment.`,
+        `  Process exited after ${String(result.durationMs)}ms — check: API key validity, model ID "${result.args?.find((_a, i) => result.args?.[i - 1] === '--model') ?? 'unknown'}", CLI version, and environment.`,
       );
       disabledAgents.add(agent);
       notifyDoctor(
         doctorPayload(agent, result, opts, {
           error: diagLabel,
-          context: `Codex startup failure (${result.durationMs}ms runtime) — generic internal error at process start; likely misconfiguration, invalid API key, bad model flags, or incompatible CLI version`,
+          context: `Codex startup failure (${String(result.durationMs)}ms runtime) — generic internal error at process start; likely misconfiguration, invalid API key, bad model flags, or incompatible CLI version`,
         }),
       );
       result.startupFailureDisabled = true;
@@ -649,15 +650,15 @@ async function executeAgentWithRetry(
   }
 
   // Log structured error diagnosis (now enriched by diagnoseAgentError)
-  if (!result.ok) {
-    log.warn(`${label}: ${result.error}`);
+  if (!result.ok) { // eslint-disable-line @typescript-eslint/no-unnecessary-condition -- runtime safety
+    log.warn(`${label}: ${String(result.error)}`);
   }
 
   // ── Investigation-guided retry ──────────────────────────────────────
   if (isInvestigatorAvailable()) {
     log.info(`${label} failed — investigating...`);
     const structuredError = result.errorCategory
-      ? `[${result.errorCategory}] ${result.errorDetail || result.error}`
+      ? `[${result.errorCategory}] ${String(result.errorDetail ?? result.error)}`
       : result.error;
     const diagnosis = await investigate({
       phase: 'agent',
@@ -670,9 +671,9 @@ async function executeAgentWithRetry(
       errorCategory: result.errorCategory ?? undefined,
       errorDetail: result.errorDetail ?? undefined,
       errorContext: result.errorContext ?? undefined,
-      context: `Phase: ${opts.phaseLabel || 'unknown'}`,
+      context: `Phase: ${opts.phaseLabel ?? 'unknown'}`,
       attemptNumber: 1,
-      ...(result.durationMs == null ? {} : { durationMs: result.durationMs }),
+      ...(result.durationMs == null ? {} : { durationMs: result.durationMs }), // eslint-disable-line @typescript-eslint/no-unnecessary-condition -- runtime safety for dynamic result shape
       ...(result.startupFailure == null ? {} : { startupFailure: result.startupFailure }),
     } as Parameters<typeof investigate>[0]);
 
@@ -690,10 +691,10 @@ async function executeAgentWithRetry(
 
     // Build retry prompt (possibly modified by investigator)
     let retryPrompt = prompt;
-    if (diagnosis.diagnosis === 'fixable' && diagnosis.retryRecommendation?.modifiedPrompt) {
+    if (diagnosis.diagnosis === 'fixable' && diagnosis.retryRecommendation.modifiedPrompt) {
       retryPrompt = `${diagnosis.retryRecommendation.modifiedPrompt}\n\n${prompt}`;
       log.dim(`Retrying with corrective preamble`);
-    } else if (diagnosis.diagnosis === 'fixable' && diagnosis.retryRecommendation?.preamble) {
+    } else if (diagnosis.diagnosis === 'fixable' && diagnosis.retryRecommendation.preamble) {
       retryPrompt = `${diagnosis.retryRecommendation.preamble}\n\n${prompt}`;
       log.dim(`Retrying with diagnostic preamble`);
     }
@@ -701,14 +702,14 @@ async function executeAgentWithRetry(
     // Try alternative agent if recommended
     let retryAgent = agent;
     if (
-      diagnosis.retryRecommendation?.retryAgent &&
+      diagnosis.retryRecommendation.retryAgent &&
       diagnosis.retryRecommendation.retryAgent !== agent
     ) {
       retryAgent = diagnosis.retryRecommendation.retryAgent;
       log.dim(`Switching to alternative agent: ${retryAgent}`);
     }
 
-    await new Promise((r) => setTimeout(r, 2000));
+    await new Promise<void>((r) => { setTimeout(r, 2000); });
     const retry = await executeAgent(retryAgent, retryPrompt, opts);
     log.dim(
       `${(AGENT_LABELS as Record<string, string>)[retryAgent] || retryAgent} retry: ${retry.ok ? 'OK' : 'FAIL'} (${formatDuration(retry.durationMs)})`,
@@ -720,7 +721,7 @@ async function executeAgentWithRetry(
       log.warn(`${label} disabled for remainder of session (investigation + retry failed)`);
       notifyDoctor(
         doctorPayload(agent, retry, opts, {
-          error: retry.error || result.error,
+          error: retry.error ?? result.error,
           context: `Investigation + retry failed: ${diagnosis.explanation}`,
         }),
       );
@@ -732,7 +733,7 @@ async function executeAgentWithRetry(
   // ── Fallback: blind retry (no investigator) ─────────────────────────
   const diagLabel = result.errorCategory ? ` [${result.errorCategory}]` : '';
   log.warn(`${label} failed${diagLabel}, retrying once after 3s...`);
-  await new Promise((r) => setTimeout(r, 3000));
+  await new Promise<void>((r) => { setTimeout(r, 3000); });
 
   const retry = await executeAgent(agent, prompt, opts);
   log.dim(
@@ -742,13 +743,13 @@ async function executeAgentWithRetry(
   if (!retry.ok) {
     disabledAgents.add(agent);
     const retryDiag = retry.errorCategory
-      ? `[${retry.errorCategory}] ${retry.errorDetail}`
-      : retry.error || result.error;
-    log.warn(`${label} disabled for remainder of session (consecutive failures: ${retryDiag})`);
+      ? `[${retry.errorCategory}] ${String(retry.errorDetail)}`
+      : retry.error ?? result.error;
+    log.warn(`${label} disabled for remainder of session (consecutive failures: ${String(retryDiag)})`);
     notifyDoctor(
       doctorPayload(agent, retry, opts, {
         error: retryDiag,
-        context: `Consecutive failures without investigator. First: ${result.errorCategory || 'unknown'}, Second: ${retry.errorCategory || 'unknown'}`,
+        context: `Consecutive failures without investigator. First: ${result.errorCategory ?? 'unknown'}, Second: ${retry.errorCategory ?? 'unknown'}`,
       }),
     );
   }
@@ -848,17 +849,17 @@ const _executePhaseWithInvestigation = async (
 
   const cfg = loadHydraConfig();
   const maxAttempts =
-    (cfg.evolve?.investigator?.['maxAttemptsPerPhase'] as number | undefined) || 2;
+    (cfg.evolve?.investigator?.['maxAttemptsPerPhase'] as number | undefined) ?? 2;
   if (maxAttempts <= 1) return result;
 
   log.info(`Phase ${phaseName} failed — investigating...`);
   const diagnosis = await investigate({
     phase: phaseName,
     agent: (context['agent'] as string) || 'codex',
-    error: (result['error'] as string | undefined) || `Phase ${phaseName} returned ok=false`,
-    stderr: ((result['stderr'] as string | undefined) || '').slice(-2000),
-    stdout: ((result['output'] as string | undefined) || '').slice(-2000),
-    timedOut: (result['timedOut'] as boolean | undefined) || false,
+    error: (result['error'] as string | undefined) ?? `Phase ${phaseName} returned ok=false`,
+    stderr: ((result['stderr'] as string | undefined) ?? '').slice(-2000),
+    stdout: ((result['output'] as string | undefined) ?? '').slice(-2000),
+    timedOut: (result['timedOut'] as boolean | undefined) || false, // eslint-disable-line @typescript-eslint/prefer-nullish-coalescing -- false is meaningful
     context: (context['planSummary'] as string) || '',
     attemptNumber: 1,
   });
@@ -872,7 +873,7 @@ const _executePhaseWithInvestigation = async (
     return result;
   }
 
-  if (!diagnosis.retryRecommendation?.retryPhase) {
+  if (!diagnosis.retryRecommendation.retryPhase) {
     (result as unknown as EvolveResult).investigation = diagnosis;
     return result;
   }
@@ -885,7 +886,7 @@ const _executePhaseWithInvestigation = async (
   (result as unknown as EvolveResult)._shouldRetry = true;
   (result as unknown as EvolveResult)._corrective = diagnosis.corrective;
   (result as unknown as EvolveResult)._preamble =
-    diagnosis.retryRecommendation?.preamble || diagnosis.retryRecommendation?.modifiedPrompt;
+    diagnosis.retryRecommendation.preamble ?? diagnosis.retryRecommendation.modifiedPrompt;
   return result;
 };
 void (_executePhaseWithInvestigation as unknown);
@@ -912,7 +913,7 @@ async function phaseResearch(
     priorLearnings.length > 0
       ? `\n\nPrior learnings for "${area}":\n${priorLearnings
           .slice(0, 5)
-          .map((e: KBEntry) => `- [${e.outcome || 'researched'}] ${e.finding?.slice(0, 200) ?? ''}`)
+          .map((e: KBEntry) => `- [${e.outcome ?? 'researched'}] ${e.finding?.slice(0, 200) ?? ''}`)
           .join('\n')}`
       : '';
 
@@ -1029,7 +1030,7 @@ Respond with a JSON object:
     if (!result.ok) {
       const stderrSnippet = result.stderr ? result.stderr.slice(-500).trim() : '';
       log.warn(
-        `${name} research failed: ${result.error || 'unknown'}${result.timedOut ? ' (TIMEOUT)' : ''}`,
+        `${name} research failed: ${result.error ?? 'unknown'}${result.timedOut ? ' (TIMEOUT)' : ''}`,
       );
       if (stderrSnippet) log.dim(`  stderr: ${stderrSnippet.slice(0, 200)}`);
     }
@@ -1058,7 +1059,7 @@ Respond with a JSON object:
       findings?: string[];
       applicableIdeas?: string[];
       sources?: unknown[];
-    } | null) || {
+    } | null) ?? {
       findings: [] as string[],
       applicableIdeas: [] as string[],
       sources: [] as unknown[],
@@ -1067,7 +1068,7 @@ Respond with a JSON object:
       findings?: string[];
       applicableIdeas?: string[];
       sources?: unknown[];
-    } | null) || {
+    } | null) ?? {
       findings: [] as string[],
       applicableIdeas: [] as string[],
       sources: [] as unknown[],
@@ -1077,7 +1078,7 @@ Respond with a JSON object:
       gaps?: string[];
       implementationIdeas?: string[];
       relevantFiles?: unknown[];
-    } | null) || {
+    } | null) ?? {
       existingPatterns: [] as string[],
       gaps: [] as string[],
       implementationIdeas: [] as string[],
@@ -1137,7 +1138,7 @@ function resilientParse(
   if (!resultOk) return { data: null, fallback: false };
 
   // Agent succeeded but JSON parsing failed — try text extraction
-  const snippet = (typeof extracted === 'string' ? extracted : rawOutput || '').slice(0, 300);
+  const snippet = (typeof extracted === 'string' ? extracted : rawOutput ?? '').slice(0, 300);
   log.warn(`${stepName}: JSON parse failed, trying text extraction`);
   log.dim(`  raw: ${snippet}`);
 
@@ -1166,7 +1167,7 @@ async function phaseDeliberate(
   // Step 1: Claude synthesizes
   const synthesizePrompt = `# Evolve Deliberation: Synthesize Research
 
-You are synthesizing research findings about "${research.area}" for the Hydra multi-agent orchestration system.
+You are synthesizing research findings about "${String(research.area)}" for the Hydra multi-agent orchestration system.
 
 ## Research Findings
 ${findingsBlock}
@@ -1209,9 +1210,9 @@ Respond with JSON:
   // Step 2: Gemini critiques
   const critiquePrompt = `# Evolve Deliberation: Critique
 
-Review this synthesis of research findings about "${research.area}" for the Hydra project:
+Review this synthesis of research findings about "${String(research.area)}" for the Hydra project:
 
-${JSON.stringify(synthData || { synthesis: 'No synthesis available' }, null, 2)}
+${JSON.stringify(synthData ?? { synthesis: 'No synthesis available' }, null, 2)}
 
 Critically evaluate:
 1. Are the conclusions well-supported by the research?
@@ -1253,13 +1254,13 @@ ${getProjectContext()}
 You are evaluating the implementation feasibility of a proposed improvement to the Hydra project.
 
 ## Proposed Improvement
-${JSON.stringify((synthData as { suggestedImprovement?: string } | null)?.suggestedImprovement || 'See synthesis', null, 2)}
+${JSON.stringify((synthData as { suggestedImprovement?: string } | null)?.suggestedImprovement ?? 'See synthesis', null, 2)}
 
 ## Synthesis
-${JSON.stringify(synthData || {}, null, 2)}
+${JSON.stringify(synthData ?? {}, null, 2)}
 
 ## Critique & Concerns
-${JSON.stringify(critiqueData || {}, null, 2)}
+${JSON.stringify(critiqueData ?? {}, null, 2)}
 
 Read the relevant source files in lib/ and evaluate from an implementation perspective:
 1. How complex is this change? (estimate lines of code, files touched)
@@ -1302,13 +1303,13 @@ Respond with JSON:
 Based on the synthesis, critique, and feasibility assessment, select the single best improvement to attempt.
 
 ## Synthesis
-${JSON.stringify(synthData || {}, null, 2)}
+${JSON.stringify(synthData ?? {}, null, 2)}
 
 ## Critique
-${JSON.stringify(critiqueData || {}, null, 2)}
+${JSON.stringify(critiqueData ?? {}, null, 2)}
 
 ## Feasibility Assessment
-${JSON.stringify(feasibilityData || {}, null, 2)}
+${JSON.stringify(feasibilityData ?? {}, null, 2)}
 
 Consider the critique's concerns, risks, and the feasibility assessment. Select the improvement that:
 - Has the highest positive impact
@@ -1344,14 +1345,14 @@ Respond with JSON:
 
   // Determine selected improvement with cascading fallbacks
   let selectedImprovement =
-    (priorityData as { selectedImprovement?: string } | null)?.selectedImprovement ||
+    (priorityData as { selectedImprovement?: string } | null)?.selectedImprovement ??
     (synthData as { suggestedImprovement?: string } | null)?.suggestedImprovement;
 
   // Research-based fallback: extract top idea directly from research findings
   if (!selectedImprovement) {
     const researchFallback =
-      research.claudeFindings?.applicableIdeas?.[0] ||
-      research.geminiFindings?.applicableIdeas?.[0] ||
+      research.claudeFindings?.applicableIdeas?.[0] ??
+      research.geminiFindings?.applicableIdeas?.[0] ??
       research.codexFindings?.implementationIdeas?.[0];
     if (researchFallback) {
       log.warn('Using top research finding as improvement (deliberation parsing failed)');
@@ -1359,7 +1360,7 @@ Respond with JSON:
     }
   }
 
-  if (!selectedImprovement) selectedImprovement = 'No improvement selected';
+  selectedImprovement ??= 'No improvement selected';
 
   return {
     synthesis: synthData,
@@ -1397,7 +1398,7 @@ async function phasePlan(
     priorLearnings.length > 0
       ? `\n## Prior Learnings for "${area}" (avoid repeating these mistakes)\n${priorLearnings
           .slice(0, 5)
-          .map((e: KBEntry) => `- [${e.outcome}] ${e.learnings || e.finding}`)
+          .map((e: KBEntry) => `- [${String(e.outcome)}] ${String(e.learnings ?? e.finding)}`)
           .join('\n')}`
       : '';
 
@@ -1412,17 +1413,17 @@ ${deliberation.selectedImprovement}
 ${((deliberation.priority as Record<string, unknown> | null)?.['rationale'] as string) || ((deliberation.synthesis as Record<string, unknown> | null)?.['rationale'] as string) || 'N/A'}
 
 ## Key Patterns Found
-${JSON.stringify((deliberation.synthesis as Record<string, unknown> | null)?.['topPatterns'] || [], null, 2)}
+${JSON.stringify((deliberation.synthesis as Record<string, unknown> | null)?.['topPatterns'] ?? [], null, 2)}
 
 ## Concerns to Watch For
-${JSON.stringify((deliberation.critique as Record<string, unknown> | null)?.['concerns'] || [], null, 2)}
+${JSON.stringify((deliberation.critique as Record<string, unknown> | null)?.['concerns'] ?? [], null, 2)}
 
 ## Implementation Notes (from feasibility assessment)
 ${((deliberation.feasibility as Record<string, unknown> | null)?.['implementationNotes'] as string) || 'N/A'}
 
 ## Risks & Constraints
-${JSON.stringify((deliberation.priority as Record<string, unknown> | null)?.['risks'] || [], null, 2)}
-${JSON.stringify((deliberation.priority as Record<string, unknown> | null)?.['constraints'] || [], null, 2)}
+${JSON.stringify((deliberation.priority as Record<string, unknown> | null)?.['risks'] ?? [], null, 2)}
+${JSON.stringify((deliberation.priority as Record<string, unknown> | null)?.['constraints'] ?? [], null, 2)}
 ${learningsBlock}
 
 ## Hydra Project Context
@@ -1465,33 +1466,33 @@ Respond with JSON:
   // Save spec artifact
   const specsDir = path.join(evolveDir, 'specs');
   ensureDir(specsDir);
-  const specPath = path.join(specsDir, `ROUND_${roundNum}_SPEC.md`);
+  const specPath = path.join(specsDir, `ROUND_${String(roundNum)}_SPEC.md`);
 
-  const specContent = `# Evolve Round ${roundNum} Spec — ${area}
+  const specContent = `# Evolve Round ${String(roundNum)} Spec — ${area}
 ## Improvement
 ${deliberation.selectedImprovement}
 
 ## Objectives
-${(planData?.objectives || []).map((o: string) => `- ${o}`).join('\n')}
+${(planData?.objectives ?? []).map((o: string) => `- ${o}`).join('\n')}
 
 ## Constraints
-${(planData?.constraints || []).map((c: string) => `- ${c}`).join('\n')}
+${(planData?.constraints ?? []).map((c: string) => `- ${c}`).join('\n')}
 
 ## Acceptance Criteria
-${(planData?.acceptanceCriteria || []).map((a: string) => `- ${a}`).join('\n')}
+${(planData?.acceptanceCriteria ?? []).map((a: string) => `- ${a}`).join('\n')}
 
 ## Files to Modify
-${(planData?.filesToModify || []).map((f: { path: string; changes: string }) => `- \`${f.path}\`: ${f.changes}`).join('\n')}
+${(planData?.filesToModify ?? []).map((f: { path: string; changes: string }) => `- \`${f.path}\`: ${f.changes}`).join('\n')}
 
 ## Test Plan
 ### Scenarios
-${(planData?.testPlan?.scenarios || []).map((s: string) => `- ${s}`).join('\n')}
+${(planData?.testPlan?.scenarios ?? []).map((s: string) => `- ${s}`).join('\n')}
 
 ### Edge Cases
-${(planData?.testPlan?.edgeCases || []).map((e: string) => `- ${e}`).join('\n')}
+${(planData?.testPlan?.edgeCases ?? []).map((e: string) => `- ${e}`).join('\n')}
 
 ## Rollback Criteria
-${(planData?.rollbackCriteria || []).map((r: string) => `- ${r}`).join('\n')}
+${(planData?.rollbackCriteria ?? []).map((r: string) => `- ${r}`).join('\n')}
 `;
 
   fs.writeFileSync(specPath, specContent, 'utf8');
@@ -1524,7 +1525,7 @@ async function phaseTest(
 ${preambleBlock}Write comprehensive tests for the following improvement plan. Tests MUST be written BEFORE the implementation.
 
 ## Plan
-${JSON.stringify(plan.plan || {}, null, 2)}
+${JSON.stringify(plan.plan ?? {}, null, 2)}
 
 ## Requirements
 - Use Node.js built-in test runner: \`import { test, describe } from 'node:test'\`
@@ -1590,14 +1591,14 @@ async function phaseImplement(
     agentOverride?: string | null;
   },
 ) {
-  const implAgent = agentOverride || 'codex';
+  const implAgent = agentOverride ?? 'codex';
   log.phase(agentOverride ? `IMPLEMENT (${agentOverride})` : 'IMPLEMENT');
 
   const improvementDesc =
-    deliberation?.selectedImprovement ||
-    (plan.plan?.['objectives'] as string[] | undefined)?.[0] ||
+    deliberation?.selectedImprovement ??
+    (plan.plan?.['objectives'] as string[] | undefined)?.[0] ??
     'See plan for details';
-  const acceptanceCriteria = ((plan.plan?.['acceptanceCriteria'] as string[]) || [])
+  const acceptanceCriteria = ((plan.plan?.['acceptanceCriteria'] as string[]) || []) // eslint-disable-line @typescript-eslint/no-unnecessary-condition -- runtime safety
     .map((c: string) => `- ${c}`)
     .join('\n');
 
@@ -1610,10 +1611,10 @@ async function phaseImplement(
 ${preambleBlock}Implement the improvement described in the spec below. Tests already exist on this branch — make them pass.
 
 ## Improvement Goal
-${improvementDesc}
+${String(improvementDesc)}
 
 ## Plan
-${JSON.stringify(plan.plan || {}, null, 2)}
+${JSON.stringify(plan.plan ?? {}, null, 2)}
 
 ${acceptanceCriteria ? `## Acceptance Criteria\n${acceptanceCriteria}\n` : ''}
 ## Requirements
@@ -1674,10 +1675,10 @@ async function phaseAnalyze(
 
   const diffBlock = diff.length > 8000 ? `${diff.slice(0, 8000)}\n...(truncated)` : diff;
   const improvementGoal =
-    deliberation?.selectedImprovement ||
-    (plan.plan?.['objectives'] as string[] | undefined)?.[0] ||
+    deliberation?.selectedImprovement ??
+    (plan.plan?.['objectives'] as string[] | undefined)?.[0] ??
     'See plan for details';
-  const acceptanceCriteria = ((plan.plan?.['acceptanceCriteria'] as string[]) || [])
+  const acceptanceCriteria = ((plan.plan?.['acceptanceCriteria'] as string[]) || []) // eslint-disable-line @typescript-eslint/no-unnecessary-condition -- runtime safety
     .map((c: string) => `- ${c}`)
     .join('\n');
 
@@ -1773,14 +1774,14 @@ Respond with JSON:
       ? ` (${(testDetails.durationMs / 1000).toFixed(1)}s)`
       : '';
     log.ok(
-      `Tests: PASS — ${testDetails.total > 0 ? `${testDetails.passed}/${testDetails.total}` : 'OK'}${durStr}`,
+      `Tests: PASS — ${testDetails.total > 0 ? `${String(testDetails.passed)}/${String(testDetails.total)}` : 'OK'}${durStr}`,
     );
   } else {
     const durStr = testDetails.durationMs
       ? ` (${(testDetails.durationMs / 1000).toFixed(1)}s)`
       : '';
     const countStr =
-      testDetails.total > 0 ? ` — ${testDetails.failed}/${testDetails.total} failed` : '';
+      testDetails.total > 0 ? ` — ${String(testDetails.failed)}/${String(testDetails.total)} failed` : '';
     log.warn(`Tests: FAIL${countStr}${durStr}`);
     for (const f of testDetails.failures.slice(0, 5)) {
       const errSuffix = f.error ? ` — ${f.error}` : '';
@@ -1807,14 +1808,14 @@ Respond with JSON:
         ) / scores.length
       : 0;
   const allConcerns = scores.flatMap(
-    (s: Record<string, unknown>) => (s['concerns'] as string[]) || [],
+    (s: Record<string, unknown>) => (s['concerns'] as string[]) || [], // eslint-disable-line @typescript-eslint/no-unnecessary-condition -- runtime safety
   );
 
   // Collect per-agent verdicts
   const agentVerdicts = {
-    claude: (claudeAnalysis?.['verdict'] as string | null) || null,
-    gemini: (geminiAnalysis?.['verdict'] as string | null) || null,
-    codex: (codexAnalysis?.['verdict'] as string | null) || null,
+    claude: (claudeAnalysis?.['verdict'] as string | null) ?? null,
+    gemini: (geminiAnalysis?.['verdict'] as string | null) ?? null,
+    codex: (codexAnalysis?.['verdict'] as string | null) ?? null,
   };
 
   return {
@@ -1848,27 +1849,27 @@ function phaseDecide(
   log.phase('DECIDE');
 
   const { aggregateScore, testsPassed, concerns, agentVerdicts } = analysis;
-  const minScore = (config['approval'] as { minScore?: number } | undefined)?.minScore || 7;
+  const minScore = (config['approval'] as { minScore?: number } | undefined)?.minScore || 7; // eslint-disable-line @typescript-eslint/prefer-nullish-coalescing -- 0 is invalid
   const requireAllTests =
     (config['approval'] as { requireAllTestsPass?: boolean } | undefined)?.requireAllTestsPass !==
     false;
 
   // Count per-agent verdicts
-  const verdictEntries = Object.entries(agentVerdicts || {}).filter(([, v]) => v != null);
+  const verdictEntries = Object.entries(agentVerdicts || {}).filter(([, v]) => v != null); // eslint-disable-line @typescript-eslint/no-unnecessary-condition -- runtime safety
   const approvals = verdictEntries.filter(([, v]) => v === 'approve').length;
   const rejections = verdictEntries.filter(([, v]) => v === 'reject').length;
   const totalVoters = verdictEntries.length;
 
   // Log per-agent breakdown
-  const agentScores = analysis.agentScores || {};
+  const agentScores = analysis.agentScores ?? {};
   const verdictParts: string[] = [];
   for (const agent of ['claude', 'gemini', 'codex']) {
-    const v = agentVerdicts?.[agent];
+    const v = agentVerdicts[agent];
     const s = (agentScores[agent] as Record<string, unknown> | null)?.['quality'] as
       | number
       | undefined;
     if (v || s != null) {
-      verdictParts.push(`${agent[0].toUpperCase() + agent.slice(1)}: ${v || '?'}(${s ?? '?'})`);
+      verdictParts.push(`${agent[0].toUpperCase() + agent.slice(1)}: ${v ?? '?'}(${String(s ?? '?')})`);
     }
   }
 
@@ -1888,25 +1889,25 @@ function phaseDecide(
   } else if (rejections >= 2 && totalVoters >= 2) {
     // Majority reject overrides score
     verdict = 'reject';
-    reason = `Majority reject (${rejections}/${totalVoters} agents) — score ${aggregateScore}/10`;
+    reason = `Majority reject (${String(rejections)}/${String(totalVoters)} agents) — score ${String(aggregateScore)}/10`;
   } else if (approvals >= 2 && totalVoters >= 2 && aggregateScore >= minScore - 1) {
     // Majority approve with score close enough → approve
     verdict = 'approve';
-    reason = `Majority approve (${approvals}/${totalVoters} agents) — score ${aggregateScore}/10, tests ${testsPassed ? 'passed' : 'N/A'}`;
+    reason = `Majority approve (${String(approvals)}/${String(totalVoters)} agents) — score ${String(aggregateScore)}/10, tests ${testsPassed ? 'passed' : 'N/A'}`;
   } else if (aggregateScore >= minScore) {
     verdict = 'approve';
-    reason = `Score ${aggregateScore}/10 meets minimum ${minScore}/10, tests ${testsPassed ? 'passed' : 'N/A'}`;
+    reason = `Score ${String(aggregateScore)}/10 meets minimum ${String(minScore)}/10, tests ${testsPassed ? 'passed' : 'N/A'}`;
   } else if (aggregateScore >= minScore - 2) {
     verdict = 'revise';
-    reason = `Score ${aggregateScore}/10 is close but below minimum ${minScore}/10`;
+    reason = `Score ${String(aggregateScore)}/10 is close but below minimum ${String(minScore)}/10`;
   } else {
     verdict = 'reject';
-    reason = `Score ${aggregateScore}/10 is below minimum ${minScore}/10`;
+    reason = `Score ${String(aggregateScore)}/10 is below minimum ${String(minScore)}/10`;
   }
 
   const verdictSummary =
     verdictParts.length > 0
-      ? ` | ${verdictParts.join(' | ')} → ${verdict.toUpperCase()}${totalVoters >= 2 ? ` (${approvals}/${totalVoters} approve)` : ''}`
+      ? ` | ${verdictParts.join(' | ')} → ${verdict.toUpperCase()}${totalVoters >= 2 ? ` (${String(approvals)}/${String(totalVoters)} approve)` : ''}`
       : '';
   log.info(`Verdict: ${verdict.toUpperCase()} — ${reason}${verdictSummary}`);
   return { verdict, reason, score: aggregateScore };
@@ -1960,7 +1961,7 @@ function getSearchQueries(area: string): string[] {
     ],
   };
   return (
-    (queries as Record<string, string[]>)[area] || [
+    (queries as Record<string, string[]>)[area] || [ // eslint-disable-line @typescript-eslint/no-unnecessary-condition -- runtime safety
       `${area} best practices 2026`,
       `${area} implementation patterns`,
       `${area} tools and frameworks`,
@@ -1980,13 +1981,13 @@ function compactTokenBar(tokens: number, budget: number, width = 16) {
 
 function formatDuration(ms: number) {
   const secs = Math.floor(ms / 1000);
-  if (secs < 60) return `${secs}s`;
+  if (secs < 60) return `${String(secs)}s`;
   const mins = Math.floor(secs / 60);
   const remSecs = secs % 60;
-  if (mins < 60) return `${mins}m ${remSecs}s`;
+  if (mins < 60) return `${String(mins)}m ${String(remSecs)}s`;
   const hrs = Math.floor(mins / 60);
   const remMins = mins % 60;
-  return `${hrs}h ${remMins}m`;
+  return `${String(hrs)}h ${String(remMins)}m`;
 }
 
 function generateSessionReport(
@@ -2022,30 +2023,30 @@ function generateSessionReport(
 
   const lines = [
     `# Evolve Session — ${dateStr}`,
-    `Rounds: ${roundResults.length}/${maxRounds} | Duration: ${durationStr} | Tokens: ${tokensStr}`,
+    `Rounds: ${String(roundResults.length)}/${String(maxRounds)} | Duration: ${durationStr} | Tokens: ${tokensStr}`,
     '',
   ];
 
   for (const r of roundResults) {
     const resultTag = r.verdict ? r.verdict.toUpperCase() : 'INCOMPLETE';
-    lines.push(`## Round ${r.round}: ${r.area}`);
-    lines.push(`- Research: ${r.researchSummary || 'N/A'}`);
-    lines.push(`- Selected: ${r.selectedImprovement || 'N/A'}`);
+    lines.push(`## Round ${String(r.round)}: ${r.area}`);
+    lines.push(`- Research: ${r.researchSummary ?? 'N/A'}`);
+    lines.push(`- Selected: ${r.selectedImprovement ?? 'N/A'}`);
     if (r.testsWritten !== undefined) {
-      lines.push(`- Tests written: ${r.testsWritten}`);
+      lines.push(`- Tests written: ${String(r.testsWritten)}`);
     }
     if (r.testSummary) {
       const ts = r.testSummary;
       if (ts.failed > 0) {
-        lines.push(`- Tests: FAIL (${ts.failed}/${ts.total} failed)`);
-        for (const f of (r.testFailures || []).slice(0, 5)) {
+        lines.push(`- Tests: FAIL (${String(ts.failed)}/${String(ts.total)} failed)`);
+        for (const f of (r.testFailures ?? []).slice(0, 5)) {
           lines.push(`  - ${f.name}${f.error ? `: ${f.error}` : ''}`);
         }
       } else {
-        lines.push(`- Tests: PASS (${ts.passed}/${ts.total})`);
+        lines.push(`- Tests: PASS (${String(ts.passed)}/${String(ts.total)})`);
       }
     }
-    lines.push(`- Result: ${resultTag}${r.score ? ` (score: ${r.score}/10)` : ''}`);
+    lines.push(`- Result: ${resultTag}${r.score ? ` (score: ${String(r.score)}/10)` : ''}`);
     if (r.branchName) {
       lines.push(`- Branch: ${r.branchName}`);
     }
@@ -2054,22 +2055,22 @@ function generateSessionReport(
     }
     if (r.investigations && r.investigations.count > 0) {
       lines.push(
-        `- Investigations: ${r.investigations.count} (healed: ${r.investigations.healed})`,
+        `- Investigations: ${String(r.investigations.count)} (healed: ${String(r.investigations.healed)})`,
       );
     }
     lines.push('');
   }
 
   lines.push('## Knowledge Base Growth');
-  lines.push(`- New entries: ${kbDelta.added}`);
-  lines.push(`- Cumulative: ${kbDelta.total} entries`);
+  lines.push(`- New entries: ${String(kbDelta.added)}`);
+  lines.push(`- Cumulative: ${String(kbDelta.total)} entries`);
   lines.push('');
 
   // Investigation summary
   if (investigatorSummary && investigatorSummary.investigations > 0) {
     lines.push('## Self-Healing Investigator');
-    lines.push(`- Investigations triggered: ${investigatorSummary.investigations}`);
-    lines.push(`- Healed (retry succeeded): ${investigatorSummary.healed}`);
+    lines.push(`- Investigations triggered: ${String(investigatorSummary.investigations)}`);
+    lines.push(`- Healed (retry succeeded): ${String(investigatorSummary.healed)}`);
     lines.push(
       `- Investigator tokens: ~${(investigatorSummary.promptTokens + investigatorSummary.completionTokens).toLocaleString()}`,
     );
@@ -2088,7 +2089,7 @@ function generateSessionReport(
     lines.push('|-------|------|--------|----------|');
     for (const d of budgetSummary.roundDeltas) {
       lines.push(
-        `| ${d.round} | ${String(d.area)} | ${d.tokens.toLocaleString()} | ${formatDuration(d.durationMs as number)} |`,
+        `| ${String(d.round)} | ${String(d.area)} | ${d.tokens.toLocaleString()} | ${formatDuration(d.durationMs as number)} |`,
       );
     }
   }
@@ -2123,7 +2124,7 @@ function generateSessionJSON(
     ...runMeta,
     budget: budgetSummary,
     knowledgeBaseDelta: kbDelta,
-    investigator: investigatorSummary || null,
+    investigator: investigatorSummary ?? null,
     rounds: roundResults.map((r) => ({
       round: r.round,
       area: r.area,
@@ -2133,12 +2134,12 @@ function generateSessionJSON(
       branchName: r.branchName,
       learnings: r.learnings,
       durationMs: r.durationMs,
-      investigations: r.investigations || null,
-      testSummary: r.testSummary || null,
-      testFailures: r.testFailures || null,
+      investigations: r.investigations ?? null,
+      testSummary: r.testSummary ?? null,
+      testFailures: r.testFailures ?? null,
       merged: r.merged || false,
-      mergeMethod: r.mergeMethod || null,
-      mergeConflicts: r.mergeConflicts || null,
+      mergeMethod: r.mergeMethod ?? null,
+      mergeConflicts: r.mergeConflicts ?? null,
     })),
   };
 }
@@ -2155,7 +2156,8 @@ async function main() {
     projectConfig = resolveProject({ project: options['project'] as string | undefined });
   } catch (err: unknown) {
     log.error(`Project resolution failed: ${err instanceof Error ? err.message : String(err)}`);
-    process.exit(1);
+    process.exitCode = 1;
+    return;
   }
 
   const { projectRoot, coordDir } = projectConfig;
@@ -2163,19 +2165,21 @@ async function main() {
 
   // ── Load evolve config ────────────────────────────────────────────────
   const hydraConfig = loadHydraConfig();
-  const evolveConfig = hydraConfig.evolve || {};
-  const baseBranch = evolveConfig.baseBranch || 'dev';
+  const evolveConfig = hydraConfig.evolve ?? {};
+  const baseBranch = evolveConfig.baseBranch ?? 'dev';
 
   // ── Validate preconditions ────────────────────────────────────────────
   const currentBranch = getCurrentBranch(projectRoot);
   if (currentBranch !== baseBranch) {
     log.error(`Must be on '${baseBranch}' branch (currently on '${currentBranch}')`);
-    process.exit(1);
+    process.exitCode = 1;
+    return;
   }
 
   if (!isCleanWorkingTree(projectRoot)) {
     log.error('Working tree is not clean. Commit or stash changes first.');
-    process.exit(1);
+    process.exitCode = 1;
+    return;
   }
 
   log.ok(`Preconditions met: on ${baseBranch}, clean working tree`);
@@ -2215,59 +2219,59 @@ async function main() {
   if (checkpoint && isResume) {
     // ── Resume from checkpoint ──────────────────────────────────────────
     log.info(pc.yellow('Resuming evolve session from checkpoint...'));
-    log.dim(`Reason: ${checkpoint.reason || 'hot-restart'}`);
+    log.dim(`Reason: ${String(checkpoint.reason ?? 'hot-restart')}`);
 
     sessionId =
-      checkpoint.sessionId || `evolve_${checkpoint.dateStr}_${randomBytes(3).toString('hex')}`;
+      checkpoint.sessionId ?? `evolve_${String(checkpoint.dateStr)}_${randomBytes(3).toString('hex')}`;
     startedAt = checkpoint.startedAt;
     dateStr = checkpoint.dateStr;
     maxRounds = checkpoint.maxRounds;
     maxHoursMs = checkpoint.maxHoursMs;
     focusAreas = checkpoint.focusAreas;
     timeouts = checkpoint.timeouts;
-    roundResults = checkpoint.completedRounds || [];
+    roundResults = checkpoint.completedRounds ?? [];
     kbStartCount = checkpoint.kbStartCount;
-    startRound = (checkpoint.lastRoundNum || 0) + 1;
+    startRound = (Number(checkpoint.lastRoundNum) || 0) + 1;  
 
     // Restore budget tracker
     if (checkpoint.budgetState) {
       budget = EvolveBudgetTracker.deserialize(checkpoint.budgetState);
       log.dim(
-        `Budget restored: ${budget.consumed.toLocaleString()} tokens consumed across ${budget.roundDeltas.length} rounds`,
+        `Budget restored: ${budget.consumed.toLocaleString()} tokens consumed across ${String(budget.roundDeltas.length)} rounds`,
       );
     } else {
-      budget = new EvolveBudgetTracker(checkpoint.budgetOverrides || {});
+      budget = new EvolveBudgetTracker(checkpoint.budgetOverrides ?? {});
       budget.recordStart();
     }
 
     // Consume (delete) the checkpoint
     deleteCheckpoint(evolveDir);
-    log.ok(`Checkpoint consumed, resuming from round ${startRound}`);
+    log.ok(`Checkpoint consumed, resuming from round ${String(startRound)}`);
   } else if (!checkpoint && isResume && existingState?.resumable) {
     // ── Resume from session state ───────────────────────────────────────
     log.info(pc.yellow('Resuming evolve session from session state...'));
-    log.dim(`Session: ${existingState.sessionId} (${existingState.status})`);
+    log.dim(`Session: ${String(existingState.sessionId)} (${String(existingState.status)})`);
 
     sessionId = existingState.sessionId;
     dateStr = existingState.dateStr;
-    roundResults = existingState.completedRounds || [];
+    roundResults = existingState.completedRounds ?? [];
     kbStartCount =
-      existingState.kbStartCount || kb.entries.length - (existingState.summary?.totalKBAdded || 0);
-    startRound = existingState.nextRound || roundResults.length + 1;
-    focusAreas = existingState.focusAreas || evolveConfig.focusAreas || DEFAULT_FOCUS_AREAS;
-    timeouts = existingState.timeouts || {
+      existingState.kbStartCount || kb.entries.length - (existingState.summary?.totalKBAdded || 0); // eslint-disable-line @typescript-eslint/prefer-nullish-coalescing -- 0 is invalid
+    startRound = existingState.nextRound ?? roundResults.length + 1;
+    focusAreas = existingState.focusAreas ?? evolveConfig.focusAreas ?? DEFAULT_FOCUS_AREAS;
+    timeouts = existingState.timeouts ?? {
       ...DEFAULT_PHASE_TIMEOUTS,
-      ...(evolveConfig.phases || {}),
+      ...(evolveConfig.phases ?? {}),
     };
 
     // Parse options for overrides on resume
     maxRounds = options['max-rounds']
       ? Number.parseInt(String(options['max-rounds']), 10)
-      : existingState.maxRounds || evolveConfig.maxRounds || DEFAULT_MAX_ROUNDS;
+      : existingState.maxRounds || evolveConfig.maxRounds || DEFAULT_MAX_ROUNDS; // eslint-disable-line @typescript-eslint/prefer-nullish-coalescing -- 0 is invalid
     maxHoursMs =
       (options['max-hours']
         ? Number.parseFloat(String(options['max-hours']))
-        : existingState.maxHours || evolveConfig.maxHours || DEFAULT_MAX_HOURS) *
+        : existingState.maxHours || evolveConfig.maxHours || DEFAULT_MAX_HOURS) * // eslint-disable-line @typescript-eslint/prefer-nullish-coalescing -- 0 is invalid
       60 *
       60 *
       1000;
@@ -2279,7 +2283,7 @@ async function main() {
     if (existingState.budgetState) {
       budget = EvolveBudgetTracker.deserialize(existingState.budgetState);
       log.dim(
-        `Budget restored: ${budget.consumed.toLocaleString()} tokens consumed across ${budget.roundDeltas.length} rounds`,
+        `Budget restored: ${budget.consumed.toLocaleString()} tokens consumed across ${String(budget.roundDeltas.length)} rounds`,
       );
     } else {
       const budgetOverrides: { hardLimit?: number; softLimit?: number } = {};
@@ -2291,7 +2295,7 @@ async function main() {
       budget.recordStart();
     }
 
-    log.ok(`Session state restored, resuming from round ${startRound}`);
+    log.ok(`Session state restored, resuming from round ${String(startRound)}`);
   } else {
     // ── Fresh session ───────────────────────────────────────────────────
     if (checkpoint && !isResume) {
@@ -2309,18 +2313,18 @@ async function main() {
     // Parse options
     maxRounds = options['max-rounds']
       ? Number.parseInt(String(options['max-rounds']), 10)
-      : evolveConfig.maxRounds || DEFAULT_MAX_ROUNDS;
+      : evolveConfig.maxRounds || DEFAULT_MAX_ROUNDS; // eslint-disable-line @typescript-eslint/prefer-nullish-coalescing -- 0 is invalid
     maxHoursMs =
       (options['max-hours']
         ? Number.parseFloat(String(options['max-hours']))
-        : evolveConfig.maxHours || DEFAULT_MAX_HOURS) *
+        : evolveConfig.maxHours || DEFAULT_MAX_HOURS) * // eslint-disable-line @typescript-eslint/prefer-nullish-coalescing -- 0 is invalid
       60 *
       60 *
       1000;
     focusAreas = options['focus']
       ? [options['focus'] as string]
-      : evolveConfig.focusAreas || DEFAULT_FOCUS_AREAS;
-    timeouts = { ...DEFAULT_PHASE_TIMEOUTS, ...(evolveConfig.phases || {}) };
+      : evolveConfig.focusAreas ?? DEFAULT_FOCUS_AREAS;
+    timeouts = { ...DEFAULT_PHASE_TIMEOUTS, ...(evolveConfig.phases ?? {}) };
 
     const budgetOverrides: { hardLimit?: number; softLimit?: number } = {};
     if (options['hard-limit'])
@@ -2340,7 +2344,7 @@ async function main() {
   if (!isResume && evolveConfig.suggestions?.enabled !== false) {
     const pending = getPendingSuggestions(suggestions);
     if (pending.length > 0) {
-      log.info(`${pending.length} pending suggestion(s) in backlog`);
+      log.info(`${String(pending.length)} pending suggestion(s) in backlog`);
       const pick = await promptSuggestionPicker(pending, {
         maxDisplay: Math.min(5, pending.length),
       });
@@ -2372,7 +2376,7 @@ async function main() {
     }
   } else if (isResume) {
     // Restore active suggestion from session state on resume
-    const existingSugId = existingState?.activeSuggestionId || checkpoint?.activeSuggestionId;
+    const existingSugId = existingState?.activeSuggestionId ?? checkpoint?.activeSuggestionId;
     if (existingSugId) {
       activeSuggestion = getSuggestionById(suggestions, existingSugId);
       if (activeSuggestion?.status === 'exploring') {
@@ -2386,7 +2390,7 @@ async function main() {
 
   log.info(`Session: ${sessionId}`);
   log.info(`Budget: ${budget.hardLimit.toLocaleString()} token hard limit`);
-  log.info(`Rounds: max ${maxRounds} | Time: max ${formatDuration(maxHoursMs)}`);
+  log.info(`Rounds: max ${String(maxRounds)} | Time: max ${formatDuration(maxHoursMs)}`);
 
   // ── Save initial session state ──────────────────────────────────────
   saveSessionState(evolveDir, {
@@ -2409,7 +2413,7 @@ async function main() {
       errors: 0,
       totalKBAdded: 0,
     },
-    activeSuggestionId: activeSuggestionId || null,
+    activeSuggestionId: activeSuggestionId ?? null,
     budgetState: budget.serialize(),
   });
 
@@ -2468,17 +2472,17 @@ async function main() {
     const usingSuggestion = activeSuggestion !== null && round === startRound;
 
     if (usingSuggestion && activeSuggestion !== null) {
-      area = activeSuggestion.area ?? focusAreas[0] ?? 'general';
+      area = activeSuggestion.area ?? focusAreas[0] ?? 'general'; // eslint-disable-line @typescript-eslint/no-unnecessary-condition -- defensive fallback
     } else {
       const areaIndex = (round - 1) % focusAreas.length;
       area = focusAreas[areaIndex];
       // If we only have one focus area specified, use it; otherwise try to avoid repeats
       if (focusAreas.length > 1 && recentAreas.includes(area)) {
-        area = focusAreas.find((a: string) => !recentAreas.includes(a)) || area;
+        area = focusAreas.find((a: string) => !recentAreas.includes(a)) ?? area;
       }
     }
 
-    log.round(`ROUND ${round}/${maxRounds}: ${area}${usingSuggestion ? ' (suggestion)' : ''}`);
+    log.round(`ROUND ${String(round)}/${String(maxRounds)}: ${area}${usingSuggestion ? ' (suggestion)' : ''}`);
 
     const roundResult: RoundResult = {
       round,
@@ -2517,7 +2521,7 @@ async function main() {
           priority: {
             selectedImprovement: activeSuggestion.description,
             rationale: `From suggestion backlog: ${activeSuggestion.title ?? ''}`,
-            expectedImpact: activeSuggestion.priority || 'medium',
+            expectedImpact: activeSuggestion.priority ?? 'medium',
             risks: [],
             constraints: [],
           },
@@ -2537,15 +2541,15 @@ async function main() {
         const research = await phaseResearch(area, kb, { cwd: projectRoot, timeouts, evolveDir });
 
         // Save research artifact
-        const researchPath = path.join(evolveDir, 'research', `ROUND_${round}_RESEARCH.json`);
+        const researchPath = path.join(evolveDir, 'research', `ROUND_${String(round)}_RESEARCH.json`);
         fs.writeFileSync(researchPath, JSON.stringify(research, null, 2), 'utf8');
         log.ok(`Research saved: ${path.basename(researchPath)}`);
 
         // Summarize research for report
         const allFindings = [
-          ...((research as { claudeFindings?: { findings?: string[] } }).claudeFindings?.findings ||
+          ...((research as { claudeFindings?: { findings?: string[] } }).claudeFindings?.findings ??
             []),
-          ...((research as { geminiFindings?: { findings?: string[] } }).geminiFindings?.findings ||
+          ...((research as { geminiFindings?: { findings?: string[] } }).geminiFindings?.findings ??
             []),
         ];
         roundResult.researchSummary =
@@ -2567,7 +2571,7 @@ async function main() {
         // ── Phase 2: DELIBERATE ──────────────────────────────────────────
         deliberation = await phaseDeliberate(research, kb, { cwd: projectRoot, timeouts });
         roundResult.selectedImprovement = deliberation.selectedImprovement;
-        log.ok(`Selected: ${deliberation.selectedImprovement.slice(0, 100)}`);
+        log.ok(`Selected: ${String(deliberation.selectedImprovement.slice(0, 100))}`);
       }
 
       // If deliberation produced no actionable improvement, skip this round
@@ -2583,7 +2587,7 @@ async function main() {
           round,
           date: dateStr,
           area,
-          finding: deliberation.selectedImprovement || 'empty',
+          finding: deliberation.selectedImprovement ?? 'empty',
           applicability: 'low',
           attempted: false,
           outcome: null,
@@ -2607,7 +2611,7 @@ async function main() {
           date: dateStr,
           area,
           finding: deliberation.selectedImprovement,
-          applicability: deliberation.priority?.expectedImpact || 'medium',
+          applicability: deliberation.priority?.expectedImpact ?? 'medium',
           attempted: false,
           outcome: null,
           learnings: 'Deferred due to budget constraints',
@@ -2627,7 +2631,7 @@ async function main() {
           });
           if (created) {
             saveSuggestions(evolveDir, sg);
-            log.dim(`Suggestion backlogged: ${created.id} — ${(created.title ?? '').slice(0, 60)}`);
+            log.dim(`Suggestion backlogged: ${String(created.id)} — ${(created.title ?? '').slice(0, 60)}`);
           }
         }
 
@@ -2645,7 +2649,7 @@ async function main() {
       });
 
       // ── Create branch ──────────────────────────────────────────────────
-      const branchName = `evolve/${dateStr}/${round}`;
+      const branchName = `evolve/${dateStr}/${String(round)}`;
       roundResult.branchName = branchName;
 
       if (!createBranch(projectRoot, branchName, baseBranch)) {
@@ -2684,23 +2688,23 @@ async function main() {
           const testDiag = await investigate({
             phase: 'test',
             agent: 'codex',
-            error: testResult.error || 'phaseTest returned ok=false',
+            error: testResult.error ?? 'phaseTest returned ok=false',
             stderr: (testResult.stderr || '').slice(-2000),
             stdout: (testResult.output || '').slice(-2000),
             timedOut: testResult.timedOut || false,
-            context: JSON.stringify(plan.plan || {}).slice(0, 3000),
+            context: JSON.stringify(plan.plan ?? {}).slice(0, 3000),
             attemptNumber: 1,
           });
           recordInvestigation('test', testDiag);
           log.dim(`Test investigation: ${testDiag.diagnosis} — ${testDiag.explanation}`);
 
-          if (testDiag.retryRecommendation?.retryPhase && testDiag.diagnosis !== 'fundamental') {
+          if (testDiag.retryRecommendation.retryPhase && testDiag.diagnosis !== 'fundamental') {
             log.info('Retrying test phase with investigator guidance...');
             testResult = await phaseTest(plan, branchName, safetyPrompt, {
               cwd: projectRoot,
               timeouts,
               investigatorPreamble:
-                testDiag.retryRecommendation?.preamble || testDiag.corrective || undefined,
+                testDiag.retryRecommendation.preamble ?? testDiag.corrective ?? undefined,
             });
           }
         }
@@ -2730,24 +2734,24 @@ async function main() {
           const implDiag = await investigate({
             phase: 'implement',
             agent: 'codex',
-            error: implResult.error || 'phaseImplement returned ok=false',
+            error: implResult.error ?? 'phaseImplement returned ok=false',
             stderr: (implResult.stderr || '').slice(-2000),
             stdout: (implResult.output || '').slice(-2000),
             timedOut: implResult.timedOut || false,
-            context: JSON.stringify(plan.plan || {}).slice(0, 3000),
+            context: JSON.stringify(plan.plan ?? {}).slice(0, 3000),
             attemptNumber: 1,
           });
           recordInvestigation('implement', implDiag);
           log.dim(`Implement investigation: ${implDiag.diagnosis} — ${implDiag.explanation}`);
 
-          if (implDiag.retryRecommendation?.retryPhase && implDiag.diagnosis !== 'fundamental') {
+          if (implDiag.retryRecommendation.retryPhase && implDiag.diagnosis !== 'fundamental') {
             log.info('Retrying implement phase with investigator guidance...');
             implResult = await phaseImplement(plan, branchName, safetyPrompt, {
               cwd: projectRoot,
               timeouts,
               deliberation,
               investigatorPreamble:
-                implDiag.retryRecommendation?.preamble || implDiag.corrective || undefined,
+                implDiag.retryRecommendation.preamble ?? implDiag.corrective ?? undefined,
             });
           }
         }
@@ -2787,12 +2791,12 @@ async function main() {
 
       // If tests failed during analysis, investigate and attempt a fix pass
       if (!analysis.testsPassed && isInvestigatorAvailable()) {
-        const td = analysis.testDetails || {};
+        const td = analysis.testDetails || {}; // eslint-disable-line @typescript-eslint/no-unnecessary-condition -- runtime safety
         const errorSummary = td.summary
           ? `Tests failed: ${td.summary}`
           : 'Tests failed during analysis phase';
         const failureContext =
-          td.failures?.length > 0
+          td.failures.length > 0
             ? `\nFailing tests: ${td.failures.map((f) => f.name).join(', ')}`
             : '';
 
@@ -2815,7 +2819,7 @@ async function main() {
 
           // Build failing tests section for the fix prompt
           let failingTestsSection = '';
-          if (td.failures?.length > 0) {
+          if (td.failures.length > 0) {
             failingTestsSection = `\n## Failing Tests\n${td.failures
               .slice(0, 10)
               .map((f) => `- **${f.name}**${f.error ? `: ${f.error}` : ''}`)
@@ -2851,7 +2855,7 @@ ${safetyPrompt}`;
       roundResult.score = analysis.aggregateScore;
 
       // Enrich roundResult with test details
-      if (analysis.testDetails) {
+      if (analysis.testDetails) { // eslint-disable-line @typescript-eslint/no-unnecessary-condition -- runtime safety
         const td = analysis.testDetails;
         roundResult.testSummary = {
           total: td.total,
@@ -2871,7 +2875,7 @@ ${safetyPrompt}`;
       // Check for violations
       const violations = scanBranchViolations(projectRoot, branchName, baseBranch);
       if (violations.length > 0) {
-        log.warn(`${violations.length} violation(s) detected`);
+        log.warn(`${String(violations.length)} violation(s) detected`);
         for (const v of violations) {
           log.dim(`  [${v.severity}] ${v.detail}`);
         }
@@ -2886,7 +2890,7 @@ ${safetyPrompt}`;
       roundResult.learnings = decision.reason;
 
       // Save decision artifact
-      const decisionPath = path.join(evolveDir, 'decisions', `ROUND_${round}_DECISION.json`);
+      const decisionPath = path.join(evolveDir, 'decisions', `ROUND_${String(round)}_DECISION.json`);
       const decisionArtifact: {
         round: number;
         area: string;
@@ -2908,7 +2912,7 @@ ${safetyPrompt}`;
         verdict: decision.verdict,
         reason: decision.reason,
         score: analysis.aggregateScore,
-        confidence: analysis.aggregateConfidence ?? 0,
+        confidence: analysis.aggregateConfidence ?? 0, // eslint-disable-line @typescript-eslint/no-unnecessary-condition -- defensive fallback
         testsPassed: analysis.testsPassed,
         violations: violations.length,
         concerns: analysis.concerns,
@@ -2916,7 +2920,7 @@ ${safetyPrompt}`;
       };
       if (roundResult.testSummary) {
         decisionArtifact.testSummary = roundResult.testSummary;
-        decisionArtifact.testFailures = (roundResult.testFailures || []).map((f: TestFailure) => ({
+        decisionArtifact.testFailures = (roundResult.testFailures ?? []).map((f: TestFailure) => ({
           name: f.name,
           error: f.error,
         }));
@@ -2938,7 +2942,7 @@ ${safetyPrompt}`;
         area,
         finding: deliberation.selectedImprovement,
         applicability:
-          (deliberation.priority as { expectedImpact?: string } | null)?.expectedImpact || 'medium',
+          (deliberation.priority as { expectedImpact?: string } | null)?.expectedImpact ?? 'medium',
         attempted: true,
         outcome: decision.verdict,
         score: analysis.aggregateScore,
@@ -2952,7 +2956,7 @@ ${safetyPrompt}`;
         const sg = loadSuggestions(evolveDir);
         const sug = getSuggestionById(sg, roundResult.suggestionId);
         if (sug) {
-          const newAttempts = (sug.attempts || 0) + 1;
+          const newAttempts = (sug.attempts || 0) + 1; // eslint-disable-line @typescript-eslint/prefer-nullish-coalescing -- 0 is invalid
           const sugUpdates: {
             attempts: number;
             lastAttemptDate: string;
@@ -2973,13 +2977,13 @@ ${safetyPrompt}`;
             sugUpdates.status = 'completed';
           } else if (
             newAttempts >=
-            (sug.maxAttempts || evolveConfig.suggestions?.maxAttemptsPerSuggestion || 3)
+            (sug.maxAttempts || evolveConfig.suggestions?.maxAttemptsPerSuggestion || 3) // eslint-disable-line @typescript-eslint/prefer-nullish-coalescing -- 0 is invalid
           ) {
             sugUpdates.status = 'rejected';
-            sugUpdates.notes = `${sug.notes ? `${sug.notes}\n` : ''}Exhausted max attempts (${newAttempts}).`;
+            sugUpdates.notes = `${sug.notes ? `${sug.notes}\n` : ''}Exhausted max attempts (${String(newAttempts)}).`;
           } else {
             sugUpdates.status = 'pending'; // Return to queue
-            sugUpdates.notes = `${sug.notes ? `${sug.notes}\n` : ''}Attempt ${newAttempts}: ${decision.verdict} (${analysis.aggregateScore}/10).`;
+            sugUpdates.notes = `${sug.notes ? `${sug.notes}\n` : ''}Attempt ${String(newAttempts)}: ${decision.verdict} (${String(analysis.aggregateScore)}/10).`;
           }
 
           updateSuggestion(sg, roundResult.suggestionId, sugUpdates);
@@ -2996,18 +3000,18 @@ ${safetyPrompt}`;
         const sg = loadSuggestions(evolveDir);
         const created = createSuggestionFromRound(sg, roundResult as any, deliberation, {
           sessionId,
-          specPath: path.join(evolveDir, 'specs', `ROUND_${round}_SPEC.md`),
-          notes: `Auto-created from rejected round ${round}. Reason: ${decision.reason}`,
+          specPath: path.join(evolveDir, 'specs', `ROUND_${String(round)}_SPEC.md`),
+          notes: `Auto-created from rejected round ${String(round)}. Reason: ${decision.reason}`,
         });
         if (created) {
           saveSuggestions(evolveDir, sg);
-          log.dim(`Suggestion backlogged: ${created.id} — ${(created.title ?? '').slice(0, 60)}`);
+          log.dim(`Suggestion backlogged: ${String(created.id)} — ${(created.title ?? '').slice(0, 60)}`);
         }
       }
 
       const stats = getBranchStats(projectRoot, branchName, baseBranch);
       log.ok(
-        `Round ${round} complete: ${decision.verdict.toUpperCase()} | ${stats.commits} commits | ${stats.filesChanged} files`,
+        `Round ${String(round)} complete: ${decision.verdict.toUpperCase()} | ${String(stats.commits)} commits | ${String(stats.filesChanged)} files`,
       );
 
       // ── Hot-restart: self-modification detected ───────────────────────
@@ -3048,7 +3052,7 @@ ${safetyPrompt}`;
             completedRounds: roundResults,
             lastRoundNum: round,
             kbStartCount,
-            activeSuggestionId: activeSuggestionId || null,
+            activeSuggestionId: activeSuggestionId ?? null,
             reason: 'hot-restart after approved self-modification',
           });
 
@@ -3056,9 +3060,11 @@ ${safetyPrompt}`;
           destroyStatusBar();
           spawnNewProcess(projectRoot);
           log.info('Exiting for hot-restart...');
-          process.exit(0);
+          process.exitCode = 0; // eslint-disable-line require-atomic-updates -- intentional
+           
+          return;
         } else {
-          log.error(`Merge failed — ${mergeResult.conflicts.length} conflicting file(s):`);
+          log.error(`Merge failed — ${String(mergeResult.conflicts.length)} conflicting file(s):`);
           for (const f of mergeResult.conflicts.slice(0, 10)) {
             log.dim(`  ${f}`);
           }
@@ -3069,7 +3075,7 @@ ${safetyPrompt}`;
         }
       }
     } catch (err: unknown) {
-      log.error(`Round ${round} error: ${err instanceof Error ? err.message : String(err)}`);
+      log.error(`Round ${String(round)} error: ${err instanceof Error ? err.message : String(err)}`);
       roundResult.verdict = 'error';
       roundResult.learnings = err instanceof Error ? err.message : String(err);
     }
@@ -3102,7 +3108,7 @@ ${safetyPrompt}`;
       completedRounds: roundResults,
       nextRound: round + 1,
       resumable: false,
-      activeSuggestionId: activeSuggestionId || null,
+      activeSuggestionId: activeSuggestionId ?? null,
       summary: {
         approved,
         rejected,
@@ -3134,7 +3140,7 @@ ${safetyPrompt}`;
       if (result.ok) {
         log.ok(`Merged ${r.branchName} → ${baseBranch} (${result.method})`);
       } else {
-        log.warn(`Could not auto-merge ${r.branchName} — ${result.conflicts.length} conflict(s)`);
+        log.warn(`Could not auto-merge ${r.branchName} — ${String(result.conflicts.length)} conflict(s)`);
         for (const f of result.conflicts.slice(0, 5)) log.dim(`  ${f}`);
         r.mergeConflicts = result.conflicts;
       }
@@ -3159,7 +3165,7 @@ ${safetyPrompt}`;
     }
     if (resetCount > 0) {
       saveSuggestions(evolveDir, sg);
-      log.dim(`Reset ${resetCount} suggestion(s) from exploring → pending`);
+      log.dim(`Reset ${String(resetCount)} suggestion(s) from exploring → pending`);
     }
   }
 
@@ -3262,21 +3268,21 @@ ${safetyPrompt}`;
 
   // ── Per-round detail ──────────────────────────────────────────────
   for (const r of roundResults) {
-    const verdictColor =
-      r.verdict === 'approve'
-        ? pc.green
-        : r.verdict === 'reject'
-          ? pc.red
-          : r.verdict === 'revise'
-            ? pc.yellow
-            : r.verdict === 'error'
-              ? pc.red
-              : pc.dim;
-    const tag = verdictColor(pc.bold((r.verdict || 'incomplete').toUpperCase()));
-    const scoreStr = r.score == null ? '' : pc.dim(` score:${r.score}/10`);
+    let verdictColor;
+    if (r.verdict === 'approve') {
+      verdictColor = pc.green;
+    } else if (r.verdict === 'reject' || r.verdict === 'error') {
+      verdictColor = pc.red;
+    } else if (r.verdict === 'revise') {
+      verdictColor = pc.yellow;
+    } else {
+      verdictColor = pc.dim;
+    }
+    const tag = verdictColor(pc.bold((r.verdict ?? 'incomplete').toUpperCase()));
+    const scoreStr = r.score == null ? '' : pc.dim(` score:${String(r.score)}/10`);
     const dur = r.durationMs ? pc.dim(` ${formatDuration(r.durationMs)}`) : '';
 
-    console.log(`  ${pc.bold(pc.cyan(`Round ${r.round}`))} ${pc.dim('·')} ${r.area}`);
+    console.log(`  ${pc.bold(pc.cyan(`Round ${String(r.round)}`))} ${pc.dim('·')} ${r.area}`);
     console.log(`    ${tag}${scoreStr}${dur}`);
     if (r.selectedImprovement && r.selectedImprovement !== 'No improvement selected') {
       console.log(`    ${pc.dim('Goal:')} ${r.selectedImprovement.slice(0, 80)}`);
@@ -3294,24 +3300,24 @@ ${safetyPrompt}`;
 
   // ── Aggregate stats ───────────────────────────────────────────────
   const verdictLine = [
-    approved > 0 ? pc.green(`${approved} approved`) : null,
-    revised > 0 ? pc.yellow(`${revised} revised`) : null,
-    rejected > 0 ? pc.red(`${rejected} rejected`) : null,
-    errors > 0 ? pc.red(`${errors} error`) : null,
-    skipped > 0 ? pc.dim(`${skipped} skipped`) : null,
+    approved > 0 ? pc.green(`${String(approved)} approved`) : null,
+    revised > 0 ? pc.yellow(`${String(revised)} revised`) : null,
+    rejected > 0 ? pc.red(`${String(rejected)} rejected`) : null,
+    errors > 0 ? pc.red(`${String(errors)} error`) : null,
+    skipped > 0 ? pc.dim(`${String(skipped)} skipped`) : null,
   ]
     .filter(Boolean)
     .join(pc.dim(' / '));
 
-  console.log(`  ${pc.bold('Rounds')}      ${roundResults.length}/${maxRounds}  ${verdictLine}`);
+  console.log(`  ${pc.bold('Rounds')}      ${String(roundResults.length)}/${String(maxRounds)}  ${verdictLine}`);
   console.log(`  ${pc.bold('Duration')}    ${formatDuration(finishedAt - startedAt)}`);
   console.log(`  ${pc.bold('Tokens')}      ~${totalTokens.toLocaleString()} consumed`);
-  console.log(`  ${pc.bold('Knowledge')}   +${kbDelta.added} entries (${kbDelta.total} total)`);
+  console.log(`  ${pc.bold('Knowledge')}   +${String(kbDelta.added)} entries (${String(kbDelta.total)} total)`);
 
   if (investigatorSummary && investigatorSummary.investigations > 0) {
     const invTokens = investigatorSummary.promptTokens + investigatorSummary.completionTokens;
     console.log(
-      `  ${pc.bold('Investigator')} ${investigatorSummary.investigations} triggered, ${investigatorSummary.healed} healed (~${invTokens.toLocaleString()} tokens)`,
+      `  ${pc.bold('Investigator')} ${String(investigatorSummary.investigations)} triggered, ${String(investigatorSummary.healed)} healed (~${invTokens.toLocaleString()} tokens)`,
     );
   }
 
@@ -3321,7 +3327,7 @@ ${safetyPrompt}`;
     for (const d of budgetSummary.roundDeltas) {
       const bar = compactTokenBar(d.tokens, budgetSummary.hardLimit);
       console.log(
-        `    R${d.round} ${String(d.area).padEnd(24).slice(0, 24)} ${bar} ${d.tokens.toLocaleString().padStart(8)}`,
+        `    R${String(d.round)} ${String(d.area).padEnd(24).slice(0, 24)} ${bar} ${d.tokens.toLocaleString().padStart(8)}`,
       );
     }
   }
@@ -3343,7 +3349,7 @@ ${safetyPrompt}`;
     console.log('');
     console.log(`  ${pc.bold(pc.green('Merged branches:'))}`);
     for (const r of mergedBranches) {
-      console.log(`    ${pc.green('✓')} ${r.branchName} (${r.mergeMethod})`);
+      console.log(`    ${pc.green('✓')} ${String(r.branchName)} (${String(r.mergeMethod)})`);
     }
   }
 
@@ -3351,11 +3357,11 @@ ${safetyPrompt}`;
     console.log('');
     console.log(`  ${pc.bold(pc.yellow('Branches with conflicts (manual merge needed):'))}`);
     for (const r of conflictBranches) {
-      const conflictCount = r.mergeConflicts?.length || 0;
+      const conflictCount = r.mergeConflicts?.length ?? 0;
       console.log(
-        `    ${pc.yellow('!')} ${r.branchName}${conflictCount > 0 ? ` — ${conflictCount} file(s)` : ''}`,
+        `    ${pc.yellow('!')} ${String(r.branchName)}${conflictCount > 0 ? ` — ${String(conflictCount)} file(s)` : ''}`,
       );
-      console.log(`      ${pc.dim('run:')} git merge ${r.branchName}`);
+      console.log(`      ${pc.dim('run:')} git merge ${String(r.branchName)}`);
     }
   }
 
@@ -3366,7 +3372,7 @@ ${safetyPrompt}`;
     console.log('');
     console.log(`  ${pc.bold(pc.yellow('Branches needing revision:'))}`);
     for (const r of branchesForReview) {
-      console.log(`    ${pc.yellow('~')} git diff ${baseBranch}...${r.branchName}`);
+      console.log(`    ${pc.yellow('~')} git diff ${baseBranch}...${String(r.branchName)}`);
     }
   }
 
@@ -3407,7 +3413,7 @@ main().catch((err: unknown) => {
   // Always try to get back to base branch
   try {
     const cfg = loadHydraConfig();
-    const baseBranch = cfg.evolve?.baseBranch || 'dev';
+    const baseBranch = cfg.evolve?.baseBranch ?? 'dev';
     const projectRoot = process.cwd();
     const branch = getCurrentBranch(projectRoot);
     if (branch !== baseBranch && branch.startsWith('evolve/')) {
@@ -3416,5 +3422,5 @@ main().catch((err: unknown) => {
   } catch {
     /* last resort */
   }
-  process.exit(1);
+  process.exitCode = 1;
 });
