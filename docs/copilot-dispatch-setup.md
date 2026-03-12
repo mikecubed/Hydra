@@ -151,7 +151,12 @@ own default model for all three roles.
 **Fix:** Added an optional `model` parameter to `callAgent()`:
 
 ```ts
-async function callAgent(agentName: string, prompt: string, timeoutMs: number, model?: string | null);
+async function callAgent(
+  agentName: string,
+  prompt: string,
+  timeoutMs: number,
+  model?: string | null,
+);
 ```
 
 And resolved each role's model before dispatch:
