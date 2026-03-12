@@ -416,9 +416,19 @@ async function main() {
     const date = new Date().toISOString().split('T')[0];
     const branchName = `${branchPrefix}/${date}/${task.slug}`;
 
-    // Choose agent — filter to installed CLIs to avoid dispatching to unavailable agents
+    // Choose agent — validate suggestedAgent against installedCLIs/enabled to avoid
+    // dispatching to an unavailable or disabled agent when the suggestion is stale.
     const taskType = classifyTask(task.title);
-    const agent = task.suggestedAgent || bestAgentFor(taskType, { installedCLIs });
+    let agent = task.suggestedAgent;
+    if (agent) {
+      const agentDef = getAgent(agent);
+      const isInstalled = installedCLIs ? installedCLIs[agent] !== false : true;
+      if (!agentDef?.enabled || !isInstalled) {
+        agent = bestAgentFor(taskType, { installedCLIs });
+      }
+    } else {
+      agent = bestAgentFor(taskType, { installedCLIs });
+    }
     const modelOverride = useEconomy
       ? (getAgent(agent)?.economyModel(budgetCfg) ?? undefined)
       : undefined;

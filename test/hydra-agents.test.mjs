@@ -494,15 +494,15 @@ test('bestAgentFor with includeVirtual returns virtual agents when they score hi
 // ── bestAgentFor with installedCLIs ─────────────────────────────────────────
 
 test('bestAgentFor skips CLI agents marked not-installed in installedCLIs', () => {
-  // With all agents available, claude wins for 'planning'
+  // Pin config so the baseline winner is deterministic regardless of local settings
+  _setTestConfig({ routing: { mode: 'balanced' } });
   const normalResult = bestAgentFor('planning');
-  assert.equal(normalResult, 'claude');
 
-  // Now mark claude as not installed — should fall back to next best
-  const withoutClaude = bestAgentFor('planning', {
-    installedCLIs: { claude: false, gemini: true, codex: true, copilot: true },
+  // Mark the baseline winner as not installed — should fall back to a different agent
+  const withoutWinner = bestAgentFor('planning', {
+    installedCLIs: { [normalResult]: false, gemini: true, codex: true, copilot: true },
   });
-  assert.notEqual(withoutClaude, 'claude');
+  assert.notEqual(withoutWinner, normalResult);
 });
 
 test('bestAgentFor does not filter when installedCLIs is not provided', () => {
