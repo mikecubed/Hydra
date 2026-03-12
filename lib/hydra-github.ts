@@ -133,12 +133,15 @@ export function detectRepo(cwd = process.cwd()): RepoInfo | null {
   const r = gh(['repo', 'view', '--json', 'owner,name,defaultBranchRef'], cwd);
   if (r.status !== 0) return null;
   try {
-    const data = JSON.parse(r.stdout);
-    return {
-      owner: data.owner?.login ?? data.owner ?? '',
-      repo: data.name ?? '',
-      defaultBranch: data.defaultBranchRef?.name ?? 'main',
-    };
+    // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment -- GitHub API response
+    const repoData = JSON.parse(r.stdout);
+    // eslint-disable-next-line @typescript-eslint/no-unsafe-member-access -- GitHub API response
+    const ownerLogin: string = String(repoData.owner?.login ?? repoData.owner ?? '');
+    // eslint-disable-next-line @typescript-eslint/no-unsafe-member-access -- GitHub API response
+    const repoName: string = String(repoData.name ?? '');
+    // eslint-disable-next-line @typescript-eslint/no-unsafe-member-access -- GitHub API response
+    const defaultBranch: string = String(repoData.defaultBranchRef?.name ?? 'main');
+    return { owner: ownerLogin, repo: repoName, defaultBranch };
   } catch {
     return null;
   }
@@ -159,29 +162,18 @@ export function createPR({
   labels = [],
   reviewers = [],
 }: CreatePROptions): PRResult {
-  const args = [
-    'pr',
-    'create',
-    '--head',
-    head,
-    '--base',
-    base,
-    '--title',
-    title,
-    '--body',
-    body || '',
-  ];
+  const args = ['pr', 'create', '--head', head, '--base', base, '--title', title, '--body', body];
   if (draft) args.push('--draft');
   for (const l of labels) args.push('--label', l);
   for (const r of reviewers) args.push('--reviewer', r);
 
   const result = gh(args, cwd);
   if (result.status === 0) {
-    const url = (result.stdout || '').trim();
+    const url = result.stdout.trim();
     const numMatch = url.match(/\/pull\/(\d+)/);
     return { ok: true, url, number: numMatch ? Number.parseInt(numMatch[1], 10) : undefined };
   }
-  return { ok: false, error: (result.stderr || result.stdout || '').trim() };
+  return { ok: false, error: (result.stderr === '' ? result.stdout : result.stderr).trim() };
 }
 
 /**
@@ -197,21 +189,20 @@ export function listPRs({
   head,
 }: { cwd?: string; state?: string; base?: string; head?: string } = {}) {
   const args = ['pr', 'list', '--json', 'number,title,headRefName,author,state', '--state', state];
-  if (base) args.push('--base', base);
-  if (head) args.push('--head', head);
+  if (base != null && base !== '') args.push('--base', base);
+  if (head != null && head !== '') args.push('--head', head);
 
   const r = gh(args, cwd);
   if (r.status !== 0) return [];
   try {
+    // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment -- GitHub API response
     const data = JSON.parse(r.stdout);
+    // eslint-disable-next-line @typescript-eslint/no-unsafe-return, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-member-access -- GitHub API response
     return data.map((pr: GitHubPR) => ({
       number: pr.number,
       title: pr.title,
       headRefName: pr.headRefName,
-      author:
-        typeof pr.author === 'object'
-          ? (pr.author.login ?? '')
-          : (pr.author ?? ''),
+      author: typeof pr.author === 'object' ? (pr.author.login ?? '') : (pr.author ?? ''),
       state: pr.state,
     }));
   } catch {
@@ -238,6 +229,7 @@ export function getPR({ cwd = process.cwd(), ref }: { cwd?: string; ref: string 
   );
   if (r.status !== 0) return null;
   try {
+    // eslint-disable-next-line @typescript-eslint/no-unsafe-return -- GitHub API response
     return JSON.parse(r.stdout);
   } catch {
     return null;
@@ -264,7 +256,7 @@ export function mergePR({
   if (deleteAfter) args.push('--delete-branch');
   const r = gh(args, cwd);
   if (r.status === 0) return { ok: true };
-  return { ok: false, error: (r.stderr || r.stdout || '').trim() };
+  return { ok: false, error: (r.stderr === '' ? r.stdout : r.stderr).trim() };
 }
 
 /**
@@ -281,7 +273,7 @@ export function closePR({
 }): PRResult {
   const r = gh(['pr', 'close', String(ref)], cwd);
   if (r.status === 0) return { ok: true };
-  return { ok: false, error: (r.stderr || r.stdout || '').trim() };
+  return { ok: false, error: (r.stderr === '' ? r.stdout : r.stderr).trim() };
 }
 
 /**
@@ -310,6 +302,7 @@ export function listIssues({
   const r = gh(args, cwd);
   if (r.status !== 0) return [];
   try {
+    // eslint-disable-next-line @typescript-eslint/no-unsafe-return -- JSON.parse result
     return JSON.parse(r.stdout);
   } catch {
     return [];
@@ -366,7 +359,7 @@ function detectPRTemplate(projectRoot: string): string | null {
  * @returns {string[]} Labels to apply
  */
 function detectAutoLabels(changedFiles: string[], labelConfig: Record<string, unknown>): string[] {
-  if (!changedFiles.length) return [];
+  if (changedFiles.length === 0) return [];
   const labels = new Set<string>();
   for (const [label, patterns] of Object.entries(labelConfig)) {
     if (!Array.isArray(patterns)) continue;
@@ -400,7 +393,7 @@ export function verifyRequiredChecks({
   const r = gh(['pr', 'checks', String(ref), '--json', 'name,state'], cwd);
   if (r.status !== 0) return { ok: false, pending: [], failed: ['(could not fetch checks)'] };
 
-  let checks;
+  let checks: unknown;
   try {
     checks = JSON.parse(r.stdout);
   } catch {
@@ -410,11 +403,12 @@ export function verifyRequiredChecks({
   const pending = [];
   const failed = [];
   for (const name of required) {
-    const check = checks.find((c: GitHubCheck) => c.name === name);
-    if (!check) {
+    const check = (checks as GitHubCheck[]).find((c: GitHubCheck) => c.name === name);
+    if (check == null) {
       pending.push(name);
       continue;
     }
+
     if (check.state === 'FAILURE' || check.state === 'ERROR') failed.push(name);
     else if (check.state !== 'SUCCESS') pending.push(name);
   }
@@ -435,7 +429,7 @@ export function pushBranchAndCreatePR(opts: PushAndCreatePROpts = {}): PRResult 
 
   // Determine base branch
   let baseBranch = opts.baseBranch ?? ghCfg.defaultBase;
-  if (!baseBranch) {
+  if (baseBranch === '') {
     const repo = detectRepo(cwd);
     baseBranch = repo?.defaultBranch ?? 'main';
   }
@@ -447,36 +441,34 @@ export function pushBranchAndCreatePR(opts: PushAndCreatePROpts = {}): PRResult 
   }
 
   // Auto-generate title from branch name if not provided
-  const title =
-    opts.title ??
-    branch
-      .replace(/^(evolve|nightly)\//, '')
-      .replace(/[/_-]/g, ' ')
-      .replace(/\b\w/g, (c) => c.toUpperCase())
-      .trim() ||
-    branch;
+  const processedBranch = branch
+    .replace(/^(evolve|nightly)\//, '')
+    .replace(/[/_-]/g, ' ')
+    .replace(/\b\w/g, (c) => c.toUpperCase())
+    .trim();
+  const title = opts.title ?? (processedBranch === '' ? branch : processedBranch);
 
   // Auto-generate body from commit log if not provided
   let body = opts.body ?? '';
-  if (!body) {
+  if (body === '') {
     // Try injecting PR template first
     const template = detectPRTemplate(cwd);
-    if (template) {
+    if (template != null && template !== '') {
       body = template;
     }
     const log = getBranchLog(cwd, branch, baseBranch);
-    if (log) {
+    if (log !== '') {
       const commitSection = `## Commits\n\n${log
         .split('\n')
         .map((l) => `- ${l}`)
         .join('\n')}`;
-      body = body ? `${body}\n\n${commitSection}` : commitSection;
+      body = body === '' ? commitSection : `${body}\n\n${commitSection}`;
     }
   }
 
   // Append footer from config
-  if (ghCfg.prBodyFooter) {
-    body = body ? `${body}\n\n---\n${ghCfg.prBodyFooter}` : ghCfg.prBodyFooter;
+  if (ghCfg.prBodyFooter !== '') {
+    body = body === '' ? ghCfg.prBodyFooter : `${body}\n\n---\n${ghCfg.prBodyFooter}`;
   }
 
   // Auto-detect labels from changed files
@@ -490,7 +482,7 @@ export function pushBranchAndCreatePR(opts: PushAndCreatePROpts = {}): PRResult 
       encoding: 'utf8',
       timeout: 10_000,
     });
-    if (gitDiff.status === 0 && gitDiff.stdout) {
+    if (gitDiff.status === 0 && gitDiff.stdout !== '') {
       changedFiles = gitDiff.stdout.trim().split('\n').filter(Boolean);
     }
     const autoLabels = detectAutoLabels(changedFiles, autolabelCfg);
