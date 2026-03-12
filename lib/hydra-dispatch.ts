@@ -17,6 +17,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { buildAgentContext } from './hydra-context.ts';
 import { getAgent, getMode, setMode } from './hydra-agents.ts';
+import { DISPATCH_PREFERENCE_ORDER } from './hydra-routing-constants.ts';
 import { resolveProject, getRoleConfig, loadHydraConfig } from './hydra-config.ts';
 import {
   nowIso,
@@ -106,12 +107,6 @@ async function fetchDaemonSummary(baseUrl: string) {
 }
 
 /**
- * Preference order used when falling back from an unavailable role agent.
- * 'local' is last and only considered when local.enabled is true in config.
- */
-const DISPATCH_PREFERENCE_ORDER = ['claude', 'copilot', 'gemini', 'codex', 'local'] as const;
-
-/**
  * Resolve the agent name for a dispatch role, with installed-CLI fallback.
  *
  * Resolution order:
@@ -134,15 +129,14 @@ export function getRoleAgent(
     if (preferred === 'local') {
       // Only dispatch to local if explicitly enabled
       if (cfg.local.enabled) return preferred;
-    } else if (installedCLIs[preferred] !== false) {
-      // Validate the agent is known and enabled before returning it
-      try {
-        const agentDef = getAgent(preferred);
-        if (agentDef && (agentDef as { enabled?: boolean }).enabled !== false) {
+    } else {
+      const agentDef = getAgent(preferred);
+      if (agentDef?.enabled) {
+        // CLI agents require explicit confirmation (=== true); API agents (cli === null) are always reachable
+        const needsCli = agentDef.cli !== null && agentDef.cli !== undefined;
+        if (!needsCli || installedCLIs[preferred] === true) {
           return preferred;
         }
-      } catch {
-        // Unknown agent name — fall through to preference chain
       }
     }
   }
@@ -586,8 +580,15 @@ async function main() {
 
 const _isMain = (() => {
   try {
-    const a = fileURLToPath(import.meta.url);
-    const b = path.resolve(process.argv[1] ?? '');
+    const normalize = (p: string) => {
+      try {
+        return fs.realpathSync(p);
+      } catch {
+        return p;
+      }
+    };
+    const a = normalize(fileURLToPath(import.meta.url));
+    const b = normalize(path.resolve(process.argv[1] ?? ''));
     return process.platform === 'win32' ? a.toLowerCase() === b.toLowerCase() : a === b;
   } catch {
     return false;

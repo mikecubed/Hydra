@@ -713,6 +713,16 @@ export function invalidateConfigCache(): void {
  * Test-only: redirect config reads/writes to a temp file path.
  * Pass null to restore the real config path.
  * Always invalidates the cache so the next read picks up the new path.
+ *
+ * @remarks
+ * Each test file runs in its own Node.js worker thread (the native `node:test`
+ * runner isolates files via workers), so this global variable is **not** shared
+ * across test files — there is no cross-file race. Within a single test file
+ * tests run sequentially, so within-file races are also not possible.
+ *
+ * Do **not** call this inside `test.concurrent` blocks or any other
+ * concurrent-execution context, as that would race on the same global.
+ * For read-only config overrides in concurrent contexts, use `_setTestConfig()`.
  */
 export function _setTestConfigPath(p: string | null): void {
   _testConfigPath = p;

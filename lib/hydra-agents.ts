@@ -31,6 +31,7 @@ import {
   resolveCliModelId,
 } from './hydra-model-profiles.ts';
 import { extractCodexText, extractCodexUsage } from './hydra-shared/codex-helpers.ts';
+import { DISPATCH_PREFERENCE_ORDER } from './hydra-routing-constants.ts';
 
 // ── Agent Type Enum ──────────────────────────────────────────────────────────
 
@@ -1022,9 +1023,7 @@ export function bestAgentFor(taskType: TaskType | string, opts: BestAgentOpts = 
   }
   if (candidates.length === 0) {
     if (installedCLIs) {
-      // Mirrors DISPATCH_PREFERENCE_ORDER in hydra-dispatch.ts (not imported to avoid circular dep)
-      const preferenceOrder = ['claude', 'copilot', 'gemini', 'codex', 'local'] as const;
-      for (const name of preferenceOrder) {
+      for (const name of DISPATCH_PREFERENCE_ORDER) {
         const agentDef = _registry.get(name);
         if (!agentDef || !_resolveEnabled(agentDef)) continue;
         if (!includeVirtual && agentDef.type === AGENT_TYPE.VIRTUAL) continue;
