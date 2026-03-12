@@ -64,6 +64,8 @@ npm run setup:hooks         # Install/verify git pre-commit and pre-push hooks
 
 **Always run `npm run quality` before opening a PR.** This runs lint + format:check + typecheck in full (no auto-fix) so you catch issues before CI does.
 
+Mermaid diagrams are validated separately with `npm run lint:mermaid`. The `quality.yml` workflow now runs Mermaid validation explicitly alongside ESLint and Prettier checks, and staged Markdown files run the same validation through `lint-staged`.
+
 ## Architecture
 
 Hydra orchestrates three AI coding agents (Claude Code CLI, Gemini CLI, Codex CLI) through a shared HTTP daemon with task queue, intelligent routing, and multiple dispatch modes.
