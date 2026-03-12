@@ -18,7 +18,7 @@ jobs:
       contents: read
     strategy:
       matrix:
-        node-version: [22]
+        node-version: [24]
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -33,7 +33,8 @@ jobs:
         env:
           HUSKY: '0'
 
-  # Full test matrix — cross-platform, Node 22.
+  # Full test matrix — cross-platform, Node 24 LTS (minimum supported version).
+  # Node 20 and 22 are dropped: package.json engines.node is >=24.0.0.
   test:
     name: Test (${{ matrix.os }}, Node ${{ matrix.node-version }})
     needs: syntax
@@ -44,7 +45,7 @@ jobs:
       fail-fast: false
       matrix:
         os: [ubuntu-latest, windows-latest]
-        node-version: [22]
+        node-version: [24]
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
