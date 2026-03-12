@@ -203,10 +203,11 @@ function statusCommand(projectRoot: string, options: Record<string, string | boo
         }
         // eslint-disable-next-line @typescript-eslint/no-unsafe-member-access -- dynamic report data
         const agentTag = pc.dim(` [${String(r.agent)}]`);
-        // eslint-disable-next-line @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-call -- dynamic report data
+        /* eslint-disable @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-call -- dynamic report data */
         console.log(
           `    ${icon} ${String(r.slug ?? r.task?.slice(0, 40) ?? '')} — ${String(r.status)}${agentTag}`,
         );
+        /* eslint-enable @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-call */
       }
     }
   } else {
