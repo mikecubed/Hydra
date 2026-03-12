@@ -1,4 +1,3 @@
-#!/usr/bin/env node
 import fs from 'node:fs';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
@@ -9,10 +8,11 @@ const isCi = args.includes('--ci');
 const targetArg = args.find((arg) => arg.startsWith('--target='));
 const outputArg = args.find((arg) => arg.startsWith('--output='));
 
-const target = targetArg
-  ? targetArg.slice('--target='.length)
-  : process.env['HYDRA_EXE_TARGET'] ?? 'node20-win-x64';
-const output = outputArg ? outputArg.slice('--output='.length) : 'dist/hydra.exe';
+const target =
+  targetArg == null
+    ? (process.env['HYDRA_EXE_TARGET'] ?? 'node20-win-x64')
+    : targetArg.slice('--target='.length);
+const output = outputArg == null ? 'dist/hydra.exe' : outputArg.slice('--output='.length);
 
 const projectRoot = process.cwd();
 const outputPath = path.resolve(projectRoot, output);

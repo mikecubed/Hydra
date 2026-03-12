@@ -36,7 +36,7 @@ interface SpawnSyncCaptureResult {
 }
 
 function safeRm(dirPath: string) {
-  if (!dirPath) return;
+  if (dirPath === '') return;
   try {
     fs.rmSync(dirPath, { recursive: true, force: true });
   } catch {
@@ -114,7 +114,7 @@ export function spawnSyncCapture(
 ): SpawnSyncCaptureResult {
   const encoding = opts.encoding ?? 'utf8';
   const maxOutputBytes: number = Number.isFinite(opts.maxOutputBytes)
-    ? opts.maxOutputBytes!
+    ? (opts.maxOutputBytes as number)
     : DEFAULT_MAX_OUTPUT_BYTES;
   const forceNoPipes = Boolean(opts.noPipes ?? process.env['HYDRA_NO_PIPES']);
 
