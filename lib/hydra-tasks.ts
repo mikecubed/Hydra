@@ -848,11 +848,14 @@ async function main() {
   selectedTasks =
     // eslint-disable-next-line @typescript-eslint/strict-boolean-expressions -- runtime options check
     options['preset'] || options['max']
-      ? // eslint-disable-next-line @typescript-eslint/strict-boolean-expressions -- runtime options check
-        scannedTasks.slice(
-          0,
-          Number.parseInt(String(options['max'] === false ? '' : options['max']), 10) || 5,
-        )
+      ? (() => {
+          const parsed = Number.parseInt(
+            String(options['max'] === false ? '' : options['max']),
+            10,
+          );
+          const maxTasks = Number.isNaN(parsed) || parsed === 0 ? 5 : parsed;
+          return scannedTasks.slice(0, maxTasks);
+        })()
       : await selectTasks(rl, scannedTasks);
 
   if (selectedTasks == null || selectedTasks.length === 0) {
