@@ -114,7 +114,7 @@ class Picker<T> {
       return;
     }
 
-    if (key.ctrl && key.name === 'c') {
+    if (key.ctrl === true && key.name === 'c') {
       this._finish(null);
       return;
     }
@@ -170,12 +170,12 @@ class Picker<T> {
   // ── Filtering ─────────────────────────────────────────────────────────────
 
   _filter() {
-    if (this.search) {
-      const q = this.search.toLowerCase();
-      this.filtered = this.items.filter((item) => this.filterKey(item).toLowerCase().includes(q));
-    } else {
-      this.filtered = [...this.items];
-    }
+    this.filtered =
+      this.search === ''
+        ? [...this.items]
+        : this.items.filter((item) =>
+            this.filterKey(item).toLowerCase().includes(this.search.toLowerCase()),
+          );
     this.cursor = Math.min(this.cursor, Math.max(0, this.filtered.length - 1));
     this.scroll = 0;
     this._scrollTo();
@@ -196,17 +196,17 @@ class Picker<T> {
     const lines = [];
 
     // Title
-    if (this.title) lines.push(`  ${pc.bold(pc.cyan(this.title))}`);
+    if (this.title !== '') lines.push(`  ${pc.bold(pc.cyan(this.title))}`);
 
     // Search bar / hint
-    if (this.search) {
+    if (this.search === '') {
+      lines.push(`  ${pc.dim(`${String(this.items.length)} items — type to filter`)}`);
+    } else {
       const cnt =
         this.filtered.length < this.items.length
           ? `${String(this.filtered.length)}/${String(this.items.length)}`
           : String(this.items.length);
       lines.push(`  ${pc.dim('Filter:')} ${this.search}${pc.dim('│')}  ${pc.dim(`(${cnt})`)}`);
-    } else {
-      lines.push(`  ${pc.dim(`${String(this.items.length)} items — type to filter`)}`);
     }
     lines.push('');
 
@@ -260,7 +260,7 @@ class Picker<T> {
 
   async _fallback(): Promise<T | null> {
     console.log('');
-    if (this.title) console.log(`  ${this.title}\n`);
+    if (this.title !== '') console.log(`  ${this.title}\n`);
     for (const [i, item] of this.items.entries()) {
       console.log(`  ${pc.dim(`${String(i + 1).padStart(3)})`)} ${this.renderItem(item, false)}`);
     }
@@ -271,7 +271,7 @@ class Picker<T> {
       rl.question('  Enter number (q to cancel): ', (ans) => {
         rl.close();
         const t = ans.trim();
-        if (!t || t === 'q') {
+        if (t === '' || t === 'q') {
           resolve(null);
           return;
         }
@@ -303,7 +303,7 @@ export async function pickAgent(): Promise<string | null> {
     renderItem: (item, sel) => {
       const pad = ' '.repeat(Math.max(1, 30 - item.label.length));
       const label = sel ? pc.white(item.label) : item.label;
-      const eff = item.effort ? pc.yellow(` [${item.effort}]`) : '';
+      const eff = item.effort === '' ? '' : pc.yellow(` [${item.effort}]`);
       return `${label}${pad}${pc.dim(item.active)}${eff}`;
     },
   }).run();
@@ -317,8 +317,10 @@ export async function pickModel(agentName: string): Promise<string | null> {
   const agentInfo = (AGENTS as Record<string, { label?: string }>)[agentName];
   const currentModel = getActiveModel(agentName);
   const cfg = loadHydraConfig();
-  const agentModels = (cfg.models as Record<string, Record<string, string> | undefined>)[agentName] ?? {};
-  const aliases = (cfg.aliases as Record<string, Record<string, string> | undefined>)[agentName] ?? {};
+  const agentModels =
+    (cfg.models as Record<string, Record<string, string> | undefined>)[agentName] ?? {};
+  const aliases =
+    (cfg.aliases as Record<string, Record<string, string> | undefined>)[agentName] ?? {};
 
   // Loading indicator
   process.stdout.write(`  ${pc.dim(`Fetching ${agentInfo.label ?? agentName} models...`)}`);
@@ -328,7 +330,7 @@ export async function pickModel(agentName: string): Promise<string | null> {
   // Preset + alias maps
   const presetOf = new Map();
   for (const key of ['default', 'fast', 'cheap']) {
-    if (agentModels[key]) presetOf.set(agentModels[key], key);
+    if (agentModels[key] !== '') presetOf.set(agentModels[key], key);
   }
   const aliasOf = new Map<string, string[]>();
   for (const [alias, id] of Object.entries(aliases)) {
@@ -346,7 +348,7 @@ export async function pickModel(agentName: string): Promise<string | null> {
 
   for (const key of ['default', 'fast', 'cheap']) {
     const id = agentModels[key];
-    if (id && !seen.has(id)) {
+    if (id !== '' && !seen.has(id)) {
       seen.add(id);
       items.push({ id, preset: key, active: id === currentModel });
     }
@@ -373,7 +375,7 @@ export async function pickModel(agentName: string): Promise<string | null> {
     sourceLabel = 'config only';
   }
   const currentEffort = getReasoningEffort(agentName);
-  const effortTag = currentEffort ? ` effort:${currentEffort}` : '';
+  const effortTag = currentEffort != null && currentEffort !== '' ? ` effort:${currentEffort}` : '';
   const initialIdx = Math.max(
     0,
     items.findIndex((i) => i.active),
@@ -385,19 +387,20 @@ export async function pickModel(agentName: string): Promise<string | null> {
     pageSize: 18,
     filterKey: (item) => {
       const parts = [item.id];
-      if (item.preset) parts.push(item.preset);
+      if (item.preset != null && item.preset !== '') parts.push(item.preset);
       const als = aliasOf.get(item.id);
       if (als) parts.push(...als);
       return parts.join(' ');
     },
     renderItem: (item, sel) => {
       const tags = [];
-      if (item.preset) tags.push(pc.magenta(item.preset));
+      if (item.preset != null && item.preset !== '') tags.push(pc.magenta(item.preset));
       if (item.active) tags.push(pc.green('◀ active'));
       const als = aliasOf.get(item.id);
-      if (als && !item.preset) tags.push(pc.dim(`(${als.join(', ')})`));
+      if (als && (item.preset == null || item.preset === ''))
+        tags.push(pc.dim(`(${als.join(', ')})`));
       const annotation = formatBenchmarkAnnotation(item.id);
-      if (annotation) tags.push(pc.dim(annotation));
+      if (annotation !== '') tags.push(pc.dim(annotation));
       const suffix = tags.length > 0 ? `  ${tags.join(' ')}` : '';
       let name: string;
       if (item.active) {
@@ -460,19 +463,22 @@ export async function pickEffort(
     }),
   );
 
-  const initialIdx = current
-    ? Math.max(
-        0,
-        items.findIndex((i) => i.id === current),
-      )
-    : 0;
+  const initialIdx =
+    current != null && current !== ''
+      ? Math.max(
+          0,
+          items.findIndex((i) => i.id === current),
+        )
+      : 0;
 
   const picked = await new Picker(items, {
     title,
     initialIndex: initialIdx,
     filterKey: (item) => item.label,
     renderItem: (item, sel) => {
-      const active = item.id === current || (!item.id && !current);
+      const active =
+        item.id === current ||
+        ((item.id == null || item.id === '') && (current == null || current === ''));
       let name: string;
       if (active) {
         name = pc.green(item.label);
@@ -483,7 +489,7 @@ export async function pickEffort(
       }
       const tags = [];
       if (active) tags.push(pc.green('◀ current'));
-      if (item.desc) tags.push(pc.dim(item.desc));
+      if (item.desc != null && item.desc !== '') tags.push(pc.dim(item.desc));
       const suffix = tags.length > 0 ? `  ${tags.join(' ')}` : '';
       return `${name}${suffix}`;
     },
@@ -521,26 +527,26 @@ async function main() {
 
   // Agent selection
   let agentName;
-  if (arg && AGENT_NAMES.includes(arg)) {
+  if (arg !== '' && AGENT_NAMES.includes(arg)) {
     agentName = arg;
-  } else if (arg) {
+  } else if (arg === '') {
+    console.log('');
+    agentName = await pickAgent();
+    if (agentName == null || agentName === '') {
+      console.log(pc.dim('  Cancelled.\n'));
+      return;
+    }
+  } else {
     console.error(pc.red(`Unknown agent: ${arg}`));
     console.error(`Available: ${AGENT_NAMES.join(', ')}`);
     process.exitCode = 1;
     return;
-  } else {
-    console.log('');
-    agentName = await pickAgent();
-    if (!agentName) {
-      console.log(pc.dim('  Cancelled.\n'));
-      return;
-    }
   }
 
   // Model selection
   console.log('');
   const modelId = await pickModel(agentName);
-  if (!modelId) {
+  if (modelId == null || modelId === '') {
     console.log(pc.dim('  Cancelled.\n'));
     return;
   }
@@ -552,7 +558,7 @@ async function main() {
     console.log(pc.dim('  Cancelled.\n'));
     return;
   }
-  if (effortPick?._skipped) {
+  if (effortPick?._skipped === true) {
     console.log(pc.dim(`  (No reasoning controls for this model — skipped)\n`));
   }
   const effortLevel = effortPick?.id ?? null; // null = "default" (clear override)
@@ -569,9 +575,9 @@ async function main() {
   const resolved = applySelection(agentName, modelId, effortLevel);
   const effortDisplay = formatEffortDisplay(resolved, effortLevel);
   let effortTag: string;
-  if (effortDisplay) {
+  if (effortDisplay !== '') {
     effortTag = pc.yellow(effortDisplay);
-  } else if (effortLevel) {
+  } else if (effortLevel != null && effortLevel !== '') {
     effortTag = pc.yellow(effortLevel);
   } else {
     effortTag = pc.dim('default');
@@ -584,7 +590,7 @@ async function main() {
 // Only run when invoked directly
 import path from 'node:path';
 const __self = new URL(import.meta.url).pathname.replace(/^\/([A-Z]:)/, '$1');
-if (path.resolve(process.argv[1] || '') === path.resolve(__self)) {
+if (path.resolve(process.argv[1] === '' ? '' : process.argv[1]) === path.resolve(__self)) {
   main().catch((err: unknown) => {
     process.stdout.write(SHOW_CURSOR);
     const msg = err instanceof Error ? err.message : String(err);
