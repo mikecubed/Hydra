@@ -161,3 +161,11 @@ Ensure the agent CLI is installed globally and available in PATH. Run `node lib/
 
 **Port already in use**
 Change the port: `node lib/orchestrator-daemon.mjs start port=4174`
+
+## Next Steps
+
+After installation, pick the guide that matches how you want to work:
+
+- [EFFECTIVE_BUILDING.md](./EFFECTIVE_BUILDING.md) — recommended workflows for feature work, bug fixing, refactors, and verification
+- [WORKFLOW_SCENARIOS.md](./WORKFLOW_SCENARIOS.md) — scenario walkthroughs with Mermaid diagrams and interaction examples
+- [USAGE.md](./USAGE.md) — full command and configuration reference

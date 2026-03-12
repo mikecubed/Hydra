@@ -29,7 +29,10 @@ function run(cmd: string, label: string) {
     const e = err as { stdout?: Buffer; stderr?: Buffer; message?: string };
     const stdout = e.stdout?.toString().trim();
     const stderr = e.stderr?.toString().trim();
-    const detail = [stderr, stdout].filter(Boolean).join('\n     ') || e.message || '';
+    const outputDetail = [stderr, stdout]
+      .filter((value): value is string => value != null && value !== '')
+      .join('\n     ');
+    const detail = outputDetail.length > 0 ? outputDetail : (e.message ?? '');
     console.error(`     ${pc.red(detail)}`);
     return false;
   }
@@ -77,12 +80,15 @@ if (allOk) {
   console.log(pc.green(pc.bold('✓ All hooks and tools are configured.')));
   console.log();
   console.log(pc.dim('Hooks active:'));
-  console.log(pc.dim('  pre-commit  → lint-staged (ESLint + Prettier on staged files)'));
+  console.log(
+    pc.dim('  pre-commit  → lint-staged (ESLint, Mermaid lint, Prettier on staged files)'),
+  );
   console.log(pc.dim('  pre-push    → npm test (full test suite)'));
   console.log();
   console.log(pc.dim('Useful commands:'));
   console.log(pc.dim('  npm run lint          — ESLint on entire codebase'));
   console.log(pc.dim('  npm run lint:fix      — ESLint with auto-fix'));
+  console.log(pc.dim('  npm run lint:mermaid  — Validate Mermaid blocks in markdown files'));
   console.log(pc.dim('  npm run format        — Prettier format all files'));
   console.log(pc.dim('  npm run format:check  — Prettier check (no write)'));
   console.log(pc.dim('  npm run typecheck     — tsc --noEmit type check'));

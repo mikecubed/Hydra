@@ -70,6 +70,7 @@
     "eval": "node lib/hydra-eval.ts",
     "lint": "eslint .",
     "lint:fix": "eslint . --fix",
+    "lint:mermaid": "node scripts/lint-mermaid.ts",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
     "typecheck": "tsc --noEmit -p tsconfig.json",
@@ -90,7 +91,11 @@
       "eslint --fix",
       "prettier --write"
     ],
-    "*.{json,md,yml,yaml}": [
+    "*.md": [
+      "node scripts/lint-mermaid.ts",
+      "prettier --write"
+    ],
+    "*.{json,yml,yaml}": [
       "prettier --write"
     ]
   },
@@ -111,6 +116,7 @@
     ]
   },
   "devDependencies": {
+    "@a24z/mermaid-parser": "^1.0.0",
     "@eslint/js": "^10.0.1",
     "@types/node": "^22.19.15",
     "@yao-pkg/pkg": "^6.14.1",

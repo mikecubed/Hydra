@@ -5,19 +5,22 @@
 
 ## Project Overview
 
-Hydra is a multi-agent AI orchestration system that coordinates three coding agents — Claude Code CLI (architect), Gemini CLI (analyst), and Codex CLI (implementer) — through a shared HTTP daemon with a task queue, intelligent routing, and multiple dispatch modes.
+Hydra is a multi-agent AI orchestration system that coordinates Claude Code CLI (architect), Gemini CLI (analyst), Codex CLI (implementer), GitHub Copilot CLI (advisor), and an optional API-backed local agent through a shared HTTP daemon with a task queue, intelligent routing, and multiple dispatch modes.
 
 The daemon runs on `localhost:4173` and exposes an HTTP API for task management, agent coordination, and event sourcing. An interactive operator console (REPL) provides the primary user interface.
 
 ## Code Conventions
 
-- **ESM only** — `"type": "module"` in package.json. All files use `import`/`export`. No CommonJS.
-- **Agent names** are always lowercase: `claude`, `gemini`, `codex`, `local`. Never capitalized internally.
+- **ESM + TypeScript** — `"type": "module"` in `package.json`. Runtime entrypoints and source files are now primarily `.ts`, using `import`/`export` only. Do not add CommonJS.
+- **No compile step for normal runtime** — Hydra runs directly with Node.js 22.18+ and native TypeScript support. `tsc` is used for type-checking, not for emitting build artifacts during normal development.
+- **Mixed repo during migration** — both `.ts` and some legacy `.mjs` files still exist. Prefer `.ts` for new or updated runtime code unless a file is intentionally still legacy.
+- **Import paths** — use explicit file extensions that match the real source file, including `.ts` imports where applicable. `tsconfig.json` enables `allowImportingTsExtensions`.
+- **Type-checking config** — use `tsconfig.json`, not `jsconfig.json`. It checks `lib/`, `bin/`, `scripts/`, and `test/`.
+- **Agent names** are always lowercase: `claude`, `gemini`, `codex`, `local`, `copilot`. Never capitalized internally.
 - **Terminal colors** — use `picocolors` (`pc`). Never chalk or ANSI escape strings directly.
-- **No build step** — pure ESM, runs directly with Node.js. No transpilation.
-- **Four dependencies**: `picocolors`, `cross-spawn`, `@modelcontextprotocol/sdk`, `zod`.
+- **Dependencies** — the core runtime dependencies are `picocolors`, `cross-spawn`, `@modelcontextprotocol/sdk`, and `zod`. `@opentelemetry/api` is optional.
 - **Config-driven models** — never hardcode model IDs. Use `getActiveModel(agent)` or `getRoleConfig(role)`.
-- **HTTP helpers** — use `request()` from `hydra-utils.mjs` for daemon calls.
+- **HTTP helpers** — use `request()` from `hydra-utils.ts` for daemon calls unless a module intentionally uses direct `fetch()` for streaming or lightweight polling.
 
 ## Coordination Protocol
 
@@ -28,6 +31,29 @@ All agents use the Hydra MCP tools for coordination:
 3. **Report results** — `hydra_tasks_update` when done or blocked
 4. **Get second opinions** — `hydra_ask` to consult another agent
 5. **Council deliberation** — `hydra_council_request` for complex architectural decisions
+
+```mermaid
+sequenceDiagram
+    participant Agent
+    participant MCP as Hydra MCP
+    participant Daemon
+    participant Peer as Peer agent
+
+    Agent->>MCP: hydra_handoffs_pending(agent)
+    MCP->>Daemon: read pending handoffs
+    Daemon-->>MCP: handoffs
+    MCP-->>Agent: pending work
+    Agent->>MCP: hydra_tasks_claim(...)
+    MCP->>Daemon: claim task
+    Daemon-->>MCP: claim token + context
+    MCP-->>Agent: claimed task
+    Agent->>Peer: hydra_ask(...) or hydra_council_request(...)
+    Peer-->>Agent: critique / second opinion
+    Agent->>MCP: hydra_tasks_update(...)
+    MCP->>Daemon: persist result, checkpoint, status
+```
+
+For narrative walkthroughs and practical examples, see [docs/EFFECTIVE_BUILDING.md](docs/EFFECTIVE_BUILDING.md) and [docs/WORKFLOW_SCENARIOS.md](docs/WORKFLOW_SCENARIOS.md).
 
 ## @claude
 
@@ -71,12 +97,12 @@ PR titles must follow [Conventional Commits](https://www.conventionalcommits.org
 
 All tests use the Node.js native test runner — no external framework.
 
-```javascript
+```ts
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 ```
 
 Run all tests: `npm test`
-Run a single file: `node --test test/hydra-ui.test.mjs`
+Run a single file: `node --test test/hydra-ui.test.ts`
 
-Integration tests (`*.integration.test.mjs`) spin up the daemon on an ephemeral port.
+Integration tests (`*.integration.test.ts` and any remaining legacy `.mjs` integration tests) spin up the daemon on an ephemeral port.

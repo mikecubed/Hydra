@@ -126,6 +126,19 @@ All routing decisions happen via a local heuristic. No API calls are made until 
 
 **Uncertain or high-stakes changes** — tandem mode lets Claude analyze the problem and Codex implement the fix independently, then cross-model verification reviews the result before it lands.
 
+### Workflow chooser
+
+| Goal                                                     | Recommended workflow                                 | Why                                                                     |
+| -------------------------------------------------------- | ---------------------------------------------------- | ----------------------------------------------------------------------- |
+| Understand the repo, discuss options, then make a change | `npm run go` in **Auto** or **Smart** mode           | Starts conversationally, then dispatches real work only when needed     |
+| Make an architectural or high-risk product decision      | `:mode council` or `npm run council -- prompt="..."` | Forces proposal, critique, refinement, and implementation into one loop |
+| Build a feature end to end                               | Operator console + optional workers                  | Good balance of planning, implementation, verification, and iteration   |
+| Run through a backlog of TODOs or issues                 | `npm run tasks`                                      | Curated autonomous execution with review flow afterward                 |
+| Let Hydra hunt for improvements overnight                | `npm run nightly`                                    | Scans, prioritizes, executes, and reports autonomously                  |
+| Improve Hydra or your project continuously               | `npm run evolve`                                     | Long-form self-improvement pipeline with suggestions backlog            |
+
+For scenario walkthroughs, Mermaid diagrams, and example interactions, start with [docs/EFFECTIVE_BUILDING.md](docs/EFFECTIVE_BUILDING.md) and [docs/WORKFLOW_SCENARIOS.md](docs/WORKFLOW_SCENARIOS.md).
+
 ## Features
 
 ### Intelligent Routing
@@ -191,6 +204,7 @@ All routing decisions happen via a local heuristic. No API calls are made until 
 | `npm run evolve`                  | Autonomous self-improvement              |
 | `npm run nightly`                 | Nightly task automation                  |
 | `npm run tasks`                   | Scan & execute TODO/FIXME/issues         |
+| `npm run lint:mermaid`            | Validate Mermaid diagrams in Markdown    |
 | `npm run eval`                    | Routing evaluation against golden corpus |
 
 ### Operator console (inside `npm run go`)
@@ -238,61 +252,60 @@ See [docs/USAGE.md](docs/USAGE.md#config-file) for the full config reference wit
 
 ## Architecture
 
-```
-                    +-----------+
-                    |  Operator |  (interactive REPL + concierge)
-                    +-----+-----+
-                          |
-              +-----------+-----------+
-              |                       |
-        +-----v-----+          +------v----+
-        | Concierge |          |  Workers  |
-        | (chat AI) |          | (headless)|
-        +-----+-----+          +------+----+
-              |                       |
-              +-----------+-----------+
-                          |
-                    +-----v-----+
-                    |   Daemon  |  (HTTP, port 4173, event-sourced)
-                    +--+--+--+--+
-                       |  |  |
-          +------------+  |  +-----------+
-          v               v              v
-     +---------+    +-----------+    +--------+
-     | Gemini  |    |  Codex    |    | Claude |
-     | (3 Pro) |    | (GPT-5.4) |    |(Sonnet)|
-     +---------+    +-----------+    +--------+
-       Analyst       Implementer      Architect
+```mermaid
+flowchart TD
+    Operator[Operator<br/>interactive REPL + concierge]
+    Concierge[Concierge<br/>multi-provider chat]
+    Workers[Workers<br/>headless executors]
+    Daemon[Daemon<br/>HTTP API, port 4173, event-sourced]
 
-  Concierge fallback chain: OpenAI → Anthropic → Google
-  Virtual sub-agents: security-reviewer, test-writer,
-                      doc-generator, researcher
-  Local agent: API-backed (no CLI), routes via OpenAI-compat endpoint
+    Gemini[Gemini<br/>analyst]
+    Codex[Codex<br/>implementer]
+    Claude[Claude<br/>architect]
+    Copilot[Copilot<br/>advisor]
+    Local[Local<br/>OpenAI-compatible endpoint]
+
+    Operator --> Concierge
+    Operator --> Workers
+    Concierge --> Daemon
+    Workers --> Daemon
+    Daemon --> Gemini
+    Daemon --> Codex
+    Daemon --> Claude
+    Daemon -. optional .-> Copilot
+    Daemon -. API-backed .-> Local
 ```
+
+**Notes:**
+
+- Concierge fallback chain: OpenAI → Anthropic → Google
+- Virtual sub-agents include `security-reviewer`, `test-writer`, `doc-generator`, and `researcher`
+- `local` is API-backed and routes through an OpenAI-compatible endpoint rather than a CLI
 
 **Routing flow:**
 
-```
-Prompt → Intent Gate → Concierge → Route Classifier
-                                        ↓
-                          single / tandem / council
-                                        ↓
-                              Daemon task queue
-                                        ↓
-                          Worker(s) claim & execute
-                                        ↓
-                              Result + checkpoint
+```mermaid
+flowchart LR
+    Prompt["Prompt"] --> Intent["Intent Gate"]
+    Intent --> ConciergeFlow["Concierge"]
+    ConciergeFlow --> Router["Route Classifier"]
+    Router --> RouteChoice["single / tandem / council"]
+    RouteChoice --> Queue["Daemon task queue"]
+    Queue --> WorkerExec["Worker(s) claim and execute"]
+    WorkerExec --> Result["Result + checkpoint"]
 ```
 
 ## Documentation
 
-| Doc                                              | Contents                                                     |
-| ------------------------------------------------ | ------------------------------------------------------------ |
-| [docs/USAGE.md](docs/USAGE.md)                   | Full command reference, config fields, daemon API, MCP tools |
-| [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)     | Module reference, dispatch modes, route strategies           |
-| [docs/INSTALL.md](docs/INSTALL.md)               | Detailed installation and setup                              |
-| [docs/MODEL_PROFILES.md](docs/MODEL_PROFILES.md) | Agent model options, reasoning effort, aliases               |
-| [CONTRIBUTING.md](CONTRIBUTING.md)               | Development workflow, test patterns, conventions             |
+| Doc                                                      | Contents                                                        |
+| -------------------------------------------------------- | --------------------------------------------------------------- |
+| [docs/USAGE.md](docs/USAGE.md)                           | Full command reference, config fields, daemon API, MCP tools    |
+| [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)             | Module reference, dispatch modes, route strategies              |
+| [docs/INSTALL.md](docs/INSTALL.md)                       | Detailed installation and setup                                 |
+| [docs/EFFECTIVE_BUILDING.md](docs/EFFECTIVE_BUILDING.md) | How to use Hydra to build software effectively, end to end      |
+| [docs/WORKFLOW_SCENARIOS.md](docs/WORKFLOW_SCENARIOS.md) | Scenario walkthroughs for operator, council, tasks, and nightly |
+| [docs/MODEL_PROFILES.md](docs/MODEL_PROFILES.md)         | Agent model options, reasoning effort, aliases                  |
+| [CONTRIBUTING.md](CONTRIBUTING.md)                       | Development workflow, test patterns, conventions                |
 
 ## Daemon Security
 
