@@ -12,6 +12,12 @@
  * Gracefully degrades to no-op when !process.stdout.isTTY or terminal < 10 rows.
  */
 
+/* eslint-disable @typescript-eslint/no-unsafe-member-access -- statusbar handles dynamic daemon response data */
+/* eslint-disable @typescript-eslint/no-unsafe-assignment -- statusbar handles dynamic daemon response data */
+/* eslint-disable @typescript-eslint/no-explicit-any -- statusbar uses dynamic daemon response types */
+/* eslint-disable @typescript-eslint/strict-boolean-expressions -- statusbar uses standard JS truthiness */
+/* eslint-disable @typescript-eslint/no-unsafe-argument -- statusbar handles dynamic daemon response data */
+
 import http from 'node:http';
 import type { ClientRequest } from 'node:http';
 import pc from 'picocolors';
@@ -854,8 +860,10 @@ function startFallbackPolling(baseUrl: string, agents: string[]) {
 
         try {
           const url = new URL(`/next?agent=${encodeURIComponent(agent)}`, baseUrl);
+          // eslint-disable-next-line no-await-in-loop -- sequential processing required
           const res = await fetch(url.href, { signal: AbortSignal.timeout(1500) });
           if (!res.ok) continue;
+          // eslint-disable-next-line no-await-in-loop -- sequential processing required
           const data = (await res.json()) as { next?: { action?: string } };
           const action = data.next?.action;
 

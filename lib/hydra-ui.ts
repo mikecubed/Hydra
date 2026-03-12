@@ -7,6 +7,8 @@
  * Dependency: picocolors (zero-dep, auto-strips ANSI in non-TTY)
  */
 
+/* eslint-disable @typescript-eslint/strict-boolean-expressions -- ui.ts uses || fallbacks intentionally (box() tested in hydra-nullish-defaulting.test.ts) */
+
 import pc from 'picocolors';
 import { versionString } from './hydra-version.ts';
 import { getShortName as _getShortName } from './hydra-model-profiles.ts';
