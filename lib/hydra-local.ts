@@ -50,7 +50,7 @@ export async function streamLocalCompletion(
     });
   } catch (err: unknown) {
     const e = err as NodeJS.ErrnoException & { cause?: NodeJS.ErrnoException };
-    const errCode = e.cause?.code || e.code;
+    const errCode = e.cause?.code ?? e.code;
     const unreachable = [
       'ECONNREFUSED',
       'ENOTFOUND',
@@ -74,7 +74,7 @@ export async function streamLocalCompletion(
 
   if (!res.ok) {
     const errText = await res.text().catch(() => '');
-    const err = new Error(`Local API error ${res.status}: ${errText.slice(0, 200)}`);
+    const err = new Error(`Local API error ${String(res.status)}: ${errText.slice(0, 200)}`);
     (err as NodeJS.ErrnoException & { status?: number }).status = res.status;
     throw err;
   }
@@ -88,13 +88,13 @@ export async function streamLocalCompletion(
   let fullResponse = '';
   let usage = null;
 
-  while (true) {
+  for (;;) {
     const { done, value } = await reader.read();
     if (done) break;
 
     buffer += decoder.decode(value, { stream: true });
     const lines = buffer.split('\n');
-    buffer = lines.pop() || '';
+    buffer = lines.pop() ?? '';
 
     for (const line of lines) {
       const trimmed = line.trim();
@@ -104,7 +104,7 @@ export async function streamLocalCompletion(
         const data = JSON.parse(trimmed.slice(6));
         const delta = data.choices?.[0]?.delta;
         if (delta?.content) {
-          fullResponse += delta.content;
+          fullResponse += delta.content as string;
           if (onChunk) onChunk(delta.content);
         }
         if (data.usage) usage = data.usage;

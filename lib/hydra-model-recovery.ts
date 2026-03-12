@@ -696,7 +696,7 @@ export function getFallbackCandidates(
   failedModel: string,
 ): Array<{ id: string; label: string; source: string; qualityScore?: number }> {
   const cfg = loadHydraConfig();
-  const agentModels =
+  const agentModels: Partial<Record<string, string>> =
     (
       (cfg as Record<string, unknown>)['models'] as
         | Record<string, Record<string, string>>
@@ -717,7 +717,6 @@ export function getFallbackCandidates(
   // 1. Config presets in priority order
   for (const preset of ['default', 'fast', 'cheap']) {
     const modelId = agentModels[preset];
-    // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition -- ModelConfig entry may be absent for non-standard agents at runtime
     if (
       modelId != null &&
       modelId !== '' &&

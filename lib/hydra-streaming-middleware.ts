@@ -33,7 +33,7 @@ interface MiddlewareCtx {
  * Tracks latency using an exponentially weighted moving average.
  */
 export class PeakEWMA {
-  private _decayMs: number;
+  private readonly _decayMs: number;
   private _ewma: number;
   private _lastTs: number;
   private _count: number;
@@ -134,9 +134,9 @@ async function circuitBreakerMiddleware(
 
 async function retryMiddleware(ctx: MiddlewareCtx, next: () => Promise<unknown>): Promise<unknown> {
   const cfg = loadHydraConfig() as any;
-  const maxRetries = cfg.rateLimits?.maxRetries || 3;
-  const baseDelayMs = cfg.rateLimits?.baseDelayMs || 5000;
-  const maxDelayMs = cfg.rateLimits?.maxDelayMs || 60000;
+  const maxRetries = cfg.rateLimits?.maxRetries ?? 3;
+  const baseDelayMs = cfg.rateLimits?.baseDelayMs ?? 5000;
+  const maxDelayMs = cfg.rateLimits?.maxDelayMs ?? 60000;
 
   let lastErr: unknown;
   for (let attempt = 0; attempt <= maxRetries; attempt++) {
@@ -149,7 +149,9 @@ async function retryMiddleware(ctx: MiddlewareCtx, next: () => Promise<unknown>)
 
       const delay = Math.min(baseDelayMs * 2 ** attempt, maxDelayMs);
       const jitter = delay * 0.1 * Math.random();
-      await new Promise((r) => setTimeout(r, delay + jitter));
+      await new Promise<void>((r) => {
+        setTimeout(r, delay + jitter);
+      });
 
       await acquireRateLimit(ctx.provider);
     }
@@ -165,8 +167,8 @@ async function usageTrackingMiddleware(
 
   if (result.usage) {
     recordProviderUsage(ctx.provider, {
-      inputTokens: result.usage.prompt_tokens || 0,
-      outputTokens: result.usage.completion_tokens || 0,
+      inputTokens: result.usage.prompt_tokens ?? 0,
+      outputTokens: result.usage.completion_tokens ?? 0,
       model: ctx.model,
     });
     recordApiRequest(ctx.provider, ctx.model, result.usage);
@@ -272,7 +274,7 @@ export function createStreamingPipeline(
     layers?: Array<(ctx: MiddlewareCtx, next: () => Promise<unknown>) => Promise<unknown>>;
   } = {},
 ) {
-  const layers = opts.layers || DEFAULT_LAYERS;
+  const layers = opts.layers ?? DEFAULT_LAYERS;
 
   const composed = compose(layers, (ctx) => coreFn(ctx.messages, ctx.cfg, ctx.onChunk));
 
@@ -283,7 +285,7 @@ export function createStreamingPipeline(
   ): Promise<unknown> {
     const ctx: MiddlewareCtx = {
       provider,
-      model: cfg.model || '',
+      model: cfg.model ?? '',
       messages,
       cfg,
       onChunk,

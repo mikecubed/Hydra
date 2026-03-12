@@ -328,10 +328,10 @@ export async function handleWriteRoute(ctx: WriteRouteCtx): Promise<boolean> {
     let worktreeInfo: Record<string, unknown> | null = null;
     if (wantWorktree && (task as Record<string, unknown>)['id'] != null) {
       try {
-        worktreeInfo = (await createWorktree(
+        worktreeInfo = createWorktree(
           (task as Record<string, unknown>)['id'] as string,
           projectRoot as string,
-        )) as Record<string, unknown>;
+        ) as Record<string, unknown>;
         // Update task record with worktree path via another mutation
         await enqueueMutation(
           `task:worktree id=${(task as Record<string, unknown>)['id'] as string}`,
@@ -557,7 +557,7 @@ export async function handleWriteRoute(ctx: WriteRouteCtx): Promise<boolean> {
       isWorktreeEnabled()
     ) {
       try {
-        await removeWorktree(taskId, projectRoot as string, {
+        removeWorktree(taskId, projectRoot as string, {
           deleteBranch: (task as Record<string, unknown>)['status'] === 'cancelled',
         });
       } catch {

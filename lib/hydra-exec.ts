@@ -1,7 +1,12 @@
-#!/usr/bin/env node
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { spawn, spawnSync } from 'node:child_process';
+import type {
+  SpawnOptions,
+  SpawnSyncOptions,
+  ChildProcess,
+  SpawnSyncReturns,
+} from 'node:child_process';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -10,7 +15,7 @@ export const HYDRA_EMBEDDED_ROOT = path.resolve(__dirname, '..');
 export const HYDRA_STANDALONE = Boolean((process as NodeJS.Process & { pkg?: unknown }).pkg);
 export const HYDRA_INTERNAL_FLAG = '--hydra-internal';
 
-const INTERNAL_MODULE_LOADERS: Record<string, () => Promise<unknown>> = {
+const INTERNAL_MODULE_LOADERS: Partial<Record<string, () => Promise<unknown>>> = {
   'lib/hydra-operator.ts': () => import('./hydra-operator.ts'),
   'lib/orchestrator-daemon.ts': () => import('./orchestrator-daemon.ts'),
   'lib/orchestrator-client.ts': () => import('./orchestrator-client.ts'),
@@ -28,7 +33,7 @@ const INTERNAL_MODULE_LOADERS: Record<string, () => Promise<unknown>> = {
 };
 
 function normalizeModuleId(moduleId: unknown): string {
-  const normalized = String(moduleId || '')
+  const normalized = (typeof moduleId === 'string' ? moduleId : '')
     .replace(/\\/g, '/')
     .replace(/^\.?\//, '')
     .replace(/\.mjs$/, '.ts'); // normalize legacy .mjs IDs to .ts
@@ -70,9 +75,9 @@ export function rewriteNodeInvocation(
 export function spawnHydraNode(
   scriptPath: string,
   scriptArgs: string[] = [],
-  options: import('node:child_process').SpawnOptions = {},
+  options: SpawnOptions = {},
   hydraRoot = HYDRA_EMBEDDED_ROOT,
-): import('node:child_process').ChildProcess {
+): ChildProcess {
   const invocation = rewriteNodeInvocation('node', [scriptPath, ...scriptArgs], hydraRoot);
   return spawn(invocation.command, invocation.args, options);
 }
@@ -80,9 +85,9 @@ export function spawnHydraNode(
 export function spawnHydraNodeSync(
   scriptPath: string,
   scriptArgs: string[] = [],
-  options: import('node:child_process').SpawnSyncOptions = {},
+  options: SpawnSyncOptions = {},
   hydraRoot = HYDRA_EMBEDDED_ROOT,
-): import('node:child_process').SpawnSyncReturns<Buffer | string> {
+): SpawnSyncReturns<Buffer | string> {
   const invocation = rewriteNodeInvocation('node', [scriptPath, ...scriptArgs], hydraRoot);
   return spawnSync(invocation.command, invocation.args, options);
 }
