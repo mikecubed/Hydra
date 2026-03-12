@@ -57,7 +57,7 @@ export function getConciergeConfig(): ConciergeConfig {
 
 export function isConciergeAvailable(): boolean {
   const cfg = getConciergeConfig();
-  if (!cfg.enabled) return false;
+  if (cfg.enabled !== true) return false;
   return detectAvailableProviders().length > 0;
 }
 
@@ -125,7 +125,10 @@ export function switchConciergeModel(modelSpec: string): void {
     pro: 'gemini-3-pro-preview',
   };
 
-  const resolved = (ALIASES as Record<string, string>)[modelSpec.toLowerCase()] || modelSpec;
+  const aliased: string | undefined = (ALIASES as Record<string, string | undefined>)[
+    modelSpec.toLowerCase()
+  ];
+  const resolved = aliased != null && aliased !== '' ? aliased : modelSpec;
 
   // Detect provider from model name
   let provider = 'openai';
@@ -229,7 +232,7 @@ function buildSystemPrompt(context: ConciergeContext = {}) {
   ]);
 
   if (
-    systemPromptCache.text &&
+    systemPromptCache.text !== '' &&
     systemPromptCache.fingerprint === fingerprint &&
     now - systemPromptCache.builtAt < SYSTEM_PROMPT_TTL_MS
   ) {
@@ -303,25 +306,25 @@ function buildSystemPrompt(context: ConciergeContext = {}) {
   }
 
   // Permanent codebase baseline (always injected when available)
-  if (context.codebaseBaseline) {
+  if (context.codebaseBaseline != null && context.codebaseBaseline !== '') {
     awarenessBlock += `\n\n${context.codebaseBaseline}`;
   }
 
   // Always-on self-awareness blocks (operator-provided)
-  if (context.selfSnapshotBlock) {
+  if (context.selfSnapshotBlock != null && context.selfSnapshotBlock !== '') {
     awarenessBlock += `\n\n${context.selfSnapshotBlock}`;
   }
-  if (context.selfIndexBlock) {
+  if (context.selfIndexBlock != null && context.selfIndexBlock !== '') {
     awarenessBlock += `\n\n${context.selfIndexBlock}`;
   }
 
   // On-demand activity digest (for "what's going on?" queries)
-  if (context.activityDigest) {
+  if (context.activityDigest != null && context.activityDigest !== '') {
     awarenessBlock += `\n\n${context.activityDigest}`;
   }
 
   // On-demand topic context (for "how does X work?" queries)
-  if (context.codebaseContext) {
+  if (context.codebaseContext != null && context.codebaseContext !== '') {
     awarenessBlock += `\n\n${context.codebaseContext}`;
   }
 
@@ -337,8 +340,8 @@ Current state:
 - Operator mode: ${mode}
 - Open tasks: ${String(openTasks)}
 - Agent models:
-${modelLines || '  (none loaded)'}${awarenessBlock}
-${otherProjects ? `\nOther known projects:\n${otherProjects}` : ''}
+${modelLines === '' ? '  (none loaded)' : modelLines}${awarenessBlock}
+${otherProjects === '' ? '' : `\nOther known projects:\n${otherProjects}`}
 
 Your role:
 1. Answer questions about Hydra, the project, general programming, and anything the user asks conversationally.
@@ -454,7 +457,7 @@ export function setConciergeBaseUrl(baseUrl: string): void {
 }
 
 async function postConciergeEvent(type: string, payload: unknown) {
-  if (!_daemonBaseUrl) return;
+  if (_daemonBaseUrl == null || _daemonBaseUrl === '') return;
   try {
     await fetch(`${_daemonBaseUrl}/events/push`, {
       method: 'POST',
@@ -584,7 +587,7 @@ export async function conciergeTurn(
 
   // Update stats
   stats.turns++;
-  if (result.usage) {
+  if (result.usage != null) {
     const usage = result.usage as { prompt_tokens?: number; completion_tokens?: number };
     stats.promptTokens += usage.prompt_tokens ?? 0;
     stats.completionTokens += usage.completion_tokens ?? 0;
@@ -665,7 +668,7 @@ export async function conciergeSuggest(
   opts: { maxTokens?: number } = {},
 ): Promise<{ suggestion: string; provider: string; model: string } | null> {
   const cfg = getConciergeConfig();
-  if (!cfg.enabled) return null;
+  if (cfg.enabled !== true) return null;
 
   const messages = [
     { role: 'system', content: SUGGEST_SYSTEM_PROMPT },
@@ -679,8 +682,8 @@ export async function conciergeSuggest(
 
   try {
     const result = await streamWithFallback(messages, streamCfg, () => {});
-    const suggestion = ((result.fullResponse as string) || '').trim();
-    if (!suggestion || suggestion.length > 150) return null;
+    const suggestion = (result.fullResponse as string).trim();
+    if (suggestion === '' || suggestion.length > 150) return null;
     return { suggestion, provider: result.provider, model: result.model };
   } catch {
     return null;
