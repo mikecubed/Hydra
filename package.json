@@ -119,7 +119,6 @@
     "@a24z/mermaid-parser": "^1.0.0",
     "@eslint/js": "^10.0.1",
     "@types/node": "^22.19.15",
-    "@a24z/mermaid-parser": "^1.0.0",
     "@yao-pkg/pkg": "^6.14.1",
     "esbuild": "^0.27.3",
     "eslint": "^10.0.3",

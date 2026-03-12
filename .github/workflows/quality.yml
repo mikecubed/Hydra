@@ -120,8 +120,11 @@ jobs:
         if: github.event_name == 'pull_request' && steps.changed-markdown.outputs.any_changed == 'true'
         run: |
           echo "Validating Mermaid blocks in changed markdown files:"
-          echo "${{ steps.changed-markdown.outputs.all_changed_files }}"
-          npm run lint:mermaid -- ${{ steps.changed-markdown.outputs.all_changed_files }}
+          files_json='${{ steps.changed-markdown.outputs.all_changed_files_json }}'
+          echo "$files_json" | jq -r '.[]' | while IFS= read -r file; do
+            echo "$file"
+            npm run lint:mermaid -- "$file"
+          done
 
       # ── Mermaid lint on full markdown set (push to main/dev) ────────────────
       - name: Mermaid lint (full)
