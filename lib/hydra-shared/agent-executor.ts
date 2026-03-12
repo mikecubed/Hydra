@@ -223,9 +223,9 @@ void _resolveClaudePerm; // retain for future use
 // never hardcoded in source.  See .env.example for setup instructions.
 const GEMINI_OAUTH = {
   clientId:
-    process.env['GEMINI_OAUTH_CLIENT_ID'] ||
+    process.env['GEMINI_OAUTH_CLIENT_ID'] ??
     '681255809395-oo8ft2oprdrnp9e3aqf6av3hmdib135j.apps.googleusercontent.com',
-  clientSecret: process.env['GEMINI_OAUTH_CLIENT_SECRET'] || '',
+  clientSecret: process.env['GEMINI_OAUTH_CLIENT_SECRET'] ?? '',
 };
 const CODE_ASSIST_ENDPOINT = 'https://cloudcode-pa.googleapis.com/v1internal';
 
@@ -275,7 +275,9 @@ async function getGeminiToken(): Promise<string | null> {
   if (!resp.ok) return null;
 
   const data = (await resp.json()) as OAuthTokenResponse;
+  // eslint-disable-next-line require-atomic-updates -- singleton OAuth token cache; races produce identical values
   _geminiToken = data.access_token;
+  // eslint-disable-next-line require-atomic-updates -- singleton OAuth token cache; races produce identical values
   _geminiTokenExpiry = Date.now() + data.expires_in * 1000;
 
   // Persist so Gemini CLI also benefits
@@ -301,7 +303,8 @@ async function getGeminiProjectId(token: string): Promise<string | null> {
 
   if (!resp.ok) return null;
   const data = (await resp.json()) as GeminiLoadResponse;
-  _geminiProjectId = data.cloudaicompanionProject || null;
+  // eslint-disable-next-line require-atomic-updates -- singleton OAuth token cache; races produce identical values
+  _geminiProjectId = data.cloudaicompanionProject ?? null;
   return _geminiProjectId;
 }
 
@@ -473,12 +476,12 @@ const AGENT_ERROR_PATTERNS: AgentErrorPattern[] = [
  * @returns {object} The same result, with errorCategory and errorDetail added
  */
 export function diagnoseAgentError(agent: string, result: ExecuteResult): ExecuteResult {
-  if (!result || result.ok) return result;
+  if (result.ok) return result;
 
   const code = result.exitCode;
-  const stderr = result.stderr || '';
-  const stdout = result.output || '';
-  const error = result.error || '';
+  const stderr = result.stderr;
+  const stdout = result.output;
+  const error = result.error ?? '';
   const combined = [stderr, stdout, error].join('\n');
 
   // 1. Check agent-specific patterns first (highest signal)
@@ -496,7 +499,7 @@ export function diagnoseAgentError(agent: string, result: ExecuteResult): Execut
   // 2. Interpret signal (process killed by signal — code may be null)
   const signal = result.signal;
   if (signal) {
-    const signalMap: Record<string, SignalInfo> = {
+    const signalMap: Partial<Record<string, SignalInfo>> = {
       SIGKILL: { category: 'oom', detail: 'killed (SIGKILL / OOM)' },
       SIGTERM: { category: 'signal', detail: 'terminated (SIGTERM)' },
       SIGINT: { category: 'signal', detail: 'interrupted (SIGINT)' },
@@ -504,43 +507,39 @@ export function diagnoseAgentError(agent: string, result: ExecuteResult): Execut
       SIGABRT: { category: 'crash', detail: 'aborted (SIGABRT)' },
       SIGBUS: { category: 'crash', detail: 'bus error (SIGBUS)' },
     };
-    const mapped = signalMap[signal] || { category: 'signal', detail: `terminated by ${signal}` };
+    const mapped = signalMap[signal] ?? { category: 'signal', detail: `terminated by ${signal}` };
     result.errorCategory = mapped.category;
     result.errorDetail = mapped.detail;
     return result;
   }
 
   // 3. For agents with --json output, extract JSONL error events (higher signal than exit code 1)
-  if (getAgent(agent)?.features?.jsonOutput) {
-    const jsonlErrors = extractCodexErrors(result.stdout || result.output || '');
+  if (getAgent(agent)?.features.jsonOutput) {
+    const jsonlErrors = extractCodexErrors(result.stdout ?? result.output);
     if (jsonlErrors.length > 0) {
       result.errorCategory = agent === 'codex' ? 'codex-jsonl-error' : 'jsonl-error';
-      result.errorDetail = `${agent} reported ${jsonlErrors.length} error(s): ${jsonlErrors.join('; ').slice(0, 200)}`;
+      result.errorDetail = `${agent} reported ${String(jsonlErrors.length)} error(s): ${jsonlErrors.join('; ').slice(0, 200)}`;
       result.errorContext = jsonlErrors[0].slice(0, 300);
       // Fall through to step 8 for error message enrichment
     }
   }
 
   // 4. Interpret exit code (only if not already classified, e.g. by JSONL extraction)
-  if (!result.errorCategory && code !== null && code !== undefined && EXIT_CODE_LABELS[code]) {
-    result.errorCategory =
-      code === 127
-        ? 'invocation'
-        : code === 126
-          ? 'permission'
-          : code === 137
-            ? 'oom'
-            : code === 139
-              ? 'crash'
-              : code >= 128 && code <= 159
-                ? 'signal'
-                : 'runtime';
+  if (!result.errorCategory && code !== null && EXIT_CODE_LABELS[code]) {
+    let errorCategory: string;
+    if (code === 127) errorCategory = 'invocation';
+    else if (code === 126) errorCategory = 'permission';
+    else if (code === 137) errorCategory = 'oom';
+    else if (code === 139) errorCategory = 'crash';
+    else if (code >= 128 && code <= 159) errorCategory = 'signal';
+    else errorCategory = 'runtime';
+    result.errorCategory = errorCategory;
     result.errorDetail = EXIT_CODE_LABELS[code];
     return result;
   }
 
   // 5. Null exit code with no signal = process died without normal exit
-  if (code === null || code === undefined) {
+  if (code === null) {
     const stderrTrimmed = stderr.replace(/\[Hydra Telemetry\].*?\n/g, '').trim();
     if (stderrTrimmed) {
       result.errorCategory = 'unclassified';
@@ -557,22 +556,22 @@ export function diagnoseAgentError(agent: string, result: ExecuteResult): Execut
   // 6. Empty output with non-zero exit = likely process died before producing output
   if (!result.errorCategory && code !== 0 && !stdout.trim() && !stderr.trim()) {
     result.errorCategory = 'silent-crash';
-    result.errorDetail = `${agent} exited with code ${code} but produced no output — possible early crash, missing binary, or env issue`;
+    result.errorDetail = `${agent} exited with code ${String(code)} but produced no output — possible early crash, missing binary, or env issue`;
     return result;
   }
 
   // 7. Non-zero exit with stderr but no pattern match = unclassified
   if (code !== 0 && !result.errorCategory) {
     result.errorCategory = 'unclassified';
-    result.errorDetail = `Exit code ${code}`;
+    result.errorDetail = `Exit code ${String(code)}`;
     if (stderr.trim()) {
       result.errorContext = stderr.trim().split('\n').slice(-3).join(' | ').slice(0, 300);
     }
   }
 
   // 8. Final enrichment: Ensure result.error is descriptive
-  if (!result.ok && result.errorCategory && result.errorDetail) {
-    const originalError = result.error || '';
+  {
+    const originalError = result.error ?? '';
     // If error is non-existent, vague, or just the exit code, replace it with the diagnosis
     const isGeneric =
       !originalError ||
@@ -585,10 +584,10 @@ export function diagnoseAgentError(agent: string, result: ExecuteResult): Execut
     if (isGeneric) {
       const signalPart = result.signal ? ` (signal ${result.signal})` : '';
       const codePart =
-        result.exitCode !== null && result.exitCode !== undefined
-          ? ` (exit code ${result.exitCode})`
+        result.exitCode !== null
+          ? ` (exit code ${String(result.exitCode)})`
           : '';
-      result.error = `[${result.errorCategory}] ${result.errorDetail}${signalPart || codePart}`;
+      result.error = `[${result.errorCategory ?? ''}] ${result.errorDetail ?? ''}${signalPart || codePart}`;
     }
   }
 
@@ -602,9 +601,9 @@ async function executeGeminiDirect(
   const { timeoutMs = 300_000, modelOverride, phaseLabel, onProgress, onStatusBar } = opts;
 
   const startTime = Date.now();
-  const model = modelOverride || getActiveModel('gemini');
+  const model = modelOverride ?? getActiveModel('gemini');
   const metricsHandle = recordCallStart('gemini', model ?? undefined);
-  if (onStatusBar) onStatusBar('gemini', { phase: phaseLabel || 'executing', step: 'running' });
+  if (onStatusBar) onStatusBar('gemini', { phase: phaseLabel ?? 'executing', step: 'running' });
 
   try {
     const token = await getGeminiToken();
@@ -612,7 +611,7 @@ async function executeGeminiDirect(
       const durationMs = Date.now() - startTime;
       const err = 'No Gemini OAuth credentials (~/.gemini/oauth_creds.json)';
       recordCallError(metricsHandle, err);
-      if (onStatusBar) onStatusBar('gemini', { phase: phaseLabel || 'error', step: 'idle' });
+      if (onStatusBar) onStatusBar('gemini', { phase: phaseLabel ?? 'error', step: 'idle' });
       return {
         ok: false,
         output: '',
@@ -630,7 +629,7 @@ async function executeGeminiDirect(
       const durationMs = Date.now() - startTime;
       const err = 'Could not resolve Gemini project ID';
       recordCallError(metricsHandle, err);
-      if (onStatusBar) onStatusBar('gemini', { phase: phaseLabel || 'error', step: 'idle' });
+      if (onStatusBar) onStatusBar('gemini', { phase: phaseLabel ?? 'error', step: 'idle' });
       return {
         ok: false,
         output: '',
@@ -644,7 +643,7 @@ async function executeGeminiDirect(
     }
 
     const cfg = loadHydraConfig();
-    const rlCfg = (cfg.rateLimits || {}) as Record<string, number>;
+    const rlCfg = (cfg.rateLimits ?? {}) as Record<string, number>;
     const maxRetries = rlCfg['maxRetries'] ?? 3;
     const baseDelayMs = rlCfg['baseDelayMs'] ?? 5000;
     const maxDelayMs = rlCfg['maxDelayMs'] ?? 60_000;
@@ -672,12 +671,12 @@ async function executeGeminiDirect(
       if (resp.ok) {
         const data = (await resp.json()) as GeminiContentResponse;
         const text =
-          data?.response?.candidates?.[0]?.content?.parts
+          data.response?.candidates?.[0]?.content?.parts
             ?.map((p: { text?: string }) => p.text)
-            .join('') || '';
+            .join('') ?? '';
         const durationMs = Date.now() - startTime;
         recordCallComplete(metricsHandle, { output: text, stderr: '' });
-        if (onStatusBar) onStatusBar('gemini', { phase: phaseLabel || 'done', step: 'idle' });
+        if (onStatusBar) onStatusBar('gemini', { phase: phaseLabel ?? 'done', step: 'idle' });
         return {
           ok: true,
           output: text,
@@ -694,7 +693,7 @@ async function executeGeminiDirect(
 
       if (resp.status === 429 || /RESOURCE_EXHAUSTED|QUOTA_EXHAUSTED/i.test(errText)) {
         if (attempt < maxRetries) {
-          const serverRetryAfter = resp.headers?.get?.('retry-after');
+          const serverRetryAfter = resp.headers.get('retry-after');
           const retryAfterMs = serverRetryAfter
             ? Number.parseInt(serverRetryAfter, 10) * 1000
             : null;
@@ -709,14 +708,14 @@ async function executeGeminiDirect(
               0,
               `Rate limited, retrying in ${(delay / 1000).toFixed(0)}s`,
             );
-          await new Promise((r) => setTimeout(r, delay));
+          await new Promise<void>((r) => { setTimeout(r, delay); });
           continue;
         }
-        lastError = `Gemini API 429 (exhausted ${maxRetries} retries)`;
+        lastError = `Gemini API 429 (exhausted ${String(maxRetries)} retries)`;
       } else {
         const durationMs = Date.now() - startTime;
         recordCallError(metricsHandle, `Gemini API ${String(resp.status)}`);
-        if (onStatusBar) onStatusBar('gemini', { phase: phaseLabel || 'error', step: 'idle' });
+        if (onStatusBar) onStatusBar('gemini', { phase: phaseLabel ?? 'error', step: 'idle' });
         return {
           ok: false,
           output: '',
@@ -731,13 +730,13 @@ async function executeGeminiDirect(
     }
 
     const durationMs = Date.now() - startTime;
-    recordCallError(metricsHandle, lastError || 'Gemini API 429');
-    if (onStatusBar) onStatusBar('gemini', { phase: phaseLabel || 'error', step: 'idle' });
+    recordCallError(metricsHandle, lastError ?? 'Gemini API 429');
+    if (onStatusBar) onStatusBar('gemini', { phase: phaseLabel ?? 'error', step: 'idle' });
     return {
       ok: false,
       output: '',
       stderr: '',
-      error: lastError || 'Gemini API 429',
+      error: lastError ?? 'Gemini API 429',
       exitCode: null,
       signal: null,
       durationMs,
@@ -747,7 +746,7 @@ async function executeGeminiDirect(
     const e = err instanceof Error ? err : new Error(String(err));
     const durationMs = Date.now() - startTime;
     recordCallError(metricsHandle, e.message);
-    if (onStatusBar) onStatusBar('gemini', { phase: phaseLabel || 'error', step: 'idle' });
+    if (onStatusBar) onStatusBar('gemini', { phase: phaseLabel ?? 'error', step: 'idle' });
     return {
       ok: false,
       output: '',
@@ -778,7 +777,7 @@ async function executeLocalAgent(
   void _onStatusBar; // reserved for future use
 
   const cfg = loadHydraConfig();
-  if (!cfg.local?.enabled) {
+  if (!cfg.local.enabled) {
     return {
       ok: false,
       output: '',
@@ -793,8 +792,8 @@ async function executeLocalAgent(
     };
   }
 
-  const baseUrl = cfg.local.baseUrl || 'http://localhost:11434/v1';
-  const model = modelOverride || cfg.local.model || 'mistral:7b';
+  const baseUrl = cfg.local.baseUrl;
+  const model = modelOverride ?? cfg.local.model;
   const startTime = Date.now();
   const metricsHandle = recordCallStart('local', model);
   const span = await startAgentSpan('local', model, { phase: phaseLabel });
@@ -831,9 +830,9 @@ async function executeLocalAgent(
         ok: false,
         output: '',
         stdout: '',
-        stderr: result.errorCategory || 'local-unavailable',
-        error: result.errorCategory || 'local-unavailable',
-        errorCategory: result.errorCategory || 'local-unavailable',
+        stderr: result.errorCategory ?? 'local-unavailable',
+        error: result.errorCategory ?? 'local-unavailable',
+        errorCategory: result.errorCategory ?? 'local-unavailable',
         exitCode: null,
         signal: null,
         durationMs,
@@ -882,8 +881,8 @@ async function executeLocalAgent(
  */
 export function expandInvokeArgs(args: string[], vars: Record<string, string>): string[] {
   return args.map((arg: string) =>
-    String(arg).replace(/\{(\w+)\}/g, (match: string, key: string) =>
-      key in vars ? String(vars[key]) : match,
+    arg.replace(/\{(\w+)\}/g, (match: string, key: string) =>
+      key in vars ? vars[key] : match,
     ),
   );
 }
@@ -931,7 +930,7 @@ async function executeCustomCliAgent(
   const cfg = loadHydraConfig();
   // Prefer registry definition (supports programmatically registered agents), fall back to config
   const def: (AgentDef & { responseParser?: string }) | CustomAgentDef | null | undefined =
-    getAgent(agentName) || (cfg.agents?.customAgents || []).find((a) => a.name === agentName);
+    getAgent(agentName) ?? cfg.agents.customAgents.find((a) => a.name === agentName);
 
   if (!def || ('enabled' in def && def.enabled === false)) {
     return {
@@ -963,7 +962,7 @@ async function executeCustomCliAgent(
           }
         ).nonInteractive)
       : undefined;
-  if (!invokeConfig?.cmd || !Array.isArray(invokeConfig?.args)) {
+  if (!invokeConfig?.cmd || !Array.isArray(invokeConfig.args)) {
     return {
       ok: false,
       output: '',
@@ -978,7 +977,7 @@ async function executeCustomCliAgent(
     };
   }
 
-  const vars = { prompt, cwd: cwd || process.cwd() };
+  const vars = { prompt, cwd: cwd ?? process.cwd() };
   const args = expandInvokeArgs(invokeConfig.args, vars);
   const cmd = invokeConfig.cmd;
   assertSafeSpawnCmd(cmd, `Custom agent '${agentName}'`);
@@ -993,7 +992,7 @@ async function executeCustomCliAgent(
     let settled = false;
 
     const child = spawn(cmd, args, {
-      cwd: cwd || process.cwd(),
+      cwd: cwd ?? process.cwd(),
       stdio: ['ignore', 'pipe', 'pipe'],
       windowsHide: true,
     });
@@ -1069,16 +1068,16 @@ async function executeCustomCliAgent(
       let costUsd: number | null = null;
       if ('parseOutput' in def && typeof def.parseOutput === 'function') {
         const result = (def as AgentDef).parseOutput(stdout, {
-          jsonOutput: (def as AgentDef).features?.jsonOutput ?? false,
+          jsonOutput: (def as AgentDef).features.jsonOutput,
         });
-        parsedOutput = result.output ?? stdout;
+        parsedOutput = result.output;
         tokenUsage = result.tokenUsage ?? null;
         costUsd = result.costUsd ?? null;
       } else {
         const parser =
           ('responseParser' in def
             ? (def as { responseParser?: string }).responseParser
-            : 'plaintext') || 'plaintext';
+            : 'plaintext') ?? 'plaintext';
         parsedOutput = parseCliResponse(stdout, parser as 'plaintext' | 'json' | 'markdown');
       }
       recordCallComplete(metricsHandle, {
@@ -1121,7 +1120,7 @@ async function executeCustomApiAgent(
     | CustomAgentDef
     | null
     | undefined =
-    getAgent(agentName) || (cfg.agents?.customAgents || []).find((a) => a.name === agentName);
+    getAgent(agentName) ?? cfg.agents.customAgents.find((a) => a.name === agentName);
 
   if (!def || ('enabled' in def && def.enabled === false)) {
     return {
@@ -1138,8 +1137,8 @@ async function executeCustomApiAgent(
     };
   }
 
-  const baseUrl = ('baseUrl' in def ? def.baseUrl : undefined) || 'http://localhost:11434/v1';
-  const model = ('model' in def ? def.model : undefined) || 'default';
+  const baseUrl = ('baseUrl' in def ? def.baseUrl : undefined) ?? 'http://localhost:11434/v1';
+  const model = ('model' in def ? def.model : undefined) ?? 'default';
   const startTime = Date.now();
   const metricsHandle = recordCallStart(agentName, model);
   const span = await startAgentSpan(agentName, model, { phase: phaseLabel });
@@ -1230,10 +1229,10 @@ export async function executeAgent(
   if (opts.hubCwd) {
     try {
       _hubSessId = hubRegister({
-        agent: opts.hubAgent || `${agent}-forge`,
+        agent: opts.hubAgent ?? `${agent}-forge`,
         cwd: opts.hubCwd,
-        project: opts.hubProject || path.basename(opts.hubCwd),
-        focus: String(prompt).slice(0, 100),
+        project: opts.hubProject ?? path.basename(opts.hubCwd),
+        focus: prompt.slice(0, 100),
       });
     } catch {
       /* hub is non-critical */
@@ -1321,7 +1320,7 @@ export async function executeAgent(
     };
   }
 
-  const effectiveModel = modelOverride || getActiveModel(agent) || 'unknown';
+  const effectiveModel = modelOverride ?? getActiveModel(agent) ?? 'unknown';
 
   // OTel tracing
   const spanPromise = startAgentSpan(agent, effectiveModel, {
@@ -1360,10 +1359,10 @@ export async function executeAgent(
   }
   const invokeResult = headlessInvoke(prompt, {
     model: effectiveModel || undefined,
-    permissionMode: (permissionMode || 'auto-edit') as PermissionMode,
+    permissionMode: (permissionMode ?? 'auto-edit') as PermissionMode,
     jsonOutput: agentDef.features.jsonOutput,
     reasoningEffort: agentDef.features.reasoningEffort
-      ? effortOverride || getReasoningEffort(agent) || undefined
+      ? effortOverride ?? getReasoningEffort(agent) ?? undefined
       : undefined,
     cwd,
     stdinPrompt: useStdin && agentDef.features.stdinPrompt,
@@ -1373,8 +1372,8 @@ export async function executeAgent(
   if (invokeResult[0] === '__gemini_direct__') {
     const sentinelData = invokeResult[1] as { prompt: string; opts: GeminiDirectOpts };
     const geminiOpts: GeminiDirectOpts = {
-      ...(sentinelData.opts || {}),
-      modelOverride: sentinelData.opts?.model,
+      ...sentinelData.opts,
+      modelOverride: sentinelData.opts.model,
     };
     try {
       return await executeGeminiDirect(sentinelData.prompt, geminiOpts);
@@ -1460,7 +1459,7 @@ export async function executeAgent(
     }
 
     if (onStatusBar) {
-      onStatusBar(agent, { phase: phaseLabel || 'executing', step: 'running' });
+      onStatusBar(agent, { phase: phaseLabel ?? 'executing', step: 'running' });
     }
 
     child.on('error', (err: Error) => {
@@ -1501,7 +1500,7 @@ export async function executeAgent(
       clearTimeout(timer);
       if (progressTimer) clearInterval(progressTimer);
       if (onStatusBar) {
-        onStatusBar(agent, { phase: phaseLabel || 'done', step: 'idle' });
+        onStatusBar(agent, { phase: phaseLabel ?? 'done', step: 'idle' });
       }
       const rawOutput = stdoutChunks.join('');
       let stderr = stderrChunks.join('');
@@ -1527,7 +1526,7 @@ export async function executeAgent(
           }
         }
         // JSONL error extraction for agents with JSON output
-        if (_agentDef?.features?.jsonOutput) {
+        if (_agentDef?.features.jsonOutput) {
           try {
             jsonlErrors = extractCodexErrors(rawOutput);
           } catch {
@@ -1542,7 +1541,7 @@ export async function executeAgent(
 
       if (!isOk) {
         const fullCmd = `${cmd} ${args.join(' ')}`;
-        let telemetry = `[Hydra Telemetry] Failed Command: ${fullCmd}\n[Hydra Telemetry] Exit Code: ${code ?? 'null'}\n[Hydra Telemetry] Signal: ${signal ?? 'null'}\n[Hydra Telemetry] Duration: ${String(elapsedMs)}ms`;
+        let telemetry = `[Hydra Telemetry] Failed Command: ${fullCmd}\n[Hydra Telemetry] Exit Code: ${String(code)}\n[Hydra Telemetry] Signal: ${signal ?? 'null'}\n[Hydra Telemetry] Duration: ${String(elapsedMs)}ms`;
         if (elapsedMs < 5000 && !timedOut)
           telemetry += ` (startup failure suspected — exited before doing real work)`;
         if (hasJsonlErrors)
@@ -1555,7 +1554,7 @@ export async function executeAgent(
       if (!isOk) {
         const parts: string[] = [];
         if (signal) parts.push(`Signal ${signal}`);
-        if (code !== null && code !== undefined && code !== 0)
+        if (code !== null && code !== 0)
           parts.push(`Exit code ${String(code)}`);
         if (hasJsonlErrors) parts.push(`JSONL errors: ${jsonlErrors.join('; ')}`);
         if (!parts.length) parts.push('Process terminated abnormally');
@@ -1570,7 +1569,7 @@ export async function executeAgent(
         stderr,
         error,
         exitCode: code,
-        signal: signal || null,
+        signal: signal ?? null,
         durationMs: elapsedMs,
         timedOut,
         startupFailure: !isOk && elapsedMs < 5000 && !timedOut,
@@ -1609,7 +1608,7 @@ export async function executeAgentWithRecovery(
   opts: ExecuteAgentOpts = {},
 ): Promise<ExecuteResult> {
   const cfg = loadHydraConfig();
-  const currentModel = opts.modelOverride || null;
+  const currentModel = opts.modelOverride ?? null;
   const recoverySpan = await startPipelineSpan('agent-recovery', { 'gen_ai.agent.name': agent });
 
   let finalResult: ExecuteResult | undefined;
@@ -1656,7 +1655,7 @@ export async function executeAgentWithRecovery(
     // Local-unavailable: transparent cloud fallback, no circuit breaker
     if (result.errorCategory === 'local-unavailable') {
       const fallbackCfg = loadHydraConfig();
-      const fallback = fallbackCfg.routing?.mode === 'economy' ? 'codex' : 'claude';
+      const fallback = fallbackCfg.routing.mode === 'economy' ? 'codex' : 'claude';
       process.stderr.write(`[local] server unreachable — falling back to ${fallback}\n`);
       finalResult = await executeAgent(fallback, prompt, { ...opts, _localFallback: true });
       return finalResult;
@@ -1725,15 +1724,15 @@ export async function executeAgentWithRecovery(
       retryAfterMs: number | null;
     };
     if (rateCheck.isRateLimit) {
-      const rlCfg = (cfg.rateLimits || {}) as Record<string, number>;
-      const maxRetries = rlCfg['maxRetries'] || 3;
+      const rlCfg = (cfg.rateLimits ?? {}) as Record<string, number>;
+      const maxRetries = rlCfg['maxRetries'] ?? 3;
       for (let attempt = 1; attempt <= maxRetries; attempt++) {
         const delayMs = calculateBackoff(attempt, {
           baseDelayMs: rlCfg['baseDelayMs'] as number | undefined,
           maxDelayMs: rlCfg['maxDelayMs'] as number | undefined,
           retryAfterMs: rateCheck.retryAfterMs ?? undefined,
         });
-        await new Promise((r) => setTimeout(r, delayMs));
+        await new Promise<void>((r) => { setTimeout(r, delayMs); });
         const retryResult = await executeAgent(agent, prompt, opts);
         if (retryResult.ok) {
           retryResult.rateLimitRetries = attempt;
@@ -1772,7 +1771,7 @@ export async function executeAgentWithRecovery(
       recordModelFailure(detection.failedModel);
     }
 
-    const recovery = (await recoverFromModelError(agent, detection.failedModel || '', {
+    const recovery = (await recoverFromModelError(agent, detection.failedModel ?? '', {
       rl: opts.rl as object | undefined,
     })) as { recovered: boolean; newModel: string | null };
 

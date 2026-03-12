@@ -48,7 +48,7 @@ const ABBREVIATIONS: Array<[RegExp, string]> = [
  * @returns {string}
  */
 export function normalizeIntent(text: string): string {
-  if (!text || !text.trim()) return '';
+  if (!text.trim()) return '';
   let result = text.trim();
 
   // Strip leading filler — repeat until stable (handles "please just fix")
@@ -112,9 +112,9 @@ export async function gateIntent(
   if (onLlmCall) onLlmCall();
 
   try {
-    const doRewrite = rewriteFn || defaultRewriteFn;
+    const doRewrite = rewriteFn ?? defaultRewriteFn;
     const rewritten = await doRewrite(text);
-    if (rewritten && rewritten.trim()) {
+    if (rewritten?.trim()) {
       const rewrittenClassification = classifyPrompt(rewritten.trim());
       return {
         text: rewritten.trim(),
@@ -155,10 +155,10 @@ async function defaultRewriteFn(text: string): Promise<string | null> {
   ];
 
   let result = '';
-  const cfg = await loadHydraConfig();
+  const cfg = loadHydraConfig();
   const localCfg = {
-    model: (cfg.local?.model as string | undefined) ?? 'llama3',
-    baseUrl: (cfg.local?.baseUrl as string | undefined) ?? 'http://localhost:11434/v1',
+    model: (cfg.local.model as string | undefined) ?? 'llama3',
+    baseUrl: (cfg.local.baseUrl as string | undefined) ?? 'http://localhost:11434/v1',
   };
   await streamLocalCompletion(messages, localCfg, (chunk: string) => {
     result += chunk;

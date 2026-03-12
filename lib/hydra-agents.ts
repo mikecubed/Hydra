@@ -63,8 +63,8 @@ const PHYSICAL_AGENTS: Record<string, Partial<AgentDef>> = {
           'full-auto': 'bypassPermissions',
         };
         const perm =
-          (opts.permissionMode ? PERM[opts.permissionMode] : undefined) ||
-          opts.permissionMode ||
+          (opts.permissionMode ? PERM[opts.permissionMode] : undefined) ??
+          opts.permissionMode ??
           'acceptEdits';
         const args = ['--output-format', 'json', '--permission-mode', perm];
         if (!opts.stdinPrompt) {
@@ -124,7 +124,7 @@ Output structure: Plan → Task breakdown → Dependency graph → Risk assessme
           };
           cost_usd?: number | null;
         };
-        if (parsed?.type === 'result') {
+        if (parsed.type === 'result') {
           const u = parsed.usage ?? {};
           return {
             output: parsed.result ?? parsed.content ?? stdout,
@@ -138,7 +138,7 @@ Output structure: Plan → Task breakdown → Dependency graph → Risk assessme
             costUsd: parsed.cost_usd ?? null,
           };
         }
-      } catch {}
+      } catch { /* ignored */ }
       return { output: stdout, tokenUsage: null, costUsd: null };
     },
     errorPatterns: {
@@ -147,7 +147,7 @@ Output structure: Plan → Task breakdown → Dependency graph → Risk assessme
       quotaExhausted: /spending_limit|credit_balance|usage_limit/i,
       networkError: /ECONNREFUSED|ENOTFOUND|network error/i,
     },
-    modelBelongsTo: (id: string) => String(id).toLowerCase().startsWith('claude-'),
+    modelBelongsTo: (id: string) => id.toLowerCase().startsWith('claude-'),
     async quotaVerify(apiKey?: string) {
       if (!apiKey)
         return {
@@ -165,7 +165,7 @@ Output structure: Plan → Task breakdown → Dependency graph → Risk assessme
         const body = await res.text().catch(() => '');
         return { verified: /spending_limit|credit_balance|usage_limit/i.test(body), status: 429 };
       }
-      return { verified: 'unknown', status: res.status, reason: `HTTP ${res.status}` };
+      return { verified: 'unknown', status: res.status, reason: `HTTP ${String(res.status)}` };
     },
     economyModel: () => 'claude-sonnet-4-5-20250929',
     readInstructions: (f: string) =>
@@ -191,7 +191,7 @@ Output structure: Plan → Task breakdown → Dependency graph → Risk assessme
       ],
       headless: (prompt: string, opts: HeadlessOpts = {}): [string, string[]] => [
         'gemini',
-        ['-p', prompt, '--approval-mode', opts.permissionMode || 'auto-edit', '-o', 'json'],
+        ['-p', prompt, '--approval-mode', opts.permissionMode ?? 'auto-edit', '-o', 'json'],
       ],
     },
     contextBudget: 2_000_000,
@@ -238,11 +238,11 @@ Output structure: Findings by severity → Code citations → Suggested fixes.`,
       try {
         const parsed = JSON.parse(stdout) as { response?: string; text?: string };
         return {
-          output: parsed?.response ?? parsed?.text ?? stdout,
+          output: parsed.response ?? parsed.text ?? stdout,
           tokenUsage: null,
           costUsd: null,
         };
-      } catch {}
+      } catch { /* ignored */ }
       return { output: stdout, tokenUsage: null, costUsd: null };
     },
     errorPatterns: {
@@ -251,7 +251,7 @@ Output structure: Findings by severity → Code citations → Suggested fixes.`,
       quotaExhausted: /QUOTA_EXHAUSTED.*(?:day|month)|daily.*quota|monthly.*quota/i,
       networkError: /ECONNREFUSED|ENOTFOUND/i,
     },
-    modelBelongsTo: (id: string) => String(id).toLowerCase().startsWith('gemini-'),
+    modelBelongsTo: (id: string) => id.toLowerCase().startsWith('gemini-'),
     async quotaVerify(apiKey?: string) {
       if (!apiKey)
         return {
@@ -270,7 +270,7 @@ Output structure: Findings by severity → Code citations → Suggested fixes.`,
           status: 429,
         };
       }
-      return { verified: 'unknown', status: res.status, reason: `HTTP ${res.status}` };
+      return { verified: 'unknown', status: res.status, reason: `HTTP ${String(res.status)}` };
     },
     economyModel: () => 'gemini-3-flash-preview',
     readInstructions: (f: string) =>
@@ -313,7 +313,7 @@ Output structure: Findings by severity → Code citations → Suggested fixes.`,
           args.push('--full-auto');
         }
         if (opts.jsonOutput) args.push('--json');
-        const model = opts.model || getActiveModel('codex');
+        const model = opts.model ?? getActiveModel('codex');
         if (model) args.push('--model', model);
         if (opts.cwd) args.push('-C', opts.cwd);
         return ['codex', args];
@@ -368,7 +368,7 @@ Sandbox-aware: no network access, file-system focused. Work within your sandbox 
       networkError: /ECONNREFUSED|ENOTFOUND/i,
     },
     modelBelongsTo: (id: string) => {
-      const l = String(id).toLowerCase();
+      const l = id.toLowerCase();
       return (
         l.startsWith('gpt-') ||
         l.startsWith('o1') ||
@@ -397,9 +397,9 @@ Sandbox-aware: no network access, file-system focused. Work within your sandbox 
         const isQuota = /usage_limit|spending_limit|hard_limit|insufficient_quota/i.test(body);
         return { verified: isQuota, status: 429, reason: isQuota ? 'quota' : 'rate-limit' };
       }
-      return { verified: 'unknown', status: res.status, reason: `HTTP ${res.status}` };
+      return { verified: 'unknown', status: res.status, reason: `HTTP ${String(res.status)}` };
     },
-    economyModel: (budgetCfg?: { handoffModel?: string }) => budgetCfg?.handoffModel || 'o4-mini',
+    economyModel: (budgetCfg?: { handoffModel?: string }) => budgetCfg?.handoffModel ?? 'o4-mini',
     readInstructions: (f: string) =>
       `Read ${f} for conventions, then read task-specific files listed in your assigned task.`,
     taskRules: ['- Do not redesign — follow the spec. Report exactly what you changed.'],
@@ -444,9 +444,11 @@ Sandbox-aware: no network access, file-system focused. Work within your sandbox 
     errorPatterns: { networkError: /ECONNREFUSED|ENOTFOUND|connection refused/i },
     modelBelongsTo: (id: string) => {
       const cfg = loadHydraConfig();
-      const localModel = cfg.local?.model;
-      return Boolean(localModel && String(id).toLowerCase() === String(localModel).toLowerCase());
+      const localModel = cfg.local.model;
+      // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition -- localModel may be absent at runtime
+      return id.toLowerCase() === localModel?.toLowerCase();
     },
+    // eslint-disable-next-line @typescript-eslint/require-await -- async required by plugin interface
     quotaVerify: async () => null,
     economyModel: () => null,
     readInstructions: (f: string) => `Read ${f} first.`,
@@ -632,10 +634,17 @@ export function registerAgent(name: string, def: Partial<AgentDef>): AgentDef {
     throw new Error(`Virtual agent "${name}" must specify a baseAgent`);
   }
   if (type === AGENT_TYPE.VIRTUAL && !_registry.has(def.baseAgent!)) {
-    throw new Error(`Virtual agent "${name}" references unknown baseAgent "${def.baseAgent}"`);
+    throw new Error(`Virtual agent "${name}" references unknown baseAgent "${def.baseAgent ?? ''}"`);
   }
 
   const _defaultExecuteMode = def.customType === 'api' ? ('api' as const) : ('spawn' as const);
+
+  let _cliValue: string | null;
+  if (type === AGENT_TYPE.PHYSICAL) {
+    _cliValue = def.cli === undefined ? lower : (def.cli ?? null);
+  } else {
+    _cliValue = null;
+  }
 
   const entry: AgentDef = {
     name: lower,
@@ -644,7 +653,7 @@ export function registerAgent(name: string, def: Partial<AgentDef>): AgentDef {
     baseAgent: def.baseAgent ?? null,
     displayName: def.displayName ?? name,
     label: def.label ?? def.displayName ?? name,
-    cli: type === AGENT_TYPE.PHYSICAL ? (def.cli === undefined ? lower : (def.cli ?? null)) : null,
+    cli: _cliValue,
     invoke: type === AGENT_TYPE.PHYSICAL ? (def.invoke ?? null) : null,
     contextBudget: def.contextBudget ?? (type === AGENT_TYPE.VIRTUAL ? null : 120_000),
     contextTier: def.contextTier ?? null,
@@ -669,6 +678,7 @@ export function registerAgent(name: string, def: Partial<AgentDef>): AgentDef {
       ((stdout: string): AgentResult => ({ output: stdout, tokenUsage: null, costUsd: null })),
     errorPatterns: def.errorPatterns ?? {},
     modelBelongsTo: def.modelBelongsTo ?? (() => false),
+    // eslint-disable-next-line @typescript-eslint/require-await -- async required by plugin interface
     quotaVerify: def.quotaVerify ?? (async () => null),
     economyModel: def.economyModel ?? (() => null),
     readInstructions: def.readInstructions ?? ((f: string) => `Read ${f} first.`),
@@ -683,7 +693,7 @@ export function registerAgent(name: string, def: Partial<AgentDef>): AgentDef {
  * Unregister a custom/virtual agent. Cannot unregister built-in physical agents.
  */
 export function unregisterAgent(name: string): boolean {
-  const lower = String(name).toLowerCase();
+  const lower = name.toLowerCase();
   const entry = _registry.get(lower);
   if (!entry) return false;
   if (entry.type === AGENT_TYPE.PHYSICAL && (PHYSICAL_AGENTS as Record<string, unknown>)[lower]) {
@@ -716,7 +726,7 @@ function _resolveEnabled(entry: AgentDef): boolean {
  */
 export function getAgent(name: string | null | undefined): AgentDef | null {
   if (!name) return null;
-  const entry = _registry.get(String(name).toLowerCase());
+  const entry = _registry.get(name.toLowerCase());
   if (!entry) return null;
   return { ...entry, enabled: _resolveEnabled(entry) };
 }
@@ -740,7 +750,7 @@ export function setAgentEnabled(name: string, enabled: boolean): boolean {
  */
 export function resolvePhysicalAgent(name: string | null | undefined): AgentDef | null {
   if (!name) return null;
-  let agent = _registry.get(String(name).toLowerCase());
+  let agent = _registry.get(name.toLowerCase());
   if (!agent) return null;
   // Follow baseAgent chain (max 5 hops to prevent infinite loops)
   let hops = 0;
@@ -796,7 +806,7 @@ export const AGENTS: Record<string, AgentDef | undefined> = new Proxy(
           return obj;
         };
       }
-      const entry = _registry.get(String(prop));
+      const entry = _registry.get(prop);
       return entry ? { ...entry, enabled: _resolveEnabled(entry) } : undefined;
     },
     has(_, prop) {
@@ -817,6 +827,7 @@ export const AGENTS: Record<string, AgentDef | undefined> = new Proxy(
           value: { ...val, enabled: _resolveEnabled(val) },
         };
       }
+      // eslint-disable-next-line unicorn/no-useless-undefined -- Proxy handler must explicitly return undefined for unknown properties
       return undefined;
     },
   },
@@ -854,12 +865,12 @@ export const AGENT_NAMES: string[] = new Proxy([] as string[], {
 });
 
 /** Always the 3 CLI-executable physical agents */
-export function getPhysicalAgentNames() {
+export function getPhysicalAgentNames(): string[] {
   return [..._registry.entries()].filter(([, v]) => v.type === AGENT_TYPE.PHYSICAL).map(([k]) => k);
 }
 
 /** All registered agent names (physical + virtual) */
-export function getAllAgentNames() {
+export function getAllAgentNames(): string[] {
   return [..._registry.keys()];
 }
 
@@ -937,12 +948,13 @@ export function recordTaskOutcome(
   outcome: 'success' | 'partial' | 'failed' | 'rejected',
 ): void {
   const cfg = loadHydraConfig();
-  const learning = cfg.agents?.affinityLearning;
+  const learning = cfg.agents.affinityLearning;
   if (!learning?.enabled) return;
 
   const overrides = loadAffinityOverrides();
   const key = `${agent}:${taskType}`;
 
+  // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition -- runtime JSON may lack key
   if (!overrides[key]) {
     overrides[key] = { adjustment: 0, sampleCount: 0, successCount: 0 };
   }
@@ -956,6 +968,7 @@ export function recordTaskOutcome(
   const minSamples = learning.minSampleSize || 5;
   if (entry.sampleCount >= minSamples) {
     const successRate = entry.successCount / entry.sampleCount;
+    // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition -- config value may be absent at runtime
     const decayFactor = learning.decayFactor ?? 0.9;
     // Center around 0.75 baseline — agents scoring above that get positive adjustment
     const raw = (successRate - 0.75) * 0.2 * decayFactor;
@@ -966,7 +979,7 @@ export function recordTaskOutcome(
 }
 
 /** Invalidate affinity cache (for testing or config reload). */
-export function invalidateAffinityCache() {
+export function invalidateAffinityCache(): void {
   _affinityOverrides = null;
 }
 
@@ -982,21 +995,21 @@ interface BestAgentOpts {
   installedCLIs?: Record<string, boolean | undefined> | null;
 }
 
-export function bestAgentFor(taskType: TaskType | string, opts: BestAgentOpts = {}): string {
+export function bestAgentFor(taskType: string, opts: BestAgentOpts = {}): string {
   const includeVirtual = opts.includeVirtual ?? false;
   const mode = opts.mode ?? 'balanced';
   const budgetState = opts.budgetState ?? null;
   const installedCLIs = opts.installedCLIs ?? null;
   const cfg = loadHydraConfig();
-  const learningEnabled = cfg.agents?.affinityLearning?.enabled;
+  const learningEnabled = cfg.agents.affinityLearning?.enabled;
   const overrides = learningEnabled ? loadAffinityOverrides() : {};
 
   // Budget gate: auto-boost local when cloud usage exceeds thresholds
-  const localGate = cfg.local?.budgetGate ?? { dailyPct: 80, weeklyPct: 75 };
+  const localGate = cfg.local.budgetGate ?? { dailyPct: 80, weeklyPct: 75 };
   const dailyPct = budgetState?.daily?.percentUsed ?? budgetState?.percent;
   const weeklyPct = budgetState?.weekly?.percentUsed ?? budgetState?.weekly?.percent;
   const budgetTriggered =
-    (dailyPct ?? 0) > (localGate.dailyPct ?? 80) || (weeklyPct ?? 0) > (localGate.weeklyPct ?? 75);
+    (dailyPct ?? 0) > localGate.dailyPct || (weeklyPct ?? 0) > localGate.weeklyPct;
 
   const localBoost = mode === 'economy' || budgetTriggered;
   const localPenalty = mode === 'performance';
@@ -1004,14 +1017,15 @@ export function bestAgentFor(taskType: TaskType | string, opts: BestAgentOpts = 
   const candidates: Array<{ name: string; score: number }> = [];
   for (const [name, agent] of _registry) {
     if (!_resolveEnabled(agent)) continue;
-    if (name === 'local' && !cfg.local?.enabled) continue;
+    if (name === 'local' && !cfg.local.enabled) continue;
     if (!includeVirtual && agent.type === AGENT_TYPE.VIRTUAL) continue;
     // Skip CLI agents explicitly marked as not installed
-    if (installedCLIs && agent.features?.executeMode === 'spawn' && installedCLIs[name] === false) {
+    if (installedCLIs && agent.features.executeMode === 'spawn' && installedCLIs[name] === false) {
       continue;
     }
     let score = (agent.taskAffinity as Record<string, number>)[taskType] ?? 0;
     const key = `${name}:${taskType}`;
+    // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition -- runtime key may not exist in overrides
     if (overrides[key]?.adjustment) {
       score += overrides[key].adjustment;
     }
@@ -1027,7 +1041,7 @@ export function bestAgentFor(taskType: TaskType | string, opts: BestAgentOpts = 
         const agentDef = _registry.get(name);
         if (!agentDef || !_resolveEnabled(agentDef)) continue;
         if (!includeVirtual && agentDef.type === AGENT_TYPE.VIRTUAL) continue;
-        if (name === 'local' && !cfg.local?.enabled) continue;
+        if (name === 'local' && !cfg.local.enabled) continue;
         if (installedCLIs[name] === false) continue;
         return name;
       }
@@ -1105,7 +1119,7 @@ export function initAgentRegistry(): void {
   // 3. Load custom agents from config
   try {
     const cfg = loadHydraConfig();
-    const agentsCfg = cfg.agents || {};
+    const agentsCfg = cfg.agents;
 
     // Disable built-ins that are not in the enabled list
     if (agentsCfg.subAgents && Array.isArray(agentsCfg.subAgents.builtIns)) {
@@ -1116,7 +1130,7 @@ export function initAgentRegistry(): void {
     if (agentsCfg.custom && typeof agentsCfg.custom === 'object') {
       for (const [name, def] of Object.entries(agentsCfg.custom)) {
         const d = def as Record<string, unknown>;
-        if (d?.['baseAgent']) {
+        if (d['baseAgent']) {
           try {
             registerAgent(name, {
               ...(d as Partial<AgentDef>),
@@ -1132,7 +1146,7 @@ export function initAgentRegistry(): void {
     // Register custom physical agents (CLI and API types from agents.customAgents[])
     if (Array.isArray(agentsCfg.customAgents)) {
       for (const def of agentsCfg.customAgents) {
-        if (!def?.name || !['cli', 'api'].includes(def?.type)) continue;
+        if (!def.name || !['cli', 'api'].includes(def.type)) continue;
         try {
           registerAgent(def.name, {
             ...(def as unknown as Partial<AgentDef>),
@@ -1209,7 +1223,7 @@ export function getEffortOptionsForModel(
   if (caps.type === 'thinking') {
     return (caps.levels ?? []).map((l) => {
       const budget = caps.budgets?.[l];
-      const hint = budget ? `${Math.round(budget / 1024)}K tokens` : '';
+      const hint = budget ? `${String(Math.round(budget / 1024))}K tokens` : '';
       return { id: l, label: l, hint };
     });
   }
@@ -1219,7 +1233,7 @@ export function getEffortOptionsForModel(
     return Object.keys(variants).map((k) => ({
       id: k,
       label: k,
-      hint: String(variants[k] ?? ''),
+      hint: typeof variants[k] === 'string' ? variants[k] : '',
     }));
   }
 
@@ -1262,12 +1276,14 @@ export const REASONING_EFFORTS = ['low', 'medium', 'high', 'xhigh'];
 
 export function getReasoningEffort(agentName: string): string | null {
   const cfg = loadHydraConfig();
+  // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition -- config entry may be absent at runtime
   return cfg.models[agentName]?.reasoningEffort ?? null;
 }
 
 export function setReasoningEffort(agentName: string, level: string | null): string | null {
   invalidateConfigCache();
   const cfg = loadHydraConfig();
+  // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition -- config entry may be absent at runtime
   if (!cfg.models[agentName]) cfg.models[agentName] = {} as ModelConfig;
   cfg.models[agentName].reasoningEffort = level ?? undefined;
   saveHydraConfig(cfg);
@@ -1281,7 +1297,7 @@ function normalizeLegacyModelId(
   modelId: string | null | undefined,
 ): string | null | undefined {
   if (!modelId) return modelId;
-  const value = String(modelId);
+  const value = modelId;
   const lower = value.toLowerCase();
   if (
     agentName === 'codex' &&
@@ -1304,7 +1320,9 @@ export function resolveModelId(
   const aliases = cfg.aliases?.[agentName];
   if (aliases?.[lower]) return aliases[lower];
 
+  // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition -- config entry may be absent at runtime
   const agentModels = cfg.models?.[agentName];
+  // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition -- config entry may be absent at runtime
   if (agentModels && (agentModels as Record<string, unknown>)[lower]) {
     return (agentModels as Record<string, string>)[lower];
   }
@@ -1314,6 +1332,7 @@ export function resolveModelId(
 
 export function getMode(): string {
   const cfg = loadHydraConfig();
+  // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition -- config value may be absent at runtime
   return cfg.mode ?? 'performance';
 }
 
@@ -1321,11 +1340,13 @@ export function setMode(modeName: string): string {
   invalidateConfigCache();
   const cfg = loadHydraConfig();
   const tiers = cfg.modeTiers ?? {};
+  // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition -- validates runtime config key
   if (!tiers[modeName]) {
     throw new Error(`Unknown mode "${modeName}". Available: ${Object.keys(tiers).join(', ')}`);
   }
   cfg.mode = modeName as typeof cfg.mode;
   for (const agent of getPhysicalAgentNames()) {
+    // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition -- config entry may be absent at runtime
     if (cfg.models[agent]) {
       cfg.models[agent].active = 'default';
     }
@@ -1337,6 +1358,7 @@ export function setMode(modeName: string): string {
 export function resetAgentModel(agentName: string): string | null {
   invalidateConfigCache();
   const cfg = loadHydraConfig();
+  // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition -- config entry may be absent at runtime
   if (cfg.models[agentName]) {
     cfg.models[agentName].active = 'default';
     saveHydraConfig(cfg);
@@ -1347,10 +1369,12 @@ export function resetAgentModel(agentName: string): string | null {
 export function getActiveModel(agentName: string): string | null {
   const envKey = `HYDRA_${agentName.toUpperCase()}_MODEL`;
   const envVal = process.env[envKey];
-  if (envVal) return resolveModelId(agentName, envVal) || envVal;
+  if (envVal) return resolveModelId(agentName, envVal) ?? envVal;
 
   const cfg = loadHydraConfig();
+  // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition -- config entry may be absent at runtime
   const agentModels = cfg.models?.[agentName];
+  // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition -- config entry may be absent at runtime
   if (!agentModels) return null;
 
   const activeKey = agentModels.active || 'default';
@@ -1376,6 +1400,7 @@ export function getActiveModel(agentName: string): string | null {
     return normalize(selected) ?? normalize(agentModels.default);
   }
 
+  // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition -- config value may be absent at runtime
   const mode = cfg.mode ?? 'performance';
   const tierPreset = cfg.modeTiers?.[mode]?.[agentName];
   if (tierPreset && (agentModels as Record<string, string>)[tierPreset]) {
@@ -1388,6 +1413,7 @@ export function getActiveModel(agentName: string): string | null {
 export function setActiveModel(agentName: string, modelKeyOrId: string): string | null {
   invalidateConfigCache();
   const cfg = loadHydraConfig();
+  // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition -- config entry may be absent at runtime
   if (!cfg.models[agentName]) {
     cfg.models[agentName] = {} as ModelConfig;
   }
@@ -1411,6 +1437,7 @@ export function getModelFlags(agentName: string): string[] {
   const flags: string[] = [];
   const modelId = getActiveModel(agentName);
   const cfg = loadHydraConfig();
+  // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition -- config entry may be absent at runtime
   const defaultId = cfg.models?.[agentName]?.default;
 
   if (modelId && (modelId !== defaultId || agentName === 'codex')) {
@@ -1435,6 +1462,7 @@ export function getModelFlags(agentName: string): string[] {
 
 export function getModelSummary(): Record<string, unknown> {
   const cfg = loadHydraConfig();
+  // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition -- config value may be absent at runtime
   const mode = cfg.mode ?? 'performance';
   const summary: Record<string, unknown> = {};
   const physicalNames = getPhysicalAgentNames();
@@ -1444,12 +1472,15 @@ export function getModelSummary(): Record<string, unknown> {
   ];
   for (const agent of orderedAgents) {
     const activeModel = getActiveModel(agent);
+    // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition -- config entry may be absent for non-standard agents
     const agentModels = (cfg.models?.[agent] ?? {}) as ModelConfig & Record<string, unknown>;
+    // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition -- config value may be absent at runtime
     const activeKey = agentModels.active ?? 'default';
     const isOverride = activeKey !== 'default';
     const tierPreset = cfg.modeTiers?.[mode]?.[agent] ?? 'default';
 
     summary[agent] = {
+      // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition -- agentModels may be empty object at runtime
       active: activeModel ?? agentModels.default ?? 'unknown',
       isDefault: !isOverride && activeModel === agentModels.default,
       isOverride,
