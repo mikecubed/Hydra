@@ -103,7 +103,7 @@ function extractResetSeconds(text: string) {
   if (dateMatch) {
     try {
       const resetDate = new Date(dateMatch[1]);
-      if (!isNaN(resetDate.getTime())) {
+      if (!Number.isNaN(resetDate.getTime())) {
         const seconds = Math.round((resetDate.getTime() - Date.now()) / 1000);
         if (seconds > 0) return seconds;
       }
@@ -126,13 +126,13 @@ const circuitState = new Map<string, CircuitState>(); // model → { failures: [
  * Opens the circuit if failures exceed threshold within window.
  * @param {string} model - Model ID that failed
  */
-export function recordModelFailure(model: string) {
+export function recordModelFailure(model: string): void {
   if (!model) return;
   const cfg = loadHydraConfig();
   const cbCfg =
     (((cfg as Record<string, unknown>)['modelRecovery'] as Record<string, unknown> | undefined)?.[
       'circuitBreaker'
-    ] as Record<string, unknown>) || {};
+    ] as Record<string, unknown> | undefined) ?? {};
   if (cbCfg['enabled'] === false) return;
 
   const threshold = (cbCfg['failureThreshold'] as number | undefined) ?? 5;
@@ -167,11 +167,11 @@ export function isCircuitOpen(model: string): boolean {
   const cbCfg =
     (((cfg as Record<string, unknown>)['modelRecovery'] as Record<string, unknown> | undefined)?.[
       'circuitBreaker'
-    ] as Record<string, unknown>) || {};
+    ] as Record<string, unknown> | undefined) ?? {};
   if (cbCfg['enabled'] === false) return false;
 
   const state = circuitState.get(model);
-  if (!state || !state.isOpen) return false;
+  if (!state?.isOpen) return false;
 
   // Auto-reset after window elapses
   const windowMs2 = (cbCfg['windowMs'] as number | undefined) ?? 300_000;
@@ -306,18 +306,24 @@ function extractModelFromError(text: string): string | null {
  * @param {object} result - executeAgent result: { ok, output, stderr, error }
  * @returns {{ isUsageLimit: boolean, resetInSeconds: number|null, errorMessage: string }}
  */
-export function detectUsageLimitError(_agent: string, result: Record<string, unknown>) {
+export function detectUsageLimitError(
+  _agent: string,
+  result: Record<string, unknown>,
+): { isUsageLimit: boolean; resetInSeconds: number | null; errorMessage: string } {
+  // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition -- runtime callers may pass null despite types
   if (!result || result['ok']) {
     return { isUsageLimit: false, resetInSeconds: null, errorMessage: '' };
   }
 
-  const sources = [result['stderr'] || '', result['output'] || '', result['error'] || ''].join(
-    '\n',
-  );
+  const sources = [
+    (result['stderr'] as string | undefined) ?? '',
+    (result['output'] as string | undefined) ?? '',
+    (result['error'] as string | undefined) ?? '',
+  ].join('\n');
 
   for (const pattern of USAGE_LIMIT_PATTERNS) {
     if (pattern.test(sources)) {
-      const matchLine = sources.split('\n').find((l) => pattern.test(l)) || sources.slice(0, 200);
+      const matchLine = sources.split('\n').find((l) => pattern.test(l)) ?? sources.slice(0, 200);
 
       // If the matched line mentions per-minute/per-hour/rate-limit language, it's a
       // transient rate limit (not an account-level quota) — skip this pattern so
@@ -355,8 +361,8 @@ export function formatResetTime(resetInSeconds: number | null): string {
   if (!resetInSeconds || resetInSeconds <= 0) return 'unknown';
   if (resetInSeconds >= 86400) return `${(resetInSeconds / 86400).toFixed(1)} days`;
   if (resetInSeconds >= 3600) return `${(resetInSeconds / 3600).toFixed(1)} hours`;
-  if (resetInSeconds >= 60) return `${Math.round(resetInSeconds / 60)} min`;
-  return `${resetInSeconds}s`;
+  if (resetInSeconds >= 60) return `${String(Math.round(resetInSeconds / 60))} min`;
+  return `${String(resetInSeconds)}s`;
 }
 
 /**
@@ -376,8 +382,11 @@ export function formatResetTime(resetInSeconds: number | null): string {
  * @param {string} [opts["hintText"]] - Error text from the agent, used to detect quota type
  * @returns {Promise<{ verified: boolean|'unknown', status?: number, reason?: string }>}
  */
-export async function verifyAgentQuota(agent: string, opts: Record<string, unknown> = {}) {
-  const hintText = opts['hintText'] || '';
+export async function verifyAgentQuota(
+  agent: string,
+  opts: Record<string, unknown> = {},
+): Promise<Record<string, unknown>> {
+  const hintText = opts['hintText'] ?? '';
   try {
     const agentDef = getAgent(agent);
     const apiKeyEnvMap: Record<string, string> = {
@@ -386,7 +395,7 @@ export async function verifyAgentQuota(agent: string, opts: Record<string, unkno
       gemini: 'GEMINI_API_KEY',
     };
     const apiKey =
-      process.env[apiKeyEnvMap[agent] ?? ''] ||
+      process.env[apiKeyEnvMap[agent] ?? ''] ??
       (agent === 'gemini' ? process.env['GOOGLE_API_KEY'] : null);
     if (agentDef?.quotaVerify) {
       const rawResult = await agentDef.quotaVerify(apiKey, { hintText });
@@ -394,13 +403,13 @@ export async function verifyAgentQuota(agent: string, opts: Record<string, unkno
         return { verified: 'unknown', reason: 'quota verification unavailable' };
       }
       if (!Object.prototype.hasOwnProperty.call(rawResult, 'verified')) {
-        return { ...rawResult, verified: 'unknown' };
+        return { ...rawResult, verified: 'unknown' as const };
       }
-      return rawResult;
+      return { ...rawResult };
     }
     return { verified: 'unknown', reason: `unknown agent: ${agent}` };
   } catch (err: unknown) {
-    return { verified: 'unknown', reason: (err as Error).message?.slice(0, 80) || 'network error' };
+    return { verified: 'unknown', reason: (err as Error).message.slice(0, 80) || 'network error' };
   }
 }
 
@@ -413,7 +422,11 @@ export async function verifyAgentQuota(agent: string, opts: Record<string, unkno
  * @param {object} result - executeAgent result: { ok, output, stderr, error }
  * @returns {{ isRateLimit: boolean, retryAfterMs: number|null, errorMessage: string }}
  */
-export function detectRateLimitError(agent: string, result: Record<string, unknown>) {
+export function detectRateLimitError(
+  agent: string,
+  result: Record<string, unknown>,
+): { isRateLimit: boolean; retryAfterMs: number | null; errorMessage: string } {
+  // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition -- runtime callers may pass null despite types
   if (!result || result['ok']) {
     return { isRateLimit: false, retryAfterMs: null, errorMessage: '' };
   }
@@ -424,14 +437,16 @@ export function detectRateLimitError(agent: string, result: Record<string, unkno
     return { isRateLimit: false, retryAfterMs: null, errorMessage: '' };
   }
 
-  const sources = [result['stderr'] || '', result['output'] || '', result['error'] || ''].join(
-    '\n',
-  );
+  const sources = [
+    (result['stderr'] as string | undefined) ?? '',
+    (result['output'] as string | undefined) ?? '',
+    (result['error'] as string | undefined) ?? '',
+  ].join('\n');
 
   for (const pattern of RATE_LIMIT_PATTERNS) {
     if (pattern.test(sources)) {
       const retryAfterMs = extractRetryAfterMs(sources);
-      const matchLine = sources.split('\n').find((l) => pattern.test(l)) || sources.slice(0, 200);
+      const matchLine = sources.split('\n').find((l) => pattern.test(l)) ?? sources.slice(0, 200);
       return {
         isRateLimit: true,
         retryAfterMs,
@@ -478,21 +493,26 @@ export function calculateBackoff(
  * @param {object} result - executeAgent result: { ok, output, stderr, error }
  * @returns {{ isModelError: boolean, failedModel: string|null, errorMessage: string }}
  */
-export function detectModelError(agent: string, result: Record<string, unknown>) {
+export function detectModelError(
+  agent: string,
+  result: Record<string, unknown>,
+): { isModelError: boolean; failedModel: string | null; errorMessage: string } {
+  // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition -- runtime callers may pass null despite types
   if (!result || result['ok']) {
     return { isModelError: false, failedModel: null, errorMessage: '' };
   }
 
-  // Combine all text sources to scan
-  const sources = [result['stderr'] || '', result['output'] || '', result['error'] || ''].join(
-    '\n',
-  );
+  const sources = [
+    (result['stderr'] as string | undefined) ?? '',
+    (result['output'] as string | undefined) ?? '',
+    (result['error'] as string | undefined) ?? '',
+  ].join('\n');
 
   for (const pattern of MODEL_ERROR_PATTERNS) {
     if (pattern.test(sources)) {
-      const failedModel = extractModelFromError(sources) || getActiveModel(agent) || null;
+      const failedModel = extractModelFromError(sources) ?? getActiveModel(agent) ?? null;
       // Find the matching line for a descriptive error message
-      const matchLine = sources.split('\n').find((l) => pattern.test(l)) || sources.slice(0, 200);
+      const matchLine = sources.split('\n').find((l) => pattern.test(l)) ?? sources.slice(0, 200);
       return {
         isModelError: true,
         failedModel,
@@ -519,7 +539,11 @@ export function detectModelError(agent: string, result: Record<string, unknown>)
  * @param {object} result - executeAgent result: { ok, output, stderr, error, exitCode, errorCategory }
  * @returns {{ isCodexError: boolean, category: string, errorMessage: string }}
  */
-export function detectCodexError(agent: string, result: Record<string, unknown>) {
+export function detectCodexError(
+  agent: string,
+  result: Record<string, unknown>,
+): { isCodexError: boolean; category: string; errorMessage: string } {
+  // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition -- runtime callers may pass null despite types
   if (!result || result['ok'] || agent !== 'codex') {
     return { isCodexError: false, category: '', errorMessage: '' };
   }
@@ -528,18 +552,20 @@ export function detectCodexError(agent: string, result: Record<string, unknown>)
   if (result['errorCategory'] && result['errorCategory'] !== 'unclassified') {
     return {
       isCodexError: true,
-      category: result['errorCategory'],
-      errorMessage: result['errorDetail'] || result['error'] || '',
+      category: result['errorCategory'] as string,
+      errorMessage: (result['errorDetail'] as string | undefined) ?? (result['error'] as string | undefined) ?? '',
     };
   }
 
-  const sources = [result['stderr'] || '', result['output'] || '', result['error'] || ''].join(
-    '\n',
-  );
+  const sources = [
+    (result['stderr'] as string | undefined) ?? '',
+    (result['output'] as string | undefined) ?? '',
+    (result['error'] as string | undefined) ?? '',
+  ].join('\n');
 
   for (const { pattern, category } of CODEX_ERROR_PATTERNS) {
     if (pattern.test(sources)) {
-      const matchLine = sources.split('\n').find((l) => pattern.test(l)) || sources.slice(0, 200);
+      const matchLine = sources.split('\n').find((l) => pattern.test(l)) ?? sources.slice(0, 200);
       return {
         isCodexError: true,
         category,
@@ -551,12 +577,12 @@ export function detectCodexError(agent: string, result: Record<string, unknown>)
   // Empty output with non-zero exit or signal = silent crash
   if (
     ((result['exitCode'] as number | null | undefined) !== 0 || result['signal']) &&
-    !String(result['output'] ?? '').trim() &&
-    !String(result['stderr'] ?? '').trim()
+    !((result['output'] as string | undefined) ?? '').trim() &&
+    !((result['stderr'] as string | undefined) ?? '').trim()
   ) {
     const reason = result['signal']
-      ? `signal ${result['signal']}`
-      : `code ${result['exitCode'] as number | null | undefined}`;
+      ? `signal ${(result['signal'] as string | null) ?? ''}`
+      : `code ${String((result['exitCode'] as number | null) ?? '')}`;
     return {
       isCodexError: true,
       category: 'silent-crash',
@@ -569,27 +595,29 @@ export function detectCodexError(agent: string, result: Record<string, unknown>)
     return {
       isCodexError: true,
       category: 'signal',
-      errorMessage: `Codex aborted by signal ${result['signal']}`,
+      errorMessage: `Codex aborted by signal ${(result['signal'] as string | null) ?? ''}`,
     };
   }
 
   // Catch-all: non-zero exit or null exit with stderr, that didn't match any known pattern.
   // Instead of returning false (which loses the error to "unclassified" limbo),
   // classify it as a Codex-specific unknown error with rich diagnostic context.
-  const hasOutput = String(result['stderr'] ?? '').trim() || String(result['output'] ?? '').trim();
+  const hasOutput =
+    ((result['stderr'] as string | undefined) ?? '').trim() ||
+    ((result['output'] as string | undefined) ?? '').trim();
   if (
     ((result['exitCode'] as number | null | undefined) !== 0 ||
       ((result['exitCode'] as number | null | undefined) === null && hasOutput)) &&
     (result['exitCode'] as number | null | undefined) !== undefined
   ) {
     // Gather the best diagnostic context available
-    const stderrTail = String(result['stderr'] ?? '')
+    const stderrTail = ((result['stderr'] as string | undefined) ?? '')
       .trim()
       .split('\n')
       .slice(-5)
       .join(' | ')
       .slice(0, 300);
-    const errorTail = String(result['error'] ?? '').slice(0, 200);
+    const errorTail = ((result['error'] as string | undefined) ?? '').slice(0, 200);
     // Check for JSONL error events in raw stdout
     const jsonlErrors = extractCodexErrorsFromResult(result);
     const jsonlContext =
@@ -598,7 +626,7 @@ export function detectCodexError(agent: string, result: Record<string, unknown>)
     const exitInfo =
       (result['exitCode'] as number | null | undefined) === null
         ? 'terminated'
-        : `exit ${result['exitCode'] as number | null | undefined}`;
+        : `exit ${String((result['exitCode'] as number | null) ?? '')}`;
     return {
       isCodexError: true,
       category: 'codex-unknown',
@@ -621,12 +649,12 @@ export function detectCodexError(agent: string, result: Record<string, unknown>)
  */
 function extractCodexErrorsFromResult(result: Record<string, unknown>): string[] {
   const raw =
-    (result['stdout'] as string | undefined) || (result['output'] as string | undefined) || '';
+    (result['stdout'] as string | undefined) ?? (result['output'] as string | undefined) ?? '';
   if (!raw || typeof raw !== 'string') return [];
   const errors = [];
   for (const line of raw.split('\n')) {
     const trimmed = line.trim();
-    if (!trimmed || trimmed[0] !== '{') continue;
+    if (!trimmed.startsWith('{')) continue;
     try {
       const obj = JSON.parse(trimmed);
       if (obj.type === 'error' && obj.message) errors.push(obj.message);
@@ -658,13 +686,13 @@ export function getFallbackCandidates(
       (cfg as Record<string, unknown>)['models'] as
         | Record<string, Record<string, string>>
         | undefined
-    )?.[agent] || {};
+    )?.[agent] ?? {};
   const aliases =
     (
       (cfg as Record<string, unknown>)['aliases'] as
         | Record<string, Record<string, string>>
         | undefined
-    )?.[agent] || {};
+    )?.[agent] ?? {};
 
   const seen = new Set<string>();
   const failed = (failedModel || '').toLowerCase();
@@ -726,10 +754,10 @@ export async function recoverFromModelError(
   agent: string,
   failedModel: string,
   opts: Record<string, unknown> = {},
-) {
+): Promise<{ recovered: boolean; newModel: string | null }> {
   const cfg = loadHydraConfig();
   const recoveryCfg =
-    ((cfg as Record<string, unknown>)['modelRecovery'] as Record<string, unknown> | undefined) ||
+    ((cfg as Record<string, unknown>)['modelRecovery'] as Record<string, unknown> | undefined) ??
     {};
 
   if (recoveryCfg['enabled'] === false) {
@@ -743,7 +771,7 @@ export async function recoverFromModelError(
 
   const isInteractive = opts['rl'] && process.stdout.isTTY;
 
-  let selected = null;
+  let selected: string | null | undefined;
 
   if (isInteractive) {
     // Interactive mode — use promptChoice if available
@@ -760,7 +788,7 @@ export async function recoverFromModelError(
         context: { 'Failed model': failedModel || 'unknown', Agent: agent },
         choices: options,
       });
-      const value = (result as { value?: string })?.value;
+      const value = (result as { value?: string }).value;
 
       if (value === 'Skip (disable agent)') {
         return { recovered: false, newModel: null };
@@ -807,7 +835,7 @@ export async function recoverFromModelError(
  * Check whether model recovery is enabled in config.
  * @returns {boolean}
  */
-export function isModelRecoveryEnabled() {
+export function isModelRecoveryEnabled(): boolean {
   const cfg = loadHydraConfig();
   return (
     ((cfg as Record<string, unknown>)['modelRecovery'] as Record<string, unknown> | undefined)?.[

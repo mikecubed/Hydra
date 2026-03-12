@@ -96,12 +96,12 @@ function detectTechStack(projectRoot: string) {
   try {
     const pkg = JSON.parse(fs.readFileSync(path.join(projectRoot, 'package.json'), 'utf8'));
     const deps = { ...pkg.dependencies, ...pkg.devDependencies };
-    if (deps['react-native']) parts.push(`React Native ${deps['react-native']}`);
-    if (deps['expo']) parts.push(`Expo ${deps['expo']}`);
-    if (deps['next']) parts.push(`Next.js ${deps['next']}`);
+    if (deps['react-native']) parts.push(`React Native ${String(deps['react-native'])}`);
+    if (deps['expo']) parts.push(`Expo ${String(deps['expo'])}`);
+    if (deps['next']) parts.push(`Next.js ${String(deps['next'])}`);
     if (deps['react'] && !deps['react-native'] && !deps['next'])
-      parts.push(`React ${deps['react']}`);
-    if (deps['vue']) parts.push(`Vue ${deps['vue']}`);
+      parts.push(`React ${String(deps['react'])}`);
+    if (deps['vue']) parts.push(`Vue ${String(deps['vue'])}`);
     if (deps['@supabase/supabase-js']) parts.push('Supabase');
     if (deps['prisma'] || deps['@prisma/client']) parts.push('Prisma');
     if (deps['typescript'] || deps['ts-node']) parts.push('TypeScript');
@@ -172,7 +172,7 @@ function buildMinimalContext(
   const gitRules = detectGitRules(projectConfig.projectRoot);
   const lines = [
     '--- PROJECT CONTEXT (minimal) ---',
-    `Project: ${projectConfig.projectName} (${techStack})`,
+    `Project: ${String(projectConfig.projectName)} (${techStack})`,
     `Branch: ${branch}${gitRules ? ` — ${gitRules}` : ''}`,
   ];
 
@@ -218,7 +218,7 @@ function buildMediumContext(projectConfig: any) {
 
   const lines = [
     '--- PROJECT CONTEXT ---',
-    `Project: ${projectConfig.projectName}`,
+    `Project: ${String(projectConfig.projectName)}`,
     `Tech: ${techStack}`,
     `Branch: ${branch}`,
   ];
@@ -337,7 +337,7 @@ function buildLargeContext(
  * @param {string} text - Prompt text to scan
  * @returns {string[]} Unique candidate paths (deduplicated)
  */
-export function extractPathsFromPrompt(text: string) {
+export function extractPathsFromPrompt(text: string): string[] {
   if (!text) return [];
   const regex = /(?:\.{0,2}\/)?[\w.-]+(?:\/[\w.-]+)*\.[\w]+/g;
   const matches = text.match(regex);
@@ -362,7 +362,7 @@ export function findScopedContextFiles(
   promptText: string,
   rootDir: string,
   opts: { maxFiles?: number } = {},
-) {
+): string[] {
   const { maxFiles = 3 } = opts;
   const candidates = extractPathsFromPrompt(promptText);
   if (candidates.length === 0) return [];
@@ -382,7 +382,7 @@ export function findScopedContextFiles(
 
     // Walk up from the candidate's directory (not including rootDir itself)
     let dir = path.dirname(absCandidate);
-    while (true) {
+    for (;;) {
       // Stop if we've reached or passed the root
       if (!dir.startsWith(absRoot + path.sep) && dir !== absRoot) break;
       if (dir === absRoot) break; // skip root-level HYDRA.md
@@ -420,7 +420,8 @@ export function findScopedContextFiles(
  * @param {string}   rootDir - Project root for computing relative display paths
  * @returns {string} Combined context string, or '' if files is empty
  */
-export function compileHierarchicalContext(files: string[], rootDir: string) {
+export function compileHierarchicalContext(files: string[], rootDir: string): string {
+  // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition -- runtime callers may pass null despite types
   if (!files || files.length === 0) return '';
 
   const absRoot = path.resolve(rootDir);
@@ -450,22 +451,20 @@ export function getProjectContext(
   agentName = 'claude',
   taskContext: { files?: string[]; types?: string; signatures?: string } = {},
   projectConfig: any = null,
-) {
-  if (!projectConfig) {
-    projectConfig = resolveProject({ skipValidation: true });
-  }
+): string {
+  const resolvedConfig: any = projectConfig ?? resolveProject({ skipValidation: true });
 
   const agent = getAgent(agentName);
-  const tier = agent?.contextTier || 'medium';
+  const tier = agent?.contextTier ?? 'medium';
 
   switch (tier) {
     case 'minimal':
-      return buildMinimalContext(projectConfig, taskContext);
+      return buildMinimalContext(resolvedConfig, taskContext);
     case 'large':
-      return buildLargeContext(projectConfig, taskContext);
+      return buildLargeContext(resolvedConfig, taskContext);
     case 'medium':
     default:
-      return buildMediumContext(projectConfig);
+      return buildMediumContext(resolvedConfig);
   }
 }
 
@@ -487,13 +486,11 @@ export function buildAgentContext(
   taskContext: { files?: string[]; types?: string; signatures?: string } = {},
   projectConfig: any = null,
   promptText: string | null = null,
-) {
-  if (!projectConfig) {
-    projectConfig = resolveProject({ skipValidation: true });
-  }
+): string {
+  const resolvedConfig: any = projectConfig ?? resolveProject({ skipValidation: true });
 
   // Base context — same as existing getProjectContext behavior
-  const baseContext = getProjectContext(agentName, taskContext, projectConfig);
+  const baseContext = getProjectContext(agentName, taskContext, resolvedConfig);
 
   // Hierarchical injection — only when promptText is provided and feature is enabled
   if (!promptText) {
@@ -501,20 +498,20 @@ export function buildAgentContext(
   }
 
   const cfg = loadHydraConfig();
-  const hierCfg = cfg.context?.hierarchical ?? {};
+  const hierCfg = cfg.context.hierarchical;
 
-  if (hierCfg.enabled === false) {
+  if (!hierCfg.enabled) {
     return baseContext;
   }
 
   const maxFiles = hierCfg.maxFiles ?? 3;
-  const scopedFiles = findScopedContextFiles(promptText, projectConfig.projectRoot, { maxFiles });
+  const scopedFiles = findScopedContextFiles(promptText, resolvedConfig.projectRoot, { maxFiles });
 
   if (scopedFiles.length === 0) {
     return baseContext;
   }
 
-  const scopedContext = compileHierarchicalContext(scopedFiles, projectConfig.projectRoot);
+  const scopedContext = compileHierarchicalContext(scopedFiles, resolvedConfig.projectRoot);
   if (!scopedContext) {
     return baseContext;
   }

@@ -48,7 +48,7 @@ import pc from 'picocolors';
 const config = resolveProject();
 const RUNS_DIR = config.runsDir;
 
-const DEFAULT_DAEMON_URL = process.env['AI_ORCH_URL'] || 'http://127.0.0.1:4173';
+const DEFAULT_DAEMON_URL = process.env['AI_ORCH_URL'] ?? 'http://127.0.0.1:4173';
 const DEFAULT_TIMEOUT_MS = 1000 * 60 * 7;
 
 const MODE_DOWNSHIFT = { performance: 'balanced', balanced: 'economy' };
@@ -100,7 +100,7 @@ async function fetchDaemonSummary(baseUrl: string) {
       return null;
     }
     const payload = await response.json();
-    return (payload as Record<string, unknown>)?.['summary'] ?? null;
+    return (payload as Record<string, unknown>)['summary'] ?? null;
   } catch {
     return null;
   }
@@ -290,10 +290,9 @@ async function main() {
   const prompt = getPrompt(options, positionals);
 
   if (!prompt) {
-    console.error(
+    throw new Error(
       'Missing prompt. Example: node lib/hydra-dispatch.ts prompt="Plan offline sync rollout"',
     );
-    process.exit(1);
   }
 
   const mode = String(options['mode'] || 'live').toLowerCase();
@@ -502,7 +501,7 @@ async function main() {
       timeoutMs,
       synthesizerModel,
     );
-    report.synthesizer = { ...synthResult, lastMessage: synthResult.output ?? synthResult.stdout };
+    report.synthesizer = { ...synthResult, lastMessage: synthResult.output };
     if (synthResult.ok) {
       spinSynth.succeed(`${colorAgent(synthesizerAgent)} synthesis complete`);
     } else {
@@ -520,6 +519,8 @@ async function main() {
   const critic = report.critic;
   const synth = report.synthesizer;
 
+  // Defensive runtime guard — TS proves these are assigned but report is mutable data
+  // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
   if (!coord || !critic || !synth) {
     throw new Error(
       'Hydra dispatch invariant violated: coordinator, critic, and synthesizer slots must be populated before computing outputSummary.',
@@ -598,6 +599,6 @@ const _isMain = (() => {
 if (_isMain) {
   main().catch((err: unknown) => {
     console.error(`Hydra dispatch failed: ${err instanceof Error ? err.message : String(err)}`);
-    process.exit(1);
+    process.exitCode = 1;
   });
 }
