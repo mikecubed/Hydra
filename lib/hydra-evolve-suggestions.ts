@@ -179,7 +179,7 @@ function isTooSimilar(existingEntries: SuggestionEntry[], newText: string, thres
  */
 export function addSuggestion(sg: Suggestions, entry: SuggestionEntry): SuggestionEntry | null {
   const dedupText = `${entry.title ?? ''} ${entry.description ?? ''}`;
-  if (dedupText.trim() && isTooSimilar(sg.entries, dedupText)) {
+  if (dedupText.trim() !== '' && isTooSimilar(sg.entries, dedupText)) {
     return null;
   }
 
@@ -284,15 +284,15 @@ export function searchSuggestions(
 ): SuggestionEntry[] {
   let results = [...sg.entries];
 
-  if (opts.status) {
+  if (opts.status != null && opts.status !== '') {
     results = results.filter((e: SuggestionEntry) => e.status === opts.status);
   }
 
-  if (opts.area) {
+  if (opts.area != null && opts.area !== '') {
     results = results.filter((e: SuggestionEntry) => e.area === opts.area);
   }
 
-  if (query) {
+  if (query != null && query !== '') {
     const q = query.toLowerCase();
     results = results.filter(
       (e) =>
@@ -330,7 +330,12 @@ export function createSuggestionFromRound(
   opts: CreateFromRoundOpts = {},
 ): SuggestionEntry | null {
   const improvement = deliberation.selectedImprovement;
-  if (!improvement || improvement === 'No improvement selected' || improvement.length < 10) {
+  if (
+    improvement == null ||
+    improvement === '' ||
+    improvement === 'No improvement selected' ||
+    improvement.length < 10
+  ) {
     return null;
   }
 
@@ -352,7 +357,7 @@ export function createSuggestionFromRound(
   if ((roundResult.score ?? 0) >= 5) priority = 'high';
   if (
     (roundResult.score ?? 0) <= 1 &&
-    roundResult.investigations?.diagnoses?.every((d) => d.diagnosis === 'transient')
+    roundResult.investigations?.diagnoses?.every((d) => d.diagnosis === 'transient') === true
   ) {
     // Low score due to transient failures (timeouts etc.) — likely worth retrying
     priority = 'high';
@@ -360,7 +365,10 @@ export function createSuggestionFromRound(
 
   return addSuggestion(sg, {
     source,
-    sourceRef: opts.sessionId ? `${opts.sessionId}/round-${String(roundResult.round ?? '')}` : null,
+    sourceRef:
+      opts.sessionId != null && opts.sessionId !== ''
+        ? `${opts.sessionId}/round-${String(roundResult.round ?? '')}`
+        : null,
     area: roundResult.area,
     title,
     description: improvement,
@@ -368,8 +376,8 @@ export function createSuggestionFromRound(
     priority,
     tags: [
       roundResult.area ?? '',
-      source.split(':')[1] || source,
-      ...(roundResult.verdict ? [roundResult.verdict] : []),
+      source.split(':')[1] === '' ? source : source.split(':')[1],
+      ...(roundResult.verdict != null && roundResult.verdict !== '' ? [roundResult.verdict] : []),
     ],
     notes: opts.notes ?? '',
   });
@@ -429,17 +437,19 @@ export async function promptSuggestionPicker(
       const idTag = pc.dim(`[${s.id ?? ''}]`);
       const areaTag = pc.yellow(s.area);
       const titleText =
-        (s.title ?? '').length > 60 ? `${(s.title ?? '').slice(0, 57)}...` : s.title ?? '';
+        (s.title ?? '').length > 60 ? `${(s.title ?? '').slice(0, 57)}...` : (s.title ?? '');
 
       console.error(`${num} ${idTag} ${areaTag}: ${titleText} ${pc.dim(`(${s.priority ?? ''})`)}`);
 
       // Second line with attempt info
       const parts = [];
       if ((s.attempts ?? 0) > 0) {
-        parts.push(`Last: ${s.lastAttemptVerdict ?? '?'} (${s.lastAttemptScore != null ? String(s.lastAttemptScore) : '?'}/10)`);
+        parts.push(
+          `Last: ${s.lastAttemptVerdict ?? '?'} (${s.lastAttemptScore == null ? '?' : String(s.lastAttemptScore)}/10)`,
+        );
         parts.push(`Attempts: ${String(s.attempts ?? 0)}/${String(s.maxAttempts ?? 0)}`);
       }
-      if (s.specPath) {
+      if (s.specPath != null && s.specPath !== '') {
         parts.push('has spec');
       }
       if (parts.length > 0) {

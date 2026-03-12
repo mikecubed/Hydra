@@ -1,4 +1,3 @@
-#!/usr/bin/env node
 /**
  * Hydra verification command resolution.
  *
@@ -94,7 +93,7 @@ export function chooseAutoVerificationCommand(
   // If there's a test script, use it as a safe Node default.
   // Skip the npm-init placeholder: echo "Error: no test specified" && exit 1
   if (scripts['test']) {
-    const raw = scripts['test'].trim();
+    const raw = String(scripts['test'] ?? '').trim();
     const isPlaceholder = /no test specified/i.test(raw) && /\bexit\s+1\b/i.test(raw);
     if (!isPlaceholder) {
       return { command: 'npm test', reason: 'Detected package.json script: test' };
@@ -121,7 +120,8 @@ export function chooseAutoVerificationCommand(
 }
 
 function parseTimeoutMs(value: unknown): number {
-  const parsed = Number.parseInt(typeof value === 'string' ? value : '', 10);
+  const parsed =
+    typeof value === 'number' ? value : Number.parseInt(typeof value === 'string' ? value : '', 10);
   if (!Number.isFinite(parsed) || parsed <= 0) {
     return DEFAULT_TIMEOUT_MS;
   }

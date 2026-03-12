@@ -127,7 +127,7 @@ const circuitState = new Map<string, CircuitState>(); // model → { failures: [
  * @param {string} model - Model ID that failed
  */
 export function recordModelFailure(model: string): void {
-  if (!model) return;
+  if (model === '') return;
   const cfg = loadHydraConfig();
   const cbCfg =
     (((cfg as Record<string, unknown>)['modelRecovery'] as Record<string, unknown> | undefined)?.[
@@ -162,7 +162,7 @@ export function recordModelFailure(model: string): void {
  * @returns {boolean}
  */
 export function isCircuitOpen(model: string): boolean {
-  if (!model) return false;
+  if (model === '') return false;
   const cfg = loadHydraConfig();
   const cbCfg =
     (((cfg as Record<string, unknown>)['modelRecovery'] as Record<string, unknown> | undefined)?.[
@@ -171,7 +171,7 @@ export function isCircuitOpen(model: string): boolean {
   if (cbCfg['enabled'] === false) return false;
 
   const state = circuitState.get(model);
-  if (!state?.isOpen) return false;
+  if (state?.isOpen !== true) return false;
 
   // Auto-reset after window elapses
   const windowMs2 = (cbCfg['windowMs'] as number | undefined) ?? 300_000;
@@ -209,7 +209,7 @@ export function getCircuitState(): Record<
  * @param {string} [model] - Model ID, or undefined to reset all
  */
 export function resetCircuitBreaker(model?: string): void {
-  if (model) {
+  if (model != null && model !== '') {
     circuitState.delete(model);
   } else {
     circuitState.clear();
@@ -311,7 +311,7 @@ export function detectUsageLimitError(
   result: Record<string, unknown>,
 ): { isUsageLimit: boolean; resetInSeconds: number | null; errorMessage: string } {
   // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition -- runtime callers may pass null despite types
-  if (!result || result['ok']) {
+  if (result == null || result['ok'] === true) {
     return { isUsageLimit: false, resetInSeconds: null, errorMessage: '' };
   }
 
@@ -358,7 +358,7 @@ export function detectUsageLimitError(
  * @returns {string}
  */
 export function formatResetTime(resetInSeconds: number | null): string {
-  if (!resetInSeconds || resetInSeconds <= 0) return 'unknown';
+  if (resetInSeconds == null || resetInSeconds <= 0) return 'unknown';
   if (resetInSeconds >= 86400) return `${(resetInSeconds / 86400).toFixed(1)} days`;
   if (resetInSeconds >= 3600) return `${(resetInSeconds / 3600).toFixed(1)} hours`;
   if (resetInSeconds >= 60) return `${String(Math.round(resetInSeconds / 60))} min`;
@@ -409,7 +409,8 @@ export async function verifyAgentQuota(
     }
     return { verified: 'unknown', reason: `unknown agent: ${agent}` };
   } catch (err: unknown) {
-    return { verified: 'unknown', reason: (err as Error).message.slice(0, 80) || 'network error' };
+    const errMsg = (err as Error).message.slice(0, 80);
+    return { verified: 'unknown', reason: errMsg === '' ? 'network error' : errMsg };
   }
 }
 
@@ -427,7 +428,7 @@ export function detectRateLimitError(
   result: Record<string, unknown>,
 ): { isRateLimit: boolean; retryAfterMs: number | null; errorMessage: string } {
   // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition -- runtime callers may pass null despite types
-  if (!result || result['ok']) {
+  if (result == null || result['ok'] === true) {
     return { isRateLimit: false, retryAfterMs: null, errorMessage: '' };
   }
 
@@ -475,7 +476,7 @@ export function calculateBackoff(
   const { baseDelayMs = 5000, maxDelayMs = 60_000, retryAfterMs } = opts;
 
   // Honour server-suggested delay if present
-  if (retryAfterMs && retryAfterMs > 0) {
+  if (retryAfterMs != null && retryAfterMs > 0) {
     return Math.min(retryAfterMs, maxDelayMs);
   }
 
@@ -498,7 +499,7 @@ export function detectModelError(
   result: Record<string, unknown>,
 ): { isModelError: boolean; failedModel: string | null; errorMessage: string } {
   // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition -- runtime callers may pass null despite types
-  if (!result || result['ok']) {
+  if (result == null || result['ok'] === true) {
     return { isModelError: false, failedModel: null, errorMessage: '' };
   }
 
@@ -544,16 +545,23 @@ export function detectCodexError(
   result: Record<string, unknown>,
 ): { isCodexError: boolean; category: string; errorMessage: string } {
   // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition -- runtime callers may pass null despite types
-  if (!result || result['ok'] || agent !== 'codex') {
+  if (result == null || result['ok'] === true || agent !== 'codex') {
     return { isCodexError: false, category: '', errorMessage: '' };
   }
 
   // If diagnoseAgentError already classified it, use that
-  if (result['errorCategory'] && result['errorCategory'] !== 'unclassified') {
+  if (
+    typeof result['errorCategory'] === 'string' &&
+    result['errorCategory'] !== '' &&
+    result['errorCategory'] !== 'unclassified'
+  ) {
     return {
       isCodexError: true,
-      category: result['errorCategory'] as string,
-      errorMessage: (result['errorDetail'] as string | undefined) ?? (result['error'] as string | undefined) ?? '',
+      category: result['errorCategory'],
+      errorMessage:
+        (result['errorDetail'] as string | undefined) ??
+        (result['error'] as string | undefined) ??
+        '',
     };
   }
 
@@ -576,13 +584,14 @@ export function detectCodexError(
 
   // Empty output with non-zero exit or signal = silent crash
   if (
-    ((result['exitCode'] as number | null | undefined) !== 0 || result['signal']) &&
-    !((result['output'] as string | undefined) ?? '').trim() &&
-    !((result['stderr'] as string | undefined) ?? '').trim()
+    ((result['exitCode'] as number | null | undefined) !== 0 || result['signal'] != null) &&
+    ((result['output'] as string | undefined) ?? '').trim() === '' &&
+    ((result['stderr'] as string | undefined) ?? '').trim() === ''
   ) {
-    const reason = result['signal']
-      ? `signal ${(result['signal'] as string | null) ?? ''}`
-      : `code ${String((result['exitCode'] as number | null) ?? '')}`;
+    const reason =
+      result['signal'] == null
+        ? `code ${String((result['exitCode'] as number | null) ?? '')}`
+        : `signal ${(result['signal'] as string | null) ?? ''}`;
     return {
       isCodexError: true,
       category: 'silent-crash',
@@ -591,7 +600,7 @@ export function detectCodexError(
   }
 
   // Handle signal-based aborts even if there was some output
-  if (result['signal'] && !result['ok']) {
+  if (result['signal'] != null && result['ok'] !== true) {
     return {
       isCodexError: true,
       category: 'signal',
@@ -603,8 +612,8 @@ export function detectCodexError(
   // Instead of returning false (which loses the error to "unclassified" limbo),
   // classify it as a Codex-specific unknown error with rich diagnostic context.
   const hasOutput =
-    ((result['stderr'] as string | undefined) ?? '').trim() ||
-    ((result['output'] as string | undefined) ?? '').trim();
+    ((result['stderr'] as string | undefined) ?? '').trim() !== '' ||
+    ((result['output'] as string | undefined) ?? '').trim() !== '';
   if (
     ((result['exitCode'] as number | null | undefined) !== 0 ||
       ((result['exitCode'] as number | null | undefined) === null && hasOutput)) &&
@@ -630,11 +639,12 @@ export function detectCodexError(
     return {
       isCodexError: true,
       category: 'codex-unknown',
-      errorMessage:
-        `Codex ${exitInfo}: ${stderrTail || errorTail || 'no context'}${jsonlContext}`.slice(
-          0,
-          500,
-        ),
+      errorMessage: (() => {
+        let diagCtx = 'no context';
+        if (stderrTail !== '') diagCtx = stderrTail;
+        else if (errorTail !== '') diagCtx = errorTail;
+        return `Codex ${exitInfo}: ${diagCtx}${jsonlContext}`.slice(0, 500);
+      })(),
     };
   }
 
@@ -650,16 +660,21 @@ export function detectCodexError(
 function extractCodexErrorsFromResult(result: Record<string, unknown>): string[] {
   const raw =
     (result['stdout'] as string | undefined) ?? (result['output'] as string | undefined) ?? '';
-  if (!raw || typeof raw !== 'string') return [];
-  const errors = [];
+  if (raw === '') return [];
+  const errors: string[] = [];
   for (const line of raw.split('\n')) {
     const trimmed = line.trim();
     if (!trimmed.startsWith('{')) continue;
     try {
-      const obj = JSON.parse(trimmed);
-      if (obj.type === 'error' && obj.message) errors.push(obj.message);
-      else if (obj.error?.message) errors.push(obj.error.message);
-      else if (obj.error && typeof obj.error === 'string') errors.push(obj.error);
+      const obj = JSON.parse(trimmed) as { type?: unknown; message?: unknown; error?: unknown };
+      if (obj.type === 'error' && typeof obj.message === 'string') errors.push(obj.message);
+      else if (
+        obj.error != null &&
+        typeof obj.error === 'object' &&
+        typeof (obj.error as Record<string, unknown>)['message'] === 'string'
+      )
+        errors.push((obj.error as Record<string, unknown>)['message'] as string);
+      else if (typeof obj.error === 'string' && obj.error !== '') errors.push(obj.error);
     } catch {
       /* skip non-JSON */
     }
@@ -695,14 +710,20 @@ export function getFallbackCandidates(
     )?.[agent] ?? {};
 
   const seen = new Set<string>();
-  const failed = (failedModel || '').toLowerCase();
+  const failed = failedModel.toLowerCase();
   const candidates: Array<{ id: string; label: string; source: string; qualityScore?: number }> =
     [];
 
   // 1. Config presets in priority order
   for (const preset of ['default', 'fast', 'cheap']) {
     const modelId = agentModels[preset];
-    if (modelId && modelId.toLowerCase() !== failed && !seen.has(modelId.toLowerCase())) {
+    // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition -- ModelConfig entry may be absent for non-standard agents at runtime
+    if (
+      modelId != null &&
+      modelId !== '' &&
+      modelId.toLowerCase() !== failed &&
+      !seen.has(modelId.toLowerCase())
+    ) {
       seen.add(modelId.toLowerCase());
       const profile = getProfile(modelId);
       candidates.push({
@@ -716,7 +737,7 @@ export function getFallbackCandidates(
 
   // 2. Aliases (deduplicated)
   for (const [alias, modelId] of Object.entries(aliases)) {
-    if (modelId && modelId.toLowerCase() !== failed && !seen.has(modelId.toLowerCase())) {
+    if (modelId !== '' && modelId.toLowerCase() !== failed && !seen.has(modelId.toLowerCase())) {
       seen.add(modelId.toLowerCase());
       const profile = getProfile(modelId);
       candidates.push({
@@ -769,7 +790,7 @@ export async function recoverFromModelError(
     return { recovered: false, newModel: null };
   }
 
-  const isInteractive = opts['rl'] && process.stdout.isTTY;
+  const isInteractive = opts['rl'] != null && process.stdout.isTTY;
 
   let selected: string | null | undefined;
 
@@ -784,8 +805,8 @@ export async function recoverFromModelError(
       options.push('Skip (disable agent)');
 
       const result = await promptChoice(opts['rl'] as object, {
-        title: `Model error: ${failedModel || 'unknown'} is unavailable for ${agent}`,
-        context: { 'Failed model': failedModel || 'unknown', Agent: agent },
+        title: `Model error: ${failedModel === '' ? 'unknown' : failedModel} is unavailable for ${agent}`,
+        context: { 'Failed model': failedModel === '' ? 'unknown' : failedModel, Agent: agent },
         choices: options,
       });
       const value = (result as { value?: string }).value;
@@ -797,7 +818,7 @@ export async function recoverFromModelError(
       if (value === 'Browse all models...') {
         // Delegate to full model picker
         const pickedModel = await pickModel(agent);
-        if (pickedModel) {
+        if (pickedModel != null && pickedModel !== '') {
           selected = pickedModel;
         } else {
           return { recovered: false, newModel: null };
@@ -819,7 +840,7 @@ export async function recoverFromModelError(
     selected = candidates[0].id;
   }
 
-  if (!selected) {
+  if (selected == null || selected === '') {
     return { recovered: false, newModel: null };
   }
 

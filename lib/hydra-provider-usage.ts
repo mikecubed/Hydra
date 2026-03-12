@@ -100,7 +100,7 @@ export function recordProviderUsage(
   const output = data.outputTokens ?? 0;
   const cost =
     data.cost ??
-    (data.model
+    (data.model != null && data.model !== ''
       ? estimateCost(data.model, {
           prompt_tokens: input,
           completion_tokens: output,
@@ -175,7 +175,7 @@ export function getExternalSummary(): string[] {
   for (const [name, data] of Object.entries(_usage)) {
     if (!data.external) continue;
     const e = data.external;
-    const totalTokens = (e.inputTokens || 0) + (e.outputTokens || 0);
+    const totalTokens = e.inputTokens + e.outputTokens;
     let tokenStr: string;
     if (totalTokens >= 1_000_000) {
       tokenStr = `${(totalTokens / 1_000_000).toFixed(1)}M`;
@@ -214,18 +214,22 @@ function todayKey(): string {
 export function loadProviderUsage(): void {
   try {
     if (!fs.existsSync(USAGE_PATH)) return;
-    const raw = JSON.parse(fs.readFileSync(USAGE_PATH, 'utf8'));
+    const raw = JSON.parse(fs.readFileSync(USAGE_PATH, 'utf8')) as Record<string, unknown>;
     const key = todayKey();
-    const today = raw[key];
-    if (!today) return;
+    const today = raw[key] as Record<string, unknown> | undefined;
+    if (today == null) return;
 
     for (const provider of ['openai', 'anthropic', 'google']) {
-      if (today[provider]) {
-        _usage[provider].today = { ...emptyCounters(), ...today[provider] };
+      const providerData = today[provider];
+      if (providerData != null) {
+        _usage[provider].today = {
+          ...emptyCounters(),
+          ...(providerData as Partial<UsageCounters>),
+        };
       }
     }
 
-    loadRpdState(raw);
+    loadRpdState(raw as Parameters<typeof loadRpdState>[0]);
   } catch {
     // Best effort
   }
@@ -242,7 +246,7 @@ export function saveProviderUsage(): void {
     let existing: Record<string, unknown> = {};
     try {
       if (fs.existsSync(USAGE_PATH)) {
-        existing = JSON.parse(fs.readFileSync(USAGE_PATH, 'utf8'));
+        existing = JSON.parse(fs.readFileSync(USAGE_PATH, 'utf8')) as Record<string, unknown>;
       }
     } catch {
       /* start fresh */
@@ -273,8 +277,10 @@ export function saveProviderUsage(): void {
 // ── External API Integration ────────────────────────────────────────────────
 
 function getAdminKeys() {
-  const cfg = loadHydraConfig() as any;
-  const providers = (cfg.providers as { openai?: { adminKey?: string }; anthropic?: { adminKey?: string } } | undefined) ?? {};
+  const cfg = loadHydraConfig() as unknown as {
+    providers?: { openai?: { adminKey?: string | null }; anthropic?: { adminKey?: string | null } };
+  };
+  const providers = cfg.providers ?? {};
   return {
     openai: process.env['OPENAI_ADMIN_KEY'] ?? providers.openai?.adminKey ?? null,
     anthropic: process.env['ANTHROPIC_ADMIN_KEY'] ?? providers.anthropic?.adminKey ?? null,
@@ -292,8 +298,9 @@ export async function refreshExternalUsage(): Promise<void> {
   const keys = getAdminKeys();
   const tasks: Promise<void>[] = [];
 
-  if (keys.openai) tasks.push(fetchOpenAIUsage(keys.openai));
-  if (keys.anthropic) tasks.push(fetchAnthropicUsage(keys.anthropic));
+  if (keys.openai != null && keys.openai !== '') tasks.push(fetchOpenAIUsage(keys.openai));
+  if (keys.anthropic != null && keys.anthropic !== '')
+    tasks.push(fetchAnthropicUsage(keys.anthropic));
 
   if (tasks.length === 0) return;
 
@@ -313,10 +320,10 @@ async function fetchOpenAIUsage(adminKey: string): Promise<void> {
       signal: AbortSignal.timeout(10_000),
     });
     if (!res.ok) return;
-    const data = (await res.json()) as any;
+    const data = await res.json();
     let inputTokens = 0,
       outputTokens = 0;
-    for (const bucket of (data.data as unknown[] | undefined) ?? []) {
+    for (const bucket of (data as { data?: unknown[] }).data ?? []) {
       for (const result of (bucket as { results?: unknown[] }).results ?? []) {
         inputTokens += (result as { input_tokens?: number }).input_tokens ?? 0;
         outputTokens += (result as { output_tokens?: number }).output_tokens ?? 0;
@@ -341,10 +348,10 @@ async function fetchAnthropicUsage(adminKey: string): Promise<void> {
       signal: AbortSignal.timeout(10_000),
     });
     if (!res.ok) return;
-    const data = (await res.json()) as any;
+    const data = await res.json();
     let inputTokens = 0,
       outputTokens = 0;
-    for (const entry of (data.data as unknown[] | undefined) ?? []) {
+    for (const entry of (data as { data?: unknown[] }).data ?? []) {
       inputTokens += (entry as { input_tokens?: number }).input_tokens ?? 0;
       outputTokens += (entry as { output_tokens?: number }).output_tokens ?? 0;
     }

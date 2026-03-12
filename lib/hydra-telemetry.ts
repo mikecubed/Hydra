@@ -166,25 +166,26 @@ export async function startAgentSpan(
   if (!tracer) return NOOP_SPAN;
 
   const spanOpts: Record<string, unknown> = {};
-  if (opts.parentSpan && !opts.parentSpan._noop) {
+  if (opts.parentSpan && opts.parentSpan._noop !== true) {
     const ctx = api.trace.setSpan(api.context.active(), opts.parentSpan);
     spanOpts['context'] = ctx;
   }
 
-  const spanName = opts.phase ? `${agent}/${opts.phase}` : `${agent}/execute`;
+  const spanName =
+    opts.phase != null && opts.phase !== '' ? `${agent}/${opts.phase}` : `${agent}/execute`;
 
   const span = tracer.startSpan(spanName, {
     kind: api.SpanKind.CLIENT,
     attributes: {
       'gen_ai.system': agent,
-      'gen_ai.request.model': model || 'unknown',
+      'gen_ai.request.model': model === '' ? 'unknown' : model,
       'gen_ai.agent.name': agent,
       'gen_ai.operation.name': opts.phase ?? 'execute',
     },
     ...spanOpts,
   });
 
-  if (opts.taskType) {
+  if (opts.taskType != null && opts.taskType !== '') {
     span.setAttribute('hydra.task_type', opts.taskType);
   }
 
@@ -201,7 +202,8 @@ export async function endAgentSpan(
   span: OTelSpan & { _noop?: boolean },
   result: AgentResult,
 ): Promise<void> {
-  if (span._noop) return;
+  // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition -- span may be null at runtime
+  if (span == null || span._noop === true) return;
 
   const api = await loadOTel();
   if (!api) return;
@@ -212,20 +214,20 @@ export async function endAgentSpan(
   if (result.exitCode != null) {
     span.setAttribute('hydra.exit_code', result.exitCode);
   }
-  if (result.timedOut) {
+  if (result.timedOut === true) {
     span.setAttribute('hydra.timed_out', true);
   }
-  if (result.recovered) {
+  if (result.recovered === true) {
     span.setAttribute('hydra.recovered', true);
     span.setAttribute('hydra.original_model', result.originalModel ?? '');
     span.setAttribute('hydra.new_model', result.newModel ?? '');
   }
 
-  if (result.ok) {
+  if (result.ok === true) {
     span.setStatus({ code: api.SpanStatusCode.OK });
   } else {
     span.setStatus({ code: api.SpanStatusCode.ERROR, message: result.error ?? 'agent failed' });
-    if (result.error) {
+    if (result.error != null && result.error !== '') {
       span.recordException(new Error(result.error));
     }
   }
@@ -279,7 +281,8 @@ export async function endProviderSpan(
   usage?: TokenUsage | null,
   latencyMs?: number | null,
 ): Promise<void> {
-  if (span._noop) return;
+  // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition -- span may be null at runtime
+  if (span == null || span._noop === true) return;
 
   const api = await loadOTel();
   if (!api) return;
@@ -337,14 +340,15 @@ export async function endPipelineSpan(
   span: OTelSpan & { _noop?: boolean },
   opts: PipelineSpanOpts = {},
 ): Promise<void> {
-  if (span._noop) return;
+  // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition -- span may be null at runtime
+  if (span == null || span._noop === true) return;
 
   const api = await loadOTel();
   if (!api) return;
 
   if (opts.ok === false) {
     span.setStatus({ code: api.SpanStatusCode.ERROR, message: opts.error ?? 'pipeline failed' });
-    if (opts.error) span.recordException(new Error(opts.error));
+    if (opts.error != null && opts.error !== '') span.recordException(new Error(opts.error));
   } else {
     span.setStatus({ code: api.SpanStatusCode.OK });
   }

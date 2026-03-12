@@ -40,8 +40,20 @@ interface SetupFlags {
 }
 
 /** Cross-platform spawnSync — uses cross-spawn on Windows for .cmd/.bat shim support. */
-const spawnSync = (cmd: string, args: string[], opts: Record<string, unknown>) =>
-  crossSpawn.sync(cmd, args, opts as Parameters<typeof crossSpawn.sync>[2]);
+const spawnSync = (
+  cmd: string,
+  args: string[],
+  opts: Record<string, unknown>,
+): { status: number | null; stderr: string | null } =>
+  (
+    crossSpawn as unknown as {
+      sync: (
+        c: string,
+        a: string[],
+        o: unknown,
+      ) => { status: number | null; stderr: string | null };
+    }
+  ).sync(cmd, args, opts);
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -126,7 +138,8 @@ export function buildMcpServerEntry(agent: string): Record<string, unknown> | st
 export function readJsonFile(filePath: string): Record<string, unknown> {
   try {
     const raw = fs.readFileSync(filePath, 'utf8');
-    if (!raw.trim()) return {};
+    if (raw.trim() === '') return {};
+    // eslint-disable-next-line @typescript-eslint/no-unsafe-return -- JSON.parse returns any
     return JSON.parse(raw);
   } catch {
     return {};
@@ -165,7 +178,9 @@ function defaultClaudeConfigPath() {
  * @param {boolean} [opts.force] Overwrite existing entry
  * @returns {{ status: 'added'|'exists'|'updated' }}
  */
-export function mergeClaudeConfig(opts: MergeConfigOptions = {}): { status: 'added' | 'exists' | 'updated' } {
+export function mergeClaudeConfig(opts: MergeConfigOptions = {}): {
+  status: 'added' | 'exists' | 'updated';
+} {
   const configPath = opts.configPath ?? defaultClaudeConfigPath();
   const force = Boolean(opts.force);
 
@@ -173,10 +188,12 @@ export function mergeClaudeConfig(opts: MergeConfigOptions = {}): { status: 'add
   config['mcpServers'] ??= {};
   const mcpServers = config['mcpServers'] as Record<string, unknown>;
 
+  // eslint-disable-next-line @typescript-eslint/strict-boolean-expressions -- untyped config value
   if (mcpServers['hydra'] && !force) {
     return { status: 'exists' as const };
   }
 
+  // eslint-disable-next-line @typescript-eslint/strict-boolean-expressions -- untyped config value
   const status = mcpServers['hydra'] ? ('updated' as const) : ('added' as const);
   mcpServers['hydra'] = buildMcpServerEntry('claude');
   writeJsonFile(configPath, config);
@@ -191,7 +208,9 @@ export function mergeClaudeConfig(opts: MergeConfigOptions = {}): { status: 'add
  * @param {string} [opts.configPath] Override config path (for testing)
  * @returns {{ status: 'removed'|'not_found' }}
  */
-export function unmergeClaudeConfig(opts: MergeConfigOptions = {}): { status: 'removed' | 'not_found' } {
+export function unmergeClaudeConfig(opts: MergeConfigOptions = {}): {
+  status: 'removed' | 'not_found';
+} {
   const configPath = opts.configPath ?? defaultClaudeConfigPath();
 
   if (!fs.existsSync(configPath)) {
@@ -200,6 +219,7 @@ export function unmergeClaudeConfig(opts: MergeConfigOptions = {}): { status: 'r
 
   const config = readJsonFile(configPath);
   const mcpServers = config['mcpServers'] as Record<string, unknown> | undefined;
+  // eslint-disable-next-line @typescript-eslint/strict-boolean-expressions -- untyped config value
   if (!mcpServers?.['hydra']) {
     return { status: 'not_found' as const };
   }
@@ -228,7 +248,9 @@ function defaultGeminiConfigPath() {
  * @param {boolean} [opts.force] Overwrite existing entry
  * @returns {{ status: 'added'|'exists'|'updated' }}
  */
-export function mergeGeminiConfig(opts: MergeConfigOptions = {}): { status: 'added' | 'exists' | 'updated' } {
+export function mergeGeminiConfig(opts: MergeConfigOptions = {}): {
+  status: 'added' | 'exists' | 'updated';
+} {
   const configPath = opts.configPath ?? defaultGeminiConfigPath();
   const force = Boolean(opts.force);
 
@@ -236,10 +258,12 @@ export function mergeGeminiConfig(opts: MergeConfigOptions = {}): { status: 'add
   config['mcpServers'] ??= {};
   const mcpServers = config['mcpServers'] as Record<string, unknown>;
 
+  // eslint-disable-next-line @typescript-eslint/strict-boolean-expressions -- untyped config value
   if (mcpServers['hydra'] && !force) {
     return { status: 'exists' as const };
   }
 
+  // eslint-disable-next-line @typescript-eslint/strict-boolean-expressions -- untyped config value
   const status = mcpServers['hydra'] ? ('updated' as const) : ('added' as const);
   mcpServers['hydra'] = buildMcpServerEntry('gemini');
   writeJsonFile(configPath, config);
@@ -254,7 +278,9 @@ export function mergeGeminiConfig(opts: MergeConfigOptions = {}): { status: 'add
  * @param {string} [opts.configPath] Override config path (for testing)
  * @returns {{ status: 'removed'|'not_found' }}
  */
-export function unmergeGeminiConfig(opts: MergeConfigOptions = {}): { status: 'removed' | 'not_found' } {
+export function unmergeGeminiConfig(opts: MergeConfigOptions = {}): {
+  status: 'removed' | 'not_found';
+} {
   const configPath = opts.configPath ?? defaultGeminiConfigPath();
 
   if (!fs.existsSync(configPath)) {
@@ -263,6 +289,7 @@ export function unmergeGeminiConfig(opts: MergeConfigOptions = {}): { status: 'r
 
   const config = readJsonFile(configPath);
   const mcpServers = config['mcpServers'] as Record<string, unknown> | undefined;
+  // eslint-disable-next-line @typescript-eslint/strict-boolean-expressions -- untyped config value
   if (!mcpServers?.['hydra']) {
     return { status: 'not_found' as const };
   }
@@ -293,9 +320,10 @@ export function registerCodexMcp(): { status: 'added' | 'error'; error?: string 
     if (result.status === 0) {
       return { status: 'added' as const };
     }
+    const errText = (result.stderr ?? '').trim();
     return {
       status: 'error' as const,
-      error: String(result.stderr ?? '').trim() || `exit code ${String(result.status)}`,
+      error: errText === '' ? `exit code ${String(result.status)}` : errText,
     };
   } catch (err: unknown) {
     return { status: 'error' as const, error: (err as Error).message };
@@ -307,7 +335,10 @@ export function registerCodexMcp(): { status: 'added' | 'error'; error?: string 
  *
  * @returns {{ status: 'removed'|'not_found'|'error', error?: string }}
  */
-export function unregisterCodexMcp(): { status: 'removed' | 'not_found' | 'error'; error?: string } {
+export function unregisterCodexMcp(): {
+  status: 'removed' | 'not_found' | 'error';
+  error?: string;
+} {
   try {
     const result = spawnSync('codex', ['mcp', 'remove', 'hydra'], {
       encoding: 'utf8',
@@ -318,11 +349,14 @@ export function unregisterCodexMcp(): { status: 'removed' | 'not_found' | 'error
     if (result.status === 0) {
       return { status: 'removed' as const };
     }
-    const stderr = String(result.stderr ?? '').trim();
+    const stderr = (result.stderr ?? '').trim();
     if (stderr.includes('not found') || stderr.includes('does not exist')) {
       return { status: 'not_found' as const };
     }
-    return { status: 'error' as const, error: stderr || `exit code ${String(result.status)}` };
+    return {
+      status: 'error' as const,
+      error: stderr === '' ? `exit code ${String(result.status)}` : stderr,
+    };
   } catch (err: unknown) {
     return { status: 'error' as const, error: (err as Error).message };
   }
@@ -425,10 +459,10 @@ function parseSetupArgs(argv: string[]): {
         }
         flags[arg.slice(2)] = true;
       }
-    } else if (subcommand) {
-      positionals.push(arg);
-    } else {
+    } else if (subcommand === '') {
       subcommand = arg;
+    } else {
+      positionals.push(arg);
     }
   }
 
@@ -460,14 +494,17 @@ export const KNOWN_CLI_MCP_PATHS = {
  * @param {boolean} [opts.force] - Overwrite existing entry
  * @returns {{ status: 'added'|'exists'|'updated'|'manual'|'error', instructions?: string }}
  */
-export function registerCustomAgentMcp(opts: RegisterMcpOptions = {}): { status: 'added' | 'exists' | 'updated' | 'manual' | 'error'; instructions?: string } {
+export function registerCustomAgentMcp(opts: RegisterMcpOptions = {}): {
+  status: 'added' | 'exists' | 'updated' | 'manual' | 'error';
+  instructions?: string;
+} {
   const { configPath, format, force = false } = opts;
   const mcpPath = resolveMcpServerPath();
   const nodePath = resolveNodePath();
 
   const manualInstructions = `Add this to your agent's MCP configuration:\n\n  Name: hydra\n  Command: ${nodePath}\n  Args: ${mcpPath}\n\nOr if your agent uses a JSON config with an "mcpServers" field:\n  {\n    "mcpServers": {\n      "hydra": {\n        "type": "stdio",\n        "command": "${nodePath}",\n        "args": ["${mcpPath}"]\n      }\n    }\n  }`;
 
-  if (!configPath || format !== 'json') {
+  if (configPath == null || configPath === '' || format !== 'json') {
     return { status: 'manual' as const, instructions: manualInstructions };
   }
 
@@ -476,10 +513,12 @@ export function registerCustomAgentMcp(opts: RegisterMcpOptions = {}): { status:
     config['mcpServers'] ??= {};
     const mcpServers = config['mcpServers'] as Record<string, unknown>;
 
+    // eslint-disable-next-line @typescript-eslint/strict-boolean-expressions -- untyped config value
     if (mcpServers['hydra'] && !force) {
       return { status: 'exists' as const };
     }
 
+    // eslint-disable-next-line @typescript-eslint/strict-boolean-expressions -- untyped config value
     const status = mcpServers['hydra'] ? ('updated' as const) : ('added' as const);
     mcpServers['hydra'] = {
       type: 'stdio',
@@ -512,6 +551,7 @@ export function mergeCopilotConfig(opts: { force?: boolean } = {}): {
   if (fs.existsSync(configPath)) {
     try {
       const parsed = JSON.parse(fs.readFileSync(configPath, 'utf8')) as unknown;
+      // eslint-disable-next-line @typescript-eslint/strict-boolean-expressions -- unknown type from JSON.parse
       if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
         config = parsed as Record<string, unknown>;
       }
@@ -523,7 +563,8 @@ export function mergeCopilotConfig(opts: { force?: boolean } = {}): {
   config['mcpServers'] ??= {};
   const mcpServers = config['mcpServers'] as Record<string, unknown>;
 
-  if (!opts.force && mcpServers['hydra']) {
+  // eslint-disable-next-line @typescript-eslint/strict-boolean-expressions -- untyped config value
+  if (opts.force !== true && mcpServers['hydra']) {
     return { status: 'already_registered', path: configPath };
   }
 
@@ -556,6 +597,7 @@ export function unmergeCopilotConfig(): { status: 'unregistered' | 'not_found'; 
   }
 
   const mcpServers = config['mcpServers'] as Record<string, unknown> | undefined;
+  // eslint-disable-next-line @typescript-eslint/strict-boolean-expressions -- untyped config value
   if (!mcpServers?.['hydra']) {
     return { status: 'not_found', path: configPath };
   }
@@ -574,7 +616,7 @@ export async function main(argv?: string[]): Promise<{ ok: boolean; message: str
   const { subcommand, flags, positionals } = parseSetupArgs(effectiveArgv);
 
   // --help
-  if (flags.help || subcommand === 'help') {
+  if (flags.help === true || subcommand === 'help') {
     console.log(HELP_TEXT);
     return { ok: true, message: 'help' };
   }
@@ -593,7 +635,7 @@ export async function main(argv?: string[]): Promise<{ ok: boolean; message: str
   console.log(HELP_TEXT);
   return {
     ok: false,
-    message: subcommand ? `Unknown command: ${subcommand}` : 'No command specified',
+    message: subcommand === '' ? 'No command specified' : `Unknown command: ${subcommand}`,
   };
 }
 
@@ -748,8 +790,9 @@ async function runInit(
 
 // ── Direct CLI entry ────────────────────────────────────────────────────────
 
+const argv1 = process.argv[1] as string | undefined;
 const isDirectRun =
-  process.argv[1] && path.resolve(process.argv[1]).replace(/\\/g, '/').endsWith('hydra-setup.ts');
+  argv1 != null && path.resolve(argv1).replace(/\\/g, '/').endsWith('hydra-setup.ts');
 
 if (isDirectRun) {
   main().catch((err: unknown) => {

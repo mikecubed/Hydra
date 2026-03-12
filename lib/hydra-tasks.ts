@@ -190,7 +190,7 @@ async function selectTasks(rl: readline.Interface, scannedTasks: ScannedTask[]) 
   );
   const answer = await askLine(rl, pc.bold('  Select tasks: '));
 
-  if (!answer || answer === 'q' || answer === 'quit') return null;
+  if (answer === '' || answer === 'q' || answer === 'quit') return null;
 
   if (answer === 'all') {
     return scannedTasks.slice(0, 10);
@@ -198,7 +198,7 @@ async function selectTasks(rl: readline.Interface, scannedTasks: ScannedTask[]) 
 
   if (answer === 'add' || answer === 'freeform') {
     const text = await askLine(rl, '  Enter task description: ');
-    if (!text) return null;
+    if (text === '') return null;
     return [createUserTask(text)];
   }
 
@@ -238,9 +238,15 @@ async function selectBudget(rl: readline.Interface, cfg: HydraConfig) {
   }
 
   if (idx === presetNames.length) {
-    const hours = Number.parseFloat((await askLine(rl, '  Max hours: ')) || '1') || 1;
-    const pct = Number.parseFloat((await askLine(rl, '  Budget % (0-100): ')) || '20') / 100 || 0.2;
-    const max = Number.parseInt((await askLine(rl, '  Max tasks: ')) || '5', 10) || 5;
+    const hoursRaw = await askLine(rl, '  Max hours: ');
+    const hoursVal = Number.parseFloat(hoursRaw === '' ? '1' : hoursRaw);
+    const hours = Number.isNaN(hoursVal) || hoursVal === 0 ? 1 : hoursVal;
+    const pctRaw = await askLine(rl, '  Budget % (0-100): ');
+    const pctVal = Number.parseFloat(pctRaw === '' ? '20' : pctRaw) / 100;
+    const pct = Number.isNaN(pctVal) || pctVal === 0 ? 0.2 : pctVal;
+    const maxRaw = await askLine(rl, '  Max tasks: ');
+    const maxVal = Number.parseInt(maxRaw === '' ? '5' : maxRaw, 10);
+    const max = Number.isNaN(maxVal) || maxVal === 0 ? 5 : maxVal;
     return {
       maxHours: hours,
       budgetPct: pct,
@@ -257,15 +263,16 @@ async function selectBudget(rl: readline.Interface, cfg: HydraConfig) {
 
 function runVerification(projectRoot: string, cfg: HydraConfig) {
   const plan = resolveVerificationPlan(projectRoot, cfg);
-  if (!plan.enabled || !plan.command) {
+  if (!plan.enabled || plan.command === '') {
     return { ran: false, passed: true, output: '', command: '' };
   }
 
   const parts = plan.command.split(/\s+/);
+  // eslint-disable-next-line @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-member-access -- cross-spawn has no bundled types
   const result = spawn.sync(parts[0], parts.slice(1), {
     cwd: projectRoot,
     encoding: 'utf8',
-    timeout: plan.timeoutMs || 60_000,
+    timeout: plan.timeoutMs === 0 ? 60_000 : plan.timeoutMs,
     windowsHide: true,
   }) as { status: number | null; stdout: string; stderr: string };
 
@@ -313,7 +320,7 @@ Then explain your reasoning briefly.`;
   });
   recordCallComplete(handle, result as unknown as Parameters<typeof recordCallComplete>[1]);
 
-  if (!result.ok || !result.output) {
+  if (!result.ok || result.output === '') {
     return { verdict: 'approve', reason: 'Verifier unavailable — defaulting to approve' };
   }
 
@@ -407,7 +414,7 @@ async function executeTask(
       const planPrompt = `Create a brief implementation plan (5-7 bullet points) for this task:
 
 Task: ${task.title}
-${task.body ? `\nDescription:\n${task.body}` : ''}
+${task.body != null && task.body !== '' ? `\nDescription:\n${task.body}` : ''}
 ${task.sourceRef === 'manual' ? '' : `\nSource: ${task.sourceRef}`}
 
 Focus on:
@@ -431,7 +438,7 @@ Be concise — this is a planning checklist, not a design doc.`;
 
       result.phases['plan'] = {
         status: planResult.ok ? 'done' : 'failed',
-        output: planResult.output.slice(0, 2048) || '',
+        output: planResult.output.slice(0, 2048),
       };
 
       if (!planResult.ok) {
@@ -452,13 +459,13 @@ Be concise — this is a planning checklist, not a design doc.`;
 
     const instructionFile = getAgentInstructionFile(task.suggestedAgent, projectRoot);
     const planOutput = (result.phases['plan']['output'] as string | undefined) ?? '';
-    const planSection = planOutput ? `\n\n## Implementation Plan\n${planOutput}` : '';
+    const planSection = planOutput === '' ? '' : `\n\n## Implementation Plan\n${planOutput}`;
 
     const executePrompt = `${safetyRules}
 
 ## Task
 ${task.title}
-${task.body ? `\n### Description\n${task.body}` : ''}
+${task.body != null && task.body !== '' ? `\n### Description\n${task.body}` : ''}
 ${task.sourceRef === 'manual' ? '' : `\n### Source Reference\n${task.sourceRef}`}
 ${planSection}
 
@@ -508,7 +515,7 @@ Read ${instructionFile} for project conventions.`;
             phase: 'agent',
             agent: task.suggestedAgent,
             error: execResult.error ?? execResult.stderr,
-            output: execResult.output.slice(0, 2048) || '',
+            output: execResult.output.slice(0, 2048),
             timedOut: execResult.timedOut || false,
           });
 
@@ -533,7 +540,11 @@ Read ${instructionFile} for project conventions.`;
               result.phases['execute']['status'] = 'done';
               result.phases['execute']['retried'] = true;
             }
-          } else if (diagnosis.diagnosis === 'fixable' && diagnosis.retryRecommendation?.preamble) {
+          } else if (
+            diagnosis.diagnosis === 'fixable' &&
+            diagnosis.retryRecommendation?.preamble != null &&
+            diagnosis.retryRecommendation.preamble !== ''
+          ) {
             console.log(pc.yellow(`  [INVESTIGATE] Fixable — retrying with corrective prompt...`));
             const correctedPrompt = `${diagnosis.retryRecommendation.preamble}\n\n${executePrompt}`;
             const retryResult = await executeAgentWithRecovery(
@@ -615,8 +626,8 @@ Read ${instructionFile} for project conventions.`;
 
     // Get stats
     const stats = getBranchStats(projectRoot, branchName, baseBranch);
-    result.filesChanged = stats.filesChanged || 0;
-    result.commits = stats.commits || 0;
+    result.filesChanged = stats.filesChanged;
+    result.commits = stats.commits;
 
     // ── VERIFY ──
     console.log(pc.dim(`  [VERIFY] Running verification...`));
@@ -662,13 +673,16 @@ Read ${instructionFile} for project conventions.`;
     const needsCouncil =
       councilCfg['enabled'] !== false &&
       (task.complexity === 'complex' ||
-        (!councilCfg['complexOnly'] && (violations.length > 0 || !verification.passed)));
+        (councilCfg['complexOnly'] !== true && (violations.length > 0 || !verification.passed)));
 
     if (needsCouncil) {
       console.log(pc.dim(`  [DECIDE] Council-lite review...`));
       const diff = getBranchDiff(projectRoot, branchName, baseBranch);
 
-      if (diff) {
+      if (diff === '') {
+        result.verdict = 'approve';
+        result.phases['decide'] = { status: 'skipped', reason: 'no diff' };
+      } else {
         const review = await councilLiteReview(task.suggestedAgent, diff, projectRoot, cfg);
         result.verdict = review.verdict;
         result.phases['decide'] = { status: 'done', verdict: review.verdict };
@@ -682,9 +696,6 @@ Read ${instructionFile} for project conventions.`;
           verdictColor = pc.yellow;
         }
         console.log(`  [DECIDE] Verdict: ${verdictColor(review.verdict)}`);
-      } else {
-        result.verdict = 'approve';
-        result.phases['decide'] = { status: 'skipped', reason: 'no diff' };
       }
     } else {
       // Simple tasks: auto-approve if verification passed
@@ -833,12 +844,21 @@ async function main() {
   let selectedTasks;
 
   // Check for preset/cli overrides
+
   selectedTasks =
+    // eslint-disable-next-line @typescript-eslint/strict-boolean-expressions -- runtime options check
     options['preset'] || options['max']
-      ? scannedTasks.slice(0, Number.parseInt(String(options['max'] || ''), 10) || 5)
+      ? (() => {
+          const parsed = Number.parseInt(
+            String(options['max'] === false ? '' : options['max']),
+            10,
+          );
+          const maxTasks = Number.isNaN(parsed) || parsed === 0 ? 5 : parsed;
+          return scannedTasks.slice(0, maxTasks);
+        })()
       : await selectTasks(rl, scannedTasks);
 
-  if (!selectedTasks || selectedTasks.length === 0) {
+  if (selectedTasks == null || selectedTasks.length === 0) {
     console.log(pc.dim('\nNo tasks selected. Exiting.'));
     rl.close();
     return;
@@ -846,13 +866,18 @@ async function main() {
 
   // ── Budget Selection ──
   let budgetPreset;
-  const presetOpt = String(options['preset'] || '');
+
+  const presetOpt = String(options['preset'] === false ? '' : options['preset']);
   if (presetOpt !== '' && presetOpt in BUDGET_PRESETS) {
     budgetPreset = BUDGET_PRESETS[presetOpt as keyof typeof BUDGET_PRESETS];
+    // eslint-disable-next-line @typescript-eslint/strict-boolean-expressions -- runtime options check
   } else if (options['hours'] || options['budget']) {
     budgetPreset = {
+      // eslint-disable-next-line @typescript-eslint/strict-boolean-expressions -- runtime options check
       maxHours: Number.parseFloat(String(options['hours'] || '1')) || 1,
+      // eslint-disable-next-line @typescript-eslint/strict-boolean-expressions -- runtime options check
       budgetPct: Number.parseFloat(String(options['budget'] || '20')) / 100 || 0.2,
+      // eslint-disable-next-line @typescript-eslint/strict-boolean-expressions -- runtime options check
       maxTasks: Number.parseInt(String(options['max'] || '10'), 10) || 10,
       label: 'CLI override',
     };
@@ -868,7 +893,7 @@ async function main() {
   // ── Budget Tracker Setup ──
   const weeklyBudget = cfg.usage.weeklyTokenBudget?.['claude-opus-4-6'] ?? 25_000_000;
   const tokenBudget = Math.round(weeklyBudget * budgetPreset.budgetPct);
-  // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition -- cfg.tasks may be undefined
+
   const perTaskEstimate = cfg.tasks?.budget?.perTaskEstimate ?? 100_000;
 
   const budget = new BudgetTracker({
@@ -939,6 +964,7 @@ async function main() {
       );
     }
 
+    // eslint-disable-next-line no-await-in-loop -- sequential task execution required
     const result = await executeTask(
       task,
       i,
@@ -966,7 +992,7 @@ async function main() {
     }
     console.log(`\n  ${statusIcon} ${task.title} (${formatDuration(result.durationMs)})`);
 
-    if (stopReason) break;
+    if (stopReason != null) break;
   }
 
   // ── Return to base branch ──
@@ -978,7 +1004,7 @@ async function main() {
 
   // ── Generate Report ──
   const budgetSummary = budget.getSummary();
-  if (stopReason) budgetSummary['stopReason'] = stopReason;
+  if (stopReason != null) budgetSummary['stopReason'] = stopReason;
 
   const report = generateReport(date, results, budgetSummary, {
     preset: budgetPreset.label,
@@ -1010,7 +1036,7 @@ async function main() {
     `  Budget: ${String(Math.round((budgetSummary['percentUsed'] as number) * 100))}% used (${(budgetSummary['consumed'] as number | undefined)?.toLocaleString() ?? '?'} tokens)`,
   );
   console.log(`  Duration: ${formatDuration(budgetSummary['durationMs'] as number)}`);
-  if (stopReason) console.log(`  Stopped: ${pc.yellow(stopReason)}`);
+  if (stopReason != null) console.log(`  Stopped: ${pc.yellow(stopReason)}`);
   console.log(`\n  Report: ${pc.dim(mdPath)}`);
 
   // List branches for review

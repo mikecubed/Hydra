@@ -667,7 +667,7 @@ function activeConfigPath(): string {
 export function loadHydraConfig(): HydraConfig {
   if (_configCache !== null) return _configCache;
   const cfgPath = activeConfigPath();
-  if (!_testConfigPath) {
+  if (_testConfigPath === null) {
     ensureRuntimeRoot();
     if (HYDRA_IS_PACKAGED) {
       seedRuntimeFile(
@@ -698,7 +698,7 @@ export function loadHydraConfig(): HydraConfig {
 
 export function saveHydraConfig(config: DeepPartial<HydraConfig>): HydraConfig {
   const cfgPath = activeConfigPath();
-  if (!_testConfigPath) ensureRuntimeRoot();
+  if (_testConfigPath === null) ensureRuntimeRoot();
   const merged = mergeWithDefaults(config);
   fs.writeFileSync(cfgPath, `${JSON.stringify(merged, null, 2)}\n`, 'utf8');
   _configCache = merged;
