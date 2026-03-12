@@ -104,8 +104,8 @@ function saveCheckpoint(
     round,
     stepIdx,
     transcript,
-    specContent: specContent || null,
-    startedAt: ((transcript[0] as Record<string, unknown>)?.['startedAt'] as string) || nowIso(),
+    specContent: specContent ?? null,
+    startedAt: ((transcript[0] as Record<string, unknown>)[['startedAt'] as string] as string | undefined) ?? nowIso(),
     updatedAt: nowIso(),
   };
   fs.writeFileSync(checkpointPath(promptHash), `${JSON.stringify(data, null, 2)}\n`, 'utf8');
@@ -120,7 +120,7 @@ function deleteCheckpoint(promptHash: string) {
   }
 }
 
-const DEFAULT_URL = process.env['AI_ORCH_URL'] || 'http://127.0.0.1:4173';
+const DEFAULT_URL = process.env['AI_ORCH_URL'] ?? 'http://127.0.0.1:4173';
 const DEFAULT_TIMEOUT_MS = 1000 * 60 * 7;
 
 /**
@@ -218,15 +218,15 @@ function normalizeDecisionOption(item: unknown, index: number) {
     return null;
   }
   const i = item as Record<string, unknown>;
-  const option = cleanText(i['option'] || i['name'] || i['title']);
-  const summary = cleanText(i['summary'] || i['description'] || i['view']);
-  const tradeoffs = normalizeTradeoffs(i['tradeoffs'] || i['criteria'] || i['decision_criteria']);
+  const option = cleanText(i['option'] ?? i['name'] ?? i['title']);
+  const summary = cleanText(i['summary'] ?? i['description'] ?? i['view']);
+  const tradeoffs = normalizeTradeoffs(i['tradeoffs'] ?? i['criteria'] ?? i['decision_criteria']);
   const preferred = i['preferred'] === true;
   if (!option && !summary && !tradeoffs) {
     return null;
   }
   return {
-    option: option || `option_${index + 1}`,
+    option: option || `option_${String(index + 1)}`,
     summary,
     preferred,
     tradeoffs,
@@ -307,14 +307,14 @@ async function callAgentAsync(agent: string, prompt: string, timeoutMs: number) 
   const raw = result as unknown as Record<string, unknown>;
   return {
     ok: result.ok,
-    stdout: result.output || result.stdout || '',
+    stdout: (result.output || result.stdout) ?? '',
     stderr: result.stderr || '',
-    error: result.error || '',
+    error: result.error ?? '',
     exitCode: result.exitCode,
     command: result.command,
     args: result.args,
     promptSnippet: result.promptSnippet,
-    recovered: result.recovered || false,
+    recovered: result.recovered ?? false,
     originalModel: result.originalModel,
     newModel: result.newModel,
     timedOut: raw['timedOut'] as boolean | undefined,
@@ -369,12 +369,12 @@ function extractQuestions(parsed: unknown) {
         questions.push({ to: 'human', question: q.trim() });
       } else if (q && typeof q === 'object') {
         const qi = q as Record<string, unknown>;
-        const question = String(qi['question'] || qi['text'] || '').trim();
+        const question = ((qi['question'] as string | undefined) ?? (qi['text'] as string | undefined) ?? '').trim();
         if (!question) {
           continue;
         }
         questions.push({
-          to: sanitizeOwner(String(qi['to'] || 'human')),
+          to: sanitizeOwner((qi['to'] as string | undefined) ?? 'human'),
           question,
         });
       }
@@ -419,11 +419,11 @@ function extractCouncilSignal(parsed: unknown) {
   if (vote === null) {
     return null;
   }
-  const reason = String(p['council_reason'] || p['reason'] || '').trim();
+  const reason = ((p['council_reason'] as string | undefined) ?? (p['reason'] as string | undefined) ?? '').trim();
   return { vote, reason };
 }
 
-export function extractDecisionOptions(parsed: unknown) {
+export function extractDecisionOptions(parsed: unknown): unknown[] {
   if (!parsed || typeof parsed !== 'object') {
     return [];
   }
@@ -447,7 +447,7 @@ export function extractDecisionOptions(parsed: unknown) {
   });
 }
 
-export function extractAssumptions(parsed: unknown) {
+export function extractAssumptions(parsed: unknown): unknown[] {
   if (!parsed || typeof parsed !== 'object') {
     return [];
   }
@@ -473,7 +473,7 @@ export function extractAssumptions(parsed: unknown) {
         continue;
       }
       const i = item as Record<string, unknown>;
-      const assumption = cleanText(i['assumption'] || i['name'] || i['summary'] || i['question']);
+      const assumption = cleanText(i['assumption'] ?? i['name'] ?? i['summary'] ?? i['question']);
       if (!assumption) {
         continue;
       }
@@ -481,9 +481,9 @@ export function extractAssumptions(parsed: unknown) {
       out.push({
         assumption,
         status: ['validated', 'open', 'rejected'].includes(status) ? status : 'open',
-        evidence: cleanText(i['evidence'] || i['basis']),
-        impact: cleanText(i['impact'] || i['risk']),
-        owner: sanitizeOwner(String(i['owner'] || i['to'] || 'unassigned')),
+        evidence: cleanText(i['evidence'] ?? i['basis']),
+        impact: cleanText(i['impact'] ?? i['risk']),
+        owner: sanitizeOwner((i['owner'] as string | undefined) ?? (i['to'] as string | undefined) ?? 'unassigned'),
       });
     }
   }
@@ -493,7 +493,7 @@ export function extractAssumptions(parsed: unknown) {
   );
 }
 
-export function extractAssumptionAttacks(parsed: unknown) {
+export function extractAssumptionAttacks(parsed: unknown): unknown[] {
   if (!parsed || typeof parsed !== 'object') {
     return [];
   }
@@ -528,14 +528,14 @@ export function extractAssumptionAttacks(parsed: unknown) {
       out.push({
         assumption,
         challenge,
-        impact: cleanText(i['impact'] || i['risk']),
-        by: sanitizeOwner(String(i['by'] || i['owner'] || 'unassigned')),
+        impact: cleanText(i['impact'] ?? i['risk']),
+        by: sanitizeOwner((i['by'] as string | undefined) ?? (i['owner'] as string | undefined) ?? 'unassigned'),
       });
     }
   }
   return dedupeBy(out, (item: unknown) => {
     const i = item as Record<string, unknown>;
-    return `${i['assumption']}|${i['challenge']}`;
+    return `${(i['assumption'] as string | undefined) ?? ''}|${(i['challenge'] as string | undefined) ?? ''}`;
   });
 }
 
@@ -562,7 +562,17 @@ function extractDisagreements(parsed: unknown) {
 export function extractFinalDecision(
   parsed: unknown,
   fallback: { agent?: string; phase?: string } = {},
-) {
+): {
+  summary: string;
+  why: string;
+  owner: string;
+  confidence: string;
+  nextAction: string;
+  reversibleFirstStep: string;
+  tradeoffs: Record<string, string> | null;
+  sourceAgent: string;
+  sourcePhase: string;
+} | null {
   if (!parsed || typeof parsed !== 'object') {
     return null;
   }
@@ -572,32 +582,32 @@ export function extractFinalDecision(
       ? (p['decision'] as Record<string, unknown>)
       : ({} as Record<string, unknown>);
   const summary = cleanText(
-    decisionRaw['summary'] ||
-      decisionRaw['choice'] ||
-      decisionRaw['recommendation'] ||
-      p['consensus'] ||
+    decisionRaw['summary'] ??
+      decisionRaw['choice'] ??
+      decisionRaw['recommendation'] ??
+      p['consensus'] ??
       p['view'],
   );
   const why = cleanText(
-    decisionRaw['why'] ||
-      decisionRaw['rationale'] ||
-      decisionRaw['reason'] ||
+    decisionRaw['why'] ??
+      decisionRaw['rationale'] ??
+      decisionRaw['reason'] ??
       p['decision_rationale'],
   );
   const owner = sanitizeOwner(
-    String(decisionRaw['owner'] || decisionRaw['decider'] || fallback.agent || 'unassigned'),
+    (decisionRaw['owner'] as string | undefined) ?? (decisionRaw['decider'] as string | undefined) ?? fallback.agent ?? 'unassigned',
   );
-  const confidence = normalizeConfidence(decisionRaw['confidence'] || p['confidence']);
+  const confidence = normalizeConfidence(decisionRaw['confidence'] ?? p['confidence']);
   const nextAction = normalizeNextAction(
-    decisionRaw['next_action'] || decisionRaw['nextAction'] || p['next_action'],
+    decisionRaw['next_action'] ?? decisionRaw['nextAction'] ?? p['next_action'],
   );
   const reversibleFirstStep = cleanText(
-    decisionRaw['reversible_first_step'] ||
-      decisionRaw['reversibleFirstStep'] ||
+    decisionRaw['reversible_first_step'] ??
+      decisionRaw['reversibleFirstStep'] ??
       p['reversible_first_step'],
   );
   const tradeoffs = normalizeTradeoffs(
-    decisionRaw['tradeoffs'] || decisionRaw['criteria'] || p['tradeoffs'] || p['decision_criteria'],
+    decisionRaw['tradeoffs'] ?? decisionRaw['criteria'] ?? p['tradeoffs'] ?? p['decision_criteria'],
   );
 
   if (!summary && !why && !confidence && !nextAction && !reversibleFirstStep && !tradeoffs) {
@@ -612,8 +622,8 @@ export function extractFinalDecision(
     nextAction,
     reversibleFirstStep,
     tradeoffs,
-    sourceAgent: fallback.agent || 'unassigned',
-    sourcePhase: fallback.phase || '',
+    sourceAgent: fallback.agent ?? 'unassigned',
+    sourcePhase: fallback.phase ?? '',
   };
 }
 
@@ -635,7 +645,7 @@ export function deriveCouncilRecommendation({
   risks?: unknown[];
   disagreements?: unknown[];
   councilVotes?: Array<{ vote: boolean }>;
-} = {}) {
+} = {}): { recommendedMode: string; nextAction: string; rationale: string } {
   const openAssumptions = countOpenAssumptions(assumptions);
   const humanQuestions = questions.filter((q) => q.to === 'human').length;
   const crossAgentQuestions = questions.filter((q) =>
@@ -646,16 +656,16 @@ export function deriveCouncilRecommendation({
   const positiveCouncilSignals = councilVotes.filter((item) => item.vote).length;
 
   let recommendedMode = 'handoff';
-  const explicitNextAction = finalDecision?.nextAction || '';
+  const explicitNextAction = finalDecision?.nextAction ?? '';
 
   if (explicitNextAction === 'handoff') {
-    const confidence = finalDecision?.confidence || '';
+    const confidence = finalDecision?.confidence ?? '';
     const synthesisLooksWeak = confidence === 'low' || disagreementItems > 1 || riskItems >= 6;
     recommendedMode = synthesisLooksWeak ? 'council' : 'handoff';
   } else if (explicitNextAction === 'council' || explicitNextAction === 'human_decision') {
     recommendedMode = 'council';
   } else if (
-    (finalDecision?.confidence || '') === 'low' &&
+    (finalDecision?.confidence ?? '') === 'low' &&
     (openAssumptions > 0 || humanQuestions > 0 || riskItems > 0)
   ) {
     recommendedMode = 'council';
@@ -667,21 +677,39 @@ export function deriveCouncilRecommendation({
 
   const nextAction = explicitNextAction || (recommendedMode === 'council' ? 'council' : 'handoff');
   const rationale = [
-    `decision_owner=${finalDecision?.owner || 'n/a'}`,
-    `decision_confidence=${finalDecision?.confidence || 'n/a'}`,
+    `decision_owner=${finalDecision?.owner ?? 'n/a'}`,
+    `decision_confidence=${finalDecision?.confidence ?? 'n/a'}`,
     `decision_next_action=${nextAction}`,
-    `open_assumptions=${openAssumptions}`,
-    `human_questions=${humanQuestions}`,
-    `cross_agent_questions=${crossAgentQuestions}`,
-    `disagreement_items=${disagreementItems}`,
-    `risk_items=${riskItems}`,
-    `positive_council_signals=${positiveCouncilSignals}`,
+    `open_assumptions=${String(openAssumptions)}`,
+    `human_questions=${String(humanQuestions)}`,
+    `cross_agent_questions=${String(crossAgentQuestions)}`,
+    `disagreement_items=${String(disagreementItems)}`,
+    `risk_items=${String(riskItems)}`,
+    `positive_council_signals=${String(positiveCouncilSignals)}`,
   ].join('; ');
 
   return { recommendedMode, nextAction, rationale };
 }
 
-export function synthesizeCouncilTranscript(prompt: string, transcript: unknown[]) {
+export function synthesizeCouncilTranscript(
+  prompt: string,
+  transcript: unknown[],
+): {
+  prompt: string;
+  consensus: string;
+  tasks: unknown[];
+  questions: unknown[];
+  risks: string[];
+  councilVotes: unknown[];
+  decisionOptions: unknown[];
+  assumptions: unknown[];
+  assumptionAttacks: unknown[];
+  disagreements: string[];
+  finalDecision: unknown;
+  recommendedMode: string;
+  recommendedNextAction: string;
+  recommendationRationale: string;
+} {
   const parsedEntries = (transcript as Array<Record<string, unknown>>).filter(
     (entry) => entry['parsed'] && typeof entry['parsed'] === 'object',
   );
@@ -749,17 +777,17 @@ export function synthesizeCouncilTranscript(prompt: string, transcript: unknown[
   );
   const dedupedAssumptionAttacks = dedupeBy(assumptionAttacks, (item: unknown) => {
     const a = item as { assumption: unknown; challenge: unknown };
-    return `${a.assumption}|${a.challenge}`;
+    return `${(a.assumption as string | undefined) ?? ''}|${(a.challenge as string | undefined) ?? ''}`;
   });
   const dedupedDisagreements = [
     ...new Set(disagreements.map((item: unknown) => cleanText(item)).filter(Boolean)),
   ];
-  const finalDecision = decisions.at(-1) || null;
+  const finalDecision = decisions.at(-1) ?? null;
   const finalDecisionObj = finalDecision as null | Record<string, unknown>;
   const consensus = cleanText(
-    finalDecisionObj?.['summary'] ||
-      (lastCodex?.['parsed'] as Record<string, unknown> | undefined)?.['consensus'] ||
-      (lastClaudeRefine?.['parsed'] as Record<string, unknown> | undefined)?.['view'] ||
+    finalDecisionObj?.['summary'] ??
+      (lastCodex?.['parsed'] as Record<string, unknown> | undefined)?.['consensus'] ??
+      (lastClaudeRefine?.['parsed'] as Record<string, unknown> | undefined)?.['view'] ??
       (lastClaude?.['parsed'] as Record<string, unknown> | undefined)?.['view'],
   );
   const recommendation = deriveCouncilRecommendation({
@@ -797,7 +825,7 @@ function buildContextSummary(transcript: unknown[]) {
     .slice(-6)
     .map((entry) => {
       const content = entry['parsed'] ? JSON.stringify(entry['parsed']) : entry['rawText'];
-      return `${String(entry['agent']).toUpperCase()} (${entry['phase'] || `R${entry['round']}`}): ${short(content as string, 500)}`;
+      return `${String(entry['agent']).toUpperCase()} (${(entry['phase'] as string | undefined) ?? `R${String(entry['round'])}`}): ${short(content as string, 500)}`;
     })
     .join('\n');
 }
@@ -813,7 +841,7 @@ export function buildStepPrompt(
   round: number,
   totalRounds: number,
   specContent: string | null = null,
-) {
+): string {
   const { agent, phase, promptLabel } = step;
   const agentConfig = getAgent(agent);
   const context = buildAgentContext(agent, {}, config, userPrompt);
@@ -889,7 +917,7 @@ export function buildStepPrompt(
   const framing = isPersonaEnabled() ? getAgentFraming(agent) : `You are ${agentConfig!.label}`;
 
   return [
-    `${framing} Council round ${round}/${totalRounds}, phase: ${phase}.`,
+    `${framing} Council round ${String(round)}/${String(totalRounds)}, phase: ${phase}.`,
     '',
     agentConfig!.rolePrompt,
     '',
@@ -911,13 +939,12 @@ export function buildStepPrompt(
     'Recent council context:',
     buildContextSummary(transcript) || '(none)',
     '',
-    phase === 'critique'
-      ? 'Focus: attack the strongest assumption in the current leading option before listing smaller issues. Cite specific file paths and line numbers.'
-      : phase === 'implement'
-        ? 'Focus: act as the final synthesizer. Name the decision owner, best next action, reversible first step, and review ordering. Do not write code.'
-        : phase === 'refine'
-          ? 'Focus: resolve critique into a single decision using the criteria above, then produce concrete task specs for Codex (file paths, signatures, DoD).'
-          : 'Focus: surface distinct options, state tradeoffs across the decision criteria, and identify assumptions that need to be challenged.',
+    (() => {
+      if (phase === 'critique') return 'Focus: attack the strongest assumption in the current leading option before listing smaller issues. Cite specific file paths and line numbers.';
+      if (phase === 'implement') return 'Focus: act as the final synthesizer. Name the decision owner, best next action, reversible first step, and review ordering. Do not write code.';
+      if (phase === 'refine') return 'Focus: resolve critique into a single decision using the criteria above, then produce concrete task specs for Codex (file paths, signatures, DoD).';
+      return 'Focus: surface distinct options, state tradeoffs across the decision criteria, and identify assumptions that need to be challenged.';
+    })(),
     'Set should_open_council=true only if deeper multi-round deliberation is necessary.',
   ].join('\n');
 }
@@ -951,7 +978,7 @@ function formatTradeoffs(tradeoffs: unknown, bulletPrefix = '- ') {
   }
   const t = tradeoffs as Record<string, unknown>;
   return COUNCIL_DECISION_CRITERIA.filter((item) => cleanText(t[item.key])).map(
-    (item) => `${bulletPrefix}${item.label}: ${t[item.key]}`,
+    (item) => `${bulletPrefix}${item.label}: ${(t[item.key] as string | undefined) ?? ''}`,
   );
 }
 
@@ -961,18 +988,18 @@ function colorOwner(owner: string) {
 
 function buildAgentBrief(agent: string, objective: string, report: Record<string, unknown>) {
   const agentConfig = getAgent(agent);
-  const tasks = Array.isArray(report?.['tasks'])
+  const tasks = Array.isArray(report['tasks'])
     ? (report['tasks'] as Array<Record<string, unknown>>)
     : [];
-  const questions = Array.isArray(report?.['questions'])
+  const questions = Array.isArray(report['questions'])
     ? (report['questions'] as Array<Record<string, unknown>>)
     : [];
-  const transcript = Array.isArray(report?.['transcript']) ? report['transcript'] : [];
-  const consensus = cleanText(report?.['consensus']);
-  const finalDecision = (report?.['finalDecision'] as Record<string, unknown> | null) || null;
+  const transcript = Array.isArray(report['transcript']) ? report['transcript'] : [];
+  const consensus = cleanText(report['consensus']);
+  const finalDecision = (report['finalDecision'] as Record<string, unknown> | null) ?? null;
   const myTasks = tasks.filter((t) => t['owner'] === agent || t['owner'] === 'unassigned');
   const myQuestions = questions.filter((q) => q['to'] === agent || q['to'] === 'human');
-  const unresolvedAssumptions = Array.isArray(report?.['assumptions'])
+  const unresolvedAssumptions = Array.isArray(report['assumptions'])
     ? (report['assumptions'] as Array<Record<string, unknown>>).filter(
         (item) => item['status'] !== 'validated',
       )
@@ -984,21 +1011,21 @@ function buildAgentBrief(agent: string, objective: string, report: Record<string
       : myTasks
           .map(
             (t) =>
-              `- ${t['title']}${t['done'] ? ` (DoD: ${t['done']})` : ''}${t['rationale'] ? ` [${t['rationale']}]` : ''}`,
+              `- ${(t['title'] as string | undefined) ?? ''}${t['done'] ? ` (DoD: ${(t['done'] as string | undefined) ?? ''})` : ''}${t['rationale'] ? ` [${(t['rationale'] as string | undefined) ?? ''}]` : ''}`,
           )
           .join('\n');
 
   const questionText =
     myQuestions.length === 0
       ? '- none'
-      : myQuestions.map((q) => `- to ${q['to']}: ${q['question']}`).join('\n');
+      : myQuestions.map((q) => `- to ${(q['to'] as string | undefined) ?? ''}: ${(q['question'] as string | undefined) ?? ''}`).join('\n');
 
   const decisionLines = finalDecision
     ? [
-        `Decision owner: ${finalDecision['owner']}`,
-        `Decision confidence: ${finalDecision['confidence'] || 'n/a'}`,
-        `Next action: ${report?.['recommendedNextAction'] || finalDecision['nextAction'] || report?.['recommendedMode'] || 'handoff'}`,
-        `Reversible first step: ${finalDecision['reversibleFirstStep'] || 'not specified'}`,
+        `Decision owner: ${(finalDecision['owner'] as string | undefined) ?? ''}`,
+        `Decision confidence: ${(finalDecision['confidence'] as string | undefined) ?? 'n/a'}`,
+        `Next action: ${(report['recommendedNextAction'] as string | undefined) ?? (finalDecision['nextAction'] as string | undefined) ?? (report['recommendedMode'] as string | undefined) ?? 'handoff'}`,
+        `Reversible first step: ${(finalDecision['reversibleFirstStep'] as string | undefined) ?? 'not specified'}`,
         ...formatTradeoffs(finalDecision['tradeoffs']),
       ]
     : ['- No explicit final decision captured; use transcript summary.'];
@@ -1010,7 +1037,7 @@ function buildAgentBrief(agent: string, objective: string, report: Record<string
           .slice(0, 5)
           .map(
             (item) =>
-              `- ${item['assumption']}${item['owner'] && item['owner'] !== 'unassigned' ? ` [owner: ${item['owner']}]` : ''}`,
+              `- ${(item['assumption'] as string | undefined) ?? ''}${item['owner'] && item['owner'] !== 'unassigned' ? ` [owner: ${(item['owner'] as string | undefined) ?? ''}]` : ''}`,
           )
           .join('\n');
 
@@ -1203,8 +1230,8 @@ function buildSynthesizePrompt(
 export function resolveActiveAgents(
   agentsFilter: string[] | null,
   defaults = ['claude', 'gemini', 'codex'],
-) {
-  if (!agentsFilter || !agentsFilter.length) return [...defaults];
+): string[] {
+  if (!agentsFilter?.length) return [...defaults];
   return defaults.filter((a) => agentsFilter.includes(a));
 }
 
@@ -1216,7 +1243,7 @@ const ADV_PHASE_ORDER = Object.freeze(['diverge', 'attack', 'synthesize']);
  * Returns { startRound, startPhaseIdx } where startPhaseIdx indexes ADV_PHASE_ORDER.
  * Returns { startRound: Infinity } when implement was already completed.
  */
-export function computeAdversarialResumePoint(transcript: unknown[]) {
+export function computeAdversarialResumePoint(transcript: unknown[]): { startRound: number; startPhaseIdx: number } {
   if (!transcript.length) return { startRound: 1, startPhaseIdx: 0 };
   const last = transcript.at(-1) as Record<string, unknown>;
   if (last['phase'] === 'implement') return { startRound: Infinity, startPhaseIdx: 0 };
@@ -1286,7 +1313,7 @@ async function runAdversarialCouncil(
     const cached = report.transcript.length;
     const resumePhase = ADV_PHASE_ORDER[startPhaseIdx] || 'implement';
     process.stderr.write(
-      `  Resuming adversarial council from round ${Math.min(startRound, rounds + 1)}, phase ${resumePhase} (${cached} phases cached)\n`,
+      `  Resuming adversarial council from round ${String(Math.min(startRound, rounds + 1))}, phase ${resumePhase} (${String(cached)} phases cached)\n`,
     );
   }
 
@@ -1302,7 +1329,7 @@ async function runAdversarialCouncil(
         `${JSON.stringify({ type: 'council_phase', action: 'start', phase: 'diverge', round, agents: activeAgents })}\n`,
       );
       const divergeSpinner = createSpinner(
-        `${DIM('diverge')} ${activeAgents.map(colorAgent).join(' ')} ${DIM(`(round ${round}/${rounds}, parallel)`)}`,
+        `${DIM('diverge')} ${activeAgents.map(colorAgent).join(' ')} ${DIM(`(round ${String(round)}/${String(rounds)}, parallel)`)}`,
         { style: 'orbital' },
       );
       divergeSpinner.start();
@@ -1320,7 +1347,7 @@ async function runAdversarialCouncil(
           };
           report.transcript.push(entry);
         }
-        divergeSpinner.succeed(`${DIM('diverge')} complete (preview, round ${round})`);
+        divergeSpinner.succeed(`${DIM('diverge')} complete (preview, round ${String(round)})`);
       } else {
         const divergeStart = Date.now();
         const divergeResults = await Promise.allSettled(
@@ -1331,7 +1358,7 @@ async function runAdversarialCouncil(
           }),
         );
         divergeSpinner.succeed(
-          `${DIM('diverge')} complete ${DIM(`(round ${round}, ${formatElapsed(Date.now() - divergeStart)})`)}`,
+          `${DIM('diverge')} complete ${DIM(`(round ${String(round)}, ${formatElapsed(Date.now() - divergeStart)})`)}`,
         );
         for (const settled of divergeResults) {
           if (settled.status === 'rejected') continue;
@@ -1369,7 +1396,7 @@ async function runAdversarialCouncil(
         `${JSON.stringify({ type: 'council_phase', action: 'start', phase: 'attack', round, agents: activeAgents })}\n`,
       );
       const attackSpinner = createSpinner(
-        `${DIM('attack')} ${activeAgents.map(colorAgent).join(' ')} ${DIM(`(round ${round}/${rounds}, parallel)`)}`,
+        `${DIM('attack')} ${activeAgents.map(colorAgent).join(' ')} ${DIM(`(round ${String(round)}/${String(rounds)}, parallel)`)}`,
         { style: 'orbital' },
       );
       attackSpinner.start();
@@ -1387,7 +1414,7 @@ async function runAdversarialCouncil(
           };
           report.transcript.push(entry);
         }
-        attackSpinner.succeed(`${DIM('attack')} complete (preview, round ${round})`);
+        attackSpinner.succeed(`${DIM('attack')} complete (preview, round ${String(round)})`);
       } else {
         const attackStart = Date.now();
         const attackResults = await Promise.allSettled(
@@ -1398,7 +1425,7 @@ async function runAdversarialCouncil(
           }),
         );
         attackSpinner.succeed(
-          `${DIM('attack')} complete ${DIM(`(round ${round}, ${formatElapsed(Date.now() - attackStart)})`)}`,
+          `${DIM('attack')} complete ${DIM(`(round ${String(round)}, ${formatElapsed(Date.now() - attackStart)})`)}`,
         );
         for (const settled of attackResults) {
           if (settled.status === 'rejected') continue;
@@ -1436,7 +1463,7 @@ async function runAdversarialCouncil(
         `${JSON.stringify({ type: 'council_phase', action: 'start', phase: 'synthesize', round, agent: synthesizeAgent })}\n`,
       );
       const synthesizeSpinner = createSpinner(
-        `${colorAgent(synthesizeAgent)} ${DIM(`synthesize (round ${round}/${rounds})`)}`,
+        `${colorAgent(synthesizeAgent)} ${DIM(`synthesize (round ${String(round)}/${String(rounds)})`)}`,
         { style: 'orbital' },
       );
       synthesizeSpinner.start();
@@ -1461,7 +1488,7 @@ async function runAdversarialCouncil(
           error: '',
         });
         synthesizeSpinner.succeed(
-          `${colorAgent(synthesizeAgent)} ${DIM('synthesize')} complete (preview, round ${round})`,
+          `${colorAgent(synthesizeAgent)} ${DIM('synthesize')} complete (preview, round ${String(round)})`,
         );
       } else {
         const synthesizeStart = Date.now();
@@ -1471,7 +1498,7 @@ async function runAdversarialCouncil(
           timeoutMs,
         );
         synthesizeSpinner.succeed(
-          `${colorAgent(synthesizeAgent)} ${DIM('synthesize')} complete ${DIM(`(round ${round}, ${formatElapsed(Date.now() - synthesizeStart)})`)}`,
+          `${colorAgent(synthesizeAgent)} ${DIM('synthesize')} complete ${DIM(`(round ${String(round)}, ${formatElapsed(Date.now() - synthesizeStart)})`)}`,
         );
         report.transcript.push({
           round,
@@ -1536,10 +1563,9 @@ async function main() {
   const prompt = getPrompt(options, positionals);
 
   if (!prompt) {
-    console.error(
+    throw new Error(
       'Missing prompt. Example: node hydra-council.mjs prompt="Investigate startup regressions"',
     );
-    process.exit(1);
   }
 
   const mode = String(options['mode'] || 'live').toLowerCase();
@@ -1574,7 +1600,7 @@ async function main() {
     ).map((s) => `${s.agent}:${s.phase}`),
     url,
     project: config.projectName,
-    daemonSummary: null as unknown | null,
+    daemonSummary: null as unknown,
     specId: undefined as string | undefined,
     transcript: [] as Array<{
       round: number;
@@ -1628,7 +1654,7 @@ async function main() {
   };
 
   try {
-    const summaryResponse = (await request('GET', url, '/summary')) as Record<string, unknown>;
+    const summaryResponse = await request('GET', url, '/summary');
     report.daemonSummary = summaryResponse['summary'];
   } catch {
     report.daemonSummary = null;
@@ -1688,13 +1714,13 @@ async function main() {
       }
       const cached = checkpoint.transcript.length;
       process.stderr.write(
-        `  Resuming council from round ${startRound}, step ${startStepIdx + 1} (${cached} phases cached)\n`,
+        `  Resuming council from round ${String(startRound)}, step ${String(startStepIdx + 1)} (${String(cached)} phases cached)\n`,
       );
     }
   }
 
   // Select council execution mode
-  const councilMode = loadHydraConfig().routing?.councilMode || 'sequential';
+  const councilMode = loadHydraConfig().routing.councilMode ?? 'sequential';
   if (councilMode === 'adversarial') {
     await runAdversarialCouncil(prompt, report, {
       preview,
@@ -1800,7 +1826,7 @@ async function main() {
         process.stderr.write(`${progressStart}\n`);
 
         const spinner = createSpinner(
-          `${colorAgent(step.agent)} ${DIM(step.phase)} (round ${round}/${rounds})`,
+          `${colorAgent(step.agent)} ${DIM(step.phase)} (round ${String(round)}/${String(rounds)})`,
           { style: 'orbital' },
         );
         spinner.start();
@@ -1815,7 +1841,7 @@ async function main() {
             spinner.update(
               `${colorAgent(step.agent)} ${DIM(step.phase)} rate limited, retrying in ${(delay / 1000).toFixed(0)}s...`,
             );
-            await new Promise((r) => globalThis.setTimeout(r, delay));
+            await new Promise<void>((r) => { globalThis.setTimeout(r, delay); });
             result = await callAgentAsync(step.agent, promptText, timeoutMs);
           }
         }
@@ -1835,11 +1861,12 @@ async function main() {
         const parsed = parseJsonLoose(result.stdout);
         const durationMs = Date.now() - phaseStartMs;
         if (result.ok) {
-          const suffix = result.recovered
-            ? ` ${DIM(`(recovered: ${result.newModel})`)}`
-            : result._compactedRetry
-              ? ` ${DIM('(compacted retry)')}`
-              : '';
+          let suffix = '';
+          if (result.recovered) {
+            suffix = ` ${DIM(`(recovered: ${result.newModel ?? ''})`)}` ;
+          } else if (result._compactedRetry) {
+            suffix = ` ${DIM('(compacted retry)')}`;
+          }
           spinner.succeed(`${colorAgent(step.agent)} ${DIM(step.phase)} complete${suffix}`);
         } else {
           spinner.fail(`${colorAgent(step.agent)} ${DIM(step.phase)} failed`);
@@ -1857,7 +1884,7 @@ async function main() {
               signal: result.signal ?? null,
               stderr: result.stderr,
               stdout: result.output ?? result.stdout,
-              context: `Council phase ${step.phase} failed in round ${round}`,
+              context: `Council phase ${step.phase} failed in round ${String(round)}`,
             });
           } catch {
             /* doctor notification non-critical */
@@ -1890,13 +1917,11 @@ async function main() {
           recovered: result.recovered || false,
           recoveredFrom: result.originalModel,
           recoveredTo: result.newModel,
-          compactedRetry: result._compactedRetry || false,
+          compactedRetry: result._compactedRetry ?? false,
         });
 
         // Save checkpoint after each completed phase
-        if (!preview) {
-          saveCheckpoint(promptHash, prompt, round, stepIdx, report.transcript, specContent);
-        }
+        saveCheckpoint(promptHash, prompt, round, stepIdx, report.transcript, specContent);
       }
     }
   } // end sequential council
@@ -1910,35 +1935,34 @@ async function main() {
 
   if (publish) {
     try {
-      const health = (await request('GET', url, '/health')) as Record<string, unknown>;
+      const health = await request('GET', url, '/health');
       if (!health['ok']) {
         throw new Error('Hydra daemon is not healthy.');
       }
 
       const createdTasks: unknown[] = [];
       for (const task of report.tasks) {
-        const created = (await request('POST', url, '/task/add', {
+        const created = await request('POST', url, '/task/add', {
           title: task.title,
           owner: task.owner,
           status: 'todo',
           notes: task.rationale ? `Council rationale: ${task.rationale}` : '',
-        })) as Record<string, unknown>;
+        });
         createdTasks.push(created['task']);
       }
 
       const decisionTitle = `Hydra Council: ${short(prompt, 90)}`;
-      const decisionResult = (await request('POST', url, '/decision', {
+      const decisionResult = await request('POST', url, '/decision', {
         title: decisionTitle,
         owner: 'human',
         rationale:
-          report.finalDecision?.why ||
-          report.consensus ||
+          (report.finalDecision?.why ?? report.consensus) ||
           'Council completed without explicit consensus.',
-        impact: `Rounds=${rounds}; Tasks=${createdTasks.length}; Flow=Claude\u2192Gemini\u2192Claude\u2192Codex; next=${report.recommendedNextAction || report.recommendedMode}`,
-      })) as Record<string, unknown>;
+        impact: `Rounds=${String(rounds)}; Tasks=${String(createdTasks.length)}; Flow=Claude\u2192Gemini\u2192Claude\u2192Codex; next=${report.recommendedNextAction}`,
+      });
 
       const handoffs: unknown[] = [];
-      const publishAgents = agentsFilter || AGENT_NAMES;
+      const publishAgents = agentsFilter ?? AGENT_NAMES;
       for (const agent of publishAgents) {
         const agentTaskIds = (createdTasks as Array<{ owner?: string; id?: string }>)
           .filter((t) => t.owner === agent || t.owner === 'unassigned')
@@ -1948,13 +1972,13 @@ async function main() {
           prompt,
           report as unknown as Record<string, unknown>,
         );
-        const handoff = (await request('POST', url, '/handoff', {
+        const handoff = await request('POST', url, '/handoff', {
           from: 'human',
           to: agent,
           summary,
           nextStep: 'Acknowledge this council handoff and start highest-priority task.',
           tasks: agentTaskIds,
-        })) as Record<string, unknown>;
+        });
         handoffs.push(handoff['handoff']);
       }
 
@@ -2019,12 +2043,12 @@ async function main() {
     for (const entry of report.transcript) {
       if (entry.ok) {
         console.log(
-          `  ${SUCCESS('\u2713')} ${colorAgent(entry.agent)} ${DIM(entry.phase)} ${DIM(`(round ${entry.round})`)}`,
+          `  ${SUCCESS('\u2713')} ${colorAgent(entry.agent)} ${DIM(entry.phase)} ${DIM(`(round ${String(entry.round)})`)}`,
         );
       } else {
-        const failLabel = entry.error?.includes('ETIMEDOUT') ? 'TIMEOUT' : 'FAILED';
+        const failLabel = entry.error.includes('ETIMEDOUT') ? 'TIMEOUT' : 'FAILED';
         console.log(
-          `  ${ERROR('\u2717')} ${colorAgent(entry.agent)} ${DIM(entry.phase)} ${DIM(`(round ${entry.round})`)} ${ERROR(failLabel)}`,
+          `  ${ERROR('\u2717')} ${colorAgent(entry.agent)} ${DIM(entry.phase)} ${DIM(`(round ${String(entry.round)})`)} ${ERROR(failLabel)}`,
         );
         if (entry.error) {
           console.log(`    ${DIM('\u2192')} ${DIM(short(entry.error.split('\n')[0], 72))}`);
@@ -2038,12 +2062,12 @@ async function main() {
   console.log(sectionHeader('Convergence'));
   if (report.finalDecision) {
     const decision = report.finalDecision;
-    console.log(label('Decision owner', colorOwner(String(decision.owner || 'unassigned'))));
-    console.log(label('Confidence', pc.white(String(decision.confidence || 'n/a'))));
+    console.log(label('Decision owner', colorOwner(decision.owner ?? 'unassigned')));
+    console.log(label('Confidence', pc.white(decision.confidence ?? 'n/a')));
     console.log(
       label(
         'Next action',
-        pc.white(report.recommendedNextAction || decision.nextAction || report.recommendedMode),
+        pc.white(report.recommendedNextAction || (decision.nextAction ?? report.recommendedMode)),
       ),
     );
     if (decision.reversibleFirstStep) {
@@ -2084,7 +2108,7 @@ async function main() {
   } else {
     const failedCount = report.transcript.filter((t) => !t.ok).length;
     if (failedCount > 0) {
-      console.log(`  ${WARNING(`No consensus reached (${failedCount} phase(s) failed)`)}`);
+      console.log(`  ${WARNING(`No consensus reached (${String(failedCount)} phase(s) failed)`)}`);
     } else {
       console.log(`  ${DIM('(none)')}`);
     }
@@ -2093,27 +2117,27 @@ async function main() {
   // ── E. Tasks List ──
   if (report.tasks.length > 0) {
     console.log('');
-    console.log(sectionHeader(`Tasks (${report.tasks.length})`));
+    console.log(sectionHeader(`Tasks (${String(report.tasks.length)})`));
     for (const [i, task] of report.tasks.entries()) {
-      const owner = task.owner || 'unassigned';
-      const title = short(task.title || task.description || '', 55);
-      console.log(`  ${DIM(`${i + 1}.`)} ${colorOwner(owner)}  ${pc.white(title)}`);
+      const owner = task.owner ?? 'unassigned';
+      const title = short(task.title ?? task.description ?? '', 55);
+      console.log(`  ${DIM(`${String(i + 1)}.`)} ${colorOwner(owner)}  ${pc.white(title)}`);
     }
   }
 
   // ── F. Risks ──
-  if (report.risks && report.risks.length > 0) {
+  if (report.risks.length > 0) {
     console.log('');
     console.log(sectionHeader('Risks'));
     for (const risk of report.risks) {
       const r = risk as Record<string, unknown> | string;
       const text =
-        typeof r === 'string' ? r : String(r['risk'] || r['description'] || JSON.stringify(r));
+        typeof r === 'string' ? r : ((r['risk'] as string | undefined) ?? (r['description'] as string | undefined) ?? JSON.stringify(r));
       console.log(`  ${WARNING('\u26A0')} ${pc.white(short(text, 72))}`);
     }
   }
 
-  if (report.disagreements?.length > 0) {
+  if (report.disagreements.length > 0) {
     console.log('');
     console.log(sectionHeader('Disagreements'));
     for (const item of report.disagreements) {
@@ -2121,11 +2145,11 @@ async function main() {
     }
   }
 
-  if (report.assumptionAttacks?.length > 0) {
+  if (report.assumptionAttacks.length > 0) {
     console.log('');
     console.log(sectionHeader('Assumption Challenges'));
     for (const item of report.assumptionAttacks) {
-      const challenge = cleanText(item.challenge || item.assumption);
+      const challenge = cleanText(item.challenge ?? item.assumption);
       if (!challenge) {
         continue;
       }
@@ -2152,20 +2176,20 @@ async function main() {
   console.log(label('Recommended', recColor(report.recommendedMode)));
   console.log(label('Rationale', DIM(short(report.recommendationRationale || 'n/a', 120))));
   let publishedLabel = DIM('no');
-  if (report.published?.ok && report.published?.skipped) {
+  if (report.published.ok && report.published.skipped) {
     publishedLabel = DIM('skipped');
-  } else if (report.published?.ok) {
+  } else if (report.published.ok) {
     publishedLabel = SUCCESS('yes');
   }
   console.log(label('Published', publishedLabel));
-  if (report.published?.ok && !report.published?.skipped) {
+  if (report.published.ok && !report.published.skipped) {
     console.log('');
     console.log(DIM('  Pull commands:'));
     console.log(DIM('    npm run hydra:next -- agent=claude'));
     console.log(DIM('    npm run hydra:next -- agent=gemini'));
     console.log(DIM('    npm run hydra:next -- agent=codex'));
   }
-  if (report.published?.ok === false) {
+  if (!report.published.ok) {
     console.log(label('Publish error', ERROR(report.published.error)));
   }
 }
@@ -2174,8 +2198,9 @@ const isMain =
   process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToPath(import.meta.url));
 
 if (isMain) {
-  main().catch((err) => {
-    console.error(`Hydra council failed: ${err.message}`);
-    process.exit(1);
+  main().catch((err: unknown) => {
+    const msg = err instanceof Error ? err.message : String(err);
+    console.error(`Hydra council failed: ${msg}`);
+    throw new Error(msg);
   });
 }

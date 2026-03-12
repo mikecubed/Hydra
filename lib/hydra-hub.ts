@@ -34,7 +34,7 @@ function deriveHubPath(): string {
 const HUB_DIR = deriveHubPath();
 
 /** Returns the absolute path to the hub sessions directory. */
-export function hubPath() {
+export function hubPath(): string {
   return HUB_DIR;
 }
 
@@ -134,9 +134,9 @@ export function registerSession(
     status?: string;
     id?: string;
   } = {} as { agent: string },
-) {
+): string {
   ensureHubDir();
-  const sessionId = id || makeId();
+  const sessionId = id ?? makeId();
   const session = {
     id: sessionId,
     agent,
@@ -231,7 +231,7 @@ export function listSessions({ cwd }: { cwd?: string } = {}): Record<string, unk
     const p = path.join(HUB_DIR, file);
     try {
       const session = JSON.parse(fs.readFileSync(p, 'utf8'));
-      const lastUpdate = new Date(session.lastUpdate || session.startedAt).getTime();
+      const lastUpdate = new Date((session.lastUpdate ?? session.startedAt) as string).getTime();
       if (now - lastUpdate > STALE_MS) {
         try {
           fs.unlinkSync(p);
@@ -249,7 +249,7 @@ export function listSessions({ cwd }: { cwd?: string } = {}): Record<string, unk
 
   if (!cwd) return sessions;
   const normalizedCwd = normalizeCwd(cwd);
-  return sessions.filter((s) => (s.cwd || '') === normalizedCwd);
+  return sessions.filter((s) => (s.cwd ?? '') === normalizedCwd);
 }
 
 /**
