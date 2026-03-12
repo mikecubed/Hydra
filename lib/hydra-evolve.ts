@@ -2231,7 +2231,7 @@ async function main() {
     timeouts = checkpoint.timeouts;
     roundResults = checkpoint.completedRounds ?? [];
     kbStartCount = checkpoint.kbStartCount;
-    startRound = (Number(checkpoint.lastRoundNum) || 0) + 1; // eslint-disable-line @typescript-eslint/prefer-nullish-coalescing -- 0 is invalid
+    startRound = (Number(checkpoint.lastRoundNum) || 0) + 1;  
 
     // Restore budget tracker
     if (checkpoint.budgetState) {
@@ -3061,7 +3061,7 @@ ${safetyPrompt}`;
           spawnNewProcess(projectRoot);
           log.info('Exiting for hot-restart...');
           process.exitCode = 0; // eslint-disable-line require-atomic-updates -- intentional
-          // eslint-disable-next-line no-useless-return
+           
           return;
         } else {
           log.error(`Merge failed — ${String(mergeResult.conflicts.length)} conflicting file(s):`);
