@@ -110,7 +110,7 @@ function listCommand(evolveDir: string, options: Record<string, string | boolean
         : getPendingSuggestions(sg);
   }
 
-  const label = statusFilter === 'all' ? 'all' : statusFilter ?? 'pending';
+  const label = statusFilter === 'all' ? 'all' : (statusFilter ?? 'pending');
   console.log(pc.bold(`\nSuggestions — ${String(entries.length)} ${label}\n`));
 
   if (entries.length === 0) {

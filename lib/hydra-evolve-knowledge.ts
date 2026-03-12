@@ -158,7 +158,11 @@ function isTooSimilar(existingEntries: KBEntry[], newFinding: string, threshold 
  */
 export function addEntry(kb: KnowledgeBase, entry: KBEntry): KBEntry | null {
   // Dedup check
-  if (entry.finding !== undefined && entry.finding !== '' && isTooSimilar(kb.entries, entry.finding)) {
+  if (
+    entry.finding !== undefined &&
+    entry.finding !== '' &&
+    isTooSimilar(kb.entries, entry.finding)
+  ) {
     return null;
   }
 
@@ -257,7 +261,11 @@ export function getPriorLearnings(kb: KnowledgeBase, area: string): KBEntry[] {
         e.area === area ||
         (e.tags ?? []).some((t: string) => t.toLowerCase() === area.toLowerCase()),
     )
-    .filter((e) => (e.learnings !== undefined && e.learnings !== '') || (e.outcome != null && e.outcome !== ''))
+    .filter(
+      (e) =>
+        (e.learnings !== undefined && e.learnings !== '') ||
+        (e.outcome != null && e.outcome !== ''),
+    )
     .sort((a, b) => (b.date ?? '').localeCompare(a.date ?? ''));
 }
 
@@ -316,7 +324,9 @@ export function formatStatsForPrompt(kb: KnowledgeBase): string {
     `Knowledge Base: ${String(stats.totalResearched)} findings, ${String(stats.totalAttempted)} attempted, ${String(stats.totalApproved)} approved, ${String(stats.totalRejected)} rejected`,
   ];
   if (stats.topAreas.length > 0) {
-    lines.push(`Top areas: ${stats.topAreas.map((a) => `${a.area}(${String(a.count)})`).join(', ')}`);
+    lines.push(
+      `Top areas: ${stats.topAreas.map((a) => `${a.area}(${String(a.count)})`).join(', ')}`,
+    );
   }
   return lines.join('\n');
 }

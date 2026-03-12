@@ -118,7 +118,9 @@ async function phaseSelect(sortedTasks: ScannedTask[], maxTasks: number) {
     if (sortedTasks.length > 20) {
       console.log(pc.dim(`\n  ... and ${String(sortedTasks.length - 20)} more`));
     }
-    console.log(pc.dim(`\n  Enter numbers (e.g. 1,3,5) or press Enter for top ${String(maxTasks)}.`));
+    console.log(
+      pc.dim(`\n  Enter numbers (e.g. 1,3,5) or press Enter for top ${String(maxTasks)}.`),
+    );
     const answer = await askLine(rl, pc.bold('  Select: '));
     if (answer.length === 0) return sortedTasks.slice(0, maxTasks);
 
@@ -153,7 +155,10 @@ function buildThresholds(budgetCfg: BudgetCfg) {
       reason: 'Soft limit reached: {pct}% budget ({consumed} tokens)',
     },
     {
-      pct: (budgetCfg.handoffThreshold !== undefined && budgetCfg.handoffThreshold > 0) ? budgetCfg.handoffThreshold : 0.7,
+      pct:
+        budgetCfg.handoffThreshold !== undefined && budgetCfg.handoffThreshold > 0
+          ? budgetCfg.handoffThreshold
+          : 0.7,
       action: 'handoff',
       reason: '{pct}% budget — switching remaining tasks to economy models',
       once: true,
@@ -184,7 +189,8 @@ function buildTaskPrompt(
     attribution: { pipeline: 'hydra-actualize', agent },
   });
 
-  const bodySection = task.body !== null && task.body.length > 0 ? `\n## Details\n${task.body}\n` : '';
+  const bodySection =
+    task.body !== null && task.body.length > 0 ? `\n## Details\n${task.body}\n` : '';
 
   const sourceNote =
     task.sourceRef.length > 0
@@ -230,7 +236,13 @@ Start working on the task now.`;
 function runVerification(projectRoot: string, cfg: Record<string, unknown>) {
   const plan = resolveVerificationPlan(projectRoot, cfg);
   if (!plan.enabled || plan.command.length === 0) {
-    return { ran: false, passed: true, command: '', output: '', reason: plan.reason.length > 0 ? plan.reason : 'disabled' };
+    return {
+      ran: false,
+      passed: true,
+      command: '',
+      output: '',
+      reason: plan.reason.length > 0 ? plan.reason : 'disabled',
+    };
   }
 
   log.dim(`Verifying: ${plan.command}`);
@@ -240,7 +252,9 @@ function runVerification(projectRoot: string, cfg: Record<string, unknown>) {
     ran: true,
     passed: result.ok,
     command: plan.command,
-    output: (result.stdout.length > 0 ? result.stdout : '').slice(-2000) + (result.stderr.length > 0 ? result.stderr : '').slice(-1000),
+    output:
+      (result.stdout.length > 0 ? result.stdout : '').slice(-2000) +
+      (result.stderr.length > 0 ? result.stderr : '').slice(-1000),
     reason: plan.reason.length > 0 ? plan.reason : '',
   };
 }
@@ -272,10 +286,15 @@ async function main() {
   const baseBranch =
     typeof options['base-branch'] === 'string' && options['base-branch'].length > 0
       ? options['base-branch']
-      : cfg.evolve?.baseBranch ?? cfg.nightly?.baseBranch ?? 'dev';
-  const branchPrefix = typeof options['branch-prefix'] === 'string' && options['branch-prefix'].length > 0 ? options['branch-prefix'] : 'actualize';
-  const maxTasks = typeof options['max-tasks'] === 'string' ? Number.parseInt(options['max-tasks'], 10) : 5;
-  const maxHours = typeof options['max-hours'] === 'string' ? Number.parseFloat(options['max-hours']) : 4;
+      : (cfg.evolve?.baseBranch ?? cfg.nightly?.baseBranch ?? 'dev');
+  const branchPrefix =
+    typeof options['branch-prefix'] === 'string' && options['branch-prefix'].length > 0
+      ? options['branch-prefix']
+      : 'actualize';
+  const maxTasks =
+    typeof options['max-tasks'] === 'string' ? Number.parseInt(options['max-tasks'], 10) : 5;
+  const maxHours =
+    typeof options['max-hours'] === 'string' ? Number.parseFloat(options['max-hours']) : 4;
   const isDryRun = options['dry-run'] === true;
   const isInteractive = options['interactive'] === true;
   const noDiscovery = options['no-discovery'] === true;
@@ -315,7 +334,9 @@ async function main() {
   // ── Phase: SCAN ──
   log.phase('SCAN');
   const scanned = scanAllSources(projectRoot);
-  log.info(`Scanned ${String(scanned.length)} task(s) from TODO comments / TODO.md / GitHub issues`);
+  log.info(
+    `Scanned ${String(scanned.length)} task(s) from TODO comments / TODO.md / GitHub issues`,
+  );
 
   // ── Phase: DISCOVER ──
   let discovered: unknown[] = [];
@@ -332,11 +353,15 @@ async function main() {
     }
     const focus =
       typeof options['focus'] === 'string' && options['focus'].length > 0
-        ? options['focus'].split(',').map((s) => s.trim()).filter((s) => s.length > 0)
-        : discoveryCfg.focus ?? [];
-    const maxSuggestions = typeof options['discover-max'] === 'string'
-      ? Number.parseInt(options['discover-max'], 10)
-      : discoveryCfg.maxSuggestions ?? 6;
+        ? options['focus']
+            .split(',')
+            .map((s) => s.trim())
+            .filter((s) => s.length > 0)
+        : (discoveryCfg.focus ?? []);
+    const maxSuggestions =
+      typeof options['discover-max'] === 'string'
+        ? Number.parseInt(options['discover-max'], 10)
+        : (discoveryCfg.maxSuggestions ?? 6);
 
     const extraContext = [snapshotText, indexText].join('\n\n');
 
@@ -518,16 +543,22 @@ async function main() {
       selfIndexText: indexText,
     });
 
-    const effectiveModel = (modelOverride != null && modelOverride.length > 0 ? modelOverride : null) ?? getActiveModel(agent) ?? 'default';
+    const effectiveModel =
+      (modelOverride != null && modelOverride.length > 0 ? modelOverride : null) ??
+      getActiveModel(agent) ??
+      'default';
     const handle = recordCallStart(agent, effectiveModel);
-    log.dim(`Dispatching ${agent}${modelOverride != null && modelOverride.length > 0 ? ` (${modelOverride})` : ''}...`);
+    log.dim(
+      `Dispatching ${agent}${modelOverride != null && modelOverride.length > 0 ? ` (${modelOverride})` : ''}...`,
+    );
 
     let agentResult;
     try {
       // eslint-disable-next-line no-await-in-loop -- tasks run sequentially for branch isolation
       agentResult = await executeAgentWithRecovery(agent, prompt, {
         cwd: projectRoot,
-        timeoutMs: (cfg.nightly?.perTaskTimeoutMs ?? 0) > 0 ? cfg.nightly.perTaskTimeoutMs : 15 * 60 * 1000,
+        timeoutMs:
+          (cfg.nightly?.perTaskTimeoutMs ?? 0) > 0 ? cfg.nightly.perTaskTimeoutMs : 15 * 60 * 1000,
         modelOverride,
         progressIntervalMs: 15_000,
         onProgress: (elapsed, outputKB) => {
@@ -551,7 +582,11 @@ async function main() {
 
     // eslint-disable-next-line @typescript-eslint/no-unsafe-argument, @typescript-eslint/no-explicit-any -- agentResult matches CallResult shape at runtime
     if (agentResult.ok) recordCallComplete(handle, agentResult as any);
-    else recordCallError(handle, new Error(agentResult.error.length > 0 ? agentResult.error : 'unknown'));
+    else
+      recordCallError(
+        handle,
+        new Error(agentResult.error.length > 0 ? agentResult.error : 'unknown'),
+      );
 
     const taskDurationMs = agentResult.durationMs;
     const tokenDelta = budget.recordUnitEnd(task.slug, taskDurationMs);
@@ -610,6 +645,7 @@ async function main() {
       branch: branchName,
       source: task.source,
       taskType: task.taskType.length > 0 ? task.taskType : 'unknown',
+      status,
       agent,
       tokensUsed: tokenDelta.tokens,
       durationMs: taskDurationMs,
@@ -671,16 +707,17 @@ async function main() {
   md.push('| # | Task | Agent | Status | Verification | Branch |');
   md.push('|---|------|-------|--------|--------------|--------|');
   for (const [i, r] of results.entries()) {
-    // eslint-disable-next-line @typescript-eslint/restrict-template-expressions -- r.verification is always string at this point
-    md.push(`| ${String(i + 1)} | ${r.title.slice(0, 60)} | ${r.agent} | ${r.status} | ${r.verification} | \`${r.branch}\` |`);
+    md.push(
+      `| ${String(i + 1)} | ${r.title.slice(0, 60)} | ${r.agent} | ${r.status} | ${r.verification} | \`${r.branch}\` |`,
+    );
   }
   md.push('');
   md.push('## Budget');
   md.push(
-    `- Consumed: ${(budgetSummary['consumed'] as number | undefined ?? 0).toLocaleString()} of ${(budgetSummary['hardLimit'] as number | undefined ?? 0).toLocaleString()}`,
+    `- Consumed: ${((budgetSummary['consumed'] as number | undefined) ?? 0).toLocaleString()} of ${((budgetSummary['hardLimit'] as number | undefined) ?? 0).toLocaleString()}`,
   );
   md.push(
-    `- Avg per task: ${(budgetSummary['avgPerTask'] as number | undefined ?? 0).toLocaleString()}`,
+    `- Avg per task: ${((budgetSummary['avgPerTask'] as number | undefined) ?? 0).toLocaleString()}`,
   );
   md.push('');
   md.push('## Next');

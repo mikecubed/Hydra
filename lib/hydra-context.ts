@@ -100,7 +100,10 @@ function detectTechStack(projectRoot: string) {
       dependencies?: Record<string, string | undefined>;
       devDependencies?: Record<string, string | undefined>;
     };
-    const deps: Record<string, string | undefined> = { ...pkg.dependencies, ...pkg.devDependencies };
+    const deps: Record<string, string | undefined> = {
+      ...pkg.dependencies,
+      ...pkg.devDependencies,
+    };
     if (deps['react-native'] != null) parts.push(`React Native ${deps['react-native']}`);
     if (deps['expo'] != null) parts.push(`Expo ${deps['expo']}`);
     if (deps['next'] != null) parts.push(`Next.js ${deps['next']}`);
@@ -211,7 +214,12 @@ function buildMinimalContext(
 function buildMediumContext(projectConfig: ProjectConfig) {
   const now = Date.now();
   const cacheKey = projectConfig.projectRoot;
-  if (cachedMedium != null && cachedMedium !== '' && now - cachedMediumAt < CACHE_TTL_MS && cachedMediumKey === cacheKey) {
+  if (
+    cachedMedium != null &&
+    cachedMedium !== '' &&
+    now - cachedMediumAt < CACHE_TTL_MS &&
+    cachedMediumKey === cacheKey
+  ) {
     return cachedMedium;
   }
 
@@ -457,7 +465,8 @@ export function getProjectContext(
   taskContext: { files?: string[]; types?: string; signatures?: string } = {},
   projectConfig: ProjectConfig | null = null,
 ): string {
-  const resolvedConfig = projectConfig ?? (resolveProject({ skipValidation: true }) as ProjectConfig);
+  const resolvedConfig =
+    projectConfig ?? (resolveProject({ skipValidation: true }) as ProjectConfig);
 
   const agent = getAgent(agentName);
   const tier = agent?.contextTier ?? 'medium';
@@ -492,7 +501,8 @@ export function buildAgentContext(
   projectConfig: ProjectConfig | null = null,
   promptText: string | null = null,
 ): string {
-  const resolvedConfig = projectConfig ?? (resolveProject({ skipValidation: true }) as ProjectConfig);
+  const resolvedConfig =
+    projectConfig ?? (resolveProject({ skipValidation: true }) as ProjectConfig);
 
   // Base context — same as existing getProjectContext behavior
   const baseContext = getProjectContext(agentName, taskContext, resolvedConfig);

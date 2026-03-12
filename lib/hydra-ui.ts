@@ -622,7 +622,8 @@ export function box(
     padding = 0;
   } else {
     width = widthOrOpts.width !== undefined && widthOrOpts.width !== 0 ? widthOrOpts.width : 60;
-    style = widthOrOpts.style !== undefined && widthOrOpts.style !== '' ? widthOrOpts.style : 'light';
+    style =
+      widthOrOpts.style !== undefined && widthOrOpts.style !== '' ? widthOrOpts.style : 'light';
     padding = widthOrOpts.padding ?? 0;
   }
   const s =

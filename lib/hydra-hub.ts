@@ -230,7 +230,9 @@ export function listSessions({ cwd }: { cwd?: string } = {}): Record<string, unk
     const p = path.join(HUB_DIR, file);
     try {
       const session = JSON.parse(fs.readFileSync(p, 'utf8')) as Record<string, unknown>;
-      const lastUpdate = new Date((session['lastUpdate'] ?? session['startedAt']) as string).getTime();
+      const lastUpdate = new Date(
+        (session['lastUpdate'] ?? session['startedAt']) as string,
+      ).getTime();
       if (now - lastUpdate > STALE_MS) {
         try {
           fs.unlinkSync(p);

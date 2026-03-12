@@ -48,8 +48,14 @@ interface ReportEntry {
   verification?: string;
   violations?: Array<{ severity: string; detail: string }>;
 }
-interface NightlyResult { status?: string; agent?: string; slug?: string; }
-interface ReportBudget { consumed?: number; }
+interface NightlyResult {
+  status?: string;
+  agent?: string;
+  slug?: string;
+}
+interface ReportBudget {
+  consumed?: number;
+}
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -65,7 +71,8 @@ function hasBaseAdvanced(projectRoot: string, branch: string, baseBranch: string
 // ── Review Command ──────────────────────────────────────────────────────────
 
 async function reviewCommand(projectRoot: string, options: Record<string, string | boolean>) {
-  const dateFilter = typeof options['date'] === 'string' && options['date'].length > 0 ? options['date'] : null;
+  const dateFilter =
+    typeof options['date'] === 'string' && options['date'].length > 0 ? options['date'] : null;
   const branches = listBranches(projectRoot, 'nightly', dateFilter);
 
   if (branches.length === 0) {
@@ -146,7 +153,10 @@ async function reviewCommand(projectRoot: string, options: Record<string, string
       protectedFiles: new Set(BASE_PROTECTED_FILES),
       protectedPatterns: [...BASE_PROTECTED_PATTERNS],
     });
-    if (liveViolations.length > 0 && !(reportEntry?.violations != null && reportEntry.violations.length > 0)) {
+    if (
+      liveViolations.length > 0 &&
+      !(reportEntry?.violations != null && reportEntry.violations.length > 0)
+    ) {
       console.log(pc.red(`\n  Live violation scan: ${String(liveViolations.length)} issue(s)`));
       for (const v of liveViolations) {
         console.log(pc.red(`    [${v.severity}] ${v.detail}`));
@@ -171,7 +181,8 @@ async function reviewCommand(projectRoot: string, options: Record<string, string
 // ── Status Command ──────────────────────────────────────────────────────────
 
 function statusCommand(projectRoot: string, options: Record<string, string | boolean>) {
-  const dateFilter = typeof options['date'] === 'string' && options['date'].length > 0 ? options['date'] : null;
+  const dateFilter =
+    typeof options['date'] === 'string' && options['date'].length > 0 ? options['date'] : null;
   const branches = listBranches(projectRoot, 'nightly', dateFilter);
 
   // Load report first to determine baseBranch
@@ -205,7 +216,7 @@ function statusCommand(projectRoot: string, options: Record<string, string | boo
     if (report['stopReason'] != null)
       console.log(`  Stopped: ${(report['stopReason'] as string | undefined) ?? ''}`);
     console.log(
-      `  Tokens: ~${((report['budget'] as ReportBudget | undefined)?.consumed?.toLocaleString() ?? '?')}`,
+      `  Tokens: ~${(report['budget'] as ReportBudget | undefined)?.consumed?.toLocaleString() ?? '?'}`,
     );
 
     if (report['results'] != null) {
@@ -232,12 +243,9 @@ function statusCommand(projectRoot: string, options: Record<string, string | boo
 
 function cleanCommand(projectRoot: string, options: Record<string, string | boolean>) {
   const nightlyDir = path.join(projectRoot, 'docs', 'coordination', 'nightly');
-  const dateOpt = typeof options['date'] === 'string' && options['date'].length > 0 ? options['date'] : null;
-  const report = loadLatestReport(
-    nightlyDir,
-    'NIGHTLY',
-    dateOpt,
-  ) as Record<string, unknown> | null;
+  const dateOpt =
+    typeof options['date'] === 'string' && options['date'].length > 0 ? options['date'] : null;
+  const report = loadLatestReport(nightlyDir, 'NIGHTLY', dateOpt) as Record<string, unknown> | null;
   const baseBranch = (report?.['baseBranch'] as string | undefined) ?? 'dev';
 
   cleanBranches(projectRoot, 'nightly', baseBranch, dateOpt);
@@ -257,7 +265,10 @@ async function main() {
   let config;
   try {
     config = resolveProject({
-      project: typeof options['project'] === 'string' && options['project'].length > 0 ? options['project'] : undefined,
+      project:
+        typeof options['project'] === 'string' && options['project'].length > 0
+          ? options['project']
+          : undefined,
     });
   } catch (err: unknown) {
     console.error(

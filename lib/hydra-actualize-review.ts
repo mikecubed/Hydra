@@ -46,8 +46,13 @@ interface ReportEntry {
   verification?: string;
   violations?: Array<{ severity: string; detail: string }>;
 }
-interface ReportBudget { consumed?: number; }
-interface ReportArtifacts { selfSnapshot?: string; selfIndex?: string; }
+interface ReportBudget {
+  consumed?: number;
+}
+interface ReportArtifacts {
+  selfSnapshot?: string;
+  selfIndex?: string;
+}
 
 function hasBaseAdvanced(projectRoot: string, branch: string, baseBranch: string) {
   try {
@@ -59,7 +64,8 @@ function hasBaseAdvanced(projectRoot: string, branch: string, baseBranch: string
 }
 
 async function reviewCommand(projectRoot: string, options: Record<string, string | boolean>) {
-  const dateFilter = typeof options['date'] === 'string' && options['date'].length > 0 ? options['date'] : null;
+  const dateFilter =
+    typeof options['date'] === 'string' && options['date'].length > 0 ? options['date'] : null;
   const branches = listBranches(projectRoot, 'actualize', dateFilter);
 
   if (branches.length === 0) {
@@ -133,7 +139,10 @@ async function reviewCommand(projectRoot: string, options: Record<string, string
       protectedFiles: new Set(BASE_PROTECTED_FILES),
       protectedPatterns: [...BASE_PROTECTED_PATTERNS],
     });
-    if (liveViolations.length > 0 && !(reportEntry?.violations != null && reportEntry.violations.length > 0)) {
+    if (
+      liveViolations.length > 0 &&
+      !(reportEntry?.violations != null && reportEntry.violations.length > 0)
+    ) {
       console.log(pc.red(`\n  Live violation scan: ${String(liveViolations.length)} issue(s)`));
       for (const v of liveViolations) {
         console.log(pc.red(`    [${v.severity}] ${v.detail}`));
@@ -155,7 +164,8 @@ async function reviewCommand(projectRoot: string, options: Record<string, string
 }
 
 function statusCommand(projectRoot: string, options: Record<string, string | boolean>) {
-  const dateFilter = typeof options['date'] === 'string' && options['date'].length > 0 ? options['date'] : null;
+  const dateFilter =
+    typeof options['date'] === 'string' && options['date'].length > 0 ? options['date'] : null;
   const branches = listBranches(projectRoot, 'actualize', dateFilter);
 
   const reportDir = path.join(projectRoot, 'docs', 'coordination', 'actualize');
@@ -188,13 +198,11 @@ function statusCommand(projectRoot: string, options: Record<string, string | boo
     if (report['stopReason'] != null)
       console.log(`  Stopped: ${(report['stopReason'] as string | undefined) ?? ''}`);
     console.log(
-      `  Tokens: ~${((report['budget'] as ReportBudget | undefined)?.consumed?.toLocaleString() ?? '?')}`,
+      `  Tokens: ~${(report['budget'] as ReportBudget | undefined)?.consumed?.toLocaleString() ?? '?'}`,
     );
     const artifacts = report['artifacts'] as ReportArtifacts | undefined;
-    if (artifacts?.selfSnapshot != null)
-      console.log(`  Self snapshot: ${artifacts.selfSnapshot}`);
-    if (artifacts?.selfIndex != null)
-      console.log(`  Self index: ${artifacts.selfIndex}`);
+    if (artifacts?.selfSnapshot != null) console.log(`  Self snapshot: ${artifacts.selfSnapshot}`);
+    if (artifacts?.selfIndex != null) console.log(`  Self index: ${artifacts.selfIndex}`);
   }
 
   console.log('');
@@ -202,12 +210,12 @@ function statusCommand(projectRoot: string, options: Record<string, string | boo
 
 function cleanCommand(projectRoot: string, options: Record<string, string | boolean>) {
   const reportDir = path.join(projectRoot, 'docs', 'coordination', 'actualize');
-  const dateOpt = typeof options['date'] === 'string' && options['date'].length > 0 ? options['date'] : null;
-  const report = loadLatestReport(
-    reportDir,
-    'ACTUALIZE',
-    dateOpt,
-  ) as Record<string, unknown> | null;
+  const dateOpt =
+    typeof options['date'] === 'string' && options['date'].length > 0 ? options['date'] : null;
+  const report = loadLatestReport(reportDir, 'ACTUALIZE', dateOpt) as Record<
+    string,
+    unknown
+  > | null;
   const baseBranch = (report?.['baseBranch'] as string | undefined) ?? 'dev';
 
   cleanBranches(projectRoot, 'actualize', baseBranch, dateOpt);
@@ -225,7 +233,10 @@ async function main() {
   let config;
   try {
     config = resolveProject({
-      project: typeof options['project'] === 'string' && options['project'].length > 0 ? options['project'] : undefined,
+      project:
+        typeof options['project'] === 'string' && options['project'].length > 0
+          ? options['project']
+          : undefined,
     });
   } catch (err: unknown) {
     console.error(

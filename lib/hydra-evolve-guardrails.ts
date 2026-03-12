@@ -103,9 +103,11 @@ export class EvolveBudgetTracker {
     this.hardLimit = (budgetOverrides['hardLimit'] as number | undefined) ?? defaults.hardLimit;
     this.perRoundEstimate =
       (budgetOverrides['perRoundEstimate'] as number | undefined) ?? defaults.perRoundEstimate;
-    this.warnThreshold = (budgetOverrides['warnThreshold'] as number | undefined) ?? defaults.warnThreshold;
+    this.warnThreshold =
+      (budgetOverrides['warnThreshold'] as number | undefined) ?? defaults.warnThreshold;
     this.reduceScopeThreshold =
-      (budgetOverrides['reduceScopeThreshold'] as number | undefined) ?? defaults.reduceScopeThreshold;
+      (budgetOverrides['reduceScopeThreshold'] as number | undefined) ??
+      defaults.reduceScopeThreshold;
     this.softStopThreshold =
       (budgetOverrides['softStopThreshold'] as number | undefined) ?? defaults.softStopThreshold;
     this.hardStopThreshold =

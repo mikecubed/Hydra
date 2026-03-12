@@ -103,7 +103,11 @@ export function initInvestigator(overrides: Partial<InvestigatorConfig> = {}): v
   if (overrides.model !== undefined && overrides.model !== '') cfg.model = overrides.model;
   if (overrides.reasoningEffort !== undefined && overrides.reasoningEffort !== '')
     cfg.reasoningEffort = overrides.reasoningEffort;
-  if (overrides.maxTokensBudget !== undefined && overrides.maxTokensBudget !== 0 && !Number.isNaN(overrides.maxTokensBudget))
+  if (
+    overrides.maxTokensBudget !== undefined &&
+    overrides.maxTokensBudget !== 0 &&
+    !Number.isNaN(overrides.maxTokensBudget)
+  )
     cfg.maxTokensBudget = overrides.maxTokensBudget;
 
   config = cfg;
@@ -371,14 +375,27 @@ function parseInvestigatorResponse(raw: string): DiagnosisResult {
     const parsed = JSON.parse(text) as ParsedDiagnosis;
     return {
       diagnosis: typeof parsed.diagnosis === 'string' ? parsed.diagnosis : 'fundamental',
-      explanation: typeof parsed.explanation === 'string' ? parsed.explanation : 'No explanation provided',
+      explanation:
+        typeof parsed.explanation === 'string' ? parsed.explanation : 'No explanation provided',
       rootCause: typeof parsed.rootCause === 'string' ? parsed.rootCause : 'Unknown',
       corrective: typeof parsed.corrective === 'string' ? parsed.corrective : null,
       retryRecommendation: {
-        retryPhase: typeof parsed.retryRecommendation?.retryPhase === 'boolean' ? parsed.retryRecommendation.retryPhase : false,
-        modifiedPrompt: typeof parsed.retryRecommendation?.modifiedPrompt === 'string' ? parsed.retryRecommendation.modifiedPrompt : null,
-        preamble: typeof parsed.retryRecommendation?.preamble === 'string' ? parsed.retryRecommendation.preamble : null,
-        retryAgent: typeof parsed.retryRecommendation?.retryAgent === 'string' ? parsed.retryRecommendation.retryAgent : null,
+        retryPhase:
+          typeof parsed.retryRecommendation?.retryPhase === 'boolean'
+            ? parsed.retryRecommendation.retryPhase
+            : false,
+        modifiedPrompt:
+          typeof parsed.retryRecommendation?.modifiedPrompt === 'string'
+            ? parsed.retryRecommendation.modifiedPrompt
+            : null,
+        preamble:
+          typeof parsed.retryRecommendation?.preamble === 'string'
+            ? parsed.retryRecommendation.preamble
+            : null,
+        retryAgent:
+          typeof parsed.retryRecommendation?.retryAgent === 'string'
+            ? parsed.retryRecommendation.retryAgent
+            : null,
       },
     };
   } catch {

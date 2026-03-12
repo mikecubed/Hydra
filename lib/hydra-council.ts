@@ -114,7 +114,9 @@ function saveCheckpoint(
     stepIdx,
     transcript,
     specContent: specContent ?? null,
-    startedAt: ((transcript[0] as Record<string, unknown>)[['startedAt'] as string] as string | undefined) ?? nowIso(),
+    startedAt:
+      ((transcript[0] as Record<string, unknown>)[['startedAt'] as string] as string | undefined) ??
+      nowIso(),
     updatedAt: nowIso(),
   };
   fs.writeFileSync(checkpointPath(promptHash), `${JSON.stringify(data, null, 2)}\n`, 'utf8');
@@ -243,7 +245,9 @@ function normalizeDecisionOption(item: unknown, index: number) {
 }
 
 function mergeTruthy(base: unknown, update: unknown) {
-  const out = { ...(base != null && typeof base === 'object' ? (base as Record<string, unknown>) : {}) };
+  const out = {
+    ...(base != null && typeof base === 'object' ? (base as Record<string, unknown>) : {}),
+  };
   for (const [key, value] of Object.entries(
     update != null && typeof update === 'object' ? (update as Record<string, unknown>) : {},
   )) {
@@ -378,7 +382,11 @@ function extractQuestions(parsed: unknown) {
         questions.push({ to: 'human', question: q.trim() });
       } else if (q != null && typeof q === 'object') {
         const qi = q as Record<string, unknown>;
-        const question = ((qi['question'] as string | undefined) ?? (qi['text'] as string | undefined) ?? '').trim();
+        const question = (
+          (qi['question'] as string | undefined) ??
+          (qi['text'] as string | undefined) ??
+          ''
+        ).trim();
         if (question === '') {
           continue;
         }
@@ -428,7 +436,11 @@ function extractCouncilSignal(parsed: unknown) {
   if (vote === null) {
     return null;
   }
-  const reason = ((p['council_reason'] as string | undefined) ?? (p['reason'] as string | undefined) ?? '').trim();
+  const reason = (
+    (p['council_reason'] as string | undefined) ??
+    (p['reason'] as string | undefined) ??
+    ''
+  ).trim();
   return { vote, reason };
 }
 
@@ -492,7 +504,9 @@ export function extractAssumptions(parsed: unknown): unknown[] {
         status: ['validated', 'open', 'rejected'].includes(status) ? status : 'open',
         evidence: cleanText(i['evidence'] ?? i['basis']),
         impact: cleanText(i['impact'] ?? i['risk']),
-        owner: sanitizeOwner((i['owner'] as string | undefined) ?? (i['to'] as string | undefined) ?? 'unassigned'),
+        owner: sanitizeOwner(
+          (i['owner'] as string | undefined) ?? (i['to'] as string | undefined) ?? 'unassigned',
+        ),
       });
     }
   }
@@ -538,7 +552,9 @@ export function extractAssumptionAttacks(parsed: unknown): unknown[] {
         assumption,
         challenge,
         impact: cleanText(i['impact'] ?? i['risk']),
-        by: sanitizeOwner((i['by'] as string | undefined) ?? (i['owner'] as string | undefined) ?? 'unassigned'),
+        by: sanitizeOwner(
+          (i['by'] as string | undefined) ?? (i['owner'] as string | undefined) ?? 'unassigned',
+        ),
       });
     }
   }
@@ -604,7 +620,10 @@ export function extractFinalDecision(
       p['decision_rationale'],
   );
   const owner = sanitizeOwner(
-    (decisionRaw['owner'] as string | undefined) ?? (decisionRaw['decider'] as string | undefined) ?? fallback.agent ?? 'unassigned',
+    (decisionRaw['owner'] as string | undefined) ??
+      (decisionRaw['decider'] as string | undefined) ??
+      fallback.agent ??
+      'unassigned',
   );
   const confidence = normalizeConfidence(decisionRaw['confidence'] ?? p['confidence']);
   const nextAction = normalizeNextAction(
@@ -619,7 +638,14 @@ export function extractFinalDecision(
     decisionRaw['tradeoffs'] ?? decisionRaw['criteria'] ?? p['tradeoffs'] ?? p['decision_criteria'],
   );
 
-  if (summary === '' && why === '' && confidence === '' && nextAction === '' && reversibleFirstStep === '' && !tradeoffs) {
+  if (
+    summary === '' &&
+    why === '' &&
+    confidence === '' &&
+    nextAction === '' &&
+    reversibleFirstStep === '' &&
+    !tradeoffs
+  ) {
     return null;
   }
 
@@ -924,7 +950,9 @@ export function buildStepPrompt(
     ].join('\n'),
   };
 
-  const framing = isPersonaEnabled() ? getAgentFraming(agent) : `You are ${agentConfig?.label ?? agent.toUpperCase()}`;
+  const framing = isPersonaEnabled()
+    ? getAgentFraming(agent)
+    : `You are ${agentConfig?.label ?? agent.toUpperCase()}`;
 
   return [
     `${framing} Council round ${String(round)}/${String(totalRounds)}, phase: ${phase}.`,
@@ -947,12 +975,18 @@ export function buildStepPrompt(
     'Do not use majority vote. Compare options explicitly, challenge assumptions directly, and prefer the most reversible path that still satisfies correctness.',
     '',
     'Recent council context:',
-    (() => { const cs = buildContextSummary(transcript); return cs === '' ? '(none)' : cs; })(),
+    (() => {
+      const cs = buildContextSummary(transcript);
+      return cs === '' ? '(none)' : cs;
+    })(),
     '',
     (() => {
-      if (phase === 'critique') return 'Focus: attack the strongest assumption in the current leading option before listing smaller issues. Cite specific file paths and line numbers.';
-      if (phase === 'implement') return 'Focus: act as the final synthesizer. Name the decision owner, best next action, reversible first step, and review ordering. Do not write code.';
-      if (phase === 'refine') return 'Focus: resolve critique into a single decision using the criteria above, then produce concrete task specs for Codex (file paths, signatures, DoD).';
+      if (phase === 'critique')
+        return 'Focus: attack the strongest assumption in the current leading option before listing smaller issues. Cite specific file paths and line numbers.';
+      if (phase === 'implement')
+        return 'Focus: act as the final synthesizer. Name the decision owner, best next action, reversible first step, and review ordering. Do not write code.';
+      if (phase === 'refine')
+        return 'Focus: resolve critique into a single decision using the criteria above, then produce concrete task specs for Codex (file paths, signatures, DoD).';
       return 'Focus: surface distinct options, state tradeoffs across the decision criteria, and identify assumptions that need to be challenged.';
     })(),
     'Set should_open_council=true only if deeper multi-round deliberation is necessary.',
@@ -1028,7 +1062,12 @@ function buildAgentBrief(agent: string, objective: string, report: Record<string
   const questionText =
     myQuestions.length === 0
       ? '- none'
-      : myQuestions.map((q) => `- to ${(q['to'] as string | undefined) ?? ''}: ${(q['question'] as string | undefined) ?? ''}`).join('\n');
+      : myQuestions
+          .map(
+            (q) =>
+              `- to ${(q['to'] as string | undefined) ?? ''}: ${(q['question'] as string | undefined) ?? ''}`,
+          )
+          .join('\n');
 
   const decisionLines = finalDecision
     ? [
@@ -1082,7 +1121,9 @@ function buildAgentBrief(agent: string, objective: string, report: Record<string
 function buildDivergePrompt(agent: string, userPrompt: string, specContent: string | null) {
   const agentConfig = getAgent(agent);
   const context = buildAgentContext(agent, {}, config, userPrompt);
-  const framing = isPersonaEnabled() ? getAgentFraming(agent) : `You are ${agentConfig?.label ?? agent.toUpperCase()}`;
+  const framing = isPersonaEnabled()
+    ? getAgentFraming(agent)
+    : `You are ${agentConfig?.label ?? agent.toUpperCase()}`;
   const tradeoffsSchema =
     '{"correctness":"string","complexity":"string","reversibility":"string","user_impact":"string"}';
   return [
@@ -1123,7 +1164,9 @@ function buildAttackPrompt(
 ) {
   const agentConfig = getAgent(agent);
   const context = buildAgentContext(agent, {}, config, userPrompt);
-  const framing = isPersonaEnabled() ? getAgentFraming(agent) : `You are ${agentConfig?.label ?? agent.toUpperCase()}`;
+  const framing = isPersonaEnabled()
+    ? getAgentFraming(agent)
+    : `You are ${agentConfig?.label ?? agent.toUpperCase()}`;
   const othersOutput = divergeEntries
     .filter((e) => e['agent'] !== agent)
     .map((e) => {
@@ -1170,7 +1213,9 @@ function buildSynthesizePrompt(
 ) {
   const agentConfig = getAgent('claude');
   const context = buildAgentContext('claude', {}, config, userPrompt);
-  const framing = isPersonaEnabled() ? getAgentFraming('claude') : `You are ${agentConfig?.label ?? 'Claude'}`;
+  const framing = isPersonaEnabled()
+    ? getAgentFraming('claude')
+    : `You are ${agentConfig?.label ?? 'Claude'}`;
   const tradeoffsSchema =
     '{"correctness":"string","complexity":"string","reversibility":"string","user_impact":"string"}';
   const allDiverge = divergeEntries
@@ -1253,7 +1298,10 @@ const ADV_PHASE_ORDER = Object.freeze(['diverge', 'attack', 'synthesize']);
  * Returns { startRound, startPhaseIdx } where startPhaseIdx indexes ADV_PHASE_ORDER.
  * Returns { startRound: Infinity } when implement was already completed.
  */
-export function computeAdversarialResumePoint(transcript: unknown[]): { startRound: number; startPhaseIdx: number } {
+export function computeAdversarialResumePoint(transcript: unknown[]): {
+  startRound: number;
+  startPhaseIdx: number;
+} {
   if (transcript.length === 0) return { startRound: 1, startPhaseIdx: 0 };
   const last = transcript.at(-1) as Record<string, unknown>;
   if (last['phase'] === 'implement') return { startRound: Infinity, startPhaseIdx: 0 };
@@ -1599,12 +1647,13 @@ async function main() {
   const emit = String(options['emit'] ?? 'summary').toLowerCase();
   const save = boolFlag(options['save'] as string | boolean | undefined, emit !== 'json');
   const agentsRaw = options['agents'];
-  const agentsFilter = typeof agentsRaw === 'string' && agentsRaw !== ''
-    ? agentsRaw
-        .split(',')
-        .map((a: string) => a.trim().toLowerCase())
-        .filter((a) => a !== '')
-    : null;
+  const agentsFilter =
+    typeof agentsRaw === 'string' && agentsRaw !== ''
+      ? agentsRaw
+          .split(',')
+          .map((a: string) => a.trim().toLowerCase())
+          .filter((a) => a !== '')
+      : null;
 
   const report = {
     id: runId('HYDRA_COUNCIL'),
@@ -1714,16 +1763,26 @@ async function main() {
 
   if (!preview) {
     const checkpoint = loadCheckpoint(promptHash, prompt);
-    if (checkpoint != null && Array.isArray(checkpoint.transcript) && checkpoint.transcript.length > 0) {
+    if (
+      checkpoint != null &&
+      Array.isArray(checkpoint.transcript) &&
+      checkpoint.transcript.length > 0
+    ) {
       report.transcript = checkpoint.transcript;
-      if (checkpoint.specContent != null && checkpoint.specContent !== '' && (specContent == null || specContent === '')) {
+      if (
+        checkpoint.specContent != null &&
+        checkpoint.specContent !== '' &&
+        (specContent == null || specContent === '')
+      ) {
         specContent = checkpoint.specContent;
       }
       // Determine resume point from last completed entry
       const last = checkpoint.transcript.at(-1);
       if (last != null) {
         startRound = last.round;
-        startStepIdx = activeFlow.findIndex((s) => s.agent === last.agent && s.phase === last.phase);
+        startStepIdx = activeFlow.findIndex(
+          (s) => s.agent === last.agent && s.phase === last.phase,
+        );
         if (startStepIdx >= 0) {
           startStepIdx += 1; // Start after the last completed step
           if (startStepIdx >= activeFlow.length) {
@@ -1866,7 +1925,9 @@ async function main() {
               `${colorAgent(step.agent)} ${DIM(step.phase)} rate limited, retrying in ${(delay / 1000).toFixed(0)}s...`,
             );
             // eslint-disable-next-line no-await-in-loop
-            await new Promise<void>((r) => { globalThis.setTimeout(r, delay); });
+            await new Promise<void>((r) => {
+              globalThis.setTimeout(r, delay);
+            });
             // eslint-disable-next-line no-await-in-loop
             afterRlResult = await callAgentAsync(step.agent, promptText, timeoutMs);
           }
@@ -1892,7 +1953,7 @@ async function main() {
         if (result.ok) {
           let suffix = '';
           if (result.recovered) {
-            suffix = ` ${DIM(`(recovered: ${result.newModel ?? ''})`)}` ;
+            suffix = ` ${DIM(`(recovered: ${result.newModel ?? ''})`)}`;
           } else if (result._compactedRetry === true) {
             suffix = ` ${DIM('(compacted retry)')}`;
           }
@@ -1981,7 +2042,10 @@ async function main() {
           title: task.title,
           owner: task.owner,
           status: 'todo',
-          notes: task.rationale != null && task.rationale !== '' ? `Council rationale: ${task.rationale}` : '',
+          notes:
+            task.rationale != null && task.rationale !== ''
+              ? `Council rationale: ${task.rationale}`
+              : '',
         });
         createdTasks.push(created['task']);
       }
@@ -1991,7 +2055,10 @@ async function main() {
       const decisionResult = await request('POST', url, '/decision', {
         title: decisionTitle,
         owner: 'human',
-        rationale: councilRationale === '' ? 'Council completed without explicit consensus.' : councilRationale,
+        rationale:
+          councilRationale === ''
+            ? 'Council completed without explicit consensus.'
+            : councilRationale,
         impact: `Rounds=${String(rounds)}; Tasks=${String(createdTasks.length)}; Flow=Claude\u2192Gemini\u2192Claude\u2192Codex; next=${report.recommendedNextAction}`,
       });
 
@@ -2102,7 +2169,11 @@ async function main() {
     console.log(
       label(
         'Next action',
-        pc.white(report.recommendedNextAction === '' ? (decision.nextAction ?? report.recommendedMode) : report.recommendedNextAction),
+        pc.white(
+          report.recommendedNextAction === ''
+            ? (decision.nextAction ?? report.recommendedMode)
+            : report.recommendedNextAction,
+        ),
       ),
     );
     if (decision.reversibleFirstStep != null && decision.reversibleFirstStep !== '') {
@@ -2167,7 +2238,11 @@ async function main() {
     for (const risk of report.risks) {
       const r = risk as Record<string, unknown> | string;
       const text =
-        typeof r === 'string' ? r : ((r['risk'] as string | undefined) ?? (r['description'] as string | undefined) ?? JSON.stringify(r));
+        typeof r === 'string'
+          ? r
+          : ((r['risk'] as string | undefined) ??
+            (r['description'] as string | undefined) ??
+            JSON.stringify(r));
       console.log(`  ${WARNING('\u26A0')} ${pc.white(short(text, 72))}`);
     }
   }
@@ -2209,7 +2284,14 @@ async function main() {
   console.log(divider());
   const recColor = report.recommendedMode === 'council' ? WARNING : SUCCESS;
   console.log(label('Recommended', recColor(report.recommendedMode)));
-  console.log(label('Rationale', DIM(short(report.recommendationRationale === '' ? 'n/a' : report.recommendationRationale, 120))));
+  console.log(
+    label(
+      'Rationale',
+      DIM(
+        short(report.recommendationRationale === '' ? 'n/a' : report.recommendationRationale, 120),
+      ),
+    ),
+  );
   let publishedLabel = DIM('no');
   if (report.published.ok && report.published.skipped === true) {
     publishedLabel = DIM('skipped');
@@ -2229,8 +2311,7 @@ async function main() {
   }
 }
 
-const isMain =
-  path.resolve(process.argv[1]) === path.resolve(fileURLToPath(import.meta.url));
+const isMain = path.resolve(process.argv[1]) === path.resolve(fileURLToPath(import.meta.url));
 
 if (isMain) {
   main().catch((err: unknown) => {

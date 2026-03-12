@@ -232,9 +232,7 @@ function statusCommand(projectRoot: string, options: Record<string, string | boo
     };
     const statusColor = statusColors[sessionState.status ?? ''] ?? pc.dim;
     console.log(`\n  Session: ${pc.bold(sessionState.sessionId ?? '?')}`);
-    console.log(
-      `  Status:  ${statusColor(pc.bold((sessionState.status ?? '').toUpperCase()))}`,
-    );
+    console.log(`  Status:  ${statusColor(pc.bold((sessionState.status ?? '').toUpperCase()))}`);
 
     if (sessionState.summary != null) {
       const s = sessionState.summary;
