@@ -16,6 +16,7 @@ import path from 'node:path';
 // @ts-ignore — cross-spawn has no bundled types; pre-existing across codebase
 import crossSpawn from 'cross-spawn';
 import { fileURLToPath } from 'node:url';
+import { detectInstalledCLIs } from './hydra-cli-detect.ts';
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -74,40 +75,8 @@ export function resolveNodePath() {
 }
 
 // ── CLI Detection ───────────────────────────────────────────────────────────
-
-/**
- * Check if a command exists on PATH.
- * Uses `where` on Windows, `which` on Unix.
- * @param {string} name
- * @returns {boolean}
- */
-export function commandExists(name: string): boolean {
-  try {
-    const cmd = process.platform === 'win32' ? 'where' : 'which';
-    const result = spawnSync(cmd, [name], {
-      encoding: 'utf8',
-      windowsHide: true,
-      timeout: 5_000,
-      stdio: ['ignore', 'pipe', 'ignore'],
-    });
-    return result.status === 0 && Boolean((result.stdout || '').trim());
-  } catch {
-    return false;
-  }
-}
-
-/**
- * Detect which AI CLIs are installed and accessible on PATH.
- * @returns {{ claude: boolean, gemini: boolean, codex: boolean, copilot: boolean }}
- */
-export function detectInstalledCLIs() {
-  return {
-    claude: commandExists('claude'),
-    gemini: commandExists('gemini'),
-    codex: commandExists('codex'),
-    copilot: commandExists('copilot'),
-  };
-}
+// Implementations live in hydra-cli-detect.ts; re-exported here for backward compatibility.
+export { commandExists, detectInstalledCLIs } from './hydra-cli-detect.ts';
 
 // ── MCP Server Entry Builders ───────────────────────────────────────────────
 
@@ -646,28 +615,28 @@ function runSetup(flags: SetupFlags): { ok: boolean; message: string } {
 
   if (uninstall) {
     // Unregister from all
-    if (clis.claude) {
+    if (clis['claude']) {
       const r = unmergeClaudeConfig();
       results.push(`Claude: ${r.status}`);
     } else {
       results.push('Claude: not installed');
     }
 
-    if (clis.gemini) {
+    if (clis['gemini']) {
       const r = unmergeGeminiConfig();
       results.push(`Gemini: ${r.status}`);
     } else {
       results.push('Gemini: not installed');
     }
 
-    if (clis.codex) {
+    if (clis['codex']) {
       const r = unregisterCodexMcp();
       results.push(`Codex: ${r.status}`);
     } else {
       results.push('Codex: not installed');
     }
 
-    if (clis.copilot) {
+    if (clis['copilot']) {
       const r = unmergeCopilotConfig();
       results.push(`Copilot: ${r.status}`);
     } else {
@@ -680,28 +649,28 @@ function runSetup(flags: SetupFlags): { ok: boolean; message: string } {
   }
 
   // Register with all installed CLIs
-  if (clis.claude) {
+  if (clis['claude']) {
     const r = mergeClaudeConfig({ force });
     results.push(`Claude: ${r.status}`);
   } else {
     results.push('Claude: not installed');
   }
 
-  if (clis.gemini) {
+  if (clis['gemini']) {
     const r = mergeGeminiConfig({ force });
     results.push(`Gemini: ${r.status}`);
   } else {
     results.push('Gemini: not installed');
   }
 
-  if (clis.codex) {
+  if (clis['codex']) {
     const r = registerCodexMcp();
     results.push(`Codex: ${r.status}`);
   } else {
     results.push('Codex: not installed');
   }
 
-  if (clis.copilot) {
+  if (clis['copilot']) {
     const r = mergeCopilotConfig({ force });
     results.push(`Copilot: ${r.status}`);
   } else {

@@ -17,7 +17,7 @@ import {
   getModeTiers as _getModeTiers,
   getConciergeFallbackChain as _getConciergeFallbackChain,
 } from './hydra-model-profiles.ts';
-import type { HydraConfig, RoleConfig } from './types.ts';
+import type { HydraConfig, RoleConfig, CopilotConfig } from './types.ts';
 
 /** Recursively make all properties optional — used for partial config overrides in tests. */
 type DeepPartial<T> = T extends object ? { [P in keyof T]?: DeepPartial<T[P]> } : T;
@@ -417,6 +417,9 @@ const DEFAULT_CONFIG = {
     fastModel: 'mistral:7b',
     budgetGate: { dailyPct: 80, weeklyPct: 75 },
   },
+  copilot: {
+    enabled: false,
+  } satisfies CopilotConfig,
   routing: {
     mode: 'balanced', // 'economy' | 'balanced' | 'performance'
     useLegacyTriage: false,
@@ -586,6 +589,7 @@ function mergeWithDefaults(config: unknown): HydraConfig {
     aliases: deepMergeSection(def['aliases'] as Record<string, unknown>, parsed['aliases']),
     modeTiers: deepMergeSection(def['modeTiers'] as Record<string, unknown>, parsed['modeTiers']),
     local: deepMergeSection(def['local'] as Record<string, unknown>, parsed['local']),
+    copilot: deepMergeSection(def['copilot'] as Record<string, unknown>, parsed['copilot']),
     usage: { ...(def['usage'] as object), ...(parsed['usage'] as object | undefined) },
     verification: {
       ...(def['verification'] as object),
@@ -653,19 +657,28 @@ function migrateConfig(parsed: Record<string, unknown>): Record<string, unknown>
 }
 
 let _configCache: HydraConfig | null = null;
+let _testConfigPath: string | null = null;
+
+/** Returns the active config file path (real or test-overridden). */
+function activeConfigPath(): string {
+  return _testConfigPath ?? CONFIG_PATH;
+}
 
 export function loadHydraConfig(): HydraConfig {
   if (_configCache !== null) return _configCache;
-  ensureRuntimeRoot();
-  if (HYDRA_IS_PACKAGED) {
-    seedRuntimeFile(
-      CONFIG_PATH,
-      EMBEDDED_CONFIG_PATH,
-      `${JSON.stringify(DEFAULT_CONFIG, null, 2)}\n`,
-    );
+  const cfgPath = activeConfigPath();
+  if (!_testConfigPath) {
+    ensureRuntimeRoot();
+    if (HYDRA_IS_PACKAGED) {
+      seedRuntimeFile(
+        cfgPath,
+        EMBEDDED_CONFIG_PATH,
+        `${JSON.stringify(DEFAULT_CONFIG, null, 2)}\n`,
+      );
+    }
   }
   try {
-    const raw = fs.readFileSync(CONFIG_PATH, 'utf8');
+    const raw = fs.readFileSync(cfgPath, 'utf8');
     const parsed = JSON.parse(raw) as Record<string, unknown>;
     // Migrate v1 → v2 if needed
     if (
@@ -684,14 +697,35 @@ export function loadHydraConfig(): HydraConfig {
 }
 
 export function saveHydraConfig(config: DeepPartial<HydraConfig>): HydraConfig {
-  ensureRuntimeRoot();
+  const cfgPath = activeConfigPath();
+  if (!_testConfigPath) ensureRuntimeRoot();
   const merged = mergeWithDefaults(config);
-  fs.writeFileSync(CONFIG_PATH, `${JSON.stringify(merged, null, 2)}\n`, 'utf8');
+  fs.writeFileSync(cfgPath, `${JSON.stringify(merged, null, 2)}\n`, 'utf8');
   _configCache = merged;
   return merged;
 }
 
 export function invalidateConfigCache(): void {
+  _configCache = null;
+}
+
+/**
+ * Test-only: redirect config reads/writes to a temp file path.
+ * Pass null to restore the real config path.
+ * Always invalidates the cache so the next read picks up the new path.
+ *
+ * @remarks
+ * Each test file runs in its own Node.js worker thread (the native `node:test`
+ * runner isolates files via workers), so this global variable is **not** shared
+ * across test files — there is no cross-file race. Within a single test file
+ * tests run sequentially, so within-file races are also not possible.
+ *
+ * Do **not** call this inside `test.concurrent` blocks or any other
+ * concurrent-execution context, as that would race on the same global.
+ * For read-only config overrides in concurrent contexts, use `_setTestConfig()`.
+ */
+export function _setTestConfigPath(p: string | null): void {
+  _testConfigPath = p;
   _configCache = null;
 }
 

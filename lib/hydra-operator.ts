@@ -32,6 +32,7 @@ import {
   AGENT_TYPE,
   formatEffortDisplay,
   bestAgentFor,
+  setAgentEnabled,
 } from './hydra-agents.ts';
 import { checkUsage, renderUsageDashboard, formatTokens } from './hydra-usage.ts';
 import { verifyAgentQuota } from './hydra-model-recovery.ts';
@@ -4204,7 +4205,7 @@ async function interactiveLoop({
             } else if (agentDef.type === 'physical') {
               console.log(`  ${ERROR('Cannot')} ${agentSubCmd} physical agents.`);
             } else {
-              agentDef.enabled = agentSubCmd === 'enable';
+              setAgentEnabled(targetName, agentSubCmd === 'enable');
               console.log(`  ${SUCCESS('\u2713')} ${colorAgent(targetName)} ${agentSubCmd}d`);
             }
           } else {

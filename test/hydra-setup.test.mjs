@@ -1,5 +1,6 @@
 import { describe, it, beforeEach, afterEach } from 'node:test';
 import assert from 'node:assert/strict';
+import { registerAgent, unregisterAgent, AGENT_TYPE } from '../lib/hydra-agents.ts';
 import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
@@ -184,6 +185,47 @@ describe('detectInstalledCLIs', () => {
     assert.strictEqual(typeof result.gemini, 'boolean');
     assert.strictEqual(typeof result.codex, 'boolean');
     assert.strictEqual(typeof result.copilot, 'boolean');
+  });
+
+  it('includes all physical spawn agents from registry (not just hardcoded 4)', () => {
+    // Register a custom CLI agent
+    registerAgent('test-cli-agent', {
+      type: AGENT_TYPE.PHYSICAL,
+      features: { executeMode: 'spawn' },
+    });
+    try {
+      const result = detectInstalledCLIs();
+      assert.ok(
+        'test-cli-agent' in result,
+        'Custom spawn agent must appear in detectInstalledCLIs()',
+      );
+      assert.strictEqual(typeof result['test-cli-agent'], 'boolean');
+    } finally {
+      unregisterAgent('test-cli-agent');
+    }
+  });
+
+  it('excludes API-mode agents (local)', () => {
+    const result = detectInstalledCLIs();
+    // 'local' uses executeMode:'api' — should not appear
+    assert.ok(!('local' in result), 'API-mode agent must not appear in detectInstalledCLIs()');
+  });
+
+  it('uses agentDef.cli as binary name when set', () => {
+    // Register an agent with a custom cli binary name
+    registerAgent('my-wrapper', {
+      type: AGENT_TYPE.PHYSICAL,
+      cli: 'claude', // points to 'claude' binary which may or may not be installed
+      features: { executeMode: 'spawn' },
+    });
+    try {
+      const result = detectInstalledCLIs();
+      assert.ok('my-wrapper' in result, 'Agent with custom cli binary must appear');
+      // The value should match what commandExists('claude') returns
+      assert.strictEqual(result['my-wrapper'], result['claude']);
+    } finally {
+      unregisterAgent('my-wrapper');
+    }
   });
 });
 

@@ -1,5 +1,8 @@
-import test from 'node:test';
+import test, { describe, it, beforeEach, afterEach } from 'node:test';
 import assert from 'node:assert/strict';
+import os from 'node:os';
+import path from 'node:path';
+import fs from 'node:fs';
 import {
   AGENTS,
   AGENT_NAMES,
@@ -18,7 +21,13 @@ import {
   _resetRegistry,
   initAgentRegistry,
 } from '../lib/hydra-agents.ts';
-import { AFFINITY_PRESETS, loadHydraConfig, saveHydraConfig } from '../lib/hydra-config.ts';
+import {
+  AFFINITY_PRESETS,
+  saveHydraConfig,
+  _setTestConfig,
+  _setTestConfigPath,
+  invalidateConfigCache,
+} from '../lib/hydra-config.ts';
 
 const CLOUD_AGENT_NAMES = ['claude', 'gemini', 'codex'];
 
@@ -82,57 +91,71 @@ test('TASK_TYPES has 10 types including new ones', () => {
 // ── Agent structure ──────────────────────────────────────────────────────────
 
 test('each physical agent has required fields', () => {
-  for (const [name, agent] of Object.entries(AGENTS)) {
-    assert.ok(agent.label, `${name} should have a label`);
-    assert.ok(agent.invoke, `${name} should have invoke methods`);
+  // Ensure copilot appears disabled regardless of runtime config file
+  _setTestConfig({ copilot: { enabled: false } });
+  try {
+    for (const [name, agent] of Object.entries(AGENTS)) {
+      assert.ok(agent.label, `${name} should have a label`);
+      assert.ok(agent.invoke, `${name} should have invoke methods`);
 
-    if (agent.cli === null) {
-      assert.equal(name, 'local', 'only local should omit a CLI binary');
-      assert.equal(
-        agent.invoke.nonInteractive,
-        null,
-        `${name} should not expose nonInteractive invoke`,
-      );
-      assert.equal(agent.invoke.interactive, null, `${name} should not expose interactive invoke`);
-      assert.equal(agent.invoke.headless, null, `${name} should not expose headless invoke`);
-    } else {
-      assert.equal(typeof agent.cli, 'string', `${name} should have a cli command`);
-      assert.equal(
-        typeof agent.invoke.nonInteractive,
-        'function',
-        `${name} should have nonInteractive invoke`,
-      );
-      assert.equal(
-        typeof agent.invoke.interactive,
-        'function',
-        `${name} should have interactive invoke`,
-      );
-      assert.equal(typeof agent.invoke.headless, 'function', `${name} should have headless invoke`);
-    }
+      if (agent.cli === null) {
+        assert.equal(name, 'local', 'only local should omit a CLI binary');
+        assert.equal(
+          agent.invoke.nonInteractive,
+          null,
+          `${name} should not expose nonInteractive invoke`,
+        );
+        assert.equal(
+          agent.invoke.interactive,
+          null,
+          `${name} should not expose interactive invoke`,
+        );
+        assert.equal(agent.invoke.headless, null, `${name} should not expose headless invoke`);
+      } else {
+        assert.equal(typeof agent.cli, 'string', `${name} should have a cli command`);
+        assert.equal(
+          typeof agent.invoke.nonInteractive,
+          'function',
+          `${name} should have nonInteractive invoke`,
+        );
+        assert.equal(
+          typeof agent.invoke.interactive,
+          'function',
+          `${name} should have interactive invoke`,
+        );
+        assert.equal(
+          typeof agent.invoke.headless,
+          'function',
+          `${name} should have headless invoke`,
+        );
+      }
 
-    assert.ok(typeof agent.contextBudget === 'number', `${name} should have contextBudget`);
-    assert.ok(
-      agent.contextTier === null || typeof agent.contextTier === 'string',
-      `${name} should have a string or null contextTier`,
-    );
-    assert.ok(Array.isArray(agent.strengths), `${name} should have strengths array`);
-    assert.ok(Array.isArray(agent.weaknesses), `${name} should have weaknesses array`);
-    if (agent.councilRole === null) {
-      assert.equal(name, 'local', 'only local should omit a council role');
-    } else {
-      assert.ok(agent.councilRole, `${name} should have councilRole`);
+      assert.ok(typeof agent.contextBudget === 'number', `${name} should have contextBudget`);
+      assert.ok(
+        agent.contextTier === null || typeof agent.contextTier === 'string',
+        `${name} should have a string or null contextTier`,
+      );
+      assert.ok(Array.isArray(agent.strengths), `${name} should have strengths array`);
+      assert.ok(Array.isArray(agent.weaknesses), `${name} should have weaknesses array`);
+      if (agent.councilRole === null) {
+        assert.equal(name, 'local', 'only local should omit a council role');
+      } else {
+        assert.ok(agent.councilRole, `${name} should have councilRole`);
+      }
+      assert.ok(agent.taskAffinity, `${name} should have taskAffinity`);
+      assert.ok(agent.rolePrompt, `${name} should have rolePrompt`);
+      assert.ok(typeof agent.timeout === 'number', `${name} should have timeout`);
+      assert.equal(agent.type, 'physical', `${name} should be a physical agent`);
+      assert.ok(Array.isArray(agent.tags), `${name} should have tags array`);
+      // copilot is disabled by default; copilot.enabled: true in config activates it
+      if (name === 'copilot') {
+        assert.equal(agent.enabled, false, 'copilot should be disabled by default');
+      } else {
+        assert.equal(agent.enabled, true, `${name} should be enabled`);
+      }
     }
-    assert.ok(agent.taskAffinity, `${name} should have taskAffinity`);
-    assert.ok(agent.rolePrompt, `${name} should have rolePrompt`);
-    assert.ok(typeof agent.timeout === 'number', `${name} should have timeout`);
-    assert.equal(agent.type, 'physical', `${name} should be a physical agent`);
-    assert.ok(Array.isArray(agent.tags), `${name} should have tags array`);
-    // copilot is disabled by default — requires CLI installation
-    if (name === 'copilot') {
-      assert.equal(agent.enabled, false, 'copilot should be disabled by default');
-    } else {
-      assert.equal(agent.enabled, true, `${name} should be enabled`);
-    }
+  } finally {
+    invalidateConfigCache();
   }
 });
 
@@ -186,12 +209,18 @@ test('getAgent returns null for unknown agents', () => {
 // ── bestAgentFor ─────────────────────────────────────────────────────────────
 
 test('bestAgentFor returns correct agents for each task type', () => {
-  assert.equal(bestAgentFor('planning'), 'claude');
-  assert.equal(bestAgentFor('architecture'), 'claude');
-  assert.equal(bestAgentFor('analysis'), 'gemini');
-  assert.equal(bestAgentFor('review'), 'gemini');
-  assert.equal(bestAgentFor('implementation'), 'codex');
-  assert.equal(bestAgentFor('testing'), 'codex');
+  // Pin routing mode so local config overrides don't affect expected results
+  _setTestConfig({ routing: { mode: 'balanced' } });
+  try {
+    assert.equal(bestAgentFor('planning'), 'claude');
+    assert.equal(bestAgentFor('architecture'), 'claude');
+    assert.equal(bestAgentFor('analysis'), 'gemini');
+    assert.equal(bestAgentFor('review'), 'gemini');
+    assert.equal(bestAgentFor('implementation'), 'codex');
+    assert.equal(bestAgentFor('testing'), 'codex');
+  } finally {
+    invalidateConfigCache();
+  }
 });
 
 test('bestAgentFor returns a valid agent name for all task types', () => {
@@ -462,7 +491,45 @@ test('bestAgentFor with includeVirtual returns virtual agents when they score hi
   unregisterAgent('super-tester');
 });
 
-// ── KNOWN_OWNERS dynamic ─────────────────────────────────────────────────────
+// ── bestAgentFor with installedCLIs ─────────────────────────────────────────
+
+test('bestAgentFor skips CLI agents marked not-installed in installedCLIs', () => {
+  // Pin config so the baseline winner is deterministic regardless of local settings
+  _setTestConfig({ routing: { mode: 'balanced' } });
+  const normalResult = bestAgentFor('planning');
+
+  // Mark the baseline winner as not installed — should fall back to a different agent
+  const withoutWinner = bestAgentFor('planning', {
+    installedCLIs: { [normalResult]: false, gemini: true, codex: true, copilot: true },
+  });
+  assert.notEqual(withoutWinner, normalResult);
+});
+
+test('bestAgentFor does not filter when installedCLIs is not provided', () => {
+  // Without installedCLIs, existing behavior is unchanged
+  const result = bestAgentFor('planning');
+  assert.equal(typeof result, 'string');
+  assert.ok(result.length > 0);
+});
+
+test('bestAgentFor with installedCLIs skips agent only if value is explicitly false', () => {
+  // undefined means "not tracked" (e.g. API agent) — should not be skipped
+  const result = bestAgentFor('planning', {
+    installedCLIs: { claude: false, gemini: undefined, codex: true, copilot: true },
+  });
+  assert.notEqual(result, 'claude');
+});
+
+test('bestAgentFor throws when installedCLIs marks all known agents as unavailable', () => {
+  // All known physical agents marked as not installed — no valid fallback
+  assert.throws(
+    () =>
+      bestAgentFor('planning', {
+        installedCLIs: { claude: false, gemini: false, codex: false, copilot: false },
+      }),
+    /Hydra routing error: no enabled agents available/,
+  );
+});
 
 test('KNOWN_OWNERS includes virtual agents after registration', () => {
   registerAgent('owner-test', { type: 'virtual', baseAgent: 'claude', rolePrompt: 'test' });
@@ -501,74 +568,72 @@ test('each AFFINITY_PRESETS entry covers all 10 task types with numbers', () => 
 
 // ── Custom physical agents (CLI + API) ────────────────────────────────────────
 
-import { describe, it, beforeEach, afterEach } from 'node:test';
-
 describe('initAgentRegistry — custom physical agents', () => {
-  let originalAgentsCfg;
+  let tmpDir;
+
+  const CUSTOM_AGENTS = [
+    {
+      name: 'test-cli-agent',
+      type: 'cli',
+      displayName: 'Test CLI',
+      invoke: {
+        nonInteractive: { cmd: 'echo', args: ['{prompt}'] },
+        headless: { cmd: 'echo', args: ['{prompt}'] },
+      },
+      responseParser: 'plaintext',
+      contextBudget: 16000,
+      councilRole: null,
+      taskAffinity: {
+        implementation: 0.7,
+        review: 0.4,
+        research: 0.0,
+        planning: 0.3,
+        architecture: 0.25,
+        refactor: 0.6,
+        analysis: 0.4,
+        testing: 0.55,
+        security: 0.3,
+        documentation: 0.4,
+      },
+      enabled: true,
+    },
+    {
+      name: 'test-api-agent',
+      type: 'api',
+      displayName: 'Test API',
+      baseUrl: 'http://localhost:9999/v1',
+      model: 'test-model',
+      contextBudget: 8000,
+      councilRole: null,
+      taskAffinity: {
+        implementation: 0.8,
+        review: 0.5,
+        research: 0.0,
+        planning: 0.35,
+        architecture: 0.3,
+        refactor: 0.75,
+        analysis: 0.45,
+        testing: 0.65,
+        security: 0.25,
+        documentation: 0.45,
+      },
+      enabled: true,
+    },
+  ];
 
   beforeEach(() => {
-    const cfg = loadHydraConfig();
-    originalAgentsCfg = cfg.agents;
-    saveHydraConfig({
-      agents: {
-        ...cfg.agents,
-        customAgents: [
-          {
-            name: 'test-cli-agent',
-            type: 'cli',
-            displayName: 'Test CLI',
-            invoke: {
-              nonInteractive: { cmd: 'echo', args: ['{prompt}'] },
-              headless: { cmd: 'echo', args: ['{prompt}'] },
-            },
-            responseParser: 'plaintext',
-            contextBudget: 16000,
-            councilRole: null,
-            taskAffinity: {
-              implementation: 0.7,
-              review: 0.4,
-              research: 0.0,
-              planning: 0.3,
-              architecture: 0.25,
-              refactor: 0.6,
-              analysis: 0.4,
-              testing: 0.55,
-              security: 0.3,
-              documentation: 0.4,
-            },
-            enabled: true,
-          },
-          {
-            name: 'test-api-agent',
-            type: 'api',
-            displayName: 'Test API',
-            baseUrl: 'http://localhost:9999/v1',
-            model: 'test-model',
-            contextBudget: 8000,
-            councilRole: null,
-            taskAffinity: {
-              implementation: 0.8,
-              review: 0.5,
-              research: 0.0,
-              planning: 0.35,
-              architecture: 0.3,
-              refactor: 0.75,
-              analysis: 0.45,
-              testing: 0.65,
-              security: 0.25,
-              documentation: 0.45,
-            },
-            enabled: true,
-          },
-        ],
-      },
-    });
+    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'hydra-test-'));
+    const tmpCfg = path.join(tmpDir, 'hydra.config.json');
+    _setTestConfigPath(tmpCfg);
+    saveHydraConfig({ agents: { customAgents: CUSTOM_AGENTS } });
     _resetRegistry();
     initAgentRegistry();
   });
 
   afterEach(() => {
-    saveHydraConfig({ agents: originalAgentsCfg });
+    _setTestConfigPath(null);
+    invalidateConfigCache();
+    fs.rmSync(tmpDir, { recursive: true, force: true });
     _resetRegistry();
     initAgentRegistry();
   });
@@ -601,20 +666,14 @@ describe('initAgentRegistry — custom physical agents', () => {
   });
 
   it('entry with invalid type is silently skipped', () => {
-    // The beforeEach fixture only has valid entries, so we add a bad one inline
-    const cfg = loadHydraConfig();
     const withBadEntry = [
-      ...(cfg.agents?.customAgents || []),
+      ...CUSTOM_AGENTS,
       { name: 'bad-type-agent', type: 'invalid', displayName: 'Bad' },
     ];
-    saveHydraConfig({ agents: { ...cfg.agents, customAgents: withBadEntry } });
+    saveHydraConfig({ agents: { customAgents: withBadEntry } });
     _resetRegistry();
     initAgentRegistry();
 
     assert.equal(getAgent('bad-type-agent'), null, 'invalid type should be silently skipped');
-    // Cleanup (afterEach will also restore, but be explicit)
-    saveHydraConfig({ agents: cfg.agents });
-    _resetRegistry();
-    initAgentRegistry();
   });
 });

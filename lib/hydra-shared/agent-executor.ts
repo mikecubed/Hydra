@@ -1068,7 +1068,9 @@ async function executeCustomCliAgent(
       let tokenUsage: TokenUsage | null = null;
       let costUsd: number | null = null;
       if ('parseOutput' in def && typeof def.parseOutput === 'function') {
-        const result = (def as AgentDef).parseOutput(stdout);
+        const result = (def as AgentDef).parseOutput(stdout, {
+          jsonOutput: (def as AgentDef).features?.jsonOutput ?? false,
+        });
         parsedOutput = result.output ?? stdout;
         tokenUsage = result.tokenUsage ?? null;
         costUsd = result.costUsd ?? null;

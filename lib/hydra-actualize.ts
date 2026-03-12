@@ -63,6 +63,7 @@ import {
 import { runDiscovery } from './hydra-nightly-discovery.ts';
 import { buildSelfSnapshot, formatSelfSnapshotForPrompt } from './hydra-self.ts';
 import { buildSelfIndex, formatSelfIndexForPrompt } from './hydra-self-index.ts';
+import { detectInstalledCLIs } from './hydra-cli-detect.ts';
 
 // ── Logging ─────────────────────────────────────────────────────────────────
 
@@ -383,6 +384,7 @@ async function main() {
   let useEconomy = false;
   let stopReason = null;
 
+  const installedCLIs = detectInstalledCLIs();
   for (let i = 0; i < selected.length; i++) {
     const task = selected[i];
 
@@ -414,9 +416,20 @@ async function main() {
     const date = new Date().toISOString().split('T')[0];
     const branchName = `${branchPrefix}/${date}/${task.slug}`;
 
-    // Choose agent (simple heuristic)
+    // Choose agent — validate suggestedAgent against installedCLIs/enabled to avoid
+    // dispatching to an unavailable or disabled agent when the suggestion is stale.
     const taskType = classifyTask(task.title);
-    const agent = task.suggestedAgent || bestAgentFor(taskType);
+    let agent = task.suggestedAgent;
+    if (agent) {
+      const agentDef = getAgent(agent);
+      const isInstalled = !(agent in installedCLIs) || installedCLIs[agent];
+      const isLocalDisabled = agent === 'local' && !cfg.local?.enabled;
+      if (!agentDef?.enabled || !isInstalled || isLocalDisabled) {
+        agent = bestAgentFor(taskType, { installedCLIs });
+      }
+    } else {
+      agent = bestAgentFor(taskType, { installedCLIs });
+    }
     const modelOverride = useEconomy
       ? (getAgent(agent)?.economyModel(budgetCfg) ?? undefined)
       : undefined;

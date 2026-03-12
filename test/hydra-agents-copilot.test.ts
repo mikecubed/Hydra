@@ -5,17 +5,30 @@
  * metrics, usage, and recovery modules.
  */
 
-import { describe, it, before } from 'node:test';
+import { describe, it, before, beforeEach, afterEach } from 'node:test';
 import assert from 'node:assert/strict';
 import type { AgentDef } from '../lib/types.ts';
 
 describe('copilot agent definition', () => {
   let getAgent: (name: string) => AgentDef;
+  let _setTestConfig: (cfg: Record<string, unknown>) => void;
+  let invalidateConfigCache: () => void;
 
   before(async () => {
     const m = await import('../lib/hydra-agents.ts');
-    // initAgentRegistry is called on module load via initAgentRegistry()
+    const cfg = await import('../lib/hydra-config.ts');
     getAgent = m.getAgent as (name: string) => AgentDef;
+    _setTestConfig = cfg._setTestConfig as (cfg: Record<string, unknown>) => void;
+    invalidateConfigCache = cfg.invalidateConfigCache;
+  });
+
+  beforeEach(() => {
+    // Default: copilot disabled (matches production default)
+    _setTestConfig({ copilot: { enabled: false } });
+  });
+
+  afterEach(() => {
+    invalidateConfigCache();
   });
 
   it('registers copilot as a physical agent', () => {
@@ -28,6 +41,12 @@ describe('copilot agent definition', () => {
   it('is disabled by default (requires CLI installation)', () => {
     const agent = getAgent('copilot');
     assert.equal(agent.enabled, false);
+  });
+
+  it('becomes enabled when copilot.enabled: true is set in config', () => {
+    _setTestConfig({ copilot: { enabled: true } });
+    const agent = getAgent('copilot');
+    assert.equal(agent.enabled, true);
   });
 
   // ── Plugin interface tests ──────────────────────────────────────────────
@@ -198,10 +217,7 @@ describe('copilot agent definition', () => {
     assert.ok(args.includes('--silent'), 'Missing --silent flag');
     assert.ok(args.includes('--no-ask-user'), 'Missing --no-ask-user flag');
     assert.ok(!args.includes('--allow-all-tools'), 'Unexpected --allow-all-tools in plan mode');
-    assert.ok(
-      !args.some((a: string) => a === '--allow-tool'),
-      'Unexpected --allow-tool in plan mode',
-    );
+    assert.ok(!args.includes('--allow-tool'), 'Unexpected --allow-tool in plan mode');
   });
 
   it('headless passes --model when opts.model provided', () => {

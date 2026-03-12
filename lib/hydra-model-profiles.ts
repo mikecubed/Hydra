@@ -785,6 +785,30 @@ export const ROLE_DEFAULTS = {
     models: ['copilot-claude-opus-4-6'],
     note: 'Opus for planning/architecture depth with GitHub workflow awareness',
   },
+  // ── Smart dispatch roles ────────────────────────────────────────────────────
+  // These map logical dispatch slots to agents. Separate from the task-queue roles
+  // (architect/analyst/implementer) — they govern the smart dispatch pipeline.
+  coordinator: {
+    agent: 'claude',
+    model: null,
+    reasoningEffort: null,
+    models: ['claude-opus-4-6', 'claude-sonnet-4-6', 'gpt-5.4'],
+    note: 'Coordination/delegation slot in smart dispatch; decomposes the prompt and delegates sub-tasks',
+  },
+  critic: {
+    agent: 'gemini',
+    model: null,
+    reasoningEffort: null,
+    models: ['gemini-3-pro-preview', 'claude-opus-4-6'],
+    note: 'Critique/second-opinion slot in smart dispatch; reviews coordinator output for risks and gaps',
+  },
+  synthesizer: {
+    agent: 'codex',
+    model: null,
+    reasoningEffort: null,
+    models: ['gpt-5.4', 'claude-sonnet-4-6'],
+    note: 'Synthesis/implementation slot in smart dispatch; produces the final execution packet',
+  },
 };
 
 // ── AGENT_PRESETS ───────────────────────────────────────────────────────────

@@ -306,6 +306,11 @@ export interface LocalConfig {
   };
 }
 
+export interface CopilotConfig {
+  /** Enable the GitHub Copilot CLI agent. Set to true after installing the copilot binary. */
+  enabled: boolean;
+}
+
 // ── Named config section interfaces (replace Record<string, unknown> in HydraConfig) ──
 
 export interface VerificationConfig {
@@ -533,6 +538,7 @@ export interface HydraConfig {
   agents: AgentsConfig;
   routing: RoutingConfig;
   local: LocalConfig;
+  copilot: CopilotConfig;
   context: ContextConfig;
   verification?: VerificationConfig;
   concierge?: ConciergeConfig;

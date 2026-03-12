@@ -1,6 +1,6 @@
 # Dynamic Agent Dispatch
 
-**Status:** Draft — 2026-03-10
+**Status:** In Progress — 2026-03-11
 
 **Problem:** `hydra-dispatch.ts`, `detectInstalledCLIs()`, and `bestAgentFor()` all hardcode
 `claude / gemini / codex` by name. Adding Copilot (or any future agent like opencode, aider,
@@ -405,18 +405,22 @@ defaults system.
 
 ## Implementation Phases
 
-### Phase 1 — Model ID Translation (Must-Have, unblocks Copilot)
+### Phase 1 — Model ID Translation ✅ Complete
 
-**Task D** — Add `resolveCliModelId()` to `hydra-model-profiles.ts`. Apply to Copilot
-`invoke.headless()`. No behavior change for existing agents. Very low risk.
+**Task D** — `resolveCliModelId()` exists in `hydra-model-profiles.ts` with `cliModelId` fields
+on Copilot model profiles. Applied to Copilot `invoke.headless()` in `hydra-agents.ts`. Done as
+part of the Copilot integration (PR #14).
 
-### Phase 2 — Registry-Driven Detection + Availability Filtering (Should-Have)
+### Phase 2 — Registry-Driven Detection + Availability Filtering (In Progress)
 
-**Tasks B, C** — `detectInstalledCLIs()` enumerates registry; `bestAgentFor()` gains
-`installedOnly` option; `hydra-actualize.ts` passes `installedOnly: true`. Low risk — opt-in
-flag, existing callers unaffected.
+**Tasks B, C** — `detectInstalledCLIs()` enumerates registry via `listAgents({type:'physical'})`;
+`bestAgentFor()` gains `installedCLIs` option; `hydra-actualize.ts` passes
+`installedCLIs: detectInstalledCLIs()`. Low risk — opt-in param, existing callers unaffected.
 
-> **Important:** Task B must be implemented _before_ the Copilot integration's Task 6 (CLI detection). If Copilot Task 6 is done first, its manual `detectInstalledCLIs` edit becomes immediate technical debt deleted by Task B. The correct order is: Task B first → Copilot plugin registers itself → detection works automatically with no manual edits.
+> **Note on circular dep avoidance:** `bestAgentFor` accepts `installedCLIs` as an explicit
+> option (rather than calling `detectInstalledCLIs()` internally) to avoid a circular import
+> between `hydra-agents.ts` ↔ `hydra-setup.ts`. The call site in `hydra-actualize.ts`
+> calls `detectInstalledCLIs()` and passes the result.
 
 ### Phase 3 — Dynamic Dispatch (Nice-to-Have, significant change)
 

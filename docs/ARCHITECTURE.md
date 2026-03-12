@@ -50,7 +50,7 @@
 - **`hydra-nightly.mjs`** — Autonomous overnight task execution. 6-phase pipeline: SCAN → DISCOVER → PRIORITIZE → SELECT (optional, `--interactive`) → EXECUTE → REPORT. SELECT phase presents tasks grouped by source with interactive pick/add/confirm. EXECUTE phase renders a live progress dashboard (task checklist with status icons, budget gauge, elapsed time, per-task agent progress). Config-driven via `nightly` section. Supports `--dry-run`, `--no-discovery`, `--interactive`, CLI overrides.
 - **`hydra-nightly-discovery.mjs`** — AI discovery phase for nightly pipeline. Dispatches an agent (default: gemini) to analyze the codebase and propose improvement tasks. Returns `ScannedTask[]` for merging. Non-blocking (failures return `[]`). Exports `runDiscovery(projectRoot, opts)`. Respects `nightly.aiDiscovery.model` config to pin the discovery model regardless of routing mode (passed as `modelOverride` to `executeAgentWithRecovery`); defaults to `gemini-3-flash-preview` for cost efficiency.
 - **`hydra-nightly-review.mjs`** — Post-run interactive review. Reads `baseBranch` from report JSON. Smart merge via `smartMerge()` (auto-rebases when base has advanced). Dev-advanced detection warns when base has diverged. Subcommands: `review`, `status`, `clean`.
-- **`hydra-mcp-server.mjs`** — MCP server using official `@modelcontextprotocol/sdk` (protocol 2025-03-26). Exposes 11 tools (Zod-validated schemas), 5 resources (`hydra://config`, `hydra://metrics`, `hydra://agents`, `hydra://activity`, `hydra://status`), and 3 prompts (`hydra_council`, `hydra_review`, `hydra_analyze`). Two modes: **standalone** (`hydra_ask` + `hydra_forge` work without daemon) and **daemon** (task queue, handoffs, council, status). Dependencies: `@modelcontextprotocol/sdk`, `zod`.
+- **`hydra-mcp-server.ts`** — MCP server using official `@modelcontextprotocol/sdk` (protocol 2025-03-26). Exposes 11 tools (Zod-validated schemas), 5 resources (`hydra://config`, `hydra://metrics`, `hydra://agents`, `hydra://activity`, `hydra://status`), and 3 prompts (`hydra_council`, `hydra_review`, `hydra_analyze`). Two modes: **standalone** (`hydra_ask` + `hydra_forge` work without daemon) and **daemon** (task queue, handoffs, council, status). Dependencies: `@modelcontextprotocol/sdk`, `zod`.
 - **`hydra-investigator.mjs`** — Re-exports from `hydra-evolve-investigator.mjs`. Self-healing failure diagnosis (shared).
 - **`hydra-knowledge.mjs`** — Re-exports from `hydra-evolve-knowledge.mjs`. Persistent knowledge base (shared).
 - **`hydra-doctor.mjs`** — Higher-level failure diagnostic and triage layer. Fires on non-trivial failures in evolve/nightly/tasks. Calls existing investigator for diagnosis, triages into follow-ups (daemon task, suggestion backlog entry, or KB learning), and tracks recurring error patterns via append-only NDJSON log. Exports `initDoctor()`, `isDoctorEnabled()`, `diagnose(failure)`, `getDoctorStats()`, `getDoctorLog(limit)`, `resetDoctor()`. `resetDoctor()` removes entries written during the current session from the persistent log file (tracked via `_sessionEntries`), making it safe for test `beforeEach/afterEach` hooks without contaminating the production log. Action pipeline scanners: `scanDoctorLog()`, `scanDaemonIssues(baseUrl)`, `scanErrorActivity()`, `enrichWithDiagnosis(items, cliContext)`, `executeFixAction(item, opts)`. Storage: `docs/coordination/doctor/DOCTOR_LOG.ndjson`. Config: `doctor.enabled`, `.autoCreateTasks`, `.autoCreateSuggestions`, `.addToKnowledgeBase`, `.recurringThreshold`, `.recurringWindowDays`. Accessible via `:doctor` and `:doctor fix` operator commands.
@@ -142,7 +142,7 @@ hydra-google.mjs ──> Google Gemini Generative Language API (SSE streaming)
 
 hydra-sub-agents.mjs ──> hydra-agents (registerAgent), hydra-config
 
-hydra-mcp-server.mjs ──> HTTP daemon API (standalone stdio MCP server)
+hydra-mcp-server.ts ──> HTTP daemon API (standalone stdio MCP server)
 
 hydra-worktree.mjs ──> git CLI (child_process.execSync)
 
@@ -744,7 +744,7 @@ Agent (Gemini/Codex/Claude)
      └── MCP tool call (JSON-RPC over stdio)
               │
               v
-         hydra-mcp-server.mjs
+         hydra-mcp-server.ts
               │
               └── HTTP request to daemon API
                        │
@@ -763,4 +763,102 @@ Agent (Gemini/Codex/Claude)
 - `hydra_council_request` — request council deliberation
 - `hydra_status` — get daemon health summary
 
-Module: `lib/hydra-mcp-server.mjs` — run with `node lib/hydra-mcp-server.mjs`.
+Module: `lib/hydra-mcp-server.ts` — run with `node lib/hydra-mcp-server.ts`.
+
+---
+
+## Agent Extensibility Contract
+
+### Adding a New Physical Agent
+
+New agents (opencode, aider, continue.dev, etc.) are registered as plugin definitions.
+Once registered, **CLI detection and routing are automatic** — no other files need editing.
+
+#### Minimum viable plugin (add to `lib/hydra-agents.ts` `PHYSICAL_AGENTS`)
+
+```typescript
+{
+  name: 'opencode',                        // lowercase a-z0-9-
+  label: 'OpenCode',
+  type: AGENT_TYPE.PHYSICAL,
+  cli: 'opencode',                         // binary name; defaults to agent name if omitted
+  features: {
+    executeMode: 'spawn',                  // 'spawn' | 'api'
+    jsonOutput: false,                     // true if CLI supports --output-format json
+    stdinPrompt: false,                    // true if prompt goes via stdin
+    reasoningEffort: false,               // true if --reasoning-effort flag supported
+  },
+  invoke: {
+    headless: (prompt, opts = {}) => {
+      const args = ['-p', prompt];
+      if (opts.model) args.push('--model', resolveCliModelId(opts.model));
+      return ['opencode', args];
+    },
+  },
+  parseOutput(stdout) {
+    return { output: stdout, tokenUsage: null, costUsd: null };
+  },
+  taskAffinity: {
+    planning: 0.6, architecture: 0.6, review: 0.7, refactor: 0.9,
+    implementation: 0.9, analysis: 0.7, testing: 0.8,
+    research: 0.5, documentation: 0.6, security: 0.6,
+  },
+}
+```
+
+#### Always use `resolveCliModelId()` in `invoke.headless()`
+
+```typescript
+import { resolveCliModelId } from './hydra-model-profiles.ts';
+
+// ✅ Correct — translates Hydra internal IDs to CLI flag values
+if (opts.model) args.push('--model', resolveCliModelId(opts.model));
+
+// ❌ Wrong — passes Hydra internal ID directly; may fail for copilot-* IDs
+if (opts.model) args.push('--model', opts.model);
+```
+
+#### Checklist for adding a new agent
+
+1. **Plugin definition** — add entry to `PHYSICAL_AGENTS` in `lib/hydra-agents.ts`
+2. **Model profiles** — add `MODEL_PROFILES` entries in `lib/hydra-model-profiles.ts` with
+   `cliModelId` where the CLI accepts a different ID than Hydra's internal ID
+3. **Config defaults** — add `models.<agentName>` entry in `DEFAULT_CONFIG` in `lib/hydra-config.ts`
+4. **UI** — add color and icon in `lib/hydra-ui.ts`
+5. **CLI detection** — automatic via `detectInstalledCLIs()` (enumerates `listAgents({type:'physical'})`)
+6. **Routing** — automatic via `bestAgentFor()` (uses `taskAffinity` scores)
+7. **Dispatch roles** — update `roles.coordinator/critic/synthesizer` in `hydra.config.json` if desired
+8. **MCP** — add `KNOWN_CLI_MCP_PATHS` entry in `lib/hydra-setup.ts` if the agent supports MCP config
+9. **Docs** — `COPILOT.md`-style agent instructions file (optional but recommended)
+
+Steps 5 and 6 require **zero code changes** once the plugin is registered — they happen automatically.
+
+### Dynamic Dispatch Roles
+
+`hydra-dispatch.ts` maps three logical dispatch slots to agents via config roles:
+
+| Role          | Default agent | Purpose                                       |
+| ------------- | ------------- | --------------------------------------------- |
+| `coordinator` | `claude`      | Decomposes prompt, delegates sub-tasks        |
+| `critic`      | `gemini`      | Reviews coordinator output for risks and gaps |
+| `synthesizer` | `codex`       | Produces the final execution packet           |
+
+Override in `hydra.config.json`:
+
+```json
+"roles": {
+  "coordinator": { "agent": "copilot", "model": null },
+  "critic":      { "agent": "claude",  "model": null },
+  "synthesizer": { "agent": "gemini",  "model": null }
+}
+```
+
+Resolution order when the configured agent is not installed:
+
+1. Config `roles.<role>.agent`
+2. First installed agent from: `claude → copilot → gemini → codex → local`
+3. Any installed agent
+4. Throws `Error('No agents available...')` — surfaces to the caller (CLI entrypoint/operator) for handling
+
+`getRoleAgent(roleName, installedCLIs)` is exported from `lib/hydra-dispatch.ts`.
+`installedCLIs` comes from `detectInstalledCLIs()` in `lib/hydra-cli-detect.ts` (re-exported by `lib/hydra-setup.ts` for backward compatibility).
