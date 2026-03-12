@@ -59,9 +59,9 @@ const STATUS_PATH = config.statusPath;
 const EVENTS_PATH = config.eventsPath;
 const ARCHIVE_PATH = config.archivePath;
 
-const DEFAULT_HOST = process.env['AI_ORCH_HOST'] || '127.0.0.1';
-const DEFAULT_PORT = Number.parseInt(process.env['AI_ORCH_PORT'] || '4173', 10);
-const ORCH_TOKEN = process.env['AI_ORCH_TOKEN'] || '';
+const DEFAULT_HOST = process.env['AI_ORCH_HOST'] ?? '127.0.0.1';
+const DEFAULT_PORT = Number.parseInt(process.env['AI_ORCH_PORT'] ?? '4173', 10);
+const ORCH_TOKEN = process.env['AI_ORCH_TOKEN'] ?? '';
 
 const STATUS_VALUES = new Set(['todo', 'in_progress', 'blocked', 'done', 'cancelled']);
 const KNOWN_AGENTS = KNOWN_OWNERS;
@@ -117,7 +117,7 @@ function normalizeState(raw: unknown): HydraStateShape {
     ...safe,
     agents: {
       ...(defaults.agents as Record<string, unknown>),
-      ...((safe['agents'] || {}) as Record<string, unknown>),
+      ...((safe['agents'] ?? {}) as Record<string, unknown>),
     },
     tasks: Array.isArray(safe['tasks']) ? safe['tasks'] : [],
     decisions: Array.isArray(safe['decisions']) ? safe['decisions'] : [],
@@ -179,7 +179,7 @@ function writeState(state: Record<string, unknown>) {
   fs.writeFileSync(tempPath, data, 'utf8');
 
   let retries = 0;
-  while (true) {
+  for (;;) {
     try {
       fs.renameSync(tempPath, STATE_PATH);
       break;
@@ -232,7 +232,8 @@ function initEventSeq() {
 
 function categorizeEvent(type: string, payload: unknown) {
   if (type === 'mutation') {
-    const label = String((payload as Record<string, unknown>)?.['label'] || '');
+    const label =
+      ((payload as Record<string, unknown>)['label'] as string | null | undefined) ?? '';
     if (label.startsWith('task:')) return 'task';
     if (label.startsWith('handoff:')) return 'handoff';
     if (label.startsWith('decision:')) return 'decision';
@@ -249,7 +250,7 @@ function appendEvent(type: string, payload?: unknown) {
   eventSeq += 1;
   const category = categorizeEvent(type, payload);
   const line = JSON.stringify({
-    id: `${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+    id: `${String(Date.now())}_${Math.random().toString(36).slice(2, 8)}`,
     seq: eventSeq,
     at: nowIso(),
     type,
@@ -282,7 +283,9 @@ function nextId(prefix: string, items: unknown[]) {
   const pattern = new RegExp(`^${prefix}(\\d+)$`);
 
   for (const item of items) {
-    const match = String((item as Record<string, unknown>)?.['id'] || '').match(pattern);
+    const match = (
+      ((item as Record<string, unknown>)['id'] as string | null | undefined) ?? ''
+    ).match(pattern);
     if (!match) {
       continue;
     }
@@ -307,7 +310,7 @@ function parseList(value: unknown): string[] {
   if (Array.isArray(value)) {
     return value.map((item: unknown) => String(item).trim()).filter(Boolean);
   }
-  return String(value)
+  return (value as string)
     .split(/,\s*/)
     .map((part) => part.trim())
     .filter(Boolean);
@@ -398,11 +401,14 @@ function autoUnblock(state: HydraStateShape, completedTaskId: string) {
 
 function buildPrompt(agent: string, state: HydraStateShape) {
   const agentConfig = getAgent(agent);
-  const label = agentConfig
-    ? agentConfig.label
-    : agent === 'human'
-      ? 'Human Operator'
-      : 'AI Assistant';
+  let label: string;
+  if (agentConfig) {
+    label = agentConfig.label;
+  } else if (agent === 'human') {
+    label = 'Human Operator';
+  } else {
+    label = 'AI Assistant';
+  }
   const rolePrompt = agentConfig ? agentConfig.rolePrompt : '';
 
   const openTasks = state.tasks
@@ -420,7 +426,7 @@ function buildPrompt(agent: string, state: HydraStateShape) {
   return [
     `You are ${label} collaborating in the ${config.projectName} repository with Gemini Pro, Codex, and Claude Code.`,
     '',
-    rolePrompt ? rolePrompt : '',
+    rolePrompt ?? '',
     '',
     readInstructions,
     '',
@@ -431,8 +437,8 @@ function buildPrompt(agent: string, state: HydraStateShape) {
     '- Add a handoff entry before switching agents.',
     ...(getAgent(agent)?.taskRules ?? []),
     '',
-    `Current focus: ${state.activeSession?.focus || 'not set'}`,
-    `Current branch: ${state.activeSession?.branch || getCurrentBranch()}`,
+    `Current focus: ${state.activeSession?.focus ?? 'not set'}`,
+    `Current branch: ${state.activeSession?.branch ?? getCurrentBranch()}`,
     '',
     'Open tasks:',
     openTasks || '- none',
@@ -455,8 +461,8 @@ function getSummary(state: HydraStateShape) {
       return { ...task, pendingDependencies };
     });
   const openBlockers = state.blockers.filter((item: BlockerEntry) => item.status !== 'resolved');
-  const recentDecision = state.decisions.at(-1) || null;
-  const latestHandoff = state.handoffs.at(-1) || null;
+  const recentDecision = state.decisions.at(-1) ?? null;
+  const latestHandoff = state.handoffs.at(-1) ?? null;
 
   return {
     updatedAt: state.updatedAt,
@@ -537,7 +543,7 @@ function suggestNext(state: HydraStateShape, agent: string) {
     .map((task: TaskEntry) => {
       const taskType = task.type || 'implementation';
       const affinity =
-        (agentConfig?.taskAffinity as Record<string, number> | undefined)?.[taskType] || 0.5;
+        (agentConfig?.taskAffinity as Record<string, number> | undefined)?.[taskType] ?? 0.5;
       // Check if a virtual agent has better affinity for this task type
       let preferredAgent = null;
       const virtualAgents = listAgents({ type: 'virtual', enabled: true });
@@ -545,7 +551,7 @@ function suggestNext(state: HydraStateShape, agent: string) {
         const physical = resolvePhysicalAgent(va.name);
         if (
           physical?.name === agent &&
-          ((va.taskAffinity as Record<string, number> | undefined)?.[taskType] || 0) > affinity
+          ((va.taskAffinity as Record<string, number> | undefined)?.[taskType] ?? 0) > affinity
         ) {
           preferredAgent = va.name;
         }
@@ -554,11 +560,11 @@ function suggestNext(state: HydraStateShape, agent: string) {
     })
     .sort((a: { affinity: number }, b: { affinity: number }) => b.affinity - a.affinity);
 
-  const unassignedTodo = unassignedTodos[0]?.task;
-  if (unassignedTodo) {
+  if (unassignedTodos.length > 0) {
+    const unassignedTodo = unassignedTodos[0].task;
     const suggestion = {
       action: 'claim_unassigned_task',
-      message: `${agent} can claim ${unassignedTodo.id} (type=${unassignedTodo.type || 'implementation'}, affinity=${unassignedTodos[0].affinity}).`,
+      message: `${agent} can claim ${unassignedTodo.id} (type=${unassignedTodo.type}, affinity=${String(unassignedTodos[0].affinity)}).`,
       task: unassignedTodo,
     };
     if (unassignedTodos[0].preferredAgent) {
@@ -636,7 +642,7 @@ async function readJsonBody(req: IncomingMessage) {
   const maxSize = 1024 * 1024;
 
   for await (const chunk of req) {
-    size += chunk.length;
+    size += (chunk as Buffer).length;
     if (size > maxSize) {
       throw new Error('Payload too large.');
     }
@@ -769,7 +775,7 @@ function createSnapshot() {
       createdAt: nowIso(),
       state,
     };
-    const filename = `snapshot_${eventSeq}_${Date.now()}.json`;
+    const filename = `snapshot_${String(eventSeq)}_${String(Date.now())}.json`;
     fs.writeFileSync(
       path.join(SNAPSHOT_DIR, filename),
       `${JSON.stringify(snapshot, null, 2)}\n`,
@@ -859,36 +865,38 @@ Environment:
 }
 
 async function commandStatus(options: Record<string, string>) {
-  const url = options['url'] || `http://${DEFAULT_HOST}:${DEFAULT_PORT}`;
+  const url = options['url'] ?? `http://${DEFAULT_HOST}:${String(DEFAULT_PORT)}`;
   try {
     const { response, payload } = await requestJson('GET', `${url}/health`);
     if (!response.ok) {
       console.error(
-        `Daemon status check failed (${response.status}): ${(payload as Record<string, unknown>)['error'] || 'unknown error'}`,
+        `Daemon status check failed (${String(response.status)}): ${((payload as Record<string, unknown>)['error'] as string | null | undefined) ?? 'unknown error'}`,
       );
-      process.exit(1);
+      process.exitCode = 1;
+      return;
     }
     console.log(JSON.stringify(payload, null, 2));
   } catch (err) {
     console.error(`Daemon not reachable at ${url}: ${(err as Error).message}`);
-    process.exit(1);
+    process.exitCode = 1;
   }
 }
 
 async function commandStop(options: Record<string, string>) {
-  const url = options['url'] || `http://${DEFAULT_HOST}:${DEFAULT_PORT}`;
+  const url = options['url'] ?? `http://${DEFAULT_HOST}:${String(DEFAULT_PORT)}`;
   try {
     const { response, payload } = await requestJson('POST', `${url}/shutdown`);
     if (!response.ok) {
       console.error(
-        `Failed to stop daemon (${response.status}): ${(payload as Record<string, unknown>)['error'] || 'unknown error'}`,
+        `Failed to stop daemon (${String(response.status)}): ${((payload as Record<string, unknown>)['error'] as string | null | undefined) ?? 'unknown error'}`,
       );
-      process.exit(1);
+      process.exitCode = 1;
+      return;
     }
     console.log('Stop signal sent to orchestrator daemon.');
   } catch (err) {
     console.error(`Unable to reach daemon at ${url}: ${(err as Error).message}`);
-    process.exit(1);
+    process.exitCode = 1;
   }
 }
 
@@ -904,7 +912,7 @@ async function commandStop(options: Record<string, string>) {
  */
 function createTaskWorktree(taskId: string) {
   const cfg = loadHydraConfig();
-  const worktreeDir = cfg.routing?.worktreeIsolation?.worktreeDir || '.hydra/worktrees';
+  const worktreeDir = cfg.routing.worktreeIsolation.worktreeDir ?? '.hydra/worktrees';
   const worktreePath = path.resolve(config.projectRoot, worktreeDir, `task-${taskId}`);
   const branch = `hydra/task/${taskId}`;
 
@@ -965,7 +973,7 @@ function mergeTaskWorktree(taskId: string) {
  */
 function cleanupTaskWorktree(taskId: string, { force = false } = {}) {
   const cfg = loadHydraConfig();
-  const worktreeDir = cfg.routing?.worktreeIsolation?.worktreeDir || '.hydra/worktrees';
+  const worktreeDir = cfg.routing.worktreeIsolation.worktreeDir ?? '.hydra/worktrees';
   const worktreePath = path.resolve(config.projectRoot, worktreeDir, `task-${taskId}`);
   const branch = `hydra/task/${taskId}`;
 
@@ -977,7 +985,7 @@ function cleanupTaskWorktree(taskId: string, { force = false } = {}) {
     const result = git(removeArgs, config.projectRoot);
     if (result.status !== 0) {
       console.warn(
-        `[worktree] Could not remove worktree for task ${taskId}: ${String(result.stderr || '').trim()}`,
+        `[worktree] Could not remove worktree for task ${taskId}: ${result.stderr.trim()}`,
       );
     }
   } catch (err) {
@@ -991,9 +999,7 @@ function cleanupTaskWorktree(taskId: string, { force = false } = {}) {
     const branchFlag = force ? '-D' : '-d';
     const result = git(['branch', branchFlag, branch], config.projectRoot);
     if (result.status !== 0) {
-      console.warn(
-        `[worktree] Could not delete branch ${branch}: ${String(result.stderr || '').trim()}`,
-      );
+      console.warn(`[worktree] Could not delete branch ${branch}: ${result.stderr.trim()}`);
     }
   } catch (err) {
     console.warn(`[worktree] Exception deleting branch ${branch}: ${(err as Error).message}`);
@@ -1017,11 +1023,12 @@ function startDaemon(options: Record<string, string>) {
     /* non-critical */
   }
 
-  const host = options['host'] || DEFAULT_HOST;
-  const port = Number.parseInt(options['port'] || String(DEFAULT_PORT), 10);
+  const host = options['host'] ?? DEFAULT_HOST;
+  const port = Number.parseInt(options['port'] ?? String(DEFAULT_PORT), 10);
   if (!Number.isFinite(port) || port <= 0) {
     console.error(`Invalid port: ${options['port']}`);
-    process.exit(1);
+    process.exitCode = 1;
+    return;
   }
 
   let isShuttingDown = false;
@@ -1057,7 +1064,7 @@ function startDaemon(options: Record<string, string>) {
       updatedAt: nowIso(),
       uptimeSec: Math.floor(process.uptime()),
       stateUpdatedAt: state.updatedAt,
-      activeSessionId: state.activeSession?.id || null,
+      activeSessionId: state.activeSession?.id ?? null,
       eventsRecorded: eventCount,
       lastEventAt,
       ...extra,
@@ -1077,7 +1084,7 @@ function startDaemon(options: Record<string, string>) {
       appendSyncLog(`[orch] ${label}`);
       const at = nowIso();
       const event = {
-        id: `${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+        id: `${String(Date.now())}_${Math.random().toString(36).slice(2, 8)}`,
         seq: eventSeq + 1,
         at,
         type: 'mutation',
@@ -1096,7 +1103,7 @@ function startDaemon(options: Record<string, string>) {
   }
 
   function runVerification(taskId: string, plan: Record<string, unknown>) {
-    if (!plan?.['enabled'] || !plan['command']) {
+    if (!plan['enabled'] || !plan['command']) {
       return;
     }
 
@@ -1104,14 +1111,14 @@ function startDaemon(options: Record<string, string>) {
 
     function handleVerificationResult(error: Error | null, stdout: string, stderr: string) {
       if (error) {
-        const snippet = String(stderr || stdout || error.message).slice(0, 500);
-        enqueueMutation(
+        const snippet = (stderr || stdout || error.message).slice(0, 500);
+        void enqueueMutation(
           `verify:fail id=${taskId}`,
           (state: HydraStateShape) => {
             const task = state.tasks.find((t: TaskEntry) => t.id === taskId);
             if (task) {
               task.status = 'blocked';
-              const note = `[AUTO-VERIFY FAILED] ${plan['command']}:\n${snippet}`;
+              const note = `[AUTO-VERIFY FAILED] ${String(plan['command'])}:\n${snippet}`;
               task.notes = task.notes ? `${task.notes}\n${note}` : note;
               task.updatedAt = nowIso();
             }
@@ -1127,12 +1134,12 @@ function startDaemon(options: Record<string, string>) {
         return;
       }
 
-      enqueueMutation(
+      void enqueueMutation(
         `verify:pass id=${taskId}`,
         (state) => {
           const task = state.tasks.find((t) => t.id === taskId);
           if (task) {
-            const note = `[AUTO-VERIFY PASSED] ${plan['command']} completed cleanly.`;
+            const note = `[AUTO-VERIFY PASSED] ${String(plan['command'])} completed cleanly.`;
             task.notes = task.notes ? `${task.notes}\n${note}` : note;
             task.updatedAt = nowIso();
           }
@@ -1151,7 +1158,7 @@ function startDaemon(options: Record<string, string>) {
         handleVerificationResult,
       );
       return;
-    } catch (err) {
+    } catch {
       // Fall through to spawn-based implementation below.
     }
 
@@ -1218,9 +1225,9 @@ function startDaemon(options: Record<string, string>) {
           /* ignore */
         }
         const effectiveError =
-          err ||
+          err ??
           (timedOut || code !== 0
-            ? new Error(timedOut ? 'Verification timed out.' : `Exit ${code}`)
+            ? new Error(timedOut ? 'Verification timed out.' : `Exit ${String(code)}`)
             : null);
         handleVerificationResult(effectiveError, out, errText);
         try {
@@ -1230,15 +1237,16 @@ function startDaemon(options: Record<string, string>) {
         }
       }
 
-      child.on('error', (err: Error) => finish(err, null));
-      child.on('close', (code: number | null) => finish(null, code));
+      child.on('error', (err: Error) => {
+        finish(err, null);
+      });
+      child.on('close', (code: number | null) => {
+        finish(null, code);
+      });
     } catch (err) {
       // If even the fallback can't start, treat as a failure but never throw.
       try {
-        const msg = String((err as Error)?.message || err || 'Verification failed to start.').slice(
-          0,
-          500,
-        );
+        const msg = ((err as Error).message || 'Verification failed to start.').slice(0, 500);
         handleVerificationResult(new Error(msg), '', '');
       } catch {
         // ignore
@@ -1266,10 +1274,14 @@ function startDaemon(options: Record<string, string>) {
     }
   }
 
+  // eslint-disable-next-line @typescript-eslint/no-misused-promises -- async HTTP handler, errors caught in try/catch block
   const server = http.createServer(async (req, res) => {
-    const requestUrl = new URL(req.url || '/', `http://${req.headers.host || `${host}:${port}`}`);
+    const requestUrl = new URL(
+      req.url ?? '/',
+      `http://${req.headers.host ?? `${host}:${String(port)}`}`,
+    );
     const route = requestUrl.pathname;
-    const method = req.method || 'GET';
+    const method = req.method ?? 'GET';
 
     try {
       const handledReadRoute = await handleReadRoute({
@@ -1292,7 +1304,7 @@ function startDaemon(options: Record<string, string>) {
         suggestNext,
         readEvents,
         replayEvents,
-        sseClients: sseClients as Set<ServerResponse>,
+        sseClients,
         readArchive,
         getMetricsSummary,
         getEventCount: () => eventCount,
@@ -1340,7 +1352,7 @@ function startDaemon(options: Record<string, string>) {
         appendEvent,
         broadcastEvent,
         setIsShuttingDown: (value: boolean) => {
-          isShuttingDown = Boolean(value);
+          isShuttingDown = value;
         },
         server,
         createSnapshot,
@@ -1362,11 +1374,12 @@ function startDaemon(options: Record<string, string>) {
 
   server.on('error', (error: Error) => {
     console.error(`Orchestrator server error: ${error.message}`);
+    // eslint-disable-next-line n/no-process-exit -- server error handler requires forced exit
     process.exit(1);
   });
 
   function autoArchiveIfNeeded() {
-    enqueueMutation('auto_archive', (state: HydraStateShape) => {
+    void enqueueMutation('auto_archive', (state: HydraStateShape) => {
       const completedCount = state.tasks.filter((t: TaskEntry) =>
         ['done', 'cancelled'].includes(t.status),
       ).length;
@@ -1380,7 +1393,7 @@ function startDaemon(options: Record<string, string>) {
       return { moved: 0 };
     })
       .then((result: Record<string, unknown>) => {
-        if (result && (result['moved'] as number) > 0) {
+        if ((result['moved'] as number) > 0) {
           appendEvent('auto_archive', { moved: result['moved'] });
         }
       })
@@ -1391,8 +1404,13 @@ function startDaemon(options: Record<string, string>) {
   loadPersistedMetrics(COORD_DIR);
 
   server.listen(port, host, () => {
-    appendSyncLog(`[orch] daemon started at http://${host}:${port}`);
-    appendEvent('daemon_start', { host, port, pid: process.pid, project: config.projectName });
+    appendSyncLog(`[orch] daemon started at http://${host}:${String(port)}`);
+    appendEvent('daemon_start', {
+      host,
+      port: String(port),
+      pid: process.pid,
+      project: config.projectName,
+    });
     writeStatus();
 
     autoArchiveIfNeeded();
@@ -1400,7 +1418,7 @@ function startDaemon(options: Record<string, string>) {
     console.log(hydraSplash());
     console.log(uiLabel('Project', pc.white(config.projectName)));
     console.log(uiLabel('Root', DIM(config.projectRoot)));
-    console.log(uiLabel('URL', pc.white(`http://${host}:${port}`)));
+    console.log(uiLabel('URL', pc.white(`http://${host}:${String(port)}`)));
     console.log(uiLabel('PID', pc.white(String(process.pid))));
     console.log(uiLabel('State', DIM(path.relative(config.projectRoot, STATE_PATH))));
     console.log(uiLabel('Status', DIM(path.relative(config.projectRoot, STATUS_PATH))));
@@ -1462,7 +1480,7 @@ function startDaemon(options: Record<string, string>) {
           // Legacy: use updatedAt/checkpoint (30 min)
           let lastActivity = task.updatedAt ? new Date(task.updatedAt).getTime() : 0;
           if (Array.isArray(task.checkpoints) && task.checkpoints.length > 0) {
-            const lastCp = task.checkpoints!.at(-1) as Record<string, unknown> | undefined;
+            const lastCp = task.checkpoints.at(-1);
             const cpTime = lastCp ? new Date(lastCp['savedAt'] as string).getTime() : 0;
             if (cpTime > lastActivity) lastActivity = cpTime;
           }
@@ -1582,7 +1600,7 @@ function startDaemon(options: Record<string, string>) {
     }
     sseClients.clear();
     // Close MCP clients
-    import('./hydra-mcp.ts').then((m) => m.closeCodexMCP()).catch(() => {});
+    void import('./hydra-mcp.ts').then((m) => m.closeCodexMCP()).catch(() => {});
     persistMetrics(COORD_DIR);
     clearInterval(statusInterval);
     clearInterval(metricsInterval);
@@ -1592,14 +1610,19 @@ function startDaemon(options: Record<string, string>) {
     server.close(() => {
       writeStatus({ running: false, stoppedAt: nowIso(), signal });
       console.log(SUCCESS('  Daemon stopped'));
+      // eslint-disable-next-line n/no-process-exit -- server.close callback requires forced exit after cleanup
       process.exit(0);
     });
   }
 
   // SIGTERM is not reliably delivered on Windows; use HTTP POST /stop for graceful shutdown there.
-  process.on('SIGINT', () => gracefulExit('SIGINT'));
+  process.on('SIGINT', () => {
+    gracefulExit('SIGINT');
+  });
   if (process.platform !== 'win32') {
-    process.on('SIGTERM', () => gracefulExit('SIGTERM'));
+    process.on('SIGTERM', () => {
+      gracefulExit('SIGTERM');
+    });
   }
 }
 
@@ -1624,8 +1647,8 @@ async function main() {
     default:
       console.error(`Unknown command: ${command}`);
       printHelp();
-      process.exit(1);
+      process.exitCode = 1;
   }
 }
 
-main();
+void main();
