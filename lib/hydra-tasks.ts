@@ -868,6 +868,7 @@ async function main() {
   // ── Budget Tracker Setup ──
   const weeklyBudget = cfg.usage.weeklyTokenBudget?.['claude-opus-4-6'] ?? 25_000_000;
   const tokenBudget = Math.round(weeklyBudget * budgetPreset.budgetPct);
+  // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition -- cfg.tasks may be undefined
   const perTaskEstimate = cfg.tasks?.budget?.perTaskEstimate ?? 100_000;
 
   const budget = new BudgetTracker({
