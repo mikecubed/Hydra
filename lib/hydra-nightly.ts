@@ -185,6 +185,7 @@ let _investigator: unknown = null;
 async function getInvestigator() {
   if (_investigator) return _investigator;
   try {
+    // eslint-disable-next-line require-atomic-updates -- singleton initialization; no real race condition
     _investigator = await import('./hydra-investigator.ts');
     return _investigator;
   } catch {
@@ -231,65 +232,67 @@ function generateReportMd(results: any[], budgetSummary: any, runMeta: any) {
   const startStr = new Date(startedAt).toLocaleTimeString('en-US', { hour12: false });
   const endStr = new Date(finishedAt).toLocaleTimeString('en-US', { hour12: false });
   const durationStr = formatDuration(finishedAt - startedAt);
-  const tokensStr = `~${budgetSummary.consumed.toLocaleString()}`;
+  const tokensStr = `~${String(budgetSummary.consumed.toLocaleString())}`;
 
-  const sourceSummary = Object.entries(sources || {})
+  const sourceSummary = Object.entries(sources ?? {})
     .filter(([, v]) => (v as number) > 0)
-    .map(([k, v]) => `${k}: ${v}`)
+    .map(([k, v]) => `${k}: ${String(v)}`)
     .join(', ');
 
   const lines = [
-    `# Nightly Run - ${date}`,
+    `# Nightly Run - ${String(date)}`,
     `Started: ${startStr} | Finished: ${endStr} | Duration: ${durationStr}`,
-    `Tasks: ${processedTasks}/${totalTasks} processed${
-      stopReason ? ` (stopped: ${stopReason})` : ''
+    `Tasks: ${String(processedTasks)}/${String(totalTasks)} processed${
+      stopReason ? ` (stopped: ${String(stopReason)})` : ''
     } | Tokens: ${tokensStr}`,
-    `Base branch: ${baseBranch} | Sources: ${sourceSummary || 'n/a'}`,
+    // eslint-disable-next-line @typescript-eslint/prefer-nullish-coalescing -- empty string should fall through
+    `Base branch: ${String(baseBranch)} | Sources: ${sourceSummary || 'n/a'}`,
     '',
     '## Results',
   ];
 
   for (const [i, r] of results.entries()) {
-    const tokenNote = r.tokensUsed ? ` - ~${r.tokensUsed.toLocaleString()} tokens` : '';
+    const tokenNote = r.tokensUsed ? ` - ~${String(r.tokensUsed.toLocaleString())} tokens` : '';
     const statusTag = r.status.toUpperCase();
-    const agentNote = ` (${r.agent})`;
+    const agentNote = ` (${String(r.agent)})`;
 
-    lines.push(`### ${i + 1}. ${r.slug} [${statusTag}]${tokenNote}${agentNote}`);
-    lines.push(`- Branch: \`${r.branch}\``);
-    lines.push(`- Source: ${r.source} | Type: ${r.taskType}`);
+    lines.push(`### ${String(i + 1)}. ${String(r.slug)} [${String(statusTag)}]${tokenNote}${agentNote}`);
+    lines.push(`- Branch: \`${String(r.branch)}\``);
+    lines.push(`- Source: ${String(r.source)} | Type: ${String(r.taskType)}`);
     lines.push(
-      `- Commits: ${r.commits} | Files: ${r.filesChanged} | Verification: ${r.verification}`,
+      `- Commits: ${String(r.commits)} | Files: ${String(r.filesChanged)} | Verification: ${String(r.verification)}`,
     );
     if (r.violations.length > 0) {
-      lines.push(`- **Violations:** ${r.violations.length}`);
+      lines.push(`- **Violations:** ${String(r.violations.length)}`);
       for (const v of r.violations) {
-        lines.push(`  - [${v.severity}] ${v.detail}`);
+        lines.push(`  - [${String(v.severity)}] ${String(v.detail)}`);
       }
     }
     lines.push(`- Duration: ${formatDuration(r.durationMs)}`);
-    lines.push(`- Review: \`git log ${baseBranch}..${r.branch} --oneline\``);
+    lines.push(`- Review: \`git log ${String(baseBranch)}..${String(r.branch)} --oneline\``);
     lines.push('');
   }
 
   lines.push('## Quick Commands');
   lines.push('```');
-  lines.push(`git branch --list "nightly/${date}/*"    # list branches`);
-  lines.push(`git diff ${baseBranch}...nightly/${date}/<slug>     # review changes`);
+  lines.push(`git branch --list "nightly/${String(date)}/*"    # list branches`);
+  lines.push(`git diff ${String(baseBranch)}...nightly/${String(date)}/<slug>     # review changes`);
   lines.push('npm run nightly:review                    # interactive merge');
   lines.push('npm run nightly:clean                     # delete all nightly branches');
   lines.push('```');
   lines.push('');
   lines.push('## Budget Summary');
   lines.push(
-    `- Consumed: ${budgetSummary.consumed.toLocaleString()} of ${budgetSummary.hardLimit.toLocaleString()} limit`,
+    `- Consumed: ${String(budgetSummary.consumed.toLocaleString())} of ${String(budgetSummary.hardLimit.toLocaleString())} limit`,
   );
-  lines.push(`- Avg per task: ${(budgetSummary.avgPerTask || 0).toLocaleString()}`);
+  // eslint-disable-next-line @typescript-eslint/prefer-nullish-coalescing -- 0 is a valid value
+  lines.push(`- Avg per task: ${String((budgetSummary.avgPerTask || 0).toLocaleString())}`);
   if (budgetSummary.taskDeltas?.length > 0) {
     lines.push('');
     lines.push('| Task | Tokens | Duration |');
     lines.push('|------|--------|----------|');
     for (const d of budgetSummary.taskDeltas) {
-      lines.push(`| ${d.label} | ${d.tokens.toLocaleString()} | ${formatDuration(d.durationMs)} |`);
+      lines.push(`| ${String(d.label)} | ${String(d.tokens.toLocaleString())} | ${formatDuration(d.durationMs)} |`);
     }
   }
   lines.push('');
@@ -326,9 +329,9 @@ function phaseScan(projectRoot: string, cfg: any) {
   }
 
   const allTasks = [...scanned, ...configTasks];
-  log.info(`Scanned ${allTasks.length} tasks from ${Object.keys(sourceCounts).length} source(s)`);
+  log.info(`Scanned ${String(allTasks.length)} tasks from ${String(Object.keys(sourceCounts).length)} source(s)`);
   for (const [src, count] of Object.entries(sourceCounts)) {
-    log.dim(`  ${src}: ${count}`);
+    log.dim(`  ${src}: ${String(count)}`);
   }
 
   return { tasks: allTasks, sourceCounts };
@@ -364,9 +367,16 @@ function phasePrioritize(allTasks: ScannedTask[], maxTasks: number) {
   const sorted = prioritizeTasks(deduped);
   const selected = sorted.slice(0, maxTasks);
 
-  log.info(`${allTasks.length} total -> ${deduped.length} deduped -> ${selected.length} selected`);
+  log.info(`${String(allTasks.length)} total -> ${String(deduped.length)} deduped -> ${String(selected.length)} selected`);
   for (const t of selected) {
-    const prioColor = t.priority === 'high' ? pc.red : t.priority === 'low' ? pc.dim : pc.yellow;
+    let prioColor;
+    if (t.priority === 'high') {
+      prioColor = pc.red;
+    } else if (t.priority === 'low') {
+      prioColor = pc.dim;
+    } else {
+      prioColor = pc.yellow;
+    }
     log.dim(`  ${prioColor(t.priority.padEnd(6))} [${t.source}] ${t.title}`);
   }
 
@@ -409,7 +419,7 @@ async function phaseSelect(sortedTasks: ScannedTask[], maxTasks: number) {
     // Display all tasks grouped by source
     const grouped = new Map();
     for (const t of sortedTasks) {
-      const src = t.source || 'unknown';
+      const src = t.source;
       if (!grouped.has(src)) grouped.set(src, []);
       grouped.get(src).push(t);
     }
@@ -424,31 +434,37 @@ async function phaseSelect(sortedTasks: ScannedTask[], maxTasks: number) {
 
     process.stderr.write('\n');
     for (const [source, tasks] of sortedGroups) {
-      process.stderr.write(`  ${pc.bold(pc.blue(source))} (${tasks.length})\n`);
+      process.stderr.write(`  ${pc.bold(pc.blue(source))} (${String(tasks.length)})\n`);
       for (const t of tasks) {
         globalIdx++;
         indexMap.set(globalIdx, t);
         const marker = recommendedSet.has(t) ? pc.green('*') : ' ';
-        const prioColor =
-          t.priority === 'high' ? pc.red : t.priority === 'low' ? pc.dim : pc.yellow;
+        let prioColor;
+        if (t.priority === 'high') {
+          prioColor = pc.red;
+        } else if (t.priority === 'low') {
+          prioColor = pc.dim;
+        } else {
+          prioColor = pc.yellow;
+        }
         const num = String(globalIdx).padStart(3);
-        const agent = t.suggestedAgent || 'auto';
+        const agent = t.suggestedAgent ?? 'auto';
         process.stderr.write(
-          `  ${marker}${pc.bold(num)}. ${prioColor(t.priority.padEnd(6))} ${t.title} ${pc.dim(`[${agent}]`)}\n`,
+          `  ${marker}${pc.bold(num)}. ${prioColor(t.priority.padEnd(6))} ${String(t.title)} ${pc.dim(`[${String(agent)}]`)}\n`,
         );
       }
       process.stderr.write('\n');
     }
 
-    process.stderr.write(pc.dim(`  * = recommended (top ${recommended.length})\n\n`));
+    process.stderr.write(pc.dim(`  * = recommended (top ${String(recommended.length)})\n\n`));
 
     // Initial action prompt
     process.stderr.write(pc.dim(`  Options:\n`));
     process.stderr.write(
-      pc.dim(`    Enter        Accept recommended ${recommended.length} tasks\n`),
+      pc.dim(`    Enter        Accept recommended ${String(recommended.length)} tasks\n`),
     );
     process.stderr.write(pc.dim(`    1,3,5        Pick specific tasks by number\n`));
-    process.stderr.write(pc.dim(`    all          Select all ${sortedTasks.length} tasks\n`));
+    process.stderr.write(pc.dim(`    all          Select all ${String(sortedTasks.length)} tasks\n`));
     process.stderr.write(pc.dim(`    add          Add a custom freeform task\n`));
     process.stderr.write(pc.dim(`    q            Cancel nightly run\n\n`));
 
@@ -458,13 +474,13 @@ async function phaseSelect(sortedTasks: ScannedTask[], maxTasks: number) {
     if (!answer || answer === '') {
       // Accept recommended
       selected = [...recommended];
-      log.ok(`Accepted ${selected.length} recommended tasks`);
+      log.ok(`Accepted ${String(selected.length)} recommended tasks`);
     } else if (answer === 'q' || answer === 'quit') {
       rl.close();
       return null;
     } else if (answer === 'all') {
       selected = [...sortedTasks];
-      log.ok(`Selected all ${selected.length} tasks`);
+      log.ok(`Selected all ${String(selected.length)} tasks`);
     } else if (answer === 'add') {
       selected = [];
       let adding = true;
@@ -494,7 +510,7 @@ async function phaseSelect(sortedTasks: ScannedTask[], maxTasks: number) {
         return null;
       }
       selected = indices.map((i) => indexMap.get(i));
-      log.ok(`Selected ${selected.length} task(s)`);
+      log.ok(`Selected ${String(selected.length)} task(s)`);
     }
 
     // Offer to add more freeform tasks
@@ -513,11 +529,11 @@ async function phaseSelect(sortedTasks: ScannedTask[], maxTasks: number) {
     }
 
     // Show final selection summary
-    process.stderr.write(`\n  ${pc.bold('Final selection')} (${selected.length} tasks):\n`);
+    process.stderr.write(`\n  ${pc.bold('Final selection')} (${String(selected.length)} tasks):\n`);
     for (const [i, t] of selected.entries()) {
-      const agent = t.suggestedAgent || 'auto';
+      const agent = t.suggestedAgent ?? 'auto';
       process.stderr.write(
-        `    ${pc.bold(String(i + 1).padStart(2))}. ${t.title} ${pc.dim(`[${t.source}] → ${agent}`)}\n`,
+        `    ${pc.bold(String(i + 1).padStart(2))}. ${String(t.title)} ${pc.dim(`[${String(t.source)}] → ${String(agent)}`)}\n`,
       );
     }
     process.stderr.write('\n');
@@ -550,7 +566,7 @@ const STATUS_ICONS = {
 };
 
 function getAgentColor(agent: string) {
-  return (AGENT_COLORS as Record<string, (str: string) => string>)[agent] || pc.white;
+  return (AGENT_COLORS as Record<string, (str: string) => string>)[agent];
 }
 
 function truncate(str: string, maxLen: number) {
@@ -576,7 +592,7 @@ function renderProgress(
 
   for (const [i, t] of tasks.entries()) {
     const r = results[i]; // undefined if not yet processed
-    const agent = r?.agent || t.suggestedAgent || 'auto';
+    const agent = r?.agent ?? t.suggestedAgent ?? 'auto';
     const colorFn = getAgentColor(agent);
     const title = truncate(t.title, 42);
 
@@ -609,7 +625,7 @@ function renderProgress(
       : 0;
   const gauge = compactProgressBar(pct, 15);
   const remaining = tasks.length - results.length;
-  const remainStr = remaining > 0 ? `  Remaining: ~${remaining} tasks` : '';
+  const remainStr = remaining > 0 ? `  Remaining: ~${String(remaining)} tasks` : '';
 
   lines.push('');
   lines.push(`  Budget: ${gauge} ${pct.toFixed(1)}%  Time: ${elapsedStr} / ${maxStr}${remainStr}`);
@@ -656,7 +672,7 @@ async function phaseExecute(
 
   for (let i = 0; i < tasks.length; i++) {
     const task = tasks[i];
-    const branchName = `${branchPrefix}/${dateStr}/${task.slug}`;
+    const branchName = `${String(branchPrefix)}/${dateStr}/${task.slug}`;
 
     // Time limit check
     if (Date.now() - startedAt > maxHoursMs) {
@@ -683,7 +699,7 @@ async function phaseExecute(
     if (budgetCheck.action === 'handoff') {
       useHandoff = true;
       log.warn(budgetCheck.reason);
-      log.info(`Remaining tasks will use ${budgetCfg.handoffAgent} (${budgetCfg.handoffModel})`);
+      log.info(`Remaining tasks will use ${String(budgetCfg.handoffAgent ?? '')} (${String(budgetCfg.handoffModel ?? '')})`);
     }
 
     if (budgetCheck.action === 'warn') {
@@ -700,8 +716,8 @@ async function phaseExecute(
     let agent;
     let modelOverride;
     if (useHandoff) {
-      agent = budgetCfg.handoffAgent || 'codex';
-      modelOverride = budgetCfg.handoffModel || 'o4-mini';
+      agent = budgetCfg.handoffAgent ?? 'codex';
+      modelOverride = budgetCfg.handoffModel ?? 'o4-mini';
     } else {
       const taskType = classifyTask(task.title);
       agent = task.suggestedAgent || bestAgentFor(taskType);
@@ -709,7 +725,7 @@ async function phaseExecute(
     }
 
     log.task(
-      `Task ${i + 1}/${tasks.length}: ${task.title} [${agent}${modelOverride ? `:${modelOverride}` : ''}]`,
+      `Task ${String(i + 1)}/${String(tasks.length)}: ${task.title} [${String(agent)}${modelOverride ? `:${String(modelOverride)}` : ''}]`,
     );
 
     // Skip if branch already exists (e.g., from a previous aborted run)
@@ -763,8 +779,8 @@ async function phaseExecute(
     });
 
     // Dispatch agent with progress feedback
-    const handle = recordCallStart(agent, modelOverride || getActiveModel(agent));
-    log.dim(`Dispatching ${agent}${modelOverride ? ` (${modelOverride})` : ''}...`);
+    const handle = recordCallStart(agent, modelOverride ?? getActiveModel(agent));
+    log.dim(`Dispatching ${String(agent)}${modelOverride ? ` (${String(modelOverride)})` : ''}...`);
 
     let agentResult = await executeAgentWithRecovery(agent, prompt, {
       cwd: projectRoot,
@@ -773,9 +789,9 @@ async function phaseExecute(
       progressIntervalMs: 15_000,
       onProgress: (elapsed, outputKB) => {
         const elStr = formatDuration(elapsed);
-        const kbStr = outputKB > 0 ? ` | ${outputKB}KB` : '';
+        const kbStr = outputKB > 0 ? ` | ${String(outputKB)}KB` : '';
         process.stderr.write(
-          `\r  ${pc.dim(`${agent}: working... ${elStr}${kbStr}`)}${' '.repeat(20)}`,
+          `\r  ${pc.dim(`${String(agent)}: working... ${elStr}${kbStr}`)}${' '.repeat(20)}`,
         );
       },
     });
@@ -790,8 +806,8 @@ async function phaseExecute(
           const diagnosis = await (inv as any).investigate({
             agent,
             prompt,
-            error: agentResult.error || agentResult.stderr || '',
-            output: agentResult.stdout || agentResult.output || '',
+            error: agentResult.error,
+            output: agentResult.stdout,
             projectRoot,
           });
 
@@ -799,7 +815,8 @@ async function phaseExecute(
             diagnosis &&
             (diagnosis.category === 'transient' || diagnosis.category === 'fixable')
           ) {
-            log.info(`Investigator: ${diagnosis.category} — retrying...`);
+            log.info(`Investigator: ${String(diagnosis.category)} — retrying...`);
+            // eslint-disable-next-line require-atomic-updates -- agentResult retry; no real race condition
             agentResult = await executeAgentWithRecovery(agent, prompt, {
               cwd: projectRoot,
               timeoutMs: perTaskTimeoutMs,
@@ -816,25 +833,25 @@ async function phaseExecute(
 
     // Doctor notification on persistent failure
     if (!agentResult.ok) {
-      import('./hydra-doctor.ts')
+      void import('./hydra-doctor.ts')
         .then((doc) => {
           if (doc.isDoctorEnabled())
-            doc.diagnose({
+            void doc.diagnose({
               pipeline: 'nightly',
               phase: 'execute',
               agent,
-              error: agentResult.error || agentResult.stderr || '',
-              exitCode: agentResult.exitCode ?? null,
-              signal: agentResult.signal || null,
+              error: agentResult.error,
+              exitCode: agentResult.exitCode,
+              signal: agentResult.signal,
               command: agentResult.command,
               args: agentResult.args,
               promptSnippet: agentResult.promptSnippet,
               stderr: agentResult.stderr,
-              stdout: agentResult.stdout || agentResult.output,
-              errorCategory: agentResult.errorCategory || null,
-              errorDetail: agentResult.errorDetail || null,
-              errorContext: agentResult.errorContext || null,
-              timedOut: agentResult.timedOut || false,
+              stdout: agentResult.stdout ?? agentResult.output,
+              errorCategory: agentResult.errorCategory,
+              errorDetail: agentResult.errorDetail,
+              errorContext: agentResult.errorContext,
+              timedOut: agentResult.timedOut,
               taskTitle: task.title,
               branchName,
             } as any);
@@ -845,7 +862,7 @@ async function phaseExecute(
     if (agentResult.ok) {
       recordCallComplete(handle, agentResult as any);
     } else {
-      recordCallError(handle, new Error(agentResult.error || 'unknown'));
+      recordCallError(handle, new Error(agentResult.error ?? 'unknown'));
     }
 
     const taskDurationMs = agentResult.durationMs || 0;
@@ -870,7 +887,14 @@ async function phaseExecute(
 
     // Run verification
     const verification = runVerification(projectRoot);
-    const verificationStatus = verification.ran ? (verification.passed ? 'PASS' : 'FAIL') : 'SKIP';
+    let verificationStatus: string;
+    if (!verification.ran) {
+      verificationStatus = 'SKIP';
+    } else if (verification.passed) {
+      verificationStatus = 'PASS';
+    } else {
+      verificationStatus = 'FAIL';
+    }
     if (verification.ran) {
       if (verification.passed) log.ok(`Verification: PASS`);
       else log.warn(`Verification: FAIL`);
@@ -883,7 +907,7 @@ async function phaseExecute(
       protectedPatterns: [...BASE_PROTECTED_PATTERNS],
     });
     if (violations.length > 0) {
-      log.warn(`${violations.length} violation(s) detected`);
+      log.warn(`${String(violations.length)} violation(s) detected`);
       for (const v of violations) {
         log.dim(`  [${v.severity}] ${v.detail}`);
       }
@@ -900,7 +924,7 @@ async function phaseExecute(
 
     const taskTokens = tokenDelta.tokens;
     log.ok(
-      `Done: ${status} | ${stats.commits} commits | ${stats.filesChanged} files | ~${taskTokens.toLocaleString()} tokens | ${formatDuration(taskDurationMs)}`,
+      `Done: ${status} | ${String(stats.commits)} commits | ${String(stats.filesChanged)} files | ~${taskTokens.toLocaleString()} tokens | ${formatDuration(taskDurationMs)}`,
     );
 
     results.push({
@@ -948,8 +972,8 @@ function phaseReport(results: any[], budget: any, runMeta: any, coordDir: string
   const mdReport = generateReportMd(results, budgetSummary, runMeta);
   const jsonReport = generateReportJSON(results, budgetSummary, runMeta);
 
-  const mdPath = path.join(nightlyDir, `NIGHTLY_${runMeta.date}.md`);
-  const jsonPath = path.join(nightlyDir, `NIGHTLY_${runMeta.date}.json`);
+  const mdPath = path.join(nightlyDir, `NIGHTLY_${String(runMeta.date)}.md`);
+  const jsonPath = path.join(nightlyDir, `NIGHTLY_${String(runMeta.date)}.json`);
 
   fs.writeFileSync(mdPath, mdReport, 'utf8');
   fs.writeFileSync(jsonPath, JSON.stringify(jsonReport, null, 2), 'utf8');
@@ -973,7 +997,8 @@ async function main() {
     projectConfig = resolveProject({ project: options['project'] as string | undefined });
   } catch (err) {
     log.error(`Project resolution failed: ${err instanceof Error ? err.message : String(err)}`);
-    process.exit(1);
+    process.exitCode = 1;
+    return;
   }
 
   const { projectRoot, coordDir } = projectConfig;
@@ -987,7 +1012,8 @@ async function main() {
   const nightlyCfg = cfg.nightly;
   if (!nightlyCfg) {
     log.error('Nightly config not found in hydra.config.json');
-    process.exit(1);
+    process.exitCode = 1;
+    return;
   }
   const baseBranch = nightlyCfg.baseBranch;
 
@@ -1002,13 +1028,15 @@ async function main() {
   // Validate preconditions
   const currentBranch = getCurrentBranch(projectRoot);
   if (currentBranch !== baseBranch) {
-    log.error(`Must be on '${baseBranch}' branch (currently on '${currentBranch}')`);
-    process.exit(1);
+    log.error(`Must be on '${String(baseBranch)}' branch (currently on '${currentBranch}')`);
+    process.exitCode = 1;
+    return;
   }
 
   if (!isCleanWorkingTree(projectRoot)) {
     log.error('Working tree is not clean. Commit or stash changes first.');
-    process.exit(1);
+    process.exitCode = 1;
+    return;
   }
 
   log.ok(`Preconditions met: on ${baseBranch}, clean working tree`);
@@ -1032,11 +1060,12 @@ async function main() {
     log.phase('PRIORITIZE');
     const deduped = deduplicateTasks(allTasks);
     const sorted = prioritizeTasks(deduped);
-    log.info(`${allTasks.length} total -> ${deduped.length} unique -> interactive selection`);
+    log.info(`${String(allTasks.length)} total -> ${String(deduped.length)} unique -> interactive selection`);
 
     const userSelected = await phaseSelect(sorted, nightlyCfg.maxTasks ?? 5);
     if (!userSelected || userSelected.length === 0) {
       log.warn('Cancelled.');
+      // eslint-disable-next-line n/no-process-exit -- top-level main function; safe to exit
       process.exit(0);
     }
     selectedTasks = userSelected;
@@ -1046,6 +1075,7 @@ async function main() {
 
   if (selectedTasks.length === 0) {
     log.warn('No tasks to execute. Nothing to do.');
+    // eslint-disable-next-line n/no-process-exit -- top-level main function; safe to exit
     process.exit(0);
   }
 
@@ -1053,11 +1083,12 @@ async function main() {
   if (isDryRun) {
     console.log('');
     console.log(pc.bold('=== Dry Run Complete ==='));
-    console.log(`  Would execute ${selectedTasks.length} task(s):`);
+    console.log(`  Would execute ${String(selectedTasks.length)} task(s):`);
     for (const t of selectedTasks) {
-      console.log(`    - [${t.source}] ${t.title} -> ${t.suggestedAgent}`);
+      console.log(`    - [${String(t.source)}] ${String(t.title)} -> ${String(t.suggestedAgent ?? '')}`);
     }
     console.log('');
+    // eslint-disable-next-line n/no-process-exit -- top-level main function; safe to exit
     process.exit(0);
   }
 
@@ -1093,9 +1124,9 @@ async function main() {
   console.log('');
   console.log(pc.bold('=== Nightly Run Complete ==='));
   console.log(
-    `  Tasks: ${pc.green(`${successCount} passed`)}${failCount ? `, ${pc.red(`${failCount} failed`)}` : ''}${skipCount ? `, ${pc.dim(`${skipCount} skipped`)}` : ''} of ${selectedTasks.length} queued`,
+    `  Tasks: ${pc.green(`${String(successCount)} passed`)}${failCount ? `, ${pc.red(`${String(failCount)} failed`)}` : ''}${skipCount ? `, ${pc.dim(`${String(skipCount)} skipped`)}` : ''} of ${String(selectedTasks.length)} queued`,
   );
-  console.log(`  Tokens: ~${budgetSummary.consumed.toLocaleString()} consumed`);
+  console.log(`  Tokens: ~${String(budgetSummary.consumed.toLocaleString())} consumed`);
   console.log(`  Duration: ${formatDuration(finishedAt - startedAt)}`);
   if (stopReason) console.log(`  Stopped: ${stopReason}`);
   console.log(`  Review: npm run nightly:review`);
@@ -1104,12 +1135,12 @@ async function main() {
 
 // ── Entry ───────────────────────────────────────────────────────────────────
 
-main().catch((err) => {
-  log.error(`Fatal: ${err.message}`);
+main().catch((err: unknown) => {
+  log.error(`Fatal: ${err instanceof Error ? err.message : String(err)}`);
   // Always try to get back to baseBranch
   try {
     const cfg = loadHydraConfig();
-    const baseBranch = cfg.nightly?.baseBranch || 'dev';
+    const baseBranch = cfg.nightly?.baseBranch ?? 'dev';
     const projectRoot = process.cwd();
     const branch = getCurrentBranch(projectRoot);
     if (branch !== baseBranch && branch.startsWith('nightly/')) {
@@ -1118,5 +1149,6 @@ main().catch((err) => {
   } catch {
     /* last resort */
   }
+  // eslint-disable-next-line n/no-process-exit -- inside .catch() callback; return does not propagate
   process.exit(1);
 });
