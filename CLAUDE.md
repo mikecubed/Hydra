@@ -97,7 +97,7 @@ flowchart TD
 ## Code Conventions
 
 - **ESM + TypeScript** (`"type": "module"` in package.json). Runtime code is primarily `.ts` with `import`/`export`; avoid CommonJS and prefer `.ts` for new code.
-- **No build step for normal development** — Node.js 22.18+ runs the TypeScript sources directly. `tsc` is used for verification, not for emitted runtime artifacts.
+- **No build step for normal development** — Node.js 24+ runs the TypeScript sources directly. `tsc` is used for verification, not for emitted runtime artifacts.
 - **Mixed `.ts` and legacy `.mjs` repo** — prefer existing patterns in the file you are editing, but default to `.ts` for new runtime modules and tests.
 - **Import extensions must match source files** — `.ts` files import other `.ts` files with explicit `.ts` extensions.
 - **Four dependencies**: `picocolors` (terminal colors), `cross-spawn` (cross-platform spawning), `@modelcontextprotocol/sdk` (MCP server), `zod` (schema validation for MCP tools). Optional peer: `@opentelemetry/api` (tracing, no-op when absent).
