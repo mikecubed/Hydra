@@ -8,6 +8,8 @@
  * Dependency: picocolors (via hydra-ui.mjs)
  */
 
+/* eslint-disable @typescript-eslint/strict-boolean-expressions, @typescript-eslint/no-explicit-any, @typescript-eslint/no-unsafe-argument, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-return -- prompt-choice handles dynamic readline state */
+
 import { box, DIM, ACCENT, WARNING, ERROR, SUCCESS, stripAnsi } from './hydra-ui.ts';
 import pc from 'picocolors';
 
