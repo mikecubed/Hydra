@@ -23,7 +23,7 @@ export function commandExists(name: string): boolean {
       timeout: 5_000,
       stdio: ['ignore', 'pipe', 'ignore'],
     });
-    return result.status === 0 && Boolean(result.stdout?.trim());
+    return result.status === 0 && Boolean(result.stdout.trim());
   } catch {
     return false;
   }

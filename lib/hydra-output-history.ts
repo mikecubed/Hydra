@@ -24,6 +24,7 @@ let _origStderrWrite: typeof process.stderr.write | null = null;
 
 // ── Scroll-region filter ─────────────────────────────────────────────────────
 
+// eslint-disable-next-line no-control-regex -- intentional ANSI escape sequence detection
 const SCROLL_REGION_RE = /\x1b\[\d*;\d*r|\x1b\[\d+[ABCDHJ]|\x1b\[s|\x1b\[u|\x1b\[\?25[lh]/;
 
 function isStatusBarLine(raw: string): boolean {
@@ -42,7 +43,7 @@ function pushLine(clean: string, raw: string): void {
 }
 
 function processChunk(chunk: string | Uint8Array, _isRaw?: boolean): void {
-  const str = typeof chunk === 'string' ? chunk : (chunk as Uint8Array)?.toString?.() || '';
+  const str = typeof chunk === 'string' ? chunk : chunk.toString();
   if (!str) return;
 
   if (isStatusBarLine(str)) return;
@@ -53,8 +54,8 @@ function processChunk(chunk: string | Uint8Array, _isRaw?: boolean): void {
   const rawParts = (_partialRaw + rawStr).split('\n');
   const cleanParts = (_partial + cleanStr).split('\n');
 
-  _partialRaw = rawParts.pop() || '';
-  _partial = cleanParts.pop() || '';
+  _partialRaw = rawParts.pop() ?? '';
+  _partial = cleanParts.pop() ?? '';
 
   for (const [i, clean] of cleanParts.entries()) {
     const raw = rawParts[i] || clean;
@@ -72,7 +73,7 @@ function processChunk(chunk: string | Uint8Array, _isRaw?: boolean): void {
  */
 export function initOutputHistory(opts: { maxLines?: number } = {}): void {
   if (_initialized) return;
-  _maxLines = opts.maxLines || 200;
+  _maxLines = opts.maxLines ?? 200;
   _initialized = true;
 
   _origStdoutWrite = process.stdout.write.bind(process.stdout);
@@ -88,7 +89,7 @@ export function initOutputHistory(opts: { maxLines?: number } = {}): void {
     } catch {
       /* never break output */
     }
-    return _origStdoutWrite!(chunk as string, encodingOrCb as BufferEncoding, cb!);
+    return _origStdoutWrite!(chunk, encodingOrCb, cb);
   };
   (process.stdout as NodeJS.WriteStream & { write: unknown }).write = patchedStdoutWrite;
 
@@ -102,7 +103,7 @@ export function initOutputHistory(opts: { maxLines?: number } = {}): void {
     } catch {
       /* never break output */
     }
-    return _origStderrWrite!(chunk as string, encodingOrCb as BufferEncoding, cb!);
+    return _origStderrWrite!(chunk, encodingOrCb, cb);
   };
   (process.stderr as NodeJS.WriteStream & { write: unknown }).write = patchedStderrWrite;
 }
