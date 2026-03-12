@@ -53,6 +53,7 @@ async function checkDaemon() {
 
 async function requireDaemon() {
   if (!daemonAvailable) {
+    // eslint-disable-next-line require-atomic-updates -- singleton flag guarded by the outer check
     daemonAvailable = await checkDaemon();
   }
   if (!daemonAvailable) {
@@ -65,7 +66,7 @@ async function requireDaemon() {
 function truncate(text: string, limit = CHARACTER_LIMIT) {
   if (text.length <= limit) return { text, truncated: false };
   return {
-    text: `${text.slice(0, limit)}\n\n[Output truncated at ${limit} chars. Use a more specific prompt or request a summary.]`,
+    text: `${text.slice(0, limit)}\n\n[Output truncated at ${String(limit)} chars. Use a more specific prompt or request a summary.]`,
     truncated: true,
   };
 }
@@ -122,7 +123,7 @@ server.registerTool(
   async ({ agent, prompt, system, model }) => {
     const fullPrompt = system ? `${system}\n\n---\n\n${prompt}` : prompt;
     const execOpts = {
-      modelOverride: model || undefined,
+      modelOverride: model ?? undefined,
       timeoutMs: 5 * 60 * 1000,
       useStdin: true,
       maxOutputBytes: 256 * 1024,
@@ -130,18 +131,17 @@ server.registerTool(
     const execFn = model ? executeAgent : executeAgentWithRecovery;
     const result = await execFn(agent, fullPrompt, execOpts);
 
-    if (!result.ok && !result.output?.trim()) {
+    if (!result.ok && !result.output.trim()) {
       return errResponse(
-        `Agent ${agent} failed: ${result.error || 'unknown error'}. Try a different agent or check agent availability with hydra_status.`,
+        `Agent ${agent} failed: ${result.error ?? 'unknown error'}. Try a different agent or check agent availability with hydra_status.`,
       );
     }
 
     let text = result.output || '';
-    // eslint-disable-next-line @typescript-eslint/no-unnecessary-type-assertion
     if ((agent as string) === 'claude') {
       try {
         const parsed = JSON.parse(text);
-        text = parsed.result || parsed.content || text;
+        text = parsed.result ?? parsed.content ?? text;
       } catch {
         /* use raw output */
       }
@@ -151,7 +151,7 @@ server.registerTool(
     const output = {
       text: truncated,
       agent,
-      model: model || 'default',
+      model: model ?? 'default',
       durationMs: result.durationMs,
       truncated: wasTruncated,
     };
@@ -193,9 +193,8 @@ server.registerTool(
   },
   async ({ status, owner, limit, offset }) => {
     await requireDaemon();
-    const data = (await request('GET', baseUrl, '/summary')) as Record<string, unknown>;
-    let tasks =
-      ((data['summary'] as Record<string, unknown> | undefined)?.['openTasks'] as unknown[]) || [];
+    const data = await request<Record<string, unknown>>('GET', baseUrl, '/summary');
+    let tasks = ((data['summary'] as Record<string, unknown> | undefined)?.['openTasks'] as unknown[] | undefined) ?? [];
     if (status) tasks = tasks.filter((t) => (t as Record<string, unknown>)['status'] === status);
     if (owner) tasks = tasks.filter((t) => (t as Record<string, unknown>)['owner'] === owner);
 
@@ -267,7 +266,7 @@ server.registerTool(
     if (taskId) body['taskId'] = taskId;
     if (title) body['title'] = title;
     if (notes) body['notes'] = notes;
-    const result = (await request('POST', baseUrl, '/task/claim', body)) as Record<string, unknown>;
+    const result = await request<Record<string, unknown>>('POST', baseUrl, '/task/claim', body);
     const output = { task: result['task'] };
     return {
       content: [{ type: 'text', text: JSON.stringify(output) }],
@@ -313,10 +312,7 @@ server.registerTool(
     if (status) body['status'] = status;
     if (notes) body['notes'] = notes;
     if (claimToken) body['claimToken'] = claimToken;
-    const result = (await request('POST', baseUrl, '/task/update', body)) as Record<
-      string,
-      unknown
-    >;
+    const result = await request<Record<string, unknown>>('POST', baseUrl, '/task/update', body);
     const output = { task: result['task'] };
     return {
       content: [{ type: 'text', text: JSON.stringify(output) }],
@@ -355,13 +351,13 @@ server.registerTool(
   },
   async ({ taskId, name, context, agent }) => {
     await requireDaemon();
-    const result = (await request('POST', baseUrl, '/task/checkpoint', {
+    const result = await request<Record<string, unknown>>('POST', baseUrl, '/task/checkpoint', {
       taskId,
       name,
-      context: context || '',
-      agent: agent || '',
-    })) as Record<string, unknown>;
-    const output = { checkpoint: (result as Record<string, unknown>)['checkpoint'] };
+      context: context ?? '',
+      agent: agent ?? '',
+    });
+    const output = { checkpoint: result['checkpoint'] };
     return {
       content: [{ type: 'text', text: JSON.stringify(output) }],
       structuredContent: output,
@@ -393,9 +389,9 @@ server.registerTool(
   },
   async ({ agent }) => {
     await requireDaemon();
-    const stateData = (await request('GET', baseUrl, '/state')) as Record<string, unknown>;
+    const stateData = await request<Record<string, unknown>>('GET', baseUrl, '/state');
     const stateObj = stateData['state'] as Record<string, unknown> | undefined;
-    const handoffs = ((stateObj?.['handoffs'] || []) as Array<Record<string, unknown>>).filter(
+    const handoffs = ((stateObj?.['handoffs'] ?? []) as Array<Record<string, unknown>>).filter(
       (h) => h['to'] === agent && !h['acknowledgedAt'],
     );
     const output = { handoffs, count: handoffs.length };
@@ -432,10 +428,7 @@ server.registerTool(
   },
   async ({ handoffId, agent }) => {
     await requireDaemon();
-    const result = (await request('POST', baseUrl, '/handoff/ack', { handoffId, agent })) as Record<
-      string,
-      unknown
-    >;
+    const result = await request<Record<string, unknown>>('POST', baseUrl, '/handoff/ack', { handoffId, agent });
     const output = { handoff: result['handoff'] };
     return {
       content: [{ type: 'text', text: JSON.stringify(output) }],
@@ -469,12 +462,12 @@ server.registerTool(
   },
   async ({ prompt }) => {
     await requireDaemon();
-    const result = (await request('POST', baseUrl, '/decision', {
+    const result = await request<Record<string, unknown>>('POST', baseUrl, '/decision', {
       title: `Council requested: ${prompt.slice(0, 80)}`,
       owner: 'human',
       rationale: `Agent requested council deliberation for: ${prompt}`,
       impact: 'pending council review',
-    })) as Record<string, unknown>;
+    });
     const output = {
       queued: true,
       decision: result['decision'],
@@ -555,13 +548,13 @@ server.registerTool(
   // @ts-expect-error — MCP SDK handler type mismatch (async callback vs sync signature)
   async ({ description, name, baseAgent, skipTest }) => {
     const result = await forgeAgent(description, {
-      name: name || undefined,
-      baseAgent: baseAgent || undefined,
+      name: name ?? undefined,
+      baseAgent: baseAgent ?? undefined,
       skipTest: skipTest !== false,
     });
     if (!result.ok) {
       return errResponse(
-        `Forge failed: ${result.errors?.join(', ') || 'unknown error'}. Check that Gemini and Claude agents are available and configured.`,
+        `Forge failed: ${result.errors?.join(', ') ?? 'unknown error'}. Check that Gemini and Claude agents are available and configured.`,
       );
     }
     const output = {
@@ -573,7 +566,7 @@ server.registerTool(
         tags: result.spec.tags,
       },
       phases: result.phases,
-      warnings: result.validation?.warnings || [],
+      warnings: result.validation?.warnings ?? [],
     };
     return {
       content: [{ type: 'text', text: JSON.stringify(output) }],
@@ -600,6 +593,8 @@ server.registerTool(
       openWorldHint: false,
     },
   },
+  // async required by MCP tool handler interface
+  // eslint-disable-next-line @typescript-eslint/require-await
   async (_args: unknown) => {
     const forged = listForgedAgents();
     const output = { agents: forged, count: forged.length };
@@ -635,6 +630,8 @@ server.registerTool(
       openWorldHint: false,
     },
   },
+  // async required by MCP tool handler interface
+  // eslint-disable-next-line @typescript-eslint/require-await
   async ({ cwd }) => {
     const sessions = hubListSessions({ cwd });
     const output = { sessions, count: sessions.length, hubPath: hubPath() };
@@ -675,6 +672,8 @@ server.registerTool(
       openWorldHint: false,
     },
   },
+  // async required by MCP tool handler interface
+  // eslint-disable-next-line @typescript-eslint/require-await
   async ({ agent, cwd, project, focus, files, taskId }) => {
     const id = hubRegisterSession({ agent, cwd, project, focus, files, taskId });
     const output = { id, hubPath: hubPath() };
@@ -711,6 +710,8 @@ server.registerTool(
       openWorldHint: false,
     },
   },
+  // async required by MCP tool handler interface
+  // eslint-disable-next-line @typescript-eslint/require-await
   async ({ id, files, status, focus }) => {
     const updates: Record<string, unknown> = {};
     if (files !== undefined) updates['files'] = files;
@@ -745,6 +746,8 @@ server.registerTool(
       openWorldHint: false,
     },
   },
+  // async required by MCP tool handler interface
+  // eslint-disable-next-line @typescript-eslint/require-await
   async ({ id }) => {
     hubDeregisterSession(id);
     const output = { ok: true };
@@ -779,6 +782,8 @@ server.registerTool(
       openWorldHint: false,
     },
   },
+  // async required by MCP tool handler interface
+  // eslint-disable-next-line @typescript-eslint/require-await
   async ({ files, cwd, excludeId }) => {
     const conflicts = hubCheckConflicts(files, { cwd, excludeId });
     const output = { conflicts };
@@ -792,6 +797,8 @@ server.registerResource(
   'config',
   'hydra://config',
   { description: 'Current Hydra configuration (hydra.config.json)', mimeType: 'application/json' },
+  // async required by MCP resource handler interface
+  // eslint-disable-next-line @typescript-eslint/require-await
   async (_args: unknown) => ({
     contents: [
       {
@@ -807,6 +814,8 @@ server.registerResource(
   'metrics',
   'hydra://metrics',
   { description: 'Session metrics and SLO status', mimeType: 'application/json' },
+  // async required by MCP resource handler interface
+  // eslint-disable-next-line @typescript-eslint/require-await
   async (_args: unknown) => ({
     contents: [
       {
@@ -822,6 +831,8 @@ server.registerResource(
   'agents',
   'hydra://agents',
   { description: 'Agent registry with models and affinities', mimeType: 'application/json' },
+  // async required by MCP resource handler interface
+  // eslint-disable-next-line @typescript-eslint/require-await
   async (_args: unknown) => ({
     contents: [
       {
@@ -837,6 +848,8 @@ server.registerResource(
   'activity',
   'hydra://activity',
   { description: 'Recent activity digest (last 20 events)', mimeType: 'application/json' },
+  // async required by MCP resource handler interface
+  // eslint-disable-next-line @typescript-eslint/require-await
   async (_args: unknown) => ({
     contents: [
       {
@@ -886,6 +899,8 @@ server.registerResource(
     description: 'Hydra self snapshot (version, git, models, config, metrics)',
     mimeType: 'application/json',
   },
+  // async required by MCP resource handler interface
+  // eslint-disable-next-line @typescript-eslint/require-await
   async (_args: unknown) => ({
     contents: [
       {
@@ -1018,7 +1033,7 @@ server.registerPrompt(
 async function main() {
   const { options } = parseArgs(process.argv);
   baseUrl =
-    (options['url'] as string | undefined) || process.env['AI_ORCH_URL'] || 'http://127.0.0.1:4173';
+    (options['url'] as string | undefined) ?? process.env['AI_ORCH_URL'] ?? 'http://127.0.0.1:4173';
 
   // Check daemon availability on startup (non-blocking for standalone tools)
   daemonAvailable = await checkDaemon();
@@ -1027,7 +1042,8 @@ async function main() {
   await server.connect(transport);
 }
 
-main().catch((err) => {
-  process.stderr.write(`Hydra MCP server failed: ${err.message}\n`);
+main().catch((err: unknown) => {
+  process.stderr.write(`Hydra MCP server failed: ${err instanceof Error ? err.message : String(err)}\n`);
+  // eslint-disable-next-line n/no-process-exit -- top-level fatal error handler
   process.exit(1);
 });
