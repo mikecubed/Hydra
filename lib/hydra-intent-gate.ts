@@ -48,7 +48,7 @@ const ABBREVIATIONS: Array<[RegExp, string]> = [
  * @returns {string}
  */
 export function normalizeIntent(text: string): string {
-  if (!text.trim()) return '';
+  if (text.trim() === '') return '';
   let result = text.trim();
 
   // Strip leading filler — repeat until stable (handles "please just fix")
@@ -114,7 +114,7 @@ export async function gateIntent(
   try {
     const doRewrite = rewriteFn ?? defaultRewriteFn;
     const rewritten = await doRewrite(text);
-    if (rewritten?.trim()) {
+    if (rewritten != null && rewritten.trim() !== '') {
       const rewrittenClassification = classifyPrompt(rewritten.trim());
       return {
         text: rewritten.trim(),
@@ -163,5 +163,5 @@ async function defaultRewriteFn(text: string): Promise<string | null> {
   await streamLocalCompletion(messages, localCfg, (chunk: string) => {
     result += chunk;
   });
-  return result.trim() || null;
+  return result.trim() === '' ? null : result.trim();
 }

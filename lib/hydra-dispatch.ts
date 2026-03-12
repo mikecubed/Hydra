@@ -59,19 +59,19 @@ function usageGuard(_agent: string) {
     if (usage.level === 'critical') {
       const currentMode = getMode();
       const nextMode = (MODE_DOWNSHIFT as Record<string, string>)[currentMode];
-      if (nextMode) {
+      if (nextMode === '') {
+        console.log(
+          WARNING(
+            `  \u26A0 Token usage CRITICAL (${usage.percent.toFixed(1)}%) \u2014 already in economy mode`,
+          ),
+        );
+      } else {
         console.log(
           WARNING(
             `  \u26A0 Token usage CRITICAL (${usage.percent.toFixed(1)}%) \u2014 downshifting mode: ${currentMode} \u2192 ${nextMode}`,
           ),
         );
         setMode(nextMode);
-      } else {
-        console.log(
-          WARNING(
-            `  \u26A0 Token usage CRITICAL (${usage.percent.toFixed(1)}%) \u2014 already in economy mode`,
-          ),
-        );
       }
     } else if (usage.level === 'warning') {
       console.log(DIM(`  \u26A0 Token usage at ${usage.percent.toFixed(1)}%`));
@@ -86,7 +86,7 @@ async function callAgent(agent: string, prompt: string, timeoutMs: number, model
   return executeAgent(agent, prompt, {
     cwd: config.projectRoot,
     timeoutMs,
-    ...(model ? { modelOverride: model } : {}),
+    ...(model == null ? {} : { modelOverride: model }),
   });
 }
 
@@ -125,13 +125,13 @@ export function getRoleAgent(
   const roleCfg = getRoleConfig(roleName);
   const preferred = roleCfg?.agent;
 
-  if (preferred) {
+  if (preferred != null && preferred !== '') {
     if (preferred === 'local') {
       // Only dispatch to local if explicitly enabled
       if (cfg.local.enabled) return preferred;
     } else {
       const agentDef = getAgent(preferred);
-      if (agentDef?.enabled) {
+      if (agentDef?.enabled === true) {
         // CLI agents require explicit confirmation (=== true); API agents (cli === null) are always reachable
         const needsCli = agentDef.cli !== null && agentDef.cli !== undefined;
         if (!needsCli || installedCLIs[preferred] === true) {
@@ -289,17 +289,23 @@ async function main() {
   const { options, positionals } = parseArgs(process.argv);
   const prompt = getPrompt(options, positionals);
 
-  if (!prompt) {
+  if (prompt === '') {
     throw new Error(
       'Missing prompt. Example: node lib/hydra-dispatch.ts prompt="Plan offline sync rollout"',
     );
   }
 
-  const mode = String(options['mode'] || 'live').toLowerCase();
+  const modeVal = options['mode'];
+  const mode = (typeof modeVal === 'string' && modeVal !== '' ? modeVal : 'live').toLowerCase();
   const isPreview = mode === 'preview' || boolFlag(options['preview'], false);
   const save = boolFlag(options['save'], true);
-  const daemonUrl = String(options['url'] || DEFAULT_DAEMON_URL);
-  const timeoutMs = Number.parseInt(String(options['timeoutMs'] || DEFAULT_TIMEOUT_MS), 10);
+  const urlVal = options['url'];
+  const daemonUrl = typeof urlVal === 'string' && urlVal !== '' ? urlVal : DEFAULT_DAEMON_URL;
+  const tmVal = options['timeoutMs'];
+  const timeoutMs = Number.parseInt(
+    typeof tmVal === 'string' && tmVal !== '' ? tmVal : String(DEFAULT_TIMEOUT_MS),
+    10,
+  );
 
   const id = runId('HYDRA_RUN');
   const startedAt = nowIso();
@@ -319,15 +325,17 @@ async function main() {
   const _synthesizerModelRaw = getRoleConfig('synthesizer')?.model ?? null;
 
   const coordinatorModel =
-    _coordinatorModelRaw && getAgent(coordinatorAgent)?.modelBelongsTo(_coordinatorModelRaw)
+    _coordinatorModelRaw != null &&
+    getAgent(coordinatorAgent)?.modelBelongsTo(_coordinatorModelRaw) === true
       ? _coordinatorModelRaw
       : null;
   const criticModel =
-    _criticModelRaw && getAgent(criticAgent)?.modelBelongsTo(_criticModelRaw)
+    _criticModelRaw != null && getAgent(criticAgent)?.modelBelongsTo(_criticModelRaw) === true
       ? _criticModelRaw
       : null;
   const synthesizerModel =
-    _synthesizerModelRaw && getAgent(synthesizerAgent)?.modelBelongsTo(_synthesizerModelRaw)
+    _synthesizerModelRaw != null &&
+    getAgent(synthesizerAgent)?.modelBelongsTo(_synthesizerModelRaw) === true
       ? _synthesizerModelRaw
       : null;
 
@@ -521,7 +529,7 @@ async function main() {
 
   // Defensive runtime guard — TS proves these are assigned but report is mutable data
   // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
-  if (!coord || !critic || !synth) {
+  if (coord == null || critic == null || synth == null) {
     throw new Error(
       'Hydra dispatch invariant violated: coordinator, critic, and synthesizer slots must be populated before computing outputSummary.',
     );

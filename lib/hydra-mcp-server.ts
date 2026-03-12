@@ -1,4 +1,3 @@
-#!/usr/bin/env node
 /**
  * Hydra MCP Server
  *
@@ -121,27 +120,28 @@ server.registerTool(
   },
   // @ts-expect-error — MCP SDK handler type mismatch (async callback vs sync signature)
   async ({ agent, prompt, system, model }) => {
-    const fullPrompt = system ? `${system}\n\n---\n\n${prompt}` : prompt;
+    const fullPrompt = system != null && system !== '' ? `${system}\n\n---\n\n${prompt}` : prompt;
     const execOpts = {
       modelOverride: model ?? undefined,
       timeoutMs: 5 * 60 * 1000,
       useStdin: true,
       maxOutputBytes: 256 * 1024,
     };
-    const execFn = model ? executeAgent : executeAgentWithRecovery;
+    const execFn = model != null && model !== '' ? executeAgent : executeAgentWithRecovery;
     const result = await execFn(agent, fullPrompt, execOpts);
 
-    if (!result.ok && !result.output.trim()) {
+    if (!result.ok && result.output.trim() === '') {
       return errResponse(
         `Agent ${agent} failed: ${result.error ?? 'unknown error'}. Try a different agent or check agent availability with hydra_status.`,
       );
     }
 
-    let text = result.output || '';
+    let text = result.output;
     if ((agent as string) === 'claude') {
       try {
-        const parsed = JSON.parse(text);
-        text = parsed.result ?? parsed.content ?? text;
+        const parsed = JSON.parse(text) as Record<string, unknown>;
+        const content = parsed['result'] ?? parsed['content'];
+        text = typeof content === 'string' ? content : text;
       } catch {
         /* use raw output */
       }
@@ -194,9 +194,14 @@ server.registerTool(
   async ({ status, owner, limit, offset }) => {
     await requireDaemon();
     const data = await request<Record<string, unknown>>('GET', baseUrl, '/summary');
-    let tasks = ((data['summary'] as Record<string, unknown> | undefined)?.['openTasks'] as unknown[] | undefined) ?? [];
-    if (status) tasks = tasks.filter((t) => (t as Record<string, unknown>)['status'] === status);
-    if (owner) tasks = tasks.filter((t) => (t as Record<string, unknown>)['owner'] === owner);
+    let tasks =
+      ((data['summary'] as Record<string, unknown> | undefined)?.['openTasks'] as
+        | unknown[]
+        | undefined) ?? [];
+    if (status != null)
+      tasks = tasks.filter((t) => (t as Record<string, unknown>)['status'] === status);
+    if (owner != null)
+      tasks = tasks.filter((t) => (t as Record<string, unknown>)['owner'] === owner);
 
     const total = tasks.length;
     const page = tasks.slice(offset, offset + limit).map((t) => {
@@ -257,15 +262,15 @@ server.registerTool(
   // @ts-expect-error — MCP SDK handler type mismatch (async callback vs sync signature)
   async ({ agent, taskId, title, notes }) => {
     await requireDaemon();
-    if (!taskId && !title) {
+    if (taskId == null && (title == null || title === '')) {
       return errResponse(
         'Error: Either taskId or title is required. Provide taskId to claim an existing task (use hydra_tasks_list to find one), or title to create a new task.',
       );
     }
     const body: Record<string, string | undefined> = { agent };
-    if (taskId) body['taskId'] = taskId;
-    if (title) body['title'] = title;
-    if (notes) body['notes'] = notes;
+    if (taskId != null) body['taskId'] = taskId;
+    if (title != null && title !== '') body['title'] = title;
+    if (notes != null && notes !== '') body['notes'] = notes;
     const result = await request<Record<string, unknown>>('POST', baseUrl, '/task/claim', body);
     const output = { task: result['task'] };
     return {
@@ -309,9 +314,9 @@ server.registerTool(
   async ({ taskId, status, notes, claimToken }) => {
     await requireDaemon();
     const body: Record<string, string | undefined> = { taskId };
-    if (status) body['status'] = status;
-    if (notes) body['notes'] = notes;
-    if (claimToken) body['claimToken'] = claimToken;
+    if (status != null && status !== '') body['status'] = status;
+    if (notes != null && notes !== '') body['notes'] = notes;
+    if (claimToken != null && claimToken !== '') body['claimToken'] = claimToken;
     const result = await request<Record<string, unknown>>('POST', baseUrl, '/task/update', body);
     const output = { task: result['task'] };
     return {
@@ -392,7 +397,7 @@ server.registerTool(
     const stateData = await request<Record<string, unknown>>('GET', baseUrl, '/state');
     const stateObj = stateData['state'] as Record<string, unknown> | undefined;
     const handoffs = ((stateObj?.['handoffs'] ?? []) as Array<Record<string, unknown>>).filter(
-      (h) => h['to'] === agent && !h['acknowledgedAt'],
+      (h) => h['to'] === agent && h['acknowledgedAt'] == null,
     );
     const output = { handoffs, count: handoffs.length };
     return {
@@ -428,7 +433,10 @@ server.registerTool(
   },
   async ({ handoffId, agent }) => {
     await requireDaemon();
-    const result = await request<Record<string, unknown>>('POST', baseUrl, '/handoff/ack', { handoffId, agent });
+    const result = await request<Record<string, unknown>>('POST', baseUrl, '/handoff/ack', {
+      handoffId,
+      agent,
+    });
     const output = { handoff: result['handoff'] };
     return {
       content: [{ type: 'text', text: JSON.stringify(output) }],
@@ -977,7 +985,7 @@ server.registerPrompt(
           text: [
             '# Multi-Agent Code Review',
             '',
-            ...(focus ? [`## Focus Areas`, focus, ''] : []),
+            ...(focus != null && focus !== '' ? [`## Focus Areas`, focus, ''] : []),
             '## Code',
             '```',
             code,
@@ -1043,7 +1051,9 @@ async function main() {
 }
 
 main().catch((err: unknown) => {
-  process.stderr.write(`Hydra MCP server failed: ${err instanceof Error ? err.message : String(err)}\n`);
+  process.stderr.write(
+    `Hydra MCP server failed: ${err instanceof Error ? err.message : String(err)}\n`,
+  );
   // eslint-disable-next-line n/no-process-exit -- top-level fatal error handler
   process.exit(1);
 });
