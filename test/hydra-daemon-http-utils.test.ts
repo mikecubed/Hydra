@@ -169,6 +169,16 @@ describe('readJsonBody', () => {
     const req = makeReq({}, 'not valid json {{{');
     await assert.rejects(() => readJsonBody(req), SyntaxError);
   });
+
+  it('readJsonBody_withPrimitiveJson_throwsTypeError', async () => {
+    const req = makeReq({}, '42');
+    await assert.rejects(() => readJsonBody(req), TypeError);
+  });
+
+  it('readJsonBody_withJsonArray_throwsTypeError', async () => {
+    const req = makeReq({}, '["a","b"]');
+    await assert.rejects(() => readJsonBody(req), TypeError);
+  });
 });
 
 // ---------------------------------------------------------------------------

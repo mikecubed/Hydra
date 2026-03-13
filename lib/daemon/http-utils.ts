@@ -58,7 +58,11 @@ export async function readJsonBody(req: IncomingMessage): Promise<Record<string,
   if (raw === '') {
     return {};
   }
-  return JSON.parse(raw) as Record<string, unknown>;
+  const parsed: unknown = JSON.parse(raw);
+  if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) {
+    throw new TypeError('Expected a JSON object body.');
+  }
+  return parsed as Record<string, unknown>;
 }
 
 export async function requestJson(
