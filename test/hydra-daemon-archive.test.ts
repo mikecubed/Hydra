@@ -8,7 +8,13 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import type { HydraStateShape, ArchiveState, TaskEntry, BlockerEntry } from '../lib/types.ts';
+import type {
+  HydraStateShape,
+  ArchiveState,
+  TaskEntry,
+  BlockerEntry,
+  HandoffEntry,
+} from '../lib/types.ts';
 import type { EventRecord } from '../lib/daemon/state.ts';
 
 type ArchiveModule = {
@@ -251,6 +257,72 @@ describe('daemon/archive unit tests', () => {
       const remaining = state.tasks.find((t) => t.id === 't2');
       assert.ok(remaining);
       assert.deepEqual((remaining as unknown as { blockedBy: string[] }).blockedBy, []);
+    });
+
+    // ── handoff archiving ───────────────────────────────────────────────────
+
+    it('archives acknowledged handoffs older than 1 hour', () => {
+      const twoHoursAgo = new Date(Date.now() - 2 * 60 * 60 * 1000).toISOString();
+      const state = makeState({
+        handoffs: [
+          {
+            id: 'h1',
+            from: 'gemini',
+            to: 'codex',
+            summary: 'Old handoff',
+            createdAt: twoHoursAgo,
+            acknowledgedAt: twoHoursAgo,
+          } as HandoffEntry,
+        ],
+      });
+
+      const moved = mod.archiveState(state);
+      assert.ok(moved >= 1);
+      assert.equal(state.handoffs.length, 0, 'handoff should be removed from active state');
+
+      const archive = mod.readArchive();
+      assert.equal(archive.handoffs.length, 1);
+      assert.equal(archive.handoffs.at(0)?.id, 'h1');
+    });
+
+    it('does not archive a recently acknowledged handoff (< 1 hour ago)', () => {
+      const fiveMinutesAgo = new Date(Date.now() - 5 * 60 * 1000).toISOString();
+      const state = makeState({
+        handoffs: [
+          {
+            id: 'h2',
+            from: 'gemini',
+            to: 'codex',
+            summary: 'Recent handoff',
+            createdAt: fiveMinutesAgo,
+            acknowledgedAt: fiveMinutesAgo,
+          } as HandoffEntry,
+        ],
+      });
+
+      const moved = mod.archiveState(state);
+      assert.equal(moved, 0);
+      assert.equal(state.handoffs.length, 1, 'recent handoff should stay in active state');
+    });
+
+    it('does not archive an unacknowledged handoff', () => {
+      const twoHoursAgo = new Date(Date.now() - 2 * 60 * 60 * 1000).toISOString();
+      const state = makeState({
+        handoffs: [
+          {
+            id: 'h3',
+            from: 'gemini',
+            to: 'codex',
+            summary: 'Pending handoff',
+            createdAt: twoHoursAgo,
+            acknowledgedAt: null,
+          } as HandoffEntry,
+        ],
+      });
+
+      const moved = mod.archiveState(state);
+      assert.equal(moved, 0);
+      assert.equal(state.handoffs.length, 1, 'unacknowledged handoff should stay in active state');
     });
   });
 

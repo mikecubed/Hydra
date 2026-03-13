@@ -59,11 +59,7 @@ export function mergeTaskWorktree(taskId: string): {
   try {
     const result = smartMerge(config.projectRoot, branch, currentBranch);
     if (!result.ok) {
-      const conflictList =
-        (result as Record<string, unknown>)['conflicts'] != null &&
-        ((result as Record<string, unknown>)['conflicts'] as string[]).length > 0
-          ? ((result as Record<string, unknown>)['conflicts'] as string[]).join(', ')
-          : '(unknown)';
+      const conflictList = result.conflicts.length > 0 ? result.conflicts.join(', ') : '(unknown)';
       console.warn(
         `[worktree] Conflict merging task ${taskId} branch into ${currentBranch}: ${conflictList}`,
       );
