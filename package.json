@@ -80,6 +80,7 @@
     "setup:hooks": "node scripts/setup-hooks.ts",
     "test": "node --test 'test/**/*.test.{ts,mjs}'",
     "test:coverage": "c8 npm test",
+    "test:coverage:check": "c8 --check-coverage npm test",
     "test:report": "node --test 'test/**/*.test.{ts,mjs}' --test-reporter=tap --test-reporter-destination=docs/coordination/test-results.tap",
     "package": "node -e \"require('fs').mkdirSync('dist', { recursive: true })\" && npm pack --pack-destination dist",
     "package:dry-run": "npm pack --dry-run",

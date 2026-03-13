@@ -195,19 +195,20 @@ For scenario walkthroughs, Mermaid diagrams, and example interactions, start wit
 
 ### npm scripts
 
-| Command                           | Description                              |
-| --------------------------------- | ---------------------------------------- |
-| `npm run go`                      | Launch operator console                  |
-| `npm start`                       | Start the daemon                         |
-| `npm test`                        | Run all tests                            |
-| `npm run test:coverage`           | Run all tests with c8 coverage reporting |
-| `npm run council -- prompt="..."` | Full council deliberation                |
-| `npm run evolve`                  | Autonomous self-improvement              |
-| `npm run nightly`                 | Nightly task automation                  |
-| `npm run tasks`                   | Scan & execute TODO/FIXME/issues         |
-| `npm run lint:mermaid`            | Validate Mermaid diagrams in Markdown    |
-| `npm run lint:cycles`             | Report circular imports in `lib/`        |
-| `npm run eval`                    | Routing evaluation against golden corpus |
+| Command                           | Description                                                   |
+| --------------------------------- | ------------------------------------------------------------- |
+| `npm run go`                      | Launch operator console                                       |
+| `npm start`                       | Start the daemon                                              |
+| `npm test`                        | Run all tests                                                 |
+| `npm run test:coverage`           | Run all tests with c8 coverage reporting                      |
+| `npm run test:coverage:check`     | Run tests + warn if coverage is below 80% (aspirational gate) |
+| `npm run council -- prompt="..."` | Full council deliberation                                     |
+| `npm run evolve`                  | Autonomous self-improvement                                   |
+| `npm run nightly`                 | Nightly task automation                                       |
+| `npm run tasks`                   | Scan & execute TODO/FIXME/issues                              |
+| `npm run lint:mermaid`            | Validate Mermaid diagrams in Markdown                         |
+| `npm run lint:cycles`             | Report circular imports in `lib/`                             |
+| `npm run eval`                    | Routing evaluation against golden corpus                      |
 
 ### Operator console (inside `npm run go`)
 
