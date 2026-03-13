@@ -186,9 +186,29 @@ export async function handleModeCommand(ctx: CommandContext, args: string): Prom
     return;
   }
   const nextMode = args.trim().toLowerCase();
+
+  const routingModes = ['economy', 'balanced', 'performance'];
+  if (routingModes.includes(nextMode)) {
+    const cfg = loadHydraConfig();
+    cfg.routing = { ...cfg.routing, mode: nextMode as any };
+    saveHydraConfig(cfg);
+    let chip: string;
+    if (nextMode === 'economy') {
+      chip = pc.yellow('◆ ECO');
+    } else if (nextMode === 'performance') {
+      chip = pc.cyan('◆ PERF');
+    } else {
+      chip = pc.green('◆ BAL');
+    }
+    console.log(`Mode set to ${chip}`);
+    setActiveMode(nextMode);
+    ctx.rl.prompt();
+    return;
+  }
+
   if (!['auto', 'handoff', 'council', 'dispatch', 'smart'].includes(nextMode)) {
     console.log(
-      'Invalid mode. Use :mode auto, :mode handoff, :mode council, :mode dispatch, or :mode smart',
+      'Invalid mode. Use :mode auto, :mode handoff, :mode council, :mode dispatch, :mode smart, or :mode economy|balanced|performance',
     );
     ctx.rl.prompt();
     return;

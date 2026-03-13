@@ -41,13 +41,7 @@ import {
   estimateFlowDuration,
   resetMetrics,
 } from './hydra-metrics.ts';
-import {
-  resolveProject,
-  HYDRA_ROOT,
-  loadHydraConfig,
-  saveHydraConfig,
-  getRecentProjects,
-} from './hydra-config.ts';
+import { resolveProject, HYDRA_ROOT, loadHydraConfig, getRecentProjects } from './hydra-config.ts';
 import { envFileExists } from './hydra-env.ts';
 import {
   parseArgs,
@@ -1268,27 +1262,6 @@ async function interactiveLoop({
         const next = loadHydraConfig();
         printSelfAwarenessStatus(next.selfAwareness);
         console.log('');
-        rl.prompt();
-        return;
-      }
-      if (
-        line.startsWith(':mode ') &&
-        ['economy', 'balanced', 'performance'].includes(line.slice(5).trim().toLowerCase())
-      ) {
-        const modeArg = line.slice(5).trim().toLowerCase();
-        const cfg = loadHydraConfig();
-        cfg.routing = { ...cfg.routing, mode: modeArg as any };
-        saveHydraConfig(cfg);
-        let chip: string;
-        if (modeArg === 'economy') {
-          chip = pc.yellow('◆ ECO');
-        } else if (modeArg === 'performance') {
-          chip = pc.cyan('◆ PERF');
-        } else {
-          chip = pc.green('◆ BAL');
-        }
-        console.log(`Mode set to ${chip}`);
-        if (typeof setActiveMode === 'function') setActiveMode(modeArg);
         rl.prompt();
         return;
       }

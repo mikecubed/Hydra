@@ -109,9 +109,13 @@ describe('hydra-operator-commands', () => {
       );
     });
 
-    it('mode=economy → does not throw', async () => {
+    it('mode=economy → logs success message with Mode arrow economy', async () => {
       const ctx = makeCtx();
-      await assert.doesNotReject(() => mod.handleModelCommand(ctx, 'mode=economy'));
+      const logs = await captureLog(() => mod.handleModelCommand(ctx, 'mode=economy'));
+      assert.ok(
+        logs.some((l) => l.includes('Mode') && l.includes('economy')),
+        `Should log Mode → economy confirmation, got: ${JSON.stringify(logs)}`,
+      );
     });
   });
 
@@ -165,6 +169,45 @@ describe('hydra-operator-commands', () => {
       });
       await captureLog(() => mod.handleModeCommand(ctx, 'auto'));
       assert.equal(newMode, 'auto', 'setLoopMode should be called with auto');
+    });
+
+    it('economy → sets routing mode in config and logs Mode set to chip', async () => {
+      let prompted = false;
+      const ctx = makeCtx({
+        rl: {
+          prompt: () => {
+            prompted = true;
+          },
+          pause: () => {},
+          resume: () => {},
+          setPrompt: () => {},
+          close: () => {},
+        } as any,
+      });
+      const logs = await captureLog(() => mod.handleModeCommand(ctx, 'economy'));
+      assert.ok(prompted, 'rl.prompt should be called');
+      assert.ok(
+        logs.some((l) => l.includes('Mode set to') || l.includes('ECO')),
+        `Should print routing mode confirmation, got: ${JSON.stringify(logs)}`,
+      );
+    });
+
+    it('performance → logs Mode set to chip with PERF', async () => {
+      const ctx = makeCtx();
+      const logs = await captureLog(() => mod.handleModeCommand(ctx, 'performance'));
+      assert.ok(
+        logs.some((l) => l.includes('Mode set to') || l.includes('PERF')),
+        `Should print PERF chip, got: ${JSON.stringify(logs)}`,
+      );
+    });
+
+    it('balanced → logs Mode set to chip', async () => {
+      const ctx = makeCtx();
+      const logs = await captureLog(() => mod.handleModeCommand(ctx, 'balanced'));
+      assert.ok(
+        logs.some((l) => l.includes('Mode set to') || l.includes('BAL')),
+        `Should print BAL chip, got: ${JSON.stringify(logs)}`,
+      );
     });
 
     it('invalid → prints Invalid mode error', async () => {
@@ -320,14 +363,76 @@ describe('hydra-operator-commands', () => {
   });
 
   describe('handleModelSelectCommand', () => {
-    it('is exported and is a function', () => {
-      assert.equal(typeof mod.handleModelSelectCommand, 'function');
+    it('calls destroyStatusBar, initStatusBar, and rl.prompt', async () => {
+      let destroyed = false;
+      let inited = false;
+      let prompted = false;
+      const ctx = makeCtx({
+        // Non-existent HYDRA_ROOT so spawnHydraNodeSync exits immediately (ENOENT)
+        HYDRA_ROOT: '/tmp/hydra-nonexistent-root',
+        rl: {
+          prompt: () => {
+            prompted = true;
+          },
+          pause: () => {},
+          resume: () => {},
+          setPrompt: () => {},
+          close: () => {},
+        } as any,
+        destroyStatusBar: () => {
+          destroyed = true;
+        },
+        initStatusBar: () => {
+          inited = true;
+        },
+      });
+      await captureLog(() => mod.handleModelSelectCommand(ctx, ''));
+      assert.ok(destroyed, 'destroyStatusBar should be called');
+      assert.ok(inited, 'initStatusBar should be called');
+      assert.ok(prompted, 'rl.prompt should be called');
+    });
+
+    it('with valid agent arg does not throw', async () => {
+      const ctx = makeCtx({ HYDRA_ROOT: '/tmp/hydra-nonexistent-root' });
+      let threw = false;
+      try {
+        await captureLog(() => mod.handleModelSelectCommand(ctx, 'claude'));
+      } catch {
+        threw = true;
+      }
+      assert.ok(!threw, 'handleModelSelectCommand(claude) should not throw');
     });
   });
 
   describe('handleCleanupCommand', () => {
-    it('is exported and is a function', () => {
-      assert.equal(typeof mod.handleCleanupCommand, 'function');
+    it('calls rl.prompt even when action pipeline throws', async () => {
+      let prompted = false;
+      const ctx = makeCtx({
+        rl: {
+          prompt: () => {
+            prompted = true;
+          },
+          pause: () => {},
+          resume: () => {},
+          setPrompt: () => {},
+          close: () => {},
+        } as any,
+        // Use a non-existent baseUrl so daemon calls fail immediately
+        baseUrl: 'http://127.0.0.1:1',
+      });
+      await captureLog(() => mod.handleCleanupCommand(ctx));
+      assert.ok(prompted, 'rl.prompt should be called after cleanup (even on error)');
+    });
+
+    it('does not throw when scanners encounter errors', async () => {
+      const ctx = makeCtx({ baseUrl: 'http://127.0.0.1:1' });
+      let threw = false;
+      try {
+        await captureLog(() => mod.handleCleanupCommand(ctx));
+      } catch {
+        threw = true;
+      }
+      assert.ok(!threw, 'handleCleanupCommand should not propagate errors');
     });
   });
 
