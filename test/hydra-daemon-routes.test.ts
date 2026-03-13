@@ -137,11 +137,11 @@ function makeWriteCtx(
     ...readCtx,
     req,
     readJsonBody: (_r: IncomingMessage) => Promise.resolve(bodyData),
-    enqueueMutation: <T>(
+    enqueueMutation: async <T>(
       _label: string,
       mutator: (s: HydraStateShape) => T,
       _detail?: Record<string, unknown>,
-    ) => Promise.resolve(mutator(state)),
+    ) => mutator(state),
     ensureKnownAgent: (agent: string, allowUnassigned = true) => {
       const known = ['claude', 'gemini', 'codex', 'human', 'local', 'copilot', 'unassigned'];
       if (!allowUnassigned && agent === 'unassigned') throw new Error(`Unknown agent: ${agent}`);
@@ -404,6 +404,86 @@ describe('handleReadRoute', () => {
     const handled = await handleReadRoute(ctx);
     assert.equal(handled, false);
   });
+
+  it('GET /session/status returns structured status', async () => {
+    const task: TaskEntry = makeTask({
+      id: 't_1',
+      title: 'In progress task',
+      status: 'in_progress',
+      owner: 'claude',
+    });
+    const state = makeState({ tasks: [task] });
+    const ctx = makeReadCtx('GET', '/session/status', state);
+    const handled = await handleReadRoute(ctx);
+    assert.ok(handled);
+    assert.equal(ctx.captured.statusCode, 200);
+    const data = ctx.captured.data as Record<string, unknown>;
+    assert.equal(data['ok'], true);
+    assert.ok(Array.isArray(data['inProgressTasks']));
+    assert.ok(Array.isArray(data['pendingHandoffs']));
+  });
+
+  it('GET /sessions lists child sessions', async () => {
+    const state = makeState({
+      childSessions: [
+        {
+          id: 'child_1',
+          type: 'fork',
+          parentId: 'root_1',
+          focus: 'child focus',
+          owner: 'human',
+          status: 'active',
+        },
+      ],
+    });
+    const ctx = makeReadCtx('GET', '/sessions', state);
+    const handled = await handleReadRoute(ctx);
+    assert.ok(handled);
+    assert.equal(ctx.captured.statusCode, 200);
+    const data = ctx.captured.data as Record<string, unknown>;
+    const children = data['childSessions'] as unknown[];
+    assert.equal(children.length, 1);
+  });
+
+  it('GET /activity counts match task list', async () => {
+    const tasks: TaskEntry[] = [
+      makeTask({ id: 't_1', title: 'Todo', status: 'todo', owner: 'claude', type: 'feat' }),
+      makeTask({ id: 't_2', title: 'Done', status: 'done', owner: 'codex', type: 'fix' }),
+    ];
+    const ctx = makeReadCtx('GET', '/activity', makeState({ tasks }));
+    const handled = await handleReadRoute(ctx);
+    assert.ok(handled);
+    assert.equal(ctx.captured.statusCode, 200);
+    const activity = (ctx.captured.data as Record<string, unknown>)['activity'] as Record<
+      string,
+      unknown
+    >;
+    const counts = activity['counts'] as Record<string, number>;
+    assert.equal(counts['tasksTodo'], 1);
+    assert.equal(counts['tasksDone'], 1);
+  });
+
+  it('GET /activity includes pending handoffs', async () => {
+    const handoff: HandoffEntry = {
+      id: 'h_1',
+      from: 'gemini',
+      to: 'codex',
+      summary: 'Please implement X',
+      createdAt: new Date().toISOString(),
+      acknowledgedAt: null,
+    };
+    const ctx = makeReadCtx('GET', '/activity', makeState({ handoffs: [handoff] }));
+    const handled = await handleReadRoute(ctx);
+    assert.ok(handled);
+    assert.equal(ctx.captured.statusCode, 200);
+    const activity = (ctx.captured.data as Record<string, unknown>)['activity'] as Record<
+      string,
+      unknown
+    >;
+    const handoffs = activity['handoffs'] as Record<string, unknown>;
+    const pending = handoffs['pending'] as unknown[];
+    assert.equal(pending.length, 1);
+  });
 });
 
 // ── Write Route Tests ──────────────────────────────────────────────────────
@@ -520,83 +600,220 @@ describe('handleWriteRoute', () => {
     assert.equal(ctx.captured.statusCode, 400);
   });
 
-  it('GET /session/status returns structured status', async () => {
-    const task: TaskEntry = makeTask({
-      id: 't_1',
-      title: 'In progress task',
-      status: 'in_progress',
-      owner: 'claude',
+  // ── Issue 1: Mutator error paths ──────────────────────────────────────────
+
+  it('POST /session/pause with already-paused session rejects', async () => {
+    const state = makeState({
+      activeSession: {
+        id: 'ses_1',
+        focus: 'test',
+        owner: 'human',
+        branch: 'main',
+        participants: ['human'],
+        status: 'paused',
+        startedAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      },
     });
-    const state = makeState({ tasks: [task] });
-    const ctx = makeReadCtx('GET', '/session/status', state);
-    const handled = await handleReadRoute(ctx);
+    const ctx = makeWriteCtx('POST', '/session/pause', state, { reason: 'already paused' });
+    await assert.rejects(
+      () => handleWriteRoute(ctx),
+      (err: Error) => {
+        assert.ok(err.message.includes('already paused'), `unexpected: ${err.message}`);
+        return true;
+      },
+    );
+  });
+
+  it('POST /session/resume with non-paused session rejects', async () => {
+    const state = makeState({
+      activeSession: {
+        id: 'ses_1',
+        focus: 'test',
+        owner: 'human',
+        branch: 'main',
+        participants: ['human'],
+        status: 'active',
+        startedAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      },
+    });
+    const ctx = makeWriteCtx('POST', '/session/resume', state, {});
+    await assert.rejects(
+      () => handleWriteRoute(ctx),
+      (err: Error) => {
+        assert.ok(err.message.includes('not paused'), `unexpected: ${err.message}`);
+        return true;
+      },
+    );
+  });
+
+  it('POST /task/update with missing taskId returns 400', async () => {
+    const ctx = makeWriteCtx('POST', '/task/update', makeState(), { taskId: '' });
+    const handled = await handleWriteRoute(ctx);
+    assert.ok(handled);
+    assert.equal(ctx.captured.statusCode, 400);
+  });
+
+  it('POST /handoff/ack with missing handoff ID returns 400', async () => {
+    const ctx = makeWriteCtx('POST', '/handoff/ack', makeState(), {
+      handoffId: '',
+      agent: 'codex',
+    });
+    const handled = await handleWriteRoute(ctx);
+    assert.ok(handled);
+    assert.equal(ctx.captured.statusCode, 400);
+  });
+
+  // ── Issue 2: Critical routes with zero coverage ───────────────────────────
+
+  it('POST /task/add happy path adds task to state and returns it', async () => {
+    const state = makeState();
+    const ctx = makeWriteCtx('POST', '/task/add', state, {
+      title: 'Write integration tests',
+      owner: 'codex',
+      status: 'todo',
+    });
+    const handled = await handleWriteRoute(ctx);
     assert.ok(handled);
     assert.equal(ctx.captured.statusCode, 200);
     const data = ctx.captured.data as Record<string, unknown>;
     assert.equal(data['ok'], true);
-    assert.ok(Array.isArray(data['inProgressTasks']));
-    assert.ok(Array.isArray(data['pendingHandoffs']));
+    const task = data['task'] as Record<string, unknown>;
+    assert.equal(task['title'], 'Write integration tests');
+    assert.equal(task['owner'], 'codex');
+    assert.equal(state.tasks.length, 1);
   });
 
-  it('GET /sessions lists child sessions', async () => {
-    const state = makeState({
-      childSessions: [
-        {
-          id: 'child_1',
-          type: 'fork',
-          parentId: 'root_1',
-          focus: 'child focus',
-          owner: 'human',
-          status: 'active',
-        },
-      ],
+  it('POST /task/result with resultStatus error × 3 moves task to deadLetter', async () => {
+    const task = makeTask({
+      id: 't_dlq',
+      title: 'Flaky task',
+      status: 'in_progress',
+      owner: 'codex',
     });
-    const ctx = makeReadCtx('GET', '/sessions', state);
-    const handled = await handleReadRoute(ctx);
+    const state = makeState({ tasks: [task] });
+
+    for (let i = 0; i < 3; i++) {
+      // Re-claim between errors so the in_progress guard passes each time
+      if (i > 0) {
+        const claimCtx = makeWriteCtx('POST', '/task/claim', state, {
+          taskId: 't_dlq',
+          agent: 'codex',
+        });
+        await handleWriteRoute(claimCtx);
+      }
+      const ctx = makeWriteCtx('POST', '/task/result', state, {
+        taskId: 't_dlq',
+        agent: 'codex',
+        status: 'error',
+        output: `failure ${String(i + 1)}`,
+      });
+      const handled = await handleWriteRoute(ctx);
+      assert.ok(handled);
+      assert.equal(ctx.captured.statusCode, 200);
+    }
+
+    // After 3 failures task should be gone from tasks and in deadLetter
+    assert.equal(
+      state.tasks.find((t) => t.id === 't_dlq'),
+      undefined,
+    );
+    const dl = (state as Record<string, unknown>)['deadLetter'] as unknown[];
+    assert.ok(Array.isArray(dl) && dl.length === 1, 'task should be in deadLetter');
+  });
+
+  it('POST /task/claim happy path sets task in_progress and returns claimToken', async () => {
+    const task = makeTask({
+      id: 't_claim',
+      title: 'Claimable task',
+      status: 'todo',
+      owner: 'unassigned',
+    });
+    const state = makeState({ tasks: [task] });
+    const ctx = makeWriteCtx('POST', '/task/claim', state, { taskId: 't_claim', agent: 'gemini' });
+    const handled = await handleWriteRoute(ctx);
     assert.ok(handled);
     assert.equal(ctx.captured.statusCode, 200);
     const data = ctx.captured.data as Record<string, unknown>;
-    const children = data['childSessions'] as unknown[];
-    assert.equal(children.length, 1);
+    assert.equal(data['ok'], true);
+    const returned = data['task'] as Record<string, unknown>;
+    assert.equal(returned['status'], 'in_progress');
+    assert.equal(returned['owner'], 'gemini');
+    assert.ok(typeof returned['claimToken'] === 'string', 'should have claimToken');
   });
 
-  it('GET /activity counts match task list', async () => {
-    const tasks: TaskEntry[] = [
-      makeTask({ id: 't_1', title: 'Todo', status: 'todo', owner: 'claude', type: 'feat' }),
-      makeTask({ id: 't_2', title: 'Done', status: 'done', owner: 'codex', type: 'fix' }),
-    ];
-    const ctx = makeReadCtx('GET', '/activity', makeState({ tasks }));
-    const handled = await handleReadRoute(ctx);
-    assert.ok(handled);
-    assert.equal(ctx.captured.statusCode, 200);
-    const activity = (ctx.captured.data as Record<string, unknown>)['activity'] as Record<
-      string,
-      unknown
-    >;
-    const counts = activity['counts'] as Record<string, number>;
-    assert.equal(counts['tasksTodo'], 1);
-    assert.equal(counts['tasksDone'], 1);
+  it('POST /task/claim conflict: claiming already in_progress task by different agent rejects', async () => {
+    const task = makeTask({
+      id: 't_busy',
+      title: 'Busy task',
+      status: 'in_progress',
+      owner: 'claude',
+    });
+    const state = makeState({ tasks: [task] });
+    const ctx = makeWriteCtx('POST', '/task/claim', state, { taskId: 't_busy', agent: 'codex' });
+    await assert.rejects(
+      () => handleWriteRoute(ctx),
+      (err: Error) => {
+        assert.ok(err.message.includes('in progress by'), `unexpected error: ${err.message}`);
+        return true;
+      },
+    );
   });
 
-  it('GET /activity includes pending handoffs', async () => {
-    const handoff: HandoffEntry = {
-      id: 'h_1',
+  it('POST /session/pause + POST /session/resume round-trip', async () => {
+    const state = makeState({
+      activeSession: {
+        id: 'ses_rt',
+        focus: 'round-trip test',
+        owner: 'human',
+        branch: 'main',
+        participants: ['human'],
+        status: 'active',
+        startedAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      },
+    });
+
+    // Pause
+    const pauseCtx = makeWriteCtx('POST', '/session/pause', state, { reason: 'lunch break' });
+    await handleWriteRoute(pauseCtx);
+    assert.equal(pauseCtx.captured.statusCode, 200);
+    assert.equal(state.activeSession?.status, 'paused');
+
+    // Resume
+    const resumeCtx = makeWriteCtx('POST', '/session/resume', state, {});
+    await handleWriteRoute(resumeCtx);
+    assert.equal(resumeCtx.captured.statusCode, 200);
+    assert.equal(state.activeSession?.status, 'active');
+  });
+
+  it('POST /handoff + POST /handoff/ack round-trip', async () => {
+    const state = makeState();
+
+    // Create handoff
+    const handoffCtx = makeWriteCtx('POST', '/handoff', state, {
       from: 'gemini',
       to: 'codex',
-      summary: 'Please implement X',
-      createdAt: new Date().toISOString(),
-      acknowledgedAt: null,
-    };
-    const ctx = makeReadCtx('GET', '/activity', makeState({ handoffs: [handoff] }));
-    const handled = await handleReadRoute(ctx);
-    assert.ok(handled);
-    assert.equal(ctx.captured.statusCode, 200);
-    const activity = (ctx.captured.data as Record<string, unknown>)['activity'] as Record<
-      string,
-      unknown
-    >;
-    const handoffs = activity['handoffs'] as Record<string, unknown>;
-    const pending = handoffs['pending'] as unknown[];
-    assert.equal(pending.length, 1);
+      summary: 'Please implement the parser',
+    });
+    await handleWriteRoute(handoffCtx);
+    assert.equal(handoffCtx.captured.statusCode, 200);
+    const handoffData = handoffCtx.captured.data as Record<string, unknown>;
+    const created = handoffData['handoff'] as Record<string, unknown>;
+    assert.ok(created['id'] != null);
+    assert.equal(state.handoffs.length, 1);
+
+    // Ack handoff
+    const ackCtx = makeWriteCtx('POST', '/handoff/ack', state, {
+      handoffId: created['id'] as string,
+      agent: 'codex',
+    });
+    await handleWriteRoute(ackCtx);
+    assert.equal(ackCtx.captured.statusCode, 200);
+    const ackData = ackCtx.captured.data as Record<string, unknown>;
+    const acked = ackData['handoff'] as Record<string, unknown>;
+    assert.ok(acked['acknowledgedAt'] != null, 'should have acknowledgedAt');
+    assert.equal(acked['acknowledgedBy'], 'codex');
   });
 });
