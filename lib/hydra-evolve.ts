@@ -89,6 +89,15 @@ import {
   getBranchDiff,
   smartMerge,
 } from './hydra-shared/git-ops.ts';
+import {
+  loadCheckpoint,
+  saveCheckpoint,
+  deleteCheckpoint,
+  loadSessionState,
+  saveSessionState,
+  computeSessionStatus,
+  computeActionNeeded,
+} from './hydra-evolve-state.ts';
 import pc from 'picocolors';
 
 // ── Local type aliases ───────────────────────────────────────────────────────
@@ -251,109 +260,7 @@ Stack: Node.js ESM, picocolors for colors, no framework deps`;
 
 // ── Checkpoint & Hot-Restart ─────────────────────────────────────────────────
 
-const CHECKPOINT_FILE = '.session-checkpoint.json';
-
-function getCheckpointPath(evolveDir: string) {
-  return path.join(evolveDir, CHECKPOINT_FILE);
-}
-
-/**
- * Load a session checkpoint from disk. Returns null if none exists.
- */
-function loadCheckpoint(evolveDir: string) {
-  const cpPath = getCheckpointPath(evolveDir);
-  try {
-    if (!fs.existsSync(cpPath)) return null;
-    const raw = fs.readFileSync(cpPath, 'utf8');
-    // eslint-disable-next-line @typescript-eslint/no-unsafe-return -- runtime safety
-    return JSON.parse(raw);
-  } catch {
-    return null;
-  }
-}
-
-/**
- * Save a session checkpoint to disk for hot-restart.
- */
-function saveCheckpoint(evolveDir: string, data: unknown) {
-  const cpPath = getCheckpointPath(evolveDir);
-  fs.writeFileSync(cpPath, JSON.stringify(data, null, 2), 'utf8');
-  log.ok(`Checkpoint saved: ${cpPath}`);
-}
-
-/**
- * Delete the checkpoint file (consumed after resume).
- */
-function deleteCheckpoint(evolveDir: string) {
-  const cpPath = getCheckpointPath(evolveDir);
-  try {
-    fs.unlinkSync(cpPath);
-  } catch {
-    /* ok if missing */
-  }
-}
-
-// ── Session State Tracking ───────────────────────────────────────────────────
-
-const SESSION_STATE_FILE = 'EVOLVE_SESSION_STATE.json';
-
-function getSessionStatePath(evolveDir: string) {
-  return path.join(evolveDir, SESSION_STATE_FILE);
-}
-
-/**
- * Compute session status from round results.
- * @returns {'running'|'completed'|'partial'|'failed'|'interrupted'}
- */
-function computeSessionStatus(
-  roundResults: Array<{ verdict?: string | null }>,
-  maxRounds: number,
-  stopReason: unknown,
-  isRunning: boolean,
-) {
-  if (isRunning) return 'running';
-  if (roundResults.length === 0) return 'failed';
-
-  const allErrored = roundResults.every(
-    (r: { verdict?: string | null }) => r.verdict === 'error' || r.verdict === 'reject',
-  );
-  if (allErrored) return 'failed';
-
-  // eslint-disable-next-line @typescript-eslint/strict-boolean-expressions -- runtime safety
-  if (stopReason) return 'partial'; // stopped early by time/budget
-  if (roundResults.length < maxRounds) return 'partial';
-  return 'completed';
-}
-
-/**
- * Compute human-readable action needed string.
- */
-function computeActionNeeded(roundResults: { length: number }, maxRounds: number, status: string) {
-  if (status === 'completed') return 'Session complete. Review branches with :evolve status';
-  if (status === 'failed') return 'All rounds failed. Check agent configs and retry';
-  if (status === 'partial') {
-    const remaining = maxRounds - roundResults.length;
-    return `${String(remaining)} round(s) remaining. Resume with :evolve resume`;
-  }
-  if (status === 'interrupted') return 'Session was interrupted. Resume with :evolve resume';
-  return 'Session in progress';
-}
-
-function saveSessionState(evolveDir: string, state: unknown) {
-  const statePath = getSessionStatePath(evolveDir);
-  fs.writeFileSync(statePath, JSON.stringify(state, null, 2), 'utf8');
-}
-
-function loadSessionState(evolveDir: string) {
-  const statePath = getSessionStatePath(evolveDir);
-  try {
-    if (!fs.existsSync(statePath)) return null;
-    // eslint-disable-next-line @typescript-eslint/no-unsafe-return -- runtime safety
-    return JSON.parse(fs.readFileSync(statePath, 'utf8'));
-  } catch {
-    return null;
-  }
-}
+// All session state logic is now imported from hydra-evolve-state.ts
 
 /**
  * Check if an evolve branch modified Hydra's own lib/ code (not the target project).
@@ -2294,9 +2201,9 @@ async function main() {
   }
 
   // ── Check for session checkpoint (resume) ─────────────────────────────
-  // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment -- runtime safety
+
   const checkpoint = loadCheckpoint(evolveDir);
-  // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment -- runtime safety
+
   const existingState = loadSessionState(evolveDir);
   let startedAt: number,
     dateStr: string,
@@ -2316,44 +2223,42 @@ async function main() {
   if (checkpoint && isResume) {
     // ── Resume from checkpoint ──────────────────────────────────────────
     log.info(pc.yellow('Resuming evolve session from checkpoint...'));
-    // eslint-disable-next-line @typescript-eslint/no-unsafe-member-access -- runtime safety
+
     log.dim(`Reason: ${String(checkpoint.reason ?? 'hot-restart')}`);
 
     // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment -- runtime safety
     sessionId =
-      // eslint-disable-next-line @typescript-eslint/no-unsafe-member-access -- runtime safety
       checkpoint.sessionId ??
-      // eslint-disable-next-line @typescript-eslint/no-unsafe-member-access -- runtime safety
       `evolve_${String(checkpoint.dateStr)}_${randomBytes(3).toString('hex')}`;
-    // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access -- runtime safety
+    // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment -- runtime safety
     startedAt = checkpoint.startedAt;
-    // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access -- runtime safety
+    // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment -- runtime safety
     dateStr = checkpoint.dateStr;
-    // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access -- runtime safety
+    // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment -- runtime safety
     maxRounds = checkpoint.maxRounds;
-    // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access -- runtime safety
+    // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment -- runtime safety
     maxHoursMs = checkpoint.maxHoursMs;
-    // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access -- runtime safety
+    // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment -- runtime safety
     focusAreas = checkpoint.focusAreas;
-    // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access -- runtime safety
+    // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment -- runtime safety
     timeouts = checkpoint.timeouts;
-    // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access -- runtime safety
+    // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment -- runtime safety
     roundResults = checkpoint.completedRounds ?? [];
-    // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access -- runtime safety
+    // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment -- runtime safety
     kbStartCount = checkpoint.kbStartCount;
-    // eslint-disable-next-line @typescript-eslint/no-unsafe-member-access, @typescript-eslint/strict-boolean-expressions -- runtime safety
+    // eslint-disable-next-line @typescript-eslint/strict-boolean-expressions -- runtime safety
     startRound = (Number(checkpoint.lastRoundNum) || 0) + 1;
 
     // Restore budget tracker
-    // eslint-disable-next-line @typescript-eslint/no-unsafe-member-access, @typescript-eslint/strict-boolean-expressions -- runtime safety
+    // eslint-disable-next-line @typescript-eslint/strict-boolean-expressions -- runtime safety
     if (checkpoint.budgetState) {
-      // eslint-disable-next-line @typescript-eslint/no-unsafe-argument, @typescript-eslint/no-unsafe-member-access -- runtime safety
+      // eslint-disable-next-line @typescript-eslint/no-unsafe-argument -- runtime safety
       budget = EvolveBudgetTracker.deserialize(checkpoint.budgetState);
       log.dim(
         `Budget restored: ${budget.consumed.toLocaleString()} tokens consumed across ${String(budget.roundDeltas.length)} rounds`,
       );
     } else {
-      // eslint-disable-next-line @typescript-eslint/no-unsafe-argument, @typescript-eslint/no-unsafe-member-access -- runtime safety
+      // eslint-disable-next-line @typescript-eslint/no-unsafe-argument -- runtime safety
       budget = new EvolveBudgetTracker(checkpoint.budgetOverrides ?? {});
       budget.recordStart();
     }
@@ -2361,27 +2266,27 @@ async function main() {
     // Consume (delete) the checkpoint
     deleteCheckpoint(evolveDir);
     log.ok(`Checkpoint consumed, resuming from round ${String(startRound)}`);
-    // eslint-disable-next-line @typescript-eslint/no-unsafe-member-access, @typescript-eslint/strict-boolean-expressions -- runtime safety
+    // eslint-disable-next-line @typescript-eslint/strict-boolean-expressions -- runtime safety
   } else if (!checkpoint && isResume && existingState?.resumable) {
     // ── Resume from session state ───────────────────────────────────────
     log.info(pc.yellow('Resuming evolve session from session state...'));
-    // eslint-disable-next-line @typescript-eslint/no-unsafe-member-access -- runtime safety
+
     log.dim(`Session: ${String(existingState.sessionId)} (${String(existingState.status)})`);
 
-    // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access -- runtime safety
+    // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment -- runtime safety
     sessionId = existingState.sessionId;
-    // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access -- runtime safety
+    // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment -- runtime safety
     dateStr = existingState.dateStr;
-    // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access -- runtime safety
+    // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment -- runtime safety
     roundResults = existingState.completedRounds ?? [];
     // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment -- runtime safety
     kbStartCount =
       existingState.kbStartCount || kb.entries.length - (existingState.summary?.totalKBAdded || 0); // eslint-disable-line @typescript-eslint/no-unsafe-member-access, @typescript-eslint/prefer-nullish-coalescing, @typescript-eslint/strict-boolean-expressions -- runtime safety
-    // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access -- runtime safety
+    // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment -- runtime safety
     startRound = existingState.nextRound ?? roundResults.length + 1;
-    // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access -- runtime safety
+    // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment -- runtime safety
     focusAreas = existingState.focusAreas ?? evolveConfig.focusAreas ?? DEFAULT_FOCUS_AREAS;
-    // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access -- runtime safety
+    // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment -- runtime safety
     timeouts = existingState.timeouts ?? {
       ...DEFAULT_PHASE_TIMEOUTS,
       ...(evolveConfig.phases ?? {}),
@@ -2391,12 +2296,12 @@ async function main() {
     // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment, @typescript-eslint/strict-boolean-expressions -- runtime safety
     maxRounds = options['max-rounds']
       ? Number.parseInt(String(options['max-rounds']), 10)
-      : existingState.maxRounds || evolveConfig.maxRounds || DEFAULT_MAX_ROUNDS; // eslint-disable-line @typescript-eslint/no-unsafe-member-access, @typescript-eslint/prefer-nullish-coalescing, @typescript-eslint/strict-boolean-expressions -- runtime safety
+      : existingState.maxRounds || evolveConfig.maxRounds || DEFAULT_MAX_ROUNDS; // eslint-disable-line @typescript-eslint/prefer-nullish-coalescing, @typescript-eslint/strict-boolean-expressions -- runtime safety
     maxHoursMs =
       // eslint-disable-next-line @typescript-eslint/strict-boolean-expressions -- runtime safety
       (options['max-hours']
         ? Number.parseFloat(String(options['max-hours']))
-        : existingState.maxHours || evolveConfig.maxHours || DEFAULT_MAX_HOURS) * // eslint-disable-line @typescript-eslint/no-unsafe-member-access, @typescript-eslint/prefer-nullish-coalescing, @typescript-eslint/strict-boolean-expressions -- runtime safety
+        : existingState.maxHours || evolveConfig.maxHours || DEFAULT_MAX_HOURS) * // eslint-disable-line @typescript-eslint/prefer-nullish-coalescing, @typescript-eslint/strict-boolean-expressions -- runtime safety
       60 *
       60 *
       1000;
@@ -2405,9 +2310,9 @@ async function main() {
     startedAt = Date.now();
 
     // Restore budget tracker
-    // eslint-disable-next-line @typescript-eslint/no-unsafe-member-access, @typescript-eslint/strict-boolean-expressions -- runtime safety
+    // eslint-disable-next-line @typescript-eslint/strict-boolean-expressions -- runtime safety
     if (existingState.budgetState) {
-      // eslint-disable-next-line @typescript-eslint/no-unsafe-argument, @typescript-eslint/no-unsafe-member-access -- runtime safety
+      // eslint-disable-next-line @typescript-eslint/no-unsafe-argument -- runtime safety
       budget = EvolveBudgetTracker.deserialize(existingState.budgetState);
       log.dim(
         `Budget restored: ${budget.consumed.toLocaleString()} tokens consumed across ${String(budget.roundDeltas.length)} rounds`,
@@ -2513,7 +2418,7 @@ async function main() {
     }
   } else if (isResume) {
     // Restore active suggestion from session state on resume
-    // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access -- runtime safety
+    // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment -- runtime safety
     const existingSugId = existingState?.activeSuggestionId ?? checkpoint?.activeSuggestionId;
     // eslint-disable-next-line @typescript-eslint/strict-boolean-expressions -- runtime safety
     if (existingSugId) {
@@ -3242,7 +3147,7 @@ ${safetyPrompt}`;
           saveKnowledgeBase(evolveDir, kb);
 
           // 3. Save session checkpoint
-          saveCheckpoint(evolveDir, {
+          const cpPath = saveCheckpoint(evolveDir, {
             sessionId,
             startedAt,
             dateStr,
@@ -3261,6 +3166,7 @@ ${safetyPrompt}`;
             activeSuggestionId: activeSuggestionId ?? null,
             reason: 'hot-restart after approved self-modification',
           });
+          log.ok(`Checkpoint saved: ${cpPath}`);
 
           // 4. Destroy status bar and spawn new process
           destroyStatusBar();
@@ -3623,17 +3529,16 @@ main().catch((err: unknown) => {
     const projectRoot = process.cwd();
     const pCfg = resolveProject({ project: projectRoot });
     const evolveDir = path.join(pCfg.coordDir, 'evolve');
-    // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment -- runtime safety
+
     const existingState = loadSessionState(evolveDir);
-    // eslint-disable-next-line @typescript-eslint/no-unsafe-member-access -- runtime safety
+
     if (existingState?.status === 'running') {
-      // eslint-disable-next-line @typescript-eslint/no-unsafe-member-access -- runtime safety
       existingState.status = 'interrupted';
-      // eslint-disable-next-line @typescript-eslint/no-unsafe-member-access -- runtime safety
+
       existingState.resumable = true;
-      // eslint-disable-next-line @typescript-eslint/no-unsafe-member-access -- runtime safety
+
       existingState.actionNeeded = `Interrupted: ${err instanceof Error ? err.message : String(err)}. Resume with :evolve resume`;
-      // eslint-disable-next-line @typescript-eslint/no-unsafe-member-access -- runtime safety
+
       existingState.interruptedAt = Date.now();
       saveSessionState(evolveDir, existingState);
       log.warn('Session state saved as interrupted — resume with :evolve resume');
