@@ -25,14 +25,14 @@ export const HYDRA_INTERNAL_FLAG = '--hydra-internal';
 export function toHydraModuleId(scriptPath: string, hydraRoot = HYDRA_EMBEDDED_ROOT): string {
   const absolute = path.resolve(scriptPath);
   const rel = path.relative(hydraRoot, absolute).replace(/\\/g, '/');
-  if (!rel || rel.startsWith('..')) {
+  if (rel === '' || rel.startsWith('..')) {
     return '';
   }
   const normalized = rel
     .replace(/\\/g, '/')
     .replace(/^\.?\//, '')
     .replace(/\.mjs$/, '.ts');
-  return normalized && !normalized.includes('..') ? normalized : '';
+  return normalized !== '' && !normalized.includes('..') ? normalized : '';
 }
 
 export function rewriteNodeInvocation(
@@ -46,7 +46,7 @@ export function rewriteNodeInvocation(
 
   const [scriptPath, ...scriptArgs] = args;
   const moduleId = toHydraModuleId(scriptPath, hydraRoot);
-  if (!moduleId) {
+  if (moduleId === '') {
     throw new Error(`Standalone Hydra cannot execute external script: ${scriptPath}`);
   }
 

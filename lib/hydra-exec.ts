@@ -47,7 +47,7 @@ function normalizeModuleId(moduleId: unknown): string {
     .replace(/\\/g, '/')
     .replace(/^\.?\//, '')
     .replace(/\.mjs$/, '.ts'); // normalize legacy .mjs IDs to .ts
-  if (!normalized) return '';
+  if (normalized === '') return '';
   if (normalized.includes('..')) return '';
   return normalized;
 }
@@ -58,7 +58,7 @@ export async function runHydraInternalModule(
   hydraRoot = HYDRA_EMBEDDED_ROOT,
 ): Promise<void> {
   const normalized = normalizeModuleId(moduleId);
-  if (!normalized) {
+  if (normalized === '') {
     throw new Error('Missing or invalid Hydra internal module id.');
   }
 
