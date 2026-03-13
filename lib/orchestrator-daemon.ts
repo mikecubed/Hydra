@@ -52,6 +52,8 @@ import { checkUsage } from './hydra-usage.ts';
 import { resolveVerificationPlan } from './hydra-verification.ts';
 import { handleReadRoute } from './daemon/read-routes.ts';
 import { handleWriteRoute } from './daemon/write-routes.ts';
+import { sendJson, sendError, isAuthorized, readJsonBody } from './daemon/http-utils.ts';
+import { printHelp, commandStatus, commandStop } from './daemon/cli-commands.ts';
 import {
   nowIso,
   toSessionId,
@@ -63,7 +65,7 @@ import {
   appendEvent,
   replayEvents,
 } from './daemon/state.ts';
-import type { IncomingMessage, ServerResponse } from 'node:http';
+import type { ServerResponse } from 'node:http';
 import type {
   HydraStateShape,
   TaskEntry,
@@ -107,132 +109,6 @@ function parseArgs(argv: string[]) {
   }
 
   return { command, options };
-}
-
-function sendJson(res: ServerResponse, statusCode: number, data: unknown) {
-  const body = JSON.stringify(data, null, 2);
-  res.writeHead(statusCode, {
-    'Content-Type': 'application/json; charset=utf-8',
-    'Content-Length': Buffer.byteLength(body),
-  });
-  res.end(body);
-}
-
-function sendError(
-  res: ServerResponse,
-  statusCode: number,
-  message: string,
-  details: unknown = null,
-) {
-  sendJson(res, statusCode, {
-    ok: false,
-    error: message,
-    details,
-  });
-}
-
-function isAuthorized(req: IncomingMessage) {
-  if (ORCH_TOKEN === '') {
-    return true;
-  }
-  return req.headers['x-ai-orch-token'] === ORCH_TOKEN;
-}
-
-async function readJsonBody(req: IncomingMessage) {
-  const chunks = [];
-  let size = 0;
-  const maxSize = 1024 * 1024;
-
-  for await (const chunk of req) {
-    size += (chunk as Buffer).length;
-    if (size > maxSize) {
-      throw new Error('Payload too large.');
-    }
-    chunks.push(chunk);
-  }
-
-  if (chunks.length === 0) {
-    return {};
-  }
-
-  const raw = Buffer.concat(chunks).toString('utf8').trim();
-  if (raw === '') {
-    return {};
-  }
-  return JSON.parse(raw) as Record<string, unknown>;
-}
-
-async function requestJson(method: string, url: string, body: unknown = null) {
-  const headers: Record<string, string> = {
-    Accept: 'application/json',
-  };
-  if (ORCH_TOKEN !== '') {
-    headers['x-ai-orch-token'] = ORCH_TOKEN;
-  }
-  if (body !== null) {
-    headers['Content-Type'] = 'application/json';
-  }
-
-  const response = await fetch(url, {
-    method,
-    headers,
-    body: body == null ? undefined : JSON.stringify(body),
-  });
-  const payload: unknown = await response.json().catch(() => ({}));
-  return { response, payload };
-}
-
-function printHelp() {
-  console.log(`
-Hydra Orchestrator Daemon
-
-Usage:
-  node orchestrator-daemon.mjs start [host=127.0.0.1] [port=4173]
-  node orchestrator-daemon.mjs status [url=http://127.0.0.1:4173]
-  node orchestrator-daemon.mjs stop [url=http://127.0.0.1:4173]
-
-Environment:
-  AI_ORCH_HOST   Host bind (default: 127.0.0.1)
-  AI_ORCH_PORT   Port bind (default: 4173)
-  AI_ORCH_TOKEN  Optional API token for write endpoints
-  HYDRA_PROJECT  Override target project directory
-`);
-}
-
-async function commandStatus(options: Record<string, string>) {
-  const url = options['url'] ?? `http://${DEFAULT_HOST}:${String(DEFAULT_PORT)}`;
-  try {
-    const { response, payload } = await requestJson('GET', `${url}/health`);
-    if (!response.ok) {
-      console.error(
-        `Daemon status check failed (${String(response.status)}): ${((payload as Record<string, unknown>)['error'] as string | null | undefined) ?? 'unknown error'}`,
-      );
-      process.exitCode = 1;
-      return;
-    }
-    console.log(JSON.stringify(payload, null, 2));
-  } catch (err) {
-    console.error(`Daemon not reachable at ${url}: ${(err as Error).message}`);
-    process.exitCode = 1;
-  }
-}
-
-async function commandStop(options: Record<string, string>) {
-  const url = options['url'] ?? `http://${DEFAULT_HOST}:${String(DEFAULT_PORT)}`;
-  try {
-    const { response, payload } = await requestJson('POST', `${url}/shutdown`);
-    if (!response.ok) {
-      console.error(
-        `Failed to stop daemon (${String(response.status)}): ${((payload as Record<string, unknown>)['error'] as string | null | undefined) ?? 'unknown error'}`,
-      );
-      process.exitCode = 1;
-      return;
-    }
-    console.log('Stop signal sent to orchestrator daemon.');
-  } catch (err) {
-    console.error(`Unable to reach daemon at ${url}: ${(err as Error).message}`);
-    process.exitCode = 1;
-  }
 }
 
 function startDaemon(options: Record<string, string>) {
@@ -546,7 +422,7 @@ function startDaemon(options: Record<string, string>) {
         return;
       }
 
-      if (!isAuthorized(req)) {
+      if (!isAuthorized(req, ORCH_TOKEN)) {
         sendError(res, 401, 'Unauthorized');
         return;
       }
