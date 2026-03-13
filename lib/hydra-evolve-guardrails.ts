@@ -33,6 +33,7 @@ export const PROTECTED_FILES = new Set([
   ...BASE_PROTECTED_FILES,
   // Evolve cannot modify itself
   'lib/hydra-evolve.ts',
+  'lib/hydra-evolve-executor.ts',
   'lib/hydra-evolve-guardrails.ts',
   'lib/hydra-evolve-knowledge.ts',
   'lib/hydra-evolve-review.ts',
