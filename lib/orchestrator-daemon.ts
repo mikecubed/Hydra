@@ -1047,7 +1047,7 @@ function startDaemon(options: Record<string, string>) {
         classifyTask,
         nextId,
         detectCycle,
-        autoUnblock: autoUnblock as (state: HydraStateShape, completedTaskId?: string) => void,
+        autoUnblock,
         readState,
         AGENT_NAMES,
         getAgent: getAgent as (name: string) => AgentDef | undefined,

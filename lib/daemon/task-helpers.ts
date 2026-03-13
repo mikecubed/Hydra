@@ -36,7 +36,7 @@ export function nextId(prefix: string, items: unknown[]): string {
 /**
  * Split a value into a trimmed string array. Splits on commas only.
  */
-export function parseList(value: unknown): string[] {
+export function parseList(value?: unknown): string[] {
   if (value == null) {
     return [];
   }
