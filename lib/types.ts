@@ -824,7 +824,7 @@ export interface WriteRouteCtx extends ReadRouteCtx {
   classifyTask: (title: string, type?: string) => string;
   nextId: (prefix: string, items: unknown[]) => string;
   detectCycle: (tasks: TaskEntry[], targetId: string, proposedBlockedBy: string[]) => boolean;
-  autoUnblock: (state: HydraStateShape, completedTaskId?: string) => void;
+  autoUnblock: (state: HydraStateShape, completedTaskId: string) => void;
   AGENT_NAMES: string[];
   getAgent: (name: string) => AgentDef | undefined;
   listAgents: (...args: unknown[]) => AgentDef[];
