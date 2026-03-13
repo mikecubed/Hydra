@@ -8,10 +8,10 @@
  * Shared brief-builders and delegation helpers live in hydra-operator-dispatch.ts.
  */
 
-/* eslint-disable @typescript-eslint/no-explicit-any, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-argument, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-return -- T7A: operator uses polymorphic any for dynamic dispatch */
-/* eslint-disable @typescript-eslint/strict-boolean-expressions, @typescript-eslint/no-non-null-assertion -- T7A: standard JS truthiness; type narrowing tracked as follow-up */
+/* eslint-disable @typescript-eslint/no-explicit-any, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-argument, @typescript-eslint/no-unsafe-call -- T7A: operator uses polymorphic any for dynamic dispatch */
+/* eslint-disable @typescript-eslint/strict-boolean-expressions -- T7A: standard JS truthiness; type narrowing tracked as follow-up */
 /* eslint-disable @typescript-eslint/no-unnecessary-type-assertion, @typescript-eslint/no-unnecessary-type-conversion -- T7A: operator uses || for truthiness-based defaults */
-/* eslint-disable no-await-in-loop -- T7A: sequential delegation publishing */
+
 /* eslint-disable @typescript-eslint/explicit-module-boundary-types, @typescript-eslint/no-redundant-type-constituents -- T7A: return types use polymorphic any; full typing is a follow-up task */
 
 import path from 'node:path';

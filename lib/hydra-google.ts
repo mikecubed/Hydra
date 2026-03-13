@@ -100,11 +100,11 @@ async function coreStreamGoogle(
     if (res.status === 429 || /RESOURCE_EXHAUSTED|QUOTA_EXHAUSTED/i.test(errText)) {
       err.isRateLimit = true;
       const retryAfter = res.headers.get('retry-after');
-      if (retryAfter != null) {
+      if (retryAfter == null) {
+        err.retryAfterMs = null;
+      } else {
         const ms = Number.parseInt(retryAfter, 10) * 1000;
         err.retryAfterMs = Number.isFinite(ms) ? ms : null;
-      } else {
-        err.retryAfterMs = null;
       }
     }
     throw err;

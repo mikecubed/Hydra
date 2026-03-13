@@ -1,4 +1,3 @@
-#!/usr/bin/env node
 /**
  * HYDRA.md sync — parses a single HYDRA.md and generates per-agent instruction files.
  *

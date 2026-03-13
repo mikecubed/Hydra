@@ -5,7 +5,7 @@
  * Extracted from hydra-operator.ts to keep operator.ts focused on the interactive loop.
  */
 /* eslint-disable @typescript-eslint/no-explicit-any, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-argument, @typescript-eslint/no-unsafe-call -- startup helpers use polymorphic any for dynamic dispatch */
-/* eslint-disable @typescript-eslint/strict-boolean-expressions, @typescript-eslint/no-base-to-string -- standard JS truthiness patterns */
+/* eslint-disable @typescript-eslint/strict-boolean-expressions -- standard JS truthiness patterns */
 /* eslint-disable no-await-in-loop -- sequential health-check polling */
 
 import path from 'node:path';
