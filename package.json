@@ -70,6 +70,7 @@
     "eval": "node lib/hydra-eval.ts",
     "lint": "eslint .",
     "lint:fix": "eslint . --fix",
+    "lint:complexity": "node scripts/complexity-report.ts",
     "lint:mermaid": "node scripts/lint-mermaid.ts",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
