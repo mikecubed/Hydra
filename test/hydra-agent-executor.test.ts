@@ -315,10 +315,7 @@ describe('executeAgent — successful execution', () => {
 
   it('populates durationMs > 0', async () => {
     const result = await executeAgent(AGENT_NAME, 'prompt');
-    assert.ok(
-      result.durationMs >= 0,
-      `durationMs should be >= 0, got ${String(result.durationMs)}`,
-    );
+    assert.ok(result.durationMs > 0, `durationMs should be > 0, got ${String(result.durationMs)}`);
   });
 
   it('populates command and args', async () => {
@@ -716,12 +713,10 @@ describe('executeAgentWithRecovery — circuit breaker', () => {
       modelOverride: MODEL,
     });
 
-    // With no recovery configured, should get circuit-breaker error or fallback result
-    // The outcome depends on whether recoverFromModelError finds a fallback
-    assert.ok(
-      result.circuitBreakerTripped === true || !result.ok || result.recovered === true,
-      `expected circuit breaker handling, got: ${JSON.stringify({ ok: result.ok, circuitBreakerTripped: result.circuitBreakerTripped })}`,
-    );
+    // With circuit open and no recovery configured, executeAgentWithRecovery returns
+    // a hard circuit-breaker error result — not a success or a generic failure.
+    assert.equal(result.circuitBreakerTripped, true);
+    assert.equal(result.ok, false);
   });
 });
 
@@ -783,13 +778,10 @@ describe('executeAgentWithRecovery — local-unavailable fallback', () => {
 
     try {
       const result = await executeAgentWithRecovery('local', 'prompt');
-      // Should either get the cloud fallback or a local-disabled/error result
-      assert.ok(
-        result.output === 'cloud-fallback' ||
-          result.errorCategory === 'local-disabled' ||
-          result.errorCategory === 'local-error',
-        `unexpected result: ${JSON.stringify({ ok: result.ok, errorCategory: result.errorCategory })}`,
-      );
+      // local.enabled: false → executeAgent returns errorCategory 'local-disabled' immediately;
+      // the 'local-unavailable' cloud-fallback path is NOT triggered.
+      assert.equal(result.errorCategory, 'local-disabled');
+      assert.equal(result.ok, false);
     } finally {
       spy.mock.restore();
     }
@@ -819,6 +811,10 @@ describe('extractCodexText — extended', () => {
       typeof result === 'string' && result.includes('line1'),
       `expected line1 in: ${String(result)}`,
     );
+    assert.ok(
+      typeof result === 'string' && result.includes('line2'),
+      `expected line2 in: ${result}`,
+    );
   });
 });
 
@@ -832,15 +828,16 @@ describe('extractCodexUsage — extended', () => {
   });
 
   it('extracts usage from usage event', () => {
+    // extractCodexUsage reads `obj.usage` (top-level) — not `obj.response.usage`
     const jsonl = JSON.stringify({
-      type: 'response.completed',
-      response: { usage: { input_tokens: 5, output_tokens: 10 } },
+      type: 'usage',
+      usage: { input_tokens: 5, output_tokens: 10 },
     });
     const usage = extractCodexUsage(jsonl);
-    // If the structure is recognized, usage should be non-null with inputTokens/outputTokens
-    if (usage != null) {
-      assert.ok(typeof usage.inputTokens === 'number' || typeof usage.totalTokens === 'number');
-    }
+    assert.ok(usage != null, 'expected non-null usage from well-formed JSONL');
+    assert.equal(usage.inputTokens, 5);
+    assert.equal(usage.outputTokens, 10);
+    assert.equal(typeof usage.totalTokens, 'number');
   });
 });
 
@@ -860,7 +857,7 @@ describe('extractCodexErrors — extended', () => {
       JSON.stringify({ type: 'error', message: 'second error' }),
     ].join('\n');
     const errors = extractCodexErrors(jsonl);
-    assert.ok(errors.length >= 1, `expected at least one error, got: ${JSON.stringify(errors)}`);
+    assert.equal(errors.length, 2);
   });
 });
 
@@ -878,17 +875,24 @@ describe('executeAgent — output size limits', () => {
   });
 
   it('truncates output when maxOutputBytes is exceeded', async () => {
-    // Write 10KB of data
-    registerTestAgent(AGENT_NAME, `process.stdout.write('x'.repeat(10 * 1024))`);
+    // Ten async writes of 1100 bytes each (11 KB total).  The callback form of
+    // process.stdout.write flushes each chunk before starting the next, which
+    // produces multiple 'data' events on the parent so the sliding-window
+    // truncation loop (stdoutChunks.length > 1) actually fires.
+    registerTestAgent(
+      AGENT_NAME,
+      `let i = 0; (function w() { if (i++ < 10) process.stdout.write('x'.repeat(1100), w); })();`,
+    );
 
     const result = await executeAgent(AGENT_NAME, 'prompt', {
-      maxOutputBytes: 1024, // cap at 1KB
+      maxOutputBytes: 1024, // cap at 1 KB — well below total written
     });
 
     assert.equal(result.ok, true);
+    // Truncation must have fired: output should be less than total written (10 × 1100 bytes)
     assert.ok(
-      result.output.length <= 10 * 1024,
-      `output should be truncated to near maxOutputBytes, got ${String(result.output.length)} chars`,
+      result.output.length < 10 * 1100,
+      `output should be truncated below total input (${String(10 * 1100)} bytes), got ${String(result.output.length)} chars`,
     );
   });
 });
