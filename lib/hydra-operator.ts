@@ -191,7 +191,7 @@ import {
   resetSessionUsage,
 } from './hydra-provider-usage.ts';
 import pc from 'picocolors';
-import { buildAgentMessage } from './hydra-operator-dispatch.ts';
+import { dispatchPrompt } from './hydra-operator-dispatch.ts';
 import { runCouncilPrompt, runAutoPrompt, runSmartPrompt } from './hydra-operator-concierge.ts';
 
 export { KNOWN_COMMANDS, SMART_TIER_MAP, getSelfAwarenessSummary } from './hydra-operator-ui.ts';
@@ -491,36 +491,6 @@ async function printWelcome(baseUrl: string) {
   }
 }
 
-async function dispatchPrompt({
-  baseUrl,
-  from,
-  agents,
-  promptText,
-}: {
-  baseUrl: string;
-  from: string;
-  agents: string[];
-  promptText: string;
-}) {
-  const records = [];
-  for (const agent of agents) {
-    const summary = buildAgentMessage(agent, promptText);
-    const payload = {
-      from,
-      to: agent,
-      summary,
-      nextStep: 'Start work and report first milestone via hydra:handoff.',
-      tasks: [],
-    };
-    const result = (await request('POST', baseUrl, '/handoff', payload)) as any;
-    records.push({
-      agent,
-      handoffId: result?.handoff?.id ?? null,
-      summary,
-    });
-  }
-  return records;
-}
 
 export function levenshtein(a: string, b: string): number {
   const m = a.length,
