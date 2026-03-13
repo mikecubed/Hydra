@@ -200,7 +200,9 @@ Key modules:
   lib/hydra-worktree.ts — Git worktree isolation
   lib/hydra-concierge.ts — Conversational front-end
   lib/hydra-config.ts — Config loading (hydra.config.json)
-  lib/hydra-evolve.ts — Self-improvement runner (this system)
+  lib/hydra-evolve.ts — Self-improvement session orchestration (main, phaseDecide, reporting)
+  lib/hydra-evolve-executor.ts — Phase execution engine (executeAgent/retry, phaseResearch/Deliberate/Plan/Test/Implement/Analyze)
+  lib/hydra-evolve-state.ts — Session state, checkpoint helpers, status types
   lib/hydra-evolve-guardrails.ts — Safety guardrails for evolve
   lib/hydra-evolve-knowledge.ts — Knowledge base persistence
 
