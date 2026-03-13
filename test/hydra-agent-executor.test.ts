@@ -30,6 +30,8 @@ import {
   _resetRegistry,
 } from '../lib/hydra-agents.ts';
 
+import type { AgentType } from '../lib/types.ts';
+
 import {
   resetCircuitBreaker,
   recordModelFailure,
@@ -59,7 +61,7 @@ function failResult(overrides: Partial<ExecuteResult> = {}): ExecuteResult {
 /** Register a physical test agent whose headless invoke spawns a node -e script. */
 function registerTestAgent(name: string, script: string, extra: Record<string, unknown> = {}) {
   registerAgent(name, {
-    type: AGENT_TYPE.PHYSICAL,
+    type: AGENT_TYPE.PHYSICAL as AgentType,
     cli: process.execPath,
     invoke: {
       nonInteractive: () => [process.execPath, ['-e', script]],
@@ -570,7 +572,7 @@ describe('executeAgent — no headless invoke', () => {
 
   beforeEach(() => {
     registerAgent(AGENT_NAME, {
-      type: AGENT_TYPE.PHYSICAL,
+      type: AGENT_TYPE.PHYSICAL as AgentType,
       cli: process.execPath,
       invoke: {
         nonInteractive: null,
@@ -615,7 +617,7 @@ describe('executeAgent — parseOutput plugin', () => {
 
   it('uses the agent parseOutput plugin to transform output', async () => {
     registerAgent(AGENT_NAME, {
-      type: AGENT_TYPE.PHYSICAL,
+      type: AGENT_TYPE.PHYSICAL as AgentType,
       cli: process.execPath,
       invoke: {
         nonInteractive: () => [process.execPath, ['-e', 'process.stdout.write("raw-output")']],
@@ -628,7 +630,7 @@ describe('executeAgent — parseOutput plugin', () => {
       enabled: true,
       parseOutput: (_stdout: string) => ({
         output: 'PARSED',
-        tokenUsage: { input: 10, output: 20, total: 30 },
+        tokenUsage: { inputTokens: 10, outputTokens: 20, totalTokens: 30 },
         costUsd: 0.001,
       }),
     });
@@ -637,7 +639,7 @@ describe('executeAgent — parseOutput plugin', () => {
     assert.equal(result.ok, true);
     assert.equal(result.output, 'PARSED');
     assert.equal(result.stdout, 'raw-output');
-    assert.deepEqual(result.tokenUsage, { input: 10, output: 20, total: 30 });
+    assert.deepEqual(result.tokenUsage, { inputTokens: 10, outputTokens: 20, totalTokens: 30 });
     assert.equal(result.costUsd, 0.001);
   });
 });
@@ -724,7 +726,7 @@ describe('executeAgentWithRecovery — local-unavailable fallback', () => {
 
     // Register a 'local' agent that reports local-unavailable
     registerAgent('local', {
-      type: AGENT_TYPE.PHYSICAL,
+      type: AGENT_TYPE.PHYSICAL as AgentType,
       cli: process.execPath,
       invoke: {
         nonInteractive: null,
@@ -735,12 +737,12 @@ describe('executeAgentWithRecovery — local-unavailable fallback', () => {
       councilRole: null,
       taskAffinity: {},
       enabled: true,
-      features: { executeMode: 'api' as const },
+      features: { executeMode: 'api' as const, jsonOutput: false, stdinPrompt: false, reasoningEffort: false },
     });
 
     // Register a claude fallback that succeeds
     registerAgent('claude', {
-      type: AGENT_TYPE.PHYSICAL,
+      type: AGENT_TYPE.PHYSICAL as AgentType,
       cli: process.execPath,
       invoke: {
         nonInteractive: () => [process.execPath, ['-e', 'process.stdout.write("cloud-fallback")']],
@@ -884,7 +886,7 @@ describe('executeAgent — custom CLI with missing invoke config', () => {
 
   beforeEach(() => {
     registerAgent(AGENT_NAME, {
-      type: AGENT_TYPE.PHYSICAL,
+      type: AGENT_TYPE.PHYSICAL as AgentType,
       customType: 'cli',
       cli: null,
       invoke: null,
@@ -928,7 +930,7 @@ describe('executeAgent — unsafe spawn command guard', () => {
 
   it('throws when headless invoke returns cmd with shell metacharacters', async () => {
     registerAgent(AGENT_NAME, {
-      type: AGENT_TYPE.PHYSICAL,
+      type: AGENT_TYPE.PHYSICAL as AgentType,
       cli: process.execPath,
       invoke: {
         nonInteractive: () => ['bad;cmd', ['-e', 'ok']],
