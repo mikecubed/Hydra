@@ -127,6 +127,23 @@ function buildTask(
 // ── Source 1: TODO/FIXME Comments in Code ────────────────────────────────────
 
 /**
+ * Build a process env without git env overrides. When callers provide an
+ * explicit `projectRoot`, git should resolve the repo from that directory
+ * rather than from whatever GIT_DIR the parent process may have inherited
+ * (e.g. when running inside a git pre-push hook).
+ */
+function envWithoutGitOverrides(): Record<string, string | undefined> {
+  const {
+    GIT_DIR: _gd,
+    GIT_WORK_TREE: _gwt,
+    GIT_INDEX_FILE: _gif,
+    GIT_OBJECT_DIRECTORY: _god,
+    ...rest
+  } = process.env;
+  return rest;
+}
+
+/**
  * Scan code for TODO/FIXME/HACK/XXX comments using git grep.
  * Fast, respects .gitignore.
  *
@@ -161,6 +178,7 @@ export function scanTodoComments(projectRoot: string): ScannedTask[] {
       cwd: projectRoot,
       encoding: 'utf8',
       timeout: 15_000,
+      env: envWithoutGitOverrides(),
     },
   );
 

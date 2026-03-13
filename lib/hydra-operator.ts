@@ -349,7 +349,7 @@ function startAgentWorkers(
   }
 }
 
-export function formatUptime(ms: number) {
+export function formatUptime(ms: number): string {
   if (ms < 60_000) return `${String(Math.round(ms / 1000))}s`;
   if (ms < 3600_000) return `${String(Math.round(ms / 60_000))}m`;
   return `${(ms / 3600_000).toFixed(1)}h`;
@@ -2190,7 +2190,7 @@ function printCommandHelp(cmd: string) {
   console.log('');
 }
 
-export function levenshtein(a: string, b: string) {
+export function levenshtein(a: string, b: string): number {
   const m = a.length,
     n = b.length;
   const dp = Array.from({ length: m + 1 }, (_, i) => {
@@ -2210,7 +2210,7 @@ export function levenshtein(a: string, b: string) {
   return dp[m][n];
 }
 
-export function fuzzyMatchCommand(input: string) {
+export function fuzzyMatchCommand(input: string): string | null {
   const normalized = input.toLowerCase().split(/\s/)[0];
   const target = normalized.startsWith(':') ? normalized : `:${normalized}`;
   let best = null;
@@ -2229,7 +2229,7 @@ export function fuzzyMatchCommand(input: string) {
 
 let _selfIndexCache = { block: '', builtAt: 0, key: '' };
 
-export function normalizeSimpleCommandText(input: any) {
+export function normalizeSimpleCommandText(input: unknown): string {
   return String(input ?? '')
     .toLowerCase()
     .replace(/[^\w\s]/g, ' ')
@@ -2237,7 +2237,7 @@ export function normalizeSimpleCommandText(input: any) {
     .trim();
 }
 
-export function parseSelfAwarenessPlaintextCommand(input: any) {
+export function parseSelfAwarenessPlaintextCommand(input: unknown): string | null {
   const raw = String(input ?? '').trim();
   if (!raw) return null;
   if (raw.startsWith(':') || raw.startsWith('!')) return null;
@@ -2267,7 +2267,7 @@ export function parseSelfAwarenessPlaintextCommand(input: any) {
   return null;
 }
 
-export function getSelfAwarenessSummary(sa: any = {}) {
+export function getSelfAwarenessSummary(sa: any = {}): string {
   const obj = sa && typeof sa === 'object' ? sa : {};
   const enabled = obj.enabled !== false;
   const includeSnapshot = obj.includeSnapshot !== false;
@@ -6625,7 +6625,6 @@ async function main() {
 }
 
 const _isMainModule =
-  process.argv[1] != null &&
   path.resolve(process.argv[1]) === path.resolve(fileURLToPath(import.meta.url));
 
 if (_isMainModule) {

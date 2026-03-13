@@ -17,14 +17,27 @@ interface GitResult {
 
 /**
  * Run a git command synchronously.
+ *
+ * GIT_DIR (and related env vars) are stripped from the inherited environment
+ * so that git hooks running `npm test` don't cause sub-process git calls to
+ * write to the hook-invoking repo instead of the intended cwd.
  */
 export function git(args: string[], cwd: string): GitResult {
+  // Destructure out the four git env vars we want to drop; forward everything else.
+  const {
+    GIT_DIR: _gitDir,
+    GIT_WORK_TREE: _gitWorkTree,
+    GIT_INDEX_FILE: _gitIndexFile,
+    GIT_OBJECT_DIRECTORY: _gitObjectDir,
+    ...env
+  } = process.env;
   const r = spawnSyncCapture('git', args, {
     cwd,
     encoding: 'utf8',
     timeout: 15_000,
     windowsHide: true,
     shell: false,
+    env,
   });
   return { status: r.status, stdout: r.stdout, stderr: r.stderr, error: r.error, signal: r.signal };
 }

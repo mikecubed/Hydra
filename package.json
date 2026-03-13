@@ -72,10 +72,11 @@
     "lint:fix": "eslint . --fix",
     "lint:complexity": "node scripts/complexity-report.ts",
     "lint:mermaid": "node scripts/lint-mermaid.ts",
+    "lint:cycles": "node scripts/detect-cycles.mjs",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
     "typecheck": "tsc --noEmit -p tsconfig.json",
-    "quality": "npm run lint && npm run format:check && npm run typecheck",
+    "quality": "npm run lint && npm run format:check && npm run typecheck && npm run lint:cycles",
     "setup:hooks": "node scripts/setup-hooks.ts",
     "test": "node --test 'test/**/*.test.{ts,mjs}'",
     "test:coverage": "c8 npm test",
@@ -120,6 +121,7 @@
   "devDependencies": {
     "@a24z/mermaid-parser": "^1.0.0",
     "@eslint/js": "^10.0.1",
+    "@types/madge": "^5.0.3",
     "@types/node": "^24.0.0",
     "@yao-pkg/pkg": "^6.14.1",
     "c8": "^11.0.0",
@@ -130,6 +132,7 @@
     "globals": "^17.4.0",
     "husky": "^9.1.7",
     "lint-staged": "^16.3.2",
+    "madge": "^8.0.0",
     "prettier": "^3.8.1",
     "typescript": "^5.9.3",
     "typescript-eslint": "^8.57.0"
