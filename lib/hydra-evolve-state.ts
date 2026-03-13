@@ -66,9 +66,11 @@ export interface EvolveCheckpoint {
   reason?: string;
 }
 
+export type EvolveSessionStatus = 'running' | 'completed' | 'partial' | 'failed' | 'interrupted';
+
 export interface EvolveSessionState {
   sessionId?: string;
-  status?: string;
+  status?: EvolveSessionStatus;
   startedAt?: number;
   finishedAt?: number;
   dateStr?: string;
@@ -169,7 +171,7 @@ export function computeSessionStatus(
 export function computeActionNeeded(
   roundResults: { length: number },
   maxRounds: number,
-  status: string,
+  status: EvolveSessionStatus,
 ): string {
   if (status === 'completed') return 'Session complete. Review branches with :evolve status';
   if (status === 'failed') return 'All rounds failed. Check agent configs and retry';

@@ -16,6 +16,23 @@ interface GitResult {
 }
 
 /**
+ * Return a copy of `process.env` with git repo-override variables removed.
+ * Use this wherever a sub-process git call should use the cwd-inferred repo
+ * rather than whatever GIT_DIR/GIT_WORK_TREE the parent may have inherited
+ * (e.g. when running inside a git pre-push hook).
+ */
+export function stripGitEnv(): Record<string, string | undefined> {
+  const {
+    GIT_DIR: _gitDir,
+    GIT_WORK_TREE: _gitWorkTree,
+    GIT_INDEX_FILE: _gitIndexFile,
+    GIT_OBJECT_DIRECTORY: _gitObjectDir,
+    ...rest
+  } = process.env;
+  return rest;
+}
+
+/**
  * Run a git command synchronously.
  *
  * GIT_DIR (and related env vars) are stripped from the inherited environment
@@ -23,7 +40,6 @@ interface GitResult {
  * write to the hook-invoking repo instead of the intended cwd.
  */
 export function git(args: string[], cwd: string): GitResult {
-  // Destructure out the four git env vars we want to drop; forward everything else.
   const {
     GIT_DIR: _gitDir,
     GIT_WORK_TREE: _gitWorkTree,

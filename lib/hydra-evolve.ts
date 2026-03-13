@@ -2204,11 +2204,11 @@ async function main() {
 
     log.dim(`Reason: ${checkpoint.reason ?? 'hot-restart'}`);
 
-    sessionId =
-      checkpoint.sessionId ??
-      `evolve_${String(checkpoint.dateStr)}_${randomBytes(3).toString('hex')}`;
     startedAt = checkpoint.startedAt ?? Date.now();
     dateStr = checkpoint.dateStr ?? '';
+    sessionId =
+      checkpoint.sessionId ??
+      `evolve_${dateStr === '' ? new Date().toISOString().slice(0, 10) : dateStr}_${randomBytes(3).toString('hex')}`;
     maxRounds = checkpoint.maxRounds ?? DEFAULT_MAX_ROUNDS;
     maxHoursMs = checkpoint.maxHoursMs ?? DEFAULT_MAX_HOURS * 60 * 60 * 1000;
     focusAreas = checkpoint.focusAreas ?? DEFAULT_FOCUS_AREAS;

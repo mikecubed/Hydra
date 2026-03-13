@@ -105,7 +105,7 @@ export function startAgentWorker(
         }
       }, 100);
     } else {
-      process.stdout.write(`\r\x1b[2K${msg}\n`);
+      process.stdout.write(`${msg}\n`);
       if (rl && !isChoiceActive()) {
         rl.prompt(true);
       }
@@ -131,7 +131,11 @@ export function startAgentWorker(
 
     const shortTitle = taskTitle != null && taskTitle !== '' ? ` (${taskTitle.slice(0, 40)})` : '';
     const msg = `  ${ERROR('\u2717')} ${colorAgent(a)} error on ${pc.white(taskId)}${shortTitle === '' ? '' : DIM(shortTitle)}: ${DIM((error ?? '').slice(0, 60))}`;
-    process.stdout.write(`\r\x1b[2K${msg}\n`);
+    if (process.stdout.isTTY) {
+      process.stdout.write(`\r\x1b[2K${msg}\n`);
+    } else {
+      process.stdout.write(`${msg}\n`);
+    }
     if (rl && !isChoiceActive()) {
       rl.prompt(true);
     }
