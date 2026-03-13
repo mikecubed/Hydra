@@ -2236,7 +2236,7 @@ async function main() {
     timeouts = { ...DEFAULT_PHASE_TIMEOUTS, ...(checkpoint.timeouts ?? {}) };
     roundResults = checkpoint.completedRounds ?? [];
     kbStartCount = checkpoint.kbStartCount ?? 0;
-    startRound = (Number(checkpoint.lastRoundNum) || 0) + 1;
+    startRound = (checkpoint.lastRoundNum ?? 0) + 1;
 
     // Restore budget tracker
     if (checkpoint.budgetState) {
@@ -2273,10 +2273,12 @@ async function main() {
     };
 
     // Parse options for overrides on resume
+    // eslint-disable-next-line @typescript-eslint/strict-boolean-expressions -- runtime safety: options values may be undefined
     maxRounds = options['max-rounds']
       ? Number.parseInt(String(options['max-rounds']), 10)
       : (existingState.maxRounds ?? evolveConfig.maxRounds ?? DEFAULT_MAX_ROUNDS);
     maxHoursMs =
+      // eslint-disable-next-line @typescript-eslint/strict-boolean-expressions -- runtime safety: options values may be undefined
       (options['max-hours']
         ? Number.parseFloat(String(options['max-hours']))
         : (existingState.maxHours ?? evolveConfig.maxHours ?? DEFAULT_MAX_HOURS)) *

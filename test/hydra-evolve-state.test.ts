@@ -131,10 +131,7 @@ describe('hydra-evolve-state', () => {
     it('partial', () => {
       assert.match(computeActionNeeded({ length: 1 }, 3, 'partial'), /2 round\(s\) remaining/);
     });
-    it('interrupted', () => {
-      assert.match(computeActionNeeded({ length: 1 }, 3, 'interrupted'), /Session was interrupted/);
-    });
-    it('running', () => {
+    it('running/other', () => {
       assert.match(computeActionNeeded({ length: 1 }, 3, 'running'), /Session in progress/);
     });
   });

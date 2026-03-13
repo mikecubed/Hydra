@@ -116,14 +116,14 @@ export function getSessionStatePath(evolveDir: string): string {
 
 /**
  * Compute session status from round results.
- * @returns {'running'|'completed'|'partial'|'failed'|'interrupted'}
+ * @returns {'running'|'completed'|'partial'|'failed'}
  */
 export function computeSessionStatus(
   roundResults: RoundResult[],
   maxRounds: number,
   stopReason: string | null,
   isRunning: boolean,
-): 'running' | 'completed' | 'partial' | 'failed' | 'interrupted' {
+): 'running' | 'completed' | 'partial' | 'failed' {
   if (isRunning) return 'running';
   if (roundResults.length === 0) return 'failed';
 
@@ -151,7 +151,6 @@ export function computeActionNeeded(
     const remaining = maxRounds - roundResults.length;
     return `${String(remaining)} round(s) remaining. Resume with :evolve resume`;
   }
-  if (status === 'interrupted') return 'Session was interrupted. Resume with :evolve resume';
   return 'Session in progress';
 }
 
