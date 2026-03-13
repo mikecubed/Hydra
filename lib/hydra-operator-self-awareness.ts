@@ -5,11 +5,11 @@
  * config patching, and git-state caching.
  * Extracted from hydra-operator.ts to keep operator.ts focused on the interactive loop.
  */
-/* eslint-disable @typescript-eslint/no-explicit-any, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-assignment -- polymorphic config patching */
+/* eslint-disable @typescript-eslint/no-explicit-any -- polymorphic config patching */
 /* eslint-disable @typescript-eslint/strict-boolean-expressions -- standard JS truthiness patterns */
 
 import { spawnSync } from 'node:child_process';
-import { resolveProject, loadHydraConfig } from './hydra-config.ts';
+import { resolveProject, loadHydraConfig, saveHydraConfig } from './hydra-config.ts';
 
 const config = resolveProject();
 
@@ -66,13 +66,12 @@ export function parseSelfAwarenessPlaintextCommand(input: unknown): string | nul
   return null;
 }
 
-export async function applySelfAwarenessPatch(patch: Record<string, unknown> = {}): Promise<any> {
+export function applySelfAwarenessPatch(patch: Record<string, unknown> = {}): unknown {
   const cfg = loadHydraConfig();
   const current =
     cfg.selfAwareness && typeof cfg.selfAwareness === 'object' ? cfg.selfAwareness : {};
   cfg.selfAwareness = { ...current, ...patch };
-  const { saveHydraConfig: save } = await import('./hydra-config.ts');
-  const merged = save(cfg);
+  const merged = saveHydraConfig(cfg);
   Object.assign(selfIndexCache, { block: '', builtAt: 0, key: '' });
   return merged.selfAwareness ?? cfg.selfAwareness;
 }

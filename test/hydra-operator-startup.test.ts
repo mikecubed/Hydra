@@ -54,17 +54,13 @@ describe('extractHandoffAgents', () => {
 });
 
 describe('findPowerShell (non-Windows)', () => {
-  it('returns null on non-Windows platforms', () => {
-    if (process.platform !== 'win32') {
-      assert.equal(findPowerShell(), null);
-    }
+  it('returns null on non-Windows platforms', { skip: process.platform === 'win32' }, () => {
+    assert.equal(findPowerShell(), null);
   });
 });
 
 describe('findWindowsTerminal (non-Windows)', () => {
-  it('returns null on non-Windows platforms', () => {
-    if (process.platform !== 'win32') {
-      assert.equal(findWindowsTerminal(), null);
-    }
+  it('returns null on non-Windows platforms', { skip: process.platform === 'win32' }, () => {
+    assert.equal(findWindowsTerminal(), null);
   });
 });
