@@ -1,0 +1,5 @@
+{
+  "include": ["lib/**/*.ts"],
+  "exclude": ["lib/**/*.d.ts"],
+  "reporter": ["text", "lcov"]
+}

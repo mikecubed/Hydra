@@ -200,6 +200,7 @@ For scenario walkthroughs, Mermaid diagrams, and example interactions, start wit
 | `npm run go`                      | Launch operator console                  |
 | `npm start`                       | Start the daemon                         |
 | `npm test`                        | Run all tests                            |
+| `npm run test:coverage`           | Run all tests with c8 coverage reporting |
 | `npm run council -- prompt="..."` | Full council deliberation                |
 | `npm run evolve`                  | Autonomous self-improvement              |
 | `npm run nightly`                 | Nightly task automation                  |
