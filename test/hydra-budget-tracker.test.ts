@@ -217,9 +217,7 @@ describe('BudgetTracker — check() — once semantics', () => {
   });
 
   it('skips once:true threshold on second check', () => {
-    const thresholds: Threshold[] = [
-      { pct: 0.5, action: 'warn', reason: 'once only', once: true },
-    ];
+    const thresholds: Threshold[] = [{ pct: 0.5, action: 'warn', reason: 'once only', once: true }];
     const t = makeTracker({ hardLimit: 100_000, thresholds });
     t.startTokens = 0;
     t.currentTokens = 60_000;
@@ -288,8 +286,8 @@ describe('BudgetTracker — getSummary()', () => {
     t.startTokens = 10_000;
     t.currentTokens = 30_000;
     const summary = t.getSummary();
-    assert.equal(summary.consumed, 20_000);
-    assert.equal(summary.percentUsed, 0.2);
+    assert.equal(summary['consumed'], 20_000);
+    assert.equal(summary['percentUsed'], 0.2);
   });
 });
 
@@ -404,9 +402,11 @@ describe('BudgetTracker — deserialize()', () => {
 // ---------------------------------------------------------------------------
 
 describe('BudgetTracker — recordStart() and recordUnitEnd()', () => {
-  it('recordStart() does not throw', () => {
+  it('recordStart() snapshots start tokens', () => {
     const t = makeTracker();
-    assert.doesNotThrow(() => { t.recordStart(); });
+    t.recordStart();
+    // After recordStart(), startTokens and currentTokens must be in sync
+    assert.equal(t.startTokens, t.currentTokens);
   });
 
   it('recordUnitEnd() does not throw', () => {

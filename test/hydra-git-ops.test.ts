@@ -205,16 +205,20 @@ describe('parseRemoteUrl()', () => {
 // ---------------------------------------------------------------------------
 
 describe('getCurrentBranch() — integration', () => {
-  it('returns a non-empty string', () => {
+  it('returns a string (empty in detached HEAD / CI)', () => {
     const branch = getCurrentBranch(REPO_ROOT);
     assert.equal(typeof branch, 'string');
-    assert.ok(branch.length > 0, 'Expected non-empty branch name');
+    // branch may be empty in detached HEAD (CI pull_request checkout)
   });
 });
 
 describe('branchExists() — integration', () => {
-  it('returns true for the current branch', () => {
+  it('returns true for the current branch when not detached', () => {
     const branch = getCurrentBranch(REPO_ROOT);
+    if (!branch) {
+      // detached HEAD (CI) — skip the positive assertion
+      return;
+    }
     const result = branchExists(REPO_ROOT, branch);
     assert.equal(result, true);
   });
