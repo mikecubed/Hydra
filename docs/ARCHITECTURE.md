@@ -1,5 +1,10 @@
 # Hydra — Architecture & Module Reference
 
+> **See also:**
+>
+> - [DEPENDENCY_DIAGRAMS.md](./DEPENDENCY_DIAGRAMS.md) — Mermaid dependency graphs, data-flow diagrams, component diagrams, and full module inventory
+> - [REFACTORING_ROADMAP.md](./REFACTORING_ROADMAP.md) — Complexity audit, quality gate recommendations, TDD refactoring plan, and phased roadmap
+
 ## Key Modules
 
 > Reference for all `lib/` modules. See [CLAUDE.md](../CLAUDE.md) for workflow rules and commands.
