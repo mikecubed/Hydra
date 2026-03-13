@@ -17,8 +17,11 @@ type RequestFn = (
   method: string,
   baseUrl: string,
   path: string,
-  body?: Record<string, unknown>,
+  body?: unknown,
 ) => Promise<unknown>;
+
+/** Signature of the worker launcher (matches hydra-operator-workers.startAgentWorkers). */
+type StartWorkersFn = (agents: string[], baseUrl: string, opts: { rl: ReadlineInterface }) => void;
 
 /**
  * Implements the :resume command.
@@ -36,7 +39,8 @@ export async function executeDaemonResume(
   resumeBaseUrl: string,
   resumeAgents: string[],
   resumeRl: ReadlineInterface,
-  requestFn: RequestFn = defaultRequest as unknown as RequestFn,
+  requestFn: RequestFn = defaultRequest,
+  startWorkersFn: StartWorkersFn = startAgentWorkers,
 ): Promise<void> {
   try {
     const sessionStatus = (await requestFn('GET', resumeBaseUrl, '/session/status')) as any;
@@ -111,7 +115,7 @@ export async function executeDaemonResume(
     const launchList = ([...agentsToLaunch] as string[]).filter((a) => resumeAgents.includes(a));
     if (launchList.length > 0) {
       console.log('');
-      startAgentWorkers(launchList, resumeBaseUrl, { rl: resumeRl });
+      startWorkersFn(launchList, resumeBaseUrl, { rl: resumeRl });
     }
 
     // Summary line

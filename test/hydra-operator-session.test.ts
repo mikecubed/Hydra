@@ -68,17 +68,26 @@ describe('executeDaemonResume', () => {
     assert.equal((updateCall as any).arguments[3].status, 'todo');
   });
 
-  it('acks pending handoffs', async () => {
+  it('acks pending handoffs and launches matching agents', async () => {
     const requestSpy = makeRequestSpy({
       'GET /session/status': sessionStatus({
         pendingHandoffs: [{ id: 'h1', to: 'gemini' }],
       }),
       'POST /handoff/ack': {},
     });
-    await executeDaemonResume('http://localhost:4173', ['gemini'], makeRl(), requestSpy);
+    const startWorkersSpy = mock.fn();
+    await executeDaemonResume(
+      'http://localhost:4173',
+      ['gemini'],
+      makeRl(),
+      requestSpy,
+      startWorkersSpy,
+    );
     const ackCall = requestSpy.mock.calls.find((c: any) => c.arguments[2] === '/handoff/ack');
     assert.ok(ackCall, 'should call /handoff/ack');
     assert.equal((ackCall as any).arguments[3].handoffId, 'h1');
+    assert.equal(startWorkersSpy.mock.calls.length, 1, 'should launch workers');
+    assert.deepEqual(startWorkersSpy.mock.calls[0].arguments[0], ['gemini']);
   });
 
   it('does not throw when /session/status request fails', async () => {
