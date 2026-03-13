@@ -10,6 +10,7 @@ import {
   extractCodexText,
   extractCodexUsage,
   extractCodexErrors,
+  assertSafeSpawnCmd,
 } from '../lib/hydra-shared/agent-executor.ts';
 
 import { detectCodexError } from '../lib/hydra-model-recovery.ts';
@@ -469,6 +470,26 @@ describe('parseCliResponse', () => {
   });
 });
 
+describe('assertSafeSpawnCmd', () => {
+  it('allows simple command names', () => {
+    assert.doesNotThrow(() => {
+      assertSafeSpawnCmd('echo', 'Test agent');
+    });
+  });
+
+  it('rejects shell metacharacters', () => {
+    assert.throws(() => {
+      assertSafeSpawnCmd('echo;rm', 'Test agent');
+    }, /unsafe characters/);
+  });
+
+  it('rejects path traversal', () => {
+    assert.throws(() => {
+      assertSafeSpawnCmd('../bin/echo', 'Test agent');
+    }, /path traversal/);
+  });
+});
+
 // ── Custom agent routing in executeAgent() ───────────────────────────────────
 import { executeAgent } from '../lib/hydra-shared/agent-executor.ts';
 import { registerAgent, unregisterAgent, AGENT_TYPE, _resetRegistry } from '../lib/hydra-agents.ts';
@@ -550,6 +571,81 @@ describe('executeAgent — custom CLI agent routing', () => {
     } catch {
       /* ignore */
     }
+  });
+});
+
+describe('executeAgent — safety and custom CLI failure paths', () => {
+  afterEach(() => {
+    for (const name of ['test-missing-cli', 'test-slow-cli']) {
+      try {
+        unregisterAgent(name);
+      } catch {
+        /* ignore */
+      }
+    }
+  });
+
+  it('rejects invalid modelOverride format before spawning', async () => {
+    const result = await executeAgent('codex', 'hello', { modelOverride: 'bad;model' });
+
+    assert.equal(result.ok, false);
+    assert.equal(result.exitCode, null);
+    assert.equal(result.timedOut, false);
+    assert.match(result.stderr, /Invalid model override format/);
+    assert.match(result.error ?? '', /Security violation/);
+  });
+
+  it('returns custom-cli-unavailable when the configured executable is missing', async () => {
+    registerAgent('test-missing-cli', {
+      type: AGENT_TYPE.PHYSICAL,
+      customType: 'cli',
+      cli: 'definitely-missing-binary-hydra-test',
+      invoke: {
+        nonInteractive: { cmd: 'definitely-missing-binary-hydra-test', args: ['{prompt}'] },
+        headless: { cmd: 'definitely-missing-binary-hydra-test', args: ['{prompt}'] },
+      },
+      responseParser: 'plaintext',
+      contextBudget: 1000,
+      councilRole: null,
+      taskAffinity: {},
+      enabled: true,
+    });
+
+    const result = await executeAgent('test-missing-cli', 'hello');
+
+    assert.equal(result.ok, false);
+    assert.equal(result.errorCategory, 'custom-cli-unavailable');
+    assert.match(result.stderr, /ENOENT|not found|spawn/i);
+  });
+
+  it('marks slow custom CLI execution as timed out', async () => {
+    registerAgent('test-slow-cli', {
+      type: AGENT_TYPE.PHYSICAL,
+      customType: 'cli',
+      cli: process.execPath,
+      invoke: {
+        nonInteractive: {
+          cmd: process.execPath,
+          args: ['-e', 'setTimeout(() => {}, 10000)'],
+        },
+        headless: {
+          cmd: process.execPath,
+          args: ['-e', 'setTimeout(() => {}, 10000)'],
+        },
+      },
+      responseParser: 'plaintext',
+      contextBudget: 1000,
+      councilRole: null,
+      taskAffinity: {},
+      enabled: true,
+    });
+
+    const result = await executeAgent('test-slow-cli', 'hello', { timeoutMs: 100 });
+
+    assert.equal(result.ok, false);
+    assert.equal(result.error, 'timeout');
+    assert.equal(result.errorCategory, 'custom-cli-error');
+    assert.equal(result.timedOut, true);
   });
 });
 

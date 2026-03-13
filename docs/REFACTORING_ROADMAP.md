@@ -28,6 +28,19 @@ TypeScript migration (PR #13) eliminated runtime type unsafety and established s
 step is architectural consolidation: breaking down oversized modules, eliminating cyclic imports, and building a
 safety net of tests before refactoring critical infrastructure.
 
+### Execution Artifacts
+
+Use this roadmap as the high-level program document, then execute from the task-oriented plans in `docs/plan/`:
+
+- `docs/plan/refactoring-master-plan.md` — operating rules, phase gates, model roles, and validation loop
+- `docs/plan/refactoring-task-breakdown.md` — dependency-ordered task matrix designed for maximum safe parallelism
+- `docs/plan/refactoring-worktree-playbook.md` — repo-local worktree conventions, quality checks, and merge hygiene
+- `docs/plan/worktree-setup-guide.md` — concrete commands and smoke checks for creating task worktrees
+- `docs/plan/validation-gate.md` — standard per-task validation commands, evidence, and review handoff rules
+
+The roadmap is intentionally summary-level. The task breakdown and worktree playbook are the source of truth for
+day-to-day execution.
+
 ### Headline Findings
 
 | Finding                                                                                      | Severity    | Impact                               |
@@ -414,6 +427,17 @@ Before refactoring any large module:
 3. **Capture current behavior** — even if buggy — to prevent regressions
 4. **Run with coverage** to ensure the tests actually exercise the paths
 
+For this roadmap, **adequate tests** means:
+
+- every public export or externally consumed contract is exercised,
+- the main success path and the important failure paths are covered,
+- state transitions or side effects that could break downstream callers are asserted,
+- the target module has enough focused coverage to make the refactor mechanically safe, with 80% function coverage
+  as the default bar for hotspot modules unless a stronger task-specific contract is defined.
+
+This 80% function-coverage bar is a **per-module hotspot gate**. The lower phase-level percentages elsewhere in this
+roadmap are the **repo-wide floor**, not a replacement for hotspot safety-net expectations.
+
 ### 7.3 Test Infrastructure Needed
 
 | Utility                 | Purpose                              | File                                |
@@ -436,242 +460,194 @@ When extracting a sub-module from a large file:
 - [ ] Update `docs/ARCHITECTURE.md` module table
 - [ ] Update `docs/DEPENDENCY_DIAGRAMS.md` appendix table
 
+### 7.5 Non-Negotiable Execution Rules
+
+- [ ] Refactor only behind an adequate safety net. If the component lacks tests, the first task is to add
+      characterization or contract tests.
+- [ ] Use one dedicated git worktree per task under a repo-local `.worktrees/` directory. Never mix unrelated work
+      in the same worktree.
+- [ ] Keep git hooks enabled. Do not use `--no-verify`, do not bypass pre-commit or pre-push checks, and do not
+      merge work that only passes with hooks disabled.
+- [ ] Always run formatting and linting on the changed files before review, then run the task's required test set.
+- [ ] Treat lint suppressions as exceptional debt, not a normal escape hatch. If a narrowly scoped suppression is
+      ever unavoidable, it must be approved, documented inline with a concrete justification, and tracked with a
+      follow-up issue. Broad or silent bypasses are not acceptable.
+- [ ] Every task must be validated by subagents before merge. Use subagents aggressively for exploration,
+      edge-case review, and change critique so the primary coordinator keeps only the durable summary in context.
+
+### 7.6 Subagent Validation Protocol
+
+Use multiple models deliberately instead of sending every question to the same reviewer:
+
+| Model / Agent         | Best use in this program                                                                | Required handoff                                          |
+| --------------------- | --------------------------------------------------------------------------------------- | --------------------------------------------------------- |
+| **GPT-5.4**           | Implementation planning, task synthesis, extracting actionable next steps from findings | Produces the initial task plan or change summary          |
+| **Claude Sonnet 4.6** | Architecture critique, module boundary review, decomposition safety, API shape review   | Reviews any structural refactor plan before coding starts |
+| **Gemini**            | Edge cases, failure modes, coverage gaps, regression risk, alternative test scenarios   | Reviews any safety-net or verification plan before merge  |
+
+Minimum validation loop per task:
+
+1. Primary implementer drafts the change in an isolated worktree.
+2. A subagent reviews the touched files and the stated assumptions.
+3. A second model reviews only the summary plus diff for risk, coverage, and regression blind spots.
+4. The coordinator keeps the distilled findings, not the full exploration trail, to preserve context budget.
+
 ---
 
 ## 8. Phase-by-Phase Roadmap
 
-### Phase 0: Safety Net (1 week) 🔴 PREREQUISITE
+This roadmap is now dependency-driven rather than date-driven. Use the detailed task matrix in
+`docs/plan/refactoring-task-breakdown.md` for day-to-day execution.
 
-> **Goal**: Establish minimum test coverage and tooling before any structural changes.
+### Phase 0: Program Bootstrap & Execution Guardrails 🔴
 
-- [ ] Add `madge` cycle detection to `quality` script and CI (`npm run lint:cycles`)
-- [ ] Fix Cycle B: `hydra-metrics.ts` self-import (remove or lazy-reference)
-- [ ] Fix Cycle A: Extract `hydra-streaming-types.ts` to break `rate-limits` ↔ `streaming-middleware` cycle
-- [ ] Add ESLint complexity rules as **warnings** (`complexity: 15`, `max-lines: 800`)
-- [ ] Write characterisation tests for `hydra-shared/agent-executor.ts` (5 dependents, 0 tests)
-- [ ] Write characterisation tests for `hydra-config.ts` (23 dependents, 0 tests)
-- [ ] Add `c8` coverage with 40% threshold
-- [ ] Make `tsc --noEmit` blocking in CI (remove `continue-on-error`)
+> **Goal**: Make parallel delivery safe before changing behavior.
 
-**Acceptance criteria**: `npm run quality` passes with no cycles detected, 40% coverage, tsc clean.
+- [ ] Adopt repo-local worktree convention: one task per `.worktrees/<task-id>` checkout
+- [ ] Add `.worktrees/` to `.gitignore` before execution begins
+- [ ] Define task IDs, ownership, and verifier assignments from `docs/plan/refactoring-task-breakdown.md`
+- [ ] Standardize the per-task validation loop: format, lint, targeted tests, subagent critique, second-model critique
+- [ ] Confirm every refactor task has an explicit test-first entry criterion
 
----
-
-### Phase 1: Critical Stability (2 weeks) 🔴
-
-> **Goal**: Test and stabilise the execution core before any refactoring.
-
-#### 1.1 Test `hydra-shared/agent-executor.ts`
-
-- [ ] Unit tests for `executeAgent()` — mock process spawn
-- [ ] Tests for output streaming and parsing logic
-- [ ] Tests for timeout and cancellation paths
-- [ ] Tests for all agent types: claude, gemini, codex, local, custom
-- [ ] Target: 80% function coverage on `agent-executor.ts`
-
-#### 1.2 Test `hydra-config.ts`
-
-- [ ] Tests for `loadHydraConfig()` — use `_setTestConfigPath()`
-- [ ] Tests for `saveHydraConfig()`
-- [ ] Tests for `getRoleConfig()`, `getActiveModel()`
-- [ ] Tests for config schema validation and defaults
-- [ ] Tests for `_setTestConfig()` and `invalidateConfigCache()`
-- [ ] Target: 80% function coverage on `hydra-config.ts`
-
-#### 1.3 Test `orchestrator-daemon.ts`
-
-- [ ] Integration tests for all HTTP endpoints (extend existing integration test)
-- [ ] Tests for task state machine (queued → claimed → running → complete)
-- [ ] Tests for worktree isolation mode
-- [ ] Tests for heartbeat and timeout behavior
-
-#### 1.4 Upgrade ESLint complexity rules from warnings to errors
-
-- [ ] Resolve all `complexity > 25` violations
-- [ ] Resolve all `max-lines > 800` violations (or add explicit suppression with comment)
+**Exit gate**: Every planned task has a worktree name, dependency list, and validation recipe.
 
 ---
 
-### Phase 2: Monolith Decomposition (3 weeks) 🟠
+### Phase 1: Safety Net Expansion 🔴
 
-> **Goal**: Break down the three largest modules into testable units.
+> **Goal**: Build confidence in the most fragile modules and remove import hazards.
 
-#### 2.1 Decompose `hydra-operator.ts` (6,630 → ~3,500 total across 5 modules)
+Parallel-ready tracks:
 
-See §6.3 for the decomposition plan.
+- [ ] Tooling track: add cycle detection, coverage reporting, and complexity visibility without weakening existing gates
+- [ ] Cycle track: resolve Cycle A, Cycle B, and investigate/untangle Cycle C
+- [ ] Core tests track: characterization tests for `hydra-shared/agent-executor.ts`
+- [ ] Config tests track: characterization tests for `hydra-config.ts`
+- [ ] Daemon tests track: endpoint, task-state, heartbeat, and worktree-isolation coverage for `orchestrator-daemon.ts`
+- [ ] Hotspot tests track: characterization tests for `hydra-operator.ts`, `hydra-evolve.ts`, `hydra-metrics.ts`, and
+      `hydra-usage.ts` before extraction or semantic cleanup begins
 
-- [ ] Extract `hydra-operator-session.ts` (session state, history)
-- [ ] Extract `hydra-operator-workers.ts` (background worker management)
-- [ ] Extract `hydra-operator-dispatch.ts` (prompt routing + streaming)
-- [ ] Extract `hydra-operator-commands.ts` (command handlers)
-- [ ] Reduce `hydra-operator.ts` to REPL loop + wiring (~800 LOC)
-- [ ] Add unit tests for each new module
-- [ ] Target: `hydra-operator.ts` ≤ 1,000 LOC
-
-#### 2.2 Decompose `hydra-evolve.ts` (3,657 → ~2,000 total across 3 modules)
-
-- [ ] Extract `hydra-evolve-pipeline.ts` (phase state machine + transition logic)
-- [ ] Extract `hydra-evolve-executor.ts` (code change execution + git operations)
-- [ ] Reduce `hydra-evolve.ts` to orchestration entry point (~600 LOC)
-- [ ] Add unit tests for each phase independently
-- [ ] Target: `hydra-evolve.ts` ≤ 700 LOC
-
-#### 2.3 Extract `IHydraConfig` interface
-
-- [ ] Define `IHydraConfig` interface in `lib/types.ts`
-- [ ] Update all 23 consumers to import the interface type
-- [ ] Keep concrete implementation in `hydra-config.ts`
-- [ ] Add tests that verify consumer contracts
-
-#### 2.4 Merge usage tracking
-
-- [ ] Audit all 12 inline usage tracking patterns
-- [ ] Consolidate into a single `recordExecution()` call in `hydra-usage.ts`
-- [ ] Update all consumers
+**Exit gate**: Critical modules have adequate characterization coverage and import cycles no longer block safe extraction work.
 
 ---
 
-### Phase 3: Extensibility (2 weeks) 🟡
+### Phase 2: Core Stability & Contract Hardening 🔴
 
-> **Goal**: Extract cross-cutting abstractions to reduce duplication and coupling.
+> **Goal**: Make shared services refactorable by locking in current contracts.
 
-#### 3.1 Create `IAgentExecutor` Interface
+- [ ] Finish deeper contract tests for `agent-executor`, including streaming, timeout, cancellation, and agent-specific paths
+- [ ] Finish deeper contract tests for `hydra-config`, including defaults, persistence, cache invalidation, and role/model helpers
+- [ ] Consolidate usage tracking behind a tested `recordExecution()` path
+- [ ] Make typecheck fully blocking once the task matrix shows the path is clean
+- [ ] Promote complexity and size rules from visibility to enforcement only after the targeted modules have safety nets
 
-- [ ] Define interface in `lib/types.ts` or `lib/hydra-shared/types.ts`
-- [ ] Update `agent-executor.ts` to implement it
-- [ ] Update all 5 consumers to use the interface
-- [ ] Add mock implementation `MockAgentExecutor` for tests
-
-#### 3.2 Create `IBudgetGate` Interface
-
-- [ ] Define interface in `lib/types.ts`
-- [ ] Move all 8 budget check patterns to use it
-- [ ] Create `NullBudgetGate` for testing (always allows)
-
-#### 3.3 Consolidate Context Building
-
-- [ ] Audit 8 context building patterns
-- [ ] Extend `hydra-context.ts` to cover all cases
-- [ ] Update consumers
-
-#### 3.4 Architecture Layer Enforcement
-
-- [ ] Add `eslint-plugin-boundaries` with layer rules
-- [ ] Fix all layer violations
-- [ ] Add to CI quality gate
-
-#### 3.5 Raise Coverage Threshold to 70%
-
-- [ ] Fill coverage gaps in evolution engine
-- [ ] Fill coverage gaps in nightly batch
-- [ ] Fill coverage gaps in daemon routes
-- [ ] Update `c8` threshold in `package.json`
+**Exit gate**: Core execution/config behavior is test-backed, and quality gates can tighten without destabilizing unrelated work.
 
 ---
 
-### Phase 4: Performance & Polish (1 week) 🟢
+### Phase 3: Monolith Decomposition 🔴
 
-> **Goal**: Optimize, document, and close remaining gaps.
+> **Goal**: Split the largest files into modules with narrow responsibilities and explicit seams.
 
-#### 4.1 Fix `no-await-in-loop` (104 warnings)
+Parallel-ready tracks after the safety-net gate:
 
-- [ ] Audit all 104 sequential-await loops
-- [ ] Convert safe cases to `Promise.all()` / `Promise.allSettled()`
-- [ ] Estimate: 50% conversion rate (52 locations)
+- [ ] `hydra-operator.ts` extracts:
+  - `hydra-operator-session.ts`
+  - `hydra-operator-workers.ts`
+  - `hydra-operator-dispatch.ts`
+  - `hydra-operator-commands.ts`
+  - shrink `hydra-operator.ts` to REPL wiring
+- [ ] `hydra-evolve.ts` extracts:
+  - `hydra-evolve-pipeline.ts`
+  - `hydra-evolve-executor.ts`
+  - shrink `hydra-evolve.ts` to orchestration entry point
+- [ ] `hydra-config.ts` seam work:
+  - define `IHydraConfig`
+  - migrate consumers in small batches
+  - protect the public shape with contract tests
 
-#### 4.2 Replace `process.exit()` (83 locations)
+**Exit gate**: Each extracted component has characterization tests before extraction and focused unit tests after extraction.
 
-- [ ] Convert to `process.exitCode = N` + `return` or `throw`
-- [ ] Fixes `n/no-process-exit` ESLint rule
+> **Hotspot rule**: tasks that edit the same hotspot source file should be serialized unless the merge coordinator has
+> explicitly split the work into non-overlapping slices with a proven low-conflict plan.
 
-#### 4.3 Add Mutation Testing
+---
 
-- [ ] Install and configure Stryker
-- [ ] Run on `hydra-config.ts`, `agent-executor.ts`, `hydra-agents.ts`
-- [ ] Target: 70% mutation score on these three modules
+### Phase 4: Shared Abstractions & Architectural Boundaries 🟡
 
-#### 4.4 Documentation Finalisation
+> **Goal**: Reduce duplication and lock in layering after the high-risk splits have landed.
 
-- [ ] Update `docs/ARCHITECTURE.md` module table with refactored modules
-- [ ] Update `docs/DEPENDENCY_DIAGRAMS.md` with post-refactor diagrams
-- [ ] Add ADR (Architecture Decision Records) directory `docs/adr/`
-- [ ] Write ADR-001: Module size limits
-- [ ] Write ADR-002: Layer enforcement rules
-- [ ] Write ADR-003: Cyclic dependency policy
+- [ ] Introduce `IAgentExecutor` and migrate consumers
+- [ ] Introduce `IBudgetGate` and eliminate duplicated budget-check paths
+- [ ] Consolidate context-building through `hydra-context.ts`
+- [ ] Enforce architecture layers with `eslint-plugin-boundaries`
+- [ ] Raise coverage targets only after each newly shared abstraction has tests and at least one proving consumer migration
+
+**Exit gate**: Shared APIs are narrow, consumers depend on interfaces where practical, and layer rules are enforced instead of aspirational.
+
+---
+
+### Phase 5: Cleanup, Performance, and Documentation 🟢
+
+> **Goal**: Finish the long tail without reopening structural risk.
+
+- [ ] Reduce safe `no-await-in-loop` cases with behavior-preserving concurrency changes
+- [ ] Replace `process.exit()` with testable exit-path handling
+- [ ] Add mutation testing to the most critical shared modules
+- [ ] Update `docs/ARCHITECTURE.md`, `docs/DEPENDENCY_DIAGRAMS.md`, and ADRs after structural changes settle
+
+**Exit gate**: Remaining cleanup is measurable, verified, and does not rely on relaxed hooks, relaxed linting, or undocumented exceptions.
 
 ---
 
 ## 9. Parallel Workstream Plan
 
-Multiple engineers can work in parallel on different phases if they respect the following dependency order:
+The program should be split into the smallest safe work packages that minimize shared-file overlap. Use the task
+matrix in `docs/plan/refactoring-task-breakdown.md` as the operational backlog.
 
-```mermaid
-gantt
-  title Hydra Refactoring Roadmap
-  dateFormat  YYYY-MM-DD
-  section Phase 0 — Safety Net
-    Cycle detection tooling       :crit, p0a, 2026-03-13, 3d
-    Fix cyclic imports            :crit, p0b, after p0a, 4d
-    Characterise agent-executor   :crit, p0c, 2026-03-13, 5d
-    Characterise hydra-config     :crit, p0d, 2026-03-13, 5d
-    Add c8 coverage gate          :p0e, after p0a, 2d
-    Make tsc blocking             :p0f, after p0d, 1d
+### Parallel Lanes
 
-  section Phase 1 — Critical Stability
-    Test agent-executor fully     :crit, p1a, after p0c, 7d
-    Test hydra-config fully       :crit, p1b, after p0d, 7d
-    Integration test daemon       :p1c, after p0a, 7d
-    Fix complexity warnings       :p1d, after p0a, 5d
+| Lane       | Focus                  | Examples                                                               | Can start when                                  | Preferred models     |
+| ---------- | ---------------------- | ---------------------------------------------------------------------- | ----------------------------------------------- | -------------------- |
+| **Lane A** | Worktree/bootstrap     | `.worktrees/` setup, task naming, merge coordinator rules              | Immediately                                     | GPT-5.4 + Sonnet 4.6 |
+| **Lane B** | Tooling & gates        | cycle detection, coverage plumbing, complexity visibility              | Immediately                                     | GPT-5.4 + Gemini     |
+| **Lane C** | Safety-net tests       | `agent-executor`, `hydra-config`, `orchestrator-daemon`                | Immediately                                     | GPT-5.4 + Gemini     |
+| **Lane D** | Cycle remediation      | Cycle A/B/C fixes once failing shapes are reproduced in tests          | After the relevant characterization tests exist | Sonnet 4.6 + Gemini  |
+| **Lane E** | Operator decomposition | session/workers/dispatch/commands extracts                             | After core operator safety-net tasks are green  | GPT-5.4 + Sonnet 4.6 |
+| **Lane F** | Evolve decomposition   | pipeline/executor extracts                                             | After evolve safety-net tasks are green         | GPT-5.4 + Sonnet 4.6 |
+| **Lane G** | Shared abstractions    | `IHydraConfig`, `IAgentExecutor`, `IBudgetGate`, context consolidation | After affected callers have contract tests      | Sonnet 4.6 + GPT-5.4 |
+| **Lane H** | Polish & docs          | ADRs, dependency diagrams, mutation testing, long-tail cleanup         | After structural lanes settle                   | GPT-5.4 + Gemini     |
 
-  section Phase 2 — Decomposition
-    Decompose hydra-operator      :crit, p2a, after p1a, 10d
-    Decompose hydra-evolve        :p2b, after p1b, 7d
-    Extract IHydraConfig          :p2c, after p1b, 4d
-    Merge usage tracking          :p2d, after p1b, 3d
+### Worktree Rules for Parallel Lanes
 
-  section Phase 3 — Extensibility
-    IAgentExecutor interface      :p3a, after p2a, 4d
-    IBudgetGate interface         :p3b, after p2d, 3d
-    Context consolidation         :p3c, after p2a, 3d
-    Layer enforcement             :p3d, after p2c, 5d
-    Coverage to 70%               :p3e, after p2a, 7d
+- Create one branch and one worktree per task, not per phase.
+- Name worktrees after the task ID, for example `.worktrees/rf-ax01-agent-executor-contracts`.
+- Rebase or merge from `main` before starting a new coding session in that worktree.
+- Do not share a worktree across multiple subagents. Let subagents inspect or critique the task, but keep the
+  implementing checkout single-purpose.
+- Merge small, validated PRs back through `main` before unblocking downstream lanes.
 
-  section Phase 4 — Polish
-    Fix await-in-loop             :p4a, after p3a, 5d
-    Fix process.exit calls        :p4b, after p3a, 3d
-    Mutation testing              :p4c, after p3e, 5d
-    ADR documentation             :p4d, after p3d, 3d
-```
+### Merge Coordination
 
-### Parallel Workstreams
-
-| Stream       | Owner Role      | Modules                                      | Dependency                      |
-| ------------ | --------------- | -------------------------------------------- | ------------------------------- |
-| **Stream A** | Senior Engineer | `hydra-operator.ts` decomposition            | Must complete Phase 0 first     |
-| **Stream B** | Senior Engineer | `hydra-evolve.ts` decomposition              | Must complete Phase 0 first     |
-| **Stream C** | Engineer        | `agent-executor.ts` tests + interface        | Independent (start immediately) |
-| **Stream D** | Engineer        | `hydra-config.ts` tests + interface          | Independent (start immediately) |
-| **Stream E** | Engineer        | Daemon route tests + cyclic fix              | Independent (start immediately) |
-| **Stream F** | DevOps/Tooling  | Quality gate tooling (madge, c8, boundaries) | Independent (start immediately) |
-
-> **Conflict zones**: Streams A and B both touch `hydra-operator.ts` indirectly via shared imports. Coordinate
-> branch merging to avoid conflicts. Recommended: Stream A and B use different feature branches with daily
-> rebases on `main`.
+- Keep one merge coordinator responsible for sequencing merges into `main`.
+- Prefer dependency-first landing order: tooling/tests before structural extraction, interfaces after proving tests.
+- If two tasks touch the same hotspot file, split them further or force them into sequential merge order.
+- Preserve context budget by having subagents return concise findings summaries rather than long transcripts.
 
 ---
 
 ## 10. Risk Register
 
-| Risk                                                        | Probability | Impact | Mitigation                                                                    |
-| ----------------------------------------------------------- | :---------: | :----: | ----------------------------------------------------------------------------- |
-| Cyclic import causes startup failure after partial fix      |   Medium    |  High  | Fix all cycles in a single commit; run integration tests before merge         |
-| `hydra-operator.ts` decomposition introduces regression     |    High     |  High  | Write characterisation tests before extraction; use feature flags             |
-| `hydra-config.ts` interface change breaks 23 consumers      |    High     |  High  | Use interface type that matches existing shape; no behavior change in Phase 2 |
-| Coverage threshold flaps due to flaky tests                 |     Low     | Medium | Mark known-flaky tests with `test.skip` + issue link                          |
-| Evolution engine generates code that breaks cycle detection |   Medium    |  Low   | Add `npm run lint:cycles` to post-evolve verification commands                |
-| Layer enforcement breaks undocumented cross-layer calls     |   Medium    | Medium | Start with `warn` before `error`; audit violations before enforcing           |
-| Parallel streams create merge conflicts                     |    High     | Medium | Feature flags + small PRs + daily rebases + nominated merge coordinator       |
-| Complexity rules generate too many false positives          |     Low     |  Low   | Tune thresholds; use inline `eslint-disable` with justification comment       |
+| Risk                                                        | Probability | Impact | Mitigation                                                                             |
+| ----------------------------------------------------------- | :---------: | :----: | -------------------------------------------------------------------------------------- |
+| Cyclic import causes startup failure after partial fix      |   Medium    |  High  | Fix all cycles in a single commit; run integration tests before merge                  |
+| `hydra-operator.ts` decomposition introduces regression     |    High     |  High  | Write characterisation tests before extraction; use feature flags                      |
+| `hydra-config.ts` interface change breaks 23 consumers      |    High     |  High  | Use interface type that matches existing shape; no behavior change in Phase 2          |
+| Coverage threshold flaps due to flaky tests                 |     Low     | Medium | Mark known-flaky tests with `test.skip` + issue link                                   |
+| Evolution engine generates code that breaks cycle detection |   Medium    |  Low   | Add `npm run lint:cycles` to post-evolve verification commands                         |
+| Layer enforcement breaks undocumented cross-layer calls     |   Medium    | Medium | Start with `warn` before `error`; audit violations before enforcing                    |
+| Parallel streams create merge conflicts                     |    High     | Medium | One task per worktree, small PRs, dependency-first merges, nominated merge coordinator |
+| Complexity rules generate too many false positives          |     Low     |  Low   | Tune thresholds; require approval for any scoped suppression and track cleanup         |
 
 ---
 
