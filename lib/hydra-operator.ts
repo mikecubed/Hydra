@@ -191,12 +191,8 @@ import {
   resetSessionUsage,
 } from './hydra-provider-usage.ts';
 import pc from 'picocolors';
-import {
-  buildAgentMessage,
-  runCouncilPrompt,
-  runAutoPrompt,
-  runSmartPrompt,
-} from './hydra-operator-concierge.ts';
+import { buildAgentMessage } from './hydra-operator-dispatch.ts';
+import { runCouncilPrompt, runAutoPrompt, runSmartPrompt } from './hydra-operator-concierge.ts';
 
 export { KNOWN_COMMANDS, SMART_TIER_MAP, getSelfAwarenessSummary } from './hydra-operator-ui.ts';
 

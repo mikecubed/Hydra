@@ -32,10 +32,12 @@ before(async () => {
   _setTestConfig = cfgMod._setTestConfig as (cfg: Record<string, unknown>) => void;
   invalidateConfigCache = cfgMod.invalidateConfigCache;
 
+  const dispatchMod = await import('../lib/hydra-operator-dispatch.ts');
+  shouldCrossVerify = dispatchMod.shouldCrossVerify;
+  buildAgentMessage = dispatchMod.buildAgentMessage;
+  buildMiniRoundBrief = dispatchMod.buildMiniRoundBrief;
+
   const mod = await import('../lib/hydra-operator-concierge.ts');
-  shouldCrossVerify = mod.shouldCrossVerify;
-  buildAgentMessage = mod.buildAgentMessage;
-  buildMiniRoundBrief = mod.buildMiniRoundBrief;
   runAutoPrompt = mod.runAutoPrompt;
   runSmartPrompt = mod.runSmartPrompt;
 });
@@ -94,9 +96,11 @@ describe('buildAgentMessage', () => {
   });
 
   it('includes agent-relevant framing', () => {
-    const msg = buildAgentMessage('claude', 'Refactor the data layer');
-    // Should contain some kind of heading or label
-    assert.ok(msg.length > 10);
+    const msgClaude = buildAgentMessage('claude', 'Refactor the data layer');
+    const msgGemini = buildAgentMessage('gemini', 'Refactor the data layer');
+    // Each agent must produce a distinct message, proving the framing is agent-specific
+    assert.notEqual(msgClaude, msgGemini, 'agent framing must differ per agent');
+    assert.ok(msgClaude.length > 50, 'message must contain substantial framing content');
   });
 
   it('falls back gracefully for an unknown agent name', () => {
