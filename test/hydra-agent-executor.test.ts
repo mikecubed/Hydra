@@ -205,31 +205,45 @@ describe('diagnoseAgentError — signal mapping', () => {
 
 describe('assertSafeSpawnCmd — extended coverage', () => {
   it('allows paths with hyphens', () => {
-    assert.doesNotThrow(() => { assertSafeSpawnCmd('my-tool', 'test'); });
+    assert.doesNotThrow(() => {
+      assertSafeSpawnCmd('my-tool', 'test');
+    });
   });
 
   it('allows paths with underscores (treated as cmd)', () => {
-    assert.doesNotThrow(() => { assertSafeSpawnCmd('my_tool', 'test'); });
+    assert.doesNotThrow(() => {
+      assertSafeSpawnCmd('my_tool', 'test');
+    });
   });
 
   it('rejects semicolons', () => {
-    assert.throws(() => { assertSafeSpawnCmd('cmd; rm -rf /', 'test'); }, /unsafe/i);
+    assert.throws(() => {
+      assertSafeSpawnCmd('cmd; rm -rf /', 'test');
+    }, /unsafe/i);
   });
 
   it('rejects pipe characters', () => {
-    assert.throws(() => { assertSafeSpawnCmd('cmd | cat', 'test'); }, /unsafe/i);
+    assert.throws(() => {
+      assertSafeSpawnCmd('cmd | cat', 'test');
+    }, /unsafe/i);
   });
 
   it('rejects backticks', () => {
-    assert.throws(() => { assertSafeSpawnCmd('`whoami`', 'test'); }, /unsafe/i);
+    assert.throws(() => {
+      assertSafeSpawnCmd('`whoami`', 'test');
+    }, /unsafe/i);
   });
 
   it('rejects dollar signs', () => {
-    assert.throws(() => { assertSafeSpawnCmd('$HOME/bin/tool', 'test'); }, /unsafe/i);
+    assert.throws(() => {
+      assertSafeSpawnCmd('$HOME/bin/tool', 'test');
+    }, /unsafe/i);
   });
 
   it('rejects double-dot path traversal', () => {
-    assert.throws(() => { assertSafeSpawnCmd('../../../bin/sh', 'test'); }, /traversal/i);
+    assert.throws(() => {
+      assertSafeSpawnCmd('../../../bin/sh', 'test');
+    }, /traversal/i);
   });
 });
 
@@ -301,7 +315,10 @@ describe('executeAgent — successful execution', () => {
 
   it('populates durationMs > 0', async () => {
     const result = await executeAgent(AGENT_NAME, 'prompt');
-    assert.ok(result.durationMs >= 0, `durationMs should be >= 0, got ${String(result.durationMs)}`);
+    assert.ok(
+      result.durationMs >= 0,
+      `durationMs should be >= 0, got ${String(result.durationMs)}`,
+    );
   });
 
   it('populates command and args', async () => {
@@ -560,10 +577,7 @@ describe('executeAgent — invalid modelOverride', () => {
 
 describe('executeAgent — unknown agent', () => {
   it('throws for an unregistered agent name', async () => {
-    await assert.rejects(
-      () => executeAgent('not-a-real-agent-xyz', 'prompt'),
-      /Unknown agent/,
-    );
+    await assert.rejects(() => executeAgent('not-a-real-agent-xyz', 'prompt'), /Unknown agent/);
   });
 });
 
@@ -737,7 +751,12 @@ describe('executeAgentWithRecovery — local-unavailable fallback', () => {
       councilRole: null,
       taskAffinity: {},
       enabled: true,
-      features: { executeMode: 'api' as const, jsonOutput: false, stdinPrompt: false, reasoningEffort: false },
+      features: {
+        executeMode: 'api' as const,
+        jsonOutput: false,
+        stdinPrompt: false,
+        reasoningEffort: false,
+      },
     });
 
     // Register a claude fallback that succeeds
@@ -820,9 +839,7 @@ describe('extractCodexUsage — extended', () => {
     const usage = extractCodexUsage(jsonl);
     // If the structure is recognized, usage should be non-null with inputTokens/outputTokens
     if (usage != null) {
-      assert.ok(
-        typeof usage.inputTokens === 'number' || typeof usage.totalTokens === 'number',
-      );
+      assert.ok(typeof usage.inputTokens === 'number' || typeof usage.totalTokens === 'number');
     }
   });
 });
@@ -862,10 +879,7 @@ describe('executeAgent — output size limits', () => {
 
   it('truncates output when maxOutputBytes is exceeded', async () => {
     // Write 10KB of data
-    registerTestAgent(
-      AGENT_NAME,
-      `process.stdout.write('x'.repeat(10 * 1024))`,
-    );
+    registerTestAgent(AGENT_NAME, `process.stdout.write('x'.repeat(10 * 1024))`);
 
     const result = await executeAgent(AGENT_NAME, 'prompt', {
       maxOutputBytes: 1024, // cap at 1KB
@@ -943,9 +957,6 @@ describe('executeAgent — unsafe spawn command guard', () => {
       enabled: true,
     });
 
-    await assert.rejects(
-      () => executeAgent(AGENT_NAME, 'prompt'),
-      /unsafe|metacharacter/i,
-    );
+    await assert.rejects(() => executeAgent(AGENT_NAME, 'prompt'), /unsafe|metacharacter/i);
   });
 });
