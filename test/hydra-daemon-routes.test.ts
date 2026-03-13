@@ -137,11 +137,11 @@ function makeWriteCtx(
     ...readCtx,
     req,
     readJsonBody: (_r: IncomingMessage) => Promise.resolve(bodyData),
-    enqueueMutation: async <T>(
+    enqueueMutation: <T>(
       _label: string,
       mutator: (s: HydraStateShape) => T,
       _detail?: Record<string, unknown>,
-    ) => mutator(state),
+    ) => Promise.resolve(mutator(state)),
     ensureKnownAgent: (agent: string, allowUnassigned = true) => {
       const known = ['claude', 'gemini', 'codex', 'human', 'local', 'copilot', 'unassigned'];
       if (!allowUnassigned && agent === 'unassigned') throw new Error(`Unknown agent: ${agent}`);
@@ -785,7 +785,7 @@ describe('handleWriteRoute', () => {
     const resumeCtx = makeWriteCtx('POST', '/session/resume', state, {});
     await handleWriteRoute(resumeCtx);
     assert.equal(resumeCtx.captured.statusCode, 200);
-    assert.equal(state.activeSession?.status, 'active');
+    assert.equal((state.activeSession as { status: string }).status, 'active');
   });
 
   it('POST /handoff + POST /handoff/ack round-trip', async () => {
