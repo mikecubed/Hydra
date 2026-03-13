@@ -47,10 +47,13 @@ interface EslintFileResult {
 function run(): void {
   const ruleFlags = RULES.flatMap((r) => ['--rule', r]);
 
+  // Use the ESLint JS entry point directly so this works on all platforms
+  // (node_modules/.bin/eslint is a shell wrapper that Node cannot execute directly on Windows)
+  const eslintBin = path.join(repoRoot, 'node_modules', 'eslint', 'bin', 'eslint.js');
   const result = spawnSync(
     process.execPath,
     [
-      path.join(repoRoot, 'node_modules', '.bin', 'eslint'),
+      eslintBin,
       'lib/**/*.ts',
       '--format',
       'json',
