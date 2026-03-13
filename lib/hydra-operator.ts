@@ -108,7 +108,14 @@ import {
   clearDispatchContext,
   setAgentExecMode,
 } from './hydra-statusbar.ts';
-import { AgentWorker } from './hydra-worker.ts';
+import {
+  workers,
+  startAgentWorker,
+  stopAgentWorker,
+  stopAllWorkers,
+  _getWorkerStatus,
+  startAgentWorkers,
+} from './hydra-operator-workers.ts';
 import {
   promptChoice,
   isChoiceActive,
@@ -149,7 +156,6 @@ import {
   generateSitrep,
   pushActivity,
   annotateDispatch,
-  annotateCompletion,
 } from './hydra-activity.ts';
 import {
   loadCodebaseContext,
@@ -195,159 +201,6 @@ const DEFAULT_URL = process.env['AI_ORCH_URL'] ?? 'http://127.0.0.1:4173';
 // ── Dry-Run Mode ─────────────────────────────────────────────────────────────
 
 let dryRunMode = false;
-
-// ── Agent Workers (headless background execution) ────────────────────────────
-
-const workers = new Map<string, AgentWorker>();
-
-function startAgentWorker(agent: string, baseUrl: string, { rl }: { rl?: ReadlineInterface } = {}) {
-  const name = agent.toLowerCase();
-  if (workers.has(name) && workers.get(name)!.status !== 'stopped') {
-    return workers.get(name);
-  }
-
-  const worker = new AgentWorker(name, {
-    baseUrl,
-    projectRoot: config.projectRoot,
-  });
-
-  // Wire worker events to status bar
-  worker.on('task:start', ({ agent: a, taskId: _taskId, title }) => {
-    setAgentActivity(a, 'working', title ?? 'Working', { taskTitle: title });
-    drawStatusBar();
-  });
-
-  worker.on(
-    'task:complete',
-    ({ agent: a, taskId, title: taskTitle, status, durationMs, outputSummary }) => {
-      // Record activity annotation for all completions
-      pushActivity(
-        status === 'error' ? 'error' : 'completion',
-        annotateCompletion({
-          agent: a,
-          taskId,
-          title: taskTitle ?? '',
-          durationMs,
-          outputSummary,
-          status,
-        }),
-        { agent: a, taskId, durationMs },
-      );
-
-      // Skip success notification for failed tasks — task:error handler covers those
-      if (status === 'error') return;
-
-      const elapsed = durationMs ? `${String(Math.round(durationMs / 1000))}s` : '';
-      const shortTitle = taskTitle ? ` (${String(taskTitle).slice(0, 40)})` : '';
-      setAgentActivity(a, 'idle', `Done ${String(taskId)}${elapsed ? ` (${elapsed})` : ''}`);
-      drawStatusBar();
-
-      // Show inline notification with sparkle
-      const icon = SUCCESS('\u2713');
-      const sparkle = '\u2728'; // ✨
-      const msg = `  ${icon} ${sparkle} ${colorAgent(a)} completed ${pc.white(taskId)}${shortTitle ? DIM(shortTitle) : ''}${elapsed ? ` ${DIM(`in ${elapsed}`)}` : ''}`;
-
-      // Brief flash effect: bold → normal
-      if (process.stdout.isTTY) {
-        process.stdout.write(`\r\x1b[2K${pc.bold(msg)}\n`);
-        setTimeout(() => {
-          process.stdout.write(`\x1b[1A\r\x1b[2K${msg}\n`);
-          if (rl && !isChoiceActive()) {
-            rl.prompt(true);
-          }
-        }, 100);
-      } else {
-        process.stdout.write(`\r\x1b[2K${msg}\n`);
-        if (rl && !isChoiceActive()) {
-          rl.prompt(true);
-        }
-      }
-    },
-  );
-
-  worker.on('task:error', ({ agent: a, taskId, title: taskTitle, error }) => {
-    pushActivity(
-      'error',
-      annotateCompletion({
-        agent: a,
-        taskId,
-        title: taskTitle ?? '',
-        status: 'error',
-        outputSummary: error,
-      }),
-      { agent: a, taskId },
-    );
-
-    setAgentActivity(a, 'error', `Error: ${String((error ?? '').slice(0, 30))}`);
-    drawStatusBar();
-
-    const shortTitle = taskTitle ? ` (${String(taskTitle).slice(0, 40)})` : '';
-    const msg = `  ${ERROR('\u2717')} ${colorAgent(a)} error on ${pc.white(taskId ?? '?')}${shortTitle ? DIM(shortTitle) : ''}: ${DIM((error ?? '').slice(0, 60))}`;
-    process.stdout.write(`\r\x1b[2K${msg}\n`);
-    if (rl && !isChoiceActive()) {
-      rl.prompt(true);
-    }
-  });
-
-  worker.on('worker:idle', ({ agent: a }) => {
-    setAgentActivity(a, 'idle', 'Awaiting next task');
-    drawStatusBar();
-  });
-
-  worker.on('worker:stop', ({ agent: a, reason: _reason }) => {
-    setAgentExecMode(a, null);
-    setAgentActivity(a, 'inactive', 'Stopped');
-    drawStatusBar();
-  });
-
-  setAgentExecMode(name, 'worker');
-  worker.start();
-  workers.set(name, worker);
-
-  console.log(
-    `  ${SUCCESS('\u2713')} ${colorAgent(name)} worker started ${DIM(`(${worker.permissionMode})`)}`,
-  );
-  return worker;
-}
-
-function stopAgentWorker(agent: string) {
-  const name = agent.toLowerCase();
-  const worker = workers.get(name);
-  if (!worker) return;
-  worker.stop();
-  setAgentExecMode(name, null);
-}
-
-function stopAllWorkers() {
-  for (const [name, worker] of workers) {
-    worker.kill();
-    setAgentExecMode(name, null);
-  }
-  workers.clear();
-}
-
-// @ts-expect-error TS6133 — function kept for debugging use
-function _getWorkerStatus(agent: string) {
-  const worker = workers.get(agent.toLowerCase());
-  if (!worker) return null;
-  return {
-    agent: worker.agent,
-    status: worker.status,
-    currentTask: worker.currentTask,
-    uptime: worker.uptime,
-    permissionMode: worker.permissionMode,
-  };
-}
-
-function startAgentWorkers(
-  agentNames: string[],
-  baseUrl: string,
-  opts: { rl?: ReadlineInterface } = {},
-) {
-  for (const agent of agentNames) {
-    startAgentWorker(agent, baseUrl, opts);
-  }
-}
 
 export function formatUptime(ms: number): string {
   if (ms < 60_000) return `${String(Math.round(ms / 1000))}s`;
