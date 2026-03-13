@@ -40,7 +40,7 @@ Before creating any worktree, normalize the local hooks path so worktrees resolv
 
 ```bash
 REPO_ROOT=$(git rev-parse --show-toplevel)
-git config core.hooksPath "$REPO_ROOT/.husky/_"
+git config core.hooksPath "$REPO_ROOT/.husky"
 ```
 
 The current relative hooks-path setup is not sufficient for repo-local worktrees.
