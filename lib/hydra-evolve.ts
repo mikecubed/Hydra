@@ -79,6 +79,7 @@ import {
 import { executeAgent as sharedExecuteAgent } from './hydra-shared/agent-executor.ts';
 import type { ExecuteResult, ExecuteAgentOpts } from './hydra-shared/agent-executor.ts';
 import type { TestFailure } from './hydra-utils.ts';
+import { type RoundResult } from './hydra-evolve-state.ts';
 import { initStatusBar, destroyStatusBar, setAgentActivity } from './hydra-statusbar.ts';
 import {
   git,
@@ -124,29 +125,7 @@ type EvolveResult = ExecuteResult & {
   startupFailure?: boolean;
 };
 
-export interface RoundResult {
-  round: number;
-  area: string;
-  selectedImprovement: string | null;
-  verdict: string | null;
-  score: number | null;
-  branchName: string | null;
-  learnings: string | null;
-  durationMs: number;
-  researchSummary: string | null;
-  investigations: {
-    count: number;
-    healed: number;
-    diagnoses: Array<{ phase: string; diagnosis: string; explanation: string }>;
-  } | null;
-  testSummary: { total: number; passed: number; failed: number; summary: string } | null;
-  testFailures: TestFailure[] | null;
-  merged: boolean;
-  mergeMethod: string | null;
-  mergeConflicts: string[] | null;
-  suggestionId: string | null;
-  testsWritten?: number;
-}
+export type { RoundResult } from './hydra-evolve-state.ts';
 
 // ── Constants ───────────────────────────────────────────────────────────────
 

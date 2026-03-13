@@ -1,6 +1,32 @@
 import fs from 'node:fs';
 import path from 'node:path';
-import type { RoundResult } from './hydra-evolve.ts';
+import type { TestFailure } from './hydra-utils.ts';
+
+// ── Shared types ─────────────────────────────────────────────────────────────
+
+export interface RoundResult {
+  round: number;
+  area: string;
+  selectedImprovement: string | null;
+  verdict: string | null;
+  score: number | null;
+  branchName: string | null;
+  learnings: string | null;
+  durationMs: number;
+  researchSummary: string | null;
+  investigations: {
+    count: number;
+    healed: number;
+    diagnoses: Array<{ phase: string; diagnosis: string; explanation: string }>;
+  } | null;
+  testSummary: { total: number; passed: number; failed: number; summary: string } | null;
+  testFailures: TestFailure[] | null;
+  merged: boolean;
+  mergeMethod: string | null;
+  mergeConflicts: string[] | null;
+  suggestionId: string | null;
+  testsWritten?: number;
+}
 
 // ── Shared types ─────────────────────────────────────────────────────────────
 
