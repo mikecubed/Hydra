@@ -25,7 +25,7 @@ import { fileURLToPath } from 'node:url';
 import path from 'node:path';
 import { exec, spawn, spawnSync } from 'node:child_process';
 import { buildAgentContext } from './hydra-context.ts';
-import { rewriteNodeInvocation, spawnHydraNode, spawnHydraNodeSync } from './hydra-exec.ts';
+import { rewriteNodeInvocation, spawnHydraNode, spawnHydraNodeSync } from './hydra-exec-spawn.ts';
 import {
   getAgent,
   AGENT_NAMES,

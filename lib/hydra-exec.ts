@@ -1,20 +1,30 @@
 import path from 'node:path';
-import { fileURLToPath, pathToFileURL } from 'node:url';
-import { spawn, spawnSync } from 'node:child_process';
-import type {
-  SpawnOptions,
-  SpawnSyncOptions,
-  ChildProcess,
-  SpawnSyncReturns,
-} from 'node:child_process';
+import { pathToFileURL } from 'node:url';
+import {
+  HYDRA_EMBEDDED_ROOT,
+  HYDRA_STANDALONE,
+  HYDRA_INTERNAL_FLAG,
+  toHydraModuleId,
+  rewriteNodeInvocation,
+  spawnHydraNode,
+  spawnHydraNodeSync,
+} from './hydra-exec-spawn.ts';
 
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
+// Re-export spawn utilities so existing importers of hydra-exec.ts keep working.
+export {
+  HYDRA_EMBEDDED_ROOT,
+  HYDRA_STANDALONE,
+  HYDRA_INTERNAL_FLAG,
+  toHydraModuleId,
+  rewriteNodeInvocation,
+  spawnHydraNode,
+  spawnHydraNodeSync,
+};
 
-export const HYDRA_EMBEDDED_ROOT = path.resolve(__dirname, '..');
-export const HYDRA_STANDALONE = Boolean((process as NodeJS.Process & { pkg?: unknown }).pkg);
-export const HYDRA_INTERNAL_FLAG = '--hydra-internal';
-
+// INTERNAL_MODULE_LOADERS uses dynamic imports so standalone bundlers can
+// statically include every internal module. hydra-operator.ts is safe here
+// because it imports from hydra-exec-spawn.ts (not hydra-exec.ts), which
+// breaks the circular dependency.
 const INTERNAL_MODULE_LOADERS: Partial<Record<string, () => Promise<unknown>>> = {
   'lib/hydra-operator.ts': () => import('./hydra-operator.ts'),
   'lib/orchestrator-daemon.ts': () => import('./orchestrator-daemon.ts'),
@@ -40,56 +50,6 @@ function normalizeModuleId(moduleId: unknown): string {
   if (!normalized) return '';
   if (normalized.includes('..')) return '';
   return normalized;
-}
-
-export function toHydraModuleId(scriptPath: string, hydraRoot = HYDRA_EMBEDDED_ROOT): string {
-  const absolute = path.resolve(scriptPath);
-  const rel = path.relative(hydraRoot, absolute).replace(/\\/g, '/');
-  if (!rel || rel.startsWith('..')) {
-    return '';
-  }
-  return normalizeModuleId(rel);
-}
-
-export function rewriteNodeInvocation(
-  command: string,
-  args: string[] = [],
-  hydraRoot = HYDRA_EMBEDDED_ROOT,
-): { command: string; args: string[] } {
-  if (!HYDRA_STANDALONE || command !== 'node' || !Array.isArray(args) || args.length === 0) {
-    return { command, args };
-  }
-
-  const [scriptPath, ...scriptArgs] = args;
-  const moduleId = toHydraModuleId(scriptPath, hydraRoot);
-  if (!moduleId) {
-    throw new Error(`Standalone Hydra cannot execute external script: ${scriptPath}`);
-  }
-
-  return {
-    command: process.execPath,
-    args: [HYDRA_INTERNAL_FLAG, moduleId, ...scriptArgs],
-  };
-}
-
-export function spawnHydraNode(
-  scriptPath: string,
-  scriptArgs: string[] = [],
-  options: SpawnOptions = {},
-  hydraRoot = HYDRA_EMBEDDED_ROOT,
-): ChildProcess {
-  const invocation = rewriteNodeInvocation('node', [scriptPath, ...scriptArgs], hydraRoot);
-  return spawn(invocation.command, invocation.args, options);
-}
-
-export function spawnHydraNodeSync(
-  scriptPath: string,
-  scriptArgs: string[] = [],
-  options: SpawnSyncOptions = {},
-  hydraRoot = HYDRA_EMBEDDED_ROOT,
-): SpawnSyncReturns<Buffer | string> {
-  const invocation = rewriteNodeInvocation('node', [scriptPath, ...scriptArgs], hydraRoot);
-  return spawnSync(invocation.command, invocation.args, options);
 }
 
 export async function runHydraInternalModule(
