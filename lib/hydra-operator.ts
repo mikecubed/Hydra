@@ -20,7 +20,6 @@
 
 import './hydra-env.ts';
 import readline from 'node:readline';
-import type { Interface as ReadlineInterface } from 'node:readline';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
@@ -59,7 +58,6 @@ import {
   WARNING,
   DIM,
   ACCENT,
-  stripAnsi,
   shortModelName,
 } from './hydra-ui.ts';
 import {
@@ -168,6 +166,8 @@ import {
   applySelfAwarenessPatch,
   getGitInfo,
 } from './hydra-operator-self-awareness.ts';
+import { createGhostTextHelpers } from './hydra-operator-ghost-text.ts';
+import { executeDaemonResume } from './hydra-operator-session.ts';
 
 export { KNOWN_COMMANDS, SMART_TIER_MAP, getSelfAwarenessSummary } from './hydra-operator-ui.ts';
 export {
@@ -351,228 +351,17 @@ async function interactiveLoop({
   if (conciergeActive) showConciergeWelcome();
 
   // ── Ghost Text (greyed-out placeholder, Claude Code CLI style) ────────────
-  // Shows dim hint text after the prompt cursor. Disappears on first keystroke.
-  // Re-appears on blank line submissions or after command completion.
-  // When _acceptableGhostText is set, Tab accepts + submits the ghost text.
-  let _ghostCleanup: ((...args: any[]) => void) | null = null;
-  let _acceptableGhostText: string | null = null; // Text that Tab would accept+submit
-  let _ghostUpgradeAborted = false; // Set true when user types; prevents async AI upgrade
-
-  const GHOST_HINTS_CONCIERGE = [
-    () => `Chat with ${getConciergeModelLabel()} — prefix ! to dispatch`,
-    () => 'Ask a question or describe what you need',
-    () => `Talking to ${getConciergeModelLabel()} — :chat off to disable`,
-    () => 'What would you like to work on?',
-  ];
-  const GHOST_HINTS_NORMAL = [
-    () => 'Describe a task to dispatch to agents',
-    () => ':help for commands, or type a prompt',
-    () => 'What would you like to work on?',
-  ];
-  let _ghostIdx = 0;
-
-  function getGhostText() {
-    const pool = conciergeActive ? GHOST_HINTS_CONCIERGE : GHOST_HINTS_NORMAL;
-    const text = pool[_ghostIdx % pool.length]();
-    _ghostIdx++;
-    return text;
-  }
-
-  /**
-   * Show ghost text after the prompt cursor.
-   * @param {string} [overrideText] - Custom text instead of cycling hints
-   * @param {string} [acceptableText] - If set, Tab will accept+submit this text
-   */
-  function showGhostAfterPrompt(overrideText?: any, acceptableText?: any) {
-    if (!process.stdout.isTTY) return;
-    const base = overrideText ?? getGhostText();
-    if (!base) return;
-
-    _acceptableGhostText = acceptableText ?? null;
-    _ghostUpgradeAborted = false;
-
-    // Append [Tab] hint for acceptable ghost text
-    const text = _acceptableGhostText ? `${String(base)}  [Tab]` : base;
-    const plain = stripAnsi(text);
-
-    // Write dim ghost text, then move cursor back to prompt end
-    process.stdout.write(DIM(text));
-    if (plain.length > 0) {
-      process.stdout.write(`\x1b[${String(plain.length)}D`);
-    }
-    // One-shot: clear ghost text on first keystroke
-    if (_ghostCleanup) {
-      process.stdin.removeListener('data', _ghostCleanup);
-      _ghostCleanup = null;
-    }
-    const cleanup = () => {
-      process.stdout.write('\x1b[K'); // Erase from cursor to end of line
-      _acceptableGhostText = null;
-      _ghostUpgradeAborted = true;
-      process.stdin.removeListener('data', cleanup);
-      if (_ghostCleanup === cleanup) _ghostCleanup = null;
-    };
-    _ghostCleanup = cleanup;
-    process.stdin.on('data', cleanup);
-  }
-
-  /**
-   * Upgrade displayed ghost text with an AI-generated suggestion.
-   * No-op if user has already started typing.
-   */
-  function upgradeGhostText(newText: string) {
-    if (_ghostUpgradeAborted) return;
-    if (!process.stdout.isTTY) return;
-    if (rl.line && rl.line.length > 0) {
-      _ghostUpgradeAborted = true;
-      return;
-    }
-    // Erase old ghost, write new acceptable ghost
-    process.stdout.write('\x1b[K');
-    const display = `${newText}  [Tab]`;
-    const plain = stripAnsi(display);
-    process.stdout.write(DIM(display));
-    if (plain.length > 0) {
-      process.stdout.write(`\x1b[${String(plain.length)}D`);
-    }
-    _acceptableGhostText = newText;
-  }
-
-  // Wrap rl.prompt to auto-show ghost text on fresh prompts (not refreshes)
-  const _origPrompt = rl.prompt.bind(rl);
-  rl.prompt = function (preserveCursor) {
-    _origPrompt(preserveCursor);
-    if (!preserveCursor) {
-      showGhostAfterPrompt();
-    }
-  };
-
-  // ── Tab Interception (accept + submit ghost text) ──────────────────────────
-  // Override readline's internal _ttyWrite to intercept Tab when acceptable
-  // ghost text is displayed. Standard pattern used by inquirer/ora.
-  const _origTtyWrite = (rl as any)._ttyWrite.bind(rl);
-  (rl as any)._ttyWrite = function (s: any, key: any) {
-    if (key.name === 'tab' && _acceptableGhostText && !rl.line.length) {
-      // Clear ghost visual
-      process.stdout.write('\x1b[K');
-      const text = _acceptableGhostText;
-      _acceptableGhostText = null;
-      _ghostUpgradeAborted = true;
-      // Clean up ghost listener
-      if (_ghostCleanup) {
-        process.stdin.removeListener('data', _ghostCleanup);
-        _ghostCleanup = null;
-      }
-      // Inject text into readline and submit
-      rl.write(text);
-      setImmediate(() => {
-        rl.write(null, { name: 'return' });
-      });
-      return; // swallow the Tab
-    }
-    _origTtyWrite(s, key);
-  };
-
-  // ── Daemon resume helper (extracted for unified :resume) ───────────────────
-  async function executeDaemonResume(
-    resumeBaseUrl: string,
-    resumeAgents: string[],
-    resumeRl: ReadlineInterface,
-  ) {
-    try {
-      const sessionStatus = (await request('GET', resumeBaseUrl, '/session/status')) as any;
-
-      // Unpause if paused
-      if (sessionStatus.activeSession?.status === 'paused') {
-        try {
-          (await request('POST', resumeBaseUrl, '/session/unpause')) as any;
-          console.log(`  ${SUCCESS('✓')} Session unpaused`);
-        } catch (err: unknown) {
-          console.log(`  ${WARNING('⚠')} Could not unpause: ${(err as Error).message}`);
-        }
-      }
-
-      // Reset stale tasks
-      const stale = sessionStatus.staleTasks ?? [];
-      if (stale.length > 0) {
-        console.log('');
-        for (const t of stale) {
-          try {
-            (await request('POST', resumeBaseUrl, '/task/update', {
-              taskId: t.id,
-              status: 'todo',
-            })) as any;
-            const mins = Math.round((Date.now() - new Date(t.updatedAt).getTime()) / 60_000);
-            console.log(
-              `  ${WARNING('↻')} ${pc.white(t.id)} ${colorAgent(t.owner)} reset to todo ${DIM(`(was stale ${String(mins)}m)`)}`,
-            );
-          } catch {
-            /* skip */
-          }
-        }
-      }
-
-      // Ack pending handoffs
-      const handoffs = sessionStatus.pendingHandoffs ?? [];
-      const agentsToLaunch = new Set();
-      if (handoffs.length > 0) {
-        console.log('');
-        for (const h of handoffs) {
-          const targetAgent = String(h.to ?? '').toLowerCase();
-          try {
-            (await request('POST', resumeBaseUrl, '/handoff/ack', {
-              handoffId: h.id,
-              agent: targetAgent,
-            })) as any;
-            if (targetAgent) agentsToLaunch.add(targetAgent);
-          } catch (err: unknown) {
-            console.log(`  ${ERROR('✗')} ${pc.white(h.id)} ${(err as Error).message}`);
-          }
-        }
-      }
-
-      // Collect in-progress agent owners
-      for (const t of sessionStatus.inProgressTasks ?? []) {
-        const owner = String(t.owner ?? '').toLowerCase();
-        if (owner) agentsToLaunch.add(owner);
-      }
-
-      // Agent suggestions
-      for (const [agent, suggestion] of Object.entries(sessionStatus.agentSuggestions ?? {})) {
-        if (
-          (suggestion as any)?.action &&
-          (suggestion as any).action !== 'idle' &&
-          (suggestion as any).action !== 'unknown'
-        ) {
-          agentsToLaunch.add(agent);
-        }
-      }
-
-      // Launch workers
-      const launchList = ([...agentsToLaunch] as string[]).filter((a) => resumeAgents.includes(a));
-      if (launchList.length > 0) {
-        console.log('');
-        startAgentWorkers(launchList, resumeBaseUrl, { rl: resumeRl });
-      }
-
-      // Summary
-      const actions = [];
-      if (stale.length > 0)
-        actions.push(`${String(stale.length)} stale task${stale.length > 1 ? 's' : ''} reset`);
-      if (handoffs.length > 0)
-        actions.push(`${String(handoffs.length)} handoff${handoffs.length > 1 ? 's' : ''} acked`);
-      if (launchList.length > 0)
-        actions.push(
-          `${String(launchList.length)} agent${launchList.length > 1 ? 's' : ''} launched`,
-        );
-      if (actions.length > 0) {
-        console.log('');
-        console.log(`  ${SUCCESS('✓')} ${actions.join(', ')}`);
-      }
-    } catch (err: unknown) {
-      console.log(`  ${ERROR((err as Error).message)}`);
-    }
-  }
+  // Extracted to hydra-operator-ghost-text.ts. Factory installs rl.prompt
+  // wrapping and Tab interception on the readline interface.
+  const {
+    showGhostAfterPrompt,
+    upgradeGhostText,
+    cleanup: _ghostTextCleanup,
+  } = createGhostTextHelpers({
+    rl,
+    getConciergeActive: () => conciergeActive,
+    getConciergeModelLabel,
+  });
 
   startEventStream(baseUrl, agents);
 
@@ -711,7 +500,7 @@ async function interactiveLoop({
               ? `Investigate why ${String(first.id)} is blocked${deps ? ` (waiting on ${String(deps)})` : ''}`
               : `Investigate ${String(blockedTasks.length)} blocked tasks: ${String(blockedTasks.map((t: any) => t.id).join(', '))}`;
 
-          _origPrompt();
+          rl.prompt(true);
           showGhostAfterPrompt(deterministicHint, deterministicHint);
 
           // Phase 2: AI upgrade (async, non-blocking)
@@ -2651,10 +2440,7 @@ async function interactiveLoop({
   });
 
   rl.on('close', () => {
-    if (_ghostCleanup) {
-      process.stdin.removeListener('data', _ghostCleanup);
-      _ghostCleanup = null;
-    }
+    _ghostTextCleanup();
     resetAutoAccept();
     resetConversation();
     stopAllWorkers();
