@@ -10,6 +10,7 @@ import { acquireRateLimit, recordApiRequest, updateFromHeaders } from './hydra-r
 import { recordProviderUsage } from './hydra-provider-usage.ts';
 import { isCircuitOpen, recordModelFailure } from './hydra-model-recovery.ts';
 import { loadHydraConfig } from './hydra-config.ts';
+import { PeakEWMA, getLatencyEstimates, getProviderEWMA } from './hydra-latency-tracker.ts';
 import { startProviderSpan, endProviderSpan } from './hydra-telemetry.ts';
 
 // ---------------------------------------------------------------------------
@@ -23,84 +24,6 @@ interface MiddlewareCtx {
   cfg: Record<string, unknown> & { model?: string };
   onChunk: ((chunk: string) => void) | null;
   latencyMs: number;
-}
-
-// ---------------------------------------------------------------------------
-// PeakEWMA — Exponentially Weighted Moving Average for latency tracking
-// ---------------------------------------------------------------------------
-
-/**
- * Tracks latency using an exponentially weighted moving average.
- */
-export class PeakEWMA {
-  private readonly _decayMs: number;
-  private _ewma: number;
-  private _lastTs: number;
-  private _count: number;
-
-  constructor(decayMs: number = 10000) {
-    this._decayMs = decayMs;
-    this._ewma = 0;
-    this._lastTs = 0;
-    this._count = 0;
-  }
-
-  observe(latencyMs: number): void {
-    const now = Date.now();
-    if (this._count === 0) {
-      this._ewma = latencyMs;
-      this._lastTs = now;
-      this._count = 1;
-      return;
-    }
-
-    const elapsed = now - this._lastTs;
-    const weight = Math.exp(-elapsed / this._decayMs);
-    this._ewma = weight * this._ewma + (1 - weight) * latencyMs;
-    this._lastTs = now;
-    this._count++;
-  }
-
-  get(): number {
-    if (this._count === 0) return 0;
-    const elapsed = Date.now() - this._lastTs;
-    const weight = Math.exp(-elapsed / this._decayMs);
-    return this._ewma * weight;
-  }
-
-  get count(): number {
-    return this._count;
-  }
-
-  reset(): void {
-    this._ewma = 0;
-    this._lastTs = 0;
-    this._count = 0;
-  }
-}
-
-// Per-provider PeakEWMA instances for health scoring
-const providerLatency = new Map<string, PeakEWMA>();
-
-/**
- * Get the PeakEWMA tracker for a provider. Creates one if needed.
- */
-export function getProviderEWMA(provider: string): PeakEWMA {
-  if (!providerLatency.has(provider)) {
-    providerLatency.set(provider, new PeakEWMA());
-  }
-  return providerLatency.get(provider)!;
-}
-
-/**
- * Get estimated latency for all tracked providers.
- */
-export function getLatencyEstimates(): Record<string, number> {
-  const out: Record<string, number> = {};
-  for (const [provider, ewma] of providerLatency) {
-    out[provider] = ewma.get();
-  }
-  return out;
 }
 
 // ---------------------------------------------------------------------------
@@ -305,4 +228,7 @@ export {
   telemetryMiddleware,
   DEFAULT_LAYERS,
   compose,
+  PeakEWMA,
+  getLatencyEstimates,
+  getProviderEWMA,
 };

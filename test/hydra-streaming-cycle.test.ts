@@ -33,11 +33,10 @@ type TestCtx = {
 type TestLayer = (ctx: TestCtx, next: () => Promise<unknown>) => Promise<unknown>;
 
 // Characterization note for rf-cy02:
-// Cycle A exists today because hydra-rate-limits.ts imports getProviderEWMA()
-// from hydra-streaming-middleware.ts, while hydra-streaming-middleware.ts imports
-// acquireRateLimit(), recordApiRequest(), and updateFromHeaders() from
-// hydra-rate-limits.ts. These tests lock down the public behavior before shared
-// types move to a separate module.
+// Cycle A existed because hydra-rate-limits.ts reached into
+// hydra-streaming-middleware.ts for getProviderEWMA(), while the middleware
+// depended on hydra-rate-limits.ts for request tracking. These tests lock down
+// the public behavior now that the shared latency tracker lives in its own module.
 
 describe('streaming cycle safety net', () => {
   beforeEach(() => {
