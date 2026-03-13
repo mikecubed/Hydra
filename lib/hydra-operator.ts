@@ -23,16 +23,9 @@ import readline from 'node:readline';
 import type { Interface as ReadlineInterface } from 'node:readline';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
-import { exec, spawnSync } from 'node:child_process';
-import { spawnHydraNode, spawnHydraNodeSync } from './hydra-exec-spawn.ts';
-import {
-  getAgent,
-  getModelSummary,
-  getMode,
-  AGENT_TYPE,
-  formatEffortDisplay,
-  bestAgentFor,
-} from './hydra-agents.ts';
+import { spawnSync } from 'node:child_process';
+import { spawnHydraNodeSync } from './hydra-exec-spawn.ts';
+import { getAgent, getModelSummary, AGENT_TYPE, bestAgentFor } from './hydra-agents.ts';
 import { checkUsage, renderUsageDashboard, formatTokens } from './hydra-usage.ts';
 import { verifyAgentQuota } from './hydra-model-recovery.ts';
 import {
@@ -53,7 +46,6 @@ import {
   classifyPrompt,
 } from './hydra-utils.ts';
 import {
-  hydraSplash,
   renderStatsDashboard,
   agentBadge,
   label,
@@ -67,7 +59,6 @@ import {
   WARNING,
   DIM,
   ACCENT,
-  AGENT_COLORS,
   stripAnsi,
   shortModelName,
 } from './hydra-ui.ts';
@@ -77,7 +68,6 @@ import {
   SMART_TIER_MAP,
   printCommandHelp,
   printHelp,
-  printNextSteps,
   printSelfAwarenessStatus,
   printStatus,
 } from './hydra-operator-ui.ts';
@@ -150,15 +140,7 @@ import {
   listPresets,
   invalidatePersonaCache,
 } from './hydra-persona.ts';
-import {
-  getProviderSummary,
-  getExternalSummary,
-  getProviderUsage,
-  loadProviderUsage,
-  saveProviderUsage,
-  refreshExternalUsage,
-  resetSessionUsage,
-} from './hydra-provider-usage.ts';
+import { getProviderUsage, saveProviderUsage, resetSessionUsage } from './hydra-provider-usage.ts';
 import pc from 'picocolors';
 import { dispatchPrompt } from './hydra-operator-dispatch.ts';
 import { runCouncilPrompt, runAutoPrompt, runSmartPrompt } from './hydra-operator-concierge.ts';
@@ -174,8 +156,34 @@ import {
   handleNightlyCommand,
   handleEvolveCommand,
 } from './hydra-operator-commands.ts';
+import {
+  ensureDaemon,
+  launchAgentTerminals,
+  extractHandoffAgents,
+  printWelcome,
+} from './hydra-operator-startup.ts';
+import {
+  selfIndexCache as _selfIndexCache,
+  parseSelfAwarenessPlaintextCommand,
+  applySelfAwarenessPatch,
+  getGitInfo,
+} from './hydra-operator-self-awareness.ts';
 
 export { KNOWN_COMMANDS, SMART_TIER_MAP, getSelfAwarenessSummary } from './hydra-operator-ui.ts';
+export {
+  ensureDaemon,
+  findPowerShell,
+  findWindowsTerminal,
+  launchAgentTerminals,
+  extractHandoffAgents,
+  printWelcome,
+} from './hydra-operator-startup.ts';
+export {
+  normalizeSimpleCommandText,
+  parseSelfAwarenessPlaintextCommand,
+  applySelfAwarenessPatch,
+  getGitInfo,
+} from './hydra-operator-self-awareness.ts';
 
 const config = resolveProject();
 const DEFAULT_URL = process.env['AI_ORCH_URL'] ?? 'http://127.0.0.1:4173';
@@ -188,288 +196,6 @@ export function formatUptime(ms: number): string {
   if (ms < 60_000) return `${String(Math.round(ms / 1000))}s`;
   if (ms < 3600_000) return `${String(Math.round(ms / 60_000))}m`;
   return `${(ms / 3600_000).toFixed(1)}h`;
-}
-
-// ── Daemon Auto-Start ────────────────────────────────────────────────────────
-
-async function ensureDaemon(baseUrl: string, { quiet = false }: { quiet?: boolean } = {}) {
-  // Check if daemon is already running
-  try {
-    (await request('GET', baseUrl, '/health')) as any;
-    return true;
-  } catch {
-    // Not running — try to start it
-  }
-
-  if (!quiet) {
-    process.stderr.write(`  ${DIM('\u2026')} Starting daemon...\n`);
-  }
-
-  const daemonScript = path.join(HYDRA_ROOT, 'lib', 'orchestrator-daemon.mjs');
-  const child = spawnHydraNode(daemonScript, ['start'], {
-    cwd: config.projectRoot,
-    detached: true,
-    stdio: 'ignore',
-    windowsHide: true,
-  });
-  child.unref();
-
-  // Wait for health (up to 8 seconds)
-  for (let i = 0; i < 32; i++) {
-    await new Promise((r) => {
-      setTimeout(r, 250);
-    });
-    try {
-      (await request('GET', baseUrl, '/health')) as any;
-      if (!quiet) {
-        process.stderr.write(`  ${SUCCESS('\u2713')} Daemon started\n`);
-      }
-      return true;
-    } catch {
-      // keep waiting
-    }
-  }
-
-  return false;
-}
-
-// ── Agent Terminal Auto-Launch ───────────────────────────────────────────────
-
-/**
- * Detect pwsh or powershell on Windows. Returns exe path or null.
- */
-function findPowerShell() {
-  if (process.platform !== 'win32') return null;
-  for (const cmd of ['pwsh', 'powershell']) {
-    try {
-      const result = spawnSync('where', [cmd], {
-        encoding: 'utf8',
-        windowsHide: true,
-        timeout: 5_000,
-      });
-      const exe = (result.stdout || '').split('\n')[0].trim();
-      if (exe) return exe;
-    } catch {
-      /* not found */
-    }
-  }
-  return null;
-}
-
-/**
- * Detect Windows Terminal (wt.exe). Returns exe path or null.
- */
-function findWindowsTerminal() {
-  if (process.platform !== 'win32') return null;
-  try {
-    const result = spawnSync('where', ['wt'], {
-      encoding: 'utf8',
-      windowsHide: true,
-      timeout: 5_000,
-    });
-    const exe = (result.stdout || '').split('\n')[0].trim();
-    if (exe) return exe;
-  } catch {
-    /* not found */
-  }
-  return null;
-}
-
-/**
- * Spawn visible terminal windows running hydra-head.ps1 for each agent.
- * Uses -EncodedCommand to avoid escaping issues, and exec(start ...) for
- * reliable window visibility on Windows.
- */
-function launchAgentTerminals(agentNames: string[], baseUrl: string) {
-  if (process.platform !== 'win32' || agentNames.length === 0) return;
-  if ((process as any).pkg) {
-    console.log(
-      `  ${DIM('(standalone build: terminal launch disabled; use :workers start instead)')}`,
-    );
-    return;
-  }
-
-  const shell = findPowerShell();
-  if (!shell) {
-    console.log(`  ${DIM('(skipping terminal launch — no PowerShell found)')}`);
-    return;
-  }
-
-  const wt = findWindowsTerminal();
-  const headScript = path.join(HYDRA_ROOT, 'bin', 'hydra-head.ps1');
-  const cwd = config.projectRoot;
-  const cwdEscaped = cwd.replace(/'/g, "''");
-
-  for (const agent of agentNames) {
-    if (!getAgent(agent)) continue;
-    const title = `Hydra Head - ${agent.toUpperCase()}`;
-    const psCommand = [
-      `Set-Location -LiteralPath '${cwdEscaped}'`,
-      `& '${headScript}' -Agent ${agent} -Url '${baseUrl}'`,
-    ].join('; ');
-
-    // Encode as UTF-16LE base64 for -EncodedCommand (avoids all escaping issues)
-    const encoded = Buffer.from(psCommand, 'utf16le').toString('base64');
-
-    let cmd;
-    if (wt) {
-      // Windows Terminal: open a new tab in the current window
-      cmd = `wt -w 0 new-tab --title "${title}" "${shell}" -NoExit -EncodedCommand ${encoded}`;
-    } else {
-      // Fallback: start command reliably opens a visible console window
-      cmd = `start "${title}" "${shell}" -NoExit -EncodedCommand ${encoded}`;
-    }
-    exec(cmd, { cwd });
-
-    const icon =
-      ({ gemini: '\u2726', codex: '\u25B6', claude: '\u2666' } as Record<string, string>)[agent] ||
-      '\u25CF';
-    console.log(`  ${SUCCESS('\u2713')} ${colorAgent(agent)} ${icon} ${agent}  terminal launched`);
-  }
-}
-
-/**
- * Extract unique agent names from auto/smart dispatch result.
- */
-function extractHandoffAgents(result: Record<string, unknown>) {
-  const handoffs = (result as any)?.published?.handoffs;
-  if (!Array.isArray(handoffs) || handoffs.length === 0) return [];
-  const seen = new Set();
-  for (const h of handoffs) {
-    const name = String(h.to ?? '').toLowerCase();
-    if (name && getAgent(name)) seen.add(name);
-  }
-  return [...seen];
-}
-
-// ── Welcome Screen ───────────────────────────────────────────────────────────
-
-async function printWelcome(baseUrl: string) {
-  console.log(hydraSplash());
-  console.log(label('Project', pc.white(config.projectName)));
-  // Sync HYDRA.md → agent instruction files on startup
-  try {
-    const syncResult = syncHydraMd(config.projectRoot);
-    if (syncResult.synced.length > 0) {
-      console.log(label('Sync', DIM(`HYDRA.md → ${syncResult.synced.join(', ')}`)));
-    }
-  } catch {
-    /* non-critical */
-  }
-
-  console.log(label('Daemon', DIM(baseUrl)));
-
-  // Startup alert: check for in-progress tasks and pending handoffs
-  try {
-    const sessionStatus = (await request('GET', baseUrl, '/session/status')) as any;
-    if (sessionStatus.activeSession?.status === 'paused') {
-      const reason = sessionStatus.activeSession.pauseReason;
-      console.log(
-        `  ${WARNING('\u23F8')} Session paused${reason ? `: "${String(reason)}"` : ''} \u2014 type ${ACCENT(':unpause')} to resume`,
-      );
-    }
-    const inProgressCount = (sessionStatus.inProgressTasks ?? []).length;
-    const handoffCount = (sessionStatus.pendingHandoffs ?? []).length;
-    const staleCount = (sessionStatus.staleTasks ?? []).length;
-    const parts = [];
-    if (inProgressCount > 0)
-      parts.push(`${String(inProgressCount)} task${inProgressCount === 1 ? '' : 's'} in progress`);
-    if (handoffCount > 0)
-      parts.push(`${String(handoffCount)} handoff${handoffCount === 1 ? '' : 's'} pending`);
-    if (staleCount > 0) parts.push(`${String(staleCount)} stale`);
-    if (parts.length > 0) {
-      console.log(
-        `  ${WARNING('\u26A0')} ${parts.join(', ')} \u2014 type ${ACCENT(':resume')} for details`,
-      );
-    }
-  } catch {
-    /* daemon may not have session data yet */
-  }
-
-  // Mode & Models
-  try {
-    const models = getModelSummary();
-    const currentMode = (models['_mode'] ?? getMode()) as string;
-    console.log(label('Mode', ACCENT(currentMode)));
-    const parts = [];
-    for (const [agent, info] of Object.entries(models)) {
-      if (agent === '_mode') continue;
-      const colorFn = (AGENT_COLORS as any)[agent] ?? pc.white;
-      const shortModel = ((info as any).active ?? '')
-        .replace(/^claude-/, '')
-        .replace(/^gemini-/, '');
-      const tag = (info as any).isOverride ? pc.yellow(' *') : '';
-      const effLabel = formatEffortDisplay(
-        (info as any).active,
-        (info as Record<string, any>)['reasoningEffort'],
-      );
-      const eff = effLabel ? pc.yellow(` ${effLabel}`) : '';
-      parts.push(`${String(colorFn(agent))}${DIM(':')}${pc.white(shortModel)}${eff}${tag}`);
-    }
-    console.log(label('Models', parts.join(DIM('  '))));
-  } catch {
-    /* skip */
-  }
-
-  // Usage — show today's actual tokens from stats-cache
-  try {
-    const usage = checkUsage();
-    if (usage.todayTokens > 0) {
-      const modelShort = (usage.model ?? '').replace(/^claude-/, '').replace(/^gemini-/, '');
-      console.log(
-        label(
-          'Today',
-          `${pc.white(formatTokens(usage.todayTokens))} tokens ${modelShort ? DIM(`(${String(modelShort)})`) : ''}`,
-        ),
-      );
-    }
-  } catch {
-    /* skip */
-  }
-
-  // Session token usage (from real Claude JSON output)
-  try {
-    const session = getSessionUsage();
-    if (session.callCount > 0) {
-      console.log(
-        label(
-          'Session',
-          `${pc.white(formatTokens(session.totalTokens))} tokens  ${pc.white(`$${session.costUsd.toFixed(4)}`)}  ${DIM(`(${String(session.callCount)} calls)`)}`,
-        ),
-      );
-    }
-  } catch {
-    /* skip */
-  }
-
-  // Provider usage (load persisted + refresh external in background)
-  try {
-    loadProviderUsage();
-    void refreshExternalUsage(); // non-blocking
-    const providerLines = getProviderSummary();
-    if (providerLines.length > 0) {
-      console.log(label('Providers', providerLines.join(DIM(' │ '))));
-    }
-    const extLines = getExternalSummary();
-    if (extLines.length > 0) {
-      console.log(label('Account', extLines.join(DIM(' │ '))));
-    }
-  } catch {
-    /* skip */
-  }
-
-  // Context-aware next steps on startup
-  try {
-    const sessionStatus = (await request('GET', baseUrl, '/session/status')) as any;
-    printNextSteps({
-      agentSuggestions: sessionStatus.agentSuggestions,
-      pendingHandoffs: sessionStatus.pendingHandoffs,
-      staleTasks: sessionStatus.staleTasks,
-      inProgressTasks: sessionStatus.inProgressTasks,
-    });
-  } catch {
-    console.log(`  ${DIM('Type a prompt to dispatch, or :help for commands')}`);
-  }
 }
 
 export function levenshtein(a: string, b: string): number {
@@ -505,89 +231,6 @@ export function fuzzyMatchCommand(input: string): string | null {
     }
   }
   return best;
-}
-
-// ── Self Awareness (Hyper-Aware Concierge Context) ────────────────────────────
-
-let _selfIndexCache = { block: '', builtAt: 0, key: '' };
-
-export function normalizeSimpleCommandText(input: unknown): string {
-  return String(input ?? '')
-    .toLowerCase()
-    .replace(/[^\w\s]/g, ' ')
-    .replace(/\s+/g, ' ')
-    .trim();
-}
-
-export function parseSelfAwarenessPlaintextCommand(input: unknown): string | null {
-  const raw = String(input ?? '').trim();
-  if (!raw) return null;
-  if (raw.startsWith(':') || raw.startsWith('!')) return null;
-  if (raw.includes('\n')) return null;
-
-  const s = normalizeSimpleCommandText(raw);
-  if (!s || s.length > 80) return null;
-
-  const target = '(?:hyper\\s*aware(?:ness)?|self\\s*awareness)';
-  const polite = '(?:please\\s+)?(?:can\\s+you\\s+|could\\s+you\\s+|would\\s+you\\s+)?';
-  const agentSuffix = '(?:\\s+agent)?';
-
-  if (new RegExp(`^${polite}(?:turn\\s+off|disable)\\s+${target}${agentSuffix}$`).test(s))
-    return 'off';
-  if (new RegExp(`^${polite}${target}${agentSuffix}\\s+off$`).test(s)) return 'off';
-
-  if (new RegExp(`^${polite}(?:turn\\s+on|enable)\\s+${target}${agentSuffix}$`).test(s))
-    return 'on';
-  if (new RegExp(`^${polite}${target}${agentSuffix}\\s+on$`).test(s)) return 'on';
-
-  if (new RegExp(`^${polite}(?:set\\s+)?${target}${agentSuffix}\\s+(?:to\\s+)?minimal$`).test(s))
-    return 'minimal';
-  if (new RegExp(`^${polite}(?:set\\s+)?${target}${agentSuffix}\\s+(?:to\\s+)?full$`).test(s))
-    return 'full';
-
-  if (new RegExp(`^${polite}${target}${agentSuffix}\\s+status$`).test(s)) return 'status';
-  return null;
-}
-
-async function applySelfAwarenessPatch(patch = {}) {
-  const cfg = loadHydraConfig();
-  const current =
-    cfg.selfAwareness && typeof cfg.selfAwareness === 'object' ? cfg.selfAwareness : {};
-  cfg.selfAwareness = { ...current, ...patch };
-  const { saveHydraConfig: save } = await import('./hydra-config.ts');
-  const merged = save(cfg);
-  _selfIndexCache = { block: '', builtAt: 0, key: '' };
-  return merged.selfAwareness ?? cfg.selfAwareness;
-}
-
-// ── Git Info Cache ────────────────────────────────────────────────────────────
-
-let _gitInfoCache: { data: any; at: number } = { data: null, at: 0 };
-const GIT_CACHE_TTL = 30_000;
-
-function getGitInfo() {
-  const now = Date.now();
-  if (_gitInfoCache.data && now - _gitInfoCache.at < GIT_CACHE_TTL) {
-    return _gitInfoCache.data;
-  }
-  try {
-    const branch = spawnSync('git', ['rev-parse', '--abbrev-ref', 'HEAD'], {
-      cwd: config.projectRoot,
-      encoding: 'utf8',
-      timeout: 5000,
-    }).stdout.trim();
-    const porcelain = spawnSync('git', ['status', '--porcelain'], {
-      cwd: config.projectRoot,
-      encoding: 'utf8',
-      timeout: 5000,
-    }).stdout.trim();
-    const modifiedFiles = porcelain ? porcelain.split('\n').length : 0;
-    const info = { branch, modifiedFiles };
-    _gitInfoCache = { data: info, at: now };
-    return info;
-  } catch {
-    return null;
-  }
 }
 
 async function interactiveLoop({
@@ -2439,11 +2082,11 @@ async function interactiveLoop({
                 now - _selfIndexCache.builtAt > refreshMs!
               ) {
                 const idx = buildSelfIndex(HYDRA_ROOT);
-                _selfIndexCache = {
+                Object.assign(_selfIndexCache, {
                   builtAt: now,
                   key,
                   block: formatSelfIndexForPrompt(idx, { maxChars }),
-                };
+                });
               }
               context.selfIndexBlock = _selfIndexCache.block;
             }
