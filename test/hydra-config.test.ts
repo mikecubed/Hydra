@@ -376,24 +376,13 @@ describe('loadHydraConfig — missing config graceful degradation', () => {
     assert.equal(config.version, 2);
   });
 
-  it('default mode is a recognised routing mode string', () => {
+  it('default mode is a recognised HydraMode string', () => {
     const tempDir = makeTempDir();
     _setTestConfigPath(path.join(tempDir, 'missing.json'));
 
     const config = loadHydraConfig();
 
-    assert.ok(
-      [
-        'performance',
-        'balanced',
-        'economy',
-        'auto',
-        'smart',
-        'council',
-        'dispatch',
-        'chat',
-      ].includes(config.mode),
-      `unexpected default mode: ${config.mode}`,
-    );
+    const validModes = ['performance', 'balanced', 'economy', 'custom'];
+    assert.ok(validModes.includes(config.mode), `unexpected default mode: ${config.mode}`);
   });
 });
