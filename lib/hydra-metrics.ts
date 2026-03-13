@@ -5,7 +5,7 @@
  * durations, estimated tokens, and success rates.
  *
  * Usage (from a consumer module):
- *   import { recordCallStart, recordCallComplete, getMetrics } from '../lib/hydra-metrics.ts';
+ *   import { recordCallStart, recordCallComplete, getMetrics } from './hydra-metrics.ts';
  *   const handle = recordCallStart('claude', 'claude-opus-4-6');
  *   // ... agent call ...
  *   recordCallComplete(handle, result);

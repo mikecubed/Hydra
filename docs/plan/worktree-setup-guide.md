@@ -78,7 +78,7 @@ git config core.hooksPath
 
 Expected repo setup after the bootstrap fix:
 
-- `core.hooksPath` resolves to an absolute path ending in `/.husky/_`
+- `core.hooksPath` resolves to an absolute path ending in `/.husky`
 - `.husky/pre-commit` exists at the repo root
 - `.husky/pre-push` exists at the repo root
 
