@@ -1,3 +1,15 @@
 #!/usr/bin/env sh
-# Run the full test suite before pushing
-npm test
+# Run the full test suite with coverage collection (single pass)
+./node_modules/.bin/c8 npm test
+TEST_EXIT=$?
+[ $TEST_EXIT -ne 0 ] && exit $TEST_EXIT
+
+# Warn if coverage is below the 80% goal — never blocks the push
+if ! ./node_modules/.bin/c8 check-coverage 2>/dev/null; then
+  echo ""
+  echo "⚠️  Coverage warning: one or more metrics are below the 80% goal."
+  echo "    Run 'npm run test:coverage' to see the full report."
+  echo "    Push proceeding — coverage gate is aspirational only."
+  echo ""
+fi
+exit 0
