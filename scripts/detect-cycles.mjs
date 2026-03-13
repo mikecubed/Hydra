@@ -1,4 +1,3 @@
-#!/usr/bin/env node
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -26,6 +25,7 @@ try {
       console.warn(`  - ${cycle.join(' → ')}`);
     }
     console.warn('\nSee docs/REFACTORING_ROADMAP.md for the remediation plan.');
+    process.exitCode = 1;
   }
 } catch (err) {
   const message = err instanceof Error ? err.message : String(err);

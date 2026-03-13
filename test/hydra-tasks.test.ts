@@ -69,6 +69,11 @@ async function loadHydraTasksInternals(): Promise<{
     '\nexport { BUDGET_THRESHOLDS };\n',
   );
 
+  assert.ok(
+    patchedSource !== source,
+    'patch must apply: main() invocation not found in hydra-tasks.ts',
+  );
+
   fs.writeFileSync(tempModulePath, patchedSource, 'utf8');
   tempModules.add(tempModulePath);
 

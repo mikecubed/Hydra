@@ -107,7 +107,7 @@ assert.notEqual(mainInvocationIndex, -1, 'Expected hydra-audit main() invocation
 const transpiledAuditSource = transformSync(rawAuditSource.slice(0, mainInvocationIndex), {
   format: 'cjs',
   loader: 'ts',
-  target: 'node24',
+  target: 'node22',
 }).code;
 
 const transformedAuditSource = `${transpiledAuditSource}

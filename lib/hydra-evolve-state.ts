@@ -173,6 +173,7 @@ export function computeActionNeeded(
 ): string {
   if (status === 'completed') return 'Session complete. Review branches with :evolve status';
   if (status === 'failed') return 'All rounds failed. Check agent configs and retry';
+  if (status === 'interrupted') return 'Session was interrupted. Resume with :evolve resume';
   if (status === 'partial') {
     const remaining = maxRounds - roundResults.length;
     return `${String(remaining)} round(s) remaining. Resume with :evolve resume`;

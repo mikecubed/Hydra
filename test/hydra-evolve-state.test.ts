@@ -128,6 +128,12 @@ describe('hydra-evolve-state', () => {
     it('failed', () => {
       assert.match(computeActionNeeded({ length: 3 }, 3, 'failed'), /All rounds failed/);
     });
+    it('interrupted', () => {
+      assert.match(
+        computeActionNeeded({ length: 1 }, 3, 'interrupted'),
+        /interrupted.*Resume|Resume.*interrupted/i,
+      );
+    });
     it('partial', () => {
       assert.match(computeActionNeeded({ length: 1 }, 3, 'partial'), /2 round\(s\) remaining/);
     });

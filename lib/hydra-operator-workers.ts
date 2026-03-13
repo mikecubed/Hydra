@@ -14,8 +14,6 @@ import { isChoiceActive } from './hydra-prompt-choice.ts';
 import { colorAgent, SUCCESS, ERROR, DIM } from './hydra-ui.ts';
 import pc from 'picocolors';
 
-const config = resolveProject();
-
 export const workers = new Map<string, AgentWorker>();
 
 interface TaskStartEvent {
@@ -58,7 +56,7 @@ export function startAgentWorker(
 
   const worker = new AgentWorker(name, {
     baseUrl,
-    projectRoot: config.projectRoot,
+    projectRoot: resolveProject().projectRoot,
   });
 
   // Wire worker events to status bar

@@ -19,3 +19,6 @@ recent-projects.json
 # TypeScript build output
 .tsbuild/
 coverage/
+
+# Temporary test module patches (hydra-tasks test fixture)
+.hydra-tasks.testable.*.ts
