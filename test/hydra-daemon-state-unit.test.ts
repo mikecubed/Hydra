@@ -23,8 +23,9 @@ type StateModule = {
   writeState: (state: Record<string, unknown>) => HydraStateShape;
   appendSyncLog: (entry: string) => void;
   initEventSeq: () => void;
+  resetEventSeq: () => void;
   categorizeEvent: (type: string, payload: unknown) => string;
-  appendEvent: (type: string, payload?: unknown) => void;
+  appendEvent: (type: string, payload?: unknown, id?: string) => void;
   replayEvents: (fromSeq?: number) => EventRecord[];
 };
 
@@ -59,8 +60,8 @@ describe('daemon/state unit tests', () => {
     if (fs.existsSync(coordDir)) {
       fs.rmSync(coordDir, { recursive: true, force: true });
     }
-    // Reset event sequence to 0 by re-initialising against the (now missing) events file
-    mod.initEventSeq();
+    // Reset event sequence to 0 for isolation
+    mod.resetEventSeq();
   });
 
   // ── nowIso ────────────────────────────────────────────────────────────
@@ -269,6 +270,7 @@ describe('daemon/state unit tests', () => {
     mod.appendEvent('daemon_start');
     const events = mod.replayEvents(0);
     const last = events.at(-1);
+    assert.ok(last !== undefined);
     assert.ok(last.category !== undefined && last.category !== '');
   });
 });

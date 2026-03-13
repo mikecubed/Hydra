@@ -196,6 +196,10 @@ export function getEventSeq(): number {
   return eventSeq;
 }
 
+export function resetEventSeq(): void {
+  eventSeq = 0;
+}
+
 export function initEventSeq(): void {
   if (!fs.existsSync(EVENTS_PATH)) return;
   const raw = fs.readFileSync(EVENTS_PATH, 'utf8');
@@ -229,11 +233,11 @@ export function categorizeEvent(type: string, payload: unknown): string {
   return 'system';
 }
 
-export function appendEvent(type: string, payload?: unknown): void {
+export function appendEvent(type: string, payload?: unknown, id?: string): void {
   eventSeq += 1;
   const category = categorizeEvent(type, payload);
   const line = JSON.stringify({
-    id: `${String(Date.now())}_${Math.random().toString(36).slice(2, 8)}`,
+    id: id ?? `${String(Date.now())}_${Math.random().toString(36).slice(2, 8)}`,
     seq: eventSeq,
     at: nowIso(),
     type,

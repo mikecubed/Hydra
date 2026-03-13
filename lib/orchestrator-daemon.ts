@@ -897,7 +897,7 @@ function startDaemon(options: Record<string, string>) {
         type: 'mutation',
         payload: { label, ...detail },
       };
-      appendEvent('mutation', { label, ...detail });
+      appendEvent('mutation', { label, ...detail }, event.id);
       broadcastEvent(event);
       lastEventAt = at;
       eventCount += 1;
