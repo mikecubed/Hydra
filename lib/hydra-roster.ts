@@ -82,7 +82,7 @@ export async function runRosterEditor(rl: unknown): Promise<void> {
       `Model: ${currentModel}`,
       benchAnnotation ? `Benchmarks: ${benchAnnotation}` : null,
       effDisplay ? `Reasoning: ${effDisplay}` : null,
-      rec?.note != null ? `Tip: ${rec.note}` : null,
+      rec?.note == null ? null : `Tip: ${rec.note}`,
     ].filter((x): x is string => x !== null);
 
     const actionResult = await promptChoice(rl, {
@@ -117,7 +117,7 @@ export async function runRosterEditor(rl: unknown): Promise<void> {
 
     const agentResult = await promptChoice(rl, {
       title: `${role}: Select Agent`,
-      context: rec?.models != null ? `Recommended models: ${rec.models.join(', ')}` : '',
+      context: rec?.models == null ? '' : `Recommended models: ${rec.models.join(', ')}`,
       choices: agentChoices,
     });
 

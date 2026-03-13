@@ -307,8 +307,8 @@ export function annotateDispatch({
     classification?.confidence == null
       ? ''
       : ` (${String(Math.round(classification.confidence * 100))}%)`;
-  const agentStr = agent != null ? ` to ${agent}` : '';
-  const routeStr = route != null ? ` via ${route}` : '';
+  const agentStr = agent == null ? '' : ` to ${agent}`;
+  const routeStr = route == null ? '' : ` via ${route}`;
   return `Dispatched "${shortPrompt}" - ${tier}/${taskType}${conf}${routeStr}${agentStr} [${mode ?? 'auto'}]`;
 }
 
@@ -319,7 +319,7 @@ export function annotateDispatch({
  */
 export function annotateHandoff({ from, to, summary, taskTitle }: HandoffParams): string {
   const shortSummary = (summary ?? '').slice(0, 100);
-  const task = taskTitle != null ? ` (task: "${taskTitle}")` : '';
+  const task = taskTitle == null ? '' : ` (task: "${taskTitle}")`;
   return `${from ?? '?'} handed off to ${to ?? '?'}: "${shortSummary}"${task}`;
 }
 
@@ -336,10 +336,10 @@ export function annotateCompletion({
   outputSummary,
   status,
 }: CompletionParams): string {
-  const elapsed = durationMs != null ? `${String(Math.round(durationMs / 1000))}s` : '';
+  const elapsed = durationMs == null ? '' : `${String(Math.round(durationMs / 1000))}s`;
   const statusStr = status === 'error' ? 'FAILED' : 'completed';
-  const summary = outputSummary != null ? `: "${outputSummary.slice(0, 80)}"` : '';
-  const taskStr = title != null ? ` "${title}"` : '';
+  const summary = outputSummary == null ? '' : `: "${outputSummary.slice(0, 80)}"`;
+  const taskStr = title == null ? '' : ` "${title}"`;
   return `${agent ?? '?'} ${statusStr} ${taskId ?? '?'}${taskStr}${elapsed.length > 0 ? ` in ${elapsed}` : ''}${summary}`;
 }
 
@@ -455,17 +455,18 @@ export async function buildActivityDigest({
       currentTask: daemonAgent.currentTask ?? null,
       pendingHandoffs: daemonAgent.pendingHandoffs ?? [],
       worker:
-        worker != null
-          ? {
+        worker == null
+          ? null
+          : {
               status: worker._state ?? worker.status ?? 'unknown',
               currentTaskId: worker._currentTask?.taskId ?? null,
               currentTaskTitle: worker._currentTask?.title ?? null,
               permissionMode: worker._permissionMode ?? null,
-            }
-          : null,
+            },
       metrics:
-        metrics != null
-          ? {
+        metrics == null
+          ? null
+          : {
               callsToday: metrics.callsToday ?? 0,
               successRate:
                 metrics.callsTotal > 0
@@ -473,8 +474,7 @@ export async function buildActivityDigest({
                   : 100,
               avgDurationMs: metrics.avgDurationMs ?? 0,
               lastModel: metrics.lastModel ?? null,
-            }
-          : null,
+            },
     };
   });
 
@@ -543,13 +543,13 @@ export function formatDigestForPrompt(digest: ActivityDigest, opts: DigestOpts =
   if (digest.session != null) {
     const s = digest.session;
     const since =
-      s.startedAt != null
-        ? new Date(s.startedAt).toLocaleTimeString('en-US', {
+      s.startedAt == null
+        ? '?'
+        : new Date(s.startedAt).toLocaleTimeString('en-US', {
             hour: '2-digit',
             minute: '2-digit',
             hour12: false,
-          })
-        : '?';
+          });
     lines.push(
       `Session: ${s.status ?? 'active'} since ${since} | Focus: "${(s.focus ?? 'general').slice(0, 60)}"`,
     );
@@ -566,9 +566,9 @@ export function formatDigestForPrompt(digest: ActivityDigest, opts: DigestOpts =
       if (a.execMode === 'worker') execTag = ' [W]';
       else if (a.execMode === 'terminal') execTag = ' [T]';
       const elapsed = a.elapsedMs > 5000 ? ` ${formatElapsedCompact(a.elapsedMs)}` : '';
-      const model = a.model != null ? ` (${a.model})` : '';
-      const taskStr = a.taskTitle != null ? ` "${a.taskTitle.slice(0, 50)}"` : '';
-      const phase = a.phase != null ? ` [${a.phase}${a.step != null ? ` ${a.step}` : ''}]` : '';
+      const model = a.model == null ? '' : ` (${a.model})`;
+      const taskStr = a.taskTitle == null ? '' : ` "${a.taskTitle.slice(0, 50)}"`;
+      const phase = a.phase == null ? '' : ` [${a.phase}${a.step == null ? '' : ` ${a.step}`}]`;
       lines.push(`- ${a.name} [${a.status}]${taskStr}${phase}${model}${execTag}${elapsed}`);
       if (a.pendingHandoffs.length > 0) {
         for (const h of a.pendingHandoffs.slice(0, 2)) {
@@ -636,7 +636,7 @@ export function formatDigestForPrompt(digest: ActivityDigest, opts: DigestOpts =
       lines.push('RECENT COMPLETIONS:');
       for (const c of digest.recentCompletions.slice(0, 3)) {
         const elapsed =
-          c.durationMs != null ? ` in ${String(Math.round(c.durationMs / 1000))}s` : '';
+          c.durationMs == null ? '' : ` in ${String(Math.round(c.durationMs / 1000))}s`;
         lines.push(
           `- ${c.id ?? c.taskId ?? '?'}: ${c.owner ?? c.agent ?? '?'} done${elapsed} - "${(c.title ?? '').slice(0, 60)}"`,
         );

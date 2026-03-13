@@ -1022,7 +1022,7 @@ export async function phaseDeliberate(
   const findingsBlock = JSON.stringify(research, null, 2);
 
   // Step 1: Claude synthesizes
-  /* eslint-disable @typescript-eslint/no-unsafe-member-access */
+
   const synthesizePrompt = `# Evolve Deliberation: Synthesize Research
 
 You are synthesizing research findings about "${research.area}" for the Hydra multi-agent orchestration system.
@@ -1047,7 +1047,6 @@ Respond with JSON:
   "suggestedImprovement": "...",
   "rationale": "..."
 }`;
-  /* eslint-enable @typescript-eslint/no-unsafe-member-access */
 
   log.dim('Step 1/4: Claude synthesizing research findings...');
   const synthResult = await executeAgent('claude', synthesizePrompt, {
@@ -1067,7 +1066,7 @@ Respond with JSON:
   );
 
   // Step 2: Gemini critiques
-  /* eslint-disable @typescript-eslint/no-unsafe-member-access */
+
   const critiquePrompt = `# Evolve Deliberation: Critique
 
 Review this synthesis of research findings about "${research.area}" for the Hydra project:
@@ -1088,7 +1087,6 @@ Respond with JSON:
   "alternativeIdea": "..." or null,
   "feasibilityScore": 1-10
 }`;
-  /* eslint-enable @typescript-eslint/no-unsafe-member-access */
 
   log.dim('Step 2/4: Gemini critiquing synthesis...');
   const critiqueResult = await executeAgentWithRetry('gemini', critiquePrompt, {
@@ -1212,18 +1210,14 @@ Respond with JSON:
   // Research-based fallback: extract top idea directly from research findings
   // eslint-disable-next-line @typescript-eslint/strict-boolean-expressions -- runtime safety
   if (!selectedImprovement) {
-    // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment -- runtime safety
     const researchFallback =
-      // eslint-disable-next-line @typescript-eslint/no-unsafe-member-access -- runtime safety
       research.claudeFindings.applicableIdeas?.[0] ??
-      // eslint-disable-next-line @typescript-eslint/no-unsafe-member-access -- runtime safety
       research.geminiFindings.applicableIdeas?.[0] ??
-      // eslint-disable-next-line @typescript-eslint/no-unsafe-member-access -- runtime safety
       research.codexFindings.implementationIdeas?.[0];
     // eslint-disable-next-line @typescript-eslint/strict-boolean-expressions -- runtime safety
     if (researchFallback) {
       log.warn('Using top research finding as improvement (deliberation parsing failed)');
-      // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment -- runtime safety
+
       selectedImprovement = researchFallback;
     }
   }

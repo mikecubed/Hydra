@@ -939,3 +939,51 @@ export interface ActiveProvider {
   model: string;
   isFallback: boolean;
 }
+
+// ── Agent executor shared types ───────────────────────────────────────────────
+
+/** Progress callback: (elapsedMs, outputKB, status?) */
+export type ProgressCallback = (elapsed: number, outputKB: number, status?: string) => void;
+
+/** Status bar callback: (agent, meta) */
+export type StatusBarCallback = (agent: string, meta: { phase?: string; step?: string }) => void;
+
+/** Common result shape returned by all execute* functions */
+export interface ExecuteResult {
+  ok: boolean;
+  output: string;
+  stdout?: string;
+  stderr: string;
+  error: string | null;
+  exitCode: number | null;
+  signal: string | null;
+  durationMs: number;
+  timedOut: boolean;
+  errorCategory?: string;
+  errorDetail?: string;
+  errorContext?: string;
+  startupFailure?: boolean;
+  tokenUsage?: TokenUsage | null;
+  costUsd?: number | null;
+  command?: string;
+  args?: string[];
+  promptSnippet?: string;
+  // Recovery fields
+  recovered?: boolean;
+  originalModel?: string;
+  newModel?: string;
+  circuitBreakerTripped?: boolean;
+  modelError?: unknown;
+  // Rate limit fields
+  rateLimitRetries?: number;
+  rateLimitExhausted?: boolean;
+  // Usage limit fields
+  usageLimited?: boolean;
+  usageLimitConfirmed?: boolean;
+  usageLimitStructured?: boolean;
+  resetInSeconds?: number;
+  usageLimitDetail?: string;
+  usageLimitFalsePositive?: boolean;
+  usageLimitPattern?: string;
+  usageLimitUnverifiable?: boolean;
+}
