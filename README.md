@@ -195,20 +195,22 @@ For scenario walkthroughs, Mermaid diagrams, and example interactions, start wit
 
 ### npm scripts
 
-| Command                           | Description                                                                                                                  |
-| --------------------------------- | ---------------------------------------------------------------------------------------------------------------------------- |
-| `npm run go`                      | Launch operator console                                                                                                      |
-| `npm start`                       | Start the daemon                                                                                                             |
-| `npm test`                        | Run all tests                                                                                                                |
-| `npm run test:coverage`           | Run all tests with c8 coverage reporting                                                                                     |
-| `npm run test:coverage:check`     | Run tests with 80% threshold; exits non-zero if below (CI runs this as a non-blocking warn-only job via `continue-on-error`) |
-| `npm run council -- prompt="..."` | Full council deliberation                                                                                                    |
-| `npm run evolve`                  | Autonomous self-improvement                                                                                                  |
-| `npm run nightly`                 | Nightly task automation                                                                                                      |
-| `npm run tasks`                   | Scan & execute TODO/FIXME/issues                                                                                             |
-| `npm run lint:mermaid`            | Validate Mermaid diagrams in Markdown                                                                                        |
-| `npm run lint:cycles`             | Report circular imports in `lib/`                                                                                            |
-| `npm run eval`                    | Routing evaluation against golden corpus                                                                                     |
+| Command                       | Description                                                                                                                  |
+| ----------------------------- | ---------------------------------------------------------------------------------------------------------------------------- |
+| `npm run go`                  | Launch operator console                                                                                                      |
+| `npm start`                   | Start the daemon                                                                                                             |
+| `npm test`                    | Run all tests                                                                                                                |
+| `npm run test:coverage`       | Run all tests with c8 coverage reporting                                                                                     |
+| `npm run test:coverage:check` | Run tests with 80% threshold; exits non-zero if below (CI runs this as a non-blocking warn-only job via `continue-on-error`) |
+
+> **Note:** The `Coverage Gate (warn-only)` CI check is expected to show a red ✗ while coverage is actively being built up toward the 80% goal. The check uses `continue-on-error: true` so it **never blocks merges** — the red icon is informational only.
+> | `npm run council -- prompt="..."` | Full council deliberation |
+> | `npm run evolve` | Autonomous self-improvement |
+> | `npm run nightly` | Nightly task automation |
+> | `npm run tasks` | Scan & execute TODO/FIXME/issues |
+> | `npm run lint:mermaid` | Validate Mermaid diagrams in Markdown |
+> | `npm run lint:cycles` | Report circular imports in `lib/` |
+> | `npm run eval` | Routing evaluation against golden corpus |
 
 ### Operator console (inside `npm run go`)
 
