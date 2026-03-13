@@ -18,7 +18,6 @@ export const HYDRA_INTERNAL_FLAG = '--hydra-internal';
 const INTERNAL_MODULE_LOADERS: Partial<Record<string, () => Promise<unknown>>> = {
   'lib/hydra-operator.ts': () => import('./hydra-operator.ts'),
   'lib/orchestrator-daemon.ts': () => import('./orchestrator-daemon.ts'),
-  'lib/orchestrator-client.ts': () => import('./orchestrator-client.ts'),
   'lib/hydra-council.ts': () => import('./hydra-council.ts'),
   'lib/hydra-dispatch.ts': () => import('./hydra-dispatch.ts'),
   'lib/hydra-models-select.ts': () => import('./hydra-models-select.ts'),
