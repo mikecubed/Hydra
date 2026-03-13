@@ -491,7 +491,6 @@ async function printWelcome(baseUrl: string) {
   }
 }
 
-
 export function levenshtein(a: string, b: string): number {
   const m = a.length,
     n = b.length;
