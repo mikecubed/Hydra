@@ -38,10 +38,15 @@ import {
 import { hydraSplash, label as uiLabel, divider, SUCCESS, DIM } from './hydra-ui.ts';
 import { resolveProject, loadHydraConfig } from './hydra-config.ts';
 import {
-  git,
-  getCurrentBranch as getGitCurrentBranch,
-  smartMerge,
-} from './hydra-shared/git-ops.ts';
+  readEvents,
+  readArchive,
+  archiveState,
+  truncateEventsFile,
+  createSnapshot,
+  cleanOldSnapshots,
+  checkIdempotency,
+} from './daemon/archive.ts';
+import { createTaskWorktree, mergeTaskWorktree, cleanupTaskWorktree } from './daemon/worktree.ts';
 import { getMetricsSummary, persistMetrics, loadPersistedMetrics } from './hydra-metrics.ts';
 import { checkUsage } from './hydra-usage.ts';
 import { resolveVerificationPlan } from './hydra-verification.ts';
@@ -57,15 +62,11 @@ import {
   appendSyncLog,
   appendEvent,
   replayEvents,
-  type EventRecord,
 } from './daemon/state.ts';
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import type {
   HydraStateShape,
   TaskEntry,
-  HandoffEntry,
-  BlockerEntry,
-  ArchiveState,
   WriteRouteCtx,
   UsageCheckResult,
   ModelSummaryEntry,
@@ -78,8 +79,6 @@ const config = resolveProject();
 const COORD_DIR = config.coordDir;
 const STATE_PATH = config.statePath;
 const STATUS_PATH = config.statusPath;
-const EVENTS_PATH = config.eventsPath;
-const ARCHIVE_PATH = config.archivePath;
 
 const DEFAULT_HOST = process.env['AI_ORCH_HOST'] ?? '127.0.0.1';
 const DEFAULT_PORT = Number.parseInt(process.env['AI_ORCH_PORT'] ?? '4173', 10);
@@ -163,174 +162,6 @@ async function readJsonBody(req: IncomingMessage) {
   return JSON.parse(raw) as Record<string, unknown>;
 }
 
-function readEvents(limit = 50) {
-  if (!fs.existsSync(EVENTS_PATH)) {
-    return [];
-  }
-  const raw = fs.readFileSync(EVENTS_PATH, 'utf8');
-  const lines = raw
-    .split(/\r?\n/)
-    .map((line: string) => line.trim())
-    .filter(Boolean);
-
-  const parsed: EventRecord[] = [];
-  for (const line of lines) {
-    try {
-      parsed.push(JSON.parse(line) as EventRecord);
-    } catch {
-      // Skip malformed lines.
-    }
-  }
-  return parsed.slice(-Math.max(1, Math.min(limit, 500)));
-}
-
-function readArchive(): ArchiveState {
-  if (!fs.existsSync(ARCHIVE_PATH)) {
-    return { tasks: [], handoffs: [], blockers: [] };
-  }
-  try {
-    return JSON.parse(fs.readFileSync(ARCHIVE_PATH, 'utf8')) as ArchiveState;
-  } catch {
-    return { tasks: [], handoffs: [], blockers: [] };
-  }
-}
-
-function writeArchive(archive: ArchiveState) {
-  archive.archivedAt = nowIso();
-  fs.writeFileSync(ARCHIVE_PATH, `${JSON.stringify(archive, null, 2)}\n`, 'utf8');
-}
-
-function archiveState(state: HydraStateShape) {
-  const archive = readArchive();
-  let moved = 0;
-  const oneHourAgo = Date.now() - 60 * 60 * 1000;
-
-  const completedTasks = state.tasks.filter((t: TaskEntry) =>
-    ['done', 'cancelled'].includes(t.status),
-  );
-  const completedTaskIds = new Set(completedTasks.map((t: TaskEntry) => t.id));
-  if (completedTasks.length > 0) {
-    archive.tasks.push(...completedTasks);
-    state.tasks = state.tasks.filter((t: TaskEntry) => !completedTaskIds.has(t.id));
-    moved += completedTasks.length;
-
-    for (const task of state.tasks) {
-      if (Array.isArray(task.blockedBy)) {
-        task.blockedBy = task.blockedBy.filter((dep: string) => !completedTaskIds.has(dep));
-      }
-    }
-  }
-
-  const oldHandoffs = state.handoffs.filter((h: HandoffEntry) => {
-    if (h.acknowledgedAt == null || h.acknowledgedAt === '') {
-      return false;
-    }
-    return new Date(h.acknowledgedAt).getTime() < oneHourAgo;
-  });
-  if (oldHandoffs.length > 0) {
-    const oldHandoffIds = new Set(oldHandoffs.map((h: HandoffEntry) => h.id));
-    archive.handoffs.push(...oldHandoffs);
-    state.handoffs = state.handoffs.filter((h: HandoffEntry) => !oldHandoffIds.has(h.id));
-    moved += oldHandoffs.length;
-  }
-
-  const resolvedBlockers = state.blockers.filter((b: BlockerEntry) => b.status === 'resolved');
-  if (resolvedBlockers.length > 0) {
-    const resolvedIds = new Set(resolvedBlockers.map((b: BlockerEntry) => b.id));
-    archive.blockers.push(...resolvedBlockers);
-    state.blockers = state.blockers.filter((b: BlockerEntry) => !resolvedIds.has(b.id));
-    moved += resolvedBlockers.length;
-  }
-
-  if (moved > 0) {
-    writeArchive(archive);
-  }
-
-  return moved;
-}
-
-function truncateEventsFile(maxLines = 500) {
-  if (!fs.existsSync(EVENTS_PATH)) {
-    return 0;
-  }
-  const raw = fs.readFileSync(EVENTS_PATH, 'utf8');
-  const lines = raw.split(/\r?\n/).filter(Boolean);
-  if (lines.length <= maxLines) {
-    return 0;
-  }
-  const trimmed = lines.slice(-maxLines);
-  fs.writeFileSync(EVENTS_PATH, `${trimmed.join('\n')}\n`, 'utf8');
-  return lines.length - maxLines;
-}
-
-// ── Snapshots ──────────────────────────────────────────────────────────────
-
-const SNAPSHOT_DIR = path.join(COORD_DIR, 'snapshots');
-
-function createSnapshot() {
-  try {
-    if (!fs.existsSync(SNAPSHOT_DIR)) {
-      fs.mkdirSync(SNAPSHOT_DIR, { recursive: true });
-    }
-    const state = readState();
-    const seq = getEventSeq();
-    const snapshot = {
-      seq,
-      createdAt: nowIso(),
-      state,
-    };
-    const filename = `snapshot_${String(seq)}_${String(Date.now())}.json`;
-    fs.writeFileSync(
-      path.join(SNAPSHOT_DIR, filename),
-      `${JSON.stringify(snapshot, null, 2)}\n`,
-      'utf8',
-    );
-    return { ok: true, seq, filename };
-  } catch (err) {
-    return { ok: false, error: (err as Error).message };
-  }
-}
-
-function cleanOldSnapshots(retentionCount = 5) {
-  try {
-    if (!fs.existsSync(SNAPSHOT_DIR)) return 0;
-    const files = fs
-      .readdirSync(SNAPSHOT_DIR)
-      .filter((f) => f.startsWith('snapshot_') && f.endsWith('.json'))
-      .sort();
-    const toDelete = files.slice(0, Math.max(0, files.length - retentionCount));
-    for (const f of toDelete) {
-      try {
-        fs.unlinkSync(path.join(SNAPSHOT_DIR, f));
-      } catch {
-        /* skip */
-      }
-    }
-    return toDelete.length;
-  } catch {
-    return 0;
-  }
-}
-
-// ── Idempotency ──────────────────────────────────────────────────────────
-
-const idempotencyLog = new Map(); // key → timestamp
-const IDEMPOTENCY_TTL_MS = 5 * 60 * 1000;
-
-function checkIdempotency(key: string) {
-  if (key === '') return false;
-  const now = Date.now();
-  // Prune stale entries periodically
-  if (idempotencyLog.size > 200) {
-    for (const [k, ts] of idempotencyLog) {
-      if (now - ts > IDEMPOTENCY_TTL_MS) idempotencyLog.delete(k);
-    }
-  }
-  if (idempotencyLog.has(key)) return true;
-  idempotencyLog.set(key, now);
-  return false;
-}
-
 async function requestJson(method: string, url: string, body: unknown = null) {
   const headers: Record<string, string> = {
     Accept: 'application/json',
@@ -401,113 +232,6 @@ async function commandStop(options: Record<string, string>) {
   } catch (err) {
     console.error(`Unable to reach daemon at ${url}: ${(err as Error).message}`);
     process.exitCode = 1;
-  }
-}
-
-// ── Worktree Isolation Helpers ───────────────────────────────────────────────
-
-/**
- * Creates a git worktree for a task at .hydra/worktrees/task-{taskId}.
- * Returns the absolute worktree path on success, null on failure (caller falls
- * back to non-isolated dispatch).
- *
- * @param {string} taskId
- * @returns {string|null}
- */
-function createTaskWorktree(taskId: string) {
-  const cfg = loadHydraConfig();
-  const worktreeDir = cfg.routing.worktreeIsolation.worktreeDir ?? '.hydra/worktrees';
-  const worktreePath = path.resolve(config.projectRoot, worktreeDir, `task-${taskId}`);
-  const branch = `hydra/task/${taskId}`;
-
-  try {
-    const result = git(['worktree', 'add', worktreePath, '-b', branch, 'HEAD'], config.projectRoot);
-    if (result.status !== 0) {
-      const errMsg = ([result.stderr, result.stdout] as string[]).find((s) => s !== '') ?? '';
-      const errMsgTrimmed = errMsg.trim();
-      console.warn(`[worktree] Failed to create worktree for task ${taskId}: ${errMsgTrimmed}`);
-      return null;
-    }
-    return worktreePath;
-  } catch (err) {
-    console.warn(
-      `[worktree] Exception creating worktree for task ${taskId}: ${(err as Error).message}`,
-    );
-    return null;
-  }
-}
-
-/**
- * Merges the task's worktree branch back to the current branch via smartMerge.
- * Returns { ok: true } on clean merge, { ok: false, conflict: true } on conflict,
- * { ok: false, error: string } on unexpected error.
- *
- * @param {string} taskId
- * @returns {{ ok: boolean, conflict?: boolean, error?: string }}
- */
-function mergeTaskWorktree(taskId: string) {
-  const branch = `hydra/task/${taskId}`;
-  const currentBranch = getGitCurrentBranch(config.projectRoot);
-
-  try {
-    const result = smartMerge(config.projectRoot, branch, currentBranch);
-    if (!result.ok) {
-      const conflictList =
-        (result as Record<string, unknown>)['conflicts'] != null &&
-        ((result as Record<string, unknown>)['conflicts'] as string[]).length > 0
-          ? ((result as Record<string, unknown>)['conflicts'] as string[]).join(', ')
-          : '(unknown)';
-      console.warn(
-        `[worktree] Conflict merging task ${taskId} branch into ${currentBranch}: ${conflictList}`,
-      );
-      return { ok: false, conflict: true };
-    }
-    return { ok: true };
-  } catch (err) {
-    console.warn(`[worktree] Exception merging task ${taskId}: ${(err as Error).message}`);
-    return { ok: false, error: (err as Error).message };
-  }
-}
-
-/**
- * Removes the git worktree and branch for a task. Best-effort — does not throw.
- * Pass force: true to remove even if the worktree has uncommitted changes.
- *
- * @param {string} taskId
- * @param {{ force?: boolean }} [opts]
- */
-function cleanupTaskWorktree(taskId: string, { force = false } = {}) {
-  const cfg = loadHydraConfig();
-  const worktreeDir = cfg.routing.worktreeIsolation.worktreeDir ?? '.hydra/worktrees';
-  const worktreePath = path.resolve(config.projectRoot, worktreeDir, `task-${taskId}`);
-  const branch = `hydra/task/${taskId}`;
-
-  // Remove worktree
-  try {
-    const removeArgs = force
-      ? ['worktree', 'remove', worktreePath, '--force']
-      : ['worktree', 'remove', worktreePath];
-    const result = git(removeArgs, config.projectRoot);
-    if (result.status !== 0) {
-      console.warn(
-        `[worktree] Could not remove worktree for task ${taskId}: ${result.stderr.trim()}`,
-      );
-    }
-  } catch (err) {
-    console.warn(
-      `[worktree] Exception removing worktree for task ${taskId}: ${(err as Error).message}`,
-    );
-  }
-
-  // Delete branch
-  try {
-    const branchFlag = force ? '-D' : '-d';
-    const result = git(['branch', branchFlag, branch], config.projectRoot);
-    if (result.status !== 0) {
-      console.warn(`[worktree] Could not delete branch ${branch}: ${result.stderr.trim()}`);
-    }
-  } catch (err) {
-    console.warn(`[worktree] Exception deleting branch ${branch}: ${(err as Error).message}`);
   }
 }
 
