@@ -65,6 +65,26 @@ let _geminiToken: string | null = null;
 let _geminiTokenExpiry = 0;
 let _geminiProjectId: string | null = null;
 
+/** Test seam: override the OAuth config without mutating process.env */
+let _geminiOAuthOverride: { clientId: string; clientSecret: string } | null = null;
+
+export function _setGeminiOAuthConfig(
+  cfg: { clientId: string; clientSecret: string } | null,
+): void {
+  _geminiOAuthOverride = cfg;
+}
+
+/** Test seam: reset the module-level token cache for isolation between tests */
+export function _resetGeminiTokenCache(): void {
+  _geminiToken = null;
+  _geminiTokenExpiry = 0;
+  _geminiProjectId = null;
+}
+
+function getOAuthConfig(): { clientId: string; clientSecret: string } {
+  return _geminiOAuthOverride ?? GEMINI_OAUTH;
+}
+
 export async function getGeminiToken(): Promise<string | null> {
   if (_geminiToken != null && Date.now() < _geminiTokenExpiry - 60_000) return _geminiToken;
 
@@ -87,7 +107,8 @@ export async function getGeminiToken(): Promise<string | null> {
   if (creds['refresh_token'] == null) return null;
 
   // Require the client secret from the environment — refuse to proceed without it.
-  if (GEMINI_OAUTH.clientSecret === '') {
+  const oauthCfg = getOAuthConfig();
+  if (oauthCfg.clientSecret === '') {
     throw new Error(
       'Gemini OAuth token refresh requires GEMINI_OAUTH_CLIENT_SECRET to be set. ' +
         'See .env.example for setup instructions.',
@@ -98,8 +119,8 @@ export async function getGeminiToken(): Promise<string | null> {
     method: 'POST',
     headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
     body: new URLSearchParams({
-      client_id: GEMINI_OAUTH.clientId,
-      client_secret: GEMINI_OAUTH.clientSecret,
+      client_id: oauthCfg.clientId,
+      client_secret: oauthCfg.clientSecret,
       refresh_token: creds['refresh_token'] as string,
       grant_type: 'refresh_token',
     }),

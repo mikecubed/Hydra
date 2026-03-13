@@ -94,6 +94,42 @@ describe('assertSafeSpawnCmd', () => {
     }, /unsafe characters/);
   });
 
+  it('rejects redirection operator <', () => {
+    assert.throws(() => {
+      assertSafeSpawnCmd('cmd < /etc/passwd', 'test');
+    }, /unsafe characters/);
+  });
+
+  it('rejects redirection operator >', () => {
+    assert.throws(() => {
+      assertSafeSpawnCmd('cmd > /tmp/out', 'test');
+    }, /unsafe characters/);
+  });
+
+  it('rejects shell subshell syntax (', () => {
+    assert.throws(() => {
+      assertSafeSpawnCmd('$(cmd)', 'test');
+    }, /unsafe characters/);
+  });
+
+  it('rejects shell subshell syntax )', () => {
+    assert.throws(() => {
+      assertSafeSpawnCmd('cmd)', 'test');
+    }, /unsafe characters/);
+  });
+
+  it('rejects newline \\n', () => {
+    assert.throws(() => {
+      assertSafeSpawnCmd('cmd\nrm -rf /', 'test');
+    }, /unsafe characters/);
+  });
+
+  it('rejects carriage return \\r', () => {
+    assert.throws(() => {
+      assertSafeSpawnCmd('cmd\rrm -rf /', 'test');
+    }, /unsafe characters/);
+  });
+
   it('includes context in error message', () => {
     assert.throws(() => {
       assertSafeSpawnCmd('cmd; bad', 'my-context');
