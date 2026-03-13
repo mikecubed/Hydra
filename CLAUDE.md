@@ -26,7 +26,7 @@ Branch naming conventions: `feat/...`, `fix/...`, `docs/...`, `chore/...`, or `c
 ```bash
 npm test                    # Run all tests (Node.js native test runner)
 npm run test:coverage       # Run all tests with c8 coverage reporting
-npm run test:coverage:check # Run tests + warn if coverage is below 80% (aspirational gate)
+npm run test:coverage:check # Run tests with 80% threshold — exits non-zero if below (CI surfaces this as warn-only via continue-on-error)
 node --test test/hydra-ui.test.ts   # Run a single test file
 npm start                   # Start the daemon (port 4173)
 npm run go                  # Launch operator console (interactive REPL)

@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import test from 'node:test';
+import test, { mock } from 'node:test';
 
 import {
   estimateFlowDuration,
@@ -13,19 +13,16 @@ import {
 } from '../lib/hydra-metrics.ts';
 
 function withMockedDateNow<T>(timestamps: number[], callback: () => T): T {
-  const originalDateNow = Date.now;
   let index = 0;
-
-  Date.now = () => {
+  const spy = mock.method(Date, 'now', () => {
     const timestamp = timestamps[Math.min(index, timestamps.length - 1)];
     index += 1;
     return timestamp;
-  };
-
+  });
   try {
     return callback();
   } finally {
-    Date.now = originalDateNow;
+    spy.mock.restore();
   }
 }
 

@@ -40,20 +40,13 @@ export function stripGitEnv(): Record<string, string | undefined> {
  * write to the hook-invoking repo instead of the intended cwd.
  */
 export function git(args: string[], cwd: string): GitResult {
-  const {
-    GIT_DIR: _gitDir,
-    GIT_WORK_TREE: _gitWorkTree,
-    GIT_INDEX_FILE: _gitIndexFile,
-    GIT_OBJECT_DIRECTORY: _gitObjectDir,
-    ...env
-  } = process.env;
   const r = spawnSyncCapture('git', args, {
     cwd,
     encoding: 'utf8',
     timeout: 15_000,
     windowsHide: true,
     shell: false,
-    env,
+    env: stripGitEnv(),
   });
   return { status: r.status, stdout: r.stdout, stderr: r.stderr, error: r.error, signal: r.signal };
 }
