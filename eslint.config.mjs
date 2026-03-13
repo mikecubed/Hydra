@@ -238,7 +238,10 @@ export default [
       '@typescript-eslint/no-floating-promises': 'off',
       '@typescript-eslint/explicit-module-boundary-types': 'off',
       '@typescript-eslint/strict-boolean-expressions': 'off',
-      'n/no-unsupported-features/node-builtins': ['error', { ignores: ['fetch', 'test.describe', 'test.mock.module'] }],
+      'n/no-unsupported-features/node-builtins': [
+        'error',
+        { ignores: ['fetch', 'test.describe', 'test.mock.module'] },
+      ],
       'no-shadow': 'off',
       'n/no-unpublished-import': 'off',
       'n/no-missing-import': 'off',
