@@ -491,8 +491,15 @@ describe('assertSafeSpawnCmd', () => {
 });
 
 // ── Custom agent routing in executeAgent() ───────────────────────────────────
-import { executeAgent } from '../lib/hydra-shared/agent-executor.ts';
-import { registerAgent, unregisterAgent, AGENT_TYPE, _resetRegistry } from '../lib/hydra-agents.ts';
+import { executeAgent, executeAgentWithRecovery } from '../lib/hydra-shared/agent-executor.ts';
+import {
+  registerAgent,
+  unregisterAgent,
+  initAgentRegistry,
+  AGENT_TYPE,
+  _resetRegistry,
+} from '../lib/hydra-agents.ts';
+import { _setTestConfig, invalidateConfigCache } from '../lib/hydra-config.ts';
 
 describe('executeAgent — custom CLI agent routing', () => {
   beforeEach(() => {
@@ -654,5 +661,208 @@ describe('executeAgentWithRecovery — custom-cli-unavailable fallback', () => {
   it('custom-cli-unavailable error category string is defined', () => {
     // Verifies the category constant value used in executeAgentWithRecovery
     assert.strictEqual('custom-cli-unavailable', 'custom-cli-unavailable');
+  });
+});
+
+describe('executeAgent edge-case characterization', () => {
+  afterEach(() => {
+    invalidateConfigCache();
+    _resetRegistry();
+    initAgentRegistry();
+  });
+
+  it('passes through a syntactically valid but unconfigured model override unchanged', async () => {
+    _setTestConfig({
+      models: {
+        'test-model-cli': {
+          default: 'configured-default-model',
+          fast: 'configured-fast-model',
+          active: 'default',
+        },
+      },
+    });
+
+    registerAgent('test-model-cli', {
+      type: AGENT_TYPE.PHYSICAL,
+      cli: process.execPath,
+      invoke: {
+        nonInteractive: (_prompt, opts = {}) => [
+          process.execPath,
+          ['-e', 'process.stdout.write(process.argv[1])', opts.model ?? ''],
+        ],
+        interactive: null,
+        headless: (_prompt, opts = {}) => [
+          process.execPath,
+          ['-e', 'process.stdout.write(process.argv[1])', opts.model ?? ''],
+        ],
+      },
+      contextBudget: 1000,
+      councilRole: null,
+      taskAffinity: {},
+      enabled: true,
+    });
+
+    const result = await executeAgent('test-model-cli', 'hello', {
+      modelOverride: 'nonexistent-valid-model',
+    });
+
+    assert.equal(result.ok, true);
+    assert.equal(result.output, 'nonexistent-valid-model');
+    assert.equal(result.error, null);
+  });
+
+  it('falls back to claude when a custom CLI binary is missing from PATH', async () => {
+    registerAgent('claude', {
+      type: AGENT_TYPE.PHYSICAL,
+      cli: process.execPath,
+      invoke: {
+        nonInteractive: () => [process.execPath, ['-e', 'process.stdout.write("fallback-ok")']],
+        interactive: null,
+        headless: () => [process.execPath, ['-e', 'process.stdout.write("fallback-ok")']],
+      },
+      contextBudget: 1000,
+      councilRole: null,
+      taskAffinity: {},
+      enabled: true,
+    });
+
+    registerAgent('test-missing-cli-recovery', {
+      type: AGENT_TYPE.PHYSICAL,
+      customType: 'cli',
+      cli: 'definitely-missing-binary-hydra-test',
+      invoke: {
+        nonInteractive: { cmd: 'definitely-missing-binary-hydra-test', args: ['{prompt}'] },
+        headless: { cmd: 'definitely-missing-binary-hydra-test', args: ['{prompt}'] },
+      },
+      responseParser: 'plaintext',
+      contextBudget: 1000,
+      councilRole: null,
+      taskAffinity: {},
+      enabled: true,
+    });
+
+    const stderrWrites = [];
+    const originalWrite = process.stderr.write.bind(process.stderr);
+    process.stderr.write = (chunk, ...rest) => {
+      stderrWrites.push(String(chunk));
+      return originalWrite(chunk, ...rest);
+    };
+
+    try {
+      const result = await executeAgentWithRecovery('test-missing-cli-recovery', 'hello');
+
+      assert.equal(result.ok, true);
+      assert.equal(result.output, 'fallback-ok');
+      assert.equal(result.command, process.execPath);
+      assert.equal(result.exitCode, 0);
+      assert.equal(result.error, null);
+      assert.match(stderrWrites.join(''), /CLI not found on PATH — falling back to claude/);
+    } finally {
+      process.stderr.write = originalWrite;
+    }
+  });
+
+  it('marks timeout results with signal, telemetry, and timedOut=true', async () => {
+    registerAgent('test-timeout-cli', {
+      type: AGENT_TYPE.PHYSICAL,
+      cli: process.execPath,
+      invoke: {
+        nonInteractive: () => [process.execPath, ['-e', 'setTimeout(() => {}, 10_000)']],
+        interactive: null,
+        headless: () => [process.execPath, ['-e', 'setTimeout(() => {}, 10_000)']],
+      },
+      contextBudget: 1000,
+      councilRole: null,
+      taskAffinity: {},
+      enabled: true,
+    });
+
+    const result = await executeAgent('test-timeout-cli', 'hello', { timeoutMs: 100 });
+
+    assert.equal(result.ok, false);
+    assert.equal(result.timedOut, true);
+    assert.equal(result.signal, 'SIGTERM');
+    assert.match(result.error ?? '', /\(timed out\)/);
+    assert.match(result.stderr, /\[Hydra Telemetry\] Status: Timed Out/);
+    assert.equal(result.startupFailure, false);
+  });
+
+  it('does not short-circuit execution when budgets are configured as exhausted', async () => {
+    _setTestConfig({
+      models: {
+        'test-budget-cli': {
+          default: 'budget-model',
+          active: 'default',
+        },
+      },
+      usage: {
+        dailyTokenBudget: { 'budget-model': 0 },
+        weeklyTokenBudget: { 'budget-model': 0 },
+      },
+    });
+
+    registerAgent('test-budget-cli', {
+      type: AGENT_TYPE.PHYSICAL,
+      cli: process.execPath,
+      invoke: {
+        nonInteractive: () => [process.execPath, ['-e', 'process.stdout.write("spawned")']],
+        interactive: null,
+        headless: () => [process.execPath, ['-e', 'process.stdout.write("spawned")']],
+      },
+      contextBudget: 1000,
+      councilRole: null,
+      taskAffinity: {},
+      enabled: true,
+    });
+
+    const result = await executeAgent('test-budget-cli', 'hello');
+
+    assert.equal(result.ok, true);
+    assert.equal(result.output, 'spawned');
+    assert.equal(result.command, process.execPath);
+  });
+
+  it('returns the fallback execution result without adding an agent field', async () => {
+    registerAgent('claude', {
+      type: AGENT_TYPE.PHYSICAL,
+      cli: process.execPath,
+      invoke: {
+        nonInteractive: () => [
+          process.execPath,
+          ['-e', 'process.stdout.write(JSON.stringify({ fallback: "claude" }))'],
+        ],
+        interactive: null,
+        headless: () => [
+          process.execPath,
+          ['-e', 'process.stdout.write(JSON.stringify({ fallback: "claude" }))'],
+        ],
+      },
+      contextBudget: 1000,
+      councilRole: null,
+      taskAffinity: {},
+      enabled: true,
+    });
+
+    registerAgent('test-fallback-chain-cli', {
+      type: AGENT_TYPE.PHYSICAL,
+      customType: 'cli',
+      cli: 'definitely-missing-binary-hydra-test',
+      invoke: {
+        nonInteractive: { cmd: 'definitely-missing-binary-hydra-test', args: ['{prompt}'] },
+        headless: { cmd: 'definitely-missing-binary-hydra-test', args: ['{prompt}'] },
+      },
+      responseParser: 'plaintext',
+      contextBudget: 1000,
+      councilRole: null,
+      taskAffinity: {},
+      enabled: true,
+    });
+
+    const result = await executeAgentWithRecovery('test-fallback-chain-cli', 'hello');
+
+    assert.equal(result.ok, true);
+    assert.equal(result.output, '{"fallback":"claude"}');
+    assert.equal(Object.hasOwn(result, 'agent'), false);
+    assert.equal(result.command, process.execPath);
   });
 });
