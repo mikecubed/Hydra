@@ -18,14 +18,42 @@ const config = resolveProject();
 
 export const workers = new Map<string, AgentWorker>();
 
+interface TaskStartEvent {
+  agent: string;
+  taskId: string;
+  title?: string;
+}
+
+interface TaskCompleteEvent {
+  agent: string;
+  taskId: string;
+  title?: string;
+  status: 'done' | 'error';
+  durationMs: number;
+  outputSummary: string;
+}
+
+interface TaskErrorEvent {
+  agent: string;
+  taskId: string;
+  title?: string;
+  error?: string;
+}
+
+interface WorkerStopEvent {
+  agent: string;
+  reason: string;
+}
+
 export function startAgentWorker(
   agent: string,
   baseUrl: string,
   { rl }: { rl?: ReadlineInterface } = {},
 ): AgentWorker | undefined {
   const name = agent.toLowerCase();
-  if (workers.has(name) && workers.get(name)!.status !== 'stopped') {
-    return workers.get(name);
+  const existing = workers.get(name);
+  if (existing && existing.status !== 'stopped') {
+    return existing;
   }
 
   const worker = new AgentWorker(name, {
@@ -34,60 +62,60 @@ export function startAgentWorker(
   });
 
   // Wire worker events to status bar
-  worker.on('task:start', ({ agent: a, taskId: _taskId, title }) => {
+  worker.on('task:start', (data: TaskStartEvent) => {
+    const { agent: a, taskId: _taskId, title } = data;
     setAgentActivity(a, 'working', title ?? 'Working', { taskTitle: title });
     drawStatusBar();
   });
 
-  worker.on(
-    'task:complete',
-    ({ agent: a, taskId, title: taskTitle, status, durationMs, outputSummary }) => {
-      // Record activity annotation for all completions
-      pushActivity(
-        status === 'error' ? 'error' : 'completion',
-        annotateCompletion({
-          agent: a,
-          taskId,
-          title: taskTitle ?? '',
-          durationMs,
-          outputSummary,
-          status,
-        }),
-        { agent: a, taskId, durationMs },
-      );
+  worker.on('task:complete', (data: TaskCompleteEvent) => {
+    const { agent: a, taskId, title: taskTitle, status, durationMs, outputSummary } = data;
+    // Record activity annotation for all completions
+    pushActivity(
+      status === 'error' ? 'error' : 'completion',
+      annotateCompletion({
+        agent: a,
+        taskId,
+        title: taskTitle ?? '',
+        durationMs,
+        outputSummary,
+        status,
+      }),
+      { agent: a, taskId, durationMs },
+    );
 
-      // Skip success notification for failed tasks — task:error handler covers those
-      if (status === 'error') return;
+    // Skip success notification for failed tasks — task:error handler covers those
+    if (status === 'error') return;
 
-      const elapsed = durationMs ? `${String(Math.round(durationMs / 1000))}s` : '';
-      const shortTitle = taskTitle ? ` (${String(taskTitle).slice(0, 40)})` : '';
-      setAgentActivity(a, 'idle', `Done ${String(taskId)}${elapsed ? ` (${elapsed})` : ''}`);
-      drawStatusBar();
+    const elapsed = durationMs > 0 ? `${String(Math.round(durationMs / 1000))}s` : '';
+    const shortTitle = taskTitle != null && taskTitle !== '' ? ` (${taskTitle.slice(0, 40)})` : '';
+    setAgentActivity(a, 'idle', `Done ${taskId}${elapsed === '' ? '' : ` (${elapsed})`}`);
+    drawStatusBar();
 
-      // Show inline notification with sparkle
-      const icon = SUCCESS('\u2713');
-      const sparkle = '\u2728'; // ✨
-      const msg = `  ${icon} ${sparkle} ${colorAgent(a)} completed ${pc.white(taskId)}${shortTitle ? DIM(shortTitle) : ''}${elapsed ? ` ${DIM(`in ${elapsed}`)}` : ''}`;
+    // Show inline notification with sparkle
+    const icon = SUCCESS('\u2713');
+    const sparkle = '\u2728'; // ✨
+    const msg = `  ${icon} ${sparkle} ${colorAgent(a)} completed ${pc.white(taskId)}${shortTitle === '' ? '' : DIM(shortTitle)}${elapsed === '' ? '' : ` ${DIM(`in ${elapsed}`)}`}`;
 
-      // Brief flash effect: bold → normal
-      if (process.stdout.isTTY) {
-        process.stdout.write(`\r\x1b[2K${pc.bold(msg)}\n`);
-        setTimeout(() => {
-          process.stdout.write(`\x1b[1A\r\x1b[2K${msg}\n`);
-          if (rl && !isChoiceActive()) {
-            rl.prompt(true);
-          }
-        }, 100);
-      } else {
-        process.stdout.write(`\r\x1b[2K${msg}\n`);
+    // Brief flash effect: bold → normal
+    if (process.stdout.isTTY) {
+      process.stdout.write(`\r\x1b[2K${pc.bold(msg)}\n`);
+      setTimeout(() => {
+        process.stdout.write(`\x1b[1A\r\x1b[2K${msg}\n`);
         if (rl && !isChoiceActive()) {
           rl.prompt(true);
         }
+      }, 100);
+    } else {
+      process.stdout.write(`\r\x1b[2K${msg}\n`);
+      if (rl && !isChoiceActive()) {
+        rl.prompt(true);
       }
-    },
-  );
+    }
+  });
 
-  worker.on('task:error', ({ agent: a, taskId, title: taskTitle, error }) => {
+  worker.on('task:error', (data: TaskErrorEvent) => {
+    const { agent: a, taskId, title: taskTitle, error } = data;
     pushActivity(
       'error',
       annotateCompletion({
@@ -100,23 +128,23 @@ export function startAgentWorker(
       { agent: a, taskId },
     );
 
-    setAgentActivity(a, 'error', `Error: ${String((error ?? '').slice(0, 30))}`);
+    setAgentActivity(a, 'error', `Error: ${(error ?? '').slice(0, 30)}`);
     drawStatusBar();
 
-    const shortTitle = taskTitle ? ` (${String(taskTitle).slice(0, 40)})` : '';
-    const msg = `  ${ERROR('\u2717')} ${colorAgent(a)} error on ${pc.white(taskId ?? '?')}${shortTitle ? DIM(shortTitle) : ''}: ${DIM((error ?? '').slice(0, 60))}`;
+    const shortTitle = taskTitle != null && taskTitle !== '' ? ` (${taskTitle.slice(0, 40)})` : '';
+    const msg = `  ${ERROR('\u2717')} ${colorAgent(a)} error on ${pc.white(taskId)}${shortTitle === '' ? '' : DIM(shortTitle)}: ${DIM((error ?? '').slice(0, 60))}`;
     process.stdout.write(`\r\x1b[2K${msg}\n`);
     if (rl && !isChoiceActive()) {
       rl.prompt(true);
     }
   });
 
-  worker.on('worker:idle', ({ agent: a }) => {
+  worker.on('worker:idle', ({ agent: a }: { agent: string }) => {
     setAgentActivity(a, 'idle', 'Awaiting next task');
     drawStatusBar();
   });
 
-  worker.on('worker:stop', ({ agent: a, reason: _reason }) => {
+  worker.on('worker:stop', ({ agent: a, reason: _reason }: WorkerStopEvent) => {
     setAgentExecMode(a, null);
     setAgentActivity(a, 'inactive', 'Stopped');
     drawStatusBar();
