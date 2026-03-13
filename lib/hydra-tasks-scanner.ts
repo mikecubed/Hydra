@@ -24,6 +24,7 @@ import { classifyTask, bestAgentFor } from './hydra-agents.ts';
 import { classifyPrompt } from './hydra-utils.ts';
 import { listIssues, isGhAvailable, isGhAuthenticated } from './hydra-github.ts';
 import { loadHydraConfig } from './hydra-config.ts';
+import { stripGitEnv } from './hydra-shared/git-ops.ts';
 import pc from 'picocolors';
 
 interface SpawnSyncResult {
@@ -161,6 +162,7 @@ export function scanTodoComments(projectRoot: string): ScannedTask[] {
       cwd: projectRoot,
       encoding: 'utf8',
       timeout: 15_000,
+      env: stripGitEnv(),
     },
   );
 

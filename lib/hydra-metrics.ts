@@ -4,7 +4,7 @@
  * In-memory metrics store with file persistence. Tracks per-agent call counts,
  * durations, estimated tokens, and success rates.
  *
- * Usage:
+ * Usage (from a consumer module):
  *   import { recordCallStart, recordCallComplete, getMetrics } from './hydra-metrics.ts';
  *   const handle = recordCallStart('claude', 'claude-opus-4-6');
  *   // ... agent call ...

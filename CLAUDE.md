@@ -25,6 +25,8 @@ Branch naming conventions: `feat/...`, `fix/...`, `docs/...`, `chore/...`, or `c
 
 ```bash
 npm test                    # Run all tests (Node.js native test runner)
+npm run test:coverage       # Run all tests with c8 coverage reporting
+npm run test:coverage:check # Run tests with 80% threshold — exits non-zero if below (CI surfaces this as warn-only via continue-on-error)
 node --test test/hydra-ui.test.ts   # Run a single test file
 npm start                   # Start the daemon (port 4173)
 npm run go                  # Launch operator console (interactive REPL)
@@ -42,10 +44,11 @@ npm run eval                # Run routing evaluation against golden corpus
 npm run lint                # ESLint on entire codebase
 npm run lint:fix            # ESLint with auto-fix
 npm run lint:mermaid        # Validate Mermaid diagrams in Markdown
+npm run lint:cycles         # Report circular imports in lib/
 npm run format              # Prettier format all files
 npm run format:check        # Prettier check (no write)
 npm run typecheck           # tsc --noEmit type check (tsconfig.json)
-npm run quality             # lint + format:check + typecheck combined
+npm run quality             # lint + format:check + typecheck + lint:cycles combined
 npm run setup:hooks         # Install/verify git pre-commit and pre-push hooks
 ```
 
@@ -62,7 +65,7 @@ npm run setup:hooks         # Install/verify git pre-commit and pre-push hooks
 - `pre-commit` — runs lint-staged: ESLint `--fix` + Prettier **auto-write** on staged `.ts/.mjs` files; Mermaid validation + Prettier on staged `.md`; Prettier auto-write on staged `.json/.yml/.yaml`.
 - `pre-push` — runs the full `npm test` suite. Push is blocked if tests fail.
 
-**Always run `npm run quality` before opening a PR.** This runs lint + format:check + typecheck in full (no auto-fix) so you catch issues before CI does.
+**Always run `npm run quality` before opening a PR.** This runs lint + format:check + typecheck + lint:cycles in full (no auto-fix) so you catch issues before CI does.
 
 Mermaid diagrams are validated separately with `npm run lint:mermaid`. The `quality.yml` workflow now runs Mermaid validation explicitly alongside ESLint and Prettier checks, and staged Markdown files run the same validation through `lint-staged`.
 

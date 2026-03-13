@@ -10,8 +10,8 @@
  */
 
 import { loadHydraConfig } from './hydra-config.ts';
+import { getProviderEWMA } from './hydra-latency-tracker.ts';
 import { getRateLimits as getModelRateLimits } from './hydra-model-profiles.ts';
-import { getProviderEWMA } from './hydra-streaming-middleware.ts';
 
 // ── Types ────────────────────────────────────────────────────────────────────
 

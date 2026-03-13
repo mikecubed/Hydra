@@ -21,10 +21,11 @@
 import './hydra-env.ts';
 import readline from 'node:readline';
 import type { Interface as ReadlineInterface } from 'node:readline';
+import { fileURLToPath } from 'node:url';
 import path from 'node:path';
 import { exec, spawn, spawnSync } from 'node:child_process';
 import { buildAgentContext } from './hydra-context.ts';
-import { rewriteNodeInvocation, spawnHydraNode, spawnHydraNodeSync } from './hydra-exec.ts';
+import { rewriteNodeInvocation, spawnHydraNode, spawnHydraNodeSync } from './hydra-exec-spawn.ts';
 import {
   getAgent,
   AGENT_NAMES,
@@ -74,8 +75,6 @@ import {
 } from './hydra-utils.ts';
 import {
   hydraSplash,
-  hydraLogoCompact,
-  renderDashboard,
   renderStatsDashboard,
   agentBadge,
   label,
@@ -94,6 +93,16 @@ import {
   shortModelName,
 } from './hydra-ui.ts';
 import {
+  COMMAND_HELP,
+  KNOWN_COMMANDS,
+  SMART_TIER_MAP,
+  printCommandHelp,
+  printHelp,
+  printNextSteps,
+  printSelfAwarenessStatus,
+  printStatus,
+} from './hydra-operator-ui.ts';
+import {
   initStatusBar,
   destroyStatusBar,
   drawStatusBar,
@@ -107,7 +116,14 @@ import {
   clearDispatchContext,
   setAgentExecMode,
 } from './hydra-statusbar.ts';
-import { AgentWorker } from './hydra-worker.ts';
+import {
+  workers,
+  startAgentWorker,
+  stopAgentWorker,
+  stopAllWorkers,
+  _getWorkerStatus,
+  startAgentWorkers,
+} from './hydra-operator-workers.ts';
 import {
   promptChoice,
   isChoiceActive,
@@ -148,7 +164,6 @@ import {
   generateSitrep,
   pushActivity,
   annotateDispatch,
-  annotateCompletion,
 } from './hydra-activity.ts';
 import {
   loadCodebaseContext,
@@ -188,6 +203,8 @@ import {
 } from './hydra-provider-usage.ts';
 import pc from 'picocolors';
 
+export { KNOWN_COMMANDS, SMART_TIER_MAP, getSelfAwarenessSummary } from './hydra-operator-ui.ts';
+
 const config = resolveProject();
 const DEFAULT_URL = process.env['AI_ORCH_URL'] ?? 'http://127.0.0.1:4173';
 
@@ -195,160 +212,7 @@ const DEFAULT_URL = process.env['AI_ORCH_URL'] ?? 'http://127.0.0.1:4173';
 
 let dryRunMode = false;
 
-// ── Agent Workers (headless background execution) ────────────────────────────
-
-const workers = new Map<string, AgentWorker>();
-
-function startAgentWorker(agent: string, baseUrl: string, { rl }: { rl?: ReadlineInterface } = {}) {
-  const name = agent.toLowerCase();
-  if (workers.has(name) && workers.get(name)!.status !== 'stopped') {
-    return workers.get(name);
-  }
-
-  const worker = new AgentWorker(name, {
-    baseUrl,
-    projectRoot: config.projectRoot,
-  });
-
-  // Wire worker events to status bar
-  worker.on('task:start', ({ agent: a, taskId: _taskId, title }) => {
-    setAgentActivity(a, 'working', title ?? 'Working', { taskTitle: title });
-    drawStatusBar();
-  });
-
-  worker.on(
-    'task:complete',
-    ({ agent: a, taskId, title: taskTitle, status, durationMs, outputSummary }) => {
-      // Record activity annotation for all completions
-      pushActivity(
-        status === 'error' ? 'error' : 'completion',
-        annotateCompletion({
-          agent: a,
-          taskId,
-          title: taskTitle ?? '',
-          durationMs,
-          outputSummary,
-          status,
-        }),
-        { agent: a, taskId, durationMs },
-      );
-
-      // Skip success notification for failed tasks — task:error handler covers those
-      if (status === 'error') return;
-
-      const elapsed = durationMs ? `${String(Math.round(durationMs / 1000))}s` : '';
-      const shortTitle = taskTitle ? ` (${String(taskTitle).slice(0, 40)})` : '';
-      setAgentActivity(a, 'idle', `Done ${String(taskId)}${elapsed ? ` (${elapsed})` : ''}`);
-      drawStatusBar();
-
-      // Show inline notification with sparkle
-      const icon = SUCCESS('\u2713');
-      const sparkle = '\u2728'; // ✨
-      const msg = `  ${icon} ${sparkle} ${colorAgent(a)} completed ${pc.white(taskId)}${shortTitle ? DIM(shortTitle) : ''}${elapsed ? ` ${DIM(`in ${elapsed}`)}` : ''}`;
-
-      // Brief flash effect: bold → normal
-      if (process.stdout.isTTY) {
-        process.stdout.write(`\r\x1b[2K${pc.bold(msg)}\n`);
-        setTimeout(() => {
-          process.stdout.write(`\x1b[1A\r\x1b[2K${msg}\n`);
-          if (rl && !isChoiceActive()) {
-            rl.prompt(true);
-          }
-        }, 100);
-      } else {
-        process.stdout.write(`\r\x1b[2K${msg}\n`);
-        if (rl && !isChoiceActive()) {
-          rl.prompt(true);
-        }
-      }
-    },
-  );
-
-  worker.on('task:error', ({ agent: a, taskId, title: taskTitle, error }) => {
-    pushActivity(
-      'error',
-      annotateCompletion({
-        agent: a,
-        taskId,
-        title: taskTitle ?? '',
-        status: 'error',
-        outputSummary: error,
-      }),
-      { agent: a, taskId },
-    );
-
-    setAgentActivity(a, 'error', `Error: ${String((error ?? '').slice(0, 30))}`);
-    drawStatusBar();
-
-    const shortTitle = taskTitle ? ` (${String(taskTitle).slice(0, 40)})` : '';
-    const msg = `  ${ERROR('\u2717')} ${colorAgent(a)} error on ${pc.white(taskId ?? '?')}${shortTitle ? DIM(shortTitle) : ''}: ${DIM((error ?? '').slice(0, 60))}`;
-    process.stdout.write(`\r\x1b[2K${msg}\n`);
-    if (rl && !isChoiceActive()) {
-      rl.prompt(true);
-    }
-  });
-
-  worker.on('worker:idle', ({ agent: a }) => {
-    setAgentActivity(a, 'idle', 'Awaiting next task');
-    drawStatusBar();
-  });
-
-  worker.on('worker:stop', ({ agent: a, reason: _reason }) => {
-    setAgentExecMode(a, null);
-    setAgentActivity(a, 'inactive', 'Stopped');
-    drawStatusBar();
-  });
-
-  setAgentExecMode(name, 'worker');
-  worker.start();
-  workers.set(name, worker);
-
-  console.log(
-    `  ${SUCCESS('\u2713')} ${colorAgent(name)} worker started ${DIM(`(${worker.permissionMode})`)}`,
-  );
-  return worker;
-}
-
-function stopAgentWorker(agent: string) {
-  const name = agent.toLowerCase();
-  const worker = workers.get(name);
-  if (!worker) return;
-  worker.stop();
-  setAgentExecMode(name, null);
-}
-
-function stopAllWorkers() {
-  for (const [name, worker] of workers) {
-    worker.kill();
-    setAgentExecMode(name, null);
-  }
-  workers.clear();
-}
-
-// @ts-expect-error TS6133 — function kept for debugging use
-function _getWorkerStatus(agent: string) {
-  const worker = workers.get(agent.toLowerCase());
-  if (!worker) return null;
-  return {
-    agent: worker.agent,
-    status: worker.status,
-    currentTask: worker.currentTask,
-    uptime: worker.uptime,
-    permissionMode: worker.permissionMode,
-  };
-}
-
-function startAgentWorkers(
-  agentNames: string[],
-  baseUrl: string,
-  opts: { rl?: ReadlineInterface } = {},
-) {
-  for (const agent of agentNames) {
-    startAgentWorker(agent, baseUrl, opts);
-  }
-}
-
-function formatUptime(ms: number) {
+export function formatUptime(ms: number): string {
   if (ms < 60_000) return `${String(Math.round(ms / 1000))}s`;
   if (ms < 3600_000) return `${String(Math.round(ms / 60_000))}m`;
   return `${(ms / 3600_000).toFixed(1)}h`;
@@ -1639,12 +1503,6 @@ async function runAutoPromptLegacy({
 
 // ── Smart Mode: auto-select model tier per prompt ───────────────────────────
 
-const SMART_TIER_MAP = {
-  simple: 'economy',
-  medium: 'balanced',
-  complex: 'performance',
-};
-
 async function runSmartPrompt({
   baseUrl,
   from,
@@ -1713,483 +1571,7 @@ async function runSmartPrompt({
   }
 }
 
-async function printStatus(baseUrl: string, agents: string[]) {
-  const summary = (await request('GET', baseUrl, '/summary')) as any;
-  const agentNextMap: any = {};
-  for (const agent of agents) {
-    try {
-      const next = (await request(
-        'GET',
-        baseUrl,
-        `/next?agent=${encodeURIComponent(agent)}`,
-      )) as any;
-      agentNextMap[agent] = next.next;
-    } catch {
-      agentNextMap[agent] = { action: 'unknown' };
-    }
-  }
-  console.log('');
-  console.log(renderDashboard(summary.summary, agentNextMap));
-  printNextSteps({ agentSuggestions: agentNextMap, summary: summary.summary });
-  return summary.summary;
-}
-
-/**
- * Print actionable suggested next steps based on current daemon state.
- * Shows concrete commands the user can type at the hydra> prompt.
- */
-function printNextSteps({
-  agentSuggestions: _agentSuggestions,
-  pendingHandoffs,
-  staleTasks,
-  inProgressTasks,
-  summary,
-}: any = {}) {
-  const steps = [];
-
-  // Derive counts from summary if available
-  const openTasks = summary?.openTasks ?? 0;
-  const handoffCount = pendingHandoffs?.length ?? summary?.pendingHandoffs ?? 0;
-  const staleCount = staleTasks?.length ?? 0;
-  const inProgressCount = inProgressTasks?.length ?? 0;
-  const hasPendingWork = handoffCount > 0 || staleCount > 0 || inProgressCount > 0;
-
-  // If there's pending work that needs resuming
-  if (hasPendingWork) {
-    const parts = [];
-    if (handoffCount > 0)
-      parts.push(`${String(handoffCount)} handoff${handoffCount > 1 ? 's' : ''}`);
-    if (staleCount > 0) parts.push(`${String(staleCount)} stale`);
-    if (inProgressCount > 0) parts.push(`${String(inProgressCount)} in progress`);
-    steps.push(
-      `${ACCENT(':resume')}    ${DIM(`Ack handoffs & launch agents (${parts.join(', ')})`)}`,
-    );
-  }
-
-  // If there are open tasks but agents are idle, suggest status check
-  if (openTasks > 0 && !hasPendingWork) {
-    steps.push(
-      `${ACCENT(':status')}    ${DIM(`Review ${String(openTasks)} open task${openTasks > 1 ? 's' : ''}`)}`,
-    );
-  }
-
-  // Always offer dispatching new work
-  if (openTasks === 0 && !hasPendingWork) {
-    steps.push(`${ACCENT('<your objective>')}  ${DIM('Type a prompt to dispatch work to agents')}`);
-    steps.push(
-      `${ACCENT(':mode council')}     ${DIM('Switch to council mode for complex objectives')}`,
-    );
-  } else {
-    steps.push(`${ACCENT('<your objective>')}  ${DIM('Dispatch additional work to agents')}`);
-  }
-
-  if (steps.length > 0) {
-    console.log(sectionHeader('Try next'));
-    for (const step of steps.slice(0, 4)) {
-      console.log(`  ${DIM('>')} ${step}`);
-    }
-  }
-}
-
-function printHelp() {
-  console.log('');
-  console.log(hydraLogoCompact());
-  console.log(DIM('  Operator Console'));
-  console.log('');
-  console.log(pc.bold('Interactive commands:'));
-  console.log(`  ${ACCENT(':help')}                 Show help`);
-  console.log(`  ${ACCENT(':status')}               Dashboard with agents & tasks`);
-  console.log(`  ${ACCENT(':sitrep')}               AI-narrated situation report`);
-  console.log(`  ${ACCENT(':self')}                 Hydra self snapshot (models, config, runtime)`);
-  console.log(
-    `  ${ACCENT(':aware')}                Hyper-awareness toggle (self snapshot/index injection)`,
-  );
-  console.log(`  ${ACCENT(':mode auto')}            Mini-round triage then delegate/escalate`);
-  console.log(`  ${ACCENT(':mode smart')}           Auto-select model tier per prompt complexity`);
-  console.log(`  ${ACCENT(':mode handoff')}         Direct handoffs (fast, no triage)`);
-  console.log(`  ${ACCENT(':mode council')}         Full council deliberation`);
-  console.log(
-    `  ${ACCENT(':mode dispatch')}        Headless pipeline (Claude\u2192Gemini\u2192Codex)`,
-  );
-  console.log(
-    `  ${ACCENT(':mode economy')}         Set routing mode (economy|balanced|performance)`,
-  );
-  console.log(`  ${ACCENT(':model')}                Show mode & active models`);
-  console.log(`  ${ACCENT(':model mode=economy')} Switch global mode`);
-  console.log(`  ${ACCENT(':model claude=sonnet')} Override agent model`);
-  console.log(`  ${ACCENT(':model reset')}         Clear all overrides`);
-  console.log(`  ${ACCENT(':model:select')}         Interactive model picker`);
-  console.log(
-    `  ${ACCENT(':roles')}                Show role→agent→model mapping & recommendations`,
-  );
-  console.log(
-    `  ${ACCENT(':roster')}               Edit role→agent→model assignments interactively`,
-  );
-  console.log(`  ${ACCENT(':persona')}              Edit personality settings interactively`);
-  console.log(`  ${ACCENT(':persona show')}         Show current personality config`);
-  console.log(
-    `  ${ACCENT(':persona <preset>')}     Apply preset (default/professional/casual/analytical/terse)`,
-  );
-  console.log(`  ${ACCENT(':usage')}                Token usage & contingencies`);
-  console.log(`  ${ACCENT(':stats')}                Agent metrics & performance`);
-  console.log(
-    `  ${ACCENT(':resume')}               Scan all resumable state (daemon, evolve, branches)`,
-  );
-  console.log(`  ${ACCENT(':pause [reason]')}       Pause the active session`);
-  console.log(`  ${ACCENT(':unpause')}              Resume a paused session`);
-  console.log(`  ${ACCENT(':fork')}                 Fork current session (explore alternatives)`);
-  console.log(`  ${ACCENT(':spawn <focus>')}       Spawn child session (fresh context)`);
-  console.log('');
-  console.log(pc.bold('Task & handoff management:'));
-  console.log(`  ${ACCENT(':tasks')}                List active daemon tasks`);
-  console.log(`  ${ACCENT(':tasks scan')}           Scan codebase for TODO/FIXME/issues`);
-  console.log(`  ${ACCENT(':tasks run')}            Launch autonomous tasks runner`);
-  console.log(`  ${ACCENT(':tasks review')}         Interactive branch review & merge`);
-  console.log(`  ${ACCENT(':tasks status')}         Show latest tasks run report`);
-  console.log(`  ${ACCENT(':tasks clean')}          Delete all tasks/* branches`);
-  console.log(`  ${ACCENT(':handoffs')}             List pending & recent handoffs`);
-  console.log(`  ${ACCENT(':cancel <id>')}          Cancel a task (e.g. :cancel T003)`);
-  console.log(`  ${ACCENT(':clear')}                Interactive menu to select clear target`);
-  console.log(`  ${ACCENT(':clear all')}            Cancel all tasks & ack all handoffs`);
-  console.log(`  ${ACCENT(':clear tasks')}          Cancel all open tasks`);
-  console.log(`  ${ACCENT(':clear handoffs')}       Ack all pending handoffs`);
-  console.log(`  ${ACCENT(':clear concierge')}      Clear conversation history`);
-  console.log(`  ${ACCENT(':clear metrics')}        Reset session metrics`);
-  console.log(`  ${ACCENT(':clear screen')}         Clear terminal`);
-  console.log(`  ${ACCENT(':archive')}              Archive completed work & trim events`);
-  console.log(`  ${ACCENT(':events')}               Show recent event log`);
-  console.log('');
-  console.log(pc.bold('Workers:'));
-  console.log(`  ${ACCENT(':workers')}              Show worker status (running/idle/stopped)`);
-  console.log(`  ${ACCENT(':workers start [agent]')} Start worker(s)`);
-  console.log(`  ${ACCENT(':workers stop [agent]')}  Stop worker(s)`);
-  console.log(`  ${ACCENT(':workers restart')}      Restart all workers`);
-  console.log(`  ${ACCENT(':workers mode <mode>')}  Change permission mode (auto-edit/full-auto)`);
-  console.log(`  ${ACCENT(':watch <agent>')}        Open visible terminal for agent observation`);
-  console.log('');
-  console.log(pc.bold('Concierge (conversational AI):'));
-  console.log(`  ${ACCENT(':chat')}                 Toggle concierge on/off`);
-  console.log(`  ${ACCENT(':chat off')}             Disable concierge`);
-  console.log(`  ${ACCENT(':chat reset')}           Clear conversation history`);
-  console.log(`  ${ACCENT(':chat stats')}           Show token usage`);
-  console.log(`  ${ACCENT(':chat model')}           Show active model & fallback chain`);
-  console.log(`  ${ACCENT(':chat model <name>')}    Switch model (e.g. sonnet, flash, opus)`);
-  console.log(`  ${ACCENT(':chat export')}          Export conversation to file`);
-  console.log(`  ${ACCENT('!<prompt>')}             Force dispatch (bypass concierge)`);
-  console.log('');
-  console.log(pc.bold('Evolve (autonomous self-improvement):'));
-  console.log(
-    `  ${ACCENT(':evolve')}               Launch evolve session (research\u2192plan\u2192test\u2192implement)`,
-  );
-  console.log(
-    `  ${ACCENT(':evolve focus=<area>')}  Focus on specific area (e.g. testing-reliability)`,
-  );
-  console.log(`  ${ACCENT(':evolve max-rounds=N')} Limit rounds (default: 3)`);
-  console.log(`  ${ACCENT(':evolve status')}        Show latest evolve session report`);
-  console.log(`  ${ACCENT(':evolve resume')}        Resume an incomplete/interrupted session`);
-  console.log(`  ${ACCENT(':evolve knowledge')}     Browse accumulated knowledge base`);
-  console.log('');
-  console.log(pc.bold('Actualize (experimental self-actualization):'));
-  console.log(
-    `  ${ACCENT(':actualize')}            Launch actualize run (branches only, no auto-merge)`,
-  );
-  console.log(
-    `  ${ACCENT(':actualize dry-run')}    Scan + discover + prioritize without executing`,
-  );
-  console.log(`  ${ACCENT(':actualize review')}     Interactive branch review & merge`);
-  console.log(`  ${ACCENT(':actualize status')}     Show latest actualize run report`);
-  console.log(`  ${ACCENT(':actualize clean')}      Delete all actualize/* branches`);
-  console.log('');
-  console.log(pc.bold('Nightly (autonomous overnight tasks):'));
-  console.log(`  ${ACCENT(':nightly')}              Launch nightly run (interactive setup)`);
-  console.log(`  ${ACCENT(':nightly dry-run')}      Scan & prioritize without executing`);
-  console.log(`  ${ACCENT(':nightly review')}       Interactive branch review & merge`);
-  console.log(`  ${ACCENT(':nightly status')}       Show latest nightly run report`);
-  console.log(`  ${ACCENT(':nightly clean')}        Delete all nightly/* branches`);
-  console.log('');
-  console.log(pc.bold('GitHub (requires gh CLI):'));
-  console.log(`  ${ACCENT(':github')}               GitHub status (gh installed, auth, repo, PRs)`);
-  console.log(`  ${ACCENT(':github prs')}           List open pull requests`);
-  console.log(`  ${ACCENT(':pr create [branch]')}   Push branch & create pull request`);
-  console.log(`  ${ACCENT(':pr list')}              List open pull requests`);
-  console.log(`  ${ACCENT(':pr view <number>')}     Show PR details`);
-  console.log('');
-  console.log(pc.bold('Agent Forge (create custom agents):'));
-  console.log(`  ${ACCENT(':forge')}                Interactive agent creation wizard`);
-  console.log(`  ${ACCENT(':forge <description>')} Start forge with a goal description`);
-  console.log(`  ${ACCENT(':forge list')}           List all forged agents`);
-  console.log(`  ${ACCENT(':forge info <name>')}    Show forge details + metadata`);
-  console.log(`  ${ACCENT(':forge test <name>')}    Test an existing forged agent`);
-  console.log(`  ${ACCENT(':forge delete <name>')}  Remove a forged agent`);
-  console.log(`  ${ACCENT(':forge edit <name>')}    Re-run refinement on an existing agent`);
-  console.log('');
-  console.log(pc.bold('Agents & diagnostics:'));
-  console.log(`  ${ACCENT(':agents')}               List all registered agents`);
-  console.log(`  ${ACCENT(':agents add')}            Register a new custom agent (CLI or API)`);
-  console.log(`  ${ACCENT(':agents remove <name>')}  Remove a custom agent`);
-  console.log(`  ${ACCENT(':agents test <name>')}    Send a test prompt to verify agent works`);
-  console.log(`  ${ACCENT(':agents info <name>')}   Show agent details & config`);
-  console.log(`  ${ACCENT(':doctor')}               Diagnostic stats & recent log entries`);
-  console.log(`  ${ACCENT(':doctor log')}           Show last 25 diagnostic entries`);
-  console.log(`  ${ACCENT(':doctor fix')}           Auto-detect and fix issues`);
-  console.log(`  ${ACCENT(':doctor config')}        Diff hydra.config.json against DEFAULT_CONFIG`);
-  console.log(`  ${ACCENT(':doctor diagnose <text>')} Investigate a failure via GPT-5.3`);
-  console.log(`  ${ACCENT(':kb')}                   Knowledge base stats & recent entries`);
-  console.log(`  ${ACCENT(':kb <query>')}           Search knowledge base entries`);
-  console.log(`  ${ACCENT(':cleanup')}              Scan & clean stale branches, tasks, artifacts`);
-  console.log('');
-  console.log(pc.bold('System:'));
-  console.log(`  ${ACCENT(':sync')}                 Sync HYDRA.md → agent instruction files`);
-  console.log(`  ${ACCENT(':confirm')}              Show/toggle dispatch confirmations`);
-  console.log(
-    `  ${ACCENT(':dry-run')}              Toggle dry-run mode (preview only, no tasks created)`,
-  );
-  console.log(`  ${ACCENT(':shutdown')}             Stop the daemon`);
-  console.log(
-    `  ${ACCENT(':quit')}                 Exit operator console  ${DIM('(alias: :exit)')}`,
-  );
-  console.log(`  ${DIM('<any text>')}             Dispatch as shared prompt`);
-  console.log('');
-  console.log(pc.bold('One-shot mode:'));
-  console.log(DIM('  npm run hydra:go -- prompt="Your objective"'));
-  console.log(DIM('  npm run hydra:go -- mode=council prompt="Your objective"'));
-  console.log('');
-}
-
-// ── Fuzzy Command Matching ─────────────────────────────────────────────────
-
-const KNOWN_COMMANDS = [
-  ':help',
-  ':status',
-  ':sitrep',
-  ':self',
-  ':aware',
-  ':mode',
-  ':model',
-  ':usage',
-  ':stats',
-  ':resume',
-  ':pause',
-  ':unpause',
-  ':fork',
-  ':spawn',
-  ':tasks',
-  ':handoffs',
-  ':cancel',
-  ':clear',
-  ':archive',
-  ':events',
-  ':workers',
-  ':watch',
-  ':chat',
-  ':evolve',
-  ':nightly',
-  ':actualize',
-  ':github',
-  ':pr',
-  ':forge',
-  ':confirm',
-  ':dry-run',
-  ':roster',
-  ':persona',
-  ':doctor',
-  ':kb',
-  ':agents',
-  ':cleanup',
-  ':shutdown',
-  ':quit',
-  ':exit',
-  ':sync',
-];
-
-// ── Per-Command Help (shown via `:command ?`) ─────────────────────────────
-const COMMAND_HELP = {
-  ':help': { usage: [':help'], desc: 'Show full help' },
-  ':status': { usage: [':status'], desc: 'Dashboard with agents & tasks' },
-  ':sitrep': { usage: [':sitrep'], desc: 'AI-narrated situation report' },
-  ':self': {
-    usage: [':self', ':self json'],
-    desc: 'Hydra self snapshot (models, config, runtime state)',
-  },
-  ':aware': {
-    usage: [':aware', ':aware status', ':aware on|off', ':aware minimal|full'],
-    desc: 'Hyper-awareness injection (self snapshot/index) for concierge prompts',
-  },
-  ':mode': {
-    usage: [':mode', ':mode auto|smart|handoff|council|dispatch'],
-    desc: 'Show or switch orchestration mode',
-  },
-  ':model': {
-    usage: [
-      ':model',
-      ':model mode=economy|balanced|performance',
-      ':model <agent>=<model>',
-      ':model <agent>=default',
-      ':model reset',
-    ],
-    desc: 'Show or change active models',
-  },
-  ':model:select': {
-    usage: [':model:select', ':model:select [agent]'],
-    desc: 'Interactive model picker',
-  },
-  ':roles': {
-    usage: [':roles'],
-    desc: 'Show role\u2192agent\u2192model mapping & recommendations',
-  },
-  ':roster': { usage: [':roster'], desc: 'Interactive role\u2192agent\u2192model editor' },
-  ':persona': {
-    usage: [':persona', ':persona show', ':persona on|off', ':persona <preset>'],
-    desc: 'Personality settings (presets: default/professional/casual/analytical/terse)',
-  },
-  ':usage': { usage: [':usage'], desc: 'Token usage & budget' },
-  ':stats': { usage: [':stats'], desc: 'Agent metrics & performance' },
-  ':resume': { usage: [':resume'], desc: 'Scan all resumable state (daemon, evolve, branches)' },
-  ':pause': { usage: [':pause', ':pause [reason]'], desc: 'Pause the active session' },
-  ':unpause': { usage: [':unpause'], desc: 'Resume a paused session' },
-  ':fork': { usage: [':fork', ':fork [reason]'], desc: 'Fork current session' },
-  ':spawn': { usage: [':spawn <focus>'], desc: 'Spawn child session with focus area' },
-  ':tasks': {
-    usage: [
-      ':tasks',
-      ':tasks scan',
-      ':tasks run [args]',
-      ':tasks review',
-      ':tasks status',
-      ':tasks clean',
-    ],
-    desc: 'Task management & autonomous runner',
-  },
-  ':handoffs': { usage: [':handoffs'], desc: 'List pending & recent handoffs' },
-  ':cancel': { usage: [':cancel <id>'], desc: 'Cancel a task (e.g. :cancel T003)' },
-  ':clear': {
-    usage: [
-      ':clear',
-      ':clear all',
-      ':clear tasks',
-      ':clear handoffs',
-      ':clear concierge',
-      ':clear metrics',
-      ':clear screen',
-    ],
-    desc: 'Clear/reset various state',
-  },
-  ':archive': { usage: [':archive'], desc: 'Archive completed work & trim events' },
-  ':events': { usage: [':events'], desc: 'Show recent event log' },
-  ':workers': {
-    usage: [
-      ':workers',
-      ':workers start [agent]',
-      ':workers stop [agent]',
-      ':workers restart [agent]',
-      ':workers mode auto-edit|full-auto',
-    ],
-    desc: 'Worker management',
-  },
-  ':watch': { usage: [':watch <agent>'], desc: 'Open visible terminal for agent observation' },
-  ':chat': {
-    usage: [
-      ':chat',
-      ':chat off',
-      ':chat reset',
-      ':chat stats',
-      ':chat model',
-      ':chat model <name>',
-      ':chat export',
-    ],
-    desc: 'Concierge (conversational AI)',
-  },
-  ':evolve': {
-    usage: [
-      ':evolve',
-      ':evolve focus=<area>',
-      ':evolve max-rounds=N',
-      ':evolve status',
-      ':evolve resume [args]',
-      ':evolve knowledge',
-    ],
-    desc: 'Autonomous self-improvement',
-  },
-  ':nightly': {
-    usage: [':nightly', ':nightly dry-run', ':nightly review', ':nightly status', ':nightly clean'],
-    desc: 'Autonomous overnight tasks',
-  },
-  ':actualize': {
-    usage: [
-      ':actualize',
-      ':actualize dry-run',
-      ':actualize review',
-      ':actualize status',
-      ':actualize clean',
-    ],
-    desc: 'Self-actualization runner (branches only, no auto-merge)',
-  },
-  ':github': { usage: [':github', ':github prs'], desc: 'GitHub status & pull requests' },
-  ':pr': {
-    usage: [':pr create [branch]', ':pr list', ':pr view <number>'],
-    desc: 'Pull request management',
-  },
-  ':forge': {
-    usage: [
-      ':forge',
-      ':forge <description>',
-      ':forge list',
-      ':forge info <name>',
-      ':forge test <name>',
-      ':forge delete <name>',
-      ':forge edit <name>',
-    ],
-    desc: 'Custom agent creation',
-  },
-  ':agents': {
-    usage: [
-      ':agents',
-      ':agents list [virtual|physical|all]',
-      ':agents info <name>',
-      ':agents add',
-      ':agents remove <name>',
-      ':agents test <name>',
-      ':agents enable <name>',
-      ':agents disable <name>',
-    ],
-    desc: 'Agent registry management — list, add, remove, test, enable/disable agents',
-  },
-  ':doctor': {
-    usage: [':doctor', ':doctor log', ':doctor fix', ':doctor config', ':doctor diagnose <text>'],
-    desc: 'Diagnostics & self-healing',
-  },
-  ':kb': { usage: [':kb', ':kb <query>'], desc: 'Knowledge base stats & search' },
-  ':cleanup': { usage: [':cleanup'], desc: 'Scan & clean stale branches, tasks, artifacts' },
-  ':sync': { usage: [':sync'], desc: 'Sync HYDRA.md \u2192 agent instruction files' },
-  ':confirm': {
-    usage: [':confirm', ':confirm on|off'],
-    desc: 'Show/toggle dispatch confirmations',
-  },
-  ':dry-run': {
-    usage: [':dry-run', ':dry-run on|off'],
-    desc: 'Toggle dry-run mode (preview dispatches without executing)',
-  },
-  ':shutdown': { usage: [':shutdown'], desc: 'Stop the daemon' },
-  ':quit': { usage: [':quit'], desc: 'Exit operator console (alias: :exit)' },
-  ':exit': { usage: [':exit'], desc: 'Exit operator console (alias: :quit)' },
-};
-
-function printCommandHelp(cmd: string) {
-  const help = (COMMAND_HELP as Record<string, any>)[cmd];
-  if (!help) {
-    console.log(`  ${DIM('No help available for')} ${ACCENT(cmd)}`);
-    return;
-  }
-  console.log('');
-  console.log(`  ${ACCENT(cmd)} ${DIM('\u2014')} ${String(help.desc)}`);
-  console.log('');
-  for (const u of help.usage) {
-    console.log(`    ${pc.white(u)}`);
-  }
-  console.log('');
-}
-
-function levenshtein(a: string, b: string) {
+export function levenshtein(a: string, b: string): number {
   const m = a.length,
     n = b.length;
   const dp = Array.from({ length: m + 1 }, (_, i) => {
@@ -2209,7 +1591,7 @@ function levenshtein(a: string, b: string) {
   return dp[m][n];
 }
 
-function fuzzyMatchCommand(input: string) {
+export function fuzzyMatchCommand(input: string): string | null {
   const normalized = input.toLowerCase().split(/\s/)[0];
   const target = normalized.startsWith(':') ? normalized : `:${normalized}`;
   let best = null;
@@ -2228,7 +1610,7 @@ function fuzzyMatchCommand(input: string) {
 
 let _selfIndexCache = { block: '', builtAt: 0, key: '' };
 
-function normalizeSimpleCommandText(input: any) {
+export function normalizeSimpleCommandText(input: unknown): string {
   return String(input ?? '')
     .toLowerCase()
     .replace(/[^\w\s]/g, ' ')
@@ -2236,7 +1618,7 @@ function normalizeSimpleCommandText(input: any) {
     .trim();
 }
 
-function parseSelfAwarenessPlaintextCommand(input: any) {
+export function parseSelfAwarenessPlaintextCommand(input: unknown): string | null {
   const raw = String(input ?? '').trim();
   if (!raw) return null;
   if (raw.startsWith(':') || raw.startsWith('!')) return null;
@@ -2264,38 +1646,6 @@ function parseSelfAwarenessPlaintextCommand(input: any) {
 
   if (new RegExp(`^${polite}${target}${agentSuffix}\\s+status$`).test(s)) return 'status';
   return null;
-}
-
-function getSelfAwarenessSummary(sa: any = {}) {
-  const obj = sa && typeof sa === 'object' ? sa : {};
-  const enabled = obj.enabled !== false;
-  const includeSnapshot = obj.includeSnapshot !== false;
-  const includeIndex = obj.includeIndex !== false;
-  let level: string;
-  if (!enabled) {
-    level = 'off';
-  } else if (includeIndex) {
-    level = 'full';
-  } else {
-    level = 'minimal';
-  }
-  return { enabled, includeSnapshot, includeIndex, level };
-}
-
-function printSelfAwarenessStatus(sa: any = {}) {
-  const s = getSelfAwarenessSummary(sa);
-  const value = s.enabled ? pc.green(s.level) : pc.red('off');
-  console.log(label('Hyper-awareness', value));
-  console.log(
-    DIM(
-      `  snapshot: ${s.includeSnapshot ? 'on' : 'off'} (maxLines=${String(sa.snapshotMaxLines ?? 80)})`,
-    ),
-  );
-  console.log(
-    DIM(
-      `  index: ${s.includeIndex ? 'on' : 'off'} (maxChars=${String(sa.indexMaxChars ?? 7000)}, refreshMs=${String(sa.indexRefreshMs ?? 300_000)})`,
-    ),
-  );
 }
 
 async function applySelfAwarenessPatch(patch = {}) {
@@ -2787,9 +2137,7 @@ async function interactiveLoop({
       if (line.startsWith(':') && line.endsWith('?')) {
         const cmdPart = line.slice(0, -1).trim();
         // Try exact match, then base command (e.g. `:tasks scan ?` → `:tasks`)
-        const cmd = (COMMAND_HELP as Record<string, any>)[cmdPart]
-          ? cmdPart
-          : cmdPart.split(/\s/)[0];
+        const cmd = COMMAND_HELP[cmdPart] ? cmdPart : cmdPart.split(/\s/)[0];
         printCommandHelp(cmd);
         rl.prompt();
         return;
@@ -2804,7 +2152,8 @@ async function interactiveLoop({
         const summary = await printStatus(baseUrl, agents);
 
         // Smart ghost: nudge about blocked tasks
-        const blockedTasks = (summary?.openTasks ?? []).filter(
+        const openTasks = Array.isArray(summary.openTasks) ? summary.openTasks : [];
+        const blockedTasks = openTasks.filter(
           (t: any) =>
             t.status === 'blocked' || (t.pendingDependencies && t.pendingDependencies.length > 0),
         );
@@ -6623,8 +5972,13 @@ async function main() {
   }
 }
 
-main().catch((err: unknown) => {
-  console.error(`Hydra operator failed: ${(err as Error).message}`);
+const _isMainModule =
+  path.resolve(process.argv[1]) === path.resolve(fileURLToPath(import.meta.url));
 
-  process.exit(1);
-});
+if (_isMainModule) {
+  main().catch((err: unknown) => {
+    console.error(`Hydra operator failed: ${(err as Error).message}`);
+
+    process.exit(1);
+  });
+}

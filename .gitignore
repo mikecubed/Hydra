@@ -9,6 +9,7 @@ nul
 .build-exe/
 .pkg-cache/
 dist/
+.worktrees/
 recent-projects.json
 /docs/audit/
 /docs/coordination/
@@ -17,3 +18,7 @@ recent-projects.json
 
 # TypeScript build output
 .tsbuild/
+coverage/
+
+# Temporary test module patches (hydra-tasks test fixture)
+.hydra-tasks.testable.*.ts
