@@ -13,7 +13,7 @@
 /* eslint-disable @typescript-eslint/no-explicit-any, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-argument, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-return -- T7A: operator uses polymorphic any for dynamic dispatch */
 /* eslint-disable @typescript-eslint/strict-boolean-expressions, @typescript-eslint/no-non-null-assertion -- T7A: standard JS truthiness; type narrowing tracked as follow-up */
 /* eslint-disable @typescript-eslint/no-unnecessary-type-assertion, @typescript-eslint/no-unnecessary-type-conversion -- T7A: operator uses || for truthiness-based defaults */
-/* eslint-disable n/no-process-exit, @typescript-eslint/no-misused-promises, require-atomic-updates, @typescript-eslint/no-redundant-type-constituents -- T7A: CLI entry point */
+/* eslint-disable n/no-process-exit, @typescript-eslint/no-misused-promises, require-atomic-updates -- T7A: CLI entry point */
 /* eslint-disable no-await-in-loop, unicorn/prefer-ternary, @typescript-eslint/no-base-to-string -- T7A: sequential processing */
 
 /* eslint-disable unicorn/no-new-array, no-control-regex -- T7A: intentional patterns */
@@ -27,18 +27,11 @@ import { exec, spawnSync } from 'node:child_process';
 import { spawnHydraNode, spawnHydraNodeSync } from './hydra-exec-spawn.ts';
 import {
   getAgent,
-  AGENT_NAMES,
-  getActiveModel,
   getModelSummary,
-  setActiveModel,
   getMode,
-  setMode,
-  resetAgentModel,
-  listAgents,
   AGENT_TYPE,
   formatEffortDisplay,
   bestAgentFor,
-  setAgentEnabled,
 } from './hydra-agents.ts';
 import { checkUsage, renderUsageDashboard, formatTokens } from './hydra-usage.ts';
 import { verifyAgentQuota } from './hydra-model-recovery.ts';
@@ -48,17 +41,8 @@ import {
   estimateFlowDuration,
   resetMetrics,
 } from './hydra-metrics.ts';
-import {
-  resolveProject,
-  HYDRA_ROOT,
-  HYDRA_RUNTIME_ROOT,
-  loadHydraConfig,
-  saveHydraConfig,
-  getRecentProjects,
-  diffConfig,
-} from './hydra-config.ts';
+import { resolveProject, HYDRA_ROOT, loadHydraConfig, getRecentProjects } from './hydra-config.ts';
 import { envFileExists } from './hydra-env.ts';
-import { executeAgent } from './hydra-shared/agent-executor.ts';
 import {
   parseArgs,
   getPrompt,
@@ -113,8 +97,6 @@ import {
 } from './hydra-statusbar.ts';
 import {
   workers,
-  startAgentWorker,
-  stopAgentWorker,
   stopAllWorkers,
   _getWorkerStatus,
   startAgentWorkers,
@@ -131,26 +113,13 @@ import {
   conciergeSuggest,
   resetConversation,
   isConciergeAvailable,
-  getConciergeStats,
   getConciergeConfig,
-  getActiveProvider,
   getConciergeModelLabel,
-  switchConciergeModel,
-  exportConversation,
   setConciergeBaseUrl,
 } from './hydra-concierge.ts';
-import { buildFallbackChain, detectAvailableProviders } from './hydra-concierge-providers.ts';
+import { detectAvailableProviders } from './hydra-concierge-providers.ts';
 import { syncHydraMd } from './hydra-sync-md.ts';
 import { registerBuiltInSubAgents } from './hydra-sub-agents.ts';
-import {
-  isGhAvailable,
-  isGhAuthenticated,
-  detectRepo,
-  listPRs,
-  getPR,
-  pushBranchAndCreatePR,
-  getGitHubConfig,
-} from './hydra-github.ts';
 import {
   detectSituationalQuery,
   buildActivityDigest,
@@ -193,6 +162,18 @@ import {
 import pc from 'picocolors';
 import { dispatchPrompt } from './hydra-operator-dispatch.ts';
 import { runCouncilPrompt, runAutoPrompt, runSmartPrompt } from './hydra-operator-concierge.ts';
+import {
+  handleModelCommand,
+  handleModelSelectCommand,
+  handleRolesCommand,
+  handleModeCommand,
+  handleAgentsCommand,
+  handleCleanupCommand,
+  handlePrCommand,
+  handleTasksCommand,
+  handleNightlyCommand,
+  handleEvolveCommand,
+} from './hydra-operator-commands.ts';
 
 export { KNOWN_COMMANDS, SMART_TIER_MAP, getSelfAwarenessSummary } from './hydra-operator-ui.ts';
 
@@ -1284,27 +1265,6 @@ async function interactiveLoop({
         rl.prompt();
         return;
       }
-      if (
-        line.startsWith(':mode ') &&
-        ['economy', 'balanced', 'performance'].includes(line.slice(5).trim().toLowerCase())
-      ) {
-        const modeArg = line.slice(5).trim().toLowerCase();
-        const cfg = loadHydraConfig();
-        cfg.routing = { ...cfg.routing, mode: modeArg as any };
-        saveHydraConfig(cfg);
-        let chip: string;
-        if (modeArg === 'economy') {
-          chip = pc.yellow('◆ ECO');
-        } else if (modeArg === 'performance') {
-          chip = pc.cyan('◆ PERF');
-        } else {
-          chip = pc.green('◆ BAL');
-        }
-        console.log(`Mode set to ${chip}`);
-        if (typeof setActiveMode === 'function') setActiveMode(modeArg);
-        rl.prompt();
-        return;
-      }
       if (line === ':usage') {
         const usage = checkUsage();
         console.log(renderUsageDashboard(usage));
@@ -1536,122 +1496,60 @@ async function interactiveLoop({
         return;
       }
       if (line === ':model' || line.startsWith(':model ')) {
-        const modelArgs = line.slice(':model'.length).trim();
-        if (modelArgs) {
-          // Handle "reset" — clear all overrides
-          if (modelArgs === 'reset') {
-            setMode(getMode());
-            console.log(
-              `  ${SUCCESS('\u2713')} All agent overrides cleared, following mode ${ACCENT(getMode())}`,
-            );
-            rl.prompt();
-            return;
-          }
-          // Parse "mode=economy" or "claude=sonnet gemini=flash" style
-          const pairs = modelArgs.split(/\s+/);
-          for (const pair of pairs) {
-            const eqIdx = pair.indexOf('=');
-            if (eqIdx > 0) {
-              const key = pair.slice(0, eqIdx).toLowerCase();
-              const value = pair.slice(eqIdx + 1);
-              if (key === 'mode') {
-                try {
-                  setMode(value);
-                  console.log(`  ${SUCCESS('\u2713')} Mode ${DIM('\u2192')} ${ACCENT(value)}`);
-                } catch (err: unknown) {
-                  console.log(`  ${ERROR((err as Error).message)}`);
-                }
-              } else if (AGENT_NAMES.includes(key)) {
-                if (value === 'default') {
-                  const resolved = resetAgentModel(key);
-                  console.log(
-                    `  ${SUCCESS('\u2713')} ${pc.bold(key)} ${DIM('\u2192')} ${pc.white(resolved)} ${DIM('(following mode)')}`,
-                  );
-                } else {
-                  const resolved = setActiveModel(key, value);
-                  console.log(
-                    `  ${SUCCESS('\u2713')} ${pc.bold(key)} ${DIM('\u2192')} ${pc.white(resolved)}`,
-                  );
-                }
-              } else {
-                console.log(`  ${ERROR('Unknown key:')} ${key}`);
-              }
-            }
-          }
-        } else {
-          const summary = getModelSummary();
-          const currentMode = summary['_mode'] ?? getMode();
-          console.log('');
-          console.log(`  ${pc.bold('Mode:')} ${ACCENT(currentMode as string)}`);
-          for (const [agent, info] of Object.entries(summary) as any) {
-            if (agent === '_mode') continue;
-            const model = info.isOverride ? pc.white(info.active) : DIM(info.active);
-            const tag = info.isOverride
-              ? WARNING('(override)')
-              : DIM(`(${String(info.tierSource)})`);
-            const effLabel2 = formatEffortDisplay(info.active, info.reasoningEffort);
-            const effort = effLabel2 ? pc.yellow(` [${effLabel2}]`) : '';
-            console.log(`  ${colorAgent(agent)}  ${model}${effort} ${tag}`);
-          }
-          console.log('');
-          console.log(DIM(`  Set mode:  :model mode=economy`));
-          console.log(DIM(`  Override:  :model codex=gpt-5.2-codex`));
-          console.log(DIM(`  Reset all: :model reset`));
-          console.log(DIM(`  Reset one: :model codex=default`));
-          console.log(DIM(`  Browse:    :model:select [agent]`));
-        }
-        rl.prompt();
+        await handleModelCommand(
+          {
+            baseUrl,
+            agents,
+            config,
+            rl,
+            HYDRA_ROOT,
+            getLoopMode: () => mode,
+            setLoopMode: (m) => {
+              mode = m;
+            },
+            initStatusBar,
+            destroyStatusBar,
+            drawStatusBar,
+          },
+          line.slice(':model'.length).trim(),
+        );
         return;
       }
       if (line === ':model:select' || line.startsWith(':model:select ')) {
-        const selectArg = line.slice(':model:select'.length).trim();
-        const pickerArgs = [path.join(HYDRA_ROOT, 'lib', 'hydra-models-select.ts')];
-        if (selectArg && AGENT_NAMES.includes(selectArg.toLowerCase())) {
-          pickerArgs.push(selectArg.toLowerCase());
-        }
-        // Hand terminal control to the interactive picker subprocess
-        rl.pause();
-        destroyStatusBar();
-        spawnHydraNodeSync(pickerArgs[0], pickerArgs.slice(1), {
-          stdio: 'inherit',
-          windowsHide: true,
-        });
-        initStatusBar(agents);
-        rl.resume();
-        rl.prompt();
+        await handleModelSelectCommand(
+          {
+            baseUrl,
+            agents,
+            config,
+            rl,
+            HYDRA_ROOT,
+            getLoopMode: () => mode,
+            setLoopMode: (m) => {
+              mode = m;
+            },
+            initStatusBar,
+            destroyStatusBar,
+            drawStatusBar,
+          },
+          line.slice(':model:select'.length).trim(),
+        );
         return;
       }
       if (line === ':roles') {
-        const cfg = loadHydraConfig();
-        const roles = cfg.roles;
-        const recs = cfg.recommendations ?? {};
-        console.log('');
-        console.log(pc.bold('  Role → Agent → Model mapping'));
-        console.log('');
-        for (const [role, rc] of Object.entries(roles)) {
-          const rec = (recs as any)[role];
-          const modelStr = rc.model ? pc.white(rc.model) : DIM('(agent default)');
-          const roleEffLabel = formatEffortDisplay(
-            (rc.model ?? getActiveModel(rc.agent)) as string,
-            rc.reasoningEffort,
-          );
-          const effortStr = roleEffLabel ? pc.yellow(` [${roleEffLabel}]`) : '';
-          const match = rec?.models?.[0] === rc.model ? SUCCESS(' ✓') : '';
-          console.log(
-            `  ${ACCENT(role.padEnd(16))} ${colorAgent(rc.agent)}  ${modelStr}${effortStr}${match}`,
-          );
-          if (rec) {
-            console.log(
-              `  ${' '.repeat(16)} ${DIM(`Recommended: ${String(rec.models.join(', '))}`)}`,
-            );
-            if (rec.note) console.log(`  ${' '.repeat(16)} ${DIM(rec.note)}`);
-          }
-        }
-        console.log('');
-        console.log(DIM('  Override in hydra.config.json under "roles" section'));
-        console.log(DIM('  Or use :roster to edit interactively'));
-        console.log('');
-        rl.prompt();
+        await handleRolesCommand({
+          baseUrl,
+          agents,
+          config,
+          rl,
+          HYDRA_ROOT,
+          getLoopMode: () => mode,
+          setLoopMode: (m) => {
+            mode = m;
+          },
+          initStatusBar,
+          destroyStatusBar,
+          drawStatusBar,
+        });
         return;
       }
       if (line === ':roster') {
@@ -1739,41 +1637,24 @@ async function interactiveLoop({
         rl.prompt();
         return;
       }
-      if (line === ':mode') {
-        const routingModeCfg = loadHydraConfig().routing.mode;
-        let chip: string;
-        if (routingModeCfg === 'economy') {
-          chip = pc.yellow('◆ ECO');
-        } else if (routingModeCfg === 'performance') {
-          chip = pc.cyan('◆ PERF');
-        } else {
-          chip = pc.green('◆ BAL');
-        }
-        console.log(label('Mode', ACCENT(mode)));
-        console.log(
-          label('Routing mode', `${chip} ${pc.dim('(economy | balanced | performance)')}`),
+      if (line === ':mode' || line.startsWith(':mode ')) {
+        await handleModeCommand(
+          {
+            baseUrl,
+            agents,
+            config,
+            rl,
+            HYDRA_ROOT,
+            getLoopMode: () => mode,
+            setLoopMode: (m) => {
+              mode = m;
+            },
+            initStatusBar,
+            destroyStatusBar,
+            drawStatusBar,
+          },
+          line.slice(':mode'.length).trim(),
         );
-        console.log(
-          DIM(`  Switch orchestration: :mode auto | smart | handoff | council | dispatch`),
-        );
-        console.log(DIM(`  Switch routing:       :mode economy | balanced | performance`));
-        rl.prompt();
-        return;
-      }
-      if (line.startsWith(':mode ')) {
-        const nextMode = line.slice(':mode '.length).trim().toLowerCase();
-        if (!['auto', 'handoff', 'council', 'dispatch', 'smart'].includes(nextMode)) {
-          console.log(
-            'Invalid mode. Use :mode auto, :mode handoff, :mode council, :mode dispatch, or :mode smart',
-          );
-          rl.prompt();
-          return;
-        }
-        mode = nextMode;
-        setActiveMode(mode);
-        console.log(label('Mode', ACCENT(mode)));
-        drawStatusBar();
-        rl.prompt();
         return;
       }
 
@@ -1960,180 +1841,23 @@ async function interactiveLoop({
       }
 
       if (line === ':tasks' || line.startsWith(':tasks ')) {
-        const tasksArg = line.slice(':tasks'.length).trim().toLowerCase();
-
-        if (tasksArg === 'scan') {
-          // Run scanner inline
-          console.log(`  ${ACCENT('Scanning for work items...')}`);
-          try {
-            const { scanAllSources } = await import('./hydra-tasks-scanner.ts');
-            const scanned = scanAllSources(config.projectRoot);
-            if (scanned.length === 0) {
-              console.log(`  ${DIM('No tasks found.')}`);
-            } else {
-              console.log('');
-              console.log(sectionHeader(`Scanned Tasks (${String(scanned.length)})`));
-              for (const t of scanned.slice(0, 15)) {
-                let prioColor: (s: string) => string;
-                if (t.priority === 'high') {
-                  prioColor = pc.red;
-                } else if (t.priority === 'low') {
-                  prioColor = DIM;
-                } else {
-                  prioColor = pc.yellow;
-                }
-                console.log(`  ${prioColor(t.priority.padEnd(6))} ${t.title}`);
-                console.log(
-                  `         ${DIM(`[${t.source}] ${t.taskType} → ${t.suggestedAgent} | ${t.sourceRef}`)}`,
-                );
-              }
-              if (scanned.length > 15) {
-                console.log(DIM(`  ... and ${String(scanned.length - 15)} more`));
-              }
-              console.log('');
-            }
-          } catch (err: unknown) {
-            console.log(`  ${ERROR((err as Error).message)}`);
-          }
-          rl.prompt();
-          return;
-        }
-
-        if (tasksArg === 'run' || tasksArg.startsWith('run ')) {
-          // Launch tasks runner as subprocess (same pattern as :evolve)
-          const cwd = config.projectRoot;
-          console.log(`  ${ACCENT('Launching tasks runner...')}`);
-          rl.pause();
-          destroyStatusBar();
-          const tasksScript = path.join(HYDRA_ROOT, 'lib', 'hydra-tasks.ts');
-          const tasksArgs = [tasksScript, `project=${cwd}`];
-          const extra = tasksArg.slice('run'.length).trim();
-          if (extra) {
-            tasksArgs.push(...extra.split(/\s+/).filter(Boolean));
-          }
-          const child = spawnHydraNode(tasksArgs[0], tasksArgs.slice(1), {
-            cwd,
-            stdio: 'inherit',
-            shell: process.platform === 'win32',
-          });
-          child.on('close', (code) => {
-            initStatusBar(agents);
-            rl.resume();
-            if (code === 0) {
-              console.log(`  ${SUCCESS('\u2713')} Tasks runner complete`);
-            } else {
-              console.log(`  ${ERROR(`Tasks runner exited with code ${String(code)}`)}`);
-            }
-            rl.prompt();
-          });
-          return;
-        }
-
-        if (tasksArg === 'review') {
-          const cwd = config.projectRoot;
-          rl.pause();
-          destroyStatusBar();
-          const reviewScript = path.join(HYDRA_ROOT, 'lib', 'hydra-tasks-review.ts');
-          const child = spawnHydraNode(reviewScript, ['review'], {
-            cwd,
-            stdio: 'inherit',
-            shell: process.platform === 'win32',
-          });
-
-          child.on('close', async () => {
-            // After branch review, surface any conflict worktrees from daemon tasks
-            try {
-              const { state } = (await request('GET', baseUrl, '/state')) as any;
-              const conflictTasks = (state.tasks ?? []).filter((t: any) => t.worktreeConflict);
-              if (conflictTasks.length > 0) {
-                console.log('');
-                console.log(sectionHeader('Conflict Worktrees'));
-                console.log(
-                  `  ${WARNING('\u26A0')}  ${String(conflictTasks.length)} task worktree${conflictTasks.length > 1 ? 's' : ''} have merge conflicts and were preserved for manual resolution:`,
-                );
-                console.log('');
-                for (const t of conflictTasks) {
-                  const relPath = t.worktreePath
-                    ? path.relative(config.projectRoot, t.worktreePath)
-                    : `hydra/task/${String(t.id)}`;
-                  console.log(`  ${ACCENT(t.id)} ${DIM(t.title ?? '(no title)')}`);
-                  console.log(`    ${DIM('Worktree:')} ${relPath}`);
-                  console.log(
-                    `    ${DIM('Branch:')}   ${String(t.worktreeBranch ?? `hydra/task/${String(t.id)}`)}`,
-                  );
-                  console.log('');
-                  console.log(`    ${DIM('Inspect:')}  git worktree list`);
-                  console.log(
-                    `    ${DIM('Diff:')}     git diff ${String(t.worktreeBranch ?? `hydra/task/${String(t.id)}`)}`,
-                  );
-                  console.log('');
-                }
-                console.log(
-                  `  ${DIM('To discard a conflict worktree, use :cleanup — stale worktrees appear after 24h.')}`,
-                );
-                console.log(
-                  `  ${DIM('To resolve manually: edit the conflicted files, commit, then run :cleanup.')}`,
-                );
-              }
-            } catch {
-              /* daemon may be unavailable — skip silently */
-            }
-            initStatusBar(agents);
-            rl.resume();
-            rl.prompt();
-          });
-          return;
-        }
-
-        if (tasksArg === 'status') {
-          const reviewScript = path.join(HYDRA_ROOT, 'lib', 'hydra-tasks-review.ts');
-          const child = spawnHydraNode(reviewScript, ['status'], {
-            cwd: config.projectRoot,
-            stdio: 'inherit',
-            shell: process.platform === 'win32',
-          });
-          child.on('close', () => {
-            rl.prompt();
-          });
-          return;
-        }
-
-        if (tasksArg === 'clean') {
-          const reviewScript = path.join(HYDRA_ROOT, 'lib', 'hydra-tasks-review.ts');
-          const child = spawnHydraNode(reviewScript, ['clean'], {
-            cwd: config.projectRoot,
-            stdio: 'inherit',
-            shell: process.platform === 'win32',
-          });
-          child.on('close', () => {
-            rl.prompt();
-          });
-          return;
-        }
-
-        // Default: list daemon tasks (original behavior)
-        try {
-          const { state } = (await request('GET', baseUrl, '/state')) as any;
-          const active = state.tasks.filter(
-            (t: any) => t.status !== 'cancelled' && t.status !== 'done',
-          );
-          if (active.length === 0) {
-            console.log(`  ${DIM('No active tasks')}`);
-          } else {
-            console.log('');
-            console.log(sectionHeader(`Tasks (${String(active.length)})`));
-            for (const t of active) {
-              const statusIcon = t.status === 'in_progress' ? WARNING('\u25CF') : DIM('\u25CB');
-              console.log(
-                `  ${statusIcon} ${pc.white(t.id)} ${colorAgent(t.owner)} ${String(t.title)} ${DIM(t.status)}`,
-              );
-            }
-            console.log('');
-          }
-        } catch (err: unknown) {
-          console.log(`  ${ERROR((err as Error).message)}`);
-        }
-        rl.prompt();
+        await handleTasksCommand(
+          {
+            baseUrl,
+            agents,
+            config,
+            rl,
+            HYDRA_ROOT,
+            getLoopMode: () => mode,
+            setLoopMode: (m) => {
+              mode = m;
+            },
+            initStatusBar,
+            destroyStatusBar,
+            drawStatusBar,
+          },
+          line.slice(':tasks'.length).trim(),
+        );
         return;
       }
 
@@ -2397,1534 +2121,107 @@ async function interactiveLoop({
 
       // ── Agent Registry Commands ────────────────────────────────────────
       if (line === ':agents' || line.startsWith(':agents ')) {
-        const agentArgs = line.slice(':agents'.length).trim();
-        const agentParts = agentArgs.split(/\s+/);
-        const agentSubCmd = agentParts[0] || '';
-
-        if (!agentSubCmd) {
-          // List all agents
-          console.log('');
-          console.log(sectionHeader('Agent Registry'));
-          const physical = listAgents({ type: 'physical' });
-          const virtual = listAgents({ type: 'virtual' });
-
-          console.log(`  ${pc.bold('Physical Agents')} (${String(physical.length)})`);
-          for (const a of physical) {
-            const model = getActiveModel(a.name) ?? DIM('default');
-            console.log(
-              `    ${colorAgent(a.name)} ${DIM(a.label)}  ${DIM('model:')} ${pc.white(model)}`,
-            );
-          }
-
-          if (virtual.length > 0) {
-            console.log('');
-            console.log(`  ${pc.bold('Virtual Sub-Agents')} (${String(virtual.length)})`);
-            for (const a of virtual) {
-              const status = a.enabled ? SUCCESS('on') : ERROR('off');
-              const base = DIM(`\u2192 ${String(a.baseAgent)}`);
-              console.log(`    ${colorAgent(a.name)} ${DIM(a.displayName)}  ${base}  [${status}]`);
-            }
-          } else {
-            console.log('');
-            console.log(`  ${DIM('No virtual sub-agents registered.')}`);
-          }
-
-          console.log('');
-          console.log(
-            DIM('  :agents add              Add custom API agent (with provider preset picker)'),
-          );
-          console.log(DIM('  :agents info <name>      Show agent details'));
-          console.log(DIM('  :agents enable <name>    Enable a virtual agent'));
-          console.log(DIM('  :agents disable <name>   Disable a virtual agent'));
-          console.log(DIM('  :agents list virtual     List virtual agents only'));
-          console.log(DIM('  :agents list physical    List physical agents only'));
-          console.log('');
-        } else if (agentSubCmd === 'list') {
-          const filterType = agentParts[1] || 'all';
-          const opts: any = {};
-          if (filterType === 'virtual') opts.type = 'virtual';
-          else if (filterType === 'physical') opts.type = 'physical';
-          const list = listAgents(opts);
-          console.log('');
-          console.log(sectionHeader(`Agents (${filterType})`));
-          for (const a of list) {
-            const typeTag = a.type === 'virtual' ? DIM('[virtual]') : DIM('[physical]');
-            const status = a.enabled ? SUCCESS('on') : ERROR('off');
-            console.log(`    ${colorAgent(a.name)} ${typeTag} ${DIM(a.displayName)}  [${status}]`);
-          }
-          if (list.length === 0) console.log(`    ${DIM('(none)')}`);
-          console.log('');
-        } else if (agentSubCmd === 'info') {
-          const targetName = agentParts[1];
-          if (targetName) {
-            const agentDef = getAgent(targetName);
-            if (agentDef) {
-              console.log('');
-              console.log(sectionHeader(`Agent: ${String(agentDef.displayName)}`));
-              console.log(`  ${pc.bold('Name:')}      ${agentDef.name}`);
-              console.log(`  ${pc.bold('Type:')}      ${agentDef.type}`);
-              console.log(`  ${pc.bold('Label:')}     ${agentDef.label}`);
-              console.log(
-                `  ${pc.bold('Enabled:')}   ${agentDef.enabled ? SUCCESS('yes') : ERROR('no')}`,
-              );
-              if (agentDef.baseAgent) {
-                console.log(`  ${pc.bold('Base:')}      ${colorAgent(agentDef.baseAgent)}`);
-              }
-              if (agentDef.councilRole) {
-                console.log(`  ${pc.bold('Council:')}   ${agentDef.councilRole}`);
-              }
-              if (agentDef.strengths!.length > 0) {
-                console.log(`  ${pc.bold('Strengths:')} ${agentDef.strengths!.join(', ')}`);
-              }
-              if (agentDef.tags!.length > 0) {
-                console.log(`  ${pc.bold('Tags:')}      ${agentDef.tags!.join(', ')}`);
-              }
-              // Show task affinities sorted by score
-              const affinities = Object.entries(agentDef.taskAffinity).sort(
-                ([, a], [, b]) => b - a,
-              );
-              if (affinities.length > 0) {
-                console.log(`  ${pc.bold('Affinities:')}`);
-                for (const [type, score] of affinities) {
-                  const bar = '\u2588'.repeat(Math.round(score * 20));
-                  const pad = ' '.repeat(20 - Math.round(score * 20));
-                  console.log(
-                    `    ${type.padEnd(16)} ${DIM(bar)}${DIM(pad)} ${(score * 100).toFixed(0)}%`,
-                  );
-                }
-              }
-              if (agentDef.rolePrompt) {
-                console.log(`  ${pc.bold('Role Prompt:')}`);
-                const lines = agentDef.rolePrompt.split('\n').slice(0, 6);
-                for (const l of lines) console.log(`    ${DIM(l)}`);
-                if (agentDef.rolePrompt.split('\n').length > 6) console.log(`    ${DIM('...')}`);
-              }
-              console.log('');
-            } else {
-              console.log(`  ${ERROR('Unknown agent:')} ${targetName}`);
-            }
-          } else {
-            console.log(`  ${ERROR('Usage:')} :agents info <name>`);
-          }
-        } else if (agentSubCmd === 'enable' || agentSubCmd === 'disable') {
-          const targetName = agentParts[1];
-          if (targetName) {
-            const agentDef = getAgent(targetName);
-            if (!agentDef) {
-              console.log(`  ${ERROR('Unknown agent:')} ${targetName}`);
-            } else if (agentDef.type === 'physical') {
-              console.log(`  ${ERROR('Cannot')} ${agentSubCmd} physical agents.`);
-            } else {
-              setAgentEnabled(targetName, agentSubCmd === 'enable');
-              console.log(`  ${SUCCESS('\u2713')} ${colorAgent(targetName)} ${agentSubCmd}d`);
-            }
-          } else {
-            console.log(`  ${ERROR('Usage:')} :agents ${agentSubCmd} <name>`);
-          }
-        } else if (agentSubCmd === 'add') {
-          const { runAgentsWizard } = await import('./hydra-agents-wizard.ts');
-          await runAgentsWizard(rl);
-        } else if (agentSubCmd === 'remove') {
-          const targetName = agentParts[1]?.toLowerCase();
-          if (targetName) {
-            const cfg = loadHydraConfig();
-            const before = cfg.agents.customAgents;
-            const customAgents = before.filter((a) => a.name !== targetName);
-            if (customAgents.length === before.length) {
-              console.log(`  ${ERROR('Not found:')} "${targetName}" is not a custom agent`);
-            } else {
-              saveHydraConfig({ agents: { ...cfg.agents, customAgents } });
-              console.log(
-                `  ${SUCCESS('\u2713')} Removed agent "${targetName}" from config (restart to take effect)`,
-              );
-            }
-          } else {
-            console.log(`  ${ERROR('Usage:')} :agents remove <name>`);
-          }
-        } else if (agentSubCmd === 'test') {
-          const targetName = agentParts[1]?.toLowerCase();
-          if (targetName) {
-            const agentDef = getAgent(targetName);
-            if (agentDef) {
-              console.log(`  Testing agent "${targetName}"...`);
-              try {
-                const result = await executeAgent(targetName, 'Say "hello" in one sentence.');
-                if (result.ok) {
-                  console.log(
-                    `  ${SUCCESS('OK')} ${DIM(result.output.slice(0, 200) || '(empty output)')}`,
-                  );
-                } else {
-                  console.log(
-                    `  ${ERROR('FAIL')} ${String(result.errorCategory)}: ${result.stderr.slice(0, 200)}`,
-                  );
-                }
-              } catch (err: unknown) {
-                console.log(`  ${ERROR('ERROR')} ${(err as Error).message}`);
-              }
-            } else {
-              console.log(`  ${ERROR('Not found:')} agent "${targetName}" not in registry`);
-            }
-          } else {
-            console.log(`  ${ERROR('Usage:')} :agents test <name>`);
-          }
-        } else {
-          console.log(`  ${ERROR('Unknown subcommand:')} ${agentSubCmd}`);
-          console.log(
-            `  ${DIM('Usage: :agents [add|remove|test|info|list|enable|disable] [name]')}`,
-          );
-        }
-
-        rl.prompt();
-        return;
-      }
-
-      // ── Doctor Commands ──────────────────────────────────────────────────
-      if (line === ':doctor' || line.startsWith(':doctor ')) {
-        const doctorArg = line.slice(':doctor'.length).trim();
-        try {
-          const { initDoctor, isDoctorEnabled, getDoctorStats, getDoctorLog } =
-            await import('./hydra-doctor.ts');
-          initDoctor();
-
-          if (!doctorArg || doctorArg === 'stats') {
-            // Show stats + last 10 log entries
-            console.log('');
-            console.log(sectionHeader('Doctor'));
-            const enabled = isDoctorEnabled();
-            console.log(label('Status', enabled ? SUCCESS('enabled') : ERROR('disabled')));
-            const stats = getDoctorStats();
-            console.log(
-              label(
-                'Session',
-                `${String(stats.total)} diagnoses — ${String(stats.fixes)} fixes, ${String(stats.tickets)} tickets, ${String(stats.investigations)} investigations, ${String(stats.ignored)} ignored`,
-              ),
-            );
-            const recent =
-              /** @type {Array<{severity?: string, ts?: number|string, action?: string, pipeline?: string, explanation?: string}>} */ getDoctorLog(
-                10,
-              );
-            if (recent.length > 0) {
-              console.log('');
-              console.log(DIM('  Recent diagnoses:'));
-              for (const e of recent as any) {
-                let sev: string;
-                if (e['severity'] === 'critical' || e['severity'] === 'high') {
-                  sev = ERROR(e['severity']);
-                } else if (e['severity'] === 'medium') {
-                  sev = WARNING(e['severity']);
-                } else {
-                  sev = DIM(e['severity'] ?? '');
-                }
-                const ts = e['ts'] ? new Date(e['ts']).toLocaleTimeString() : '';
-                console.log(
-                  `    ${DIM(ts)} ${sev} ${pc.white(e['action'] ?? '')} ${DIM(e['pipeline'] ?? '')} ${String((e['explanation'] ?? '').slice(0, 60))}`,
-                );
-              }
-            } else {
-              console.log(`  ${DIM('No diagnostic entries yet')}`);
-            }
-            console.log('');
-          } else if (doctorArg === 'log') {
-            // Show last 25 entries
-            const entries =
-              /** @type {Array<{severity?: string, ts?: number|string, action?: string, pipeline?: string, explanation?: string, recurring?: boolean}>} */ getDoctorLog(
-                25,
-              );
-            console.log('');
-            console.log(sectionHeader('Doctor Log'));
-            if (entries.length === 0) {
-              console.log(`  ${DIM('No diagnostic entries yet')}`);
-            } else {
-              for (const e of entries as any) {
-                let sev: string;
-                if (e['severity'] === 'critical' || e['severity'] === 'high') {
-                  sev = ERROR(e['severity'].padEnd(8));
-                } else if (e['severity'] === 'medium') {
-                  sev = WARNING(e['severity'].padEnd(8));
-                } else {
-                  sev = DIM((e['severity'] ?? '').padEnd(8));
-                }
-                const ts = e['ts'] ? new Date(e['ts']).toLocaleString() : '';
-                console.log(
-                  `  ${DIM(ts)} ${sev} [${String(e['action'])}] ${String(e['pipeline'] ?? '')}: ${String((e['explanation'] ?? '').slice(0, 80))}`,
-                );
-                if (e['recurring']) console.log(`    ${WARNING('↻ recurring')}`);
-              }
-            }
-            console.log('');
-          } else if (doctorArg === 'fix') {
-            // Auto-detect and fix issues via action pipeline
-            try {
-              const { runActionPipeline } = await import('./hydra-action-pipeline.ts');
-              const {
-                scanDoctorLog,
-                scanDaemonIssues,
-                scanErrorActivity,
-                enrichWithDiagnosis,
-                executeFixAction,
-              } = await import('./hydra-doctor.ts');
-              const { getOutputContext } = await import('./hydra-output-history.ts');
-
-              await runActionPipeline(rl, {
-                title: 'Doctor Fix',
-                scanners: [
-                  () => scanDoctorLog(),
-                  () => scanDaemonIssues(baseUrl),
-                  () => scanErrorActivity(),
-                ],
-                enrich: (items) => enrichWithDiagnosis(items, getOutputContext()),
-                preSelectFilter: (item) =>
-                  item['severity'] === 'critical' || item['severity'] === 'high',
-                executeFn: (item) =>
-                  executeFixAction(item, { projectRoot: config.projectRoot, rl }),
-                projectRoot: config.projectRoot,
-                baseUrl,
-              });
-            } catch (err: unknown) {
-              console.log(`  ${ERROR((err as Error).message)}`);
-            }
-          } else if (doctorArg === 'config') {
-            // Compare user hydra.config.json against DEFAULT_CONFIG
-            console.log('');
-            console.log(sectionHeader('Doctor Config'));
-            console.log(`  ${DIM('Comparing hydra.config.json against DEFAULT_CONFIG...')}`);
-            console.log('');
-            try {
-              const fs = await import('node:fs');
-              const configFilePath = path.join(HYDRA_RUNTIME_ROOT, 'hydra.config.json');
-              let rawUser = {};
-              try {
-                rawUser = JSON.parse(fs.default.readFileSync(configFilePath, 'utf8'));
-              } catch {
-                console.log(
-                  `  ${WARNING('Could not read hydra.config.json — using empty config for comparison')}`,
-                );
-              }
-              const { missing, stale, typeMismatches } = diffConfig(rawUser);
-
-              // ── Stale keys ────────────────────────────────────────────────
-              if (stale.length === 0) {
-                console.log(`  ${SUCCESS('✓')} No stale keys found`);
-              } else {
-                console.log(
-                  `  ${ERROR('✗')} ${pc.bold('Stale keys')} ${DIM('(in your config but not in DEFAULT_CONFIG — may be from an old version):')}`,
-                );
-                for (const item of stale) {
-                  const preview = JSON.stringify(item.userValue);
-                  const truncated = preview.length > 60 ? `${preview.slice(0, 57)}...` : preview;
-                  console.log(
-                    `    ${ERROR('•')} ${pc.white(item.path.padEnd(32))} ${DIM(`user: ${truncated}`)}`,
-                  );
-                }
-                console.log(
-                  `  ${DIM('  → Consider removing these keys or updating your config.')}`,
-                );
-              }
-              console.log('');
-
-              // ── Type mismatches ───────────────────────────────────────────
-              if (typeMismatches.length === 0) {
-                console.log(`  ${SUCCESS('✓')} No type mismatches`);
-              } else {
-                console.log(
-                  `  ${ERROR('✗')} ${pc.bold('Type mismatches')} ${DIM('(key exists in both but types differ):')}`,
-                );
-                for (const item of typeMismatches) {
-                  console.log(
-                    `    ${ERROR('•')} ${pc.white(item.path.padEnd(32))} expected: ${WARNING(item.expectedType.padEnd(8))}  got: ${ERROR(item.gotType)}`,
-                  );
-                }
-                console.log(
-                  `  ${DIM('  → These may cause unexpected behaviour — check your config values.')}`,
-                );
-              }
-              console.log('');
-
-              // ── Missing keys ──────────────────────────────────────────────
-              if (missing.length === 0) {
-                console.log(`  ${SUCCESS('✓')} No missing keys (your config is fully specified)`);
-              } else {
-                console.log(
-                  `  ${WARNING('⚠')} ${pc.bold('Missing keys')} ${DIM('(in DEFAULT_CONFIG but not in your file — defaults will be used, no action needed):')}`,
-                );
-                for (const item of missing) {
-                  const preview = JSON.stringify(item.defaultValue);
-                  const truncated = preview.length > 60 ? `${preview.slice(0, 57)}...` : preview;
-                  console.log(
-                    `    ${DIM('•')} ${pc.white(item.path.padEnd(32))} ${DIM(`default: ${truncated}`)}`,
-                  );
-                }
-                console.log(
-                  `  ${DIM('  → These are informational only. Hydra fills them in automatically.')}`,
-                );
-              }
-              console.log('');
-            } catch (err: unknown) {
-              console.log(`  ${ERROR((err as Error).message)}`);
-            }
-          } else if (doctorArg.startsWith('diagnose ')) {
-            const errorText = doctorArg.slice('diagnose '.length).trim();
-            if (errorText) {
-              console.log('');
-              console.log(sectionHeader('Investigating'));
-              const spinner = createSpinner('Diagnosing failure...', { style: 'orbital' });
-              try {
-                const inv = await import('./hydra-investigator.ts');
-                if (inv.isInvestigatorAvailable()) {
-                  inv.initInvestigator();
-                  const result = await inv.investigate({
-                    phase: 'manual',
-                    error: errorText,
-                    context: errorText,
-                    attemptNumber: 1,
-                  });
-                  spinner.stop();
-
-                  // Display diagnosis
-                  let diagColor: (s: string) => string;
-                  if (result.diagnosis === 'fundamental') {
-                    diagColor = ERROR;
-                  } else if (result.diagnosis === 'fixable') {
-                    diagColor = WARNING;
-                  } else {
-                    diagColor = DIM;
-                  }
-                  console.log(label('Type', diagColor(result.diagnosis)));
-                  console.log(label('Root cause', pc.white(result.rootCause || 'unknown')));
-                  console.log(label('Explanation', pc.white(result.explanation || 'none')));
-                  if (result.corrective) {
-                    console.log(label('Corrective', ACCENT(result.corrective)));
-                  }
-                  const rec = result.retryRecommendation;
-                  console.log(label('Retry', rec.retryPhase ? SUCCESS('yes') : DIM('no')));
-                  if (rec.retryAgent) console.log(label('Alt agent', colorAgent(rec.retryAgent)));
-
-                  // Also triage into follow-ups
-                  try {
-                    const { diagnose } = await import('./hydra-doctor.ts');
-                    await diagnose({
-                      pipeline: 'manual',
-                      phase: 'manual',
-                      error: errorText,
-                      context: errorText,
-                    });
-                    console.log(`  ${DIM('Triaged into follow-ups (suggestion/KB)')}`);
-                  } catch {
-                    /* best effort */
-                  }
-                } else {
-                  spinner.stop();
-                  console.log(`  ${ERROR('Investigator unavailable')} — OPENAI_API_KEY required`);
-                }
-              } catch (err: unknown) {
-                spinner.stop();
-                console.log(`  ${ERROR((err as Error).message)}`);
-              }
-              console.log('');
-            } else {
-              console.log(`  ${ERROR('Usage:')} :doctor diagnose <error text>`);
-            }
-          } else {
-            console.log(`  ${ERROR('Unknown subcommand:')} ${doctorArg}`);
-            console.log(`  ${DIM('Usage: :doctor [stats|log|fix|config|diagnose <text>]')}`);
-          }
-        } catch (err: unknown) {
-          console.log(`  ${ERROR((err as Error).message)}`);
-        }
-        rl.prompt();
-        return;
-      }
-
-      // ── Knowledge Base Commands ────────────────────────────────────────────
-      if (line === ':kb' || line.startsWith(':kb ')) {
-        const kbArg = line.slice(':kb'.length).trim();
-        try {
-          const { loadKnowledgeBase, searchEntries, getStats } =
-            await import('./hydra-knowledge.ts');
-          const evolveDir = path.join(config.projectRoot, 'docs', 'coordination', 'evolve');
-          const kb = loadKnowledgeBase(evolveDir);
-
-          if (kbArg) {
-            // Search entries
-            const results = searchEntries(kb, kbArg);
-            console.log('');
-            console.log(sectionHeader(`KB Search: "${kbArg}"`));
-            if (results.length === 0) {
-              console.log(`  ${DIM('No matching entries')}`);
-            } else {
-              for (const e of results.slice(0, 15)) {
-                let appColor: (s: string) => string;
-                if (e.applicability === 'high') {
-                  appColor = SUCCESS;
-                } else if (e.applicability === 'medium') {
-                  appColor = WARNING;
-                } else {
-                  appColor = DIM;
-                }
-                console.log(
-                  `  ${DIM(e.id ?? '?')} ${appColor((e.applicability ?? '?').padEnd(6))} ${DIM(e.area ?? '')}`,
-                );
-                console.log(`    ${(e.finding ?? '').slice(0, 100)}`);
-                if (e.learnings) console.log(`    ${DIM(`→ ${e.learnings.slice(0, 80)}`)}`);
-              }
-              if (results.length > 15) {
-                console.log(`  ${DIM(`... and ${String(results.length - 15)} more`)}`);
-              }
-            }
-            console.log('');
-          } else {
-            // Stats + 10 most recent entries
-            console.log('');
-            console.log(sectionHeader('Knowledge Base'));
-            const stats = getStats(kb) as any;
-            console.log(
-              label('Entries', pc.white(String(stats.totalEntries ?? kb.entries.length ?? 0))),
-            );
-            if (stats.byArea && Object.keys(stats.byArea).length > 0) {
-              const areas = Object.entries(stats.byArea)
-                .sort(([, a], [, b]) => (b as number) - (a as number))
-                .slice(0, 5);
-              console.log(
-                label('Top areas', areas.map(([a, c]) => `${a} (${String(c)})`).join(', ')),
-              );
-            }
-            console.log('');
-            const recent = kb.entries.slice(-10).reverse();
-            if (recent.length > 0) {
-              console.log(DIM('  Recent entries:'));
-              for (const e of recent) {
-                let appColor: (s: string) => string;
-                if (e.applicability === 'high') {
-                  appColor = SUCCESS;
-                } else if (e.applicability === 'medium') {
-                  appColor = WARNING;
-                } else {
-                  appColor = DIM;
-                }
-                console.log(
-                  `    ${DIM(e.id ?? '?')} ${appColor((e.applicability ?? '?').padEnd(6))} ${DIM(e.area ?? '')} ${(e.finding ?? '').slice(0, 70)}`,
-                );
-              }
-            } else {
-              console.log(
-                `  ${DIM('Knowledge base is empty — run :evolve to accumulate learnings')}`,
-              );
-            }
-            console.log('');
-          }
-        } catch (err: unknown) {
-          console.log(`  ${ERROR((err as Error).message)}`);
-        }
-        rl.prompt();
+        await handleAgentsCommand(
+          {
+            baseUrl,
+            agents,
+            config,
+            rl,
+            HYDRA_ROOT,
+            getLoopMode: () => mode,
+            setLoopMode: (m) => {
+              mode = m;
+            },
+            initStatusBar,
+            destroyStatusBar,
+            drawStatusBar,
+          },
+          line.slice(':agents'.length).trim(),
+        );
         return;
       }
 
       // ── Cleanup Command ──────────────────────────────────────────────────
       if (line === ':cleanup') {
-        try {
-          const { runActionPipeline } = await import('./hydra-action-pipeline.ts');
-          const {
-            scanArchivableTasks,
-            scanOldHandoffs,
-            scanStaleBranches,
-            scanStaleTasks,
-            scanAbandonedSuggestions,
-            scanOldCheckpoints,
-            scanOldArtifacts,
-            scanStaleTaskWorktrees,
-            enrichCleanupWithSitrep,
-            executeCleanupAction,
-          } = await import('./hydra-cleanup.ts');
-
-          await runActionPipeline(rl, {
-            title: 'Cleanup',
-            scanners: [
-              () => scanArchivableTasks(baseUrl),
-              () => scanOldHandoffs(baseUrl),
-              () => scanStaleBranches(config.projectRoot),
-              () => scanStaleTasks(baseUrl),
-              () => scanAbandonedSuggestions(),
-              () => scanOldCheckpoints(config.projectRoot),
-              () => scanOldArtifacts(config.projectRoot),
-              () => scanStaleTaskWorktrees(config.projectRoot),
-            ],
-            enrich: (items) =>
-              enrichCleanupWithSitrep(items, { baseUrl, projectRoot: config.projectRoot }),
-            preSelectFilter: (item) => item.category === 'archive',
-            executeFn: (item) =>
-              executeCleanupAction(item, { baseUrl, projectRoot: config.projectRoot }),
-            projectRoot: config.projectRoot,
-            baseUrl,
-          });
-        } catch (err: unknown) {
-          console.log(`  ${ERROR((err as Error).message)}`);
-        }
-        rl.prompt();
-        return;
-      }
-
-      // ── Worker Commands ──────────────────────────────────────────────────
-      if (line === ':workers' || line.startsWith(':workers ')) {
-        const workerArgs = line.slice(':workers'.length).trim().toLowerCase();
-
-        if (!workerArgs) {
-          // Show status of all workers
-          console.log('');
-          console.log(sectionHeader('Agent Workers'));
-          if (workers.size === 0) {
-            console.log(`  ${DIM('No workers running. Dispatch a prompt to start workers.')}`);
-          } else {
-            for (const [name, w] of workers) {
-              let statusIcon: string;
-              if (w.status === 'working') {
-                statusIcon = WARNING('\u25CF');
-              } else if (w.status === 'idle') {
-                statusIcon = SUCCESS('\u25CB');
-              } else if (w.status === 'error') {
-                statusIcon = ERROR('\u25CF');
-              } else {
-                statusIcon = DIM('\u25CB');
-              }
-              const task = w.currentTask
-                ? `${pc.white(w.currentTask.taskId)} ${DIM(short(w.currentTask.title, 40))}`
-                : DIM('no task');
-              const up = w.uptime > 0 ? DIM(`  up ${formatUptime(w.uptime)}`) : '';
-              const perm = DIM(`  (${w.permissionMode})`);
-              console.log(
-                `  ${statusIcon} ${colorAgent(name)} ${pc.white(w.status)}  ${task}${up}${perm}`,
-              );
-            }
-          }
-          console.log('');
-          console.log(DIM('  :workers start [agent]   Start worker(s)'));
-          console.log(DIM('  :workers stop [agent]    Stop worker(s)'));
-          console.log(DIM('  :workers restart [agent] Restart worker(s)'));
-          console.log(DIM('  :workers mode <mode>     Change permission mode'));
-          console.log('');
-          rl.prompt();
-          return;
-        }
-
-        const parts = workerArgs.split(/\s+/);
-        const subCmd = parts[0];
-        const targetAgent = parts[1] || null;
-
-        if (subCmd === 'start') {
-          const toStart = targetAgent ? [targetAgent] : agents;
-          for (const a of toStart) {
-            if (!agents.includes(a)) {
-              console.log(`  ${ERROR('Unknown agent:')} ${a}`);
-              continue;
-            }
-            startAgentWorker(a, baseUrl, { rl });
-          }
-        } else if (subCmd === 'stop') {
-          const toStop = targetAgent ? [targetAgent] : [...workers.keys()];
-          for (const a of toStop) {
-            stopAgentWorker(a);
-            console.log(`  ${SUCCESS('\u2713')} ${colorAgent(a)} worker stopped`);
-          }
-        } else if (subCmd === 'restart') {
-          const toRestart = targetAgent ? [targetAgent] : [...workers.keys()];
-          for (const a of toRestart) {
-            stopAgentWorker(a);
-            startAgentWorker(a, baseUrl, { rl });
-          }
-        } else if (subCmd === 'mode') {
-          const newMode = parts[1];
-          if (!newMode || !['auto-edit', 'full-auto'].includes(newMode)) {
-            console.log(`  ${ERROR('Usage:')} :workers mode auto-edit | full-auto`);
-          } else {
-            for (const [, w] of workers) {
-              w.setPermissionMode(newMode);
-            }
-            console.log(
-              `  ${SUCCESS('\u2713')} Worker permission mode ${DIM('\u2192')} ${ACCENT(newMode)}`,
-            );
-          }
-        } else {
-          console.log(`  ${ERROR('Unknown subcommand:')} ${subCmd}`);
-          console.log(`  ${DIM('Usage: :workers [start|stop|restart|mode] [agent]')}`);
-        }
-
-        rl.prompt();
-        return;
-      }
-
-      if (line.startsWith(':watch ')) {
-        const watchAgent = line.slice(':watch '.length).trim().toLowerCase();
-        if (!watchAgent || !agents.includes(watchAgent)) {
-          console.log(`  ${ERROR('Usage:')} :watch <agent>  (${agents.join(', ')})`);
-          rl.prompt();
-          return;
-        }
-        setAgentExecMode(watchAgent, 'terminal');
-        launchAgentTerminals([watchAgent], baseUrl);
-        console.log(
-          `  ${DIM('Terminal opened for observation. Worker continues running in background.')}`,
-        );
-        rl.prompt();
-        return;
-      }
-
-      // ── GitHub Commands ──────────────────────────────────────────────────
-      if (line === ':github' || line.startsWith(':github ')) {
-        const ghArg = line.slice(':github'.length).trim().toLowerCase();
-
-        if (!ghArg) {
-          // Status dashboard
-          const installed = isGhAvailable();
-          console.log(
-            `  ${label('gh CLI')}      ${installed ? SUCCESS('installed') : ERROR('not found')}`,
-          );
-          if (installed) {
-            const authed = isGhAuthenticated();
-            console.log(
-              `  ${label('Auth')}        ${authed ? SUCCESS('authenticated') : WARNING('not authenticated — run: gh auth login')}`,
-            );
-            if (authed) {
-              const repo = detectRepo(config.projectRoot);
-              if (repo) {
-                console.log(
-                  `  ${label('Repo')}        ${SUCCESS(`${repo.owner}/${repo.repo}`)} ${DIM(`(default: ${repo.defaultBranch})`)}`,
-                );
-                const prs = listPRs({ cwd: config.projectRoot });
-                console.log(`  ${label('Open PRs')}    ${String(prs.length)}`);
-              } else {
-                console.log(
-                  `  ${label('Repo')}        ${WARNING('not detected (not a GitHub repo?)')}`,
-                );
-              }
-            }
-          }
-          const ghCfg = getGitHubConfig();
-          console.log(
-            `  ${label('Config')}      enabled=${String(ghCfg.enabled)}, draft=${String(ghCfg.draft)}, labels=[${ghCfg.labels.join(',')}]`,
-          );
-        } else if (ghArg === 'prs') {
-          if (!isGhAvailable()) {
-            console.log(`  ${ERROR('gh CLI not found.')} Install: https://cli.github.com`);
-            rl.prompt();
-            return;
-          }
-          const prs = listPRs({ cwd: config.projectRoot });
-          if (prs.length === 0) {
-            console.log(`  ${DIM('No open pull requests.')}`);
-          } else {
-            console.log(`  ${pc.bold(`Open PRs (${String(prs.length)}):`)}`);
-            for (const pr of prs) {
-              console.log(
-                `    ${ACCENT(`#${String(pr.number)}`)} ${String(pr.title)} ${DIM(`(${String(pr.headRefName)} by ${String(pr.author)})`)}`,
-              );
-            }
-          }
-        } else {
-          console.log(`  ${ERROR('Usage:')} :github [prs]`);
-        }
-
-        rl.prompt();
+        await handleCleanupCommand({
+          baseUrl,
+          agents,
+          config,
+          rl,
+          HYDRA_ROOT,
+          getLoopMode: () => mode,
+          setLoopMode: (m) => {
+            mode = m;
+          },
+          initStatusBar,
+          destroyStatusBar,
+          drawStatusBar,
+        });
         return;
       }
 
       if (line === ':pr' || line.startsWith(':pr ')) {
-        const prArgs = line.slice(':pr'.length).trim();
-        const prCmd = prArgs.split(/\s+/)[0]?.toLowerCase() || '';
-        const prRest = prArgs.slice(prCmd.length).trim();
-
-        if (!isGhAvailable()) {
-          console.log(`  ${ERROR('gh CLI not found.')} Install: https://cli.github.com`);
-          rl.prompt();
-          return;
-        }
-
-        if (prCmd === 'create') {
-          const branch = prRest || undefined;
-          console.log(`  ${DIM('Pushing branch and creating PR...')}`);
-          const result = pushBranchAndCreatePR({ cwd: config.projectRoot, branch });
-          if (result.ok) {
-            console.log(`  ${SUCCESS('PR created:')} ${String(result.url)}`);
-          } else {
-            console.log(`  ${ERROR('Failed:')} ${result.error ?? 'unknown error'}`);
-          }
-        } else if (prCmd === 'list') {
-          const prs = listPRs({ cwd: config.projectRoot });
-          if (prs.length === 0) {
-            console.log(`  ${DIM('No open pull requests.')}`);
-          } else {
-            console.log(`  ${pc.bold(`Open PRs (${String(prs.length)}):`)}`);
-            for (const pr of prs) {
-              console.log(
-                `    ${ACCENT(`#${String(pr.number)}`)} ${String(pr.title)} ${DIM(`(${String(pr.headRefName)} by ${String(pr.author)})`)}`,
-              );
-            }
-          }
-        } else if (prCmd === 'view') {
-          if (!prRest) {
-            console.log(`  ${ERROR('Usage:')} :pr view <number>`);
-            rl.prompt();
-            return;
-          }
-          const pr = getPR({ cwd: config.projectRoot, ref: prRest });
-          if (pr) {
-            console.log(`  ${ACCENT(`#${String(pr.number)}`)} ${String(pr.title)}`);
-            console.log(`  ${label('State')}       ${String(pr.state)}`);
-            console.log(
-              `  ${label('Branch')}      ${String(pr.headRefName)} → ${String(pr.baseRefName)}`,
-            );
-            console.log(
-              `  ${label('Author')}      ${String(pr.author?.login ?? pr.author ?? '?')}`,
-            );
-            console.log(
-              `  ${label('Changes')}     ${SUCCESS(`+${String(pr.additions ?? 0)}`)} ${ERROR(`-${String(pr.deletions ?? 0)}`)}`,
-            );
-            if (pr.url) console.log(`  ${label('URL')}         ${String(pr.url)}`);
-          } else {
-            console.log(`  ${ERROR('PR not found:')} ${prRest}`);
-          }
-        } else {
-          console.log(`  ${ERROR('Usage:')} :pr <create|list|view> [args]`);
-        }
-
-        rl.prompt();
-        return;
-      }
-
-      // ── Concierge (Chat) Commands ─────────────────────────────────────────
-      if (line === ':chat' || line.startsWith(':chat ')) {
-        const chatArg = line.slice(':chat'.length).trim().toLowerCase();
-
-        if (chatArg === 'off') {
-          conciergeActive = false;
-          setActiveMode(mode);
-          rl.setPrompt(normalPrompt);
-          console.log(`  ${SUCCESS('\u2713')} Concierge ${DIM('disabled')}`);
-          drawStatusBar();
-        } else if (chatArg === 'reset') {
-          resetConversation();
-          console.log(`  ${SUCCESS('\u2713')} Conversation history cleared`);
-        } else if (chatArg === 'stats') {
-          const cStats = getConciergeStats();
-          const ap = getActiveProvider();
-          console.log('');
-          console.log(sectionHeader('Concierge Stats'));
-          console.log(label('Provider', pc.white(ap ? ap.provider : 'none')));
-          console.log(label('Model', pc.white(ap ? ap.model : getConciergeConfig().model)));
-          if (ap?.isFallback) console.log(label('Note', WARNING('Using fallback provider')));
-          console.log(label('Turns', pc.white(String(cStats.turns))));
-          console.log(label('Prompt tokens', pc.white(String(cStats.promptTokens))));
-          console.log(label('Completion tokens', pc.white(String(cStats.completionTokens))));
-          console.log(
-            label('Total tokens', pc.white(String(cStats.promptTokens + cStats.completionTokens))),
-          );
-          console.log('');
-        } else if (chatArg === 'model' || chatArg.startsWith('model ')) {
-          const modelName = chatArg.slice('model'.length).trim();
-          if (modelName) {
-            // Switch model
-            try {
-              switchConciergeModel(modelName);
-              const ap = getActiveProvider();
-              rl.setPrompt(buildConciergePrompt());
-              console.log(
-                `  ${SUCCESS('\u2713')} Concierge model switched to ${ACCENT(ap!.model)} ${DIM(`(${ap!.provider})`)}`,
-              );
-            } catch (err: unknown) {
-              console.log(`  ${ERROR('Failed to switch model:')} ${(err as Error).message}`);
-            }
-          } else {
-            // Show active model + fallback chain
-            const ap = getActiveProvider();
-            const chain = buildFallbackChain();
-            console.log('');
-            console.log(sectionHeader('Concierge Model'));
-            console.log(
-              label(
-                'Active',
-                pc.white(
-                  ap
-                    ? `${ap.provider}:${ap.model}${ap.isFallback ? ' (fallback)' : ''}`
-                    : 'none yet',
-                ),
-              ),
-            );
-            console.log(label('Chain', ''));
-            for (const entry of chain) {
-              const status = entry.available ? SUCCESS('\u2713') : ERROR('\u2717');
-              console.log(`    ${status} ${entry.provider}: ${pc.white(entry.model)}`);
-            }
-            console.log('');
-          }
-        } else if (chatArg === 'export') {
-          try {
-            const fs = await import('node:fs');
-            const exportData = exportConversation();
-            const coordDir = path.join(config.projectRoot, 'docs', 'coordination');
-            fs.mkdirSync(coordDir, { recursive: true });
-            const timestamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
-            const exportPath = path.join(coordDir, `concierge_export_${timestamp}.json`);
-            fs.writeFileSync(exportPath, `${JSON.stringify(exportData, null, 2)}\n`, 'utf8');
-            console.log(
-              `  ${SUCCESS('\u2713')} Conversation exported to ${DIM(path.relative(config.projectRoot, exportPath))}`,
-            );
-          } catch (err: unknown) {
-            console.log(`  ${ERROR('Export failed:')} ${(err as Error).message}`);
-          }
-        } else {
-          // Toggle
-          if (!isConciergeAvailable()) {
-            console.log(
-              `  ${ERROR('Concierge unavailable')} — set an API key (OPENAI_API_KEY, ANTHROPIC_API_KEY, or GEMINI_API_KEY)`,
-            );
-            rl.prompt();
-            return;
-          }
-          conciergeActive = !conciergeActive;
-          if (conciergeActive) {
-            setActiveMode('chat');
-            rl.setPrompt(buildConciergePrompt());
-            showConciergeWelcome();
-            console.log(
-              `  ${SUCCESS('\u2713')} Concierge ${ACCENT('enabled')} ${DIM(`(${getConciergeModelLabel()})`)}`,
-            );
-          } else {
-            setActiveMode(mode);
-            rl.setPrompt(normalPrompt);
-            console.log(`  ${SUCCESS('\u2713')} Concierge ${DIM('disabled')}`);
-          }
-          drawStatusBar();
-        }
-
-        rl.prompt();
-        return;
-      }
-
-      // ── Actualize Commands ───────────────────────────────────────────────
-      if (line === ':actualize' || line.startsWith(':actualize ')) {
-        const actualizeArg = line.slice(':actualize'.length).trim().toLowerCase();
-
-        const reviewScript = path.join(HYDRA_ROOT, 'lib', 'hydra-actualize-review.ts');
-        const runScript = path.join(HYDRA_ROOT, 'lib', 'hydra-actualize.ts');
-
-        if (actualizeArg === 'status') {
-          const child = spawnHydraNode(reviewScript, ['status'], {
-            cwd: config.projectRoot,
-            stdio: 'inherit',
-            shell: process.platform === 'win32',
-          });
-          child.on('close', () => {
-            rl.prompt();
-          });
-          return;
-        }
-
-        if (actualizeArg === 'review') {
-          const cwd = config.projectRoot;
-          rl.pause();
-          destroyStatusBar();
-          const child = spawnHydraNode(reviewScript, ['review'], {
-            cwd,
-            stdio: 'inherit',
-            shell: process.platform === 'win32',
-          });
-          child.on('close', () => {
-            initStatusBar(agents);
-            rl.resume();
-            rl.prompt();
-          });
-          return;
-        }
-
-        if (actualizeArg === 'clean') {
-          const child = spawnHydraNode(reviewScript, ['clean'], {
-            cwd: config.projectRoot,
-            stdio: 'inherit',
-            shell: process.platform === 'win32',
-          });
-          child.on('close', () => {
-            rl.prompt();
-          });
-          return;
-        }
-
-        const isDryRun = actualizeArg === 'dry-run';
-        const cfg = loadHydraConfig();
-        const baseBranch = cfg.evolve?.baseBranch ?? cfg.nightly?.baseBranch ?? 'dev';
-        const cwd = config.projectRoot;
-
-        // Pre-flight: must be on base branch
-        const curBranch = spawnSync('git', ['rev-parse', '--abbrev-ref', 'HEAD'], {
-          cwd,
-          encoding: 'utf8',
-        }).stdout.trim();
-        if (curBranch !== baseBranch) {
-          const brExists =
-            spawnSync('git', ['rev-parse', '--verify', baseBranch], { cwd, encoding: 'utf8' })
-              .status === 0;
-          if (!brExists) {
-            console.log(`  ${ACCENT(`Creating '${baseBranch}' branch from '${curBranch}'...`)}`);
-            spawnSync('git', ['branch', baseBranch], { cwd });
-          }
-          console.log(`  ${ACCENT(`Switching from '${curBranch}' to '${baseBranch}'...`)}`);
-          const sw = spawnSync('git', ['checkout', baseBranch], { cwd, encoding: 'utf8' });
-          if (sw.status !== 0) {
-            console.log(`  ${ERROR(`Failed to switch branch: ${(sw.stderr || '').trim()}`)}`);
-            rl.prompt();
-            return;
-          }
-        }
-
-        // Pre-flight: clean working tree (offer auto-commit)
-        const status = spawnSync('git', ['status', '--porcelain'], {
-          cwd,
-          encoding: 'utf8',
-        }).stdout.trim();
-        if (status) {
-          const confirm = (await promptChoice(rl, {
-            message: 'Working tree is not clean. Auto-commit before actualize?',
-            choices: [
-              { label: 'Yes — commit all changes', value: 'yes' },
-              { label: 'No — abort', value: 'no' },
-            ],
-            defaultIndex: 0,
-            timeout: 30_000,
-          })) as any;
-          if (confirm.value !== 'yes') {
-            console.log(`  ${WARNING('Aborted — commit or stash changes first.')}`);
-            rl.prompt();
-            return;
-          }
-          const ts = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
-          spawnSync('git', ['add', '-A'], { cwd });
-          spawnSync('git', ['commit', '-m', `chore: auto-commit before actualize run ${ts}`], {
-            cwd,
-          });
-          console.log(`  ${SUCCESS('\u2713')} Changes committed.`);
-        }
-
-        const actualizeArgs = [runScript, `project=${cwd}`];
-        if (isDryRun) actualizeArgs.push('--dry-run');
-
-        if (!isDryRun) {
-          const modeChoice = (await promptChoice(rl, {
-            message: 'Actualize intensity?',
-            context: { default: 'balanced' },
-            choices: [
-              {
-                label: 'Balanced (Recommended)',
-                value: 'balanced',
-                description: 'Good default: moderate time/tasks, discovery on',
-              },
-              { label: 'Quick', value: 'quick', description: 'Fewer tasks, shorter run' },
-              { label: 'Deep', value: 'deep', description: 'More tasks, longer run' },
-            ],
-            defaultIndex: 0,
-            timeout: 60_000,
-          })) as any;
-
-          if (modeChoice.value === 'quick') actualizeArgs.push('max-tasks=3', 'max-hours=1');
-          else if (modeChoice.value === 'deep') actualizeArgs.push('max-tasks=8', 'max-hours=6');
-
-          const discoveryChoice = (await promptChoice(rl, {
-            message: 'Enable AI discovery? (agent suggests improvement tasks)',
-            context: { default: 'on' },
-            choices: [
-              { label: 'Yes — discover + scan', value: 'yes' },
-              { label: 'No — scan only', value: 'no' },
-            ],
-            defaultIndex: 0,
-            timeout: 20_000,
-          })) as any;
-          if (discoveryChoice.value === 'no') actualizeArgs.push('--no-discovery');
-
-          // Let the user choose tasks if they want
-          const selectChoice = (await promptChoice(rl, {
-            message: 'Select tasks interactively?',
-            context: { default: 'yes' },
-            choices: [
-              {
-                label: 'Yes (Recommended)',
-                value: 'yes',
-                description: 'Pick tasks before execution',
-              },
-              { label: 'No', value: 'no', description: 'Run top-ranked tasks automatically' },
-            ],
-            defaultIndex: 0,
-            timeout: 20_000,
-          })) as any;
-          if (selectChoice.value === 'yes') actualizeArgs.push('--interactive');
-        }
-
-        const runLabel = isDryRun ? 'actualize dry-run' : 'actualize run';
-        console.log(`  ${ACCENT(`Launching ${runLabel}...`)}`);
-        rl.pause();
-        destroyStatusBar();
-        const child = spawnHydraNode(actualizeArgs[0], actualizeArgs.slice(1), {
-          cwd,
-          stdio: 'inherit',
-          shell: process.platform === 'win32',
-        });
-        child.on('close', (code) => {
-          initStatusBar(agents);
-          rl.resume();
-          if (code === 0) {
-            console.log(
-              `  ${SUCCESS('\u2713')} Actualize ${isDryRun ? 'dry-run' : 'run'} complete`,
-            );
-          } else {
-            console.log(`  ${ERROR(`Actualize exited with code ${String(code)}`)}`);
-          }
-          rl.prompt();
-        });
+        await handlePrCommand(
+          {
+            baseUrl,
+            agents,
+            config,
+            rl,
+            HYDRA_ROOT,
+            getLoopMode: () => mode,
+            setLoopMode: (m) => {
+              mode = m;
+            },
+            initStatusBar,
+            destroyStatusBar,
+            drawStatusBar,
+          },
+          line.slice(':pr'.length).trim(),
+        );
         return;
       }
 
       // ── Nightly Commands ─────────────────────────────────────────────────
       if (line === ':nightly' || line.startsWith(':nightly ')) {
-        const nightlyArg = line.slice(':nightly'.length).trim().toLowerCase();
-
-        if (nightlyArg === 'status') {
-          const reviewScript = path.join(HYDRA_ROOT, 'lib', 'hydra-nightly-review.ts');
-          const child = spawnHydraNode(reviewScript, ['status'], {
-            cwd: config.projectRoot,
-            stdio: 'inherit',
-            shell: process.platform === 'win32',
-          });
-          child.on('close', () => {
-            rl.prompt();
-          });
-          return;
-        }
-
-        if (nightlyArg === 'review') {
-          const cwd = config.projectRoot;
-          rl.pause();
-          destroyStatusBar();
-          const reviewScript = path.join(HYDRA_ROOT, 'lib', 'hydra-nightly-review.ts');
-          const child = spawnHydraNode(reviewScript, ['review'], {
-            cwd,
-            stdio: 'inherit',
-            shell: process.platform === 'win32',
-          });
-          child.on('close', () => {
-            initStatusBar(agents);
-            rl.resume();
-            rl.prompt();
-          });
-          return;
-        }
-
-        if (nightlyArg === 'clean') {
-          const reviewScript = path.join(HYDRA_ROOT, 'lib', 'hydra-nightly-review.ts');
-          const child = spawnHydraNode(reviewScript, ['clean'], {
-            cwd: config.projectRoot,
-            stdio: 'inherit',
-            shell: process.platform === 'win32',
-          });
-          child.on('close', () => {
-            rl.prompt();
-          });
-          return;
-        }
-
-        // ── Launch nightly (with or without dry-run) ───────────────────────
-        const isDryRun = nightlyArg === 'dry-run';
-
-        // Interactive setup: mode, limits, discovery
-        const cfg = loadHydraConfig();
-        const nightlyCfg = cfg.nightly;
-        const baseBranch = nightlyCfg!.baseBranch ?? 'dev';
-        const cwd = config.projectRoot;
-
-        // Pre-flight: must be on base branch
-        const curBranch = spawnSync('git', ['rev-parse', '--abbrev-ref', 'HEAD'], {
-          cwd,
-          encoding: 'utf8',
-        }).stdout.trim();
-        if (curBranch !== baseBranch) {
-          const brExists =
-            spawnSync('git', ['rev-parse', '--verify', baseBranch], { cwd, encoding: 'utf8' })
-              .status === 0;
-          if (!brExists) {
-            console.log(`  ${ACCENT(`Creating '${baseBranch}' branch from '${curBranch}'...`)}`);
-            spawnSync('git', ['branch', baseBranch], { cwd });
-          }
-          console.log(`  ${ACCENT(`Switching from '${curBranch}' to '${baseBranch}'...`)}`);
-          const sw = spawnSync('git', ['checkout', baseBranch], { cwd, encoding: 'utf8' });
-          if (sw.status !== 0) {
-            console.log(`  ${ERROR(`Failed to switch branch: ${(sw.stderr || '').trim()}`)}`);
-            rl.prompt();
-            return;
-          }
-        }
-
-        // Pre-flight: clean working tree
-        const status = spawnSync('git', ['status', '--porcelain'], {
-          cwd,
-          encoding: 'utf8',
-        }).stdout.trim();
-        if (status) {
-          const confirm = (await promptChoice(rl, {
-            message: 'Working tree is not clean. Auto-commit before nightly?',
-            choices: [
-              { label: 'Yes \u2014 commit all changes', value: 'yes' },
-              { label: 'No \u2014 abort', value: 'no' },
-            ],
-            defaultIndex: 0,
-            timeout: 30_000,
-          })) as any;
-          if (confirm.value !== 'yes') {
-            console.log(`  ${WARNING('Aborted \u2014 commit or stash changes first.')}`);
-            rl.prompt();
-            return;
-          }
-          const ts = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
-          spawnSync('git', ['add', '-A'], { cwd });
-          spawnSync('git', ['commit', '-m', `chore: auto-commit before nightly run ${ts}`], {
-            cwd,
-          });
-          console.log(`  ${SUCCESS('\u2713')} Changes committed.`);
-        }
-
-        // Interactive setup prompts (skip for dry-run with no extra arg)
-        const nightlyArgs = [path.join(HYDRA_ROOT, 'lib', 'hydra-nightly.ts'), `project=${cwd}`];
-
-        if (isDryRun) {
-          nightlyArgs.push('--dry-run');
-        }
-
-        if (!isDryRun) {
-          // 1. Execution mode
-          const modeChoice = (await promptChoice(rl, {
-            message: 'Execution mode?',
-            context: { default: 'balanced' },
-            choices: [
-              {
-                label: 'Balanced',
-                value: 'balanced',
-                description: 'Default config: moderate budget & time limits',
-              },
-              {
-                label: 'Quick / Fast',
-                value: 'quick',
-                description: 'Fewer tasks, shorter timeout, economy models',
-              },
-              {
-                label: 'Deep / Thorough',
-                value: 'deep',
-                description: 'More tasks, longer timeout, high reasoning',
-              },
-              {
-                label: 'Auto / Intuitive',
-                value: 'auto',
-                description: 'Let agents switch tiers per-task complexity',
-              },
-            ],
-            defaultIndex: 0,
-            timeout: 60_000,
-          })) as any;
-
-          if (modeChoice.value === 'quick') {
-            nightlyArgs.push('max-tasks=3', 'max-hours=1');
-          } else if (modeChoice.value === 'deep') {
-            nightlyArgs.push('max-tasks=10', 'max-hours=8');
-          } else if (modeChoice.value === 'auto') {
-            // auto uses config defaults but enables discovery
-            nightlyArgs.push('max-tasks=7', 'max-hours=6');
-          }
-          // balanced = config defaults (no override)
-
-          // 2. Max tasks
-          let maxTasksDefault: string;
-          if (modeChoice.value === 'quick') {
-            maxTasksDefault = '3';
-          } else if (modeChoice.value === 'deep') {
-            maxTasksDefault = '10';
-          } else if (modeChoice.value === 'auto') {
-            maxTasksDefault = '7';
-          } else {
-            maxTasksDefault = String(nightlyCfg!.maxTasks ?? 5);
-          }
-
-          const tasksChoice = (await promptChoice(rl, {
-            message: `Max tasks to execute?`,
-            context: { default: maxTasksDefault },
-            choices: [
-              { label: `${maxTasksDefault} (default)`, value: maxTasksDefault },
-              { label: '3 (light)', value: '3' },
-              { label: '5 (moderate)', value: '5' },
-              { label: '10 (heavy)', value: '10' },
-            ],
-            defaultIndex: 0,
-            freeform: true,
-            timeout: 30_000,
-          })) as any;
-          const maxTasks = Number.parseInt(tasksChoice.value, 10);
-          if (!Number.isNaN(maxTasks) && maxTasks > 0) {
-            // Remove any previous max-tasks from mode preset
-            const idx = nightlyArgs.findIndex((a) => a.startsWith('max-tasks='));
-            if (idx !== -1) nightlyArgs.splice(idx, 1);
-            nightlyArgs.push(`max-tasks=${String(maxTasks)}`);
-          }
-
-          // 3. Max hours
-          let maxHoursDefault: string;
-          if (modeChoice.value === 'quick') {
-            maxHoursDefault = '1';
-          } else if (modeChoice.value === 'deep') {
-            maxHoursDefault = '8';
-          } else if (modeChoice.value === 'auto') {
-            maxHoursDefault = '6';
-          } else {
-            maxHoursDefault = String(nightlyCfg!.maxHours ?? 4);
-          }
-
-          const hoursChoice = (await promptChoice(rl, {
-            message: `Max hours?`,
-            context: { default: maxHoursDefault },
-            choices: [
-              { label: `${maxHoursDefault}h (default)`, value: maxHoursDefault },
-              { label: '1h (quick)', value: '1' },
-              { label: '4h (standard)', value: '4' },
-              { label: '8h (overnight)', value: '8' },
-            ],
-            defaultIndex: 0,
-            freeform: true,
-            timeout: 30_000,
-          })) as any;
-          const maxHours = Number.parseFloat(hoursChoice.value);
-          if (!Number.isNaN(maxHours) && maxHours > 0) {
-            const idx = nightlyArgs.findIndex((a) => a.startsWith('max-hours='));
-            if (idx !== -1) nightlyArgs.splice(idx, 1);
-            nightlyArgs.push(`max-hours=${String(maxHours)}`);
-          }
-
-          // 4. AI discovery toggle
-          const discoveryChoice = (await promptChoice(rl, {
-            message: 'Enable AI discovery? (agent suggests improvement tasks)',
-            context: { default: nightlyCfg!.sources?.['aiDiscovery'] === false ? 'off' : 'on' },
-            choices: [
-              { label: 'Yes \u2014 discover + scan', value: 'yes' },
-              { label: 'No \u2014 scan only', value: 'no' },
-            ],
-            defaultIndex: nightlyCfg!.sources?.['aiDiscovery'] === false ? 1 : 0,
-            timeout: 20_000,
-          })) as any;
-          if (discoveryChoice.value === 'no') {
-            nightlyArgs.push('--no-discovery');
-          }
-
-          // Enable interactive task selection (nightly child inherits stdio)
-          nightlyArgs.push('--interactive');
-        }
-
-        // Launch
-        const runLabel = isDryRun ? 'nightly dry-run' : 'nightly run';
-        console.log(`  ${ACCENT(`Launching ${runLabel}...`)}`);
-        rl.pause();
-        destroyStatusBar();
-        const child = spawnHydraNode(nightlyArgs[0], nightlyArgs.slice(1), {
-          cwd,
-          stdio: 'inherit',
-          shell: process.platform === 'win32',
-        });
-        child.on('close', (code) => {
-          initStatusBar(agents);
-          rl.resume();
-          if (code === 0) {
-            console.log(`  ${SUCCESS('\u2713')} Nightly ${isDryRun ? 'dry-run' : 'run'} complete`);
-          } else {
-            console.log(`  ${ERROR(`Nightly exited with code ${String(code)}`)}`);
-          }
-          rl.prompt();
-        });
+        await handleNightlyCommand(
+          {
+            baseUrl,
+            agents,
+            config,
+            rl,
+            HYDRA_ROOT,
+            getLoopMode: () => mode,
+            setLoopMode: (m) => {
+              mode = m;
+            },
+            initStatusBar,
+            destroyStatusBar,
+            drawStatusBar,
+          },
+          line.slice(':nightly'.length).trim(),
+        );
         return;
       }
 
       // ── Evolve Commands ──────────────────────────────────────────────────
       if (line === ':evolve' || line.startsWith(':evolve ')) {
-        const evolveArg = line.slice(':evolve'.length).trim().toLowerCase();
-
-        if (evolveArg === 'status') {
-          // Show latest evolve report
-          const reviewScript = path.join(HYDRA_ROOT, 'lib', 'hydra-evolve-review.ts');
-          const child = spawnHydraNode(reviewScript, ['status'], {
-            cwd: config.projectRoot,
-            stdio: 'inherit',
-            shell: process.platform === 'win32',
-          });
-          child.on('close', () => {
-            rl.prompt();
-          });
-        } else if (evolveArg === 'knowledge') {
-          const reviewScript = path.join(HYDRA_ROOT, 'lib', 'hydra-evolve-review.ts');
-          const child = spawnHydraNode(reviewScript, ['knowledge'], {
-            cwd: config.projectRoot,
-            stdio: 'inherit',
-            shell: process.platform === 'win32',
-          });
-          child.on('close', () => {
-            rl.prompt();
-          });
-        } else if (evolveArg === 'resume' || evolveArg.startsWith('resume ')) {
-          // Resume incomplete/interrupted evolve session
-          const extraArgs = evolveArg.slice('resume'.length).trim();
-          const cfg = loadHydraConfig();
-          const baseBranch = cfg.evolve?.baseBranch ?? 'dev';
-          const cwd = config.projectRoot;
-
-          // Same pre-flight as regular :evolve
-          const curBranch = spawnSync('git', ['rev-parse', '--abbrev-ref', 'HEAD'], {
-            cwd,
-            encoding: 'utf8',
-          }).stdout.trim();
-          if (curBranch !== baseBranch) {
-            const branchExists =
-              spawnSync('git', ['rev-parse', '--verify', baseBranch], { cwd, encoding: 'utf8' })
-                .status === 0;
-            if (!branchExists) {
-              console.log(`  ${ACCENT(`Creating '${baseBranch}' branch from '${curBranch}'...`)}`);
-              spawnSync('git', ['branch', baseBranch], { cwd });
-            }
-            console.log(`  ${ACCENT(`Switching from '${curBranch}' to '${baseBranch}'...`)}`);
-            const sw = spawnSync('git', ['checkout', baseBranch], { cwd, encoding: 'utf8' });
-            if (sw.status !== 0) {
-              console.log(`  ${ERROR(`Failed to switch branch: ${(sw.stderr || '').trim()}`)}`);
-              rl.prompt();
-              return;
-            }
-          }
-
-          const status = spawnSync('git', ['status', '--porcelain'], {
-            cwd,
-            encoding: 'utf8',
-          }).stdout.trim();
-          if (status) {
-            const confirm = (await promptChoice(rl, {
-              message: 'Working tree is not clean. Auto-commit before evolve resume?',
-              choices: [
-                { label: 'Yes \u2014 commit all changes', value: 'yes' },
-                { label: 'No \u2014 abort', value: 'no' },
-              ],
-              defaultIndex: 0,
-              timeout: 30_000,
-            })) as any;
-            if (confirm.value !== 'yes') {
-              console.log(`  ${WARNING('Aborted \u2014 commit or stash changes first.')}`);
-              rl.prompt();
-              return;
-            }
-            const ts = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
-            spawnSync('git', ['add', '-A'], { cwd });
-            spawnSync('git', ['commit', '-m', `chore: auto-commit before evolve session ${ts}`], {
-              cwd,
-            });
-            console.log(`  ${SUCCESS('\u2713')} Changes committed.`);
-          }
-
-          console.log(`  ${ACCENT('Resuming evolve session...')}`);
-          rl.pause();
-          destroyStatusBar();
-          const evolveScript = path.join(HYDRA_ROOT, 'lib', 'hydra-evolve.ts');
-          const evolveArgs = [evolveScript, `project=${cwd}`, 'resume=1'];
-          if (extraArgs) {
-            evolveArgs.push(...extraArgs.split(/\s+/).filter(Boolean));
-          }
-          const child = spawnHydraNode(evolveArgs[0], evolveArgs.slice(1), {
-            cwd,
-            stdio: 'inherit',
-            shell: process.platform === 'win32',
-          });
-          child.on('close', (code) => {
-            initStatusBar(agents);
-            rl.resume();
-            if (code === 0) {
-              console.log(`  ${SUCCESS('\u2713')} Evolve session complete`);
-            } else {
-              console.log(`  ${ERROR(`Evolve exited with code ${String(code)}`)}`);
-            }
-            rl.prompt();
-          });
-        } else {
-          // Launch evolve session — pre-flight: branch switch + auto-commit
-          const cfg = loadHydraConfig();
-          const baseBranch = cfg.evolve?.baseBranch ?? 'dev';
-          const cwd = config.projectRoot;
-
-          // Switch to base branch if needed (create it if it doesn't exist)
-          const curBranch = spawnSync('git', ['rev-parse', '--abbrev-ref', 'HEAD'], {
-            cwd,
-            encoding: 'utf8',
-          }).stdout.trim();
-          if (curBranch !== baseBranch) {
-            // Check if base branch exists
-            const branchExists =
-              spawnSync('git', ['rev-parse', '--verify', baseBranch], { cwd, encoding: 'utf8' })
-                .status === 0;
-            if (!branchExists) {
-              console.log(`  ${ACCENT(`Creating '${baseBranch}' branch from '${curBranch}'...`)}`);
-              spawnSync('git', ['branch', baseBranch], { cwd });
-            }
-            console.log(`  ${ACCENT(`Switching from '${curBranch}' to '${baseBranch}'...`)}`);
-            const sw = spawnSync('git', ['checkout', baseBranch], { cwd, encoding: 'utf8' });
-            if (sw.status !== 0) {
-              console.log(`  ${ERROR(`Failed to switch branch: ${(sw.stderr || '').trim()}`)}`);
-              rl.prompt();
-              return;
-            }
-          }
-
-          // Auto-commit dirty working tree
-          const status = spawnSync('git', ['status', '--porcelain'], {
-            cwd,
-            encoding: 'utf8',
-          }).stdout.trim();
-          if (status) {
-            const confirm = (await promptChoice(rl, {
-              message: 'Working tree is not clean. Auto-commit before evolve?',
-              choices: [
-                { label: 'Yes \u2014 commit all changes', value: 'yes' },
-                { label: 'No \u2014 abort', value: 'no' },
-              ],
-              defaultIndex: 0,
-              timeout: 30_000,
-            })) as any;
-            if (confirm.value !== 'yes') {
-              console.log(`  ${WARNING('Aborted \u2014 commit or stash changes first.')}`);
-              rl.prompt();
-              return;
-            }
-            const ts = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
-            spawnSync('git', ['add', '-A'], { cwd });
-            spawnSync('git', ['commit', '-m', `chore: auto-commit before evolve session ${ts}`], {
-              cwd,
-            });
-            console.log(`  ${SUCCESS('\u2713')} Changes committed.`);
-          }
-
-          console.log(`  ${ACCENT('Launching evolve session...')}`);
-          rl.pause();
-          destroyStatusBar();
-          const evolveScript = path.join(HYDRA_ROOT, 'lib', 'hydra-evolve.ts');
-          const evolveArgs = [evolveScript, `project=${cwd}`];
-          if (evolveArg) {
-            evolveArgs.push(...evolveArg.split(/\s+/).filter(Boolean));
-          }
-          const child = spawnHydraNode(evolveArgs[0], evolveArgs.slice(1), {
-            cwd,
-            stdio: 'inherit',
-            shell: process.platform === 'win32',
-          });
-          child.on('close', (code) => {
-            initStatusBar(agents);
-            rl.resume();
-            if (code === 0) {
-              console.log(`  ${SUCCESS('\u2713')} Evolve session complete`);
-            } else {
-              console.log(`  ${ERROR(`Evolve exited with code ${String(code)}`)}`);
-            }
-            rl.prompt();
-          });
-        }
+        await handleEvolveCommand(
+          {
+            baseUrl,
+            agents,
+            config,
+            rl,
+            HYDRA_ROOT,
+            getLoopMode: () => mode,
+            setLoopMode: (m) => {
+              mode = m;
+            },
+            initStatusBar,
+            destroyStatusBar,
+            drawStatusBar,
+          },
+          line.slice(':evolve'.length).trim(),
+        );
         return;
       }
 
