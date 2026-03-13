@@ -99,12 +99,11 @@ const worktreeRoot = path.resolve(testDir, '..');
 const hydraAuditPath = path.join(worktreeRoot, 'lib', 'hydra-audit.ts');
 
 const rawAuditSource = fs.readFileSync(hydraAuditPath, 'utf8');
-const auditSourceWithoutImports = rawAuditSource.replace(/^import [^\n]+;\n/gm, '');
-const mainInvocationIndex = auditSourceWithoutImports.lastIndexOf('\nmain().catch(');
+const mainInvocationIndex = rawAuditSource.lastIndexOf('\nmain().catch(');
 assert.notEqual(mainInvocationIndex, -1, 'Expected hydra-audit main() invocation');
 
-const transpiledAuditSource = transformSync(auditSourceWithoutImports.slice(0, mainInvocationIndex), {
-  format: 'esm',
+const transpiledAuditSource = transformSync(rawAuditSource.slice(0, mainInvocationIndex), {
+  format: 'cjs',
   loader: 'ts',
   target: 'node24',
 }).code;
@@ -131,24 +130,50 @@ function makeTempDir(): string {
 }
 
 function loadHydraAuditInternals(options: LoadAuditOptions = {}): AuditInternals {
+  const requireMock = (specifier: string): unknown => {
+    switch (specifier) {
+      case 'node:child_process':
+        return { execFileSync };
+      case 'cross-spawn':
+        return () => {
+          throw new Error('spawn not supported in test harness');
+        };
+      case 'node:fs':
+        return {
+          existsSync: fs.existsSync,
+          mkdirSync: fs.mkdirSync,
+          readdirSync: fs.readdirSync,
+          statSync: fs.statSync,
+          writeFileSync: fs.writeFileSync,
+        };
+      case 'node:path':
+        return {
+          basename: (value: string) => path.basename(value),
+          dirname: (value: string) => path.dirname(value),
+          isAbsolute: (value: string) => path.isAbsolute(value),
+          join: (...parts: string[]) => path.join(...parts),
+          relative: (from: string, to: string) => path.relative(from, to),
+          resolve: (...parts: string[]) => path.resolve(...parts),
+        };
+      case './hydra-config.ts':
+        return { loadHydraConfig: () => ({ audit: options.auditConfig ?? {} }) };
+      case './hydra-agents.ts':
+        return { getAgent: (agent: string) => options.agents?.[agent] ?? null };
+      case './hydra-shared/agent-executor.ts':
+        return { expandInvokeArgs: (args: string[]) => args };
+      default:
+        throw new Error(`Unexpected require(${JSON.stringify(specifier)}) in test harness`);
+    }
+  };
+
   const context = vm.createContext({
     __hydraAuditTestExports: undefined,
-    _spawn: () => { throw new Error('spawn not supported in test harness'); },
-    basename: (value: string) => path.basename(value),
     clearTimeout,
     console,
-    dirname: (value: string) => path.dirname(value),
-    execFileSync,
-    existsSync: fs.existsSync,
-    expandInvokeArgs: (args: string[]) => args,
-    getAgent: (agent: string) => options.agents?.[agent] ?? null,
-    isAbsolute: (value: string) => path.isAbsolute(value),
-    join: (...parts: string[]) => path.join(...parts),
     JSON,
-    loadHydraConfig: () => ({ audit: options.auditConfig ?? {} }),
     Map,
     Math,
-    mkdirSync: fs.mkdirSync,
+    module: { exports: {} },
     Number,
     Object,
     process: {
@@ -159,15 +184,12 @@ function loadHydraAuditInternals(options: LoadAuditOptions = {}): AuditInternals
         throw new Error(`Unexpected process.exit(${String(code)}) in test harness`);
       },
     },
-    readdirSync: fs.readdirSync,
-    relative: (from: string, to: string) => path.relative(from, to),
-    resolve: (...parts: string[]) => path.resolve(...parts),
+    require: requireMock,
     Set,
     setTimeout,
-    statSync: fs.statSync,
     String,
-    writeFileSync: fs.writeFileSync,
   });
+  context.exports = context.module.exports;
 
   vm.runInContext(transformedAuditSource, context, { filename: hydraAuditPath });
   return context['__hydraAuditTestExports'] as AuditInternals;
