@@ -266,7 +266,11 @@ describe('getSelfAwarenessSummary', () => {
   });
 
   it('returns level "full" when both snapshot and index are enabled', () => {
-    const summary = getSelfAwarenessSummary({ enabled: true, includeSnapshot: true, includeIndex: true });
+    const summary = getSelfAwarenessSummary({
+      enabled: true,
+      includeSnapshot: true,
+      includeIndex: true,
+    });
     assert.equal(summary.level, 'full');
   });
 

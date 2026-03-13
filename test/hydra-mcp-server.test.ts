@@ -391,11 +391,17 @@ function assertStructuredJsonResult(result: ToolResult) {
   assert.equal(result.ok, true, result.error?.message ?? `${result.name} should succeed`);
   assert.ok(result.result);
   assert.equal(result.result.isError, undefined);
-  assert.deepEqual(JSON.parse(result.result.content[0]?.text ?? 'null'), result.result.structuredContent);
+  assert.deepEqual(
+    JSON.parse(result.result.content[0]?.text ?? 'null'),
+    result.result.structuredContent,
+  );
 }
 
 test('hydra-mcp-server registers the expected tool, resource, and prompt contracts', () => {
-  const snapshot = runHarness({ command: 'snapshot', parseArgsOptions: { url: 'http://daemon.test:4173' } });
+  const snapshot = runHarness({
+    command: 'snapshot',
+    parseArgsOptions: { url: 'http://daemon.test:4173' },
+  });
 
   assert.deepEqual(snapshot.serverInfo, { name: 'hydra-orchestrator', version: '3.0.0' });
   assert.equal(snapshot.connected, true);
@@ -418,7 +424,14 @@ test('hydra-mcp-server registers the expected tool, resource, and prompt contrac
     'hydra_hub_deregister',
     'hydra_hub_conflicts',
   ]);
-  assert.deepEqual(snapshot.resourceNames, ['config', 'metrics', 'agents', 'activity', 'status', 'self']);
+  assert.deepEqual(snapshot.resourceNames, [
+    'config',
+    'metrics',
+    'agents',
+    'activity',
+    'status',
+    'self',
+  ]);
   assert.deepEqual(snapshot.promptNames, ['hydra_council', 'hydra_review', 'hydra_analyze']);
   assert.deepEqual(snapshot.tools, {
     hydra_ask: {
@@ -942,16 +955,32 @@ test('daemon-backed MCP tool handlers document request and error contracts', () 
         summary: {
           openTasks: [
             { id: 'task-1', title: 'Write tests', status: 'todo', owner: 'codex', type: 'test' },
-            { id: 'task-2', title: 'Review tests', status: 'done', owner: 'gemini', type: 'review' },
+            {
+              id: 'task-2',
+              title: 'Review tests',
+              status: 'done',
+              owner: 'gemini',
+              type: 'review',
+            },
             { id: 'task-3', title: 'Ship tests', status: 'done', owner: 'codex', type: 'deploy' },
           ],
         },
       },
       '/task/claim': {
-        task: { id: 'task-9', title: 'Characterize MCP server', status: 'in_progress', owner: 'codex' },
+        task: {
+          id: 'task-9',
+          title: 'Characterize MCP server',
+          status: 'in_progress',
+          owner: 'codex',
+        },
       },
       '/task/update': {
-        task: { id: 'task-9', status: 'done', notes: 'Finished characterization', claimToken: 'claim-1' },
+        task: {
+          id: 'task-9',
+          status: 'done',
+          notes: 'Finished characterization',
+          claimToken: 'claim-1',
+        },
       },
       '/task/checkpoint': {
         checkpoint: { id: 'cp-1', taskId: 'task-9', name: 'tests-green' },
@@ -975,15 +1004,28 @@ test('daemon-backed MCP tool handlers document request and error contracts', () 
     },
     calls: [
       { name: 'hydra_tasks_list', args: { status: 'done', owner: 'codex', limit: 1, offset: 0 } },
-      { name: 'hydra_tasks_claim', args: { agent: 'codex', title: 'Characterize MCP server', notes: 'rf-sn11' } },
+      {
+        name: 'hydra_tasks_claim',
+        args: { agent: 'codex', title: 'Characterize MCP server', notes: 'rf-sn11' },
+      },
       { name: 'hydra_tasks_claim', args: { agent: 'codex' } },
       {
         name: 'hydra_tasks_update',
-        args: { taskId: 'task-9', status: 'done', notes: 'Finished characterization', claimToken: 'claim-1' },
+        args: {
+          taskId: 'task-9',
+          status: 'done',
+          notes: 'Finished characterization',
+          claimToken: 'claim-1',
+        },
       },
       {
         name: 'hydra_tasks_checkpoint',
-        args: { taskId: 'task-9', name: 'tests-green', context: 'All checks passed', agent: 'codex' },
+        args: {
+          taskId: 'task-9',
+          name: 'tests-green',
+          context: 'All checks passed',
+          agent: 'codex',
+        },
       },
       { name: 'hydra_handoffs_pending', args: { agent: 'codex' } },
       { name: 'hydra_handoffs_ack', args: { handoffId: 'handoff-1', agent: 'codex' } },
@@ -1002,7 +1044,8 @@ test('daemon-backed MCP tool handlers document request and error contracts', () 
     has_more: false,
   });
 
-  const taskClaimResults = output.results?.filter((entry) => entry.name === 'hydra_tasks_claim') ?? [];
+  const taskClaimResults =
+    output.results?.filter((entry) => entry.name === 'hydra_tasks_claim') ?? [];
   assert.equal(taskClaimResults.length, 2);
   assertStructuredJsonResult(taskClaimResults[0]);
   assert.deepEqual(taskClaimResults[0].result?.structuredContent, {

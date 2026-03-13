@@ -10,7 +10,12 @@ import ts from 'typescript';
 import { _setTestConfig, invalidateConfigCache } from '../lib/hydra-config.ts';
 import { _resetRegistry, initAgentRegistry } from '../lib/hydra-agents.ts';
 import { ensureDir } from '../lib/hydra-utils.ts';
-import { createUserTask, deduplicateTasks, prioritizeTasks, taskToSlug } from '../lib/hydra-tasks-scanner.ts';
+import {
+  createUserTask,
+  deduplicateTasks,
+  prioritizeTasks,
+  taskToSlug,
+} from '../lib/hydra-tasks-scanner.ts';
 import { runDiscovery } from '../lib/hydra-nightly-discovery.ts';
 import type { ScannedTask } from '../lib/hydra-tasks-scanner.ts';
 import type { CustomAgentDef, NightlyConfig } from '../lib/types.ts';
@@ -124,10 +129,7 @@ function makeTask(
   };
 }
 
-function writeDiscoveryAgent(
-  dir: string,
-  mode: 'success' | 'invalid' | 'error',
-): string {
+function writeDiscoveryAgent(dir: string, mode: 'success' | 'invalid' | 'error'): string {
   const scriptPath = path.join(dir, `fake-discovery-${mode}.mjs`);
   fs.writeFileSync(
     scriptPath,
@@ -242,10 +244,12 @@ describe('hydra-nightly helper behavior', () => {
     const defaults = buildThresholds({});
     const custom = buildThresholds({ handoffThreshold: 0.62 });
 
-    assert.deepEqual(
-      normalize(defaults.map((entry) => entry.action)),
-      ['hard_stop', 'soft_stop', 'handoff', 'warn'],
-    );
+    assert.deepEqual(normalize(defaults.map((entry) => entry.action)), [
+      'hard_stop',
+      'soft_stop',
+      'handoff',
+      'warn',
+    ]);
     assert.equal(defaults[2]?.pct, 0.7);
     assert.equal(defaults[2]?.once, true);
     assert.equal(custom[2]?.pct, 0.62);
@@ -414,10 +418,10 @@ describe('hydra-nightly phase contracts', () => {
       'github-issue': 1,
       config: 2,
     });
-    assert.deepEqual(
-      normalize(result.tasks.slice(-2).map((task) => task.title)),
-      ['Stabilize nightly dry run', 'Review nightly summary output'],
-    );
+    assert.deepEqual(normalize(result.tasks.slice(-2).map((task) => task.title)), [
+      'Stabilize nightly dry run',
+      'Review nightly summary output',
+    ]);
   });
 
   it('phaseDiscover short-circuits when AI discovery is disabled', async () => {
@@ -436,11 +440,9 @@ describe('hydra-nightly phase contracts', () => {
       nightlyCfg: NightlyConfig,
     ) => Promise<ScannedTask[]>;
 
-    const result = await phaseDiscover(
-      '/repo',
-      [makeTask('Queued nightly task')],
-      { sources: { aiDiscovery: false } } as NightlyConfig,
-    );
+    const result = await phaseDiscover('/repo', [makeTask('Queued nightly task')], {
+      sources: { aiDiscovery: false },
+    } as NightlyConfig);
 
     assert.deepEqual(normalize(result), []);
     assert.equal(called, false);
@@ -448,7 +450,9 @@ describe('hydra-nightly phase contracts', () => {
 
   it('phaseDiscover forwards config-driven options and existing task titles to discovery', async () => {
     let received: Record<string, unknown> | null = null;
-    const discoveredTask = makeTask('Discovery task', { source: 'ai-discovery' as ScannedTask['source'] });
+    const discoveredTask = makeTask('Discovery task', {
+      source: 'ai-discovery' as ScannedTask['source'],
+    });
     const phaseDiscover = loadHelper(nightlySourcePath, 'phaseDiscover', {
       context: {
         log: noopLog,
@@ -569,7 +573,9 @@ describe('hydra-nightly phase contracts', () => {
   });
 
   it('phaseReport writes paired markdown and json reports for review tooling', () => {
-    const formatDuration = loadHelper(nightlySourcePath, 'formatDuration') as (ms: number) => string;
+    const formatDuration = loadHelper(nightlySourcePath, 'formatDuration') as (
+      ms: number,
+    ) => string;
     const generateReportJSON = loadHelper(nightlySourcePath, 'generateReportJSON') as (
       results: Array<Record<string, unknown>>,
       budgetSummary: Record<string, unknown>,

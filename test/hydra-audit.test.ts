@@ -8,7 +8,6 @@ import { afterEach, describe, it } from 'node:test';
 import { fileURLToPath } from 'node:url';
 import vm from 'node:vm';
 
-
 interface AuditFinding {
   file: string;
   line: number | null;
@@ -56,7 +55,10 @@ interface AuditInternals {
   parseCsv(value: string): string[];
   parsePositiveInt(...values: unknown[]): number;
   resolveReportPath(projectPath: string, reportArg: string): string;
-  buildManifest(projectPath: string, maxFiles: number): {
+  buildManifest(
+    projectPath: string,
+    maxFiles: number,
+  ): {
     files: AuditFileEntry[];
     stats: ManifestStats;
   };
@@ -189,7 +191,7 @@ function loadHydraAuditInternals(options: LoadAuditOptions = {}): AuditInternals
     setTimeout,
     String,
   });
-  context.exports = context.module.exports;
+  context['exports'] = context['module'].exports;
 
   vm.runInContext(transformedAuditSource, context, { filename: hydraAuditPath });
   return context['__hydraAuditTestExports'] as AuditInternals;
@@ -316,15 +318,15 @@ describe('hydra-audit characterization', () => {
     assert.deepEqual(
       toPlain(
         audit.parseFindings(
-        {
-          agent: 'codex',
-          stdout: 'not-json',
-          stderr: '',
-          code: 0,
-          signal: null,
-          elapsedSec: '0.1',
-        },
-        'tests',
+          {
+            agent: 'codex',
+            stdout: 'not-json',
+            stderr: '',
+            code: 0,
+            signal: null,
+            elapsedSec: '0.1',
+          },
+          'tests',
         ),
       ),
       [],
@@ -476,7 +478,10 @@ describe('hydra-audit characterization', () => {
       },
     ];
 
-    writeFile(path.join(projectRoot, 'src', 'sample.ts'), 'export function sample() { return 1; }\n');
+    writeFile(
+      path.join(projectRoot, 'src', 'sample.ts'),
+      'export function sample() { return 1; }\n',
+    );
     makeFakeCli(fakeBinDir, 'codex');
 
     const result = spawnSync(

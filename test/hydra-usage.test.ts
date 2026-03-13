@@ -55,14 +55,16 @@ function writeStatsCache(
   return statsPath;
 }
 
-function setUsageTestConfig(options: {
-  model?: string;
-  dailyBudget?: number;
-  weeklyBudget?: number;
-  windowBudget?: number;
-  warningThresholdPercent?: number;
-  criticalThresholdPercent?: number;
-} = {}): string {
+function setUsageTestConfig(
+  options: {
+    model?: string;
+    dailyBudget?: number;
+    weeklyBudget?: number;
+    windowBudget?: number;
+    warningThresholdPercent?: number;
+    criticalThresholdPercent?: number;
+  } = {},
+): string {
   const model = options.model ?? 'claude-test';
   _setTestConfig({
     models: {
@@ -118,7 +120,9 @@ describe('hydra-usage characterization', { concurrency: false }, () => {
   it('allows usage that stays below the configured daily budget', () => {
     const projectRoot = createIsolatedProject();
     const model = setUsageTestConfig();
-    const statsPath = writeStatsCache(projectRoot, [{ date: localDateOffset(0), model, tokens: 799 }]);
+    const statsPath = writeStatsCache(projectRoot, [
+      { date: localDateOffset(0), model, tokens: 799 },
+    ]);
 
     const usage = checkUsage({ statsPath });
 
@@ -137,7 +141,9 @@ describe('hydra-usage characterization', { concurrency: false }, () => {
   it('treats exact daily budget exhaustion as a critical block', () => {
     const projectRoot = createIsolatedProject();
     const model = setUsageTestConfig();
-    const statsPath = writeStatsCache(projectRoot, [{ date: localDateOffset(0), model, tokens: 1_000 }]);
+    const statsPath = writeStatsCache(projectRoot, [
+      { date: localDateOffset(0), model, tokens: 1_000 },
+    ]);
 
     const usage = checkUsage({ statsPath });
 
@@ -200,7 +206,11 @@ describe('hydra-usage characterization', { concurrency: false }, () => {
 
   it('uses session token metrics as the fallback source for totals and per-agent accounting', () => {
     createIsolatedProject();
-    const model = setUsageTestConfig({ dailyBudget: 1_000, weeklyBudget: 4_000, windowBudget: 500 });
+    const model = setUsageTestConfig({
+      dailyBudget: 1_000,
+      weeklyBudget: 4_000,
+      windowBudget: 500,
+    });
     const handle = recordCallStart('claude', model);
     recordCallComplete(handle, {
       output: '',

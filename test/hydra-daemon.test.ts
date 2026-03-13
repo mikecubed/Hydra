@@ -39,7 +39,11 @@ function sleep(ms: number): Promise<void> {
 
 function createTempProject(packageJson: Record<string, unknown>): string {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'hydra-daemon-ts-'));
-  fs.writeFileSync(path.join(root, 'package.json'), `${JSON.stringify(packageJson, null, 2)}\n`, 'utf8');
+  fs.writeFileSync(
+    path.join(root, 'package.json'),
+    `${JSON.stringify(packageJson, null, 2)}\n`,
+    'utf8',
+  );
   return root;
 }
 
@@ -150,7 +154,11 @@ async function requestJson<T = Record<string, unknown>>(
   });
 }
 
-async function waitForHealth(baseUrl: string, child: ChildProcess, headers?: Record<string, string>) {
+async function waitForHealth(
+  baseUrl: string,
+  child: ChildProcess,
+  headers?: Record<string, string>,
+) {
   const startedAt = Date.now();
   while (Date.now() - startedAt < 10_000) {
     if (child.exitCode !== null) {
@@ -203,11 +211,7 @@ async function startDaemon(
   );
   child.unref();
 
-  await waitForHealth(
-    baseUrl,
-    child,
-    authToken ? { 'x-ai-orch-token': authToken } : undefined,
-  );
+  await waitForHealth(baseUrl, child, authToken ? { 'x-ai-orch-token': authToken } : undefined);
   return { child, baseUrl, authToken };
 }
 
@@ -216,10 +220,16 @@ async function stopDaemon(instance: DaemonInstance | null): Promise<void> {
     return;
   }
   try {
-    await requestJson(instance.baseUrl, 'POST', '/shutdown', {}, {
-      timeoutMs: 1_500,
-      headers: instance.authToken ? { 'x-ai-orch-token': instance.authToken } : undefined,
-    });
+    await requestJson(
+      instance.baseUrl,
+      'POST',
+      '/shutdown',
+      {},
+      {
+        timeoutMs: 1_500,
+        headers: instance.authToken ? { 'x-ai-orch-token': instance.authToken } : undefined,
+      },
+    );
   } catch {
     // Fall through to process termination below.
   }
@@ -246,69 +256,82 @@ async function removeDirBestEffort(dirPath: string, attempts = 8): Promise<void>
 }
 
 describe('hydra daemon endpoint characterization', () => {
-  it('enforces write auth and rejects duplicate idempotency keys', { timeout: 60_000 }, async (t) => {
-    const projectRoot = createTempProject({
-      name: 'hydra-daemon-auth',
-      private: true,
-      type: 'module',
-    });
-    let daemon: DaemonInstance | null = null;
-    t.after(async () => {
-      await stopDaemon(daemon);
-      await removeDirBestEffort(projectRoot);
-    });
+  it(
+    'enforces write auth and rejects duplicate idempotency keys',
+    { timeout: 60_000 },
+    async (t) => {
+      const projectRoot = createTempProject({
+        name: 'hydra-daemon-auth',
+        private: true,
+        type: 'module',
+      });
+      let daemon: DaemonInstance | null = null;
+      t.after(async () => {
+        await stopDaemon(daemon);
+        await removeDirBestEffort(projectRoot);
+      });
 
-    daemon = await startDaemon(projectRoot, { env: { AI_ORCH_TOKEN: 'top-secret-token' } });
-    const authHeaders = { 'x-ai-orch-token': 'top-secret-token' };
+      daemon = await startDaemon(projectRoot, { env: { AI_ORCH_TOKEN: 'top-secret-token' } });
+      const authHeaders = { 'x-ai-orch-token': 'top-secret-token' };
 
-    const state = await requestJson<{ ok: boolean; state: HydraStateShape }>(
-      daemon.baseUrl,
-      'GET',
-      '/state',
-    );
-    assert.equal(state.response.status, 200);
-    assert.deepEqual(state.json.state.tasks, []);
+      const state = await requestJson<{ ok: boolean; state: HydraStateShape }>(
+        daemon.baseUrl,
+        'GET',
+        '/state',
+      );
+      assert.equal(state.response.status, 200);
+      assert.deepEqual(state.json.state.tasks, []);
 
-    const unauthorized = await requestJson<{ error?: string }>(daemon.baseUrl, 'POST', '/task/add', {
-      title: 'should be rejected',
-    });
-    assert.equal(unauthorized.response.status, 401);
-    assert.match(unauthorized.json.error ?? '', /unauthorized/i);
-
-    const firstCreate = await requestJson<{ task: { id: string } }>(
-      daemon.baseUrl,
-      'POST',
-      '/task/add',
-      { title: 'safe write' },
-      {
-        headers: {
-          ...authHeaders,
-          'idempotency-key': 'hydra-daemon-add-once',
+      const unauthorized = await requestJson<{ error?: string }>(
+        daemon.baseUrl,
+        'POST',
+        '/task/add',
+        {
+          title: 'should be rejected',
         },
-      },
-    );
-    assert.equal(firstCreate.response.status, 200);
-    assert.equal(firstCreate.json.task.id, 'T001');
+      );
+      assert.equal(unauthorized.response.status, 401);
+      assert.match(unauthorized.json.error ?? '', /unauthorized/i);
 
-    const duplicateCreate = await requestJson<{ error?: string }>(
-      daemon.baseUrl,
-      'POST',
-      '/task/add',
-      { title: 'safe write' },
-      {
-        headers: {
-          ...authHeaders,
-          'idempotency-key': 'hydra-daemon-add-once',
+      const firstCreate = await requestJson<{ task: { id: string } }>(
+        daemon.baseUrl,
+        'POST',
+        '/task/add',
+        { title: 'safe write' },
+        {
+          headers: {
+            ...authHeaders,
+            'idempotency-key': 'hydra-daemon-add-once',
+          },
         },
-      },
-    );
-    assert.equal(duplicateCreate.response.status, 409);
-    assert.match(duplicateCreate.json.error ?? '', /duplicate request/i);
+      );
+      assert.equal(firstCreate.response.status, 200);
+      assert.equal(firstCreate.json.task.id, 'T001');
 
-    const persisted = await requestJson<{ state: HydraStateShape }>(daemon.baseUrl, 'GET', '/state');
-    assert.equal(persisted.json.state.tasks.length, 1);
-    assert.equal(persisted.json.state.tasks[0]?.title, 'safe write');
-  });
+      const duplicateCreate = await requestJson<{ error?: string }>(
+        daemon.baseUrl,
+        'POST',
+        '/task/add',
+        { title: 'safe write' },
+        {
+          headers: {
+            ...authHeaders,
+            'idempotency-key': 'hydra-daemon-add-once',
+          },
+        },
+      );
+      assert.equal(duplicateCreate.response.status, 409);
+      assert.match(duplicateCreate.json.error ?? '', /duplicate request/i);
+
+      const persisted = await requestJson<{ state: HydraStateShape }>(
+        daemon.baseUrl,
+        'GET',
+        '/state',
+      );
+      assert.equal(persisted.json.state.tasks.length, 1);
+      assert.equal(persisted.json.state.tasks[0]?.title, 'safe write');
+    },
+  );
 
   it('persists state and event logs across daemon restarts', { timeout: 60_000 }, async (t) => {
     const projectRoot = createTempProject({
@@ -391,100 +414,120 @@ describe('hydra daemon endpoint characterization', () => {
     );
   });
 
-  it('summarizes open work and next actions from persisted state', { timeout: 60_000 }, async (t) => {
-    const projectRoot = createTempProject({
-      name: 'hydra-daemon-summary',
-      private: true,
-      type: 'module',
-    });
-    let daemon: DaemonInstance | null = null;
-    t.after(async () => {
-      await stopDaemon(daemon);
-      await removeDirBestEffort(projectRoot);
-    });
+  it(
+    'summarizes open work and next actions from persisted state',
+    { timeout: 60_000 },
+    async (t) => {
+      const projectRoot = createTempProject({
+        name: 'hydra-daemon-summary',
+        private: true,
+        type: 'module',
+      });
+      let daemon: DaemonInstance | null = null;
+      t.after(async () => {
+        await stopDaemon(daemon);
+        await removeDirBestEffort(projectRoot);
+      });
 
-    daemon = await startDaemon(projectRoot);
+      daemon = await startDaemon(projectRoot);
 
-    const owned = await requestJson<{ task: { id: string } }>(daemon.baseUrl, 'POST', '/task/add', {
-      title: 'Owned implementation task',
-      owner: 'claude',
-      type: 'implementation',
-    });
-    const handoffTarget = await requestJson<{ task: { id: string } }>(
-      daemon.baseUrl,
-      'POST',
-      '/task/add',
-      {
-        title: 'Follow up on the handoff',
-        owner: 'gemini',
-        type: 'analysis',
-      },
-    );
-    const blocked = await requestJson<{ task: { id: string } }>(daemon.baseUrl, 'POST', '/task/add', {
-      title: 'Blocked downstream task',
-      owner: 'codex',
-      status: 'blocked',
-      blockedBy: [owned.json.task.id],
-      type: 'implementation',
-    });
-    assert.equal(blocked.response.status, 200);
+      const owned = await requestJson<{ task: { id: string } }>(
+        daemon.baseUrl,
+        'POST',
+        '/task/add',
+        {
+          title: 'Owned implementation task',
+          owner: 'claude',
+          type: 'implementation',
+        },
+      );
+      const handoffTarget = await requestJson<{ task: { id: string } }>(
+        daemon.baseUrl,
+        'POST',
+        '/task/add',
+        {
+          title: 'Follow up on the handoff',
+          owner: 'gemini',
+          type: 'analysis',
+        },
+      );
+      const blocked = await requestJson<{ task: { id: string } }>(
+        daemon.baseUrl,
+        'POST',
+        '/task/add',
+        {
+          title: 'Blocked downstream task',
+          owner: 'codex',
+          status: 'blocked',
+          blockedBy: [owned.json.task.id],
+          type: 'implementation',
+        },
+      );
+      assert.equal(blocked.response.status, 200);
 
-    const decision = await requestJson<{ decision: { id: string } }>(
-      daemon.baseUrl,
-      'POST',
-      '/decision',
-      {
-        title: 'Route next work via handoff',
-        owner: 'human',
-        impact: 'Keeps ownership clear',
-      },
-    );
-    assert.equal(decision.json.decision.id, 'D001');
+      const decision = await requestJson<{ decision: { id: string } }>(
+        daemon.baseUrl,
+        'POST',
+        '/decision',
+        {
+          title: 'Route next work via handoff',
+          owner: 'human',
+          impact: 'Keeps ownership clear',
+        },
+      );
+      assert.equal(decision.json.decision.id, 'D001');
 
-    const handoff = await requestJson<{ handoff: { id: string } }>(daemon.baseUrl, 'POST', '/handoff', {
-      from: 'claude',
-      to: 'gemini',
-      summary: 'Pick up the follow-up task',
-      nextStep: 'Review the notes and continue',
-      tasks: [handoffTarget.json.task.id],
-    });
-    assert.equal(handoff.json.handoff.id, 'H001');
+      const handoff = await requestJson<{ handoff: { id: string } }>(
+        daemon.baseUrl,
+        'POST',
+        '/handoff',
+        {
+          from: 'claude',
+          to: 'gemini',
+          summary: 'Pick up the follow-up task',
+          nextStep: 'Review the notes and continue',
+          tasks: [handoffTarget.json.task.id],
+        },
+      );
+      assert.equal(handoff.json.handoff.id, 'H001');
 
-    const summary = await requestJson<{
-      summary: {
-        counts: { tasksOpen: number; blockersOpen: number; decisions: number; handoffs: number };
-        openTasks: Array<{ id: string; pendingDependencies: string[] }>;
-        recentDecision: { id: string };
-        latestHandoff: { id: string };
-      };
-    }>(daemon.baseUrl, 'GET', '/summary');
-    assert.equal(summary.response.status, 200);
-    assert.equal(summary.json.summary.counts.tasksOpen, 3);
-    assert.equal(summary.json.summary.counts.blockersOpen, 0);
-    assert.equal(summary.json.summary.counts.decisions, 1);
-    assert.equal(summary.json.summary.counts.handoffs, 1);
-    assert.equal(summary.json.summary.recentDecision.id, 'D001');
-    assert.equal(summary.json.summary.latestHandoff.id, 'H001');
-    assert.deepEqual(
-      summary.json.summary.openTasks.find((task) => task.id === blocked.json.task.id)?.pendingDependencies,
-      [owned.json.task.id],
-    );
+      const summary = await requestJson<{
+        summary: {
+          counts: { tasksOpen: number; blockersOpen: number; decisions: number; handoffs: number };
+          openTasks: Array<{ id: string; pendingDependencies: string[] }>;
+          recentDecision: { id: string };
+          latestHandoff: { id: string };
+        };
+      }>(daemon.baseUrl, 'GET', '/summary');
+      assert.equal(summary.response.status, 200);
+      assert.equal(summary.json.summary.counts.tasksOpen, 3);
+      assert.equal(summary.json.summary.counts.blockersOpen, 0);
+      assert.equal(summary.json.summary.counts.decisions, 1);
+      assert.equal(summary.json.summary.counts.handoffs, 1);
+      assert.equal(summary.json.summary.recentDecision.id, 'D001');
+      assert.equal(summary.json.summary.latestHandoff.id, 'H001');
+      assert.deepEqual(
+        summary.json.summary.openTasks.find((task) => task.id === blocked.json.task.id)
+          ?.pendingDependencies,
+        [owned.json.task.id],
+      );
 
-    const geminiNext = await requestJson<{
-      next: { action: string; relatedTask?: { id: string }; handoff?: { id: string } };
-    }>(daemon.baseUrl, 'GET', '/next?agent=gemini');
-    assert.equal(geminiNext.response.status, 200);
-    assert.equal(geminiNext.json.next.action, 'pickup_handoff');
-    assert.equal(geminiNext.json.next.handoff?.id, 'H001');
-    assert.equal(geminiNext.json.next.relatedTask?.id, handoffTarget.json.task.id);
+      const geminiNext = await requestJson<{
+        next: { action: string; relatedTask?: { id: string }; handoff?: { id: string } };
+      }>(daemon.baseUrl, 'GET', '/next?agent=gemini');
+      assert.equal(geminiNext.response.status, 200);
+      assert.equal(geminiNext.json.next.action, 'pickup_handoff');
+      assert.equal(geminiNext.json.next.handoff?.id, 'H001');
+      assert.equal(geminiNext.json.next.relatedTask?.id, handoffTarget.json.task.id);
 
-    const claudeNext = await requestJson<{ next: { action: string; task?: { id: string } } }>(
-      daemon.baseUrl,
-      'GET',
-      '/next?agent=claude',
-    );
-    assert.equal(claudeNext.response.status, 200);
-    assert.equal(claudeNext.json.next.action, 'claim_owned_task');
-    assert.equal(claudeNext.json.next.task?.id, owned.json.task.id);
-  });
+      const claudeNext = await requestJson<{ next: { action: string; task?: { id: string } } }>(
+        daemon.baseUrl,
+        'GET',
+        '/next?agent=claude',
+      );
+      assert.equal(claudeNext.response.status, 200);
+      assert.equal(claudeNext.json.next.action, 'claim_owned_task');
+      assert.equal(claudeNext.json.next.task?.id, owned.json.task.id);
+    },
+  );
 });

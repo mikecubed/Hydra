@@ -52,14 +52,7 @@ function run(): void {
   const eslintBin = path.join(repoRoot, 'node_modules', 'eslint', 'bin', 'eslint.js');
   const result = spawnSync(
     process.execPath,
-    [
-      eslintBin,
-      'lib/**/*.ts',
-      '--format',
-      'json',
-      '--no-error-on-unmatched-pattern',
-      ...ruleFlags,
-    ],
+    [eslintBin, 'lib/**/*.ts', '--format', 'json', '--no-error-on-unmatched-pattern', ...ruleFlags],
     {
       cwd: repoRoot,
       encoding: 'utf8',

@@ -7,6 +7,7 @@ import {
   label,
   renderDashboard,
   sectionHeader,
+  type TaskLike,
 } from './hydra-ui.ts';
 
 type AgentNextAction = {
@@ -17,9 +18,9 @@ type AgentNextAction = {
 
 type AgentNextMap = Record<string, AgentNextAction>;
 
-type OpenTask = {
-  status?: string;
+type OpenTask = TaskLike & {
   pendingDependencies?: unknown[];
+  blockedBy?: unknown[];
 };
 
 type OperatorStatusSummary = {
@@ -92,8 +93,14 @@ export async function printStatus(
   );
   const agentNextMap: AgentNextMap = Object.fromEntries(agentNextEntries);
 
+  // Normalize openTasks: renderDashboard expects TaskLike[], not number | OpenTask[]
+  const normalizedTasks: TaskLike[] = Array.isArray(dashboardSummary.openTasks)
+    ? dashboardSummary.openTasks
+    : [];
+  const renderInput = { ...dashboardSummary, openTasks: normalizedTasks };
+
   console.log('');
-  console.log(renderDashboard(dashboardSummary, agentNextMap));
+  console.log(renderDashboard(renderInput, agentNextMap));
   printNextSteps({ agentSuggestions: agentNextMap, summary: dashboardSummary });
   return dashboardSummary;
 }
