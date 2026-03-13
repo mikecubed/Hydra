@@ -158,11 +158,15 @@ async function waitForHealth(
   baseUrl: string,
   child: ChildProcess,
   headers?: Record<string, string>,
+  stderrLines?: string[],
 ) {
   const startedAt = Date.now();
   while (Date.now() - startedAt < 10_000) {
     if (child.exitCode !== null) {
-      throw new Error(`Daemon exited before becoming healthy (exit=${String(child.exitCode)})`);
+      const detail = stderrLines?.length ? `\nstderr:\n${stderrLines.join('')}` : '';
+      throw new Error(
+        `Daemon exited before becoming healthy (exit=${String(child.exitCode)})${detail}`,
+      );
     }
     try {
       const { response } = await requestJson(baseUrl, 'GET', '/health', null, { headers });
@@ -174,7 +178,8 @@ async function waitForHealth(
     }
     await sleep(125);
   }
-  throw new Error('Timed out waiting for daemon health check');
+  const detail = stderrLines?.length ? `\nstderr:\n${stderrLines.join('')}` : '';
+  throw new Error(`Timed out waiting for daemon health check${detail}`);
 }
 
 async function waitForExit(child: ChildProcess, timeoutMs = 4_000): Promise<void> {
@@ -202,7 +207,7 @@ async function startDaemon(
     [DAEMON_SCRIPT, 'start', 'host=127.0.0.1', `port=${String(port)}`, `project=${projectRoot}`],
     {
       cwd: REPO_ROOT,
-      stdio: ['ignore', 'ignore', 'ignore'],
+      stdio: ['ignore', 'ignore', 'pipe'],
       env: {
         ...process.env,
         ...options.env,
@@ -211,7 +216,17 @@ async function startDaemon(
   );
   child.unref();
 
-  await waitForHealth(baseUrl, child, authToken ? { 'x-ai-orch-token': authToken } : undefined);
+  const stderrLines: string[] = [];
+  child.stderr.on('data', (chunk: Buffer) => {
+    stderrLines.push(String(chunk));
+  });
+
+  await waitForHealth(
+    baseUrl,
+    child,
+    authToken ? { 'x-ai-orch-token': authToken } : undefined,
+    stderrLines,
+  );
   return { child, baseUrl, authToken };
 }
 

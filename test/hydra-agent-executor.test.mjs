@@ -2,7 +2,7 @@
  * Tests for agent-executor.ts diagnostics and unification.
  */
 
-import { describe, it, beforeEach, afterEach } from 'node:test';
+import { describe, it, beforeEach, afterEach, mock } from 'node:test';
 import assert from 'node:assert/strict';
 
 import {
@@ -743,10 +743,10 @@ describe('executeAgent edge-case characterization', () => {
 
     const stderrWrites = [];
     const originalWrite = process.stderr.write.bind(process.stderr);
-    process.stderr.write = (chunk, ...rest) => {
+    const stderrSpy = mock.method(process.stderr, 'write', (chunk, ...rest) => {
       stderrWrites.push(String(chunk));
       return originalWrite(chunk, ...rest);
-    };
+    });
 
     try {
       const result = await executeAgentWithRecovery('test-missing-cli-recovery', 'hello');
@@ -758,7 +758,7 @@ describe('executeAgent edge-case characterization', () => {
       assert.equal(result.error, null);
       assert.match(stderrWrites.join(''), /CLI not found on PATH — falling back to claude/);
     } finally {
-      process.stderr.write = originalWrite;
+      stderrSpy.mock.restore();
     }
   });
 

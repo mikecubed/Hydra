@@ -53,13 +53,24 @@ git worktree add .worktrees/<task-id>-<short-name> -b feat/<task-id>-<short-name
 
 ### 3. Make dependencies available inside the worktree
 
-Preferred option:
+**macOS / Linux** (symlink preferred):
 
 ```bash
 ln -s ../../node_modules .worktrees/<task-id>-<short-name>/node_modules
 ```
 
-Fallback option if symlinking is not appropriate:
+**Windows** (symlinks require Developer Mode or admin privileges):
+
+```cmd
+# Option A: mklink (requires admin or Developer Mode enabled)
+mklink /D .worktrees\<task-id>-<short-name>\node_modules ..\..\node_modules
+
+# Option B: run npm ci inside the worktree (no symlink needed)
+cd .worktrees/<task-id>-<short-name>
+npm ci
+```
+
+**Fallback (any OS)** — run a fresh install inside the worktree:
 
 ```bash
 cd .worktrees/<task-id>-<short-name>
