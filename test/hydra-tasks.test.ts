@@ -35,15 +35,23 @@ function writeFixtureFiles(root: string, files: Record<string, string>): void {
   }
 }
 
+// Build a clean env without git overrides so test-spawned git commands use
+// the cwd-local repo, not whatever GIT_DIR the parent process inherited.
+const {
+  GIT_DIR: _gitDir,
+  GIT_WORK_TREE: _gitWorkTree,
+  GIT_INDEX_FILE: _gitIndexFile,
+  GIT_OBJECT_DIRECTORY: _gitObjDir,
+  ...cleanEnv
+} = process.env;
+
 function initGitRepo(root: string): void {
-  execFileSync('git', ['init', '-b', 'main'], { cwd: root, stdio: 'ignore' });
-  execFileSync('git', ['config', 'user.name', 'Hydra Tests'], { cwd: root, stdio: 'ignore' });
-  execFileSync('git', ['config', 'user.email', 'hydra-tests@example.com'], {
-    cwd: root,
-    stdio: 'ignore',
-  });
-  execFileSync('git', ['add', '.'], { cwd: root, stdio: 'ignore' });
-  execFileSync('git', ['commit', '-m', 'fixture'], { cwd: root, stdio: 'ignore' });
+  const opts = { cwd: root, stdio: 'ignore' as const, env: cleanEnv };
+  execFileSync('git', ['init', '-b', 'main'], opts);
+  execFileSync('git', ['config', 'user.name', 'Hydra Tests'], opts);
+  execFileSync('git', ['config', 'user.email', 'hydra-tests@example.com'], opts);
+  execFileSync('git', ['add', '.'], opts);
+  execFileSync('git', ['commit', '-m', 'fixture'], opts);
 }
 
 async function loadHydraTasksInternals(): Promise<{
@@ -183,7 +191,12 @@ describe('hydra-tasks scanner characterization', () => {
 
     const prioritized = prioritizeTasks([
       { ...createUserTask('docs cleanup'), id: 'low', priority: 'low', complexity: 'simple' },
-      { ...createUserTask('Fix crash'), id: 'high-complex', priority: 'high', complexity: 'complex' },
+      {
+        ...createUserTask('Fix crash'),
+        id: 'high-complex',
+        priority: 'high',
+        complexity: 'complex',
+      },
       { ...createUserTask('Fix bug'), id: 'high-simple', priority: 'high', complexity: 'simple' },
       {
         ...createUserTask('Implement cache warming'),
