@@ -37,13 +37,24 @@ import { checkUsage } from './hydra-usage.ts';
 import { resolveVerificationPlan } from './hydra-verification.ts';
 import { handleReadRoute } from './daemon/read-routes.ts';
 import { handleWriteRoute } from './daemon/write-routes.ts';
+import {
+  nowIso,
+  toSessionId,
+  getEventSeq,
+  ensureCoordFiles,
+  readState,
+  writeState,
+  appendSyncLog,
+  appendEvent,
+  replayEvents,
+  type EventRecord,
+} from './daemon/state.ts';
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import type {
   HydraStateShape,
   TaskEntry,
   HandoffEntry,
   BlockerEntry,
-  DecisionEntry,
   ArchiveState,
   WriteRouteCtx,
   UsageCheckResult,
@@ -56,7 +67,6 @@ const config = resolveProject();
 
 const COORD_DIR = config.coordDir;
 const STATE_PATH = config.statePath;
-const LOG_PATH = config.logPath;
 const STATUS_PATH = config.statusPath;
 const EVENTS_PATH = config.eventsPath;
 const ARCHIVE_PATH = config.archivePath;
@@ -67,220 +77,6 @@ const ORCH_TOKEN = process.env['AI_ORCH_TOKEN'] ?? '';
 
 const STATUS_VALUES = new Set(['todo', 'in_progress', 'blocked', 'done', 'cancelled']);
 const KNOWN_AGENTS = KNOWN_OWNERS;
-
-function nowIso() {
-  return new Date().toISOString();
-}
-
-function toSessionId(date = new Date()) {
-  const yyyy = String(date.getFullYear());
-  const mm = String(date.getMonth() + 1).padStart(2, '0');
-  const dd = String(date.getDate()).padStart(2, '0');
-  const hh = String(date.getHours()).padStart(2, '0');
-  const min = String(date.getMinutes()).padStart(2, '0');
-  const ss = String(date.getSeconds()).padStart(2, '0');
-  return `SYNC_${yyyy}${mm}${dd}_${hh}${min}${ss}`;
-}
-
-function createAgentRecord() {
-  return {
-    installed: null,
-    path: '',
-    version: '',
-    lastCheckedAt: null,
-  };
-}
-
-function createDefaultState() {
-  return {
-    schemaVersion: 1,
-    project: config.projectName,
-    updatedAt: nowIso(),
-    activeSession: null,
-    agents: {
-      gemini: createAgentRecord(),
-      codex: createAgentRecord(),
-      claude: createAgentRecord(),
-    },
-    tasks: [],
-    decisions: [],
-    blockers: [],
-    handoffs: [],
-    deadLetter: [],
-  };
-}
-
-function normalizeState(raw: unknown): HydraStateShape {
-  const defaults = createDefaultState();
-  const safe = (raw != null && typeof raw === 'object' ? raw : {}) as Record<string, unknown>;
-
-  return {
-    ...defaults,
-    ...safe,
-    agents: {
-      ...(defaults.agents as Record<string, unknown>),
-      ...((safe['agents'] ?? {}) as Record<string, unknown>),
-    },
-    tasks: Array.isArray(safe['tasks']) ? (safe['tasks'] as TaskEntry[]) : [],
-    decisions: Array.isArray(safe['decisions']) ? (safe['decisions'] as DecisionEntry[]) : [],
-    blockers: Array.isArray(safe['blockers']) ? (safe['blockers'] as BlockerEntry[]) : [],
-    handoffs: Array.isArray(safe['handoffs']) ? (safe['handoffs'] as HandoffEntry[]) : [],
-    deadLetter: Array.isArray(safe['deadLetter']) ? safe['deadLetter'] : [],
-    childSessions: Array.isArray(safe['childSessions']) ? safe['childSessions'] : [],
-  };
-}
-
-function ensureCoordFiles() {
-  if (!fs.existsSync(COORD_DIR)) {
-    fs.mkdirSync(COORD_DIR, { recursive: true });
-  }
-
-  if (!fs.existsSync(STATE_PATH)) {
-    const state = createDefaultState();
-    fs.writeFileSync(STATE_PATH, `${JSON.stringify(state, null, 2)}\n`, 'utf8');
-  }
-
-  if (!fs.existsSync(LOG_PATH)) {
-    const lines = [
-      '# AI Sync Log',
-      '',
-      `Created: ${nowIso()}`,
-      '',
-      'Use `npm run hydra:summary` to see current state.',
-      '',
-    ];
-    fs.writeFileSync(LOG_PATH, `${lines.join('\n')}\n`, 'utf8');
-  }
-
-  if (!fs.existsSync(EVENTS_PATH)) {
-    fs.writeFileSync(EVENTS_PATH, '', 'utf8');
-  }
-
-  initEventSeq();
-}
-
-function readState(): HydraStateShape {
-  ensureCoordFiles();
-  const raw = fs.readFileSync(STATE_PATH, 'utf8');
-  return normalizeState(JSON.parse(raw));
-}
-
-/**
- * Atomically persist state to disk (write-tmp then rename).
- * @param {object} state - The state object to persist
- * @returns {object} The normalized, timestamped state that was written
- */
-function writeState(state: Record<string, unknown>) {
-  const next = normalizeState(state);
-  next.updatedAt = nowIso();
-  if (next.activeSession?.status === 'active') {
-    next.activeSession.updatedAt = next.updatedAt;
-  }
-  const tempPath = `${STATE_PATH}.tmp`;
-  const data = `${JSON.stringify(next, null, 2)}\n`;
-  fs.writeFileSync(tempPath, data, 'utf8');
-
-  let retries = 0;
-  for (;;) {
-    try {
-      fs.renameSync(tempPath, STATE_PATH);
-      break;
-    } catch (err) {
-      retries++;
-      if (retries > 5) {
-        // If rename fails consistently, try copy and unlink (less atomic but better than partial write)
-        try {
-          fs.copyFileSync(tempPath, STATE_PATH);
-          fs.unlinkSync(tempPath);
-          break;
-        } catch (copyErr) {
-          console.error(
-            `Failed to write state: ${(err as Error).message} -> ${(copyErr as Error).message}`,
-          );
-          throw copyErr;
-        }
-      }
-      // Sync sleep (busy wait) 50ms * retries
-      const start = Date.now();
-      while (Date.now() - start < 50 * retries);
-    }
-  }
-  return next;
-}
-
-function appendSyncLog(entry: string) {
-  ensureCoordFiles();
-  fs.appendFileSync(LOG_PATH, `- ${nowIso()} | ${entry}\n`, 'utf8');
-}
-
-let eventSeq = 0;
-
-function initEventSeq() {
-  if (!fs.existsSync(EVENTS_PATH)) return;
-  const raw = fs.readFileSync(EVENTS_PATH, 'utf8');
-  const lines = raw.split(/\r?\n/).filter(Boolean);
-  for (let i = lines.length - 1; i >= 0; i--) {
-    try {
-      const parsed = JSON.parse(lines[i]) as { seq?: number };
-      if (typeof parsed.seq === 'number' && parsed.seq > eventSeq) {
-        eventSeq = parsed.seq;
-      }
-      break;
-    } catch {
-      /* skip malformed */
-    }
-  }
-}
-
-function categorizeEvent(type: string, payload: unknown) {
-  if (type === 'mutation') {
-    const label =
-      ((payload as Record<string, unknown>)['label'] as string | null | undefined) ?? '';
-    if (label.startsWith('task:')) return 'task';
-    if (label.startsWith('handoff:')) return 'handoff';
-    if (label.startsWith('decision:')) return 'decision';
-    if (label.startsWith('blocker:')) return 'blocker';
-    if (label.startsWith('session:')) return 'session';
-  }
-  if (type === 'daemon_start' || type === 'daemon_stop' || type === 'auto_archive') return 'system';
-  if (type === 'verification_start' || type === 'verification_complete') return 'task';
-  if (typeof type === 'string' && type.startsWith('concierge:')) return 'concierge';
-  return 'system';
-}
-
-function appendEvent(type: string, payload?: unknown) {
-  eventSeq += 1;
-  const category = categorizeEvent(type, payload);
-  const line = JSON.stringify({
-    id: `${String(Date.now())}_${Math.random().toString(36).slice(2, 8)}`,
-    seq: eventSeq,
-    at: nowIso(),
-    type,
-    category,
-    payload,
-  });
-  fs.appendFileSync(EVENTS_PATH, `${line}\n`, 'utf8');
-}
-
-type EventRecord = { seq: number; at: string; type: string; category?: string; payload?: unknown };
-
-function replayEvents(fromSeq = 0): EventRecord[] {
-  if (!fs.existsSync(EVENTS_PATH)) return [];
-  const raw = fs.readFileSync(EVENTS_PATH, 'utf8');
-  const lines = raw.split(/\r?\n/).filter(Boolean);
-  const events: EventRecord[] = [];
-  for (const line of lines) {
-    try {
-      const parsed = JSON.parse(line) as { seq?: number } & Partial<EventRecord>;
-      if (typeof parsed.seq === 'number' && parsed.seq >= fromSeq) {
-        events.push(parsed as EventRecord);
-      }
-    } catch {
-      /* skip malformed */
-    }
-  }
-  return events;
-}
 
 function nextId(prefix: string, items: unknown[]) {
   let max = 0;
@@ -779,18 +575,19 @@ function createSnapshot() {
       fs.mkdirSync(SNAPSHOT_DIR, { recursive: true });
     }
     const state = readState();
+    const seq = getEventSeq();
     const snapshot = {
-      seq: eventSeq,
+      seq,
       createdAt: nowIso(),
       state,
     };
-    const filename = `snapshot_${String(eventSeq)}_${String(Date.now())}.json`;
+    const filename = `snapshot_${String(seq)}_${String(Date.now())}.json`;
     fs.writeFileSync(
       path.join(SNAPSHOT_DIR, filename),
       `${JSON.stringify(snapshot, null, 2)}\n`,
       'utf8',
     );
-    return { ok: true, seq: eventSeq, filename };
+    return { ok: true, seq, filename };
   } catch (err) {
     return { ok: false, error: (err as Error).message };
   }
@@ -1095,12 +892,12 @@ function startDaemon(options: Record<string, string>) {
       const at = nowIso();
       const event = {
         id: `${String(Date.now())}_${Math.random().toString(36).slice(2, 8)}`,
-        seq: eventSeq + 1,
+        seq: getEventSeq() + 1,
         at,
         type: 'mutation',
         payload: { label, ...detail },
       };
-      appendEvent('mutation', { label, ...detail });
+      appendEvent('mutation', { label, ...detail }, event.id);
       broadcastEvent(event);
       lastEventAt = at;
       eventCount += 1;
