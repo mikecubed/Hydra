@@ -1,4 +1,1 @@
-export function parseValue() {
-  // TODO: add parser fallback for nested arrays
-  return 1;
-}
+// TODO: add tokenizer support
