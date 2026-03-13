@@ -21,6 +21,7 @@
 import './hydra-env.ts';
 import readline from 'node:readline';
 import type { Interface as ReadlineInterface } from 'node:readline';
+import { fileURLToPath } from 'node:url';
 import path from 'node:path';
 import { exec, spawn, spawnSync } from 'node:child_process';
 import { buildAgentContext } from './hydra-context.ts';
@@ -348,7 +349,7 @@ function startAgentWorkers(
   }
 }
 
-function formatUptime(ms: number) {
+export function formatUptime(ms: number) {
   if (ms < 60_000) return `${String(Math.round(ms / 1000))}s`;
   if (ms < 3600_000) return `${String(Math.round(ms / 60_000))}m`;
   return `${(ms / 3600_000).toFixed(1)}h`;
@@ -1639,7 +1640,7 @@ async function runAutoPromptLegacy({
 
 // ── Smart Mode: auto-select model tier per prompt ───────────────────────────
 
-const SMART_TIER_MAP = {
+export const SMART_TIER_MAP = {
   simple: 'economy',
   medium: 'balanced',
   complex: 'performance',
@@ -1958,7 +1959,7 @@ function printHelp() {
 
 // ── Fuzzy Command Matching ─────────────────────────────────────────────────
 
-const KNOWN_COMMANDS = [
+export const KNOWN_COMMANDS = [
   ':help',
   ':status',
   ':sitrep',
@@ -2189,7 +2190,7 @@ function printCommandHelp(cmd: string) {
   console.log('');
 }
 
-function levenshtein(a: string, b: string) {
+export function levenshtein(a: string, b: string) {
   const m = a.length,
     n = b.length;
   const dp = Array.from({ length: m + 1 }, (_, i) => {
@@ -2209,7 +2210,7 @@ function levenshtein(a: string, b: string) {
   return dp[m][n];
 }
 
-function fuzzyMatchCommand(input: string) {
+export function fuzzyMatchCommand(input: string) {
   const normalized = input.toLowerCase().split(/\s/)[0];
   const target = normalized.startsWith(':') ? normalized : `:${normalized}`;
   let best = null;
@@ -2228,7 +2229,7 @@ function fuzzyMatchCommand(input: string) {
 
 let _selfIndexCache = { block: '', builtAt: 0, key: '' };
 
-function normalizeSimpleCommandText(input: any) {
+export function normalizeSimpleCommandText(input: any) {
   return String(input ?? '')
     .toLowerCase()
     .replace(/[^\w\s]/g, ' ')
@@ -2236,7 +2237,7 @@ function normalizeSimpleCommandText(input: any) {
     .trim();
 }
 
-function parseSelfAwarenessPlaintextCommand(input: any) {
+export function parseSelfAwarenessPlaintextCommand(input: any) {
   const raw = String(input ?? '').trim();
   if (!raw) return null;
   if (raw.startsWith(':') || raw.startsWith('!')) return null;
@@ -2266,7 +2267,7 @@ function parseSelfAwarenessPlaintextCommand(input: any) {
   return null;
 }
 
-function getSelfAwarenessSummary(sa: any = {}) {
+export function getSelfAwarenessSummary(sa: any = {}) {
   const obj = sa && typeof sa === 'object' ? sa : {};
   const enabled = obj.enabled !== false;
   const includeSnapshot = obj.includeSnapshot !== false;
@@ -6623,8 +6624,14 @@ async function main() {
   }
 }
 
-main().catch((err: unknown) => {
-  console.error(`Hydra operator failed: ${(err as Error).message}`);
+const _isMainModule =
+  process.argv[1] != null &&
+  path.resolve(process.argv[1]) === path.resolve(fileURLToPath(import.meta.url));
 
-  process.exit(1);
-});
+if (_isMainModule) {
+  main().catch((err: unknown) => {
+    console.error(`Hydra operator failed: ${(err as Error).message}`);
+
+    process.exit(1);
+  });
+}
