@@ -55,32 +55,32 @@ C4Context
 
 ```mermaid
 block-beta
-  columns 3
+  columns 6
 
-  block:presentation["Presentation Layer"]:3
-    operator["hydra-operator.ts\n(6,630 LOC — Operator Console)"]
-    council["hydra-council.ts\n(2,321 LOC — Multi-round Deliberation)"]
-    ui["hydra-ui.ts\n(1,561 LOC — Terminal UI)"]
+  block:presentation["Presentation Layer"]:6
+    operator["hydra-operator.ts<br/>(6,630 LOC — Operator Console)<br/>"]
+    council["hydra-council.ts<br/>(2,321 LOC — Multi-round Deliberation)"]
+    ui["hydra-ui.ts<br/>(1,561 LOC — Terminal UI)"]
   end
-
-  block:domain["Domain / Orchestration Layer"]:3
-    dispatch["hydra-dispatch.ts\n(Routing & Dispatch)"]
-    tasks["hydra-tasks.ts\n(Task Queue Management)"]
-    evolve["hydra-evolve.ts\n(3,657 LOC — Auto-evolution)"]
+  space:6
+  block:domain["Domain / Orchestration Layer"]:6
+    dispatch["hydra-dispatch.ts<br/>(Routing & Dispatch)"]
+    tasks["hydra-tasks.ts<br/>(Task Queue Management)"]
+    evolve["hydra-evolve.ts<br/>(3,657 LOC — Auto-evolution)"]
   end
-
+  space:6
   block:config["Configuration & Registry"]:3
-    config["hydra-config.ts\n(1,067 LOC — Central Config Hub\n⚠ 23 fan-in dependents)"]
-    agents["hydra-agents.ts\n(Agent Plugin Registry)"]
-    types["types.ts\n(Shared Type Definitions)"]
+    config2["hydra-config.ts<br/>(1,067 LOC — Central Config Hub<br/>⚠ 23 fan-in dependents)"]
+    agents["hydra-agents.ts<br/>(Agent Plugin Registry)<br/>"]
+    types["types.ts<br/>(Shared Type Definitions)<br/>"]
   end
 
   block:infra["Infrastructure Layer"]:3
-    executor["hydra-shared/agent-executor.ts\n(Core Execution Engine)"]
-    worker["hydra-worker.ts\n(Background Workers)"]
-    daemon["orchestrator-daemon.ts\n(HTTP API, port 4173)"]
+    executor["hydra-shared/agent-executor.ts<br/>(Core Execution Engine)"]
+    worker["hydra-worker.ts<br/>(Background Workers)"]
+    daemon["orchestrator-daemon.ts<br/>(HTTP API, port 4173)"]
   end
-
+  space:6
   block:providers["AI Provider Adapters"]:3
     anthropic["hydra-anthropic.ts"]
     openai["hydra-openai.ts"]
@@ -111,7 +111,7 @@ graph TD
   subgraph Config["⚙ Configuration Core"]
     types["types.ts"]
     profiles["hydra-model-profiles.ts"]
-    config["hydra-config.ts\n⚠ 23 fan-in"]
+    config["hydra-config.ts<br/>⚠ 23 fan-in"]
     constants["hydra-shared/constants.ts"]
     routing_const["hydra-routing-constants.ts"]
   end
@@ -122,7 +122,7 @@ graph TD
   end
 
   subgraph Execution["⚡ Execution Core"]
-    executor["hydra-shared/agent-executor.ts\n⚠ 1,824 LOC, 5 dependents"]
+    executor["hydra-shared/agent-executor.ts<br/>⚠ 1,824 LOC, 5 dependents"]
     worker["hydra-worker.ts"]
     local["hydra-local.ts"]
     model_recovery["hydra-model-recovery.ts"]
@@ -136,7 +136,7 @@ graph TD
   end
 
   subgraph Observability["📊 Observability"]
-    metrics["hydra-metrics.ts\n⚠ self-import"]
+    metrics["hydra-metrics.ts<br/>⚠ self-import"]
     usage["hydra-usage.ts"]
     activity["hydra-activity.ts"]
     statusbar["hydra-statusbar.ts"]
@@ -483,24 +483,24 @@ graph LR
 
 ```mermaid
 flowchart TD
-  User(["👤 Operator\nREPL or CLI"])
-  OP["hydra-operator.ts\nCommand parsing\n+ input buffering"]
-  IG["hydra-intent-gate.ts\nPrompt pre-screening\n(confidence threshold)"]
-  DP["hydra-dispatch.ts\nRoute selection\n(economy|balanced|performance)"]
+  User(["👤 Operator<br/>REPL or CLI"])
+  OP["hydra-operator.ts<br/>Command parsing<br/>+ input buffering"]
+  IG["hydra-intent-gate.ts<br/>Prompt pre-screening<br/>(confidence threshold)"]
+  DP["hydra-dispatch.ts<br/>Route selection<br/>(economy|balanced|performance)"]
 
   subgraph Routing["Routing Decision"]
-    R_LOCAL["Local agent\n(API-backed)"]
+    R_LOCAL["Local agent<br/>(API-backed)"]
     R_CLAUDE["claude CLI"]
     R_GEMINI["gemini CLI"]
     R_CODEX["codex CLI + --model"]
-    R_CUSTOM["custom agent\n(CLI or API)"]
+    R_CUSTOM["custom agent<br/>(CLI or API)"]
   end
 
-  EX["hydra-shared/agent-executor.ts\nSpawn + stream\noutput parsing"]
-  MR["hydra-model-recovery.ts\nRetry + fallback\non quota/error"]
-  ME["hydra-metrics.ts\nToken accounting\nlatency recording"]
-  US["hydra-usage.ts\nBudget gate check\n(daily/weekly limits)"]
-  OUT(["📤 Streamed\nResponse"])
+  EX["hydra-shared/agent-executor.ts<br/>Spawn + stream<br/>output parsing"]
+  MR["hydra-model-recovery.ts<br/>Retry + fallback<br/>on quota/error"]
+  ME["hydra-metrics.ts<br/>Token accounting<br/>latency recording"]
+  US["hydra-usage.ts<br/>Budget gate check<br/>(daily/weekly limits)"]
+  OUT(["📤 Streamed<br/>Response"])
 
   User -->|"raw prompt"| OP
   OP -->|"classified prompt"| IG
@@ -574,34 +574,34 @@ sequenceDiagram
 ```mermaid
 flowchart LR
   subgraph Phase1["Phase 1: Discover"]
-    P1A["hydra-evolve-investigator.ts\nOpenAI issue analysis"]
-    P1B["hydra-evolve-knowledge.ts\nKnowledge graph read"]
-    P1C["hydra-evolve-suggestions.ts\nSuggestion backlog"]
+    P1A["hydra-evolve-investigator.ts<br/>OpenAI issue analysis"]
+    P1B["hydra-evolve-knowledge.ts<br/>Knowledge graph read"]
+    P1C["hydra-evolve-suggestions.ts<br/>Suggestion backlog"]
   end
 
   subgraph Phase2["Phase 2: Gate"]
-    P2["hydra-evolve-guardrails.ts\nBudget & safety check\n(daily token limits)"]
+    P2["hydra-evolve-guardrails.ts<br/>Budget & safety check<br/>(daily token limits)"]
   end
 
   subgraph Phase3["Phase 3: Plan"]
-    P3["hydra-evolve.ts\nCouncil deliberation\n(Claude architect round)"]
+    P3["hydra-evolve.ts<br/>Council deliberation<br/>(Claude architect round)"]
   end
 
   subgraph Phase4["Phase 4: Implement"]
-    P4["agent-executor.ts\nCodex implementation\nrun in git worktree"]
+    P4["agent-executor.ts<br/>Codex implementation<br/>run in git worktree"]
   end
 
   subgraph Phase5["Phase 5: Test"]
-    P5A["hydra-shared/git-ops.ts\ngit diff + test run"]
-    P5B["hydra-verification.ts\nVerification commands"]
+    P5A["hydra-shared/git-ops.ts<br/>git diff + test run"]
+    P5B["hydra-verification.ts<br/>Verification commands"]
   end
 
   subgraph Phase6["Phase 6: Review"]
-    P6["hydra-evolve-review.ts\nGemini review\n+ guardrails re-check"]
+    P6["hydra-evolve-review.ts<br/>Gemini review<br/>+ guardrails re-check"]
   end
 
   subgraph Phase7["Phase 7: Decide"]
-    P7["hydra-evolve.ts\nMerge / discard\ngit commit or reset"]
+    P7["hydra-evolve.ts<br/>Merge / discard<br/>git commit or reset"]
   end
 
   START(["⚡ npm run evolve"]) --> Phase1
@@ -623,30 +623,30 @@ flowchart LR
 
 ```mermaid
 flowchart TD
-  START(["⏰ npm run nightly\nor scheduled cron"])
-  NY["hydra-nightly.ts\nOrchestrator"]
+  START(["⏰ npm run nightly<br/>or scheduled cron"])
+  NY["hydra-nightly.ts<br/>Orchestrator"]
 
   subgraph Discovery["Discovery Phase"]
-    ND["hydra-nightly-discovery.ts\nScan issues + TODO/FIXME"]
-    TS["hydra-tasks-scanner.ts\nFile-level TODO mining"]
-    GH1["hydra-github.ts\nFetch open issues"]
+    ND["hydra-nightly-discovery.ts<br/>Scan issues + TODO/FIXME"]
+    TS["hydra-tasks-scanner.ts<br/>File-level TODO mining"]
+    GH1["hydra-github.ts<br/>Fetch open issues"]
   end
 
   subgraph Execution["Batch Execution"]
-    BT["hydra-shared/budget-tracker.ts\nPer-agent token budgets"]
-    GU["hydra-shared/guardrails.ts\nSafety gate"]
-    EX["agent-executor.ts\nAgent runs (parallelised)"]
-    SM["hydra-sync-md.ts\nMD file sync"]
+    BT["hydra-shared/budget-tracker.ts<br/>Per-agent token budgets"]
+    GU["hydra-shared/guardrails.ts<br/>Safety gate"]
+    EX["agent-executor.ts<br/>Agent runs (parallelised)"]
+    SM["hydra-sync-md.ts<br/>MD file sync"]
   end
 
   subgraph Review["Review Phase"]
-    NR["hydra-nightly-review.ts\nGemini review of changes"]
-    GH2["hydra-github.ts\nCreate PRs + comments"]
+    NR["hydra-nightly-review.ts<br/>Gemini review of changes"]
+    GH2["hydra-github.ts<br/>Create PRs + comments"]
   end
 
   subgraph Verification["Verification"]
-    VF["hydra-verification.ts\nRun verify commands"]
-    ME["hydra-metrics.ts\nRecord run stats"]
+    VF["hydra-verification.ts<br/>Run verify commands"]
+    ME["hydra-metrics.ts<br/>Record run stats"]
   end
 
   START --> NY
@@ -661,7 +661,7 @@ flowchart TD
   NR --> GH2
   Review --> Verification
   VF --> ME
-  Verification --> DONE(["📊 Nightly report written\nto hydra-metrics"])
+  Verification --> DONE(["📊 Nightly report written<br/>to hydra-metrics"])
 ```
 
 ---
@@ -672,8 +672,8 @@ flowchart TD
 
 ```mermaid
 sequenceDiagram
-  participant CLI as hydra-dispatch.ts\n(client)
-  participant HTTP as orchestrator-daemon.ts\n(HTTP :4173)
+  participant CLI as hydra-dispatch.ts<br/>(client)
+  participant HTTP as orchestrator-daemon.ts<br/>(HTTP :4173)
   participant WR as daemon/write-routes.ts
   participant RR as daemon/read-routes.ts
   participant WT as hydra-worktree.ts
@@ -759,18 +759,18 @@ sequenceDiagram
 stateDiagram-v2
   [*] --> queued: POST /task/add
 
-  queued --> claimed: POST /task/claim\n(agent picks up task)
+  queued --> claimed: POST /task/claim<br/>(agent picks up task)
   queued --> cancelled: DELETE /task/{id}
 
-  claimed --> running: agent-executor.ts\nspawns agent process
-  claimed --> queued: claim timeout\n(worker died)
+  claimed --> running: agent-executor.ts<br/>spawns agent process
+  claimed --> queued: claim timeout<br/>(worker died)
 
-  running --> complete: POST /task/result\n(success)
-  running --> failed: POST /task/result\n(error output)
-  running --> running: heartbeat\nPOST /task/heartbeat
+  running --> complete: POST /task/result<br/>(success)
+  running --> failed: POST /task/result<br/>(error output)
+  running --> running: heartbeat<br/>POST /task/heartbeat
 
   complete --> [*]
-  failed --> queued: auto-retry\n(if retries remain)
+  failed --> queued: auto-retry<br/>(if retries remain)
   failed --> [*]: max retries exceeded
 
   cancelled --> [*]
@@ -791,7 +791,7 @@ graph TB
     ENV[hydra-env.ts]
     VER[hydra-version.ts]
     RC[hydra-routing-constants.ts]
-    CFG["hydra-config.ts\n⚠ Hub — 23 fan-in"]
+    CFG["hydra-config.ts<br/>⚠ Hub — 23 fan-in"]
   end
 
   subgraph AgentCore["🤖 Agent Core"]
@@ -805,7 +805,7 @@ graph TB
   end
 
   subgraph ExecInfra["⚡ Execution Infrastructure"]
-    EX["agent-executor.ts\n⚠ 1,824 LOC"]
+    EX["agent-executor.ts<br/>⚠ 1,824 LOC"]
     WK[hydra-worker.ts]
     LO[hydra-local.ts]
     MR[hydra-model-recovery.ts]
@@ -840,7 +840,7 @@ graph TB
   end
 
   subgraph PresentationLayer["🖥 Presentation"]
-    OP["hydra-operator.ts\n⚠ 6,630 LOC"]
+    OP["hydra-operator.ts<br/>⚠ 6,630 LOC"]
     CO[hydra-council.ts]
     UI[hydra-ui.ts]
     PC[hydra-prompt-choice.ts]
@@ -849,14 +849,14 @@ graph TB
   end
 
   subgraph ObservabilityLayer["📊 Observability"]
-    ME["hydra-metrics.ts\n⚠ self-import"]
+    ME["hydra-metrics.ts<br/>⚠ self-import"]
     AC[hydra-activity.ts]
     AU[hydra-audit.ts]
     US[hydra-usage.ts]
   end
 
   subgraph EvolutionEngine["🔄 Evolution Engine"]
-    EV["hydra-evolve.ts\n3,657 LOC"]
+    EV["hydra-evolve.ts<br/>3,657 LOC"]
     EG[evolve-guardrails.ts]
     EI[evolve-investigator.ts]
     EK[evolve-knowledge.ts]
@@ -975,7 +975,7 @@ quadrantChart
 graph LR
   subgraph Cycle1["⚠ Cycle 1: Activity ↔ Statusbar"]
     AC1["hydra-activity.ts"] -->|"imports statusbar"| SB1["hydra-statusbar.ts"]
-    SB1 -->|"imports usage\n(imports activity indirectly)"| US1["hydra-usage.ts"]
+    SB1 -->|"imports usage<br/>(imports activity indirectly)"| US1["hydra-usage.ts"]
     US1 -->|"self-import via metrics"| ME1["hydra-metrics.ts"]
     ME1 -->|"config only"| CFG1["hydra-config.ts"]
   end

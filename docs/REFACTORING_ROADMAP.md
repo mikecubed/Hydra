@@ -334,11 +334,11 @@ The current architecture has no enforced layering. The following violations exis
 
 ```mermaid
 graph LR
-  OP["hydra-operator.ts\n(Presentation)"]
-  OD["orchestrator-daemon.ts\n(Infrastructure)"]
-  GH["hydra-github.ts\n(Integration)"]
-  EX["agent-executor.ts\n(Execution Infra)"]
-  CI["hydra-concierge.ts\n(Provider)"]
+  OP["hydra-operator.ts<br/>(Presentation)"]
+  OD["orchestrator-daemon.ts<br/>(Infrastructure)"]
+  GH["hydra-github.ts<br/>(Integration)"]
+  EX["agent-executor.ts<br/>(Execution Infra)"]
+  CI["hydra-concierge.ts<br/>(Provider)"]
 
   OP -->|"❌ Presentation → Infra"| OD
   OP -->|"⚠ Presentation → Integration"| GH
@@ -372,13 +372,13 @@ The 6,630-line operator module should be split into ~5 focused modules:
 
 ```mermaid
 graph TD
-  OLD["hydra-operator.ts\n6,630 LOC\n(current)"]
+  OLD["hydra-operator.ts<br/>6,630 LOC<br/>(current)"]
 
-  NEW1["hydra-operator-repl.ts\n~800 LOC\nREPL loop + command parsing\n+ input handling"]
-  NEW2["hydra-operator-commands.ts\n~1,200 LOC\nCommand handlers (:council,\n:evolve, :tasks, :agents, ...)"]
-  NEW3["hydra-operator-dispatch.ts\n~600 LOC\nPrompt routing + agent\nselection + streaming"]
-  NEW4["hydra-operator-session.ts\n~400 LOC\nSession state + history\n+ output recording"]
-  NEW5["hydra-operator-workers.ts\n~500 LOC\nBackground worker\nmanagement"]
+  NEW1["hydra-operator-repl.ts<br/>~800 LOC<br/>REPL loop + command parsing<br/>+ input handling"]
+  NEW2["hydra-operator-commands.ts<br/>~1,200 LOC<br/>Command handlers (:council,<br/>:evolve, :tasks, :agents, ...)"]
+  NEW3["hydra-operator-dispatch.ts<br/>~600 LOC<br/>Prompt routing + agent<br/>selection + streaming"]
+  NEW4["hydra-operator-session.ts<br/>~400 LOC<br/>Session state + history<br/>+ output recording"]
+  NEW5["hydra-operator-workers.ts<br/>~500 LOC<br/>Background worker<br/>management"]
 
   OLD -->|"split into"| NEW1
   OLD -->|"split into"| NEW2
@@ -397,11 +397,11 @@ The key principle: **never refactor code that has no tests**. Write the safety n
 
 ```mermaid
 flowchart LR
-  A["1. Write\ncharacterisation\ntests\n(describe current\nbehavior)"] --> B["2. Run tests\n(all green)"]
-  B --> C["3. Refactor\n(extract, rename,\nsplit module)"]
-  C --> D["4. Run tests\n(confirm still green)"]
-  D --> E["5. Add new\nbehavior tests\nfor extracted\nmodule"]
-  E --> F["6. Merge &\nupdate docs"]
+  A["1. Write<br/>characterisation<br/>tests<br/>(describe current<br/>behavior)"] --> B["2. Run tests<br/>(all green)"]
+  B --> C["3. Refactor<br/>(extract, rename,<br/>split module)"]
+  C --> D["4. Run tests<br/>(confirm still green)"]
+  D --> E["5. Add new<br/>behavior tests<br/>for extracted<br/>module"]
+  E --> F["6. Merge &<br/>update docs"]
   F -->|"next module"| A
 ```
 
@@ -748,22 +748,22 @@ What are the positive and negative consequences?
 
 ```mermaid
 flowchart LR
-  commit["git commit"] --> pre_commit["pre-commit hook\n(lint-staged)\n• ESLint --fix\n• Prettier --write\n• Mermaid validate"]
+  commit["git commit"] --> pre_commit["pre-commit hook<br/>(lint-staged)<br/>• ESLint --fix<br/>• Prettier --write<br/>• Mermaid validate"]
   pre_commit --> push["git push"]
-  push --> pre_push["pre-push hook\n• npm test\n(blocks on failure)"]
+  push --> pre_push["pre-push hook<br/>• npm test<br/>(blocks on failure)"]
   pre_push --> ci["CI / GitHub Actions"]
 
   subgraph ci["CI — quality.yml"]
-    lint["ESLint\n(full codebase)"]
+    lint["ESLint<br/>(full codebase)"]
     fmt["Prettier check"]
-    tsc["tsc --noEmit\n(blocking in Phase 1)"]
-    cycles["madge --circular\n(add in Phase 0)"]
-    coverage["c8 coverage check\n(add in Phase 0)"]
+    tsc["tsc --noEmit<br/>(blocking in Phase 1)"]
+    cycles["madge --circular<br/>(add in Phase 0)"]
+    coverage["c8 coverage check<br/>(add in Phase 0)"]
   end
 
   subgraph ci2["CI — ci.yml"]
-    tests["npm test\n(Ubuntu + Windows\nNode 20 + 22)"]
-    syntax["node --check\nsyntax validation"]
+    tests["npm test<br/>(Ubuntu + Windows<br/>Node 20 + 22)"]
+    syntax["node --check<br/>syntax validation"]
   end
 
   ci --> review["PR Review"]
