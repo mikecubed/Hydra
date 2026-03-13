@@ -15,7 +15,10 @@ import {
   saveSessionState,
   computeSessionStatus,
   computeActionNeeded,
+  type EvolveCheckpoint,
+  type EvolveSessionState,
 } from '../lib/hydra-evolve-state.ts';
+import type { RoundResult } from '../lib/hydra-evolve.ts';
 
 function tmpDir() {
   return fs.mkdtempSync(path.join(os.tmpdir(), 'hydra-evolve-state-test-'));
@@ -46,7 +49,7 @@ describe('hydra-evolve-state', () => {
 
     it('saveCheckpoint and loadCheckpoint round-trip', () => {
       tempDir = tmpDir();
-      const data = { foo: 'bar', n: 123 };
+      const data: EvolveCheckpoint = { reason: 'test', sessionId: 'abc' };
       const savedPath = saveCheckpoint(tempDir, data);
       assert.ok(savedPath.endsWith(CHECKPOINT_FILE));
 
@@ -56,7 +59,7 @@ describe('hydra-evolve-state', () => {
 
     it('deleteCheckpoint removes file', () => {
       tempDir = tmpDir();
-      saveCheckpoint(tempDir, { a: 1 });
+      saveCheckpoint(tempDir, { reason: 'test' } satisfies EvolveCheckpoint);
       assert.ok(fs.existsSync(getCheckpointPath(tempDir)));
       deleteCheckpoint(tempDir);
       assert.ok(!fs.existsSync(getCheckpointPath(tempDir)));
@@ -77,7 +80,7 @@ describe('hydra-evolve-state', () => {
 
     it('saveSessionState and loadSessionState round-trip', () => {
       tempDir = tmpDir();
-      const state = { status: 'running', round: 1 };
+      const state: EvolveSessionState = { status: 'running' };
       saveSessionState(tempDir, state);
       const loaded = loadSessionState(tempDir);
       assert.deepEqual(loaded, state);
@@ -94,22 +97,26 @@ describe('hydra-evolve-state', () => {
     });
 
     it('returns "failed" if all rounds errored/rejected', () => {
-      const rounds = [{ verdict: 'error' }, { verdict: 'reject' }];
+      const rounds = [{ verdict: 'error' }, { verdict: 'reject' }] as RoundResult[];
       assert.equal(computeSessionStatus(rounds, 3, null, false), 'failed');
     });
 
     it('returns "partial" if stopReason exists', () => {
-      const rounds = [{ verdict: 'approve' }];
+      const rounds = [{ verdict: 'approve' }] as RoundResult[];
       assert.equal(computeSessionStatus(rounds, 3, 'timeout', false), 'partial');
     });
 
     it('returns "partial" if fewer rounds than max', () => {
-      const rounds = [{ verdict: 'approve' }];
+      const rounds = [{ verdict: 'approve' }] as RoundResult[];
       assert.equal(computeSessionStatus(rounds, 3, null, false), 'partial');
     });
 
     it('returns "completed" if max rounds reached', () => {
-      const rounds = [{ verdict: 'approve' }, { verdict: 'reject' }, { verdict: 'approve' }];
+      const rounds = [
+        { verdict: 'approve' },
+        { verdict: 'reject' },
+        { verdict: 'approve' },
+      ] as RoundResult[];
       assert.equal(computeSessionStatus(rounds, 3, null, false), 'completed');
     });
   });

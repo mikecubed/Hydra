@@ -124,7 +124,7 @@ type EvolveResult = ExecuteResult & {
   startupFailure?: boolean;
 };
 
-interface RoundResult {
+export interface RoundResult {
   round: number;
   area: string;
   selectedImprovement: string | null;
@@ -2219,46 +2219,32 @@ async function main() {
 
   const kb = loadKnowledgeBase(evolveDir);
 
-  // eslint-disable-next-line @typescript-eslint/strict-boolean-expressions -- runtime safety
   if (checkpoint && isResume) {
     // ── Resume from checkpoint ──────────────────────────────────────────
     log.info(pc.yellow('Resuming evolve session from checkpoint...'));
 
-    log.dim(`Reason: ${String(checkpoint.reason ?? 'hot-restart')}`);
+    log.dim(`Reason: ${checkpoint.reason ?? 'hot-restart'}`);
 
-    // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment -- runtime safety
     sessionId =
       checkpoint.sessionId ??
       `evolve_${String(checkpoint.dateStr)}_${randomBytes(3).toString('hex')}`;
-    // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment -- runtime safety
-    startedAt = checkpoint.startedAt;
-    // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment -- runtime safety
-    dateStr = checkpoint.dateStr;
-    // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment -- runtime safety
-    maxRounds = checkpoint.maxRounds;
-    // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment -- runtime safety
-    maxHoursMs = checkpoint.maxHoursMs;
-    // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment -- runtime safety
-    focusAreas = checkpoint.focusAreas;
-    // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment -- runtime safety
-    timeouts = checkpoint.timeouts;
-    // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment -- runtime safety
+    startedAt = checkpoint.startedAt ?? Date.now();
+    dateStr = checkpoint.dateStr ?? '';
+    maxRounds = checkpoint.maxRounds ?? DEFAULT_MAX_ROUNDS;
+    maxHoursMs = checkpoint.maxHoursMs ?? DEFAULT_MAX_HOURS * 60 * 60 * 1000;
+    focusAreas = checkpoint.focusAreas ?? DEFAULT_FOCUS_AREAS;
+    timeouts = { ...DEFAULT_PHASE_TIMEOUTS, ...(checkpoint.timeouts ?? {}) };
     roundResults = checkpoint.completedRounds ?? [];
-    // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment -- runtime safety
-    kbStartCount = checkpoint.kbStartCount;
-    // eslint-disable-next-line @typescript-eslint/strict-boolean-expressions -- runtime safety
+    kbStartCount = checkpoint.kbStartCount ?? 0;
     startRound = (Number(checkpoint.lastRoundNum) || 0) + 1;
 
     // Restore budget tracker
-    // eslint-disable-next-line @typescript-eslint/strict-boolean-expressions -- runtime safety
     if (checkpoint.budgetState) {
-      // eslint-disable-next-line @typescript-eslint/no-unsafe-argument -- runtime safety
       budget = EvolveBudgetTracker.deserialize(checkpoint.budgetState);
       log.dim(
         `Budget restored: ${budget.consumed.toLocaleString()} tokens consumed across ${String(budget.roundDeltas.length)} rounds`,
       );
     } else {
-      // eslint-disable-next-line @typescript-eslint/no-unsafe-argument -- runtime safety
       budget = new EvolveBudgetTracker(checkpoint.budgetOverrides ?? {});
       budget.recordStart();
     }
@@ -2271,37 +2257,29 @@ async function main() {
     // ── Resume from session state ───────────────────────────────────────
     log.info(pc.yellow('Resuming evolve session from session state...'));
 
-    log.dim(`Session: ${String(existingState.sessionId)} (${String(existingState.status)})`);
+    log.dim(`Session: ${existingState.sessionId ?? ''} (${existingState.status ?? ''})`);
 
-    // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment -- runtime safety
-    sessionId = existingState.sessionId;
-    // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment -- runtime safety
-    dateStr = existingState.dateStr;
-    // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment -- runtime safety
+    sessionId = existingState.sessionId ?? '';
+    dateStr = existingState.dateStr ?? '';
     roundResults = existingState.completedRounds ?? [];
-    // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment -- runtime safety
     kbStartCount =
-      existingState.kbStartCount || kb.entries.length - (existingState.summary?.totalKBAdded || 0); // eslint-disable-line @typescript-eslint/no-unsafe-member-access, @typescript-eslint/prefer-nullish-coalescing, @typescript-eslint/strict-boolean-expressions -- runtime safety
-    // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment -- runtime safety
+      existingState.kbStartCount ?? kb.entries.length - (existingState.summary?.totalKBAdded ?? 0);
     startRound = existingState.nextRound ?? roundResults.length + 1;
-    // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment -- runtime safety
     focusAreas = existingState.focusAreas ?? evolveConfig.focusAreas ?? DEFAULT_FOCUS_AREAS;
-    // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment -- runtime safety
-    timeouts = existingState.timeouts ?? {
+    timeouts = {
       ...DEFAULT_PHASE_TIMEOUTS,
+      ...(existingState.timeouts ?? {}),
       ...(evolveConfig.phases ?? {}),
     };
 
     // Parse options for overrides on resume
-    // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment, @typescript-eslint/strict-boolean-expressions -- runtime safety
     maxRounds = options['max-rounds']
       ? Number.parseInt(String(options['max-rounds']), 10)
-      : existingState.maxRounds || evolveConfig.maxRounds || DEFAULT_MAX_ROUNDS; // eslint-disable-line @typescript-eslint/prefer-nullish-coalescing, @typescript-eslint/strict-boolean-expressions -- runtime safety
+      : (existingState.maxRounds ?? evolveConfig.maxRounds ?? DEFAULT_MAX_ROUNDS);
     maxHoursMs =
-      // eslint-disable-next-line @typescript-eslint/strict-boolean-expressions -- runtime safety
       (options['max-hours']
         ? Number.parseFloat(String(options['max-hours']))
-        : existingState.maxHours || evolveConfig.maxHours || DEFAULT_MAX_HOURS) * // eslint-disable-line @typescript-eslint/prefer-nullish-coalescing, @typescript-eslint/strict-boolean-expressions -- runtime safety
+        : (existingState.maxHours ?? evolveConfig.maxHours ?? DEFAULT_MAX_HOURS)) *
       60 *
       60 *
       1000;
@@ -2310,9 +2288,7 @@ async function main() {
     startedAt = Date.now();
 
     // Restore budget tracker
-    // eslint-disable-next-line @typescript-eslint/strict-boolean-expressions -- runtime safety
     if (existingState.budgetState) {
-      // eslint-disable-next-line @typescript-eslint/no-unsafe-argument -- runtime safety
       budget = EvolveBudgetTracker.deserialize(existingState.budgetState);
       log.dim(
         `Budget restored: ${budget.consumed.toLocaleString()} tokens consumed across ${String(budget.roundDeltas.length)} rounds`,
@@ -2332,7 +2308,7 @@ async function main() {
     log.ok(`Session state restored, resuming from round ${String(startRound)}`);
   } else {
     // ── Fresh session ───────────────────────────────────────────────────
-    // eslint-disable-next-line @typescript-eslint/strict-boolean-expressions -- runtime safety
+
     if (checkpoint && !isResume) {
       log.warn('Stale checkpoint found but --resume not set. Starting fresh session.');
       deleteCheckpoint(evolveDir);
@@ -2418,14 +2394,12 @@ async function main() {
     }
   } else if (isResume) {
     // Restore active suggestion from session state on resume
-    // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment -- runtime safety
+
     const existingSugId = existingState?.activeSuggestionId ?? checkpoint?.activeSuggestionId;
     // eslint-disable-next-line @typescript-eslint/strict-boolean-expressions -- runtime safety
     if (existingSugId) {
-      // eslint-disable-next-line @typescript-eslint/no-unsafe-argument -- runtime safety
       activeSuggestion = getSuggestionById(suggestions, existingSugId);
       if (activeSuggestion?.status === 'exploring') {
-        // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment -- runtime safety
         activeSuggestionId = existingSugId;
         log.dim(`Resumed with suggestion: ${(activeSuggestion.title ?? '').slice(0, 80)}`);
       } else {
@@ -2459,7 +2433,7 @@ async function main() {
       errors: 0,
       totalKBAdded: 0,
     },
-    // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment -- runtime safety
+
     activeSuggestionId: activeSuggestionId ?? null,
     budgetState: budget.serialize(),
   });
@@ -2549,7 +2523,7 @@ async function main() {
       merged: false,
       mergeMethod: null,
       mergeConflicts: null,
-      // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment -- runtime safety
+
       suggestionId: usingSuggestion ? activeSuggestionId : null,
     };
 
@@ -3162,7 +3136,7 @@ ${safetyPrompt}`;
             completedRounds: roundResults,
             lastRoundNum: round,
             kbStartCount,
-            // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment -- runtime safety
+
             activeSuggestionId: activeSuggestionId ?? null,
             reason: 'hot-restart after approved self-modification',
           });
@@ -3222,7 +3196,6 @@ ${safetyPrompt}`;
       completedRounds: roundResults,
       nextRound: round + 1,
       resumable: false,
-      // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment -- runtime safety
       activeSuggestionId: activeSuggestionId ?? null,
       summary: {
         approved,
@@ -3350,7 +3323,7 @@ ${safetyPrompt}`;
     kbStartCount,
     completedRounds: roundResults,
     nextRound:
-      roundResults.length + startRound > maxRounds ? null : roundResults.length + startRound,
+      roundResults.length + startRound > maxRounds ? undefined : roundResults.length + startRound,
     resumable: finalStatus === 'partial' || finalStatus === 'failed',
     stopReason,
     actionNeeded,

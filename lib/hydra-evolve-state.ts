@@ -1,5 +1,66 @@
 import fs from 'node:fs';
 import path from 'node:path';
+import type { RoundResult } from './hydra-evolve.ts';
+
+// ── Shared types ─────────────────────────────────────────────────────────────
+
+export interface EvolveTimeouts {
+  researchTimeoutMs: number;
+  deliberateTimeoutMs: number;
+  planTimeoutMs: number;
+  testTimeoutMs: number;
+  implementTimeoutMs: number;
+  analyzeTimeoutMs: number;
+}
+
+export interface EvolveSummary {
+  approved?: number;
+  rejected?: number;
+  skipped?: number;
+  errors?: number;
+  totalKBAdded?: number;
+}
+
+export interface EvolveCheckpoint {
+  sessionId?: string;
+  startedAt?: number;
+  dateStr?: string;
+  projectRoot?: string;
+  baseBranch?: string;
+  maxRounds?: number;
+  maxHoursMs?: number;
+  focusAreas?: string[];
+  timeouts?: Partial<EvolveTimeouts>;
+  budgetOverrides?: Record<string, unknown>;
+  budgetState?: Record<string, unknown>;
+  completedRounds?: RoundResult[];
+  lastRoundNum?: number;
+  kbStartCount?: number;
+  activeSuggestionId?: string | null;
+  reason?: string;
+}
+
+export interface EvolveSessionState {
+  sessionId?: string;
+  status?: string;
+  startedAt?: number;
+  finishedAt?: number;
+  dateStr?: string;
+  maxRounds?: number;
+  maxHours?: number;
+  focusAreas?: string[];
+  timeouts?: Partial<EvolveTimeouts>;
+  kbStartCount?: number;
+  completedRounds?: RoundResult[];
+  nextRound?: number;
+  resumable?: boolean;
+  activeSuggestionId?: string | null;
+  summary?: EvolveSummary;
+  budgetState?: Record<string, unknown>;
+  stopReason?: string | null;
+  actionNeeded?: string;
+  interruptedAt?: number;
+}
 
 // ── Checkpoint & Hot-Restart ─────────────────────────────────────────────────
 
@@ -12,12 +73,12 @@ export function getCheckpointPath(evolveDir: string): string {
 /**
  * Load a session checkpoint from disk. Returns null if none exists.
  */
-export function loadCheckpoint(evolveDir: string): unknown {
+export function loadCheckpoint(evolveDir: string): EvolveCheckpoint | null {
   const cpPath = getCheckpointPath(evolveDir);
   try {
     if (!fs.existsSync(cpPath)) return null;
     const raw = fs.readFileSync(cpPath, 'utf8');
-    return JSON.parse(raw);
+    return JSON.parse(raw) as EvolveCheckpoint;
   } catch {
     return null;
   }
@@ -27,7 +88,7 @@ export function loadCheckpoint(evolveDir: string): unknown {
  * Save a session checkpoint to disk for hot-restart.
  * @returns The path to the saved checkpoint file.
  */
-export function saveCheckpoint(evolveDir: string, data: unknown): string {
+export function saveCheckpoint(evolveDir: string, data: EvolveCheckpoint): string {
   const cpPath = getCheckpointPath(evolveDir);
   fs.writeFileSync(cpPath, JSON.stringify(data, null, 2), 'utf8');
   return cpPath;
@@ -58,21 +119,20 @@ export function getSessionStatePath(evolveDir: string): string {
  * @returns {'running'|'completed'|'partial'|'failed'|'interrupted'}
  */
 export function computeSessionStatus(
-  roundResults: Array<{ verdict?: string | null }>,
+  roundResults: RoundResult[],
   maxRounds: number,
-  stopReason: unknown,
+  stopReason: string | null,
   isRunning: boolean,
 ): 'running' | 'completed' | 'partial' | 'failed' | 'interrupted' {
   if (isRunning) return 'running';
   if (roundResults.length === 0) return 'failed';
 
   const allErrored = roundResults.every(
-    (r: { verdict?: string | null }) => r.verdict === 'error' || r.verdict === 'reject',
+    (r: RoundResult) => r.verdict === 'error' || r.verdict === 'reject',
   );
   if (allErrored) return 'failed';
 
-  // eslint-disable-next-line @typescript-eslint/strict-boolean-expressions -- runtime safety
-  if (stopReason) return 'partial'; // stopped early by time/budget
+  if (stopReason !== null) return 'partial'; // stopped early by time/budget
   if (roundResults.length < maxRounds) return 'partial';
   return 'completed';
 }
@@ -95,16 +155,16 @@ export function computeActionNeeded(
   return 'Session in progress';
 }
 
-export function saveSessionState(evolveDir: string, state: unknown): void {
+export function saveSessionState(evolveDir: string, state: EvolveSessionState): void {
   const statePath = getSessionStatePath(evolveDir);
   fs.writeFileSync(statePath, JSON.stringify(state, null, 2), 'utf8');
 }
 
-export function loadSessionState(evolveDir: string): unknown {
+export function loadSessionState(evolveDir: string): EvolveSessionState | null {
   const statePath = getSessionStatePath(evolveDir);
   try {
     if (!fs.existsSync(statePath)) return null;
-    return JSON.parse(fs.readFileSync(statePath, 'utf8'));
+    return JSON.parse(fs.readFileSync(statePath, 'utf8')) as EvolveSessionState;
   } catch {
     return null;
   }
