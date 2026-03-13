@@ -9,7 +9,6 @@
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import readline from 'node:readline';
 import { fileURLToPath } from 'node:url';
 import {
   getAgentPresets as _getAgentPresets,
@@ -54,11 +53,8 @@ function getPackagedRuntimeRoot(): string {
 
 export const HYDRA_RUNTIME_ROOT = HYDRA_IS_PACKAGED ? getPackagedRuntimeRoot() : HYDRA_ROOT;
 
-const EMBEDDED_RECENT_PROJECTS_PATH = path.join(HYDRA_ROOT, 'recent-projects.json');
 const EMBEDDED_CONFIG_PATH = path.join(HYDRA_ROOT, 'hydra.config.json');
-const RECENT_PROJECTS_PATH = path.join(HYDRA_RUNTIME_ROOT, 'recent-projects.json');
 const CONFIG_PATH = path.join(HYDRA_RUNTIME_ROOT, 'hydra.config.json');
-const MAX_RECENT = 10;
 
 function ensureRuntimeRoot() {
   if (!fs.existsSync(HYDRA_RUNTIME_ROOT)) {
@@ -861,207 +857,14 @@ export function diffConfig(
   return { missing, stale, typeMismatches };
 }
 
-// ── Recent Projects ──────────────────────────────────────────────────────────
+// ── Re-exports for backward compatibility ─────────────────────────────────────
 
-export function getRecentProjects(): string[] {
-  ensureRuntimeRoot();
-  if (HYDRA_IS_PACKAGED) {
-    seedRuntimeFile(RECENT_PROJECTS_PATH, EMBEDDED_RECENT_PROJECTS_PATH, '[]\n');
-  }
-  try {
-    const raw = fs.readFileSync(RECENT_PROJECTS_PATH, 'utf8');
-    const parsed = JSON.parse(raw) as unknown;
-    return Array.isArray(parsed) ? (parsed as string[]) : [];
-  } catch {
-    return [];
-  }
-}
-
-export function addRecentProject(projectPath: string): void {
-  ensureRuntimeRoot();
-  const normalized = path.resolve(projectPath);
-  const recent = getRecentProjects().filter((p) => path.resolve(p) !== normalized);
-  recent.unshift(normalized);
-  const trimmed = recent.slice(0, MAX_RECENT);
-  fs.writeFileSync(RECENT_PROJECTS_PATH, `${JSON.stringify(trimmed, null, 2)}\n`, 'utf8');
-}
-
-// ── Project Detection ────────────────────────────────────────────────────────
-
-function detectProjectName(projectRoot: string): string {
-  // Try package.json name first
-  try {
-    const pkg = JSON.parse(
-      fs.readFileSync(path.join(projectRoot, 'package.json'), 'utf8'),
-    ) as Record<string, unknown>;
-    if (typeof pkg['name'] === 'string' && pkg['name'].length > 0) return pkg['name'];
-  } catch {
-    /* ignore */
-  }
-
-  // Fall back to directory name
-  return path.basename(projectRoot);
-}
-
-function isValidProject(dir: string): boolean {
-  const markers = [
-    'package.json',
-    '.git',
-    'HYDRA.md',
-    'CLAUDE.md',
-    'Cargo.toml',
-    'pyproject.toml',
-    'go.mod',
-  ];
-  return markers.some((m) => fs.existsSync(path.join(dir, m)));
-}
-
-export interface ProjectConfig {
-  projectRoot: string;
-  projectName: string;
-  coordDir: string;
-  statePath: string;
-  logPath: string;
-  statusPath: string;
-  eventsPath: string;
-  archivePath: string;
-  runsDir: string;
-  hydraRoot: string;
-}
-
-export interface ResolveProjectOptions {
-  project?: string;
-  skipValidation?: boolean;
-}
-
-/**
- * Resolve the target project.
- *
- * Priority:
- * 1. options.project (explicit path)
- * 2. --project=<path> CLI arg
- * 3. HYDRA_PROJECT env var
- * 4. process.cwd()
- *
- * @param {object} [options]
- * @param {string} [options.project] - Explicit project path
- * @param {boolean} [options.skipValidation] - Skip project marker check
- * @returns {object} Project config with all derived paths
- */
-export function resolveProject(options: ResolveProjectOptions = {}): ProjectConfig {
-  let projectRoot = options.project ?? '';
-
-  // Check CLI args for --project=<path> or project=<path>
-  if (projectRoot.length === 0) {
-    for (const arg of process.argv.slice(2)) {
-      const match = arg.match(/^(?:--)?project=(.+)$/);
-      if (match !== null) {
-        projectRoot = match[1]; // capture group (.+) is always defined when match succeeds
-        break;
-      }
-    }
-  }
-
-  // Check env var
-  const hydraProject = process.env['HYDRA_PROJECT'];
-  if (projectRoot.length === 0 && hydraProject !== undefined) {
-    projectRoot = hydraProject;
-  }
-
-  // Fall back to cwd
-  if (projectRoot.length === 0) {
-    projectRoot = process.cwd();
-  }
-
-  projectRoot = path.resolve(projectRoot);
-
-  if (options.skipValidation !== true && !isValidProject(projectRoot)) {
-    throw new Error(
-      `Not a valid project directory: ${projectRoot}\n` +
-        'Expected one of: package.json, .git, CLAUDE.md, Cargo.toml, pyproject.toml, go.mod',
-    );
-  }
-
-  const projectName = detectProjectName(projectRoot);
-  const coordDir = path.join(projectRoot, 'docs', 'coordination');
-
-  return {
-    projectRoot,
-    projectName,
-    coordDir,
-    statePath: path.join(coordDir, 'AI_SYNC_STATE.json'),
-    logPath: path.join(coordDir, 'AI_SYNC_LOG.md'),
-    statusPath: path.join(coordDir, 'AI_ORCHESTRATOR_STATUS.json'),
-    eventsPath: path.join(coordDir, 'AI_ORCHESTRATOR_EVENTS.ndjson'),
-    archivePath: path.join(coordDir, 'AI_SYNC_ARCHIVE.json'),
-    runsDir: path.join(coordDir, 'runs'),
-    hydraRoot: HYDRA_ROOT,
-  };
-}
-
-/**
- * Interactive project selection.
- * Prompts user to confirm cwd or pick from recent/enter a path.
- *
- * @returns {Promise<object>} Project config
- */
-export async function selectProjectInteractive(): Promise<ProjectConfig> {
-  const cwd = process.cwd();
-  const cwdValid = isValidProject(cwd);
-  const recent = getRecentProjects().filter((p) => p !== cwd && fs.existsSync(p));
-
-  if (cwdValid) {
-    const name = detectProjectName(cwd);
-    const answer = await askLine(`Detected project: ${name} (${cwd}). Work here? (Y/n/browse) `);
-    const trimmed = answer.trim().toLowerCase();
-
-    if (trimmed.length === 0 || trimmed === 'y' || trimmed === 'yes') {
-      addRecentProject(cwd);
-      return resolveProject({ project: cwd });
-    }
-
-    if (trimmed !== 'n' && trimmed !== 'no' && trimmed !== 'browse') {
-      // Treat as path
-      addRecentProject(trimmed);
-      return resolveProject({ project: trimmed });
-    }
-  }
-
-  // Show recent projects
-  if (recent.length > 0) {
-    console.log('\nRecent projects:');
-    for (const [i, p] of recent.entries()) {
-      const name = detectProjectName(p);
-      console.log(`  ${String(i + 1)}) ${name} (${p})`);
-    }
-    console.log(`  ${String(recent.length + 1)}) Enter a new path`);
-
-    const choice = await askLine('Select project: ');
-    const idx = Number.parseInt(choice, 10) - 1;
-
-    if (idx >= 0 && idx < recent.length) {
-      addRecentProject(recent[idx]);
-      return resolveProject({ project: recent[idx] });
-    }
-  }
-
-  // Manual path entry
-  const manualPath = await askLine('Enter project path: ');
-  if (manualPath.trim().length === 0) {
-    throw new Error('No project path provided.');
-  }
-  addRecentProject(manualPath.trim());
-  return resolveProject({ project: manualPath.trim() });
-}
-
-// ── Helpers ──────────────────────────────────────────────────────────────────
-
-function askLine(prompt: string): Promise<string> {
-  return new Promise((resolve) => {
-    const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
-    rl.question(prompt, (answer) => {
-      rl.close();
-      resolve(answer);
-    });
-  });
-}
+export type { ProjectConfig, ResolveProjectOptions } from './hydra-project.ts';
+export {
+  resolveProject,
+  selectProjectInteractive,
+  getRecentProjects,
+  addRecentProject,
+  detectProjectName,
+  isValidProject,
+} from './hydra-project.ts';
