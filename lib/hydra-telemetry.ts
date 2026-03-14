@@ -11,7 +11,8 @@
  * Semantic conventions: https://opentelemetry.io/docs/specs/semconv/gen-ai/
  */
 
-import { loadHydraConfig } from './hydra-config.ts';
+import { configStore } from './hydra-config.ts';
+import type { IConfigStore } from './types.ts';
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -99,8 +100,8 @@ async function loadOTel(): Promise<OTelApi | null> {
 /**
  * Check if tracing is enabled (OTel available + config allows it).
  */
-export async function isTracingEnabled(): Promise<boolean> {
-  const cfg = loadHydraConfig();
+export async function isTracingEnabled(store: IConfigStore = configStore): Promise<boolean> {
+  const cfg = store.load();
   if ((cfg.telemetry as { enabled?: boolean } | undefined)?.enabled === false) return false;
   const api = await loadOTel();
   return api !== null;

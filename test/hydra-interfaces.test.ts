@@ -1,5 +1,5 @@
 /**
- * Contract tests for IContextProvider, IGitOperations, IMetricsRecorder interfaces.
+ * Contract tests for IContextProvider, IGitOperations, IMetricsRecorder, IConfigStore interfaces.
  *
  * Primary tests call real implementations and verify return values.
  * One mock test per interface verifies mockability.
@@ -11,7 +11,13 @@ import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 
-import type { IContextProvider, IGitOperations, IMetricsRecorder } from '../lib/types.ts';
+import type {
+  HydraConfig,
+  IContextProvider,
+  IGitOperations,
+  IMetricsRecorder,
+  IConfigStore,
+} from '../lib/types.ts';
 
 // ── IContextProvider ──────────────────────────────────────────────────────────
 
@@ -206,5 +212,51 @@ describe('IMetricsRecorder interface', () => {
 
     const handle = mock.recordCallStart('claude', 'claude-opus-4-6');
     assert.equal(handle, 'handle_claude');
+  });
+});
+
+// ── IConfigStore ─────────────────────────────────────────────────────────────
+
+describe('IConfigStore interface', () => {
+  it('configStore export satisfies IConfigStore at compile time', async () => {
+    const { configStore } = await import('../lib/hydra-config.ts');
+    const store: IConfigStore = configStore;
+    assert.equal(typeof store.load, 'function');
+    assert.equal(typeof store.save, 'function');
+    assert.equal(typeof store.invalidate, 'function');
+  });
+
+  it('configStore.load returns an object with expected top-level keys', async () => {
+    const { configStore } = await import('../lib/hydra-config.ts');
+    const cfg = configStore.load();
+    assert.equal(typeof cfg, 'object');
+    assert.ok('mode' in cfg, 'config should have a mode field');
+    assert.ok('routing' in cfg, 'config should have a routing field');
+    assert.ok('models' in cfg, 'config should have a models field');
+  });
+
+  it('configStore.invalidate clears cache so next load re-reads', async () => {
+    const { configStore } = await import('../lib/hydra-config.ts');
+    const cfg1 = configStore.load();
+    configStore.invalidate();
+    const cfg2 = configStore.load();
+    // After invalidation, a fresh object is returned (different reference)
+    assert.notStrictEqual(cfg1, cfg2);
+  });
+
+  it('can be implemented by a mock object', () => {
+    const mock: IConfigStore = {
+      load() {
+        return { mode: 'performance', models: {}, routing: {} } as unknown as HydraConfig;
+      },
+      save(config) {
+        return { ...config, mode: 'performance' } as unknown as HydraConfig;
+      },
+      invalidate() {},
+    };
+
+    const cfg = mock.load();
+    assert.equal(cfg.mode, 'performance');
+    mock.invalidate(); // should not throw
   });
 });

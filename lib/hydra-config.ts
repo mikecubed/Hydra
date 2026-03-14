@@ -16,10 +16,7 @@ import {
   getModeTiers as _getModeTiers,
   getConciergeFallbackChain as _getConciergeFallbackChain,
 } from './hydra-model-profiles.ts';
-import type { HydraConfig, RoleConfig, CopilotConfig } from './types.ts';
-
-/** Recursively make all properties optional — used for partial config overrides in tests. */
-type DeepPartial<T> = T extends object ? { [P in keyof T]?: DeepPartial<T[P]> } : T;
+import type { HydraConfig, RoleConfig, CopilotConfig, DeepPartial, IConfigStore } from './types.ts';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -704,6 +701,18 @@ export function saveHydraConfig(config: DeepPartial<HydraConfig>): HydraConfig {
 export function invalidateConfigCache(): void {
   _configCache = null;
 }
+
+// ── IConfigStore-typed export ─────────────────────────────────────────────────
+
+/**
+ * Injectable object satisfying the IConfigStore interface contract.
+ * Consumers can depend on IConfigStore for testability and DI.
+ */
+export const configStore: IConfigStore = {
+  load: loadHydraConfig,
+  save: saveHydraConfig,
+  invalidate: invalidateConfigCache,
+};
 
 /**
  * Test-only: redirect config reads/writes to a temp file path.
