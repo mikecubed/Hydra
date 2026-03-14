@@ -26,6 +26,40 @@ interface MiddlewareCtx {
   latencyMs: number;
 }
 
+interface ErrorWithStatus {
+  status?: number;
+  isRateLimit?: boolean;
+}
+
+function isErrorWithStatus(err: unknown): err is ErrorWithStatus {
+  return typeof err === 'object' && err !== null;
+}
+
+interface RetryConfig {
+  rateLimits?: {
+    maxRetries?: number;
+    baseDelayMs?: number;
+    maxDelayMs?: number;
+  };
+}
+
+interface ProviderResult {
+  usage?: { prompt_tokens?: number; completion_tokens?: number };
+  rateLimits?: Record<string, unknown>;
+}
+
+function asProviderResult(val: unknown): ProviderResult {
+  if (typeof val === 'object' && val != null) return val as ProviderResult;
+  return {};
+}
+
+interface TelemetrySpan {
+  _noop?: boolean;
+  recordException?: (err: unknown) => void;
+  setStatus?: (status: { code: number; message?: string }) => void;
+  end?: () => void;
+}
+
 // ---------------------------------------------------------------------------
 // Middleware layers
 // ---------------------------------------------------------------------------
@@ -38,7 +72,7 @@ async function circuitBreakerMiddleware(
   ctx: MiddlewareCtx,
   next: () => Promise<unknown>,
 ): Promise<unknown> {
-  if (ctx.model && isCircuitOpen(ctx.model)) {
+  if (ctx.model !== '' && isCircuitOpen(ctx.model)) {
     const err = new Error(`Circuit breaker open for model ${ctx.model}`);
     (err as Error & { circuitBreakerOpen: boolean }).circuitBreakerOpen = true;
     throw err;
@@ -48,7 +82,8 @@ async function circuitBreakerMiddleware(
     const result = await next();
     return result;
   } catch (err: unknown) {
-    if (ctx.model && (err as any).status && (err as any).status >= 500) {
+    const errObj = isErrorWithStatus(err) ? err : null;
+    if (ctx.model !== '' && errObj?.status != null && errObj.status >= 500) {
       recordModelFailure(ctx.model);
     }
     throw err;
@@ -56,7 +91,7 @@ async function circuitBreakerMiddleware(
 }
 
 async function retryMiddleware(ctx: MiddlewareCtx, next: () => Promise<unknown>): Promise<unknown> {
-  const cfg = loadHydraConfig() as any;
+  const cfg = loadHydraConfig() as unknown as RetryConfig;
   const maxRetries = cfg.rateLimits?.maxRetries ?? 3;
   const baseDelayMs = cfg.rateLimits?.baseDelayMs ?? 5000;
   const maxDelayMs = cfg.rateLimits?.maxDelayMs ?? 60000;
@@ -68,7 +103,8 @@ async function retryMiddleware(ctx: MiddlewareCtx, next: () => Promise<unknown>)
       return await next();
     } catch (err: unknown) {
       lastErr = err;
-      const is429 = (err as any).status === 429 || (err as any).isRateLimit;
+      const errObj = isErrorWithStatus(err) ? err : null;
+      const is429 = errObj?.status === 429 || errObj?.isRateLimit === true;
       if (!is429 || attempt >= maxRetries) throw err;
 
       const delay = Math.min(baseDelayMs * 2 ** attempt, maxDelayMs);
@@ -89,9 +125,9 @@ async function usageTrackingMiddleware(
   ctx: MiddlewareCtx,
   next: () => Promise<unknown>,
 ): Promise<unknown> {
-  const result = (await next()) as any;
+  const result = asProviderResult(await next());
 
-  if (result.usage) {
+  if (result.usage != null) {
     recordProviderUsage(ctx.provider, {
       inputTokens: result.usage.prompt_tokens ?? 0,
       outputTokens: result.usage.completion_tokens ?? 0,
@@ -107,9 +143,9 @@ async function headerCaptureMiddleware(
   ctx: MiddlewareCtx,
   next: () => Promise<unknown>,
 ): Promise<unknown> {
-  const result = (await next()) as any;
+  const result = asProviderResult(await next());
 
-  if (result.rateLimits) {
+  if (result.rateLimits != null) {
     updateFromHeaders(ctx.provider, result.rateLimits);
   }
 
@@ -123,12 +159,12 @@ async function telemetryMiddleware(
   const span = await startProviderSpan(ctx.provider, ctx.model);
   const start = Date.now();
   try {
-    const result = (await next()) as any;
-    await endProviderSpan(span, result.usage, Date.now() - start);
+    const result = asProviderResult(await next());
+    await endProviderSpan(span, result.usage ?? null, Date.now() - start);
     return result;
   } catch (err: unknown) {
-    const s = span as any;
-    if (!s._noop) {
+    const s = span as unknown as TelemetrySpan;
+    if (s._noop !== true) {
       s.recordException?.(err);
       s.setStatus?.({ code: 2, message: (err as Error).message });
       s.end?.();
@@ -149,7 +185,8 @@ async function latencyMiddleware(
     ctx.latencyMs = latencyMs;
     return result;
   } catch (err: unknown) {
-    if ((err as any).status !== 429 && !(err as any).isRateLimit) {
+    const errObj = isErrorWithStatus(err) ? err : null;
+    if (errObj?.status !== 429 && errObj?.isRateLimit !== true) {
       const latencyMs = Date.now() - start;
       getProviderEWMA(ctx.provider).observe(latencyMs);
     }
