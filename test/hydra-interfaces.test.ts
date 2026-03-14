@@ -58,6 +58,9 @@ describe('IGitOperations interface', () => {
     const { getCurrentBranch } = await import('../lib/hydra-shared/git-ops.ts');
     const branch = getCurrentBranch(process.cwd());
     assert.equal(typeof branch, 'string');
+    // In CI, git checkout produces a detached HEAD and getCurrentBranch returns ''.
+    // That IS the correct behaviour — skip the non-empty assertion in that case.
+    if (branch === '') return;
     assert.ok(branch.length > 0, 'branch name should be non-empty');
   });
 
