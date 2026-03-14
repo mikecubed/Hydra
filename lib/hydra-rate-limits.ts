@@ -474,6 +474,7 @@ export class TokenBucket {
     while (!this.tryConsume(n)) {
       const deficit = n - this.tokens;
       const waitMs = Math.max(50, Math.ceil((deficit / this.refillRate) * 1000));
+      // eslint-disable-next-line no-await-in-loop -- intentionally sequential: polling loop; must sleep and re-check token availability until the bucket refills
       await sleep(Math.min(waitMs, 5000));
     }
   }
@@ -561,6 +562,7 @@ export function initConcurrency(maxInFlight = 3): void {
 
 export async function acquireConcurrencySlot(): Promise<() => void> {
   while (_activeCount >= _maxInFlight) {
+    // eslint-disable-next-line no-await-in-loop -- intentionally sequential: polling loop; must sleep and re-check the active-count until a concurrency slot becomes available
     await sleep(250);
   }
   _activeCount++;

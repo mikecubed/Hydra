@@ -1054,6 +1054,7 @@ async function main(): Promise<void> {
             .replace('{{projectName}}', projectName);
 
           console.log(`  [${agent}] ${def.label}...`);
+          // eslint-disable-next-line no-await-in-loop -- intentionally sequential: categories for the same agent run one-at-a-time to avoid overwhelming a single agent process
           const result = await dispatchToAgent(agent, prompt, PROJECT, ECONOMY, TIMEOUT_MS);
           if (result.code !== 0 && VERBOSE && result.stderr.length > 0) {
             console.log(`  [${agent}] stderr: ${result.stderr.slice(0, 300)}`);

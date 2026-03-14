@@ -153,6 +153,7 @@ export async function streamWithFallback(
     }
 
     try {
+      // eslint-disable-next-line no-await-in-loop -- intentionally sequential: provider fallback chain; load each provider lazily, only advancing if the current one fails
       const streamFn = await getStreamFn(entry.provider);
       const providerCfg: Record<string, unknown> = { ...cfg, model: entry.model };
 
@@ -177,6 +178,7 @@ export async function streamWithFallback(
       // OpenAI: reasoningEffort passed through as-is (already handled by streamCompletion)
       // Google: no reasoning params needed
 
+      // eslint-disable-next-line no-await-in-loop -- intentionally sequential: provider fallback chain; stream the result and return on success, catch to try the next provider
       const result = (await streamFn(messages, providerCfg, onChunk)) as Record<string, unknown>;
 
       return {

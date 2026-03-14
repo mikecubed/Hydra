@@ -89,6 +89,7 @@ export async function streamLocalCompletion(
   let usage = null;
 
   for (;;) {
+    // eslint-disable-next-line no-await-in-loop -- intentionally sequential: SSE stream must be read chunk-by-chunk in order; each chunk depends on the previous reader state
     const { done, value } = await reader.read();
     if (done) break;
 
