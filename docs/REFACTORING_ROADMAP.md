@@ -309,28 +309,28 @@ confirmed.
 
 ### 5.3 Repeated Patterns (DRY Violations)
 
-| Pattern                        | Count | Location                                             | Proposed Abstraction                                           |
-| ------------------------------ | ----: | ---------------------------------------------------- | -------------------------------------------------------------- |
-| Agent execution boilerplate    |   15+ | operator, council, evolve, nightly, actualize, tasks | `agent-executor.ts` already exists — ensure all callers use it |
-| Budget/quota check             |    8+ | operator, evolve, council, nightly, guardrails       | `hydra-shared/budget-tracker.ts` — expand API                  |
-| Context building               |    8+ | council, dispatch, operator, nightly                 | `hydra-context.ts` — expose unified `buildContext()`           |
-| Error recovery + retry         |   10+ | executor, operator, council, evolve                  | `hydra-model-recovery.ts` — expand + enforce usage             |
-| Usage tracking after execution |   12+ | operator, council, evolve, tasks                     | `hydra-usage.ts` — expose single `recordExecution()`           |
-| Git operation patterns         |    6+ | evolve, nightly, tasks, github                       | `hydra-shared/git-ops.ts` already exists                       |
-| Provider presets               |    7+ | concierge, providers                                 | `hydra-concierge-providers.ts` — centralise fully              |
+| Pattern                        | Count | Location                                             | Proposed Abstraction                                                                |
+| ------------------------------ | ----: | ---------------------------------------------------- | ----------------------------------------------------------------------------------- |
+| Agent execution boilerplate    |   15+ | operator, council, evolve, nightly, actualize, tasks | `agent-executor.ts` already exists — ensure all callers use it                      |
+| Budget/quota check             |    8+ | operator, evolve, council, nightly, guardrails       | `hydra-shared/budget-tracker.ts` — expand API                                       |
+| Context building               |    8+ | council, dispatch, operator, nightly                 | `hydra-context.ts` — expose unified `buildContext()`                                |
+| Error recovery + retry         |   10+ | executor, operator, council, evolve                  | `hydra-model-recovery.ts` — expand + enforce usage                                  |
+| Usage tracking after execution |   12+ | operator, council, evolve, tasks                     | `hydra-usage.ts` — expose single `recordExecution()` (deferred — see Phase 2 notes) |
+| Git operation patterns         |    6+ | evolve, nightly, tasks, github                       | `hydra-shared/git-ops.ts` already exists                                            |
+| Provider presets               |    7+ | concierge, providers                                 | `hydra-concierge-providers.ts` — centralise fully                                   |
 
 ### 5.4 Missing Abstractions
 
 These interfaces would reduce coupling and improve testability:
 
-| Interface          | Purpose                            | Consumers                                 |
-| ------------------ | ---------------------------------- | ----------------------------------------- |
-| `IAgentExecutor`   | Decouple execution from consumers  | operator, council, evolve, tasks, nightly |
-| `IConfigStore`     | Decouple config loading from users | All 23 current direct consumers           |
-| `IMetricsRecorder` | Decouple metrics recording         | 10+ consumers                             |
-| `IBudgetGate`      | Abstract usage checking            | 8+ consumers                              |
-| `IContextProvider` | Decouple context building          | 8+ consumers                              |
-| `IGitOperations`   | Abstract git commands              | 8+ consumers                              |
+| Interface          | Purpose                            | Consumers                                 | Status                                                                                |
+| ------------------ | ---------------------------------- | ----------------------------------------- | ------------------------------------------------------------------------------------- |
+| `IAgentExecutor`   | Decouple execution from consumers  | operator, council, evolve, tasks, nightly | ✅ Defined in `agent-executor.ts` (Phase 4); partially adopted (dispatch, operator)   |
+| `IConfigStore`     | Decouple config loading from users | All 23 current direct consumers           | Not started                                                                           |
+| `IMetricsRecorder` | Decouple metrics recording         | 10+ consumers                             | ✅ Defined in `lib/types.ts` (Phase 5, PR #91); consumer adoption pending (`rf-ab06`) |
+| `IBudgetGate`      | Abstract usage checking            | 8+ consumers                              | ✅ Defined in `budget-gate.ts` (Phase 4); consumer adoption pending                   |
+| `IContextProvider` | Decouple context building          | 8+ consumers                              | ✅ Defined in `lib/types.ts` (Phase 5, PR #91); consumer adoption pending             |
+| `IGitOperations`   | Abstract git commands              | 8+ consumers                              | ✅ Defined in `lib/types.ts` (Phase 5, PR #91); consumer adoption pending (`rf-ab07`) |
 
 ### 5.5 Miscellaneous Smells
 
@@ -541,7 +541,7 @@ Parallel-ready tracks:
 
 - [ ] Finish deeper contract tests for `agent-executor`, including streaming, timeout, cancellation, and agent-specific paths
 - [ ] Finish deeper contract tests for `hydra-config`, including defaults, persistence, cache invalidation, and role/model helpers
-- [ ] Consolidate usage tracking behind a tested `recordExecution()` path
+- [ ] Consolidate usage tracking behind a tested `recordExecution()` path — **Note**: Evaluated during Phase 5; the existing handle-based API (`recordCallStart()`/`recordCallComplete()`/`recordCallError()` in `hydra-metrics.ts`) already covers per-call tracking used by all execution paths. A higher-level `recordExecution()` wrapper may still be useful for deduplicating post-call usage bookkeeping in operator/council/evolve/tasks, but is deferred until those consumers are refactored to accept `IMetricsRecorder`.
 - [ ] Make typecheck fully blocking once the task matrix shows the path is clean
 - [ ] Promote complexity and size rules from visibility to enforcement only after the targeted modules have safety nets
 
