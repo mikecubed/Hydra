@@ -46,14 +46,14 @@ const SAFE_COMMAND_PATTERN = /^[a-zA-Z0-9 _./:@=-]+$/;
  * @returns {boolean}
  */
 export function isVerificationCommandShellSafe(command: string): boolean {
-  if (!command || typeof command !== 'string') return false;
+  if (command === '' || typeof command !== 'string') return false;
   return SAFE_COMMAND_PATTERN.test(command.trim());
 }
 
 function readPackageJson(projectRoot: string): { scripts?: Record<string, string> } | null {
   try {
     const raw = fs.readFileSync(path.join(projectRoot, 'package.json'), 'utf8');
-    return JSON.parse(raw);
+    return JSON.parse(raw) as { scripts?: Record<string, string> };
   } catch {
     return null;
   }
@@ -82,17 +82,17 @@ export function chooseAutoVerificationCommand(
   const scripts: Record<string, string> =
     signals.npmScripts && typeof signals.npmScripts === 'object' ? signals.npmScripts : {};
 
-  if (scripts['typecheck']) {
+  if ('typecheck' in scripts) {
     return { command: 'npm run typecheck', reason: 'Detected package.json script: typecheck' };
   }
 
-  if (scripts['verify']) {
+  if ('verify' in scripts) {
     return { command: 'npm run verify', reason: 'Detected package.json script: verify' };
   }
 
   // If there's a test script, use it as a safe Node default.
   // Skip the npm-init placeholder: echo "Error: no test specified" && exit 1
-  if (scripts['test']) {
+  if ('test' in scripts) {
     const raw = (scripts['test'] ?? '').trim();
     const isPlaceholder = /no test specified/i.test(raw) && /\bexit\s+1\b/i.test(raw);
     if (!isPlaceholder) {
@@ -100,19 +100,19 @@ export function chooseAutoVerificationCommand(
     }
   }
 
-  if (signals.hasTypeScriptConfig) {
+  if (signals.hasTypeScriptConfig === true) {
     return { command: 'npx tsc --noEmit', reason: 'Detected tsconfig.json' };
   }
 
-  if (signals.hasCargoToml) {
+  if (signals.hasCargoToml === true) {
     return { command: 'cargo check', reason: 'Detected Cargo.toml' };
   }
 
-  if (signals.hasGoMod) {
+  if (signals.hasGoMod === true) {
     return { command: 'go test ./...', reason: 'Detected go.mod' };
   }
 
-  if (signals.hasPyproject) {
+  if (signals.hasPyproject === true) {
     return { command: 'python -m pytest -q', reason: 'Detected pyproject.toml' };
   }
 
@@ -135,7 +135,7 @@ export function resolveVerificationPlan(
 ): VerificationPlan {
   const cfg: Record<string, unknown> = hydraConfig;
   const verificationCfg =
-    cfg['verification'] && typeof cfg['verification'] === 'object'
+    cfg['verification'] != null && typeof cfg['verification'] === 'object'
       ? (cfg['verification'] as Record<string, unknown>)
       : {};
 
@@ -165,7 +165,7 @@ export function resolveVerificationPlan(
     };
   }
 
-  if (rawCommand && lowered !== 'auto') {
+  if (rawCommand !== '' && lowered !== 'auto') {
     if (!isVerificationCommandShellSafe(rawCommand)) {
       return {
         enabled: false,
