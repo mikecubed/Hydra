@@ -324,8 +324,16 @@ async function handleEventsPush(ctx: WriteRouteCtx): Promise<boolean> {
 
 async function handleSessionStart(ctx: WriteRouteCtx): Promise<boolean> {
   const {
-    req, res, sendJson, sendError, enqueueMutation, ensureKnownAgent,
-    parseList, getCurrentBranch, toSessionId, nowIso,
+    req,
+    res,
+    sendJson,
+    sendError,
+    enqueueMutation,
+    ensureKnownAgent,
+    parseList,
+    getCurrentBranch,
+    toSessionId,
+    nowIso,
   } = ctx;
   const body = await ctx.readJsonBody(req);
   const focus = ((body['focus'] as string | null | undefined) ?? '').trim();
@@ -486,8 +494,18 @@ async function handleSessionResume(ctx: WriteRouteCtx): Promise<boolean> {
 
 async function handleTaskAdd(ctx: WriteRouteCtx): Promise<boolean> {
   const {
-    req, res, sendJson, sendError, enqueueMutation, ensureKnownAgent, ensureKnownStatus,
-    parseList, classifyTask, nextId, nowIso, projectRoot,
+    req,
+    res,
+    sendJson,
+    sendError,
+    enqueueMutation,
+    ensureKnownAgent,
+    ensureKnownStatus,
+    parseList,
+    classifyTask,
+    nextId,
+    nowIso,
+    projectRoot,
   } = ctx;
   const body = await ctx.readJsonBody(req);
   const title = ((body['title'] as string | null | undefined) ?? '').trim();
@@ -510,7 +528,14 @@ async function handleTaskAdd(ctx: WriteRouteCtx): Promise<boolean> {
     (state: HydraStateShape) => {
       const item = {
         id: nextId('T', state.tasks),
-        title, owner, status, type: taskType, files, notes, blockedBy, updatedAt: nowIso(),
+        title,
+        owner,
+        status,
+        type: taskType,
+        files,
+        notes,
+        blockedBy,
+        updatedAt: nowIso(),
       };
       state.tasks.push(item as unknown as TaskEntry);
       return item;
@@ -527,7 +552,9 @@ async function handleTaskAdd(ctx: WriteRouteCtx): Promise<boolean> {
       await enqueueMutation(
         `task:worktree id=${(task as Record<string, unknown>)['id'] as string}`,
         (state: HydraStateShape) => {
-          const t = state.tasks.find((x: TaskEntry) => x.id === (task as Record<string, unknown>)['id'] as string);
+          const t = state.tasks.find(
+            (x: TaskEntry) => x.id === ((task as Record<string, unknown>)['id'] as string),
+          );
           if (t && worktreeInfo != null) {
             t.worktreePath = worktreeInfo['worktreePath'] as string;
             t.worktreeBranch = worktreeInfo['branch'] as string;
@@ -544,7 +571,8 @@ async function handleTaskAdd(ctx: WriteRouteCtx): Promise<boolean> {
 }
 
 async function handleTaskClaim(ctx: WriteRouteCtx): Promise<boolean> {
-  const { req, res, sendJson, enqueueMutation, ensureKnownAgent, projectRoot, createTaskWorktree } = ctx;
+  const { req, res, sendJson, enqueueMutation, ensureKnownAgent, projectRoot, createTaskWorktree } =
+    ctx;
   const body = await ctx.readJsonBody(req);
   const agent = ((body['agent'] as string | null | undefined) ?? '').toLowerCase();
   ensureKnownAgent(agent, false);
@@ -606,8 +634,14 @@ async function handleTaskClaim(ctx: WriteRouteCtx): Promise<boolean> {
 
 async function handleTaskUpdate(ctx: WriteRouteCtx): Promise<boolean> {
   const {
-    req, res, sendJson, sendError, enqueueMutation, resolveVerificationPlan,
-    runVerification, projectRoot,
+    req,
+    res,
+    sendJson,
+    sendError,
+    enqueueMutation,
+    resolveVerificationPlan,
+    runVerification,
+    projectRoot,
   } = ctx;
   const body = await ctx.readJsonBody(req);
   const taskId = ((body['taskId'] as string | null | undefined) ?? '').trim();
@@ -707,7 +741,14 @@ async function handleTaskRoute(ctx: WriteRouteCtx): Promise<boolean> {
 
 async function handleVerify(ctx: WriteRouteCtx): Promise<boolean> {
   const {
-    req, res, sendJson, sendError, readState, resolveVerificationPlan, runVerification, projectRoot,
+    req,
+    res,
+    sendJson,
+    sendError,
+    readState,
+    resolveVerificationPlan,
+    runVerification,
+    projectRoot,
   } = ctx;
   const body = await ctx.readJsonBody(req);
   const verifyTaskId = ((body['taskId'] as string | null | undefined) ?? '').trim();
@@ -768,7 +809,11 @@ async function handleDecision(ctx: WriteRouteCtx): Promise<boolean> {
     (state: HydraStateShape) => {
       const item = {
         id: nextId('D', state.decisions),
-        title, owner, rationale, impact, createdAt: nowIso(),
+        title,
+        owner,
+        rationale,
+        impact,
+        createdAt: nowIso(),
       };
       state.decisions.push(item);
       return item;
@@ -790,24 +835,33 @@ async function handleBlocker(ctx: WriteRouteCtx): Promise<boolean> {
   const owner = ((body['owner'] as string | null | undefined) ?? 'human').toLowerCase();
   ensureKnownAgent(owner, false);
   const nextStep = (body['nextStep'] as string | null | undefined) ?? '';
-  const blocker = await enqueueMutation(
-    `blocker:add owner=${owner}`,
-    (state: HydraStateShape) => {
-      const item = {
-        id: nextId('B', state.blockers),
-        title, owner, status: 'open', nextStep, createdAt: nowIso(),
-      };
-      state.blockers.push(item);
-      return item;
-    },
-  );
+  const blocker = await enqueueMutation(`blocker:add owner=${owner}`, (state: HydraStateShape) => {
+    const item = {
+      id: nextId('B', state.blockers),
+      title,
+      owner,
+      status: 'open',
+      nextStep,
+      createdAt: nowIso(),
+    };
+    state.blockers.push(item);
+    return item;
+  });
   sendJson(res, 200, { ok: true, blocker });
   return true;
 }
 
 async function handleHandoff(ctx: WriteRouteCtx): Promise<boolean> {
   const {
-    req, res, sendJson, sendError, enqueueMutation, ensureKnownAgent, parseList, nextId, nowIso,
+    req,
+    res,
+    sendJson,
+    sendError,
+    enqueueMutation,
+    ensureKnownAgent,
+    parseList,
+    nextId,
+    nowIso,
   } = ctx;
   const body = await ctx.readJsonBody(req);
   const from = ((body['from'] as string | null | undefined) ?? '').toLowerCase();
@@ -826,7 +880,12 @@ async function handleHandoff(ctx: WriteRouteCtx): Promise<boolean> {
     (state: HydraStateShape) => {
       const item = {
         id: nextId('H', state.handoffs),
-        from, to, summary, nextStep, tasks, createdAt: nowIso(),
+        from,
+        to,
+        summary,
+        nextStep,
+        tasks,
+        createdAt: nowIso(),
       };
       state.handoffs.push(item);
       return item;
@@ -1016,7 +1075,8 @@ async function handleDeadLetterRetry(ctx: WriteRouteCtx): Promise<boolean> {
 
 function handleAdminCompact(ctx: WriteRouteCtx): Promise<boolean> {
   const {
-    res, sendJson,
+    res,
+    sendJson,
     createSnapshot: _createSnapshot,
     cleanOldSnapshots: _cleanOldSnapshots,
     truncateEventsFile,

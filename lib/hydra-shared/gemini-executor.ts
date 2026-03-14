@@ -179,7 +179,8 @@ function makeGeminiFailResult(
 ): ExecuteResult {
   const durationMs = Date.now() - startTime;
   recordCallError(metricsHandle, err);
-  if (opts.onStatusBar) opts.onStatusBar('gemini', { phase: opts.phaseLabel ?? 'error', step: 'idle' });
+  if (opts.onStatusBar)
+    opts.onStatusBar('gemini', { phase: opts.phaseLabel ?? 'error', step: 'idle' });
   return {
     ok: false,
     output: '',
@@ -203,8 +204,9 @@ function buildGeminiRetryConfig(cfg: ReturnType<typeof loadHydraConfig>): Gemini
 
 function extractGeminiText(data: GeminiContentResponse): string {
   return (
-    data.response?.candidates?.[0]?.content?.parts?.map((p: { text?: string }) => p.text).join('') ??
-    ''
+    data.response?.candidates?.[0]?.content?.parts
+      ?.map((p: { text?: string }) => p.text)
+      .join('') ?? ''
   );
 }
 
@@ -224,7 +226,11 @@ async function waitForGeminiRetry(
     retryAfterMs: retryAfterMs ?? undefined,
   });
   if (onProgress) {
-    onProgress(Date.now() - startTime, 0, `Rate limited, retrying in ${(delay / 1000).toFixed(0)}s`);
+    onProgress(
+      Date.now() - startTime,
+      0,
+      `Rate limited, retrying in ${(delay / 1000).toFixed(0)}s`,
+    );
   }
   await new Promise<void>((r) => {
     setTimeout(r, delay);
@@ -268,8 +274,18 @@ async function executeGeminiRetryLoop(
       const text = extractGeminiText(data);
       const durationMs = Date.now() - startTime;
       recordCallComplete(metricsHandle, { output: text, stderr: '' });
-      if (opts.onStatusBar) opts.onStatusBar('gemini', { phase: opts.phaseLabel ?? 'done', step: 'idle' });
-      return { ok: true, output: text, stderr: '', error: null, exitCode: null, signal: null, durationMs, timedOut: false };
+      if (opts.onStatusBar)
+        opts.onStatusBar('gemini', { phase: opts.phaseLabel ?? 'done', step: 'idle' });
+      return {
+        ok: true,
+        output: text,
+        stderr: '',
+        error: null,
+        exitCode: null,
+        signal: null,
+        durationMs,
+        timedOut: false,
+      };
     }
 
     // eslint-disable-next-line no-await-in-loop
@@ -324,7 +340,12 @@ export async function executeGeminiDirect(
 
     const projectId = await getGeminiProjectId(token);
     if (projectId == null) {
-      return makeGeminiFailResult('Could not resolve Gemini project ID', startTime, metricsHandle, opts);
+      return makeGeminiFailResult(
+        'Could not resolve Gemini project ID',
+        startTime,
+        metricsHandle,
+        opts,
+      );
     }
 
     const retryConfig = buildGeminiRetryConfig(loadHydraConfig());

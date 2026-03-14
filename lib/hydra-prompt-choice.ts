@@ -306,7 +306,186 @@ function renderMultiSelectUI({
   return `\n${box(title || 'Multi-Select', boxLines, { style: 'rounded', padding, width: boxWidth })}`;
 }
 
+// ── Line Handler Helpers ─────────────────────────────────────────────────────
+
+async function handleChoiceLine(
+  input: string,
+  isResolved: () => boolean,
+  choices: any[],
+  freeformChoice: any,
+  defaultValue: any,
+  choicePrompt: string,
+  rl: any,
+  finish: (result: any) => void,
+): Promise<void> {
+  if (isResolved()) return;
+  const trimmed = (input || '').trim();
+
+  if (!trimmed) {
+    rl.prompt();
+    return;
+  }
+
+  const num = Number.parseInt(trimmed, 10);
+  if (num >= 1 && num <= choices.length) {
+    const picked = choices[num - 1];
+
+    if (picked.value === '__auto_accept__') {
+      sessionAutoAccept = true;
+      finish({ value: defaultValue, autoAcceptAll: true, timedOut: false });
+      return;
+    }
+
+    if (picked.freeform) {
+      rl.removeAllListeners('line');
+      const text = await collectFreeform(rl);
+      if (!text) {
+        rl.on('line', (lineInput: string) => {
+          void handleChoiceLine(
+            lineInput,
+            isResolved,
+            choices,
+            freeformChoice,
+            defaultValue,
+            choicePrompt,
+            rl,
+            finish,
+          );
+        });
+        console.log(`  ${ERROR('Empty input, try again.')}`);
+        rl.setPrompt(choicePrompt);
+        rl.prompt();
+        return;
+      }
+      finish({ value: text, autoAcceptAll: false, timedOut: false });
+      return;
+    }
+
+    finish({ value: picked.value, autoAcceptAll: false, timedOut: false });
+    return;
+  }
+
+  if (freeformChoice && trimmed.length > 2) {
+    finish({ value: trimmed, autoAcceptAll: false, timedOut: false });
+    return;
+  }
+
+  console.log(
+    `  ${ERROR('Invalid selection.')} Pick ${ACCENT('1')}-${ACCENT(String(choices.length))}${freeformChoice ? ' or type your response' : ''}`,
+  );
+  rl.prompt();
+}
+
+function handleMultiSelectLine(
+  input: string,
+  isResolved: () => boolean,
+  choices: any[],
+  selected: Set<number>,
+  title: string,
+  context: any,
+  choicePrompt: string,
+  rl: any,
+  finish: (result: any) => void,
+  showStatus: () => void,
+): void {
+  if (isResolved()) return;
+  const trimmed = (input || '').trim();
+
+  if (!trimmed) {
+    const values = [...selected].sort((a, b) => a - b).map((i) => choices[i].value);
+    finish({ values, autoAcceptAll: false, timedOut: false });
+    return;
+  }
+
+  if (trimmed === '?') {
+    console.log(renderMultiSelectUI({ title, context, choices, selected }));
+    rl.prompt();
+    return;
+  }
+
+  const parsed = parseMultiSelectInput(trimmed, choices.length);
+  if (parsed === 'all') {
+    if (selected.size === choices.length) {
+      selected.clear();
+    } else {
+      for (let i = 0; i < choices.length; i++) selected.add(i);
+    }
+    showStatus();
+    rl.prompt();
+    return;
+  }
+
+  if (parsed === null) {
+    console.log(
+      `  ${ERROR('Invalid input.')} Use numbers (1,3,5), ranges (1-3), a=all, Enter=confirm`,
+    );
+    rl.prompt();
+    return;
+  }
+
+  for (const idx of parsed) {
+    if (selected.has(idx)) selected.delete(idx);
+    else selected.add(idx);
+  }
+  showStatus();
+  rl.prompt();
+}
+
 // ── Main API ────────────────────────────────────────────────────────────────
+
+function attachChoiceTimeout(
+  timeoutMs: number,
+  getResolved: () => boolean,
+  defaultValue: unknown,
+  finish: (result: unknown) => void,
+): ReturnType<typeof setTimeout> {
+  const tid = setTimeout(() => {
+    if (!getResolved()) {
+      console.log(
+        DIM(`  (timed out after ${String(Math.round(timeoutMs / 1000))}s, auto-selecting default)`),
+      );
+      finish({ value: defaultValue, autoAcceptAll: false, timedOut: true });
+    }
+  }, timeoutMs);
+  tid.unref();
+  return tid;
+}
+
+function attachMultiSelectTimeout(
+  timeoutMs: number,
+  getResolved: () => boolean,
+  selected: Set<number>,
+  choices: any[],
+  finish: (result: unknown) => void,
+): ReturnType<typeof setTimeout> {
+  const tid = setTimeout(() => {
+    if (!getResolved()) {
+      console.log(DIM(`  (timed out, confirming current selection)`));
+      const values =
+        selected.size > 0
+          ? [...selected].sort((a, b) => a - b).map((i) => choices[i].value)
+          : choices.map((c) => c.value);
+      finish({ values, autoAcceptAll: false, timedOut: true });
+    }
+  }, timeoutMs);
+  tid.unref();
+  return tid;
+}
+
+function cleanupChoiceState(
+  rl: any,
+  savedListeners: any[],
+  timeoutIdRef: { value: ReturnType<typeof setTimeout> | null },
+): void {
+  choiceActive = false;
+  if (timeoutIdRef.value) {
+    clearTimeout(timeoutIdRef.value);
+    timeoutIdRef.value = null;
+  }
+  rl.removeAllListeners('line');
+  for (const listener of savedListeners) rl.on('line', listener);
+  rl.setPrompt(`${ACCENT('hydra')}${DIM('>')} `);
+}
 
 /**
  * Show an interactive numbered-choice prompt.
@@ -370,128 +549,42 @@ export function promptChoice(
   return new Promise((resolve) => {
     choiceActive = true;
 
-    // Save existing 'line' listeners and detach them
     const savedListeners = rl.listeners('line').slice();
     rl.removeAllListeners('line');
 
-    // Track if we've already resolved (timeout vs input race)
     let resolved = false;
-    let timeoutId: ReturnType<typeof setTimeout> | null = null;
+    const timeoutIdRef: { value: ReturnType<typeof setTimeout> | null } = { value: null };
 
     const choicePrompt = `${ACCENT('hydra')}${pc.yellow('?')}${DIM('>')} `;
-
-    // Find if any choice is freeform
     const freeformChoice = choices.find((c: any) => c.freeform);
-
-    function cleanup() {
-      choiceActive = false;
-      if (timeoutId) {
-        clearTimeout(timeoutId);
-        timeoutId = null;
-      }
-      // Remove our handler
-      rl.removeAllListeners('line');
-      // Restore original listeners
-      for (const listener of savedListeners) {
-        rl.on('line', listener);
-      }
-      // Restore normal prompt
-      const normalPrompt = `${ACCENT('hydra')}${DIM('>')} `;
-      rl.setPrompt(normalPrompt);
-    }
 
     function finish(result: any) {
       if (resolved) return;
       resolved = true;
-      cleanup();
+      cleanupChoiceState(rl, savedListeners, timeoutIdRef);
       resolve(result);
     }
 
-    // Render the choice UI with animation
     void animateBoxDrawIn({ title, context, choices }).then(() => {
-      // After animation completes, show the prompt
       rl.setPrompt(choicePrompt);
       rl.prompt();
     });
 
-    // Install one-shot line handler
-    async function handleLine(input: string) {
-      if (resolved) return;
-      const trimmed = (input || '').trim();
-
-      if (!trimmed) {
-        // Empty input: re-prompt
-        rl.prompt();
-        return;
-      }
-
-      // Try parsing as a number
-      const num = Number.parseInt(trimmed, 10);
-      if (num >= 1 && num <= choices.length) {
-        const picked = choices[num - 1];
-
-        // Special: auto-accept-all
-        if (picked.value === '__auto_accept__') {
-          sessionAutoAccept = true;
-          // Return the default value (proceed), but flag autoAcceptAll
-          finish({ value: defaultValue, autoAcceptAll: true, timedOut: false });
-          return;
-        }
-
-        // Freeform: collect additional input
-        if (picked.freeform) {
-          // Temporarily remove our handler for freeform collection
-          rl.removeAllListeners('line');
-          const text = await collectFreeform(rl);
-          // Re-attach our handler in case of empty text
-          if (!text) {
-            rl.on('line', (lineInput: string) => {
-              void handleLine(lineInput);
-            });
-            console.log(`  ${ERROR('Empty input, try again.')}`);
-            rl.setPrompt(choicePrompt);
-            rl.prompt();
-            return;
-          }
-          finish({ value: text, autoAcceptAll: false, timedOut: false });
-          return;
-        }
-
-        finish({ value: picked.value, autoAcceptAll: false, timedOut: false });
-        return;
-      }
-
-      // Not a valid number — check if it's freeform text (> 2 chars and a freeform option exists)
-      if (freeformChoice && trimmed.length > 2) {
-        finish({ value: trimmed, autoAcceptAll: false, timedOut: false });
-        return;
-      }
-
-      // Invalid input
-      console.log(
-        `  ${ERROR('Invalid selection.')} Pick ${ACCENT('1')}-${ACCENT(String(choices.length))}${freeformChoice ? ' or type your response' : ''}`,
-      );
-      rl.prompt();
-    }
-
     rl.on('line', (lineInput: string) => {
-      void handleLine(lineInput);
+      void handleChoiceLine(
+        lineInput,
+        () => resolved,
+        choices,
+        freeformChoice,
+        defaultValue,
+        choicePrompt,
+        rl,
+        finish,
+      );
     });
 
-    // Timeout
     if (timeoutMs > 0) {
-      timeoutId = setTimeout(() => {
-        if (!resolved) {
-          console.log(
-            DIM(
-              `  (timed out after ${String(Math.round(timeoutMs / 1000))}s, auto-selecting default)`,
-            ),
-          );
-          finish({ value: defaultValue, autoAcceptAll: false, timedOut: true });
-        }
-      }, timeoutMs);
-      // Don't keep process alive for timeout
-      timeoutId.unref();
+      timeoutIdRef.value = attachChoiceTimeout(timeoutMs, () => resolved, defaultValue, finish);
     }
   });
 }
@@ -544,8 +637,7 @@ function promptMultiSelect(
       }
       rl.removeAllListeners('line');
       for (const listener of savedListeners) rl.on('line', listener);
-      const normalPrompt = `${ACCENT('hydra')}${DIM('>')} `;
-      rl.setPrompt(normalPrompt);
+      rl.setPrompt(`${ACCENT('hydra')}${DIM('>')} `);
     }
 
     function finish(result: any) {
@@ -563,74 +655,27 @@ function promptMultiSelect(
       );
     }
 
-    // Initial render (no animation for multi-select — it re-renders)
     console.log(renderMultiSelectUI({ title, context, choices, selected }));
     rl.setPrompt(choicePrompt);
     rl.prompt();
 
-    function handleLine(input: string) {
-      if (resolved) return;
-      const trimmed = (input || '').trim();
-
-      // Empty enter = confirm selection
-      if (!trimmed) {
-        const values = [...selected].sort((a, b) => a - b).map((i) => choices[i].value);
-        finish({ values, autoAcceptAll: false, timedOut: false });
-        return;
-      }
-
-      // ? = re-render
-      if (trimmed === '?') {
-        console.log(renderMultiSelectUI({ title, context, choices, selected }));
-        rl.prompt();
-        return;
-      }
-
-      // Parse multi-select input
-      const parsed = parseMultiSelectInput(trimmed, choices.length);
-      if (parsed === 'all') {
-        // Toggle all: if all selected → deselect all, else select all
-        if (selected.size === choices.length) {
-          selected.clear();
-        } else {
-          for (let i = 0; i < choices.length; i++) selected.add(i);
-        }
-        showStatus();
-        rl.prompt();
-        return;
-      }
-
-      if (parsed === null) {
-        console.log(
-          `  ${ERROR('Invalid input.')} Use numbers (1,3,5), ranges (1-3), a=all, Enter=confirm`,
-        );
-        rl.prompt();
-        return;
-      }
-
-      // Toggle each index
-      for (const idx of parsed) {
-        if (selected.has(idx)) selected.delete(idx);
-        else selected.add(idx);
-      }
-      showStatus();
-      rl.prompt();
-    }
-
-    rl.on('line', handleLine);
+    rl.on('line', (lineInput: string) => {
+      handleMultiSelectLine(
+        lineInput,
+        () => resolved,
+        choices,
+        selected,
+        title,
+        context,
+        choicePrompt,
+        rl,
+        finish,
+        showStatus,
+      );
+    });
 
     if (timeoutMs > 0) {
-      timeoutId = setTimeout(() => {
-        if (!resolved) {
-          console.log(DIM(`  (timed out, confirming current selection)`));
-          const values =
-            selected.size > 0
-              ? [...selected].sort((a, b) => a - b).map((i) => choices[i].value)
-              : choices.map((c) => c.value);
-          finish({ values, autoAcceptAll: false, timedOut: true });
-        }
-      }, timeoutMs);
-      timeoutId.unref();
+      timeoutId = attachMultiSelectTimeout(timeoutMs, () => resolved, selected, choices, finish);
     }
   });
 }
@@ -643,6 +688,38 @@ const SEVERITY_ICONS = {
   medium: WARNING('\u25C7'), // ◇
   low: DIM('\u25CB'), // ○
 };
+
+function buildPlanBoxLines(
+  context: any,
+  summary: string | undefined,
+  actions: any[],
+  innerWidth: number,
+): string[] {
+  const boxLines: string[] = [];
+
+  if (context && typeof context === 'object') {
+    for (const [key, value] of Object.entries(context)) {
+      if (value !== undefined && value !== null && value !== '') {
+        boxLines.push(...wrapContextValue(key, value as string, innerWidth));
+      }
+    }
+  }
+  if (summary) boxLines.push(DIM(summary));
+  boxLines.push(DIM('\u2500'.repeat(innerWidth)));
+
+  for (const [i, action] of actions.entries()) {
+    const num = DIM(`${String(i + 1).padStart(2)}.`);
+    const severity = (action.severity as string | undefined) ?? '';
+    const icon = (SEVERITY_ICONS as Record<string, string>)[severity] ?? DIM('\u25CB');
+    const agentTag = action.agent ? ` ${DIM(`[${String(action.agent)}]`)}` : '';
+    boxLines.push(` ${num} ${icon} ${pc.white(action.label)}${agentTag}`);
+    if (action.description) {
+      boxLines.push(`      ${DIM(action.description.slice(0, innerWidth - 6))}`);
+    }
+  }
+
+  return boxLines;
+}
 
 /**
  * Render a non-interactive summary of planned actions and ask for Proceed/Cancel.
@@ -670,46 +747,19 @@ export async function confirmActionPlan(
 
   if (actions.length === 0) return true;
 
-  // Build context with action list
   const planContext: Record<string, string> = context
     ? { ...(context as Record<string, string>) }
     : {};
   if (summary) planContext['Summary'] = summary;
   planContext['Actions'] = `${String(actions.length)} item${actions.length === 1 ? '' : 's'}`;
 
-  // Print the action list
   const boxWidth = computeBoxWidth();
   const padding = 1;
   const innerWidth = boxWidth - 2 - padding * 2;
-  const boxLines = [];
-
-  if (context && typeof context === 'object') {
-    for (const [key, value] of Object.entries(context)) {
-      if (value !== undefined && value !== null && value !== '') {
-        const wrappedLines = wrapContextValue(key, value as string, innerWidth);
-        boxLines.push(...wrappedLines);
-      }
-    }
-  }
-  if (summary) {
-    boxLines.push(DIM(summary));
-  }
-  boxLines.push(DIM('\u2500'.repeat(innerWidth)));
-
-  for (const [i, action] of actions.entries()) {
-    const num = DIM(`${String(i + 1).padStart(2)}.`);
-    const severity = (action.severity as string | undefined) ?? '';
-    const icon = (SEVERITY_ICONS as Record<string, string>)[severity] ?? DIM('\u25CB');
-    const agentTag = action.agent ? ` ${DIM(`[${String(action.agent)}]`)}` : '';
-    boxLines.push(` ${num} ${icon} ${pc.white(action.label)}${agentTag}`);
-    if (action.description) {
-      boxLines.push(`      ${DIM(action.description.slice(0, innerWidth - 6))}`);
-    }
-  }
+  const boxLines = buildPlanBoxLines(context, summary, actions, innerWidth);
 
   console.log(`\n${box(title, boxLines, { style: 'rounded', padding, width: boxWidth })}`);
 
-  // Binary confirm via promptChoice
   const result = await promptChoice(rl, {
     title: 'Confirm',
     choices: [

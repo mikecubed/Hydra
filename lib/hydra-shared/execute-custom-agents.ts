@@ -307,8 +307,8 @@ export async function executeCustomCliAgent(
 
 function buildApiRequestConfig(def: AgentDef | CustomAgentDef, timeoutMs: number): ApiAgentConfig {
   const baseUrl =
-    (('baseUrl' in def ? (def as { baseUrl?: string }).baseUrl : undefined) ??
-    'http://localhost:11434/v1');
+    ('baseUrl' in def ? (def as { baseUrl?: string }).baseUrl : undefined) ??
+    'http://localhost:11434/v1';
   const model = ('model' in def ? (def as { model?: string }).model : undefined) ?? 'default';
   const maxTokens = 'maxTokens' in def ? (def as { maxTokens?: number }).maxTokens : undefined;
   const abortSignal = timeoutMs > 0 ? AbortSignal.timeout(timeoutMs) : undefined;

@@ -42,6 +42,52 @@ export const AGENT_TYPE = { PHYSICAL: 'physical', VIRTUAL: 'virtual' };
 
 const _registry = new Map<string, AgentDef>();
 
+// ── Copilot parseOutput helpers ──────────────────────────────────────────────
+
+function parseCopilotJsonlLines(stdout: string): Record<string, unknown>[] {
+  const lines = stdout.split(/\r?\n/).filter(Boolean);
+  const events: Record<string, unknown>[] = [];
+  for (const line of lines) {
+    try {
+      const parsed = JSON.parse(line) as unknown;
+      if (parsed != null && typeof parsed === 'object' && !Array.isArray(parsed)) {
+        events.push(parsed as Record<string, unknown>);
+      }
+    } catch {
+      // Skip lines that are not valid JSON
+    }
+  }
+  return events;
+}
+
+function findLastAssistantContent(events: Record<string, unknown>[]): string | null {
+  const messages = events.filter((e) => {
+    if (e['type'] !== 'assistant.message') return false;
+    const data = e['data'];
+    if (data == null || typeof data !== 'object' || Array.isArray(data)) return false;
+    const toolRequests = (data as Record<string, unknown>)['toolRequests'];
+    return Array.isArray(toolRequests) && toolRequests.length === 0;
+  });
+  const lastMsg = messages.at(-1);
+  const lastMsgData =
+    lastMsg?.['data'] != null &&
+    typeof lastMsg['data'] === 'object' &&
+    !Array.isArray(lastMsg['data'])
+      ? (lastMsg['data'] as Record<string, unknown>)
+      : undefined;
+  const content = lastMsgData?.['content'];
+  return typeof content === 'string' ? content : null;
+}
+
+function extractPremiumRequestsFromEvents(events: Record<string, unknown>[]): number | null {
+  const resultEvent = [...events].reverse().find((e) => e['type'] === 'result');
+  if (!resultEvent) return null;
+  const usage = resultEvent['usage'];
+  if (usage == null || typeof usage !== 'object' || Array.isArray(usage)) return null;
+  const pr = (usage as Record<string, unknown>)['premiumRequests'];
+  return typeof pr === 'number' ? pr : null;
+}
+
 // ── Physical Agent Definitions ───────────────────────────────────────────────
 
 const PHYSICAL_AGENTS: Record<string, Partial<AgentDef>> = {
@@ -504,51 +550,10 @@ Sandbox-aware: no network access, file-system focused. Work within your sandbox 
     parseOutput(stdout: string, opts?: { jsonOutput?: boolean }): AgentResult {
       if (opts?.jsonOutput === true) {
         try {
-          const lines = stdout.split(/\r?\n/).filter(Boolean);
-
-          // Parse JSONL line-by-line — skip non-JSON lines (warnings, prompts, etc.)
-          const events: Record<string, unknown>[] = [];
-          for (const line of lines) {
-            try {
-              const parsed = JSON.parse(line) as unknown;
-              if (parsed != null && typeof parsed === 'object' && !Array.isArray(parsed)) {
-                events.push(parsed as Record<string, unknown>);
-              }
-            } catch {
-              // Skip lines that are not valid JSON
-            }
-          }
-
-          // Find the last assistant.message that is a final text response
-          // (toolRequests is empty, meaning it is the final answer turn)
-          const messages = events.filter((e) => {
-            if (e['type'] !== 'assistant.message') return false;
-            const data = e['data'];
-            if (data == null || typeof data !== 'object' || Array.isArray(data)) return false;
-            const toolRequests = (data as Record<string, unknown>)['toolRequests'];
-            return Array.isArray(toolRequests) && toolRequests.length === 0;
-          });
-          const lastMsg = messages.at(-1);
-          const lastMsgData =
-            lastMsg?.['data'] != null &&
-            typeof lastMsg['data'] === 'object' &&
-            !Array.isArray(lastMsg['data'])
-              ? (lastMsg['data'] as Record<string, unknown>)
-              : undefined;
-          const content = lastMsgData?.['content'];
-          const output = typeof content === 'string' ? content : stdout;
-
-          // Extract usage from the final result event
-          const resultEvent = [...events].reverse().find((e) => e['type'] === 'result');
-          let premiumRequests: number | null = null;
-          if (resultEvent) {
-            const usage = resultEvent['usage'];
-            if (usage != null && typeof usage === 'object' && !Array.isArray(usage)) {
-              const pr = (usage as Record<string, unknown>)['premiumRequests'];
-              if (typeof pr === 'number') premiumRequests = pr;
-            }
-          }
-
+          const events = parseCopilotJsonlLines(stdout);
+          const content = findLastAssistantContent(events);
+          const output = content ?? stdout;
+          const premiumRequests = extractPremiumRequestsFromEvents(events);
           return {
             output,
             tokenUsage: premiumRequests === null ? null : { premiumRequests },
@@ -622,20 +627,14 @@ Output structure: GitHub context summary → Actionable suggestions → Commands
 
 // ── Registry Operations ──────────────────────────────────────────────────────
 
-/**
- * Validate and register an agent definition.
- * @param {string} name - Unique agent name (lowercase, no spaces)
- * @param {object} def - Agent definition object
- */
-export function registerAgent(name: string, def: Partial<AgentDef>): AgentDef {
+function validateAgentRegistration(name: string, lower: string, def: Partial<AgentDef>): void {
   if (name === '' || typeof name !== 'string') {
     throw new Error('Agent name must be a non-empty string');
   }
-  const lower = name.toLowerCase();
   if (!/^[a-z][a-z0-9-]*$/.test(lower)) {
     throw new Error(`Invalid agent name "${name}": must be lowercase alphanumeric with hyphens`);
   }
-  const type = (def.type ?? AGENT_TYPE.PHYSICAL) as AgentDef['type'];
+  const type = def.type ?? AGENT_TYPE.PHYSICAL;
   if (type === AGENT_TYPE.VIRTUAL && (def.baseAgent == null || def.baseAgent === '')) {
     throw new Error(`Virtual agent "${name}" must specify a baseAgent`);
   }
@@ -644,24 +643,62 @@ export function registerAgent(name: string, def: Partial<AgentDef>): AgentDef {
       `Virtual agent "${name}" references unknown baseAgent "${def.baseAgent ?? ''}"`,
     );
   }
+}
 
-  const _defaultExecuteMode = def.customType === 'api' ? ('api' as const) : ('spawn' as const);
+function resolveAgentCliField(lower: string, type: string, def: Partial<AgentDef>): string | null {
+  if (type !== AGENT_TYPE.PHYSICAL) return null;
+  return def.cli === undefined ? lower : (def.cli ?? null);
+}
 
-  let _cli: string | null = null;
-  if (type === AGENT_TYPE.PHYSICAL) {
-    _cli = def.cli === undefined ? lower : (def.cli ?? null);
-  }
-  const entry: AgentDef = {
+function buildAgentCoreFields(
+  lower: string,
+  type: AgentDef['type'],
+  def: Partial<AgentDef>,
+  name: string,
+  cli: string | null,
+): Pick<
+  AgentDef,
+  | 'name'
+  | 'type'
+  | 'customType'
+  | 'baseAgent'
+  | 'displayName'
+  | 'label'
+  | 'cli'
+  | 'invoke'
+  | 'contextBudget'
+  | 'contextTier'
+> {
+  return {
     name: lower,
     type,
     customType: def.customType ?? null,
     baseAgent: def.baseAgent ?? null,
     displayName: def.displayName ?? name,
     label: def.label ?? def.displayName ?? name,
-    cli: _cli,
+    cli,
     invoke: type === AGENT_TYPE.PHYSICAL ? (def.invoke ?? null) : null,
     contextBudget: def.contextBudget ?? (type === AGENT_TYPE.VIRTUAL ? null : 120_000),
     contextTier: def.contextTier ?? null,
+  };
+}
+
+function buildAgentBehaviorFields(
+  def: Partial<AgentDef>,
+  defaultExecuteMode: 'api' | 'spawn',
+): Pick<
+  AgentDef,
+  | 'strengths'
+  | 'weaknesses'
+  | 'councilRole'
+  | 'taskAffinity'
+  | 'rolePrompt'
+  | 'timeout'
+  | 'tags'
+  | 'enabled'
+  | 'features'
+> {
+  return {
     strengths: def.strengths ?? [],
     weaknesses: def.weaknesses ?? [],
     councilRole: def.councilRole ?? null,
@@ -670,14 +707,29 @@ export function registerAgent(name: string, def: Partial<AgentDef>): AgentDef {
     timeout: def.timeout ?? null,
     tags: def.tags ?? [],
     enabled: def.enabled !== false,
-    // Plugin interface defaults — applied to all agents, including custom
     features: {
-      executeMode: _defaultExecuteMode,
+      executeMode: defaultExecuteMode,
       jsonOutput: false,
       stdinPrompt: false,
       reasoningEffort: false,
       ...(def.features ?? {}),
     },
+  };
+}
+
+function buildAgentPluginFields(
+  def: Partial<AgentDef>,
+): Pick<
+  AgentDef,
+  | 'parseOutput'
+  | 'errorPatterns'
+  | 'modelBelongsTo'
+  | 'quotaVerify'
+  | 'economyModel'
+  | 'readInstructions'
+  | 'taskRules'
+> {
+  return {
     parseOutput:
       def.parseOutput ??
       ((stdout: string): AgentResult => ({ output: stdout, tokenUsage: null, costUsd: null })),
@@ -688,7 +740,24 @@ export function registerAgent(name: string, def: Partial<AgentDef>): AgentDef {
     readInstructions: def.readInstructions ?? ((f: string) => `Read ${f} first.`),
     taskRules: def.taskRules ?? [],
   };
+}
 
+/**
+ * Validate and register an agent definition.
+ * @param {string} name - Unique agent name (lowercase, no spaces)
+ * @param {object} def - Agent definition object
+ */
+export function registerAgent(name: string, def: Partial<AgentDef>): AgentDef {
+  const lower = name.toLowerCase();
+  validateAgentRegistration(name, lower, def);
+  const type = (def.type ?? AGENT_TYPE.PHYSICAL) as AgentDef['type'];
+  const defaultExecuteMode = def.customType === 'api' ? ('api' as const) : ('spawn' as const);
+  const cli = resolveAgentCliField(lower, type, def);
+  const entry: AgentDef = {
+    ...buildAgentCoreFields(lower, type, def, name, cli),
+    ...buildAgentBehaviorFields(def, defaultExecuteMode),
+    ...buildAgentPluginFields(def),
+  };
   _registry.set(lower, entry);
   return entry;
 }
@@ -850,26 +919,11 @@ export const AGENT_NAMES: string[] = new Proxy([] as string[], {
       .map(([k]) => k);
     if (prop === Symbol.iterator) return physicalNames[Symbol.iterator].bind(physicalNames);
     if (prop === 'length') return physicalNames.length;
-    if (prop === 'sort') return physicalNames.sort.bind(physicalNames);
-    if (prop === 'filter') return physicalNames.filter.bind(physicalNames);
-    if (prop === 'map') return physicalNames.map.bind(physicalNames);
-    if (prop === 'forEach') return physicalNames.forEach.bind(physicalNames);
-    if (prop === 'includes') return physicalNames.includes.bind(physicalNames);
-    if (prop === 'indexOf') return physicalNames.indexOf.bind(physicalNames);
-    if (prop === 'join') return physicalNames.join.bind(physicalNames);
-    if (prop === 'reduce') return physicalNames.reduce.bind(physicalNames);
-    if (prop === 'some') return physicalNames.some.bind(physicalNames);
-    if (prop === 'every') return physicalNames.every.bind(physicalNames);
-    if (prop === 'find') return physicalNames.find.bind(physicalNames);
-    if (prop === 'slice') return physicalNames.slice.bind(physicalNames);
-    if (prop === 'concat') return physicalNames.concat.bind(physicalNames);
-    if (prop === 'flat') return physicalNames.flat.bind(physicalNames);
-    if (prop === 'flatMap') return physicalNames.flatMap.bind(physicalNames);
-    if (prop === 'entries') return physicalNames.entries.bind(physicalNames);
-    if (prop === 'keys') return physicalNames.keys.bind(physicalNames);
-    if (prop === 'values') return physicalNames.values.bind(physicalNames);
     if (typeof prop === 'string' && /^\d+$/.test(prop)) return physicalNames[Number(prop)];
-    return (physicalNames as unknown as Record<string | symbol, unknown>)[prop];
+    const val = (physicalNames as unknown as Record<string | symbol, unknown>)[prop];
+    return typeof val === 'function'
+      ? (val as (...args: unknown[]) => unknown).bind(physicalNames)
+      : val;
   },
 });
 
@@ -1002,6 +1056,90 @@ interface BestAgentOpts {
   installedCLIs?: Record<string, boolean | undefined> | null;
 }
 
+function computeLocalBudgetFlags(
+  mode: string,
+  budgetState: BestAgentOpts['budgetState'],
+  cfg: ReturnType<typeof loadHydraConfig>,
+): { localBoost: boolean; localPenalty: boolean } {
+  const localGate = new DefaultBudgetGate(cfg.local.budgetGate);
+  const dailyPct = budgetState?.daily?.percentUsed ?? budgetState?.percent;
+  const weeklyPct = budgetState?.weekly?.percentUsed ?? budgetState?.weekly?.percent;
+  const budgetTriggered = localGate.isExceeded(dailyPct ?? 0, weeklyPct ?? 0);
+  return {
+    localBoost: mode === 'economy' || budgetTriggered,
+    localPenalty: mode === 'performance',
+  };
+}
+
+function scoreAgentCandidate(
+  name: string,
+  agent: AgentDef,
+  taskType: string,
+  overrides: Record<string, AffinityEntry | undefined>,
+  localBoost: boolean,
+  localPenalty: boolean,
+): number {
+  let score = (agent.taskAffinity as Record<string, number>)[taskType] ?? 0;
+  const key = `${name}:${taskType}`;
+  const overrideEntry = overrides[key];
+  if (overrideEntry != null && overrideEntry.adjustment !== 0) {
+    score += overrideEntry.adjustment;
+  }
+  if (name === 'local') {
+    if (localBoost) score *= 1.5;
+    if (localPenalty) score *= 0.5;
+  }
+  return score;
+}
+
+function resolveFallbackAgent(
+  installedCLIs: Record<string, boolean | undefined>,
+  cfg: ReturnType<typeof loadHydraConfig>,
+  includeVirtual: boolean,
+): string {
+  for (const name of DISPATCH_PREFERENCE_ORDER) {
+    const agentDef = _registry.get(name);
+    if (!agentDef || !_resolveEnabled(agentDef)) continue;
+    if (!includeVirtual && agentDef.type === AGENT_TYPE.VIRTUAL) continue;
+    if (name === 'local' && !cfg.local.enabled) continue;
+    if (installedCLIs[name] === false) continue;
+    return name;
+  }
+  const registryBackedFallback = Object.entries(installedCLIs).find(([cliName, v]) => {
+    if (v !== true) return false;
+    const agentDef = _registry.get(cliName);
+    if (!agentDef || !_resolveEnabled(agentDef)) return false;
+    return !(!includeVirtual && agentDef.type === AGENT_TYPE.VIRTUAL);
+  });
+  if (registryBackedFallback) return registryBackedFallback[0];
+  throw new Error(
+    'Hydra routing error: no enabled agents available. All installedCLIs entries are false' +
+      ' and the local agent is disabled by configuration.',
+  );
+}
+
+function collectAgentCandidates(
+  taskType: string,
+  cfg: ReturnType<typeof loadHydraConfig>,
+  overrides: Record<string, AffinityEntry | undefined>,
+  includeVirtual: boolean,
+  installedCLIs: Record<string, boolean | undefined> | null,
+  localBoost: boolean,
+  localPenalty: boolean,
+): Array<{ name: string; score: number }> {
+  const candidates: Array<{ name: string; score: number }> = [];
+  for (const [name, agent] of _registry) {
+    if (!_resolveEnabled(agent)) continue;
+    if (name === 'local' && !cfg.local.enabled) continue;
+    if (!includeVirtual && agent.type === AGENT_TYPE.VIRTUAL) continue;
+    if (installedCLIs && agent.features.executeMode === 'spawn' && installedCLIs[name] === false)
+      continue;
+    const score = scoreAgentCandidate(name, agent, taskType, overrides, localBoost, localPenalty);
+    candidates.push({ name, score });
+  }
+  return candidates;
+}
+
 export function bestAgentFor(taskType: string, opts: BestAgentOpts = {}): string {
   const includeVirtual = opts.includeVirtual ?? false;
   const mode = opts.mode ?? 'balanced';
@@ -1010,61 +1148,19 @@ export function bestAgentFor(taskType: string, opts: BestAgentOpts = {}): string
   const cfg = loadHydraConfig();
   const learningEnabled = cfg.agents.affinityLearning?.enabled;
   const overrides = learningEnabled === true ? loadAffinityOverrides() : {};
+  const { localBoost, localPenalty } = computeLocalBudgetFlags(mode, budgetState, cfg);
 
-  // Budget gate: auto-boost local when cloud usage exceeds thresholds
-  const localGate = new DefaultBudgetGate(cfg.local.budgetGate);
-  const dailyPct = budgetState?.daily?.percentUsed ?? budgetState?.percent;
-  const weeklyPct = budgetState?.weekly?.percentUsed ?? budgetState?.weekly?.percent;
-  const budgetTriggered = localGate.isExceeded(dailyPct ?? 0, weeklyPct ?? 0);
-
-  const localBoost = mode === 'economy' || budgetTriggered;
-  const localPenalty = mode === 'performance';
-
-  const candidates: Array<{ name: string; score: number }> = [];
-  for (const [name, agent] of _registry) {
-    if (!_resolveEnabled(agent)) continue;
-    if (name === 'local' && !cfg.local.enabled) continue;
-    if (!includeVirtual && agent.type === AGENT_TYPE.VIRTUAL) continue;
-    // Skip CLI agents explicitly marked as not installed
-    if (installedCLIs && agent.features.executeMode === 'spawn' && installedCLIs[name] === false) {
-      continue;
-    }
-    let score = (agent.taskAffinity as Record<string, number>)[taskType] ?? 0;
-    const key = `${name}:${taskType}`;
-    const overrideEntry = (overrides as Record<string, AffinityEntry | undefined>)[key];
-    if (overrideEntry != null && overrideEntry.adjustment !== 0) {
-      score += overrideEntry.adjustment;
-    }
-    if (name === 'local') {
-      if (localBoost) score *= 1.5;
-      if (localPenalty) score *= 0.5;
-    }
-    candidates.push({ name, score });
-  }
+  const candidates = collectAgentCandidates(
+    taskType,
+    cfg,
+    overrides as Record<string, AffinityEntry | undefined>,
+    includeVirtual,
+    installedCLIs,
+    localBoost,
+    localPenalty,
+  );
   if (candidates.length === 0) {
-    if (installedCLIs) {
-      for (const name of DISPATCH_PREFERENCE_ORDER) {
-        const agentDef = _registry.get(name);
-        if (!agentDef || !_resolveEnabled(agentDef)) continue;
-        if (!includeVirtual && agentDef.type === AGENT_TYPE.VIRTUAL) continue;
-        if (name === 'local' && !cfg.local.enabled) continue;
-        if (installedCLIs[name] === false) continue;
-        return name;
-      }
-      // Secondary: any installed CLI backed by a registered, enabled agent
-      const registryBackedFallback = Object.entries(installedCLIs).find(([cliName, v]) => {
-        if (v !== true) return false;
-        const agentDef = _registry.get(cliName);
-        if (!agentDef || !_resolveEnabled(agentDef)) return false;
-        if (!includeVirtual && agentDef.type === AGENT_TYPE.VIRTUAL) return false;
-        return true;
-      });
-      if (registryBackedFallback) return registryBackedFallback[0];
-      throw new Error(
-        'Hydra routing error: no enabled agents available. All installedCLIs entries are false' +
-          ' and the local agent is disabled by configuration.',
-      );
-    }
+    if (installedCLIs) return resolveFallbackAgent(installedCLIs, cfg, includeVirtual);
     return 'claude';
   }
   candidates.sort((a, b) => b.score - a.score);
@@ -1103,6 +1199,43 @@ export function getVerifier(producerAgent: string): string {
 
 let _initialized = false;
 
+type CustomPhysicalAgentDef = {
+  name: string;
+  type: string;
+  invoke?: { headless?: { cmd?: string } };
+  [key: string]: unknown;
+};
+
+function registerCustomVirtualAgents(customMap: Record<string, unknown>): void {
+  for (const [name, def] of Object.entries(customMap)) {
+    const d = def as Record<string, unknown>;
+    if (d['baseAgent'] == null) continue;
+    try {
+      registerAgent(name, {
+        ...(d as Partial<AgentDef>),
+        type: AGENT_TYPE.VIRTUAL as AgentDef['type'],
+      });
+    } catch {
+      /* skip invalid custom agents */
+    }
+  }
+}
+
+function registerCustomPhysicalAgent(def: CustomPhysicalAgentDef): void {
+  if (def.name === '' || !['cli', 'api'].includes(def.type)) return;
+  try {
+    registerAgent(def.name, {
+      ...(def as unknown as Partial<AgentDef>),
+      type: AGENT_TYPE.PHYSICAL as AgentDef['type'],
+      customType: def.type as 'cli' | 'api',
+      cli: def.type === 'cli' ? (def.invoke?.headless?.cmd ?? def.name) : null,
+      invoke: def.invoke as unknown as AgentInvoke | undefined,
+    });
+  } catch {
+    /* skip invalid custom agents silently */
+  }
+}
+
 /**
  * Initialize the agent registry. Called at startup.
  * Registers physical agents, then loads built-in sub-agents and custom agents from config.
@@ -1110,12 +1243,10 @@ let _initialized = false;
 export function initAgentRegistry(): void {
   if (_initialized) return;
 
-  // 1. Register the 3 physical agents
   for (const [name, def] of Object.entries(PHYSICAL_AGENTS)) {
     registerAgent(name, def);
   }
 
-  // 2. Load built-in sub-agents (lazy import to avoid circular deps)
   try {
     // Dynamic import would be async; we use a sync registration pattern.
     // Built-in sub-agents are registered via registerBuiltInSubAgents() called separately.
@@ -1123,48 +1254,21 @@ export function initAgentRegistry(): void {
     /* sub-agents module optional */
   }
 
-  // 3. Load custom agents from config
   try {
     const cfg = loadHydraConfig();
     const agentsCfg = cfg.agents;
 
-    // Disable built-ins that are not in the enabled list
     if (agentsCfg.subAgents && Array.isArray(agentsCfg.subAgents.builtIns)) {
       // This will be checked when sub-agents register themselves
     }
 
-    // Register custom user-defined virtual agents
     if (agentsCfg.custom && typeof agentsCfg.custom === 'object') {
-      for (const [name, def] of Object.entries(agentsCfg.custom)) {
-        const d = def as Record<string, unknown>;
-        if (d['baseAgent'] != null) {
-          try {
-            registerAgent(name, {
-              ...(d as Partial<AgentDef>),
-              type: AGENT_TYPE.VIRTUAL as AgentDef['type'],
-            });
-          } catch {
-            /* skip invalid custom agents */
-          }
-        }
-      }
+      registerCustomVirtualAgents(agentsCfg.custom);
     }
 
-    // Register custom physical agents (CLI and API types from agents.customAgents[])
     if (Array.isArray(agentsCfg.customAgents)) {
       for (const def of agentsCfg.customAgents) {
-        if (def.name === '' || !['cli', 'api'].includes(def.type)) continue;
-        try {
-          registerAgent(def.name, {
-            ...(def as unknown as Partial<AgentDef>),
-            type: AGENT_TYPE.PHYSICAL as AgentDef['type'],
-            customType: def.type,
-            cli: def.type === 'cli' ? (def.invoke?.headless?.cmd ?? def.name) : null,
-            invoke: def.invoke as unknown as AgentInvoke | undefined,
-          });
-        } catch {
-          /* skip invalid custom agents silently */
-        }
+        registerCustomPhysicalAgent(def as CustomPhysicalAgentDef);
       }
     }
   } catch {
@@ -1367,6 +1471,16 @@ export function resetAgentModel(agentName: string): string | null {
   return getActiveModel(agentName);
 }
 
+function resolveGeminiThinkingModel(activeKey: string, effort: string | null): string | null {
+  if (activeKey !== 'default') return null;
+  if (effort !== 'high' && effort !== 'xhigh') return null;
+  const thinkingModel = resolveModelId('gemini', 'thinking');
+  if (thinkingModel != null && thinkingModel !== '' && thinkingModel !== 'thinking') {
+    return thinkingModel;
+  }
+  return null;
+}
+
 export function getActiveModel(agentName: string): string | null {
   const envKey = `HYDRA_${agentName.toUpperCase()}_MODEL`;
   const envVal = process.env[envKey];
@@ -1383,16 +1497,9 @@ export function getActiveModel(agentName: string): string | null {
     return resolveModelId(agentName, legacyNormalized) ?? legacyNormalized ?? null;
   };
 
-  // If reasoning effort is high and it's gemini, prefer the 'thinking' alias if it exists
-  const effort = getReasoningEffort(agentName);
-  if (
-    agentName === 'gemini' &&
-    activeKey === 'default' &&
-    (effort === 'high' || effort === 'xhigh')
-  ) {
-    const thinkingModel = resolveModelId('gemini', 'thinking');
-    if (thinkingModel != null && thinkingModel !== '' && thinkingModel !== 'thinking')
-      return thinkingModel;
+  if (agentName === 'gemini') {
+    const thinkingModel = resolveGeminiThinkingModel(activeKey, getReasoningEffort(agentName));
+    if (thinkingModel !== null) return thinkingModel;
   }
 
   if (activeKey !== 'default') {

@@ -229,7 +229,6 @@ export class AgentWorker extends EventEmitter {
   async _workLoop(): Promise<void> {
     while (!this._stopped) {
       try {
-        // Concurrency gate: wait if too many tasks running globally
         while (activeTaskCount >= globalMaxInFlight) {
           // eslint-disable-next-line no-await-in-loop -- concurrency gate
           await this._sleep(500);
@@ -242,287 +241,41 @@ export class AgentWorker extends EventEmitter {
           this._status = 'idle';
           this._currentTask = null;
           this.emit('worker:idle', { agent: this.agent });
-
-          // Adaptive polling: slow down when mostly utilized, speed up when idle
-          if (this.adaptivePolling) {
-            const utilization = globalMaxInFlight > 0 ? activeTaskCount / globalMaxInFlight : 0;
-            if (utilization > 0.8) {
-              this.pollIntervalMs = Math.min(
-                this.basePollIntervalMs * 3,
-                this.pollIntervalMs * 1.5,
-              );
-            } else if (utilization < 0.3) {
-              this.pollIntervalMs = Math.max(
-                this.basePollIntervalMs * 0.5,
-                this.pollIntervalMs * 0.8,
-              );
-            }
-          }
-
+          this._adjustPollInterval();
           // eslint-disable-next-line no-await-in-loop -- sequential worker loop
           await this._sleep(this.pollIntervalMs);
           continue;
         }
 
-        // We have work to do
-        let prompt: string, taskId: string, title: string;
-
-        if (next.action === 'pickup_handoff') {
-          // Acknowledge the handoff
-          try {
-            // eslint-disable-next-line no-await-in-loop -- sequential worker loop
-            await request('POST', this.baseUrl, '/handoff/ack', {
-              handoffId: next.handoff?.id,
-              agent: this.agent,
-            });
-          } catch {
-            /* non-critical */
-          }
-
-          prompt = next.handoff?.summary ?? next.handoff?.nextStep ?? 'Continue assigned work.';
-          taskId = next.handoff?.tasks?.[0] ?? next.handoff?.id ?? 'unknown';
-          title = short(prompt, 80);
-        } else if (
-          next.action === 'claim_owned_task' ||
-          next.action === 'claim_unassigned_task' ||
-          next.action === 'continue_task'
-        ) {
-          const task = next.task;
-          taskId = (task?.['id'] as string | undefined) ?? 'unknown';
-          title = (task?.['title'] as string | undefined) ?? 'Untitled task';
-
-          // Claim the task
-          try {
-            // eslint-disable-next-line no-await-in-loop -- sequential worker loop
-            await request('POST', this.baseUrl, '/task/claim', {
-              taskId,
-              agent: this.agent,
-            });
-          } catch {
-            /* may already be claimed */
-          }
-
-          prompt = this._buildTaskPrompt(task ?? null);
-        } else {
-          // Unknown action — sleep and retry
+        // eslint-disable-next-line no-await-in-loop -- sequential worker loop
+        const workItem = await this._resolveWorkItem(next);
+        if (workItem == null) {
           // eslint-disable-next-line no-await-in-loop -- sequential worker loop
           await this._sleep(this.pollIntervalMs);
           continue;
         }
 
-        // Skip tasks that already failed on this worker (prevent infinite retry)
+        const { prompt, taskId, title } = workItem;
+
         if (this._failedTasks.has(taskId)) {
-          try {
-            // eslint-disable-next-line no-await-in-loop -- sequential worker loop
-            await request('POST', this.baseUrl, '/task/update', {
-              taskId,
-              status: 'blocked',
-              notes: `Worker ${this.agent}: task previously failed, marking blocked to prevent retry loop.`,
-            });
-          } catch {
-            /* daemon may be down */
-          }
-          // eslint-disable-next-line no-await-in-loop -- sequential worker: blocked task backoff
-          await this._sleep(this.pollIntervalMs);
+          // eslint-disable-next-line no-await-in-loop -- sequential worker loop
+          await this._markFailedAndSkip(taskId);
           continue;
         }
 
-        // Execute
         this._status = 'working';
         activeTaskCount++;
         this.emit('task:start', { agent: this.agent, taskId, title });
 
-        // Heartbeat interval: send periodic pings to daemon during execution
-        const workerCfg = getWorkerConfig();
-        const hbIntervalMs = workerCfg.heartbeatIntervalMs ?? 30_000;
-        const hbInterval = setInterval(() => {
-          fetch(`${this.baseUrl}/task/${taskId}/heartbeat`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              agent: this.agent,
-              outputBytes: this._outputBuffer.length,
-              phase: 'executing',
-            }),
-            signal: AbortSignal.timeout(5000),
-          }).catch(() => {}); // fire-and-forget
-        }, hbIntervalMs);
-
-        let result;
-        try {
-          // eslint-disable-next-line no-await-in-loop -- sequential retry after model error
-          result = await this._executeAgent(prompt);
-        } finally {
-          clearInterval(hbInterval);
-        }
-
-        // ── Error recovery (headless auto-fallback) ─────────────────
-        if (!result.ok) {
-          // 1. Check for account-level usage limits FIRST — no retry possible
-          const usageCheck = detectUsageLimitError(
-            this.agent,
-            result as unknown as Record<string, unknown>,
-          );
-          if (usageCheck.isUsageLimit) {
-            const resetMsg =
-              usageCheck.resetInSeconds != null && usageCheck.resetInSeconds !== 0
-                ? ` (resets in ${formatResetTime(usageCheck.resetInSeconds)})`
-                : '';
-            this.emit('task:progress', {
-              agent: this.agent,
-              taskId,
-              output: `[usage-limit] ${usageCheck.errorMessage}${resetMsg}`,
-            });
-            // Annotate result so the error report is informative
-            result.errorCategory = 'usage-limit';
-            result.errorDetail = usageCheck.errorMessage;
-            // 2. Check for Codex-specific errors (auth/sandbox/invocation)
-            // — these should NOT be retried with a different model
-          } else {
-            const codexCheck = detectCodexError(
-              this.agent,
-              result as unknown as Record<string, unknown>,
-            );
-            if (codexCheck.isCodexError) {
-              const codexCat = typeof codexCheck.category === 'string' ? codexCheck.category : '';
-              const codexMsg =
-                typeof codexCheck.errorMessage === 'string' ? codexCheck.errorMessage : '';
-              this.emit('task:progress', {
-                agent: this.agent,
-                taskId,
-                output: `[${codexCat}] ${codexMsg}`,
-              });
-              // Don't attempt model fallback — this is an env/config issue
-            } else {
-              // Model error → try fallback model
-              const modelCheck = detectModelError(
-                this.agent,
-                result as unknown as Record<string, unknown>,
-              );
-              if (modelCheck.isModelError) {
-                // eslint-disable-next-line no-await-in-loop -- sequential model error recovery
-                const recovery = (await recoverFromModelError(
-                  this.agent,
-                  modelCheck.failedModel ?? '',
-                )) as { recovered: boolean; newModel: string | null };
-                if (recovery.recovered) {
-                  this.emit('task:progress', {
-                    agent: this.agent,
-                    taskId,
-                    output: `Model recovery: ${modelCheck.failedModel ?? ''} → ${recovery.newModel ?? ''}`,
-                  });
-                  // eslint-disable-next-line no-await-in-loop -- sequential retry after recovery
-                  result = await this._executeAgent(prompt);
-                  result.recovered = true;
-                  result.originalModel = modelCheck.failedModel ?? undefined;
-                  result.newModel = recovery.newModel ?? undefined;
-                }
-              }
-            }
-          }
-        }
-
-        const durationMs = this._currentTask == null ? 0 : Date.now() - this._currentTask.startedAt;
-        const outputSummary = short(result.output, 200);
-
-        // Report result to daemon (include structured error info for telemetry)
-        const errorInfo = result.ok
-          ? undefined
-          : {
-              exitCode: result.exitCode,
-              signal: result.signal ?? null,
-              stderr: short(result.stderr, 500),
-              error: result.error,
-              errorCategory: result.errorCategory ?? null,
-              errorDetail: result.errorDetail ?? null,
-              errorContext: result.errorContext ?? null,
-            };
-        try {
-          // eslint-disable-next-line no-await-in-loop -- sequential worker loop
-          await request('POST', this.baseUrl, '/task/result', {
-            taskId,
-            agent: this.agent,
-            status: result.ok ? 'done' : 'error',
-            output: short(result.output, 2000),
-            durationMs,
-            ...(errorInfo && { errorInfo }),
-          });
-        } catch {
-          // Fallback: try task/update if /task/result doesn't exist
-          try {
-            // eslint-disable-next-line no-await-in-loop -- sequential worker loop fallback
-            await request('POST', this.baseUrl, '/task/update', {
-              taskId,
-              status: result.ok ? 'done' : 'blocked',
-              notes: result.ok
-                ? `Worker output: ${outputSummary}`
-                : `Worker error: ${result.error ?? outputSummary}`,
-            });
-          } catch {
-            /* daemon may be down */
-          }
-        }
+        // eslint-disable-next-line no-await-in-loop -- sequential worker loop
+        const result = await this._executeWithRecovery(prompt, taskId);
 
         activeTaskCount = Math.max(0, activeTaskCount - 1);
-        this._currentTask = null;
-        this._status = 'idle';
-        this.emit('task:complete', {
-          agent: this.agent,
-          taskId,
-          title,
-          status: result.ok ? 'done' : 'error',
-          durationMs,
-          outputSummary,
-        });
+        // eslint-disable-next-line no-await-in-loop -- sequential worker loop
+        const shouldStop = await this._finalizeTask(taskId, title, result);
+        if (shouldStop) break;
 
-        if (result.error != null && result.error !== '') {
-          this._failedTasks.add(taskId);
-          this.emit('task:error', {
-            agent: this.agent,
-            taskId,
-            title,
-            error:
-              result.errorCategory != null && result.errorCategory !== ''
-                ? `[${result.errorCategory}] ${result.errorDetail ?? result.error}`
-                : result.error,
-            exitCode: result.exitCode,
-            signal: result.signal ?? null,
-            errorCategory: result.errorCategory ?? null,
-            errorDetail: result.errorDetail ?? null,
-            errorContext: result.errorContext ?? null,
-            stderr: short(result.stderr, 300),
-          });
-
-          // If this is a usage limit (e.g. ChatGPT Codex quota exhausted),
-          // stop the worker — no point processing more tasks until it resets.
-          const usageCheck = detectUsageLimitError(
-            this.agent,
-            result as unknown as Record<string, unknown>,
-          );
-          if (usageCheck.isUsageLimit) {
-            const resetLabel =
-              usageCheck.resetInSeconds != null && usageCheck.resetInSeconds !== 0
-                ? ` (resets in ${formatResetTime(usageCheck.resetInSeconds)})`
-                : '';
-            this.emit('task:progress', {
-              agent: this.agent,
-              taskId,
-              output: `${this.agent} usage limit hit${resetLabel} — stopping worker`,
-            });
-            this.stop();
-            break;
-          }
-
-          // Backoff after task failure before polling for next work
-          // eslint-disable-next-line no-await-in-loop -- failure backoff
-          await this._sleep(Math.min(this.pollIntervalMs * 3, 8_000));
-        }
-
-        // Auto-chain: immediately loop for next task (no delay)
-        if (!this.autoChain) {
-          // If not auto-chaining, wait for explicit restart
-          this._stopped = true;
-        }
+        if (!this.autoChain) this._stopped = true;
       } catch (err: unknown) {
         if (this._status === 'working') activeTaskCount = Math.max(0, activeTaskCount - 1);
         this._status = 'error';
@@ -533,8 +286,6 @@ export class AgentWorker extends EventEmitter {
           error: (err as Error).message,
         });
         this._currentTask = null;
-
-        // Backoff on errors
         // eslint-disable-next-line no-await-in-loop -- sequential error backoff
         await this._sleep(Math.min(this.pollIntervalMs * 4, 10_000));
         this._status = 'idle';
@@ -543,6 +294,290 @@ export class AgentWorker extends EventEmitter {
 
     this._status = 'stopped';
     this._currentTask = null;
+  }
+
+  /** Adjust poll interval based on current global utilization (adaptive polling). */
+  private _adjustPollInterval(): void {
+    if (!this.adaptivePolling) return;
+    const utilization = globalMaxInFlight > 0 ? activeTaskCount / globalMaxInFlight : 0;
+    if (utilization > 0.8) {
+      this.pollIntervalMs = Math.min(this.basePollIntervalMs * 3, this.pollIntervalMs * 1.5);
+    } else if (utilization < 0.3) {
+      this.pollIntervalMs = Math.max(this.basePollIntervalMs * 0.5, this.pollIntervalMs * 0.8);
+    }
+  }
+
+  /** Route next action to the appropriate resolver, or return null for unknown actions. */
+  private async _resolveWorkItem(
+    next: WorkerNextAction,
+  ): Promise<{ prompt: string; taskId: string; title: string } | null> {
+    if (next.action === 'pickup_handoff') {
+      return this._resolveHandoffItem(next);
+    }
+    if (
+      next.action === 'claim_owned_task' ||
+      next.action === 'claim_unassigned_task' ||
+      next.action === 'continue_task'
+    ) {
+      return this._resolveTaskItem(next);
+    }
+    return null;
+  }
+
+  /** Acknowledge a handoff and build the corresponding work item. */
+  private async _resolveHandoffItem(
+    next: WorkerNextAction,
+  ): Promise<{ prompt: string; taskId: string; title: string }> {
+    const handoff = next.handoff ?? {};
+    try {
+      await request('POST', this.baseUrl, '/handoff/ack', {
+        handoffId: handoff.id,
+        agent: this.agent,
+      });
+    } catch {
+      /* non-critical */
+    }
+    const prompt = handoff.summary ?? handoff.nextStep ?? 'Continue assigned work.';
+    const taskId = handoff.tasks?.[0] ?? handoff.id ?? 'unknown';
+    return { prompt, taskId, title: short(prompt, 80) };
+  }
+
+  /** Claim a task and build the corresponding work item. */
+  private async _resolveTaskItem(
+    next: WorkerNextAction,
+  ): Promise<{ prompt: string; taskId: string; title: string }> {
+    const task = next.task;
+    const taskId = (task?.['id'] as string | undefined) ?? 'unknown';
+    const title = (task?.['title'] as string | undefined) ?? 'Untitled task';
+    try {
+      await request('POST', this.baseUrl, '/task/claim', { taskId, agent: this.agent });
+    } catch {
+      /* may already be claimed */
+    }
+    return { prompt: this._buildTaskPrompt(task ?? null), taskId, title };
+  }
+
+  /** Mark a previously-failed task as blocked to prevent infinite retry, then backoff. */
+  private async _markFailedAndSkip(taskId: string): Promise<void> {
+    try {
+      await request('POST', this.baseUrl, '/task/update', {
+        taskId,
+        status: 'blocked',
+        notes: `Worker ${this.agent}: task previously failed, marking blocked to prevent retry loop.`,
+      });
+    } catch {
+      /* daemon may be down */
+    }
+    await this._sleep(this.pollIntervalMs);
+  }
+
+  /** Start a heartbeat interval that pings the daemon during task execution. */
+  private _startHeartbeat(taskId: string): ReturnType<typeof setInterval> {
+    const workerCfg = getWorkerConfig();
+    const hbIntervalMs = workerCfg.heartbeatIntervalMs ?? 30_000;
+    return setInterval(() => {
+      fetch(`${this.baseUrl}/task/${taskId}/heartbeat`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          agent: this.agent,
+          outputBytes: this._outputBuffer.length,
+          phase: 'executing',
+        }),
+        signal: AbortSignal.timeout(5000),
+      }).catch(() => {}); // fire-and-forget
+    }, hbIntervalMs);
+  }
+
+  /** Execute the agent and apply error recovery if needed. */
+  private async _executeWithRecovery(
+    prompt: string,
+    taskId: string,
+  ): Promise<Awaited<ReturnType<typeof executeAgent>>> {
+    const hbInterval = this._startHeartbeat(taskId);
+    let result;
+    try {
+      result = await this._executeAgent(prompt);
+    } finally {
+      clearInterval(hbInterval);
+    }
+    if (!result.ok) {
+      result = await this._handleExecuteFailure(result, prompt, taskId);
+    }
+    return result;
+  }
+
+  /** Handle execution failure: usage-limit, Codex-specific, or model-error recovery. */
+  private async _handleExecuteFailure(
+    result: Awaited<ReturnType<typeof executeAgent>>,
+    prompt: string,
+    taskId: string,
+  ): Promise<Awaited<ReturnType<typeof executeAgent>>> {
+    // 1. Account-level usage limits — no retry possible
+    const usageCheck = detectUsageLimitError(
+      this.agent,
+      result as unknown as Record<string, unknown>,
+    );
+    if (usageCheck.isUsageLimit) {
+      const resetMsg =
+        usageCheck.resetInSeconds != null && usageCheck.resetInSeconds !== 0
+          ? ` (resets in ${formatResetTime(usageCheck.resetInSeconds)})`
+          : '';
+      this.emit('task:progress', {
+        agent: this.agent,
+        taskId,
+        output: `[usage-limit] ${usageCheck.errorMessage}${resetMsg}`,
+      });
+      result.errorCategory = 'usage-limit';
+      result.errorDetail = usageCheck.errorMessage;
+      return result;
+    }
+
+    // 2. Codex-specific errors (auth/sandbox/invocation) — no model fallback
+    const codexCheck = detectCodexError(this.agent, result as unknown as Record<string, unknown>);
+    if (codexCheck.isCodexError) {
+      const codexCat = typeof codexCheck.category === 'string' ? codexCheck.category : '';
+      const codexMsg = typeof codexCheck.errorMessage === 'string' ? codexCheck.errorMessage : '';
+      this.emit('task:progress', {
+        agent: this.agent,
+        taskId,
+        output: `[${codexCat}] ${codexMsg}`,
+      });
+      return result;
+    }
+
+    // 3. Model error → try fallback model
+    const modelCheck = detectModelError(this.agent, result as unknown as Record<string, unknown>);
+    if (!modelCheck.isModelError) return result;
+
+    const recovery = (await recoverFromModelError(this.agent, modelCheck.failedModel ?? '')) as {
+      recovered: boolean;
+      newModel: string | null;
+    };
+    if (!recovery.recovered) return result;
+
+    this.emit('task:progress', {
+      agent: this.agent,
+      taskId,
+      output: `Model recovery: ${modelCheck.failedModel ?? ''} → ${recovery.newModel ?? ''}`,
+    });
+    const retryResult = await this._executeAgent(prompt);
+    retryResult.recovered = true;
+    retryResult.originalModel = modelCheck.failedModel ?? undefined;
+    retryResult.newModel = recovery.newModel ?? undefined;
+    return retryResult;
+  }
+
+  /** Report task result to daemon (with update fallback). */
+  private async _reportResult(
+    taskId: string,
+    result: Awaited<ReturnType<typeof executeAgent>>,
+    durationMs: number,
+    outputSummary: string,
+  ): Promise<void> {
+    const errorInfo = result.ok
+      ? undefined
+      : {
+          exitCode: result.exitCode,
+          signal: result.signal ?? null,
+          stderr: short(result.stderr, 500),
+          error: result.error,
+          errorCategory: result.errorCategory ?? null,
+          errorDetail: result.errorDetail ?? null,
+          errorContext: result.errorContext ?? null,
+        };
+    try {
+      await request('POST', this.baseUrl, '/task/result', {
+        taskId,
+        agent: this.agent,
+        status: result.ok ? 'done' : 'error',
+        output: short(result.output, 2000),
+        durationMs,
+        ...(errorInfo && { errorInfo }),
+      });
+    } catch {
+      // Fallback: try task/update if /task/result doesn't exist
+      try {
+        await request('POST', this.baseUrl, '/task/update', {
+          taskId,
+          status: result.ok ? 'done' : 'blocked',
+          notes: result.ok
+            ? `Worker output: ${outputSummary}`
+            : `Worker error: ${result.error ?? outputSummary}`,
+        });
+      } catch {
+        /* daemon may be down */
+      }
+    }
+  }
+
+  /**
+   * Emit completion events, report result, and handle per-task error recovery.
+   * Returns true if the worker loop should break (usage limit hit).
+   */
+  private async _finalizeTask(
+    taskId: string,
+    title: string,
+    result: Awaited<ReturnType<typeof executeAgent>>,
+  ): Promise<boolean> {
+    const durationMs = this._currentTask == null ? 0 : Date.now() - this._currentTask.startedAt;
+    const outputSummary = short(result.output, 200);
+
+    await this._reportResult(taskId, result, durationMs, outputSummary);
+
+    this._currentTask = null;
+    this._status = 'idle';
+    this.emit('task:complete', {
+      agent: this.agent,
+      taskId,
+      title,
+      status: result.ok ? 'done' : 'error',
+      durationMs,
+      outputSummary,
+    });
+
+    if (result.error == null || result.error === '') return false;
+
+    this._failedTasks.add(taskId);
+    this.emit('task:error', {
+      agent: this.agent,
+      taskId,
+      title,
+      error:
+        result.errorCategory != null && result.errorCategory !== ''
+          ? `[${result.errorCategory}] ${result.errorDetail ?? result.error}`
+          : result.error,
+      exitCode: result.exitCode,
+      signal: result.signal ?? null,
+      errorCategory: result.errorCategory ?? null,
+      errorDetail: result.errorDetail ?? null,
+      errorContext: result.errorContext ?? null,
+      stderr: short(result.stderr, 300),
+    });
+
+    // If this is a usage limit (e.g. ChatGPT Codex quota exhausted),
+    // stop the worker — no point processing more tasks until it resets.
+    const usageCheck = detectUsageLimitError(
+      this.agent,
+      result as unknown as Record<string, unknown>,
+    );
+    if (usageCheck.isUsageLimit) {
+      const resetLabel =
+        usageCheck.resetInSeconds != null && usageCheck.resetInSeconds !== 0
+          ? ` (resets in ${formatResetTime(usageCheck.resetInSeconds)})`
+          : '';
+      this.emit('task:progress', {
+        agent: this.agent,
+        taskId,
+        output: `${this.agent} usage limit hit${resetLabel} — stopping worker`,
+      });
+      this.stop();
+      return true;
+    }
+
+    // Backoff after task failure before polling for next work
+    await this._sleep(Math.min(this.pollIntervalMs * 3, 8_000));
+    return false;
   }
 
   /**

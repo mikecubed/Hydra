@@ -31,9 +31,7 @@ function handleHealth(ctx: ReadRouteCtx): boolean {
   let models: Record<string, string> = {};
   try {
     const summary = getModelSummary();
-    models = Object.fromEntries(
-      Object.entries(summary).map(([name, info]) => [name, info.active]),
-    );
+    models = Object.fromEntries(Object.entries(summary).map(([name, info]) => [name, info.active]));
   } catch {
     // Best effort only.
   }
@@ -78,9 +76,7 @@ function loadSelfModels(
   }
 }
 
-function buildSelfDaemonField(
-  status: Record<string, unknown> | null,
-): Record<string, unknown> {
+function buildSelfDaemonField(status: Record<string, unknown> | null): Record<string, unknown> {
   return {
     ok: true,
     url: status?.['url'] ?? null,
@@ -243,8 +239,7 @@ function buildActivityAgents(
       state.tasks.find((t: TaskEntry) => t.owner === name && t.status === 'in_progress') ?? null;
     const pendingHandoffs = state.handoffs
       .filter(
-        (h: HandoffEntry) =>
-          h.to === name && (h.acknowledgedAt == null || h.acknowledgedAt === ''),
+        (h: HandoffEntry) => h.to === name && (h.acknowledgedAt == null || h.acknowledgedAt === ''),
       )
       .map((h: HandoffEntry) => ({
         id: h.id,
@@ -364,8 +359,7 @@ function handleActivity(ctx: ReadRouteCtx): boolean {
   const events = readEvents(50);
   const agents = buildActivityAgents(state, suggestNext);
   const { inProgress, todo, blocked, recentlyCompleted } = buildActivityTasks(state);
-  const { pendingHandoffs, recentHandoffs, recentDecisions } =
-    buildActivityHandoffsSummary(state);
+  const { pendingHandoffs, recentHandoffs, recentDecisions } = buildActivityHandoffsSummary(state);
   const recentEvents = events.slice(-20).map((e: EventEntry) => ({
     seq: e.seq,
     at: e.at,

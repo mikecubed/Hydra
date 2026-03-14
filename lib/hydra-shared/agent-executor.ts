@@ -233,7 +233,14 @@ async function executeLocalAgent(
 
   try {
     return await executeLocalStream(
-      prompt, baseUrl, model, maxTokens, startTime, metricsHandle, span, onProgress,
+      prompt,
+      baseUrl,
+      model,
+      maxTokens,
+      startTime,
+      metricsHandle,
+      span,
+      onProgress,
     );
   } catch (err: unknown) {
     const e = err instanceof Error ? err : new Error(String(err));
@@ -388,7 +395,13 @@ function buildAgentCloseResult(
   let stderr = stderrInput;
   if (!isOk) {
     const telemetry = buildFailureTelemetry(
-      cmd, args, code, signal, elapsedMs, timedOut, parsed.jsonlErrors.length,
+      cmd,
+      args,
+      code,
+      signal,
+      elapsedMs,
+      timedOut,
+      parsed.jsonlErrors.length,
     );
     stderr = `${stderrInput}\n\n${telemetry}`.trim();
   }
@@ -527,9 +540,10 @@ function buildHeadlessOpts(
     model: effectiveModel === '' ? undefined : effectiveModel,
     permissionMode: (opts.permissionMode ?? 'auto-edit') as PermissionMode,
     jsonOutput: agentDef?.features.jsonOutput,
-    reasoningEffort: agentDef?.features.reasoningEffort === true
-      ? (opts.reasoningEffort ?? getReasoningEffort(agent) ?? undefined)
-      : undefined,
+    reasoningEffort:
+      agentDef?.features.reasoningEffort === true
+        ? (opts.reasoningEffort ?? getReasoningEffort(agent) ?? undefined)
+        : undefined,
     cwd: opts.cwd,
     stdinPrompt: (opts.useStdin ?? true) && agentDef?.features.stdinPrompt,
   };
@@ -594,13 +608,68 @@ function resolveSpawnDefaults(opts: ExecuteAgentOpts): SpawnDefaults {
   };
 }
 
+function attachChildHandlers(
+  child: ChildProcess,
+  ctx: SpawnCtx,
+  opts: ExecuteAgentOpts,
+  stdoutChunks: string[],
+  stderrChunks: string[],
+  timedOutRef: { value: boolean },
+  timer: ReturnType<typeof setTimeout>,
+  progressTimer: ReturnType<typeof setInterval> | null,
+  resolve: (result: ExecuteResult) => void,
+): void {
+  child.on('error', (err: Error) => {
+    clearTimeout(timer);
+    if (progressTimer) clearInterval(progressTimer);
+    const result = buildAgentSpawnErrorResult(
+      err,
+      stdoutChunks,
+      stderrChunks,
+      ctx.startTime,
+      ctx.cmd,
+      ctx.args,
+      ctx.prompt,
+    );
+    finalizeSpawnResult(ctx, result);
+    resolve(result);
+  });
+
+  child.on('close', (code: number | null, signal: string | null) => {
+    clearTimeout(timer);
+    if (progressTimer) clearInterval(progressTimer);
+    if (opts.onStatusBar) {
+      opts.onStatusBar(ctx.agent, { phase: opts.phaseLabel ?? 'done', step: 'idle' });
+    }
+    const result = buildAgentCloseResult(
+      ctx.agent,
+      stdoutChunks.join(''),
+      stderrChunks.join(''),
+      code,
+      signal,
+      timedOutRef.value,
+      Date.now() - ctx.startTime,
+      ctx.cmd,
+      ctx.args,
+      ctx.prompt,
+    );
+    finalizeSpawnResult(ctx, result);
+    resolve(result);
+  });
+}
+
 function spawnAgentProcess(p: AgentSpawnParams, opts: ExecuteAgentOpts): Promise<ExecuteResult> {
   const sd = resolveSpawnDefaults(opts);
   return new Promise<ExecuteResult>((resolve) => {
     const ctx: SpawnCtx = {
-      agent: p.agent, cmd: p.cmd, args: p.args, prompt: p.prompt,
-      startTime: Date.now(), metricsHandle: p.metricsHandle,
-      spanPromise: p.spanPromise, hubCleanup: p.hubCleanup,
+      agent: p.agent,
+      cmd: p.cmd,
+      args: p.args,
+      prompt: p.prompt,
+      startTime: Date.now(),
+      metricsHandle: p.metricsHandle,
+      spanPromise: p.spanPromise,
+      hubCleanup: p.hubCleanup,
     };
     const useStdinForPrompt = sd.useStdin && p.agentDef.features.stdinPrompt;
     const stdoutChunks: string[] = [];
@@ -641,35 +710,26 @@ function spawnAgentProcess(p: AgentSpawnParams, opts: ExecuteAgentOpts): Promise
 
     const { timedOutRef, timer } = setupSpawnTimeout(child, sd.timeoutMs);
     const progressTimer = setupSpawnProgress(
-      sd.progressIntervalMs, opts.onProgress, ctx.startTime, stdoutBytes,
+      sd.progressIntervalMs,
+      opts.onProgress,
+      ctx.startTime,
+      stdoutBytes,
     );
     if (opts.onStatusBar) {
       opts.onStatusBar(p.agent, { phase: opts.phaseLabel ?? 'executing', step: 'running' });
     }
 
-    child.on('error', (err: Error) => {
-      clearTimeout(timer);
-      if (progressTimer) clearInterval(progressTimer);
-      const result = buildAgentSpawnErrorResult(
-        err, stdoutChunks, stderrChunks, ctx.startTime, p.cmd, p.args, p.prompt,
-      );
-      finalizeSpawnResult(ctx, result);
-      resolve(result);
-    });
-
-    child.on('close', (code: number | null, signal: string | null) => {
-      clearTimeout(timer);
-      if (progressTimer) clearInterval(progressTimer);
-      if (opts.onStatusBar) {
-        opts.onStatusBar(p.agent, { phase: opts.phaseLabel ?? 'done', step: 'idle' });
-      }
-      const result = buildAgentCloseResult(
-        p.agent, stdoutChunks.join(''), stderrChunks.join(''),
-        code, signal, timedOutRef.value, Date.now() - ctx.startTime, p.cmd, p.args, p.prompt,
-      );
-      finalizeSpawnResult(ctx, result);
-      resolve(result);
-    });
+    attachChildHandlers(
+      child,
+      ctx,
+      opts,
+      stdoutChunks,
+      stderrChunks,
+      timedOutRef,
+      timer,
+      progressTimer,
+      resolve,
+    );
   });
 }
 
@@ -689,24 +749,49 @@ export async function executeAgent(
   // API-mode agents (local + any custom api-type)
   if (agentDef.features.executeMode === 'api') {
     if (agentDef.customType === 'api') {
-      try { return await executeCustomApiAgent(agent, prompt, opts); } finally { _hubCleanup(); }
+      try {
+        return await executeCustomApiAgent(agent, prompt, opts);
+      } finally {
+        _hubCleanup();
+      }
     }
-    try { return await executeLocalAgent(prompt, opts); } finally { _hubCleanup(); }
+    try {
+      return await executeLocalAgent(prompt, opts);
+    } finally {
+      _hubCleanup();
+    }
   }
 
   // Custom CLI agents
   if (agentDef.customType === 'cli') {
-    try { return await executeCustomCliAgent(agent, prompt, opts); } finally { _hubCleanup(); }
+    try {
+      return await executeCustomCliAgent(agent, prompt, opts);
+    } finally {
+      _hubCleanup();
+    }
   }
 
   // Gemini direct API (bypasses broken CLI)
   if (agentDef.name === 'gemini') {
     const effectiveModel = opts.modelOverride ?? getActiveModel(agent) ?? 'unknown';
     const geminiOpts: GeminiDirectOpts = { ...opts, modelOverride: effectiveModel };
-    try { return await executeGeminiDirect(prompt, geminiOpts); } finally { _hubCleanup(); }
+    try {
+      return await executeGeminiDirect(prompt, geminiOpts);
+    } finally {
+      _hubCleanup();
+    }
   }
 
-  // Standard CLI agent — resolve headless invoke
+  return executeStandardCliAgent(agent, agentDef, prompt, opts, _hubCleanup);
+}
+
+async function executeStandardCliAgent(
+  agent: string,
+  agentDef: NonNullable<ReturnType<typeof getAgent>>,
+  prompt: string,
+  opts: ExecuteAgentOpts,
+  _hubCleanup: () => void,
+): Promise<ExecuteResult> {
   const headlessInvoke = agentDef.invoke?.headless ?? null;
   const { modelOverride, phaseLabel } = opts;
 
@@ -735,13 +820,25 @@ export async function executeAgent(
     return handleNoHeadlessInvoke(agent, metricsHandle, spanPromise, _hubCleanup);
   }
 
-  const invokeResult = headlessInvoke(prompt, buildHeadlessOpts(effectiveModel, agent, opts, agentDef));
+  const invokeResult = headlessInvoke(
+    prompt,
+    buildHeadlessOpts(effectiveModel, agent, opts, agentDef),
+  );
   const _cmd = invokeResult[0];
   const _args = invokeResult[1];
   assertSafeSpawnCmd(_cmd, `Agent '${agent}'`);
 
   return spawnAgentProcess(
-    { agent, cmd: _cmd, args: _args, prompt, metricsHandle, spanPromise, hubCleanup: _hubCleanup, agentDef },
+    {
+      agent,
+      cmd: _cmd,
+      args: _args,
+      prompt,
+      metricsHandle,
+      spanPromise,
+      hubCleanup: _hubCleanup,
+      agentDef,
+    },
     opts,
   );
 }
@@ -862,10 +959,7 @@ async function handleRateLimitRetry(
       retryResult.rateLimitRetries = attempt;
       return retryResult;
     }
-    const recheck = detectRateLimitError(
-      agent,
-      retryResult as unknown as Record<string, unknown>,
-    );
+    const recheck = detectRateLimitError(agent, retryResult as unknown as Record<string, unknown>);
     if (!recheck.isRateLimit) {
       retryResult.rateLimitRetries = attempt;
       return retryResult;
@@ -907,9 +1001,7 @@ function shouldTripCircuitBreaker(currentModel: string | null): currentModel is 
   return currentModel != null && currentModel !== '' && isCircuitOpen(currentModel);
 }
 
-function makeFinalSpanAttrs(
-  result: ExecuteResult | undefined,
-): { ok: boolean; error?: string } {
+function makeFinalSpanAttrs(result: ExecuteResult | undefined): { ok: boolean; error?: string } {
   return { ok: result?.ok ?? false, error: result?.error ?? undefined };
 }
 
@@ -961,20 +1053,20 @@ export async function executeAgentWithRecovery(
     }
 
     // Rate limit retry with exponential backoff
-    const rateCheck = detectRateLimitError(
-      agent,
-      result as unknown as Record<string, unknown>,
-    ) as { isRateLimit: boolean; retryAfterMs: number | null };
+    const rateCheck = detectRateLimitError(agent, result as unknown as Record<string, unknown>) as {
+      isRateLimit: boolean;
+      retryAfterMs: number | null;
+    };
     if (rateCheck.isRateLimit) {
       finalResult = await handleRateLimitRetry(agent, prompt, opts, result, rateCheck, cfg);
       return finalResult;
     }
 
     // Model error → fallback
-    const detection = detectModelError(
-      agent,
-      result as unknown as Record<string, unknown>,
-    ) as { isModelError: boolean; failedModel: string | null };
+    const detection = detectModelError(agent, result as unknown as Record<string, unknown>) as {
+      isModelError: boolean;
+      failedModel: string | null;
+    };
     if (!detection.isModelError) {
       finalResult = result;
       return result;

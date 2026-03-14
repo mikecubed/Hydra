@@ -76,6 +76,30 @@ export function buildAgentMessage(agent: string, userPrompt: string): string {
     .join('\n');
 }
 
+function formatAssignedTaskText(myTasks: any[]): string {
+  if (myTasks.length === 0) {
+    return '- No explicit task assigned. Start by proposing first concrete step.';
+  }
+  return myTasks
+    .map(
+      (task: any) =>
+        `- ${String(task.title)}${task.done ? ` (DoD: ${String(task.done)})` : ''}${task.rationale ? ` [${String(task.rationale)}]` : ''}`,
+    )
+    .join('\n');
+}
+
+function formatOpenQuestionText(myQuestions: any[]): string {
+  if (myQuestions.length === 0) return '- none';
+  return myQuestions
+    .map((q: any) => {
+      const to = String(q.to ?? 'human');
+      const question = String(q.question ?? '').trim();
+      return question ? `- to ${to}: ${question}` : null;
+    })
+    .filter(Boolean)
+    .join('\n');
+}
+
 export function buildMiniRoundBrief(
   agent: string,
   userPrompt: string,
@@ -91,27 +115,8 @@ export function buildMiniRoundBrief(
   const myTasks = tasks.filter((task: any) => task.owner === agent || task.owner === 'unassigned');
   const myQuestions = questions.filter((q: any) => q && (q.to === agent || q.to === 'human'));
 
-  const taskText =
-    myTasks.length === 0
-      ? '- No explicit task assigned. Start by proposing first concrete step.'
-      : myTasks
-          .map(
-            (task: any) =>
-              `- ${String(task.title)}${task.done ? ` (DoD: ${String(task.done)})` : ''}${task.rationale ? ` [${String(task.rationale)}]` : ''}`,
-          )
-          .join('\n');
-
-  const questionText =
-    myQuestions.length === 0
-      ? '- none'
-      : myQuestions
-          .map((q: any) => {
-            const to = String(q.to ?? 'human');
-            const question = String(q.question ?? '').trim();
-            return question ? `- to ${to}: ${question}` : null;
-          })
-          .filter(Boolean)
-          .join('\n');
+  const taskText = formatAssignedTaskText(myTasks);
+  const questionText = formatOpenQuestionText(myQuestions);
 
   return [
     isPersonaEnabled()
@@ -177,6 +182,22 @@ export function buildTandemBrief(
   ]
     .filter(Boolean)
     .join('\n');
+}
+
+function parseVerificationJson(output: string): Record<string, unknown> | null {
+  try {
+    return JSON.parse(output) as Record<string, unknown>;
+  } catch {
+    const match = output.match(/\{[\s\S]*\}/);
+    if (match) {
+      try {
+        return JSON.parse(match[0]) as Record<string, unknown>;
+      } catch {
+        /* give up */
+      }
+    }
+    return null;
+  }
 }
 
 // ── Config-Based Gate ────────────────────────────────────────────────────────
@@ -255,26 +276,14 @@ export async function runCrossVerification(
     if (!result.ok) return null;
 
     const output = (result.stdout ?? result.output) || '';
-    let parsed = null;
-    try {
-      parsed = JSON.parse(output);
-    } catch {
-      const match = output.match(/\{[\s\S]*\}/);
-      if (match) {
-        try {
-          parsed = JSON.parse(match[0]);
-        } catch {
-          /* give up */
-        }
-      }
-    }
+    const parsed = parseVerificationJson(output);
     if (!parsed) return null;
 
     return {
       verifier: verifierAgent,
-      approved: Boolean(parsed.approved),
-      issues: Array.isArray(parsed.issues) ? parsed.issues : [],
-      suggestions: Array.isArray(parsed.suggestions) ? parsed.suggestions : [],
+      approved: Boolean(parsed['approved']),
+      issues: Array.isArray(parsed['issues']) ? (parsed['issues'] as string[]) : [],
+      suggestions: Array.isArray(parsed['suggestions']) ? (parsed['suggestions'] as string[]) : [],
     };
   } catch {
     return null;

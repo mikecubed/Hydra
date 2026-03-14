@@ -248,7 +248,12 @@ function isUnclassified(result: ExecuteResult): boolean {
 }
 
 function isSilentCrash(result: ExecuteResult, code: number): boolean {
-  return isUnclassified(result) && code !== 0 && result.output.trim() === '' && result.stderr.trim() === '';
+  return (
+    isUnclassified(result) &&
+    code !== 0 &&
+    result.output.trim() === '' &&
+    result.stderr.trim() === ''
+  );
 }
 
 function classifySilentCrash(agent: string, code: number): ClassificationResult {
