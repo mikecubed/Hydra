@@ -102,6 +102,14 @@ describe('IGitOperations interface', () => {
     );
   });
 
+  it('gitOperations export satisfies IGitOperations at compile time', async () => {
+    const { gitOperations } = await import('../lib/hydra-shared/git-ops.ts');
+    // Compile-time contract check — assignment fails if signatures drift
+    const _: IGitOperations = gitOperations;
+    assert.equal(typeof _.getCurrentBranch, 'function');
+    assert.equal(typeof _.stageAndCommit, 'function');
+  });
+
   it('can be implemented by a mock object', () => {
     const mock: IGitOperations = {
       getCurrentBranch() {

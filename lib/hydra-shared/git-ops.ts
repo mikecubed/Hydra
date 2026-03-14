@@ -6,14 +6,7 @@
  */
 
 import { spawnSyncCapture } from '../hydra-proc.ts';
-
-interface GitResult {
-  status: number | null;
-  stdout: string;
-  stderr: string;
-  error: Error | null;
-  signal: string | null;
-}
+import type { GitResult, IGitOperations } from '../types.ts';
 
 /**
  * Return a copy of `process.env` with git repo-override variables removed.
@@ -292,3 +285,16 @@ export function isAheadOfRemote(cwd: string): { ahead: number; behind: number } 
     behind: behindMatch ? Number.parseInt(behindMatch[1], 10) : 0,
   };
 }
+
+// ── Typed DI-ready export ───────────────────────────────────────────────────
+
+/** Typed object satisfying IGitOperations for dependency-injection adoption. */
+export const gitOperations = {
+  getCurrentBranch,
+  branchExists,
+  createBranch,
+  checkoutBranch,
+  mergeBranch,
+  deleteBranch,
+  stageAndCommit,
+} satisfies IGitOperations;
