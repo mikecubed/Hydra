@@ -1,6 +1,6 @@
 # Hydra — Refactoring Roadmap & Quality Gate Recommendations
 
-> Generated: 2026-03-13 | Branch: `copilot/audit-source-code-compliance`
+> Generated: 2026-03-14 | Branch: `docs/update-roadmap-status`
 > This document is a living roadmap. Update the checklist items as work progresses.
 
 ---
@@ -24,9 +24,9 @@
 ## 1. Executive Summary
 
 Hydra is a **92-module, 53,000-line TypeScript ESM codebase** that orchestrates multiple AI coding agents. The
-TypeScript migration (PR #13) eliminated runtime type unsafety and established strong quality tooling. The next
-step is architectural consolidation: breaking down oversized modules, eliminating cyclic imports, and building a
-safety net of tests before refactoring critical infrastructure.
+core remediation program is now largely complete: the largest hotspots have been split down, the safety net is in
+place, circular imports are gone, and the quality tooling backlog has been implemented. The remaining work is now
+focused on a small set of follow-on seams rather than broad structural cleanup.
 
 ### Execution Artifacts
 
@@ -41,19 +41,30 @@ Use this roadmap as the high-level program document, then execute from the task-
 The roadmap is intentionally summary-level. The task breakdown and worktree playbook are the source of truth for
 day-to-day execution.
 
+### Current Status
+
+- **Overall progress**: ~95% complete after PR #94 (`feat/remediation`) merged to `main`
+- **Current quality snapshot**: 1,884 passing tests, 0 failing tests (1,903 total, 19 todo); 0 circular imports in
+  `lib/`; 0 TypeScript errors; 0 lint errors
+- **Completed**: bootstrap, tooling gates, safety-net expansion, cycle remediation, hotspot decomposition, mutation
+  testing, and the Phase 5 documentation refresh
+- **Remaining**:
+  - `rf-ab01` — introduce `IHydraConfig` (highest-value remaining abstraction task; not started)
+  - `rf-pl02` — migrate the last 5 direct `process.exit()` calls in `lib/`
+  - `rf-ab06` / `rf-ab07` follow-on consumer adoption — typed exports exist, but DI-based interface consumption is
+    still pending
+
 ### Headline Findings
 
-| Finding                                                                                      | Severity    | Impact                               |
-| -------------------------------------------------------------------------------------------- | ----------- | ------------------------------------ |
-| `hydra-operator.ts` is 6,630 lines — ~12% of total codebase                                  | 🔴 Critical | Untestable, high bug surface         |
-| `hydra-config.ts` has 23 fan-in dependents — central hub bottleneck                          | 🔴 Critical | Any change ripples to 25% of modules |
-| `hydra-shared/agent-executor.ts` — 1,824 lines, 5 dependents, no tests                       | 🔴 Critical | Core execution path unprotected      |
-| Three cyclic import chains                                                                   | 🔴 Critical | Can cause runtime `undefined` errors |
-| 60 of 92 modules (65%) have no dedicated test file                                           | 🟠 High     | Low confidence for any refactor      |
-| `hydra-evolve.ts` — 3,657 lines, no tests                                                    | 🟠 High     | Evolution engine unverified          |
-| No cyclomatic complexity gate                                                                | 🟡 Medium   | Complexity can grow unbounded        |
-| No architectural layer enforcement                                                           | 🟡 Medium   | Presentation imports infra directly  |
-| Repeated patterns: error recovery, context building, usage checking (8+ abstractions needed) | 🟡 Medium   | Duplication, inconsistent behavior   |
+| Finding                                                                                      | Severity    | Impact                                                   |
+| -------------------------------------------------------------------------------------------- | ----------- | -------------------------------------------------------- |
+| `hydra-operator.ts` is down to 2,748 LOC from 6,630, but remains the largest entrypoint      | 🟠 High     | Still a hotspot worth monitoring                         |
+| `hydra-council.ts` (2,542 LOC) and `hydra-evolve.ts` (2,245 LOC) are now the main size risks | 🟡 Medium   | Large modules remain, but they are no longer unprotected |
+| `hydra-config.ts` is down to 870 LOC, but `IHydraConfig` has not started                     | 🟠 High     | Config remains the highest-value abstraction gap         |
+| Circular imports are eliminated (`madge`: 0 cycles in `lib/`)                                | ✅ Resolved | Import-order failures are no longer blocking work        |
+| Safety-net coverage is in place across all major hotspots                                    | ✅ Resolved | Downstream extraction work is now test-backed            |
+| `process.exit()` remediation is close, but 5 direct calls remain in `lib/`                   | 🟡 Medium   | A small number of exit paths still bypass helpers        |
+| Architecture boundaries, mutation testing, coverage gating, and audit checks are live        | ✅ Resolved | The quality gate backlog is materially complete          |
 
 ---
 
@@ -71,59 +82,55 @@ xychart-beta
 
 ### 2.2 Complexity Hotspots
 
-| Rank | Module                         |   LOC | Fan-Out | Fan-In | Test? | Priority   |
-| ---- | ------------------------------ | ----: | ------: | -----: | :---: | ---------- |
-| 1    | hydra-operator.ts              | 6,630 |      29 |      0 |  ❌   | 🔴 URGENT  |
-| 2    | hydra-evolve.ts                | 3,657 |      11 |      1 |  ❌   | 🔴 URGENT  |
-| 3    | hydra-council.ts               | 2,321 |      11 |      2 |  ✅   | 🟡 MONITOR |
-| 4    | hydra-shared/agent-executor.ts | 1,824 |       4 |      5 |  ❌   | 🔴 URGENT  |
-| 5    | orchestrator-daemon.ts         | 1,670 |      12 |      0 |  ❌   | 🟠 HIGH    |
-| 6    | hydra-nightly.ts               | 1,233 |      15 |      0 |  ❌   | 🟠 HIGH    |
-| 7    | hydra-model-profiles.ts        | 1,143 |       1 |      6 |  ✅   | 🟢 OK      |
-| 8    | hydra-audit.ts                 | 1,126 |       4 |      0 |  ❌   | 🟡 MEDIUM  |
-| 9    | hydra-config.ts                | 1,067 |       2 |     23 |  ❌   | 🔴 URGENT  |
-| 10   | hydra-mcp-server.ts            | 1,059 |       9 |      0 |  ❌   | 🟡 MEDIUM  |
+| Rank | Module                           | LOC (current) | Test? | Refactor status                                      | Priority   |
+| ---- | -------------------------------- | ------------: | :---: | ---------------------------------------------------- | ---------- |
+| 1    | `hydra-operator.ts`              |         2,748 |  ✅   | Phase 3 extraction complete (was 6,630)              | 🟡 Monitor |
+| 2    | `hydra-council.ts`               |         2,542 |  ✅   | Stable but still oversized                           | 🟡 Monitor |
+| 3    | `hydra-evolve.ts`                |         2,245 |  ✅   | Phase 3 extraction complete (was 3,657)              | 🟡 Monitor |
+| 4    | `hydra-evolve-executor.ts`       |         2,005 |  ✅   | Extracted successfully; now a visible hotspot        | 🟡 Monitor |
+| 5    | `hydra-agents.ts`                |         1,603 |  ✅   | Stable shared module                                 | 🟡 Monitor |
+| 6    | `hydra-shared/agent-executor.ts` |         1,120 |  ✅   | Reduced from 1,824; covered and partially abstracted | 🟡 Monitor |
+| 7    | `hydra-config.ts`                |           870 |  ✅   | Reduced from 1,067; `IHydraConfig` still pending     | 🟠 Next up |
 
 ### 2.3 Test Coverage Overview
 
-```mermaid
-pie title Test Coverage by Domain (approximate)
-  "Covered" : 32
-  "Uncovered" : 60
-```
+**Current test snapshot:**
 
-**Modules with NO tests and >500 LOC (highest risk):**
-
-- `hydra-operator.ts` (6,630) — main entry point, most used
-- `hydra-evolve.ts` (3,657) — autonomous AI mutation engine
-- `hydra-shared/agent-executor.ts` (1,824) — executes all AI agent calls
-- `orchestrator-daemon.ts` (1,670) — HTTP API server
-- `hydra-nightly.ts` (1,233) — batch automation
-- `hydra-audit.ts` (1,126) — audit log pipeline
-- `hydra-config.ts` (1,067) — central config hub
-- `hydra-mcp-server.ts` (1,059) — MCP tool handler
-- `hydra-tasks.ts` (1,055) — task queue management
-- `hydra-usage.ts` (1,051) — token budget enforcement
+- **1,884 passing**, **0 failing**, **1,903 total** tests (**19 todo**)
+- All characterization safety-net tracks (`rf-sn01` through `rf-sn12`) are complete
+- The previously highest-risk hotspots now have direct test coverage, including:
+  - `hydra-operator.ts`
+  - `hydra-evolve.ts`
+  - `hydra-shared/agent-executor.ts`
+  - `orchestrator-daemon.ts`
+  - `hydra-config.ts`
+  - `hydra-nightly.ts`
+  - `hydra-audit.ts`
+  - `hydra-mcp-server.ts`
+  - `hydra-tasks.ts`
+  - `hydra-usage.ts`
+- Mutation testing is also in place for `lib/hydra-shared/**/*.ts`
 
 ---
 
 ## 3. Current Quality Gate Inventory
 
-| Gate                           | Tool                       | Config                     | Status              | Blocks PR?                  |
-| ------------------------------ | -------------------------- | -------------------------- | ------------------- | --------------------------- |
-| Lint                           | ESLint v10                 | `eslint.config.mjs`        | ✅ Active           | ✅ Yes (CI + pre-push)      |
-| Format                         | Prettier v3                | `.prettierrc.json`         | ✅ Active           | ✅ Yes                      |
-| Type check                     | TypeScript `tsc --noEmit`  | `tsconfig.json`            | ✅ Active           | ⚠ `continue-on-error` in CI |
-| Unit tests                     | Node.js native test runner | `package.json` test script | ✅ Active           | ✅ Yes (pre-push hook)      |
-| Mermaid validation             | `npm run lint:mermaid`     | `scripts/lint-mermaid.ts`  | ✅ Active           | ✅ Pre-commit staged        |
-| Test coverage threshold        | —                          | —                          | ❌ **Missing**      | —                           |
-| Cyclomatic complexity          | —                          | —                          | ❌ **Missing**      | —                           |
-| Module size limit              | —                          | —                          | ❌ **Missing**      | —                           |
-| Import cycle detection         | —                          | —                          | ❌ **Missing**      | —                           |
-| Architecture layer enforcement | —                          | —                          | ❌ **Missing**      | —                           |
-| Mutation testing               | —                          | —                          | ❌ **Missing**      | —                           |
-| Dependency audit               | —                          | —                          | ❌ **Missing**      | —                           |
-| Bundle size                    | —                          | —                          | N/A (no build step) | —                           |
+| Gate                           | Tool                       | Config / Entry Point        | Status                      | Blocks PR?                        |
+| ------------------------------ | -------------------------- | --------------------------- | --------------------------- | --------------------------------- |
+| Lint                           | ESLint v10                 | `eslint.config.mjs`         | ✅ Implemented              | ✅ Yes (CI + hooks)               |
+| Format                         | Prettier v3                | `.prettierrc.json`          | ✅ Implemented              | ✅ Yes                            |
+| Type check                     | TypeScript `tsc --noEmit`  | `tsconfig.json`             | ✅ Implemented              | ⚠ Warn-only in part of CI         |
+| TypeScript strict mode         | TypeScript                 | `tsconfig.json`             | ✅ Implemented              | ✅ Enforced in local verification |
+| Unit tests                     | Node.js native test runner | `package.json` test script  | ✅ Implemented              | ✅ Yes (pre-push hook)            |
+| Mermaid validation             | `npm run lint:mermaid`     | `scripts/lint-mermaid.ts`   | ✅ Implemented              | ✅ Pre-commit staged              |
+| Test coverage threshold        | `c8`                       | coverage scripts + CI       | ✅ Implemented              | ✅ Yes                            |
+| Cyclomatic complexity          | ESLint                     | `eslint.config.mjs`         | ✅ Implemented (visibility) | ✅ Yes                            |
+| Module size limit              | hotspot tracking           | roadmap + ESLint visibility | ⚠ Visibility only           | ❌ No dedicated hard gate yet     |
+| Import cycle detection         | `madge`                    | `npm run lint:cycles` + CI  | ✅ Implemented              | ✅ Yes                            |
+| Architecture layer enforcement | `eslint-plugin-boundaries` | `eslint.config.mjs`         | ✅ Implemented              | ✅ Yes                            |
+| Mutation testing               | Stryker                    | `stryker.config.json`       | ✅ Implemented              | ⚠ Warn-only CI job                |
+| Dependency audit               | `npm audit`                | `ci.yml`                    | ✅ Implemented              | ⚠ Warn-only CI job                |
+| Bundle size                    | —                          | —                           | N/A (no build step)         | —                                 |
 
 ---
 
@@ -131,7 +138,11 @@ pie title Test Coverage by Domain (approximate)
 
 ### 4.1 Immediate (add within 1 sprint)
 
-#### A. Import Cycle Detection — `eslint-plugin-import` or `madge`
+- [x] Import cycle detection (`madge`)
+- [x] TypeScript strict checking
+- [ ] Module size warning / hard gate
+
+#### A. Import Cycle Detection — `madge` ✅ Implemented
 
 Cyclic imports between `hydra-rate-limits` ↔ `hydra-streaming-middleware` and the self-import in
 `hydra-metrics` can cause `undefined` module errors at startup.
@@ -160,10 +171,10 @@ Add to CI `quality.yml`:
   run: npm run lint:cycles
 ```
 
-#### B. TypeScript Type Check — Make Blocking
+#### B. TypeScript Type Check — strict mode ✅ Implemented
 
-`quality.yml` currently runs `tsc --noEmit` with `continue-on-error: true`. Once the backlog of TS errors
-is cleared, remove the flag to make type errors block PRs.
+The repository is now on a **0 TypeScript error** baseline and strict mode is in place. Some CI jobs still report
+typecheck in a warn-only posture, but the implementation work itself is complete and clean.
 
 **Target**: Zero `tsc` errors by end of Phase 2 (see §8).
 
@@ -182,7 +193,11 @@ Add to `quality` script and CI.
 
 ### 4.2 Short-Term (within 2 sprints)
 
-#### D. Test Coverage Threshold — `c8`
+- [x] Test coverage threshold (`c8`)
+- [x] Cyclomatic complexity visibility (ESLint)
+- [x] Import architecture enforcement (`eslint-plugin-boundaries`)
+
+#### D. Test Coverage Threshold — `c8` ✅ Implemented
 
 ```bash
 npm install --save-dev c8
@@ -197,7 +212,7 @@ npm install --save-dev c8
 }
 ```
 
-Start at 60% line/function coverage threshold, increase by 5% per sprint.
+Implemented via `c8` rollout and kept in the repo's quality path.
 
 **Coverage targets by phase:**
 
@@ -208,7 +223,7 @@ Start at 60% line/function coverage threshold, increase by 5% per sprint.
 | Phase 3 | 70% (evolution engine, daemon)                |
 | Phase 4 | 80%+ (full coverage)                          |
 
-#### E. Cyclomatic Complexity Limit — ESLint
+#### E. Cyclomatic Complexity Limit — ESLint ✅ Implemented (warning-level visibility)
 
 ```js
 // In eslint.config.mjs
@@ -221,7 +236,8 @@ Start at 60% line/function coverage threshold, increase by 5% per sprint.
 }
 ```
 
-Recommended thresholds (implement as warnings first, then errors):
+Current warning-level thresholds are active and were added specifically to surface hotspots without blocking the
+refactor program prematurely.
 
 | Rule                      | Warning | Error |
 | ------------------------- | ------- | ----- |
@@ -231,7 +247,7 @@ Recommended thresholds (implement as warnings first, then errors):
 | `max-depth` (nesting)     | 4       | 6     |
 | `max-params`              | 5       | 7     |
 
-#### F. Import Architecture Enforcement — `eslint-plugin-boundaries`
+#### F. Import Architecture Enforcement — `eslint-plugin-boundaries` ✅ Implemented
 
 Enforces that modules only import from the correct layer. Prevents `hydra-operator.ts` from importing
 `orchestrator-daemon.ts` directly.
@@ -258,7 +274,10 @@ npm install --save-dev eslint-plugin-boundaries
 }
 ```
 
-### 4.3 Medium-Term (Phase 3)
+### 4.3 Medium-Term (Phase 3 / Phase 5 delivery)
+
+- [x] Mutation testing (`Stryker`)
+- [x] Dependency security audit (`npm audit`)
 
 #### G. Mutation Testing — `stryker` ✅ Done (Phase 5)
 
@@ -290,22 +309,24 @@ confirmed.
 
 ### 5.1 God Objects
 
-| Module              |   LOC | Issue                                                                                    |
-| ------------------- | ----: | ---------------------------------------------------------------------------------------- |
-| `hydra-operator.ts` | 6,630 | Main REPL + dispatch + worker management + UI rendering + persistence all in one file    |
-| `hydra-evolve.ts`   | 3,657 | 7-phase state machine + context building + code execution + PR management                |
-| `hydra-config.ts`   | 1,067 | Config loading + saving + schema + test helpers + model selection helpers + role lookups |
+| Module                     |   LOC | Current concern                                                                          |
+| -------------------------- | ----: | ---------------------------------------------------------------------------------------- |
+| `hydra-operator.ts`        | 2,748 | Main entrypoint is much smaller, but still carries enough orchestration logic to monitor |
+| `hydra-council.ts`         | 2,542 | Still large and cross-cutting, though now covered                                        |
+| `hydra-evolve.ts`          | 2,245 | Entry-point shell improved, but the evolve path remains a sizable workflow               |
+| `hydra-evolve-executor.ts` | 2,005 | Extraction succeeded, but the new executor module is now a visible hotspot               |
+| `hydra-config.ts`          |   870 | Close to target size; `IHydraConfig` is the main remaining seam                          |
 
-### 5.2 Cyclic Dependencies (must fix before refactoring)
+### 5.2 Cyclic Dependencies (resolved)
 
-| Cycle       | Files                                                                           | Risk                                         |
-| ----------- | ------------------------------------------------------------------------------- | -------------------------------------------- |
-| **Cycle A** | `hydra-rate-limits.ts` ↔ `hydra-streaming-middleware.ts`                        | Module load failure if one initialises first |
-| **Cycle B** | `hydra-metrics.ts` self-import                                                  | Causes `undefined` on first access           |
-| **Cycle C** | `hydra-activity.ts` → `hydra-statusbar.ts` → `hydra-usage.ts` → (indirect loop) | Startup order sensitivity                    |
+| Cycle       | Files                                                                           | Status               | Resolution                       |
+| ----------- | ------------------------------------------------------------------------------- | -------------------- | -------------------------------- |
+| **Cycle A** | `hydra-rate-limits.ts` ↔ `hydra-streaming-middleware.ts`                        | ✅ Fixed (`rf-cy02`) | Shared streaming types extracted |
+| **Cycle B** | `hydra-metrics.ts` self-import                                                  | ✅ Fixed (`rf-cy01`) | Self-import removed              |
+| **Cycle C** | `hydra-activity.ts` → `hydra-statusbar.ts` → `hydra-usage.ts` → (indirect loop) | ✅ Fixed (`rf-cy03`) | Activity / usage loop untangled  |
 
-**Fix strategy:** Extract shared interfaces/types to a new `lib/hydra-streaming-types.ts` that both
-`hydra-rate-limits.ts` and `hydra-streaming-middleware.ts` import without mutual dependency.
+**Current state:** `madge` reports **0 circular imports** in `lib/`, so cycle removal is no longer on the
+critical path for follow-on work.
 
 ### 5.3 Repeated Patterns (DRY Violations)
 
@@ -323,14 +344,14 @@ confirmed.
 
 These interfaces would reduce coupling and improve testability:
 
-| Interface          | Purpose                            | Consumers                                 | Status                                                                                |
-| ------------------ | ---------------------------------- | ----------------------------------------- | ------------------------------------------------------------------------------------- |
-| `IAgentExecutor`   | Decouple execution from consumers  | operator, council, evolve, tasks, nightly | ✅ Defined in `agent-executor.ts` (Phase 4); partially adopted (dispatch, operator)   |
-| `IConfigStore`     | Decouple config loading from users | All 23 current direct consumers           | Not started                                                                           |
-| `IMetricsRecorder` | Decouple metrics recording         | 10+ consumers                             | ✅ Defined in `lib/types.ts` (Phase 5, PR #91); consumer adoption pending (`rf-ab06`) |
-| `IBudgetGate`      | Abstract usage checking            | 8+ consumers                              | ✅ Defined in `budget-gate.ts` (Phase 4); consumer adoption pending                   |
-| `IContextProvider` | Decouple context building          | 8+ consumers                              | ✅ Defined in `lib/types.ts` (Phase 5, PR #91); consumer adoption pending             |
-| `IGitOperations`   | Abstract git commands              | 8+ consumers                              | ✅ Defined in `lib/types.ts` (Phase 5, PR #91); consumer adoption pending (`rf-ab07`) |
+| Interface          | Purpose                            | Consumers                                 | Status                                                                          |
+| ------------------ | ---------------------------------- | ----------------------------------------- | ------------------------------------------------------------------------------- |
+| `IAgentExecutor`   | Decouple execution from consumers  | operator, council, evolve, tasks, nightly | ✅ Defined and adopted for covered consumers                                    |
+| `IHydraConfig`     | Decouple config loading from users | All 23 current direct consumers           | ⏳ Not started (`rf-ab01`, highest-priority remaining abstraction task)         |
+| `IMetricsRecorder` | Decouple metrics recording         | 10+ consumers                             | ⚠ Interface defined and typed export landed; consumer DI adoption still pending |
+| `IBudgetGate`      | Abstract usage checking            | 8+ consumers                              | ✅ Defined and adopted                                                          |
+| `IContextProvider` | Decouple context building          | 8+ consumers                              | ✅ Context consolidation completed in `hydra-context.ts`                        |
+| `IGitOperations`   | Abstract git commands              | 8+ consumers                              | ⚠ Interface defined and typed export landed; consumer DI adoption still pending |
 
 ### 5.5 Miscellaneous Smells
 
@@ -338,8 +359,8 @@ These interfaces would reduce coupling and improve testability:
 - **Long parameter lists**: Some functions accept 7+ parameters — signals need for parameter objects
 - **Boolean flags**: Several functions use boolean arguments to switch behavior — use strategy pattern or options objects
 - **Magic strings**: Provider names, model IDs, and command strings repeated inline
-- **No-await-in-loop**: 104 ESLint warnings for sequential awaits where `Promise.all` should be used
-- **`process.exit()` calls**: 83 direct calls — should use `process.exitCode` and let process terminate
+- **No-await-in-loop**: safe cases are complete; 27 remaining sequential loops are documented as intentional
+- **`process.exit()` calls**: 5 direct calls remain in `lib/` after 12 call sites were migrated to the shared helper
 
 ---
 
@@ -347,7 +368,8 @@ These interfaces would reduce coupling and improve testability:
 
 ### 6.1 Layer Violations
 
-The current architecture has no enforced layering. The following violations exist:
+Layering is now enforced with `eslint-plugin-boundaries`, so these examples are best read as the historical
+violations this program was designed to eliminate:
 
 ```mermaid
 graph LR
@@ -383,19 +405,20 @@ The recommended mitigation is to:
 2. Use dependency injection in top-level modules (operator, daemon)
 3. Keep the loader implementation in `hydra-config.ts` but only expose the interface type
 
-### 6.3 `hydra-operator.ts` Decomposition Plan
+### 6.3 `hydra-operator.ts` Decomposition Outcome
 
-The 6,630-line operator module should be split into ~5 focused modules:
+The operator hotspot has already been split. The remaining entrypoint is **2,748 LOC** (down from 6,630), with the
+largest extracted responsibilities now living in focused supporting modules:
 
 ```mermaid
 graph TD
-  OLD["hydra-operator.ts<br/>6,630 LOC<br/>(current)"]
+  OLD["hydra-operator.ts<br/>2,748 LOC<br/>(current)"]
 
-  NEW1["hydra-operator-repl.ts<br/>~800 LOC<br/>REPL loop + command parsing<br/>+ input handling"]
-  NEW2["hydra-operator-commands.ts<br/>~1,200 LOC<br/>Command handlers (:council,<br/>:evolve, :tasks, :agents, ...)"]
-  NEW3["hydra-operator-dispatch.ts<br/>~600 LOC<br/>Prompt routing + agent<br/>selection + streaming"]
-  NEW4["hydra-operator-session.ts<br/>~400 LOC<br/>Session state + history<br/>+ output recording"]
-  NEW5["hydra-operator-workers.ts<br/>~500 LOC<br/>Background worker<br/>management"]
+  NEW1["hydra-operator-session.ts<br/>Session state + history<br/>+ output recording"]
+  NEW2["hydra-operator-commands.ts<br/>Command handlers<br/>for operator commands"]
+  NEW3["hydra-operator-dispatch.ts<br/>Prompt routing +<br/>streaming orchestration"]
+  NEW4["hydra-operator-concierge.ts<br/>Concierge-specific<br/>operator helpers"]
+  NEW5["hydra-operator-startup.ts<br/>Startup, self-awareness,<br/>and ghost-text helpers"]
 
   OLD -->|"split into"| NEW1
   OLD -->|"split into"| NEW2
@@ -503,53 +526,53 @@ Minimum validation loop per task:
 This roadmap is now dependency-driven rather than date-driven. Use the detailed task matrix in
 `docs/plan/refactoring-task-breakdown.md` for day-to-day execution.
 
-### Phase 0: Program Bootstrap & Execution Guardrails 🔴
+### Phase 0: Program Bootstrap & Execution Guardrails ✅ Complete
 
 > **Goal**: Make parallel delivery safe before changing behavior.
 
-- [ ] Adopt repo-local worktree convention: one task per `.worktrees/<task-id>` checkout
-- [ ] Add `.worktrees/` to `.gitignore` before execution begins
-- [ ] Define task IDs, ownership, and verifier assignments from `docs/plan/refactoring-task-breakdown.md`
-- [ ] Standardize the per-task validation loop: format, lint, targeted tests, subagent critique, second-model critique
-- [ ] Confirm every refactor task has an explicit test-first entry criterion
+- [x] Adopt repo-local worktree convention: one task per `.worktrees/<task-id>` checkout
+- [x] Add `.worktrees/` to `.gitignore` before execution begins
+- [x] Define task IDs, ownership, and verifier assignments from `docs/plan/refactoring-task-breakdown.md`
+- [x] Standardize the per-task validation loop: format, lint, targeted tests, subagent critique, second-model critique
+- [x] Confirm every refactor task has an explicit test-first entry criterion
 
 **Exit gate**: Every planned task has a worktree name, dependency list, and validation recipe.
 
 ---
 
-### Phase 1: Safety Net Expansion 🔴
+### Phase 1: Safety Net Expansion ✅ Complete
 
 > **Goal**: Build confidence in the most fragile modules and remove import hazards.
 
 Parallel-ready tracks:
 
-- [ ] Tooling track: add cycle detection, coverage reporting, and complexity visibility without weakening existing gates
-- [ ] Cycle track: resolve Cycle A, Cycle B, and investigate/untangle Cycle C
-- [ ] Core tests track: characterization tests for `hydra-shared/agent-executor.ts`
-- [ ] Config tests track: characterization tests for `hydra-config.ts`
-- [ ] Daemon tests track: endpoint, task-state, heartbeat, and worktree-isolation coverage for `orchestrator-daemon.ts`
-- [ ] Hotspot tests track: characterization tests for `hydra-operator.ts`, `hydra-evolve.ts`, `hydra-metrics.ts`, and
+- [x] Tooling track: add cycle detection, coverage reporting, and complexity visibility without weakening existing gates
+- [x] Cycle track: resolve Cycle A, Cycle B, and investigate/untangle Cycle C
+- [x] Core tests track: characterization tests for `hydra-shared/agent-executor.ts`
+- [x] Config tests track: characterization tests for `hydra-config.ts`
+- [x] Daemon tests track: endpoint, task-state, heartbeat, and worktree-isolation coverage for `orchestrator-daemon.ts`
+- [x] Hotspot tests track: characterization tests for `hydra-operator.ts`, `hydra-evolve.ts`, `hydra-metrics.ts`, and
       `hydra-usage.ts` before extraction or semantic cleanup begins
 
 **Exit gate**: Critical modules have adequate characterization coverage and import cycles no longer block safe extraction work.
 
 ---
 
-### Phase 2: Core Stability & Contract Hardening 🔴
+### Phase 2: Core Stability & Contract Hardening 🟡 Mostly complete
 
 > **Goal**: Make shared services refactorable by locking in current contracts.
 
-- [ ] Finish deeper contract tests for `agent-executor`, including streaming, timeout, cancellation, and agent-specific paths
-- [ ] Finish deeper contract tests for `hydra-config`, including defaults, persistence, cache invalidation, and role/model helpers
-- [ ] Consolidate usage tracking behind a tested `recordExecution()` path — **Note**: Evaluated during Phase 5; the existing handle-based API (`recordCallStart()`/`recordCallComplete()`/`recordCallError()` in `hydra-metrics.ts`) already covers per-call tracking used by all execution paths. A higher-level `recordExecution()` wrapper may still be useful for deduplicating post-call usage bookkeeping in operator/council/evolve/tasks, but is deferred until those consumers are refactored to accept `IMetricsRecorder`.
-- [ ] Make typecheck fully blocking once the task matrix shows the path is clean
-- [ ] Promote complexity and size rules from visibility to enforcement only after the targeted modules have safety nets
+- [x] Finish deeper contract tests for `agent-executor`, including streaming, timeout, cancellation, and agent-specific paths
+- [x] Finish deeper contract tests for `hydra-config`, including defaults, persistence, cache invalidation, and role/model helpers
+- [ ] Consolidate usage tracking behind a tested `recordExecution()` path — **Deferred (`rf-cs03`)**. The current handle-based API (`recordCallStart()` / `recordCallComplete()` / `recordCallError()` in `hydra-metrics.ts`) already covers per-call tracking used by all execution paths. A higher-level wrapper may still help deduplicate post-call bookkeeping after future interface adoption work.
+- [x] Keep the TypeScript strict, zero-error baseline in place
+- [x] Promote complexity visibility after the targeted modules have safety nets
 
 **Exit gate**: Core execution/config behavior is test-backed, and quality gates can tighten without destabilizing unrelated work.
 
 ---
 
-### Phase 3: Monolith Decomposition ✅
+### Phase 3: Monolith Decomposition ✅ Complete
 
 > **Goal**: Split the largest files into modules with narrow responsibilities and explicit seams.
 >
@@ -565,17 +588,17 @@ Parallel-ready tracks after the safety-net gate:
   - `hydra-operator-startup.ts`
   - `hydra-operator-self-awareness.ts`
   - `hydra-operator-ghost-text.ts`
-  - shrunk `hydra-operator.ts` 6,630 → 2,630 LOC (−60%)
+  - shrunk `hydra-operator.ts` 6,630 → 2,748 LOC (−59%)
 - [x] `hydra-evolve.ts` extracts:
   - `hydra-evolve-executor.ts`
-  - shrunk `orchestrator-daemon.ts` 1,670 → 765 LOC (−54%)
+  - shrunk `hydra-evolve.ts` 3,657 → 2,245 LOC (−39%)
 - [x] `hydra-config.ts` seam work:
   - `hydra-config.ts` 1,067 → 870 LOC (−18%)
 - [x] `hydra-shared/agent-executor.ts` extracts:
   - `hydra-shared/error-diagnosis.ts`
   - `hydra-shared/gemini-executor.ts`
   - `hydra-shared/execute-custom-agents.ts`
-  - shrunk 1,824 → 835 LOC (−54%)
+  - shrunk 1,824 → 1,120 LOC (−39%)
 - [x] `orchestrator-daemon.ts` extracts:
   - `lib/daemon/state.ts`
   - `lib/daemon/task-helpers.ts`
@@ -594,26 +617,28 @@ Parallel-ready tracks after the safety-net gate:
 
 ---
 
-### Phase 4: Shared Abstractions & Architectural Boundaries ✅
+### Phase 4: Shared Abstractions & Architectural Boundaries 🟡 Mostly complete
 
 > **Goal**: Reduce duplication and lock in layering after the high-risk splits have landed.
 
+- [ ] Introduce `IHydraConfig` and migrate covered consumers (`rf-ab01` — not started)
 - [x] Introduce `IAgentExecutor` and migrate consumers
 - [x] Introduce `IBudgetGate` and eliminate duplicated budget-check paths
 - [x] Consolidate context-building through `hydra-context.ts`
 - [x] Enforce architecture layers with `eslint-plugin-boundaries`
-- [x] Raise coverage targets only after each newly shared abstraction has tests and at least one proving consumer migration
+- [x] Land typed exports for `IMetricsRecorder` and `IGitOperations`
+- [ ] Complete DI-based consumer adoption for `IMetricsRecorder` / `IGitOperations`
 
 **Exit gate**: Shared APIs are narrow, consumers depend on interfaces where practical, and layer rules are enforced instead of aspirational.
 
 ---
 
-### Phase 5: Cleanup, Performance, and Documentation ✅ Complete
+### Phase 5: Cleanup, Performance, and Documentation 🟡 Nearly complete
 
 > **Goal**: Finish the long tail without reopening structural risk.
 
 - [x] Reduce safe `no-await-in-loop` cases with behavior-preserving concurrency changes (PR #92: 2 sequential loops converted to `Promise.all` in `hydra-operator-session.ts`; 27 intentional sequential loops documented)
-- [x] Replace `process.exit()` with testable exit-path handling (PR #93: `lib/hydra-process.ts` with `exit()`/`setExitHandler()`/`resetExitHandler()`; 12 call sites migrated across 7 files; 3 new tests in `test/hydra-process.test.ts`)
+- [ ] Replace remaining `process.exit()` calls with testable exit-path handling (PR #93 migrated 12 call sites across 7 files, but 5 direct calls remain in `lib/`)
 - [x] Add mutation testing to the most critical shared modules (PR #90: Stryker installed, targeting `lib/hydra-shared/**/*.ts`, `npm run test:mutation`, warn-only CI job)
 - [x] Update `docs/ARCHITECTURE.md`, `docs/DEPENDENCY_DIAGRAMS.md`, and ADRs after structural changes settle
 
@@ -625,7 +650,7 @@ Parallel-ready tracks after the safety-net gate:
 - Removed committed `node_modules` symlink from git tracking
 - Fixed Coverage Gate CI job (was calling `test:coverage:check` without first generating coverage data)
 
-**Test count at Phase 5 close**: 1885 pass, 0 fail.
+**Current test count**: 1,884 pass, 0 fail (1,903 total, 19 todo).
 
 **Exit gate**: Remaining cleanup is measurable, verified, and does not rely on relaxed hooks, relaxed linting, or undocumented exceptions.
 
@@ -686,17 +711,25 @@ matrix in `docs/plan/refactoring-task-breakdown.md` as the operational backlog.
 
 ### Quantitative Targets
 
-| Metric                         | Baseline (now) | Phase 1 |   Phase 2    |     Phase 3     | Phase 4 |
-| ------------------------------ | :------------: | :-----: | :----------: | :-------------: | :-----: |
-| Test coverage (lines)          |      ~35%      |   50%   |     60%      |       70%       |   80%   |
-| Modules > 800 LOC              |       10       |   10    |      5       |   **3** ✅ 3    |    1    |
-| Modules > 1,500 LOC            |       5        |    5    |      2       |   **1** ✅ 1    |    0    |
-| Cyclic imports                 |       3        |    0    |      0       |   **0** ✅ 0    |    0    |
-| ESLint errors                  |      ~400      |   200   |     100      |       50        |    0    |
-| `tsc --noEmit` errors          |       0        |    0    |      0       |   **0** ✅ 0    |    0    |
-| Fan-in on `hydra-config.ts`    |       23       |   23    |      15      |       10        |  ≤ 10   |
-| Fan-out on `hydra-operator.ts` |       29       |   29    | ≤ 10 (split) | ≤ 10 (split) ✅ |  ≤ 10   |
-| `no-await-in-loop` warnings    |      104       |   104   |      80      |       40        |    0    |
+| Metric                                  | Current value                                        | Target / Interpretation                              |
+| --------------------------------------- | ---------------------------------------------------- | ---------------------------------------------------- |
+| Test results                            | **1,884 passing / 0 failing** (1,903 total, 19 todo) | ✅ Safety-net and downstream validation are in place |
+| Circular imports                        | **0**                                                | ✅ Target met                                        |
+| TypeScript errors                       | **0**                                                | ✅ Target met                                        |
+| ESLint errors                           | **0**                                                | ✅ Target met                                        |
+| `hydra-operator.ts` LOC                 | **2,748**                                            | ⚠ Improved from 6,630; still above long-term goal    |
+| `hydra-council.ts` LOC                  | **2,542**                                            | ⚠ Large but covered                                  |
+| `hydra-evolve.ts` LOC                   | **2,245**                                            | ⚠ Improved from 3,657; still above long-term goal    |
+| `hydra-evolve-executor.ts` LOC          | **2,005**                                            | ⚠ New extracted hotspot                              |
+| `hydra-shared/agent-executor.ts` LOC    | **1,120**                                            | ⚠ Improved from 1,824; still above long-term goal    |
+| `hydra-config.ts` LOC                   | **870**                                              | ⚠ Close to target; `IHydraConfig` still pending      |
+| Direct `process.exit()` calls in `lib/` | **5**                                                | ⚠ Remaining Phase 5 cleanup                          |
+
+**Long-term targets that still define success**:
+
+- bring the remaining hotspot modules toward the long-term ≤800 LOC goal where justified,
+- eliminate the last 5 direct `process.exit()` calls,
+- finish `IHydraConfig` and the consumer-adoption follow-on work for `IMetricsRecorder` / `IGitOperations`.
 
 ### Qualitative Definition of Done
 
