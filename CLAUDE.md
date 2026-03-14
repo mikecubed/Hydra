@@ -4,6 +4,33 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
+## Project Overview
+
+Hydra is a **multi-agent AI orchestrator** that routes prompts to the right AI coding agent (Claude
+Code, Gemini CLI, Codex CLI) or orchestrates all three together through a shared HTTP daemon with
+task queue, intelligent routing, and multi-round deliberation.
+
+**Key modules:**
+
+| File                             | Role                                                |
+| -------------------------------- | --------------------------------------------------- |
+| `lib/hydra-operator.ts`          | Interactive REPL + dispatch pipeline (main entry)   |
+| `lib/hydra-agents.ts`            | Agent definitions, invoke commands, model config    |
+| `lib/hydra-dispatch.ts`          | Headless task dispatch                              |
+| `lib/hydra-council.ts`           | Multi-round deliberation pipeline                   |
+| `lib/hydra-context.ts`           | Hierarchical HYDRA.md context injection             |
+| `lib/hydra-concierge.ts`         | Streaming conversational AI (multi-provider)        |
+| `lib/hydra-config.ts`            | Config loading, caching, role lookups               |
+| `lib/orchestrator-daemon.ts`     | HTTP daemon, event-sourced state (port 4173)        |
+| `lib/hydra-evolve-executor.ts`   | Phase execution engine (executeAgent / retry logic) |
+| `lib/hydra-evolve-state.ts`      | Session state, checkpoint helpers, status types     |
+| `lib/hydra-evolve-guardrails.ts` | Safety guardrails for evolve                        |
+| `lib/hydra-evolve-knowledge.ts`  | Knowledge base persistence                          |
+
+**Stack:** Node.js ESM TypeScript, `picocolors` for colors, no framework deps.  
+**Tests:** `test/hydra-*.test.ts` — Node.js native `node:test` + `assert/strict`.  
+**Config:** `hydra.config.json`
+
 ## Branch Workflow
 
 Always work on a feature branch. Never commit directly to `main`. All changes go through pull requests.

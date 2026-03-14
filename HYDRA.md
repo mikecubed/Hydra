@@ -9,6 +9,23 @@ Hydra is a multi-agent AI orchestration system that coordinates Claude Code CLI 
 
 The daemon runs on `localhost:4173` and exposes an HTTP API for task management, agent coordination, and event sourcing. An interactive operator console (REPL) provides the primary user interface.
 
+## Code Entry Points
+
+| File                             | Role                                              |
+| -------------------------------- | ------------------------------------------------- |
+| `lib/hydra-operator.ts`          | Interactive REPL + dispatch pipeline (main entry) |
+| `lib/hydra-agents.ts`            | Agent definitions, invoke commands, model config  |
+| `lib/hydra-dispatch.ts`          | Headless task dispatch                            |
+| `lib/hydra-council.ts`           | Multi-round deliberation pipeline                 |
+| `lib/hydra-context.ts`           | Hierarchical HYDRA.md context injection           |
+| `lib/hydra-concierge.ts`         | Streaming conversational AI (multi-provider)      |
+| `lib/hydra-config.ts`            | Config loading, caching, role lookups             |
+| `lib/orchestrator-daemon.ts`     | HTTP daemon, event-sourced state (port 4173)      |
+| `lib/hydra-evolve-executor.ts`   | Phase execution engine (executeAgent / retry)     |
+| `lib/hydra-evolve-state.ts`      | Session state, checkpoint helpers, status types   |
+| `lib/hydra-evolve-guardrails.ts` | Safety guardrails for evolve                      |
+| `lib/hydra-evolve-knowledge.ts`  | Knowledge base persistence                        |
+
 ## Code Conventions
 
 - **ESM + TypeScript** — `"type": "module"` in `package.json`. Runtime entrypoints and source files are now primarily `.ts`, using `import`/`export` only. Do not add CommonJS.
