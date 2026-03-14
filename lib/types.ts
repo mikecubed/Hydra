@@ -987,3 +987,71 @@ export interface ExecuteResult {
   usageLimitPattern?: string;
   usageLimitUnverifiable?: boolean;
 }
+
+// ── Service Interfaces ────────────────────────────────────────────────────────
+
+/** Result shape returned by synchronous git operations. */
+export interface GitResult {
+  status: number | null;
+  stdout: string;
+  stderr: string;
+  error: Error | null;
+  signal: string | null;
+}
+
+/**
+ * Interface contract for agent context providers.
+ * Implemented by `buildAgentContext` in `lib/hydra-context.ts`.
+ */
+export interface IContextProvider {
+  buildAgentContext(
+    agentName?: string,
+    taskContext?: { files?: string[]; types?: string; signatures?: string },
+    projectConfig?: { projectRoot: string; projectName?: string } | null,
+    promptText?: string | null,
+  ): string;
+}
+
+/**
+ * Interface contract for core git operations.
+ * Implemented by the functions exported from `lib/hydra-shared/git-ops.ts`.
+ */
+export interface IGitOperations {
+  getCurrentBranch(cwd: string): string;
+  branchExists(cwd: string, branchName: string): boolean;
+  createBranch(cwd: string, branchName: string, fromBranch: string): boolean;
+  checkoutBranch(cwd: string, branch: string): GitResult;
+  mergeBranch(cwd: string, branch: string, baseBranch?: string): boolean;
+  deleteBranch(cwd: string, branch: string): boolean;
+  stageAndCommit(
+    cwd: string,
+    message: string,
+    opts?: { originatedBy?: string; executedBy?: string },
+  ): boolean;
+}
+
+/** Minimal call result accepted by IMetricsRecorder.recordCallComplete. */
+export interface MetricsCallResult {
+  stdout?: string;
+  output?: string;
+  stderr?: string;
+  tokenUsage?: {
+    inputTokens?: number;
+    outputTokens?: number;
+    cacheCreationTokens?: number;
+    cacheReadTokens?: number;
+    totalTokens?: number;
+  } | null;
+  costUsd?: number | null;
+  outcome?: string;
+}
+
+/**
+ * Interface contract for recording agent call metrics.
+ * Implemented by the functions exported from `lib/hydra-metrics.ts`.
+ */
+export interface IMetricsRecorder {
+  recordCallStart(agentName: string, model?: string): string;
+  recordCallComplete(handle: string, result: MetricsCallResult): void;
+  recordCallError(handle: string, error: unknown): void;
+}
