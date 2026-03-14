@@ -194,7 +194,7 @@ function resolveNextValue(
   return { value: rawTokens[i + 1], advance: true };
 }
 
-function buildOperatorArg(key: string, normalizedKey: string, value: string | null): string | null {
+function buildOperatorArg(key: string, normalizedKey: string, value: string | null): string {
   const lowerKey = normalizedKey.toLowerCase();
   if (
     value === null &&

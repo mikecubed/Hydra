@@ -151,7 +151,7 @@ function doMerge(
   withLog: boolean,
 ): boolean {
   if (!useSmartMerge) return mergeBranch(projectRoot, branch, baseBranch);
-  if (!withLog) return smartMerge(projectRoot, branch, baseBranch);
+  if (!withLog) return smartMerge(projectRoot, branch, baseBranch).ok;
   return smartMerge(projectRoot, branch, baseBranch, {
     log: {
       info: (m: string) => {
@@ -164,7 +164,7 @@ function doMerge(
         console.log(pc.yellow(`  ${m}`));
       },
     },
-  });
+  }).ok;
 }
 
 function tryCreatePR(

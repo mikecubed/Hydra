@@ -981,7 +981,7 @@ function applyEnrichments(items: ActionItem[], enriched: Array<Record<string, un
         items[idx]['actionPrompt'] = prompt;
       }
       const sev = enrichment['severity'] as ActionItem['severity'] | undefined;
-      if (sev != null && sev !== '') {
+      if (sev != null) {
         items[idx]['severity'] = sev;
       }
     }

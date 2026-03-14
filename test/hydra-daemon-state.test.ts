@@ -530,11 +530,13 @@ describe('hydra daemon state-machine characterization', () => {
       );
       const taskId = claim.json.task.id;
 
+      assert.ok(daemon, 'daemon must be running');
+      const daemonUrl = daemon.baseUrl;
       async function runErrorAndReopen(attemptNum: number): Promise<void> {
         const errorResult: RequestResult<{
           task: { status: string; failCount?: number; blockedReason?: string };
           entry: { status: string };
-        }> = await requestJson(daemon.baseUrl, 'POST', '/task/result', {
+        }> = await requestJson(daemonUrl, 'POST', '/task/result', {
           taskId,
           agent: 'codex',
           status: 'error',
@@ -551,7 +553,7 @@ describe('hydra daemon state-machine characterization', () => {
         );
 
         const reopen: RequestResult<{ task: { status: string; owner: string } }> =
-          await requestJson(daemon.baseUrl, 'POST', '/task/update', {
+          await requestJson(daemonUrl, 'POST', '/task/update', {
             taskId,
             owner: 'codex',
             status: 'in_progress',

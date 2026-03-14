@@ -23,7 +23,7 @@ function sessionStatus(overrides: Record<string, unknown> = {}) {
 
 /** Creates a spy that records calls and returns canned responses. */
 function makeRequestSpy(responses: Record<string, unknown>) {
-  return mock.fn((method: string, _baseUrl: string, path: string) => {
+  return mock.fn((method: string, _baseUrl: string, path: string, _body?: unknown) => {
     const key = `${method} ${path}`;
     if (key in responses) return Promise.resolve(responses[key]);
     if (method === 'POST') return Promise.resolve({});
@@ -63,8 +63,8 @@ describe('executeDaemonResume', () => {
     const updateCall = requestSpy.mock.calls.find((c) => c.arguments[2] === '/task/update');
     assert.ok(updateCall, 'should call /task/update');
     const updateBody = updateCall.arguments[3] as Record<string, unknown>;
-    assert.equal(updateBody.taskId, 'task-1');
-    assert.equal(updateBody.status, 'todo');
+    assert.equal(updateBody['taskId'], 'task-1');
+    assert.equal(updateBody['status'], 'todo');
   });
 
   it('acks pending handoffs and launches matching agents', async () => {
@@ -85,7 +85,7 @@ describe('executeDaemonResume', () => {
     const ackCall = requestSpy.mock.calls.find((c) => c.arguments[2] === '/handoff/ack');
     assert.ok(ackCall, 'should call /handoff/ack');
     const ackBody = ackCall.arguments[3] as Record<string, unknown>;
-    assert.equal(ackBody.handoffId, 'h1');
+    assert.equal(ackBody['handoffId'], 'h1');
     assert.equal(startWorkersSpy.mock.calls.length, 1, 'should launch workers');
     assert.deepEqual(startWorkersSpy.mock.calls[0].arguments[0], ['gemini']);
   });

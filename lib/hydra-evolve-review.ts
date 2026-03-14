@@ -414,7 +414,7 @@ function cleanCommand(projectRoot: string, options: Record<string, string | bool
 
 // ── Knowledge Command ───────────────────────────────────────────────────────
 
-function getOutcomeIcon(outcome: string | undefined): string {
+function getOutcomeIcon(outcome: string | null | undefined): string {
   if (outcome === 'approve') return pc.green('+');
   if (outcome === 'reject') return pc.red('x');
   if (outcome === 'revise') return pc.yellow('~');
@@ -427,7 +427,7 @@ function displayKnowledgeEntries(
     area?: string;
     finding?: string;
     learnings?: string;
-    outcome?: string;
+    outcome?: string | null;
   }>,
   showLearnings: boolean,
 ): void {

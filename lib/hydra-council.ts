@@ -1457,7 +1457,7 @@ function makeTranscriptEntry(
   phase: string,
   result: {
     ok: boolean;
-    stdout: string;
+    stdout?: string;
     stderr: string;
     error: string;
     recovered: boolean;
@@ -1470,8 +1470,8 @@ function makeTranscriptEntry(
     agent,
     phase,
     ok: result.ok,
-    rawText: result.stdout,
-    parsed: parseJsonLoose(result.stdout),
+    rawText: result.stdout ?? '',
+    parsed: parseJsonLoose(result.stdout ?? ''),
     error: result.error === '' ? result.stderr : result.error,
     recovered: result.recovered,
     recoveredFrom: result.originalModel,
@@ -1997,7 +1997,7 @@ async function notifyDoctorOnFailure(
     exitCode?: number | null;
     signal?: string | null;
     output?: string;
-    stdout: string;
+    stdout?: string;
   },
   round: number,
 ): Promise<void> {

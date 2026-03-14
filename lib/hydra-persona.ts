@@ -169,7 +169,9 @@ export function showPersonaSummary(): void {
 // ── Interactive Editor ───────────────────────────────────────────────────────
 
 interface PromptChoiceResult {
-  value: unknown;
+  value?: unknown;
+  values?: unknown[];
+  autoAcceptAll?: boolean;
   timedOut?: boolean;
 }
 
@@ -329,7 +331,8 @@ async function handleNameEdit(
 }
 
 type PromptChoiceFn = (
-  ...args: [ReadlineInterface, Record<string, unknown>]
+  rl: ReadlineInterface,
+  opts?: Record<string, unknown>,
 ) => Promise<PromptChoiceResult | null>;
 
 export async function runPersonaEditor(rl: ReadlineInterface): Promise<void> {

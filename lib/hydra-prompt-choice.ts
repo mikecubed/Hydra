@@ -383,7 +383,7 @@ function handleMultiSelectLine(
   selected: Set<number>,
   title: string,
   context: any,
-  choicePrompt: string,
+  _choicePrompt: string,
   rl: any,
   finish: (result: any) => void,
   showStatus: () => void,

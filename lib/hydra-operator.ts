@@ -2020,8 +2020,10 @@ async function runCouncilGateEfficientDispatch(
   );
   if (autoResult.published) {
     console.log(label('Tasks created', pc.white(String(autoResult.published.tasks.length))));
-    console.log(label('Handoffs queued', pc.white(String(autoResult.published.handoffs.length))));
-    const handoffAgents = extractHandoffAgents(autoResult);
+    console.log(
+      label('Handoffs queued', pc.white(String(autoResult.published.handoffs?.length ?? 0))),
+    );
+    const handoffAgents = extractHandoffAgents(autoResult as unknown as Record<string, unknown>);
     if (handoffAgents.length > 0)
       startAgentWorkers(handoffAgents as string[], ctx.baseUrl, { rl: ctx.rl });
   }
@@ -2620,13 +2622,20 @@ async function runOneShotAuto(opts: ReturnType<typeof parseMainOpts>): Promise<v
     );
   }
   if (auto.triage)
-    console.log(label('Rationale', DIM(auto.triage.recommendationRationale ?? 'n/a')));
+    console.log(
+      label(
+        'Rationale',
+        DIM(
+          (auto.triage as Record<string, string | undefined>)['recommendationRationale'] ?? 'n/a',
+        ),
+      ),
+    );
   if ((auto as any).escalatedToCouncil) {
     if ((auto as any).councilOutput) console.log((auto as any).councilOutput);
   } else if (auto.published) {
     console.log(label('Tasks created', pc.white(String(auto.published.tasks.length))));
-    console.log(label('Handoffs queued', pc.white(String(auto.published.handoffs.length))));
-    const handoffAgents = extractHandoffAgents(auto);
+    console.log(label('Handoffs queued', pc.white(String(auto.published.handoffs?.length ?? 0))));
+    const handoffAgents = extractHandoffAgents(auto as unknown as Record<string, unknown>);
     if (handoffAgents.length > 0) startAgentWorkers(handoffAgents as string[], baseUrl);
   } else {
     console.log(label('Route', DIM('preview')));

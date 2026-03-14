@@ -999,7 +999,7 @@ async function dispatchAndRecord(
   useHandoff: boolean,
 ): Promise<NightlyTaskResult> {
   const prompt = buildTaskPrompt(task, branchName, projectRoot, agent, { isHandoff: useHandoff });
-  const handle = recordCallStart(agent, modelOverride ?? getActiveModel(agent));
+  const handle = recordCallStart(agent, modelOverride ?? getActiveModel(agent) ?? undefined);
   log.dim(`Dispatching ${agent}${modelOverride == null ? '' : ` (${modelOverride})`}...`);
   let agentResult = await executeAgentWithRecovery(agent, prompt, {
     cwd: projectRoot,
@@ -1260,7 +1260,7 @@ async function main() {
     finishedAt,
     date: dateStr,
     project: projectRoot,
-    baseBranch,
+    baseBranch: baseBranch ?? 'main',
     sources: sourceCounts,
     totalTasks: selectedTasks.length,
     processedTasks: results.length,

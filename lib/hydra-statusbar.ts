@@ -592,23 +592,23 @@ let sseReconnectTimer: ReturnType<typeof setTimeout> | null = null;
 const SSE_RECONNECT_DELAY_MS = 3000;
 
 function handleHandoffAckEvent(payload: Record<string, any>, agentList: Set<string>): void {
-  const agent = String(payload.agent ?? '').toLowerCase();
+  const agent = String(payload['agent'] ?? '').toLowerCase();
   if (agentList.has(agent)) {
-    const hSummary = payload.summary ? ` (${String(payload.summary).slice(0, 30)})` : '';
-    setAgentActivity(agent, 'working', `Ack'd ${String(payload.handoffId ?? '?')}`);
-    pushTickerEvent(`${agent} ack'd ${String(payload.handoffId ?? '?')}${hSummary}`, 'handoff');
+    const hSummary = payload['summary'] ? ` (${String(payload['summary']).slice(0, 30)})` : '';
+    setAgentActivity(agent, 'working', `Ack'd ${String(payload['handoffId'] ?? '?')}`);
+    pushTickerEvent(`${agent} ack'd ${String(payload['handoffId'] ?? '?')}${hSummary}`, 'handoff');
     emitActivityEvent({
       event: 'handoff_ack',
       agent,
-      detail: `${String(payload.handoffId ?? '')}${hSummary}`,
+      detail: `${String(payload['handoffId'] ?? '')}${hSummary}`,
     });
   }
 }
 
 function handleHandoffEvent(payload: Record<string, any>, agentList: Set<string>): void {
-  const to = String(payload.to ?? '').toLowerCase();
-  const from = String(payload.from ?? '').toLowerCase();
-  const hSummary = payload.summary ? ` (${String(payload.summary).slice(0, 30)})` : '';
+  const to = String(payload['to'] ?? '').toLowerCase();
+  const from = String(payload['from'] ?? '').toLowerCase();
+  const hSummary = payload['summary'] ? ` (${String(payload['summary']).slice(0, 30)})` : '';
   if (agentList.has(to)) {
     const current = getAgentActivity(to);
     const recentlySet = current.updatedAt && Date.now() - current.updatedAt < 5000;
@@ -622,9 +622,9 @@ function handleHandoffEvent(payload: Record<string, any>, agentList: Set<string>
 }
 
 function handleTaskClaimEvent(payload: Record<string, any>, agentList: Set<string>): void {
-  const agent = String(payload.agent ?? '').toLowerCase();
+  const agent = String(payload['agent'] ?? '').toLowerCase();
   if (agentList.has(agent)) {
-    const title = String(payload.title ?? '').slice(0, 40);
+    const title = String(payload['title'] ?? '').slice(0, 40);
     setAgentActivity(agent, 'working', title.length > 0 ? title : 'Working', {
       taskTitle: title.length > 0 ? title : null,
     });
@@ -634,8 +634,8 @@ function handleTaskClaimEvent(payload: Record<string, any>, agentList: Set<strin
 }
 
 function handleTaskAddEvent(payload: Record<string, any>, agentList: Set<string>): void {
-  const owner = String(payload.owner ?? '').toLowerCase();
-  const title = String(payload.title ?? '').slice(0, 40);
+  const owner = String(payload['owner'] ?? '').toLowerCase();
+  const title = String(payload['title'] ?? '').slice(0, 40);
   openTaskCount++;
   pushTickerEvent(title, 'add');
   if (agentList.has(owner)) {
@@ -644,31 +644,31 @@ function handleTaskAddEvent(payload: Record<string, any>, agentList: Set<string>
 }
 
 function handleTaskUpdateEvent(payload: Record<string, any>, agentList: Set<string>): void {
-  const status = String(payload.status ?? '').toLowerCase();
-  const owner = String(payload.owner ?? '').toLowerCase();
-  const tTitle = payload.title ? ` (${String(payload.title).slice(0, 30)})` : '';
+  const status = String(payload['status'] ?? '').toLowerCase();
+  const owner = String(payload['owner'] ?? '').toLowerCase();
+  const tTitle = payload['title'] ? ` (${String(payload['title']).slice(0, 30)})` : '';
   if (status === 'done') {
     openTaskCount = Math.max(0, openTaskCount - 1);
     if (agentList.has(owner)) {
       setAgentActivity(owner, 'idle', 'Done');
     }
-    pushTickerEvent(`${String(payload.taskId ?? '?')}${tTitle} done`, 'done');
+    pushTickerEvent(`${String(payload['taskId'] ?? '?')}${tTitle} done`, 'done');
     emitActivityEvent({
       event: 'task_done',
       agent: owner,
-      detail: `${String(payload.taskId ?? '')}${tTitle}`,
+      detail: `${String(payload['taskId'] ?? '')}${tTitle}`,
     });
   } else if (status === 'blocked') {
     if (agentList.has(owner)) {
-      setAgentActivity(owner, 'error', `Blocked \u2014 ${String(payload.taskId ?? '?')}`);
+      setAgentActivity(owner, 'error', `Blocked \u2014 ${String(payload['taskId'] ?? '?')}`);
     }
-    pushTickerEvent(`${String(payload.taskId ?? '?')}${tTitle} blocked`, 'blocked');
+    pushTickerEvent(`${String(payload['taskId'] ?? '?')}${tTitle} blocked`, 'blocked');
   }
 }
 
 function handleVerifyEvent(payload: Record<string, any>): void {
-  const passed = payload.passed;
-  const taskId = String(payload.taskId ?? '?');
+  const passed = payload['passed'];
+  const taskId = String(payload['taskId'] ?? '?');
   pushTickerEvent(
     `verify ${taskId}: ${passed ? 'PASS' : 'FAIL'}`,
     passed ? 'verify_pass' : 'verify_fail',
@@ -681,17 +681,17 @@ function handleVerifyEvent(payload: Record<string, any>): void {
 }
 
 function handleDecisionEvent(payload: Record<string, any>): void {
-  const title = String(payload.title ?? '').slice(0, 40);
+  const title = String(payload['title'] ?? '').slice(0, 40);
   pushTickerEvent(title, 'decision');
 }
 
 function handleTaskStaleEvent(payload: Record<string, any>, agentList: Set<string>): void {
-  const owner = String(payload.owner ?? '').toLowerCase();
-  const sTitle = payload.title ? ` (${String(payload.title).slice(0, 30)})` : '';
+  const owner = String(payload['owner'] ?? '').toLowerCase();
+  const sTitle = payload['title'] ? ` (${String(payload['title']).slice(0, 30)})` : '';
   if (agentList.has(owner)) {
-    setAgentActivity(owner, 'error', `${String(payload.taskId ?? '')} stale`);
+    setAgentActivity(owner, 'error', `${String(payload['taskId'] ?? '')} stale`);
   }
-  pushTickerEvent(`${String(payload.taskId ?? '?')}${sTitle} stale (${owner})`, 'stale');
+  pushTickerEvent(`${String(payload['taskId'] ?? '?')}${sTitle} stale (${owner})`, 'stale');
 }
 
 function handleSSEEvent(data: string, agents: string[]) {
@@ -707,7 +707,7 @@ function handleSSEEvent(data: string, agents: string[]) {
 
   const agentList = new Set(agents.map((a) => a.toLowerCase()));
 
-  switch (payload.event) {
+  switch (payload['event']) {
     case 'handoff_ack':
       handleHandoffAckEvent(payload, agentList);
       break;

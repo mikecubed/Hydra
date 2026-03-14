@@ -198,7 +198,7 @@ async function executeDiscoveryAgent(
       return null;
     }
     recordCallComplete(handle, result as unknown as Parameters<typeof recordCallComplete>[1]);
-    return result;
+    return result as { ok: boolean; stdout?: string; output?: string; error?: string };
   } catch (err: unknown) {
     recordCallError(handle, err instanceof Error ? err : new Error(String(err)));
     log.warn(`Discovery agent failed: ${err instanceof Error ? err.message : String(err)}`);

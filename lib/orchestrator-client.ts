@@ -148,7 +148,7 @@ async function handleSummary(baseUrl: string, jsonMode: boolean): Promise<void> 
 
 async function handleNext(
   baseUrl: string,
-  options: Record<string, unknown>,
+  options: Record<string, string | boolean>,
   jsonMode: boolean,
 ): Promise<void> {
   const agent = requireOption(options, 'agent');
@@ -201,7 +201,7 @@ async function handleStats(baseUrl: string, jsonMode: boolean): Promise<void> {
   }
 }
 
-function handleModelAssignments(options: Record<string, unknown>): boolean {
+function handleModelAssignments(options: Record<string, string | boolean>): boolean {
   const assignments: { agent: string; model: unknown }[] = [];
   for (const [key, val] of Object.entries(options)) {
     if (AGENT_NAMES.includes(key)) assignments.push({ agent: key, model: val });
@@ -257,7 +257,7 @@ function handleModelShow(): void {
   console.log('');
 }
 
-function handleModel(options: Record<string, unknown>): void {
+function handleModel(options: Record<string, string | boolean>): void {
   if (getOption(options, 'reset', '') === 'true' || process.argv.includes('reset')) {
     setMode(getMode());
     console.log(
@@ -281,7 +281,7 @@ function handleModel(options: Record<string, unknown>): void {
   handleModelShow();
 }
 
-async function handleModelSelect(options: Record<string, unknown>): Promise<void> {
+async function handleModelSelect(options: Record<string, string | boolean>): Promise<void> {
   const { pickAgent, pickModel, applySelection } = await import('./hydra-models-select.ts');
   let agentName: string | null = null;
   for (const [key, val] of Object.entries(options)) {
@@ -363,7 +363,7 @@ function handleInit(): void {
 async function routeReadCommand(
   command: string,
   baseUrl: string,
-  options: Record<string, unknown>,
+  options: Record<string, string | boolean>,
   jsonMode: boolean,
 ): Promise<boolean> {
   switch (command) {
@@ -420,7 +420,7 @@ async function routeReadCommand(
 async function routeTaskCommand(
   command: string,
   baseUrl: string,
-  options: Record<string, unknown>,
+  options: Record<string, string | boolean>,
 ): Promise<boolean> {
   switch (command) {
     case 'task:add':
@@ -475,7 +475,7 @@ async function routeTaskCommand(
 async function routeWriteCommand(
   command: string,
   baseUrl: string,
-  options: Record<string, unknown>,
+  options: Record<string, string | boolean>,
 ): Promise<boolean> {
   const taskHandled = await routeTaskCommand(command, baseUrl, options);
   if (taskHandled) return true;
@@ -553,7 +553,7 @@ async function main() {
 async function executeCommand(
   command: string,
   baseUrl: string,
-  options: Record<string, string>,
+  options: Record<string, string | boolean>,
   jsonMode: boolean,
 ): Promise<void> {
   try {

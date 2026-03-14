@@ -299,11 +299,13 @@ function buildSuggestionFromDecision(
     source: 'auto:rejected-round',
     sourceRef: raw.branchName ?? file,
     area: raw.area ?? 'general',
-    title: raw.improvement.slice(0, 100),
-    description: raw.improvement,
+    title: (raw.improvement ?? '').slice(0, 100),
+    description: raw.improvement ?? '',
     specPath: hasSpec ? specPath : null,
     priority: (raw.score ?? 0) >= 5 ? 'high' : 'medium',
-    tags: [raw.area ?? '', 'imported', raw.verdict].filter((t) => t !== ''),
+    tags: [raw.area ?? '', 'imported', raw.verdict].filter(
+      (t): t is string => t != null && t !== '',
+    ),
     notes: `Imported from ${file}. Score: ${String(raw.score ?? 0)}/10. ${raw.reason ?? ''}`.trim(),
   };
 }
