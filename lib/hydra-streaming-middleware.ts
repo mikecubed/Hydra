@@ -64,6 +64,7 @@ async function retryMiddleware(ctx: MiddlewareCtx, next: () => Promise<unknown>)
   let lastErr: unknown;
   for (let attempt = 0; attempt <= maxRetries; attempt++) {
     try {
+      // eslint-disable-next-line no-await-in-loop -- intentionally sequential: retry loop; each attempt only runs if the previous one threw a 429
       return await next();
     } catch (err: unknown) {
       lastErr = err;
@@ -72,10 +73,12 @@ async function retryMiddleware(ctx: MiddlewareCtx, next: () => Promise<unknown>)
 
       const delay = Math.min(baseDelayMs * 2 ** attempt, maxDelayMs);
       const jitter = delay * 0.1 * Math.random();
+      // eslint-disable-next-line no-await-in-loop -- intentionally sequential: retry loop; must sleep before attempting the next request
       await new Promise<void>((r) => {
         setTimeout(r, delay + jitter);
       });
 
+      // eslint-disable-next-line no-await-in-loop -- intentionally sequential: retry loop; must acquire a rate-limit token before the next attempt
       await acquireRateLimit(ctx.provider);
     }
   }

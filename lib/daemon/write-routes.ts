@@ -11,6 +11,7 @@ import {
   deregisterSession as hubDeregister,
   updateSession as hubUpdate,
 } from '../hydra-hub.ts';
+import { exit } from '../hydra-process.ts';
 
 export async function handleWriteRoute(ctx: WriteRouteCtx): Promise<boolean> {
   const {
@@ -1136,8 +1137,7 @@ export async function handleWriteRoute(ctx: WriteRouteCtx): Promise<boolean> {
     setTimeout(() => {
       server.close(() => {
         ctx.writeStatus({ running: false, stoppedAt: nowIso() });
-        // eslint-disable-next-line n/no-process-exit -- server.close callback requires forced exit after cleanup
-        process.exit(0);
+        exit(0);
       });
     }, 100);
     return true;

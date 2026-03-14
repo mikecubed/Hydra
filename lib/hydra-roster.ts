@@ -85,6 +85,7 @@ export async function runRosterEditor(rl: unknown): Promise<void> {
       rec?.note == null ? null : `Tip: ${rec.note}`,
     ].filter((x): x is string => x !== null);
 
+    // eslint-disable-next-line no-await-in-loop -- intentionally sequential: interactive role-by-role wizard; user must respond to each prompt before seeing the next role
     const actionResult = await promptChoice(rl, {
       title: `Role: ${role}`,
       context: contextLines.join('\n'),
@@ -115,6 +116,7 @@ export async function runRosterEditor(rl: unknown): Promise<void> {
       return { label: a, value: a, description: desc };
     });
 
+    // eslint-disable-next-line no-await-in-loop -- intentionally sequential: interactive role-by-role wizard; agent selection follows the keep/change decision for the same role
     const agentResult = await promptChoice(rl, {
       title: `${role}: Select Agent`,
       context: rec?.models == null ? '' : `Recommended models: ${rec.models.join(', ')}`,
@@ -164,6 +166,7 @@ export async function runRosterEditor(rl: unknown): Promise<void> {
       description: "use the agent's default model",
     });
 
+    // eslint-disable-next-line no-await-in-loop -- intentionally sequential: interactive role-by-role wizard; model selection follows agent selection for the same role
     const modelResult = await promptChoice(rl, {
       title: `${role}: Select Model`,
       context: `Agent: ${newAgent}`,
@@ -192,6 +195,7 @@ export async function runRosterEditor(rl: unknown): Promise<void> {
         description: opt.hint ?? '',
       }));
 
+      // eslint-disable-next-line no-await-in-loop -- intentionally sequential: interactive role-by-role wizard; reasoning effort selection follows model selection for the same role
       const effortResult = await promptChoice(rl, {
         title: `${role}: ${REASONING_TITLES[caps.type] ?? 'Reasoning'}`,
         context: `Model: ${effectiveModel}`,

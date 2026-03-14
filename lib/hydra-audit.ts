@@ -14,6 +14,7 @@ import { loadHydraConfig } from './hydra-config.ts';
 import { getAgent } from './hydra-agents.ts';
 import { expandInvokeArgs } from './hydra-shared/agent-executor.ts';
 import type { AgentDef, HeadlessOpts } from './types.ts';
+import { exit } from './hydra-process.ts';
 
 const spawn = _spawn as (cmd: string, args: string[], opts?: SpawnOptions) => ChildProcess;
 
@@ -1009,8 +1010,7 @@ async function main(): Promise<void> {
 
   if (manifest.length === 0) {
     console.log('   No code files found. Check project path.');
-    // eslint-disable-next-line n/no-process-exit
-    process.exit(1);
+    exit(1);
   }
 
   if (runnableCategories.length === 0) {
@@ -1054,6 +1054,7 @@ async function main(): Promise<void> {
             .replace('{{projectName}}', projectName);
 
           console.log(`  [${agent}] ${def.label}...`);
+          // eslint-disable-next-line no-await-in-loop -- intentionally sequential: categories for the same agent run one-at-a-time to avoid overwhelming a single agent process
           const result = await dispatchToAgent(agent, prompt, PROJECT, ECONOMY, TIMEOUT_MS);
           if (result.code !== 0 && VERBOSE && result.stderr.length > 0) {
             console.log(`  [${agent}] stderr: ${result.stderr.slice(0, 300)}`);
@@ -1121,6 +1122,5 @@ async function main(): Promise<void> {
 main().catch((err: unknown) => {
   const message = err instanceof Error ? err.message : String(err);
   console.error(`Fatal: ${message}`);
-  // eslint-disable-next-line n/no-process-exit
-  process.exit(1);
+  exit(1);
 });

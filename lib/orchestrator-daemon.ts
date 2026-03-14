@@ -75,6 +75,7 @@ import type {
   AgentDef,
 } from './types.ts';
 import pc from 'picocolors';
+import { exit } from './hydra-process.ts';
 
 const config = resolveProject();
 
@@ -483,8 +484,7 @@ function startDaemon(options: Record<string, string>) {
 
   server.on('error', (error: Error) => {
     console.error(`Orchestrator server error: ${error.message}`);
-    // eslint-disable-next-line n/no-process-exit -- server error handler requires forced exit
-    process.exit(1);
+    exit(1);
   });
 
   function autoArchiveIfNeeded() {
@@ -721,8 +721,7 @@ function startDaemon(options: Record<string, string>) {
     server.close(() => {
       writeStatus({ running: false, stoppedAt: nowIso(), signal });
       console.log(SUCCESS('  Daemon stopped'));
-      // eslint-disable-next-line n/no-process-exit -- server.close callback requires forced exit after cleanup
-      process.exit(0);
+      exit(0);
     });
   }
 

@@ -218,6 +218,11 @@ export default [
       // ── Readonly (warn — daemon code has justified mutable state) ─────────
       '@typescript-eslint/prefer-readonly': 'warn',
 
+      // ── Complexity (warn — establish baseline before enforcing as errors) ──
+      complexity: ['warn', 15],
+      'max-lines-per-function': ['warn', { max: 80, skipBlankLines: true, skipComments: true }],
+      'max-depth': ['warn', 4],
+
       // ── Node import resolution (n plugin can't resolve .mjs from .ts context) ──
       'n/no-missing-import': 'off',
 
@@ -278,6 +283,10 @@ export default [
       'no-shadow': 'off',
       'n/no-unpublished-import': 'off',
       'n/no-missing-import': 'off',
+      // complexity rules do not apply to tests — test functions are naturally long
+      complexity: 'off',
+      'max-lines-per-function': 'off',
+      'max-depth': 'off',
     },
   },
 ];
