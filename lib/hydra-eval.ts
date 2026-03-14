@@ -339,6 +339,7 @@ export function generateEvalReport(
 // ── CLI Entry Point ──────────────────────────────────────────────────────────
 
 const isMain =
+  process.argv.length > 1 &&
   process.argv[1] !== '' &&
   path.resolve(process.argv[1]) === path.resolve(fileURLToPath(import.meta.url));
 

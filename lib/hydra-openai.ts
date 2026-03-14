@@ -106,7 +106,9 @@ async function coreStreamOpenAI(
 ): Promise<StreamResult> {
   const apiKey = process.env['OPENAI_API_KEY'] ?? '';
   if (apiKey === '') throw new Error('OPENAI_API_KEY not set');
-  if (cfg.model === '') throw new Error('streamCompletion requires cfg.model to be set');
+  // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition -- runtime defense: cfg.model may be nullish from untyped callers
+  if (cfg.model == null || cfg.model === '')
+    throw new Error('streamCompletion requires cfg.model to be set');
 
   const body = buildOpenAIBody(cfg, messages);
 

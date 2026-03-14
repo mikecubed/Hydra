@@ -405,7 +405,7 @@ function statsCommand(evolveDir: string) {
 async function main() {
   const { options, positionals } = parseArgs(process.argv);
   const positionalZero = positionals[0];
-  const command = positionalZero === '' ? 'list' : positionalZero;
+  const command = positionals.length > 0 && positionalZero !== '' ? positionalZero : 'list';
 
   let config: ReturnType<typeof resolveProject> | undefined;
   try {

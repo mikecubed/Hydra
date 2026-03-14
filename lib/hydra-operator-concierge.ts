@@ -182,7 +182,7 @@ function parseCouncilJsonOutput(result: any): {
       ok: false,
       status: result.status,
       stdout: result.stdout ?? '',
-      stderr: `Failed to parse council JSON: ${(err as Error).message}`,
+      stderr: `Failed to parse council JSON: ${err instanceof Error ? err.message : String(err)}`,
       report: null,
     };
   }
