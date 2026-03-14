@@ -26,7 +26,9 @@ let _cached: VersionInfo | null = null;
 
 function readGit(args: string[]): string | null {
   const r = git(args, repoRoot);
-  return r.status === 0 ? (r.stdout || '').trim() || null : null;
+  if (r.status !== 0) return null;
+  const trimmed = r.stdout.trim();
+  return trimmed === '' ? null : trimmed;
 }
 
 export function getVersion(): VersionInfo {
@@ -45,12 +47,12 @@ export function getVersion(): VersionInfo {
   const dirty = readGit(['status', '--porcelain']);
 
   let full = semver;
-  if (commitCount && shortHash) {
+  if (commitCount != null && shortHash != null) {
     full = `${semver}-${commitCount}-g${shortHash}`;
   }
-  if (dirty) full += '-dirty';
+  if (dirty != null && dirty !== '') full += '-dirty';
 
-  _cached = { semver, commitCount, shortHash, dirty: !!dirty, full };
+  _cached = { semver, commitCount, shortHash, dirty: dirty != null && dirty !== '', full };
   return _cached;
 }
 
