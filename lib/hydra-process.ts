@@ -5,7 +5,7 @@
  * can inject a spy via setExitHandler() without terminating the test process.
  */
 
-type ExitHandler = (code?: number) => void;
+type ExitHandler = (code?: number) => never;
 
 // eslint-disable-next-line n/no-process-exit -- this is the one place where process.exit() is intentionally called
 let _exitHandler: ExitHandler = (code) => process.exit(code);
@@ -22,6 +22,6 @@ export function resetExitHandler(): void {
 }
 
 /** Exit the process (or call the injected test handler). */
-export function exit(code?: number): void {
+export function exit(code?: number): never {
   _exitHandler(code);
 }

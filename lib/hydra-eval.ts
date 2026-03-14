@@ -15,6 +15,7 @@ import { fileURLToPath } from 'node:url';
 import { classifyPrompt } from './hydra-utils.ts';
 import { bestAgentFor, classifyTask, initAgentRegistry } from './hydra-agents.ts';
 import { loadHydraConfig, HYDRA_ROOT } from './hydra-config.ts';
+import { exit } from './hydra-process.ts';
 
 const EVAL_DIR = path.join(HYDRA_ROOT, 'docs', 'coordination', 'eval');
 
@@ -338,8 +339,7 @@ if (isMain) {
 
   if (corpus.length === 0) {
     console.error('No test cases found.');
-    // eslint-disable-next-line n/no-process-exit
-    process.exit(1);
+    exit(1);
   }
 
   console.log('\nEvaluating routing classification...');

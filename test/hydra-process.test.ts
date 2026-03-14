@@ -11,9 +11,9 @@ describe('hydra-process exit handler', () => {
   it('calls the injected handler with the exit code', async () => {
     const { exit, setExitHandler, resetExitHandler } = await import('../lib/hydra-process.ts');
     const codes: number[] = [];
-    setExitHandler((code) => {
+    setExitHandler(((code: number | undefined) => {
       codes.push(code ?? 0);
-    });
+    }) as (code?: number) => never);
     exit(0);
     exit(1);
     resetExitHandler();
