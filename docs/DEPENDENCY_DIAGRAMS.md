@@ -1,6 +1,6 @@
 # Hydra — Dependency, Data-Flow & Component Diagrams
 
-> Generated: 2026-03-13 | Branch: `copilot/audit-source-code-compliance`
+> Generated: March 2026 | Branch: `main`
 > All diagrams use [Mermaid](https://mermaid.js.org/) syntax. Validate with `npm run lint:mermaid`.
 
 ---
@@ -11,16 +11,17 @@
 2. [Component Architecture](#2-component-architecture)
 3. [Module Dependency Graph — Core Layer](#3-module-dependency-graph--core-layer)
 4. [Module Dependency Graph — Full lib/](#4-module-dependency-graph--full-lib)
-5. [Data-Flow: Prompt Dispatch](#5-data-flow-prompt-dispatch)
-6. [Data-Flow: Council Deliberation](#6-data-flow-council-deliberation)
-7. [Data-Flow: Autonomous Evolution](#7-data-flow-autonomous-evolution)
-8. [Data-Flow: Nightly Batch Run](#8-data-flow-nightly-batch-run)
-9. [Sequence: Task Claim → Execute → Result](#9-sequence-task-claim--execute--result)
-10. [Sequence: Operator Console Interaction](#10-sequence-operator-console-interaction)
-11. [State Machine: Daemon Task Lifecycle](#11-state-machine-daemon-task-lifecycle)
-12. [Domain Cluster Map](#12-domain-cluster-map)
-13. [Dependency Fan-In / Fan-Out Heat Map](#13-dependency-fan-in--fan-out-heat-map)
-14. [Cyclic Dependency Graph](#14-cyclic-dependency-graph)
+5. [Architectural Boundary Layer Map](#5-architectural-boundary-layer-map)
+6. [Data-Flow: Prompt Dispatch](#6-data-flow-prompt-dispatch)
+7. [Data-Flow: Council Deliberation](#7-data-flow-council-deliberation)
+8. [Data-Flow: Autonomous Evolution](#8-data-flow-autonomous-evolution)
+9. [Data-Flow: Nightly Batch Run](#9-data-flow-nightly-batch-run)
+10. [Sequence: Task Claim → Execute → Result](#10-sequence-task-claim--execute--result)
+11. [Sequence: Operator Console Interaction](#11-sequence-operator-console-interaction)
+12. [State Machine: Daemon Task Lifecycle](#12-state-machine-daemon-task-lifecycle)
+13. [Domain Cluster Map](#13-domain-cluster-map)
+14. [Dependency Fan-In / Fan-Out Heat Map](#14-dependency-fan-in--fan-out-heat-map)
+15. [Cyclic Dependency Graph](#15-cyclic-dependency-graph)
 
 ---
 
@@ -54,50 +55,56 @@ C4Context
 ## 2. Component Architecture
 
 ```mermaid
-block-beta
-  columns 6
-
-  block:presentation["Presentation Layer"]:6
-    operator["hydra-operator.ts<br/>(6,630 LOC — Operator Console)<br/>"]
-    council["hydra-council.ts<br/>(2,321 LOC — Multi-round Deliberation)"]
-    ui["hydra-ui.ts<br/>(1,561 LOC — Terminal UI)"]
+graph TD
+  subgraph Presentation["🖥 Presentation Layer"]
+    subgraph OperatorREPL["hydra-operator.ts [REPL entry]"]
+      op_cmds["hydra-operator-commands.ts"]
+      op_disp["hydra-operator-dispatch.ts"]
+      op_sess["hydra-operator-session.ts"]
+      op_wkrs["hydra-operator-workers.ts"]
+      op_stat["hydra-operator-status.ts"]
+      op_conc["hydra-operator-concierge.ts / hydra-operator-ui.ts"]
+    end
+    council["hydra-council.ts<br/>(Multi-round Deliberation)"]
+    ui["hydra-ui.ts<br/>(Terminal UI)"]
   end
-  space:6
-  block:domain["Domain / Orchestration Layer"]:6
+
+  subgraph Domain["🔀 Domain / Orchestration Layer"]
     dispatch["hydra-dispatch.ts<br/>(Routing & Dispatch)"]
     tasks["hydra-tasks.ts<br/>(Task Queue Management)"]
-    evolve["hydra-evolve.ts<br/>(3,657 LOC — Auto-evolution)"]
-  end
-  space:6
-  block:config["Configuration & Registry"]:3
-    config2["hydra-config.ts<br/>(1,067 LOC — Central Config Hub<br/>⚠ 23 fan-in dependents)"]
-    agents["hydra-agents.ts<br/>(Agent Plugin Registry)<br/>"]
-    types["types.ts<br/>(Shared Type Definitions)<br/>"]
+    evolve["hydra-evolve.ts<br/>(Auto-evolution)"]
   end
 
-  block:infra["Infrastructure Layer"]:3
-    executor["hydra-shared/agent-executor.ts<br/>(Core Execution Engine)"]
+  subgraph ConfigReg["⚙ Configuration & Registry"]
+    config2["hydra-config.ts<br/>(Central Config Hub — ⚠ 23 fan-in)"]
+    agents["hydra-agents.ts<br/>(Agent Plugin Registry)"]
+    types["types.ts<br/>(Shared Type Definitions)"]
+  end
+
+  subgraph Infra["⚡ Infrastructure Layer"]
+    executor["hydra-shared/agent-executor.ts<br/>(IAgentExecutor — Core Execution Engine)"]
+    budget_gate["hydra-shared/budget-gate.ts<br/>(IBudgetGate interface)"]
     worker["hydra-worker.ts<br/>(Background Workers)"]
     daemon["orchestrator-daemon.ts<br/>(HTTP API, port 4173)"]
   end
-  space:6
-  block:providers["AI Provider Adapters"]:3
+
+  subgraph Providers["🌐 AI Provider Adapters"]
     anthropic["hydra-anthropic.ts"]
     openai["hydra-openai.ts"]
     google["hydra-google.ts"]
   end
 
-  block:observability["Observability"]:3
+  subgraph Obs["📊 Observability"]
     metrics["hydra-metrics.ts"]
     activity["hydra-activity.ts"]
     audit["hydra-audit.ts"]
   end
 
-  presentation --> domain
-  domain --> config
-  domain --> infra
-  infra --> providers
-  infra --> observability
+  Presentation --> Domain
+  Domain --> ConfigReg
+  Domain --> Infra
+  Infra --> Providers
+  Infra --> Obs
 ```
 
 ---
@@ -122,7 +129,8 @@ graph TD
   end
 
   subgraph Execution["⚡ Execution Core"]
-    executor["hydra-shared/agent-executor.ts<br/>⚠ 1,824 LOC, 5 dependents"]
+    executor["hydra-shared/agent-executor.ts<br/>(IAgentExecutor interface)<br/>⚠ 5 dependents"]
+    budget_gate["hydra-shared/budget-gate.ts<br/>(IBudgetGate interface)"]
     worker["hydra-worker.ts"]
     local["hydra-local.ts"]
     model_recovery["hydra-model-recovery.ts"]
@@ -147,6 +155,7 @@ graph TD
   config --> agents
   routing_const --> agents
   codex_helpers --> agents
+  budget_gate --> agents
   agents --> executor
   config --> executor
   local --> executor
@@ -477,7 +486,31 @@ graph LR
 
 ---
 
-## 5. Data-Flow: Prompt Dispatch
+## 5. Architectural Boundary Layer Map
+
+> Shows the 6 enforced architectural boundary layers and their permitted import directions. Enforced by `eslint-plugin-boundaries` at **error** severity.
+
+```mermaid
+graph TD
+  subgraph BoundaryLayers["Boundary Layers (eslint-plugin-boundaries — error severity)"]
+    TEST["test/**<br/>can import: all"]
+    BIN["bin/**<br/>can import: all"]
+    SCRIPTS["scripts/**<br/>can import: all"]
+    LIB["lib/**<br/>can import: shared, lib"]
+    DAEMON["lib/daemon/**<br/>can import: shared, daemon, lib"]
+    SHARED["lib/hydra-shared/**<br/>can import: shared, lib"]
+  end
+  TEST --> LIB
+  TEST --> SHARED
+  BIN --> LIB
+  LIB --> SHARED
+  DAEMON --> SHARED
+  DAEMON --> LIB
+```
+
+---
+
+## 6. Data-Flow: Prompt Dispatch
 
 > Traces a user prompt from the operator console through routing, execution, and back.
 
@@ -518,7 +551,7 @@ flowchart TD
 
 ---
 
-## 6. Data-Flow: Council Deliberation
+## 7. Data-Flow: Council Deliberation
 
 > Multi-round consensus pipeline across Claude → Gemini → Claude → Codex.
 
@@ -567,7 +600,7 @@ sequenceDiagram
 
 ---
 
-## 7. Data-Flow: Autonomous Evolution
+## 8. Data-Flow: Autonomous Evolution
 
 > The `hydra-evolve.ts` self-improvement pipeline — 7-phase cycle.
 
@@ -619,7 +652,7 @@ flowchart LR
 
 ---
 
-## 8. Data-Flow: Nightly Batch Run
+## 9. Data-Flow: Nightly Batch Run
 
 ```mermaid
 flowchart TD
@@ -666,7 +699,7 @@ flowchart TD
 
 ---
 
-## 9. Sequence: Task Claim → Execute → Result
+## 10. Sequence: Task Claim → Execute → Result
 
 > HTTP daemon task lifecycle viewed from a worker's perspective.
 
@@ -712,7 +745,7 @@ sequenceDiagram
 
 ---
 
-## 10. Sequence: Operator Console Interaction
+## 11. Sequence: Operator Console Interaction
 
 ```mermaid
 sequenceDiagram
@@ -753,7 +786,7 @@ sequenceDiagram
 
 ---
 
-## 11. State Machine: Daemon Task Lifecycle
+## 12. State Machine: Daemon Task Lifecycle
 
 ```mermaid
 stateDiagram-v2
@@ -778,7 +811,7 @@ stateDiagram-v2
 
 ---
 
-## 12. Domain Cluster Map
+## 13. Domain Cluster Map
 
 > Shows which modules belong to each logical domain and their inter-domain coupling.
 
@@ -796,7 +829,6 @@ graph TB
 
   subgraph AgentCore["🤖 Agent Core"]
     AG[hydra-agents.ts]
-    CH[codex-helpers.ts]
     AW[agents-wizard.ts]
     AF[agent-forge.ts]
     SA[sub-agents.ts]
@@ -804,8 +836,13 @@ graph TB
     SH[hydra-setup.ts]
   end
 
+  subgraph HydraShared["🔧 hydra-shared/"]
+    EX["agent-executor.ts<br/>(IAgentExecutor)<br/>⚠ 5 dependents"]
+    BG[budget-gate.ts]
+    CH[codex-helpers.ts]
+  end
+
   subgraph ExecInfra["⚡ Execution Infrastructure"]
-    EX["agent-executor.ts<br/>⚠ 1,824 LOC"]
     WK[hydra-worker.ts]
     LO[hydra-local.ts]
     MR[hydra-model-recovery.ts]
@@ -840,7 +877,13 @@ graph TB
   end
 
   subgraph PresentationLayer["🖥 Presentation"]
-    OP["hydra-operator.ts<br/>⚠ 6,630 LOC"]
+    OP["hydra-operator.ts [REPL entry]"]
+    OP_CMD[hydra-operator-commands.ts]
+    OP_DISP[hydra-operator-dispatch.ts]
+    OP_SESS[hydra-operator-session.ts]
+    OP_WKRS[hydra-operator-workers.ts]
+    OP_STAT[hydra-operator-status.ts]
+    OP_CONC[hydra-operator-concierge.ts]
     CO[hydra-council.ts]
     UI[hydra-ui.ts]
     PC[hydra-prompt-choice.ts]
@@ -896,21 +939,30 @@ graph TB
   end
 
   Foundation -->|"config"| AgentCore
+  Foundation -->|"config"| HydraShared
   Foundation -->|"config"| ExecInfra
   Foundation -->|"config"| RoutingLayer
+  AgentCore --> HydraShared
   AgentCore --> ExecInfra
+  HydraShared --> ExecInfra
+  HydraShared --> RoutingLayer
   ExecInfra --> RoutingLayer
   RoutingLayer --> ProviderAdapters
   RoutingLayer --> DaemonHTTP
   ProviderAdapters --> DaemonHTTP
+  HydraShared --> PresentationLayer
   ExecInfra --> PresentationLayer
   AgentCore --> PresentationLayer
   RoutingLayer --> PresentationLayer
   ObservabilityLayer --> PresentationLayer
+  HydraShared --> ObservabilityLayer
   ExecInfra --> ObservabilityLayer
   Foundation -->|"config"| ObservabilityLayer
+  HydraShared --> EvolutionEngine
   ExecInfra --> EvolutionEngine
+  HydraShared --> TaskMgmt
   ExecInfra --> TaskMgmt
+  HydraShared --> NightlyBatch
   ExecInfra --> NightlyBatch
   Integration --> TaskMgmt
   Integration --> NightlyBatch
@@ -923,7 +975,7 @@ graph TB
 
 ---
 
-## 13. Dependency Fan-In / Fan-Out Heat Map
+## 14. Dependency Fan-In / Fan-Out Heat Map
 
 > Fan-in = number of files that import this module. Fan-out = number of lib/ files this module imports.
 > Modules with high fan-in are fragile (many dependents). High fan-out modules are hard to test in isolation.
@@ -967,7 +1019,7 @@ quadrantChart
 
 ---
 
-## 14. Cyclic Dependency Graph
+## 15. Cyclic Dependency Graph
 
 > Three detected cyclic import chains — each breaks tree-shaking, complicates testing, and can cause runtime `undefined` module errors.
 

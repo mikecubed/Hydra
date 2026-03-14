@@ -590,15 +590,15 @@ Parallel-ready tracks after the safety-net gate:
 
 ---
 
-### Phase 4: Shared Abstractions & Architectural Boundaries 🟡
+### Phase 4: Shared Abstractions & Architectural Boundaries ✅
 
 > **Goal**: Reduce duplication and lock in layering after the high-risk splits have landed.
 
-- [ ] Introduce `IAgentExecutor` and migrate consumers
-- [ ] Introduce `IBudgetGate` and eliminate duplicated budget-check paths
-- [ ] Consolidate context-building through `hydra-context.ts`
-- [ ] Enforce architecture layers with `eslint-plugin-boundaries`
-- [ ] Raise coverage targets only after each newly shared abstraction has tests and at least one proving consumer migration
+- [x] Introduce `IAgentExecutor` and migrate consumers
+- [x] Introduce `IBudgetGate` and eliminate duplicated budget-check paths
+- [x] Consolidate context-building through `hydra-context.ts`
+- [x] Enforce architecture layers with `eslint-plugin-boundaries`
+- [x] Raise coverage targets only after each newly shared abstraction has tests and at least one proving consumer migration
 
 **Exit gate**: Shared APIs are narrow, consumers depend on interfaces where practical, and layer rules are enforced instead of aspirational.
 
