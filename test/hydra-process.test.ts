@@ -20,10 +20,25 @@ describe('hydra-process exit handler', () => {
     assert.deepEqual(codes, [0, 1]);
   });
 
-  it('calls process.exit by default when no handler is set', async () => {
-    // We can only verify this at the type/module level — actual process.exit
-    // would terminate the test. Just verify the default is callable.
-    const { resetExitHandler } = await import('../lib/hydra-process.ts');
-    resetExitHandler(); // should not throw
+  it('resetExitHandler restores default state so a new handler can be set', async () => {
+    const { exit, setExitHandler, resetExitHandler } = await import('../lib/hydra-process.ts');
+
+    // Set a custom handler and verify it works
+    let capturedCode: number | undefined;
+    setExitHandler((code) => {
+      capturedCode = code;
+    });
+    exit(42);
+    assert.equal(capturedCode, 42);
+
+    // Reset, then set a different handler — proves reset clears previous state
+    resetExitHandler();
+    setExitHandler((code) => {
+      capturedCode = (code ?? 0) + 1;
+    });
+    exit(5);
+    assert.equal(capturedCode, 6, 'new handler after reset should receive exit code');
+
+    resetExitHandler();
   });
 });
