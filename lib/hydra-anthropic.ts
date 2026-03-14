@@ -16,7 +16,7 @@ interface ChatMessage {
 }
 
 interface AnthropicStreamCfg {
-  model: string;
+  model?: string;
   maxTokens?: number;
   thinkingBudget?: number;
 }
@@ -49,6 +49,97 @@ interface AnthropicBody {
   thinking?: { type: 'enabled'; budget_tokens: number };
 }
 
+interface AnthropicSSEDelta {
+  type?: string;
+  text?: string;
+  output_tokens?: number;
+}
+
+interface AnthropicSSEChunk {
+  type?: string;
+  delta?: AnthropicSSEDelta;
+  usage?: { output_tokens?: number };
+  message?: { usage?: { input_tokens?: number } };
+}
+
+function buildAnthropicBody(
+  messages: ChatMessage[],
+  cfg: AnthropicStreamCfg,
+): { body: AnthropicBody; systemText: string } {
+  let systemText = '';
+  const filteredMessages: { role: string; content: string }[] = [];
+  for (const msg of messages) {
+    if (msg.role === 'system') {
+      systemText += (systemText === '' ? '' : '\n\n') + msg.content;
+    } else {
+      filteredMessages.push({ role: msg.role, content: msg.content });
+    }
+  }
+  const body: AnthropicBody = {
+    model: cfg.model ?? '',
+    messages: filteredMessages,
+    max_tokens: cfg.maxTokens ?? 4096,
+    stream: true,
+  };
+  if (systemText !== '') body.system = systemText;
+  if (cfg.thinkingBudget != null && cfg.thinkingBudget > 0) {
+    body.thinking = { type: 'enabled', budget_tokens: cfg.thinkingBudget };
+  }
+  return { body, systemText };
+}
+
+function parseAnthropicRateLimits(headers: Headers): AnthropicRateLimits {
+  const parse = (h: string | null): number | null => {
+    const v = Number.parseInt(h ?? '');
+    return Number.isNaN(v) ? null : v;
+  };
+  return {
+    remainingRequests: parse(headers.get('anthropic-ratelimit-requests-remaining')),
+    remainingInputTokens: parse(headers.get('anthropic-ratelimit-input-tokens-remaining')),
+    remainingOutputTokens: parse(headers.get('anthropic-ratelimit-output-tokens-remaining')),
+    remainingTokens: parse(headers.get('anthropic-ratelimit-tokens-remaining')),
+    resetRequests: headers.get('anthropic-ratelimit-requests-reset'),
+  };
+}
+
+function updateAnthropicUsage(
+  data: AnthropicSSEChunk,
+  currentUsage: AnthropicUsage | null,
+): AnthropicUsage | null {
+  let usage = currentUsage;
+  if (data.type === 'message_delta' && data.usage != null) {
+    usage ??= { prompt_tokens: 0, completion_tokens: 0 };
+    usage.completion_tokens = data.usage.output_tokens ?? 0;
+  }
+  if (data.type === 'message_start' && data.message?.usage != null) {
+    usage ??= { prompt_tokens: 0, completion_tokens: 0 };
+    usage.prompt_tokens = data.message.usage.input_tokens ?? 0;
+  }
+  return usage;
+}
+
+function parseAnthropicSSELine(
+  line: string,
+  currentUsage: AnthropicUsage | null,
+  onText: (text: string) => void,
+): AnthropicUsage | null {
+  const trimmed = line.trim();
+  if (trimmed === '' || trimmed.startsWith(':')) return currentUsage;
+  if (trimmed.startsWith('event: ')) return currentUsage;
+  if (!trimmed.startsWith('data: ')) return currentUsage;
+  try {
+    const data = JSON.parse(trimmed.slice(6)) as AnthropicSSEChunk;
+    if (data.type === 'content_block_delta' && data.delta?.type === 'text_delta') {
+      const text = data.delta.text;
+      if (text != null && text !== '') onText(text);
+    }
+    return updateAnthropicUsage(data, currentUsage);
+  } catch {
+    // Skip malformed SSE chunks
+  }
+  return currentUsage;
+}
+
 /**
  * Core Anthropic streaming function — ONLY does the HTTP call + SSE parsing.
  * All cross-cutting concerns (rate limit, retry, usage, etc.) are handled by middleware.
@@ -58,44 +149,13 @@ async function coreStreamAnthropic(
   cfg: AnthropicStreamCfg,
   onChunk: ((chunk: string) => void) | undefined,
 ): Promise<AnthropicStreamResult> {
-  const apiKey = process.env['ANTHROPIC_API_KEY'];
-  if (!apiKey) {
-    throw new Error('ANTHROPIC_API_KEY not set');
-  }
-
-  if (!cfg.model) {
+  const apiKey = process.env['ANTHROPIC_API_KEY'] ?? '';
+  if (apiKey === '') throw new Error('ANTHROPIC_API_KEY not set');
+  if (cfg.model == null || cfg.model === '') {
     throw new Error('streamAnthropicCompletion requires cfg.model to be set');
   }
 
-  // Extract system message from array → separate system param (Anthropic requirement)
-  let systemText = '';
-  const filteredMessages = [];
-  for (const msg of messages) {
-    if (msg.role === 'system') {
-      systemText += (systemText ? '\n\n' : '') + msg.content;
-    } else {
-      filteredMessages.push({ role: msg.role, content: msg.content });
-    }
-  }
-
-  const body: AnthropicBody = {
-    model: cfg.model,
-    messages: filteredMessages,
-    max_tokens: cfg.maxTokens ?? 4096,
-    stream: true,
-  };
-
-  if (systemText) {
-    body.system = systemText;
-  }
-
-  // Extended thinking support
-  if (cfg.thinkingBudget && cfg.thinkingBudget > 0) {
-    body.thinking = {
-      type: 'enabled',
-      budget_tokens: cfg.thinkingBudget,
-    };
-  }
+  const { body } = buildAnthropicBody(messages, cfg);
 
   const res = await fetch('https://api.anthropic.com/v1/messages', {
     method: 'POST',
@@ -107,35 +167,16 @@ async function coreStreamAnthropic(
     body: JSON.stringify(body),
   });
 
-  // Capture rate limit headers (Anthropic sends these on every response)
-  const parseRateHeader = (h: string | null): number | null => {
-    const v = Number.parseInt(h ?? '');
-    return Number.isNaN(v) ? null : v;
-  };
-  const rateLimits: AnthropicRateLimits = {
-    remainingRequests: parseRateHeader(res.headers.get('anthropic-ratelimit-requests-remaining')),
-    remainingInputTokens: parseRateHeader(
-      res.headers.get('anthropic-ratelimit-input-tokens-remaining'),
-    ),
-    remainingOutputTokens: parseRateHeader(
-      res.headers.get('anthropic-ratelimit-output-tokens-remaining'),
-    ),
-    remainingTokens: parseRateHeader(res.headers.get('anthropic-ratelimit-tokens-remaining')),
-    resetRequests: res.headers.get('anthropic-ratelimit-requests-reset'),
-  };
+  const rateLimits = parseAnthropicRateLimits(res.headers);
 
   if (!res.ok) {
     const errText = await res.text().catch(() => '');
-    const err = Object.assign(
+    throw Object.assign(
       new Error(`Anthropic API error ${String(res.status)}: ${errText.slice(0, 200)}`),
-      {
-        status: res.status,
-      },
+      { status: res.status },
     );
-    throw err;
   }
 
-  // Parse SSE stream
   if (!res.body) throw new Error('Response body is null');
   const reader = res.body.getReader();
   const decoder = new TextDecoder();
@@ -147,58 +188,16 @@ async function coreStreamAnthropic(
     // eslint-disable-next-line no-await-in-loop -- intentionally sequential: SSE stream must be read chunk-by-chunk in order; each chunk depends on the previous reader state
     const readResult = await reader.read();
     if (readResult.done) break;
-    const value = readResult.value as Uint8Array;
 
-    buffer += decoder.decode(value, { stream: true });
+    buffer += decoder.decode(readResult.value as Uint8Array, { stream: true });
     const lines = buffer.split('\n');
     buffer = lines.pop() ?? '';
 
     for (const line of lines) {
-      const trimmed = line.trim();
-      if (!trimmed || trimmed.startsWith(':')) continue;
-
-      if (trimmed.startsWith('event: ')) continue; // skip event type lines
-
-      if (!trimmed.startsWith('data: ')) continue;
-
-      try {
-        interface AnthropicSSEDelta {
-          type?: string;
-          text?: string;
-          output_tokens?: number;
-        }
-        interface AnthropicSSEChunk {
-          type?: string;
-          delta?: AnthropicSSEDelta;
-          usage?: { output_tokens?: number };
-          message?: { usage?: { input_tokens?: number } };
-        }
-        const data = JSON.parse(trimmed.slice(6)) as AnthropicSSEChunk;
-
-        // content_block_delta → only process text_delta, skip thinking_delta
-        if (
-          data.type === 'content_block_delta' &&
-          data.delta?.type === 'text_delta' &&
-          data.delta.text
-        ) {
-          fullResponse += data.delta.text;
-          if (onChunk) onChunk(data.delta.text);
-        }
-
-        // message_delta → usage (stop reason + output tokens)
-        if (data.type === 'message_delta' && data.usage) {
-          usage ??= { prompt_tokens: 0, completion_tokens: 0 };
-          usage.completion_tokens = data.usage.output_tokens ?? 0;
-        }
-
-        // message_start → input usage
-        if (data.type === 'message_start' && data.message?.usage) {
-          usage ??= { prompt_tokens: 0, completion_tokens: 0 };
-          usage.prompt_tokens = data.message.usage.input_tokens ?? 0;
-        }
-      } catch {
-        // Skip malformed SSE chunks
-      }
+      usage = parseAnthropicSSELine(line, usage, (text) => {
+        fullResponse += text;
+        if (onChunk) onChunk(text);
+      });
     }
   }
 

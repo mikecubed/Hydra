@@ -59,6 +59,29 @@ export interface CommandContext {
   executor?: IAgentExecutor;
 }
 
+function applyModelPairOverride(key: string, value: string): void {
+  if (key === 'mode') {
+    try {
+      setMode(value);
+      console.log(`  ${SUCCESS('\u2713')} Mode ${DIM('\u2192')} ${ACCENT(value)}`);
+    } catch (err: unknown) {
+      console.log(`  ${ERROR((err as Error).message)}`);
+    }
+  } else if (AGENT_NAMES.includes(key)) {
+    if (value === 'default') {
+      const resolved = resetAgentModel(key);
+      console.log(
+        `  ${SUCCESS('\u2713')} ${pc.bold(key)} ${DIM('\u2192')} ${pc.white(resolved)} ${DIM('(following mode)')}`,
+      );
+    } else {
+      const resolved = setActiveModel(key, value);
+      console.log(`  ${SUCCESS('\u2713')} ${pc.bold(key)} ${DIM('\u2192')} ${pc.white(resolved)}`);
+    }
+  } else {
+    console.log(`  ${ERROR('Unknown key:')} ${key}`);
+  }
+}
+
 export async function handleModelCommand(ctx: CommandContext, args: string): Promise<void> {
   if (args) {
     if (args === 'reset') {
@@ -75,28 +98,7 @@ export async function handleModelCommand(ctx: CommandContext, args: string): Pro
       if (eqIdx > 0) {
         const key = pair.slice(0, eqIdx).toLowerCase();
         const value = pair.slice(eqIdx + 1);
-        if (key === 'mode') {
-          try {
-            setMode(value);
-            console.log(`  ${SUCCESS('\u2713')} Mode ${DIM('\u2192')} ${ACCENT(value)}`);
-          } catch (err: unknown) {
-            console.log(`  ${ERROR((err as Error).message)}`);
-          }
-        } else if (AGENT_NAMES.includes(key)) {
-          if (value === 'default') {
-            const resolved = resetAgentModel(key);
-            console.log(
-              `  ${SUCCESS('\u2713')} ${pc.bold(key)} ${DIM('\u2192')} ${pc.white(resolved)} ${DIM('(following mode)')}`,
-            );
-          } else {
-            const resolved = setActiveModel(key, value);
-            console.log(
-              `  ${SUCCESS('\u2713')} ${pc.bold(key)} ${DIM('\u2192')} ${pc.white(resolved)}`,
-            );
-          }
-        } else {
-          console.log(`  ${ERROR('Unknown key:')} ${key}`);
-        }
+        applyModelPairOverride(key, value);
       }
     }
   } else {
@@ -222,157 +224,148 @@ export async function handleModeCommand(ctx: CommandContext, args: string): Prom
   ctx.rl.prompt();
 }
 
-export async function handleTasksCommand(ctx: CommandContext, args: string): Promise<void> {
-  const tasksArg = args.trim().toLowerCase();
+function taskPriorityColor(priority: string): (s: string) => string {
+  if (priority === 'high') return pc.red;
+  if (priority === 'low') return DIM;
+  return pc.yellow;
+}
 
-  if (tasksArg === 'scan') {
-    console.log(`  ${ACCENT('Scanning for work items...')}`);
-    try {
-      const { scanAllSources } = await import('./hydra-tasks-scanner.ts');
-      const scanned = scanAllSources(ctx.config.projectRoot);
-      if (scanned.length === 0) {
-        console.log(`  ${DIM('No tasks found.')}`);
-      } else {
-        console.log('');
-        console.log(sectionHeader(`Scanned Tasks (${String(scanned.length)})`));
-        for (const t of scanned.slice(0, 15)) {
-          let prioColor: (s: string) => string;
-          if (t.priority === 'high') {
-            prioColor = pc.red;
-          } else if (t.priority === 'low') {
-            prioColor = DIM;
-          } else {
-            prioColor = pc.yellow;
-          }
-          console.log(`  ${prioColor(t.priority.padEnd(6))} ${t.title}`);
-          console.log(
-            `         ${DIM(`[${t.source}] ${t.taskType} → ${t.suggestedAgent} | ${t.sourceRef}`)}`,
-          );
-        }
-        if (scanned.length > 15) {
-          console.log(DIM(`  ... and ${String(scanned.length - 15)} more`));
-        }
-        console.log('');
+async function runTasksScan(ctx: CommandContext): Promise<void> {
+  console.log(`  ${ACCENT('Scanning for work items...')}`);
+  try {
+    const { scanAllSources } = await import('./hydra-tasks-scanner.ts');
+    const scanned = scanAllSources(ctx.config.projectRoot);
+    if (scanned.length === 0) {
+      console.log(`  ${DIM('No tasks found.')}`);
+    } else {
+      console.log('');
+      console.log(sectionHeader(`Scanned Tasks (${String(scanned.length)})`));
+      for (const t of scanned.slice(0, 15)) {
+        const prioColor = taskPriorityColor(t.priority);
+        console.log(`  ${prioColor(t.priority.padEnd(6))} ${t.title}`);
+        console.log(
+          `         ${DIM(`[${t.source}] ${t.taskType} → ${t.suggestedAgent} | ${t.sourceRef}`)}`,
+        );
       }
-    } catch (err: unknown) {
-      console.log(`  ${ERROR((err as Error).message)}`);
+      if (scanned.length > 15) {
+        console.log(DIM(`  ... and ${String(scanned.length - 15)} more`));
+      }
+      console.log('');
+    }
+  } catch (err: unknown) {
+    console.log(`  ${ERROR((err as Error).message)}`);
+  }
+  ctx.rl.prompt();
+}
+
+function runTasksRun(ctx: CommandContext, tasksArg: string): void {
+  const cwd = ctx.config.projectRoot;
+  console.log(`  ${ACCENT('Launching tasks runner...')}`);
+  ctx.rl.pause();
+  ctx.destroyStatusBar();
+  const tasksScript = path.join(ctx.HYDRA_ROOT, 'lib', 'hydra-tasks.ts');
+  const tasksArgs = [tasksScript, `project=${cwd}`];
+  const extra = tasksArg.slice('run'.length).trim();
+  if (extra) {
+    tasksArgs.push(...extra.split(/\s+/).filter(Boolean));
+  }
+  const child = spawnHydraNode(tasksArgs[0], tasksArgs.slice(1), {
+    cwd,
+    stdio: 'inherit',
+    shell: process.platform === 'win32',
+  });
+  child.on('close', (code) => {
+    ctx.initStatusBar(ctx.agents);
+    ctx.rl.resume();
+    if (code === 0) {
+      console.log(`  ${SUCCESS('\u2713')} Tasks runner complete`);
+    } else {
+      console.log(`  ${ERROR(`Tasks runner exited with code ${String(code)}`)}`);
     }
     ctx.rl.prompt();
-    return;
-  }
+  });
+}
 
-  if (tasksArg === 'run' || tasksArg.startsWith('run ')) {
-    const cwd = ctx.config.projectRoot;
-    console.log(`  ${ACCENT('Launching tasks runner...')}`);
-    ctx.rl.pause();
-    ctx.destroyStatusBar();
-    const tasksScript = path.join(ctx.HYDRA_ROOT, 'lib', 'hydra-tasks.ts');
-    const tasksArgs = [tasksScript, `project=${cwd}`];
-    const extra = tasksArg.slice('run'.length).trim();
-    if (extra) {
-      tasksArgs.push(...extra.split(/\s+/).filter(Boolean));
-    }
-    const child = spawnHydraNode(tasksArgs[0], tasksArgs.slice(1), {
-      cwd,
-      stdio: 'inherit',
-      shell: process.platform === 'win32',
-    });
-    child.on('close', (code) => {
-      ctx.initStatusBar(ctx.agents);
-      ctx.rl.resume();
-      if (code === 0) {
-        console.log(`  ${SUCCESS('\u2713')} Tasks runner complete`);
-      } else {
-        console.log(`  ${ERROR(`Tasks runner exited with code ${String(code)}`)}`);
-      }
-      ctx.rl.prompt();
-    });
-    return;
-  }
-
-  if (tasksArg === 'review') {
-    const cwd = ctx.config.projectRoot;
-    ctx.rl.pause();
-    ctx.destroyStatusBar();
-    const reviewScript = path.join(ctx.HYDRA_ROOT, 'lib', 'hydra-tasks-review.ts');
-    const child = spawnHydraNode(reviewScript, ['review'], {
-      cwd,
-      stdio: 'inherit',
-      shell: process.platform === 'win32',
-    });
-
-    child.on('close', async () => {
-      try {
-        const { state } = (await request('GET', ctx.baseUrl, '/state')) as any;
-        const conflictTasks = (state.tasks ?? []).filter((t: any) => t.worktreeConflict);
-        if (conflictTasks.length > 0) {
-          console.log('');
-          console.log(sectionHeader('Conflict Worktrees'));
+function runTasksReview(ctx: CommandContext): void {
+  const cwd = ctx.config.projectRoot;
+  ctx.rl.pause();
+  ctx.destroyStatusBar();
+  const reviewScript = path.join(ctx.HYDRA_ROOT, 'lib', 'hydra-tasks-review.ts');
+  const child = spawnHydraNode(reviewScript, ['review'], {
+    cwd,
+    stdio: 'inherit',
+    shell: process.platform === 'win32',
+  });
+  child.on('close', async () => {
+    try {
+      const { state } = (await request('GET', ctx.baseUrl, '/state')) as any;
+      const conflictTasks = (state.tasks ?? []).filter((t: any) => t.worktreeConflict);
+      if (conflictTasks.length > 0) {
+        console.log('');
+        console.log(sectionHeader('Conflict Worktrees'));
+        console.log(
+          `  ${WARNING('\u26A0')}  ${String(conflictTasks.length)} task worktree${conflictTasks.length > 1 ? 's' : ''} have merge conflicts and were preserved for manual resolution:`,
+        );
+        console.log('');
+        for (const t of conflictTasks) {
+          const relPath = t.worktreePath
+            ? path.relative(ctx.config.projectRoot, t.worktreePath)
+            : `hydra/task/${String(t.id)}`;
+          console.log(`  ${ACCENT(t.id)} ${DIM(t.title ?? '(no title)')}`);
+          console.log(`    ${DIM('Worktree:')} ${relPath}`);
           console.log(
-            `  ${WARNING('\u26A0')}  ${String(conflictTasks.length)} task worktree${conflictTasks.length > 1 ? 's' : ''} have merge conflicts and were preserved for manual resolution:`,
+            `    ${DIM('Branch:')}   ${String(t.worktreeBranch ?? `hydra/task/${String(t.id)}`)}`,
           );
           console.log('');
-          for (const t of conflictTasks) {
-            const relPath = t.worktreePath
-              ? path.relative(ctx.config.projectRoot, t.worktreePath)
-              : `hydra/task/${String(t.id)}`;
-            console.log(`  ${ACCENT(t.id)} ${DIM(t.title ?? '(no title)')}`);
-            console.log(`    ${DIM('Worktree:')} ${relPath}`);
-            console.log(
-              `    ${DIM('Branch:')}   ${String(t.worktreeBranch ?? `hydra/task/${String(t.id)}`)}`,
-            );
-            console.log('');
-            console.log(`    ${DIM('Inspect:')}  git worktree list`);
-            console.log(
-              `    ${DIM('Diff:')}     git diff ${String(t.worktreeBranch ?? `hydra/task/${String(t.id)}`)}`,
-            );
-            console.log('');
-          }
+          console.log(`    ${DIM('Inspect:')}  git worktree list`);
           console.log(
-            `  ${DIM('To discard a conflict worktree, use :cleanup — stale worktrees appear after 24h.')}`,
+            `    ${DIM('Diff:')}     git diff ${String(t.worktreeBranch ?? `hydra/task/${String(t.id)}`)}`,
           );
-          console.log(
-            `  ${DIM('To resolve manually: edit the conflicted files, commit, then run :cleanup.')}`,
-          );
+          console.log('');
         }
-      } catch {
-        /* daemon may be unavailable — skip silently */
+        console.log(
+          `  ${DIM('To discard a conflict worktree, use :cleanup — stale worktrees appear after 24h.')}`,
+        );
+        console.log(
+          `  ${DIM('To resolve manually: edit the conflicted files, commit, then run :cleanup.')}`,
+        );
       }
-      ctx.initStatusBar(ctx.agents);
-      ctx.rl.resume();
-      ctx.rl.prompt();
-    });
-    return;
-  }
+    } catch {
+      /* daemon may be unavailable — skip silently */
+    }
+    ctx.initStatusBar(ctx.agents);
+    ctx.rl.resume();
+    ctx.rl.prompt();
+  });
+}
 
-  if (tasksArg === 'status') {
-    const reviewScript = path.join(ctx.HYDRA_ROOT, 'lib', 'hydra-tasks-review.ts');
-    const child = spawnHydraNode(reviewScript, ['status'], {
-      cwd: ctx.config.projectRoot,
-      stdio: 'inherit',
-      shell: process.platform === 'win32',
-    });
-    child.on('error', () => {});
-    child.on('close', () => {
-      ctx.rl.prompt();
-    });
-    return;
-  }
+function runTasksStatus(ctx: CommandContext): void {
+  const reviewScript = path.join(ctx.HYDRA_ROOT, 'lib', 'hydra-tasks-review.ts');
+  const child = spawnHydraNode(reviewScript, ['status'], {
+    cwd: ctx.config.projectRoot,
+    stdio: 'inherit',
+    shell: process.platform === 'win32',
+  });
+  child.on('error', () => {});
+  child.on('close', () => {
+    ctx.rl.prompt();
+  });
+}
 
-  if (tasksArg === 'clean') {
-    const reviewScript = path.join(ctx.HYDRA_ROOT, 'lib', 'hydra-tasks-review.ts');
-    const child = spawnHydraNode(reviewScript, ['clean'], {
-      cwd: ctx.config.projectRoot,
-      stdio: 'inherit',
-      shell: process.platform === 'win32',
-    });
-    child.on('error', () => {});
-    child.on('close', () => {
-      ctx.rl.prompt();
-    });
-    return;
-  }
+function runTasksClean(ctx: CommandContext): void {
+  const reviewScript = path.join(ctx.HYDRA_ROOT, 'lib', 'hydra-tasks-review.ts');
+  const child = spawnHydraNode(reviewScript, ['clean'], {
+    cwd: ctx.config.projectRoot,
+    stdio: 'inherit',
+    shell: process.platform === 'win32',
+  });
+  child.on('error', () => {});
+  child.on('close', () => {
+    ctx.rl.prompt();
+  });
+}
 
+async function showTasksList(ctx: CommandContext): Promise<void> {
   try {
     const { state } = (await request('GET', ctx.baseUrl, '/state')) as any;
     const active = state.tasks.filter((t: any) => t.status !== 'cancelled' && t.status !== 'done');
@@ -395,171 +388,210 @@ export async function handleTasksCommand(ctx: CommandContext, args: string): Pro
   ctx.rl.prompt();
 }
 
+export async function handleTasksCommand(ctx: CommandContext, args: string): Promise<void> {
+  const tasksArg = args.trim().toLowerCase();
+  if (tasksArg === 'scan') {
+    await runTasksScan(ctx);
+    return;
+  }
+  if (tasksArg === 'run' || tasksArg.startsWith('run ')) {
+    runTasksRun(ctx, tasksArg);
+    return;
+  }
+  if (tasksArg === 'review') {
+    runTasksReview(ctx);
+    return;
+  }
+  if (tasksArg === 'status') {
+    runTasksStatus(ctx);
+    return;
+  }
+  if (tasksArg === 'clean') {
+    runTasksClean(ctx);
+    return;
+  }
+  await showTasksList(ctx);
+}
+
+function showAgentsRegistry(): void {
+  console.log('');
+  console.log(sectionHeader('Agent Registry'));
+  const physical = listAgents({ type: 'physical' });
+  const virtual = listAgents({ type: 'virtual' });
+
+  console.log(`  ${pc.bold('Physical Agents')} (${String(physical.length)})`);
+  for (const a of physical) {
+    const model = getActiveModel(a.name) ?? DIM('default');
+    console.log(`    ${colorAgent(a.name)} ${DIM(a.label)}  ${DIM('model:')} ${pc.white(model)}`);
+  }
+
+  if (virtual.length > 0) {
+    console.log('');
+    console.log(`  ${pc.bold('Virtual Sub-Agents')} (${String(virtual.length)})`);
+    for (const a of virtual) {
+      const status = a.enabled ? SUCCESS('on') : ERROR('off');
+      const base = DIM(`\u2192 ${String(a.baseAgent)}`);
+      console.log(`    ${colorAgent(a.name)} ${DIM(a.displayName)}  ${base}  [${status}]`);
+    }
+  } else {
+    console.log('');
+    console.log(`  ${DIM('No virtual sub-agents registered.')}`);
+  }
+
+  console.log('');
+  console.log(DIM('  :agents add              Add custom API agent (with provider preset picker)'));
+  console.log(DIM('  :agents info <name>      Show agent details'));
+  console.log(DIM('  :agents enable <name>    Enable a virtual agent'));
+  console.log(DIM('  :agents disable <name>   Disable a virtual agent'));
+  console.log(DIM('  :agents list virtual     List virtual agents only'));
+  console.log(DIM('  :agents list physical    List physical agents only'));
+  console.log('');
+}
+
+function handleAgentsList(filterType: string): void {
+  const opts: any = {};
+  if (filterType === 'virtual') opts.type = 'virtual';
+  else if (filterType === 'physical') opts.type = 'physical';
+  const list = listAgents(opts);
+  console.log('');
+  console.log(sectionHeader(`Agents (${filterType})`));
+  for (const a of list) {
+    const typeTag = a.type === 'virtual' ? DIM('[virtual]') : DIM('[physical]');
+    const status = a.enabled ? SUCCESS('on') : ERROR('off');
+    console.log(`    ${colorAgent(a.name)} ${typeTag} ${DIM(a.displayName)}  [${status}]`);
+  }
+  if (list.length === 0) console.log(`    ${DIM('(none)')}`);
+  console.log('');
+}
+
+function handleAgentsInfo(targetName: string | undefined): void {
+  if (!targetName) {
+    console.log(`  ${ERROR('Usage:')} :agents info <name>`);
+    return;
+  }
+  const agentDef = getAgent(targetName);
+  if (!agentDef) {
+    console.log(`  ${ERROR('Unknown agent:')} ${targetName}`);
+    return;
+  }
+  console.log('');
+  console.log(sectionHeader(`Agent: ${String(agentDef.displayName)}`));
+  console.log(`  ${pc.bold('Name:')}      ${agentDef.name}`);
+  console.log(`  ${pc.bold('Type:')}      ${agentDef.type}`);
+  console.log(`  ${pc.bold('Label:')}     ${agentDef.label}`);
+  console.log(`  ${pc.bold('Enabled:')}   ${agentDef.enabled ? SUCCESS('yes') : ERROR('no')}`);
+  if (agentDef.baseAgent) {
+    console.log(`  ${pc.bold('Base:')}      ${colorAgent(agentDef.baseAgent)}`);
+  }
+  if (agentDef.councilRole) {
+    console.log(`  ${pc.bold('Council:')}   ${agentDef.councilRole}`);
+  }
+  if (agentDef.strengths!.length > 0) {
+    console.log(`  ${pc.bold('Strengths:')} ${agentDef.strengths!.join(', ')}`);
+  }
+  if (agentDef.tags!.length > 0) {
+    console.log(`  ${pc.bold('Tags:')}      ${agentDef.tags!.join(', ')}`);
+  }
+  const affinities = Object.entries(agentDef.taskAffinity).sort(([, a], [, b]) => b - a);
+  if (affinities.length > 0) {
+    console.log(`  ${pc.bold('Affinities:')}`);
+    for (const [type, score] of affinities) {
+      const bar = '\u2588'.repeat(Math.round(score * 20));
+      const pad = ' '.repeat(20 - Math.round(score * 20));
+      console.log(`    ${type.padEnd(16)} ${DIM(bar)}${DIM(pad)} ${(score * 100).toFixed(0)}%`);
+    }
+  }
+  if (agentDef.rolePrompt) {
+    console.log(`  ${pc.bold('Role Prompt:')}`);
+    const lines = agentDef.rolePrompt.split('\n').slice(0, 6);
+    for (const l of lines) console.log(`    ${DIM(l)}`);
+    if (agentDef.rolePrompt.split('\n').length > 6) console.log(`    ${DIM('...')}`);
+  }
+  console.log('');
+}
+
+function handleAgentsToggle(subCmd: string, targetName: string | undefined): void {
+  if (!targetName) {
+    console.log(`  ${ERROR('Usage:')} :agents ${subCmd} <name>`);
+    return;
+  }
+  const agentDef = getAgent(targetName);
+  if (!agentDef) {
+    console.log(`  ${ERROR('Unknown agent:')} ${targetName}`);
+  } else if (agentDef.type === 'physical') {
+    console.log(`  ${ERROR('Cannot')} ${subCmd} physical agents.`);
+  } else {
+    setAgentEnabled(targetName, subCmd === 'enable');
+    console.log(`  ${SUCCESS('\u2713')} ${colorAgent(targetName)} ${subCmd}d`);
+  }
+}
+
+function handleAgentsRemove(targetName: string | undefined): void {
+  if (!targetName) {
+    console.log(`  ${ERROR('Usage:')} :agents remove <name>`);
+    return;
+  }
+  const cfg = loadHydraConfig();
+  const before = cfg.agents.customAgents;
+  const customAgents = before.filter((a) => a.name !== targetName);
+  if (customAgents.length === before.length) {
+    console.log(`  ${ERROR('Not found:')} "${targetName}" is not a custom agent`);
+  } else {
+    saveHydraConfig({ agents: { ...cfg.agents, customAgents } });
+    console.log(
+      `  ${SUCCESS('\u2713')} Removed agent "${targetName}" from config (restart to take effect)`,
+    );
+  }
+}
+
+async function handleAgentsTest(
+  executor: IAgentExecutor,
+  targetName: string | undefined,
+): Promise<void> {
+  if (!targetName) {
+    console.log(`  ${ERROR('Usage:')} :agents test <name>`);
+    return;
+  }
+  const agentDef = getAgent(targetName);
+  if (!agentDef) {
+    console.log(`  ${ERROR('Not found:')} agent "${targetName}" not in registry`);
+    return;
+  }
+  console.log(`  Testing agent "${targetName}"...`);
+  try {
+    const result = await executor.executeAgent(targetName, 'Say "hello" in one sentence.');
+    if (result.ok) {
+      console.log(`  ${SUCCESS('OK')} ${DIM(result.output.slice(0, 200) || '(empty output)')}`);
+    } else {
+      console.log(
+        `  ${ERROR('FAIL')} ${String(result.errorCategory)}: ${result.stderr.slice(0, 200)}`,
+      );
+    }
+  } catch (err: unknown) {
+    console.log(`  ${ERROR('ERROR')} ${(err as Error).message}`);
+  }
+}
+
 export async function handleAgentsCommand(ctx: CommandContext, args: string): Promise<void> {
   const executor: IAgentExecutor = ctx.executor ?? new DefaultAgentExecutor();
   const agentParts = args.split(/\s+/);
   const agentSubCmd = agentParts[0] || '';
 
   if (!agentSubCmd) {
-    console.log('');
-    console.log(sectionHeader('Agent Registry'));
-    const physical = listAgents({ type: 'physical' });
-    const virtual = listAgents({ type: 'virtual' });
-
-    console.log(`  ${pc.bold('Physical Agents')} (${String(physical.length)})`);
-    for (const a of physical) {
-      const model = getActiveModel(a.name) ?? DIM('default');
-      console.log(`    ${colorAgent(a.name)} ${DIM(a.label)}  ${DIM('model:')} ${pc.white(model)}`);
-    }
-
-    if (virtual.length > 0) {
-      console.log('');
-      console.log(`  ${pc.bold('Virtual Sub-Agents')} (${String(virtual.length)})`);
-      for (const a of virtual) {
-        const status = a.enabled ? SUCCESS('on') : ERROR('off');
-        const base = DIM(`\u2192 ${String(a.baseAgent)}`);
-        console.log(`    ${colorAgent(a.name)} ${DIM(a.displayName)}  ${base}  [${status}]`);
-      }
-    } else {
-      console.log('');
-      console.log(`  ${DIM('No virtual sub-agents registered.')}`);
-    }
-
-    console.log('');
-    console.log(
-      DIM('  :agents add              Add custom API agent (with provider preset picker)'),
-    );
-    console.log(DIM('  :agents info <name>      Show agent details'));
-    console.log(DIM('  :agents enable <name>    Enable a virtual agent'));
-    console.log(DIM('  :agents disable <name>   Disable a virtual agent'));
-    console.log(DIM('  :agents list virtual     List virtual agents only'));
-    console.log(DIM('  :agents list physical    List physical agents only'));
-    console.log('');
+    showAgentsRegistry();
   } else if (agentSubCmd === 'list') {
-    const filterType = agentParts[1] || 'all';
-    const opts: any = {};
-    if (filterType === 'virtual') opts.type = 'virtual';
-    else if (filterType === 'physical') opts.type = 'physical';
-    const list = listAgents(opts);
-    console.log('');
-    console.log(sectionHeader(`Agents (${filterType})`));
-    for (const a of list) {
-      const typeTag = a.type === 'virtual' ? DIM('[virtual]') : DIM('[physical]');
-      const status = a.enabled ? SUCCESS('on') : ERROR('off');
-      console.log(`    ${colorAgent(a.name)} ${typeTag} ${DIM(a.displayName)}  [${status}]`);
-    }
-    if (list.length === 0) console.log(`    ${DIM('(none)')}`);
-    console.log('');
+    handleAgentsList(agentParts[1] || 'all');
   } else if (agentSubCmd === 'info') {
-    const targetName = agentParts[1];
-    if (targetName) {
-      const agentDef = getAgent(targetName);
-      if (agentDef) {
-        console.log('');
-        console.log(sectionHeader(`Agent: ${String(agentDef.displayName)}`));
-        console.log(`  ${pc.bold('Name:')}      ${agentDef.name}`);
-        console.log(`  ${pc.bold('Type:')}      ${agentDef.type}`);
-        console.log(`  ${pc.bold('Label:')}     ${agentDef.label}`);
-        console.log(
-          `  ${pc.bold('Enabled:')}   ${agentDef.enabled ? SUCCESS('yes') : ERROR('no')}`,
-        );
-        if (agentDef.baseAgent) {
-          console.log(`  ${pc.bold('Base:')}      ${colorAgent(agentDef.baseAgent)}`);
-        }
-        if (agentDef.councilRole) {
-          console.log(`  ${pc.bold('Council:')}   ${agentDef.councilRole}`);
-        }
-        if (agentDef.strengths!.length > 0) {
-          console.log(`  ${pc.bold('Strengths:')} ${agentDef.strengths!.join(', ')}`);
-        }
-        if (agentDef.tags!.length > 0) {
-          console.log(`  ${pc.bold('Tags:')}      ${agentDef.tags!.join(', ')}`);
-        }
-        const affinities = Object.entries(agentDef.taskAffinity).sort(([, a], [, b]) => b - a);
-        if (affinities.length > 0) {
-          console.log(`  ${pc.bold('Affinities:')}`);
-          for (const [type, score] of affinities) {
-            const bar = '\u2588'.repeat(Math.round(score * 20));
-            const pad = ' '.repeat(20 - Math.round(score * 20));
-            console.log(
-              `    ${type.padEnd(16)} ${DIM(bar)}${DIM(pad)} ${(score * 100).toFixed(0)}%`,
-            );
-          }
-        }
-        if (agentDef.rolePrompt) {
-          console.log(`  ${pc.bold('Role Prompt:')}`);
-          const lines = agentDef.rolePrompt.split('\n').slice(0, 6);
-          for (const l of lines) console.log(`    ${DIM(l)}`);
-          if (agentDef.rolePrompt.split('\n').length > 6) console.log(`    ${DIM('...')}`);
-        }
-        console.log('');
-      } else {
-        console.log(`  ${ERROR('Unknown agent:')} ${targetName}`);
-      }
-    } else {
-      console.log(`  ${ERROR('Usage:')} :agents info <name>`);
-    }
+    handleAgentsInfo(agentParts[1]);
   } else if (agentSubCmd === 'enable' || agentSubCmd === 'disable') {
-    const targetName = agentParts[1];
-    if (targetName) {
-      const agentDef = getAgent(targetName);
-      if (!agentDef) {
-        console.log(`  ${ERROR('Unknown agent:')} ${targetName}`);
-      } else if (agentDef.type === 'physical') {
-        console.log(`  ${ERROR('Cannot')} ${agentSubCmd} physical agents.`);
-      } else {
-        setAgentEnabled(targetName, agentSubCmd === 'enable');
-        console.log(`  ${SUCCESS('\u2713')} ${colorAgent(targetName)} ${agentSubCmd}d`);
-      }
-    } else {
-      console.log(`  ${ERROR('Usage:')} :agents ${agentSubCmd} <name>`);
-    }
+    handleAgentsToggle(agentSubCmd, agentParts[1]);
   } else if (agentSubCmd === 'add') {
     const { runAgentsWizard } = await import('./hydra-agents-wizard.ts');
     await runAgentsWizard(ctx.rl);
   } else if (agentSubCmd === 'remove') {
-    const targetName = agentParts[1]?.toLowerCase();
-    if (targetName) {
-      const cfg = loadHydraConfig();
-      const before = cfg.agents.customAgents;
-      const customAgents = before.filter((a) => a.name !== targetName);
-      if (customAgents.length === before.length) {
-        console.log(`  ${ERROR('Not found:')} "${targetName}" is not a custom agent`);
-      } else {
-        saveHydraConfig({ agents: { ...cfg.agents, customAgents } });
-        console.log(
-          `  ${SUCCESS('\u2713')} Removed agent "${targetName}" from config (restart to take effect)`,
-        );
-      }
-    } else {
-      console.log(`  ${ERROR('Usage:')} :agents remove <name>`);
-    }
+    handleAgentsRemove(agentParts[1]?.toLowerCase());
   } else if (agentSubCmd === 'test') {
-    const targetName = agentParts[1]?.toLowerCase();
-    if (targetName) {
-      const agentDef = getAgent(targetName);
-      if (agentDef) {
-        console.log(`  Testing agent "${targetName}"...`);
-        try {
-          const result = await executor.executeAgent(targetName, 'Say "hello" in one sentence.');
-          if (result.ok) {
-            console.log(
-              `  ${SUCCESS('OK')} ${DIM(result.output.slice(0, 200) || '(empty output)')}`,
-            );
-          } else {
-            console.log(
-              `  ${ERROR('FAIL')} ${String(result.errorCategory)}: ${result.stderr.slice(0, 200)}`,
-            );
-          }
-        } catch (err: unknown) {
-          console.log(`  ${ERROR('ERROR')} ${(err as Error).message}`);
-        }
-      } else {
-        console.log(`  ${ERROR('Not found:')} agent "${targetName}" not in registry`);
-      }
-    } else {
-      console.log(`  ${ERROR('Usage:')} :agents test <name>`);
-    }
+    await handleAgentsTest(executor, agentParts[1]?.toLowerCase());
   } else {
     console.log(`  ${ERROR('Unknown subcommand:')} ${agentSubCmd}`);
     console.log(`  ${DIM('Usage: :agents [add|remove|test|info|list|enable|disable] [name]')}`);
@@ -616,6 +648,47 @@ export async function handleCleanupCommand(ctx: CommandContext): Promise<void> {
   ctx.rl.prompt();
 }
 
+function handlePrCreate(ctx: CommandContext, prRest: string): void {
+  const branch = prRest || undefined;
+  console.log(`  ${DIM('Pushing branch and creating PR...')}`);
+  const result = pushBranchAndCreatePR({ cwd: ctx.config.projectRoot, branch });
+  if (result.ok) {
+    console.log(`  ${SUCCESS('PR created:')} ${String(result.url)}`);
+  } else {
+    console.log(`  ${ERROR('Failed:')} ${result.error ?? 'unknown error'}`);
+  }
+}
+
+function handlePrList(ctx: CommandContext): void {
+  const prs = listPRs({ cwd: ctx.config.projectRoot });
+  if (prs.length === 0) {
+    console.log(`  ${DIM('No open pull requests.')}`);
+  } else {
+    console.log(`  ${pc.bold(`Open PRs (${String(prs.length)}):`)}`);
+    for (const pr of prs) {
+      console.log(
+        `    ${ACCENT(`#${String(pr.number)}`)} ${String(pr.title)} ${DIM(`(${String(pr.headRefName)} by ${String(pr.author)})`)}`,
+      );
+    }
+  }
+}
+
+function handlePrView(ctx: CommandContext, prRest: string): void {
+  const pr = getPR({ cwd: ctx.config.projectRoot, ref: prRest });
+  if (pr) {
+    console.log(`  ${ACCENT(`#${String(pr.number)}`)} ${String(pr.title)}`);
+    console.log(`  ${label('State')}       ${String(pr.state)}`);
+    console.log(`  ${label('Branch')}      ${String(pr.headRefName)} → ${String(pr.baseRefName)}`);
+    console.log(`  ${label('Author')}      ${String(pr.author?.login ?? pr.author ?? '?')}`);
+    console.log(
+      `  ${label('Changes')}     ${SUCCESS(`+${String(pr.additions ?? 0)}`)} ${ERROR(`-${String(pr.deletions ?? 0)}`)}`,
+    );
+    if (pr.url) console.log(`  ${label('URL')}         ${String(pr.url)}`);
+  } else {
+    console.log(`  ${ERROR('PR not found:')} ${prRest}`);
+  }
+}
+
 export async function handlePrCommand(ctx: CommandContext, args: string): Promise<void> {
   const prCmd = args.split(/\s+/)[0]?.toLowerCase() || '';
   const prRest = args.slice(prCmd.length).trim();
@@ -627,47 +700,16 @@ export async function handlePrCommand(ctx: CommandContext, args: string): Promis
   }
 
   if (prCmd === 'create') {
-    const branch = prRest || undefined;
-    console.log(`  ${DIM('Pushing branch and creating PR...')}`);
-    const result = pushBranchAndCreatePR({ cwd: ctx.config.projectRoot, branch });
-    if (result.ok) {
-      console.log(`  ${SUCCESS('PR created:')} ${String(result.url)}`);
-    } else {
-      console.log(`  ${ERROR('Failed:')} ${result.error ?? 'unknown error'}`);
-    }
+    handlePrCreate(ctx, prRest);
   } else if (prCmd === 'list') {
-    const prs = listPRs({ cwd: ctx.config.projectRoot });
-    if (prs.length === 0) {
-      console.log(`  ${DIM('No open pull requests.')}`);
-    } else {
-      console.log(`  ${pc.bold(`Open PRs (${String(prs.length)}):`)}`);
-      for (const pr of prs) {
-        console.log(
-          `    ${ACCENT(`#${String(pr.number)}`)} ${String(pr.title)} ${DIM(`(${String(pr.headRefName)} by ${String(pr.author)})`)}`,
-        );
-      }
-    }
+    handlePrList(ctx);
   } else if (prCmd === 'view') {
     if (!prRest) {
       console.log(`  ${ERROR('Usage:')} :pr view <number>`);
       ctx.rl.prompt();
       return;
     }
-    const pr = getPR({ cwd: ctx.config.projectRoot, ref: prRest });
-    if (pr) {
-      console.log(`  ${ACCENT(`#${String(pr.number)}`)} ${String(pr.title)}`);
-      console.log(`  ${label('State')}       ${String(pr.state)}`);
-      console.log(
-        `  ${label('Branch')}      ${String(pr.headRefName)} → ${String(pr.baseRefName)}`,
-      );
-      console.log(`  ${label('Author')}      ${String(pr.author?.login ?? pr.author ?? '?')}`);
-      console.log(
-        `  ${label('Changes')}     ${SUCCESS(`+${String(pr.additions ?? 0)}`)} ${ERROR(`-${String(pr.deletions ?? 0)}`)}`,
-      );
-      if (pr.url) console.log(`  ${label('URL')}         ${String(pr.url)}`);
-    } else {
-      console.log(`  ${ERROR('PR not found:')} ${prRest}`);
-    }
+    handlePrView(ctx, prRest);
   } else {
     console.log(`  ${ERROR('Usage:')} :pr <create|list|view> [args]`);
   }
@@ -675,62 +717,12 @@ export async function handlePrCommand(ctx: CommandContext, args: string): Promis
   ctx.rl.prompt();
 }
 
-export async function handleNightlyCommand(ctx: CommandContext, args: string): Promise<void> {
-  const nightlyArg = args.trim().toLowerCase();
-
-  if (nightlyArg === 'status') {
-    const reviewScript = path.join(ctx.HYDRA_ROOT, 'lib', 'hydra-nightly-review.ts');
-    const child = spawnHydraNode(reviewScript, ['status'], {
-      cwd: ctx.config.projectRoot,
-      stdio: 'inherit',
-      shell: process.platform === 'win32',
-    });
-    child.on('error', () => {});
-    child.on('close', () => {
-      ctx.rl.prompt();
-    });
-    return;
-  }
-
-  if (nightlyArg === 'review') {
-    const cwd = ctx.config.projectRoot;
-    ctx.rl.pause();
-    ctx.destroyStatusBar();
-    const reviewScript = path.join(ctx.HYDRA_ROOT, 'lib', 'hydra-nightly-review.ts');
-    const child = spawnHydraNode(reviewScript, ['review'], {
-      cwd,
-      stdio: 'inherit',
-      shell: process.platform === 'win32',
-    });
-    child.on('close', () => {
-      ctx.initStatusBar(ctx.agents);
-      ctx.rl.resume();
-      ctx.rl.prompt();
-    });
-    return;
-  }
-
-  if (nightlyArg === 'clean') {
-    const reviewScript = path.join(ctx.HYDRA_ROOT, 'lib', 'hydra-nightly-review.ts');
-    const child = spawnHydraNode(reviewScript, ['clean'], {
-      cwd: ctx.config.projectRoot,
-      stdio: 'inherit',
-      shell: process.platform === 'win32',
-    });
-    child.on('error', () => {});
-    child.on('close', () => {
-      ctx.rl.prompt();
-    });
-    return;
-  }
-
-  const isDryRun = nightlyArg === 'dry-run';
-
-  const cfg = loadHydraConfig();
-  const nightlyCfg = cfg.nightly;
-  const baseBranch = nightlyCfg!.baseBranch ?? 'dev';
-  const cwd = ctx.config.projectRoot;
-
+async function ensureBranchAndClean(
+  ctx: CommandContext,
+  cwd: string,
+  baseBranch: string,
+  runLabel: string,
+): Promise<boolean> {
   const curBranch = spawnSync('git', ['rev-parse', '--abbrev-ref', 'HEAD'], {
     cwd,
     encoding: 'utf8',
@@ -748,17 +740,16 @@ export async function handleNightlyCommand(ctx: CommandContext, args: string): P
     if (sw.status !== 0) {
       console.log(`  ${ERROR(`Failed to switch branch: ${(sw.stderr || '').trim()}`)}`);
       ctx.rl.prompt();
-      return;
+      return false;
     }
   }
-
   const status = spawnSync('git', ['status', '--porcelain'], {
     cwd,
     encoding: 'utf8',
   }).stdout.trim();
   if (status) {
     const confirm = (await promptChoice(ctx.rl, {
-      message: 'Working tree is not clean. Auto-commit before nightly?',
+      message: `Working tree is not clean. Auto-commit before ${runLabel}?`,
       choices: [
         { label: 'Yes \u2014 commit all changes', value: 'yes' },
         { label: 'No \u2014 abort', value: 'no' },
@@ -769,135 +760,218 @@ export async function handleNightlyCommand(ctx: CommandContext, args: string): P
     if (confirm.value !== 'yes') {
       console.log(`  ${WARNING('Aborted \u2014 commit or stash changes first.')}`);
       ctx.rl.prompt();
-      return;
+      return false;
     }
     const ts = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
     spawnSync('git', ['add', '-A'], { cwd });
-    spawnSync('git', ['commit', '-m', `chore: auto-commit before nightly run ${ts}`], { cwd });
+    spawnSync('git', ['commit', '-m', `chore: auto-commit before ${runLabel} ${ts}`], { cwd });
     console.log(`  ${SUCCESS('\u2713')} Changes committed.`);
   }
+  return true;
+}
 
-  const nightlyArgs = [path.join(ctx.HYDRA_ROOT, 'lib', 'hydra-nightly.ts'), `project=${cwd}`];
+function handleNightlyStatus(ctx: CommandContext): void {
+  const reviewScript = path.join(ctx.HYDRA_ROOT, 'lib', 'hydra-nightly-review.ts');
+  const child = spawnHydraNode(reviewScript, ['status'], {
+    cwd: ctx.config.projectRoot,
+    stdio: 'inherit',
+    shell: process.platform === 'win32',
+  });
+  child.on('error', () => {});
+  child.on('close', () => {
+    ctx.rl.prompt();
+  });
+}
 
-  if (isDryRun) {
-    nightlyArgs.push('--dry-run');
+function handleNightlyReview(ctx: CommandContext): void {
+  const cwd = ctx.config.projectRoot;
+  ctx.rl.pause();
+  ctx.destroyStatusBar();
+  const reviewScript = path.join(ctx.HYDRA_ROOT, 'lib', 'hydra-nightly-review.ts');
+  const child = spawnHydraNode(reviewScript, ['review'], {
+    cwd,
+    stdio: 'inherit',
+    shell: process.platform === 'win32',
+  });
+  child.on('close', () => {
+    ctx.initStatusBar(ctx.agents);
+    ctx.rl.resume();
+    ctx.rl.prompt();
+  });
+}
+
+function handleNightlyClean(ctx: CommandContext): void {
+  const reviewScript = path.join(ctx.HYDRA_ROOT, 'lib', 'hydra-nightly-review.ts');
+  const child = spawnHydraNode(reviewScript, ['clean'], {
+    cwd: ctx.config.projectRoot,
+    stdio: 'inherit',
+    shell: process.platform === 'win32',
+  });
+  child.on('error', () => {});
+  child.on('close', () => {
+    ctx.rl.prompt();
+  });
+}
+
+function resolveNightlyModeDefaults(
+  modeValue: string,
+  nightlyCfg: any,
+): { maxTasksDefault: string; maxHoursDefault: string } {
+  if (modeValue === 'quick') return { maxTasksDefault: '3', maxHoursDefault: '1' };
+  if (modeValue === 'deep') return { maxTasksDefault: '10', maxHoursDefault: '8' };
+  if (modeValue === 'auto') return { maxTasksDefault: '7', maxHoursDefault: '6' };
+  return {
+    maxTasksDefault: String(nightlyCfg!.maxTasks ?? 5),
+    maxHoursDefault: String(nightlyCfg!.maxHours ?? 4),
+  };
+}
+
+function applyNightlyModeArgs(modeValue: string, nightlyArgs: string[]): void {
+  if (modeValue === 'quick') {
+    nightlyArgs.push('max-tasks=3', 'max-hours=1');
+  } else if (modeValue === 'deep') {
+    nightlyArgs.push('max-tasks=10', 'max-hours=8');
+  } else if (modeValue === 'auto') {
+    nightlyArgs.push('max-tasks=7', 'max-hours=6');
+  }
+}
+
+function applyNumericArg(
+  nightlyArgs: string[],
+  prefix: string,
+  rawValue: string,
+  parseFn: (v: string) => number,
+): void {
+  const parsed = parseFn(rawValue);
+  if (!Number.isNaN(parsed) && parsed > 0) {
+    const idx = nightlyArgs.findIndex((a) => a.startsWith(`${prefix}=`));
+    if (idx !== -1) nightlyArgs.splice(idx, 1);
+    nightlyArgs.push(`${prefix}=${String(parsed)}`);
+  }
+}
+
+async function collectDiscoveryOption(
+  ctx: CommandContext,
+  nightlyCfg: any,
+  nightlyArgs: string[],
+): Promise<void> {
+  const discoveryChoice = (await promptChoice(ctx.rl, {
+    message: 'Enable AI discovery? (agent suggests improvement tasks)',
+    context: { default: nightlyCfg!.sources?.['aiDiscovery'] === false ? 'off' : 'on' },
+    choices: [
+      { label: 'Yes \u2014 discover + scan', value: 'yes' },
+      { label: 'No \u2014 scan only', value: 'no' },
+    ],
+    defaultIndex: nightlyCfg!.sources?.['aiDiscovery'] === false ? 1 : 0,
+    timeout: 20_000,
+  })) as any;
+  if (discoveryChoice.value === 'no') {
+    nightlyArgs.push('--no-discovery');
+  }
+}
+
+async function collectNightlyOptions(
+  ctx: CommandContext,
+  nightlyCfg: any,
+  nightlyArgs: string[],
+): Promise<void> {
+  const modeChoice = (await promptChoice(ctx.rl, {
+    message: 'Execution mode?',
+    context: { default: 'balanced' },
+    choices: [
+      {
+        label: 'Balanced',
+        value: 'balanced',
+        description: 'Default config: moderate budget & time limits',
+      },
+      {
+        label: 'Quick / Fast',
+        value: 'quick',
+        description: 'Fewer tasks, shorter timeout, economy models',
+      },
+      {
+        label: 'Deep / Thorough',
+        value: 'deep',
+        description: 'More tasks, longer timeout, high reasoning',
+      },
+      {
+        label: 'Auto / Intuitive',
+        value: 'auto',
+        description: 'Let agents switch tiers per-task complexity',
+      },
+    ],
+    defaultIndex: 0,
+    timeout: 60_000,
+  })) as any;
+  applyNightlyModeArgs(modeChoice.value, nightlyArgs);
+  const { maxTasksDefault, maxHoursDefault } = resolveNightlyModeDefaults(
+    modeChoice.value,
+    nightlyCfg,
+  );
+
+  const tasksChoice = (await promptChoice(ctx.rl, {
+    message: `Max tasks to execute?`,
+    context: { default: maxTasksDefault },
+    choices: [
+      { label: `${maxTasksDefault} (default)`, value: maxTasksDefault },
+      { label: '3 (light)', value: '3' },
+      { label: '5 (moderate)', value: '5' },
+      { label: '10 (heavy)', value: '10' },
+    ],
+    defaultIndex: 0,
+    freeform: true,
+    timeout: 30_000,
+  })) as any;
+  applyNumericArg(nightlyArgs, 'max-tasks', tasksChoice.value, (v) => Number.parseInt(v, 10));
+
+  const hoursChoice = (await promptChoice(ctx.rl, {
+    message: `Max hours?`,
+    context: { default: maxHoursDefault },
+    choices: [
+      { label: `${maxHoursDefault}h (default)`, value: maxHoursDefault },
+      { label: '1h (quick)', value: '1' },
+      { label: '4h (standard)', value: '4' },
+      { label: '8h (overnight)', value: '8' },
+    ],
+    defaultIndex: 0,
+    freeform: true,
+    timeout: 30_000,
+  })) as any;
+  applyNumericArg(nightlyArgs, 'max-hours', hoursChoice.value, Number.parseFloat);
+
+  await collectDiscoveryOption(ctx, nightlyCfg, nightlyArgs);
+  nightlyArgs.push('--interactive');
+}
+
+export async function handleNightlyCommand(ctx: CommandContext, args: string): Promise<void> {
+  const nightlyArg = args.trim().toLowerCase();
+
+  if (nightlyArg === 'status') {
+    handleNightlyStatus(ctx);
+    return;
+  }
+  if (nightlyArg === 'review') {
+    handleNightlyReview(ctx);
+    return;
+  }
+  if (nightlyArg === 'clean') {
+    handleNightlyClean(ctx);
+    return;
   }
 
-  if (!isDryRun) {
-    const modeChoice = (await promptChoice(ctx.rl, {
-      message: 'Execution mode?',
-      context: { default: 'balanced' },
-      choices: [
-        {
-          label: 'Balanced',
-          value: 'balanced',
-          description: 'Default config: moderate budget & time limits',
-        },
-        {
-          label: 'Quick / Fast',
-          value: 'quick',
-          description: 'Fewer tasks, shorter timeout, economy models',
-        },
-        {
-          label: 'Deep / Thorough',
-          value: 'deep',
-          description: 'More tasks, longer timeout, high reasoning',
-        },
-        {
-          label: 'Auto / Intuitive',
-          value: 'auto',
-          description: 'Let agents switch tiers per-task complexity',
-        },
-      ],
-      defaultIndex: 0,
-      timeout: 60_000,
-    })) as any;
+  const isDryRun = nightlyArg === 'dry-run';
+  const cfg = loadHydraConfig();
+  const nightlyCfg = cfg.nightly;
+  const baseBranch = nightlyCfg!.baseBranch ?? 'dev';
+  const cwd = ctx.config.projectRoot;
 
-    if (modeChoice.value === 'quick') {
-      nightlyArgs.push('max-tasks=3', 'max-hours=1');
-    } else if (modeChoice.value === 'deep') {
-      nightlyArgs.push('max-tasks=10', 'max-hours=8');
-    } else if (modeChoice.value === 'auto') {
-      nightlyArgs.push('max-tasks=7', 'max-hours=6');
-    }
+  if (!(await ensureBranchAndClean(ctx, cwd, baseBranch, 'nightly run'))) return;
 
-    let maxTasksDefault: string;
-    if (modeChoice.value === 'quick') {
-      maxTasksDefault = '3';
-    } else if (modeChoice.value === 'deep') {
-      maxTasksDefault = '10';
-    } else if (modeChoice.value === 'auto') {
-      maxTasksDefault = '7';
-    } else {
-      maxTasksDefault = String(nightlyCfg!.maxTasks ?? 5);
-    }
-
-    const tasksChoice = (await promptChoice(ctx.rl, {
-      message: `Max tasks to execute?`,
-      context: { default: maxTasksDefault },
-      choices: [
-        { label: `${maxTasksDefault} (default)`, value: maxTasksDefault },
-        { label: '3 (light)', value: '3' },
-        { label: '5 (moderate)', value: '5' },
-        { label: '10 (heavy)', value: '10' },
-      ],
-      defaultIndex: 0,
-      freeform: true,
-      timeout: 30_000,
-    })) as any;
-    const maxTasks = Number.parseInt(tasksChoice.value, 10);
-    if (!Number.isNaN(maxTasks) && maxTasks > 0) {
-      const idx = nightlyArgs.findIndex((a) => a.startsWith('max-tasks='));
-      if (idx !== -1) nightlyArgs.splice(idx, 1);
-      nightlyArgs.push(`max-tasks=${String(maxTasks)}`);
-    }
-
-    let maxHoursDefault: string;
-    if (modeChoice.value === 'quick') {
-      maxHoursDefault = '1';
-    } else if (modeChoice.value === 'deep') {
-      maxHoursDefault = '8';
-    } else if (modeChoice.value === 'auto') {
-      maxHoursDefault = '6';
-    } else {
-      maxHoursDefault = String(nightlyCfg!.maxHours ?? 4);
-    }
-
-    const hoursChoice = (await promptChoice(ctx.rl, {
-      message: `Max hours?`,
-      context: { default: maxHoursDefault },
-      choices: [
-        { label: `${maxHoursDefault}h (default)`, value: maxHoursDefault },
-        { label: '1h (quick)', value: '1' },
-        { label: '4h (standard)', value: '4' },
-        { label: '8h (overnight)', value: '8' },
-      ],
-      defaultIndex: 0,
-      freeform: true,
-      timeout: 30_000,
-    })) as any;
-    const maxHours = Number.parseFloat(hoursChoice.value);
-    if (!Number.isNaN(maxHours) && maxHours > 0) {
-      const idx = nightlyArgs.findIndex((a) => a.startsWith('max-hours='));
-      if (idx !== -1) nightlyArgs.splice(idx, 1);
-      nightlyArgs.push(`max-hours=${String(maxHours)}`);
-    }
-
-    const discoveryChoice = (await promptChoice(ctx.rl, {
-      message: 'Enable AI discovery? (agent suggests improvement tasks)',
-      context: { default: nightlyCfg!.sources?.['aiDiscovery'] === false ? 'off' : 'on' },
-      choices: [
-        { label: 'Yes \u2014 discover + scan', value: 'yes' },
-        { label: 'No \u2014 scan only', value: 'no' },
-      ],
-      defaultIndex: nightlyCfg!.sources?.['aiDiscovery'] === false ? 1 : 0,
-      timeout: 20_000,
-    })) as any;
-    if (discoveryChoice.value === 'no') {
-      nightlyArgs.push('--no-discovery');
-    }
-
-    nightlyArgs.push('--interactive');
+  const nightlyArgs = [path.join(ctx.HYDRA_ROOT, 'lib', 'hydra-nightly.ts'), `project=${cwd}`];
+  if (isDryRun) {
+    nightlyArgs.push('--dry-run');
+  } else {
+    await collectNightlyOptions(ctx, nightlyCfg, nightlyArgs);
   }
 
   const runLabel = isDryRun ? 'nightly dry-run' : 'nightly run';
@@ -921,174 +995,50 @@ export async function handleNightlyCommand(ctx: CommandContext, args: string): P
   });
 }
 
-export async function handleEvolveCommand(ctx: CommandContext, args: string): Promise<void> {
-  const evolveArg = args.trim().toLowerCase();
+function handleEvolveStatus(ctx: CommandContext): void {
+  const reviewScript = path.join(ctx.HYDRA_ROOT, 'lib', 'hydra-evolve-review.ts');
+  const child = spawnHydraNode(reviewScript, ['status'], {
+    cwd: ctx.config.projectRoot,
+    stdio: 'inherit',
+    shell: process.platform === 'win32',
+  });
+  child.on('error', () => {});
+  child.on('close', () => {
+    ctx.rl.prompt();
+  });
+}
 
-  if (evolveArg === 'status') {
-    const reviewScript = path.join(ctx.HYDRA_ROOT, 'lib', 'hydra-evolve-review.ts');
-    const child = spawnHydraNode(reviewScript, ['status'], {
-      cwd: ctx.config.projectRoot,
-      stdio: 'inherit',
-      shell: process.platform === 'win32',
-    });
-    child.on('error', () => {});
-    child.on('close', () => {
-      ctx.rl.prompt();
-    });
-    return;
-  }
+function handleEvolveKnowledge(ctx: CommandContext): void {
+  const reviewScript = path.join(ctx.HYDRA_ROOT, 'lib', 'hydra-evolve-review.ts');
+  const child = spawnHydraNode(reviewScript, ['knowledge'], {
+    cwd: ctx.config.projectRoot,
+    stdio: 'inherit',
+    shell: process.platform === 'win32',
+  });
+  child.on('error', () => {});
+  child.on('close', () => {
+    ctx.rl.prompt();
+  });
+}
 
-  if (evolveArg === 'knowledge') {
-    const reviewScript = path.join(ctx.HYDRA_ROOT, 'lib', 'hydra-evolve-review.ts');
-    const child = spawnHydraNode(reviewScript, ['knowledge'], {
-      cwd: ctx.config.projectRoot,
-      stdio: 'inherit',
-      shell: process.platform === 'win32',
-    });
-    child.on('error', () => {});
-    child.on('close', () => {
-      ctx.rl.prompt();
-    });
-    return;
-  }
-
-  if (evolveArg === 'resume' || evolveArg.startsWith('resume ')) {
-    const extraArgs = evolveArg.slice('resume'.length).trim();
-    const cfg = loadHydraConfig();
-    const baseBranch = cfg.evolve?.baseBranch ?? 'dev';
-    const cwd = ctx.config.projectRoot;
-
-    const curBranch = spawnSync('git', ['rev-parse', '--abbrev-ref', 'HEAD'], {
-      cwd,
-      encoding: 'utf8',
-    }).stdout.trim();
-    if (curBranch !== baseBranch) {
-      const branchExists =
-        spawnSync('git', ['rev-parse', '--verify', baseBranch], { cwd, encoding: 'utf8' })
-          .status === 0;
-      if (!branchExists) {
-        console.log(`  ${ACCENT(`Creating '${baseBranch}' branch from '${curBranch}'...`)}`);
-        spawnSync('git', ['branch', baseBranch], { cwd });
-      }
-      console.log(`  ${ACCENT(`Switching from '${curBranch}' to '${baseBranch}'...`)}`);
-      const sw = spawnSync('git', ['checkout', baseBranch], { cwd, encoding: 'utf8' });
-      if (sw.status !== 0) {
-        console.log(`  ${ERROR(`Failed to switch branch: ${(sw.stderr || '').trim()}`)}`);
-        ctx.rl.prompt();
-        return;
-      }
-    }
-
-    const status = spawnSync('git', ['status', '--porcelain'], {
-      cwd,
-      encoding: 'utf8',
-    }).stdout.trim();
-    if (status) {
-      const confirm = (await promptChoice(ctx.rl, {
-        message: 'Working tree is not clean. Auto-commit before evolve resume?',
-        choices: [
-          { label: 'Yes \u2014 commit all changes', value: 'yes' },
-          { label: 'No \u2014 abort', value: 'no' },
-        ],
-        defaultIndex: 0,
-        timeout: 30_000,
-      })) as any;
-      if (confirm.value !== 'yes') {
-        console.log(`  ${WARNING('Aborted \u2014 commit or stash changes first.')}`);
-        ctx.rl.prompt();
-        return;
-      }
-      const ts = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
-      spawnSync('git', ['add', '-A'], { cwd });
-      spawnSync('git', ['commit', '-m', `chore: auto-commit before evolve session ${ts}`], {
-        cwd,
-      });
-      console.log(`  ${SUCCESS('\u2713')} Changes committed.`);
-    }
-
-    console.log(`  ${ACCENT('Resuming evolve session...')}`);
-    ctx.rl.pause();
-    ctx.destroyStatusBar();
-    const evolveScript = path.join(ctx.HYDRA_ROOT, 'lib', 'hydra-evolve.ts');
-    const evolveArgs = [evolveScript, `project=${cwd}`, 'resume=1'];
-    if (extraArgs) {
-      evolveArgs.push(...extraArgs.split(/\s+/).filter(Boolean));
-    }
-    const child = spawnHydraNode(evolveArgs[0], evolveArgs.slice(1), {
-      cwd,
-      stdio: 'inherit',
-      shell: process.platform === 'win32',
-    });
-    child.on('close', (code) => {
-      ctx.initStatusBar(ctx.agents);
-      ctx.rl.resume();
-      if (code === 0) {
-        console.log(`  ${SUCCESS('\u2713')} Evolve session complete`);
-      } else {
-        console.log(`  ${ERROR(`Evolve exited with code ${String(code)}`)}`);
-      }
-      ctx.rl.prompt();
-    });
-    return;
-  }
-
-  // Launch evolve session
-  const cfg = loadHydraConfig();
-  const baseBranch = cfg.evolve?.baseBranch ?? 'dev';
-  const cwd = ctx.config.projectRoot;
-
-  const curBranch = spawnSync('git', ['rev-parse', '--abbrev-ref', 'HEAD'], {
-    cwd,
-    encoding: 'utf8',
-  }).stdout.trim();
-  if (curBranch !== baseBranch) {
-    const branchExists =
-      spawnSync('git', ['rev-parse', '--verify', baseBranch], { cwd, encoding: 'utf8' }).status ===
-      0;
-    if (!branchExists) {
-      console.log(`  ${ACCENT(`Creating '${baseBranch}' branch from '${curBranch}'...`)}`);
-      spawnSync('git', ['branch', baseBranch], { cwd });
-    }
-    console.log(`  ${ACCENT(`Switching from '${curBranch}' to '${baseBranch}'...`)}`);
-    const sw = spawnSync('git', ['checkout', baseBranch], { cwd, encoding: 'utf8' });
-    if (sw.status !== 0) {
-      console.log(`  ${ERROR(`Failed to switch branch: ${(sw.stderr || '').trim()}`)}`);
-      ctx.rl.prompt();
-      return;
-    }
-  }
-
-  const status = spawnSync('git', ['status', '--porcelain'], {
-    cwd,
-    encoding: 'utf8',
-  }).stdout.trim();
-  if (status) {
-    const confirm = (await promptChoice(ctx.rl, {
-      message: 'Working tree is not clean. Auto-commit before evolve?',
-      choices: [
-        { label: 'Yes \u2014 commit all changes', value: 'yes' },
-        { label: 'No \u2014 abort', value: 'no' },
-      ],
-      defaultIndex: 0,
-      timeout: 30_000,
-    })) as any;
-    if (confirm.value !== 'yes') {
-      console.log(`  ${WARNING('Aborted \u2014 commit or stash changes first.')}`);
-      ctx.rl.prompt();
-      return;
-    }
-    const ts = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
-    spawnSync('git', ['add', '-A'], { cwd });
-    spawnSync('git', ['commit', '-m', `chore: auto-commit before evolve session ${ts}`], { cwd });
-    console.log(`  ${SUCCESS('\u2713')} Changes committed.`);
-  }
-
-  console.log(`  ${ACCENT('Launching evolve session...')}`);
+async function launchEvolveSession(
+  ctx: CommandContext,
+  cwd: string,
+  evolveArg: string,
+  extraArgs?: string,
+): Promise<void> {
+  const isResume = extraArgs !== undefined;
+  console.log(
+    `  ${ACCENT(isResume ? 'Resuming evolve session...' : 'Launching evolve session...')}`,
+  );
   ctx.rl.pause();
   ctx.destroyStatusBar();
   const evolveScript = path.join(ctx.HYDRA_ROOT, 'lib', 'hydra-evolve.ts');
   const evolveArgs = [evolveScript, `project=${cwd}`];
-  if (evolveArg) {
+  if (isResume) {
+    evolveArgs.push('resume=1');
+    if (extraArgs) evolveArgs.push(...extraArgs.split(/\s+/).filter(Boolean));
+  } else if (evolveArg) {
     evolveArgs.push(...evolveArg.split(/\s+/).filter(Boolean));
   }
   const child = spawnHydraNode(evolveArgs[0], evolveArgs.slice(1), {
@@ -1106,4 +1056,33 @@ export async function handleEvolveCommand(ctx: CommandContext, args: string): Pr
     }
     ctx.rl.prompt();
   });
+}
+
+export async function handleEvolveCommand(ctx: CommandContext, args: string): Promise<void> {
+  const evolveArg = args.trim().toLowerCase();
+
+  if (evolveArg === 'status') {
+    handleEvolveStatus(ctx);
+    return;
+  }
+  if (evolveArg === 'knowledge') {
+    handleEvolveKnowledge(ctx);
+    return;
+  }
+
+  if (evolveArg === 'resume' || evolveArg.startsWith('resume ')) {
+    const extraArgs = evolveArg.slice('resume'.length).trim();
+    const cfg = loadHydraConfig();
+    const baseBranch = cfg.evolve?.baseBranch ?? 'dev';
+    const cwd = ctx.config.projectRoot;
+    if (!(await ensureBranchAndClean(ctx, cwd, baseBranch, 'evolve resume'))) return;
+    await launchEvolveSession(ctx, cwd, evolveArg, extraArgs);
+    return;
+  }
+
+  const cfg = loadHydraConfig();
+  const baseBranch = cfg.evolve?.baseBranch ?? 'dev';
+  const cwd = ctx.config.projectRoot;
+  if (!(await ensureBranchAndClean(ctx, cwd, baseBranch, 'evolve'))) return;
+  await launchEvolveSession(ctx, cwd, evolveArg);
 }
