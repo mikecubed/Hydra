@@ -5,7 +5,8 @@
  * can inject a spy via setExitHandler() without terminating the test process.
  */
 
-type ExitHandler = (code?: number) => never;
+// Handlers may return void in tests; exit() itself is declared never for call-site narrowing.
+type ExitHandler = (code?: number) => void;
 
 // eslint-disable-next-line n/no-process-exit -- this is the one place where process.exit() is intentionally called
 let _exitHandler: ExitHandler = (code) => process.exit(code);
@@ -24,4 +25,7 @@ export function resetExitHandler(): void {
 /** Exit the process (or call the injected test handler). */
 export function exit(code?: number): never {
   _exitHandler(code);
+  // Unreachable in production (process.exit never returns).
+  // Needed as a type-safe fallback for test handlers that return void.
+  return undefined as never;
 }
