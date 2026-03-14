@@ -124,9 +124,14 @@ describe('buildMiniRoundBrief', () => {
   });
 
   it('handles non-string consensus gracefully (defensive coercion)', () => {
-    const report = { consensus: 123, recommendedMode: 'handoff', tasks: [], questions: [] };
-    assert.doesNotThrow(() => buildMiniRoundBrief('claude', 'Some task', report as any));
-    const result = buildMiniRoundBrief('claude', 'Some task', report as any);
+    const report = {
+      consensus: 123 as const,
+      recommendedMode: 'handoff' as const,
+      tasks: [] as unknown[],
+      questions: [] as Array<{ to?: string; question?: string }>,
+    };
+    assert.doesNotThrow(() => buildMiniRoundBrief('claude', 'Some task', report));
+    const result = buildMiniRoundBrief('claude', 'Some task', report);
     assert.ok(result.includes('123'));
   });
 
@@ -194,7 +199,7 @@ describe('buildTandemBrief', () => {
 
 describe('shouldCrossVerify', () => {
   beforeEach(() => {
-    _setTestConfig({} as any);
+    _setTestConfig({});
   });
 
   afterEach(() => {
@@ -207,14 +212,14 @@ describe('shouldCrossVerify', () => {
   });
 
   it('returns false when crossModelVerification is disabled', () => {
-    _setTestConfig({ crossModelVerification: { enabled: false } } as any);
+    _setTestConfig({ crossModelVerification: { enabled: false } });
     assert.equal(shouldCrossVerify({ tier: 'complex' }), false);
   });
 
   it('returns true for always mode regardless of tier', () => {
     _setTestConfig({
       crossModelVerification: { enabled: true, mode: 'always' },
-    } as any);
+    });
     assert.equal(shouldCrossVerify({ tier: 'simple' }), true);
     assert.equal(shouldCrossVerify({ tier: 'complex' }), true);
   });
@@ -222,21 +227,21 @@ describe('shouldCrossVerify', () => {
   it('returns true for complex tier in on-complex mode', () => {
     _setTestConfig({
       crossModelVerification: { enabled: true, mode: 'on-complex' },
-    } as any);
+    });
     assert.equal(shouldCrossVerify({ tier: 'complex' }), true);
   });
 
   it('returns false for simple tier in on-complex mode', () => {
     _setTestConfig({
       crossModelVerification: { enabled: true, mode: 'on-complex' },
-    } as any);
+    });
     assert.equal(shouldCrossVerify({ tier: 'simple' }), false);
   });
 
   it('returns false for unknown mode', () => {
     _setTestConfig({
       crossModelVerification: { enabled: true, mode: 'unknown-mode' },
-    } as any);
+    });
     assert.equal(shouldCrossVerify({ tier: 'complex' }), false);
   });
 });

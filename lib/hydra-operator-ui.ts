@@ -105,35 +105,44 @@ export async function printStatus(
   return dashboardSummary;
 }
 
-/**
- * Print actionable suggested next steps based on current daemon state.
- * Shows concrete commands the user can type at the hydra> prompt.
- */
-export function printNextSteps({
-  agentSuggestions: _agentSuggestions,
-  pendingHandoffs,
-  staleTasks,
-  inProgressTasks,
-  summary,
-}: PrintNextStepsInput = {}): void {
-  const steps: string[] = [];
-
+function extractNextStepCounts(input: PrintNextStepsInput): {
+  openTasks: number;
+  handoffCount: number;
+  staleCount: number;
+  inProgressCount: number;
+} {
+  const { pendingHandoffs, staleTasks, inProgressTasks, summary } = input;
   const openTasks =
     typeof summary?.openTasks === 'number' ? summary.openTasks : (summary?.openTasks?.length ?? 0);
   const handoffCount = pendingHandoffs?.length ?? summary?.pendingHandoffs ?? 0;
   const staleCount = staleTasks?.length ?? 0;
   const inProgressCount = inProgressTasks?.length ?? 0;
+  return { openTasks, handoffCount, staleCount, inProgressCount };
+}
+
+function buildPendingWorkStep(
+  handoffCount: number,
+  staleCount: number,
+  inProgressCount: number,
+): string {
+  const parts: string[] = [];
+  if (handoffCount > 0) parts.push(`${String(handoffCount)} handoff${handoffCount > 1 ? 's' : ''}`);
+  if (staleCount > 0) parts.push(`${String(staleCount)} stale`);
+  if (inProgressCount > 0) parts.push(`${String(inProgressCount)} in progress`);
+  return `${ACCENT(':resume')}    ${DIM(`Ack handoffs & launch agents (${parts.join(', ')})`)}`;
+}
+
+function buildStepsList(
+  openTasks: number,
+  handoffCount: number,
+  staleCount: number,
+  inProgressCount: number,
+): string[] {
+  const steps: string[] = [];
   const hasPendingWork = handoffCount > 0 || staleCount > 0 || inProgressCount > 0;
 
   if (hasPendingWork) {
-    const parts = [];
-    if (handoffCount > 0)
-      parts.push(`${String(handoffCount)} handoff${handoffCount > 1 ? 's' : ''}`);
-    if (staleCount > 0) parts.push(`${String(staleCount)} stale`);
-    if (inProgressCount > 0) parts.push(`${String(inProgressCount)} in progress`);
-    steps.push(
-      `${ACCENT(':resume')}    ${DIM(`Ack handoffs & launch agents (${parts.join(', ')})`)}`,
-    );
+    steps.push(buildPendingWorkStep(handoffCount, staleCount, inProgressCount));
   }
 
   if (openTasks > 0 && !hasPendingWork) {
@@ -151,6 +160,18 @@ export function printNextSteps({
     steps.push(`${ACCENT('<your objective>')}  ${DIM('Dispatch additional work to agents')}`);
   }
 
+  return steps;
+}
+
+/**
+ * Print actionable suggested next steps based on current daemon state.
+ * Shows concrete commands the user can type at the hydra> prompt.
+ */
+export function printNextSteps(input: PrintNextStepsInput = {}): void {
+  const { openTasks, handoffCount, staleCount, inProgressCount } = extractNextStepCounts(input);
+
+  const steps = buildStepsList(openTasks, handoffCount, staleCount, inProgressCount);
+
   if (steps.length > 0) {
     console.log(sectionHeader('Try next'));
     for (const step of steps.slice(0, 4)) {
@@ -159,11 +180,7 @@ export function printNextSteps({
   }
 }
 
-export function printHelp(): void {
-  console.log('');
-  console.log(hydraLogoCompact());
-  console.log(DIM('  Operator Console'));
-  console.log('');
+function printInteractiveCommandsHelp(): void {
   console.log(pc.bold('Interactive commands:'));
   console.log(`  ${ACCENT(':help')}                 Show help`);
   console.log(`  ${ACCENT(':status')}               Dashboard with agents & tasks`);
@@ -206,6 +223,9 @@ export function printHelp(): void {
   console.log(`  ${ACCENT(':fork')}                 Fork current session (explore alternatives)`);
   console.log(`  ${ACCENT(':spawn <focus>')}       Spawn child session (fresh context)`);
   console.log('');
+}
+
+function printTaskHandoffHelp(): void {
   console.log(pc.bold('Task & handoff management:'));
   console.log(`  ${ACCENT(':tasks')}                List active daemon tasks`);
   console.log(`  ${ACCENT(':tasks scan')}           Scan codebase for TODO/FIXME/issues`);
@@ -225,6 +245,9 @@ export function printHelp(): void {
   console.log(`  ${ACCENT(':archive')}              Archive completed work & trim events`);
   console.log(`  ${ACCENT(':events')}               Show recent event log`);
   console.log('');
+}
+
+function printWorkersAndConciergeHelp(): void {
   console.log(pc.bold('Workers:'));
   console.log(`  ${ACCENT(':workers')}              Show worker status (running/idle/stopped)`);
   console.log(`  ${ACCENT(':workers start [agent]')} Start worker(s)`);
@@ -243,6 +266,9 @@ export function printHelp(): void {
   console.log(`  ${ACCENT(':chat export')}          Export conversation to file`);
   console.log(`  ${ACCENT('!<prompt>')}             Force dispatch (bypass concierge)`);
   console.log('');
+}
+
+function printEvolveAndNightlyHelp(): void {
   console.log(pc.bold('Evolve (autonomous self-improvement):'));
   console.log(
     `  ${ACCENT(':evolve')}               Launch evolve session (research→plan→test→implement)`,
@@ -273,6 +299,9 @@ export function printHelp(): void {
   console.log(`  ${ACCENT(':nightly status')}       Show latest nightly run report`);
   console.log(`  ${ACCENT(':nightly clean')}        Delete all nightly/* branches`);
   console.log('');
+}
+
+function printGithubAndForgeHelp(): void {
   console.log(pc.bold('GitHub (requires gh CLI):'));
   console.log(`  ${ACCENT(':github')}               GitHub status (gh installed, auth, repo, PRs)`);
   console.log(`  ${ACCENT(':github prs')}           List open pull requests`);
@@ -289,6 +318,9 @@ export function printHelp(): void {
   console.log(`  ${ACCENT(':forge delete <name>')}  Remove a forged agent`);
   console.log(`  ${ACCENT(':forge edit <name>')}    Re-run refinement on an existing agent`);
   console.log('');
+}
+
+function printAgentsAndSystemHelp(): void {
   console.log(pc.bold('Agents & diagnostics:'));
   console.log(`  ${ACCENT(':agents')}               List all registered agents`);
   console.log(`  ${ACCENT(':agents add')}            Register a new custom agent (CLI or API)`);
@@ -320,6 +352,19 @@ export function printHelp(): void {
   console.log(DIM('  npm run hydra:go -- prompt="Your objective"'));
   console.log(DIM('  npm run hydra:go -- mode=council prompt="Your objective"'));
   console.log('');
+}
+
+export function printHelp(): void {
+  console.log('');
+  console.log(hydraLogoCompact());
+  console.log(DIM('  Operator Console'));
+  console.log('');
+  printInteractiveCommandsHelp();
+  printTaskHandoffHelp();
+  printWorkersAndConciergeHelp();
+  printEvolveAndNightlyHelp();
+  printGithubAndForgeHelp();
+  printAgentsAndSystemHelp();
 }
 
 export const KNOWN_COMMANDS = [

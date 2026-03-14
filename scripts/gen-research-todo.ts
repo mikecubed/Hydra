@@ -34,48 +34,27 @@ function toTitleCase(str: string) {
   return str.replace(/[-_]+/g, ' ').replace(/\b\w/g, (c: string) => c.toUpperCase());
 }
 
-function extractTitle(filePath: string) {
-  let raw;
-  try {
-    raw = fs.readFileSync(filePath, 'utf8');
-  } catch {
-    return null;
+function extractTxtTitle(content: string): string | null {
+  for (const line of content.split('\n')) {
+    const t = line.trim();
+    if (t !== '') return t;
   }
+  return null;
+}
 
-  // Strip BOM
-  if (raw.charCodeAt(0) === 0xfeff) raw = raw.slice(1);
+function skipFrontMatter(lines: string[]): number {
+  if (lines[0]?.trim() !== '---') return 0;
+  let i = 1;
+  while (i < lines.length && lines[i]?.trim() !== '---') i++;
+  return i + 1;
+}
 
-  // Skip binary-like content
-  if (raw.includes('\0')) return null;
-
-  // Normalize line endings
-  const content = raw.replace(/\r\n/g, '\n').replace(/\r/g, '\n');
-  const ext = path.extname(filePath).toLowerCase();
-
-  if (ext === '.txt') {
-    // First non-empty line
-    for (const line of content.split('\n')) {
-      const t = line.trim();
-      if (t !== '') return t;
-    }
-    return null;
-  }
-
-  // Markdown: skip YAML front matter
+function extractMarkdownTitle(content: string): string | null {
   const lines = content.split('\n');
-  let i = 0;
+  let i = skipFrontMatter(lines);
   let inCodeBlock = false;
-
-  if (lines[0]?.trim() === '---') {
-    i = 1;
-    while (i < lines.length && lines[i]?.trim() !== '---') i++;
-    i++; // skip closing ---
-  }
-
-  // Find first H1 outside code blocks
   for (; i < lines.length; i++) {
     const line = lines[i];
-    // Toggle code block state
     if (line.startsWith('```')) {
       inCodeBlock = !inCodeBlock;
       continue;
@@ -84,8 +63,24 @@ function extractTitle(filePath: string) {
     const m = /^#\s+(.+)$/.exec(line);
     if (m) return m[1].trim();
   }
-
   return null;
+}
+
+function extractTitle(filePath: string) {
+  let raw;
+  try {
+    raw = fs.readFileSync(filePath, 'utf8');
+  } catch {
+    return null;
+  }
+
+  if (raw.charCodeAt(0) === 0xfeff) raw = raw.slice(1);
+  if (raw.includes('\0')) return null;
+
+  const content = raw.replace(/\r\n/g, '\n').replace(/\r/g, '\n');
+  const ext = path.extname(filePath).toLowerCase();
+
+  return ext === '.txt' ? extractTxtTitle(content) : extractMarkdownTitle(content);
 }
 
 function collectFiles(dir: string): string[] {

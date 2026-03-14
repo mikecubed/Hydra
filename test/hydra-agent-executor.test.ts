@@ -727,7 +727,7 @@ describe('executeAgentWithRecovery — local-unavailable fallback', () => {
     initAgentRegistry();
   });
 
-  it('falls back to cloud agent when local returns local-unavailable', async () => {
+  it('returns local-disabled error when local agent is disabled in config', async () => {
     _setTestConfig({
       local: { enabled: false },
       routing: { mode: 'performance' },
@@ -894,6 +894,42 @@ describe('executeAgent — output size limits', () => {
       result.output.length < 10 * 1100,
       `output should be truncated below total input (${String(10 * 1100)} bytes), got ${String(result.output.length)} chars`,
     );
+  });
+
+  it('truncates single-chunk stdout that exceeds maxOutputBytes', async () => {
+    // One synchronous write of 4096 ASCII bytes — arrives as a single chunk,
+    // exercising the single-chunk overflow path (stdoutChunks.length === 1).
+    registerTestAgent(AGENT_NAME, `process.stdout.write('A'.repeat(4096));`);
+
+    const result = await executeAgent(AGENT_NAME, 'prompt', {
+      maxOutputBytes: 1024,
+    });
+
+    assert.equal(result.ok, true);
+    const outputBytes = Buffer.byteLength(result.output, 'utf8');
+    assert.ok(
+      outputBytes <= 1024,
+      `single-chunk output should be ≤ 1024 bytes, got ${String(outputBytes)}`,
+    );
+  });
+
+  it('truncates single-chunk multi-byte UTF-8 stdout by bytes not characters', async () => {
+    // Each emoji (🔥) is 4 bytes in UTF-8. Writing 512 emoji = 2048 bytes.
+    // Cap at 1023 bytes (not divisible by 4) to exercise the mid-character boundary.
+    registerTestAgent(AGENT_NAME, `process.stdout.write('\\u{1F525}'.repeat(512));`);
+
+    const result = await executeAgent(AGENT_NAME, 'prompt', {
+      maxOutputBytes: 1023,
+    });
+
+    assert.equal(result.ok, true);
+    const outputBytes = Buffer.byteLength(result.output, 'utf8');
+    assert.ok(
+      outputBytes <= 1023,
+      `multi-byte output should be ≤ 1023 bytes, got ${String(outputBytes)} (${String(result.output.length)} chars)`,
+    );
+    // Verify truncation actually happened (should be well below original 2048 bytes)
+    assert.ok(outputBytes < 2048, `output should be truncated below original 2048 bytes`);
   });
 });
 

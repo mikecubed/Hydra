@@ -1,16 +1,16 @@
-/* eslint-disable @typescript-eslint/no-explicit-any */
 import { describe, it, mock } from 'node:test';
 import assert from 'node:assert/strict';
+import type { Interface as ReadlineInterface } from 'node:readline';
 import { executeDaemonResume } from '../lib/hydra-operator-session.ts';
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
-function makeRl() {
-  return { prompt: () => {} } as any;
+function makeRl(): ReadlineInterface {
+  return { prompt: () => {} } as unknown as ReadlineInterface;
 }
 
 /** Build a minimal session-status response. */
-function sessionStatus(overrides: Record<string, any> = {}) {
+function sessionStatus(overrides: Record<string, unknown> = {}) {
   return {
     activeSession: { status: 'active' },
     staleTasks: [],
@@ -22,8 +22,8 @@ function sessionStatus(overrides: Record<string, any> = {}) {
 }
 
 /** Creates a spy that records calls and returns canned responses. */
-function makeRequestSpy(responses: Record<string, any>) {
-  return mock.fn((method: string, _baseUrl: string, path: string, _body?: any) => {
+function makeRequestSpy(responses: Record<string, unknown>) {
+  return mock.fn((method: string, _baseUrl: string, path: string, _body?: unknown) => {
     const key = `${method} ${path}`;
     if (key in responses) return Promise.resolve(responses[key]);
     if (method === 'POST') return Promise.resolve({});
@@ -48,9 +48,7 @@ describe('executeDaemonResume', () => {
       'POST /session/unpause': {},
     });
     await executeDaemonResume('http://localhost:4173', ['claude'], makeRl(), requestSpy);
-    const calls = requestSpy.mock.calls.map(
-      (c: any) => `${String(c.arguments[0])} ${String(c.arguments[2])}`,
-    );
+    const calls = requestSpy.mock.calls.map((c) => `${c.arguments[0]} ${c.arguments[2]}`);
     assert.ok(calls.includes('POST /session/unpause'), 'should call /session/unpause');
   });
 
@@ -62,10 +60,11 @@ describe('executeDaemonResume', () => {
       'POST /task/update': {},
     });
     await executeDaemonResume('http://localhost:4173', ['claude'], makeRl(), requestSpy);
-    const updateCall = requestSpy.mock.calls.find((c: any) => c.arguments[2] === '/task/update');
+    const updateCall = requestSpy.mock.calls.find((c) => c.arguments[2] === '/task/update');
     assert.ok(updateCall, 'should call /task/update');
-    assert.equal((updateCall as any).arguments[3].taskId, 'task-1');
-    assert.equal((updateCall as any).arguments[3].status, 'todo');
+    const updateBody = updateCall.arguments[3] as Record<string, unknown>;
+    assert.equal(updateBody['taskId'], 'task-1');
+    assert.equal(updateBody['status'], 'todo');
   });
 
   it('acks pending handoffs and launches matching agents', async () => {
@@ -83,9 +82,10 @@ describe('executeDaemonResume', () => {
       requestSpy,
       startWorkersSpy,
     );
-    const ackCall = requestSpy.mock.calls.find((c: any) => c.arguments[2] === '/handoff/ack');
+    const ackCall = requestSpy.mock.calls.find((c) => c.arguments[2] === '/handoff/ack');
     assert.ok(ackCall, 'should call /handoff/ack');
-    assert.equal((ackCall as any).arguments[3].handoffId, 'h1');
+    const ackBody = ackCall.arguments[3] as Record<string, unknown>;
+    assert.equal(ackBody['handoffId'], 'h1');
     assert.equal(startWorkersSpy.mock.calls.length, 1, 'should launch workers');
     assert.deepEqual(startWorkersSpy.mock.calls[0].arguments[0], ['gemini']);
   });

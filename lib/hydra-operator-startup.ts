@@ -169,14 +169,10 @@ export function launchAgentTerminals(agentNames: string[], baseUrl: string): voi
     // Encode as UTF-16LE base64 for -EncodedCommand (avoids all escaping issues)
     const encoded = Buffer.from(psCommand, 'utf16le').toString('base64');
 
-    let cmd;
-    if (wt) {
-      // Windows Terminal: open a new tab in the current window
-      cmd = `wt -w 0 new-tab --title "${title}" "${shell}" -NoExit -EncodedCommand ${encoded}`;
-    } else {
-      // Fallback: start command reliably opens a visible console window
-      cmd = `start "${title}" "${shell}" -NoExit -EncodedCommand ${encoded}`;
-    }
+    // Windows Terminal: new tab in current window; fallback: start a visible console
+    const cmd = wt
+      ? `wt -w 0 new-tab --title "${title}" "${shell}" -NoExit -EncodedCommand ${encoded}`
+      : `start "${title}" "${shell}" -NoExit -EncodedCommand ${encoded}`;
     exec(cmd, { cwd });
 
     const icon =
@@ -202,22 +198,7 @@ export function extractHandoffAgents(result: Record<string, unknown>): string[] 
 
 // ── Welcome Screen ───────────────────────────────────────────────────────────
 
-export async function printWelcome(baseUrl: string): Promise<void> {
-  console.log(hydraSplash());
-  console.log(label('Project', pc.white(config.projectName)));
-  // Sync HYDRA.md → agent instruction files on startup
-  try {
-    const syncResult = syncHydraMd(config.projectRoot);
-    if (syncResult.synced.length > 0) {
-      console.log(label('Sync', DIM(`HYDRA.md → ${syncResult.synced.join(', ')}`)));
-    }
-  } catch {
-    /* non-critical */
-  }
-
-  console.log(label('Daemon', DIM(baseUrl)));
-
-  // Startup alert: check for in-progress tasks and pending handoffs
+async function printWelcomeSessionAlerts(baseUrl: string): Promise<void> {
   try {
     const sessionStatus = (await request('GET', baseUrl, '/session/status')) as any;
     if (sessionStatus.activeSession?.status === 'paused') {
@@ -243,8 +224,9 @@ export async function printWelcome(baseUrl: string): Promise<void> {
   } catch {
     /* daemon may not have session data yet */
   }
+}
 
-  // Mode & Models
+function printWelcomeModels(): void {
   try {
     const models = getModelSummary();
     const currentMode = (models['_mode'] ?? getMode()) as string;
@@ -268,8 +250,9 @@ export async function printWelcome(baseUrl: string): Promise<void> {
   } catch {
     /* skip */
   }
+}
 
-  // Usage — show today's actual tokens from stats-cache
+function printWelcomeUsageStats(): void {
   try {
     const usage = checkUsage();
     if (usage.todayTokens > 0) {
@@ -285,7 +268,6 @@ export async function printWelcome(baseUrl: string): Promise<void> {
     /* skip */
   }
 
-  // Session token usage (from real Claude JSON output)
   try {
     const session = getSessionUsage();
     if (session.callCount > 0) {
@@ -300,7 +282,6 @@ export async function printWelcome(baseUrl: string): Promise<void> {
     /* skip */
   }
 
-  // Provider usage (load persisted + refresh external in background)
   try {
     loadProviderUsage();
     void refreshExternalUsage(); // non-blocking
@@ -315,8 +296,9 @@ export async function printWelcome(baseUrl: string): Promise<void> {
   } catch {
     /* skip */
   }
+}
 
-  // Context-aware next steps on startup
+async function printWelcomeNextSteps(baseUrl: string): Promise<void> {
   try {
     const sessionStatus = (await request('GET', baseUrl, '/session/status')) as any;
     printNextSteps({
@@ -328,6 +310,27 @@ export async function printWelcome(baseUrl: string): Promise<void> {
   } catch {
     console.log(`  ${DIM('Type a prompt to dispatch, or :help for commands')}`);
   }
+}
+
+export async function printWelcome(baseUrl: string): Promise<void> {
+  console.log(hydraSplash());
+  console.log(label('Project', pc.white(config.projectName)));
+  // Sync HYDRA.md → agent instruction files on startup
+  try {
+    const syncResult = syncHydraMd(config.projectRoot);
+    if (syncResult.synced.length > 0) {
+      console.log(label('Sync', DIM(`HYDRA.md → ${syncResult.synced.join(', ')}`)));
+    }
+  } catch {
+    /* non-critical */
+  }
+
+  console.log(label('Daemon', DIM(baseUrl)));
+
+  await printWelcomeSessionAlerts(baseUrl);
+  printWelcomeModels();
+  printWelcomeUsageStats();
+  await printWelcomeNextSteps(baseUrl);
 }
 
 // Silence unused import warning — AGENT_TYPE is re-exported for module consumers

@@ -68,8 +68,8 @@
     "tasks:clean": "node lib/hydra-tasks-review.ts clean",
     "research:todo": "node scripts/gen-research-todo.ts",
     "eval": "node lib/hydra-eval.ts",
-    "lint": "eslint .",
-    "lint:fix": "eslint . --fix",
+    "lint": "eslint . --max-warnings 0",
+    "lint:fix": "eslint . --fix --max-warnings 0",
     "lint:complexity": "node scripts/complexity-report.ts",
     "lint:mermaid": "node scripts/lint-mermaid.ts",
     "lint:cycles": "node scripts/detect-cycles.mjs",
@@ -93,7 +93,7 @@
   },
   "lint-staged": {
     "*.{ts,mjs}": [
-      "eslint --fix",
+      "eslint --fix --max-warnings 0",
       "prettier --write"
     ],
     "*.md": [

@@ -123,7 +123,7 @@ function getProviderTier(provider: string): number | string {
 
 function getEffectiveLimits(provider: string, model?: string): RateLimits | null {
   const tier = getProviderTier(provider);
-  if (model) {
+  if (model != null && model !== '') {
     const limits = getModelRateLimits(model, tier as number);
     if (limits) return limits as RateLimits;
   }
@@ -198,6 +198,50 @@ interface CanMakeRequestResult {
   remaining: RemainingCapacity;
 }
 
+function checkRpmExhausted(limits: RateLimits, remaining: RemainingCapacity): string | null {
+  if (limits.rpm != null && limits.rpm !== 0 && remaining.rpm != null && remaining.rpm <= 0) {
+    return `RPM exhausted (${String(limits.rpm)}/min)`;
+  }
+  return null;
+}
+
+function checkTpmExhausted(
+  limits: RateLimits,
+  remaining: RemainingCapacity,
+  estimatedTokens: number,
+): string | null {
+  const tpmLimit = limits.tpm ?? limits.itpm;
+  if (tpmLimit != null && tpmLimit !== 0 && remaining.tpm != null) {
+    if (remaining.tpm <= 0) {
+      return `TPM exhausted (${String(tpmLimit)}/min)`;
+    }
+    if (estimatedTokens > 0 && remaining.tpm < estimatedTokens) {
+      return `insufficient TPM (need ~${String(estimatedTokens)}, have ${String(remaining.tpm)})`;
+    }
+  }
+  return null;
+}
+
+function checkRpdExhausted(limits: RateLimits, remaining: RemainingCapacity): string | null {
+  if (limits.rpd != null && limits.rpd !== 0 && remaining.rpd != null && remaining.rpd <= 0) {
+    return `RPD exhausted (${String(limits.rpd)}/day)`;
+  }
+  return null;
+}
+
+function checkRpmWarning(limits: RateLimits, remaining: RemainingCapacity): string | null {
+  const RPM_WARN_PCT = 0.1;
+  if (
+    limits.rpm != null &&
+    limits.rpm !== 0 &&
+    remaining.rpm != null &&
+    remaining.rpm < limits.rpm * RPM_WARN_PCT
+  ) {
+    return `RPM low (${String(remaining.rpm)} remaining)`;
+  }
+  return null;
+}
+
 export function canMakeRequest(
   provider: string,
   model: string,
@@ -206,96 +250,96 @@ export function canMakeRequest(
   const limits = getEffectiveLimits(provider, model);
   const remaining = getRemainingCapacity(provider, model);
 
-  // No limit data → allow (we can't predict)
-  if (!limits) {
+  if (limits == null) {
     return { allowed: true, reason: 'no limit data', remaining };
   }
 
-  // Check RPM
-  if (limits.rpm && remaining.rpm != null && remaining.rpm <= 0) {
-    return { allowed: false, reason: `RPM exhausted (${String(limits.rpm)}/min)`, remaining };
-  }
+  const rpmErr = checkRpmExhausted(limits, remaining);
+  if (rpmErr != null) return { allowed: false, reason: rpmErr, remaining };
 
-  // Check TPM (use either tpm or itpm depending on provider)
-  const tpmLimit = limits.tpm ?? limits.itpm;
-  if (tpmLimit && remaining.tpm != null) {
-    if (remaining.tpm <= 0) {
-      return { allowed: false, reason: `TPM exhausted (${String(tpmLimit)}/min)`, remaining };
-    }
-    if (estimatedTokens > 0 && remaining.tpm < estimatedTokens) {
-      return {
-        allowed: false,
-        reason: `insufficient TPM (need ~${String(estimatedTokens)}, have ${String(remaining.tpm)})`,
-        remaining,
-      };
-    }
-  }
+  const tpmErr = checkTpmExhausted(limits, remaining, estimatedTokens);
+  if (tpmErr != null) return { allowed: false, reason: tpmErr, remaining };
 
-  // Check RPD (critical for Google free tier)
-  if (limits.rpd && remaining.rpd != null && remaining.rpd <= 0) {
-    return { allowed: false, reason: `RPD exhausted (${String(limits.rpd)}/day)`, remaining };
-  }
+  const rpdErr = checkRpdExhausted(limits, remaining);
+  if (rpdErr != null) return { allowed: false, reason: rpdErr, remaining };
 
-  // Warn threshold: allow but note when approaching limits
-  const RPM_WARN_PCT = 0.1; // warn at 10% remaining
-  if (limits.rpm && remaining.rpm != null && remaining.rpm < limits.rpm * RPM_WARN_PCT) {
-    return { allowed: true, reason: `RPM low (${String(remaining.rpm)} remaining)`, remaining };
-  }
+  const rpmWarn = checkRpmWarning(limits, remaining);
+  if (rpmWarn != null) return { allowed: true, reason: rpmWarn, remaining };
 
   return { allowed: true, reason: 'ok', remaining };
 }
 
-export function getRemainingCapacity(provider: string, model?: string): RemainingCapacity {
-  const limits = model ? getEffectiveLimits(provider, model) : null;
-  const result: RemainingCapacity = {
-    rpm: null,
-    tpm: null,
-    rpd: null,
-    pctRpm: null,
-    pctTpm: null,
-    pctRpd: null,
-  };
-
-  // Check for fresh header data first
-  const headers = _headerCapacity[provider];
-  const headersFresh = headers && Date.now() - headers.ts < HEADER_TTL_MS;
-
-  // RPM
-  if (headersFresh && headers.remainingRequests != null) {
-    result.rpm = headers.remainingRequests;
-    if (limits?.rpm) result.pctRpm = Math.round((result.rpm / limits.rpm) * 100);
-  } else if (limits?.rpm) {
+function computeRpmCapacity(
+  provider: string,
+  limits: RateLimits | null,
+  headers: HeaderCapacity | null,
+  headersFresh: boolean,
+): { rpm: number | null; pctRpm: number | null } {
+  if (headersFresh && headers?.remainingRequests != null) {
+    const rpm = headers.remainingRequests;
+    const pctRpm = computePctOfLimit(rpm, limits?.rpm);
+    return { rpm, pctRpm };
+  }
+  if (limits?.rpm != null && limits.rpm !== 0) {
     pruneWindow(_requestTimestamps[provider] ?? []);
     const used = (_requestTimestamps[provider] ?? []).length;
-    result.rpm = Math.max(0, limits.rpm - used);
-    result.pctRpm = Math.round((result.rpm / limits.rpm) * 100);
+    const rpm = Math.max(0, limits.rpm - used);
+    return { rpm, pctRpm: Math.round((rpm / limits.rpm) * 100) };
   }
+  return { rpm: null, pctRpm: null };
+}
 
-  // TPM
+function computePctOfLimit(value: number, limit: number | null | undefined): number | null {
+  if (limit == null || limit === 0) return null;
+  return Math.round((value / limit) * 100);
+}
+
+function computeTpmCapacity(
+  provider: string,
+  limits: RateLimits | null,
+  headers: HeaderCapacity | null,
+  headersFresh: boolean,
+): { tpm: number | null; pctTpm: number | null } {
   const tpmLimit = limits?.tpm ?? limits?.itpm;
-  if (headersFresh && headers.remainingTokens != null) {
-    result.tpm = headers.remainingTokens;
-    if (tpmLimit) result.pctTpm = Math.round((result.tpm / tpmLimit) * 100);
-  } else if (headersFresh && headers.remainingInputTokens != null) {
-    result.tpm = headers.remainingInputTokens;
-    if (tpmLimit) result.pctTpm = Math.round((result.tpm / tpmLimit) * 100);
-  } else if (tpmLimit) {
+  if (headersFresh && headers != null) {
+    const headerTpm = headers.remainingTokens ?? headers.remainingInputTokens;
+    if (headerTpm != null) {
+      return { tpm: headerTpm, pctTpm: computePctOfLimit(headerTpm, tpmLimit) };
+    }
+  }
+  if (tpmLimit != null && tpmLimit !== 0) {
     pruneTokenWindow(_tokenTimestamps[provider] ?? []);
     const usedTokens = (_tokenTimestamps[provider] ?? []).reduce((sum, e) => sum + e.tokens, 0);
-    result.tpm = Math.max(0, tpmLimit - usedTokens);
-    result.pctTpm = Math.round((result.tpm / tpmLimit) * 100);
+    const tpm = Math.max(0, tpmLimit - usedTokens);
+    return { tpm, pctTpm: computePctOfLimit(tpm, tpmLimit) };
   }
+  return { tpm: null, pctTpm: null };
+}
 
-  // RPD
-  if (limits?.rpd) {
+function computeRpdCapacity(
+  provider: string,
+  limits: RateLimits | null,
+): { rpd: number | null; pctRpd: number | null } {
+  if (limits?.rpd != null && limits.rpd !== 0) {
     const d = today();
     const daily = _dailyRequests[provider];
     const used = daily?.date === d ? daily.count : 0;
-    result.rpd = Math.max(0, limits.rpd - used);
-    result.pctRpd = Math.round((result.rpd / limits.rpd) * 100);
+    const rpd = Math.max(0, limits.rpd - used);
+    return { rpd, pctRpd: Math.round((rpd / limits.rpd) * 100) };
   }
+  return { rpd: null, pctRpd: null };
+}
 
-  return result;
+export function getRemainingCapacity(provider: string, model?: string): RemainingCapacity {
+  const limits = model != null && model !== '' ? getEffectiveLimits(provider, model) : null;
+  const headers = _headerCapacity[provider] ?? null;
+  const headersFresh = headers != null && Date.now() - headers.ts < HEADER_TTL_MS;
+
+  const { rpm, pctRpm } = computeRpmCapacity(provider, limits, headers, headersFresh);
+  const { tpm, pctTpm } = computeTpmCapacity(provider, limits, headers, headersFresh);
+  const { rpd, pctRpd } = computeRpdCapacity(provider, limits);
+
+  return { rpm, tpm, rpd, pctRpm, pctTpm, pctRpd };
 }
 
 export function getHealthiestProvider(candidates: ProviderCandidate[]): ProviderCandidate[] {
@@ -331,7 +375,7 @@ function computeHealthScore(cap: RemainingCapacity, provider: string): number {
   } // double weight for RPD
 
   // Factor in latency via PeakEWMA (lower latency → higher score)
-  if (provider) {
+  if (provider !== '') {
     const ewma = getProviderEWMA(provider);
     const latencyMs = ewma.get();
     if (latencyMs > 0) {
@@ -403,7 +447,7 @@ export function loadRpdState(data: PersistedRpdState | null | undefined): void {
   if (!data?.rpd) return;
   for (const [provider, state] of Object.entries(data.rpd)) {
     const daily = _dailyRequests[provider];
-    if (daily && state?.date && state.count) {
+    if (daily && state?.date != null && state.date !== '' && state.count !== 0) {
       daily.date = state.date;
       daily.count = state.count;
     }
@@ -413,7 +457,7 @@ export function loadRpdState(data: PersistedRpdState | null | undefined): void {
 export function getRpdState(): Record<string, { date: string; count: number }> {
   const out: Record<string, { date: string; count: number }> = {};
   for (const [provider, state] of Object.entries(_dailyRequests)) {
-    if (state?.date) {
+    if (state?.date != null && state.date !== '') {
       out[provider] = { date: state.date, count: state.count };
     }
   }
@@ -504,12 +548,14 @@ export function initRateLimiters(rpsConfig: Record<string, number> = {}): void {
 }
 
 function _getLimiter(provider: string): TokenBucket {
-  if (!_limiters.has(provider)) {
+  let limiter = _limiters.get(provider);
+  if (limiter == null) {
     const rps = DEFAULT_BUCKET_LIMITS[provider] ?? 60;
     const perSecond = rps / 60;
-    _limiters.set(provider, new TokenBucket(Math.max(1, Math.ceil(rps / 6)), perSecond));
+    limiter = new TokenBucket(Math.max(1, Math.ceil(rps / 6)), perSecond);
+    _limiters.set(provider, limiter);
   }
-  return _limiters.get(provider)!;
+  return limiter;
 }
 
 /** Acquire a rate limit token for a provider. Waits if necessary. */
@@ -541,7 +587,7 @@ export function getRateLimitStats(): Record<string, RateLimitStats> {
 }
 
 export function resetRateLimiter(provider?: string): void {
-  if (provider) {
+  if (provider != null && provider !== '') {
     const limiter = _limiters.get(provider);
     if (limiter) limiter.tokens = limiter.capacity;
   } else {

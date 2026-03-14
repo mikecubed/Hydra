@@ -291,6 +291,22 @@ let codexClient: MCPClient | null = null;
 /**
  * Get or create a Codex MCP client.
  */
+function extractMCPText(result: Record<string, unknown> | null): string {
+  if (result == null) return '';
+  if (Array.isArray(result['content'])) {
+    return (result['content'] as Array<{ text?: string }>).map((c) => c.text ?? '').join('\n');
+  }
+  if (typeof result['content'] === 'string') {
+    return result['content'];
+  }
+  // Fallback: preserve non-standard MCP responses instead of silently dropping them
+  try {
+    return JSON.stringify(result);
+  } catch {
+    return '';
+  }
+}
+
 export function getCodexMCPClient(opts: { cwd?: string } = {}): MCPClient | null {
   const cfg = loadHydraConfig();
   const mcpConfig = (cfg as Record<string, unknown>)['mcp'] as Record<string, unknown> | undefined;
@@ -335,21 +351,7 @@ export async function codexMCP(
       string,
       unknown
     > | null;
-    let text: string;
-    if (Array.isArray(result?.['content'])) {
-      text = (result['content'] as Array<{ text?: string }>).map((c) => c.text ?? '').join('\n');
-    } else if (typeof result?.['content'] === 'string') {
-      text = result['content'];
-    } else if (result == null) {
-      text = '';
-    } else {
-      // Fallback: preserve non-standard MCP responses instead of silently dropping them
-      try {
-        text = JSON.stringify(result);
-      } catch {
-        text = '';
-      }
-    }
+    const text = extractMCPText(result);
 
     const threadId = (result?.['conversationId'] ?? result?.['threadId'] ?? opts.threadId) as
       | string

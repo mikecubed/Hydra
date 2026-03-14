@@ -44,7 +44,7 @@ function pushLine(clean: string, raw: string): void {
 
 function processChunk(chunk: string | Uint8Array, _isRaw?: boolean): void {
   const str = typeof chunk === 'string' ? chunk : Buffer.from(chunk).toString('utf8');
-  if (!str) return;
+  if (str === '') return;
 
   if (isStatusBarLine(str)) return;
 
@@ -58,8 +58,8 @@ function processChunk(chunk: string | Uint8Array, _isRaw?: boolean): void {
   _partial = cleanParts.pop() ?? '';
 
   for (const [i, clean] of cleanParts.entries()) {
-    const raw = rawParts[i] || clean;
-    if (clean.trim()) {
+    const raw = rawParts[i] === '' ? clean : rawParts[i];
+    if (clean.trim() !== '') {
       pushLine(clean, raw);
     }
   }
@@ -90,9 +90,9 @@ export function initOutputHistory(opts: { maxLines?: number } = {}): void {
       /* never break output */
     }
     if (typeof encodingOrCb === 'function') {
-      return _origStdoutWrite!(chunk, encodingOrCb);
+      return _origStdoutWrite?.(chunk, encodingOrCb) ?? false;
     }
-    return _origStdoutWrite!(chunk, encodingOrCb, cb);
+    return _origStdoutWrite?.(chunk, encodingOrCb, cb) ?? false;
   };
   (process.stdout as NodeJS.WriteStream & { write: unknown }).write = patchedStdoutWrite;
 
@@ -107,9 +107,9 @@ export function initOutputHistory(opts: { maxLines?: number } = {}): void {
       /* never break output */
     }
     if (typeof encodingOrCb === 'function') {
-      return _origStderrWrite!(chunk, encodingOrCb);
+      return _origStderrWrite?.(chunk, encodingOrCb) ?? false;
     }
-    return _origStderrWrite!(chunk, encodingOrCb, cb);
+    return _origStderrWrite?.(chunk, encodingOrCb, cb) ?? false;
   };
   (process.stderr as NodeJS.WriteStream & { write: unknown }).write = patchedStderrWrite;
 }

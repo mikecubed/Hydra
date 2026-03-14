@@ -56,10 +56,12 @@ describe('streaming cycle safety net', () => {
     assert.equal(bucket.tryConsume(1), false);
 
     // Poll for up to 500ms so the assertion passes even under heavy CI load
-    let attempts = 0;
-    while (bucket.available() < 1 && attempts++ < 25) {
+    async function waitForRefill(remaining: number): Promise<void> {
+      if (bucket.available() >= 1 || remaining <= 0) return;
       await delay(20);
+      return waitForRefill(remaining - 1);
     }
+    await waitForRefill(25);
 
     assert.ok(bucket.available() >= 1);
   });

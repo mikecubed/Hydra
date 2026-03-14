@@ -33,6 +33,25 @@ export function normalizeSimpleCommandText(input: unknown): string {
     .trim();
 }
 
+function matchSelfAwarenessVerb(s: string): string | null {
+  const target = '(?:hyper\\s*aware(?:ness)?|self\\s*awareness)';
+  const polite = '(?:please\\s+)?(?:can\\s+you\\s+|could\\s+you\\s+|would\\s+you\\s+)?';
+  const agentSuffix = '(?:\\s+agent)?';
+
+  if (new RegExp(`^${polite}(?:turn\\s+off|disable)\\s+${target}${agentSuffix}$`).test(s))
+    return 'off';
+  if (new RegExp(`^${polite}${target}${agentSuffix}\\s+off$`).test(s)) return 'off';
+  if (new RegExp(`^${polite}(?:turn\\s+on|enable)\\s+${target}${agentSuffix}$`).test(s))
+    return 'on';
+  if (new RegExp(`^${polite}${target}${agentSuffix}\\s+on$`).test(s)) return 'on';
+  if (new RegExp(`^${polite}(?:set\\s+)?${target}${agentSuffix}\\s+(?:to\\s+)?minimal$`).test(s))
+    return 'minimal';
+  if (new RegExp(`^${polite}(?:set\\s+)?${target}${agentSuffix}\\s+(?:to\\s+)?full$`).test(s))
+    return 'full';
+  if (new RegExp(`^${polite}${target}${agentSuffix}\\s+status$`).test(s)) return 'status';
+  return null;
+}
+
 export function parseSelfAwarenessPlaintextCommand(input: unknown): string | null {
   if (input === null || input === undefined) return null;
   if (typeof input === 'object' || typeof input === 'symbol' || typeof input === 'function')
@@ -45,25 +64,7 @@ export function parseSelfAwarenessPlaintextCommand(input: unknown): string | nul
   const s = normalizeSimpleCommandText(raw);
   if (!s || s.length > 80) return null;
 
-  const target = '(?:hyper\\s*aware(?:ness)?|self\\s*awareness)';
-  const polite = '(?:please\\s+)?(?:can\\s+you\\s+|could\\s+you\\s+|would\\s+you\\s+)?';
-  const agentSuffix = '(?:\\s+agent)?';
-
-  if (new RegExp(`^${polite}(?:turn\\s+off|disable)\\s+${target}${agentSuffix}$`).test(s))
-    return 'off';
-  if (new RegExp(`^${polite}${target}${agentSuffix}\\s+off$`).test(s)) return 'off';
-
-  if (new RegExp(`^${polite}(?:turn\\s+on|enable)\\s+${target}${agentSuffix}$`).test(s))
-    return 'on';
-  if (new RegExp(`^${polite}${target}${agentSuffix}\\s+on$`).test(s)) return 'on';
-
-  if (new RegExp(`^${polite}(?:set\\s+)?${target}${agentSuffix}\\s+(?:to\\s+)?minimal$`).test(s))
-    return 'minimal';
-  if (new RegExp(`^${polite}(?:set\\s+)?${target}${agentSuffix}\\s+(?:to\\s+)?full$`).test(s))
-    return 'full';
-
-  if (new RegExp(`^${polite}${target}${agentSuffix}\\s+status$`).test(s)) return 'status';
-  return null;
+  return matchSelfAwarenessVerb(s);
 }
 
 export function applySelfAwarenessPatch(patch: Record<string, unknown> = {}): unknown {

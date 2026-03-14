@@ -65,6 +65,111 @@ interface PipelineOpts {
   baseUrl?: string;
 }
 
+async function scanItems(scanners: (() => Promise<ActionItem[]>)[]): Promise<ActionItem[]> {
+  const scanSpinner = createSpinner('Scanning...', { style: 'orbital' });
+  let allItems: ActionItem[] = [];
+
+  try {
+    const results = await Promise.allSettled(scanners.map((fn) => fn()));
+    for (const r of results) {
+      if (r.status === 'fulfilled' && Array.isArray(r.value)) {
+        allItems.push(...r.value);
+      }
+    }
+  } finally {
+    scanSpinner.stop();
+  }
+
+  const seen = new Set<string>();
+  allItems = allItems.filter((item) => {
+    if (seen.has(item.id)) return false;
+    seen.add(item.id);
+    return true;
+  });
+
+  return allItems;
+}
+
+async function enrichItems(
+  items: ActionItem[],
+  enrich?: (items: ActionItem[]) => Promise<ActionItem[]>,
+): Promise<ActionItem[]> {
+  if (enrich == null) return items;
+  const enrichSpinner = createSpinner('Analyzing...', { style: 'stellar' });
+  try {
+    return await enrich(items);
+  } catch {
+    return items;
+  } finally {
+    enrichSpinner.stop();
+  }
+}
+
+async function executeItems(
+  selectedItems: ActionItem[],
+  executeFn: ((item: ActionItem, opts: PipelineOpts) => Promise<PipelineResult>) | undefined,
+  pipelineOpts: PipelineOpts,
+  title: string,
+): Promise<PipelineResult[]> {
+  console.log('');
+  console.log(sectionHeader(`${title} — Executing`));
+
+  const results: PipelineResult[] = [];
+  for (let i = 0; i < selectedItems.length; i++) {
+    const item = selectedItems[i];
+    const progress = DIM(`[${String(i + 1)}/${String(selectedItems.length)}]`);
+    const spinner = createSpinner(`${progress} ${item.title}`, { style: 'solar' });
+
+    const startMs = Date.now();
+    let pipelineResult: PipelineResult;
+
+    try {
+      if (executeFn == null) throw new Error('Pipeline executeFn is required but was not provided');
+      // eslint-disable-next-line no-await-in-loop -- intentionally sequential: items execute one at a time with progress spinner and [i+1/n] display
+      pipelineResult = await executeFn(item, pipelineOpts);
+    } catch (err: unknown) {
+      pipelineResult = {
+        item,
+        ok: false,
+        error: err instanceof Error ? err.message : String(err),
+        durationMs: Date.now() - startMs,
+      };
+    } finally {
+      spinner.stop();
+    }
+
+    const statusIcon = pipelineResult.ok ? SUCCESS('\u2713') : ERROR('\u2718');
+    const elapsed = formatElapsed(pipelineResult.durationMs);
+    console.log(`  ${statusIcon} ${item.title} ${DIM(elapsed)}`);
+    if (!pipelineResult.ok && pipelineResult.error != null && pipelineResult.error !== '') {
+      console.log(`    ${ERROR(pipelineResult.error.slice(0, 120))}`);
+    }
+
+    results.push(pipelineResult);
+  }
+  return results;
+}
+
+function printReport(results: PipelineResult[], title: string): void {
+  console.log('');
+  const succeeded = results.filter((r) => r.ok).length;
+  const failed = results.length - succeeded;
+  const totalMs = results.reduce((sum, r) => sum + r.durationMs, 0);
+
+  const summaryParts = [
+    `${String(succeeded)} succeeded`,
+    failed > 0 ? `${String(failed)} failed` : null,
+    formatElapsed(totalMs),
+  ].filter((x): x is string => x !== null);
+
+  let summaryColor: (s: string) => string;
+  if (failed === 0) summaryColor = SUCCESS;
+  else if (failed === results.length) summaryColor = ERROR;
+  else summaryColor = WARNING;
+  console.log(`  ${summaryColor(`${title} complete:`)} ${summaryParts.join(' | ')}`);
+  console.log('');
+}
+
 export async function runActionPipeline(
   rl: unknown,
   opts: PipelineOpts = {},
@@ -82,27 +187,7 @@ export async function runActionPipeline(
   console.log(sectionHeader(title));
 
   // ── SCAN ─────────────────────────────────────────────────────────────────
-  const scanSpinner = createSpinner('Scanning...', { style: 'orbital' });
-  let allItems: ActionItem[] = [];
-
-  try {
-    const results = await Promise.allSettled(scanners.map((fn) => fn()));
-    for (const r of results) {
-      if (r.status === 'fulfilled' && Array.isArray(r.value)) {
-        allItems.push(...r.value);
-      }
-    }
-  } finally {
-    scanSpinner.stop();
-  }
-
-  // Deduplicate by id
-  const seen = new Set<string>();
-  allItems = allItems.filter((item) => {
-    if (seen.has(item.id)) return false;
-    seen.add(item.id);
-    return true;
-  });
+  let allItems = await scanItems(scanners);
 
   if (allItems.length === 0) {
     console.log(`  ${DIM('Nothing found.')}`);
@@ -115,19 +200,9 @@ export async function runActionPipeline(
   );
 
   // ── ENRICH ───────────────────────────────────────────────────────────────
-  if (enrich) {
-    const enrichSpinner = createSpinner('Analyzing...', { style: 'stellar' });
-    try {
-      allItems = await enrich(allItems);
-    } catch {
-      // Non-fatal: continue with un-enriched items
-    } finally {
-      enrichSpinner.stop();
-    }
-  }
+  allItems = await enrichItems(allItems, enrich);
 
   // ── SELECT ───────────────────────────────────────────────────────────────
-  // Build choices from items
   const choices = allItems.map((item) => ({
     label: item.title,
     value: item.id,
@@ -173,63 +248,12 @@ export async function runActionPipeline(
   }
 
   // ── EXECUTE ──────────────────────────────────────────────────────────────
-  console.log('');
-  console.log(sectionHeader(`${title} — Executing`));
-
-  const results: PipelineResult[] = [];
-  for (let i = 0; i < selectedItems.length; i++) {
-    const item = selectedItems[i];
-    const progress = DIM(`[${String(i + 1)}/${String(selectedItems.length)}]`);
-    const spinner = createSpinner(`${progress} ${item.title}`, { style: 'solar' });
-
-    const startMs = Date.now();
-    let pipelineResult: PipelineResult;
-
-    try {
-      if (!executeFn) throw new Error('Pipeline executeFn is required but was not provided');
-      // eslint-disable-next-line no-await-in-loop -- intentionally sequential: items execute one at a time with progress spinner and [i+1/n] display
-      pipelineResult = await executeFn(item, opts);
-    } catch (err: unknown) {
-      pipelineResult = {
-        item,
-        ok: false,
-        error: err instanceof Error ? err.message : String(err),
-        durationMs: Date.now() - startMs,
-      };
-    } finally {
-      spinner.stop();
-    }
-
-    const statusIcon = pipelineResult!.ok ? SUCCESS('\u2713') : ERROR('\u2718');
-    const elapsed = formatElapsed(pipelineResult!.durationMs);
-    console.log(`  ${statusIcon} ${item.title} ${DIM(elapsed)}`);
-    if (!pipelineResult!.ok && pipelineResult!.error) {
-      console.log(`    ${ERROR(pipelineResult!.error.slice(0, 120))}`);
-    }
-
-    results.push(pipelineResult!);
-  }
+  const results = await executeItems(selectedItems, executeFn, opts, title);
 
   // ── REPORT ───────────────────────────────────────────────────────────────
-  console.log('');
-  const succeeded = results.filter((r) => r.ok).length;
-  const failed = results.length - succeeded;
-  const totalMs = results.reduce((sum, r) => sum + r.durationMs, 0);
+  printReport(results, title);
 
-  const summaryParts = [
-    `${String(succeeded)} succeeded`,
-    failed > 0 ? `${String(failed)} failed` : null,
-    formatElapsed(totalMs),
-  ].filter((x): x is string => x !== null);
-
-  let summaryColor: (s: string) => string;
-  if (failed === 0) summaryColor = SUCCESS;
-  else if (failed === results.length) summaryColor = ERROR;
-  else summaryColor = WARNING;
-  console.log(`  ${summaryColor(`${title} complete:`)} ${summaryParts.join(' | ')}`);
-  console.log('');
-
-  if (onComplete) {
+  if (onComplete != null) {
     try {
       onComplete(results);
     } catch {

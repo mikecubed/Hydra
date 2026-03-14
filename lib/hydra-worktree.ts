@@ -17,7 +17,8 @@ import { git, getCurrentBranch } from './hydra-shared/git-ops.ts';
 function getWorktreeConfig() {
   const cfg = loadHydraConfig();
   const wt = cfg.worktrees;
-  const branchPrefix = (wt?.['branchPrefix'] as string) || 'hydra/';
+  const rawPrefix = (wt?.['branchPrefix'] as string | undefined) ?? '';
+  const branchPrefix = rawPrefix === '' ? 'hydra/' : rawPrefix;
 
   // Security: Validate branchPrefix to prevent shell injection
   if (!/^[\w/.-]+$/.test(branchPrefix)) {
@@ -26,9 +27,10 @@ function getWorktreeConfig() {
     );
   }
 
+  const rawBasePath = (wt?.['basePath'] as string | undefined) ?? '';
   return {
-    enabled: (wt?.['enabled'] as boolean) || false,
-    basePath: (wt?.['basePath'] as string) || '.hydra/worktrees',
+    enabled: (wt?.['enabled'] as boolean | undefined) === true,
+    basePath: rawBasePath === '' ? '.hydra/worktrees' : rawBasePath,
     autoCleanup: wt?.['autoCleanup'] !== false,
     branchPrefix,
   };
@@ -66,16 +68,21 @@ export function createWorktree(
   const gitPath = worktreePath.replace(/\\/g, '/');
 
   // Determine base branch
-  const base = (baseBranch ?? getCurrentBranch(projectRoot)) || 'HEAD';
+  const resolvedBase = baseBranch ?? getCurrentBranch(projectRoot);
+  const base = resolvedBase === '' ? 'HEAD' : resolvedBase;
 
   // Create branch and worktree
   const r = git(['worktree', 'add', '-b', branch, gitPath, base], projectRoot);
   if (r.status !== 0) {
     const r2 = git(['worktree', 'add', gitPath, branch], projectRoot);
     if (r2.status !== 0) {
-      throw new Error(
-        `Failed to create worktree for ${taskId}: ${r2.stderr || r.stderr || 'unknown error'}`,
-      );
+      let errMsg = 'unknown error';
+      if (r2.stderr !== '') {
+        errMsg = r2.stderr;
+      } else if (r.stderr !== '') {
+        errMsg = r.stderr;
+      }
+      throw new Error(`Failed to create worktree for ${taskId}: ${errMsg}`);
     }
   }
 
@@ -110,7 +117,7 @@ export function removeWorktree(
     git(['worktree', 'prune'], projectRoot);
   }
 
-  if (opts.deleteBranch) {
+  if (opts.deleteBranch === true) {
     git(['branch', '-D', branch], projectRoot);
   }
 }
@@ -134,14 +141,14 @@ export function getWorktreePath(taskId: string, projectRoot: string): string {
 export function listWorktrees(projectRoot: string): WorktreeInfo[] {
   const r = git(['worktree', 'list', '--porcelain'], projectRoot);
   if (r.status !== 0) return [];
-  const output = (r.stdout || '').trim();
+  const output = r.stdout.trim();
 
   const worktrees: WorktreeInfo[] = [];
   let current: Partial<WorktreeInfo> = {};
 
   for (const line of output.split('\n')) {
     if (line.startsWith('worktree ')) {
-      if (current.path) worktrees.push(current as WorktreeInfo);
+      if (current.path != null && current.path !== '') worktrees.push(current as WorktreeInfo);
       current = { path: line.slice('worktree '.length).trim() };
     } else if (line.startsWith('HEAD ')) {
       current.head = line.slice('HEAD '.length).trim();
@@ -150,12 +157,12 @@ export function listWorktrees(projectRoot: string): WorktreeInfo[] {
         .slice('branch '.length)
         .trim()
         .replace(/^refs\/heads\//, '');
-    } else if (line === '' && current.path) {
+    } else if (line === '' && current.path != null && current.path !== '') {
       worktrees.push(current as WorktreeInfo);
       current = {};
     }
   }
-  if (current.path) worktrees.push(current as WorktreeInfo);
+  if (current.path != null && current.path !== '') worktrees.push(current as WorktreeInfo);
 
   return worktrees;
 }
@@ -174,15 +181,28 @@ export function mergeWorktree(
 ): { ok: boolean; message: string } {
   const config = getWorktreeConfig();
   const branch = `${config.branchPrefix}${taskId}`;
-  const target = (targetBranch ?? getCurrentBranch(projectRoot)) || 'main';
+  const resolvedTarget = targetBranch ?? getCurrentBranch(projectRoot);
+  const target = resolvedTarget === '' ? 'main' : resolvedTarget;
 
   const r = git(['merge', branch, '--no-edit'], projectRoot);
   if (r.status === 0) {
-    return { ok: true, message: (r.stdout || '').trim() || `Merged ${branch} into ${target}` };
+    const mergeOutput = r.stdout.trim();
+    return {
+      ok: true,
+      message: mergeOutput === '' ? `Merged ${branch} into ${target}` : mergeOutput,
+    };
+  }
+  const errStderr = r.stderr.trim();
+  const errStdout = r.stdout.trim();
+  let errDetail = 'unknown error';
+  if (errStderr !== '') {
+    errDetail = errStderr;
+  } else if (errStdout !== '') {
+    errDetail = errStdout;
   }
   return {
     ok: false,
-    message: `Merge failed: ${(r.stderr || r.stdout || 'unknown error').trim()}`,
+    message: `Merge failed: ${errDetail}`,
   };
 }
 

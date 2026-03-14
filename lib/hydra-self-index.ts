@@ -57,7 +57,8 @@ function walkFiles(rootDir: string, filterFn: (f: string) => boolean): string[] 
   const out: string[] = [];
   const stack: string[] = [rootDir];
   while (stack.length > 0) {
-    const dir = stack.pop()!;
+    const dir = stack.pop();
+    if (dir === undefined) continue;
     let entries: fs.Dirent[];
     try {
       entries = fs.readdirSync(dir, { withFileTypes: true });
@@ -89,7 +90,7 @@ function uniq(arr: string[]): string[] {
 
 function extractExports(source: string): string[] {
   const names: string[] = [];
-  if (!source) return names;
+  if (source === '') return names;
 
   // export function foo / export async function foo
   for (const m of source.matchAll(/export\s+(?:async\s+)?function\s+([A-Za-z0-9_]+)/g)) {
@@ -121,7 +122,7 @@ function extractExports(source: string): string[] {
 
 function extractDaemonRoutes(source: string): string[] {
   const routes: string[] = [];
-  if (!source) return routes;
+  if (source === '') return routes;
   for (const m of source.matchAll(/route\s*===\s*'([^']+)'/g)) routes.push(m[1]);
   for (const m of source.matchAll(/route\s*===\s*"([^"]+)"/g)) routes.push(m[1]);
   for (const m of source.matchAll(/route\.startsWith\(\s*'([^']+)'\s*\)/g)) routes.push(`${m[1]}*`);
@@ -133,7 +134,7 @@ function extractDaemonRoutes(source: string): string[] {
 
 function extractMcpTools(source: string): string[] {
   const tools: string[] = [];
-  if (!source) return tools;
+  if (source === '') return tools;
   for (const m of source.matchAll(/server\.tool\(\s*'([^']+)'/g)) tools.push(m[1]);
   for (const m of source.matchAll(/server\.tool\(\s*"([^"]+)"/g)) tools.push(m[1]);
   return uniq(tools).sort();
@@ -141,7 +142,7 @@ function extractMcpTools(source: string): string[] {
 
 function extractMcpResources(source: string): string[] {
   const resources: string[] = [];
-  if (!source) return resources;
+  if (source === '') return resources;
   // server.registerResource('name','hydra://uri', ...)
   for (const m of source.matchAll(/server\.registerResource\(\s*'[^']+'\s*,\s*'([^']+)'/g))
     resources.push(m[1]);
@@ -152,11 +153,11 @@ function extractMcpResources(source: string): string[] {
 
 function extractOperatorCommands(source: string): string[] {
   const cmds: string[] = [];
-  if (!source) return cmds;
+  if (source === '') return cmds;
 
   // Best-effort: parse KNOWN_COMMANDS array literals
   const block = source.match(/const\s+KNOWN_COMMANDS\s*=\s*\[([\s\S]*?)\];/m);
-  if (block?.[1]) {
+  if (block != null && block[1] !== '') {
     for (const m of block[1].matchAll(/'(:[^']+)'/g)) cmds.push(m[1]);
     for (const m of block[1].matchAll(/"(:[^"]+)"/g)) cmds.push(m[1]);
   }
@@ -249,7 +250,7 @@ export function formatSelfIndexForPrompt(index: SelfIndex, opts: FormatSelfIndex
   if (idx.moduleIndex.length > 0) {
     const sample = idx.moduleIndex
       .slice(0, 14)
-      .map((m) => `- ${m.file}${m.purpose ? `: ${m.purpose}` : ''}`)
+      .map((m) => `- ${m.file}${m.purpose != null && m.purpose !== '' ? `: ${m.purpose}` : ''}`)
       .join('\n');
     bodyLines.push('Key modules:');
     bodyLines.push(sample);

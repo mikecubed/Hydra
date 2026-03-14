@@ -86,7 +86,7 @@ function semverGt(a: string, b: string): boolean {
  *   Returns null on network error or when no repo URL is configured.
  */
 export async function checkForUpdates(): Promise<UpdateCacheData | null> {
-  if (!REMOTE_PKG_URL) return null;
+  if (REMOTE_PKG_URL == null || REMOTE_PKG_URL === '') return null;
 
   // Serve from cache if fresh
   const cache = loadCache();
@@ -103,7 +103,7 @@ export async function checkForUpdates(): Promise<UpdateCacheData | null> {
 
     const pkg = (await res.json()) as Record<string, unknown>;
     const remoteVersion = pkg['version'] as string | undefined;
-    if (!remoteVersion) return null;
+    if (remoteVersion == null || remoteVersion === '') return null;
 
     const hasUpdate = semverGt(remoteVersion, LOCAL_VERSION);
     return saveCache({ hasUpdate, remoteVersion, localVersion: LOCAL_VERSION });

@@ -125,10 +125,10 @@ describe('applySelfAwarenessPatch', () => {
   });
 
   it('merges patch with existing selfAwareness values', () => {
-    _setTestConfig({ selfAwareness: { enabled: true, detail: 'full' } } as any);
+    _setTestConfig({ selfAwareness: { enabled: true, detail: 'full' } });
     _setTestConfigPath(configPath);
 
-    const result = applySelfAwarenessPatch({ detail: 'minimal' } as any);
+    const result = applySelfAwarenessPatch({ detail: 'minimal' });
 
     assert.ok(typeof result === 'object' && result !== null);
     assert.equal((result as Record<string, unknown>)['detail'], 'minimal');

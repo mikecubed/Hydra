@@ -26,6 +26,7 @@ import { listIssues, isGhAvailable, isGhAuthenticated } from './hydra-github.ts'
 import { loadHydraConfig } from './hydra-config.ts';
 import { stripGitEnv } from './hydra-shared/git-ops.ts';
 import pc from 'picocolors';
+import { exit } from './hydra-process.ts';
 
 interface SpawnSyncResult {
   status: number | null;
@@ -166,13 +167,13 @@ export function scanTodoComments(projectRoot: string): ScannedTask[] {
     },
   );
 
-  if (result.status !== 0 || !result.stdout) return [];
+  if (result.status !== 0 || result.stdout === '') return [];
 
   const tasks: ScannedTask[] = [];
   const seen = new Set<string>();
 
   for (const line of result.stdout.split('\n')) {
-    if (!line.trim()) continue;
+    if (line.trim() === '') continue;
 
     // Format: file:line:content
     const match = line.match(/^(.+?):(\d+):(.+)$/);
@@ -223,6 +224,29 @@ const TODO_SECTION_PRIORITY = [
   'Known Issues',
 ];
 
+function orderByPrioritySections(
+  sectionTasks: Map<string, { text: string; section: string }[]>,
+): { text: string; section: string }[] {
+  const ordered: { text: string; section: string }[] = [];
+  for (const sectionName of TODO_SECTION_PRIORITY) {
+    for (const [key, items] of sectionTasks) {
+      if (
+        key.includes(sectionName) ||
+        sectionName.includes(key.replace(/[^a-zA-Z ]/g, '').trim())
+      ) {
+        ordered.push(...items);
+      }
+    }
+  }
+  for (const [key, items] of sectionTasks) {
+    const alreadyAdded = TODO_SECTION_PRIORITY.some(
+      (p) => key.includes(p) || p.includes(key.replace(/[^a-zA-Z ]/g, '').trim()),
+    );
+    if (!alreadyAdded) ordered.push(...items);
+  }
+  return ordered;
+}
+
 /**
  * Scan docs/TODO.md for unchecked task items.
  *
@@ -259,7 +283,7 @@ export function scanTodoMd(projectRoot: string): ScannedTask[] {
 
     // Unchecked items only
     const unchecked = trimmed.match(/^-\s+\[\s\]\s+(.+)/);
-    if (unchecked && currentSection) {
+    if (unchecked != null && currentSection !== '') {
       const taskText = unchecked[1]
         .replace(/\*\*/g, '')
         .replace(/\[([^\]]+)\]\([^)]+\)/g, '$1')
@@ -268,30 +292,13 @@ export function scanTodoMd(projectRoot: string): ScannedTask[] {
         if (!sectionTasks.has(currentSection)) {
           sectionTasks.set(currentSection, []);
         }
-        sectionTasks.get(currentSection)!.push({ text: taskText, section: currentSection });
+        sectionTasks.get(currentSection)?.push({ text: taskText, section: currentSection });
       }
     }
   }
 
   // Flatten by priority order
-  const ordered = [];
-  for (const sectionName of TODO_SECTION_PRIORITY) {
-    for (const [key, items] of sectionTasks) {
-      if (
-        key.includes(sectionName) ||
-        sectionName.includes(key.replace(/[^a-zA-Z ]/g, '').trim())
-      ) {
-        ordered.push(...items);
-      }
-    }
-  }
-  // Remaining sections
-  for (const [key, items] of sectionTasks) {
-    const alreadyAdded = TODO_SECTION_PRIORITY.some(
-      (p) => key.includes(p) || p.includes(key.replace(/[^a-zA-Z ]/g, '').trim()),
-    );
-    if (!alreadyAdded) ordered.push(...items);
-  }
+  const ordered = orderByPrioritySections(sectionTasks);
 
   for (const item of ordered) {
     const slug = taskToSlug(item.text);
@@ -437,13 +444,13 @@ export function scanAllSources(projectRoot: string, opts: ScanAllOpts = {}): Sca
 // ── CLI Entry Point ─────────────────────────────────────────────────────────
 
 const isDirectRun =
-  process.argv[1] &&
+  process.argv[1] !== '' &&
   path.resolve(process.argv[1]) ===
     path.resolve(new URL(import.meta.url).pathname.replace(/^\/([A-Z]:)/, '$1'));
 
 if (isDirectRun) {
   (async () => {
-    const projectRoot = process.argv[2] || process.cwd();
+    const projectRoot = process.argv[2] === '' ? process.cwd() : process.argv[2];
 
     // Initialize agent registry for classifyTask/bestAgentFor
     const { initAgentRegistry } = await import('./hydra-agents.ts');
@@ -482,7 +489,6 @@ if (isDirectRun) {
     console.log('');
   })().catch((err: unknown) => {
     console.error(err instanceof Error ? err.message : String(err));
-    // eslint-disable-next-line n/no-process-exit
-    process.exit(1);
+    exit(1);
   });
 }

@@ -35,6 +35,7 @@ import {
 } from './hydra-shared/review-common.ts';
 import { isGhAvailable } from './hydra-github.ts';
 import pc from 'picocolors';
+import { exit } from './hydra-process.ts';
 
 interface ReportEntry {
   branch?: string;
@@ -52,6 +53,85 @@ interface ReportBudget {
 interface ReportArtifacts {
   selfSnapshot?: string;
   selfIndex?: string;
+}
+
+function printActualizeEntryViolations(
+  violations: Array<{ severity: string; detail: string }>,
+): void {
+  console.log(pc.red(`  Violations: ${String(violations.length)}`));
+  for (const v of violations) {
+    console.log(pc.red(`    [${v.severity}] ${v.detail}`));
+  }
+}
+
+function printActualizeReportEntry(reportEntry: ReportEntry | undefined): void {
+  if (reportEntry == null) return;
+  const statusColor = reportEntry.status === 'success' ? pc.green : pc.yellow;
+  console.log(`  Status: ${statusColor((reportEntry.status ?? '').toUpperCase())}`);
+  console.log(`  Agent: ${reportEntry.agent ?? 'claude'}`);
+  if (reportEntry.source != null && reportEntry.source.length > 0)
+    console.log(
+      `  Source: ${reportEntry.source}${reportEntry.taskType != null && reportEntry.taskType.length > 0 ? ` (${reportEntry.taskType})` : ''}`,
+    );
+  if (reportEntry.tokensUsed != null && reportEntry.tokensUsed > 0)
+    console.log(`  Tokens: ~${reportEntry.tokensUsed.toLocaleString()}`);
+  console.log(`  Verification: ${reportEntry.verification ?? '?'}`);
+  if (reportEntry.violations != null && reportEntry.violations.length > 0) {
+    printActualizeEntryViolations(reportEntry.violations);
+  }
+}
+
+function printActualizeLiveViolations(
+  liveViolations: Array<{ severity: string; detail: string }>,
+  reportEntry: ReportEntry | undefined,
+): void {
+  if (
+    liveViolations.length > 0 &&
+    !(reportEntry?.violations != null && reportEntry.violations.length > 0)
+  ) {
+    console.log(pc.red(`\n  Live violation scan: ${String(liveViolations.length)} issue(s)`));
+    for (const v of liveViolations) {
+      console.log(pc.red(`    [${v.severity}] ${v.detail}`));
+    }
+  }
+}
+
+async function processActualizeBranch(
+  rl: ReturnType<typeof createRL>,
+  projectRoot: string,
+  branch: string,
+  baseBranch: string,
+  reportEntry: ReportEntry | undefined,
+): Promise<string | null> {
+  console.log(pc.bold(pc.cyan(`\n── ${branch} ──`)));
+  printActualizeReportEntry(reportEntry);
+
+  if (hasBaseAdvanced(projectRoot, branch, baseBranch)) {
+    console.log(
+      pc.yellow(
+        `  ${baseBranch} has advanced since this branch was created — smart merge will rebase first`,
+      ),
+    );
+  }
+
+  const { commitLog } = displayBranchInfo(projectRoot, branch, baseBranch);
+  if (commitLog.length === 0) {
+    await handleEmptyBranch(rl, projectRoot, branch);
+    return null;
+  }
+
+  const liveViolations = scanBranchViolations(projectRoot, branch, {
+    baseBranch,
+    protectedFiles: new Set(BASE_PROTECTED_FILES),
+    protectedPatterns: [...BASE_PROTECTED_PATTERNS],
+  });
+  printActualizeLiveViolations(liveViolations, reportEntry);
+
+  console.log('');
+  return await handleBranchAction(rl, projectRoot, branch, baseBranch, {
+    enablePR: isGhAvailable(),
+    useSmartMerge: true,
+  });
 }
 
 function hasBaseAdvanced(projectRoot: string, branch: string, baseBranch: string) {
@@ -97,64 +177,8 @@ async function reviewCommand(projectRoot: string, options: Record<string, string
     const reportEntry = (reportData?.['results'] as ReportEntry[] | undefined)?.find(
       (r: ReportEntry) => r.branch === branch,
     );
-
-    console.log(pc.bold(pc.cyan(`\n── ${branch} ──`)));
-
-    if (reportEntry != null) {
-      const statusColor = reportEntry.status === 'success' ? pc.green : pc.yellow;
-      console.log(`  Status: ${statusColor((reportEntry.status ?? '').toUpperCase())}`);
-      console.log(`  Agent: ${reportEntry.agent ?? 'claude'}`);
-      if (reportEntry.source != null && reportEntry.source.length > 0)
-        console.log(
-          `  Source: ${reportEntry.source}${reportEntry.taskType != null && reportEntry.taskType.length > 0 ? ` (${reportEntry.taskType})` : ''}`,
-        );
-      if (reportEntry.tokensUsed != null && reportEntry.tokensUsed > 0)
-        console.log(`  Tokens: ~${reportEntry.tokensUsed.toLocaleString()}`);
-      console.log(`  Verification: ${reportEntry.verification ?? '?'}`);
-      if (reportEntry.violations != null && reportEntry.violations.length > 0) {
-        console.log(pc.red(`  Violations: ${String(reportEntry.violations.length)}`));
-        for (const v of reportEntry.violations) {
-          console.log(pc.red(`    [${v.severity}] ${v.detail}`));
-        }
-      }
-    }
-
-    if (hasBaseAdvanced(projectRoot, branch, baseBranch)) {
-      console.log(
-        pc.yellow(
-          `  ${baseBranch} has advanced since this branch was created — smart merge will rebase first`,
-        ),
-      );
-    }
-
-    const { commitLog } = displayBranchInfo(projectRoot, branch, baseBranch);
-    if (commitLog.length === 0) {
-      // eslint-disable-next-line no-await-in-loop -- sequential interactive user prompts
-      await handleEmptyBranch(rl, projectRoot, branch);
-      continue;
-    }
-
-    const liveViolations = scanBranchViolations(projectRoot, branch, {
-      baseBranch,
-      protectedFiles: new Set(BASE_PROTECTED_FILES),
-      protectedPatterns: [...BASE_PROTECTED_PATTERNS],
-    });
-    if (
-      liveViolations.length > 0 &&
-      !(reportEntry?.violations != null && reportEntry.violations.length > 0)
-    ) {
-      console.log(pc.red(`\n  Live violation scan: ${String(liveViolations.length)} issue(s)`));
-      for (const v of liveViolations) {
-        console.log(pc.red(`    [${v.severity}] ${v.detail}`));
-      }
-    }
-
-    console.log('');
     // eslint-disable-next-line no-await-in-loop -- sequential interactive user prompts
-    const result = await handleBranchAction(rl, projectRoot, branch, baseBranch, {
-      enablePR: isGhAvailable(),
-      useSmartMerge: true,
-    });
+    const result = await processActualizeBranch(rl, projectRoot, branch, baseBranch, reportEntry);
     if (result === 'merged' || result === 'pr-created') merged++;
     else if (result === 'skipped') skipped++;
   }
@@ -163,20 +187,11 @@ async function reviewCommand(projectRoot: string, options: Record<string, string
   console.log(pc.bold(`\nDone: ${String(merged)} merged, ${String(skipped)} skipped`));
 }
 
-function statusCommand(projectRoot: string, options: Record<string, string | boolean>) {
-  const dateFilter =
-    typeof options['date'] === 'string' && options['date'].length > 0 ? options['date'] : null;
-  const branches = listBranches(projectRoot, 'actualize', dateFilter);
-
-  const reportDir = path.join(projectRoot, 'docs', 'coordination', 'actualize');
-  const report = loadLatestReport(reportDir, 'ACTUALIZE', dateFilter) as Record<
-    string,
-    unknown
-  > | null;
-  const baseBranch = (report?.['baseBranch'] as string | undefined) ?? 'dev';
-
-  console.log(pc.bold('\nActualize Status'));
-
+function printActualizeBranchesSection(
+  branches: string[],
+  baseBranch: string,
+  projectRoot: string,
+): void {
   if (branches.length === 0) {
     console.log(pc.dim('  No actualize branches found.'));
   } else {
@@ -187,7 +202,9 @@ function statusCommand(projectRoot: string, options: Record<string, string | boo
       console.log(`    ${b} (${String(commitCount)} commit${commitCount === 1 ? '' : 's'})`);
     }
   }
+}
 
+function printActualizeReportSection(report: Record<string, unknown> | null): void {
   if (report == null) {
     console.log(pc.dim('\n  No actualize report found.'));
   } else {
@@ -204,7 +221,23 @@ function statusCommand(projectRoot: string, options: Record<string, string | boo
     if (artifacts?.selfSnapshot != null) console.log(`  Self snapshot: ${artifacts.selfSnapshot}`);
     if (artifacts?.selfIndex != null) console.log(`  Self index: ${artifacts.selfIndex}`);
   }
+}
 
+function statusCommand(projectRoot: string, options: Record<string, string | boolean>) {
+  const dateFilter =
+    typeof options['date'] === 'string' && options['date'].length > 0 ? options['date'] : null;
+  const branches = listBranches(projectRoot, 'actualize', dateFilter);
+
+  const reportDir = path.join(projectRoot, 'docs', 'coordination', 'actualize');
+  const report = loadLatestReport(reportDir, 'ACTUALIZE', dateFilter) as Record<
+    string,
+    unknown
+  > | null;
+  const baseBranch = (report?.['baseBranch'] as string | undefined) ?? 'dev';
+
+  console.log(pc.bold('\nActualize Status'));
+  printActualizeBranchesSection(branches, baseBranch, projectRoot);
+  printActualizeReportSection(report);
   console.log('');
 }
 
@@ -267,6 +300,5 @@ async function main() {
 
 main().catch((err: unknown) => {
   console.error(pc.red(`Fatal: ${err instanceof Error ? err.message : String(err)}`));
-  // eslint-disable-next-line n/no-process-exit -- inside .catch() callback; return does not propagate
-  process.exit(1);
+  exit(1);
 });

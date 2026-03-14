@@ -1,193 +1,204 @@
 /**
- * TDD contract tests for IContextProvider, IGitOperations, IMetricsRecorder interfaces.
+ * Contract tests for IContextProvider, IGitOperations, IMetricsRecorder interfaces.
  *
- * Written BEFORE the interfaces were added to lib/types.ts (Red phase).
+ * Primary tests call real implementations and verify return values.
+ * One mock test per interface verifies mockability.
  */
-import { describe, it } from 'node:test';
+import { describe, it, afterEach } from 'node:test';
 import assert from 'node:assert/strict';
+import { execSync } from 'node:child_process';
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { join } from 'node:path';
+import { tmpdir } from 'node:os';
 
 import type { IContextProvider, IGitOperations, IMetricsRecorder } from '../lib/types.ts';
 
 // ── IContextProvider ──────────────────────────────────────────────────────────
 
 describe('IContextProvider interface', () => {
-  it('buildAgentContext satisfies IContextProvider contract', async () => {
+  it('buildAgentContext returns a non-empty string for each built-in agent', async () => {
     const { buildAgentContext } = await import('../lib/hydra-context.ts');
-    // Type-level assertion: cast verifies structural compatibility at compile time
-    const provider: IContextProvider = { buildAgentContext };
-    assert.equal(typeof provider.buildAgentContext, 'function');
+    for (const agent of ['claude', 'gemini', 'codex']) {
+      const ctx = buildAgentContext(agent, {}, { projectRoot: process.cwd() });
+      assert.equal(typeof ctx, 'string', `expected string for ${agent}`);
+      assert.ok(ctx.length > 0, `expected non-empty context for ${agent}`);
+    }
+  });
+
+  it('buildAgentContext includes project-specific content', async () => {
+    const { buildAgentContext } = await import('../lib/hydra-context.ts');
+    const ctx = buildAgentContext('claude', {}, { projectRoot: process.cwd() });
+    // The context should contain recognisable Hydra project references
+    assert.ok(ctx.includes('hydra') || ctx.includes('Hydra'), 'context should mention the project');
   });
 
   it('can be implemented by a mock object', () => {
-    const calls: string[] = [];
-
     const mock: IContextProvider = {
-      buildAgentContext(
-        agentName = 'claude',
-        _taskContext = {},
-        _projectConfig = null,
-        _promptText = null,
-      ) {
-        calls.push(agentName);
+      buildAgentContext(agentName = 'claude') {
         return `context-for-${agentName}`;
       },
     };
 
-    assert.equal(typeof mock.buildAgentContext, 'function');
-    const result = mock.buildAgentContext('gemini');
-    assert.equal(result, 'context-for-gemini');
-    assert.deepEqual(calls, ['gemini']);
-  });
-
-  it('mock returns a string context', () => {
-    const mock: IContextProvider = {
-      buildAgentContext() {
-        return 'mocked-context-string';
-      },
-    };
-
-    const ctx = mock.buildAgentContext('codex', { files: ['src/foo.ts'] }, null, 'some prompt');
-    assert.equal(typeof ctx, 'string');
-    assert.equal(ctx, 'mocked-context-string');
+    assert.equal(mock.buildAgentContext('gemini'), 'context-for-gemini');
   });
 });
 
 // ── IGitOperations ───────────────────────────────────────────────────────────
 
 describe('IGitOperations interface', () => {
-  it('git-ops module exports satisfy IGitOperations contract', async () => {
-    const gitOps = await import('../lib/hydra-shared/git-ops.ts');
-    const impl: IGitOperations = {
-      getCurrentBranch: gitOps.getCurrentBranch,
-      branchExists: gitOps.branchExists,
-      createBranch: gitOps.createBranch,
-      checkoutBranch: gitOps.checkoutBranch,
-      mergeBranch: gitOps.mergeBranch,
-      deleteBranch: gitOps.deleteBranch,
-      stageAndCommit: gitOps.stageAndCommit,
-    };
-    assert.equal(typeof impl.getCurrentBranch, 'function');
-    assert.equal(typeof impl.branchExists, 'function');
-    assert.equal(typeof impl.createBranch, 'function');
-    assert.equal(typeof impl.checkoutBranch, 'function');
-    assert.equal(typeof impl.mergeBranch, 'function');
-    assert.equal(typeof impl.deleteBranch, 'function');
-    assert.equal(typeof impl.stageAndCommit, 'function');
+  let tempDir: string;
+
+  afterEach(() => {
+    if (tempDir) {
+      rmSync(tempDir, { recursive: true, force: true });
+    }
+  });
+
+  it('getCurrentBranch returns the current branch name from a real repo', async () => {
+    const { getCurrentBranch } = await import('../lib/hydra-shared/git-ops.ts');
+    const branch = getCurrentBranch(process.cwd());
+    assert.equal(typeof branch, 'string');
+    assert.ok(branch.length > 0, 'branch name should be non-empty');
+  });
+
+  it('branchExists returns true for current branch, false for non-existent', async () => {
+    const { branchExists, getCurrentBranch } = await import('../lib/hydra-shared/git-ops.ts');
+    const cwd = process.cwd();
+    const current = getCurrentBranch(cwd);
+    assert.equal(branchExists(cwd, current), true, 'current branch should exist');
+    assert.equal(
+      branchExists(cwd, 'nonexistent-branch-abc123xyz'),
+      false,
+      'random branch should not exist',
+    );
+  });
+
+  it('createBranch and deleteBranch work in a temp git repo', async () => {
+    const { createBranch, branchExists, deleteBranch, checkoutBranch } =
+      await import('../lib/hydra-shared/git-ops.ts');
+    tempDir = mkdtempSync(join(tmpdir(), 'hydra-git-test-'));
+    execSync('git init -b main', { cwd: tempDir, stdio: 'ignore' });
+    execSync('git config user.email "test@test.com"', { cwd: tempDir, stdio: 'ignore' });
+    execSync('git config user.name "Test"', { cwd: tempDir, stdio: 'ignore' });
+    writeFileSync(join(tempDir, 'README.md'), '# test');
+    execSync('git add . && git commit -m "init"', { cwd: tempDir, stdio: 'ignore' });
+
+    const branchName = 'feat/test-branch';
+    // createBranch checks out the new branch
+    const created = createBranch(tempDir, branchName, 'main');
+    assert.equal(created, true, 'createBranch should succeed');
+    assert.equal(branchExists(tempDir, branchName), true, 'branch should exist after creation');
+
+    // Switch back to main before deleting
+    const co = checkoutBranch(tempDir, 'main');
+    assert.equal(co.status, 0, 'checkoutBranch should succeed');
+
+    const deleted = deleteBranch(tempDir, branchName);
+    assert.equal(deleted, true, 'deleteBranch should succeed');
+    assert.equal(
+      branchExists(tempDir, branchName),
+      false,
+      'branch should not exist after deletion',
+    );
+  });
+
+  it('gitOperations export satisfies IGitOperations at compile time', async () => {
+    const { gitOperations } = await import('../lib/hydra-shared/git-ops.ts');
+    // Compile-time contract check — assignment fails if signatures drift
+    const _: IGitOperations = gitOperations;
+    assert.equal(typeof _.getCurrentBranch, 'function');
+    assert.equal(typeof _.stageAndCommit, 'function');
   });
 
   it('can be implemented by a mock object', () => {
-    const ops: string[] = [];
-
     const mock: IGitOperations = {
-      getCurrentBranch(_cwd) {
-        ops.push('getCurrentBranch');
+      getCurrentBranch() {
         return 'main';
       },
-      branchExists(_cwd, _name) {
-        ops.push('branchExists');
+      branchExists() {
         return false;
       },
-      createBranch(_cwd, _name, _from) {
-        ops.push('createBranch');
+      createBranch() {
         return true;
       },
-      checkoutBranch(_cwd, _branch) {
-        ops.push('checkoutBranch');
+      checkoutBranch() {
         return { status: 0, stdout: '', stderr: '', error: null, signal: null };
       },
-      mergeBranch(_cwd, _branch, _base) {
-        ops.push('mergeBranch');
+      mergeBranch() {
         return true;
       },
-      deleteBranch(_cwd, _branch) {
-        ops.push('deleteBranch');
+      deleteBranch() {
         return true;
       },
-      stageAndCommit(_cwd, _message, _opts) {
-        ops.push('stageAndCommit');
+      stageAndCommit() {
         return true;
       },
     };
 
     assert.equal(mock.getCurrentBranch('/tmp'), 'main');
     assert.equal(mock.branchExists('/tmp', 'feat/x'), false);
-    assert.equal(mock.createBranch('/tmp', 'feat/x', 'main'), true);
-    assert.deepEqual(mock.checkoutBranch('/tmp', 'main'), {
-      status: 0,
-      stdout: '',
-      stderr: '',
-      error: null,
-      signal: null,
-    });
-    assert.equal(mock.mergeBranch('/tmp', 'feat/x'), true);
-    assert.equal(mock.deleteBranch('/tmp', 'feat/x'), true);
-    assert.equal(mock.stageAndCommit('/tmp', 'chore: test'), true);
-    assert.deepEqual(ops, [
-      'getCurrentBranch',
-      'branchExists',
-      'createBranch',
-      'checkoutBranch',
-      'mergeBranch',
-      'deleteBranch',
-      'stageAndCommit',
-    ]);
   });
 });
 
 // ── IMetricsRecorder ─────────────────────────────────────────────────────────
 
 describe('IMetricsRecorder interface', () => {
-  it('hydra-metrics exports satisfy IMetricsRecorder contract', async () => {
-    const metrics = await import('../lib/hydra-metrics.ts');
-    const impl: IMetricsRecorder = {
-      recordCallStart: metrics.recordCallStart,
-      recordCallComplete: metrics.recordCallComplete,
-      recordCallError: metrics.recordCallError,
-    };
-    assert.equal(typeof impl.recordCallStart, 'function');
-    assert.equal(typeof impl.recordCallComplete, 'function');
-    assert.equal(typeof impl.recordCallError, 'function');
+  afterEach(async () => {
+    const { resetMetrics } = await import('../lib/hydra-metrics.ts');
+    resetMetrics();
+  });
+
+  it('recordCallStart returns a unique string handle', async () => {
+    const { recordCallStart } = await import('../lib/hydra-metrics.ts');
+    const h1 = recordCallStart('claude', 'claude-opus-4-6');
+    const h2 = recordCallStart('gemini', 'gemini-3-pro');
+    assert.equal(typeof h1, 'string');
+    assert.equal(typeof h2, 'string');
+    assert.ok(h1.startsWith('call_'), 'handle should start with call_');
+    assert.notEqual(h1, h2, 'handles should be unique');
+  });
+
+  it('recordCallComplete records metrics for a started call', async () => {
+    const { recordCallStart, recordCallComplete, getAgentMetrics } =
+      await import('../lib/hydra-metrics.ts');
+    const handle = recordCallStart('claude', 'claude-opus-4-6');
+    recordCallComplete(handle, { stdout: 'hello world', outcome: 'success' });
+
+    const agentMetrics = getAgentMetrics('claude');
+    assert.ok(agentMetrics, 'agent metrics should exist after recording');
+    assert.ok(agentMetrics.callsTotal >= 1, 'should have at least 1 call recorded');
+  });
+
+  it('recordCallError increments the failure counter', async () => {
+    const { recordCallStart, recordCallError, getAgentMetrics } =
+      await import('../lib/hydra-metrics.ts');
+    const handle = recordCallStart('gemini', 'gemini-3-pro');
+    recordCallError(handle, new Error('timeout'));
+
+    const agentMetrics = getAgentMetrics('gemini');
+    assert.ok(agentMetrics, 'agent metrics should exist after error');
+    assert.ok(agentMetrics.callsFailed >= 1, 'should have at least 1 failed call');
+  });
+
+  it('metricsRecorder export satisfies IMetricsRecorder at compile time', async () => {
+    const { metricsRecorder } = await import('../lib/hydra-metrics.ts');
+    // Compile-time check: assignment fails if metricsRecorder doesn't satisfy IMetricsRecorder
+    const recorder: IMetricsRecorder = metricsRecorder;
+    assert.equal(typeof recorder.recordCallStart, 'function');
+    assert.equal(typeof recorder.recordCallComplete, 'function');
+    assert.equal(typeof recorder.recordCallError, 'function');
   });
 
   it('can be implemented by a mock object', () => {
-    const log: Array<{ op: string; args: unknown[] }> = [];
-
     const mock: IMetricsRecorder = {
-      recordCallStart(agentName, model) {
-        log.push({ op: 'start', args: [agentName, model] });
+      recordCallStart(agentName) {
         return `handle_${agentName}`;
       },
-      recordCallComplete(handle, result) {
-        log.push({ op: 'complete', args: [handle, result] });
-      },
-      recordCallError(handle, error) {
-        log.push({ op: 'error', args: [handle, error] });
-      },
+      recordCallComplete() {},
+      recordCallError() {},
     };
 
     const handle = mock.recordCallStart('claude', 'claude-opus-4-6');
     assert.equal(handle, 'handle_claude');
-
-    mock.recordCallComplete(handle, { stdout: 'ok output', outcome: 'success' });
-    mock.recordCallError('handle_gemini', new Error('timeout'));
-
-    assert.equal(log.length, 3);
-    assert.equal(log[0]?.op, 'start');
-    assert.equal(log[1]?.op, 'complete');
-    assert.equal(log[2]?.op, 'error');
-  });
-
-  it('mock recordCallStart returns a string handle', () => {
-    const mock: IMetricsRecorder = {
-      recordCallStart(agentName) {
-        return `handle_${agentName}_${String(Date.now())}`;
-      },
-      recordCallComplete(_handle, _result) {},
-      recordCallError(_handle, _error) {},
-    };
-
-    const h = mock.recordCallStart('codex');
-    assert.equal(typeof h, 'string');
-    assert.ok(h.startsWith('handle_codex_'));
   });
 });
