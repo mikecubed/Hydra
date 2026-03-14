@@ -6,14 +6,14 @@
 
 ### Track A — IAgentExecutor Interface
 
-- Define `IAgentExecutor` in `lib/types.ts`
+- Define `IAgentExecutor` in `lib/hydra-shared/agent-executor.ts`
 - Migrate consumers to depend on the interface
 - Write contract tests against the interface
 
 ### Track B — IBudgetGate Interface
 
 - Identify all duplicated budget-check paths across the codebase
-- Extract into `lib/hydra-budget-gate.ts`
+- Extract into `lib/hydra-shared/budget-gate.ts`
 - Migrate consumers
 
 ### Track C — Context Consolidation

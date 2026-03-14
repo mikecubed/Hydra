@@ -29,10 +29,7 @@ import {
   parseJsonLoose,
   ensureDir,
 } from './hydra-utils.ts';
-import {
-  DefaultAgentExecutor,
-  type IAgentExecutor,
-} from './hydra-shared/agent-executor.ts';
+import { DefaultAgentExecutor, type IAgentExecutor } from './hydra-shared/agent-executor.ts';
 import {
   sectionHeader,
   label,

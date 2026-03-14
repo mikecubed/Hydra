@@ -25,10 +25,7 @@ import {
   formatEffortDisplay,
   setAgentEnabled,
 } from './hydra-agents.ts';
-import {
-  DefaultAgentExecutor,
-  type IAgentExecutor,
-} from './hydra-shared/agent-executor.ts';
+import { DefaultAgentExecutor, type IAgentExecutor } from './hydra-shared/agent-executor.ts';
 import { loadHydraConfig, saveHydraConfig } from './hydra-config.ts';
 import type { ProjectConfig } from './hydra-config.ts';
 import { request } from './hydra-utils.ts';

@@ -19,7 +19,10 @@ export class DefaultBudgetGate implements IBudgetGate {
   readonly #dailyPct: number;
   readonly #weeklyPct: number;
 
-  constructor({ dailyPct = DEFAULT_DAILY_PCT, weeklyPct = DEFAULT_WEEKLY_PCT }: Partial<{ dailyPct: number; weeklyPct: number }> = {}) {
+  constructor({
+    dailyPct = DEFAULT_DAILY_PCT,
+    weeklyPct = DEFAULT_WEEKLY_PCT,
+  }: Partial<{ dailyPct: number; weeklyPct: number }> = {}) {
     this.#dailyPct = dailyPct;
     this.#weeklyPct = weeklyPct;
   }

@@ -8,10 +8,7 @@ import assert from 'node:assert/strict';
 
 // Import the types/classes under test — these will fail until implemented
 import type { IAgentExecutor } from '../lib/hydra-shared/agent-executor.ts';
-import {
-  DefaultAgentExecutor,
-  type ExecuteAgentOpts,
-} from '../lib/hydra-shared/agent-executor.ts';
+import { DefaultAgentExecutor, type ExecuteAgentOpts } from '../lib/hydra-shared/agent-executor.ts';
 import type { ExecuteResult } from '../lib/types.ts';
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
@@ -152,9 +149,7 @@ describe('DefaultAgentExecutor', () => {
 
 describe('runCrossVerification with IAgentExecutor', () => {
   it('accepts an optional executor parameter', async () => {
-    const { runCrossVerification } = await import(
-      '../lib/hydra-operator-dispatch.ts'
-    );
+    const { runCrossVerification } = await import('../lib/hydra-operator-dispatch.ts');
 
     // Pass a mock executor that returns a fast stub result
     const mock: IAgentExecutor = {
@@ -177,7 +172,13 @@ describe('runCrossVerification with IAgentExecutor', () => {
     };
 
     // Cross-verification is feature-gated; result will be null when disabled in test env
-    const result = await runCrossVerification('claude', 'output text', 'original prompt', null, mock);
+    const result = await runCrossVerification(
+      'claude',
+      'output text',
+      'original prompt',
+      null,
+      mock,
+    );
     // We only assert the call didn't throw — cross-verification may return null when cfg disabled
     assert.ok(result === null || typeof result === 'object');
   });

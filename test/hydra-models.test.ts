@@ -5,8 +5,8 @@
  * test the path that returns immediately — unknown agent names — which bypass
  * all API and CLI strategies. This keeps tests fast and deterministic.
  *
- * We also verify the return-shape contract is honoured for every known agent
- * by probing just the return type, accepting any non-throwing result.
+ * We also verify the return-shape contract is honoured for one unknown-agent
+ * call, confirming the fast-exit path returns the correct shape without error.
  */
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';

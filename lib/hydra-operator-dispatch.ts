@@ -13,10 +13,7 @@ import { buildAgentContext } from './hydra-context.ts';
 import { getAgent, getVerifier } from './hydra-agents.ts';
 import { resolveProject, loadHydraConfig } from './hydra-config.ts';
 import { short, request, normalizeTask, selectTandemPair } from './hydra-utils.ts';
-import {
-  DefaultAgentExecutor,
-  type IAgentExecutor,
-} from './hydra-shared/agent-executor.ts';
+import { DefaultAgentExecutor, type IAgentExecutor } from './hydra-shared/agent-executor.ts';
 import { isPersonaEnabled, getAgentFraming, getProcessLabel } from './hydra-persona.ts';
 import { pushActivity, annotateDispatch } from './hydra-activity.ts';
 
