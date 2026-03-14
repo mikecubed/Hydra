@@ -183,6 +183,7 @@ export async function runPersonaEditor(rl: ReadlineInterface): Promise<void> {
 
   // Main menu loop
   for (;;) {
+    // eslint-disable-next-line no-await-in-loop -- intentionally sequential: interactive REPL menu; each iteration waits for one user choice before presenting the next
     const action = (await promptChoice(rl, {
       title: 'Persona Editor',
       choices: [
@@ -207,6 +208,7 @@ export async function runPersonaEditor(rl: ReadlineInterface): Promise<void> {
         console.log(`  ${pc.dim('No presets available.')}`);
         continue;
       }
+      // eslint-disable-next-line no-await-in-loop -- intentionally sequential: interactive preset picker; must wait for user selection before applying
       const pick = (await promptChoice(rl, {
         title: 'Select Preset',
         choices: presetNames.map((n) => ({ label: n, value: n })),
@@ -228,6 +230,7 @@ export async function runPersonaEditor(rl: ReadlineInterface): Promise<void> {
 
     if (action.value === 'tweak') {
       // Tone
+      // eslint-disable-next-line no-await-in-loop -- intentionally sequential: interactive tweak wizard; tone/verbosity/formality/humor must be collected one at a time
       const tone = (await promptChoice(rl, {
         title: 'Tone',
         context: `Current: ${persona.tone ?? 'balanced'}`,
@@ -245,6 +248,7 @@ export async function runPersonaEditor(rl: ReadlineInterface): Promise<void> {
       }
 
       // Verbosity
+      // eslint-disable-next-line no-await-in-loop -- intentionally sequential: interactive tweak wizard; verbosity follows tone selection
       const verb = (await promptChoice(rl, {
         title: 'Verbosity',
         context: `Current: ${persona.verbosity ?? 'concise'}`,
@@ -261,6 +265,7 @@ export async function runPersonaEditor(rl: ReadlineInterface): Promise<void> {
       }
 
       // Formality
+      // eslint-disable-next-line no-await-in-loop -- intentionally sequential: interactive tweak wizard; formality follows verbosity selection
       const form = (await promptChoice(rl, {
         title: 'Formality',
         context: `Current: ${persona.formality ?? 'neutral'}`,
@@ -277,6 +282,7 @@ export async function runPersonaEditor(rl: ReadlineInterface): Promise<void> {
       }
 
       // Humor
+      // eslint-disable-next-line no-await-in-loop -- intentionally sequential: interactive tweak wizard; humor follows formality selection
       const humor = (await promptChoice(rl, {
         title: 'Humor',
         context: `Current: ${persona.humor === false ? 'off' : 'on'}`,
@@ -292,6 +298,7 @@ export async function runPersonaEditor(rl: ReadlineInterface): Promise<void> {
     }
 
     if (action.value === 'name') {
+      // eslint-disable-next-line no-await-in-loop -- intentionally sequential: interactive name editor; awaits user input before returning to menu
       const nameResult = (await promptChoice(rl, {
         title: 'Persona Name',
         context: `Current: ${persona.name ?? 'Hydra'}`,

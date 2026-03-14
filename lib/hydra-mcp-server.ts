@@ -35,6 +35,7 @@ import {
   listSessions as hubListSessions,
   checkConflicts as hubCheckConflicts,
 } from './hydra-hub.ts';
+import { exit } from './hydra-process.ts';
 
 const CHARACTER_LIMIT = 25000;
 
@@ -1054,6 +1055,5 @@ main().catch((err: unknown) => {
   process.stderr.write(
     `Hydra MCP server failed: ${err instanceof Error ? err.message : String(err)}\n`,
   );
-  // eslint-disable-next-line n/no-process-exit -- top-level fatal error handler
-  process.exit(1);
+  exit(1);
 });

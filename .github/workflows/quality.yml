@@ -188,12 +188,40 @@ jobs:
           HUSKY: '0'
 
       - name: Run tests with coverage
+        run: npm run test:coverage
+        env:
+          HUSKY: '0'
+
+      - name: Check coverage thresholds
         run: npm run test:coverage:check
         env:
           HUSKY: '0'
         # Aspirational goal: 80% coverage across lines/statements/branches/functions.
         # This job is continue-on-error — it will show a warning in CI but never block
         # merges. Raise the thresholds in .c8rc.json as coverage improves.
+
+  audit:
+    name: Dependency Audit (warn-only)
+    runs-on: ubuntu-latest
+    # warn-only until vulnerability baseline is established; flip to false once clean
+    continue-on-error: true
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+        env:
+          HUSKY: '0'
+
+      - name: npm audit (high+critical)
+        run: npm audit --audit-level=high
 
   lint-pr-title:
     name: Lint PR Title

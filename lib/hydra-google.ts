@@ -119,6 +119,7 @@ async function coreStreamGoogle(
   let usage: { prompt_tokens: number; completion_tokens: number } | null = null;
 
   for (;;) {
+    // eslint-disable-next-line no-await-in-loop -- intentionally sequential: SSE stream must be read chunk-by-chunk in order; each chunk depends on the previous reader state
     const chunk = (await reader.read()) as { done: boolean; value: Uint8Array };
     if (chunk.done) break;
 

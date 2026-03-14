@@ -187,6 +187,7 @@ export async function runActionPipeline(
 
     try {
       if (!executeFn) throw new Error('Pipeline executeFn is required but was not provided');
+      // eslint-disable-next-line no-await-in-loop -- intentionally sequential: items execute one at a time with progress spinner and [i+1/n] display
       pipelineResult = await executeFn(item, opts);
     } catch (err: unknown) {
       pipelineResult = {

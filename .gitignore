@@ -26,3 +26,4 @@ coverage/
 # Stryker mutation testing output
 .stryker-tmp/
 reports/
+node_modules
