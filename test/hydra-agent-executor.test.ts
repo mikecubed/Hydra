@@ -727,7 +727,7 @@ describe('executeAgentWithRecovery — local-unavailable fallback', () => {
     initAgentRegistry();
   });
 
-  it('falls back to cloud agent when local returns local-unavailable', async () => {
+  it('returns local-disabled error when local agent is disabled in config', async () => {
     _setTestConfig({
       local: { enabled: false },
       routing: { mode: 'performance' },
