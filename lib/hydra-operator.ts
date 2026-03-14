@@ -13,35 +13,18 @@
 /* eslint-disable @typescript-eslint/no-explicit-any, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-argument, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-return -- T7A: operator uses polymorphic any for dynamic dispatch */
 /* eslint-disable @typescript-eslint/strict-boolean-expressions, @typescript-eslint/no-non-null-assertion -- T7A: standard JS truthiness; type narrowing tracked as follow-up */
 /* eslint-disable @typescript-eslint/no-unnecessary-type-assertion, @typescript-eslint/no-unnecessary-type-conversion -- T7A: operator uses || for truthiness-based defaults */
-/* eslint-disable n/no-process-exit, @typescript-eslint/no-misused-promises, require-atomic-updates, @typescript-eslint/no-redundant-type-constituents -- T7A: CLI entry point */
-/* eslint-disable no-await-in-loop, unicorn/prefer-ternary, @typescript-eslint/no-base-to-string -- T7A: sequential processing */
+/* eslint-disable n/no-process-exit, @typescript-eslint/no-misused-promises, require-atomic-updates -- T7A: CLI entry point */
+/* eslint-disable no-await-in-loop, @typescript-eslint/no-base-to-string -- T7A: sequential processing */
 
 /* eslint-disable unicorn/no-new-array, no-control-regex -- T7A: intentional patterns */
 
 import './hydra-env.ts';
 import readline from 'node:readline';
-import type { Interface as ReadlineInterface } from 'node:readline';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
-import { exec, spawn, spawnSync } from 'node:child_process';
-import { buildAgentContext } from './hydra-context.ts';
-import { rewriteNodeInvocation, spawnHydraNode, spawnHydraNodeSync } from './hydra-exec-spawn.ts';
-import {
-  getAgent,
-  AGENT_NAMES,
-  getActiveModel,
-  getModelSummary,
-  setActiveModel,
-  getMode,
-  setMode,
-  resetAgentModel,
-  getVerifier,
-  listAgents,
-  AGENT_TYPE,
-  formatEffortDisplay,
-  bestAgentFor,
-  setAgentEnabled,
-} from './hydra-agents.ts';
+import { spawnSync } from 'node:child_process';
+import { spawnHydraNodeSync } from './hydra-exec-spawn.ts';
+import { getAgent, getModelSummary, AGENT_TYPE, bestAgentFor } from './hydra-agents.ts';
 import { checkUsage, renderUsageDashboard, formatTokens } from './hydra-usage.ts';
 import { verifyAgentQuota } from './hydra-model-recovery.ts';
 import {
@@ -50,17 +33,8 @@ import {
   estimateFlowDuration,
   resetMetrics,
 } from './hydra-metrics.ts';
-import {
-  resolveProject,
-  HYDRA_ROOT,
-  HYDRA_RUNTIME_ROOT,
-  loadHydraConfig,
-  saveHydraConfig,
-  getRecentProjects,
-  diffConfig,
-} from './hydra-config.ts';
+import { resolveProject, HYDRA_ROOT, loadHydraConfig, getRecentProjects } from './hydra-config.ts';
 import { envFileExists } from './hydra-env.ts';
-import { executeAgent } from './hydra-shared/agent-executor.ts';
 import {
   parseArgs,
   getPrompt,
@@ -68,13 +42,9 @@ import {
   boolFlag,
   short,
   request,
-  normalizeTask,
   classifyPrompt,
-  selectTandemPair,
-  generateSpec,
 } from './hydra-utils.ts';
 import {
-  hydraSplash,
   renderStatsDashboard,
   agentBadge,
   label,
@@ -88,8 +58,6 @@ import {
   WARNING,
   DIM,
   ACCENT,
-  AGENT_COLORS,
-  stripAnsi,
   shortModelName,
 } from './hydra-ui.ts';
 import {
@@ -98,7 +66,6 @@ import {
   SMART_TIER_MAP,
   printCommandHelp,
   printHelp,
-  printNextSteps,
   printSelfAwarenessStatus,
   printStatus,
 } from './hydra-operator-ui.ts';
@@ -118,8 +85,6 @@ import {
 } from './hydra-statusbar.ts';
 import {
   workers,
-  startAgentWorker,
-  stopAgentWorker,
   stopAllWorkers,
   _getWorkerStatus,
   startAgentWorkers,
@@ -136,34 +101,18 @@ import {
   conciergeSuggest,
   resetConversation,
   isConciergeAvailable,
-  getConciergeStats,
   getConciergeConfig,
-  getActiveProvider,
   getConciergeModelLabel,
-  switchConciergeModel,
-  exportConversation,
   setConciergeBaseUrl,
 } from './hydra-concierge.ts';
-import { buildFallbackChain, detectAvailableProviders } from './hydra-concierge-providers.ts';
-import { gateIntent } from './hydra-intent-gate.ts';
+import { detectAvailableProviders } from './hydra-concierge-providers.ts';
 import { syncHydraMd } from './hydra-sync-md.ts';
 import { registerBuiltInSubAgents } from './hydra-sub-agents.ts';
-import {
-  isGhAvailable,
-  isGhAuthenticated,
-  detectRepo,
-  listPRs,
-  getPR,
-  pushBranchAndCreatePR,
-  getGitHubConfig,
-} from './hydra-github.ts';
 import {
   detectSituationalQuery,
   buildActivityDigest,
   formatDigestForPrompt,
   generateSitrep,
-  pushActivity,
-  annotateDispatch,
 } from './hydra-activity.ts';
 import {
   loadCodebaseContext,
@@ -184,26 +133,57 @@ import {
 import { scanResumableState } from './hydra-resume-scanner.ts';
 import { checkForUpdates } from './hydra-updater.ts';
 import {
-  isPersonaEnabled,
-  getAgentFraming,
-  getProcessLabel,
   showPersonaSummary,
   applyPreset,
   listPresets,
   invalidatePersonaCache,
 } from './hydra-persona.ts';
-import {
-  getProviderSummary,
-  getExternalSummary,
-  getProviderUsage,
-  loadProviderUsage,
-  saveProviderUsage,
-  refreshExternalUsage,
-  resetSessionUsage,
-} from './hydra-provider-usage.ts';
+import { getProviderUsage, saveProviderUsage, resetSessionUsage } from './hydra-provider-usage.ts';
 import pc from 'picocolors';
+import { dispatchPrompt } from './hydra-operator-dispatch.ts';
+import { runCouncilPrompt, runAutoPrompt, runSmartPrompt } from './hydra-operator-concierge.ts';
+import {
+  handleModelCommand,
+  handleModelSelectCommand,
+  handleRolesCommand,
+  handleModeCommand,
+  handleAgentsCommand,
+  handleCleanupCommand,
+  handlePrCommand,
+  handleTasksCommand,
+  handleNightlyCommand,
+  handleEvolveCommand,
+} from './hydra-operator-commands.ts';
+import {
+  ensureDaemon,
+  launchAgentTerminals,
+  extractHandoffAgents,
+  printWelcome,
+} from './hydra-operator-startup.ts';
+import {
+  selfIndexCache as _selfIndexCache,
+  parseSelfAwarenessPlaintextCommand,
+  applySelfAwarenessPatch,
+  getGitInfo,
+} from './hydra-operator-self-awareness.ts';
+import { createGhostTextHelpers } from './hydra-operator-ghost-text.ts';
+import { executeDaemonResume } from './hydra-operator-session.ts';
 
 export { KNOWN_COMMANDS, SMART_TIER_MAP, getSelfAwarenessSummary } from './hydra-operator-ui.ts';
+export {
+  ensureDaemon,
+  findPowerShell,
+  findWindowsTerminal,
+  launchAgentTerminals,
+  extractHandoffAgents,
+  printWelcome,
+} from './hydra-operator-startup.ts';
+export {
+  normalizeSimpleCommandText,
+  parseSelfAwarenessPlaintextCommand,
+  applySelfAwarenessPatch,
+  getGitInfo,
+} from './hydra-operator-self-awareness.ts';
 
 const config = resolveProject();
 const DEFAULT_URL = process.env['AI_ORCH_URL'] ?? 'http://127.0.0.1:4173';
@@ -216,1359 +196,6 @@ export function formatUptime(ms: number): string {
   if (ms < 60_000) return `${String(Math.round(ms / 1000))}s`;
   if (ms < 3600_000) return `${String(Math.round(ms / 60_000))}m`;
   return `${(ms / 3600_000).toFixed(1)}h`;
-}
-
-// ── Daemon Auto-Start ────────────────────────────────────────────────────────
-
-async function ensureDaemon(baseUrl: string, { quiet = false }: { quiet?: boolean } = {}) {
-  // Check if daemon is already running
-  try {
-    (await request('GET', baseUrl, '/health')) as any;
-    return true;
-  } catch {
-    // Not running — try to start it
-  }
-
-  if (!quiet) {
-    process.stderr.write(`  ${DIM('\u2026')} Starting daemon...\n`);
-  }
-
-  const daemonScript = path.join(HYDRA_ROOT, 'lib', 'orchestrator-daemon.mjs');
-  const child = spawnHydraNode(daemonScript, ['start'], {
-    cwd: config.projectRoot,
-    detached: true,
-    stdio: 'ignore',
-    windowsHide: true,
-  });
-  child.unref();
-
-  // Wait for health (up to 8 seconds)
-  for (let i = 0; i < 32; i++) {
-    await new Promise((r) => {
-      setTimeout(r, 250);
-    });
-    try {
-      (await request('GET', baseUrl, '/health')) as any;
-      if (!quiet) {
-        process.stderr.write(`  ${SUCCESS('\u2713')} Daemon started\n`);
-      }
-      return true;
-    } catch {
-      // keep waiting
-    }
-  }
-
-  return false;
-}
-
-// ── Agent Terminal Auto-Launch ───────────────────────────────────────────────
-
-/**
- * Detect pwsh or powershell on Windows. Returns exe path or null.
- */
-function findPowerShell() {
-  if (process.platform !== 'win32') return null;
-  for (const cmd of ['pwsh', 'powershell']) {
-    try {
-      const result = spawnSync('where', [cmd], {
-        encoding: 'utf8',
-        windowsHide: true,
-        timeout: 5_000,
-      });
-      const exe = (result.stdout || '').split('\n')[0].trim();
-      if (exe) return exe;
-    } catch {
-      /* not found */
-    }
-  }
-  return null;
-}
-
-/**
- * Detect Windows Terminal (wt.exe). Returns exe path or null.
- */
-function findWindowsTerminal() {
-  if (process.platform !== 'win32') return null;
-  try {
-    const result = spawnSync('where', ['wt'], {
-      encoding: 'utf8',
-      windowsHide: true,
-      timeout: 5_000,
-    });
-    const exe = (result.stdout || '').split('\n')[0].trim();
-    if (exe) return exe;
-  } catch {
-    /* not found */
-  }
-  return null;
-}
-
-/**
- * Spawn visible terminal windows running hydra-head.ps1 for each agent.
- * Uses -EncodedCommand to avoid escaping issues, and exec(start ...) for
- * reliable window visibility on Windows.
- */
-function launchAgentTerminals(agentNames: string[], baseUrl: string) {
-  if (process.platform !== 'win32' || agentNames.length === 0) return;
-  if ((process as any).pkg) {
-    console.log(
-      `  ${DIM('(standalone build: terminal launch disabled; use :workers start instead)')}`,
-    );
-    return;
-  }
-
-  const shell = findPowerShell();
-  if (!shell) {
-    console.log(`  ${DIM('(skipping terminal launch — no PowerShell found)')}`);
-    return;
-  }
-
-  const wt = findWindowsTerminal();
-  const headScript = path.join(HYDRA_ROOT, 'bin', 'hydra-head.ps1');
-  const cwd = config.projectRoot;
-  const cwdEscaped = cwd.replace(/'/g, "''");
-
-  for (const agent of agentNames) {
-    if (!getAgent(agent)) continue;
-    const title = `Hydra Head - ${agent.toUpperCase()}`;
-    const psCommand = [
-      `Set-Location -LiteralPath '${cwdEscaped}'`,
-      `& '${headScript}' -Agent ${agent} -Url '${baseUrl}'`,
-    ].join('; ');
-
-    // Encode as UTF-16LE base64 for -EncodedCommand (avoids all escaping issues)
-    const encoded = Buffer.from(psCommand, 'utf16le').toString('base64');
-
-    let cmd;
-    if (wt) {
-      // Windows Terminal: open a new tab in the current window
-      cmd = `wt -w 0 new-tab --title "${title}" "${shell}" -NoExit -EncodedCommand ${encoded}`;
-    } else {
-      // Fallback: start command reliably opens a visible console window
-      cmd = `start "${title}" "${shell}" -NoExit -EncodedCommand ${encoded}`;
-    }
-    exec(cmd, { cwd });
-
-    const icon =
-      ({ gemini: '\u2726', codex: '\u25B6', claude: '\u2666' } as Record<string, string>)[agent] ||
-      '\u25CF';
-    console.log(`  ${SUCCESS('\u2713')} ${colorAgent(agent)} ${icon} ${agent}  terminal launched`);
-  }
-}
-
-/**
- * Extract unique agent names from auto/smart dispatch result.
- */
-function extractHandoffAgents(result: Record<string, unknown>) {
-  const handoffs = (result as any)?.published?.handoffs;
-  if (!Array.isArray(handoffs) || handoffs.length === 0) return [];
-  const seen = new Set();
-  for (const h of handoffs) {
-    const name = String(h.to ?? '').toLowerCase();
-    if (name && getAgent(name)) seen.add(name);
-  }
-  return [...seen];
-}
-
-// ── Welcome Screen ───────────────────────────────────────────────────────────
-
-async function printWelcome(baseUrl: string) {
-  console.log(hydraSplash());
-  console.log(label('Project', pc.white(config.projectName)));
-  // Sync HYDRA.md → agent instruction files on startup
-  try {
-    const syncResult = syncHydraMd(config.projectRoot);
-    if (syncResult.synced.length > 0) {
-      console.log(label('Sync', DIM(`HYDRA.md → ${syncResult.synced.join(', ')}`)));
-    }
-  } catch {
-    /* non-critical */
-  }
-
-  console.log(label('Daemon', DIM(baseUrl)));
-
-  // Startup alert: check for in-progress tasks and pending handoffs
-  try {
-    const sessionStatus = (await request('GET', baseUrl, '/session/status')) as any;
-    if (sessionStatus.activeSession?.status === 'paused') {
-      const reason = sessionStatus.activeSession.pauseReason;
-      console.log(
-        `  ${WARNING('\u23F8')} Session paused${reason ? `: "${String(reason)}"` : ''} \u2014 type ${ACCENT(':unpause')} to resume`,
-      );
-    }
-    const inProgressCount = (sessionStatus.inProgressTasks ?? []).length;
-    const handoffCount = (sessionStatus.pendingHandoffs ?? []).length;
-    const staleCount = (sessionStatus.staleTasks ?? []).length;
-    const parts = [];
-    if (inProgressCount > 0)
-      parts.push(`${String(inProgressCount)} task${inProgressCount === 1 ? '' : 's'} in progress`);
-    if (handoffCount > 0)
-      parts.push(`${String(handoffCount)} handoff${handoffCount === 1 ? '' : 's'} pending`);
-    if (staleCount > 0) parts.push(`${String(staleCount)} stale`);
-    if (parts.length > 0) {
-      console.log(
-        `  ${WARNING('\u26A0')} ${parts.join(', ')} \u2014 type ${ACCENT(':resume')} for details`,
-      );
-    }
-  } catch {
-    /* daemon may not have session data yet */
-  }
-
-  // Mode & Models
-  try {
-    const models = getModelSummary();
-    const currentMode = (models['_mode'] ?? getMode()) as string;
-    console.log(label('Mode', ACCENT(currentMode)));
-    const parts = [];
-    for (const [agent, info] of Object.entries(models)) {
-      if (agent === '_mode') continue;
-      const colorFn = (AGENT_COLORS as any)[agent] ?? pc.white;
-      const shortModel = ((info as any).active ?? '')
-        .replace(/^claude-/, '')
-        .replace(/^gemini-/, '');
-      const tag = (info as any).isOverride ? pc.yellow(' *') : '';
-      const effLabel = formatEffortDisplay(
-        (info as any).active,
-        (info as Record<string, any>)['reasoningEffort'],
-      );
-      const eff = effLabel ? pc.yellow(` ${effLabel}`) : '';
-      parts.push(`${String(colorFn(agent))}${DIM(':')}${pc.white(shortModel)}${eff}${tag}`);
-    }
-    console.log(label('Models', parts.join(DIM('  '))));
-  } catch {
-    /* skip */
-  }
-
-  // Usage — show today's actual tokens from stats-cache
-  try {
-    const usage = checkUsage();
-    if (usage.todayTokens > 0) {
-      const modelShort = (usage.model ?? '').replace(/^claude-/, '').replace(/^gemini-/, '');
-      console.log(
-        label(
-          'Today',
-          `${pc.white(formatTokens(usage.todayTokens))} tokens ${modelShort ? DIM(`(${String(modelShort)})`) : ''}`,
-        ),
-      );
-    }
-  } catch {
-    /* skip */
-  }
-
-  // Session token usage (from real Claude JSON output)
-  try {
-    const session = getSessionUsage();
-    if (session.callCount > 0) {
-      console.log(
-        label(
-          'Session',
-          `${pc.white(formatTokens(session.totalTokens))} tokens  ${pc.white(`$${session.costUsd.toFixed(4)}`)}  ${DIM(`(${String(session.callCount)} calls)`)}`,
-        ),
-      );
-    }
-  } catch {
-    /* skip */
-  }
-
-  // Provider usage (load persisted + refresh external in background)
-  try {
-    loadProviderUsage();
-    void refreshExternalUsage(); // non-blocking
-    const providerLines = getProviderSummary();
-    if (providerLines.length > 0) {
-      console.log(label('Providers', providerLines.join(DIM(' │ '))));
-    }
-    const extLines = getExternalSummary();
-    if (extLines.length > 0) {
-      console.log(label('Account', extLines.join(DIM(' │ '))));
-    }
-  } catch {
-    /* skip */
-  }
-
-  // Context-aware next steps on startup
-  try {
-    const sessionStatus = (await request('GET', baseUrl, '/session/status')) as any;
-    printNextSteps({
-      agentSuggestions: sessionStatus.agentSuggestions,
-      pendingHandoffs: sessionStatus.pendingHandoffs,
-      staleTasks: sessionStatus.staleTasks,
-      inProgressTasks: sessionStatus.inProgressTasks,
-    });
-  } catch {
-    console.log(`  ${DIM('Type a prompt to dispatch, or :help for commands')}`);
-  }
-}
-
-function buildAgentMessage(agent: string, userPrompt: string) {
-  const agentConfig = getAgent(agent);
-  const rolePrompt = agentConfig
-    ? agentConfig.rolePrompt
-    : 'Contribute effectively to this objective.';
-  const agentLabel = agentConfig ? agentConfig.label : agent.toUpperCase();
-
-  const heading = isPersonaEnabled()
-    ? `${getAgentFraming(agent)} ${getProcessLabel('dispatch')} directive:`
-    : `Hydra dispatch for ${agentLabel}:`;
-
-  return [
-    heading,
-    `Primary objective: ${userPrompt}`,
-    '',
-    rolePrompt,
-    '',
-    ...(getAgent(agent)?.taskRules ?? []),
-    '',
-    'If blocked or unclear, ask direct questions immediately.',
-    'When done with current chunk, create a Hydra handoff with exact next step.',
-    '',
-    buildAgentContext(agent, {}, config, userPrompt),
-  ]
-    .filter(Boolean)
-    .join('\n');
-}
-
-function buildMiniRoundBrief(agent: string, userPrompt: string, report: any) {
-  const agentConfig = getAgent(agent);
-  const tasks = Array.isArray(report?.tasks)
-    ? report.tasks.map((item: any) => normalizeTask(item)).filter(Boolean)
-    : [];
-  const questions = Array.isArray(report?.questions) ? report.questions : [];
-  const consensus = String(report?.consensus ?? '').trim();
-
-  const myTasks = tasks.filter((task: any) => task.owner === agent || task.owner === 'unassigned');
-  const myQuestions = questions.filter((q: any) => q && (q.to === agent || q.to === 'human'));
-
-  const taskText =
-    myTasks.length === 0
-      ? '- No explicit task assigned. Start by proposing first concrete step.'
-      : myTasks
-          .map(
-            (task: any) =>
-              `- ${String(task.title)}${task.done ? ` (DoD: ${String(task.done)})` : ''}${task.rationale ? ` [${String(task.rationale)}]` : ''}`,
-          )
-          .join('\n');
-
-  const questionText =
-    myQuestions.length === 0
-      ? '- none'
-      : myQuestions
-          .map((q: any) => {
-            const to = String(q.to ?? 'human');
-            const question = String(q.question ?? '').trim();
-            return question ? `- to ${to}: ${question}` : null;
-          })
-          .filter(Boolean)
-          .join('\n');
-
-  return [
-    isPersonaEnabled()
-      ? `${getAgentFraming(agent)} ${getProcessLabel('miniRound')} delegation.`
-      : `Hydra mini-round delegation for ${agentConfig ? agentConfig.label : agent.toUpperCase()}.`,
-    '',
-    agentConfig ? agentConfig.rolePrompt : '',
-    '',
-    buildAgentContext(agent, {}, config, userPrompt),
-    '',
-    `Objective: ${userPrompt}`,
-    `Recommendation: ${String(report?.recommendedMode ?? 'handoff')} (${String(report?.recommendationRationale ?? 'n/a')})`,
-    `Consensus: ${consensus || 'No explicit consensus text.'}`,
-    'Assigned tasks:',
-    taskText,
-    'Open questions:',
-    questionText,
-    'Next step: execute first task and publish milestone/blocker via Hydra handoff.',
-  ]
-    .filter(Boolean)
-    .join('\n');
-}
-
-/**
- * Cross-model verification: route producer output to a paired verifier agent.
- * Returns { approved, issues, suggestions } or null if verification is skipped/fails.
- */
-async function runCrossVerification(
-  producerAgent: string,
-  producerOutput: string,
-  originalPrompt: string,
-  specContent: string | null = null,
-) {
-  const cfg = loadHydraConfig();
-  const cvConfig = cfg.crossModelVerification;
-  if (!cvConfig?.enabled) return null;
-
-  const verifierAgent = getVerifier(producerAgent);
-  if (verifierAgent === producerAgent) return null;
-
-  const reviewPrompt = [
-    "You are reviewing another AI agent's output. Be precise and adversarial — your job is to surface what the producer missed or got wrong.",
-    '',
-    `Original objective: ${originalPrompt}`,
-    specContent ? `\nAnchoring specification:\n${specContent}\n` : '',
-    `Producer agent: ${producerAgent}`,
-    `Producer output:\n${producerOutput}`,
-    '',
-    'Review this output and return JSON only:',
-    '{',
-    '  "approved": true|false,',
-    '  "strongestAssumption": "The single most load-bearing assumption in this output — if it is wrong, the whole approach fails",',
-    '  "attackVector": "A concrete scenario or counterexample that would break the strongest assumption",',
-    '  "issues": ["string — specific correctness or completeness failures"],',
-    '  "suggestions": ["string — concrete improvements"],',
-    '  "criteriaScores": {',
-    '    "correctness": 0-10,',
-    '    "complexity": 0-10,',
-    '    "reversibility": 0-10,',
-    '    "userImpact": 0-10',
-    '  }',
-    '}',
-    '',
-    'Scoring guide: correctness = factual/logical soundness; complexity = simplicity of approach (10 = minimal); reversibility = how easily this can be undone (10 = fully reversible); userImpact = positive effect on end users.',
-  ]
-    .filter(Boolean)
-    .join('\n');
-
-  try {
-    const result = await executeAgent(verifierAgent, reviewPrompt, {
-      cwd: config.projectRoot,
-      timeoutMs: 60_000,
-      permissionMode: verifierAgent === 'codex' ? 'read-only' : 'plan',
-    });
-    if (!result.ok) return null;
-
-    const output = (result.stdout ?? result.output) || '';
-    let parsed = null;
-    try {
-      parsed = JSON.parse(output);
-    } catch {
-      // Try extracting JSON from response
-      const match = output.match(/\{[\s\S]*\}/);
-      if (match) {
-        try {
-          parsed = JSON.parse(match[0]);
-        } catch {
-          /* give up */
-        }
-      }
-    }
-    if (!parsed) return null;
-
-    return {
-      verifier: verifierAgent,
-      approved: Boolean(parsed.approved),
-      issues: Array.isArray(parsed.issues) ? parsed.issues : [],
-      suggestions: Array.isArray(parsed.suggestions) ? parsed.suggestions : [],
-    };
-  } catch {
-    return null;
-  }
-}
-
-/**
- * Check if cross-model verification should run for a given classification.
- */
-function shouldCrossVerify(classification: any) {
-  const cfg = loadHydraConfig();
-  const cvConfig = cfg.crossModelVerification;
-  if (!cvConfig?.enabled) return false;
-  if (cvConfig['mode'] === 'always') return true;
-  if (cvConfig['mode'] === 'on-complex') return classification.tier === 'complex';
-  return false;
-}
-
-async function publishMiniRoundDelegation({
-  baseUrl,
-  from,
-  agents,
-  promptText,
-  report,
-}: {
-  baseUrl: string;
-  from: string;
-  agents: string[];
-  promptText: string;
-  report: any;
-}) {
-  const normalizedTasks = (Array.isArray(report?.tasks) ? report.tasks : [])
-    .map(normalizeTask)
-    .filter(Boolean);
-  const tasksToCreate =
-    normalizedTasks.length > 0
-      ? normalizedTasks
-      : agents.map((agent) => ({
-          owner: agent,
-          title: `Execute ${agent} contribution for: ${short(promptText, 120)}`,
-          done: '',
-          rationale: 'Generated fallback task because mini-round had no explicit allocations.',
-        }));
-
-  const createdTasks = [];
-  for (const task of tasksToCreate) {
-    const created = (await request('POST', baseUrl, '/task/add', {
-      title: task.title,
-      owner: task.owner,
-      status: 'todo',
-      notes: task.rationale ? `Mini-round rationale: ${String(task.rationale)}` : '',
-    })) as any;
-    createdTasks.push(created.task);
-  }
-
-  const decision = (await request('POST', baseUrl, '/decision', {
-    title: `Hydra Mini Round: ${short(promptText, 90)}`,
-    owner: from,
-    rationale: short(report?.consensus ?? 'Mini-round completed without explicit consensus.', 600),
-    impact: `recommended=${String(report?.recommendedMode ?? 'handoff')}; tasks=${String(createdTasks.length)}`,
-  })) as any;
-
-  const handoffs = [];
-  for (const agent of agents) {
-    const agentTaskIds = createdTasks
-      .filter((task: any) => task.owner === agent || task.owner === 'unassigned')
-      .map((task) => task.id);
-    const summary = buildMiniRoundBrief(agent, promptText, report);
-    const handoff = (await request('POST', baseUrl, '/handoff', {
-      from,
-      to: agent,
-      summary,
-      nextStep: 'Acknowledge and execute top-priority delegated task.',
-      tasks: agentTaskIds,
-    })) as any;
-    handoffs.push(handoff.handoff);
-  }
-
-  // Record activity annotation
-  pushActivity(
-    'dispatch',
-    annotateDispatch({
-      prompt: promptText,
-      classification: { tier: 'medium', taskType: 'mixed' },
-      mode: 'auto',
-      route: 'mini-round',
-      agent: agents[0],
-    }) as any,
-    { agents, taskCount: createdTasks.length },
-  );
-
-  return {
-    decision: decision.decision,
-    tasks: createdTasks,
-    handoffs,
-  };
-}
-
-async function dispatchPrompt({
-  baseUrl,
-  from,
-  agents,
-  promptText,
-}: {
-  baseUrl: string;
-  from: string;
-  agents: string[];
-  promptText: string;
-}) {
-  const records = [];
-  for (const agent of agents) {
-    const summary = buildAgentMessage(agent, promptText);
-    const payload = {
-      from,
-      to: agent,
-      summary,
-      nextStep: 'Start work and report first milestone via hydra:handoff.',
-      tasks: [],
-    };
-    const result = (await request('POST', baseUrl, '/handoff', payload)) as any;
-    records.push({
-      agent,
-      handoffId: result?.handoff?.id ?? null,
-      summary,
-    });
-  }
-  return records;
-}
-
-async function publishFastPathDelegation({
-  baseUrl,
-  from,
-  promptText,
-  classification,
-  agents = null,
-}: {
-  baseUrl: string;
-  from: string;
-  promptText: string;
-  classification: any;
-  agents?: string[] | null;
-}) {
-  const { taskType } = classification;
-  let { suggestedAgent } = classification;
-
-  // If agents filter provided and suggestedAgent is excluded, pick best from allowed list
-  if (agents && agents.length > 0 && !agents.includes(suggestedAgent)) {
-    let best = agents[0];
-    let bestScore = 0;
-    for (const a of agents) {
-      const cfg = getAgent(a);
-      const score = (cfg?.taskAffinity as any)?.[taskType] ?? 0.5;
-      if (score > bestScore) {
-        bestScore = score;
-        best = a;
-      }
-    }
-    suggestedAgent = best;
-  }
-
-  const task = (await request('POST', baseUrl, '/task/add', {
-    title: short(promptText, 200) as any,
-    owner: suggestedAgent,
-    status: 'todo',
-    type: taskType,
-    notes: `Fast-path dispatch (confidence=${String(classification.confidence)}, reason: ${String(classification.reason)})`,
-  })) as any;
-
-  const summary = buildAgentMessage(suggestedAgent, promptText);
-  const handoff = (await request('POST', baseUrl, '/handoff', {
-    from,
-    to: suggestedAgent,
-    summary,
-    nextStep: 'Start work and report first milestone via hydra:handoff.',
-    tasks: task.task?.id ? [task.task.id] : [],
-  })) as any;
-
-  // Record activity annotation
-  pushActivity(
-    'dispatch',
-    annotateDispatch({
-      prompt: promptText,
-      classification,
-      mode: 'auto',
-      route: 'fast-path',
-      agent: suggestedAgent,
-    }) as any,
-    { agent: suggestedAgent, taskId: task.task?.id },
-  );
-
-  return {
-    task: task.task,
-    handoff: handoff.handoff,
-    agent: suggestedAgent,
-  };
-}
-
-/**
- * Build a role-aware tandem brief for an agent in a tandem pair.
- */
-function buildTandemBrief(
-  agent: any,
-  partner: any,
-  promptText: any,
-  _classification: any,
-  role: any,
-) {
-  const agentConfig = getAgent(agent);
-  const agentLabel = agentConfig ? agentConfig.label : agent.toUpperCase();
-  const partnerLabel = getAgent(partner)?.label ?? partner.toUpperCase();
-
-  const heading = isPersonaEnabled()
-    ? `${getAgentFraming(agent)} ${getProcessLabel('dispatch')} directive (tandem ${String(role)}):`
-    : `Hydra tandem dispatch for ${String(agentLabel)} (${String(role)}):`;
-
-  const roleInstruction =
-    role === 'lead'
-      ? `You are the lead in a tandem pair. Analyze the objective and produce an actionable plan or analysis. Your output will be handed to ${String(partnerLabel)} for execution.`
-      : `You are the follow-up in a tandem pair. Build on ${String(partnerLabel)}'s analysis and execute the work. Focus on implementation and verification.`;
-
-  const rolePrompt = agentConfig
-    ? agentConfig.rolePrompt
-    : 'Contribute effectively to this objective.';
-
-  return [
-    heading,
-    `Primary objective: ${String(promptText)}`,
-    '',
-    roleInstruction,
-    '',
-    rolePrompt,
-    '',
-    'If blocked or unclear, ask direct questions immediately.',
-    'When done, create a Hydra handoff with exact next step.',
-    '',
-    buildAgentContext(agent, {}, config, promptText),
-  ]
-    .filter(Boolean)
-    .join('\n');
-}
-
-/**
- * Tandem dispatch: create 2 tasks + 2 handoffs for a lead→follow pair.
- * Zero agent CLI calls — daemon HTTP posts only.
- */
-async function publishTandemDelegation({
-  baseUrl,
-  from,
-  promptText,
-  classification,
-  agents = null,
-}: {
-  baseUrl: string;
-  from: string;
-  promptText: string;
-  classification: any;
-  agents?: string[] | null;
-}) {
-  const { taskType } = classification;
-  let { tandemPair } = classification;
-
-  // Re-resolve pair with agent filter
-  if (agents && agents.length > 0) {
-    tandemPair = selectTandemPair(taskType, classification.suggestedAgent, agents);
-  }
-
-  // Degrade to single if tandem not viable
-  if (!tandemPair) {
-    return publishFastPathDelegation({ baseUrl, from, promptText, classification, agents });
-  }
-
-  const { lead, follow } = tandemPair;
-
-  // Create lead task
-  const leadTask = (await request('POST', baseUrl, '/task/add', {
-    title: `[Lead] ${short(promptText, 180)}`,
-    owner: lead,
-    status: 'todo',
-    type: taskType,
-    notes: `Tandem lead (${String(lead)} → ${String(follow)}). Analyze/plan then hand off.`,
-  })) as any;
-
-  // Create follow task
-  const followTask = (await request('POST', baseUrl, '/task/add', {
-    title: `[Follow] ${short(promptText, 180)}`,
-    owner: follow,
-    status: 'todo',
-    type: taskType,
-    notes: `Tandem follow (from ${String(lead)}). Execute based on lead's analysis. Ref: task ${String(leadTask.task?.id ?? '?')}`,
-  })) as any;
-
-  // Create lead handoff
-  const leadBrief = buildTandemBrief(lead, follow, promptText, classification, 'lead');
-  const leadHandoff = (await request('POST', baseUrl, '/handoff', {
-    from,
-    to: lead,
-    summary: leadBrief,
-    nextStep: `Analyze the objective and produce actionable plan. Your output will be forwarded to ${String(follow)}.`,
-    tasks: leadTask.task?.id ? [leadTask.task.id] : [],
-  })) as any;
-
-  // Create follow handoff
-  const followBrief = buildTandemBrief(follow, lead, promptText, classification, 'follow');
-  const followHandoff = (await request('POST', baseUrl, '/handoff', {
-    from,
-    to: follow,
-    summary: followBrief,
-    nextStep: `Build on ${String(lead)}'s analysis and execute. Reference task ${String(leadTask.task?.id ?? '?')}.`,
-    tasks: followTask.task?.id ? [followTask.task.id] : [],
-  })) as any;
-
-  // Record activity
-  pushActivity(
-    'dispatch',
-    annotateDispatch({
-      prompt: promptText,
-      classification,
-      mode: 'auto',
-      route: `tandem: ${String(lead)} → ${String(follow)}`,
-      agent: lead,
-    }) as any,
-    { agent: lead, taskId: leadTask.task?.id },
-  );
-
-  return {
-    tasks: [leadTask.task, followTask.task].filter(Boolean),
-    handoffs: [leadHandoff.handoff, followHandoff.handoff].filter(Boolean),
-    lead,
-    follow,
-  };
-}
-
-/**
- * Spawn a child process asynchronously, collecting stdout/stderr.
- * Unlike spawnSync, this does NOT block the event loop, so status bar
- * polling and redraws continue while the subprocess runs.
- * @param {string} cmd
- * @param {string[]} args
- * @param {object} [opts]
- * @param {Function} [onProgress] - Called with parsed JSON progress markers from stderr
- */
-function spawnAsync(
-  cmd: string,
-  args: string[],
-  opts: any = {},
-  onProgress: ((data: any) => void) | null = null,
-) {
-  return new Promise((resolve) => {
-    const chunks: { stdout: string[]; stderr: string[] } = { stdout: [], stderr: [] };
-    let stderrBuf = '';
-    const invocation = rewriteNodeInvocation(cmd, args, HYDRA_ROOT);
-    const child = spawn(invocation.command, invocation.args, {
-      cwd: opts.cwd,
-      windowsHide: true,
-      stdio: ['ignore', 'pipe', 'pipe'],
-    });
-    child.stdout.setEncoding('utf8');
-    child.stderr.setEncoding('utf8');
-    child.stdout.on('data', (d) => chunks.stdout.push(d));
-    child.stderr.on('data', (d) => {
-      chunks.stderr.push(d);
-      if (onProgress) {
-        stderrBuf += String(d);
-        const lines = stderrBuf.split('\n');
-        stderrBuf = lines.pop() ?? ''; // keep incomplete last line
-        for (const line of lines) {
-          const trimmed = line.trim();
-          if (trimmed[0] !== '{') continue;
-          try {
-            const parsed = JSON.parse(trimmed);
-            if (parsed.type === 'council_phase') onProgress(parsed);
-          } catch {
-            /* not a progress marker */
-          }
-        }
-      }
-    });
-    child.on('error', (err) => {
-      resolve({ status: 1, stdout: '', stderr: err.message });
-    });
-    child.on('close', (code) => {
-      resolve({
-        status: code ?? 1,
-        stdout: chunks.stdout.join(''),
-        stderr: chunks.stderr.join(''),
-      });
-    });
-  });
-}
-
-async function runCouncilPrompt({
-  baseUrl,
-  promptText,
-  rounds = 2,
-  preview = false,
-  onProgress = null,
-  agents = null,
-}: {
-  baseUrl: string;
-  promptText: string;
-  rounds?: number;
-  preview?: boolean;
-  onProgress?: ((data: Record<string, unknown>) => void) | null;
-  agents?: string[] | null;
-}) {
-  const councilScript = path.join(HYDRA_ROOT, 'lib', 'hydra-council.ts');
-  const councilTimeoutMs = (config as any).routing?.councilTimeoutMs ?? 420_000;
-  const args = [
-    councilScript,
-    `prompt=${promptText}`,
-    `url=${baseUrl}`,
-    `rounds=${String(rounds)}`,
-    `timeoutMs=${String(councilTimeoutMs)}`,
-  ];
-  if (preview) {
-    args.push('mode=preview', 'publish=false');
-  } else {
-    args.push('publish=true');
-  }
-  if (agents && agents.length > 0) {
-    args.push(`agents=${agents.join(',')}`);
-  }
-
-  const result = (await spawnAsync('node', args, { cwd: config.projectRoot }, onProgress)) as any;
-
-  return {
-    ok: result.status === 0,
-    status: result.status,
-    stdout: result.stdout ?? '',
-    stderr: result.stderr ?? '',
-  };
-}
-
-async function runCouncilJson({
-  baseUrl,
-  promptText,
-  rounds = 1,
-  preview = false,
-  publish = false,
-  onProgress = null,
-  agents = null,
-}: {
-  baseUrl: string;
-  promptText: string;
-  rounds?: number;
-  preview?: boolean;
-  publish?: boolean;
-  onProgress?: ((data: Record<string, unknown>) => void) | null;
-  agents?: string[] | null;
-}) {
-  const councilScript = path.join(HYDRA_ROOT, 'lib', 'hydra-council.ts');
-  const councilTimeoutMs = (config as any).routing?.councilTimeoutMs ?? 420_000;
-  const args = [
-    councilScript,
-    `prompt=${promptText}`,
-    `url=${baseUrl}`,
-    `rounds=${String(rounds)}`,
-    `timeoutMs=${String(councilTimeoutMs)}`,
-    'emit=json',
-    'save=false',
-    `publish=${publish ? 'true' : 'false'}`,
-  ];
-  if (preview) {
-    args.push('mode=preview', 'publish=false');
-  }
-  if (agents && agents.length > 0) {
-    args.push(`agents=${agents.join(',')}`);
-  }
-
-  const result = (await spawnAsync('node', args, { cwd: config.projectRoot }, onProgress)) as any;
-
-  if (result.status !== 0) {
-    return {
-      ok: false,
-      status: result.status,
-      stdout: result.stdout ?? '',
-      stderr: result.stderr ?? '',
-      report: null,
-    };
-  }
-
-  try {
-    const parsed = JSON.parse(result.stdout ?? '{}');
-    return {
-      ok: true,
-      status: result.status,
-      stdout: result.stdout ?? '',
-      stderr: result.stderr ?? '',
-      report: parsed.report ?? null,
-    };
-  } catch (err: unknown) {
-    return {
-      ok: false,
-      status: result.status,
-      stdout: result.stdout ?? '',
-      stderr: `Failed to parse council JSON: ${(err as Error).message}`,
-      report: null,
-    };
-  }
-}
-
-async function runAutoPrompt({
-  baseUrl,
-  from,
-  agents,
-  promptText,
-  miniRounds,
-  councilRounds,
-  preview,
-  onProgress = null,
-}: {
-  baseUrl: string;
-  from: string;
-  agents: string[];
-  promptText: string;
-  miniRounds: number;
-  councilRounds: number;
-  preview: boolean;
-  onProgress?: ((data: Record<string, unknown>) => void) | null;
-}) {
-  // Intent gate: normalize filler/abbreviations, optionally LLM-rewrite low-confidence prompts
-  const _intentCfg = (() => {
-    try {
-      const c = loadHydraConfig();
-      return c.routing.intentGate;
-    } catch {
-      return {};
-    }
-  })();
-  let _gatedText, classification;
-  try {
-    ({ text: _gatedText, classification } = await gateIntent(promptText, {
-      enabled: (_intentCfg as any).enabled !== false,
-      confidenceThreshold: (_intentCfg as any).confidenceThreshold ?? 0.55,
-    }));
-  } catch {
-    _gatedText = promptText;
-    classification = classifyPrompt(promptText);
-  }
-  const effectivePrompt = _gatedText;
-
-  const routingConfig = (config as any).routing ?? {};
-
-  // Re-resolve route strategy with agent filter
-  let { routeStrategy } = classification;
-  let tandemPair = classification.tandemPair;
-  if (routeStrategy === 'tandem' && agents.length > 0) {
-    tandemPair = selectTandemPair(classification.taskType, classification.suggestedAgent, agents);
-    if (!tandemPair) routeStrategy = 'single';
-  }
-  if (routeStrategy === 'tandem' && routingConfig.tandemEnabled === false) {
-    routeStrategy = 'single';
-  }
-
-  // Legacy triage toggle: fall through to old mini-round path
-  if (routingConfig.useLegacyTriage && routeStrategy !== 'single') {
-    return runAutoPromptLegacy({
-      baseUrl,
-      from,
-      agents,
-      promptText: effectivePrompt,
-      miniRounds,
-      councilRounds,
-      preview,
-      onProgress,
-      classification,
-    });
-  }
-
-  // ── Single route (fast-path) ──
-  if (routeStrategy === 'single') {
-    if (preview) {
-      return {
-        mode: 'fast-path',
-        recommended: 'handoff',
-        route: `fast-path → ${classification.suggestedAgent}`,
-        classification,
-        triage: null,
-        published: null,
-        escalatedToCouncil: false,
-      };
-    }
-    const published = await publishFastPathDelegation({
-      baseUrl,
-      from,
-      promptText: effectivePrompt,
-      classification,
-      agents,
-    });
-    return {
-      mode: 'fast-path',
-      recommended: 'handoff',
-      route: `fast-path → ${String(published.agent)} (${classification.taskType}, ${String(classification.confidence)} confidence)`,
-      classification,
-      triage: null,
-      published: { tasks: [published.task], handoffs: [published.handoff] },
-      escalatedToCouncil: false,
-    };
-  }
-
-  // ── Tandem route (2 agents, 0 CLI calls) ──
-  if (routeStrategy === 'tandem') {
-    if (preview) {
-      const pair = tandemPair ?? { lead: 'claude', follow: 'codex' };
-      return {
-        mode: 'tandem',
-        recommended: 'tandem',
-        route: `tandem: ${pair.lead} → ${pair.follow}`,
-        classification,
-        triage: null,
-        published: null,
-        escalatedToCouncil: false,
-      };
-    }
-    const published = await publishTandemDelegation({
-      baseUrl,
-      from,
-      promptText: effectivePrompt,
-      classification,
-      agents,
-    });
-    const pair = (published as any).lead
-      ? { lead: (published as any).lead, follow: (published as any).follow }
-      : (tandemPair ?? { lead: '?', follow: '?' });
-    return {
-      mode: 'tandem',
-      recommended: 'tandem',
-      route: `tandem: ${String(pair.lead)} → ${String(pair.follow)} (${classification.taskType})`,
-      classification,
-      triage: null,
-      published: { tasks: (published as any).tasks, handoffs: (published as any).handoffs },
-      escalatedToCouncil: false,
-    };
-  }
-
-  // ── Council route (skip mini-round triage, go directly) ──
-  let spec = null;
-  try {
-    spec = await generateSpec(effectivePrompt, null, { cwd: config.projectRoot });
-  } catch {
-    /* non-critical */
-  }
-
-  if (preview) {
-    return {
-      mode: 'council',
-      recommended: 'council',
-      route: 'council (complex prompt)',
-      classification,
-      triage: null,
-      published: null,
-      escalatedToCouncil: true,
-      spec: spec ? { specId: spec.specId, specPath: spec.specPath } : null,
-    };
-  }
-
-  const council = await runCouncilPrompt({
-    baseUrl,
-    promptText: effectivePrompt,
-    rounds: councilRounds,
-    preview: false,
-    onProgress,
-    agents,
-  });
-  if (!council.ok) {
-    throw new Error(
-      council.stderr ?? council.stdout ?? `Council exited with status ${String(council.status)}`,
-    );
-  }
-
-  let verification = null;
-  if (shouldCrossVerify(classification) && council.stdout) {
-    verification = await runCrossVerification(
-      'claude',
-      council.stdout.trim(),
-      effectivePrompt,
-      spec?.specContent,
-    );
-  }
-
-  return {
-    mode: 'council',
-    recommended: 'council',
-    route: 'council (complex prompt)',
-    classification,
-    triage: null,
-    published: null,
-    escalatedToCouncil: true,
-    councilOutput: council.stdout.trim(),
-    spec: spec ? { specId: spec.specId, specPath: spec.specPath } : null,
-    verification,
-  };
-}
-
-/**
- * Legacy auto prompt path: uses mini-round triage (4 agent calls).
- * Retained behind `routing.useLegacyTriage` config toggle.
- */
-async function runAutoPromptLegacy({
-  baseUrl,
-  from,
-  agents,
-  promptText,
-  miniRounds,
-  councilRounds,
-  preview,
-  onProgress,
-  classification,
-}: {
-  baseUrl: string;
-  from: string;
-  agents: string[];
-  promptText: string;
-  miniRounds: number;
-  councilRounds: number;
-  preview: boolean;
-  onProgress: ((data: any) => void) | null;
-
-  classification: any | null;
-}) {
-  // Intent gate: skip if classification already provided (caller already gated the prompt).
-  // If called directly, normalize and optionally LLM-rewrite low-confidence prompts.
-  let effectivePrompt = promptText;
-  let localClassification = classification;
-  if (!localClassification) {
-    const _intentCfg = (() => {
-      try {
-        const c = loadHydraConfig();
-        return c.routing.intentGate;
-      } catch {
-        return {};
-      }
-    })();
-    try {
-      const { text: _gatedText, classification: _gatedClassification } = await gateIntent(
-        promptText,
-        {
-          enabled: (_intentCfg as any).enabled !== false,
-          confidenceThreshold: (_intentCfg as any).confidenceThreshold ?? 0.55,
-        },
-      );
-      localClassification = _gatedClassification;
-      effectivePrompt = _gatedText;
-    } catch {
-      localClassification = classifyPrompt(promptText);
-    }
-  }
-
-  const triage = await runCouncilJson({
-    baseUrl,
-    promptText: effectivePrompt,
-    rounds: miniRounds,
-    preview,
-    publish: false,
-    onProgress,
-    agents,
-  });
-
-  if (!triage.ok || !triage.report) {
-    throw new Error(
-      triage.stderr ?? triage.stdout ?? `Mini-round exited with status ${String(triage.status)}`,
-    );
-  }
-
-  const recommended = String(triage.report.recommendedMode ?? 'handoff').toLowerCase();
-  if (preview) {
-    return {
-      mode: 'preview',
-      recommended,
-      route:
-        localClassification.tier === 'complex'
-          ? 'council (complex prompt)'
-          : 'mini-round triage → preview',
-      classification: localClassification,
-      triage: triage.report,
-      published: null,
-      escalatedToCouncil: recommended === 'council',
-    };
-  }
-
-  let spec = null;
-  if (localClassification.tier === 'complex') {
-    try {
-      spec = await generateSpec(effectivePrompt, null, { cwd: config.projectRoot });
-    } catch {
-      /* non-critical */
-    }
-  }
-
-  if (recommended === 'council' || localClassification.tier === 'complex') {
-    const council = await runCouncilPrompt({
-      baseUrl,
-      promptText: effectivePrompt,
-      rounds: councilRounds,
-      preview: false,
-      onProgress,
-      agents,
-    });
-    if (!council.ok)
-      throw new Error(
-        council.stderr ?? council.stdout ?? `Council exited with status ${String(council.status)}`,
-      );
-    let verification = null;
-    if (shouldCrossVerify(localClassification) && council.stdout) {
-      verification = await runCrossVerification(
-        'claude',
-        council.stdout.trim(),
-        effectivePrompt,
-        spec?.specContent,
-      );
-    }
-    return {
-      mode: 'council',
-      recommended,
-      route: 'council (escalated)',
-      classification: localClassification,
-      triage: triage.report,
-      published: null,
-      escalatedToCouncil: true,
-      councilOutput: council.stdout.trim(),
-      spec: spec ? { specId: spec.specId, specPath: spec.specPath } : null,
-      verification,
-    };
-  }
-
-  const published = await publishMiniRoundDelegation({
-    baseUrl,
-    from,
-    agents,
-    promptText: effectivePrompt,
-    report: triage.report,
-  });
-  return {
-    mode: 'handoff',
-    recommended,
-    route: 'mini-round triage → delegated',
-    classification: localClassification,
-    triage: triage.report,
-    published,
-    escalatedToCouncil: false,
-  };
-}
-
-// ── Smart Mode: auto-select model tier per prompt ───────────────────────────
-
-async function runSmartPrompt({
-  baseUrl,
-  from,
-  agents,
-  promptText,
-  miniRounds,
-  councilRounds,
-  preview,
-  onProgress = null,
-}: {
-  baseUrl: string;
-  from: string;
-  agents: string[];
-  promptText: string;
-  miniRounds: number;
-  councilRounds: number;
-  preview: boolean;
-  onProgress?: ((data: Record<string, unknown>) => void) | null;
-}) {
-  const classification = classifyPrompt(promptText);
-  const targetMode = (SMART_TIER_MAP as Record<string, string>)[classification.tier] || 'balanced';
-
-  // Save current mode to restore after dispatch
-  const previousMode = getMode();
-
-  try {
-    // Temporarily switch to the tier-appropriate model preset
-    setMode(targetMode);
-  } catch {
-    // If targetMode doesn't exist in modeTiers, fall through to auto
-  }
-
-  try {
-    const result = await runAutoPrompt({
-      baseUrl,
-      from,
-      agents,
-      promptText,
-      miniRounds,
-      councilRounds,
-      preview,
-      onProgress,
-    });
-
-    // Annotate result with smart routing info
-    (result as any).smartTier = classification.tier;
-    (result as any).smartMode = targetMode;
-    result.route = `${classification.tier}\u2192${result.route}`;
-
-    // Update status bar dispatch info
-    setLastDispatch({
-      route: `${classification.tier}\u2192${String(result.mode === 'fast-path' ? (result.published?.handoffs?.[0]?.to ?? classification.suggestedAgent ?? 'agent') : result.mode)}`,
-      tier: classification.tier,
-      agent: result.mode === 'fast-path' ? classification.suggestedAgent || '' : '',
-      mode: 'smart',
-    });
-
-    return result;
-  } finally {
-    // Restore previous mode
-    try {
-      setMode(previousMode);
-    } catch {
-      /* ignore */
-    }
-  }
 }
 
 export function levenshtein(a: string, b: string): number {
@@ -1604,89 +231,6 @@ export function fuzzyMatchCommand(input: string): string | null {
     }
   }
   return best;
-}
-
-// ── Self Awareness (Hyper-Aware Concierge Context) ────────────────────────────
-
-let _selfIndexCache = { block: '', builtAt: 0, key: '' };
-
-export function normalizeSimpleCommandText(input: unknown): string {
-  return String(input ?? '')
-    .toLowerCase()
-    .replace(/[^\w\s]/g, ' ')
-    .replace(/\s+/g, ' ')
-    .trim();
-}
-
-export function parseSelfAwarenessPlaintextCommand(input: unknown): string | null {
-  const raw = String(input ?? '').trim();
-  if (!raw) return null;
-  if (raw.startsWith(':') || raw.startsWith('!')) return null;
-  if (raw.includes('\n')) return null;
-
-  const s = normalizeSimpleCommandText(raw);
-  if (!s || s.length > 80) return null;
-
-  const target = '(?:hyper\\s*aware(?:ness)?|self\\s*awareness)';
-  const polite = '(?:please\\s+)?(?:can\\s+you\\s+|could\\s+you\\s+|would\\s+you\\s+)?';
-  const agentSuffix = '(?:\\s+agent)?';
-
-  if (new RegExp(`^${polite}(?:turn\\s+off|disable)\\s+${target}${agentSuffix}$`).test(s))
-    return 'off';
-  if (new RegExp(`^${polite}${target}${agentSuffix}\\s+off$`).test(s)) return 'off';
-
-  if (new RegExp(`^${polite}(?:turn\\s+on|enable)\\s+${target}${agentSuffix}$`).test(s))
-    return 'on';
-  if (new RegExp(`^${polite}${target}${agentSuffix}\\s+on$`).test(s)) return 'on';
-
-  if (new RegExp(`^${polite}(?:set\\s+)?${target}${agentSuffix}\\s+(?:to\\s+)?minimal$`).test(s))
-    return 'minimal';
-  if (new RegExp(`^${polite}(?:set\\s+)?${target}${agentSuffix}\\s+(?:to\\s+)?full$`).test(s))
-    return 'full';
-
-  if (new RegExp(`^${polite}${target}${agentSuffix}\\s+status$`).test(s)) return 'status';
-  return null;
-}
-
-async function applySelfAwarenessPatch(patch = {}) {
-  const cfg = loadHydraConfig();
-  const current =
-    cfg.selfAwareness && typeof cfg.selfAwareness === 'object' ? cfg.selfAwareness : {};
-  cfg.selfAwareness = { ...current, ...patch };
-  const { saveHydraConfig: save } = await import('./hydra-config.ts');
-  const merged = save(cfg);
-  _selfIndexCache = { block: '', builtAt: 0, key: '' };
-  return merged.selfAwareness ?? cfg.selfAwareness;
-}
-
-// ── Git Info Cache ────────────────────────────────────────────────────────────
-
-let _gitInfoCache: { data: any; at: number } = { data: null, at: 0 };
-const GIT_CACHE_TTL = 30_000;
-
-function getGitInfo() {
-  const now = Date.now();
-  if (_gitInfoCache.data && now - _gitInfoCache.at < GIT_CACHE_TTL) {
-    return _gitInfoCache.data;
-  }
-  try {
-    const branch = spawnSync('git', ['rev-parse', '--abbrev-ref', 'HEAD'], {
-      cwd: config.projectRoot,
-      encoding: 'utf8',
-      timeout: 5000,
-    }).stdout.trim();
-    const porcelain = spawnSync('git', ['status', '--porcelain'], {
-      cwd: config.projectRoot,
-      encoding: 'utf8',
-      timeout: 5000,
-    }).stdout.trim();
-    const modifiedFiles = porcelain ? porcelain.split('\n').length : 0;
-    const info = { branch, modifiedFiles };
-    _gitInfoCache = { data: info, at: now };
-    return info;
-  } catch {
-    return null;
-  }
 }
 
 async function interactiveLoop({
@@ -1807,228 +351,17 @@ async function interactiveLoop({
   if (conciergeActive) showConciergeWelcome();
 
   // ── Ghost Text (greyed-out placeholder, Claude Code CLI style) ────────────
-  // Shows dim hint text after the prompt cursor. Disappears on first keystroke.
-  // Re-appears on blank line submissions or after command completion.
-  // When _acceptableGhostText is set, Tab accepts + submits the ghost text.
-  let _ghostCleanup: ((...args: any[]) => void) | null = null;
-  let _acceptableGhostText: string | null = null; // Text that Tab would accept+submit
-  let _ghostUpgradeAborted = false; // Set true when user types; prevents async AI upgrade
-
-  const GHOST_HINTS_CONCIERGE = [
-    () => `Chat with ${getConciergeModelLabel()} — prefix ! to dispatch`,
-    () => 'Ask a question or describe what you need',
-    () => `Talking to ${getConciergeModelLabel()} — :chat off to disable`,
-    () => 'What would you like to work on?',
-  ];
-  const GHOST_HINTS_NORMAL = [
-    () => 'Describe a task to dispatch to agents',
-    () => ':help for commands, or type a prompt',
-    () => 'What would you like to work on?',
-  ];
-  let _ghostIdx = 0;
-
-  function getGhostText() {
-    const pool = conciergeActive ? GHOST_HINTS_CONCIERGE : GHOST_HINTS_NORMAL;
-    const text = pool[_ghostIdx % pool.length]();
-    _ghostIdx++;
-    return text;
-  }
-
-  /**
-   * Show ghost text after the prompt cursor.
-   * @param {string} [overrideText] - Custom text instead of cycling hints
-   * @param {string} [acceptableText] - If set, Tab will accept+submit this text
-   */
-  function showGhostAfterPrompt(overrideText?: any, acceptableText?: any) {
-    if (!process.stdout.isTTY) return;
-    const base = overrideText ?? getGhostText();
-    if (!base) return;
-
-    _acceptableGhostText = acceptableText ?? null;
-    _ghostUpgradeAborted = false;
-
-    // Append [Tab] hint for acceptable ghost text
-    const text = _acceptableGhostText ? `${String(base)}  [Tab]` : base;
-    const plain = stripAnsi(text);
-
-    // Write dim ghost text, then move cursor back to prompt end
-    process.stdout.write(DIM(text));
-    if (plain.length > 0) {
-      process.stdout.write(`\x1b[${String(plain.length)}D`);
-    }
-    // One-shot: clear ghost text on first keystroke
-    if (_ghostCleanup) {
-      process.stdin.removeListener('data', _ghostCleanup);
-      _ghostCleanup = null;
-    }
-    const cleanup = () => {
-      process.stdout.write('\x1b[K'); // Erase from cursor to end of line
-      _acceptableGhostText = null;
-      _ghostUpgradeAborted = true;
-      process.stdin.removeListener('data', cleanup);
-      if (_ghostCleanup === cleanup) _ghostCleanup = null;
-    };
-    _ghostCleanup = cleanup;
-    process.stdin.on('data', cleanup);
-  }
-
-  /**
-   * Upgrade displayed ghost text with an AI-generated suggestion.
-   * No-op if user has already started typing.
-   */
-  function upgradeGhostText(newText: string) {
-    if (_ghostUpgradeAborted) return;
-    if (!process.stdout.isTTY) return;
-    if (rl.line && rl.line.length > 0) {
-      _ghostUpgradeAborted = true;
-      return;
-    }
-    // Erase old ghost, write new acceptable ghost
-    process.stdout.write('\x1b[K');
-    const display = `${newText}  [Tab]`;
-    const plain = stripAnsi(display);
-    process.stdout.write(DIM(display));
-    if (plain.length > 0) {
-      process.stdout.write(`\x1b[${String(plain.length)}D`);
-    }
-    _acceptableGhostText = newText;
-  }
-
-  // Wrap rl.prompt to auto-show ghost text on fresh prompts (not refreshes)
-  const _origPrompt = rl.prompt.bind(rl);
-  rl.prompt = function (preserveCursor) {
-    _origPrompt(preserveCursor);
-    if (!preserveCursor) {
-      showGhostAfterPrompt();
-    }
-  };
-
-  // ── Tab Interception (accept + submit ghost text) ──────────────────────────
-  // Override readline's internal _ttyWrite to intercept Tab when acceptable
-  // ghost text is displayed. Standard pattern used by inquirer/ora.
-  const _origTtyWrite = (rl as any)._ttyWrite.bind(rl);
-  (rl as any)._ttyWrite = function (s: any, key: any) {
-    if (key.name === 'tab' && _acceptableGhostText && !rl.line.length) {
-      // Clear ghost visual
-      process.stdout.write('\x1b[K');
-      const text = _acceptableGhostText;
-      _acceptableGhostText = null;
-      _ghostUpgradeAborted = true;
-      // Clean up ghost listener
-      if (_ghostCleanup) {
-        process.stdin.removeListener('data', _ghostCleanup);
-        _ghostCleanup = null;
-      }
-      // Inject text into readline and submit
-      rl.write(text);
-      setImmediate(() => {
-        rl.write(null, { name: 'return' });
-      });
-      return; // swallow the Tab
-    }
-    _origTtyWrite(s, key);
-  };
-
-  // ── Daemon resume helper (extracted for unified :resume) ───────────────────
-  async function executeDaemonResume(
-    resumeBaseUrl: string,
-    resumeAgents: string[],
-    resumeRl: ReadlineInterface,
-  ) {
-    try {
-      const sessionStatus = (await request('GET', resumeBaseUrl, '/session/status')) as any;
-
-      // Unpause if paused
-      if (sessionStatus.activeSession?.status === 'paused') {
-        try {
-          (await request('POST', resumeBaseUrl, '/session/unpause')) as any;
-          console.log(`  ${SUCCESS('✓')} Session unpaused`);
-        } catch (err: unknown) {
-          console.log(`  ${WARNING('⚠')} Could not unpause: ${(err as Error).message}`);
-        }
-      }
-
-      // Reset stale tasks
-      const stale = sessionStatus.staleTasks ?? [];
-      if (stale.length > 0) {
-        console.log('');
-        for (const t of stale) {
-          try {
-            (await request('POST', resumeBaseUrl, '/task/update', {
-              taskId: t.id,
-              status: 'todo',
-            })) as any;
-            const mins = Math.round((Date.now() - new Date(t.updatedAt).getTime()) / 60_000);
-            console.log(
-              `  ${WARNING('↻')} ${pc.white(t.id)} ${colorAgent(t.owner)} reset to todo ${DIM(`(was stale ${String(mins)}m)`)}`,
-            );
-          } catch {
-            /* skip */
-          }
-        }
-      }
-
-      // Ack pending handoffs
-      const handoffs = sessionStatus.pendingHandoffs ?? [];
-      const agentsToLaunch = new Set();
-      if (handoffs.length > 0) {
-        console.log('');
-        for (const h of handoffs) {
-          const targetAgent = String(h.to ?? '').toLowerCase();
-          try {
-            (await request('POST', resumeBaseUrl, '/handoff/ack', {
-              handoffId: h.id,
-              agent: targetAgent,
-            })) as any;
-            if (targetAgent) agentsToLaunch.add(targetAgent);
-          } catch (err: unknown) {
-            console.log(`  ${ERROR('✗')} ${pc.white(h.id)} ${(err as Error).message}`);
-          }
-        }
-      }
-
-      // Collect in-progress agent owners
-      for (const t of sessionStatus.inProgressTasks ?? []) {
-        const owner = String(t.owner ?? '').toLowerCase();
-        if (owner) agentsToLaunch.add(owner);
-      }
-
-      // Agent suggestions
-      for (const [agent, suggestion] of Object.entries(sessionStatus.agentSuggestions ?? {})) {
-        if (
-          (suggestion as any)?.action &&
-          (suggestion as any).action !== 'idle' &&
-          (suggestion as any).action !== 'unknown'
-        ) {
-          agentsToLaunch.add(agent);
-        }
-      }
-
-      // Launch workers
-      const launchList = ([...agentsToLaunch] as string[]).filter((a) => resumeAgents.includes(a));
-      if (launchList.length > 0) {
-        console.log('');
-        startAgentWorkers(launchList, resumeBaseUrl, { rl: resumeRl });
-      }
-
-      // Summary
-      const actions = [];
-      if (stale.length > 0)
-        actions.push(`${String(stale.length)} stale task${stale.length > 1 ? 's' : ''} reset`);
-      if (handoffs.length > 0)
-        actions.push(`${String(handoffs.length)} handoff${handoffs.length > 1 ? 's' : ''} acked`);
-      if (launchList.length > 0)
-        actions.push(
-          `${String(launchList.length)} agent${launchList.length > 1 ? 's' : ''} launched`,
-        );
-      if (actions.length > 0) {
-        console.log('');
-        console.log(`  ${SUCCESS('✓')} ${actions.join(', ')}`);
-      }
-    } catch (err: unknown) {
-      console.log(`  ${ERROR((err as Error).message)}`);
-    }
-  }
+  // Extracted to hydra-operator-ghost-text.ts. Factory installs rl.prompt
+  // wrapping and Tab interception on the readline interface.
+  const {
+    showGhostAfterPrompt,
+    upgradeGhostText,
+    cleanup: _ghostTextCleanup,
+  } = createGhostTextHelpers({
+    rl,
+    getConciergeActive: () => conciergeActive,
+    getConciergeModelLabel,
+  });
 
   startEventStream(baseUrl, agents);
 
@@ -2167,7 +500,7 @@ async function interactiveLoop({
               ? `Investigate why ${String(first.id)} is blocked${deps ? ` (waiting on ${String(deps)})` : ''}`
               : `Investigate ${String(blockedTasks.length)} blocked tasks: ${String(blockedTasks.map((t: any) => t.id).join(', '))}`;
 
-          _origPrompt();
+          rl.prompt(true);
           showGhostAfterPrompt(deterministicHint, deterministicHint);
 
           // Phase 2: AI upgrade (async, non-blocking)
@@ -2361,27 +694,6 @@ async function interactiveLoop({
         const next = loadHydraConfig();
         printSelfAwarenessStatus(next.selfAwareness);
         console.log('');
-        rl.prompt();
-        return;
-      }
-      if (
-        line.startsWith(':mode ') &&
-        ['economy', 'balanced', 'performance'].includes(line.slice(5).trim().toLowerCase())
-      ) {
-        const modeArg = line.slice(5).trim().toLowerCase();
-        const cfg = loadHydraConfig();
-        cfg.routing = { ...cfg.routing, mode: modeArg as any };
-        saveHydraConfig(cfg);
-        let chip: string;
-        if (modeArg === 'economy') {
-          chip = pc.yellow('◆ ECO');
-        } else if (modeArg === 'performance') {
-          chip = pc.cyan('◆ PERF');
-        } else {
-          chip = pc.green('◆ BAL');
-        }
-        console.log(`Mode set to ${chip}`);
-        if (typeof setActiveMode === 'function') setActiveMode(modeArg);
         rl.prompt();
         return;
       }
@@ -2616,122 +928,60 @@ async function interactiveLoop({
         return;
       }
       if (line === ':model' || line.startsWith(':model ')) {
-        const modelArgs = line.slice(':model'.length).trim();
-        if (modelArgs) {
-          // Handle "reset" — clear all overrides
-          if (modelArgs === 'reset') {
-            setMode(getMode());
-            console.log(
-              `  ${SUCCESS('\u2713')} All agent overrides cleared, following mode ${ACCENT(getMode())}`,
-            );
-            rl.prompt();
-            return;
-          }
-          // Parse "mode=economy" or "claude=sonnet gemini=flash" style
-          const pairs = modelArgs.split(/\s+/);
-          for (const pair of pairs) {
-            const eqIdx = pair.indexOf('=');
-            if (eqIdx > 0) {
-              const key = pair.slice(0, eqIdx).toLowerCase();
-              const value = pair.slice(eqIdx + 1);
-              if (key === 'mode') {
-                try {
-                  setMode(value);
-                  console.log(`  ${SUCCESS('\u2713')} Mode ${DIM('\u2192')} ${ACCENT(value)}`);
-                } catch (err: unknown) {
-                  console.log(`  ${ERROR((err as Error).message)}`);
-                }
-              } else if (AGENT_NAMES.includes(key)) {
-                if (value === 'default') {
-                  const resolved = resetAgentModel(key);
-                  console.log(
-                    `  ${SUCCESS('\u2713')} ${pc.bold(key)} ${DIM('\u2192')} ${pc.white(resolved)} ${DIM('(following mode)')}`,
-                  );
-                } else {
-                  const resolved = setActiveModel(key, value);
-                  console.log(
-                    `  ${SUCCESS('\u2713')} ${pc.bold(key)} ${DIM('\u2192')} ${pc.white(resolved)}`,
-                  );
-                }
-              } else {
-                console.log(`  ${ERROR('Unknown key:')} ${key}`);
-              }
-            }
-          }
-        } else {
-          const summary = getModelSummary();
-          const currentMode = summary['_mode'] ?? getMode();
-          console.log('');
-          console.log(`  ${pc.bold('Mode:')} ${ACCENT(currentMode as string)}`);
-          for (const [agent, info] of Object.entries(summary) as any) {
-            if (agent === '_mode') continue;
-            const model = info.isOverride ? pc.white(info.active) : DIM(info.active);
-            const tag = info.isOverride
-              ? WARNING('(override)')
-              : DIM(`(${String(info.tierSource)})`);
-            const effLabel2 = formatEffortDisplay(info.active, info.reasoningEffort);
-            const effort = effLabel2 ? pc.yellow(` [${effLabel2}]`) : '';
-            console.log(`  ${colorAgent(agent)}  ${model}${effort} ${tag}`);
-          }
-          console.log('');
-          console.log(DIM(`  Set mode:  :model mode=economy`));
-          console.log(DIM(`  Override:  :model codex=gpt-5.2-codex`));
-          console.log(DIM(`  Reset all: :model reset`));
-          console.log(DIM(`  Reset one: :model codex=default`));
-          console.log(DIM(`  Browse:    :model:select [agent]`));
-        }
-        rl.prompt();
+        await handleModelCommand(
+          {
+            baseUrl,
+            agents,
+            config,
+            rl,
+            HYDRA_ROOT,
+            getLoopMode: () => mode,
+            setLoopMode: (m) => {
+              mode = m;
+            },
+            initStatusBar,
+            destroyStatusBar,
+            drawStatusBar,
+          },
+          line.slice(':model'.length).trim(),
+        );
         return;
       }
       if (line === ':model:select' || line.startsWith(':model:select ')) {
-        const selectArg = line.slice(':model:select'.length).trim();
-        const pickerArgs = [path.join(HYDRA_ROOT, 'lib', 'hydra-models-select.ts')];
-        if (selectArg && AGENT_NAMES.includes(selectArg.toLowerCase())) {
-          pickerArgs.push(selectArg.toLowerCase());
-        }
-        // Hand terminal control to the interactive picker subprocess
-        rl.pause();
-        destroyStatusBar();
-        spawnHydraNodeSync(pickerArgs[0], pickerArgs.slice(1), {
-          stdio: 'inherit',
-          windowsHide: true,
-        });
-        initStatusBar(agents);
-        rl.resume();
-        rl.prompt();
+        await handleModelSelectCommand(
+          {
+            baseUrl,
+            agents,
+            config,
+            rl,
+            HYDRA_ROOT,
+            getLoopMode: () => mode,
+            setLoopMode: (m) => {
+              mode = m;
+            },
+            initStatusBar,
+            destroyStatusBar,
+            drawStatusBar,
+          },
+          line.slice(':model:select'.length).trim(),
+        );
         return;
       }
       if (line === ':roles') {
-        const cfg = loadHydraConfig();
-        const roles = cfg.roles;
-        const recs = cfg.recommendations ?? {};
-        console.log('');
-        console.log(pc.bold('  Role → Agent → Model mapping'));
-        console.log('');
-        for (const [role, rc] of Object.entries(roles)) {
-          const rec = (recs as any)[role];
-          const modelStr = rc.model ? pc.white(rc.model) : DIM('(agent default)');
-          const roleEffLabel = formatEffortDisplay(
-            (rc.model ?? getActiveModel(rc.agent)) as string,
-            rc.reasoningEffort,
-          );
-          const effortStr = roleEffLabel ? pc.yellow(` [${roleEffLabel}]`) : '';
-          const match = rec?.models?.[0] === rc.model ? SUCCESS(' ✓') : '';
-          console.log(
-            `  ${ACCENT(role.padEnd(16))} ${colorAgent(rc.agent)}  ${modelStr}${effortStr}${match}`,
-          );
-          if (rec) {
-            console.log(
-              `  ${' '.repeat(16)} ${DIM(`Recommended: ${String(rec.models.join(', '))}`)}`,
-            );
-            if (rec.note) console.log(`  ${' '.repeat(16)} ${DIM(rec.note)}`);
-          }
-        }
-        console.log('');
-        console.log(DIM('  Override in hydra.config.json under "roles" section'));
-        console.log(DIM('  Or use :roster to edit interactively'));
-        console.log('');
-        rl.prompt();
+        await handleRolesCommand({
+          baseUrl,
+          agents,
+          config,
+          rl,
+          HYDRA_ROOT,
+          getLoopMode: () => mode,
+          setLoopMode: (m) => {
+            mode = m;
+          },
+          initStatusBar,
+          destroyStatusBar,
+          drawStatusBar,
+        });
         return;
       }
       if (line === ':roster') {
@@ -2819,41 +1069,24 @@ async function interactiveLoop({
         rl.prompt();
         return;
       }
-      if (line === ':mode') {
-        const routingModeCfg = loadHydraConfig().routing.mode;
-        let chip: string;
-        if (routingModeCfg === 'economy') {
-          chip = pc.yellow('◆ ECO');
-        } else if (routingModeCfg === 'performance') {
-          chip = pc.cyan('◆ PERF');
-        } else {
-          chip = pc.green('◆ BAL');
-        }
-        console.log(label('Mode', ACCENT(mode)));
-        console.log(
-          label('Routing mode', `${chip} ${pc.dim('(economy | balanced | performance)')}`),
+      if (line === ':mode' || line.startsWith(':mode ')) {
+        await handleModeCommand(
+          {
+            baseUrl,
+            agents,
+            config,
+            rl,
+            HYDRA_ROOT,
+            getLoopMode: () => mode,
+            setLoopMode: (m) => {
+              mode = m;
+            },
+            initStatusBar,
+            destroyStatusBar,
+            drawStatusBar,
+          },
+          line.slice(':mode'.length).trim(),
         );
-        console.log(
-          DIM(`  Switch orchestration: :mode auto | smart | handoff | council | dispatch`),
-        );
-        console.log(DIM(`  Switch routing:       :mode economy | balanced | performance`));
-        rl.prompt();
-        return;
-      }
-      if (line.startsWith(':mode ')) {
-        const nextMode = line.slice(':mode '.length).trim().toLowerCase();
-        if (!['auto', 'handoff', 'council', 'dispatch', 'smart'].includes(nextMode)) {
-          console.log(
-            'Invalid mode. Use :mode auto, :mode handoff, :mode council, :mode dispatch, or :mode smart',
-          );
-          rl.prompt();
-          return;
-        }
-        mode = nextMode;
-        setActiveMode(mode);
-        console.log(label('Mode', ACCENT(mode)));
-        drawStatusBar();
-        rl.prompt();
         return;
       }
 
@@ -3040,180 +1273,23 @@ async function interactiveLoop({
       }
 
       if (line === ':tasks' || line.startsWith(':tasks ')) {
-        const tasksArg = line.slice(':tasks'.length).trim().toLowerCase();
-
-        if (tasksArg === 'scan') {
-          // Run scanner inline
-          console.log(`  ${ACCENT('Scanning for work items...')}`);
-          try {
-            const { scanAllSources } = await import('./hydra-tasks-scanner.ts');
-            const scanned = scanAllSources(config.projectRoot);
-            if (scanned.length === 0) {
-              console.log(`  ${DIM('No tasks found.')}`);
-            } else {
-              console.log('');
-              console.log(sectionHeader(`Scanned Tasks (${String(scanned.length)})`));
-              for (const t of scanned.slice(0, 15)) {
-                let prioColor: (s: string) => string;
-                if (t.priority === 'high') {
-                  prioColor = pc.red;
-                } else if (t.priority === 'low') {
-                  prioColor = DIM;
-                } else {
-                  prioColor = pc.yellow;
-                }
-                console.log(`  ${prioColor(t.priority.padEnd(6))} ${t.title}`);
-                console.log(
-                  `         ${DIM(`[${t.source}] ${t.taskType} → ${t.suggestedAgent} | ${t.sourceRef}`)}`,
-                );
-              }
-              if (scanned.length > 15) {
-                console.log(DIM(`  ... and ${String(scanned.length - 15)} more`));
-              }
-              console.log('');
-            }
-          } catch (err: unknown) {
-            console.log(`  ${ERROR((err as Error).message)}`);
-          }
-          rl.prompt();
-          return;
-        }
-
-        if (tasksArg === 'run' || tasksArg.startsWith('run ')) {
-          // Launch tasks runner as subprocess (same pattern as :evolve)
-          const cwd = config.projectRoot;
-          console.log(`  ${ACCENT('Launching tasks runner...')}`);
-          rl.pause();
-          destroyStatusBar();
-          const tasksScript = path.join(HYDRA_ROOT, 'lib', 'hydra-tasks.ts');
-          const tasksArgs = [tasksScript, `project=${cwd}`];
-          const extra = tasksArg.slice('run'.length).trim();
-          if (extra) {
-            tasksArgs.push(...extra.split(/\s+/).filter(Boolean));
-          }
-          const child = spawnHydraNode(tasksArgs[0], tasksArgs.slice(1), {
-            cwd,
-            stdio: 'inherit',
-            shell: process.platform === 'win32',
-          });
-          child.on('close', (code) => {
-            initStatusBar(agents);
-            rl.resume();
-            if (code === 0) {
-              console.log(`  ${SUCCESS('\u2713')} Tasks runner complete`);
-            } else {
-              console.log(`  ${ERROR(`Tasks runner exited with code ${String(code)}`)}`);
-            }
-            rl.prompt();
-          });
-          return;
-        }
-
-        if (tasksArg === 'review') {
-          const cwd = config.projectRoot;
-          rl.pause();
-          destroyStatusBar();
-          const reviewScript = path.join(HYDRA_ROOT, 'lib', 'hydra-tasks-review.ts');
-          const child = spawnHydraNode(reviewScript, ['review'], {
-            cwd,
-            stdio: 'inherit',
-            shell: process.platform === 'win32',
-          });
-
-          child.on('close', async () => {
-            // After branch review, surface any conflict worktrees from daemon tasks
-            try {
-              const { state } = (await request('GET', baseUrl, '/state')) as any;
-              const conflictTasks = (state.tasks ?? []).filter((t: any) => t.worktreeConflict);
-              if (conflictTasks.length > 0) {
-                console.log('');
-                console.log(sectionHeader('Conflict Worktrees'));
-                console.log(
-                  `  ${WARNING('\u26A0')}  ${String(conflictTasks.length)} task worktree${conflictTasks.length > 1 ? 's' : ''} have merge conflicts and were preserved for manual resolution:`,
-                );
-                console.log('');
-                for (const t of conflictTasks) {
-                  const relPath = t.worktreePath
-                    ? path.relative(config.projectRoot, t.worktreePath)
-                    : `hydra/task/${String(t.id)}`;
-                  console.log(`  ${ACCENT(t.id)} ${DIM(t.title ?? '(no title)')}`);
-                  console.log(`    ${DIM('Worktree:')} ${relPath}`);
-                  console.log(
-                    `    ${DIM('Branch:')}   ${String(t.worktreeBranch ?? `hydra/task/${String(t.id)}`)}`,
-                  );
-                  console.log('');
-                  console.log(`    ${DIM('Inspect:')}  git worktree list`);
-                  console.log(
-                    `    ${DIM('Diff:')}     git diff ${String(t.worktreeBranch ?? `hydra/task/${String(t.id)}`)}`,
-                  );
-                  console.log('');
-                }
-                console.log(
-                  `  ${DIM('To discard a conflict worktree, use :cleanup — stale worktrees appear after 24h.')}`,
-                );
-                console.log(
-                  `  ${DIM('To resolve manually: edit the conflicted files, commit, then run :cleanup.')}`,
-                );
-              }
-            } catch {
-              /* daemon may be unavailable — skip silently */
-            }
-            initStatusBar(agents);
-            rl.resume();
-            rl.prompt();
-          });
-          return;
-        }
-
-        if (tasksArg === 'status') {
-          const reviewScript = path.join(HYDRA_ROOT, 'lib', 'hydra-tasks-review.ts');
-          const child = spawnHydraNode(reviewScript, ['status'], {
-            cwd: config.projectRoot,
-            stdio: 'inherit',
-            shell: process.platform === 'win32',
-          });
-          child.on('close', () => {
-            rl.prompt();
-          });
-          return;
-        }
-
-        if (tasksArg === 'clean') {
-          const reviewScript = path.join(HYDRA_ROOT, 'lib', 'hydra-tasks-review.ts');
-          const child = spawnHydraNode(reviewScript, ['clean'], {
-            cwd: config.projectRoot,
-            stdio: 'inherit',
-            shell: process.platform === 'win32',
-          });
-          child.on('close', () => {
-            rl.prompt();
-          });
-          return;
-        }
-
-        // Default: list daemon tasks (original behavior)
-        try {
-          const { state } = (await request('GET', baseUrl, '/state')) as any;
-          const active = state.tasks.filter(
-            (t: any) => t.status !== 'cancelled' && t.status !== 'done',
-          );
-          if (active.length === 0) {
-            console.log(`  ${DIM('No active tasks')}`);
-          } else {
-            console.log('');
-            console.log(sectionHeader(`Tasks (${String(active.length)})`));
-            for (const t of active) {
-              const statusIcon = t.status === 'in_progress' ? WARNING('\u25CF') : DIM('\u25CB');
-              console.log(
-                `  ${statusIcon} ${pc.white(t.id)} ${colorAgent(t.owner)} ${String(t.title)} ${DIM(t.status)}`,
-              );
-            }
-            console.log('');
-          }
-        } catch (err: unknown) {
-          console.log(`  ${ERROR((err as Error).message)}`);
-        }
-        rl.prompt();
+        await handleTasksCommand(
+          {
+            baseUrl,
+            agents,
+            config,
+            rl,
+            HYDRA_ROOT,
+            getLoopMode: () => mode,
+            setLoopMode: (m) => {
+              mode = m;
+            },
+            initStatusBar,
+            destroyStatusBar,
+            drawStatusBar,
+          },
+          line.slice(':tasks'.length).trim(),
+        );
         return;
       }
 
@@ -3477,1534 +1553,107 @@ async function interactiveLoop({
 
       // ── Agent Registry Commands ────────────────────────────────────────
       if (line === ':agents' || line.startsWith(':agents ')) {
-        const agentArgs = line.slice(':agents'.length).trim();
-        const agentParts = agentArgs.split(/\s+/);
-        const agentSubCmd = agentParts[0] || '';
-
-        if (!agentSubCmd) {
-          // List all agents
-          console.log('');
-          console.log(sectionHeader('Agent Registry'));
-          const physical = listAgents({ type: 'physical' });
-          const virtual = listAgents({ type: 'virtual' });
-
-          console.log(`  ${pc.bold('Physical Agents')} (${String(physical.length)})`);
-          for (const a of physical) {
-            const model = getActiveModel(a.name) ?? DIM('default');
-            console.log(
-              `    ${colorAgent(a.name)} ${DIM(a.label)}  ${DIM('model:')} ${pc.white(model)}`,
-            );
-          }
-
-          if (virtual.length > 0) {
-            console.log('');
-            console.log(`  ${pc.bold('Virtual Sub-Agents')} (${String(virtual.length)})`);
-            for (const a of virtual) {
-              const status = a.enabled ? SUCCESS('on') : ERROR('off');
-              const base = DIM(`\u2192 ${String(a.baseAgent)}`);
-              console.log(`    ${colorAgent(a.name)} ${DIM(a.displayName)}  ${base}  [${status}]`);
-            }
-          } else {
-            console.log('');
-            console.log(`  ${DIM('No virtual sub-agents registered.')}`);
-          }
-
-          console.log('');
-          console.log(
-            DIM('  :agents add              Add custom API agent (with provider preset picker)'),
-          );
-          console.log(DIM('  :agents info <name>      Show agent details'));
-          console.log(DIM('  :agents enable <name>    Enable a virtual agent'));
-          console.log(DIM('  :agents disable <name>   Disable a virtual agent'));
-          console.log(DIM('  :agents list virtual     List virtual agents only'));
-          console.log(DIM('  :agents list physical    List physical agents only'));
-          console.log('');
-        } else if (agentSubCmd === 'list') {
-          const filterType = agentParts[1] || 'all';
-          const opts: any = {};
-          if (filterType === 'virtual') opts.type = 'virtual';
-          else if (filterType === 'physical') opts.type = 'physical';
-          const list = listAgents(opts);
-          console.log('');
-          console.log(sectionHeader(`Agents (${filterType})`));
-          for (const a of list) {
-            const typeTag = a.type === 'virtual' ? DIM('[virtual]') : DIM('[physical]');
-            const status = a.enabled ? SUCCESS('on') : ERROR('off');
-            console.log(`    ${colorAgent(a.name)} ${typeTag} ${DIM(a.displayName)}  [${status}]`);
-          }
-          if (list.length === 0) console.log(`    ${DIM('(none)')}`);
-          console.log('');
-        } else if (agentSubCmd === 'info') {
-          const targetName = agentParts[1];
-          if (targetName) {
-            const agentDef = getAgent(targetName);
-            if (agentDef) {
-              console.log('');
-              console.log(sectionHeader(`Agent: ${String(agentDef.displayName)}`));
-              console.log(`  ${pc.bold('Name:')}      ${agentDef.name}`);
-              console.log(`  ${pc.bold('Type:')}      ${agentDef.type}`);
-              console.log(`  ${pc.bold('Label:')}     ${agentDef.label}`);
-              console.log(
-                `  ${pc.bold('Enabled:')}   ${agentDef.enabled ? SUCCESS('yes') : ERROR('no')}`,
-              );
-              if (agentDef.baseAgent) {
-                console.log(`  ${pc.bold('Base:')}      ${colorAgent(agentDef.baseAgent)}`);
-              }
-              if (agentDef.councilRole) {
-                console.log(`  ${pc.bold('Council:')}   ${agentDef.councilRole}`);
-              }
-              if (agentDef.strengths!.length > 0) {
-                console.log(`  ${pc.bold('Strengths:')} ${agentDef.strengths!.join(', ')}`);
-              }
-              if (agentDef.tags!.length > 0) {
-                console.log(`  ${pc.bold('Tags:')}      ${agentDef.tags!.join(', ')}`);
-              }
-              // Show task affinities sorted by score
-              const affinities = Object.entries(agentDef.taskAffinity).sort(
-                ([, a], [, b]) => b - a,
-              );
-              if (affinities.length > 0) {
-                console.log(`  ${pc.bold('Affinities:')}`);
-                for (const [type, score] of affinities) {
-                  const bar = '\u2588'.repeat(Math.round(score * 20));
-                  const pad = ' '.repeat(20 - Math.round(score * 20));
-                  console.log(
-                    `    ${type.padEnd(16)} ${DIM(bar)}${DIM(pad)} ${(score * 100).toFixed(0)}%`,
-                  );
-                }
-              }
-              if (agentDef.rolePrompt) {
-                console.log(`  ${pc.bold('Role Prompt:')}`);
-                const lines = agentDef.rolePrompt.split('\n').slice(0, 6);
-                for (const l of lines) console.log(`    ${DIM(l)}`);
-                if (agentDef.rolePrompt.split('\n').length > 6) console.log(`    ${DIM('...')}`);
-              }
-              console.log('');
-            } else {
-              console.log(`  ${ERROR('Unknown agent:')} ${targetName}`);
-            }
-          } else {
-            console.log(`  ${ERROR('Usage:')} :agents info <name>`);
-          }
-        } else if (agentSubCmd === 'enable' || agentSubCmd === 'disable') {
-          const targetName = agentParts[1];
-          if (targetName) {
-            const agentDef = getAgent(targetName);
-            if (!agentDef) {
-              console.log(`  ${ERROR('Unknown agent:')} ${targetName}`);
-            } else if (agentDef.type === 'physical') {
-              console.log(`  ${ERROR('Cannot')} ${agentSubCmd} physical agents.`);
-            } else {
-              setAgentEnabled(targetName, agentSubCmd === 'enable');
-              console.log(`  ${SUCCESS('\u2713')} ${colorAgent(targetName)} ${agentSubCmd}d`);
-            }
-          } else {
-            console.log(`  ${ERROR('Usage:')} :agents ${agentSubCmd} <name>`);
-          }
-        } else if (agentSubCmd === 'add') {
-          const { runAgentsWizard } = await import('./hydra-agents-wizard.ts');
-          await runAgentsWizard(rl);
-        } else if (agentSubCmd === 'remove') {
-          const targetName = agentParts[1]?.toLowerCase();
-          if (targetName) {
-            const cfg = loadHydraConfig();
-            const before = cfg.agents.customAgents;
-            const customAgents = before.filter((a) => a.name !== targetName);
-            if (customAgents.length === before.length) {
-              console.log(`  ${ERROR('Not found:')} "${targetName}" is not a custom agent`);
-            } else {
-              saveHydraConfig({ agents: { ...cfg.agents, customAgents } });
-              console.log(
-                `  ${SUCCESS('\u2713')} Removed agent "${targetName}" from config (restart to take effect)`,
-              );
-            }
-          } else {
-            console.log(`  ${ERROR('Usage:')} :agents remove <name>`);
-          }
-        } else if (agentSubCmd === 'test') {
-          const targetName = agentParts[1]?.toLowerCase();
-          if (targetName) {
-            const agentDef = getAgent(targetName);
-            if (agentDef) {
-              console.log(`  Testing agent "${targetName}"...`);
-              try {
-                const result = await executeAgent(targetName, 'Say "hello" in one sentence.');
-                if (result.ok) {
-                  console.log(
-                    `  ${SUCCESS('OK')} ${DIM(result.output.slice(0, 200) || '(empty output)')}`,
-                  );
-                } else {
-                  console.log(
-                    `  ${ERROR('FAIL')} ${String(result.errorCategory)}: ${result.stderr.slice(0, 200)}`,
-                  );
-                }
-              } catch (err: unknown) {
-                console.log(`  ${ERROR('ERROR')} ${(err as Error).message}`);
-              }
-            } else {
-              console.log(`  ${ERROR('Not found:')} agent "${targetName}" not in registry`);
-            }
-          } else {
-            console.log(`  ${ERROR('Usage:')} :agents test <name>`);
-          }
-        } else {
-          console.log(`  ${ERROR('Unknown subcommand:')} ${agentSubCmd}`);
-          console.log(
-            `  ${DIM('Usage: :agents [add|remove|test|info|list|enable|disable] [name]')}`,
-          );
-        }
-
-        rl.prompt();
-        return;
-      }
-
-      // ── Doctor Commands ──────────────────────────────────────────────────
-      if (line === ':doctor' || line.startsWith(':doctor ')) {
-        const doctorArg = line.slice(':doctor'.length).trim();
-        try {
-          const { initDoctor, isDoctorEnabled, getDoctorStats, getDoctorLog } =
-            await import('./hydra-doctor.ts');
-          initDoctor();
-
-          if (!doctorArg || doctorArg === 'stats') {
-            // Show stats + last 10 log entries
-            console.log('');
-            console.log(sectionHeader('Doctor'));
-            const enabled = isDoctorEnabled();
-            console.log(label('Status', enabled ? SUCCESS('enabled') : ERROR('disabled')));
-            const stats = getDoctorStats();
-            console.log(
-              label(
-                'Session',
-                `${String(stats.total)} diagnoses — ${String(stats.fixes)} fixes, ${String(stats.tickets)} tickets, ${String(stats.investigations)} investigations, ${String(stats.ignored)} ignored`,
-              ),
-            );
-            const recent =
-              /** @type {Array<{severity?: string, ts?: number|string, action?: string, pipeline?: string, explanation?: string}>} */ getDoctorLog(
-                10,
-              );
-            if (recent.length > 0) {
-              console.log('');
-              console.log(DIM('  Recent diagnoses:'));
-              for (const e of recent as any) {
-                let sev: string;
-                if (e['severity'] === 'critical' || e['severity'] === 'high') {
-                  sev = ERROR(e['severity']);
-                } else if (e['severity'] === 'medium') {
-                  sev = WARNING(e['severity']);
-                } else {
-                  sev = DIM(e['severity'] ?? '');
-                }
-                const ts = e['ts'] ? new Date(e['ts']).toLocaleTimeString() : '';
-                console.log(
-                  `    ${DIM(ts)} ${sev} ${pc.white(e['action'] ?? '')} ${DIM(e['pipeline'] ?? '')} ${String((e['explanation'] ?? '').slice(0, 60))}`,
-                );
-              }
-            } else {
-              console.log(`  ${DIM('No diagnostic entries yet')}`);
-            }
-            console.log('');
-          } else if (doctorArg === 'log') {
-            // Show last 25 entries
-            const entries =
-              /** @type {Array<{severity?: string, ts?: number|string, action?: string, pipeline?: string, explanation?: string, recurring?: boolean}>} */ getDoctorLog(
-                25,
-              );
-            console.log('');
-            console.log(sectionHeader('Doctor Log'));
-            if (entries.length === 0) {
-              console.log(`  ${DIM('No diagnostic entries yet')}`);
-            } else {
-              for (const e of entries as any) {
-                let sev: string;
-                if (e['severity'] === 'critical' || e['severity'] === 'high') {
-                  sev = ERROR(e['severity'].padEnd(8));
-                } else if (e['severity'] === 'medium') {
-                  sev = WARNING(e['severity'].padEnd(8));
-                } else {
-                  sev = DIM((e['severity'] ?? '').padEnd(8));
-                }
-                const ts = e['ts'] ? new Date(e['ts']).toLocaleString() : '';
-                console.log(
-                  `  ${DIM(ts)} ${sev} [${String(e['action'])}] ${String(e['pipeline'] ?? '')}: ${String((e['explanation'] ?? '').slice(0, 80))}`,
-                );
-                if (e['recurring']) console.log(`    ${WARNING('↻ recurring')}`);
-              }
-            }
-            console.log('');
-          } else if (doctorArg === 'fix') {
-            // Auto-detect and fix issues via action pipeline
-            try {
-              const { runActionPipeline } = await import('./hydra-action-pipeline.ts');
-              const {
-                scanDoctorLog,
-                scanDaemonIssues,
-                scanErrorActivity,
-                enrichWithDiagnosis,
-                executeFixAction,
-              } = await import('./hydra-doctor.ts');
-              const { getOutputContext } = await import('./hydra-output-history.ts');
-
-              await runActionPipeline(rl, {
-                title: 'Doctor Fix',
-                scanners: [
-                  () => scanDoctorLog(),
-                  () => scanDaemonIssues(baseUrl),
-                  () => scanErrorActivity(),
-                ],
-                enrich: (items) => enrichWithDiagnosis(items, getOutputContext()),
-                preSelectFilter: (item) =>
-                  item['severity'] === 'critical' || item['severity'] === 'high',
-                executeFn: (item) =>
-                  executeFixAction(item, { projectRoot: config.projectRoot, rl }),
-                projectRoot: config.projectRoot,
-                baseUrl,
-              });
-            } catch (err: unknown) {
-              console.log(`  ${ERROR((err as Error).message)}`);
-            }
-          } else if (doctorArg === 'config') {
-            // Compare user hydra.config.json against DEFAULT_CONFIG
-            console.log('');
-            console.log(sectionHeader('Doctor Config'));
-            console.log(`  ${DIM('Comparing hydra.config.json against DEFAULT_CONFIG...')}`);
-            console.log('');
-            try {
-              const fs = await import('node:fs');
-              const configFilePath = path.join(HYDRA_RUNTIME_ROOT, 'hydra.config.json');
-              let rawUser = {};
-              try {
-                rawUser = JSON.parse(fs.default.readFileSync(configFilePath, 'utf8'));
-              } catch {
-                console.log(
-                  `  ${WARNING('Could not read hydra.config.json — using empty config for comparison')}`,
-                );
-              }
-              const { missing, stale, typeMismatches } = diffConfig(rawUser);
-
-              // ── Stale keys ────────────────────────────────────────────────
-              if (stale.length === 0) {
-                console.log(`  ${SUCCESS('✓')} No stale keys found`);
-              } else {
-                console.log(
-                  `  ${ERROR('✗')} ${pc.bold('Stale keys')} ${DIM('(in your config but not in DEFAULT_CONFIG — may be from an old version):')}`,
-                );
-                for (const item of stale) {
-                  const preview = JSON.stringify(item.userValue);
-                  const truncated = preview.length > 60 ? `${preview.slice(0, 57)}...` : preview;
-                  console.log(
-                    `    ${ERROR('•')} ${pc.white(item.path.padEnd(32))} ${DIM(`user: ${truncated}`)}`,
-                  );
-                }
-                console.log(
-                  `  ${DIM('  → Consider removing these keys or updating your config.')}`,
-                );
-              }
-              console.log('');
-
-              // ── Type mismatches ───────────────────────────────────────────
-              if (typeMismatches.length === 0) {
-                console.log(`  ${SUCCESS('✓')} No type mismatches`);
-              } else {
-                console.log(
-                  `  ${ERROR('✗')} ${pc.bold('Type mismatches')} ${DIM('(key exists in both but types differ):')}`,
-                );
-                for (const item of typeMismatches) {
-                  console.log(
-                    `    ${ERROR('•')} ${pc.white(item.path.padEnd(32))} expected: ${WARNING(item.expectedType.padEnd(8))}  got: ${ERROR(item.gotType)}`,
-                  );
-                }
-                console.log(
-                  `  ${DIM('  → These may cause unexpected behaviour — check your config values.')}`,
-                );
-              }
-              console.log('');
-
-              // ── Missing keys ──────────────────────────────────────────────
-              if (missing.length === 0) {
-                console.log(`  ${SUCCESS('✓')} No missing keys (your config is fully specified)`);
-              } else {
-                console.log(
-                  `  ${WARNING('⚠')} ${pc.bold('Missing keys')} ${DIM('(in DEFAULT_CONFIG but not in your file — defaults will be used, no action needed):')}`,
-                );
-                for (const item of missing) {
-                  const preview = JSON.stringify(item.defaultValue);
-                  const truncated = preview.length > 60 ? `${preview.slice(0, 57)}...` : preview;
-                  console.log(
-                    `    ${DIM('•')} ${pc.white(item.path.padEnd(32))} ${DIM(`default: ${truncated}`)}`,
-                  );
-                }
-                console.log(
-                  `  ${DIM('  → These are informational only. Hydra fills them in automatically.')}`,
-                );
-              }
-              console.log('');
-            } catch (err: unknown) {
-              console.log(`  ${ERROR((err as Error).message)}`);
-            }
-          } else if (doctorArg.startsWith('diagnose ')) {
-            const errorText = doctorArg.slice('diagnose '.length).trim();
-            if (errorText) {
-              console.log('');
-              console.log(sectionHeader('Investigating'));
-              const spinner = createSpinner('Diagnosing failure...', { style: 'orbital' });
-              try {
-                const inv = await import('./hydra-investigator.ts');
-                if (inv.isInvestigatorAvailable()) {
-                  inv.initInvestigator();
-                  const result = await inv.investigate({
-                    phase: 'manual',
-                    error: errorText,
-                    context: errorText,
-                    attemptNumber: 1,
-                  });
-                  spinner.stop();
-
-                  // Display diagnosis
-                  let diagColor: (s: string) => string;
-                  if (result.diagnosis === 'fundamental') {
-                    diagColor = ERROR;
-                  } else if (result.diagnosis === 'fixable') {
-                    diagColor = WARNING;
-                  } else {
-                    diagColor = DIM;
-                  }
-                  console.log(label('Type', diagColor(result.diagnosis)));
-                  console.log(label('Root cause', pc.white(result.rootCause || 'unknown')));
-                  console.log(label('Explanation', pc.white(result.explanation || 'none')));
-                  if (result.corrective) {
-                    console.log(label('Corrective', ACCENT(result.corrective)));
-                  }
-                  const rec = result.retryRecommendation;
-                  console.log(label('Retry', rec.retryPhase ? SUCCESS('yes') : DIM('no')));
-                  if (rec.retryAgent) console.log(label('Alt agent', colorAgent(rec.retryAgent)));
-
-                  // Also triage into follow-ups
-                  try {
-                    const { diagnose } = await import('./hydra-doctor.ts');
-                    await diagnose({
-                      pipeline: 'manual',
-                      phase: 'manual',
-                      error: errorText,
-                      context: errorText,
-                    });
-                    console.log(`  ${DIM('Triaged into follow-ups (suggestion/KB)')}`);
-                  } catch {
-                    /* best effort */
-                  }
-                } else {
-                  spinner.stop();
-                  console.log(`  ${ERROR('Investigator unavailable')} — OPENAI_API_KEY required`);
-                }
-              } catch (err: unknown) {
-                spinner.stop();
-                console.log(`  ${ERROR((err as Error).message)}`);
-              }
-              console.log('');
-            } else {
-              console.log(`  ${ERROR('Usage:')} :doctor diagnose <error text>`);
-            }
-          } else {
-            console.log(`  ${ERROR('Unknown subcommand:')} ${doctorArg}`);
-            console.log(`  ${DIM('Usage: :doctor [stats|log|fix|config|diagnose <text>]')}`);
-          }
-        } catch (err: unknown) {
-          console.log(`  ${ERROR((err as Error).message)}`);
-        }
-        rl.prompt();
-        return;
-      }
-
-      // ── Knowledge Base Commands ────────────────────────────────────────────
-      if (line === ':kb' || line.startsWith(':kb ')) {
-        const kbArg = line.slice(':kb'.length).trim();
-        try {
-          const { loadKnowledgeBase, searchEntries, getStats } =
-            await import('./hydra-knowledge.ts');
-          const evolveDir = path.join(config.projectRoot, 'docs', 'coordination', 'evolve');
-          const kb = loadKnowledgeBase(evolveDir);
-
-          if (kbArg) {
-            // Search entries
-            const results = searchEntries(kb, kbArg);
-            console.log('');
-            console.log(sectionHeader(`KB Search: "${kbArg}"`));
-            if (results.length === 0) {
-              console.log(`  ${DIM('No matching entries')}`);
-            } else {
-              for (const e of results.slice(0, 15)) {
-                let appColor: (s: string) => string;
-                if (e.applicability === 'high') {
-                  appColor = SUCCESS;
-                } else if (e.applicability === 'medium') {
-                  appColor = WARNING;
-                } else {
-                  appColor = DIM;
-                }
-                console.log(
-                  `  ${DIM(e.id ?? '?')} ${appColor((e.applicability ?? '?').padEnd(6))} ${DIM(e.area ?? '')}`,
-                );
-                console.log(`    ${(e.finding ?? '').slice(0, 100)}`);
-                if (e.learnings) console.log(`    ${DIM(`→ ${e.learnings.slice(0, 80)}`)}`);
-              }
-              if (results.length > 15) {
-                console.log(`  ${DIM(`... and ${String(results.length - 15)} more`)}`);
-              }
-            }
-            console.log('');
-          } else {
-            // Stats + 10 most recent entries
-            console.log('');
-            console.log(sectionHeader('Knowledge Base'));
-            const stats = getStats(kb) as any;
-            console.log(
-              label('Entries', pc.white(String(stats.totalEntries ?? kb.entries.length ?? 0))),
-            );
-            if (stats.byArea && Object.keys(stats.byArea).length > 0) {
-              const areas = Object.entries(stats.byArea)
-                .sort(([, a], [, b]) => (b as number) - (a as number))
-                .slice(0, 5);
-              console.log(
-                label('Top areas', areas.map(([a, c]) => `${a} (${String(c)})`).join(', ')),
-              );
-            }
-            console.log('');
-            const recent = kb.entries.slice(-10).reverse();
-            if (recent.length > 0) {
-              console.log(DIM('  Recent entries:'));
-              for (const e of recent) {
-                let appColor: (s: string) => string;
-                if (e.applicability === 'high') {
-                  appColor = SUCCESS;
-                } else if (e.applicability === 'medium') {
-                  appColor = WARNING;
-                } else {
-                  appColor = DIM;
-                }
-                console.log(
-                  `    ${DIM(e.id ?? '?')} ${appColor((e.applicability ?? '?').padEnd(6))} ${DIM(e.area ?? '')} ${(e.finding ?? '').slice(0, 70)}`,
-                );
-              }
-            } else {
-              console.log(
-                `  ${DIM('Knowledge base is empty — run :evolve to accumulate learnings')}`,
-              );
-            }
-            console.log('');
-          }
-        } catch (err: unknown) {
-          console.log(`  ${ERROR((err as Error).message)}`);
-        }
-        rl.prompt();
+        await handleAgentsCommand(
+          {
+            baseUrl,
+            agents,
+            config,
+            rl,
+            HYDRA_ROOT,
+            getLoopMode: () => mode,
+            setLoopMode: (m) => {
+              mode = m;
+            },
+            initStatusBar,
+            destroyStatusBar,
+            drawStatusBar,
+          },
+          line.slice(':agents'.length).trim(),
+        );
         return;
       }
 
       // ── Cleanup Command ──────────────────────────────────────────────────
       if (line === ':cleanup') {
-        try {
-          const { runActionPipeline } = await import('./hydra-action-pipeline.ts');
-          const {
-            scanArchivableTasks,
-            scanOldHandoffs,
-            scanStaleBranches,
-            scanStaleTasks,
-            scanAbandonedSuggestions,
-            scanOldCheckpoints,
-            scanOldArtifacts,
-            scanStaleTaskWorktrees,
-            enrichCleanupWithSitrep,
-            executeCleanupAction,
-          } = await import('./hydra-cleanup.ts');
-
-          await runActionPipeline(rl, {
-            title: 'Cleanup',
-            scanners: [
-              () => scanArchivableTasks(baseUrl),
-              () => scanOldHandoffs(baseUrl),
-              () => scanStaleBranches(config.projectRoot),
-              () => scanStaleTasks(baseUrl),
-              () => scanAbandonedSuggestions(),
-              () => scanOldCheckpoints(config.projectRoot),
-              () => scanOldArtifacts(config.projectRoot),
-              () => scanStaleTaskWorktrees(config.projectRoot),
-            ],
-            enrich: (items) =>
-              enrichCleanupWithSitrep(items, { baseUrl, projectRoot: config.projectRoot }),
-            preSelectFilter: (item) => item.category === 'archive',
-            executeFn: (item) =>
-              executeCleanupAction(item, { baseUrl, projectRoot: config.projectRoot }),
-            projectRoot: config.projectRoot,
-            baseUrl,
-          });
-        } catch (err: unknown) {
-          console.log(`  ${ERROR((err as Error).message)}`);
-        }
-        rl.prompt();
-        return;
-      }
-
-      // ── Worker Commands ──────────────────────────────────────────────────
-      if (line === ':workers' || line.startsWith(':workers ')) {
-        const workerArgs = line.slice(':workers'.length).trim().toLowerCase();
-
-        if (!workerArgs) {
-          // Show status of all workers
-          console.log('');
-          console.log(sectionHeader('Agent Workers'));
-          if (workers.size === 0) {
-            console.log(`  ${DIM('No workers running. Dispatch a prompt to start workers.')}`);
-          } else {
-            for (const [name, w] of workers) {
-              let statusIcon: string;
-              if (w.status === 'working') {
-                statusIcon = WARNING('\u25CF');
-              } else if (w.status === 'idle') {
-                statusIcon = SUCCESS('\u25CB');
-              } else if (w.status === 'error') {
-                statusIcon = ERROR('\u25CF');
-              } else {
-                statusIcon = DIM('\u25CB');
-              }
-              const task = w.currentTask
-                ? `${pc.white(w.currentTask.taskId)} ${DIM(short(w.currentTask.title, 40))}`
-                : DIM('no task');
-              const up = w.uptime > 0 ? DIM(`  up ${formatUptime(w.uptime)}`) : '';
-              const perm = DIM(`  (${w.permissionMode})`);
-              console.log(
-                `  ${statusIcon} ${colorAgent(name)} ${pc.white(w.status)}  ${task}${up}${perm}`,
-              );
-            }
-          }
-          console.log('');
-          console.log(DIM('  :workers start [agent]   Start worker(s)'));
-          console.log(DIM('  :workers stop [agent]    Stop worker(s)'));
-          console.log(DIM('  :workers restart [agent] Restart worker(s)'));
-          console.log(DIM('  :workers mode <mode>     Change permission mode'));
-          console.log('');
-          rl.prompt();
-          return;
-        }
-
-        const parts = workerArgs.split(/\s+/);
-        const subCmd = parts[0];
-        const targetAgent = parts[1] || null;
-
-        if (subCmd === 'start') {
-          const toStart = targetAgent ? [targetAgent] : agents;
-          for (const a of toStart) {
-            if (!agents.includes(a)) {
-              console.log(`  ${ERROR('Unknown agent:')} ${a}`);
-              continue;
-            }
-            startAgentWorker(a, baseUrl, { rl });
-          }
-        } else if (subCmd === 'stop') {
-          const toStop = targetAgent ? [targetAgent] : [...workers.keys()];
-          for (const a of toStop) {
-            stopAgentWorker(a);
-            console.log(`  ${SUCCESS('\u2713')} ${colorAgent(a)} worker stopped`);
-          }
-        } else if (subCmd === 'restart') {
-          const toRestart = targetAgent ? [targetAgent] : [...workers.keys()];
-          for (const a of toRestart) {
-            stopAgentWorker(a);
-            startAgentWorker(a, baseUrl, { rl });
-          }
-        } else if (subCmd === 'mode') {
-          const newMode = parts[1];
-          if (!newMode || !['auto-edit', 'full-auto'].includes(newMode)) {
-            console.log(`  ${ERROR('Usage:')} :workers mode auto-edit | full-auto`);
-          } else {
-            for (const [, w] of workers) {
-              w.setPermissionMode(newMode);
-            }
-            console.log(
-              `  ${SUCCESS('\u2713')} Worker permission mode ${DIM('\u2192')} ${ACCENT(newMode)}`,
-            );
-          }
-        } else {
-          console.log(`  ${ERROR('Unknown subcommand:')} ${subCmd}`);
-          console.log(`  ${DIM('Usage: :workers [start|stop|restart|mode] [agent]')}`);
-        }
-
-        rl.prompt();
-        return;
-      }
-
-      if (line.startsWith(':watch ')) {
-        const watchAgent = line.slice(':watch '.length).trim().toLowerCase();
-        if (!watchAgent || !agents.includes(watchAgent)) {
-          console.log(`  ${ERROR('Usage:')} :watch <agent>  (${agents.join(', ')})`);
-          rl.prompt();
-          return;
-        }
-        setAgentExecMode(watchAgent, 'terminal');
-        launchAgentTerminals([watchAgent], baseUrl);
-        console.log(
-          `  ${DIM('Terminal opened for observation. Worker continues running in background.')}`,
-        );
-        rl.prompt();
-        return;
-      }
-
-      // ── GitHub Commands ──────────────────────────────────────────────────
-      if (line === ':github' || line.startsWith(':github ')) {
-        const ghArg = line.slice(':github'.length).trim().toLowerCase();
-
-        if (!ghArg) {
-          // Status dashboard
-          const installed = isGhAvailable();
-          console.log(
-            `  ${label('gh CLI')}      ${installed ? SUCCESS('installed') : ERROR('not found')}`,
-          );
-          if (installed) {
-            const authed = isGhAuthenticated();
-            console.log(
-              `  ${label('Auth')}        ${authed ? SUCCESS('authenticated') : WARNING('not authenticated — run: gh auth login')}`,
-            );
-            if (authed) {
-              const repo = detectRepo(config.projectRoot);
-              if (repo) {
-                console.log(
-                  `  ${label('Repo')}        ${SUCCESS(`${repo.owner}/${repo.repo}`)} ${DIM(`(default: ${repo.defaultBranch})`)}`,
-                );
-                const prs = listPRs({ cwd: config.projectRoot });
-                console.log(`  ${label('Open PRs')}    ${String(prs.length)}`);
-              } else {
-                console.log(
-                  `  ${label('Repo')}        ${WARNING('not detected (not a GitHub repo?)')}`,
-                );
-              }
-            }
-          }
-          const ghCfg = getGitHubConfig();
-          console.log(
-            `  ${label('Config')}      enabled=${String(ghCfg.enabled)}, draft=${String(ghCfg.draft)}, labels=[${ghCfg.labels.join(',')}]`,
-          );
-        } else if (ghArg === 'prs') {
-          if (!isGhAvailable()) {
-            console.log(`  ${ERROR('gh CLI not found.')} Install: https://cli.github.com`);
-            rl.prompt();
-            return;
-          }
-          const prs = listPRs({ cwd: config.projectRoot });
-          if (prs.length === 0) {
-            console.log(`  ${DIM('No open pull requests.')}`);
-          } else {
-            console.log(`  ${pc.bold(`Open PRs (${String(prs.length)}):`)}`);
-            for (const pr of prs) {
-              console.log(
-                `    ${ACCENT(`#${String(pr.number)}`)} ${String(pr.title)} ${DIM(`(${String(pr.headRefName)} by ${String(pr.author)})`)}`,
-              );
-            }
-          }
-        } else {
-          console.log(`  ${ERROR('Usage:')} :github [prs]`);
-        }
-
-        rl.prompt();
+        await handleCleanupCommand({
+          baseUrl,
+          agents,
+          config,
+          rl,
+          HYDRA_ROOT,
+          getLoopMode: () => mode,
+          setLoopMode: (m) => {
+            mode = m;
+          },
+          initStatusBar,
+          destroyStatusBar,
+          drawStatusBar,
+        });
         return;
       }
 
       if (line === ':pr' || line.startsWith(':pr ')) {
-        const prArgs = line.slice(':pr'.length).trim();
-        const prCmd = prArgs.split(/\s+/)[0]?.toLowerCase() || '';
-        const prRest = prArgs.slice(prCmd.length).trim();
-
-        if (!isGhAvailable()) {
-          console.log(`  ${ERROR('gh CLI not found.')} Install: https://cli.github.com`);
-          rl.prompt();
-          return;
-        }
-
-        if (prCmd === 'create') {
-          const branch = prRest || undefined;
-          console.log(`  ${DIM('Pushing branch and creating PR...')}`);
-          const result = pushBranchAndCreatePR({ cwd: config.projectRoot, branch });
-          if (result.ok) {
-            console.log(`  ${SUCCESS('PR created:')} ${String(result.url)}`);
-          } else {
-            console.log(`  ${ERROR('Failed:')} ${result.error ?? 'unknown error'}`);
-          }
-        } else if (prCmd === 'list') {
-          const prs = listPRs({ cwd: config.projectRoot });
-          if (prs.length === 0) {
-            console.log(`  ${DIM('No open pull requests.')}`);
-          } else {
-            console.log(`  ${pc.bold(`Open PRs (${String(prs.length)}):`)}`);
-            for (const pr of prs) {
-              console.log(
-                `    ${ACCENT(`#${String(pr.number)}`)} ${String(pr.title)} ${DIM(`(${String(pr.headRefName)} by ${String(pr.author)})`)}`,
-              );
-            }
-          }
-        } else if (prCmd === 'view') {
-          if (!prRest) {
-            console.log(`  ${ERROR('Usage:')} :pr view <number>`);
-            rl.prompt();
-            return;
-          }
-          const pr = getPR({ cwd: config.projectRoot, ref: prRest });
-          if (pr) {
-            console.log(`  ${ACCENT(`#${String(pr.number)}`)} ${String(pr.title)}`);
-            console.log(`  ${label('State')}       ${String(pr.state)}`);
-            console.log(
-              `  ${label('Branch')}      ${String(pr.headRefName)} → ${String(pr.baseRefName)}`,
-            );
-            console.log(
-              `  ${label('Author')}      ${String(pr.author?.login ?? pr.author ?? '?')}`,
-            );
-            console.log(
-              `  ${label('Changes')}     ${SUCCESS(`+${String(pr.additions ?? 0)}`)} ${ERROR(`-${String(pr.deletions ?? 0)}`)}`,
-            );
-            if (pr.url) console.log(`  ${label('URL')}         ${String(pr.url)}`);
-          } else {
-            console.log(`  ${ERROR('PR not found:')} ${prRest}`);
-          }
-        } else {
-          console.log(`  ${ERROR('Usage:')} :pr <create|list|view> [args]`);
-        }
-
-        rl.prompt();
-        return;
-      }
-
-      // ── Concierge (Chat) Commands ─────────────────────────────────────────
-      if (line === ':chat' || line.startsWith(':chat ')) {
-        const chatArg = line.slice(':chat'.length).trim().toLowerCase();
-
-        if (chatArg === 'off') {
-          conciergeActive = false;
-          setActiveMode(mode);
-          rl.setPrompt(normalPrompt);
-          console.log(`  ${SUCCESS('\u2713')} Concierge ${DIM('disabled')}`);
-          drawStatusBar();
-        } else if (chatArg === 'reset') {
-          resetConversation();
-          console.log(`  ${SUCCESS('\u2713')} Conversation history cleared`);
-        } else if (chatArg === 'stats') {
-          const cStats = getConciergeStats();
-          const ap = getActiveProvider();
-          console.log('');
-          console.log(sectionHeader('Concierge Stats'));
-          console.log(label('Provider', pc.white(ap ? ap.provider : 'none')));
-          console.log(label('Model', pc.white(ap ? ap.model : getConciergeConfig().model)));
-          if (ap?.isFallback) console.log(label('Note', WARNING('Using fallback provider')));
-          console.log(label('Turns', pc.white(String(cStats.turns))));
-          console.log(label('Prompt tokens', pc.white(String(cStats.promptTokens))));
-          console.log(label('Completion tokens', pc.white(String(cStats.completionTokens))));
-          console.log(
-            label('Total tokens', pc.white(String(cStats.promptTokens + cStats.completionTokens))),
-          );
-          console.log('');
-        } else if (chatArg === 'model' || chatArg.startsWith('model ')) {
-          const modelName = chatArg.slice('model'.length).trim();
-          if (modelName) {
-            // Switch model
-            try {
-              switchConciergeModel(modelName);
-              const ap = getActiveProvider();
-              rl.setPrompt(buildConciergePrompt());
-              console.log(
-                `  ${SUCCESS('\u2713')} Concierge model switched to ${ACCENT(ap!.model)} ${DIM(`(${ap!.provider})`)}`,
-              );
-            } catch (err: unknown) {
-              console.log(`  ${ERROR('Failed to switch model:')} ${(err as Error).message}`);
-            }
-          } else {
-            // Show active model + fallback chain
-            const ap = getActiveProvider();
-            const chain = buildFallbackChain();
-            console.log('');
-            console.log(sectionHeader('Concierge Model'));
-            console.log(
-              label(
-                'Active',
-                pc.white(
-                  ap
-                    ? `${ap.provider}:${ap.model}${ap.isFallback ? ' (fallback)' : ''}`
-                    : 'none yet',
-                ),
-              ),
-            );
-            console.log(label('Chain', ''));
-            for (const entry of chain) {
-              const status = entry.available ? SUCCESS('\u2713') : ERROR('\u2717');
-              console.log(`    ${status} ${entry.provider}: ${pc.white(entry.model)}`);
-            }
-            console.log('');
-          }
-        } else if (chatArg === 'export') {
-          try {
-            const fs = await import('node:fs');
-            const exportData = exportConversation();
-            const coordDir = path.join(config.projectRoot, 'docs', 'coordination');
-            fs.mkdirSync(coordDir, { recursive: true });
-            const timestamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
-            const exportPath = path.join(coordDir, `concierge_export_${timestamp}.json`);
-            fs.writeFileSync(exportPath, `${JSON.stringify(exportData, null, 2)}\n`, 'utf8');
-            console.log(
-              `  ${SUCCESS('\u2713')} Conversation exported to ${DIM(path.relative(config.projectRoot, exportPath))}`,
-            );
-          } catch (err: unknown) {
-            console.log(`  ${ERROR('Export failed:')} ${(err as Error).message}`);
-          }
-        } else {
-          // Toggle
-          if (!isConciergeAvailable()) {
-            console.log(
-              `  ${ERROR('Concierge unavailable')} — set an API key (OPENAI_API_KEY, ANTHROPIC_API_KEY, or GEMINI_API_KEY)`,
-            );
-            rl.prompt();
-            return;
-          }
-          conciergeActive = !conciergeActive;
-          if (conciergeActive) {
-            setActiveMode('chat');
-            rl.setPrompt(buildConciergePrompt());
-            showConciergeWelcome();
-            console.log(
-              `  ${SUCCESS('\u2713')} Concierge ${ACCENT('enabled')} ${DIM(`(${getConciergeModelLabel()})`)}`,
-            );
-          } else {
-            setActiveMode(mode);
-            rl.setPrompt(normalPrompt);
-            console.log(`  ${SUCCESS('\u2713')} Concierge ${DIM('disabled')}`);
-          }
-          drawStatusBar();
-        }
-
-        rl.prompt();
-        return;
-      }
-
-      // ── Actualize Commands ───────────────────────────────────────────────
-      if (line === ':actualize' || line.startsWith(':actualize ')) {
-        const actualizeArg = line.slice(':actualize'.length).trim().toLowerCase();
-
-        const reviewScript = path.join(HYDRA_ROOT, 'lib', 'hydra-actualize-review.ts');
-        const runScript = path.join(HYDRA_ROOT, 'lib', 'hydra-actualize.ts');
-
-        if (actualizeArg === 'status') {
-          const child = spawnHydraNode(reviewScript, ['status'], {
-            cwd: config.projectRoot,
-            stdio: 'inherit',
-            shell: process.platform === 'win32',
-          });
-          child.on('close', () => {
-            rl.prompt();
-          });
-          return;
-        }
-
-        if (actualizeArg === 'review') {
-          const cwd = config.projectRoot;
-          rl.pause();
-          destroyStatusBar();
-          const child = spawnHydraNode(reviewScript, ['review'], {
-            cwd,
-            stdio: 'inherit',
-            shell: process.platform === 'win32',
-          });
-          child.on('close', () => {
-            initStatusBar(agents);
-            rl.resume();
-            rl.prompt();
-          });
-          return;
-        }
-
-        if (actualizeArg === 'clean') {
-          const child = spawnHydraNode(reviewScript, ['clean'], {
-            cwd: config.projectRoot,
-            stdio: 'inherit',
-            shell: process.platform === 'win32',
-          });
-          child.on('close', () => {
-            rl.prompt();
-          });
-          return;
-        }
-
-        const isDryRun = actualizeArg === 'dry-run';
-        const cfg = loadHydraConfig();
-        const baseBranch = cfg.evolve?.baseBranch ?? cfg.nightly?.baseBranch ?? 'dev';
-        const cwd = config.projectRoot;
-
-        // Pre-flight: must be on base branch
-        const curBranch = spawnSync('git', ['rev-parse', '--abbrev-ref', 'HEAD'], {
-          cwd,
-          encoding: 'utf8',
-        }).stdout.trim();
-        if (curBranch !== baseBranch) {
-          const brExists =
-            spawnSync('git', ['rev-parse', '--verify', baseBranch], { cwd, encoding: 'utf8' })
-              .status === 0;
-          if (!brExists) {
-            console.log(`  ${ACCENT(`Creating '${baseBranch}' branch from '${curBranch}'...`)}`);
-            spawnSync('git', ['branch', baseBranch], { cwd });
-          }
-          console.log(`  ${ACCENT(`Switching from '${curBranch}' to '${baseBranch}'...`)}`);
-          const sw = spawnSync('git', ['checkout', baseBranch], { cwd, encoding: 'utf8' });
-          if (sw.status !== 0) {
-            console.log(`  ${ERROR(`Failed to switch branch: ${(sw.stderr || '').trim()}`)}`);
-            rl.prompt();
-            return;
-          }
-        }
-
-        // Pre-flight: clean working tree (offer auto-commit)
-        const status = spawnSync('git', ['status', '--porcelain'], {
-          cwd,
-          encoding: 'utf8',
-        }).stdout.trim();
-        if (status) {
-          const confirm = (await promptChoice(rl, {
-            message: 'Working tree is not clean. Auto-commit before actualize?',
-            choices: [
-              { label: 'Yes — commit all changes', value: 'yes' },
-              { label: 'No — abort', value: 'no' },
-            ],
-            defaultIndex: 0,
-            timeout: 30_000,
-          })) as any;
-          if (confirm.value !== 'yes') {
-            console.log(`  ${WARNING('Aborted — commit or stash changes first.')}`);
-            rl.prompt();
-            return;
-          }
-          const ts = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
-          spawnSync('git', ['add', '-A'], { cwd });
-          spawnSync('git', ['commit', '-m', `chore: auto-commit before actualize run ${ts}`], {
-            cwd,
-          });
-          console.log(`  ${SUCCESS('\u2713')} Changes committed.`);
-        }
-
-        const actualizeArgs = [runScript, `project=${cwd}`];
-        if (isDryRun) actualizeArgs.push('--dry-run');
-
-        if (!isDryRun) {
-          const modeChoice = (await promptChoice(rl, {
-            message: 'Actualize intensity?',
-            context: { default: 'balanced' },
-            choices: [
-              {
-                label: 'Balanced (Recommended)',
-                value: 'balanced',
-                description: 'Good default: moderate time/tasks, discovery on',
-              },
-              { label: 'Quick', value: 'quick', description: 'Fewer tasks, shorter run' },
-              { label: 'Deep', value: 'deep', description: 'More tasks, longer run' },
-            ],
-            defaultIndex: 0,
-            timeout: 60_000,
-          })) as any;
-
-          if (modeChoice.value === 'quick') actualizeArgs.push('max-tasks=3', 'max-hours=1');
-          else if (modeChoice.value === 'deep') actualizeArgs.push('max-tasks=8', 'max-hours=6');
-
-          const discoveryChoice = (await promptChoice(rl, {
-            message: 'Enable AI discovery? (agent suggests improvement tasks)',
-            context: { default: 'on' },
-            choices: [
-              { label: 'Yes — discover + scan', value: 'yes' },
-              { label: 'No — scan only', value: 'no' },
-            ],
-            defaultIndex: 0,
-            timeout: 20_000,
-          })) as any;
-          if (discoveryChoice.value === 'no') actualizeArgs.push('--no-discovery');
-
-          // Let the user choose tasks if they want
-          const selectChoice = (await promptChoice(rl, {
-            message: 'Select tasks interactively?',
-            context: { default: 'yes' },
-            choices: [
-              {
-                label: 'Yes (Recommended)',
-                value: 'yes',
-                description: 'Pick tasks before execution',
-              },
-              { label: 'No', value: 'no', description: 'Run top-ranked tasks automatically' },
-            ],
-            defaultIndex: 0,
-            timeout: 20_000,
-          })) as any;
-          if (selectChoice.value === 'yes') actualizeArgs.push('--interactive');
-        }
-
-        const runLabel = isDryRun ? 'actualize dry-run' : 'actualize run';
-        console.log(`  ${ACCENT(`Launching ${runLabel}...`)}`);
-        rl.pause();
-        destroyStatusBar();
-        const child = spawnHydraNode(actualizeArgs[0], actualizeArgs.slice(1), {
-          cwd,
-          stdio: 'inherit',
-          shell: process.platform === 'win32',
-        });
-        child.on('close', (code) => {
-          initStatusBar(agents);
-          rl.resume();
-          if (code === 0) {
-            console.log(
-              `  ${SUCCESS('\u2713')} Actualize ${isDryRun ? 'dry-run' : 'run'} complete`,
-            );
-          } else {
-            console.log(`  ${ERROR(`Actualize exited with code ${String(code)}`)}`);
-          }
-          rl.prompt();
-        });
+        await handlePrCommand(
+          {
+            baseUrl,
+            agents,
+            config,
+            rl,
+            HYDRA_ROOT,
+            getLoopMode: () => mode,
+            setLoopMode: (m) => {
+              mode = m;
+            },
+            initStatusBar,
+            destroyStatusBar,
+            drawStatusBar,
+          },
+          line.slice(':pr'.length).trim(),
+        );
         return;
       }
 
       // ── Nightly Commands ─────────────────────────────────────────────────
       if (line === ':nightly' || line.startsWith(':nightly ')) {
-        const nightlyArg = line.slice(':nightly'.length).trim().toLowerCase();
-
-        if (nightlyArg === 'status') {
-          const reviewScript = path.join(HYDRA_ROOT, 'lib', 'hydra-nightly-review.ts');
-          const child = spawnHydraNode(reviewScript, ['status'], {
-            cwd: config.projectRoot,
-            stdio: 'inherit',
-            shell: process.platform === 'win32',
-          });
-          child.on('close', () => {
-            rl.prompt();
-          });
-          return;
-        }
-
-        if (nightlyArg === 'review') {
-          const cwd = config.projectRoot;
-          rl.pause();
-          destroyStatusBar();
-          const reviewScript = path.join(HYDRA_ROOT, 'lib', 'hydra-nightly-review.ts');
-          const child = spawnHydraNode(reviewScript, ['review'], {
-            cwd,
-            stdio: 'inherit',
-            shell: process.platform === 'win32',
-          });
-          child.on('close', () => {
-            initStatusBar(agents);
-            rl.resume();
-            rl.prompt();
-          });
-          return;
-        }
-
-        if (nightlyArg === 'clean') {
-          const reviewScript = path.join(HYDRA_ROOT, 'lib', 'hydra-nightly-review.ts');
-          const child = spawnHydraNode(reviewScript, ['clean'], {
-            cwd: config.projectRoot,
-            stdio: 'inherit',
-            shell: process.platform === 'win32',
-          });
-          child.on('close', () => {
-            rl.prompt();
-          });
-          return;
-        }
-
-        // ── Launch nightly (with or without dry-run) ───────────────────────
-        const isDryRun = nightlyArg === 'dry-run';
-
-        // Interactive setup: mode, limits, discovery
-        const cfg = loadHydraConfig();
-        const nightlyCfg = cfg.nightly;
-        const baseBranch = nightlyCfg!.baseBranch ?? 'dev';
-        const cwd = config.projectRoot;
-
-        // Pre-flight: must be on base branch
-        const curBranch = spawnSync('git', ['rev-parse', '--abbrev-ref', 'HEAD'], {
-          cwd,
-          encoding: 'utf8',
-        }).stdout.trim();
-        if (curBranch !== baseBranch) {
-          const brExists =
-            spawnSync('git', ['rev-parse', '--verify', baseBranch], { cwd, encoding: 'utf8' })
-              .status === 0;
-          if (!brExists) {
-            console.log(`  ${ACCENT(`Creating '${baseBranch}' branch from '${curBranch}'...`)}`);
-            spawnSync('git', ['branch', baseBranch], { cwd });
-          }
-          console.log(`  ${ACCENT(`Switching from '${curBranch}' to '${baseBranch}'...`)}`);
-          const sw = spawnSync('git', ['checkout', baseBranch], { cwd, encoding: 'utf8' });
-          if (sw.status !== 0) {
-            console.log(`  ${ERROR(`Failed to switch branch: ${(sw.stderr || '').trim()}`)}`);
-            rl.prompt();
-            return;
-          }
-        }
-
-        // Pre-flight: clean working tree
-        const status = spawnSync('git', ['status', '--porcelain'], {
-          cwd,
-          encoding: 'utf8',
-        }).stdout.trim();
-        if (status) {
-          const confirm = (await promptChoice(rl, {
-            message: 'Working tree is not clean. Auto-commit before nightly?',
-            choices: [
-              { label: 'Yes \u2014 commit all changes', value: 'yes' },
-              { label: 'No \u2014 abort', value: 'no' },
-            ],
-            defaultIndex: 0,
-            timeout: 30_000,
-          })) as any;
-          if (confirm.value !== 'yes') {
-            console.log(`  ${WARNING('Aborted \u2014 commit or stash changes first.')}`);
-            rl.prompt();
-            return;
-          }
-          const ts = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
-          spawnSync('git', ['add', '-A'], { cwd });
-          spawnSync('git', ['commit', '-m', `chore: auto-commit before nightly run ${ts}`], {
-            cwd,
-          });
-          console.log(`  ${SUCCESS('\u2713')} Changes committed.`);
-        }
-
-        // Interactive setup prompts (skip for dry-run with no extra arg)
-        const nightlyArgs = [path.join(HYDRA_ROOT, 'lib', 'hydra-nightly.ts'), `project=${cwd}`];
-
-        if (isDryRun) {
-          nightlyArgs.push('--dry-run');
-        }
-
-        if (!isDryRun) {
-          // 1. Execution mode
-          const modeChoice = (await promptChoice(rl, {
-            message: 'Execution mode?',
-            context: { default: 'balanced' },
-            choices: [
-              {
-                label: 'Balanced',
-                value: 'balanced',
-                description: 'Default config: moderate budget & time limits',
-              },
-              {
-                label: 'Quick / Fast',
-                value: 'quick',
-                description: 'Fewer tasks, shorter timeout, economy models',
-              },
-              {
-                label: 'Deep / Thorough',
-                value: 'deep',
-                description: 'More tasks, longer timeout, high reasoning',
-              },
-              {
-                label: 'Auto / Intuitive',
-                value: 'auto',
-                description: 'Let agents switch tiers per-task complexity',
-              },
-            ],
-            defaultIndex: 0,
-            timeout: 60_000,
-          })) as any;
-
-          if (modeChoice.value === 'quick') {
-            nightlyArgs.push('max-tasks=3', 'max-hours=1');
-          } else if (modeChoice.value === 'deep') {
-            nightlyArgs.push('max-tasks=10', 'max-hours=8');
-          } else if (modeChoice.value === 'auto') {
-            // auto uses config defaults but enables discovery
-            nightlyArgs.push('max-tasks=7', 'max-hours=6');
-          }
-          // balanced = config defaults (no override)
-
-          // 2. Max tasks
-          let maxTasksDefault: string;
-          if (modeChoice.value === 'quick') {
-            maxTasksDefault = '3';
-          } else if (modeChoice.value === 'deep') {
-            maxTasksDefault = '10';
-          } else if (modeChoice.value === 'auto') {
-            maxTasksDefault = '7';
-          } else {
-            maxTasksDefault = String(nightlyCfg!.maxTasks ?? 5);
-          }
-
-          const tasksChoice = (await promptChoice(rl, {
-            message: `Max tasks to execute?`,
-            context: { default: maxTasksDefault },
-            choices: [
-              { label: `${maxTasksDefault} (default)`, value: maxTasksDefault },
-              { label: '3 (light)', value: '3' },
-              { label: '5 (moderate)', value: '5' },
-              { label: '10 (heavy)', value: '10' },
-            ],
-            defaultIndex: 0,
-            freeform: true,
-            timeout: 30_000,
-          })) as any;
-          const maxTasks = Number.parseInt(tasksChoice.value, 10);
-          if (!Number.isNaN(maxTasks) && maxTasks > 0) {
-            // Remove any previous max-tasks from mode preset
-            const idx = nightlyArgs.findIndex((a) => a.startsWith('max-tasks='));
-            if (idx !== -1) nightlyArgs.splice(idx, 1);
-            nightlyArgs.push(`max-tasks=${String(maxTasks)}`);
-          }
-
-          // 3. Max hours
-          let maxHoursDefault: string;
-          if (modeChoice.value === 'quick') {
-            maxHoursDefault = '1';
-          } else if (modeChoice.value === 'deep') {
-            maxHoursDefault = '8';
-          } else if (modeChoice.value === 'auto') {
-            maxHoursDefault = '6';
-          } else {
-            maxHoursDefault = String(nightlyCfg!.maxHours ?? 4);
-          }
-
-          const hoursChoice = (await promptChoice(rl, {
-            message: `Max hours?`,
-            context: { default: maxHoursDefault },
-            choices: [
-              { label: `${maxHoursDefault}h (default)`, value: maxHoursDefault },
-              { label: '1h (quick)', value: '1' },
-              { label: '4h (standard)', value: '4' },
-              { label: '8h (overnight)', value: '8' },
-            ],
-            defaultIndex: 0,
-            freeform: true,
-            timeout: 30_000,
-          })) as any;
-          const maxHours = Number.parseFloat(hoursChoice.value);
-          if (!Number.isNaN(maxHours) && maxHours > 0) {
-            const idx = nightlyArgs.findIndex((a) => a.startsWith('max-hours='));
-            if (idx !== -1) nightlyArgs.splice(idx, 1);
-            nightlyArgs.push(`max-hours=${String(maxHours)}`);
-          }
-
-          // 4. AI discovery toggle
-          const discoveryChoice = (await promptChoice(rl, {
-            message: 'Enable AI discovery? (agent suggests improvement tasks)',
-            context: { default: nightlyCfg!.sources?.['aiDiscovery'] === false ? 'off' : 'on' },
-            choices: [
-              { label: 'Yes \u2014 discover + scan', value: 'yes' },
-              { label: 'No \u2014 scan only', value: 'no' },
-            ],
-            defaultIndex: nightlyCfg!.sources?.['aiDiscovery'] === false ? 1 : 0,
-            timeout: 20_000,
-          })) as any;
-          if (discoveryChoice.value === 'no') {
-            nightlyArgs.push('--no-discovery');
-          }
-
-          // Enable interactive task selection (nightly child inherits stdio)
-          nightlyArgs.push('--interactive');
-        }
-
-        // Launch
-        const runLabel = isDryRun ? 'nightly dry-run' : 'nightly run';
-        console.log(`  ${ACCENT(`Launching ${runLabel}...`)}`);
-        rl.pause();
-        destroyStatusBar();
-        const child = spawnHydraNode(nightlyArgs[0], nightlyArgs.slice(1), {
-          cwd,
-          stdio: 'inherit',
-          shell: process.platform === 'win32',
-        });
-        child.on('close', (code) => {
-          initStatusBar(agents);
-          rl.resume();
-          if (code === 0) {
-            console.log(`  ${SUCCESS('\u2713')} Nightly ${isDryRun ? 'dry-run' : 'run'} complete`);
-          } else {
-            console.log(`  ${ERROR(`Nightly exited with code ${String(code)}`)}`);
-          }
-          rl.prompt();
-        });
+        await handleNightlyCommand(
+          {
+            baseUrl,
+            agents,
+            config,
+            rl,
+            HYDRA_ROOT,
+            getLoopMode: () => mode,
+            setLoopMode: (m) => {
+              mode = m;
+            },
+            initStatusBar,
+            destroyStatusBar,
+            drawStatusBar,
+          },
+          line.slice(':nightly'.length).trim(),
+        );
         return;
       }
 
       // ── Evolve Commands ──────────────────────────────────────────────────
       if (line === ':evolve' || line.startsWith(':evolve ')) {
-        const evolveArg = line.slice(':evolve'.length).trim().toLowerCase();
-
-        if (evolveArg === 'status') {
-          // Show latest evolve report
-          const reviewScript = path.join(HYDRA_ROOT, 'lib', 'hydra-evolve-review.ts');
-          const child = spawnHydraNode(reviewScript, ['status'], {
-            cwd: config.projectRoot,
-            stdio: 'inherit',
-            shell: process.platform === 'win32',
-          });
-          child.on('close', () => {
-            rl.prompt();
-          });
-        } else if (evolveArg === 'knowledge') {
-          const reviewScript = path.join(HYDRA_ROOT, 'lib', 'hydra-evolve-review.ts');
-          const child = spawnHydraNode(reviewScript, ['knowledge'], {
-            cwd: config.projectRoot,
-            stdio: 'inherit',
-            shell: process.platform === 'win32',
-          });
-          child.on('close', () => {
-            rl.prompt();
-          });
-        } else if (evolveArg === 'resume' || evolveArg.startsWith('resume ')) {
-          // Resume incomplete/interrupted evolve session
-          const extraArgs = evolveArg.slice('resume'.length).trim();
-          const cfg = loadHydraConfig();
-          const baseBranch = cfg.evolve?.baseBranch ?? 'dev';
-          const cwd = config.projectRoot;
-
-          // Same pre-flight as regular :evolve
-          const curBranch = spawnSync('git', ['rev-parse', '--abbrev-ref', 'HEAD'], {
-            cwd,
-            encoding: 'utf8',
-          }).stdout.trim();
-          if (curBranch !== baseBranch) {
-            const branchExists =
-              spawnSync('git', ['rev-parse', '--verify', baseBranch], { cwd, encoding: 'utf8' })
-                .status === 0;
-            if (!branchExists) {
-              console.log(`  ${ACCENT(`Creating '${baseBranch}' branch from '${curBranch}'...`)}`);
-              spawnSync('git', ['branch', baseBranch], { cwd });
-            }
-            console.log(`  ${ACCENT(`Switching from '${curBranch}' to '${baseBranch}'...`)}`);
-            const sw = spawnSync('git', ['checkout', baseBranch], { cwd, encoding: 'utf8' });
-            if (sw.status !== 0) {
-              console.log(`  ${ERROR(`Failed to switch branch: ${(sw.stderr || '').trim()}`)}`);
-              rl.prompt();
-              return;
-            }
-          }
-
-          const status = spawnSync('git', ['status', '--porcelain'], {
-            cwd,
-            encoding: 'utf8',
-          }).stdout.trim();
-          if (status) {
-            const confirm = (await promptChoice(rl, {
-              message: 'Working tree is not clean. Auto-commit before evolve resume?',
-              choices: [
-                { label: 'Yes \u2014 commit all changes', value: 'yes' },
-                { label: 'No \u2014 abort', value: 'no' },
-              ],
-              defaultIndex: 0,
-              timeout: 30_000,
-            })) as any;
-            if (confirm.value !== 'yes') {
-              console.log(`  ${WARNING('Aborted \u2014 commit or stash changes first.')}`);
-              rl.prompt();
-              return;
-            }
-            const ts = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
-            spawnSync('git', ['add', '-A'], { cwd });
-            spawnSync('git', ['commit', '-m', `chore: auto-commit before evolve session ${ts}`], {
-              cwd,
-            });
-            console.log(`  ${SUCCESS('\u2713')} Changes committed.`);
-          }
-
-          console.log(`  ${ACCENT('Resuming evolve session...')}`);
-          rl.pause();
-          destroyStatusBar();
-          const evolveScript = path.join(HYDRA_ROOT, 'lib', 'hydra-evolve.ts');
-          const evolveArgs = [evolveScript, `project=${cwd}`, 'resume=1'];
-          if (extraArgs) {
-            evolveArgs.push(...extraArgs.split(/\s+/).filter(Boolean));
-          }
-          const child = spawnHydraNode(evolveArgs[0], evolveArgs.slice(1), {
-            cwd,
-            stdio: 'inherit',
-            shell: process.platform === 'win32',
-          });
-          child.on('close', (code) => {
-            initStatusBar(agents);
-            rl.resume();
-            if (code === 0) {
-              console.log(`  ${SUCCESS('\u2713')} Evolve session complete`);
-            } else {
-              console.log(`  ${ERROR(`Evolve exited with code ${String(code)}`)}`);
-            }
-            rl.prompt();
-          });
-        } else {
-          // Launch evolve session — pre-flight: branch switch + auto-commit
-          const cfg = loadHydraConfig();
-          const baseBranch = cfg.evolve?.baseBranch ?? 'dev';
-          const cwd = config.projectRoot;
-
-          // Switch to base branch if needed (create it if it doesn't exist)
-          const curBranch = spawnSync('git', ['rev-parse', '--abbrev-ref', 'HEAD'], {
-            cwd,
-            encoding: 'utf8',
-          }).stdout.trim();
-          if (curBranch !== baseBranch) {
-            // Check if base branch exists
-            const branchExists =
-              spawnSync('git', ['rev-parse', '--verify', baseBranch], { cwd, encoding: 'utf8' })
-                .status === 0;
-            if (!branchExists) {
-              console.log(`  ${ACCENT(`Creating '${baseBranch}' branch from '${curBranch}'...`)}`);
-              spawnSync('git', ['branch', baseBranch], { cwd });
-            }
-            console.log(`  ${ACCENT(`Switching from '${curBranch}' to '${baseBranch}'...`)}`);
-            const sw = spawnSync('git', ['checkout', baseBranch], { cwd, encoding: 'utf8' });
-            if (sw.status !== 0) {
-              console.log(`  ${ERROR(`Failed to switch branch: ${(sw.stderr || '').trim()}`)}`);
-              rl.prompt();
-              return;
-            }
-          }
-
-          // Auto-commit dirty working tree
-          const status = spawnSync('git', ['status', '--porcelain'], {
-            cwd,
-            encoding: 'utf8',
-          }).stdout.trim();
-          if (status) {
-            const confirm = (await promptChoice(rl, {
-              message: 'Working tree is not clean. Auto-commit before evolve?',
-              choices: [
-                { label: 'Yes \u2014 commit all changes', value: 'yes' },
-                { label: 'No \u2014 abort', value: 'no' },
-              ],
-              defaultIndex: 0,
-              timeout: 30_000,
-            })) as any;
-            if (confirm.value !== 'yes') {
-              console.log(`  ${WARNING('Aborted \u2014 commit or stash changes first.')}`);
-              rl.prompt();
-              return;
-            }
-            const ts = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
-            spawnSync('git', ['add', '-A'], { cwd });
-            spawnSync('git', ['commit', '-m', `chore: auto-commit before evolve session ${ts}`], {
-              cwd,
-            });
-            console.log(`  ${SUCCESS('\u2713')} Changes committed.`);
-          }
-
-          console.log(`  ${ACCENT('Launching evolve session...')}`);
-          rl.pause();
-          destroyStatusBar();
-          const evolveScript = path.join(HYDRA_ROOT, 'lib', 'hydra-evolve.ts');
-          const evolveArgs = [evolveScript, `project=${cwd}`];
-          if (evolveArg) {
-            evolveArgs.push(...evolveArg.split(/\s+/).filter(Boolean));
-          }
-          const child = spawnHydraNode(evolveArgs[0], evolveArgs.slice(1), {
-            cwd,
-            stdio: 'inherit',
-            shell: process.platform === 'win32',
-          });
-          child.on('close', (code) => {
-            initStatusBar(agents);
-            rl.resume();
-            if (code === 0) {
-              console.log(`  ${SUCCESS('\u2713')} Evolve session complete`);
-            } else {
-              console.log(`  ${ERROR(`Evolve exited with code ${String(code)}`)}`);
-            }
-            rl.prompt();
-          });
-        }
+        await handleEvolveCommand(
+          {
+            baseUrl,
+            agents,
+            config,
+            rl,
+            HYDRA_ROOT,
+            getLoopMode: () => mode,
+            setLoopMode: (m) => {
+              mode = m;
+            },
+            initStatusBar,
+            destroyStatusBar,
+            drawStatusBar,
+          },
+          line.slice(':evolve'.length).trim(),
+        );
         return;
       }
 
@@ -5222,11 +1871,11 @@ async function interactiveLoop({
                 now - _selfIndexCache.builtAt > refreshMs!
               ) {
                 const idx = buildSelfIndex(HYDRA_ROOT);
-                _selfIndexCache = {
+                Object.assign(_selfIndexCache, {
                   builtAt: now,
                   key,
                   block: formatSelfIndexForPrompt(idx, { maxChars }),
-                };
+                });
               }
               context.selfIndexBlock = _selfIndexCache.block;
             }
@@ -5791,10 +2440,7 @@ async function interactiveLoop({
   });
 
   rl.on('close', () => {
-    if (_ghostCleanup) {
-      process.stdin.removeListener('data', _ghostCleanup);
-      _ghostCleanup = null;
-    }
+    _ghostTextCleanup();
     resetAutoAccept();
     resetConversation();
     stopAllWorkers();

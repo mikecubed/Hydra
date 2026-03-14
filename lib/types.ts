@@ -824,7 +824,7 @@ export interface WriteRouteCtx extends ReadRouteCtx {
   classifyTask: (title: string, type?: string) => string;
   nextId: (prefix: string, items: unknown[]) => string;
   detectCycle: (tasks: TaskEntry[], targetId: string, proposedBlockedBy: string[]) => boolean;
-  autoUnblock: (state: HydraStateShape, completedTaskId?: string) => void;
+  autoUnblock: (state: HydraStateShape, completedTaskId: string) => void;
   AGENT_NAMES: string[];
   getAgent: (name: string) => AgentDef | undefined;
   listAgents: (...args: unknown[]) => AgentDef[];
@@ -938,4 +938,52 @@ export interface ActiveProvider {
   provider: string;
   model: string;
   isFallback: boolean;
+}
+
+// ── Agent executor shared types ───────────────────────────────────────────────
+
+/** Progress callback: (elapsedMs, outputKB, status?) */
+export type ProgressCallback = (elapsed: number, outputKB: number, status?: string) => void;
+
+/** Status bar callback: (agent, meta) */
+export type StatusBarCallback = (agent: string, meta: { phase?: string; step?: string }) => void;
+
+/** Common result shape returned by all execute* functions */
+export interface ExecuteResult {
+  ok: boolean;
+  output: string;
+  stdout?: string;
+  stderr: string;
+  error: string | null;
+  exitCode: number | null;
+  signal: string | null;
+  durationMs: number;
+  timedOut: boolean;
+  errorCategory?: string;
+  errorDetail?: string;
+  errorContext?: string;
+  startupFailure?: boolean;
+  tokenUsage?: TokenUsage | null;
+  costUsd?: number | null;
+  command?: string;
+  args?: string[];
+  promptSnippet?: string;
+  // Recovery fields
+  recovered?: boolean;
+  originalModel?: string;
+  newModel?: string;
+  circuitBreakerTripped?: boolean;
+  modelError?: unknown;
+  // Rate limit fields
+  rateLimitRetries?: number;
+  rateLimitExhausted?: boolean;
+  // Usage limit fields
+  usageLimited?: boolean;
+  usageLimitConfirmed?: boolean;
+  usageLimitStructured?: boolean;
+  resetInSeconds?: number;
+  usageLimitDetail?: string;
+  usageLimitFalsePositive?: boolean;
+  usageLimitPattern?: string;
+  usageLimitUnverifiable?: boolean;
 }

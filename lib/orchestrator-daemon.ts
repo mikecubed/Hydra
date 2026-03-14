@@ -13,38 +13,62 @@ import fs from 'node:fs';
 import http from 'node:http';
 import os from 'node:os';
 import path from 'node:path';
-import { exec, execSync, spawn } from 'node:child_process';
+import { exec, spawn } from 'node:child_process';
 import {
   getAgent,
-  KNOWN_OWNERS,
   AGENT_NAMES,
   classifyTask,
   getModelSummary,
   listAgents,
-  resolvePhysicalAgent,
 } from './hydra-agents.ts';
 import { registerBuiltInSubAgents } from './hydra-sub-agents.ts';
-import { syncHydraMd, getAgentInstructionFile } from './hydra-sync-md.ts';
+import { syncHydraMd } from './hydra-sync-md.ts';
+import {
+  nextId,
+  parseList,
+  getCurrentBranch as _getCurrentBranch,
+  ensureKnownStatus,
+  ensureKnownAgent,
+  detectCycle,
+  autoUnblock,
+  buildPrompt as _buildPrompt,
+  getSummary,
+  suggestNext,
+} from './daemon/task-helpers.ts';
 import { hydraSplash, label as uiLabel, divider, SUCCESS, DIM } from './hydra-ui.ts';
 import { resolveProject, loadHydraConfig } from './hydra-config.ts';
 import {
-  git,
-  getCurrentBranch as getGitCurrentBranch,
-  smartMerge,
-} from './hydra-shared/git-ops.ts';
+  readEvents,
+  readArchive,
+  archiveState,
+  truncateEventsFile,
+  createSnapshot,
+  cleanOldSnapshots,
+  checkIdempotency,
+} from './daemon/archive.ts';
+import { createTaskWorktree, mergeTaskWorktree, cleanupTaskWorktree } from './daemon/worktree.ts';
 import { getMetricsSummary, persistMetrics, loadPersistedMetrics } from './hydra-metrics.ts';
 import { checkUsage } from './hydra-usage.ts';
 import { resolveVerificationPlan } from './hydra-verification.ts';
 import { handleReadRoute } from './daemon/read-routes.ts';
 import { handleWriteRoute } from './daemon/write-routes.ts';
-import type { IncomingMessage, ServerResponse } from 'node:http';
+import { sendJson, sendError, isAuthorized, readJsonBody } from './daemon/http-utils.ts';
+import { printHelp, commandStatus, commandStop } from './daemon/cli-commands.ts';
+import {
+  nowIso,
+  toSessionId,
+  getEventSeq,
+  ensureCoordFiles,
+  readState,
+  writeState,
+  appendSyncLog,
+  appendEvent,
+  replayEvents,
+} from './daemon/state.ts';
+import type { ServerResponse } from 'node:http';
 import type {
   HydraStateShape,
   TaskEntry,
-  HandoffEntry,
-  BlockerEntry,
-  DecisionEntry,
-  ArchiveState,
   WriteRouteCtx,
   UsageCheckResult,
   ModelSummaryEntry,
@@ -56,547 +80,18 @@ const config = resolveProject();
 
 const COORD_DIR = config.coordDir;
 const STATE_PATH = config.statePath;
-const LOG_PATH = config.logPath;
 const STATUS_PATH = config.statusPath;
-const EVENTS_PATH = config.eventsPath;
-const ARCHIVE_PATH = config.archivePath;
 
 const DEFAULT_HOST = process.env['AI_ORCH_HOST'] ?? '127.0.0.1';
 const DEFAULT_PORT = Number.parseInt(process.env['AI_ORCH_PORT'] ?? '4173', 10);
 const ORCH_TOKEN = process.env['AI_ORCH_TOKEN'] ?? '';
 
-const STATUS_VALUES = new Set(['todo', 'in_progress', 'blocked', 'done', 'cancelled']);
-const KNOWN_AGENTS = KNOWN_OWNERS;
-
-function nowIso() {
-  return new Date().toISOString();
-}
-
-function toSessionId(date = new Date()) {
-  const yyyy = String(date.getFullYear());
-  const mm = String(date.getMonth() + 1).padStart(2, '0');
-  const dd = String(date.getDate()).padStart(2, '0');
-  const hh = String(date.getHours()).padStart(2, '0');
-  const min = String(date.getMinutes()).padStart(2, '0');
-  const ss = String(date.getSeconds()).padStart(2, '0');
-  return `SYNC_${yyyy}${mm}${dd}_${hh}${min}${ss}`;
-}
-
-function createAgentRecord() {
-  return {
-    installed: null,
-    path: '',
-    version: '',
-    lastCheckedAt: null,
-  };
-}
-
-function createDefaultState() {
-  return {
-    schemaVersion: 1,
-    project: config.projectName,
-    updatedAt: nowIso(),
-    activeSession: null,
-    agents: {
-      gemini: createAgentRecord(),
-      codex: createAgentRecord(),
-      claude: createAgentRecord(),
-    },
-    tasks: [],
-    decisions: [],
-    blockers: [],
-    handoffs: [],
-    deadLetter: [],
-  };
-}
-
-function normalizeState(raw: unknown): HydraStateShape {
-  const defaults = createDefaultState();
-  const safe = (raw != null && typeof raw === 'object' ? raw : {}) as Record<string, unknown>;
-
-  return {
-    ...defaults,
-    ...safe,
-    agents: {
-      ...(defaults.agents as Record<string, unknown>),
-      ...((safe['agents'] ?? {}) as Record<string, unknown>),
-    },
-    tasks: Array.isArray(safe['tasks']) ? (safe['tasks'] as TaskEntry[]) : [],
-    decisions: Array.isArray(safe['decisions']) ? (safe['decisions'] as DecisionEntry[]) : [],
-    blockers: Array.isArray(safe['blockers']) ? (safe['blockers'] as BlockerEntry[]) : [],
-    handoffs: Array.isArray(safe['handoffs']) ? (safe['handoffs'] as HandoffEntry[]) : [],
-    deadLetter: Array.isArray(safe['deadLetter']) ? safe['deadLetter'] : [],
-    childSessions: Array.isArray(safe['childSessions']) ? safe['childSessions'] : [],
-  };
-}
-
-function ensureCoordFiles() {
-  if (!fs.existsSync(COORD_DIR)) {
-    fs.mkdirSync(COORD_DIR, { recursive: true });
-  }
-
-  if (!fs.existsSync(STATE_PATH)) {
-    const state = createDefaultState();
-    fs.writeFileSync(STATE_PATH, `${JSON.stringify(state, null, 2)}\n`, 'utf8');
-  }
-
-  if (!fs.existsSync(LOG_PATH)) {
-    const lines = [
-      '# AI Sync Log',
-      '',
-      `Created: ${nowIso()}`,
-      '',
-      'Use `npm run hydra:summary` to see current state.',
-      '',
-    ];
-    fs.writeFileSync(LOG_PATH, `${lines.join('\n')}\n`, 'utf8');
-  }
-
-  if (!fs.existsSync(EVENTS_PATH)) {
-    fs.writeFileSync(EVENTS_PATH, '', 'utf8');
-  }
-
-  initEventSeq();
-}
-
-function readState(): HydraStateShape {
-  ensureCoordFiles();
-  const raw = fs.readFileSync(STATE_PATH, 'utf8');
-  return normalizeState(JSON.parse(raw));
-}
-
-/**
- * Atomically persist state to disk (write-tmp then rename).
- * @param {object} state - The state object to persist
- * @returns {object} The normalized, timestamped state that was written
- */
-function writeState(state: Record<string, unknown>) {
-  const next = normalizeState(state);
-  next.updatedAt = nowIso();
-  if (next.activeSession?.status === 'active') {
-    next.activeSession.updatedAt = next.updatedAt;
-  }
-  const tempPath = `${STATE_PATH}.tmp`;
-  const data = `${JSON.stringify(next, null, 2)}\n`;
-  fs.writeFileSync(tempPath, data, 'utf8');
-
-  let retries = 0;
-  for (;;) {
-    try {
-      fs.renameSync(tempPath, STATE_PATH);
-      break;
-    } catch (err) {
-      retries++;
-      if (retries > 5) {
-        // If rename fails consistently, try copy and unlink (less atomic but better than partial write)
-        try {
-          fs.copyFileSync(tempPath, STATE_PATH);
-          fs.unlinkSync(tempPath);
-          break;
-        } catch (copyErr) {
-          console.error(
-            `Failed to write state: ${(err as Error).message} -> ${(copyErr as Error).message}`,
-          );
-          throw copyErr;
-        }
-      }
-      // Sync sleep (busy wait) 50ms * retries
-      const start = Date.now();
-      while (Date.now() - start < 50 * retries);
-    }
-  }
-  return next;
-}
-
-function appendSyncLog(entry: string) {
-  ensureCoordFiles();
-  fs.appendFileSync(LOG_PATH, `- ${nowIso()} | ${entry}\n`, 'utf8');
-}
-
-let eventSeq = 0;
-
-function initEventSeq() {
-  if (!fs.existsSync(EVENTS_PATH)) return;
-  const raw = fs.readFileSync(EVENTS_PATH, 'utf8');
-  const lines = raw.split(/\r?\n/).filter(Boolean);
-  for (let i = lines.length - 1; i >= 0; i--) {
-    try {
-      const parsed = JSON.parse(lines[i]) as { seq?: number };
-      if (typeof parsed.seq === 'number' && parsed.seq > eventSeq) {
-        eventSeq = parsed.seq;
-      }
-      break;
-    } catch {
-      /* skip malformed */
-    }
-  }
-}
-
-function categorizeEvent(type: string, payload: unknown) {
-  if (type === 'mutation') {
-    const label =
-      ((payload as Record<string, unknown>)['label'] as string | null | undefined) ?? '';
-    if (label.startsWith('task:')) return 'task';
-    if (label.startsWith('handoff:')) return 'handoff';
-    if (label.startsWith('decision:')) return 'decision';
-    if (label.startsWith('blocker:')) return 'blocker';
-    if (label.startsWith('session:')) return 'session';
-  }
-  if (type === 'daemon_start' || type === 'daemon_stop' || type === 'auto_archive') return 'system';
-  if (type === 'verification_start' || type === 'verification_complete') return 'task';
-  if (typeof type === 'string' && type.startsWith('concierge:')) return 'concierge';
-  return 'system';
-}
-
-function appendEvent(type: string, payload?: unknown) {
-  eventSeq += 1;
-  const category = categorizeEvent(type, payload);
-  const line = JSON.stringify({
-    id: `${String(Date.now())}_${Math.random().toString(36).slice(2, 8)}`,
-    seq: eventSeq,
-    at: nowIso(),
-    type,
-    category,
-    payload,
-  });
-  fs.appendFileSync(EVENTS_PATH, `${line}\n`, 'utf8');
-}
-
-type EventRecord = { seq: number; at: string; type: string; category?: string; payload?: unknown };
-
-function replayEvents(fromSeq = 0): EventRecord[] {
-  if (!fs.existsSync(EVENTS_PATH)) return [];
-  const raw = fs.readFileSync(EVENTS_PATH, 'utf8');
-  const lines = raw.split(/\r?\n/).filter(Boolean);
-  const events: EventRecord[] = [];
-  for (const line of lines) {
-    try {
-      const parsed = JSON.parse(line) as { seq?: number } & Partial<EventRecord>;
-      if (typeof parsed.seq === 'number' && parsed.seq >= fromSeq) {
-        events.push(parsed as EventRecord);
-      }
-    } catch {
-      /* skip malformed */
-    }
-  }
-  return events;
-}
-
-function nextId(prefix: string, items: unknown[]) {
-  let max = 0;
-  const pattern = new RegExp(`^${prefix}(\\d+)$`);
-
-  for (const item of items) {
-    const match = (
-      ((item as Record<string, unknown>)['id'] as string | null | undefined) ?? ''
-    ).match(pattern);
-    if (!match) {
-      continue;
-    }
-    const parsed = Number.parseInt(match[1], 10);
-    if (Number.isFinite(parsed) && parsed > max) {
-      max = parsed;
-    }
-  }
-
-  return `${prefix}${String(max + 1).padStart(3, '0')}`;
-}
-
-/**
- * Split a value into a trimmed string array. Splits on commas only.
- * @param {string | string[] | null | undefined} value
- * @returns {string[]}
- */
-function parseList(value: unknown): string[] {
-  if (value == null) {
-    return [];
-  }
-  if (Array.isArray(value)) {
-    return value.map((item: unknown) => String(item).trim()).filter(Boolean);
-  }
-  return (value as string)
-    .split(/,\s*/)
-    .map((part) => part.trim())
-    .filter(Boolean);
-}
-
-function runCommand(command: string) {
-  try {
-    return execSync(command, {
-      cwd: config.projectRoot,
-      encoding: 'utf8',
-      stdio: ['ignore', 'pipe', 'ignore'],
-      windowsHide: true,
-    }).trim();
-  } catch {
-    return '';
-  }
-}
-
 function getCurrentBranch() {
-  const branch = runCommand('git branch --show-current');
-  return branch === '' ? 'unknown' : branch;
-}
-
-function ensureKnownStatus(status: string) {
-  if (!STATUS_VALUES.has(status)) {
-    throw new Error(`Invalid status "${status}".`);
-  }
-}
-
-function ensureKnownAgent(agent: string, allowUnassigned = true) {
-  const allowed = allowUnassigned ? KNOWN_AGENTS : new Set(['human', 'gemini', 'codex', 'claude']);
-  if (!allowed.has(agent)) {
-    throw new Error(`Unknown agent "${agent}".`);
-  }
-}
-
-function formatTask(task: TaskEntry) {
-  const deps =
-    Array.isArray(task.blockedBy) && task.blockedBy.length > 0
-      ? ` blockedBy=${task.blockedBy.join(',')}`
-      : '';
-  return `${task.id} [${task.status}] owner=${task.owner}${deps} :: ${task.title}`;
-}
-
-function detectCycle(tasks: TaskEntry[], targetId: string, proposedBlockedBy: string[]) {
-  const visited = new Set();
-  const queue = [...proposedBlockedBy];
-  while (queue.length > 0) {
-    const current = queue.shift();
-    if (current === targetId) {
-      return true;
-    }
-    if (visited.has(current)) {
-      continue;
-    }
-    visited.add(current);
-    const task = tasks.find((t: TaskEntry) => t.id === current);
-    if (task && Array.isArray(task.blockedBy)) {
-      queue.push(...task.blockedBy);
-    }
-  }
-  return false;
-}
-
-function autoUnblock(state: HydraStateShape, completedTaskId: string) {
-  const completedIds = new Set(
-    state.tasks
-      .filter((t: TaskEntry) => ['done', 'cancelled'].includes(t.status))
-      .map((t: TaskEntry) => t.id),
-  );
-  completedIds.add(completedTaskId);
-
-  for (const task of state.tasks) {
-    if (!Array.isArray(task.blockedBy) || task.blockedBy.length === 0) {
-      continue;
-    }
-    if (task.status !== 'blocked') {
-      continue;
-    }
-    const allDepsComplete = task.blockedBy.every((dep: string) => completedIds.has(dep));
-    if (allDepsComplete) {
-      task.status = 'todo';
-      const note = `[AUTO] All dependencies completed (${task.blockedBy.join(',')}), moved to todo.`;
-      task.notes = task.notes === '' ? note : `${task.notes}\n${note}`;
-      task.updatedAt = nowIso();
-    }
-  }
+  return _getCurrentBranch(config.projectRoot);
 }
 
 function buildPrompt(agent: string, state: HydraStateShape) {
-  const agentConfig = getAgent(agent);
-  let label: string;
-  if (agentConfig) {
-    label = agentConfig.label;
-  } else if (agent === 'human') {
-    label = 'Human Operator';
-  } else {
-    label = 'AI Assistant';
-  }
-  const rolePrompt = agentConfig ? agentConfig.rolePrompt : '';
-
-  const openTasks = state.tasks
-    .filter((task: TaskEntry) => !['done', 'cancelled'].includes(task.status))
-    .slice(0, 10)
-    .map((task: TaskEntry) => `- ${formatTask(task)}`)
-    .join('\n');
-
-  // Agent-specific file read instructions
-  const instructionFile = getAgentInstructionFile(agent, config.projectRoot);
-  const readInstructions = (
-    getAgent(agent)?.readInstructions ?? (() => `Read ${instructionFile} first.`)
-  )(instructionFile);
-
-  return [
-    `You are ${label} collaborating in the ${config.projectName} repository with Gemini Pro, Codex, and Claude Code.`,
-    '',
-    rolePrompt ?? '',
-    '',
-    readInstructions,
-    '',
-    'Rules for this run:',
-    '- Claim or update one task before editing.',
-    '- Keep task status current: todo/in_progress/blocked/done.',
-    '- Record decisions and blockers as they happen.',
-    '- Add a handoff entry before switching agents.',
-    ...(getAgent(agent)?.taskRules ?? []),
-    '',
-    `Current focus: ${state.activeSession?.focus ?? 'not set'}`,
-    `Current branch: ${state.activeSession?.branch ?? getCurrentBranch()}`,
-    '',
-    'Open tasks:',
-    openTasks === '' ? '- none' : openTasks,
-  ]
-    .filter(Boolean)
-    .join('\n');
-}
-
-function getSummary(state: HydraStateShape) {
-  const completedIds = new Set(
-    state.tasks
-      .filter((t: TaskEntry) => ['done', 'cancelled'].includes(t.status))
-      .map((t: TaskEntry) => t.id),
-  );
-  const openTasks = state.tasks
-    .filter((task: TaskEntry) => !['done', 'cancelled'].includes(task.status))
-    .map((task: TaskEntry) => {
-      const deps = Array.isArray(task.blockedBy) ? task.blockedBy : [];
-      const pendingDependencies = deps.filter((dep: string) => !completedIds.has(dep));
-      return { ...task, pendingDependencies };
-    });
-  const openBlockers = state.blockers.filter((item: BlockerEntry) => item.status !== 'resolved');
-  const recentDecision = state.decisions.at(-1) ?? null;
-  const latestHandoff = state.handoffs.at(-1) ?? null;
-
-  return {
-    updatedAt: state.updatedAt,
-    activeSession: state.activeSession,
-    counts: {
-      tasksOpen: openTasks.length,
-      blockersOpen: openBlockers.length,
-      decisions: state.decisions.length,
-      handoffs: state.handoffs.length,
-    },
-    openTasks,
-    openBlockers,
-    recentDecision,
-    latestHandoff,
-  };
-}
-
-function suggestNext(state: HydraStateShape, agent: string) {
-  ensureKnownAgent(agent, false);
-
-  const completedIds = new Set(
-    state.tasks
-      .filter((t: TaskEntry) => ['done', 'cancelled'].includes(t.status))
-      .map((t: TaskEntry) => t.id),
-  );
-  const openTasks = state.tasks.filter((task: TaskEntry) => {
-    if (['done', 'cancelled'].includes(task.status)) {
-      return false;
-    }
-    const deps = Array.isArray(task.blockedBy) ? task.blockedBy : [];
-    return deps.every((dep: string) => completedIds.has(dep));
-  });
-  const openTasks2 = openTasks; // alias for type narrowing
-  const inProgress = openTasks2.find(
-    (task: TaskEntry) => task.owner === agent && task.status === 'in_progress',
-  );
-  if (inProgress) {
-    return {
-      action: 'continue_task',
-      message: `${agent} should continue ${inProgress.id}.`,
-      task: inProgress,
-    };
-  }
-
-  const pendingHandoff = [...state.handoffs]
-    .reverse()
-    .find(
-      (handoff: HandoffEntry) =>
-        handoff.to === agent && (handoff.acknowledgedAt == null || handoff.acknowledgedAt === ''),
-    );
-  if (pendingHandoff) {
-    const relatedTask =
-      pendingHandoff.tasks == null
-        ? null
-        : openTasks.find((task: TaskEntry) => (pendingHandoff.tasks as string[]).includes(task.id));
-    return {
-      action: 'pickup_handoff',
-      message: `${agent} has an unacknowledged handoff ${pendingHandoff.id}.`,
-      handoff: pendingHandoff,
-      relatedTask,
-    };
-  }
-
-  const ownedTodo = openTasks.find(
-    (task: TaskEntry) => task.owner === agent && task.status === 'todo',
-  );
-  if (ownedTodo) {
-    return {
-      action: 'claim_owned_task',
-      message: `${agent} should move ${ownedTodo.id} to in_progress.`,
-      task: ownedTodo,
-    };
-  }
-
-  // Sort unassigned tasks by affinity for the requesting agent
-  const agentConfig = getAgent(agent);
-  const unassignedTodos = openTasks
-    .filter(
-      (task: TaskEntry) =>
-        ['unassigned', 'human', ''].includes(task.owner) && task.status === 'todo',
-    )
-    .map((task: TaskEntry) => {
-      const taskType = task.type === '' ? 'implementation' : task.type;
-      const affinity =
-        (agentConfig?.taskAffinity as Record<string, number> | undefined)?.[taskType] ?? 0.5;
-      // Check if a virtual agent has better affinity for this task type
-      let preferredAgent = null;
-      const virtualAgents = listAgents({ type: 'virtual', enabled: true });
-      for (const va of virtualAgents) {
-        const physical = resolvePhysicalAgent(va.name);
-        if (
-          physical?.name === agent &&
-          ((va.taskAffinity as Record<string, number> | undefined)?.[taskType] ?? 0) > affinity
-        ) {
-          preferredAgent = va.name;
-        }
-      }
-      return { task, affinity, preferredAgent };
-    })
-    .sort((a: { affinity: number }, b: { affinity: number }) => b.affinity - a.affinity);
-
-  if (unassignedTodos.length > 0) {
-    const unassignedTodo = unassignedTodos[0].task;
-    const suggestion = {
-      action: 'claim_unassigned_task',
-      message: `${agent} can claim ${unassignedTodo.id} (type=${unassignedTodo.type}, affinity=${String(unassignedTodos[0].affinity)}).`,
-      task: unassignedTodo,
-    };
-    if (unassignedTodos[0].preferredAgent != null && unassignedTodos[0].preferredAgent !== '') {
-      (suggestion as Record<string, unknown>)['preferredAgent'] = unassignedTodos[0].preferredAgent;
-    }
-    return suggestion;
-  }
-
-  const blockedMine = openTasks.find(
-    (task: TaskEntry) => task.owner === agent && task.status === 'blocked',
-  );
-  if (blockedMine) {
-    return {
-      action: 'resolve_blocker',
-      message: `${agent} has blocked task ${blockedMine.id}.`,
-      task: blockedMine,
-    };
-  }
-
-  return {
-    action: 'idle',
-    message: `No actionable task for ${agent}.`,
-  };
+  return _buildPrompt(agent, state, config.projectRoot, config.projectName);
 }
 
 function parseArgs(argv: string[]) {
@@ -614,406 +109,6 @@ function parseArgs(argv: string[]) {
   }
 
   return { command, options };
-}
-
-function sendJson(res: ServerResponse, statusCode: number, data: unknown) {
-  const body = JSON.stringify(data, null, 2);
-  res.writeHead(statusCode, {
-    'Content-Type': 'application/json; charset=utf-8',
-    'Content-Length': Buffer.byteLength(body),
-  });
-  res.end(body);
-}
-
-function sendError(
-  res: ServerResponse,
-  statusCode: number,
-  message: string,
-  details: unknown = null,
-) {
-  sendJson(res, statusCode, {
-    ok: false,
-    error: message,
-    details,
-  });
-}
-
-function isAuthorized(req: IncomingMessage) {
-  if (ORCH_TOKEN === '') {
-    return true;
-  }
-  return req.headers['x-ai-orch-token'] === ORCH_TOKEN;
-}
-
-async function readJsonBody(req: IncomingMessage) {
-  const chunks = [];
-  let size = 0;
-  const maxSize = 1024 * 1024;
-
-  for await (const chunk of req) {
-    size += (chunk as Buffer).length;
-    if (size > maxSize) {
-      throw new Error('Payload too large.');
-    }
-    chunks.push(chunk);
-  }
-
-  if (chunks.length === 0) {
-    return {};
-  }
-
-  const raw = Buffer.concat(chunks).toString('utf8').trim();
-  if (raw === '') {
-    return {};
-  }
-  return JSON.parse(raw) as Record<string, unknown>;
-}
-
-function readEvents(limit = 50) {
-  if (!fs.existsSync(EVENTS_PATH)) {
-    return [];
-  }
-  const raw = fs.readFileSync(EVENTS_PATH, 'utf8');
-  const lines = raw
-    .split(/\r?\n/)
-    .map((line: string) => line.trim())
-    .filter(Boolean);
-
-  const parsed: EventRecord[] = [];
-  for (const line of lines) {
-    try {
-      parsed.push(JSON.parse(line) as EventRecord);
-    } catch {
-      // Skip malformed lines.
-    }
-  }
-  return parsed.slice(-Math.max(1, Math.min(limit, 500)));
-}
-
-function readArchive(): ArchiveState {
-  if (!fs.existsSync(ARCHIVE_PATH)) {
-    return { tasks: [], handoffs: [], blockers: [] };
-  }
-  try {
-    return JSON.parse(fs.readFileSync(ARCHIVE_PATH, 'utf8')) as ArchiveState;
-  } catch {
-    return { tasks: [], handoffs: [], blockers: [] };
-  }
-}
-
-function writeArchive(archive: ArchiveState) {
-  archive.archivedAt = nowIso();
-  fs.writeFileSync(ARCHIVE_PATH, `${JSON.stringify(archive, null, 2)}\n`, 'utf8');
-}
-
-function archiveState(state: HydraStateShape) {
-  const archive = readArchive();
-  let moved = 0;
-  const oneHourAgo = Date.now() - 60 * 60 * 1000;
-
-  const completedTasks = state.tasks.filter((t: TaskEntry) =>
-    ['done', 'cancelled'].includes(t.status),
-  );
-  const completedTaskIds = new Set(completedTasks.map((t: TaskEntry) => t.id));
-  if (completedTasks.length > 0) {
-    archive.tasks.push(...completedTasks);
-    state.tasks = state.tasks.filter((t: TaskEntry) => !completedTaskIds.has(t.id));
-    moved += completedTasks.length;
-
-    for (const task of state.tasks) {
-      if (Array.isArray(task.blockedBy)) {
-        task.blockedBy = task.blockedBy.filter((dep: string) => !completedTaskIds.has(dep));
-      }
-    }
-  }
-
-  const oldHandoffs = state.handoffs.filter((h: HandoffEntry) => {
-    if (h.acknowledgedAt == null || h.acknowledgedAt === '') {
-      return false;
-    }
-    return new Date(h.acknowledgedAt).getTime() < oneHourAgo;
-  });
-  if (oldHandoffs.length > 0) {
-    const oldHandoffIds = new Set(oldHandoffs.map((h: HandoffEntry) => h.id));
-    archive.handoffs.push(...oldHandoffs);
-    state.handoffs = state.handoffs.filter((h: HandoffEntry) => !oldHandoffIds.has(h.id));
-    moved += oldHandoffs.length;
-  }
-
-  const resolvedBlockers = state.blockers.filter((b: BlockerEntry) => b.status === 'resolved');
-  if (resolvedBlockers.length > 0) {
-    const resolvedIds = new Set(resolvedBlockers.map((b: BlockerEntry) => b.id));
-    archive.blockers.push(...resolvedBlockers);
-    state.blockers = state.blockers.filter((b: BlockerEntry) => !resolvedIds.has(b.id));
-    moved += resolvedBlockers.length;
-  }
-
-  if (moved > 0) {
-    writeArchive(archive);
-  }
-
-  return moved;
-}
-
-function truncateEventsFile(maxLines = 500) {
-  if (!fs.existsSync(EVENTS_PATH)) {
-    return 0;
-  }
-  const raw = fs.readFileSync(EVENTS_PATH, 'utf8');
-  const lines = raw.split(/\r?\n/).filter(Boolean);
-  if (lines.length <= maxLines) {
-    return 0;
-  }
-  const trimmed = lines.slice(-maxLines);
-  fs.writeFileSync(EVENTS_PATH, `${trimmed.join('\n')}\n`, 'utf8');
-  return lines.length - maxLines;
-}
-
-// ── Snapshots ──────────────────────────────────────────────────────────────
-
-const SNAPSHOT_DIR = path.join(COORD_DIR, 'snapshots');
-
-function createSnapshot() {
-  try {
-    if (!fs.existsSync(SNAPSHOT_DIR)) {
-      fs.mkdirSync(SNAPSHOT_DIR, { recursive: true });
-    }
-    const state = readState();
-    const snapshot = {
-      seq: eventSeq,
-      createdAt: nowIso(),
-      state,
-    };
-    const filename = `snapshot_${String(eventSeq)}_${String(Date.now())}.json`;
-    fs.writeFileSync(
-      path.join(SNAPSHOT_DIR, filename),
-      `${JSON.stringify(snapshot, null, 2)}\n`,
-      'utf8',
-    );
-    return { ok: true, seq: eventSeq, filename };
-  } catch (err) {
-    return { ok: false, error: (err as Error).message };
-  }
-}
-
-function cleanOldSnapshots(retentionCount = 5) {
-  try {
-    if (!fs.existsSync(SNAPSHOT_DIR)) return 0;
-    const files = fs
-      .readdirSync(SNAPSHOT_DIR)
-      .filter((f) => f.startsWith('snapshot_') && f.endsWith('.json'))
-      .sort();
-    const toDelete = files.slice(0, Math.max(0, files.length - retentionCount));
-    for (const f of toDelete) {
-      try {
-        fs.unlinkSync(path.join(SNAPSHOT_DIR, f));
-      } catch {
-        /* skip */
-      }
-    }
-    return toDelete.length;
-  } catch {
-    return 0;
-  }
-}
-
-// ── Idempotency ──────────────────────────────────────────────────────────
-
-const idempotencyLog = new Map(); // key → timestamp
-const IDEMPOTENCY_TTL_MS = 5 * 60 * 1000;
-
-function checkIdempotency(key: string) {
-  if (key === '') return false;
-  const now = Date.now();
-  // Prune stale entries periodically
-  if (idempotencyLog.size > 200) {
-    for (const [k, ts] of idempotencyLog) {
-      if (now - ts > IDEMPOTENCY_TTL_MS) idempotencyLog.delete(k);
-    }
-  }
-  if (idempotencyLog.has(key)) return true;
-  idempotencyLog.set(key, now);
-  return false;
-}
-
-async function requestJson(method: string, url: string, body: unknown = null) {
-  const headers: Record<string, string> = {
-    Accept: 'application/json',
-  };
-  if (ORCH_TOKEN !== '') {
-    headers['x-ai-orch-token'] = ORCH_TOKEN;
-  }
-  if (body !== null) {
-    headers['Content-Type'] = 'application/json';
-  }
-
-  const response = await fetch(url, {
-    method,
-    headers,
-    body: body == null ? undefined : JSON.stringify(body),
-  });
-  const payload: unknown = await response.json().catch(() => ({}));
-  return { response, payload };
-}
-
-function printHelp() {
-  console.log(`
-Hydra Orchestrator Daemon
-
-Usage:
-  node orchestrator-daemon.mjs start [host=127.0.0.1] [port=4173]
-  node orchestrator-daemon.mjs status [url=http://127.0.0.1:4173]
-  node orchestrator-daemon.mjs stop [url=http://127.0.0.1:4173]
-
-Environment:
-  AI_ORCH_HOST   Host bind (default: 127.0.0.1)
-  AI_ORCH_PORT   Port bind (default: 4173)
-  AI_ORCH_TOKEN  Optional API token for write endpoints
-  HYDRA_PROJECT  Override target project directory
-`);
-}
-
-async function commandStatus(options: Record<string, string>) {
-  const url = options['url'] ?? `http://${DEFAULT_HOST}:${String(DEFAULT_PORT)}`;
-  try {
-    const { response, payload } = await requestJson('GET', `${url}/health`);
-    if (!response.ok) {
-      console.error(
-        `Daemon status check failed (${String(response.status)}): ${((payload as Record<string, unknown>)['error'] as string | null | undefined) ?? 'unknown error'}`,
-      );
-      process.exitCode = 1;
-      return;
-    }
-    console.log(JSON.stringify(payload, null, 2));
-  } catch (err) {
-    console.error(`Daemon not reachable at ${url}: ${(err as Error).message}`);
-    process.exitCode = 1;
-  }
-}
-
-async function commandStop(options: Record<string, string>) {
-  const url = options['url'] ?? `http://${DEFAULT_HOST}:${String(DEFAULT_PORT)}`;
-  try {
-    const { response, payload } = await requestJson('POST', `${url}/shutdown`);
-    if (!response.ok) {
-      console.error(
-        `Failed to stop daemon (${String(response.status)}): ${((payload as Record<string, unknown>)['error'] as string | null | undefined) ?? 'unknown error'}`,
-      );
-      process.exitCode = 1;
-      return;
-    }
-    console.log('Stop signal sent to orchestrator daemon.');
-  } catch (err) {
-    console.error(`Unable to reach daemon at ${url}: ${(err as Error).message}`);
-    process.exitCode = 1;
-  }
-}
-
-// ── Worktree Isolation Helpers ───────────────────────────────────────────────
-
-/**
- * Creates a git worktree for a task at .hydra/worktrees/task-{taskId}.
- * Returns the absolute worktree path on success, null on failure (caller falls
- * back to non-isolated dispatch).
- *
- * @param {string} taskId
- * @returns {string|null}
- */
-function createTaskWorktree(taskId: string) {
-  const cfg = loadHydraConfig();
-  const worktreeDir = cfg.routing.worktreeIsolation.worktreeDir ?? '.hydra/worktrees';
-  const worktreePath = path.resolve(config.projectRoot, worktreeDir, `task-${taskId}`);
-  const branch = `hydra/task/${taskId}`;
-
-  try {
-    const result = git(['worktree', 'add', worktreePath, '-b', branch, 'HEAD'], config.projectRoot);
-    if (result.status !== 0) {
-      const errMsg = ([result.stderr, result.stdout] as string[]).find((s) => s !== '') ?? '';
-      const errMsgTrimmed = errMsg.trim();
-      console.warn(`[worktree] Failed to create worktree for task ${taskId}: ${errMsgTrimmed}`);
-      return null;
-    }
-    return worktreePath;
-  } catch (err) {
-    console.warn(
-      `[worktree] Exception creating worktree for task ${taskId}: ${(err as Error).message}`,
-    );
-    return null;
-  }
-}
-
-/**
- * Merges the task's worktree branch back to the current branch via smartMerge.
- * Returns { ok: true } on clean merge, { ok: false, conflict: true } on conflict,
- * { ok: false, error: string } on unexpected error.
- *
- * @param {string} taskId
- * @returns {{ ok: boolean, conflict?: boolean, error?: string }}
- */
-function mergeTaskWorktree(taskId: string) {
-  const branch = `hydra/task/${taskId}`;
-  const currentBranch = getGitCurrentBranch(config.projectRoot);
-
-  try {
-    const result = smartMerge(config.projectRoot, branch, currentBranch);
-    if (!result.ok) {
-      const conflictList =
-        (result as Record<string, unknown>)['conflicts'] != null &&
-        ((result as Record<string, unknown>)['conflicts'] as string[]).length > 0
-          ? ((result as Record<string, unknown>)['conflicts'] as string[]).join(', ')
-          : '(unknown)';
-      console.warn(
-        `[worktree] Conflict merging task ${taskId} branch into ${currentBranch}: ${conflictList}`,
-      );
-      return { ok: false, conflict: true };
-    }
-    return { ok: true };
-  } catch (err) {
-    console.warn(`[worktree] Exception merging task ${taskId}: ${(err as Error).message}`);
-    return { ok: false, error: (err as Error).message };
-  }
-}
-
-/**
- * Removes the git worktree and branch for a task. Best-effort — does not throw.
- * Pass force: true to remove even if the worktree has uncommitted changes.
- *
- * @param {string} taskId
- * @param {{ force?: boolean }} [opts]
- */
-function cleanupTaskWorktree(taskId: string, { force = false } = {}) {
-  const cfg = loadHydraConfig();
-  const worktreeDir = cfg.routing.worktreeIsolation.worktreeDir ?? '.hydra/worktrees';
-  const worktreePath = path.resolve(config.projectRoot, worktreeDir, `task-${taskId}`);
-  const branch = `hydra/task/${taskId}`;
-
-  // Remove worktree
-  try {
-    const removeArgs = force
-      ? ['worktree', 'remove', worktreePath, '--force']
-      : ['worktree', 'remove', worktreePath];
-    const result = git(removeArgs, config.projectRoot);
-    if (result.status !== 0) {
-      console.warn(
-        `[worktree] Could not remove worktree for task ${taskId}: ${result.stderr.trim()}`,
-      );
-    }
-  } catch (err) {
-    console.warn(
-      `[worktree] Exception removing worktree for task ${taskId}: ${(err as Error).message}`,
-    );
-  }
-
-  // Delete branch
-  try {
-    const branchFlag = force ? '-D' : '-d';
-    const result = git(['branch', branchFlag, branch], config.projectRoot);
-    if (result.status !== 0) {
-      console.warn(`[worktree] Could not delete branch ${branch}: ${result.stderr.trim()}`);
-    }
-  } catch (err) {
-    console.warn(`[worktree] Exception deleting branch ${branch}: ${(err as Error).message}`);
-  }
 }
 
 function startDaemon(options: Record<string, string>) {
@@ -1095,12 +190,12 @@ function startDaemon(options: Record<string, string>) {
       const at = nowIso();
       const event = {
         id: `${String(Date.now())}_${Math.random().toString(36).slice(2, 8)}`,
-        seq: eventSeq + 1,
+        seq: getEventSeq() + 1,
         at,
         type: 'mutation',
         payload: { label, ...detail },
       };
-      appendEvent('mutation', { label, ...detail });
+      appendEvent('mutation', { label, ...detail }, event.id);
       broadcastEvent(event);
       lastEventAt = at;
       eventCount += 1;
@@ -1327,7 +422,7 @@ function startDaemon(options: Record<string, string>) {
         return;
       }
 
-      if (!isAuthorized(req)) {
+      if (!isAuthorized(req, ORCH_TOKEN)) {
         sendError(res, 401, 'Unauthorized');
         return;
       }
@@ -1350,7 +445,7 @@ function startDaemon(options: Record<string, string>) {
         classifyTask,
         nextId,
         detectCycle,
-        autoUnblock: autoUnblock as (state: HydraStateShape, completedTaskId?: string) => void,
+        autoUnblock,
         readState,
         AGENT_NAMES,
         getAgent: getAgent as (name: string) => AgentDef | undefined,

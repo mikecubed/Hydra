@@ -555,10 +555,10 @@ function formatManifest(files: FileEntry[]): string {
   for (const f of files) {
     const topDir = f.path.includes('/') ? (f.path.split('/')[0] ?? '(root)') : '(root)';
     const existing = groups[topDir];
-    if (existing != null) {
-      existing.push(f);
-    } else {
+    if (existing == null) {
       groups[topDir] = [f];
+    } else {
+      existing.push(f);
     }
   }
 
@@ -674,7 +674,7 @@ function dispatchToAgent(
       clearTimeout(killTimer);
       const elapsedSec = ((Date.now() - startedAt) / 1000).toFixed(1);
       if (VERBOSE) {
-        const codeStr = code != null ? String(code) : 'null';
+        const codeStr = code == null ? 'null' : String(code);
         const signalStr = signal ?? 'none';
         const status = code === 0 ? 'ok' : `exit=${codeStr} signal=${signalStr}`;
         console.log(`  [${agent}] ${status} (${elapsedSec}s, ${String(stdout.length)} chars)`);
@@ -869,10 +869,10 @@ function generateReport(
   for (const finding of findings) {
     const category = finding.category.length > 0 ? finding.category : 'uncategorized';
     const existing = byCategory[category];
-    if (existing != null) {
-      existing.push(finding);
-    } else {
+    if (existing == null) {
       byCategory[category] = [finding];
+    } else {
+      existing.push(finding);
     }
   }
 
@@ -911,7 +911,7 @@ function generateReport(
     if (finding.severity === 'critical') severityIcon = '[CRIT]';
     else if (finding.severity === 'major') severityIcon = '[MAJOR]';
     const effortTag = finding.effort.length > 0 ? ` \`${finding.effort}\`` : '';
-    const lineRef = finding.line != null ? `:${String(finding.line)}` : '';
+    const lineRef = finding.line == null ? '' : `:${String(finding.line)}`;
     const fileRef = finding.file.length > 0 ? ` - \`${finding.file}\`${lineRef}` : '';
 
     md += `${String(i + 1)}. ${severityIcon} **${finding.title}**${effortTag}${fileRef}\n`;
@@ -932,7 +932,7 @@ function generateReport(
     for (const finding of categoryFindings) {
       md += `- **${finding.title}** \`${finding.severity}\` \`${finding.effort}\`\n`;
       if (finding.file.length > 0) {
-        const lineRef = finding.line != null ? `:${String(finding.line)}` : '';
+        const lineRef = finding.line == null ? '' : `:${String(finding.line)}`;
         md += `  File: \`${finding.file}\`${lineRef}\n`;
       }
       md += `  ${finding.detail}\n\n`;
@@ -1037,10 +1037,10 @@ async function main(): Promise<void> {
       const def = AUDIT_CATEGORIES[category];
       const { agent } = def;
       const existing = categoriesByAgent[agent];
-      if (existing != null) {
-        existing.push(category);
-      } else {
+      if (existing == null) {
         categoriesByAgent[agent] = [category];
+      } else {
+        existing.push(category);
       }
     }
 

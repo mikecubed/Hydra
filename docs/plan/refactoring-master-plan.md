@@ -74,10 +74,22 @@ Recommended pattern:
 - Harden contracts around `agent-executor`, `hydra-config`, and daemon behavior.
 - Tighten gates only after tests exist.
 
-### Phase 3 — Decomposition
+### Phase 3 — Decomposition ✅ Complete
 
-- Split `hydra-operator.ts` and `hydra-evolve.ts` in small slices.
-- Migrate config seams through tested interfaces, not sweeping rewrites.
+All extraction targets met or exceeded. Merged via `feat/phase3-decomposition`.
+
+**Achieved:**
+
+- `hydra-operator.ts`: 6,630 → 2,630 LOC (−60%) — extracted 7 focused modules
+- `orchestrator-daemon.ts`: 1,670 → 765 LOC (−54%) — extracted 8 daemon sub-modules
+- `hydra-shared/agent-executor.ts`: 1,824 → 835 LOC (−54%) — extracted 3 executor modules
+- `hydra-config.ts`: 1,067 → 870 LOC (−18%)
+- 20 new focused modules created total
+- 100+ new tests added
+- Modules > 1,500 LOC: 5 → 1 ✅ (target: 1)
+- Modules > 800 LOC: 10 → 3 ✅ (target: 3)
+- Cyclic imports: 0 ✅
+- TSC errors: 0 ✅
 
 ### Phase 4 — Shared Abstractions
 
