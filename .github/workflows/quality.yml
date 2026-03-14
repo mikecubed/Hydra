@@ -188,6 +188,11 @@ jobs:
           HUSKY: '0'
 
       - name: Run tests with coverage
+        run: npm run test:coverage
+        env:
+          HUSKY: '0'
+
+      - name: Check coverage thresholds
         run: npm run test:coverage:check
         env:
           HUSKY: '0'
