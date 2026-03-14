@@ -15,6 +15,7 @@ import path from 'node:path';
 import { getAgent } from './hydra-agents.ts';
 import { loadHydraConfig, resolveProject } from './hydra-config.ts';
 import { getCurrentBranch, git } from './hydra-shared/git-ops.ts';
+import type { IContextProvider } from './types.ts';
 
 interface ProjectConfig {
   projectRoot: string;
@@ -534,3 +535,8 @@ export function buildAgentContext(
   // Prepend scoped (deepest-first) context before root context
   return `${scopedContext}\n\n${baseContext}`;
 }
+
+/** Typed object satisfying IContextProvider for future DI adoption. */
+export const contextProvider: IContextProvider = {
+  buildAgentContext,
+};
