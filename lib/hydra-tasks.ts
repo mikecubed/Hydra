@@ -138,6 +138,7 @@ function formatDuration(ms: number) {
 // ── Simple Readline Fallback ────────────────────────────────────────────────
 
 import readline from 'node:readline';
+import { exit } from './hydra-process.ts';
 
 function createRL() {
   return readline.createInterface({ input: process.stdin, output: process.stderr, terminal: true });
@@ -1050,6 +1051,5 @@ async function main() {
 
 main().catch((err: unknown) => {
   console.error(pc.red(`Fatal: ${err instanceof Error ? err.message : String(err)}`));
-  // eslint-disable-next-line n/no-process-exit -- catch callback exit
-  process.exit(1);
+  exit(1);
 });

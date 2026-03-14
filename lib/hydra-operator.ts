@@ -168,6 +168,7 @@ import {
 } from './hydra-operator-self-awareness.ts';
 import { createGhostTextHelpers } from './hydra-operator-ghost-text.ts';
 import { executeDaemonResume } from './hydra-operator-session.ts';
+import { exit } from './hydra-process.ts';
 
 export { KNOWN_COMMANDS, SMART_TIER_MAP, getSelfAwarenessSummary } from './hydra-operator-ui.ts';
 export {
@@ -2448,7 +2449,7 @@ async function interactiveLoop({
     destroyStatusBar();
     console.log('Hydra operator console closed.');
 
-    process.exit(0);
+    exit(0);
   });
 }
 
@@ -2496,7 +2497,7 @@ async function main() {
     console.error(`Hydra daemon unreachable at ${baseUrl}.`);
     console.error('Start manually: npm run hydra:start');
 
-    process.exit(1);
+    exit(1);
   }
 
   if (interactive) {
@@ -2597,7 +2598,7 @@ async function main() {
       stdio: 'inherit',
     });
     if (result.status !== 0) {
-      process.exit(result.status ?? 1);
+      exit(result.status ?? 1);
     }
   } else {
     const records = await dispatchPrompt({
@@ -2625,6 +2626,6 @@ if (_isMainModule) {
   main().catch((err: unknown) => {
     console.error(`Hydra operator failed: ${(err as Error).message}`);
 
-    process.exit(1);
+    exit(1);
   });
 }
