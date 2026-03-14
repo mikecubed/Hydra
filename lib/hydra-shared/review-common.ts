@@ -69,7 +69,7 @@ export function loadLatestReport(
 ): unknown {
   if (!fs.existsSync(reportDir)) return null;
 
-  if (dateFilter) {
+  if (dateFilter !== null && dateFilter !== '') {
     const jsonPath = path.join(reportDir, `${prefix}_${dateFilter}.json`);
     if (fs.existsSync(jsonPath)) {
       try {
@@ -112,13 +112,13 @@ export function displayBranchInfo(
   const diffStat = getBranchDiffStat(projectRoot, branch, baseBranch);
   const commitLog = getBranchLog(projectRoot, branch, baseBranch);
 
-  if (commitLog) {
+  if (commitLog !== '') {
     console.log(pc.dim('\n  Commits:'));
     for (const line of commitLog.split('\n')) {
       console.log(pc.dim(`    ${line}`));
     }
   }
-  if (diffStat) {
+  if (diffStat !== '') {
     console.log(pc.dim('\n  Changes:'));
     for (const line of diffStat.split('\n')) {
       console.log(pc.dim(`    ${line}`));
@@ -143,6 +143,136 @@ export interface HandleBranchActionOpts {
   useSmartMerge?: boolean;
 }
 
+function doMerge(
+  projectRoot: string,
+  branch: string,
+  baseBranch: string,
+  useSmartMerge: boolean,
+  withLog: boolean,
+): boolean {
+  if (!useSmartMerge) return mergeBranch(projectRoot, branch, baseBranch);
+  if (!withLog) return smartMerge(projectRoot, branch, baseBranch);
+  return smartMerge(projectRoot, branch, baseBranch, {
+    log: {
+      info: (m: string) => {
+        console.log(pc.dim(`  ${m}`));
+      },
+      ok: (m: string) => {
+        console.log(pc.green(`  ${m}`));
+      },
+      warn: (m: string) => {
+        console.log(pc.yellow(`  ${m}`));
+      },
+    },
+  });
+}
+
+function tryCreatePR(
+  projectRoot: string,
+  branch: string,
+  baseBranch: string,
+): 'pr-created' | 'skipped' {
+  const result = pushBranchAndCreatePR({ cwd: projectRoot, branch, baseBranch });
+  if (result.ok) {
+    console.log(pc.green(`  + PR created: ${result.url ?? ''}`));
+    return 'pr-created';
+  }
+  console.log(pc.red(`  x PR creation failed: ${result.error ?? 'unknown error'}`));
+  return 'skipped';
+}
+
+async function handlePR(
+  rl: readline.Interface,
+  projectRoot: string,
+  branch: string,
+  baseBranch: string,
+  enablePR: boolean,
+): Promise<'pr-created' | 'skipped'> {
+  if (!enablePR) {
+    console.log(pc.dim('  Skipped.'));
+    return 'skipped';
+  }
+  const outcome = tryCreatePR(projectRoot, branch, baseBranch);
+  if (outcome === 'pr-created') {
+    const delAnswer = await ask(rl, `  Delete local branch? (y/N) `);
+    if (delAnswer === 'y' || delAnswer === 'yes') {
+      checkoutBranch(projectRoot, baseBranch);
+      deleteBranch(projectRoot, branch);
+      console.log(pc.dim('  Branch deleted.'));
+    }
+  }
+  return outcome;
+}
+
+async function handleMerge(
+  rl: readline.Interface,
+  projectRoot: string,
+  branch: string,
+  baseBranch: string,
+  useSmartMerge: boolean,
+): Promise<'merged' | 'skipped'> {
+  const ok = doMerge(projectRoot, branch, baseBranch, useSmartMerge, true);
+  if (!ok) {
+    console.log(pc.red(`  x Merge failed — resolve conflicts manually`));
+    console.log(pc.dim(`    git merge ${branch}`));
+    return 'skipped';
+  }
+  console.log(pc.green(`  + Merged ${branch} into ${baseBranch}`));
+  const delAnswer = await ask(rl, `  Delete branch after merge? (Y/n) `);
+  if (delAnswer !== 'n' && delAnswer !== 'no') {
+    deleteBranch(projectRoot, branch);
+    console.log(pc.dim('  Branch deleted.'));
+  }
+  return 'merged';
+}
+
+function handlePostDiffAction(
+  postDiff: string,
+  projectRoot: string,
+  branch: string,
+  baseBranch: string,
+  opts: HandleBranchActionOpts,
+): 'merged' | 'skipped' | 'deleted' | 'pr-created' {
+  if ((postDiff === 'p' || postDiff === 'pr') && opts.enablePR === true) {
+    return tryCreatePR(projectRoot, branch, baseBranch);
+  }
+  if (postDiff === 'm' || postDiff === 'merge') {
+    const ok = doMerge(projectRoot, branch, baseBranch, opts.useSmartMerge === true, false);
+    if (ok) {
+      console.log(pc.green(`  + Merged ${branch} into ${baseBranch}`));
+      deleteBranch(projectRoot, branch);
+      console.log(pc.dim('  Branch deleted.'));
+      return 'merged';
+    }
+    console.log(pc.red(`  x Merge failed`));
+    return 'skipped';
+  }
+  if (postDiff === 'x' || postDiff === 'delete') {
+    deleteBranch(projectRoot, branch);
+    console.log(pc.dim('  Branch deleted.'));
+    return 'deleted';
+  }
+  console.log(pc.dim('  Skipped.'));
+  return 'skipped';
+}
+
+async function handleDiff(
+  rl: readline.Interface,
+  projectRoot: string,
+  branch: string,
+  baseBranch: string,
+  opts: HandleBranchActionOpts,
+): Promise<'merged' | 'skipped' | 'deleted' | 'pr-created'> {
+  const fullDiff = getBranchDiff(projectRoot, branch, baseBranch);
+  console.log(`\n${fullDiff}\n`);
+  const prLabel2 = opts.enablePR === true ? `[${pc.magenta('p')}]r  ` : '';
+  const postDiff = await ask(
+    rl,
+    `  After review: ${prLabel2}[${pc.green('m')}]erge  [${pc.yellow('s')}]kip  [${pc.red('x')}]delete  ? `,
+  );
+  return handlePostDiffAction(postDiff, projectRoot, branch, baseBranch, opts);
+}
+
 export async function handleBranchAction(
   rl: readline.Interface,
   projectRoot: string,
@@ -150,7 +280,7 @@ export async function handleBranchAction(
   baseBranch: string,
   opts: HandleBranchActionOpts = {},
 ): Promise<'merged' | 'skipped' | 'deleted' | 'pr-created'> {
-  const prLabel = opts.enablePR ? `[${pc.magenta('p')}]r  ` : '';
+  const prLabel = opts.enablePR === true ? `[${pc.magenta('p')}]r  ` : '';
   const answer = await ask(
     rl,
     `  ${prLabel}[${pc.green('m')}]erge  [${pc.yellow('s')}]kip  [${pc.blue('d')}]iff  [${pc.red('x')}]delete  ? `,
@@ -158,110 +288,22 @@ export async function handleBranchAction(
 
   switch (answer) {
     case 'p':
-    case 'pr': {
-      if (!opts.enablePR) {
-        console.log(pc.dim('  Skipped.'));
-        return 'skipped';
-      }
-      const result = pushBranchAndCreatePR({ cwd: projectRoot, branch, baseBranch });
-      if (result.ok) {
-        console.log(pc.green(`  + PR created: ${result.url ?? ''}`));
-        const delAnswer = await ask(rl, `  Delete local branch? (y/N) `);
-        if (delAnswer === 'y' || delAnswer === 'yes') {
-          checkoutBranch(projectRoot, baseBranch);
-          deleteBranch(projectRoot, branch);
-          console.log(pc.dim('  Branch deleted.'));
-        }
-        return 'pr-created';
-      } else {
-        console.log(pc.red(`  x PR creation failed: ${result.error ?? 'unknown error'}`));
-        return 'skipped';
-      }
-    }
-
+    case 'pr':
+      return handlePR(rl, projectRoot, branch, baseBranch, opts.enablePR === true);
     case 'm':
-    case 'merge': {
-      const ok = opts.useSmartMerge
-        ? smartMerge(projectRoot, branch, baseBranch, {
-            log: {
-              info: (m) => {
-                console.log(pc.dim(`  ${m}`));
-              },
-              ok: (m) => {
-                console.log(pc.green(`  ${m}`));
-              },
-              warn: (m) => {
-                console.log(pc.yellow(`  ${m}`));
-              },
-            },
-          })
-        : mergeBranch(projectRoot, branch, baseBranch);
-      if (ok) {
-        console.log(pc.green(`  + Merged ${branch} into ${baseBranch}`));
-        const delAnswer = await ask(rl, `  Delete branch after merge? (Y/n) `);
-        if (delAnswer !== 'n' && delAnswer !== 'no') {
-          deleteBranch(projectRoot, branch);
-          console.log(pc.dim('  Branch deleted.'));
-        }
-        return 'merged';
-      } else {
-        console.log(pc.red(`  x Merge failed — resolve conflicts manually`));
-        console.log(pc.dim(`    git merge ${branch}`));
-        return 'skipped';
-      }
-    }
-
+    case 'merge':
+      return handleMerge(rl, projectRoot, branch, baseBranch, opts.useSmartMerge === true);
     case 'd':
-    case 'diff': {
-      const fullDiff = getBranchDiff(projectRoot, branch, baseBranch);
-      console.log(`\n${fullDiff}\n`);
-      const prLabel2 = opts.enablePR ? `[${pc.magenta('p')}]r  ` : '';
-      const postDiff = await ask(
-        rl,
-        `  After review: ${prLabel2}[${pc.green('m')}]erge  [${pc.yellow('s')}]kip  [${pc.red('x')}]delete  ? `,
-      );
-      if ((postDiff === 'p' || postDiff === 'pr') && opts.enablePR) {
-        const result = pushBranchAndCreatePR({ cwd: projectRoot, branch, baseBranch });
-        if (result.ok) {
-          console.log(pc.green(`  + PR created: ${result.url ?? ''}`));
-          return 'pr-created';
-        } else {
-          console.log(pc.red(`  x PR creation failed: ${result.error ?? 'unknown error'}`));
-          return 'skipped';
-        }
-      } else if (postDiff === 'm' || postDiff === 'merge') {
-        const ok = opts.useSmartMerge
-          ? smartMerge(projectRoot, branch, baseBranch)
-          : mergeBranch(projectRoot, branch, baseBranch);
-        if (ok) {
-          console.log(pc.green(`  + Merged ${branch} into ${baseBranch}`));
-          deleteBranch(projectRoot, branch);
-          console.log(pc.dim('  Branch deleted.'));
-          return 'merged';
-        } else {
-          console.log(pc.red(`  x Merge failed`));
-          return 'skipped';
-        }
-      } else if (postDiff === 'x' || postDiff === 'delete') {
-        deleteBranch(projectRoot, branch);
-        console.log(pc.dim('  Branch deleted.'));
-        return 'deleted';
-      }
-      console.log(pc.dim('  Skipped.'));
-      return 'skipped';
-    }
-
+    case 'diff':
+      return handleDiff(rl, projectRoot, branch, baseBranch, opts);
     case 'x':
-    case 'delete': {
+    case 'delete':
       deleteBranch(projectRoot, branch);
       console.log(pc.dim('  Branch deleted.'));
       return 'deleted';
-    }
-
-    default: {
+    default:
       console.log(pc.dim('  Skipped.'));
       return 'skipped';
-    }
   }
 }
 
