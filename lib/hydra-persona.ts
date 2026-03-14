@@ -85,9 +85,9 @@ function buildToneBlock(p: PersonaConfig): string {
   const tone = TONE_MODIFIERS[p.tone ?? ''] ?? '';
   const verb = VERBOSITY_MODIFIERS[p.verbosity ?? ''] ?? '';
   const form = FORMALITY_MODIFIERS[p.formality ?? ''] ?? '';
-  if (tone) parts.push(tone);
-  if (verb) parts.push(verb);
-  if (form) parts.push(form);
+  if (tone !== '') parts.push(tone);
+  if (verb !== '') parts.push(verb);
+  if (form !== '') parts.push(form);
   if (p.humor === false) {
     parts.push('Do not use humor, wit, or personality. Stay purely functional.');
   }
@@ -98,7 +98,8 @@ function buildToneBlock(p: PersonaConfig): string {
 
 export function getConciergeIdentity(): string | null {
   const p = getPersonaConfig();
-  if (!p.enabled) return null; // caller falls back to hardcoded text
+  if (p.enabled == null) return null; // caller falls back to hardcoded text
+  if (!p.enabled) return null;
 
   const voice = p.voice ?? '';
   const toneBlock = buildToneBlock(p);
@@ -107,7 +108,7 @@ export function getConciergeIdentity(): string | null {
   return [
     p.identity ?? '',
     '',
-    voiceLine ? `Communication style: ${voiceLine}` : '',
+    voiceLine === '' ? '' : `Communication style: ${voiceLine}`,
     '',
     'You are the conversational interface. You answer questions directly, help think through problems, and escalate to your specialized perspectives when hands-on work is needed.',
   ].join('\n');
@@ -115,7 +116,7 @@ export function getConciergeIdentity(): string | null {
 
 export function getAgentFraming(agentName: string): string {
   const p = getPersonaConfig();
-  const name = (agentName || '').toLowerCase();
+  const name = agentName.toLowerCase();
   return p.agentFraming?.[name] ?? `You are ${p.name ?? 'Hydra'}'s ${name} perspective.`;
 }
 
@@ -133,11 +134,11 @@ export function applyPreset(presetName: string): boolean {
   if (!preset) return false;
 
   // Overlay preset values onto persona (voice only if preset specifies one)
-  if (preset.tone) persona.tone = preset.tone;
-  if (preset.verbosity) persona.verbosity = preset.verbosity;
-  if (preset.formality) persona.formality = preset.formality;
+  if (preset.tone != null && preset.tone !== '') persona.tone = preset.tone;
+  if (preset.verbosity != null && preset.verbosity !== '') persona.verbosity = preset.verbosity;
+  if (preset.formality != null && preset.formality !== '') persona.formality = preset.formality;
   if (preset.humor !== undefined) persona.humor = preset.humor;
-  if (preset.voice) persona.voice = preset.voice;
+  if (preset.voice != null && preset.voice !== '') persona.voice = preset.voice;
 
   cfg.persona = persona;
   saveHydraConfig(cfg);
@@ -172,6 +173,165 @@ interface PromptChoiceResult {
   timedOut?: boolean;
 }
 
+function applyPresetFields(preset: PersonaPreset, persona: PersonaConfig): void {
+  if (preset.tone != null && preset.tone !== '') persona.tone = preset.tone;
+  if (preset.verbosity != null && preset.verbosity !== '') persona.verbosity = preset.verbosity;
+  if (preset.formality != null && preset.formality !== '') persona.formality = preset.formality;
+  if (preset.humor !== undefined) persona.humor = preset.humor;
+  if (preset.voice != null && preset.voice !== '') persona.voice = preset.voice;
+}
+
+async function handlePresetChoice(
+  rl: ReadlineInterface,
+  persona: PersonaConfig,
+  changes: string[],
+  promptChoice: PromptChoiceFn,
+): Promise<void> {
+  const presetNames = Object.keys(persona.presets ?? {});
+  if (presetNames.length === 0) {
+    console.log(`  ${pc.dim('No presets available.')}`);
+    return;
+  }
+  const pick = await promptChoice(rl, {
+    title: 'Select Preset',
+    choices: presetNames.map((n) => ({ label: n, value: n })),
+  });
+  const pickValue = typeof pick?.value === 'string' ? pick.value : '';
+  if (pickValue !== '') {
+    const preset = persona.presets?.[pickValue];
+    if (preset) {
+      applyPresetFields(preset, persona);
+      changes.push(`preset → ${pickValue}`);
+      console.log(`  ${pc.green('Applied preset:')} ${pickValue}`);
+    }
+  }
+}
+
+interface TweakResult {
+  tone?: string;
+  verbosity?: string;
+  formality?: string;
+  humor?: boolean;
+}
+
+async function collectTweakChoices(
+  rl: ReadlineInterface,
+  persona: PersonaConfig,
+  promptChoice: PromptChoiceFn,
+): Promise<TweakResult> {
+  const tone = await promptChoice(rl, {
+    title: 'Tone',
+    context: `Current: ${persona.tone ?? 'balanced'}`,
+    choices: [
+      { label: 'formal', value: 'formal' },
+      { label: 'balanced', value: 'balanced' },
+      { label: 'casual', value: 'casual' },
+      { label: 'terse', value: 'terse' },
+    ],
+  });
+
+  const verb = await promptChoice(rl, {
+    title: 'Verbosity',
+    context: `Current: ${persona.verbosity ?? 'concise'}`,
+    choices: [
+      { label: 'minimal', value: 'minimal' },
+      { label: 'concise', value: 'concise' },
+      { label: 'detailed', value: 'detailed' },
+    ],
+  });
+
+  const form = await promptChoice(rl, {
+    title: 'Formality',
+    context: `Current: ${persona.formality ?? 'neutral'}`,
+    choices: [
+      { label: 'formal', value: 'formal' },
+      { label: 'neutral', value: 'neutral' },
+      { label: 'informal', value: 'informal' },
+    ],
+  });
+
+  const humor = await promptChoice(rl, {
+    title: 'Humor',
+    context: `Current: ${persona.humor === false ? 'off' : 'on'}`,
+    choices: [
+      { label: 'On', value: true },
+      { label: 'Off', value: false },
+    ],
+  });
+
+  return buildTweakResult(tone, verb, form, humor);
+}
+
+function buildTweakResult(
+  tone: PromptChoiceResult | null,
+  verb: PromptChoiceResult | null,
+  form: PromptChoiceResult | null,
+  humor: PromptChoiceResult | null,
+): TweakResult {
+  const result: TweakResult = {};
+  const toneValue = typeof tone?.value === 'string' ? tone.value : '';
+  if (toneValue !== '') result.tone = toneValue;
+  const verbValue = typeof verb?.value === 'string' ? verb.value : '';
+  if (verbValue !== '') result.verbosity = verbValue;
+  const formValue = typeof form?.value === 'string' ? form.value : '';
+  if (formValue !== '') result.formality = formValue;
+  if (humor?.value !== undefined && typeof humor.value === 'boolean') result.humor = humor.value;
+  return result;
+}
+
+async function handleTweakSettings(
+  rl: ReadlineInterface,
+  persona: PersonaConfig,
+  changes: string[],
+  promptChoice: PromptChoiceFn,
+): Promise<void> {
+  const tweaks = await collectTweakChoices(rl, persona, promptChoice);
+  const p = persona;
+  if (tweaks.tone !== undefined) {
+    p.tone = tweaks.tone;
+    changes.push(`tone → ${tweaks.tone}`);
+  }
+  if (tweaks.verbosity !== undefined) {
+    p.verbosity = tweaks.verbosity;
+    changes.push(`verbosity → ${tweaks.verbosity}`);
+  }
+  if (tweaks.formality !== undefined) {
+    p.formality = tweaks.formality;
+    changes.push(`formality → ${tweaks.formality}`);
+  }
+  if (tweaks.humor !== undefined) {
+    p.humor = tweaks.humor;
+    changes.push(`humor → ${tweaks.humor ? 'on' : 'off'}`);
+  }
+}
+
+async function handleNameEdit(
+  rl: ReadlineInterface,
+  persona: PersonaConfig,
+  changes: string[],
+  promptChoice: PromptChoiceFn,
+): Promise<void> {
+  const nameResult = await promptChoice(rl, {
+    title: 'Persona Name',
+    context: `Current: ${persona.name ?? 'Hydra'}`,
+    freeform: true,
+    choices: [
+      { label: 'Hydra', value: 'Hydra' },
+      { label: 'Custom (type below)', value: '__freeform__' },
+    ],
+  } as Parameters<PromptChoiceFn>[1]);
+  const nameValue = typeof nameResult?.value === 'string' ? nameResult.value : '';
+  const localPersona = persona;
+  if (nameValue !== '' && nameValue !== '__freeform__') {
+    localPersona.name = nameValue;
+    changes.push(`name → ${nameValue}`);
+  }
+}
+
+type PromptChoiceFn = (
+  ...args: [ReadlineInterface, Record<string, unknown>]
+) => Promise<PromptChoiceResult | null>;
+
 export async function runPersonaEditor(rl: ReadlineInterface): Promise<void> {
   const { promptChoice } = await import('./hydra-prompt-choice.ts');
 
@@ -198,122 +358,16 @@ export async function runPersonaEditor(rl: ReadlineInterface): Promise<void> {
       ],
     })) as PromptChoiceResult | null;
 
-    if (!action || action.value === 'done' || action.timedOut) {
+    if (action == null || action.value === 'done' || action.timedOut === true) {
       break;
     }
 
-    if (action.value === 'preset') {
-      const presetNames = Object.keys(persona.presets ?? {});
-      if (presetNames.length === 0) {
-        console.log(`  ${pc.dim('No presets available.')}`);
-        continue;
-      }
-      // eslint-disable-next-line no-await-in-loop -- intentionally sequential: interactive preset picker; must wait for user selection before applying
-      const pick = (await promptChoice(rl, {
-        title: 'Select Preset',
-        choices: presetNames.map((n) => ({ label: n, value: n })),
-      })) as PromptChoiceResult | null;
-      const pickValue = typeof pick?.value === 'string' ? pick.value : '';
-      if (pickValue) {
-        const preset = persona.presets?.[pickValue];
-        if (preset) {
-          if (preset.tone) persona.tone = preset.tone;
-          if (preset.verbosity) persona.verbosity = preset.verbosity;
-          if (preset.formality) persona.formality = preset.formality;
-          if (preset.humor !== undefined) persona.humor = preset.humor;
-          if (preset.voice) persona.voice = preset.voice;
-          changes.push(`preset → ${pickValue}`);
-          console.log(`  ${pc.green('Applied preset:')} ${pickValue}`);
-        }
-      }
-    }
-
-    if (action.value === 'tweak') {
-      // Tone
-      // eslint-disable-next-line no-await-in-loop -- intentionally sequential: interactive tweak wizard; tone/verbosity/formality/humor must be collected one at a time
-      const tone = (await promptChoice(rl, {
-        title: 'Tone',
-        context: `Current: ${persona.tone ?? 'balanced'}`,
-        choices: [
-          { label: 'formal', value: 'formal' },
-          { label: 'balanced', value: 'balanced' },
-          { label: 'casual', value: 'casual' },
-          { label: 'terse', value: 'terse' },
-        ],
-      })) as PromptChoiceResult | null;
-      const toneValue = typeof tone?.value === 'string' ? tone.value : '';
-      if (toneValue) {
-        persona.tone = toneValue;
-        changes.push(`tone → ${toneValue}`);
-      }
-
-      // Verbosity
-      // eslint-disable-next-line no-await-in-loop -- intentionally sequential: interactive tweak wizard; verbosity follows tone selection
-      const verb = (await promptChoice(rl, {
-        title: 'Verbosity',
-        context: `Current: ${persona.verbosity ?? 'concise'}`,
-        choices: [
-          { label: 'minimal', value: 'minimal' },
-          { label: 'concise', value: 'concise' },
-          { label: 'detailed', value: 'detailed' },
-        ],
-      })) as PromptChoiceResult | null;
-      const verbValue = typeof verb?.value === 'string' ? verb.value : '';
-      if (verbValue) {
-        persona.verbosity = verbValue;
-        changes.push(`verbosity → ${verbValue}`);
-      }
-
-      // Formality
-      // eslint-disable-next-line no-await-in-loop -- intentionally sequential: interactive tweak wizard; formality follows verbosity selection
-      const form = (await promptChoice(rl, {
-        title: 'Formality',
-        context: `Current: ${persona.formality ?? 'neutral'}`,
-        choices: [
-          { label: 'formal', value: 'formal' },
-          { label: 'neutral', value: 'neutral' },
-          { label: 'informal', value: 'informal' },
-        ],
-      })) as PromptChoiceResult | null;
-      const formValue = typeof form?.value === 'string' ? form.value : '';
-      if (formValue) {
-        persona.formality = formValue;
-        changes.push(`formality → ${formValue}`);
-      }
-
-      // Humor
-      // eslint-disable-next-line no-await-in-loop -- intentionally sequential: interactive tweak wizard; humor follows formality selection
-      const humor = (await promptChoice(rl, {
-        title: 'Humor',
-        context: `Current: ${persona.humor === false ? 'off' : 'on'}`,
-        choices: [
-          { label: 'On', value: true },
-          { label: 'Off', value: false },
-        ],
-      })) as PromptChoiceResult | null;
-      if (humor?.value !== undefined && typeof humor.value === 'boolean') {
-        persona.humor = humor.value;
-        changes.push(`humor → ${humor.value ? 'on' : 'off'}`);
-      }
-    }
-
-    if (action.value === 'name') {
-      // eslint-disable-next-line no-await-in-loop -- intentionally sequential: interactive name editor; awaits user input before returning to menu
-      const nameResult = (await promptChoice(rl, {
-        title: 'Persona Name',
-        context: `Current: ${persona.name ?? 'Hydra'}`,
-        freeform: true,
-        choices: [
-          { label: 'Hydra', value: 'Hydra' },
-          { label: 'Custom (type below)', value: '__freeform__' },
-        ],
-      } as Parameters<typeof promptChoice>[1])) as PromptChoiceResult | null;
-      const nameValue = typeof nameResult?.value === 'string' ? nameResult.value : '';
-      if (nameValue && nameValue !== '__freeform__') {
-        persona.name = nameValue;
-        changes.push(`name → ${nameValue}`);
-      }
-    }
+    // eslint-disable-next-line no-await-in-loop -- intentionally sequential: interactive menu handlers must complete before next iteration
+    if (action.value === 'preset') await handlePresetChoice(rl, persona, changes, promptChoice);
+    // eslint-disable-next-line no-await-in-loop -- intentionally sequential: interactive menu handlers must complete before next iteration
+    if (action.value === 'tweak') await handleTweakSettings(rl, persona, changes, promptChoice);
+    // eslint-disable-next-line no-await-in-loop -- intentionally sequential: interactive menu handlers must complete before next iteration
+    if (action.value === 'name') await handleNameEdit(rl, persona, changes, promptChoice);
 
     if (action.value === 'toggle') {
       persona.enabled = persona.enabled === false;
