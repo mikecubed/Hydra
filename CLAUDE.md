@@ -54,6 +54,7 @@ Branch naming conventions: `feat/...`, `fix/...`, `docs/...`, `chore/...`, or `c
 npm test                    # Run all tests (Node.js native test runner)
 npm run test:coverage       # Run all tests with c8 coverage reporting
 npm run test:coverage:check # Run tests with 80% threshold — exits non-zero if below (CI surfaces this as warn-only via continue-on-error)
+npm run test:mutation       # Run Stryker mutation tests against lib/hydra-shared/**/*.ts (warn <60%, break <40%)
 node --test test/hydra-ui.test.ts   # Run a single test file
 npm start                   # Start the daemon (port 4173)
 npm run go                  # Launch operator console (interactive REPL)
@@ -142,6 +143,7 @@ flowchart TD
 - **Provider presets**: `getProviderPresets()` from `hydra-config.ts` returns built-in GLM-5 / Kimi K2.5 templates. Used by `:agents add` wizard preset picker.
 - **Custom agent wizard**: `lib/hydra-agents-wizard.ts` — `runAgentsWizard(rl)` guides CLI or API agent setup, writes to `agents.customAgents[]`, calls `registerCustomAgentMcp()`. Exports `buildCustomAgentEntry()`, `parseArgsTemplate()`, `validateAgentName()`. Accessed via `:agents add`. `lib/hydra-setup.ts` exports `registerCustomAgentMcp({ configPath, format, force? })` and `KNOWN_CLI_MCP_PATHS` for MCP injection into custom agent config files.
 - **Task worktree isolation**: `routing.worktreeIsolation.enabled` (default: false) — daemon creates/merges/cleans per-task worktrees at claim/result time. `:cleanup` sweeps stale worktrees via `scanStaleTaskWorktrees()`.
+- **Process exit**: Always use `exit()` from `lib/hydra-process.ts` instead of `process.exit()` directly. This allows tests to intercept exit calls via `setExitHandler(fn)` without terminating the process. Reset with `resetExitHandler()` in test teardown.
 
 ## Test Patterns
 
