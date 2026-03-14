@@ -31,6 +31,7 @@ import {
   resolveCliModelId,
 } from './hydra-model-profiles.ts';
 import { extractCodexText, extractCodexUsage } from './hydra-shared/codex-helpers.ts';
+import { DefaultBudgetGate } from './hydra-shared/budget-gate.ts';
 import { DISPATCH_PREFERENCE_ORDER } from './hydra-routing-constants.ts';
 
 // ── Agent Type Enum ──────────────────────────────────────────────────────────
@@ -1011,11 +1012,10 @@ export function bestAgentFor(taskType: string, opts: BestAgentOpts = {}): string
   const overrides = learningEnabled === true ? loadAffinityOverrides() : {};
 
   // Budget gate: auto-boost local when cloud usage exceeds thresholds
-  const localGate = cfg.local.budgetGate ?? { dailyPct: 80, weeklyPct: 75 };
+  const localGate = new DefaultBudgetGate(cfg.local.budgetGate);
   const dailyPct = budgetState?.daily?.percentUsed ?? budgetState?.percent;
   const weeklyPct = budgetState?.weekly?.percentUsed ?? budgetState?.weekly?.percent;
-  const budgetTriggered =
-    (dailyPct ?? 0) > localGate.dailyPct || (weeklyPct ?? 0) > localGate.weeklyPct;
+  const budgetTriggered = localGate.isExceeded(dailyPct ?? 0, weeklyPct ?? 0);
 
   const localBoost = mode === 'economy' || budgetTriggered;
   const localPenalty = mode === 'performance';
