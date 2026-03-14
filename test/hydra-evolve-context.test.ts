@@ -23,6 +23,23 @@ describe('buildAgentContext (used by hydra-evolve-executor)', () => {
     assert.ok(ctx.length > 0, 'should return a non-empty string');
   });
 
+  it('returns meaningful context (length > 200 chars)', () => {
+    const ctx = buildAgentContext('claude', {}, null, null);
+    assert.ok(
+      ctx.length > 200,
+      `expected context length > 200, got ${String(ctx.length)} chars:\n${ctx}`,
+    );
+  });
+
+  it('contains at least one real module reference', () => {
+    const ctx = buildAgentContext('claude', {}, null, null);
+    const hasModuleRef = ctx.includes('hydra-operator') || ctx.includes('lib/');
+    assert.ok(
+      hasModuleRef,
+      `expected context to reference a module (hydra-operator or lib/), got:\n${ctx.slice(0, 400)}`,
+    );
+  });
+
   it('contains dynamic project metadata (name, tech, branch)', () => {
     const ctx = buildAgentContext('claude', {}, null, null);
     // buildAgentContext produces metadata-driven output including project name and tech stack.
