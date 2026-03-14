@@ -203,9 +203,9 @@ describe('runAutoPrompt preview routing', () => {
       'Refactor ALL of the authentication layer end-to-end with full test suite',
       'Fix typo',
     ];
-    for (const promptText of prompts) {
-      await assert.doesNotReject(runAutoPrompt({ ...baseOpts, promptText }));
-    }
+    await Promise.all(
+      prompts.map((promptText) => assert.doesNotReject(runAutoPrompt({ ...baseOpts, promptText }))),
+    );
   });
 
   it('sets escalatedToCouncil=false for fast-path route', async () => {
@@ -271,8 +271,10 @@ describe('runSmartPrompt preview routing', () => {
 
   it('does not throw for any prompt in preview mode', async () => {
     const prompts = ['Fix typo', 'Design and implement full distributed caching system', ''];
-    for (const promptText of prompts) {
-      await assert.doesNotReject(runSmartPrompt({ ...baseOpts, promptText }));
-    }
+    await Promise.all(
+      prompts.map((promptText) =>
+        assert.doesNotReject(runSmartPrompt({ ...baseOpts, promptText })),
+      ),
+    );
   });
 });

@@ -31,6 +31,22 @@ describe('copilot agent definition', () => {
     invalidateConfigCache();
   });
 
+  /** Extracts and asserts invoke.headless from an agent definition. */
+  function assertHeadless(agent: AgentDef) {
+    assert.ok(agent.invoke != null, 'agent.invoke must be defined');
+    const { headless } = agent.invoke;
+    assert.ok(headless != null, 'agent.invoke.headless must be defined');
+    return headless;
+  }
+
+  /** Extracts and asserts invoke.nonInteractive from an agent definition. */
+  function assertNonInteractive(agent: AgentDef) {
+    assert.ok(agent.invoke != null, 'agent.invoke must be defined');
+    const { nonInteractive } = agent.invoke;
+    assert.ok(nonInteractive != null, 'agent.invoke.nonInteractive must be defined');
+    return nonInteractive;
+  }
+
   it('registers copilot as a physical agent', () => {
     const agent = getAgent('copilot');
     assert.ok(agent, 'copilot must be registered');
@@ -210,7 +226,8 @@ describe('copilot agent definition', () => {
   it('headless plan mode uses -p flag, --silent, --no-ask-user, and no allow flags', () => {
     const agent = getAgent('copilot');
     assert.ok(agent.invoke);
-    const [cmd, args] = agent.invoke.headless!('test prompt', { permissionMode: 'plan' });
+    const headless = assertHeadless(agent);
+    const [cmd, args] = headless('test prompt', { permissionMode: 'plan' });
     assert.equal(cmd, 'copilot');
     assert.ok(args.includes('-p'), 'Missing -p flag');
     assert.ok(args.includes('test prompt'), 'Missing prompt in args');
@@ -222,7 +239,8 @@ describe('copilot agent definition', () => {
 
   it('headless passes --model when opts.model provided', () => {
     const agent = getAgent('copilot');
-    const [, args] = agent.invoke!.headless!('test prompt', { model: 'claude-sonnet-4.6' });
+    const headless = assertHeadless(agent);
+    const [, args] = headless('test prompt', { model: 'claude-sonnet-4.6' });
     const modelIdx = args.indexOf('--model');
     assert.ok(modelIdx !== -1, 'Missing --model flag');
     assert.equal(args[modelIdx + 1], 'claude-sonnet-4.6');
@@ -230,20 +248,23 @@ describe('copilot agent definition', () => {
 
   it('headless does NOT pass --model when opts.model is omitted', () => {
     const agent = getAgent('copilot');
-    const [, args] = agent.invoke!.headless!('test prompt', {});
+    const headless = assertHeadless(agent);
+    const [, args] = headless('test prompt', {});
     assert.ok(!args.includes('--model'), 'Unexpected --model flag when no model specified');
   });
 
   it('headless always passes --output-format json by default (features.jsonOutput: true)', () => {
     const agent = getAgent('copilot');
-    const [, args] = agent.invoke!.headless!('test prompt', {});
+    const headless = assertHeadless(agent);
+    const [, args] = headless('test prompt', {});
     assert.ok(args.includes('--output-format'), 'Missing --output-format');
     assert.equal(args[args.indexOf('--output-format') + 1], 'json');
   });
 
   it('headless omits --output-format when opts.jsonOutput explicitly false', () => {
     const agent = getAgent('copilot');
-    const [, args] = agent.invoke!.headless!('test prompt', { jsonOutput: false });
+    const headless = assertHeadless(agent);
+    const [, args] = headless('test prompt', { jsonOutput: false });
     assert.ok(
       !args.includes('--output-format'),
       'Unexpected --output-format when jsonOutput false',
@@ -252,7 +273,8 @@ describe('copilot agent definition', () => {
 
   it('headless full-auto uses --allow-all-tools', () => {
     const agent = getAgent('copilot');
-    const [cmd, args] = agent.invoke!.headless!('test prompt', { permissionMode: 'full-auto' });
+    const headless = assertHeadless(agent);
+    const [cmd, args] = headless('test prompt', { permissionMode: 'full-auto' });
     assert.equal(cmd, 'copilot');
     assert.ok(args.includes('-p'), 'Missing -p flag');
     assert.ok(args.includes('--allow-all-tools'), 'Missing --allow-all-tools in full-auto mode');
@@ -260,7 +282,8 @@ describe('copilot agent definition', () => {
 
   it('headless auto-edit uses specific allow-tool flags', () => {
     const agent = getAgent('copilot');
-    const [cmd, args] = agent.invoke!.headless!('test prompt', { permissionMode: 'auto-edit' });
+    const headless = assertHeadless(agent);
+    const [cmd, args] = headless('test prompt', { permissionMode: 'auto-edit' });
     assert.equal(cmd, 'copilot');
     assert.ok(args.includes('-p'), 'Missing -p flag');
     assert.ok(args.includes('--allow-tool'), 'Missing --allow-tool in auto-edit mode');
@@ -273,7 +296,8 @@ describe('copilot agent definition', () => {
   it('headless resolves Hydra internal model IDs to CLI model IDs', () => {
     const agent = getAgent('copilot');
     // copilot-claude-sonnet-4-6 → claude-sonnet-4.6 (via cliModelId in model profile)
-    const [, args] = agent.invoke!.headless!('test prompt', {
+    const headless = assertHeadless(agent);
+    const [, args] = headless('test prompt', {
       model: 'copilot-claude-sonnet-4-6',
     });
     const modelIdx = args.indexOf('--model');
@@ -287,7 +311,8 @@ describe('copilot agent definition', () => {
 
   it('nonInteractive uses -p flag (no allow flags)', () => {
     const agent = getAgent('copilot');
-    const [cmd, args] = agent.invoke!.nonInteractive!('test prompt');
+    const nonInteractive = assertNonInteractive(agent);
+    const [cmd, args] = nonInteractive('test prompt');
     assert.equal(cmd, 'copilot');
     assert.ok(args.includes('-p'), 'Missing -p flag');
     assert.ok(args.includes('test prompt'), 'Missing prompt in args');
