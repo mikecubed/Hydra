@@ -65,10 +65,11 @@ import {
   appendEvent,
   replayEvents,
 } from './daemon/state.ts';
-import type { ServerResponse } from 'node:http';
+import type { ServerResponse, IncomingMessage } from 'node:http';
 import type {
   HydraStateShape,
   TaskEntry,
+  ReadRouteCtx,
   WriteRouteCtx,
   UsageCheckResult,
   ModelSummaryEntry,
@@ -112,6 +113,679 @@ function parseArgs(argv: string[]) {
   return { command, options };
 }
 
+interface DaemonContext {
+  host: string;
+  port: number;
+  isShuttingDown: boolean;
+  startedAt: string;
+  lastEventAt: string;
+  eventCount: number;
+  writeQueue: Promise<unknown>;
+  sseClients: Set<ServerResponse>;
+}
+
+interface DaemonIntervals {
+  statusInterval: ReturnType<typeof setInterval>;
+  metricsInterval: ReturnType<typeof setInterval>;
+  archiveInterval: ReturnType<typeof setInterval>;
+  staleInterval: ReturnType<typeof setInterval>;
+}
+
+type VerificationCallback = (error: Error | null, stdout: string, stderr: string) => void;
+
+function createDaemonContext(host: string, port: number): DaemonContext {
+  return {
+    host,
+    port,
+    isShuttingDown: false,
+    startedAt: nowIso(),
+    lastEventAt: nowIso(),
+    eventCount: 0,
+    writeQueue: Promise.resolve(),
+    sseClients: new Set<ServerResponse>(),
+  };
+}
+
+function broadcastEvent(sseClients: Set<ServerResponse>, event: unknown) {
+  if (sseClients.size === 0) return;
+  const data = JSON.stringify(event);
+  for (const client of sseClients) {
+    try {
+      client.write(`data: ${data}\n\n`);
+    } catch {
+      sseClients.delete(client);
+    }
+  }
+}
+
+function writeStatus(ctx: DaemonContext, extra: Record<string, unknown> = {}) {
+  const state = readState();
+  const payload = {
+    service: 'hydra-orchestrator',
+    project: config.projectName,
+    projectRoot: config.projectRoot,
+    running: !ctx.isShuttingDown,
+    pid: process.pid,
+    host: ctx.host,
+    port: ctx.port,
+    startedAt: ctx.startedAt,
+    updatedAt: nowIso(),
+    uptimeSec: Math.floor(process.uptime()),
+    stateUpdatedAt: state.updatedAt,
+    activeSessionId: state.activeSession?.id ?? null,
+    eventsRecorded: ctx.eventCount,
+    lastEventAt: ctx.lastEventAt,
+    ...extra,
+  };
+  fs.writeFileSync(STATUS_PATH, `${JSON.stringify(payload, null, 2)}\n`, 'utf8');
+}
+
+function enqueueMutation<T>(
+  ctx: DaemonContext,
+  label: string,
+  mutator: (state: HydraStateShape) => T,
+  detail: Record<string, unknown> = {},
+) {
+  const mutation = ctx.writeQueue.then(() => {
+    const state = readState();
+    const result = mutator(state);
+    writeState(state);
+    appendSyncLog(`[orch] ${label}`);
+    const at = nowIso();
+    const event = {
+      id: `${String(Date.now())}_${Math.random().toString(36).slice(2, 8)}`,
+      seq: getEventSeq() + 1,
+      at,
+      type: 'mutation',
+      payload: { label, ...detail },
+    };
+    appendEvent('mutation', { label, ...detail }, event.id);
+    broadcastEvent(ctx.sseClients, event);
+    ctx.lastEventAt = at;
+    ctx.eventCount += 1;
+    writeStatus(ctx);
+    return result;
+  });
+  // Prevent queue poisoning: failed mutations must not block subsequent ones
+  ctx.writeQueue = mutation.catch(() => {});
+  return mutation;
+}
+
+function handleVerificationResult(
+  ctx: DaemonContext,
+  taskId: string,
+  plan: Record<string, unknown>,
+  error: Error | null,
+  stdout: string,
+  stderr: string,
+) {
+  if (error) {
+    const snippet = ([stderr, stdout, error.message] as string[]).find((s) => s !== '') ?? '';
+    const snippetSliced = snippet.slice(0, 500);
+    void enqueueMutation(
+      ctx,
+      `verify:fail id=${taskId}`,
+      (state: HydraStateShape) => {
+        const task = state.tasks.find((t: TaskEntry) => t.id === taskId);
+        if (task) {
+          task.status = 'blocked';
+          const note = `[AUTO-VERIFY FAILED] ${String(plan['command'])}:\n${snippetSliced}`;
+          task.notes = task.notes === '' ? note : `${task.notes}\n${note}`;
+          task.updatedAt = nowIso();
+        }
+      },
+      { event: 'verify', taskId, passed: false, command: plan['command'] },
+    );
+    appendEvent('verification_complete', {
+      taskId,
+      passed: false,
+      command: plan['command'],
+      snippet: snippetSliced,
+    });
+    return;
+  }
+
+  void enqueueMutation(
+    ctx,
+    `verify:pass id=${taskId}`,
+    (state) => {
+      const task = state.tasks.find((t) => t.id === taskId);
+      if (task) {
+        const note = `[AUTO-VERIFY PASSED] ${String(plan['command'])} completed cleanly.`;
+        task.notes = task.notes === '' ? note : `${task.notes}\n${note}`;
+        task.updatedAt = nowIso();
+      }
+    },
+    { event: 'verify', taskId, passed: true, command: plan['command'] },
+  );
+  appendEvent('verification_complete', { taskId, passed: true, command: plan['command'] });
+}
+
+interface SpawnVerifyOptions {
+  command: string;
+  cwd: string;
+  stdoutFd: number;
+  stderrFd: number;
+  timeoutMs: number;
+  stdoutPath: string;
+  stderrPath: string;
+  tmpDir: string;
+  handleResult: VerificationCallback;
+}
+
+function spawnVerifyChild(opts: SpawnVerifyOptions) {
+  const child = spawn(opts.command, [], {
+    cwd: opts.cwd,
+    shell: true,
+    windowsHide: true,
+    stdio: ['ignore', opts.stdoutFd, opts.stderrFd],
+  });
+
+  // Parent can close immediately; child holds its own handles.
+  try {
+    fs.closeSync(opts.stdoutFd);
+  } catch {
+    /* ignore */
+  }
+  try {
+    fs.closeSync(opts.stderrFd);
+  } catch {
+    /* ignore */
+  }
+
+  let timedOut = false;
+  let finished = false;
+  const timer = setTimeout(
+    () => {
+      timedOut = true;
+      try {
+        child.kill();
+      } catch {
+        /* ignore */
+      }
+    },
+    Math.max(1, opts.timeoutMs === 0 ? 60_000 : opts.timeoutMs),
+  );
+
+  function finish(err: Error | null, code: number | null) {
+    if (finished) return;
+    finished = true;
+    clearTimeout(timer);
+    let out = '';
+    let errText = '';
+    try {
+      out = fs.readFileSync(opts.stdoutPath, 'utf8');
+    } catch {
+      /* ignore */
+    }
+    try {
+      errText = fs.readFileSync(opts.stderrPath, 'utf8');
+    } catch {
+      /* ignore */
+    }
+    const effectiveError =
+      err ??
+      (timedOut || code !== 0
+        ? new Error(timedOut ? 'Verification timed out.' : `Exit ${String(code)}`)
+        : null);
+    opts.handleResult(effectiveError, out, errText);
+    try {
+      fs.rmSync(opts.tmpDir, { recursive: true, force: true });
+    } catch {
+      /* ignore */
+    }
+  }
+
+  child.on('error', (err: Error) => {
+    finish(err, null);
+  });
+  child.on('close', (code: number | null) => {
+    finish(null, code);
+  });
+}
+
+function runVerificationFallback(
+  plan: Record<string, unknown>,
+  handleResult: VerificationCallback,
+) {
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'hydra-verify-'));
+  const stdoutPath = path.join(tmpDir, 'stdout.txt');
+  const stderrPath = path.join(tmpDir, 'stderr.txt');
+
+  let stdoutFd: number | null = null;
+  let stderrFd: number | null = null;
+  try {
+    stdoutFd = fs.openSync(stdoutPath, 'w');
+    stderrFd = fs.openSync(stderrPath, 'w');
+    spawnVerifyChild({
+      command: plan['command'] as string,
+      cwd: config.projectRoot,
+      stdoutFd,
+      stderrFd,
+      timeoutMs: plan['timeoutMs'] as number,
+      stdoutPath,
+      stderrPath,
+      tmpDir,
+      handleResult,
+    });
+    // Fds were handed off to the child process — clear refs so finally doesn't double-close.
+    stdoutFd = null;
+    stderrFd = null;
+  } catch (err) {
+    // If even the fallback can't start, treat as a failure but never throw.
+    try {
+      const msg = (
+        (err as Error).message === '' ? 'Verification failed to start.' : (err as Error).message
+      ).slice(0, 500);
+      handleResult(new Error(msg), '', '');
+    } catch {
+      // ignore
+    }
+    try {
+      fs.rmSync(tmpDir, { recursive: true, force: true });
+    } catch {
+      /* ignore */
+    }
+  } finally {
+    if (stdoutFd !== null) {
+      try {
+        fs.closeSync(stdoutFd);
+      } catch {
+        /* ignore */
+      }
+    }
+    if (stderrFd !== null) {
+      try {
+        fs.closeSync(stderrFd);
+      } catch {
+        /* ignore */
+      }
+    }
+  }
+}
+
+function runVerification(ctx: DaemonContext, taskId: string, plan: Record<string, unknown>) {
+  if (plan['enabled'] !== true || plan['command'] == null || plan['command'] === '') {
+    return;
+  }
+
+  appendEvent('verification_start', { taskId, command: plan['command'], source: plan['source'] });
+
+  const handleResult: VerificationCallback = (error, stdout, stderr) => {
+    handleVerificationResult(ctx, taskId, plan, error, stdout, stderr);
+  };
+
+  // Prefer exec (captures stdout/stderr) when possible, but fall back to a
+  // no-pipes spawn mode for restricted sandboxes that forbid stdio pipes.
+  try {
+    exec(
+      plan['command'] as string,
+      { cwd: config.projectRoot, timeout: plan['timeoutMs'] as number, encoding: 'utf8' },
+      handleResult,
+    );
+    return;
+  } catch {
+    // Fall through to spawn-based implementation below.
+  }
+
+  // No-pipes fallback: redirect stdout/stderr to temp files and read them at the end.
+  runVerificationFallback(plan, handleResult);
+}
+
+function buildReadRouteCtx(
+  ctx: DaemonContext,
+  req: IncomingMessage,
+  res: ServerResponse,
+  requestUrl: URL,
+): ReadRouteCtx {
+  return {
+    method: req.method ?? 'GET',
+    route: requestUrl.pathname,
+    requestUrl,
+    req,
+    res,
+    sendJson,
+    sendError,
+    writeStatus: () => {
+      writeStatus(ctx);
+    },
+    readStatus: () => JSON.parse(fs.readFileSync(STATUS_PATH, 'utf8')) as Record<string, unknown>,
+    checkUsage: checkUsage as unknown as () => UsageCheckResult,
+    getModelSummary: getModelSummary as () => Record<string, ModelSummaryEntry>,
+    readState,
+    getSummary,
+    projectRoot: config.projectRoot,
+    projectName: config.projectName,
+    buildPrompt,
+    suggestNext,
+    readEvents,
+    replayEvents,
+    sseClients: ctx.sseClients,
+    readArchive,
+    getMetricsSummary,
+    getEventCount: () => ctx.eventCount,
+  };
+}
+
+function buildWriteRouteCtx(
+  ctx: DaemonContext,
+  server: http.Server,
+  req: IncomingMessage,
+  res: ServerResponse,
+  requestUrl: URL,
+) {
+  return {
+    method: req.method ?? 'GET',
+    route: requestUrl.pathname,
+    req,
+    res,
+    readJsonBody,
+    sendJson,
+    sendError,
+    enqueueMutation: <T>(
+      label: string,
+      mutator: (state: HydraStateShape) => T,
+      detail?: Record<string, unknown>,
+    ) => enqueueMutation(ctx, label, mutator, detail ?? {}),
+    ensureKnownAgent,
+    ensureKnownStatus,
+    parseList,
+    getCurrentBranch,
+    toSessionId,
+    nowIso,
+    classifyTask,
+    nextId,
+    detectCycle,
+    autoUnblock,
+    readState,
+    AGENT_NAMES,
+    getAgent: getAgent as (name: string) => AgentDef | undefined,
+    listAgents: listAgents as (...args: unknown[]) => AgentDef[],
+    resolveVerificationPlan: resolveVerificationPlan as unknown as (
+      ...args: unknown[]
+    ) => Record<string, unknown>,
+    projectRoot: config.projectRoot,
+    runVerification: (taskId: unknown, plan: unknown) => {
+      runVerification(ctx, taskId as string, plan as Record<string, unknown>);
+    },
+    archiveState,
+    truncateEventsFile,
+    writeStatus: (extra?: Record<string, unknown>) => {
+      writeStatus(ctx, extra);
+    },
+    appendEvent,
+    broadcastEvent: (event: unknown) => {
+      broadcastEvent(ctx.sseClients, event);
+    },
+    setIsShuttingDown: (value: boolean) => {
+      ctx.isShuttingDown = value;
+    },
+    server,
+    createSnapshot,
+    cleanOldSnapshots,
+    checkIdempotency,
+    createTaskWorktree,
+    mergeTaskWorktree,
+    cleanupTaskWorktree,
+  };
+}
+
+async function handleHttpRequest(
+  ctx: DaemonContext,
+  server: http.Server,
+  req: IncomingMessage,
+  res: ServerResponse,
+) {
+  const requestUrl = new URL(
+    req.url ?? '/',
+    `http://${req.headers.host ?? `${ctx.host}:${String(ctx.port)}`}`,
+  );
+  const route = requestUrl.pathname;
+  const method = req.method ?? 'GET';
+
+  try {
+    if (await handleReadRoute(buildReadRouteCtx(ctx, req, res, requestUrl))) return;
+
+    if (!isAuthorized(req, ORCH_TOKEN)) {
+      sendError(res, 401, 'Unauthorized');
+      return;
+    }
+
+    if (
+      await handleWriteRoute(
+        buildWriteRouteCtx(ctx, server, req, res, requestUrl) as unknown as WriteRouteCtx,
+      )
+    ) {
+      return;
+    }
+
+    sendError(res, 404, `Route not found: ${method} ${route}`);
+  } catch (err) {
+    sendError(res, 400, (err as Error).message === '' ? 'Bad request' : (err as Error).message);
+  }
+}
+
+function autoArchiveIfNeeded(ctx: DaemonContext) {
+  void enqueueMutation(ctx, 'auto_archive', (state: HydraStateShape) => {
+    const completedCount = state.tasks.filter((t: TaskEntry) =>
+      ['done', 'cancelled'].includes(t.status),
+    ).length;
+    if (completedCount > 20) {
+      const moved = archiveState(state);
+      if (moved > 0) {
+        truncateEventsFile(500);
+        return { moved };
+      }
+    }
+    return { moved: 0 };
+  })
+    .then((result: Record<string, unknown>) => {
+      if ((result['moved'] as number) > 0) {
+        appendEvent('auto_archive', { moved: result['moved'] });
+      }
+    })
+    .catch(() => {});
+}
+
+function printStartupInfo(host: string, port: number) {
+  console.log(hydraSplash());
+  console.log(uiLabel('Project', pc.white(config.projectName)));
+  console.log(uiLabel('Root', DIM(config.projectRoot)));
+  console.log(uiLabel('URL', pc.white(`http://${host}:${String(port)}`)));
+  console.log(uiLabel('PID', pc.white(String(process.pid))));
+  console.log(uiLabel('State', DIM(path.relative(config.projectRoot, STATE_PATH))));
+  console.log(uiLabel('Status', DIM(path.relative(config.projectRoot, STATUS_PATH))));
+  console.log(divider());
+  console.log(SUCCESS('  Daemon ready'));
+  console.log('');
+}
+
+// Stale task reaper: uses heartbeat timeout (fast) or updatedAt fallback (slow)
+const STALE_THRESHOLD_MS = 30 * 60 * 1000; // 30 min — no-heartbeat fallback
+
+function isTaskStale(
+  task: TaskEntry,
+  now: number,
+  heartbeatTimeoutMs: number,
+  staleThresholdMs: number,
+): boolean {
+  if ((task as Record<string, unknown>)['lastHeartbeat'] == null) {
+    let lastActivity = task.updatedAt === '' ? 0 : new Date(task.updatedAt).getTime();
+    if (Array.isArray(task.checkpoints) && task.checkpoints.length > 0) {
+      const lastCp = task.checkpoints.at(-1);
+      const cpTime = lastCp ? new Date(lastCp['savedAt'] as string).getTime() : 0;
+      if (cpTime > lastActivity) lastActivity = cpTime;
+    }
+    return now - lastActivity > staleThresholdMs;
+  }
+  const hbAge =
+    now - new Date((task as Record<string, unknown>)['lastHeartbeat'] as string).getTime();
+  return hbAge > heartbeatTimeoutMs;
+}
+
+function handleHeartbeatTimeout(
+  sseClients: Set<ServerResponse>,
+  task: TaskEntry,
+  state: HydraStateShape,
+  maxAttempts: number,
+) {
+  const currentFailCount = (task as Record<string, unknown>)['failCount'] as number | undefined;
+  const failCount = (currentFailCount ?? 0) + 1;
+  (task as Record<string, unknown>)['failCount'] = failCount;
+
+  if (failCount < maxAttempts) {
+    // Requeue: reset to todo for retry
+    task.status = 'todo';
+    task.stale = false;
+    delete task.staleSince;
+    task.updatedAt = nowIso();
+    broadcastEvent(sseClients, {
+      type: 'mutation',
+      payload: {
+        event: 'task:heartbeat_timeout',
+        taskId: task.id,
+        owner: task.owner,
+        action: 'requeue',
+        failCount,
+      },
+    });
+    appendEvent('task:heartbeat_timeout', {
+      taskId: task.id,
+      owner: task.owner,
+      action: 'requeue',
+      failCount,
+      category: 'heartbeat',
+    });
+  } else {
+    // Exhausted retries → dead-letter queue
+    if (!Array.isArray(state['deadLetter'])) state['deadLetter'] = [];
+    (state['deadLetter'] as unknown[]).push({
+      id: task.id,
+      title: task.title,
+      owner: task.owner,
+      failCount,
+      reason: 'heartbeat_timeout',
+      movedAt: nowIso(),
+    });
+    (task as Record<string, unknown>)['status'] = 'failed';
+    task.updatedAt = nowIso();
+    broadcastEvent(sseClients, {
+      type: 'mutation',
+      payload: {
+        event: 'task:heartbeat_timeout',
+        taskId: task.id,
+        owner: task.owner,
+        action: 'dead_letter',
+        failCount,
+      },
+    });
+    appendEvent('task:heartbeat_timeout', {
+      taskId: task.id,
+      owner: task.owner,
+      action: 'dead_letter',
+      failCount,
+      category: 'heartbeat',
+    });
+  }
+}
+
+function markStaleTasks(ctx: DaemonContext) {
+  try {
+    const cfg = loadHydraConfig();
+    const heartbeatTimeoutMsRaw = Number(
+      ((cfg as Record<string, unknown>)['workers'] as Record<string, unknown> | undefined)?.[
+        'heartbeatTimeoutMs'
+      ],
+    );
+    const heartbeatTimeoutMs = heartbeatTimeoutMsRaw === 0 ? 90_000 : heartbeatTimeoutMsRaw; // 90s default
+    const maxAttemptsRaw = Number(
+      (
+        ((cfg as Record<string, unknown>)['workers'] as Record<string, unknown> | undefined)?.[
+          'retry'
+        ] as Record<string, unknown> | undefined
+      )?.['maxAttempts'],
+    );
+    const maxAttempts = maxAttemptsRaw === 0 ? 3 : maxAttemptsRaw;
+    const state = readState();
+    const now = Date.now();
+    let changed = false;
+
+    for (const task of state.tasks) {
+      if (task.status !== 'in_progress') continue;
+
+      const isStale = isTaskStale(task, now, heartbeatTimeoutMs, STALE_THRESHOLD_MS);
+
+      if (isStale && task.stale !== true) {
+        task.stale = true;
+        task.staleSince = nowIso();
+        changed = true;
+
+        if ((task as Record<string, unknown>)['lastHeartbeat'] == null) {
+          broadcastEvent(ctx.sseClients, {
+            type: 'mutation',
+            payload: {
+              event: 'task_stale',
+              taskId: task.id,
+              owner: task.owner,
+              title: task.title,
+            },
+          });
+        } else {
+          handleHeartbeatTimeout(ctx.sseClients, task, state, maxAttempts);
+        }
+      } else if (!isStale && task.stale === true) {
+        task.stale = false;
+        delete task.staleSince;
+        changed = true;
+      }
+    }
+
+    if (changed) {
+      writeState(state);
+    }
+  } catch {
+    // Non-critical — skip silently.
+  }
+}
+
+function gracefulExit(
+  ctx: DaemonContext,
+  server: http.Server,
+  intervals: DaemonIntervals,
+  signal: string,
+) {
+  if (ctx.isShuttingDown) {
+    return;
+  }
+  ctx.isShuttingDown = true;
+  console.log('');
+  console.log(DIM(`  Shutting down (${signal})...`));
+  appendSyncLog(`[orch] daemon stopping (${signal})`);
+  appendEvent('daemon_stop', { signal, pid: process.pid });
+  // Close all SSE clients
+  for (const client of ctx.sseClients) {
+    try {
+      client.end();
+    } catch {
+      /* ignore */
+    }
+  }
+  ctx.sseClients.clear();
+  // Close MCP clients
+  void import('./hydra-mcp.ts').then((m) => m.closeCodexMCP()).catch(() => {});
+  persistMetrics(COORD_DIR);
+  clearInterval(intervals.statusInterval);
+  clearInterval(intervals.metricsInterval);
+  clearInterval(intervals.archiveInterval);
+  clearInterval(intervals.staleInterval);
+  writeStatus(ctx, { running: false, stoppingAt: nowIso(), signal });
+  server.close(() => {
+    writeStatus(ctx, { running: false, stoppedAt: nowIso(), signal });
+    console.log(SUCCESS('  Daemon stopped'));
+    exit(0);
+  });
+}
+
 function startDaemon(options: Record<string, string>) {
   ensureCoordFiles();
 
@@ -137,377 +811,15 @@ function startDaemon(options: Record<string, string>) {
     return;
   }
 
-  let isShuttingDown = false;
-  const startedAt = nowIso();
-  let lastEventAt = nowIso();
-  let eventCount = 0;
-  let writeQueue: Promise<unknown> = Promise.resolve();
-  const sseClients = new Set<ServerResponse>();
-
-  function broadcastEvent(event: unknown) {
-    if (sseClients.size === 0) return;
-    const data = JSON.stringify(event);
-    for (const client of sseClients) {
-      try {
-        client.write(`data: ${data}\n\n`);
-      } catch {
-        sseClients.delete(client);
-      }
-    }
-  }
-
-  function writeStatus(extra: Record<string, unknown> = {}) {
-    const state = readState();
-    const payload = {
-      service: 'hydra-orchestrator',
-      project: config.projectName,
-      projectRoot: config.projectRoot,
-      running: !isShuttingDown,
-      pid: process.pid,
-      host,
-      port,
-      startedAt,
-      updatedAt: nowIso(),
-      uptimeSec: Math.floor(process.uptime()),
-      stateUpdatedAt: state.updatedAt,
-      activeSessionId: state.activeSession?.id ?? null,
-      eventsRecorded: eventCount,
-      lastEventAt,
-      ...extra,
-    };
-    fs.writeFileSync(STATUS_PATH, `${JSON.stringify(payload, null, 2)}\n`, 'utf8');
-  }
-
-  function enqueueMutation<T>(
-    label: string,
-    mutator: (state: HydraStateShape) => T,
-    detail: Record<string, unknown> = {},
-  ) {
-    const mutation = writeQueue.then(() => {
-      const state = readState();
-      const result = mutator(state);
-      writeState(state);
-      appendSyncLog(`[orch] ${label}`);
-      const at = nowIso();
-      const event = {
-        id: `${String(Date.now())}_${Math.random().toString(36).slice(2, 8)}`,
-        seq: getEventSeq() + 1,
-        at,
-        type: 'mutation',
-        payload: { label, ...detail },
-      };
-      appendEvent('mutation', { label, ...detail }, event.id);
-      broadcastEvent(event);
-      lastEventAt = at;
-      eventCount += 1;
-      writeStatus();
-      return result;
-    });
-    // Prevent queue poisoning: failed mutations must not block subsequent ones
-    writeQueue = mutation.catch(() => {});
-    return mutation;
-  }
-
-  function runVerification(taskId: string, plan: Record<string, unknown>) {
-    if (plan['enabled'] !== true || plan['command'] == null || plan['command'] === '') {
-      return;
-    }
-
-    appendEvent('verification_start', { taskId, command: plan['command'], source: plan['source'] });
-
-    function handleVerificationResult(error: Error | null, stdout: string, stderr: string) {
-      if (error) {
-        const snippet = ([stderr, stdout, error.message] as string[]).find((s) => s !== '') ?? '';
-        const snippetSliced = snippet.slice(0, 500);
-        void enqueueMutation(
-          `verify:fail id=${taskId}`,
-          (state: HydraStateShape) => {
-            const task = state.tasks.find((t: TaskEntry) => t.id === taskId);
-            if (task) {
-              task.status = 'blocked';
-              const note = `[AUTO-VERIFY FAILED] ${String(plan['command'])}:\n${snippetSliced}`;
-              task.notes = task.notes === '' ? note : `${task.notes}\n${note}`;
-              task.updatedAt = nowIso();
-            }
-          },
-          { event: 'verify', taskId, passed: false, command: plan['command'] },
-        );
-        appendEvent('verification_complete', {
-          taskId,
-          passed: false,
-          command: plan['command'],
-          snippet: snippetSliced,
-        });
-        return;
-      }
-
-      void enqueueMutation(
-        `verify:pass id=${taskId}`,
-        (state) => {
-          const task = state.tasks.find((t) => t.id === taskId);
-          if (task) {
-            const note = `[AUTO-VERIFY PASSED] ${String(plan['command'])} completed cleanly.`;
-            task.notes = task.notes === '' ? note : `${task.notes}\n${note}`;
-            task.updatedAt = nowIso();
-          }
-        },
-        { event: 'verify', taskId, passed: true, command: plan['command'] },
-      );
-      appendEvent('verification_complete', { taskId, passed: true, command: plan['command'] });
-    }
-
-    // Prefer exec (captures stdout/stderr) when possible, but fall back to a
-    // no-pipes spawn mode for restricted sandboxes that forbid stdio pipes.
-    try {
-      exec(
-        plan['command'] as string,
-        { cwd: config.projectRoot, timeout: plan['timeoutMs'] as number, encoding: 'utf8' },
-        handleVerificationResult,
-      );
-      return;
-    } catch {
-      // Fall through to spawn-based implementation below.
-    }
-
-    // No-pipes fallback: redirect stdout/stderr to temp files and read them at the end.
-    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'hydra-verify-'));
-    const stdoutPath = path.join(tmpDir, 'stdout.txt');
-    const stderrPath = path.join(tmpDir, 'stderr.txt');
-
-    let stdoutFd: number | null = null;
-    let stderrFd: number | null = null;
-    try {
-      stdoutFd = fs.openSync(stdoutPath, 'w');
-      stderrFd = fs.openSync(stderrPath, 'w');
-
-      const child = spawn(plan['command'] as string, [], {
-        cwd: config.projectRoot,
-        shell: true,
-        windowsHide: true,
-        stdio: ['ignore', stdoutFd, stderrFd],
-      });
-
-      // Parent can close immediately; child holds its own handles.
-      try {
-        fs.closeSync(stdoutFd);
-      } catch {
-        /* ignore */
-      }
-      try {
-        fs.closeSync(stderrFd);
-      } catch {
-        /* ignore */
-      }
-      stdoutFd = null;
-      stderrFd = null;
-
-      let timedOut = false;
-      let finished = false;
-      const timer = setTimeout(
-        () => {
-          timedOut = true;
-          try {
-            child.kill();
-          } catch {
-            /* ignore */
-          }
-        },
-        Math.max(1, (plan['timeoutMs'] as number) === 0 ? 60_000 : (plan['timeoutMs'] as number)),
-      );
-
-      function finish(err: Error | null, code: number | null) {
-        if (finished) return;
-        finished = true;
-        clearTimeout(timer);
-        let out = '';
-        let errText = '';
-        try {
-          out = fs.readFileSync(stdoutPath, 'utf8');
-        } catch {
-          /* ignore */
-        }
-        try {
-          errText = fs.readFileSync(stderrPath, 'utf8');
-        } catch {
-          /* ignore */
-        }
-        const effectiveError =
-          err ??
-          (timedOut || code !== 0
-            ? new Error(timedOut ? 'Verification timed out.' : `Exit ${String(code)}`)
-            : null);
-        handleVerificationResult(effectiveError, out, errText);
-        try {
-          fs.rmSync(tmpDir, { recursive: true, force: true });
-        } catch {
-          /* ignore */
-        }
-      }
-
-      child.on('error', (err: Error) => {
-        finish(err, null);
-      });
-      child.on('close', (code: number | null) => {
-        finish(null, code);
-      });
-    } catch (err) {
-      // If even the fallback can't start, treat as a failure but never throw.
-      try {
-        const msg = (
-          (err as Error).message === '' ? 'Verification failed to start.' : (err as Error).message
-        ).slice(0, 500);
-        handleVerificationResult(new Error(msg), '', '');
-      } catch {
-        // ignore
-      }
-      try {
-        fs.rmSync(tmpDir, { recursive: true, force: true });
-      } catch {
-        /* ignore */
-      }
-    } finally {
-      if (stdoutFd !== null) {
-        try {
-          fs.closeSync(stdoutFd);
-        } catch {
-          /* ignore */
-        }
-      }
-      if (stderrFd !== null) {
-        try {
-          fs.closeSync(stderrFd);
-        } catch {
-          /* ignore */
-        }
-      }
-    }
-  }
+  const ctx = createDaemonContext(host, port);
 
   // eslint-disable-next-line @typescript-eslint/no-misused-promises -- async HTTP handler, errors caught in try/catch block
-  const server = http.createServer(async (req, res) => {
-    const requestUrl = new URL(
-      req.url ?? '/',
-      `http://${req.headers.host ?? `${host}:${String(port)}`}`,
-    );
-    const route = requestUrl.pathname;
-    const method = req.method ?? 'GET';
-
-    try {
-      const handledReadRoute = await handleReadRoute({
-        method,
-        route,
-        requestUrl,
-        req,
-        res,
-        sendJson,
-        sendError,
-        writeStatus,
-        readStatus: () =>
-          JSON.parse(fs.readFileSync(STATUS_PATH, 'utf8')) as Record<string, unknown>,
-        checkUsage: checkUsage as unknown as () => UsageCheckResult,
-        getModelSummary: getModelSummary as () => Record<string, ModelSummaryEntry>,
-        readState,
-        getSummary,
-        projectRoot: config.projectRoot,
-        projectName: config.projectName,
-        buildPrompt,
-        suggestNext,
-        readEvents,
-        replayEvents,
-        sseClients,
-        readArchive,
-        getMetricsSummary,
-        getEventCount: () => eventCount,
-      });
-      if (handledReadRoute) {
-        return;
-      }
-
-      if (!isAuthorized(req, ORCH_TOKEN)) {
-        sendError(res, 401, 'Unauthorized');
-        return;
-      }
-
-      const handledWriteRoute = await handleWriteRoute({
-        method,
-        route,
-        req,
-        res,
-        readJsonBody,
-        sendJson,
-        sendError,
-        enqueueMutation,
-        ensureKnownAgent,
-        ensureKnownStatus,
-        parseList,
-        getCurrentBranch,
-        toSessionId,
-        nowIso,
-        classifyTask,
-        nextId,
-        detectCycle,
-        autoUnblock,
-        readState,
-        AGENT_NAMES,
-        getAgent: getAgent as (name: string) => AgentDef | undefined,
-        listAgents: listAgents as (...args: unknown[]) => AgentDef[],
-        resolveVerificationPlan: resolveVerificationPlan as unknown as (
-          ...args: unknown[]
-        ) => Record<string, unknown>,
-        projectRoot: config.projectRoot,
-        runVerification: runVerification as (...args: unknown[]) => void,
-        archiveState,
-        truncateEventsFile,
-        writeStatus,
-        appendEvent,
-        broadcastEvent,
-        setIsShuttingDown: (value: boolean) => {
-          isShuttingDown = value;
-        },
-        server,
-        createSnapshot,
-        cleanOldSnapshots,
-        checkIdempotency,
-        createTaskWorktree,
-        mergeTaskWorktree,
-        cleanupTaskWorktree,
-      } as unknown as WriteRouteCtx);
-      if (handledWriteRoute) {
-        return;
-      }
-
-      sendError(res, 404, `Route not found: ${method} ${route}`);
-    } catch (err) {
-      sendError(res, 400, (err as Error).message === '' ? 'Bad request' : (err as Error).message);
-    }
-  });
+  const server = http.createServer(async (req, res) => handleHttpRequest(ctx, server, req, res));
 
   server.on('error', (error: Error) => {
     console.error(`Orchestrator server error: ${error.message}`);
     exit(1);
   });
-
-  function autoArchiveIfNeeded() {
-    void enqueueMutation('auto_archive', (state: HydraStateShape) => {
-      const completedCount = state.tasks.filter((t: TaskEntry) =>
-        ['done', 'cancelled'].includes(t.status),
-      ).length;
-      if (completedCount > 20) {
-        const moved = archiveState(state);
-        if (moved > 0) {
-          truncateEventsFile(500);
-          return { moved };
-        }
-      }
-      return { moved: 0 };
-    })
-      .then((result: Record<string, unknown>) => {
-        if ((result['moved'] as number) > 0) {
-          appendEvent('auto_archive', { moved: result['moved'] });
-        }
-      })
-      .catch(() => {});
-  }
 
   // Load persisted metrics from previous session
   loadPersistedMetrics(COORD_DIR);
@@ -520,218 +832,41 @@ function startDaemon(options: Record<string, string>) {
       pid: process.pid,
       project: config.projectName,
     });
-    writeStatus();
-
-    autoArchiveIfNeeded();
-
-    console.log(hydraSplash());
-    console.log(uiLabel('Project', pc.white(config.projectName)));
-    console.log(uiLabel('Root', DIM(config.projectRoot)));
-    console.log(uiLabel('URL', pc.white(`http://${host}:${String(port)}`)));
-    console.log(uiLabel('PID', pc.white(String(process.pid))));
-    console.log(uiLabel('State', DIM(path.relative(config.projectRoot, STATE_PATH))));
-    console.log(uiLabel('Status', DIM(path.relative(config.projectRoot, STATUS_PATH))));
-    console.log(divider());
-    console.log(SUCCESS('  Daemon ready'));
-    console.log('');
+    writeStatus(ctx);
+    autoArchiveIfNeeded(ctx);
+    printStartupInfo(host, port);
   });
 
   const statusInterval = setInterval(() => {
-    writeStatus();
+    writeStatus(ctx);
   }, 5000);
-
   const metricsInterval = setInterval(() => {
     persistMetrics(COORD_DIR);
   }, 30_000);
-
   const archiveInterval = setInterval(
     () => {
-      autoArchiveIfNeeded();
+      autoArchiveIfNeeded(ctx);
     },
     30 * 60 * 1000,
   );
-
-  // Stale task reaper: uses heartbeat timeout (fast) or updatedAt fallback (slow)
-  const STALE_THRESHOLD_MS = 30 * 60 * 1000; // 30 min — no-heartbeat fallback
-
-  function markStaleTasks() {
-    try {
-      const cfg = loadHydraConfig();
-      const heartbeatTimeoutMsRaw = Number(
-        ((cfg as Record<string, unknown>)['workers'] as Record<string, unknown> | undefined)?.[
-          'heartbeatTimeoutMs'
-        ],
-      );
-      const heartbeatTimeoutMs = heartbeatTimeoutMsRaw === 0 ? 90_000 : heartbeatTimeoutMsRaw; // 90s default
-      const maxAttemptsRaw = Number(
-        (
-          ((cfg as Record<string, unknown>)['workers'] as Record<string, unknown> | undefined)?.[
-            'retry'
-          ] as Record<string, unknown> | undefined
-        )?.['maxAttempts'],
-      );
-      const maxAttempts = maxAttemptsRaw === 0 ? 3 : maxAttemptsRaw;
-      const state = readState();
-      const now = Date.now();
-      let changed = false;
-
-      for (const task of state.tasks) {
-        if (task.status !== 'in_progress') continue;
-
-        let isStale = false;
-
-        if ((task as Record<string, unknown>)['lastHeartbeat'] == null) {
-          // Legacy: use updatedAt/checkpoint (30 min)
-          let lastActivity = task.updatedAt === '' ? 0 : new Date(task.updatedAt).getTime();
-          if (Array.isArray(task.checkpoints) && task.checkpoints.length > 0) {
-            const lastCp = task.checkpoints.at(-1);
-            const cpTime = lastCp ? new Date(lastCp['savedAt'] as string).getTime() : 0;
-            if (cpTime > lastActivity) lastActivity = cpTime;
-          }
-          isStale = now - lastActivity > STALE_THRESHOLD_MS;
-        } else {
-          const hbAge =
-            now - new Date((task as Record<string, unknown>)['lastHeartbeat'] as string).getTime();
-          isStale = hbAge > heartbeatTimeoutMs;
-        }
-
-        if (isStale && task.stale !== true) {
-          task.stale = true;
-          task.staleSince = nowIso();
-          changed = true;
-
-          // Heartbeat timeout: requeue or dead-letter based on failCount
-          if ((task as Record<string, unknown>)['lastHeartbeat'] == null) {
-            broadcastEvent({
-              type: 'mutation',
-              payload: {
-                event: 'task_stale',
-                taskId: task.id,
-                owner: task.owner,
-                title: task.title,
-              },
-            });
-          } else {
-            const currentFailCount = (task as Record<string, unknown>)['failCount'] as
-              | number
-              | undefined;
-            const failCount = (currentFailCount ?? 0) + 1;
-            (task as Record<string, unknown>)['failCount'] = failCount;
-
-            if (failCount < maxAttempts) {
-              // Requeue: reset to todo for retry
-              task.status = 'todo';
-              task.stale = false;
-              delete task.staleSince;
-              task.updatedAt = nowIso();
-              broadcastEvent({
-                type: 'mutation',
-                payload: {
-                  event: 'task:heartbeat_timeout',
-                  taskId: task.id,
-                  owner: task.owner,
-                  action: 'requeue',
-                  failCount,
-                },
-              });
-              appendEvent('task:heartbeat_timeout', {
-                taskId: task.id,
-                owner: task.owner,
-                action: 'requeue',
-                failCount,
-                category: 'heartbeat',
-              });
-            } else {
-              // Exhausted retries → dead-letter queue
-              if (!Array.isArray(state['deadLetter'])) state['deadLetter'] = [];
-              (state['deadLetter'] as unknown[]).push({
-                id: task.id,
-                title: task.title,
-                owner: task.owner,
-                failCount,
-                reason: 'heartbeat_timeout',
-                movedAt: nowIso(),
-              });
-              (task as Record<string, unknown>)['status'] = 'failed';
-              task.updatedAt = nowIso();
-              broadcastEvent({
-                type: 'mutation',
-                payload: {
-                  event: 'task:heartbeat_timeout',
-                  taskId: task.id,
-                  owner: task.owner,
-                  action: 'dead_letter',
-                  failCount,
-                },
-              });
-              appendEvent('task:heartbeat_timeout', {
-                taskId: task.id,
-                owner: task.owner,
-                action: 'dead_letter',
-                failCount,
-                category: 'heartbeat',
-              });
-            }
-          }
-        } else if (!isStale && task.stale === true) {
-          task.stale = false;
-          delete task.staleSince;
-          changed = true;
-        }
-      }
-
-      if (changed) {
-        writeState(state);
-      }
-    } catch {
-      // Non-critical — skip silently.
-    }
-  }
-
   const staleInterval = setInterval(() => {
-    markStaleTasks();
+    markStaleTasks(ctx);
   }, 60 * 1000); // 60s — frequent enough for heartbeat timeouts
 
-  function gracefulExit(signal: string) {
-    if (isShuttingDown) {
-      return;
-    }
-    isShuttingDown = true;
-    console.log('');
-    console.log(DIM(`  Shutting down (${signal})...`));
-    appendSyncLog(`[orch] daemon stopping (${signal})`);
-    appendEvent('daemon_stop', { signal, pid: process.pid });
-    // Close all SSE clients
-    for (const client of sseClients) {
-      try {
-        client.end();
-      } catch {
-        /* ignore */
-      }
-    }
-    sseClients.clear();
-    // Close MCP clients
-    void import('./hydra-mcp.ts').then((m) => m.closeCodexMCP()).catch(() => {});
-    persistMetrics(COORD_DIR);
-    clearInterval(statusInterval);
-    clearInterval(metricsInterval);
-    clearInterval(archiveInterval);
-    clearInterval(staleInterval);
-    writeStatus({ running: false, stoppingAt: nowIso(), signal });
-    server.close(() => {
-      writeStatus({ running: false, stoppedAt: nowIso(), signal });
-      console.log(SUCCESS('  Daemon stopped'));
-      exit(0);
-    });
-  }
+  const intervals: DaemonIntervals = {
+    statusInterval,
+    metricsInterval,
+    archiveInterval,
+    staleInterval,
+  };
 
   // SIGTERM is not reliably delivered on Windows; use HTTP POST /stop for graceful shutdown there.
   process.on('SIGINT', () => {
-    gracefulExit('SIGINT');
+    gracefulExit(ctx, server, intervals, 'SIGINT');
   });
   if (process.platform !== 'win32') {
     process.on('SIGTERM', () => {
-      gracefulExit('SIGTERM');
+      gracefulExit(ctx, server, intervals, 'SIGTERM');
     });
   }
 }
