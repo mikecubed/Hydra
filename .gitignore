@@ -22,3 +22,7 @@ coverage/
 
 # Temporary test module patches (hydra-tasks test fixture)
 .hydra-tasks.testable.*.ts
+
+# Stryker mutation testing output
+.stryker-tmp/
+reports/
