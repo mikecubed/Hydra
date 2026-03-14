@@ -66,9 +66,17 @@ function safeCall<T>(fn: () => T, fallback: T | null = null): T | null {
 function gitExec(cwd: string, args: string[]): string {
   const r = spawnSyncCapture('git', args, { cwd, encoding: 'utf8', timeout: 5000 });
   if (r.status !== 0) {
-    throw new Error(((r.stderr || r.stdout || r.error?.message) ?? 'git error').trim());
+    let errMsg = 'git error';
+    if (r.stderr !== '') {
+      errMsg = r.stderr;
+    } else if (r.stdout !== '') {
+      errMsg = r.stdout;
+    } else if (r.error?.message != null) {
+      errMsg = r.error.message;
+    }
+    throw new Error(errMsg.trim());
   }
-  return (r.stdout || '').trim();
+  return r.stdout.trim();
 }
 
 /**
@@ -77,12 +85,12 @@ function gitExec(cwd: string, args: string[]): string {
  * @param {string} cwd
  */
 export function getGitInfo(cwd: string | null): GitInfo | null {
-  if (!cwd) return null;
+  if (cwd == null || cwd === '') return null;
   try {
     const branch = gitExec(cwd, ['rev-parse', '--abbrev-ref', 'HEAD']);
     const commit = gitExec(cwd, ['rev-parse', '--short', 'HEAD']);
     const porcelain = gitExec(cwd, ['status', '--porcelain']);
-    const modifiedFiles = porcelain ? porcelain.split(/\r?\n/).filter(Boolean).length : 0;
+    const modifiedFiles = porcelain === '' ? 0 : porcelain.split(/\r?\n/).filter(Boolean).length;
     return {
       branch,
       commit,
@@ -100,6 +108,52 @@ export function getHydraPackageInfo(): HydraPackageInfo {
     name: (pkg['name'] as string | undefined) ?? 'hydra',
     version: (pkg['version'] as string | undefined) ?? 'unknown',
     description: (pkg['description'] as string | undefined) ?? '',
+  };
+}
+
+function buildProjectInfo(projectRoot: string, projectName: string): Record<string, unknown> {
+  let resolvedName = 'unknown';
+  if (projectName !== '') {
+    resolvedName = projectName;
+  } else if (projectRoot !== '') {
+    resolvedName = path.basename(projectRoot);
+  }
+  return {
+    name: resolvedName,
+    root: projectRoot,
+  };
+}
+
+function buildConfigSnapshot(cfg: Record<string, unknown>): Record<string, unknown> {
+  const cfgConcierge = cfg['concierge'] as Record<string, unknown> | undefined;
+  const cfgVerification = cfg['verification'] as Record<string, unknown> | undefined;
+  const cfgModelRecovery = cfg['modelRecovery'] as Record<string, unknown> | undefined;
+  const cfgWorkers = cfg['workers'] as Record<string, unknown> | undefined;
+  return {
+    mode: (cfg['mode'] as string | undefined) ?? 'performance',
+    concierge:
+      cfgConcierge == null
+        ? null
+        : {
+            enabled: cfgConcierge['enabled'] !== false,
+            model: (cfgConcierge['model'] as string | undefined) ?? null,
+            reasoningEffort: (cfgConcierge['reasoningEffort'] as string | undefined) ?? null,
+            fallbackChain: Array.isArray(cfgConcierge['fallbackChain'])
+              ? cfgConcierge['fallbackChain']
+              : [],
+          },
+    verification:
+      cfgVerification == null
+        ? null
+        : {
+            onTaskDone: cfgVerification['onTaskDone'] !== false,
+            command: cfgVerification['command'] ?? 'auto',
+            timeoutMs: cfgVerification['timeoutMs'] ?? null,
+            secretsScan: cfgVerification['secretsScan'] !== false,
+          },
+    modelRecovery:
+      cfgModelRecovery == null ? null : { enabled: cfgModelRecovery['enabled'] !== false },
+    workers: cfgWorkers == null ? null : { enabled: cfgWorkers['enabled'] !== false },
   };
 }
 
@@ -143,43 +197,14 @@ export function buildSelfSnapshot(opts: SelfSnapshotOpts = {}): Record<string, u
     },
     git: {
       hydra: getGitInfo(HYDRA_ROOT),
-      project: projectRoot ? getGitInfo(projectRoot) : null,
+      project: projectRoot === '' ? null : getGitInfo(projectRoot),
     },
-    project: {
-      name: projectName || (projectRoot ? path.basename(projectRoot) : 'unknown'),
-      root: projectRoot || '',
-    },
+    project: buildProjectInfo(projectRoot, projectName),
     models,
   };
 
-  if (cfg) {
-    const cfgConcierge = cfg['concierge'] as Record<string, unknown> | undefined;
-    const cfgVerification = cfg['verification'] as Record<string, unknown> | undefined;
-    const cfgModelRecovery = cfg['modelRecovery'] as Record<string, unknown> | undefined;
-    const cfgWorkers = cfg['workers'] as Record<string, unknown> | undefined;
-    snapshot['config'] = {
-      mode: (cfg['mode'] as string | undefined) ?? 'performance',
-      concierge: cfgConcierge
-        ? {
-            enabled: cfgConcierge['enabled'] !== false,
-            model: (cfgConcierge['model'] as string | undefined) ?? null,
-            reasoningEffort: (cfgConcierge['reasoningEffort'] as string | undefined) ?? null,
-            fallbackChain: Array.isArray(cfgConcierge['fallbackChain'])
-              ? cfgConcierge['fallbackChain']
-              : [],
-          }
-        : null,
-      verification: cfgVerification
-        ? {
-            onTaskDone: cfgVerification['onTaskDone'] !== false,
-            command: cfgVerification['command'] ?? 'auto',
-            timeoutMs: cfgVerification['timeoutMs'] ?? null,
-            secretsScan: cfgVerification['secretsScan'] !== false,
-          }
-        : null,
-      modelRecovery: cfgModelRecovery ? { enabled: cfgModelRecovery['enabled'] !== false } : null,
-      workers: cfgWorkers ? { enabled: cfgWorkers['enabled'] !== false } : null,
-    };
+  if (cfg != null) {
+    snapshot['config'] = buildConfigSnapshot(cfg);
   }
 
   if (includeMetrics) {
@@ -199,6 +224,66 @@ function truncateLines(text: string, maxLines: number): string {
   return `${lines.slice(0, maxLines).join('\n')}\n... (truncated)`;
 }
 
+function formatHydraSection(s: Record<string, unknown>, lines: string[]): void {
+  const hydra = s['hydra'] as Record<string, unknown> | undefined;
+  if (hydra == null) return;
+  const hydraName = hydra['name'] as string | undefined;
+  const hydraVersion = hydra['version'] as string | undefined;
+  const hydraRoot = hydra['root'] as string | undefined;
+  const hydraNode = hydra['node'] as string | undefined;
+  const hydraPlatform = hydra['platform'] as string | undefined;
+  lines.push(`Hydra: ${hydraName ?? 'hydra'} v${hydraVersion ?? 'unknown'}`);
+  if (hydraRoot != null && hydraRoot !== '') lines.push(`Hydra root: ${hydraRoot}`);
+  if (hydraNode != null && hydraNode !== '')
+    lines.push(`Node: ${hydraNode} (${hydraPlatform ?? ''})`);
+}
+
+function formatGitSection(s: Record<string, unknown>, lines: string[]): void {
+  const git = s['git'] as Record<string, unknown> | undefined;
+  const hg = git?.['hydra'] as GitInfo | undefined;
+  if (hg != null) {
+    lines.push(
+      `Hydra git: ${hg.branch}@${hg.commit}${hg.dirty ? ` (+${String(hg.modifiedFiles)} dirty)` : ''}`,
+    );
+  }
+
+  const project = s['project'] as Record<string, unknown> | undefined;
+  const projectRoot = project?.['root'] as string | undefined;
+  if (projectRoot != null && projectRoot !== '') {
+    const projectName = project?.['name'] as string | undefined;
+    lines.push(`Project: ${projectName ?? 'unknown'} (${projectRoot})`);
+  }
+
+  const pg = git?.['project'] as GitInfo | undefined;
+  if (pg != null) {
+    lines.push(
+      `Project git: ${pg.branch}@${pg.commit}${pg.dirty ? ` (+${String(pg.modifiedFiles)} dirty)` : ''}`,
+    );
+  }
+}
+
+function formatModelsSection(s: Record<string, unknown>, lines: string[]): void {
+  const config = s['config'] as Record<string, unknown> | undefined;
+  const mode = config?.['mode'] as string | undefined;
+  if (mode != null && mode !== '') {
+    lines.push(`Mode: ${mode}`);
+  }
+
+  const models = s['models'] as Record<string, unknown> | undefined;
+  if (models != null && typeof models === 'object') {
+    lines.push('Models:');
+    for (const [agent, info] of Object.entries(models)) {
+      if (agent === '_mode') continue;
+      if (info == null || typeof info !== 'object') continue;
+      const infoRec = info as Record<string, unknown>;
+      const active = (infoRec['active'] as string | undefined) ?? 'unknown';
+      const tierSource = infoRec['tierSource'] as string | undefined;
+      const src = tierSource == null || tierSource === '' ? '' : ` (${tierSource})`;
+      lines.push(`- ${agent}: ${active}${src}`);
+    }
+  }
+}
+
 /**
  * Format a snapshot into a bounded text block for LLM prompt injection.
  * @param {object} snapshot
@@ -210,64 +295,12 @@ export function formatSelfSnapshotForPrompt(
   opts: FormatSnapshotOpts = {},
 ): string {
   const maxLines = Number.isFinite(opts.maxLines) ? (opts.maxLines as number) : 80;
-  const s = snapshot;
   const lines: string[] = [];
 
   lines.push('=== HYDRA SELF SNAPSHOT ===');
-  const hydra = s['hydra'] as Record<string, unknown> | undefined;
-  if (hydra) {
-    const hydraName = hydra['name'] as string | undefined;
-    const hydraVersion = hydra['version'] as string | undefined;
-    const hydraRoot = hydra['root'] as string | undefined;
-    const hydraNode = hydra['node'] as string | undefined;
-    const hydraPlatform = hydra['platform'] as string | undefined;
-    lines.push(`Hydra: ${hydraName ?? 'hydra'} v${hydraVersion ?? 'unknown'}`);
-    if (hydraRoot) lines.push(`Hydra root: ${hydraRoot}`);
-    if (hydraNode) lines.push(`Node: ${hydraNode} (${hydraPlatform ?? ''})`);
-  }
-
-  const git = s['git'] as Record<string, unknown> | undefined;
-  const hg = git?.['hydra'] as GitInfo | undefined;
-  if (hg) {
-    lines.push(
-      `Hydra git: ${hg.branch}@${hg.commit}${hg.dirty ? ` (+${String(hg.modifiedFiles)} dirty)` : ''}`,
-    );
-  }
-
-  const project = s['project'] as Record<string, unknown> | undefined;
-  if (project?.['root']) {
-    const projectName = project['name'] as string | undefined;
-    const projectRoot = project['root'] as string | undefined;
-    lines.push(`Project: ${projectName ?? 'unknown'} (${projectRoot ?? ''})`);
-  }
-
-  const pg = git?.['project'] as GitInfo | undefined;
-  if (pg) {
-    lines.push(
-      `Project git: ${pg.branch}@${pg.commit}${pg.dirty ? ` (+${String(pg.modifiedFiles)} dirty)` : ''}`,
-    );
-  }
-
-  const config = s['config'] as Record<string, unknown> | undefined;
-  const mode = config?.['mode'] as string | undefined;
-  if (mode) {
-    lines.push(`Mode: ${mode}`);
-  }
-
-  const models = s['models'];
-  if (models && typeof models === 'object') {
-    lines.push('Models:');
-    for (const [agent, info] of Object.entries(models as Record<string, unknown>)) {
-      if (agent === '_mode') continue;
-      if (!info || typeof info !== 'object') continue;
-      const infoRec = info as Record<string, unknown>;
-      const active = (infoRec['active'] as string | undefined) ?? 'unknown';
-      const tierSource = infoRec['tierSource'] as string | undefined;
-      const src = tierSource ? ` (${tierSource})` : '';
-      lines.push(`- ${agent}: ${active}${src}`);
-    }
-  }
-
+  formatHydraSection(snapshot, lines);
+  formatGitSection(snapshot, lines);
+  formatModelsSection(snapshot, lines);
   lines.push('=== END SNAPSHOT ===');
   return truncateLines(lines.join('\n'), maxLines);
 }
