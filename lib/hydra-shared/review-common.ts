@@ -12,17 +12,15 @@ import path from 'node:path';
 import readline from 'node:readline';
 import pc from 'picocolors';
 import {
-  getCurrentBranch,
-  checkoutBranch,
   listBranches,
   getBranchDiffStat,
   getBranchDiff,
   getBranchLog,
-  mergeBranch,
   smartMerge,
-  deleteBranch,
+  gitOperations,
 } from './git-ops.ts';
 import { pushBranchAndCreatePR } from '../hydra-github.ts';
+import type { IGitOperations } from '../types.ts';
 
 // ── Interactive Prompt ──────────────────────────────────────────────────────
 
@@ -149,8 +147,9 @@ function doMerge(
   baseBranch: string,
   useSmartMerge: boolean,
   withLog: boolean,
+  gitOps: IGitOperations = gitOperations,
 ): boolean {
-  if (!useSmartMerge) return mergeBranch(projectRoot, branch, baseBranch);
+  if (!useSmartMerge) return gitOps.mergeBranch(projectRoot, branch, baseBranch);
   if (!withLog) return smartMerge(projectRoot, branch, baseBranch).ok;
   return smartMerge(projectRoot, branch, baseBranch, {
     log: {
@@ -187,6 +186,7 @@ async function handlePR(
   branch: string,
   baseBranch: string,
   enablePR: boolean,
+  gitOps: IGitOperations = gitOperations,
 ): Promise<'pr-created' | 'skipped'> {
   if (!enablePR) {
     console.log(pc.dim('  Skipped.'));
@@ -196,8 +196,8 @@ async function handlePR(
   if (outcome === 'pr-created') {
     const delAnswer = await ask(rl, `  Delete local branch? (y/N) `);
     if (delAnswer === 'y' || delAnswer === 'yes') {
-      checkoutBranch(projectRoot, baseBranch);
-      deleteBranch(projectRoot, branch);
+      gitOps.checkoutBranch(projectRoot, baseBranch);
+      gitOps.deleteBranch(projectRoot, branch);
       console.log(pc.dim('  Branch deleted.'));
     }
   }
@@ -210,8 +210,9 @@ async function handleMerge(
   branch: string,
   baseBranch: string,
   useSmartMerge: boolean,
+  gitOps: IGitOperations = gitOperations,
 ): Promise<'merged' | 'skipped'> {
-  const ok = doMerge(projectRoot, branch, baseBranch, useSmartMerge, true);
+  const ok = doMerge(projectRoot, branch, baseBranch, useSmartMerge, true, gitOps);
   if (!ok) {
     console.log(pc.red(`  x Merge failed — resolve conflicts manually`));
     console.log(pc.dim(`    git merge ${branch}`));
@@ -220,7 +221,7 @@ async function handleMerge(
   console.log(pc.green(`  + Merged ${branch} into ${baseBranch}`));
   const delAnswer = await ask(rl, `  Delete branch after merge? (Y/n) `);
   if (delAnswer !== 'n' && delAnswer !== 'no') {
-    deleteBranch(projectRoot, branch);
+    gitOps.deleteBranch(projectRoot, branch);
     console.log(pc.dim('  Branch deleted.'));
   }
   return 'merged';
@@ -232,15 +233,16 @@ function handlePostDiffAction(
   branch: string,
   baseBranch: string,
   opts: HandleBranchActionOpts,
+  gitOps: IGitOperations = gitOperations,
 ): 'merged' | 'skipped' | 'deleted' | 'pr-created' {
   if ((postDiff === 'p' || postDiff === 'pr') && opts.enablePR === true) {
     return tryCreatePR(projectRoot, branch, baseBranch);
   }
   if (postDiff === 'm' || postDiff === 'merge') {
-    const ok = doMerge(projectRoot, branch, baseBranch, opts.useSmartMerge === true, false);
+    const ok = doMerge(projectRoot, branch, baseBranch, opts.useSmartMerge === true, false, gitOps);
     if (ok) {
       console.log(pc.green(`  + Merged ${branch} into ${baseBranch}`));
-      deleteBranch(projectRoot, branch);
+      gitOps.deleteBranch(projectRoot, branch);
       console.log(pc.dim('  Branch deleted.'));
       return 'merged';
     }
@@ -248,7 +250,7 @@ function handlePostDiffAction(
     return 'skipped';
   }
   if (postDiff === 'x' || postDiff === 'delete') {
-    deleteBranch(projectRoot, branch);
+    gitOps.deleteBranch(projectRoot, branch);
     console.log(pc.dim('  Branch deleted.'));
     return 'deleted';
   }
@@ -262,6 +264,7 @@ async function handleDiff(
   branch: string,
   baseBranch: string,
   opts: HandleBranchActionOpts,
+  gitOps: IGitOperations = gitOperations,
 ): Promise<'merged' | 'skipped' | 'deleted' | 'pr-created'> {
   const fullDiff = getBranchDiff(projectRoot, branch, baseBranch);
   console.log(`\n${fullDiff}\n`);
@@ -270,7 +273,7 @@ async function handleDiff(
     rl,
     `  After review: ${prLabel2}[${pc.green('m')}]erge  [${pc.yellow('s')}]kip  [${pc.red('x')}]delete  ? `,
   );
-  return handlePostDiffAction(postDiff, projectRoot, branch, baseBranch, opts);
+  return handlePostDiffAction(postDiff, projectRoot, branch, baseBranch, opts, gitOps);
 }
 
 export async function handleBranchAction(
@@ -279,6 +282,7 @@ export async function handleBranchAction(
   branch: string,
   baseBranch: string,
   opts: HandleBranchActionOpts = {},
+  gitOps: IGitOperations = gitOperations,
 ): Promise<'merged' | 'skipped' | 'deleted' | 'pr-created'> {
   const prLabel = opts.enablePR === true ? `[${pc.magenta('p')}]r  ` : '';
   const answer = await ask(
@@ -289,16 +293,16 @@ export async function handleBranchAction(
   switch (answer) {
     case 'p':
     case 'pr':
-      return handlePR(rl, projectRoot, branch, baseBranch, opts.enablePR === true);
+      return handlePR(rl, projectRoot, branch, baseBranch, opts.enablePR === true, gitOps);
     case 'm':
     case 'merge':
-      return handleMerge(rl, projectRoot, branch, baseBranch, opts.useSmartMerge === true);
+      return handleMerge(rl, projectRoot, branch, baseBranch, opts.useSmartMerge === true, gitOps);
     case 'd':
     case 'diff':
-      return handleDiff(rl, projectRoot, branch, baseBranch, opts);
+      return handleDiff(rl, projectRoot, branch, baseBranch, opts, gitOps);
     case 'x':
     case 'delete':
-      deleteBranch(projectRoot, branch);
+      gitOps.deleteBranch(projectRoot, branch);
       console.log(pc.dim('  Branch deleted.'));
       return 'deleted';
     default:
@@ -318,11 +322,12 @@ export async function handleEmptyBranch(
   rl: readline.Interface,
   projectRoot: string,
   branch: string,
+  gitOps: IGitOperations = gitOperations,
 ): Promise<void> {
   console.log(pc.dim('  (no commits on this branch)'));
   const cleanAnswer = await ask(rl, `\n  ${pc.yellow('Delete empty branch?')} (y/N) `);
   if (cleanAnswer === 'y' || cleanAnswer === 'yes') {
-    deleteBranch(projectRoot, branch);
+    gitOps.deleteBranch(projectRoot, branch);
     console.log(pc.dim('  Deleted.'));
   }
 }
@@ -339,6 +344,7 @@ export function cleanBranches(
   prefix: string,
   baseBranch: string,
   dateFilter: string | null = null,
+  gitOps: IGitOperations = gitOperations,
 ): void {
   const branches = listBranches(projectRoot, prefix, dateFilter);
 
@@ -347,16 +353,16 @@ export function cleanBranches(
     return;
   }
 
-  const current = getCurrentBranch(projectRoot);
+  const current = gitOps.getCurrentBranch(projectRoot);
   if (current !== baseBranch) {
-    checkoutBranch(projectRoot, baseBranch);
+    gitOps.checkoutBranch(projectRoot, baseBranch);
   }
 
   console.log(pc.bold(`Cleaning ${String(branches.length)} ${prefix} branch(es)...`));
 
   let deleted = 0;
   for (const branch of branches) {
-    const ok = deleteBranch(projectRoot, branch);
+    const ok = gitOps.deleteBranch(projectRoot, branch);
     if (ok) {
       console.log(pc.dim(`  Deleted: ${branch}`));
       deleted++;

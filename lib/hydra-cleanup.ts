@@ -9,6 +9,8 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import type { ActionItem, PipelineResult } from './hydra-action-pipeline.ts';
+import { gitOperations } from './hydra-shared/git-ops.ts';
+import type { IGitOperations } from './types.ts';
 
 // ── Scanners ─────────────────────────────────────────────────────────────────
 
@@ -361,6 +363,7 @@ export function enrichCleanupWithSitrep(
 export async function executeCleanupAction(
   item: ActionItem,
   opts: Record<string, unknown> = {},
+  gitOps: IGitOperations = gitOperations,
 ): Promise<PipelineResult> {
   const startMs = Date.now();
   const baseUrl = opts['baseUrl'] as string | undefined;
@@ -372,7 +375,7 @@ export async function executeCleanupAction(
         return await executeArchive(item, baseUrl ?? '', startMs);
       }
       case 'delete': {
-        return await executeDelete(item, projectRoot ?? '', startMs);
+        return executeDelete(item, projectRoot ?? '', startMs, gitOps);
       }
       case 'requeue': {
         return await executeRequeue(item, baseUrl ?? '', startMs);
@@ -418,19 +421,19 @@ async function executeArchive(
   return { item, ok: true, output: 'No action needed', durationMs: Date.now() - startMs };
 }
 
-async function executeDelete(
+function executeDelete(
   item: ActionItem,
   projectRoot: string,
   startMs: number,
-): Promise<PipelineResult> {
+  gitOps: IGitOperations = gitOperations,
+): PipelineResult {
   const branch = item.meta?.['branch'] as string | undefined;
   const filePath = item.meta?.['filePath'] as string | undefined;
 
   // Branch deletion
   if (item.source === 'branches' && branch !== undefined) {
     try {
-      const { deleteBranch } = await import('./hydra-shared/git-ops.ts');
-      const ok = deleteBranch(projectRoot, branch);
+      const ok = gitOps.deleteBranch(projectRoot, branch);
       return {
         item,
         ok,

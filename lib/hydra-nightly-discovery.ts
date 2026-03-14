@@ -14,7 +14,8 @@ import { classifyPrompt } from './hydra-utils.ts';
 import { taskToSlug, type ScannedTask } from './hydra-tasks-scanner.ts';
 import { executeAgentWithRecovery } from './hydra-shared/agent-executor.ts';
 import { getAgentInstructionFile } from './hydra-sync-md.ts';
-import { recordCallStart, recordCallComplete, recordCallError } from './hydra-metrics.ts';
+import { metricsRecorder } from './hydra-metrics.ts';
+import type { IMetricsRecorder, MetricsCallResult } from './types.ts';
 import pc from 'picocolors';
 
 // ── Logging ─────────────────────────────────────────────────────────────────
@@ -188,19 +189,20 @@ async function executeDiscoveryAgent(
   agent: string,
   prompt: string,
   opts: { cwd: string; timeoutMs: number; modelOverride?: string },
+  metrics: IMetricsRecorder = metricsRecorder,
 ): Promise<{ ok: boolean; stdout?: string; output?: string; error?: string } | null> {
-  const handle = recordCallStart(agent, 'discovery');
+  const handle = metrics.recordCallStart(agent, 'discovery');
   try {
     const result = await executeAgentWithRecovery(agent, prompt, opts);
     if (!result.ok) {
-      recordCallError(handle, new Error(result.error ?? 'agent returned non-ok'));
+      metrics.recordCallError(handle, new Error(result.error ?? 'agent returned non-ok'));
       log.warn(`Discovery agent returned error: ${result.error ?? 'unknown'}`);
       return null;
     }
-    recordCallComplete(handle, result as unknown as Parameters<typeof recordCallComplete>[1]);
+    metrics.recordCallComplete(handle, result as unknown as MetricsCallResult);
     return result as { ok: boolean; stdout?: string; output?: string; error?: string };
   } catch (err: unknown) {
-    recordCallError(handle, err instanceof Error ? err : new Error(String(err)));
+    metrics.recordCallError(handle, err instanceof Error ? err : new Error(String(err)));
     log.warn(`Discovery agent failed: ${err instanceof Error ? err.message : String(err)}`);
     return null;
   }
@@ -244,6 +246,7 @@ function buildDiscoveredTask(item: Record<string, unknown>, agent: string): Scan
 export async function runDiscovery(
   projectRoot: string,
   opts: RunDiscoveryOpts = {},
+  metrics: IMetricsRecorder = metricsRecorder,
 ): Promise<ScannedTask[]> {
   const cfg = loadHydraConfig();
   const discoveryCfg = (cfg.nightly?.aiDiscovery ?? {}) as Record<string, unknown>;
@@ -266,7 +269,7 @@ export async function runDiscovery(
     ...(resolved.modelOverride != null &&
       resolved.modelOverride !== '' && { modelOverride: resolved.modelOverride }),
   };
-  const result = await executeDiscoveryAgent(resolved.agent, prompt, agentOpts);
+  const result = await executeDiscoveryAgent(resolved.agent, prompt, agentOpts, metrics);
   if (result == null) return [];
 
   const output = result.stdout ?? result.output;

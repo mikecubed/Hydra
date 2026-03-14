@@ -12,8 +12,13 @@ import crypto from 'node:crypto';
 import { getActiveModel } from '../hydra-agents.ts';
 import { loadHydraConfig } from '../hydra-config.ts';
 import { calculateBackoff } from '../hydra-model-recovery.ts';
-import { recordCallStart, recordCallComplete, recordCallError } from '../hydra-metrics.ts';
-import type { ExecuteResult, ProgressCallback, StatusBarCallback } from '../types.ts';
+import { metricsRecorder } from '../hydra-metrics.ts';
+import type {
+  ExecuteResult,
+  ProgressCallback,
+  StatusBarCallback,
+  IMetricsRecorder,
+} from '../types.ts';
 
 /** Options for Gemini direct API calls */
 export interface GeminiDirectOpts {
@@ -173,12 +178,13 @@ interface GeminiRetryConfig {
 function makeGeminiFailResult(
   err: string,
   startTime: number,
-  metricsHandle: ReturnType<typeof recordCallStart>,
+  metricsHandle: string,
   opts: GeminiDirectOpts,
   extra?: { stderr?: string; timedOut?: boolean },
+  metrics: IMetricsRecorder = metricsRecorder,
 ): ExecuteResult {
   const durationMs = Date.now() - startTime;
-  recordCallError(metricsHandle, err);
+  metrics.recordCallError(metricsHandle, err);
   if (opts.onStatusBar)
     opts.onStatusBar('gemini', { phase: opts.phaseLabel ?? 'error', step: 'idle' });
   return {
@@ -245,8 +251,9 @@ async function executeGeminiRetryLoop(
   config: GeminiRetryConfig,
   timeoutMs: number,
   startTime: number,
-  metricsHandle: ReturnType<typeof recordCallStart>,
+  metricsHandle: string,
   opts: GeminiDirectOpts,
+  metrics: IMetricsRecorder = metricsRecorder,
 ): Promise<ExecuteResult> {
   let lastError: string | null = null;
 
@@ -273,7 +280,7 @@ async function executeGeminiRetryLoop(
       const data = (await resp.json()) as GeminiContentResponse;
       const text = extractGeminiText(data);
       const durationMs = Date.now() - startTime;
-      recordCallComplete(metricsHandle, { output: text, stderr: '' });
+      metrics.recordCallComplete(metricsHandle, { output: text, stderr: '' });
       if (opts.onStatusBar)
         opts.onStatusBar('gemini', { phase: opts.phaseLabel ?? 'done', step: 'idle' });
       return {
@@ -309,10 +316,18 @@ async function executeGeminiRetryLoop(
       metricsHandle,
       opts,
       { stderr: errText },
+      metrics,
     );
   }
 
-  return makeGeminiFailResult(lastError ?? 'Gemini API 429', startTime, metricsHandle, opts);
+  return makeGeminiFailResult(
+    lastError ?? 'Gemini API 429',
+    startTime,
+    metricsHandle,
+    opts,
+    undefined,
+    metrics,
+  );
 }
 
 // ── Main Entry Point ────────────────────────────────────────────────────────
@@ -320,11 +335,12 @@ async function executeGeminiRetryLoop(
 export async function executeGeminiDirect(
   prompt: string,
   opts: GeminiDirectOpts = {},
+  metrics: IMetricsRecorder = metricsRecorder,
 ): Promise<ExecuteResult> {
   const { timeoutMs = 300_000, modelOverride, phaseLabel, onStatusBar } = opts;
   const startTime = Date.now();
   const model = modelOverride ?? getActiveModel('gemini') ?? 'gemini';
-  const metricsHandle = recordCallStart('gemini', model);
+  const metricsHandle = metrics.recordCallStart('gemini', model);
   if (onStatusBar) onStatusBar('gemini', { phase: phaseLabel ?? 'executing', step: 'running' });
 
   try {
@@ -335,6 +351,8 @@ export async function executeGeminiDirect(
         startTime,
         metricsHandle,
         opts,
+        undefined,
+        metrics,
       );
     }
 
@@ -345,6 +363,8 @@ export async function executeGeminiDirect(
         startTime,
         metricsHandle,
         opts,
+        undefined,
+        metrics,
       );
     }
 
@@ -359,12 +379,20 @@ export async function executeGeminiDirect(
       startTime,
       metricsHandle,
       opts,
+      metrics,
     );
   } catch (err: unknown) {
     const e = err instanceof Error ? err : new Error(String(err));
     const errMsg = e.name === 'TimeoutError' ? 'Gemini API timeout' : e.message;
-    return makeGeminiFailResult(errMsg, startTime, metricsHandle, opts, {
-      timedOut: e.name === 'TimeoutError',
-    });
+    return makeGeminiFailResult(
+      errMsg,
+      startTime,
+      metricsHandle,
+      opts,
+      {
+        timedOut: e.name === 'TimeoutError',
+      },
+      metrics,
+    );
   }
 }

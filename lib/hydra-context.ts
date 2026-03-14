@@ -14,8 +14,8 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { getAgent } from './hydra-agents.ts';
 import { loadHydraConfig, resolveProject } from './hydra-config.ts';
-import { getCurrentBranch, git } from './hydra-shared/git-ops.ts';
-import type { IContextProvider } from './types.ts';
+import { git, gitOperations } from './hydra-shared/git-ops.ts';
+import type { IContextProvider, IGitOperations } from './types.ts';
 
 interface ProjectConfig {
   projectRoot: string;
@@ -178,8 +178,9 @@ function detectGitRules(projectRoot: string) {
 function buildMinimalContext(
   projectConfig: ProjectConfig,
   taskContext: { files?: string[]; types?: string; signatures?: string } = {},
+  gitOps: IGitOperations = gitOperations,
 ) {
-  const branch = getCurrentBranch(projectConfig.projectRoot);
+  const branch = gitOps.getCurrentBranch(projectConfig.projectRoot);
   const techStack = detectTechStack(projectConfig.projectRoot);
   const gitRules = detectGitRules(projectConfig.projectRoot);
   const lines = [
@@ -215,7 +216,7 @@ function buildMinimalContext(
  * Medium context (~1500 tokens) for Claude.
  * Claude has full tool access to read files, so summary + priorities is enough.
  */
-function buildMediumContext(projectConfig: ProjectConfig) {
+function buildMediumContext(projectConfig: ProjectConfig, gitOps: IGitOperations = gitOperations) {
   const now = Date.now();
   const cacheKey = projectConfig.projectRoot;
   if (
@@ -227,7 +228,7 @@ function buildMediumContext(projectConfig: ProjectConfig) {
     return cachedMedium;
   }
 
-  const branch = getCurrentBranch(projectConfig.projectRoot);
+  const branch = gitOps.getCurrentBranch(projectConfig.projectRoot);
   const techStack = detectTechStack(projectConfig.projectRoot);
   const gitRules = detectGitRules(projectConfig.projectRoot);
   const todoContent = readFileSafe(path.join(projectConfig.projectRoot, 'docs', 'TODO.md'), 50);
@@ -319,6 +320,7 @@ function appendTaskRelevantFiles(
 function buildLargeContext(
   projectConfig: ProjectConfig,
   taskContext: { files?: string[]; types?: string; signatures?: string } = {},
+  gitOps: IGitOperations = gitOperations,
 ) {
   const now = Date.now();
   const cacheKey = projectConfig.projectRoot;
@@ -332,7 +334,7 @@ function buildLargeContext(
     return cachedLarge;
   }
 
-  const medium = buildMediumContext(projectConfig);
+  const medium = buildMediumContext(projectConfig, gitOps);
   const extraLines = [medium];
 
   appendGitChanges(extraLines, projectConfig.projectRoot);
@@ -476,6 +478,7 @@ export function getProjectContext(
   agentName = 'claude',
   taskContext: { files?: string[]; types?: string; signatures?: string } = {},
   projectConfig: ProjectConfig | null = null,
+  gitOps: IGitOperations = gitOperations,
 ): string {
   const resolvedConfig =
     projectConfig ?? (resolveProject({ skipValidation: true }) as ProjectConfig);
@@ -485,12 +488,12 @@ export function getProjectContext(
 
   switch (tier) {
     case 'minimal':
-      return buildMinimalContext(resolvedConfig, taskContext);
+      return buildMinimalContext(resolvedConfig, taskContext, gitOps);
     case 'large':
-      return buildLargeContext(resolvedConfig, taskContext);
+      return buildLargeContext(resolvedConfig, taskContext, gitOps);
     case 'medium':
     default:
-      return buildMediumContext(resolvedConfig);
+      return buildMediumContext(resolvedConfig, gitOps);
   }
 }
 
@@ -512,12 +515,13 @@ export function buildAgentContext(
   taskContext: { files?: string[]; types?: string; signatures?: string } = {},
   projectConfig: ProjectConfig | null = null,
   promptText: string | null = null,
+  gitOps: IGitOperations = gitOperations,
 ): string {
   const resolvedConfig =
     projectConfig ?? (resolveProject({ skipValidation: true }) as ProjectConfig);
 
   // Base context — same as existing getProjectContext behavior
-  const baseContext = getProjectContext(agentName, taskContext, resolvedConfig);
+  const baseContext = getProjectContext(agentName, taskContext, resolvedConfig, gitOps);
 
   // Hierarchical injection — only when promptText is provided and feature is enabled
   if (promptText == null || promptText === '') {
