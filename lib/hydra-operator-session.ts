@@ -60,7 +60,8 @@ export async function executeDaemonResume(
     if (stale.length > 0) {
       console.log('');
       await Promise.all(
-        stale.map(async (t) => {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        stale.map(async (t: any) => {
           try {
             await requestFn('POST', resumeBaseUrl, '/task/update', {
               taskId: t.id,
@@ -83,7 +84,8 @@ export async function executeDaemonResume(
     if (handoffs.length > 0) {
       console.log('');
       await Promise.all(
-        handoffs.map(async (h) => {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        handoffs.map(async (h: any) => {
           const targetAgent = String(h.to ?? '').toLowerCase();
           try {
             await requestFn('POST', resumeBaseUrl, '/handoff/ack', {
