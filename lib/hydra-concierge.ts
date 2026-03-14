@@ -378,11 +378,14 @@ function buildAwarenessBlock(context: ConciergeContext): string {
 }
 
 function buildConciergeFingerprint(context: ConciergeContext): string {
+  const completions = context.recentCompletions ?? [];
+  const lastTaskId = completions.at(-1)?.taskId ?? '';
   return JSON.stringify([
     context.mode ?? '',
     context.openTasks ?? 0,
     context.gitInfo?.branch ?? '',
-    context.recentCompletions ?? [],
+    completions.length,
+    lastTaskId,
     context.selfAwarenessKey ?? '',
   ]);
 }

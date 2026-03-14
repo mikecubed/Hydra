@@ -68,7 +68,10 @@ export function buildCustomAgentEntry(fields: WizardFields): CustomAgentDef {
     name,
     type,
     displayName: fields.displayName ?? name,
-    contextBudget: Number(contextBudget) === 0 ? 32000 : Number(contextBudget),
+    contextBudget: (() => {
+      const n = Number(contextBudget);
+      return Number.isFinite(n) && n > 0 ? n : 32000;
+    })(),
     councilRole: councilRole ?? null,
     taskAffinity,
     enabled: enabled !== false,

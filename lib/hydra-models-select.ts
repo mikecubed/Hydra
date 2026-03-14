@@ -330,7 +330,8 @@ function buildPresetAliasAnnotations(
 ): { presetOf: Map<string, string>; aliasOf: Map<string, string[]> } {
   const presetOf = new Map<string, string>();
   for (const key of ['default', 'fast', 'cheap']) {
-    if (agentModels[key] !== '') presetOf.set(agentModels[key], key);
+    if (typeof agentModels[key] === 'string' && agentModels[key] !== '')
+      presetOf.set(agentModels[key], key);
   }
   const aliasOf = new Map<string, string[]>();
   for (const [alias, id] of Object.entries(aliases)) {

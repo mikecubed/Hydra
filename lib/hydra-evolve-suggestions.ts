@@ -362,9 +362,11 @@ function buildRoundSourceRef(
 }
 
 function buildRoundTags(roundResult: EvolveRoundResult, source: string): string[] {
+  const [, suffix] = source.split(':') as [string, string | undefined];
+  const sourceTag = suffix != null && suffix !== '' ? suffix : source;
   return [
     roundResult.area ?? '',
-    source.split(':')[1] === '' ? source : source.split(':')[1],
+    sourceTag,
     ...(roundResult.verdict != null && roundResult.verdict !== '' ? [roundResult.verdict] : []),
   ];
 }

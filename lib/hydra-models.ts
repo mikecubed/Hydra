@@ -177,7 +177,7 @@ function displayPresetsSection(
   const presetKeys = ['default', 'fast', 'cheap'];
   console.log(pc.bold('  Presets:'));
   for (const key of presetKeys) {
-    if (agentModels[key] !== '') {
+    if (agentModels[key] != null && agentModels[key] !== '') {
       const marker = agentModels[key] === activeModel ? pc.green(' ◀') : '';
       console.log(`    ${pc.dim(key.padEnd(8))} ${agentModels[key] ?? ''}${marker}`);
     }
