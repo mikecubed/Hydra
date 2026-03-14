@@ -21,6 +21,7 @@ import { setActiveModel, AGENT_NAMES, getModelSummary, getAgent } from './hydra-
 import { getMetricsSummary, getRecentTokens } from './hydra-metrics.ts';
 import pc from 'picocolors';
 import { isTruecolor } from './hydra-ui.ts';
+import { exit } from './hydra-process.ts';
 
 // ── Interfaces ──────────────────────────────────────────────────────────────
 
@@ -1044,8 +1045,7 @@ const isMainModule =
 if (isMainModule) {
   const usage = checkUsage();
   console.log(renderUsageDashboard(usage));
-  // eslint-disable-next-line n/no-process-exit
-  process.exit(usage.level === 'critical' ? 1 : 0);
+  exit(usage.level === 'critical' ? 1 : 0);
 }
 
 export { renderUsageDashboard, renderUsageBar, formatTokens };

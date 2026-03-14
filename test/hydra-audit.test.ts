@@ -163,6 +163,12 @@ function loadHydraAuditInternals(options: LoadAuditOptions = {}): AuditInternals
         return { getAgent: (agent: string) => options.agents?.[agent] ?? null };
       case './hydra-shared/agent-executor.ts':
         return { expandInvokeArgs: (args: string[]) => args };
+      case './hydra-process.ts':
+        return {
+          exit: (code?: number) => {
+            throw new Error(`Unexpected exit(${String(code)}) in test harness`);
+          },
+        };
       default:
         throw new Error(`Unexpected require(${JSON.stringify(specifier)}) in test harness`);
     }
