@@ -59,9 +59,13 @@ const MODE_DOWNSHIFT = { performance: 'balanced', balanced: 'economy' };
 // Module-level executor — replace via setDispatchExecutor() for testing
 let _dispatchExecutor: IAgentExecutor = new DefaultAgentExecutor();
 
-/** Override the agent executor used by this module (primarily for testing). */
-export function setDispatchExecutor(executor: IAgentExecutor): void {
+/** Override the agent executor used by this module (primarily for testing).
+ *  Returns the displaced executor so callers can restore it in teardown:
+ *  `const prev = setDispatchExecutor(mock); ... setDispatchExecutor(prev)` */
+export function setDispatchExecutor(executor: IAgentExecutor): IAgentExecutor {
+  const previous = _dispatchExecutor;
   _dispatchExecutor = executor;
+  return previous;
 }
 
 function usageGuard(_agent: string) {
