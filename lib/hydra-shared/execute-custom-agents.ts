@@ -74,7 +74,160 @@ export function parseCliResponse(
   return stdout; // plaintext and markdown both return raw stdout
 }
 
+// ── Shared Helpers ────────────────────────────────────────────────────────────
+
+type MetricsHandle = ReturnType<typeof recordCallStart>;
+type AgentSpan = Awaited<ReturnType<typeof startAgentSpan>>;
+
+interface CliSpawnState {
+  stdout: string;
+  stderr: string;
+  timedOut: boolean;
+  settled: boolean;
+  timer: ReturnType<typeof setTimeout> | undefined;
+}
+
+interface ParsedCliOutput {
+  parsedOutput: string;
+  tokenUsage: TokenUsage | null;
+  costUsd: number | null;
+}
+
+interface ApiAgentConfig {
+  baseUrl: string;
+  model: string;
+  maxTokens?: number;
+  abortSignal?: AbortSignal;
+}
+
+function makeCustomAgentErrorResult(
+  errorCategory: string,
+  extra?: Partial<ExecuteResult>,
+): ExecuteResult {
+  return {
+    ok: false,
+    output: '',
+    stdout: '',
+    stderr: '',
+    error: errorCategory,
+    errorCategory,
+    exitCode: null,
+    signal: null,
+    durationMs: 0,
+    timedOut: false,
+    ...extra,
+  };
+}
+
+function resolveCustomAgentDef(agentName: string): AgentDef | CustomAgentDef | null {
+  const cfg = loadHydraConfig();
+  const def = getAgent(agentName) ?? cfg.agents.customAgents.find((a) => a.name === agentName);
+  if (!def) return null;
+  if ('enabled' in def && def.enabled === false) return null;
+  return def;
+}
+
 // ── Custom CLI Agent ──────────────────────────────────────────────────────────
+
+function resolveCliInvokeConfig(
+  def: AgentDef | CustomAgentDef,
+): { cmd: string; args: string[] } | undefined {
+  if (!def.invoke || !('headless' in def.invoke)) return undefined;
+  type InvokeShape = {
+    headless?: { cmd: string; args: string[] };
+    nonInteractive?: { cmd: string; args: string[] };
+  };
+  const invoke = def.invoke as InvokeShape;
+  return invoke.headless ?? invoke.nonInteractive;
+}
+
+function parseCustomCliOutput(stdout: string, def: AgentDef | CustomAgentDef): ParsedCliOutput {
+  if ('parseOutput' in def && typeof def.parseOutput === 'function') {
+    const result = def.parseOutput(stdout, { jsonOutput: def.features.jsonOutput });
+    return {
+      parsedOutput: result.output,
+      tokenUsage: result.tokenUsage ?? null,
+      costUsd: result.costUsd ?? null,
+    };
+  }
+  const parser =
+    ('responseParser' in def ? (def as { responseParser?: string }).responseParser : 'plaintext') ??
+    'plaintext';
+  return {
+    parsedOutput: parseCliResponse(stdout, parser as 'plaintext' | 'json' | 'markdown'),
+    tokenUsage: null,
+    costUsd: null,
+  };
+}
+
+async function handleCliSpawnError(
+  err: NodeJS.ErrnoException,
+  state: CliSpawnState,
+  startTime: number,
+  metricsHandle: MetricsHandle,
+  span: AgentSpan,
+): Promise<ExecuteResult> {
+  if (state.timer) clearTimeout(state.timer);
+  const durationMs = Date.now() - startTime;
+  const errorCategory = err.code === 'ENOENT' ? 'custom-cli-unavailable' : 'custom-cli-error';
+  recordCallError(metricsHandle, errorCategory);
+  await endAgentSpan(span, { ok: false, error: errorCategory });
+  return makeCustomAgentErrorResult(errorCategory, { stderr: err.message, durationMs });
+}
+
+async function handleCliClose(
+  code: number | null,
+  signal: string | null,
+  state: CliSpawnState,
+  startTime: number,
+  metricsHandle: MetricsHandle,
+  span: AgentSpan,
+  def: AgentDef | CustomAgentDef,
+): Promise<ExecuteResult> {
+  if (state.timer) clearTimeout(state.timer);
+  const durationMs = Date.now() - startTime;
+  const isFailure = (code !== 0 || Boolean(signal)) && !state.timedOut;
+
+  if (isFailure) {
+    recordCallError(metricsHandle, 'custom-cli-error');
+    await endAgentSpan(span, { ok: false, error: 'custom-cli-error' });
+    return {
+      ok: false,
+      output: '',
+      stdout: state.stdout,
+      stderr: state.stderr,
+      error: 'custom-cli-error',
+      errorCategory: 'custom-cli-error',
+      exitCode: code,
+      signal,
+      durationMs,
+      timedOut: false,
+    };
+  }
+
+  const { parsedOutput, tokenUsage, costUsd } = parseCustomCliOutput(state.stdout, def);
+  recordCallComplete(metricsHandle, {
+    output: parsedOutput,
+    stdout: parsedOutput,
+    tokenUsage: tokenUsage ?? undefined,
+    costUsd,
+  });
+  await endAgentSpan(span, { ok: !state.timedOut });
+  return {
+    ok: !state.timedOut,
+    output: parsedOutput,
+    stdout: parsedOutput,
+    stderr: state.stderr,
+    tokenUsage,
+    costUsd,
+    error: state.timedOut ? 'timeout' : null,
+    errorCategory: state.timedOut ? 'custom-cli-error' : undefined,
+    exitCode: code,
+    signal,
+    durationMs,
+    timedOut: state.timedOut,
+  };
+}
 
 export async function executeCustomCliAgent(
   agentName: string,
@@ -82,54 +235,19 @@ export async function executeCustomCliAgent(
   opts: CustomCliOpts = {},
 ): Promise<ExecuteResult> {
   const { cwd, timeoutMs = 3 * 60 * 1000, onProgress, phaseLabel } = opts;
-  const cfg = loadHydraConfig();
-  // Prefer registry definition (supports programmatically registered agents), fall back to config
-  const def: (AgentDef & { responseParser?: string }) | CustomAgentDef | null | undefined =
-    getAgent(agentName) ?? cfg.agents.customAgents.find((a) => a.name === agentName);
+  const def = resolveCustomAgentDef(agentName);
 
-  if (!def || ('enabled' in def && def.enabled === false)) {
-    return {
-      ok: false,
-      output: '',
-      stdout: '',
+  if (!def) {
+    return makeCustomAgentErrorResult('custom-cli-disabled', {
       stderr: 'Custom agent disabled or not found.',
-      error: 'custom-cli-disabled',
-      errorCategory: 'custom-cli-disabled',
-      exitCode: null,
-      signal: null,
-      durationMs: 0,
-      timedOut: false,
-    };
+    });
   }
 
-  const invokeConfig =
-    def.invoke && 'headless' in def.invoke
-      ? ((
-          def.invoke as {
-            headless?: { cmd: string; args: string[] };
-            nonInteractive?: { cmd: string; args: string[] };
-          }
-        ).headless ??
-        (
-          def.invoke as {
-            headless?: { cmd: string; args: string[] };
-            nonInteractive?: { cmd: string; args: string[] };
-          }
-        ).nonInteractive)
-      : undefined;
+  const invokeConfig = resolveCliInvokeConfig(def);
   if (invokeConfig?.cmd == null || invokeConfig.cmd === '' || !Array.isArray(invokeConfig.args)) {
-    return {
-      ok: false,
-      output: '',
-      stdout: '',
+    return makeCustomAgentErrorResult('custom-cli-error', {
       stderr: 'Custom agent has no valid invoke config.',
-      error: 'custom-cli-error',
-      errorCategory: 'custom-cli-error',
-      exitCode: null,
-      signal: null,
-      durationMs: 0,
-      timedOut: false,
-    };
+    });
   }
 
   const vars = { prompt, cwd: cwd ?? process.cwd() };
@@ -141,132 +259,117 @@ export async function executeCustomCliAgent(
   const span = await startAgentSpan(agentName, agentName, { phase: phaseLabel });
 
   return new Promise<ExecuteResult>((resolve) => {
-    let stdout = '';
-    let stderr = '';
-    let timedOut = false;
-    let settled = false;
-
+    const state: CliSpawnState = {
+      stdout: '',
+      stderr: '',
+      timedOut: false,
+      settled: false,
+      timer: undefined,
+    };
     const child = spawn(cmd, args, {
       cwd: cwd ?? process.cwd(),
       stdio: ['ignore', 'pipe', 'pipe'],
       windowsHide: true,
     });
-    // spawn is typed as returning ChildProcess via the typed wrapper at top of file
 
-    let timer: ReturnType<typeof setTimeout> | undefined;
     if (timeoutMs > 0) {
-      timer = setTimeout(() => {
-        timedOut = true;
+      state.timer = setTimeout(() => {
+        state.timedOut = true;
         child.kill('SIGTERM');
       }, timeoutMs);
     }
 
     child.on('error', (err: NodeJS.ErrnoException) => {
-      void (async () => {
-        if (settled) return;
-        settled = true;
-        if (timer) clearTimeout(timer);
-        const durationMs = Date.now() - startTime;
-        const isUnavailable = err.code === 'ENOENT';
-        const errorCategory = isUnavailable ? 'custom-cli-unavailable' : 'custom-cli-error';
-        recordCallError(metricsHandle, errorCategory);
-        await endAgentSpan(span, { ok: false, error: errorCategory });
-        resolve({
-          ok: false,
-          output: '',
-          stdout: '',
-          stderr: err.message,
-          error: errorCategory,
-          errorCategory,
-          exitCode: null,
-          signal: null,
-          durationMs,
-          timedOut: false,
-        });
-      })();
+      if (state.settled) return;
+      state.settled = true;
+      void handleCliSpawnError(err, state, startTime, metricsHandle, span).then(resolve);
     });
 
-    // stdout and stderr are always defined with stdio: ['ignore', 'pipe', 'pipe']
     child.stdout?.setEncoding('utf8');
     child.stderr?.setEncoding('utf8');
     child.stdout?.on('data', (d: string) => {
-      stdout += d;
-      if (onProgress) onProgress(Date.now() - startTime, Math.round(stdout.length / 1024));
+      state.stdout += d;
+      if (onProgress) onProgress(Date.now() - startTime, Math.round(state.stdout.length / 1024));
     });
     child.stderr?.on('data', (d: string) => {
-      stderr += d;
+      state.stderr += d;
     });
 
     child.on('close', (code: number | null, signal: string | null) => {
-      void (async () => {
-        if (settled) return;
-        settled = true;
-        if (timer) clearTimeout(timer);
-        const durationMs = Date.now() - startTime;
-        const isFailure = (code !== 0 || Boolean(signal)) && !timedOut;
-        if (isFailure) {
-          recordCallError(metricsHandle, 'custom-cli-error');
-          await endAgentSpan(span, { ok: false, error: 'custom-cli-error' });
-          resolve({
-            ok: false,
-            output: '',
-            stdout,
-            stderr,
-            error: 'custom-cli-error',
-            errorCategory: 'custom-cli-error',
-            exitCode: code,
-            signal,
-            durationMs,
-            timedOut: false,
-          });
-          return;
-        }
-        // Prefer plugin parseOutput (set by registerAgent) for token/cost extraction.
-        // Fall back to legacy responseParser for config-only agents not in the registry.
-        let parsedOutput: string;
-        let tokenUsage: TokenUsage | null = null;
-        let costUsd: number | null = null;
-        if ('parseOutput' in def && typeof def.parseOutput === 'function') {
-          const result = (def as AgentDef).parseOutput(stdout, {
-            jsonOutput: (def as AgentDef).features.jsonOutput,
-          });
-          parsedOutput = result.output;
-          tokenUsage = result.tokenUsage ?? null;
-          costUsd = result.costUsd ?? null;
-        } else {
-          const parser =
-            ('responseParser' in def
-              ? (def as { responseParser?: string }).responseParser
-              : 'plaintext') ?? 'plaintext';
-          parsedOutput = parseCliResponse(stdout, parser as 'plaintext' | 'json' | 'markdown');
-        }
-        recordCallComplete(metricsHandle, {
-          output: parsedOutput,
-          stdout: parsedOutput,
-          tokenUsage: tokenUsage ?? undefined,
-          costUsd,
-        });
-        await endAgentSpan(span, { ok: !timedOut });
-        resolve({
-          ok: !timedOut,
-          output: parsedOutput,
-          stdout: parsedOutput,
-          stderr,
-          tokenUsage,
-          costUsd,
-          error: timedOut ? 'timeout' : null,
-          errorCategory: timedOut ? 'custom-cli-error' : undefined,
-          exitCode: code,
-          signal,
-          durationMs,
-          timedOut,
-        });
-      })();
+      if (state.settled) return;
+      state.settled = true;
+      void handleCliClose(code, signal, state, startTime, metricsHandle, span, def).then(resolve);
     });
   });
 }
 
 // ── Custom API Agent ──────────────────────────────────────────────────────────
+
+function buildApiRequestConfig(def: AgentDef | CustomAgentDef, timeoutMs: number): ApiAgentConfig {
+  const baseUrl =
+    (('baseUrl' in def ? (def as { baseUrl?: string }).baseUrl : undefined) ??
+    'http://localhost:11434/v1');
+  const model = ('model' in def ? (def as { model?: string }).model : undefined) ?? 'default';
+  const maxTokens = 'maxTokens' in def ? (def as { maxTokens?: number }).maxTokens : undefined;
+  const abortSignal = timeoutMs > 0 ? AbortSignal.timeout(timeoutMs) : undefined;
+  return { baseUrl, model, maxTokens, abortSignal };
+}
+
+async function executeApiStream(
+  prompt: string,
+  apiConfig: ApiAgentConfig,
+  startTime: number,
+  metricsHandle: MetricsHandle,
+  span: AgentSpan,
+  onProgress?: ProgressCallback,
+): Promise<ExecuteResult> {
+  let output = '';
+  const messages: Array<{ role: 'user' | 'assistant' | 'system'; content: string }> = [
+    { role: 'user', content: prompt },
+  ];
+
+  const result = await streamLocalCompletion(
+    messages,
+    {
+      baseUrl: apiConfig.baseUrl,
+      model: apiConfig.model,
+      maxTokens: apiConfig.maxTokens,
+      signal: apiConfig.abortSignal,
+    },
+    (chunk: string) => {
+      output += chunk;
+      if (onProgress) {
+        onProgress(Date.now() - startTime, Math.round(Buffer.byteLength(output, 'utf8') / 1024));
+      }
+    },
+  );
+
+  const durationMs = Date.now() - startTime;
+  if (!result.ok) {
+    recordCallError(metricsHandle, result.errorCategory ?? 'unknown');
+    await endAgentSpan(span, { ok: false, error: result.errorCategory });
+    return makeCustomAgentErrorResult(result.errorCategory ?? 'unknown', {
+      stderr: result.errorCategory ?? '',
+      error: result.errorCategory ?? null,
+      durationMs,
+    });
+  }
+
+  recordCallComplete(metricsHandle, { output: result.output, stdout: result.output });
+  await endAgentSpan(span, { ok: true });
+  return {
+    ok: true,
+    output: result.output,
+    stdout: result.output,
+    stderr: '',
+    error: null,
+    errorCategory: undefined,
+    exitCode: 0,
+    signal: null,
+    durationMs,
+    timedOut: false,
+  };
+}
 
 export async function executeCustomApiAgent(
   agentName: string,
@@ -274,100 +377,26 @@ export async function executeCustomApiAgent(
   opts: CustomApiOpts = {},
 ): Promise<ExecuteResult> {
   const { timeoutMs = 3 * 60 * 1000, onProgress, phaseLabel } = opts;
-  const cfg = loadHydraConfig();
-  // Prefer registry definition (supports programmatically registered agents), fall back to config
-  const def:
-    | (AgentDef & { baseUrl?: string; model?: string; maxTokens?: number })
-    | CustomAgentDef
-    | null
-    | undefined = getAgent(agentName) ?? cfg.agents.customAgents.find((a) => a.name === agentName);
+  const def = resolveCustomAgentDef(agentName);
 
-  if (!def || ('enabled' in def && def.enabled === false)) {
-    return {
-      ok: false,
-      output: '',
-      stdout: '',
+  if (!def) {
+    return makeCustomAgentErrorResult('custom-api-disabled', {
       stderr: 'Custom API agent disabled or not found.',
-      error: 'custom-api-disabled',
-      errorCategory: 'custom-api-disabled',
-      exitCode: null,
-      signal: null,
-      durationMs: 0,
-      timedOut: false,
-    };
+    });
   }
 
-  const baseUrl = ('baseUrl' in def ? def.baseUrl : undefined) ?? 'http://localhost:11434/v1';
-  const model = ('model' in def ? def.model : undefined) ?? 'default';
+  const apiConfig = buildApiRequestConfig(def, timeoutMs);
   const startTime = Date.now();
-  const metricsHandle = recordCallStart(agentName, model);
-  const span = await startAgentSpan(agentName, model, { phase: phaseLabel });
-  const abortSignal = timeoutMs > 0 ? AbortSignal.timeout(timeoutMs) : undefined;
+  const metricsHandle = recordCallStart(agentName, apiConfig.model);
+  const span = await startAgentSpan(agentName, apiConfig.model, { phase: phaseLabel });
 
-  let output = '';
   try {
-    const messages: Array<{ role: 'user' | 'assistant' | 'system'; content: string }> = [
-      { role: 'user', content: prompt },
-    ];
-    const maxTokens = 'maxTokens' in def ? (def as { maxTokens?: number }).maxTokens : undefined;
-    const result = await streamLocalCompletion(
-      messages,
-      { baseUrl, model, maxTokens, signal: abortSignal },
-      (chunk: string) => {
-        output += chunk;
-        if (onProgress)
-          onProgress(Date.now() - startTime, Math.round(Buffer.byteLength(output, 'utf8') / 1024));
-      },
-    );
-
-    const durationMs = Date.now() - startTime;
-    if (!result.ok) {
-      recordCallError(metricsHandle, result.errorCategory ?? 'unknown');
-      await endAgentSpan(span, { ok: false, error: result.errorCategory });
-      return {
-        ok: false,
-        output: '',
-        stdout: '',
-        stderr: result.errorCategory ?? '',
-        error: result.errorCategory ?? null,
-        errorCategory: result.errorCategory,
-        exitCode: null,
-        signal: null,
-        durationMs,
-        timedOut: false,
-      };
-    }
-
-    recordCallComplete(metricsHandle, { output: result.output, stdout: result.output });
-    await endAgentSpan(span, { ok: true });
-    return {
-      ok: true,
-      output: result.output,
-      stdout: result.output,
-      stderr: '',
-      error: null,
-      errorCategory: undefined,
-      exitCode: 0,
-      signal: null,
-      durationMs,
-      timedOut: false,
-    };
+    return await executeApiStream(prompt, apiConfig, startTime, metricsHandle, span, onProgress);
   } catch (err: unknown) {
     const e = err instanceof Error ? err : new Error(String(err));
     const durationMs = Date.now() - startTime;
     recordCallError(metricsHandle, 'custom-cli-error');
     await endAgentSpan(span, { ok: false, error: e.message });
-    return {
-      ok: false,
-      output: '',
-      stdout: '',
-      stderr: e.message,
-      error: 'custom-cli-error',
-      errorCategory: 'custom-cli-error',
-      exitCode: null,
-      signal: null,
-      durationMs,
-      timedOut: false,
-    };
+    return makeCustomAgentErrorResult('custom-cli-error', { stderr: e.message, durationMs });
   }
 }

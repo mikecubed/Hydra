@@ -255,6 +255,67 @@ export function getSummary(state: HydraStateShape): Record<string, unknown> {
   };
 }
 
+function getOpenTasks(state: HydraStateShape): TaskEntry[] {
+  const completedIds = new Set(
+    state.tasks
+      .filter((t: TaskEntry) => ['done', 'cancelled'].includes(t.status))
+      .map((t: TaskEntry) => t.id),
+  );
+  return state.tasks.filter((task: TaskEntry) => {
+    if (['done', 'cancelled'].includes(task.status)) return false;
+    const deps = Array.isArray(task.blockedBy) ? task.blockedBy : [];
+    return deps.every((dep: string) => completedIds.has(dep));
+  });
+}
+
+function buildUnassignedSuggestion(
+  scored: ScoredTask[],
+  agent: string,
+): { action: string; message: string; task: TaskEntry; preferredAgent?: string } | null {
+  if (scored.length === 0) return null;
+  const { task, affinity, preferredAgent } = scored[0];
+  const result: { action: string; message: string; task: TaskEntry; preferredAgent?: string } = {
+    action: 'claim_unassigned_task',
+    message: `${agent} can claim ${task.id} (type=${task.type}, affinity=${String(affinity)}).`,
+    task,
+  };
+  if (preferredAgent != null && preferredAgent !== '') result.preferredAgent = preferredAgent;
+  return result;
+}
+
+interface ScoredTask {
+  task: TaskEntry;
+  affinity: number;
+  preferredAgent: string | null;
+}
+
+function scoreUnassignedTodos(openTasks: TaskEntry[], agent: string): ScoredTask[] {
+  const agentConfig = getAgent(agent);
+  return openTasks
+    .filter(
+      (task: TaskEntry) =>
+        ['unassigned', 'human', ''].includes(task.owner) && task.status === 'todo',
+    )
+    .map((task: TaskEntry) => {
+      const taskType = task.type === '' ? 'implementation' : task.type;
+      const affinity =
+        (agentConfig?.taskAffinity as Record<string, number> | undefined)?.[taskType] ?? 0.5;
+      let preferredAgent: string | null = null;
+      const virtualAgents = listAgents({ type: 'virtual', enabled: true });
+      for (const va of virtualAgents) {
+        const physical = resolvePhysicalAgent(va.name);
+        if (
+          physical?.name === agent &&
+          ((va.taskAffinity as Record<string, number> | undefined)?.[taskType] ?? 0) > affinity
+        ) {
+          preferredAgent = va.name;
+        }
+      }
+      return { task, affinity, preferredAgent };
+    })
+    .sort((a: { affinity: number }, b: { affinity: number }) => b.affinity - a.affinity);
+}
+
 /**
  * Suggest the next action for the given agent based on current state.
  */
@@ -268,19 +329,7 @@ export function suggestNext(
   handoff?: Record<string, unknown>;
 } & Record<string, unknown> {
   ensureKnownAgent(agent, false);
-
-  const completedIds = new Set(
-    state.tasks
-      .filter((t: TaskEntry) => ['done', 'cancelled'].includes(t.status))
-      .map((t: TaskEntry) => t.id),
-  );
-  const openTasks = state.tasks.filter((task: TaskEntry) => {
-    if (['done', 'cancelled'].includes(task.status)) {
-      return false;
-    }
-    const deps = Array.isArray(task.blockedBy) ? task.blockedBy : [];
-    return deps.every((dep: string) => completedIds.has(dep));
-  });
+  const openTasks = getOpenTasks(state);
 
   const inProgress = openTasks.find(
     (task: TaskEntry) => task.owner === agent && task.status === 'in_progress',
@@ -323,48 +372,9 @@ export function suggestNext(
     };
   }
 
-  const agentConfig = getAgent(agent);
-  const unassignedTodos = openTasks
-    .filter(
-      (task: TaskEntry) =>
-        ['unassigned', 'human', ''].includes(task.owner) && task.status === 'todo',
-    )
-    .map((task: TaskEntry) => {
-      const taskType = task.type === '' ? 'implementation' : task.type;
-      const affinity =
-        (agentConfig?.taskAffinity as Record<string, number> | undefined)?.[taskType] ?? 0.5;
-      let preferredAgent: string | null = null;
-      const virtualAgents = listAgents({ type: 'virtual', enabled: true });
-      for (const va of virtualAgents) {
-        const physical = resolvePhysicalAgent(va.name);
-        if (
-          physical?.name === agent &&
-          ((va.taskAffinity as Record<string, number> | undefined)?.[taskType] ?? 0) > affinity
-        ) {
-          preferredAgent = va.name;
-        }
-      }
-      return { task, affinity, preferredAgent };
-    })
-    .sort((a: { affinity: number }, b: { affinity: number }) => b.affinity - a.affinity);
-
-  if (unassignedTodos.length > 0) {
-    const unassignedTodo = unassignedTodos[0].task;
-    const suggestion: {
-      action: string;
-      message: string;
-      task: TaskEntry;
-      preferredAgent?: string;
-    } = {
-      action: 'claim_unassigned_task',
-      message: `${agent} can claim ${unassignedTodo.id} (type=${unassignedTodo.type}, affinity=${String(unassignedTodos[0].affinity)}).`,
-      task: unassignedTodo,
-    };
-    if (unassignedTodos[0].preferredAgent != null && unassignedTodos[0].preferredAgent !== '') {
-      suggestion['preferredAgent'] = unassignedTodos[0].preferredAgent;
-    }
-    return suggestion;
-  }
+  const unassignedTodos = scoreUnassignedTodos(openTasks, agent);
+  const unassignedSuggestion = buildUnassignedSuggestion(unassignedTodos, agent);
+  if (unassignedSuggestion) return unassignedSuggestion;
 
   const blockedMine = openTasks.find(
     (task: TaskEntry) => task.owner === agent && task.status === 'blocked',
