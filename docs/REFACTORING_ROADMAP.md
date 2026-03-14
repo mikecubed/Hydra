@@ -50,7 +50,7 @@ day-to-day execution.
   testing, and the Phase 5 documentation refresh
 - **Remaining**:
   - `rf-ab01` — introduce `IHydraConfig` (highest-value remaining abstraction task; not started)
-  - `rf-pl02` — migrate the last 5 direct `process.exit()` calls in `lib/`
+  - `rf-pl02` — ✅ complete; all direct `process.exit()` calls in `lib/` have been migrated to the shared `gracefulExit` helper (only the intentional wrapper in `lib/hydra-process.ts` remains)
   - `rf-ab06` / `rf-ab07` follow-on consumer adoption — typed exports exist, but DI-based interface consumption is
     still pending
 
@@ -63,7 +63,7 @@ day-to-day execution.
 | `hydra-config.ts` is down to 870 LOC, but `IHydraConfig` has not started                     | 🟠 High     | Config remains the highest-value abstraction gap         |
 | Circular imports are eliminated (`madge`: 0 cycles in `lib/`)                                | ✅ Resolved | Import-order failures are no longer blocking work        |
 | Safety-net coverage is in place across all major hotspots                                    | ✅ Resolved | Downstream extraction work is now test-backed            |
-| `process.exit()` remediation is close, but 5 direct calls remain in `lib/`                   | 🟡 Medium   | A small number of exit paths still bypass helpers        |
+| `process.exit()` remediation is complete — all direct calls migrated to `gracefulExit`       | ✅ Resolved | All exit paths now route through the shared helper       |
 | Architecture boundaries, mutation testing, coverage gating, and audit checks are live        | ✅ Resolved | The quality gate backlog is materially complete          |
 
 ---
@@ -176,7 +176,7 @@ Add to CI `quality.yml`:
 The repository is now on a **0 TypeScript error** baseline and strict mode is in place. Some CI jobs still report
 typecheck in a warn-only posture, but the implementation work itself is complete and clean.
 
-**Target**: Zero `tsc` errors by end of Phase 2 (see §8).
+**Target achieved** ✅: Zero `tsc` errors — reached during Phase 4/5 remediation (PR #94).
 
 #### C. Module Size Lint Warning
 
@@ -360,7 +360,7 @@ These interfaces would reduce coupling and improve testability:
 - **Boolean flags**: Several functions use boolean arguments to switch behavior — use strategy pattern or options objects
 - **Magic strings**: Provider names, model IDs, and command strings repeated inline
 - **No-await-in-loop**: safe cases are complete; 27 remaining sequential loops are documented as intentional
-- **`process.exit()` calls**: 5 direct calls remain in `lib/` after 12 call sites were migrated to the shared helper
+- **`process.exit()` calls**: ✅ All direct calls migrated to `gracefulExit`; only the intentional wrapper in `lib/hydra-process.ts` remains
 
 ---
 
@@ -633,12 +633,12 @@ Parallel-ready tracks after the safety-net gate:
 
 ---
 
-### Phase 5: Cleanup, Performance, and Documentation 🟡 Nearly complete
+### Phase 5: Cleanup, Performance, and Documentation ✅ Complete
 
 > **Goal**: Finish the long tail without reopening structural risk.
 
 - [x] Reduce safe `no-await-in-loop` cases with behavior-preserving concurrency changes (PR #92: 2 sequential loops converted to `Promise.all` in `hydra-operator-session.ts`; 27 intentional sequential loops documented)
-- [ ] Replace remaining `process.exit()` calls with testable exit-path handling (PR #93 migrated 12 call sites across 7 files, but 5 direct calls remain in `lib/`)
+- [x] Replace remaining `process.exit()` calls with testable exit-path handling (PR #93 migrated 12 call sites across 7 files; all remaining direct calls subsequently migrated to `gracefulExit`)
 - [x] Add mutation testing to the most critical shared modules (PR #90: Stryker installed, targeting `lib/hydra-shared/**/*.ts`, `npm run test:mutation`, warn-only CI job)
 - [x] Update `docs/ARCHITECTURE.md`, `docs/DEPENDENCY_DIAGRAMS.md`, and ADRs after structural changes settle
 
@@ -723,12 +723,11 @@ matrix in `docs/plan/refactoring-task-breakdown.md` as the operational backlog.
 | `hydra-evolve-executor.ts` LOC          | **2,005**                                            | ⚠ New extracted hotspot                              |
 | `hydra-shared/agent-executor.ts` LOC    | **1,120**                                            | ⚠ Improved from 1,824; still above long-term goal    |
 | `hydra-config.ts` LOC                   | **870**                                              | ⚠ Close to target; `IHydraConfig` still pending      |
-| Direct `process.exit()` calls in `lib/` | **5**                                                | ⚠ Remaining Phase 5 cleanup                          |
+| Direct `process.exit()` calls in `lib/` | **0**                                                | ✅ All migrated to `gracefulExit` helper             |
 
 **Long-term targets that still define success**:
 
 - bring the remaining hotspot modules toward the long-term ≤800 LOC goal where justified,
-- eliminate the last 5 direct `process.exit()` calls,
 - finish `IHydraConfig` and the consumer-adoption follow-on work for `IMetricsRecorder` / `IGitOperations`.
 
 ### Qualitative Definition of Done
