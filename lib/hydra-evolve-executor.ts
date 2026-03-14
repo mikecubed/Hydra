@@ -228,324 +228,326 @@ export function executeAgent(
   }) as Promise<EvolveResult>;
 }
 
-/**
- * Execute an agent with investigation-guided retry on failure.
- * Uses the investigator (if available) to diagnose failures and decide
- * whether to retry as-is, retry with a modified prompt, or give up.
- * If an agent fails twice, it's disabled for the rest of the session.
- */
-export async function executeAgentWithRetry(
+async function handleUsageLimit(
+  agent: string,
+  result: EvolveResult,
+  label: string,
+  opts: ExecuteAgentOpts,
+  usageCheck: ReturnType<typeof detectUsageLimitError>,
+): Promise<EvolveResult | null> {
+  const verification = await verifyAgentQuota(agent);
+  if (verification['verified'] === true) {
+    // API confirmed quota exhausted — disable the agent.
+    const resetLabel = formatResetTime(usageCheck.resetInSeconds);
+    log.warn(`${label}: usage limit confirmed by API — resets in ${resetLabel}`);
+    log.dim(`  Triggered by: "${usageCheck.errorMessage.slice(0, 120)}"`);
+    disabledAgents.add(agent);
+    notifyDoctor(
+      doctorPayload(agent, result, opts, {
+        error: usageCheck.errorMessage,
+        context: `Usage limit confirmed by API — resets in ${resetLabel}`,
+      }),
+    );
+    result.usageLimited = true;
+    result.usageLimitConfirmed = true;
+    result.resetInSeconds = usageCheck.resetInSeconds ?? undefined;
+    return result;
+  } else if (
+    verification['verified'] === 'unknown' &&
+    result.errorCategory === 'codex-jsonl-error'
+  ) {
+    // Structured JSONL event from the Codex CLI — authoritative, not a text
+    // pattern match. Trust it even without API key (Codex uses OAuth, no key).
+    const resetLabel = formatResetTime(usageCheck.resetInSeconds);
+    log.warn(
+      `${label}: usage limit (structured JSONL — no API key to verify, but source is authoritative) — resets in ${resetLabel}`,
+    );
+    log.dim(`  Triggered by: "${usageCheck.errorMessage.slice(0, 120)}"`);
+    disabledAgents.add(agent);
+    notifyDoctor(
+      doctorPayload(agent, result, opts, {
+        error: usageCheck.errorMessage,
+        context: `Usage limit from structured JSONL — resets in ${resetLabel}`,
+      }),
+    );
+    result.usageLimited = true;
+    result.usageLimitConfirmed = true;
+    result.usageLimitStructured = true;
+    result.resetInSeconds = usageCheck.resetInSeconds ?? undefined;
+    return result;
+  } else {
+    // verified === false (API says account active) OR verified === 'unknown'
+    // without a structured error source — cannot confirm quota exhaustion.
+    // Fall through to rate-limit handling (may be a false positive).
+    const reason =
+      verification['verified'] === false
+        ? 'API says account is active (false positive)'
+        : `cannot verify — ${(verification['reason'] as string | undefined) ?? 'no API key'}`;
+    log.dim(
+      `${label}: usage limit pattern matched but ${reason} — pattern: "${usageCheck.errorMessage.slice(0, 80)}"`,
+    );
+    result.usageLimitFalsePositive = true;
+    return null;
+  }
+}
+
+async function handleRateLimit(
   agent: string,
   prompt: string,
-  opts: ExecuteAgentOpts = {},
-): Promise<EvolveResult> {
-  // eslint-disable-next-line @typescript-eslint/strict-boolean-expressions -- runtime safety
-  const label = (AGENT_LABELS as Record<string, string>)[agent] || agent;
+  result: EvolveResult,
+  label: string,
+  opts: ExecuteAgentOpts,
+  rlCheck: ReturnType<typeof detectRateLimitError>,
+): Promise<EvolveResult | null> {
+  const cfg = loadHydraConfig();
+  const rlCfg = cfg.rateLimits ?? {};
+  const maxRetries = (rlCfg['maxRetries'] as number | undefined) ?? 3;
+  const baseDelayMs = (rlCfg['baseDelayMs'] as number | undefined) ?? 5000;
+  const maxDelayMs = (rlCfg['maxDelayMs'] as number | undefined) ?? 60_000;
 
-  // Skip agents that are known-broken this session
-  if (disabledAgents.has(agent)) {
-    return {
-      ok: false,
-      output: '',
-      stderr: '',
-      error: `${agent} disabled for session`,
-      durationMs: 0,
-      timedOut: false,
-      skipped: true,
-      exitCode: null,
-      signal: null,
-    } as EvolveResult;
-  }
+  log.warn(`${label}: rate limited — ${rlCheck.errorMessage.slice(0, 100)}`);
 
-  const result = await executeAgent(agent, prompt, opts);
-  if (result.ok) return result;
-
-  // Don't retry timeouts (already took too long)
-  if (result.timedOut) return result;
-
-  // ── Usage limit check (multi-day quota — NO retries, immediate disable) ──
-  // Verify with API first to avoid false positives from pattern matching.
-  const usageCheck = detectUsageLimitError(agent, result as unknown as Record<string, unknown>);
-  if (usageCheck.isUsageLimit) {
-    const verification = await verifyAgentQuota(agent);
-    if (verification['verified'] === true) {
-      // API confirmed quota exhausted — disable the agent.
-      const resetLabel = formatResetTime(usageCheck.resetInSeconds);
-      log.warn(`${label}: usage limit confirmed by API — resets in ${resetLabel}`);
-      log.dim(`  Triggered by: "${usageCheck.errorMessage.slice(0, 120)}"`);
-      disabledAgents.add(agent);
-      notifyDoctor(
-        doctorPayload(agent, result, opts, {
-          error: usageCheck.errorMessage,
-          context: `Usage limit confirmed by API — resets in ${resetLabel}`,
-        }),
-      );
-      result.usageLimited = true;
-      result.usageLimitConfirmed = true;
-      result.resetInSeconds = usageCheck.resetInSeconds ?? undefined;
-      return result;
-    } else if (
-      verification['verified'] === 'unknown' &&
-      result.errorCategory === 'codex-jsonl-error'
-    ) {
-      // Structured JSONL event from the Codex CLI — authoritative, not a text
-      // pattern match. Trust it even without API key (Codex uses OAuth, no key).
-      const resetLabel = formatResetTime(usageCheck.resetInSeconds);
-      log.warn(
-        `${label}: usage limit (structured JSONL — no API key to verify, but source is authoritative) — resets in ${resetLabel}`,
-      );
-      log.dim(`  Triggered by: "${usageCheck.errorMessage.slice(0, 120)}"`);
-      disabledAgents.add(agent);
-      notifyDoctor(
-        doctorPayload(agent, result, opts, {
-          error: usageCheck.errorMessage,
-          context: `Usage limit from structured JSONL — resets in ${resetLabel}`,
-        }),
-      );
-      result.usageLimited = true;
-      result.usageLimitConfirmed = true;
-      result.usageLimitStructured = true;
-      result.resetInSeconds = usageCheck.resetInSeconds ?? undefined;
-      return result;
-    } else {
-      // verified === false (API says account active) OR verified === 'unknown'
-      // without a structured error source — cannot confirm quota exhaustion.
-      // Fall through to rate-limit handling (may be a false positive).
-      const reason =
-        verification['verified'] === false
-          ? 'API says account is active (false positive)'
-          : `cannot verify — ${(verification['reason'] as string | undefined) ?? 'no API key'}`;
-      log.dim(
-        `${label}: usage limit pattern matched but ${reason} — pattern: "${usageCheck.errorMessage.slice(0, 80)}"`,
-      );
-      const localRef = result;
-      localRef.usageLimitFalsePositive = true;
-    }
-  }
-
-  // ── Rate limit recovery (cheapest check — no API calls, just backoff) ──
-  const rlCheck = detectRateLimitError(agent, result as unknown as Record<string, unknown>);
-  if (rlCheck.isRateLimit) {
-    const cfg = loadHydraConfig();
-    const rlCfg = cfg.rateLimits ?? {};
-    const maxRetries = (rlCfg['maxRetries'] as number | undefined) ?? 3;
-    const baseDelayMs = (rlCfg['baseDelayMs'] as number | undefined) ?? 5000;
-    const maxDelayMs = (rlCfg['maxDelayMs'] as number | undefined) ?? 60_000;
-
-    log.warn(`${label}: rate limited — ${rlCheck.errorMessage.slice(0, 100)}`);
-
-    for (let attempt = 0; attempt < maxRetries; attempt++) {
-      const delay = calculateBackoff(attempt, {
-        baseDelayMs,
-        maxDelayMs,
-        retryAfterMs: rlCheck.retryAfterMs ?? undefined,
-      });
-      log.dim(
-        `${label}: waiting ${(delay / 1000).toFixed(0)}s before retry (${String(attempt + 1)}/${String(maxRetries)})`,
-      );
-      setAgentActivity(
-        agent,
-        'waiting',
-        `Rate limited, retry ${String(attempt + 1)}/${String(maxRetries)}`,
-      );
-      // eslint-disable-next-line no-await-in-loop -- sequential processing required
-      await new Promise<void>((r) => {
-        setTimeout(r, delay);
-      });
-
-      // eslint-disable-next-line no-await-in-loop -- sequential processing required
-      const retry = await executeAgent(agent, prompt, opts);
-      if (retry.ok) {
-        log.dim(`${label} retry: OK (${formatDuration(retry.durationMs)})`);
-        return retry;
-      }
-
-      // Check if still rate limited
-      const retryRlCheck = detectRateLimitError(agent, retry as unknown as Record<string, unknown>);
-      if (!retryRlCheck.isRateLimit) {
-        // Different error — fall through to normal error handling below
-        log.dim(`${label}: no longer rate limited, but failed with: ${String(retry.error)}`);
-        // Don't disable — let the investigator handle it if available
-        return retry;
-      }
-      // Update retry-after from newest response
-      rlCheck.retryAfterMs = retryRlCheck.retryAfterMs;
-    }
-
-    // Exhausted rate limit retries — disable agent
-    disabledAgents.add(agent);
-    log.warn(`${label} disabled for session (rate limited after ${String(maxRetries)} retries)`);
-    notifyDoctor(
-      doctorPayload(agent, result, opts, {
-        error: result.error ?? 'rate limited',
-        context: `Rate limited after ${String(maxRetries)} retries`,
-      }),
-    );
-    result.rateLimited = true;
-    return result;
-  }
-
-  // ── Model error recovery (cheap check before expensive investigator) ──
-  const modelCheck = detectModelError(agent, result as unknown as Record<string, unknown>);
-  if (modelCheck.isModelError) {
-    log.warn(`${label}: model error detected — ${modelCheck.errorMessage}`);
-    const recovery = await recoverFromModelError(agent, modelCheck.failedModel ?? '');
-    if (recovery.recovered) {
-      log.info(`${label}: recovered with fallback model ${String(recovery.newModel)} — retrying`);
-      const retryResult = await executeAgent(agent, prompt, {
-        ...opts,
-        modelOverride: recovery.newModel ?? undefined,
-      });
-      retryResult.recovered = true;
-      retryResult.originalModel = modelCheck.failedModel ?? undefined;
-      retryResult.newModel = recovery.newModel ?? undefined;
-      return retryResult;
-    }
-    // Recovery failed — disable agent and return
-    log.warn(`${label}: no fallback model available — disabling for session`);
-    disabledAgents.add(agent);
-    notifyDoctor(
-      doctorPayload(agent, result, opts, {
-        error: modelCheck.errorMessage,
-        context: `Model error: ${String(modelCheck.failedModel)}`,
-      }),
-    );
-    result.modelError = modelCheck;
-    return result;
-  }
-
-  // ── JSONL structured error check (auth/sandbox/invocation — no model fallback) ──
-  // detectCodexError is currently codex-specific; this guard will extend to other
-  // jsonOutput agents when they support structured error reporting.
-  // eslint-disable-next-line @typescript-eslint/strict-boolean-expressions -- runtime safety
-  if (getAgent(agent)?.features.jsonOutput) {
-    const codexCheck = detectCodexError(agent, result as unknown as Record<string, unknown>);
-    const retryableCodexCategories = ['transient', 'internal', 'codex-jsonl-error'];
-    if (codexCheck.isCodexError && !retryableCodexCategories.includes(codexCheck.category)) {
-      const catLabel = `[${codexCheck.category}] ${codexCheck.errorMessage}`;
-      log.warn(`${label}: ${catLabel}`);
-      disabledAgents.add(agent);
-      notifyDoctor(
-        doctorPayload(agent, result, opts, {
-          error: catLabel,
-          context: `Codex error: ${codexCheck.category}`,
-        }),
-      );
-      return result;
-    }
-
-    // "something went wrong" within 5s of startup = config/env issue, not a transient runtime error.
-    // Don't waste an investigator call — disable and report immediately with actionable guidance.
-    // eslint-disable-next-line @typescript-eslint/strict-boolean-expressions -- runtime safety
-    if (codexCheck.isCodexError && codexCheck.category === 'internal' && result.startupFailure) {
-      const diagLabel = `[startup-failure] ${codexCheck.errorMessage === '' ? (result.errorDetail ?? result.error ?? '') : codexCheck.errorMessage}`;
-      log.warn(`${label}: ${diagLabel}`);
-      log.dim(
-        `  Process exited after ${String(result.durationMs)}ms — check: API key validity, model ID "${result.args?.find((_a, i) => result.args?.[i - 1] === '--model') ?? 'unknown'}", CLI version, and environment.`,
-      );
-      disabledAgents.add(agent);
-      notifyDoctor(
-        doctorPayload(agent, result, opts, {
-          error: diagLabel,
-          context: `Codex startup failure (${String(result.durationMs)}ms runtime) — generic internal error at process start; likely misconfiguration, invalid API key, bad model flags, or incompatible CLI version`,
-        }),
-      );
-      result.startupFailureDisabled = true;
-      return result;
-    }
-  }
-
-  // Log structured error diagnosis (now enriched by diagnoseAgentError)
-  // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition -- runtime safety
-  if (!result.ok) {
-    log.warn(`${label}: ${String(result.error)}`);
-  }
-
-  // ── Investigation-guided retry ──────────────────────────────────────
-  if (isInvestigatorAvailable()) {
-    log.info(`${label} failed — investigating...`);
-    // eslint-disable-next-line @typescript-eslint/strict-boolean-expressions -- runtime safety
-    const structuredError = result.errorCategory
-      ? `[${result.errorCategory}] ${String(result.errorDetail ?? result.error)}`
-      : result.error;
-    const diagnosis = await investigate({
-      phase: 'agent',
-      agent,
-      error: structuredError ?? undefined,
-      // eslint-disable-next-line @typescript-eslint/strict-boolean-expressions -- runtime safety
-      stdout: (result.output || '').slice(-2000),
-      timedOut: result.timedOut,
-      exitCode: result.exitCode,
-      signal: result.signal,
-      errorCategory: result.errorCategory ?? undefined,
-      errorDetail: result.errorDetail ?? undefined,
-      errorContext: result.errorContext ?? undefined,
-      context: `Phase: ${opts.phaseLabel ?? 'unknown'}`,
-      attemptNumber: 1,
-      ...(result.durationMs == null ? {} : { durationMs: result.durationMs }), // eslint-disable-line @typescript-eslint/no-unnecessary-condition -- runtime safety for dynamic result shape
-      ...(result.startupFailure == null ? {} : { startupFailure: result.startupFailure }),
-    } as Parameters<typeof investigate>[0]);
-
-    log.dim(`Investigation: ${diagnosis.diagnosis} — ${diagnosis.explanation}`);
-
-    if (diagnosis.diagnosis === 'fundamental') {
-      log.warn(`${label}: fundamental failure — skipping retry`);
-      disabledAgents.add(agent);
-      notifyDoctor(
-        doctorPayload(agent, result, opts, { context: `Fundamental: ${diagnosis.explanation}` }),
-      );
-      result.investigation = diagnosis;
-      return result;
-    }
-
-    // Build retry prompt (possibly modified by investigator)
-    let retryPrompt = prompt;
-    // eslint-disable-next-line @typescript-eslint/strict-boolean-expressions -- runtime safety
-    if (diagnosis.diagnosis === 'fixable' && diagnosis.retryRecommendation.modifiedPrompt) {
-      retryPrompt = `${diagnosis.retryRecommendation.modifiedPrompt}\n\n${prompt}`;
-      log.dim(`Retrying with corrective preamble`);
-      // eslint-disable-next-line @typescript-eslint/strict-boolean-expressions -- runtime safety
-    } else if (diagnosis.diagnosis === 'fixable' && diagnosis.retryRecommendation.preamble) {
-      retryPrompt = `${diagnosis.retryRecommendation.preamble}\n\n${prompt}`;
-      log.dim(`Retrying with diagnostic preamble`);
-    }
-
-    // Try alternative agent if recommended
-    let retryAgent = agent;
-    if (
-      // eslint-disable-next-line @typescript-eslint/strict-boolean-expressions -- runtime safety
-      diagnosis.retryRecommendation.retryAgent &&
-      diagnosis.retryRecommendation.retryAgent !== agent
-    ) {
-      retryAgent = diagnosis.retryRecommendation.retryAgent;
-      log.dim(`Switching to alternative agent: ${retryAgent}`);
-    }
-
-    await new Promise<void>((r) => {
-      setTimeout(r, 2000);
+  let currentRetryAfterMs = rlCheck.retryAfterMs ?? undefined;
+  for (let attempt = 0; attempt < maxRetries; attempt++) {
+    const delay = calculateBackoff(attempt, {
+      baseDelayMs,
+      maxDelayMs,
+      retryAfterMs: currentRetryAfterMs,
     });
-    const retry = await executeAgent(retryAgent, retryPrompt, opts);
     log.dim(
-      // eslint-disable-next-line @typescript-eslint/strict-boolean-expressions -- runtime safety
-      `${(AGENT_LABELS as Record<string, string>)[retryAgent] || retryAgent} retry: ${retry.ok ? 'OK' : 'FAIL'} (${formatDuration(retry.durationMs)})`,
+      `${label}: waiting ${(delay / 1000).toFixed(0)}s before retry (${String(attempt + 1)}/${String(maxRetries)})`,
     );
-    retry.investigation = diagnosis;
+    setAgentActivity(
+      agent,
+      'waiting',
+      `Rate limited, retry ${String(attempt + 1)}/${String(maxRetries)}`,
+    );
+    // eslint-disable-next-line no-await-in-loop -- sequential processing required
+    await new Promise<void>((r) => {
+      setTimeout(r, delay);
+    });
 
-    if (!retry.ok) {
-      disabledAgents.add(agent);
-      log.warn(`${label} disabled for remainder of session (investigation + retry failed)`);
-      notifyDoctor(
-        doctorPayload(agent, retry, opts, {
-          error: retry.error ?? result.error,
-          context: `Investigation + retry failed: ${diagnosis.explanation}`,
-        }),
-      );
+    // eslint-disable-next-line no-await-in-loop -- sequential processing required
+    const retry = await executeAgent(agent, prompt, opts);
+    if (retry.ok) {
+      log.dim(`${label} retry: OK (${formatDuration(retry.durationMs)})`);
+      return retry;
     }
 
-    return retry;
+    // Check if still rate limited
+    const retryRlCheck = detectRateLimitError(agent, retry as unknown as Record<string, unknown>);
+    if (!retryRlCheck.isRateLimit) {
+      // Different error — fall through to normal error handling below
+      log.dim(`${label}: no longer rate limited, but failed with: ${String(retry.error)}`);
+      // Don't disable — let the investigator handle it if available
+      return retry;
+    }
+    // Update retry-after from newest response
+    currentRetryAfterMs = retryRlCheck.retryAfterMs ?? undefined;
   }
 
-  // ── Fallback: blind retry (no investigator) ─────────────────────────
+  // Exhausted rate limit retries — disable agent
+  disabledAgents.add(agent);
+  log.warn(`${label} disabled for session (rate limited after ${String(maxRetries)} retries)`);
+  notifyDoctor(
+    doctorPayload(agent, result, opts, {
+      error: result.error ?? 'rate limited',
+      context: `Rate limited after ${String(maxRetries)} retries`,
+    }),
+  );
+  result.rateLimited = true;
+  return result;
+}
+
+async function handleModelError(
+  agent: string,
+  prompt: string,
+  result: EvolveResult,
+  label: string,
+  opts: ExecuteAgentOpts,
+  modelCheck: ReturnType<typeof detectModelError>,
+): Promise<EvolveResult | null> {
+  log.warn(`${label}: model error detected — ${modelCheck.errorMessage}`);
+  const recovery = await recoverFromModelError(agent, modelCheck.failedModel ?? '');
+  if (recovery.recovered) {
+    log.info(`${label}: recovered with fallback model ${String(recovery.newModel)} — retrying`);
+    const retryResult = await executeAgent(agent, prompt, {
+      ...opts,
+      modelOverride: recovery.newModel ?? undefined,
+    });
+    retryResult.recovered = true;
+    retryResult.originalModel = modelCheck.failedModel ?? undefined;
+    retryResult.newModel = recovery.newModel ?? undefined;
+    return retryResult;
+  }
+  // Recovery failed — disable agent and return
+  log.warn(`${label}: no fallback model available — disabling for session`);
+  disabledAgents.add(agent);
+  notifyDoctor(
+    doctorPayload(agent, result, opts, {
+      error: modelCheck.errorMessage,
+      context: `Model error: ${String(modelCheck.failedModel)}`,
+    }),
+  );
+  result.modelError = modelCheck;
+  return result;
+}
+
+function handleJsonlError(
+  agent: string,
+  result: EvolveResult,
+  label: string,
+  opts: ExecuteAgentOpts,
+): EvolveResult | null {
+  // eslint-disable-next-line @typescript-eslint/strict-boolean-expressions -- runtime safety
+  if (!getAgent(agent)?.features.jsonOutput) return null;
+  const codexCheck = detectCodexError(agent, result as unknown as Record<string, unknown>);
+  const retryableCodexCategories = ['transient', 'internal', 'codex-jsonl-error'];
+  if (codexCheck.isCodexError && !retryableCodexCategories.includes(codexCheck.category)) {
+    const catLabel = `[${codexCheck.category}] ${codexCheck.errorMessage}`;
+    log.warn(`${label}: ${catLabel}`);
+    disabledAgents.add(agent);
+    notifyDoctor(
+      doctorPayload(agent, result, opts, {
+        error: catLabel,
+        context: `Codex error: ${codexCheck.category}`,
+      }),
+    );
+    return result;
+  }
+  // "something went wrong" within 5s of startup = config/env issue, not a transient runtime error.
+  // Don't waste an investigator call — disable and report immediately with actionable guidance.
+  // eslint-disable-next-line @typescript-eslint/strict-boolean-expressions -- runtime safety
+  if (codexCheck.isCodexError && codexCheck.category === 'internal' && result.startupFailure) {
+    const diagLabel = `[startup-failure] ${codexCheck.errorMessage === '' ? (result.errorDetail ?? result.error ?? '') : codexCheck.errorMessage}`;
+    log.warn(`${label}: ${diagLabel}`);
+    log.dim(
+      `  Process exited after ${String(result.durationMs)}ms — check: API key validity, model ID "${result.args?.find((_a, i) => result.args?.[i - 1] === '--model') ?? 'unknown'}", CLI version, and environment.`,
+    );
+    disabledAgents.add(agent);
+    notifyDoctor(
+      doctorPayload(agent, result, opts, {
+        error: diagLabel,
+        context: `Codex startup failure (${String(result.durationMs)}ms runtime) — generic internal error at process start; likely misconfiguration, invalid API key, bad model flags, or incompatible CLI version`,
+      }),
+    );
+    result.startupFailureDisabled = true;
+    return result;
+  }
+  return null;
+}
+
+function buildInvestigationCall(
+  result: EvolveResult,
+  agent: string,
+  opts: ExecuteAgentOpts,
+): Parameters<typeof investigate>[0] {
+  // eslint-disable-next-line @typescript-eslint/strict-boolean-expressions -- runtime safety
+  const structuredError = result.errorCategory
+    ? `[${result.errorCategory}] ${String(result.errorDetail ?? result.error)}`
+    : result.error;
+  return {
+    phase: 'agent',
+    agent,
+    error: structuredError ?? undefined,
+    // eslint-disable-next-line @typescript-eslint/strict-boolean-expressions -- runtime safety
+    stdout: (result.output || '').slice(-2000),
+    timedOut: result.timedOut,
+    exitCode: result.exitCode,
+    signal: result.signal,
+    errorCategory: result.errorCategory ?? undefined,
+    errorDetail: result.errorDetail ?? undefined,
+    errorContext: result.errorContext ?? undefined,
+    context: `Phase: ${opts.phaseLabel ?? 'unknown'}`,
+    attemptNumber: 1,
+    ...(result.durationMs == null ? {} : { durationMs: result.durationMs }), // eslint-disable-line @typescript-eslint/no-unnecessary-condition -- runtime safety for dynamic result shape
+    ...(result.startupFailure == null ? {} : { startupFailure: result.startupFailure }),
+  } as Parameters<typeof investigate>[0];
+}
+
+function buildRetryPromptAndAgent(
+  prompt: string,
+  agent: string,
+  diagnosis: Awaited<ReturnType<typeof investigate>>,
+): { retryPrompt: string; retryAgent: string } {
+  let retryPrompt = prompt;
+  // eslint-disable-next-line @typescript-eslint/strict-boolean-expressions -- runtime safety
+  if (diagnosis.diagnosis === 'fixable' && diagnosis.retryRecommendation.modifiedPrompt) {
+    retryPrompt = `${diagnosis.retryRecommendation.modifiedPrompt}\n\n${prompt}`;
+    log.dim(`Retrying with corrective preamble`);
+    // eslint-disable-next-line @typescript-eslint/strict-boolean-expressions -- runtime safety
+  } else if (diagnosis.diagnosis === 'fixable' && diagnosis.retryRecommendation.preamble) {
+    retryPrompt = `${diagnosis.retryRecommendation.preamble}\n\n${prompt}`;
+    log.dim(`Retrying with diagnostic preamble`);
+  }
+  let retryAgent = agent;
+  if (
+    // eslint-disable-next-line @typescript-eslint/strict-boolean-expressions -- runtime safety
+    diagnosis.retryRecommendation.retryAgent &&
+    diagnosis.retryRecommendation.retryAgent !== agent
+  ) {
+    retryAgent = diagnosis.retryRecommendation.retryAgent;
+    log.dim(`Switching to alternative agent: ${retryAgent}`);
+  }
+  return { retryPrompt, retryAgent };
+}
+
+async function handleInvestigationRetry(
+  agent: string,
+  prompt: string,
+  result: EvolveResult,
+  label: string,
+  opts: ExecuteAgentOpts,
+): Promise<EvolveResult | null> {
+  if (!isInvestigatorAvailable()) return null;
+  log.info(`${label} failed — investigating...`);
+  const diagnosis = await investigate(buildInvestigationCall(result, agent, opts));
+
+  log.dim(`Investigation: ${diagnosis.diagnosis} — ${diagnosis.explanation}`);
+
+  if (diagnosis.diagnosis === 'fundamental') {
+    log.warn(`${label}: fundamental failure — skipping retry`);
+    disabledAgents.add(agent);
+    notifyDoctor(
+      doctorPayload(agent, result, opts, { context: `Fundamental: ${diagnosis.explanation}` }),
+    );
+    result.investigation = diagnosis;
+    return result;
+  }
+
+  const { retryPrompt, retryAgent } = buildRetryPromptAndAgent(prompt, agent, diagnosis);
+
+  await new Promise<void>((r) => {
+    setTimeout(r, 2000);
+  });
+  const retry = await executeAgent(retryAgent, retryPrompt, opts);
+  log.dim(
+    // eslint-disable-next-line @typescript-eslint/strict-boolean-expressions -- runtime safety
+    `${(AGENT_LABELS as Record<string, string>)[retryAgent] || retryAgent} retry: ${retry.ok ? 'OK' : 'FAIL'} (${formatDuration(retry.durationMs)})`,
+  );
+  retry.investigation = diagnosis;
+
+  if (!retry.ok) {
+    disabledAgents.add(agent);
+    log.warn(`${label} disabled for remainder of session (investigation + retry failed)`);
+    notifyDoctor(
+      doctorPayload(agent, retry, opts, {
+        error: retry.error ?? result.error,
+        context: `Investigation + retry failed: ${diagnosis.explanation}`,
+      }),
+    );
+  }
+
+  return retry;
+}
+
+async function handleBlindRetry(
+  agent: string,
+  prompt: string,
+  result: EvolveResult,
+  label: string,
+  opts: ExecuteAgentOpts,
+): Promise<EvolveResult> {
   // eslint-disable-next-line @typescript-eslint/strict-boolean-expressions -- runtime safety
   const diagLabel = result.errorCategory ? ` [${result.errorCategory}]` : '';
   log.warn(`${label} failed${diagLabel}, retrying once after 3s...`);
@@ -577,6 +579,70 @@ export async function executeAgentWithRetry(
   }
 
   return retry;
+}
+
+/**
+ * Execute an agent with investigation-guided retry on failure.
+ * Uses the investigator (if available) to diagnose failures and decide
+ * whether to retry as-is, retry with a modified prompt, or give up.
+ * If an agent fails twice, it's disabled for the rest of the session.
+ */
+export async function executeAgentWithRetry(
+  agent: string,
+  prompt: string,
+  opts: ExecuteAgentOpts = {},
+): Promise<EvolveResult> {
+  // eslint-disable-next-line @typescript-eslint/strict-boolean-expressions -- runtime safety
+  const label = (AGENT_LABELS as Record<string, string>)[agent] || agent;
+
+  if (disabledAgents.has(agent)) {
+    return {
+      ok: false,
+      output: '',
+      stderr: '',
+      error: `${agent} disabled for session`,
+      durationMs: 0,
+      timedOut: false,
+      skipped: true,
+      exitCode: null,
+      signal: null,
+    } as EvolveResult;
+  }
+
+  const result = await executeAgent(agent, prompt, opts);
+  if (result.ok) return result;
+  if (result.timedOut) return result;
+
+  const usageCheck = detectUsageLimitError(agent, result as unknown as Record<string, unknown>);
+  if (usageCheck.isUsageLimit) {
+    const usageResult = await handleUsageLimit(agent, result, label, opts, usageCheck);
+    if (usageResult !== null) return usageResult;
+  }
+
+  const rlCheck = detectRateLimitError(agent, result as unknown as Record<string, unknown>);
+  if (rlCheck.isRateLimit) {
+    const rlResult = await handleRateLimit(agent, prompt, result, label, opts, rlCheck);
+    if (rlResult !== null) return rlResult;
+  }
+
+  const modelCheck = detectModelError(agent, result as unknown as Record<string, unknown>);
+  if (modelCheck.isModelError) {
+    const modelResult = await handleModelError(agent, prompt, result, label, opts, modelCheck);
+    if (modelResult !== null) return modelResult;
+  }
+
+  const jsonlResult = handleJsonlError(agent, result, label, opts);
+  if (jsonlResult !== null) return jsonlResult;
+
+  // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition -- runtime safety
+  if (!result.ok) {
+    log.warn(`${label}: ${String(result.error)}`);
+  }
+
+  const investigationResult = await handleInvestigationRetry(agent, prompt, result, label, opts);
+  if (investigationResult !== null) return investigationResult;
+
+  return handleBlindRetry(agent, prompt, result, label, opts);
 }
 
 /**
@@ -652,29 +718,11 @@ export function recordInvestigation(
   }
 }
 
-/**
- * Wrap a phase function call with investigation-guided retry on failure.
- *
- * @param {string} phaseName - Phase identifier (test, implement, analyze)
- * @param {Function} phaseFn - The async phase function to call
- * @param {Array} phaseArgs - Arguments to pass to phaseFn
- * @param {object} context - Additional context for the investigator
- * @returns {Promise<object>} Phase result (possibly from retry)
- */
-const _executePhaseWithInvestigation = async (
+async function investigateAndRetryPhase(
   phaseName: string,
-  phaseFn: (...args: unknown[]) => Promise<{ ok: boolean; [key: string]: unknown }>,
-  phaseArgs: unknown[],
-  context: Record<string, unknown> = {},
-) => {
-  const result = await phaseFn(...phaseArgs);
-
-  // Phase succeeded — return as-is
-  if (result.ok) return result;
-
-  // Investigator not available — return original failure
-  if (!isInvestigatorAvailable()) return result;
-
+  result: { ok: boolean; [key: string]: unknown },
+  context: Record<string, unknown>,
+): Promise<{ ok: boolean; [key: string]: unknown }> {
   const cfg = loadHydraConfig();
   const maxAttempts =
     (cfg.evolve?.investigator?.['maxAttemptsPerPhase'] as number | undefined) ?? 2;
@@ -718,35 +766,42 @@ const _executePhaseWithInvestigation = async (
   (result as unknown as EvolveResult)._preamble =
     diagnosis.retryRecommendation.preamble ?? diagnosis.retryRecommendation.modifiedPrompt;
   return result;
+}
+
+/**
+ * Wrap a phase function call with investigation-guided retry on failure.
+ *
+ * @param {string} phaseName - Phase identifier (test, implement, analyze)
+ * @param {Function} phaseFn - The async phase function to call
+ * @param {Array} phaseArgs - Arguments to pass to phaseFn
+ * @param {object} context - Additional context for the investigator
+ * @returns {Promise<object>} Phase result (possibly from retry)
+ */
+const _executePhaseWithInvestigation = async (
+  phaseName: string,
+  phaseFn: (...args: unknown[]) => Promise<{ ok: boolean; [key: string]: unknown }>,
+  phaseArgs: unknown[],
+  context: Record<string, unknown> = {},
+) => {
+  const result = await phaseFn(...phaseArgs);
+
+  // Phase succeeded — return as-is
+  if (result.ok) return result;
+
+  // Investigator not available — return original failure
+  if (!isInvestigatorAvailable()) return result;
+
+  return investigateAndRetryPhase(phaseName, result, context);
 };
 void (_executePhaseWithInvestigation as unknown);
 
 // ── Phase Implementations ───────────────────────────────────────────────────
 
-/**
- * Phase 1: RESEARCH — Agents investigate external systems (web-first).
- */
-export async function phaseResearch(
+function buildResearchPrompts(
   area: string,
-  kb: KnowledgeBase,
-  {
-    cwd,
-    timeouts,
-    evolveDir,
-  }: { cwd: string; timeouts: typeof DEFAULT_PHASE_TIMEOUTS; evolveDir: string },
-): Promise<ResearchResult> {
-  log.phase(`RESEARCH — ${area}`);
-
-  const kbContext = formatStatsForPrompt(kb);
-  const priorLearnings = getPriorLearnings(kb, area);
-  const priorContext =
-    priorLearnings.length > 0
-      ? `\n\nPrior learnings for "${area}":\n${priorLearnings
-          .slice(0, 5)
-          .map((e: KBEntry) => `- [${e.outcome ?? 'researched'}] ${e.finding?.slice(0, 200) ?? ''}`)
-          .join('\n')}`
-      : '';
-
+  kbContext: string,
+  priorContext: string,
+): { claudePrompt: string; geminiPrompt: string; codexPrompt: string } {
   const claudePrompt = `# Evolve Research: ${area}
 
 You are researching "${area}" for the Hydra multi-agent orchestration system.
@@ -823,26 +878,14 @@ Respond with a JSON object:
   "confidence": 0.0-1.0
 }`;
 
-  // Dispatch all three agents in parallel (with retry on failure)
-  log.dim('Dispatching research to Claude + Gemini + Codex in parallel...');
-  const [claudeResult, geminiResult, codexResult] = await Promise.all([
-    executeAgentWithRetry('claude', claudePrompt, {
-      cwd,
-      timeoutMs: timeouts.researchTimeoutMs,
-      phaseLabel: `research: ${area}`,
-    }),
-    executeAgentWithRetry('gemini', geminiPrompt, {
-      cwd,
-      timeoutMs: timeouts.researchTimeoutMs,
-      phaseLabel: `research: ${area}`,
-    }),
-    executeAgentWithRetry('codex', codexPrompt, {
-      cwd,
-      timeoutMs: timeouts.researchTimeoutMs,
-      phaseLabel: `research: ${area} (codebase)`,
-    }),
-  ]);
+  return { claudePrompt, geminiPrompt, codexPrompt };
+}
 
+function parseResearchResults(
+  claudeResult: EvolveResult,
+  geminiResult: EvolveResult,
+  codexResult: EvolveResult,
+): { claudeData: unknown; geminiData: unknown; codexData: unknown } {
   log.dim(
     `Claude: ${claudeResult.ok ? 'OK' : 'FAIL'} (${formatDuration(claudeResult.durationMs)})`,
   );
@@ -887,7 +930,16 @@ Respond with a JSON object:
     }
   }
 
-  const combined = {
+  return { claudeData, geminiData, codexData };
+}
+
+function buildResearchCombined(
+  area: string,
+  claudeData: unknown,
+  geminiData: unknown,
+  codexData: unknown,
+): ResearchResult {
+  return {
     area,
     claudeFindings: (claudeData as {
       findings?: string[];
@@ -919,6 +971,65 @@ Respond with a JSON object:
       relevantFiles: [] as unknown[],
     },
   };
+}
+
+/**
+ * Phase 1: RESEARCH — Agents investigate external systems (web-first).
+ */
+export async function phaseResearch(
+  area: string,
+  kb: KnowledgeBase,
+  {
+    cwd,
+    timeouts,
+    evolveDir,
+  }: { cwd: string; timeouts: typeof DEFAULT_PHASE_TIMEOUTS; evolveDir: string },
+): Promise<ResearchResult> {
+  log.phase(`RESEARCH — ${area}`);
+
+  const kbContext = formatStatsForPrompt(kb);
+  const priorLearnings = getPriorLearnings(kb, area);
+  const priorContext =
+    priorLearnings.length > 0
+      ? `\n\nPrior learnings for "${area}":\n${priorLearnings
+          .slice(0, 5)
+          .map((e: KBEntry) => `- [${e.outcome ?? 'researched'}] ${e.finding?.slice(0, 200) ?? ''}`)
+          .join('\n')}`
+      : '';
+
+  const { claudePrompt, geminiPrompt, codexPrompt } = buildResearchPrompts(
+    area,
+    kbContext,
+    priorContext,
+  );
+
+  // Dispatch all three agents in parallel (with retry on failure)
+  log.dim('Dispatching research to Claude + Gemini + Codex in parallel...');
+  const [claudeResult, geminiResult, codexResult] = await Promise.all([
+    executeAgentWithRetry('claude', claudePrompt, {
+      cwd,
+      timeoutMs: timeouts.researchTimeoutMs,
+      phaseLabel: `research: ${area}`,
+    }),
+    executeAgentWithRetry('gemini', geminiPrompt, {
+      cwd,
+      timeoutMs: timeouts.researchTimeoutMs,
+      phaseLabel: `research: ${area}`,
+    }),
+    executeAgentWithRetry('codex', codexPrompt, {
+      cwd,
+      timeoutMs: timeouts.researchTimeoutMs,
+      phaseLabel: `research: ${area} (codebase)`,
+    }),
+  ]);
+
+  const { claudeData, geminiData, codexData } = parseResearchResults(
+    claudeResult,
+    geminiResult,
+    codexResult,
+  );
+
+  const combined = buildResearchCombined(area, claudeData, geminiData, codexData);
 
   // Save research artifact
   const researchDir = path.join(evolveDir, 'research');
@@ -987,21 +1098,13 @@ function resilientParse(
   return { data: null, fallback: false };
 }
 
-/**
- * Phase 2: DELIBERATE — Council discusses findings.
- */
-export async function phaseDeliberate(
+async function deliberateSynthesize(
   research: ResearchResult,
-  kb: KnowledgeBase,
-  { cwd, timeouts }: { cwd: string; timeouts: typeof DEFAULT_PHASE_TIMEOUTS },
-): Promise<DeliberationResult> {
-  log.phase('DELIBERATE');
-
-  const kbContext = formatStatsForPrompt(kb);
-  const findingsBlock = JSON.stringify(research, null, 2);
-
-  // Step 1: Claude synthesizes
-
+  kbContext: string,
+  findingsBlock: string,
+  cwd: string,
+  timeouts: typeof DEFAULT_PHASE_TIMEOUTS,
+): Promise<Record<string, unknown> | null> {
   const synthesizePrompt = `# Evolve Deliberation: Synthesize Research
 
 You are synthesizing research findings about "${research.area}" for the Hydra multi-agent orchestration system.
@@ -1039,13 +1142,18 @@ Respond with JSON:
     'Synthesize',
     'suggestedImprovement',
   );
-  const synthData = synthParsed.data;
   log.dim(
     `Synthesis: ${synthResult.ok ? 'OK' : 'FAIL'}${synthParsed.fallback ? ' (fallback)' : ''} (${formatDuration(synthResult.durationMs)})`,
   );
+  return synthParsed.data;
+}
 
-  // Step 2: Gemini critiques
-
+async function deliberateCritique(
+  research: ResearchResult,
+  synthData: Record<string, unknown> | null,
+  cwd: string,
+  timeouts: typeof DEFAULT_PHASE_TIMEOUTS,
+): Promise<Record<string, unknown> | null> {
   const critiquePrompt = `# Evolve Deliberation: Critique
 
 Review this synthesis of research findings about "${research.area}" for the Hydra project:
@@ -1079,12 +1187,18 @@ Respond with JSON:
     'Critique',
     'critique',
   );
-  const critiqueData = critiqueParsed.data;
   log.dim(
     `Critique: ${critiqueResult.ok ? 'OK' : 'FAIL'}${critiqueParsed.fallback ? ' (fallback)' : ''} (${formatDuration(critiqueResult.durationMs)})`,
   );
+  return critiqueParsed.data;
+}
 
-  // Step 3: Codex feasibility assessment
+async function deliberateFeasibility(
+  synthData: Record<string, unknown> | null,
+  critiqueData: Record<string, unknown> | null,
+  cwd: string,
+  timeouts: typeof DEFAULT_PHASE_TIMEOUTS,
+): Promise<Record<string, unknown> | null> {
   const feasibilityPrompt = `# Evolve Deliberation: Feasibility Assessment
 
 ${getProjectContext()}
@@ -1130,12 +1244,19 @@ Respond with JSON:
     'Feasibility',
     'implementationNotes',
   );
-  const feasibilityData = feasibilityParsed.data;
   log.dim(
     `Feasibility: ${feasibilityResult.ok ? 'OK' : 'FAIL'}${feasibilityParsed.fallback ? ' (fallback)' : ''} (${formatDuration(feasibilityResult.durationMs)})`,
   );
+  return feasibilityParsed.data;
+}
 
-  // Step 4: Claude prioritizes and selects
+async function deliberatePrioritize(
+  synthData: Record<string, unknown> | null,
+  critiqueData: Record<string, unknown> | null,
+  feasibilityData: Record<string, unknown> | null,
+  cwd: string,
+  timeouts: typeof DEFAULT_PHASE_TIMEOUTS,
+): Promise<Record<string, unknown> | null> {
   const prioritizePrompt = `# Evolve Deliberation: Final Selection
 
 Based on the synthesis, critique, and feasibility assessment, select the single best improvement to attempt.
@@ -1176,9 +1297,34 @@ Respond with JSON:
     'Prioritize',
     'selectedImprovement',
   );
-  const priorityData = priorityParsed.data;
   log.dim(
     `Priority: ${priorityResult.ok ? 'OK' : 'FAIL'}${priorityParsed.fallback ? ' (fallback)' : ''} (${formatDuration(priorityResult.durationMs)})`,
+  );
+  return priorityParsed.data;
+}
+
+/**
+ * Phase 2: DELIBERATE — Council discusses findings.
+ */
+export async function phaseDeliberate(
+  research: ResearchResult,
+  kb: KnowledgeBase,
+  { cwd, timeouts }: { cwd: string; timeouts: typeof DEFAULT_PHASE_TIMEOUTS },
+): Promise<DeliberationResult> {
+  log.phase('DELIBERATE');
+
+  const kbContext = formatStatsForPrompt(kb);
+  const findingsBlock = JSON.stringify(research, null, 2);
+
+  const synthData = await deliberateSynthesize(research, kbContext, findingsBlock, cwd, timeouts);
+  const critiqueData = await deliberateCritique(research, synthData, cwd, timeouts);
+  const feasibilityData = await deliberateFeasibility(synthData, critiqueData, cwd, timeouts);
+  const priorityData = await deliberatePrioritize(
+    synthData,
+    critiqueData,
+    feasibilityData,
+    cwd,
+    timeouts,
   );
 
   // Determine selected improvement with cascading fallbacks
@@ -1212,10 +1358,7 @@ Respond with JSON:
   };
 }
 
-/**
- * Phase 3: PLAN — Create improvement spec + test plan.
- */
-export async function phasePlan(
+function buildPlanPrompt(
   deliberation: {
     selectedImprovement: string;
     synthesis?: Record<string, unknown> | null;
@@ -1223,28 +1366,10 @@ export async function phasePlan(
     feasibility?: Record<string, unknown> | null;
     priority?: Record<string, unknown> | null;
   },
-  area: string,
-  kb: KnowledgeBase,
-  {
-    cwd,
-    timeouts,
-    evolveDir,
-    roundNum,
-  }: { cwd: string; timeouts: typeof DEFAULT_PHASE_TIMEOUTS; evolveDir: string; roundNum: number },
-): Promise<PlanResult> {
-  log.phase('PLAN');
-
-  const priorLearnings = getPriorLearnings(kb, area);
-  const learningsBlock =
-    priorLearnings.length > 0
-      ? `\n## Prior Learnings for "${area}" (avoid repeating these mistakes)\n${priorLearnings
-          .slice(0, 5)
-          .map((e: KBEntry) => `- [${String(e.outcome)}] ${String(e.learnings ?? e.finding)}`)
-          .join('\n')}`
-      : '';
-
+  learningsBlock: string,
+): string {
   /* eslint-disable @typescript-eslint/strict-boolean-expressions */
-  const planPrompt = `# Evolve Plan: Improvement Specification
+  return `# Evolve Plan: Improvement Specification
 
 Create a detailed implementation plan for the following improvement to the Hydra project:
 
@@ -1290,6 +1415,94 @@ Respond with JSON:
   "rollbackCriteria": ["criterion1", ...]
 }`;
   /* eslint-enable @typescript-eslint/strict-boolean-expressions */
+}
+
+function savePlanArtifact(
+  planData: PlanData | null,
+  evolveDir: string,
+  roundNum: number,
+  area: string,
+  deliberation: { selectedImprovement: string },
+): string {
+  const specsDir = path.join(evolveDir, 'specs');
+  ensureDir(specsDir);
+  const specPath = path.join(specsDir, `ROUND_${String(roundNum)}_SPEC.md`);
+
+  const {
+    objectives = [],
+    constraints = [],
+    acceptanceCriteria = [],
+    filesToModify = [],
+    testPlan,
+    rollbackCriteria = [],
+  } = planData ?? {};
+  const scenarios = testPlan?.scenarios ?? [];
+  const edgeCases = testPlan?.edgeCases ?? [];
+
+  const specContent = `# Evolve Round ${String(roundNum)} Spec — ${area}
+## Improvement
+${deliberation.selectedImprovement}
+
+## Objectives
+${objectives.map((o: string) => `- ${o}`).join('\n')}
+
+## Constraints
+${constraints.map((c: string) => `- ${c}`).join('\n')}
+
+## Acceptance Criteria
+${acceptanceCriteria.map((a: string) => `- ${a}`).join('\n')}
+
+## Files to Modify
+${filesToModify.map((f: { path: string; changes: string }) => `- \`${f.path}\`: ${f.changes}`).join('\n')}
+
+## Test Plan
+### Scenarios
+${scenarios.map((s: string) => `- ${s}`).join('\n')}
+
+### Edge Cases
+${edgeCases.map((e: string) => `- ${e}`).join('\n')}
+
+## Rollback Criteria
+${rollbackCriteria.map((r: string) => `- ${r}`).join('\n')}
+`;
+
+  fs.writeFileSync(specPath, specContent, 'utf8');
+  log.ok(`Spec saved: ${specPath}`);
+  return specPath;
+}
+
+/**
+ * Phase 3: PLAN — Create improvement spec + test plan.
+ */
+export async function phasePlan(
+  deliberation: {
+    selectedImprovement: string;
+    synthesis?: Record<string, unknown> | null;
+    critique?: Record<string, unknown> | null;
+    feasibility?: Record<string, unknown> | null;
+    priority?: Record<string, unknown> | null;
+  },
+  area: string,
+  kb: KnowledgeBase,
+  {
+    cwd,
+    timeouts,
+    evolveDir,
+    roundNum,
+  }: { cwd: string; timeouts: typeof DEFAULT_PHASE_TIMEOUTS; evolveDir: string; roundNum: number },
+): Promise<PlanResult> {
+  log.phase('PLAN');
+
+  const priorLearnings = getPriorLearnings(kb, area);
+  const learningsBlock =
+    priorLearnings.length > 0
+      ? `\n## Prior Learnings for "${area}" (avoid repeating these mistakes)\n${priorLearnings
+          .slice(0, 5)
+          .map((e: KBEntry) => `- [${String(e.outcome)}] ${String(e.learnings ?? e.finding)}`)
+          .join('\n')}`
+      : '';
+
+  const planPrompt = buildPlanPrompt(deliberation, learningsBlock);
 
   const planResult = await executeAgent('claude', planPrompt, {
     cwd,
@@ -1306,42 +1519,26 @@ Respond with JSON:
   } | null;
   log.dim(`Plan: ${planResult.ok ? 'OK' : 'FAIL'} (${formatDuration(planResult.durationMs)})`);
 
-  // Save spec artifact
-  const specsDir = path.join(evolveDir, 'specs');
-  ensureDir(specsDir);
-  const specPath = path.join(specsDir, `ROUND_${String(roundNum)}_SPEC.md`);
-
-  const specContent = `# Evolve Round ${String(roundNum)} Spec — ${area}
-## Improvement
-${deliberation.selectedImprovement}
-
-## Objectives
-${(planData?.objectives ?? []).map((o: string) => `- ${o}`).join('\n')}
-
-## Constraints
-${(planData?.constraints ?? []).map((c: string) => `- ${c}`).join('\n')}
-
-## Acceptance Criteria
-${(planData?.acceptanceCriteria ?? []).map((a: string) => `- ${a}`).join('\n')}
-
-## Files to Modify
-${(planData?.filesToModify ?? []).map((f: { path: string; changes: string }) => `- \`${f.path}\`: ${f.changes}`).join('\n')}
-
-## Test Plan
-### Scenarios
-${(planData?.testPlan?.scenarios ?? []).map((s: string) => `- ${s}`).join('\n')}
-
-### Edge Cases
-${(planData?.testPlan?.edgeCases ?? []).map((e: string) => `- ${e}`).join('\n')}
-
-## Rollback Criteria
-${(planData?.rollbackCriteria ?? []).map((r: string) => `- ${r}`).join('\n')}
-`;
-
-  fs.writeFileSync(specPath, specContent, 'utf8');
-  log.ok(`Spec saved: ${specPath}`);
+  const specPath = savePlanArtifact(planData, evolveDir, roundNum, area, deliberation);
 
   return { plan: planData, specPath };
+}
+
+function logPhaseResult(name: string, result: EvolveResult): void {
+  if (result.ok) {
+    log.dim(`${name}: OK (${formatDuration(result.durationMs)})`);
+  } else {
+    log.warn(`${name}: FAIL (${formatDuration(result.durationMs)})`);
+    // eslint-disable-next-line @typescript-eslint/strict-boolean-expressions -- runtime safety
+    if (result.error) log.dim(`  Error: ${result.error}`);
+    // eslint-disable-next-line @typescript-eslint/strict-boolean-expressions -- runtime safety
+    const stderrLines = (result.stderr || '').trim().split('\n').filter(Boolean);
+    if (stderrLines.length > 0) {
+      for (const line of stderrLines.slice(-3)) {
+        log.dim(`  ${line.trim()}`);
+      }
+    }
+  }
 }
 
 /**
@@ -1392,20 +1589,7 @@ ${safetyPrompt}`;
     phaseLabel: 'test: write TDD tests',
   });
 
-  if (testResult.ok) {
-    log.dim(`Tests: OK (${formatDuration(testResult.durationMs)})`);
-  } else {
-    log.warn(`Tests: FAIL (${formatDuration(testResult.durationMs)})`);
-    // eslint-disable-next-line @typescript-eslint/strict-boolean-expressions -- runtime safety
-    if (testResult.error) log.dim(`  Error: ${testResult.error}`);
-    // eslint-disable-next-line @typescript-eslint/strict-boolean-expressions -- runtime safety
-    const stderrLines = (testResult.stderr || '').trim().split('\n').filter(Boolean);
-    if (stderrLines.length > 0) {
-      for (const line of stderrLines.slice(-3)) {
-        log.dim(`  ${line.trim()}`);
-      }
-    }
-  }
+  logPhaseResult('Tests', testResult);
   return {
     ok: testResult.ok,
     output: testResult.output,
@@ -1414,6 +1598,46 @@ ${safetyPrompt}`;
     durationMs: testResult.durationMs,
     timedOut: testResult.timedOut,
   };
+}
+
+function buildImplementPrompt(
+  plan: { plan?: PlanData | null },
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- runtime safety
+  deliberation: any,
+  safetyPrompt: string,
+  investigatorPreamble?: string,
+): string {
+  // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment -- runtime safety
+  const improvementDesc =
+    // eslint-disable-next-line @typescript-eslint/no-unsafe-member-access -- runtime safety
+    deliberation?.selectedImprovement ?? plan.plan?.objectives?.[0] ?? 'See plan for details';
+  const acceptanceCriteria = ((plan.plan?.['acceptanceCriteria'] as string[]) || []) // eslint-disable-line @typescript-eslint/no-unnecessary-condition, @typescript-eslint/strict-boolean-expressions -- runtime safety
+    .map((c: string) => `- ${c}`)
+    .join('\n');
+  // eslint-disable-next-line @typescript-eslint/strict-boolean-expressions -- runtime safety
+  const preambleBlock = investigatorPreamble
+    ? `## Investigator Guidance (from prior failure analysis)\n${investigatorPreamble}\n\n`
+    : '';
+  /* eslint-disable @typescript-eslint/strict-boolean-expressions */
+  return `# Evolve: Implement Improvement
+
+${preambleBlock}Implement the improvement described in the spec below. Tests already exist on this branch — make them pass.
+
+## Improvement Goal
+${String(improvementDesc)}
+
+## Plan
+${JSON.stringify(plan.plan ?? {}, null, 2)}
+
+${acceptanceCriteria ? `## Acceptance Criteria\n${acceptanceCriteria}\n` : ''}## Requirements
+- Read existing code before making changes
+- Make focused, minimal changes
+- Run \`node --test\` to verify tests pass
+- Commit your changes with a descriptive message
+- Do NOT modify test files — only implementation files
+
+${safetyPrompt}`;
+  /* eslint-enable @typescript-eslint/strict-boolean-expressions */
 }
 
 /**
@@ -1442,40 +1666,7 @@ export async function phaseImplement(
   // eslint-disable-next-line @typescript-eslint/strict-boolean-expressions -- runtime safety
   log.phase(agentOverride ? `IMPLEMENT (${agentOverride})` : 'IMPLEMENT');
 
-  // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment -- runtime safety
-  const improvementDesc =
-    // eslint-disable-next-line @typescript-eslint/no-unsafe-member-access -- runtime safety
-    deliberation?.selectedImprovement ?? plan.plan?.objectives?.[0] ?? 'See plan for details';
-  const acceptanceCriteria = ((plan.plan?.['acceptanceCriteria'] as string[]) || []) // eslint-disable-line @typescript-eslint/no-unnecessary-condition, @typescript-eslint/strict-boolean-expressions -- runtime safety
-    .map((c: string) => `- ${c}`)
-    .join('\n');
-
-  // eslint-disable-next-line @typescript-eslint/strict-boolean-expressions -- runtime safety
-  const preambleBlock = investigatorPreamble
-    ? `## Investigator Guidance (from prior failure analysis)\n${investigatorPreamble}\n\n`
-    : '';
-
-  /* eslint-disable @typescript-eslint/strict-boolean-expressions */
-  const implPrompt = `# Evolve: Implement Improvement
-
-${preambleBlock}Implement the improvement described in the spec below. Tests already exist on this branch — make them pass.
-
-## Improvement Goal
-${String(improvementDesc)}
-
-## Plan
-${JSON.stringify(plan.plan ?? {}, null, 2)}
-
-${acceptanceCriteria ? `## Acceptance Criteria\n${acceptanceCriteria}\n` : ''}
-## Requirements
-- Read existing code before making changes
-- Make focused, minimal changes
-- Run \`node --test\` to verify tests pass
-- Commit your changes with a descriptive message
-- Do NOT modify test files — only implementation files
-
-${safetyPrompt}`;
-  /* eslint-enable @typescript-eslint/strict-boolean-expressions */
+  const implPrompt = buildImplementPrompt(plan, deliberation, safetyPrompt, investigatorPreamble);
 
   const implResult = await executeAgent(implAgent, implPrompt, {
     cwd,
@@ -1483,20 +1674,7 @@ ${safetyPrompt}`;
     phaseLabel: 'implement: make tests pass',
   });
 
-  if (implResult.ok) {
-    log.dim(`Implement: OK (${formatDuration(implResult.durationMs)})`);
-  } else {
-    log.warn(`Implement: FAIL (${formatDuration(implResult.durationMs)})`);
-    // eslint-disable-next-line @typescript-eslint/strict-boolean-expressions -- runtime safety
-    if (implResult.error) log.dim(`  Error: ${implResult.error}`);
-    // eslint-disable-next-line @typescript-eslint/strict-boolean-expressions -- runtime safety
-    const stderrLines = (implResult.stderr || '').trim().split('\n').filter(Boolean);
-    if (stderrLines.length > 0) {
-      for (const line of stderrLines.slice(-3)) {
-        log.dim(`  ${line.trim()}`);
-      }
-    }
-  }
+  logPhaseResult('Implement', implResult);
   return {
     ok: implResult.ok,
     output: implResult.output,
@@ -1505,6 +1683,121 @@ ${safetyPrompt}`;
     durationMs: implResult.durationMs,
     timedOut: implResult.timedOut,
   };
+}
+
+/* eslint-disable @typescript-eslint/strict-boolean-expressions */
+function buildReviewPrompt(
+  improvementGoal: string,
+  acceptanceCriteria: string,
+  diffBlock: string,
+  focus: string,
+): string {
+  return `# Evolve Analysis: ${focus}
+
+Review the implementation diff below for a Hydra improvement.
+
+## Improvement Goal
+${improvementGoal}
+
+${acceptanceCriteria ? `## Acceptance Criteria\n${acceptanceCriteria}\n` : ''}
+## Diff
+\`\`\`
+${diffBlock}
+\`\`\`
+
+## Your Focus: ${focus}
+Score the implementation on:
+- quality (1-10): Code quality, style consistency, correctness
+- confidence (1-10): How confident are you in this assessment
+
+Respond with JSON:
+{
+  "quality": 1-10,
+  "confidence": 1-10,
+  "concerns": ["concern1", ...],
+  "suggestions": ["suggestion1", ...],
+  "verdict": "approve" | "reject" | "revise"
+}`;
+}
+/* eslint-enable @typescript-eslint/strict-boolean-expressions */
+
+function collectVerdicts(
+  claudeAnalysis: Record<string, unknown> | null,
+  geminiAnalysis: Record<string, unknown> | null,
+  codexAnalysis: Record<string, unknown> | null,
+): { claude: string | null; gemini: string | null; codex: string | null } {
+  return {
+    claude: (claudeAnalysis?.['verdict'] as string | null) ?? null,
+    gemini: (geminiAnalysis?.['verdict'] as string | null) ?? null,
+    codex: (codexAnalysis?.['verdict'] as string | null) ?? null,
+  };
+}
+
+interface AnalyzeAgentResults {
+  claudeAnalysis: Record<string, unknown> | null;
+  geminiAnalysis: Record<string, unknown> | null;
+  codexAnalysis: Record<string, unknown> | null;
+}
+
+async function dispatchAnalysis(
+  improvementGoal: string,
+  acceptanceCriteria: string,
+  diffBlock: string,
+  cwd: string,
+  timeouts: typeof DEFAULT_PHASE_TIMEOUTS,
+): Promise<AnalyzeAgentResults> {
+  log.dim('Dispatching analysis to Claude + Gemini + Codex in parallel...');
+  const [claudeResult, geminiResult, codexResult] = await Promise.all([
+    executeAgentWithRetry(
+      'claude',
+      buildReviewPrompt(
+        improvementGoal,
+        acceptanceCriteria,
+        diffBlock,
+        'Architectural quality, code style, spec alignment',
+      ),
+      { cwd, timeoutMs: timeouts.analyzeTimeoutMs, phaseLabel: 'analyze: architecture review' },
+    ),
+    executeAgentWithRetry(
+      'gemini',
+      buildReviewPrompt(
+        improvementGoal,
+        acceptanceCriteria,
+        diffBlock,
+        'Regression risk, pattern consistency, codebase fit',
+      ),
+      { cwd, timeoutMs: timeouts.analyzeTimeoutMs, phaseLabel: 'analyze: regression review' },
+    ),
+    executeAgentWithRetry(
+      'codex',
+      buildReviewPrompt(
+        improvementGoal,
+        acceptanceCriteria,
+        diffBlock,
+        'Test coverage, implementation correctness, runtime safety',
+      ),
+      { cwd, timeoutMs: timeouts.analyzeTimeoutMs, phaseLabel: 'analyze: correctness review' },
+    ),
+  ]);
+
+  const claudeAnalysis = parseJsonLoose(extractOutput(claudeResult.output)) as Record<
+    string,
+    unknown
+  > | null;
+  const geminiAnalysis = parseJsonLoose(extractOutput(geminiResult.output)) as Record<
+    string,
+    unknown
+  > | null;
+  const codexAnalysis = parseJsonLoose(extractOutput(codexResult.output)) as Record<
+    string,
+    unknown
+  > | null;
+
+  log.dim(`Claude analysis: ${claudeResult.ok ? 'OK' : 'FAIL'}`);
+  log.dim(`Gemini analysis: ${geminiResult.ok ? 'OK' : 'FAIL'}`);
+  log.dim(`Codex analysis:  ${codexResult.ok ? 'OK' : 'FAIL'}`);
+
+  return { claudeAnalysis, geminiAnalysis, codexAnalysis };
 }
 
 /**
@@ -1533,96 +1826,38 @@ export async function phaseAnalyze(
     .map((c: string) => `- ${c}`)
     .join('\n');
 
-  /* eslint-disable @typescript-eslint/strict-boolean-expressions */
-  const reviewPrompt = (_agent: string, focus: string) => `# Evolve Analysis: ${focus}
-
-Review the implementation diff below for a Hydra improvement.
-
-## Improvement Goal
-${improvementGoal}
-
-${acceptanceCriteria ? `## Acceptance Criteria\n${acceptanceCriteria}\n` : ''}
-## Diff
-\`\`\`
-${diffBlock}
-\`\`\`
-
-## Your Focus: ${focus}
-Score the implementation on:
-- quality (1-10): Code quality, style consistency, correctness
-- confidence (1-10): How confident are you in this assessment
-
-Respond with JSON:
-{
-  "quality": 1-10,
-  "confidence": 1-10,
-  "concerns": ["concern1", ...],
-  "suggestions": ["suggestion1", ...],
-  "verdict": "approve" | "reject" | "revise"
-}`;
-  /* eslint-enable @typescript-eslint/strict-boolean-expressions */
-
-  log.dim('Dispatching analysis to Claude + Gemini + Codex in parallel...');
-  const [claudeResult, geminiResult, codexResult] = await Promise.all([
-    executeAgentWithRetry(
-      'claude',
-      reviewPrompt('claude', 'Architectural quality, code style, spec alignment'),
-      {
-        cwd,
-        timeoutMs: timeouts.analyzeTimeoutMs,
-        phaseLabel: 'analyze: architecture review',
-      },
-    ),
-    executeAgentWithRetry(
-      'gemini',
-      reviewPrompt('gemini', 'Regression risk, pattern consistency, codebase fit'),
-      {
-        cwd,
-        timeoutMs: timeouts.analyzeTimeoutMs,
-        phaseLabel: 'analyze: regression review',
-      },
-    ),
-    executeAgentWithRetry(
-      'codex',
-      reviewPrompt('codex', 'Test coverage, implementation correctness, runtime safety'),
-      {
-        cwd,
-        timeoutMs: timeouts.analyzeTimeoutMs,
-        phaseLabel: 'analyze: correctness review',
-      },
-    ),
-  ]);
-
-  const claudeAnalysis = parseJsonLoose(extractOutput(claudeResult.output)) as Record<
-    string,
-    unknown
-  > | null;
-  const geminiAnalysis = parseJsonLoose(extractOutput(geminiResult.output)) as Record<
-    string,
-    unknown
-  > | null;
-  const codexAnalysis = parseJsonLoose(extractOutput(codexResult.output)) as Record<
-    string,
-    unknown
-  > | null;
-
-  log.dim(`Claude analysis: ${claudeResult.ok ? 'OK' : 'FAIL'}`);
-  log.dim(`Gemini analysis: ${geminiResult.ok ? 'OK' : 'FAIL'}`);
-  log.dim(`Codex analysis:  ${codexResult.ok ? 'OK' : 'FAIL'}`);
-
-  // Also run tests
-  log.dim('Running test suite...');
-  setAgentActivity('codex', 'working', 'Running test suite');
-  // eslint-disable-next-line @typescript-eslint/strict-boolean-expressions -- runtime safety
-  const testRun = runProcess('node', ['--test'], timeouts.testTimeoutMs || 600_000, { cwd });
-  const testsPassed = testRun.ok;
-  const testDetails = parseTestOutput(testRun.stdout, testRun.stderr);
-  setAgentActivity(
-    'codex',
-    testsPassed ? 'idle' : 'error',
-    testsPassed ? 'Tests passed' : 'Tests failed',
+  const { claudeAnalysis, geminiAnalysis, codexAnalysis } = await dispatchAnalysis(
+    improvementGoal,
+    acceptanceCriteria,
+    diffBlock,
+    cwd,
+    timeouts,
   );
 
+  const { testsPassed, testDetails, testOutput } = runTestSuite(cwd, timeouts);
+  const { avgQuality, avgConfidence, allConcerns } = aggregateAnalysisScores(
+    claudeAnalysis,
+    geminiAnalysis,
+    codexAnalysis,
+  );
+  const agentVerdicts = collectVerdicts(claudeAnalysis, geminiAnalysis, codexAnalysis);
+
+  return {
+    agentScores: { claude: claudeAnalysis, gemini: geminiAnalysis, codex: codexAnalysis },
+    agentVerdicts,
+    aggregateScore: Math.round(avgQuality * 10) / 10,
+    aggregateConfidence: Math.round(avgConfidence * 10) / 10,
+    concerns: allConcerns,
+    testsPassed,
+    testOutput,
+    testDetails,
+  };
+}
+
+function logTestResults(
+  testsPassed: boolean,
+  testDetails: ReturnType<typeof parseTestOutput>,
+): void {
   if (testsPassed) {
     // eslint-disable-next-line @typescript-eslint/strict-boolean-expressions -- runtime safety
     const durStr = testDetails.durationMs
@@ -1647,8 +1882,37 @@ Respond with JSON:
       log.dim(`  x ${f.name}${errSuffix}`);
     }
   }
+}
 
-  // Aggregate scores
+function runTestSuite(
+  cwd: string,
+  timeouts: typeof DEFAULT_PHASE_TIMEOUTS,
+): { testsPassed: boolean; testDetails: ReturnType<typeof parseTestOutput>; testOutput: string } {
+  log.dim('Running test suite...');
+  setAgentActivity('codex', 'working', 'Running test suite');
+  // eslint-disable-next-line @typescript-eslint/strict-boolean-expressions -- runtime safety
+  const testRun = runProcess('node', ['--test'], timeouts.testTimeoutMs || 600_000, { cwd });
+  const testsPassed = testRun.ok;
+  const testDetails = parseTestOutput(testRun.stdout, testRun.stderr);
+  setAgentActivity(
+    'codex',
+    testsPassed ? 'idle' : 'error',
+    testsPassed ? 'Tests passed' : 'Tests failed',
+  );
+  logTestResults(testsPassed, testDetails);
+  return {
+    testsPassed,
+    testDetails,
+    // eslint-disable-next-line @typescript-eslint/strict-boolean-expressions -- runtime safety
+    testOutput: (testRun.stdout || '').slice(-2000),
+  };
+}
+
+function aggregateAnalysisScores(
+  claudeAnalysis: Record<string, unknown> | null,
+  geminiAnalysis: Record<string, unknown> | null,
+  codexAnalysis: Record<string, unknown> | null,
+): { avgQuality: number; avgConfidence: number; allConcerns: string[] } {
   const scores = [claudeAnalysis, geminiAnalysis, codexAnalysis].filter(
     (x): x is Record<string, unknown> => Boolean(x),
   );
@@ -1671,25 +1935,7 @@ Respond with JSON:
   const allConcerns = scores.flatMap(
     (s: Record<string, unknown>) => (s['concerns'] as string[]) || [], // eslint-disable-line @typescript-eslint/no-unnecessary-condition, @typescript-eslint/strict-boolean-expressions -- runtime safety
   );
-
-  // Collect per-agent verdicts
-  const agentVerdicts = {
-    claude: (claudeAnalysis?.['verdict'] as string | null) ?? null,
-    gemini: (geminiAnalysis?.['verdict'] as string | null) ?? null,
-    codex: (codexAnalysis?.['verdict'] as string | null) ?? null,
-  };
-
-  return {
-    agentScores: { claude: claudeAnalysis, gemini: geminiAnalysis, codex: codexAnalysis },
-    agentVerdicts,
-    aggregateScore: Math.round(avgQuality * 10) / 10,
-    aggregateConfidence: Math.round(avgConfidence * 10) / 10,
-    concerns: allConcerns,
-    testsPassed,
-    // eslint-disable-next-line @typescript-eslint/strict-boolean-expressions -- runtime safety
-    testOutput: (testRun.stdout || '').slice(-2000),
-    testDetails,
-  };
+  return { avgQuality, avgConfidence, allConcerns };
 }
 
 function getSearchQueries(area: string): string[] {
