@@ -62,7 +62,7 @@ async function ackPendingHandoffs(
   console.log('');
   await Promise.all(
     handoffs.map(async (h) => {
-      const targetAgent = (h.to ?? '').toLowerCase();
+      const targetAgent = h.to.toLowerCase();
       try {
         await requestFn('POST', resumeBaseUrl, '/handoff/ack', {
           handoffId: h.id,
@@ -79,7 +79,7 @@ async function ackPendingHandoffs(
 function collectAgentsToLaunch(sessionStatus: SessionStatus): Set<string> {
   const agentsToLaunch = new Set<string>();
   for (const t of sessionStatus.inProgressTasks ?? []) {
-    const owner = (t.owner ?? '').toLowerCase();
+    const owner = t.owner.toLowerCase();
     if (owner !== '') agentsToLaunch.add(owner);
   }
   for (const [agent, suggestion] of Object.entries(sessionStatus.agentSuggestions ?? {})) {

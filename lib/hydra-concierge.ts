@@ -554,6 +554,7 @@ function makeChunkHandler(
       state.firstChunkFired = true;
       opts.onFirstChunk();
     }
+    const wasDispatchKnown = state.dispatchDetected;
     if (!state.dispatchDetected && state.chunkCount <= 5) {
       const trimmed = state.responseBuffer.trimStart();
       if (trimmed.startsWith('[DISPATCH]')) {
@@ -564,7 +565,11 @@ function makeChunkHandler(
         state.dispatchDetected = true;
       }
     }
-    if (state.dispatchDetected && !state.isDispatch && opts.onChunk) opts.onChunk(chunk);
+    if (state.dispatchDetected && !state.isDispatch && opts.onChunk) {
+      // On first confirmation of non-dispatch, flush the full buffer (previous chunks were held);
+      // on subsequent chunks emit only the incremental chunk.
+      opts.onChunk(wasDispatchKnown ? chunk : state.responseBuffer);
+    }
   };
 }
 

@@ -65,6 +65,9 @@ describe('IGitOperations interface', () => {
     const { branchExists, getCurrentBranch } = await import('../lib/hydra-shared/git-ops.ts');
     const cwd = process.cwd();
     const current = getCurrentBranch(cwd);
+    // In CI, git checkout may produce a detached HEAD (empty branch name); skip the
+    // branch-existence check in that case since there is no local branch to verify.
+    if (current === '') return;
     assert.equal(branchExists(cwd, current), true, 'current branch should exist');
     assert.equal(
       branchExists(cwd, 'nonexistent-branch-abc123xyz'),
