@@ -232,7 +232,7 @@ function displayAvailableModelsSection(
   // Build known-set for highlighting
   const knownIds = new Set();
   for (const key of presetKeys) {
-    if (agentModels[key] !== '') knownIds.add(agentModels[key]);
+    if (agentModels[key] != null && agentModels[key] !== '') knownIds.add(agentModels[key]);
   }
   for (const modelId of Object.values(aliases)) knownIds.add(modelId);
 

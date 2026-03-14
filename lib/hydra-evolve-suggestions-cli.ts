@@ -208,8 +208,8 @@ async function addCommand(evolveDir: string, options: Record<string, string | bo
 // ── Remove Command ──────────────────────────────────────────────────────────
 
 function resolveIdArg(options: Record<string, string | boolean>, positionals: string[]): string {
-  const positional = positionals[1];
-  if (positional !== '') return positional;
+  const positional = positionals[1] as string | undefined;
+  if (positional != null && positional !== '') return positional;
   const optId = options['id'] as string | undefined;
   return optId !== undefined && optId !== '' ? optId : '';
 }

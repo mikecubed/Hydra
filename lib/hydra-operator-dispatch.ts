@@ -115,11 +115,16 @@ export function buildMiniRoundBrief(
   const tasks: NormalizedTask[] = Array.isArray(report?.tasks)
     ? report.tasks.map((item) => normalizeTask(item)).filter((t): t is NormalizedTask => t !== null)
     : [];
-  const questions = Array.isArray(report?.questions) ? report.questions : [];
+  const questions = Array.isArray(report?.questions)
+    ? (report.questions as Array<{ to?: string; question?: string } | null>)
+    : [];
   const consensus = String(report?.consensus ?? '').trim();
 
   const myTasks = tasks.filter((task) => task.owner === agent || task.owner === 'unassigned');
-  const myQuestions = questions.filter((q) => q.to === agent || q.to === 'human');
+  const myQuestions = questions.filter(
+    (q): q is { to?: string; question?: string } =>
+      q != null && (q.to === agent || q.to === 'human'),
+  );
 
   const taskText = formatAssignedTaskText(myTasks);
   const questionText = formatOpenQuestionText(myQuestions);
@@ -287,7 +292,7 @@ export async function runCrossVerification(
 
     return {
       verifier: verifierAgent,
-      approved: Boolean(parsed['approved']),
+      approved: parsed['approved'] === true,
       issues: Array.isArray(parsed['issues']) ? (parsed['issues'] as string[]) : [],
       suggestions: Array.isArray(parsed['suggestions']) ? (parsed['suggestions'] as string[]) : [],
     };
