@@ -5,8 +5,11 @@ import os from 'node:os';
 import path from 'node:path';
 
 import {
+  AFFINITY_PRESETS,
   _setTestConfig,
   _setTestConfigPath,
+  diffConfig,
+  getProviderPresets,
   getProviderTier,
   getRoleConfig,
   invalidateConfigCache,
@@ -384,5 +387,131 @@ describe('loadHydraConfig — missing config graceful degradation', () => {
 
     const validModes = ['performance', 'balanced', 'economy', 'custom'];
     assert.ok(validModes.includes(config.mode), `unexpected default mode: ${config.mode}`);
+  });
+});
+
+// ── diffConfig — missing keys ─────────────────────────────────────────────────
+
+describe('diffConfig — missing keys', () => {
+  it('reports a key present in defaults but absent from userConfig as missing', () => {
+    const result = diffConfig({ version: 2 }, { version: 2, mode: 'balanced', extra: 'foo' });
+    const paths = result.missing.map((m) => m.path);
+    assert.ok(paths.includes('mode'), '"mode" must appear in missing');
+    assert.ok(paths.includes('extra'), '"extra" must appear in missing');
+  });
+
+  it('returns empty missing array when userConfig matches all default top-level keys', () => {
+    const ref = { version: 2 };
+    const result = diffConfig({ version: 2 }, ref);
+    assert.deepEqual(result.missing, []);
+  });
+
+  it('includes the defaultValue in each missing entry', () => {
+    const result = diffConfig({}, { mode: 'balanced' });
+    const modeEntry = result.missing.find((m) => m.path === 'mode');
+    assert.ok(modeEntry, '"mode" must be in missing');
+    assert.equal(modeEntry.defaultValue, 'balanced');
+  });
+});
+
+// ── diffConfig — stale keys ───────────────────────────────────────────────────
+
+describe('diffConfig — stale keys', () => {
+  it('reports a key present in userConfig but absent from defaults as stale', () => {
+    const result = diffConfig({ version: 2, obsoleteKey: 'old' }, { version: 2 });
+    const paths = result.stale.map((s) => s.path);
+    assert.ok(paths.includes('obsoleteKey'), '"obsoleteKey" must appear in stale');
+  });
+
+  it('returns empty stale array when no extra keys exist in userConfig', () => {
+    const ref = { version: 2 };
+    const result = diffConfig({ version: 2 }, ref);
+    assert.deepEqual(result.stale, []);
+  });
+
+  it('includes the userValue in each stale entry', () => {
+    const result = diffConfig({ extra: 42 }, {});
+    const entry = result.stale.find((s) => s.path === 'extra');
+    assert.ok(entry, '"extra" must be in stale');
+    assert.equal(entry.userValue, 42);
+  });
+});
+
+// ── diffConfig — type mismatches ──────────────────────────────────────────────
+
+describe('diffConfig — type mismatches', () => {
+  it('reports a type mismatch when user value type differs from default type', () => {
+    const result = diffConfig({ version: 'two' }, { version: 2 });
+    const mismatches = result.typeMismatches;
+    assert.ok(mismatches.length > 0, 'must have at least one mismatch');
+    const entry = mismatches.find((m) => m.path === 'version');
+    assert.ok(entry, 'version must appear in typeMismatches');
+    assert.equal(entry.expectedType, 'number');
+    assert.equal(entry.gotType, 'string');
+  });
+
+  it('returns empty typeMismatches when types match', () => {
+    const result = diffConfig({ version: 99 }, { version: 2 });
+    assert.deepEqual(result.typeMismatches, []);
+  });
+
+  it('returns all three arrays in the result', () => {
+    const result = diffConfig({}, {});
+    assert.ok(Array.isArray(result.missing));
+    assert.ok(Array.isArray(result.stale));
+    assert.ok(Array.isArray(result.typeMismatches));
+  });
+});
+
+// ── getProviderPresets — shape ────────────────────────────────────────────────
+
+describe('getProviderPresets', () => {
+  it('returns an array', () => {
+    const presets = getProviderPresets();
+    assert.ok(Array.isArray(presets));
+  });
+
+  it('every preset is a plain object', () => {
+    const presets = getProviderPresets();
+    for (const preset of presets) {
+      assert.ok(typeof preset === 'object' && !Array.isArray(preset));
+    }
+  });
+});
+
+// ── AFFINITY_PRESETS — exported constant ──────────────────────────────────────
+
+describe('AFFINITY_PRESETS', () => {
+  it('exports a "balanced" preset', () => {
+    assert.ok(AFFINITY_PRESETS['balanced'], '"balanced" preset must exist');
+  });
+
+  it('exports a "code-focused" preset', () => {
+    assert.ok(AFFINITY_PRESETS['code-focused'], '"code-focused" preset must exist');
+  });
+
+  it('"balanced" preset has implementation key', () => {
+    assert.ok(
+      typeof AFFINITY_PRESETS['balanced']['implementation'] === 'number',
+      '"implementation" must be a number',
+    );
+  });
+
+  it('"code-focused" preset has implementation affinity > 0.5', () => {
+    assert.ok(
+      AFFINITY_PRESETS['code-focused']['implementation'] > 0.5,
+      '"code-focused" implementation affinity must favour code',
+    );
+  });
+
+  it('all preset affinities are numbers between 0 and 1', () => {
+    for (const [presetName, preset] of Object.entries(AFFINITY_PRESETS)) {
+      for (const [key, value] of Object.entries(preset)) {
+        assert.ok(
+          typeof value === 'number' && value >= 0 && value <= 1,
+          `${presetName}.${key} = ${String(value)} must be a number in [0,1]`,
+        );
+      }
+    }
   });
 });

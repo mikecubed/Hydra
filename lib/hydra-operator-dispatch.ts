@@ -13,7 +13,7 @@ import { buildAgentContext } from './hydra-context.ts';
 import { getAgent, getVerifier } from './hydra-agents.ts';
 import { resolveProject, loadHydraConfig } from './hydra-config.ts';
 import { short, request, normalizeTask, selectTandemPair } from './hydra-utils.ts';
-import { executeAgent } from './hydra-shared/agent-executor.ts';
+import { DefaultAgentExecutor, type IAgentExecutor } from './hydra-shared/agent-executor.ts';
 import { isPersonaEnabled, getAgentFraming, getProcessLabel } from './hydra-persona.ts';
 import { pushActivity, annotateDispatch } from './hydra-activity.ts';
 
@@ -204,6 +204,7 @@ export async function runCrossVerification(
   producerOutput: string,
   originalPrompt: string,
   specContent: string | null = null,
+  executor: IAgentExecutor = new DefaultAgentExecutor(),
 ): Promise<{
   verifier: string;
   approved: boolean;
@@ -246,7 +247,7 @@ export async function runCrossVerification(
     .join('\n');
 
   try {
-    const result = await executeAgent(verifierAgent, reviewPrompt, {
+    const result = await executor.executeAgent(verifierAgent, reviewPrompt, {
       cwd: config.projectRoot,
       timeoutMs: 60_000,
       permissionMode: verifierAgent === 'codex' ? 'read-only' : 'plan',

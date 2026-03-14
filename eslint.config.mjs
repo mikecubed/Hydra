@@ -1,4 +1,5 @@
 import js from '@eslint/js';
+import boundaries from 'eslint-plugin-boundaries';
 import pluginN from 'eslint-plugin-n';
 import unicorn from 'eslint-plugin-unicorn';
 import globals from 'globals';
@@ -228,6 +229,38 @@ export default [
       '@typescript-eslint/switch-exhaustiveness-check': 'error',
     },
   }),
+
+  // ─── Architectural layer boundaries ──────────────────────────────────────
+  {
+    plugins: { boundaries },
+    settings: {
+      'boundaries/elements': [
+        { type: 'shared', pattern: 'lib/hydra-shared/**' },
+        { type: 'daemon', pattern: 'lib/daemon/**' },
+        { type: 'lib', pattern: 'lib/**' },
+        { type: 'bin', pattern: 'bin/**' },
+        { type: 'scripts', pattern: 'scripts/**' },
+        { type: 'test', pattern: 'test/**' },
+      ],
+    },
+    rules: {
+      'boundaries/element-types': [
+        'error',
+        {
+          default: 'disallow',
+          rules: [
+            // lib/hydra-shared/ and lib/daemon/ are sub-namespaces of lib/ and may import from it
+            { from: 'shared', allow: ['shared', 'lib'] },
+            { from: 'daemon', allow: ['shared', 'daemon', 'lib'] },
+            { from: 'lib', allow: ['shared', 'daemon', 'lib'] },
+            { from: 'bin', allow: ['lib', 'shared', 'daemon'] },
+            { from: 'scripts', allow: ['lib', 'shared'] },
+            { from: 'test', allow: ['lib', 'shared', 'daemon', 'bin', 'scripts', 'test'] },
+          ],
+        },
+      ],
+    },
+  },
 
   // ─── Test files — relax strict TS rules ──────────────────────────────────
   {

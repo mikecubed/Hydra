@@ -1,6 +1,8 @@
 #!/usr/bin/env sh
-# Run the full test suite with coverage collection (single pass)
-./node_modules/.bin/c8 npm test
+# Run the full test suite without coverage instrumentation.
+# c8 was removed from this hook because it causes intermittent flakiness
+# in process-spawning tests due to instrumentation overhead.
+npm test
 TEST_EXIT=$?
 [ $TEST_EXIT -ne 0 ] && exit $TEST_EXIT
 
