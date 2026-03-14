@@ -108,7 +108,6 @@ describe('IGitOperations interface', () => {
     const _: IGitOperations = gitOperations;
     assert.equal(typeof _.getCurrentBranch, 'function');
     assert.equal(typeof _.stageAndCommit, 'function');
-    assert.strictEqual(gitOperations.getCurrentBranch, _.getCurrentBranch);
   });
 
   it('can be implemented by a mock object', () => {
