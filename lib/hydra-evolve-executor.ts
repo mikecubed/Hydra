@@ -19,6 +19,7 @@ import { isInvestigatorAvailable, investigate } from './hydra-evolve-investigato
 import type { loadKnowledgeBase } from './hydra-evolve-knowledge.ts';
 import { getPriorLearnings, formatStatsForPrompt } from './hydra-evolve-knowledge.ts';
 import { ensureDir, parseJsonLoose, runProcess, parseTestOutput } from './hydra-utils.ts';
+import { buildAgentContext } from './hydra-context.ts';
 import pc from 'picocolors';
 
 // ── Local type aliases ───────────────────────────────────────────────────────
@@ -186,29 +187,7 @@ let _projectContextCache: string | null = null;
 function getProjectContext() {
   // eslint-disable-next-line @typescript-eslint/strict-boolean-expressions -- runtime safety
   if (_projectContextCache) return _projectContextCache;
-  _projectContextCache = `## Hydra Project Context
-Key modules:
-  lib/hydra-operator.ts — Interactive REPL + dispatch pipeline (main entry)
-  lib/hydra-agents.ts — Agent definitions, invoke commands, model config
-  lib/hydra-utils.ts — HTTP helpers, classifyPrompt, parseJsonLoose
-  lib/hydra-ui.ts — Terminal colors (picocolors), formatters, dashboard
-  lib/hydra-metrics.ts — In-memory + file metrics, EventEmitter
-  lib/hydra-statusbar.ts — ANSI scroll region status bar
-  lib/hydra-worker.ts — Headless background agent workers
-  lib/hydra-council.ts — Multi-agent deliberation
-  lib/hydra-dispatch.ts — Task dispatch to agents
-  lib/hydra-worktree.ts — Git worktree isolation
-  lib/hydra-concierge.ts — Conversational front-end
-  lib/hydra-config.ts — Config loading (hydra.config.json)
-  lib/hydra-evolve.ts — Self-improvement session orchestration (main, phaseDecide, reporting)
-  lib/hydra-evolve-executor.ts — Phase execution engine (executeAgent/retry, phaseResearch/Deliberate/Plan/Test/Implement/Analyze)
-  lib/hydra-evolve-state.ts — Session state, checkpoint helpers, status types
-  lib/hydra-evolve-guardrails.ts — Safety guardrails for evolve
-  lib/hydra-evolve-knowledge.ts — Knowledge base persistence
-
-Test files: test/hydra-*.test.mjs (node:test + assert/strict)
-Config: hydra.config.json
-Stack: Node.js ESM, picocolors for colors, no framework deps`;
+  _projectContextCache = buildAgentContext('claude', {}, null, null);
   return _projectContextCache;
 }
 
