@@ -19,6 +19,7 @@ import { shortModelName } from './hydra-ui.ts';
 import { COST_PER_1K, estimateCost } from './hydra-provider-usage.ts';
 import { getConciergeIdentity } from './hydra-persona.ts';
 import { getSessionContext } from './hydra-activity.ts';
+import { buildAgentContext } from './hydra-context.ts';
 
 // Re-export for backward compat (concierge was the original home)
 export { COST_PER_1K };
@@ -219,7 +220,7 @@ interface ConciergeContext {
   [key: string]: unknown;
 }
 
-function buildSystemPrompt(context: ConciergeContext = {}) {
+function buildSystemPrompt(context: ConciergeContext = {}): string {
   const now = Date.now();
 
   // Context-hash fingerprint for cache invalidation
@@ -308,6 +309,17 @@ function buildSystemPrompt(context: ConciergeContext = {}) {
   // Permanent codebase baseline (always injected when available)
   if (context.codebaseBaseline != null && context.codebaseBaseline !== '') {
     awarenessBlock += `\n\n${context.codebaseBaseline}`;
+  }
+
+  // Route codebase context through buildAgentContext — reads HYDRA.md / CLAUDE.md
+  // so the concierge always has live project context alongside any curated baseline.
+  try {
+    const agentCtx = buildAgentContext('claude', {}, null, null);
+    if (agentCtx !== '') {
+      awarenessBlock += `\n\n${agentCtx}`;
+    }
+  } catch {
+    // buildAgentContext is best-effort; gracefully degrade if project resolution fails
   }
 
   // Always-on self-awareness blocks (operator-provided)
@@ -443,6 +455,9 @@ Important constraints:
   systemPromptCache = { text, builtAt: now, fingerprint };
   return text;
 }
+
+/** Exported for testing — same as internal buildSystemPrompt. */
+export { buildSystemPrompt as buildConciergeSystemPrompt };
 
 // ── Event Posting (bidirectional) ────────────────────────────────────────────
 
