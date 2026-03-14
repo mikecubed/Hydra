@@ -10,7 +10,8 @@
  * Zero overhead on successful calls. Callers opt in explicitly.
  */
 
-import { loadHydraConfig } from './hydra-config.ts';
+import { configStore } from './hydra-config.ts';
+import type { IConfigStore } from './types.ts';
 import { getActiveModel, setActiveModel, getAgent } from './hydra-agents.ts';
 import { getProfile } from './hydra-model-profiles.ts';
 
@@ -126,9 +127,9 @@ const circuitState = new Map<string, CircuitState>(); // model → { failures: [
  * Opens the circuit if failures exceed threshold within window.
  * @param {string} model - Model ID that failed
  */
-export function recordModelFailure(model: string): void {
+export function recordModelFailure(model: string, store: IConfigStore = configStore): void {
   if (model === '') return;
-  const cfg = loadHydraConfig();
+  const cfg = store.load();
   const cbCfg =
     (((cfg as Record<string, unknown>)['modelRecovery'] as Record<string, unknown> | undefined)?.[
       'circuitBreaker'
@@ -161,9 +162,9 @@ export function recordModelFailure(model: string): void {
  * @param {string} model - Model ID
  * @returns {boolean}
  */
-export function isCircuitOpen(model: string): boolean {
+export function isCircuitOpen(model: string, store: IConfigStore = configStore): boolean {
   if (model === '') return false;
-  const cfg = loadHydraConfig();
+  const cfg = store.load();
   const cbCfg =
     (((cfg as Record<string, unknown>)['modelRecovery'] as Record<string, unknown> | undefined)?.[
       'circuitBreaker'
@@ -777,8 +778,9 @@ function collectAliasCandidates(
 export function getFallbackCandidates(
   agent: string,
   failedModel: string,
+  store: IConfigStore = configStore,
 ): Array<{ id: string; label: string; source: string; qualityScore?: number }> {
-  const cfg = loadHydraConfig();
+  const cfg = store.load();
   const agentModels: Partial<Record<string, string>> =
     (
       (cfg as Record<string, unknown>)['models'] as
@@ -862,8 +864,9 @@ export async function recoverFromModelError(
   agent: string,
   failedModel: string,
   opts: Record<string, unknown> = {},
+  store: IConfigStore = configStore,
 ): Promise<{ recovered: boolean; newModel: string | null }> {
-  const cfg = loadHydraConfig();
+  const cfg = store.load();
   const recoveryCfg =
     ((cfg as Record<string, unknown>)['modelRecovery'] as Record<string, unknown> | undefined) ??
     {};
@@ -872,7 +875,7 @@ export async function recoverFromModelError(
     return { recovered: false, newModel: null };
   }
 
-  const candidates = getFallbackCandidates(agent, failedModel);
+  const candidates = getFallbackCandidates(agent, failedModel, store);
   if (candidates.length === 0) {
     return { recovered: false, newModel: null };
   }
@@ -906,8 +909,8 @@ export async function recoverFromModelError(
  * Check whether model recovery is enabled in config.
  * @returns {boolean}
  */
-export function isModelRecoveryEnabled(): boolean {
-  const cfg = loadHydraConfig();
+export function isModelRecoveryEnabled(store: IConfigStore = configStore): boolean {
+  const cfg = store.load();
   return (
     ((cfg as Record<string, unknown>)['modelRecovery'] as Record<string, unknown> | undefined)?.[
       'enabled'

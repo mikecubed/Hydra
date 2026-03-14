@@ -1055,3 +1055,17 @@ export interface IMetricsRecorder {
   recordCallComplete(handle: string, result: MetricsCallResult): void;
   recordCallError(handle: string, error: unknown): void;
 }
+
+/** Recursively make all properties optional — used for partial config overrides. */
+export type DeepPartial<T> = T extends object ? { [P in keyof T]?: DeepPartial<T[P]> } : T;
+
+/**
+ * Interface contract for the Hydra configuration store.
+ * Abstracts read/write/invalidation so consumers can be tested with a mock.
+ * Implemented by the `configStore` export from `lib/hydra-config.ts`.
+ */
+export interface IConfigStore {
+  load(): HydraConfig;
+  save(config: DeepPartial<HydraConfig>): HydraConfig;
+  invalidate(): void;
+}

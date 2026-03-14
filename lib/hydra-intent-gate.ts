@@ -9,7 +9,8 @@
  */
 
 import { classifyPrompt } from './hydra-utils.ts';
-import { loadHydraConfig } from './hydra-config.ts';
+import { configStore } from './hydra-config.ts';
+import type { IConfigStore } from './types.ts';
 
 // ── Filler phrases stripped from the start of prompts ────────────────────────
 const FILLER_PATTERNS = [
@@ -84,6 +85,7 @@ interface GateIntentOpts {
   confidenceThreshold?: number;
   rewriteFn?: ((text: string) => Promise<string | null>) | null;
   onLlmCall?: (() => void) | null;
+  store?: IConfigStore;
 }
 
 export async function gateIntent(
@@ -95,7 +97,13 @@ export async function gateIntent(
   normalized: boolean;
   rewritten: boolean;
 }> {
-  const { enabled = true, confidenceThreshold = 0.55, rewriteFn = null, onLlmCall = null } = opts;
+  const {
+    enabled = true,
+    confidenceThreshold = 0.55,
+    rewriteFn = null,
+    onLlmCall = null,
+    store = configStore,
+  } = opts;
 
   if (!enabled) {
     return { text, classification: classifyPrompt(text), normalized: false, rewritten: false };
@@ -112,7 +120,7 @@ export async function gateIntent(
   if (onLlmCall) onLlmCall();
 
   try {
-    const doRewrite = rewriteFn ?? defaultRewriteFn;
+    const doRewrite = rewriteFn ?? ((t: string) => defaultRewriteFn(t, store));
     const rewritten = await doRewrite(text);
     if (rewritten != null && rewritten.trim() !== '') {
       const rewrittenClassification = classifyPrompt(rewritten.trim());
@@ -134,7 +142,10 @@ export async function gateIntent(
  * Default LLM rewrite using the local/fast model via hydra-local.ts.
  * Dynamic import avoids circular deps at load time.
  */
-async function defaultRewriteFn(text: string): Promise<string | null> {
+async function defaultRewriteFn(
+  text: string,
+  store: IConfigStore = configStore,
+): Promise<string | null> {
   let streamLocalCompletion;
   try {
     ({ streamLocalCompletion } = await import('./hydra-local.ts'));
@@ -155,7 +166,7 @@ async function defaultRewriteFn(text: string): Promise<string | null> {
   ];
 
   let result = '';
-  const cfg = loadHydraConfig();
+  const cfg = store.load();
   const localCfg = {
     model: (cfg.local.model as string | undefined) ?? 'llama3',
     baseUrl: (cfg.local.baseUrl as string | undefined) ?? 'http://localhost:11434/v1',

@@ -6,7 +6,8 @@
  * Dynamically reorders the chain based on remaining rate limit capacity.
  */
 
-import { loadHydraConfig } from './hydra-config.ts';
+import { configStore } from './hydra-config.ts';
+import type { IConfigStore } from './types.ts';
 import { getModelReasoningCaps } from './hydra-agents.ts';
 import { canMakeRequest, getHealthiestProvider } from './hydra-rate-limits.ts';
 
@@ -44,12 +45,12 @@ interface FallbackChainEntry {
  * Build the fallback chain from config, filtered by available API keys.
  * @returns {Array<{provider: string, model: string, available: boolean}>}
  */
-export function buildFallbackChain(): Array<{
+export function buildFallbackChain(store: IConfigStore = configStore): Array<{
   provider: string;
   model: string;
   available: boolean;
 }> {
-  const cfg = loadHydraConfig();
+  const cfg = store.load();
   const chain = cfg.concierge?.fallbackChain ?? [
     { provider: 'openai', model: 'gpt-5' },
     { provider: 'anthropic', model: 'claude-sonnet-4-5-20250929' },
