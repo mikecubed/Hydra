@@ -59,20 +59,22 @@ export async function executeDaemonResume(
     const stale = sessionStatus.staleTasks ?? [];
     if (stale.length > 0) {
       console.log('');
-      for (const t of stale) {
-        try {
-          await requestFn('POST', resumeBaseUrl, '/task/update', {
-            taskId: t.id,
-            status: 'todo',
-          });
-          const mins = Math.round((Date.now() - new Date(t.updatedAt).getTime()) / 60_000);
-          console.log(
-            `  ${WARNING('↻')} ${pc.white(t.id)} ${colorAgent(t.owner)} reset to todo ${DIM(`(was stale ${String(mins)}m)`)}`,
-          );
-        } catch {
-          /* skip */
-        }
-      }
+      await Promise.all(
+        stale.map(async (t) => {
+          try {
+            await requestFn('POST', resumeBaseUrl, '/task/update', {
+              taskId: t.id,
+              status: 'todo',
+            });
+            const mins = Math.round((Date.now() - new Date(t.updatedAt).getTime()) / 60_000);
+            console.log(
+              `  ${WARNING('↻')} ${pc.white(t.id)} ${colorAgent(t.owner)} reset to todo ${DIM(`(was stale ${String(mins)}m)`)}`,
+            );
+          } catch {
+            /* skip */
+          }
+        }),
+      );
     }
 
     // Ack pending handoffs
@@ -80,18 +82,20 @@ export async function executeDaemonResume(
     const agentsToLaunch = new Set<string>();
     if (handoffs.length > 0) {
       console.log('');
-      for (const h of handoffs) {
-        const targetAgent = String(h.to ?? '').toLowerCase();
-        try {
-          await requestFn('POST', resumeBaseUrl, '/handoff/ack', {
-            handoffId: h.id,
-            agent: targetAgent,
-          });
-          if (targetAgent) agentsToLaunch.add(targetAgent);
-        } catch (err: unknown) {
-          console.log(`  ${ERROR('✗')} ${pc.white(h.id)} ${(err as Error).message}`);
-        }
-      }
+      await Promise.all(
+        handoffs.map(async (h) => {
+          const targetAgent = String(h.to ?? '').toLowerCase();
+          try {
+            await requestFn('POST', resumeBaseUrl, '/handoff/ack', {
+              handoffId: h.id,
+              agent: targetAgent,
+            });
+            if (targetAgent) agentsToLaunch.add(targetAgent);
+          } catch (err: unknown) {
+            console.log(`  ${ERROR('✗')} ${pc.white(h.id)} ${(err as Error).message}`);
+          }
+        }),
+      );
     }
 
     // Collect in-progress agent owners

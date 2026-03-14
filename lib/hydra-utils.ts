@@ -420,6 +420,7 @@ export async function request<T = unknown>(
 
   for (let attempt = 1; attempt <= NETWORK_RETRY_COUNT; attempt += 1) {
     try {
+      // eslint-disable-next-line no-await-in-loop -- intentionally sequential: network retry loop; each fetch only runs after the previous one fails
       response = await fetch(`${baseUrl}${route}`, {
         method,
         headers,
@@ -432,6 +433,7 @@ export async function request<T = unknown>(
       if (attempt >= NETWORK_RETRY_COUNT) {
         break;
       }
+      // eslint-disable-next-line no-await-in-loop -- intentionally sequential: network retry loop; must sleep before the next fetch attempt
       await new Promise<void>((resolve) => {
         setTimeout(resolve, NETWORK_RETRY_DELAY_MS * attempt);
       });

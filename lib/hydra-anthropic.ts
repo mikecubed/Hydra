@@ -144,6 +144,7 @@ async function coreStreamAnthropic(
   let usage: AnthropicUsage | null = null;
 
   for (;;) {
+    // eslint-disable-next-line no-await-in-loop -- intentionally sequential: SSE stream must be read chunk-by-chunk in order; each chunk depends on the previous reader state
     const readResult = await reader.read();
     if (readResult.done) break;
     const value = readResult.value as Uint8Array;

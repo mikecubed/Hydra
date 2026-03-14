@@ -110,6 +110,7 @@ export async function runAgentsWizard(rl: ReadlineInterface): Promise<void> {
   let name!: string;
   let nameError!: string | null;
   do {
+    // eslint-disable-next-line no-await-in-loop -- intentionally sequential: do-while retry loop for interactive user-input validation; each iteration depends on the previous answer
     name = await ask('Agent name (e.g. copilot, mixtral)');
     nameError = validateAgentName(name);
     if (nameError) console.log(`  ✗ ${nameError}`);
