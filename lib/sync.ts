@@ -12,6 +12,7 @@ import { spawnSyncCapture } from './hydra-proc.ts';
 import { getCurrentBranch as getCurrentBranchGit } from './hydra-shared/git-ops.ts';
 import { resolveProject } from './hydra-config.ts';
 import { getAgentInstructionFile } from './hydra-sync-md.ts';
+import { exit } from './hydra-process.ts';
 
 interface AgentRecord {
   installed: boolean | null;
@@ -211,8 +212,7 @@ function readState(): SyncState {
     return normalizeState(raw);
   } catch (err) {
     console.error(`Failed to read ${path.relative(ROOT, STATE_PATH)}: ${(err as Error).message}`);
-    // eslint-disable-next-line n/no-process-exit
-    process.exit(1);
+    exit(1);
   }
 }
 
@@ -312,8 +312,7 @@ function getRequiredOption(
   if (value === '') {
     const extra = helpHint ? `\n${helpHint}` : '';
     console.error(`Missing required option --${key}.${extra}`);
-    // eslint-disable-next-line n/no-process-exit
-    process.exit(1);
+    exit(1);
   }
   return value;
 }
@@ -409,8 +408,7 @@ function ensureStatus(status: string) {
     console.error(
       `Invalid status "${status}". Use one of: ${Array.from(STATUS_VALUES).join(', ')}`,
     );
-    // eslint-disable-next-line n/no-process-exit
-    process.exit(1);
+    exit(1);
   }
 }
 
@@ -543,8 +541,7 @@ function commandTaskUpdate(options: CliOptions, positionals: string[]) {
 
   if (!task) {
     console.error(`Task ${id} not found.`);
-    // eslint-disable-next-line n/no-process-exit
-    process.exit(1);
+    exit(1);
   }
 
   const nextTitle = getOptionValue(options, positionals, 'title', 5, '');
@@ -845,8 +842,7 @@ function main() {
     default:
       console.error(`Unknown command: ${command}`);
       printHelp();
-      // eslint-disable-next-line n/no-process-exit
-      process.exit(1);
+      exit(1);
   }
 }
 

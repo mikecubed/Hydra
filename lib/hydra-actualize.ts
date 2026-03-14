@@ -64,6 +64,7 @@ import { runDiscovery } from './hydra-nightly-discovery.ts';
 import { buildSelfSnapshot, formatSelfSnapshotForPrompt } from './hydra-self.ts';
 import { buildSelfIndex, formatSelfIndexForPrompt } from './hydra-self-index.ts';
 import { detectInstalledCLIs } from './hydra-cli-detect.ts';
+import { exit } from './hydra-process.ts';
 
 // ── Logging ─────────────────────────────────────────────────────────────────
 
@@ -389,8 +390,7 @@ async function main() {
 
   if (selected.length === 0) {
     log.warn('No tasks to execute. Nothing to do.');
-    // eslint-disable-next-line n/no-process-exit -- top-level main function; safe to exit cleanly
-    process.exit(0);
+    exit(0);
   }
 
   log.info(`Selected ${String(selected.length)} task(s)`);
@@ -414,8 +414,7 @@ async function main() {
       console.log(`    - [${t.source}] ${t.title} -> ${t.suggestedAgent}`);
     }
     console.log('');
-    // eslint-disable-next-line n/no-process-exit -- top-level main function; safe to exit cleanly
-    process.exit(0);
+    exit(0);
   }
 
   // ── Phase: EXECUTE ──
@@ -739,6 +738,5 @@ async function main() {
 
 main().catch((err: unknown) => {
   process.stderr.write(pc.red(`Fatal: ${err instanceof Error ? err.message : String(err)}\n`));
-  // eslint-disable-next-line n/no-process-exit -- inside .catch() callback; return does not propagate
-  process.exit(1);
+  exit(1);
 });

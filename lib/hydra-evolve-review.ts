@@ -48,6 +48,7 @@ import {
   getSuggestionStats,
 } from './hydra-evolve-suggestions.ts';
 import pc from 'picocolors';
+import { exit } from './hydra-process.ts';
 
 interface EvolveRoundEntry {
   round?: number;
@@ -565,6 +566,5 @@ async function main() {
 
 main().catch((err: unknown) => {
   console.error(pc.red(`Fatal: ${err instanceof Error ? err.message : String(err)}`));
-  // eslint-disable-next-line n/no-process-exit -- inside .catch() callback; return does not propagate
-  process.exit(1);
+  exit(1);
 });

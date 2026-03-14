@@ -66,6 +66,7 @@ import {
 } from './hydra-tasks-scanner.ts';
 import { runDiscovery } from './hydra-nightly-discovery.ts';
 import type { NightlyConfig } from './types.ts';
+import { exit } from './hydra-process.ts';
 
 // ── Local interfaces ─────────────────────────────────────────────────────────
 
@@ -1142,8 +1143,7 @@ async function main() {
     const userSelected = await phaseSelect(sorted, nightlyCfg.maxTasks ?? 5);
     if (userSelected === null || userSelected.length === 0) {
       log.warn('Cancelled.');
-      // eslint-disable-next-line n/no-process-exit -- top-level main function; safe to exit
-      process.exit(0);
+      exit(0);
     }
     selectedTasks = userSelected;
   } else {
@@ -1152,8 +1152,7 @@ async function main() {
 
   if (selectedTasks.length === 0) {
     log.warn('No tasks to execute. Nothing to do.');
-    // eslint-disable-next-line n/no-process-exit -- top-level main function; safe to exit
-    process.exit(0);
+    exit(0);
   }
 
   // Dry run: stop here
@@ -1167,8 +1166,7 @@ async function main() {
       );
     }
     console.log('');
-    // eslint-disable-next-line n/no-process-exit -- top-level main function; safe to exit
-    process.exit(0);
+    exit(0);
   }
 
   // Phase 4: EXECUTE
@@ -1228,6 +1226,5 @@ main().catch((err: unknown) => {
   } catch {
     /* last resort */
   }
-  // eslint-disable-next-line n/no-process-exit -- inside .catch() callback; return does not propagate
-  process.exit(1);
+  exit(1);
 });

@@ -26,6 +26,7 @@ import { listIssues, isGhAvailable, isGhAuthenticated } from './hydra-github.ts'
 import { loadHydraConfig } from './hydra-config.ts';
 import { stripGitEnv } from './hydra-shared/git-ops.ts';
 import pc from 'picocolors';
+import { exit } from './hydra-process.ts';
 
 interface SpawnSyncResult {
   status: number | null;
@@ -482,7 +483,6 @@ if (isDirectRun) {
     console.log('');
   })().catch((err: unknown) => {
     console.error(err instanceof Error ? err.message : String(err));
-    // eslint-disable-next-line n/no-process-exit
-    process.exit(1);
+    exit(1);
   });
 }
