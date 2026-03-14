@@ -43,6 +43,77 @@ const BASE_BRANCH = 'dev';
 
 const PROTECTED_FILES = new Set([...BASE_PROTECTED_FILES, 'hydra.config.json']);
 
+function printTasksEntryViolations(violations: Array<Record<string, unknown>>): void {
+  console.log(pc.red(`  Violations: ${String(violations.length)}`));
+  for (const v of violations) {
+    console.log(pc.red(`    [${String(v['severity'])}] ${String(v['detail'])}`));
+  }
+}
+
+function printTasksReportEntry(reportEntry: Record<string, unknown> | undefined): void {
+  if (!reportEntry) return;
+  const status = reportEntry['status'] as string | undefined;
+  const statusColor = status === 'success' ? pc.green : pc.yellow;
+  console.log(`  Status: ${statusColor((status ?? '').toUpperCase())}`);
+  console.log(`  Agent: ${(reportEntry['agent'] as string | undefined) ?? '?'}`);
+  const tokens = reportEntry['tokens'] as number | undefined;
+  if (tokens != null && tokens !== 0) console.log(`  Tokens: ~${tokens.toLocaleString()}`);
+  const verdict = reportEntry['verdict'] as string | undefined;
+  if (verdict != null && verdict !== '') console.log(`  Verdict: ${verdict}`);
+  const verification = reportEntry['verification'] as Record<string, unknown> | undefined;
+  if (verification?.['command'] != null) {
+    const vIcon = verification['passed'] === true ? pc.green('pass') : pc.red('FAIL');
+    console.log(`  Verification: ${vIcon} (${verification['command'] as string})`);
+  }
+  const violations = reportEntry['violations'] as Array<Record<string, unknown>> | undefined;
+  if (violations && violations.length > 0) {
+    printTasksEntryViolations(violations);
+  }
+}
+
+function printTasksLiveViolations(
+  liveViolations: Array<{ severity: string; detail: string }>,
+  reportEntry: Record<string, unknown> | undefined,
+): void {
+  if (
+    liveViolations.length > 0 &&
+    ((reportEntry?.['violations'] as unknown[] | undefined)?.length ?? 0) === 0
+  ) {
+    console.log(pc.red(`\n  Live violation scan: ${String(liveViolations.length)} issue(s)`));
+    for (const v of liveViolations) {
+      console.log(pc.red(`    [${v.severity}] ${v.detail}`));
+    }
+  }
+}
+
+async function processTasksBranch(
+  rl: ReturnType<typeof createRL>,
+  projectRoot: string,
+  branch: string,
+  reportEntry: Record<string, unknown> | undefined,
+): Promise<string | null> {
+  console.log(pc.bold(pc.cyan(`\n── ${branch} ──`)));
+  printTasksReportEntry(reportEntry);
+
+  const { commitLog } = displayBranchInfo(projectRoot, branch, BASE_BRANCH);
+  if (commitLog === '') {
+    await handleEmptyBranch(rl, projectRoot, branch);
+    return null;
+  }
+
+  const liveViolations = scanBranchViolations(projectRoot, branch, {
+    baseBranch: BASE_BRANCH,
+    protectedFiles: PROTECTED_FILES,
+    protectedPatterns: BASE_PROTECTED_PATTERNS,
+  });
+  printTasksLiveViolations(liveViolations, reportEntry);
+
+  console.log('');
+  return await handleBranchAction(rl, projectRoot, branch, BASE_BRANCH, {
+    enablePR: isGhAvailable(),
+  });
+}
+
 // ── Review Command ──────────────────────────────────────────────────────────
 
 async function reviewCommand(projectRoot: string, options: Record<string, string | boolean>) {
@@ -58,7 +129,6 @@ async function reviewCommand(projectRoot: string, options: Record<string, string
     return;
   }
 
-  // Ensure we're on dev
   const current = getCurrentBranch(projectRoot);
   if (current !== BASE_BRANCH) {
     console.log(pc.yellow(`Switching to ${BASE_BRANCH} branch (was on ${current})`));
@@ -67,7 +137,6 @@ async function reviewCommand(projectRoot: string, options: Record<string, string
 
   console.log(pc.bold(`\nTasks Review — ${String(branches.length)} branch(es)\n`));
 
-  // Load the latest report if available
   const reportDir = path.join(projectRoot, 'docs', 'coordination', 'tasks');
   const reportData = loadLatestReport(reportDir, REPORT_PREFIX, dateFilter) as Record<
     string,
@@ -82,70 +151,53 @@ async function reviewCommand(projectRoot: string, options: Record<string, string
     const reportEntry = (reportData?.['results'] as Record<string, unknown>[] | undefined)?.find(
       (r: Record<string, unknown>) => r['branch'] === branch,
     );
-
-    console.log(pc.bold(pc.cyan(`\n── ${branch} ──`)));
-
-    // Show report info if available
-    if (reportEntry) {
-      const status = reportEntry['status'] as string | undefined;
-      const statusColor = status === 'success' ? pc.green : pc.yellow;
-      console.log(`  Status: ${statusColor((status ?? '').toUpperCase())}`);
-      console.log(`  Agent: ${(reportEntry['agent'] as string | undefined) ?? '?'}`);
-      const tokens = reportEntry['tokens'] as number | undefined;
-      if (tokens != null && tokens !== 0) console.log(`  Tokens: ~${tokens.toLocaleString()}`);
-      const verdict = reportEntry['verdict'] as string | undefined;
-      if (verdict != null && verdict !== '') console.log(`  Verdict: ${verdict}`);
-      const verification = reportEntry['verification'] as Record<string, unknown> | undefined;
-      if (verification?.['command'] != null) {
-        const vIcon = verification['passed'] === true ? pc.green('pass') : pc.red('FAIL');
-        console.log(`  Verification: ${vIcon} (${verification['command'] as string})`);
-      }
-      const violations = reportEntry['violations'] as Array<Record<string, unknown>> | undefined;
-      if (violations && violations.length > 0) {
-        console.log(pc.red(`  Violations: ${String(violations.length)}`));
-        for (const v of violations) {
-          console.log(pc.red(`    [${String(v['severity'])}] ${String(v['detail'])}`));
-        }
-      }
-    }
-
-    // Show diff stat and commit log
-    const { commitLog } = displayBranchInfo(projectRoot, branch, BASE_BRANCH);
-
-    if (commitLog === '') {
-      // eslint-disable-next-line no-await-in-loop -- sequential dependency
-      await handleEmptyBranch(rl, projectRoot, branch);
-      continue;
-    }
-
-    // Live violation scan
-    const liveViolations = scanBranchViolations(projectRoot, branch, {
-      baseBranch: BASE_BRANCH,
-      protectedFiles: PROTECTED_FILES,
-      protectedPatterns: BASE_PROTECTED_PATTERNS,
-    });
-    if (
-      liveViolations.length > 0 &&
-      ((reportEntry?.['violations'] as unknown[] | undefined)?.length ?? 0) === 0
-    ) {
-      console.log(pc.red(`\n  Live violation scan: ${String(liveViolations.length)} issue(s)`));
-      for (const v of liveViolations) {
-        console.log(pc.red(`    [${v.severity}] ${v.detail}`));
-      }
-    }
-
-    // Prompt action
-    console.log('');
     // eslint-disable-next-line no-await-in-loop -- sequential branch review
-    const result = await handleBranchAction(rl, projectRoot, branch, BASE_BRANCH, {
-      enablePR: isGhAvailable(),
-    });
+    const result = await processTasksBranch(rl, projectRoot, branch, reportEntry);
     if (result === 'merged' || result === 'pr-created') merged++;
     else if (result === 'skipped') skipped++;
   }
 
   rl.close();
   console.log(pc.bold(`\nDone: ${String(merged)} merged, ${String(skipped)} skipped`));
+}
+
+function printTasksResultRow(r: Record<string, unknown>): void {
+  let icon: string;
+  if (r['status'] === 'success') {
+    icon = pc.green('pass');
+  } else if (r['status'] === 'failed') {
+    icon = pc.red('FAIL');
+  } else {
+    icon = pc.yellow(String(r['status']));
+  }
+  const agentTag = pc.dim(` [${String(r['agent'])}]`);
+  const slug =
+    (r['slug'] as string | undefined) ?? (r['task'] as string | undefined)?.slice(0, 40) ?? '';
+  console.log(`    ${icon} ${slug} — ${String(r['status'])}${agentTag}`);
+}
+
+function printTasksStatusReport(report: Record<string, unknown> | null): void {
+  if (!report) {
+    console.log(pc.dim('\n  No tasks report found.'));
+    return;
+  }
+  console.log(`\n  Latest Report: ${String(report['date'])}`);
+  console.log(`  Tasks: ${String(report['processedTasks'])}/${String(report['totalTasks'])}`);
+  console.log(`  Successful: ${String((report['successful'] as number | undefined) ?? 0)}`);
+  console.log(`  Failed: ${String((report['failed'] as number | undefined) ?? 0)}`);
+  if (report['stopReason'] != null && report['stopReason'] !== '')
+    console.log(`  Stopped: ${report['stopReason'] as string}`);
+  const budget = report['budget'] as Record<string, unknown> | undefined;
+  const tokensConsumed =
+    typeof budget?.['consumed'] === 'number' ? budget['consumed'].toLocaleString() : '?';
+  console.log(`  Tokens: ~${tokensConsumed}`);
+
+  if (report['results'] != null) {
+    console.log('');
+    for (const r of report['results'] as Record<string, unknown>[]) {
+      printTasksResultRow(r);
+    }
+  }
 }
 
 // ── Status Command ──────────────────────────────────────────────────────────
@@ -156,7 +208,6 @@ function statusCommand(projectRoot: string, options: Record<string, string | boo
 
   console.log(pc.bold('\nTasks Status'));
 
-  // Show branches
   if (branches.length === 0) {
     console.log(pc.dim('  No tasks branches found.'));
   } else {
@@ -168,51 +219,12 @@ function statusCommand(projectRoot: string, options: Record<string, string | boo
     }
   }
 
-  // Show latest report
   const reportDir = path.join(projectRoot, 'docs', 'coordination', 'tasks');
   const report = loadLatestReport(reportDir, REPORT_PREFIX, dateFilter) as Record<
     string,
     unknown
   > | null;
-  if (report) {
-    console.log(`\n  Latest Report: ${String(report['date'])}`);
-    console.log(`  Tasks: ${String(report['processedTasks'])}/${String(report['totalTasks'])}`);
-    console.log(`  Successful: ${String((report['successful'] as number | undefined) ?? 0)}`);
-    console.log(`  Failed: ${String((report['failed'] as number | undefined) ?? 0)}`);
-    if (report['stopReason'] != null && report['stopReason'] !== '')
-      console.log(`  Stopped: ${report['stopReason'] as string}`);
-    const budget = report['budget'] as Record<string, unknown> | undefined;
-    const tokensConsumed =
-      typeof budget?.['consumed'] === 'number' ? budget['consumed'].toLocaleString() : '?';
-    console.log(`  Tokens: ~${tokensConsumed}`);
-
-    if (report['results'] != null) {
-      console.log('');
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any -- dynamic report data
-      for (const r of report['results'] as any[]) {
-        let icon: string;
-        // eslint-disable-next-line @typescript-eslint/no-unsafe-member-access -- dynamic report data
-        if (r.status === 'success') {
-          icon = pc.green('pass');
-          // eslint-disable-next-line @typescript-eslint/no-unsafe-member-access -- dynamic report data
-        } else if (r.status === 'failed') {
-          icon = pc.red('FAIL');
-        } else {
-          // eslint-disable-next-line @typescript-eslint/no-unsafe-member-access -- dynamic report data
-          icon = pc.yellow(String(r.status));
-        }
-        // eslint-disable-next-line @typescript-eslint/no-unsafe-member-access -- dynamic report data
-        const agentTag = pc.dim(` [${String(r.agent)}]`);
-        /* eslint-disable @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-call -- dynamic report data */
-        console.log(
-          `    ${icon} ${String(r.slug ?? r.task?.slice(0, 40) ?? '')} — ${String(r.status)}${agentTag}`,
-        );
-        /* eslint-enable @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-call */
-      }
-    }
-  } else {
-    console.log(pc.dim('\n  No tasks report found.'));
-  }
+  printTasksStatusReport(report);
 
   console.log('');
 }

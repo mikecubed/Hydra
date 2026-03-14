@@ -120,8 +120,8 @@ describe('concurrency', () => {
   it('tryAcquire returns release function when available', () => {
     initConcurrency(2);
     const release = tryAcquireConcurrencySlot();
-    assert.equal(typeof release, 'function');
-    release!();
+    assert.ok(release != null);
+    release();
   });
 
   it('release is idempotent', async () => {

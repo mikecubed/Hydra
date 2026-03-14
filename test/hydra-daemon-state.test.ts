@@ -124,22 +124,24 @@ async function requestJson<T = Record<string, unknown>>(
 }
 
 async function waitForHealth(baseUrl: string, child: ChildProcess): Promise<void> {
-  const startedAt = Date.now();
-  while (Date.now() - startedAt < 10_000) {
+  const deadline = Date.now() + 10_000;
+  async function attempt(): Promise<void> {
     if (child.exitCode !== null) {
       throw new Error(`Daemon exited before becoming healthy (exit=${String(child.exitCode)})`);
     }
     try {
       const { response } = await requestJson(baseUrl, 'GET', '/health');
-      if (response.ok) {
-        return;
-      }
+      if (response.ok) return;
     } catch {
       // Retry until timeout.
     }
+    if (Date.now() >= deadline) {
+      throw new Error('Timed out waiting for daemon health check');
+    }
     await sleep(125);
+    return attempt();
   }
-  throw new Error('Timed out waiting for daemon health check');
+  return attempt();
 }
 
 async function waitForExit(child: ChildProcess, timeoutMs = 4_000): Promise<void> {
@@ -189,18 +191,20 @@ async function stopDaemon(instance: DaemonInstance | null): Promise<void> {
 }
 
 async function removeDirBestEffort(dirPath: string, attempts = 8): Promise<void> {
-  for (let index = 0; index < attempts; index += 1) {
+  async function attempt(index: number): Promise<void> {
+    if (index >= attempts) return;
     try {
       fs.rmSync(dirPath, { recursive: true, force: true });
-      return;
     } catch (err) {
       const code = (err as NodeJS.ErrnoException).code ?? '';
       if (!['EBUSY', 'ENOTEMPTY', 'EPERM'].includes(code) || index === attempts - 1) {
         return;
       }
       await sleep(150);
+      return attempt(index + 1);
     }
   }
+  return attempt(0);
 }
 
 async function getState(baseUrl: string): Promise<HydraStateShape> {
@@ -526,28 +530,30 @@ describe('hydra daemon state-machine characterization', () => {
       );
       const taskId = claim.json.task.id;
 
-      for (let attempt = 1; attempt <= 2; attempt += 1) {
+      assert.ok(daemon, 'daemon must be running');
+      const daemonUrl = daemon.baseUrl;
+      async function runErrorAndReopen(attemptNum: number): Promise<void> {
         const errorResult: RequestResult<{
           task: { status: string; failCount?: number; blockedReason?: string };
           entry: { status: string };
-        }> = await requestJson(daemon.baseUrl, 'POST', '/task/result', {
+        }> = await requestJson(daemonUrl, 'POST', '/task/result', {
           taskId,
           agent: 'codex',
           status: 'error',
-          output: `failure ${String(attempt)}`,
+          output: `failure ${String(attemptNum)}`,
           durationMs: 25,
         });
         assert.equal(errorResult.response.status, 200);
         assert.equal(errorResult.json.entry.status, 'error');
         assert.equal(errorResult.json.task.status, 'blocked');
-        assert.equal(errorResult.json.task.failCount, attempt);
+        assert.equal(errorResult.json.task.failCount, attemptNum);
         assert.match(
           errorResult.json.task.blockedReason ?? '',
-          new RegExp(`failure ${String(attempt)}`),
+          new RegExp(`failure ${String(attemptNum)}`),
         );
 
         const reopen: RequestResult<{ task: { status: string; owner: string } }> =
-          await requestJson(daemon.baseUrl, 'POST', '/task/update', {
+          await requestJson(daemonUrl, 'POST', '/task/update', {
             taskId,
             owner: 'codex',
             status: 'in_progress',
@@ -555,6 +561,9 @@ describe('hydra daemon state-machine characterization', () => {
         assert.equal(reopen.response.status, 200);
         assert.equal(reopen.json.task.status, 'in_progress');
       }
+
+      await runErrorAndReopen(1);
+      await runErrorAndReopen(2);
 
       const terminalError = await requestJson<{
         task: { status: string; deadLetteredAt?: string; failCount?: number };

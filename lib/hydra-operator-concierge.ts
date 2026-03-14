@@ -34,6 +34,28 @@ import {
 
 const config = resolveProject();
 
+// ── Shared result types ───────────────────────────────────────────────────────
+
+interface DispatchPublished {
+  tasks: unknown[];
+  handoffs?: Array<{ to?: string }>;
+}
+
+interface DispatchResult {
+  mode: string;
+  recommended: string;
+  route: string;
+  classification: unknown;
+  triage: unknown;
+  published: DispatchPublished | null;
+  escalatedToCouncil: boolean;
+  councilOutput?: string;
+  spec?: { specId: string; specPath: string } | null;
+  verification?: unknown;
+  smartTier?: string;
+  smartMode?: string;
+}
+
 // ── Subprocess runner ─────────────────────────────────────────────────────────
 
 /**
@@ -139,6 +161,33 @@ export async function runCouncilPrompt({
   };
 }
 
+function parseCouncilJsonOutput(result: any): {
+  ok: boolean;
+  status: number;
+  stdout: string;
+  stderr: string;
+  report: any;
+} {
+  try {
+    const parsed = JSON.parse(result.stdout ?? '{}');
+    return {
+      ok: true,
+      status: result.status,
+      stdout: result.stdout ?? '',
+      stderr: result.stderr ?? '',
+      report: parsed.report ?? null,
+    };
+  } catch (err: unknown) {
+    return {
+      ok: false,
+      status: result.status,
+      stdout: result.stdout ?? '',
+      stderr: `Failed to parse council JSON: ${err instanceof Error ? err.message : String(err)}`,
+      report: null,
+    };
+  }
+}
+
 export async function runCouncilJson({
   baseUrl,
   promptText,
@@ -186,50 +235,13 @@ export async function runCouncilJson({
       report: null,
     };
   }
-
-  try {
-    const parsed = JSON.parse(result.stdout ?? '{}');
-    return {
-      ok: true,
-      status: result.status,
-      stdout: result.stdout ?? '',
-      stderr: result.stderr ?? '',
-      report: parsed.report ?? null,
-    };
-  } catch (err: unknown) {
-    return {
-      ok: false,
-      status: result.status,
-      stdout: result.stdout ?? '',
-      stderr: `Failed to parse council JSON: ${(err as Error).message}`,
-      report: null,
-    };
-  }
+  return parseCouncilJsonOutput(result);
 }
 
-// ── Auto prompt runners ───────────────────────────────────────────────────────
-
-export async function runAutoPrompt({
-  baseUrl,
-  from,
-  agents,
-  promptText,
-  miniRounds,
-  councilRounds,
-  preview,
-  onProgress = null,
-}: {
-  baseUrl: string;
-  from: string;
-  agents: string[];
-  promptText: string;
-  miniRounds: number;
-  councilRounds: number;
-  preview: boolean;
-  onProgress?: ((data: Record<string, unknown>) => void) | null;
-}) {
-  // Intent gate: normalize filler/abbreviations, optionally LLM-rewrite low-confidence prompts
-  const _intentCfg = (() => {
+async function loadIntentGateResult(
+  promptText: string,
+): Promise<{ effectivePrompt: string; classification: any }> {
+  const intentCfg = (() => {
     try {
       const c = loadHydraConfig();
       return c.routing.intentGate;
@@ -237,112 +249,105 @@ export async function runAutoPrompt({
       return {};
     }
   })();
-  let _gatedText, classification;
   try {
-    ({ text: _gatedText, classification } = await gateIntent(promptText, {
-      enabled: (_intentCfg as any).enabled !== false,
-      confidenceThreshold: (_intentCfg as any).confidenceThreshold ?? 0.55,
-    }));
+    const { text: gatedText, classification } = await gateIntent(promptText, {
+      enabled: (intentCfg as any).enabled !== false,
+      confidenceThreshold: (intentCfg as any).confidenceThreshold ?? 0.55,
+    });
+    return { effectivePrompt: gatedText, classification };
   } catch {
-    _gatedText = promptText;
-    classification = classifyPrompt(promptText);
+    return { effectivePrompt: promptText, classification: classifyPrompt(promptText) };
   }
-  const effectivePrompt = _gatedText;
+}
 
-  const routingConfig = (config as any).routing ?? {};
-
-  // Re-resolve route strategy with agent filter
-  let { routeStrategy } = classification;
-  let tandemPair = classification.tandemPair;
-  if (routeStrategy === 'tandem' && agents.length > 0) {
-    tandemPair = selectTandemPair(classification.taskType, classification.suggestedAgent, agents);
-    if (!tandemPair) routeStrategy = 'single';
-  }
-  if (routeStrategy === 'tandem' && routingConfig.tandemEnabled === false) {
-    routeStrategy = 'single';
-  }
-
-  if (routingConfig.useLegacyTriage && routeStrategy !== 'single') {
-    return runAutoPromptLegacy({
-      baseUrl,
-      from,
-      agents,
-      promptText: effectivePrompt,
-      miniRounds,
-      councilRounds,
-      preview,
-      onProgress,
-      classification,
-    });
-  }
-
-  // ── Single route (fast-path) ──
-  if (routeStrategy === 'single') {
-    if (preview) {
-      return {
-        mode: 'fast-path',
-        recommended: 'handoff',
-        route: `fast-path → ${classification.suggestedAgent}`,
-        classification,
-        triage: null,
-        published: null,
-        escalatedToCouncil: false,
-      };
-    }
-    const published = await publishFastPathDelegation({
-      baseUrl,
-      from,
-      promptText: effectivePrompt,
-      classification,
-      agents,
-    });
+async function handleSingleRoute(
+  baseUrl: string,
+  from: string,
+  effectivePrompt: string,
+  classification: any,
+  agents: string[],
+  preview: boolean,
+): Promise<DispatchResult> {
+  if (preview) {
     return {
       mode: 'fast-path',
       recommended: 'handoff',
-      route: `fast-path → ${String(published.agent)} (${classification.taskType}, ${String(classification.confidence)} confidence)`,
+      route: `fast-path → ${String(classification.suggestedAgent)}`,
       classification,
       triage: null,
-      published: { tasks: [published.task], handoffs: [published.handoff] },
+      published: null,
       escalatedToCouncil: false,
     };
   }
+  const published = await publishFastPathDelegation({
+    baseUrl,
+    from,
+    promptText: effectivePrompt,
+    classification,
+    agents,
+  });
+  return {
+    mode: 'fast-path',
+    recommended: 'handoff',
+    route: `fast-path → ${String(published.agent)} (${String(classification.taskType)}, ${String(classification.confidence)} confidence)`,
+    classification,
+    triage: null,
+    published: { tasks: [published.task], handoffs: [published.handoff] },
+    escalatedToCouncil: false,
+  };
+}
 
-  // ── Tandem route (2 agents, 0 CLI calls) ──
-  if (routeStrategy === 'tandem') {
-    if (preview) {
-      const pair = tandemPair ?? { lead: 'claude', follow: 'codex' };
-      return {
-        mode: 'tandem',
-        recommended: 'tandem',
-        route: `tandem: ${pair.lead} → ${pair.follow}`,
-        classification,
-        triage: null,
-        published: null,
-        escalatedToCouncil: false,
-      };
-    }
-    const published = await publishTandemDelegation({
-      baseUrl,
-      from,
-      promptText: effectivePrompt,
-      classification,
-      agents,
-    });
-    const pair = (published as any).lead
-      ? { lead: (published as any).lead, follow: (published as any).follow }
-      : (tandemPair ?? { lead: '?', follow: '?' });
+async function handleTandemRoute(
+  baseUrl: string,
+  from: string,
+  effectivePrompt: string,
+  classification: any,
+  agents: string[],
+  tandemPair: any,
+  preview: boolean,
+): Promise<DispatchResult> {
+  if (preview) {
+    const pair = tandemPair ?? { lead: 'claude', follow: 'codex' };
     return {
       mode: 'tandem',
       recommended: 'tandem',
-      route: `tandem: ${String(pair.lead)} → ${String(pair.follow)} (${classification.taskType})`,
+      route: `tandem: ${String(pair.lead)} → ${String(pair.follow)}`,
       classification,
       triage: null,
-      published: { tasks: (published as any).tasks, handoffs: (published as any).handoffs },
+      published: null,
       escalatedToCouncil: false,
     };
   }
+  const published = await publishTandemDelegation({
+    baseUrl,
+    from,
+    promptText: effectivePrompt,
+    classification,
+    agents,
+  });
+  const pair = (published as any).lead
+    ? { lead: (published as any).lead, follow: (published as any).follow }
+    : (tandemPair ?? { lead: '?', follow: '?' });
+  return {
+    mode: 'tandem',
+    recommended: 'tandem',
+    route: `tandem: ${String(pair.lead)} → ${String(pair.follow)} (${String(classification.taskType)})`,
+    classification,
+    triage: null,
+    published: { tasks: (published as any).tasks, handoffs: (published as any).handoffs },
+    escalatedToCouncil: false,
+  };
+}
 
-  // ── Council route (skip mini-round triage, go directly) ──
+async function handleCouncilRoute(
+  baseUrl: string,
+  effectivePrompt: string,
+  classification: any,
+  agents: string[],
+  councilRounds: number,
+  preview: boolean,
+  onProgress: any,
+): Promise<DispatchResult> {
   let spec = null;
   try {
     spec = await generateSpec(effectivePrompt, null, { cwd: config.projectRoot });
@@ -401,6 +406,156 @@ export async function runAutoPrompt({
   };
 }
 
+// ── Auto prompt runners ───────────────────────────────────────────────────────
+
+export async function runAutoPrompt({
+  baseUrl,
+  from,
+  agents,
+  promptText,
+  miniRounds,
+  councilRounds,
+  preview,
+  onProgress = null,
+}: {
+  baseUrl: string;
+  from: string;
+  agents: string[];
+  promptText: string;
+  miniRounds: number;
+  councilRounds: number;
+  preview: boolean;
+  onProgress?: ((data: Record<string, unknown>) => void) | null;
+}): Promise<DispatchResult> {
+  const { effectivePrompt, classification } = await loadIntentGateResult(promptText);
+
+  const routingConfig = (config as any).routing ?? {};
+
+  // Re-resolve route strategy with agent filter
+  let { routeStrategy } = classification;
+  let tandemPair = classification.tandemPair;
+  if (routeStrategy === 'tandem' && agents.length > 0) {
+    tandemPair = selectTandemPair(classification.taskType, classification.suggestedAgent, agents);
+    if (!tandemPair) routeStrategy = 'single';
+  }
+  if (routeStrategy === 'tandem' && routingConfig.tandemEnabled === false) {
+    routeStrategy = 'single';
+  }
+
+  if (routingConfig.useLegacyTriage && routeStrategy !== 'single') {
+    return runAutoPromptLegacy({
+      baseUrl,
+      from,
+      agents,
+      promptText: effectivePrompt,
+      miniRounds,
+      councilRounds,
+      preview,
+      onProgress,
+      classification,
+    });
+  }
+
+  if (routeStrategy === 'single') {
+    return handleSingleRoute(baseUrl, from, effectivePrompt, classification, agents, preview);
+  }
+
+  if (routeStrategy === 'tandem') {
+    return handleTandemRoute(
+      baseUrl,
+      from,
+      effectivePrompt,
+      classification,
+      agents,
+      tandemPair,
+      preview,
+    );
+  }
+
+  return handleCouncilRoute(
+    baseUrl,
+    effectivePrompt,
+    classification,
+    agents,
+    councilRounds,
+    preview,
+    onProgress,
+  );
+}
+
+async function resolveClassificationIfNeeded(
+  promptText: string,
+  existing: any,
+): Promise<{ effectivePrompt: string; classification: any }> {
+  if (existing) {
+    return { effectivePrompt: promptText, classification: existing };
+  }
+  return loadIntentGateResult(promptText);
+}
+
+async function handleLegacyCouncilEscalation(
+  baseUrl: string,
+  effectivePrompt: string,
+  localClassification: any,
+  spec: any,
+  councilRounds: number,
+  preview: boolean,
+  onProgress: any,
+  agents: string[],
+  recommended: string,
+  triageReport: any,
+): Promise<DispatchResult> {
+  if (preview) {
+    return {
+      mode: 'preview',
+      recommended,
+      route:
+        localClassification.tier === 'complex'
+          ? 'council (complex prompt)'
+          : 'mini-round triage → preview',
+      classification: localClassification,
+      triage: triageReport,
+      published: null,
+      escalatedToCouncil: recommended === 'council',
+    };
+  }
+
+  const council = await runCouncilPrompt({
+    baseUrl,
+    promptText: effectivePrompt,
+    rounds: councilRounds,
+    preview: false,
+    onProgress,
+    agents,
+  });
+  if (!council.ok) {
+    throw new Error(
+      council.stderr ?? council.stdout ?? `Council exited with status ${String(council.status)}`,
+    );
+  }
+  let verification = null;
+  if (shouldCrossVerify(localClassification) && council.stdout) {
+    verification = await runCrossVerification(
+      'claude',
+      council.stdout.trim(),
+      effectivePrompt,
+      spec?.specContent,
+    );
+  }
+  return {
+    mode: 'council',
+    recommended,
+    route: 'council (escalated)',
+    classification: localClassification,
+    triage: triageReport,
+    published: null,
+    escalatedToCouncil: true,
+    councilOutput: council.stdout.trim(),
+    spec: spec ? { specId: spec.specId, specPath: spec.specPath } : null,
+    verification,
+  };
+}
+
 /**
  * Legacy auto prompt path: uses mini-round triage (4 agent calls).
  * Retained behind `routing.useLegacyTriage` config toggle.
@@ -425,32 +580,9 @@ export async function runAutoPromptLegacy({
   preview: boolean;
   onProgress: ((data: any) => void) | null;
   classification: any | null;
-}) {
-  let effectivePrompt = promptText;
-  let localClassification = classification;
-  if (!localClassification) {
-    const _intentCfg = (() => {
-      try {
-        const c = loadHydraConfig();
-        return c.routing.intentGate;
-      } catch {
-        return {};
-      }
-    })();
-    try {
-      const { text: _gatedText, classification: _gatedClassification } = await gateIntent(
-        promptText,
-        {
-          enabled: (_intentCfg as any).enabled !== false,
-          confidenceThreshold: (_intentCfg as any).confidenceThreshold ?? 0.55,
-        },
-      );
-      localClassification = _gatedClassification;
-      effectivePrompt = _gatedText;
-    } catch {
-      localClassification = classifyPrompt(promptText);
-    }
-  }
+}): Promise<DispatchResult> {
+  const { effectivePrompt, classification: localClassification } =
+    await resolveClassificationIfNeeded(promptText, classification);
 
   const triage = await runCouncilJson({
     baseUrl,
@@ -469,23 +601,9 @@ export async function runAutoPromptLegacy({
   }
 
   const recommended = String(triage.report.recommendedMode ?? 'handoff').toLowerCase();
-  if (preview) {
-    return {
-      mode: 'preview',
-      recommended,
-      route:
-        localClassification.tier === 'complex'
-          ? 'council (complex prompt)'
-          : 'mini-round triage → preview',
-      classification: localClassification,
-      triage: triage.report,
-      published: null,
-      escalatedToCouncil: recommended === 'council',
-    };
-  }
 
   let spec = null;
-  if (localClassification.tier === 'complex') {
+  if (!preview && localClassification.tier === 'complex') {
     try {
       spec = await generateSpec(effectivePrompt, null, { cwd: config.projectRoot });
     } catch {
@@ -493,40 +611,19 @@ export async function runAutoPromptLegacy({
     }
   }
 
-  if (recommended === 'council' || localClassification.tier === 'complex') {
-    const council = await runCouncilPrompt({
+  if (preview || recommended === 'council' || localClassification.tier === 'complex') {
+    return handleLegacyCouncilEscalation(
       baseUrl,
-      promptText: effectivePrompt,
-      rounds: councilRounds,
-      preview: false,
+      effectivePrompt,
+      localClassification,
+      spec,
+      councilRounds,
+      preview,
       onProgress,
       agents,
-    });
-    if (!council.ok)
-      throw new Error(
-        council.stderr ?? council.stdout ?? `Council exited with status ${String(council.status)}`,
-      );
-    let verification = null;
-    if (shouldCrossVerify(localClassification) && council.stdout) {
-      verification = await runCrossVerification(
-        'claude',
-        council.stdout.trim(),
-        effectivePrompt,
-        spec?.specContent,
-      );
-    }
-    return {
-      mode: 'council',
       recommended,
-      route: 'council (escalated)',
-      classification: localClassification,
-      triage: triage.report,
-      published: null,
-      escalatedToCouncil: true,
-      councilOutput: council.stdout.trim(),
-      spec: spec ? { specId: spec.specId, specPath: spec.specPath } : null,
-      verification,
-    };
+      triage.report,
+    );
   }
 
   const published = await publishMiniRoundDelegation({
@@ -567,7 +664,7 @@ export async function runSmartPrompt({
   councilRounds: number;
   preview: boolean;
   onProgress?: ((data: Record<string, unknown>) => void) | null;
-}) {
+}): Promise<DispatchResult> {
   const classification = classifyPrompt(promptText);
   const targetMode = (SMART_TIER_MAP as Record<string, string>)[classification.tier] || 'balanced';
 
@@ -593,10 +690,10 @@ export async function runSmartPrompt({
 
     (result as any).smartTier = classification.tier;
     (result as any).smartMode = targetMode;
-    result.route = `${classification.tier}\u2192${result.route}`;
+    result.route = `${String(classification.tier)}\u2192${String(result.route)}`;
 
     setLastDispatch({
-      route: `${classification.tier}\u2192${String(result.mode === 'fast-path' ? (result.published?.handoffs?.[0]?.to ?? classification.suggestedAgent ?? 'agent') : result.mode)}`,
+      route: `${classification.tier}\u2192${String(result.mode === 'fast-path' ? (result.published?.handoffs?.[0]?.to ?? (classification.suggestedAgent || 'agent')) : result.mode)}`,
       tier: classification.tier,
       agent: result.mode === 'fast-path' ? classification.suggestedAgent || '' : '',
       mode: 'smart',

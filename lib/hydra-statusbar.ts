@@ -276,11 +276,7 @@ function resetScrollRegion() {
   process.stdout.write(`${ESC}${String(rows)};1H`);
 }
 
-/**
- * Build the context + token gauge line (line 2 of status bar).
- */
-function buildContextLine(cols: number) {
-  // Left: mode + tasks + last dispatch
+function buildContextLeftParts(): string[] {
   const MODE_ICONS: Record<string, string> = {
     smart: '\u26A1', // ⚡
     auto: '\u21BB', // ↻
@@ -293,14 +289,13 @@ function buildContextLine(cols: number) {
   const modePart = ACCENT(`${modeIcon} ${activeMode}`);
   const taskPart = `${String(openTaskCount)} task${openTaskCount === 1 ? '' : 's'}`;
   const lastPart = lastDispatch.route ? `last: ${lastDispatch.route}` : '';
-  const leftParts = [modePart, DIM(taskPart)];
+  const parts = [modePart, DIM(taskPart)];
   if (dispatchContext?.['promptSummary']) {
     const tierBadge = dispatchContext['tier'] ? `[${String(dispatchContext['tier'])}]` : '';
-    leftParts.push(ACCENT(`${tierBadge} ${String(dispatchContext['promptSummary'])}`));
+    parts.push(ACCENT(`${tierBadge} ${String(dispatchContext['promptSummary'])}`));
   } else if (lastPart) {
-    leftParts.push(DIM(lastPart));
+    parts.push(DIM(lastPart));
   }
-  // Routing mode chip (non-default modes only)
   const routingMode = loadHydraConfig().routing.mode;
   let modeChip: string;
   if (routingMode === 'economy') {
@@ -310,12 +305,11 @@ function buildContextLine(cols: number) {
   } else {
     modeChip = '';
   }
-  if (modeChip) leftParts.push(modeChip);
+  if (modeChip) parts.push(modeChip);
+  return parts;
+}
 
-  const leftText = ` ${leftParts.join(DIM('  \u2502  '))}`;
-
-  // SLO check (cached alongside usage)
-  let sloIndicator = '';
+function buildSloIndicator(): string {
   try {
     const cfg = loadHydraConfig();
     const cfgMetrics = cfg.metrics;
@@ -326,15 +320,16 @@ function buildContextLine(cols: number) {
       const violations = checkSLOs(cfgMetrics['slo'] as Record<string, never>);
       if (violations.length > 0) {
         const hasCritical = violations.some((v) => v.metric === 'error_rate');
-        sloIndicator = hasCritical ? ` ${pc.red('\u26A0 SLO')}` : ` ${pc.yellow('\u26A0 SLO')}`;
+        return hasCritical ? ` ${pc.red('\u26A0 SLO')}` : ` ${pc.yellow('\u26A0 SLO')}`;
       }
     }
   } catch {
     /* skip */
   }
+  return '';
+}
 
-  // Right: session cost + today's tokens
-  let rightText = '';
+function buildContextRightText(): string {
   try {
     const now = Date.now();
     if (!cachedUsage || now - cachedUsageAt > USAGE_CACHE_TTL_MS) {
@@ -342,8 +337,6 @@ function buildContextLine(cols: number) {
       cachedUsageAt = now;
     }
     const usage = cachedUsage;
-
-    // Session cost from metrics
     let costStr = '';
     try {
       const session = getSessionUsage();
@@ -353,8 +346,6 @@ function buildContextLine(cols: number) {
     } catch {
       /* skip */
     }
-
-    // Show today's actual token count from stats-cache
     const todayTokens = usage?.todayTokens ?? 0;
     if (todayTokens > 0) {
       let tokenStr: string;
@@ -368,15 +359,24 @@ function buildContextLine(cols: number) {
       const parts = [];
       if (costStr) parts.push(DIM(costStr));
       parts.push(DIM(`${tokenStr} today`));
-      rightText = parts.join('  ');
+      return parts.join('  ');
     } else if (costStr) {
-      rightText = DIM(costStr);
+      return DIM(costStr);
     }
+    return '';
   } catch {
-    rightText = DIM('n/a');
+    return DIM('n/a');
   }
+}
 
-  // Compose: left-align left, right-align right
+/**
+ * Build the context + token gauge line (line 2 of status bar).
+ */
+function buildContextLine(cols: number) {
+  const leftParts = buildContextLeftParts();
+  const leftText = ` ${leftParts.join(DIM('  \u2502  '))}`;
+  const sloIndicator = buildSloIndicator();
+  const rightText = buildContextRightText();
   const leftStripped = stripAnsi(leftText);
   const fullRight = sloIndicator ? rightText + sloIndicator : rightText;
   const rightStripped = stripAnsi(fullRight);
@@ -384,48 +384,32 @@ function buildContextLine(cols: number) {
   return leftText + ' '.repeat(gap) + fullRight;
 }
 
-/**
- * Build the 5-line status bar content.
- */
-function buildStatusBar() {
-  const { cols } = getTermSize();
+function buildAgentActionText(state: AgentActivityState): string {
+  if (state.status !== 'working') return state.action || state.status || 'Inactive';
+  let label = '';
+  if (state.taskTitle) {
+    label = state.taskTitle;
+  } else if (state.action && !state.action.startsWith('Calling ')) {
+    label = state.action;
+  } else if (state.action) {
+    label = state.action;
+  }
+  const stepSuffix = state.step ? ` [${state.step}]` : '';
+  return label ? `${label}${stepSuffix}` : `Working${stepSuffix}`;
+}
 
-  // Line 1: divider
-  const dividerLine = DIM('\u2500'.repeat(cols));
-
-  // Line 2: context + token gauge
-  const contextLine = buildContextLine(cols);
-
-  // Line 3: agent segments joined by │
-  const segments = [];
+function buildAgentSegments(cols: number): string {
   const agentSep = '  \u2502  '; // "  │  " = 5 visible chars
   const separatorChars = Math.max(0, registeredAgents.length - 1) * 5;
   const maxPerAgent = Math.max(16, Math.floor((cols - separatorChars) / registeredAgents.length));
+  const segments = [];
   for (const agent of registeredAgents) {
     const state = getAgentActivity(agent);
     const elapsed =
       state.updatedAt && state.status === 'working'
         ? ` ${formatElapsed(Date.now() - state.updatedAt)}`
         : '';
-
-    // Build compact action text — prioritize readability over detail
-    let actionText = state.action || state.status || 'Inactive';
-    if (state.status === 'working') {
-      // Pick the most useful label: taskTitle > action > fallback
-      let label = '';
-      if (state.taskTitle) {
-        label = state.taskTitle;
-      } else if (state.action && !state.action.startsWith('Calling ')) {
-        label = state.action;
-      } else if (state.action) {
-        label = state.action;
-      }
-      // Append step count inline (compact)
-      const stepSuffix = state.step ? ` [${state.step}]` : '';
-      actionText = label ? `${label}${stepSuffix}` : `Working${stepSuffix}`;
-    }
-
-    // Execution mode indicator
+    const actionText = buildAgentActionText(state);
     const execMode = agentExecMode.get(agent);
     let modeSuffix: string;
     if (execMode === 'worker') {
@@ -438,24 +422,29 @@ function buildStatusBar() {
     const actionWithElapsed = `${actionText}${elapsed}${modeSuffix ? ` ${modeSuffix}` : ''}`;
     segments.push(formatAgentStatus(agent, state.status, actionWithElapsed, maxPerAgent));
   }
-  const agentLine = segments.join(DIM(agentSep));
+  return segments.join(DIM(agentSep));
+}
 
-  // Line 4: activity ticker
-  let tickerLine: string;
-  if (tickerEvents.length > 0) {
-    const parts = tickerEvents.map((e) => `${DIM(e.time)} ${e.text}`);
-    tickerLine = `  \u21B3 ${parts.join(DIM('  \u00B7  '))}`;
-    const stripped = stripAnsi(tickerLine);
-    if (stripped.length > cols) {
-      tickerLine = `  \u21B3 ${parts.slice(-2).join(DIM('  \u00B7  '))}`;
-    }
-  } else {
-    tickerLine = DIM('  \u21B3 awaiting events...');
+function buildTickerLine(cols: number): string {
+  if (tickerEvents.length === 0) return DIM('  \u21B3 awaiting events...');
+  const parts = tickerEvents.map((e) => `${DIM(e.time)} ${e.text}`);
+  let line = `  \u21B3 ${parts.join(DIM('  \u00B7  '))}`;
+  if (stripAnsi(line).length > cols) {
+    line = `  \u21B3 ${parts.slice(-2).join(DIM('  \u00B7  '))}`;
   }
+  return line;
+}
 
-  // Line 5: empty spacer
+/**
+ * Build the 5-line status bar content.
+ */
+function buildStatusBar() {
+  const { cols } = getTermSize();
+  const dividerLine = DIM('\u2500'.repeat(cols));
+  const contextLine = buildContextLine(cols);
+  const agentLine = buildAgentSegments(cols);
+  const tickerLine = buildTickerLine(cols);
   const spacerLine = '';
-
   return { dividerLine, contextLine, agentLine, tickerLine, spacerLine };
 }
 
@@ -602,6 +591,109 @@ let sseRequest: ClientRequest | null = null;
 let sseReconnectTimer: ReturnType<typeof setTimeout> | null = null;
 const SSE_RECONNECT_DELAY_MS = 3000;
 
+function handleHandoffAckEvent(payload: Record<string, any>, agentList: Set<string>): void {
+  const agent = String(payload['agent'] ?? '').toLowerCase();
+  if (agentList.has(agent)) {
+    const hSummary = payload['summary'] ? ` (${String(payload['summary']).slice(0, 30)})` : '';
+    setAgentActivity(agent, 'working', `Ack'd ${String(payload['handoffId'] ?? '?')}`);
+    pushTickerEvent(`${agent} ack'd ${String(payload['handoffId'] ?? '?')}${hSummary}`, 'handoff');
+    emitActivityEvent({
+      event: 'handoff_ack',
+      agent,
+      detail: `${String(payload['handoffId'] ?? '')}${hSummary}`,
+    });
+  }
+}
+
+function handleHandoffEvent(payload: Record<string, any>, agentList: Set<string>): void {
+  const to = String(payload['to'] ?? '').toLowerCase();
+  const from = String(payload['from'] ?? '').toLowerCase();
+  const hSummary = payload['summary'] ? ` (${String(payload['summary']).slice(0, 30)})` : '';
+  if (agentList.has(to)) {
+    const current = getAgentActivity(to);
+    const recentlySet = current.updatedAt && Date.now() - current.updatedAt < 5000;
+    const hasTaskTitle = current.taskTitle && current.taskTitle.length > 0;
+    if (!(recentlySet && hasTaskTitle)) {
+      setAgentActivity(to, 'idle', `Handoff from ${from}`);
+    }
+    pushTickerEvent(`${from}\u2192${to}${hSummary}`, 'handoff');
+    emitActivityEvent({ event: 'handoff', agent: to, detail: `from ${from}${hSummary}` });
+  }
+}
+
+function handleTaskClaimEvent(payload: Record<string, any>, agentList: Set<string>): void {
+  const agent = String(payload['agent'] ?? '').toLowerCase();
+  if (agentList.has(agent)) {
+    const title = String(payload['title'] ?? '').slice(0, 40);
+    setAgentActivity(agent, 'working', title.length > 0 ? title : 'Working', {
+      taskTitle: title.length > 0 ? title : null,
+    });
+    pushTickerEvent(`${agent} claimed ${title.length > 0 ? title : 'task'}`, 'claim');
+    emitActivityEvent({ event: 'task_claim', agent, detail: title });
+  }
+}
+
+function handleTaskAddEvent(payload: Record<string, any>, agentList: Set<string>): void {
+  const owner = String(payload['owner'] ?? '').toLowerCase();
+  const title = String(payload['title'] ?? '').slice(0, 40);
+  openTaskCount++;
+  pushTickerEvent(title, 'add');
+  if (agentList.has(owner)) {
+    emitActivityEvent({ event: 'task_add', agent: owner, detail: title });
+  }
+}
+
+function handleTaskUpdateEvent(payload: Record<string, any>, agentList: Set<string>): void {
+  const status = String(payload['status'] ?? '').toLowerCase();
+  const owner = String(payload['owner'] ?? '').toLowerCase();
+  const tTitle = payload['title'] ? ` (${String(payload['title']).slice(0, 30)})` : '';
+  if (status === 'done') {
+    openTaskCount = Math.max(0, openTaskCount - 1);
+    if (agentList.has(owner)) {
+      setAgentActivity(owner, 'idle', 'Done');
+    }
+    pushTickerEvent(`${String(payload['taskId'] ?? '?')}${tTitle} done`, 'done');
+    emitActivityEvent({
+      event: 'task_done',
+      agent: owner,
+      detail: `${String(payload['taskId'] ?? '')}${tTitle}`,
+    });
+  } else if (status === 'blocked') {
+    if (agentList.has(owner)) {
+      setAgentActivity(owner, 'error', `Blocked \u2014 ${String(payload['taskId'] ?? '?')}`);
+    }
+    pushTickerEvent(`${String(payload['taskId'] ?? '?')}${tTitle} blocked`, 'blocked');
+  }
+}
+
+function handleVerifyEvent(payload: Record<string, any>): void {
+  const passed = payload['passed'];
+  const taskId = String(payload['taskId'] ?? '?');
+  pushTickerEvent(
+    `verify ${taskId}: ${passed ? 'PASS' : 'FAIL'}`,
+    passed ? 'verify_pass' : 'verify_fail',
+  );
+  emitActivityEvent({
+    event: 'verify',
+    agent: '',
+    detail: `${taskId} ${passed ? 'passed' : 'failed'}`,
+  });
+}
+
+function handleDecisionEvent(payload: Record<string, any>): void {
+  const title = String(payload['title'] ?? '').slice(0, 40);
+  pushTickerEvent(title, 'decision');
+}
+
+function handleTaskStaleEvent(payload: Record<string, any>, agentList: Set<string>): void {
+  const owner = String(payload['owner'] ?? '').toLowerCase();
+  const sTitle = payload['title'] ? ` (${String(payload['title']).slice(0, 30)})` : '';
+  if (agentList.has(owner)) {
+    setAgentActivity(owner, 'error', `${String(payload['taskId'] ?? '')} stale`);
+  }
+  pushTickerEvent(`${String(payload['taskId'] ?? '?')}${sTitle} stale (${owner})`, 'stale');
+}
+
 function handleSSEEvent(data: string, agents: string[]) {
   let event;
   try {
@@ -615,111 +707,31 @@ function handleSSEEvent(data: string, agents: string[]) {
 
   const agentList = new Set(agents.map((a) => a.toLowerCase()));
 
-  switch (payload.event) {
-    case 'handoff_ack': {
-      const agent = String(payload.agent ?? '').toLowerCase();
-      if (agentList.has(agent)) {
-        const hSummary = payload.summary ? ` (${String(payload.summary).slice(0, 30)})` : '';
-        setAgentActivity(agent, 'working', `Ack'd ${String(payload.handoffId ?? '?')}`);
-        pushTickerEvent(`${agent} ack'd ${String(payload.handoffId ?? '?')}${hSummary}`, 'handoff');
-        emitActivityEvent({
-          event: 'handoff_ack',
-          agent,
-          detail: `${String(payload.handoffId ?? '')}${hSummary}`,
-        });
-      }
+  switch (payload['event']) {
+    case 'handoff_ack':
+      handleHandoffAckEvent(payload, agentList);
       break;
-    }
-    case 'handoff': {
-      const to = String(payload.to ?? '').toLowerCase();
-      const from = String(payload.from ?? '').toLowerCase();
-      const hSummary = payload.summary ? ` (${String(payload.summary).slice(0, 30)})` : '';
-      if (agentList.has(to)) {
-        // Don't clobber rich task-title status set within the last 5 seconds
-        const current = getAgentActivity(to);
-        const recentlySet = current.updatedAt && Date.now() - current.updatedAt < 5000;
-        const hasTaskTitle = current.taskTitle && current.taskTitle.length > 0;
-        if (!(recentlySet && hasTaskTitle)) {
-          setAgentActivity(to, 'idle', `Handoff from ${from}`);
-        }
-        pushTickerEvent(`${from}\u2192${to}${hSummary}`, 'handoff');
-        emitActivityEvent({ event: 'handoff', agent: to, detail: `from ${from}${hSummary}` });
-      }
+    case 'handoff':
+      handleHandoffEvent(payload, agentList);
       break;
-    }
-    case 'task_claim': {
-      const agent = String(payload.agent ?? '').toLowerCase();
-      if (agentList.has(agent)) {
-        const title = String(payload.title ?? '').slice(0, 40);
-        setAgentActivity(agent, 'working', title.length > 0 ? title : 'Working', {
-          taskTitle: title.length > 0 ? title : null,
-        });
-        pushTickerEvent(`${agent} claimed ${title.length > 0 ? title : 'task'}`, 'claim');
-        emitActivityEvent({ event: 'task_claim', agent, detail: title });
-      }
+    case 'task_claim':
+      handleTaskClaimEvent(payload, agentList);
       break;
-    }
-    case 'task_add': {
-      const owner = String(payload.owner ?? '').toLowerCase();
-      const title = String(payload.title ?? '').slice(0, 40);
-      openTaskCount++;
-      pushTickerEvent(title, 'add');
-      if (agentList.has(owner)) {
-        emitActivityEvent({ event: 'task_add', agent: owner, detail: title });
-      }
+    case 'task_add':
+      handleTaskAddEvent(payload, agentList);
       break;
-    }
-    case 'task_update': {
-      const status = String(payload.status ?? '').toLowerCase();
-      const owner = String(payload.owner ?? '').toLowerCase();
-      const tTitle = payload.title ? ` (${String(payload.title).slice(0, 30)})` : '';
-      if (status === 'done') {
-        openTaskCount = Math.max(0, openTaskCount - 1);
-        if (agentList.has(owner)) {
-          setAgentActivity(owner, 'idle', 'Done');
-        }
-        pushTickerEvent(`${String(payload.taskId ?? '?')}${tTitle} done`, 'done');
-        emitActivityEvent({
-          event: 'task_done',
-          agent: owner,
-          detail: `${String(payload.taskId ?? '')}${tTitle}`,
-        });
-      } else if (status === 'blocked') {
-        if (agentList.has(owner)) {
-          setAgentActivity(owner, 'error', `Blocked \u2014 ${String(payload.taskId ?? '?')}`);
-        }
-        pushTickerEvent(`${String(payload.taskId ?? '?')}${tTitle} blocked`, 'blocked');
-      }
+    case 'task_update':
+      handleTaskUpdateEvent(payload, agentList);
       break;
-    }
-    case 'verify': {
-      const passed = payload.passed;
-      const taskId = String(payload.taskId ?? '?');
-      pushTickerEvent(
-        `verify ${taskId}: ${passed ? 'PASS' : 'FAIL'}`,
-        passed ? 'verify_pass' : 'verify_fail',
-      );
-      emitActivityEvent({
-        event: 'verify',
-        agent: '',
-        detail: `${taskId} ${passed ? 'passed' : 'failed'}`,
-      });
+    case 'verify':
+      handleVerifyEvent(payload);
       break;
-    }
-    case 'decision': {
-      const title = String(payload.title ?? '').slice(0, 40);
-      pushTickerEvent(title, 'decision');
+    case 'decision':
+      handleDecisionEvent(payload);
       break;
-    }
-    case 'task_stale': {
-      const owner = String(payload.owner ?? '').toLowerCase();
-      const sTitle = payload.title ? ` (${String(payload.title).slice(0, 30)})` : '';
-      if (agentList.has(owner)) {
-        setAgentActivity(owner, 'error', `${String(payload.taskId ?? '')} stale`);
-      }
-      pushTickerEvent(`${String(payload.taskId ?? '?')}${sTitle} stale (${owner})`, 'stale');
+    case 'task_stale':
+      handleTaskStaleEvent(payload, agentList);
       break;
-    }
     default:
       break;
   }

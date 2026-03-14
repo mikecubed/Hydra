@@ -166,139 +166,195 @@ const AGENT_ERROR_PATTERNS: AgentErrorPattern[] = [
   },
 ];
 
+// ── Diagnosis Helpers ────────────────────────────────────────────────────────
+
+/** Classification result for error diagnosis helpers. */
+interface ClassificationResult {
+  errorCategory: string;
+  errorDetail: string;
+  errorContext?: string;
+}
+
+function matchAgentErrorPattern(combined: string): ClassificationResult | null {
+  for (const { pattern, category, detail } of AGENT_ERROR_PATTERNS) {
+    if (pattern.test(combined)) {
+      const matchLine = combined.split('\n').find((l) => pattern.test(l));
+      return {
+        errorCategory: category,
+        errorDetail: detail,
+        errorContext: matchLine?.trim().slice(0, 300),
+      };
+    }
+  }
+  return null;
+}
+
+function classifyBySignal(signal: string): ClassificationResult {
+  const signalMap: Partial<Record<string, SignalInfo>> = {
+    SIGKILL: { category: 'oom', detail: 'killed (SIGKILL / OOM)' },
+    SIGTERM: { category: 'signal', detail: 'terminated (SIGTERM)' },
+    SIGINT: { category: 'signal', detail: 'interrupted (SIGINT)' },
+    SIGSEGV: { category: 'crash', detail: 'segmentation fault (SIGSEGV)' },
+    SIGABRT: { category: 'crash', detail: 'aborted (SIGABRT)' },
+    SIGBUS: { category: 'crash', detail: 'bus error (SIGBUS)' },
+  };
+  const mapped = signalMap[signal] ?? { category: 'signal', detail: `terminated by ${signal}` };
+  return { errorCategory: mapped.category, errorDetail: mapped.detail };
+}
+
+function exitCodeToCategory(code: number): string {
+  if (code === 127) return 'invocation';
+  if (code === 126) return 'permission';
+  if (code === 137) return 'oom';
+  if (code === 139) return 'crash';
+  if (code >= 128 && code <= 159) return 'signal';
+  return 'runtime';
+}
+
+function classifyByExitCode(code: number): ClassificationResult | null {
+  if (!(code in EXIT_CODE_LABELS)) return null;
+  return { errorCategory: exitCodeToCategory(code), errorDetail: EXIT_CODE_LABELS[code] };
+}
+
+function classifyByJsonlErrors(agent: string, result: ExecuteResult): ClassificationResult | null {
+  if (getAgent(agent)?.features.jsonOutput !== true) return null;
+  const jsonlErrors = extractCodexErrors(result.stdout ?? result.output);
+  if (jsonlErrors.length === 0) return null;
+  return {
+    errorCategory: agent === 'codex' ? 'codex-jsonl-error' : 'jsonl-error',
+    errorDetail: `${agent} reported ${String(jsonlErrors.length)} error(s): ${jsonlErrors.join('; ').slice(0, 200)}`,
+    errorContext: jsonlErrors[0].slice(0, 300),
+  };
+}
+
+function classifyNullExitCode(agent: string, result: ExecuteResult): ClassificationResult {
+  const stderrTrimmed = result.stderr.replace(/\[Hydra Telemetry\].*?\n/g, '').trim();
+  if (stderrTrimmed === '') {
+    return {
+      errorCategory: 'silent-crash',
+      errorDetail: `${agent} terminated without exit code or signal — possible spawn failure, missing binary, or env issue`,
+      errorContext: result.error?.slice(0, 300),
+    };
+  }
+  return {
+    errorCategory: 'unclassified',
+    errorDetail: `${agent} terminated without exit code, but produced stderr`,
+    errorContext: stderrTrimmed.split('\n').slice(0, 3).join(' | ').slice(0, 300),
+  };
+}
+
+function isUnclassified(result: ExecuteResult): boolean {
+  return result.errorCategory == null || result.errorCategory === '';
+}
+
+function isSilentCrash(result: ExecuteResult, code: number): boolean {
+  return (
+    isUnclassified(result) &&
+    code !== 0 &&
+    result.output.trim() === '' &&
+    result.stderr.trim() === ''
+  );
+}
+
+function classifySilentCrash(agent: string, code: number): ClassificationResult {
+  return {
+    errorCategory: 'silent-crash',
+    errorDetail: `${agent} exited with code ${String(code)} but produced no output — possible early crash, missing binary, or env issue`,
+  };
+}
+
+function classifyUnclassified(code: number, result: ExecuteResult): ClassificationResult {
+  const cls: ClassificationResult = {
+    errorCategory: 'unclassified',
+    errorDetail: `Exit code ${String(code)}`,
+  };
+  if (result.stderr.trim() !== '') {
+    cls.errorContext = result.stderr.trim().split('\n').slice(-3).join(' | ').slice(0, 300);
+  }
+  return cls;
+}
+
+function applyClassification(result: ExecuteResult, cls: ClassificationResult): void {
+  result.errorCategory = cls.errorCategory;
+  result.errorDetail = cls.errorDetail;
+  if (cls.errorContext !== undefined) result.errorContext = cls.errorContext;
+}
+
+function enrichErrorText(result: ExecuteResult): void {
+  const originalError = result.error ?? '';
+  const isGeneric =
+    originalError === '' ||
+    originalError.includes('Exit code') ||
+    originalError.includes('Spawn error') ||
+    originalError.includes('Process terminated') ||
+    originalError.includes('mystery error') ||
+    originalError.includes('something went wrong');
+
+  if (!isGeneric) return;
+  const signalPart = result.signal == null ? '' : ` (signal ${result.signal})`;
+  const codePart = result.exitCode === null ? '' : ` (exit code ${String(result.exitCode)})`;
+  result.error = `[${result.errorCategory ?? ''}] ${result.errorDetail ?? ''}${signalPart === '' ? codePart : signalPart}`;
+}
+
+// ── Main Diagnosis Entry Point ──────────────────────────────────────────────
+
 /**
  * Diagnose a failed agent result by interpreting exit code + stderr patterns.
  * Enriches the result object with errorCategory and errorDetail fields.
  * Exported for use in worker and evolve pipelines.
- *
- * Exit code interpretation follows Unix semantics (e.g. 127 = command not found).
- * On Windows, exit code classification is best-effort; spawn/CLI behavior may differ.
- *
- * @param {string} agent - Agent name
- * @param {object} result - executeAgent result (mutated in place)
- * @returns {object} The same result, with errorCategory and errorDetail added
  */
 export function diagnoseAgentError(agent: string, result: ExecuteResult): ExecuteResult {
   if (result.ok) return result;
 
+  const combined = [result.stderr, result.output, result.error ?? ''].join('\n');
   const code = result.exitCode;
-  const stderr = result.stderr;
-  const stdout = result.output;
-  const error = result.error ?? '';
-  const combined = [stderr, stdout, error].join('\n');
 
   // 1. Check agent-specific patterns first (highest signal)
-  for (const { pattern, category, detail } of AGENT_ERROR_PATTERNS) {
-    if (pattern.test(combined)) {
-      result.errorCategory = category;
-      result.errorDetail = detail;
-      // Extract the matching line for context
-      const matchLine = combined.split('\n').find((l) => pattern.test(l));
-      if (matchLine != null) result.errorContext = matchLine.trim().slice(0, 300);
+  const patternMatch = matchAgentErrorPattern(combined);
+  if (patternMatch) {
+    applyClassification(result, patternMatch);
+    return result;
+  }
+
+  // 2. Interpret signal (process killed by signal)
+  if (result.signal != null) {
+    applyClassification(result, classifyBySignal(result.signal));
+    return result;
+  }
+
+  // 3. For agents with --json output, extract JSONL error events
+  const jsonlCls = classifyByJsonlErrors(agent, result);
+  if (jsonlCls) applyClassification(result, jsonlCls);
+
+  // 4. Interpret exit code (only if not already classified)
+  if (isUnclassified(result) && code !== null) {
+    const exitCls = classifyByExitCode(code);
+    if (exitCls) {
+      applyClassification(result, exitCls);
+      enrichErrorText(result);
       return result;
     }
   }
 
-  // 2. Interpret signal (process killed by signal — code may be null)
-  const signal = result.signal;
-  if (signal != null) {
-    const signalMap: Partial<Record<string, SignalInfo>> = {
-      SIGKILL: { category: 'oom', detail: 'killed (SIGKILL / OOM)' },
-      SIGTERM: { category: 'signal', detail: 'terminated (SIGTERM)' },
-      SIGINT: { category: 'signal', detail: 'interrupted (SIGINT)' },
-      SIGSEGV: { category: 'crash', detail: 'segmentation fault (SIGSEGV)' },
-      SIGABRT: { category: 'crash', detail: 'aborted (SIGABRT)' },
-      SIGBUS: { category: 'crash', detail: 'bus error (SIGBUS)' },
-    };
-    const mapped = signalMap[signal] ?? { category: 'signal', detail: `terminated by ${signal}` };
-    result.errorCategory = mapped.category;
-    result.errorDetail = mapped.detail;
-    return result;
-  }
-
-  // 3. For agents with --json output, extract JSONL error events (higher signal than exit code 1)
-  if (getAgent(agent)?.features.jsonOutput === true) {
-    const jsonlErrors = extractCodexErrors(result.stdout ?? result.output);
-    if (jsonlErrors.length > 0) {
-      result.errorCategory = agent === 'codex' ? 'codex-jsonl-error' : 'jsonl-error';
-      result.errorDetail = `${agent} reported ${String(jsonlErrors.length)} error(s): ${jsonlErrors.join('; ').slice(0, 200)}`;
-      result.errorContext = jsonlErrors[0].slice(0, 300);
-      // Fall through to step 8 for error message enrichment
-    }
-  }
-
-  // 4. Interpret exit code (only if not already classified, e.g. by JSONL extraction)
-  if (
-    (result.errorCategory == null || result.errorCategory === '') &&
-    code !== null &&
-    code in EXIT_CODE_LABELS
-  ) {
-    let errorCategory: string;
-    if (code === 127) errorCategory = 'invocation';
-    else if (code === 126) errorCategory = 'permission';
-    else if (code === 137) errorCategory = 'oom';
-    else if (code === 139) errorCategory = 'crash';
-    else if (code >= 128 && code <= 159) errorCategory = 'signal';
-    else errorCategory = 'runtime';
-    result.errorCategory = errorCategory;
-    result.errorDetail = EXIT_CODE_LABELS[code];
-    return result;
-  }
-
-  // 5. Null exit code with no signal = process died without normal exit
+  // 5. Null exit code with no signal
   if (code === null) {
-    const stderrTrimmed = stderr.replace(/\[Hydra Telemetry\].*?\n/g, '').trim();
-    if (stderrTrimmed === '') {
-      result.errorCategory = 'silent-crash';
-      result.errorDetail = `${agent} terminated without exit code or signal — possible spawn failure, missing binary, or env issue`;
-      if (result.error != null) result.errorContext = result.error.slice(0, 300);
-    } else {
-      result.errorCategory = 'unclassified';
-      result.errorDetail = `${agent} terminated without exit code, but produced stderr`;
-      result.errorContext = stderrTrimmed.split('\n').slice(0, 3).join(' | ').slice(0, 300);
-    }
+    applyClassification(result, classifyNullExitCode(agent, result));
+    enrichErrorText(result);
     return result;
   }
 
-  // 6. Empty output with non-zero exit = likely process died before producing output
-  if (
-    (result.errorCategory == null || result.errorCategory === '') &&
-    code !== 0 &&
-    stdout.trim() === '' &&
-    stderr.trim() === ''
-  ) {
-    result.errorCategory = 'silent-crash';
-    result.errorDetail = `${agent} exited with code ${String(code)} but produced no output — possible early crash, missing binary, or env issue`;
+  // 6. Silent crash (non-zero exit, no output)
+  if (isSilentCrash(result, code)) {
+    applyClassification(result, classifySilentCrash(agent, code));
+    enrichErrorText(result);
     return result;
   }
 
-  // 7. Non-zero exit with stderr but no pattern match = unclassified
-  if (code !== 0 && (result.errorCategory == null || result.errorCategory === '')) {
-    result.errorCategory = 'unclassified';
-    result.errorDetail = `Exit code ${String(code)}`;
-    if (stderr.trim() !== '') {
-      result.errorContext = stderr.trim().split('\n').slice(-3).join(' | ').slice(0, 300);
-    }
+  // 7. Non-zero exit with stderr but no pattern match
+  if (code !== 0 && isUnclassified(result)) {
+    applyClassification(result, classifyUnclassified(code, result));
   }
 
-  // 8. Final enrichment: Ensure result.error is descriptive
-  {
-    const originalError = result.error ?? '';
-    // If error is non-existent, vague, or just the exit code, replace it with the diagnosis
-    const isGeneric =
-      originalError === '' ||
-      originalError.includes('Exit code') ||
-      originalError.includes('Spawn error') ||
-      originalError.includes('Process terminated') ||
-      originalError.includes('mystery error') ||
-      originalError.includes('something went wrong');
-
-    if (isGeneric) {
-      const signalPart = result.signal == null ? '' : ` (signal ${result.signal})`;
-      const codePart = result.exitCode === null ? '' : ` (exit code ${String(result.exitCode)})`;
-      result.error = `[${result.errorCategory ?? ''}] ${result.errorDetail ?? ''}${signalPart === '' ? codePart : signalPart}`;
-    }
-  }
-
+  enrichErrorText(result);
   return result;
 }

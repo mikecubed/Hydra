@@ -95,7 +95,7 @@ export class BudgetTracker {
   /** Record initial token state at start of run. */
   recordStart(): void {
     const session = getSessionUsage();
-    this.startTokens = session.totalTokens || 0;
+    this.startTokens = session.totalTokens === 0 ? 0 : session.totalTokens;
     this.currentTokens = this.startTokens;
   }
 
@@ -112,7 +112,7 @@ export class BudgetTracker {
     extra: Record<string, unknown> = {},
   ): { tokens: number } {
     const session = getSessionUsage();
-    const now = session.totalTokens || 0;
+    const now = session.totalTokens === 0 ? 0 : session.totalTokens;
     const delta = now - this.currentTokens;
     this.currentTokens = now;
     this.unitDeltas.push({ label, tokens: delta, durationMs, ...extra });
@@ -176,10 +176,10 @@ export class BudgetTracker {
     // Evaluate thresholds in order
     for (const threshold of this.thresholds) {
       if (pct >= threshold.pct) {
-        if (threshold.once && this._firedOnce.has(threshold.action)) {
+        if (threshold.once === true && this._firedOnce.has(threshold.action)) {
           continue;
         }
-        if (threshold.once) {
+        if (threshold.once === true) {
           this._firedOnce.add(threshold.action);
         }
         const reason = threshold.reason

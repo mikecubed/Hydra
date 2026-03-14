@@ -12,7 +12,13 @@
 import { buildAgentContext } from './hydra-context.ts';
 import { getAgent, getVerifier } from './hydra-agents.ts';
 import { resolveProject, loadHydraConfig } from './hydra-config.ts';
-import { short, request, normalizeTask, selectTandemPair } from './hydra-utils.ts';
+import {
+  short,
+  request,
+  normalizeTask,
+  selectTandemPair,
+  type NormalizedTask,
+} from './hydra-utils.ts';
 import { DefaultAgentExecutor, type IAgentExecutor } from './hydra-shared/agent-executor.ts';
 import { isPersonaEnabled, getAgentFraming, getProcessLabel } from './hydra-persona.ts';
 import { pushActivity, annotateDispatch } from './hydra-activity.ts';
@@ -76,42 +82,52 @@ export function buildAgentMessage(agent: string, userPrompt: string): string {
     .join('\n');
 }
 
+function formatAssignedTaskText(myTasks: NormalizedTask[]): string {
+  if (myTasks.length === 0) {
+    return '- No explicit task assigned. Start by proposing first concrete step.';
+  }
+  return myTasks
+    .map(
+      (task) =>
+        `- ${task.title}${task.done ? ` (DoD: ${task.done})` : ''}${task.rationale ? ` [${task.rationale}]` : ''}`,
+    )
+    .join('\n');
+}
+
+function formatOpenQuestionText(myQuestions: Array<{ to?: string; question?: string }>): string {
+  if (myQuestions.length === 0) return '- none';
+  return myQuestions
+    .map((q) => {
+      const to = q.to ?? 'human';
+      const question = (q.question ?? '').trim();
+      return question ? `- to ${to}: ${question}` : null;
+    })
+    .filter(Boolean)
+    .join('\n');
+}
+
 export function buildMiniRoundBrief(
   agent: string,
   userPrompt: string,
   report: MiniRoundReport | null,
 ): string {
   const agentConfig = getAgent(agent);
-  const tasks = Array.isArray(report?.tasks)
-    ? report.tasks.map((item: any) => normalizeTask(item)).filter(Boolean)
+  const tasks: NormalizedTask[] = Array.isArray(report?.tasks)
+    ? report.tasks.map((item) => normalizeTask(item)).filter((t): t is NormalizedTask => t !== null)
     : [];
-  const questions = Array.isArray(report?.questions) ? report.questions : [];
+  const questions = Array.isArray(report?.questions)
+    ? (report.questions as Array<{ to?: string; question?: string } | null>)
+    : [];
   const consensus = String(report?.consensus ?? '').trim();
 
-  const myTasks = tasks.filter((task: any) => task.owner === agent || task.owner === 'unassigned');
-  const myQuestions = questions.filter((q: any) => q && (q.to === agent || q.to === 'human'));
+  const myTasks = tasks.filter((task) => task.owner === agent || task.owner === 'unassigned');
+  const myQuestions = questions.filter(
+    (q): q is { to?: string; question?: string } =>
+      q != null && (q.to === agent || q.to === 'human'),
+  );
 
-  const taskText =
-    myTasks.length === 0
-      ? '- No explicit task assigned. Start by proposing first concrete step.'
-      : myTasks
-          .map(
-            (task: any) =>
-              `- ${String(task.title)}${task.done ? ` (DoD: ${String(task.done)})` : ''}${task.rationale ? ` [${String(task.rationale)}]` : ''}`,
-          )
-          .join('\n');
-
-  const questionText =
-    myQuestions.length === 0
-      ? '- none'
-      : myQuestions
-          .map((q: any) => {
-            const to = String(q.to ?? 'human');
-            const question = String(q.question ?? '').trim();
-            return question ? `- to ${to}: ${question}` : null;
-          })
-          .filter(Boolean)
-          .join('\n');
+  const taskText = formatAssignedTaskText(myTasks);
+  const questionText = formatOpenQuestionText(myQuestions);
 
   return [
     isPersonaEnabled()
@@ -177,6 +193,22 @@ export function buildTandemBrief(
   ]
     .filter(Boolean)
     .join('\n');
+}
+
+function parseVerificationJson(output: string): Record<string, unknown> | null {
+  try {
+    return JSON.parse(output) as Record<string, unknown>;
+  } catch {
+    const match = output.match(/\{[\s\S]*\}/);
+    if (match) {
+      try {
+        return JSON.parse(match[0]) as Record<string, unknown>;
+      } catch {
+        /* give up */
+      }
+    }
+    return null;
+  }
 }
 
 // ── Config-Based Gate ────────────────────────────────────────────────────────
@@ -255,26 +287,14 @@ export async function runCrossVerification(
     if (!result.ok) return null;
 
     const output = (result.stdout ?? result.output) || '';
-    let parsed = null;
-    try {
-      parsed = JSON.parse(output);
-    } catch {
-      const match = output.match(/\{[\s\S]*\}/);
-      if (match) {
-        try {
-          parsed = JSON.parse(match[0]);
-        } catch {
-          /* give up */
-        }
-      }
-    }
+    const parsed = parseVerificationJson(output);
     if (!parsed) return null;
 
     return {
       verifier: verifierAgent,
-      approved: Boolean(parsed.approved),
-      issues: Array.isArray(parsed.issues) ? parsed.issues : [],
-      suggestions: Array.isArray(parsed.suggestions) ? parsed.suggestions : [],
+      approved: parsed['approved'] === true,
+      issues: Array.isArray(parsed['issues']) ? (parsed['issues'] as string[]) : [],
+      suggestions: Array.isArray(parsed['suggestions']) ? (parsed['suggestions'] as string[]) : [],
     };
   } catch {
     return null;

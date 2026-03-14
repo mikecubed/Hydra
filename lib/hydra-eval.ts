@@ -15,6 +15,7 @@ import { fileURLToPath } from 'node:url';
 import { classifyPrompt } from './hydra-utils.ts';
 import { bestAgentFor, classifyTask, initAgentRegistry } from './hydra-agents.ts';
 import { loadHydraConfig, HYDRA_ROOT } from './hydra-config.ts';
+import { exit } from './hydra-process.ts';
 
 const EVAL_DIR = path.join(HYDRA_ROOT, 'docs', 'coordination', 'eval');
 
@@ -104,6 +105,40 @@ export function loadGoldenCorpus(paths: string[]): CorpusEntry[] {
  * @param {CorpusEntry[]} corpus
  * @returns {RoutingResults} Evaluation results
  */
+interface EntryEvalResult {
+  routeMatch: boolean;
+  taskTypeMatch: boolean;
+  mismatch: RoutingMismatch | null;
+  expectedRoute: string | undefined;
+  expectedTaskType: string | undefined;
+}
+
+function evaluateEntry(entry: CorpusEntry): EntryEvalResult {
+  const result = classifyPrompt(entry.prompt);
+  const expectedRoute = entry.expected.routeStrategy;
+  const expectedTaskType = entry.expected.taskType;
+  const routeMatch = result.routeStrategy === expectedRoute;
+  const actualTaskType = result.taskType === '' ? classifyTask(entry.prompt) : result.taskType;
+  const taskTypeMatch = actualTaskType === expectedTaskType;
+
+  const mismatch =
+    !routeMatch || !taskTypeMatch
+      ? {
+          prompt: entry.prompt.slice(0, 100),
+          expectedRoute,
+          actualRoute: result.routeStrategy ?? '',
+          expectedTaskType,
+          actualTaskType,
+          routeMatch,
+          taskTypeMatch,
+          confidence: result.confidence,
+          reason: result.reason,
+        }
+      : null;
+
+  return { routeMatch, taskTypeMatch, mismatch, expectedRoute, expectedTaskType };
+}
+
 export function evaluateRouting(corpus: CorpusEntry[]): RoutingResults {
   let correct = 0;
   const perStrategy: Record<string, StratCounter> = {
@@ -115,45 +150,29 @@ export function evaluateRouting(corpus: CorpusEntry[]): RoutingResults {
   const mismatches: RoutingMismatch[] = [];
 
   for (const entry of corpus) {
-    const result = classifyPrompt(entry.prompt);
-    const expectedRoute = entry.expected.routeStrategy;
-    const expectedTaskType = entry.expected.taskType;
-
-    // Route strategy match
-    const routeMatch = result.routeStrategy === expectedRoute;
-
-    // Task type match (use classifyTask as fallback)
-    const actualTaskType = result.taskType || classifyTask(entry.prompt);
-    const taskTypeMatch = actualTaskType === expectedTaskType;
+    const evalResult = evaluateEntry(entry);
+    const { routeMatch, expectedRoute, expectedTaskType } = evalResult;
 
     if (routeMatch) correct++;
 
-    // Per-strategy tracking
-    if (expectedRoute && Object.hasOwn(perStrategy, expectedRoute)) {
+    if (
+      expectedRoute != null &&
+      expectedRoute !== '' &&
+      Object.hasOwn(perStrategy, expectedRoute)
+    ) {
       perStrategy[expectedRoute].total++;
       if (routeMatch) perStrategy[expectedRoute].correct++;
     }
 
-    // Per-task-type tracking
-    if (expectedTaskType) {
+    if (expectedTaskType != null && expectedTaskType !== '') {
       if (!Object.hasOwn(perTaskType, expectedTaskType))
         perTaskType[expectedTaskType] = { correct: 0, total: 0 };
       perTaskType[expectedTaskType].total++;
-      if (taskTypeMatch) perTaskType[expectedTaskType].correct++;
+      if (evalResult.taskTypeMatch) perTaskType[expectedTaskType].correct++;
     }
 
-    if (!routeMatch || !taskTypeMatch) {
-      mismatches.push({
-        prompt: entry.prompt.slice(0, 100),
-        expectedRoute,
-        actualRoute: result.routeStrategy ?? '',
-        expectedTaskType,
-        actualTaskType,
-        routeMatch,
-        taskTypeMatch,
-        confidence: result.confidence,
-        reason: result.reason,
-      });
+    if (evalResult.mismatch != null) {
+      mismatches.push(evalResult.mismatch);
     }
   }
 
@@ -188,7 +207,7 @@ export function evaluateAgentSelection(corpus: CorpusEntry[]): AgentSelectionRes
   const mismatches: AgentMismatch[] = [];
 
   for (const entry of corpus) {
-    if (!entry.expected.agent) continue;
+    if (entry.expected.agent == null || entry.expected.agent === '') continue;
     const taskType = entry.expected.taskType ?? classifyTask(entry.prompt);
     const actual = bestAgentFor(taskType);
     const match = actual === entry.expected.agent;
@@ -203,13 +222,30 @@ export function evaluateAgentSelection(corpus: CorpusEntry[]): AgentSelectionRes
     }
   }
 
-  const withAgent = corpus.filter((e) => e.expected.agent).length;
+  const withAgent = corpus.filter(
+    (e) => e.expected.agent != null && e.expected.agent !== '',
+  ).length;
   return {
     total: withAgent,
     correct,
     accuracy: withAgent > 0 ? Math.round((correct / withAgent) * 1000) / 10 : 0,
     mismatches,
   };
+}
+
+function formatRoutingMismatches(mismatches: RoutingMismatch[], max: number): string[] {
+  const lines: string[] = ['', '### Mismatches', ''];
+  for (const m of mismatches.slice(0, max)) {
+    const routeIcon = m.routeMatch ? '' : ` route: ${String(m.expectedRoute)}!=${m.actualRoute}`;
+    const typeIcon = m.taskTypeMatch
+      ? ''
+      : ` type: ${String(m.expectedTaskType)}!=${m.actualTaskType}`;
+    lines.push(`- "${m.prompt}"${routeIcon}${typeIcon}`);
+  }
+  if (mismatches.length > max) {
+    lines.push(`- ... and ${String(mismatches.length - max)} more`);
+  }
+  return lines;
 }
 
 /**
@@ -273,17 +309,7 @@ export function generateEvalReport(
   }
 
   if (routingResults.mismatches.length > 0) {
-    lines.push('', '### Mismatches', '');
-    for (const m of routingResults.mismatches.slice(0, 15)) {
-      const routeIcon = m.routeMatch ? '' : ` route: ${String(m.expectedRoute)}!=${m.actualRoute}`;
-      const typeIcon = m.taskTypeMatch
-        ? ''
-        : ` type: ${String(m.expectedTaskType)}!=${m.actualTaskType}`;
-      lines.push(`- "${m.prompt}"${routeIcon}${typeIcon}`);
-    }
-    if (routingResults.mismatches.length > 15) {
-      lines.push(`- ... and ${String(routingResults.mismatches.length - 15)} more`);
-    }
+    lines.push(...formatRoutingMismatches(routingResults.mismatches, 15));
   }
 
   if (agentResults && agentResults.total > 0) {
@@ -313,7 +339,9 @@ export function generateEvalReport(
 // ── CLI Entry Point ──────────────────────────────────────────────────────────
 
 const isMain =
-  process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToPath(import.meta.url));
+  process.argv.length > 1 &&
+  process.argv[1] !== '' &&
+  path.resolve(process.argv[1]) === path.resolve(fileURLToPath(import.meta.url));
 
 if (isMain) {
   // Initialize agent registry
@@ -338,8 +366,7 @@ if (isMain) {
 
   if (corpus.length === 0) {
     console.error('No test cases found.');
-    // eslint-disable-next-line n/no-process-exit
-    process.exit(1);
+    exit(1);
   }
 
   console.log('\nEvaluating routing classification...');

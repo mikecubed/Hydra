@@ -36,7 +36,7 @@ interface WizardFields {
  * Returns an error message, or null if valid.
  */
 export function validateAgentName(name: string): string | null {
-  if (name.length === 0 || !name.trim()) return 'Name cannot be empty';
+  if (name.length === 0 || name.trim() === '') return 'Name cannot be empty';
   if (RESERVED_NAMES.includes(name.toLowerCase())) return `"${name}" is a reserved agent name`;
   if (!/^[a-z][a-z0-9-]*$/.test(name))
     return 'Name must be lowercase alphanumeric with hyphens (e.g. copilot, my-agent)';
@@ -68,7 +68,10 @@ export function buildCustomAgentEntry(fields: WizardFields): CustomAgentDef {
     name,
     type,
     displayName: fields.displayName ?? name,
-    contextBudget: Number(contextBudget) || 32000,
+    contextBudget: (() => {
+      const n = Number(contextBudget);
+      return Number.isFinite(n) && n > 0 ? n : 32000;
+    })(),
     councilRole: councilRole ?? null,
     taskAffinity,
     enabled: enabled !== false,
@@ -113,10 +116,27 @@ export async function runAgentsWizard(rl: ReadlineInterface): Promise<void> {
     // eslint-disable-next-line no-await-in-loop -- intentionally sequential: do-while retry loop for interactive user-input validation; each iteration depends on the previous answer
     name = await ask('Agent name (e.g. copilot, mixtral)');
     nameError = validateAgentName(name);
-    if (nameError) console.log(`  ✗ ${nameError}`);
+    if (nameError !== null) console.log(`  ✗ ${nameError}`);
   } while (nameError !== null);
 
-  // 2. Type
+  // 2. Type + type-specific fields
+  const fields = await collectWizardFields(rl, ask, name);
+
+  // Build entry
+  const entry = buildCustomAgentEntry(fields);
+
+  // MCP setup (CLI agents only)
+  const mcpConfig = await collectMcpConfig(rl, ask, fields);
+
+  // Save and register
+  saveWizardResult(entry, mcpConfig, fields.type);
+}
+
+async function collectWizardFields(
+  rl: ReadlineInterface,
+  ask: (q: string) => Promise<string>,
+  name: string,
+): Promise<WizardFields> {
   const typeChoice = await promptChoice(rl, {
     title: 'Agent type',
     choices: [
@@ -133,25 +153,18 @@ export async function runAgentsWizard(rl: ReadlineInterface): Promise<void> {
     ],
   });
   const agentType = (typeChoice as { value: string }).value as 'cli' | 'api';
-
   const fields: WizardFields = { name, type: agentType };
 
   if (agentType === 'cli') {
     fields.cmd = await ask('CLI command (e.g. gh, aider, continue)');
     fields.argsTemplate = await ask('Args template (e.g. copilot suggest -p {prompt})');
-
     const parserChoice = await promptChoice(rl, {
       title: 'Response parser',
       choices: [
         { value: 'plaintext', label: 'Plaintext', hint: 'Capture stdout as-is' },
-        {
-          value: 'json',
-          label: 'JSON',
-          hint: 'Parse JSON stdout, extract .content/.text field',
-        },
+        { value: 'json', label: 'JSON', hint: 'Parse JSON stdout, extract .content/.text field' },
         { value: 'markdown', label: 'Markdown', hint: 'Capture markdown output as-is' },
       ],
-      // autoAccept is not a formal promptChoice option — omitted
     });
     fields.responseParser = (parserChoice as { value: string }).value;
   } else {
@@ -159,11 +172,10 @@ export async function runAgentsWizard(rl: ReadlineInterface): Promise<void> {
     fields.model = await ask('Model name (e.g. mixtral:8x7b, llama3.2)');
   }
 
-  // Context budget
   const budgetRaw = await ask('Context budget in tokens (default: 32000)');
-  fields.contextBudget = Number.parseInt(budgetRaw, 10) || 32000;
+  const parsed = Number.parseInt(budgetRaw, 10);
+  fields.contextBudget = !Number.isNaN(parsed) && parsed !== 0 ? parsed : 32000;
 
-  // Task profile
   const profileChoice = await promptChoice(rl, {
     title: 'Task affinity profile',
     choices: [
@@ -187,7 +199,6 @@ export async function runAgentsWizard(rl: ReadlineInterface): Promise<void> {
   });
   fields.affinityPreset = (profileChoice as { value: string }).value;
 
-  // Council role
   const councilChoice = await promptChoice(rl, {
     title: 'Council role',
     choices: [
@@ -199,40 +210,50 @@ export async function runAgentsWizard(rl: ReadlineInterface): Promise<void> {
   });
   fields.councilRole = (councilChoice as { value: string | null }).value;
 
-  // Build entry
-  const entry = buildCustomAgentEntry(fields);
+  return fields;
+}
 
-  // MCP setup (CLI agents only)
-  let mcpConfig: { configPath: string | null; format: string } | null = null;
-  if (agentType === 'cli') {
-    const knownPath = fields.cmd
+async function collectMcpConfig(
+  rl: ReadlineInterface,
+  ask: (q: string) => Promise<string>,
+  fields: WizardFields,
+): Promise<{ configPath: string | null; format: string } | null> {
+  if (fields.type !== 'cli') return null;
+
+  const knownPath =
+    fields.cmd != null && fields.cmd !== ''
       ? (KNOWN_CLI_MCP_PATHS as Record<string, string | null | undefined>)[fields.cmd]
       : undefined;
-    const mcpChoices = [
-      {
-        value: 'auto',
-        label: 'Auto-detect',
-        hint: knownPath ? `Try ${knownPath}` : 'Attempt auto-detection',
-      },
-      {
-        value: 'manual-path',
-        label: 'Enter config path',
-        hint: "Provide the path to your agent's config file",
-      },
-      { value: 'skip', label: 'Skip', hint: 'Show manual instructions at the end' },
-    ];
-    const mcpChoice = await promptChoice(rl, { title: 'MCP registration', choices: mcpChoices });
+  const hintText =
+    knownPath != null && knownPath !== '' ? `Try ${knownPath}` : 'Attempt auto-detection';
+  const mcpChoices = [
+    { value: 'auto', label: 'Auto-detect', hint: hintText },
+    {
+      value: 'manual-path',
+      label: 'Enter config path',
+      hint: "Provide the path to your agent's config file",
+    },
+    { value: 'skip', label: 'Skip', hint: 'Show manual instructions at the end' },
+  ];
+  const mcpChoice = await promptChoice(rl, { title: 'MCP registration', choices: mcpChoices });
+  const mcpValue = (mcpChoice as { value: string }).value;
 
-    if ((mcpChoice as { value: string }).value === 'auto' && knownPath) {
-      mcpConfig = { configPath: path.join(os.homedir(), knownPath), format: 'json' };
-    } else if ((mcpChoice as { value: string }).value === 'manual-path') {
-      const rawPath = await ask('Path to agent config file (absolute path)');
-      const fmt = await ask('Config format (json / other)');
-      mcpConfig = { configPath: rawPath, format: fmt };
-    }
+  if (mcpValue === 'auto' && knownPath != null && knownPath !== '') {
+    return { configPath: path.join(os.homedir(), knownPath), format: 'json' };
   }
+  if (mcpValue === 'manual-path') {
+    const rawPath = await ask('Path to agent config file (absolute path)');
+    const fmt = await ask('Config format (json / other)');
+    return { configPath: rawPath, format: fmt };
+  }
+  return null;
+}
 
-  // Save to config
+function saveWizardResult(
+  entry: CustomAgentDef,
+  mcpConfig: { configPath: string | null; format: string } | null,
+  agentType: 'cli' | 'api',
+): void {
   const cfg = loadHydraConfig();
   const customAgents = [...cfg.agents.customAgents];
   const existing = customAgents.findIndex((a) => a.name === entry.name);
@@ -245,8 +266,7 @@ export async function runAgentsWizard(rl: ReadlineInterface): Promise<void> {
 
   console.log(`\n  ✓ Agent "${entry.name}" saved to config`);
 
-  // MCP registration
-  if (mcpConfig) {
+  if (mcpConfig != null) {
     const mcpResult = registerCustomAgentMcp(mcpConfig);
     if (mcpResult.status === 'added' || mcpResult.status === 'updated') {
       console.log(`  ✓ Hydra MCP server registered with ${entry.name}`);

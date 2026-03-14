@@ -145,6 +145,90 @@ function extractJsonArray(text: string) {
 
 // ── Main Export ─────────────────────────────────────────────────────────────
 
+type RunDiscoveryOpts = {
+  agent?: string;
+  model?: string;
+  maxSuggestions?: number;
+  focus?: string[];
+  timeoutMs?: number;
+  existingTasks?: string[];
+  profile?: string;
+  extraContext?: string;
+};
+
+interface ResolvedDiscoveryConfig {
+  agent: string;
+  modelOverride: string | null;
+  maxSuggestions: number;
+  focus: string[];
+  timeoutMs: number;
+  existingTasks: string[];
+  profile: string;
+  extraContext: string;
+}
+
+function resolveDiscoveryConfig(
+  opts: RunDiscoveryOpts,
+  discoveryCfg: Record<string, unknown>,
+): ResolvedDiscoveryConfig {
+  return {
+    agent: opts.agent ?? (discoveryCfg['agent'] as string | undefined) ?? 'gemini',
+    modelOverride: opts.model ?? (discoveryCfg['model'] as string | undefined) ?? null,
+    maxSuggestions:
+      opts.maxSuggestions ?? (discoveryCfg['maxSuggestions'] as number | undefined) ?? 5,
+    focus: opts.focus ?? (discoveryCfg['focus'] as string[] | undefined) ?? [],
+    timeoutMs: opts.timeoutMs ?? (discoveryCfg['timeoutMs'] as number | undefined) ?? 5 * 60 * 1000,
+    existingTasks: opts.existingTasks ?? [],
+    profile: opts.profile ?? 'nightly',
+    extraContext: opts.extraContext ?? '',
+  };
+}
+
+async function executeDiscoveryAgent(
+  agent: string,
+  prompt: string,
+  opts: { cwd: string; timeoutMs: number; modelOverride?: string },
+): Promise<{ ok: boolean; stdout?: string; output?: string; error?: string } | null> {
+  const handle = recordCallStart(agent, 'discovery');
+  try {
+    const result = await executeAgentWithRecovery(agent, prompt, opts);
+    if (!result.ok) {
+      recordCallError(handle, new Error(result.error ?? 'agent returned non-ok'));
+      log.warn(`Discovery agent returned error: ${result.error ?? 'unknown'}`);
+      return null;
+    }
+    recordCallComplete(handle, result as unknown as Parameters<typeof recordCallComplete>[1]);
+    return result as { ok: boolean; stdout?: string; output?: string; error?: string };
+  } catch (err: unknown) {
+    recordCallError(handle, err instanceof Error ? err : new Error(String(err)));
+    log.warn(`Discovery agent failed: ${err instanceof Error ? err.message : String(err)}`);
+    return null;
+  }
+}
+
+function buildDiscoveredTask(item: Record<string, unknown>, agent: string): ScannedTask | null {
+  // eslint-disable-next-line @typescript-eslint/strict-boolean-expressions -- untyped data
+  if (!item['title'] || typeof item['title'] !== 'string') return null;
+  const title = item['title'].trim();
+  const slug = taskToSlug(title);
+  const taskType = (item['taskType'] ?? classifyTask(title)) as string;
+  const suggestedAgent = bestAgentFor(taskType);
+  const { tier } = classifyPrompt(title);
+  return {
+    id: `ai-discovery:${slug}`,
+    title,
+    slug,
+    source: 'ai-discovery' as ScannedTask['source'],
+    sourceRef: `${agent}-discovery`,
+    taskType,
+    suggestedAgent,
+    complexity: tier,
+    priority: (item['priority'] ?? 'medium') as ScannedTask['priority'],
+    body: (item['description'] ?? null) as string | null,
+    issueNumber: null,
+  };
+}
+
 /**
  * Run AI discovery to suggest improvement tasks for the nightly pipeline.
  *
@@ -159,104 +243,44 @@ function extractJsonArray(text: string) {
  */
 export async function runDiscovery(
   projectRoot: string,
-  opts: {
-    agent?: string;
-    model?: string;
-    maxSuggestions?: number;
-    focus?: string[];
-    timeoutMs?: number;
-    existingTasks?: string[];
-    profile?: string;
-    extraContext?: string;
-  } = {},
+  opts: RunDiscoveryOpts = {},
 ): Promise<ScannedTask[]> {
   const cfg = loadHydraConfig();
   const discoveryCfg = (cfg.nightly?.aiDiscovery ?? {}) as Record<string, unknown>;
+  const resolved = resolveDiscoveryConfig(opts, discoveryCfg);
 
-  const agent = opts.agent ?? (discoveryCfg['agent'] as string | undefined) ?? 'gemini';
-  const modelOverride = opts.model ?? (discoveryCfg['model'] as string | undefined) ?? null;
-  const maxSuggestions =
-    opts.maxSuggestions ?? (discoveryCfg['maxSuggestions'] as number | undefined) ?? 5;
-  const focus = opts.focus ?? (discoveryCfg['focus'] as string[] | undefined) ?? [];
-  const timeoutMs =
-    opts.timeoutMs ?? (discoveryCfg['timeoutMs'] as number | undefined) ?? 5 * 60 * 1000;
-  const existingTasks = opts.existingTasks ?? [];
-  const profile = opts.profile ?? 'nightly';
-  const extraContext = opts.extraContext ?? '';
-
-  const instructionFile = getAgentInstructionFile(agent, projectRoot);
+  const instructionFile = getAgentInstructionFile(resolved.agent, projectRoot);
   const prompt = buildDiscoveryPrompt(projectRoot, {
-    existingTasks,
-    focus,
+    existingTasks: resolved.existingTasks,
+    focus: resolved.focus,
     instructionFile,
-    profile,
-    extraContext,
+    profile: resolved.profile,
+    extraContext: resolved.extraContext,
   });
 
-  log.info(`AI Discovery: dispatching ${agent} to analyze codebase...`);
+  log.info(`AI Discovery: dispatching ${resolved.agent} to analyze codebase...`);
 
-  const handle = recordCallStart(agent, 'discovery');
-  let result;
-  try {
-    result = await executeAgentWithRecovery(agent, prompt, {
-      cwd: projectRoot,
-      timeoutMs,
-      ...(modelOverride != null && modelOverride !== '' && { modelOverride }),
-    });
-  } catch (err: unknown) {
-    recordCallError(handle, err instanceof Error ? err : new Error(String(err)));
-    log.warn(`Discovery agent failed: ${err instanceof Error ? err.message : String(err)}`);
-    return [];
-  }
+  const agentOpts: { cwd: string; timeoutMs: number; modelOverride?: string } = {
+    cwd: projectRoot,
+    timeoutMs: resolved.timeoutMs,
+    ...(resolved.modelOverride != null &&
+      resolved.modelOverride !== '' && { modelOverride: resolved.modelOverride }),
+  };
+  const result = await executeDiscoveryAgent(resolved.agent, prompt, agentOpts);
+  if (result == null) return [];
 
-  if (!result.ok) {
-    recordCallError(handle, new Error(result.error ?? 'agent returned non-ok'));
-    log.warn(`Discovery agent returned error: ${result.error ?? 'unknown'}`);
-    return [];
-  }
-
-  recordCallComplete(handle, result as unknown as Parameters<typeof recordCallComplete>[1]);
-
-  // Parse response
   const output = result.stdout ?? result.output;
-  const items = extractJsonArray(output);
+  const items = extractJsonArray(output ?? '');
 
   if (!items || items.length === 0) {
     log.warn('Discovery: could not parse task suggestions from agent output');
     return [];
   }
 
-  // Convert to ScannedTask shape
   const tasks: ScannedTask[] = [];
-  for (const item of items.slice(0, maxSuggestions)) {
-    // eslint-disable-next-line @typescript-eslint/no-unsafe-member-access, @typescript-eslint/strict-boolean-expressions -- untyped data
-    if (!item.title || typeof item.title !== 'string') continue;
-
-    // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-member-access -- untyped data
-    const title = item.title.trim();
-    // eslint-disable-next-line @typescript-eslint/no-unsafe-argument -- untyped data
-    const slug = taskToSlug(title);
-    // eslint-disable-next-line @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-argument -- untyped data
-    const taskType = (item.taskType ?? classifyTask(title)) as string;
-    const suggestedAgent = bestAgentFor(taskType);
-    const { tier } = classifyPrompt(title);
-
-    tasks.push({
-      id: `ai-discovery:${slug}`,
-      // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment -- untyped data
-      title,
-      slug,
-      source: 'ai-discovery' as ScannedTask['source'],
-      sourceRef: `${agent}-discovery`,
-      taskType,
-      suggestedAgent,
-      complexity: tier,
-      // eslint-disable-next-line @typescript-eslint/no-unsafe-member-access -- untyped data
-      priority: (item.priority ?? 'medium') as ScannedTask['priority'],
-      // eslint-disable-next-line @typescript-eslint/no-unsafe-member-access -- untyped data
-      body: (item.description ?? null) as string | null,
-      issueNumber: null,
-    });
+  for (const item of items.slice(0, resolved.maxSuggestions)) {
+    const task = buildDiscoveredTask(item as Record<string, unknown>, resolved.agent);
+    if (task != null) tasks.push(task);
   }
 
   log.ok(`Discovery: ${String(tasks.length)} task(s) suggested`);

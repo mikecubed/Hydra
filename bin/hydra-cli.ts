@@ -183,6 +183,31 @@ function parseCommonArgs(argv: string[]) {
   return { full, prompt, showHelp, passthrough };
 }
 
+function resolveNextValue(
+  rawTokens: string[],
+  i: number,
+  currentValue: string | null,
+): { value: string | null; advance: boolean } {
+  if (currentValue !== null || i + 1 >= rawTokens.length || looksLikeOption(rawTokens[i + 1])) {
+    return { value: currentValue, advance: false };
+  }
+  return { value: rawTokens[i + 1], advance: true };
+}
+
+function buildOperatorArg(key: string, normalizedKey: string, value: string | null): string {
+  const lowerKey = normalizedKey.toLowerCase();
+  if (
+    value === null &&
+    lowerKey.startsWith('no') &&
+    key.startsWith('no-') &&
+    normalizedKey.length > 2
+  ) {
+    const positiveKey = normalizedKey[2].toLowerCase() + normalizedKey.slice(3);
+    return `${positiveKey}=false`;
+  }
+  return `${normalizedKey}=${value ?? 'true'}`;
+}
+
 function toOperatorArgs(rawTokens: string[]) {
   const out = [];
 
@@ -207,30 +232,13 @@ function toOperatorArgs(rawTokens: string[]) {
       continue;
     }
 
-    let value = parsed.value;
-    if (value === null && i + 1 < rawTokens.length && !looksLikeOption(rawTokens[i + 1])) {
-      value = rawTokens[i + 1];
-      i += 1;
-    }
+    const { value, advance } = resolveNextValue(rawTokens, i, parsed.value);
+    if (advance) i += 1;
 
     const normalizedKey = normalizeOperatorKey(key);
-    if (normalizedKey === '') {
-      continue;
-    }
+    if (normalizedKey === '') continue;
 
-    const lowerKey = normalizedKey.toLowerCase();
-    if (
-      value === null &&
-      lowerKey.startsWith('no') &&
-      key.startsWith('no-') &&
-      normalizedKey.length > 2
-    ) {
-      const positiveKey = normalizedKey[2].toLowerCase() + normalizedKey.slice(3);
-      out.push(`${positiveKey}=false`);
-      continue;
-    }
-
-    out.push(`${normalizedKey}=${value ?? 'true'}`);
+    out.push(buildOperatorArg(key, normalizedKey, value));
   }
 
   return out;

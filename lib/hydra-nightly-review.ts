@@ -37,6 +37,7 @@ import {
 } from './hydra-shared/review-common.ts';
 import { isGhAvailable } from './hydra-github.ts';
 import pc from 'picocolors';
+import { exit } from './hydra-process.ts';
 
 interface ReportEntry {
   branch?: string;
@@ -68,6 +69,85 @@ function hasBaseAdvanced(projectRoot: string, branch: string, baseBranch: string
   }
 }
 
+function printNightlyEntryViolations(
+  violations: Array<{ severity: string; detail: string }>,
+): void {
+  console.log(pc.red(`  Violations: ${String(violations.length)}`));
+  for (const v of violations) {
+    console.log(pc.red(`    [${v.severity}] ${v.detail}`));
+  }
+}
+
+function printNightlyReportEntry(reportEntry: ReportEntry | undefined): void {
+  if (reportEntry == null) return;
+  const statusColor = reportEntry.status === 'success' ? pc.green : pc.yellow;
+  console.log(`  Status: ${statusColor((reportEntry.status ?? '').toUpperCase())}`);
+  console.log(`  Agent: ${reportEntry.agent ?? 'claude'}`);
+  if (reportEntry.source != null && reportEntry.source.length > 0)
+    console.log(
+      `  Source: ${reportEntry.source}${reportEntry.taskType != null && reportEntry.taskType.length > 0 ? ` (${reportEntry.taskType})` : ''}`,
+    );
+  if (reportEntry.tokensUsed != null && reportEntry.tokensUsed > 0)
+    console.log(`  Tokens: ~${reportEntry.tokensUsed.toLocaleString()}`);
+  console.log(`  Verification: ${reportEntry.verification ?? '?'}`);
+  if (reportEntry.violations != null && reportEntry.violations.length > 0) {
+    printNightlyEntryViolations(reportEntry.violations);
+  }
+}
+
+function printNightlyLiveViolations(
+  liveViolations: Array<{ severity: string; detail: string }>,
+  reportEntry: ReportEntry | undefined,
+): void {
+  if (
+    liveViolations.length > 0 &&
+    !(reportEntry?.violations != null && reportEntry.violations.length > 0)
+  ) {
+    console.log(pc.red(`\n  Live violation scan: ${String(liveViolations.length)} issue(s)`));
+    for (const v of liveViolations) {
+      console.log(pc.red(`    [${v.severity}] ${v.detail}`));
+    }
+  }
+}
+
+async function processNightlyBranch(
+  rl: ReturnType<typeof createRL>,
+  projectRoot: string,
+  branch: string,
+  baseBranch: string,
+  reportEntry: ReportEntry | undefined,
+): Promise<string | null> {
+  console.log(pc.bold(pc.cyan(`\n── ${branch} ──`)));
+  printNightlyReportEntry(reportEntry);
+
+  if (hasBaseAdvanced(projectRoot, branch, baseBranch)) {
+    console.log(
+      pc.yellow(
+        `  ${baseBranch} has advanced since this branch was created — smart merge will rebase first`,
+      ),
+    );
+  }
+
+  const { commitLog } = displayBranchInfo(projectRoot, branch, baseBranch);
+  if (commitLog.length === 0) {
+    await handleEmptyBranch(rl, projectRoot, branch);
+    return null;
+  }
+
+  const liveViolations = scanBranchViolations(projectRoot, branch, {
+    baseBranch,
+    protectedFiles: new Set(BASE_PROTECTED_FILES),
+    protectedPatterns: [...BASE_PROTECTED_PATTERNS],
+  });
+  printNightlyLiveViolations(liveViolations, reportEntry);
+
+  console.log('');
+  return await handleBranchAction(rl, projectRoot, branch, baseBranch, {
+    enablePR: isGhAvailable(),
+    useSmartMerge: true,
+  });
+}
+
 // ── Review Command ──────────────────────────────────────────────────────────
 
 async function reviewCommand(projectRoot: string, options: Record<string, string | boolean>) {
@@ -81,7 +161,6 @@ async function reviewCommand(projectRoot: string, options: Record<string, string
     return;
   }
 
-  // Load the latest nightly report to determine baseBranch
   const nightlyDir = path.join(projectRoot, 'docs', 'coordination', 'nightly');
   const reportData = loadLatestReport(nightlyDir, 'NIGHTLY', dateFilter) as Record<
     string,
@@ -89,7 +168,6 @@ async function reviewCommand(projectRoot: string, options: Record<string, string
   > | null;
   const baseBranch = (reportData?.['baseBranch'] as string | undefined) ?? 'dev';
 
-  // Ensure we're on baseBranch
   const current = getCurrentBranch(projectRoot);
   if (current !== baseBranch) {
     console.log(pc.yellow(`Switching to ${baseBranch} branch (was on ${current})`));
@@ -106,70 +184,8 @@ async function reviewCommand(projectRoot: string, options: Record<string, string
     const reportEntry = (reportData?.['results'] as ReportEntry[] | undefined)?.find(
       (r: ReportEntry) => r.branch === branch,
     );
-
-    console.log(pc.bold(pc.cyan(`\n── ${branch} ──`)));
-
-    // Show report info if available
-    if (reportEntry != null) {
-      const statusColor = reportEntry.status === 'success' ? pc.green : pc.yellow;
-      console.log(`  Status: ${statusColor((reportEntry.status ?? '').toUpperCase())}`);
-      console.log(`  Agent: ${reportEntry.agent ?? 'claude'}`);
-      if (reportEntry.source != null && reportEntry.source.length > 0)
-        console.log(
-          `  Source: ${reportEntry.source}${reportEntry.taskType != null && reportEntry.taskType.length > 0 ? ` (${reportEntry.taskType})` : ''}`,
-        );
-      if (reportEntry.tokensUsed != null && reportEntry.tokensUsed > 0)
-        console.log(`  Tokens: ~${reportEntry.tokensUsed.toLocaleString()}`);
-      console.log(`  Verification: ${reportEntry.verification ?? '?'}`);
-      if (reportEntry.violations != null && reportEntry.violations.length > 0) {
-        console.log(pc.red(`  Violations: ${String(reportEntry.violations.length)}`));
-        for (const v of reportEntry.violations) {
-          console.log(pc.red(`    [${v.severity}] ${v.detail}`));
-        }
-      }
-    }
-
-    // Check if base has advanced (diverged)
-    if (hasBaseAdvanced(projectRoot, branch, baseBranch)) {
-      console.log(
-        pc.yellow(
-          `  ${baseBranch} has advanced since this branch was created — smart merge will rebase first`,
-        ),
-      );
-    }
-
-    // Show diff stat and commit log
-    const { commitLog } = displayBranchInfo(projectRoot, branch, baseBranch);
-
-    if (commitLog.length === 0) {
-      // eslint-disable-next-line no-await-in-loop -- sequential interactive user prompts
-      await handleEmptyBranch(rl, projectRoot, branch);
-      continue;
-    }
-
-    // Also scan for violations live (may catch things the report missed)
-    const liveViolations = scanBranchViolations(projectRoot, branch, {
-      baseBranch,
-      protectedFiles: new Set(BASE_PROTECTED_FILES),
-      protectedPatterns: [...BASE_PROTECTED_PATTERNS],
-    });
-    if (
-      liveViolations.length > 0 &&
-      !(reportEntry?.violations != null && reportEntry.violations.length > 0)
-    ) {
-      console.log(pc.red(`\n  Live violation scan: ${String(liveViolations.length)} issue(s)`));
-      for (const v of liveViolations) {
-        console.log(pc.red(`    [${v.severity}] ${v.detail}`));
-      }
-    }
-
-    // Prompt: merge / skip / diff / delete / pr
-    console.log('');
     // eslint-disable-next-line no-await-in-loop -- sequential interactive user prompts
-    const result = await handleBranchAction(rl, projectRoot, branch, baseBranch, {
-      enablePR: isGhAvailable(),
-      useSmartMerge: true,
-    });
+    const result = await processNightlyBranch(rl, projectRoot, branch, baseBranch, reportEntry);
     if (result === 'merged' || result === 'pr-created') merged++;
     else if (result === 'skipped') skipped++;
   }
@@ -178,24 +194,27 @@ async function reviewCommand(projectRoot: string, options: Record<string, string
   console.log(pc.bold(`\nDone: ${String(merged)} merged, ${String(skipped)} skipped`));
 }
 
-// ── Status Command ──────────────────────────────────────────────────────────
+function printNightlyResultsSection(results: NightlyResult[]): void {
+  console.log('');
+  for (const r of results) {
+    let icon: string;
+    if (r.status === 'success') {
+      icon = pc.green('✓');
+    } else if (r.status === 'partial') {
+      icon = pc.yellow('~');
+    } else {
+      icon = pc.red('✗');
+    }
+    const agentTag = r.agent === 'claude' ? '' : pc.dim(` [${r.agent ?? ''}]`);
+    console.log(`    ${icon} ${r.slug ?? ''} — ${r.status ?? ''}${agentTag}`);
+  }
+}
 
-function statusCommand(projectRoot: string, options: Record<string, string | boolean>) {
-  const dateFilter =
-    typeof options['date'] === 'string' && options['date'].length > 0 ? options['date'] : null;
-  const branches = listBranches(projectRoot, 'nightly', dateFilter);
-
-  // Load report first to determine baseBranch
-  const nightlyDir = path.join(projectRoot, 'docs', 'coordination', 'nightly');
-  const report = loadLatestReport(nightlyDir, 'NIGHTLY', dateFilter) as Record<
-    string,
-    unknown
-  > | null;
-  const baseBranch = (report?.['baseBranch'] as string | undefined) ?? 'dev';
-
-  console.log(pc.bold('\nNightly Status'));
-
-  // Show branches
+function printNightlyBranchesSection(
+  branches: string[],
+  baseBranch: string,
+  projectRoot: string,
+): void {
   if (branches.length === 0) {
     console.log(pc.dim('  No nightly branches found.'));
   } else {
@@ -206,36 +225,44 @@ function statusCommand(projectRoot: string, options: Record<string, string | boo
       console.log(`    ${b} (${String(commitCount)} commit${commitCount === 1 ? '' : 's'})`);
     }
   }
+}
+
+function printNightlyReportSection(report: Record<string, unknown> | null): void {
   if (report == null) {
     console.log(pc.dim('\n  No nightly report found.'));
-  } else {
-    console.log(`\n  Latest Report: ${(report['date'] as string | undefined) ?? ''}`);
-    console.log(
-      `  Tasks: ${String((report['processedTasks'] as string | number | undefined) ?? '')}/${String((report['totalTasks'] as string | number | undefined) ?? '')}`,
-    );
-    if (report['stopReason'] != null)
-      console.log(`  Stopped: ${(report['stopReason'] as string | undefined) ?? ''}`);
-    console.log(
-      `  Tokens: ~${(report['budget'] as ReportBudget | undefined)?.consumed?.toLocaleString() ?? '?'}`,
-    );
-
-    if (report['results'] != null) {
-      console.log('');
-      for (const r of report['results'] as NightlyResult[]) {
-        let icon: string;
-        if (r.status === 'success') {
-          icon = pc.green('✓');
-        } else if (r.status === 'partial') {
-          icon = pc.yellow('~');
-        } else {
-          icon = pc.red('✗');
-        }
-        const agentTag = r.agent === 'claude' ? '' : pc.dim(` [${r.agent ?? ''}]`);
-        console.log(`    ${icon} ${r.slug ?? ''} — ${r.status ?? ''}${agentTag}`);
-      }
-    }
+    return;
   }
+  console.log(`\n  Latest Report: ${(report['date'] as string | undefined) ?? ''}`);
+  console.log(
+    `  Tasks: ${String((report['processedTasks'] as string | number | undefined) ?? '')}/${String((report['totalTasks'] as string | number | undefined) ?? '')}`,
+  );
+  if (report['stopReason'] != null)
+    console.log(`  Stopped: ${(report['stopReason'] as string | undefined) ?? ''}`);
+  console.log(
+    `  Tokens: ~${(report['budget'] as ReportBudget | undefined)?.consumed?.toLocaleString() ?? '?'}`,
+  );
+  if (report['results'] != null) {
+    printNightlyResultsSection(report['results'] as NightlyResult[]);
+  }
+}
 
+// ── Status Command ──────────────────────────────────────────────────────────
+
+function statusCommand(projectRoot: string, options: Record<string, string | boolean>) {
+  const dateFilter =
+    typeof options['date'] === 'string' && options['date'].length > 0 ? options['date'] : null;
+  const branches = listBranches(projectRoot, 'nightly', dateFilter);
+
+  const nightlyDir = path.join(projectRoot, 'docs', 'coordination', 'nightly');
+  const report = loadLatestReport(nightlyDir, 'NIGHTLY', dateFilter) as Record<
+    string,
+    unknown
+  > | null;
+  const baseBranch = (report?.['baseBranch'] as string | undefined) ?? 'dev';
+
+  console.log(pc.bold('\nNightly Status'));
+  printNightlyBranchesSection(branches, baseBranch, projectRoot);
+  printNightlyReportSection(report);
   console.log('');
 }
 
@@ -299,6 +326,5 @@ async function main() {
 
 main().catch((err: unknown) => {
   console.error(pc.red(`Fatal: ${err instanceof Error ? err.message : String(err)}`));
-  // eslint-disable-next-line n/no-process-exit -- inside .catch() callback; return does not propagate
-  process.exit(1);
+  exit(1);
 });

@@ -170,57 +170,47 @@ export async function fetchModels(
 
 // ── Display ─────────────────────────────────────────────────────────────────
 
-function displayAgent(agentName: string, fetchResult: { models: string[]; source: string }) {
-  const cfg = loadHydraConfig();
-  const agentModels =
-    (cfg.models as Record<string, Record<string, string> | undefined>)[agentName] ?? {};
-  const aliases =
-    (cfg.aliases as Record<string, Record<string, string> | undefined>)[agentName] ?? {};
-  const activeModel = getActiveModel(agentName);
-  const agentInfo = (AGENTS as Record<string, { label?: string }>)[agentName];
-  const mode = cfg.mode;
-  const tierPreset = cfg.modeTiers?.[mode]?.[agentName] ?? 'default';
-
-  console.log('');
-  console.log(pc.bold(pc.cyan(`═══ ${agentInfo.label ?? agentName} ═══`)));
-
-  // Active model + reasoning effort
-  const effort = getReasoningEffort(agentName);
-  const effortStr = effort != null && effort !== '' ? pc.yellow(` [${effort}]`) : '';
-  console.log(
-    `  Active:  ${pc.green(activeModel ?? 'unknown')}${effortStr} ${pc.dim(`(mode: ${mode} → ${tierPreset})`)}`,
-  );
-
-  // Presets
+function displayPresetsSection(
+  agentModels: Record<string, string | undefined>,
+  activeModel: string | null | undefined,
+): void {
   const presetKeys = ['default', 'fast', 'cheap'];
   console.log(pc.bold('  Presets:'));
   for (const key of presetKeys) {
-    if (agentModels[key] !== '') {
+    if (agentModels[key] != null && agentModels[key] !== '') {
       const marker = agentModels[key] === activeModel ? pc.green(' ◀') : '';
-      console.log(`    ${pc.dim(key.padEnd(8))} ${agentModels[key]}${marker}`);
+      console.log(`    ${pc.dim(key.padEnd(8))} ${agentModels[key] ?? ''}${marker}`);
     }
   }
+}
 
-  // Reasoning effort
-  console.log(pc.bold('  Effort:'));
+function displayEffortSection(effort: string | null | undefined): void {
   const effortLevels = ['low', 'medium', 'high', 'xhigh'];
+  console.log(pc.bold('  Effort:'));
   const effortLine = effortLevels
     .map((e) => (e === effort ? pc.green(e) + pc.green(' ◀') : pc.dim(e)))
     .join('  ');
   console.log(
     `    ${effort != null && effort !== '' ? effortLine : `${pc.dim('default')}  (${effortLevels.map((e) => pc.dim(e)).join(' | ')})`}`,
   );
+}
 
-  // Aliases
-  if (Object.keys(aliases).length > 0) {
-    console.log(pc.bold('  Aliases:'));
-    for (const [alias, modelId] of Object.entries(aliases)) {
-      console.log(`    ${pc.dim(alias.padEnd(12))} → ${modelId}`);
-    }
+function displayAliasesSection(aliases: Record<string, string>): void {
+  if (Object.keys(aliases).length === 0) return;
+  console.log(pc.bold('  Aliases:'));
+  for (const [alias, modelId] of Object.entries(aliases)) {
+    console.log(`    ${pc.dim(alias.padEnd(12))} → ${modelId}`);
   }
+}
 
-  // Discovered models
-  const { models, source } = fetchResult;
+function displayAvailableModelsSection(
+  models: string[],
+  source: string,
+  agentModels: Record<string, string | undefined>,
+  activeModel: string | null | undefined,
+  aliases: Record<string, string>,
+): void {
+  const presetKeys = ['default', 'fast', 'cheap'];
   let sourceLabel: string;
   if (source === 'api') {
     sourceLabel = 'REST API';
@@ -242,7 +232,7 @@ function displayAgent(agentName: string, fetchResult: { models: string[]; source
   // Build known-set for highlighting
   const knownIds = new Set();
   for (const key of presetKeys) {
-    if (agentModels[key] !== '') knownIds.add(agentModels[key]);
+    if (agentModels[key] != null && agentModels[key] !== '') knownIds.add(agentModels[key]);
   }
   for (const modelId of Object.values(aliases)) knownIds.add(modelId);
 
@@ -260,6 +250,39 @@ function displayAgent(agentName: string, fetchResult: { models: string[]; source
       console.log(`    ${model}`);
     }
   }
+}
+
+function displayAgent(agentName: string, fetchResult: { models: string[]; source: string }) {
+  const cfg = loadHydraConfig();
+  const agentModels =
+    (cfg.models as Record<string, Record<string, string> | undefined>)[agentName] ?? {};
+  const aliases =
+    (cfg.aliases as Record<string, Record<string, string> | undefined>)[agentName] ?? {};
+  const activeModel = getActiveModel(agentName);
+  const agentInfo = (AGENTS as Record<string, { label?: string }>)[agentName];
+  const mode = cfg.mode;
+  const tierPreset = cfg.modeTiers?.[mode]?.[agentName] ?? 'default';
+
+  console.log('');
+  console.log(pc.bold(pc.cyan(`═══ ${agentInfo.label ?? agentName} ═══`)));
+
+  // Active model + reasoning effort
+  const effort = getReasoningEffort(agentName);
+  const effortStr = effort != null && effort !== '' ? pc.yellow(` [${effort}]`) : '';
+  console.log(
+    `  Active:  ${pc.green(activeModel ?? 'unknown')}${effortStr} ${pc.dim(`(mode: ${mode} → ${tierPreset})`)}`,
+  );
+
+  displayPresetsSection(agentModels, activeModel);
+  displayEffortSection(effort);
+  displayAliasesSection(aliases);
+  displayAvailableModelsSection(
+    fetchResult.models,
+    fetchResult.source,
+    agentModels,
+    activeModel,
+    aliases,
+  );
 }
 
 // ── Main ────────────────────────────────────────────────────────────────────

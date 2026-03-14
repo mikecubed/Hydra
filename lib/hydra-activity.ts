@@ -272,7 +272,7 @@ export function detectSituationalQuery(message: unknown): {
     if (match) {
       // Resolve $1 capture for agent-specific patterns
       let resolved = focus;
-      if (focus === '$1' && match[1]) {
+      if (focus === '$1' && match[1] !== '') {
         resolved = match[1].toLowerCase();
       }
       return { isSituational: true, focus: resolved };
@@ -404,13 +404,57 @@ export function clearActivityLog(): void {
  * @param {string} [opts.focus] - 'all' | agent name | 'tasks' | 'handoffs' | 'dispatch'
  * @returns {Promise<object>} ActivityDigest
  */
-export async function buildActivityDigest({
-  baseUrl,
-  workers,
-  focus,
-}: BuildDigestOpts): Promise<ActivityDigest> {
-  // Fetch daemon activity snapshot
-  let daemonActivity: DaemonActivityData | null = null;
+function buildWorkerEntry(worker: WorkerState): AgentDigestEntry['worker'] {
+  return {
+    status: worker._state ?? worker.status ?? 'unknown',
+    currentTaskId: worker._currentTask?.taskId ?? null,
+    currentTaskTitle: worker._currentTask?.title ?? null,
+    permissionMode: worker._permissionMode ?? null,
+  };
+}
+
+function buildMetricsEntry(metrics: AgentMetricsShape): AgentDigestEntry['metrics'] {
+  return {
+    callsToday: metrics.callsToday ?? 0,
+    successRate:
+      metrics.callsTotal > 0 ? Math.round((metrics.callsSuccess / metrics.callsTotal) * 100) : 100,
+    avgDurationMs: metrics.avgDurationMs ?? 0,
+    lastModel: metrics.lastModel ?? null,
+  };
+}
+
+function buildAgentDigestEntry(
+  name: string,
+  daemonActivity: DaemonActivityData | null,
+  workers: BuildDigestOpts['workers'],
+): AgentDigestEntry {
+  const activity = getAgentActivity(name);
+  const metrics = getAgentMetrics(name) as AgentMetricsShape | null;
+  const execMode = getAgentExecMode(name);
+  const worker = workers?.get(name);
+  const daemonAgent: DaemonAgentInfo = daemonActivity?.agents?.[name] ?? {};
+
+  return {
+    name,
+    status: activity.status,
+    action: activity.action,
+    taskTitle: activity.taskTitle ?? daemonAgent.currentTask?.title ?? null,
+    model: activity.model,
+    phase: activity.phase,
+    step: activity.step,
+    execMode,
+    elapsedMs: activity.updatedAt > 0 ? Date.now() - activity.updatedAt : 0,
+    currentTask: daemonAgent.currentTask ?? null,
+    pendingHandoffs: daemonAgent.pendingHandoffs ?? [],
+    worker: worker == null ? null : buildWorkerEntry(worker),
+    metrics: metrics == null ? null : buildMetricsEntry(metrics),
+  };
+}
+
+async function fetchDaemonActivity(
+  baseUrl: string,
+  focus: string | undefined,
+): Promise<DaemonActivityData | null> {
   try {
     const focusParam =
       focus != null && focus !== 'all' ? `?focus=${encodeURIComponent(focus)}` : '';
@@ -419,81 +463,33 @@ export async function buildActivityDigest({
       baseUrl,
       `/activity${focusParam}`,
     );
-    daemonActivity = res.activity ?? null;
+    return res.activity ?? null;
   } catch {
-    // Fall back to summary endpoint
     try {
       const res = await request<{ summary?: unknown }>('GET', baseUrl, '/summary');
-      daemonActivity = {
+      return {
         _fromSummary: true,
         summary: (res.summary as DaemonActivityData['summary']) ?? null,
       };
     } catch {
-      /* daemon unreachable */
+      return null;
     }
   }
+}
 
-  // Merge local agent state
-  const agents: AgentDigestEntry[] = ['claude', 'gemini', 'codex'].map((name) => {
-    const activity = getAgentActivity(name);
-    const metrics = getAgentMetrics(name) as AgentMetricsShape | null;
-    const execMode = getAgentExecMode(name);
-    const worker = workers?.get(name);
-
-    const daemonAgent: DaemonAgentInfo = daemonActivity?.agents?.[name] ?? {};
-
-    return {
-      name,
-      status: activity.status,
-      action: activity.action,
-      taskTitle: activity.taskTitle ?? daemonAgent.currentTask?.title ?? null,
-      model: activity.model,
-      phase: activity.phase,
-      step: activity.step,
-      execMode,
-      elapsedMs: activity.updatedAt > 0 ? Date.now() - activity.updatedAt : 0,
-      currentTask: daemonAgent.currentTask ?? null,
-      pendingHandoffs: daemonAgent.pendingHandoffs ?? [],
-      worker:
-        worker == null
-          ? null
-          : {
-              status: worker._state ?? worker.status ?? 'unknown',
-              currentTaskId: worker._currentTask?.taskId ?? null,
-              currentTaskTitle: worker._currentTask?.title ?? null,
-              permissionMode: worker._permissionMode ?? null,
-            },
-      metrics:
-        metrics == null
-          ? null
-          : {
-              callsToday: metrics.callsToday ?? 0,
-              successRate:
-                metrics.callsTotal > 0
-                  ? Math.round((metrics.callsSuccess / metrics.callsTotal) * 100)
-                  : 100,
-              avgDurationMs: metrics.avgDurationMs ?? 0,
-              lastModel: metrics.lastModel ?? null,
-            },
-    };
-  });
-
-  // Extract task info from daemon
-  const rawTasks: TasksData = daemonActivity?.tasks ?? daemonActivity?.summary?.openTasks ?? [];
-  const activeTasks: DaemonTask[] = Array.isArray(rawTasks)
-    ? rawTasks
-    : [...(rawTasks.inProgress ?? []), ...(rawTasks.todo ?? []), ...(rawTasks.blocked ?? [])];
-  const grouped: TasksGrouped = Array.isArray(rawTasks) ? {} : rawTasks;
-  const recentCompletions: DaemonTask[] = Array.isArray(grouped.recentlyCompleted)
-    ? grouped.recentlyCompleted
-    : [];
-
-  // Extract handoff info
+export async function buildActivityDigest({
+  baseUrl,
+  workers,
+  focus,
+}: BuildDigestOpts): Promise<ActivityDigest> {
+  const daemonActivity = await fetchDaemonActivity(baseUrl, focus);
+  const agents: AgentDigestEntry[] = ['claude', 'gemini', 'codex'].map((name) =>
+    buildAgentDigestEntry(name, daemonActivity, workers),
+  );
+  const { activeTasks, recentCompletions } = extractActiveTasksFromDaemon(daemonActivity);
   const handoffs = daemonActivity?.handoffs ?? {};
   const pendingHandoffs: DaemonHandoff[] = handoffs.pending ?? [];
   const recentHandoffs: DaemonHandoff[] = handoffs.recent ?? [];
-
-  // Session metrics
   const sessionUsage = getSessionUsage();
 
   return {
@@ -516,6 +512,21 @@ export async function buildActivityDigest({
   };
 }
 
+function extractActiveTasksFromDaemon(daemonActivity: DaemonActivityData | null): {
+  activeTasks: DaemonTask[];
+  recentCompletions: DaemonTask[];
+} {
+  const rawTasks: TasksData = daemonActivity?.tasks ?? daemonActivity?.summary?.openTasks ?? [];
+  const activeTasks: DaemonTask[] = Array.isArray(rawTasks)
+    ? rawTasks
+    : [...(rawTasks.inProgress ?? []), ...(rawTasks.todo ?? []), ...(rawTasks.blocked ?? [])];
+  const grouped: TasksGrouped = Array.isArray(rawTasks) ? {} : rawTasks;
+  const recentCompletions: DaemonTask[] = Array.isArray(grouped.recentlyCompleted)
+    ? grouped.recentlyCompleted
+    : [];
+  return { activeTasks, recentCompletions };
+}
+
 /** Pull the most recent dispatch entry from the activity log. */
 function getLastDispatchFromLog(): ActivityEntry | null {
   for (let i = activityLog.length - 1; i >= 0; i--) {
@@ -525,6 +536,145 @@ function getLastDispatchFromLog(): ActivityEntry | null {
 }
 
 // ── Digest Formatter ────────────────────────────────────────────────────────
+
+function formatSessionLine(session: DaemonSession): string {
+  const since =
+    session.startedAt == null
+      ? '?'
+      : new Date(session.startedAt).toLocaleTimeString('en-US', {
+          hour: '2-digit',
+          minute: '2-digit',
+          hour12: false,
+        });
+  return `Session: ${session.status ?? 'active'} since ${since} | Focus: "${(session.focus ?? 'general').slice(0, 60)}"`;
+}
+
+function formatAgentsSection(digest: ActivityDigest, focus: string): string[] {
+  const lines: string[] = ['', 'AGENTS:'];
+  const agentsToShow =
+    focus === 'all' ? digest.agents : digest.agents.filter((a) => a.name === focus);
+  for (const a of agentsToShow) {
+    let execTag = '';
+    if (a.execMode === 'worker') execTag = ' [W]';
+    else if (a.execMode === 'terminal') execTag = ' [T]';
+    const elapsed = a.elapsedMs > 5000 ? ` ${formatElapsedCompact(a.elapsedMs)}` : '';
+    const model = a.model == null ? '' : ` (${a.model})`;
+    const taskStr = a.taskTitle == null ? '' : ` "${a.taskTitle.slice(0, 50)}"`;
+    const phase = a.phase == null ? '' : ` [${a.phase}${a.step == null ? '' : ` ${a.step}`}]`;
+    lines.push(`- ${a.name} [${a.status}]${taskStr}${phase}${model}${execTag}${elapsed}`);
+    for (const h of a.pendingHandoffs.slice(0, 2)) {
+      lines.push(`  ^ pending handoff from ${h.from ?? '?'}: "${(h.summary ?? '').slice(0, 60)}"`);
+    }
+  }
+  return lines;
+}
+
+function formatTasksSection(digest: ActivityDigest, focus: string): string[] {
+  const tasksToShow =
+    focus === 'all' || focus === 'tasks'
+      ? digest.activeTasks
+      : digest.activeTasks.filter((t) => t.owner === focus);
+  if (tasksToShow.length === 0) return [];
+  const lines: string[] = ['', `TASKS (${String(tasksToShow.length)} active):`];
+  for (const t of tasksToShow.slice(0, 8)) {
+    const blocked =
+      (t.blockedBy?.length ?? 0) > 0 ? ` (blocked by ${(t.blockedBy ?? []).join(', ')})` : '';
+    lines.push(
+      `- ${t.id ?? t.taskId ?? '?'} [${t.status ?? '?'}] ${t.owner ?? 'unassigned'} - "${(t.title ?? '').slice(0, 60)}"${blocked}`,
+    );
+  }
+  if (tasksToShow.length > 8) lines.push(`  ... and ${String(tasksToShow.length - 8)} more`);
+  return lines;
+}
+
+function formatHandoffLine(h: DaemonHandoff, suffix = ''): string {
+  return `  - ${h.id ?? '?'}: ${h.from ?? '?'} -> ${h.to ?? '?'} "${(h.summary ?? '').slice(0, 80)}"${suffix}`;
+}
+
+function formatHandoffsSection(digest: ActivityDigest): string[] {
+  if (digest.pendingHandoffs.length === 0 && digest.recentHandoffs.length === 0) return [];
+  const lines: string[] = ['', 'HANDOFFS:'];
+  if (digest.pendingHandoffs.length > 0) {
+    lines.push('  Pending:');
+    for (const h of digest.pendingHandoffs.slice(0, 3)) {
+      lines.push(formatHandoffLine(h));
+      if (h.nextStep != null) lines.push(`    Next: ${h.nextStep.slice(0, 80)}`);
+    }
+  }
+  if (digest.recentHandoffs.length > 0) {
+    lines.push('  Recent:');
+    for (const h of digest.recentHandoffs.slice(0, 3)) {
+      lines.push(formatHandoffLine(h, h.acknowledged === true ? ' (ack)' : ''));
+    }
+  }
+  return lines;
+}
+
+function formatCompletionsSection(digest: ActivityDigest): string[] {
+  if (digest.recentCompletions.length === 0) return [];
+  const lines: string[] = ['', 'RECENT COMPLETIONS:'];
+  for (const c of digest.recentCompletions.slice(0, 3)) {
+    const elapsed = c.durationMs == null ? '' : ` in ${String(Math.round(c.durationMs / 1000))}s`;
+    lines.push(
+      `- ${c.id ?? c.taskId ?? '?'}: ${c.owner ?? c.agent ?? '?'} done${elapsed} - "${(c.title ?? '').slice(0, 60)}"`,
+    );
+  }
+  return lines;
+}
+
+function formatDispatchSection(digest: ActivityDigest): string[] {
+  if (digest.lastDispatch == null) return [];
+  const narrative =
+    digest.lastDispatch.narrative.length > 0 ? digest.lastDispatch.narrative : 'unknown';
+  return ['', 'LAST DISPATCH:', `- ${narrative}`];
+}
+
+function formatActivityLogSection(digest: ActivityDigest): string[] {
+  if (digest.activityLog.length === 0) return [];
+  const lines: string[] = ['', 'ACTIVITY LOG (recent):'];
+  for (const entry of digest.activityLog.slice(-5)) {
+    const time = new Date(entry.at).toLocaleTimeString('en-US', {
+      hour: '2-digit',
+      minute: '2-digit',
+      hour12: false,
+    });
+    lines.push(`- ${time} [${entry.type}] ${entry.narrative.slice(0, 100)}`);
+  }
+  return lines;
+}
+
+function formatMetricsFooter(digest: ActivityDigest): string[] {
+  if (digest.metrics.totalCalls === 0 && digest.metrics.totalTokens === 0) return [];
+  const cost = digest.metrics.totalCost > 0 ? ` | ~$${digest.metrics.totalCost.toFixed(2)}` : '';
+  const tokens =
+    digest.metrics.totalTokens > 0
+      ? ` | ${String(Math.round(digest.metrics.totalTokens / 1000))}K tokens`
+      : '';
+  return ['', `Session: ${String(digest.metrics.totalCalls)} calls${cost}${tokens}`];
+}
+
+function gatherDigestSections(digest: ActivityDigest, focus: string): string[] {
+  const isAgentFocus = ['claude', 'gemini', 'codex'].includes(focus);
+  const lines: string[] = [];
+
+  if (digest.session != null) lines.push(formatSessionLine(digest.session));
+
+  if (focus === 'all' || isAgentFocus) lines.push(...formatAgentsSection(digest, focus));
+
+  if (focus === 'all' || focus === 'tasks' || isAgentFocus)
+    lines.push(...formatTasksSection(digest, focus));
+
+  if (focus === 'all' || focus === 'handoffs') lines.push(...formatHandoffsSection(digest));
+
+  if (focus === 'all' || focus === 'tasks') lines.push(...formatCompletionsSection(digest));
+
+  if (focus === 'all' || focus === 'dispatch') lines.push(...formatDispatchSection(digest));
+
+  if (focus === 'all') lines.push(...formatActivityLogSection(digest));
+
+  lines.push(...formatMetricsFooter(digest));
+  return lines;
+}
 
 /**
  * Format an ActivityDigest into a text block for system prompt injection.
@@ -537,154 +687,8 @@ function getLastDispatchFromLog(): ActivityEntry | null {
 export function formatDigestForPrompt(digest: ActivityDigest, opts: DigestOpts = {}): string {
   const maxChars = opts.maxChars ?? 6000;
   const focus = opts.focus ?? 'all';
-  const lines = ['=== ACTIVITY DIGEST ==='];
-
-  // Session line
-  if (digest.session != null) {
-    const s = digest.session;
-    const since =
-      s.startedAt == null
-        ? '?'
-        : new Date(s.startedAt).toLocaleTimeString('en-US', {
-            hour: '2-digit',
-            minute: '2-digit',
-            hour12: false,
-          });
-    lines.push(
-      `Session: ${s.status ?? 'active'} since ${since} | Focus: "${(s.focus ?? 'general').slice(0, 60)}"`,
-    );
-  }
-
-  // Agents section (always show unless focus is very narrow)
-  if (focus === 'all' || ['claude', 'gemini', 'codex'].includes(focus)) {
-    lines.push('');
-    lines.push('AGENTS:');
-    const agentsToShow =
-      focus === 'all' ? digest.agents : digest.agents.filter((a) => a.name === focus);
-    for (const a of agentsToShow) {
-      let execTag = '';
-      if (a.execMode === 'worker') execTag = ' [W]';
-      else if (a.execMode === 'terminal') execTag = ' [T]';
-      const elapsed = a.elapsedMs > 5000 ? ` ${formatElapsedCompact(a.elapsedMs)}` : '';
-      const model = a.model == null ? '' : ` (${a.model})`;
-      const taskStr = a.taskTitle == null ? '' : ` "${a.taskTitle.slice(0, 50)}"`;
-      const phase = a.phase == null ? '' : ` [${a.phase}${a.step == null ? '' : ` ${a.step}`}]`;
-      lines.push(`- ${a.name} [${a.status}]${taskStr}${phase}${model}${execTag}${elapsed}`);
-      if (a.pendingHandoffs.length > 0) {
-        for (const h of a.pendingHandoffs.slice(0, 2)) {
-          lines.push(
-            `  ^ pending handoff from ${h.from ?? '?'}: "${(h.summary ?? '').slice(0, 60)}"`,
-          );
-        }
-      }
-    }
-  }
-
-  // Tasks section
-  if (focus === 'all' || focus === 'tasks' || ['claude', 'gemini', 'codex'].includes(focus)) {
-    const tasksToShow =
-      focus === 'all' || focus === 'tasks'
-        ? digest.activeTasks
-        : digest.activeTasks.filter((t) => t.owner === focus);
-
-    if (tasksToShow.length > 0) {
-      lines.push('');
-      lines.push(`TASKS (${String(tasksToShow.length)} active):`);
-      for (const t of tasksToShow.slice(0, 8)) {
-        const blocked =
-          (t.blockedBy?.length ?? 0) > 0 ? ` (blocked by ${(t.blockedBy ?? []).join(', ')})` : '';
-        lines.push(
-          `- ${t.id ?? t.taskId ?? '?'} [${t.status ?? '?'}] ${t.owner ?? 'unassigned'} - "${(t.title ?? '').slice(0, 60)}"${blocked}`,
-        );
-      }
-      if (tasksToShow.length > 8) {
-        lines.push(`  ... and ${String(tasksToShow.length - 8)} more`);
-      }
-    }
-  }
-
-  // Handoffs section
-  if (focus === 'all' || focus === 'handoffs') {
-    if (digest.pendingHandoffs.length > 0 || digest.recentHandoffs.length > 0) {
-      lines.push('');
-      lines.push('HANDOFFS:');
-      if (digest.pendingHandoffs.length > 0) {
-        lines.push('  Pending:');
-        for (const h of digest.pendingHandoffs.slice(0, 3)) {
-          lines.push(
-            `  - ${h.id ?? '?'}: ${h.from ?? '?'} -> ${h.to ?? '?'} "${(h.summary ?? '').slice(0, 80)}"`,
-          );
-          if (h.nextStep != null) lines.push(`    Next: ${h.nextStep.slice(0, 80)}`);
-        }
-      }
-      if (digest.recentHandoffs.length > 0) {
-        lines.push('  Recent:');
-        for (const h of digest.recentHandoffs.slice(0, 3)) {
-          const acked = h.acknowledged === true ? ' (ack)' : '';
-          lines.push(
-            `  - ${h.id ?? '?'}: ${h.from ?? '?'} -> ${h.to ?? '?'} "${(h.summary ?? '').slice(0, 80)}"${acked}`,
-          );
-        }
-      }
-    }
-  }
-
-  // Recent completions
-  if (focus === 'all' || focus === 'tasks') {
-    if (digest.recentCompletions.length > 0) {
-      lines.push('');
-      lines.push('RECENT COMPLETIONS:');
-      for (const c of digest.recentCompletions.slice(0, 3)) {
-        const elapsed =
-          c.durationMs == null ? '' : ` in ${String(Math.round(c.durationMs / 1000))}s`;
-        lines.push(
-          `- ${c.id ?? c.taskId ?? '?'}: ${c.owner ?? c.agent ?? '?'} done${elapsed} - "${(c.title ?? '').slice(0, 60)}"`,
-        );
-      }
-    }
-  }
-
-  // Last dispatch
-  if (focus === 'all' || focus === 'dispatch') {
-    const lastDispatch = digest.lastDispatch;
-    if (lastDispatch != null) {
-      lines.push('');
-      lines.push('LAST DISPATCH:');
-      lines.push(`- ${lastDispatch.narrative.length > 0 ? lastDispatch.narrative : 'unknown'}`);
-    }
-  }
-
-  // Activity log
-  if (focus === 'all') {
-    const recentLog = digest.activityLog;
-    if (recentLog.length > 0) {
-      lines.push('');
-      lines.push('ACTIVITY LOG (recent):');
-      for (const entry of recentLog.slice(-5)) {
-        const time = new Date(entry.at).toLocaleTimeString('en-US', {
-          hour: '2-digit',
-          minute: '2-digit',
-          hour12: false,
-        });
-        lines.push(`- ${time} [${entry.type}] ${entry.narrative.slice(0, 100)}`);
-      }
-    }
-  }
-
-  // Session metrics footer
-  if (digest.metrics.totalCalls > 0 || digest.metrics.totalTokens > 0) {
-    lines.push('');
-    const cost = digest.metrics.totalCost > 0 ? ` | ~$${digest.metrics.totalCost.toFixed(2)}` : '';
-    const tokens =
-      digest.metrics.totalTokens > 0
-        ? ` | ${String(Math.round(digest.metrics.totalTokens / 1000))}K tokens`
-        : '';
-    lines.push(`Session: ${String(digest.metrics.totalCalls)} calls${cost}${tokens}`);
-  }
-
-  lines.push('=== END DIGEST ===');
-
-  // Enforce character budget
+  const body = gatherDigestSections(digest, focus);
+  const lines = ['=== ACTIVITY DIGEST ===', ...body, '=== END DIGEST ==='];
   let result = lines.join('\n');
   if (result.length > maxChars) {
     result = `${result.slice(0, maxChars - 20)}\n... (truncated)\n=== END DIGEST ===`;
@@ -726,6 +730,72 @@ Rules:
 - Write for a developer who just sat down and needs to get oriented fast`;
 }
 
+interface SitrepSupplementalOpts {
+  sessionFocus: string | null;
+  gitBranch?: string;
+  gitLog?: string;
+  counts: ActivityDigest['counts'];
+  budgetStatus?: BudgetStatus | null;
+  statsData?: StatsData | null;
+}
+
+function buildBudgetLine(budgetStatus: BudgetStatus): string {
+  const lvl = budgetStatus.level ?? budgetStatus.weekly?.level ?? 'unknown';
+  const pct =
+    budgetStatus.weekly?.percentUsed == null
+      ? ''
+      : `${String(Math.round(budgetStatus.weekly.percentUsed))}%`;
+  const msg = budgetStatus.message ?? budgetStatus.weekly?.message ?? '';
+  return `Budget: ${lvl}${pct.length > 0 ? ` (${pct} used)` : ''}${msg.length > 0 ? ` — ${msg}` : ''}`;
+}
+
+function buildStatsLine(statsData: StatsData): string | null {
+  const parts: string[] = [];
+  if (statsData.uptime != null) parts.push(`uptime ${statsData.uptime}`);
+  if (statsData.totalCalls != null) parts.push(`${String(statsData.totalCalls)} total calls`);
+  if (statsData.totalTokens != null)
+    parts.push(`${String(Math.round(statsData.totalTokens / 1000))}K tokens`);
+  return parts.length > 0 ? `Daemon: ${parts.join(', ')}` : null;
+}
+
+function buildSitrepSupplemental(opts: SitrepSupplementalOpts): string[] {
+  const { sessionFocus, gitBranch, gitLog, counts, budgetStatus, statsData } = opts;
+  const supplemental: string[] = [];
+
+  if (sessionFocus != null) supplemental.push(`Session focus: ${sessionFocus}`);
+  if (gitBranch != null) supplemental.push(`Git branch: ${gitBranch}`);
+  if (gitLog != null) supplemental.push(`Recent commits:\n${gitLog}`);
+
+  if (counts != null) {
+    const parts: string[] = [];
+    if (counts.completed != null) parts.push(`${String(counts.completed)} completed`);
+    if (counts.open != null) parts.push(`${String(counts.open)} open`);
+    if (counts.blocked != null) parts.push(`${String(counts.blocked)} blocked`);
+    if (parts.length > 0) supplemental.push(`Task progress: ${parts.join(', ')}`);
+  }
+
+  if (budgetStatus != null) supplemental.push(buildBudgetLine(budgetStatus));
+
+  if (statsData != null) {
+    const line = buildStatsLine(statsData);
+    if (line != null) supplemental.push(line);
+  }
+
+  return supplemental;
+}
+
+function buildSitrepFallback(
+  formattedDigest: string,
+  sessionFocus: string | null,
+  gitBranch: string | undefined,
+): SitrepResult {
+  const headerParts: string[] = [];
+  if (sessionFocus != null) headerParts.push(`Focus: ${sessionFocus}`);
+  if (gitBranch != null) headerParts.push(`Branch: ${gitBranch}`);
+  const header = headerParts.length > 0 ? `${headerParts.join(' | ')}\n\n` : '';
+  return { narrative: header + formattedDigest, fallback: true, reason: 'no_provider' };
+}
+
 /**
  * Generate an AI-narrated situation report.
  * Falls back to the raw formatted digest if no AI provider is available.
@@ -742,70 +812,27 @@ Rules:
 export async function generateSitrep(opts: SitrepOpts = {}): Promise<SitrepResult> {
   const { baseUrl, workers, budgetStatus, gitBranch, gitLog, statsData } = opts;
 
-  // Build activity digest (reuse existing function)
   const digest = await buildActivityDigest({ baseUrl: baseUrl ?? '', workers, focus: 'all' });
   const formattedDigest = formatDigestForPrompt(digest, { maxChars: 4000 });
-
-  // Extract session focus for prominence
   const sessionFocus = digest.session?.focus ?? null;
 
-  // Append supplemental data not in the digest
-  const supplemental: string[] = [];
-  if (sessionFocus != null) {
-    supplemental.push(`Session focus: ${sessionFocus}`);
-  }
-  if (gitBranch != null) {
-    supplemental.push(`Git branch: ${gitBranch}`);
-  }
-  if (gitLog != null) {
-    supplemental.push(`Recent commits:\n${gitLog}`);
-  }
-  // Task progress summary from digest counts
-  if (digest.counts != null) {
-    const c = digest.counts;
-    const parts: string[] = [];
-    if (c.completed != null) parts.push(`${String(c.completed)} completed`);
-    if (c.open != null) parts.push(`${String(c.open)} open`);
-    if (c.blocked != null) parts.push(`${String(c.blocked)} blocked`);
-    if (parts.length > 0) supplemental.push(`Task progress: ${parts.join(', ')}`);
-  }
-  if (budgetStatus != null) {
-    const lvl = budgetStatus.level ?? budgetStatus.weekly?.level ?? 'unknown';
-    const pct =
-      budgetStatus.weekly?.percentUsed == null
-        ? ''
-        : `${String(Math.round(budgetStatus.weekly.percentUsed))}%`;
-    const msg = budgetStatus.message ?? budgetStatus.weekly?.message ?? '';
-    supplemental.push(
-      `Budget: ${lvl}${pct.length > 0 ? ` (${pct} used)` : ''}${msg.length > 0 ? ` — ${msg}` : ''}`,
-    );
-  }
-  if (statsData != null) {
-    const parts: string[] = [];
-    if (statsData.uptime != null) parts.push(`uptime ${statsData.uptime}`);
-    if (statsData.totalCalls != null) parts.push(`${String(statsData.totalCalls)} total calls`);
-    if (statsData.totalTokens != null)
-      parts.push(`${String(Math.round(statsData.totalTokens / 1000))}K tokens`);
-    if (parts.length > 0) supplemental.push(`Daemon: ${parts.join(', ')}`);
-  }
+  const supplemental = buildSitrepSupplemental({
+    sessionFocus,
+    gitBranch,
+    gitLog,
+    counts: digest.counts,
+    budgetStatus,
+    statsData,
+  });
 
   const userContent =
     supplemental.length > 0
       ? `${formattedDigest}\n\nSUPPLEMENTAL:\n${supplemental.join('\n')}`
       : formattedDigest;
 
-  // Check if any AI provider is available
   const providers = detectAvailableProviders();
-  if (providers.length === 0) {
-    // Fallback: prepend session focus + branch as big-picture header
-    const headerParts: string[] = [];
-    if (sessionFocus != null) headerParts.push(`Focus: ${sessionFocus}`);
-    if (gitBranch != null) headerParts.push(`Branch: ${gitBranch}`);
-    const header = headerParts.length > 0 ? `${headerParts.join(' | ')}\n\n` : '';
-    return { narrative: header + formattedDigest, fallback: true, reason: 'no_provider' };
-  }
+  if (providers.length === 0) return buildSitrepFallback(formattedDigest, sessionFocus, gitBranch);
 
-  // Call AI via the fallback chain
   const messages = [
     { role: 'system', content: getSitrepSystemPrompt() },
     { role: 'user', content: userContent },
@@ -819,7 +846,6 @@ export async function generateSitrep(opts: SitrepOpts = {}): Promise<SitrepResul
     );
     const narrative = (typeof result.fullResponse === 'string' ? result.fullResponse : '').trim();
     if (narrative.length === 0) {
-      // AI returned empty response — fall back to raw digest
       return { narrative: formattedDigest, fallback: true, reason: 'empty_response' };
     }
     return {
@@ -830,7 +856,6 @@ export async function generateSitrep(opts: SitrepOpts = {}): Promise<SitrepResul
       fallback: false,
     };
   } catch (err: unknown) {
-    // All providers failed — fall back to raw digest with error detail
     return {
       narrative: formattedDigest,
       fallback: true,

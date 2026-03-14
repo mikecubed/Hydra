@@ -65,7 +65,8 @@ export function buildSafetyPrompt(
   let attributionSection = '';
   if (attribution) {
     const trailerLines = [`Originated-By: ${attribution.pipeline}`];
-    if (attribution.agent) trailerLines.push(`Executed-By: ${attribution.agent}`);
+    if (attribution.agent != null && attribution.agent !== '')
+      trailerLines.push(`Executed-By: ${attribution.agent}`);
     attributionSection = `
 
 ### Commit Attribution
@@ -178,7 +179,7 @@ export function checkDiffSize(
     timeout: 10_000,
   });
 
-  if (result.status !== 0 || !result.stdout) return null;
+  if (result.status !== 0 || result.stdout === '') return null;
 
   const lines = result.stdout.trim().split('\n');
   const summary = lines.at(-1) ?? '';
@@ -196,6 +197,60 @@ export function checkDiffSize(
   }
 
   return null;
+}
+
+function collectFileViolations(
+  changedFiles: string[],
+  protectedFiles: Set<string>,
+  protectedPatterns: RegExp[],
+): ScanViolation[] {
+  const violations: ScanViolation[] = [];
+  for (const file of changedFiles) {
+    const normalized = file.replace(/\\/g, '/');
+    if (protectedFiles.has(normalized)) {
+      violations.push({
+        type: 'protected_file',
+        detail: `Modified protected file: ${file}`,
+        severity: 'critical',
+      });
+    }
+    for (const pattern of protectedPatterns) {
+      if (pattern.test(normalized)) {
+        violations.push({
+          type: 'protected_pattern',
+          detail: `Modified file matching protected pattern: ${file}`,
+          severity: 'warning',
+        });
+        break;
+      }
+    }
+  }
+  return violations;
+}
+
+function collectDeletedTestViolations(
+  projectRoot: string,
+  branchName: string,
+  baseBranch: string,
+): ScanViolation[] {
+  const violations: ScanViolation[] = [];
+  const deletedResult = spawnSyncCapture(
+    'git',
+    ['diff', '--name-only', '--diff-filter=D', `${baseBranch}...${branchName}`],
+    { cwd: projectRoot, encoding: 'utf8', timeout: 10_000 },
+  );
+  if (deletedResult.status !== 0 || deletedResult.stdout === '') return violations;
+  const deletedFiles = deletedResult.stdout.trim().split('\n').filter(Boolean);
+  for (const file of deletedFiles) {
+    if (/\.test\.|\.spec\.|__tests__/.test(file)) {
+      violations.push({
+        type: 'deleted_test',
+        detail: `Deleted test file: ${file}`,
+        severity: 'critical',
+      });
+    }
+  }
+  return violations;
 }
 
 /**
@@ -228,63 +283,23 @@ export function scanBranchViolations(
     { cwd: projectRoot, encoding: 'utf8', timeout: 10_000 },
   );
 
-  if (diffResult.status !== 0 || !diffResult.stdout) {
+  if (diffResult.status !== 0 || diffResult.stdout === '') {
     return violations;
   }
 
   const changedFiles = diffResult.stdout.trim().split('\n').filter(Boolean);
 
-  for (const file of changedFiles) {
-    const normalized = file.replace(/\\/g, '/');
-
-    if (protectedFiles.has(normalized)) {
-      violations.push({
-        type: 'protected_file',
-        detail: `Modified protected file: ${file}`,
-        severity: 'critical',
-      });
-    }
-
-    for (const pattern of protectedPatterns) {
-      if (pattern.test(normalized)) {
-        violations.push({
-          type: 'protected_pattern',
-          detail: `Modified file matching protected pattern: ${file}`,
-          severity: 'warning',
-        });
-        break;
-      }
-    }
-  }
+  violations.push(...collectFileViolations(changedFiles, protectedFiles, protectedPatterns));
 
   if (checkDeletedTests) {
-    const deletedResult = spawnSyncCapture(
-      'git',
-      ['diff', '--name-only', '--diff-filter=D', `${baseBranch}...${branchName}`],
-      { cwd: projectRoot, encoding: 'utf8', timeout: 10_000 },
-    );
-
-    if (deletedResult.status === 0 && deletedResult.stdout) {
-      const deletedFiles = deletedResult.stdout.trim().split('\n').filter(Boolean);
-      for (const file of deletedFiles) {
-        if (/\.test\.|\.spec\.|__tests__/.test(file)) {
-          violations.push({
-            type: 'deleted_test',
-            detail: `Deleted test file: ${file}`,
-            severity: 'critical',
-          });
-        }
-      }
-    }
+    violations.push(...collectDeletedTestViolations(projectRoot, branchName, baseBranch));
   }
 
-  // Secrets scan
   if (secretsScan && changedFiles.length > 0) {
     const secretViolations = scanForSecrets(projectRoot, changedFiles);
     violations.push(...secretViolations);
   }
 
-  // Diff size check
   if (maxDiffLines > 0) {
     const diffViolation = checkDiffSize(projectRoot, branchName, { baseBranch, maxDiffLines });
     if (diffViolation) violations.push(diffViolation);

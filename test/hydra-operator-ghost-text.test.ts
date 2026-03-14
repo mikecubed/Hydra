@@ -1,16 +1,16 @@
-/* eslint-disable @typescript-eslint/no-explicit-any */
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
+import type { Interface as ReadlineInterface } from 'node:readline';
 import { createGhostTextHelpers } from '../lib/hydra-operator-ghost-text.ts';
 
 // Minimal readline-like mock
-function makeRl() {
+function makeRl(): ReadlineInterface {
   return {
     line: '',
     prompt: (_preserveCursor?: boolean) => {},
-    write: (_text: any, _key?: any) => {},
-    _ttyWrite: (_s: any, _key: any) => {},
-  } as any;
+    write: (_text: unknown, _key?: unknown) => {},
+    _ttyWrite: (_s: unknown, _key: unknown) => {},
+  } as unknown as ReadlineInterface;
 }
 
 describe('createGhostTextHelpers', () => {
@@ -127,9 +127,10 @@ describe('createGhostTextHelpers', () => {
   it('wraps rl.prompt so that fresh prompts (no preserveCursor) call showGhostAfterPrompt', () => {
     const rl = makeRl();
     let originalCalled = false;
-    rl.prompt = (_preserveCursor?: boolean) => {
+    const originalPrompt = (_preserveCursor?: boolean) => {
       originalCalled = true;
     };
+    Object.assign(rl, { prompt: originalPrompt });
     createGhostTextHelpers({
       rl,
       getConciergeActive: () => false,

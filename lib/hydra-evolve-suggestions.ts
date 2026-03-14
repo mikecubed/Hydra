@@ -177,14 +177,8 @@ function isTooSimilar(existingEntries: SuggestionEntry[], newText: string, thres
  * @param {object} entry - Suggestion data (without id)
  * @returns {object|null} The added entry or null if deduped
  */
-export function addSuggestion(sg: Suggestions, entry: SuggestionEntry): SuggestionEntry | null {
-  const dedupText = `${entry.title ?? ''} ${entry.description ?? ''}`;
-  if (dedupText.trim() !== '' && isTooSimilar(sg.entries, dedupText)) {
-    return null;
-  }
-
-  const id = nextId(sg.entries);
-  const fullEntry = {
+function buildEntryCoreFields(entry: SuggestionEntry, id: string): Partial<SuggestionEntry> {
+  return {
     id,
     createdAt: entry.createdAt ?? new Date().toISOString().split('T')[0],
     source: entry.source ?? 'user:manual',
@@ -193,6 +187,11 @@ export function addSuggestion(sg: Suggestions, entry: SuggestionEntry): Suggesti
     title: entry.title ?? '',
     description: entry.description ?? '',
     specPath: entry.specPath ?? null,
+  };
+}
+
+function buildEntryTrackingFields(entry: SuggestionEntry): Partial<SuggestionEntry> {
+  return {
     priority: entry.priority ?? 'medium',
     status: 'pending',
     attempts: entry.attempts ?? 0,
@@ -204,6 +203,19 @@ export function addSuggestion(sg: Suggestions, entry: SuggestionEntry): Suggesti
     tags: entry.tags ?? [],
     notes: entry.notes ?? '',
   };
+}
+
+export function addSuggestion(sg: Suggestions, entry: SuggestionEntry): SuggestionEntry | null {
+  const dedupText = `${entry.title ?? ''} ${entry.description ?? ''}`;
+  if (dedupText.trim() !== '' && isTooSimilar(sg.entries, dedupText)) {
+    return null;
+  }
+
+  const id = nextId(sg.entries);
+  const fullEntry = {
+    ...buildEntryCoreFields(entry, id),
+    ...buildEntryTrackingFields(entry),
+  } as SuggestionEntry;
 
   sg.entries.push(fullEntry);
   return fullEntry;
@@ -323,6 +335,42 @@ export function searchSuggestions(
  * @param {object} [opts] - { sessionId, specPath, notes, source }
  * @returns {object|null} The created suggestion or null if deduped/invalid
  */
+function determineRoundSource(roundResult: EvolveRoundResult, opts: CreateFromRoundOpts): string {
+  if (opts.source != null) return opts.source;
+  if (roundResult.verdict === 'skipped') return 'auto:deferred';
+  return 'auto:rejected-round';
+}
+
+function determineRoundPriority(roundResult: EvolveRoundResult): string {
+  if ((roundResult.score ?? 0) >= 5) return 'high';
+  if (
+    (roundResult.score ?? 0) <= 1 &&
+    roundResult.investigations?.diagnoses?.every((d) => d.diagnosis === 'transient') === true
+  ) {
+    return 'high';
+  }
+  return 'medium';
+}
+
+function buildRoundSourceRef(
+  opts: CreateFromRoundOpts,
+  roundResult: EvolveRoundResult,
+): string | null {
+  return opts.sessionId != null && opts.sessionId !== ''
+    ? `${opts.sessionId}/round-${String(roundResult.round ?? '')}`
+    : null;
+}
+
+function buildRoundTags(roundResult: EvolveRoundResult, source: string): string[] {
+  const [, suffix] = source.split(':') as [string, string | undefined];
+  const sourceTag = suffix != null && suffix !== '' ? suffix : source;
+  return [
+    roundResult.area ?? '',
+    sourceTag,
+    ...(roundResult.verdict != null && roundResult.verdict !== '' ? [roundResult.verdict] : []),
+  ];
+}
+
 export function createSuggestionFromRound(
   sg: Suggestions,
   roundResult: EvolveRoundResult,
@@ -339,46 +387,19 @@ export function createSuggestionFromRound(
     return null;
   }
 
-  // Build a short title from the improvement text
   const title = improvement.length > 100 ? `${improvement.slice(0, 97)}...` : improvement;
-
-  // Determine source
-  let source: string;
-  if (opts.source != null) {
-    source = opts.source;
-  } else if (roundResult.verdict === 'skipped') {
-    source = 'auto:deferred';
-  } else {
-    source = 'auto:rejected-round';
-  }
-
-  // Determine priority based on score
-  let priority = 'medium';
-  if ((roundResult.score ?? 0) >= 5) priority = 'high';
-  if (
-    (roundResult.score ?? 0) <= 1 &&
-    roundResult.investigations?.diagnoses?.every((d) => d.diagnosis === 'transient') === true
-  ) {
-    // Low score due to transient failures (timeouts etc.) — likely worth retrying
-    priority = 'high';
-  }
+  const source = determineRoundSource(roundResult, opts);
+  const priority = determineRoundPriority(roundResult);
 
   return addSuggestion(sg, {
     source,
-    sourceRef:
-      opts.sessionId != null && opts.sessionId !== ''
-        ? `${opts.sessionId}/round-${String(roundResult.round ?? '')}`
-        : null,
+    sourceRef: buildRoundSourceRef(opts, roundResult),
     area: roundResult.area,
     title,
     description: improvement,
     specPath: opts.specPath ?? null,
     priority,
-    tags: [
-      roundResult.area ?? '',
-      source.split(':')[1] === '' ? source : source.split(':')[1],
-      ...(roundResult.verdict != null && roundResult.verdict !== '' ? [roundResult.verdict] : []),
-    ],
+    tags: buildRoundTags(roundResult, source),
     notes: opts.notes ?? '',
   });
 }
@@ -418,6 +439,45 @@ function askRaw(
  * @param {object} [opts] - { maxDisplay: 5 }
  * @returns {Promise<{ action: string, suggestion?: object, text?: string }>}
  */
+function formatAttemptInfo(s: SuggestionEntry): string[] {
+  if ((s.attempts ?? 0) === 0) return [];
+  return [
+    `Last: ${s.lastAttemptVerdict ?? '?'} (${s.lastAttemptScore == null ? '?' : String(s.lastAttemptScore)}/10)`,
+    `Attempts: ${String(s.attempts ?? 0)}/${String(s.maxAttempts ?? 0)}`,
+  ];
+}
+
+function displaySuggestionItem(s: SuggestionEntry, i: number): void {
+  const num = pc.bold(pc.white(`  ${String(i + 1)}.`));
+  const idTag = pc.dim(`[${s.id ?? ''}]`);
+  const areaTag = pc.yellow(s.area);
+  const titleText =
+    (s.title ?? '').length > 60 ? `${(s.title ?? '').slice(0, 57)}...` : (s.title ?? '');
+
+  console.error(`${num} ${idTag} ${areaTag}: ${titleText} ${pc.dim(`(${s.priority ?? ''})`)}`);
+
+  const parts = formatAttemptInfo(s);
+  if (s.specPath != null && s.specPath !== '') parts.push('has spec');
+  if (parts.length > 0) {
+    console.error(`     ${pc.dim(parts.join(' | '))}`);
+  }
+  console.error('');
+}
+
+function displaySuggestionList(
+  displayed: SuggestionEntry[],
+  pending: SuggestionEntry[],
+  maxDisplay: number,
+): void {
+  for (const [i, s] of displayed.entries()) {
+    displaySuggestionItem(s, i);
+  }
+  if (pending.length > maxDisplay) {
+    console.error(pc.dim(`     ... and ${String(pending.length - maxDisplay)} more`));
+    console.error('');
+  }
+}
+
 export async function promptSuggestionPicker(
   pending: SuggestionEntry[],
   opts: { maxDisplay?: number } = {},
@@ -432,36 +492,7 @@ export async function promptSuggestionPicker(
     console.error(pc.bold(pc.cyan(`  Pending Suggestions (${String(pending.length)}):`)));
     console.error('');
 
-    for (const [i, s] of displayed.entries()) {
-      const num = pc.bold(pc.white(`  ${String(i + 1)}.`));
-      const idTag = pc.dim(`[${s.id ?? ''}]`);
-      const areaTag = pc.yellow(s.area);
-      const titleText =
-        (s.title ?? '').length > 60 ? `${(s.title ?? '').slice(0, 57)}...` : (s.title ?? '');
-
-      console.error(`${num} ${idTag} ${areaTag}: ${titleText} ${pc.dim(`(${s.priority ?? ''})`)}`);
-
-      // Second line with attempt info
-      const parts = [];
-      if ((s.attempts ?? 0) > 0) {
-        parts.push(
-          `Last: ${s.lastAttemptVerdict ?? '?'} (${s.lastAttemptScore == null ? '?' : String(s.lastAttemptScore)}/10)`,
-        );
-        parts.push(`Attempts: ${String(s.attempts ?? 0)}/${String(s.maxAttempts ?? 0)}`);
-      }
-      if (s.specPath != null && s.specPath !== '') {
-        parts.push('has spec');
-      }
-      if (parts.length > 0) {
-        console.error(`     ${pc.dim(parts.join(' | '))}`);
-      }
-      console.error('');
-    }
-
-    if (pending.length > maxDisplay) {
-      console.error(pc.dim(`     ... and ${String(pending.length - maxDisplay)} more`));
-      console.error('');
-    }
+    displaySuggestionList(displayed, pending, maxDisplay);
 
     const prompt = `${pc.cyan(
       `  [1-${String(displayed.length)}]`,
@@ -470,13 +501,11 @@ export async function promptSuggestionPicker(
     const answer = await askRaw(rl, prompt);
     const lower = answer.toLowerCase();
 
-    // Number selection
     const num = Number.parseInt(answer, 10);
     if (num >= 1 && num <= displayed.length) {
       return { action: 'pick', suggestion: displayed[num - 1] };
     }
 
-    // Freeform
     if (lower === 'f' || lower === 'freeform') {
       const text = await askRaw(rl, pc.cyan('  Describe your improvement idea: '));
       if (text.length > 0) {
@@ -485,18 +514,15 @@ export async function promptSuggestionPicker(
       return { action: 'discover' };
     }
 
-    // Discover
     if (lower === 'd' || lower === 'discover') {
       return { action: 'discover' };
     }
 
-    // Skip (default)
     return { action: 'skip' };
   } finally {
     rl.close();
   }
 }
-
 // ── Stats ───────────────────────────────────────────────────────────────────
 
 /**

@@ -160,8 +160,8 @@ async function waitForHealth(
   headers?: Record<string, string>,
   stderrLines?: string[],
 ) {
-  const startedAt = Date.now();
-  while (Date.now() - startedAt < 10_000) {
+  const deadline = Date.now() + 10_000;
+  async function attempt(): Promise<void> {
     if (child.exitCode !== null) {
       const detail = stderrLines?.length ? `\nstderr:\n${stderrLines.join('')}` : '';
       throw new Error(
@@ -170,16 +170,18 @@ async function waitForHealth(
     }
     try {
       const { response } = await requestJson(baseUrl, 'GET', '/health', null, { headers });
-      if (response.ok) {
-        return;
-      }
+      if (response.ok) return;
     } catch {
       // Retry until timeout.
     }
+    if (Date.now() >= deadline) {
+      const detail = stderrLines?.length ? `\nstderr:\n${stderrLines.join('')}` : '';
+      throw new Error(`Timed out waiting for daemon health check${detail}`);
+    }
     await sleep(125);
+    return attempt();
   }
-  const detail = stderrLines?.length ? `\nstderr:\n${stderrLines.join('')}` : '';
-  throw new Error(`Timed out waiting for daemon health check${detail}`);
+  return attempt();
 }
 
 async function waitForExit(child: ChildProcess, timeoutMs = 4_000): Promise<void> {
@@ -256,18 +258,20 @@ async function stopDaemon(instance: DaemonInstance | null): Promise<void> {
 }
 
 async function removeDirBestEffort(dirPath: string, attempts = 8): Promise<void> {
-  for (let index = 0; index < attempts; index += 1) {
+  async function attempt(index: number): Promise<void> {
+    if (index >= attempts) return;
     try {
       fs.rmSync(dirPath, { recursive: true, force: true });
-      return;
     } catch (err) {
       const code = (err as NodeJS.ErrnoException).code ?? '';
       if (!['EBUSY', 'ENOTEMPTY', 'EPERM'].includes(code) || index === attempts - 1) {
         return;
       }
       await sleep(150);
+      return attempt(index + 1);
     }
   }
+  return attempt(0);
 }
 
 describe('hydra daemon endpoint characterization', () => {
@@ -356,9 +360,11 @@ describe('hydra daemon endpoint characterization', () => {
     });
     const daemons: DaemonInstance[] = [];
     t.after(async () => {
-      for (const daemonInstance of daemons.reverse()) {
-        await stopDaemon(daemonInstance);
-      }
+      await daemons
+        .reverse()
+        .reduce<
+          Promise<void>
+        >((chain, daemonInstance) => chain.then(() => stopDaemon(daemonInstance)), Promise.resolve());
       await removeDirBestEffort(projectRoot);
     });
 

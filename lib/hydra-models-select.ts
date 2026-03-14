@@ -102,47 +102,66 @@ class Picker<T> {
     });
   }
 
+  _handleSearchChar(str: string): void {
+    if (str.length === 1 && str >= ' ') {
+      this.search += str;
+      this._filter();
+    }
+  }
+
+  _handleNavKey(name: string): void {
+    switch (name) {
+      case 'up':
+        this.cursor = Math.max(0, this.cursor - 1);
+        break;
+      case 'down':
+        this.cursor = Math.min(this.filtered.length - 1, this.cursor + 1);
+        break;
+      case 'pageup':
+        this.cursor = Math.max(0, this.cursor - this.pageSize);
+        break;
+      case 'pagedown':
+        this.cursor = Math.min(this.filtered.length - 1, this.cursor + this.pageSize);
+        break;
+      case 'home':
+        this.cursor = 0;
+        break;
+      case 'end':
+        this.cursor = Math.max(0, this.filtered.length - 1);
+        break;
+      default:
+        break;
+    }
+    this._scrollTo();
+  }
+
+  _handleBackspace(): void {
+    if (this.search.length > 0) {
+      this.search = this.search.slice(0, -1);
+      this._filter();
+    }
+  }
+
   // ── Key handling ──────────────────────────────────────────────────────────
 
   _onKey(str: string, key: { ctrl?: boolean; name?: string } | null) {
     if (!key) {
-      if (str.length === 1 && str >= ' ') {
-        this.search += str;
-        this._filter();
-      }
+      this._handleSearchChar(str);
       this._draw();
       return;
     }
-
     if (key.ctrl === true && key.name === 'c') {
       this._finish(null);
       return;
     }
-
     switch (key.name) {
       case 'up':
-        this.cursor = Math.max(0, this.cursor - 1);
-        this._scrollTo();
-        break;
       case 'down':
-        this.cursor = Math.min(this.filtered.length - 1, this.cursor + 1);
-        this._scrollTo();
-        break;
       case 'pageup':
-        this.cursor = Math.max(0, this.cursor - this.pageSize);
-        this._scrollTo();
-        break;
       case 'pagedown':
-        this.cursor = Math.min(this.filtered.length - 1, this.cursor + this.pageSize);
-        this._scrollTo();
-        break;
       case 'home':
-        this.cursor = 0;
-        this._scrollTo();
-        break;
       case 'end':
-        this.cursor = Math.max(0, this.filtered.length - 1);
-        this._scrollTo();
+        this._handleNavKey(key.name);
         break;
       case 'return':
         if (this.filtered.length > 0) this._finish(this.filtered[this.cursor]);
@@ -151,17 +170,11 @@ class Picker<T> {
         this._finish(null);
         return;
       case 'backspace':
-        if (this.search.length > 0) {
-          this.search = this.search.slice(0, -1);
-          this._filter();
-        }
+        this._handleBackspace();
         break;
       case undefined:
       default:
-        if (str.length === 1 && str >= ' ') {
-          this.search += str;
-          this._filter();
-        }
+        this._handleSearchChar(str);
         break;
     }
     this._draw();
@@ -311,41 +324,31 @@ export async function pickAgent(): Promise<string | null> {
   return picked?.name ?? null;
 }
 
-// ── Model picker ────────────────────────────────────────────────────────────
-
-export async function pickModel(agentName: string): Promise<string | null> {
-  const agentInfo = (AGENTS as Record<string, { label?: string }>)[agentName];
-  const currentModel = getActiveModel(agentName);
-  const cfg = loadHydraConfig();
-  const agentModels =
-    (cfg.models as Record<string, Record<string, string> | undefined>)[agentName] ?? {};
-  const aliases =
-    (cfg.aliases as Record<string, Record<string, string> | undefined>)[agentName] ?? {};
-
-  // Loading indicator
-  process.stdout.write(`  ${pc.dim(`Fetching ${agentInfo.label ?? agentName} models...`)}`);
-  const { models, source } = await fetchModels(agentName);
-  process.stdout.write(`\r${CLEAR_LINE}`);
-
-  // Preset + alias maps
-  const presetOf = new Map();
+function buildPresetAliasAnnotations(
+  agentModels: Record<string, string>,
+  aliases: Record<string, string>,
+): { presetOf: Map<string, string>; aliasOf: Map<string, string[]> } {
+  const presetOf = new Map<string, string>();
   for (const key of ['default', 'fast', 'cheap']) {
-    if (agentModels[key] !== '') presetOf.set(agentModels[key], key);
+    if (typeof agentModels[key] === 'string' && agentModels[key] !== '')
+      presetOf.set(agentModels[key], key);
   }
   const aliasOf = new Map<string, string[]>();
   for (const [alias, id] of Object.entries(aliases)) {
-    const existing = aliasOf.get(id);
-    if (existing) {
-      existing.push(alias);
-    } else {
-      aliasOf.set(id, [alias]);
-    }
+    const e = aliasOf.get(id);
+    if (e) e.push(alias);
+    else aliasOf.set(id, [alias]);
   }
+  return { presetOf, aliasOf };
+}
 
-  // Build item list: presets first (deduped), then discovered models
+function buildModelPickerItems(
+  models: string[],
+  agentModels: Record<string, string>,
+  currentModel: string | null,
+): Array<{ id: string; preset: string | null; active: boolean }> {
   const seen = new Set<string>();
   const items: Array<{ id: string; preset: string | null; active: boolean }> = [];
-
   for (const key of ['default', 'fast', 'cheap']) {
     const id = agentModels[key];
     if (id !== '' && !seen.has(id)) {
@@ -359,6 +362,53 @@ export async function pickModel(agentName: string): Promise<string | null> {
       items.push({ id, preset: null, active: id === currentModel });
     }
   }
+  return items;
+}
+
+function renderModelPickerItem(
+  item: { id: string; preset: string | null; active: boolean },
+  sel: boolean,
+  aliasOf: Map<string, string[]>,
+): string {
+  const tags = [];
+  if (item.preset != null && item.preset !== '') tags.push(pc.magenta(item.preset));
+  if (item.active) tags.push(pc.green('◀ active'));
+  const als = aliasOf.get(item.id);
+  if (als != null && (item.preset == null || item.preset === ''))
+    tags.push(pc.dim(`(${als.join(', ')})`));
+  const annotation = formatBenchmarkAnnotation(item.id);
+  if (annotation !== '') tags.push(pc.dim(annotation));
+  const suffix = tags.length > 0 ? `  ${tags.join(' ')}` : '';
+  let name: string;
+  if (item.active) name = pc.green(item.id);
+  else if (sel) name = pc.white(item.id);
+  else name = item.id;
+  return `${name}${suffix}`;
+}
+
+function resolveSourceLabel(source: string): string {
+  if (source === 'api') return 'REST API';
+  if (source === 'cli') return 'CLI';
+  return 'config only';
+}
+
+// ── Model picker ────────────────────────────────────────────────────────────
+
+export async function pickModel(agentName: string): Promise<string | null> {
+  const agentInfo = (AGENTS as Record<string, { label?: string }>)[agentName];
+  const currentModel = getActiveModel(agentName);
+  const cfg = loadHydraConfig();
+  const agentModels =
+    (cfg.models as Record<string, Record<string, string> | undefined>)[agentName] ?? {};
+  const aliases =
+    (cfg.aliases as Record<string, Record<string, string> | undefined>)[agentName] ?? {};
+
+  process.stdout.write(`  ${pc.dim(`Fetching ${agentInfo.label ?? agentName} models...`)}`);
+  const { models, source } = await fetchModels(agentName);
+  process.stdout.write(`\r${CLEAR_LINE}`);
+
+  const { aliasOf } = buildPresetAliasAnnotations(agentModels, aliases);
+  const items = buildModelPickerItems(models, agentModels, currentModel);
 
   if (items.length === 0) {
     console.log(pc.yellow(`\n  No models found for ${agentName}.`));
@@ -366,14 +416,7 @@ export async function pickModel(agentName: string): Promise<string | null> {
     return null;
   }
 
-  let sourceLabel: string;
-  if (source === 'api') {
-    sourceLabel = 'REST API';
-  } else if (source === 'cli') {
-    sourceLabel = 'CLI';
-  } else {
-    sourceLabel = 'config only';
-  }
+  const sourceLabel = resolveSourceLabel(source);
   const currentEffort = getReasoningEffort(agentName);
   const effortTag = currentEffort != null && currentEffort !== '' ? ` effort:${currentEffort}` : '';
   const initialIdx = Math.max(
@@ -392,26 +435,7 @@ export async function pickModel(agentName: string): Promise<string | null> {
       if (als) parts.push(...als);
       return parts.join(' ');
     },
-    renderItem: (item, sel) => {
-      const tags = [];
-      if (item.preset != null && item.preset !== '') tags.push(pc.magenta(item.preset));
-      if (item.active) tags.push(pc.green('◀ active'));
-      const als = aliasOf.get(item.id);
-      if (als && (item.preset == null || item.preset === ''))
-        tags.push(pc.dim(`(${als.join(', ')})`));
-      const annotation = formatBenchmarkAnnotation(item.id);
-      if (annotation !== '') tags.push(pc.dim(annotation));
-      const suffix = tags.length > 0 ? `  ${tags.join(' ')}` : '';
-      let name: string;
-      if (item.active) {
-        name = pc.green(item.id);
-      } else if (sel) {
-        name = pc.white(item.id);
-      } else {
-        name = item.id;
-      }
-      return `${name}${suffix}`;
-    },
+    renderItem: (item, sel) => renderModelPickerItem(item, sel, aliasOf),
   }).run();
 
   return picked?.id ?? null;
@@ -520,30 +544,37 @@ export function applySelection(
   return resolved;
 }
 
+async function resolveAgentName(arg: string | undefined): Promise<string | null> {
+  if (arg != null && arg !== '' && AGENT_NAMES.includes(arg)) return arg;
+  if (arg == null || arg === '') {
+    console.log('');
+    const picked = await pickAgent();
+    if (picked == null || picked === '') {
+      console.log(pc.dim('  Cancelled.\n'));
+      return null;
+    }
+    return picked;
+  }
+  console.error(pc.red(`Unknown agent: ${arg}`));
+  console.error(`Available: ${AGENT_NAMES.join(', ')}`);
+  process.exitCode = 1;
+  return null;
+}
+
+function buildEffortTag(resolved: string, effortLevel: string | null): string {
+  const effortDisplay = formatEffortDisplay(resolved, effortLevel);
+  if (effortDisplay !== '') return pc.yellow(effortDisplay);
+  if (effortLevel != null && effortLevel !== '') return pc.yellow(effortLevel);
+  return pc.dim('default');
+}
+
 // ── Main ────────────────────────────────────────────────────────────────────
 
 async function main() {
   const arg = process.argv[2]?.toLowerCase();
+  const agentName = await resolveAgentName(arg);
+  if (agentName == null) return;
 
-  // Agent selection
-  let agentName;
-  if (arg !== '' && AGENT_NAMES.includes(arg)) {
-    agentName = arg;
-  } else if (arg === '') {
-    console.log('');
-    agentName = await pickAgent();
-    if (agentName == null || agentName === '') {
-      console.log(pc.dim('  Cancelled.\n'));
-      return;
-    }
-  } else {
-    console.error(pc.red(`Unknown agent: ${arg}`));
-    console.error(`Available: ${AGENT_NAMES.join(', ')}`);
-    process.exitCode = 1;
-    return;
-  }
-
-  // Model selection
   console.log('');
   const modelId = await pickModel(agentName);
   if (modelId == null || modelId === '') {
@@ -551,7 +582,6 @@ async function main() {
     return;
   }
 
-  // Reasoning effort selection
   console.log('');
   const effortPick = await pickEffort(agentName, modelId);
   if (effortPick === null) {
@@ -561,9 +591,8 @@ async function main() {
   if (effortPick?._skipped === true) {
     console.log(pc.dim(`  (No reasoning controls for this model — skipped)\n`));
   }
-  const effortLevel = effortPick?.id ?? null; // null = "default" (clear override)
+  const effortLevel = effortPick?.id ?? null;
 
-  // Check if nothing changed
   const currentModel = getActiveModel(agentName);
   const currentEffort = getReasoningEffort(agentName);
   if (modelId === currentModel && effortLevel === currentEffort) {
@@ -571,17 +600,8 @@ async function main() {
     return;
   }
 
-  // Apply
   const resolved = applySelection(agentName, modelId, effortLevel);
-  const effortDisplay = formatEffortDisplay(resolved, effortLevel);
-  let effortTag: string;
-  if (effortDisplay !== '') {
-    effortTag = pc.yellow(effortDisplay);
-  } else if (effortLevel != null && effortLevel !== '') {
-    effortTag = pc.yellow(effortLevel);
-  } else {
-    effortTag = pc.dim('default');
-  }
+  const effortTag = buildEffortTag(resolved, effortLevel);
   console.log(
     `\n  ${pc.green('✓')} ${pc.bold(agentName)} → ${pc.white(resolved)} ${effortTag}  ${pc.dim('(mode → custom)')}\n`,
   );
