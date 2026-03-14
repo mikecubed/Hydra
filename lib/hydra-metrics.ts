@@ -15,6 +15,8 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { EventEmitter } from 'node:events';
 
+import type { IMetricsRecorder } from './types.ts';
+
 // ── Types ────────────────────────────────────────────────────────────────────
 
 interface SessionUsage {
@@ -625,3 +627,15 @@ export function loadPersistedMetrics(coordDir: string): void {
 export function resetMetrics(): void {
   metricsStore = createEmptyStore();
 }
+
+// ── IMetricsRecorder-typed export ────────────────────────────────────────────
+
+/**
+ * Injectable object satisfying the IMetricsRecorder interface contract.
+ * Consumers can depend on IMetricsRecorder for testability and DI.
+ */
+export const metricsRecorder: IMetricsRecorder = {
+  recordCallStart,
+  recordCallComplete,
+  recordCallError,
+};

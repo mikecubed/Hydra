@@ -172,6 +172,15 @@ describe('IMetricsRecorder interface', () => {
     assert.ok(agentMetrics.callsFailed >= 1, 'should have at least 1 failed call');
   });
 
+  it('metricsRecorder export satisfies IMetricsRecorder at compile time', async () => {
+    const { metricsRecorder } = await import('../lib/hydra-metrics.ts');
+    // Compile-time check: assignment fails if metricsRecorder doesn't satisfy IMetricsRecorder
+    const recorder: IMetricsRecorder = metricsRecorder;
+    assert.equal(typeof recorder.recordCallStart, 'function');
+    assert.equal(typeof recorder.recordCallComplete, 'function');
+    assert.equal(typeof recorder.recordCallError, 'function');
+  });
+
   it('can be implemented by a mock object', () => {
     const mock: IMetricsRecorder = {
       recordCallStart(agentName) {
