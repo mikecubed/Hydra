@@ -203,62 +203,100 @@
   },
   "recommendations": {
     "architect": {
-      "models": ["claude-sonnet-4-6", "claude-opus-4-6", "gpt-5.4"],
+      "models": [
+        "claude-sonnet-4-6",
+        "claude-opus-4-6",
+        "gpt-5.4"
+      ],
       "reasoningEffort": null,
       "note": "Strong coding + agentic at 40% lower cost than Opus; Opus available for highest-complexity tasks"
     },
     "analyst": {
-      "models": ["gemini-3.1-pro-preview", "claude-opus-4-6"],
+      "models": [
+        "gemini-3.1-pro-preview",
+        "claude-opus-4-6"
+      ],
       "reasoningEffort": null,
       "note": "Latest SOTA reasoning model, GPQA 91.9%, 1M native context"
     },
     "implementer": {
-      "models": ["gpt-5.4", "gpt-5.3-codex", "claude-sonnet-4-5-20250929"],
+      "models": [
+        "gpt-5.4",
+        "gpt-5.3-codex",
+        "claude-sonnet-4-5-20250929"
+      ],
       "reasoningEffort": null,
       "note": "SWE-Bench Pro 57.7%, 1.05M context, reasoning effort control (none→xhigh)"
     },
     "concierge": {
-      "models": ["gpt-5", "claude-sonnet-4-5-20250929"],
+      "models": [
+        "gpt-5",
+        "claude-sonnet-4-5-20250929"
+      ],
       "reasoningEffort": null,
       "note": "Fast streaming, broad knowledge, $1.25/$10 (GPT-5 has no reasoning control)"
     },
     "investigator": {
-      "models": ["gpt-5.2", "gpt-5"],
+      "models": [
+        "gpt-5.2",
+        "gpt-5"
+      ],
       "reasoningEffort": null,
       "note": "Best deep reasoning (GPQA 93.2%, FrontierMath 40.3%)"
     },
     "nightlyHandoff": {
-      "models": ["o4-mini", "gpt-5"],
+      "models": [
+        "o4-mini",
+        "gpt-5"
+      ],
       "reasoningEffort": "low",
       "note": "Budget-friendly, SWE-bench 68.1%, o4-mini supports low/medium/high effort"
     },
     "copilot": {
-      "models": ["copilot-claude-sonnet-4-6", "copilot-claude-opus-4-6", "copilot-gpt-5-4"],
+      "models": [
+        "copilot-claude-sonnet-4-6",
+        "copilot-claude-opus-4-6",
+        "copilot-gpt-5-4"
+      ],
       "reasoningEffort": null,
       "note": "GitHub-integrated advisor; cross-references issues, PRs, and CI in every response"
     },
     "copilot-reviewer": {
-      "models": ["copilot-claude-sonnet-4-6"],
+      "models": [
+        "copilot-claude-sonnet-4-6"
+      ],
       "reasoningEffort": null,
       "note": "Sonnet is well-suited for review tasks with GitHub context"
     },
     "copilot-architect": {
-      "models": ["copilot-claude-opus-4-6"],
+      "models": [
+        "copilot-claude-opus-4-6"
+      ],
       "reasoningEffort": null,
       "note": "Opus for planning/architecture depth with GitHub workflow awareness"
     },
     "coordinator": {
-      "models": ["claude-opus-4-6", "claude-sonnet-4-6", "gpt-5.4"],
+      "models": [
+        "claude-opus-4-6",
+        "claude-sonnet-4-6",
+        "gpt-5.4"
+      ],
       "reasoningEffort": null,
       "note": "Coordination/delegation slot in smart dispatch; decomposes the prompt and delegates sub-tasks"
     },
     "critic": {
-      "models": ["gemini-3-pro-preview", "claude-opus-4-6"],
+      "models": [
+        "gemini-3-pro-preview",
+        "claude-opus-4-6"
+      ],
       "reasoningEffort": null,
       "note": "Critique/second-opinion slot in smart dispatch; reviews coordinator output for risks and gaps"
     },
     "synthesizer": {
-      "models": ["gpt-5.4", "claude-sonnet-4-6"],
+      "models": [
+        "gpt-5.4",
+        "claude-sonnet-4-6"
+      ],
       "reasoningEffort": null,
       "note": "Synthesis/implementation slot in smart dispatch; produces the final execution packet"
     }
@@ -322,7 +360,12 @@
       "model": "gpt-5.2",
       "reasoningEffort": "high",
       "maxAttemptsPerPhase": 2,
-      "phases": ["test", "implement", "analyze", "agent"],
+      "phases": [
+        "test",
+        "implement",
+        "analyze",
+        "agent"
+      ],
       "maxTokensBudget": 50000,
       "tryAlternativeAgent": true,
       "logToFile": true
@@ -408,7 +451,14 @@
   },
   "audit": {
     "maxFiles": 200,
-    "categories": ["dead-code", "inconsistencies", "architecture", "security", "tests", "types"],
+    "categories": [
+      "dead-code",
+      "inconsistencies",
+      "architecture",
+      "security",
+      "tests",
+      "types"
+    ],
     "reportDir": "docs/audit",
     "timeout": 300000,
     "economy": false
@@ -576,7 +626,9 @@
     }
   },
   "eval": {
-    "corpusPaths": ["test/golden/routing-corpus.json"]
+    "corpusPaths": [
+      "test/golden/routing-corpus.json"
+    ]
   },
   "persona": {
     "enabled": true,
