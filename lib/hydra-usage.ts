@@ -217,6 +217,42 @@ export function findStatsCache(): string | null {
 
 // ── Stats Parsing ───────────────────────────────────────────────────────────
 
+function resolveDailyEntry(
+  data: StatsJsonData,
+  today: string,
+): { entry: DailyModelEntry | undefined; stale: boolean } {
+  const entry = Array.isArray(data.dailyModelTokens)
+    ? data.dailyModelTokens.find((d) => d.date === today)
+    : undefined;
+  if (entry != null) return { entry, stale: false };
+  if (!Array.isArray(data.dailyModelTokens) || data.dailyModelTokens.length === 0) {
+    return { entry: undefined, stale: false };
+  }
+  const latest = data.dailyModelTokens.at(-1);
+  if (latest == null) return { entry: undefined, stale: false };
+  const diffMs =
+    new Date(`${today}T00:00:00`).getTime() - new Date(`${latest.date}T00:00:00`).getTime();
+  if (diffMs > 0 && diffMs <= 48 * 60 * 60 * 1000) return { entry: latest, stale: true };
+  return { entry: undefined, stale: false };
+}
+
+function aggregateWeeklyTokens(
+  data: StatsJsonData,
+  weekAgoStr: string,
+): { tokensByModel: Record<string, number>; dayCount: number } {
+  const tokensByModel: Record<string, number> = {};
+  let dayCount = 0;
+  if (!Array.isArray(data.dailyModelTokens)) return { tokensByModel, dayCount };
+  for (const entry of data.dailyModelTokens) {
+    if (entry.date <= weekAgoStr) continue;
+    dayCount++;
+    for (const [model, tokens] of Object.entries(entry.tokensByModel)) {
+      tokensByModel[model] = (tokensByModel[model] ?? 0) + tokens;
+    }
+  }
+  return { tokensByModel, dayCount };
+}
+
 /**
  * Parse stats-cache.json and extract today's usage data.
  * @param {string} filePath - Path to stats-cache.json
@@ -230,81 +266,28 @@ export function parseStatsCache(filePath: string): ParsedStatsCache {
   try {
     const raw = fs.readFileSync(filePath, 'utf8');
     const data = JSON.parse(raw) as StatsJsonData;
-    const today = getLocalDateString(); // Local date to match stats-cache format
+    const today = getLocalDateString();
 
-    // Extract today's token usage by model
-    let dailyTokens: DailyModelEntry | undefined = Array.isArray(data.dailyModelTokens)
-      ? data.dailyModelTokens.find((d) => d.date === today)
-      : undefined;
-
-    // If no data for today, check if the most recent day is yesterday
-    // (stats-cache may not be updated yet for the current day)
-    let stale = false;
-    if (
-      dailyTokens == null &&
-      Array.isArray(data.dailyModelTokens) &&
-      data.dailyModelTokens.length > 0
-    ) {
-      const latest = data.dailyModelTokens.at(-1);
-      if (latest != null) {
-        const latestDate = new Date(`${latest.date}T00:00:00`);
-        const todayDate = new Date(`${today}T00:00:00`);
-        const diffMs = todayDate.getTime() - latestDate.getTime();
-        // Use yesterday's data as a proxy if within 48h
-        if (diffMs > 0 && diffMs <= 48 * 60 * 60 * 1000) {
-          dailyTokens = latest;
-          stale = true;
-        }
-      }
-    }
-
+    const { entry: dailyTokens, stale } = resolveDailyEntry(data, today);
     const tokensByModel = dailyTokens?.tokensByModel ?? {};
     const totalTokensToday = Object.values(tokensByModel).reduce((sum, n) => sum + n, 0);
 
-    // Estimate today's tokens from activity if we have no direct data
     const todayActivity: DailyActivityEntry | undefined = Array.isArray(data.dailyActivity)
       ? data.dailyActivity.find((d) => d.date === today)
       : undefined;
-    let estimatedFromActivity = 0;
-    if (todayActivity != null && totalTokensToday === 0) {
-      // Estimate ~150 tokens per message as rough heuristic
-      estimatedFromActivity = todayActivity.messageCount * 150;
-    }
+    const estimatedFromActivity =
+      todayActivity != null && totalTokensToday === 0 ? todayActivity.messageCount * 150 : 0;
 
-    // Extract today's activity
-    const dailyActivity: DailyActivityEntry | undefined = Array.isArray(data.dailyActivity)
-      ? data.dailyActivity.find((d) => d.date === today)
-      : undefined;
-
-    // Overall model usage stats (cumulative)
     const modelUsage = data.modelUsage ?? {};
-
-    // Calculate burn rate from recent data
     const recentDays = Array.isArray(data.dailyModelTokens) ? data.dailyModelTokens.slice(-7) : [];
 
-    // ── Weekly token aggregation ──────────────────────────────────────
-    // Claude Max plans use weekly limits, so we sum the last 7 days.
-    const todayDate = new Date();
-    const weekAgo = new Date(todayDate);
+    const weekAgo = new Date();
     weekAgo.setDate(weekAgo.getDate() - 7);
-    const weekAgoStr = getLocalDateString(weekAgo);
-
-    const weeklyTokensByModel: Record<string, number> = {};
-    let weeklyDayCount = 0;
-    if (Array.isArray(data.dailyModelTokens)) {
-      for (const entry of data.dailyModelTokens) {
-        if (entry.date > weekAgoStr) {
-          weeklyDayCount++;
-          for (const [model, tokens] of Object.entries(entry.tokensByModel)) {
-            weeklyTokensByModel[model] = (weeklyTokensByModel[model] ?? 0) + tokens;
-          }
-        }
-      }
-    }
+    const { tokensByModel: weeklyTokensByModel, dayCount: weeklyDayCount } = aggregateWeeklyTokens(
+      data,
+      getLocalDateString(weekAgo),
+    );
     const totalTokensWeekly = Object.values(weeklyTokensByModel).reduce((s, n) => s + n, 0);
-
-    // Use activity for today even if token data is stale
-    const activityEntry = todayActivity ?? dailyActivity;
 
     return {
       found: true,
@@ -317,12 +300,12 @@ export function parseStatsCache(filePath: string): ParsedStatsCache {
       totalTokensWeekly,
       weeklyDayCount,
       activity:
-        activityEntry == null
+        todayActivity == null
           ? null
           : {
-              messageCount: activityEntry.messageCount,
-              sessionCount: activityEntry.sessionCount,
-              toolCallCount: activityEntry.toolCallCount,
+              messageCount: todayActivity.messageCount,
+              sessionCount: todayActivity.sessionCount,
+              toolCallCount: todayActivity.toolCallCount,
             },
       modelUsage,
       recentDays: recentDays.length,
@@ -391,6 +374,78 @@ function pickHighestTrackedModel(
     }
   }
   return best;
+}
+
+function resolveTrackedModel(
+  activeModel: string | null,
+  activeBudget: number,
+  agentModelTokens: Record<string, number>,
+  agentUsedTokens: number,
+  budgets: Record<string, number>,
+): TrackedModel | null {
+  if (activeModel === null || activeBudget <= 0) {
+    return pickHighestTrackedModel(agentModelTokens, budgets);
+  }
+  const trackedUsed =
+    safeNumber(agentModelTokens[activeModel]) === 0
+      ? agentUsedTokens
+      : safeNumber(agentModelTokens[activeModel]);
+  return {
+    model: activeModel,
+    budget: activeBudget,
+    used: trackedUsed,
+    percent: (trackedUsed / activeBudget) * 100,
+  };
+}
+
+function deriveAgentConfidence(
+  directUsed: number,
+  estimatedUsed: number,
+  hasRealTokens: boolean,
+  defaultConfidence: string,
+): string {
+  if (directUsed > 0) return defaultConfidence;
+  if (estimatedUsed > 0) return hasRealTokens ? 'medium' : 'low';
+  return 'none';
+}
+
+function deriveSourceLabel(
+  directUsed: number,
+  hasRealTokens: boolean,
+  estimatedUsed: number,
+): string {
+  if (directUsed > 0) return 'stats-cache';
+  if (hasRealTokens) return 'hydra-metrics-real';
+  if (estimatedUsed > 0) return 'hydra-metrics-estimate';
+  return 'none';
+}
+
+function buildAgentWindowEntry(
+  agent: string,
+  recent: { total: number; real: number; estimated: number; entries: number },
+  activeModel: string | null,
+  windowBudgets: Record<string, number>,
+  windowHours: number,
+  warningPct: number,
+  criticalPct: number,
+): AgentWindowEntry {
+  const windowBudget = activeModel == null ? 0 : safeNumber(windowBudgets[activeModel]);
+  const used = recent.total;
+  const percent = windowBudget > 0 ? (used / windowBudget) * 100 : 0;
+  const level = windowBudget > 0 ? levelFromPercent(percent, warningPct, criticalPct) : 'unknown';
+  return {
+    agent,
+    level,
+    percent: roundPercent(percent),
+    windowTokens: used,
+    realTokens: recent.real,
+    estimatedTokens: recent.estimated,
+    windowBudget: windowBudget > 0 ? windowBudget : null,
+    windowHours,
+    model: activeModel,
+    entries: recent.entries,
+    hasData: recent.entries > 0,
+  };
 }
 
 function readPersistedEstimatedTokens(): Record<string, number> {
@@ -462,28 +517,17 @@ export function checkWindowBudget(options: { windowHours?: number } = {}): Windo
   for (const agent of AGENT_NAMES) {
     const recent = getRecentTokens(agent, windowMs);
     const activeModel = modelSummary[agent].active ?? null;
-    const windowBudget = activeModel == null ? 0 : safeNumber(windowBudgets[activeModel]);
-
-    const used = recent.total;
-    const percent = windowBudget > 0 ? (used / windowBudget) * 100 : 0;
-    const level = windowBudget > 0 ? levelFromPercent(percent, warningPct, criticalPct) : 'unknown';
-
-    agentWindow[agent] = {
+    agentWindow[agent] = buildAgentWindowEntry(
       agent,
-      level,
-      percent: roundPercent(percent),
-      windowTokens: used,
-      realTokens: recent.real,
-      estimatedTokens: recent.estimated,
-      windowBudget: windowBudget > 0 ? windowBudget : null,
+      recent,
+      activeModel,
+      windowBudgets,
       windowHours,
-      model: activeModel,
-      entries: recent.entries,
-      hasData: recent.entries > 0,
-    };
+      warningPct,
+      criticalPct,
+    );
   }
 
-  // Overall: tightest constraint
   const tracked = Object.values(agentWindow).filter((a) => (a.windowBudget ?? 0) > 0);
   const highest = tracked.reduce<AgentWindowEntry | null>(
     (best, a) => (best == null || a.percent > best.percent ? a : best),
@@ -502,6 +546,301 @@ export function checkWindowBudget(options: { windowHours?: number } = {}): Windo
 
 // ── Usage Check ─────────────────────────────────────────────────────────────
 
+interface AgentDailyConfig {
+  warningPct: number;
+  criticalPct: number;
+  budgets: Record<string, number>;
+  resetInfo: { resetAt: string; resetInMs: number };
+  defaultConfidence: string;
+}
+
+function filterModelTokensByAgent(
+  agent: string,
+  tokensByModel: Record<string, number>,
+): Record<string, number> {
+  const result: Record<string, number> = {};
+  for (const [modelId, tokenCount] of Object.entries(tokensByModel)) {
+    if (modelBelongsToAgent(modelId, agent)) {
+      result[modelId] = safeNumber(tokenCount);
+    }
+  }
+  return result;
+}
+
+function getAgentRealTokens(metricsSummary: MetricsSummaryType, agent: string): number {
+  return safeNumber(metricsSummary.agents?.[agent]?.sessionTokens?.totalTokens);
+}
+
+function buildAgentUsageEntry(
+  agent: string,
+  config: AgentDailyConfig,
+  tokensByModel: Record<string, number>,
+  modelSummary: ModelSummaryType,
+  estimatedTokensByAgent: Record<string, number>,
+  metricsSummary: MetricsSummaryType,
+): AgentUsageEntry {
+  const { warningPct, criticalPct, budgets, resetInfo, defaultConfidence } = config;
+  const activeModel = modelSummary[agent].active ?? null;
+  const agentModelTokens = filterModelTokensByAgent(agent, tokensByModel);
+
+  const directUsed = sumObjectValues(agentModelTokens);
+  const estimatedUsed = safeNumber(estimatedTokensByAgent[agent]);
+  const agentUsedTokens = directUsed > 0 ? directUsed : estimatedUsed;
+  const activeBudget = activeModel == null ? 0 : safeNumber(budgets[activeModel]);
+  const tracked = resolveTrackedModel(
+    activeModel,
+    activeBudget,
+    agentModelTokens,
+    agentUsedTokens,
+    budgets,
+  );
+  const hasRealTokens = getAgentRealTokens(metricsSummary, agent) > 0;
+  const confidence = deriveAgentConfidence(
+    directUsed,
+    estimatedUsed,
+    hasRealTokens,
+    defaultConfidence,
+  );
+  const sourceLabel = deriveSourceLabel(directUsed, hasRealTokens, estimatedUsed);
+
+  if (tracked == null || tracked.budget <= 0) {
+    return {
+      agent,
+      level: 'unknown',
+      percent: 0,
+      todayTokens: agentUsedTokens,
+      used: agentUsedTokens,
+      budget: null,
+      remaining: null,
+      model: activeModel,
+      activeModel,
+      source: sourceLabel,
+      tracked: false,
+      confidence,
+      resetAt: null,
+      resetInMs: null,
+      modelBreakdown: agentModelTokens,
+    };
+  }
+
+  const percent = roundPercent(tracked.percent);
+  return {
+    agent,
+    level: levelFromPercent(percent, warningPct, criticalPct),
+    percent,
+    todayTokens: agentUsedTokens,
+    used: tracked.used,
+    budget: tracked.budget,
+    remaining: Math.max(0, tracked.budget - tracked.used),
+    model: tracked.model,
+    activeModel,
+    source: sourceLabel,
+    tracked: true,
+    confidence,
+    resetAt: resetInfo.resetAt,
+    resetInMs: resetInfo.resetInMs,
+    modelBreakdown: agentModelTokens,
+  };
+}
+
+function buildNoStatsMessage(
+  metricsSummary: MetricsSummaryType,
+  stats: ParsedStatsCache,
+  totalTokens: number,
+): { message: string; confidence: string } {
+  const sessionTotal = safeNumber(metricsSummary.sessionUsage?.totalTokens);
+  if (sessionTotal > 0) {
+    const calls = safeNumber(metricsSummary.sessionUsage?.callCount);
+    return {
+      message: `Session: ${formatTokens(sessionTotal)} tokens from ${String(calls)} tracked calls (stats-cache unavailable)`,
+      confidence: 'medium',
+    };
+  }
+  if (totalTokens > 0) {
+    return {
+      message: `Session: ~${formatTokens(totalTokens)} estimated tokens (stats-cache unavailable)`,
+      confidence: 'low',
+    };
+  }
+  return {
+    message: stats.error ?? 'Claude stats cache not found. Usage tracking unavailable.',
+    confidence: 'none',
+  };
+}
+
+interface DailySummary {
+  level: string;
+  percent: number;
+  message: string;
+  confidence: string;
+  model: string | null;
+  budget: number;
+  used: number;
+  remaining: number | null;
+  resetAt: string | null;
+  resetInMs: number | null;
+}
+
+function buildDailySummary(
+  highest: AgentUsageEntry | null,
+  stats: ParsedStatsCache,
+  metricsSummary: MetricsSummaryType,
+  totalTokens: number,
+): DailySummary {
+  const base: DailySummary = {
+    level: 'unknown',
+    percent: 0,
+    message: '',
+    confidence: 'none',
+    model: null,
+    budget: 0,
+    used: 0,
+    remaining: null,
+    resetAt: null,
+    resetInMs: null,
+  };
+
+  if (highest != null) {
+    base.level = highest.level;
+    base.percent = highest.percent;
+    base.confidence = highest.confidence;
+    base.model = highest.model;
+    base.budget = highest.budget ?? 0;
+    base.used = highest.used;
+    base.remaining = highest.remaining;
+    base.resetAt = highest.resetAt;
+    base.resetInMs = highest.resetInMs;
+    base.message = `${highest.agent} usage ${highest.percent.toFixed(1)}% — highest tracked load`;
+  } else if (stats.found) {
+    base.message = 'Usage data found, but no token budget is configured for active models.';
+  } else {
+    const { message, confidence } = buildNoStatsMessage(metricsSummary, stats, totalTokens);
+    base.message = message;
+    base.confidence = confidence;
+  }
+
+  if (stats.stale === true && base.message !== '') {
+    base.message += ' (token data from previous day — current day not yet computed)';
+  } else if ((stats.estimatedFromActivity ?? 0) > 0 && highest == null) {
+    base.message = `Estimated ~${formatTokens(stats.estimatedFromActivity ?? 0)} tokens from activity (${String(stats.activity?.messageCount ?? 0)} messages today)`;
+  }
+
+  return base;
+}
+
+function buildAgentWeeklyEntry(
+  agent: string,
+  weeklyTokensByModel: Record<string, number>,
+  weeklyBudgets: Record<string, number>,
+  activeModel: string | null,
+  warningPct: number,
+  criticalPct: number,
+  weeklyDayCount: number,
+): AgentWeeklyEntry {
+  const agentWeeklyTokens: Record<string, number> = {};
+  for (const [modelId, wUsed] of Object.entries(weeklyTokensByModel)) {
+    if (modelBelongsToAgent(modelId, agent)) {
+      agentWeeklyTokens[modelId] = safeNumber(wUsed);
+    }
+  }
+  const weeklyUsed = sumObjectValues(agentWeeklyTokens);
+  let weeklyBudget = activeModel == null ? 0 : safeNumber(weeklyBudgets[activeModel]);
+  let budgetModel = activeModel;
+  if (weeklyBudget <= 0) {
+    const best = pickHighestTrackedModel(agentWeeklyTokens, weeklyBudgets);
+    if (best != null) {
+      weeklyBudget = best.budget;
+      budgetModel = best.model;
+    }
+  }
+  const weeklyPercent = weeklyBudget > 0 ? (weeklyUsed / weeklyBudget) * 100 : 0;
+  const weeklyLevel =
+    weeklyBudget > 0 ? levelFromPercent(weeklyPercent, warningPct, criticalPct) : 'unknown';
+  return {
+    agent,
+    level: weeklyLevel,
+    percent: roundPercent(weeklyPercent),
+    weeklyTokens: weeklyUsed,
+    weeklyBudget: weeklyBudget > 0 ? weeklyBudget : null,
+    model: budgetModel,
+    tracked: weeklyBudget > 0,
+    modelBreakdown: agentWeeklyTokens,
+    daysCovered: weeklyDayCount,
+  };
+}
+
+function buildWeeklyResult(
+  weeklyBudgets: Record<string, number>,
+  stats: ParsedStatsCache,
+  modelSummary: ModelSummaryType,
+  warningPct: number,
+  criticalPct: number,
+): WeeklyResult {
+  const weeklyTokensByModel: Record<string, number> = stats.found
+    ? (stats.weeklyTokensByModel ?? {})
+    : {};
+  const weeklyDayCount = stats.weeklyDayCount ?? 0;
+  const agentWeekly: Record<string, AgentWeeklyEntry> = {};
+
+  for (const agent of AGENT_NAMES) {
+    const activeModel = modelSummary[agent].active ?? null;
+    agentWeekly[agent] = buildAgentWeeklyEntry(
+      agent,
+      weeklyTokensByModel,
+      weeklyBudgets,
+      activeModel,
+      warningPct,
+      criticalPct,
+      weeklyDayCount,
+    );
+  }
+
+  const trackedWeekly = Object.values(agentWeekly).filter((a) => a.tracked);
+  const highestWeekly = trackedWeekly.reduce<AgentWeeklyEntry | null>(
+    (best, a) => (best == null || a.percent > best.percent ? a : best),
+    null,
+  );
+
+  return {
+    ok: highestWeekly?.level !== 'critical',
+    level: highestWeekly?.level ?? 'unknown',
+    percent: highestWeekly?.percent ?? 0,
+    agents: agentWeekly,
+    tightest: highestWeekly,
+    totalTokens: safeNumber(stats.totalTokensWeekly),
+    daysCovered: weeklyDayCount,
+  };
+}
+
+function escalateLevel(
+  current: { level: string; percent: number; message: string },
+  highestWeekly: AgentWeeklyEntry | null,
+  window: WindowResult,
+): { level: string; percent: number; message: string } {
+  const LEVEL_ORDER: Record<string, number> = { normal: 0, warning: 1, critical: 2, unknown: -1 };
+  let { level, percent, message } = current;
+
+  if (highestWeekly != null && highestWeekly.level !== 'unknown') {
+    const weeklyOrder = LEVEL_ORDER[highestWeekly.level] ?? -1;
+    if (weeklyOrder > (LEVEL_ORDER[level] ?? -1)) {
+      level = highestWeekly.level;
+      percent = highestWeekly.percent;
+      message = `${highestWeekly.agent} weekly usage ${highestWeekly.percent.toFixed(1)}% — ${message}`;
+    }
+  }
+
+  if (window.tightest != null && window.tightest.level !== 'unknown') {
+    const windowOrder = LEVEL_ORDER[window.tightest.level] ?? -1;
+    if (windowOrder > (LEVEL_ORDER[level] ?? -1)) {
+      level = window.tightest.level;
+      percent = window.tightest.percent;
+      message = `${window.tightest.agent} window usage ${window.tightest.percent.toFixed(1)}% (${String(window.windowHours)}h sliding) — ${message}`;
+    }
+  }
+
+  return { level, percent, message };
+}
+
 /**
  * Check current usage level against configured thresholds.
  * @param {object} [options]
@@ -519,97 +858,28 @@ export function checkUsage(options: { statsPath?: string } = {}): UsageSummary {
   const stats = parseStatsCache(statsPath ?? '');
   const modelSummary = getModelSummary() as ModelSummaryType;
   const estimatedTokensByAgent = collectEstimatedTokensByAgent();
-
   const tokensByModel = stats.found ? (stats.tokensByModel ?? {}) : {};
   const defaultConfidence = stats.found ? deriveConfidence(stats) : 'none';
   const metricsSummary = getMetricsSummary() as MetricsSummaryType;
+
+  const agentDailyConfig: AgentDailyConfig = {
+    warningPct,
+    criticalPct,
+    budgets,
+    resetInfo,
+    defaultConfidence,
+  };
+
   const agentUsage: Record<string, AgentUsageEntry> = {};
-
   for (const agent of AGENT_NAMES) {
-    const activeModel = modelSummary[agent].active ?? null;
-    const agentModelTokens: Record<string, number> = {};
-    for (const [modelId, tokenCount] of Object.entries(tokensByModel)) {
-      if (modelBelongsToAgent(modelId, agent)) {
-        agentModelTokens[modelId] = safeNumber(tokenCount);
-      }
-    }
-
-    const modelBreakdown = agentModelTokens;
-    const directUsed = sumObjectValues(agentModelTokens);
-    const estimatedUsed = safeNumber(estimatedTokensByAgent[agent]);
-    const agentUsedTokens = directUsed > 0 ? directUsed : estimatedUsed;
-
-    let source: string;
-    if (directUsed > 0) {
-      source = 'stats-cache';
-    } else if (estimatedUsed > 0) {
-      source = 'hydra-metrics-estimate';
-    } else {
-      source = 'none';
-    }
-
-    const activeBudget = activeModel == null ? 0 : safeNumber(budgets[activeModel]);
-    let tracked: TrackedModel | null;
-    if (activeModel === null || activeBudget <= 0) {
-      tracked = pickHighestTrackedModel(agentModelTokens, budgets);
-    } else {
-      const trackedUsed =
-        safeNumber(agentModelTokens[activeModel]) === 0
-          ? agentUsedTokens
-          : safeNumber(agentModelTokens[activeModel]);
-      tracked = {
-        model: activeModel,
-        budget: activeBudget,
-        used: trackedUsed,
-        percent: activeBudget > 0 ? (trackedUsed / activeBudget) * 100 : 0,
-      };
-    }
-
-    const hasBudget = tracked != null && tracked.budget > 0;
-    const percent = hasBudget ? roundPercent(tracked?.percent ?? 0) : 0;
-    const level = hasBudget ? levelFromPercent(percent, warningPct, criticalPct) : 'unknown';
-    const remaining = hasBudget ? Math.max(0, (tracked?.budget ?? 0) - (tracked?.used ?? 0)) : null;
-    // Upgrade confidence when real session tokens are available from metrics
-    const hasRealTokens =
-      safeNumber(metricsSummary.agents?.[agent]?.sessionTokens?.totalTokens) > 0;
-    let confidence: string;
-    if (source === 'stats-cache') {
-      confidence = defaultConfidence;
-    } else if (estimatedUsed > 0) {
-      confidence = hasRealTokens ? 'medium' : 'low';
-    } else {
-      confidence = 'none';
-    }
-
-    // Distinguish real session data from character-based estimates
-    let sourceLabel: string;
-    if (directUsed > 0) {
-      sourceLabel = 'stats-cache';
-    } else if (hasRealTokens) {
-      sourceLabel = 'hydra-metrics-real';
-    } else if (estimatedUsed > 0) {
-      sourceLabel = 'hydra-metrics-estimate';
-    } else {
-      sourceLabel = 'none';
-    }
-
-    agentUsage[agent] = {
+    agentUsage[agent] = buildAgentUsageEntry(
       agent,
-      level,
-      percent,
-      todayTokens: agentUsedTokens,
-      used: hasBudget ? (tracked?.used ?? 0) : agentUsedTokens,
-      budget: hasBudget ? (tracked?.budget ?? null) : null,
-      remaining,
-      model: hasBudget ? (tracked?.model ?? null) : activeModel,
-      activeModel,
-      source: sourceLabel,
-      tracked: hasBudget,
-      confidence,
-      resetAt: hasBudget ? resetInfo.resetAt : null,
-      resetInMs: hasBudget ? resetInfo.resetInMs : null,
-      modelBreakdown,
-    };
+      agentDailyConfig,
+      tokensByModel,
+      modelSummary,
+      estimatedTokensByAgent,
+      metricsSummary,
+    );
   }
 
   const trackedAgents = Object.values(agentUsage).filter((entry) => entry.tracked);
@@ -622,154 +892,34 @@ export function checkUsage(options: { statsPath?: string } = {}): UsageSummary {
     0,
   );
 
-  let level = 'unknown';
-  let percent = 0;
-  let confidence = 'none';
-  let model: string | null = null;
-  let budget = 0;
-  let used = 0;
-  let remaining: number | null = null;
-  let resetAt: string | null = null;
-  let resetInMs: number | null = null;
-  let message: string;
-
-  if (highest != null) {
-    level = highest.level;
-    percent = highest.percent;
-    confidence = highest.confidence;
-    model = highest.model;
-    budget = highest.budget ?? 0;
-    used = highest.used;
-    remaining = highest.remaining;
-    resetAt = highest.resetAt;
-    resetInMs = highest.resetInMs;
-    message = `${highest.agent} usage ${highest.percent.toFixed(1)}% — highest tracked load`;
-  } else if (stats.found) {
-    message = 'Usage data found, but no token budget is configured for active models.';
-  } else {
-    // No stats-cache: show session data from hydra-metrics if available
-    const sessionTotal = safeNumber(metricsSummary.sessionUsage?.totalTokens);
-    if (sessionTotal > 0) {
-      const sessionRealCalls = safeNumber(metricsSummary.sessionUsage?.callCount);
-      message = `Session: ${formatTokens(sessionTotal)} tokens from ${String(sessionRealCalls)} tracked calls (stats-cache unavailable)`;
-      confidence = 'medium';
-    } else if (totalTokens > 0) {
-      message = `Session: ~${formatTokens(totalTokens)} estimated tokens (stats-cache unavailable)`;
-      confidence = 'low';
-    } else {
-      message = stats.error ?? 'Claude stats cache not found. Usage tracking unavailable.';
-    }
-  }
-
-  if (stats.stale === true && message !== '') {
-    message += ' (token data from previous day — current day not yet computed)';
-  } else if ((stats.estimatedFromActivity ?? 0) > 0 && highest == null) {
-    message = `Estimated ~${formatTokens(stats.estimatedFromActivity ?? 0)} tokens from activity (${String(stats.activity?.messageCount ?? 0)} messages today)`;
-  }
-
-  // ── Weekly budget check (primary metric for Max plans) ────────────
-  const weeklyBudgets = cfg.usage.weeklyTokenBudget ?? {};
-  const weeklyTokensByModel: Record<string, number> = stats.found
-    ? (stats.weeklyTokensByModel ?? {})
-    : {};
-  const agentWeekly: Record<string, AgentWeeklyEntry> = {};
-
-  for (const agent of AGENT_NAMES) {
-    const activeModel = modelSummary[agent].active ?? null;
-    const agentWeeklyTokens: Record<string, number> = {};
-
-    for (const [modelId, wUsed] of Object.entries(weeklyTokensByModel)) {
-      if (modelBelongsToAgent(modelId, agent)) {
-        agentWeeklyTokens[modelId] = safeNumber(wUsed);
-      }
-    }
-    const weeklyUsed = sumObjectValues(agentWeeklyTokens);
-
-    // Find the best budget match — try active model first, then highest-usage model with a budget
-    let weeklyBudget = activeModel == null ? 0 : safeNumber(weeklyBudgets[activeModel]);
-    let budgetModel = activeModel;
-    if (weeklyBudget <= 0) {
-      const best = pickHighestTrackedModel(agentWeeklyTokens, weeklyBudgets);
-      if (best != null) {
-        weeklyBudget = best.budget;
-        budgetModel = best.model;
-      }
-    }
-
-    const weeklyPercent = weeklyBudget > 0 ? (weeklyUsed / weeklyBudget) * 100 : 0;
-    const weeklyLevel =
-      weeklyBudget > 0 ? levelFromPercent(weeklyPercent, warningPct, criticalPct) : 'unknown';
-
-    agentWeekly[agent] = {
-      agent,
-      level: weeklyLevel,
-      percent: roundPercent(weeklyPercent),
-      weeklyTokens: weeklyUsed,
-      weeklyBudget: weeklyBudget > 0 ? weeklyBudget : null,
-      model: budgetModel,
-      tracked: weeklyBudget > 0,
-      modelBreakdown: agentWeeklyTokens,
-      daysCovered: stats.weeklyDayCount ?? 0,
-    };
-  }
-
-  const trackedWeekly = Object.values(agentWeekly).filter((a) => a.tracked);
-  const highestWeekly = trackedWeekly.reduce<AgentWeeklyEntry | null>(
-    (best, a) => (best == null || a.percent > best.percent ? a : best),
-    null,
+  const daily = buildDailySummary(highest, stats, metricsSummary, totalTokens);
+  const weekly = buildWeeklyResult(
+    cfg.usage.weeklyTokenBudget ?? {},
+    stats,
+    modelSummary,
+    warningPct,
+    criticalPct,
+  );
+  const window = checkWindowBudget();
+  const escalated = escalateLevel(
+    { level: daily.level, percent: daily.percent, message: daily.message },
+    weekly.tightest,
+    window,
   );
 
-  const weekly: WeeklyResult = {
-    ok: highestWeekly?.level !== 'critical',
-    level: highestWeekly?.level ?? 'unknown',
-    percent: highestWeekly?.percent ?? 0,
-    agents: agentWeekly,
-    tightest: highestWeekly,
-    totalTokens: safeNumber(stats.totalTokensWeekly),
-    daysCovered: stats.weeklyDayCount ?? 0,
-  };
-
-  // ── Determine overall level ──────────────────────────────────────
-  // Weekly is the primary metric (matches Claude's actual limit structure).
-  // Daily and window are secondary — only escalate if they're tighter.
-  const LEVEL_ORDER: Record<string, number> = { normal: 0, warning: 1, critical: 2, unknown: -1 };
-
-  // Start with weekly as primary
-  if (highestWeekly != null && highestWeekly.level !== 'unknown') {
-    const weeklyLevelOrder = LEVEL_ORDER[highestWeekly.level] ?? -1;
-    const currentLevelOrder = LEVEL_ORDER[level] ?? -1;
-    if (weeklyLevelOrder > currentLevelOrder) {
-      level = highestWeekly.level;
-      percent = highestWeekly.percent;
-      message = `${highestWeekly.agent} weekly usage ${highestWeekly.percent.toFixed(1)}% — ${message}`;
-    }
-  }
-
-  // Sliding window budget check — escalate if tighter
-  const window = checkWindowBudget();
-  if (window.tightest?.level !== 'unknown' && window.tightest != null) {
-    const currentLevelOrder = LEVEL_ORDER[level] ?? -1;
-    const windowLevel = LEVEL_ORDER[window.tightest.level] ?? -1;
-    if (windowLevel > currentLevelOrder) {
-      level = window.tightest.level;
-      percent = window.tightest.percent;
-      message = `${window.tightest.agent} window usage ${window.tightest.percent.toFixed(1)}% (${String(window.windowHours)}h sliding) — ${message}`;
-    }
-  }
-
   return {
-    ok: level !== 'critical',
-    level,
-    percent,
+    ok: escalated.level !== 'critical',
+    level: escalated.level,
+    percent: escalated.percent,
     todayTokens: totalTokens,
-    model,
-    budget,
-    used,
-    remaining,
-    resetAt,
-    resetInMs,
-    message,
-    confidence,
+    model: daily.model,
+    budget: daily.budget,
+    used: daily.used,
+    remaining: daily.remaining,
+    resetAt: daily.resetAt,
+    resetInMs: daily.resetInMs,
+    message: escalated.message,
+    confidence: daily.confidence,
     scope: 'cli-only',
     accountUsageNote: 'CLI tokens only. Full account: claude.ai/settings/usage',
     stats: stats.found ? stats : null,
@@ -905,108 +1055,117 @@ function agentBadgeCompact(agent: string): string {
   return cfg.color(`${cfg.icon} ${agent.toUpperCase()}`);
 }
 
+function renderWeeklySection(wk: WeeklyResult): string[] {
+  if (wk.tightest?.tracked !== true) return [];
+  const d = pc.gray;
+  const b = pc.bold;
+  const lines: string[] = [''];
+  lines.push(`  ${b('Weekly')} ${d(`(${String(wk.daysCovered)} days)`)}`);
+  lines.push(`  ${d('Usage:')} ${renderUsageBar(wk.percent)}`);
+  lines.push(`  ${d('Tokens (7d):')} ${pc.white(formatTokens(wk.totalTokens))}`);
+  if ((wk.tightest.weeklyBudget ?? 0) > 0) {
+    const wkBudget = wk.tightest.weeklyBudget ?? 0;
+    const wkRemaining = Math.max(0, wkBudget - wk.tightest.weeklyTokens);
+    lines.push(
+      `  ${d('Budget:')} ${pc.white(formatTokens(wkBudget))} ${d(`(${String(wk.tightest.model)})`)}`,
+    );
+    lines.push(`  ${d('Remaining:')} ${pc.white(formatTokens(wkRemaining))}`);
+  }
+  return lines;
+}
+
+function renderDailySection(usage: UsageSummary): string[] {
+  const d = pc.gray;
+  const b = pc.bold;
+  const lines: string[] = ['', `  ${b('Today')}`];
+  if (usage.budget > 0) {
+    lines.push(`  ${d('Usage:')} ${renderUsageBar(usage.percent)}`);
+  }
+  lines.push(`  ${d('Tokens today:')} ${pc.white(formatTokens(usage.todayTokens))}`);
+  if (usage.budget > 0) {
+    const remaining = usage.remaining == null ? 'n/a' : formatTokens(usage.remaining);
+    lines.push(
+      `  ${d('Budget:')} ${pc.white(formatTokens(usage.budget))} ${d(`(${String(usage.model)})`)}`,
+    );
+    lines.push(`  ${d('Remaining:')} ${pc.white(remaining)}`);
+    if (usage.resetInMs != null) {
+      lines.push(`  ${d('Reset in:')} ${pc.white(formatResetCountdown(usage.resetInMs))}`);
+    }
+  }
+  lines.push(`  ${d('Confidence:')} ${pc.white(usage.confidence)}`);
+  return lines;
+}
+
+function renderAgentRow(agent: string, row: AgentUsageEntry): string {
+  const d = pc.gray;
+  const statusColors: Record<string, (s: string) => string> = {
+    normal: pc.green,
+    warning: pc.yellow,
+    critical: pc.red,
+    unknown: pc.gray,
+  };
+  const statusFn = statusColors[row.level] ?? pc.white;
+  const status = statusFn((row.level === '' ? 'unknown' : row.level).toUpperCase());
+  if ((row.budget ?? 0) > 0) {
+    const rowUsed = formatTokens(row.used === 0 ? 0 : row.used);
+    const rowBudget = formatTokens(row.budget ?? 0);
+    const rowRemaining = formatTokens(row.remaining ?? 0);
+    const reset = row.resetInMs == null ? 'n/a' : formatResetCountdown(row.resetInMs);
+    return `    ${agentBadgeCompact(agent)} ${status} ${pc.white(`${row.percent.toFixed(1)}%`)}  ${d('used')} ${pc.white(rowUsed)}${d('/')} ${pc.white(rowBudget)}  ${d('left')} ${pc.white(rowRemaining)}  ${d('reset')} ${pc.white(reset)}`;
+  }
+  const rowUsed = formatTokens(row.todayTokens === 0 ? 0 : row.todayTokens);
+  return `    ${agentBadgeCompact(agent)} ${status} ${d('used')} ${pc.white(rowUsed)}  ${d('budget')} ${pc.white('n/a')}  ${d('source')} ${pc.white(row.source === '' ? 'none' : row.source)}`;
+}
+
+function renderAgentBreakdown(usage: UsageSummary): string[] {
+  if (Object.keys(usage.agents).length === 0) return [];
+  const b = pc.bold;
+  const lines: string[] = ['', `  ${b('Agent breakdown (today):')}`];
+  for (const agent of AGENT_NAMES) {
+    const row = usage.agents[agent];
+    if (row == null) continue; // eslint-disable-line @typescript-eslint/no-unnecessary-condition -- defensive null guard
+    lines.push(renderAgentRow(agent, row));
+  }
+  return lines;
+}
+
 function renderUsageDashboard(usage: UsageSummary): string {
-  const lines: string[] = [];
   const d = pc.gray;
   const b = pc.bold;
 
-  lines.push('');
-  lines.push(`${b(pc.magenta('HYDRA'))} ${d('|')} ${d('Claude Code Token Usage')}`);
-  lines.push(d('\u2500'.repeat(56)));
-  lines.push(`  ${d('CLI usage only \u2014 does not include web or desktop usage')}`);
-  lines.push(`  ${d('Full account:')} ${pc.white('claude.ai/settings/usage')}`);
+  const lines: string[] = [
+    '',
+    `${b(pc.magenta('HYDRA'))} ${d('|')} ${d('Claude Code Token Usage')}`,
+    d('\u2500'.repeat(56)),
+    `  ${d('CLI usage only \u2014 does not include web or desktop usage')}`,
+    `  ${d('Full account:')} ${pc.white('claude.ai/settings/usage')}`,
+  ];
 
   if (usage.level === 'unknown') {
-    lines.push('');
-    lines.push(`  ${pc.yellow('\u26A0')} ${usage.message}`);
+    lines.push('', `  ${pc.yellow('\u26A0')} ${usage.message}`);
   } else {
-    // ── Weekly usage (primary — matches Claude's limit structure) ──
-    const wk = usage.weekly;
-    if (wk.tightest?.tracked === true) {
-      lines.push('');
-      lines.push(`  ${b('Weekly')} ${d(`(${String(wk.daysCovered)} days)`)}`);
-      lines.push(`  ${d('Usage:')} ${renderUsageBar(wk.percent)}`);
-      lines.push(`  ${d('Tokens (7d):')} ${pc.white(formatTokens(wk.totalTokens))}`);
-      if ((wk.tightest.weeklyBudget ?? 0) > 0) {
-        const wkBudget = wk.tightest.weeklyBudget ?? 0;
-        const wkRemaining = Math.max(0, wkBudget - wk.tightest.weeklyTokens);
-        lines.push(
-          `  ${d('Budget:')} ${pc.white(formatTokens(wkBudget))} ${d(`(${String(wk.tightest.model)})`)}`,
-        );
-        lines.push(`  ${d('Remaining:')} ${pc.white(formatTokens(wkRemaining))}`);
-      }
-    }
-
-    // ── Daily usage (secondary) ──
-    lines.push('');
-    lines.push(`  ${b('Today')}`);
-    if (usage.budget > 0) {
-      lines.push(`  ${d('Usage:')} ${renderUsageBar(usage.percent)}`);
-    }
-    lines.push(`  ${d('Tokens today:')} ${pc.white(formatTokens(usage.todayTokens))}`);
-    if (usage.budget > 0) {
-      const remaining = usage.remaining == null ? 'n/a' : formatTokens(usage.remaining);
-      lines.push(
-        `  ${d('Budget:')} ${pc.white(formatTokens(usage.budget))} ${d(`(${String(usage.model)})`)}`,
-      );
-      lines.push(`  ${d('Remaining:')} ${pc.white(remaining)}`);
-      if (usage.resetInMs != null) {
-        lines.push(`  ${d('Reset in:')} ${pc.white(formatResetCountdown(usage.resetInMs))}`);
-      }
-    }
-    lines.push(`  ${d('Confidence:')} ${pc.white(usage.confidence)}`);
+    lines.push(...renderWeeklySection(usage.weekly));
+    lines.push(...renderDailySection(usage));
   }
 
   if (usage.stats?.activity != null) {
     const a = usage.stats.activity;
-    lines.push('');
     lines.push(
+      '',
       `  ${d('Messages:')} ${pc.white(String(a.messageCount))}  ${d('Sessions:')} ${pc.white(String(a.sessionCount))}  ${d('Tool calls:')} ${pc.white(String(a.toolCallCount))}`,
     );
   }
 
-  // Per-model breakdown (today)
   if (usage.stats?.tokensByModel != null && Object.keys(usage.stats.tokensByModel).length > 0) {
-    lines.push('');
-    lines.push(`  ${b('Model breakdown (today):')}`);
+    lines.push('', `  ${b('Model breakdown (today):')}`);
     for (const [model, tokens] of Object.entries(usage.stats.tokensByModel)) {
       const shortName = model.replace(/^claude-/, '').replace(/^gemini-/, '');
       lines.push(`    ${d(shortName)} ${pc.white(formatTokens(tokens))}`);
     }
   }
 
-  if (Object.keys(usage.agents).length > 0) {
-    lines.push('');
-    lines.push(`  ${b('Agent breakdown (today):')}`);
-    for (const agent of AGENT_NAMES) {
-      const row = usage.agents[agent];
-      if (row == null) continue; // eslint-disable-line @typescript-eslint/no-unnecessary-condition -- defensive null guard
-      const statusColors: Record<string, (s: string) => string> = {
-        normal: pc.green,
-        warning: pc.yellow,
-        critical: pc.red,
-        unknown: pc.gray,
-      };
-      const statusFn = statusColors[row.level] ?? pc.white;
-      const status = statusFn((row.level === '' ? 'unknown' : row.level).toUpperCase());
-      if ((row.budget ?? 0) > 0) {
-        const rowUsed = formatTokens(row.used === 0 ? 0 : row.used);
-        const rowBudget = formatTokens(row.budget ?? 0);
-        const rowRemaining = formatTokens(row.remaining ?? 0);
-        const reset = row.resetInMs == null ? 'n/a' : formatResetCountdown(row.resetInMs);
-        lines.push(
-          `    ${agentBadgeCompact(agent)} ${status} ${pc.white(`${row.percent.toFixed(1)}%`)}  ${d('used')} ${pc.white(rowUsed)}${d('/')} ${pc.white(rowBudget)}  ${d('left')} ${pc.white(rowRemaining)}  ${d('reset')} ${pc.white(reset)}`,
-        );
-      } else {
-        const rowUsed = formatTokens(row.todayTokens === 0 ? 0 : row.todayTokens);
-        lines.push(
-          `    ${agentBadgeCompact(agent)} ${status} ${d('used')} ${pc.white(rowUsed)}  ${d('budget')} ${pc.white('n/a')}  ${d('source')} ${pc.white(row.source === '' ? 'none' : row.source)}`,
-        );
-      }
-    }
-  }
+  lines.push(...renderAgentBreakdown(usage));
 
-  // Status line
   const statusColors: Record<string, (s: string) => string> = {
     normal: pc.green,
     warning: pc.yellow,
@@ -1014,16 +1173,14 @@ function renderUsageDashboard(usage: UsageSummary): string {
     unknown: pc.gray,
   };
   const statusFn = statusColors[usage.level] ?? pc.white;
-  lines.push('');
   lines.push(
+    '',
     `  ${d('Status:')} ${statusFn(usage.level.toUpperCase())} ${d(`\u2014 ${usage.message}`)}`,
   );
 
-  // Contingency options
   const contingencies = getContingencyOptions(usage);
   if (contingencies.length > 0) {
-    lines.push('');
-    lines.push(`  ${b(pc.yellow('Contingency options:'))}`);
+    lines.push('', `  ${b(pc.yellow('Contingency options:'))}`);
     for (const [i, opt] of contingencies.entries()) {
       lines.push(
         `    ${pc.yellow(`${String(i + 1)})`)} ${pc.white(opt.label)} ${d(`\u2014 ${opt.description}`)}`,

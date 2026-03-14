@@ -59,6 +59,14 @@ describe('Copilot roles configuration', () => {
     invalidateConfigCache();
   });
 
+  /** Extracts and asserts invoke.headless from an agent definition. */
+  function assertHeadless(agent: AgentDef) {
+    assert.ok(agent.invoke != null, 'agent.invoke must be defined');
+    const { headless } = agent.invoke;
+    assert.ok(headless != null, 'agent.invoke.headless must be defined');
+    return headless;
+  }
+
   // ── Agent enablement ────────────────────────────────────────────────────
 
   describe('copilot agent enablement', () => {
@@ -134,7 +142,8 @@ describe('Copilot roles configuration', () => {
   describe('headless CLI args — architect role (claude-opus-4.6)', () => {
     it('headless plan mode includes -p, --silent, --no-ask-user', () => {
       const agent = getAgent('copilot');
-      const [cmd, args] = agent.invoke!.headless!('architect task', {
+      const headless = assertHeadless(agent);
+      const [cmd, args] = headless('architect task', {
         model: 'copilot-claude-opus-4-6',
       });
       assert.equal(cmd, 'copilot');
@@ -146,7 +155,8 @@ describe('Copilot roles configuration', () => {
 
     it('headless resolves copilot-claude-opus-4-6 → --model claude-opus-4.6', () => {
       const agent = getAgent('copilot');
-      const [, args] = agent.invoke!.headless!('architect task', {
+      const headless = assertHeadless(agent);
+      const [, args] = headless('architect task', {
         model: 'copilot-claude-opus-4-6',
       });
       const idx = args.indexOf('--model');
@@ -156,7 +166,8 @@ describe('Copilot roles configuration', () => {
 
     it('headless includes --output-format json for architect role', () => {
       const agent = getAgent('copilot');
-      const [, args] = agent.invoke!.headless!('architect task', {
+      const headless = assertHeadless(agent);
+      const [, args] = headless('architect task', {
         model: 'copilot-claude-opus-4-6',
       });
       const idx = args.indexOf('--output-format');
@@ -168,7 +179,8 @@ describe('Copilot roles configuration', () => {
   describe('headless CLI args — analyst role (claude-sonnet-4.6)', () => {
     it('headless resolves copilot-claude-sonnet-4-6 → --model claude-sonnet-4.6', () => {
       const agent = getAgent('copilot');
-      const [, args] = agent.invoke!.headless!('analyst task', {
+      const headless = assertHeadless(agent);
+      const [, args] = headless('analyst task', {
         model: 'copilot-claude-sonnet-4-6',
       });
       const idx = args.indexOf('--model');
@@ -178,7 +190,8 @@ describe('Copilot roles configuration', () => {
 
     it('headless full-auto mode adds --allow-all-tools for analyst', () => {
       const agent = getAgent('copilot');
-      const [, args] = agent.invoke!.headless!('analyst task', {
+      const headless = assertHeadless(agent);
+      const [, args] = headless('analyst task', {
         model: 'copilot-claude-sonnet-4-6',
         permissionMode: 'full-auto',
       });
@@ -189,7 +202,8 @@ describe('Copilot roles configuration', () => {
   describe('headless CLI args — implementer role (gpt-5.4)', () => {
     it('headless resolves copilot-gpt-5-4 → --model gpt-5.4', () => {
       const agent = getAgent('copilot');
-      const [, args] = agent.invoke!.headless!('implementer task', {
+      const headless = assertHeadless(agent);
+      const [, args] = headless('implementer task', {
         model: 'copilot-gpt-5-4',
       });
       const idx = args.indexOf('--model');
@@ -199,7 +213,8 @@ describe('Copilot roles configuration', () => {
 
     it('headless auto-edit mode uses specific --allow-tool flags for implementer', () => {
       const agent = getAgent('copilot');
-      const [, args] = agent.invoke!.headless!('implementer task', {
+      const headless = assertHeadless(agent);
+      const [, args] = headless('implementer task', {
         model: 'copilot-gpt-5-4',
         permissionMode: 'auto-edit',
       });

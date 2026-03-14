@@ -94,8 +94,8 @@ function extractPriorities(todoContent: string) {
 
 // ── Auto-detect project metadata ─────────────────────────────────────────────
 
-function detectTechStack(projectRoot: string) {
-  const parts = [];
+function detectNpmTechParts(projectRoot: string): string[] {
+  const parts: string[] = [];
   try {
     const pkg = JSON.parse(fs.readFileSync(path.join(projectRoot, 'package.json'), 'utf8')) as {
       dependencies?: Record<string, string | undefined>;
@@ -117,11 +117,14 @@ function detectTechStack(projectRoot: string) {
   } catch {
     /* ignore */
   }
+  return parts;
+}
 
+function detectTechStack(projectRoot: string) {
+  const parts = detectNpmTechParts(projectRoot);
   if (fs.existsSync(path.join(projectRoot, 'Cargo.toml'))) parts.push('Rust');
   if (fs.existsSync(path.join(projectRoot, 'go.mod'))) parts.push('Go');
   if (fs.existsSync(path.join(projectRoot, 'pyproject.toml'))) parts.push('Python');
-
   return parts.length > 0 ? parts.join(', ') : 'unknown stack';
 }
 
@@ -270,6 +273,45 @@ function buildMediumContext(projectConfig: ProjectConfig) {
   return cachedMedium;
 }
 
+function appendGitChanges(extraLines: string[], projectRoot: string): void {
+  const diff = getRecentGitDiff(projectRoot, 60);
+  if (diff !== '') {
+    extraLines.push('');
+    extraLines.push('--- RECENT CHANGES (last 3 commits) ---');
+    extraLines.push(diff);
+    extraLines.push('--- END RECENT CHANGES ---');
+  }
+}
+
+function appendTodoPriorities(extraLines: string[], projectRoot: string): void {
+  const todoContent = readFileSafe(path.join(projectRoot, 'docs', 'TODO.md'), 80);
+  if (todoContent !== '') {
+    extraLines.push('');
+    extraLines.push('--- CURRENT TODO (top 80 lines) ---');
+    extraLines.push(todoContent);
+    extraLines.push('--- END TODO ---');
+  }
+}
+
+function appendTaskRelevantFiles(
+  extraLines: string[],
+  projectRoot: string,
+  taskFiles: string[],
+): void {
+  if (taskFiles.length === 0) return;
+  extraLines.push('');
+  extraLines.push('--- TASK-RELEVANT FILES ---');
+  for (const filePath of taskFiles.slice(0, 5)) {
+    const fullPath = path.isAbsolute(filePath) ? filePath : path.join(projectRoot, filePath);
+    const content = readFileSafe(fullPath, 100);
+    if (content !== '') {
+      extraLines.push(`\n// ${filePath} (first 100 lines)`);
+      extraLines.push(content);
+    }
+  }
+  extraLines.push('--- END TASK-RELEVANT FILES ---');
+}
+
 /**
  * Large context (~5000-8000 tokens) for Gemini.
  * Leverages Gemini's massive context window with additional file contents and git history.
@@ -293,40 +335,9 @@ function buildLargeContext(
   const medium = buildMediumContext(projectConfig);
   const extraLines = [medium];
 
-  // Add recent git changes
-  const diff = getRecentGitDiff(projectConfig.projectRoot, 60);
-  if (diff !== '') {
-    extraLines.push('');
-    extraLines.push('--- RECENT CHANGES (last 3 commits) ---');
-    extraLines.push(diff);
-    extraLines.push('--- END RECENT CHANGES ---');
-  }
-
-  // Add TODO priorities (full section, not just titles)
-  const todoContent = readFileSafe(path.join(projectConfig.projectRoot, 'docs', 'TODO.md'), 80);
-  if (todoContent !== '') {
-    extraLines.push('');
-    extraLines.push('--- CURRENT TODO (top 80 lines) ---');
-    extraLines.push(todoContent);
-    extraLines.push('--- END TODO ---');
-  }
-
-  // Add task-specific file contents if provided
-  if (taskContext.files && taskContext.files.length > 0) {
-    extraLines.push('');
-    extraLines.push('--- TASK-RELEVANT FILES ---');
-    for (const filePath of taskContext.files.slice(0, 5)) {
-      const fullPath = path.isAbsolute(filePath)
-        ? filePath
-        : path.join(projectConfig.projectRoot, filePath);
-      const content = readFileSafe(fullPath, 100);
-      if (content !== '') {
-        extraLines.push(`\n// ${filePath} (first 100 lines)`);
-        extraLines.push(content);
-      }
-    }
-    extraLines.push('--- END TASK-RELEVANT FILES ---');
-  }
+  appendGitChanges(extraLines, projectConfig.projectRoot);
+  appendTodoPriorities(extraLines, projectConfig.projectRoot);
+  appendTaskRelevantFiles(extraLines, projectConfig.projectRoot, taskContext.files ?? []);
 
   const result = extraLines.join('\n');
 

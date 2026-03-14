@@ -55,33 +55,42 @@ function askQuestion(
   });
 }
 
-function formatEntry(s: SuggestionEntry) {
-  let statusColor: (s: string) => string;
-  if (s.status === 'pending') statusColor = pc.cyan;
-  else if (s.status === 'completed') statusColor = pc.green;
-  else if (s.status === 'rejected') statusColor = pc.red;
-  else if (s.status === 'exploring') statusColor = pc.yellow;
-  else statusColor = pc.dim;
+function getStatusColor(status: string | undefined): (s: string) => string {
+  if (status === 'pending') return pc.cyan;
+  if (status === 'completed') return pc.green;
+  if (status === 'rejected') return pc.red;
+  if (status === 'exploring') return pc.yellow;
+  return pc.dim;
+}
 
-  let priorityBadge: string;
-  if (s.priority === 'high') priorityBadge = pc.red('HIGH');
-  else if (s.priority === 'low') priorityBadge = pc.dim('low');
-  else priorityBadge = pc.yellow('med');
+function getPriorityBadge(priority: string | undefined): string {
+  if (priority === 'high') return pc.red('HIGH');
+  if (priority === 'low') return pc.dim('low');
+  return pc.yellow('med');
+}
 
-  console.log(
-    `  ${statusColor(s.id ?? '')} ${pc.yellow(s.area ?? '')}: ${(s.title ?? '').slice(0, 80)}`,
-  );
-
+function buildEntryParts(s: SuggestionEntry): string[] {
+  const statusColor = getStatusColor(s.status);
+  const priorityBadge = getPriorityBadge(s.priority);
   const parts = [`status: ${statusColor(s.status ?? '')}`, `priority: ${priorityBadge}`];
   if ((s.attempts ?? 0) > 0) {
     parts.push(`attempts: ${String(s.attempts ?? 0)}/${String(s.maxAttempts ?? 0)}`);
     if (s.lastAttemptScore != null) parts.push(`last: ${String(s.lastAttemptScore)}/10`);
   }
-  if (s.specPath) parts.push('has spec');
-  if (s.source) parts.push(`source: ${s.source}`);
-  console.log(`    ${pc.dim(parts.join(' | '))}`);
+  if (s.specPath != null && s.specPath !== '') parts.push('has spec');
+  if (s.source != null && s.source !== '') parts.push(`source: ${s.source}`);
+  return parts;
+}
 
-  if (s.notes) {
+function formatEntry(s: SuggestionEntry) {
+  const statusColor = getStatusColor(s.status);
+
+  console.log(
+    `  ${statusColor(s.id ?? '')} ${pc.yellow(s.area ?? '')}: ${(s.title ?? '').slice(0, 80)}`,
+  );
+  console.log(`    ${pc.dim(buildEntryParts(s).join(' | '))}`);
+
+  if (s.notes != null && s.notes !== '') {
     const noteLines = s.notes.split('\n').filter(Boolean);
     for (const line of noteLines.slice(0, 2)) {
       console.log(`    ${pc.dim(line.slice(0, 100))}`);
@@ -94,20 +103,23 @@ function formatEntry(s: SuggestionEntry) {
 
 function listCommand(evolveDir: string, options: Record<string, string | boolean>) {
   const sg = loadSuggestions(evolveDir);
-  const statusFilter = (options['status'] as string) || null;
-  const areaFilter = (options['area'] as string) || undefined;
-  const query = (options['query'] as string) || undefined;
+  const statusVal = options['status'] as string | undefined;
+  const statusFilter = statusVal != null && statusVal !== '' ? statusVal : null;
+  const areaVal = options['area'] as string | undefined;
+  const areaFilter = areaVal != null && areaVal !== '' ? areaVal : undefined;
+  const queryVal = options['query'] as string | undefined;
+  const query = queryVal != null && queryVal !== '' ? queryVal : undefined;
 
   let entries;
   if (statusFilter === 'all') {
     entries = searchSuggestions(sg, query, { area: areaFilter });
-  } else if (statusFilter) {
-    entries = searchSuggestions(sg, query, { status: statusFilter, area: areaFilter });
-  } else {
+  } else if (statusFilter === null) {
     entries =
-      query || areaFilter
+      query !== undefined || areaFilter !== undefined
         ? searchSuggestions(sg, query, { status: 'pending', area: areaFilter })
         : getPendingSuggestions(sg);
+  } else {
+    entries = searchSuggestions(sg, query, { status: statusFilter, area: areaFilter });
   }
 
   const label = statusFilter === 'all' ? 'all' : (statusFilter ?? 'pending');
@@ -126,40 +138,54 @@ function listCommand(evolveDir: string, options: Record<string, string | boolean
 
 // ── Add Command ─────────────────────────────────────────────────────────────
 
+async function collectInteractiveInput(): Promise<{
+  title: string;
+  area: string;
+  description: string;
+  priority: string;
+} | null> {
+  const cfg = loadHydraConfig();
+  const focusAreas = cfg.evolve?.focusAreas ?? [];
+
+  const rl = createRL();
+  try {
+    const title = await askQuestion(rl, pc.cyan('  Title: '));
+    if (title === '') {
+      console.log(pc.yellow('  Cancelled — no title provided.'));
+      return null;
+    }
+
+    if (focusAreas.length > 0) {
+      console.log(pc.dim(`  Areas: ${focusAreas.join(', ')}`));
+    }
+    const area = await askQuestion(rl, pc.cyan('  Area: '));
+    const description = await askQuestion(rl, pc.cyan('  Description (optional): '));
+    const p = await askQuestion(rl, pc.cyan('  Priority [high/medium/low]: '));
+    const priority = ['high', 'medium', 'low'].includes(p) ? p : 'medium';
+    return { title, area, description, priority };
+  } finally {
+    rl.close();
+  }
+}
+
 async function addCommand(evolveDir: string, options: Record<string, string | boolean>) {
   const sg = loadSuggestions(evolveDir);
-  let title = (options['title'] as string) || '';
-  let area = (options['area'] as string) || '';
-  let description = (options['description'] as string) || '';
-  let priority = (options['priority'] as string) || 'medium';
+  let title = (options['title'] as string | undefined) ?? '';
+  let area = (options['area'] as string | undefined) ?? '';
+  let description = (options['description'] as string | undefined) ?? '';
+  let priority = (options['priority'] as string | undefined) ?? 'medium';
 
-  // Interactive mode if title not provided
-  if (!title) {
-    const cfg = loadHydraConfig();
-    const focusAreas = cfg.evolve?.focusAreas ?? [];
-
-    const rl = createRL();
-    try {
-      title = await askQuestion(rl, pc.cyan('  Title: '));
-      if (!title) {
-        console.log(pc.yellow('  Cancelled — no title provided.'));
-        return;
-      }
-
-      if (focusAreas.length > 0) {
-        console.log(pc.dim(`  Areas: ${focusAreas.join(', ')}`));
-      }
-      area = await askQuestion(rl, pc.cyan('  Area: '));
-      description = await askQuestion(rl, pc.cyan('  Description (optional): '));
-      const p = await askQuestion(rl, pc.cyan('  Priority [high/medium/low]: '));
-      if (['high', 'medium', 'low'].includes(p)) priority = p;
-    } finally {
-      rl.close();
-    }
+  if (title === '') {
+    const input = await collectInteractiveInput();
+    if (input == null) return;
+    title = input.title;
+    area = input.area;
+    description = input.description;
+    priority = input.priority;
   }
 
-  if (!area) area = 'general';
-  if (!description) description = title;
+  if (area === '') area = 'general';
+  if (description === '') description = title;
 
   const created = addSuggestion(sg, {
     source: 'user:manual',
@@ -181,20 +207,27 @@ async function addCommand(evolveDir: string, options: Record<string, string | bo
 
 // ── Remove Command ──────────────────────────────────────────────────────────
 
+function resolveIdArg(options: Record<string, string | boolean>, positionals: string[]): string {
+  const positional = positionals[1];
+  if (positional !== '') return positional;
+  const optId = options['id'] as string | undefined;
+  return optId !== undefined && optId !== '' ? optId : '';
+}
+
 function removeCommand(
   evolveDir: string,
   options: Record<string, string | boolean>,
   positionals: string[],
 ) {
-  const id = positionals[1] || (options['id'] as string);
-  if (!id) {
+  const id = resolveIdArg(options, positionals);
+  if (id === '') {
     console.error(pc.red('  Usage: remove <SUG_ID>'));
     return;
   }
 
   const sg = loadSuggestions(evolveDir);
   const entry = getSuggestionById(sg, id);
-  if (!entry) {
+  if (entry == null) {
     console.error(pc.red(`  Suggestion ${id} not found.`));
     return;
   }
@@ -211,15 +244,15 @@ function resetCommand(
   options: Record<string, string | boolean>,
   positionals: string[],
 ) {
-  const id = positionals[1] || (options['id'] as string);
-  if (!id) {
+  const id = resolveIdArg(options, positionals);
+  if (id === '') {
     console.error(pc.red('  Usage: reset <SUG_ID>'));
     return;
   }
 
   const sg = loadSuggestions(evolveDir);
   const entry = getSuggestionById(sg, id);
-  if (!entry) {
+  if (entry == null) {
     console.error(pc.red(`  Suggestion ${id} not found.`));
     return;
   }
@@ -238,6 +271,67 @@ function resetCommand(
 
 // ── Import Command ──────────────────────────────────────────────────────────
 
+interface DecisionArtifact {
+  verdict?: string;
+  improvement?: string;
+  branchName?: string;
+  area?: string;
+  score?: number;
+  reason?: string;
+}
+
+function isRetryableDecision(raw: DecisionArtifact): boolean {
+  return (
+    (raw.verdict === 'reject' || raw.verdict === 'revise') &&
+    raw.improvement != null &&
+    raw.improvement !== 'No improvement selected' &&
+    raw.improvement.length >= 10
+  );
+}
+
+function buildSuggestionFromDecision(
+  raw: DecisionArtifact,
+  file: string,
+  specPath: string | null,
+  hasSpec: boolean,
+): Parameters<typeof addSuggestion>[1] {
+  return {
+    source: 'auto:rejected-round',
+    sourceRef: raw.branchName ?? file,
+    area: raw.area ?? 'general',
+    title: raw.improvement.slice(0, 100),
+    description: raw.improvement,
+    specPath: hasSpec ? specPath : null,
+    priority: (raw.score ?? 0) >= 5 ? 'high' : 'medium',
+    tags: [raw.area ?? '', 'imported', raw.verdict].filter((t) => t !== ''),
+    notes: `Imported from ${file}. Score: ${String(raw.score ?? 0)}/10. ${raw.reason ?? ''}`.trim(),
+  };
+}
+
+function processDecisionFile(
+  file: string,
+  decisionsDir: string,
+  specsDir: string,
+  sg: ReturnType<typeof loadSuggestions>,
+): boolean {
+  const raw = JSON.parse(
+    fs.readFileSync(path.join(decisionsDir, file), 'utf8'),
+  ) as DecisionArtifact;
+  if (!isRetryableDecision(raw)) return false;
+
+  const roundNum = file.match(/ROUND_(\d+)/)?.[1];
+  const specPath = roundNum === undefined ? null : path.join(specsDir, `ROUND_${roundNum}_SPEC.md`);
+  const hasSpec = specPath !== null && fs.existsSync(specPath);
+
+  const entry = addSuggestion(sg, buildSuggestionFromDecision(raw, file, specPath, hasSpec));
+
+  if (entry != null) {
+    console.log(pc.green(`  + ${entry.id ?? ''}: ${(entry.title ?? '').slice(0, 70)}`));
+    return true;
+  }
+  return false;
+}
+
 function importCommand(evolveDir: string) {
   const decisionsDir = path.join(evolveDir, 'decisions');
   const specsDir = path.join(evolveDir, 'specs');
@@ -253,35 +347,8 @@ function importCommand(evolveDir: string) {
 
   for (const file of files) {
     try {
-      const decision = JSON.parse(fs.readFileSync(path.join(decisionsDir, file), 'utf8'));
-      // Only import rejected rounds with valid improvement text
-      if (
-        (decision.verdict === 'reject' || decision.verdict === 'revise') &&
-        decision.improvement &&
-        decision.improvement !== 'No improvement selected' &&
-        decision.improvement.length >= 10
-      ) {
-        const roundNum = file.match(/ROUND_(\d+)/)?.[1];
-        const specPath = roundNum ? path.join(specsDir, `ROUND_${roundNum}_SPEC.md`) : null;
-        const hasSpec = specPath && fs.existsSync(specPath);
-
-        const entry = addSuggestion(sg, {
-          source: 'auto:rejected-round',
-          sourceRef: String(decision.branchName ?? file),
-          area: decision.area ?? 'general',
-          title: decision.improvement.slice(0, 100),
-          description: decision.improvement,
-          specPath: hasSpec ? specPath : null,
-          priority: decision.score >= 5 ? 'high' : 'medium',
-          tags: [decision.area, 'imported', decision.verdict].filter(Boolean),
-          notes:
-            `Imported from ${file}. Score: ${String(decision.score as number)}/10. ${(decision.reason as string | undefined) ?? ''}`.trim(),
-        });
-
-        if (entry) {
-          created++;
-          console.log(pc.green(`  + ${entry.id ?? ''}: ${(entry.title ?? '').slice(0, 70)}`));
-        }
+      if (processDecisionFile(file, decisionsDir, specsDir, sg)) {
+        created++;
       }
     } catch {
       // Skip malformed files
@@ -308,7 +375,7 @@ function statsCommand(evolveDir: string) {
   console.log(pc.bold('\nSuggestions Backlog Stats\n'));
   console.log(`  Total entries:  ${String(sg.entries.length)}`);
   console.log(`  Pending:        ${pc.cyan(String(stats.totalPending))}`);
-  console.log(`  Exploring:      ${pc.yellow(String(stats.totalExploring || 0))}`);
+  console.log(`  Exploring:      ${pc.yellow(String(stats.totalExploring))}`);
   console.log(`  Completed:      ${pc.green(String(stats.totalCompleted))}`);
   console.log(`  Rejected:       ${pc.red(String(stats.totalRejected))}`);
   console.log(`  Abandoned:      ${pc.dim(String(stats.totalAbandoned))}`);
@@ -335,7 +402,8 @@ function statsCommand(evolveDir: string) {
 
 async function main() {
   const { options, positionals } = parseArgs(process.argv);
-  const command = positionals[0] || 'list';
+  const positionalZero = positionals[0];
+  const command = positionalZero === '' ? 'list' : positionalZero;
 
   let config: ReturnType<typeof resolveProject> | undefined;
   try {

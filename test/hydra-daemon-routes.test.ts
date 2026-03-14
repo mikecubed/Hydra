@@ -694,8 +694,7 @@ describe('handleWriteRoute', () => {
     });
     const state = makeState({ tasks: [task] });
 
-    for (let i = 0; i < 3; i++) {
-      // Re-claim between errors so the in_progress guard passes each time
+    async function runDlqErrorIteration(i: number): Promise<void> {
       if (i > 0) {
         const claimCtx = makeWriteCtx('POST', '/task/claim', state, {
           taskId: 't_dlq',
@@ -713,6 +712,10 @@ describe('handleWriteRoute', () => {
       assert.ok(handled);
       assert.equal(ctx.captured.statusCode, 200);
     }
+
+    await runDlqErrorIteration(0);
+    await runDlqErrorIteration(1);
+    await runDlqErrorIteration(2);
 
     // After 3 failures task should be gone from tasks and in deadLetter
     assert.equal(

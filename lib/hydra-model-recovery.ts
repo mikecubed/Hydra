@@ -540,16 +540,9 @@ export function detectModelError(
  * @param {object} result - executeAgent result: { ok, output, stderr, error, exitCode, errorCategory }
  * @returns {{ isCodexError: boolean, category: string, errorMessage: string }}
  */
-export function detectCodexError(
-  agent: string,
+function getPreclassifiedError(
   result: Record<string, unknown>,
-): { isCodexError: boolean; category: string; errorMessage: string } {
-  // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition -- runtime callers may pass null despite types
-  if (result == null || result['ok'] === true || agent !== 'codex') {
-    return { isCodexError: false, category: '', errorMessage: '' };
-  }
-
-  // If diagnoseAgentError already classified it, use that
+): { isCodexError: boolean; category: string; errorMessage: string } | null {
   if (
     typeof result['errorCategory'] === 'string' &&
     result['errorCategory'] !== '' &&
@@ -564,13 +557,20 @@ export function detectCodexError(
         '',
     };
   }
+  return null;
+}
 
-  const sources = [
+function buildSourcesText(result: Record<string, unknown>): string {
+  return [
     (result['stderr'] as string | undefined) ?? '',
     (result['output'] as string | undefined) ?? '',
     (result['error'] as string | undefined) ?? '',
   ].join('\n');
+}
 
+function detectPatternError(
+  sources: string,
+): { isCodexError: boolean; category: string; errorMessage: string } | null {
   for (const { pattern, category } of CODEX_ERROR_PATTERNS) {
     if (pattern.test(sources)) {
       const matchLine = sources.split('\n').find((l) => pattern.test(l)) ?? sources.slice(0, 200);
@@ -581,8 +581,12 @@ export function detectCodexError(
       };
     }
   }
+  return null;
+}
 
-  // Empty output with non-zero exit or signal = silent crash
+function detectSilentCrashError(
+  result: Record<string, unknown>,
+): { isCodexError: boolean; category: string; errorMessage: string } | null {
   if (
     ((result['exitCode'] as number | null | undefined) !== 0 || result['signal'] != null) &&
     ((result['output'] as string | undefined) ?? '').trim() === '' &&
@@ -598,8 +602,12 @@ export function detectCodexError(
       errorMessage: `Codex aborted (${reason}) but produced no output`,
     };
   }
+  return null;
+}
 
-  // Handle signal-based aborts even if there was some output
+function detectSignalError(
+  result: Record<string, unknown>,
+): { isCodexError: boolean; category: string; errorMessage: string } | null {
   if (result['signal'] != null && result['ok'] !== true) {
     return {
       isCodexError: true,
@@ -607,10 +615,12 @@ export function detectCodexError(
       errorMessage: `Codex aborted by signal ${(result['signal'] as string | null) ?? ''}`,
     };
   }
+  return null;
+}
 
-  // Catch-all: non-zero exit or null exit with stderr, that didn't match any known pattern.
-  // Instead of returning false (which loses the error to "unclassified" limbo),
-  // classify it as a Codex-specific unknown error with rich diagnostic context.
+function buildUnknownCodexError(
+  result: Record<string, unknown>,
+): { isCodexError: boolean; category: string; errorMessage: string } | null {
   const hasOutput =
     ((result['stderr'] as string | undefined) ?? '').trim() !== '' ||
     ((result['output'] as string | undefined) ?? '').trim() !== '';
@@ -619,7 +629,6 @@ export function detectCodexError(
       ((result['exitCode'] as number | null | undefined) === null && hasOutput)) &&
     (result['exitCode'] as number | null | undefined) !== undefined
   ) {
-    // Gather the best diagnostic context available
     const stderrTail = ((result['stderr'] as string | undefined) ?? '')
       .trim()
       .split('\n')
@@ -627,26 +636,50 @@ export function detectCodexError(
       .join(' | ')
       .slice(0, 300);
     const errorTail = ((result['error'] as string | undefined) ?? '').slice(0, 200);
-    // Check for JSONL error events in raw stdout
     const jsonlErrors = extractCodexErrorsFromResult(result);
     const jsonlContext =
       jsonlErrors.length > 0 ? ` JSONL errors: ${jsonlErrors.join('; ').slice(0, 200)}` : '';
-
     const exitInfo =
       (result['exitCode'] as number | null | undefined) === null
         ? 'terminated'
         : `exit ${String((result['exitCode'] as number | null) ?? '')}`;
+    let diagCtx = 'no context';
+    if (stderrTail !== '') diagCtx = stderrTail;
+    else if (errorTail !== '') diagCtx = errorTail;
     return {
       isCodexError: true,
       category: 'codex-unknown',
-      errorMessage: (() => {
-        let diagCtx = 'no context';
-        if (stderrTail !== '') diagCtx = stderrTail;
-        else if (errorTail !== '') diagCtx = errorTail;
-        return `Codex ${exitInfo}: ${diagCtx}${jsonlContext}`.slice(0, 500);
-      })(),
+      errorMessage: `Codex ${exitInfo}: ${diagCtx}${jsonlContext}`.slice(0, 500),
     };
   }
+  return null;
+}
+
+export function detectCodexError(
+  agent: string,
+  result: Record<string, unknown>,
+): { isCodexError: boolean; category: string; errorMessage: string } {
+  // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition -- runtime callers may pass null despite types
+  if (result == null || result['ok'] === true || agent !== 'codex') {
+    return { isCodexError: false, category: '', errorMessage: '' };
+  }
+
+  const preclassified = getPreclassifiedError(result);
+  if (preclassified != null) return preclassified;
+
+  const sources = buildSourcesText(result);
+
+  const patternError = detectPatternError(sources);
+  if (patternError != null) return patternError;
+
+  const silentCrash = detectSilentCrashError(result);
+  if (silentCrash != null) return silentCrash;
+
+  const signalError = detectSignalError(result);
+  if (signalError != null) return signalError;
+
+  const unknownError = buildUnknownCodexError(result);
+  if (unknownError != null) return unknownError;
 
   return { isCodexError: false, category: '', errorMessage: '' };
 }
@@ -691,6 +724,56 @@ function extractCodexErrorsFromResult(result: Record<string, unknown>): string[]
  * @param {string} failedModel - The model that failed
  * @returns {Array<{ id: string, label: string, source: string }>}
  */
+function collectPresetCandidates(
+  agentModels: Partial<Record<string, string>>,
+  failed: string,
+  seen: Set<string>,
+): Array<{ id: string; label: string; source: string; qualityScore?: number }> {
+  const candidates: Array<{ id: string; label: string; source: string; qualityScore?: number }> =
+    [];
+  for (const preset of ['default', 'fast', 'cheap']) {
+    const modelId = agentModels[preset];
+    if (
+      modelId != null &&
+      modelId !== '' &&
+      modelId.toLowerCase() !== failed &&
+      !seen.has(modelId.toLowerCase())
+    ) {
+      seen.add(modelId.toLowerCase());
+      const profile = getProfile(modelId);
+      candidates.push({
+        id: modelId,
+        label: `${preset}: ${modelId}`,
+        source: 'preset',
+        qualityScore: profile?.qualityScore ?? 0,
+      });
+    }
+  }
+  return candidates;
+}
+
+function collectAliasCandidates(
+  aliases: Record<string, string>,
+  failed: string,
+  seen: Set<string>,
+): Array<{ id: string; label: string; source: string; qualityScore?: number }> {
+  const candidates: Array<{ id: string; label: string; source: string; qualityScore?: number }> =
+    [];
+  for (const [alias, modelId] of Object.entries(aliases)) {
+    if (modelId !== '' && modelId.toLowerCase() !== failed && !seen.has(modelId.toLowerCase())) {
+      seen.add(modelId.toLowerCase());
+      const profile = getProfile(modelId);
+      candidates.push({
+        id: modelId,
+        label: `${alias}: ${modelId}`,
+        source: 'alias',
+        qualityScore: profile?.qualityScore ?? 0,
+      });
+    }
+  }
+  return candidates;
+}
+
 export function getFallbackCandidates(
   agent: string,
   failedModel: string,
@@ -711,42 +794,11 @@ export function getFallbackCandidates(
 
   const seen = new Set<string>();
   const failed = failedModel.toLowerCase();
-  const candidates: Array<{ id: string; label: string; source: string; qualityScore?: number }> =
-    [];
 
-  // 1. Config presets in priority order
-  for (const preset of ['default', 'fast', 'cheap']) {
-    const modelId = agentModels[preset];
-    if (
-      modelId != null &&
-      modelId !== '' &&
-      modelId.toLowerCase() !== failed &&
-      !seen.has(modelId.toLowerCase())
-    ) {
-      seen.add(modelId.toLowerCase());
-      const profile = getProfile(modelId);
-      candidates.push({
-        id: modelId,
-        label: `${preset}: ${modelId}`,
-        source: 'preset',
-        qualityScore: profile?.qualityScore ?? 0,
-      });
-    }
-  }
-
-  // 2. Aliases (deduplicated)
-  for (const [alias, modelId] of Object.entries(aliases)) {
-    if (modelId !== '' && modelId.toLowerCase() !== failed && !seen.has(modelId.toLowerCase())) {
-      seen.add(modelId.toLowerCase());
-      const profile = getProfile(modelId);
-      candidates.push({
-        id: modelId,
-        label: `${alias}: ${modelId}`,
-        source: 'alias',
-        qualityScore: profile?.qualityScore ?? 0,
-      });
-    }
-  }
+  const candidates = [
+    ...collectPresetCandidates(agentModels, failed, seen),
+    ...collectAliasCandidates(aliases, failed, seen),
+  ];
 
   return (candidates as Array<{ qualityScore: number; source: string }>).sort((a, b) => {
     if (a.source === 'preset' && b.source !== 'preset') return -1;
@@ -770,6 +822,42 @@ export function getFallbackCandidates(
  * @param {object} [opts["rl"]] - readline interface for interactive mode
  * @returns {Promise<{ recovered: boolean, newModel: string|null }>}
  */
+async function runInteractiveRecovery(
+  opts: Record<string, unknown>,
+  candidates: Array<{ id: string; label: string; source: string; qualityScore?: number }>,
+  agent: string,
+  failedModel: string,
+): Promise<string | null | undefined> {
+  try {
+    const { promptChoice } = await import('./hydra-prompt-choice.ts');
+    const { pickModel } = await import('./hydra-models-select.ts');
+
+    const options = candidates.map((c) => c.label);
+    options.push('Browse all models...');
+    options.push('Skip (disable agent)');
+
+    const result = await promptChoice(opts['rl'] as object, {
+      title: `Model error: ${failedModel === '' ? 'unknown' : failedModel} is unavailable for ${agent}`,
+      context: { 'Failed model': failedModel === '' ? 'unknown' : failedModel, Agent: agent },
+      choices: options,
+    });
+    const value = (result as { value?: string }).value;
+
+    if (value === 'Skip (disable agent)') return null;
+
+    if (value === 'Browse all models...') {
+      const pickedModel = await pickModel(agent);
+      if (pickedModel != null && pickedModel !== '') return pickedModel;
+      return undefined; // signals "cancel"
+    }
+
+    const match = candidates.find((c) => c.label === value);
+    return match ? match.id : null;
+  } catch {
+    return candidates[0].id;
+  }
+}
+
 export async function recoverFromModelError(
   agent: string,
   failedModel: string,
@@ -794,45 +882,9 @@ export async function recoverFromModelError(
   let selected: string | null | undefined;
 
   if (isInteractive) {
-    // Interactive mode — use promptChoice if available
-    try {
-      const { promptChoice } = await import('./hydra-prompt-choice.ts');
-      const { pickModel } = await import('./hydra-models-select.ts');
-
-      const options = candidates.map((c) => c.label);
-      options.push('Browse all models...');
-      options.push('Skip (disable agent)');
-
-      const result = await promptChoice(opts['rl'] as object, {
-        title: `Model error: ${failedModel === '' ? 'unknown' : failedModel} is unavailable for ${agent}`,
-        context: { 'Failed model': failedModel === '' ? 'unknown' : failedModel, Agent: agent },
-        choices: options,
-      });
-      const value = (result as { value?: string }).value;
-
-      if (value === 'Skip (disable agent)') {
-        return { recovered: false, newModel: null };
-      }
-
-      if (value === 'Browse all models...') {
-        // Delegate to full model picker
-        const pickedModel = await pickModel(agent);
-        if (pickedModel != null && pickedModel !== '') {
-          selected = pickedModel;
-        } else {
-          return { recovered: false, newModel: null };
-        }
-      } else {
-        // Find the candidate matching the selected label
-        const match = candidates.find((c) => c.label === value);
-        selected = match ? match.id : null;
-      }
-    } catch {
-      // promptChoice not available or failed — fall through to headless
-      selected = candidates[0].id;
-    }
+    selected = await runInteractiveRecovery(opts, candidates, agent, failedModel);
+    if (selected === undefined) return { recovered: false, newModel: null };
   } else {
-    // Headless mode — auto-select first candidate
     if (recoveryCfg['headlessFallback'] === false) {
       return { recovered: false, newModel: null };
     }
@@ -843,7 +895,6 @@ export async function recoverFromModelError(
     return { recovered: false, newModel: null };
   }
 
-  // Persist the new model selection
   if (recoveryCfg['autoPersist'] !== false) {
     setActiveModel(agent, selected);
   }

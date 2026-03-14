@@ -231,7 +231,7 @@ function appendLog(entry: string): void {
 }
 
 function parseList(value: unknown): string[] {
-  if (typeof value !== 'string' || !value) {
+  if (typeof value !== 'string' || value === '') {
     return [];
   }
   return value
@@ -251,7 +251,7 @@ function parseCli(argv: string[]) {
     if (token.includes('=') && !token.startsWith('--')) {
       const [rawKey, ...rawValue] = token.split('=');
       const key = rawKey.trim();
-      if (key) {
+      if (key !== '') {
         options[key] = rawValue.join('=').trim();
       }
       continue;
@@ -271,7 +271,7 @@ function parseCli(argv: string[]) {
 
     const key = maybeInline;
     const maybeValue = rest[i + 1];
-    if (!maybeValue || maybeValue.startsWith('--') || maybeValue.includes('=')) {
+    if (maybeValue === '' || maybeValue.startsWith('--') || maybeValue.includes('=')) {
       options[key] = true;
       continue;
     }
@@ -295,7 +295,7 @@ function getOptionValue(
     return opt;
   }
   const pos = positionals[positionIndex];
-  if (pos) {
+  if (pos !== '') {
     return pos;
   }
   return defaultValue;
@@ -310,7 +310,7 @@ function getRequiredOption(
 ): string {
   const value = getOptionValue(options, positionals, key, positionIndex, '');
   if (value === '') {
-    const extra = helpHint ? `\n${helpHint}` : '';
+    const extra = helpHint === '' ? '' : `\n${helpHint}`;
     console.error(`Missing required option --${key}.${extra}`);
     exit(1);
   }
@@ -336,7 +336,8 @@ function nextId(prefix: string, items: Array<{ id?: string | null }>): string {
 }
 
 function getCurrentBranch() {
-  return getCurrentBranchGit(ROOT) || 'unknown';
+  const branch = getCurrentBranchGit(ROOT);
+  return branch === '' ? 'unknown' : branch;
 }
 
 function detectCommand(name: string) {
@@ -346,7 +347,7 @@ function detectCommand(name: string) {
     encoding: 'utf8',
     windowsHide: true,
   });
-  if (r.status !== 0 || !r.stdout.trim()) {
+  if (r.status !== 0 || r.stdout.trim() === '') {
     return { installed: false, path: '' };
   }
   const firstPath = r.stdout.split(/\r?\n/)[0]?.trim() ?? '';
@@ -354,7 +355,7 @@ function detectCommand(name: string) {
 }
 
 function detectVersion(name: string, customCommand: string) {
-  const command = customCommand || `${name} --version`;
+  const command = customCommand === '' ? `${name} --version` : customCommand;
   // If the command contains quotes or the executable token itself contains a space
   // (e.g. "C:\Program Files\node\node.exe"), fall back to shell parsing.
   const firstToken = command.split(/\s/)[0];
@@ -441,8 +442,8 @@ function commandDoctor() {
 
     if (item.key === 'gcloud') {
       console.log(
-        `- ${item.key.padEnd(7)} installed=${String(detected.installed).padEnd(5)} path=${detected.path || 'n/a'}${
-          version ? ` version=${version}` : ''
+        `- ${item.key.padEnd(7)} installed=${String(detected.installed).padEnd(5)} path=${detected.path === '' ? 'n/a' : detected.path}${
+          version === '' ? '' : ` version=${version}`
         }`,
       );
       continue;
@@ -456,8 +457,8 @@ function commandDoctor() {
     };
 
     console.log(
-      `- ${item.key.padEnd(7)} installed=${String(detected.installed).padEnd(5)} path=${detected.path || 'n/a'}${
-        version ? ` version=${version}` : ''
+      `- ${item.key.padEnd(7)} installed=${String(detected.installed).padEnd(5)} path=${detected.path === '' ? 'n/a' : detected.path}${
+        version === '' ? '' : ` version=${version}`
       }`,
     );
   }
@@ -465,7 +466,7 @@ function commandDoctor() {
   writeState(state);
   appendLog('Ran tooling doctor');
 
-  if (!state.agents.gemini.installed) {
+  if (state.agents.gemini.installed !== true) {
     console.log('\nGemini CLI was not detected on PATH.');
     console.log('You can still use Gemini Pro via web by pasting output from prompt command.');
   }
@@ -505,7 +506,8 @@ function commandStart(options: CliOptions, positionals: string[]) {
   console.log(`Started session ${session.id}`);
   console.log(`Focus: ${focus}`);
   console.log(`Branch: ${branch}`);
-  console.log(`Participants: ${participants.join(', ') || 'none'}`);
+  const participantList = participants.join(', ');
+  console.log(`Participants: ${participantList === '' ? 'none' : participantList}`);
 }
 
 function commandTaskAdd(options: CliOptions, positionals: string[]) {
@@ -534,6 +536,48 @@ function commandTaskAdd(options: CliOptions, positionals: string[]) {
   console.log(`Added ${task.id}: ${task.title}`);
 }
 
+function resolveFieldFromOptionOrPositional(
+  options: CliOptions,
+  key: string,
+  positional: string | undefined,
+): string {
+  if (typeof options[key] === 'string') return options[key];
+  if (positional !== undefined) return positional;
+  return '';
+}
+
+function resolveStatusField(options: CliOptions, positionalStatus: string | undefined): string {
+  const fromOption = typeof options['status'] === 'string' ? options['status'] : '';
+  const fromPositional =
+    positionalStatus !== undefined && positionalStatus !== '' && STATUS_VALUES.has(positionalStatus)
+      ? positionalStatus
+      : '';
+  return fromOption === '' ? fromPositional : fromOption;
+}
+
+function resolveOwnerField(
+  options: CliOptions,
+  positionalOwner: string | undefined,
+  positionalStatus: string | undefined,
+): string {
+  const fromOption = typeof options['owner'] === 'string' ? options['owner'] : '';
+  let fromPositional = '';
+  if (
+    positionalOwner !== undefined &&
+    positionalOwner !== '' &&
+    !STATUS_VALUES.has(positionalOwner)
+  ) {
+    fromPositional = positionalOwner;
+  } else if (
+    positionalStatus !== undefined &&
+    positionalStatus !== '' &&
+    !STATUS_VALUES.has(positionalStatus)
+  ) {
+    fromPositional = positionalStatus;
+  }
+  return fromOption === '' ? fromPositional : fromOption;
+}
+
 function commandTaskUpdate(options: CliOptions, positionals: string[]) {
   const id = getRequiredOption(options, positionals, 'id', 0);
   const state = readState();
@@ -545,56 +589,30 @@ function commandTaskUpdate(options: CliOptions, positionals: string[]) {
   }
 
   const nextTitle = getOptionValue(options, positionals, 'title', 5, '');
-  if (nextTitle) {
+  if (nextTitle !== '') {
     task.title = nextTitle;
   }
 
-  const positionalStatus = positionals[1];
-  const positionalOwner = positionals[2];
-  const positionalNotes = positionals[3];
-  const positionalFiles = positionals[4];
-
-  const nextStatusFromOption = typeof options['status'] === 'string' ? options['status'] : '';
-  const nextStatusFromPositional =
-    positionalStatus && STATUS_VALUES.has(positionalStatus) ? positionalStatus : '';
-  const nextStatus = nextStatusFromOption || nextStatusFromPositional;
-  if (nextStatus) {
+  const nextStatus = resolveStatusField(options, positionals[1]);
+  if (nextStatus !== '') {
     ensureStatus(nextStatus);
     task.status = nextStatus;
   }
 
-  const ownerFromOption = typeof options['owner'] === 'string' ? options['owner'] : '';
-  let ownerFromPositional = '';
-  if (positionalOwner && !STATUS_VALUES.has(positionalOwner)) {
-    ownerFromPositional = positionalOwner;
-  } else if (positionalStatus && !STATUS_VALUES.has(positionalStatus)) {
-    ownerFromPositional = positionalStatus;
-  }
-
-  const nextOwner = ownerFromOption || ownerFromPositional;
-  if (nextOwner) {
+  const nextOwner = resolveOwnerField(options, positionals[2], positionals[1]);
+  if (nextOwner !== '') {
     task.owner = nextOwner;
   }
 
-  let nextFilesRaw = '';
-  if (typeof options['files'] === 'string') {
-    nextFilesRaw = options['files'];
-  } else if (positionalFiles) {
-    nextFilesRaw = positionalFiles;
-  }
-  if (nextFilesRaw) {
+  const nextFilesRaw = resolveFieldFromOptionOrPositional(options, 'files', positionals[4]);
+  if (nextFilesRaw !== '') {
     task.files = parseList(nextFilesRaw);
   }
 
-  let nextNoteRaw = '';
-  if (typeof options['notes'] === 'string') {
-    nextNoteRaw = options['notes'];
-  } else if (positionalNotes) {
-    nextNoteRaw = positionalNotes;
-  }
-  if (nextNoteRaw) {
-    const nextNote = nextNoteRaw;
-    task.notes = task.notes ? `${task.notes}\n${nextNote}` : nextNote;
+  const nextNoteRaw = resolveFieldFromOptionOrPositional(options, 'notes', positionals[3]);
+  if (nextNoteRaw !== '') {
+    task.notes =
+      task.notes != null && task.notes !== '' ? `${task.notes}\n${nextNoteRaw}` : nextNoteRaw;
   }
 
   task.updatedAt = nowIso();
@@ -672,7 +690,7 @@ function commandHandoff(options: CliOptions, positionals: string[]) {
   state.handoffs.push(handoff);
   writeState(state);
   appendLog(
-    `Added handoff ${handoff.id} | ${from} -> ${to} | tasks=${relatedTasks.join(',') || 'none'}`,
+    `Added handoff ${handoff.id} | ${from} -> ${to} | tasks=${relatedTasks.join(',') === '' ? 'none' : relatedTasks.join(',')}`,
   );
 
   console.log(`Recorded ${handoff.id}`);
@@ -680,6 +698,41 @@ function commandHandoff(options: CliOptions, positionals: string[]) {
 
 function formatTask(task: TaskItem): string {
   return `${task.id ?? ''} [${task.status ?? ''}] owner=${task.owner ?? ''} :: ${task.title ?? ''}`;
+}
+
+function renderBlockers(blockers: BlockerItem[]): void {
+  if (blockers.length === 0) {
+    console.log('- none');
+    return;
+  }
+  for (const blocker of blockers) {
+    console.log(`- ${blocker.id ?? ''} owner=${blocker.owner ?? ''} :: ${blocker.title ?? ''}`);
+    if (blocker.nextStep != null && blocker.nextStep !== '') {
+      console.log(`  next: ${blocker.nextStep}`);
+    }
+  }
+}
+
+function renderDecisions(decisions: DecisionItem[]): void {
+  if (decisions.length === 0) {
+    console.log('- none');
+    return;
+  }
+  for (const decision of decisions) {
+    console.log(`- ${decision.id ?? ''} owner=${decision.owner ?? ''} :: ${decision.title ?? ''}`);
+  }
+}
+
+function renderLatestHandoff(handoff: HandoffItem | undefined): void {
+  if (handoff == null) {
+    console.log('- none');
+    return;
+  }
+  console.log(`- ${handoff.id ?? ''} ${handoff.from ?? ''} -> ${handoff.to ?? ''}`);
+  console.log(`  summary: ${handoff.summary ?? ''}`);
+  if (handoff.nextStep != null && handoff.nextStep !== '') {
+    console.log(`  next: ${handoff.nextStep}`);
+  }
 }
 
 function commandSummary() {
@@ -718,40 +771,13 @@ function commandSummary() {
   }
 
   console.log(`\nOpen Blockers (${String(activeBlockers.length)})`);
-  if (activeBlockers.length === 0) {
-    console.log('- none');
-  } else {
-    for (const blocker of activeBlockers) {
-      console.log(`- ${blocker.id ?? ''} owner=${blocker.owner ?? ''} :: ${blocker.title ?? ''}`);
-      if (blocker.nextStep) {
-        console.log(`  next: ${blocker.nextStep}`);
-      }
-    }
-  }
+  renderBlockers(activeBlockers);
 
   console.log(`\nRecent Decisions (${String(recentDecisions.length)})`);
-  if (recentDecisions.length === 0) {
-    console.log('- none');
-  } else {
-    for (const decision of recentDecisions) {
-      console.log(
-        `- ${decision.id ?? ''} owner=${decision.owner ?? ''} :: ${decision.title ?? ''}`,
-      );
-    }
-  }
+  renderDecisions(recentDecisions);
 
   console.log('\nLatest Handoff');
-  if (recentHandoff) {
-    console.log(
-      `- ${recentHandoff.id ?? ''} ${recentHandoff.from ?? ''} -> ${recentHandoff.to ?? ''}`,
-    );
-    console.log(`  summary: ${recentHandoff.summary ?? ''}`);
-    if (recentHandoff.nextStep) {
-      console.log(`  next: ${recentHandoff.nextStep}`);
-    }
-  } else {
-    console.log('- none');
-  }
+  renderLatestHandoff(recentHandoff);
 }
 
 function buildPrompt(agent: string, state: SyncState): string {
@@ -761,7 +787,7 @@ function buildPrompt(agent: string, state: SyncState): string {
     gemini: 'Gemini Pro',
     generic: 'AI Assistant',
   };
-  const agentLabel = labelByAgent[agent] || labelByAgent['generic'] || 'AI Assistant';
+  const agentLabel = labelByAgent[agent] ?? 'AI Assistant';
 
   const openTasks = state.tasks
     .filter((task) => !['done', 'cancelled'].includes(task.status ?? ''))
@@ -790,7 +816,7 @@ function buildPrompt(agent: string, state: SyncState): string {
     `Current branch: ${state.activeSession?.branch ?? getCurrentBranch()}`,
     '',
     'Open tasks:',
-    openTasks || '- none',
+    openTasks === '' ? '- none' : openTasks,
   ].join('\n');
 }
 

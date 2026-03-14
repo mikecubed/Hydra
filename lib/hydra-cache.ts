@@ -160,7 +160,7 @@ interface InitCachesConfig {
 
 /** Initialize caches from config. Call once at startup if custom sizes needed. */
 export function initCaches(config: InitCachesConfig = {}): void {
-  if (!config.enabled) return;
+  if (config.enabled !== true) return;
   const defaults = { maxEntries: config.maxEntries ?? 1000, ttlSec: config.ttlSec ?? 300 };
   _caches['routing'] = new LRUCache(defaults);
   _caches['agent'] = new LRUCache(defaults);

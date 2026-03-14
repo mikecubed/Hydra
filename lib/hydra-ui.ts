@@ -868,6 +868,30 @@ const STYLE_COLORS = {
  * @param {number} [opts.intervalMs] - Override frame interval (default varies by style)
  * @param {function} [opts.color] - Color function for frames (default: per-style or ACCENT)
  */
+function spinnerTimeSuffix(startTime: number, estimatedMs: number): string {
+  const elapsed = Date.now() - startTime;
+  const elapsedStr = formatElapsed(elapsed);
+  if (estimatedMs > 0) return DIM(` (${elapsedStr} / ~${formatElapsed(estimatedMs)})`);
+  return DIM(` (${elapsedStr})`);
+}
+
+function spinnerRender(
+  isTTY: boolean,
+  frames: string[],
+  frameIdxRef: { v: number },
+  colorFn: (s: string) => string,
+  currentMsg: () => string,
+  startTime: number,
+  estimatedMs: number,
+): void {
+  if (!isTTY) return;
+  const frame = colorFn(frames[frameIdxRef.v % frames.length]);
+  process.stderr.write(
+    `\r\x1b[2K${frame} ${currentMsg()}${spinnerTimeSuffix(startTime, estimatedMs)}`,
+  );
+  frameIdxRef.v++;
+}
+
 export function createSpinner(
   message: string,
   opts: {
@@ -878,7 +902,7 @@ export function createSpinner(
   } = {},
 ): SpinnerHandle {
   const isTTY = process.stderr.isTTY;
-  let frameIdx = 0;
+  const frameIdxRef = { v: 0 };
   let interval: ReturnType<typeof setInterval> | null = null;
   let currentMsg = message;
   const startTime = Date.now();
@@ -891,28 +915,12 @@ export function createSpinner(
   const colorFn =
     opts.color ?? (STYLE_COLORS as Partial<Record<string, (s: string) => string>>)[style] ?? ACCENT;
 
-  function timeSuffix() {
-    const elapsed = Date.now() - startTime;
-    const elapsedStr = formatElapsed(elapsed);
-    if (estimatedMs > 0) {
-      const etaStr = formatElapsed(estimatedMs);
-      return DIM(` (${elapsedStr} / ~${etaStr})`);
-    }
-    return DIM(` (${elapsedStr})`);
-  }
-
-  function render() {
-    if (!isTTY) return;
-    const frame = colorFn(frames[frameIdx % frames.length]);
-    const line = `${frame} ${currentMsg}${timeSuffix()}`;
-    process.stderr.write(`\r\x1b[2K${line}`);
-    frameIdx++;
-  }
-
-  function clearLine() {
-    if (!isTTY) return;
-    process.stderr.write('\r\x1b[2K');
-  }
+  const clearLine = () => {
+    if (isTTY) process.stderr.write('\r\x1b[2K');
+  };
+  const render = () => {
+    spinnerRender(isTTY, frames, frameIdxRef, colorFn, () => currentMsg, startTime, estimatedMs);
+  };
 
   return {
     start() {
@@ -933,16 +941,18 @@ export function createSpinner(
       clearLine();
       if (interval) clearInterval(interval);
       interval = null;
-      const elapsed = formatElapsed(Date.now() - startTime);
-      process.stderr.write(`  ${SUCCESS('\u2713')} ${msg || currentMsg} ${DIM(`(${elapsed})`)}\n`);
+      process.stderr.write(
+        `  ${SUCCESS('\u2713')} ${msg || currentMsg} ${DIM(`(${formatElapsed(Date.now() - startTime)})`)}\n`,
+      );
       return this;
     },
     fail(msg: string) {
       clearLine();
       if (interval) clearInterval(interval);
       interval = null;
-      const elapsed = formatElapsed(Date.now() - startTime);
-      process.stderr.write(`  ${ERROR('\u2717')} ${msg || currentMsg} ${DIM(`(${elapsed})`)}\n`);
+      process.stderr.write(
+        `  ${ERROR('\u2717')} ${msg || currentMsg} ${DIM(`(${formatElapsed(Date.now() - startTime)})`)}\n`,
+      );
       return this;
     },
     stop() {
@@ -973,28 +983,77 @@ function randomTip() {
   return DASHBOARD_TIPS[Math.floor(Math.random() * DASHBOARD_TIPS.length)];
 }
 
-export function renderDashboard(
-  summary: DashboardSummary,
+function resolveAgentActionDesc(next: AgentNextAction): string {
+  const action = next.action ?? 'unknown';
+  const lookup: Partial<Record<string, () => string>> = {
+    continue_task: () => `working on ${pc.bold(next.task?.id ?? '?')}`,
+    pickup_handoff: () => WARNING(`handoff ${next.handoff?.id ?? '?'} waiting`),
+    claim_owned_task: () => `can claim ${pc.bold(next.task?.id ?? '?')}`,
+    claim_unassigned_task: () => `can claim ${pc.bold(next.task?.id ?? '?')}`,
+    idle: () => DIM('idle'),
+    resolve_blocker: () => ERROR(`blocked on ${next.task?.id ?? '?'}`),
+  };
+  return lookup[action]?.() ?? action;
+}
+
+function resolveAgentMood(metrics: { successRate?: number } | undefined): string {
+  if (metrics?.successRate === undefined) return '';
+  const r = metrics.successRate;
+  if (r >= 90) return ' \u{1F60A}';
+  if (r >= 50) return ' \u{1F610}';
+  return ' \u{1F61F}';
+}
+
+function buildAgentSectionLines(
   agentNextMap: Record<string, AgentNextAction>,
-  extras: DashboardExtras = {},
-): string {
-  const lines: string[] = [];
-  lines.push(hydraLogoCompact());
-  lines.push(divider());
-
-  // Session
-  const session = summary.activeSession;
-  if (session) {
-    lines.push(sectionHeader('Session'));
-    lines.push(label('Focus', pc.white(session.focus ?? 'not set')));
-    lines.push(label('Branch', pc.white(session.branch ?? '?')));
-    lines.push(label('Status', colorStatus(session.status ?? 'active')));
-    lines.push(label('Updated', relativeTime(summary.updatedAt ?? '')));
+  extras: DashboardExtras,
+): string[] {
+  if (Object.keys(agentNextMap).length === 0) return [];
+  const lines: string[] = [sectionHeader('Agents')];
+  for (const [agent, next] of Object.entries(agentNextMap)) {
+    const desc = resolveAgentActionDesc(next);
+    const modelLabel = extras.models?.[agent] ? DIM(` [${extras.models[agent]}]`) : '';
+    const mood = resolveAgentMood(extras.metrics?.[agent]);
+    lines.push(`  ${agentBadge(agent)}  ${desc}${modelLabel}${mood}`);
   }
+  return lines;
+}
 
-  // Counts
+function buildTaskSectionLines(summary: DashboardSummary): string[] {
+  const tasks = summary.openTasks ?? [];
+  const lines: string[] = [];
+  if (tasks.length > 0) {
+    lines.push(sectionHeader('Open Tasks'));
+    for (const task of tasks.slice(0, 10)) lines.push(formatTaskLine(task));
+    if (tasks.length > 10) lines.push(DIM(`  ... and ${String(tasks.length - 10)} more`));
+  } else {
+    const celebrations = [
+      '\u2728 All tasks complete! Time for a victory lap.',
+      '\u{1F389} Queue clear! The agents are ready for action.',
+      '\u2713 No open tasks. Smooth sailing ahead!',
+      '\u{1F680} Zero tasks in flight. Ready to launch the next mission.',
+      "\u{1F3C6} Task queue conquered! What's next?",
+    ];
+    lines.push('', `  ${SUCCESS(celebrations[Math.floor(Math.random() * celebrations.length)])}`);
+  }
+  const blockers = summary.openBlockers ?? [];
+  if (blockers.length > 0) {
+    lines.push(sectionHeader('Blockers'));
+    for (const b of blockers)
+      lines.push(
+        `  ${ERROR('\u2717')} ${pc.bold(b.id)} ${colorAgent(b.owner)} ${DIM((b.title ?? '').slice(0, 50))}`,
+      );
+  }
+  if (summary.latestHandoff) {
+    lines.push(sectionHeader('Latest Handoff'));
+    lines.push(formatHandoffLine(summary.latestHandoff));
+  }
+  return lines;
+}
+
+function buildOverviewSectionLines(summary: DashboardSummary, extras: DashboardExtras): string[] {
   const counts = summary.counts ?? {};
-  lines.push(sectionHeader('Overview'));
+  const lines = [sectionHeader('Overview')];
   lines.push(label('Open tasks', counts.tasksOpen ?? '?'));
   lines.push(
     label(
@@ -1007,90 +1066,30 @@ export function renderDashboard(
   if (extras.usage && extras.usage.level !== 'unknown') {
     lines.push(label('Token usage', progressBar(extras.usage.percent ?? 0, 20)));
   }
+  return lines;
+}
 
-  // Agent Status
-  if (Object.keys(agentNextMap).length > 0) {
-    lines.push(sectionHeader('Agents'));
-    for (const [agent, next] of Object.entries(agentNextMap)) {
-      const action = next.action ?? 'unknown';
-      let desc: string = action;
-      if (action === 'continue_task') {
-        desc = `working on ${pc.bold(next.task?.id ?? '?')}`;
-      } else if (action === 'pickup_handoff') {
-        desc = WARNING(`handoff ${next.handoff?.id ?? '?'} waiting`);
-      } else if (action === 'claim_owned_task' || action === 'claim_unassigned_task') {
-        desc = `can claim ${pc.bold(next.task?.id ?? '?')}`;
-      } else if (action === 'idle') {
-        desc = DIM('idle');
-      } else if (action === 'resolve_blocker') {
-        desc = ERROR(`blocked on ${next.task?.id ?? '?'}`);
-      }
-      const modelLabel = extras.models?.[agent] ? DIM(` [${extras.models[agent]}]`) : '';
+export function renderDashboard(
+  summary: DashboardSummary,
+  agentNextMap: Record<string, AgentNextAction>,
+  extras: DashboardExtras = {},
+): string {
+  const lines: string[] = [hydraLogoCompact(), divider()];
 
-      // Mood indicator based on success rate (if available)
-      let mood = '';
-      const agentMetrics = extras.metrics?.[agent];
-      if (agentMetrics?.successRate !== undefined) {
-        const rate = agentMetrics.successRate;
-        if (rate >= 90) {
-          mood = ' \u{1F60A}'; // 😊
-        } else if (rate >= 50) {
-          mood = ' \u{1F610}'; // 😐
-        } else {
-          mood = ' \u{1F61F}'; // 😟
-        }
-      }
-
-      lines.push(`  ${agentBadge(agent)}  ${desc}${modelLabel}${mood}`);
-    }
+  const session = summary.activeSession;
+  if (session) {
+    lines.push(sectionHeader('Session'));
+    lines.push(label('Focus', pc.white(session.focus ?? 'not set')));
+    lines.push(label('Branch', pc.white(session.branch ?? '?')));
+    lines.push(label('Status', colorStatus(session.status ?? 'active')));
+    lines.push(label('Updated', relativeTime(summary.updatedAt ?? '')));
   }
 
-  // Open Tasks
-  const tasks = summary.openTasks ?? [];
-  if (tasks.length > 0) {
-    lines.push(sectionHeader('Open Tasks'));
-    for (const task of tasks.slice(0, 10)) {
-      lines.push(formatTaskLine(task));
-    }
-    if (tasks.length > 10) {
-      lines.push(DIM(`  ... and ${String(tasks.length - 10)} more`));
-    }
-  } else {
-    // All clear! Show a congratulatory message
-    const celebrations = [
-      '\u2728 All tasks complete! Time for a victory lap.',
-      '\u{1F389} Queue clear! The agents are ready for action.',
-      '\u2713 No open tasks. Smooth sailing ahead!',
-      '\u{1F680} Zero tasks in flight. Ready to launch the next mission.',
-      "\u{1F3C6} Task queue conquered! What's next?",
-    ];
-    const msg = celebrations[Math.floor(Math.random() * celebrations.length)];
-    lines.push('');
-    lines.push(`  ${SUCCESS(msg)}`);
-  }
+  lines.push(...buildOverviewSectionLines(summary, extras));
+  lines.push(...buildAgentSectionLines(agentNextMap, extras));
+  lines.push(...buildTaskSectionLines(summary));
 
-  // Open Blockers
-  const blockers = summary.openBlockers ?? [];
-  if (blockers.length > 0) {
-    lines.push(sectionHeader('Blockers'));
-    for (const b of blockers) {
-      lines.push(
-        `  ${ERROR('\u2717')} ${pc.bold(b.id)} ${colorAgent(b.owner)} ${DIM((b.title ?? '').slice(0, 50))}`,
-      );
-    }
-  }
-
-  // Latest Handoff
-  const handoff = summary.latestHandoff;
-  if (handoff) {
-    lines.push(sectionHeader('Latest Handoff'));
-    lines.push(formatHandoffLine(handoff));
-  }
-
-  // Footer tip
-  lines.push('');
-  lines.push(DIM(randomTip()));
-  lines.push('');
+  lines.push('', DIM(randomTip()), '');
   return lines.join('\n');
 }
 
@@ -1179,6 +1178,126 @@ function fmtReset(ms: number | null | undefined): string {
   return `${String(hours)}h ${String(minutes)}m`;
 }
 
+function agentUsageRow(agent: string, row: AgentUsageRow): string {
+  const colorFn =
+    (AGENT_COLORS as Partial<Record<string, (s: string) => string>>)[agent] ?? pc.white;
+  const icon = (AGENT_ICONS as Partial<Record<string, string>>)[agent] ?? '\u2022';
+  const badge = colorFn(`${icon} ${agent.toUpperCase()}`);
+  const statusColors: Partial<Record<string, (s: string) => string>> = {
+    normal: pc.green,
+    warning: pc.yellow,
+    critical: pc.red,
+    unknown: pc.gray,
+  };
+  const statusFn = statusColors[row.level ?? ''] ?? pc.white;
+  const status = statusFn((row.level ?? 'unknown').toUpperCase());
+  if (row.budget) {
+    const resetStr = fmtReset(row.resetInMs as number | undefined);
+    return `    ${badge} ${status} ${pc.white(`${(row.percent ?? 0).toFixed(1)}%`)}  ${DIM('used')} ${pc.white(fmtTokens(row.used ?? 0))}/${pc.white(fmtTokens(row.budget ?? 0))}  ${DIM('left')} ${pc.white(fmtTokens(row.remaining ?? 0))}  ${DIM('reset')} ${pc.white(resetStr)}`;
+  }
+  return `    ${badge} ${status} ${DIM('used')} ${pc.white(fmtTokens(row.todayTokens ?? 0))}  ${DIM('budget')} ${pc.white('n/a')}  ${DIM('source')} ${pc.white(row.source ?? 'none')}`;
+}
+
+/**
+ * Render a full stats dashboard combining metrics and usage data.
+ * @param {object} metrics - From getMetricsSummary()
+ * @param {object} usage - From checkUsage()
+ */
+function buildUsageSectionLines(usage: UsageSummary): string[] {
+  const lines: string[] = [sectionHeader('Token Usage'), `  ${progressBar(usage.percent ?? 0)}`];
+  const statusColors: Partial<Record<string, (s: string) => string>> = {
+    normal: pc.green,
+    warning: pc.yellow,
+    critical: pc.red,
+    unknown: pc.gray,
+  };
+  const statusFn = statusColors[usage.level ?? ''] ?? pc.white;
+  lines.push(label('Status', statusFn((usage.level ?? 'unknown').toUpperCase())));
+  if (usage.todayTokens) lines.push(label('Today', pc.white(fmtTokens(usage.todayTokens))));
+  if (usage.message) lines.push(label('Note', DIM(usage.message)));
+  if (usage.agents && Object.keys(usage.agents).length > 0) {
+    lines.push('', `  ${pc.bold('Per-Agent:')}`);
+    for (const agent of ['gemini', 'codex', 'claude']) {
+      const row = usage.agents[agent];
+      if (!row) continue;
+      lines.push(agentUsageRow(agent, row));
+    }
+  }
+  return lines;
+}
+
+function buildAgentPerfLine(agent: string, data: AgentMetrics, sep: string): string {
+  const colorFn =
+    (AGENT_COLORS as Partial<Record<string, (s: string) => string>>)[agent] ?? pc.white;
+  const icon = (AGENT_ICONS as Partial<Record<string, string>>)[agent] ?? '\u2022';
+  const agentLabel = colorFn(`${icon} ${agent.padEnd(8)}`);
+  const calls = pc.white(String(data.callsToday ?? 0).padStart(6));
+  const st = data.sessionTokens;
+  const stTotal = st?.totalTokens ?? 0;
+  const hasReal = stTotal > 0;
+  const tokenVal = hasReal ? stTotal : (data.estimatedTokensToday ?? 0);
+  const tokenStr = fmtTokens(tokenVal).padStart(10);
+  const tokens = hasReal ? pc.white(tokenStr) : DIM(tokenStr);
+  const costVal = hasReal ? (st?.costUsd ?? 0) : 0;
+  const cost = costVal > 0 ? pc.white(fmtCost(costVal).padStart(8)) : DIM('-'.padStart(8));
+  const avgTime = pc.white(fmtDuration(data.avgDurationMs ?? 0).padStart(9));
+  const rate = buildRateColumn(data.successRate);
+  return `  ${agentLabel}${sep}${calls}${sep}${tokens}${sep}${cost}${sep}${avgTime}${sep}${rate}`;
+}
+
+function buildRateColumn(successRate: number | undefined): string {
+  if (successRate === undefined) return DIM('   -'.padStart(8));
+  let rateFn: (s: string) => string;
+  if (successRate >= 100) rateFn = pc.green;
+  else if (successRate >= 80) rateFn = pc.yellow;
+  else rateFn = pc.red;
+  return rateFn(`${String(successRate)}%`.padStart(8));
+}
+
+function buildAgentPerfLines(metrics: MetricsSummary): string[] {
+  const sep = DIM(' \u2502 ');
+  const lines = [
+    sectionHeader('Agent Performance'),
+    DIM(
+      `  ${'Agent'.padEnd(10)}${sep}${'Calls'.padStart(6)}${sep}${'Tokens'.padStart(10)}${sep}${'Cost'.padStart(8)}${sep}${'Avg Time'.padStart(9)}${sep}${'Success'.padStart(8)}`,
+    ),
+    DIM(`  ${'\u2500'.repeat(62)}`),
+  ];
+  for (const [agent, data] of Object.entries(metrics.agents ?? {}))
+    lines.push(buildAgentPerfLine(agent, data, sep));
+  return lines;
+}
+
+function buildSessionTotalsTokenLines(su: NonNullable<MetricsSummary['sessionUsage']>): string[] {
+  const lines = [
+    label('Input tokens', pc.white(fmtTokens(su.inputTokens ?? 0))),
+    label('Output tokens', pc.white(fmtTokens(su.outputTokens ?? 0))),
+    label('Total tokens', pc.white(fmtTokens(su.totalTokens ?? 0))),
+  ];
+  if ((su.cacheCreationTokens ?? 0) > 0 || (su.cacheReadTokens ?? 0) > 0) {
+    lines.push(label('Cache create', pc.white(fmtTokens(su.cacheCreationTokens ?? 0))));
+    lines.push(label('Cache read', pc.white(fmtTokens(su.cacheReadTokens ?? 0))));
+  }
+  lines.push(label('Cost', pc.white(fmtCost(su.costUsd ?? 0))));
+  return lines;
+}
+
+function buildSessionTotals(metrics: MetricsSummary): string[] {
+  const lines = [
+    sectionHeader('Session Totals'),
+    label('Total calls', pc.white(String(metrics.totalCalls ?? 0))),
+  ];
+  const su = metrics.sessionUsage;
+  if (su && (su.callCount ?? 0) > 0) {
+    lines.push(...buildSessionTotalsTokenLines(su));
+  } else {
+    lines.push(label('Est. tokens', pc.white(fmtTokens(metrics.totalTokens ?? 0))));
+  }
+  lines.push(label('Total time', pc.white(fmtDuration(metrics.totalDurationMs ?? 0))));
+  lines.push(label('Uptime', pc.white(fmtDuration((metrics.uptimeSec ?? 0) * 1000))));
+  return lines;
+}
+
 /**
  * Render a full stats dashboard combining metrics and usage data.
  * @param {object} metrics - From getMetricsSummary()
@@ -1188,136 +1307,14 @@ export function renderStatsDashboard(
   metrics: MetricsSummary | null | undefined,
   usage: UsageSummary | null | undefined,
 ): string {
-  const lines: string[] = [];
-  lines.push('');
-  lines.push(hydraLogoCompact());
-  lines.push(DIM('\u2500'.repeat(56)));
-
-  // Usage bar
-  if (usage) {
-    lines.push(sectionHeader('Token Usage'));
-    lines.push(`  ${progressBar(usage.percent ?? 0)}`);
-    const statusColors: Record<string, (s: string) => string> = {
-      normal: pc.green,
-      warning: pc.yellow,
-      critical: pc.red,
-      unknown: pc.gray,
-    };
-    const statusFn =
-      (statusColors as Partial<Record<string, (s: string) => string>>)[usage.level ?? ''] ??
-      pc.white;
-    lines.push(label('Status', statusFn((usage.level ?? 'unknown').toUpperCase())));
-    if (usage.todayTokens) {
-      lines.push(label('Today', pc.white(fmtTokens(usage.todayTokens))));
-    }
-    if (usage.message) {
-      lines.push(label('Note', DIM(usage.message)));
-    }
-    if (usage.agents && Object.keys(usage.agents).length > 0) {
-      lines.push('');
-      lines.push(`  ${pc.bold('Per-Agent:')}`);
-      for (const agent of ['gemini', 'codex', 'claude']) {
-        const row = usage.agents[agent];
-        if (!row) continue;
-        const colorFn =
-          (AGENT_COLORS as Partial<Record<string, (s: string) => string>>)[agent] ?? pc.white;
-        const icon = (AGENT_ICONS as Partial<Record<string, string>>)[agent] ?? '\u2022';
-        const badge = colorFn(`${icon} ${agent.toUpperCase()}`);
-        const rowStatusColors: Record<string, (s: string) => string> = {
-          normal: pc.green,
-          warning: pc.yellow,
-          critical: pc.red,
-          unknown: pc.gray,
-        };
-        const rowStatusFn =
-          (rowStatusColors as Partial<Record<string, (s: string) => string>>)[row.level ?? ''] ??
-          pc.white;
-        const status = rowStatusFn((row.level ?? 'unknown').toUpperCase());
-        if (row.budget) {
-          lines.push(
-            `    ${badge} ${status} ${pc.white(`${(row.percent ?? 0).toFixed(1)}%`)}  ` +
-              `${DIM('used')} ${pc.white(fmtTokens(row.used ?? 0))}/${pc.white(fmtTokens(row.budget ?? 0))}  ` +
-              `${DIM('left')} ${pc.white(fmtTokens(row.remaining ?? 0))}  ` +
-              `${DIM('reset')} ${pc.white(fmtReset(row.resetInMs))}`,
-          );
-        } else {
-          lines.push(
-            `    ${badge} ${status} ${DIM('used')} ${pc.white(fmtTokens(row.todayTokens ?? 0))}  ` +
-              `${DIM('budget')} ${pc.white('n/a')}  ${DIM('source')} ${pc.white(row.source ?? 'none')}`,
-          );
-        }
-      }
-    }
-  }
-
+  const lines: string[] = ['', hydraLogoCompact(), DIM('\u2500'.repeat(56))];
+  if (usage) lines.push(...buildUsageSectionLines(usage));
   if (!metrics?.agents || Object.keys(metrics.agents).length === 0) {
-    lines.push('');
-    lines.push(`  ${DIM('No agent calls recorded yet.')}`);
-    lines.push('');
+    lines.push('', `  ${DIM('No agent calls recorded yet.')}`, '');
     return lines.join('\n');
   }
-
-  // Per-agent table
-  lines.push(sectionHeader('Agent Performance'));
-  const sep = DIM(' \u2502 ');
-  const header = `  ${'Agent'.padEnd(10)}${sep}${'Calls'.padStart(6)}${sep}${'Tokens'.padStart(10)}${sep}${'Cost'.padStart(8)}${sep}${'Avg Time'.padStart(9)}${sep}${'Success'.padStart(8)}`;
-  lines.push(DIM(header));
-  lines.push(DIM(`  ${'\u2500'.repeat(62)}`));
-
-  for (const [agent, data] of Object.entries(metrics.agents)) {
-    const colorFn =
-      (AGENT_COLORS as Partial<Record<string, (s: string) => string>>)[agent] ?? pc.white;
-    const icon = (AGENT_ICONS as Partial<Record<string, string>>)[agent] ?? '\u2022';
-    const agentLabel = colorFn(`${icon} ${agent.padEnd(8)}`);
-    const calls = pc.white(String(data.callsToday ?? 0).padStart(6));
-    // Prefer real session tokens when available, fall back to estimate
-    const st = data.sessionTokens;
-    const hasReal = st && (st.totalTokens ?? 0) > 0;
-    const tokenVal = hasReal ? (st.totalTokens ?? 0) : (data.estimatedTokensToday ?? 0);
-    const tokenStr = fmtTokens(tokenVal).padStart(10);
-    const tokens = hasReal ? pc.white(tokenStr) : DIM(tokenStr);
-    const costVal = hasReal ? (st.costUsd ?? 0) : 0;
-    const cost = costVal > 0 ? pc.white(fmtCost(costVal).padStart(8)) : DIM('-'.padStart(8));
-    const avgTime = pc.white(fmtDuration(data.avgDurationMs ?? 0).padStart(9));
-    let rate: string;
-    if (data.successRate === undefined) {
-      rate = DIM('   -'.padStart(8));
-    } else {
-      let rateColorFn: (s: string) => string;
-      if (data.successRate >= 100) {
-        rateColorFn = pc.green;
-      } else if (data.successRate >= 80) {
-        rateColorFn = pc.yellow;
-      } else {
-        rateColorFn = pc.red;
-      }
-      rate = rateColorFn(`${String(data.successRate)}%`.padStart(8));
-    }
-    lines.push(
-      `  ${agentLabel}${sep}${calls}${sep}${tokens}${sep}${cost}${sep}${avgTime}${sep}${rate}`,
-    );
-  }
-
-  // Session totals
-  const su = metrics.sessionUsage;
-  const hasSessionData = su && (su.callCount ?? 0) > 0;
-  lines.push(sectionHeader('Session Totals'));
-  lines.push(label('Total calls', pc.white(String(metrics.totalCalls ?? 0))));
-  if (hasSessionData) {
-    lines.push(label('Input tokens', pc.white(fmtTokens(su.inputTokens ?? 0))));
-    lines.push(label('Output tokens', pc.white(fmtTokens(su.outputTokens ?? 0))));
-    lines.push(label('Total tokens', pc.white(fmtTokens(su.totalTokens ?? 0))));
-    if ((su.cacheCreationTokens ?? 0) > 0 || (su.cacheReadTokens ?? 0) > 0) {
-      lines.push(label('Cache create', pc.white(fmtTokens(su.cacheCreationTokens ?? 0))));
-      lines.push(label('Cache read', pc.white(fmtTokens(su.cacheReadTokens ?? 0))));
-    }
-    lines.push(label('Cost', pc.white(fmtCost(su.costUsd ?? 0))));
-  } else {
-    lines.push(label('Est. tokens', pc.white(fmtTokens(metrics.totalTokens ?? 0))));
-  }
-  lines.push(label('Total time', pc.white(fmtDuration(metrics.totalDurationMs ?? 0))));
-  lines.push(label('Uptime', pc.white(fmtDuration((metrics.uptimeSec ?? 0) * 1000))));
-
+  lines.push(...buildAgentPerfLines(metrics));
+  lines.push(...buildSessionTotals(metrics));
   lines.push('');
   return lines.join('\n');
 }

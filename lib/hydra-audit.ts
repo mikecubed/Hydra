@@ -138,9 +138,11 @@ const TIMEOUT_MS = parsePositiveInt(args['timeout'], auditCfg['timeout'], 300_00
 const reportDirCfg = auditCfg['reportDir'];
 const REPORT_DIR =
   typeof reportDirCfg === 'string' && reportDirCfg.trim().length > 0 ? reportDirCfg : 'docs/audit';
-const REPORT_PATH = args['report']
-  ? resolveReportPath(PROJECT, args['report'])
-  : join(PROJECT, REPORT_DIR, `${dateStr()}.md`);
+const reportArg = args['report'];
+const REPORT_PATH =
+  typeof reportArg === 'string' && reportArg !== ''
+    ? resolveReportPath(PROJECT, reportArg)
+    : join(PROJECT, REPORT_DIR, `${dateStr()}.md`);
 const ECONOMY = flags.has('economy') || auditCfg['economy'] === true;
 const VERBOSE = flags.has('verbose');
 const RUN_ID = `${dateStr()}-${timeStr()}-${Math.random().toString(36).slice(2, 8)}`;
@@ -162,11 +164,11 @@ function parsePositiveInt(...values: unknown[]): number {
   return 1;
 }
 
-function resolveReportPath(projectPath: string, reportArg: string): string {
-  if (isAbsolute(reportArg)) {
-    return reportArg;
+function resolveReportPath(projectPath: string, reportPath: string): string {
+  if (isAbsolute(reportPath)) {
+    return reportPath;
   }
-  return resolve(projectPath, reportArg);
+  return resolve(projectPath, reportPath);
 }
 
 function dateStr() {
@@ -423,7 +425,7 @@ function getGitPrioritySets(projectPath: string): PrioritySets {
   const status = gitOutput(projectPath, ['status', '--porcelain']);
   for (const rawLine of status.split('\n')) {
     const line = rawLine.trim();
-    if (!line) continue;
+    if (line === '') continue;
     let filePath = line.slice(3).trim();
     if (filePath.includes(' -> ')) {
       filePath = filePath.split(' -> ').pop() ?? filePath;
@@ -440,7 +442,7 @@ function getGitPrioritySets(projectPath: string): PrioritySets {
   ]);
   for (const line of recentFiles.split('\n')) {
     const normalized = line.trim().replace(/\\/g, '/');
-    if (normalized) recent.add(normalized);
+    if (normalized !== '') recent.add(normalized);
   }
 
   return { changed, recent };
@@ -616,7 +618,7 @@ function getAgentCommand(
   const [cmd, baseArgs] = buildAuditInvocation(agentDef, prompt, { cwd: projectPath });
   if (!economy) return { cmd, args: baseArgs };
   const economyModel = agentDef.economyModel();
-  if (!economyModel) return { cmd, args: baseArgs };
+  if (economyModel == null || economyModel === '') return { cmd, args: baseArgs };
   // Only inject model flag for function-based invocations (built-in agents with known CLI flags)
   if (typeof agentDef.invoke?.nonInteractive !== 'function') return { cmd, args: baseArgs };
   const modelFlag = agent === 'codex' || agent === 'gemini' ? '-m' : '--model';
@@ -714,7 +716,7 @@ const CATEGORY_ALIASES = {
 
 function parseFindings(agentResponse: AgentResponse, fallbackCategory: string): Finding[] {
   const rawStdout = agentResponse.stdout.trim();
-  if (!rawStdout) return [];
+  if (rawStdout === '') return [];
 
   // Normalize through the agent's plugin parser so that wrapped output formats
   // (e.g. Claude's JSON envelope) are unwrapped before JSON array extraction.
@@ -732,7 +734,7 @@ function parseFindings(agentResponse: AgentResponse, fallbackCategory: string): 
   const candidates = [text];
 
   for (const match of text.matchAll(/```(?:json)?\s*([\s\S]*?)\s*```/gi)) {
-    if (match[1]) candidates.push(match[1].trim());
+    if (match[1] !== '') candidates.push(match[1].trim());
   }
 
   const firstBracket = text.indexOf('[');
@@ -762,10 +764,10 @@ function parseFindings(agentResponse: AgentResponse, fallbackCategory: string): 
   return [];
 }
 
-function normalizeFinding(raw: unknown, fallbackCategory: string): Finding | null {
-  if (raw == null || typeof raw !== 'object') return null;
-  const r = raw as Record<string, unknown>;
-
+function normalizeSeverityEffortCategory(
+  r: Record<string, unknown>,
+  fallbackCategory: string,
+): { severity: string; effort: string; category: string } {
   const severity = typeof r['severity'] === 'string' ? r['severity'].toLowerCase() : '';
   const normalizedSeverity = SEVERITIES.has(severity) ? severity : 'minor';
 
@@ -785,6 +787,19 @@ function normalizeFinding(raw: unknown, fallbackCategory: string): Finding | nul
   } else {
     normalizedCategory = 'uncategorized';
   }
+
+  return { severity: normalizedSeverity, effort: normalizedEffort, category: normalizedCategory };
+}
+
+function normalizeFinding(raw: unknown, fallbackCategory: string): Finding | null {
+  if (raw == null || typeof raw !== 'object') return null;
+  const r = raw as Record<string, unknown>;
+
+  const {
+    severity: normalizedSeverity,
+    effort: normalizedEffort,
+    category: normalizedCategory,
+  } = normalizeSeverityEffortCategory(r, fallbackCategory);
 
   const rawLine = r['line'];
   const lineNumber =
@@ -854,6 +869,42 @@ function scoreAndSort(findings: Finding[]): ScoredFinding[] {
 
 // -- Report generation -------------------------------------------------------
 
+function renderByCategorySection(byCategory: Partial<Record<string, ScoredFinding[]>>): string {
+  let md = `---\n\n## By Category\n\n`;
+  for (const [category, categoryFindings] of Object.entries(byCategory).sort(([a], [b]) =>
+    a.localeCompare(b),
+  )) {
+    if (categoryFindings == null) continue;
+    const maybeDef = AUDIT_CATEGORIES[category] as AuditCategoryDef | undefined;
+    const categoryLabel = maybeDef?.label ?? category;
+    const categoryAgent = maybeDef?.agent ?? 'unknown';
+    md += `### ${categoryLabel} (${categoryAgent})\n\n`;
+    for (const finding of categoryFindings) {
+      md += `- **${finding.title}** \`${finding.severity}\` \`${finding.effort}\`\n`;
+      if (finding.file.length > 0) {
+        const lineRef = finding.line == null ? '' : `:${String(finding.line)}`;
+        md += `  File: \`${finding.file}\`${lineRef}\n`;
+      }
+      md += `  ${finding.detail}\n\n`;
+    }
+  }
+  return md;
+}
+
+function renderQuickWinsSection(findings: ScoredFinding[]): string {
+  const quickWins = findings.filter(
+    (f) => (f.effort === 'trivial' || f.effort === 'small') && f.severity !== 'minor',
+  );
+  if (quickWins.length === 0) return '';
+  let md = `---\n\n## Quick Wins\n\n`;
+  md += `> High-impact, low-effort items to tackle first.\n\n`;
+  for (const finding of quickWins) {
+    const fileRef = finding.file.length > 0 ? finding.file : 'project-wide';
+    md += `- **${finding.title}** - \`${fileRef}\` (${finding.severity}, ${finding.effort})\n`;
+  }
+  return `${md}\n`;
+}
+
 function generateReport(
   findings: ScoredFinding[],
   manifest: FileEntry[],
@@ -914,53 +965,109 @@ function generateReport(
     const effortTag = finding.effort.length > 0 ? ` \`${finding.effort}\`` : '';
     const lineRef = finding.line == null ? '' : `:${String(finding.line)}`;
     const fileRef = finding.file.length > 0 ? ` - \`${finding.file}\`${lineRef}` : '';
-
     md += `${String(i + 1)}. ${severityIcon} **${finding.title}**${effortTag}${fileRef}\n`;
     md += `   ${finding.detail}\n\n`;
   }
 
-  md += `---\n\n## By Category\n\n`;
-
-  for (const [category, categoryFindings] of Object.entries(byCategory).sort(([a], [b]) =>
-    a.localeCompare(b),
-  )) {
-    if (categoryFindings == null) continue;
-    const maybeDef = AUDIT_CATEGORIES[category] as AuditCategoryDef | undefined;
-    const categoryLabel = maybeDef?.label ?? category;
-    const categoryAgent = maybeDef?.agent ?? 'unknown';
-    md += `### ${categoryLabel} (${categoryAgent})\n\n`;
-
-    for (const finding of categoryFindings) {
-      md += `- **${finding.title}** \`${finding.severity}\` \`${finding.effort}\`\n`;
-      if (finding.file.length > 0) {
-        const lineRef = finding.line == null ? '' : `:${String(finding.line)}`;
-        md += `  File: \`${finding.file}\`${lineRef}\n`;
-      }
-      md += `  ${finding.detail}\n\n`;
-    }
-  }
-
-  const quickWins = findings.filter(
-    (f) =>
-      (f.effort === 'trivial' || f.effort === 'small') &&
-      (f.severity === 'critical' || f.severity === 'major'),
-  );
-
-  if (quickWins.length > 0) {
-    md += `---\n\n## Quick Wins\n\n`;
-    md += `> High-impact, low-effort items to tackle first.\n\n`;
-    for (const finding of quickWins) {
-      md += `- **${finding.title}** - \`${finding.file.length > 0 ? finding.file : 'project-wide'}\` (${finding.severity}, ${finding.effort})\n`;
-    }
-    md += '\n';
-  }
-
+  md += renderByCategorySection(byCategory);
+  md += renderQuickWinsSection(findings);
   md += `---\n\n*Generated by Hydra Audit (${reportMeta.runId}) on ${date} at ${time}. Analysis only; no code was modified.*\n`;
 
   return md;
 }
 
 // -- Main -------------------------------------------------------------------
+
+function printAuditHeader(
+  activeAgents: string[],
+  runnableCategories: string[],
+  unknownAgents: string[],
+  unknownCategories: string[],
+): void {
+  const agentsDisplay = activeAgents.join(', ');
+  const categoriesDisplay = runnableCategories.join(', ');
+  console.log('');
+  console.log('=== Hydra Audit ===');
+  console.log(`  Run ID:     ${RUN_ID}`);
+  console.log(`  Project:    ${PROJECT}`);
+  console.log(`  Agents:     ${agentsDisplay === '' ? '(none)' : agentsDisplay}`);
+  console.log(`  Categories: ${categoriesDisplay === '' ? '(none)' : categoriesDisplay}`);
+  console.log(`  Max files:  ${String(MAX_FILES)}`);
+  if (ECONOMY) console.log('  Models:     economy tier');
+  console.log('');
+  if (unknownAgents.length > 0)
+    console.log(`! Ignoring unknown agents: ${unknownAgents.join(', ')}`);
+  if (unknownCategories.length > 0)
+    console.log(`! Ignoring unknown categories: ${unknownCategories.join(', ')}`);
+}
+
+async function dispatchAllCategories(
+  runnableCategories: string[],
+  manifestText: string,
+  projectName: string,
+): Promise<Finding[]> {
+  const categoriesByAgent: Partial<Record<string, string[]>> = {};
+  for (const category of runnableCategories) {
+    const def = AUDIT_CATEGORIES[category];
+    const { agent } = def;
+    const existing = categoriesByAgent[agent];
+    if (existing == null) {
+      categoriesByAgent[agent] = [category];
+    } else {
+      existing.push(category);
+    }
+  }
+
+  const agentPromises = Object.entries(categoriesByAgent).map(
+    async ([agent, categories]): Promise<Finding[]> => {
+      const findings: Finding[] = [];
+      for (const category of categories ?? []) {
+        const def = AUDIT_CATEGORIES[category];
+        const prompt = def.prompt
+          .replace('{{manifest}}', manifestText)
+          .replace('{{projectName}}', projectName);
+        console.log(`  [${agent}] ${def.label}...`);
+        // eslint-disable-next-line no-await-in-loop -- intentionally sequential: categories for the same agent run one-at-a-time to avoid overwhelming a single agent process
+        const result = await dispatchToAgent(agent, prompt, PROJECT, ECONOMY, TIMEOUT_MS);
+        if (result.code !== 0 && VERBOSE && result.stderr.length > 0) {
+          console.log(`  [${agent}] stderr: ${result.stderr.slice(0, 300)}`);
+        }
+        const parsed = parseFindings(result, category);
+        console.log(`  [${agent}] ${def.label}: ${String(parsed.length)} findings`);
+        findings.push(...parsed);
+      }
+      return findings;
+    },
+  );
+
+  const nested = await Promise.all(agentPromises);
+  return nested.flat();
+}
+
+function saveReport(report: string): void {
+  const reportDir = dirname(REPORT_PATH);
+  if (!existsSync(reportDir)) {
+    mkdirSync(reportDir, { recursive: true });
+  }
+  writeFileSync(REPORT_PATH, report, 'utf8');
+  console.log(`   Report saved: ${REPORT_PATH}`);
+}
+
+function printSummary(scored: ScoredFinding[], elapsedSec: string): void {
+  const critical = scored.filter((f) => f.severity === 'critical').length;
+  const major = scored.filter((f) => f.severity === 'major').length;
+  const quickWins = scored.filter(
+    (f) => (f.effort === 'trivial' || f.effort === 'small') && f.severity !== 'minor',
+  ).length;
+  console.log('');
+  console.log('=== Summary ===');
+  console.log(`  Run ID:      ${RUN_ID}`);
+  console.log(`  Critical:    ${String(critical)}`);
+  console.log(`  Major:       ${String(major)}`);
+  console.log(`  Quick wins:  ${String(quickWins)}`);
+  console.log(`  Time:        ${elapsedSec}s`);
+  console.log('');
+}
 
 async function main(): Promise<void> {
   const knownAgents = new Set(['gemini', 'claude', 'codex']);
@@ -972,30 +1079,11 @@ async function main(): Promise<void> {
     (category) => !(category in AUDIT_CATEGORIES),
   );
   const validCategories = requestedCategories.filter((category) => category in AUDIT_CATEGORIES);
+  const runnableCategories = validCategories.filter((category) =>
+    activeAgents.includes(AUDIT_CATEGORIES[category].agent),
+  );
 
-  const runnableCategories = validCategories.filter((category) => {
-    const def = AUDIT_CATEGORIES[category];
-    return activeAgents.includes(def.agent);
-  });
-
-  console.log('');
-  console.log('=== Hydra Audit ===');
-  console.log(`  Run ID:     ${RUN_ID}`);
-  console.log(`  Project:    ${PROJECT}`);
-  console.log(`  Agents:     ${activeAgents.join(', ') || '(none)'}`);
-  console.log(`  Categories: ${runnableCategories.join(', ') || '(none)'}`);
-  console.log(`  Max files:  ${String(MAX_FILES)}`);
-  if (ECONOMY) {
-    console.log('  Models:     economy tier');
-  }
-  console.log('');
-
-  if (unknownAgents.length > 0) {
-    console.log(`! Ignoring unknown agents: ${unknownAgents.join(', ')}`);
-  }
-  if (unknownCategories.length > 0) {
-    console.log(`! Ignoring unknown categories: ${unknownCategories.join(', ')}`);
-  }
+  printAuditHeader(activeAgents, runnableCategories, unknownAgents, unknownCategories);
 
   console.log('1) Building file manifest...');
   const { files: manifest, stats: manifestStats } = buildManifest(PROJECT, MAX_FILES);
@@ -1007,22 +1095,19 @@ async function main(): Promise<void> {
       `   Prioritized changed=${String(manifestStats.changed)}, recent=${String(manifestStats.recent)}`,
     );
   }
-
   if (manifest.length === 0) {
     console.log('   No code files found. Check project path.');
     exit(1);
   }
-
   if (runnableCategories.length === 0) {
     console.log('   No runnable categories after filters; generating empty report.');
   }
 
   const manifestText = formatManifest(manifest);
   const projectName = basename(PROJECT);
-
   const startedAt = Date.now();
-  const allFindings: Finding[] = [];
 
+  let allFindings: Finding[] = [];
   if (runnableCategories.length > 0) {
     console.log('');
     console.log('2) Dispatching audit categories:');
@@ -1031,51 +1116,10 @@ async function main(): Promise<void> {
       console.log(`   - ${def.label} -> ${def.agent}`);
     }
     console.log('');
-
-    const categoriesByAgent: Partial<Record<string, string[]>> = {};
-    for (const category of runnableCategories) {
-      const def = AUDIT_CATEGORIES[category];
-      const { agent } = def;
-      const existing = categoriesByAgent[agent];
-      if (existing == null) {
-        categoriesByAgent[agent] = [category];
-      } else {
-        existing.push(category);
-      }
-    }
-
-    const agentPromises = Object.entries(categoriesByAgent).map(
-      async ([agent, categories]): Promise<Finding[]> => {
-        const findings: Finding[] = [];
-        for (const category of categories ?? []) {
-          const def = AUDIT_CATEGORIES[category];
-          const prompt = def.prompt
-            .replace('{{manifest}}', manifestText)
-            .replace('{{projectName}}', projectName);
-
-          console.log(`  [${agent}] ${def.label}...`);
-          // eslint-disable-next-line no-await-in-loop -- intentionally sequential: categories for the same agent run one-at-a-time to avoid overwhelming a single agent process
-          const result = await dispatchToAgent(agent, prompt, PROJECT, ECONOMY, TIMEOUT_MS);
-          if (result.code !== 0 && VERBOSE && result.stderr.length > 0) {
-            console.log(`  [${agent}] stderr: ${result.stderr.slice(0, 300)}`);
-          }
-
-          const parsed = parseFindings(result, category);
-          console.log(`  [${agent}] ${def.label}: ${String(parsed.length)} findings`);
-          findings.push(...parsed);
-        }
-        return findings;
-      },
-    );
-
-    const nested = await Promise.all(agentPromises);
-    for (const findings of nested) {
-      allFindings.push(...findings);
-    }
+    allFindings = await dispatchAllCategories(runnableCategories, manifestText, projectName);
   }
 
   const elapsedSec = ((Date.now() - startedAt) / 1000).toFixed(0);
-
   console.log('');
   console.log(`3) Processing ${String(allFindings.length)} raw findings...`);
   const deduped = deduplicateFindings(allFindings);
@@ -1092,31 +1136,8 @@ async function main(): Promise<void> {
     elapsedSec,
     manifestStats,
   });
-
-  const reportDir = dirname(REPORT_PATH);
-  if (!existsSync(reportDir)) {
-    mkdirSync(reportDir, { recursive: true });
-  }
-
-  writeFileSync(REPORT_PATH, report, 'utf8');
-  console.log(`   Report saved: ${REPORT_PATH}`);
-
-  const critical = scored.filter((f) => f.severity === 'critical').length;
-  const major = scored.filter((f) => f.severity === 'major').length;
-  const quickWins = scored.filter(
-    (f) =>
-      (f.effort === 'trivial' || f.effort === 'small') &&
-      (f.severity === 'critical' || f.severity === 'major'),
-  ).length;
-
-  console.log('');
-  console.log('=== Summary ===');
-  console.log(`  Run ID:      ${RUN_ID}`);
-  console.log(`  Critical:    ${String(critical)}`);
-  console.log(`  Major:       ${String(major)}`);
-  console.log(`  Quick wins:  ${String(quickWins)}`);
-  console.log(`  Time:        ${elapsedSec}s`);
-  console.log('');
+  saveReport(report);
+  printSummary(scored, elapsedSec);
 }
 
 main().catch((err: unknown) => {

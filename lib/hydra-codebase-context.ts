@@ -334,6 +334,74 @@ const TOPIC_SECTIONS: Partial<
   metrics: { keys: ['key-modules'], filter: 'metric|usage|budget', supplementWith: 'config' },
 };
 
+function appendFilteredSection(
+  lines: string[],
+  section: string,
+  filter: string | null | undefined,
+): void {
+  if (filter != null && filter !== '') {
+    const filterRe = new RegExp(filter, 'i');
+    const filtered = section
+      .split('\n')
+      .filter(
+        (line) =>
+          line.startsWith('#') ||
+          (line.startsWith('-') && filterRe.test(line)) ||
+          filterRe.test(line),
+      );
+    if (filtered.length > 0) {
+      lines.push(...filtered);
+      lines.push('');
+    }
+  } else {
+    lines.push(section);
+    lines.push('');
+  }
+}
+
+function appendTopicSupplement(
+  lines: string[],
+  topic: string,
+  supplementWith: string | null | undefined,
+  getConfigRef: (t: string) => string | null,
+  getFuncRef: (t: string) => string,
+  getEndpointsRef: () => string,
+): void {
+  if (supplementWith === 'config') {
+    const configRef = getConfigRef(topic);
+    if (configRef != null && configRef !== '') {
+      lines.push(configRef);
+      lines.push('');
+    }
+  } else if (supplementWith === 'functions') {
+    const funcRef = getFuncRef(topic);
+    if (funcRef !== '') {
+      lines.push(funcRef);
+      lines.push('');
+    }
+  } else if (supplementWith === 'endpoints') {
+    lines.push(getEndpointsRef());
+    lines.push('');
+  }
+}
+
+function appendRelevantModules(
+  lines: string[],
+  moduleIndex: Array<{ file: string; purpose?: string | null }>,
+  filterOrTopic: string,
+): void {
+  const relevantModules = moduleIndex.filter((m) => {
+    const lower = `${m.file.toLowerCase()} ${(m.purpose ?? '').toLowerCase()}`;
+    return new RegExp(filterOrTopic, 'i').test(lower);
+  });
+  if (relevantModules.length > 0) {
+    lines.push('Related modules:');
+    for (const m of relevantModules.slice(0, 10)) {
+      lines.push(`- ${m.file}${m.purpose != null && m.purpose !== '' ? ` - ${m.purpose}` : ''}`);
+    }
+  }
+}
+
 /**
  * Get focused context for a specific topic.
  * @param {string} topic
@@ -346,65 +414,22 @@ export function getTopicContext(topic: string): string {
 
   const lines = [`=== CODEBASE CONTEXT: ${topic} ===`, ''];
 
-  // Pull relevant CLAUDE.md sections
   for (const key of topicDef.keys) {
     const section = ctx.sections[key];
     if (section === '') continue;
-
-    if (topicDef.filter != null && topicDef.filter !== '') {
-      // Filter to paragraphs mentioning the topic
-      const filterRe = new RegExp(topicDef.filter, 'i');
-      const filtered = section
-        .split('\n')
-        .filter(
-          (line) =>
-            line.startsWith('#') ||
-            (line.startsWith('-') && filterRe.test(line)) ||
-            filterRe.test(line),
-        );
-      if (filtered.length > 0) {
-        lines.push(...filtered);
-        lines.push('');
-      }
-    } else {
-      lines.push(section);
-      lines.push('');
-    }
+    appendFilteredSection(lines, section, topicDef.filter);
   }
 
-  // Supplement with additional info
-  if (topicDef.supplementWith === 'config') {
-    const configRef = getConfigReference(topic);
-    if (configRef != null && configRef !== '') {
-      lines.push(configRef);
-      lines.push('');
-    }
-  }
+  appendTopicSupplement(
+    lines,
+    topic,
+    topicDef.supplementWith,
+    getConfigReference,
+    getFunctionReference,
+    getDaemonEndpointsReference,
+  );
 
-  if (topicDef.supplementWith === 'functions') {
-    const funcRef = getFunctionReference(topic);
-    if (funcRef !== '') {
-      lines.push(funcRef);
-      lines.push('');
-    }
-  }
-
-  if (topicDef.supplementWith === 'endpoints') {
-    lines.push(getDaemonEndpointsReference());
-    lines.push('');
-  }
-
-  // Add relevant modules from index
-  const relevantModules = ctx.moduleIndex.filter((m) => {
-    const lower = `${m.file.toLowerCase()} ${(m.purpose ?? '').toLowerCase()}`;
-    return new RegExp(topicDef.filter ?? topic, 'i').test(lower);
-  });
-  if (relevantModules.length > 0) {
-    lines.push('Related modules:');
-    for (const m of relevantModules.slice(0, 10)) {
-      lines.push(`- ${m.file}${m.purpose != null && m.purpose !== '' ? ` - ${m.purpose}` : ''}`);
-    }
-  }
+  appendRelevantModules(lines, ctx.moduleIndex, topicDef.filter ?? topic);
 
   if (topic === 'modules') {
     lines.push('');

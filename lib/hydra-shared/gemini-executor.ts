@@ -162,174 +162,209 @@ export async function getGeminiProjectId(token: string): Promise<string | null> 
   return _geminiProjectId;
 }
 
+// ── Gemini Direct Helpers ────────────────────────────────────────────────────
+
+interface GeminiRetryConfig {
+  maxRetries: number;
+  baseDelayMs: number;
+  maxDelayMs: number;
+}
+
+function makeGeminiFailResult(
+  err: string,
+  startTime: number,
+  metricsHandle: ReturnType<typeof recordCallStart>,
+  opts: GeminiDirectOpts,
+  extra?: { stderr?: string; timedOut?: boolean },
+): ExecuteResult {
+  const durationMs = Date.now() - startTime;
+  recordCallError(metricsHandle, err);
+  if (opts.onStatusBar)
+    opts.onStatusBar('gemini', { phase: opts.phaseLabel ?? 'error', step: 'idle' });
+  return {
+    ok: false,
+    output: '',
+    stderr: extra?.stderr ?? '',
+    error: err,
+    exitCode: null,
+    signal: null,
+    durationMs,
+    timedOut: extra?.timedOut ?? false,
+  };
+}
+
+function buildGeminiRetryConfig(cfg: ReturnType<typeof loadHydraConfig>): GeminiRetryConfig {
+  const rlCfg = (cfg.rateLimits ?? {}) as Record<string, number>;
+  return {
+    maxRetries: rlCfg['maxRetries'] ?? 3,
+    baseDelayMs: rlCfg['baseDelayMs'] ?? 5000,
+    maxDelayMs: rlCfg['maxDelayMs'] ?? 60_000,
+  };
+}
+
+function extractGeminiText(data: GeminiContentResponse): string {
+  return (
+    data.response?.candidates?.[0]?.content?.parts
+      ?.map((p: { text?: string }) => p.text)
+      .join('') ?? ''
+  );
+}
+
+async function waitForGeminiRetry(
+  attempt: number,
+  resp: Response,
+  config: GeminiRetryConfig,
+  startTime: number,
+  onProgress?: ProgressCallback,
+): Promise<void> {
+  const serverRetryAfter = resp.headers.get('retry-after');
+  const retryAfterMs =
+    serverRetryAfter == null ? null : Number.parseInt(serverRetryAfter, 10) * 1000;
+  const delay = calculateBackoff(attempt, {
+    baseDelayMs: config.baseDelayMs,
+    maxDelayMs: config.maxDelayMs,
+    retryAfterMs: retryAfterMs ?? undefined,
+  });
+  if (onProgress) {
+    onProgress(
+      Date.now() - startTime,
+      0,
+      `Rate limited, retrying in ${(delay / 1000).toFixed(0)}s`,
+    );
+  }
+  await new Promise<void>((r) => {
+    setTimeout(r, delay);
+  });
+}
+
+async function executeGeminiRetryLoop(
+  prompt: string,
+  token: string,
+  projectId: string,
+  model: string,
+  config: GeminiRetryConfig,
+  timeoutMs: number,
+  startTime: number,
+  metricsHandle: ReturnType<typeof recordCallStart>,
+  opts: GeminiDirectOpts,
+): Promise<ExecuteResult> {
+  let lastError: string | null = null;
+
+  for (let attempt = 0; attempt <= config.maxRetries; attempt++) {
+    // sequential: each iteration depends on previous response (retry loop)
+    // eslint-disable-next-line no-await-in-loop
+    const resp = await fetch(`${CODE_ASSIST_ENDPOINT}:generateContent`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        model,
+        project: projectId,
+        user_prompt_id: crypto.randomUUID(),
+        request: {
+          contents: [{ role: 'user', parts: [{ text: prompt }] }],
+          generationConfig: { temperature: 0.7, maxOutputTokens: 8192 },
+        },
+      }),
+      signal: AbortSignal.timeout(timeoutMs),
+    });
+
+    if (resp.ok) {
+      // eslint-disable-next-line no-await-in-loop
+      const data = (await resp.json()) as GeminiContentResponse;
+      const text = extractGeminiText(data);
+      const durationMs = Date.now() - startTime;
+      recordCallComplete(metricsHandle, { output: text, stderr: '' });
+      if (opts.onStatusBar)
+        opts.onStatusBar('gemini', { phase: opts.phaseLabel ?? 'done', step: 'idle' });
+      return {
+        ok: true,
+        output: text,
+        stderr: '',
+        error: null,
+        exitCode: null,
+        signal: null,
+        durationMs,
+        timedOut: false,
+      };
+    }
+
+    // eslint-disable-next-line no-await-in-loop
+    const errText = await resp.text().catch(() => '');
+    const isRateLimited =
+      resp.status === 429 || /RESOURCE_EXHAUSTED|QUOTA_EXHAUSTED/i.test(errText);
+
+    if (isRateLimited && attempt < config.maxRetries) {
+      // eslint-disable-next-line no-await-in-loop
+      await waitForGeminiRetry(attempt, resp, config, startTime, opts.onProgress);
+      continue;
+    }
+    if (isRateLimited) {
+      lastError = `Gemini API 429 (exhausted ${String(config.maxRetries)} retries)`;
+      continue;
+    }
+
+    return makeGeminiFailResult(
+      `Gemini API ${String(resp.status)}`,
+      startTime,
+      metricsHandle,
+      opts,
+      { stderr: errText },
+    );
+  }
+
+  return makeGeminiFailResult(lastError ?? 'Gemini API 429', startTime, metricsHandle, opts);
+}
+
+// ── Main Entry Point ────────────────────────────────────────────────────────
+
 export async function executeGeminiDirect(
   prompt: string,
   opts: GeminiDirectOpts = {},
 ): Promise<ExecuteResult> {
-  const { timeoutMs = 300_000, modelOverride, phaseLabel, onProgress, onStatusBar } = opts;
-
+  const { timeoutMs = 300_000, modelOverride, phaseLabel, onStatusBar } = opts;
   const startTime = Date.now();
-  const model = modelOverride ?? getActiveModel('gemini');
-  const metricsHandle = recordCallStart('gemini', model ?? undefined);
+  const model = modelOverride ?? getActiveModel('gemini') ?? 'gemini';
+  const metricsHandle = recordCallStart('gemini', model);
   if (onStatusBar) onStatusBar('gemini', { phase: phaseLabel ?? 'executing', step: 'running' });
 
   try {
     const token = await getGeminiToken();
     if (token == null) {
-      const durationMs = Date.now() - startTime;
-      const err = 'No Gemini OAuth credentials (~/.gemini/oauth_creds.json)';
-      recordCallError(metricsHandle, err);
-      if (onStatusBar) onStatusBar('gemini', { phase: phaseLabel ?? 'error', step: 'idle' });
-      return {
-        ok: false,
-        output: '',
-        stderr: '',
-        error: err,
-        exitCode: null,
-        signal: null,
-        durationMs,
-        timedOut: false,
-      };
+      return makeGeminiFailResult(
+        'No Gemini OAuth credentials (~/.gemini/oauth_creds.json)',
+        startTime,
+        metricsHandle,
+        opts,
+      );
     }
 
     const projectId = await getGeminiProjectId(token);
     if (projectId == null) {
-      const durationMs = Date.now() - startTime;
-      const err = 'Could not resolve Gemini project ID';
-      recordCallError(metricsHandle, err);
-      if (onStatusBar) onStatusBar('gemini', { phase: phaseLabel ?? 'error', step: 'idle' });
-      return {
-        ok: false,
-        output: '',
-        stderr: '',
-        error: err,
-        exitCode: null,
-        signal: null,
-        durationMs,
-        timedOut: false,
-      };
+      return makeGeminiFailResult(
+        'Could not resolve Gemini project ID',
+        startTime,
+        metricsHandle,
+        opts,
+      );
     }
 
-    const cfg = loadHydraConfig();
-    const rlCfg = (cfg.rateLimits ?? {}) as Record<string, number>;
-    const maxRetries = rlCfg['maxRetries'] ?? 3;
-    const baseDelayMs = rlCfg['baseDelayMs'] ?? 5000;
-    const maxDelayMs = rlCfg['maxDelayMs'] ?? 60_000;
-
-    let lastError: string | null = null;
-    for (let attempt = 0; attempt <= maxRetries; attempt++) {
-      // sequential: each iteration depends on previous response (retry loop)
-      // eslint-disable-next-line no-await-in-loop
-      const resp = await fetch(`${CODE_ASSIST_ENDPOINT}:generateContent`, {
-        method: 'POST',
-        headers: {
-          Authorization: `Bearer ${token}`,
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          model,
-          project: projectId,
-          user_prompt_id: crypto.randomUUID(),
-          request: {
-            contents: [{ role: 'user', parts: [{ text: prompt }] }],
-            generationConfig: { temperature: 0.7, maxOutputTokens: 8192 },
-          },
-        }),
-        signal: AbortSignal.timeout(timeoutMs),
-      });
-
-      if (resp.ok) {
-        // eslint-disable-next-line no-await-in-loop
-        const data = (await resp.json()) as GeminiContentResponse;
-        const text =
-          data.response?.candidates?.[0]?.content?.parts
-            ?.map((p: { text?: string }) => p.text)
-            .join('') ?? '';
-        const durationMs = Date.now() - startTime;
-        recordCallComplete(metricsHandle, { output: text, stderr: '' });
-        if (onStatusBar) onStatusBar('gemini', { phase: phaseLabel ?? 'done', step: 'idle' });
-        return {
-          ok: true,
-          output: text,
-          stderr: '',
-          error: null,
-          exitCode: null,
-          signal: null,
-          durationMs,
-          timedOut: false,
-        };
-      }
-
-      // eslint-disable-next-line no-await-in-loop
-      const errText = await resp.text().catch(() => '');
-
-      if (resp.status === 429 || /RESOURCE_EXHAUSTED|QUOTA_EXHAUSTED/i.test(errText)) {
-        if (attempt < maxRetries) {
-          const serverRetryAfter = resp.headers.get('retry-after');
-          const retryAfterMs =
-            serverRetryAfter == null ? null : Number.parseInt(serverRetryAfter, 10) * 1000;
-          const delay = calculateBackoff(attempt, {
-            baseDelayMs,
-            maxDelayMs,
-            retryAfterMs: retryAfterMs ?? undefined,
-          });
-          if (onProgress)
-            onProgress(
-              Date.now() - startTime,
-              0,
-              `Rate limited, retrying in ${(delay / 1000).toFixed(0)}s`,
-            );
-          // eslint-disable-next-line no-await-in-loop
-          await new Promise<void>((r) => {
-            setTimeout(r, delay);
-          });
-          continue;
-        }
-        lastError = `Gemini API 429 (exhausted ${String(maxRetries)} retries)`;
-      } else {
-        const durationMs = Date.now() - startTime;
-        recordCallError(metricsHandle, `Gemini API ${String(resp.status)}`);
-        if (onStatusBar) onStatusBar('gemini', { phase: phaseLabel ?? 'error', step: 'idle' });
-        return {
-          ok: false,
-          output: '',
-          stderr: errText,
-          error: `Gemini API ${String(resp.status)}`,
-          exitCode: null,
-          signal: null,
-          durationMs,
-          timedOut: false,
-        };
-      }
-    }
-
-    const durationMs = Date.now() - startTime;
-    recordCallError(metricsHandle, lastError ?? 'Gemini API 429');
-    if (onStatusBar) onStatusBar('gemini', { phase: phaseLabel ?? 'error', step: 'idle' });
-    return {
-      ok: false,
-      output: '',
-      stderr: '',
-      error: lastError ?? 'Gemini API 429',
-      exitCode: null,
-      signal: null,
-      durationMs,
-      timedOut: false,
-    };
+    const retryConfig = buildGeminiRetryConfig(loadHydraConfig());
+    return await executeGeminiRetryLoop(
+      prompt,
+      token,
+      projectId,
+      model,
+      retryConfig,
+      timeoutMs,
+      startTime,
+      metricsHandle,
+      opts,
+    );
   } catch (err: unknown) {
     const e = err instanceof Error ? err : new Error(String(err));
-    const durationMs = Date.now() - startTime;
-    recordCallError(metricsHandle, e.message);
-    if (onStatusBar) onStatusBar('gemini', { phase: phaseLabel ?? 'error', step: 'idle' });
-    return {
-      ok: false,
-      output: '',
-      stderr: '',
-      error: e.name === 'TimeoutError' ? 'Gemini API timeout' : e.message,
-      exitCode: null,
-      signal: null,
-      durationMs,
+    const errMsg = e.name === 'TimeoutError' ? 'Gemini API timeout' : e.message;
+    return makeGeminiFailResult(errMsg, startTime, metricsHandle, opts, {
       timedOut: e.name === 'TimeoutError',
-    };
+    });
   }
 }

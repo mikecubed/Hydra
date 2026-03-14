@@ -128,6 +128,81 @@ export { _extractCodexErrors as extractCodexErrors };
 // Internal alias used by diagnoseAgentError below.
 const extractCodexErrors = _extractCodexErrors;
 
+// ── Local Agent Helpers ──────────────────────────────────────────────────────
+
+function makeLocalDisabledResult(): ExecuteResult {
+  return {
+    ok: false,
+    output: '',
+    stdout: '',
+    stderr: 'Local agent not enabled. Set config.local.enabled = true.',
+    error: 'local-disabled',
+    errorCategory: 'local-disabled',
+    exitCode: null,
+    signal: null,
+    durationMs: 0,
+    timedOut: false,
+  };
+}
+
+async function executeLocalStream(
+  prompt: string,
+  baseUrl: string,
+  model: string,
+  maxTokens: number | undefined,
+  startTime: number,
+  metricsHandle: ReturnType<typeof recordCallStart>,
+  span: Awaited<ReturnType<typeof startAgentSpan>>,
+  onProgress?: ProgressCallback,
+): Promise<ExecuteResult> {
+  let output = '';
+  const messages: Array<{ role: 'user' | 'assistant' | 'system'; content: string }> = [
+    { role: 'user', content: prompt },
+  ];
+  const result = await streamLocalCompletion(
+    messages,
+    { baseUrl, model, maxTokens },
+    (chunk: string) => {
+      output += chunk;
+      if (onProgress) {
+        onProgress(Date.now() - startTime, Math.round(Buffer.byteLength(output, 'utf8') / 1024));
+      }
+    },
+  );
+
+  const durationMs = Date.now() - startTime;
+  if (!result.ok) {
+    recordCallError(metricsHandle, result.errorCategory);
+    await endAgentSpan(span, { ok: false, error: result.errorCategory });
+    return {
+      ok: false,
+      output: '',
+      stdout: '',
+      stderr: result.errorCategory ?? 'local-unavailable',
+      error: result.errorCategory ?? 'local-unavailable',
+      errorCategory: result.errorCategory ?? 'local-unavailable',
+      exitCode: null,
+      signal: null,
+      durationMs,
+      timedOut: false,
+    };
+  }
+
+  recordCallComplete(metricsHandle, { output: result.output, stdout: result.output });
+  await endAgentSpan(span, { ok: true });
+  return {
+    ok: true,
+    output: result.output,
+    stdout: result.output,
+    stderr: '',
+    error: null,
+    exitCode: 0,
+    signal: null,
+    durationMs,
+    timedOut: false,
+  };
+}
+
 // ── Local Agent (OpenAI-compat HTTP) ─────────────────────────────────────────
 
 async function executeLocalAgent(
@@ -145,82 +220,28 @@ async function executeLocalAgent(
   void _onStatusBar; // reserved for future use
 
   const cfg = loadHydraConfig();
-  if (!cfg.local.enabled) {
-    return {
-      ok: false,
-      output: '',
-      stdout: '',
-      stderr: 'Local agent not enabled. Set config.local.enabled = true.',
-      error: 'local-disabled',
-      errorCategory: 'local-disabled',
-      exitCode: null,
-      signal: null,
-      durationMs: 0,
-      timedOut: false,
-    };
-  }
+  if (!cfg.local.enabled) return makeLocalDisabledResult();
 
   const baseUrl = cfg.local.baseUrl;
   const model = modelOverride ?? cfg.local.model;
   const startTime = Date.now();
   const metricsHandle = recordCallStart('local', model);
   const span = await startAgentSpan('local', model, { phase: phaseLabel });
+  const maxTokens = (cfg.local as unknown as Record<string, unknown>)['maxTokens'] as
+    | number
+    | undefined;
 
-  let output = '';
   try {
-    const messages: Array<{ role: 'user' | 'assistant' | 'system'; content: string }> = [
-      { role: 'user', content: prompt },
-    ];
-    const result = await streamLocalCompletion(
-      messages,
-      {
-        baseUrl,
-        model,
-        maxTokens: (cfg.local as unknown as Record<string, unknown>)['maxTokens'] as
-          | number
-          | undefined,
-      },
-      (chunk: string) => {
-        output += chunk;
-        if (onProgress) {
-          const elapsed = Date.now() - startTime;
-          onProgress(elapsed, Math.round(Buffer.byteLength(output, 'utf8') / 1024));
-        }
-      },
+    return await executeLocalStream(
+      prompt,
+      baseUrl,
+      model,
+      maxTokens,
+      startTime,
+      metricsHandle,
+      span,
+      onProgress,
     );
-
-    const durationMs = Date.now() - startTime;
-
-    if (!result.ok) {
-      recordCallError(metricsHandle, result.errorCategory);
-      await endAgentSpan(span, { ok: false, error: result.errorCategory });
-      return {
-        ok: false,
-        output: '',
-        stdout: '',
-        stderr: result.errorCategory ?? 'local-unavailable',
-        error: result.errorCategory ?? 'local-unavailable',
-        errorCategory: result.errorCategory ?? 'local-unavailable',
-        exitCode: null,
-        signal: null,
-        durationMs,
-        timedOut: false,
-      };
-    }
-
-    recordCallComplete(metricsHandle, { output: result.output, stdout: result.output });
-    await endAgentSpan(span, { ok: true });
-    return {
-      ok: true,
-      output: result.output,
-      stdout: result.output,
-      stderr: '',
-      error: null,
-      exitCode: 0,
-      signal: null,
-      durationMs,
-      timedOut: false,
-    };
   } catch (err: unknown) {
     const e = err instanceof Error ? err : new Error(String(err));
     const durationMs = Date.now() - startTime;
@@ -241,23 +262,35 @@ async function executeLocalAgent(
   }
 }
 
-/** Execute an agent CLI as a headless subprocess. */
-export async function executeAgent(
+// ── Agent Process Helpers ──────────────────────────────────────────────────
+
+interface SpawnCtx {
+  agent: string;
+  cmd: string;
+  args: string[];
+  prompt: string;
+  startTime: number;
+  metricsHandle: ReturnType<typeof recordCallStart>;
+  spanPromise: Promise<Awaited<ReturnType<typeof startAgentSpan>>>;
+  hubCleanup: () => void;
+}
+
+interface ParsedAgentOutput {
+  output: string;
+  tokenUsage: TokenUsage | null;
+  costUsd: number | null;
+  jsonlErrors: string[];
+}
+
+function setupHubSession(
   agent: string,
   prompt: string,
-  opts: ExecuteAgentOpts = {},
-): Promise<ExecuteResult> {
-  // Validate agent before any side-effects to prevent hub session leaks
-  const agentDef = getAgent(agent);
-  if (!agentDef) {
-    throw new Error(`Unknown agent: "${agent}"`);
-  }
-
-  // Hub registration (opt-in via opts.hubCwd)
-  let _hubSessId: string | null = null;
+  opts: ExecuteAgentOpts,
+): { cleanup: () => void } {
+  let sessId: string | null = null;
   if (opts.hubCwd != null && opts.hubCwd !== '') {
     try {
-      _hubSessId = hubRegister({
+      sessId = hubRegister({
         agent: opts.hubAgent ?? `${agent}-forge`,
         cwd: opts.hubCwd,
         project: opts.hubProject ?? path.basename(opts.hubCwd),
@@ -267,21 +300,454 @@ export async function executeAgent(
       /* hub is non-critical */
     }
   }
-
-  const _hubCleanup = () => {
-    if (_hubSessId != null) {
+  const cleanup = () => {
+    if (sessId != null) {
       try {
-        hubDeregister(_hubSessId);
+        hubDeregister(sessId);
       } catch {
         /* non-critical */
       }
-      _hubSessId = null;
+      sessId = null;
     }
   };
+  return { cleanup };
+}
 
-  // API-mode agents (local + any custom api-type): call endpoint directly
+function parseAgentOutput(rawOutput: string, agent: string): ParsedAgentOutput {
+  let output = rawOutput;
+  let tokenUsage: TokenUsage | null = null;
+  let costUsd: number | null = null;
+  let jsonlErrors: string[] = [];
+
+  const _agentDef = getAgent(agent);
+  if (_agentDef) {
+    try {
+      const parsed = _agentDef.parseOutput(rawOutput, {
+        jsonOutput: _agentDef.features.jsonOutput,
+      });
+      output = parsed.output;
+      tokenUsage = parsed.tokenUsage;
+      costUsd = parsed.costUsd ?? null;
+    } catch {
+      /* use raw */
+    }
+  }
+  if (_agentDef?.features.jsonOutput === true) {
+    try {
+      jsonlErrors = extractCodexErrors(rawOutput);
+    } catch {
+      /* ignore */
+    }
+  }
+
+  return { output, tokenUsage, costUsd, jsonlErrors };
+}
+
+function buildFailureTelemetry(
+  cmd: string,
+  args: string[],
+  code: number | null,
+  signal: string | null,
+  elapsedMs: number,
+  timedOut: boolean,
+  jsonlErrorCount: number,
+): string {
+  const fullCmd = `${cmd} ${args.join(' ')}`;
+  let t = `[Hydra Telemetry] Failed Command: ${fullCmd}\n[Hydra Telemetry] Exit Code: ${String(code)}\n[Hydra Telemetry] Signal: ${signal ?? 'null'}\n[Hydra Telemetry] Duration: ${String(elapsedMs)}ms`;
+  if (elapsedMs < 5000 && !timedOut)
+    t += ` (startup failure suspected — exited before doing real work)`;
+  if (jsonlErrorCount > 0) t += `\n[Hydra Telemetry] JSONL Errors: ${String(jsonlErrorCount)}`;
+  if (timedOut) t += `\n[Hydra Telemetry] Status: Timed Out`;
+  return t;
+}
+
+function buildErrorDescription(
+  code: number | null,
+  signal: string | null,
+  timedOut: boolean,
+  jsonlErrors: string[],
+): string {
+  const parts: string[] = [];
+  if (signal != null) parts.push(`Signal ${signal}`);
+  if (code !== null && code !== 0) parts.push(`Exit code ${String(code)}`);
+  if (jsonlErrors.length > 0) parts.push(`JSONL errors: ${jsonlErrors.join('; ')}`);
+  if (parts.length === 0) parts.push('Process terminated abnormally');
+  if (timedOut) parts.push('(timed out)');
+  return parts.join(', ');
+}
+
+function buildAgentCloseResult(
+  agent: string,
+  rawOutput: string,
+  stderrInput: string,
+  code: number | null,
+  signal: string | null,
+  timedOut: boolean,
+  elapsedMs: number,
+  cmd: string,
+  args: string[],
+  prompt: string,
+): ExecuteResult {
+  const parsed = parseAgentOutput(rawOutput, agent);
+  const hasJsonlErrors = parsed.jsonlErrors.length > 0;
+  const isOk = code === 0 && signal == null && !hasJsonlErrors;
+
+  let stderr = stderrInput;
+  if (!isOk) {
+    const telemetry = buildFailureTelemetry(
+      cmd,
+      args,
+      code,
+      signal,
+      elapsedMs,
+      timedOut,
+      parsed.jsonlErrors.length,
+    );
+    stderr = `${stderrInput}\n\n${telemetry}`.trim();
+  }
+
+  return {
+    ok: isOk,
+    output: parsed.output,
+    stdout: rawOutput,
+    stderr,
+    error: isOk ? null : buildErrorDescription(code, signal, timedOut, parsed.jsonlErrors),
+    exitCode: code,
+    signal: signal ?? null,
+    durationMs: elapsedMs,
+    timedOut,
+    startupFailure: !isOk && elapsedMs < 5000 && !timedOut,
+    tokenUsage: parsed.tokenUsage,
+    costUsd: parsed.costUsd,
+    command: cmd,
+    args,
+    promptSnippet: prompt.slice(0, 500),
+  };
+}
+
+function buildAgentSpawnErrorResult(
+  err: Error,
+  stdoutChunks: string[],
+  stderrChunks: string[],
+  startTime: number,
+  cmd: string,
+  args: string[],
+  prompt: string,
+): ExecuteResult {
+  const output = stdoutChunks.join('');
+  const fullCmd = `${cmd} ${args.join(' ')}`;
+  const telemetry = `[Hydra Telemetry] Failed Command: ${fullCmd}\n[Hydra Telemetry] Spawn Error: ${err.message}`;
+  const stderr = `${stderrChunks.join('')}\n\n${telemetry}`.trim();
+  return {
+    ok: false,
+    output,
+    stdout: output,
+    stderr,
+    error: `Spawn error: ${err.message}`,
+    exitCode: null,
+    signal: null,
+    durationMs: Date.now() - startTime,
+    timedOut: false,
+    command: cmd,
+    args,
+    promptSnippet: prompt.slice(0, 500),
+  };
+}
+
+function finalizeSpawnResult(ctx: SpawnCtx, result: ExecuteResult): void {
+  if (result.ok) {
+    recordCallComplete(ctx.metricsHandle, {
+      output: result.stdout ?? '',
+      stderr: result.stderr,
+      tokenUsage: result.tokenUsage ?? undefined,
+      costUsd: result.costUsd,
+    });
+  } else {
+    diagnoseAgentError(ctx.agent, result);
+    recordCallError(ctx.metricsHandle, result.error);
+  }
+  ctx.spanPromise
+    .then((span) => endAgentSpan(span, { ok: result.ok, error: result.error ?? undefined }))
+    .catch(() => {});
+  ctx.hubCleanup();
+}
+
+function appendBufferedChunk(
+  chunk: string,
+  chunks: string[],
+  bytesRef: { value: number },
+  maxBytes: number,
+): void {
+  bytesRef.value += Buffer.byteLength(chunk);
+  chunks.push(chunk);
+  while (bytesRef.value > maxBytes && chunks.length > 1) {
+    const dropped = chunks.shift() ?? '';
+    bytesRef.value -= Buffer.byteLength(dropped);
+  }
+  if (chunks.length === 1 && bytesRef.value > maxBytes) {
+    const buf = Buffer.from(chunks[0], 'utf8');
+    let truncated = buf.subarray(0, maxBytes).toString('utf8');
+    while (Buffer.byteLength(truncated, 'utf8') > maxBytes && truncated.length > 0) {
+      truncated = truncated.slice(0, -1);
+    }
+    chunks[0] = truncated;
+    bytesRef.value = Buffer.byteLength(truncated, 'utf8');
+  }
+}
+
+async function handleNoHeadlessInvoke(
+  agent: string,
+  metricsHandle: ReturnType<typeof recordCallStart>,
+  spanPromise: Promise<Awaited<ReturnType<typeof startAgentSpan>>>,
+  hubCleanup: () => void,
+): Promise<ExecuteResult> {
+  const error = new Error(`Agent "${agent}" has no headless invoke method`);
+  try {
+    const span = await spanPromise;
+    await endAgentSpan(span, { error: error.message });
+  } catch {
+    /* best-effort */
+  }
+  try {
+    recordCallError(metricsHandle, error);
+  } catch {
+    /* best-effort */
+  }
+  hubCleanup();
+  return {
+    ok: false,
+    output: '',
+    stderr: error.message,
+    error: error.message,
+    exitCode: null,
+    signal: null,
+    durationMs: 0,
+    timedOut: false,
+  };
+}
+
+function isInvalidModelOverride(modelOverride: string | undefined): boolean {
+  return modelOverride != null && modelOverride !== '' && !/^[a-zA-Z0-9-.:]+$/.test(modelOverride);
+}
+
+function buildHeadlessOpts(
+  effectiveModel: string,
+  agent: string,
+  opts: ExecuteAgentOpts,
+  agentDef: ReturnType<typeof getAgent>,
+): HeadlessOpts {
+  return {
+    model: effectiveModel === '' ? undefined : effectiveModel,
+    permissionMode: (opts.permissionMode ?? 'auto-edit') as PermissionMode,
+    jsonOutput: agentDef?.features.jsonOutput,
+    reasoningEffort:
+      agentDef?.features.reasoningEffort === true
+        ? (opts.reasoningEffort ?? getReasoningEffort(agent) ?? undefined)
+        : undefined,
+    cwd: opts.cwd,
+    stdinPrompt: (opts.useStdin ?? true) && agentDef?.features.stdinPrompt,
+  };
+}
+
+interface AgentSpawnParams {
+  agent: string;
+  cmd: string;
+  args: string[];
+  prompt: string;
+  metricsHandle: ReturnType<typeof recordCallStart>;
+  spanPromise: Promise<Awaited<ReturnType<typeof startAgentSpan>>>;
+  hubCleanup: () => void;
+  agentDef: NonNullable<ReturnType<typeof getAgent>>;
+}
+
+function setupSpawnTimeout(
+  child: ChildProcess,
+  timeoutMs: number,
+): { timedOutRef: { value: boolean }; timer: ReturnType<typeof setTimeout> } {
+  const timedOutRef = { value: false };
+  const timer = setTimeout(() => {
+    timedOutRef.value = true;
+    try {
+      child.kill('SIGTERM');
+    } catch {
+      /* ignore */
+    }
+  }, timeoutMs);
+  return { timedOutRef, timer };
+}
+
+function setupSpawnProgress(
+  intervalMs: number,
+  onProgress: ProgressCallback | undefined,
+  startTime: number,
+  bytesRef: { value: number },
+): ReturnType<typeof setInterval> | null {
+  if (intervalMs <= 0 || !onProgress) return null;
+  return setInterval(() => {
+    onProgress(Date.now() - startTime, Math.round(bytesRef.value / 1024));
+  }, intervalMs);
+}
+
+interface SpawnDefaults {
+  useStdin: boolean;
+  collectStderr: boolean;
+  maxOutputBytes: number;
+  maxStderrBytes: number;
+  timeoutMs: number;
+  progressIntervalMs: number;
+}
+
+function resolveSpawnDefaults(opts: ExecuteAgentOpts): SpawnDefaults {
+  return {
+    useStdin: opts.useStdin ?? true,
+    collectStderr: opts.collectStderr ?? true,
+    maxOutputBytes: opts.maxOutputBytes ?? DEFAULT_MAX_OUTPUT_BYTES,
+    maxStderrBytes: opts.maxStderrBytes ?? DEFAULT_MAX_STDERR_BYTES,
+    timeoutMs: opts.timeoutMs ?? DEFAULT_TIMEOUT_MS,
+    progressIntervalMs: opts.progressIntervalMs ?? 0,
+  };
+}
+
+function attachChildHandlers(
+  child: ChildProcess,
+  ctx: SpawnCtx,
+  opts: ExecuteAgentOpts,
+  stdoutChunks: string[],
+  stderrChunks: string[],
+  timedOutRef: { value: boolean },
+  timer: ReturnType<typeof setTimeout>,
+  progressTimer: ReturnType<typeof setInterval> | null,
+  resolve: (result: ExecuteResult) => void,
+): void {
+  child.on('error', (err: Error) => {
+    clearTimeout(timer);
+    if (progressTimer) clearInterval(progressTimer);
+    const result = buildAgentSpawnErrorResult(
+      err,
+      stdoutChunks,
+      stderrChunks,
+      ctx.startTime,
+      ctx.cmd,
+      ctx.args,
+      ctx.prompt,
+    );
+    finalizeSpawnResult(ctx, result);
+    resolve(result);
+  });
+
+  child.on('close', (code: number | null, signal: string | null) => {
+    clearTimeout(timer);
+    if (progressTimer) clearInterval(progressTimer);
+    if (opts.onStatusBar) {
+      opts.onStatusBar(ctx.agent, { phase: opts.phaseLabel ?? 'done', step: 'idle' });
+    }
+    const result = buildAgentCloseResult(
+      ctx.agent,
+      stdoutChunks.join(''),
+      stderrChunks.join(''),
+      code,
+      signal,
+      timedOutRef.value,
+      Date.now() - ctx.startTime,
+      ctx.cmd,
+      ctx.args,
+      ctx.prompt,
+    );
+    finalizeSpawnResult(ctx, result);
+    resolve(result);
+  });
+}
+
+function spawnAgentProcess(p: AgentSpawnParams, opts: ExecuteAgentOpts): Promise<ExecuteResult> {
+  const sd = resolveSpawnDefaults(opts);
+  return new Promise<ExecuteResult>((resolve) => {
+    const ctx: SpawnCtx = {
+      agent: p.agent,
+      cmd: p.cmd,
+      args: p.args,
+      prompt: p.prompt,
+      startTime: Date.now(),
+      metricsHandle: p.metricsHandle,
+      spanPromise: p.spanPromise,
+      hubCleanup: p.hubCleanup,
+    };
+    const useStdinForPrompt = sd.useStdin && p.agentDef.features.stdinPrompt;
+    const stdoutChunks: string[] = [];
+    const stdoutBytes = { value: 0 };
+    const stderrChunks: string[] = [];
+    let stderrBytes = 0;
+
+    const childEnv = { ...process.env };
+    delete childEnv['CLAUDECODE'];
+    const child = spawn(p.cmd, p.args, {
+      cwd: opts.cwd,
+      env: childEnv,
+      windowsHide: true,
+      stdio: [useStdinForPrompt ? 'pipe' : 'ignore', 'pipe', 'pipe'],
+    });
+
+    if (useStdinForPrompt && child.stdin != null) {
+      child.stdin.write(p.prompt);
+      child.stdin.end();
+    }
+
+    child.stdout?.setEncoding('utf8');
+    child.stderr?.setEncoding('utf8');
+    child.stdout?.on('data', (d: string) => {
+      appendBufferedChunk(d, stdoutChunks, stdoutBytes, sd.maxOutputBytes);
+    });
+
+    if (sd.collectStderr) {
+      child.stderr?.on('data', (d: string) => {
+        stderrBytes += Buffer.byteLength(d);
+        stderrChunks.push(d);
+        while (stderrBytes > sd.maxStderrBytes && stderrChunks.length > 1) {
+          const dropped = stderrChunks.shift() ?? '';
+          stderrBytes -= Buffer.byteLength(dropped);
+        }
+      });
+    }
+
+    const { timedOutRef, timer } = setupSpawnTimeout(child, sd.timeoutMs);
+    const progressTimer = setupSpawnProgress(
+      sd.progressIntervalMs,
+      opts.onProgress,
+      ctx.startTime,
+      stdoutBytes,
+    );
+    if (opts.onStatusBar) {
+      opts.onStatusBar(p.agent, { phase: opts.phaseLabel ?? 'executing', step: 'running' });
+    }
+
+    attachChildHandlers(
+      child,
+      ctx,
+      opts,
+      stdoutChunks,
+      stderrChunks,
+      timedOutRef,
+      timer,
+      progressTimer,
+      resolve,
+    );
+  });
+}
+
+/** Execute an agent CLI as a headless subprocess. */
+export async function executeAgent(
+  agent: string,
+  prompt: string,
+  opts: ExecuteAgentOpts = {},
+): Promise<ExecuteResult> {
+  const agentDef = getAgent(agent);
+  if (!agentDef) {
+    throw new Error(`Unknown agent: "${agent}"`);
+  }
+
+  const { cleanup: _hubCleanup } = setupHubSession(agent, prompt, opts);
+
+  // API-mode agents (local + any custom api-type)
   if (agentDef.features.executeMode === 'api') {
-    // Custom API agents registered via config
     if (agentDef.customType === 'api') {
       try {
         return await executeCustomApiAgent(agent, prompt, opts);
@@ -289,7 +755,6 @@ export async function executeAgent(
         _hubCleanup();
       }
     }
-    // Built-in local agent
     try {
       return await executeLocalAgent(prompt, opts);
     } finally {
@@ -306,41 +771,36 @@ export async function executeAgent(
     }
   }
 
-  // Route Gemini to executeGeminiDirect via a local sentinel. The sentinel
-  // avoids mutating the shared registry definition on every call.
-  // When the Gemini CLI bug is fixed, delete this block and the sentinel check below.
-  type GeminiSentinel = ['__gemini_direct__', { prompt: string; opts: GeminiDirectOpts }];
-  type HeadlessInvokeFn = ((prompt: string, opts?: HeadlessOpts) => [string, string[]]) | null;
-  const headlessInvoke: HeadlessInvokeFn | ((p: string, o: HeadlessOpts) => GeminiSentinel) =
-    agentDef.name === 'gemini'
-      ? (p: string, o: HeadlessOpts): GeminiSentinel => [
-          '__gemini_direct__',
-          { prompt: p, opts: o as GeminiDirectOpts },
-        ]
-      : (agentDef.invoke?.headless ?? null);
+  // Gemini direct API (bypasses broken CLI)
+  if (agentDef.name === 'gemini') {
+    const effectiveModel = opts.modelOverride ?? getActiveModel(agent) ?? 'unknown';
+    const geminiOpts: GeminiDirectOpts = { ...opts, modelOverride: effectiveModel };
+    try {
+      return await executeGeminiDirect(prompt, geminiOpts);
+    } finally {
+      _hubCleanup();
+    }
+  }
 
-  const {
-    cwd,
-    timeoutMs = DEFAULT_TIMEOUT_MS,
-    modelOverride,
-    reasoningEffort: effortOverride,
-    collectStderr = true,
-    useStdin = true,
-    progressIntervalMs = 0,
-    onProgress,
-    onStatusBar,
-    maxOutputBytes = DEFAULT_MAX_OUTPUT_BYTES,
-    maxStderrBytes = DEFAULT_MAX_STDERR_BYTES,
-    phaseLabel,
-    permissionMode,
-  } = opts;
+  return executeStandardCliAgent(agent, agentDef, prompt, opts, _hubCleanup);
+}
 
-  if (modelOverride != null && modelOverride !== '' && !/^[a-zA-Z0-9-.:]+$/.test(modelOverride)) {
+async function executeStandardCliAgent(
+  agent: string,
+  agentDef: NonNullable<ReturnType<typeof getAgent>>,
+  prompt: string,
+  opts: ExecuteAgentOpts,
+  _hubCleanup: () => void,
+): Promise<ExecuteResult> {
+  const headlessInvoke = agentDef.invoke?.headless ?? null;
+  const { modelOverride, phaseLabel } = opts;
+
+  if (isInvalidModelOverride(modelOverride)) {
     _hubCleanup();
     return {
       ok: false,
       output: '',
-      stderr: `Invalid model override format: "${modelOverride}"`,
+      stderr: `Invalid model override format: "${String(modelOverride)}"`,
       error: 'Security violation: invalid model format',
       exitCode: null,
       signal: null,
@@ -350,299 +810,199 @@ export async function executeAgent(
   }
 
   const effectiveModel = modelOverride ?? getActiveModel(agent) ?? 'unknown';
-
-  // OTel tracing
   const spanPromise = startAgentSpan(agent, effectiveModel, {
     phase: phaseLabel,
     taskType: opts.taskType,
   });
-
-  // Metrics recording
   const metricsHandle = recordCallStart(agent, effectiveModel);
 
-  // Resolve headless invocation before the spawn Promise
   if (!headlessInvoke) {
-    const error = new Error(`Agent "${agent}" has no headless invoke method`);
-    try {
-      const span = await spanPromise;
-      await endAgentSpan(span, { error: error.message });
-    } catch {
-      /* best-effort */
-    }
-    try {
-      recordCallError(metricsHandle, error);
-    } catch {
-      /* best-effort */
-    }
-    _hubCleanup();
-    return {
-      ok: false,
-      output: '',
-      stderr: error.message,
-      error: error.message,
-      exitCode: null,
-      signal: null,
-      durationMs: 0,
-      timedOut: false,
-    };
-  }
-  const invokeResult = headlessInvoke(prompt, {
-    model: effectiveModel === '' ? undefined : effectiveModel,
-    permissionMode: (permissionMode ?? 'auto-edit') as PermissionMode,
-    jsonOutput: agentDef.features.jsonOutput,
-    reasoningEffort: agentDef.features.reasoningEffort
-      ? (effortOverride ?? getReasoningEffort(agent) ?? undefined)
-      : undefined,
-    cwd,
-    stdinPrompt: useStdin && agentDef.features.stdinPrompt,
-  });
-
-  // Gemini sentinel: headlessInvoke returns this marker for Gemini
-  if (invokeResult[0] === '__gemini_direct__') {
-    const sentinelData = invokeResult[1] as { prompt: string; opts: GeminiDirectOpts };
-    const geminiOpts: GeminiDirectOpts = {
-      ...sentinelData.opts,
-      modelOverride: sentinelData.opts.model,
-    };
-    try {
-      return await executeGeminiDirect(sentinelData.prompt, geminiOpts);
-    } finally {
-      _hubCleanup();
-    }
+    return handleNoHeadlessInvoke(agent, metricsHandle, spanPromise, _hubCleanup);
   }
 
-  const _headlessCmd = invokeResult[0];
-  const _headlessArgs = invokeResult[1] as string[];
-  assertSafeSpawnCmd(_headlessCmd, `Agent '${agent}'`);
+  const invokeResult = headlessInvoke(
+    prompt,
+    buildHeadlessOpts(effectiveModel, agent, opts, agentDef),
+  );
+  const _cmd = invokeResult[0];
+  const _args = invokeResult[1];
+  assertSafeSpawnCmd(_cmd, `Agent '${agent}'`);
 
-  return new Promise<ExecuteResult>((resolve) => {
-    const cmd = _headlessCmd;
-    const args = _headlessArgs;
-    const useStdinForPrompt = useStdin && agentDef.features.stdinPrompt;
+  return spawnAgentProcess(
+    {
+      agent,
+      cmd: _cmd,
+      args: _args,
+      prompt,
+      metricsHandle,
+      spanPromise,
+      hubCleanup: _hubCleanup,
+      agentDef,
+    },
+    opts,
+  );
+}
 
-    const stdoutChunks: string[] = [];
-    let stdoutBytes = 0;
-    const stderrChunks: string[] = [];
-    let stderrBytes = 0;
+// ── Recovery Helpers ─────────────────────────────────────────────────────────
 
-    const stdinMode = useStdinForPrompt ? 'pipe' : 'ignore';
-
-    // Strip CLAUDECODE env var so nested Claude sessions don't get blocked
-    const childEnv = { ...process.env };
-    delete childEnv['CLAUDECODE'];
-
-    const child = spawn(cmd, args, {
-      cwd,
-      env: childEnv,
-      windowsHide: true,
-      stdio: [stdinMode, 'pipe', 'pipe'],
+async function handleCircuitBreakerTripped(
+  agent: string,
+  prompt: string,
+  opts: ExecuteAgentOpts,
+  currentModel: string,
+): Promise<ExecuteResult> {
+  const recovery = (await recoverFromModelError(agent, currentModel, {
+    rl: opts.rl as object | undefined,
+  })) as { recovered: boolean; newModel: string | null };
+  if (recovery.recovered) {
+    const retryResult = await executeAgent(agent, prompt, {
+      ...opts,
+      modelOverride: recovery.newModel ?? undefined,
     });
+    retryResult.recovered = true;
+    retryResult.originalModel = currentModel;
+    retryResult.newModel = recovery.newModel ?? undefined;
+    retryResult.circuitBreakerTripped = true;
+    return retryResult;
+  }
+  return {
+    ok: false,
+    output: '',
+    stdout: '',
+    stderr: '',
+    error: 'Circuit breaker open, no fallback available',
+    exitCode: null,
+    signal: null,
+    durationMs: 0,
+    timedOut: false,
+    circuitBreakerTripped: true,
+  };
+}
 
-    if (useStdinForPrompt && child.stdin != null) {
-      child.stdin.write(prompt);
-      child.stdin.end();
-    }
+async function handleLocalFallback(
+  agent: string,
+  prompt: string,
+  opts: ExecuteAgentOpts,
+  result: ExecuteResult,
+  cfg: ReturnType<typeof loadHydraConfig>,
+): Promise<ExecuteResult | null> {
+  if (result.errorCategory === 'local-unavailable') {
+    const fallback = cfg.routing.mode === 'economy' ? 'codex' : 'claude';
+    process.stderr.write(`[local] server unreachable — falling back to ${fallback}\n`);
+    return executeAgent(fallback, prompt, { ...opts, _localFallback: true });
+  }
+  if (result.errorCategory === 'custom-cli-unavailable') {
+    process.stderr.write(`[${agent}] CLI not found on PATH — falling back to claude\n`);
+    return executeAgent('claude', prompt, { ...opts, _customFallback: true });
+  }
+  return null;
+}
 
-    // stdout and stderr are always defined with stdio: [..., 'pipe', 'pipe']
-    child.stdout?.setEncoding('utf8');
-    child.stderr?.setEncoding('utf8');
+function handleUsageLimitDetected(
+  agent: string,
+  result: ExecuteResult,
+  usageCheck: { isUsageLimit: boolean; errorMessage: string; resetInSeconds: number | null },
+  verification: { verified: boolean | 'unknown' },
+): ExecuteResult | null {
+  if (verification.verified === true) {
+    const resetLabel = formatResetTime(usageCheck.resetInSeconds);
+    result.usageLimited = true;
+    result.usageLimitConfirmed = true;
+    result.resetInSeconds = usageCheck.resetInSeconds ?? undefined;
+    result.usageLimitDetail = usageCheck.errorMessage;
+    result.error = `${agent} usage limit confirmed by API (resets in ${resetLabel})`;
+    return result;
+  }
+  if (verification.verified === 'unknown' && result.errorCategory === 'codex-jsonl-error') {
+    const resetLabel = formatResetTime(usageCheck.resetInSeconds);
+    result.usageLimited = true;
+    result.usageLimitConfirmed = true;
+    result.usageLimitStructured = true;
+    result.resetInSeconds = usageCheck.resetInSeconds ?? undefined;
+    result.usageLimitDetail = usageCheck.errorMessage;
+    result.error = `${agent} usage limit (structured JSONL — resets in ${resetLabel})`;
+    return result;
+  }
+  result.usageLimitFalsePositive = true;
+  result.usageLimitPattern = usageCheck.errorMessage;
+  if (verification.verified === 'unknown') {
+    result.usageLimitUnverifiable = true;
+  }
+  return null;
+}
 
-    child.stdout?.on('data', (d: string) => {
-      stdoutBytes += Buffer.byteLength(d);
-      stdoutChunks.push(d);
-      // Drop oldest chunks while over the limit (requires ≥2 chunks to avoid
-      // discarding all context — handled separately for single-chunk overflow).
-      while (stdoutBytes > maxOutputBytes && stdoutChunks.length > 1) {
-        const dropped = stdoutChunks.shift() ?? '';
-        stdoutBytes -= Buffer.byteLength(dropped);
-      }
-      // Single-chunk overflow: byte-accurate truncation (String.slice counts
-      // characters, not bytes — multi-byte UTF-8 would exceed the limit).
-      if (stdoutChunks.length === 1 && stdoutBytes > maxOutputBytes) {
-        const buf = Buffer.from(stdoutChunks[0], 'utf8');
-        let truncated = buf.subarray(0, maxOutputBytes).toString('utf8');
-        // Cutting mid-character produces U+FFFD (3 bytes) which may overshoot.
-        // Trim trailing chars until the result fits within the byte budget.
-        while (Buffer.byteLength(truncated, 'utf8') > maxOutputBytes && truncated.length > 0) {
-          truncated = truncated.slice(0, -1);
-        }
-        stdoutChunks[0] = truncated;
-        stdoutBytes = Buffer.byteLength(truncated, 'utf8');
-      }
+async function handleRateLimitRetry(
+  agent: string,
+  prompt: string,
+  opts: ExecuteAgentOpts,
+  result: ExecuteResult,
+  rateCheck: { retryAfterMs: number | null },
+  cfg: ReturnType<typeof loadHydraConfig>,
+): Promise<ExecuteResult> {
+  const rlCfg = (cfg.rateLimits ?? {}) as Record<string, number>;
+  const maxRetries = rlCfg['maxRetries'] ?? 3;
+
+  for (let attempt = 1; attempt <= maxRetries; attempt++) {
+    const delayMs = calculateBackoff(attempt, {
+      baseDelayMs: rlCfg['baseDelayMs'] as number | undefined,
+      maxDelayMs: rlCfg['maxDelayMs'] as number | undefined,
+      retryAfterMs: rateCheck.retryAfterMs ?? undefined,
     });
-
-    if (collectStderr) {
-      child.stderr?.on('data', (d: string) => {
-        stderrBytes += Buffer.byteLength(d);
-        stderrChunks.push(d);
-        while (stderrBytes > maxStderrBytes && stderrChunks.length > 1) {
-          const dropped = stderrChunks.shift() ?? '';
-          stderrBytes -= Buffer.byteLength(dropped);
-        }
-      });
-    }
-
-    const startTime = Date.now();
-    let timedOut = false;
-
-    const timer = setTimeout(() => {
-      timedOut = true;
-      try {
-        child.kill('SIGTERM');
-      } catch {
-        /* ignore */
-      }
-    }, timeoutMs);
-
-    let progressTimer = null;
-    if (progressIntervalMs > 0 && onProgress) {
-      progressTimer = setInterval(() => {
-        const elapsed = Date.now() - startTime;
-        const outputKB = Math.round(stdoutBytes / 1024);
-        onProgress(elapsed, outputKB);
-      }, progressIntervalMs);
-    }
-
-    if (onStatusBar) {
-      onStatusBar(agent, { phase: phaseLabel ?? 'executing', step: 'running' });
-    }
-
-    child.on('error', (err: Error) => {
-      clearTimeout(timer);
-      if (progressTimer) clearInterval(progressTimer);
-      const output = stdoutChunks.join('');
-      let stderr = stderrChunks.join('');
-
-      // Add telemetry to stderr on spawn error
-      const fullCmd = `${cmd} ${args.join(' ')}`;
-      const telemetry = `[Hydra Telemetry] Failed Command: ${fullCmd}\n[Hydra Telemetry] Spawn Error: ${err.message}`;
-      stderr = `${stderr}\n\n${telemetry}`.trim();
-
-      const result: ExecuteResult = {
-        ok: false,
-        output,
-        stdout: output,
-        stderr,
-        error: `Spawn error: ${err.message}`,
-        exitCode: null,
-        signal: null,
-        durationMs: Date.now() - startTime,
-        timedOut: false,
-        command: cmd,
-        args,
-        promptSnippet: prompt.slice(0, 500),
-      };
-      diagnoseAgentError(agent, result);
-      recordCallError(metricsHandle, result.error);
-      spanPromise
-        .then((span) => endAgentSpan(span, { ok: false, error: result.error ?? undefined }))
-        .catch(() => {});
-      _hubCleanup();
-      resolve(result);
+    // sequential: each iteration depends on previous result (rate-limit retry)
+    // eslint-disable-next-line no-await-in-loop
+    await new Promise<void>((r) => {
+      setTimeout(r, delayMs);
     });
+    // eslint-disable-next-line no-await-in-loop
+    const retryResult = await executeAgent(agent, prompt, opts);
+    if (retryResult.ok) {
+      retryResult.rateLimitRetries = attempt;
+      return retryResult;
+    }
+    const recheck = detectRateLimitError(agent, retryResult as unknown as Record<string, unknown>);
+    if (!recheck.isRateLimit) {
+      retryResult.rateLimitRetries = attempt;
+      return retryResult;
+    }
+  }
 
-    child.on('close', (code: number | null, signal: string | null) => {
-      clearTimeout(timer);
-      if (progressTimer) clearInterval(progressTimer);
-      if (onStatusBar) {
-        onStatusBar(agent, { phase: phaseLabel ?? 'done', step: 'idle' });
-      }
-      const rawOutput = stdoutChunks.join('');
-      let stderr = stderrChunks.join('');
+  result.rateLimitExhausted = true;
+  result.rateLimitRetries = maxRetries;
+  return result;
+}
 
-      let output = rawOutput;
-      let tokenUsage: TokenUsage | null = null;
-      let jsonlErrors: string[] = [];
+async function handleModelErrorRecovery(
+  agent: string,
+  prompt: string,
+  opts: ExecuteAgentOpts,
+  detection: { isModelError: boolean; failedModel: string | null },
+): Promise<ExecuteResult | null> {
+  if (detection.failedModel != null && detection.failedModel !== '') {
+    recordModelFailure(detection.failedModel);
+  }
 
-      // Agent-specific output parsing via plugin interface
-      let costUsd: number | null = null;
-      {
-        const _agentDef = getAgent(agent);
-        if (_agentDef) {
-          try {
-            const parsed = _agentDef.parseOutput(rawOutput, {
-              jsonOutput: _agentDef.features.jsonOutput,
-            });
-            output = parsed.output;
-            tokenUsage = parsed.tokenUsage;
-            costUsd = parsed.costUsd ?? null;
-          } catch {
-            /* use raw */
-          }
-        }
-        // JSONL error extraction for agents with JSON output
-        if (_agentDef?.features.jsonOutput === true) {
-          try {
-            jsonlErrors = extractCodexErrors(rawOutput);
-          } catch {
-            /* ignore */
-          }
-        }
-      }
+  const recovery = (await recoverFromModelError(agent, detection.failedModel ?? '', {
+    rl: opts.rl as object | undefined,
+  })) as { recovered: boolean; newModel: string | null };
 
-      const hasJsonlErrors = jsonlErrors.length > 0;
-      const isOk = code === 0 && signal == null && !hasJsonlErrors;
-      const elapsedMs = Date.now() - startTime;
+  if (!recovery.recovered) return null;
 
-      if (!isOk) {
-        const fullCmd = `${cmd} ${args.join(' ')}`;
-        let telemetry = `[Hydra Telemetry] Failed Command: ${fullCmd}\n[Hydra Telemetry] Exit Code: ${String(code)}\n[Hydra Telemetry] Signal: ${signal ?? 'null'}\n[Hydra Telemetry] Duration: ${String(elapsedMs)}ms`;
-        if (elapsedMs < 5000 && !timedOut)
-          telemetry += ` (startup failure suspected — exited before doing real work)`;
-        if (hasJsonlErrors)
-          telemetry += `\n[Hydra Telemetry] JSONL Errors: ${String(jsonlErrors.length)}`;
-        if (timedOut) telemetry += `\n[Hydra Telemetry] Status: Timed Out`;
-        stderr = `${stderr}\n\n${telemetry}`.trim();
-      }
-
-      let error: string | null = null;
-      if (!isOk) {
-        const parts: string[] = [];
-        if (signal != null) parts.push(`Signal ${signal}`);
-        if (code !== null && code !== 0) parts.push(`Exit code ${String(code)}`);
-        if (hasJsonlErrors) parts.push(`JSONL errors: ${jsonlErrors.join('; ')}`);
-        if (parts.length === 0) parts.push('Process terminated abnormally');
-        if (timedOut) parts.push('(timed out)');
-        error = parts.join(', ');
-      }
-
-      const result: ExecuteResult = {
-        ok: isOk,
-        output,
-        stdout: rawOutput,
-        stderr,
-        error,
-        exitCode: code,
-        signal: signal ?? null,
-        durationMs: elapsedMs,
-        timedOut,
-        startupFailure: !isOk && elapsedMs < 5000 && !timedOut,
-        tokenUsage,
-        costUsd,
-        command: cmd,
-        args,
-        promptSnippet: prompt.slice(0, 500),
-      };
-
-      if (result.ok) {
-        recordCallComplete(metricsHandle, {
-          output: rawOutput,
-          stderr,
-          tokenUsage: tokenUsage ?? undefined,
-          costUsd,
-        });
-      } else {
-        diagnoseAgentError(agent, result);
-        recordCallError(metricsHandle, result.error);
-      }
-
-      spanPromise
-        .then((span) => endAgentSpan(span, { ok: result.ok, error: result.error ?? undefined }))
-        .catch(() => {});
-      _hubCleanup();
-      resolve(result);
-    });
+  const retryResult = await executeAgent(agent, prompt, {
+    ...opts,
+    modelOverride: recovery.newModel ?? undefined,
   });
+  retryResult.recovered = true;
+  retryResult.originalModel = detection.failedModel ?? undefined;
+  retryResult.newModel = recovery.newModel ?? undefined;
+  return retryResult;
+}
+
+function shouldTripCircuitBreaker(currentModel: string | null): currentModel is string {
+  return currentModel != null && currentModel !== '' && isCircuitOpen(currentModel);
+}
+
+function makeFinalSpanAttrs(result: ExecuteResult | undefined): { ok: boolean; error?: string } {
+  return { ok: result?.ok ?? false, error: result?.error ?? undefined };
 }
 
 /** Execute an agent with automatic model-error recovery. */
@@ -658,65 +1018,25 @@ export async function executeAgentWithRecovery(
   let finalResult: ExecuteResult | undefined;
   try {
     // Circuit breaker: skip directly to fallback if model is tripped
-    if (currentModel != null && currentModel !== '' && isCircuitOpen(currentModel)) {
-      const recovery = (await recoverFromModelError(agent, currentModel, {
-        rl: opts.rl as object | undefined,
-      })) as { recovered: boolean; newModel: string | null };
-      if (recovery.recovered) {
-        const retryResult = await executeAgent(agent, prompt, {
-          ...opts,
-          modelOverride: recovery.newModel ?? undefined,
-        });
-        retryResult.recovered = true;
-        retryResult.originalModel = currentModel;
-        retryResult.newModel = recovery.newModel ?? undefined;
-        retryResult.circuitBreakerTripped = true;
-        finalResult = retryResult;
-        return retryResult;
-      }
-      finalResult = {
-        ok: false,
-        output: '',
-        stdout: '',
-        stderr: '',
-        error: 'Circuit breaker open, no fallback available',
-        exitCode: null,
-        signal: null,
-        durationMs: 0,
-        timedOut: false,
-        circuitBreakerTripped: true,
-      };
+    if (shouldTripCircuitBreaker(currentModel)) {
+      finalResult = await handleCircuitBreakerTripped(agent, prompt, opts, currentModel);
       return finalResult;
     }
 
     const result = await executeAgent(agent, prompt, opts);
-
     if (result.ok || !isModelRecoveryEnabled()) {
       finalResult = result;
       return result;
     }
 
-    // Local-unavailable: transparent cloud fallback, no circuit breaker
-    if (result.errorCategory === 'local-unavailable') {
-      const fallbackCfg = loadHydraConfig();
-      const fallback = fallbackCfg.routing.mode === 'economy' ? 'codex' : 'claude';
-      process.stderr.write(`[local] server unreachable — falling back to ${fallback}\n`);
-      finalResult = await executeAgent(fallback, prompt, { ...opts, _localFallback: true });
-      return finalResult;
+    // Local-unavailable / custom-cli-unavailable: transparent cloud fallback
+    const fallbackResult = await handleLocalFallback(agent, prompt, opts, result, cfg);
+    if (fallbackResult) {
+      finalResult = fallbackResult;
+      return fallbackResult;
     }
 
-    // Custom-CLI-unavailable: binary not found on PATH — fall back to cloud agent
-    if (result.errorCategory === 'custom-cli-unavailable') {
-      const fallback = 'claude';
-      process.stderr.write(`[${agent}] CLI not found on PATH — falling back to ${fallback}\n`);
-      finalResult = await executeAgent(fallback, prompt, { ...opts, _customFallback: true });
-      return finalResult;
-    }
-
-    // Check usage limits — verify with API before committing to disable.
-    // Pattern matching alone can produce false positives (e.g. Codex echoing
-    // documentation that mentions "usage_limit_reached"). A quick GET /models
-    // call tells us whether the account is actually quota-exhausted.
+    // Check usage limits
     const usageCheck = detectUsageLimitError(
       agent,
       result as unknown as Record<string, unknown>,
@@ -725,40 +1045,10 @@ export async function executeAgentWithRecovery(
       const verification = (await verifyAgentQuota(agent, {
         hintText: usageCheck.errorMessage,
       })) as { verified: boolean | 'unknown' };
-      if (verification.verified === true) {
-        // API confirmed quota exhausted — hard-disable the agent.
-        const resetLabel = formatResetTime(usageCheck.resetInSeconds);
-        result.usageLimited = true;
-        result.usageLimitConfirmed = true;
-        result.resetInSeconds = usageCheck.resetInSeconds ?? undefined;
-        result.usageLimitDetail = usageCheck.errorMessage;
-        result.error = `${agent} usage limit confirmed by API (resets in ${resetLabel})`;
-        finalResult = result;
-        return result;
-      } else if (
-        verification.verified === 'unknown' &&
-        result.errorCategory === 'codex-jsonl-error'
-      ) {
-        // Structured JSONL event from the Codex CLI itself — authoritative, not a
-        // text pattern match on arbitrary output. Trust it even without API key.
-        const resetLabel = formatResetTime(usageCheck.resetInSeconds);
-        result.usageLimited = true;
-        result.usageLimitConfirmed = true;
-        result.usageLimitStructured = true; // from JSONL, not pattern match
-        result.resetInSeconds = usageCheck.resetInSeconds ?? undefined;
-        result.usageLimitDetail = usageCheck.errorMessage;
-        result.error = `${agent} usage limit (structured JSONL — resets in ${resetLabel})`;
-        finalResult = result;
-        return result;
-      } else {
-        // verified === false (API says account active) OR verified === 'unknown'
-        // without a structured error source — cannot confirm quota exhaustion.
-        // Fall through to rate-limit handling (may be a false positive).
-        result.usageLimitFalsePositive = true;
-        result.usageLimitPattern = usageCheck.errorMessage;
-        if (verification.verified === 'unknown') {
-          result.usageLimitUnverifiable = true; // callers can log/surface this
-        }
+      const usageResult = handleUsageLimitDetected(agent, result, usageCheck, verification);
+      if (usageResult) {
+        finalResult = usageResult;
+        return usageResult;
       }
     }
 
@@ -768,41 +1058,8 @@ export async function executeAgentWithRecovery(
       retryAfterMs: number | null;
     };
     if (rateCheck.isRateLimit) {
-      const rlCfg = (cfg.rateLimits ?? {}) as Record<string, number>;
-      const maxRetries = rlCfg['maxRetries'] ?? 3;
-      for (let attempt = 1; attempt <= maxRetries; attempt++) {
-        const delayMs = calculateBackoff(attempt, {
-          baseDelayMs: rlCfg['baseDelayMs'] as number | undefined,
-          maxDelayMs: rlCfg['maxDelayMs'] as number | undefined,
-          retryAfterMs: rateCheck.retryAfterMs ?? undefined,
-        });
-        // sequential: each iteration depends on previous result (rate-limit retry)
-        // eslint-disable-next-line no-await-in-loop
-        await new Promise<void>((r) => {
-          setTimeout(r, delayMs);
-        });
-        // eslint-disable-next-line no-await-in-loop
-        const retryResult = await executeAgent(agent, prompt, opts);
-        if (retryResult.ok) {
-          retryResult.rateLimitRetries = attempt;
-          finalResult = retryResult;
-          return retryResult;
-        }
-        // Check if still rate limited
-        const recheck = detectRateLimitError(
-          agent,
-          retryResult as unknown as Record<string, unknown>,
-        );
-        if (!recheck.isRateLimit) {
-          retryResult.rateLimitRetries = attempt;
-          finalResult = retryResult;
-          return retryResult;
-        }
-      }
-      result.rateLimitExhausted = true;
-      result.rateLimitRetries = maxRetries;
-      finalResult = result;
-      return result;
+      finalResult = await handleRateLimitRetry(agent, prompt, opts, result, rateCheck, cfg);
+      return finalResult;
     }
 
     // Model error → fallback
@@ -815,37 +1072,17 @@ export async function executeAgentWithRecovery(
       return result;
     }
 
-    // Record failure for circuit breaker
-    if (detection.failedModel != null && detection.failedModel !== '') {
-      recordModelFailure(detection.failedModel);
+    const modelResult = await handleModelErrorRecovery(agent, prompt, opts, detection);
+    if (modelResult) {
+      finalResult = modelResult;
+      return modelResult;
     }
 
-    const recovery = (await recoverFromModelError(agent, detection.failedModel ?? '', {
-      rl: opts.rl as object | undefined,
-    })) as { recovered: boolean; newModel: string | null };
-
-    if (!recovery.recovered) {
-      result.modelError = detection;
-      finalResult = result;
-      return result;
-    }
-
-    // Retry with the new model
-    const retryResult = await executeAgent(agent, prompt, {
-      ...opts,
-      modelOverride: recovery.newModel ?? undefined,
-    });
-
-    retryResult.recovered = true;
-    retryResult.originalModel = detection.failedModel ?? undefined;
-    retryResult.newModel = recovery.newModel ?? undefined;
-    finalResult = retryResult;
-    return retryResult;
+    result.modelError = detection;
+    finalResult = result;
+    return result;
   } finally {
-    await endPipelineSpan(recoverySpan, {
-      ok: finalResult?.ok ?? false,
-      error: finalResult?.error ?? undefined,
-    });
+    await endPipelineSpan(recoverySpan, makeFinalSpanAttrs(finalResult));
   }
 }
 

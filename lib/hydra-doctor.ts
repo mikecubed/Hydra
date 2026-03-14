@@ -152,7 +152,7 @@ export function resetDoctor(): void {
             return true;
           }
         });
-        fs.writeFileSync(LOG_PATH, kept.join('\n') + (kept.length ? '\n' : ''), 'utf8');
+        fs.writeFileSync(LOG_PATH, kept.join('\n') + (kept.length > 0 ? '\n' : ''), 'utf8');
       }
     } catch {
       /* best effort — don't break if file is locked */
@@ -182,6 +182,47 @@ export function resetDoctor(): void {
  * @param {string} [failure.context] - Additional context
  * @returns {Promise<DoctorDiagnosis>}
  */
+async function runInvestigator(failure: FailureInfo): Promise<InvestigatorDiagnosis | null> {
+  try {
+    const inv = await lazyLoadInvestigator();
+    if (inv?.isInvestigatorAvailable() === true) {
+      _sessionStats.investigations++;
+      return (await inv.investigate({
+        phase: failure.phase ?? 'agent',
+        agent: failure.agent,
+        error: (failure.error ?? '').slice(0, 2000),
+        exitCode: failure.exitCode ?? null,
+        signal: failure.signal ?? null,
+        stderr: (failure.stderr ?? '').slice(-2000),
+        stdout: (failure.stdout ?? '').slice(-2000),
+        timedOut: failure.timedOut ?? false,
+        command: failure.command,
+        args: failure.args as string[] | undefined,
+        promptSnippet: failure.promptSnippet,
+        context: failure.context ?? `Pipeline: ${failure.pipeline}`,
+        attemptNumber: 1,
+      })) as InvestigatorDiagnosis;
+    }
+  } catch {
+    // Investigator unavailable — proceed with heuristic triage
+  }
+  return null;
+}
+
+async function resolveFollowUp(
+  failure: FailureInfo,
+  diagnosis: DoctorDiagnosis,
+  cfg: DoctorConfig,
+): Promise<unknown> {
+  if (diagnosis.action === 'ticket' && cfg.autoCreateSuggestions) {
+    return await createFollowUp(failure, diagnosis, 'suggestion');
+  }
+  if (diagnosis.action === 'fix' && cfg.autoCreateTasks) {
+    return await createFollowUp(failure, diagnosis, 'task');
+  }
+  return null;
+}
+
 export async function diagnose(failure: FailureInfo): Promise<DoctorDiagnosis> {
   if (!_initialized) initDoctor();
 
@@ -206,38 +247,10 @@ export async function diagnose(failure: FailureInfo): Promise<DoctorDiagnosis> {
     return result;
   }
 
-  let investigatorDiagnosis: InvestigatorDiagnosis | null = null;
-  try {
-    const inv = await lazyLoadInvestigator();
-    if (inv?.isInvestigatorAvailable()) {
-      _sessionStats.investigations++;
-      investigatorDiagnosis = (await inv.investigate({
-        phase: failure.phase ?? 'agent',
-        agent: failure.agent,
-        error: (failure.error ?? '').slice(0, 2000),
-        exitCode: failure.exitCode ?? null,
-        signal: failure.signal ?? null,
-        stderr: (failure.stderr ?? '').slice(-2000),
-        stdout: (failure.stdout ?? '').slice(-2000),
-        timedOut: failure.timedOut ?? false,
-        command: failure.command,
-        args: failure.args as string[] | undefined,
-        promptSnippet: failure.promptSnippet,
-        context: failure.context ?? `Pipeline: ${failure.pipeline}`,
-        attemptNumber: 1,
-      })) as InvestigatorDiagnosis;
-    }
-  } catch {
-    // Investigator unavailable — proceed with heuristic triage
-  }
-
+  const investigatorDiagnosis = await runInvestigator(failure);
   const diagnosis = triage(failure, investigatorDiagnosis, recurring, cfg);
 
-  if (diagnosis.action === 'ticket' && cfg.autoCreateSuggestions) {
-    diagnosis.followUp = await createFollowUp(failure, diagnosis, 'suggestion');
-  } else if (diagnosis.action === 'fix' && cfg.autoCreateTasks) {
-    diagnosis.followUp = await createFollowUp(failure, diagnosis, 'task');
-  }
+  diagnosis.followUp = await resolveFollowUp(failure, diagnosis, cfg);
 
   if (diagnosis.action !== 'ignore' && cfg.addToKnowledgeBase) {
     await addKBEntry(failure, diagnosis);
@@ -250,91 +263,160 @@ export async function diagnose(failure: FailureInfo): Promise<DoctorDiagnosis> {
 
 // ── Triage Logic ────────────────────────────────────────────────────────────
 
+interface TriageResult {
+  severity: string;
+  action: string;
+  explanation: string;
+  rootCause: string;
+}
+
+function resolveInvExplanation(invExpl: string, fallback: string): string {
+  return invExpl === '' ? fallback : invExpl;
+}
+
+function triageFromInvestigator(
+  invDiag: string,
+  investigatorDiagnosis: InvestigatorDiagnosis | null,
+  failure: FailureInfo,
+  recurring: boolean,
+  cfg: DoctorConfig,
+): TriageResult {
+  const invExpl = investigatorDiagnosis?.explanation ?? '';
+  const invRoot = investigatorDiagnosis?.rootCause ?? 'unknown';
+
+  if (invDiag === 'fundamental') {
+    return {
+      severity: recurring ? 'critical' : 'high',
+      action: 'ticket',
+      explanation: resolveInvExplanation(invExpl, 'Fundamental failure requiring investigation'),
+      rootCause: invRoot,
+    };
+  }
+  if (invDiag === 'fixable') {
+    return {
+      severity: recurring ? 'high' : 'medium',
+      action: 'fix',
+      explanation: resolveInvExplanation(invExpl, 'Fixable issue detected'),
+      rootCause: invRoot,
+    };
+  }
+  // transient
+  return triageTransient(invExpl, invRoot, failure, recurring, cfg);
+}
+
+function triageTransient(
+  invExpl: string,
+  invRoot: string,
+  failure: FailureInfo,
+  recurring: boolean,
+  cfg: DoctorConfig,
+): TriageResult {
+  if (recurring) {
+    const detail = resolveInvExplanation(invExpl, failure.error ?? 'unknown');
+    return {
+      severity: 'medium',
+      action: 'ticket',
+      explanation: `Recurring transient failure (${String(cfg.recurringThreshold)}+ occurrences): ${detail}`,
+      rootCause: invRoot === 'unknown' ? 'recurring_transient' : invRoot,
+    };
+  }
+  return {
+    severity: 'low',
+    action: 'ignore',
+    explanation: resolveInvExplanation(invExpl, 'Transient failure'),
+    rootCause: invRoot === 'unknown' ? 'transient' : invRoot,
+  };
+}
+
+function formatExitSignalInfo(failure: FailureInfo): { exitInfo: string; signalInfo: string } {
+  const exitInfo = failure.exitCode == null ? '' : ` (exit ${String(failure.exitCode)})`;
+  const signalStr = failure.signal ?? '';
+  const signalInfo = signalStr === '' ? '' : ` (signal ${signalStr})`;
+  return { exitInfo, signalInfo };
+}
+
+function triageHeuristic(failure: FailureInfo, recurring: boolean): TriageResult {
+  if (failure.timedOut === true) {
+    return {
+      severity: recurring ? 'medium' : 'low',
+      action: recurring ? 'ticket' : 'ignore',
+      explanation: `Agent timed out${recurring ? ' (recurring)' : ''}`,
+      rootCause: 'timeout',
+    };
+  }
+
+  const errorCat = failure.errorCategory ?? '';
+  if (errorCat !== '' && errorCat !== 'unclassified') {
+    const { exitInfo, signalInfo } = formatExitSignalInfo(failure);
+    return {
+      severity: recurring ? 'high' : 'medium',
+      action: recurring ? 'ticket' : 'fix',
+      explanation: `[${errorCat}] ${failure.errorDetail ?? failure.error ?? 'unknown'}${exitInfo}${signalInfo}`,
+      rootCause: errorCat,
+    };
+  }
+
+  return triageUnknown(failure);
+}
+
+function triageUnknown(failure: FailureInfo): TriageResult {
+  const { exitInfo, signalInfo } = formatExitSignalInfo(failure);
+  const errorStr = failure.error ?? '';
+  const stderrStr = failure.stderr ?? '';
+  let stderrHint = '';
+  if (errorStr === '' && stderrStr !== '') {
+    stderrHint =
+      stderrStr
+        .replace(/\[Hydra Telemetry\].*?\n/g, '')
+        .trim()
+        .split('\n')[0]
+        ?.slice(0, 150) ?? '';
+  }
+
+  const errorSlice = errorStr.slice(0, 200);
+  let explanationBase = 'Unknown failure without investigator';
+  if (errorSlice !== '') {
+    explanationBase = errorSlice;
+  } else if (stderrHint !== '') {
+    explanationBase = stderrHint;
+  }
+
+  return {
+    severity: 'medium',
+    action: 'ticket',
+    explanation: explanationBase + exitInfo + signalInfo,
+    rootCause: 'unknown',
+  };
+}
+
+function updateSessionStats(action: string): void {
+  if (action === 'fix') _sessionStats.fixes++;
+  else if (action === 'ticket') _sessionStats.tickets++;
+  else _sessionStats.ignored++;
+}
+
 function triage(
   failure: FailureInfo,
   investigatorDiagnosis: InvestigatorDiagnosis | null,
   recurring: boolean,
   cfg: DoctorConfig,
 ): DoctorDiagnosis {
-  const invDiag = investigatorDiagnosis?.diagnosis;
-  let severity: string;
-  let action: string;
-  let explanation: string;
-  let rootCause: string;
+  const invDiag = investigatorDiagnosis?.diagnosis ?? '';
 
-  if (invDiag === 'fundamental') {
-    severity = recurring ? 'critical' : 'high';
-    action = 'ticket';
-    explanation =
-      investigatorDiagnosis?.explanation ?? 'Fundamental failure requiring investigation';
-    rootCause = investigatorDiagnosis?.rootCause ?? 'unknown';
-  } else if (invDiag === 'fixable') {
-    severity = recurring ? 'high' : 'medium';
-    action = 'fix';
-    explanation = investigatorDiagnosis?.explanation ?? 'Fixable issue detected';
-    rootCause = investigatorDiagnosis?.rootCause ?? 'unknown';
-  } else if (invDiag === 'transient') {
-    if (recurring) {
-      severity = 'medium';
-      action = 'ticket';
-      explanation = `Recurring transient failure (${String(cfg.recurringThreshold)}+ occurrences): ${investigatorDiagnosis?.explanation ?? failure.error ?? 'unknown'}`;
-      rootCause = investigatorDiagnosis?.rootCause ?? 'recurring_transient';
-    } else {
-      severity = 'low';
-      action = 'ignore';
-      explanation = investigatorDiagnosis?.explanation ?? 'Transient failure';
-      rootCause = investigatorDiagnosis?.rootCause ?? 'transient';
-    }
-  } else {
-    if (failure.timedOut) {
-      severity = recurring ? 'medium' : 'low';
-      action = recurring ? 'ticket' : 'ignore';
-      explanation = `Agent timed out${recurring ? ' (recurring)' : ''}`;
-      rootCause = 'timeout';
-    } else if (failure.errorCategory && failure.errorCategory !== 'unclassified') {
-      severity = recurring ? 'high' : 'medium';
-      action = recurring ? 'ticket' : 'fix';
-      const exitInfo = failure.exitCode == null ? '' : ` (exit ${String(failure.exitCode)})`;
-      const signalInfo = failure.signal ? ` (signal ${failure.signal})` : '';
-      explanation = `[${failure.errorCategory}] ${failure.errorDetail ?? failure.error ?? 'unknown'}${exitInfo}${signalInfo}`;
-      rootCause = failure.errorCategory;
-    } else {
-      severity = 'medium';
-      action = 'ticket';
-      const exitInfo = failure.exitCode == null ? '' : ` (exit ${String(failure.exitCode)})`;
-      const signalInfo = failure.signal ? ` (signal ${failure.signal})` : '';
-      const stderrHint =
-        !failure.error && failure.stderr
-          ? ((failure.stderr ?? '')
-              .replace(/\[Hydra Telemetry\].*?\n/g, '')
-              .trim()
-              .split('\n')[0]
-              ?.slice(0, 150) ?? '')
-          : '';
-      explanation =
-        ((failure.error ?? '').slice(0, 200) ||
-          stderrHint ||
-          'Unknown failure without investigator') +
-        exitInfo +
-        signalInfo;
-      rootCause = 'unknown';
-    }
+  const result: TriageResult =
+    invDiag === 'fundamental' || invDiag === 'fixable' || invDiag === 'transient'
+      ? triageFromInvestigator(invDiag, investigatorDiagnosis, failure, recurring, cfg)
+      : triageHeuristic(failure, recurring);
+
+  if (recurring && result.action === 'ignore') {
+    result.action = 'ticket';
+    result.severity = 'medium';
   }
 
-  if (recurring && action === 'ignore') {
-    action = 'ticket';
-    severity = 'medium';
-  }
-
-  if (action === 'fix') _sessionStats.fixes++;
-  else if (action === 'ticket') _sessionStats.tickets++;
-  else _sessionStats.ignored++;
+  updateSessionStats(result.action);
 
   return {
-    severity,
-    action,
-    explanation,
-    rootCause,
+    ...result,
     followUp: null as unknown,
     investigatorDiagnosis: investigatorDiagnosis ?? null,
     recurring,
@@ -343,33 +425,42 @@ function triage(
 
 // ── Signature & Recurrence ──────────────────────────────────────────────────
 
+function enrichErrorWithStderr(errorText: string, stderr: string): string {
+  const stderrClean = stderr.replace(/\[Hydra Telemetry\].*?\n/g, '').trim();
+  if (stderrClean === '') return errorText;
+  const lines = stderrClean.split('\n').filter((l: string) => !l.startsWith('[Hydra Telemetry]'));
+  if (lines.length > 0) {
+    return `${errorText} (${lines[0].trim()})`;
+  }
+  return errorText;
+}
+
+function categorizeErrorText(failure: FailureInfo): string {
+  let errorText = failure.error ?? '';
+  const errorCat = failure.errorCategory ?? '';
+  const signalStr = failure.signal ?? '';
+
+  if (errorCat !== '' && errorCat !== 'unclassified') {
+    errorText = `[${errorCat}] ${failure.errorDetail ?? errorText}`;
+  } else if (signalStr !== '') {
+    errorText = `Signal ${signalStr}${errorText === '' ? '' : ` (${errorText})`}`;
+  }
+  return errorText;
+}
+
 function buildSignature(failure: FailureInfo): string {
   const agent = failure.agent ?? 'unknown';
   const phase = failure.phase ?? 'unknown';
-  let errorText = failure.error ?? '';
-
-  if (failure.errorCategory && failure.errorCategory !== 'unclassified') {
-    errorText = `[${failure.errorCategory}] ${failure.errorDetail ?? errorText}`;
-  } else if (failure.signal) {
-    errorText = `Signal ${failure.signal}${errorText ? ` (${errorText})` : ''}`;
-  }
+  let errorText = categorizeErrorText(failure);
 
   const isGeneric =
     errorText.includes('Exit code') ||
     errorText === 'Process terminated abnormally' ||
     errorText.startsWith('[unclassified]');
 
-  if (isGeneric && failure.stderr) {
-    const stderrClean = failure.stderr.replace(/\[Hydra Telemetry\].*?\n/g, '').trim();
-    if (stderrClean) {
-      const lines = stderrClean
-        .split('\n')
-        .filter((l: string) => !l.startsWith('[Hydra Telemetry]'));
-      if (lines.length > 0) {
-        const firstLine = lines[0].trim();
-        errorText = `${errorText} (${firstLine})`;
-      }
-    }
+  const stderrStr = failure.stderr ?? '';
+  if (isGeneric && stderrStr !== '') {
+    errorText = enrichErrorWithStderr(errorText, stderrStr);
   }
 
   const errorSnippet = errorText.slice(0, 100).replace(/\s+/g, ' ').trim();
@@ -394,33 +485,41 @@ function isRateLimitError(failure: FailureInfo): boolean {
 
 // ── Follow-up Creation ──────────────────────────────────────────────────────
 
+function labelIfPresent(label: string, val: string): string | null {
+  return val === '' ? null : `${label}: ${val}`;
+}
+
+function buildFollowUpNotes(failure: FailureInfo, diagnosis: DoctorDiagnosis): string {
+  return [
+    `Pipeline: ${failure.pipeline}`,
+    `Phase: ${failure.phase ?? 'unknown'}`,
+    `Agent: ${failure.agent ?? 'unknown'}`,
+    `Root cause: ${diagnosis.rootCause}`,
+    labelIfPresent('Error category', failure.errorCategory ?? ''),
+    labelIfPresent('Error detail', failure.errorDetail ?? ''),
+    labelIfPresent('Error context', failure.errorContext ?? ''),
+    failure.exitCode == null ? '' : `Exit code: ${String(failure.exitCode)}`,
+    labelIfPresent('Signal', failure.signal ?? ''),
+    diagnosis.recurring ? 'Status: RECURRING' : '',
+    labelIfPresent('Branch', failure.branchName ?? ''),
+    labelIfPresent('Task', failure.taskTitle ?? ''),
+  ]
+    .filter(Boolean)
+    .join('\n');
+}
+
 async function createFollowUp(
   failure: FailureInfo,
   diagnosis: DoctorDiagnosis,
   type: string,
 ): Promise<unknown> {
+  const errorCat = failure.errorCategory ?? '';
   const titleDetail =
-    failure.errorCategory && failure.errorCategory !== 'unclassified'
-      ? `[${failure.errorCategory}] ${(failure.errorDetail ?? diagnosis.explanation).slice(0, 70)}`
+    errorCat !== '' && errorCat !== 'unclassified'
+      ? `[${errorCat}] ${(failure.errorDetail ?? diagnosis.explanation).slice(0, 70)}`
       : diagnosis.explanation.slice(0, 80);
   const title = `[doctor] ${failure.pipeline}: ${titleDetail}`;
-  const notes = [
-    `Pipeline: ${failure.pipeline}`,
-    `Phase: ${failure.phase ?? 'unknown'}`,
-    `Agent: ${failure.agent ?? 'unknown'}`,
-    `Root cause: ${diagnosis.rootCause}`,
-    failure.errorCategory ? `Error category: ${failure.errorCategory}` : '',
-    failure.errorDetail ? `Error detail: ${failure.errorDetail}` : '',
-    failure.errorContext ? `Error context: ${failure.errorContext}` : '',
-    failure.exitCode == null ? '' : `Exit code: ${String(failure.exitCode)}`,
-    failure.signal ? `Signal: ${failure.signal}` : '',
-    diagnosis.recurring ? 'Status: RECURRING' : '',
-    failure.branchName ? `Branch: ${failure.branchName}` : '',
-    failure.taskTitle ? `Task: ${failure.taskTitle}` : '',
-  ]
-    .filter(Boolean)
-    .join('\n');
-
+  const notes = buildFollowUpNotes(failure, diagnosis);
   const preferredAgent = diagnosis.action === 'fix' ? 'codex' : 'gemini';
 
   if (type === 'task') {
@@ -445,7 +544,7 @@ async function tryCreateDaemonTask(
       preferredAgent,
       source: 'doctor',
     });
-    return result != null && !(result as Record<string, unknown>)['error'];
+    return result != null && (result as Record<string, unknown>)['error'] == null;
   } catch {
     return false;
   }
@@ -526,6 +625,57 @@ function loadHistory(): Record<string, unknown>[] {
   }
 }
 
+function sliceOrNull(val: string | undefined, maxLen: number): string | null {
+  const s = (val ?? '').slice(-maxLen);
+  return s === '' ? null : s;
+}
+
+function orNull<T>(val: T | undefined | null): T | null {
+  return val ?? null;
+}
+
+function buildFailureLogFields(failure: FailureInfo): Record<string, unknown> {
+  const errorCtxSlice = (failure.errorContext ?? '').slice(0, 300);
+  return {
+    pipeline: failure.pipeline,
+    phase: orNull(failure.phase),
+    agent: orNull(failure.agent),
+    error: (failure.error ?? '').slice(0, 500),
+    exitCode: orNull(failure.exitCode),
+    signal: orNull(failure.signal),
+    command: orNull(failure.command),
+    args: orNull(failure.args),
+    promptSnippet: orNull(failure.promptSnippet),
+    stderrTail: sliceOrNull(failure.stderr, 500),
+    stdoutTail: sliceOrNull(failure.stdout, 500),
+    timedOut: failure.timedOut ?? false,
+    taskTitle: orNull(failure.taskTitle),
+    branchName: orNull(failure.branchName),
+    errorCategory: orNull(failure.errorCategory),
+    errorDetail: orNull(failure.errorDetail),
+    errorContext: errorCtxSlice === '' ? null : errorCtxSlice,
+  };
+}
+
+function buildLogEntry(
+  failure: FailureInfo,
+  diagnosis: DoctorDiagnosis,
+  signature: string,
+  ts: string,
+): Record<string, unknown> {
+  return {
+    ts,
+    ...buildFailureLogFields(failure),
+    signature,
+    severity: diagnosis.severity,
+    action: diagnosis.action,
+    explanation: diagnosis.explanation,
+    rootCause: diagnosis.rootCause,
+    recurring: diagnosis.recurring,
+    followUp: diagnosis.followUp,
+  };
+}
+
 function appendLog(failure: FailureInfo, diagnosis: DoctorDiagnosis, signature: string): void {
   try {
     if (!fs.existsSync(LOG_DIR)) {
@@ -533,33 +683,7 @@ function appendLog(failure: FailureInfo, diagnosis: DoctorDiagnosis, signature: 
     }
 
     const ts = new Date().toISOString();
-    const entry: Record<string, unknown> = {
-      ts,
-      pipeline: failure.pipeline,
-      phase: failure.phase ?? null,
-      agent: failure.agent ?? null,
-      error: (failure.error ?? '').slice(0, 500),
-      exitCode: failure.exitCode ?? null,
-      signal: failure.signal ?? null,
-      command: failure.command ?? null,
-      args: failure.args ?? null,
-      promptSnippet: failure.promptSnippet ?? null,
-      stderrTail: (failure.stderr ?? '').slice(-500) || null,
-      stdoutTail: (failure.stdout ?? '').slice(-500) || null,
-      timedOut: failure.timedOut ?? false,
-      taskTitle: failure.taskTitle ?? null,
-      branchName: failure.branchName ?? null,
-      errorCategory: failure.errorCategory ?? null,
-      errorDetail: failure.errorDetail ?? null,
-      errorContext: (failure.errorContext ?? '').slice(0, 300) || null,
-      signature,
-      severity: diagnosis.severity,
-      action: diagnosis.action,
-      explanation: diagnosis.explanation,
-      rootCause: diagnosis.rootCause,
-      recurring: diagnosis.recurring,
-      followUp: diagnosis.followUp,
-    };
+    const entry = buildLogEntry(failure, diagnosis, signature, ts);
 
     fs.appendFileSync(LOG_PATH, `${JSON.stringify(entry)}\n`, 'utf8');
 
@@ -578,14 +702,12 @@ function appendLog(failure: FailureInfo, diagnosis: DoctorDiagnosis, signature: 
  * with an occurrence count. Excludes doctor-fix feedback entries.
  * @returns {Promise<ActionItem[]>}
  */
-export function scanDoctorLog(): Promise<ActionItem[]> {
-  if (!_initialized) initDoctor();
-  const items: ActionItem[] = [];
+type SigEntry = { entry: Record<string, unknown>; count: number };
 
-  type SigEntry = { entry: Record<string, unknown>; count: number };
+function deduplicateHistory(history: Record<string, unknown>[]): Map<string, SigEntry> {
   const bySignature = new Map<string, SigEntry>();
 
-  for (const entry of _history) {
+  for (const entry of history) {
     const entryAction = entry['action'] as string | undefined;
     if (entryAction !== 'fix' && entryAction !== 'ticket') continue;
     const entryPipeline = entry['pipeline'] as string | undefined;
@@ -601,55 +723,67 @@ export function scanDoctorLog(): Promise<ActionItem[]> {
       entrySignature ??
       `${entryAgent ?? ''}:${entryPhase ?? ''}:${(entryError ?? '').slice(0, 80)}`;
     const existing = bySignature.get(sig);
-    if (!existing || new Date(entryTs) > new Date(existing.entry['ts'] as string)) {
+    if (existing == null || new Date(entryTs) > new Date(existing.entry['ts'] as string)) {
       bySignature.set(sig, { entry, count: (existing?.count ?? 0) + 1 });
     } else {
       existing.count++;
     }
   }
 
+  return bySignature;
+}
+
+function buildDoctorItemDescription(entry: Record<string, unknown>, count: number): string {
+  const errorCatStr = (entry['errorCategory'] as string | undefined) ?? '';
+  const errorDetailStr = (entry['errorDetail'] as string | undefined) ?? '';
+  const signalStr = (entry['signal'] as string | undefined) ?? '';
+  const errorStr = (entry['error'] as string | undefined) ?? '';
+  const entryRecurring = entry['recurring'] as boolean | undefined;
+
+  return [
+    `Pipeline: ${(entry['pipeline'] as string | undefined) ?? 'unknown'}`,
+    `Phase: ${(entry['phase'] as string | undefined) ?? 'unknown'}`,
+    `Agent: ${(entry['agent'] as string | undefined) ?? 'unknown'}`,
+    `Root cause: ${(entry['rootCause'] as string | undefined) ?? 'unknown'}`,
+    labelIfPresent('Category', errorCatStr),
+    labelIfPresent('Detail', errorDetailStr),
+    entry['exitCode'] == null ? null : `Exit: ${String(entry['exitCode'] as number)}`,
+    labelIfPresent('Signal', signalStr),
+    count > 1 ? `Occurrences: ${String(count)}` : null,
+    entryRecurring === true ? 'RECURRING' : null,
+    errorStr === '' ? null : `Error: ${errorStr.slice(0, 200)}`,
+  ]
+    .filter(Boolean)
+    .join(' | ');
+}
+
+function buildDoctorItem(sig: string, entry: Record<string, unknown>, count: number): ActionItem {
+  const countLabel = count > 1 ? ` (${String(count)}x)` : '';
+  const isTransient = classifyIssueType(entry) === 'transient';
+  const entryExplanation = entry['explanation'] as string | undefined;
+  const entrySeverity = entry['severity'] as 'critical' | 'high' | 'medium' | 'low' | undefined;
+
+  return {
+    id: `doctor-${sig.slice(0, 40)}`,
+    title: `${(entryExplanation ?? 'Unknown issue').slice(0, 90)}${countLabel}`,
+    description: buildDoctorItemDescription(entry, count),
+    category: isTransient ? 'acknowledge' : 'fix',
+    severity: entrySeverity ?? 'medium',
+    source: 'doctor-log',
+    agent: selectFixAgent(entry),
+    actionPrompt: isTransient ? undefined : buildFixPrompt(entry),
+    meta: { entry, count, issueType: classifyIssueType(entry) },
+  };
+}
+
+export function scanDoctorLog(): Promise<ActionItem[]> {
+  if (!_initialized) initDoctor();
+
+  const bySignature = deduplicateHistory(_history);
+  const items: ActionItem[] = [];
+
   for (const [sig, { entry, count }] of bySignature) {
-    const countLabel = count > 1 ? ` (${String(count)}x)` : '';
-    const isTransient = classifyIssueType(entry) === 'transient';
-
-    const entryExplanation = entry['explanation'] as string | undefined;
-    const entryPipeline = entry['pipeline'] as string | undefined;
-    const entryPhase = entry['phase'] as string | undefined;
-    const entryAgent = entry['agent'] as string | undefined;
-    const entryRootCause = entry['rootCause'] as string | undefined;
-    const entryErrorCategory = entry['errorCategory'] as string | undefined;
-    const entryErrorDetail = entry['errorDetail'] as string | undefined;
-    const entryExitCode = entry['exitCode'] as number | null | undefined;
-    const entrySignal = entry['signal'] as string | undefined;
-    const entryRecurring = entry['recurring'] as boolean | undefined;
-    const entryError = entry['error'] as string | undefined;
-    const entrySeverity = entry['severity'] as 'critical' | 'high' | 'medium' | 'low' | undefined;
-
-    items.push({
-      id: `doctor-${sig.slice(0, 40)}`,
-      title: `${(entryExplanation ?? 'Unknown issue').slice(0, 90)}${countLabel}`,
-      description: [
-        `Pipeline: ${entryPipeline ?? 'unknown'}`,
-        `Phase: ${entryPhase ?? 'unknown'}`,
-        `Agent: ${entryAgent ?? 'unknown'}`,
-        `Root cause: ${entryRootCause ?? 'unknown'}`,
-        entryErrorCategory ? `Category: ${entryErrorCategory}` : null,
-        entryErrorDetail ? `Detail: ${entryErrorDetail}` : null,
-        entryExitCode == null ? null : `Exit: ${String(entryExitCode)}`,
-        entrySignal ? `Signal: ${entrySignal}` : null,
-        count > 1 ? `Occurrences: ${String(count)}` : null,
-        entryRecurring ? 'RECURRING' : null,
-        entryError ? `Error: ${entryError.slice(0, 200)}` : null,
-      ]
-        .filter(Boolean)
-        .join(' | '),
-      category: isTransient ? 'acknowledge' : 'fix',
-      severity: entrySeverity ?? 'medium',
-      source: 'doctor-log',
-      agent: selectFixAgent(entry),
-      actionPrompt: isTransient ? undefined : buildFixPrompt(entry),
-      meta: { entry, count, issueType: classifyIssueType(entry) },
-    });
+    items.push(buildDoctorItem(sig, entry, count));
   }
 
   return Promise.resolve(items);
@@ -660,34 +794,38 @@ export function scanDoctorLog(): Promise<ActionItem[]> {
  * Uses structured errorCategory from diagnoseAgentError when available.
  * Also checks the log entry fields that may have been persisted.
  */
-function classifyIssueType(entry: Record<string, unknown>): string {
-  const error = ((entry['error'] as string | undefined) ?? '').toLowerCase();
-  const rootCause = ((entry['rootCause'] as string | undefined) ?? '').toLowerCase();
+const CATEGORY_CONFIG_SET = new Set([
+  'auth',
+  'invocation',
+  'sandbox',
+  'permission',
+  'silent-crash',
+]);
+const CATEGORY_TRANSIENT_SET = new Set([
+  'network',
+  'server',
+  'oom',
+  'crash',
+  'signal',
+  'internal',
+  'codex-jsonl-error',
+]);
 
-  const meta = entry['meta'] as Record<string, unknown> | undefined;
-  const metaEntry = meta?.['entry'] as Record<string, unknown> | undefined;
-  const cat = (
-    (entry['errorCategory'] as string | undefined) ??
-    (metaEntry?.['errorCategory'] as string | undefined) ??
-    ''
-  ).toLowerCase();
-
-  if (cat === 'auth') return 'config';
-  if (cat === 'invocation') return 'config';
-  if (cat === 'sandbox') return 'config';
-  if (cat === 'permission') return 'config';
-  if (cat === 'network') return 'transient';
-  if (cat === 'server') return 'transient';
-  if (cat === 'oom') return 'transient';
-  if (cat === 'crash') return 'transient';
-  if (cat === 'signal') return 'transient';
-  if (cat === 'internal') return 'transient';
-  if (cat === 'codex-jsonl-error') return 'transient';
+function classifyByCategory(cat: string): string | null {
+  if (CATEGORY_CONFIG_SET.has(cat)) return 'config';
+  if (CATEGORY_TRANSIENT_SET.has(cat)) return 'transient';
   if (cat === 'parse') return 'code';
-  if (cat === 'silent-crash') return 'config';
+  return null;
+}
 
-  if ((entry['timedOut'] as boolean | undefined) || (entry['signal'] as string | null | undefined))
-    return 'transient';
+function classifyByEntryFields(entry: Record<string, unknown>): string | null {
+  const timedOut = entry['timedOut'] as boolean | undefined;
+  const signal = entry['signal'] as string | null | undefined;
+  if (timedOut === true || (signal != null && signal !== '')) return 'transient';
+  return null;
+}
+
+function classifyByErrorPatterns(error: string, rootCause: string): string | null {
   if (/timeout|timed.?out/i.test(error) || /timeout/i.test(rootCause)) return 'transient';
   if (/segfault|sigsegv|segmentation/i.test(error + rootCause)) return 'transient';
   if (/rate.?limit|429|resource.?exhausted|quota/i.test(error)) return 'transient';
@@ -706,7 +844,28 @@ function classifyIssueType(entry: Record<string, unknown>): string {
 
   if (/not configured|not in.*config|missing.*config/i.test(rootCause + error)) return 'config';
 
-  return 'code';
+  return null;
+}
+
+function classifyIssueType(entry: Record<string, unknown>): string {
+  const error = ((entry['error'] as string | undefined) ?? '').toLowerCase();
+  const rootCause = ((entry['rootCause'] as string | undefined) ?? '').toLowerCase();
+
+  const meta = entry['meta'] as Record<string, unknown> | undefined;
+  const metaEntry = meta?.['entry'] as Record<string, unknown> | undefined;
+  const cat = (
+    (entry['errorCategory'] as string | undefined) ??
+    (metaEntry?.['errorCategory'] as string | undefined) ??
+    ''
+  ).toLowerCase();
+
+  const byCat = classifyByCategory(cat);
+  if (byCat != null) return byCat;
+
+  const byFields = classifyByEntryFields(entry);
+  if (byFields != null) return byFields;
+
+  return classifyByErrorPatterns(error, rootCause) ?? 'code';
 }
 
 /**
@@ -729,7 +888,7 @@ export async function scanDaemonIssues(baseUrl: string): Promise<ActionItem[]> {
     const { request } = await import('./hydra-utils.ts');
     const status = await request('GET', baseUrl, '/status');
     const statusData = status as Record<string, unknown>;
-    if (!statusData['tasks']) return items;
+    if (statusData['tasks'] == null) return items;
 
     for (const task of statusData['tasks'] as Record<string, unknown>[]) {
       const taskStatus = task['status'] as string;
@@ -741,6 +900,7 @@ export async function scanDaemonIssues(baseUrl: string): Promise<ActionItem[]> {
           (task['assignedTo'] as string | undefined) ??
           (task['preferredAgent'] as string | undefined) ??
           'codex';
+        const notesLabel = taskNotes === '' ? 'none' : taskNotes;
         items.push({
           id: `daemon-task-${taskId}`,
           title: `${taskStatus === 'blocked' ? 'Blocked' : 'Failed'} task: ${taskTitle}`,
@@ -751,8 +911,8 @@ export async function scanDaemonIssues(baseUrl: string): Promise<ActionItem[]> {
           agent: assignedTo,
           actionPrompt:
             taskStatus === 'failed'
-              ? `Investigate and fix the failed task: ${taskTitle}\n\nNotes: ${taskNotes || 'none'}`
-              : `Unblock the task: ${taskTitle}\n\nNotes: ${taskNotes || 'none'}`,
+              ? `Investigate and fix the failed task: ${taskTitle}\n\nNotes: ${notesLabel}`
+              : `Unblock the task: ${taskTitle}\n\nNotes: ${notesLabel}`,
           meta: { taskId, daemonTask: task },
         });
       }
@@ -767,6 +927,27 @@ export async function scanDaemonIssues(baseUrl: string): Promise<ActionItem[]> {
  * Scan recent activity for error patterns.
  * @returns {Promise<ActionItem[]>}
  */
+function buildActivityItem(act: Record<string, unknown>): ActionItem {
+  const actTs = act['ts'] as string | number | undefined;
+  const actSummary = act['summary'] as string | undefined;
+  const actMessage = act['message'] as string | undefined;
+  const actDetail = act['detail'] as string | undefined;
+  const actAgent = (act['agent'] as string | undefined) ?? 'codex';
+  const errorLabel = actSummary ?? actMessage ?? 'Unknown error';
+
+  return {
+    id: `activity-${String(actTs ?? Date.now())}-${Math.random().toString(36).slice(2, 8)}`,
+    title: `Error: ${errorLabel.slice(0, 100)}`,
+    description: actDetail ?? actSummary ?? '',
+    category: 'fix',
+    severity: 'medium',
+    source: 'activity',
+    agent: actAgent,
+    actionPrompt: `Investigate and fix: ${errorLabel}\n\nContext: ${actDetail ?? 'none'}`,
+    meta: { activity: act },
+  };
+}
+
 export async function scanErrorActivity(): Promise<ActionItem[]> {
   const items: ActionItem[] = [];
   try {
@@ -775,23 +956,8 @@ export async function scanErrorActivity(): Promise<ActionItem[]> {
 
     for (const act of activities) {
       const actType = act['type'] as string | undefined;
-      if (actType?.includes('error') || actType?.includes('failure')) {
-        const actTs = act['ts'] as string | number | undefined;
-        const actSummary = act['summary'] as string | undefined;
-        const actMessage = act['message'] as string | undefined;
-        const actDetail = act['detail'] as string | undefined;
-        const actAgent = (act['agent'] as string | undefined) ?? 'codex';
-        items.push({
-          id: `activity-${String(actTs ?? Date.now())}-${Math.random().toString(36).slice(2, 8)}`,
-          title: `Error: ${(actSummary ?? actMessage ?? 'Unknown error').slice(0, 100)}`,
-          description: actDetail ?? actSummary ?? '',
-          category: 'fix',
-          severity: 'medium',
-          source: 'activity',
-          agent: actAgent,
-          actionPrompt: `Investigate and fix: ${actSummary ?? actMessage ?? 'Unknown error'}\n\nContext: ${actDetail ?? 'none'}`,
-          meta: { activity: act },
-        });
+      if (actType?.includes('error') === true || actType?.includes('failure') === true) {
+        items.push(buildActivityItem(act));
       }
     }
   } catch {
@@ -806,6 +972,39 @@ export async function scanErrorActivity(): Promise<ActionItem[]> {
  * @param {string} cliContext - Recent CLI output
  * @returns {Promise<ActionItem[]>}
  */
+function applyEnrichments(items: ActionItem[], enriched: Array<Record<string, unknown>>): void {
+  for (const enrichment of enriched) {
+    const idx = enrichment['index'] as number;
+    if (idx >= 0 && idx < items.length) {
+      const prompt = enrichment['actionPrompt'] as string | undefined;
+      if (prompt != null && prompt !== '') {
+        items[idx]['actionPrompt'] = prompt;
+      }
+      const sev = enrichment['severity'] as ActionItem['severity'] | undefined;
+      if (sev != null && sev !== '') {
+        items[idx]['severity'] = sev;
+      }
+    }
+  }
+}
+
+function addDiscoveredItems(items: ActionItem[], discovered: Array<Record<string, unknown>>): void {
+  for (const disc of discovered) {
+    items.push({
+      id: `discovered-${String(Date.now())}-${Math.random().toString(36).slice(2, 8)}`,
+      title: ((disc['title'] as string | undefined) ?? 'Discovered issue').slice(0, 100),
+      description: (disc['description'] as string | undefined) ?? '',
+      category: 'fix',
+      severity: (disc['severity'] as ActionItem['severity'] | undefined) ?? 'medium',
+      source: 'cli-output',
+      agent: 'codex',
+      actionPrompt:
+        (disc['actionPrompt'] as string | undefined) ??
+        `Fix: ${(disc['title'] as string | undefined) ?? 'issue'}`,
+    });
+  }
+}
+
 export async function enrichWithDiagnosis(
   items: ActionItem[],
   cliContext: string,
@@ -845,36 +1044,13 @@ Respond as JSON:
     );
 
     const jsonMatch = response.match(/\{[\s\S]*\}/);
-    if (jsonMatch) {
+    if (jsonMatch != null) {
       const parsed = JSON.parse(jsonMatch[0]) as Record<string, unknown>;
-
       if (Array.isArray(parsed['enriched'])) {
-        for (const enrichment of parsed['enriched'] as Array<Record<string, unknown>>) {
-          const idx = enrichment['index'] as number;
-          if (idx >= 0 && idx < items.length) {
-            if (enrichment['actionPrompt'])
-              items[idx]['actionPrompt'] = enrichment['actionPrompt'] as string;
-            if (enrichment['severity'])
-              items[idx]['severity'] = enrichment['severity'] as ActionItem['severity'];
-          }
-        }
+        applyEnrichments(items, parsed['enriched'] as Array<Record<string, unknown>>);
       }
-
       if (Array.isArray(parsed['discovered'])) {
-        for (const disc of parsed['discovered'] as Array<Record<string, unknown>>) {
-          items.push({
-            id: `discovered-${String(Date.now())}-${Math.random().toString(36).slice(2, 8)}`,
-            title: ((disc['title'] as string | undefined) ?? 'Discovered issue').slice(0, 100),
-            description: (disc['description'] as string | undefined) ?? '',
-            category: 'fix',
-            severity: (disc['severity'] as ActionItem['severity'] | undefined) ?? 'medium',
-            source: 'cli-output',
-            agent: 'codex',
-            actionPrompt:
-              (disc['actionPrompt'] as string | undefined) ??
-              `Fix: ${(disc['title'] as string | undefined) ?? 'issue'}`,
-          });
-        }
+        addDiscoveredItems(items, parsed['discovered'] as Array<Record<string, unknown>>);
       }
     }
   } catch {
@@ -901,36 +1077,34 @@ Respond as JSON:
  * @param {object} opts
  * @returns {Promise<PipelineResult>}
  */
-export async function executeFixAction(
+function handleTransientAction(item: ActionItem, startMs: number): PipelineResult {
+  const count = (item.meta?.['count'] as number | undefined) ?? 1;
+  const entryForSig = item.meta?.['entry'] as Record<string, unknown> | undefined;
+  clearLogEntriesBySignature(entryForSig?.['signature'] as string | undefined);
+  return {
+    item,
+    ok: true,
+    output: `Acknowledged ${String(count)} transient occurrence(s) and cleared from log`,
+    durationMs: Date.now() - startMs,
+  };
+}
+
+function handleConfigAction(item: ActionItem, startMs: number): PipelineResult {
+  const entry = (item.meta?.['entry'] as Record<string, unknown> | undefined) ?? {};
+  const suggestion = buildConfigSuggestion(entry);
+  return {
+    item,
+    ok: true,
+    output: suggestion,
+    durationMs: Date.now() - startMs,
+  };
+}
+
+async function handleCodeAction(
   item: ActionItem,
-  opts: Record<string, unknown> = {},
+  opts: Record<string, unknown>,
+  startMs: number,
 ): Promise<PipelineResult> {
-  const startMs = Date.now();
-  const issueType = (item.meta?.['issueType'] as string | undefined) ?? 'code';
-
-  if (issueType === 'transient' || item.category === 'acknowledge') {
-    const count = (item.meta?.['count'] as number | undefined) ?? 1;
-    const entryForSig = item.meta?.['entry'] as Record<string, unknown> | undefined;
-    clearLogEntriesBySignature(entryForSig?.['signature'] as string | undefined);
-    return {
-      item,
-      ok: true,
-      output: `Acknowledged ${String(count)} transient occurrence(s) and cleared from log`,
-      durationMs: Date.now() - startMs,
-    };
-  }
-
-  if (issueType === 'config') {
-    const entry = (item.meta?.['entry'] as Record<string, unknown> | undefined) ?? {};
-    const suggestion = buildConfigSuggestion(entry);
-    return {
-      item,
-      ok: true,
-      output: suggestion,
-      durationMs: Date.now() - startMs,
-    };
-  }
-
   const agent = item.agent ?? 'claude';
   const prompt = item.actionPrompt ?? `Fix: ${item.title}`;
   const projectRoot = opts['projectRoot'] as string | undefined;
@@ -938,21 +1112,26 @@ export async function executeFixAction(
 
   try {
     const { executeAgentWithRecovery } = await import('./hydra-shared/agent-executor.ts');
-
     const result = await executeAgentWithRecovery(agent, prompt, {
       cwd,
       timeoutMs: 5 * 60 * 1000,
     });
 
-    const ok = result.ok && !result.error;
+    const resultError = result.error ?? '';
+    const ok = result.ok && resultError === '';
 
-    // Do NOT call diagnose() here — prevents feedback loop
+    let errorMsg: string | undefined;
+    if (resultError !== '') {
+      errorMsg = resultError;
+    } else if (!ok) {
+      errorMsg = 'Agent returned error';
+    }
 
     return {
       item,
       ok,
       output: result.stdout ?? result.output,
-      error: result.error ?? (ok ? undefined : 'Agent returned error'),
+      error: errorMsg,
       durationMs: Date.now() - startMs,
     };
   } catch (err) {
@@ -965,11 +1144,29 @@ export async function executeFixAction(
   }
 }
 
+export async function executeFixAction(
+  item: ActionItem,
+  opts: Record<string, unknown> = {},
+): Promise<PipelineResult> {
+  const startMs = Date.now();
+  const issueType = (item.meta?.['issueType'] as string | undefined) ?? 'code';
+
+  if (issueType === 'transient' || item.category === 'acknowledge') {
+    return handleTransientAction(item, startMs);
+  }
+
+  if (issueType === 'config') {
+    return handleConfigAction(item, startMs);
+  }
+
+  return await handleCodeAction(item, opts, startMs);
+}
+
 /**
  * Remove log entries matching a signature (used when acknowledging transient issues).
  */
 function clearLogEntriesBySignature(signature: string | undefined): void {
-  if (!signature) return;
+  if (signature == null || signature === '') return;
   try {
     if (!fs.existsSync(LOG_PATH)) return;
     const lines = fs.readFileSync(LOG_PATH, 'utf8').split('\n').filter(Boolean);
@@ -981,7 +1178,7 @@ function clearLogEntriesBySignature(signature: string | undefined): void {
         return true;
       }
     });
-    fs.writeFileSync(LOG_PATH, kept.join('\n') + (kept.length ? '\n' : ''), 'utf8');
+    fs.writeFileSync(LOG_PATH, kept.join('\n') + (kept.length > 0 ? '\n' : ''), 'utf8');
     _history = _history.filter((h) => h['signature'] !== signature);
   } catch {
     /* best effort */
@@ -1010,6 +1207,18 @@ function buildConfigSuggestion(entry: Record<string, unknown>): string {
 
 // ── Fix Prompt Builder ──────────────────────────────────────────────────────
 
+function appendEntryField(
+  parts: string[],
+  entry: Record<string, unknown>,
+  key: string,
+  label: string,
+): void {
+  const val = entry[key] as string | undefined;
+  if (val != null && val !== '') {
+    parts.push(`${label}: ${val}`);
+  }
+}
+
 function buildFixPrompt(entry: Record<string, unknown>): string {
   const explanation = (entry['explanation'] as string | undefined) ?? 'Unknown';
   const rootCause = (entry['rootCause'] as string | undefined) ?? 'unknown';
@@ -1020,15 +1229,18 @@ function buildFixPrompt(entry: Record<string, unknown>): string {
     `Root cause: ${rootCause}`,
   ];
 
-  if (entry['pipeline']) parts.push(`Pipeline: ${entry['pipeline'] as string}`);
-  if (entry['phase']) parts.push(`Phase: ${entry['phase'] as string}`);
-  if (entry['errorCategory']) parts.push(`Error category: ${entry['errorCategory'] as string}`);
-  if (entry['errorDetail']) parts.push(`Error detail: ${entry['errorDetail'] as string}`);
-  if (entry['errorContext']) parts.push(`Error context: ${entry['errorContext'] as string}`);
+  appendEntryField(parts, entry, 'pipeline', 'Pipeline');
+  appendEntryField(parts, entry, 'phase', 'Phase');
+  appendEntryField(parts, entry, 'errorCategory', 'Error category');
+  appendEntryField(parts, entry, 'errorDetail', 'Error detail');
+  appendEntryField(parts, entry, 'errorContext', 'Error context');
   if (entry['exitCode'] != null) parts.push(`Exit code: ${String(entry['exitCode'] as number)}`);
-  if (entry['signal']) parts.push(`Signal: ${entry['signal'] as string}`);
-  if (entry['error']) parts.push(`Error: ${(entry['error'] as string).slice(0, 500)}`);
-  if (entry['stderrTail']) parts.push(`Stderr: ${(entry['stderrTail'] as string).slice(-500)}`);
+  appendEntryField(parts, entry, 'signal', 'Signal');
+
+  const errorStr = (entry['error'] as string | undefined) ?? '';
+  if (errorStr !== '') parts.push(`Error: ${errorStr.slice(0, 500)}`);
+  const stderrStr = (entry['stderrTail'] as string | undefined) ?? '';
+  if (stderrStr !== '') parts.push(`Stderr: ${stderrStr.slice(-500)}`);
 
   parts.push('');
   parts.push('Investigate the root cause and apply a minimal, targeted fix.');

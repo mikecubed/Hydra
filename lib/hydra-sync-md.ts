@@ -80,9 +80,9 @@ export function parseHydraMd(content: string): ParsedHydraMd {
  */
 export function buildAgentFile(agent: AgentName, parsed: ParsedHydraMd): string {
   const parts = [GENERATED_HEADER];
-  if (parsed.shared) parts.push(parsed.shared);
-  if (parsed.agents[agent]) {
-    if (parsed.shared) parts.push('');
+  if (parsed.shared !== '') parts.push(parsed.shared);
+  if (parsed.agents[agent] !== '') {
+    if (parsed.shared !== '') parts.push('');
     parts.push(parsed.agents[agent]);
   }
   return `${parts.join('\n').trimEnd()}\n`;
@@ -101,7 +101,8 @@ export function hasHydraMd(projectRoot: string): boolean {
  */
 export function getAgentInstructionFile(agent: string, projectRoot: string): string {
   if (hasHydraMd(projectRoot)) {
-    return AGENT_FILES[agent as AgentName] || 'CLAUDE.md';
+    const agentFile = (AGENT_FILES as Record<string, string | undefined>)[agent];
+    return agentFile !== undefined && agentFile !== '' ? agentFile : 'CLAUDE.md';
   }
   return 'CLAUDE.md';
 }
@@ -157,7 +158,7 @@ export function syncHydraMd(projectRoot: string): { synced: string[]; skipped: b
     }
 
     // Skip hand-maintained files (those without the auto-generated header)
-    if (existing && !existing.startsWith('<!-- Auto-generated from HYDRA.md')) {
+    if (existing !== '' && !existing.startsWith('<!-- Auto-generated from HYDRA.md')) {
       continue;
     }
 
