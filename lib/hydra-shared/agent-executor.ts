@@ -456,10 +456,18 @@ export async function executeAgent(
         const dropped = stdoutChunks.shift() ?? '';
         stdoutBytes -= Buffer.byteLength(dropped);
       }
-      // Single-chunk overflow: hard-truncate to keep exactly maxOutputBytes.
+      // Single-chunk overflow: byte-accurate truncation (String.slice counts
+      // characters, not bytes — multi-byte UTF-8 would exceed the limit).
       if (stdoutChunks.length === 1 && stdoutBytes > maxOutputBytes) {
-        stdoutChunks[0] = stdoutChunks[0].slice(0, maxOutputBytes);
-        stdoutBytes = maxOutputBytes;
+        const buf = Buffer.from(stdoutChunks[0], 'utf8');
+        let truncated = buf.subarray(0, maxOutputBytes).toString('utf8');
+        // Cutting mid-character produces U+FFFD (3 bytes) which may overshoot.
+        // Trim trailing chars until the result fits within the byte budget.
+        while (Buffer.byteLength(truncated, 'utf8') > maxOutputBytes && truncated.length > 0) {
+          truncated = truncated.slice(0, -1);
+        }
+        stdoutChunks[0] = truncated;
+        stdoutBytes = Buffer.byteLength(truncated, 'utf8');
       }
     });
 
