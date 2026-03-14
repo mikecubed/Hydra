@@ -43,32 +43,34 @@ interface WorkerStopEvent {
   reason: string;
 }
 
-export function startAgentWorker(
-  agent: string,
-  baseUrl: string,
-  { rl }: { rl?: ReadlineInterface } = {},
-): AgentWorker | undefined {
-  const name = agent.toLowerCase();
-  const existing = workers.get(name);
-  if (existing && existing.status !== 'stopped') {
-    return existing;
-  }
-
-  const worker = new AgentWorker(name, {
-    baseUrl,
-    projectRoot: resolveProject().projectRoot,
-  });
-
-  // Wire worker events to status bar
+function wireTaskStartEvent(worker: AgentWorker): void {
   worker.on('task:start', (data: TaskStartEvent) => {
     const { agent: a, taskId: _taskId, title } = data;
     setAgentActivity(a, 'working', title ?? 'Working', { taskTitle: title });
     drawStatusBar();
   });
+}
 
+function writeCompletionNotification(msg: string, rl: ReadlineInterface | undefined): void {
+  if (process.stdout.isTTY) {
+    process.stdout.write(`\r\x1b[2K${pc.bold(msg)}\n`);
+    setTimeout(() => {
+      process.stdout.write(`\x1b[1A\r\x1b[2K${msg}\n`);
+      if (rl && !isChoiceActive()) {
+        rl.prompt(true);
+      }
+    }, 100);
+  } else {
+    process.stdout.write(`${msg}\n`);
+    if (rl && !isChoiceActive()) {
+      rl.prompt(true);
+    }
+  }
+}
+
+function wireTaskCompleteEvent(worker: AgentWorker, rl: ReadlineInterface | undefined): void {
   worker.on('task:complete', (data: TaskCompleteEvent) => {
     const { agent: a, taskId, title: taskTitle, status, durationMs, outputSummary } = data;
-    // Record activity annotation for all completions
     pushActivity(
       status === 'error' ? 'error' : 'completion',
       annotateCompletion({
@@ -90,28 +92,15 @@ export function startAgentWorker(
     setAgentActivity(a, 'idle', `Done ${taskId}${elapsed === '' ? '' : ` (${elapsed})`}`);
     drawStatusBar();
 
-    // Show inline notification with sparkle
     const icon = SUCCESS('\u2713');
     const sparkle = '\u2728'; // ✨
     const msg = `  ${icon} ${sparkle} ${colorAgent(a)} completed ${pc.white(taskId)}${shortTitle === '' ? '' : DIM(shortTitle)}${elapsed === '' ? '' : ` ${DIM(`in ${elapsed}`)}`}`;
 
-    // Brief flash effect: bold → normal
-    if (process.stdout.isTTY) {
-      process.stdout.write(`\r\x1b[2K${pc.bold(msg)}\n`);
-      setTimeout(() => {
-        process.stdout.write(`\x1b[1A\r\x1b[2K${msg}\n`);
-        if (rl && !isChoiceActive()) {
-          rl.prompt(true);
-        }
-      }, 100);
-    } else {
-      process.stdout.write(`${msg}\n`);
-      if (rl && !isChoiceActive()) {
-        rl.prompt(true);
-      }
-    }
+    writeCompletionNotification(msg, rl);
   });
+}
 
+function wireTaskErrorEvent(worker: AgentWorker, rl: ReadlineInterface | undefined): void {
   worker.on('task:error', (data: TaskErrorEvent) => {
     const { agent: a, taskId, title: taskTitle, error } = data;
     pushActivity(
@@ -140,7 +129,9 @@ export function startAgentWorker(
       rl.prompt(true);
     }
   });
+}
 
+function wireWorkerLifecycleEvents(worker: AgentWorker): void {
   worker.on('worker:idle', ({ agent: a }: { agent: string }) => {
     setAgentActivity(a, 'idle', 'Awaiting next task');
     drawStatusBar();
@@ -151,6 +142,28 @@ export function startAgentWorker(
     setAgentActivity(a, 'inactive', 'Stopped');
     drawStatusBar();
   });
+}
+
+export function startAgentWorker(
+  agent: string,
+  baseUrl: string,
+  { rl }: { rl?: ReadlineInterface } = {},
+): AgentWorker | undefined {
+  const name = agent.toLowerCase();
+  const existing = workers.get(name);
+  if (existing && existing.status !== 'stopped') {
+    return existing;
+  }
+
+  const worker = new AgentWorker(name, {
+    baseUrl,
+    projectRoot: resolveProject().projectRoot,
+  });
+
+  wireTaskStartEvent(worker);
+  wireTaskCompleteEvent(worker, rl);
+  wireTaskErrorEvent(worker, rl);
+  wireWorkerLifecycleEvents(worker);
 
   setAgentExecMode(name, 'worker');
   worker.start();

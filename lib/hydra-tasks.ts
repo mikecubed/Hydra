@@ -62,7 +62,7 @@ import {
   type ScannedTask,
 } from './hydra-tasks-scanner.ts';
 import { getAgentInstructionFile } from './hydra-sync-md.ts';
-import type { HydraConfig } from './types.ts';
+import type { HydraConfig, ExecuteResult } from './types.ts';
 
 interface InvestigatorLike {
   isInvestigatorAvailable(): boolean;
@@ -219,6 +219,24 @@ async function selectTasks(rl: readline.Interface, scannedTasks: ScannedTask[]) 
 
 // ── Budget Preset Selection ─────────────────────────────────────────────────
 
+async function readCustomBudget(rl: readline.Interface) {
+  const hoursRaw = await askLine(rl, '  Max hours: ');
+  const hoursVal = Number.parseFloat(hoursRaw === '' ? '1' : hoursRaw);
+  const hours = Number.isNaN(hoursVal) || hoursVal === 0 ? 1 : hoursVal;
+  const pctRaw = await askLine(rl, '  Budget % (0-100): ');
+  const pctVal = Number.parseFloat(pctRaw === '' ? '20' : pctRaw) / 100;
+  const pct = Number.isNaN(pctVal) || pctVal === 0 ? 0.2 : pctVal;
+  const maxRaw = await askLine(rl, '  Max tasks: ');
+  const maxVal = Number.parseInt(maxRaw === '' ? '5' : maxRaw, 10);
+  const max = Number.isNaN(maxVal) || maxVal === 0 ? 5 : maxVal;
+  return {
+    maxHours: hours,
+    budgetPct: pct,
+    maxTasks: max,
+    label: `Custom (${String(hours)}hr, ${String(Math.round(pct * 100))}%, ${String(max)} tasks)`,
+  };
+}
+
 async function selectBudget(rl: readline.Interface, cfg: HydraConfig) {
   const defaultPreset = cfg.tasks?.budget?.defaultPreset ?? 'medium';
 
@@ -239,21 +257,7 @@ async function selectBudget(rl: readline.Interface, cfg: HydraConfig) {
   }
 
   if (idx === presetNames.length) {
-    const hoursRaw = await askLine(rl, '  Max hours: ');
-    const hoursVal = Number.parseFloat(hoursRaw === '' ? '1' : hoursRaw);
-    const hours = Number.isNaN(hoursVal) || hoursVal === 0 ? 1 : hoursVal;
-    const pctRaw = await askLine(rl, '  Budget % (0-100): ');
-    const pctVal = Number.parseFloat(pctRaw === '' ? '20' : pctRaw) / 100;
-    const pct = Number.isNaN(pctVal) || pctVal === 0 ? 0.2 : pctVal;
-    const maxRaw = await askLine(rl, '  Max tasks: ');
-    const maxVal = Number.parseInt(maxRaw === '' ? '5' : maxRaw, 10);
-    const max = Number.isNaN(maxVal) || maxVal === 0 ? 5 : maxVal;
-    return {
-      maxHours: hours,
-      budgetPct: pct,
-      maxTasks: max,
-      label: `Custom (${String(hours)}hr, ${String(Math.round(pct * 100))}%, ${String(max)} tasks)`,
-    };
+    return readCustomBudget(rl);
   }
 
   // Default
@@ -337,23 +341,10 @@ Then explain your reasoning briefly.`;
   return { verdict: 'approve', reason: output };
 }
 
-// ── Per-Task Execution ──────────────────────────────────────────────────────
+// ── executeTask Helpers ─────────────────────────────────────────────────────
 
-async function executeTask(
-  task: ScannedTask,
-  idx: number,
-  total: number,
-  projectRoot: string,
-  baseBranch: string,
-  cfg: HydraConfig,
-  _budget: unknown,
-  _sessionMode: unknown,
-) {
-  const date = todayStr();
-  const branchName = `${BRANCH_PREFIX}/${date}/${task.slug}`;
-  const startTime = Date.now();
-
-  const result = {
+function makeTaskResult(task: ScannedTask, branchName: string) {
+  return {
     task: task.title,
     slug: task.slug,
     source: task.source,
@@ -372,47 +363,60 @@ async function executeTask(
     violations: [] as ScanViolation[],
     verdict: null as string | null,
   };
+}
 
-  const phaseLabel = `Task ${String(idx + 1)}/${String(total)}`;
+function logTaskHeader(phaseLabel: string, task: ScannedTask): Record<string, unknown> {
+  console.log(pc.bold(`\n${'─'.repeat(60)}`));
+  console.log(pc.bold(`  ${phaseLabel}: ${task.title}`));
+  console.log(
+    pc.dim(`  [${task.source}] ${task.taskType} → ${task.suggestedAgent} | ${task.complexity}`),
+  );
+  console.log(pc.bold('─'.repeat(60)));
+  return {
+    status: 'done',
+    taskType: task.taskType,
+    complexity: task.complexity,
+    agent: task.suggestedAgent,
+  };
+}
 
-  try {
-    // ── CLASSIFY ──
-    result.phases['classify'] = {
-      status: 'done',
-      taskType: task.taskType,
-      complexity: task.complexity,
-      agent: task.suggestedAgent,
-    };
+async function handleExecFailure(
+  task: ScannedTask,
+  phaseLabel: string,
+  branchName: string,
+  projectRoot: string,
+  cfg: HydraConfig,
+  executePrompt: string,
+  execResult: ExecuteResult,
+  phases: Record<string, Record<string, unknown>>,
+): Promise<boolean> {
+  console.log(pc.red(`  [EXECUTE] Failed: ${execResult.error ?? 'unknown error'}`));
+  const healed = await runSelfHealing(
+    task,
+    phaseLabel,
+    projectRoot,
+    cfg,
+    executePrompt,
+    execResult,
+  );
+  if (healed.diagnosisPhase) phases['investigate'] = healed.diagnosisPhase;
+  if (healed.recovered) {
+    phases['execute']['status'] = 'done';
+    phases['execute']['retried'] = true;
+    return false;
+  }
+  notifyDoctorOnFailure(task, branchName, execResult);
+  return true;
+}
 
-    // ── Branch Setup ──
-    console.log(pc.bold(`\n${'─'.repeat(60)}`));
-    console.log(pc.bold(`  ${phaseLabel}: ${task.title}`));
-    console.log(
-      pc.dim(`  [${task.source}] ${task.taskType} → ${task.suggestedAgent} | ${task.complexity}`),
-    );
-    console.log(pc.bold('─'.repeat(60)));
-
-    // Ensure we're on base branch before creating task branch
-    const currentBranch = getCurrentBranch(projectRoot);
-    if (currentBranch !== baseBranch) {
-      checkoutBranch(projectRoot, baseBranch);
-    }
-
-    if (branchExists(projectRoot, branchName)) {
-      console.log(pc.yellow(`  Branch ${branchName} already exists, skipping`));
-      result.status = 'skipped';
-      result.durationMs = Date.now() - startTime;
-      return result;
-    }
-
-    createBranch(projectRoot, branchName, baseBranch);
-    checkoutBranch(projectRoot, branchName);
-
-    // ── PLAN (complex tasks only) ──
-    if (task.complexity === 'complex') {
-      console.log(pc.dim(`  [PLAN] Generating implementation plan...`));
-
-      const planPrompt = `Create a brief implementation plan (5-7 bullet points) for this task:
+async function runPlanPhase(
+  task: ScannedTask,
+  phaseLabel: string,
+  projectRoot: string,
+): Promise<Record<string, unknown>> {
+  if (task.complexity !== 'complex') return {};
+  console.log(pc.dim(`  [PLAN] Generating implementation plan...`));
+  const planPrompt = `Create a brief implementation plan (5-7 bullet points) for this task:
 
 Task: ${task.title}
 ${task.body != null && task.body !== '' ? `\nDescription:\n${task.body}` : ''}
@@ -425,44 +429,36 @@ Focus on:
 - How to verify the change works
 
 Be concise — this is a planning checklist, not a design doc.`;
+  const planHandle = recordCallStart('claude');
+  const planResult = await executeAgentWithRecovery('claude', planPrompt, {
+    cwd: projectRoot,
+    timeoutMs: 3 * 60 * 1000,
+    phaseLabel: `${phaseLabel} plan`,
+  });
+  recordCallComplete(planHandle, planResult as unknown as Parameters<typeof recordCallComplete>[1]);
+  if (!planResult.ok) {
+    console.log(pc.yellow(`  [PLAN] Planning failed, proceeding with direct execution`));
+  }
+  return { status: planResult.ok ? 'done' : 'failed', output: planResult.output.slice(0, 2048) };
+}
 
-      const planHandle = recordCallStart('claude');
-      const planResult = await executeAgentWithRecovery('claude', planPrompt, {
-        cwd: projectRoot,
-        timeoutMs: 3 * 60 * 1000,
-        phaseLabel: `${phaseLabel} plan`,
-      });
-      recordCallComplete(
-        planHandle,
-        planResult as unknown as Parameters<typeof recordCallComplete>[1],
-      );
-
-      result.phases['plan'] = {
-        status: planResult.ok ? 'done' : 'failed',
-        output: planResult.output.slice(0, 2048),
-      };
-
-      if (!planResult.ok) {
-        console.log(pc.yellow(`  [PLAN] Planning failed, proceeding with direct execution`));
-      }
-    }
-
-    // ── EXECUTE ──
-    console.log(pc.dim(`  [EXECUTE] Dispatching to ${task.suggestedAgent}...`));
-
-    const safetyRules = buildSafetyPrompt(branchName, {
-      runner: RUNNER_NAME,
-      reportName: REPORT_NAME,
-      protectedFiles: PROTECTED_FILES,
-      blockedCommands: BLOCKED_COMMANDS,
-      attribution: { pipeline: 'hydra-tasks', agent: task.suggestedAgent },
-    });
-
-    const instructionFile = getAgentInstructionFile(task.suggestedAgent, projectRoot);
-    const planOutput = (result.phases['plan']['output'] as string | undefined) ?? '';
-    const planSection = planOutput === '' ? '' : `\n\n## Implementation Plan\n${planOutput}`;
-
-    const executePrompt = `${safetyRules}
+function buildExecutePrompt(
+  task: ScannedTask,
+  branchName: string,
+  projectRoot: string,
+  planOutput: string | undefined,
+): string {
+  const safetyRules = buildSafetyPrompt(branchName, {
+    runner: RUNNER_NAME,
+    reportName: REPORT_NAME,
+    protectedFiles: PROTECTED_FILES,
+    blockedCommands: BLOCKED_COMMANDS,
+    attribution: { pipeline: 'hydra-tasks', agent: task.suggestedAgent },
+  });
+  const instructionFile = getAgentInstructionFile(task.suggestedAgent, projectRoot);
+  const planSection =
+    planOutput != null && planOutput !== '' ? `\n\n## Implementation Plan\n${planOutput}` : '';
+  return `${safetyRules}
 
 ## Task
 ${task.title}
@@ -477,146 +473,328 @@ ${planSection}
 4. Do NOT modify files outside the scope of this task
 
 Read ${instructionFile} for project conventions.`;
+}
 
-    const timeoutMs = cfg.tasks?.perTaskTimeoutMs ?? 15 * 60 * 1000;
-    const execHandle = recordCallStart(task.suggestedAgent);
-    const execResult = await executeAgentWithRecovery(task.suggestedAgent, executePrompt, {
-      cwd: projectRoot,
-      timeoutMs,
-      phaseLabel,
-      progressIntervalMs: 30_000,
-      onProgress: (elapsed) => {
-        process.stderr.write(pc.dim(`  [${phaseLabel}] ${formatDuration(elapsed)} elapsed...\r`));
-      },
-      hubCwd: projectRoot,
-      hubProject: path.basename(projectRoot),
-      hubAgent: `${task.suggestedAgent}-forge`,
+async function invokeExecuteAgent(
+  task: ScannedTask,
+  phaseLabel: string,
+  projectRoot: string,
+  cfg: HydraConfig,
+  executePrompt: string,
+): Promise<{ ok: boolean; phase: Record<string, unknown>; raw: ExecuteResult }> {
+  console.log(pc.dim(`  [EXECUTE] Dispatching to ${task.suggestedAgent}...`));
+  const timeoutMs = cfg.tasks?.perTaskTimeoutMs ?? 15 * 60 * 1000;
+  const execHandle = recordCallStart(task.suggestedAgent);
+  const raw = await executeAgentWithRecovery(task.suggestedAgent, executePrompt, {
+    cwd: projectRoot,
+    timeoutMs,
+    phaseLabel,
+    progressIntervalMs: 30_000,
+    onProgress: (elapsed) => {
+      process.stderr.write(pc.dim(`  [${phaseLabel}] ${formatDuration(elapsed)} elapsed...\r`));
+    },
+    hubCwd: projectRoot,
+    hubProject: path.basename(projectRoot),
+    hubAgent: `${task.suggestedAgent}-forge`,
+  });
+  recordCallComplete(execHandle, raw as unknown as Parameters<typeof recordCallComplete>[1]);
+  const phase: Record<string, unknown> = {
+    status: raw.ok ? 'done' : 'failed',
+    timedOut: raw.timedOut,
+    error: raw.error ?? null,
+    recovered: raw.recovered ?? false,
+  };
+  return { ok: raw.ok, phase, raw: raw as unknown as ExecuteResult };
+}
+
+async function applyDiagnosis(
+  task: ScannedTask,
+  phaseLabel: string,
+  projectRoot: string,
+  executePrompt: string,
+  timeoutMs: number,
+  diagnosis: { diagnosis: string; retryRecommendation?: { preamble?: string } },
+): Promise<boolean> {
+  const baseOpts = {
+    cwd: projectRoot,
+    timeoutMs,
+    hubCwd: projectRoot,
+    hubProject: path.basename(projectRoot),
+    hubAgent: `${task.suggestedAgent}-forge`,
+  };
+  if (diagnosis.diagnosis === 'transient') {
+    console.log(pc.yellow(`  [INVESTIGATE] Transient failure — retrying...`));
+    const retry = await executeAgentWithRecovery(task.suggestedAgent, executePrompt, {
+      ...baseOpts,
+      phaseLabel: `${phaseLabel} retry`,
     });
     recordCallComplete(
-      execHandle,
-      execResult as unknown as Parameters<typeof recordCallComplete>[1],
+      recordCallStart(task.suggestedAgent),
+      retry as unknown as Parameters<typeof recordCallComplete>[1],
+    );
+    return retry.ok;
+  }
+  const preamble = diagnosis.retryRecommendation?.preamble;
+  if (diagnosis.diagnosis === 'fixable' && preamble != null && preamble !== '') {
+    console.log(pc.yellow(`  [INVESTIGATE] Fixable — retrying with corrective prompt...`));
+    const corrected = `${preamble}\n\n${executePrompt}`;
+    const retry = await executeAgentWithRecovery(task.suggestedAgent, corrected, {
+      ...baseOpts,
+      phaseLabel: `${phaseLabel} fix-retry`,
+    });
+    recordCallComplete(
+      recordCallStart(task.suggestedAgent),
+      retry as unknown as Parameters<typeof recordCallComplete>[1],
+    );
+    return retry.ok;
+  }
+  console.log(pc.red(`  [INVESTIGATE] Fundamental failure — skipping task`));
+  return false;
+}
+
+async function runSelfHealing(
+  task: ScannedTask,
+  phaseLabel: string,
+  projectRoot: string,
+  cfg: HydraConfig,
+  executePrompt: string,
+  execResult: ExecuteResult,
+): Promise<{ recovered: boolean; diagnosisPhase: Record<string, unknown> | null }> {
+  const inv = await getInvestigator();
+  if (!inv || cfg.tasks?.investigator?.['enabled'] === false || !inv.isInvestigatorAvailable()) {
+    return { recovered: false, diagnosisPhase: null };
+  }
+  console.log(pc.dim(`  [INVESTIGATE] Diagnosing failure...`));
+  try {
+    const diagnosis = await inv.investigate({
+      phase: 'agent',
+      agent: task.suggestedAgent,
+      error: execResult.error ?? execResult.stderr,
+      output: execResult.output.slice(0, 2048),
+      timedOut: execResult.timedOut || false,
+    });
+    const diagnosisPhase = { diagnosis: diagnosis.diagnosis };
+    const timeoutMs = cfg.tasks?.perTaskTimeoutMs ?? 15 * 60 * 1000;
+    const recovered = await applyDiagnosis(
+      task,
+      phaseLabel,
+      projectRoot,
+      executePrompt,
+      timeoutMs,
+      diagnosis,
+    );
+    return { recovered, diagnosisPhase };
+  } catch (invErr) {
+    console.log(
+      pc.dim(
+        `  [INVESTIGATE] Investigation failed: ${invErr instanceof Error ? invErr.message : String(invErr)}`,
+      ),
+    );
+    return { recovered: false, diagnosisPhase: null };
+  }
+}
+
+function notifyDoctorOnFailure(
+  task: ScannedTask,
+  branchName: string,
+  execResult: ExecuteResult,
+): void {
+  void import('./hydra-doctor.ts')
+    .then((doc) => {
+      if (doc.isDoctorEnabled())
+        void doc.diagnose({
+          pipeline: 'tasks',
+          phase: 'execute',
+          agent: task.suggestedAgent,
+          error: execResult.error ?? execResult.stderr,
+          exitCode: execResult.exitCode ?? null,
+          signal: execResult.signal ?? null,
+          command: execResult.command,
+          args: execResult.args,
+          promptSnippet: execResult.promptSnippet,
+          stderr: execResult.stderr,
+          stdout: execResult.output,
+          errorCategory: execResult.errorCategory ?? null,
+          errorDetail: execResult.errorDetail ?? null,
+          errorContext: execResult.errorContext ?? null,
+          timedOut: execResult.timedOut || false,
+          taskTitle: task.title,
+          branchName,
+        } as unknown as Parameters<typeof doc.diagnose>[0]);
+    })
+    .catch(() => {});
+}
+
+async function resolveVerdict(
+  task: ScannedTask,
+  projectRoot: string,
+  branchName: string,
+  baseBranch: string,
+  cfg: HydraConfig,
+  verification: { ran: boolean; passed: boolean; command: string },
+  violations: ScanViolation[],
+): Promise<{ value: string; phase: Record<string, unknown> }> {
+  const councilCfg = cfg.tasks?.councilLite ?? {};
+  const needsCouncil =
+    councilCfg['enabled'] !== false &&
+    (task.complexity === 'complex' ||
+      (councilCfg['complexOnly'] !== true && (violations.length > 0 || !verification.passed)));
+  if (!needsCouncil) {
+    const value =
+      (verification.passed || !verification.ran) && violations.length === 0
+        ? 'approve'
+        : 'needs-review';
+    return { value, phase: { status: 'auto', verdict: value } };
+  }
+  console.log(pc.dim(`  [DECIDE] Council-lite review...`));
+  const diff = getBranchDiff(projectRoot, branchName, baseBranch);
+  if (diff === '') {
+    return { value: 'approve', phase: { status: 'skipped', reason: 'no diff' } };
+  }
+  const review = await councilLiteReview(task.suggestedAgent, diff, projectRoot, cfg);
+  let verdictColor: (s: string) => string;
+  if (review.verdict === 'approve') verdictColor = pc.green;
+  else if (review.verdict === 'reject') verdictColor = pc.red;
+  else verdictColor = pc.yellow;
+  console.log(`  [DECIDE] Verdict: ${verdictColor(review.verdict)}`);
+  return { value: review.verdict, phase: { status: 'done', verdict: review.verdict } };
+}
+
+async function runVerifyAndDecide(
+  task: ScannedTask,
+  projectRoot: string,
+  branchName: string,
+  baseBranch: string,
+  cfg: HydraConfig,
+): Promise<{
+  verification: { ran: boolean; passed: boolean; command: string };
+  violations: ScanViolation[];
+  verdict: string;
+  phases: { verify: Record<string, unknown>; decide: Record<string, unknown> };
+}> {
+  console.log(pc.dim(`  [VERIFY] Running verification...`));
+  const verResult = runVerification(projectRoot, cfg);
+  if (verResult.ran) {
+    console.log(
+      verResult.passed
+        ? pc.green(`  [VERIFY] Passed: ${verResult.command}`)
+        : pc.red(`  [VERIFY] Failed: ${verResult.command}`),
+    );
+  }
+  const violations = scanBranchViolations(projectRoot, branchName, {
+    baseBranch,
+    protectedFiles: PROTECTED_FILES,
+    protectedPatterns: BASE_PROTECTED_PATTERNS,
+    checkDeletedTests: true,
+  });
+  if (violations.length > 0) {
+    console.log(pc.red(`  [VERIFY] ${String(violations.length)} violation(s) detected`));
+    for (const v of violations) {
+      console.log(pc.red(`    [${v.severity}] ${v.detail}`));
+    }
+  }
+  const verifyPhase = { status: 'done', passed: verResult.passed, violations: violations.length };
+  const verdictResult = await resolveVerdict(
+    task,
+    projectRoot,
+    branchName,
+    baseBranch,
+    cfg,
+    { ran: verResult.ran, passed: verResult.passed, command: verResult.command },
+    violations,
+  );
+  return {
+    verification: { ran: verResult.ran, passed: verResult.passed, command: verResult.command },
+    violations,
+    verdict: verdictResult.value,
+    phases: { verify: verifyPhase, decide: verdictResult.phase },
+  };
+}
+
+async function collectBranchResults(
+  task: ScannedTask,
+  projectRoot: string,
+  branchName: string,
+  baseBranch: string,
+  cfg: HydraConfig,
+  result: ReturnType<typeof makeTaskResult>,
+): Promise<void> {
+  const stats = getBranchStats(projectRoot, branchName, baseBranch);
+  result.filesChanged = stats.filesChanged;
+  result.commits = stats.commits;
+
+  const vd = await runVerifyAndDecide(task, projectRoot, branchName, baseBranch, cfg);
+  result.verification = vd.verification;
+  result.violations = vd.violations;
+  result.verdict = vd.verdict;
+  Object.assign(result.phases, vd.phases);
+}
+
+// ── Per-Task Execution ──────────────────────────────────────────────────────
+
+async function executeTask(
+  task: ScannedTask,
+  idx: number,
+  total: number,
+  projectRoot: string,
+  baseBranch: string,
+  cfg: HydraConfig,
+  _budget: unknown,
+  _sessionMode: unknown,
+) {
+  const date = todayStr();
+  const branchName = `${BRANCH_PREFIX}/${date}/${task.slug}`;
+  const startTime = Date.now();
+  const result = makeTaskResult(task, branchName);
+  const phaseLabel = `Task ${String(idx + 1)}/${String(total)}`;
+
+  try {
+    result.phases['classify'] = logTaskHeader(phaseLabel, task);
+
+    if (getCurrentBranch(projectRoot) !== baseBranch) checkoutBranch(projectRoot, baseBranch);
+
+    if (branchExists(projectRoot, branchName)) {
+      console.log(pc.yellow(`  Branch ${branchName} already exists, skipping`));
+      result.status = 'skipped';
+      result.durationMs = Date.now() - startTime;
+      return result;
+    }
+
+    createBranch(projectRoot, branchName, baseBranch);
+    checkoutBranch(projectRoot, branchName);
+
+    const planPhaseResult = await runPlanPhase(task, phaseLabel, projectRoot);
+    result.phases['plan'] = planPhaseResult;
+
+    const executePrompt = buildExecutePrompt(
+      task,
+      branchName,
+      projectRoot,
+      planPhaseResult['output'] as string | undefined,
     );
 
-    result.phases['execute'] = {
-      status: execResult.ok ? 'done' : 'failed',
-      timedOut: execResult.timedOut,
-      error: execResult.error ?? null,
-      recovered: execResult.recovered ?? false,
-    };
+    const execResult = await invokeExecuteAgent(task, phaseLabel, projectRoot, cfg, executePrompt);
+    result.phases['execute'] = execResult.phase;
 
     if (!execResult.ok) {
-      console.log(pc.red(`  [EXECUTE] Failed: ${execResult.error ?? 'unknown error'}`));
-
-      // Self-healing via investigator
-      const inv = await getInvestigator();
-      if (inv && cfg.tasks?.investigator?.['enabled'] !== false && inv.isInvestigatorAvailable()) {
-        console.log(pc.dim(`  [INVESTIGATE] Diagnosing failure...`));
-        try {
-          const diagnosis = await inv.investigate({
-            phase: 'agent',
-            agent: task.suggestedAgent,
-            error: execResult.error ?? execResult.stderr,
-            output: execResult.output.slice(0, 2048),
-            timedOut: execResult.timedOut || false,
-          });
-
-          result.phases['investigate'] = { diagnosis: diagnosis.diagnosis };
-
-          if (diagnosis.diagnosis === 'transient') {
-            console.log(pc.yellow(`  [INVESTIGATE] Transient failure — retrying...`));
-            const retryResult = await executeAgentWithRecovery(task.suggestedAgent, executePrompt, {
-              cwd: projectRoot,
-              timeoutMs,
-              phaseLabel: `${phaseLabel} retry`,
-              hubCwd: projectRoot,
-              hubProject: path.basename(projectRoot),
-              hubAgent: `${task.suggestedAgent}-forge`,
-            });
-            recordCallComplete(
-              recordCallStart(task.suggestedAgent),
-              retryResult as unknown as Parameters<typeof recordCallComplete>[1],
-            );
-
-            if (retryResult.ok) {
-              result.phases['execute']['status'] = 'done';
-              result.phases['execute']['retried'] = true;
-            }
-          } else if (
-            diagnosis.diagnosis === 'fixable' &&
-            diagnosis.retryRecommendation?.preamble != null &&
-            diagnosis.retryRecommendation.preamble !== ''
-          ) {
-            console.log(pc.yellow(`  [INVESTIGATE] Fixable — retrying with corrective prompt...`));
-            const correctedPrompt = `${diagnosis.retryRecommendation.preamble}\n\n${executePrompt}`;
-            const retryResult = await executeAgentWithRecovery(
-              task.suggestedAgent,
-              correctedPrompt,
-              {
-                cwd: projectRoot,
-                timeoutMs,
-                phaseLabel: `${phaseLabel} fix-retry`,
-                hubCwd: projectRoot,
-                hubProject: path.basename(projectRoot),
-                hubAgent: `${task.suggestedAgent}-forge`,
-              },
-            );
-            recordCallComplete(
-              recordCallStart(task.suggestedAgent),
-              retryResult as unknown as Parameters<typeof recordCallComplete>[1],
-            );
-
-            if (retryResult.ok) {
-              result.phases['execute']['status'] = 'done';
-              result.phases['execute']['retried'] = true;
-            }
-          } else {
-            console.log(pc.red(`  [INVESTIGATE] Fundamental failure — skipping task`));
-          }
-        } catch (invErr) {
-          console.log(
-            pc.dim(
-              `  [INVESTIGATE] Investigation failed: ${invErr instanceof Error ? invErr.message : String(invErr)}`,
-            ),
-          );
-        }
-      }
-
-      if (result.phases['execute']['status'] !== 'done') {
-        // Doctor notification for persistent failure
-        void import('./hydra-doctor.ts')
-          .then((doc) => {
-            if (doc.isDoctorEnabled())
-              void doc.diagnose({
-                pipeline: 'tasks',
-                phase: 'execute',
-                agent: task.suggestedAgent,
-                error: execResult.error ?? execResult.stderr,
-                exitCode: execResult.exitCode ?? null,
-                signal: execResult.signal ?? null,
-                command: execResult.command,
-                args: execResult.args,
-                promptSnippet: execResult.promptSnippet,
-                stderr: execResult.stderr,
-                stdout: execResult.output,
-                errorCategory: execResult.errorCategory ?? null,
-                errorDetail: execResult.errorDetail ?? null,
-                errorContext: execResult.errorContext ?? null,
-                timedOut: execResult.timedOut || false,
-                taskTitle: task.title,
-                branchName,
-              } as unknown as Parameters<typeof doc.diagnose>[0]);
-          })
-          .catch(() => {});
-
+      const shouldAbort = await handleExecFailure(
+        task,
+        phaseLabel,
+        branchName,
+        projectRoot,
+        cfg,
+        executePrompt,
+        execResult.raw,
+        result.phases,
+      );
+      if (shouldAbort) {
         result.status = 'failed';
         result.durationMs = Date.now() - startTime;
-        // Return to base branch
         checkoutBranch(projectRoot, baseBranch);
         return result;
       }
     }
 
-    // Check if the branch has any commits
     if (!branchHasCommits(projectRoot, branchName, baseBranch)) {
       console.log(pc.yellow(`  [EXECUTE] No commits produced — skipping`));
       result.status = 'empty';
@@ -625,87 +803,7 @@ Read ${instructionFile} for project conventions.`;
       return result;
     }
 
-    // Get stats
-    const stats = getBranchStats(projectRoot, branchName, baseBranch);
-    result.filesChanged = stats.filesChanged;
-    result.commits = stats.commits;
-
-    // ── VERIFY ──
-    console.log(pc.dim(`  [VERIFY] Running verification...`));
-    const verification = runVerification(projectRoot, cfg);
-    result.verification = {
-      ran: verification.ran,
-      passed: verification.passed,
-      command: verification.command,
-    };
-
-    if (verification.ran) {
-      console.log(
-        verification.passed
-          ? pc.green(`  [VERIFY] Passed: ${verification.command}`)
-          : pc.red(`  [VERIFY] Failed: ${verification.command}`),
-      );
-    }
-
-    // Scan for violations
-    const violations = scanBranchViolations(projectRoot, branchName, {
-      baseBranch,
-      protectedFiles: PROTECTED_FILES,
-      protectedPatterns: BASE_PROTECTED_PATTERNS,
-      checkDeletedTests: true,
-    });
-    result.violations = violations;
-
-    if (violations.length > 0) {
-      console.log(pc.red(`  [VERIFY] ${String(violations.length)} violation(s) detected`));
-      for (const v of violations) {
-        console.log(pc.red(`    [${v.severity}] ${v.detail}`));
-      }
-    }
-
-    result.phases['verify'] = {
-      status: 'done',
-      passed: verification.passed,
-      violations: violations.length,
-    };
-
-    // ── DECIDE (council-lite for complex tasks) ──
-    const councilCfg = cfg.tasks?.councilLite ?? {};
-    const needsCouncil =
-      councilCfg['enabled'] !== false &&
-      (task.complexity === 'complex' ||
-        (councilCfg['complexOnly'] !== true && (violations.length > 0 || !verification.passed)));
-
-    if (needsCouncil) {
-      console.log(pc.dim(`  [DECIDE] Council-lite review...`));
-      const diff = getBranchDiff(projectRoot, branchName, baseBranch);
-
-      if (diff === '') {
-        result.verdict = 'approve';
-        result.phases['decide'] = { status: 'skipped', reason: 'no diff' };
-      } else {
-        const review = await councilLiteReview(task.suggestedAgent, diff, projectRoot, cfg);
-        result.verdict = review.verdict;
-        result.phases['decide'] = { status: 'done', verdict: review.verdict };
-
-        let verdictColor;
-        if (review.verdict === 'approve') {
-          verdictColor = pc.green;
-        } else if (review.verdict === 'reject') {
-          verdictColor = pc.red;
-        } else {
-          verdictColor = pc.yellow;
-        }
-        console.log(`  [DECIDE] Verdict: ${verdictColor(review.verdict)}`);
-      }
-    } else {
-      // Simple tasks: auto-approve if verification passed
-      result.verdict =
-        (verification.passed || !verification.ran) && violations.length === 0
-          ? 'approve'
-          : 'needs-review';
-      result.phases['decide'] = { status: 'auto', verdict: result.verdict };
-    }
+    await collectBranchResults(task, projectRoot, branchName, baseBranch, cfg, result);
 
     result.status = result.verdict === 'reject' ? 'rejected' : 'success';
   } catch (err) {
@@ -716,14 +814,11 @@ Read ${instructionFile} for project conventions.`;
   }
 
   result.durationMs = Date.now() - startTime;
-
-  // Return to base branch
   try {
     checkoutBranch(projectRoot, baseBranch);
   } catch {
     /* best effort */
   }
-
   return result;
 }
 
@@ -794,13 +889,118 @@ function generateReport(
   return { json: jsonReport, markdown: md };
 }
 
+// ── Session Helpers ─────────────────────────────────────────────────────────
+
+function optionAsStr(v: unknown, fallback: string): string {
+  if (typeof v === 'string') return v;
+  if (typeof v === 'number') return String(v);
+  return fallback;
+}
+
+function resolveBudgetFromOptions(
+  options: Record<string, unknown>,
+): { maxHours: number; budgetPct: number; maxTasks: number; label: string } | null {
+  const presetName = options['preset'] as string | undefined;
+  if (typeof presetName === 'string' && presetName in BUDGET_PRESETS) {
+    return BUDGET_PRESETS[presetName as keyof typeof BUDGET_PRESETS];
+  }
+  if (options['max'] == null && options['hours'] == null && options['budget'] == null) return null;
+  const hoursVal = Number.parseFloat(optionAsStr(options['hours'], '1'));
+  const hours = Number.isNaN(hoursVal) || hoursVal === 0 ? 1 : hoursVal;
+  const pctVal = Number.parseFloat(optionAsStr(options['budget'], '20')) / 100;
+  const pct = Number.isNaN(pctVal) || pctVal === 0 ? 0.2 : pctVal;
+  const maxVal = Number.parseInt(optionAsStr(options['max'], '5'), 10);
+  const max = Number.isNaN(maxVal) || maxVal === 0 ? 5 : maxVal;
+  return {
+    maxHours: hours,
+    budgetPct: pct,
+    maxTasks: max,
+    label: `Custom (${String(hours)}hr, ${String(Math.round(pct * 100))}%, ${String(max)} tasks)`,
+  };
+}
+
+async function runTaskLoop(
+  selectedTasks: ScannedTask[],
+  budgetPreset: { maxHours: number; maxTasks: number; budgetPct: number; label: string },
+  budget: BudgetTracker,
+  projectRoot: string,
+  baseBranch: string,
+  cfg: HydraConfig,
+): Promise<{ results: Awaited<ReturnType<typeof executeTask>>[]; stopReason: string | null }> {
+  type LoopState = {
+    results: Awaited<ReturnType<typeof executeTask>>[];
+    stopReason: string | null;
+  };
+  const sessionStart = Date.now();
+  const maxMs = budgetPreset.maxHours * 60 * 60 * 1000;
+
+  const runOne = async (acc: LoopState, task: ScannedTask, i: number): Promise<LoopState> => {
+    if (acc.stopReason !== null) return acc;
+    if (Date.now() - sessionStart > maxMs) {
+      return { ...acc, stopReason: `Time limit reached (${String(budgetPreset.maxHours)}hr)` };
+    }
+    const budgetCheck = budget.check();
+    if (budgetCheck.action === 'hard_stop') {
+      return { ...acc, stopReason: budgetCheck.reason };
+    }
+    const taskResult = await executeTask(
+      task,
+      i,
+      selectedTasks.length,
+      projectRoot,
+      baseBranch,
+      cfg,
+      budget,
+      null,
+    );
+    budget.recordUnitEnd(task.slug, taskResult.durationMs);
+    const results = [...acc.results, taskResult];
+    if (budgetCheck.action === 'soft_stop') {
+      return { results, stopReason: budgetCheck.reason };
+    }
+    return { results, stopReason: null };
+  };
+
+  return selectedTasks.reduce<Promise<LoopState>>(
+    (accPromise, task, i) => accPromise.then((acc) => runOne(acc, task, i)),
+    Promise.resolve({ results: [], stopReason: null }),
+  );
+}
+
+function printFinalSummary(
+  results: Array<{
+    status: string;
+    task: string;
+    agent: string;
+    tokens: number;
+    durationMs: number;
+    verdict: string | null;
+  }>,
+  _selectedTasks: ScannedTask[],
+  budgetSummary: Record<string, unknown>,
+  stopReason: string | null,
+  reportPath: string,
+): void {
+  const successful = results.filter((r) => r.status === 'success').length;
+  const failed = results.filter((r) => r.status === 'failed' || r.status === 'error').length;
+  console.log(pc.bold('\n── Session Complete ──\n'));
+  console.log(
+    `  Tasks:    ${String(results.length)} (${pc.green(String(successful))} ok, ${pc.red(String(failed))} failed)`,
+  );
+  const consumed = (budgetSummary['consumed'] as number | undefined) ?? 0;
+  console.log(`  Tokens:   ${consumed.toLocaleString()}`);
+  console.log(
+    `  Duration: ${formatDuration((budgetSummary['durationMs'] as number | undefined) ?? 0)}`,
+  );
+  if (stopReason != null) console.log(pc.yellow(`  Stopped:  ${stopReason}`));
+  console.log(pc.dim(`\n  Report: ${reportPath}\n`));
+}
+
 // ── Main Session ────────────────────────────────────────────────────────────
 
-async function main() {
-  initAgentRegistry();
-
-  const { options, positionals: _positionals } = parseArgs(process.argv);
-
+function setupSession(
+  options: Record<string, unknown>,
+): { projectRoot: string; cfg: HydraConfig; baseBranch: string } | null {
   let config;
   try {
     config = resolveProject({ project: options['project'] as string | undefined });
@@ -809,106 +1009,119 @@ async function main() {
       pc.red(`Project resolution failed: ${err instanceof Error ? err.message : String(err)}`),
     );
     process.exitCode = 1;
-    return;
+    return null;
   }
-
   const { projectRoot } = config;
   const cfg = loadHydraConfig();
   const baseBranch = cfg.tasks?.baseBranch ?? 'dev';
-
-  // ── Preconditions ──
   const branchCheck = verifyBranch(projectRoot, baseBranch);
   if (!branchCheck.ok) {
     console.log(pc.yellow(`Switching to ${baseBranch} (was on ${branchCheck.currentBranch})`));
     checkoutBranch(projectRoot, baseBranch);
   }
-
   if (!isCleanWorkingTree(projectRoot)) {
     console.error(pc.red('Working tree is not clean. Commit or stash changes first.'));
     process.exitCode = 1;
-    return;
+    return null;
   }
+  return { projectRoot, cfg, baseBranch };
+}
 
-  // ── Scan ──
-  console.log(pc.bold('\nHydra Tasks Runner\n'));
-  console.log(pc.dim('Scanning for work items...'));
-
-  const scannedTasks = scanAllSources(projectRoot);
-
-  if (scannedTasks.length === 0) {
-    console.log(pc.yellow('\nNo tasks found. Add TODO/FIXME comments or create GitHub issues.'));
-    return;
-  }
-
-  // ── Interactive Selection ──
-  const rl = createRL();
-  let selectedTasks;
-
-  // Check for preset/cli overrides
-
-  selectedTasks =
-    // eslint-disable-next-line @typescript-eslint/strict-boolean-expressions -- runtime options check
-    options['preset'] || options['max']
+async function selectTasksInteractively(
+  options: Record<string, unknown>,
+  scannedTasks: ScannedTask[],
+  rl: ReturnType<typeof createRL>,
+  cfg: HydraConfig,
+): Promise<{
+  tasks: ScannedTask[];
+  budgetPreset: { label: string; maxHours: number; budgetPct: number; maxTasks: number };
+} | null> {
+  const selectedTasks =
+    Boolean(options['preset']) || Boolean(options['max'])
       ? (() => {
           const parsed = Number.parseInt(
             String(options['max'] === false ? '' : options['max']),
             10,
           );
-          const maxTasks = Number.isNaN(parsed) || parsed === 0 ? 5 : parsed;
-          return scannedTasks.slice(0, maxTasks);
+          return scannedTasks.slice(0, Number.isNaN(parsed) || parsed === 0 ? 5 : parsed);
         })()
       : await selectTasks(rl, scannedTasks);
 
   if (selectedTasks == null || selectedTasks.length === 0) {
     console.log(pc.dim('\nNo tasks selected. Exiting.'));
     rl.close();
+    return null;
+  }
+
+  const cliPreset = resolveBudgetFromOptions(options);
+  const budgetPreset = cliPreset ?? (await selectBudget(rl, cfg));
+  rl.close();
+  return { tasks: selectedTasks, budgetPreset };
+}
+
+function saveAndPrintReport(
+  date: string,
+  results: Awaited<ReturnType<typeof executeTask>>[],
+  selectedTasks: ScannedTask[],
+  budget: BudgetTracker,
+  budgetPreset: { label: string; maxTasks: number; maxHours: number; budgetPct: number },
+  tokenBudget: number,
+  stopReason: string | null,
+  projectRoot: string,
+): void {
+  const budgetSummary = budget.getSummary();
+  if (stopReason != null) budgetSummary['stopReason'] = stopReason;
+  const report = generateReport(date, results, budgetSummary, {
+    preset: budgetPreset.label,
+    maxTasks: budgetPreset.maxTasks,
+    maxHours: budgetPreset.maxHours,
+    tokenBudget,
+  });
+  const reportDir = path.join(projectRoot, 'docs', 'coordination', 'tasks');
+  ensureDir(reportDir);
+  const timestamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
+  const jsonPath = path.join(reportDir, `TASKS_${date}_${timestamp}.json`);
+  const mdPath = path.join(reportDir, `TASKS_${date}_${timestamp}.md`);
+  fs.writeFileSync(jsonPath, `${JSON.stringify(report.json, null, 2)}\n`, 'utf8');
+  fs.writeFileSync(mdPath, report.markdown, 'utf8');
+  printFinalSummary(results, selectedTasks, budgetSummary, stopReason, mdPath);
+}
+
+async function main() {
+  initAgentRegistry();
+  const { options } = parseArgs(process.argv);
+
+  const session = setupSession(options);
+  if (!session) return;
+  const { projectRoot, cfg, baseBranch } = session;
+
+  console.log(pc.bold('\nHydra Tasks Runner\n'));
+  console.log(pc.dim('Scanning for work items...'));
+
+  const scannedTasks = scanAllSources(projectRoot);
+  if (scannedTasks.length === 0) {
+    console.log(pc.yellow('\nNo tasks found. Add TODO/FIXME comments or create GitHub issues.'));
     return;
   }
 
-  // ── Budget Selection ──
-  let budgetPreset;
+  const rl = createRL();
+  const selection = await selectTasksInteractively(options, scannedTasks, rl, cfg);
+  if (!selection) return;
+  const { budgetPreset } = selection;
+  const selectedTasks = selection.tasks.slice(0, budgetPreset.maxTasks);
 
-  const presetOpt = String(options['preset'] === false ? '' : options['preset']);
-  if (presetOpt !== '' && presetOpt in BUDGET_PRESETS) {
-    budgetPreset = BUDGET_PRESETS[presetOpt as keyof typeof BUDGET_PRESETS];
-    // eslint-disable-next-line @typescript-eslint/strict-boolean-expressions -- runtime options check
-  } else if (options['hours'] || options['budget']) {
-    budgetPreset = {
-      // eslint-disable-next-line @typescript-eslint/strict-boolean-expressions -- runtime options check
-      maxHours: Number.parseFloat(String(options['hours'] || '1')) || 1,
-      // eslint-disable-next-line @typescript-eslint/strict-boolean-expressions -- runtime options check
-      budgetPct: Number.parseFloat(String(options['budget'] || '20')) / 100 || 0.2,
-      // eslint-disable-next-line @typescript-eslint/strict-boolean-expressions -- runtime options check
-      maxTasks: Number.parseInt(String(options['max'] || '10'), 10) || 10,
-      label: 'CLI override',
-    };
-  } else {
-    budgetPreset = await selectBudget(rl, cfg);
-  }
-
-  rl.close();
-
-  // Cap tasks to budget max
-  selectedTasks = selectedTasks.slice(0, budgetPreset.maxTasks);
-
-  // ── Budget Tracker Setup ──
   const weeklyBudget = cfg.usage.weeklyTokenBudget?.['claude-opus-4-6'] ?? 25_000_000;
   const tokenBudget = Math.round(weeklyBudget * budgetPreset.budgetPct);
-
-  const perTaskEstimate = cfg.tasks?.budget?.perTaskEstimate ?? 100_000;
-
   const budget = new BudgetTracker({
     softLimit: Math.round(tokenBudget * 0.85),
     hardLimit: tokenBudget,
-    unitEstimate: perTaskEstimate,
+    unitEstimate: cfg.tasks?.budget?.perTaskEstimate ?? 100_000,
     unitLabel: 'task',
     thresholds: BUDGET_THRESHOLDS,
   });
   budget.recordStart();
 
-  // ── Session Summary ──
   const date = todayStr();
-
   console.log(pc.bold('\n── Session Configuration ──\n'));
   console.log(`  Tasks: ${pc.cyan(String(selectedTasks.length))}`);
   console.log(`  Budget: ${pc.cyan(budgetPreset.label)}`);
@@ -916,137 +1129,35 @@ async function main() {
   console.log(`  Time limit: ${pc.cyan(`${String(budgetPreset.maxHours)}hr`)}`);
   console.log(`  Base branch: ${pc.cyan(baseBranch)}`);
   console.log('');
-
   for (const [i, t] of selectedTasks.entries()) {
     console.log(`  ${pc.dim(`${String(i + 1)}.`)} ${t.title} ${pc.dim(`[${t.suggestedAgent}]`)}`);
   }
   console.log('');
 
-  // ── Execute Tasks ──
-  const sessionStart = Date.now();
-  const maxMs = budgetPreset.maxHours * 60 * 60 * 1000;
-  const results = [];
-  let stopReason = null;
-  let useCheapMode = false;
-
-  for (let i = 0; i < selectedTasks.length; i++) {
-    const task = selectedTasks[i];
-
-    // Time check
-    const elapsed = Date.now() - sessionStart;
-    if (elapsed >= maxMs) {
-      stopReason = `Time limit reached (${String(budgetPreset.maxHours)}hr)`;
-      console.log(pc.yellow(`\n  ${stopReason}`));
-      break;
-    }
-
-    // Budget check
-    const budgetCheck = budget.check();
-    if (budgetCheck.action === 'hard_stop') {
-      stopReason = budgetCheck.reason;
-      console.log(pc.red(`\n  ${stopReason}`));
-      break;
-    }
-    if (budgetCheck.action === 'soft_stop') {
-      stopReason = budgetCheck.reason;
-      console.log(pc.yellow(`\n  ${stopReason} — completing this task then stopping`));
-    }
-    if (budgetCheck.action === 'handoff_cheap' && !useCheapMode) {
-      useCheapMode = true;
-      console.log(
-        pc.yellow(
-          `\n  Budget at ${String(Math.round(budgetCheck.percentUsed * 100))}% — switching to economy tier`,
-        ),
-      );
-    }
-    if (budgetCheck.action === 'warn') {
-      console.log(
-        pc.yellow(`  Budget: ${String(Math.round(budgetCheck.percentUsed * 100))}% used`),
-      );
-    }
-
-    // eslint-disable-next-line no-await-in-loop -- sequential task execution required
-    const result = await executeTask(
-      task,
-      i,
-      selectedTasks.length,
-      projectRoot,
-      baseBranch,
-      cfg,
-      budget,
-      useCheapMode ? 'economy' : 'performance',
-    );
-
-    results.push(result);
-
-    // Record budget
-    const budgetDelta = budget.recordUnitEnd(task.slug, result.durationMs);
-    result.tokens = budgetDelta.tokens;
-
-    let statusIcon;
-    if (result.status === 'success') {
-      statusIcon = pc.green('PASS');
-    } else if (result.status === 'failed') {
-      statusIcon = pc.red('FAIL');
-    } else {
-      statusIcon = pc.yellow(result.status.toUpperCase());
-    }
-    console.log(`\n  ${statusIcon} ${task.title} (${formatDuration(result.durationMs)})`);
-
-    if (stopReason != null) break;
-  }
-
-  // ── Return to base branch ──
+  const { results, stopReason } = await runTaskLoop(
+    selectedTasks,
+    budgetPreset,
+    budget,
+    projectRoot,
+    baseBranch,
+    cfg,
+  );
   try {
     checkoutBranch(projectRoot, baseBranch);
   } catch {
     /* best effort */
   }
 
-  // ── Generate Report ──
-  const budgetSummary = budget.getSummary();
-  if (stopReason != null) budgetSummary['stopReason'] = stopReason;
-
-  const report = generateReport(date, results, budgetSummary, {
-    preset: budgetPreset.label,
-    maxTasks: budgetPreset.maxTasks,
-    maxHours: budgetPreset.maxHours,
+  saveAndPrintReport(
+    date,
+    results,
+    selectedTasks,
+    budget,
+    budgetPreset,
     tokenBudget,
-  });
-
-  // Save reports
-  const reportDir = path.join(projectRoot, 'docs', 'coordination', 'tasks');
-  ensureDir(reportDir);
-
-  const timestamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
-  const jsonPath = path.join(reportDir, `TASKS_${date}_${timestamp}.json`);
-  const mdPath = path.join(reportDir, `TASKS_${date}_${timestamp}.md`);
-
-  fs.writeFileSync(jsonPath, `${JSON.stringify(report.json, null, 2)}\n`, 'utf8');
-  fs.writeFileSync(mdPath, report.markdown, 'utf8');
-
-  // ── Final Summary ──
-  const successful = results.filter((r) => r.status === 'success').length;
-  const failed = results.filter((r) => r.status === 'failed' || r.status === 'error').length;
-
-  console.log(pc.bold('\n── Tasks Runner Complete ──\n'));
-  console.log(`  Processed: ${String(results.length)}/${String(selectedTasks.length)}`);
-  console.log(`  Success: ${pc.green(String(successful))}`);
-  console.log(`  Failed: ${failed > 0 ? pc.red(String(failed)) : pc.dim('0')}`);
-  console.log(
-    `  Budget: ${String(Math.round((budgetSummary['percentUsed'] as number) * 100))}% used (${(budgetSummary['consumed'] as number | undefined)?.toLocaleString() ?? '?'} tokens)`,
+    stopReason,
+    projectRoot,
   );
-  console.log(`  Duration: ${formatDuration(budgetSummary['durationMs'] as number)}`);
-  if (stopReason != null) console.log(`  Stopped: ${pc.yellow(stopReason)}`);
-  console.log(`\n  Report: ${pc.dim(mdPath)}`);
-
-  // List branches for review
-  const taskBranches = results.filter((r) => r.status === 'success').map((r) => r.branch);
-  if (taskBranches.length > 0) {
-    console.log(pc.dim(`\n  Run 'npm run tasks:review' to merge approved branches.`));
-  }
-
-  console.log('');
 }
 
 main().catch((err: unknown) => {

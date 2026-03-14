@@ -40,6 +40,7 @@ import {
   verifyBranch,
   isCleanWorkingTree,
   scanBranchViolations,
+  type ScanViolation,
 } from './hydra-shared/guardrails.ts';
 import {
   git,
@@ -260,30 +261,28 @@ function runVerification(projectRoot: string, cfg: Record<string, unknown>) {
   };
 }
 
-// ── Main ────────────────────────────────────────────────────────────────────
+// ── Run Helpers ──────────────────────────────────────────────────────────────
 
-async function main() {
-  const { options } = parseArgs(process.argv);
-  const startedAt = Date.now();
-  const dateStr = new Date().toISOString().split('T')[0];
+interface RunOptions {
+  projectConfig: ReturnType<typeof resolveProject>;
+  projectRoot: string;
+  coordDir: string;
+  baseBranch: string;
+  branchPrefix: string;
+  maxTasks: number;
+  maxHours: number;
+  isDryRun: boolean;
+  isInteractive: boolean;
+  noDiscovery: boolean;
+}
 
-  // Resolve project (default: Hydra itself)
-  let projectConfig;
-  try {
-    const projectOpt = (options['project'] as string | undefined) ?? HYDRA_ROOT;
-    projectConfig = resolveProject({ project: projectOpt });
-  } catch (err) {
-    log.error(`Project resolution failed: ${err instanceof Error ? err.message : String(err)}`);
-    process.exitCode = 1;
-    return;
-  }
-
+function resolveRunOptions(
+  options: Record<string, unknown>,
+  cfg: ReturnType<typeof loadHydraConfig>,
+): RunOptions {
+  const projectOpt = (options['project'] as string | undefined) ?? HYDRA_ROOT;
+  const projectConfig = resolveProject({ project: projectOpt });
   const { projectRoot, coordDir } = projectConfig;
-  log.info(`Project: ${projectRoot}`);
-
-  initAgentRegistry();
-
-  const cfg = loadHydraConfig();
   const baseBranch =
     typeof options['base-branch'] === 'string' && options['base-branch'].length > 0
       ? options['base-branch']
@@ -299,27 +298,38 @@ async function main() {
   const isDryRun = options['dry-run'] === true;
   const isInteractive = options['interactive'] === true;
   const noDiscovery = options['no-discovery'] === true;
+  return {
+    projectConfig,
+    projectRoot,
+    coordDir,
+    baseBranch,
+    branchPrefix,
+    maxTasks,
+    maxHours,
+    isDryRun,
+    isInteractive,
+    noDiscovery,
+  };
+}
 
-  // Preconditions
-  const currentBranch = getCurrentBranch(projectRoot);
-  if (currentBranch !== baseBranch) {
-    log.error(`Must be on '${baseBranch}' branch (currently on '${currentBranch}')`);
-    process.exitCode = 1;
-    return;
-  }
-  if (!isCleanWorkingTree(projectRoot)) {
-    log.error('Working tree is not clean. Commit or stash changes first.');
-    process.exitCode = 1;
-    return;
-  }
-  log.ok(`Preconditions met: on ${baseBranch}, clean working tree`);
+interface SelfPhaseResult {
+  snapshotText: string;
+  indexText: string;
+  snapshotPath: string;
+  indexPath: string;
+  actualizeDir: string;
+}
 
-  // ── Phase: SELF ──
-  log.phase('SELF');
+function phaseSelf(
+  projectRoot: string,
+  coordDir: string,
+  dateStr: string,
+  projectName: string,
+): SelfPhaseResult {
   const actualizeDir = path.join(coordDir, 'actualize');
   ensureDir(actualizeDir);
 
-  const snapshotObj = buildSelfSnapshot({ projectRoot, projectName: projectConfig.projectName });
+  const snapshotObj = buildSelfSnapshot({ projectRoot, projectName });
   const snapshotText = formatSelfSnapshotForPrompt(snapshotObj, { maxLines: 120 });
   const indexObj = buildSelfIndex(HYDRA_ROOT);
   const indexText = formatSelfIndexForPrompt(indexObj, { maxChars: 7000 });
@@ -331,95 +341,353 @@ async function main() {
   fs.writeFileSync(indexPath, `${JSON.stringify(indexObj, null, 2)}\n`, 'utf8');
   log.ok(`Wrote self snapshot: ${path.relative(projectRoot, snapshotPath)}`);
   log.ok(`Wrote self index: ${path.relative(projectRoot, indexPath)}`);
+  return { snapshotText, indexText, snapshotPath, indexPath, actualizeDir };
+}
 
-  // ── Phase: SCAN ──
-  log.phase('SCAN');
-  const scanned = scanAllSources(projectRoot);
-  log.info(
-    `Scanned ${String(scanned.length)} task(s) from TODO comments / TODO.md / GitHub issues`,
-  );
-
-  // ── Phase: DISCOVER ──
-  let discovered: unknown[] = [];
-  if (noDiscovery) {
-    log.dim('AI discovery: disabled');
-  } else {
-    log.phase('DISCOVER');
-    const discoveryCfg = cfg.nightly?.aiDiscovery ?? {};
-    let discoveryAgent = 'gemini';
-    if (typeof options['discovery-agent'] === 'string' && options['discovery-agent'].length > 0) {
-      discoveryAgent = options['discovery-agent'];
-    } else if (discoveryCfg.agent != null && discoveryCfg.agent.length > 0) {
-      discoveryAgent = discoveryCfg.agent;
-    }
-    const focus =
-      typeof options['focus'] === 'string' && options['focus'].length > 0
-        ? options['focus']
-            .split(',')
-            .map((s) => s.trim())
-            .filter((s) => s.length > 0)
-        : (discoveryCfg.focus ?? []);
-    const maxSuggestions =
-      typeof options['discover-max'] === 'string'
-        ? Number.parseInt(options['discover-max'], 10)
-        : (discoveryCfg.maxSuggestions ?? 6);
-
-    const extraContext = [snapshotText, indexText].join('\n\n');
-
-    discovered = await runDiscovery(projectRoot, {
-      agent: discoveryAgent,
-      maxSuggestions,
-      focus,
-      timeoutMs: discoveryCfg.timeoutMs ?? 5 * 60 * 1000,
-      existingTasks: scanned.map((t) => t.title),
-      profile: 'actualize',
-      extraContext,
-    });
+async function phaseDiscover(
+  options: Record<string, unknown>,
+  cfg: ReturnType<typeof loadHydraConfig>,
+  projectRoot: string,
+  scanned: ScannedTask[],
+  snapshotText: string,
+  indexText: string,
+): Promise<unknown[]> {
+  const discoveryCfg = cfg.nightly?.aiDiscovery ?? {};
+  let discoveryAgent = 'gemini';
+  if (typeof options['discovery-agent'] === 'string' && options['discovery-agent'].length > 0) {
+    discoveryAgent = options['discovery-agent'];
+  } else if (discoveryCfg.agent != null && discoveryCfg.agent.length > 0) {
+    discoveryAgent = discoveryCfg.agent;
   }
+  const focus =
+    typeof options['focus'] === 'string' && options['focus'].length > 0
+      ? options['focus']
+          .split(',')
+          .map((s) => s.trim())
+          .filter((s) => s.length > 0)
+      : (discoveryCfg.focus ?? []);
+  const maxSuggestions =
+    typeof options['discover-max'] === 'string'
+      ? Number.parseInt(options['discover-max'], 10)
+      : (discoveryCfg.maxSuggestions ?? 6);
 
-  // Merge + prioritize
-  log.phase('PRIORITIZE');
-  const all = [...scanned, ...discovered] as ScannedTask[];
-  const deduped = deduplicateTasks(all);
-  const sorted = prioritizeTasks(deduped);
-  let selected = sorted.slice(0, Math.max(1, maxTasks));
+  const extraContext = [snapshotText, indexText].join('\n\n');
+  return runDiscovery(projectRoot, {
+    agent: discoveryAgent,
+    maxSuggestions,
+    focus,
+    timeoutMs: discoveryCfg.timeoutMs ?? 5 * 60 * 1000,
+    existingTasks: scanned.map((t) => t.title),
+    profile: 'actualize',
+    extraContext,
+  });
+}
 
+function getPriorityColor(priority: string): (s: string) => string {
+  if (priority === 'high') return pc.red;
+  if (priority === 'low') return pc.dim;
+  return pc.yellow;
+}
+
+async function selectTasksForRun(
+  sorted: ScannedTask[],
+  maxTasks: number,
+  isInteractive: boolean,
+): Promise<ScannedTask[]> {
   if (isInteractive && process.stdin.isTTY) {
-    selected = await phaseSelect(sorted, Math.max(1, maxTasks));
+    return phaseSelect(sorted, Math.max(1, maxTasks));
   }
+  return sorted.slice(0, Math.max(1, maxTasks));
+}
 
-  if (selected.length === 0) {
-    log.warn('No tasks to execute. Nothing to do.');
-    exit(0);
-  }
+interface TaskExecutionResult {
+  slug: string;
+  title: string;
+  branch: string;
+  source: string;
+  taskType: string;
+  status: string;
+  agent: string;
+  tokensUsed: number;
+  durationMs: number;
+  commits: number;
+  filesChanged: number;
+  verification: string;
+  violations: ScanViolation[];
+  error?: string;
+}
 
-  log.info(`Selected ${String(selected.length)} task(s)`);
-  for (const t of selected) {
-    let prioColor2: (s: string) => string;
-    if (t.priority === 'high') {
-      prioColor2 = pc.red;
-    } else if (t.priority === 'low') {
-      prioColor2 = pc.dim;
-    } else {
-      prioColor2 = pc.yellow;
+interface TaskExecutionContext {
+  projectRoot: string;
+  baseBranch: string;
+  branchPrefix: string;
+  cfg: ReturnType<typeof loadHydraConfig>;
+  budget: BudgetTracker;
+  snapshotText: string;
+  indexText: string;
+  installedCLIs: Record<string, boolean>;
+  useEconomy: boolean;
+}
+
+function resolveTaskAgent(
+  task: ScannedTask,
+  cfg: ReturnType<typeof loadHydraConfig>,
+  installedCLIs: Record<string, boolean>,
+  useEconomy: boolean,
+): { agent: string; modelOverride: string | undefined } {
+  const taskType = classifyTask(task.title);
+  let agent = task.suggestedAgent;
+  if (agent.length > 0) {
+    const agentDef = getAgent(agent);
+    const isInstalled = !(agent in installedCLIs) || installedCLIs[agent];
+    // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition -- cfg.local may be undefined at runtime despite types
+    const isLocalDisabled = agent === 'local' && !cfg.local?.enabled;
+    if (agentDef?.enabled !== true || !isInstalled || isLocalDisabled) {
+      agent = bestAgentFor(taskType, { installedCLIs });
     }
-    log.dim(`  ${prioColor2(t.priority.padEnd(6))} [${t.source}] ${t.title}`);
+  } else {
+    agent = bestAgentFor(taskType, { installedCLIs });
   }
+  // eslint-disable-next-line @typescript-eslint/prefer-nullish-coalescing -- fallback object needed
+  const budgetCfg = cfg.nightly?.budget || {
+    softLimit: 300_000,
+    hardLimit: 450_000,
+    perTaskEstimate: 100_000,
+  };
+  const modelOverride = useEconomy
+    ? (getAgent(agent)?.economyModel(budgetCfg) ?? undefined)
+    : undefined;
+  return { agent, modelOverride };
+}
 
-  if (isDryRun) {
-    console.log('');
-    console.log(pc.bold('=== Dry Run Complete ==='));
-    console.log(`  Would execute ${String(selected.length)} task(s):`);
-    for (const t of selected) {
-      console.log(`    - [${t.source}] ${t.title} -> ${t.suggestedAgent}`);
+type BranchPreparation =
+  | { ok: true; branchName: string }
+  | { ok: false; result: TaskExecutionResult };
+
+function prepareBranch(
+  task: ScannedTask,
+  branchPrefix: string,
+  projectRoot: string,
+  baseBranch: string,
+  agent: string,
+): BranchPreparation {
+  const date = new Date().toISOString().split('T')[0];
+  const branchName = `${branchPrefix}/${date}/${task.slug}`;
+  const taskType = task.taskType.length > 0 ? task.taskType : 'unknown';
+  const base = {
+    slug: task.slug,
+    title: task.title,
+    branch: branchName,
+    source: task.source,
+    taskType,
+    agent,
+    tokensUsed: 0,
+    durationMs: 0,
+    commits: 0,
+    filesChanged: 0,
+    verification: 'SKIP' as const,
+    violations: [],
+  };
+  if (branchExists(projectRoot, branchName)) {
+    log.warn(`Branch already exists: ${branchName} — skipping`);
+    return { ok: false, result: { ...base, status: 'skipped' } };
+  }
+  if (!createBranch(projectRoot, branchName, baseBranch)) {
+    log.error(`Failed to create branch: ${branchName}`);
+    checkoutBranch(projectRoot, baseBranch);
+    return { ok: false, result: { ...base, status: 'error', error: 'Branch creation failed' } };
+  }
+  log.ok(`Branch: ${branchName}`);
+  return { ok: true, branchName };
+}
+
+function resolveEffectiveModel(agent: string, modelOverride: string | undefined): string {
+  const override = modelOverride != null && modelOverride.length > 0 ? modelOverride : null;
+  return override ?? getActiveModel(agent) ?? 'default';
+}
+
+async function dispatchAgent(
+  agent: string,
+  prompt: string,
+  cfg: ReturnType<typeof loadHydraConfig>,
+  projectRoot: string,
+  modelOverride: string | undefined,
+): Promise<{
+  ok: boolean;
+  output: string;
+  stderr: string;
+  error?: string | null;
+  durationMs: number;
+}> {
+  const effectiveModel = resolveEffectiveModel(agent, modelOverride);
+  const handle = recordCallStart(agent, effectiveModel);
+  log.dim(
+    `Dispatching ${agent}${modelOverride != null && modelOverride.length > 0 ? ` (${modelOverride})` : ''}...`,
+  );
+  let result;
+  try {
+    result = await executeAgentWithRecovery(agent, prompt, {
+      cwd: projectRoot,
+      timeoutMs:
+        (cfg.nightly?.perTaskTimeoutMs ?? 0) > 0
+          ? (cfg.nightly?.perTaskTimeoutMs as number)
+          : 15 * 60 * 1000,
+      modelOverride,
+      progressIntervalMs: 15_000,
+      onProgress: (elapsed, outputKB) => {
+        const elStr = formatDuration(elapsed);
+        const kbStr = outputKB > 0 ? ` | ${String(outputKB)}KB` : '';
+        process.stderr.write(
+          `\r  ${pc.dim(`${agent}: working... ${elStr}${kbStr}`)}${' '.repeat(20)}`,
+        );
+      },
+    });
+  } catch (err) {
+    result = {
+      ok: false,
+      output: '',
+      stderr: '',
+      error: err instanceof Error ? err.message : String(err),
+      durationMs: 0,
+    };
+  }
+  process.stderr.write(`\r${' '.repeat(100)}\r`);
+  // eslint-disable-next-line @typescript-eslint/no-unsafe-argument, @typescript-eslint/no-explicit-any -- agentResult matches CallResult shape at runtime
+  if (result.ok) recordCallComplete(handle, result as any);
+  else
+    recordCallError(
+      handle,
+      new Error((result.error ?? '').length > 0 ? (result.error ?? 'unknown') : 'unknown'),
+    );
+  return result;
+}
+
+function finalizeTaskExecution(
+  task: ScannedTask,
+  branchName: string,
+  baseBranch: string,
+  agent: string,
+  agentResult: { ok: boolean; error?: string | null; durationMs: number },
+  budget: BudgetTracker,
+  cfg: ReturnType<typeof loadHydraConfig>,
+  projectRoot: string,
+): TaskExecutionResult {
+  const taskDurationMs = agentResult.durationMs;
+  const tokenDelta = budget.recordUnitEnd(task.slug, taskDurationMs);
+  const branchCheck = verifyBranch(projectRoot, branchName);
+  if (!branchCheck.ok) {
+    log.error(
+      `Branch escape detected! Expected '${branchName}', on '${branchCheck.currentBranch}'`,
+    );
+    try {
+      git(['checkout', branchName], projectRoot);
+    } catch {
+      /* best effort */
     }
-    console.log('');
-    exit(0);
   }
+  const verification = runVerification(projectRoot, cfg);
+  let verificationStatus: string;
+  if (!verification.ran) {
+    verificationStatus = 'SKIP';
+  } else if (verification.passed) {
+    verificationStatus = 'PASS';
+  } else {
+    verificationStatus = 'FAIL';
+  }
+  if (verification.ran) {
+    if (verification.passed) log.ok('Verification: PASS');
+    else log.warn('Verification: FAIL');
+  }
+  const violations = scanBranchViolations(projectRoot, branchName, {
+    baseBranch,
+    protectedFiles: new Set(BASE_PROTECTED_FILES),
+    protectedPatterns: [...BASE_PROTECTED_PATTERNS],
+  });
+  if (violations.length > 0) {
+    log.warn(`${String(violations.length)} violation(s) detected`);
+    for (const v of violations) log.dim(`  [${v.severity}] ${v.detail}`);
+  }
+  const stats = getBranchStats(projectRoot, branchName, baseBranch);
+  let status = 'success';
+  if (!agentResult.ok) status = 'error';
+  else if (verification.ran && !verification.passed) status = 'partial';
+  log.ok(
+    `Done: ${status} | ${String(stats.commits)} commits | ${String(stats.filesChanged)} files | ~${tokenDelta.tokens.toLocaleString()} tokens | ${formatDuration(taskDurationMs)}`,
+  );
+  checkoutBranch(projectRoot, baseBranch);
+  return {
+    slug: task.slug,
+    title: task.title,
+    branch: branchName,
+    source: task.source,
+    taskType: task.taskType.length > 0 ? task.taskType : 'unknown',
+    status,
+    agent,
+    tokensUsed: tokenDelta.tokens,
+    durationMs: taskDurationMs,
+    commits: stats.commits,
+    filesChanged: stats.filesChanged,
+    verification: verificationStatus,
+    violations,
+  };
+}
 
-  // ── Phase: EXECUTE ──
-  log.phase('EXECUTE');
+async function executeOneTask(
+  task: ScannedTask,
+  index: number,
+  total: number,
+  context: TaskExecutionContext,
+): Promise<TaskExecutionResult> {
+  const {
+    projectRoot,
+    baseBranch,
+    branchPrefix,
+    cfg,
+    budget,
+    snapshotText,
+    indexText,
+    installedCLIs,
+    useEconomy,
+  } = context;
+  const { agent, modelOverride } = resolveTaskAgent(task, cfg, installedCLIs, useEconomy);
+  log.task(`Task ${String(index + 1)}/${String(total)}: ${task.title} [${agent}]`);
+  const prep = prepareBranch(task, branchPrefix, projectRoot, baseBranch, agent);
+  if (!prep.ok) return prep.result;
+  const { branchName } = prep;
+  const prompt = buildTaskPrompt(task, branchName, projectRoot, agent, {
+    selfSnapshotText: snapshotText,
+    selfIndexText: indexText,
+  });
+  const agentResult = await dispatchAgent(agent, prompt, cfg, projectRoot, modelOverride);
+  return finalizeTaskExecution(
+    task,
+    branchName,
+    baseBranch,
+    agent,
+    agentResult,
+    budget,
+    cfg,
+    projectRoot,
+  );
+}
 
+interface ExecutePhaseResult {
+  results: TaskExecutionResult[];
+  stopReason: string | null;
+  budgetSummary: Record<string, unknown>;
+}
+
+async function phaseExecute(
+  selected: ScannedTask[],
+  projectRoot: string,
+  baseBranch: string,
+  branchPrefix: string,
+  cfg: ReturnType<typeof loadHydraConfig>,
+  snapshotText: string,
+  indexText: string,
+  startedAt: number,
+  maxHours: number,
+): Promise<ExecutePhaseResult> {
   // eslint-disable-next-line @typescript-eslint/prefer-nullish-coalescing -- fallback object needed
   const budgetCfg = cfg.nightly?.budget || {
     softLimit: 300_000,
@@ -436,10 +704,10 @@ async function main() {
   budget.recordStart();
   log.info(`Budget: ${budget.hardLimit.toLocaleString()} token hard limit`);
 
-  const results = [];
+  const results: TaskExecutionResult[] = [];
   const maxHoursMs = maxHours * 60 * 60 * 1000;
   let useEconomy = false;
-  let stopReason = null;
+  let stopReason: string | null = null;
 
   const installedCLIs = detectInstalledCLIs();
   for (let i = 0; i < selected.length; i++) {
@@ -470,221 +738,50 @@ async function main() {
       log.warn(budgetCheck.reason);
     }
 
-    const date = new Date().toISOString().split('T')[0];
-    const branchName = `${branchPrefix}/${date}/${task.slug}`;
-
-    // Choose agent — validate suggestedAgent against installedCLIs/enabled to avoid
-    // dispatching to an unavailable or disabled agent when the suggestion is stale.
-    const taskType = classifyTask(task.title);
-    let agent = task.suggestedAgent;
-    if (agent.length > 0) {
-      const agentDef = getAgent(agent);
-      const isInstalled = !(agent in installedCLIs) || installedCLIs[agent];
-      // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition -- cfg.local may be undefined at runtime despite types
-      const isLocalDisabled = agent === 'local' && !cfg.local?.enabled;
-      if (agentDef?.enabled !== true || !isInstalled || isLocalDisabled) {
-        agent = bestAgentFor(taskType, { installedCLIs });
-      }
-    } else {
-      agent = bestAgentFor(taskType, { installedCLIs });
-    }
-    const modelOverride = useEconomy
-      ? (getAgent(agent)?.economyModel(budgetCfg) ?? undefined)
-      : undefined;
-
-    log.task(`Task ${String(i + 1)}/${String(selected.length)}: ${task.title} [${agent}]`);
-
-    if (branchExists(projectRoot, branchName)) {
-      log.warn(`Branch already exists: ${branchName} — skipping`);
-      results.push({
-        slug: task.slug,
-        title: task.title,
-        branch: branchName,
-        source: task.source,
-        taskType: task.taskType.length > 0 ? task.taskType : 'unknown',
-        status: 'skipped',
-        agent,
-        tokensUsed: 0,
-        durationMs: 0,
-        commits: 0,
-        filesChanged: 0,
-        verification: 'SKIP',
-        violations: [],
-      });
-      continue;
-    }
-
-    if (!createBranch(projectRoot, branchName, baseBranch)) {
-      log.error(`Failed to create branch: ${branchName}`);
-      results.push({
-        slug: task.slug,
-        title: task.title,
-        branch: branchName,
-        source: task.source,
-        taskType: task.taskType.length > 0 ? task.taskType : 'unknown',
-        status: 'error',
-        agent,
-        tokensUsed: 0,
-        durationMs: 0,
-        commits: 0,
-        filesChanged: 0,
-        verification: 'SKIP',
-        violations: [],
-        error: 'Branch creation failed',
-      });
-      checkoutBranch(projectRoot, baseBranch);
-      continue;
-    }
-    log.ok(`Branch: ${branchName}`);
-
-    const prompt = buildTaskPrompt(task, branchName, projectRoot, agent, {
-      selfSnapshotText: snapshotText,
-      selfIndexText: indexText,
-    });
-
-    const effectiveModel =
-      (modelOverride != null && modelOverride.length > 0 ? modelOverride : null) ??
-      getActiveModel(agent) ??
-      'default';
-    const handle = recordCallStart(agent, effectiveModel);
-    log.dim(
-      `Dispatching ${agent}${modelOverride != null && modelOverride.length > 0 ? ` (${modelOverride})` : ''}...`,
-    );
-
-    let agentResult;
-    try {
-      // eslint-disable-next-line no-await-in-loop -- tasks run sequentially for branch isolation
-      agentResult = await executeAgentWithRecovery(agent, prompt, {
-        cwd: projectRoot,
-        timeoutMs:
-          (cfg.nightly?.perTaskTimeoutMs ?? 0) > 0
-            ? (cfg.nightly?.perTaskTimeoutMs as number)
-            : 15 * 60 * 1000,
-        modelOverride,
-        progressIntervalMs: 15_000,
-        onProgress: (elapsed, outputKB) => {
-          const elStr = formatDuration(elapsed);
-          const kbStr = outputKB > 0 ? ` | ${String(outputKB)}KB` : '';
-          process.stderr.write(
-            `\r  ${pc.dim(`${agent}: working... ${elStr}${kbStr}`)}${' '.repeat(20)}`,
-          );
-        },
-      });
-    } catch (err) {
-      agentResult = {
-        ok: false,
-        output: '',
-        stderr: '',
-        error: err instanceof Error ? err.message : String(err),
-        durationMs: 0,
-      };
-    }
-    process.stderr.write(`\r${' '.repeat(100)}\r`);
-
-    // eslint-disable-next-line @typescript-eslint/no-unsafe-argument, @typescript-eslint/no-explicit-any -- agentResult matches CallResult shape at runtime
-    if (agentResult.ok) recordCallComplete(handle, agentResult as any);
-    else
-      recordCallError(
-        handle,
-        new Error((agentResult.error ?? '').length > 0 ? agentResult.error! : 'unknown'),
-      );
-
-    const taskDurationMs = agentResult.durationMs;
-    const tokenDelta = budget.recordUnitEnd(task.slug, taskDurationMs);
-
-    // Branch integrity
-    const branchCheck = verifyBranch(projectRoot, branchName);
-    if (!branchCheck.ok) {
-      log.error(
-        `Branch escape detected! Expected '${branchName}', on '${branchCheck.currentBranch}'`,
-      );
-      try {
-        git(['checkout', branchName], projectRoot);
-      } catch {
-        /* best effort */
-      }
-    }
-
-    // Verification
-    const verification = runVerification(projectRoot, cfg);
-    let verificationStatus: string;
-    if (!verification.ran) {
-      verificationStatus = 'SKIP';
-    } else if (verification.passed) {
-      verificationStatus = 'PASS';
-    } else {
-      verificationStatus = 'FAIL';
-    }
-    if (verification.ran) {
-      if (verification.passed) log.ok('Verification: PASS');
-      else log.warn('Verification: FAIL');
-    }
-
-    // Violations
-    const violations = scanBranchViolations(projectRoot, branchName, {
+    const context: TaskExecutionContext = {
+      projectRoot,
       baseBranch,
-      protectedFiles: new Set(BASE_PROTECTED_FILES),
-      protectedPatterns: [...BASE_PROTECTED_PATTERNS],
-    });
-    if (violations.length > 0) {
-      log.warn(`${String(violations.length)} violation(s) detected`);
-      for (const v of violations) log.dim(`  [${v.severity}] ${v.detail}`);
-    }
-
-    const stats = getBranchStats(projectRoot, branchName, baseBranch);
-    let status = 'success';
-    if (!agentResult.ok) status = 'error';
-    else if (verification.ran && !verification.passed) status = 'partial';
-
-    log.ok(
-      `Done: ${status} | ${String(stats.commits)} commits | ${String(stats.filesChanged)} files | ~${tokenDelta.tokens.toLocaleString()} tokens | ${formatDuration(taskDurationMs)}`,
-    );
-
-    results.push({
-      slug: task.slug,
-      title: task.title,
-      branch: branchName,
-      source: task.source,
-      taskType: task.taskType.length > 0 ? task.taskType : 'unknown',
-      status,
-      agent,
-      tokensUsed: tokenDelta.tokens,
-      durationMs: taskDurationMs,
-      commits: stats.commits,
-      filesChanged: stats.filesChanged,
-      verification: verificationStatus,
-      violations,
-    });
-
-    checkoutBranch(projectRoot, baseBranch);
+      branchPrefix,
+      cfg,
+      budget,
+      snapshotText,
+      indexText,
+      installedCLIs,
+      useEconomy,
+    };
+    // eslint-disable-next-line no-await-in-loop -- tasks run sequentially for branch isolation
+    const result = await executeOneTask(task, i, selected.length, context);
+    results.push(result);
   }
 
-  // Ensure base branch
   if (getCurrentBranch(projectRoot) !== baseBranch) {
     checkoutBranch(projectRoot, baseBranch);
   }
 
-  // ── Phase: REPORT ──
-  log.phase('REPORT');
+  return { results, stopReason, budgetSummary: budget.getSummary() };
+}
 
-  const runMeta = {
-    date: dateStr,
-    startedAt: new Date(startedAt).toISOString(),
-    endedAt: new Date().toISOString(),
-    projectRoot,
-    baseBranch,
-    branchPrefix,
-    totalTasks: selected.length,
-    processedTasks: results.length,
-    stopReason,
-    artifacts: {
-      selfSnapshot: path.relative(projectRoot, snapshotPath).replace(/\\/g, '/'),
-      selfIndex: path.relative(projectRoot, indexPath).replace(/\\/g, '/'),
-    },
-  };
+interface RunMeta {
+  date: string;
+  startedAt: string;
+  endedAt: string;
+  projectRoot: string;
+  baseBranch: string;
+  branchPrefix: string;
+  totalTasks: number;
+  processedTasks: number;
+  stopReason: string | null;
+  artifacts: { selfSnapshot: string; selfIndex: string };
+}
 
-  const budgetSummary = budget.getSummary();
-  if (stopReason !== null) budgetSummary['stopReason'] = stopReason;
+function phaseReport(
+  results: TaskExecutionResult[],
+  runMeta: RunMeta,
+  budgetSummary: Record<string, unknown>,
+  actualizeDir: string,
+  projectRoot: string,
+): void {
+  if (runMeta.stopReason !== null) budgetSummary['stopReason'] = runMeta.stopReason;
 
   const jsonReport = {
     ...runMeta,
@@ -734,6 +831,177 @@ async function main() {
 
   log.ok(`Report: ${path.relative(projectRoot, reportMdPath)}`);
   log.ok(`Review: node lib/hydra-actualize-review.mjs review`);
+}
+
+function checkPreconditions(projectRoot: string, baseBranch: string): boolean {
+  const currentBranch = getCurrentBranch(projectRoot);
+  if (currentBranch !== baseBranch) {
+    log.error(`Must be on '${baseBranch}' branch (currently on '${currentBranch}')`);
+    return false;
+  }
+  if (!isCleanWorkingTree(projectRoot)) {
+    log.error('Working tree is not clean. Commit or stash changes first.');
+    return false;
+  }
+  log.ok(`Preconditions met: on ${baseBranch}, clean working tree`);
+  return true;
+}
+
+function printDryRun(selected: ScannedTask[]): never {
+  console.log('');
+  console.log(pc.bold('=== Dry Run Complete ==='));
+  console.log(`  Would execute ${String(selected.length)} task(s):`);
+  for (const t of selected) {
+    console.log(`    - [${t.source}] ${t.title} -> ${t.suggestedAgent}`);
+  }
+  console.log('');
+  exit(0);
+}
+
+function buildRunMeta(
+  dateStr: string,
+  startedAt: number,
+  projectRoot: string,
+  baseBranch: string,
+  branchPrefix: string,
+  selected: ScannedTask[],
+  results: TaskExecutionResult[],
+  stopReason: string | null,
+  snapshotPath: string,
+  indexPath: string,
+): RunMeta {
+  return {
+    date: dateStr,
+    startedAt: new Date(startedAt).toISOString(),
+    endedAt: new Date().toISOString(),
+    projectRoot,
+    baseBranch,
+    branchPrefix,
+    totalTasks: selected.length,
+    processedTasks: results.length,
+    stopReason,
+    artifacts: {
+      selfSnapshot: path.relative(projectRoot, snapshotPath).replace(/\\/g, '/'),
+      selfIndex: path.relative(projectRoot, indexPath).replace(/\\/g, '/'),
+    },
+  };
+}
+
+async function runScanAndSelect(
+  projectRoot: string,
+  options: Record<string, unknown>,
+  cfg: ReturnType<typeof loadHydraConfig>,
+  snapshotText: string,
+  indexText: string,
+  maxTasks: number,
+  isInteractive: boolean,
+  noDiscovery: boolean,
+): Promise<ScannedTask[]> {
+  log.phase('SCAN');
+  const scanned = scanAllSources(projectRoot);
+  log.info(
+    `Scanned ${String(scanned.length)} task(s) from TODO comments / TODO.md / GitHub issues`,
+  );
+  let discovered: unknown[] = [];
+  if (noDiscovery) {
+    log.dim('AI discovery: disabled');
+  } else {
+    log.phase('DISCOVER');
+    discovered = await phaseDiscover(options, cfg, projectRoot, scanned, snapshotText, indexText);
+  }
+  log.phase('PRIORITIZE');
+  const all = [...scanned, ...discovered] as ScannedTask[];
+  const deduped = deduplicateTasks(all);
+  const sorted = prioritizeTasks(deduped);
+  const selected = await selectTasksForRun(sorted, maxTasks, isInteractive);
+  if (selected.length === 0) {
+    log.warn('No tasks to execute. Nothing to do.');
+    exit(0);
+  }
+  log.info(`Selected ${String(selected.length)} task(s)`);
+  for (const t of selected) {
+    log.dim(`  ${getPriorityColor(t.priority)(t.priority.padEnd(6))} [${t.source}] ${t.title}`);
+  }
+  return selected;
+}
+
+// ── Main ────────────────────────────────────────────────────────────────────
+
+async function main() {
+  const { options } = parseArgs(process.argv);
+  const startedAt = Date.now();
+  const dateStr = new Date().toISOString().split('T')[0];
+  initAgentRegistry();
+  const cfg = loadHydraConfig();
+  let runOpts: RunOptions;
+  try {
+    runOpts = resolveRunOptions(options, cfg);
+  } catch (err) {
+    log.error(`Project resolution failed: ${err instanceof Error ? err.message : String(err)}`);
+    process.exitCode = 1;
+    return;
+  }
+  const {
+    projectRoot,
+    coordDir,
+    baseBranch,
+    branchPrefix,
+    maxTasks,
+    maxHours,
+    isDryRun,
+    isInteractive,
+    noDiscovery,
+    projectConfig,
+  } = runOpts;
+  log.info(`Project: ${projectRoot}`);
+  if (!checkPreconditions(projectRoot, baseBranch)) {
+    process.exitCode = 1;
+    return;
+  }
+  log.phase('SELF');
+  const { snapshotText, indexText, snapshotPath, indexPath, actualizeDir } = phaseSelf(
+    projectRoot,
+    coordDir,
+    dateStr,
+    projectConfig.projectName,
+  );
+  const selected = await runScanAndSelect(
+    projectRoot,
+    options,
+    cfg,
+    snapshotText,
+    indexText,
+    maxTasks,
+    isInteractive,
+    noDiscovery,
+  );
+  if (isDryRun) printDryRun(selected);
+  log.phase('EXECUTE');
+  const { results, stopReason, budgetSummary } = await phaseExecute(
+    selected,
+    projectRoot,
+    baseBranch,
+    branchPrefix,
+    cfg,
+    snapshotText,
+    indexText,
+    startedAt,
+    maxHours,
+  );
+  log.phase('REPORT');
+  const runMeta = buildRunMeta(
+    dateStr,
+    startedAt,
+    projectRoot,
+    baseBranch,
+    branchPrefix,
+    selected,
+    results,
+    stopReason,
+    snapshotPath,
+    indexPath,
+  );
+  phaseReport(results, runMeta, budgetSummary, actualizeDir, projectRoot);
 }
 
 main().catch((err: unknown) => {

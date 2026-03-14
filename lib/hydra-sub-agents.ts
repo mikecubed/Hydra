@@ -291,7 +291,7 @@ export function registerBuiltInSubAgents(): void {
       registerAgent(name, def as Partial<AgentDef>);
     } catch (err) {
       // Non-fatal — log but don't crash
-      if (process.env['HYDRA_DEBUG']) {
+      if (process.env['HYDRA_DEBUG'] != null && process.env['HYDRA_DEBUG'] !== '') {
         const message = err instanceof Error ? err.message : String(err);
         console.error(`[sub-agents] Failed to register ${name}:`, message);
       }

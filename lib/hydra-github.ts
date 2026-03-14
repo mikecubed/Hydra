@@ -415,43 +415,32 @@ export function verifyRequiredChecks({
   return { ok: failed.length === 0 && pending.length === 0, pending, failed };
 }
 
-/**
- * Push a branch to origin and create a PR. Auto-generates title/body from branch name and commit log.
- * Applies config defaults (labels, reviewers, draft, footer).
- *
- * @param {{ cwd?: string, branch?: string, baseBranch?: string, title?: string, body?: string, draft?: boolean }} [opts={}]
- * @returns {{ ok: boolean, url?: string, number?: number, error?: string }}
- */
-export function pushBranchAndCreatePR(opts: PushAndCreatePROpts = {}): PRResult {
-  const cwd = opts.cwd ?? process.cwd();
-  const branch = opts.branch ?? getCurrentBranch(cwd);
-  const ghCfg = getGitHubConfig();
+function resolveBaseBranch(opts: PushAndCreatePROpts, ghCfg: GitHubConfig, cwd: string): string {
+  const base = opts.baseBranch ?? ghCfg.defaultBase;
+  if (base !== '') return base;
+  const repo = detectRepo(cwd);
+  return repo?.defaultBranch ?? 'main';
+}
 
-  // Determine base branch
-  let baseBranch = opts.baseBranch ?? ghCfg.defaultBase;
-  if (baseBranch === '') {
-    const repo = detectRepo(cwd);
-    baseBranch = repo?.defaultBranch ?? 'main';
-  }
-
-  // Push the branch
-  const pushResult = pushBranch(cwd, branch, { setUpstream: true });
-  if (!pushResult.ok) {
-    return { ok: false, error: `Push failed: ${pushResult.stderr}` };
-  }
-
-  // Auto-generate title from branch name if not provided
-  const processedBranch = branch
+function buildPRTitle(opts: PushAndCreatePROpts, branch: string): string {
+  if (opts.title != null && opts.title !== '') return opts.title;
+  const processed = branch
     .replace(/^(evolve|nightly)\//, '')
     .replace(/[/_-]/g, ' ')
     .replace(/\b\w/g, (c) => c.toUpperCase())
     .trim();
-  const title = opts.title ?? (processedBranch === '' ? branch : processedBranch);
+  return processed === '' ? branch : processed;
+}
 
-  // Auto-generate body from commit log if not provided
+function buildPRBody(
+  opts: PushAndCreatePROpts,
+  ghCfg: GitHubConfig,
+  cwd: string,
+  branch: string,
+  baseBranch: string,
+): string {
   let body = opts.body ?? '';
   if (body === '') {
-    // Try injecting PR template first
     const template = detectPRTemplate(cwd);
     if (template != null && template !== '') {
       body = template;
@@ -465,32 +454,60 @@ export function pushBranchAndCreatePR(opts: PushAndCreatePROpts = {}): PRResult 
       body = body === '' ? commitSection : `${body}\n\n${commitSection}`;
     }
   }
-
-  // Append footer from config
   if (ghCfg.prBodyFooter !== '') {
     body = body === '' ? ghCfg.prBodyFooter : `${body}\n\n---\n${ghCfg.prBodyFooter}`;
   }
+  return body;
+}
 
-  // Auto-detect labels from changed files
+function collectPRLabels(
+  cwd: string,
+  branch: string,
+  baseBranch: string,
+  ghCfg: GitHubConfig,
+): string[] {
   const labels: string[] = [...ghCfg.labels];
   const autolabelCfg = loadHydraConfig().github?.autolabel;
-  if (autolabelCfg) {
-    // Get changed files via git diff (works before PR exists)
-    let changedFiles: string[] = [];
-    const gitDiff = spawnSyncCapture('git', ['diff', '--name-only', `${baseBranch}...${branch}`], {
-      cwd,
-      encoding: 'utf8',
-      timeout: 10_000,
-    });
-    if (gitDiff.status === 0 && gitDiff.stdout !== '') {
-      changedFiles = gitDiff.stdout.trim().split('\n').filter(Boolean);
-    }
-    const autoLabels = detectAutoLabels(changedFiles, autolabelCfg);
-    for (const l of autoLabels) {
-      if (!labels.includes(l)) labels.push(l);
-    }
+  if (!autolabelCfg) return labels;
+
+  let changedFiles: string[] = [];
+  const gitDiff = spawnSyncCapture('git', ['diff', '--name-only', `${baseBranch}...${branch}`], {
+    cwd,
+    encoding: 'utf8',
+    timeout: 10_000,
+  });
+  if (gitDiff.status === 0 && gitDiff.stdout !== '') {
+    changedFiles = gitDiff.stdout.trim().split('\n').filter(Boolean);
+  }
+  const autoLabels = detectAutoLabels(changedFiles, autolabelCfg);
+  for (const l of autoLabels) {
+    if (!labels.includes(l)) labels.push(l);
+  }
+  return labels;
+}
+
+/**
+ * Push a branch to origin and create a PR. Auto-generates title/body from branch name and commit log.
+ * Applies config defaults (labels, reviewers, draft, footer).
+ *
+ * @param {{ cwd?: string, branch?: string, baseBranch?: string, title?: string, body?: string, draft?: boolean }} [opts={}]
+ * @returns {{ ok: boolean, url?: string, number?: number, error?: string }}
+ */
+export function pushBranchAndCreatePR(opts: PushAndCreatePROpts = {}): PRResult {
+  const cwd = opts.cwd ?? process.cwd();
+  const branch = opts.branch ?? getCurrentBranch(cwd);
+  const ghCfg = getGitHubConfig();
+
+  const baseBranch = resolveBaseBranch(opts, ghCfg, cwd);
+
+  const pushResult = pushBranch(cwd, branch, { setUpstream: true });
+  if (!pushResult.ok) {
+    return { ok: false, error: `Push failed: ${pushResult.stderr}` };
   }
 
+  const title = buildPRTitle(opts, branch);
+  const body = buildPRBody(opts, ghCfg, cwd, branch, baseBranch);
+  const labels = collectPRLabels(cwd, branch, baseBranch, ghCfg);
   const draft = opts.draft ?? ghCfg.draft;
 
   return createPR({

@@ -220,168 +220,7 @@ interface ConciergeContext {
   [key: string]: unknown;
 }
 
-function buildSystemPrompt(context: ConciergeContext = {}): string {
-  const now = Date.now();
-
-  // Context-hash fingerprint for cache invalidation
-  const fingerprint = JSON.stringify([
-    context.mode ?? '',
-    context.openTasks ?? 0,
-    context.gitInfo?.branch ?? '',
-    (context.recentCompletions ?? []).length,
-    context.selfAwarenessKey ?? '',
-  ]);
-
-  if (
-    systemPromptCache.text !== '' &&
-    systemPromptCache.fingerprint === fingerprint &&
-    now - systemPromptCache.builtAt < SYSTEM_PROMPT_TTL_MS
-  ) {
-    return systemPromptCache.text;
-  }
-
-  const project = context.projectName ?? 'unknown';
-  const projectRoot = context.projectRoot ?? '';
-  const mode = context.mode ?? 'auto';
-  const openTasks = context.openTasks ?? 0;
-  const agentModels = context.agentModels ?? {};
-  const knownProjects = context.knownProjects ?? [];
-
-  const modelLines = Object.entries(agentModels)
-    .map(([agent, model]) => `  - ${agent}: ${model}`)
-    .join('\n');
-
-  const otherProjects = knownProjects
-    .filter((p) => p !== projectRoot)
-    .map((p) => `  - ${path.basename(p)} (${p})`)
-    .join('\n');
-
-  // Build enriched awareness sections
-  let awarenessBlock = '';
-
-  // Git info
-  if (context.gitInfo) {
-    const gi = context.gitInfo;
-    awarenessBlock += `\n- Git branch: ${gi.branch ?? 'unknown'}`;
-    if (gi.modifiedFiles != null) {
-      awarenessBlock += ` (${String(gi.modifiedFiles)} modified file${gi.modifiedFiles === 1 ? '' : 's'})`;
-    }
-  }
-
-  // Recent completions
-  if (context.recentCompletions && context.recentCompletions.length > 0) {
-    awarenessBlock += '\n- Recently completed tasks:';
-    for (const c of context.recentCompletions.slice(0, 3)) {
-      awarenessBlock += `\n  - [${c.agent}] ${c.title ?? c.taskId ?? 'untitled'}`;
-    }
-  }
-
-  // Recent errors
-  if (context.recentErrors && context.recentErrors.length > 0) {
-    awarenessBlock += '\n- Recent errors:';
-    for (const e of context.recentErrors.slice(0, 3)) {
-      awarenessBlock += `\n  - [${e.agent ?? 'system'}] ${(e.error ?? e.message ?? 'unknown').slice(0, 80)}`;
-    }
-  }
-
-  // Active workers
-  if (context.activeWorkers && context.activeWorkers.length > 0) {
-    awarenessBlock += `\n- Active workers: ${context.activeWorkers.join(', ')}`;
-  }
-
-  // Prior session context (cross-session continuity)
-  try {
-    const sessionCtx = getSessionContext();
-    if (sessionCtx.priorSessions.length > 0) {
-      awarenessBlock += '\n- Prior sessions:';
-      for (const s of sessionCtx.priorSessions) {
-        const when = new Date(s.timestamp).toLocaleDateString('en-US', {
-          month: 'short',
-          day: 'numeric',
-        });
-        awarenessBlock += `\n  - ${when}: ${s.summary.slice(0, 120)}`;
-      }
-    }
-  } catch {
-    /* skip on error */
-  }
-
-  // Permanent codebase baseline (always injected when available)
-  if (context.codebaseBaseline != null && context.codebaseBaseline !== '') {
-    awarenessBlock += `\n\n${context.codebaseBaseline}`;
-  }
-
-  // Route codebase context through buildAgentContext only when codebaseBaseline is absent.
-  // If a curated baseline is already present it will have been sourced from the same
-  // HYDRA.md / CLAUDE.md files, so calling buildAgentContext would duplicate that content.
-  if (context.codebaseBaseline == null || context.codebaseBaseline === '') {
-    try {
-      const agentCtx = buildAgentContext('claude', {}, null, null);
-      if (agentCtx !== '') {
-        awarenessBlock += `\n\n${agentCtx}`;
-      }
-    } catch {
-      // buildAgentContext is best-effort; gracefully degrade if project resolution fails
-    }
-  }
-
-  // Always-on self-awareness blocks (operator-provided)
-  if (context.selfSnapshotBlock != null && context.selfSnapshotBlock !== '') {
-    awarenessBlock += `\n\n${context.selfSnapshotBlock}`;
-  }
-  if (context.selfIndexBlock != null && context.selfIndexBlock !== '') {
-    awarenessBlock += `\n\n${context.selfIndexBlock}`;
-  }
-
-  // On-demand activity digest (for "what's going on?" queries)
-  if (context.activityDigest != null && context.activityDigest !== '') {
-    awarenessBlock += `\n\n${context.activityDigest}`;
-  }
-
-  // On-demand topic context (for "how does X work?" queries)
-  if (context.codebaseContext != null && context.codebaseContext !== '') {
-    awarenessBlock += `\n\n${context.codebaseContext}`;
-  }
-
-  // Persona-aware identity block (falls back to hardcoded text when persona disabled)
-  const openingParagraph =
-    getConciergeIdentity() ??
-    'You are the Hydra Concierge \u2014 the conversational front-end for the Hydra multi-agent orchestration system.';
-
-  const text = `${openingParagraph}
-
-Current state:
-- Project: ${project} (${projectRoot})
-- Operator mode: ${mode}
-- Open tasks: ${String(openTasks)}
-- Agent models:
-${modelLines === '' ? '  (none loaded)' : modelLines}${awarenessBlock}
-${otherProjects === '' ? '' : `\nOther known projects:\n${otherProjects}`}
-
-Your role:
-1. Answer questions about Hydra, the project, general programming, and anything the user asks conversationally.
-2. Help the user think through problems, refine their objectives, and plan their work.
-3. When asked about the codebase architecture, modules, or patterns, provide specific, detailed answers referencing modules, functions, and config keys by name.
-3. When the user gives you an instruction that requires actual code changes, file modifications, debugging, investigation, or any hands-on work that Hydra agents should execute — you MUST escalate by prefixing your entire response with [DISPATCH] followed by a clean, actionable prompt for the dispatch pipeline.
-
-Project awareness:
-- You know which project is currently active and what other projects the user works on.
-- If the user's prompt clearly relates to a DIFFERENT project (e.g. mentions concepts, files, or terminology that belong to another known project, not the current one), point this out and suggest they switch first: "That sounds like it belongs to **<project name>** — you'll want to restart the operator from that directory (cd <path> && npm run go) or launch a separate session for it."
-- Do NOT blindly dispatch work that targets the wrong project. A heads-up saves the user from wasted agent runs.
-- If you're unsure whether the prompt matches the current project, ask for clarification.
-
-Intent rules:
-- Questions, discussion, brainstorming, explanations → respond directly (NO [DISPATCH] prefix)
-- Requests for code changes, bug fixes, feature implementation, file creation, refactoring, running commands, investigation that requires reading files → respond with [DISPATCH] followed by a refined prompt
-- If ambiguous, ask the user to clarify rather than guessing
-
-Disambiguation — when input is ambiguous, ALWAYS ask a brief clarifying question:
-- Short ambiguous phrases ("fix it", "try again", "do it") → ask what specifically to fix/retry/do
-- Input that could be a command shortcut ("status", "clear") → suggest the :command form
-- When unsure if a request needs code changes or discussion → ask: "Should I dispatch this to an agent, or discuss it here?"
-- NEVER interpret single-digit inputs (1-9) as messages — these are UI selection inputs
-
-Command awareness — the operator supports these colon-prefixed commands:
+const CONCIERGE_COMMANDS_HELP = `Command awareness — the operator supports these colon-prefixed commands:
   :help                 Show help
   :status               Dashboard with agents & tasks
   :self                 Hydra self snapshot (models, config, runtime)
@@ -441,7 +280,157 @@ Command awareness — the operator supports these colon-prefixed commands:
   :confirm on/off       Enable/disable confirmations
   :shutdown             Stop the daemon
   :quit / :exit         Exit operator console
-  !<prompt>             Force dispatch (bypass concierge)
+  !<prompt>             Force dispatch (bypass concierge)`;
+
+function appendGitInfoSection(block: string, gitInfo: ConciergeContext['gitInfo']): string {
+  if (!gitInfo) return block;
+  const gi = gitInfo;
+  let result = `${block}\n- Git branch: ${gi.branch ?? 'unknown'}`;
+  if (gi.modifiedFiles != null) {
+    result += ` (${String(gi.modifiedFiles)} modified file${gi.modifiedFiles === 1 ? '' : 's'})`;
+  }
+  return result;
+}
+
+function appendCompletionsSection(
+  block: string,
+  completions: ConciergeContext['recentCompletions'],
+): string {
+  if (!completions || completions.length === 0) return block;
+  let result = `${block}\n- Recently completed tasks:`;
+  for (const c of completions.slice(0, 3)) {
+    result = `${result}\n  - [${c.agent}] ${c.title ?? c.taskId ?? 'untitled'}`;
+  }
+  return result;
+}
+
+function appendErrorsSection(block: string, errors: ConciergeContext['recentErrors']): string {
+  if (!errors || errors.length === 0) return block;
+  let result = `${block}\n- Recent errors:`;
+  for (const e of errors.slice(0, 3)) {
+    result = `${result}\n  - [${e.agent ?? 'system'}] ${(e.error ?? e.message ?? 'unknown').slice(0, 80)}`;
+  }
+  return result;
+}
+
+function appendPriorSessionsSection(block: string): string {
+  try {
+    const sessionCtx = getSessionContext();
+    if (sessionCtx.priorSessions.length === 0) return block;
+    let result = `${block}\n- Prior sessions:`;
+    for (const s of sessionCtx.priorSessions) {
+      const when = new Date(s.timestamp).toLocaleDateString('en-US', {
+        month: 'short',
+        day: 'numeric',
+      });
+      result = `${result}\n  - ${when}: ${s.summary.slice(0, 120)}`;
+    }
+    return result;
+  } catch {
+    return block;
+  }
+}
+
+function appendCodebaseContextSection(block: string, context: ConciergeContext): string {
+  if (context.codebaseBaseline != null && context.codebaseBaseline !== '') {
+    return `${block}\n\n${context.codebaseBaseline}`;
+  }
+  try {
+    const agentCtx = buildAgentContext('claude', {}, null, null);
+    if (agentCtx !== '') {
+      return `${block}\n\n${agentCtx}`;
+    }
+  } catch {
+    // buildAgentContext is best-effort; gracefully degrade if project resolution fails
+  }
+  return block;
+}
+
+function appendOptionalContextBlocks(block: string, context: ConciergeContext): string {
+  let result = block;
+  if (context.selfSnapshotBlock != null && context.selfSnapshotBlock !== '') {
+    result = `${result}\n\n${context.selfSnapshotBlock}`;
+  }
+  if (context.selfIndexBlock != null && context.selfIndexBlock !== '') {
+    result = `${result}\n\n${context.selfIndexBlock}`;
+  }
+  if (context.activityDigest != null && context.activityDigest !== '') {
+    result = `${result}\n\n${context.activityDigest}`;
+  }
+  if (context.codebaseContext != null && context.codebaseContext !== '') {
+    result = `${result}\n\n${context.codebaseContext}`;
+  }
+  return result;
+}
+
+function buildAwarenessBlock(context: ConciergeContext): string {
+  let block = '';
+  block = appendGitInfoSection(block, context.gitInfo);
+  block = appendCompletionsSection(block, context.recentCompletions);
+  block = appendErrorsSection(block, context.recentErrors);
+  if (context.activeWorkers && context.activeWorkers.length > 0) {
+    block = `${block}\n- Active workers: ${context.activeWorkers.join(', ')}`;
+  }
+  block = appendPriorSessionsSection(block);
+  block = appendCodebaseContextSection(block, context);
+  block = appendOptionalContextBlocks(block, context);
+  return block;
+}
+
+function buildConciergeFingerprint(context: ConciergeContext): string {
+  return JSON.stringify([
+    context.mode ?? '',
+    context.openTasks ?? 0,
+    context.gitInfo?.branch ?? '',
+    context.recentCompletions ?? [],
+    context.selfAwarenessKey ?? '',
+  ]);
+}
+
+function buildConciergeText(
+  openingParagraph: string,
+  project: string,
+  projectRoot: string,
+  mode: string,
+  openTasks: number,
+  modelLines: string,
+  awarenessBlock: string,
+  otherProjects: string,
+): string {
+  return `${openingParagraph}
+
+Current state:
+- Project: ${project} (${projectRoot})
+- Operator mode: ${mode}
+- Open tasks: ${String(openTasks)}
+- Agent models:
+${modelLines === '' ? '  (none loaded)' : modelLines}${awarenessBlock}
+${otherProjects === '' ? '' : `\nOther known projects:\n${otherProjects}`}
+
+Your role:
+1. Answer questions about Hydra, the project, general programming, and anything the user asks conversationally.
+2. Help the user think through problems, refine their objectives, and plan their work.
+3. When asked about the codebase architecture, modules, or patterns, provide specific, detailed answers referencing modules, functions, and config keys by name.
+3. When the user gives you an instruction that requires actual code changes, file modifications, debugging, investigation, or any hands-on work that Hydra agents should execute — you MUST escalate by prefixing your entire response with [DISPATCH] followed by a clean, actionable prompt for the dispatch pipeline.
+
+Project awareness:
+- You know which project is currently active and what other projects the user works on.
+- If the user's prompt clearly relates to a DIFFERENT project (e.g. mentions concepts, files, or terminology that belong to another known project, not the current one), point this out and suggest they switch first: "That sounds like it belongs to **<project name>** — you'll want to restart the operator from that directory (cd <path> && npm run go) or launch a separate session for it."
+- Do NOT blindly dispatch work that targets the wrong project. A heads-up saves the user from wasted agent runs.
+- If you're unsure whether the prompt matches the current project, ask for clarification.
+
+Intent rules:
+- Questions, discussion, brainstorming, explanations → respond directly (NO [DISPATCH] prefix)
+- Requests for code changes, bug fixes, feature implementation, file creation, refactoring, running commands, investigation that requires reading files → respond with [DISPATCH] followed by a refined prompt
+- If ambiguous, ask the user to clarify rather than guessing
+
+Disambiguation — when input is ambiguous, ALWAYS ask a brief clarifying question:
+- Short ambiguous phrases ("fix it", "try again", "do it") → ask what specifically to fix/retry/do
+- Input that could be a command shortcut ("status", "clear") → suggest the :command form
+- When unsure if a request needs code changes or discussion → ask: "Should I dispatch this to an agent, or discuss it here?"
+- NEVER interpret single-digit inputs (1-9) as messages — these are UI selection inputs
+
+${CONCIERGE_COMMANDS_HELP}
 
 If the user's input looks like a mistyped or approximate command (e.g. "stats", "satus", ":staus", "show status", "clear tasks", "halp", "mode economy", "switch to council"), you MUST:
 - Identify the most likely intended command
@@ -454,6 +443,52 @@ Important constraints:
 - You can only converse and decide when to escalate to the agent pipeline
 - Keep responses concise and focused
 - When escalating with [DISPATCH], write a clear, actionable prompt that includes all necessary context from the conversation`;
+}
+
+function buildSystemPrompt(context: ConciergeContext = {}): string {
+  const now = Date.now();
+  const fingerprint = buildConciergeFingerprint(context);
+
+  if (
+    systemPromptCache.text !== '' &&
+    systemPromptCache.fingerprint === fingerprint &&
+    now - systemPromptCache.builtAt < SYSTEM_PROMPT_TTL_MS
+  ) {
+    return systemPromptCache.text;
+  }
+
+  const project = context.projectName ?? 'unknown';
+  const projectRoot = context.projectRoot ?? '';
+  const mode = context.mode ?? 'auto';
+  const openTasks = context.openTasks ?? 0;
+  const agentModels = context.agentModels ?? {};
+  const knownProjects = context.knownProjects ?? [];
+
+  const modelLines = Object.entries(agentModels)
+    .map(([agent, model]) => `  - ${agent}: ${model}`)
+    .join('\n');
+
+  const otherProjects = knownProjects
+    .filter((p) => p !== projectRoot)
+    .map((p) => `  - ${path.basename(p)} (${p})`)
+    .join('\n');
+
+  const awarenessBlock = buildAwarenessBlock(context);
+
+  const openingParagraph =
+    getConciergeIdentity() ??
+    'You are the Hydra Concierge \u2014 the conversational front-end for the Hydra multi-agent orchestration system.';
+
+  const text = buildConciergeText(
+    openingParagraph,
+    project,
+    projectRoot,
+    mode,
+    openTasks,
+    modelLines,
+    awarenessBlock,
+    otherProjects,
+  );
 
   systemPromptCache = { text, builtAt: now, fingerprint };
   return text;
@@ -497,6 +532,72 @@ interface ConciergeTurnOpts {
   context?: ConciergeContext;
 }
 
+interface ChunkHandlerState {
+  isDispatch: boolean;
+  dispatchDetected: boolean;
+  responseBuffer: string;
+  chunkCount: number;
+  firstChunkFired: boolean;
+}
+
+function makeChunkHandler(
+  state: ChunkHandlerState,
+  opts: ConciergeTurnOpts,
+): (chunk: string) => void {
+  return (chunk: string) => {
+    state.responseBuffer += chunk;
+    state.chunkCount++;
+    if (!state.firstChunkFired && opts.onFirstChunk) {
+      state.firstChunkFired = true;
+      opts.onFirstChunk();
+    }
+    if (!state.dispatchDetected && state.chunkCount <= 5) {
+      const trimmed = state.responseBuffer.trimStart();
+      if (trimmed.startsWith('[DISPATCH]')) {
+        state.isDispatch = true;
+        state.dispatchDetected = true;
+        return;
+      } else if (trimmed.length > 12) {
+        state.dispatchDetected = true;
+      }
+    }
+    if (state.dispatchDetected && !state.isDispatch && opts.onChunk) opts.onChunk(chunk);
+  };
+}
+
+function flushBufferedChunks(state: ChunkHandlerState, opts: ConciergeTurnOpts): void {
+  if (!state.isDispatch && !state.dispatchDetected && opts.onChunk)
+    opts.onChunk(state.responseBuffer);
+  if (!state.firstChunkFired && opts.onFirstChunk) opts.onFirstChunk();
+}
+
+function updateConciergeTurnStats(result: { usage?: unknown; model: string }): number {
+  stats.turns++;
+  if (result.usage != null) {
+    const usage = result.usage as { prompt_tokens?: number; completion_tokens?: number };
+    stats.promptTokens += usage.prompt_tokens ?? 0;
+    stats.completionTokens += usage.completion_tokens ?? 0;
+  }
+  return estimateCost(
+    result.model,
+    result.usage as { prompt_tokens?: number; completion_tokens?: number } | null,
+  );
+}
+
+function maybeSendSummaryEvent(): void {
+  if (stats.turns % 5 !== 0) return;
+  const lastTopic =
+    history
+      .filter((m) => m.role === 'user')
+      .at(-1)
+      ?.content.slice(0, 80) ?? '';
+  void postConciergeEvent('concierge:summary', {
+    turns: stats.turns,
+    lastTopic,
+    tokensUsed: stats.promptTokens + stats.completionTokens,
+  });
+}
+
 /**
  * Process one conversational turn.
  * @param {string} userMsg - The user's message
@@ -531,15 +632,12 @@ export async function conciergeTurn(
   const cfg = getConciergeConfig();
   const systemPrompt = buildSystemPrompt(opts.context ?? {});
 
-  // Add user message to history
   history.push({ role: 'user', content: userMsg });
   trimHistory(cfg.maxHistoryMessages ?? 40);
 
-  // Build messages array
   const messages = [{ role: 'system', content: systemPrompt }, ...history];
 
-  // Track whether we've detected [DISPATCH] prefix
-  const state = {
+  const state: ChunkHandlerState = {
     isDispatch: false,
     dispatchDetected: false,
     responseBuffer: '',
@@ -547,37 +645,8 @@ export async function conciergeTurn(
     firstChunkFired: false,
   };
 
-  const onChunk = (chunk: string) => {
-    state.responseBuffer += chunk;
-    state.chunkCount++;
+  const onChunk = makeChunkHandler(state, opts);
 
-    // Notify on first chunk (for spinner)
-    if (!state.firstChunkFired && opts.onFirstChunk) {
-      state.firstChunkFired = true;
-      opts.onFirstChunk();
-    }
-
-    // Check for [DISPATCH] prefix in first few chunks
-    if (!state.dispatchDetected && state.chunkCount <= 5) {
-      const trimmed = state.responseBuffer.trimStart();
-      if (trimmed.startsWith('[DISPATCH]')) {
-        state.isDispatch = true;
-        state.dispatchDetected = true;
-        return;
-      } else if (trimmed.length > 12) {
-        state.dispatchDetected = true;
-      }
-    }
-
-    // Stream to user only if it's a chat response
-    if (state.dispatchDetected && !state.isDispatch && opts.onChunk) {
-      opts.onChunk(chunk);
-    }
-  };
-
-  // If we have an explicitly set provider, use streamWithFallback which
-  // respects the chain. If activeProvider was set via switchConciergeModel,
-  // it will be the first entry tried.
   const streamCfg = { ...cfg };
   if (activeProvider) {
     streamCfg.model = activeProvider.model;
@@ -585,7 +654,6 @@ export async function conciergeTurn(
 
   const result = await streamWithFallback(messages, streamCfg, onChunk);
 
-  // Update active provider info
   // eslint-disable-next-line require-atomic-updates -- assignment uses result.provider/model, not prior activeProvider value
   activeProvider = {
     provider: result.provider,
@@ -593,60 +661,22 @@ export async function conciergeTurn(
     isFallback: result.isFallback,
   };
 
-  // If we buffered early chunks waiting for dispatch detection, flush them now
-  if (!state.isDispatch && !state.dispatchDetected && opts.onChunk) {
-    opts.onChunk(state.responseBuffer);
-  }
+  flushBufferedChunks(state, opts);
 
-  // Fire onFirstChunk if nothing came through (empty response edge case)
-  if (!state.firstChunkFired && opts.onFirstChunk) {
-    opts.onFirstChunk();
-  }
+  const cost = updateConciergeTurnStats(result);
+  maybeSendSummaryEvent();
 
-  // Update stats
-  stats.turns++;
-  if (result.usage != null) {
-    const usage = result.usage as { prompt_tokens?: number; completion_tokens?: number };
-    stats.promptTokens += usage.prompt_tokens ?? 0;
-    stats.completionTokens += usage.completion_tokens ?? 0;
-  }
-
-  // Estimate cost
-  const cost = estimateCost(
-    result.model,
-    result.usage as { prompt_tokens?: number; completion_tokens?: number } | null,
-  );
-
-  // Add assistant response to history
   history.push({ role: 'assistant', content: result.fullResponse as string });
 
-  // Post summary event every 5 turns
-  if (stats.turns % 5 === 0) {
-    const lastTopic =
-      history
-        .filter((m) => m.role === 'user')
-        .at(-1)
-        ?.content.slice(0, 80) ?? '';
-    void postConciergeEvent('concierge:summary', {
-      turns: stats.turns,
-      lastTopic,
-      tokensUsed: stats.promptTokens + stats.completionTokens,
-    });
-  }
-
-  // Determine intent
   const trimmedResponse = (result.fullResponse as string).trimStart();
   if (trimmedResponse.startsWith('[DISPATCH]')) {
     const dispatchPrompt = trimmedResponse.slice('[DISPATCH]'.length).trim();
-
-    // Post dispatch event
     void postConciergeEvent('concierge:dispatch', {
       dispatchPrompt: dispatchPrompt.slice(0, 200),
       conversationContext: getRecentContext(3),
       provider: result.provider,
       model: result.model,
     });
-
     return {
       intent: 'dispatch',
       response: result.fullResponse,

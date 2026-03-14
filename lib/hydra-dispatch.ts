@@ -118,6 +118,64 @@ async function fetchDaemonSummary(baseUrl: string) {
   }
 }
 
+function resolvePreferredAgentName(
+  preferred: string,
+  cfg: ReturnType<typeof loadHydraConfig>,
+  installedCLIs: Record<string, boolean | undefined>,
+): string | null {
+  if (preferred === 'local') {
+    return cfg.local.enabled ? preferred : null;
+  }
+  const agentDef = getAgent(preferred);
+  if (agentDef?.enabled !== true) return null;
+  const needsCli = agentDef.cli !== null && agentDef.cli !== undefined;
+  if (!needsCli || installedCLIs[preferred] === true) return preferred;
+  return null;
+}
+
+function findAgentFromPreferenceOrder(
+  installedCLIs: Record<string, boolean | undefined>,
+  cfg: ReturnType<typeof loadHydraConfig>,
+): string | null {
+  for (const name of DISPATCH_PREFERENCE_ORDER) {
+    if (name === 'local') {
+      if (cfg.local.enabled) return name;
+    } else if (installedCLIs[name] === true) {
+      try {
+        const agentDef = getAgent(name);
+        if (agentDef && (agentDef as { enabled?: boolean }).enabled !== false) {
+          return name;
+        }
+      } catch {
+        // Unknown agent name in preference order — skip
+      }
+    }
+  }
+  return null;
+}
+
+function findAnyInstalledAgentName(
+  installedCLIs: Record<string, boolean | undefined>,
+  cfg: ReturnType<typeof loadHydraConfig>,
+): string | null {
+  for (const [name, v] of Object.entries(installedCLIs)) {
+    if (v !== true) continue;
+    if (name === 'local') {
+      if (cfg.local.enabled) return name;
+      continue;
+    }
+    try {
+      const agentDef = getAgent(name);
+      if (agentDef && (agentDef as { enabled?: boolean }).enabled !== false) {
+        return name;
+      }
+    } catch {
+      // Unknown agent — skip
+    }
+  }
+  return null;
+}
+
 /**
  * Resolve the agent name for a dispatch role, with installed-CLI fallback.
  *
@@ -138,52 +196,16 @@ export function getRoleAgent(
   const preferred = roleCfg?.agent;
 
   if (preferred != null && preferred !== '') {
-    if (preferred === 'local') {
-      // Only dispatch to local if explicitly enabled
-      if (cfg.local.enabled) return preferred;
-    } else {
-      const agentDef = getAgent(preferred);
-      if (agentDef?.enabled === true) {
-        // CLI agents require explicit confirmation (=== true); API agents (cli === null) are always reachable
-        const needsCli = agentDef.cli !== null && agentDef.cli !== undefined;
-        if (!needsCli || installedCLIs[preferred] === true) {
-          return preferred;
-        }
-      }
-    }
+    const resolved = resolvePreferredAgentName(preferred, cfg, installedCLIs);
+    if (resolved !== null) return resolved;
   }
 
-  // Fallback: first installed AND enabled agent from preference order
-  for (const name of DISPATCH_PREFERENCE_ORDER) {
-    if (name === 'local') {
-      if (cfg.local.enabled) return name;
-    } else if (installedCLIs[name] === true) {
-      try {
-        const agentDef = getAgent(name);
-        if (agentDef && (agentDef as { enabled?: boolean }).enabled !== false) {
-          return name;
-        }
-      } catch {
-        // Unknown agent name in preference order — skip
-      }
-    }
-  }
-  // Last resort: any installed, registered, and enabled agent
-  for (const [name, v] of Object.entries(installedCLIs)) {
-    if (v !== true) continue;
-    if (name === 'local') {
-      if (cfg.local.enabled) return name;
-      continue;
-    }
-    try {
-      const agentDef = getAgent(name);
-      if (agentDef && (agentDef as { enabled?: boolean }).enabled !== false) {
-        return name;
-      }
-    } catch {
-      // Unknown agent — skip
-    }
-  }
+  const fromPreference = findAgentFromPreferenceOrder(installedCLIs, cfg);
+  if (fromPreference !== null) return fromPreference;
+
+  const anyAgent = findAnyInstalledAgentName(installedCLIs, cfg);
+  if (anyAgent !== null) return anyAgent;
+
   throw new Error('No agents available: install at least one agent CLI or enable local');
 }
 
@@ -297,16 +319,56 @@ function buildSynthesizerPrompt(
   ].join('\n');
 }
 
-async function main() {
-  const { options, positionals } = parseArgs(process.argv);
-  const prompt = getPrompt(options, positionals);
+type DispatchSlot = {
+  ok?: boolean;
+  preview?: boolean;
+  command?: unknown;
+  parsed?: unknown;
+  stdout?: string;
+  output?: string;
+  lastMessage?: string;
+};
 
+type DispatchReport = {
+  id: string;
+  startedAt: string;
+  finishedAt: string | null;
+  mode: string;
+  prompt: string;
+  project: string;
+  daemonUrl: string;
+  daemonSummary: unknown;
+  roleAgents: Record<string, string>;
+  coordinator: DispatchSlot | null;
+  critic: DispatchSlot | null;
+  synthesizer: DispatchSlot | null;
+  claude: DispatchSlot | null;
+  gemini: DispatchSlot | null;
+  codex: DispatchSlot | null;
+  outputSummary: {
+    coordinatorOk: boolean;
+    criticOk: boolean;
+    synthesizerOk: boolean;
+    claudeOk: boolean;
+    geminiOk: boolean;
+    codexOk: boolean;
+    coordinatorSnippet: string;
+    criticSnippet: string;
+    synthesizerSnippet: string;
+    claudeSnippet: string;
+    geminiSnippet: string;
+    codexSnippet: string;
+  } | null;
+};
+
+function parseDispatchOptions(argv: string[]) {
+  const { options, positionals } = parseArgs(argv);
+  const prompt = getPrompt(options, positionals);
   if (prompt === '') {
     throw new Error(
       'Missing prompt. Example: node lib/hydra-dispatch.ts prompt="Plan offline sync rollout"',
     );
   }
-
   const modeVal = options['mode'];
   const mode = (typeof modeVal === 'string' && modeVal !== '' ? modeVal : 'live').toLowerCase();
   const isPreview = mode === 'preview' || boolFlag(options['preview'], false);
@@ -318,229 +380,133 @@ async function main() {
     typeof tmVal === 'string' && tmVal !== '' ? tmVal : String(DEFAULT_TIMEOUT_MS),
     10,
   );
+  return { prompt, mode, isPreview, save, daemonUrl, timeoutMs };
+}
 
-  const id = runId('HYDRA_RUN');
-  const startedAt = nowIso();
+function resolveRoleModel(roleAgent: string, rawModel: string | null | undefined): string | null {
+  if (rawModel == null) return null;
+  return getAgent(roleAgent)?.modelBelongsTo(rawModel) === true ? rawModel : null;
+}
 
-  // Resolve role → agent mapping once, using installed CLI detection
-  const installedCLIs = detectInstalledCLIs();
-  const coordinatorAgent = getRoleAgent('coordinator', installedCLIs);
-  const criticAgent = getRoleAgent('critic', installedCLIs);
-  const synthesizerAgent = getRoleAgent('synthesizer', installedCLIs);
-
-  // Resolve per-role model overrides, validating each against the resolved agent.
-  // If the configured model doesn't belong to the resolved agent (e.g., role configured
-  // for copilot with a copilot-* model but copilot isn't installed and fell back to claude),
-  // clear the override so the agent uses its own default model.
-  const _coordinatorModelRaw = getRoleConfig('coordinator')?.model ?? null;
-  const _criticModelRaw = getRoleConfig('critic')?.model ?? null;
-  const _synthesizerModelRaw = getRoleConfig('synthesizer')?.model ?? null;
-
-  const coordinatorModel =
-    _coordinatorModelRaw != null &&
-    getAgent(coordinatorAgent)?.modelBelongsTo(_coordinatorModelRaw) === true
-      ? _coordinatorModelRaw
-      : null;
-  const criticModel =
-    _criticModelRaw != null && getAgent(criticAgent)?.modelBelongsTo(_criticModelRaw) === true
-      ? _criticModelRaw
-      : null;
-  const synthesizerModel =
-    _synthesizerModelRaw != null &&
-    getAgent(synthesizerAgent)?.modelBelongsTo(_synthesizerModelRaw) === true
-      ? _synthesizerModelRaw
-      : null;
-
-  type DispatchSlot = {
-    ok?: boolean;
-    preview?: boolean;
-    command?: unknown;
-    parsed?: unknown;
-    stdout?: string;
-    output?: string;
-    lastMessage?: string;
+function buildPreviewSlot(agent: string, cmd: unknown): DispatchSlot {
+  return {
+    ok: cmd !== undefined,
+    preview: true,
+    command: cmd,
+    ...(cmd === undefined && {
+      lastMessage: `${agent} does not support nonInteractive preview`,
+    }),
   };
+}
 
-  const report: {
-    id: string;
-    startedAt: string;
-    finishedAt: string | null;
-    mode: string;
-    prompt: string;
-    project: string;
-    daemonUrl: string;
-    daemonSummary: unknown;
-    // Role → agent mapping for this run
-    roleAgents: Record<string, string>;
-    // Role-based keys (canonical)
-    coordinator: DispatchSlot | null;
-    critic: DispatchSlot | null;
-    synthesizer: DispatchSlot | null;
-    // Backward-compat aliases (point at role-based objects)
-    claude: DispatchSlot | null;
-    gemini: DispatchSlot | null;
-    codex: DispatchSlot | null;
-    outputSummary: {
-      coordinatorOk: boolean;
-      criticOk: boolean;
-      synthesizerOk: boolean;
-      // Backward-compat aliases
-      claudeOk: boolean;
-      geminiOk: boolean;
-      codexOk: boolean;
-      coordinatorSnippet: string;
-      criticSnippet: string;
-      synthesizerSnippet: string;
-      claudeSnippet: string;
-      geminiSnippet: string;
-      codexSnippet: string;
-    } | null;
-  } = {
-    id,
-    startedAt,
-    finishedAt: null,
-    mode: isPreview ? 'preview' : 'live',
-    prompt,
-    project: config.projectName,
-    daemonUrl,
-    daemonSummary: null,
-    coordinator: null,
-    critic: null,
-    synthesizer: null,
-    roleAgents: {
-      coordinator: coordinatorAgent,
-      critic: criticAgent,
-      synthesizer: synthesizerAgent,
-    },
-    // Backward-compat aliases — set after role slots are populated
-    claude: null,
-    gemini: null,
-    codex: null,
-    outputSummary: null,
-  };
+function populatePreviewSlots(
+  coordinatorAgent: string,
+  criticAgent: string,
+  synthesizerAgent: string,
+  coordinatorModel: string | null,
+  criticModel: string | null,
+  synthesizerModel: string | null,
+  report: DispatchReport,
+): void {
+  const coordConfig = getAgent(coordinatorAgent);
+  const criticConfig = getAgent(criticAgent);
+  const synthConfig = getAgent(synthesizerAgent);
+  const coordCmd = coordConfig?.invoke?.nonInteractive?.('<coordinator-prompt>', {
+    model: coordinatorModel ?? undefined,
+  });
+  const criticCmd = criticConfig?.invoke?.nonInteractive?.('<critic-prompt>', {
+    model: criticModel ?? undefined,
+  });
+  const synthCmd = synthConfig?.invoke?.nonInteractive?.('<synthesizer-prompt>', {
+    outputPath: '<tempfile>',
+    cwd: config.projectRoot,
+    model: synthesizerModel ?? undefined,
+  });
+  report.coordinator = buildPreviewSlot(coordinatorAgent, coordCmd);
+  report.critic = buildPreviewSlot(criticAgent, criticCmd);
+  report.synthesizer = buildPreviewSlot(synthesizerAgent, synthCmd);
+}
 
-  report.daemonSummary = await fetchDaemonSummary(daemonUrl);
-
-  const coordinatorPromptText = buildCoordinatorPrompt(
+async function populateLiveSlots(
+  coordinatorAgent: string,
+  criticAgent: string,
+  synthesizerAgent: string,
+  coordinatorModel: string | null,
+  criticModel: string | null,
+  synthesizerModel: string | null,
+  prompt: string,
+  timeoutMs: number,
+  coordinatorPromptText: string,
+  daemonSummary: unknown,
+  report: DispatchReport,
+): Promise<void> {
+  const spinCoord = createSpinner(`${colorAgent(coordinatorAgent)} ${DIM('coordinating...')}`, {
+    style: 'solar',
+  });
+  spinCoord.start();
+  const coordResult = await callAgent(
     coordinatorAgent,
-    prompt,
-    report.daemonSummary,
+    coordinatorPromptText,
+    timeoutMs,
+    coordinatorModel,
   );
-
-  if (isPreview) {
-    const coordConfig = getAgent(coordinatorAgent);
-    const criticConfig = getAgent(criticAgent);
-    const synthConfig = getAgent(synthesizerAgent);
-    const coordCmd = coordConfig?.invoke?.nonInteractive?.('<coordinator-prompt>', {
-      model: coordinatorModel ?? undefined,
-    });
-    const criticCmd = criticConfig?.invoke?.nonInteractive?.('<critic-prompt>', {
-      model: criticModel ?? undefined,
-    });
-    const synthCmd = synthConfig?.invoke?.nonInteractive?.('<synthesizer-prompt>', {
-      outputPath: '<tempfile>',
-      cwd: config.projectRoot,
-      model: synthesizerModel ?? undefined,
-    });
-    report.coordinator = {
-      ok: coordCmd !== undefined,
-      preview: true,
-      command: coordCmd,
-      ...(coordCmd === undefined && {
-        lastMessage: `${coordinatorAgent} does not support nonInteractive preview`,
-      }),
-    };
-    report.critic = {
-      ok: criticCmd !== undefined,
-      preview: true,
-      command: criticCmd,
-      ...(criticCmd === undefined && {
-        lastMessage: `${criticAgent} does not support nonInteractive preview`,
-      }),
-    };
-    report.synthesizer = {
-      ok: synthCmd !== undefined,
-      preview: true,
-      command: synthCmd,
-      ...(synthCmd === undefined && {
-        lastMessage: `${synthesizerAgent} does not support nonInteractive preview`,
-      }),
-    };
+  const coordParsed = parseJsonLoose(coordResult.output);
+  report.coordinator = { ...coordResult, parsed: coordParsed };
+  if (coordResult.ok) {
+    spinCoord.succeed(`${colorAgent(coordinatorAgent)} coordination complete`);
   } else {
-    const spinCoord = createSpinner(`${colorAgent(coordinatorAgent)} ${DIM('coordinating...')}`, {
-      style: 'solar',
-    });
-    spinCoord.start();
-    const coordResult = await callAgent(
-      coordinatorAgent,
-      coordinatorPromptText,
-      timeoutMs,
-      coordinatorModel,
-    );
-    const coordParsed = parseJsonLoose(coordResult.output);
-    report.coordinator = { ...coordResult, parsed: coordParsed };
-    if (coordResult.ok) {
-      spinCoord.succeed(`${colorAgent(coordinatorAgent)} coordination complete`);
-    } else {
-      spinCoord.fail(`${colorAgent(coordinatorAgent)} coordination failed`);
-    }
-
-    const criticPromptText = buildCriticPrompt(
-      criticAgent,
-      prompt,
-      coordParsed ?? coordResult.output,
-      report.daemonSummary,
-    );
-    const spinCritic = createSpinner(`${colorAgent(criticAgent)} ${DIM('critiquing...')}`, {
-      style: 'solar',
-    });
-    spinCritic.start();
-    const criticResult = await callAgent(criticAgent, criticPromptText, timeoutMs, criticModel);
-    const criticParsed = parseJsonLoose(criticResult.output);
-    report.critic = { ...criticResult, parsed: criticParsed };
-    if (criticResult.ok) {
-      spinCritic.succeed(`${colorAgent(criticAgent)} critique complete`);
-    } else {
-      spinCritic.fail(`${colorAgent(criticAgent)} critique failed`);
-    }
-
-    const synthPromptText = buildSynthesizerPrompt(
-      synthesizerAgent,
-      prompt,
-      coordParsed ?? coordResult.output,
-      criticParsed ?? criticResult.output,
-      report.daemonSummary,
-    );
-    const spinSynth = createSpinner(`${colorAgent(synthesizerAgent)} ${DIM('synthesizing...')}`, {
-      style: 'solar',
-    });
-    spinSynth.start();
-    const synthResult = await callAgent(
-      synthesizerAgent,
-      synthPromptText,
-      timeoutMs,
-      synthesizerModel,
-    );
-    report.synthesizer = { ...synthResult, lastMessage: synthResult.output };
-    if (synthResult.ok) {
-      spinSynth.succeed(`${colorAgent(synthesizerAgent)} synthesis complete`);
-    } else {
-      spinSynth.fail(`${colorAgent(synthesizerAgent)} synthesis failed`);
-    }
+    spinCoord.fail(`${colorAgent(coordinatorAgent)} coordination failed`);
   }
 
-  // Set backward-compat aliases so existing consumers reading report.claude etc. still work
-  report.claude = report.coordinator;
-  report.gemini = report.critic;
-  report.codex = report.synthesizer;
+  const criticPromptText = buildCriticPrompt(
+    criticAgent,
+    prompt,
+    coordParsed ?? coordResult.output,
+    daemonSummary,
+  );
+  const spinCritic = createSpinner(`${colorAgent(criticAgent)} ${DIM('critiquing...')}`, {
+    style: 'solar',
+  });
+  spinCritic.start();
+  const criticResult = await callAgent(criticAgent, criticPromptText, timeoutMs, criticModel);
+  const criticParsed = parseJsonLoose(criticResult.output);
+  report.critic = { ...criticResult, parsed: criticParsed };
+  if (criticResult.ok) {
+    spinCritic.succeed(`${colorAgent(criticAgent)} critique complete`);
+  } else {
+    spinCritic.fail(`${colorAgent(criticAgent)} critique failed`);
+  }
 
-  report.finishedAt = nowIso();
+  const synthPromptText = buildSynthesizerPrompt(
+    synthesizerAgent,
+    prompt,
+    coordParsed ?? coordResult.output,
+    criticParsed ?? criticResult.output,
+    daemonSummary,
+  );
+  const spinSynth = createSpinner(`${colorAgent(synthesizerAgent)} ${DIM('synthesizing...')}`, {
+    style: 'solar',
+  });
+  spinSynth.start();
+  const synthResult = await callAgent(
+    synthesizerAgent,
+    synthPromptText,
+    timeoutMs,
+    synthesizerModel,
+  );
+  report.synthesizer = { ...synthResult, lastMessage: synthResult.output };
+  if (synthResult.ok) {
+    spinSynth.succeed(`${colorAgent(synthesizerAgent)} synthesis complete`);
+  } else {
+    spinSynth.fail(`${colorAgent(synthesizerAgent)} synthesis failed`);
+  }
+}
+
+function finalizeOutputSummary(report: DispatchReport): void {
   const coord = report.coordinator;
   const critic = report.critic;
   const synth = report.synthesizer;
-
-  // Defensive runtime guard — TS proves these are assigned but report is mutable data
-  // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
+  // Defensive runtime guard — report is mutable data
   if (coord == null || critic == null || synth == null) {
     throw new Error(
       'Hydra dispatch invariant violated: coordinator, critic, and synthesizer slots must be populated before computing outputSummary.',
@@ -553,7 +519,6 @@ async function main() {
     coordinatorOk: Boolean(coord.ok),
     criticOk: Boolean(critic.ok),
     synthesizerOk: Boolean(synth.ok),
-    // Backward-compat aliases
     claudeOk: Boolean(coord.ok),
     geminiOk: Boolean(critic.ok),
     codexOk: Boolean(synth.ok),
@@ -564,39 +529,127 @@ async function main() {
     geminiSnippet: criticSnippet,
     codexSnippet: synthSnippet,
   };
+}
 
-  if (save) {
+function printDispatchSummary(
+  report: DispatchReport,
+  coordinatorAgent: string,
+  criticAgent: string,
+  synthesizerAgent: string,
+): void {
+  const summary = report.outputSummary;
+  if (!summary) return;
+  console.log(sectionHeader('Hydra Dispatch Summary'));
+  console.log(label('Run ID', DIM(report.id)));
+  console.log(label('Project', pc.white(config.projectName)));
+  console.log(label('Mode', pc.white(report.mode)));
+  console.log(
+    label(
+      'Coordinator',
+      `${colorAgent(coordinatorAgent)} ${summary.coordinatorOk ? SUCCESS('ok') : ERROR('failed')}`,
+    ),
+  );
+  console.log(
+    label(
+      'Critic',
+      `${colorAgent(criticAgent)} ${summary.criticOk ? SUCCESS('ok') : ERROR('failed')}`,
+    ),
+  );
+  console.log(
+    label(
+      'Synthesizer',
+      `${colorAgent(synthesizerAgent)} ${summary.synthesizerOk ? SUCCESS('ok') : ERROR('failed')}`,
+    ),
+  );
+  console.log(label('Coordinator snippet', DIM(summary.coordinatorSnippet)));
+  console.log(label('Critic snippet', DIM(summary.criticSnippet)));
+  console.log(label('Synthesizer snippet', DIM(summary.synthesizerSnippet)));
+}
+
+async function main() {
+  const opts = parseDispatchOptions(process.argv);
+  const id = runId('HYDRA_RUN');
+  const startedAt = nowIso();
+
+  const installedCLIs = detectInstalledCLIs();
+  const coordinatorAgent = getRoleAgent('coordinator', installedCLIs);
+  const criticAgent = getRoleAgent('critic', installedCLIs);
+  const synthesizerAgent = getRoleAgent('synthesizer', installedCLIs);
+
+  const coordinatorModel = resolveRoleModel(coordinatorAgent, getRoleConfig('coordinator')?.model);
+  const criticModel = resolveRoleModel(criticAgent, getRoleConfig('critic')?.model);
+  const synthesizerModel = resolveRoleModel(synthesizerAgent, getRoleConfig('synthesizer')?.model);
+
+  const report: DispatchReport = {
+    id,
+    startedAt,
+    finishedAt: null,
+    mode: opts.isPreview ? 'preview' : 'live',
+    prompt: opts.prompt,
+    project: config.projectName,
+    daemonUrl: opts.daemonUrl,
+    daemonSummary: null,
+    coordinator: null,
+    critic: null,
+    synthesizer: null,
+    roleAgents: {
+      coordinator: coordinatorAgent,
+      critic: criticAgent,
+      synthesizer: synthesizerAgent,
+    },
+    claude: null,
+    gemini: null,
+    codex: null,
+    outputSummary: null,
+  };
+
+  report.daemonSummary = await fetchDaemonSummary(opts.daemonUrl);
+  const coordinatorPromptText = buildCoordinatorPrompt(
+    coordinatorAgent,
+    opts.prompt,
+    report.daemonSummary,
+  );
+
+  if (opts.isPreview) {
+    populatePreviewSlots(
+      coordinatorAgent,
+      criticAgent,
+      synthesizerAgent,
+      coordinatorModel,
+      criticModel,
+      synthesizerModel,
+      report,
+    );
+  } else {
+    await populateLiveSlots(
+      coordinatorAgent,
+      criticAgent,
+      synthesizerAgent,
+      coordinatorModel,
+      criticModel,
+      synthesizerModel,
+      opts.prompt,
+      opts.timeoutMs,
+      coordinatorPromptText,
+      report.daemonSummary,
+      report,
+    );
+  }
+
+  report.claude = report.coordinator;
+  report.gemini = report.critic;
+  report.codex = report.synthesizer;
+  report.finishedAt = nowIso();
+  finalizeOutputSummary(report);
+
+  if (opts.save) {
     ensureDir(RUNS_DIR);
     const outPath = path.join(RUNS_DIR, `${id}.json`);
     fs.writeFileSync(outPath, `${JSON.stringify(report, null, 2)}\n`, 'utf8');
     console.log(`Hydra dispatch report saved: ${path.relative(config.projectRoot, outPath)}`);
   }
 
-  console.log(sectionHeader('Hydra Dispatch Summary'));
-  console.log(label('Run ID', DIM(id)));
-  console.log(label('Project', pc.white(config.projectName)));
-  console.log(label('Mode', pc.white(report.mode)));
-  console.log(
-    label(
-      'Coordinator',
-      `${colorAgent(coordinatorAgent)} ${report.outputSummary.coordinatorOk ? SUCCESS('ok') : ERROR('failed')}`,
-    ),
-  );
-  console.log(
-    label(
-      'Critic',
-      `${colorAgent(criticAgent)} ${report.outputSummary.criticOk ? SUCCESS('ok') : ERROR('failed')}`,
-    ),
-  );
-  console.log(
-    label(
-      'Synthesizer',
-      `${colorAgent(synthesizerAgent)} ${report.outputSummary.synthesizerOk ? SUCCESS('ok') : ERROR('failed')}`,
-    ),
-  );
-  console.log(label('Coordinator snippet', DIM(report.outputSummary.coordinatorSnippet)));
-  console.log(label('Critic snippet', DIM(report.outputSummary.criticSnippet)));
-  console.log(label('Synthesizer snippet', DIM(report.outputSummary.synthesizerSnippet)));
+  printDispatchSummary(report, coordinatorAgent, criticAgent, synthesizerAgent);
 }
 
 const _isMain = (() => {

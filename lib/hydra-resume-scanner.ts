@@ -94,58 +94,67 @@ export async function scanResumableState({
 
 // ── Individual Scanners ─────────────────────────────────────────────────────
 
+function buildPausedSessionItem(session: DaemonStatus['activeSession']): ResumableItem | null {
+  if (session?.status !== 'paused') return null;
+  const reason = session.pauseReason;
+  return {
+    source: 'daemon',
+    label: 'Unpause session',
+    hint: reason != null && reason !== '' ? `Paused: "${reason}"` : 'Session is paused',
+    value: 'daemon:unpause',
+  };
+}
+
+function buildStaleTasksItem(stale: DaemonTask[]): ResumableItem | null {
+  if (stale.length === 0) return null;
+  return {
+    source: 'daemon',
+    label: `Reset ${String(stale.length)} stale task${stale.length > 1 ? 's' : ''}`,
+    hint: stale.map((t) => `${t.id} (${t.owner})`).join(', '),
+    value: 'daemon:stale',
+  };
+}
+
+function buildHandoffsItem(handoffs: DaemonHandoff[]): ResumableItem | null {
+  if (handoffs.length === 0) return null;
+  return {
+    source: 'daemon',
+    label: `Ack ${String(handoffs.length)} pending handoff${handoffs.length > 1 ? 's' : ''}`,
+    hint: handoffs.map((h) => `${h.from}→${h.to}`).join(', '),
+    value: 'daemon:handoffs',
+  };
+}
+
+function buildInProgressItem(
+  inProgress: DaemonTask[],
+  stale: DaemonTask[],
+  handoffs: DaemonHandoff[],
+): ResumableItem | null {
+  if (inProgress.length === 0 || stale.length > 0 || handoffs.length > 0) return null;
+  return {
+    source: 'daemon',
+    label: `Resume ${String(inProgress.length)} in-progress task${inProgress.length > 1 ? 's' : ''}`,
+    hint: inProgress.map((t) => `${t.id} (${t.owner})`).join(', '),
+    value: 'daemon:resume',
+  };
+}
+
 async function scanDaemon(baseUrl: string): Promise<ResumableItem[] | null> {
-  if (!baseUrl) return null;
+  if (baseUrl === '') return null;
   try {
     const { request } = await import('./hydra-utils.ts');
     const statusUnknown: unknown = await request('GET', baseUrl, '/session/status');
     const status = statusUnknown as DaemonStatus;
-    const items: ResumableItem[] = [];
-
-    // Paused session
-    if (status.activeSession?.status === 'paused') {
-      const reason = status.activeSession.pauseReason;
-      items.push({
-        source: 'daemon',
-        label: 'Unpause session',
-        hint: reason ? `Paused: "${reason}"` : 'Session is paused',
-        value: 'daemon:unpause',
-      });
-    }
-
-    // Stale tasks
     const stale = status.staleTasks ?? [];
-    if (stale.length > 0) {
-      items.push({
-        source: 'daemon',
-        label: `Reset ${String(stale.length)} stale task${stale.length > 1 ? 's' : ''}`,
-        hint: stale.map((t) => `${t.id} (${t.owner})`).join(', '),
-        value: 'daemon:stale',
-      });
-    }
-
-    // Pending handoffs
     const handoffs = status.pendingHandoffs ?? [];
-    if (handoffs.length > 0) {
-      items.push({
-        source: 'daemon',
-        label: `Ack ${String(handoffs.length)} pending handoff${handoffs.length > 1 ? 's' : ''}`,
-        hint: handoffs.map((h) => `${h.from}→${h.to}`).join(', '),
-        value: 'daemon:handoffs',
-      });
-    }
-
-    // In-progress tasks (agents may need relaunching)
     const inProgress = status.inProgressTasks ?? [];
-    if (inProgress.length > 0 && stale.length === 0 && handoffs.length === 0) {
-      items.push({
-        source: 'daemon',
-        label: `Resume ${String(inProgress.length)} in-progress task${inProgress.length > 1 ? 's' : ''}`,
-        hint: inProgress.map((t) => `${t.id} (${t.owner})`).join(', '),
-        value: 'daemon:resume',
-      });
-    }
-
+    const candidates = [
+      buildPausedSessionItem(status.activeSession),
+      buildStaleTasksItem(stale),
+      buildHandoffsItem(handoffs),
+      buildInProgressItem(inProgress, stale, handoffs),
+    ];
+    const items = candidates.filter((x): x is ResumableItem => x !== null);
     return items.length > 0 ? items : null;
   } catch {
     return null;
@@ -158,7 +167,7 @@ function scanEvolveSession(evolveDir: string): ResumableItem | null {
     if (!fs.existsSync(statePath)) return null;
     const state = JSON.parse(fs.readFileSync(statePath, 'utf8')) as EvolveState;
 
-    if (!state.resumable) return null;
+    if (state.resumable !== true) return null;
     const status = state.status;
     if (status !== 'partial' && status !== 'failed' && status !== 'interrupted') return null;
 

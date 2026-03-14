@@ -197,6 +197,137 @@ Respond with ONLY a JSON object (no markdown, no explanation outside JSON):
 
 // ── Core Investigation ───────────────────────────────────────────────────────
 
+function makeBudgetExhaustedResult(budgetUsed: number, maxBudget: number): DiagnosisResult {
+  return {
+    diagnosis: 'fundamental',
+    explanation: 'Investigator token budget exhausted',
+    rootCause: `Used ${String(budgetUsed)}/${String(maxBudget)} tokens`,
+    corrective: null,
+    retryRecommendation: {
+      retryPhase: false,
+      modifiedPrompt: null,
+      preamble: null,
+      retryAgent: null,
+    },
+    tokens: { prompt: 0, completion: 0 },
+  };
+}
+
+function makePhaseNotConfiguredResult(phase: string): DiagnosisResult {
+  return {
+    diagnosis: 'fundamental',
+    explanation: `Phase '${phase}' not configured for investigation`,
+    rootCause: 'Phase not in investigator.phases config',
+    corrective: null,
+    retryRecommendation: {
+      retryPhase: false,
+      modifiedPrompt: null,
+      preamble: null,
+      retryAgent: null,
+    },
+    tokens: { prompt: 0, completion: 0 },
+  };
+}
+
+function makeTimeoutDiagnosis(failure: EvolveFailure): DiagnosisResult {
+  return {
+    diagnosis: 'transient',
+    explanation: `${failure.agent ?? failure.phase} timed out`,
+    rootCause: 'Operation exceeded timeout limit',
+    corrective: null,
+    retryRecommendation: {
+      retryPhase: true,
+      modifiedPrompt: null,
+      preamble: null,
+      retryAgent: null,
+    },
+    tokens: { prompt: 0, completion: 0 },
+  };
+}
+
+function buildFailureOptionalDetails(failure: EvolveFailure): string {
+  const parts: string[] = [];
+  if (failure.errorCategory !== undefined && failure.errorCategory !== '')
+    parts.push(`Error Category: ${failure.errorCategory}`);
+  if (failure.errorDetail !== undefined && failure.errorDetail !== '')
+    parts.push(`Error Detail: ${failure.errorDetail}`);
+  if (failure.errorContext !== undefined && failure.errorContext !== '')
+    parts.push(`Error Context: ${failure.errorContext}`);
+  if (failure.command !== undefined && failure.command !== '')
+    parts.push(`Command: ${failure.command} ${failure.args?.join(' ') ?? ''}`);
+  if (failure.promptSnippet !== undefined && failure.promptSnippet !== '')
+    parts.push(`Prompt Snippet: ${failure.promptSnippet}...`);
+  return parts.length > 0 ? `\n${parts.join('\n')}` : '';
+}
+
+function buildSnippetSections(failure: EvolveFailure): string {
+  const stderrSnippet = (failure.stderr ?? '').slice(-2000);
+  const stdoutSnippet = (failure.stdout ?? '').slice(-2000);
+  const contextSnippet = (failure.context ?? '').slice(-3000);
+  const parts: string[] = [];
+  if (stderrSnippet.length > 0)
+    parts.push(`## stderr (last 2KB)\n\`\`\`\n${stderrSnippet}\n\`\`\``);
+  if (stdoutSnippet.length > 0)
+    parts.push(`## stdout (last 2KB)\n\`\`\`\n${stdoutSnippet}\n\`\`\``);
+  if (contextSnippet.length > 0) parts.push(`## Additional Context\n${contextSnippet}`);
+  return parts.length > 0 ? `\n${parts.join('\n')}\n` : '';
+}
+
+function buildFailureUserMessage(failure: EvolveFailure): string {
+  const exitCode = failure.exitCode == null ? 'N/A' : String(failure.exitCode);
+  const details = buildFailureOptionalDetails(failure);
+  const snippets = buildSnippetSections(failure);
+  return `## Failed Phase: ${failure.phase}\nAgent: ${failure.agent ?? 'N/A'}\nAttempt: ${String(failure.attemptNumber ?? 1)}\nExit Code: ${exitCode}\nSignal: ${failure.signal ?? 'N/A'}\nError: ${failure.error ?? 'Unknown'}${details}\nTimed Out: no\n${snippets}\nDiagnose this failure and provide a structured recommendation.`;
+}
+
+async function runInvestigatorStream(
+  failure: EvolveFailure,
+  cfg: InvestigatorConfig,
+): Promise<DiagnosisResult> {
+  const userMessage = buildFailureUserMessage(failure);
+  const messages = [
+    { role: 'system', content: buildSystemPrompt() },
+    { role: 'user', content: userMessage },
+  ];
+  const { fullResponse, usage } = await streamCompletion(messages, {
+    model: cfg.model,
+    reasoningEffort: cfg.reasoningEffort,
+  });
+  const promptTokens = usage?.prompt_tokens ?? 0;
+  const completionTokens = usage?.completion_tokens ?? 0;
+  stats.promptTokens += promptTokens;
+  stats.completionTokens += completionTokens;
+  tokenBudgetUsed += promptTokens + completionTokens;
+  stats.investigations++;
+  const diagnosis = parseInvestigatorResponse(fullResponse);
+  diagnosis.tokens = { prompt: promptTokens, completion: completionTokens };
+  if (
+    (diagnosis.diagnosis === 'fixable' || diagnosis.diagnosis === 'transient') &&
+    diagnosis.retryRecommendation.retryPhase
+  ) {
+    stats.healed++;
+  }
+  logInvestigation(failure, diagnosis);
+  return diagnosis;
+}
+
+function makeInvestigatorErrorResult(err: unknown): DiagnosisResult {
+  const errMsg = err instanceof Error ? err.message : String(err);
+  return {
+    diagnosis: 'fundamental',
+    explanation: `Investigator call failed: ${errMsg}`,
+    rootCause: errMsg,
+    corrective: null,
+    retryRecommendation: {
+      retryPhase: false,
+      modifiedPrompt: null,
+      preamble: null,
+      retryAgent: null,
+    },
+    tokens: { prompt: 0, completion: 0 },
+  };
+}
+
 /**
  * Investigate a phase failure and return a diagnosis.
  *
@@ -213,134 +344,20 @@ Respond with ONLY a JSON object (no markdown, no explanation outside JSON):
  */
 export async function investigate(failure: EvolveFailure): Promise<DiagnosisResult> {
   const cfg = getInvestigatorConfig();
-
-  // Budget guard — don't spend more than our token budget
-  if (tokenBudgetUsed >= cfg.maxTokensBudget) {
-    return {
-      diagnosis: 'fundamental',
-      explanation: 'Investigator token budget exhausted',
-      rootCause: `Used ${String(tokenBudgetUsed)}/${String(cfg.maxTokensBudget)} tokens`,
-      corrective: null,
-      retryRecommendation: {
-        retryPhase: false,
-        modifiedPrompt: null,
-        preamble: null,
-        retryAgent: null,
-      },
-      tokens: { prompt: 0, completion: 0 },
-    };
-  }
-
-  // Phase guard — only investigate configured phases
-  if (!cfg.phases.includes(failure.phase)) {
-    return {
-      diagnosis: 'fundamental',
-      explanation: `Phase '${failure.phase}' not configured for investigation`,
-      rootCause: 'Phase not in investigator.phases config',
-      corrective: null,
-      retryRecommendation: {
-        retryPhase: false,
-        modifiedPrompt: null,
-        preamble: null,
-        retryAgent: null,
-      },
-      tokens: { prompt: 0, completion: 0 },
-    };
-  }
-
-  // Quick classification for obvious transients
+  if (tokenBudgetUsed >= cfg.maxTokensBudget)
+    return makeBudgetExhaustedResult(tokenBudgetUsed, cfg.maxTokensBudget);
+  if (!cfg.phases.includes(failure.phase)) return makePhaseNotConfiguredResult(failure.phase);
   if (failure.timedOut === true) {
-    const result = {
-      diagnosis: 'transient',
-      explanation: `${failure.agent ?? failure.phase} timed out`,
-      rootCause: 'Operation exceeded timeout limit',
-      corrective: null,
-      retryRecommendation: {
-        retryPhase: true,
-        modifiedPrompt: null,
-        preamble: null,
-        retryAgent: null,
-      },
-      tokens: { prompt: 0, completion: 0 },
-    };
+    const result = makeTimeoutDiagnosis(failure);
     logInvestigation(failure, result);
     stats.investigations++;
     return result;
   }
-
-  // Build the user message with failure context
-  const stderrSnippet = (failure.stderr ?? '').slice(-2000);
-  const stdoutSnippet = (failure.stdout ?? '').slice(-2000);
-  const contextSnippet = (failure.context ?? '').slice(-3000);
-
-  const userMessage = `## Failed Phase: ${failure.phase}
-Agent: ${failure.agent ?? 'N/A'}
-Attempt: ${String(failure.attemptNumber ?? 1)}
-Exit Code: ${failure.exitCode == null ? 'N/A' : String(failure.exitCode)}
-Signal: ${failure.signal ?? 'N/A'}
-Error: ${failure.error ?? 'Unknown'}
-${failure.errorCategory !== undefined && failure.errorCategory !== '' ? `Error Category: ${failure.errorCategory}` : ''}
-${failure.errorDetail !== undefined && failure.errorDetail !== '' ? `Error Detail: ${failure.errorDetail}` : ''}
-${failure.errorContext !== undefined && failure.errorContext !== '' ? `Error Context: ${failure.errorContext}` : ''}
-Timed Out: no
-${failure.command !== undefined && failure.command !== '' ? `Command: ${failure.command} ${failure.args?.join(' ') ?? ''}` : ''}
-${failure.promptSnippet !== undefined && failure.promptSnippet !== '' ? `Prompt Snippet: ${failure.promptSnippet}...` : ''}
-
-${stderrSnippet.length > 0 ? `## stderr (last 2KB)\n\`\`\`\n${stderrSnippet}\n\`\`\`\n` : ''}
-${stdoutSnippet.length > 0 ? `## stdout (last 2KB)\n\`\`\`\n${stdoutSnippet}\n\`\`\`\n` : ''}
-${contextSnippet.length > 0 ? `## Additional Context\n${contextSnippet}\n` : ''}
-
-Diagnose this failure and provide a structured recommendation.`;
-
-  const messages = [
-    { role: 'system', content: buildSystemPrompt() },
-    { role: 'user', content: userMessage },
-  ];
-
   try {
-    const { fullResponse, usage } = await streamCompletion(messages, {
-      model: cfg.model,
-      reasoningEffort: cfg.reasoningEffort,
-    }); // No streaming callback — we just want the final result
-
-    // Track token usage
-    const promptTokens = usage?.prompt_tokens ?? 0;
-    const completionTokens = usage?.completion_tokens ?? 0;
-    stats.promptTokens += promptTokens;
-    stats.completionTokens += completionTokens;
-    tokenBudgetUsed += promptTokens + completionTokens;
-    stats.investigations++;
-
-    // Parse the JSON response
-    const diagnosis = parseInvestigatorResponse(fullResponse);
-    diagnosis.tokens = { prompt: promptTokens, completion: completionTokens };
-
-    // Track heals
-    if (diagnosis.diagnosis === 'fixable' || diagnosis.diagnosis === 'transient') {
-      if (diagnosis.retryRecommendation.retryPhase) {
-        stats.healed++;
-      }
-    }
-
-    logInvestigation(failure, diagnosis);
-    return diagnosis;
+    return await runInvestigatorStream(failure, cfg);
   } catch (err) {
-    // Investigator itself failed — don't recurse, just return fundamental
     stats.investigations++;
-    const errMsg = err instanceof Error ? err.message : String(err);
-    const fallback: DiagnosisResult = {
-      diagnosis: 'fundamental',
-      explanation: `Investigator call failed: ${errMsg}`,
-      rootCause: errMsg,
-      corrective: null,
-      retryRecommendation: {
-        retryPhase: false,
-        modifiedPrompt: null,
-        preamble: null,
-        retryAgent: null,
-      },
-      tokens: { prompt: 0, completion: 0 },
-    };
+    const fallback = makeInvestigatorErrorResult(err);
     logInvestigation(failure, fallback);
     return fallback;
   }

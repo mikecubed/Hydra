@@ -89,6 +89,110 @@ export function supportsPipedStdio(): boolean {
   }
 }
 
+function closeFdSafe(fd: number | 'ignore' | null): void {
+  if (typeof fd === 'number') {
+    try {
+      fs.closeSync(fd);
+    } catch {
+      /* ignore */
+    }
+  }
+}
+
+function buildStdinFd(
+  stdinPath: string,
+  input: string | Buffer | undefined,
+  encoding: BufferEncoding,
+): number | 'ignore' {
+  if (input === undefined) return 'ignore';
+  const buf = Buffer.isBuffer(input) ? input : Buffer.from(input, encoding);
+  fs.writeFileSync(stdinPath, buf);
+  return fs.openSync(stdinPath, 'r');
+}
+
+function trySpawnWithPipes(
+  command: string,
+  args: string[],
+  opts: SpawnSyncCaptureOpts,
+  encoding: BufferEncoding,
+  maxOutputBytes: number,
+): SpawnSyncCaptureResult | null {
+  const r = spawnSync(command, Array.isArray(args) ? args : [], {
+    cwd: opts.cwd,
+    env: opts.env,
+    timeout: opts.timeout,
+    encoding,
+    windowsHide: opts.windowsHide !== false,
+    shell: Boolean(opts.shell),
+    input: opts.input,
+    maxBuffer: maxOutputBytes,
+  });
+  const isEPERM =
+    r.error !== undefined && ((r.error as NodeJS.ErrnoException).code ?? '') === 'EPERM';
+  if (isEPERM) return null;
+  return {
+    status: r.status ?? null,
+    stdout: r.stdout,
+    stderr: r.stderr,
+    error: r.error ?? null,
+    signal: r.signal ?? null,
+  };
+}
+
+function spawnWithTempFiles(
+  command: string,
+  args: string[],
+  opts: SpawnSyncCaptureOpts,
+  encoding: BufferEncoding,
+  maxOutputBytes: number,
+): SpawnSyncCaptureResult {
+  let tmpDir = '';
+  let stdinFd: number | 'ignore' = 'ignore';
+  let stdoutFd: number | null = null;
+  let stderrFd: number | null = null;
+
+  try {
+    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'hydra-proc-'));
+    const stdoutPath = path.join(tmpDir, 'stdout.txt');
+    const stderrPath = path.join(tmpDir, 'stderr.txt');
+
+    stdoutFd = fs.openSync(stdoutPath, 'w');
+    stderrFd = fs.openSync(stderrPath, 'w');
+    stdinFd = buildStdinFd(path.join(tmpDir, 'stdin.txt'), opts.input, encoding);
+
+    const r = spawnSync(command, Array.isArray(args) ? args : [], {
+      cwd: opts.cwd,
+      env: opts.env,
+      timeout: opts.timeout,
+      windowsHide: opts.windowsHide !== false,
+      shell: Boolean(opts.shell),
+      stdio: [stdinFd, stdoutFd, stderrFd],
+    });
+
+    // Close fds before reading so the OS flushes all writes.
+    closeFdSafe(stdinFd);
+    closeFdSafe(stdoutFd);
+    closeFdSafe(stderrFd);
+
+    const stdout = readFileTruncated(stdoutPath, maxOutputBytes, encoding);
+    const stderr = readFileTruncated(stderrPath, maxOutputBytes, encoding);
+
+    return {
+      status: r.status ?? null,
+      stdout,
+      stderr,
+      error: r.error ?? null,
+      signal: r.signal ?? null,
+    };
+  } finally {
+    // Guard against early exceptions leaving fds open.
+    closeFdSafe(stdinFd);
+    closeFdSafe(stdoutFd);
+    closeFdSafe(stderrFd);
+    safeRm(tmpDir);
+  }
+}
+
 /**
  * Spawn synchronously and capture stdout/stderr. Falls back to file-backed
  * stdio capture when pipes are forbidden (EPERM).
@@ -119,117 +223,9 @@ export function spawnSyncCapture(
   const forceNoPipes = Boolean(opts.noPipes ?? process.env['HYDRA_NO_PIPES']);
 
   if (!forceNoPipes) {
-    const r = spawnSync(command, Array.isArray(args) ? args : [], {
-      cwd: opts.cwd,
-      env: opts.env,
-      timeout: opts.timeout,
-      encoding,
-      windowsHide: opts.windowsHide !== false,
-      shell: Boolean(opts.shell),
-      input: opts.input,
-      maxBuffer: maxOutputBytes,
-    });
-
-    const stdout: string = r.stdout;
-    const stderr: string = r.stderr;
-
-    if (!(r.error && ((r.error as NodeJS.ErrnoException).code ?? '') === 'EPERM')) {
-      return {
-        status: r.status ?? null,
-        stdout,
-        stderr,
-        error: r.error ?? null,
-        signal: r.signal ?? null,
-      };
-    }
+    const result = trySpawnWithPipes(command, args, opts, encoding, maxOutputBytes);
+    if (result !== null) return result;
   }
 
-  // Fallback: no pipes. Use temp files for stdio.
-  let tmpDir = '';
-  let stdinFd: number | 'ignore' = 'ignore';
-  let stdoutFd = null;
-  let stderrFd = null;
-
-  try {
-    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'hydra-proc-'));
-    const _stdoutPath = path.join(tmpDir, 'stdout.txt');
-    const _stderrPath = path.join(tmpDir, 'stderr.txt');
-    const _stdinPath = path.join(tmpDir, 'stdin.txt');
-
-    stdoutFd = fs.openSync(_stdoutPath, 'w');
-    stderrFd = fs.openSync(_stderrPath, 'w');
-
-    if (opts.input !== undefined) {
-      const buf = Buffer.isBuffer(opts.input) ? opts.input : Buffer.from(opts.input, encoding);
-      fs.writeFileSync(_stdinPath, buf);
-      stdinFd = fs.openSync(_stdinPath, 'r');
-    }
-
-    const r = spawnSync(command, Array.isArray(args) ? args : [], {
-      cwd: opts.cwd,
-      env: opts.env,
-      timeout: opts.timeout,
-      windowsHide: opts.windowsHide !== false,
-      shell: Boolean(opts.shell),
-      stdio: [stdinFd, stdoutFd, stderrFd],
-    });
-
-    // Close fds before reading.
-    if (typeof stdinFd === 'number') {
-      try {
-        fs.closeSync(stdinFd);
-      } catch {
-        /* ignore */
-      }
-    }
-    if (typeof stdoutFd === 'number') {
-      try {
-        fs.closeSync(stdoutFd);
-      } catch {
-        /* ignore */
-      }
-    }
-    if (typeof stderrFd === 'number') {
-      try {
-        fs.closeSync(stderrFd);
-      } catch {
-        /* ignore */
-      }
-    }
-
-    const stdout = readFileTruncated(_stdoutPath, maxOutputBytes, encoding);
-    const stderr = readFileTruncated(_stderrPath, maxOutputBytes, encoding);
-
-    return {
-      status: r.status ?? null,
-      stdout,
-      stderr,
-      error: r.error ?? null,
-      signal: r.signal ?? null,
-    };
-  } finally {
-    // In case of early exceptions, close what we can.
-    if (typeof stdinFd === 'number') {
-      try {
-        fs.closeSync(stdinFd);
-      } catch {
-        /* ignore */
-      }
-    }
-    if (typeof stdoutFd === 'number') {
-      try {
-        fs.closeSync(stdoutFd);
-      } catch {
-        /* ignore */
-      }
-    }
-    if (typeof stderrFd === 'number') {
-      try {
-        fs.closeSync(stderrFd);
-      } catch {
-        /* ignore */
-      }
-    }
-    safeRm(tmpDir);
-  }
+  return spawnWithTempFiles(command, args, opts, encoding, maxOutputBytes);
 }

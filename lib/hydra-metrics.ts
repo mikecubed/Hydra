@@ -211,6 +211,50 @@ const activeHandles = new Map<string, ActiveHandle>();
  * @param {string} [model] - Model ID being used
  * @returns {string} Handle ID for recordCallComplete/Error
  */
+function parseCallTokenUsage(result: CallResult): {
+  realTokens: RealTokens | null;
+  costUsd: number;
+} {
+  let realTokens: RealTokens | null = null;
+  let costUsd = 0;
+  if (result.tokenUsage) {
+    const tu = result.tokenUsage;
+    realTokens = {
+      inputTokens: tu.inputTokens ?? 0,
+      outputTokens: tu.outputTokens ?? 0,
+      cacheCreationTokens: tu.cacheCreationTokens ?? 0,
+      cacheReadTokens: tu.cacheReadTokens ?? 0,
+      totalTokens: tu.totalTokens ?? (tu.inputTokens ?? 0) + (tu.outputTokens ?? 0),
+    };
+  }
+  if (result.costUsd != null) {
+    costUsd = result.costUsd;
+  }
+  return { realTokens, costUsd };
+}
+
+function accumulateTokensIntoSession(
+  agent: AgentMetrics,
+  realTokens: RealTokens,
+  costUsd: number,
+): void {
+  agent.sessionTokens.inputTokens += realTokens.inputTokens;
+  agent.sessionTokens.outputTokens += realTokens.outputTokens;
+  agent.sessionTokens.cacheCreationTokens += realTokens.cacheCreationTokens;
+  agent.sessionTokens.cacheReadTokens += realTokens.cacheReadTokens;
+  agent.sessionTokens.totalTokens += realTokens.totalTokens;
+  agent.sessionTokens.costUsd += costUsd;
+  agent.sessionTokens.callCount += 1;
+
+  metricsStore.sessionUsage.inputTokens += realTokens.inputTokens;
+  metricsStore.sessionUsage.outputTokens += realTokens.outputTokens;
+  metricsStore.sessionUsage.cacheCreationTokens += realTokens.cacheCreationTokens;
+  metricsStore.sessionUsage.cacheReadTokens += realTokens.cacheReadTokens;
+  metricsStore.sessionUsage.totalTokens += realTokens.totalTokens;
+  metricsStore.sessionUsage.costUsd += costUsd;
+  metricsStore.sessionUsage.callCount += 1;
+}
+
 export function recordCallStart(agentName: string, model?: string): string {
   handleCounter += 1;
   const handle = `call_${String(handleCounter)}_${String(Date.now())}`;
@@ -242,24 +286,7 @@ export function recordCallComplete(handle: string, result: CallResult): void {
   const outputLen = stdout.length + stderr.length;
   const estimatedTokens = Math.round(outputLen * TOKENS_PER_CHAR_ESTIMATE);
 
-  // Try to extract real token usage from agent output
-  let realTokens = null;
-  let costUsd = 0;
-
-  // Accept pre-parsed tokenUsage from callers (e.g. executor after parseOutput)
-  if (result.tokenUsage) {
-    const tu = result.tokenUsage;
-    realTokens = {
-      inputTokens: tu.inputTokens ?? 0,
-      outputTokens: tu.outputTokens ?? 0,
-      cacheCreationTokens: tu.cacheCreationTokens ?? 0,
-      cacheReadTokens: tu.cacheReadTokens ?? 0,
-      totalTokens: tu.totalTokens ?? (tu.inputTokens ?? 0) + (tu.outputTokens ?? 0),
-    };
-  }
-  if (result.costUsd != null) {
-    costUsd = result.costUsd;
-  }
+  const { realTokens, costUsd } = parseCallTokenUsage(result);
 
   agent.callsTotal += 1;
   agent.callsToday += 1;
@@ -272,21 +299,7 @@ export function recordCallComplete(handle: string, result: CallResult): void {
 
   // Accumulate real token usage into session counters
   if (realTokens) {
-    agent.sessionTokens.inputTokens += realTokens.inputTokens;
-    agent.sessionTokens.outputTokens += realTokens.outputTokens;
-    agent.sessionTokens.cacheCreationTokens += realTokens.cacheCreationTokens;
-    agent.sessionTokens.cacheReadTokens += realTokens.cacheReadTokens;
-    agent.sessionTokens.totalTokens += realTokens.totalTokens;
-    agent.sessionTokens.costUsd += costUsd;
-    agent.sessionTokens.callCount += 1;
-
-    metricsStore.sessionUsage.inputTokens += realTokens.inputTokens;
-    metricsStore.sessionUsage.outputTokens += realTokens.outputTokens;
-    metricsStore.sessionUsage.cacheCreationTokens += realTokens.cacheCreationTokens;
-    metricsStore.sessionUsage.cacheReadTokens += realTokens.cacheReadTokens;
-    metricsStore.sessionUsage.totalTokens += realTokens.totalTokens;
-    metricsStore.sessionUsage.costUsd += costUsd;
-    metricsStore.sessionUsage.callCount += 1;
+    accumulateTokensIntoSession(agent, realTokens, costUsd);
   }
 
   agent.history.push({

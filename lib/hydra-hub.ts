@@ -213,6 +213,15 @@ export function deregisterSession(id: string): void {
  * @param {string} [opts.cwd] - If provided, only return sessions for this project
  * @returns {object[]} Array of session objects
  */
+function tryRemoveStaleSession(p: string): void {
+  try {
+    fs.unlinkSync(p);
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code !== 'ENOENT') throw err;
+    // ENOENT = concurrently deleted, safe to skip
+  }
+}
+
 export function listSessions({ cwd }: { cwd?: string } = {}): Record<string, unknown>[] {
   ensureHubDir();
   const now = Date.now();
@@ -234,12 +243,7 @@ export function listSessions({ cwd }: { cwd?: string } = {}): Record<string, unk
         (session['lastUpdate'] ?? session['startedAt']) as string,
       ).getTime();
       if (now - lastUpdate > STALE_MS) {
-        try {
-          fs.unlinkSync(p);
-        } catch (err) {
-          if ((err as NodeJS.ErrnoException).code !== 'ENOENT') throw err;
-          // ENOENT = concurrently deleted, safe to skip
-        }
+        tryRemoveStaleSession(p);
         continue;
       }
       sessions.push(session);

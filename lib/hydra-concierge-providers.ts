@@ -26,7 +26,7 @@ export function detectAvailableProviders(): Array<{ provider: string; apiKey: st
   const available = [];
   for (const [provider, getKey] of Object.entries(PROVIDER_KEYS)) {
     const key = getKey();
-    if (key) {
+    if (key != null && key !== '') {
       available.push({ provider, apiKey: key });
     }
   }
@@ -158,21 +158,23 @@ export async function streamWithFallback(
       const providerCfg: Record<string, unknown> = { ...cfg, model: entry.model };
 
       // Map reasoning effort to provider-specific params
-      if (cfg['reasoningEffort'] && entry.provider === 'anthropic') {
+      if (
+        cfg['reasoningEffort'] != null &&
+        entry.provider === 'anthropic' &&
+        getModelReasoningCaps(entry.model).type === 'thinking'
+      ) {
+        const LEGACY_MAP: Record<string, string> = {
+          high: 'deep',
+          xhigh: 'deep',
+          medium: 'standard',
+          low: 'light',
+        };
+        const normalized =
+          LEGACY_MAP[cfg['reasoningEffort'] as string] ?? (cfg['reasoningEffort'] as string);
         const caps = getModelReasoningCaps(entry.model);
-        if (caps.type === 'thinking') {
-          const LEGACY_MAP: Record<string, string> = {
-            high: 'deep',
-            xhigh: 'deep',
-            medium: 'standard',
-            low: 'light',
-          };
-          const normalized =
-            LEGACY_MAP[cfg['reasoningEffort'] as string] || (cfg['reasoningEffort'] as string);
-          const budget = caps.budgets?.[normalized];
-          if (budget && normalized !== 'off') {
-            providerCfg['thinkingBudget'] = budget;
-          }
+        const budget = caps.budgets?.[normalized];
+        if (budget != null && budget !== 0 && normalized !== 'off') {
+          providerCfg['thinkingBudget'] = budget;
         }
       }
       // OpenAI: reasoningEffort passed through as-is (already handled by streamCompletion)

@@ -47,7 +47,7 @@ function tryParseJsonLine(line: string): unknown {
 
 /** Extract human-readable text from Codex --json JSONL output. */
 export function extractCodexText(raw: string | null | undefined): string | null | undefined {
-  if (!raw || typeof raw !== 'string') return raw;
+  if (raw == null || typeof raw !== 'string') return raw;
   const lines = raw.split('\n');
   const textParts: string[] = [];
   for (const line of lines) {
@@ -65,7 +65,7 @@ export function extractCodexText(raw: string | null | undefined): string | null 
 export function extractCodexUsage(
   raw: string | null | undefined,
 ): { inputTokens: number; outputTokens: number; totalTokens: number } | null {
-  if (!raw || typeof raw !== 'string') return null;
+  if (raw == null || typeof raw !== 'string') return null;
   const lines = raw.split('\n');
   let usage: { inputTokens: number; outputTokens: number; totalTokens: number } | null = null;
   for (const line of lines) {
@@ -87,7 +87,7 @@ export function extractCodexUsage(
 
 /** Extract error objects from Codex --json JSONL output. */
 export function extractCodexErrors(raw: string | null | undefined): string[] {
-  if (!raw || typeof raw !== 'string') return [];
+  if (raw == null || typeof raw !== 'string') return [];
   const lines = raw.split('\n');
   const errors: string[] = [];
   for (const line of lines) {
