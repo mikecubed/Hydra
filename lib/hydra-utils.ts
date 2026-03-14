@@ -122,7 +122,7 @@ export function parseArgs(argv: string[]): ParsedArgs {
     } else if (token.includes('=')) {
       const [rawKey, ...rawValue] = token.split('=');
       const key = rawKey.trim();
-      if (key) {
+      if (key !== '') {
         options[key] = rawValue.join('=').trim();
       }
     } else {
@@ -142,7 +142,7 @@ export function parseArgsWithCommand(argv: string[]): ParsedArgsWithCommand {
     } else if (token.includes('=')) {
       const [rawKey, ...rawValue] = token.split('=');
       const key = rawKey.trim();
-      if (key) {
+      if (key !== '') {
         options[key] = rawValue.join('=').trim();
       }
     } else {
@@ -170,8 +170,8 @@ export function requireOption(
   help = '',
 ): string {
   const value = getOption(options, key, '');
-  if (!value) {
-    const suffix = help ? `\n${help}` : '';
+  if (value === '') {
+    const suffix = help === '' ? '' : `\n${help}`;
     throw new Error(`Missing required option "${key}".${suffix}`);
   }
   return value;
@@ -181,8 +181,9 @@ export function getPrompt(
   options: Record<string, string | boolean>,
   positionals: string[],
 ): string {
-  if (options['prompt']) {
-    return String(options['prompt']);
+  const promptVal = options['prompt'];
+  if (typeof promptVal === 'string' && promptVal !== '') {
+    return promptVal;
   }
   if (positionals.length > 0) {
     return positionals.join(' ');
@@ -203,7 +204,7 @@ export function boolFlag(value: unknown, fallback = false): boolean {
 
 /** Split a value into a trimmed string array. Splits on commas only. */
 export function parseList(value: string | string[] | null | undefined): string[] {
-  if (!value) {
+  if (value == null || value === '') {
     return [];
   }
   if (Array.isArray(value)) {
@@ -241,7 +242,7 @@ export function parseJsonLoose(text: unknown): unknown {
   if (text == null) return null;
   if (typeof text !== 'string') return null;
   const raw = text.trim();
-  if (!raw) {
+  if (raw === '') {
     return null;
   }
 
@@ -298,8 +299,8 @@ export function runProcess(
   };
 
   const result = spawnSyncCapture(command, args, spawnOpts);
-  const stdout = result.stdout || '';
-  const stderr = result.stderr || '';
+  const stdout = typeof result.stdout === 'string' ? result.stdout : '';
+  const stderr = typeof result.stderr === 'string' ? result.stderr : '';
 
   if (result.error) {
     return {
@@ -324,75 +325,88 @@ export function runProcess(
 
 // --- Test Output Parsing ---
 
+interface TapCounters {
+  total: number;
+  passed: number;
+  failed: number;
+  durationMs: number;
+}
+
+function parseTapCounters(combined: string): TapCounters {
+  const totalMatch = combined.match(/^# tests\s+(\d+)/m);
+  const passMatch = combined.match(/^# pass\s+(\d+)/m);
+  const failMatch = combined.match(/^# fail\s+(\d+)/m);
+  const durationMatch = combined.match(/^# duration_ms\s+([\d.]+)/m);
+
+  const passed = passMatch == null ? 0 : Number.parseInt(passMatch[1], 10);
+  const failed = failMatch == null ? 0 : Number.parseInt(failMatch[1], 10);
+  let total = totalMatch == null ? 0 : Number.parseInt(totalMatch[1], 10);
+  const durationMs = durationMatch == null ? 0 : Number.parseFloat(durationMatch[1]);
+
+  if (totalMatch == null && (passMatch != null || failMatch != null)) {
+    total = passed + failed;
+  }
+
+  return { total, passed, failed, durationMs };
+}
+
+function extractFailureContext(combined: string, matchStr: string): string {
+  const idx = combined.indexOf(matchStr);
+  const afterFailure = combined.slice(idx + matchStr.length, idx + matchStr.length + 500);
+  const errorMatch = afterFailure.match(/\n\s{2,}(.+)/);
+  return errorMatch == null ? '' : errorMatch[1].trim();
+}
+
+function extractFailedTests(combined: string): TestFailure[] {
+  const failures: TestFailure[] = [];
+
+  for (const m of combined.matchAll(/^not ok \d+[\s-]+(.+)/gm)) {
+    failures.push({ name: m[1].trim(), error: extractFailureContext(combined, m[0]) });
+  }
+
+  for (const m of combined.matchAll(/^[ \t]*(?:✗|✖|×)\s+(.+)/gm)) {
+    const name = m[1].trim();
+    if (failures.some((f) => f.name === name)) continue;
+    failures.push({ name, error: extractFailureContext(combined, m[0]) });
+  }
+
+  return failures;
+}
+
+function buildTestSummary(
+  total: number,
+  passed: number,
+  failed: number,
+  failures: TestFailure[],
+): string {
+  if (total === 0 && failed === 0) return '';
+  if (failed > 0) {
+    const names = failures
+      .slice(0, 5)
+      .map((f) => (f.name.length > 40 ? `${f.name.slice(0, 37)}...` : f.name));
+    return `${String(failed)}/${String(total)} failed${names.length > 0 ? `: ${names.join(', ')}` : ''}`;
+  }
+  return `${String(passed)}/${String(total)} passed`;
+}
+
 /**
  * Parse Node.js test runner output (TAP / spec reporter) into structured results.
  * Gracefully returns zeros when output can't be parsed.
  */
 export function parseTestOutput(stdout = '', stderr = ''): ParseTestOutputResult {
   const combined = `${stdout}\n${stderr}`;
-  let total = 0,
-    passed = 0,
-    failed = 0,
-    durationMs = 0;
-  const failures = [];
+  const counters = parseTapCounters(combined);
+  let { total, failed } = counters;
+  const { passed, durationMs } = counters;
 
-  // TAP summary counters: # tests N, # pass N, # fail N, # duration_ms N
-  const totalMatch = combined.match(/^# tests\s+(\d+)/m);
-  const passMatch = combined.match(/^# pass\s+(\d+)/m);
-  const failMatch = combined.match(/^# fail\s+(\d+)/m);
-  const durationMatch = combined.match(/^# duration_ms\s+([\d.]+)/m);
+  const failures = extractFailedTests(combined);
 
-  if (totalMatch) total = Number.parseInt(totalMatch[1], 10);
-  if (passMatch) passed = Number.parseInt(passMatch[1], 10);
-  if (failMatch) failed = Number.parseInt(failMatch[1], 10);
-  if (durationMatch) durationMs = Number.parseFloat(durationMatch[1]);
-
-  // If we got fail count but not total, derive total from pass+fail
-  if (!totalMatch && (passMatch || failMatch)) {
-    total = passed + failed;
-  }
-
-  // Extract failed test names from TAP: "not ok N - description"
-  const tapFailures = combined.matchAll(/^not ok \d+[\s-]+(.+)/gm);
-  for (const m of tapFailures) {
-    const name = m[1].trim();
-    // Look for indented error line after the failure marker
-    const idx = combined.indexOf(m[0]);
-    const afterFailure = combined.slice(idx + m[0].length, idx + m[0].length + 500);
-    const errorMatch = afterFailure.match(/\n\s{2,}(.+)/);
-    failures.push({ name, error: errorMatch ? errorMatch[1].trim() : '' });
-  }
-
-  // Spec reporter: "✗ description" or "✖ description" (× also)
-  const specFailures = combined.matchAll(/^[ \t]*(?:✗|✖|×)\s+(.+)/gm);
-  for (const m of specFailures) {
-    const name = m[1].trim();
-    // Avoid duplicates if TAP already captured it
-    if (failures.some((f) => f.name === name)) continue;
-    const idx = combined.indexOf(m[0]);
-    const afterFailure = combined.slice(idx + m[0].length, idx + m[0].length + 500);
-    const errorMatch = afterFailure.match(/\n\s{2,}(.+)/);
-    failures.push({ name, error: errorMatch ? errorMatch[1].trim() : '' });
-  }
-
-  // If we found failures but no fail count from counters, use failures length
   if (failed === 0 && failures.length > 0) {
     failed = failures.length;
     if (total === 0) total = passed + failed;
   }
 
-  // Build summary string
-  let summary = '';
-  if (total > 0 || failed > 0) {
-    if (failed > 0) {
-      const names = failures
-        .slice(0, 5)
-        .map((f) => (f.name.length > 40 ? `${f.name.slice(0, 37)}...` : f.name));
-      summary = `${String(failed)}/${String(total)} failed${names.length > 0 ? `: ${names.join(', ')}` : ''}`;
-    } else {
-      summary = `${String(passed)}/${String(total)} passed`;
-    }
-  }
+  const summary = buildTestSummary(total, passed, failed, failures);
 
   return { total, passed, failed, durationMs, failures, summary };
 }
@@ -408,7 +422,7 @@ export async function request<T = unknown>(
   const headers: Record<string, string> = {
     Accept: 'application/json',
   };
-  if (ORCH_TOKEN) {
+  if (ORCH_TOKEN !== '') {
     headers['x-ai-orch-token'] = ORCH_TOKEN;
   }
   if (body !== null) {
@@ -440,15 +454,19 @@ export async function request<T = unknown>(
     }
   }
 
-  if (lastNetworkError) {
+  if (lastNetworkError != null) {
     throw new Error(
       `Unable to reach Hydra daemon at ${baseUrl}. Start it with "npm run hydra:start" or set url=http://127.0.0.1:4173.`,
     );
   }
 
-  const payload = (await response!.json().catch(() => ({}))) as { error?: string };
-  if (!response!.ok) {
-    throw new Error(payload.error ?? `HTTP ${String(response!.status)}`);
+  if (response === undefined) {
+    throw new Error(`No response received from ${baseUrl}${route}`);
+  }
+
+  const payload = (await response.json().catch(() => ({}))) as { error?: string };
+  if (!response.ok) {
+    throw new Error(payload.error ?? `HTTP ${String(response.status)}`);
   }
 
   return payload as T;
@@ -473,7 +491,7 @@ export function sanitizeOwner(owner: unknown): string {
 }
 
 export function normalizeTask(item: unknown, fallbackOwner = 'unassigned'): NormalizedTask | null {
-  if (!item || typeof item !== 'object') {
+  if (item == null || typeof item !== 'object') {
     return null;
   }
   const record = item as Record<string, unknown>;
@@ -481,13 +499,23 @@ export function normalizeTask(item: unknown, fallbackOwner = 'unassigned'): Norm
     const v = record[key];
     return typeof v === 'string' ? v : '';
   };
-  const title = (str('title') || str('task')).trim();
-  if (!title) {
+  const rawTitle = str('title');
+  const title = (rawTitle === '' ? str('task') : rawTitle).trim();
+  if (title === '') {
     return null;
   }
-  const owner = sanitizeOwner(str('owner') || fallbackOwner);
-  const done = (str('definition_of_done') || str('done') || str('acceptance')).trim();
-  const rationale = (str('rationale') || str('why')).trim();
+  const rawOwner = str('owner');
+  const owner = sanitizeOwner(rawOwner === '' ? fallbackOwner : rawOwner);
+  const rawDone = str('definition_of_done');
+  const rawDoneFallback1 = str('done');
+  const rawDoneFallback2 = str('acceptance');
+  let doneSource = rawDone;
+  if (doneSource === '') doneSource = rawDoneFallback1;
+  if (doneSource === '') doneSource = rawDoneFallback2;
+  const done = doneSource.trim();
+  const rawRationale = str('rationale');
+  const rawRationaleFallback = str('why');
+  const rationale = (rawRationale === '' ? rawRationaleFallback : rawRationale).trim();
   return { owner, title, done, rationale };
 }
 
@@ -572,34 +600,53 @@ export function selectTandemPair(
   return { lead, follow };
 }
 
-/**
- * Local heuristic classifier for prompt complexity.
- * Returns { tier, taskType, suggestedAgent, confidence, reason }.
- *
- * Tiers:
- *   - simple:   skip triage, dispatch directly (confidence >= 0.7)
- *   - moderate: run mini-round triage (default)
- *   - complex:  full council deliberation
- */
-export function classifyPrompt(promptText: unknown, agents?: string[]): ClassifyPromptResult {
-  const text = (typeof promptText === 'string' ? promptText : '').trim();
-  if (!text) {
-    return {
-      tier: 'moderate',
-      taskType: 'implementation',
-      suggestedAgent: 'claude',
-      confidence: 0.3,
-      reason: 'Empty prompt',
-    };
+interface SignalScores {
+  simpleScore: number;
+  complexScore: number;
+  signals: string[];
+  mentionedAgent: string | undefined;
+  taskType: string;
+}
+
+function scoreComplexityMarkers(text: string, lowerText: string, signals: string[]): number {
+  let complexScore = 0;
+
+  if (COMPLEX_MARKERS.test(lowerText)) {
+    complexScore += 0.35;
+    signals.push('ambiguity/decision markers');
+  }
+  if (STRATEGIC_MARKERS.test(lowerText)) {
+    complexScore += 0.25;
+    signals.push('strategic/design intent');
   }
 
+  const sentenceCount = text.split(/[.!?]+/).filter((s) => s.trim().length > 5).length;
+  if (sentenceCount >= 3) {
+    complexScore += 0.2;
+    signals.push(`${String(sentenceCount)} sentences`);
+  }
+  if (text.includes('?')) {
+    complexScore += 0.15;
+    signals.push('contains question');
+  }
+
+  const verbPhrasePattern =
+    /\b(fix|add|create|implement|update|refactor|remove|delete|write|build|change|move|rename)\b/gi;
+  const verbMatches = lowerText.match(verbPhrasePattern) ?? [];
+  if (verbMatches.length >= 2 && MULTI_OBJECTIVE.test(lowerText)) {
+    complexScore += 0.2;
+    signals.push('multiple objectives');
+  }
+
+  return complexScore;
+}
+
+function computeSignalScores(text: string, lowerText: string): SignalScores {
   const words = text.split(/\s+/);
   const wordCount = words.length;
-  const lowerText = text.toLowerCase();
-
   let simpleScore = 0;
-  let complexScore = 0;
-  const signals = [];
+  let wordCountComplexBonus = 0;
+  const signals: string[] = [];
 
   // Word count signals
   if (wordCount <= 12) {
@@ -609,7 +656,7 @@ export function classifyPrompt(promptText: unknown, agents?: string[]): Classify
     simpleScore += 0.1;
     signals.push('medium prompt');
   } else if (wordCount >= 40) {
-    complexScore += 0.15;
+    wordCountComplexBonus = 0.15;
     signals.push('long prompt');
   }
 
@@ -621,7 +668,7 @@ export function classifyPrompt(promptText: unknown, agents?: string[]): Classify
     signals.push('imperative action');
   }
 
-  // File path detection (.mjs, .ts, .js, .json, path separators in context)
+  // File path detection
   if (
     /(?:\/[\w.-]+\.[\w]+|\\[\w.-]+\.[\w]+|\.\w{1,5}\b)/.test(text) &&
     /\.(mjs|js|ts|tsx|jsx|json|css|html|py|md|yml|yaml)/.test(lowerText)
@@ -630,57 +677,32 @@ export function classifyPrompt(promptText: unknown, agents?: string[]): Classify
     signals.push('contains file paths');
   }
 
-  // Task type classification via existing classifyTask
   const taskType = classifyTask(text, '');
-
-  // Strong single-task-type match
   if (taskType !== 'implementation') {
     simpleScore += 0.1;
     signals.push(`clear task type: ${taskType}`);
   }
 
-  // Agent name mention → user targeting specific agent
   const mentionedAgent = AGENT_NAMES.find((a) => lowerText.includes(a));
-  if (mentionedAgent) {
+  if (mentionedAgent != null) {
     simpleScore += 0.2;
     signals.push(`mentions agent: ${mentionedAgent}`);
   }
 
-  // Complexity markers
-  if (COMPLEX_MARKERS.test(lowerText)) {
-    complexScore += 0.35;
-    signals.push('ambiguity/decision markers');
-  }
+  const complexScore = wordCountComplexBonus + scoreComplexityMarkers(text, lowerText, signals);
 
-  // Strategic/design-level intent
-  if (STRATEGIC_MARKERS.test(lowerText)) {
-    complexScore += 0.25;
-    signals.push('strategic/design intent');
-  }
+  return { simpleScore, complexScore, signals, mentionedAgent, taskType };
+}
 
-  // Multi-sentence prompts (3+ sentences) suggest complex thinking
-  const sentenceCount = text.split(/[.!?]+/).filter((s) => s.trim().length > 5).length;
-  if (sentenceCount >= 3) {
-    complexScore += 0.2;
-    signals.push(`${String(sentenceCount)} sentences`);
-  }
-
-  // Question marks suggest uncertainty
-  if (text.includes('?')) {
-    complexScore += 0.15;
-    signals.push('contains question');
-  }
-
-  // Multiple verb phrases joined by "and" → multi-objective
-  const verbPhrasePattern =
-    /\b(fix|add|create|implement|update|refactor|remove|delete|write|build|change|move|rename)\b/gi;
-  const verbMatches = lowerText.match(verbPhrasePattern) ?? [];
-  if (verbMatches.length >= 2 && MULTI_OBJECTIVE.test(lowerText)) {
-    complexScore += 0.2;
-    signals.push('multiple objectives');
-  }
-
-  // Determine tier
+function determineTierAndRoute(
+  scores: SignalScores,
+  lowerText: string,
+  agents: string[] | undefined,
+): Pick<
+  ClassifyPromptResult,
+  'tier' | 'confidence' | 'routeStrategy' | 'suggestedAgent' | 'tandemPair'
+> {
+  const { simpleScore, complexScore, signals, mentionedAgent, taskType } = scores;
   const netScore = simpleScore - complexScore;
   let tier: 'simple' | 'moderate' | 'complex';
   let confidence: number;
@@ -696,16 +718,13 @@ export function classifyPrompt(promptText: unknown, agents?: string[]): Classify
     confidence = 0.5 + Math.abs(netScore) * 0.2;
   }
 
-  // Tandem-indicator detection: two-phase language upgrades simple→tandem route
   const hasTandemIndicator = TANDEM_INDICATORS.test(lowerText);
   if (hasTandemIndicator) {
     signals.push('two-phase language');
   }
 
-  // Suggested agent
   const suggestedAgent: string = mentionedAgent ?? bestAgentFor(taskType);
 
-  // Route strategy: single / tandem / council
   let routeStrategy: 'single' | 'tandem' | 'council';
   if (tier === 'simple' && !hasTandemIndicator) {
     routeStrategy = 'single';
@@ -715,20 +734,48 @@ export function classifyPrompt(promptText: unknown, agents?: string[]): Classify
     routeStrategy = 'tandem';
   }
 
-  // Resolve tandem pair (null for single/council). When an agents list is
-  // provided (e.g. from the dispatch layer with availability-filtered agents),
-  // it is passed through so unavailable agents are skipped.
   const tandemPair =
     routeStrategy === 'tandem' ? selectTandemPair(taskType, suggestedAgent, agents) : null;
 
   return {
     tier,
-    taskType,
-    suggestedAgent,
     confidence: Math.round(confidence * 100) / 100,
-    reason: signals.join(', ') || 'default classification',
     routeStrategy,
+    suggestedAgent,
     tandemPair,
+  };
+}
+
+/**
+ * Local heuristic classifier for prompt complexity.
+ * Returns { tier, taskType, suggestedAgent, confidence, reason }.
+ *
+ * Tiers:
+ *   - simple:   skip triage, dispatch directly (confidence >= 0.7)
+ *   - moderate: run mini-round triage (default)
+ *   - complex:  full council deliberation
+ */
+export function classifyPrompt(promptText: unknown, agents?: string[]): ClassifyPromptResult {
+  const text = (typeof promptText === 'string' ? promptText : '').trim();
+  if (text === '') {
+    return {
+      tier: 'moderate',
+      taskType: 'implementation',
+      suggestedAgent: 'claude',
+      confidence: 0.3,
+      reason: 'Empty prompt',
+    };
+  }
+
+  const lowerText = text.toLowerCase();
+  const scores = computeSignalScores(text, lowerText);
+  const tierResult = determineTierAndRoute(scores, lowerText, agents);
+  const reasonStr = scores.signals.join(', ');
+
+  return {
+    ...tierResult,
+    taskType: scores.taskType,
+    reason: reasonStr === '' ? 'default classification' : reasonStr,
   };
 }
 
@@ -770,7 +817,7 @@ export async function generateSpec(
       permissionMode: 'plan',
     });
 
-    if (!result.ok || !result.output) {
+    if (!result.ok || result.output === '') {
       return null;
     }
 

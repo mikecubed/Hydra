@@ -522,7 +522,21 @@ describe('hydra-nightly phase contracts', () => {
       budgetCfg: Record<string, unknown>,
     ) => unknown[];
     const phaseExecute = loadHelper(nightlySourcePath, 'phaseExecute', {
-      functions: ['formatDuration', 'buildThresholds'],
+      functions: [
+        'formatDuration',
+        'buildThresholds',
+        'resolvePhaseConfig',
+        'makeBudget',
+        'checkBudgetAndTime',
+        'selectAgentAndModel',
+        'prepareBranch',
+        'makeProgressCallback',
+        'applyInvestigatorHeal',
+        'notifyDoctor',
+        'assessTaskResult',
+        'buildZeroResult',
+        'buildTaskResult',
+      ],
       context: {
         log: noopLog,
         renderProgress: () => {},
