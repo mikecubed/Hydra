@@ -29,7 +29,10 @@ import {
   parseJsonLoose,
   ensureDir,
 } from './hydra-utils.ts';
-import { executeAgent } from './hydra-shared/agent-executor.ts';
+import {
+  DefaultAgentExecutor,
+  type IAgentExecutor,
+} from './hydra-shared/agent-executor.ts';
 import {
   sectionHeader,
   label,
@@ -52,6 +55,18 @@ const DEFAULT_DAEMON_URL = process.env['AI_ORCH_URL'] ?? 'http://127.0.0.1:4173'
 const DEFAULT_TIMEOUT_MS = 1000 * 60 * 7;
 
 const MODE_DOWNSHIFT = { performance: 'balanced', balanced: 'economy' };
+
+// Module-level executor — replace via setDispatchExecutor() for testing
+let _dispatchExecutor: IAgentExecutor = new DefaultAgentExecutor();
+
+/** Override the agent executor used by this module (primarily for testing).
+ *  Returns the displaced executor so callers can restore it in teardown:
+ *  `const prev = setDispatchExecutor(mock); ... setDispatchExecutor(prev)` */
+export function setDispatchExecutor(executor: IAgentExecutor): IAgentExecutor {
+  const previous = _dispatchExecutor;
+  _dispatchExecutor = executor;
+  return previous;
+}
 
 function usageGuard(_agent: string) {
   try {
@@ -83,7 +98,7 @@ function usageGuard(_agent: string) {
 
 async function callAgent(agent: string, prompt: string, timeoutMs: number, model?: string | null) {
   usageGuard(agent);
-  return executeAgent(agent, prompt, {
+  return _dispatchExecutor.executeAgent(agent, prompt, {
     cwd: config.projectRoot,
     timeoutMs,
     ...(model == null ? {} : { modelOverride: model }),

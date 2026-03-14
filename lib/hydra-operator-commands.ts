@@ -25,7 +25,10 @@ import {
   formatEffortDisplay,
   setAgentEnabled,
 } from './hydra-agents.ts';
-import { executeAgent } from './hydra-shared/agent-executor.ts';
+import {
+  DefaultAgentExecutor,
+  type IAgentExecutor,
+} from './hydra-shared/agent-executor.ts';
 import { loadHydraConfig, saveHydraConfig } from './hydra-config.ts';
 import type { ProjectConfig } from './hydra-config.ts';
 import { request } from './hydra-utils.ts';
@@ -55,6 +58,8 @@ export interface CommandContext {
   initStatusBar: (agents: string[]) => void;
   destroyStatusBar: () => void;
   drawStatusBar: () => void;
+  /** Optional executor for agent calls — defaults to DefaultAgentExecutor when absent. */
+  executor?: IAgentExecutor;
 }
 
 export async function handleModelCommand(ctx: CommandContext, args: string): Promise<void> {
@@ -394,6 +399,7 @@ export async function handleTasksCommand(ctx: CommandContext, args: string): Pro
 }
 
 export async function handleAgentsCommand(ctx: CommandContext, args: string): Promise<void> {
+  const executor: IAgentExecutor = ctx.executor ?? new DefaultAgentExecutor();
   const agentParts = args.split(/\s+/);
   const agentSubCmd = agentParts[0] || '';
 
@@ -538,7 +544,7 @@ export async function handleAgentsCommand(ctx: CommandContext, args: string): Pr
       if (agentDef) {
         console.log(`  Testing agent "${targetName}"...`);
         try {
-          const result = await executeAgent(targetName, 'Say "hello" in one sentence.');
+          const result = await executor.executeAgent(targetName, 'Say "hello" in one sentence.');
           if (result.ok) {
             console.log(
               `  ${SUCCESS('OK')} ${DIM(result.output.slice(0, 200) || '(empty output)')}`,

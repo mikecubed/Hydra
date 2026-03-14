@@ -833,3 +833,36 @@ export async function executeAgentWithRecovery(
     });
   }
 }
+
+// ── IAgentExecutor interface & DefaultAgentExecutor ───────────────────────────
+
+/**
+ * Interface for agent execution, enabling dependency injection and testability.
+ * Consumers should depend on this interface rather than importing the free functions directly.
+ */
+export interface IAgentExecutor {
+  executeAgent(agent: string, prompt: string, opts?: ExecuteAgentOpts): Promise<ExecuteResult>;
+  executeAgentWithRecovery(
+    agent: string,
+    prompt: string,
+    opts?: ExecuteAgentOpts,
+  ): Promise<ExecuteResult>;
+}
+
+/**
+ * Default implementation of IAgentExecutor that delegates to the module-level
+ * executeAgent / executeAgentWithRecovery functions.
+ */
+export class DefaultAgentExecutor implements IAgentExecutor {
+  executeAgent(agent: string, prompt: string, opts?: ExecuteAgentOpts): Promise<ExecuteResult> {
+    return executeAgent(agent, prompt, opts);
+  }
+
+  executeAgentWithRecovery(
+    agent: string,
+    prompt: string,
+    opts?: ExecuteAgentOpts,
+  ): Promise<ExecuteResult> {
+    return executeAgentWithRecovery(agent, prompt, opts);
+  }
+}
