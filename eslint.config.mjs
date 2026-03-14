@@ -20,6 +20,7 @@ export default [
       'docs/**',
       'test/fixtures/**',
       'test/golden/**',
+      '.worktrees/**',
     ],
   },
 
