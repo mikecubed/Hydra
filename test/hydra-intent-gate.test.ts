@@ -162,7 +162,7 @@ describe('gateIntent — passthrough and flags', () => {
   it('returns rewritten=true when LLM rewrite succeeds and confidence is low', async () => {
     const result = await gateIntent('do the thing', {
       confidenceThreshold: 0.99,
-      rewriteFn: async () => 'implement the feature in src/index.ts',
+      rewriteFn: () => Promise.resolve('implement the feature in src/index.ts'),
     });
     assert.equal(result.rewritten, true);
     assert.equal(result.text, 'implement the feature in src/index.ts');
@@ -185,7 +185,7 @@ describe('gateIntent — passthrough and flags', () => {
       onLlmCall: () => {
         llmCalled = true;
       },
-      rewriteFn: async (t) => t,
+      rewriteFn: (t) => Promise.resolve(t),
     });
     assert.equal(llmCalled, true);
   });
@@ -193,7 +193,7 @@ describe('gateIntent — passthrough and flags', () => {
   it('falls back gracefully when rewriteFn throws', async () => {
     const result = await gateIntent('do the thing', {
       confidenceThreshold: 0.99,
-      rewriteFn: async () => {
+      rewriteFn: () => {
         throw new Error('LLM failure');
       },
     });
@@ -205,7 +205,7 @@ describe('gateIntent — passthrough and flags', () => {
   it('falls back gracefully when rewriteFn returns null', async () => {
     const result = await gateIntent('do the thing', {
       confidenceThreshold: 0.99,
-      rewriteFn: async () => null,
+      rewriteFn: () => Promise.resolve(null),
     });
     assert.ok(result.text);
     assert.equal(result.rewritten, false);
@@ -214,7 +214,7 @@ describe('gateIntent — passthrough and flags', () => {
   it('falls back gracefully when rewriteFn returns empty string', async () => {
     const result = await gateIntent('do the thing', {
       confidenceThreshold: 0.99,
-      rewriteFn: async () => '',
+      rewriteFn: () => Promise.resolve(''),
     });
     assert.equal(result.rewritten, false);
   });
@@ -222,7 +222,7 @@ describe('gateIntent — passthrough and flags', () => {
   it('trims whitespace from rewritten text', async () => {
     const result = await gateIntent('do the thing', {
       confidenceThreshold: 0.99,
-      rewriteFn: async () => '  implement the service  ',
+      rewriteFn: () => Promise.resolve('  implement the service  '),
     });
     assert.equal(result.text, 'implement the service');
   });

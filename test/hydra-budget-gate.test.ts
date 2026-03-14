@@ -109,7 +109,7 @@ describe('DefaultBudgetGate', () => {
         assert.equal(
           gate.isExceeded(daily, weekly),
           expected,
-          `daily=${daily}, weekly=${weekly} should be ${String(expected)}`,
+          `daily=${String(daily)}, weekly=${String(weekly)} should be ${String(expected)}`,
         );
       }
     });

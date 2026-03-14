@@ -474,7 +474,7 @@ describe('getProviderPresets', () => {
   it('every preset is a plain object', () => {
     const presets = getProviderPresets();
     for (const preset of presets) {
-      assert.ok(preset !== null && typeof preset === 'object' && !Array.isArray(preset));
+      assert.ok(typeof preset === 'object' && !Array.isArray(preset));
     }
   });
 });
@@ -499,7 +499,7 @@ describe('AFFINITY_PRESETS', () => {
 
   it('"code-focused" preset has implementation affinity > 0.5', () => {
     assert.ok(
-      (AFFINITY_PRESETS['code-focused']['implementation'] ?? 0) > 0.5,
+      AFFINITY_PRESETS['code-focused']['implementation'] > 0.5,
       '"code-focused" implementation affinity must favour code',
     );
   });

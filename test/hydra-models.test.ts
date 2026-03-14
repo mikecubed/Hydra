@@ -45,7 +45,7 @@ describe('fetchModels — unknown agent name', () => {
 
   it('always returns a plain object with models array and source string', async () => {
     const result = await fetchModels('nonexistent');
-    assert.ok(result !== null && typeof result === 'object');
+    assert.ok(typeof result === 'object');
     assert.ok(Array.isArray(result.models));
     assert.ok(typeof result.source === 'string');
   });
