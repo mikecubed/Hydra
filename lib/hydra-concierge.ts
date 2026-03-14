@@ -311,15 +311,18 @@ function buildSystemPrompt(context: ConciergeContext = {}): string {
     awarenessBlock += `\n\n${context.codebaseBaseline}`;
   }
 
-  // Route codebase context through buildAgentContext — reads HYDRA.md / CLAUDE.md
-  // so the concierge always has live project context alongside any curated baseline.
-  try {
-    const agentCtx = buildAgentContext('claude', {}, null, null);
-    if (agentCtx !== '') {
-      awarenessBlock += `\n\n${agentCtx}`;
+  // Route codebase context through buildAgentContext only when codebaseBaseline is absent.
+  // If a curated baseline is already present it will have been sourced from the same
+  // HYDRA.md / CLAUDE.md files, so calling buildAgentContext would duplicate that content.
+  if (context.codebaseBaseline == null || context.codebaseBaseline === '') {
+    try {
+      const agentCtx = buildAgentContext('claude', {}, null, null);
+      if (agentCtx !== '') {
+        awarenessBlock += `\n\n${agentCtx}`;
+      }
+    } catch {
+      // buildAgentContext is best-effort; gracefully degrade if project resolution fails
     }
-  } catch {
-    // buildAgentContext is best-effort; gracefully degrade if project resolution fails
   }
 
   // Always-on self-awareness blocks (operator-provided)
