@@ -450,9 +450,16 @@ export async function executeAgent(
     child.stdout?.on('data', (d: string) => {
       stdoutBytes += Buffer.byteLength(d);
       stdoutChunks.push(d);
+      // Drop oldest chunks while over the limit (requires ≥2 chunks to avoid
+      // discarding all context — handled separately for single-chunk overflow).
       while (stdoutBytes > maxOutputBytes && stdoutChunks.length > 1) {
         const dropped = stdoutChunks.shift() ?? '';
         stdoutBytes -= Buffer.byteLength(dropped);
+      }
+      // Single-chunk overflow: hard-truncate to keep exactly maxOutputBytes.
+      if (stdoutChunks.length === 1 && stdoutBytes > maxOutputBytes) {
+        stdoutChunks[0] = stdoutChunks[0].slice(0, maxOutputBytes);
+        stdoutBytes = maxOutputBytes;
       }
     });
 
