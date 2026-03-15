@@ -14,7 +14,7 @@
  * SC-008: Multi-agent activity attribution
  * SC-009: Multi-session conflict resolution
  */
-import { describe, it, beforeEach } from 'node:test';
+import { describe, it, beforeEach, afterEach } from 'node:test';
 import assert from 'node:assert/strict';
 import { ConversationStore } from '../lib/daemon/conversation-store.ts';
 import { StreamManager } from '../lib/daemon/stream-manager.ts';
@@ -498,5 +498,192 @@ describe('Instruction queue integration', () => {
       attribution: operatorAttribution,
     });
     assert.equal(turn.instruction, 'Task A');
+  });
+});
+
+// ── Daemon-level HTTP integration: executor wiring ───────────────────────────
+
+import http from 'node:http';
+import { handleConversationRoute } from '../lib/daemon/conversation-routes.ts';
+import type { ConversationRouteDeps } from '../lib/daemon/conversation-routes.ts';
+
+function httpRequest(
+  port: number,
+  method: string,
+  path: string,
+  body?: unknown,
+): Promise<{ status: number; data: Record<string, unknown> }> {
+  return new Promise((resolve, reject) => {
+    const payload = body === undefined ? undefined : JSON.stringify(body);
+    const req = http.request(
+      {
+        hostname: '127.0.0.1',
+        port,
+        path,
+        method,
+        headers: payload
+          ? { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(payload) }
+          : undefined,
+      },
+      (res) => {
+        let text = '';
+        res.setEncoding('utf8');
+        res.on('data', (chunk: string) => {
+          text += chunk;
+        });
+        res.on('end', () => {
+          let data: Record<string, unknown> = {};
+          try {
+            data = JSON.parse(text) as Record<string, unknown>;
+          } catch {
+            /* keep empty */
+          }
+          resolve({ status: res.statusCode ?? 0, data });
+        });
+      },
+    );
+    req.on('error', reject);
+    if (payload) req.write(payload);
+    req.end();
+  });
+}
+
+describe('Daemon-level HTTP: submit/retry with executor', () => {
+  let server: http.Server;
+  let port: number;
+  let httpStore: ConversationStore;
+  let httpStreamManager: StreamManager;
+  let executedTurns: Array<{ turnId: string; instruction: string }>;
+
+  beforeEach(async () => {
+    httpStore = new ConversationStore();
+    httpStreamManager = new StreamManager(httpStore);
+    executedTurns = [];
+
+    const deps: ConversationRouteDeps = {
+      store: httpStore,
+      streamManager: httpStreamManager,
+      executeTurn(turnId: string, instruction: string) {
+        executedTurns.push({ turnId, instruction });
+        httpStreamManager.emitEvent(turnId, 'text-delta', { text: `echo: ${instruction}` });
+        httpStreamManager.completeStream(turnId);
+      },
+    };
+
+    server = http.createServer((req, res) => {
+      if (!handleConversationRoute(req, res, deps)) {
+        res.writeHead(404);
+        res.end('Not found');
+      }
+    });
+
+    await new Promise<void>((resolve) => {
+      server.listen(0, '127.0.0.1', () => {
+        const addr = server.address();
+        port = typeof addr === 'object' && addr ? addr.port : 0;
+        resolve();
+      });
+    });
+  });
+
+  afterEach(() => {
+    server.close();
+  });
+
+  it('submit through HTTP invokes executor and reaches completed state', async () => {
+    // Create conversation
+    const createRes = await httpRequest(port, 'POST', '/conversations', { title: 'HTTP test' });
+    assert.equal(createRes.status, 201);
+    const convId = createRes.data['id'] as string;
+    assert.ok(convId);
+
+    // Submit instruction
+    const submitRes = await httpRequest(port, 'POST', `/conversations/${convId}/turns`, {
+      instruction: 'Explain architecture',
+    });
+    assert.equal(submitRes.status, 201);
+    const turnObj = submitRes.data['turn'] as Record<string, unknown>;
+    const turnId = turnObj['id'] as string;
+    assert.ok(submitRes.data['streamId']);
+
+    // Verify executor was called
+    assert.equal(executedTurns.length, 1);
+    assert.equal(executedTurns[0].instruction, 'Explain architecture');
+
+    // Verify turn reached terminal state
+    const finalTurn = httpStore.getTurn(turnId);
+    assert.equal(finalTurn?.status, 'completed');
+    assert.equal(finalTurn?.response, 'echo: Explain architecture');
+
+    // Verify stream has completed events
+    const events = httpStreamManager.getStreamEvents(turnId);
+    assert.ok(events.some((e) => e.kind === 'stream-started'));
+    assert.ok(events.some((e) => e.kind === 'stream-completed'));
+  });
+
+  it('retry through HTTP invokes executor on new turn', async () => {
+    const conv = httpStore.createConversation();
+    const turn = httpStore.appendTurn(conv.id, {
+      kind: 'operator',
+      instruction: 'Original',
+      attribution: operatorAttribution,
+    });
+    httpStore.finalizeTurn(turn.id, 'failed', 'Error');
+
+    const retryRes = await httpRequest(
+      port,
+      'POST',
+      `/conversations/${conv.id}/turns/${turn.id}/retry`,
+    );
+    assert.equal(retryRes.status, 201);
+    const newTurn = retryRes.data['turn'] as Record<string, unknown>;
+    const newTurnId = newTurn['id'] as string;
+
+    assert.equal(executedTurns.length, 1);
+    assert.equal(executedTurns[0].turnId, newTurnId);
+
+    const finalTurn = httpStore.getTurn(newTurnId);
+    assert.equal(finalTurn?.status, 'completed');
+  });
+
+  it('submit through HTTP with failing executor reaches failed state', async () => {
+    // Replace server with one using a failing executor
+    server.close();
+    const failDeps: ConversationRouteDeps = {
+      store: httpStore,
+      streamManager: httpStreamManager,
+      executeTurn(turnId: string) {
+        httpStreamManager.failStream(turnId, 'Agent unavailable');
+      },
+    };
+    const failServer = http.createServer((req, res) => {
+      if (!handleConversationRoute(req, res, failDeps)) {
+        res.writeHead(404);
+        res.end('Not found');
+      }
+    });
+    await new Promise<void>((resolve) => {
+      failServer.listen(0, '127.0.0.1', () => {
+        const addr = failServer.address();
+        port = typeof addr === 'object' && addr ? addr.port : 0;
+        resolve();
+      });
+    });
+
+    const conv = httpStore.createConversation();
+    const submitRes = await httpRequest(port, 'POST', `/conversations/${conv.id}/turns`, {
+      instruction: 'Will fail',
+    });
+    assert.equal(submitRes.status, 201);
+    const turnObj = submitRes.data['turn'] as Record<string, unknown>;
+    const turnId = turnObj['id'] as string;
+
+    const finalTurn = httpStore.getTurn(turnId);
+    assert.equal(finalTurn?.status, 'failed');
+
+    const events = httpStreamManager.getStreamEvents(turnId);
+    assert.ok(events.some((e) => e.kind === 'stream-failed'));
+
+    failServer.close();
   });
 });

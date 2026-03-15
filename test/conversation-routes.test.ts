@@ -1049,3 +1049,234 @@ describe('Conversation routes — fork inheritance via routes', () => {
     );
   });
 });
+
+// ── Blocker: Executor startup failures ───────────────────────────────────────
+
+describe('Conversation routes — executor startup failures', () => {
+  it('submit catches thrown executeTurn and fails stream/turn', async () => {
+    const depsWithThrow: ConversationRouteDeps = {
+      ...deps,
+      executeTurn() {
+        throw new Error('Agent binary not found');
+      },
+    };
+    const conv = depsWithThrow.store.createConversation();
+    const req = createMockReq('POST', `/conversations/${conv.id}/turns`, {
+      instruction: 'Hello',
+    });
+    const res = createMockRes();
+    handleConversationRoute(req, res as unknown as ServerResponse, depsWithThrow);
+    await waitForResponse(res);
+    assert.equal(res.statusCode, 201, 'should still return 201 — turn was created');
+    const body = res.body as Record<string, unknown>;
+    const turnObj = body['turn'] as Record<string, unknown>;
+    const turnId = turnObj['id'] as string;
+
+    const finalTurn = deps.store.getTurn(turnId);
+    assert.equal(finalTurn?.status, 'failed', 'turn should be failed after thrown executor');
+
+    const events = deps.streamManager.getStreamEvents(turnId);
+    assert.ok(
+      events.some((e) => e.kind === 'stream-failed'),
+      'stream should have a stream-failed event',
+    );
+  });
+
+  it('submit catches rejected executeTurn promise and fails stream/turn', async () => {
+    const depsWithReject: ConversationRouteDeps = {
+      ...deps,
+      executeTurn() {
+        return Promise.reject(new Error('Connection refused'));
+      },
+    };
+    const conv = depsWithReject.store.createConversation();
+    const req = createMockReq('POST', `/conversations/${conv.id}/turns`, {
+      instruction: 'Hello',
+    });
+    const res = createMockRes();
+    handleConversationRoute(req, res as unknown as ServerResponse, depsWithReject);
+    await waitForResponse(res);
+    assert.equal(res.statusCode, 201);
+    const body = res.body as Record<string, unknown>;
+    const turnObj = body['turn'] as Record<string, unknown>;
+    const turnId = turnObj['id'] as string;
+
+    // Allow microtask queue to settle for promise rejection handler
+    await new Promise<void>((resolve) => {
+      setTimeout(resolve, 50);
+    });
+
+    const finalTurn = deps.store.getTurn(turnId);
+    assert.equal(finalTurn?.status, 'failed', 'turn should be failed after rejected executor');
+
+    const events = deps.streamManager.getStreamEvents(turnId);
+    assert.ok(
+      events.some((e) => e.kind === 'stream-failed'),
+      'stream should have a stream-failed event',
+    );
+  });
+
+  it('retry catches thrown executeTurn and fails stream/turn', () => {
+    const depsWithThrow: ConversationRouteDeps = {
+      ...deps,
+      executeTurn() {
+        throw new Error('Agent crashed');
+      },
+    };
+    const conv = depsWithThrow.store.createConversation();
+    const turn = depsWithThrow.store.appendTurn(conv.id, {
+      kind: 'operator',
+      instruction: 'Retry me',
+      attribution: operatorAttribution,
+    });
+    depsWithThrow.store.finalizeTurn(turn.id, 'failed', 'Error');
+
+    const req = createMockReq('POST', `/conversations/${conv.id}/turns/${turn.id}/retry`);
+    const res = createMockRes();
+    handleConversationRoute(req, res as unknown as ServerResponse, depsWithThrow);
+    assert.equal(res.statusCode, 201, 'should still return 201 — retry turn was created');
+
+    const body = res.body as Record<string, unknown>;
+    const newTurn = body['turn'] as Record<string, unknown>;
+    const newTurnId = newTurn['id'] as string;
+
+    const finalTurn = deps.store.getTurn(newTurnId);
+    assert.equal(finalTurn?.status, 'failed', 'retried turn should be failed');
+
+    const events = deps.streamManager.getStreamEvents(newTurnId);
+    assert.ok(events.some((e) => e.kind === 'stream-failed'));
+  });
+
+  it('retry catches rejected executeTurn promise and fails stream/turn', async () => {
+    const depsWithReject: ConversationRouteDeps = {
+      ...deps,
+      executeTurn() {
+        return Promise.reject(new Error('Timeout'));
+      },
+    };
+    const conv = depsWithReject.store.createConversation();
+    const turn = depsWithReject.store.appendTurn(conv.id, {
+      kind: 'operator',
+      instruction: 'Retry me',
+      attribution: operatorAttribution,
+    });
+    depsWithReject.store.finalizeTurn(turn.id, 'failed', 'Error');
+
+    const req = createMockReq('POST', `/conversations/${conv.id}/turns/${turn.id}/retry`);
+    const res = createMockRes();
+    handleConversationRoute(req, res as unknown as ServerResponse, depsWithReject);
+    assert.equal(res.statusCode, 201);
+
+    const body = res.body as Record<string, unknown>;
+    const newTurn = body['turn'] as Record<string, unknown>;
+    const newTurnId = newTurn['id'] as string;
+
+    await new Promise<void>((resolve) => {
+      setTimeout(resolve, 50);
+    });
+
+    const finalTurn = deps.store.getTurn(newTurnId);
+    assert.equal(finalTurn?.status, 'failed');
+
+    const events = deps.streamManager.getStreamEvents(newTurnId);
+    assert.ok(events.some((e) => e.kind === 'stream-failed'));
+  });
+});
+
+// ── Blocker: Invalid filter/pagination on list endpoints ─────────────────────
+
+describe('Conversation routes — list validation', () => {
+  it('GET /conversations rejects invalid status', () => {
+    deps.store.createConversation();
+    const req = createMockReq('GET', '/conversations?status=bogus');
+    const res = createMockRes();
+    handleConversationRoute(req, res as unknown as ServerResponse, deps);
+    assert.equal(res.statusCode, 400);
+    const body = res.body as Record<string, unknown>;
+    assert.ok((body['error'] as string).includes('Invalid status'));
+  });
+
+  it('GET /conversations rejects non-numeric limit', () => {
+    deps.store.createConversation();
+    const req = createMockReq('GET', '/conversations?limit=abc');
+    const res = createMockRes();
+    handleConversationRoute(req, res as unknown as ServerResponse, deps);
+    assert.equal(res.statusCode, 400);
+    const body = res.body as Record<string, unknown>;
+    assert.ok((body['error'] as string).includes('Invalid limit'));
+  });
+
+  it('GET /conversations rejects negative limit', () => {
+    const req = createMockReq('GET', '/conversations?limit=-5');
+    const res = createMockRes();
+    handleConversationRoute(req, res as unknown as ServerResponse, deps);
+    assert.equal(res.statusCode, 400);
+  });
+
+  it('GET /conversations rejects limit over 100', () => {
+    const req = createMockReq('GET', '/conversations?limit=200');
+    const res = createMockRes();
+    handleConversationRoute(req, res as unknown as ServerResponse, deps);
+    assert.equal(res.statusCode, 400);
+  });
+
+  it('GET /conversations rejects fractional limit', () => {
+    const req = createMockReq('GET', '/conversations?limit=2.5');
+    const res = createMockRes();
+    handleConversationRoute(req, res as unknown as ServerResponse, deps);
+    assert.equal(res.statusCode, 400);
+  });
+
+  it('GET /conversations accepts valid status=active', () => {
+    deps.store.createConversation();
+    const req = createMockReq('GET', '/conversations?status=active');
+    const res = createMockRes();
+    handleConversationRoute(req, res as unknown as ServerResponse, deps);
+    assert.equal(res.statusCode, 200);
+  });
+
+  it('GET /conversations accepts valid status=archived', () => {
+    const conv = deps.store.createConversation();
+    deps.store.archiveConversation(conv.id);
+    const req = createMockReq('GET', '/conversations?status=archived');
+    const res = createMockRes();
+    handleConversationRoute(req, res as unknown as ServerResponse, deps);
+    assert.equal(res.statusCode, 200);
+    const body = res.body as Record<string, unknown>;
+    assert.equal((body['conversations'] as unknown[]).length, 1);
+  });
+
+  it('GET /conversations/:id/artifacts rejects non-numeric limit', () => {
+    const conv = deps.store.createConversation();
+    const req = createMockReq('GET', `/conversations/${conv.id}/artifacts?limit=xyz`);
+    const res = createMockRes();
+    handleConversationRoute(req, res as unknown as ServerResponse, deps);
+    assert.equal(res.statusCode, 400);
+    const body = res.body as Record<string, unknown>;
+    assert.ok((body['error'] as string).includes('Invalid limit'));
+  });
+
+  it('GET /conversations/:id/artifacts rejects negative limit', () => {
+    const conv = deps.store.createConversation();
+    const req = createMockReq('GET', `/conversations/${conv.id}/artifacts?limit=-1`);
+    const res = createMockRes();
+    handleConversationRoute(req, res as unknown as ServerResponse, deps);
+    assert.equal(res.statusCode, 400);
+  });
+
+  it('GET /conversations/:id/artifacts rejects limit over 100', () => {
+    const conv = deps.store.createConversation();
+    const req = createMockReq('GET', `/conversations/${conv.id}/artifacts?limit=999`);
+    const res = createMockRes();
+    handleConversationRoute(req, res as unknown as ServerResponse, deps);
+    assert.equal(res.statusCode, 400);
+  });
+
+  it('GET /conversations/:id/artifacts rejects fractional limit', () => {
+    const conv = deps.store.createConversation();
+    const req = createMockReq('GET', `/conversations/${conv.id}/artifacts?limit=3.7`);
+    const res = createMockRes();
+    handleConversationRoute(req, res as unknown as ServerResponse, deps);
+    assert.equal(res.statusCode, 400);
+  });
+});

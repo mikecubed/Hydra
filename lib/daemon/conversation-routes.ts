@@ -18,6 +18,19 @@ import type { ConversationStore } from './conversation-store.ts';
 import type { StreamManager } from './stream-manager.ts';
 import { sendJson, sendError, readJsonBody } from './http-utils.ts';
 
+// ── Shared validation helpers ────────────────────────────────────────────────
+
+const VALID_CONVERSATION_STATUSES = new Set(['active', 'archived']);
+
+function validateLimitParam(raw: string | null): { limit: number } | { error: string } {
+  if (raw === null) return { limit: 20 };
+  const parsed = Number(raw);
+  if (!Number.isFinite(parsed) || !Number.isInteger(parsed) || parsed < 1 || parsed > 100) {
+    return { error: 'Invalid limit: must be an integer between 1 and 100' };
+  }
+  return { limit: parsed };
+}
+
 // ── Route registration ───────────────────────────────────────────────────────
 
 export interface ConversationRouteDeps {
@@ -32,7 +45,7 @@ export interface ConversationRouteDeps {
    * When absent the route still creates the turn + stream but nothing drives
    * execution — useful for tests that manually control the stream.
    */
-  executeTurn?: (turnId: string, instruction: string) => void;
+  executeTurn?: (turnId: string, instruction: string) => void | Promise<void>;
 }
 
 // ── Sub-routers (split to keep main function below complexity threshold) ────
@@ -231,7 +244,18 @@ function handleListConversations(url: URL, res: ServerResponse, deps: Conversati
   const status = url.searchParams.get('status') ?? undefined;
   const cursor = url.searchParams.get('cursor') ?? undefined;
   const limitParam = url.searchParams.get('limit');
-  const limit = Math.min(Math.max(limitParam === null ? 20 : Number(limitParam), 1), 100);
+
+  if (status !== undefined && status !== '' && !VALID_CONVERSATION_STATUSES.has(status)) {
+    sendError(res, 400, `Invalid status filter: "${status}". Must be one of: active, archived`);
+    return;
+  }
+
+  const limitResult = validateLimitParam(limitParam);
+  if ('error' in limitResult) {
+    sendError(res, 400, limitResult.error);
+    return;
+  }
+  const { limit } = limitResult;
 
   const all = deps.store.listConversations(
     status !== undefined && status !== '' ? { status } : undefined,
@@ -346,7 +370,23 @@ async function handleSubmitInstruction(
 
   // Kick off async execution if an executor is wired up
   if (deps.executeTurn) {
-    deps.executeTurn(turn.id, instruction);
+    try {
+      const maybePromise = deps.executeTurn(turn.id, instruction);
+      // Handle rejected promises from async executors
+      if (maybePromise instanceof Promise) {
+        maybePromise.catch((err: unknown) => {
+          deps.streamManager.failStream(
+            turn.id,
+            err instanceof Error ? err.message : 'Executor failed',
+          );
+        });
+      }
+    } catch (err) {
+      deps.streamManager.failStream(
+        turn.id,
+        err instanceof Error ? err.message : 'Executor startup failed',
+      );
+    }
   }
 
   sendJson(res, 201, { turn, streamId });
@@ -493,7 +533,22 @@ function handleRetryTurn(
 
     // Kick off async execution if an executor is wired up
     if (deps.executeTurn) {
-      deps.executeTurn(newTurn.id, newTurn.instruction ?? '');
+      try {
+        const maybePromise = deps.executeTurn(newTurn.id, newTurn.instruction ?? '');
+        if (maybePromise instanceof Promise) {
+          maybePromise.catch((err: unknown) => {
+            deps.streamManager.failStream(
+              newTurn.id,
+              err instanceof Error ? err.message : 'Executor failed',
+            );
+          });
+        }
+      } catch (err) {
+        deps.streamManager.failStream(
+          newTurn.id,
+          err instanceof Error ? err.message : 'Executor startup failed',
+        );
+      }
     }
 
     sendJson(res, 201, { turn: newTurn, streamId });
@@ -610,8 +665,12 @@ function handleListArtifactsForConversation(
 
   const kind = url.searchParams.get('kind') ?? undefined;
   const cursor = url.searchParams.get('cursor') ?? undefined;
-  const limitParam = url.searchParams.get('limit');
-  const limit = Math.min(Math.max(limitParam === null ? 20 : Number(limitParam), 1), 100);
+  const limitResult = validateLimitParam(url.searchParams.get('limit'));
+  if ('error' in limitResult) {
+    sendError(res, 400, limitResult.error);
+    return;
+  }
+  const { limit } = limitResult;
 
   let all = deps.store.listArtifactsForConversation(conversationId);
 

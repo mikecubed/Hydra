@@ -21,6 +21,7 @@ import {
   getModelSummary,
   listAgents,
 } from './hydra-agents.ts';
+import { executeAgentWithRecovery } from './hydra-shared/agent-executor.ts';
 import { registerBuiltInSubAgents } from './hydra-sub-agents.ts';
 import { syncHydraMd } from './hydra-sync-md.ts';
 import {
@@ -164,6 +165,44 @@ function broadcastEvent(sseClients: Set<ServerResponse>, event: unknown) {
       sseClients.delete(client);
     }
   }
+}
+
+/**
+ * Create the executeTurn callback that wires conversation turns into
+ * the Hydra agent execution pipeline.  The returned function dispatches
+ * the instruction to the best available agent via `executeAgentWithRecovery`
+ * and drives the turn's stream to a terminal state (completed / failed).
+ */
+function createConversationExecutor(
+  ctx: DaemonContext,
+): (turnId: string, instruction: string) => Promise<void> {
+  return async (turnId: string, instruction: string): Promise<void> => {
+    const { streamManager } = ctx;
+    const taskType = classifyTask(instruction);
+    // Pick the agent best suited for this task type.  The daemon has no CLI-
+    // detection context, so we fall back to role-based defaults:  analysis /
+    // review → gemini, implementation / refactor / testing → codex, rest → claude.
+    const agentMap: Record<string, string> = {
+      analysis: 'gemini',
+      review: 'gemini',
+      research: 'gemini',
+      implementation: 'codex',
+      refactor: 'codex',
+      testing: 'codex',
+    };
+    const agent = agentMap[taskType] ?? 'claude';
+    const result = await executeAgentWithRecovery(agent, instruction);
+    if (result.ok) {
+      const output = typeof result.output === 'string' ? result.output : '';
+      if (output !== '') {
+        streamManager.emitEvent(turnId, 'text-delta', { text: output });
+      }
+      streamManager.completeStream(turnId);
+    } else {
+      const reason = typeof result.output === 'string' ? result.output : 'Agent execution failed';
+      streamManager.failStream(turnId, reason);
+    }
+  };
 }
 
 function writeStatus(ctx: DaemonContext, extra: Record<string, unknown> = {}) {
@@ -563,6 +602,7 @@ async function handleHttpRequest(
       handleConversationRoute(req, res, {
         store: ctx.conversationStore,
         streamManager: ctx.streamManager,
+        executeTurn: createConversationExecutor(ctx),
       })
     ) {
       return;
