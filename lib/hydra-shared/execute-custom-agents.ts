@@ -412,8 +412,8 @@ export async function executeCustomApiAgent(
   } catch (err: unknown) {
     const e = err instanceof Error ? err : new Error(String(err));
     const durationMs = Date.now() - startTime;
-    metrics.recordCallError(metricsHandle, 'custom-cli-error');
+    metrics.recordCallError(metricsHandle, 'custom-api-error');
     await endAgentSpan(span, { ok: false, error: e.message });
-    return makeCustomAgentErrorResult('custom-cli-error', { stderr: e.message, durationMs });
+    return makeCustomAgentErrorResult('custom-api-error', { stderr: e.message, durationMs });
   }
 }

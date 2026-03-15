@@ -652,10 +652,13 @@ function applySmartMode(preview: boolean, targetMode: string): string | null {
   const previous = getMode();
   try {
     setMode(targetMode);
+    // Only return the previous mode when the change succeeded — if setMode throws,
+    // the mode was never mutated so there is nothing to restore.
+    return previous;
   } catch {
-    // targetMode not in modeTiers — fall through to auto routing
+    // targetMode not in modeTiers — fall through to auto routing; no restore needed
+    return null;
   }
-  return previous;
 }
 
 /** Restores the routing mode saved by applySmartMode; no-op for preview (previousMode === null). */
