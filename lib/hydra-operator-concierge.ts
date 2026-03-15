@@ -646,6 +646,28 @@ export async function runAutoPromptLegacy({
 
 // ── Smart Mode ────────────────────────────────────────────────────────────────
 
+/** Sets the routing mode for a real dispatch; returns the previous mode to restore, or null for preview. */
+function applySmartMode(preview: boolean, targetMode: string): string | null {
+  if (preview) return null;
+  const previous = getMode();
+  try {
+    setMode(targetMode);
+  } catch {
+    // targetMode not in modeTiers — fall through to auto routing
+  }
+  return previous;
+}
+
+/** Restores the routing mode saved by applySmartMode; no-op for preview (previousMode === null). */
+function restoreSmartMode(previousMode: string | null): void {
+  if (previousMode === null) return;
+  try {
+    setMode(previousMode);
+  } catch {
+    /* ignore */
+  }
+}
+
 export async function runSmartPrompt({
   baseUrl,
   from,
@@ -668,13 +690,8 @@ export async function runSmartPrompt({
   const classification = classifyPrompt(promptText);
   const targetMode = (SMART_TIER_MAP as Record<string, string>)[classification.tier] || 'balanced';
 
-  const previousMode = getMode();
-
-  try {
-    setMode(targetMode);
-  } catch {
-    // If targetMode doesn't exist in modeTiers, fall through to auto
-  }
+  // Only mutate routing mode for real dispatches — preview runs must be side-effect-free.
+  const previousMode = applySmartMode(preview, targetMode);
 
   try {
     const result = await runAutoPrompt({
@@ -701,10 +718,6 @@ export async function runSmartPrompt({
 
     return result;
   } finally {
-    try {
-      setMode(previousMode);
-    } catch {
-      /* ignore */
-    }
+    restoreSmartMode(previousMode);
   }
 }

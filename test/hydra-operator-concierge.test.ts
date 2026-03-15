@@ -14,8 +14,11 @@
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
-import { afterEach, before, describe, it } from 'node:test';
+import { after, afterEach, before, describe, it } from 'node:test';
 import assert from 'node:assert/strict';
+import * as fs from 'node:fs';
+import * as os from 'node:os';
+import * as path from 'node:path';
 
 // Lazily loaded so that _setTestConfig can be called before module init reads config.
 let shouldCrossVerify: (classification: any) => boolean;
@@ -25,12 +28,28 @@ let runAutoPrompt: (opts: any) => Promise<any>;
 let runSmartPrompt: (opts: any) => Promise<any>;
 
 let _setTestConfig: (cfg: Record<string, unknown>) => void;
+let _setTestConfigPath: (p: string | null) => void;
 let invalidateConfigCache: () => void;
 
 before(async () => {
   const cfgMod = await import('../lib/hydra-config.ts');
   _setTestConfig = cfgMod._setTestConfig as (cfg: Record<string, unknown>) => void;
+  _setTestConfigPath = cfgMod._setTestConfigPath as (p: string | null) => void;
   invalidateConfigCache = cfgMod.invalidateConfigCache;
+
+  // Redirect all file-based config reads/writes away from the real hydra.config.json.
+  // This prevents setMode() calls inside runSmartPrompt from mutating the repo config.
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'hydra-concierge-test-'));
+  const tmpCfg = path.join(tmpDir, 'hydra.config.json');
+  fs.writeFileSync(
+    tmpCfg,
+    JSON.stringify(
+      { version: 2, mode: 'economy', modeTiers: { economy: {}, balanced: {}, performance: {} } },
+      null,
+      2,
+    ),
+  );
+  _setTestConfigPath(tmpCfg);
 
   const dispatchMod = await import('../lib/hydra-operator-dispatch.ts');
   shouldCrossVerify = dispatchMod.shouldCrossVerify;
@@ -44,6 +63,11 @@ before(async () => {
 
 afterEach(() => {
   invalidateConfigCache();
+});
+
+// Restore real config path after all tests in this file complete.
+after(() => {
+  _setTestConfigPath(null);
 });
 
 // ── shouldCrossVerify ─────────────────────────────────────────────────────────
