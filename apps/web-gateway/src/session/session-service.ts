@@ -5,6 +5,7 @@
 import type { Clock } from '../shared/clock.ts';
 import { SystemClock } from '../shared/clock.ts';
 import { type SessionStore, type StoredSession } from './session-store.ts';
+import type { SessionState } from '@hydra/web-contracts';
 import { transition, isTerminal } from './session-state-machine.ts';
 import { createError } from '../shared/errors.ts';
 import type { AuditService } from '../audit/audit-service.ts';
@@ -166,7 +167,7 @@ export class SessionService {
 
     // If the session is still 'active' but within the window, auto-transition
     // to 'expiring-soon' so the FSM extend transition is valid.
-    let currentState = session.state;
+    let currentState: SessionState = session.state;
     if (currentState === 'active') {
       const warnResult = transition(currentState, 'warn-expiry');
       if (warnResult.ok) {

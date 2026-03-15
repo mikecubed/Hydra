@@ -2,7 +2,10 @@
  * Route-level tests for auth-routes — focused on /logout error handling.
  *
  * Verifies that logout does not falsely succeed when the underlying
- * sessionService.logout() or audit persistence fails.
+ * audit persistence layer fails inside the real composed route stack.
+ * Audit failures are injected by poisoning AuditStore.append() so the
+ * full transitionSession → AuditService.record → AuditStore.append path
+ * executes, rolls back the FSM state, and surfaces as a 500 to the client.
  */
 import { describe, it, beforeEach } from 'node:test';
 import assert from 'node:assert/strict';
@@ -21,6 +24,8 @@ import type { GatewayEnv } from '../../shared/types.ts';
 describe('auth-routes: /logout', () => {
   let clock: FakeClock;
   let operatorStore: OperatorStore;
+  let sessionStore: SessionStore;
+  let auditStore: AuditStore;
   let sessionService: SessionService;
   let authService: AuthService;
   let app: Hono<GatewayEnv>;
@@ -29,8 +34,8 @@ describe('auth-routes: /logout', () => {
     clock = new FakeClock(Date.now());
     operatorStore = new OperatorStore(null);
     const rateLimiter = new RateLimiter(clock);
-    const sessionStore = new SessionStore(null);
-    const auditStore = new AuditStore(null);
+    sessionStore = new SessionStore(null);
+    auditStore = new AuditStore(null);
     const auditService = new AuditService(auditStore, clock);
     sessionService = new SessionService(sessionStore, clock, {}, auditService);
     authService = new AuthService(operatorStore, rateLimiter, sessionService, auditService);
@@ -75,22 +80,39 @@ describe('auth-routes: /logout', () => {
     assert.equal(body['success'], true);
   });
 
-  it('returns 500 and preserves cookies when sessionService.logout() throws (audit persistence failure)', async () => {
+  it('returns 500, preserves cookies, and keeps session active when audit persistence fails during logout', async () => {
     const result = await authService.authenticate('admin', 'password123', '127.0.0.1');
+    const sid = result.session.id;
 
-    // Monkey-patch logout to simulate an audit persistence error
-    // (transitionSession rolls back state → session stays active)
-    const originalLogout = sessionService.logout.bind(sessionService);
-    sessionService.logout = async (_id: string) => {
-      await originalLogout(_id).catch(() => {});
-      throw new Error('Audit write failed: ENOSPC');
+    // Verify session is active before the logout attempt
+    assert.equal(sessionStore.get(sid)?.state, 'active');
+
+    // Poison the audit store so the real transitionSession → auditService.record →
+    // auditStore.append path throws, triggering the FSM rollback inside transitionSession.
+    const originalAppend = auditStore.append.bind(auditStore);
+    let callCount = 0;
+    auditStore.append = async (record) => {
+      callCount++;
+      // Let all prior audit writes succeed (create, authenticate) but fail
+      // the logout audit write (the 'session.logged-out' event).
+      if (record.eventType === 'session.logged-out') {
+        throw new Error('Audit write failed: ENOSPC');
+      }
+      return originalAppend(record);
     };
 
     const res = await app.request('/auth/logout', {
       method: 'POST',
-      headers: { Cookie: `__session=${result.session.id}` },
+      headers: { Cookie: `__session=${sid}` },
     });
+
+    // The audit append for logout must have been reached
+    assert.ok(callCount > 0, 'audit store append must have been called');
+
+    // Response must be 500 (do not falsely report success)
     assert.equal(res.status, 500);
+    const body = (await res.json()) as Record<string, unknown>;
+    assert.equal(body['code'], 'INTERNAL_ERROR');
 
     // Cookies must NOT be cleared — the server rolled back so the session
     // is still active; clearing cookies would leave a dangling server session.
@@ -103,22 +125,32 @@ describe('auth-routes: /logout', () => {
       !setCookies.some((h) => h.startsWith('__csrf=')),
       'must not clear __csrf cookie when server-side logout rolled back',
     );
+
+    // The session must still be active on the server after rollback —
+    // this is the critical postcondition that proves rollback worked.
+    const post = sessionStore.get(sid);
+    assert.ok(post, 'session must still exist in the store');
+    assert.equal(post.state, 'active', 'session must be rolled back to active after audit failure');
   });
 
-  it('returns 500 and preserves cookies when sessionService.logout() throws unexpected error', async () => {
+  it('returns 500 and preserves cookies when auditStore.append() throws unexpected error', async () => {
     const result = await authService.authenticate('admin', 'password123', '127.0.0.1');
+    const sid = result.session.id;
 
-    sessionService.logout = async () => {
-      throw new Error('Unexpected database corruption');
+    // Poison audit store with an unexpected error on logout events
+    auditStore.append = async (record) => {
+      if (record.eventType === 'session.logged-out') {
+        throw new Error('Unexpected database corruption');
+      }
     };
 
     const res = await app.request('/auth/logout', {
       method: 'POST',
-      headers: { Cookie: `__session=${result.session.id}` },
+      headers: { Cookie: `__session=${sid}` },
     });
     assert.equal(res.status, 500);
 
-    // Cookies preserved — server may still consider the session active
+    // Cookies preserved — server rolled back, session is still active
     const setCookies = res.headers.getSetCookie();
     assert.ok(
       !setCookies.some((h) => h.startsWith('__session=')),
@@ -128,24 +160,26 @@ describe('auth-routes: /logout', () => {
       !setCookies.some((h) => h.startsWith('__csrf=')),
       'must not clear __csrf cookie on unexpected error',
     );
+
+    // Session must remain active after rollback
+    const post = sessionStore.get(sid);
+    assert.ok(post, 'session must still exist after unexpected audit error');
+    assert.equal(post.state, 'active', 'session must be rolled back to active');
   });
 
-  it('returns 500 and preserves cookies on partial failure (audit write failed, server rolled back)', async () => {
+  it('returns 500, preserves cookies, and rolls back FSM state on audit write failure', async () => {
     const result = await authService.authenticate('admin', 'password123', '127.0.0.1');
     const sid = result.session.id;
 
     // Verify session is active before logout
-    const pre = sessionService.store.get(sid);
+    const pre = sessionStore.get(sid);
     assert.equal(pre?.state, 'active');
 
-    // Patch: make the audit write inside transitionSession throw, which
-    // causes a rollback — the session stays active on the server.
-    const originalLogout = sessionService.logout.bind(sessionService);
-    sessionService.logout = async (id: string) => {
-      await originalLogout(id);
-      // If we reach here the real logout succeeded (no audit error).
-      // Force an additional throw to simulate a downstream step failing.
-      throw new Error('Audit persistence failed after state transition');
+    // Poison audit store: fail only the 'session.logged-out' event
+    auditStore.append = async (record) => {
+      if (record.eventType === 'session.logged-out') {
+        throw new Error('Audit persistence failed: disk full');
+      }
     };
 
     const res = await app.request('/auth/logout', {
@@ -169,5 +203,11 @@ describe('auth-routes: /logout', () => {
       !setCookies.some((h) => h.startsWith('__csrf=')),
       'must not clear __csrf cookie when logout threw',
     );
+
+    // Critical: the session must still be active on the server after
+    // transitionSession's rollback — proving the real rollback path works.
+    const post = sessionStore.get(sid);
+    assert.ok(post, 'session must still exist in store after rollback');
+    assert.equal(post.state, 'active', 'session must be rolled back to active');
   });
 });
