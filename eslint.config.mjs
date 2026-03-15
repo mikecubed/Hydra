@@ -260,7 +260,7 @@ export default [
           rules: [
             // lib/hydra-shared/ and lib/daemon/ are sub-namespaces of lib/ and may import from it
             { from: 'shared', allow: ['shared', 'lib'] },
-            { from: 'daemon', allow: ['shared', 'daemon', 'lib'] },
+            { from: 'daemon', allow: ['shared', 'daemon', 'lib', 'web-contracts'] },
             { from: 'lib', allow: ['shared', 'daemon', 'lib'] },
             { from: 'bin', allow: ['lib', 'shared', 'daemon'] },
             { from: 'scripts', allow: ['lib', 'shared'] },

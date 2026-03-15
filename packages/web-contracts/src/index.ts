@@ -38,3 +38,74 @@ export { LoginRequest, LoginResponse, LogoutResponse, AuthError } from './auth-s
 export { AuditEventType, AuditRecord } from './audit-schemas.ts';
 
 export { Operator, CredentialType } from './operator-schemas.ts';
+
+// ─── Conversation Protocol entities (Phase 2 — web-conversation-protocol) ───
+
+export { Attribution, AttributionType } from './attribution.ts';
+export { Conversation, ConversationStatus } from './conversation.ts';
+export { Turn, TurnKind, TurnStatus } from './turn.ts';
+export { StreamEvent, StreamEventKind } from './stream.ts';
+export { ApprovalRequest, ApprovalStatus, ApprovalResponseOption } from './approval.ts';
+export { Artifact, ArtifactKind } from './artifact.ts';
+export { ActivityEntry, ActivityKind } from './activity.ts';
+
+// ─── Conversation Protocol contracts ─────────────────────────────────────────
+
+export {
+  CreateConversationRequest,
+  CreateConversationResponse,
+  OpenConversationRequest,
+  OpenConversationResponse,
+  ResumeConversationRequest,
+  ResumeConversationResponse,
+  ArchiveConversationRequest,
+  ArchiveConversationResponse,
+  ListConversationsRequest,
+  ListConversationsResponse,
+} from './contracts/conversation-lifecycle.ts';
+
+export {
+  SubmitInstructionRequest,
+  SubmitInstructionResponse,
+  SubscribeToStreamRequest,
+  SubscribeToStreamResponse,
+  LoadTurnHistoryRequest,
+  LoadTurnHistoryResponse,
+} from './contracts/turn-submission.ts';
+
+export {
+  GetPendingApprovalsRequest,
+  GetPendingApprovalsResponse,
+  RespondToApprovalRequest,
+  RespondToApprovalResponse,
+} from './contracts/approval-flow.ts';
+
+export {
+  CancelWorkRequest,
+  CancelWorkResponse,
+  RetryTurnRequest,
+  RetryTurnResponse,
+  ForkConversationRequest,
+  ForkConversationResponse,
+  QueuedInstruction,
+  ManageQueueRequest,
+  ManageQueueResponse,
+} from './contracts/work-control.ts';
+
+export {
+  ListArtifactsForTurnRequest,
+  ListArtifactsForTurnResponse,
+  GetArtifactContentRequest,
+  GetArtifactContentResponse,
+  ListArtifactsForConversationRequest,
+  ListArtifactsForConversationResponse,
+} from './contracts/artifact-access.ts';
+
+export {
+  GetActivityEntriesRequest,
+  GetActivityEntriesResponse,
+  FilterActivityByAgentRequest,
+  FilterActivityByAgentResponse,
+} from './contracts/multi-agent-activity.ts';
+
+export { ErrorCode, ErrorResponse } from './contracts/error.ts';
