@@ -520,6 +520,7 @@ async function dispatchAgent(
   durationMs: number;
 }> {
   const effectiveModel = resolveEffectiveModel(agent, modelOverride);
+  // rf-cs03: complex lifecycle — catch wraps error into result instead of re-throwing
   const handle = recordCallStart(agent, effectiveModel);
   log.dim(
     `Dispatching ${agent}${modelOverride != null && modelOverride.length > 0 ? ` (${modelOverride})` : ''}...`,

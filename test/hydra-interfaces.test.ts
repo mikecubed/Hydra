@@ -208,6 +208,9 @@ describe('IMetricsRecorder interface', () => {
       },
       recordCallComplete() {},
       recordCallError() {},
+      async recordExecution<T>(_agent: string, _model: string | undefined, fn: () => Promise<T>) {
+        return fn();
+      },
     };
 
     const handle = mock.recordCallStart('claude', 'claude-opus-4-6');

@@ -999,6 +999,7 @@ async function dispatchAndRecord(
   useHandoff: boolean,
 ): Promise<NightlyTaskResult> {
   const prompt = buildTaskPrompt(task, branchName, projectRoot, agent, { isHandoff: useHandoff });
+  // rf-cs03: complex lifecycle — result modified by applyInvestigatorHeal before recording
   const handle = recordCallStart(agent, modelOverride ?? getActiveModel(agent) ?? undefined);
   log.dim(`Dispatching ${agent}${modelOverride == null ? '' : ` (${modelOverride})`}...`);
   let agentResult = await executeAgentWithRecovery(agent, prompt, {

@@ -33,6 +33,21 @@ function createMockMetrics(): IMetricsRecorder & {
     recordCallError(handle: string, error: unknown): void {
       calls.push({ method: 'recordCallError', args: [handle, error] });
     },
+    async recordExecution<T>(
+      agentName: string,
+      model: string | undefined,
+      fn: () => Promise<T>,
+    ): Promise<T> {
+      const handle = this.recordCallStart(agentName, model);
+      try {
+        const result = await fn();
+        this.recordCallComplete(handle, result as unknown as MetricsCallResult);
+        return result;
+      } catch (err: unknown) {
+        this.recordCallError(handle, err);
+        throw err;
+      }
+    },
   };
 }
 
