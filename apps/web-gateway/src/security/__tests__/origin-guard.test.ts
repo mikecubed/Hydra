@@ -1,47 +1,54 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
+import { Hono } from 'hono';
 import { createOriginGuard } from '../origin-guard.ts';
-import { createMockReqRes } from '../../shared/__tests__/test-helpers.ts';
+
+function createTestApp() {
+  const app = new Hono();
+  app.use('*', createOriginGuard('http://127.0.0.1:4174'));
+  app.all('/test', (c) => c.json({ ok: true }));
+  return app;
+}
 
 describe('Origin guard', () => {
-  const guard = createOriginGuard('http://127.0.0.1:4174');
+  it('GET without origin passes', async () => {
+    const app = createTestApp();
+    const res = await app.request('/test');
+    assert.equal(res.status, 200);
+  });
 
-  it('GET without origin passes', () => {
-    const { req, res } = createMockReqRes('GET');
-    let called = false;
-    guard(req, res, () => {
-      called = true;
+  it('POST with matching origin passes', async () => {
+    const app = createTestApp();
+    const res = await app.request('/test', {
+      method: 'POST',
+      headers: { Origin: 'http://127.0.0.1:4174' },
     });
-    assert.equal(called, true);
+    assert.equal(res.status, 200);
   });
 
-  it('POST with matching origin passes', () => {
-    const { req, res } = createMockReqRes('POST', { origin: 'http://127.0.0.1:4174' });
-    let called = false;
-    guard(req, res, () => {
-      called = true;
+  it('POST with mismatched origin returns 403', async () => {
+    const app = createTestApp();
+    const res = await app.request('/test', {
+      method: 'POST',
+      headers: { Origin: 'http://evil.com' },
     });
-    assert.equal(called, true);
+    assert.equal(res.status, 403);
   });
 
-  it('POST with mismatched origin returns 403', () => {
-    const { req, res } = createMockReqRes('POST', { origin: 'http://evil.com' });
-    guard(req, res, () => {});
-    assert.equal(res.statusCode, 403);
+  it('POST with missing origin returns 403', async () => {
+    const app = createTestApp();
+    const res = await app.request('/test', { method: 'POST' });
+    assert.equal(res.status, 403);
   });
 
-  it('POST with missing origin returns 403', () => {
-    const { req, res } = createMockReqRes('POST');
-    guard(req, res, () => {});
-    assert.equal(res.statusCode, 403);
-  });
-
-  it('WebSocket upgrade with wrong origin returns 403', () => {
-    const { req, res } = createMockReqRes('GET', {
-      upgrade: 'websocket',
-      origin: 'http://evil.com',
+  it('WebSocket upgrade with wrong origin returns 403', async () => {
+    const app = createTestApp();
+    const res = await app.request('/test', {
+      headers: {
+        Upgrade: 'websocket',
+        Origin: 'http://evil.com',
+      },
     });
-    guard(req, res, () => {});
-    assert.equal(res.statusCode, 403);
+    assert.equal(res.status, 403);
   });
 });

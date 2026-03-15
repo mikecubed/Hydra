@@ -7,6 +7,7 @@ import { SystemClock } from '../shared/clock.ts';
 import { type SessionStore, type StoredSession } from './session-store.ts';
 import { transition, isTerminal } from './session-state-machine.ts';
 import { createError } from '../shared/errors.ts';
+import type { AuditService } from '../audit/audit-service.ts';
 
 export interface SessionServiceConfig {
   sessionLifetimeMs: number;
@@ -26,19 +27,31 @@ const DEFAULT_CONFIG: SessionServiceConfig = {
   idleTimeoutMs: 30 * 60 * 1000, // 30 minutes
 };
 
+/** Maps FSM triggers to audit event types. */
+const TRIGGER_TO_AUDIT: Record<string, string> = {
+  expire: 'session.expired',
+  invalidate: 'session.invalidated',
+  logout: 'session.logged-out',
+  'daemon-down': 'session.daemon-unreachable',
+  'daemon-up': 'session.daemon-restored',
+};
+
 export class SessionService {
   readonly store: SessionStore;
   private readonly clock: Clock;
   readonly config: SessionServiceConfig;
+  private readonly auditService?: AuditService;
 
   constructor(
     store: SessionStore,
     clock: Clock = new SystemClock(),
     config: Partial<SessionServiceConfig> = {},
+    auditService?: AuditService,
   ) {
     this.store = store;
     this.clock = clock;
     this.config = { ...DEFAULT_CONFIG, ...config };
+    this.auditService = auditService;
   }
 
   create(operatorId: string, sourceIp: string): StoredSession {
@@ -54,7 +67,13 @@ export class SessionService {
 
     const expiresAt = new Date(this.clock.now() + this.config.sessionLifetimeMs).toISOString();
     const now = new Date(this.clock.now()).toISOString();
-    return this.store.create(operatorId, expiresAt, sourceIp, now);
+    const session = this.store.create(operatorId, expiresAt, sourceIp, now);
+
+    void this.auditService?.record(
+      'session.created', operatorId, session.id, { sourceIp }, 'success',
+    );
+
+    return session;
   }
 
   validate(sessionId: string): StoredSession {
@@ -116,6 +135,12 @@ export class SessionService {
       lastActivityAt: new Date(this.clock.now()).toISOString(),
     });
     if (!updated) throw createError('SESSION_NOT_FOUND');
+
+    void this.auditService?.record(
+      'session.extended', session.operatorId, sessionId,
+      { extendedCount: session.extendedCount + 1 }, 'success',
+    );
+
     return updated;
   }
 
@@ -156,5 +181,13 @@ export class SessionService {
       updates.invalidatedReason = reason;
     }
     this.store.update(sessionId, updates);
+
+    const eventType = TRIGGER_TO_AUDIT[trigger];
+    if (eventType && this.auditService) {
+      void this.auditService.record(
+        eventType, session.operatorId, sessionId,
+        reason != null ? { reason } : {}, 'success',
+      );
+    }
   }
 }

@@ -1,30 +1,30 @@
 /**
  * Origin guard — validates Origin header on mutating routes and WS upgrade. (FR-021)
  */
-import type { IncomingMessage, ServerResponse } from 'node:http';
+import { createMiddleware } from 'hono/factory';
+import type { MiddlewareHandler } from 'hono';
 import { createError } from '../shared/errors.ts';
+import { gatewayErrorResponse } from '../shared/types.ts';
 
 const SAFE_METHODS = new Set(['GET', 'HEAD', 'OPTIONS']);
 
-export function createOriginGuard(allowedOrigin: string) {
-  return function originGuard(req: IncomingMessage, res: ServerResponse, next: () => void): void {
-    const method = req.method?.toUpperCase() ?? 'GET';
-    const isUpgrade = req.headers.upgrade?.toLowerCase() === 'websocket';
+export function createOriginGuard(allowedOrigin: string): MiddlewareHandler {
+  return createMiddleware(async (c, next) => {
+    const method = c.req.method.toUpperCase();
+    const isUpgrade = c.req.header('upgrade')?.toLowerCase() === 'websocket';
 
-    // Only check mutating methods and WebSocket upgrades
     if (!isUpgrade && SAFE_METHODS.has(method)) {
-      next();
+      await next();
       return;
     }
 
-    const origin = req.headers.origin;
+    const origin = c.req.header('origin');
     if (origin == null || origin !== allowedOrigin) {
-      const err = createError('ORIGIN_REJECTED');
-      res.writeHead(err.statusCode, { 'Content-Type': 'application/json' });
-      res.end(JSON.stringify({ code: err.code, message: err.message }));
-      return;
+      return gatewayErrorResponse(c, createError('ORIGIN_REJECTED'));
     }
 
-    next();
-  };
+    await next();
+    // eslint-disable-next-line no-useless-return
+    return;
+  });
 }

@@ -94,7 +94,7 @@ export default [
       'n/no-process-exit': 'error', // use process.exitCode instead
       'n/prefer-node-protocol': 'error', // require node: prefix on builtins
       'n/hashbang': 'warn', // lib files may have intentional shebangs without being in bin
-      'n/no-unsupported-features/node-builtins': ['error', { ignores: ['fetch'] }], // fetch used intentionally (Node 22 dev runtime)
+      'n/no-unsupported-features/node-builtins': ['error', { ignores: ['fetch', 'Response'] }], // fetch/Response used intentionally (Node 22 dev runtime, Hono framework)
 
       // ── Unicorn rules (selective) ──────────────────────────────────────────
       'unicorn/prefer-module': 'error',
@@ -308,6 +308,7 @@ export default [
             'test.afterEach',
             'test.mock.module',
             'import.meta.dirname',
+            'Response',
           ],
         },
       ],

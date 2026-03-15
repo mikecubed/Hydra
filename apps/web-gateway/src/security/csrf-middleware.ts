@@ -2,45 +2,30 @@
  * CSRF middleware — double-submit cookie validation.
  * Reads __csrf cookie, compares to X-CSRF-Token header on mutating routes. (FR-022)
  */
-import type { ServerResponse } from 'node:http';
-import { parseCookies } from '../shared/cookies.ts';
+import { createMiddleware } from 'hono/factory';
+import { getCookie } from 'hono/cookie';
+import type { MiddlewareHandler } from 'hono';
 import { createError } from '../shared/errors.ts';
-import type { AuthenticatedRequest } from '../auth/auth-middleware.ts';
+import { gatewayErrorResponse, type GatewayEnv } from '../shared/types.ts';
 
 const SAFE_METHODS = new Set(['GET', 'HEAD', 'OPTIONS']);
 
-export function createCsrfMiddleware(): (
-  req: AuthenticatedRequest,
-  res: ServerResponse,
-  next: () => void,
-) => void {
-  return function csrfMiddleware(
-    req: AuthenticatedRequest,
-    res: ServerResponse,
-    next: () => void,
-  ): void {
-    const method = req.method?.toUpperCase() ?? 'GET';
-    if (SAFE_METHODS.has(method)) {
-      next();
+export function createCsrfMiddleware(): MiddlewareHandler<GatewayEnv> {
+  return createMiddleware<GatewayEnv>(async (c, next) => {
+    if (SAFE_METHODS.has(c.req.method.toUpperCase())) {
+      await next();
       return;
     }
 
-    const cookies = parseCookies(req.headers.cookie);
-    const cookieToken = cookies['__csrf'];
-    const headerToken = req.headers['x-csrf-token'] as string | undefined;
+    const cookieToken = getCookie(c, '__csrf');
+    const headerToken = c.req.header('x-csrf-token');
 
-    if (
-      cookieToken === '' ||
-      headerToken === '' ||
-      headerToken === undefined ||
-      cookieToken !== headerToken
-    ) {
-      const err = createError('CSRF_INVALID');
-      res.writeHead(err.statusCode, { 'Content-Type': 'application/json' });
-      res.end(JSON.stringify({ code: err.code, message: err.message }));
-      return;
+    if (!cookieToken || !headerToken || cookieToken !== headerToken) {
+      return gatewayErrorResponse(c, createError('CSRF_INVALID'));
     }
 
-    next();
-  };
+    await next();
+    // eslint-disable-next-line no-useless-return
+    return;
+  });
 }

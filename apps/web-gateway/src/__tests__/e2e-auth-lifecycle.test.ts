@@ -27,6 +27,8 @@ describe('E2E: Auth lifecycle', () => {
     operatorStore = new OperatorStore(null);
     const rateLimiter = new RateLimiter(clock);
     const sessionStore = new SessionStore(null);
+    const auditStore = new AuditStore(null);
+    auditService = new AuditService(auditStore, clock);
     sessionService = new SessionService(sessionStore, clock, {
       sessionLifetimeMs: 3600_000,
       warningThresholdMs: 600_000,
@@ -34,9 +36,8 @@ describe('E2E: Auth lifecycle', () => {
       extensionDurationMs: 3600_000,
       maxConcurrentSessions: 5,
       idleTimeoutMs: 1800_000,
-    });
-    authService = new AuthService(operatorStore, rateLimiter, sessionService);
-    auditService = new AuditService(new AuditStore(null), clock);
+    }, auditService);
+    authService = new AuthService(operatorStore, rateLimiter, sessionService, auditService);
 
     await operatorStore.createOperator('admin', 'Admin');
     await operatorStore.addCredential('admin', 'password123');
@@ -51,8 +52,6 @@ describe('E2E: Auth lifecycle', () => {
     assert.ok(sessionId);
     assert.ok(csrfToken);
 
-    await auditService.record('auth.attempt.success', 'admin', sessionId, {}, 'success');
-
     // 2. Session is valid
     const validated = sessionService.validate(sessionId);
     assert.equal(validated.state, 'active');
@@ -66,11 +65,9 @@ describe('E2E: Auth lifecycle', () => {
     const extended = sessionService.extend(sessionId);
     assert.equal(extended.state, 'active');
     assert.equal(extended.extendedCount, 1);
-    await auditService.record('session.extended', 'admin', sessionId, {}, 'success');
 
     // 5. Logout
     sessionService.logout(sessionId);
-    await auditService.record('session.logged-out', 'admin', sessionId, {}, 'success');
 
     // 6. Old session rejected
     assert.throws(() => sessionService.validate(sessionId));
@@ -80,9 +77,16 @@ describe('E2E: Auth lifecycle', () => {
     assert.equal(result2.session.state, 'active');
     assert.notEqual(result2.session.id, sessionId);
 
-    // 8. Audit trail
+    // 8. Audit trail — verify automatically emitted records
     const records = auditService.getRecords();
-    assert.equal(records.length, 3);
+    const types = records.map((r) => r.eventType);
+    assert.ok(types.includes('auth.attempt.success'), 'should have login success audit');
+    assert.ok(types.includes('session.created'), 'should have session.created audit');
+    assert.ok(types.includes('session.extended'), 'should have session.extended audit');
+    assert.ok(types.includes('session.logged-out'), 'should have session.logged-out audit');
+    // Two logins, two session.created events
+    assert.equal(types.filter((t) => t === 'auth.attempt.success').length, 2);
+    assert.equal(types.filter((t) => t === 'session.created').length, 2);
   });
 
   it('idle timeout → reauth → same session resumes', async () => {
@@ -105,6 +109,11 @@ describe('E2E: Auth lifecycle', () => {
     // After reauth, idle timer reset
     const updatedSession = sessionService.store.get(sessionId)!;
     assert.equal(sessionService.isIdle(updatedSession), false);
+
+    // Verify reauth audit event
+    const records = auditService.getRecords();
+    const types = records.map((r) => r.eventType);
+    assert.ok(types.includes('session.idle-reauth'), 'should have session.idle-reauth audit');
   });
 
   it('rate limiting: 5 bad logins → locked → lockout expires → login succeeds', async () => {
@@ -118,6 +127,12 @@ describe('E2E: Auth lifecycle', () => {
 
     // Rate limited
     await assert.rejects(() => authService.authenticate('admin', 'password123', '127.0.0.1'));
+
+    // Verify audit trail includes failure and rate-limited events
+    const records = auditService.getRecords();
+    const types = records.map((r) => r.eventType);
+    assert.ok(types.includes('auth.attempt.failure'), 'should have auth failure audit');
+    assert.ok(types.includes('auth.rate-limited'), 'should have rate-limited audit');
 
     // Wait for lockout to expire
     clock.advance(300_001);

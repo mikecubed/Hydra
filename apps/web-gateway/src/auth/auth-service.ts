@@ -8,6 +8,7 @@ import { type RateLimiter } from './rate-limiter.ts';
 import { type SessionService } from '../session/session-service.ts';
 import { createError } from '../shared/errors.ts';
 import type { StoredSession } from '../session/session-store.ts';
+import type { AuditService } from '../audit/audit-service.ts';
 
 export interface AuthResult {
   operator: StoredOperator;
@@ -18,20 +19,26 @@ export class AuthService {
   private readonly operatorStore: OperatorStore;
   private readonly rateLimiter: RateLimiter;
   private readonly sessionService: SessionService;
+  private readonly auditService?: AuditService;
 
   constructor(
     operatorStore: OperatorStore,
     rateLimiter: RateLimiter,
     sessionService: SessionService,
+    auditService?: AuditService,
   ) {
     this.operatorStore = operatorStore;
     this.rateLimiter = rateLimiter;
     this.sessionService = sessionService;
+    this.auditService = auditService;
   }
 
   async authenticate(identity: string, secret: string, sourceKey: string): Promise<AuthResult> {
     // Rate limit check (FR-003)
     if (!this.rateLimiter.check(sourceKey)) {
+      await this.auditService?.record(
+        'auth.rate-limited', null, null, { identity }, 'failure', sourceKey,
+      );
       throw createError('RATE_LIMITED');
     }
 
@@ -39,11 +46,18 @@ export class AuthService {
     const operator = this.operatorStore.getOperatorByIdentity(identity);
     if (!operator) {
       this.rateLimiter.recordFailure(sourceKey);
+      await this.auditService?.record(
+        'auth.attempt.failure', null, null, { identity }, 'failure', sourceKey,
+      );
       throw createError('INVALID_CREDENTIALS');
     }
 
     if (!operator.isActive) {
       this.rateLimiter.recordFailure(sourceKey);
+      await this.auditService?.record(
+        'auth.attempt.failure', operator.id, null,
+        { identity, reason: 'account_disabled' }, 'failure', sourceKey,
+      );
       throw createError('ACCOUNT_DISABLED');
     }
 
@@ -51,12 +65,18 @@ export class AuthService {
     const cred = operator.credentials.find((c) => !c.isRevoked);
     if (!cred) {
       this.rateLimiter.recordFailure(sourceKey);
+      await this.auditService?.record(
+        'auth.attempt.failure', operator.id, null, { identity }, 'failure', sourceKey,
+      );
       throw createError('INVALID_CREDENTIALS');
     }
 
     const valid = await verifySecret(secret, cred.hashedSecret, cred.salt);
     if (!valid) {
       this.rateLimiter.recordFailure(sourceKey);
+      await this.auditService?.record(
+        'auth.attempt.failure', operator.id, null, { identity }, 'failure', sourceKey,
+      );
       throw createError('INVALID_CREDENTIALS');
     }
 
@@ -68,6 +88,10 @@ export class AuthService {
 
     // Reset rate limiter on success
     this.rateLimiter.reset(sourceKey);
+
+    await this.auditService?.record(
+      'auth.attempt.success', operator.id, session.id, {}, 'success', sourceKey,
+    );
 
     return { operator, session };
   }
@@ -97,6 +121,10 @@ export class AuthService {
 
     // Reset idle timer on successful re-auth
     this.sessionService.touchActivity(sessionId);
+
+    await this.auditService?.record(
+      'session.idle-reauth', operator.id, sessionId, {}, 'success', _sourceKey,
+    );
 
     return session;
   }

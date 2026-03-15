@@ -1,8 +1,8 @@
 import { describe, it, beforeEach } from 'node:test';
 import assert from 'node:assert/strict';
+import { Hono } from 'hono';
 import { createMutatingRateLimiter } from '../mutating-rate-limiter.ts';
 import { FakeClock } from '../../shared/clock.ts';
-import { createMockReqRes } from '../../shared/__tests__/test-helpers.ts';
 
 describe('Mutating rate limiter', () => {
   let clock: FakeClock;
@@ -11,68 +11,58 @@ describe('Mutating rate limiter', () => {
     clock = new FakeClock(Date.now());
   });
 
-  it('GET passes through', () => {
-    const limiter = createMutatingRateLimiter(clock, {
-      maxAttempts: 3,
-      windowMs: 60000,
-      lockoutMs: 60000,
-    });
-    const { req, res } = createMockReqRes('GET');
-    let called = false;
-    limiter(req, res, () => {
-      called = true;
-    });
-    assert.equal(called, true);
+  it('GET passes through', async () => {
+    const app = new Hono();
+    app.use('*', createMutatingRateLimiter(clock, { maxAttempts: 3 }));
+    app.get('/test', (c) => c.json({ ok: true }));
+    const res = await app.request('/test');
+    assert.equal(res.status, 200);
   });
 
-  it('POST under threshold passes', () => {
-    const limiter = createMutatingRateLimiter(clock, {
-      maxAttempts: 3,
-      windowMs: 60000,
-      lockoutMs: 60000,
+  it('POST under threshold passes', async () => {
+    const app = new Hono();
+    app.use('*', createMutatingRateLimiter(clock, { maxAttempts: 3 }));
+    app.post('/test', (c) => c.json({ ok: true }));
+    const res = await app.request('/test', {
+      method: 'POST',
+      headers: { 'X-Forwarded-For': '127.0.0.1' },
     });
-    const { req, res } = createMockReqRes('POST');
-    let called = false;
-    limiter(req, res, () => {
-      called = true;
-    });
-    assert.equal(called, true);
+    assert.equal(res.status, 200);
   });
 
-  it('at threshold returns 429', () => {
-    const limiter = createMutatingRateLimiter(clock, {
-      maxAttempts: 2,
-      windowMs: 60000,
-      lockoutMs: 60000,
-    });
-    // Use up the attempts
+  it('at threshold returns 429', async () => {
+    const app = new Hono();
+    app.use('*', createMutatingRateLimiter(clock, { maxAttempts: 2 }));
+    app.post('/test', (c) => c.json({ ok: true }));
     for (let i = 0; i < 2; i++) {
-      const { req, res } = createMockReqRes('POST');
-      limiter(req, res, () => {});
+      await app.request('/test', {
+        method: 'POST',
+        headers: { 'X-Forwarded-For': '127.0.0.1' },
+      });
     }
-    const { req, res } = createMockReqRes('POST');
-    limiter(req, res, () => {});
-    assert.equal(res.statusCode, 429);
+    const res = await app.request('/test', {
+      method: 'POST',
+      headers: { 'X-Forwarded-For': '127.0.0.1' },
+    });
+    assert.equal(res.status, 429);
   });
 
-  it('window slides', () => {
-    const limiter = createMutatingRateLimiter(clock, {
-      maxAttempts: 2,
-      windowMs: 60000,
-      lockoutMs: 60000,
-    });
+  it('window slides after lockout', async () => {
+    const app = new Hono();
+    app.use('*', createMutatingRateLimiter(clock, { maxAttempts: 2, lockoutMs: 60_000 }));
+    app.post('/test', (c) => c.json({ ok: true }));
     for (let i = 0; i < 2; i++) {
-      const { req, res } = createMockReqRes('POST');
-      limiter(req, res, () => {});
+      await app.request('/test', {
+        method: 'POST',
+        headers: { 'X-Forwarded-For': '127.0.0.1' },
+      });
     }
-    clock.advance(60001);
-    // After lockout
-    clock.advance(60001);
-    const { req, res } = createMockReqRes('POST');
-    let called = false;
-    limiter(req, res, () => {
-      called = true;
+    // Advance past lockout
+    clock.advance(120_001);
+    const res = await app.request('/test', {
+      method: 'POST',
+      headers: { 'X-Forwarded-For': '127.0.0.1' },
     });
-    assert.equal(called, true);
+    assert.equal(res.status, 200);
   });
 });
