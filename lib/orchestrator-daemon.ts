@@ -22,6 +22,11 @@ import {
   listAgents,
 } from './hydra-agents.ts';
 import { executeAgentWithRecovery } from './hydra-shared/agent-executor.ts';
+import {
+  createConversationExecutor,
+  createApprovalContinuator,
+  type ExecutorDeps,
+} from './daemon/conversation-executor.ts';
 import { registerBuiltInSubAgents } from './hydra-sub-agents.ts';
 import { syncHydraMd } from './hydra-sync-md.ts';
 import {
@@ -168,67 +173,20 @@ function broadcastEvent(sseClients: Set<ServerResponse>, event: unknown) {
 }
 
 /**
- * Create the executeTurn callback that wires conversation turns into
- * the Hydra agent execution pipeline.  The returned function dispatches
- * the instruction to the best available agent via `executeAgentWithRecovery`
- * and drives the turn's stream to a terminal state (completed / failed).
+ * Build the ExecutorDeps for the conversation executor/continuator from the
+ * daemon context.  Uses `executeAgentWithRecovery` as the real agent backend.
  */
-function createConversationExecutor(
-  ctx: DaemonContext,
-): (turnId: string, instruction: string) => Promise<void> {
-  return async (turnId: string, instruction: string): Promise<void> => {
-    const { streamManager } = ctx;
-    const taskType = classifyTask(instruction);
-    // Pick the agent best suited for this task type.  The daemon has no CLI-
-    // detection context, so we fall back to role-based defaults:  analysis /
-    // review → gemini, implementation / refactor / testing → codex, rest → claude.
-    const agentMap: Record<string, string> = {
-      analysis: 'gemini',
-      review: 'gemini',
-      research: 'gemini',
-      implementation: 'codex',
-      refactor: 'codex',
-      testing: 'codex',
-    };
-    const agent = agentMap[taskType] ?? 'claude';
-    const result = await executeAgentWithRecovery(agent, instruction);
-    if (result.ok) {
-      const output = typeof result.output === 'string' ? result.output : '';
-      if (output !== '') {
-        streamManager.emitEvent(turnId, 'text-delta', { text: output });
-      }
-      streamManager.completeStream(turnId);
-    } else {
-      const reason = typeof result.output === 'string' ? result.output : 'Agent execution failed';
-      streamManager.failStream(turnId, reason);
-    }
-  };
-}
-
-/**
- * Create the continueAfterApproval callback that resumes paused turns after
- * an operator responds to an approval prompt.  The callback dispatches a
- * follow-up instruction that includes the approval context so the agent can
- * continue from where it left off.
- */
-function createApprovalContinuator(
-  ctx: DaemonContext,
-): (
-  turnId: string,
-  approvalId: string,
-  response: string,
-  originalInstruction: string,
-) => Promise<void> {
-  return async (
-    turnId: string,
-    _approvalId: string,
-    response: string,
-    originalInstruction: string,
-  ): Promise<void> => {
-    const continuationInstruction =
-      `Continue the previous task. Original instruction: ${originalInstruction}\n` +
-      `Approval response: ${response}`;
-    await createConversationExecutor(ctx)(turnId, continuationInstruction);
+function buildExecutorDeps(ctx: DaemonContext): ExecutorDeps {
+  return {
+    conversationStore: ctx.conversationStore,
+    streamManager: ctx.streamManager,
+    executeAgent: async (agent, prompt) => {
+      const result = await executeAgentWithRecovery(agent, prompt);
+      return {
+        ok: result.ok,
+        output: typeof result.output === 'string' ? result.output : '',
+      };
+    },
   };
 }
 
@@ -629,8 +587,8 @@ async function handleHttpRequest(
       handleConversationRoute(req, res, {
         store: ctx.conversationStore,
         streamManager: ctx.streamManager,
-        executeTurn: createConversationExecutor(ctx),
-        continueAfterApproval: createApprovalContinuator(ctx),
+        executeTurn: createConversationExecutor(buildExecutorDeps(ctx)),
+        continueAfterApproval: createApprovalContinuator(buildExecutorDeps(ctx)),
       })
     ) {
       return;
