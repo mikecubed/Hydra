@@ -157,6 +157,100 @@ describe('AuthService', () => {
     assert.equal(idleReauthEvents.length, 0, 'should not emit idle-reauth for active session');
   });
 
+  describe('multi-credential operators', () => {
+    it('authenticate succeeds with second credential', async () => {
+      // Add a second credential to the same operator
+      await operatorStore.addCredential('admin', 'second-password');
+
+      // Login with the second credential
+      const result = await authService.authenticate('admin', 'second-password', '127.0.0.1');
+      assert.equal(result.operator.id, 'admin');
+      assert.equal(result.session.state, 'active');
+    });
+
+    it('authenticate updates lastUsedAt only on the matching credential', async () => {
+      const cred2 = await operatorStore.addCredential('admin', 'second-password');
+
+      await authService.authenticate('admin', 'second-password', '127.0.0.1');
+
+      const operator = operatorStore.getOperator('admin')!;
+      const firstCred = operator.credentials[0];
+      const secondCred = operator.credentials.find((c) => c.id === cred2.id)!;
+
+      assert.equal(firstCred.lastUsedAt, null, 'first credential should not be touched');
+      assert.ok(secondCred.lastUsedAt, 'second credential should have lastUsedAt set');
+    });
+
+    it('authenticate rejects when no credential matches', async () => {
+      await operatorStore.addCredential('admin', 'second-password');
+
+      await assert.rejects(
+        () => authService.authenticate('admin', 'neither-password', '127.0.0.1'),
+        { message: /credentials/i },
+      );
+    });
+
+    it('authenticate skips revoked credentials', async () => {
+      const operator = operatorStore.getOperator('admin')!;
+      // Revoke the first credential
+      operator.credentials[0].isRevoked = true;
+
+      // Add a fresh second credential
+      await operatorStore.addCredential('admin', 'new-password');
+
+      // Old credential rejected
+      await assert.rejects(
+        () => authService.authenticate('admin', 'correct-password', '127.0.0.1'),
+        { message: /credentials/i },
+      );
+
+      // New credential accepted
+      const result = await authService.authenticate('admin', 'new-password', '127.0.0.1');
+      assert.equal(result.operator.id, 'admin');
+    });
+
+    it('reauthenticate succeeds with second credential', async () => {
+      await operatorStore.addCredential('admin', 'second-password');
+
+      // Login with first credential
+      const result = await authService.authenticate('admin', 'correct-password', '127.0.0.1');
+      // Advance past idle timeout
+      clock.advance(30 * 60 * 1000 + 1);
+
+      // Reauth with second credential
+      const session = await authService.reauthenticate(
+        'admin',
+        'second-password',
+        '127.0.0.1',
+        result.session.id,
+      );
+      assert.equal(session.id, result.session.id);
+    });
+
+    it('reauthenticate updates lastUsedAt only on the matching credential', async () => {
+      const cred2 = await operatorStore.addCredential('admin', 'second-password');
+
+      const result = await authService.authenticate('admin', 'correct-password', '127.0.0.1');
+      clock.advance(30 * 60 * 1000 + 1);
+
+      // Clear lastUsedAt from the login to isolate the reauth update
+      const operator = operatorStore.getOperator('admin')!;
+      for (const c of operator.credentials) c.lastUsedAt = null;
+
+      await authService.reauthenticate(
+        'admin',
+        'second-password',
+        '127.0.0.1',
+        result.session.id,
+      );
+
+      const firstCred = operator.credentials[0];
+      const secondCred = operator.credentials.find((c) => c.id === cred2.id)!;
+      assert.equal(firstCred.lastUsedAt, null, 'first credential should not be touched by reauth');
+      assert.ok(secondCred.lastUsedAt, 'second credential should have lastUsedAt set by reauth');
+    });
+  });
+
   describe('reauthenticate rate-limiting and failure auditing', () => {
     let auditService: AuditService;
     let authedService: AuthService;

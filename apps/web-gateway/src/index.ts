@@ -66,9 +66,13 @@ export function createGatewayApp(deps: GatewayAppDeps = {}): GatewayApp {
   // Mutating rate limiter
   app.use('*', createMutatingRateLimiter(clock));
 
-  // Auth routes (login/logout/reauth) — no session required, but need CSRF after login
+  // Auth routes — login is unauthenticated; logout/reauth need CSRF protection
   const authRoutes = createAuthRoutes(authService, sessionService, deps.authRoutesConfig);
-  app.route('/auth', authRoutes);
+  const authApp = new Hono<GatewayEnv>();
+  authApp.use('/logout', createCsrfMiddleware());
+  authApp.use('/reauth', createCsrfMiddleware());
+  authApp.route('/', authRoutes);
+  app.route('/auth', authApp);
 
   // Session routes (info/extend) — require valid session + CSRF
   const sessionRoutes = createSessionRoutes(sessionService);

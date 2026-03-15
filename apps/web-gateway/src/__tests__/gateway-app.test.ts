@@ -218,7 +218,7 @@ describe('Gateway app integration', () => {
 
     const logoutReq = buildRequest('POST', '/auth/logout', {
       cookies: { __session: cookies['__session'], __csrf: cookies['__csrf'] },
-      headers: { origin: ORIGIN },
+      headers: { origin: ORIGIN, 'x-csrf-token': cookies['__csrf'] },
     });
     const logoutRes = await gw.app.request(logoutReq);
     assert.equal(logoutRes.status, 200);
@@ -231,6 +231,81 @@ describe('Gateway app integration', () => {
     assert.notEqual(infoRes.status, 200);
   });
 
+  // ── CSRF protection on /auth/logout ─────────────────────────────────────
+
+  it('POST /auth/logout without CSRF token returns 403', async () => {
+    const cookies = await login(gw);
+
+    const logoutReq = buildRequest('POST', '/auth/logout', {
+      cookies: { __session: cookies['__session'], __csrf: cookies['__csrf'] },
+      headers: { origin: ORIGIN },
+    });
+    const logoutRes = await gw.app.request(logoutReq);
+    assert.equal(logoutRes.status, 403);
+    const body = (await logoutRes.json()) as { code: string };
+    assert.equal(body.code, 'CSRF_INVALID');
+  });
+
+  it('POST /auth/logout with wrong CSRF token returns 403', async () => {
+    const cookies = await login(gw);
+
+    const logoutReq = buildRequest('POST', '/auth/logout', {
+      cookies: { __session: cookies['__session'], __csrf: cookies['__csrf'] },
+      headers: { origin: ORIGIN, 'x-csrf-token': 'wrong-token' },
+    });
+    const logoutRes = await gw.app.request(logoutReq);
+    assert.equal(logoutRes.status, 403);
+    const body = (await logoutRes.json()) as { code: string };
+    assert.equal(body.code, 'CSRF_INVALID');
+  });
+
+  // ── CSRF protection on /auth/reauth ─────────────────────────────────────
+
+  it('POST /auth/reauth without CSRF token returns 403', async () => {
+    const cookies = await login(gw);
+
+    // Advance past idle timeout
+    clock.advance(1800_001);
+
+    const reauthReq = buildRequest('POST', '/auth/reauth', {
+      body: json({ identity: 'admin', secret: 'password123' }),
+      cookies: { __session: cookies['__session'], __csrf: cookies['__csrf'] },
+      headers: { origin: ORIGIN },
+    });
+    const reauthRes = await gw.app.request(reauthReq);
+    assert.equal(reauthRes.status, 403);
+    const body = (await reauthRes.json()) as { code: string };
+    assert.equal(body.code, 'CSRF_INVALID');
+  });
+
+  it('POST /auth/reauth with valid CSRF token succeeds', async () => {
+    const cookies = await login(gw);
+
+    // Advance past idle timeout
+    clock.advance(1800_001);
+
+    const reauthReq = buildRequest('POST', '/auth/reauth', {
+      body: json({ identity: 'admin', secret: 'password123' }),
+      cookies: { __session: cookies['__session'], __csrf: cookies['__csrf'] },
+      headers: { origin: ORIGIN, 'x-csrf-token': cookies['__csrf'] },
+    });
+    const reauthRes = await gw.app.request(reauthReq);
+    assert.equal(reauthRes.status, 200);
+    const body = (await reauthRes.json()) as { operatorId: string };
+    assert.equal(body.operatorId, 'admin');
+  });
+
+  // ── Login does NOT require CSRF ──────────────────────────────────────────
+
+  it('POST /auth/login without CSRF token succeeds (pre-auth)', async () => {
+    const req = buildRequest('POST', '/auth/login', {
+      body: json({ identity: 'admin', secret: 'password123' }),
+      headers: { origin: ORIGIN },
+    });
+    const res = await gw.app.request(req);
+    assert.equal(res.status, 200);
+  });
+
   // ── Reauth (idle-only) ──────────────────────────────────────────────────
 
   it('reauth rejects active (non-idle) session', async () => {
@@ -238,8 +313,8 @@ describe('Gateway app integration', () => {
 
     const reauthReq = buildRequest('POST', '/auth/reauth', {
       body: json({ identity: 'admin', secret: 'password123' }),
-      cookies: { __session: cookies['__session'] },
-      headers: { origin: ORIGIN },
+      cookies: { __session: cookies['__session'], __csrf: cookies['__csrf'] },
+      headers: { origin: ORIGIN, 'x-csrf-token': cookies['__csrf'] },
     });
     const reauthRes = await gw.app.request(reauthReq);
     assert.equal(reauthRes.status, 403);
@@ -255,8 +330,8 @@ describe('Gateway app integration', () => {
 
     const reauthReq = buildRequest('POST', '/auth/reauth', {
       body: json({ identity: 'admin', secret: 'password123' }),
-      cookies: { __session: cookies['__session'] },
-      headers: { origin: ORIGIN },
+      cookies: { __session: cookies['__session'], __csrf: cookies['__csrf'] },
+      headers: { origin: ORIGIN, 'x-csrf-token': cookies['__csrf'] },
     });
     const reauthRes = await gw.app.request(reauthReq);
     assert.equal(reauthRes.status, 200);

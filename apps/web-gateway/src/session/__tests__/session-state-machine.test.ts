@@ -22,6 +22,8 @@ describe('session-state-machine', () => {
       { from: 'expiring-soon', trigger: 'logout', to: 'logged-out' },
       { from: 'daemon-unreachable', trigger: 'daemon-up', to: 'active' },
       { from: 'daemon-unreachable', trigger: 'expire', to: 'expired' },
+      { from: 'daemon-unreachable', trigger: 'logout', to: 'logged-out' },
+      { from: 'daemon-unreachable', trigger: 'invalidate', to: 'invalidated' },
     ];
 
     for (const { from, trigger, to } of cases) {
@@ -97,8 +99,8 @@ describe('session-state-machine', () => {
       assert.equal(getValidTriggers('expiring-soon').length, 4);
     });
 
-    it('daemon-unreachable has 2 triggers', () => {
-      assert.equal(getValidTriggers('daemon-unreachable').length, 2);
+    it('daemon-unreachable has 4 triggers', () => {
+      assert.equal(getValidTriggers('daemon-unreachable').length, 4);
     });
 
     it('terminal states have 0 triggers', () => {
@@ -133,6 +135,44 @@ describe('session-state-machine', () => {
       if (r5.ok) reachable.add(r5.newState);
 
       assert.equal(reachable.size, 6);
+    });
+  });
+
+  describe('logout during daemon outage terminates session', () => {
+    it('daemon-unreachable + logout → logged-out (terminal)', () => {
+      const result = transition('daemon-unreachable', 'logout');
+      assert.ok(result.ok);
+      if (result.ok) {
+        assert.equal(result.newState, 'logged-out');
+        assert.equal(isTerminal(result.newState), true);
+      }
+    });
+
+    it('daemon-unreachable + invalidate → invalidated (terminal)', () => {
+      const result = transition('daemon-unreachable', 'invalidate');
+      assert.ok(result.ok);
+      if (result.ok) {
+        assert.equal(result.newState, 'invalidated');
+        assert.equal(isTerminal(result.newState), true);
+      }
+    });
+
+    it('session is unusable after logout from daemon-unreachable', () => {
+      // Simulate: active → daemon-down → logout
+      const step1 = transition('active', 'daemon-down');
+      assert.ok(step1.ok);
+      if (!step1.ok) return;
+
+      const step2 = transition(step1.newState, 'logout');
+      assert.ok(step2.ok);
+      if (!step2.ok) return;
+
+      // Terminal: no further transitions allowed
+      assert.equal(isTerminal(step2.newState), true);
+      const step3 = transition(step2.newState, 'daemon-up');
+      assert.equal(step3.ok, false, 'logged-out session must reject daemon-up');
+      const step4 = transition(step2.newState, 'extend');
+      assert.equal(step4.ok, false, 'logged-out session must reject extend');
     });
   });
 });

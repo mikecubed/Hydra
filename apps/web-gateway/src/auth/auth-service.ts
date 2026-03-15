@@ -75,9 +75,9 @@ export class AuthService {
       throw createError('ACCOUNT_DISABLED');
     }
 
-    // Verify credential
-    const cred = operator.credentials.find((c) => !c.isRevoked);
-    if (!cred) {
+    // Verify credential — try all non-revoked credentials (supports credential rotation)
+    const matchedCred = await this.findMatchingCredential(operator, secret);
+    if (!matchedCred) {
       this.rateLimiter.recordFailure(sourceKey);
       await this.auditService?.record(
         'auth.attempt.failure',
@@ -90,22 +90,8 @@ export class AuthService {
       throw createError('INVALID_CREDENTIALS');
     }
 
-    const valid = await verifySecret(secret, cred.hashedSecret, cred.salt);
-    if (!valid) {
-      this.rateLimiter.recordFailure(sourceKey);
-      await this.auditService?.record(
-        'auth.attempt.failure',
-        operator.id,
-        null,
-        { identity },
-        'failure',
-        sourceKey,
-      );
-      throw createError('INVALID_CREDENTIALS');
-    }
-
-    // Update lastUsedAt
-    cred.lastUsedAt = new Date().toISOString();
+    // Update lastUsedAt only on the matching credential
+    matchedCred.lastUsedAt = new Date().toISOString();
 
     // Create session
     const session = await this.sessionService.create(operator.id, sourceKey);
@@ -163,17 +149,14 @@ export class AuthService {
       throw createError('ACCOUNT_DISABLED');
     }
 
-    const cred = operator.credentials.find((c) => !c.isRevoked);
-    if (!cred) {
+    const matchedCred = await this.findMatchingCredential(operator, secret);
+    if (!matchedCred) {
       await this.recordReauthFailure(operator.id, sessionId, identity, sourceKey);
       throw createError('INVALID_CREDENTIALS');
     }
 
-    const valid = await verifySecret(secret, cred.hashedSecret, cred.salt);
-    if (!valid) {
-      await this.recordReauthFailure(operator.id, sessionId, identity, sourceKey);
-      throw createError('INVALID_CREDENTIALS');
-    }
+    // Update lastUsedAt only on the matching credential
+    matchedCred.lastUsedAt = new Date().toISOString();
 
     // Reset rate limiter + idle timer on successful re-auth
     this.rateLimiter.reset(sourceKey);
@@ -189,6 +172,20 @@ export class AuthService {
     );
 
     return session;
+  }
+
+  /** Try all non-revoked credentials; return the first match, or undefined. */
+  private async findMatchingCredential(
+    operator: StoredOperator,
+    secret: string,
+  ): Promise<StoredOperator['credentials'][number] | undefined> {
+    const activeCreds = operator.credentials.filter((c) => !c.isRevoked);
+    for (const cred of activeCreds) {
+      // eslint-disable-next-line no-await-in-loop -- sequential: stop at first match
+      const valid = await verifySecret(secret, cred.hashedSecret, cred.salt);
+      if (valid) return cred;
+    }
+    return undefined;
   }
 
   private async recordReauthFailure(

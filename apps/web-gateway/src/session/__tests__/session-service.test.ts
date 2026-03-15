@@ -134,6 +134,38 @@ describe('SessionService', () => {
     assert.equal(store.get(s1.id)?.state, 'invalidated');
     assert.equal(store.get(s2.id)?.state, 'invalidated');
   });
+
+  it('logout during daemon outage leaves session unusable', async () => {
+    const session = await service.create('op-1', '127.0.0.1');
+
+    // Simulate daemon going down
+    await service.markDaemonDown(session.id);
+    assert.equal(store.get(session.id)?.state, 'daemon-unreachable');
+
+    // Logout while daemon is unreachable
+    await service.logout(session.id);
+    assert.equal(store.get(session.id)?.state, 'logged-out');
+
+    // Session must be rejected on subsequent validate
+    await assert.rejects(() => service.validate(session.id), {
+      message: /session/i,
+    });
+  });
+
+  it('invalidate during daemon outage leaves session unusable', async () => {
+    const session = await service.create('op-1', '127.0.0.1');
+
+    await service.markDaemonDown(session.id);
+    assert.equal(store.get(session.id)?.state, 'daemon-unreachable');
+
+    await service.invalidate(session.id, 'admin-revoke');
+    assert.equal(store.get(session.id)?.state, 'invalidated');
+    assert.equal(store.get(session.id)?.invalidatedReason, 'admin-revoke');
+
+    await assert.rejects(() => service.validate(session.id), {
+      message: /invalidated/i,
+    });
+  });
 });
 
 describe('SessionService audit failure propagation', () => {
