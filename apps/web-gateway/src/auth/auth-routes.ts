@@ -69,11 +69,10 @@ export function createAuthRoutes(
   app.post('/logout', async (c) => {
     const sessionId = getCookie(c, '__session');
     if (sessionId) {
-      try {
-        await sessionService.logout(sessionId);
-      } catch {
-        // Session may already be gone
-      }
+      // sessionService.logout() silently handles benign cases (session not
+      // found, already terminal). Only genuine failures (e.g. audit
+      // persistence errors) will throw, and those must surface as 5xx.
+      await sessionService.logout(sessionId);
     }
 
     deleteCookie(c, '__session', { path: '/' });

@@ -128,7 +128,7 @@ export class AuthService {
   async reauthenticate(
     identity: string,
     secret: string,
-    _sourceKey: string,
+    sourceKey: string,
     sessionId: string,
   ): Promise<StoredSession> {
     // Validate the session is non-terminal and non-expired (FR-009)
@@ -139,20 +139,44 @@ export class AuthService {
       throw createError('SESSION_NOT_IDLE');
     }
 
+    // Rate limit check — same brute-force protection as authenticate() (FR-003)
+    if (!this.rateLimiter.check(sourceKey)) {
+      await this.auditService?.record(
+        'auth.rate-limited',
+        null,
+        sessionId,
+        { identity, context: 'reauth' },
+        'failure',
+        sourceKey,
+      );
+      throw createError('RATE_LIMITED');
+    }
+
     const operator = this.operatorStore.getOperatorByIdentity(identity);
     if (operator?.id !== session.operatorId) {
+      await this.recordReauthFailure(null, sessionId, identity, sourceKey);
       throw createError('INVALID_CREDENTIALS');
     }
 
-    if (!operator.isActive) throw createError('ACCOUNT_DISABLED');
+    if (!operator.isActive) {
+      await this.recordReauthFailure(operator.id, sessionId, identity, sourceKey, 'account_disabled');
+      throw createError('ACCOUNT_DISABLED');
+    }
 
     const cred = operator.credentials.find((c) => !c.isRevoked);
-    if (!cred) throw createError('INVALID_CREDENTIALS');
+    if (!cred) {
+      await this.recordReauthFailure(operator.id, sessionId, identity, sourceKey);
+      throw createError('INVALID_CREDENTIALS');
+    }
 
     const valid = await verifySecret(secret, cred.hashedSecret, cred.salt);
-    if (!valid) throw createError('INVALID_CREDENTIALS');
+    if (!valid) {
+      await this.recordReauthFailure(operator.id, sessionId, identity, sourceKey);
+      throw createError('INVALID_CREDENTIALS');
+    }
 
-    // Reset idle timer on successful re-auth
+    // Reset rate limiter + idle timer on successful re-auth
+    this.rateLimiter.reset(sourceKey);
     this.sessionService.touchActivity(sessionId);
 
     await this.auditService?.record(
@@ -161,9 +185,29 @@ export class AuthService {
       sessionId,
       {},
       'success',
-      _sourceKey,
+      sourceKey,
     );
 
     return session;
+  }
+
+  private async recordReauthFailure(
+    operatorId: string | null,
+    sessionId: string,
+    identity: string,
+    sourceKey: string,
+    reason?: string,
+  ): Promise<void> {
+    this.rateLimiter.recordFailure(sourceKey);
+    const detail: Record<string, unknown> = { identity, context: 'reauth' };
+    if (reason != null) detail.reason = reason;
+    await this.auditService?.record(
+      'auth.attempt.failure',
+      operatorId,
+      sessionId,
+      detail,
+      'failure',
+      sourceKey,
+    );
   }
 }
