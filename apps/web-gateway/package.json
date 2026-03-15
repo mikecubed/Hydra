@@ -2,5 +2,12 @@
   "name": "@hydra/web-gateway",
   "version": "0.0.0",
   "private": true,
-  "type": "module"
+  "type": "module",
+  "scripts": {
+    "test": "node --test --experimental-test-module-mocks 'src/**/*.test.ts'"
+  },
+  "dependencies": {
+    "@hydra/web-contracts": "*",
+    "hono": "^4.12.8"
+  }
 }
