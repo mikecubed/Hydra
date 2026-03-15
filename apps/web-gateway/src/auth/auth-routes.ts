@@ -25,12 +25,16 @@ export function createAuthRoutes(
   const app = new Hono<GatewayEnv>();
 
   app.post('/login', async (c) => {
-    let body: { identity?: string; secret?: string };
+    let raw: unknown;
     try {
-      body = await c.req.json<{ identity?: string; secret?: string }>();
+      raw = await c.req.json();
     } catch {
       return c.json({ code: 'BAD_REQUEST', message: 'Invalid JSON body' }, 400);
     }
+    if (raw == null || typeof raw !== 'object' || Array.isArray(raw)) {
+      return c.json({ code: 'BAD_REQUEST', message: 'Invalid JSON body' }, 400);
+    }
+    const body = raw as { identity?: string; secret?: string };
     const identity = body.identity ?? '';
     const secret = body.secret ?? '';
 
@@ -104,12 +108,16 @@ export function createAuthRoutes(
       );
     }
 
-    let body: { identity?: string; secret?: string };
+    let raw: unknown;
     try {
-      body = await c.req.json<{ identity?: string; secret?: string }>();
+      raw = await c.req.json();
     } catch {
       return c.json({ code: 'BAD_REQUEST', message: 'Invalid JSON body' }, 400);
     }
+    if (raw == null || typeof raw !== 'object' || Array.isArray(raw)) {
+      return c.json({ code: 'BAD_REQUEST', message: 'Invalid JSON body' }, 400);
+    }
+    const body = raw as { identity?: string; secret?: string };
     const identity = body.identity ?? '';
     const secret = body.secret ?? '';
 

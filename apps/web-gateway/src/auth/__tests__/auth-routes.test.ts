@@ -265,6 +265,40 @@ describe('auth-routes: /login malformed body', () => {
     const body = (await res.json()) as Record<string, unknown>;
     assert.equal(body['code'], 'BAD_REQUEST');
   });
+
+  it('returns 400 BAD_REQUEST for literal null JSON body', async () => {
+    const res = await app.request('/auth/login', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: 'null',
+    });
+    assert.equal(res.status, 400);
+    const body = (await res.json()) as Record<string, unknown>;
+    assert.equal(body['code'], 'BAD_REQUEST');
+    assert.equal(body['message'], 'Invalid JSON body');
+  });
+
+  it('returns 400 BAD_REQUEST for JSON array body', async () => {
+    const res = await app.request('/auth/login', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: '[1,2,3]',
+    });
+    assert.equal(res.status, 400);
+    const body = (await res.json()) as Record<string, unknown>;
+    assert.equal(body['code'], 'BAD_REQUEST');
+  });
+
+  it('returns 400 BAD_REQUEST for JSON string body', async () => {
+    const res = await app.request('/auth/login', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: '"just a string"',
+    });
+    assert.equal(res.status, 400);
+    const body = (await res.json()) as Record<string, unknown>;
+    assert.equal(body['code'], 'BAD_REQUEST');
+  });
 });
 
 describe('auth-routes: /reauth malformed body', () => {
@@ -329,5 +363,36 @@ describe('auth-routes: /reauth malformed body', () => {
     assert.equal(res.status, 401);
     const body = (await res.json()) as Record<string, unknown>;
     assert.equal(body['code'], 'SESSION_NOT_FOUND');
+  });
+
+  it('returns 400 BAD_REQUEST for literal null JSON body on reauth', async () => {
+    const result = await authService.authenticate('admin', 'password123', '127.0.0.1');
+    const res = await app.request('/auth/reauth', {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+        Cookie: `__session=${result.session.id}`,
+      },
+      body: 'null',
+    });
+    assert.equal(res.status, 400);
+    const body = (await res.json()) as Record<string, unknown>;
+    assert.equal(body['code'], 'BAD_REQUEST');
+    assert.equal(body['message'], 'Invalid JSON body');
+  });
+
+  it('returns 400 BAD_REQUEST for JSON array body on reauth', async () => {
+    const result = await authService.authenticate('admin', 'password123', '127.0.0.1');
+    const res = await app.request('/auth/reauth', {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+        Cookie: `__session=${result.session.id}`,
+      },
+      body: '[1,2,3]',
+    });
+    assert.equal(res.status, 400);
+    const body = (await res.json()) as Record<string, unknown>;
+    assert.equal(body['code'], 'BAD_REQUEST');
   });
 });
