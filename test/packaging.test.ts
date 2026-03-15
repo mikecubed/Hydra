@@ -2,9 +2,10 @@
  * test/packaging.test.ts — Validate that `npm pack` produces a runnable artifact.
  *
  * Ensures the three public bin entries (hydra, hydra-client, hydra-daemon)
- * execute successfully from a fresh tarball install. This prevents regressions
- * where the published package exposes raw .ts entrypoints that Node cannot run
- * without native TypeScript support.
+ * execute successfully from a fresh tarball install, and that the packed
+ * package.json scripts reference .js entrypoints so `npm run` works.
+ * This prevents regressions where the published package exposes raw .ts
+ * entrypoints that Node cannot run without native TypeScript support.
  */
 
 import { describe, it, before, after } from 'node:test';
@@ -22,6 +23,8 @@ const ROOT = path.resolve(__dirname, '..');
 describe('packaging', { timeout: 120_000 }, () => {
   let tmpDir: string;
   let tgzPath: string;
+  /** Resolved path to the installed hydra package inside tmpDir. */
+  let hydraPkgDir: string;
 
   before(() => {
     tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'hydra-pack-test-'));
@@ -46,6 +49,8 @@ describe('packaging', { timeout: 120_000 }, () => {
       stdio: 'pipe',
       env: { ...process.env, HUSKY: '0' },
     });
+
+    hydraPkgDir = path.join(tmpDir, 'node_modules', 'hydra');
   });
 
   after(() => {
@@ -55,8 +60,8 @@ describe('packaging', { timeout: 120_000 }, () => {
   });
 
   it('tarball contains .js bin entrypoints alongside .ts source', () => {
-    const binDir = path.join(tmpDir, 'node_modules', 'hydra', 'bin');
-    const libDir = path.join(tmpDir, 'node_modules', 'hydra', 'lib');
+    const binDir = path.join(hydraPkgDir, 'bin');
+    const libDir = path.join(hydraPkgDir, 'lib');
 
     assert.ok(fs.existsSync(path.join(binDir, 'hydra-cli.js')), 'bin/hydra-cli.js missing');
     assert.ok(fs.existsSync(path.join(binDir, 'hydra-cli.ts')), 'bin/hydra-cli.ts missing');
@@ -71,10 +76,7 @@ describe('packaging', { timeout: 120_000 }, () => {
   });
 
   it('.js bin files contain no .ts import specifiers', () => {
-    const binJs = fs.readFileSync(
-      path.join(tmpDir, 'node_modules', 'hydra', 'bin', 'hydra-cli.js'),
-      'utf8',
-    );
+    const binJs = fs.readFileSync(path.join(hydraPkgDir, 'bin', 'hydra-cli.js'), 'utf8');
     const tsImports = binJs.match(/from\s+['"][^'"]*\.ts['"]/g);
     assert.equal(tsImports, null, `Found .ts import specifiers: ${tsImports?.join(', ')}`);
   });
@@ -107,11 +109,47 @@ describe('packaging', { timeout: 120_000 }, () => {
   });
 
   it('package.json bin entries point to .js files', () => {
-    const pkg = JSON.parse(
-      fs.readFileSync(path.join(tmpDir, 'node_modules', 'hydra', 'package.json'), 'utf8'),
-    );
+    const pkg = JSON.parse(fs.readFileSync(path.join(hydraPkgDir, 'package.json'), 'utf8'));
     for (const [name, target] of Object.entries(pkg.bin as Record<string, string>)) {
       assert.ok(target.endsWith('.js'), `bin.${name} should end with .js, got: ${target}`);
     }
+  });
+
+  it('packed package.json scripts reference .js for lib/bin entrypoints', () => {
+    const pkg = JSON.parse(fs.readFileSync(path.join(hydraPkgDir, 'package.json'), 'utf8'));
+    const libBinScripts = Object.entries(pkg.scripts as Record<string, string>).filter(([, v]) =>
+      /\b(?:lib|bin)\//.test(v),
+    );
+    assert.ok(libBinScripts.length > 0, 'Expected at least one script referencing lib/ or bin/');
+    for (const [name, cmd] of libBinScripts) {
+      assert.ok(
+        !/\b(?:lib|bin)\/[\w./-]*?\.ts\b/.test(cmd),
+        `scripts.${name} still references .ts: ${cmd}`,
+      );
+    }
+  });
+
+  it('installed package "start" script runs daemon help via .js', () => {
+    // Run the daemon's .js entrypoint directly with "help" — validates that
+    // the compiled .js file and its import graph are functional.
+    const result = execSync('node lib/orchestrator-daemon.js help', {
+      cwd: hydraPkgDir,
+      encoding: 'utf8',
+      stdio: 'pipe',
+    });
+    assert.ok(result.includes('Daemon'), 'Expected daemon help output from .js entrypoint');
+  });
+
+  it('source repo package.json is restored after pack (not mutated)', () => {
+    // The repo-at-rest package.json should still reference .ts entrypoints.
+    const repoPkg = JSON.parse(fs.readFileSync(path.join(ROOT, 'package.json'), 'utf8'));
+    assert.ok(
+      (repoPkg.scripts.start as string).includes('.ts'),
+      'Repo scripts.start should reference .ts after postpack restore',
+    );
+    assert.ok(
+      (repoPkg.scripts.go as string).includes('.ts'),
+      'Repo scripts.go should reference .ts after postpack restore',
+    );
   });
 });

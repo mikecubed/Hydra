@@ -22,6 +22,7 @@ coverage/
 
 # Prepack build output (generated .js alongside .ts source)
 .packfiles
+.package.json.bak
 lib/**/*.js
 bin/**/*.js
 

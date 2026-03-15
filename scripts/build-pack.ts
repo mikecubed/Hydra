@@ -10,6 +10,7 @@
  *   2. Post-process emitted .js files: rewrite remaining string-literal
  *      ".ts" references (path.join segments, file filters, etc.) to ".js".
  *   3. Write a manifest of generated files for postpack cleanup.
+ *   4. Patch package.json so published scripts also point to .js entrypoints.
  */
 
 import fs from 'node:fs';
@@ -86,4 +87,35 @@ console.log(`[prepack] Patched string literals in ${String(patchCount)} files.`)
 
 fs.writeFileSync(MANIFEST_PATH, `${emitted.join('\n')}\n`);
 console.log(`[prepack] Manifest written to .packfiles (${String(emitted.length)} entries).`);
+
+// ── Step 5: Patch package.json for published artifact ────────────────────────
+// Rewrite scripts that reference .ts entrypoints under lib/ or bin/ so that
+// `npm run <script>` works from the installed package (which has only .js).
+
+const PKG_PATH = path.join(ROOT, 'package.json');
+const PKG_BACKUP = path.join(ROOT, '.package.json.bak');
+
+console.log('[prepack] Patching package.json for published artifact…');
+fs.copyFileSync(PKG_PATH, PKG_BACKUP);
+
+const pkg = JSON.parse(fs.readFileSync(PKG_PATH, 'utf8')) as {
+  scripts?: Record<string, string>;
+};
+
+if (pkg.scripts) {
+  let scriptPatchCount = 0;
+  for (const [key, value] of Object.entries(pkg.scripts)) {
+    if (typeof value !== 'string') continue;
+    // Only rewrite .ts references that live under lib/ or bin/ (shipped dirs).
+    // Leave scripts/ references alone — those are dev-only and not in the tarball.
+    const rewritten = value.replace(/\b((?:lib|bin)\/[\w./-]*?)\.ts\b/g, '$1.js');
+    if (rewritten !== value) {
+      pkg.scripts[key] = rewritten;
+      scriptPatchCount += 1;
+    }
+  }
+  console.log(`[prepack] Rewrote ${String(scriptPatchCount)} script entries (.ts → .js).`);
+}
+
+fs.writeFileSync(PKG_PATH, `${JSON.stringify(pkg, null, 2)}\n`);
 console.log('[prepack] Done.');
