@@ -21,6 +21,12 @@ import {
   getModelSummary,
   listAgents,
 } from './hydra-agents.ts';
+import { executeAgentWithRecovery } from './hydra-shared/agent-executor.ts';
+import {
+  createConversationExecutor,
+  createApprovalContinuator,
+  type ExecutorDeps,
+} from './daemon/conversation-executor.ts';
 import { registerBuiltInSubAgents } from './hydra-sub-agents.ts';
 import { syncHydraMd } from './hydra-sync-md.ts';
 import {
@@ -52,6 +58,9 @@ import { checkUsage } from './hydra-usage.ts';
 import { resolveVerificationPlan } from './hydra-verification.ts';
 import { handleReadRoute } from './daemon/read-routes.ts';
 import { handleWriteRoute } from './daemon/write-routes.ts';
+import { handleConversationRoute } from './daemon/conversation-routes.ts';
+import { ConversationStore } from './daemon/conversation-store.ts';
+import { StreamManager } from './daemon/stream-manager.ts';
 import { sendJson, sendError, isAuthorized, readJsonBody } from './daemon/http-utils.ts';
 import { printHelp, commandStatus, commandStop } from './daemon/cli-commands.ts';
 import {
@@ -122,6 +131,8 @@ interface DaemonContext {
   eventCount: number;
   writeQueue: Promise<unknown>;
   sseClients: Set<ServerResponse>;
+  conversationStore: ConversationStore;
+  streamManager: StreamManager;
 }
 
 interface DaemonIntervals {
@@ -134,6 +145,7 @@ interface DaemonIntervals {
 type VerificationCallback = (error: Error | null, stdout: string, stderr: string) => void;
 
 function createDaemonContext(host: string, port: number): DaemonContext {
+  const conversationStore = new ConversationStore();
   return {
     host,
     port,
@@ -143,6 +155,8 @@ function createDaemonContext(host: string, port: number): DaemonContext {
     eventCount: 0,
     writeQueue: Promise.resolve(),
     sseClients: new Set<ServerResponse>(),
+    conversationStore,
+    streamManager: new StreamManager(conversationStore),
   };
 }
 
@@ -156,6 +170,24 @@ function broadcastEvent(sseClients: Set<ServerResponse>, event: unknown) {
       sseClients.delete(client);
     }
   }
+}
+
+/**
+ * Build the ExecutorDeps for the conversation executor/continuator from the
+ * daemon context.  Uses `executeAgentWithRecovery` as the real agent backend.
+ */
+function buildExecutorDeps(ctx: DaemonContext): ExecutorDeps {
+  return {
+    conversationStore: ctx.conversationStore,
+    streamManager: ctx.streamManager,
+    executeAgent: async (agent, prompt) => {
+      const result = await executeAgentWithRecovery(agent, prompt);
+      return {
+        ok: result.ok,
+        output: typeof result.output === 'string' ? result.output : '',
+      };
+    },
+  };
 }
 
 function writeStatus(ctx: DaemonContext, extra: Record<string, unknown> = {}) {
@@ -548,6 +580,17 @@ async function handleHttpRequest(
 
     if (!isAuthorized(req, ORCH_TOKEN)) {
       sendError(res, 401, 'Unauthorized');
+      return;
+    }
+
+    if (
+      handleConversationRoute(req, res, {
+        store: ctx.conversationStore,
+        streamManager: ctx.streamManager,
+        executeTurn: createConversationExecutor(buildExecutorDeps(ctx)),
+        continueAfterApproval: createApprovalContinuator(buildExecutorDeps(ctx)),
+      })
+    ) {
       return;
     }
 
