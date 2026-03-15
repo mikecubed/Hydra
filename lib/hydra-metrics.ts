@@ -15,7 +15,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { EventEmitter } from 'node:events';
 
-import type { IMetricsRecorder } from './types.ts';
+import type { IMetricsRecorder, MetricsCallResult } from './types.ts';
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
@@ -75,21 +75,6 @@ interface ActiveHandle {
   model: string;
   startedAt: number;
   startIso: string;
-}
-
-interface CallResult {
-  stdout?: string;
-  output?: string;
-  stderr?: string;
-  tokenUsage?: {
-    inputTokens?: number;
-    outputTokens?: number;
-    cacheCreationTokens?: number;
-    cacheReadTokens?: number;
-    totalTokens?: number;
-  } | null;
-  costUsd?: number | null;
-  outcome?: string;
 }
 
 interface PercentileResult {
@@ -211,7 +196,7 @@ const activeHandles = new Map<string, ActiveHandle>();
  * @param {string} [model] - Model ID being used
  * @returns {string} Handle ID for recordCallComplete/Error
  */
-function parseCallTokenUsage(result: CallResult): {
+function parseCallTokenUsage(result: MetricsCallResult): {
   realTokens: RealTokens | null;
   costUsd: number;
 } {
@@ -273,7 +258,7 @@ export function recordCallStart(agentName: string, model?: string): string {
  * @param {string} handle - Handle from recordCallStart
  * @param {object} result - Process result with stdout/stderr
  */
-export function recordCallComplete(handle: string, result: CallResult): void {
+export function recordCallComplete(handle: string, result: MetricsCallResult): void {
   const meta = activeHandles.get(handle);
   if (!meta) return;
   activeHandles.delete(handle);
@@ -356,6 +341,93 @@ export function recordCallError(handle: string, error: unknown): void {
     agent: meta.agent,
     error: error instanceof Error ? error.message : String(error),
   });
+}
+
+/**
+ * Record a failed agent call that still produced output/token data (e.g. ok:false without throw).
+ * Unlike recordCallError(), this preserves token usage and output-length accounting.
+ * @param {string} handle - Handle from recordCallStart
+ * @param {object} result - The result payload (ok:false)
+ * @param {string} errorMessage - Human-readable failure description
+ */
+export function recordCallFailure(
+  handle: string,
+  result: MetricsCallResult,
+  errorMessage: string,
+): void {
+  const meta = activeHandles.get(handle);
+  if (!meta) return;
+  activeHandles.delete(handle);
+
+  const durationMs = Date.now() - meta.startedAt;
+  const agent = ensureAgent(meta.agent);
+  const stdout = result.stdout ?? result.output ?? '';
+  const stderr = result.stderr ?? '';
+  const outputLen = stdout.length + stderr.length;
+  const estimatedTokens = Math.round(outputLen * TOKENS_PER_CHAR_ESTIMATE);
+  const { realTokens, costUsd } = parseCallTokenUsage(result);
+
+  agent.callsTotal += 1;
+  agent.callsToday += 1;
+  agent.callsFailed += 1;
+  agent.estimatedTokensToday += estimatedTokens;
+  agent.totalDurationMs += durationMs;
+  agent.avgDurationMs = Math.round(agent.totalDurationMs / agent.callsTotal);
+  agent.lastCallAt = new Date().toISOString();
+  agent.lastModel = meta.model;
+
+  if (realTokens) {
+    accumulateTokensIntoSession(agent, realTokens, costUsd);
+  }
+
+  agent.history.push({
+    at: meta.startIso,
+    model: meta.model,
+    durationMs,
+    estimatedTokens,
+    realTokens: realTokens ? { ...realTokens } : null,
+    costUsd: costUsd === 0 ? null : costUsd,
+    ok: false,
+    outputLen,
+    error: errorMessage,
+    outcome: result.outcome ?? 'failed',
+  });
+  if (agent.history.length > MAX_HISTORY) {
+    agent.history = agent.history.slice(-MAX_HISTORY);
+  }
+  metricsEmitter.emit('call:error', { agent: meta.agent, error: errorMessage });
+}
+
+/**
+ * Convenience wrapper that manages the full recordCallStart → complete/error lifecycle.
+ * Use this when the entire async operation fits within a single try/catch.
+ * For complex cases (handle passed through helpers, branching on result.ok, etc.),
+ * use the individual recordCallStart/Complete/Error functions directly.
+ */
+export async function recordExecution<T extends MetricsCallResult>(
+  agentName: string,
+  model: string | undefined,
+  fn: () => Promise<T>,
+): Promise<T> {
+  const handle = recordCallStart(agentName, model);
+  try {
+    const result = await fn();
+    // Treat resolved results with ok:false as failures so metrics reflect actual outcomes.
+    // Use recordCallFailure (not recordCallError) to preserve token/output accounting.
+    if (result.ok === false) {
+      const rawDetail = result.stderr ?? result.output ?? '';
+      const detail = rawDetail.length > 500 ? `${rawDetail.slice(0, 500)}…` : rawDetail;
+      const message =
+        detail === '' ? 'agent call returned ok:false' : `agent call returned ok:false: ${detail}`;
+      recordCallFailure(handle, result, message);
+    } else {
+      recordCallComplete(handle, result);
+    }
+    return result;
+  } catch (err: unknown) {
+    recordCallError(handle, err);
+    throw err;
+  }
 }
 
 // ── Querying ────────────────────────────────────────────────────────────────
@@ -651,4 +723,5 @@ export const metricsRecorder: IMetricsRecorder = {
   recordCallStart,
   recordCallComplete,
   recordCallError,
+  recordExecution,
 };

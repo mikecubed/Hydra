@@ -12,9 +12,9 @@ const spawn = _spawn as (cmd: string, args: string[], opts?: SpawnOptions) => Ch
 import { getAgent } from '../hydra-agents.ts';
 import { loadHydraConfig } from '../hydra-config.ts';
 import { streamLocalCompletion } from '../hydra-local.ts';
-import { recordCallStart, recordCallComplete, recordCallError } from '../hydra-metrics.ts';
+import { metricsRecorder } from '../hydra-metrics.ts';
 import { startAgentSpan, endAgentSpan } from '../hydra-telemetry.ts';
-import type { AgentDef, TokenUsage, CustomAgentDef } from '../types.ts';
+import type { AgentDef, TokenUsage, CustomAgentDef, IMetricsRecorder } from '../types.ts';
 import type { ExecuteResult, ProgressCallback } from '../types.ts';
 
 /** Options for custom CLI agent execution */
@@ -76,7 +76,7 @@ export function parseCliResponse(
 
 // ── Shared Helpers ────────────────────────────────────────────────────────────
 
-type MetricsHandle = ReturnType<typeof recordCallStart>;
+type MetricsHandle = string;
 type AgentSpan = Awaited<ReturnType<typeof startAgentSpan>>;
 
 interface CliSpawnState {
@@ -166,11 +166,12 @@ async function handleCliSpawnError(
   startTime: number,
   metricsHandle: MetricsHandle,
   span: AgentSpan,
+  metrics: IMetricsRecorder = metricsRecorder,
 ): Promise<ExecuteResult> {
   if (state.timer) clearTimeout(state.timer);
   const durationMs = Date.now() - startTime;
   const errorCategory = err.code === 'ENOENT' ? 'custom-cli-unavailable' : 'custom-cli-error';
-  recordCallError(metricsHandle, errorCategory);
+  metrics.recordCallError(metricsHandle, errorCategory);
   await endAgentSpan(span, { ok: false, error: errorCategory });
   return makeCustomAgentErrorResult(errorCategory, { stderr: err.message, durationMs });
 }
@@ -183,13 +184,14 @@ async function handleCliClose(
   metricsHandle: MetricsHandle,
   span: AgentSpan,
   def: AgentDef | CustomAgentDef,
+  metrics: IMetricsRecorder = metricsRecorder,
 ): Promise<ExecuteResult> {
   if (state.timer) clearTimeout(state.timer);
   const durationMs = Date.now() - startTime;
   const isFailure = (code !== 0 || Boolean(signal)) && !state.timedOut;
 
   if (isFailure) {
-    recordCallError(metricsHandle, 'custom-cli-error');
+    metrics.recordCallError(metricsHandle, 'custom-cli-error');
     await endAgentSpan(span, { ok: false, error: 'custom-cli-error' });
     return {
       ok: false,
@@ -206,7 +208,7 @@ async function handleCliClose(
   }
 
   const { parsedOutput, tokenUsage, costUsd } = parseCustomCliOutput(state.stdout, def);
-  recordCallComplete(metricsHandle, {
+  metrics.recordCallComplete(metricsHandle, {
     output: parsedOutput,
     stdout: parsedOutput,
     tokenUsage: tokenUsage ?? undefined,
@@ -233,6 +235,7 @@ export async function executeCustomCliAgent(
   agentName: string,
   prompt: string,
   opts: CustomCliOpts = {},
+  metrics: IMetricsRecorder = metricsRecorder,
 ): Promise<ExecuteResult> {
   const { cwd, timeoutMs = 3 * 60 * 1000, onProgress, phaseLabel } = opts;
   const def = resolveCustomAgentDef(agentName);
@@ -255,7 +258,8 @@ export async function executeCustomCliAgent(
   const cmd = invokeConfig.cmd;
   assertSafeSpawnCmd(cmd, `Custom agent '${agentName}'`);
   const startTime = Date.now();
-  const metricsHandle = recordCallStart(agentName, agentName);
+  // rf-cs03: complex lifecycle — handle passed to event-driven spawn callbacks
+  const metricsHandle = metrics.recordCallStart(agentName, agentName);
   const span = await startAgentSpan(agentName, agentName, { phase: phaseLabel });
 
   return new Promise<ExecuteResult>((resolve) => {
@@ -282,7 +286,7 @@ export async function executeCustomCliAgent(
     child.on('error', (err: NodeJS.ErrnoException) => {
       if (state.settled) return;
       state.settled = true;
-      void handleCliSpawnError(err, state, startTime, metricsHandle, span).then(resolve);
+      void handleCliSpawnError(err, state, startTime, metricsHandle, span, metrics).then(resolve);
     });
 
     child.stdout?.setEncoding('utf8');
@@ -298,7 +302,9 @@ export async function executeCustomCliAgent(
     child.on('close', (code: number | null, signal: string | null) => {
       if (state.settled) return;
       state.settled = true;
-      void handleCliClose(code, signal, state, startTime, metricsHandle, span, def).then(resolve);
+      void handleCliClose(code, signal, state, startTime, metricsHandle, span, def, metrics).then(
+        resolve,
+      );
     });
   });
 }
@@ -322,6 +328,7 @@ async function executeApiStream(
   metricsHandle: MetricsHandle,
   span: AgentSpan,
   onProgress?: ProgressCallback,
+  metrics: IMetricsRecorder = metricsRecorder,
 ): Promise<ExecuteResult> {
   let output = '';
   const messages: Array<{ role: 'user' | 'assistant' | 'system'; content: string }> = [
@@ -346,7 +353,7 @@ async function executeApiStream(
 
   const durationMs = Date.now() - startTime;
   if (!result.ok) {
-    recordCallError(metricsHandle, result.errorCategory ?? 'unknown');
+    metrics.recordCallError(metricsHandle, result.errorCategory ?? 'unknown');
     await endAgentSpan(span, { ok: false, error: result.errorCategory });
     return makeCustomAgentErrorResult(result.errorCategory ?? 'unknown', {
       stderr: result.errorCategory ?? '',
@@ -355,7 +362,7 @@ async function executeApiStream(
     });
   }
 
-  recordCallComplete(metricsHandle, { output: result.output, stdout: result.output });
+  metrics.recordCallComplete(metricsHandle, { output: result.output, stdout: result.output });
   await endAgentSpan(span, { ok: true });
   return {
     ok: true,
@@ -375,6 +382,7 @@ export async function executeCustomApiAgent(
   agentName: string,
   prompt: string,
   opts: CustomApiOpts = {},
+  metrics: IMetricsRecorder = metricsRecorder,
 ): Promise<ExecuteResult> {
   const { timeoutMs = 3 * 60 * 1000, onProgress, phaseLabel } = opts;
   const def = resolveCustomAgentDef(agentName);
@@ -387,16 +395,25 @@ export async function executeCustomApiAgent(
 
   const apiConfig = buildApiRequestConfig(def, timeoutMs);
   const startTime = Date.now();
-  const metricsHandle = recordCallStart(agentName, apiConfig.model);
+  // rf-cs03: complex lifecycle — handle passed to executeApiStream helper
+  const metricsHandle = metrics.recordCallStart(agentName, apiConfig.model);
   const span = await startAgentSpan(agentName, apiConfig.model, { phase: phaseLabel });
 
   try {
-    return await executeApiStream(prompt, apiConfig, startTime, metricsHandle, span, onProgress);
+    return await executeApiStream(
+      prompt,
+      apiConfig,
+      startTime,
+      metricsHandle,
+      span,
+      onProgress,
+      metrics,
+    );
   } catch (err: unknown) {
     const e = err instanceof Error ? err : new Error(String(err));
     const durationMs = Date.now() - startTime;
-    recordCallError(metricsHandle, 'custom-cli-error');
+    metrics.recordCallError(metricsHandle, 'custom-api-error');
     await endAgentSpan(span, { ok: false, error: e.message });
-    return makeCustomAgentErrorResult('custom-cli-error', { stderr: e.message, durationMs });
+    return makeCustomAgentErrorResult('custom-api-error', { stderr: e.message, durationMs });
   }
 }

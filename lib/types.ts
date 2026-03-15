@@ -1032,6 +1032,7 @@ export interface IGitOperations {
 
 /** Minimal call result accepted by IMetricsRecorder.recordCallComplete. */
 export interface MetricsCallResult {
+  ok?: boolean;
   stdout?: string;
   output?: string;
   stderr?: string;
@@ -1054,4 +1055,23 @@ export interface IMetricsRecorder {
   recordCallStart(agentName: string, model?: string): string;
   recordCallComplete(handle: string, result: MetricsCallResult): void;
   recordCallError(handle: string, error: unknown): void;
+  recordExecution<T extends MetricsCallResult>(
+    agentName: string,
+    model: string | undefined,
+    fn: () => Promise<T>,
+  ): Promise<T>;
+}
+
+/** Recursively make all properties optional — used for partial config overrides. */
+export type DeepPartial<T> = T extends object ? { [P in keyof T]?: DeepPartial<T[P]> } : T;
+
+/**
+ * Interface contract for the Hydra configuration store.
+ * Abstracts read/write/invalidation so consumers can be tested with a mock.
+ * Implemented by the `configStore` export from `lib/hydra-config.ts`.
+ */
+export interface IConfigStore {
+  load(): HydraConfig;
+  save(config: DeepPartial<HydraConfig>): HydraConfig;
+  invalidate(): void;
 }

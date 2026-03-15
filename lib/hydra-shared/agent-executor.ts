@@ -225,6 +225,7 @@ async function executeLocalAgent(
   const baseUrl = cfg.local.baseUrl;
   const model = modelOverride ?? cfg.local.model;
   const startTime = Date.now();
+  // rf-cs03: complex lifecycle — handle passed to executeLocalStream helper
   const metricsHandle = recordCallStart('local', model);
   const span = await startAgentSpan('local', model, { phase: phaseLabel });
   const maxTokens = (cfg.local as unknown as Record<string, unknown>)['maxTokens'] as
@@ -814,6 +815,7 @@ async function executeStandardCliAgent(
     phase: phaseLabel,
     taskType: opts.taskType,
   });
+  // rf-cs03: complex lifecycle — handle passed to helpers (finalizeSpawnResult, handleNoHeadlessInvoke)
   const metricsHandle = recordCallStart(agent, effectiveModel);
 
   if (!headlessInvoke) {

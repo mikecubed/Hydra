@@ -14,8 +14,8 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { getAgent } from './hydra-agents.ts';
 import { loadHydraConfig, resolveProject } from './hydra-config.ts';
-import { getCurrentBranch, git } from './hydra-shared/git-ops.ts';
-import type { IContextProvider } from './types.ts';
+import { git, gitOperations } from './hydra-shared/git-ops.ts';
+import type { IContextProvider, IGitOperations } from './types.ts';
 
 interface ProjectConfig {
   projectRoot: string;
@@ -178,8 +178,9 @@ function detectGitRules(projectRoot: string) {
 function buildMinimalContext(
   projectConfig: ProjectConfig,
   taskContext: { files?: string[]; types?: string; signatures?: string } = {},
+  gitOps: IGitOperations = gitOperations,
 ) {
-  const branch = getCurrentBranch(projectConfig.projectRoot);
+  const branch = gitOps.getCurrentBranch(projectConfig.projectRoot);
   const techStack = detectTechStack(projectConfig.projectRoot);
   const gitRules = detectGitRules(projectConfig.projectRoot);
   const lines = [
@@ -211,14 +212,9 @@ function buildMinimalContext(
   return lines.join('\n');
 }
 
-/**
- * Medium context (~1500 tokens) for Claude.
- * Claude has full tool access to read files, so summary + priorities is enough.
- */
-function buildMediumContext(projectConfig: ProjectConfig) {
-  const now = Date.now();
-  const cacheKey = projectConfig.projectRoot;
+function getMediumCacheHit(cacheKey: string, gitOps: IGitOperations, now: number): string | null {
   if (
+    gitOps === gitOperations &&
     cachedMedium != null &&
     cachedMedium !== '' &&
     now - cachedMediumAt < CACHE_TTL_MS &&
@@ -226,8 +222,39 @@ function buildMediumContext(projectConfig: ProjectConfig) {
   ) {
     return cachedMedium;
   }
+  return null;
+}
 
-  const branch = getCurrentBranch(projectConfig.projectRoot);
+function getLargeCacheHit(
+  cacheKey: string,
+  gitOps: IGitOperations,
+  now: number,
+  hasTaskFiles: boolean,
+): string | null {
+  if (
+    gitOps === gitOperations &&
+    cachedLarge != null &&
+    cachedLarge !== '' &&
+    now - cachedLargeAt < CACHE_TTL_MS &&
+    cachedLargeKey === cacheKey &&
+    !hasTaskFiles
+  ) {
+    return cachedLarge;
+  }
+  return null;
+}
+
+/**
+ * Medium context (~1500 tokens) for Claude.
+ * Claude has full tool access to read files, so summary + priorities is enough.
+ */
+function buildMediumContext(projectConfig: ProjectConfig, gitOps: IGitOperations = gitOperations) {
+  const now = Date.now();
+  const cacheKey = projectConfig.projectRoot;
+  const cached = getMediumCacheHit(cacheKey, gitOps, now);
+  if (cached !== null) return cached;
+
+  const branch = gitOps.getCurrentBranch(projectConfig.projectRoot);
   const techStack = detectTechStack(projectConfig.projectRoot);
   const gitRules = detectGitRules(projectConfig.projectRoot);
   const todoContent = readFileSafe(path.join(projectConfig.projectRoot, 'docs', 'TODO.md'), 50);
@@ -267,10 +294,14 @@ function buildMediumContext(projectConfig: ProjectConfig) {
 
   lines.push('--- END PROJECT CONTEXT ---');
 
-  cachedMedium = lines.join('\n');
-  cachedMediumAt = now;
-  cachedMediumKey = cacheKey;
-  return cachedMedium;
+  const context = lines.join('\n');
+  // Only cache when using the default gitOps so test-injected mocks don't poison the cache
+  if (gitOps === gitOperations) {
+    cachedMedium = context;
+    cachedMediumAt = now;
+    cachedMediumKey = cacheKey;
+  }
+  return context;
 }
 
 function appendGitChanges(extraLines: string[], projectRoot: string): void {
@@ -319,20 +350,15 @@ function appendTaskRelevantFiles(
 function buildLargeContext(
   projectConfig: ProjectConfig,
   taskContext: { files?: string[]; types?: string; signatures?: string } = {},
+  gitOps: IGitOperations = gitOperations,
 ) {
   const now = Date.now();
   const cacheKey = projectConfig.projectRoot;
-  if (
-    cachedLarge != null &&
-    cachedLarge !== '' &&
-    now - cachedLargeAt < CACHE_TTL_MS &&
-    cachedLargeKey === cacheKey &&
-    !taskContext.files
-  ) {
-    return cachedLarge;
-  }
+  const hasTaskFiles = Array.isArray(taskContext.files) && taskContext.files.length > 0;
+  const cached = getLargeCacheHit(cacheKey, gitOps, now, hasTaskFiles);
+  if (cached !== null) return cached;
 
-  const medium = buildMediumContext(projectConfig);
+  const medium = buildMediumContext(projectConfig, gitOps);
   const extraLines = [medium];
 
   appendGitChanges(extraLines, projectConfig.projectRoot);
@@ -341,8 +367,8 @@ function buildLargeContext(
 
   const result = extraLines.join('\n');
 
-  // Only cache if no task-specific files (those are unique per call)
-  if (!taskContext.files || taskContext.files.length === 0) {
+  // Only cache when using the default gitOps and no task-specific files
+  if (gitOps === gitOperations && !hasTaskFiles) {
     cachedLarge = result;
     cachedLargeAt = now;
     cachedLargeKey = cacheKey;
@@ -476,6 +502,7 @@ export function getProjectContext(
   agentName = 'claude',
   taskContext: { files?: string[]; types?: string; signatures?: string } = {},
   projectConfig: ProjectConfig | null = null,
+  gitOps: IGitOperations = gitOperations,
 ): string {
   const resolvedConfig =
     projectConfig ?? (resolveProject({ skipValidation: true }) as ProjectConfig);
@@ -485,12 +512,12 @@ export function getProjectContext(
 
   switch (tier) {
     case 'minimal':
-      return buildMinimalContext(resolvedConfig, taskContext);
+      return buildMinimalContext(resolvedConfig, taskContext, gitOps);
     case 'large':
-      return buildLargeContext(resolvedConfig, taskContext);
+      return buildLargeContext(resolvedConfig, taskContext, gitOps);
     case 'medium':
     default:
-      return buildMediumContext(resolvedConfig);
+      return buildMediumContext(resolvedConfig, gitOps);
   }
 }
 
@@ -512,12 +539,13 @@ export function buildAgentContext(
   taskContext: { files?: string[]; types?: string; signatures?: string } = {},
   projectConfig: ProjectConfig | null = null,
   promptText: string | null = null,
+  gitOps: IGitOperations = gitOperations,
 ): string {
   const resolvedConfig =
     projectConfig ?? (resolveProject({ skipValidation: true }) as ProjectConfig);
 
   // Base context — same as existing getProjectContext behavior
-  const baseContext = getProjectContext(agentName, taskContext, resolvedConfig);
+  const baseContext = getProjectContext(agentName, taskContext, resolvedConfig, gitOps);
 
   // Hierarchical injection — only when promptText is provided and feature is enabled
   if (promptText == null || promptText === '') {

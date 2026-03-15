@@ -9,7 +9,8 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { loadHydraConfig } from './hydra-config.ts';
-import { git, getCurrentBranch } from './hydra-shared/git-ops.ts';
+import { git, gitOperations } from './hydra-shared/git-ops.ts';
+import type { IGitOperations } from './types.ts';
 
 /**
  * Get worktree config with defaults.
@@ -53,6 +54,7 @@ export function createWorktree(
   taskId: string,
   projectRoot: string,
   baseBranch?: string,
+  gitOps: IGitOperations = gitOperations,
 ): { worktreePath: string; branch: string } {
   const config = getWorktreeConfig();
   const branch = `${config.branchPrefix}${taskId}`;
@@ -68,7 +70,7 @@ export function createWorktree(
   const gitPath = worktreePath.replace(/\\/g, '/');
 
   // Determine base branch
-  const resolvedBase = baseBranch ?? getCurrentBranch(projectRoot);
+  const resolvedBase = baseBranch ?? gitOps.getCurrentBranch(projectRoot);
   const base = resolvedBase === '' ? 'HEAD' : resolvedBase;
 
   // Create branch and worktree
@@ -178,10 +180,11 @@ export function mergeWorktree(
   taskId: string,
   projectRoot: string,
   targetBranch?: string,
+  gitOps: IGitOperations = gitOperations,
 ): { ok: boolean; message: string } {
   const config = getWorktreeConfig();
   const branch = `${config.branchPrefix}${taskId}`;
-  const resolvedTarget = targetBranch ?? getCurrentBranch(projectRoot);
+  const resolvedTarget = targetBranch ?? gitOps.getCurrentBranch(projectRoot);
   const target = resolvedTarget === '' ? 'main' : resolvedTarget;
 
   const r = git(['merge', branch, '--no-edit'], projectRoot);
