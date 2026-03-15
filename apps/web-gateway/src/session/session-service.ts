@@ -70,7 +70,11 @@ export class SessionService {
     const session = this.store.create(operatorId, expiresAt, sourceIp, now);
 
     void this.auditService?.record(
-      'session.created', operatorId, session.id, { sourceIp }, 'success',
+      'session.created',
+      operatorId,
+      session.id,
+      { sourceIp },
+      'success',
     );
 
     return session;
@@ -114,15 +118,45 @@ export class SessionService {
     this.store.update(sessionId, { lastActivityAt: new Date(this.clock.now()).toISOString() });
   }
 
+  /** Whether a session is within the extension-eligible time window. */
+  isInExtensionWindow(session: StoredSession): boolean {
+    const now = this.clock.now();
+    const expiresAtMs = new Date(session.expiresAt).getTime();
+    if (now >= expiresAtMs) return false; // already expired
+    const remaining = expiresAtMs - now;
+    return remaining <= this.config.warningThresholdMs;
+  }
+
   extend(sessionId: string): StoredSession {
     const session = this.store.get(sessionId);
     if (!session) throw createError('SESSION_NOT_FOUND');
+
+    if (isTerminal(session.state)) {
+      throw createError('SESSION_EXPIRED', `Cannot extend session in '${session.state}' state`);
+    }
 
     if (session.extendedCount >= this.config.maxExtensions) {
       throw createError('SESSION_EXPIRED', 'Maximum session extensions reached');
     }
 
-    const result = transition(session.state, 'extend');
+    // Check time-based eligibility — the extension window is the source of
+    // truth, not whether a prior validate() happened to flip the FSM state.
+    if (!this.isInExtensionWindow(session)) {
+      throw createError('SESSION_EXPIRED', 'Session is not within the extension window');
+    }
+
+    // If the session is still 'active' but within the window, auto-transition
+    // to 'expiring-soon' so the FSM extend transition is valid.
+    let currentState = session.state;
+    if (currentState === 'active') {
+      const warnResult = transition(currentState, 'warn-expiry');
+      if (warnResult.ok) {
+        this.store.update(sessionId, { state: warnResult.newState });
+        currentState = warnResult.newState;
+      }
+    }
+
+    const result = transition(currentState, 'extend');
     if (!result.ok) {
       throw createError('SESSION_EXPIRED', result.error);
     }
@@ -137,8 +171,11 @@ export class SessionService {
     if (!updated) throw createError('SESSION_NOT_FOUND');
 
     void this.auditService?.record(
-      'session.extended', session.operatorId, sessionId,
-      { extendedCount: session.extendedCount + 1 }, 'success',
+      'session.extended',
+      session.operatorId,
+      sessionId,
+      { extendedCount: session.extendedCount + 1 },
+      'success',
     );
 
     return updated;
@@ -185,8 +222,11 @@ export class SessionService {
     const eventType = TRIGGER_TO_AUDIT[trigger];
     if (eventType && this.auditService) {
       void this.auditService.record(
-        eventType, session.operatorId, sessionId,
-        reason != null ? { reason } : {}, 'success',
+        eventType,
+        session.operatorId,
+        sessionId,
+        reason == null ? {} : { reason },
+        'success',
       );
     }
   }

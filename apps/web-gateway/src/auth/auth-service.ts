@@ -37,7 +37,12 @@ export class AuthService {
     // Rate limit check (FR-003)
     if (!this.rateLimiter.check(sourceKey)) {
       await this.auditService?.record(
-        'auth.rate-limited', null, null, { identity }, 'failure', sourceKey,
+        'auth.rate-limited',
+        null,
+        null,
+        { identity },
+        'failure',
+        sourceKey,
       );
       throw createError('RATE_LIMITED');
     }
@@ -47,7 +52,12 @@ export class AuthService {
     if (!operator) {
       this.rateLimiter.recordFailure(sourceKey);
       await this.auditService?.record(
-        'auth.attempt.failure', null, null, { identity }, 'failure', sourceKey,
+        'auth.attempt.failure',
+        null,
+        null,
+        { identity },
+        'failure',
+        sourceKey,
       );
       throw createError('INVALID_CREDENTIALS');
     }
@@ -55,8 +65,12 @@ export class AuthService {
     if (!operator.isActive) {
       this.rateLimiter.recordFailure(sourceKey);
       await this.auditService?.record(
-        'auth.attempt.failure', operator.id, null,
-        { identity, reason: 'account_disabled' }, 'failure', sourceKey,
+        'auth.attempt.failure',
+        operator.id,
+        null,
+        { identity, reason: 'account_disabled' },
+        'failure',
+        sourceKey,
       );
       throw createError('ACCOUNT_DISABLED');
     }
@@ -66,7 +80,12 @@ export class AuthService {
     if (!cred) {
       this.rateLimiter.recordFailure(sourceKey);
       await this.auditService?.record(
-        'auth.attempt.failure', operator.id, null, { identity }, 'failure', sourceKey,
+        'auth.attempt.failure',
+        operator.id,
+        null,
+        { identity },
+        'failure',
+        sourceKey,
       );
       throw createError('INVALID_CREDENTIALS');
     }
@@ -75,7 +94,12 @@ export class AuthService {
     if (!valid) {
       this.rateLimiter.recordFailure(sourceKey);
       await this.auditService?.record(
-        'auth.attempt.failure', operator.id, null, { identity }, 'failure', sourceKey,
+        'auth.attempt.failure',
+        operator.id,
+        null,
+        { identity },
+        'failure',
+        sourceKey,
       );
       throw createError('INVALID_CREDENTIALS');
     }
@@ -90,7 +114,12 @@ export class AuthService {
     this.rateLimiter.reset(sourceKey);
 
     await this.auditService?.record(
-      'auth.attempt.success', operator.id, session.id, {}, 'success', sourceKey,
+      'auth.attempt.success',
+      operator.id,
+      session.id,
+      {},
+      'success',
+      sourceKey,
     );
 
     return { operator, session };
@@ -105,6 +134,11 @@ export class AuthService {
     // Validate the session exists and belongs to this operator
     const session = this.sessionService.store.get(sessionId);
     if (!session) throw createError('SESSION_NOT_FOUND');
+
+    // Re-authentication is only valid for idle sessions (FR-009)
+    if (!this.sessionService.isIdle(session)) {
+      throw createError('SESSION_NOT_IDLE');
+    }
 
     const operator = this.operatorStore.getOperatorByIdentity(identity);
     if (operator?.id !== session.operatorId) {
@@ -123,7 +157,12 @@ export class AuthService {
     this.sessionService.touchActivity(sessionId);
 
     await this.auditService?.record(
-      'session.idle-reauth', operator.id, sessionId, {}, 'success', _sourceKey,
+      'session.idle-reauth',
+      operator.id,
+      sessionId,
+      {},
+      'success',
+      _sourceKey,
     );
 
     return session;

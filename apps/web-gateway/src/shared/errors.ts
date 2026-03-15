@@ -10,6 +10,7 @@ export type SessionErrorCode =
   | 'SESSION_EXPIRED'
   | 'SESSION_INVALIDATED'
   | 'SESSION_NOT_FOUND'
+  | 'SESSION_NOT_IDLE'
   | 'IDLE_TIMEOUT';
 
 export type SystemErrorCode =
@@ -39,6 +40,7 @@ export const ERROR_STATUS_MAP: Record<ErrorCode, number> = {
   SESSION_EXPIRED: 401,
   SESSION_INVALIDATED: 401,
   SESSION_NOT_FOUND: 401,
+  SESSION_NOT_IDLE: 403,
   IDLE_TIMEOUT: 401,
   DAEMON_UNREACHABLE: 503,
   CLOCK_UNRELIABLE: 503,
@@ -54,6 +56,7 @@ export function createError(code: ErrorCode, message?: string): GatewayError {
     SESSION_EXPIRED: 'Session has expired',
     SESSION_INVALIDATED: 'Session has been invalidated',
     SESSION_NOT_FOUND: 'No valid session found',
+    SESSION_NOT_IDLE: 'Re-authentication is only allowed for idle sessions',
     IDLE_TIMEOUT: 'Session idle timeout — re-authentication required',
     DAEMON_UNREACHABLE: 'Hydra daemon is unreachable',
     CLOCK_UNRELIABLE: 'System clock is unreliable',

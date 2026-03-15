@@ -75,4 +75,51 @@ describe('AuthService', () => {
     };
     assert.equal('sessionId' in response, false);
   });
+
+  it('reauthenticate rejects active (non-idle) session', async () => {
+    const result = await authService.authenticate('admin', 'correct-password', '127.0.0.1');
+    // Session is fresh — not idle at all
+    await assert.rejects(
+      () => authService.reauthenticate('admin', 'correct-password', '127.0.0.1', result.session.id),
+      { message: /idle/i },
+    );
+  });
+
+  it('reauthenticate succeeds for idle session', async () => {
+    const result = await authService.authenticate('admin', 'correct-password', '127.0.0.1');
+    // Advance past idle timeout (default 30 min)
+    clock.advance(30 * 60 * 1000 + 1);
+    const session = await authService.reauthenticate(
+      'admin',
+      'correct-password',
+      '127.0.0.1',
+      result.session.id,
+    );
+    assert.equal(session.id, result.session.id);
+  });
+
+  it('reauthenticate does not emit idle-reauth audit for non-idle session', async () => {
+    const auditStore = new (await import('../../audit/audit-store.ts')).AuditStore(null);
+    const auditSvc = new (await import('../../audit/audit-service.ts')).AuditService(
+      auditStore,
+      clock,
+    );
+    const authedService = new AuthService(operatorStore, rateLimiter, sessionService, auditSvc);
+
+    const result = await authedService.authenticate('admin', 'correct-password', '127.0.0.1');
+    try {
+      await authedService.reauthenticate(
+        'admin',
+        'correct-password',
+        '127.0.0.1',
+        result.session.id,
+      );
+    } catch {
+      // expected rejection for active session
+    }
+
+    const records = auditSvc.getRecords();
+    const idleReauthEvents = records.filter((r) => r.eventType === 'session.idle-reauth');
+    assert.equal(idleReauthEvents.length, 0, 'should not emit idle-reauth for active session');
+  });
 });

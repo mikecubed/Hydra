@@ -77,6 +77,47 @@ describe('SessionService', () => {
     assert.equal(extended.extendedCount, 1);
   });
 
+  it('extends session in window without prior validate() call', () => {
+    const session = service.create('op-1', '127.0.0.1');
+    // Advance into the extension window (within warningThresholdMs of expiry)
+    // Session lifetime is 3600s, warning threshold is 600s, so advance to 3001s
+    clock.advance(3001_000);
+    // Do NOT call validate() — extend should still work
+    const extended = service.extend(session.id);
+    assert.equal(extended.state, 'active');
+    assert.equal(extended.extendedCount, 1);
+  });
+
+  it('rejects extension for session not yet in window', () => {
+    const session = service.create('op-1', '127.0.0.1');
+    // Only advance 100ms — far from the window
+    clock.advance(100);
+    assert.throws(() => service.extend(session.id), {
+      message: /not within the extension window/i,
+    });
+  });
+
+  it('rejects extension for expired session', () => {
+    const session = service.create('op-1', '127.0.0.1');
+    // Advance past expiry
+    clock.advance(3600_001);
+    assert.throws(() => service.extend(session.id), {
+      message: /not within the extension window/i,
+    });
+  });
+
+  it('rejects extension when max extensions reached', () => {
+    const session = service.create('op-1', '127.0.0.1');
+    // Extend 3 times (max)
+    for (let i = 0; i < 3; i++) {
+      clock.advance(3001_000);
+      service.extend(session.id);
+    }
+    // Fourth extension should fail
+    clock.advance(3001_000);
+    assert.throws(() => service.extend(session.id), { message: /maximum/i });
+  });
+
   it('logout transitions to logged-out', () => {
     const session = service.create('op-1', '127.0.0.1');
     service.logout(session.id);

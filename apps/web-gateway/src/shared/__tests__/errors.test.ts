@@ -25,6 +25,7 @@ describe('createError', () => {
     'SESSION_EXPIRED',
     'SESSION_INVALIDATED',
     'SESSION_NOT_FOUND',
+    'SESSION_NOT_IDLE',
     'IDLE_TIMEOUT',
     'DAEMON_UNREACHABLE',
     'CLOCK_UNRELIABLE',
@@ -50,7 +51,7 @@ describe('createError', () => {
 describe('ERROR_STATUS_MAP', () => {
   it('maps all codes to HTTP status codes', () => {
     const codes = Object.keys(ERROR_STATUS_MAP);
-    assert.equal(codes.length, 11);
+    assert.equal(codes.length, 12);
     for (const code of codes) {
       const status = ERROR_STATUS_MAP[code as ErrorCode];
       assert.ok(status >= 400 && status < 600, `${code} should map to a 4xx/5xx status`);
