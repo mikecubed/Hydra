@@ -77,21 +77,6 @@ interface ActiveHandle {
   startIso: string;
 }
 
-interface CallResult {
-  stdout?: string;
-  output?: string;
-  stderr?: string;
-  tokenUsage?: {
-    inputTokens?: number;
-    outputTokens?: number;
-    cacheCreationTokens?: number;
-    cacheReadTokens?: number;
-    totalTokens?: number;
-  } | null;
-  costUsd?: number | null;
-  outcome?: string;
-}
-
 interface PercentileResult {
   p50?: number;
   p95?: number;
@@ -211,7 +196,7 @@ const activeHandles = new Map<string, ActiveHandle>();
  * @param {string} [model] - Model ID being used
  * @returns {string} Handle ID for recordCallComplete/Error
  */
-function parseCallTokenUsage(result: CallResult): {
+function parseCallTokenUsage(result: MetricsCallResult): {
   realTokens: RealTokens | null;
   costUsd: number;
 } {
@@ -273,7 +258,7 @@ export function recordCallStart(agentName: string, model?: string): string {
  * @param {string} handle - Handle from recordCallStart
  * @param {object} result - Process result with stdout/stderr
  */
-export function recordCallComplete(handle: string, result: CallResult): void {
+export function recordCallComplete(handle: string, result: MetricsCallResult): void {
   const meta = activeHandles.get(handle);
   if (!meta) return;
   activeHandles.delete(handle);
@@ -374,7 +359,7 @@ export async function recordExecution<T extends MetricsCallResult>(
   const handle = recordCallStart(agentName, model);
   try {
     const result = await fn();
-    recordCallComplete(handle, result as unknown as CallResult);
+    recordCallComplete(handle, result);
     return result;
   } catch (err: unknown) {
     recordCallError(handle, err);
