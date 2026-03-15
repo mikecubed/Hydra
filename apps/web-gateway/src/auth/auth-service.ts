@@ -200,7 +200,7 @@ export class AuthService {
   ): Promise<void> {
     this.rateLimiter.recordFailure(sourceKey);
     const detail: Record<string, unknown> = { identity, context: 'reauth' };
-    if (reason != null) detail.reason = reason;
+    if (reason != null) detail['reason'] = reason;
     await this.auditService?.record(
       'auth.attempt.failure',
       operatorId,

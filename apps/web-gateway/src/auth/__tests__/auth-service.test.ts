@@ -204,7 +204,7 @@ describe('AuthService', () => {
 
       const records = auditService.getRecords();
       const failures = records.filter(
-        (r) => r.eventType === 'auth.attempt.failure' && r.detail.context === 'reauth',
+        (r) => r.eventType === 'auth.attempt.failure' && r.detail['context'] === 'reauth',
       );
       assert.equal(failures.length, 1, 'should emit failure audit for wrong reauth');
       assert.equal(failures[0].sessionId, sessionId);
@@ -228,7 +228,7 @@ describe('AuthService', () => {
 
       const records = auditService.getRecords();
       const rateLimited = records.filter(
-        (r) => r.eventType === 'auth.rate-limited' && r.detail.context === 'reauth',
+        (r) => r.eventType === 'auth.rate-limited' && r.detail['context'] === 'reauth',
       );
       assert.equal(rateLimited.length, 1, 'should emit rate-limited audit for reauth');
       assert.equal(rateLimited[0].sessionId, sessionId);

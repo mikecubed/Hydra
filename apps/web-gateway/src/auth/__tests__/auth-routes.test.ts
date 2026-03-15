@@ -50,15 +50,15 @@ describe('auth-routes: /logout', () => {
       headers: { Cookie: `__session=${result.session.id}` },
     });
     assert.equal(res.status, 200);
-    const body = await res.json();
-    assert.equal(body.success, true);
+    const body = (await res.json()) as Record<string, unknown>;
+    assert.equal(body['success'], true);
   });
 
   it('returns 200 when no session cookie is present (no-op)', async () => {
     const res = await app.request('/auth/logout', { method: 'POST' });
     assert.equal(res.status, 200);
-    const body = await res.json();
-    assert.equal(body.success, true);
+    const body = (await res.json()) as Record<string, unknown>;
+    assert.equal(body['success'], true);
   });
 
   it('returns 200 when session is already logged out (benign)', async () => {
@@ -71,8 +71,8 @@ describe('auth-routes: /logout', () => {
       headers: { Cookie: `__session=${result.session.id}` },
     });
     assert.equal(res.status, 200);
-    const body = await res.json();
-    assert.equal(body.success, true);
+    const body = (await res.json()) as Record<string, unknown>;
+    assert.equal(body['success'], true);
   });
 
   it('returns 500 and clears cookies when sessionService.logout() throws (audit persistence failure)', async () => {
@@ -152,8 +152,8 @@ describe('auth-routes: /logout', () => {
 
     // Response must be 500 (do not falsely report success)
     assert.equal(res.status, 500);
-    const body = await res.json();
-    assert.equal(body.code, 'INTERNAL_ERROR');
+    const body = (await res.json()) as Record<string, unknown>;
+    assert.equal(body['code'], 'INTERNAL_ERROR');
 
     // Cookies must be cleared despite the failure — the server-side session
     // is already terminal so leaving stale cookies would be inconsistent
