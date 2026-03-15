@@ -335,6 +335,52 @@ describe('SessionService audit failure propagation', () => {
   });
 });
 
+describe('SessionService warn-expiry with audit service', () => {
+  it('validate() near-expiry session does not throw when audit service is attached', async () => {
+    const clock = new FakeClock(Date.now());
+    const store = new SessionStore(null);
+    const auditStore = new AuditStore(null);
+    const auditService = new AuditService(auditStore, clock);
+    const service = new SessionService(
+      store,
+      clock,
+      { sessionLifetimeMs: 3600_000, warningThresholdMs: 600_000 },
+      auditService,
+    );
+
+    const session = await service.create('op-1', '127.0.0.1');
+    // Advance into the warning window but before absolute expiry
+    clock.advance(3001_000);
+
+    // Must not throw — warn-expiry has no audit mapping and should be silently skipped
+    const validated = await service.validate(session.id);
+    assert.equal(validated.state, 'expiring-soon');
+  });
+
+  it('validate() near-expiry does not emit an audit record for warn-expiry', async () => {
+    const clock = new FakeClock(Date.now());
+    const store = new SessionStore(null);
+    const auditStore = new AuditStore(null);
+    const auditService = new AuditService(auditStore, clock);
+    const service = new SessionService(
+      store,
+      clock,
+      { sessionLifetimeMs: 3600_000, warningThresholdMs: 600_000 },
+      auditService,
+    );
+
+    const session = await service.create('op-1', '127.0.0.1');
+    const recordsBefore = auditService.getRecords().length;
+
+    clock.advance(3001_000);
+    await service.validate(session.id);
+
+    // Only the session.created audit record should exist — no warn-expiry event
+    const recordsAfter = auditService.getRecords();
+    assert.equal(recordsAfter.length, recordsBefore, 'warn-expiry must not emit an audit record');
+  });
+});
+
 describe('SessionService audit payload accuracy', () => {
   it('session.extended audit records the correct extendedCount matching stored state', async () => {
     const clock = new FakeClock(Date.now());

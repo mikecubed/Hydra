@@ -6,7 +6,7 @@ import type { Clock } from '../shared/clock.ts';
 import { SystemClock } from '../shared/clock.ts';
 import { type SessionStore, type StoredSession } from './session-store.ts';
 import type { SessionState } from '@hydra/web-contracts';
-import { transition, isTerminal } from './session-state-machine.ts';
+import { transition, isTerminal, type SessionTrigger } from './session-state-machine.ts';
 import { createError } from '../shared/errors.ts';
 import type { AuditService } from '../audit/audit-service.ts';
 
@@ -28,8 +28,8 @@ const DEFAULT_CONFIG: SessionServiceConfig = {
   idleTimeoutMs: 30 * 60 * 1000, // 30 minutes
 };
 
-/** Maps FSM triggers to audit event types. */
-const TRIGGER_TO_AUDIT: Record<string, string> = {
+/** Maps FSM triggers to audit event types. Triggers absent from this map are silently skipped. */
+const TRIGGER_TO_AUDIT: Partial<Record<SessionTrigger, string>> = {
   expire: 'session.expired',
   invalidate: 'session.invalidated',
   logout: 'session.logged-out',
@@ -251,7 +251,7 @@ export class SessionService {
     this.store.update(sessionId, updates);
 
     const eventType = TRIGGER_TO_AUDIT[trigger];
-    if (eventType !== '' && this.auditService) {
+    if (eventType != null && eventType !== '' && this.auditService) {
       try {
         await this.auditService.record(
           eventType,
