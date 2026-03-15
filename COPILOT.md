@@ -84,3 +84,15 @@ Copilot is the preferred **follow** agent for:
 - **documentation** tasks: Claude leads (writes content), Copilot follows (adds GitHub workflow notes)
 
 If Copilot is not available, Hydra automatically substitutes the next best agent.
+
+## Web Initiative
+
+The web initiative adds three npm workspace packages alongside Hydra core:
+
+- `apps/web/` — Browser surface (React + Vite frontend, later phase)
+- `apps/web-gateway/` — Gateway surface (Hono HTTP/WebSocket, later phase)
+- `packages/web-contracts/` — Shared cross-surface Zod schemas and vocabulary
+
+ESLint boundary rules enforce that web packages do not import from `lib/` directly. See
+[`docs/web-interface/07-boundaries-and-governance.md`](docs/web-interface/07-boundaries-and-governance.md)
+for full boundary rules, ownership, and governance.

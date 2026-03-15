@@ -894,3 +894,24 @@ Resolution order when the configured agent is not installed:
 
 `getRoleAgent(roleName, installedCLIs)` is exported from `lib/hydra-dispatch.ts`.
 `installedCLIs` comes from `detectInstalledCLIs()` in `lib/hydra-cli-detect.ts` (re-exported by `lib/hydra-setup.ts` for backward compatibility).
+
+## Web Initiative Boundary
+
+The web initiative adds three npm workspace packages alongside the existing Hydra core:
+
+| Workspace                 | Surface | Purpose                                   |
+| ------------------------- | ------- | ----------------------------------------- |
+| `apps/web/`               | Browser | React + Vite frontend (later phase)       |
+| `apps/web-gateway/`       | Gateway | Hono HTTP/WebSocket gateway (later phase) |
+| `packages/web-contracts/` | Shared  | Cross-surface Zod schemas and vocabulary  |
+
+These workspaces are declared in the root `package.json` via `"workspaces": ["apps/*", "packages/*"]`.
+
+**Import direction rules** (enforced by `eslint-plugin-boundaries`):
+
+- `apps/web` → `packages/web-contracts` only
+- `apps/web-gateway` → `packages/web-contracts` only
+- `packages/web-contracts` → no internal deps (only Zod)
+- Web packages must not import from `lib/` directly
+
+See [`docs/web-interface/07-boundaries-and-governance.md`](./web-interface/07-boundaries-and-governance.md) for the full boundary reference.

@@ -33,6 +33,9 @@ To keep the work easier to reason about, the design has been split into smaller 
 6. [`docs/web-interface/06-phases-and-sdd.md`](./web-interface/06-phases-and-sdd.md)
    - implementation phases, recommended SDD spec breakdown, and open questions.
 
+7. [`docs/web-interface/07-boundaries-and-governance.md`](./web-interface/07-boundaries-and-governance.md)
+   - workspace boundary, ownership rules, cross-boundary governance, and extension process.
+
 ## Current Direction Summary
 
 - Choose **TypeScript end-to-end** for the web initiative.

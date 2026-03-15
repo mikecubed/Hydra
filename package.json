@@ -16,6 +16,10 @@
   "engines": {
     "node": ">=24.0.0"
   },
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
   "bin": {
     "hydra": "./bin/hydra-cli.ts",
     "hydra-client": "./lib/orchestrator-client.ts",
