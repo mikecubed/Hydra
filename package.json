@@ -92,8 +92,9 @@
     "postpack": "node scripts/clean-pack.ts",
     "build:exe": "node scripts/build-exe.ts",
     "build:exe:ci": "node scripts/build-exe.ts --ci",
-    "install:global": "npm pack && npm install -g hydra-*.tgz && rm hydra-*.tgz",
+    "install:global": "node scripts/install-global.ts",
     "uninstall:global": "npm uninstall -g hydra",
+    "postinstall": "node lib/check-install.ts",
     "prepare": "husky",
     "test:mutation": "stryker run"
   },

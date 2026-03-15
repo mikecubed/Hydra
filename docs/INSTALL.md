@@ -16,6 +16,21 @@
 
 ## Installation
 
+> **Important:** Hydra must be installed through a **packed artifact** (tarball or registry)
+> when used as a dependency. Raw local-folder installs (`npm install /path/to/repo`,
+> `npm link`) are **not supported** because the JavaScript runtime files are generated
+> during `npm pack` and do not exist in the source tree. A postinstall guard will reject
+> unsupported install methods with a clear error message.
+
+### Supported Install Methods
+
+| Method                                | Command                                      | Notes                             |
+| ------------------------------------- | -------------------------------------------- | --------------------------------- |
+| **Development (clone + npm install)** | `git clone <url> && cd Hydra && npm install` | Works directly with `.ts` sources |
+| **Global from repo checkout**         | `npm run install:global`                     | Packs then installs the tarball   |
+| **Global from tarball**               | `npm install -g hydra-<version>.tgz`         | From `npm pack` output            |
+| **Registry**                          | `npm install hydra`                          | When published to npm             |
+
 ### 1. Clone or Copy
 
 ```powershell
@@ -49,7 +64,7 @@ This adds a real `hydra` command to your npm global bin (no PowerShell profile f
 hydra --help
 
 # Check that the daemon can start
-node lib/orchestrator-daemon.mjs help
+node lib/orchestrator-daemon.ts help
 ```
 
 ### 5. Initialize for Your Project
