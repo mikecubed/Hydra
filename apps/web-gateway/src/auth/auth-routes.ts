@@ -68,28 +68,24 @@ export function createAuthRoutes(
 
   app.post('/logout', async (c) => {
     const sessionId = getCookie(c, '__session');
-    let logoutError: unknown;
+
     if (sessionId) {
       try {
         // sessionService.logout() silently handles benign cases (session not
         // found, already terminal). Only genuine failures (e.g. audit
         // persistence errors) will throw, and those must surface as 5xx.
         await sessionService.logout(sessionId);
-      } catch (err) {
-        logoutError = err;
+      } catch {
+        // logout() rolls server state back on audit failure — the session
+        // is still active, so keep cookies intact so the client can retry.
+        return c.json({ code: 'INTERNAL_ERROR', message: 'Internal error' }, 500);
       }
     }
 
-    // Always clear auth cookies — even when a post-transition step (e.g.
-    // audit persistence) failed after the server-side session state already
-    // moved to terminal. Leaving stale cookies when the server considers
-    // the session dead creates an inconsistent client/server state.
+    // Only clear cookies after a confirmed server-side terminal transition
+    // (or when there was no session to begin with).
     deleteCookie(c, '__session', { path: '/' });
     deleteCookie(c, '__csrf', { path: '/' });
-
-    if (logoutError) {
-      return c.json({ code: 'INTERNAL_ERROR', message: 'Internal error' }, 500);
-    }
 
     return c.json({ success: true });
   });

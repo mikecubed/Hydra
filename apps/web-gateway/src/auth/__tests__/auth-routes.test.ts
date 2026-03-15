@@ -75,13 +75,13 @@ describe('auth-routes: /logout', () => {
     assert.equal(body['success'], true);
   });
 
-  it('returns 500 and clears cookies when sessionService.logout() throws (audit persistence failure)', async () => {
+  it('returns 500 and preserves cookies when sessionService.logout() throws (audit persistence failure)', async () => {
     const result = await authService.authenticate('admin', 'password123', '127.0.0.1');
 
     // Monkey-patch logout to simulate an audit persistence error
+    // (transitionSession rolls back state → session stays active)
     const originalLogout = sessionService.logout.bind(sessionService);
     sessionService.logout = async (_id: string) => {
-      // Simulate the logout transition succeeding but audit write failing
       await originalLogout(_id).catch(() => {});
       throw new Error('Audit write failed: ENOSPC');
     };
@@ -92,19 +92,20 @@ describe('auth-routes: /logout', () => {
     });
     assert.equal(res.status, 500);
 
-    // Cookies must still be cleared even though the handler returned 500
+    // Cookies must NOT be cleared — the server rolled back so the session
+    // is still active; clearing cookies would leave a dangling server session.
     const setCookies = res.headers.getSetCookie();
     assert.ok(
-      setCookies.some((h) => h.startsWith('__session=')),
-      'should clear __session cookie on failure',
+      !setCookies.some((h) => h.startsWith('__session=')),
+      'must not clear __session cookie when server-side logout rolled back',
     );
     assert.ok(
-      setCookies.some((h) => h.startsWith('__csrf=')),
-      'should clear __csrf cookie on failure',
+      !setCookies.some((h) => h.startsWith('__csrf=')),
+      'must not clear __csrf cookie when server-side logout rolled back',
     );
   });
 
-  it('returns 500 and clears cookies when sessionService.logout() throws unexpected error', async () => {
+  it('returns 500 and preserves cookies when sessionService.logout() throws unexpected error', async () => {
     const result = await authService.authenticate('admin', 'password123', '127.0.0.1');
 
     sessionService.logout = async () => {
@@ -117,18 +118,19 @@ describe('auth-routes: /logout', () => {
     });
     assert.equal(res.status, 500);
 
+    // Cookies preserved — server may still consider the session active
     const setCookies = res.headers.getSetCookie();
     assert.ok(
-      setCookies.some((h) => h.startsWith('__session=')),
-      'should clear __session cookie on failure',
+      !setCookies.some((h) => h.startsWith('__session=')),
+      'must not clear __session cookie on unexpected error',
     );
     assert.ok(
-      setCookies.some((h) => h.startsWith('__csrf=')),
-      'should clear __csrf cookie on failure',
+      !setCookies.some((h) => h.startsWith('__csrf=')),
+      'must not clear __csrf cookie on unexpected error',
     );
   });
 
-  it('clears cookies with 500 on partial failure (session transitioned, audit write failed)', async () => {
+  it('returns 500 and preserves cookies on partial failure (audit write failed, server rolled back)', async () => {
     const result = await authService.authenticate('admin', 'password123', '127.0.0.1');
     const sid = result.session.id;
 
@@ -136,12 +138,13 @@ describe('auth-routes: /logout', () => {
     const pre = sessionService.store.get(sid);
     assert.equal(pre?.state, 'active');
 
-    // Patch: transition succeeds, but a post-transition audit step throws
+    // Patch: make the audit write inside transitionSession throw, which
+    // causes a rollback — the session stays active on the server.
     const originalLogout = sessionService.logout.bind(sessionService);
     sessionService.logout = async (id: string) => {
       await originalLogout(id);
-      // Session is now in terminal 'logged-out' state on the server.
-      // Simulate a subsequent audit/persistence step failing:
+      // If we reach here the real logout succeeded (no audit error).
+      // Force an additional throw to simulate a downstream step failing.
       throw new Error('Audit persistence failed after state transition');
     };
 
@@ -155,20 +158,16 @@ describe('auth-routes: /logout', () => {
     const body = (await res.json()) as Record<string, unknown>;
     assert.equal(body['code'], 'INTERNAL_ERROR');
 
-    // Cookies must be cleared despite the failure — the server-side session
-    // is already terminal so leaving stale cookies would be inconsistent
+    // Cookies must NOT be cleared — the route exits early on error so the
+    // client retains its session cookie for a retry.
     const setCookies = res.headers.getSetCookie();
     assert.ok(
-      setCookies.some((h) => h.startsWith('__session=')),
-      'must clear __session cookie even on partial failure',
+      !setCookies.some((h) => h.startsWith('__session=')),
+      'must not clear __session cookie when logout threw',
     );
     assert.ok(
-      setCookies.some((h) => h.startsWith('__csrf=')),
-      'must clear __csrf cookie even on partial failure',
+      !setCookies.some((h) => h.startsWith('__csrf=')),
+      'must not clear __csrf cookie when logout threw',
     );
-
-    // Confirm the server-side session actually transitioned to terminal
-    const post = sessionService.store.get(sid);
-    assert.equal(post?.state, 'logged-out');
   });
 });

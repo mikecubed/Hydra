@@ -141,6 +141,10 @@ export class SessionService {
       throw createError('SESSION_EXPIRED', `Cannot extend session in '${session.state}' state`);
     }
 
+    if (session.state === 'daemon-unreachable') {
+      throw createError('DAEMON_UNREACHABLE');
+    }
+
     if (session.extendedCount >= this.config.maxExtensions) {
       throw createError('SESSION_EXPIRED', 'Maximum session extensions reached');
     }
@@ -190,7 +194,7 @@ export class SessionService {
         'session.extended',
         session.operatorId,
         sessionId,
-        { extendedCount: session.extendedCount + 1 },
+        { extendedCount: updated.extendedCount },
         'success',
       );
     } catch (err) {

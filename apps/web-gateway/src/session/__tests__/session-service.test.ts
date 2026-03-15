@@ -5,6 +5,7 @@ import { SessionStore } from '../session-store.ts';
 import { FakeClock } from '../../shared/clock.ts';
 import { AuditService } from '../../audit/audit-service.ts';
 import { AuditStore } from '../../audit/audit-store.ts';
+import type { GatewayError } from '../../shared/errors.ts';
 
 describe('SessionService', () => {
   let store: SessionStore;
@@ -118,6 +119,23 @@ describe('SessionService', () => {
     // Fourth extension should fail
     clock.advance(3001_000);
     await assert.rejects(() => service.extend(session.id), { message: /maximum/i });
+  });
+
+  it('rejects extension with DAEMON_UNREACHABLE when daemon is down', async () => {
+    const session = await service.create('op-1', '127.0.0.1');
+    await service.markDaemonDown(session.id);
+    assert.equal(store.get(session.id)?.state, 'daemon-unreachable');
+
+    await assert.rejects(
+      () => service.extend(session.id),
+      (err: unknown) => {
+        assert.ok(err instanceof Error);
+        const ge = err as GatewayError;
+        assert.equal(ge.code, 'DAEMON_UNREACHABLE');
+        assert.equal(ge.statusCode, 503);
+        return true;
+      },
+    );
   });
 
   it('logout transitions to logged-out', async () => {
@@ -314,5 +332,46 @@ describe('SessionService audit failure propagation', () => {
     const afterFail = store.get(session.id);
     assert.ok(afterFail);
     assert.equal(afterFail.state, 'active', 'state must revert on audit failure');
+  });
+});
+
+describe('SessionService audit payload accuracy', () => {
+  it('session.extended audit records the correct extendedCount matching stored state', async () => {
+    const clock = new FakeClock(Date.now());
+    const store = new SessionStore(null);
+    const auditStore = new AuditStore(null);
+    const auditService = new AuditService(auditStore, clock);
+    const service = new SessionService(
+      store,
+      clock,
+      { sessionLifetimeMs: 3600_000, warningThresholdMs: 600_000, extensionDurationMs: 3600_000 },
+      auditService,
+    );
+
+    const session = await service.create('op-1', '127.0.0.1');
+
+    // First extension
+    clock.advance(3001_000);
+    await service.extend(session.id);
+
+    // Second extension
+    clock.advance(3001_000);
+    await service.extend(session.id);
+
+    const records = auditService.getRecords();
+    const extendRecords = records.filter((r) => r.eventType === 'session.extended');
+    assert.equal(extendRecords.length, 2);
+
+    // Each audit record's extendedCount must match the actual stored state
+    // at the time it was emitted (1 for first extend, 2 for second).
+    const firstDetail = extendRecords[0].detail as { extendedCount: number };
+    const secondDetail = extendRecords[1].detail as { extendedCount: number };
+    assert.equal(firstDetail.extendedCount, 1, 'first extend audit must report extendedCount=1');
+    assert.equal(secondDetail.extendedCount, 2, 'second extend audit must report extendedCount=2');
+
+    // Final stored state must agree
+    const final = store.get(session.id);
+    assert.ok(final);
+    assert.equal(final.extendedCount, 2);
   });
 });
