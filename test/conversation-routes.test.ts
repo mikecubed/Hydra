@@ -2344,6 +2344,54 @@ describe('Conversation routes — context-hash staleness detection', () => {
     const ctx2 = { agent: 'codex', instruction: 'test' };
     assert.equal(contextHash(ctx1), contextHash(ctx2), 'key insertion order must not affect hash');
   });
+
+  it('nested object field changes produce different hashes', () => {
+    const ctx1 = { instruction: 'deploy', meta: { env: 'staging', region: 'us-east-1' } };
+    const ctx2 = { instruction: 'deploy', meta: { env: 'production', region: 'us-east-1' } };
+    assert.notEqual(
+      contextHash(ctx1),
+      contextHash(ctx2),
+      'different nested values must produce different hashes',
+    );
+  });
+
+  it('deeply nested key-order differences do not affect hash', () => {
+    const ctx1 = { a: { z: 1, y: 2 }, b: 'ok' };
+    const ctx2 = { b: 'ok', a: { y: 2, z: 1 } };
+    assert.equal(
+      contextHash(ctx1),
+      contextHash(ctx2),
+      'key order at any depth must not affect hash',
+    );
+  });
+
+  it('added nested key produces a different hash', () => {
+    const ctx1 = { instruction: 'run', opts: { verbose: true } };
+    const ctx2 = { instruction: 'run', opts: { verbose: true, dryRun: false } };
+    assert.notEqual(
+      contextHash(ctx1),
+      contextHash(ctx2),
+      'additional nested key must change the hash',
+    );
+  });
+
+  it('array element order matters for hash', () => {
+    const ctx1 = { tags: ['a', 'b', 'c'] };
+    const ctx2 = { tags: ['c', 'b', 'a'] };
+    assert.notEqual(
+      contextHash(ctx1),
+      contextHash(ctx2),
+      'array order should affect hash (positional semantics)',
+    );
+  });
+
+  it('handles null and undefined nested values deterministically', () => {
+    const ctx1 = { a: null, b: { c: undefined } };
+    const hash1 = contextHash(ctx1);
+    const hash2 = contextHash(ctx1);
+    assert.equal(hash1, hash2, 'null/undefined values must hash deterministically');
+    assert.equal(hash1.length, 16);
+  });
 });
 
 // ── Blocker fix: contract-compliant query parameter names ────────────────────

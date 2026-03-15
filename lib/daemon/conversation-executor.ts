@@ -35,16 +35,37 @@ export interface ExecutorDeps {
 // ── Context hashing ──────────────────────────────────────────────────────────
 
 /**
+ * Recursively produce a canonical JSON string where object keys at every
+ * nesting level are sorted lexicographically.  Arrays preserve element
+ * order (they are positional, not keyed).
+ *
+ * This replaces the previous `JSON.stringify(ctx, Object.keys(ctx).sort())`
+ * approach which used an array replacer — that only whitelisted *top-level*
+ * keys and silently dropped nested object fields, causing materially
+ * different nested contexts to hash identically.
+ */
+function canonicalStringify(value: unknown): string {
+  if (value === null || value === undefined) return JSON.stringify(value);
+  if (typeof value !== 'object') return JSON.stringify(value);
+  if (Array.isArray(value)) {
+    return `[${value.map((v) => canonicalStringify(v)).join(',')}]`;
+  }
+  const obj = value as Record<string, unknown>;
+  const keys = Object.keys(obj).sort();
+  return `{${keys.map((k) => `${JSON.stringify(k)}:${canonicalStringify(obj[k])}`).join(',')}}`;
+}
+
+/**
  * Compute a truncated SHA-256 hash over an approval's `context` record.
  * This is the single source of truth for staleness comparison — the same
  * function must be used both at approval-creation time and at every
  * subsequent staleness refresh.
  *
- * Determinism relies on `JSON.stringify` with sorted keys so insertion
- * order never affects the hash.
+ * Determinism relies on recursive key-sorted canonicalization so neither
+ * insertion order nor nesting depth affects the hash.
  */
 export function computeApprovalContextHash(context: Record<string, unknown>): string {
-  const canonical = JSON.stringify(context, Object.keys(context).sort());
+  const canonical = canonicalStringify(context);
   return createHash('sha256').update(canonical).digest('hex').slice(0, 16);
 }
 
