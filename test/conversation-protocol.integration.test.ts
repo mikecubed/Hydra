@@ -686,4 +686,221 @@ describe('Daemon-level HTTP: submit/retry with executor', () => {
 
     failServer.close();
   });
+
+  it('approval respond through HTTP invokes continueAfterApproval and reaches completed state', async () => {
+    // Replace server with one using both executeTurn and continueAfterApproval
+    server.close();
+    const approvalStore = new ConversationStore();
+    const approvalStreamManager = new StreamManager(approvalStore);
+    let continueCallCount = 0;
+
+    const approvalDeps: ConversationRouteDeps = {
+      store: approvalStore,
+      streamManager: approvalStreamManager,
+      executeTurn(turnId: string, instruction: string) {
+        // Simulate agent work that pauses for approval
+        approvalStreamManager.emitEvent(turnId, 'text-delta', { text: `starting: ${instruction}` });
+        // Create an approval request (simulates agent requesting human approval)
+        approvalStore.createApprovalRequest(turnId, {
+          prompt: 'Deploy to production?',
+          context: { env: 'prod' },
+          contextHash: 'hash-v1',
+          responseOptions: [
+            { key: 'approve', label: 'Approve' },
+            { key: 'reject', label: 'Reject' },
+          ],
+        });
+        approvalStreamManager.emitEvent(turnId, 'approval-prompt', { turnId });
+        // Do NOT complete stream — turn is paused waiting for approval
+      },
+      continueAfterApproval(turnId: string, _approvalId: string, response: string) {
+        continueCallCount++;
+        approvalStreamManager.emitEvent(turnId, 'text-delta', {
+          text: `resumed with: ${response}`,
+        });
+        approvalStreamManager.completeStream(turnId);
+      },
+    };
+
+    const approvalServer = http.createServer((req, res) => {
+      if (!handleConversationRoute(req, res, approvalDeps)) {
+        res.writeHead(404);
+        res.end('Not found');
+      }
+    });
+    await new Promise<void>((resolve) => {
+      approvalServer.listen(0, '127.0.0.1', () => {
+        const addr = approvalServer.address();
+        port = typeof addr === 'object' && addr ? addr.port : 0;
+        resolve();
+      });
+    });
+
+    // 1. Create conversation
+    const createRes = await httpRequest(port, 'POST', '/conversations', {
+      title: 'Approval test',
+    });
+    assert.equal(createRes.status, 201);
+    const convId = createRes.data['id'] as string;
+
+    // 2. Submit instruction — executor pauses and creates approval
+    const submitRes = await httpRequest(port, 'POST', `/conversations/${convId}/turns`, {
+      instruction: 'Deploy changes',
+    });
+    assert.equal(submitRes.status, 201);
+    const turnObj = submitRes.data['turn'] as Record<string, unknown>;
+    const turnId = turnObj['id'] as string;
+
+    // 3. Check pending approvals
+    const pendingRes = await httpRequest(port, 'GET', `/conversations/${convId}/approvals`);
+    assert.equal(pendingRes.status, 200);
+    const approvals = pendingRes.data['approvals'] as Array<Record<string, unknown>>;
+    assert.equal(approvals.length, 1, 'should have 1 pending approval');
+    const approvalId = approvals[0]['id'] as string;
+
+    // 4. Respond to approval
+    const respondRes = await httpRequest(port, 'POST', `/approvals/${approvalId}/respond`, {
+      response: 'approve',
+      sessionId: 'operator-1',
+    });
+    assert.equal(respondRes.status, 200);
+    assert.equal(respondRes.data['success'], true);
+
+    // 5. Verify continueAfterApproval was invoked
+    assert.equal(continueCallCount, 1, 'continueAfterApproval should be called exactly once');
+
+    // 6. Verify turn reached completed state
+    const finalTurn = approvalStore.getTurn(turnId);
+    assert.equal(finalTurn?.status, 'completed');
+
+    // 7. Verify stream has full event sequence
+    const events = approvalStreamManager.getStreamEvents(turnId);
+    assert.ok(events.some((e) => e.kind === 'stream-started'));
+    assert.ok(events.some((e) => e.kind === 'approval-prompt'));
+    assert.ok(events.some((e) => e.kind === 'approval-response'));
+    assert.ok(events.some((e) => e.kind === 'stream-completed'));
+
+    // 8. Verify text-deltas include both initial and resumed content
+    const textDeltas = events
+      .filter((e) => e.kind === 'text-delta')
+      .map((e) => (e.payload as { text: string }).text);
+    assert.ok(
+      textDeltas.some((t) => t.includes('starting:')),
+      'should have initial text',
+    );
+    assert.ok(
+      textDeltas.some((t) => t.includes('resumed with: approve')),
+      'should have resumed text',
+    );
+
+    approvalServer.close();
+  });
+
+  it('approval respond after cancel returns failure and does not resume', async () => {
+    server.close();
+    const cancelStore = new ConversationStore();
+    const cancelStreamManager = new StreamManager(cancelStore);
+    let continueCallCount = 0;
+
+    const cancelDeps: ConversationRouteDeps = {
+      store: cancelStore,
+      streamManager: cancelStreamManager,
+      executeTurn(turnId: string, instruction: string) {
+        cancelStreamManager.emitEvent(turnId, 'text-delta', { text: instruction });
+        cancelStore.createApprovalRequest(turnId, {
+          prompt: 'Continue?',
+          context: {},
+          contextHash: 'hash-1',
+          responseOptions: [{ key: 'yes', label: 'Yes' }],
+        });
+      },
+      continueAfterApproval() {
+        continueCallCount++;
+      },
+    };
+
+    const cancelServer = http.createServer((req, res) => {
+      if (!handleConversationRoute(req, res, cancelDeps)) {
+        res.writeHead(404);
+        res.end('Not found');
+      }
+    });
+    await new Promise<void>((resolve) => {
+      cancelServer.listen(0, '127.0.0.1', () => {
+        const addr = cancelServer.address();
+        port = typeof addr === 'object' && addr ? addr.port : 0;
+        resolve();
+      });
+    });
+
+    // Create conversation and submit
+    const createRes = await httpRequest(port, 'POST', '/conversations', { title: 'Cancel test' });
+    const convId = createRes.data['id'] as string;
+    const submitRes = await httpRequest(port, 'POST', `/conversations/${convId}/turns`, {
+      instruction: 'Do work',
+    });
+    const turnId = (submitRes.data['turn'] as Record<string, unknown>)['id'] as string;
+
+    // Get approval
+    const pendingRes = await httpRequest(port, 'GET', `/conversations/${convId}/approvals`);
+    const approvalId = (pendingRes.data['approvals'] as Array<Record<string, unknown>>)[0][
+      'id'
+    ] as string;
+
+    // Cancel the turn
+    const cancelRes = await httpRequest(
+      port,
+      'POST',
+      `/conversations/${convId}/turns/${turnId}/cancel`,
+    );
+    assert.equal(cancelRes.status, 200);
+
+    // Attempt to respond to approval — should fail
+    const respondRes = await httpRequest(port, 'POST', `/approvals/${approvalId}/respond`, {
+      response: 'yes',
+      sessionId: 'sess-1',
+    });
+    assert.equal(respondRes.status, 409, 'should reject approval on cancelled turn');
+    assert.equal(respondRes.data['success'], false);
+    assert.equal(continueCallCount, 0, 'continueAfterApproval must not be called');
+
+    cancelServer.close();
+  });
+
+  it('stream subscription using contract name lastAcknowledgedSeq through HTTP', async () => {
+    // Create conversation and submit
+    const createRes = await httpRequest(port, 'POST', '/conversations', {
+      title: 'Contract param test',
+    });
+    const convId = createRes.data['id'] as string;
+    const submitRes = await httpRequest(port, 'POST', `/conversations/${convId}/turns`, {
+      instruction: 'Hello contract',
+    });
+    const turnId = (submitRes.data['turn'] as Record<string, unknown>)['id'] as string;
+
+    // Get all events to find a midpoint seq
+    const allRes = await httpRequest(
+      port,
+      'GET',
+      `/conversations/${convId}/turns/${turnId}/stream?lastAcknowledgedSeq=0`,
+    );
+    assert.equal(allRes.status, 200);
+    const allEvents = allRes.data['events'] as Array<Record<string, unknown>>;
+    assert.ok(allEvents.length > 0);
+
+    // Use lastAcknowledgedSeq to get only events after the first
+    const firstSeq = allEvents[0]['seq'] as number;
+    const resumeRes = await httpRequest(
+      port,
+      'GET',
+      `/conversations/${convId}/turns/${turnId}/stream?lastAcknowledgedSeq=${String(firstSeq)}`,
+    );
+    assert.equal(resumeRes.status, 200);
+    const resumeEvents = resumeRes.data['events'] as Array<Record<string, unknown>>;
+    assert.ok(
+      resumeEvents.every((e) => (e['seq'] as number) > firstSeq),
+      'all events should be after firstSeq',
+    );
+    assert.ok(resumeEvents.length < allEvents.length, 'should have fewer events than total');
+  });
 });

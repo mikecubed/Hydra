@@ -205,6 +205,33 @@ function createConversationExecutor(
   };
 }
 
+/**
+ * Create the continueAfterApproval callback that resumes paused turns after
+ * an operator responds to an approval prompt.  The callback dispatches a
+ * follow-up instruction that includes the approval context so the agent can
+ * continue from where it left off.
+ */
+function createApprovalContinuator(
+  ctx: DaemonContext,
+): (
+  turnId: string,
+  approvalId: string,
+  response: string,
+  originalInstruction: string,
+) => Promise<void> {
+  return async (
+    turnId: string,
+    _approvalId: string,
+    response: string,
+    originalInstruction: string,
+  ): Promise<void> => {
+    const continuationInstruction =
+      `Continue the previous task. Original instruction: ${originalInstruction}\n` +
+      `Approval response: ${response}`;
+    await createConversationExecutor(ctx)(turnId, continuationInstruction);
+  };
+}
+
 function writeStatus(ctx: DaemonContext, extra: Record<string, unknown> = {}) {
   const state = readState();
   const payload = {
@@ -603,6 +630,7 @@ async function handleHttpRequest(
         store: ctx.conversationStore,
         streamManager: ctx.streamManager,
         executeTurn: createConversationExecutor(ctx),
+        continueAfterApproval: createApprovalContinuator(ctx),
       })
     ) {
       return;

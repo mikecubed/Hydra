@@ -463,12 +463,18 @@ function handleLoadTurnHistory(
     sendError(res, 404, 'Conversation not found');
     return;
   }
-  const fromResult = validatePositiveIntParam('from', url.searchParams.get('from'));
+  const fromResult = validatePositiveIntParam(
+    'fromPosition',
+    url.searchParams.get('fromPosition') ?? url.searchParams.get('from'),
+  );
   if ('error' in fromResult) {
     sendError(res, 400, fromResult.error);
     return;
   }
-  const toResult = validatePositiveIntParam('to', url.searchParams.get('to'));
+  const toResult = validatePositiveIntParam(
+    'toPosition',
+    url.searchParams.get('toPosition') ?? url.searchParams.get('to'),
+  );
   if ('error' in toResult) {
     sendError(res, 400, toResult.error);
     return;
@@ -514,7 +520,10 @@ function handleSubscribeToStream(
     sendError(res, 400, 'Turn does not belong to this conversation');
     return;
   }
-  const sinceResult = validateNonNegativeIntParam('since', url.searchParams.get('since'));
+  const sinceResult = validateNonNegativeIntParam(
+    'lastAcknowledgedSeq',
+    url.searchParams.get('lastAcknowledgedSeq') ?? url.searchParams.get('since'),
+  );
   if ('error' in sinceResult) {
     sendError(res, 400, sinceResult.error);
     return;

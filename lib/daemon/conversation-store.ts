@@ -78,6 +78,8 @@ interface ApprovalResult {
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
+const TERMINAL_TURN_STATUSES = new Set(['completed', 'failed', 'cancelled']);
+
 function generateId(prefix: string): string {
   return `${prefix}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
 }
@@ -272,6 +274,16 @@ export class ConversationStore {
       status,
       hasResponse: response !== undefined && response !== '',
     });
+
+    // Invalidate pending/stale approvals when a turn reaches a terminal state
+    const approvalIds = this.approvalsByTurn.get(turnId) ?? [];
+    for (const aid of approvalIds) {
+      const approval = this.approvals.get(aid);
+      if (approval && (approval.status === 'pending' || approval.status === 'stale')) {
+        approval.status = 'expired';
+        this.emit('conversation:approval-expired', { approvalId: aid, turnId, reason: status });
+      }
+    }
   }
 
   // ── Approvals ──────────────────────────────────────────────────────────
@@ -324,6 +336,12 @@ export class ConversationStore {
   ): ApprovalResult {
     const approval = this.approvals.get(approvalId);
     if (!approval) throw new Error(`Approval not found: ${approvalId}`);
+
+    // Reject if the owning turn is in a terminal state
+    const turn = this.turns.get(approval.turnId);
+    if (turn && TERMINAL_TURN_STATUSES.has(turn.status)) {
+      return { success: false, approval };
+    }
 
     // Already responded — first-write-wins conflict
     if (approval.status === 'responded') {
@@ -414,8 +432,7 @@ export class ConversationStore {
     const original = this.turns.get(turnId);
     if (!original) throw new Error(`Turn not found: ${turnId}`);
 
-    const terminalStatuses = new Set(['completed', 'failed', 'cancelled']);
-    if (!terminalStatuses.has(original.status)) {
+    if (!TERMINAL_TURN_STATUSES.has(original.status)) {
       throw new Error(`Cannot retry non-terminal turn (status: ${original.status})`);
     }
 

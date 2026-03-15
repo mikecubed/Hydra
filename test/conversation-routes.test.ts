@@ -1497,7 +1497,7 @@ describe('Conversation routes — stream query validation', () => {
     handleConversationRoute(req, res as unknown as ServerResponse, deps);
     assert.equal(res.statusCode, 400);
     const body = res.body as Record<string, unknown>;
-    assert.ok((body['error'] as string).includes('Invalid since'));
+    assert.ok((body['error'] as string).includes('Invalid lastAcknowledgedSeq'));
   });
 
   it('GET .../stream rejects negative since', () => {
@@ -1790,5 +1790,336 @@ describe('Conversation routes — approval response stream notification', () => 
     const events = deps.streamManager.getStreamEvents(turn.id);
     const failEvents = events.filter((e) => e.kind === 'stream-failed');
     assert.equal(failEvents.length, 1, 'stream should be failed after sync throw');
+  });
+});
+
+// ── Blocker fix: reject approvals on cancelled/terminal turns ────────────────
+
+describe('Conversation routes — approval rejection on terminal turns', () => {
+  it('POST /approvals/:id/respond returns failure when owning turn is cancelled', async () => {
+    const conv = deps.store.createConversation();
+    const turn = deps.store.appendTurn(conv.id, {
+      kind: 'operator',
+      instruction: 'Deploy',
+      attribution: operatorAttribution,
+    });
+    deps.store.updateTurnStatus(turn.id, 'executing');
+    deps.streamManager.createStream(turn.id);
+
+    const approval = deps.store.createApprovalRequest(turn.id, {
+      prompt: 'Continue?',
+      context: {},
+      contextHash: 'hash-1',
+      responseOptions: [{ key: 'yes', label: 'Yes' }],
+    });
+
+    // Cancel the turn — this should expire the pending approval
+    deps.streamManager.cancelStream(turn.id);
+
+    const req = createMockReq('POST', `/approvals/${approval.id}/respond`, {
+      response: 'yes',
+      sessionId: 'sess-1',
+    });
+    const res = createMockRes();
+    handleConversationRoute(req, res as unknown as ServerResponse, deps);
+    await waitForResponse(res);
+
+    assert.equal(res.statusCode, 409, 'should reject approval on cancelled turn');
+    assert.equal((res.body as Record<string, unknown>)['success'], false);
+  });
+
+  it('POST /approvals/:id/respond returns failure when owning turn is completed', async () => {
+    const conv = deps.store.createConversation();
+    const turn = deps.store.appendTurn(conv.id, {
+      kind: 'operator',
+      instruction: 'Do work',
+      attribution: operatorAttribution,
+    });
+    deps.store.updateTurnStatus(turn.id, 'executing');
+    deps.streamManager.createStream(turn.id);
+
+    const approval = deps.store.createApprovalRequest(turn.id, {
+      prompt: 'OK?',
+      context: {},
+      contextHash: 'hash-1',
+      responseOptions: [{ key: 'ok', label: 'OK' }],
+    });
+
+    // Complete the turn — should expire approvals
+    deps.streamManager.completeStream(turn.id);
+
+    const req = createMockReq('POST', `/approvals/${approval.id}/respond`, {
+      response: 'ok',
+      sessionId: 'sess-1',
+    });
+    const res = createMockRes();
+    handleConversationRoute(req, res as unknown as ServerResponse, deps);
+    await waitForResponse(res);
+
+    assert.equal(res.statusCode, 409, 'should reject approval on completed turn');
+    assert.equal((res.body as Record<string, unknown>)['success'], false);
+  });
+
+  it('POST /approvals/:id/respond returns failure when owning turn is failed', async () => {
+    const conv = deps.store.createConversation();
+    const turn = deps.store.appendTurn(conv.id, {
+      kind: 'operator',
+      instruction: 'Do work',
+      attribution: operatorAttribution,
+    });
+    deps.store.updateTurnStatus(turn.id, 'executing');
+    deps.streamManager.createStream(turn.id);
+
+    const approval = deps.store.createApprovalRequest(turn.id, {
+      prompt: 'OK?',
+      context: {},
+      contextHash: 'hash-1',
+      responseOptions: [{ key: 'ok', label: 'OK' }],
+    });
+
+    // Fail the turn — should expire approvals
+    deps.streamManager.failStream(turn.id, 'boom');
+
+    const req = createMockReq('POST', `/approvals/${approval.id}/respond`, {
+      response: 'ok',
+      sessionId: 'sess-1',
+    });
+    const res = createMockRes();
+    handleConversationRoute(req, res as unknown as ServerResponse, deps);
+    await waitForResponse(res);
+
+    assert.equal(res.statusCode, 409, 'should reject approval on failed turn');
+    assert.equal((res.body as Record<string, unknown>)['success'], false);
+  });
+
+  it('does not invoke continueAfterApproval when turn is cancelled', async () => {
+    let continueCalled = false;
+    deps.continueAfterApproval = () => {
+      continueCalled = true;
+    };
+
+    const conv = deps.store.createConversation();
+    const turn = deps.store.appendTurn(conv.id, {
+      kind: 'operator',
+      instruction: 'Deploy',
+      attribution: operatorAttribution,
+    });
+    deps.store.updateTurnStatus(turn.id, 'executing');
+    deps.streamManager.createStream(turn.id);
+
+    const approval = deps.store.createApprovalRequest(turn.id, {
+      prompt: 'Continue?',
+      context: {},
+      contextHash: 'hash-1',
+      responseOptions: [{ key: 'yes', label: 'Yes' }],
+    });
+
+    deps.streamManager.cancelStream(turn.id);
+
+    const req = createMockReq('POST', `/approvals/${approval.id}/respond`, {
+      response: 'yes',
+      sessionId: 'sess-1',
+    });
+    const res = createMockRes();
+    handleConversationRoute(req, res as unknown as ServerResponse, deps);
+    await waitForResponse(res);
+
+    assert.equal(
+      continueCalled,
+      false,
+      'continueAfterApproval must not be called on cancelled turn',
+    );
+  });
+
+  it('cancellation expires pending approvals so getPendingApprovals returns empty', () => {
+    const conv = deps.store.createConversation();
+    const turn = deps.store.appendTurn(conv.id, {
+      kind: 'operator',
+      instruction: 'Deploy',
+      attribution: operatorAttribution,
+    });
+    deps.store.updateTurnStatus(turn.id, 'executing');
+    deps.streamManager.createStream(turn.id);
+
+    deps.store.createApprovalRequest(turn.id, {
+      prompt: 'Continue?',
+      context: {},
+      contextHash: 'hash-1',
+      responseOptions: [{ key: 'yes', label: 'Yes' }],
+    });
+
+    assert.equal(deps.store.getPendingApprovals(conv.id).length, 1, 'should have 1 pending');
+
+    deps.streamManager.cancelStream(turn.id);
+
+    assert.equal(
+      deps.store.getPendingApprovals(conv.id).length,
+      0,
+      'should have 0 pending after cancel',
+    );
+  });
+});
+
+// ── Blocker fix: contract-compliant query parameter names ────────────────────
+
+describe('Conversation routes — contract parameter names', () => {
+  it('GET .../stream accepts lastAcknowledgedSeq (contract name)', () => {
+    const conv = deps.store.createConversation();
+    const turn = deps.store.appendTurn(conv.id, {
+      kind: 'operator',
+      instruction: 'A',
+      attribution: operatorAttribution,
+    });
+    deps.store.updateTurnStatus(turn.id, 'executing');
+    deps.streamManager.createStream(turn.id);
+    deps.streamManager.emitEvent(turn.id, 'text-delta', { text: 'hello' });
+    deps.streamManager.completeStream(turn.id);
+
+    const allEvents = deps.streamManager.getStreamEvents(turn.id);
+    const midSeq = allEvents[0].seq;
+
+    const req = createMockReq(
+      'GET',
+      `/conversations/${conv.id}/turns/${turn.id}/stream?lastAcknowledgedSeq=${String(midSeq)}`,
+    );
+    const res = createMockRes();
+    handleConversationRoute(req, res as unknown as ServerResponse, deps);
+    assert.equal(res.statusCode, 200);
+    const body = res.body as Record<string, unknown>;
+    const events = body['events'] as Array<Record<string, unknown>>;
+    assert.ok(events.length > 0, 'should return events after midSeq');
+    assert.ok(
+      events.every((e) => (e['seq'] as number) > midSeq),
+      'all events should be after midSeq',
+    );
+  });
+
+  it('GET .../stream still supports since as alias', () => {
+    const conv = deps.store.createConversation();
+    const turn = deps.store.appendTurn(conv.id, {
+      kind: 'operator',
+      instruction: 'A',
+      attribution: operatorAttribution,
+    });
+    deps.streamManager.createStream(turn.id);
+
+    const req = createMockReq('GET', `/conversations/${conv.id}/turns/${turn.id}/stream?since=0`);
+    const res = createMockRes();
+    handleConversationRoute(req, res as unknown as ServerResponse, deps);
+    assert.equal(res.statusCode, 200);
+  });
+
+  it('GET .../stream prefers lastAcknowledgedSeq over since when both provided', () => {
+    const conv = deps.store.createConversation();
+    const turn = deps.store.appendTurn(conv.id, {
+      kind: 'operator',
+      instruction: 'A',
+      attribution: operatorAttribution,
+    });
+    deps.store.updateTurnStatus(turn.id, 'executing');
+    deps.streamManager.createStream(turn.id);
+    deps.streamManager.emitEvent(turn.id, 'text-delta', { text: 'a' });
+    deps.streamManager.emitEvent(turn.id, 'text-delta', { text: 'b' });
+    deps.streamManager.completeStream(turn.id);
+
+    const allEvents = deps.streamManager.getStreamEvents(turn.id);
+    const highSeq = allEvents.at(-1)!.seq;
+
+    // lastAcknowledgedSeq = highSeq (returns nothing), since = 0 (would return all)
+    const req = createMockReq(
+      'GET',
+      `/conversations/${conv.id}/turns/${turn.id}/stream?lastAcknowledgedSeq=${String(highSeq)}&since=0`,
+    );
+    const res = createMockRes();
+    handleConversationRoute(req, res as unknown as ServerResponse, deps);
+    assert.equal(res.statusCode, 200);
+    const body = res.body as Record<string, unknown>;
+    const events = body['events'] as Array<Record<string, unknown>>;
+    assert.equal(events.length, 0, 'lastAcknowledgedSeq should take precedence over since');
+  });
+
+  it('GET .../turns accepts fromPosition and toPosition (contract names)', () => {
+    const conv = deps.store.createConversation();
+    for (let i = 1; i <= 5; i++) {
+      deps.store.appendTurn(conv.id, {
+        kind: 'operator',
+        instruction: `Turn ${String(i)}`,
+        attribution: operatorAttribution,
+      });
+    }
+
+    const req = createMockReq('GET', `/conversations/${conv.id}/turns?fromPosition=2&toPosition=4`);
+    const res = createMockRes();
+    handleConversationRoute(req, res as unknown as ServerResponse, deps);
+    assert.equal(res.statusCode, 200);
+    const body = res.body as Record<string, unknown>;
+    const turns = body['turns'] as Array<Record<string, unknown>>;
+    assert.equal(turns.length, 3, 'should return turns at positions 2, 3, 4');
+    assert.equal(turns[0]['position'], 2);
+    assert.equal(turns[2]['position'], 4);
+  });
+
+  it('GET .../turns still supports from and to as aliases', () => {
+    const conv = deps.store.createConversation();
+    for (let i = 1; i <= 3; i++) {
+      deps.store.appendTurn(conv.id, {
+        kind: 'operator',
+        instruction: `Turn ${String(i)}`,
+        attribution: operatorAttribution,
+      });
+    }
+
+    const req = createMockReq('GET', `/conversations/${conv.id}/turns?from=1&to=2`);
+    const res = createMockRes();
+    handleConversationRoute(req, res as unknown as ServerResponse, deps);
+    assert.equal(res.statusCode, 200);
+    const body = res.body as Record<string, unknown>;
+    const turns = body['turns'] as Array<Record<string, unknown>>;
+    assert.equal(turns.length, 2, 'alias from/to should still work');
+  });
+
+  it('GET .../turns prefers fromPosition/toPosition over from/to when both provided', () => {
+    const conv = deps.store.createConversation();
+    for (let i = 1; i <= 5; i++) {
+      deps.store.appendTurn(conv.id, {
+        kind: 'operator',
+        instruction: `Turn ${String(i)}`,
+        attribution: operatorAttribution,
+      });
+    }
+
+    // fromPosition=4&toPosition=5 (returns 2 turns), from=1&to=3 (would return 3 turns)
+    const req = createMockReq(
+      'GET',
+      `/conversations/${conv.id}/turns?fromPosition=4&toPosition=5&from=1&to=3`,
+    );
+    const res = createMockRes();
+    handleConversationRoute(req, res as unknown as ServerResponse, deps);
+    assert.equal(res.statusCode, 200);
+    const body = res.body as Record<string, unknown>;
+    const turns = body['turns'] as Array<Record<string, unknown>>;
+    assert.equal(turns.length, 2, 'fromPosition/toPosition should take precedence');
+    assert.equal(turns[0]['position'], 4);
+    assert.equal(turns[1]['position'], 5);
+  });
+
+  it('GET .../stream rejects invalid lastAcknowledgedSeq', () => {
+    const conv = deps.store.createConversation();
+    const turn = deps.store.appendTurn(conv.id, {
+      kind: 'operator',
+      instruction: 'A',
+      attribution: operatorAttribution,
+    });
+    deps.streamManager.createStream(turn.id);
+
+    const req = createMockReq(
+      'GET',
+      `/conversations/${conv.id}/turns/${turn.id}/stream?lastAcknowledgedSeq=abc`,
+    );
+    const res = createMockRes();
+    handleConversationRoute(req, res as unknown as ServerResponse, deps);
+    assert.equal(res.statusCode, 400);
+    const body = res.body as Record<string, unknown>;
+    assert.ok((body['error'] as string).includes('lastAcknowledgedSeq'));
   });
 });
