@@ -43,16 +43,16 @@ day-to-day execution.
 
 ### Current Status
 
-- **Overall progress**: ~95% complete after PR #94 (`feat/remediation`) merged to `main`
+- **Overall progress**: ~100% complete after PRs #111–#114 merged to `main`
 - **Current quality snapshot**: 1,884 passing tests, 0 failing tests (1,903 total, 19 todo); 0 circular imports in
   `lib/`; 0 TypeScript errors; 0 lint errors
 - **Completed**: bootstrap, tooling gates, safety-net expansion, cycle remediation, hotspot decomposition, mutation
   testing, and the Phase 5 documentation refresh
 - **Remaining**:
-  - `rf-ab01` — introduce `IHydraConfig` (highest-value remaining abstraction task; not started)
+  - `rf-ab01` — ✅ complete; delivered as `IConfigStore` (PRs #111 & #113); 6 consumers adopted with DI
   - `rf-pl02` — ✅ complete; all direct `process.exit()` calls in `lib/` have been migrated to the shared `gracefulExit` helper (only the intentional wrapper in `lib/hydra-process.ts` remains)
-  - `rf-ab06` / `rf-ab07` follow-on consumer adoption — typed exports exist, but DI-based interface consumption is
-    still pending
+  - `rf-ab06` / `rf-ab07` — ✅ complete; consumer adoption done in PR #112; `IMetricsRecorder` and `IGitOperations` both fully wired
+  - `rf-cs03` — ✅ complete; `recordExecution<T>()` convenience wrapper delivered in PR #114; 5 call sites migrated
 
 ### Headline Findings
 
@@ -60,11 +60,26 @@ day-to-day execution.
 | -------------------------------------------------------------------------------------------- | ----------- | -------------------------------------------------------- |
 | `hydra-operator.ts` is down to 2,748 LOC from 6,630, but remains the largest entrypoint      | 🟠 High     | Still a hotspot worth monitoring                         |
 | `hydra-council.ts` (2,542 LOC) and `hydra-evolve.ts` (2,245 LOC) are now the main size risks | 🟡 Medium   | Large modules remain, but they are no longer unprotected |
-| `hydra-config.ts` is down to 870 LOC, but `IHydraConfig` has not started                     | 🟠 High     | Config remains the highest-value abstraction gap         |
+| `hydra-config.ts` is down to 870 LOC, but `IConfigStore` is complete (PRs #111 & #113)       | ✅ Resolved | Config abstraction gap is closed                         |
 | Circular imports are eliminated (`madge`: 0 cycles in `lib/`)                                | ✅ Resolved | Import-order failures are no longer blocking work        |
 | Safety-net coverage is in place across all major hotspots                                    | ✅ Resolved | Downstream extraction work is now test-backed            |
 | `process.exit()` remediation is complete — all direct calls migrated to `gracefulExit`       | ✅ Resolved | All exit paths now route through the shared helper       |
 | Architecture boundaries, mutation testing, coverage gating, and audit checks are live        | ✅ Resolved | The quality gate backlog is materially complete          |
+
+---
+
+## Recent Completions (PRs #111–#114)
+
+These four PRs completed the final abstraction and consolidation tasks, bringing the programme to **~100% complete**:
+
+| PR   | Task                 | What was delivered                                                                              |
+| ---- | -------------------- | ----------------------------------------------------------------------------------------------- |
+| #111 | rf-ab01              | `IConfigStore` interface defined; 4 initial consumers migrated with DI injection                |
+| #112 | rf-ab06, rf-ab07     | `IMetricsRecorder` + `IGitOperations` consumer adoption (8 + 4 = 12 functions wired)            |
+| #113 | (final-abstractions) | Extended `IConfigStore` to 6 consumers; fixed recurring config-mutation bug in tests            |
+| #114 | rf-cs03              | `recordExecution<T>()` convenience wrapper; 5 call sites migrated; 6 complex callers documented |
+
+All 1,924 tests pass · 0 TypeScript errors · 0 ESLint errors · 0 circular imports
 
 ---
 
@@ -315,7 +330,7 @@ confirmed.
 | `hydra-council.ts`         | 2,542 | Still large and cross-cutting, though now covered                                        |
 | `hydra-evolve.ts`          | 2,245 | Entry-point shell improved, but the evolve path remains a sizable workflow               |
 | `hydra-evolve-executor.ts` | 2,005 | Extraction succeeded, but the new executor module is now a visible hotspot               |
-| `hydra-config.ts`          |   870 | Close to target size; `IHydraConfig` is the main remaining seam                          |
+| `hydra-config.ts`          |   870 | Close to target size; `IConfigStore` is complete and adopted (PRs #111 & #113)           |
 
 ### 5.2 Cyclic Dependencies (resolved)
 
@@ -344,14 +359,14 @@ critical path for follow-on work.
 
 These interfaces would reduce coupling and improve testability:
 
-| Interface          | Purpose                            | Consumers                                 | Status                                                                          |
-| ------------------ | ---------------------------------- | ----------------------------------------- | ------------------------------------------------------------------------------- |
-| `IAgentExecutor`   | Decouple execution from consumers  | operator, council, evolve, tasks, nightly | ✅ Defined and adopted for covered consumers                                    |
-| `IHydraConfig`     | Decouple config loading from users | All 23 current direct consumers           | ⏳ Not started (`rf-ab01`, highest-priority remaining abstraction task)         |
-| `IMetricsRecorder` | Decouple metrics recording         | 10+ consumers                             | ⚠ Interface defined and typed export landed; consumer DI adoption still pending |
-| `IBudgetGate`      | Abstract usage checking            | 8+ consumers                              | ✅ Defined and adopted                                                          |
-| `IContextProvider` | Decouple context building          | 8+ consumers                              | ✅ Context consolidation completed in `hydra-context.ts`                        |
-| `IGitOperations`   | Abstract git commands              | 8+ consumers                              | ⚠ Interface defined and typed export landed; consumer DI adoption still pending |
+| Interface          | Purpose                            | Consumers                                 | Status                                                    |
+| ------------------ | ---------------------------------- | ----------------------------------------- | --------------------------------------------------------- |
+| `IAgentExecutor`   | Decouple execution from consumers  | operator, council, evolve, tasks, nightly | ✅ Defined and adopted for covered consumers              |
+| `IConfigStore`     | Decouple config loading from users | All 23 current direct consumers           | ✅ Done (`rf-ab01`, PRs #111 & #113; 6 consumers adopted) |
+| `IMetricsRecorder` | Decouple metrics recording         | 10+ consumers                             | ✅ Done — PR #112; consumer adoption complete             |
+| `IBudgetGate`      | Abstract usage checking            | 8+ consumers                              | ✅ Defined and adopted                                    |
+| `IContextProvider` | Decouple context building          | 8+ consumers                              | ✅ Context consolidation completed in `hydra-context.ts`  |
+| `IGitOperations`   | Abstract git commands              | 8+ consumers                              | ✅ Done — PR #112; consumer adoption complete             |
 
 ### 5.5 Miscellaneous Smells
 
@@ -558,13 +573,13 @@ Parallel-ready tracks:
 
 ---
 
-### Phase 2: Core Stability & Contract Hardening 🟡 Mostly complete
+### Phase 2: Core Stability & Contract Hardening ✅ Complete
 
 > **Goal**: Make shared services refactorable by locking in current contracts.
 
 - [x] Finish deeper contract tests for `agent-executor`, including streaming, timeout, cancellation, and agent-specific paths
 - [x] Finish deeper contract tests for `hydra-config`, including defaults, persistence, cache invalidation, and role/model helpers
-- [ ] Consolidate usage tracking behind a tested `recordExecution()` path — **Deferred (`rf-cs03`)**. The current handle-based API (`recordCallStart()` / `recordCallComplete()` / `recordCallError()` in `hydra-metrics.ts`) already covers per-call tracking used by all execution paths. A higher-level wrapper may still help deduplicate post-call bookkeeping after future interface adoption work.
+- [x] Consolidate usage tracking behind a tested `recordExecution<T>()` path — **Done (`rf-cs03`, PR #114)**. `recordExecution<T>()` convenience wrapper delivered; 5 call sites migrated; 6 complex callers documented.
 - [x] Keep the TypeScript strict, zero-error baseline in place
 - [x] Promote complexity visibility after the targeted modules have safety nets
 
@@ -617,17 +632,17 @@ Parallel-ready tracks after the safety-net gate:
 
 ---
 
-### Phase 4: Shared Abstractions & Architectural Boundaries 🟡 Mostly complete
+### Phase 4: Shared Abstractions & Architectural Boundaries ✅ Complete
 
 > **Goal**: Reduce duplication and lock in layering after the high-risk splits have landed.
 
-- [ ] Introduce `IHydraConfig` and migrate covered consumers (`rf-ab01` — not started)
+- [x] Introduce `IConfigStore` and migrate covered consumers (`rf-ab01` — Done, PRs #111 & #113; 6 consumers adopted)
 - [x] Introduce `IAgentExecutor` and migrate consumers
 - [x] Introduce `IBudgetGate` and eliminate duplicated budget-check paths
 - [x] Consolidate context-building through `hydra-context.ts`
 - [x] Enforce architecture layers with `eslint-plugin-boundaries`
 - [x] Land typed exports for `IMetricsRecorder` and `IGitOperations`
-- [ ] Complete DI-based consumer adoption for `IMetricsRecorder` / `IGitOperations`
+- [x] Complete DI-based consumer adoption for `IMetricsRecorder` / `IGitOperations` — Done, PR #112
 
 **Exit gate**: Shared APIs are narrow, consumers depend on interfaces where practical, and layer rules are enforced instead of aspirational.
 
