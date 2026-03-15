@@ -1,8 +1,20 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
-import { describe, it } from 'node:test';
+import { afterEach, beforeEach, describe, it } from 'node:test';
 import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
 import type { CommandContext } from '../lib/hydra-operator-commands.ts';
 import * as mod from '../lib/hydra-operator-commands.ts';
+import {
+  _setTestConfigPath,
+  invalidateConfigCache,
+  loadHydraConfig,
+  saveHydraConfig,
+} from '../lib/hydra-config.ts';
+
+let tempConfigDir = '';
+let tempConfigPath = '';
 
 function makeCtx(overrides: Partial<CommandContext> = {}): CommandContext {
   return {
@@ -57,6 +69,23 @@ function captureLog(fn: () => Promise<void>): Promise<string[]> {
 }
 
 describe('hydra-operator-commands', () => {
+  beforeEach(() => {
+    tempConfigDir = fs.mkdtempSync(path.join(os.tmpdir(), 'hydra-operator-commands-test-'));
+    tempConfigPath = path.join(tempConfigDir, 'hydra.config.json');
+    _setTestConfigPath(tempConfigPath);
+    saveHydraConfig({});
+  });
+
+  afterEach(() => {
+    _setTestConfigPath(null);
+    invalidateConfigCache();
+    if (tempConfigDir !== '') {
+      fs.rmSync(tempConfigDir, { recursive: true, force: true });
+      tempConfigDir = '';
+      tempConfigPath = '';
+    }
+  });
+
   describe('handleModelCommand', () => {
     it('no args → prints model summary and calls rl.prompt', async () => {
       let prompted = false;
@@ -116,6 +145,8 @@ describe('hydra-operator-commands', () => {
         logs.some((l) => l.includes('Mode') && l.includes('economy')),
         `Should log Mode → economy confirmation, got: ${JSON.stringify(logs)}`,
       );
+      invalidateConfigCache();
+      assert.equal(loadHydraConfig().mode, 'economy');
     });
   });
 
@@ -190,6 +221,8 @@ describe('hydra-operator-commands', () => {
         logs.some((l) => l.includes('Mode set to') || l.includes('ECO')),
         `Should print routing mode confirmation, got: ${JSON.stringify(logs)}`,
       );
+      invalidateConfigCache();
+      assert.equal(loadHydraConfig().routing.mode, 'economy');
     });
 
     it('performance → logs Mode set to chip with PERF', async () => {
