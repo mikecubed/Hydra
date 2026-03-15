@@ -93,7 +93,16 @@ export default [
       'n/no-unpublished-import': 'off', // devDeps used in tests/scripts are fine
       'n/no-process-exit': 'error', // use process.exitCode instead
       'n/prefer-node-protocol': 'error', // require node: prefix on builtins
-      'n/hashbang': 'warn', // lib files may have intentional shebangs without being in bin
+      'n/hashbang': [
+        'warn',
+        {
+          convertPath: {
+            'bin/**/*.ts': ['\\.ts$', '.js'],
+            'lib/orchestrator-client.ts': ['\\.ts$', '.js'],
+            'lib/orchestrator-daemon.ts': ['\\.ts$', '.js'],
+          },
+        },
+      ],
       'n/no-unsupported-features/node-builtins': ['error', { ignores: ['fetch', 'Response'] }], // fetch/Response used intentionally (Node 22 dev runtime, Hono framework)
 
       // ── Unicorn rules (selective) ──────────────────────────────────────────

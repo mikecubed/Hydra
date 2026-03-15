@@ -21,9 +21,9 @@
     "packages/*"
   ],
   "bin": {
-    "hydra": "./bin/hydra-cli.ts",
-    "hydra-client": "./lib/orchestrator-client.ts",
-    "hydra-daemon": "./lib/orchestrator-daemon.ts"
+    "hydra": "./bin/hydra-cli.js",
+    "hydra-client": "./lib/orchestrator-client.js",
+    "hydra-daemon": "./lib/orchestrator-daemon.js"
   },
   "files": [
     "bin/",
@@ -88,6 +88,8 @@
     "test:report": "node --test 'test/**/*.test.{ts,mjs}' --test-reporter=tap --test-reporter-destination=docs/coordination/test-results.tap",
     "package": "node -e \"require('fs').mkdirSync('dist', { recursive: true })\" && npm pack --pack-destination dist",
     "package:dry-run": "npm pack --dry-run",
+    "prepack": "node scripts/build-pack.ts",
+    "postpack": "node scripts/clean-pack.ts",
     "build:exe": "node scripts/build-exe.ts",
     "build:exe:ci": "node scripts/build-exe.ts --ci",
     "install:global": "npm install -g .",

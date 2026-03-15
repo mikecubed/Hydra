@@ -20,6 +20,11 @@ recent-projects.json
 .tsbuild/
 coverage/
 
+# Prepack build output (generated .js alongside .ts source)
+.packfiles
+lib/**/*.js
+bin/**/*.js
+
 # Temporary test module patches (hydra-tasks test fixture)
 .hydra-tasks.testable.*.ts
 
