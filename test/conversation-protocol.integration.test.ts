@@ -519,18 +519,20 @@ function httpRequest(
   method: string,
   path: string,
   body?: unknown,
+  extraHeaders?: Record<string, string>,
 ): Promise<{ status: number; data: Record<string, unknown> }> {
   return new Promise((resolve, reject) => {
     const payload = body === undefined ? undefined : JSON.stringify(body);
+    const baseHeaders: Record<string, string> = payload
+      ? { 'Content-Type': 'application/json', 'Content-Length': String(Buffer.byteLength(payload)) }
+      : {};
     const req = http.request(
       {
         hostname: '127.0.0.1',
         port,
         path,
         method,
-        headers: payload
-          ? { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(payload) }
-          : undefined,
+        headers: { ...baseHeaders, ...extraHeaders },
       },
       (res) => {
         let text = '';
@@ -767,10 +769,13 @@ describe('Daemon-level HTTP: submit/retry with executor', () => {
     const approvalId = approvals[0]['id'] as string;
 
     // 4. Respond to approval
-    const respondRes = await httpRequest(port, 'POST', `/approvals/${approvalId}/respond`, {
-      response: 'approve',
-      sessionId: 'operator-1',
-    });
+    const respondRes = await httpRequest(
+      port,
+      'POST',
+      `/approvals/${approvalId}/respond`,
+      { response: 'approve' },
+      { 'x-session-id': 'operator-1' },
+    );
     assert.equal(respondRes.status, 200);
     assert.equal(respondRes.data['success'], true);
 
@@ -865,10 +870,13 @@ describe('Daemon-level HTTP: submit/retry with executor', () => {
     assert.equal(cancelRes.status, 200);
 
     // Attempt to respond to approval — should fail
-    const respondRes = await httpRequest(port, 'POST', `/approvals/${approvalId}/respond`, {
-      response: 'yes',
-      sessionId: 'sess-1',
-    });
+    const respondRes = await httpRequest(
+      port,
+      'POST',
+      `/approvals/${approvalId}/respond`,
+      { response: 'yes' },
+      { 'x-session-id': 'sess-1' },
+    );
     assert.equal(respondRes.status, 409, 'should reject approval on cancelled turn');
     assert.equal(respondRes.data['success'], false);
     assert.equal(continueCallCount, 0, 'continueAfterApproval must not be called');

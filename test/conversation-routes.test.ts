@@ -2157,7 +2157,7 @@ describe('Conversation routes — approval response validation', () => {
     assert.equal((res.body as Record<string, unknown>)['success'], true);
   });
 
-  it('POST /approvals/:id/respond falls back to anonymous when X-Session-Id header is missing', async () => {
+  it('POST /approvals/:id/respond rejects with 401 when X-Session-Id header is missing', async () => {
     const conv = deps.store.createConversation();
     const turn = deps.store.appendTurn(conv.id, {
       kind: 'operator',
@@ -2181,12 +2181,10 @@ describe('Conversation routes — approval response validation', () => {
     handleConversationRoute(req, res as unknown as ServerResponse, deps);
     await waitForResponse(res);
 
-    assert.equal(res.statusCode, 200, 'missing header should succeed with anonymous');
-    const updated = deps.store.getApproval(approval.id);
-    assert.deepStrictEqual(updated?.respondedBy, { type: 'operator', label: 'anonymous' });
+    assert.equal(res.statusCode, 401, 'missing header should be rejected');
   });
 
-  it('POST /approvals/:id/respond falls back to anonymous when X-Session-Id header is empty', async () => {
+  it('POST /approvals/:id/respond rejects with 401 when X-Session-Id header is empty', async () => {
     const conv = deps.store.createConversation();
     const turn = deps.store.appendTurn(conv.id, {
       kind: 'operator',
@@ -2215,9 +2213,7 @@ describe('Conversation routes — approval response validation', () => {
     handleConversationRoute(req, res as unknown as ServerResponse, deps);
     await waitForResponse(res);
 
-    assert.equal(res.statusCode, 200, 'empty header should succeed with anonymous');
-    const updated = deps.store.getApproval(approval.id);
-    assert.deepStrictEqual(updated?.respondedBy, { type: 'operator', label: 'anonymous' });
+    assert.equal(res.statusCode, 401, 'empty header should be rejected');
   });
 
   it('POST /approvals/:id/respond uses X-Session-Id header for attribution', async () => {

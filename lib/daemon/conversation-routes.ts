@@ -632,11 +632,15 @@ async function handleRespondToApproval(
   const response = typeof body['response'] === 'string' ? body['response'] : '';
   const acknowledgeStaleness = body['acknowledgeStaleness'] === true;
 
-  // Session identity comes from the X-Session-Id header (injected by the
-  // gateway from the authenticated HttpOnly cookie), not from the request body.
-  // Falls back to 'anonymous' for direct daemon access without a gateway.
+  // Session identity comes from the X-Session-Id header, not the request body.
+  // Direct daemon callers (operator console, CLI tooling) must set this header
+  // explicitly — there is no gateway that injects it automatically.
   const headerVal = req.headers['x-session-id'];
-  const sessionId = typeof headerVal === 'string' && headerVal !== '' ? headerVal : 'anonymous';
+  if (typeof headerVal !== 'string' || headerVal === '') {
+    sendError(res, 401, 'X-Session-Id header is required');
+    return;
+  }
+  const sessionId = headerVal;
 
   if (response === '') {
     sendError(res, 400, 'response is required');

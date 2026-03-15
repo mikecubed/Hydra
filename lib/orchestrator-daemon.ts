@@ -140,6 +140,7 @@ interface DaemonIntervals {
   metricsInterval: ReturnType<typeof setInterval>;
   archiveInterval: ReturnType<typeof setInterval>;
   staleInterval: ReturnType<typeof setInterval>;
+  streamPurgeInterval: ReturnType<typeof setInterval>;
 }
 
 type VerificationCallback = (error: Error | null, stdout: string, stderr: string) => void;
@@ -821,6 +822,7 @@ function gracefulExit(
   clearInterval(intervals.metricsInterval);
   clearInterval(intervals.archiveInterval);
   clearInterval(intervals.staleInterval);
+  clearInterval(intervals.streamPurgeInterval);
   writeStatus(ctx, { running: false, stoppingAt: nowIso(), signal });
   server.close(() => {
     writeStatus(ctx, { running: false, stoppedAt: nowIso(), signal });
@@ -895,12 +897,16 @@ function startDaemon(options: Record<string, string>) {
   const staleInterval = setInterval(() => {
     markStaleTasks(ctx);
   }, 60 * 1000); // 60s — frequent enough for heartbeat timeouts
+  const streamPurgeInterval = setInterval(() => {
+    ctx.streamManager.purgeTerminalStreams();
+  }, 60 * 1000); // 60s — enforce wall-clock retention even when idle
 
   const intervals: DaemonIntervals = {
     statusInterval,
     metricsInterval,
     archiveInterval,
     staleInterval,
+    streamPurgeInterval,
   };
 
   // SIGTERM is not reliably delivered on Windows; use HTTP POST /stop for graceful shutdown there.

@@ -30,18 +30,20 @@ function httpRequest(
   method: string,
   path: string,
   body?: unknown,
+  extraHeaders?: Record<string, string>,
 ): Promise<{ status: number; data: Record<string, unknown> }> {
   return new Promise((resolve, reject) => {
     const payload = body === undefined ? undefined : JSON.stringify(body);
+    const baseHeaders: Record<string, string> = payload
+      ? { 'Content-Type': 'application/json', 'Content-Length': String(Buffer.byteLength(payload)) }
+      : {};
     const req = http.request(
       {
         hostname: '127.0.0.1',
         port,
         path,
         method,
-        headers: payload
-          ? { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(payload) }
-          : undefined,
+        headers: { ...baseHeaders, ...extraHeaders },
       },
       (res) => {
         let text = '';
@@ -462,10 +464,13 @@ describe('End-to-end HTTP: real executor approval flow', () => {
     assert.ok((approvals[0]['prompt'] as string).includes('deploy to production'));
 
     // 7. Respond to approval — this should trigger the real continuator
-    const respondRes = await httpRequest(port, 'POST', `/approvals/${approvalId}/respond`, {
-      response: 'approve',
-      sessionId: 'operator-1',
-    });
+    const respondRes = await httpRequest(
+      port,
+      'POST',
+      `/approvals/${approvalId}/respond`,
+      { response: 'approve' },
+      { 'x-session-id': 'operator-1' },
+    );
     assert.equal(respondRes.status, 200);
     assert.equal(respondRes.data['success'], true);
 
@@ -515,10 +520,13 @@ describe('End-to-end HTTP: real executor approval flow', () => {
     ] as string;
 
     // Reject
-    const respondRes = await httpRequest(port, 'POST', `/approvals/${approvalId}/respond`, {
-      response: 'reject',
-      sessionId: 'operator-2',
-    });
+    const respondRes = await httpRequest(
+      port,
+      'POST',
+      `/approvals/${approvalId}/respond`,
+      { response: 'reject' },
+      { 'x-session-id': 'operator-2' },
+    );
     assert.equal(respondRes.status, 200);
 
     await delay(50);
@@ -579,10 +587,13 @@ describe('End-to-end HTTP: real executor approval flow', () => {
     assert.equal(approval.context['agent'], 'codex');
 
     // Respond
-    await httpRequest(port, 'POST', `/approvals/${approvalId}/respond`, {
-      response: 'approve',
-      sessionId: 'operator-1',
-    });
+    await httpRequest(
+      port,
+      'POST',
+      `/approvals/${approvalId}/respond`,
+      { response: 'approve' },
+      { 'x-session-id': 'operator-1' },
+    );
     await delay(50);
 
     // The continuator should use the agent from the persisted approval context
