@@ -608,3 +608,444 @@ describe('Conversation routes — artifact content contract', () => {
     assert.equal(body['content'], 'const x = 1;');
   });
 });
+
+// ── Blocker 1: Turn execution pipeline ───────────────────────────────────────
+
+describe('Conversation routes — turn execution pipeline', () => {
+  it('submit instruction invokes executeTurn callback', async () => {
+    const executedTurns: Array<{ turnId: string; instruction: string }> = [];
+    const depsWithExecutor: ConversationRouteDeps = {
+      ...deps,
+      executeTurn(turnId: string, instruction: string) {
+        executedTurns.push({ turnId, instruction });
+      },
+    };
+    const conv = depsWithExecutor.store.createConversation();
+    const req = createMockReq('POST', `/conversations/${conv.id}/turns`, {
+      instruction: 'Hello world',
+    });
+    const res = createMockRes();
+    handleConversationRoute(req, res as unknown as ServerResponse, depsWithExecutor);
+    await waitForResponse(res);
+    assert.equal(res.statusCode, 201);
+    assert.equal(executedTurns.length, 1, 'executeTurn should have been called');
+    assert.equal(executedTurns[0].instruction, 'Hello world');
+  });
+
+  it('submit + executeTurn drives stream to completion', async () => {
+    const depsWithExecutor: ConversationRouteDeps = {
+      ...deps,
+      executeTurn(turnId: string, _instruction: string) {
+        deps.streamManager.emitEvent(turnId, 'text-delta', { text: 'response text' });
+        deps.streamManager.completeStream(turnId);
+      },
+    };
+    const conv = depsWithExecutor.store.createConversation();
+    const req = createMockReq('POST', `/conversations/${conv.id}/turns`, {
+      instruction: 'Test execution',
+    });
+    const res = createMockRes();
+    handleConversationRoute(req, res as unknown as ServerResponse, depsWithExecutor);
+    await waitForResponse(res);
+    assert.equal(res.statusCode, 201);
+    const body = res.body as Record<string, unknown>;
+    const turnObj = body['turn'] as Record<string, unknown>;
+    const turnId = turnObj['id'] as string;
+
+    // Verify the turn reached completed state
+    const finalTurn = deps.store.getTurn(turnId);
+    assert.equal(finalTurn?.status, 'completed');
+    assert.equal(finalTurn?.response, 'response text');
+
+    // Verify stream events were emitted
+    const events = deps.streamManager.getStreamEvents(turnId);
+    assert.ok(events.some((e) => e.kind === 'stream-started'));
+    assert.ok(events.some((e) => e.kind === 'text-delta'));
+    assert.ok(events.some((e) => e.kind === 'stream-completed'));
+  });
+
+  it('submit + executeTurn handles failure', async () => {
+    const depsWithExecutor: ConversationRouteDeps = {
+      ...deps,
+      executeTurn(turnId: string, _instruction: string) {
+        deps.streamManager.failStream(turnId, 'Agent crashed');
+      },
+    };
+    const conv = depsWithExecutor.store.createConversation();
+    const req = createMockReq('POST', `/conversations/${conv.id}/turns`, {
+      instruction: 'Will fail',
+    });
+    const res = createMockRes();
+    handleConversationRoute(req, res as unknown as ServerResponse, depsWithExecutor);
+    await waitForResponse(res);
+    assert.equal(res.statusCode, 201);
+    const body = res.body as Record<string, unknown>;
+    const turnObj = body['turn'] as Record<string, unknown>;
+    const turnId = turnObj['id'] as string;
+
+    const finalTurn = deps.store.getTurn(turnId);
+    assert.equal(finalTurn?.status, 'failed');
+
+    const events = deps.streamManager.getStreamEvents(turnId);
+    assert.ok(events.some((e) => e.kind === 'stream-failed'));
+  });
+
+  it('retry invokes executeTurn on the new turn', () => {
+    const executedTurns: Array<{ turnId: string; instruction: string }> = [];
+    const depsWithExecutor: ConversationRouteDeps = {
+      ...deps,
+      executeTurn(turnId: string, instruction: string) {
+        executedTurns.push({ turnId, instruction });
+      },
+    };
+    const conv = depsWithExecutor.store.createConversation();
+    const turn = depsWithExecutor.store.appendTurn(conv.id, {
+      kind: 'operator',
+      instruction: 'Retry me',
+      attribution: operatorAttribution,
+    });
+    depsWithExecutor.store.finalizeTurn(turn.id, 'failed', 'Error');
+
+    const req = createMockReq('POST', `/conversations/${conv.id}/turns/${turn.id}/retry`);
+    const res = createMockRes();
+    handleConversationRoute(req, res as unknown as ServerResponse, depsWithExecutor);
+    assert.equal(res.statusCode, 201);
+    assert.equal(executedTurns.length, 1, 'executeTurn should be called for retry');
+    assert.equal(executedTurns[0].instruction, 'Retry me');
+  });
+
+  it('retry + executeTurn drives new stream to completion', () => {
+    const depsWithExecutor: ConversationRouteDeps = {
+      ...deps,
+      executeTurn(turnId: string, _instruction: string) {
+        deps.streamManager.emitEvent(turnId, 'text-delta', { text: 'retry success' });
+        deps.streamManager.completeStream(turnId);
+      },
+    };
+    const conv = depsWithExecutor.store.createConversation();
+    const turn = depsWithExecutor.store.appendTurn(conv.id, {
+      kind: 'operator',
+      instruction: 'Retry me',
+      attribution: operatorAttribution,
+    });
+    depsWithExecutor.store.finalizeTurn(turn.id, 'failed', 'Error');
+
+    const req = createMockReq('POST', `/conversations/${conv.id}/turns/${turn.id}/retry`);
+    const res = createMockRes();
+    handleConversationRoute(req, res as unknown as ServerResponse, depsWithExecutor);
+    assert.equal(res.statusCode, 201);
+    const body = res.body as Record<string, unknown>;
+    const newTurn = body['turn'] as Record<string, unknown>;
+    const newTurnId = newTurn['id'] as string;
+
+    const finalTurn = deps.store.getTurn(newTurnId);
+    assert.equal(finalTurn?.status, 'completed');
+    assert.equal(finalTurn?.response, 'retry success');
+  });
+
+  it('works without executeTurn callback (backward compat)', async () => {
+    const conv = deps.store.createConversation();
+    const req = createMockReq('POST', `/conversations/${conv.id}/turns`, {
+      instruction: 'No executor',
+    });
+    const res = createMockRes();
+    handleConversationRoute(req, res as unknown as ServerResponse, deps);
+    await waitForResponse(res);
+    assert.equal(res.statusCode, 201);
+    const body = res.body as Record<string, unknown>;
+    const turnObj = body['turn'] as Record<string, unknown>;
+    // Turn is executing but not completed (no executor)
+    assert.equal(turnObj['status'], 'executing');
+  });
+});
+
+// ── Blocker 2: Pagination contracts ──────────────────────────────────────────
+
+describe('Conversation routes — list conversations pagination', () => {
+  it('GET /conversations respects limit parameter', () => {
+    for (let i = 0; i < 5; i++) {
+      deps.store.createConversation({ title: `Conv ${String(i)}` });
+    }
+    const req = createMockReq('GET', '/conversations?limit=2');
+    const res = createMockRes();
+    handleConversationRoute(req, res as unknown as ServerResponse, deps);
+    assert.equal(res.statusCode, 200);
+    const body = res.body as Record<string, unknown>;
+    const convs = body['conversations'] as unknown[];
+    assert.equal(convs.length, 2);
+    assert.equal(body['totalCount'], 5);
+    assert.ok(body['nextCursor'], 'should have nextCursor when more items exist');
+  });
+
+  it('GET /conversations returns all when limit >= total', () => {
+    for (let i = 0; i < 3; i++) {
+      deps.store.createConversation({ title: `Conv ${String(i)}` });
+    }
+    const req = createMockReq('GET', '/conversations?limit=10');
+    const res = createMockRes();
+    handleConversationRoute(req, res as unknown as ServerResponse, deps);
+    const body = res.body as Record<string, unknown>;
+    assert.equal((body['conversations'] as unknown[]).length, 3);
+    assert.equal(body['nextCursor'], undefined);
+  });
+
+  it('GET /conversations cursor paginates through all items', () => {
+    for (let i = 0; i < 5; i++) {
+      deps.store.createConversation({ title: `Conv ${String(i)}` });
+    }
+
+    // Page 1
+    const req1 = createMockReq('GET', '/conversations?limit=2');
+    const res1 = createMockRes();
+    handleConversationRoute(req1, res1 as unknown as ServerResponse, deps);
+    const body1 = res1.body as Record<string, unknown>;
+    const page1 = body1['conversations'] as Array<Record<string, unknown>>;
+    assert.equal(page1.length, 2);
+    const cursor1 = body1['nextCursor'] as string;
+    assert.ok(cursor1);
+
+    // Page 2
+    const req2 = createMockReq('GET', `/conversations?limit=2&cursor=${cursor1}`);
+    const res2 = createMockRes();
+    handleConversationRoute(req2, res2 as unknown as ServerResponse, deps);
+    const body2 = res2.body as Record<string, unknown>;
+    const page2 = body2['conversations'] as Array<Record<string, unknown>>;
+    assert.equal(page2.length, 2);
+    const cursor2 = body2['nextCursor'] as string;
+    assert.ok(cursor2);
+
+    // Page 3 (last)
+    const req3 = createMockReq('GET', `/conversations?limit=2&cursor=${cursor2}`);
+    const res3 = createMockRes();
+    handleConversationRoute(req3, res3 as unknown as ServerResponse, deps);
+    const body3 = res3.body as Record<string, unknown>;
+    const page3 = body3['conversations'] as Array<Record<string, unknown>>;
+    assert.equal(page3.length, 1);
+    assert.equal(body3['nextCursor'], undefined, 'no nextCursor on last page');
+
+    // No duplicates across pages
+    const allIds = [...page1, ...page2, ...page3].map((c) => c['id'] as string);
+    const unique = new Set(allIds);
+    assert.equal(unique.size, 5, 'should have 5 unique conversations across all pages');
+  });
+
+  it('GET /conversations default limit is 20', () => {
+    for (let i = 0; i < 25; i++) {
+      deps.store.createConversation({ title: `Conv ${String(i)}` });
+    }
+    const req = createMockReq('GET', '/conversations');
+    const res = createMockRes();
+    handleConversationRoute(req, res as unknown as ServerResponse, deps);
+    const body = res.body as Record<string, unknown>;
+    assert.equal((body['conversations'] as unknown[]).length, 20);
+    assert.ok(body['nextCursor']);
+    assert.equal(body['totalCount'], 25);
+  });
+});
+
+describe('Conversation routes — list artifacts pagination', () => {
+  it('GET /conversations/:id/artifacts respects limit', () => {
+    const conv = deps.store.createConversation();
+    const turn = deps.store.appendTurn(conv.id, {
+      kind: 'operator',
+      instruction: 'A',
+      attribution: operatorAttribution,
+    });
+    for (let i = 0; i < 5; i++) {
+      deps.store.createArtifact(turn.id, {
+        kind: 'file',
+        label: `file${String(i)}.ts`,
+        size: 100,
+        content: `c${String(i)}`,
+      });
+    }
+
+    const req = createMockReq('GET', `/conversations/${conv.id}/artifacts?limit=2`);
+    const res = createMockRes();
+    handleConversationRoute(req, res as unknown as ServerResponse, deps);
+    assert.equal(res.statusCode, 200);
+    const body = res.body as Record<string, unknown>;
+    assert.equal((body['artifacts'] as unknown[]).length, 2);
+    assert.equal(body['totalCount'], 5);
+    assert.ok(body['nextCursor']);
+  });
+
+  it('GET /conversations/:id/artifacts filters by kind', () => {
+    const conv = deps.store.createConversation();
+    const turn = deps.store.appendTurn(conv.id, {
+      kind: 'operator',
+      instruction: 'A',
+      attribution: operatorAttribution,
+    });
+    deps.store.createArtifact(turn.id, {
+      kind: 'file',
+      label: 'a.ts',
+      size: 100,
+      content: '',
+    });
+    deps.store.createArtifact(turn.id, {
+      kind: 'diff',
+      label: 'b.diff',
+      size: 50,
+      content: '',
+    });
+    deps.store.createArtifact(turn.id, {
+      kind: 'file',
+      label: 'c.ts',
+      size: 100,
+      content: '',
+    });
+
+    const req = createMockReq('GET', `/conversations/${conv.id}/artifacts?kind=file`);
+    const res = createMockRes();
+    handleConversationRoute(req, res as unknown as ServerResponse, deps);
+    assert.equal(res.statusCode, 200);
+    const body = res.body as Record<string, unknown>;
+    const artifacts = body['artifacts'] as Array<Record<string, unknown>>;
+    assert.equal(artifacts.length, 2);
+    assert.ok(artifacts.every((a) => a['kind'] === 'file'));
+    assert.equal(body['totalCount'], 2);
+  });
+
+  it('GET /conversations/:id/artifacts cursor paginates correctly', () => {
+    const conv = deps.store.createConversation();
+    const turn = deps.store.appendTurn(conv.id, {
+      kind: 'operator',
+      instruction: 'A',
+      attribution: operatorAttribution,
+    });
+    for (let i = 0; i < 5; i++) {
+      deps.store.createArtifact(turn.id, {
+        kind: 'file',
+        label: `file${String(i)}.ts`,
+        size: 100,
+        content: `c${String(i)}`,
+      });
+    }
+
+    // Page 1
+    const req1 = createMockReq('GET', `/conversations/${conv.id}/artifacts?limit=2`);
+    const res1 = createMockRes();
+    handleConversationRoute(req1, res1 as unknown as ServerResponse, deps);
+    const body1 = res1.body as Record<string, unknown>;
+    const page1 = body1['artifacts'] as Array<Record<string, unknown>>;
+    assert.equal(page1.length, 2);
+    const cursor1 = body1['nextCursor'] as string;
+    assert.ok(cursor1);
+
+    // Page 2
+    const req2 = createMockReq(
+      'GET',
+      `/conversations/${conv.id}/artifacts?limit=2&cursor=${cursor1}`,
+    );
+    const res2 = createMockRes();
+    handleConversationRoute(req2, res2 as unknown as ServerResponse, deps);
+    const body2 = res2.body as Record<string, unknown>;
+    const page2 = body2['artifacts'] as Array<Record<string, unknown>>;
+    assert.equal(page2.length, 2);
+
+    // Page 3 (last)
+    const cursor2 = body2['nextCursor'] as string;
+    const req3 = createMockReq(
+      'GET',
+      `/conversations/${conv.id}/artifacts?limit=2&cursor=${cursor2}`,
+    );
+    const res3 = createMockRes();
+    handleConversationRoute(req3, res3 as unknown as ServerResponse, deps);
+    const body3 = res3.body as Record<string, unknown>;
+    const page3 = body3['artifacts'] as Array<Record<string, unknown>>;
+    assert.equal(page3.length, 1);
+    assert.equal(body3['nextCursor'], undefined);
+
+    // No duplicates
+    const allIds = [...page1, ...page2, ...page3].map((a) => a['id'] as string);
+    assert.equal(new Set(allIds).size, 5);
+  });
+
+  it('GET /conversations/:id/artifacts kind + cursor combined', () => {
+    const conv = deps.store.createConversation();
+    const turn = deps.store.appendTurn(conv.id, {
+      kind: 'operator',
+      instruction: 'A',
+      attribution: operatorAttribution,
+    });
+    for (let i = 0; i < 4; i++) {
+      deps.store.createArtifact(turn.id, {
+        kind: 'file',
+        label: `file${String(i)}.ts`,
+        size: 100,
+        content: '',
+      });
+    }
+    deps.store.createArtifact(turn.id, { kind: 'diff', label: 'x.diff', size: 10, content: '' });
+
+    // First page of kind=file with limit 2
+    const req1 = createMockReq('GET', `/conversations/${conv.id}/artifacts?kind=file&limit=2`);
+    const res1 = createMockRes();
+    handleConversationRoute(req1, res1 as unknown as ServerResponse, deps);
+    const body1 = res1.body as Record<string, unknown>;
+    assert.equal((body1['artifacts'] as unknown[]).length, 2);
+    assert.equal(body1['totalCount'], 4);
+    assert.ok(body1['nextCursor']);
+  });
+});
+
+// ── Blocker 3 route-level: fork inherits approvals/artifacts via routes ──────
+
+describe('Conversation routes — fork inheritance via routes', () => {
+  it('GET approvals on forked conversation returns inherited approvals', () => {
+    const parent = deps.store.createConversation();
+    const t1 = deps.store.appendTurn(parent.id, {
+      kind: 'operator',
+      instruction: 'A',
+      attribution: operatorAttribution,
+    });
+    const t2 = deps.store.appendTurn(parent.id, {
+      kind: 'operator',
+      instruction: 'B',
+      attribution: operatorAttribution,
+    });
+    deps.store.createApprovalRequest(t1.id, {
+      prompt: 'Parent approval?',
+      context: {},
+      contextHash: 'hash-p',
+      responseOptions: [{ key: 'ok', label: 'OK' }],
+    });
+
+    const fork = deps.store.forkConversation(parent.id, t2.id);
+
+    const req = createMockReq('GET', `/conversations/${fork.id}/approvals`);
+    const res = createMockRes();
+    handleConversationRoute(req, res as unknown as ServerResponse, deps);
+    assert.equal(res.statusCode, 200);
+    const body = res.body as Record<string, unknown>;
+    assert.equal(
+      (body['approvals'] as unknown[]).length,
+      1,
+      'fork route should show inherited approvals',
+    );
+  });
+
+  it('GET artifacts on forked conversation returns inherited artifacts', () => {
+    const parent = deps.store.createConversation();
+    const t1 = deps.store.appendTurn(parent.id, {
+      kind: 'operator',
+      instruction: 'A',
+      attribution: operatorAttribution,
+    });
+    deps.store.createArtifact(t1.id, { kind: 'file', label: 'parent.ts', size: 100, content: 'p' });
+
+    const fork = deps.store.forkConversation(parent.id, t1.id);
+
+    const req = createMockReq('GET', `/conversations/${fork.id}/artifacts`);
+    const res = createMockRes();
+    handleConversationRoute(req, res as unknown as ServerResponse, deps);
+    assert.equal(res.statusCode, 200);
+    const body = res.body as Record<string, unknown>;
+    assert.equal(
+      (body['artifacts'] as unknown[]).length,
+      1,
+      'fork route should show inherited artifacts',
+    );
+  });
+});

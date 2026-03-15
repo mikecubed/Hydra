@@ -23,6 +23,16 @@ import { sendJson, sendError, readJsonBody } from './http-utils.ts';
 export interface ConversationRouteDeps {
   store: ConversationStore;
   streamManager: StreamManager;
+  /**
+   * Optional callback invoked after a turn is marked executing and a stream is
+   * allocated.  The callback is responsible for driving stream events
+   * (text-delta, approval-prompt, etc.) and ultimately calling
+   * `streamManager.completeStream` / `failStream`.
+   *
+   * When absent the route still creates the turn + stream but nothing drives
+   * execution — useful for tests that manually control the stream.
+   */
+  executeTurn?: (turnId: string, instruction: string) => void;
 }
 
 // ── Sub-routers (split to keep main function below complexity threshold) ────
@@ -171,7 +181,7 @@ function routeArtifactsAndActivities(
   }
   const convArtifactsMatch = path.match(/^\/conversations\/([^/]+)\/artifacts$/);
   if (convArtifactsMatch !== null && method === 'GET') {
-    handleListArtifactsForConversation(convArtifactsMatch[1], res, deps);
+    handleListArtifactsForConversation(convArtifactsMatch[1], url, res, deps);
     return true;
   }
   const activitiesMatch = path.match(/^\/turns\/([^/]+)\/activities$/);
@@ -219,10 +229,34 @@ async function handleCreateConversation(
 
 function handleListConversations(url: URL, res: ServerResponse, deps: ConversationRouteDeps): void {
   const status = url.searchParams.get('status') ?? undefined;
-  const conversations = deps.store.listConversations(
+  const cursor = url.searchParams.get('cursor') ?? undefined;
+  const limitParam = url.searchParams.get('limit');
+  const limit = Math.min(Math.max(limitParam === null ? 20 : Number(limitParam), 1), 100);
+
+  const all = deps.store.listConversations(
     status !== undefined && status !== '' ? { status } : undefined,
   );
-  sendJson(res, 200, { conversations, totalCount: conversations.length });
+  const totalCount = all.length;
+
+  // Sort by createdAt descending, then id for stable ordering
+  all.sort((a, b) => {
+    const cmp = b.createdAt.localeCompare(a.createdAt);
+    return cmp === 0 ? b.id.localeCompare(a.id) : cmp;
+  });
+
+  // Cursor-based pagination: cursor is the id of the last item seen
+  let startIdx = 0;
+  if (cursor !== undefined && cursor !== '') {
+    const cursorIdx = all.findIndex((c) => c.id === cursor);
+    if (cursorIdx >= 0) {
+      startIdx = cursorIdx + 1;
+    }
+  }
+
+  const page = all.slice(startIdx, startIdx + limit);
+  const nextCursor = startIdx + limit < all.length ? page.at(-1)?.id : undefined;
+
+  sendJson(res, 200, { conversations: page, nextCursor, totalCount });
 }
 
 function handleGetConversation(id: string, res: ServerResponse, deps: ConversationRouteDeps): void {
@@ -309,6 +343,12 @@ async function handleSubmitInstruction(
   });
   deps.store.updateTurnStatus(turn.id, 'executing');
   const streamId = deps.streamManager.createStream(turn.id);
+
+  // Kick off async execution if an executor is wired up
+  if (deps.executeTurn) {
+    deps.executeTurn(turn.id, instruction);
+  }
+
   sendJson(res, 201, { turn, streamId });
 }
 
@@ -450,6 +490,12 @@ function handleRetryTurn(
     const newTurn = deps.store.retryTurn(conversationId, turnId);
     deps.store.updateTurnStatus(newTurn.id, 'executing');
     const streamId = deps.streamManager.createStream(newTurn.id);
+
+    // Kick off async execution if an executor is wired up
+    if (deps.executeTurn) {
+      deps.executeTurn(newTurn.id, newTurn.instruction ?? '');
+    }
+
     sendJson(res, 201, { turn: newTurn, streamId });
   } catch (err) {
     sendError(res, 400, (err as Error).message);
@@ -552,6 +598,7 @@ function handleGetArtifactContent(
 
 function handleListArtifactsForConversation(
   conversationId: string,
+  url: URL,
   res: ServerResponse,
   deps: ConversationRouteDeps,
 ): void {
@@ -560,8 +607,34 @@ function handleListArtifactsForConversation(
     sendError(res, 404, 'Conversation not found');
     return;
   }
-  const artifacts = deps.store.listArtifactsForConversation(conversationId);
-  sendJson(res, 200, { artifacts, totalCount: artifacts.length });
+
+  const kind = url.searchParams.get('kind') ?? undefined;
+  const cursor = url.searchParams.get('cursor') ?? undefined;
+  const limitParam = url.searchParams.get('limit');
+  const limit = Math.min(Math.max(limitParam === null ? 20 : Number(limitParam), 1), 100);
+
+  let all = deps.store.listArtifactsForConversation(conversationId);
+
+  // Filter by kind if specified
+  if (kind !== undefined && kind !== '') {
+    all = all.filter((a) => a.kind === kind);
+  }
+
+  const totalCount = all.length;
+
+  // Cursor-based pagination: cursor is the id of the last item seen
+  let startIdx = 0;
+  if (cursor !== undefined && cursor !== '') {
+    const cursorIdx = all.findIndex((a) => a.id === cursor);
+    if (cursorIdx >= 0) {
+      startIdx = cursorIdx + 1;
+    }
+  }
+
+  const page = all.slice(startIdx, startIdx + limit);
+  const nextCursor = startIdx + limit < all.length ? page.at(-1)?.id : undefined;
+
+  sendJson(res, 200, { artifacts: page, nextCursor, totalCount });
 }
 
 function handleGetActivities(

@@ -635,3 +635,157 @@ describe('ConversationStore — event log', () => {
     assert.ok(fromSecond.length < allEvents.length);
   });
 });
+
+// ── Fork inheritance — approvals ─────────────────────────────────────────────
+
+describe('ConversationStore — fork inherits approvals', () => {
+  it('getPendingApprovals on fork includes parent approvals', () => {
+    const parent = store.createConversation();
+    const t1 = store.appendTurn(parent.id, {
+      kind: 'operator',
+      instruction: 'A',
+      attribution: operatorAttribution,
+    });
+    const t2 = store.appendTurn(parent.id, {
+      kind: 'operator',
+      instruction: 'B',
+      attribution: operatorAttribution,
+    });
+
+    // Approval on parent turn
+    store.createApprovalRequest(t1.id, {
+      prompt: 'Parent approval?',
+      context: {},
+      contextHash: 'hash-p',
+      responseOptions: [{ key: 'ok', label: 'OK' }],
+    });
+
+    const fork = store.forkConversation(parent.id, t2.id);
+    const pending = store.getPendingApprovals(fork.id);
+    assert.equal(pending.length, 1, 'fork should inherit parent pending approvals');
+    assert.equal(pending[0].prompt, 'Parent approval?');
+  });
+
+  it('getPendingApprovals on fork combines parent and own approvals', () => {
+    const parent = store.createConversation();
+    const t1 = store.appendTurn(parent.id, {
+      kind: 'operator',
+      instruction: 'A',
+      attribution: operatorAttribution,
+    });
+
+    store.createApprovalRequest(t1.id, {
+      prompt: 'Parent approval?',
+      context: {},
+      contextHash: 'hash-p',
+      responseOptions: [{ key: 'ok', label: 'OK' }],
+    });
+
+    const fork = store.forkConversation(parent.id, t1.id);
+    const ownTurn = store.appendTurn(fork.id, {
+      kind: 'operator',
+      instruction: 'Fork instruction',
+      attribution: operatorAttribution,
+    });
+    store.createApprovalRequest(ownTurn.id, {
+      prompt: 'Fork approval?',
+      context: {},
+      contextHash: 'hash-f',
+      responseOptions: [{ key: 'ok', label: 'OK' }],
+    });
+
+    const pending = store.getPendingApprovals(fork.id);
+    assert.equal(pending.length, 2, 'fork should have parent + own pending approvals');
+  });
+
+  it('getPendingApprovals excludes parent approvals beyond fork point', () => {
+    const parent = store.createConversation();
+    const t1 = store.appendTurn(parent.id, {
+      kind: 'operator',
+      instruction: 'A',
+      attribution: operatorAttribution,
+    });
+    const t2 = store.appendTurn(parent.id, {
+      kind: 'operator',
+      instruction: 'B',
+      attribution: operatorAttribution,
+    });
+
+    // Approval on turn AFTER fork point should NOT be inherited
+    store.createApprovalRequest(t2.id, {
+      prompt: 'Post-fork approval?',
+      context: {},
+      contextHash: 'hash-post',
+      responseOptions: [{ key: 'ok', label: 'OK' }],
+    });
+
+    const fork = store.forkConversation(parent.id, t1.id);
+    const pending = store.getPendingApprovals(fork.id);
+    assert.equal(pending.length, 0, 'should not inherit approvals beyond fork point');
+  });
+});
+
+// ── Fork inheritance — artifacts ─────────────────────────────────────────────
+
+describe('ConversationStore — fork inherits artifacts', () => {
+  it('listArtifactsForConversation on fork includes parent artifacts', () => {
+    const parent = store.createConversation();
+    const t1 = store.appendTurn(parent.id, {
+      kind: 'operator',
+      instruction: 'A',
+      attribution: operatorAttribution,
+    });
+    const t2 = store.appendTurn(parent.id, {
+      kind: 'operator',
+      instruction: 'B',
+      attribution: operatorAttribution,
+    });
+    store.createArtifact(t1.id, { kind: 'file', label: 'parent.ts', size: 100, content: 'p' });
+
+    const fork = store.forkConversation(parent.id, t2.id);
+    const artifacts = store.listArtifactsForConversation(fork.id);
+    assert.equal(artifacts.length, 1, 'fork should inherit parent artifacts');
+    assert.equal(artifacts[0].label, 'parent.ts');
+  });
+
+  it('listArtifactsForConversation combines parent and own artifacts', () => {
+    const parent = store.createConversation();
+    const t1 = store.appendTurn(parent.id, {
+      kind: 'operator',
+      instruction: 'A',
+      attribution: operatorAttribution,
+    });
+    store.createArtifact(t1.id, { kind: 'file', label: 'parent.ts', size: 100, content: 'p' });
+
+    const fork = store.forkConversation(parent.id, t1.id);
+    const ownTurn = store.appendTurn(fork.id, {
+      kind: 'operator',
+      instruction: 'Fork',
+      attribution: operatorAttribution,
+    });
+    store.createArtifact(ownTurn.id, { kind: 'diff', label: 'fork.diff', size: 50, content: 'f' });
+
+    const artifacts = store.listArtifactsForConversation(fork.id);
+    assert.equal(artifacts.length, 2, 'fork should have parent + own artifacts');
+  });
+
+  it('listArtifactsForConversation excludes parent artifacts beyond fork point', () => {
+    const parent = store.createConversation();
+    const t1 = store.appendTurn(parent.id, {
+      kind: 'operator',
+      instruction: 'A',
+      attribution: operatorAttribution,
+    });
+    const t2 = store.appendTurn(parent.id, {
+      kind: 'operator',
+      instruction: 'B',
+      attribution: operatorAttribution,
+    });
+    // Artifact on turn after fork point
+    store.createArtifact(t2.id, { kind: 'file', label: 'late.ts', size: 100, content: 'l' });
+
+    const fork = store.forkConversation(parent.id, t1.id);
+    const artifacts = store.listArtifactsForConversation(fork.id);
+    assert.equal(artifacts.length, 0, 'should not inherit artifacts beyond fork point');
+  });
+});

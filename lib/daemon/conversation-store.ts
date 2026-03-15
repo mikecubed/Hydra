@@ -302,10 +302,10 @@ export class ConversationStore {
   }
 
   getPendingApprovals(conversationId: string): ApprovalRequestType[] {
-    const turnIds = this.turnsByConversation.get(conversationId) ?? [];
+    const effectiveTurns = this.getTurns(conversationId);
     const result: ApprovalRequestType[] = [];
-    for (const tid of turnIds) {
-      const approvalIds = this.approvalsByTurn.get(tid) ?? [];
+    for (const turn of effectiveTurns) {
+      const approvalIds = this.approvalsByTurn.get(turn.id) ?? [];
       for (const aid of approvalIds) {
         const a = this.approvals.get(aid);
         if (a && (a.status === 'pending' || a.status === 'stale')) {
@@ -529,10 +529,10 @@ export class ConversationStore {
   }
 
   listArtifactsForConversation(conversationId: string): ArtifactType[] {
-    const turnIds = this.turnsByConversation.get(conversationId) ?? [];
+    const effectiveTurns = this.getTurns(conversationId);
     const result: ArtifactType[] = [];
-    for (const tid of turnIds) {
-      result.push(...this.getArtifactsForTurn(tid));
+    for (const turn of effectiveTurns) {
+      result.push(...this.getArtifactsForTurn(turn.id));
     }
     return result;
   }
