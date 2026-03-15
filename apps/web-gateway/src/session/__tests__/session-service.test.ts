@@ -152,6 +152,23 @@ describe('SessionService', () => {
     });
   });
 
+  it('markDaemonDown transitions expiring-soon session to daemon-unreachable', async () => {
+    const session = await service.create('op-1', '127.0.0.1');
+
+    // Advance into warning window and validate to reach expiring-soon
+    clock.advance(3001_000);
+    await service.validate(session.id);
+    assert.equal(store.get(session.id)?.state, 'expiring-soon');
+
+    // markDaemonDown must succeed on expiring-soon
+    await service.markDaemonDown(session.id);
+    assert.equal(store.get(session.id)?.state, 'daemon-unreachable');
+
+    // markDaemonUp restores session
+    await service.markDaemonUp(session.id);
+    assert.equal(store.get(session.id)?.state, 'active');
+  });
+
   it('invalidate during daemon outage leaves session unusable', async () => {
     const session = await service.create('op-1', '127.0.0.1');
 

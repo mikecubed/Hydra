@@ -50,6 +50,45 @@ describe('DaemonHeartbeat', () => {
     assert.equal(store.get(session.id)?.state, 'active');
   });
 
+  it('expiring-soon session transitions to daemon-unreachable on outage', async () => {
+    const session = await service.create('op-1', '127.0.0.1');
+    const hb = createHeartbeat();
+
+    // Advance into warning window so validate flips state to expiring-soon
+    clock.advance(service.config.sessionLifetimeMs - service.config.warningThresholdMs + 1);
+    await service.validate(session.id);
+    assert.equal(store.get(session.id)?.state, 'expiring-soon');
+
+    // Daemon goes down — expiring-soon must reach daemon-unreachable
+    healthResult = false;
+    await hb.tick();
+    assert.equal(store.get(session.id)?.state, 'daemon-unreachable');
+  });
+
+  it('expiring-soon session recovers via daemon-up', async () => {
+    const session = await service.create('op-1', '127.0.0.1');
+    const hb = createHeartbeat();
+
+    // Move to expiring-soon
+    clock.advance(service.config.sessionLifetimeMs - service.config.warningThresholdMs + 1);
+    await service.validate(session.id);
+    assert.equal(store.get(session.id)?.state, 'expiring-soon');
+
+    // Daemon outage
+    healthResult = false;
+    await hb.tick();
+    assert.equal(store.get(session.id)?.state, 'daemon-unreachable');
+
+    // Daemon recovers — session should be restored (validate + daemon-up → active)
+    healthResult = true;
+    await hb.tick();
+    const recovered = store.get(session.id);
+    assert.ok(recovered);
+    assert.notEqual(recovered.state, 'daemon-unreachable');
+    // Should be active (daemon-up restores to active; next validate would re-enter expiring-soon)
+    assert.equal(recovered.state, 'active');
+  });
+
   it('expired-during-outage stays terminal', async () => {
     const session = await service.create('op-1', '127.0.0.1');
     const hb = createHeartbeat();

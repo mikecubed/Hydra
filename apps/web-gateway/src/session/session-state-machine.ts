@@ -1,7 +1,7 @@
 /**
  * Session state machine — pure function: (current + trigger) → new state | error.
  *
- * 14 defined transitions. Terminal states reject all transitions.
+ * 15 defined transitions. Terminal states reject all transitions.
  */
 import type { SessionState } from '@hydra/web-contracts';
 import { TERMINAL_STATES } from '@hydra/web-contracts';
@@ -28,6 +28,7 @@ const TRANSITIONS: readonly Transition[] = [
   { from: 'active', trigger: 'logout', to: 'logged-out' },
   { from: 'active', trigger: 'daemon-down', to: 'daemon-unreachable' },
   { from: 'expiring-soon', trigger: 'extend', to: 'active' },
+  { from: 'expiring-soon', trigger: 'daemon-down', to: 'daemon-unreachable' },
   { from: 'expiring-soon', trigger: 'expire', to: 'expired' },
   { from: 'expiring-soon', trigger: 'invalidate', to: 'invalidated' },
   { from: 'expiring-soon', trigger: 'logout', to: 'logged-out' },

@@ -17,6 +17,7 @@ describe('session-state-machine', () => {
       { from: 'active', trigger: 'logout', to: 'logged-out' },
       { from: 'active', trigger: 'daemon-down', to: 'daemon-unreachable' },
       { from: 'expiring-soon', trigger: 'extend', to: 'active' },
+      { from: 'expiring-soon', trigger: 'daemon-down', to: 'daemon-unreachable' },
       { from: 'expiring-soon', trigger: 'expire', to: 'expired' },
       { from: 'expiring-soon', trigger: 'invalidate', to: 'invalidated' },
       { from: 'expiring-soon', trigger: 'logout', to: 'logged-out' },
@@ -95,8 +96,8 @@ describe('session-state-machine', () => {
       assert.equal(getValidTriggers('active').length, 5);
     });
 
-    it('expiring-soon has 4 triggers', () => {
-      assert.equal(getValidTriggers('expiring-soon').length, 4);
+    it('expiring-soon has 5 triggers', () => {
+      assert.equal(getValidTriggers('expiring-soon').length, 5);
     });
 
     it('daemon-unreachable has 4 triggers', () => {
@@ -173,6 +174,31 @@ describe('session-state-machine', () => {
       assert.equal(step3.ok, false, 'logged-out session must reject daemon-up');
       const step4 = transition(step2.newState, 'extend');
       assert.equal(step4.ok, false, 'logged-out session must reject extend');
+    });
+  });
+
+  describe('daemon outage from expiring-soon', () => {
+    it('expiring-soon + daemon-down → daemon-unreachable', () => {
+      const result = transition('expiring-soon', 'daemon-down');
+      assert.ok(result.ok);
+      if (result.ok) assert.equal(result.newState, 'daemon-unreachable');
+    });
+
+    it('full round-trip: active → expiring-soon → daemon-unreachable → active', () => {
+      const step1 = transition('active', 'warn-expiry');
+      assert.ok(step1.ok);
+      if (!step1.ok) return;
+      assert.equal(step1.newState, 'expiring-soon');
+
+      const step2 = transition(step1.newState, 'daemon-down');
+      assert.ok(step2.ok);
+      if (!step2.ok) return;
+      assert.equal(step2.newState, 'daemon-unreachable');
+
+      const step3 = transition(step2.newState, 'daemon-up');
+      assert.ok(step3.ok);
+      if (!step3.ok) return;
+      assert.equal(step3.newState, 'active');
     });
   });
 });
