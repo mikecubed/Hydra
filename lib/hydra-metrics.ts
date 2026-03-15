@@ -15,7 +15,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { EventEmitter } from 'node:events';
 
-import type { IMetricsRecorder } from './types.ts';
+import type { IMetricsRecorder, MetricsCallResult } from './types.ts';
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
@@ -366,7 +366,7 @@ export function recordCallError(handle: string, error: unknown): void {
  * For complex cases (handle passed through helpers, branching on result.ok, etc.),
  * use the individual recordCallStart/Complete/Error functions directly.
  */
-export async function recordExecution<T>(
+export async function recordExecution<T extends MetricsCallResult>(
   agentName: string,
   model: string | undefined,
   fn: () => Promise<T>,

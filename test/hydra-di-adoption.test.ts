@@ -4,8 +4,10 @@
  * Verifies that migrated functions accept mock implementations of the typed
  * interfaces and call through to them instead of the concrete module exports.
  */
-import { describe, it, beforeEach } from 'node:test';
+import { describe, it, beforeEach, afterEach } from 'node:test';
 import assert from 'node:assert/strict';
+import os from 'node:os';
+import fs from 'node:fs';
 
 import type {
   IMetricsRecorder,
@@ -13,7 +15,7 @@ import type {
   IGitOperations,
   GitResult,
 } from '../lib/types.ts';
-import { _setTestConfig } from '../lib/hydra-config.ts';
+import { _setTestConfig, invalidateConfigCache } from '../lib/hydra-config.ts';
 
 // ── Mock Factories ───────────────────────────────────────────────────────────
 
@@ -109,6 +111,10 @@ describe('IMetricsRecorder DI — hydra-nightly-discovery', () => {
     });
   });
 
+  afterEach(() => {
+    invalidateConfigCache();
+  });
+
   it('runDiscovery passes custom IMetricsRecorder to discovery agent', async () => {
     const mockMetrics = createMockMetrics();
     const { runDiscovery } = await import('../lib/hydra-nightly-discovery.ts');
@@ -157,11 +163,38 @@ describe('IMetricsRecorder DI — execute-custom-agents', () => {
 });
 
 describe('IMetricsRecorder DI — gemini-executor', () => {
+  // Redirect HOME to an empty temp dir so no real OAuth credentials are found,
+  // ensuring executeGeminiDirect fails at the auth step on any host environment.
+  let tmpHome = '';
+  let savedHome: string | undefined;
+  let savedUserProfile: string | undefined;
+
+  beforeEach(() => {
+    savedHome = process.env['HOME'];
+    savedUserProfile = process.env['USERPROFILE'];
+    tmpHome = fs.mkdtempSync(`${os.tmpdir()}/hydra-test-home-`);
+    process.env['HOME'] = tmpHome;
+    process.env['USERPROFILE'] = tmpHome;
+  });
+
+  afterEach(() => {
+    if (savedHome === undefined) {
+      Reflect.deleteProperty(process.env, 'HOME');
+    } else {
+      process.env['HOME'] = savedHome;
+    }
+    if (savedUserProfile === undefined) {
+      Reflect.deleteProperty(process.env, 'USERPROFILE');
+    } else {
+      process.env['USERPROFILE'] = savedUserProfile;
+    }
+    fs.rmSync(tmpHome, { recursive: true, force: true });
+  });
+
   it('executeGeminiDirect accepts a custom IMetricsRecorder', async () => {
     const mockMetrics = createMockMetrics();
     const { executeGeminiDirect } = await import('../lib/hydra-shared/gemini-executor.ts');
 
-    // Will fail at OAuth step but should call recordCallStart first
     const result = await executeGeminiDirect('test prompt', {}, mockMetrics);
     assert.equal(result.ok, false);
 
@@ -182,6 +215,10 @@ describe('IGitOperations DI — hydra-context', () => {
     _setTestConfig({
       context: { hierarchical: { enabled: false } },
     });
+  });
+
+  afterEach(() => {
+    invalidateConfigCache();
   });
 
   it('getProjectContext accepts a custom IGitOperations', async () => {
@@ -285,14 +322,63 @@ describe('IGitOperations DI — review-common', () => {
 });
 
 describe('IGitOperations DI — hydra-worktree', () => {
-  it('createWorktree accepts a custom IGitOperations', async () => {
+  it('createWorktree calls getCurrentBranch on injected IGitOperations when baseBranch is omitted', async () => {
+    const calls: Array<{ method: string; args: unknown[] }> = [];
+    const mockGit: IGitOperations = {
+      getCurrentBranch: (cwd) => {
+        calls.push({ method: 'getCurrentBranch', args: [cwd] });
+        return 'test-base-branch';
+      },
+      branchExists: () => false,
+      createBranch: () => true,
+      checkoutBranch: () => ({ status: 0, stdout: '', stderr: '' }) as GitResult,
+      mergeBranch: () => true,
+      deleteBranch: () => true,
+      stageAndCommit: () => true,
+    };
     const { createWorktree } = await import('../lib/hydra-worktree.ts');
-    assert.equal(typeof createWorktree, 'function');
+
+    // Omit baseBranch so createWorktree must call getCurrentBranch on the injected mock.
+    // The git command itself will fail in the test environment — that's fine.
+    try {
+      createWorktree('test-wt-mock', '/tmp/nonexistent-base', undefined, mockGit);
+    } catch {
+      // git worktree add fails outside a real repo — we only care about the DI call
+    }
+
+    assert.ok(
+      calls.some((c) => c.method === 'getCurrentBranch'),
+      'createWorktree should call getCurrentBranch on the injected IGitOperations',
+    );
   });
 
-  it('mergeWorktree accepts a custom IGitOperations', async () => {
+  it('mergeWorktree calls getCurrentBranch on injected IGitOperations when targetBranch is omitted', async () => {
+    const calls: Array<{ method: string; args: unknown[] }> = [];
+    const mockGit: IGitOperations = {
+      getCurrentBranch: (cwd) => {
+        calls.push({ method: 'getCurrentBranch', args: [cwd] });
+        return 'test-target-branch';
+      },
+      branchExists: () => false,
+      createBranch: () => true,
+      checkoutBranch: () => ({ status: 0, stdout: '', stderr: '' }) as GitResult,
+      mergeBranch: () => true,
+      deleteBranch: () => true,
+      stageAndCommit: () => true,
+    };
     const { mergeWorktree } = await import('../lib/hydra-worktree.ts');
-    assert.equal(typeof mergeWorktree, 'function');
+
+    // Omit targetBranch so mergeWorktree must call getCurrentBranch on the injected mock.
+    try {
+      mergeWorktree('test-wt-mock', '/tmp/nonexistent-wt', undefined, mockGit);
+    } catch {
+      // git commands fail outside a real worktree — we only care about the DI call
+    }
+
+    assert.ok(
+      calls.some((c) => c.method === 'getCurrentBranch'),
+      'mergeWorktree should call getCurrentBranch on the injected IGitOperations',
+    );
   });
 });
 

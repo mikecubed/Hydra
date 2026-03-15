@@ -55,7 +55,11 @@ describe('buildFallbackChain with injected IConfigStore', () => {
 
   afterEach(() => {
     for (const [k, v] of Object.entries(savedEnv)) {
-      process.env[k] = v ?? '';
+      if (v === undefined) {
+        Reflect.deleteProperty(process.env, k);
+      } else {
+        process.env[k] = v;
+      }
     }
   });
 
