@@ -212,14 +212,9 @@ function buildMinimalContext(
   return lines.join('\n');
 }
 
-/**
- * Medium context (~1500 tokens) for Claude.
- * Claude has full tool access to read files, so summary + priorities is enough.
- */
-function buildMediumContext(projectConfig: ProjectConfig, gitOps: IGitOperations = gitOperations) {
-  const now = Date.now();
-  const cacheKey = projectConfig.projectRoot;
+function getMediumCacheHit(cacheKey: string, gitOps: IGitOperations, now: number): string | null {
   if (
+    gitOps === gitOperations &&
     cachedMedium != null &&
     cachedMedium !== '' &&
     now - cachedMediumAt < CACHE_TTL_MS &&
@@ -227,6 +222,37 @@ function buildMediumContext(projectConfig: ProjectConfig, gitOps: IGitOperations
   ) {
     return cachedMedium;
   }
+  return null;
+}
+
+function getLargeCacheHit(
+  cacheKey: string,
+  gitOps: IGitOperations,
+  now: number,
+  hasTaskFiles: boolean,
+): string | null {
+  if (
+    gitOps === gitOperations &&
+    cachedLarge != null &&
+    cachedLarge !== '' &&
+    now - cachedLargeAt < CACHE_TTL_MS &&
+    cachedLargeKey === cacheKey &&
+    !hasTaskFiles
+  ) {
+    return cachedLarge;
+  }
+  return null;
+}
+
+/**
+ * Medium context (~1500 tokens) for Claude.
+ * Claude has full tool access to read files, so summary + priorities is enough.
+ */
+function buildMediumContext(projectConfig: ProjectConfig, gitOps: IGitOperations = gitOperations) {
+  const now = Date.now();
+  const cacheKey = projectConfig.projectRoot;
+  const cached = getMediumCacheHit(cacheKey, gitOps, now);
+  if (cached !== null) return cached;
 
   const branch = gitOps.getCurrentBranch(projectConfig.projectRoot);
   const techStack = detectTechStack(projectConfig.projectRoot);
@@ -324,15 +350,8 @@ function buildLargeContext(
 ) {
   const now = Date.now();
   const cacheKey = projectConfig.projectRoot;
-  if (
-    cachedLarge != null &&
-    cachedLarge !== '' &&
-    now - cachedLargeAt < CACHE_TTL_MS &&
-    cachedLargeKey === cacheKey &&
-    !taskContext.files
-  ) {
-    return cachedLarge;
-  }
+  const cached = getLargeCacheHit(cacheKey, gitOps, now, Boolean(taskContext.files));
+  if (cached !== null) return cached;
 
   const medium = buildMediumContext(projectConfig, gitOps);
   const extraLines = [medium];

@@ -359,7 +359,12 @@ export async function recordExecution<T extends MetricsCallResult>(
   const handle = recordCallStart(agentName, model);
   try {
     const result = await fn();
-    recordCallComplete(handle, result);
+    // Treat resolved results with ok:false as failures so metrics reflect actual outcomes
+    if (result.ok === false) {
+      recordCallError(handle, new Error('agent call returned ok:false'));
+    } else {
+      recordCallComplete(handle, result);
+    }
     return result;
   } catch (err: unknown) {
     recordCallError(handle, err);

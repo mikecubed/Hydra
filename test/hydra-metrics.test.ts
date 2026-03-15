@@ -283,6 +283,35 @@ test('recordExecution: emits call:start and call:error events on failure', async
   assert.deepEqual(events, ['start', 'error']);
 });
 
+test('recordExecution: ok:false result is recorded as failure not success', async () => {
+  resetMetrics();
+  const result = await recordExecution('claude', 'opus', () =>
+    Promise.resolve({ ok: false, output: '', stderr: 'agent failed' }),
+  );
+
+  assert.deepEqual(result, { ok: false, output: '', stderr: 'agent failed' });
+  const agent = getAgentMetrics('claude');
+  assert.ok(agent);
+  assert.equal(agent.callsTotal, 1);
+  assert.equal(agent.callsFailed, 1);
+  assert.equal(agent.callsSuccess, 0);
+});
+
+test('recordExecution: ok:false result emits call:error not call:complete', async () => {
+  resetMetrics();
+  const events: string[] = [];
+  const onComplete = () => events.push('complete');
+  const onError = () => events.push('error');
+  metricsEmitter.on('call:complete', onComplete);
+  metricsEmitter.on('call:error', onError);
+
+  await recordExecution('gemini', 'flash', () => Promise.resolve({ ok: false, output: '' }));
+
+  metricsEmitter.off('call:complete', onComplete);
+  metricsEmitter.off('call:error', onError);
+  assert.deepEqual(events, ['error']);
+});
+
 test('metricsRecorder satisfies IMetricsRecorder including recordExecution', () => {
   const recorder: IMetricsRecorder = metricsRecorder;
   assert.equal(typeof recorder.recordCallStart, 'function');

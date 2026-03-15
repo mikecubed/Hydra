@@ -1032,6 +1032,7 @@ export interface IGitOperations {
 
 /** Minimal call result accepted by IMetricsRecorder.recordCallComplete. */
 export interface MetricsCallResult {
+  ok?: boolean;
   stdout?: string;
   output?: string;
   stderr?: string;

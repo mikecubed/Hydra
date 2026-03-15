@@ -8,6 +8,7 @@ import { describe, it, beforeEach, afterEach } from 'node:test';
 import assert from 'node:assert/strict';
 import os from 'node:os';
 import fs from 'node:fs';
+import type readline from 'node:readline';
 
 import type {
   IMetricsRecorder,
@@ -303,21 +304,74 @@ describe('IGitOperations DI — hydra-cleanup', () => {
 });
 
 describe('IGitOperations DI — review-common', () => {
-  it('cleanBranches accepts a custom IGitOperations', async () => {
-    const { cleanBranches } = await import('../lib/hydra-shared/review-common.ts');
-    assert.equal(typeof cleanBranches, 'function');
-    // Verify function accepts gitOps parameter (6th param)
-    assert.ok(cleanBranches.length >= 1);
-  });
+  it('handleEmptyBranch calls deleteBranch on injected IGitOperations when user answers y', async () => {
+    const calls: Array<{ method: string; args: unknown[] }> = [];
+    const mockGit: IGitOperations = {
+      getCurrentBranch: () => 'main',
+      branchExists: () => false,
+      createBranch: () => true,
+      checkoutBranch: () => ({ status: 0, stdout: '', stderr: '' }) as GitResult,
+      mergeBranch: () => true,
+      deleteBranch: (cwd, branch) => {
+        calls.push({ method: 'deleteBranch', args: [cwd, branch] });
+        return true;
+      },
+      stageAndCommit: () => true,
+    };
+    // Mock readline that immediately answers 'y' to any question
+    const mockRl = {
+      question: (_q: string, callback: (a: string) => void) => {
+        callback('y');
+      },
+    } as unknown as readline.Interface;
 
-  it('handleEmptyBranch accepts a custom IGitOperations', async () => {
     const { handleEmptyBranch } = await import('../lib/hydra-shared/review-common.ts');
-    assert.equal(typeof handleEmptyBranch, 'function');
+    await handleEmptyBranch(mockRl, '/tmp/test-project', 'feature/empty-branch', mockGit);
+
+    assert.ok(
+      calls.some((c) => c.method === 'deleteBranch'),
+      'handleEmptyBranch should call deleteBranch on the injected IGitOperations',
+    );
+    assert.deepEqual(calls[0].args, ['/tmp/test-project', 'feature/empty-branch']);
   });
 
-  it('handleBranchAction accepts a custom IGitOperations', async () => {
+  it('handleBranchAction calls deleteBranch on injected IGitOperations when user chooses delete', async () => {
+    const calls: Array<{ method: string; args: unknown[] }> = [];
+    const mockGit: IGitOperations = {
+      getCurrentBranch: () => 'main',
+      branchExists: () => false,
+      createBranch: () => true,
+      checkoutBranch: () => ({ status: 0, stdout: '', stderr: '' }) as GitResult,
+      mergeBranch: () => true,
+      deleteBranch: (cwd, branch) => {
+        calls.push({ method: 'deleteBranch', args: [cwd, branch] });
+        return true;
+      },
+      stageAndCommit: () => true,
+    };
+    // Mock readline that answers 'x' (delete) to the branch action prompt
+    const mockRl = {
+      question: (_q: string, callback: (a: string) => void) => {
+        callback('x');
+      },
+    } as unknown as readline.Interface;
+
     const { handleBranchAction } = await import('../lib/hydra-shared/review-common.ts');
-    assert.equal(typeof handleBranchAction, 'function');
+    const result = await handleBranchAction(
+      mockRl,
+      '/tmp/test-project',
+      'feature/test-branch',
+      'main',
+      {},
+      mockGit,
+    );
+
+    assert.equal(result, 'deleted');
+    assert.ok(
+      calls.some((c) => c.method === 'deleteBranch'),
+      'handleBranchAction should call deleteBranch on the injected IGitOperations',
+    );
+    assert.deepEqual(calls[0].args, ['/tmp/test-project', 'feature/test-branch']);
   });
 });
 
