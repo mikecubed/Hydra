@@ -21,6 +21,12 @@ export interface GatewayConfig {
   certPath?: string;
   keyPath?: string;
   gatewayOrigin: string;
+  /**
+   * IP allow-list of reverse proxies whose X-Forwarded-For headers are trusted.
+   * When empty (default), forwarded headers are ignored and the transport-level
+   * remote address is used for rate-limit source keys.
+   */
+  trustedProxies: string[];
 }
 
 export const DEFAULT_GATEWAY_CONFIG: GatewayConfig = {
@@ -40,6 +46,7 @@ export const DEFAULT_GATEWAY_CONFIG: GatewayConfig = {
   clockDriftToleranceMs: 30_000,
   bindAddress: '127.0.0.1',
   gatewayOrigin: 'http://127.0.0.1:4174',
+  trustedProxies: [],
 };
 
 export function loadGatewayConfig(overrides: Partial<GatewayConfig> = {}): GatewayConfig {

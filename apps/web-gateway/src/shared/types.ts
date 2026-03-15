@@ -11,13 +11,11 @@ export type GatewayEnv = {
     operatorId: string;
     sessionId: string;
     csrfToken: string;
+    sourceKey: string;
   };
 };
 
 /** Return a JSON error response from a GatewayError. */
 export function gatewayErrorResponse(c: Context, err: GatewayError): Response {
-  return c.json(
-    { code: err.code, message: err.message },
-    err.statusCode as ContentfulStatusCode,
-  );
+  return c.json({ code: err.code, message: err.message }, err.statusCode as ContentfulStatusCode);
 }

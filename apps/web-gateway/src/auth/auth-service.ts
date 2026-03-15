@@ -93,20 +93,26 @@ export class AuthService {
     // Update lastUsedAt only on the matching credential
     matchedCred.lastUsedAt = new Date().toISOString();
 
-    // Create session
+    // Create session — must be rolled back if success audit fails
     const session = await this.sessionService.create(operator.id, sourceKey);
 
     // Reset rate limiter on success
     this.rateLimiter.reset(sourceKey);
 
-    await this.auditService?.record(
-      'auth.attempt.success',
-      operator.id,
-      session.id,
-      {},
-      'success',
-      sourceKey,
-    );
+    try {
+      await this.auditService?.record(
+        'auth.attempt.success',
+        operator.id,
+        session.id,
+        {},
+        'success',
+        sourceKey,
+      );
+    } catch (err) {
+      // Rollback: destroy the session so no orphaned auth state exists
+      this.sessionService.store.delete(session.id);
+      throw err;
+    }
 
     return { operator, session };
   }
@@ -145,7 +151,13 @@ export class AuthService {
     }
 
     if (!operator.isActive) {
-      await this.recordReauthFailure(operator.id, sessionId, identity, sourceKey, 'account_disabled');
+      await this.recordReauthFailure(
+        operator.id,
+        sessionId,
+        identity,
+        sourceKey,
+        'account_disabled',
+      );
       throw createError('ACCOUNT_DISABLED');
     }
 
@@ -158,18 +170,26 @@ export class AuthService {
     // Update lastUsedAt only on the matching credential
     matchedCred.lastUsedAt = new Date().toISOString();
 
-    // Reset rate limiter + idle timer on successful re-auth
+    // Reset rate limiter + idle timer on successful re-auth.
+    // Snapshot lastActivityAt so we can rollback if the audit write fails.
     this.rateLimiter.reset(sourceKey);
+    const previousActivityAt = session.lastActivityAt;
     this.sessionService.touchActivity(sessionId);
 
-    await this.auditService?.record(
-      'session.idle-reauth',
-      operator.id,
-      sessionId,
-      {},
-      'success',
-      sourceKey,
-    );
+    try {
+      await this.auditService?.record(
+        'session.idle-reauth',
+        operator.id,
+        sessionId,
+        {},
+        'success',
+        sourceKey,
+      );
+    } catch (err) {
+      // Rollback: restore the previous lastActivityAt so the session stays idle
+      this.sessionService.store.update(sessionId, { lastActivityAt: previousActivityAt });
+      throw err;
+    }
 
     return session;
   }

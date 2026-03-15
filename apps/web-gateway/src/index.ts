@@ -29,6 +29,8 @@ import {
 } from './session/daemon-heartbeat.ts';
 import type { Clock } from './shared/clock.ts';
 import { SystemClock } from './shared/clock.ts';
+import { createSourceKeyMiddleware, type SourceKeyConfig } from './security/source-key.ts';
+import { validateTlsConfig, isSecure, type TlsConfig } from './security/tls-guard.ts';
 
 export interface GatewayAppDeps {
   clock?: Clock;
@@ -41,6 +43,8 @@ export interface GatewayAppDeps {
   allowedOrigin?: string;
   healthChecker?: HealthChecker;
   heartbeatConfig?: Partial<DaemonHeartbeatConfig>;
+  sourceKeyConfig?: SourceKeyConfig;
+  tlsConfig?: TlsConfig;
 }
 
 export interface GatewayApp {
@@ -53,6 +57,21 @@ export interface GatewayApp {
 }
 
 export function createGatewayApp(deps: GatewayAppDeps = {}): GatewayApp {
+  // TLS validation: non-loopback deployments require cert+key (FR-024)
+  if (deps.tlsConfig) {
+    validateTlsConfig(deps.tlsConfig);
+  }
+
+  // Derive secureCookies from TLS config when not explicitly provided
+  const secureCookies =
+    deps.authRoutesConfig?.secureCookies ?? (deps.tlsConfig ? isSecure(deps.tlsConfig) : false);
+  const resolvedAuthRoutesConfig: AuthRoutesConfig = { secureCookies };
+
+  // Derive tlsActive for HSTS from TLS config when not explicitly provided
+  const tlsActive =
+    deps.hardenedHeadersConfig?.tlsActive ?? (deps.tlsConfig ? isSecure(deps.tlsConfig) : false);
+  const resolvedHeadersConfig: HardenedHeadersConfig = { tlsActive };
+
   const clock = deps.clock ?? new SystemClock();
   const sessionStore = deps.sessionStore ?? new SessionStore(null);
   const operatorStore = deps.operatorStore ?? new OperatorStore(null);
@@ -74,8 +93,11 @@ export function createGatewayApp(deps: GatewayAppDeps = {}): GatewayApp {
 
   const app = new Hono<GatewayEnv>();
 
+  // Source-key middleware — must run before any rate limiter
+  app.use('*', createSourceKeyMiddleware(deps.sourceKeyConfig));
+
   // Global security headers
-  app.use('*', createHardenedHeaders(deps.hardenedHeadersConfig));
+  app.use('*', createHardenedHeaders(resolvedHeadersConfig));
 
   // Origin guard on all routes
   app.use('*', createOriginGuard(allowedOrigin));
@@ -84,7 +106,7 @@ export function createGatewayApp(deps: GatewayAppDeps = {}): GatewayApp {
   app.use('*', createMutatingRateLimiter(clock));
 
   // Auth routes — login is unauthenticated; logout/reauth need CSRF protection
-  const authRoutes = createAuthRoutes(authService, sessionService, deps.authRoutesConfig);
+  const authRoutes = createAuthRoutes(authService, sessionService, resolvedAuthRoutesConfig);
   const authApp = new Hono<GatewayEnv>();
   authApp.use('/logout', createCsrfMiddleware());
   authApp.use('/reauth', createCsrfMiddleware());

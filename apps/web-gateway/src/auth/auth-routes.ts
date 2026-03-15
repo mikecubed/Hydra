@@ -38,19 +38,18 @@ export function createAuthRoutes(
     const identity = body['identity'];
     const secret = body['secret'];
 
-    if (typeof identity !== 'string' || typeof secret !== 'string' || identity === '' || secret === '') {
-      return c.json(
-        { code: 'BAD_REQUEST', message: 'Missing identity or secret' },
-        400,
-      );
+    if (
+      typeof identity !== 'string' ||
+      typeof secret !== 'string' ||
+      identity === '' ||
+      secret === ''
+    ) {
+      return c.json({ code: 'BAD_REQUEST', message: 'Missing identity or secret' }, 400);
     }
 
     try {
-      const { session } = await authService.authenticate(
-        identity,
-        secret,
-        c.req.header('x-forwarded-for') ?? 'unknown',
-      );
+      const sourceKey = c.get('sourceKey');
+      const { session } = await authService.authenticate(identity, secret, sourceKey);
 
       setCookie(c, '__session', session.id, {
         httpOnly: true,
@@ -102,10 +101,7 @@ export function createAuthRoutes(
   app.post('/reauth', async (c) => {
     const sessionId = getCookie(c, '__session');
     if (!sessionId) {
-      return c.json(
-        { code: 'SESSION_NOT_FOUND', message: 'No session' },
-        401,
-      );
+      return c.json({ code: 'SESSION_NOT_FOUND', message: 'No session' }, 401);
     }
 
     let raw: unknown;
@@ -121,17 +117,18 @@ export function createAuthRoutes(
     const identity = body['identity'];
     const secret = body['secret'];
 
-    if (typeof identity !== 'string' || typeof secret !== 'string' || identity === '' || secret === '') {
+    if (
+      typeof identity !== 'string' ||
+      typeof secret !== 'string' ||
+      identity === '' ||
+      secret === ''
+    ) {
       return c.json({ code: 'BAD_REQUEST', message: 'Missing credentials' }, 400);
     }
 
     try {
-      const session = await authService.reauthenticate(
-        identity,
-        secret,
-        c.req.header('x-forwarded-for') ?? 'unknown',
-        sessionId,
-      );
+      const sourceKey = c.get('sourceKey');
+      const session = await authService.reauthenticate(identity, secret, sourceKey, sessionId);
 
       return c.json({
         operatorId: session.operatorId,
