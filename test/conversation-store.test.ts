@@ -767,10 +767,10 @@ describe('ConversationStore — event log', () => {
   });
 });
 
-// ── Fork inheritance — approvals ─────────────────────────────────────────────
+// ── Fork isolation — approvals ───────────────────────────────────────────────
 
-describe('ConversationStore — fork inherits approvals', () => {
-  it('getPendingApprovals on fork includes parent approvals', () => {
+describe('ConversationStore — fork approval isolation', () => {
+  it('getPendingApprovals on fork does NOT include parent approvals', () => {
     const parent = store.createConversation();
     const t1 = store.appendTurn(parent.id, {
       kind: 'operator',
@@ -793,11 +793,10 @@ describe('ConversationStore — fork inherits approvals', () => {
 
     const fork = store.forkConversation(parent.id, t2.id);
     const pending = store.getPendingApprovals(fork.id);
-    assert.equal(pending.length, 1, 'fork should inherit parent pending approvals');
-    assert.equal(pending[0].prompt, 'Parent approval?');
+    assert.equal(pending.length, 0, 'fork must NOT inherit parent pending approvals');
   });
 
-  it('getPendingApprovals on fork combines parent and own approvals', () => {
+  it('getPendingApprovals on fork returns only own approvals, not parent', () => {
     const parent = store.createConversation();
     const t1 = store.appendTurn(parent.id, {
       kind: 'operator',
@@ -826,7 +825,51 @@ describe('ConversationStore — fork inherits approvals', () => {
     });
 
     const pending = store.getPendingApprovals(fork.id);
-    assert.equal(pending.length, 2, 'fork should have parent + own pending approvals');
+    assert.equal(pending.length, 1, 'fork should have only own pending approvals');
+    assert.equal(pending[0].prompt, 'Fork approval?');
+  });
+
+  it('parent still sees its own approvals after fork', () => {
+    const parent = store.createConversation();
+    const t1 = store.appendTurn(parent.id, {
+      kind: 'operator',
+      instruction: 'A',
+      attribution: operatorAttribution,
+    });
+
+    store.createApprovalRequest(t1.id, {
+      prompt: 'Parent approval?',
+      context: {},
+      contextHash: 'hash-p',
+      responseOptions: [{ key: 'ok', label: 'OK' }],
+    });
+
+    store.forkConversation(parent.id, t1.id);
+
+    const pending = store.getPendingApprovals(parent.id);
+    assert.equal(pending.length, 1, 'parent should still see its own approvals');
+    assert.equal(pending[0].prompt, 'Parent approval?');
+  });
+
+  it('responding to parent approval from parent conversation succeeds', () => {
+    const parent = store.createConversation();
+    const t1 = store.appendTurn(parent.id, {
+      kind: 'operator',
+      instruction: 'A',
+      attribution: operatorAttribution,
+    });
+
+    const approval = store.createApprovalRequest(t1.id, {
+      prompt: 'Parent approval?',
+      context: {},
+      contextHash: 'hash-p',
+      responseOptions: [{ key: 'ok', label: 'OK' }],
+    });
+
+    store.forkConversation(parent.id, t1.id);
+
+    const result = store.respondToApproval(approval.id, 'ok', 'session-1');
+    assert.ok(result.success, 'parent should be able to respond to its own approval');
   });
 
   it('getPendingApprovals excludes parent approvals beyond fork point', () => {

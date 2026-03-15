@@ -14,10 +14,10 @@
  */
 
 import type { IncomingMessage, ServerResponse } from 'node:http';
-import { createHash } from 'node:crypto';
 import type { ConversationStore } from './conversation-store.ts';
 import type { StreamManager } from './stream-manager.ts';
 import { sendJson, sendError, readJsonBody } from './http-utils.ts';
+import { computeApprovalContextHash } from './conversation-executor.ts';
 
 // ── Shared validation helpers ────────────────────────────────────────────────
 
@@ -536,10 +536,30 @@ function handleSubscribeToStream(
   sendJson(res, 200, { events });
 }
 
-function computeCurrentContextHash(store: ConversationStore, turnId: string): string | undefined {
-  const turn = store.getTurn(turnId);
-  if (turn?.instruction === undefined || turn.instruction === '') return undefined;
-  return createHash('sha256').update(turn.instruction).digest('hex').slice(0, 16);
+/**
+ * Recompute the context hash for an approval by re-hashing its persisted
+ * `context` record through the shared `computeApprovalContextHash`.
+ *
+ * When the approval's context includes the turn's instruction, any mutation
+ * of that instruction (e.g. via retry) will produce a different hash and
+ * trigger the staleness transition.
+ */
+function recomputeApprovalContextHash(
+  store: ConversationStore,
+  approval: { turnId: string; context: Record<string, unknown> },
+): string | undefined {
+  const turn = store.getTurn(approval.turnId);
+  if (turn?.instruction === undefined || turn.instruction === '') {
+    return undefined;
+  }
+
+  // Rebuild the context with the current instruction value so the hash
+  // reflects the live state of the world, not a snapshot from creation time.
+  const liveContext: Record<string, unknown> = {
+    ...approval.context,
+    instruction: turn.instruction,
+  };
+  return computeApprovalContextHash(liveContext);
 }
 
 /** Refresh staleness for all pending approvals in a conversation. */
@@ -547,7 +567,7 @@ function refreshPendingApprovalStaleness(store: ConversationStore, conversationI
   const approvals = store.getPendingApprovals(conversationId);
   for (const approval of approvals) {
     if (approval.status === 'pending') {
-      const currentHash = computeCurrentContextHash(store, approval.turnId);
+      const currentHash = recomputeApprovalContextHash(store, approval);
       if (currentHash !== undefined) {
         store.refreshApprovalStaleness(approval.id, currentHash);
       }
@@ -610,7 +630,7 @@ async function handleRespondToApproval(
 ): Promise<void> {
   const body = await readJsonBody(req);
   const response = typeof body['response'] === 'string' ? body['response'] : '';
-  const sessionId = typeof body['sessionId'] === 'string' ? body['sessionId'] : 'unknown';
+  const sessionId = typeof body['sessionId'] === 'string' ? body['sessionId'] : '';
   const acknowledgeStaleness = body['acknowledgeStaleness'] === true;
 
   if (response === '') {
@@ -618,11 +638,16 @@ async function handleRespondToApproval(
     return;
   }
 
+  if (sessionId === '') {
+    sendError(res, 400, 'sessionId is required');
+    return;
+  }
+
   try {
-    // Compute current context hash from the turn's instruction for staleness detection
+    // Compute current context hash from the approval's live context for staleness detection
     const approval = deps.store.getApproval(approvalId);
     const currentContextHash = approval
-      ? computeCurrentContextHash(deps.store, approval.turnId)
+      ? recomputeApprovalContextHash(deps.store, approval)
       : undefined;
 
     const result = deps.store.respondToApproval(

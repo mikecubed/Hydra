@@ -32,6 +32,22 @@ export interface ExecutorDeps {
   executeAgent: AgentExecutor;
 }
 
+// ── Context hashing ──────────────────────────────────────────────────────────
+
+/**
+ * Compute a truncated SHA-256 hash over an approval's `context` record.
+ * This is the single source of truth for staleness comparison — the same
+ * function must be used both at approval-creation time and at every
+ * subsequent staleness refresh.
+ *
+ * Determinism relies on `JSON.stringify` with sorted keys so insertion
+ * order never affects the hash.
+ */
+export function computeApprovalContextHash(context: Record<string, unknown>): string {
+  const canonical = JSON.stringify(context, Object.keys(context).sort());
+  return createHash('sha256').update(canonical).digest('hex').slice(0, 16);
+}
+
 // ── Approval gate ────────────────────────────────────────────────────────────
 
 /**
@@ -92,11 +108,12 @@ export function createConversationExecutor(
         text: `Task classified as "${taskType}" — requires operator approval before execution.`,
       });
 
-      const contextHash = createHash('sha256').update(instruction).digest('hex').slice(0, 16);
+      const context: Record<string, unknown> = { instruction, taskType, agent };
+      const contextHash = computeApprovalContextHash(context);
 
       const approval = conversationStore.createApprovalRequest(turnId, {
         prompt: `Confirm execution: ${instruction}`,
-        context: { instruction, taskType, agent },
+        context,
         contextHash,
         responseOptions: [
           { key: 'approve', label: 'Approve' },

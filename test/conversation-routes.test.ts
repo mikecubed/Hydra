@@ -6,7 +6,6 @@
 import { describe, it, beforeEach } from 'node:test';
 import assert from 'node:assert/strict';
 import type { IncomingMessage, ServerResponse } from 'node:http';
-import { createHash } from 'node:crypto';
 import { Readable } from 'node:stream';
 import {
   handleConversationRoute,
@@ -14,12 +13,16 @@ import {
 } from '../lib/daemon/conversation-routes.ts';
 import { ConversationStore } from '../lib/daemon/conversation-store.ts';
 import { StreamManager } from '../lib/daemon/stream-manager.ts';
+import { computeApprovalContextHash } from '../lib/daemon/conversation-executor.ts';
 
 const operatorAttribution = { type: 'operator' as const, label: 'Admin' };
 
-/** Compute context hash the same way the route + executor do. */
-function contextHash(instruction: string): string {
-  return createHash('sha256').update(instruction).digest('hex').slice(0, 16);
+/**
+ * Compute a context hash the same way the executor + route do — over a full
+ * approval context record.  Test callers pass a minimal context for brevity.
+ */
+function contextHash(context: Record<string, unknown>): string {
+  return computeApprovalContextHash(context);
 }
 
 // ── Mock helpers ─────────────────────────────────────────────────────────────
@@ -207,7 +210,7 @@ describe('Conversation routes — approvals', () => {
     deps.store.createApprovalRequest(turn.id, {
       prompt: 'Approve?',
       context: {},
-      contextHash: contextHash('A'),
+      contextHash: contextHash({ instruction: 'A' }),
       responseOptions: [{ key: 'ok', label: 'OK' }],
     });
 
@@ -228,7 +231,7 @@ describe('Conversation routes — approvals', () => {
     const approval = deps.store.createApprovalRequest(turn.id, {
       prompt: 'Approve?',
       context: {},
-      contextHash: contextHash('A'),
+      contextHash: contextHash({ instruction: 'A' }),
       responseOptions: [{ key: 'ok', label: 'OK' }],
     });
 
@@ -1085,8 +1088,8 @@ describe('Conversation routes — list artifacts pagination', () => {
 
 // ── Blocker 3 route-level: fork inherits approvals/artifacts via routes ──────
 
-describe('Conversation routes — fork inheritance via routes', () => {
-  it('GET approvals on forked conversation returns inherited approvals', () => {
+describe('Conversation routes — fork approval isolation via routes', () => {
+  it('GET approvals on forked conversation does NOT return inherited parent approvals', () => {
     const parent = deps.store.createConversation();
     const t1 = deps.store.appendTurn(parent.id, {
       kind: 'operator',
@@ -1101,7 +1104,7 @@ describe('Conversation routes — fork inheritance via routes', () => {
     deps.store.createApprovalRequest(t1.id, {
       prompt: 'Parent approval?',
       context: {},
-      contextHash: contextHash('A'),
+      contextHash: contextHash({ instruction: 'A' }),
       responseOptions: [{ key: 'ok', label: 'OK' }],
     });
 
@@ -1114,11 +1117,78 @@ describe('Conversation routes — fork inheritance via routes', () => {
     const body = res.body as Record<string, unknown>;
     assert.equal(
       (body['approvals'] as unknown[]).length,
-      1,
-      'fork route should show inherited approvals',
+      0,
+      'fork route must NOT show inherited parent approvals',
     );
   });
 
+  it('GET approvals on parent still returns its own approvals after fork', () => {
+    const parent = deps.store.createConversation();
+    const t1 = deps.store.appendTurn(parent.id, {
+      kind: 'operator',
+      instruction: 'A',
+      attribution: operatorAttribution,
+    });
+    deps.store.createApprovalRequest(t1.id, {
+      prompt: 'Parent approval?',
+      context: {},
+      contextHash: contextHash({ instruction: 'A' }),
+      responseOptions: [{ key: 'ok', label: 'OK' }],
+    });
+
+    deps.store.forkConversation(parent.id, t1.id);
+
+    const req = createMockReq('GET', `/conversations/${parent.id}/approvals`);
+    const res = createMockRes();
+    handleConversationRoute(req, res as unknown as ServerResponse, deps);
+    assert.equal(res.statusCode, 200);
+    const body = res.body as Record<string, unknown>;
+    assert.equal(
+      (body['approvals'] as unknown[]).length,
+      1,
+      'parent should still see its own approvals',
+    );
+  });
+
+  it('GET approvals on fork returns only fork-owned approvals', () => {
+    const parent = deps.store.createConversation();
+    const t1 = deps.store.appendTurn(parent.id, {
+      kind: 'operator',
+      instruction: 'A',
+      attribution: operatorAttribution,
+    });
+    deps.store.createApprovalRequest(t1.id, {
+      prompt: 'Parent approval?',
+      context: {},
+      contextHash: contextHash({ instruction: 'A' }),
+      responseOptions: [{ key: 'ok', label: 'OK' }],
+    });
+
+    const fork = deps.store.forkConversation(parent.id, t1.id);
+    const forkTurn = deps.store.appendTurn(fork.id, {
+      kind: 'operator',
+      instruction: 'Fork work',
+      attribution: operatorAttribution,
+    });
+    deps.store.createApprovalRequest(forkTurn.id, {
+      prompt: 'Fork approval?',
+      context: {},
+      contextHash: contextHash({ instruction: 'Fork work' }),
+      responseOptions: [{ key: 'ok', label: 'OK' }],
+    });
+
+    const req = createMockReq('GET', `/conversations/${fork.id}/approvals`);
+    const res = createMockRes();
+    handleConversationRoute(req, res as unknown as ServerResponse, deps);
+    assert.equal(res.statusCode, 200);
+    const body = res.body as Record<string, unknown>;
+    const approvals = body['approvals'] as Array<Record<string, unknown>>;
+    assert.equal(approvals.length, 1, 'fork should only see its own approvals');
+    assert.equal(approvals[0]['prompt'], 'Fork approval?');
+  });
+});
+
+describe('Conversation routes — fork artifact inheritance via routes', () => {
   it('GET artifacts on forked conversation returns inherited artifacts', () => {
     const parent = deps.store.createConversation();
     const t1 = deps.store.appendTurn(parent.id, {
@@ -1568,7 +1638,7 @@ describe('Conversation routes — approval response stream notification', () => 
     const approval = deps.store.createApprovalRequest(turn.id, {
       prompt: 'Deploy to prod?',
       context: {},
-      contextHash: contextHash('Deploy'),
+      contextHash: contextHash({ instruction: 'Deploy' }),
       responseOptions: [
         { key: 'approve', label: 'Approve' },
         { key: 'reject', label: 'Reject' },
@@ -1626,7 +1696,7 @@ describe('Conversation routes — approval response stream notification', () => 
     const approval = deps.store.createApprovalRequest(turn.id, {
       prompt: 'Deploy to prod?',
       context: {},
-      contextHash: contextHash('Deploy to production'),
+      contextHash: contextHash({ instruction: 'Deploy to production' }),
       responseOptions: [{ key: 'approve', label: 'Approve' }],
     });
 
@@ -1667,7 +1737,7 @@ describe('Conversation routes — approval response stream notification', () => 
     const approval = deps.store.createApprovalRequest(turn.id, {
       prompt: 'Deploy?',
       context: {},
-      contextHash: contextHash('Deploy'),
+      contextHash: contextHash({ instruction: 'Deploy' }),
       responseOptions: [{ key: 'approve', label: 'Approve' }],
     });
 
@@ -1700,7 +1770,7 @@ describe('Conversation routes — approval response stream notification', () => 
     const approval = deps.store.createApprovalRequest(turn.id, {
       prompt: 'Deploy?',
       context: {},
-      contextHash: contextHash('Deploy'),
+      contextHash: contextHash({ instruction: 'Deploy' }),
       responseOptions: [{ key: 'ok', label: 'OK' }],
     });
 
@@ -1738,7 +1808,7 @@ describe('Conversation routes — approval response stream notification', () => 
     const approval = deps.store.createApprovalRequest(turn.id, {
       prompt: 'Deploy?',
       context: {},
-      contextHash: contextHash('Deploy'),
+      contextHash: contextHash({ instruction: 'Deploy' }),
       responseOptions: [{ key: 'ok', label: 'OK' }],
     });
 
@@ -1780,7 +1850,7 @@ describe('Conversation routes — approval response stream notification', () => 
     const approval = deps.store.createApprovalRequest(turn.id, {
       prompt: 'Deploy?',
       context: {},
-      contextHash: contextHash('Deploy'),
+      contextHash: contextHash({ instruction: 'Deploy' }),
       responseOptions: [{ key: 'ok', label: 'OK' }],
     });
 
@@ -1815,7 +1885,7 @@ describe('Conversation routes — approval rejection on terminal turns', () => {
     const approval = deps.store.createApprovalRequest(turn.id, {
       prompt: 'Continue?',
       context: {},
-      contextHash: contextHash('Deploy'),
+      contextHash: contextHash({ instruction: 'Deploy' }),
       responseOptions: [{ key: 'yes', label: 'Yes' }],
     });
 
@@ -1847,7 +1917,7 @@ describe('Conversation routes — approval rejection on terminal turns', () => {
     const approval = deps.store.createApprovalRequest(turn.id, {
       prompt: 'OK?',
       context: {},
-      contextHash: contextHash('Do work'),
+      contextHash: contextHash({ instruction: 'Do work' }),
       responseOptions: [{ key: 'ok', label: 'OK' }],
     });
 
@@ -1879,7 +1949,7 @@ describe('Conversation routes — approval rejection on terminal turns', () => {
     const approval = deps.store.createApprovalRequest(turn.id, {
       prompt: 'OK?',
       context: {},
-      contextHash: contextHash('Do work'),
+      contextHash: contextHash({ instruction: 'Do work' }),
       responseOptions: [{ key: 'ok', label: 'OK' }],
     });
 
@@ -1916,7 +1986,7 @@ describe('Conversation routes — approval rejection on terminal turns', () => {
     const approval = deps.store.createApprovalRequest(turn.id, {
       prompt: 'Continue?',
       context: {},
-      contextHash: contextHash('Deploy'),
+      contextHash: contextHash({ instruction: 'Deploy' }),
       responseOptions: [{ key: 'yes', label: 'Yes' }],
     });
 
@@ -1950,7 +2020,7 @@ describe('Conversation routes — approval rejection on terminal turns', () => {
     deps.store.createApprovalRequest(turn.id, {
       prompt: 'Continue?',
       context: {},
-      contextHash: contextHash('Deploy'),
+      contextHash: contextHash({ instruction: 'Deploy' }),
       responseOptions: [{ key: 'yes', label: 'Yes' }],
     });
 
@@ -1982,7 +2052,7 @@ describe('Conversation routes — approval response validation', () => {
     const approval = deps.store.createApprovalRequest(turn.id, {
       prompt: 'Deploy?',
       context: {},
-      contextHash: contextHash('Deploy'),
+      contextHash: contextHash({ instruction: 'Deploy' }),
       responseOptions: [
         { key: 'approve', label: 'Approve' },
         { key: 'reject', label: 'Reject' },
@@ -2015,7 +2085,7 @@ describe('Conversation routes — approval response validation', () => {
     const approval = deps.store.createApprovalRequest(turn.id, {
       prompt: 'Deploy?',
       context: {},
-      contextHash: contextHash('Deploy'),
+      contextHash: contextHash({ instruction: 'Deploy' }),
       responseOptions: [
         { key: 'approve', label: 'Approve' },
         { key: 'reject', label: 'Reject' },
@@ -2033,26 +2103,119 @@ describe('Conversation routes — approval response validation', () => {
     assert.equal(res.statusCode, 200);
     assert.equal((res.body as Record<string, unknown>)['success'], true);
   });
-});
 
-describe('Conversation routes — context-hash staleness detection', () => {
-  it('GET /conversations/:id/approvals marks stale when context hash changed', () => {
+  it('POST /approvals/:id/respond returns 400 when sessionId is missing', async () => {
     const conv = deps.store.createConversation();
     const turn = deps.store.appendTurn(conv.id, {
       kind: 'operator',
-      instruction: 'original instruction',
+      instruction: 'Deploy',
+      attribution: operatorAttribution,
+    });
+    deps.store.updateTurnStatus(turn.id, 'executing');
+    deps.streamManager.createStream(turn.id);
+
+    const approval = deps.store.createApprovalRequest(turn.id, {
+      prompt: 'Deploy?',
+      context: {},
+      contextHash: contextHash({ instruction: 'Deploy' }),
+      responseOptions: [{ key: 'approve', label: 'Approve' }],
+    });
+
+    const req = createMockReq('POST', `/approvals/${approval.id}/respond`, {
+      response: 'approve',
+    });
+    const res = createMockRes();
+    handleConversationRoute(req, res as unknown as ServerResponse, deps);
+    await waitForResponse(res);
+
+    assert.equal(res.statusCode, 400, 'missing sessionId should return 400');
+    assert.ok(
+      (res.body as Record<string, string>)['error']?.includes('sessionId'),
+      'error message should mention sessionId',
+    );
+  });
+
+  it('POST /approvals/:id/respond returns 400 when sessionId is empty string', async () => {
+    const conv = deps.store.createConversation();
+    const turn = deps.store.appendTurn(conv.id, {
+      kind: 'operator',
+      instruction: 'Deploy',
+      attribution: operatorAttribution,
+    });
+    deps.store.updateTurnStatus(turn.id, 'executing');
+    deps.streamManager.createStream(turn.id);
+
+    const approval = deps.store.createApprovalRequest(turn.id, {
+      prompt: 'Deploy?',
+      context: {},
+      contextHash: contextHash({ instruction: 'Deploy' }),
+      responseOptions: [{ key: 'approve', label: 'Approve' }],
+    });
+
+    const req = createMockReq('POST', `/approvals/${approval.id}/respond`, {
+      response: 'approve',
+      sessionId: '',
+    });
+    const res = createMockRes();
+    handleConversationRoute(req, res as unknown as ServerResponse, deps);
+    await waitForResponse(res);
+
+    assert.equal(res.statusCode, 400, 'empty sessionId should return 400');
+  });
+
+  it('POST /approvals/:id/respond returns 400 when sessionId is non-string', async () => {
+    const conv = deps.store.createConversation();
+    const turn = deps.store.appendTurn(conv.id, {
+      kind: 'operator',
+      instruction: 'Deploy',
+      attribution: operatorAttribution,
+    });
+    deps.store.updateTurnStatus(turn.id, 'executing');
+    deps.streamManager.createStream(turn.id);
+
+    const approval = deps.store.createApprovalRequest(turn.id, {
+      prompt: 'Deploy?',
+      context: {},
+      contextHash: contextHash({ instruction: 'Deploy' }),
+      responseOptions: [{ key: 'approve', label: 'Approve' }],
+    });
+
+    const req = createMockReq('POST', `/approvals/${approval.id}/respond`, {
+      response: 'approve',
+      sessionId: 12345,
+    });
+    const res = createMockRes();
+    handleConversationRoute(req, res as unknown as ServerResponse, deps);
+    await waitForResponse(res);
+
+    assert.equal(res.statusCode, 400, 'non-string sessionId should return 400');
+  });
+});
+
+describe('Conversation routes — context-hash staleness detection', () => {
+  it('GET /conversations/:id/approvals detects stale when turn instruction changes', () => {
+    const conv = deps.store.createConversation();
+    const turn = deps.store.appendTurn(conv.id, {
+      kind: 'operator',
+      instruction: 'deploy to production',
       attribution: operatorAttribution,
     });
 
-    // Create approval with a DIFFERENT hash than what sha256(instruction) produces
+    // Approval created with original context matching the instruction
+    const originalContext = { instruction: 'deploy to production', env: 'prod' };
     const approval = deps.store.createApprovalRequest(turn.id, {
       prompt: 'Approve?',
-      context: {},
-      contextHash: 'deliberately-wrong-hash',
+      context: originalContext,
+      contextHash: contextHash(originalContext),
       responseOptions: [{ key: 'ok', label: 'OK' }],
     });
 
     assert.equal(approval.status, 'pending');
+
+    // Simulate context drift: mutate the turn instruction to a new value.
+    // In production this would happen via a retry creating a new turn, but
+    // we mutate directly to prove the staleness mechanism works.
+    (turn as { instruction: string }).instruction = 'deploy to staging';
 
     const req = createMockReq('GET', `/conversations/${conv.id}/approvals`);
     const res = createMockRes();
@@ -2063,10 +2226,14 @@ describe('Conversation routes — context-hash staleness detection', () => {
       Record<string, unknown>
     >;
     assert.equal(approvals.length, 1);
-    assert.equal(approvals[0]['status'], 'stale', 'hash mismatch should auto-mark stale');
+    assert.equal(
+      approvals[0]['status'],
+      'stale',
+      'instruction change should auto-mark approval stale',
+    );
   });
 
-  it('GET /conversations/:id/approvals keeps pending when context hash matches', () => {
+  it('GET /conversations/:id/approvals keeps pending when context is unchanged', () => {
     const conv = deps.store.createConversation();
     const turn = deps.store.appendTurn(conv.id, {
       kind: 'operator',
@@ -2074,11 +2241,12 @@ describe('Conversation routes — context-hash staleness detection', () => {
       attribution: operatorAttribution,
     });
 
-    const correctHash = contextHash('some instruction');
+    const approvalContext = { instruction: 'some instruction' };
+    const correctHash = contextHash(approvalContext);
 
     deps.store.createApprovalRequest(turn.id, {
       prompt: 'Approve?',
-      context: {},
+      context: approvalContext,
       contextHash: correctHash,
       responseOptions: [{ key: 'ok', label: 'OK' }],
     });
@@ -2092,10 +2260,10 @@ describe('Conversation routes — context-hash staleness detection', () => {
       Record<string, unknown>
     >;
     assert.equal(approvals.length, 1);
-    assert.equal(approvals[0]['status'], 'pending', 'matching hash should stay pending');
+    assert.equal(approvals[0]['status'], 'pending', 'unchanged context should stay pending');
   });
 
-  it('POST /approvals/:id/respond auto-detects staleness and returns 409', async () => {
+  it('POST /approvals/:id/respond auto-detects staleness from real context drift', async () => {
     const conv = deps.store.createConversation();
     const turn = deps.store.appendTurn(conv.id, {
       kind: 'operator',
@@ -2105,13 +2273,16 @@ describe('Conversation routes — context-hash staleness detection', () => {
     deps.store.updateTurnStatus(turn.id, 'executing');
     deps.streamManager.createStream(turn.id);
 
-    // Create approval with a stale hash
+    const originalContext = { instruction: 'deploy to production' };
     const approval = deps.store.createApprovalRequest(turn.id, {
       prompt: 'Deploy?',
-      context: {},
-      contextHash: 'outdated-hash',
+      context: originalContext,
+      contextHash: contextHash(originalContext),
       responseOptions: [{ key: 'approve', label: 'Approve' }],
     });
+
+    // Mutate the turn instruction to simulate context drift
+    (turn as { instruction: string }).instruction = 'deploy to staging';
 
     const req = createMockReq('POST', `/approvals/${approval.id}/respond`, {
       response: 'approve',
@@ -2121,12 +2292,12 @@ describe('Conversation routes — context-hash staleness detection', () => {
     handleConversationRoute(req, res as unknown as ServerResponse, deps);
     await waitForResponse(res);
 
-    assert.equal(res.statusCode, 409, 'stale context should return 409');
+    assert.equal(res.statusCode, 409, 'drifted context should return 409');
     assert.equal((res.body as Record<string, unknown>)['success'], false);
     assert.equal((res.body as Record<string, unknown>)['reason'], 'stale');
   });
 
-  it('POST /approvals/:id/respond succeeds with acknowledgeStaleness on stale context', async () => {
+  it('POST /approvals/:id/respond succeeds with acknowledgeStaleness on drifted context', async () => {
     const conv = deps.store.createConversation();
     const turn = deps.store.appendTurn(conv.id, {
       kind: 'operator',
@@ -2136,12 +2307,16 @@ describe('Conversation routes — context-hash staleness detection', () => {
     deps.store.updateTurnStatus(turn.id, 'executing');
     deps.streamManager.createStream(turn.id);
 
+    const originalContext = { instruction: 'deploy to production' };
     const approval = deps.store.createApprovalRequest(turn.id, {
       prompt: 'Deploy?',
-      context: {},
-      contextHash: 'outdated-hash',
+      context: originalContext,
+      contextHash: contextHash(originalContext),
       responseOptions: [{ key: 'approve', label: 'Approve' }],
     });
+
+    // Mutate instruction to create staleness
+    (turn as { instruction: string }).instruction = 'deploy to staging';
 
     const req = createMockReq('POST', `/approvals/${approval.id}/respond`, {
       response: 'approve',
@@ -2154,6 +2329,20 @@ describe('Conversation routes — context-hash staleness detection', () => {
 
     assert.equal(res.statusCode, 200, 'should succeed with acknowledgeStaleness');
     assert.equal((res.body as Record<string, unknown>)['success'], true);
+  });
+
+  it('shared hash function produces identical hashes for identical contexts', () => {
+    const ctx = { instruction: 'test', taskType: 'analysis', agent: 'gemini' };
+    const hash1 = contextHash(ctx);
+    const hash2 = contextHash(ctx);
+    assert.equal(hash1, hash2, 'same context must produce same hash');
+    assert.equal(hash1.length, 16, 'hash should be truncated to 16 hex chars');
+  });
+
+  it('shared hash is key-order independent', () => {
+    const ctx1 = { instruction: 'test', agent: 'codex' };
+    const ctx2 = { agent: 'codex', instruction: 'test' };
+    assert.equal(contextHash(ctx1), contextHash(ctx2), 'key insertion order must not affect hash');
   });
 });
 

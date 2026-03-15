@@ -323,10 +323,13 @@ export class ConversationStore {
   }
 
   getPendingApprovals(conversationId: string): ApprovalRequestType[] {
-    const effectiveTurns = this.getTurns(conversationId);
+    // Only include approvals from the conversation's own turns — inherited
+    // parent turns are read-only context and must not surface actionable
+    // approvals on a fork (fork isolation).
+    const ownTurnIds = this.turnsByConversation.get(conversationId) ?? [];
     const result: ApprovalRequestType[] = [];
-    for (const turn of effectiveTurns) {
-      const approvalIds = this.approvalsByTurn.get(turn.id) ?? [];
+    for (const tid of ownTurnIds) {
+      const approvalIds = this.approvalsByTurn.get(tid) ?? [];
       for (const aid of approvalIds) {
         const a = this.approvals.get(aid);
         if (a && (a.status === 'pending' || a.status === 'stale')) {

@@ -16,9 +16,10 @@
  */
 import { describe, it, beforeEach, afterEach } from 'node:test';
 import assert from 'node:assert/strict';
-import { createHash } from 'node:crypto';
 import { ConversationStore } from '../lib/daemon/conversation-store.ts';
 import { StreamManager } from '../lib/daemon/stream-manager.ts';
+
+import { computeApprovalContextHash } from '../lib/daemon/conversation-executor.ts';
 
 const operatorAttribution = { type: 'operator' as const, label: 'Admin' };
 const agentAttr = (id: string) => ({
@@ -27,9 +28,9 @@ const agentAttr = (id: string) => ({
   label: id,
 });
 
-/** Compute context hash the same way the executor/route do. */
-function ctxHash(instruction: string): string {
-  return createHash('sha256').update(instruction).digest('hex').slice(0, 16);
+/** Compute context hash using the same shared function as the executor/route. */
+function ctxHash(context: Record<string, unknown>): string {
+  return computeApprovalContextHash(context);
 }
 
 let store: ConversationStore;
@@ -707,10 +708,11 @@ describe('Daemon-level HTTP: submit/retry with executor', () => {
         // Simulate agent work that pauses for approval
         approvalStreamManager.emitEvent(turnId, 'text-delta', { text: `starting: ${instruction}` });
         // Create an approval request (simulates agent requesting human approval)
+        const context = { env: 'prod', instruction };
         approvalStore.createApprovalRequest(turnId, {
           prompt: 'Deploy to production?',
-          context: { env: 'prod' },
-          contextHash: ctxHash(instruction),
+          context,
+          contextHash: ctxHash(context),
           responseOptions: [
             { key: 'approve', label: 'Approve' },
             { key: 'reject', label: 'Reject' },
@@ -813,10 +815,11 @@ describe('Daemon-level HTTP: submit/retry with executor', () => {
       streamManager: cancelStreamManager,
       executeTurn(turnId: string, instruction: string) {
         cancelStreamManager.emitEvent(turnId, 'text-delta', { text: instruction });
+        const context = { instruction };
         cancelStore.createApprovalRequest(turnId, {
           prompt: 'Continue?',
-          context: {},
-          contextHash: ctxHash(instruction),
+          context,
+          contextHash: ctxHash(context),
           responseOptions: [{ key: 'yes', label: 'Yes' }],
         });
       },
