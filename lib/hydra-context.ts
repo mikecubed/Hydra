@@ -354,7 +354,8 @@ function buildLargeContext(
 ) {
   const now = Date.now();
   const cacheKey = projectConfig.projectRoot;
-  const cached = getLargeCacheHit(cacheKey, gitOps, now, Boolean(taskContext.files));
+  const hasTaskFiles = Array.isArray(taskContext.files) && taskContext.files.length > 0;
+  const cached = getLargeCacheHit(cacheKey, gitOps, now, hasTaskFiles);
   if (cached !== null) return cached;
 
   const medium = buildMediumContext(projectConfig, gitOps);
@@ -367,7 +368,7 @@ function buildLargeContext(
   const result = extraLines.join('\n');
 
   // Only cache when using the default gitOps and no task-specific files
-  if (gitOps === gitOperations && (!taskContext.files || taskContext.files.length === 0)) {
+  if (gitOps === gitOperations && !hasTaskFiles) {
     cachedLarge = result;
     cachedLargeAt = now;
     cachedLargeKey = cacheKey;

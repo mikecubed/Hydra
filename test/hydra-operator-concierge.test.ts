@@ -28,7 +28,7 @@ let runAutoPrompt: (opts: any) => Promise<any>;
 let runSmartPrompt: (opts: any) => Promise<any>;
 
 let _setTestConfig: (cfg: Record<string, unknown>) => void;
-let _setTestConfigPath: (p: string | null) => void;
+let _setTestConfigPath: ((p: string | null) => void) | undefined;
 let invalidateConfigCache: () => void;
 let tmpDir = '';
 
@@ -67,8 +67,9 @@ afterEach(() => {
 });
 
 // Restore real config path and clean up temp dir after all tests in this file complete.
+// Guard both calls: if before() failed mid-setup, these may not be assigned yet.
 after(() => {
-  _setTestConfigPath(null);
+  _setTestConfigPath?.call(undefined, null);
   if (tmpDir) fs.rmSync(tmpDir, { recursive: true, force: true });
 });
 
