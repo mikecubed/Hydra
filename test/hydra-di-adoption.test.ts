@@ -7,6 +7,7 @@
 import { describe, it, beforeEach, afterEach } from 'node:test';
 import assert from 'node:assert/strict';
 import os from 'node:os';
+import path from 'node:path';
 import fs from 'node:fs';
 import type readline from 'node:readline';
 
@@ -409,10 +410,13 @@ describe('IGitOperations DI — hydra-worktree', () => {
 
     // Omit baseBranch so createWorktree must call getCurrentBranch on the injected mock.
     // The git command itself will fail in the test environment — that's fine.
+    const wtTmp = fs.mkdtempSync(path.join(os.tmpdir(), 'hydra-di-wt-'));
     try {
-      createWorktree('test-wt-mock', '/tmp/nonexistent-base', undefined, mockGit);
+      createWorktree('test-wt-mock', wtTmp, undefined, mockGit);
     } catch {
       // git worktree add fails outside a real repo — we only care about the DI call
+    } finally {
+      fs.rmSync(wtTmp, { recursive: true, force: true });
     }
 
     assert.ok(
@@ -438,10 +442,13 @@ describe('IGitOperations DI — hydra-worktree', () => {
     const { mergeWorktree } = await import('../lib/hydra-worktree.ts');
 
     // Omit targetBranch so mergeWorktree must call getCurrentBranch on the injected mock.
+    const wtTmp = fs.mkdtempSync(path.join(os.tmpdir(), 'hydra-di-wt-'));
     try {
-      mergeWorktree('test-wt-mock', '/tmp/nonexistent-wt', undefined, mockGit);
+      mergeWorktree('test-wt-mock', wtTmp, undefined, mockGit);
     } catch {
       // git commands fail outside a real worktree — we only care about the DI call
+    } finally {
+      fs.rmSync(wtTmp, { recursive: true, force: true });
     }
 
     assert.ok(

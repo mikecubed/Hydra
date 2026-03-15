@@ -361,7 +361,8 @@ export async function recordExecution<T extends MetricsCallResult>(
     const result = await fn();
     // Treat resolved results with ok:false as failures so metrics reflect actual outcomes
     if (result.ok === false) {
-      const detail = result.stderr ?? result.output ?? '';
+      const rawDetail = result.stderr ?? result.output ?? '';
+      const detail = rawDetail.length > 500 ? `${rawDetail.slice(0, 500)}…` : rawDetail;
       const message =
         detail === '' ? 'agent call returned ok:false' : `agent call returned ok:false: ${detail}`;
       recordCallError(handle, new Error(message));

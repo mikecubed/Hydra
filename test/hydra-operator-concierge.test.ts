@@ -30,6 +30,7 @@ let runSmartPrompt: (opts: any) => Promise<any>;
 let _setTestConfig: (cfg: Record<string, unknown>) => void;
 let _setTestConfigPath: (p: string | null) => void;
 let invalidateConfigCache: () => void;
+let tmpDir = '';
 
 before(async () => {
   const cfgMod = await import('../lib/hydra-config.ts');
@@ -39,7 +40,7 @@ before(async () => {
 
   // Redirect all file-based config reads/writes away from the real hydra.config.json.
   // This prevents setMode() calls inside runSmartPrompt from mutating the repo config.
-  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'hydra-concierge-test-'));
+  tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'hydra-concierge-test-'));
   const tmpCfg = path.join(tmpDir, 'hydra.config.json');
   fs.writeFileSync(
     tmpCfg,
@@ -65,9 +66,10 @@ afterEach(() => {
   invalidateConfigCache();
 });
 
-// Restore real config path after all tests in this file complete.
+// Restore real config path and clean up temp dir after all tests in this file complete.
 after(() => {
   _setTestConfigPath(null);
+  if (tmpDir) fs.rmSync(tmpDir, { recursive: true, force: true });
 });
 
 // ── shouldCrossVerify ─────────────────────────────────────────────────────────
