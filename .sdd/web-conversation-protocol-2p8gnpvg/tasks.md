@@ -1,5 +1,9 @@
 # Tasks: Web Conversation Protocol Slice
 
+**Execution Status**: 🔄 In progress on worktree branch `feat/web-conversation-protocol`.
+**Latest Worktree Commit**: `62351b6`
+**Tracking Note**: This slice is still under active repair/review and is not merged yet.
+
 **Input**: Design documents from `.sdd/web-conversation-protocol-2p8gnpvg/`
 **Prerequisites**: plan.md (required), spec.md (required for user stories)
 

@@ -1,5 +1,9 @@
 # Tasks: Web REPL Foundation Slice
 
+**Execution Status**: ✅ Completed and merged into the feature branch.
+**Merged Commit**: `e339f4b` (`merge: web repl foundation`)
+**Tracking Note**: All tasks in this slice are complete.
+
 **Generated**: 2026-03-15 (revised)
 **Feature**: `.sdd/web-repl-foundation-5oycwcdr/`
 **Spec**: [spec.md](./spec.md) | **Plan**: [plan.md](./plan.md)
@@ -23,12 +27,12 @@
 
 ### US1: Maintainer Identifies Web Boundary (P1)
 
-- [ ] T001 ⚙️ [P1] [US1] Register npm workspaces in root `package.json`
+- [x] T001 ⚙️ [P1] [US1] Register npm workspaces in root `package.json`
   - Add `"workspaces": ["apps/*", "packages/*"]` to root `package.json`.
   - Do NOT modify any existing fields. This is an additive change.
   - **Verify**: `node -e "console.log(require('./package.json').workspaces)"` prints the array.
 
-- [ ] T002 ⚙️ [P1] [US1] Create `apps/web/` workspace placeholder
+- [x] T002 ⚙️ [P1] [US1] Create `apps/web/` workspace placeholder
   - Create `apps/web/package.json`:
     ```json
     { "name": "@hydra/web", "version": "0.0.0", "private": true, "type": "module" }
@@ -37,7 +41,7 @@
   - Create `apps/web/README.md`: brief placeholder stating the React + Vite frontend starts in a later phase; links to `docs/web-interface/07-boundaries-and-governance.md`.
   - **Verify**: `ls apps/web/package.json apps/web/tsconfig.json apps/web/README.md` succeeds.
 
-- [ ] T003 ⚙️ [P1] [US1] Create `apps/web-gateway/` workspace placeholder
+- [x] T003 ⚙️ [P1] [US1] Create `apps/web-gateway/` workspace placeholder
   - Create `apps/web-gateway/package.json`:
     ```json
     { "name": "@hydra/web-gateway", "version": "0.0.0", "private": true, "type": "module" }
@@ -46,7 +50,7 @@
   - Create `apps/web-gateway/README.md`: brief placeholder stating the Hono gateway starts in a later phase; links to `docs/web-interface/07-boundaries-and-governance.md`.
   - **Verify**: `ls apps/web-gateway/package.json apps/web-gateway/tsconfig.json apps/web-gateway/README.md` succeeds.
 
-- [ ] T004 ⚙️ [P1] [US1] Create `packages/web-contracts/` workspace package scaffold
+- [x] T004 ⚙️ [P1] [US1] Create `packages/web-contracts/` workspace package scaffold
   - Create `packages/web-contracts/package.json`:
     ```json
     {
@@ -64,7 +68,7 @@
   - Create `packages/web-contracts/src/vocabulary.ts`: placeholder file with a comment indicating vocabulary stubs will be implemented in Phase 3.
   - **Verify**: `ls packages/web-contracts/package.json packages/web-contracts/tsconfig.json packages/web-contracts/src/index.ts packages/web-contracts/src/vocabulary.ts` succeeds.
 
-- [ ] T005 ⚙️ [P1] [US1] Run `npm install` to link workspaces and verify resolution
+- [x] T005 ⚙️ [P1] [US1] Run `npm install` to link workspaces and verify resolution
   - Run `npm install` from the repo root.
   - Verify workspaces are linked: `npm ls --workspaces` lists `@hydra/web`, `@hydra/web-gateway`, `@hydra/web-contracts`.
   - Verify `npm run typecheck` passes (no new errors).
@@ -78,7 +82,7 @@
 
 ### US1 continued + US3: Quality Gate (P1/P2)
 
-- [ ] T006 📄 [P1] [US1] Create the boundary and governance document — `docs/web-interface/07-boundaries-and-governance.md`
+- [x] T006 📄 [P1] [US1] Create the boundary and governance document — `docs/web-interface/07-boundaries-and-governance.md`
   - This document is **subordinate to `docs/WEB_INTERFACE.md`** — it is the 7th doc in the existing numbered web-interface set, not a competing top-level authority.
   - Add an entry for it in `docs/WEB_INTERFACE.md`'s Document Map section (item 7).
   - YAML front matter with structured metadata:
@@ -108,7 +112,7 @@
   - Phase roadmap listing known future phases and expected workspace packages.
   - **Verify**: front matter is valid YAML; document renders correctly in Markdown preview; `docs/WEB_INTERFACE.md` links to it.
 
-- [ ] T007 📄 [P1] [US1] Update `docs/ARCHITECTURE.md` to reference the web initiative boundary
+- [x] T007 📄 [P1] [US1] Update `docs/ARCHITECTURE.md` to reference the web initiative boundary
   - Add a new section titled "Web Initiative Boundary" that:
     - States `apps/web/`, `apps/web-gateway/`, and `packages/web-contracts/` are the workspace roots for web initiative work.
     - Links to `docs/web-interface/07-boundaries-and-governance.md` as the boundary reference.
@@ -116,7 +120,7 @@
   - Do NOT reorganize existing content — append only.
   - **Verify**: `docs/ARCHITECTURE.md` still renders; new section is present.
 
-- [ ] T008 📄 [P1] [US1] Update agent instruction files with web boundary references — `CLAUDE.md`, `AGENTS.md`, `COPILOT.md`
+- [x] T008 📄 [P1] [US1] Update agent instruction files with web boundary references — `CLAUDE.md`, `AGENTS.md`, `COPILOT.md`
   - Each file gets a "Web Initiative" section that:
     - Lists the three workspace roots.
     - States `packages/web-contracts/` holds shared cross-surface contracts.
@@ -124,7 +128,7 @@
     - Notes ESLint boundary constraints.
   - **Verify**: each file has the new section; no existing content is removed.
 
-- [ ] T009 📄 [P2] [US3] Write the quality gate specification — `packages/web-contracts/QUALITY.md`
+- [x] T009 📄 [P2] [US3] Write the quality gate specification — `packages/web-contracts/QUALITY.md`
   - Enumerated expectations with unique IDs. Each is classified as **immediately enforced** (⚡) or **required standard** (📋):
     - `QG-001` 📋: **TDD methodology** — all new contracts and modules must follow Red-Green-Refactor. Failing test written and committed before implementation. Enforced by PR review, task ordering, and reviewer attestation. Automated enforcement deferred until test-ordering tooling is added.
     - `QG-002` ⚡/📋: **Test coverage** — all web initiative source files must meet the project-wide 80% line coverage threshold. ⚡ Immediately enforced by c8 once packages contain measurable source files; 📋 vacuously satisfied in foundation (no runtime code yet).
@@ -139,7 +143,7 @@
   - Reference `docs/web-interface/05-security-and-quality.md` as the authoritative quality standards source.
   - **Verify**: document renders correctly; all expectations are binary and measurable; enforcement classification is explicit.
 
-- [ ] T010 📄 [P1] [US2] Create the contract index document — `packages/web-contracts/CONTRACTS.md`
+- [x] T010 📄 [P1] [US2] Create the contract index document — `packages/web-contracts/CONTRACTS.md`
   - Write `CONTRACTS.md` with:
     - Purpose statement: single source of truth for cross-surface contract lifecycle.
     - Table columns: Name, Version, Status (draft/stable/deprecated/removed), Consumers, File.
@@ -149,7 +153,7 @@
     - Governance: breaking changes require a new version file.
   - **Verify**: file exists and renders correctly.
 
-- [ ] T011a 🔴 RED [P1] [US1] Write failing test for ESLint boundary enforcement — `test/web-contracts/eslint-boundary.test.ts`
+- [x] T011a 🔴 RED [P1] [US1] Write failing test for ESLint boundary enforcement — `test/web-contracts/eslint-boundary.test.ts`
   - Write a test (using `node:test`) that programmatically verifies the ESLint config structure:
     - Assert that boundary elements for `web-app`, `web-gateway`, and `web-contracts` exist.
     - Assert that `from: 'web-app'` only allows `['web-contracts']`.
@@ -157,7 +161,7 @@
     - Assert that `from: 'web-contracts'` allows `[]` (no deps on other elements).
   - **Verify**: `node --test test/web-contracts/eslint-boundary.test.ts` fails (boundary elements not yet in ESLint config). Expected RED state.
 
-- [ ] T011b 🟢 GREEN [P1] [US1] Add web-initiative boundary elements to ESLint configuration — `eslint.config.mjs`
+- [x] T011b 🟢 GREEN [P1] [US1] Add web-initiative boundary elements to ESLint configuration — `eslint.config.mjs`
   - Add boundary elements for:
     - `{ type: 'web-app', pattern: 'apps/web/**' }`
     - `{ type: 'web-gateway', pattern: 'apps/web-gateway/**' }`
@@ -170,7 +174,7 @@
   - **Verify**: `node --test test/web-contracts/eslint-boundary.test.ts` passes (GREEN); `npm run lint` passes (no regressions); `npm run quality` passes.
   - Additionally: create a temporary file in `apps/web/src/test-boundary.ts` that tries to import from `../../lib/hydra-config.ts` and confirm `npm run lint` catches it. Clean up the temporary file.
 
-- [ ] T012 ⚙️ [P1] [US1] Verify TypeScript compilation covers web workspace packages
+- [x] T012 ⚙️ [P1] [US1] Verify TypeScript compilation covers web workspace packages
   - Verify or update root `tsconfig.json` so `apps/**/*.ts` and `packages/**/*.ts` are included in type-check scope, OR confirm that each workspace's own `tsconfig.json` is picked up by `npm run typecheck`.
   - If the root `npm run typecheck` only checks the root tsconfig, add workspace-aware type-check scripts.
   - **Note**: until this task is confirmed green, T023 cannot claim root typecheck coverage of web packages.
@@ -182,7 +186,7 @@
 
 ### US2: Contributor Uses Shared Contracts (P1)
 
-- [ ] T013 🔴 RED [P1] [US2] Write failing tests for contract validation helpers — `test/web-contracts/contract-helpers.test.ts`
+- [x] T013 🔴 RED [P1] [US2] Write failing tests for contract validation helpers — `test/web-contracts/contract-helpers.test.ts`
   - Create `test/web-contracts/` directory.
   - Write tests using `node:test` + `node:assert/strict` that import `assertContractValid` and `assertContractInvalid` from `./contract-helpers.ts` (this file does not exist yet — tests MUST fail).
   - Test cases (minimum):
@@ -194,14 +198,14 @@
   - Use a trivial inline Zod schema within the test file (e.g., `z.object({ name: z.string() })`) — NOT a domain-specific contract.
   - **Verify**: `node --test test/web-contracts/contract-helpers.test.ts` fails (import not found). Expected RED state.
 
-- [ ] T014 🟢 GREEN [P1] [US2] Implement contract validation helpers — `test/web-contracts/contract-helpers.ts`
+- [x] T014 🟢 GREEN [P1] [US2] Implement contract validation helpers — `test/web-contracts/contract-helpers.ts`
   - Implement `assertContractValid(schema, data)` and `assertContractInvalid(schema, data, expectedField?)`.
   - Use Zod's `.safeParse()` internally to produce structured error details.
   - These helpers are schema-agnostic — they work with ANY Zod schema, not just web contracts.
   - Export both functions for use by all contract conformance test files.
   - **Verify**: `node --test test/web-contracts/contract-helpers.test.ts` passes (GREEN).
 
-- [ ] T015 🔵 REFACTOR [P1] [US2] Review and refine contract helpers
+- [x] T015 🔵 REFACTOR [P1] [US2] Review and refine contract helpers
   - Ensure all test descriptions are clear and follow existing test naming patterns in the repo.
   - Ensure JSDoc comments on exported helper functions match the project's documentation standards.
   - Verify that the helpers are truly schema-agnostic — no domain-specific logic.
@@ -210,7 +214,7 @@
 
 ### US2 continued: Shared Vocabulary (P1)
 
-- [ ] T015a 🔴 RED [P1] [US2] Write failing tests for vocabulary type stubs — `test/web-contracts/vocabulary.test.ts`
+- [x] T015a 🔴 RED [P1] [US2] Write failing tests for vocabulary type stubs — `test/web-contracts/vocabulary.test.ts`
   - Write tests using `node:test` + `node:assert/strict` that import vocabulary stubs from `@hydra/web-contracts` or directly from `packages/web-contracts/src/vocabulary.ts`.
   - Test cases (minimum):
     - Each of the six core protocol object schemas (`Conversation`, `Turn`, `StreamEvent`, `ApprovalRequest`, `Artifact`, `SessionSnapshot`) can parse a minimal object with the correct `kind` discriminator.
@@ -220,7 +224,7 @@
   - Use `assertContractValid`/`assertContractInvalid` helpers from T014 where applicable.
   - **Verify**: `node --test test/web-contracts/vocabulary.test.ts` fails (vocabulary stubs not yet implemented). Expected RED state.
 
-- [ ] T015b 🟢 GREEN [P1] [US2] Implement vocabulary type stubs — `packages/web-contracts/src/vocabulary.ts`
+- [x] T015b 🟢 GREEN [P1] [US2] Implement vocabulary type stubs — `packages/web-contracts/src/vocabulary.ts`
   - Define Zod schemas for the six core protocol objects per `docs/web-interface/04-protocol.md`:
     - `ConversationStub` — `{ kind: 'conversation' }` (minimal identity only)
     - `TurnStub` — `{ kind: 'turn' }`
@@ -238,7 +242,7 @@
   - **Scope boundary**: stubs define names and minimal identity only. Full field-level schemas are deferred to later specs.
   - **Verify**: `node --test test/web-contracts/vocabulary.test.ts` passes (GREEN).
 
-- [ ] T015c 🔵 REFACTOR [P1] [US2] Wire vocabulary into barrel export and contract index
+- [x] T015c 🔵 REFACTOR [P1] [US2] Wire vocabulary into barrel export and contract index
   - Update `packages/web-contracts/src/index.ts` to re-export all vocabulary stubs and the `CONTRACT_FAMILIES` constant.
   - Update `packages/web-contracts/CONTRACTS.md` to list vocabulary as a `draft` entry.
   - Verify imports resolve from `@hydra/web-contracts`.
@@ -251,7 +255,7 @@
 
 ### US4: Later Phase Builds Safely on Foundation (P2)
 
-- [ ] T016 🔴 RED [P2] [US4] Write failing extensibility test — simulated contract addition — `test/web-contracts/extensibility-add-contract.test.ts`
+- [x] T016 🔴 RED [P2] [US4] Write failing extensibility test — simulated contract addition — `test/web-contracts/extensibility-add-contract.test.ts`
   - Write a test that:
     - Creates an inline mock contract schema (e.g., `z.object({ type: z.literal('notification'), payload: z.string() })`).
     - Validates it through the `assertContractValid`/`assertContractInvalid` helpers from T014.
@@ -259,14 +263,14 @@
   - The test proves the mechanism works: a later phase can add a contract file, append a re-export line, and write conformance tests using existing helpers — with zero changes to foundation structural artifacts.
   - **Verify**: test fails initially if helpers are not yet available. Expected RED state if run before T014.
 
-- [ ] T017 🟢 GREEN [P2] [US4] Make extensibility test pass — verify zero-structural-modification extension
+- [x] T017 🟢 GREEN [P2] [US4] Make extensibility test pass — verify zero-structural-modification extension
   - Ensure T016's test passes by confirming:
     - The `contract-helpers.ts` utilities work with any Zod schema (not just the helpers' own test schema).
     - Adding a new contract schema + re-exporting it is purely additive (append-only to barrel and index).
   - Do NOT actually commit a domain contract — this is a simulation test only.
   - **Verify**: `node --test test/web-contracts/extensibility-add-contract.test.ts` passes (GREEN).
 
-- [ ] T018 🔴 RED [P2] [US4] Write failing extensibility test — simulated workspace package addition — `test/web-contracts/extensibility-add-workspace.test.ts`
+- [x] T018 🔴 RED [P2] [US4] Write failing extensibility test — simulated workspace package addition — `test/web-contracts/extensibility-add-workspace.test.ts`
   - Write a test that:
     - Verifies the root `package.json` workspaces glob (`apps/*`, `packages/*`) would cover a new package (e.g., `packages/web-ui/`) without modifying the glob pattern.
     - Verifies that ESLint boundary element patterns for `packages/web-contracts/**` do not interfere with a sibling package at `packages/web-ui/**`.
@@ -274,12 +278,12 @@
   - Implementation: parse `package.json`, ESLint config, and root tsconfig programmatically to assert the patterns.
   - **Verify**: test fails initially if workspace config is not yet in place. Expected RED if T001/T005 not yet done.
 
-- [ ] T019 🟢 GREEN [P2] [US4] Make workspace extensibility test pass
+- [x] T019 🟢 GREEN [P2] [US4] Make workspace extensibility test pass
   - Ensure T001 (workspaces array) and T005 (npm install) are complete.
   - Run T018's test — it should pass, confirming that new packages under `apps/` or `packages/` are automatically covered by workspaces globs and do not require foundation structural modifications.
   - **Verify**: `node --test test/web-contracts/extensibility-add-workspace.test.ts` passes (GREEN).
 
-- [ ] T020 📄 [P2] [US4] Document the extension process in `docs/web-interface/07-boundaries-and-governance.md`
+- [x] T020 📄 [P2] [US4] Document the extension process in `docs/web-interface/07-boundaries-and-governance.md`
   - Add a section titled "Extending the Foundation" to `docs/web-interface/07-boundaries-and-governance.md` that describes:
     - How to add a new shared contract (create file in `packages/web-contracts/src/`, update `CONTRACTS.md`, add barrel re-export, write conformance tests using helpers from `test/web-contracts/`).
     - How to add a new workspace package (create directory under `apps/` or `packages/`, add `package.json` + `tsconfig.json`, run `npm install`; the workspaces glob covers it automatically).
@@ -293,7 +297,7 @@
 
 ## Phase 5 — Final Validation & Cleanup
 
-- [ ] T023 ⚙️ [P1] [US1,US2,US3,US4] Run full regression suite — verify zero disruption to existing Hydra core
+- [x] T023 ⚙️ [P1] [US1,US2,US3,US4] Run full regression suite — verify zero disruption to existing Hydra core
   - Run the complete quality and test pipeline:
     ```bash
     npm run quality   # lint + format:check + typecheck + cycle detection
@@ -305,7 +309,7 @@
   - **Coverage note**: `npm run test:coverage:check` is expected to pass because the foundation adds minimal source code (vocabulary stubs + test helpers). If coverage thresholds are affected by new packages with low file counts, verify the c8 inclusion patterns are correctly scoped. Do NOT claim coverage gate enforcement on web packages until verified.
   - **Verify**: all three commands exit 0; `git diff --stat` shows only expected changes.
 
-- [ ] T024 📄 [P1] [US1,US2] Final review of all new documentation for consistency
+- [x] T024 📄 [P1] [US1,US2] Final review of all new documentation for consistency
   - Cross-check that:
     - `docs/web-interface/07-boundaries-and-governance.md` lists all three workspace roots and links to `packages/web-contracts/CONTRACTS.md`.
     - `docs/WEB_INTERFACE.md` document map includes item 7 linking to `07-boundaries-and-governance.md`.
