@@ -314,6 +314,63 @@ describe('Gateway app integration', () => {
     assert.equal(res.status, 200);
   });
 
+  // ── CSRF failure must not refresh idle activity ──────────────────────────
+
+  it('failed CSRF on /session/extend does not refresh idle activity', async () => {
+    const cookies = await login(gw);
+    const session = gw.sessionService.store.get(cookies['__session'])!;
+    const activityBefore = session.lastActivityAt;
+
+    // Advance time but stay within idle window
+    clock.advance(900_000);
+
+    // POST /session/extend WITHOUT X-CSRF-Token — should get 403 CSRF_INVALID
+    const extendReq = buildRequest('POST', '/session/extend', {
+      cookies: { __session: cookies['__session'], __csrf: cookies['__csrf'] },
+      headers: { origin: ORIGIN },
+    });
+    const extendRes = await gw.app.request(extendReq);
+    assert.equal(extendRes.status, 403);
+    const body = (await extendRes.json()) as { code: string };
+    assert.equal(body.code, 'CSRF_INVALID');
+
+    // Activity must NOT have been refreshed
+    const afterSession = gw.sessionService.store.get(cookies['__session'])!;
+    assert.equal(
+      afterSession.lastActivityAt,
+      activityBefore,
+      'CSRF failure must not refresh idle activity',
+    );
+  });
+
+  // ── Malformed JSON on auth routes ─────────────────────────────────────
+
+  it('POST /auth/login with malformed JSON returns 400', async () => {
+    const req = buildRequest('POST', '/auth/login', {
+      body: '{not-valid-json',
+      headers: { origin: ORIGIN },
+    });
+    const res = await gw.app.request(req);
+    assert.equal(res.status, 400);
+    const body = (await res.json()) as { code: string };
+    assert.equal(body.code, 'BAD_REQUEST');
+  });
+
+  it('POST /auth/reauth with malformed JSON returns 400', async () => {
+    const cookies = await login(gw);
+    clock.advance(1800_001); // idle
+
+    const req = buildRequest('POST', '/auth/reauth', {
+      body: '%%%not-json',
+      cookies: { __session: cookies['__session'], __csrf: cookies['__csrf'] },
+      headers: { origin: ORIGIN, 'x-csrf-token': cookies['__csrf'] },
+    });
+    const res = await gw.app.request(req);
+    assert.equal(res.status, 400);
+    const body = (await res.json()) as { code: string };
+    assert.equal(body.code, 'BAD_REQUEST');
+  });
+
   // ── Reauth (idle-only) ──────────────────────────────────────────────────
 
   it('reauth rejects active (non-idle) session', async () => {

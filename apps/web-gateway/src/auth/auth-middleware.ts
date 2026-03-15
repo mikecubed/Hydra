@@ -37,12 +37,16 @@ export function createAuthMiddleware(
         return gatewayErrorResponse(c, createError('IDLE_TIMEOUT'));
       }
 
-      sessionService.touchActivity(sessionId);
-
       c.set('operatorId', session.operatorId);
       c.set('sessionId', sessionId);
       c.set('csrfToken', session.csrfToken);
       await next();
+
+      // Only refresh idle activity after downstream middleware (including CSRF)
+      // succeeds — a rejected mutating request must not keep the session alive.
+      if (c.res.status < 400) {
+        sessionService.touchActivity(sessionId);
+      }
       // eslint-disable-next-line no-useless-return
       return;
     } catch (err) {

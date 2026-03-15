@@ -129,6 +129,40 @@ describe('Auth middleware', () => {
     assert.equal(sessionService.isIdle(updated), false);
   });
 
+  it('does not touch activity when downstream middleware rejects', async () => {
+    // Simulate the CSRF-before-handler pattern: auth middleware runs, then a
+    // downstream middleware rejects with 403. Activity must NOT be refreshed.
+    const rejectApp = new Hono<GatewayEnv>();
+    rejectApp.use('*', createAuthMiddleware(sessionService));
+    rejectApp.use('*', async (c) => {
+      return c.json({ code: 'CSRF_INVALID', message: 'bad token' }, 403);
+    });
+    rejectApp.post('/action', (c) => c.json({ ok: true }));
+
+    const session = await sessionService.create('admin', '127.0.0.1');
+    const createdAt = session.lastActivityAt;
+    clock.advance(100_000);
+
+    await rejectApp.request('/action', {
+      method: 'POST',
+      headers: { Cookie: `__session=${session.id}` },
+    });
+    const after = sessionService.store.get(session.id)!;
+    assert.equal(after.lastActivityAt, createdAt, 'activity must not be refreshed on 403');
+  });
+
+  it('refreshes activity when downstream returns success', async () => {
+    const session = await sessionService.create('admin', '127.0.0.1');
+    const createdAt = session.lastActivityAt;
+    clock.advance(100_000);
+
+    await app.request('/protected', {
+      headers: { Cookie: `__session=${session.id}` },
+    });
+    const after = sessionService.store.get(session.id)!;
+    assert.notEqual(after.lastActivityAt, createdAt, 'activity must be refreshed on success');
+  });
+
   it('sets csrfToken context variable', async () => {
     const csrfApp = new Hono<GatewayEnv>();
     csrfApp.use('*', createAuthMiddleware(sessionService));

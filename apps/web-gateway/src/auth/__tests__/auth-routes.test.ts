@@ -211,3 +211,123 @@ describe('auth-routes: /logout', () => {
     assert.equal(post.state, 'active', 'session must be rolled back to active');
   });
 });
+
+describe('auth-routes: /login malformed body', () => {
+  let app: Hono<GatewayEnv>;
+
+  beforeEach(async () => {
+    const clock = new FakeClock(Date.now());
+    const operatorStore = new OperatorStore(null);
+    const rateLimiter = new RateLimiter(clock);
+    const sessionStore = new SessionStore(null);
+    const auditStore = new AuditStore(null);
+    const auditService = new AuditService(auditStore, clock);
+    const sessionService = new SessionService(sessionStore, clock, {}, auditService);
+    const authService = new AuthService(operatorStore, rateLimiter, sessionService, auditService);
+
+    await operatorStore.createOperator('admin', 'Admin');
+    await operatorStore.addCredential('admin', 'password123');
+
+    const routes = createAuthRoutes(authService, sessionService);
+    app = new Hono<GatewayEnv>();
+    app.route('/auth', routes);
+  });
+
+  it('returns 400 BAD_REQUEST for malformed JSON body', async () => {
+    const res = await app.request('/auth/login', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: '{not json',
+    });
+    assert.equal(res.status, 400);
+    const body = (await res.json()) as Record<string, unknown>;
+    assert.equal(body['code'], 'BAD_REQUEST');
+  });
+
+  it('returns 400 BAD_REQUEST for empty body', async () => {
+    const res = await app.request('/auth/login', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: '',
+    });
+    assert.equal(res.status, 400);
+    const body = (await res.json()) as Record<string, unknown>;
+    assert.equal(body['code'], 'BAD_REQUEST');
+  });
+
+  it('still validates missing credentials after valid JSON parse', async () => {
+    const res = await app.request('/auth/login', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({}),
+    });
+    assert.equal(res.status, 400);
+    const body = (await res.json()) as Record<string, unknown>;
+    assert.equal(body['code'], 'BAD_REQUEST');
+  });
+});
+
+describe('auth-routes: /reauth malformed body', () => {
+  let app: Hono<GatewayEnv>;
+  let sessionService: SessionService;
+  let authService: AuthService;
+
+  beforeEach(async () => {
+    const clock = new FakeClock(Date.now());
+    const operatorStore = new OperatorStore(null);
+    const rateLimiter = new RateLimiter(clock);
+    const sessionStore = new SessionStore(null);
+    const auditStore = new AuditStore(null);
+    const auditService = new AuditService(auditStore, clock);
+    sessionService = new SessionService(sessionStore, clock, {}, auditService);
+    authService = new AuthService(operatorStore, rateLimiter, sessionService, auditService);
+
+    await operatorStore.createOperator('admin', 'Admin');
+    await operatorStore.addCredential('admin', 'password123');
+
+    const routes = createAuthRoutes(authService, sessionService);
+    app = new Hono<GatewayEnv>();
+    app.route('/auth', routes);
+  });
+
+  it('returns 400 BAD_REQUEST for malformed JSON body', async () => {
+    const result = await authService.authenticate('admin', 'password123', '127.0.0.1');
+    const res = await app.request('/auth/reauth', {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+        Cookie: `__session=${result.session.id}`,
+      },
+      body: '{broken',
+    });
+    assert.equal(res.status, 400);
+    const body = (await res.json()) as Record<string, unknown>;
+    assert.equal(body['code'], 'BAD_REQUEST');
+  });
+
+  it('returns 400 BAD_REQUEST for empty body on reauth', async () => {
+    const result = await authService.authenticate('admin', 'password123', '127.0.0.1');
+    const res = await app.request('/auth/reauth', {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+        Cookie: `__session=${result.session.id}`,
+      },
+      body: '',
+    });
+    assert.equal(res.status, 400);
+    const body = (await res.json()) as Record<string, unknown>;
+    assert.equal(body['code'], 'BAD_REQUEST');
+  });
+
+  it('returns 401 when no session cookie even with malformed body', async () => {
+    const res = await app.request('/auth/reauth', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: '{broken',
+    });
+    assert.equal(res.status, 401);
+    const body = (await res.json()) as Record<string, unknown>;
+    assert.equal(body['code'], 'SESSION_NOT_FOUND');
+  });
+});
