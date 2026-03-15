@@ -17,9 +17,12 @@ export const GetPendingApprovalsResponse = z.object({
 export type GetPendingApprovalsResponse = z.infer<typeof GetPendingApprovalsResponse>;
 
 // ── RespondToApproval ────────────────────────────────────────────────────────
+// Route: POST /approvals/:approvalId/respond
+// Approval identity comes from the URL path parameter, NOT the request body.
+// The daemon also requires an `X-Session-Id` HTTP header for session attribution
+// — this is transport metadata and intentionally omitted from the JSON schema.
 
 export const RespondToApprovalRequest = z.object({
-  approvalId: z.string().min(1),
   response: z.string().min(1),
   acknowledgeStaleness: z.boolean().default(false),
 });

@@ -228,25 +228,30 @@ describe('Approval Flow contracts', () => {
     assert.ok(GetPendingApprovalsResponse.safeParse({ approvals: [validApproval] }).success);
   });
 
-  it('RespondToApprovalRequest requires response but not sessionId', () => {
-    assert.ok(!RespondToApprovalRequest.safeParse({ approvalId: 'a-1' }).success);
-    assert.ok(
-      RespondToApprovalRequest.safeParse({
-        approvalId: 'a-1',
-        response: 'approve',
-      }).success,
-    );
-    // sessionId must NOT be part of the public contract
+  it('RespondToApprovalRequest body contains only response fields (no approvalId or sessionId)', () => {
+    // Body without response must fail
+    assert.ok(!RespondToApprovalRequest.safeParse({}).success);
+
+    // Minimal valid body — only `response` is required
+    assert.ok(RespondToApprovalRequest.safeParse({ response: 'approve' }).success);
+
+    // approvalId comes from the URL path, sessionId from X-Session-Id header —
+    // neither belongs in the body schema and both must be stripped.
     const parsed = RespondToApprovalRequest.safeParse({
-      approvalId: 'a-1',
       response: 'approve',
+      approvalId: 'a-1',
       sessionId: 'sess-1',
     });
     assert.ok(parsed.success, 'extra fields should not fail parse');
     assert.equal(
+      (parsed.data as Record<string, unknown>)['approvalId'],
+      undefined,
+      'approvalId must be stripped — it comes from the URL path',
+    );
+    assert.equal(
       (parsed.data as Record<string, unknown>)['sessionId'],
       undefined,
-      'sessionId must be stripped from parsed data',
+      'sessionId must be stripped — it comes from the X-Session-Id header',
     );
   });
 

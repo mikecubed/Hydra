@@ -633,8 +633,9 @@ async function handleRespondToApproval(
   const acknowledgeStaleness = body['acknowledgeStaleness'] === true;
 
   // Session identity comes from the X-Session-Id header, not the request body.
-  // Direct daemon callers (operator console, CLI tooling) must set this header
-  // explicitly — there is no gateway that injects it automatically.
+  // Approval identity comes from the URL path parameter (:approvalId).
+  // The JSON body contains only `response` and `acknowledgeStaleness` — see
+  // RespondToApprovalRequest in web-contracts for the canonical body schema.
   const headerVal = req.headers['x-session-id'];
   if (typeof headerVal !== 'string' || headerVal === '') {
     sendError(res, 401, 'X-Session-Id header is required');
