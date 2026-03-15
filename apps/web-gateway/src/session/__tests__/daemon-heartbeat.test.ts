@@ -23,14 +23,14 @@ describe('DaemonHeartbeat', () => {
   }
 
   it('healthy daemon keeps sessions active', async () => {
-    const session = service.create('op-1', '127.0.0.1');
+    const session = await service.create('op-1', '127.0.0.1');
     const hb = createHeartbeat();
     await hb.tick();
     assert.equal(store.get(session.id)?.state, 'active');
   });
 
   it('unhealthy transitions to daemon-unreachable', async () => {
-    const session = service.create('op-1', '127.0.0.1');
+    const session = await service.create('op-1', '127.0.0.1');
     healthResult = false;
     const hb = createHeartbeat();
     await hb.tick();
@@ -38,7 +38,7 @@ describe('DaemonHeartbeat', () => {
   });
 
   it('recovery restores active', async () => {
-    const session = service.create('op-1', '127.0.0.1');
+    const session = await service.create('op-1', '127.0.0.1');
     const hb = createHeartbeat();
 
     healthResult = false;
@@ -51,7 +51,7 @@ describe('DaemonHeartbeat', () => {
   });
 
   it('expired-during-outage stays terminal', async () => {
-    const session = service.create('op-1', '127.0.0.1');
+    const session = await service.create('op-1', '127.0.0.1');
     const hb = createHeartbeat();
 
     healthResult = false;

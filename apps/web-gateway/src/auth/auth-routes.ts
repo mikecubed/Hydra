@@ -66,11 +66,11 @@ export function createAuthRoutes(
     }
   });
 
-  app.post('/logout', (c) => {
+  app.post('/logout', async (c) => {
     const sessionId = getCookie(c, '__session');
     if (sessionId) {
       try {
-        sessionService.logout(sessionId);
+        await sessionService.logout(sessionId);
       } catch {
         // Session may already be gone
       }

@@ -12,7 +12,7 @@ import type { GatewayEnv } from '../shared/types.ts';
 export function createSessionRoutes(sessionService: SessionService): Hono<GatewayEnv> {
   const app = new Hono<GatewayEnv>();
 
-  app.get('/info', (c) => {
+  app.get('/info', async (c) => {
     const sessionId = getCookie(c, '__session');
     if (!sessionId) {
       return c.json(
@@ -22,7 +22,7 @@ export function createSessionRoutes(sessionService: SessionService): Hono<Gatewa
     }
 
     try {
-      const session = sessionService.validate(sessionId);
+      const session = await sessionService.validate(sessionId);
       return c.json({
         operatorId: session.operatorId,
         state: session.state,
@@ -35,7 +35,7 @@ export function createSessionRoutes(sessionService: SessionService): Hono<Gatewa
     }
   });
 
-  app.post('/extend', (c) => {
+  app.post('/extend', async (c) => {
     const sessionId = getCookie(c, '__session');
     if (!sessionId) {
       return c.json(
@@ -45,7 +45,7 @@ export function createSessionRoutes(sessionService: SessionService): Hono<Gatewa
     }
 
     try {
-      const session = sessionService.extend(sessionId);
+      const session = await sessionService.extend(sessionId);
       return c.json({ newExpiresAt: session.expiresAt });
     } catch (err) {
       return sendSessionError(c, err);

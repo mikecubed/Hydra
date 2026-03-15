@@ -98,6 +98,38 @@ describe('AuthService', () => {
     assert.equal(session.id, result.session.id);
   });
 
+  it('reauthenticate rejects expired session', async () => {
+    const result = await authService.authenticate('admin', 'correct-password', '127.0.0.1');
+    // Advance past session lifetime (8h default) — session is both expired and idle
+    clock.advance(8 * 60 * 60 * 1000 + 1);
+    await assert.rejects(
+      () => authService.reauthenticate('admin', 'correct-password', '127.0.0.1', result.session.id),
+      { message: /expired/i },
+    );
+  });
+
+  it('reauthenticate rejects logged-out session', async () => {
+    const result = await authService.authenticate('admin', 'correct-password', '127.0.0.1');
+    await sessionService.logout(result.session.id);
+    // Advance past idle timeout so it would be "idle" if still valid
+    clock.advance(30 * 60 * 1000 + 1);
+    await assert.rejects(
+      () => authService.reauthenticate('admin', 'correct-password', '127.0.0.1', result.session.id),
+      { message: /session/i },
+    );
+  });
+
+  it('reauthenticate rejects invalidated session', async () => {
+    const result = await authService.authenticate('admin', 'correct-password', '127.0.0.1');
+    await sessionService.invalidate(result.session.id, 'admin-action');
+    // Advance past idle timeout so it would be "idle" if still valid
+    clock.advance(30 * 60 * 1000 + 1);
+    await assert.rejects(
+      () => authService.reauthenticate('admin', 'correct-password', '127.0.0.1', result.session.id),
+      { message: /invalidated/i },
+    );
+  });
+
   it('reauthenticate does not emit idle-reauth audit for non-idle session', async () => {
     const auditStore = new (await import('../../audit/audit-store.ts')).AuditStore(null);
     const auditSvc = new (await import('../../audit/audit-service.ts')).AuditService(

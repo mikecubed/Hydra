@@ -264,6 +264,30 @@ describe('Gateway app integration', () => {
     assert.equal(body.operatorId, 'admin');
   });
 
+  // ── Idle timeout audit ─────────────────────────────────────────────────
+
+  it('idle timeout emits session.idle-timeout audit event via composed stack', async () => {
+    const cookies = await login(gw);
+
+    // Advance past idle timeout
+    clock.advance(1800_001);
+
+    const infoReq = buildRequest('GET', '/session/info', {
+      cookies: { __session: cookies['__session'], __csrf: cookies['__csrf'] },
+    });
+    const infoRes = await gw.app.request(infoReq);
+    assert.equal(infoRes.status, 401);
+    const body = (await infoRes.json()) as { code: string };
+    assert.equal(body.code, 'IDLE_TIMEOUT');
+
+    // Verify audit trail includes idle-timeout event
+    const records = gw.auditService.getRecords();
+    const idleEvents = records.filter((r) => r.eventType === 'session.idle-timeout');
+    assert.equal(idleEvents.length, 1, 'should emit one session.idle-timeout audit event');
+    assert.equal(idleEvents[0].operatorId, 'admin');
+    assert.equal(idleEvents[0].outcome, 'failure');
+  });
+
   // ── Session extend without prior validate() (through composed stack) ──
 
   it('extend works without prior validate() through composed app', async () => {

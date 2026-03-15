@@ -53,24 +53,24 @@ describe('E2E: Auth lifecycle', () => {
     assert.ok(csrfToken);
 
     // 2. Session is valid
-    const validated = sessionService.validate(sessionId);
+    const validated = await sessionService.validate(sessionId);
     assert.equal(validated.state, 'active');
 
     // 3. Move time to expiring-soon
     clock.advance(3000_000);
-    const expiring = sessionService.validate(sessionId);
+    const expiring = await sessionService.validate(sessionId);
     assert.equal(expiring.state, 'expiring-soon');
 
     // 4. Extend
-    const extended = sessionService.extend(sessionId);
+    const extended = await sessionService.extend(sessionId);
     assert.equal(extended.state, 'active');
     assert.equal(extended.extendedCount, 1);
 
     // 5. Logout
-    sessionService.logout(sessionId);
+    await sessionService.logout(sessionId);
 
     // 6. Old session rejected
-    assert.throws(() => sessionService.validate(sessionId));
+    await assert.rejects(() => sessionService.validate(sessionId));
 
     // 7. Re-login works
     const result2 = await authService.authenticate('admin', 'password123', '127.0.0.1');

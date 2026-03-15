@@ -73,7 +73,7 @@ export function createGatewayApp(deps: GatewayAppDeps = {}): GatewayApp {
   // Session routes (info/extend) — require valid session + CSRF
   const sessionRoutes = createSessionRoutes(sessionService);
   const protectedSession = new Hono<GatewayEnv>();
-  protectedSession.use('*', createAuthMiddleware(sessionService));
+  protectedSession.use('*', createAuthMiddleware(sessionService, auditService));
   protectedSession.use('*', createCsrfMiddleware());
   protectedSession.route('/', sessionRoutes);
   app.route('/session', protectedSession);

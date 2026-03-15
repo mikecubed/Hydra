@@ -19,6 +19,7 @@ export const AuditEventType = z.enum([
   'session.daemon-unreachable',
   'session.daemon-restored',
   'session.idle-reauth',
+  'session.idle-timeout',
 ]);
 export type AuditEventType = z.infer<typeof AuditEventType>;
 

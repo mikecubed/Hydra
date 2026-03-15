@@ -15,10 +15,11 @@ describe('AuditEventType', () => {
     'session.daemon-unreachable',
     'session.daemon-restored',
     'session.idle-reauth',
+    'session.idle-timeout',
   ] as const;
 
-  it('has exactly 11 in-scope types', () => {
-    assert.equal(AuditEventType.options.length, 11);
+  it('has exactly 12 in-scope types', () => {
+    assert.equal(AuditEventType.options.length, 12);
   });
 
   for (const type of allTypes) {

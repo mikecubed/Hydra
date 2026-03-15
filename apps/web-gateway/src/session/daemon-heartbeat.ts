@@ -59,15 +59,15 @@ export class DaemonHeartbeat {
     if (!healthy && this.daemonHealthy) {
       // Daemon went down
       this.daemonHealthy = false;
-      this.transitionAllActive('daemon-down');
+      await this.transitionAllActive('daemon-down');
     } else if (healthy && !this.daemonHealthy) {
       // Daemon recovered
       this.daemonHealthy = true;
-      this.transitionAllDaemonUnreachable('daemon-up');
+      await this.transitionAllDaemonUnreachable('daemon-up');
     }
   }
 
-  private transitionAllActive(_action: 'daemon-down'): void {
+  private async transitionAllActive(_action: 'daemon-down'): Promise<void> {
     // We need all non-terminal sessions. Since we can't easily iterate
     // the store's internal map, we use the public API via operator lists.
     // For simplicity, iterate by getting all sessions from the store.
@@ -75,19 +75,19 @@ export class DaemonHeartbeat {
     const sessions = this.getAllActiveSessions();
     for (const s of sessions) {
       if (s.state === 'active' || s.state === 'expiring-soon') {
-        this.sessionService.markDaemonDown(s.id);
+        await this.sessionService.markDaemonDown(s.id);
       }
     }
   }
 
-  private transitionAllDaemonUnreachable(_action: 'daemon-up'): void {
+  private async transitionAllDaemonUnreachable(_action: 'daemon-up'): Promise<void> {
     const sessions = this.getAllActiveSessions();
     for (const s of sessions) {
       if (s.state === 'daemon-unreachable') {
         // Check if expired during outage — validate will handle expiry transition
         try {
-          this.sessionService.validate(s.id);
-          this.sessionService.markDaemonUp(s.id);
+          await this.sessionService.validate(s.id);
+          await this.sessionService.markDaemonUp(s.id);
         } catch {
           // Session expired during outage — already transitioned by validate
         }

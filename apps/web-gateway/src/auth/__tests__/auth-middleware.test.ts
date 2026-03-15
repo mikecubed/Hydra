@@ -4,6 +4,8 @@ import { Hono } from 'hono';
 import { createAuthMiddleware } from '../auth-middleware.ts';
 import { SessionService } from '../../session/session-service.ts';
 import { SessionStore } from '../../session/session-store.ts';
+import { AuditService } from '../../audit/audit-service.ts';
+import { AuditStore } from '../../audit/audit-store.ts';
 import { FakeClock } from '../../shared/clock.ts';
 import type { GatewayEnv } from '../../shared/types.ts';
 
@@ -53,7 +55,7 @@ describe('Auth middleware', () => {
   });
 
   it('accepts request with valid session cookie', async () => {
-    const session = sessionService.create('admin', '127.0.0.1');
+    const session = await sessionService.create('admin', '127.0.0.1');
     const res = await app.request('/protected', {
       headers: { Cookie: `__session=${session.id}` },
     });
@@ -65,7 +67,7 @@ describe('Auth middleware', () => {
   });
 
   it('rejects request with expired session cookie', async () => {
-    const session = sessionService.create('admin', '127.0.0.1');
+    const session = await sessionService.create('admin', '127.0.0.1');
     clock.advance(3600_001);
     const res = await app.request('/protected', {
       headers: { Cookie: `__session=${session.id}` },
@@ -76,8 +78,8 @@ describe('Auth middleware', () => {
   });
 
   it('rejects request with invalidated session cookie', async () => {
-    const session = sessionService.create('admin', '127.0.0.1');
-    sessionService.invalidate(session.id, 'test-reason');
+    const session = await sessionService.create('admin', '127.0.0.1');
+    await sessionService.invalidate(session.id, 'test-reason');
     const res = await app.request('/protected', {
       headers: { Cookie: `__session=${session.id}` },
     });
@@ -87,8 +89,8 @@ describe('Auth middleware', () => {
   });
 
   it('rejects request with logged-out session cookie', async () => {
-    const session = sessionService.create('admin', '127.0.0.1');
-    sessionService.logout(session.id);
+    const session = await sessionService.create('admin', '127.0.0.1');
+    await sessionService.logout(session.id);
     const res = await app.request('/protected', {
       headers: { Cookie: `__session=${session.id}` },
     });
@@ -98,7 +100,7 @@ describe('Auth middleware', () => {
   });
 
   it('rejects request with idle session', async () => {
-    const session = sessionService.create('admin', '127.0.0.1');
+    const session = await sessionService.create('admin', '127.0.0.1');
     clock.advance(1800_001);
     const res = await app.request('/protected', {
       headers: { Cookie: `__session=${session.id}` },
@@ -118,7 +120,7 @@ describe('Auth middleware', () => {
   });
 
   it('touches activity on valid request', async () => {
-    const session = sessionService.create('admin', '127.0.0.1');
+    const session = await sessionService.create('admin', '127.0.0.1');
     clock.advance(100_000);
     await app.request('/protected', {
       headers: { Cookie: `__session=${session.id}` },
@@ -132,12 +134,36 @@ describe('Auth middleware', () => {
     csrfApp.use('*', createAuthMiddleware(sessionService));
     csrfApp.get('/csrf', (c) => c.json({ csrf: c.get('csrfToken') }));
 
-    const session = sessionService.create('admin', '127.0.0.1');
+    const session = await sessionService.create('admin', '127.0.0.1');
     const res = await csrfApp.request('/csrf', {
       headers: { Cookie: `__session=${session.id}` },
     });
     assert.equal(res.status, 200);
     const body = await jsonBody(res);
     assert.equal(body.csrf, session.csrfToken);
+  });
+
+  it('emits session.idle-timeout audit event on idle rejection', async () => {
+    const auditStore = new AuditStore(null);
+    const auditService = new AuditService(auditStore, clock);
+
+    const auditedApp = new Hono<GatewayEnv>();
+    auditedApp.use('*', createAuthMiddleware(sessionService, auditService));
+    auditedApp.get('/protected', (c) => c.json({ ok: true }));
+
+    const session = await sessionService.create('admin', '127.0.0.1');
+    clock.advance(1800_001);
+
+    const res = await auditedApp.request('/protected', {
+      headers: { Cookie: `__session=${session.id}` },
+    });
+    assert.equal(res.status, 401);
+
+    const records = auditService.getRecords();
+    const idleEvents = records.filter((r) => r.eventType === 'session.idle-timeout');
+    assert.equal(idleEvents.length, 1, 'should emit one session.idle-timeout audit event');
+    assert.equal(idleEvents[0].operatorId, 'admin');
+    assert.equal(idleEvents[0].sessionId, session.id);
+    assert.equal(idleEvents[0].outcome, 'failure');
   });
 });

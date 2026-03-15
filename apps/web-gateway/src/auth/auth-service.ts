@@ -108,7 +108,7 @@ export class AuthService {
     cred.lastUsedAt = new Date().toISOString();
 
     // Create session
-    const session = this.sessionService.create(operator.id, sourceKey);
+    const session = await this.sessionService.create(operator.id, sourceKey);
 
     // Reset rate limiter on success
     this.rateLimiter.reset(sourceKey);
@@ -131,9 +131,8 @@ export class AuthService {
     _sourceKey: string,
     sessionId: string,
   ): Promise<StoredSession> {
-    // Validate the session exists and belongs to this operator
-    const session = this.sessionService.store.get(sessionId);
-    if (!session) throw createError('SESSION_NOT_FOUND');
+    // Validate the session is non-terminal and non-expired (FR-009)
+    const session = await this.sessionService.validate(sessionId);
 
     // Re-authentication is only valid for idle sessions (FR-009)
     if (!this.sessionService.isIdle(session)) {

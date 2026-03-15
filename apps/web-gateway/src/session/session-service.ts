@@ -54,7 +54,7 @@ export class SessionService {
     this.auditService = auditService;
   }
 
-  create(operatorId: string, sourceIp: string): StoredSession {
+  async create(operatorId: string, sourceIp: string): Promise<StoredSession> {
     // Enforce concurrent session limit (FR-017)
     const active = this.store.listByOperator(operatorId).filter((s) => !isTerminal(s.state));
     if (active.length >= this.config.maxConcurrentSessions) {
@@ -62,14 +62,14 @@ export class SessionService {
       const oldest = active.sort(
         (a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime(),
       )[0];
-      this.transitionSession(oldest.id, 'invalidate', 'concurrent-session-limit');
+      await this.transitionSession(oldest.id, 'invalidate', 'concurrent-session-limit');
     }
 
     const expiresAt = new Date(this.clock.now() + this.config.sessionLifetimeMs).toISOString();
     const now = new Date(this.clock.now()).toISOString();
     const session = this.store.create(operatorId, expiresAt, sourceIp, now);
 
-    void this.auditService?.record(
+    await this.auditService?.record(
       'session.created',
       operatorId,
       session.id,
@@ -80,7 +80,7 @@ export class SessionService {
     return session;
   }
 
-  validate(sessionId: string): StoredSession {
+  async validate(sessionId: string): Promise<StoredSession> {
     const session = this.store.get(sessionId);
     if (!session) throw createError('SESSION_NOT_FOUND');
 
@@ -93,14 +93,14 @@ export class SessionService {
     // Check absolute expiry
     const now = this.clock.now();
     if (now >= new Date(session.expiresAt).getTime()) {
-      this.transitionSession(sessionId, 'expire');
+      await this.transitionSession(sessionId, 'expire');
       throw createError('SESSION_EXPIRED');
     }
 
     // Check expiring-soon threshold
     const remaining = new Date(session.expiresAt).getTime() - now;
     if (remaining <= this.config.warningThresholdMs && session.state === 'active') {
-      this.transitionSession(sessionId, 'warn-expiry');
+      await this.transitionSession(sessionId, 'warn-expiry');
     }
 
     return session;
@@ -127,7 +127,7 @@ export class SessionService {
     return remaining <= this.config.warningThresholdMs;
   }
 
-  extend(sessionId: string): StoredSession {
+  async extend(sessionId: string): Promise<StoredSession> {
     const session = this.store.get(sessionId);
     if (!session) throw createError('SESSION_NOT_FOUND');
 
@@ -170,7 +170,7 @@ export class SessionService {
     });
     if (!updated) throw createError('SESSION_NOT_FOUND');
 
-    void this.auditService?.record(
+    await this.auditService?.record(
       'session.extended',
       session.operatorId,
       sessionId,
@@ -181,34 +181,34 @@ export class SessionService {
     return updated;
   }
 
-  logout(sessionId: string): void {
-    this.transitionSession(sessionId, 'logout');
+  async logout(sessionId: string): Promise<void> {
+    await this.transitionSession(sessionId, 'logout');
   }
 
-  invalidate(sessionId: string, reason: string): void {
-    this.transitionSession(sessionId, 'invalidate', reason);
+  async invalidate(sessionId: string, reason: string): Promise<void> {
+    await this.transitionSession(sessionId, 'invalidate', reason);
   }
 
-  invalidateAllForOperator(operatorId: string, reason: string): void {
+  async invalidateAllForOperator(operatorId: string, reason: string): Promise<void> {
     const sessions = this.store.listByOperator(operatorId).filter((s) => !isTerminal(s.state));
     for (const s of sessions) {
-      this.transitionSession(s.id, 'invalidate', reason);
+      await this.transitionSession(s.id, 'invalidate', reason);
     }
   }
 
-  markDaemonDown(sessionId: string): void {
-    this.transitionSession(sessionId, 'daemon-down');
+  async markDaemonDown(sessionId: string): Promise<void> {
+    await this.transitionSession(sessionId, 'daemon-down');
   }
 
-  markDaemonUp(sessionId: string): void {
-    this.transitionSession(sessionId, 'daemon-up');
+  async markDaemonUp(sessionId: string): Promise<void> {
+    await this.transitionSession(sessionId, 'daemon-up');
   }
 
-  private transitionSession(
+  private async transitionSession(
     sessionId: string,
     trigger: Parameters<typeof transition>[1],
     reason?: string,
-  ): void {
+  ): Promise<void> {
     const session = this.store.get(sessionId);
     if (session == null) return;
     const result = transition(session.state, trigger);
@@ -221,7 +221,7 @@ export class SessionService {
 
     const eventType = TRIGGER_TO_AUDIT[trigger];
     if (eventType && this.auditService) {
-      void this.auditService.record(
+      await this.auditService.record(
         eventType,
         session.operatorId,
         sessionId,

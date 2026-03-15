@@ -8,10 +8,14 @@ import type { MiddlewareHandler } from 'hono';
 import { type SessionService } from '../session/session-service.ts';
 import { createError, type GatewayError } from '../shared/errors.ts';
 import { type GatewayEnv, gatewayErrorResponse } from '../shared/types.ts';
+import type { AuditService } from '../audit/audit-service.ts';
 
 export type { GatewayEnv };
 
-export function createAuthMiddleware(sessionService: SessionService): MiddlewareHandler<GatewayEnv> {
+export function createAuthMiddleware(
+  sessionService: SessionService,
+  auditService?: AuditService,
+): MiddlewareHandler<GatewayEnv> {
   return createMiddleware<GatewayEnv>(async (c, next) => {
     const sessionId = getCookie(c, '__session');
 
@@ -20,9 +24,16 @@ export function createAuthMiddleware(sessionService: SessionService): Middleware
     }
 
     try {
-      const session = sessionService.validate(sessionId);
+      const session = await sessionService.validate(sessionId);
 
       if (sessionService.isIdle(session)) {
+        await auditService?.record(
+          'session.idle-timeout',
+          session.operatorId,
+          sessionId,
+          {},
+          'failure',
+        );
         return gatewayErrorResponse(c, createError('IDLE_TIMEOUT'));
       }
 
