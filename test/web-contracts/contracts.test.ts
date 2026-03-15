@@ -228,14 +228,25 @@ describe('Approval Flow contracts', () => {
     assert.ok(GetPendingApprovalsResponse.safeParse({ approvals: [validApproval] }).success);
   });
 
-  it('RespondToApprovalRequest requires response and sessionId', () => {
+  it('RespondToApprovalRequest requires response but not sessionId', () => {
     assert.ok(!RespondToApprovalRequest.safeParse({ approvalId: 'a-1' }).success);
     assert.ok(
       RespondToApprovalRequest.safeParse({
         approvalId: 'a-1',
         response: 'approve',
-        sessionId: 'sess-1',
       }).success,
+    );
+    // sessionId must NOT be part of the public contract
+    const parsed = RespondToApprovalRequest.safeParse({
+      approvalId: 'a-1',
+      response: 'approve',
+      sessionId: 'sess-1',
+    });
+    assert.ok(parsed.success, 'extra fields should not fail parse');
+    assert.equal(
+      (parsed.data as Record<string, unknown>)['sessionId'],
+      undefined,
+      'sessionId must be stripped from parsed data',
     );
   });
 

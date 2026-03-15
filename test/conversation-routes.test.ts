@@ -31,13 +31,14 @@ function createMockReq(
   method: string,
   url: string,
   body?: Record<string, unknown>,
+  headers?: Record<string, string>,
 ): IncomingMessage {
   const readable = body ? Readable.from([Buffer.from(JSON.stringify(body))]) : Readable.from([]);
 
   const req = Object.assign(readable, {
     method,
     url,
-    headers: { host: 'localhost:4173' },
+    headers: { host: 'localhost:4173', ...headers },
   }) as unknown as IncomingMessage;
 
   return req;
@@ -235,10 +236,14 @@ describe('Conversation routes — approvals', () => {
       responseOptions: [{ key: 'ok', label: 'OK' }],
     });
 
-    const req = createMockReq('POST', `/approvals/${approval.id}/respond`, {
-      response: 'ok',
-      sessionId: 'sess-1',
-    });
+    const req = createMockReq(
+      'POST',
+      `/approvals/${approval.id}/respond`,
+      {
+        response: 'ok',
+      },
+      { 'x-session-id': 'sess-1' },
+    );
     const res = createMockRes();
     handleConversationRoute(req, res as unknown as ServerResponse, deps);
     await waitForResponse(res);
@@ -1648,10 +1653,14 @@ describe('Conversation routes — approval response stream notification', () => 
       approvalId: approval.id,
     });
 
-    const req = createMockReq('POST', `/approvals/${approval.id}/respond`, {
-      response: 'approve',
-      sessionId: 'sess-1',
-    });
+    const req = createMockReq(
+      'POST',
+      `/approvals/${approval.id}/respond`,
+      {
+        response: 'approve',
+      },
+      { 'x-session-id': 'sess-1' },
+    );
     const res = createMockRes();
     handleConversationRoute(req, res as unknown as ServerResponse, deps);
     await waitForResponse(res);
@@ -1700,10 +1709,14 @@ describe('Conversation routes — approval response stream notification', () => 
       responseOptions: [{ key: 'approve', label: 'Approve' }],
     });
 
-    const req = createMockReq('POST', `/approvals/${approval.id}/respond`, {
-      response: 'approve',
-      sessionId: 'sess-1',
-    });
+    const req = createMockReq(
+      'POST',
+      `/approvals/${approval.id}/respond`,
+      {
+        response: 'approve',
+      },
+      { 'x-session-id': 'sess-1' },
+    );
     const res = createMockRes();
     handleConversationRoute(req, res as unknown as ServerResponse, deps);
     await waitForResponse(res);
@@ -1741,10 +1754,14 @@ describe('Conversation routes — approval response stream notification', () => 
       responseOptions: [{ key: 'approve', label: 'Approve' }],
     });
 
-    const req = createMockReq('POST', `/approvals/${approval.id}/respond`, {
-      response: 'approve',
-      sessionId: 'sess-1',
-    });
+    const req = createMockReq(
+      'POST',
+      `/approvals/${approval.id}/respond`,
+      {
+        response: 'approve',
+      },
+      { 'x-session-id': 'sess-1' },
+    );
     const res = createMockRes();
     handleConversationRoute(req, res as unknown as ServerResponse, deps);
     await waitForResponse(res);
@@ -1780,10 +1797,14 @@ describe('Conversation routes — approval response stream notification', () => 
     const eventsBefore = deps.streamManager.getStreamEvents(turn.id);
 
     // Second response via route — should conflict (409), no new stream event
-    const req = createMockReq('POST', `/approvals/${approval.id}/respond`, {
-      response: 'ok',
-      sessionId: 'sess-2',
-    });
+    const req = createMockReq(
+      'POST',
+      `/approvals/${approval.id}/respond`,
+      {
+        response: 'ok',
+      },
+      { 'x-session-id': 'sess-2' },
+    );
     const res = createMockRes();
     handleConversationRoute(req, res as unknown as ServerResponse, deps);
     await waitForResponse(res);
@@ -1812,10 +1833,14 @@ describe('Conversation routes — approval response stream notification', () => 
       responseOptions: [{ key: 'ok', label: 'OK' }],
     });
 
-    const req = createMockReq('POST', `/approvals/${approval.id}/respond`, {
-      response: 'ok',
-      sessionId: 'sess-1',
-    });
+    const req = createMockReq(
+      'POST',
+      `/approvals/${approval.id}/respond`,
+      {
+        response: 'ok',
+      },
+      { 'x-session-id': 'sess-1' },
+    );
     const res = createMockRes();
     handleConversationRoute(req, res as unknown as ServerResponse, deps);
     await waitForResponse(res);
@@ -1854,10 +1879,14 @@ describe('Conversation routes — approval response stream notification', () => 
       responseOptions: [{ key: 'ok', label: 'OK' }],
     });
 
-    const req = createMockReq('POST', `/approvals/${approval.id}/respond`, {
-      response: 'ok',
-      sessionId: 'sess-1',
-    });
+    const req = createMockReq(
+      'POST',
+      `/approvals/${approval.id}/respond`,
+      {
+        response: 'ok',
+      },
+      { 'x-session-id': 'sess-1' },
+    );
     const res = createMockRes();
     handleConversationRoute(req, res as unknown as ServerResponse, deps);
     await waitForResponse(res);
@@ -1892,10 +1921,14 @@ describe('Conversation routes — approval rejection on terminal turns', () => {
     // Cancel the turn — this should expire the pending approval
     deps.streamManager.cancelStream(turn.id);
 
-    const req = createMockReq('POST', `/approvals/${approval.id}/respond`, {
-      response: 'yes',
-      sessionId: 'sess-1',
-    });
+    const req = createMockReq(
+      'POST',
+      `/approvals/${approval.id}/respond`,
+      {
+        response: 'yes',
+      },
+      { 'x-session-id': 'sess-1' },
+    );
     const res = createMockRes();
     handleConversationRoute(req, res as unknown as ServerResponse, deps);
     await waitForResponse(res);
@@ -1924,10 +1957,14 @@ describe('Conversation routes — approval rejection on terminal turns', () => {
     // Complete the turn — should expire approvals
     deps.streamManager.completeStream(turn.id);
 
-    const req = createMockReq('POST', `/approvals/${approval.id}/respond`, {
-      response: 'ok',
-      sessionId: 'sess-1',
-    });
+    const req = createMockReq(
+      'POST',
+      `/approvals/${approval.id}/respond`,
+      {
+        response: 'ok',
+      },
+      { 'x-session-id': 'sess-1' },
+    );
     const res = createMockRes();
     handleConversationRoute(req, res as unknown as ServerResponse, deps);
     await waitForResponse(res);
@@ -1956,10 +1993,14 @@ describe('Conversation routes — approval rejection on terminal turns', () => {
     // Fail the turn — should expire approvals
     deps.streamManager.failStream(turn.id, 'boom');
 
-    const req = createMockReq('POST', `/approvals/${approval.id}/respond`, {
-      response: 'ok',
-      sessionId: 'sess-1',
-    });
+    const req = createMockReq(
+      'POST',
+      `/approvals/${approval.id}/respond`,
+      {
+        response: 'ok',
+      },
+      { 'x-session-id': 'sess-1' },
+    );
     const res = createMockRes();
     handleConversationRoute(req, res as unknown as ServerResponse, deps);
     await waitForResponse(res);
@@ -1992,10 +2033,14 @@ describe('Conversation routes — approval rejection on terminal turns', () => {
 
     deps.streamManager.cancelStream(turn.id);
 
-    const req = createMockReq('POST', `/approvals/${approval.id}/respond`, {
-      response: 'yes',
-      sessionId: 'sess-1',
-    });
+    const req = createMockReq(
+      'POST',
+      `/approvals/${approval.id}/respond`,
+      {
+        response: 'yes',
+      },
+      { 'x-session-id': 'sess-1' },
+    );
     const res = createMockRes();
     handleConversationRoute(req, res as unknown as ServerResponse, deps);
     await waitForResponse(res);
@@ -2059,10 +2104,14 @@ describe('Conversation routes — approval response validation', () => {
       ],
     });
 
-    const req = createMockReq('POST', `/approvals/${approval.id}/respond`, {
-      response: 'maybe',
-      sessionId: 'sess-1',
-    });
+    const req = createMockReq(
+      'POST',
+      `/approvals/${approval.id}/respond`,
+      {
+        response: 'maybe',
+      },
+      { 'x-session-id': 'sess-1' },
+    );
     const res = createMockRes();
     handleConversationRoute(req, res as unknown as ServerResponse, deps);
     await waitForResponse(res);
@@ -2092,10 +2141,14 @@ describe('Conversation routes — approval response validation', () => {
       ],
     });
 
-    const req = createMockReq('POST', `/approvals/${approval.id}/respond`, {
-      response: 'approve',
-      sessionId: 'sess-1',
-    });
+    const req = createMockReq(
+      'POST',
+      `/approvals/${approval.id}/respond`,
+      {
+        response: 'approve',
+      },
+      { 'x-session-id': 'sess-1' },
+    );
     const res = createMockRes();
     handleConversationRoute(req, res as unknown as ServerResponse, deps);
     await waitForResponse(res);
@@ -2104,7 +2157,7 @@ describe('Conversation routes — approval response validation', () => {
     assert.equal((res.body as Record<string, unknown>)['success'], true);
   });
 
-  it('POST /approvals/:id/respond returns 400 when sessionId is missing', async () => {
+  it('POST /approvals/:id/respond falls back to anonymous when X-Session-Id header is missing', async () => {
     const conv = deps.store.createConversation();
     const turn = deps.store.appendTurn(conv.id, {
       kind: 'operator',
@@ -2128,14 +2181,46 @@ describe('Conversation routes — approval response validation', () => {
     handleConversationRoute(req, res as unknown as ServerResponse, deps);
     await waitForResponse(res);
 
-    assert.equal(res.statusCode, 400, 'missing sessionId should return 400');
-    assert.ok(
-      (res.body as Record<string, string>)['error']?.includes('sessionId'),
-      'error message should mention sessionId',
+    assert.equal(res.statusCode, 200, 'missing header should succeed with anonymous');
+    const updated = deps.store.getApproval(approval.id);
+    assert.deepStrictEqual(updated?.respondedBy, { type: 'operator', label: 'anonymous' });
+  });
+
+  it('POST /approvals/:id/respond falls back to anonymous when X-Session-Id header is empty', async () => {
+    const conv = deps.store.createConversation();
+    const turn = deps.store.appendTurn(conv.id, {
+      kind: 'operator',
+      instruction: 'Deploy',
+      attribution: operatorAttribution,
+    });
+    deps.store.updateTurnStatus(turn.id, 'executing');
+    deps.streamManager.createStream(turn.id);
+
+    const approval = deps.store.createApprovalRequest(turn.id, {
+      prompt: 'Deploy?',
+      context: {},
+      contextHash: contextHash({ instruction: 'Deploy' }),
+      responseOptions: [{ key: 'approve', label: 'Approve' }],
+    });
+
+    const req = createMockReq(
+      'POST',
+      `/approvals/${approval.id}/respond`,
+      {
+        response: 'approve',
+      },
+      { 'x-session-id': '' },
     );
+    const res = createMockRes();
+    handleConversationRoute(req, res as unknown as ServerResponse, deps);
+    await waitForResponse(res);
+
+    assert.equal(res.statusCode, 200, 'empty header should succeed with anonymous');
+    const updated = deps.store.getApproval(approval.id);
+    assert.deepStrictEqual(updated?.respondedBy, { type: 'operator', label: 'anonymous' });
   });
 
-  it('POST /approvals/:id/respond returns 400 when sessionId is empty string', async () => {
+  it('POST /approvals/:id/respond uses X-Session-Id header for attribution', async () => {
     const conv = deps.store.createConversation();
     const turn = deps.store.appendTurn(conv.id, {
       kind: 'operator',
@@ -2152,43 +2237,21 @@ describe('Conversation routes — approval response validation', () => {
       responseOptions: [{ key: 'approve', label: 'Approve' }],
     });
 
-    const req = createMockReq('POST', `/approvals/${approval.id}/respond`, {
-      response: 'approve',
-      sessionId: '',
-    });
+    const req = createMockReq(
+      'POST',
+      `/approvals/${approval.id}/respond`,
+      {
+        response: 'approve',
+      },
+      { 'x-session-id': 'gateway-session-42' },
+    );
     const res = createMockRes();
     handleConversationRoute(req, res as unknown as ServerResponse, deps);
     await waitForResponse(res);
 
-    assert.equal(res.statusCode, 400, 'empty sessionId should return 400');
-  });
-
-  it('POST /approvals/:id/respond returns 400 when sessionId is non-string', async () => {
-    const conv = deps.store.createConversation();
-    const turn = deps.store.appendTurn(conv.id, {
-      kind: 'operator',
-      instruction: 'Deploy',
-      attribution: operatorAttribution,
-    });
-    deps.store.updateTurnStatus(turn.id, 'executing');
-    deps.streamManager.createStream(turn.id);
-
-    const approval = deps.store.createApprovalRequest(turn.id, {
-      prompt: 'Deploy?',
-      context: {},
-      contextHash: contextHash({ instruction: 'Deploy' }),
-      responseOptions: [{ key: 'approve', label: 'Approve' }],
-    });
-
-    const req = createMockReq('POST', `/approvals/${approval.id}/respond`, {
-      response: 'approve',
-      sessionId: 12345,
-    });
-    const res = createMockRes();
-    handleConversationRoute(req, res as unknown as ServerResponse, deps);
-    await waitForResponse(res);
-
-    assert.equal(res.statusCode, 400, 'non-string sessionId should return 400');
+    assert.equal(res.statusCode, 200);
+    const updated = deps.store.getApproval(approval.id);
+    assert.deepStrictEqual(updated?.respondedBy, { type: 'operator', label: 'gateway-session-42' });
   });
 });
 
@@ -2284,10 +2347,14 @@ describe('Conversation routes — context-hash staleness detection', () => {
     // Mutate the turn instruction to simulate context drift
     (turn as { instruction: string }).instruction = 'deploy to staging';
 
-    const req = createMockReq('POST', `/approvals/${approval.id}/respond`, {
-      response: 'approve',
-      sessionId: 'sess-1',
-    });
+    const req = createMockReq(
+      'POST',
+      `/approvals/${approval.id}/respond`,
+      {
+        response: 'approve',
+      },
+      { 'x-session-id': 'sess-1' },
+    );
     const res = createMockRes();
     handleConversationRoute(req, res as unknown as ServerResponse, deps);
     await waitForResponse(res);
@@ -2318,11 +2385,15 @@ describe('Conversation routes — context-hash staleness detection', () => {
     // Mutate instruction to create staleness
     (turn as { instruction: string }).instruction = 'deploy to staging';
 
-    const req = createMockReq('POST', `/approvals/${approval.id}/respond`, {
-      response: 'approve',
-      sessionId: 'sess-1',
-      acknowledgeStaleness: true,
-    });
+    const req = createMockReq(
+      'POST',
+      `/approvals/${approval.id}/respond`,
+      {
+        response: 'approve',
+        acknowledgeStaleness: true,
+      },
+      { 'x-session-id': 'sess-1' },
+    );
     const res = createMockRes();
     handleConversationRoute(req, res as unknown as ServerResponse, deps);
     await waitForResponse(res);

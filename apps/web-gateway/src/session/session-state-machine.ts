@@ -1,7 +1,7 @@
 /**
  * Session state machine — pure function: (current + trigger) → new state | error.
  *
- * 15 defined transitions. Terminal states reject all transitions.
+ * 14 defined transitions. Terminal states reject all transitions.
  */
 import type { SessionState } from '@hydra/web-contracts';
 import { TERMINAL_STATES } from '@hydra/web-contracts';

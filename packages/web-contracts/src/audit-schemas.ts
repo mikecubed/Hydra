@@ -5,7 +5,7 @@
  */
 import { z } from 'zod';
 
-// ─── AuditEventType enum (11 in-scope types) ────────────────────────────────
+// ─── AuditEventType enum (12 in-scope types) ────────────────────────────────
 
 export const AuditEventType = z.enum([
   'auth.attempt.success',

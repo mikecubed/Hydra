@@ -29,7 +29,18 @@ interface StreamState {
   streamId: string;
   status: StreamStatus;
   events: StreamEventType[];
+  /** ISO timestamp when the stream entered a terminal state (completed/failed/cancelled). */
+  completedAt?: string;
 }
+
+const TERMINAL_STREAM_STATUSES: ReadonlySet<StreamStatus> = new Set([
+  'completed',
+  'failed',
+  'cancelled',
+]);
+
+/** Default retention: 5 minutes after terminal state. */
+const DEFAULT_RETENTION_MS = 5 * 60 * 1000;
 
 // ── StreamManager ────────────────────────────────────────────────────────────
 
@@ -38,9 +49,11 @@ export class StreamManager {
   private readonly streamByTurnId = new Map<string, string>();
   private seq = 0;
   private readonly store: ConversationStore;
+  private readonly retentionMs: number;
 
-  constructor(store: ConversationStore) {
+  constructor(store: ConversationStore, retentionMs = DEFAULT_RETENTION_MS) {
     this.store = store;
+    this.retentionMs = retentionMs;
   }
 
   private nextSeq(): number {
@@ -130,9 +143,12 @@ export class StreamManager {
     };
     state.events.push(completedEvent);
     state.status = 'completed';
+    state.completedAt = nowIso();
 
     // Finalize the turn
     this.store.finalizeTurn(turnId, 'completed', response === '' ? undefined : response);
+
+    this.purgeExpiredStreams();
   }
 
   /**
@@ -153,8 +169,11 @@ export class StreamManager {
     };
     state.events.push(failedEvent);
     state.status = 'failed';
+    state.completedAt = nowIso();
 
     this.store.finalizeTurn(turnId, 'failed', reason);
+
+    this.purgeExpiredStreams();
   }
 
   /**
@@ -176,8 +195,11 @@ export class StreamManager {
     };
     state.events.push(cancelEvent);
     state.status = 'cancelled';
+    state.completedAt = nowIso();
 
     this.store.finalizeTurn(turnId, 'cancelled');
+
+    this.purgeExpiredStreams();
   }
 
   /**
@@ -212,5 +234,40 @@ export class StreamManager {
    */
   getStreamId(turnId: string): string | undefined {
     return this.streamByTurnId.get(turnId);
+  }
+
+  /**
+   * Remove terminal streams older than `maxAgeMs` (defaults to configured
+   * retention). Active streams are never purged — only completed, failed, or
+   * cancelled streams past the retention window are removed.
+   *
+   * @returns The number of streams purged.
+   */
+  purgeTerminalStreams(maxAgeMs?: number): number {
+    const cutoff = Date.now() - (maxAgeMs ?? this.retentionMs);
+    let purged = 0;
+    for (const [streamId, state] of this.streams) {
+      if (!TERMINAL_STREAM_STATUSES.has(state.status)) continue;
+      if (state.completedAt === undefined) continue;
+      if (new Date(state.completedAt).getTime() <= cutoff) {
+        this.streams.delete(streamId);
+        this.streamByTurnId.delete(state.turnId);
+        purged += 1;
+      }
+    }
+    return purged;
+  }
+
+  /** Number of streams currently tracked (active + retained terminal). */
+  get streamCount(): number {
+    return this.streams.size;
+  }
+
+  /**
+   * Internal: purge expired streams after each terminal transition.
+   * Uses the instance retention setting.
+   */
+  private purgeExpiredStreams(): void {
+    this.purgeTerminalStreams();
   }
 }

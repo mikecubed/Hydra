@@ -630,16 +630,16 @@ async function handleRespondToApproval(
 ): Promise<void> {
   const body = await readJsonBody(req);
   const response = typeof body['response'] === 'string' ? body['response'] : '';
-  const sessionId = typeof body['sessionId'] === 'string' ? body['sessionId'] : '';
   const acknowledgeStaleness = body['acknowledgeStaleness'] === true;
+
+  // Session identity comes from the X-Session-Id header (injected by the
+  // gateway from the authenticated HttpOnly cookie), not from the request body.
+  // Falls back to 'anonymous' for direct daemon access without a gateway.
+  const headerVal = req.headers['x-session-id'];
+  const sessionId = typeof headerVal === 'string' && headerVal !== '' ? headerVal : 'anonymous';
 
   if (response === '') {
     sendError(res, 400, 'response is required');
-    return;
-  }
-
-  if (sessionId === '') {
-    sendError(res, 400, 'sessionId is required');
     return;
   }
 

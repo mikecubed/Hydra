@@ -347,3 +347,153 @@ describe('StreamManager — status', () => {
     assert.ok(!streamManager.isStreamActive(turn.id));
   });
 });
+
+// ── Stream retention / cleanup ───────────────────────────────────────────────
+
+describe('StreamManager — retention', () => {
+  it('purgeTerminalStreams removes completed streams past retention window', () => {
+    // Use large retention so auto-purge does not fire, then manually purge with 0ms
+    const sm = new StreamManager(store, 60_000);
+    const conv = store.createConversation();
+    const turn = store.appendTurn(conv.id, {
+      kind: 'operator',
+      instruction: 'Hello',
+      attribution: operatorAttribution,
+    });
+    store.updateTurnStatus(turn.id, 'executing');
+    sm.createStream(turn.id);
+    sm.completeStream(turn.id);
+
+    assert.equal(sm.streamCount, 1, 'stream should be retained within window');
+
+    // Manual purge with 0ms override should remove it
+    const purged = sm.purgeTerminalStreams(0);
+    assert.equal(purged, 1);
+    assert.equal(sm.streamCount, 0);
+    assert.deepStrictEqual(sm.getStreamEvents(turn.id), []);
+  });
+
+  it('purgeTerminalStreams preserves active streams', () => {
+    const sm = new StreamManager(store, 0);
+    const conv = store.createConversation();
+    const turn = store.appendTurn(conv.id, {
+      kind: 'operator',
+      instruction: 'Hello',
+      attribution: operatorAttribution,
+    });
+    sm.createStream(turn.id);
+
+    const purged = sm.purgeTerminalStreams(0);
+    assert.equal(purged, 0);
+    assert.equal(sm.streamCount, 1);
+  });
+
+  it('purgeTerminalStreams preserves streams within retention window', () => {
+    // Use very large retention so nothing expires
+    const sm = new StreamManager(store, 60_000);
+    const conv = store.createConversation();
+    const turn = store.appendTurn(conv.id, {
+      kind: 'operator',
+      instruction: 'Hello',
+      attribution: operatorAttribution,
+    });
+    store.updateTurnStatus(turn.id, 'executing');
+    sm.createStream(turn.id);
+    sm.completeStream(turn.id);
+
+    const purged = sm.purgeTerminalStreams();
+    assert.equal(purged, 0, 'recently completed stream should not be purged');
+    assert.equal(sm.streamCount, 1);
+  });
+
+  it('auto-purges on completeStream with 0ms retention', () => {
+    const sm = new StreamManager(store, 0);
+    const conv = store.createConversation();
+
+    // Create and complete stream A
+    const turnA = store.appendTurn(conv.id, {
+      kind: 'operator',
+      instruction: 'A',
+      attribution: operatorAttribution,
+    });
+    store.updateTurnStatus(turnA.id, 'executing');
+    sm.createStream(turnA.id);
+    sm.completeStream(turnA.id);
+
+    // Create and complete stream B — this should auto-purge A
+    const turnB = store.appendTurn(conv.id, {
+      kind: 'operator',
+      instruction: 'B',
+      attribution: operatorAttribution,
+    });
+    store.updateTurnStatus(turnB.id, 'executing');
+    sm.createStream(turnB.id);
+    sm.completeStream(turnB.id);
+
+    // Both terminal with 0ms retention — both purged at B's completion
+    assert.equal(sm.streamCount, 0);
+  });
+
+  it('auto-purges on failStream', () => {
+    const sm = new StreamManager(store, 0);
+    const conv = store.createConversation();
+
+    const turnA = store.appendTurn(conv.id, {
+      kind: 'operator',
+      instruction: 'A',
+      attribution: operatorAttribution,
+    });
+    store.updateTurnStatus(turnA.id, 'executing');
+    sm.createStream(turnA.id);
+    sm.completeStream(turnA.id);
+
+    const turnB = store.appendTurn(conv.id, {
+      kind: 'operator',
+      instruction: 'B',
+      attribution: operatorAttribution,
+    });
+    store.updateTurnStatus(turnB.id, 'executing');
+    sm.createStream(turnB.id);
+    sm.failStream(turnB.id, 'error');
+
+    assert.equal(sm.streamCount, 0);
+  });
+
+  it('auto-purges on cancelStream', () => {
+    const sm = new StreamManager(store, 0);
+    const conv = store.createConversation();
+
+    const turnA = store.appendTurn(conv.id, {
+      kind: 'operator',
+      instruction: 'A',
+      attribution: operatorAttribution,
+    });
+    store.updateTurnStatus(turnA.id, 'executing');
+    sm.createStream(turnA.id);
+    sm.completeStream(turnA.id);
+
+    const turnB = store.appendTurn(conv.id, {
+      kind: 'operator',
+      instruction: 'B',
+      attribution: operatorAttribution,
+    });
+    store.updateTurnStatus(turnB.id, 'executing');
+    sm.createStream(turnB.id);
+    sm.cancelStream(turnB.id);
+
+    assert.equal(sm.streamCount, 0);
+  });
+
+  it('streamCount reflects current map size', () => {
+    const conv = store.createConversation();
+    assert.equal(streamManager.streamCount, 0);
+
+    const turn = store.appendTurn(conv.id, {
+      kind: 'operator',
+      instruction: 'Hello',
+      attribution: operatorAttribution,
+    });
+    streamManager.createStream(turn.id);
+    assert.equal(streamManager.streamCount, 1);
+  });
+});

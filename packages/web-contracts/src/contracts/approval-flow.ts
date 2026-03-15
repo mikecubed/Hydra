@@ -21,7 +21,6 @@ export type GetPendingApprovalsResponse = z.infer<typeof GetPendingApprovalsResp
 export const RespondToApprovalRequest = z.object({
   approvalId: z.string().min(1),
   response: z.string().min(1),
-  sessionId: z.string().min(1),
   acknowledgeStaleness: z.boolean().default(false),
 });
 export type RespondToApprovalRequest = z.infer<typeof RespondToApprovalRequest>;
