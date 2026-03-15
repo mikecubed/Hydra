@@ -22,7 +22,9 @@ export type HealthChecker = (url: string) => Promise<boolean>;
 export const defaultHealthChecker: HealthChecker = async (url: string): Promise<boolean> => {
   try {
     const controller = new AbortController();
-    const timeout = setTimeout(() => { controller.abort(); }, 5_000);
+    const timeout = setTimeout(() => {
+      controller.abort();
+    }, 5_000);
     const res = await fetch(`${url}/status`, { signal: controller.signal });
     clearTimeout(timeout);
     return res.ok;
@@ -81,31 +83,24 @@ export class DaemonHeartbeat {
   }
 
   private async transitionAllActive(_action: 'daemon-down'): Promise<void> {
-    // We need all non-terminal sessions. Since we can't easily iterate
-    // the store's internal map, we use the public API via operator lists.
-    // For simplicity, iterate by getting all sessions from the store.
-    // This works because DaemonHeartbeat has access to the store.
     const sessions = this.getAllActiveSessions();
-    for (const s of sessions) {
-      if (s.state === 'active' || s.state === 'expiring-soon') {
-        await this.sessionService.markDaemonDown(s.id);
-      }
-    }
+    const eligible = sessions.filter((s) => s.state === 'active' || s.state === 'expiring-soon');
+    await Promise.all(eligible.map((s) => this.sessionService.markDaemonDown(s.id)));
   }
 
   private async transitionAllDaemonUnreachable(_action: 'daemon-up'): Promise<void> {
     const sessions = this.getAllActiveSessions();
-    for (const s of sessions) {
-      if (s.state === 'daemon-unreachable') {
-        // Check if expired during outage — validate will handle expiry transition
+    const eligible = sessions.filter((s) => s.state === 'daemon-unreachable');
+    await Promise.all(
+      eligible.map(async (s) => {
         try {
           await this.sessionService.validate(s.id);
           await this.sessionService.markDaemonUp(s.id);
         } catch {
           // Session expired during outage — already transitioned by validate
         }
-      }
-    }
+      }),
+    );
   }
 
   private getAllActiveSessions() {

@@ -20,7 +20,13 @@ export function createCsrfMiddleware(): MiddlewareHandler<GatewayEnv> {
     const cookieToken = getCookie(c, '__csrf');
     const headerToken = c.req.header('x-csrf-token');
 
-    if (!cookieToken || !headerToken || cookieToken !== headerToken) {
+    if (
+      cookieToken == null ||
+      cookieToken === '' ||
+      headerToken == null ||
+      headerToken === '' ||
+      cookieToken !== headerToken
+    ) {
       return gatewayErrorResponse(c, createError('CSRF_INVALID'));
     }
 

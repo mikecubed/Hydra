@@ -237,12 +237,7 @@ describe('AuthService', () => {
       const operator = operatorStore.getOperator('admin')!;
       for (const c of operator.credentials) c.lastUsedAt = null;
 
-      await authService.reauthenticate(
-        'admin',
-        'second-password',
-        '127.0.0.1',
-        result.session.id,
-      );
+      await authService.reauthenticate('admin', 'second-password', '127.0.0.1', result.session.id);
 
       const firstCred = operator.credentials[0];
       const secondCred = operator.credentials.find((c) => c.id === cred2.id)!;
@@ -259,10 +254,19 @@ describe('AuthService', () => {
     beforeEach(async () => {
       const auditStore = new AuditStore(null);
       auditService = new AuditService(auditStore, clock);
-      rateLimiterForReauth = new RateLimiter(clock, { maxAttempts: 3, windowMs: 60_000, lockoutMs: 300_000 });
+      rateLimiterForReauth = new RateLimiter(clock, {
+        maxAttempts: 3,
+        windowMs: 60_000,
+        lockoutMs: 300_000,
+      });
       const sessionStore = new SessionStore(null);
       const sessionSvc = new SessionService(sessionStore, clock);
-      authedService = new AuthService(operatorStore, rateLimiterForReauth, sessionSvc, auditService);
+      authedService = new AuthService(
+        operatorStore,
+        rateLimiterForReauth,
+        sessionSvc,
+        auditService,
+      );
     });
 
     async function loginAndMakeIdle(): Promise<string> {
@@ -311,7 +315,9 @@ describe('AuthService', () => {
       for (let i = 0; i < 3; i++) {
         try {
           await authedService.reauthenticate('admin', 'wrong', '10.0.0.1', sessionId);
-        } catch { /* expected */ }
+        } catch {
+          /* expected */
+        }
       }
 
       // Trigger rate limit
@@ -335,7 +341,9 @@ describe('AuthService', () => {
       for (let i = 0; i < 2; i++) {
         try {
           await authedService.reauthenticate('admin', 'wrong', '10.0.0.1', sessionId);
-        } catch { /* expected */ }
+        } catch {
+          /* expected */
+        }
       }
 
       // Successful reauth should reset the counter

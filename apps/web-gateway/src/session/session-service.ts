@@ -217,9 +217,7 @@ export class SessionService {
 
   async invalidateAllForOperator(operatorId: string, reason: string): Promise<void> {
     const sessions = this.store.listByOperator(operatorId).filter((s) => !isTerminal(s.state));
-    for (const s of sessions) {
-      await this.transitionSession(s.id, 'invalidate', reason);
-    }
+    await Promise.all(sessions.map((s) => this.transitionSession(s.id, 'invalidate', reason)));
   }
 
   async markDaemonDown(sessionId: string): Promise<void> {
@@ -253,7 +251,7 @@ export class SessionService {
     this.store.update(sessionId, updates);
 
     const eventType = TRIGGER_TO_AUDIT[trigger];
-    if (eventType && this.auditService) {
+    if (eventType !== '' && this.auditService) {
       try {
         await this.auditService.record(
           eventType,

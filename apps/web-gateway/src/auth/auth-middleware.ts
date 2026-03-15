@@ -19,7 +19,7 @@ export function createAuthMiddleware(
   return createMiddleware<GatewayEnv>(async (c, next) => {
     const sessionId = getCookie(c, '__session');
 
-    if (!sessionId) {
+    if (sessionId == null || sessionId === '') {
       return gatewayErrorResponse(c, createError('SESSION_NOT_FOUND'));
     }
 
@@ -53,10 +53,7 @@ export function createAuthMiddleware(
       if (err != null && typeof err === 'object' && 'code' in err) {
         return gatewayErrorResponse(c, err as GatewayError);
       }
-      return c.json(
-        { code: 'INTERNAL_ERROR', message: 'Internal server error' },
-        500,
-      );
+      return c.json({ code: 'INTERNAL_ERROR', message: 'Internal server error' }, 500);
     }
   });
 }

@@ -14,11 +14,8 @@ export function createSessionRoutes(sessionService: SessionService): Hono<Gatewa
 
   app.get('/info', async (c) => {
     const sessionId = getCookie(c, '__session');
-    if (!sessionId) {
-      return c.json(
-        { code: 'SESSION_NOT_FOUND', message: 'No session' },
-        401,
-      );
+    if (sessionId == null || sessionId === '') {
+      return c.json({ code: 'SESSION_NOT_FOUND', message: 'No session' }, 401);
     }
 
     try {
@@ -37,11 +34,8 @@ export function createSessionRoutes(sessionService: SessionService): Hono<Gatewa
 
   app.post('/extend', async (c) => {
     const sessionId = getCookie(c, '__session');
-    if (!sessionId) {
-      return c.json(
-        { code: 'SESSION_NOT_FOUND', message: 'No session' },
-        401,
-      );
+    if (sessionId == null || sessionId === '') {
+      return c.json({ code: 'SESSION_NOT_FOUND', message: 'No session' }, 401);
     }
 
     try {

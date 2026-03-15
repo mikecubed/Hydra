@@ -29,14 +29,19 @@ describe('E2E: Auth lifecycle', () => {
     const sessionStore = new SessionStore(null);
     const auditStore = new AuditStore(null);
     auditService = new AuditService(auditStore, clock);
-    sessionService = new SessionService(sessionStore, clock, {
-      sessionLifetimeMs: 3600_000,
-      warningThresholdMs: 600_000,
-      maxExtensions: 3,
-      extensionDurationMs: 3600_000,
-      maxConcurrentSessions: 5,
-      idleTimeoutMs: 1800_000,
-    }, auditService);
+    sessionService = new SessionService(
+      sessionStore,
+      clock,
+      {
+        sessionLifetimeMs: 3600_000,
+        warningThresholdMs: 600_000,
+        maxExtensions: 3,
+        extensionDurationMs: 3600_000,
+        maxConcurrentSessions: 5,
+        idleTimeoutMs: 1800_000,
+      },
+      auditService,
+    );
     authService = new AuthService(operatorStore, rateLimiter, sessionService, auditService);
 
     await operatorStore.createOperator('admin', 'Admin');

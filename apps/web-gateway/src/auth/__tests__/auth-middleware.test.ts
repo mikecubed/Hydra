@@ -134,9 +134,7 @@ describe('Auth middleware', () => {
     // downstream middleware rejects with 403. Activity must NOT be refreshed.
     const rejectApp = new Hono<GatewayEnv>();
     rejectApp.use('*', createAuthMiddleware(sessionService));
-    rejectApp.use('*', async (c) => {
-      return c.json({ code: 'CSRF_INVALID', message: 'bad token' }, 403);
-    });
+    rejectApp.use('*', async (c) => c.json({ code: 'CSRF_INVALID', message: 'bad token' }, 403));
     rejectApp.post('/action', (c) => c.json({ ok: true }));
 
     const session = await sessionService.create('admin', '127.0.0.1');

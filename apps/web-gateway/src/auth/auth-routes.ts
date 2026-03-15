@@ -17,6 +17,61 @@ export interface AuthRoutesConfig {
   secureCookies: boolean;
 }
 
+type CredentialResult =
+  | { ok: true; identity: string; secret: string }
+  | { ok: false; response: Response };
+
+async function parseCredentials(
+  c: Context,
+  missingMessage = 'Missing identity or secret',
+): Promise<CredentialResult> {
+  let raw: unknown;
+  try {
+    raw = await c.req.json();
+  } catch {
+    return {
+      ok: false,
+      response: c.json({ code: 'BAD_REQUEST', message: 'Invalid JSON body' }, 400),
+    };
+  }
+  if (raw == null || typeof raw !== 'object' || Array.isArray(raw)) {
+    return {
+      ok: false,
+      response: c.json({ code: 'BAD_REQUEST', message: 'Invalid JSON body' }, 400),
+    };
+  }
+  const body = raw as Record<string, unknown>;
+  const { identity, secret } = body as { identity: unknown; secret: unknown };
+  if (
+    typeof identity !== 'string' ||
+    typeof secret !== 'string' ||
+    identity === '' ||
+    secret === ''
+  ) {
+    return { ok: false, response: c.json({ code: 'BAD_REQUEST', message: missingMessage }, 400) };
+  }
+  return { ok: true, identity, secret };
+}
+
+function setSessionCookies(
+  c: Context,
+  session: { id: string; csrfToken: string },
+  config: AuthRoutesConfig,
+): void {
+  setCookie(c, '__session', session.id, {
+    httpOnly: true,
+    sameSite: 'Strict',
+    secure: config.secureCookies,
+    path: '/',
+  });
+  setCookie(c, '__csrf', session.csrfToken, {
+    httpOnly: false,
+    sameSite: 'Strict',
+    secure: config.secureCookies,
+    path: '/',
+  });
+}
+
 export function createAuthRoutes(
   authService: AuthService,
   sessionService: SessionService,
@@ -25,44 +80,13 @@ export function createAuthRoutes(
   const app = new Hono<GatewayEnv>();
 
   app.post('/login', async (c) => {
-    let raw: unknown;
-    try {
-      raw = await c.req.json();
-    } catch {
-      return c.json({ code: 'BAD_REQUEST', message: 'Invalid JSON body' }, 400);
-    }
-    if (raw == null || typeof raw !== 'object' || Array.isArray(raw)) {
-      return c.json({ code: 'BAD_REQUEST', message: 'Invalid JSON body' }, 400);
-    }
-    const body = raw as Record<string, unknown>;
-    const identity = body['identity'];
-    const secret = body['secret'];
-
-    if (
-      typeof identity !== 'string' ||
-      typeof secret !== 'string' ||
-      identity === '' ||
-      secret === ''
-    ) {
-      return c.json({ code: 'BAD_REQUEST', message: 'Missing identity or secret' }, 400);
-    }
+    const creds = await parseCredentials(c);
+    if (!creds.ok) return creds.response;
 
     try {
       const sourceKey = c.get('sourceKey');
-      const { session } = await authService.authenticate(identity, secret, sourceKey);
-
-      setCookie(c, '__session', session.id, {
-        httpOnly: true,
-        sameSite: 'Strict',
-        secure: config.secureCookies,
-        path: '/',
-      });
-      setCookie(c, '__csrf', session.csrfToken, {
-        httpOnly: false,
-        sameSite: 'Strict',
-        secure: config.secureCookies,
-        path: '/',
-      });
+      const { session } = await authService.authenticate(creds.identity, creds.secret, sourceKey);
+      setSessionCookies(c, session, config);
 
       return c.json({
         operatorId: session.operatorId,
@@ -77,11 +101,8 @@ export function createAuthRoutes(
   app.post('/logout', async (c) => {
     const sessionId = getCookie(c, '__session');
 
-    if (sessionId) {
+    if (sessionId != null && sessionId !== '') {
       try {
-        // sessionService.logout() silently handles benign cases (session not
-        // found, already terminal). Only genuine failures (e.g. audit
-        // persistence errors) will throw, and those must surface as 5xx.
         await sessionService.logout(sessionId);
       } catch {
         // logout() rolls server state back on audit failure — the session
@@ -90,8 +111,6 @@ export function createAuthRoutes(
       }
     }
 
-    // Only clear cookies after a confirmed server-side terminal transition
-    // (or when there was no session to begin with).
     deleteCookie(c, '__session', { path: '/' });
     deleteCookie(c, '__csrf', { path: '/' });
 
@@ -100,35 +119,21 @@ export function createAuthRoutes(
 
   app.post('/reauth', async (c) => {
     const sessionId = getCookie(c, '__session');
-    if (!sessionId) {
+    if (sessionId == null || sessionId === '') {
       return c.json({ code: 'SESSION_NOT_FOUND', message: 'No session' }, 401);
     }
 
-    let raw: unknown;
-    try {
-      raw = await c.req.json();
-    } catch {
-      return c.json({ code: 'BAD_REQUEST', message: 'Invalid JSON body' }, 400);
-    }
-    if (raw == null || typeof raw !== 'object' || Array.isArray(raw)) {
-      return c.json({ code: 'BAD_REQUEST', message: 'Invalid JSON body' }, 400);
-    }
-    const body = raw as Record<string, unknown>;
-    const identity = body['identity'];
-    const secret = body['secret'];
-
-    if (
-      typeof identity !== 'string' ||
-      typeof secret !== 'string' ||
-      identity === '' ||
-      secret === ''
-    ) {
-      return c.json({ code: 'BAD_REQUEST', message: 'Missing credentials' }, 400);
-    }
+    const creds = await parseCredentials(c, 'Missing credentials');
+    if (!creds.ok) return creds.response;
 
     try {
       const sourceKey = c.get('sourceKey');
-      const session = await authService.reauthenticate(identity, secret, sourceKey, sessionId);
+      const session = await authService.reauthenticate(
+        creds.identity,
+        creds.secret,
+        sourceKey,
+        sessionId,
+      );
 
       return c.json({
         operatorId: session.operatorId,
