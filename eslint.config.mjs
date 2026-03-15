@@ -129,7 +129,7 @@ export default [
 
   // ─── Test files — relaxed rules ───────────────────────────────────────────
   {
-    files: ['test/**/*.mjs'],
+    files: ['test/**/*.mjs', 'apps/**/__tests__/**/*.mjs', 'packages/**/__tests__/**/*.mjs'],
     rules: {
       'no-shadow': 'off',
       'no-await-in-loop': 'off',
@@ -289,7 +289,7 @@ export default [
 
   // ─── Test files — relax strict TS rules ──────────────────────────────────
   {
-    files: ['test/**/*.ts'],
+    files: ['test/**/*.ts', 'apps/**/__tests__/**/*.ts', 'packages/**/__tests__/**/*.ts'],
     rules: {
       '@typescript-eslint/no-unsafe-assignment': 'off',
       '@typescript-eslint/no-unsafe-member-access': 'off',
@@ -298,7 +298,18 @@ export default [
       '@typescript-eslint/strict-boolean-expressions': 'off',
       'n/no-unsupported-features/node-builtins': [
         'error',
-        { ignores: ['fetch', 'test.describe', 'test.mock.module'] },
+        {
+          ignores: [
+            'fetch',
+            'test',
+            'test.describe',
+            'test.it',
+            'test.beforeEach',
+            'test.afterEach',
+            'test.mock.module',
+            'import.meta.dirname',
+          ],
+        },
       ],
       'no-shadow': 'off',
       'n/no-unpublished-import': 'off',
@@ -307,6 +318,11 @@ export default [
       complexity: 'off',
       'max-lines-per-function': 'off',
       'max-depth': 'off',
+      'no-await-in-loop': 'off',
+      '@typescript-eslint/no-non-null-assertion': 'off',
+      '@typescript-eslint/restrict-template-expressions': 'off',
+      '@typescript-eslint/require-await': 'off',
+      '@typescript-eslint/no-unnecessary-condition': 'off',
     },
   },
 ];

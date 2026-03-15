@@ -22,3 +22,19 @@ export type { ApprovalRequestStub as ApprovalRequestType } from './vocabulary.ts
 export type { ArtifactStub as ArtifactType } from './vocabulary.ts';
 export type { SessionSnapshotStub as SessionSnapshotType } from './vocabulary.ts';
 export type { ContractFamily } from './vocabulary.ts';
+
+// ─── Session & Auth contracts (Phase 1 — web-session-auth) ──────────────────
+
+export {
+  SessionState,
+  TERMINAL_STATES,
+  SessionInfo,
+  SessionEvent,
+  ExtendResponse,
+} from './session-schemas.ts';
+
+export { LoginRequest, LoginResponse, LogoutResponse, AuthError } from './auth-schemas.ts';
+
+export { AuditEventType, AuditRecord } from './audit-schemas.ts';
+
+export { Operator, CredentialType } from './operator-schemas.ts';
