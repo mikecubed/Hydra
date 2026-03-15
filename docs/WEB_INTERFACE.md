@@ -1,459 +1,367 @@
 # Hydra Web Interface — Design & Architecture
 
-> **Status:** Proposal / Research Document
-> **Scope:** Local-network web UI providing full operator parity with the terminal REPL
+> **Status:** Proposal / Revised design document
+> **Scope:** Progressive, authenticated web UI for Hydra, starting with the daemon capabilities that already exist today
 
 ---
 
 ## Table of Contents
 
 1. [Overview](#overview)
-2. [Proposed Features](#proposed-features)
-3. [Framework Research & Recommendation](#framework-research--recommendation)
-4. [Architecture Overview](#architecture-overview)
-5. [Dataflow Diagrams](#dataflow-diagrams)
-6. [Workflow Diagrams](#workflow-diagrams)
-7. [How the App Works with the Daemon](#how-the-app-works-with-the-daemon)
-8. [Security Model](#security-model)
-9. [Threat Model](#threat-model)
-10. [Implementation Roadmap](#implementation-roadmap)
+2. [Guiding Decisions](#guiding-decisions)
+3. [Goals and Non-Goals](#goals-and-non-goals)
+4. [Proposed Capabilities](#proposed-capabilities)
+5. [Framework Recommendation](#framework-recommendation)
+6. [Architecture Overview](#architecture-overview)
+7. [Current Daemon Alignment and Required Additions](#current-daemon-alignment-and-required-additions)
+8. [Data Flows](#data-flows)
+9. [Security Model](#security-model)
+10. [Threat Model](#threat-model)
+11. [Implementation Roadmap](#implementation-roadmap)
+12. [Testing, Packaging, and Rollout](#testing-packaging-and-rollout)
+13. [Further Considerations and Open Questions](#further-considerations-and-open-questions)
 
 ---
 
 ## Overview
 
-The Hydra operator today is a terminal REPL (`npm run go`). While powerful, it is inaccessible from a phone, tablet, or second machine on the local network. A web interface would:
+Hydra's primary operator experience today is the terminal REPL (`npm run go`) backed by the local
+HTTP daemon (`lib/orchestrator-daemon.ts`). A web interface is still desirable because it would let
+an operator:
 
-- Mirror every operator command through a browser-based chat and control panel
-- Expose real-time event streams, task queues, agent statuses, and token budgets
-- Allow configuration editing, model selection, and automation triggers without SSH
-- Remain **lightweight, dependency-minimal, and easy to modify** by any developer
+- check state from a phone, tablet, or second machine on the same network;
+- create and monitor tasks without opening an SSH session;
+- observe live agent activity, budgets, and daemon health from a browser; and
+- perform a carefully selected subset of write actions through a friendlier UI.
 
-The web server acts as a **thin authenticated proxy** between the browser and the existing daemon
-(port `4173`). No business logic moves to the web layer — the daemon stays the single source of
-truth.
+The original proposal overreached in two ways:
 
----
+1. it promised "full operator parity" before the backend contracts exist to support that safely;
+2. it described the web layer as a "thin proxy" while also assigning it responsibility for config
+   writes, pipeline launches, session management, and richer streaming semantics.
 
-## Proposed Features
+This revised design keeps the architecture honest:
 
-### Core Chat & Dispatch
+- the **daemon remains the authority** for state, task lifecycle, and any future filesystem or
+  process mutations;
+- the **web server is an authenticated same-origin adapter** that serves assets, manages browser
+  sessions, and forwards allowed requests to the daemon; and
+- the **MVP is progressive parity**, not a browser clone of every TTY-native workflow.
 
-| Feature                   | Description                                                                                                                                                |
-| ------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **Chat interface**        | Full-screen conversational UI replacing the terminal REPL. Supports all 5 dispatch modes (auto / smart / council / dispatch / chat) selectable via toolbar |
-| **Mode switcher**         | Toggle between auto, smart, council, dispatch, chat modes from a dropdown                                                                                  |
-| **Agent lock**            | Pin dispatch to a specific agent (claude / gemini / codex / local / custom)                                                                                |
-| **Tandem/council badges** | Response cards show which agents participated, round count, consensus score                                                                                |
-| **Message history**       | Scrollable, searchable session transcript with copy-to-clipboard per response                                                                              |
-| **Ghost text suggestion** | When a task is blocked, auto-suggest a follow-up prompt (mirrors terminal ghost text)                                                                      |
-| **Dry-run toggle**        | Preview routing decision without executing; shows route card before dispatch                                                                               |
-
-### Task Management
-
-| Feature                 | Description                                                                       |
-| ----------------------- | --------------------------------------------------------------------------------- |
-| **Task board**          | Kanban-style columns: To-Do → In-Progress → Blocked → Done. Live-updating via SSE |
-| **Task detail panel**   | Click any task for full description, checkpoints, agent assignment, cost estimate |
-| **Add task form**       | Create tasks directly from the UI (invokes `POST /task/add`)                      |
-| **Dead-letter queue**   | View and retry exhausted tasks with one click                                     |
-| **Stale task detector** | Visual badge on tasks that have exceeded heartbeat timeout                        |
-| **Worktree status**     | Table of active git worktrees per task (if worktree isolation is enabled)         |
-
-### Agent & Model Management
-
-| Feature                                 | Description                                                                         |
-| --------------------------------------- | ----------------------------------------------------------------------------------- |
-| **Agent roster**                        | Live card per agent showing status, active model, last heartbeat, token spend       |
-| **Model switcher**                      | Swap active model per agent from a dropdown populated by `GET /self`                |
-| **Custom agent wizard**                 | Multi-step web form equivalent of `:agents add` (CLI/API type, name, args template) |
-| **Provider picker**                     | Select concierge provider (OpenAI → Anthropic → Google fallback)                    |
-| **Economy/balanced/performance toggle** | Visual routing-mode selector that writes to config and restarts routing logic       |
-
-### Automation Pipelines
-
-| Feature                | Description                                                                           |
-| ---------------------- | ------------------------------------------------------------------------------------- |
-| **Pipeline launcher**  | One-click buttons for: Evolve, Nightly, Audit, Actualize, Tasks, Council deliberation |
-| **Pipeline status**    | Live progress view: phase name, current step, elapsed time, token spend               |
-| **Budget gauge**       | Visual daily/weekly token gauge with color-coded warning thresholds                   |
-| **Scheduled triggers** | Simple cron UI to schedule nightly/evolve runs (stored in `hydra.config.json`)        |
-
-### Configuration
-
-| Feature                    | Description                                                                                    |
-| -------------------------- | ---------------------------------------------------------------------------------------------- |
-| **Config editor**          | Structured form for all `hydra.config.json` sections (models, routing, agents, budgets, roles) |
-| **Role editor**            | Assign agent + model per role (architect / analyst / implementer)                              |
-| **HYDRA.md viewer/editor** | In-browser Markdown editor for context files                                                   |
-| **Environment inspector**  | Read-only view of detected env vars (keys only, values masked)                                 |
-
-### Monitoring & Observability
-
-| Feature                  | Description                                                                                       |
-| ------------------------ | ------------------------------------------------------------------------------------------------- |
-| **Real-time status bar** | Web equivalent of the terminal status bar: agent badges, token gauge, last dispatch, session cost |
-| **Event stream viewer**  | Scrollable, filterable log of daemon events (mirrors `GET /events/stream` SSE)                    |
-| **Usage statistics**     | Charts for token spend per agent/day/model (pulls from `GET /stats`)                              |
-| **Session history**      | List of past sessions with cost, task counts, agents used                                         |
-| **Health panel**         | Daemon version, uptime, Node.js version, config path, coordDir size                               |
-
-### Security Controls (UI)
-
-| Feature               | Description                                                                                      |
-| --------------------- | ------------------------------------------------------------------------------------------------ |
-| **Token gate**        | Login screen requiring the bearer token; token stored in `sessionStorage` (cleared on tab close) |
-| **Activity log**      | Timestamped log of all actions taken through the UI (audit trail)                                |
-| **Rate-limit status** | Show per-provider token-bucket level (from `GET /self`)                                          |
+That framing gives Hydra a useful web surface quickly without introducing protocol bridges,
+framework sprawl, or a second source of truth.
 
 ---
 
-## Framework Research & Recommendation
+## Guiding Decisions
 
-The key constraints are: **lightweight, no build step required to modify, fast load, easy to
-understand**.
+1. **Progressive parity, not full REPL parity.**
+   The first versions should cover dashboarding, task creation, live monitoring, and a small number
+   of safe write flows. TTY-native interactions, multi-step prompts, and arbitrary filesystem edits
+   are explicitly out of the MVP.
 
-### Options Evaluated
+2. **Single UI approach.**
+   Use one client-side rendering model for the browser shell. Mixing Preact, HTMX, and Alpine in
+   the same app creates split state ownership and harder maintenance for a small team.
 
-#### Option A — Vanilla HTML + CSS + JavaScript (ES Modules)
+3. **No new heavyweight runtime framework for the server.**
+   Hydra already ships a raw `node:http` daemon. The web adapter should use built-in
+   `node:http`/`node:https` plus small local helpers, not Express or Fastify.
 
-- **Size:** 0 KB framework overhead
-- **Simplicity:** A developer only needs to know HTML/CSS/JS — no framework mental model
-- **Modifications:** Edit one `.html` / `.js` file; refresh browser. Zero toolchain needed
-- **Realtime:** Native `EventSource` API for SSE; `fetch()` for REST calls
-- **Drawbacks:** Managing DOM state manually gets verbose for complex reactive panels; no component
-  reuse primitives
-- **Best for:** Simple read-only dashboards or very small UIs
+4. **Same-origin browser session, server-side daemon auth.**
+   The browser should authenticate once to the web adapter, receive a secure session cookie, and
+   never persist or reuse the raw daemon token for normal requests. The adapter forwards to the
+   daemon using the existing `x-ai-orch-token` header.
 
-#### Option B — HTMX + Alpine.js
+5. **New durable writes belong in the daemon.**
+   If a feature needs to mutate `hydra.config.json`, launch child processes, manage schedules, or
+   write other files, it should be added as a daemon-owned capability. The web adapter should not
+   become a second control plane.
 
-- **Size:** HTMX ~14 KB (min+gz) + Alpine.js ~15 KB. Total < 30 KB (when combined with Preact + htm for the chat shell, the full hybrid bundle is ~35 KB)
-- **Simplicity:** HTML stays as the primary language. `hx-get` / `hx-post` declaratively call the
-  daemon. Alpine `x-data` handles local state. No build step
-- **Modifications:** Add a new panel by adding a `<div hx-get="/state">` — no JS required
-- **Realtime:** HTMX has built-in SSE extension (`hx-ext="sse"`) that replaces DOM fragments on
-  server-sent events
-- **Drawbacks:** Interactivity beyond simple CRUD (e.g., chat streaming, nested component trees)
-  requires more Alpine boilerplate; SSE HTML fragments must be rendered server-side
-- **Best for:** Config editors, task boards, monitoring panels
+6. **LAN exposure is opt-in.**
+   Like the daemon today, the web service should default to loopback and require explicit operator
+   intent before binding to `0.0.0.0`.
 
-#### Option C — Preact + htm (no build step)
+7. **Browser transport should stay simple.**
+   Prefer `fetch()` + SSE over a custom WebSocket bridge unless a later requirement proves that WS
+   is necessary.
 
-- **Size:** Preact ~4 KB (min+gz) + htm tag literal ~1 KB. Total ~5 KB
-- **Simplicity:** Familiar React API (hooks, components) with zero JSX compilation — components are
-  written with `html\`\`` template literals
-- **Modifications:** Add a new component in a single `.js` file, import it via ES module
-- **Realtime:** Standard `EventSource` + `useState`/`useEffect` hooks
-- **Drawbacks:** Still a virtual DOM; debugging requires understanding of component tree
-- **Best for:** Chat interfaces, interactive multi-panel dashboards with shared state
+---
 
-#### Option D — SvelteKit / Vite + Svelte
+## Goals and Non-Goals
 
-- **Size:** Svelte runtime ~10 KB; build output well-optimised
-- **Simplicity:** Very readable `.svelte` components; Svelte compiles away the framework overhead
-- **Modifications:** Requires Node.js + `npm run dev` to iterate — not zero-toolchain
-- **Best for:** Teams comfortable with build tools who want a polished SPA
+### Goals
 
-#### Option E — Vue 3 (CDN, no build)
+- Provide a browser-accessible operator view for Hydra on the local machine or trusted LAN.
+- Reuse the daemon's existing read APIs and event stream wherever possible.
+- Support authenticated task creation and monitoring without exposing the daemon directly.
+- Keep the implementation dependency-light and aligned with Hydra's current architecture.
+- Make failure modes visible: daemon offline, auth expired, disconnected SSE, blocked tasks, and
+  throttled actions should all be explicit in the UI.
 
-- **Size:** ~40 KB (min+gz) via CDN
-- **Simplicity:** Vue's Options API is approachable; CDN import means no build step
-- **Modifications:** Edit `.html` file, use `<script type="module">` to import Vue from CDN
-- **Drawbacks:** Larger than Preact + htm; CDN dependency introduces supply-chain risk
+### Non-Goals for the MVP
+
+- Full terminal REPL parity.
+- Public internet exposure.
+- Multi-user RBAC or tenant isolation.
+- Browser-driven arbitrary file editing (`HYDRA.md`, shell scripts, or free-form config files).
+- Interactive TTY flows that require prompts, confirmations, or curses-like input handling.
+- A second orchestration engine outside the daemon.
+
+---
+
+## Proposed Capabilities
+
+| Capability                                                       | Phase  | Notes                                                             |
+| ---------------------------------------------------------------- | ------ | ----------------------------------------------------------------- |
+| Authenticated dashboard (`/health`, `/self`, `/state`, `/stats`) | MVP    | Uses existing daemon APIs through the adapter                     |
+| Live event stream viewer                                         | MVP    | Backed by daemon SSE relay                                        |
+| Task create / update / retry                                     | MVP    | Uses existing `/task/add`, `/task/update`, `/dead-letter/retry`   |
+| Task detail and checkpoints                                      | MVP    | Uses existing `GET /task/:id/checkpoints`                         |
+| Chat-like dispatch timeline                                      | MVP    | UI metaphor only; still built on task creation + SSE              |
+| Agent/mode selector for new tasks                                | MVP    | Maps onto existing task dispatch parameters only                  |
+| Session and daemon offline states                                | MVP    | Required for a usable browser experience                          |
+| Mobile-friendly layout                                           | MVP    | Core screens must work on phone-sized viewports                   |
+| Read-only worktree / session summaries                           | Later  | Depends on which existing daemon endpoints are exposed in the UI  |
+| Config viewer with secret masking                                | Later  | Read-only first; leverage `/self` snapshot                        |
+| Config editor for a supported subset                             | Later  | Requires new daemon-owned config endpoints and concurrency checks |
+| Pipeline launcher                                                | Later  | Requires daemon-owned process orchestration contract              |
+| Scheduled automation management                                  | Later  | Requires persistence and scheduler ownership model                |
+| Custom agent wizard                                              | Future | Large scope; defer until base web surface is proven               |
+| HYDRA.md browser editor                                          | Future | High-risk file editing surface; explicitly not in MVP             |
+| TTY-equivalent interactive command flows                         | Future | Needs a dedicated transport and UX model                          |
+
+A useful rule of thumb: if a feature can be expressed as "authenticated read + existing write
+endpoint + SSE updates," it is a good MVP candidate. If it needs new daemon contracts, process
+spawning, or filesystem mutation, it belongs in a later phase.
+
+---
+
+## Framework Recommendation
+
+### Options Considered
+
+| Option                                | Pros                                                     | Cons                                                                               | Fit                                                          |
+| ------------------------------------- | -------------------------------------------------------- | ---------------------------------------------------------------------------------- | ------------------------------------------------------------ |
+| Vanilla HTML/CSS/JS                   | Zero framework overhead; easy to inspect                 | Manual state management becomes noisy for a live task UI                           | Good for tiny dashboards; weak for Hydra's shared live state |
+| HTMX + Alpine                         | Good for server-driven fragments; no build required      | Splits state between server HTML and client JS; awkward for chat-like streaming UI | Poor fit for a unified interactive shell                     |
+| Preact + htm                          | Small runtime, component model, no JSX compiler required | Still needs a disciplined asset strategy for browser delivery                      | Best fit for a single reactive shell                         |
+| Svelte/Vite or other SPA build stacks | Excellent developer experience                           | Introduces a full frontend toolchain Hydra does not otherwise need                 | Too heavy for this project right now                         |
 
 ### Recommendation
 
-**Use Preact + htm for the primary interactive shell (chat + task board) with HTMX for
-secondary panels (config editor, monitoring).**
+Use **Preact + htm for the browser UI** and **built-in `node:http`/`node:https` for the web
+adapter**.
 
-Rationale:
+Why this is the best fit:
 
-- The chat interface needs reactive streaming state — Preact hooks handle this elegantly at ~5 KB
-  total overhead
-- Config and monitoring panels are best expressed as server-driven HTML fragments — HTMX `hx-get`
-  polls or subscribes with zero JS
-- Zero build step: browsers import Preact + htm directly from a bundled CDN-style `vendor.js` that
-  ships with Hydra (`web/vendor.js`)
-- A developer modifies a single `web/*.js` or `web/*.html` file and refreshes — no toolchain
-- The web server can be a minimal **Express.js** or **Fastify** server (already a common dep in the
-  Node ecosystem) that:
-  - Serves `web/` as static files
-  - Proxies all `/api/*` requests to `http://127.0.0.1:4173` after validating the session token
-  - Streams the SSE endpoint from the daemon to the browser
+- Hydra already expects contributors to be comfortable with JavaScript and ESM.
+- The UI needs shared state for task lists, stream updates, connection state, and auth expiry.
+- Preact + htm keeps the UI small without introducing JSX compilation.
+- A single rendering model is easier to reason about than a Preact/HTMX/Alpine hybrid.
+- Built-in Node HTTP primitives preserve Hydra's dependency-minimal server posture.
+
+### Asset Strategy
+
+The original `web/vendor.js` idea was convenient but too opaque. Instead:
+
+- keep browser app code in readable ESM modules under `web/`;
+- vendor only the minimal pinned browser dependencies under `web/vendor/` or generate them from a
+  small script using the already-present `esbuild` dev dependency;
+- do not rely on runtime CDNs; and
+- ensure packaged distributions include the browser assets explicitly.
+
+This keeps the runtime self-contained without checking in an opaque monolithic bundle that is hard
+to diff or audit.
 
 ---
 
 ## Architecture Overview
 
 ```mermaid
-graph TB
-    subgraph Browser["Browser (LAN client)"]
-        Chat["Chat Panel\n(Preact)"]
-        Tasks["Task Board\n(Preact + HTMX)"]
-        Config["Config Editor\n(HTMX)"]
-        Monitor["Monitor Panel\n(HTMX + SSE)"]
+flowchart TB
+    subgraph Browser[Browser]
+        Shell[Web shell\nPreact + htm]
+        Timeline[Task timeline]
+        Monitor[Health and event panels]
+        Settings[Supported settings views]
     end
 
-    subgraph WebServer["Web Server (new: lib/hydra-web.ts, port 4174)"]
-        Static["Static file server\n(web/ directory)"]
-        Auth["Auth middleware\n(bearer token validation)"]
-        Proxy["Daemon proxy\n(/api/* → 127.0.0.1:4173)"]
-        SSERelay["SSE relay\n(/api/events/stream)"]
-        WsConcierge["WebSocket concierge\n(/ws/chat)"]
+    subgraph Web[Web adapter\nnew: lib/hydra-web.ts]
+        Static[Static asset server]
+        Session[Session auth\nand cookie handling]
+        Proxy[Authenticated API proxy]
+        Relay[SSE relay]
     end
 
-    subgraph Daemon["Daemon (existing: port 4173)"]
-        StateEngine["Event-sourced state"]
-        TaskQueue["Task queue"]
-        AgentWorkers["Agent workers"]
-        SSE["SSE /events/stream"]
+    subgraph Daemon[Daemon\nexisting: lib/orchestrator-daemon.ts]
+        State[State and summaries]
+        Queue[Task queue]
+        Events[SSE broadcaster]
+        Workers[Agent workers]
     end
 
-    subgraph Agents["AI Agents"]
-        Claude["Claude CLI"]
-        Gemini["Gemini CLI"]
-        Codex["Codex CLI"]
-        Local["Local LLM"]
-    end
-
-    Browser -->|"HTTPS / WS (LAN)"| WebServer
-    WebServer -->|"HTTP (loopback)"| Daemon
-    Daemon --> Agents
-    SSE -->|"piped through SSERelay"| Monitor
+    Browser -->|HTTPS or loopback HTTP| Web
+    Web -->|loopback HTTP + x-ai-orch-token| Daemon
+    Queue --> Workers
+    Events --> Relay
 ```
 
-### Component Responsibilities
+### Process Roles
 
-| Component                  | Responsibility                                                                                                                                  |
-| -------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------- |
-| `lib/hydra-web.ts` _(new)_ | Thin Express/Fastify server; serves `web/`; validates bearer token; proxies `/api/*` to daemon; relays SSE; proxies WebSocket chat to concierge |
-| `web/index.html` _(new)_   | Single-page shell; loads Preact + htm + Alpine from `vendor.js`                                                                                 |
-| `web/chat.js` _(new)_      | Chat panel component; dispatches prompts via WebSocket; receives task status chunks via SSE relay; renders chat bubbles                         |
-| `web/tasks.js` _(new)_     | Task board component; polls `GET /api/state`; subscribes to SSE                                                                                 |
-| `web/config.js` _(new)_    | Config editor; loads `GET /api/self`; posts to config save endpoint                                                                             |
-| `web/monitor.js` _(new)_   | Event viewer + usage charts; subscribes to SSE event stream                                                                                     |
-| `web/vendor.js` _(new)_    | Pre-bundled Preact + htm + Alpine (committed, no npm install needed)                                                                            |
+| Component                  | Responsibility                                                                                                                         |
+| -------------------------- | -------------------------------------------------------------------------------------------------------------------------------------- |
+| `lib/hydra-web.ts` _(new)_ | Serves browser assets, authenticates browser sessions, proxies allowed daemon routes, relays SSE, exposes a small login/logout surface |
+| `web/index.html` _(new)_   | App shell entry point                                                                                                                  |
+| `web/app.js` _(new)_       | Top-level UI state, routing between panels, reconnect handling                                                                         |
+| `web/chat.js` _(new)_      | Task-dispatch composer and chat-like timeline built on task events                                                                     |
+| `web/tasks.js` _(new)_     | Task lists, retry/update actions, checkpoint viewer                                                                                    |
+| `web/monitor.js` _(new)_   | Event stream, stats, health, and connection status                                                                                     |
+| `web/settings.js` _(new)_  | Read-only or later writable settings surfaces, gated by supported backend endpoints                                                    |
+| Daemon                     | Owns authoritative state and any future config/process mutations                                                                       |
+
+### Default Bindings
+
+- **Daemon:** unchanged; defaults to `127.0.0.1:${AI_ORCH_PORT:-4173}`.
+- **Web adapter:** defaults to `127.0.0.1:${HYDRA_WEB_PORT:-4174}`.
+- **LAN mode:** explicit opt-in via config or env. When LAN mode is enabled, HTTPS is required.
 
 ---
 
-## Dataflow Diagrams
+## Current Daemon Alignment and Required Additions
 
-### Chat Message Dispatch
+The daemon already exposes enough surface for a useful dashboard MVP. The web work should start from
+that reality instead of inventing new protocols up front.
 
-```mermaid
-sequenceDiagram
-    actor User
-    participant Browser
-    participant WebServer as Web Server\n(port 4174)
-    participant Daemon as Daemon\n(port 4173)
-    participant Agent as AI Agent\n(claude/gemini/codex)
+### Existing Endpoints the MVP Can Reuse
 
-    User->>Browser: Type prompt, press Enter
-    Browser->>WebServer: WS send {mode, agent, prompt}
-    WebServer->>WebServer: Validate session token
-    WebServer->>Daemon: POST /task/add {prompt, mode, agent}
-    Daemon->>Daemon: Classify task, select route
-    Daemon-->>WebServer: {taskId, route}
-    WebServer-->>Browser: WS {taskId, route} (shows route badge)
-    Daemon->>Agent: Spawn agent with prompt
-    Agent-->>Daemon: Streaming output chunks
-    Daemon->>Daemon: Record events, update state
-    loop SSE stream
-        Daemon-->>WebServer: event: task_update data: {taskId, chunk}
-        WebServer-->>Browser: event: task_update data: {taskId, chunk}
-        Browser->>Browser: Append chunk to chat bubble
-    end
-    Agent-->>Daemon: Final result + cost
-    Daemon->>Daemon: POST /task/result, close task
-    Daemon-->>WebServer: event: task_done data: {taskId, cost}
-    WebServer-->>Browser: event: task_done data: {taskId, cost}
-    Browser->>Browser: Show cost badge, enable input
-```
+| Capability        | Existing support            | Notes                                                          |
+| ----------------- | --------------------------- | -------------------------------------------------------------- |
+| Health            | `GET /health`               | Suitable for adapter and daemon liveness display               |
+| System snapshot   | `GET /self`                 | Includes masked config-oriented data via `buildSelfSnapshot()` |
+| State snapshot    | `GET /state`                | Primary task/session snapshot                                  |
+| Stats             | `GET /stats`                | Suitable for charts and token summaries                        |
+| Event log         | `GET /events`               | Useful for recent event history                                |
+| Live stream       | `GET /events/stream`        | Browser subscribes through adapter relay                       |
+| Task creation     | `POST /task/add`            | Core dispatch action                                           |
+| Task update       | `POST /task/update`         | Retry/unblock-like flows where already supported               |
+| Dead-letter retry | `POST /dead-letter/retry`   | Existing recovery surface                                      |
+| Session start     | `POST /session/start`       | Available if the UI later needs explicit session creation      |
+| Task checkpoints  | `GET /task/:id/checkpoints` | Already exists and should be surfaced in task details          |
 
-### Config Save Flow
+### Features That Need New Backend Contracts
 
-```mermaid
-sequenceDiagram
-    actor User
-    participant Browser
-    participant WebServer as Web Server
-    participant Daemon as Daemon
-    participant FS as File System
+| Feature                                                       | Why current contracts are insufficient                               | Recommended owner     |
+| ------------------------------------------------------------- | -------------------------------------------------------------------- | --------------------- |
+| Writable config editor                                        | No config-write daemon endpoint exists today                         | Daemon                |
+| Pipeline launcher (`evolve`, `nightly`, `audit`, `actualize`) | These are separate CLI processes, not daemon task types              | Daemon                |
+| Scheduled triggers                                            | Needs persistence and a long-lived scheduler model                   | Daemon                |
+| HYDRA.md editing                                              | No safe file-edit API exists                                         | Daemon, if ever added |
+| Interactive browser command flows                             | No browser-safe equivalent of TTY prompts exists                     | Future design         |
+| Fine-grained council round visualisation                      | Current SSE/task model does not provide a dedicated council protocol | Daemon, if needed     |
 
-    User->>Browser: Edit config field, click Save
-    Browser->>WebServer: POST /api/config {section, value}
-    WebServer->>WebServer: Validate token + sanitize JSON
-    WebServer->>Daemon: POST /events/push {type:"config_update", payload}
-    Daemon->>FS: Write hydra.config.json
-    Daemon->>Daemon: Invalidate config cache
-    Daemon-->>WebServer: 200 OK
-    WebServer-->>Browser: 200 OK
-    Browser->>Browser: Show success toast
-```
+### Ownership Rule
 
-### Pipeline Trigger Flow (Evolve/Nightly/Audit)
+If the feature needs one of the following, it should be designed as a daemon capability first:
+
+- filesystem writes,
+- child-process spawning or lifecycle control,
+- long-lived schedules,
+- additional persisted state,
+- or richer event semantics than the current task/event stream.
+
+That rule keeps the web adapter small and prevents business logic from splitting across two servers.
+
+---
+
+## Data Flows
+
+### Authentication and Session Bootstrap
+
+The browser must be able to call authenticated `fetch()` routes and `EventSource` without manually
+attaching custom auth headers. That makes a **same-origin secure cookie** the right session model.
 
 ```mermaid
 sequenceDiagram
     actor User
     participant Browser
-    participant WebServer as Web Server
-    participant Daemon as Daemon
-    participant Pipeline as Pipeline Process\n(hydra-evolve.ts etc.)
+    participant Web as Web adapter
+    participant Daemon
 
-    User->>Browser: Click "Run Evolve"
-    Browser->>WebServer: POST /api/pipeline/evolve {}
-    WebServer->>WebServer: Validate token + check running pipelines
-    WebServer->>Daemon: POST /task/add {type:"evolve", priority:"high"}
-    Daemon->>Daemon: Enqueue pipeline task
-    Daemon-->>WebServer: {taskId}
-    WebServer-->>Browser: {taskId} — subscribe to SSE
-    loop Phase updates via SSE
-        Daemon->>Pipeline: Spawn pipeline process
-        Pipeline-->>Daemon: Phase start/complete events
-        Daemon-->>WebServer: SSE event: pipeline_phase
-        WebServer-->>Browser: SSE event: pipeline_phase
-        Browser->>Browser: Update progress bar + phase label
-    end
-    Pipeline-->>Daemon: Pipeline complete
-    Daemon-->>WebServer: SSE event: pipeline_done
-    WebServer-->>Browser: SSE event: pipeline_done
-    Browser->>Browser: Show summary card
+    User->>Browser: Open web UI
+    Browser->>Web: GET /
+    Web-->>Browser: Login shell
+    User->>Browser: Submit operator token or magic link
+    Browser->>Web: POST /auth/login
+    Web->>Web: Constant-time token check
+    Web-->>Browser: Set-Cookie: hydra_session=...; HttpOnly; Secure; SameSite=Strict
+    Browser->>Web: GET /api/self (cookie sent automatically)
+    Web->>Daemon: GET /self + x-ai-orch-token
+    Daemon-->>Web: Snapshot JSON
+    Web-->>Browser: Snapshot JSON
 ```
 
-### SSE Event Relay
+Notes:
+
+- The browser sees the raw operator token only during the login submission itself; it should not be
+  stored in normal browser state afterward.
+- A "magic link" printed by the CLI can be offered as a convenience, but the adapter should still
+  convert it into a normal session cookie immediately.
+- State-changing browser requests should validate `Origin` in addition to the session cookie.
+
+### Task Dispatch and Live Updates
+
+The web UI does not need a WebSocket bridge for the MVP. A normal task create request plus the
+existing event stream is enough.
+
+```mermaid
+sequenceDiagram
+    actor User
+    participant Browser
+    participant Web as Web adapter
+    participant Daemon
+    participant Agent as Agent worker
+
+    Browser->>Web: GET /api/events/stream
+    Web->>Daemon: GET /events/stream + x-ai-orch-token
+    Daemon-->>Web: SSE stream
+    Web-->>Browser: SSE stream
+
+    User->>Browser: Submit task prompt
+    Browser->>Web: POST /api/task/add
+    Web->>Daemon: POST /task/add + x-ai-orch-token
+    Daemon->>Agent: Execute task
+    Daemon-->>Web: task events via SSE
+    Web-->>Browser: task events via SSE
+    Browser->>Browser: Update timeline, task lists, and badges
+```
+
+Implications:
+
+- The browser app should treat the timeline as a projection of task events, not as a separate chat
+  transport.
+- Council/tandem UI can still exist, but it should render whatever the daemon already emits instead
+  of inventing a browser-only protocol.
+- If richer streaming semantics are needed later, add them to the daemon deliberately instead of
+  hiding them inside the adapter.
+
+### Future Controlled Config Writes
+
+A config editor is feasible only after the daemon gains explicit write support.
 
 ```mermaid
 flowchart LR
-    Daemon["Daemon\nGET /events/stream\ntext/event-stream"]
-    WebServer["Web Server\nPipes response headers + body\nAdds auth wrapper"]
-    Browser["Browser\nnew EventSource('/api/events/stream')"]
-    Daemon -->|"loopback TCP"| WebServer
-    WebServer -->|"LAN HTTPS"| Browser
+    Browser[Browser settings form] --> Web[Web adapter]
+    Web -->|validated request| Daemon[Daemon config endpoint\nnew]
+    Daemon -->|schema validation + concurrency check| Config[hydra.config.json]
 ```
 
----
+Required properties of that future flow:
 
-## Workflow Diagrams
-
-### Session Lifecycle
-
-```mermaid
-stateDiagram-v2
-    [*] --> Login: Open browser
-    Login --> Idle: Token accepted
-    Login --> Login: Token rejected (401)
-    Idle --> Dispatching: Submit prompt
-    Idle --> Configuring: Open config panel
-    Idle --> PipelineRunning: Launch pipeline
-    Dispatching --> WaitingResult: Task queued
-    WaitingResult --> Idle: Task done / error
-    WaitingResult --> Dispatching: Tandem second agent
-    Configuring --> Idle: Save / cancel
-    PipelineRunning --> PipelineRunning: Phase update
-    PipelineRunning --> Idle: Pipeline done
-    Idle --> [*]: Close browser
-```
-
-### Task Board Update Cycle
-
-```mermaid
-flowchart TD
-    SSE["SSE /events/stream"] -->|"task_added event"| Parser["Event parser\n(chat.js)"]
-    SSE -->|"task_update event"| Parser
-    SSE -->|"task_done event"| Parser
-    SSE -->|"task_failed event"| Parser
-    Parser -->|"setState"| TaskBoard["Task board\nPreact component"]
-    TaskBoard -->|"re-render"| Columns["To-Do | In-Progress | Blocked | Done"]
-    UserClick["User clicks task"] -->|"GET /api/task/:id/checkpoints"| Detail["Task detail panel"]
-    UserClick2["User clicks retry"] -->|"POST /api/dead-letter/retry"| Daemon["Daemon"]
-```
-
-### Council Deliberation View
-
-```mermaid
-sequenceDiagram
-    participant Browser
-    participant WebServer as Web Server
-    participant Daemon
-    participant Claude
-    participant Gemini
-    participant Codex
-
-    Browser->>WebServer: POST /api/council {prompt, rounds}
-    WebServer->>Daemon: POST /task/add {type:"council", ...}
-    Daemon->>Claude: Round 1 — architect analysis
-    Claude-->>Daemon: analysis text + confidence
-    Daemon-->>Browser: SSE council_round {agent:"claude", round:1, text}
-    Daemon->>Gemini: Round 1 — critique
-    Gemini-->>Daemon: critique text
-    Daemon-->>Browser: SSE council_round {agent:"gemini", round:1, text}
-    Daemon->>Codex: Round 1 — implementation plan
-    Codex-->>Daemon: plan text
-    Daemon-->>Browser: SSE council_round {agent:"codex", round:1, text}
-    Note over Daemon: Convergence check
-    Daemon->>Claude: Round 2 — synthesis (if diverged)
-    Claude-->>Daemon: final synthesis
-    Daemon-->>Browser: SSE council_done {synthesis, consensus_score, cost}
-    Browser->>Browser: Render multi-column deliberation view
-```
-
----
-
-## How the App Works with the Daemon
-
-The web interface is a **read/write client** of the daemon, identical in privilege to the terminal
-operator. The daemon does not change — the web server is a new thin process that:
-
-1. **Starts alongside the daemon** — `npm run web` or as an optional flag to `npm start`
-2. **Authenticates the browser** — validates a session token before forwarding any request
-3. **Proxies all state reads/writes** to the daemon's existing HTTP API
-4. **Relays the SSE event stream** so the browser receives real-time updates
-5. **Proxies chat messages** as `POST /task/add` requests, using the same dispatch pipeline
-
-```mermaid
-flowchart TD
-    subgraph "Process: hydra-web (port 4174)"
-        A["Static file server\n(web/)"]
-        B["Auth middleware\n(bearer token)"]
-        C["API proxy\n(/api/* → :4173)"]
-        D["SSE relay\n(/api/events/stream)"]
-        E["WebSocket endpoint\n(/ws/chat)"]
-    end
-    subgraph "Process: orchestrator-daemon (port 4173)"
-        F["State machine\n(event-sourced)"]
-        G["Task queue"]
-        H["Worker manager"]
-        I["SSE broadcaster"]
-    end
-    Browser -->|"HTTPS :4174"| A
-    Browser -->|"HTTPS :4174 + Bearer"| B
-    B --> C
-    B --> D
-    B --> E
-    C -->|"HTTP :4173"| F
-    D -->|"pipe"| I
-    E -->|"POST /task/add"| G
-    H --> Agents["AI Agents"]
-```
-
-### Integration Points
-
-| Web Server Route              | Daemon Endpoint                  | Purpose                                  |
-| ----------------------------- | -------------------------------- | ---------------------------------------- |
-| `GET /api/health`             | `GET /health`                    | Health check                             |
-| `GET /api/state`              | `GET /state`                     | Full task/handoff state                  |
-| `GET /api/self`               | `GET /self`                      | System snapshot (models, agents, config) |
-| `GET /api/stats`              | `GET /stats`                     | Usage statistics                         |
-| `GET /api/events`             | `GET /events`                    | Event log                                |
-| `GET /api/events/stream`      | `GET /events/stream`             | SSE live stream                          |
-| `POST /api/task/add`          | `POST /task/add`                 | Queue new task                           |
-| `POST /api/task/update`       | `POST /task/update`              | Update task                              |
-| `POST /api/dead-letter/retry` | `POST /dead-letter/retry`        | Retry failed task                        |
-| `POST /api/session/start`     | `POST /session/start`            | Start new session                        |
-| `POST /api/pipeline/:name`    | `POST /task/add` with type       | Trigger pipeline                         |
-| `POST /api/config`            | `POST /events/push` + file write | Save config                              |
-| `POST /api/shutdown`          | `POST /shutdown`                 | Stop daemon                              |
+- optimistic concurrency (hash or mtime check);
+- secret masking on reads;
+- allowlisted writable fields only;
+- explicit audit events for every write.
 
 ---
 
@@ -461,77 +369,79 @@ flowchart TD
 
 ### Design Principles
 
-1. **Local-network only by default** — the web server binds to `0.0.0.0` (LAN-accessible) but the
-   daemon remains bound to `127.0.0.1` (loopback-only). The daemon is never directly exposed
-2. **Single shared secret** — a bearer token (extending `AI_ORCH_TOKEN`) authenticates all
-   requests. The browser stores it in `sessionStorage` (cleared on tab close, never `localStorage`)
-3. **HTTPS enforced** — TLS with a self-signed certificate (auto-generated on first start).
-   Browsers show a warning once; after trust the connection is encrypted on the LAN
-4. **Origin pinning** — CORS headers allow only the server's own origin; API requests from other
-   origins are rejected
-5. **No secrets in responses** — API key values, token values, and `.env` contents are never sent
-   to the browser. The environment inspector shows key names only
-6. **Immutable daemon** — the daemon API is unchanged; the web server adds auth on top of existing
-   endpoints. No new unauthenticated write surface is created
+1. **Same-origin session cookie, not bearer token in app state.**
+   Native `EventSource` cannot attach arbitrary auth headers. A secure cookie lets the browser call
+   both JSON routes and SSE consistently.
 
-### Auth Flow
+2. **The daemon token stays server-side after login.**
+   The adapter talks to the daemon with `x-ai-orch-token`; the browser never reuses that header.
 
-```mermaid
-sequenceDiagram
-    actor User
-    participant Browser
-    participant WebServer as Web Server\n(port 4174, HTTPS)
-    participant Daemon as Daemon\n(port 4173, HTTP loopback)
+3. **Loopback by default, LAN only by explicit opt-in.**
+   Exposing the UI should be a conscious choice, not the default runtime posture.
 
-    User->>Browser: Open https://hydra.local:4174
-    Browser->>WebServer: GET / (no token)
-    WebServer-->>Browser: 200 login.html
-    User->>Browser: Enter bearer token
-    Browser->>WebServer: POST /auth/login {token}
-    WebServer->>WebServer: Compare token to AI_ORCH_TOKEN (constant-time)
-    WebServer-->>Browser: 200 {sessionToken, expiresIn}
-    Browser->>Browser: Store sessionToken in sessionStorage
-    Browser->>WebServer: GET /api/state\nAuthorization: Bearer <sessionToken>
-    WebServer->>WebServer: Validate sessionToken
-    WebServer->>Daemon: GET /state\nAuthorization: Bearer <AI_ORCH_TOKEN>
-    Daemon-->>WebServer: state JSON
-    WebServer-->>Browser: state JSON
-```
+4. **No unauthenticated browser access to daemon state.**
+   The adapter should require auth for all proxied routes, including read-only ones.
 
-### Session Token Design
+5. **Runtime secrets and certs live outside the repository tree.**
+   Store web runtime material under `coordDir/web/` (or the runtime root), not `certs/` in the repo.
 
-- The web server issues a **short-lived session token** (HMAC-SHA256 over a random nonce + timestamp, signed with a **separate server-side secret** generated at startup and stored in `certs/web-secret.key` — distinct from `AI_ORCH_TOKEN` so that session token exposure does not reveal the daemon credential)
-- Default expiry: **8 hours** (configurable: `web.sessionTtlHours` in `hydra.config.json`)
-- The session token is separate from `AI_ORCH_TOKEN` — the browser never sees the raw daemon token
-- Token refresh happens automatically when 1 hour remains
+6. **Dangerous actions must be deliberately surfaced.**
+   Shutdown, destructive retries, future config writes, and future pipeline launches should be
+   feature-gated and clearly labelled.
 
-### TLS Certificate
+### Session Design
 
-Certificates use **ECDSA P-256** (preferred over 2048-bit RSA for better performance and equivalent
-security; easy to regenerate since the cert is local-only).
+Recommended session properties:
 
-```mermaid
-flowchart TD
-    Start["Web server starts"] --> Check{"certs/tls.key\nexists?"}
-    Check -->|"No"| Generate["Generate self-signed cert\n(node:crypto, ECDSA P-256,\n365-day validity)"]
-    Generate --> Store["Write certs/tls.key + certs/tls.crt\n(gitignored)"]
-    Store --> Listen["HTTPS server listens\non 0.0.0.0:4174"]
-    Check -->|"Yes"| Listen
-    Listen --> Warning["Print LAN URL +\ncert fingerprint to stdout\nfor first-time trust"]
-```
+- cookie name: `hydra_session`;
+- attributes: `HttpOnly`, `Secure` in HTTPS mode, `SameSite=Strict`, path `/`;
+- short TTL with idle refresh semantics;
+- server-side validation using an adapter-owned signing secret;
+- logout endpoint that clears the cookie immediately.
 
-### Headers & CORS
+If the UI later needs CSRF protection beyond `SameSite=Strict`, add `Origin` validation and a simple
+synchronizer or double-submit token for state-changing forms.
 
-```
-Content-Security-Policy: default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'
+### TLS and Certificates
+
+For loopback-only development, plain HTTP is acceptable. For LAN mode, HTTPS is required.
+
+Recommended certificate policy:
+
+- prefer operator-supplied certs or `mkcert`-generated local-trust certs when available;
+- fall back to adapter-generated self-signed certs only when needed;
+- store private keys and cert material under `coordDir/web/` with restricted permissions;
+- print the URL and certificate fingerprint when starting in LAN mode.
+
+This is more realistic than assuming browsers will smoothly accept a self-signed cert once and never
+warn again, especially on mobile devices.
+
+### Headers and Origin Policy
+
+Recommended defaults:
+
+```text
+Content-Security-Policy: default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; connect-src 'self'; img-src 'self' data:
 X-Frame-Options: DENY
 X-Content-Type-Options: nosniff
 Referrer-Policy: no-referrer
-Strict-Transport-Security: max-age=31536000
-Access-Control-Allow-Origin: https://<server-hostname>:4174
-Access-Control-Allow-Methods: GET, POST
-Access-Control-Allow-Headers: Authorization, Content-Type
+Permissions-Policy: geolocation=(), microphone=(), camera=()
 ```
+
+Additional controls:
+
+- validate `Host` for DNS rebinding resistance when LAN mode is enabled;
+- validate `Origin` on state-changing requests;
+- do not enable broad CORS; same-origin browser access is sufficient;
+- rate-limit `/auth/login` and any mutating API routes.
+
+### Daemon Offline and Session Expiry UX
+
+The UI must treat these as first-class states:
+
+- **daemon offline:** show a clear banner, disable mutating actions, retry health/state polling;
+- **SSE disconnected:** show reconnect status and re-fetch state after reconnect;
+- **session expired:** redirect to login with a preserved return path where safe.
 
 ---
 
@@ -539,169 +449,160 @@ Access-Control-Allow-Headers: Authorization, Content-Type
 
 ### Scope
 
-- **Target:** Developer workstation or home lab server running Hydra on a trusted LAN
-- **Out of scope:** Public internet exposure (Hydra is explicitly not designed for this)
+- **Target environment:** developer workstation or trusted home-lab machine.
+- **Primary access modes:** local browser on loopback, or an explicitly exposed LAN browser.
+- **Out of scope:** public internet exposure, hostile enterprise multi-tenant hosting, and strong
+  multi-user identity isolation.
 
-### STRIDE Analysis
+### STRIDE Summary
 
-#### Spoofing (Identity)
+| Category               | Example threat                                        | Mitigation                                                                                    |
+| ---------------------- | ----------------------------------------------------- | --------------------------------------------------------------------------------------------- |
+| Spoofing               | Guessing the operator token or session cookie         | Strong operator token, rate limits, signed short-lived session cookie, constant-time compares |
+| Tampering              | Browser or LAN actor submits malformed config write   | No config writes in MVP; future writes must be allowlisted and validated by daemon            |
+| Repudiation            | Operator disputes a browser action                    | Write audit events for login, logout, task creation, retries, and future config changes       |
+| Information disclosure | Browser receives secrets from `/self` or config views | Secret masking on daemon snapshots; adapter never forwards raw daemon token                   |
+| Denial of service      | Flood of login attempts or task submissions           | Adapter rate limits, UI-side backpressure, existing daemon queue protections                  |
+| Elevation of privilege | Web adapter grows its own file/process control plane  | Keep durable writes in daemon; keep adapter focused on auth, assets, and proxying             |
 
-| Threat                                                          | Mitigation                                                                                                                                                                                                                                              |
-| --------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Attacker on LAN guesses bearer token                            | Require 32+ character random token; rate-limit `/auth/login` (5 attempts then exponential back-off; hard lock after 20 attempts per IP within 15 min — note that IP-based limiting has limited effectiveness on LANs, so combine with account lock-out) |
-| Session token forgery                                           | HMAC-SHA256 with server-side secret; verification is constant-time                                                                                                                                                                                      |
-| DNS rebinding attack (attacker's page calls `hydra.local:4174`) | `Host` header validation — reject requests where `Host` is not the configured hostname; CSP blocks cross-origin scripts                                                                                                                                 |
+### Residual Risks
 
-#### Tampering (Integrity)
-
-| Threat                                      | Mitigation                                                                                                                                                                                                                                                                                                                                                                                                                                         |
-| ------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| MITM on LAN intercepts chat messages        | HTTPS enforced; HSTS header; self-signed cert trust required on first connect                                                                                                                                                                                                                                                                                                                                                                      |
-| Malicious config payload via config editor  | JSON schema validation server-side before writing `hydra.config.json`; no `eval`; sanitise all string fields                                                                                                                                                                                                                                                                                                                                       |
-| Prompt injection via task description field | Task descriptions are passed as data to agents, not executed by the web server. However, web-originated prompts should have content length limits enforced (already noted in DoS section) and optionally run through the existing `gateIntent()` pre-screening before forwarding to the daemon. Document that web-sourced prompts cannot be fully sanitized from indirect prompt injection — this is a known limitation of LLM agent architectures |
-
-#### Repudiation (Non-repudiation)
-
-| Threat                             | Mitigation                                                                                                       |
-| ---------------------------------- | ---------------------------------------------------------------------------------------------------------------- |
-| Unauthorized action denied by user | Activity log with timestamp, source IP, session token hash, and action written to `activity.jsonl` in `coordDir` |
-
-#### Information Disclosure
-
-| Threat                                      | Mitigation                                                              |
-| ------------------------------------------- | ----------------------------------------------------------------------- |
-| Browser reads `AI_ORCH_TOKEN` from response | Web server never forwards raw token; session token is distinct          |
-| Event stream leaks API key values           | Daemon events contain task/agent data only, never API keys              |
-| TLS cert private key exposed                | Key stored in `certs/` directory (gitignored); file permissions `0600`  |
-| Config endpoint returns secrets             | Config API masks all `*_KEY`, `*_TOKEN`, `*_SECRET` fields with `"***"` |
-
-#### Denial of Service
-
-| Threat                                 | Mitigation                                                                                        |
-| -------------------------------------- | ------------------------------------------------------------------------------------------------- |
-| Flood of task submissions from browser | Rate limiting on `POST /api/task/add` (60 req/min per session); daemon task queue has depth limit |
-| Pipeline triggered repeatedly          | Lock: only one instance of each pipeline type can run; UI button disabled while running           |
-| SSE stream held open indefinitely      | Max 10 concurrent SSE connections; idle connections timed out after 5 min of no events            |
-| Large prompt causing high token spend  | Existing daemon budget gates apply; web server rejects prompts > 32 KB                            |
-
-#### Elevation of Privilege
-
-| Threat                                    | Mitigation                                                                           |
-| ----------------------------------------- | ------------------------------------------------------------------------------------ |
-| Web server process spawns shell commands  | No shell execution in web server; all operations go through daemon HTTP API only     |
-| Config editor writes arbitrary file paths | Config save endpoint only writes `hydra.config.json`; no `path.join` with user input |
-| Unauthenticated access to daemon directly | Daemon binds to `127.0.0.1` only; not accessible from LAN directly                   |
-
-### Trust Boundary Diagram
-
-```mermaid
-flowchart TB
-    subgraph "Untrusted Zone (LAN)"
-        Phone["Mobile browser"]
-        Laptop["Laptop browser"]
-        Attacker["Potential attacker\n(on same LAN)"]
-    end
-
-    subgraph "TLS Boundary (HTTPS :4174)"
-        TLS["TLS termination\n+ Host validation\n+ Bearer token check"]
-    end
-
-    subgraph "Trusted Zone (localhost only)"
-        WebServer["Web Server\n(proxy + static)"]
-        Daemon["Daemon :4173\n(loopback only)"]
-        ConfigFS["hydra.config.json"]
-        KeyFS["certs/ keys\n(0600 permissions)"]
-        EnvVars["Process env\n(API keys)"]
-    end
-
-    Phone -->|"HTTPS"| TLS
-    Laptop -->|"HTTPS"| TLS
-    Attacker -->|"HTTPS (no token → 401)"| TLS
-    TLS --> WebServer
-    WebServer -->|"Loopback HTTP"| Daemon
-    WebServer --> ConfigFS
-    WebServer --> KeyFS
-    Daemon --> EnvVars
-```
-
-### Known Residual Risks
-
-| Risk                                                          | Likelihood         | Impact   | Owner Action                                                               |
-| ------------------------------------------------------------- | ------------------ | -------- | -------------------------------------------------------------------------- |
-| Self-signed cert pinning bypass (user ignores warning + MITM) | Low on home LAN    | High     | Document that users should pin the cert fingerprint; provide mDNS hostname |
-| Compromised LAN device sends valid session token              | Medium             | High     | Add optional IP allowlist (`web.allowedIPs` in config)                     |
-| Physical access to server reads certs/ or env                 | Low (home lab)     | Critical | Outside scope; OS-level controls apply                                     |
-| Dependency vulnerability in web framework                     | Low (minimal deps) | Medium   | `npm audit` in CI; pin framework to exact version                          |
+| Risk                                         | Why it remains                                           | Response                                              |
+| -------------------------------------------- | -------------------------------------------------------- | ----------------------------------------------------- |
+| Compromised LAN device with a valid session  | Hydra is not designed as a hardened multi-user appliance | Keep LAN mode opt-in and document trust assumptions   |
+| Self-signed cert distrust on mobile browsers | Browser UX varies and may be hostile to local certs      | Prefer `mkcert` or user-supplied certs                |
+| Browser task UI cannot cover all TTY flows   | Some Hydra workflows are terminal-native today           | Keep those flows out of MVP and document the boundary |
 
 ---
 
 ## Implementation Roadmap
 
-### Phase 1 — Minimal Viable Web Shell (2–3 days)
+### Phase 0 — Contract and Scope Alignment
 
-- [ ] `lib/hydra-web.ts` — Express/Fastify server on port `4174`; static file serving; bearer token auth; daemon proxy
-- [ ] TLS self-signed cert generation on first start (ECDSA P-256)
-- [ ] Separate `web-secret.key` for session token signing (not `AI_ORCH_TOKEN`)
-- [ ] `web/index.html` — Login page + single-page shell
-- [ ] `web/vendor.js` — Bundled Preact + htm + Alpine
-- [ ] `web/chat.js` — Basic chat panel connecting to daemon via WebSocket proxy
-- [ ] `npm run web` script
+- Finalize the ownership rule: new durable writes belong in the daemon.
+- Add a small config surface for the web adapter itself (`web.enabled`, `web.host`, `web.port`,
+  `web.lan`, `web.tlsMode` or equivalent).
+- Decide which existing daemon routes are exposed in the first UI.
+- Confirm that MVP chat is task dispatch + SSE, not a separate WebSocket protocol.
+- Document unsupported workflows explicitly.
 
-### Phase 2 — Task Board & Monitoring (2–3 days)
+### Phase 1 — Authenticated Dashboard MVP
 
-- [ ] `web/tasks.js` — Kanban task board with SSE live updates
-- [ ] `web/monitor.js` — Event stream viewer + health panel
-- [ ] `web/statusbar.js` — Web equivalent of terminal status bar
-- [ ] Rate limiting + activity log
+- Add `lib/hydra-web.ts` using built-in Node HTTP primitives.
+- Add login/logout and secure session cookie handling.
+- Serve a minimal browser shell from `web/`.
+- Proxy read routes: `/health`, `/self`, `/state`, `/stats`, `/events`, `/events/stream`.
+- Proxy safe task routes: `/task/add`, `/task/update`, `/dead-letter/retry`,
+  `/task/:id/checkpoints`.
+- Implement daemon-offline state, session-expired state, and SSE reconnect UX.
+- Ship a responsive mobile-friendly layout for the core screens.
 
-### Phase 3 — Config & Pipelines (2–3 days)
+### Phase 2 — Dispatch-Centric Workspace
 
-- [ ] `web/config.js` — Config editor (structured form)
-- [ ] `web/pipelines.js` — Pipeline launcher + progress view
-- [ ] `web/agents.js` — Agent roster + model switcher + custom agent wizard
+- Improve the task timeline and filters.
+- Add agent/mode selectors mapped to current daemon dispatch options.
+- Add checkpoint and dead-letter views.
+- Add session summaries and lightweight historical views where daemon APIs already support them.
+- Render council/tandem activity only from existing task/event data.
 
-### Phase 4 — Polish & Security Hardening (1–2 days)
+### Phase 3 — Controlled Write Surfaces
 
-- [ ] IP allowlist support
-- [ ] Session expiry + refresh
-- [ ] CSP headers + security audit
-- [ ] `npm run web:dev` hot-reload mode for development
-- [ ] Documentation updates (README, ARCHITECTURE.md)
+- Add daemon-owned config read/write endpoints for an allowlisted subset of settings.
+- Add optimistic concurrency for config writes.
+- Decide whether pipeline launch becomes a daemon capability; if yes, add explicit daemon endpoints
+  and audit events.
+- Gate destructive actions behind clear UI affordances and configuration flags.
+
+### Phase 4 — Hardening and Packaging
+
+- Include browser assets in npm packaging and executable packaging.
+- Update lint boundaries and any architectural rules needed for `lib/hydra-web.ts` and `web/`.
+- Finalize LAN documentation, cert handling, and runtime storage paths.
+- Improve accessibility, keyboard navigation, and empty/error states.
+- Add clear rollback and disablement procedures.
+
+### Future Work
+
+- richer multi-session views;
+- optional pipeline scheduling once ownership is well-defined;
+- custom agent setup flows;
+- any browser support for interactive multi-step command prompts.
 
 ---
 
-## Further Considerations
+## Testing, Packaging, and Rollout
 
-### mDNS / Local Discovery
+### Testing Expectations
 
-A `hydra.local` mDNS hostname (using the `mdns` npm package or Avahi on Linux) would let users
-reach the UI without knowing the server's IP. This also helps with TLS `Subject Alternative Name`
-binding.
+Hydra's quality bar means the web work needs tests from the first phase.
 
-### Mobile-First Layout
+**Unit tests**
 
-The web UI should be usable on a phone. Key affordances:
+- session signing/verification;
+- login/logout handlers;
+- proxy header behaviour (`x-ai-orch-token` server-side only);
+- Host and Origin validation;
+- SSE relay connection lifecycle;
+- daemon-offline error mapping.
 
-- Large tap targets for mode switcher and agent selector
-- Chat bubbles that wrap correctly at 320px width
-- Collapsible side panels (task board, config) behind a hamburger menu
-- No horizontal scroll on the main chat view
+**Integration tests**
 
-### Offline / Disconnected Handling
+- spawn daemon and adapter on ephemeral ports;
+- verify authenticated read proxying;
+- verify task creation through the adapter;
+- verify SSE relay reaches the browser-facing endpoint;
+- verify expired/invalid sessions are rejected.
 
-When the browser loses the SSE connection (daemon restart, network blip), the UI should:
+**Manual/browser smoke checks**
 
-1. Show a reconnecting banner
-2. `EventSource` auto-reconnects with exponential back-off
-3. Re-fetch `GET /api/state` on reconnect to reconcile missed events
+- desktop and phone-sized layouts;
+- reconnect after daemon restart;
+- LAN-mode login with trusted cert;
+- logout and session expiry behaviour.
 
-### Multi-User Considerations
+### Packaging Requirements
 
-Hydra is designed for a single operator. Multiple simultaneous web sessions from the same token are
-allowed but share the same daemon state. A future enhancement could add per-session namespacing.
+The current package metadata does not yet account for a web surface. Before shipping:
 
-### Integration with Existing MCP Server
+- include `web/` assets in published artifacts;
+- account for them in executable packaging if the project continues to ship packaged binaries;
+- document the runtime location of generated certs/secrets;
+- avoid hidden asset build steps that are easy to forget during release.
 
-The web interface could optionally expose an MCP-over-HTTP endpoint at `/mcp`, allowing AI
-assistants to call Hydra tools over the LAN without a local CLI. This reuses `lib/hydra-mcp-server.ts`
-with an HTTP transport adapter.
+### Rollout and Rollback
+
+Recommended rollout posture:
+
+- ship the adapter behind an explicit `web.enabled`-style flag or dedicated startup command;
+- keep the daemon fully usable without the web adapter;
+- treat browser access as an optional feature, not a required runtime mode;
+- make rollback trivial: disable the adapter and leave the daemon untouched.
+
+---
+
+## Further Considerations and Open Questions
+
+### Operational Questions
+
+1. Should Hydra support a helper command that prints a one-time login URL for the web adapter?
+2. Should loopback-only mode default to HTTP while LAN mode requires HTTPS?
+3. Which daemon routes are safe enough to expose immediately, and which should remain terminal-only?
+4. What performance budget should the UI target for initial load and steady-state SSE usage?
+
+### Product Questions
+
+1. Is the intended experience a browser dashboard with task control, or true operator parity over
+   time?
+2. Which settings are safe and valuable enough to edit in the browser first?
+3. Which terminal-only workflows should remain deliberately out of scope even long term?
+
+### Optional Enhancements
+
+- mDNS discovery such as `hydra.local`;
+- a clearer council/tandem visualisation once the daemon emits enough structure to support it;
+- a read-only environment inspector that continues to mask values;
+- richer session history views if the daemon surfaces stable historical APIs.
+
+The key takeaway is that Hydra does not need a "mini web app platform." It needs a small,
+authenticated browser surface that starts by reusing the daemon it already has, then grows only when
+new backend contracts are explicit, tested, and owned by the daemon.
