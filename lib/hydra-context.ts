@@ -294,10 +294,14 @@ function buildMediumContext(projectConfig: ProjectConfig, gitOps: IGitOperations
 
   lines.push('--- END PROJECT CONTEXT ---');
 
-  cachedMedium = lines.join('\n');
-  cachedMediumAt = now;
-  cachedMediumKey = cacheKey;
-  return cachedMedium;
+  const context = lines.join('\n');
+  // Only cache when using the default gitOps so test-injected mocks don't poison the cache
+  if (gitOps === gitOperations) {
+    cachedMedium = context;
+    cachedMediumAt = now;
+    cachedMediumKey = cacheKey;
+  }
+  return context;
 }
 
 function appendGitChanges(extraLines: string[], projectRoot: string): void {
@@ -362,8 +366,8 @@ function buildLargeContext(
 
   const result = extraLines.join('\n');
 
-  // Only cache if no task-specific files (those are unique per call)
-  if (!taskContext.files || taskContext.files.length === 0) {
+  // Only cache when using the default gitOps and no task-specific files
+  if (gitOps === gitOperations && (!taskContext.files || taskContext.files.length === 0)) {
     cachedLarge = result;
     cachedLargeAt = now;
     cachedLargeKey = cacheKey;

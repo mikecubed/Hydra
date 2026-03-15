@@ -106,7 +106,16 @@ function createMockGitOps(): IGitOperations & {
 // ── IMetricsRecorder Injection Tests ─────────────────────────────────────────
 
 describe('IMetricsRecorder DI — hydra-nightly-discovery', () => {
+  let savedHome: string | undefined;
+  let tmpHome: string;
+
   beforeEach(() => {
+    // Redirect HOME to an empty temp dir so no real OAuth credentials are found,
+    // making the gemini agent fail deterministically on any host environment.
+    savedHome = process.env['HOME'];
+    tmpHome = fs.mkdtempSync(`${os.tmpdir()}/hydra-test-home-`);
+    process.env['HOME'] = tmpHome;
+
     _setTestConfig({
       nightly: { aiDiscovery: { enabled: true, agent: 'gemini' } },
     });
@@ -114,6 +123,12 @@ describe('IMetricsRecorder DI — hydra-nightly-discovery', () => {
 
   afterEach(() => {
     invalidateConfigCache();
+    fs.rmSync(tmpHome, { recursive: true, force: true });
+    if (savedHome === undefined) {
+      Reflect.deleteProperty(process.env, 'HOME');
+    } else {
+      process.env['HOME'] = savedHome;
+    }
   });
 
   it('runDiscovery passes custom IMetricsRecorder to discovery agent', async () => {

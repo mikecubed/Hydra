@@ -295,6 +295,10 @@ test('recordExecution: ok:false result is recorded as failure not success', asyn
   assert.equal(agent.callsTotal, 1);
   assert.equal(agent.callsFailed, 1);
   assert.equal(agent.callsSuccess, 0);
+  assert.ok(
+    agent.history[0]?.error?.includes('agent failed'),
+    'error message should include stderr detail',
+  );
 });
 
 test('recordExecution: ok:false result emits call:error not call:complete', async () => {
