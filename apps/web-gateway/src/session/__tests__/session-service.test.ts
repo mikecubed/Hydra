@@ -203,6 +203,24 @@ describe('SessionService audit failure propagation', () => {
     });
   });
 
+  it('create() rolls back — no live session left after audit failure', async () => {
+    const clock = new FakeClock(Date.now());
+    const store = new SessionStore(null);
+    const auditStore = new AuditStore(null);
+    const auditService = new AuditService(auditStore, clock);
+
+    auditStore.append = async () => {
+      throw new Error('Audit disk full');
+    };
+
+    const service = new SessionService(store, clock, {}, auditService);
+    await assert.rejects(() => service.create('op-1', '127.0.0.1'));
+
+    // No session should exist in the store
+    const sessions = store.listByOperator('op-1');
+    assert.equal(sessions.length, 0, 'failed create must not leave a live session');
+  });
+
   it('extend() propagates audit write failure', async () => {
     const clock = new FakeClock(Date.now());
     const store = new SessionStore(null);
@@ -228,6 +246,37 @@ describe('SessionService audit failure propagation', () => {
     });
   });
 
+  it('extend() rolls back — extendedCount and expiresAt unchanged after audit failure', async () => {
+    const clock = new FakeClock(Date.now());
+    const store = new SessionStore(null);
+    const auditStore = new AuditStore(null);
+    const auditService = new AuditService(auditStore, clock);
+    const service = new SessionService(
+      store,
+      clock,
+      { sessionLifetimeMs: 3600_000, warningThresholdMs: 600_000, extensionDurationMs: 3600_000 },
+      auditService,
+    );
+
+    const session = await service.create('op-1', '127.0.0.1');
+    const originalExpiresAt = session.expiresAt;
+    const originalExtendedCount = session.extendedCount;
+
+    clock.advance(3001_000);
+
+    auditStore.append = async () => {
+      throw new Error('Audit disk full');
+    };
+
+    await assert.rejects(() => service.extend(session.id));
+
+    const afterFail = store.get(session.id);
+    assert.ok(afterFail);
+    assert.equal(afterFail.extendedCount, originalExtendedCount, 'extendedCount must not change');
+    assert.equal(afterFail.expiresAt, originalExpiresAt, 'expiresAt must not change');
+    assert.equal(afterFail.state, 'active', 'state must revert to original');
+  });
+
   it('logout() propagates audit write failure', async () => {
     const clock = new FakeClock(Date.now());
     const store = new SessionStore(null);
@@ -245,5 +294,25 @@ describe('SessionService audit failure propagation', () => {
     await assert.rejects(() => service.logout(session.id), {
       message: /Audit disk full/,
     });
+  });
+
+  it('logout() rolls back — session remains active after audit failure', async () => {
+    const clock = new FakeClock(Date.now());
+    const store = new SessionStore(null);
+    const auditStore = new AuditStore(null);
+    const auditService = new AuditService(auditStore, clock);
+    const service = new SessionService(store, clock, {}, auditService);
+
+    const session = await service.create('op-1', '127.0.0.1');
+
+    auditStore.append = async () => {
+      throw new Error('Audit disk full');
+    };
+
+    await assert.rejects(() => service.logout(session.id));
+
+    const afterFail = store.get(session.id);
+    assert.ok(afterFail);
+    assert.equal(afterFail.state, 'active', 'state must revert on audit failure');
   });
 });

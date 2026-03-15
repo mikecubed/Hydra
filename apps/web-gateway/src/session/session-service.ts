@@ -69,13 +69,19 @@ export class SessionService {
     const now = new Date(this.clock.now()).toISOString();
     const session = this.store.create(operatorId, expiresAt, sourceIp, now);
 
-    await this.auditService?.record(
-      'session.created',
-      operatorId,
-      session.id,
-      { sourceIp },
-      'success',
-    );
+    try {
+      await this.auditService?.record(
+        'session.created',
+        operatorId,
+        session.id,
+        { sourceIp },
+        'success',
+      );
+    } catch (err) {
+      // Rollback: remove the session so no live session exists without audit
+      this.store.delete(session.id);
+      throw err;
+    }
 
     return session;
   }
@@ -145,6 +151,15 @@ export class SessionService {
       throw createError('SESSION_EXPIRED', 'Session is not within the extension window');
     }
 
+    // Snapshot pre-mutation state for rollback (must be captured before any
+    // store mutations, since store.update mutates the object in place).
+    const snapshot = {
+      state: session.state,
+      expiresAt: session.expiresAt,
+      extendedCount: session.extendedCount,
+      lastActivityAt: session.lastActivityAt,
+    };
+
     // If the session is still 'active' but within the window, auto-transition
     // to 'expiring-soon' so the FSM extend transition is valid.
     let currentState = session.state;
@@ -170,13 +185,19 @@ export class SessionService {
     });
     if (!updated) throw createError('SESSION_NOT_FOUND');
 
-    await this.auditService?.record(
-      'session.extended',
-      session.operatorId,
-      sessionId,
-      { extendedCount: session.extendedCount + 1 },
-      'success',
-    );
+    try {
+      await this.auditService?.record(
+        'session.extended',
+        session.operatorId,
+        sessionId,
+        { extendedCount: session.extendedCount + 1 },
+        'success',
+      );
+    } catch (err) {
+      // Rollback to pre-mutation state
+      this.store.update(sessionId, snapshot);
+      throw err;
+    }
 
     return updated;
   }
@@ -213,6 +234,13 @@ export class SessionService {
     if (session == null) return;
     const result = transition(session.state, trigger);
     if (!result.ok) return; // silently ignore invalid transitions
+
+    // Snapshot pre-mutation state for rollback
+    const snapshot = {
+      state: session.state,
+      invalidatedReason: session.invalidatedReason,
+    };
+
     const updates: Partial<StoredSession> = { state: result.newState };
     if (reason != null && result.newState === 'invalidated') {
       updates.invalidatedReason = reason;
@@ -221,13 +249,19 @@ export class SessionService {
 
     const eventType = TRIGGER_TO_AUDIT[trigger];
     if (eventType && this.auditService) {
-      await this.auditService.record(
-        eventType,
-        session.operatorId,
-        sessionId,
-        reason == null ? {} : { reason },
-        'success',
-      );
+      try {
+        await this.auditService.record(
+          eventType,
+          session.operatorId,
+          sessionId,
+          reason == null ? {} : { reason },
+          'success',
+        );
+      } catch (err) {
+        // Rollback to pre-mutation state
+        this.store.update(sessionId, snapshot);
+        throw err;
+      }
     }
   }
 }

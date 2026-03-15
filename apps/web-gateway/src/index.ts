@@ -21,6 +21,12 @@ import { createOriginGuard } from './security/origin-guard.ts';
 import { createCsrfMiddleware } from './security/csrf-middleware.ts';
 import { createHardenedHeaders, type HardenedHeadersConfig } from './security/hardened-headers.ts';
 import { createMutatingRateLimiter } from './security/mutating-rate-limiter.ts';
+import {
+  DaemonHeartbeat,
+  defaultHealthChecker,
+  type HealthChecker,
+  type DaemonHeartbeatConfig,
+} from './session/daemon-heartbeat.ts';
 import type { Clock } from './shared/clock.ts';
 import { SystemClock } from './shared/clock.ts';
 
@@ -33,6 +39,8 @@ export interface GatewayAppDeps {
   authRoutesConfig?: AuthRoutesConfig;
   hardenedHeadersConfig?: HardenedHeadersConfig;
   allowedOrigin?: string;
+  healthChecker?: HealthChecker;
+  heartbeatConfig?: Partial<DaemonHeartbeatConfig>;
 }
 
 export interface GatewayApp {
@@ -41,6 +49,7 @@ export interface GatewayApp {
   authService: AuthService;
   auditService: AuditService;
   operatorStore: OperatorStore;
+  heartbeat: DaemonHeartbeat;
 }
 
 export function createGatewayApp(deps: GatewayAppDeps = {}): GatewayApp {
@@ -54,6 +63,14 @@ export function createGatewayApp(deps: GatewayAppDeps = {}): GatewayApp {
   const sessionService = new SessionService(sessionStore, clock, deps.sessionConfig, auditService);
   const rateLimiter = new RateLimiter(clock);
   const authService = new AuthService(operatorStore, rateLimiter, sessionService, auditService);
+
+  const heartbeat = new DaemonHeartbeat(
+    sessionService,
+    sessionStore,
+    deps.healthChecker ?? defaultHealthChecker,
+    deps.heartbeatConfig,
+  );
+  heartbeat.start();
 
   const app = new Hono<GatewayEnv>();
 
@@ -82,5 +99,5 @@ export function createGatewayApp(deps: GatewayAppDeps = {}): GatewayApp {
   protectedSession.route('/', sessionRoutes);
   app.route('/session', protectedSession);
 
-  return { app, sessionService, authService, auditService, operatorStore };
+  return { app, sessionService, authService, auditService, operatorStore, heartbeat };
 }

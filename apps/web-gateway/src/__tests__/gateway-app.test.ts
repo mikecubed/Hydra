@@ -5,7 +5,7 @@
  * through the fully-assembled Hono stack created by createGatewayApp().
  */
 /* eslint-disable n/no-unsupported-features/node-builtins -- Request is stable in Node 24 */
-import { describe, it, beforeEach } from 'node:test';
+import { describe, it, beforeEach, afterEach } from 'node:test';
 import assert from 'node:assert/strict';
 import { createGatewayApp, type GatewayApp } from '../index.ts';
 import { FakeClock } from '../shared/clock.ts';
@@ -69,12 +69,16 @@ async function login(gw: GatewayApp): Promise<Record<string, string>> {
 describe('Gateway app integration', () => {
   let gw: GatewayApp;
   let clock: FakeClock;
+  let healthResult: boolean;
 
   beforeEach(async () => {
     clock = new FakeClock(Date.now());
+    healthResult = true;
     gw = createGatewayApp({
       clock,
       allowedOrigin: ORIGIN,
+      healthChecker: async () => healthResult,
+      heartbeatConfig: { intervalMs: 60_000 },
       sessionConfig: {
         sessionLifetimeMs: 3600_000,
         warningThresholdMs: 600_000,
@@ -85,6 +89,10 @@ describe('Gateway app integration', () => {
     });
     await gw.operatorStore.createOperator('admin', 'Admin');
     await gw.operatorStore.addCredential('admin', 'password123');
+  });
+
+  afterEach(() => {
+    gw.heartbeat.stop();
   });
 
   // ── Origin guard ─────────────────────────────────────────────────────────
@@ -390,5 +398,79 @@ describe('Gateway app integration', () => {
     assert.equal(extendRes.status, 200);
     const body = (await extendRes.json()) as { newExpiresAt: string };
     assert.ok(body.newExpiresAt);
+  });
+
+  // ── Daemon heartbeat integration ──────────────────────────────────────────
+
+  it('heartbeat is wired: daemon-down marks sessions daemon-unreachable via /session/info', async () => {
+    const cookies = await login(gw);
+
+    // Verify session is active
+    const infoReq1 = buildRequest('GET', '/session/info', {
+      cookies: { __session: cookies['__session'], __csrf: cookies['__csrf'] },
+    });
+    const infoRes1 = await gw.app.request(infoReq1);
+    assert.equal(infoRes1.status, 200);
+    const body1 = (await infoRes1.json()) as { state: string };
+    assert.equal(body1.state, 'active');
+
+    // Simulate daemon going down via the wired heartbeat
+    healthResult = false;
+    await gw.heartbeat.tick();
+
+    // Session should now be daemon-unreachable — validate still throws,
+    // but the session-info route should reflect the state change via the store.
+    const session = gw.sessionService.store.get(cookies['__session']);
+    assert.ok(session);
+    assert.equal(session.state, 'daemon-unreachable');
+  });
+
+  it('heartbeat is wired: daemon recovery restores sessions via composed gateway', async () => {
+    const cookies = await login(gw);
+
+    // Daemon goes down
+    healthResult = false;
+    await gw.heartbeat.tick();
+    assert.equal(gw.sessionService.store.get(cookies['__session'])?.state, 'daemon-unreachable');
+
+    // Daemon recovers
+    healthResult = true;
+    await gw.heartbeat.tick();
+
+    // Session should be restored to active
+    const infoReq = buildRequest('GET', '/session/info', {
+      cookies: { __session: cookies['__session'], __csrf: cookies['__csrf'] },
+    });
+    const infoRes = await gw.app.request(infoReq);
+    assert.equal(infoRes.status, 200);
+    const body = (await infoRes.json()) as { state: string };
+    assert.equal(body.state, 'active');
+  });
+
+  it('heartbeat: session expired during daemon outage stays terminal after recovery', async () => {
+    const cookies = await login(gw);
+
+    // Daemon goes down
+    healthResult = false;
+    await gw.heartbeat.tick();
+    assert.equal(gw.sessionService.store.get(cookies['__session'])?.state, 'daemon-unreachable');
+
+    // Time passes beyond session lifetime while daemon is down
+    clock.advance(3600_001);
+
+    // Daemon recovers — heartbeat validate should detect expiry
+    healthResult = true;
+    await gw.heartbeat.tick();
+
+    const session = gw.sessionService.store.get(cookies['__session']);
+    assert.ok(session);
+    assert.equal(session.state, 'expired');
+
+    // And the HTTP route confirms it
+    const infoReq = buildRequest('GET', '/session/info', {
+      cookies: { __session: cookies['__session'], __csrf: cookies['__csrf'] },
+    });
+    const infoRes = await gw.app.request(infoReq);
+    assert.notEqual(infoRes.status, 200);
   });
 });
