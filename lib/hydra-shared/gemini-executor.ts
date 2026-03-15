@@ -340,6 +340,7 @@ export async function executeGeminiDirect(
   const { timeoutMs = 300_000, modelOverride, phaseLabel, onStatusBar } = opts;
   const startTime = Date.now();
   const model = modelOverride ?? getActiveModel('gemini') ?? 'gemini';
+  // rf-cs03: complex lifecycle — handle passed to makeGeminiFailResult and retry loop
   const metricsHandle = metrics.recordCallStart('gemini', model);
   if (onStatusBar) onStatusBar('gemini', { phase: phaseLabel ?? 'executing', step: 'running' });
 

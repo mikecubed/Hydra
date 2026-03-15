@@ -358,6 +358,30 @@ export function recordCallError(handle: string, error: unknown): void {
   });
 }
 
+// ── Convenience wrapper ─────────────────────────────────────────────────────
+
+/**
+ * Convenience wrapper that manages the full recordCallStart → complete/error lifecycle.
+ * Use this when the entire async operation fits within a single try/catch.
+ * For complex cases (handle passed through helpers, branching on result.ok, etc.),
+ * use the individual recordCallStart/Complete/Error functions directly.
+ */
+export async function recordExecution<T>(
+  agentName: string,
+  model: string | undefined,
+  fn: () => Promise<T>,
+): Promise<T> {
+  const handle = recordCallStart(agentName, model);
+  try {
+    const result = await fn();
+    recordCallComplete(handle, result as unknown as CallResult);
+    return result;
+  } catch (err: unknown) {
+    recordCallError(handle, err);
+    throw err;
+  }
+}
+
 // ── Querying ────────────────────────────────────────────────────────────────
 
 /**
@@ -651,4 +675,5 @@ export const metricsRecorder: IMetricsRecorder = {
   recordCallStart,
   recordCallComplete,
   recordCallError,
+  recordExecution,
 };

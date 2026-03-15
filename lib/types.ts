@@ -1054,6 +1054,11 @@ export interface IMetricsRecorder {
   recordCallStart(agentName: string, model?: string): string;
   recordCallComplete(handle: string, result: MetricsCallResult): void;
   recordCallError(handle: string, error: unknown): void;
+  recordExecution<T>(
+    agentName: string,
+    model: string | undefined,
+    fn: () => Promise<T>,
+  ): Promise<T>;
 }
 
 /** Recursively make all properties optional — used for partial config overrides. */

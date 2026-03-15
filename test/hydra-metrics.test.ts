@@ -7,10 +7,13 @@ import {
   getMetricsSummary,
   getSessionUsage,
   metricsEmitter,
+  metricsRecorder,
   recordCallComplete,
   recordCallStart,
+  recordExecution,
   resetMetrics,
 } from '../lib/hydra-metrics.ts';
+import type { IMetricsRecorder } from '../lib/types.ts';
 
 function withMockedDateNow<T>(timestamps: number[], callback: () => T): T {
   let index = 0;
@@ -203,4 +206,87 @@ test('metrics(ts): concurrent recordCallStart calls produce distinct handles and
   assert.equal(agent.callsTotal, 2);
   assert.equal(agent.callsSuccess, 2);
   assert.deepEqual(recordedModels, ['model-a', 'model-b']);
+});
+
+// ── recordExecution tests ───────────────────────────────────────────────────
+
+test('recordExecution: success path records complete and returns result', async () => {
+  resetMetrics();
+  const result = await recordExecution('claude', 'opus', () =>
+    Promise.resolve({ output: 'done', stdout: 'done', stderr: '' }),
+  );
+
+  assert.deepEqual(result, { output: 'done', stdout: 'done', stderr: '' });
+  const agent = getAgentMetrics('claude');
+  assert.ok(agent);
+  assert.equal(agent.callsTotal, 1);
+  assert.equal(agent.callsSuccess, 1);
+  assert.equal(agent.callsFailed, 0);
+  assert.equal(agent.lastModel, 'opus');
+});
+
+test('recordExecution: error path records error and re-throws', async () => {
+  resetMetrics();
+  const err = new Error('agent crashed');
+
+  await assert.rejects(
+    () => recordExecution('gemini', 'flash', () => Promise.reject(err)),
+    (thrown: unknown) => thrown === err,
+  );
+
+  const agent = getAgentMetrics('gemini');
+  assert.ok(agent);
+  assert.equal(agent.callsTotal, 1);
+  assert.equal(agent.callsFailed, 1);
+  assert.equal(agent.callsSuccess, 0);
+  assert.equal(agent.history[0]?.error, 'agent crashed');
+});
+
+test('recordExecution: model defaults to unknown when undefined', async () => {
+  resetMetrics();
+  await recordExecution('codex', undefined, () => Promise.resolve({ output: 'x' }));
+
+  const agent = getAgentMetrics('codex');
+  assert.ok(agent);
+  assert.equal(agent.lastModel, 'unknown');
+});
+
+test('recordExecution: emits call:start and call:complete events', async () => {
+  resetMetrics();
+  const events: string[] = [];
+  const onStart = () => events.push('start');
+  const onComplete = () => events.push('complete');
+  metricsEmitter.on('call:start', onStart);
+  metricsEmitter.on('call:complete', onComplete);
+
+  await recordExecution('claude', 'sonnet', () => Promise.resolve({ output: 'ok' }));
+
+  metricsEmitter.off('call:start', onStart);
+  metricsEmitter.off('call:complete', onComplete);
+  assert.deepEqual(events, ['start', 'complete']);
+});
+
+test('recordExecution: emits call:start and call:error events on failure', async () => {
+  resetMetrics();
+  const events: string[] = [];
+  const onStart = () => events.push('start');
+  const onError = () => events.push('error');
+  metricsEmitter.on('call:start', onStart);
+  metricsEmitter.on('call:error', onError);
+
+  await recordExecution('claude', 'sonnet', () => Promise.reject(new Error('boom'))).catch(
+    () => {},
+  );
+
+  metricsEmitter.off('call:start', onStart);
+  metricsEmitter.off('call:error', onError);
+  assert.deepEqual(events, ['start', 'error']);
+});
+
+test('metricsRecorder satisfies IMetricsRecorder including recordExecution', () => {
+  const recorder: IMetricsRecorder = metricsRecorder;
+  assert.equal(typeof recorder.recordCallStart, 'function');
+  assert.equal(typeof recorder.recordCallComplete, 'function');
+  assert.equal(typeof recorder.recordCallError, 'function');
+  assert.equal(typeof recorder.recordExecution, 'function');
 });

@@ -258,6 +258,7 @@ export async function executeCustomCliAgent(
   const cmd = invokeConfig.cmd;
   assertSafeSpawnCmd(cmd, `Custom agent '${agentName}'`);
   const startTime = Date.now();
+  // rf-cs03: complex lifecycle — handle passed to event-driven spawn callbacks
   const metricsHandle = metrics.recordCallStart(agentName, agentName);
   const span = await startAgentSpan(agentName, agentName, { phase: phaseLabel });
 
@@ -394,6 +395,7 @@ export async function executeCustomApiAgent(
 
   const apiConfig = buildApiRequestConfig(def, timeoutMs);
   const startTime = Date.now();
+  // rf-cs03: complex lifecycle — handle passed to executeApiStream helper
   const metricsHandle = metrics.recordCallStart(agentName, apiConfig.model);
   const span = await startAgentSpan(agentName, apiConfig.model, { phase: phaseLabel });
 

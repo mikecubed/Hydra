@@ -191,6 +191,7 @@ async function executeDiscoveryAgent(
   opts: { cwd: string; timeoutMs: number; modelOverride?: string },
   metrics: IMetricsRecorder = metricsRecorder,
 ): Promise<{ ok: boolean; stdout?: string; output?: string; error?: string } | null> {
+  // rf-cs03: complex lifecycle — branches on result.ok inside try, returns null instead of throwing
   const handle = metrics.recordCallStart(agent, 'discovery');
   try {
     const result = await executeAgentWithRecovery(agent, prompt, opts);

@@ -29,7 +29,7 @@ import {
   bestAgentFor as _bestAgentFor,
   getVerifier,
 } from './hydra-agents.ts';
-import { recordCallStart, recordCallComplete } from './hydra-metrics.ts';
+import { recordExecution } from './hydra-metrics.ts';
 import { checkUsage as _checkUsage } from './hydra-usage.ts';
 import { resolveVerificationPlan } from './hydra-verification.ts';
 import { BudgetTracker } from './hydra-shared/budget-tracker.ts';
@@ -317,13 +317,13 @@ ${truncatedDiff}
 
 Then explain your reasoning briefly.`;
 
-  const handle = recordCallStart(verifier);
-  const result = await executeAgentWithRecovery(verifier, reviewPrompt, {
-    cwd: projectRoot,
-    timeoutMs: 5 * 60 * 1000,
-    phaseLabel: 'council-lite review',
-  });
-  recordCallComplete(handle, result as unknown as Parameters<typeof recordCallComplete>[1]);
+  const result = await recordExecution(verifier, undefined, () =>
+    executeAgentWithRecovery(verifier, reviewPrompt, {
+      cwd: projectRoot,
+      timeoutMs: 5 * 60 * 1000,
+      phaseLabel: 'council-lite review',
+    }),
+  );
 
   if (!result.ok || result.output === '') {
     return { verdict: 'approve', reason: 'Verifier unavailable — defaulting to approve' };
@@ -429,13 +429,13 @@ Focus on:
 - How to verify the change works
 
 Be concise — this is a planning checklist, not a design doc.`;
-  const planHandle = recordCallStart('claude');
-  const planResult = await executeAgentWithRecovery('claude', planPrompt, {
-    cwd: projectRoot,
-    timeoutMs: 3 * 60 * 1000,
-    phaseLabel: `${phaseLabel} plan`,
-  });
-  recordCallComplete(planHandle, planResult as unknown as Parameters<typeof recordCallComplete>[1]);
+  const planResult = await recordExecution('claude', undefined, () =>
+    executeAgentWithRecovery('claude', planPrompt, {
+      cwd: projectRoot,
+      timeoutMs: 3 * 60 * 1000,
+      phaseLabel: `${phaseLabel} plan`,
+    }),
+  );
   if (!planResult.ok) {
     console.log(pc.yellow(`  [PLAN] Planning failed, proceeding with direct execution`));
   }
@@ -484,20 +484,20 @@ async function invokeExecuteAgent(
 ): Promise<{ ok: boolean; phase: Record<string, unknown>; raw: ExecuteResult }> {
   console.log(pc.dim(`  [EXECUTE] Dispatching to ${task.suggestedAgent}...`));
   const timeoutMs = cfg.tasks?.perTaskTimeoutMs ?? 15 * 60 * 1000;
-  const execHandle = recordCallStart(task.suggestedAgent);
-  const raw = await executeAgentWithRecovery(task.suggestedAgent, executePrompt, {
-    cwd: projectRoot,
-    timeoutMs,
-    phaseLabel,
-    progressIntervalMs: 30_000,
-    onProgress: (elapsed) => {
-      process.stderr.write(pc.dim(`  [${phaseLabel}] ${formatDuration(elapsed)} elapsed...\r`));
-    },
-    hubCwd: projectRoot,
-    hubProject: path.basename(projectRoot),
-    hubAgent: `${task.suggestedAgent}-forge`,
-  });
-  recordCallComplete(execHandle, raw as unknown as Parameters<typeof recordCallComplete>[1]);
+  const raw = await recordExecution(task.suggestedAgent, undefined, () =>
+    executeAgentWithRecovery(task.suggestedAgent, executePrompt, {
+      cwd: projectRoot,
+      timeoutMs,
+      phaseLabel,
+      progressIntervalMs: 30_000,
+      onProgress: (elapsed) => {
+        process.stderr.write(pc.dim(`  [${phaseLabel}] ${formatDuration(elapsed)} elapsed...\r`));
+      },
+      hubCwd: projectRoot,
+      hubProject: path.basename(projectRoot),
+      hubAgent: `${task.suggestedAgent}-forge`,
+    }),
+  );
   const phase: Record<string, unknown> = {
     status: raw.ok ? 'done' : 'failed',
     timedOut: raw.timedOut,
@@ -524,13 +524,11 @@ async function applyDiagnosis(
   };
   if (diagnosis.diagnosis === 'transient') {
     console.log(pc.yellow(`  [INVESTIGATE] Transient failure — retrying...`));
-    const retry = await executeAgentWithRecovery(task.suggestedAgent, executePrompt, {
-      ...baseOpts,
-      phaseLabel: `${phaseLabel} retry`,
-    });
-    recordCallComplete(
-      recordCallStart(task.suggestedAgent),
-      retry as unknown as Parameters<typeof recordCallComplete>[1],
+    const retry = await recordExecution(task.suggestedAgent, undefined, () =>
+      executeAgentWithRecovery(task.suggestedAgent, executePrompt, {
+        ...baseOpts,
+        phaseLabel: `${phaseLabel} retry`,
+      }),
     );
     return retry.ok;
   }
@@ -538,13 +536,11 @@ async function applyDiagnosis(
   if (diagnosis.diagnosis === 'fixable' && preamble != null && preamble !== '') {
     console.log(pc.yellow(`  [INVESTIGATE] Fixable — retrying with corrective prompt...`));
     const corrected = `${preamble}\n\n${executePrompt}`;
-    const retry = await executeAgentWithRecovery(task.suggestedAgent, corrected, {
-      ...baseOpts,
-      phaseLabel: `${phaseLabel} fix-retry`,
-    });
-    recordCallComplete(
-      recordCallStart(task.suggestedAgent),
-      retry as unknown as Parameters<typeof recordCallComplete>[1],
+    const retry = await recordExecution(task.suggestedAgent, undefined, () =>
+      executeAgentWithRecovery(task.suggestedAgent, corrected, {
+        ...baseOpts,
+        phaseLabel: `${phaseLabel} fix-retry`,
+      }),
     );
     return retry.ok;
   }
