@@ -90,14 +90,8 @@ export class AuthService {
       throw createError('INVALID_CREDENTIALS');
     }
 
-    // Update lastUsedAt only on the matching credential
-    matchedCred.lastUsedAt = new Date().toISOString();
-
     // Create session — must be rolled back if success audit fails
     const session = await this.sessionService.create(operator.id, sourceKey);
-
-    // Reset rate limiter on success
-    this.rateLimiter.reset(sourceKey);
 
     try {
       await this.auditService?.record(
@@ -113,6 +107,11 @@ export class AuthService {
       this.sessionService.store.delete(session.id);
       throw err;
     }
+
+    // Credential metadata and limiter state are part of the same success transaction —
+    // only mutate after the audit write is durable.
+    matchedCred.lastUsedAt = new Date().toISOString();
+    this.rateLimiter.reset(sourceKey);
 
     return { operator, session };
   }
@@ -167,12 +166,8 @@ export class AuthService {
       throw createError('INVALID_CREDENTIALS');
     }
 
-    // Update lastUsedAt only on the matching credential
-    matchedCred.lastUsedAt = new Date().toISOString();
-
-    // Reset rate limiter + idle timer on successful re-auth.
+    // Reset idle timer on successful re-auth.
     // Snapshot lastActivityAt so we can rollback if the audit write fails.
-    this.rateLimiter.reset(sourceKey);
     const previousActivityAt = session.lastActivityAt;
     this.sessionService.touchActivity(sessionId);
 
@@ -190,6 +185,11 @@ export class AuthService {
       this.sessionService.store.update(sessionId, { lastActivityAt: previousActivityAt });
       throw err;
     }
+
+    // Credential metadata and limiter state are part of the same success transaction —
+    // only mutate after the audit write is durable.
+    matchedCred.lastUsedAt = new Date().toISOString();
+    this.rateLimiter.reset(sourceKey);
 
     return session;
   }
