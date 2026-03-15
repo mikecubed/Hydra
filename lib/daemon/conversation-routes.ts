@@ -86,7 +86,7 @@ function routeTurns(
   }
   const streamMatch = path.match(/^\/conversations\/([^/]+)\/turns\/([^/]+)\/stream$/);
   if (streamMatch !== null && method === 'GET') {
-    handleSubscribeToStream(streamMatch[2], url, res, deps);
+    handleSubscribeToStream(streamMatch[1], streamMatch[2], url, res, deps);
     return true;
   }
   return false;
@@ -268,9 +268,16 @@ async function handleResumeConversation(
     sendError(res, 404, 'Conversation not found');
     return;
   }
-  const events = deps.store.getEventsSince(lastSeq + 1);
+  // Collect stream events across all turns in this conversation since lastSeq (exclusive)
+  const turns = deps.store.getTurns(id);
+  const allStreamEvents = [];
+  for (const turn of turns) {
+    const turnEvents = deps.streamManager.getStreamEventsSince(turn.id, lastSeq);
+    allStreamEvents.push(...turnEvents);
+  }
+  allStreamEvents.sort((a, b) => a.seq - b.seq);
   const pendingApprovals = deps.store.getPendingApprovals(id);
-  sendJson(res, 200, { conversation: conv, events, pendingApprovals });
+  sendJson(res, 200, { conversation: conv, events: allStreamEvents, pendingApprovals });
 }
 
 async function handleSubmitInstruction(
@@ -340,11 +347,21 @@ function handleLoadTurnHistory(
 }
 
 function handleSubscribeToStream(
+  conversationId: string,
   turnId: string,
   url: URL,
   res: ServerResponse,
   deps: ConversationRouteDeps,
 ): void {
+  const turn = deps.store.getTurn(turnId);
+  if (!turn) {
+    sendError(res, 404, 'Turn not found');
+    return;
+  }
+  if (turn.conversationId !== conversationId) {
+    sendError(res, 400, 'Turn does not belong to this conversation');
+    return;
+  }
   const sinceParam = url.searchParams.get('since');
   const sinceSeq = sinceParam === null ? 0 : Number(sinceParam);
   const events = deps.streamManager.getStreamEventsSince(turnId, sinceSeq);
@@ -395,7 +412,7 @@ async function handleRespondToApproval(
 }
 
 function handleCancelWork(
-  _conversationId: string,
+  conversationId: string,
   turnId: string,
   res: ServerResponse,
   deps: ConversationRouteDeps,
@@ -403,6 +420,10 @@ function handleCancelWork(
   const turn = deps.store.getTurn(turnId);
   if (!turn) {
     sendError(res, 404, 'Turn not found');
+    return;
+  }
+  if (turn.conversationId !== conversationId) {
+    sendError(res, 400, 'Turn does not belong to this conversation');
     return;
   }
   deps.streamManager.cancelStream(turnId);
@@ -416,6 +437,15 @@ function handleRetryTurn(
   res: ServerResponse,
   deps: ConversationRouteDeps,
 ): void {
+  const original = deps.store.getTurn(turnId);
+  if (!original) {
+    sendError(res, 404, 'Turn not found');
+    return;
+  }
+  if (original.conversationId !== conversationId) {
+    sendError(res, 400, 'Turn does not belong to this conversation');
+    return;
+  }
   try {
     const newTurn = deps.store.retryTurn(conversationId, turnId);
     deps.store.updateTurnStatus(newTurn.id, 'executing');
@@ -439,6 +469,25 @@ async function handleForkConversation(
 
   if (forkPointTurnId === '') {
     sendError(res, 400, 'forkPointTurnId is required');
+    return;
+  }
+
+  const forkTurn = deps.store.getTurn(forkPointTurnId);
+  if (!forkTurn) {
+    sendError(res, 404, 'Fork point turn not found');
+    return;
+  }
+  // The fork point turn must belong to the conversation being forked or
+  // one of its ancestor conversations (reachable through the parent chain).
+  const conv = deps.store.getConversation(conversationId);
+  if (!conv) {
+    sendError(res, 404, 'Conversation not found');
+    return;
+  }
+  const turnsInConversation = deps.store.getTurns(conversationId);
+  const turnBelongs = turnsInConversation.some((t) => t.id === forkPointTurnId);
+  if (!turnBelongs) {
+    sendError(res, 400, 'Fork point turn does not belong to this conversation');
     return;
   }
 
@@ -492,12 +541,13 @@ function handleGetArtifactContent(
   res: ServerResponse,
   deps: ConversationRouteDeps,
 ): void {
-  const content = deps.store.getArtifactContent(artifactId);
-  if (content === undefined) {
+  const artifact = deps.store.getArtifactMetadata(artifactId);
+  if (artifact === undefined) {
     sendError(res, 404, 'Artifact not found');
     return;
   }
-  sendJson(res, 200, { artifactId, content });
+  const content = deps.store.getArtifactContent(artifactId);
+  sendJson(res, 200, { artifact, content });
 }
 
 function handleListArtifactsForConversation(

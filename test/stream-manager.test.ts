@@ -128,7 +128,7 @@ describe('StreamManager — subscription', () => {
     assert.ok(events.length >= 3, 'should include started + 2 deltas');
   });
 
-  it('subscribes from midpoint', () => {
+  it('subscribes from midpoint (exclusive)', () => {
     const conv = store.createConversation();
     const turn = store.appendTurn(conv.id, {
       kind: 'operator',
@@ -142,12 +142,29 @@ describe('StreamManager — subscription', () => {
 
     const allEvents = streamManager.getStreamEvents(turn.id);
     const midSeq = allEvents[1].seq; // after 'started' and first delta
-    const fromMid = streamManager.getStreamEventsSince(turn.id, midSeq + 1);
+    const fromMid = streamManager.getStreamEventsSince(turn.id, midSeq);
     assert.ok(fromMid.length < allEvents.length, 'should have fewer events when resuming');
     assert.ok(
       fromMid.every((e) => e.seq > midSeq),
-      'all events should be after midpoint',
+      'all events should be strictly after midpoint (exclusive)',
     );
+  });
+
+  it('since is exclusive — does not duplicate last acknowledged event', () => {
+    const conv = store.createConversation();
+    const turn = store.appendTurn(conv.id, {
+      kind: 'operator',
+      instruction: 'Hello',
+      attribution: operatorAttribution,
+    });
+    streamManager.createStream(turn.id);
+    streamManager.emitEvent(turn.id, 'text-delta', { text: 'a' });
+    streamManager.emitEvent(turn.id, 'text-delta', { text: 'b' });
+
+    const allEvents = streamManager.getStreamEvents(turn.id);
+    const lastAcked = allEvents.at(-1)!.seq;
+    const resumed = streamManager.getStreamEventsSince(turn.id, lastAcked);
+    assert.equal(resumed.length, 0, 'no events should be returned when fully caught up');
   });
 });
 

@@ -194,7 +194,7 @@ export class StreamManager {
    * Get stream events since a given sequence number (for reconnect resumption).
    */
   getStreamEventsSince(turnId: string, fromSeq: number): StreamEventType[] {
-    return this.getStreamEvents(turnId).filter((e) => e.seq >= fromSeq);
+    return this.getStreamEvents(turnId).filter((e) => e.seq > fromSeq);
   }
 
   /**

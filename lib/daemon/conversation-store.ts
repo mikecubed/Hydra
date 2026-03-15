@@ -521,6 +521,13 @@ export class ConversationStore {
     return this.artifacts.get(artifactId)?.content;
   }
 
+  getArtifactMetadata(artifactId: string): ArtifactType | undefined {
+    const stored = this.artifacts.get(artifactId);
+    if (!stored) return undefined;
+    const { content: _, ...meta } = stored;
+    return meta;
+  }
+
   listArtifactsForConversation(conversationId: string): ArtifactType[] {
     const turnIds = this.turnsByConversation.get(conversationId) ?? [];
     const result: ArtifactType[] = [];

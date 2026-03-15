@@ -52,6 +52,9 @@ import { checkUsage } from './hydra-usage.ts';
 import { resolveVerificationPlan } from './hydra-verification.ts';
 import { handleReadRoute } from './daemon/read-routes.ts';
 import { handleWriteRoute } from './daemon/write-routes.ts';
+import { handleConversationRoute } from './daemon/conversation-routes.ts';
+import { ConversationStore } from './daemon/conversation-store.ts';
+import { StreamManager } from './daemon/stream-manager.ts';
 import { sendJson, sendError, isAuthorized, readJsonBody } from './daemon/http-utils.ts';
 import { printHelp, commandStatus, commandStop } from './daemon/cli-commands.ts';
 import {
@@ -122,6 +125,8 @@ interface DaemonContext {
   eventCount: number;
   writeQueue: Promise<unknown>;
   sseClients: Set<ServerResponse>;
+  conversationStore: ConversationStore;
+  streamManager: StreamManager;
 }
 
 interface DaemonIntervals {
@@ -134,6 +139,7 @@ interface DaemonIntervals {
 type VerificationCallback = (error: Error | null, stdout: string, stderr: string) => void;
 
 function createDaemonContext(host: string, port: number): DaemonContext {
+  const conversationStore = new ConversationStore();
   return {
     host,
     port,
@@ -143,6 +149,8 @@ function createDaemonContext(host: string, port: number): DaemonContext {
     eventCount: 0,
     writeQueue: Promise.resolve(),
     sseClients: new Set<ServerResponse>(),
+    conversationStore,
+    streamManager: new StreamManager(conversationStore),
   };
 }
 
@@ -548,6 +556,15 @@ async function handleHttpRequest(
 
     if (!isAuthorized(req, ORCH_TOKEN)) {
       sendError(res, 401, 'Unauthorized');
+      return;
+    }
+
+    if (
+      handleConversationRoute(req, res, {
+        store: ctx.conversationStore,
+        streamManager: ctx.streamManager,
+      })
+    ) {
       return;
     }
 

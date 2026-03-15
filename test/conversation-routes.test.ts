@@ -343,6 +343,7 @@ describe('Conversation routes — artifacts', () => {
     handleConversationRoute(req, res as unknown as ServerResponse, deps);
     assert.equal(res.statusCode, 200);
     assert.equal((res.body as Record<string, unknown>)['content'], 'const x = 1;');
+    assert.ok((res.body as Record<string, unknown>)['artifact'], 'should have artifact object');
   });
 });
 
@@ -398,5 +399,212 @@ describe('Conversation routes — activities', () => {
     const res = createMockRes();
     const handled = handleConversationRoute(req, res as unknown as ServerResponse, deps);
     assert.ok(!handled, 'should not handle unknown routes');
+  });
+});
+
+// ── Blocker 2: Reconnect/resume semantics ────────────────────────────────────
+
+describe('Conversation routes — resume returns StreamEvents', () => {
+  it('resume returns StreamEvent[] not ConversationEventRecords', async () => {
+    const conv = deps.store.createConversation();
+    const turn = deps.store.appendTurn(conv.id, {
+      kind: 'operator',
+      instruction: 'Hello',
+      attribution: operatorAttribution,
+    });
+    deps.store.updateTurnStatus(turn.id, 'executing');
+    deps.streamManager.createStream(turn.id);
+    deps.streamManager.emitEvent(turn.id, 'text-delta', { text: 'chunk' });
+
+    const req = createMockReq('POST', `/conversations/${conv.id}/resume`, {
+      lastAcknowledgedSeq: 0,
+    });
+    const res = createMockRes();
+    handleConversationRoute(req, res as unknown as ServerResponse, deps);
+    await waitForResponse(res);
+    assert.equal(res.statusCode, 200);
+    const body = res.body as Record<string, unknown>;
+    const events = body['events'] as Array<Record<string, unknown>>;
+    assert.ok(events.length >= 2, 'should have stream-started + text-delta');
+    // StreamEvents have seq, turnId, kind, payload, timestamp — NOT category
+    for (const ev of events) {
+      assert.ok('seq' in ev, 'event should have seq');
+      assert.ok('turnId' in ev, 'event should have turnId');
+      assert.ok('kind' in ev, 'event should have kind');
+      assert.ok(
+        !('category' in ev),
+        'event should not have category (that is ConversationEventRecord)',
+      );
+    }
+  });
+
+  it('resume since is exclusive — does not duplicate last acknowledged event', async () => {
+    const conv = deps.store.createConversation();
+    const turn = deps.store.appendTurn(conv.id, {
+      kind: 'operator',
+      instruction: 'Hello',
+      attribution: operatorAttribution,
+    });
+    deps.store.updateTurnStatus(turn.id, 'executing');
+    deps.streamManager.createStream(turn.id);
+    deps.streamManager.emitEvent(turn.id, 'text-delta', { text: 'a' });
+    deps.streamManager.emitEvent(turn.id, 'text-delta', { text: 'b' });
+
+    // Get all events to find the last seq
+    const allEvents = deps.streamManager.getStreamEvents(turn.id);
+    const lastSeq = allEvents.at(-1)!.seq;
+
+    const req = createMockReq('POST', `/conversations/${conv.id}/resume`, {
+      lastAcknowledgedSeq: lastSeq,
+    });
+    const res = createMockRes();
+    handleConversationRoute(req, res as unknown as ServerResponse, deps);
+    await waitForResponse(res);
+    assert.equal(res.statusCode, 200);
+    const body = res.body as Record<string, unknown>;
+    const events = body['events'] as Array<Record<string, unknown>>;
+    assert.equal(events.length, 0, 'should not include already-acknowledged events');
+  });
+});
+
+// ── Blocker 3: Cross-conversation turn validation ────────────────────────────
+
+describe('Conversation routes — cross-conversation validation', () => {
+  it('cancel rejects turn from different conversation', () => {
+    const conv1 = deps.store.createConversation({ title: 'Conv 1' });
+    const conv2 = deps.store.createConversation({ title: 'Conv 2' });
+    const turn1 = deps.store.appendTurn(conv1.id, {
+      kind: 'operator',
+      instruction: 'A',
+      attribution: operatorAttribution,
+    });
+    deps.store.updateTurnStatus(turn1.id, 'executing');
+    deps.streamManager.createStream(turn1.id);
+
+    // Try to cancel conv1's turn via conv2's path
+    const req = createMockReq('POST', `/conversations/${conv2.id}/turns/${turn1.id}/cancel`);
+    const res = createMockRes();
+    handleConversationRoute(req, res as unknown as ServerResponse, deps);
+    assert.equal(res.statusCode, 400);
+    const body = res.body as Record<string, unknown>;
+    assert.ok(
+      (body['error'] as string).includes('does not belong'),
+      'should indicate turn does not belong to conversation',
+    );
+  });
+
+  it('stream rejects turn from different conversation', () => {
+    const conv1 = deps.store.createConversation({ title: 'Conv 1' });
+    const conv2 = deps.store.createConversation({ title: 'Conv 2' });
+    const turn1 = deps.store.appendTurn(conv1.id, {
+      kind: 'operator',
+      instruction: 'A',
+      attribution: operatorAttribution,
+    });
+    deps.streamManager.createStream(turn1.id);
+
+    const req = createMockReq('GET', `/conversations/${conv2.id}/turns/${turn1.id}/stream?since=0`);
+    const res = createMockRes();
+    handleConversationRoute(req, res as unknown as ServerResponse, deps);
+    assert.equal(res.statusCode, 400);
+  });
+
+  it('retry rejects turn from different conversation', () => {
+    const conv1 = deps.store.createConversation({ title: 'Conv 1' });
+    const conv2 = deps.store.createConversation({ title: 'Conv 2' });
+    const turn1 = deps.store.appendTurn(conv1.id, {
+      kind: 'operator',
+      instruction: 'A',
+      attribution: operatorAttribution,
+    });
+    deps.store.finalizeTurn(turn1.id, 'failed', 'Error');
+
+    const req = createMockReq('POST', `/conversations/${conv2.id}/turns/${turn1.id}/retry`);
+    const res = createMockRes();
+    handleConversationRoute(req, res as unknown as ServerResponse, deps);
+    assert.equal(res.statusCode, 400);
+  });
+
+  it('fork rejects turn from different conversation', async () => {
+    const conv1 = deps.store.createConversation({ title: 'Conv 1' });
+    const conv2 = deps.store.createConversation({ title: 'Conv 2' });
+    const turn1 = deps.store.appendTurn(conv1.id, {
+      kind: 'operator',
+      instruction: 'A',
+      attribution: operatorAttribution,
+    });
+
+    const req = createMockReq('POST', `/conversations/${conv2.id}/fork`, {
+      forkPointTurnId: turn1.id,
+    });
+    const res = createMockRes();
+    handleConversationRoute(req, res as unknown as ServerResponse, deps);
+    await waitForResponse(res);
+    assert.equal(res.statusCode, 400);
+  });
+
+  it('fork accepts turn from parent conversation lineage', async () => {
+    const parent = deps.store.createConversation({ title: 'Parent' });
+    const turn1 = deps.store.appendTurn(parent.id, {
+      kind: 'operator',
+      instruction: 'A',
+      attribution: operatorAttribution,
+    });
+    deps.store.appendTurn(parent.id, {
+      kind: 'operator',
+      instruction: 'B',
+      attribution: operatorAttribution,
+    });
+
+    // Fork the parent at turn1
+    const forked = deps.store.forkConversation(parent.id, turn1.id, 'Forked');
+    // The forked conversation inherits parent turns up to the fork point.
+    // Forking the forked conversation at turn1 (which is a parent turn) should succeed.
+    const req = createMockReq('POST', `/conversations/${forked.id}/fork`, {
+      forkPointTurnId: turn1.id,
+    });
+    const res = createMockRes();
+    handleConversationRoute(req, res as unknown as ServerResponse, deps);
+    await waitForResponse(res);
+    assert.equal(res.statusCode, 201, 'should accept turn from parent lineage');
+  });
+});
+
+// ── Blocker 4: Artifact content contract compliance ──────────────────────────
+
+describe('Conversation routes — artifact content contract', () => {
+  it('GET /artifacts/:id returns { artifact, content } matching contract', () => {
+    const conv = deps.store.createConversation();
+    const turn = deps.store.appendTurn(conv.id, {
+      kind: 'operator',
+      instruction: 'A',
+      attribution: operatorAttribution,
+    });
+    const art = deps.store.createArtifact(turn.id, {
+      kind: 'file',
+      label: 'out.ts',
+      size: 12,
+      content: 'const x = 1;',
+    });
+
+    const req = createMockReq('GET', `/artifacts/${art.id}`);
+    const res = createMockRes();
+    handleConversationRoute(req, res as unknown as ServerResponse, deps);
+    assert.equal(res.statusCode, 200);
+    const body = res.body as Record<string, unknown>;
+
+    // Must have 'artifact' (full object), not 'artifactId' (string)
+    assert.ok(!('artifactId' in body), 'should not have artifactId key');
+    assert.ok('artifact' in body, 'should have artifact key');
+    assert.ok('content' in body, 'should have content key');
+
+    const artifact = body['artifact'] as Record<string, unknown>;
+    assert.equal(artifact['id'], art.id);
+    assert.equal(artifact['turnId'], turn.id);
+    assert.equal(artifact['kind'], 'file');
+    assert.equal(artifact['label'], 'out.ts');
+    assert.equal(artifact['size'], 12);
+    assert.ok('createdAt' in artifact, 'artifact should have createdAt');
+    assert.equal(body['content'], 'const x = 1;');
   });
 });
