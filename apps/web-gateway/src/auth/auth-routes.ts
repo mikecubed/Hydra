@@ -34,11 +34,11 @@ export function createAuthRoutes(
     if (raw == null || typeof raw !== 'object' || Array.isArray(raw)) {
       return c.json({ code: 'BAD_REQUEST', message: 'Invalid JSON body' }, 400);
     }
-    const body = raw as { identity?: string; secret?: string };
-    const identity = body.identity ?? '';
-    const secret = body.secret ?? '';
+    const body = raw as Record<string, unknown>;
+    const identity = body['identity'];
+    const secret = body['secret'];
 
-    if (identity === '' || secret === '') {
+    if (typeof identity !== 'string' || typeof secret !== 'string' || identity === '' || secret === '') {
       return c.json(
         { code: 'BAD_REQUEST', message: 'Missing identity or secret' },
         400,
@@ -117,11 +117,11 @@ export function createAuthRoutes(
     if (raw == null || typeof raw !== 'object' || Array.isArray(raw)) {
       return c.json({ code: 'BAD_REQUEST', message: 'Invalid JSON body' }, 400);
     }
-    const body = raw as { identity?: string; secret?: string };
-    const identity = body.identity ?? '';
-    const secret = body.secret ?? '';
+    const body = raw as Record<string, unknown>;
+    const identity = body['identity'];
+    const secret = body['secret'];
 
-    if (identity === '' || secret === '') {
+    if (typeof identity !== 'string' || typeof secret !== 'string' || identity === '' || secret === '') {
       return c.json({ code: 'BAD_REQUEST', message: 'Missing credentials' }, 400);
     }
 
