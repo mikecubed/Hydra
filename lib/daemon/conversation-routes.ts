@@ -46,6 +46,18 @@ function validateNonNegativeIntParam(
   return { value: parsed };
 }
 
+function validatePositiveIntParam(
+  name: string,
+  raw: string | null,
+): { value: number | undefined } | { error: string } {
+  if (raw === null) return { value: undefined };
+  const parsed = Number(raw);
+  if (!Number.isFinite(parsed) || !Number.isInteger(parsed) || parsed < 1) {
+    return { error: `Invalid ${name}: must be a positive integer` };
+  }
+  return { value: parsed };
+}
+
 // ── Route registration ───────────────────────────────────────────────────────
 
 export interface ConversationRouteDeps {
@@ -61,6 +73,26 @@ export interface ConversationRouteDeps {
    * execution — useful for tests that manually control the stream.
    */
   executeTurn?: (turnId: string, instruction: string) => void | Promise<void>;
+  /**
+   * Optional callback invoked when an approval response is received and the
+   * paused workflow should resume.  Unlike `executeTurn` (which starts a fresh
+   * instruction), this carries the original turn context so the executor can
+   * continue the paused work rather than treating the response as a new prompt.
+   *
+   * Receives:
+   *   - turnId:             the turn that was paused waiting for approval
+   *   - approvalId:         the approval request that was responded to
+   *   - response:           the operator's approval response value
+   *   - originalInstruction: the instruction from the original turn submission
+   *
+   * When absent, approval responses are recorded but no execution resumes.
+   */
+  continueAfterApproval?: (
+    turnId: string,
+    approvalId: string,
+    response: string,
+    originalInstruction: string,
+  ) => void | Promise<void>;
 }
 
 // ── Sub-routers (split to keep main function below complexity threshold) ────
@@ -335,7 +367,20 @@ async function handleResumeConversation(
   deps: ConversationRouteDeps,
 ): Promise<void> {
   const body = await readJsonBody(req);
-  const lastSeq = typeof body['lastAcknowledgedSeq'] === 'number' ? body['lastAcknowledgedSeq'] : 0;
+  const rawSeq = body['lastAcknowledgedSeq'];
+  // Validate: must be a non-negative integer when provided
+  if (rawSeq !== undefined && rawSeq !== null) {
+    if (
+      typeof rawSeq !== 'number' ||
+      !Number.isFinite(rawSeq) ||
+      !Number.isInteger(rawSeq) ||
+      rawSeq < 0
+    ) {
+      sendError(res, 400, 'Invalid lastAcknowledgedSeq: must be a non-negative integer');
+      return;
+    }
+  }
+  const lastSeq = typeof rawSeq === 'number' ? rawSeq : 0;
   const conv = deps.store.getConversation(id);
   if (!conv) {
     sendError(res, 404, 'Conversation not found');
@@ -418,12 +463,12 @@ function handleLoadTurnHistory(
     sendError(res, 404, 'Conversation not found');
     return;
   }
-  const fromResult = validateNonNegativeIntParam('from', url.searchParams.get('from'));
+  const fromResult = validatePositiveIntParam('from', url.searchParams.get('from'));
   if ('error' in fromResult) {
     sendError(res, 400, fromResult.error);
     return;
   }
-  const toResult = validateNonNegativeIntParam('to', url.searchParams.get('to'));
+  const toResult = validatePositiveIntParam('to', url.searchParams.get('to'));
   if ('error' in toResult) {
     sendError(res, 400, toResult.error);
     return;
@@ -493,9 +538,22 @@ function handleGetPendingApprovals(
   sendJson(res, 200, { approvals });
 }
 
-function resumeAfterApproval(deps: ConversationRouteDeps, turnId: string, response: string): void {
+function resumeAfterApproval(
+  deps: ConversationRouteDeps,
+  turnId: string,
+  approvalId: string,
+  response: string,
+): void {
+  const turn = deps.store.getTurn(turnId);
+  const originalInstruction = turn?.instruction ?? '';
+
   try {
-    const maybePromise = deps.executeTurn?.(turnId, response);
+    const maybePromise = deps.continueAfterApproval?.(
+      turnId,
+      approvalId,
+      response,
+      originalInstruction,
+    );
     if (maybePromise instanceof Promise) {
       maybePromise.catch((err: unknown) => {
         deps.streamManager.failStream(
@@ -547,9 +605,9 @@ async function handleRespondToApproval(
         // Stream may not be active (already completed/failed/cancelled) — non-fatal
       }
 
-      // Resume execution if an executor is wired up
-      if (deps.executeTurn) {
-        resumeAfterApproval(deps, result.approval.turnId, response);
+      // Resume execution if a continuation handler is wired up
+      if (deps.continueAfterApproval) {
+        resumeAfterApproval(deps, result.approval.turnId, approvalId, response);
       }
     }
 

@@ -467,6 +467,93 @@ describe('Conversation routes — resume returns StreamEvents', () => {
   });
 });
 
+// ── Blocker 2 (continued): Resume input validation ───────────────────────────
+
+describe('Conversation routes — resume input validation', () => {
+  it('resume rejects negative lastAcknowledgedSeq', async () => {
+    const conv = deps.store.createConversation();
+    const req = createMockReq('POST', `/conversations/${conv.id}/resume`, {
+      lastAcknowledgedSeq: -1,
+    });
+    const res = createMockRes();
+    handleConversationRoute(req, res as unknown as ServerResponse, deps);
+    await waitForResponse(res);
+    assert.equal(res.statusCode, 400);
+    const body = res.body as Record<string, unknown>;
+    assert.ok(
+      (body['error'] as string).includes('lastAcknowledgedSeq'),
+      'error should mention lastAcknowledgedSeq',
+    );
+  });
+
+  it('resume rejects fractional lastAcknowledgedSeq', async () => {
+    const conv = deps.store.createConversation();
+    const req = createMockReq('POST', `/conversations/${conv.id}/resume`, {
+      lastAcknowledgedSeq: 1.5,
+    });
+    const res = createMockRes();
+    handleConversationRoute(req, res as unknown as ServerResponse, deps);
+    await waitForResponse(res);
+    assert.equal(res.statusCode, 400);
+  });
+
+  it('resume rejects non-number lastAcknowledgedSeq', async () => {
+    const conv = deps.store.createConversation();
+    const req = createMockReq('POST', `/conversations/${conv.id}/resume`, {
+      lastAcknowledgedSeq: 'abc',
+    });
+    const res = createMockRes();
+    handleConversationRoute(req, res as unknown as ServerResponse, deps);
+    await waitForResponse(res);
+    // String value for a numeric field is correctly rejected
+    assert.equal(res.statusCode, 400);
+  });
+
+  it('resume defaults missing lastAcknowledgedSeq to 0', async () => {
+    const conv = deps.store.createConversation();
+    const req = createMockReq('POST', `/conversations/${conv.id}/resume`, {});
+    const res = createMockRes();
+    handleConversationRoute(req, res as unknown as ServerResponse, deps);
+    await waitForResponse(res);
+    assert.equal(res.statusCode, 200, 'omitted lastAcknowledgedSeq defaults to 0');
+  });
+
+  it('resume accepts zero lastAcknowledgedSeq (means "give me everything")', async () => {
+    const conv = deps.store.createConversation();
+    const req = createMockReq('POST', `/conversations/${conv.id}/resume`, {
+      lastAcknowledgedSeq: 0,
+    });
+    const res = createMockRes();
+    handleConversationRoute(req, res as unknown as ServerResponse, deps);
+    await waitForResponse(res);
+    assert.equal(res.statusCode, 200);
+  });
+});
+
+// ── Blocker 2 (continued): Turn history position validation (positive ints) ─
+
+describe('Conversation routes — turn history position validation', () => {
+  it('GET /conversations/:id/turns rejects from=0 (positions are positive)', () => {
+    const conv = deps.store.createConversation();
+    const req = createMockReq('GET', `/conversations/${conv.id}/turns?from=0`);
+    const res = createMockRes();
+    handleConversationRoute(req, res as unknown as ServerResponse, deps);
+    assert.equal(res.statusCode, 400);
+    const body = res.body as Record<string, unknown>;
+    assert.ok((body['error'] as string).includes('positive'));
+  });
+
+  it('GET /conversations/:id/turns rejects to=0 (positions are positive)', () => {
+    const conv = deps.store.createConversation();
+    const req = createMockReq('GET', `/conversations/${conv.id}/turns?from=1&to=0`);
+    const res = createMockRes();
+    handleConversationRoute(req, res as unknown as ServerResponse, deps);
+    assert.equal(res.statusCode, 400);
+    const body = res.body as Record<string, unknown>;
+    assert.ok((body['error'] as string).includes('positive'));
+  });
+});
+
 // ── Blocker 3: Cross-conversation turn validation ────────────────────────────
 
 describe('Conversation routes — cross-conversation validation', () => {
@@ -1322,7 +1409,7 @@ describe('Conversation routes — turn-history query validation', () => {
 
   it('GET /conversations/:id/turns rejects negative to', () => {
     const conv = deps.store.createConversation();
-    const req = createMockReq('GET', `/conversations/${conv.id}/turns?from=0&to=-5`);
+    const req = createMockReq('GET', `/conversations/${conv.id}/turns?from=1&to=-5`);
     const res = createMockRes();
     handleConversationRoute(req, res as unknown as ServerResponse, deps);
     assert.equal(res.statusCode, 400);
@@ -1504,18 +1591,27 @@ describe('Conversation routes — approval response stream notification', () => 
     assert.equal(approvalResponseEvents[0].payload['response'], 'approve');
   });
 
-  it('POST /approvals/:id/respond invokes executeTurn to resume work', async () => {
-    let executedTurnId = '';
-    let executedInstruction = '';
-    deps.executeTurn = (turnId: string, instruction: string) => {
-      executedTurnId = turnId;
-      executedInstruction = instruction;
+  it('POST /approvals/:id/respond invokes continueAfterApproval to resume paused work', async () => {
+    let capturedTurnId = '';
+    let capturedApprovalId = '';
+    let capturedResponse = '';
+    let capturedOriginalInstruction = '';
+    deps.continueAfterApproval = (
+      turnId: string,
+      approvalId: string,
+      response: string,
+      originalInstruction: string,
+    ) => {
+      capturedTurnId = turnId;
+      capturedApprovalId = approvalId;
+      capturedResponse = response;
+      capturedOriginalInstruction = originalInstruction;
     };
 
     const conv = deps.store.createConversation();
     const turn = deps.store.appendTurn(conv.id, {
       kind: 'operator',
-      instruction: 'Deploy',
+      instruction: 'Deploy to production',
       attribution: operatorAttribution,
     });
     deps.store.updateTurnStatus(turn.id, 'executing');
@@ -1537,11 +1633,51 @@ describe('Conversation routes — approval response stream notification', () => 
     await waitForResponse(res);
 
     assert.equal(res.statusCode, 200);
-    assert.equal(executedTurnId, turn.id, 'executeTurn should be called with the approval turnId');
+    assert.equal(capturedTurnId, turn.id, 'should receive the paused turn id');
+    assert.equal(capturedApprovalId, approval.id, 'should receive the approval id');
+    assert.equal(capturedResponse, 'approve', 'should receive the approval response');
     assert.equal(
-      executedInstruction,
-      'approve',
-      'executeTurn should be called with the approval response',
+      capturedOriginalInstruction,
+      'Deploy to production',
+      'should receive the original turn instruction for continuation',
+    );
+  });
+
+  it('POST /approvals/:id/respond does NOT invoke executeTurn (separation of concerns)', async () => {
+    let executeTurnCalled = false;
+    deps.executeTurn = () => {
+      executeTurnCalled = true;
+    };
+
+    const conv = deps.store.createConversation();
+    const turn = deps.store.appendTurn(conv.id, {
+      kind: 'operator',
+      instruction: 'Deploy',
+      attribution: operatorAttribution,
+    });
+    deps.store.updateTurnStatus(turn.id, 'executing');
+    deps.streamManager.createStream(turn.id);
+
+    const approval = deps.store.createApprovalRequest(turn.id, {
+      prompt: 'Deploy?',
+      context: {},
+      contextHash: 'hash-1',
+      responseOptions: [{ key: 'approve', label: 'Approve' }],
+    });
+
+    const req = createMockReq('POST', `/approvals/${approval.id}/respond`, {
+      response: 'approve',
+      sessionId: 'sess-1',
+    });
+    const res = createMockRes();
+    handleConversationRoute(req, res as unknown as ServerResponse, deps);
+    await waitForResponse(res);
+
+    assert.equal(res.statusCode, 200);
+    assert.equal(
+      executeTurnCalled,
+      false,
+      'executeTurn must not be called for approval responses — only continueAfterApproval',
     );
   });
 
@@ -1581,8 +1717,8 @@ describe('Conversation routes — approval response stream notification', () => 
     assert.equal(eventsAfter.length, eventsBefore.length, 'no new stream events on conflict');
   });
 
-  it('POST /approvals/:id/respond handles async executeTurn failure gracefully', async () => {
-    deps.executeTurn = () => Promise.reject(new Error('executor crashed'));
+  it('POST /approvals/:id/respond handles async continueAfterApproval failure gracefully', async () => {
+    deps.continueAfterApproval = () => Promise.reject(new Error('executor crashed'));
 
     const conv = deps.store.createConversation();
     const turn = deps.store.appendTurn(conv.id, {
@@ -1619,5 +1755,40 @@ describe('Conversation routes — approval response stream notification', () => 
     const events = deps.streamManager.getStreamEvents(turn.id);
     const failEvents = events.filter((e) => e.kind === 'stream-failed');
     assert.equal(failEvents.length, 1, 'stream should be failed after executor rejection');
+  });
+
+  it('POST /approvals/:id/respond handles sync continueAfterApproval throw gracefully', async () => {
+    deps.continueAfterApproval = () => {
+      throw new Error('sync crash');
+    };
+
+    const conv = deps.store.createConversation();
+    const turn = deps.store.appendTurn(conv.id, {
+      kind: 'operator',
+      instruction: 'Deploy',
+      attribution: operatorAttribution,
+    });
+    deps.store.updateTurnStatus(turn.id, 'executing');
+    deps.streamManager.createStream(turn.id);
+
+    const approval = deps.store.createApprovalRequest(turn.id, {
+      prompt: 'Deploy?',
+      context: {},
+      contextHash: 'hash-1',
+      responseOptions: [{ key: 'ok', label: 'OK' }],
+    });
+
+    const req = createMockReq('POST', `/approvals/${approval.id}/respond`, {
+      response: 'ok',
+      sessionId: 'sess-1',
+    });
+    const res = createMockRes();
+    handleConversationRoute(req, res as unknown as ServerResponse, deps);
+    await waitForResponse(res);
+
+    assert.equal(res.statusCode, 200, 'route still responds 200 when sync throw occurs');
+    const events = deps.streamManager.getStreamEvents(turn.id);
+    const failEvents = events.filter((e) => e.kind === 'stream-failed');
+    assert.equal(failEvents.length, 1, 'stream should be failed after sync throw');
   });
 });
