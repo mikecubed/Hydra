@@ -10,6 +10,6 @@
     "test": "node --test --experimental-test-module-mocks 'src/**/*.test.ts'"
   },
   "dependencies": {
-    "zod": "*"
+    "zod": "^4.3.6"
   }
 }

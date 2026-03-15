@@ -14,9 +14,10 @@ export function createHardenedHeaders(
 ): MiddlewareHandler {
   return createMiddleware(async (c, next) => {
     await next();
+    const connectSrc = config.tlsActive ? "'self' wss:" : "'self' ws: wss:";
     c.header(
       'Content-Security-Policy',
-      "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; connect-src 'self' wss:; frame-ancestors 'none'",
+      `default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; connect-src ${connectSrc}; frame-ancestors 'none'`,
     );
     c.header('X-Content-Type-Options', 'nosniff');
     c.header('X-Frame-Options', 'DENY');

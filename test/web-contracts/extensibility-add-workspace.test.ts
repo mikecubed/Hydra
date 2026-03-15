@@ -22,7 +22,7 @@ function matchesWorkspaceGlob(globs: string[], path: string): boolean {
   return globs.some((glob) => {
     // Convert npm workspace glob "apps/*" to match "apps/new-app"
     const pattern = glob.endsWith('/*') ? `${glob.slice(0, -2)}/` : glob;
-    return path.startsWith(pattern) || path.match(new RegExp(`^${glob.replace('*', '[^/]+')}$`));
+    return path.startsWith(pattern) || path.match(new RegExp(`^${glob.replaceAll('*', '[^/]+')}$`));
   });
 }
 

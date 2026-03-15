@@ -104,10 +104,6 @@ export class DaemonHeartbeat {
   }
 
   private getAllActiveSessions() {
-    // Access internal store for iteration. Store exposes listByOperator but
-    // we need all sessions. We'll use a small hack via the store's sessions map.
-    // @ts-expect-error — accessing internal state for system-level operation
-    const map = this.store.sessions;
-    return [...map.values()].filter((s) => !isTerminal(s.state));
+    return this.store.listAll().filter((s) => !isTerminal(s.state));
   }
 }

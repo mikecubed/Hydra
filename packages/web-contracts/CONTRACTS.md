@@ -21,7 +21,8 @@
 
 ## Contract Registry
 
-| Name              | Version         | Status | Consumers    | File                |
-| ----------------- | --------------- | ------ | ------------ | ------------------- | ---------------------------- | --- |
-| Vocabulary stubs  | v0              | draft  | all surfaces | `src/vocabulary.ts` |
-| <!-- Example row: | SessionContract | v1     | stable       | gateway, browser    | `src/session-contract-v1.ts` | --> |
+| Name             | Version | Status | Consumers    | File                |
+| ---------------- | ------- | ------ | ------------ | ------------------- |
+| Vocabulary stubs | v0      | draft  | all surfaces | `src/vocabulary.ts` |
+
+<!-- Example row: | SessionContract | v1 | stable | gateway, browser | `src/session-contract-v1.ts` | -->

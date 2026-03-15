@@ -10,7 +10,7 @@
  */
 
 import type { ConversationStore } from './conversation-store.ts';
-import type { StreamEvent as StreamEventType } from '../../packages/web-contracts/src/stream.ts';
+import type { StreamEvent as StreamEventType } from '@hydra/web-contracts';
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 

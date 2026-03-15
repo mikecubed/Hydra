@@ -16,7 +16,7 @@ import type {
   Artifact as ArtifactType,
   ActivityEntry as ActivityEntryType,
   Attribution as AttributionType,
-} from '../../packages/web-contracts/src/index.ts';
+} from '@hydra/web-contracts';
 
 // ── Internal types ───────────────────────────────────────────────────────────
 

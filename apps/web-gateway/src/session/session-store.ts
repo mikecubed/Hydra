@@ -56,6 +56,10 @@ export class SessionStore {
     return this.sessions.delete(id);
   }
 
+  listAll(): StoredSession[] {
+    return [...this.sessions.values()];
+  }
+
   listByOperator(operatorId: string): StoredSession[] {
     return [...this.sessions.values()].filter((s) => s.operatorId === operatorId);
   }
