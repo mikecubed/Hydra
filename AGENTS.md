@@ -34,3 +34,15 @@ Key points: ESM + TypeScript, `picocolors` for terminal colors, explicit `.ts` i
 - Use Node's native test runner. The standard commands are `npm test` and `node --test test/<file>.test.ts`.
 
 When implementing, claim the task first, then report what you changed and any tests you added via `hydra_tasks_update`.
+
+## Web Initiative
+
+The web initiative adds three npm workspace packages alongside Hydra core:
+
+- `apps/web/` — Browser surface (React + Vite frontend, later phase)
+- `apps/web-gateway/` — Gateway surface (Hono HTTP/WebSocket, later phase)
+- `packages/web-contracts/` — Shared cross-surface Zod schemas and vocabulary
+
+ESLint boundary rules enforce that web packages do not import from `lib/` directly. See
+[`docs/web-interface/07-boundaries-and-governance.md`](docs/web-interface/07-boundaries-and-governance.md)
+for full boundary rules, ownership, and governance.

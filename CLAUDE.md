@@ -187,3 +187,15 @@ Direct OpenAI Responses API calls (separate from Hydra's agent CLIs).
 - **`ask_gpt_fast`** (gpt-4.1-mini) — Cheap/fast. Quick summaries, small refactors, simple reviews.
 - **`ask_gpt53`** (GPT-5.3) — Deep reasoning. Architecture decisions, complex bugs, security analysis.
 - **`ask_gpt52`** — Alias for `ask_gpt53` (backward compat).
+
+## Web Initiative
+
+The web initiative adds three npm workspace packages alongside Hydra core:
+
+- `apps/web/` — Browser surface (React + Vite frontend, later phase)
+- `apps/web-gateway/` — Gateway surface (Hono HTTP/WebSocket, later phase)
+- `packages/web-contracts/` — Shared cross-surface Zod schemas and vocabulary
+
+ESLint boundary rules enforce that web packages do not import from `lib/` directly. See
+[`docs/web-interface/07-boundaries-and-governance.md`](docs/web-interface/07-boundaries-and-governance.md)
+for full boundary rules, ownership, and governance.
