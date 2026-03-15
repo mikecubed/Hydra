@@ -22,13 +22,28 @@ import { sendJson, sendError, readJsonBody } from './http-utils.ts';
 
 const VALID_CONVERSATION_STATUSES = new Set(['active', 'archived']);
 
-function validateLimitParam(raw: string | null): { limit: number } | { error: string } {
-  if (raw === null) return { limit: 20 };
+function validateLimitParam(
+  raw: string | null,
+  defaultLimit = 20,
+): { limit: number } | { error: string } {
+  if (raw === null) return { limit: defaultLimit };
   const parsed = Number(raw);
   if (!Number.isFinite(parsed) || !Number.isInteger(parsed) || parsed < 1 || parsed > 100) {
     return { error: 'Invalid limit: must be an integer between 1 and 100' };
   }
   return { limit: parsed };
+}
+
+function validateNonNegativeIntParam(
+  name: string,
+  raw: string | null,
+): { value: number | undefined } | { error: string } {
+  if (raw === null) return { value: undefined };
+  const parsed = Number(raw);
+  if (!Number.isFinite(parsed) || !Number.isInteger(parsed) || parsed < 0) {
+    return { error: `Invalid ${name}: must be a non-negative integer` };
+  }
+  return { value: parsed };
 }
 
 // ── Route registration ───────────────────────────────────────────────────────
@@ -403,15 +418,27 @@ function handleLoadTurnHistory(
     sendError(res, 404, 'Conversation not found');
     return;
   }
-  const fromParam = url.searchParams.get('from');
-  const toParam = url.searchParams.get('to');
-  const limitParam = url.searchParams.get('limit');
-  const from = fromParam === null ? undefined : Number(fromParam);
-  const to = toParam === null ? undefined : Number(toParam);
-  const limit = Math.min(limitParam === null ? 50 : Number(limitParam), 100);
+  const fromResult = validateNonNegativeIntParam('from', url.searchParams.get('from'));
+  if ('error' in fromResult) {
+    sendError(res, 400, fromResult.error);
+    return;
+  }
+  const toResult = validateNonNegativeIntParam('to', url.searchParams.get('to'));
+  if ('error' in toResult) {
+    sendError(res, 400, toResult.error);
+    return;
+  }
+  const limitResult = validateLimitParam(url.searchParams.get('limit'), 50);
+  if ('error' in limitResult) {
+    sendError(res, 400, limitResult.error);
+    return;
+  }
+  const { value: from } = fromResult;
+  const { value: to } = toResult;
+  const { limit } = limitResult;
 
   let turns;
-  if (from !== undefined && to !== undefined && !Number.isNaN(from) && !Number.isNaN(to)) {
+  if (from !== undefined && to !== undefined) {
     turns = deps.store.getTurnsByRange(conversationId, from, to);
   } else {
     turns = deps.store.getTurns(conversationId);
@@ -442,8 +469,12 @@ function handleSubscribeToStream(
     sendError(res, 400, 'Turn does not belong to this conversation');
     return;
   }
-  const sinceParam = url.searchParams.get('since');
-  const sinceSeq = sinceParam === null ? 0 : Number(sinceParam);
+  const sinceResult = validateNonNegativeIntParam('since', url.searchParams.get('since'));
+  if ('error' in sinceResult) {
+    sendError(res, 400, sinceResult.error);
+    return;
+  }
+  const sinceSeq = sinceResult.value ?? 0;
   const events = deps.streamManager.getStreamEventsSince(turnId, sinceSeq);
   sendJson(res, 200, { events });
 }
@@ -460,6 +491,25 @@ function handleGetPendingApprovals(
   }
   const approvals = deps.store.getPendingApprovals(conversationId);
   sendJson(res, 200, { approvals });
+}
+
+function resumeAfterApproval(deps: ConversationRouteDeps, turnId: string, response: string): void {
+  try {
+    const maybePromise = deps.executeTurn?.(turnId, response);
+    if (maybePromise instanceof Promise) {
+      maybePromise.catch((err: unknown) => {
+        deps.streamManager.failStream(
+          turnId,
+          err instanceof Error ? err.message : 'Resume after approval failed',
+        );
+      });
+    }
+  } catch (err) {
+    deps.streamManager.failStream(
+      turnId,
+      err instanceof Error ? err.message : 'Resume after approval startup failed',
+    );
+  }
 }
 
 async function handleRespondToApproval(
@@ -485,6 +535,24 @@ async function handleRespondToApproval(
       sessionId,
       acknowledgeStaleness,
     );
+
+    if (result.success) {
+      // Emit approval-response stream event so subscribers see the response
+      try {
+        deps.streamManager.emitEvent(result.approval.turnId, 'approval-response', {
+          approvalId,
+          response,
+        });
+      } catch {
+        // Stream may not be active (already completed/failed/cancelled) — non-fatal
+      }
+
+      // Resume execution if an executor is wired up
+      if (deps.executeTurn) {
+        resumeAfterApproval(deps, result.approval.turnId, response);
+      }
+    }
+
     sendJson(res, result.success ? 200 : 409, result);
   } catch {
     sendError(res, 404, 'Approval not found');

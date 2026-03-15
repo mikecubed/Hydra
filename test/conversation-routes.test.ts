@@ -1280,3 +1280,344 @@ describe('Conversation routes — list validation', () => {
     assert.equal(res.statusCode, 400);
   });
 });
+
+// ── Blocker fix: turn-history and stream query validation ────────────────────
+
+describe('Conversation routes — turn-history query validation', () => {
+  it('GET /conversations/:id/turns rejects non-numeric from', () => {
+    const conv = deps.store.createConversation();
+    const req = createMockReq('GET', `/conversations/${conv.id}/turns?from=abc`);
+    const res = createMockRes();
+    handleConversationRoute(req, res as unknown as ServerResponse, deps);
+    assert.equal(res.statusCode, 400);
+    const body = res.body as Record<string, unknown>;
+    assert.ok((body['error'] as string).includes('Invalid from'));
+  });
+
+  it('GET /conversations/:id/turns rejects negative from', () => {
+    const conv = deps.store.createConversation();
+    const req = createMockReq('GET', `/conversations/${conv.id}/turns?from=-1`);
+    const res = createMockRes();
+    handleConversationRoute(req, res as unknown as ServerResponse, deps);
+    assert.equal(res.statusCode, 400);
+  });
+
+  it('GET /conversations/:id/turns rejects fractional from', () => {
+    const conv = deps.store.createConversation();
+    const req = createMockReq('GET', `/conversations/${conv.id}/turns?from=1.5`);
+    const res = createMockRes();
+    handleConversationRoute(req, res as unknown as ServerResponse, deps);
+    assert.equal(res.statusCode, 400);
+  });
+
+  it('GET /conversations/:id/turns rejects non-numeric to', () => {
+    const conv = deps.store.createConversation();
+    const req = createMockReq('GET', `/conversations/${conv.id}/turns?from=1&to=xyz`);
+    const res = createMockRes();
+    handleConversationRoute(req, res as unknown as ServerResponse, deps);
+    assert.equal(res.statusCode, 400);
+    const body = res.body as Record<string, unknown>;
+    assert.ok((body['error'] as string).includes('Invalid to'));
+  });
+
+  it('GET /conversations/:id/turns rejects negative to', () => {
+    const conv = deps.store.createConversation();
+    const req = createMockReq('GET', `/conversations/${conv.id}/turns?from=0&to=-5`);
+    const res = createMockRes();
+    handleConversationRoute(req, res as unknown as ServerResponse, deps);
+    assert.equal(res.statusCode, 400);
+  });
+
+  it('GET /conversations/:id/turns rejects non-numeric limit', () => {
+    const conv = deps.store.createConversation();
+    const req = createMockReq('GET', `/conversations/${conv.id}/turns?limit=xyz`);
+    const res = createMockRes();
+    handleConversationRoute(req, res as unknown as ServerResponse, deps);
+    assert.equal(res.statusCode, 400);
+    const body = res.body as Record<string, unknown>;
+    assert.ok((body['error'] as string).includes('Invalid limit'));
+  });
+
+  it('GET /conversations/:id/turns rejects negative limit', () => {
+    const conv = deps.store.createConversation();
+    const req = createMockReq('GET', `/conversations/${conv.id}/turns?limit=-1`);
+    const res = createMockRes();
+    handleConversationRoute(req, res as unknown as ServerResponse, deps);
+    assert.equal(res.statusCode, 400);
+  });
+
+  it('GET /conversations/:id/turns rejects limit over 100', () => {
+    const conv = deps.store.createConversation();
+    const req = createMockReq('GET', `/conversations/${conv.id}/turns?limit=999`);
+    const res = createMockRes();
+    handleConversationRoute(req, res as unknown as ServerResponse, deps);
+    assert.equal(res.statusCode, 400);
+  });
+
+  it('GET /conversations/:id/turns rejects fractional limit', () => {
+    const conv = deps.store.createConversation();
+    const req = createMockReq('GET', `/conversations/${conv.id}/turns?limit=2.5`);
+    const res = createMockRes();
+    handleConversationRoute(req, res as unknown as ServerResponse, deps);
+    assert.equal(res.statusCode, 400);
+  });
+
+  it('GET /conversations/:id/turns accepts valid from/to range', () => {
+    const conv = deps.store.createConversation();
+    deps.store.appendTurn(conv.id, {
+      kind: 'operator',
+      instruction: 'A',
+      attribution: operatorAttribution,
+    });
+    deps.store.appendTurn(conv.id, {
+      kind: 'operator',
+      instruction: 'B',
+      attribution: operatorAttribution,
+    });
+    const req = createMockReq('GET', `/conversations/${conv.id}/turns?from=1&to=2`);
+    const res = createMockRes();
+    handleConversationRoute(req, res as unknown as ServerResponse, deps);
+    assert.equal(res.statusCode, 200);
+    assert.equal(((res.body as Record<string, unknown>)['turns'] as unknown[]).length, 2);
+  });
+
+  it('GET /conversations/:id/turns accepts valid limit', () => {
+    const conv = deps.store.createConversation();
+    deps.store.appendTurn(conv.id, {
+      kind: 'operator',
+      instruction: 'A',
+      attribution: operatorAttribution,
+    });
+    const req = createMockReq('GET', `/conversations/${conv.id}/turns?limit=10`);
+    const res = createMockRes();
+    handleConversationRoute(req, res as unknown as ServerResponse, deps);
+    assert.equal(res.statusCode, 200);
+  });
+});
+
+describe('Conversation routes — stream query validation', () => {
+  it('GET .../stream rejects non-numeric since', () => {
+    const conv = deps.store.createConversation();
+    const turn = deps.store.appendTurn(conv.id, {
+      kind: 'operator',
+      instruction: 'A',
+      attribution: operatorAttribution,
+    });
+    deps.streamManager.createStream(turn.id);
+
+    const req = createMockReq('GET', `/conversations/${conv.id}/turns/${turn.id}/stream?since=abc`);
+    const res = createMockRes();
+    handleConversationRoute(req, res as unknown as ServerResponse, deps);
+    assert.equal(res.statusCode, 400);
+    const body = res.body as Record<string, unknown>;
+    assert.ok((body['error'] as string).includes('Invalid since'));
+  });
+
+  it('GET .../stream rejects negative since', () => {
+    const conv = deps.store.createConversation();
+    const turn = deps.store.appendTurn(conv.id, {
+      kind: 'operator',
+      instruction: 'A',
+      attribution: operatorAttribution,
+    });
+    deps.streamManager.createStream(turn.id);
+
+    const req = createMockReq('GET', `/conversations/${conv.id}/turns/${turn.id}/stream?since=-5`);
+    const res = createMockRes();
+    handleConversationRoute(req, res as unknown as ServerResponse, deps);
+    assert.equal(res.statusCode, 400);
+  });
+
+  it('GET .../stream rejects fractional since', () => {
+    const conv = deps.store.createConversation();
+    const turn = deps.store.appendTurn(conv.id, {
+      kind: 'operator',
+      instruction: 'A',
+      attribution: operatorAttribution,
+    });
+    deps.streamManager.createStream(turn.id);
+
+    const req = createMockReq('GET', `/conversations/${conv.id}/turns/${turn.id}/stream?since=1.7`);
+    const res = createMockRes();
+    handleConversationRoute(req, res as unknown as ServerResponse, deps);
+    assert.equal(res.statusCode, 400);
+  });
+
+  it('GET .../stream accepts valid since=0', () => {
+    const conv = deps.store.createConversation();
+    const turn = deps.store.appendTurn(conv.id, {
+      kind: 'operator',
+      instruction: 'A',
+      attribution: operatorAttribution,
+    });
+    deps.streamManager.createStream(turn.id);
+
+    const req = createMockReq('GET', `/conversations/${conv.id}/turns/${turn.id}/stream?since=0`);
+    const res = createMockRes();
+    handleConversationRoute(req, res as unknown as ServerResponse, deps);
+    assert.equal(res.statusCode, 200);
+  });
+});
+
+// ── Blocker fix: approval-response stream event and execution resumption ─────
+
+describe('Conversation routes — approval response stream notification', () => {
+  it('POST /approvals/:id/respond emits approval-response stream event', async () => {
+    const conv = deps.store.createConversation();
+    const turn = deps.store.appendTurn(conv.id, {
+      kind: 'operator',
+      instruction: 'Deploy',
+      attribution: operatorAttribution,
+    });
+    deps.store.updateTurnStatus(turn.id, 'executing');
+    deps.streamManager.createStream(turn.id);
+
+    const approval = deps.store.createApprovalRequest(turn.id, {
+      prompt: 'Deploy to prod?',
+      context: {},
+      contextHash: 'hash-1',
+      responseOptions: [
+        { key: 'approve', label: 'Approve' },
+        { key: 'reject', label: 'Reject' },
+      ],
+    });
+    deps.streamManager.emitEvent(turn.id, 'approval-prompt', {
+      approvalId: approval.id,
+    });
+
+    const req = createMockReq('POST', `/approvals/${approval.id}/respond`, {
+      response: 'approve',
+      sessionId: 'sess-1',
+    });
+    const res = createMockRes();
+    handleConversationRoute(req, res as unknown as ServerResponse, deps);
+    await waitForResponse(res);
+
+    assert.equal(res.statusCode, 200);
+    assert.equal((res.body as Record<string, unknown>)['success'], true);
+
+    // Verify approval-response event was emitted into the turn stream
+    const events = deps.streamManager.getStreamEvents(turn.id);
+    const approvalResponseEvents = events.filter((e) => e.kind === 'approval-response');
+    assert.equal(approvalResponseEvents.length, 1, 'should emit exactly one approval-response');
+    assert.equal(approvalResponseEvents[0].payload['approvalId'], approval.id);
+    assert.equal(approvalResponseEvents[0].payload['response'], 'approve');
+  });
+
+  it('POST /approvals/:id/respond invokes executeTurn to resume work', async () => {
+    let executedTurnId = '';
+    let executedInstruction = '';
+    deps.executeTurn = (turnId: string, instruction: string) => {
+      executedTurnId = turnId;
+      executedInstruction = instruction;
+    };
+
+    const conv = deps.store.createConversation();
+    const turn = deps.store.appendTurn(conv.id, {
+      kind: 'operator',
+      instruction: 'Deploy',
+      attribution: operatorAttribution,
+    });
+    deps.store.updateTurnStatus(turn.id, 'executing');
+    deps.streamManager.createStream(turn.id);
+
+    const approval = deps.store.createApprovalRequest(turn.id, {
+      prompt: 'Deploy to prod?',
+      context: {},
+      contextHash: 'hash-1',
+      responseOptions: [{ key: 'approve', label: 'Approve' }],
+    });
+
+    const req = createMockReq('POST', `/approvals/${approval.id}/respond`, {
+      response: 'approve',
+      sessionId: 'sess-1',
+    });
+    const res = createMockRes();
+    handleConversationRoute(req, res as unknown as ServerResponse, deps);
+    await waitForResponse(res);
+
+    assert.equal(res.statusCode, 200);
+    assert.equal(executedTurnId, turn.id, 'executeTurn should be called with the approval turnId');
+    assert.equal(
+      executedInstruction,
+      'approve',
+      'executeTurn should be called with the approval response',
+    );
+  });
+
+  it('POST /approvals/:id/respond does not emit event on conflict', async () => {
+    const conv = deps.store.createConversation();
+    const turn = deps.store.appendTurn(conv.id, {
+      kind: 'operator',
+      instruction: 'Deploy',
+      attribution: operatorAttribution,
+    });
+    deps.store.updateTurnStatus(turn.id, 'executing');
+    deps.streamManager.createStream(turn.id);
+
+    const approval = deps.store.createApprovalRequest(turn.id, {
+      prompt: 'Deploy?',
+      context: {},
+      contextHash: 'hash-1',
+      responseOptions: [{ key: 'ok', label: 'OK' }],
+    });
+
+    // First response succeeds
+    deps.store.respondToApproval(approval.id, 'ok', 'sess-1');
+
+    const eventsBefore = deps.streamManager.getStreamEvents(turn.id);
+
+    // Second response via route — should conflict (409), no new stream event
+    const req = createMockReq('POST', `/approvals/${approval.id}/respond`, {
+      response: 'ok',
+      sessionId: 'sess-2',
+    });
+    const res = createMockRes();
+    handleConversationRoute(req, res as unknown as ServerResponse, deps);
+    await waitForResponse(res);
+
+    assert.equal(res.statusCode, 409);
+    const eventsAfter = deps.streamManager.getStreamEvents(turn.id);
+    assert.equal(eventsAfter.length, eventsBefore.length, 'no new stream events on conflict');
+  });
+
+  it('POST /approvals/:id/respond handles async executeTurn failure gracefully', async () => {
+    deps.executeTurn = () => Promise.reject(new Error('executor crashed'));
+
+    const conv = deps.store.createConversation();
+    const turn = deps.store.appendTurn(conv.id, {
+      kind: 'operator',
+      instruction: 'Deploy',
+      attribution: operatorAttribution,
+    });
+    deps.store.updateTurnStatus(turn.id, 'executing');
+    deps.streamManager.createStream(turn.id);
+
+    const approval = deps.store.createApprovalRequest(turn.id, {
+      prompt: 'Deploy?',
+      context: {},
+      contextHash: 'hash-1',
+      responseOptions: [{ key: 'ok', label: 'OK' }],
+    });
+
+    const req = createMockReq('POST', `/approvals/${approval.id}/respond`, {
+      response: 'ok',
+      sessionId: 'sess-1',
+    });
+    const res = createMockRes();
+    handleConversationRoute(req, res as unknown as ServerResponse, deps);
+    await waitForResponse(res);
+
+    assert.equal(res.statusCode, 200, 'route responds 200 before async executor fails');
+
+    // Give async rejection time to be caught
+    await new Promise<void>((resolve) => {
+      setTimeout(resolve, 50);
+    });
+
+    // Stream should be failed by the rejection handler
+    const events = deps.streamManager.getStreamEvents(turn.id);
+    const failEvents = events.filter((e) => e.kind === 'stream-failed');
+    assert.equal(failEvents.length, 1, 'stream should be failed after executor rejection');
+  });
+});
