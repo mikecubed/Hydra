@@ -111,20 +111,43 @@ export function createConversationExecutor(
 
     // ── Direct execution (no approval required) ──────────────────────────
     const result = await executeAgent(agent, instruction);
-    if (result.ok) {
-      const output = typeof result.output === 'string' ? result.output : '';
-      if (output !== '') {
-        streamManager.emitEvent(turnId, 'text-delta', { text: output });
-      }
-      streamManager.completeStream(turnId);
-    } else {
-      const reason = typeof result.output === 'string' ? result.output : 'Agent execution failed';
-      streamManager.failStream(turnId, reason);
-    }
+    finalizeAgentStream(streamManager, turnId, result);
   };
 }
 
 // ── Continuator ──────────────────────────────────────────────────────────────
+
+/**
+ * Validate that the response is one of the declared options on the approval.
+ * Returns `true` when valid or when validation cannot be performed (missing record).
+ */
+function isValidApprovalResponse(
+  approval: ReturnType<ConversationStore['getApproval']>,
+  response: string,
+): boolean {
+  if (!approval?.responseOptions || approval.responseOptions.length === 0) return true;
+  return approval.responseOptions.some((o) => o.key === response);
+}
+
+/**
+ * Drive the stream to a terminal state based on the agent result.
+ */
+function finalizeAgentStream(
+  streamManager: StreamManager,
+  turnId: string,
+  result: AgentResult,
+): void {
+  if (result.ok) {
+    const output = typeof result.output === 'string' ? result.output : '';
+    if (output !== '') {
+      streamManager.emitEvent(turnId, 'text-delta', { text: output });
+    }
+    streamManager.completeStream(turnId);
+  } else {
+    const reason = typeof result.output === 'string' ? result.output : 'Agent execution failed';
+    streamManager.failStream(turnId, reason);
+  }
+}
 
 /**
  * Create the `continueAfterApproval` callback used by the conversation routes.
@@ -134,8 +157,10 @@ export function createConversationExecutor(
  * continuation instruction so the agent receives the full decision context
  * rather than a bare re-prompt.
  *
- * If the operator chose "reject" the turn is completed with a rejection notice
- * and no agent execution occurs.
+ * The response is validated against the approval's declared `responseOptions`;
+ * undeclared values cause the stream to fail immediately.  If the operator
+ * chose "reject" the turn is completed with a rejection notice and no agent
+ * execution occurs.
  */
 export function createApprovalContinuator(
   deps: ExecutorDeps,
@@ -155,6 +180,12 @@ export function createApprovalContinuator(
 
     // Load persisted approval record for full context.
     const approval = conversationStore.getApproval(approvalId);
+
+    // Validate response against declared options when the approval exists
+    if (!isValidApprovalResponse(approval, response)) {
+      streamManager.failStream(turnId, `Approval response "${response}" is not a declared option`);
+      return;
+    }
 
     // ── Rejection path ───────────────────────────────────────────────────
     if (response === 'reject') {
@@ -188,15 +219,6 @@ export function createApprovalContinuator(
       `Operator response: ${response}`;
 
     const result = await executeAgent(agent, continuationInstruction);
-    if (result.ok) {
-      const output = typeof result.output === 'string' ? result.output : '';
-      if (output !== '') {
-        streamManager.emitEvent(turnId, 'text-delta', { text: output });
-      }
-      streamManager.completeStream(turnId);
-    } else {
-      const reason = typeof result.output === 'string' ? result.output : 'Agent execution failed';
-      streamManager.failStream(turnId, reason);
-    }
+    finalizeAgentStream(streamManager, turnId, result);
   };
 }

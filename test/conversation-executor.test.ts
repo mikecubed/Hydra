@@ -310,6 +310,66 @@ describe('createApprovalContinuator — persisted context', () => {
     assert.ok(agentCalls[0].prompt.includes('deploy to production'));
     assert.ok(agentCalls[0].prompt.includes('Approval requested')); // fallback prompt
   });
+
+  it('fails stream when response is not a declared option', async () => {
+    const conv = store.createConversation({ title: 'test' });
+    const turn = store.appendTurn(conv.id, {
+      kind: 'operator',
+      instruction: 'deploy to production',
+      attribution: { type: 'operator', label: 'op' },
+    });
+    store.updateTurnStatus(turn.id, 'executing');
+    streamManager.createStream(turn.id);
+
+    const approval = store.createApprovalRequest(turn.id, {
+      prompt: 'Confirm execution: deploy to production',
+      context: { instruction: 'deploy to production', taskType: 'implementation', agent: 'codex' },
+      contextHash: 'abc123',
+      responseOptions: [
+        { key: 'approve', label: 'Approve' },
+        { key: 'reject', label: 'Reject' },
+      ],
+    });
+
+    const continuator = createApprovalContinuator(buildDeps());
+    await continuator(turn.id, approval.id, 'maybe', 'deploy to production');
+
+    assert.equal(agentCalls.length, 0, 'agent must not execute for invalid response');
+    const events = streamManager.getStreamEvents(turn.id);
+    assert.ok(
+      events.some((e) => e.kind === 'stream-failed'),
+      'stream should fail for undeclared response',
+    );
+  });
+
+  it('proceeds for any valid non-reject option', async () => {
+    const conv = store.createConversation({ title: 'test' });
+    const turn = store.appendTurn(conv.id, {
+      kind: 'operator',
+      instruction: 'deploy to production',
+      attribution: { type: 'operator', label: 'op' },
+    });
+    store.updateTurnStatus(turn.id, 'executing');
+    streamManager.createStream(turn.id);
+
+    const approval = store.createApprovalRequest(turn.id, {
+      prompt: 'Confirm execution: deploy to production',
+      context: { instruction: 'deploy to production', taskType: 'implementation', agent: 'codex' },
+      contextHash: 'abc123',
+      responseOptions: [
+        { key: 'approve', label: 'Approve' },
+        { key: 'approve-with-conditions', label: 'Approve with conditions' },
+        { key: 'reject', label: 'Reject' },
+      ],
+    });
+    store.respondToApproval(approval.id, 'approve-with-conditions', 'session-1');
+
+    const continuator = createApprovalContinuator(buildDeps());
+    await continuator(turn.id, approval.id, 'approve-with-conditions', 'deploy to production');
+
+    assert.equal(agentCalls.length, 1, 'agent should execute for valid non-reject option');
+    assert.ok(agentCalls[0].prompt.includes('approve-with-conditions'));
+  });
 });
 
 // ── End-to-end HTTP integration: real executor + real continuator ─────────────

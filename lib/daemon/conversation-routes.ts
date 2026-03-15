@@ -14,6 +14,7 @@
  */
 
 import type { IncomingMessage, ServerResponse } from 'node:http';
+import { createHash } from 'node:crypto';
 import type { ConversationStore } from './conversation-store.ts';
 import type { StreamManager } from './stream-manager.ts';
 import { sendJson, sendError, readJsonBody } from './http-utils.ts';
@@ -338,6 +339,7 @@ function handleGetConversation(id: string, res: ServerResponse, deps: Conversati
   }
   const turns = deps.store.getTurns(conv.id);
   const recentTurns = turns.slice(-20);
+  refreshPendingApprovalStaleness(deps.store, conv.id);
   const pendingApprovals = deps.store.getPendingApprovals(conv.id);
   sendJson(res, 200, {
     conversation: conv,
@@ -394,6 +396,7 @@ async function handleResumeConversation(
     allStreamEvents.push(...turnEvents);
   }
   allStreamEvents.sort((a, b) => a.seq - b.seq);
+  refreshPendingApprovalStaleness(deps.store, id);
   const pendingApprovals = deps.store.getPendingApprovals(id);
   sendJson(res, 200, { conversation: conv, events: allStreamEvents, pendingApprovals });
 }
@@ -533,6 +536,25 @@ function handleSubscribeToStream(
   sendJson(res, 200, { events });
 }
 
+function computeCurrentContextHash(store: ConversationStore, turnId: string): string | undefined {
+  const turn = store.getTurn(turnId);
+  if (turn?.instruction === undefined || turn.instruction === '') return undefined;
+  return createHash('sha256').update(turn.instruction).digest('hex').slice(0, 16);
+}
+
+/** Refresh staleness for all pending approvals in a conversation. */
+function refreshPendingApprovalStaleness(store: ConversationStore, conversationId: string): void {
+  const approvals = store.getPendingApprovals(conversationId);
+  for (const approval of approvals) {
+    if (approval.status === 'pending') {
+      const currentHash = computeCurrentContextHash(store, approval.turnId);
+      if (currentHash !== undefined) {
+        store.refreshApprovalStaleness(approval.id, currentHash);
+      }
+    }
+  }
+}
+
 function handleGetPendingApprovals(
   conversationId: string,
   res: ServerResponse,
@@ -543,6 +565,7 @@ function handleGetPendingApprovals(
     sendError(res, 404, 'Conversation not found');
     return;
   }
+  refreshPendingApprovalStaleness(deps.store, conversationId);
   const approvals = deps.store.getPendingApprovals(conversationId);
   sendJson(res, 200, { approvals });
 }
@@ -596,11 +619,18 @@ async function handleRespondToApproval(
   }
 
   try {
+    // Compute current context hash from the turn's instruction for staleness detection
+    const approval = deps.store.getApproval(approvalId);
+    const currentContextHash = approval
+      ? computeCurrentContextHash(deps.store, approval.turnId)
+      : undefined;
+
     const result = deps.store.respondToApproval(
       approvalId,
       response,
       sessionId,
       acknowledgeStaleness,
+      currentContextHash,
     );
 
     if (result.success) {
@@ -620,7 +650,10 @@ async function handleRespondToApproval(
       }
     }
 
-    sendJson(res, result.success ? 200 : 409, result);
+    let status = 409;
+    if (result.success) status = 200;
+    else if (result.reason === 'invalid_response') status = 400;
+    sendJson(res, status, result);
   } catch {
     sendError(res, 404, 'Approval not found');
   }

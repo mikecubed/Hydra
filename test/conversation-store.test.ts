@@ -361,6 +361,137 @@ describe('ConversationStore — approvals', () => {
     assert.ok(second.conflictNotification);
     assert.equal(second.conflictNotification?.conflictingSessionId, 'session-1');
   });
+
+  it('rejects response not matching declared responseOptions', () => {
+    const conv = store.createConversation();
+    const turn = store.appendTurn(conv.id, {
+      kind: 'operator',
+      instruction: 'A',
+      attribution: operatorAttribution,
+    });
+    const approval = store.createApprovalRequest(turn.id, {
+      prompt: 'Approve?',
+      context: {},
+      contextHash: 'hash-1',
+      responseOptions: [
+        { key: 'approve', label: 'Approve' },
+        { key: 'reject', label: 'Reject' },
+      ],
+    });
+    const result = store.respondToApproval(approval.id, 'maybe', 'session-1');
+    assert.ok(!result.success);
+    assert.equal(result.reason, 'invalid_response');
+    assert.equal(result.approval.status, 'pending', 'status unchanged on invalid response');
+  });
+
+  it('auto-marks stale when currentContextHash mismatches on respond', () => {
+    const conv = store.createConversation();
+    const turn = store.appendTurn(conv.id, {
+      kind: 'operator',
+      instruction: 'A',
+      attribution: operatorAttribution,
+    });
+    const approval = store.createApprovalRequest(turn.id, {
+      prompt: 'Approve?',
+      context: {},
+      contextHash: 'original-hash',
+      responseOptions: [{ key: 'ok', label: 'OK' }],
+    });
+    const result = store.respondToApproval(approval.id, 'ok', 'session-1', false, 'different-hash');
+    assert.ok(!result.success);
+    assert.equal(result.reason, 'stale');
+    assert.equal(result.approval.status, 'stale');
+  });
+
+  it('succeeds when currentContextHash matches stored hash', () => {
+    const conv = store.createConversation();
+    const turn = store.appendTurn(conv.id, {
+      kind: 'operator',
+      instruction: 'A',
+      attribution: operatorAttribution,
+    });
+    const approval = store.createApprovalRequest(turn.id, {
+      prompt: 'Approve?',
+      context: {},
+      contextHash: 'same-hash',
+      responseOptions: [{ key: 'ok', label: 'OK' }],
+    });
+    const result = store.respondToApproval(approval.id, 'ok', 'session-1', false, 'same-hash');
+    assert.ok(result.success);
+    assert.equal(result.approval.status, 'responded');
+  });
+
+  it('allows stale response when acknowledgeStaleness is true with currentContextHash mismatch', () => {
+    const conv = store.createConversation();
+    const turn = store.appendTurn(conv.id, {
+      kind: 'operator',
+      instruction: 'A',
+      attribution: operatorAttribution,
+    });
+    const approval = store.createApprovalRequest(turn.id, {
+      prompt: 'Approve?',
+      context: {},
+      contextHash: 'old-hash',
+      responseOptions: [{ key: 'ok', label: 'OK' }],
+    });
+    const result = store.respondToApproval(approval.id, 'ok', 'session-1', true, 'new-hash');
+    assert.ok(result.success);
+    assert.equal(result.approval.status, 'responded');
+  });
+
+  it('refreshApprovalStaleness auto-marks stale on hash mismatch', () => {
+    const conv = store.createConversation();
+    const turn = store.appendTurn(conv.id, {
+      kind: 'operator',
+      instruction: 'A',
+      attribution: operatorAttribution,
+    });
+    const approval = store.createApprovalRequest(turn.id, {
+      prompt: 'Approve?',
+      context: {},
+      contextHash: 'hash-v1',
+      responseOptions: [{ key: 'ok', label: 'OK' }],
+    });
+    store.refreshApprovalStaleness(approval.id, 'hash-v2');
+    const fetched = store.getApproval(approval.id);
+    assert.equal(fetched?.status, 'stale');
+  });
+
+  it('refreshApprovalStaleness leaves pending when hashes match', () => {
+    const conv = store.createConversation();
+    const turn = store.appendTurn(conv.id, {
+      kind: 'operator',
+      instruction: 'A',
+      attribution: operatorAttribution,
+    });
+    const approval = store.createApprovalRequest(turn.id, {
+      prompt: 'Approve?',
+      context: {},
+      contextHash: 'hash-v1',
+      responseOptions: [{ key: 'ok', label: 'OK' }],
+    });
+    store.refreshApprovalStaleness(approval.id, 'hash-v1');
+    const fetched = store.getApproval(approval.id);
+    assert.equal(fetched?.status, 'pending');
+  });
+
+  it('markApprovalStale compares hashes and skips when they match', () => {
+    const conv = store.createConversation();
+    const turn = store.appendTurn(conv.id, {
+      kind: 'operator',
+      instruction: 'A',
+      attribution: operatorAttribution,
+    });
+    const approval = store.createApprovalRequest(turn.id, {
+      prompt: 'Approve?',
+      context: {},
+      contextHash: 'same-hash',
+      responseOptions: [{ key: 'ok', label: 'OK' }],
+    });
+    store.markApprovalStale(approval.id, 'same-hash');
+    const fetched = store.getApproval(approval.id);
+    assert.equal(fetched?.status, 'pending', 'should stay pending when hashes match');
+  });
 });
 
 // ── Fork ─────────────────────────────────────────────────────────────────────

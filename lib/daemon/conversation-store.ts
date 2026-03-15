@@ -70,6 +70,7 @@ interface ActivityInput {
 interface ApprovalResult {
   success: boolean;
   approval: ApprovalRequestType;
+  reason?: 'invalid_response' | 'terminal_turn' | 'already_responded' | 'stale' | 'expired';
   conflictNotification?: {
     conflictingSessionId: string;
     message: string;
@@ -86,6 +87,14 @@ function generateId(prefix: string): string {
 
 function nowIso(): string {
   return new Date().toISOString();
+}
+
+/** Check whether a response key is declared in the approval's responseOptions. */
+function isResponseDeclared(
+  options: Array<{ key: string; label: string }>,
+  response: string,
+): boolean {
+  return options.some((o) => o.key === response);
 }
 
 // ── ConversationStore ────────────────────────────────────────────────────────
@@ -333,14 +342,20 @@ export class ConversationStore {
     response: string,
     sessionId: string,
     acknowledgeStaleness = false,
+    currentContextHash?: string,
   ): ApprovalResult {
     const approval = this.approvals.get(approvalId);
     if (!approval) throw new Error(`Approval not found: ${approvalId}`);
 
+    // Validate response against declared options
+    if (!isResponseDeclared(approval.responseOptions, response)) {
+      return { success: false, approval, reason: 'invalid_response' };
+    }
+
     // Reject if the owning turn is in a terminal state
     const turn = this.turns.get(approval.turnId);
     if (turn && TERMINAL_TURN_STATUSES.has(turn.status)) {
-      return { success: false, approval };
+      return { success: false, approval, reason: 'terminal_turn' };
     }
 
     // Already responded — first-write-wins conflict
@@ -348,6 +363,7 @@ export class ConversationStore {
       return {
         success: false,
         approval,
+        reason: 'already_responded',
         conflictNotification: {
           conflictingSessionId:
             (approval.respondedBy as { label?: string } | undefined)?.label ?? 'unknown',
@@ -356,14 +372,16 @@ export class ConversationStore {
       };
     }
 
-    // Stale without acknowledgement
+    // Context-hash staleness detection — auto-transition pending → stale,
+    // then reject unless the caller explicitly acknowledged the staleness.
+    this.refreshApprovalStaleness(approvalId, currentContextHash ?? approval.contextHash);
     if (approval.status === 'stale' && !acknowledgeStaleness) {
-      return { success: false, approval };
+      return { success: false, approval, reason: 'stale' };
     }
 
     // Expired
     if (approval.status === 'expired') {
-      return { success: false, approval };
+      return { success: false, approval, reason: 'expired' };
     }
 
     approval.status = 'responded';
@@ -380,10 +398,19 @@ export class ConversationStore {
     return { success: true, approval };
   }
 
-  markApprovalStale(approvalId: string, _newContextHash: string): void {
+  markApprovalStale(approvalId: string, newContextHash: string): void {
     const approval = this.approvals.get(approvalId);
     if (!approval) throw new Error(`Approval not found: ${approvalId}`);
-    if (approval.status === 'pending') {
+    if (approval.status === 'pending' && newContextHash !== approval.contextHash) {
+      approval.status = 'stale';
+      this.emit('conversation:approval-stale', { approvalId });
+    }
+  }
+
+  refreshApprovalStaleness(approvalId: string, currentContextHash: string): void {
+    const approval = this.approvals.get(approvalId);
+    if (!approval) return;
+    if (approval.status === 'pending' && currentContextHash !== approval.contextHash) {
       approval.status = 'stale';
       this.emit('conversation:approval-stale', { approvalId });
     }

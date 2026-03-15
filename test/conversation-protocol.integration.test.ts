@@ -16,6 +16,7 @@
  */
 import { describe, it, beforeEach, afterEach } from 'node:test';
 import assert from 'node:assert/strict';
+import { createHash } from 'node:crypto';
 import { ConversationStore } from '../lib/daemon/conversation-store.ts';
 import { StreamManager } from '../lib/daemon/stream-manager.ts';
 
@@ -25,6 +26,11 @@ const agentAttr = (id: string) => ({
   agentId: id,
   label: id,
 });
+
+/** Compute context hash the same way the executor/route do. */
+function ctxHash(instruction: string): string {
+  return createHash('sha256').update(instruction).digest('hex').slice(0, 16);
+}
 
 let store: ConversationStore;
 let streamManager: StreamManager;
@@ -704,7 +710,7 @@ describe('Daemon-level HTTP: submit/retry with executor', () => {
         approvalStore.createApprovalRequest(turnId, {
           prompt: 'Deploy to production?',
           context: { env: 'prod' },
-          contextHash: 'hash-v1',
+          contextHash: ctxHash(instruction),
           responseOptions: [
             { key: 'approve', label: 'Approve' },
             { key: 'reject', label: 'Reject' },
@@ -810,7 +816,7 @@ describe('Daemon-level HTTP: submit/retry with executor', () => {
         cancelStore.createApprovalRequest(turnId, {
           prompt: 'Continue?',
           context: {},
-          contextHash: 'hash-1',
+          contextHash: ctxHash(instruction),
           responseOptions: [{ key: 'yes', label: 'Yes' }],
         });
       },
