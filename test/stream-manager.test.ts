@@ -19,6 +19,43 @@ beforeEach(() => {
   streamManager = new StreamManager(store);
 });
 
+// ── Stream ID format ─────────────────────────────────────────────────────────
+
+describe('StreamManager — ID format', () => {
+  it('generates stream IDs using UUID format', () => {
+    const conv = store.createConversation();
+    const turn = store.appendTurn(conv.id, {
+      kind: 'operator',
+      instruction: 'Hello',
+      attribution: operatorAttribution,
+    });
+    const streamId = streamManager.createStream(turn.id);
+    // Should be "stream-<uuid>"
+    assert.match(
+      streamId,
+      /^stream-[\da-f]{8}-[\da-f]{4}-[\da-f]{4}-[\da-f]{4}-[\da-f]{12}$/,
+      'stream ID should use UUID format',
+    );
+  });
+
+  it('generates unique stream IDs across calls', () => {
+    const conv = store.createConversation();
+    const turnA = store.appendTurn(conv.id, {
+      kind: 'operator',
+      instruction: 'A',
+      attribution: operatorAttribution,
+    });
+    const turnB = store.appendTurn(conv.id, {
+      kind: 'operator',
+      instruction: 'B',
+      attribution: operatorAttribution,
+    });
+    const idA = streamManager.createStream(turnA.id);
+    const idB = streamManager.createStream(turnB.id);
+    assert.notEqual(idA, idB, 'each stream should get a unique ID');
+  });
+});
+
 // ── Stream lifecycle ─────────────────────────────────────────────────────────
 
 describe('StreamManager — lifecycle', () => {

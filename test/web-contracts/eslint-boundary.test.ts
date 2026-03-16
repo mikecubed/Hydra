@@ -7,7 +7,7 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import { resolve, dirname } from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const ROOT = resolve(__dirname, '..', '..');
@@ -21,7 +21,7 @@ async function loadBoundaryConfig(): Promise<{
   rules: Array<{ from: string; allow: string[] }>;
 }> {
   const configPath = resolve(ROOT, 'eslint.config.mjs');
-  const configModule = await import(configPath);
+  const configModule = await import(pathToFileURL(configPath).href);
   const configs: unknown[] = configModule.default;
 
   let elements: Array<{ type: string; pattern: string }> = [];

@@ -9,7 +9,7 @@ import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import { resolve, dirname } from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const ROOT = resolve(__dirname, '..', '..');
@@ -63,7 +63,7 @@ describe('Extensibility — simulated workspace package addition', () => {
 
   it('ESLint boundary pattern for web-contracts does not interfere with sibling packages', async () => {
     const configPath = resolve(ROOT, 'eslint.config.mjs');
-    const configModule = await import(configPath);
+    const configModule = await import(pathToFileURL(configPath).href);
     const configs: unknown[] = configModule.default;
 
     let elements: Array<{ type: string; pattern: string }> = [];
