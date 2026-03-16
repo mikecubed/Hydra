@@ -156,7 +156,7 @@ This document defines the public interface contracts that the web conversation p
 
 > **This family is NOT owned by this slice.** Browser session lifecycle (registration, heartbeat, WebSocket termination, transport-level session tracking) belongs to `apps/web-gateway` and the `web-session-and-auth` slice per the architecture docs (`03-architecture.md`).
 
-This slice consumes opaque `operatorId` and `sessionId` values in contract inputs (e.g., `Respond to Approval` includes a `sessionId` for conflict attribution). It does not define how those identifiers are issued, validated, or refreshed.
+This slice consumes opaque `operatorId` and `sessionId` values in contract inputs for attribution and conflict resolution. It does not define how those identifiers are issued, validated, or refreshed, and it does not require the daemon to add dedicated browser-facing conflict-notification fields that simply echo raw transport session identifiers.
 
 **Integration point**: The gateway passes `operatorId` and `sessionId` as context when proxying browser requests to daemon conversation contracts. The daemon uses them for attribution and conflict resolution only.
 

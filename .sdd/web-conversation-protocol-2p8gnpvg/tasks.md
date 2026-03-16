@@ -219,7 +219,7 @@
 
 ## Phase 10: Multi-Session Consistency (Cross-Cutting)
 
-**Purpose**: Ensure multiple browser sessions see the same authoritative state (FR-015, SC-009). Uses opaque sessionId from web-session-and-auth — does NOT own session registration or heartbeat.
+**Purpose**: Ensure multiple browser sessions see the same authoritative state (FR-015, SC-009). Uses opaque sessionId from web-session-and-auth for daemon-side conflict resolution; browser-facing conflict UX should prefer gateway-mapped aliases over adding new raw transport-id fields solely for notification. Does NOT own session registration or heartbeat.
 
 - [x] T082 Write unit tests for conflict resolution (red): first-write-wins with notification to other sessions in `test/conversation-store.test.ts`
 - [x] T083 Implement conflict resolution in ApprovalStore — first-write-wins with notification payload for other sessions when a conflicting response arrives in `lib/daemon/conversation-store.ts`
