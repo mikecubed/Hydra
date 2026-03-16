@@ -292,6 +292,15 @@ export class DaemonClient {
 
       return { error: translateDaemonResponse(response.status, body) };
     } catch (err: unknown) {
+      const method = (init.method ?? 'GET').toUpperCase();
+      const errName = err instanceof Error ? err.name : 'UnknownError';
+      const errMsg = err instanceof Error ? err.message : String(err);
+      console.warn('[DaemonClient] fetch failure', {
+        method,
+        url,
+        error: errName,
+        message: errMsg,
+      });
       return { error: translateFetchFailure(err) };
     } finally {
       clearTimeout(timer);

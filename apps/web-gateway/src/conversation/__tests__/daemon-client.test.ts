@@ -487,6 +487,46 @@ describe('DaemonClient', () => {
       assert.equal(err.code, 'DAEMON_UNREACHABLE');
     });
 
+    it('logs TypeError fetch failure via console.warn with structured context', async () => {
+      fetchMock.mock.mockImplementation(() => Promise.reject(new TypeError('fetch failed')));
+      // eslint-disable-next-line n/no-unsupported-features/node-builtins -- test.mock.method is stable in Node 24
+      const warnMock = mock.method(console, 'warn');
+      try {
+        await client.createConversation({ title: 'test' });
+
+        assert.ok(warnMock.mock.callCount() >= 1, 'console.warn should be called');
+        const [label, ctx] = warnMock.mock.calls[0].arguments as [string, Record<string, string>];
+        assert.equal(label, '[DaemonClient] fetch failure');
+        assert.equal(ctx['method'], 'POST');
+        assert.ok(ctx['url'].includes('/conversations'), 'url should contain the request path');
+        assert.equal(ctx['error'], 'TypeError');
+        assert.equal(ctx['message'], 'fetch failed');
+      } finally {
+        warnMock.mock.restore();
+      }
+    });
+
+    it('logs AbortError fetch failure via console.warn with structured context', async () => {
+      const abortError = new Error('The operation was aborted');
+      abortError.name = 'AbortError';
+      fetchMock.mock.mockImplementation(() => Promise.reject(abortError));
+      // eslint-disable-next-line n/no-unsupported-features/node-builtins -- test.mock.method is stable in Node 24
+      const warnMock = mock.method(console, 'warn');
+      try {
+        await client.openConversation('c1');
+
+        assert.ok(warnMock.mock.callCount() >= 1, 'console.warn should be called');
+        const [label, ctx] = warnMock.mock.calls[0].arguments as [string, Record<string, string>];
+        assert.equal(label, '[DaemonClient] fetch failure');
+        assert.equal(ctx['method'], 'GET');
+        assert.ok(ctx['url'].includes('/conversations/c1'), 'url should contain the request path');
+        assert.equal(ctx['error'], 'AbortError');
+        assert.equal(ctx['message'], 'The operation was aborted');
+      } finally {
+        warnMock.mock.restore();
+      }
+    });
+
     it('provides AbortSignal with timeout to fetch', async () => {
       fetchMock.mock.mockImplementation(() => Promise.resolve(okResponse({ id: 'c1' })));
 
