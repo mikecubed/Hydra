@@ -48,14 +48,15 @@ npm install
 ### 3. Install Hydra CLI Globally
 
 ```powershell
-# From this repo checkout
-pwsh -File .\bin\install-hydra-cli.ps1
-
-# Alternative:
 npm run install:global
 ```
 
-This adds a real `hydra` command to your npm global bin (no PowerShell profile function required).
+This packs a tarball and installs it globally, adding a real `hydra` command to your
+npm global bin (no PowerShell profile function required).
+
+> **Note:** Do not use `npm install -g .` or the legacy `bin\install-hydra-cli.ps1`
+> script directly — raw local-folder installs are unsupported (see the guard in step
+> above). `npm run install:global` handles packing automatically.
 
 ### 4. Verify Installation
 
