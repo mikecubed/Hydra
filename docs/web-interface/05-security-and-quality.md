@@ -57,7 +57,9 @@ The web initiative should use the strictest practical engineering discipline.
 - SOLID and DRY through package boundaries and shared contracts;
 - no hidden state machines in components when explicit state modeling is warranted;
 - no schema duplication across browser, gateway, and daemon boundaries;
-- no silent fallbacks for auth, connection, or mutation failures.
+- no silent fallbacks for auth, connection, or mutation failures;
+- new browser-facing contracts should avoid introducing raw transport metadata fields unless a
+  dedicated browser-safe contract explicitly owns and justifies that exposure.
 
 ### Enforceable rules to add
 

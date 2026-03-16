@@ -115,7 +115,7 @@
 
 **Question**: How are conflicting actions from two browser tabs or devices handled?
 
-**Chosen**: First-write-wins with notification. Each browser session has a session identifier. When a conflicting action arrives (e.g., two approval responses for the same request), the first response is accepted, and subsequent sessions receive a "conflict resolved" notification showing who responded and the outcome.
+**Chosen**: First-write-wins with notification. Each browser session has a session identifier. When a conflicting action arrives (e.g., two approval responses for the same request), the first response is accepted, and subsequent sessions receive a "conflict resolved" notification that lets the UI indicate which session or tab won. Browser-facing presentation should prefer a gateway-mapped safe label or alias when available rather than introducing new raw transport session-id fields solely for conflict notification.
 
 **Rationale**: Optimistic locking would require the operator to explicitly retry on conflict, which is jarring. First-write-wins with notification keeps the workflow moving while ensuring all sessions converge to the same authoritative state. The daemon's event-sourcing model naturally provides the ordering needed.
 
