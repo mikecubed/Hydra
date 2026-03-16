@@ -23,27 +23,33 @@ export const TERMINAL_STATES: readonly SessionState[] = ['expired', 'invalidated
 
 // ─── SessionInfo (public — no id) ───────────────────────────────────────────
 
-export const SessionInfo = z.object({
-  operatorId: z.string().min(1),
-  state: SessionState,
-  expiresAt: z.iso.datetime(),
-  lastActivityAt: z.iso.datetime(),
-  createdAt: z.iso.datetime(),
-});
+export const SessionInfo = z
+  .object({
+    operatorId: z.string().min(1),
+    state: SessionState,
+    expiresAt: z.iso.datetime(),
+    lastActivityAt: z.iso.datetime(),
+    createdAt: z.iso.datetime(),
+  })
+  .strict();
 export type SessionInfo = z.infer<typeof SessionInfo>;
 
 // ─── SessionEvent (broadcast payload — no session id) ───────────────────────
 
-export const SessionEvent = z.object({
-  type: z.enum(['state-change', 'expiry-warning', 'forced-logout']),
-  newState: SessionState,
-  reason: z.string().optional(),
-});
+export const SessionEvent = z
+  .object({
+    type: z.enum(['state-change', 'expiry-warning', 'forced-logout']),
+    newState: SessionState,
+    reason: z.string().optional(),
+  })
+  .strict();
 export type SessionEvent = z.infer<typeof SessionEvent>;
 
 // ─── ExtendResponse ─────────────────────────────────────────────────────────
 
-export const ExtendResponse = z.object({
-  newExpiresAt: z.iso.datetime(),
-});
+export const ExtendResponse = z
+  .object({
+    newExpiresAt: z.iso.datetime(),
+  })
+  .strict();
 export type ExtendResponse = z.infer<typeof ExtendResponse>;

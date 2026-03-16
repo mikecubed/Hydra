@@ -35,7 +35,7 @@ export function createMutatingRateLimiter(
       const err = createError('RATE_LIMITED');
       return c.json({ code: err.code, message: err.message }, 429);
     }
-    limiter.recordFailure(sourceKey);
+    limiter.recordAttempt(sourceKey);
     await next();
     // eslint-disable-next-line no-useless-return
     return;

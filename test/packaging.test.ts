@@ -29,12 +29,20 @@ describe('packaging', { timeout: 120_000 }, () => {
   before(() => {
     tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'hydra-pack-test-'));
 
-    // Pack the project into a tarball
-    execSync('npm pack', { cwd: ROOT, stdio: 'pipe', env: { ...process.env, HUSKY: '0' } });
+    // Pack the project into a tarball and capture the exact filename from stdout
+    const packOutput = execSync('npm pack', {
+      cwd: ROOT,
+      stdio: 'pipe',
+      encoding: 'utf8',
+      env: { ...process.env, HUSKY: '0' },
+    });
 
-    // Find the generated tarball (hydra-<version>.tgz)
-    const tgzName = fs.readdirSync(ROOT).find((f) => f.startsWith('hydra-') && f.endsWith('.tgz'));
-    assert.ok(tgzName, 'Expected a hydra-*.tgz file after npm pack');
+    // npm pack prints the tarball filename on its last stdout line
+    const tgzName = packOutput.trim().split('\n').pop()?.trim() ?? '';
+    assert.ok(
+      tgzName.endsWith('.tgz'),
+      `Expected npm pack to output a .tgz filename, got: ${packOutput}`,
+    );
     const srcTgz = path.join(ROOT, tgzName);
     tgzPath = path.join(tmpDir, tgzName);
     fs.renameSync(srcTgz, tgzPath);

@@ -63,6 +63,11 @@ describe('SessionInfo', () => {
     const reparsed = SessionInfo.parse(result);
     assert.deepStrictEqual(result, reparsed);
   });
+
+  it('rejects unknown fields (strict)', () => {
+    const result = SessionInfo.safeParse({ ...valid, sessionId: 'leaked' });
+    assert.equal(result.success, false, 'strict schema must reject unknown fields');
+  });
 });
 
 describe('SessionEvent', () => {

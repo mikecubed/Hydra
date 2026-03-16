@@ -481,8 +481,11 @@ describe('SC-009: Multi-session conflict resolution', () => {
     const result2 = store.respondToApproval(approval.id, 'no', 'session-2');
     assert.ok(!result2.success);
     assert.ok(result2.conflictNotification);
-    assert.equal(result2.conflictNotification?.conflictingSessionId, 'session-1');
-    assert.ok(result2.conflictNotification?.message);
+    assert.equal(
+      result2.conflictNotification?.message,
+      'Approval already responded by another session',
+    );
+    assert.ok(!('conflictingSessionId' in (result2.conflictNotification ?? {})));
   });
 });
 

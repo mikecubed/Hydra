@@ -6,22 +6,21 @@
  *   2. Installs that specific file globally.
  *   3. Cleans up the tarball in a finally-style block (even on failure).
  *
- * Uses spawnSync with args-array and platform-resolved binary (npm.cmd on
- * Windows) so shell interpolation is never needed.
+ * Uses cross-spawn sync API for cross-platform compatibility (handles
+ * Windows .cmd shims automatically without manual npm.cmd branching).
  */
 
-import { spawnSync, type SpawnSyncReturns } from 'node:child_process';
+// @ts-expect-error — cross-spawn has no bundled types; pre-existing across codebase
+import crossSpawn from 'cross-spawn';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import type { SpawnSyncReturns } from 'node:child_process';
 
 import { exit } from '../lib/hydra-process.ts';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(__dirname, '..');
-
-/** Resolve the platform-correct npm binary (npm.cmd on Windows). */
-const NPM = process.platform === 'win32' ? 'npm.cmd' : 'npm';
 
 /**
  * Run a command synchronously, returning trimmed stdout.
@@ -32,11 +31,12 @@ function run(
   args: string[],
   opts: { cwd: string; stdio?: 'inherit' | 'pipe' },
 ): string {
-  const result: SpawnSyncReturns<string> = spawnSync(cmd, args, {
+  // eslint-disable-next-line @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-member-access -- cross-spawn has no bundled types
+  const result: SpawnSyncReturns<string> = crossSpawn.sync(cmd, args, {
     cwd: opts.cwd,
     stdio: opts.stdio ?? 'pipe',
     encoding: 'utf8',
-  });
+  }) as SpawnSyncReturns<string>;
   if (result.error) throw result.error;
   if (result.status !== 0) {
     const stderr = typeof result.stderr === 'string' ? result.stderr.trim() : '';
@@ -52,7 +52,7 @@ let exitCode = 0;
 
 try {
   console.log('[install:global] Packing tarball…');
-  const output = run(NPM, ['pack'], { cwd: ROOT });
+  const output = run('npm', ['pack'], { cwd: ROOT });
 
   // npm pack prints the filename on the last line of stdout
   const filename = output.split('\n').pop()?.trim();
@@ -68,7 +68,7 @@ try {
   }
 
   console.log(`[install:global] Installing ${filename} globally…`);
-  run(NPM, ['install', '-g', tgzPath], { cwd: ROOT, stdio: 'inherit' });
+  run('npm', ['install', '-g', tgzPath], { cwd: ROOT, stdio: 'inherit' });
   console.log('[install:global] Done.');
 } catch (err: unknown) {
   const message = err instanceof Error ? err.message : String(err);

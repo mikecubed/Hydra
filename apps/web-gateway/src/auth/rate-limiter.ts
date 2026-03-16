@@ -63,6 +63,14 @@ export class RateLimiter {
     return true;
   }
 
+  /**
+   * Record a generic attempt (not necessarily a failure).
+   * Alias used by non-auth rate limiters where every mutating request counts.
+   */
+  recordAttempt(sourceKey: string): boolean {
+    return this.recordFailure(sourceKey);
+  }
+
   reset(sourceKey: string): void {
     this.entries.delete(sourceKey);
   }

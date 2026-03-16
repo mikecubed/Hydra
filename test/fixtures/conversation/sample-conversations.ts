@@ -2,9 +2,17 @@
  * Test fixtures for conversation protocol scenarios.
  *
  * Provides pre-built valid entities for use across unit and integration tests.
+ * IDs use a deterministic monotonic counter so snapshots are stable across runs.
  */
 const NOW = '2025-07-14T00:00:00.000Z';
 const LATER = '2025-07-14T01:00:00.000Z';
+
+let _nextId = 1;
+
+/** Reset the monotonic ID counter (call in beforeEach when needed). */
+export function resetFixtureIds(): void {
+  _nextId = 1;
+}
 
 export const operatorAttribution = { type: 'operator' as const, label: 'Admin' };
 export const systemAttribution = { type: 'system' as const, label: 'System' };
@@ -16,7 +24,7 @@ export const agentAttribution = (agentId: string, label: string) => ({
 
 export function makeConversation(overrides: Record<string, unknown> = {}) {
   return {
-    id: `conv-${Date.now()}`,
+    id: `conv-${String(_nextId++)}`,
     status: 'active' as const,
     createdAt: NOW,
     updatedAt: NOW,
@@ -62,7 +70,7 @@ export function makeStreamEvent(
 
 export function makeApproval(turnId: string, overrides: Record<string, unknown> = {}) {
   return {
-    id: `approval-${turnId}-${Date.now()}`,
+    id: `approval-${turnId}-${String(_nextId++)}`,
     turnId,
     status: 'pending' as const,
     prompt: 'Approve this action?',
@@ -79,7 +87,7 @@ export function makeApproval(turnId: string, overrides: Record<string, unknown> 
 
 export function makeArtifact(turnId: string, overrides: Record<string, unknown> = {}) {
   return {
-    id: `artifact-${turnId}-${Date.now()}`,
+    id: `artifact-${turnId}-${String(_nextId++)}`,
     turnId,
     kind: 'file' as const,
     label: 'output.ts',
@@ -91,7 +99,7 @@ export function makeArtifact(turnId: string, overrides: Record<string, unknown> 
 
 export function makeActivity(agentId: string, overrides: Record<string, unknown> = {}) {
   return {
-    id: `activity-${agentId}-${Date.now()}`,
+    id: `activity-${agentId}-${String(_nextId++)}`,
     attribution: agentAttribution(agentId, agentId),
     kind: 'task-started' as const,
     summary: `${agentId} started work`,

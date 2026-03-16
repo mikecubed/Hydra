@@ -40,8 +40,8 @@ describe('LoginResponse', () => {
       state: 'active',
       sessionId: 'leaked-id',
     };
-    const result = LoginResponse.parse(input);
-    assert.equal('sessionId' in result, false, 'sessionId must not appear in LoginResponse');
+    const result = LoginResponse.safeParse(input);
+    assert.equal(result.success, false, 'strict schema must reject unknown fields like sessionId');
   });
 
   it('rejects missing operatorId', () => {

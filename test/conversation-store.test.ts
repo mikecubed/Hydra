@@ -359,7 +359,10 @@ describe('ConversationStore — approvals', () => {
     const second = store.respondToApproval(approval.id, 'ok', 'session-2');
     assert.ok(!second.success);
     assert.ok(second.conflictNotification);
-    assert.equal(second.conflictNotification?.conflictingSessionId, 'session-1');
+    assert.equal(
+      second.conflictNotification?.message,
+      'Approval already responded by another session',
+    );
   });
 
   it('rejects response not matching declared responseOptions', () => {

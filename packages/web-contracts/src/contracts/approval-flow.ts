@@ -33,7 +33,6 @@ export const RespondToApprovalResponse = z.object({
   approval: ApprovalRequest,
   conflictNotification: z
     .object({
-      conflictingSessionId: z.string().min(1),
       message: z.string(),
     })
     .optional(),

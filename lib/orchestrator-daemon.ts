@@ -173,6 +173,13 @@ function broadcastEvent(sseClients: Set<ServerResponse>, event: unknown) {
   }
 }
 
+/** Losslessly coerce unknown agent output to a string. */
+function coerceOutput(raw: unknown): string {
+  if (typeof raw === 'string') return raw;
+  if (raw != null) return JSON.stringify(raw);
+  return '';
+}
+
 /**
  * Build the ExecutorDeps for the conversation executor/continuator from the
  * daemon context.  Uses `executeAgentWithRecovery` as the real agent backend.
@@ -183,11 +190,23 @@ function buildExecutorDeps(ctx: DaemonContext): ExecutorDeps {
     streamManager: ctx.streamManager,
     executeAgent: async (agent, prompt) => {
       const result = await executeAgentWithRecovery(agent, prompt);
-      return {
-        ok: result.ok,
-        output: typeof result.output === 'string' ? result.output : '',
-      };
+      return { ok: result.ok, output: coerceOutput(result.output) };
     },
+  };
+}
+
+/**
+ * Pre-built conversation route handlers, constructed once per daemon context
+ * rather than per request. Safe to share because executor deps reference
+ * the mutable context (store, streamManager) by closure.
+ */
+function buildConversationHandlers(ctx: DaemonContext) {
+  const deps = buildExecutorDeps(ctx);
+  return {
+    store: ctx.conversationStore,
+    streamManager: ctx.streamManager,
+    executeTurn: createConversationExecutor(deps),
+    continueAfterApproval: createApprovalContinuator(deps),
   };
 }
 
@@ -565,6 +584,7 @@ function buildWriteRouteCtx(
 
 async function handleHttpRequest(
   ctx: DaemonContext,
+  convHandlers: ReturnType<typeof buildConversationHandlers>,
   server: http.Server,
   req: IncomingMessage,
   res: ServerResponse,
@@ -584,14 +604,7 @@ async function handleHttpRequest(
       return;
     }
 
-    if (
-      handleConversationRoute(req, res, {
-        store: ctx.conversationStore,
-        streamManager: ctx.streamManager,
-        executeTurn: createConversationExecutor(buildExecutorDeps(ctx)),
-        continueAfterApproval: createApprovalContinuator(buildExecutorDeps(ctx)),
-      })
-    ) {
+    if (handleConversationRoute(req, res, convHandlers)) {
       return;
     }
 
@@ -857,9 +870,12 @@ function startDaemon(options: Record<string, string>) {
   }
 
   const ctx = createDaemonContext(host, port);
+  const convHandlers = buildConversationHandlers(ctx);
 
   // eslint-disable-next-line @typescript-eslint/no-misused-promises -- async HTTP handler, errors caught in try/catch block
-  const server = http.createServer(async (req, res) => handleHttpRequest(ctx, server, req, res));
+  const server = http.createServer(async (req, res) =>
+    handleHttpRequest(ctx, convHandlers, server, req, res),
+  );
 
   server.on('error', (error: Error) => {
     console.error(`Orchestrator server error: ${error.message}`);

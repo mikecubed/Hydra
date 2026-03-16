@@ -260,11 +260,30 @@ describe('Approval Flow contracts', () => {
       success: false,
       approval: { ...validApproval, status: 'responded', response: 'approve' },
       conflictNotification: {
-        conflictingSessionId: 'sess-2',
         message: 'Already responded by another session',
       },
     });
     assert.ok(result.success);
+  });
+
+  it('RespondToApprovalResponse rejects conflictingSessionId in notification', () => {
+    const result = RespondToApprovalResponse.safeParse({
+      success: false,
+      approval: { ...validApproval, status: 'responded', response: 'approve' },
+      conflictNotification: {
+        conflictingSessionId: 'sess-2',
+        message: 'Already responded by another session',
+      },
+    });
+    // conflictingSessionId is not in the schema — it should be stripped by default
+    // (non-strict object), confirming it never reaches the browser
+    assert.ok(result.success);
+    const parsed = result.data as { conflictNotification?: Record<string, unknown> };
+    assert.equal(
+      parsed.conflictNotification?.['conflictingSessionId'],
+      undefined,
+      'conflictingSessionId must not appear in parsed response',
+    );
   });
 });
 

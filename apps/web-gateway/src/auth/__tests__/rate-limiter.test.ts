@@ -64,4 +64,12 @@ describe('RateLimiter', () => {
     limiter.reset('ip1');
     assert.equal(limiter.check('ip1'), true);
   });
+
+  it('recordAttempt behaves identically to recordFailure', () => {
+    limiter.recordAttempt('ip3');
+    limiter.recordAttempt('ip3');
+    assert.equal(limiter.check('ip3'), true);
+    limiter.recordAttempt('ip3'); // 3rd = locked
+    assert.equal(limiter.check('ip3'), false);
+  });
 });

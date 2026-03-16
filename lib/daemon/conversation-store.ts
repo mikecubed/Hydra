@@ -72,7 +72,6 @@ interface ApprovalResult {
   approval: ApprovalRequestType;
   reason?: 'invalid_response' | 'terminal_turn' | 'already_responded' | 'stale' | 'expired';
   conflictNotification?: {
-    conflictingSessionId: string;
     message: string;
   };
 }
@@ -368,8 +367,6 @@ export class ConversationStore {
         approval,
         reason: 'already_responded',
         conflictNotification: {
-          conflictingSessionId:
-            (approval.respondedBy as { label?: string } | undefined)?.label ?? 'unknown',
           message: 'Approval already responded by another session',
         },
       };

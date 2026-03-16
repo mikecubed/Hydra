@@ -20,7 +20,9 @@ const PKG_BACKUP = path.join(ROOT, '.package.json.bak');
 // ── Restore original package.json ────────────────────────────────────────────
 
 if (fs.existsSync(PKG_BACKUP)) {
-  fs.renameSync(PKG_BACKUP, path.join(ROOT, 'package.json'));
+  const target = path.join(ROOT, 'package.json');
+  fs.copyFileSync(PKG_BACKUP, target);
+  fs.unlinkSync(PKG_BACKUP);
   console.log('[postpack] Restored original package.json.');
 }
 

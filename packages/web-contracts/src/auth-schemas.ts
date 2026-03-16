@@ -16,24 +16,30 @@ export type LoginRequest = z.infer<typeof LoginRequest>;
 
 // ─── LoginResponse (no sessionId — FR-020) ──────────────────────────────────
 
-export const LoginResponse = z.object({
-  operatorId: z.string().min(1),
-  expiresAt: z.iso.datetime(),
-  state: SessionState,
-});
+export const LoginResponse = z
+  .object({
+    operatorId: z.string().min(1),
+    expiresAt: z.iso.datetime(),
+    state: SessionState,
+  })
+  .strict();
 export type LoginResponse = z.infer<typeof LoginResponse>;
 
 // ─── LogoutResponse ─────────────────────────────────────────────────────────
 
-export const LogoutResponse = z.object({
-  success: z.boolean(),
-});
+export const LogoutResponse = z
+  .object({
+    success: z.boolean(),
+  })
+  .strict();
 export type LogoutResponse = z.infer<typeof LogoutResponse>;
 
 // ─── AuthError ──────────────────────────────────────────────────────────────
 
-export const AuthError = z.object({
-  code: z.string().min(1),
-  message: z.string().min(1),
-});
+export const AuthError = z
+  .object({
+    code: z.string().min(1),
+    message: z.string().min(1),
+  })
+  .strict();
 export type AuthError = z.infer<typeof AuthError>;
