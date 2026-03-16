@@ -14,6 +14,8 @@ export type SessionErrorCode =
   | 'IDLE_TIMEOUT';
 
 export type SystemErrorCode =
+  | 'BAD_REQUEST'
+  | 'INTERNAL_ERROR'
   | 'DAEMON_UNREACHABLE'
   | 'CLOCK_UNRELIABLE'
   | 'CSRF_INVALID'
@@ -42,6 +44,8 @@ export const ERROR_STATUS_MAP: Record<ErrorCode, number> = {
   SESSION_NOT_FOUND: 401,
   SESSION_NOT_IDLE: 403,
   IDLE_TIMEOUT: 401,
+  BAD_REQUEST: 400,
+  INTERNAL_ERROR: 500,
   DAEMON_UNREACHABLE: 503,
   CLOCK_UNRELIABLE: 503,
   CSRF_INVALID: 403,
@@ -58,6 +62,8 @@ export function createError(code: ErrorCode, message?: string): GatewayError {
     SESSION_NOT_FOUND: 'No valid session found',
     SESSION_NOT_IDLE: 'Re-authentication is only allowed for idle sessions',
     IDLE_TIMEOUT: 'Session idle timeout — re-authentication required',
+    BAD_REQUEST: 'Bad request',
+    INTERNAL_ERROR: 'Internal error',
     DAEMON_UNREACHABLE: 'Hydra daemon is unreachable',
     CLOCK_UNRELIABLE: 'System clock is unreliable',
     CSRF_INVALID: 'CSRF token missing or invalid',

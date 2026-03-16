@@ -4,7 +4,7 @@
 
 | Requirement               | Minimum | Notes                          |
 | ------------------------- | ------- | ------------------------------ |
-| **Node.js**               | 20+     | For all Hydra modules          |
+| **Node.js**               | 24+     | For all Hydra modules          |
 | **PowerShell**            | 7+      | For launchers and agent heads  |
 | **AI CLI (at least one)** |         | `gemini`, `codex`, or `claude` |
 
@@ -62,9 +62,6 @@ This adds a real `hydra` command to your npm global bin (no PowerShell profile f
 ```powershell
 # Check CLI wiring
 hydra --help
-
-# Check that the daemon can start
-node lib/orchestrator-daemon.ts help
 ```
 
 ### 5. Initialize for Your Project
