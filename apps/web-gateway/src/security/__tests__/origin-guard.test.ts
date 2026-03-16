@@ -33,12 +33,20 @@ describe('Origin guard', () => {
       headers: { Origin: 'http://evil.com' },
     });
     assert.equal(res.status, 403);
+    const body = (await res.json()) as { ok: boolean; code: string; category: string };
+    assert.equal(body.ok, false);
+    assert.equal(body.code, 'ORIGIN_REJECTED');
+    assert.equal(body.category, 'auth');
   });
 
   it('POST with missing origin returns 403', async () => {
     const app = createTestApp();
     const res = await app.request('/test', { method: 'POST' });
     assert.equal(res.status, 403);
+    const body = (await res.json()) as { ok: boolean; code: string; category: string };
+    assert.equal(body.ok, false);
+    assert.equal(body.code, 'ORIGIN_REJECTED');
+    assert.equal(body.category, 'auth');
   });
 
   it('WebSocket upgrade with wrong origin returns 403', async () => {

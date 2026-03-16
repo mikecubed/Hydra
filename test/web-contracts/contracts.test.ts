@@ -18,6 +18,7 @@ import {
   OpenConversationRequest,
   OpenConversationResponse,
   ResumeConversationRequest,
+  ResumeConversationBody,
   ArchiveConversationRequest,
   ListConversationsRequest,
   ListConversationsResponse,
@@ -25,6 +26,7 @@ import {
 
 import {
   SubmitInstructionRequest,
+  SubmitInstructionBody,
   SubmitInstructionResponse,
   SubscribeToStreamRequest,
   LoadTurnHistoryRequest,
@@ -139,6 +141,24 @@ describe('Conversation Lifecycle contracts', () => {
     );
   });
 
+  it('ResumeConversationBody omits conversationId (browser-facing)', () => {
+    // Must accept body without conversationId — path is authoritative
+    assert.ok(ResumeConversationBody.safeParse({ lastAcknowledgedSeq: 10 }).success);
+    // Must reject missing lastAcknowledgedSeq
+    assert.ok(!ResumeConversationBody.safeParse({}).success);
+    // Must strip conversationId if accidentally sent — Zod default strips unknown keys
+    const parsed = ResumeConversationBody.safeParse({
+      conversationId: 'should-be-stripped',
+      lastAcknowledgedSeq: 5,
+    });
+    assert.ok(parsed.success, 'extra keys should not fail parse');
+    assert.equal(
+      (parsed.data as Record<string, unknown>)['conversationId'],
+      undefined,
+      'conversationId must be stripped — it comes from the URL path',
+    );
+  });
+
   it('ArchiveConversationRequest requires conversationId', () => {
     assert.ok(!ArchiveConversationRequest.safeParse({}).success);
     assert.ok(ArchiveConversationRequest.safeParse({ conversationId: 'c-1' }).success);
@@ -183,6 +203,30 @@ describe('Turn Submission contracts', () => {
         turn: validTurn,
         streamId: 'stream-1',
       }).success,
+    );
+  });
+
+  it('SubmitInstructionBody omits conversationId (browser-facing)', () => {
+    // Must accept body without conversationId — path is authoritative
+    assert.ok(SubmitInstructionBody.safeParse({ instruction: 'Do something' }).success);
+    // Must reject empty instruction
+    assert.ok(!SubmitInstructionBody.safeParse({ instruction: '' }).success);
+    // Must reject missing instruction
+    assert.ok(!SubmitInstructionBody.safeParse({}).success);
+    // Must strip conversationId if accidentally sent
+    const parsed = SubmitInstructionBody.safeParse({
+      conversationId: 'should-be-stripped',
+      instruction: 'test',
+    });
+    assert.ok(parsed.success);
+    assert.equal(
+      (parsed.data as Record<string, unknown>)['conversationId'],
+      undefined,
+      'conversationId must be stripped — it comes from the URL path',
+    );
+    // Must accept optional metadata
+    assert.ok(
+      SubmitInstructionBody.safeParse({ instruction: 'test', metadata: { key: 'val' } }).success,
     );
   });
 
@@ -377,10 +421,10 @@ describe('Multi-Agent Activity contracts', () => {
     assert.ok(GetActivityEntriesRequest.safeParse({ turnId: 'turn-1' }).success);
   });
 
-  it('FilterActivityByAgentRequest requires turnId and agentId', () => {
+  it('FilterActivityByAgentRequest requires turnId and agent', () => {
     assert.ok(!FilterActivityByAgentRequest.safeParse({ turnId: 'turn-1' }).success);
     assert.ok(
-      FilterActivityByAgentRequest.safeParse({ turnId: 'turn-1', agentId: 'claude' }).success,
+      FilterActivityByAgentRequest.safeParse({ turnId: 'turn-1', agent: 'claude' }).success,
     );
   });
 });

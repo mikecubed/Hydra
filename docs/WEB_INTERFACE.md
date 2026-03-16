@@ -50,3 +50,17 @@ To keep the work easier to reason about, the design has been split into smaller 
 
 Use this document set as the source material for `sdd.specify`, starting with the first foundational
 specs rather than attempting the entire web initiative in one implementation pass.
+
+The current SDD execution order is:
+
+1. `web-repl-foundation`
+2. `web-session-auth`
+3. `web-conversation-protocol`
+4. **`web-gateway-conversation-transport`** ← next spec to plan (gateway REST + WebSocket mediation, session binding, reconnect/resume, daemon transport amendments)
+5. `web-chat-workspace`
+6. `web-hydra-operations-panels`
+7. `web-controlled-mutations`
+8. `web-hardening-and-packaging`
+
+See [`docs/web-interface/06-phases-and-sdd.md`](./web-interface/06-phases-and-sdd.md) for full phase
+and spec breakdown details.

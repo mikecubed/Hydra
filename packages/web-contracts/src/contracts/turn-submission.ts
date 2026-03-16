@@ -20,6 +20,12 @@ export const SubmitInstructionResponse = z.object({
 });
 export type SubmitInstructionResponse = z.infer<typeof SubmitInstructionResponse>;
 
+// ── SubmitInstructionBody (browser-facing: path-owned conversationId) ─────────
+
+/** Browser-facing body for POST /conversations/:convId/turns — conversationId comes from the URL. */
+export const SubmitInstructionBody = SubmitInstructionRequest.omit({ conversationId: true });
+export type SubmitInstructionBody = z.infer<typeof SubmitInstructionBody>;
+
 // ── SubscribeToStream ────────────────────────────────────────────────────────
 
 export const SubscribeToStreamRequest = z.object({

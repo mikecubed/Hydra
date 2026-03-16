@@ -18,6 +18,8 @@ These phases define the program shape. They are intentionally broader than the e
 - login/logout and browser session management;
 - websocket bootstrap and reconnect behavior;
 - conversation create/open/resume flow;
+- gateway REST + WebSocket mediation layer (daemon→browser event bridge, session binding);
+- daemon transport amendments needed by the gateway (event subscription, sequence numbering);
 - protocol-level validation and replay tests.
 
 ### Phase 2 — Core Chat Workspace
@@ -53,12 +55,13 @@ These phases define the program shape. They are intentionally broader than the e
 After the document set is accepted, break the work into these specs:
 
 1. **`web-repl-foundation`**
-2. **`web-session-and-auth`**
+2. **`web-session-auth`**
 3. **`web-conversation-protocol`**
-4. **`web-chat-workspace`**
-5. **`web-hydra-operations-panels`**
-6. **`web-controlled-mutations`**
-7. **`web-hardening-and-packaging`**
+4. **`web-gateway-conversation-transport`** — gateway REST + WebSocket mediation, session binding, reconnect/resume, and daemon transport amendments
+5. **`web-chat-workspace`**
+6. **`web-hydra-operations-panels`**
+7. **`web-controlled-mutations`**
+8. **`web-hardening-and-packaging`**
 
 ### Suggested early execution order
 
@@ -66,16 +69,19 @@ The most important early dependency is getting the protocol and backend contract
 the richer UI work expands.
 
 1. `web-repl-foundation`
-2. `web-session-and-auth`
+2. `web-session-auth`
 3. `web-conversation-protocol`
-4. `web-chat-workspace`
-5. `web-hydra-operations-panels`
-6. `web-controlled-mutations`
-7. `web-hardening-and-packaging`
+4. `web-gateway-conversation-transport`
+5. `web-chat-workspace`
+6. `web-hydra-operations-panels`
+7. `web-controlled-mutations`
+8. `web-hardening-and-packaging`
 
 If the daemon needs significant new conversation or command contracts, that work should be planned
-inside or immediately adjacent to `web-conversation-protocol` rather than deferred until the UI is
-already built.
+inside or immediately adjacent to `web-conversation-protocol` or
+`web-gateway-conversation-transport` rather than deferred until the UI is already built. The
+transport slice explicitly includes daemon transport amendments (event subscription, sequence
+numbering, replay buffer) as work items rather than assuming they exist.
 
 ## Recommended Workflow
 

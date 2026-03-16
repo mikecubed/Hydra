@@ -48,6 +48,10 @@ describe('CSRF middleware', () => {
       headers: { Cookie: '__csrf=tok123' },
     });
     assert.equal(res.status, 403);
+    const body = (await res.json()) as { ok: boolean; code: string; category: string };
+    assert.equal(body.ok, false);
+    assert.equal(body.code, 'CSRF_INVALID');
+    assert.equal(body.category, 'validation');
   });
 
   it('POST with wrong token returns 403', async () => {
@@ -60,5 +64,9 @@ describe('CSRF middleware', () => {
       },
     });
     assert.equal(res.status, 403);
+    const body = (await res.json()) as { ok: boolean; code: string; category: string };
+    assert.equal(body.ok, false);
+    assert.equal(body.code, 'CSRF_INVALID');
+    assert.equal(body.category, 'validation');
   });
 });

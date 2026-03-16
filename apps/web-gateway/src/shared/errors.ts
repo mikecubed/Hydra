@@ -1,7 +1,7 @@
 /**
  * Typed error codes for auth, session, and system failures.
  *
- * Used across auth/, session/, and security/ modules.
+ * Used across auth/, session/, security/, and conversation/ modules.
  */
 
 export type AuthErrorCode = 'INVALID_CREDENTIALS' | 'RATE_LIMITED' | 'ACCOUNT_DISABLED';
@@ -13,6 +13,13 @@ export type SessionErrorCode =
   | 'SESSION_NOT_IDLE'
   | 'IDLE_TIMEOUT';
 
+export type ConversationErrorCode =
+  | 'CONVERSATION_NOT_FOUND'
+  | 'TURN_NOT_FOUND'
+  | 'VALIDATION_FAILED'
+  | 'WS_INVALID_MESSAGE'
+  | 'WS_BUFFER_OVERFLOW';
+
 export type SystemErrorCode =
   | 'BAD_REQUEST'
   | 'INTERNAL_ERROR'
@@ -21,7 +28,7 @@ export type SystemErrorCode =
   | 'CSRF_INVALID'
   | 'ORIGIN_REJECTED';
 
-export type ErrorCode = AuthErrorCode | SessionErrorCode | SystemErrorCode;
+export type ErrorCode = AuthErrorCode | SessionErrorCode | ConversationErrorCode | SystemErrorCode;
 
 export class GatewayError extends Error {
   readonly code: ErrorCode;
@@ -50,6 +57,11 @@ export const ERROR_STATUS_MAP: Record<ErrorCode, number> = {
   CLOCK_UNRELIABLE: 503,
   CSRF_INVALID: 403,
   ORIGIN_REJECTED: 403,
+  CONVERSATION_NOT_FOUND: 404,
+  TURN_NOT_FOUND: 404,
+  VALIDATION_FAILED: 400,
+  WS_INVALID_MESSAGE: 400,
+  WS_BUFFER_OVERFLOW: 503,
 };
 
 export function createError(code: ErrorCode, message?: string): GatewayError {
@@ -68,6 +80,11 @@ export function createError(code: ErrorCode, message?: string): GatewayError {
     CLOCK_UNRELIABLE: 'System clock is unreliable',
     CSRF_INVALID: 'CSRF token missing or invalid',
     ORIGIN_REJECTED: 'Origin not allowed',
+    CONVERSATION_NOT_FOUND: 'Conversation not found',
+    TURN_NOT_FOUND: 'Turn not found',
+    VALIDATION_FAILED: 'Request validation failed',
+    WS_INVALID_MESSAGE: 'Invalid WebSocket message',
+    WS_BUFFER_OVERFLOW: 'Event buffer overflow',
   };
   return new GatewayError(code, message ?? defaultMessages[code], ERROR_STATUS_MAP[code]);
 }

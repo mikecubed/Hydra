@@ -57,6 +57,7 @@ export {
   OpenConversationRequest,
   OpenConversationResponse,
   ResumeConversationRequest,
+  ResumeConversationBody,
   ResumeConversationResponse,
   ArchiveConversationRequest,
   ArchiveConversationResponse,
@@ -66,6 +67,7 @@ export {
 
 export {
   SubmitInstructionRequest,
+  SubmitInstructionBody,
   SubmitInstructionResponse,
   SubscribeToStreamRequest,
   SubscribeToStreamResponse,

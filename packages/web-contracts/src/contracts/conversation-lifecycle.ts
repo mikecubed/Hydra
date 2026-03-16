@@ -49,6 +49,12 @@ export const ResumeConversationResponse = z.object({
 });
 export type ResumeConversationResponse = z.infer<typeof ResumeConversationResponse>;
 
+// ── ResumeConversationBody (browser-facing: path-owned conversationId) ────────
+
+/** Browser-facing body for POST /conversations/:id/resume — conversationId comes from the URL. */
+export const ResumeConversationBody = ResumeConversationRequest.omit({ conversationId: true });
+export type ResumeConversationBody = z.infer<typeof ResumeConversationBody>;
+
 // ── ArchiveConversation ──────────────────────────────────────────────────────
 
 export const ArchiveConversationRequest = z.object({

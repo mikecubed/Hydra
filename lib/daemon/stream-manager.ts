@@ -12,6 +12,7 @@
 import { randomUUID } from 'node:crypto';
 
 import type { ConversationStore } from './conversation-store.ts';
+import type { EventBridge } from './event-bridge.ts';
 import type { StreamEvent as StreamEventType } from '@hydra/web-contracts';
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
@@ -52,15 +53,35 @@ export class StreamManager {
   private seq = 0;
   private readonly store: ConversationStore;
   private readonly retentionMs: number;
+  private readonly bridge?: EventBridge;
 
-  constructor(store: ConversationStore, retentionMs = DEFAULT_RETENTION_MS) {
+  constructor(store: ConversationStore, retentionMs = DEFAULT_RETENTION_MS, bridge?: EventBridge) {
     this.store = store;
     this.retentionMs = retentionMs;
+    this.bridge = bridge;
   }
 
   private nextSeq(): number {
     this.seq += 1;
     return this.seq;
+  }
+
+  /** Emit an event through the bridge if one is configured.
+   *  Listener exceptions are caught so they never disrupt stream lifecycle. */
+  private bridgeEmit(turnId: string, event: StreamEventType): void {
+    if (!this.bridge) return;
+    const turn = this.store.getTurn(turnId);
+    if (!turn) return;
+    try {
+      this.bridge.emitStreamEvent(turn.conversationId, event);
+    } catch (err: unknown) {
+      // Bridge consumer errors must not break daemon stream operations.
+      // Log a warning so failures are observable and diagnosable.
+      const detail = err instanceof Error ? err.message : 'unknown error';
+      console.warn(
+        `[StreamManager] bridgeEmit listener error (turn=${turnId}, kind=${event.kind}): ${detail}`,
+      );
+    }
   }
 
   /**
@@ -85,6 +106,7 @@ export class StreamManager {
       timestamp: nowIso(),
     };
     state.events.push(startEvent);
+    this.bridgeEmit(turnId, startEvent);
 
     this.streams.set(streamId, state);
     this.streamByTurnId.set(turnId, streamId);
@@ -116,6 +138,7 @@ export class StreamManager {
       timestamp: nowIso(),
     };
     state.events.push(event);
+    this.bridgeEmit(turnId, event);
     return event;
   }
 
@@ -144,6 +167,7 @@ export class StreamManager {
       timestamp: nowIso(),
     };
     state.events.push(completedEvent);
+    this.bridgeEmit(turnId, completedEvent);
     state.status = 'completed';
     state.completedAt = nowIso();
 
@@ -170,6 +194,7 @@ export class StreamManager {
       timestamp: nowIso(),
     };
     state.events.push(failedEvent);
+    this.bridgeEmit(turnId, failedEvent);
     state.status = 'failed';
     state.completedAt = nowIso();
 
@@ -196,6 +221,7 @@ export class StreamManager {
       timestamp: nowIso(),
     };
     state.events.push(cancelEvent);
+    this.bridgeEmit(turnId, cancelEvent);
     state.status = 'cancelled';
     state.completedAt = nowIso();
 

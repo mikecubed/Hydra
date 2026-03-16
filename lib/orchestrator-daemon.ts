@@ -61,6 +61,7 @@ import { handleWriteRoute } from './daemon/write-routes.ts';
 import { handleConversationRoute } from './daemon/conversation-routes.ts';
 import { ConversationStore } from './daemon/conversation-store.ts';
 import { StreamManager } from './daemon/stream-manager.ts';
+import { EventBridge } from './daemon/event-bridge.ts';
 import { sendJson, sendError, isAuthorized, readJsonBody } from './daemon/http-utils.ts';
 import { printHelp, commandStatus, commandStop } from './daemon/cli-commands.ts';
 import {
@@ -133,6 +134,7 @@ interface DaemonContext {
   sseClients: Set<ServerResponse>;
   conversationStore: ConversationStore;
   streamManager: StreamManager;
+  eventBridge: EventBridge;
 }
 
 interface DaemonIntervals {
@@ -147,6 +149,7 @@ type VerificationCallback = (error: Error | null, stdout: string, stderr: string
 
 function createDaemonContext(host: string, port: number): DaemonContext {
   const conversationStore = new ConversationStore();
+  const eventBridge = new EventBridge();
   return {
     host,
     port,
@@ -157,7 +160,8 @@ function createDaemonContext(host: string, port: number): DaemonContext {
     writeQueue: Promise.resolve(),
     sseClients: new Set<ServerResponse>(),
     conversationStore,
-    streamManager: new StreamManager(conversationStore),
+    streamManager: new StreamManager(conversationStore, undefined, eventBridge),
+    eventBridge,
   };
 }
 

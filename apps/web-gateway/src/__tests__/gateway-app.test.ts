@@ -178,8 +178,10 @@ describe('Gateway app integration', () => {
     });
     const extendRes = await gw.app.request(extendReq);
     assert.equal(extendRes.status, 403);
-    const body = (await extendRes.json()) as { code: string };
+    const body = (await extendRes.json()) as { ok: boolean; code: string; category: string };
+    assert.equal(body.ok, false);
     assert.equal(body.code, 'CSRF_INVALID');
+    assert.equal(body.category, 'validation');
   });
 
   it('POST /session/extend with valid CSRF succeeds', async () => {
@@ -250,8 +252,10 @@ describe('Gateway app integration', () => {
     });
     const logoutRes = await gw.app.request(logoutReq);
     assert.equal(logoutRes.status, 403);
-    const body = (await logoutRes.json()) as { code: string };
+    const body = (await logoutRes.json()) as { ok: boolean; code: string; category: string };
+    assert.equal(body.ok, false);
     assert.equal(body.code, 'CSRF_INVALID');
+    assert.equal(body.category, 'validation');
   });
 
   it('POST /auth/logout with wrong CSRF token returns 403', async () => {
@@ -263,8 +267,10 @@ describe('Gateway app integration', () => {
     });
     const logoutRes = await gw.app.request(logoutReq);
     assert.equal(logoutRes.status, 403);
-    const body = (await logoutRes.json()) as { code: string };
+    const body = (await logoutRes.json()) as { ok: boolean; code: string; category: string };
+    assert.equal(body.ok, false);
     assert.equal(body.code, 'CSRF_INVALID');
+    assert.equal(body.category, 'validation');
   });
 
   // ── CSRF protection on /auth/reauth ─────────────────────────────────────
@@ -282,8 +288,10 @@ describe('Gateway app integration', () => {
     });
     const reauthRes = await gw.app.request(reauthReq);
     assert.equal(reauthRes.status, 403);
-    const body = (await reauthRes.json()) as { code: string };
+    const body = (await reauthRes.json()) as { ok: boolean; code: string; category: string };
+    assert.equal(body.ok, false);
     assert.equal(body.code, 'CSRF_INVALID');
+    assert.equal(body.category, 'validation');
   });
 
   it('POST /auth/reauth with valid CSRF token succeeds', async () => {
@@ -331,8 +339,10 @@ describe('Gateway app integration', () => {
     });
     const extendRes = await gw.app.request(extendReq);
     assert.equal(extendRes.status, 403);
-    const body = (await extendRes.json()) as { code: string };
+    const body = (await extendRes.json()) as { ok: boolean; code: string; category: string };
+    assert.equal(body.ok, false);
     assert.equal(body.code, 'CSRF_INVALID');
+    assert.equal(body.category, 'validation');
 
     // Activity must NOT have been refreshed
     const afterSession = gw.sessionService.store.get(cookies['__session'])!;
