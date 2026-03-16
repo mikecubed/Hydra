@@ -26,16 +26,31 @@ interface ZodLikeError {
 
 /**
  * Detect whether a Zod schema field is a numeric type (possibly wrapped in
- * optional, default, or nullable). Compatible with Zod v4's `def.type` API.
+ * optional, default, or nullable).
+ *
+ * Best-effort: Zod has no public field-kind introspection API, so we inspect
+ * internal `def` (Zod v4) or `_def` (Zod v3) shapes. We also support both
+ * `innerType` and `inner` keys for wrapped schemas since Zod versions differ.
+ * This may need updating if Zod changes its internal layout.
  */
 function isZodNumericType(schema: unknown): boolean {
   if (schema === null || typeof schema !== 'object') return false;
-  const def = (schema as Record<string, unknown>)['def'] as Record<string, unknown> | undefined;
+  const obj = schema as Record<string, unknown>;
+  const def = (obj['def'] ?? obj['_def']) as Record<string, unknown> | undefined;
   if (!def) return false;
-  const fieldType = def['type'] as string | undefined;
-  if (fieldType === 'number') return true;
-  if (fieldType === 'optional' || fieldType === 'default' || fieldType === 'nullable') {
-    return isZodNumericType(def['innerType']);
+  const fieldType = (def['type'] ?? def['typeName']) as string | undefined;
+  if (fieldType === 'number' || fieldType === 'ZodNumber') return true;
+  const wrapperTypes = [
+    'optional',
+    'default',
+    'nullable',
+    'ZodOptional',
+    'ZodDefault',
+    'ZodNullable',
+  ];
+  if (fieldType !== undefined && wrapperTypes.includes(fieldType)) {
+    const inner = def['innerType'] ?? def['inner'] ?? def['type_'];
+    return isZodNumericType(inner);
   }
   return false;
 }

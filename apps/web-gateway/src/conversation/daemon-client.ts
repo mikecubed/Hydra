@@ -78,9 +78,12 @@ export class DaemonClient {
 
   async resumeConversation(
     conversationId: string,
-    body: { conversationId: string; lastAcknowledgedSeq: number },
+    body: { lastAcknowledgedSeq: number },
   ): Promise<DaemonResult<ResumeConversationResponse>> {
-    return this.post(`/conversations/${encodeURIComponent(conversationId)}/resume`, body);
+    return this.post(`/conversations/${encodeURIComponent(conversationId)}/resume`, {
+      ...body,
+      conversationId,
+    });
   }
 
   async archiveConversation(
@@ -93,7 +96,7 @@ export class DaemonClient {
 
   async submitInstruction(
     conversationId: string,
-    body: { conversationId: string; instruction: string; metadata?: Record<string, unknown> },
+    body: { instruction: string; metadata?: Record<string, unknown> },
     opts?: { sessionId: string },
   ): Promise<DaemonResult<SubmitInstructionResponse>> {
     const extraHeaders: Record<string, string> = {};
@@ -102,7 +105,7 @@ export class DaemonClient {
     }
     return this.post(
       `/conversations/${encodeURIComponent(conversationId)}/turns`,
-      body,
+      { ...body, conversationId },
       extraHeaders,
     );
   }

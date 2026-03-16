@@ -4,7 +4,7 @@
  */
 import type { Context } from 'hono';
 import type { ContentfulStatusCode } from 'hono/utils/http-status';
-import type { GatewayError } from './errors.ts';
+import type { ErrorCode, GatewayError } from './errors.ts';
 import { createGatewayErrorResponse, type ErrorCategory } from './gateway-error-response.ts';
 
 export type GatewayEnv = {
@@ -17,7 +17,7 @@ export type GatewayEnv = {
 };
 
 /** Map GatewayError codes to their ErrorCategory for structured responses. */
-const ERROR_CODE_CATEGORY: Record<string, ErrorCategory> = {
+const ERROR_CODE_CATEGORY: Record<ErrorCode, ErrorCategory> = {
   INVALID_CREDENTIALS: 'auth',
   RATE_LIMITED: 'rate-limit',
   ACCOUNT_DISABLED: 'auth',
@@ -41,7 +41,7 @@ const ERROR_CODE_CATEGORY: Record<string, ErrorCategory> = {
 
 /** Return a structured GatewayErrorResponse JSON body from a GatewayError. */
 export function gatewayErrorResponse(c: Context, err: GatewayError): Response {
-  const category: ErrorCategory = ERROR_CODE_CATEGORY[err.code] ?? 'daemon';
+  const category: ErrorCategory = ERROR_CODE_CATEGORY[err.code];
   const body = createGatewayErrorResponse({
     code: err.code,
     category,

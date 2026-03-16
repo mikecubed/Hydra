@@ -347,7 +347,7 @@ describe('Conversation lifecycle routes (T010)', () => {
       assert.equal(res.status, 400);
     });
 
-    it('overwrites body conversationId with path param when they differ', async () => {
+    it('does not pass conversationId in body — client is path-authoritative (Issue 1 fix)', async () => {
       const res = await app.request(
         buildRequest('POST', '/conversations/path-id/resume', {
           body: JSON.stringify({ conversationId: 'body-id', lastAcknowledgedSeq: 3 }),
@@ -356,11 +356,12 @@ describe('Conversation lifecycle routes (T010)', () => {
       assert.equal(res.status, 200);
       const callArgs = mockClient.resumeConversation.mock.calls[0].arguments;
       assert.equal(callArgs[0], 'path-id', 'first arg (path) must be the path param');
-      const body = callArgs[1] as { conversationId: string };
+      const body = callArgs[1] as Record<string, unknown>;
+      assert.equal(body['lastAcknowledgedSeq'], 3);
       assert.equal(
-        body.conversationId,
-        'path-id',
-        'body.conversationId must be overwritten to path param',
+        'conversationId' in body,
+        false,
+        'body must not contain conversationId — the daemon client injects it from the path arg',
       );
     });
 
@@ -374,8 +375,7 @@ describe('Conversation lifecycle routes (T010)', () => {
       assert.equal(mockClient.resumeConversation.mock.callCount(), 1);
       const callArgs = mockClient.resumeConversation.mock.calls[0].arguments;
       assert.equal(callArgs[0], 'conv-1', 'first arg must be the path param');
-      const body = callArgs[1] as { conversationId: string; lastAcknowledgedSeq: number };
-      assert.equal(body.conversationId, 'conv-1', 'conversationId must be injected from path');
+      const body = callArgs[1] as { lastAcknowledgedSeq: number };
       assert.equal(body.lastAcknowledgedSeq, 7);
     });
   });
@@ -439,7 +439,7 @@ describe('Turn routes (T011)', () => {
       assert.equal(opts.sessionId, 'test-session-123');
     });
 
-    it('overwrites body conversationId with path param when they differ', async () => {
+    it('does not pass conversationId in body — client is path-authoritative (Issue 1 fix)', async () => {
       const res = await app.request(
         buildRequest('POST', '/conversations/path-conv/turns', {
           body: JSON.stringify({ conversationId: 'body-conv', instruction: 'do it' }),
@@ -448,11 +448,12 @@ describe('Turn routes (T011)', () => {
       assert.equal(res.status, 201);
       const callArgs = mockClient.submitInstruction.mock.calls[0].arguments;
       assert.equal(callArgs[0], 'path-conv', 'first arg must be path param');
-      const body = callArgs[1] as { conversationId: string };
+      const body = callArgs[1] as Record<string, unknown>;
+      assert.equal(body['instruction'], 'do it');
       assert.equal(
-        body.conversationId,
-        'path-conv',
-        'body.conversationId must be overwritten to path param',
+        'conversationId' in body,
+        false,
+        'body must not contain conversationId — the daemon client injects it from the path arg',
       );
     });
 
@@ -466,8 +467,7 @@ describe('Turn routes (T011)', () => {
       assert.equal(mockClient.submitInstruction.mock.callCount(), 1);
       const callArgs = mockClient.submitInstruction.mock.calls[0].arguments;
       assert.equal(callArgs[0], 'conv-1', 'first arg must be path param');
-      const body = callArgs[1] as { conversationId: string; instruction: string };
-      assert.equal(body.conversationId, 'conv-1', 'conversationId must be injected from path');
+      const body = callArgs[1] as { instruction: string };
       assert.equal(body.instruction, 'do something');
     });
   });

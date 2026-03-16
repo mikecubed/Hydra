@@ -119,7 +119,7 @@ function registerLifecycleRoutes(app: Hono<GatewayEnv>, dc: DaemonClient): void 
   app.post('/conversations/:id/resume', validateBody(ResumeConversationBody), async (c) => {
     const id = c.req.param('id');
     const body = c.get('validatedBody' as never) as ResumeConversationBody;
-    return handleResult(c, await dc.resumeConversation(id, { ...body, conversationId: id }));
+    return handleResult(c, await dc.resumeConversation(id, body));
   });
 
   app.post('/conversations/:id/archive', async (c) =>
@@ -132,11 +132,7 @@ function registerTurnRoutes(app: Hono<GatewayEnv>, dc: DaemonClient): void {
     const convId = c.req.param('convId');
     const sessionId = c.get('sessionId' as never) as string;
     const body = c.get('validatedBody' as never) as SubmitInstructionBody;
-    return handleResult(
-      c,
-      await dc.submitInstruction(convId, { ...body, conversationId: convId }, { sessionId }),
-      201,
-    );
+    return handleResult(c, await dc.submitInstruction(convId, body, { sessionId }), 201);
   });
 
   app.get('/conversations/:convId/turns', validateQuery(LoadTurnHistoryQuery), async (c) => {

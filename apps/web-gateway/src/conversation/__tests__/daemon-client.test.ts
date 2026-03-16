@@ -148,11 +148,23 @@ describe('DaemonClient', () => {
         Promise.resolve(okResponse({ conversation: {}, events: [], pendingApprovals: [] })),
       );
 
-      await client.resumeConversation('c1', { conversationId: 'c1', lastAcknowledgedSeq: 5 });
+      await client.resumeConversation('c1', { lastAcknowledgedSeq: 5 });
 
       const [url, opts] = fetchMock.mock.calls[0].arguments;
       assert.equal(url, `${baseUrl}/conversations/c1/resume`);
       assert.equal(opts?.method, 'POST');
+    });
+
+    it('injects path conversationId into daemon body — body cannot override (Issue 1 fix)', async () => {
+      fetchMock.mock.mockImplementation(() =>
+        Promise.resolve(okResponse({ conversation: {}, events: [], pendingApprovals: [] })),
+      );
+
+      await client.resumeConversation('path-id', { lastAcknowledgedSeq: 5 });
+
+      const opts = fetchMock.mock.calls[0].arguments[1];
+      const sentBody = JSON.parse(opts?.body as string) as { conversationId: string };
+      assert.equal(sentBody.conversationId, 'path-id');
     });
   });
 
@@ -177,13 +189,26 @@ describe('DaemonClient', () => {
       );
 
       await client.submitInstruction('c1', {
-        conversationId: 'c1',
         instruction: 'Do something',
       });
 
       const [url, opts] = fetchMock.mock.calls[0].arguments;
       assert.equal(url, `${baseUrl}/conversations/c1/turns`);
       assert.equal(opts?.method, 'POST');
+    });
+
+    it('injects path conversationId into daemon body — body cannot override (Issue 1 fix)', async () => {
+      fetchMock.mock.mockImplementation(() =>
+        Promise.resolve(okResponse({ turn: { id: 't1' }, streamId: 'stream-1' })),
+      );
+
+      await client.submitInstruction('path-id', {
+        instruction: 'Do something',
+      });
+
+      const opts = fetchMock.mock.calls[0].arguments[1];
+      const sentBody = JSON.parse(opts?.body as string) as { conversationId: string };
+      assert.equal(sentBody.conversationId, 'path-id');
     });
 
     it('forwards X-Session-Id header when sessionId is provided (Issue 1 regression)', async () => {
@@ -193,7 +218,7 @@ describe('DaemonClient', () => {
 
       await client.submitInstruction(
         'c1',
-        { conversationId: 'c1', instruction: 'Do something' },
+        { instruction: 'Do something' },
         { sessionId: 'sess-77' },
       );
 

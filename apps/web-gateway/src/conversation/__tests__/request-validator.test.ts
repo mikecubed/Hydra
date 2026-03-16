@@ -33,6 +33,46 @@ function buildRequest(
   });
 }
 
+type FakeIssue = { path: ReadonlyArray<PropertyKey>; message: string };
+
+function zodV4Number(): Record<string, unknown> {
+  return { def: { type: 'number' } };
+}
+
+function zodV4Optional(innerType: Record<string, unknown>): Record<string, unknown> {
+  return { def: { type: 'optional', innerType } };
+}
+
+function zodV4Nullable(innerType: Record<string, unknown>): Record<string, unknown> {
+  return { def: { type: 'nullable', innerType } };
+}
+
+function zodV3Default(inner: Record<string, unknown>): Record<string, unknown> {
+  return { _def: { typeName: 'ZodDefault', inner } };
+}
+
+function createFakeQuerySchema<T extends Record<string, unknown>>(options: {
+  shape: Record<string, unknown>;
+  parse: (
+    raw: Record<string, unknown>,
+  ) => { success: true; data: T } | { success: false; error: { issues: FakeIssue[] } };
+}): {
+  shape: Record<string, unknown>;
+  safeParse(
+    data: unknown,
+  ): { success: true; data: T } | { success: false; error: { issues: FakeIssue[] } };
+} {
+  return {
+    shape: options.shape,
+    safeParse(data: unknown) {
+      if (data === null || typeof data !== 'object') {
+        return { success: false, error: { issues: [{ path: [], message: 'expected object' }] } };
+      }
+      return options.parse(data as Record<string, unknown>);
+    },
+  };
+}
+
 describe('validateBody middleware', () => {
   it('passes valid CreateConversationRequest through', async () => {
     const app = new Hono();
@@ -201,5 +241,134 @@ describe('validateQuery middleware', () => {
     // limit should still be coerced to a number
     assert.equal(typeof body.parsed.limit, 'number');
     assert.equal(body.parsed.limit, 10);
+  });
+});
+
+describe('validateQuery numeric coercion — wrapper shapes (Issue 3 fix)', () => {
+  it('coerces Zod v4 optional-number wrapper fields from query strings', async () => {
+    const schema = createFakeQuerySchema<{ count?: number; name?: string }>({
+      shape: {
+        count: zodV4Optional(zodV4Number()),
+        name: { def: { type: 'string' } },
+      },
+      parse(raw) {
+        if (typeof raw['count'] !== 'number' || typeof raw['name'] !== 'string') {
+          return {
+            success: false,
+            error: { issues: [{ path: ['count'], message: 'count must be a number' }] },
+          };
+        }
+        return { success: true, data: { count: raw['count'], name: raw['name'] } };
+      },
+    });
+    const app = new Hono();
+    app.get('/test', validateQuery(schema), (c) => {
+      const parsed = c.get('validatedQuery' as never) as { count?: number; name?: string };
+      return c.json({ parsed });
+    });
+
+    const res = await app.request(buildRequest('GET', '/test?count=42&name=hello'));
+    assert.equal(res.status, 200);
+    const body = (await res.json()) as { parsed: { count: number; name: string } };
+    assert.equal(typeof body.parsed.count, 'number');
+    assert.equal(body.parsed.count, 42);
+    assert.equal(typeof body.parsed.name, 'string');
+    assert.equal(body.parsed.name, 'hello');
+  });
+
+  it('coerces Zod v4 nullable-number wrapper fields from query strings', async () => {
+    const schema = createFakeQuerySchema<{ offset: number | null }>({
+      shape: {
+        offset: zodV4Nullable(zodV4Number()),
+      },
+      parse(raw) {
+        if (typeof raw['offset'] !== 'number') {
+          return {
+            success: false,
+            error: { issues: [{ path: ['offset'], message: 'offset must be a number' }] },
+          };
+        }
+        return { success: true, data: { offset: raw['offset'] } };
+      },
+    });
+    const app = new Hono();
+    app.get('/test', validateQuery(schema), (c) => {
+      const parsed = c.get('validatedQuery' as never) as { offset: number | null };
+      return c.json({ parsed });
+    });
+
+    const res = await app.request(buildRequest('GET', '/test?offset=7'));
+    assert.equal(res.status, 200);
+    const body = (await res.json()) as { parsed: { offset: number } };
+    assert.equal(typeof body.parsed.offset, 'number');
+    assert.equal(body.parsed.offset, 7);
+  });
+
+  it('coerces Zod v3 default-number wrapper fields from query strings', async () => {
+    const schema = createFakeQuerySchema<{ page: number }>({
+      shape: {
+        page: zodV3Default(zodV4Number()),
+      },
+      parse(raw) {
+        const page = raw['page'] === undefined ? 1 : raw['page'];
+        if (typeof page !== 'number') {
+          return {
+            success: false,
+            error: { issues: [{ path: ['page'], message: 'page must be a number' }] },
+          };
+        }
+        return { success: true, data: { page } };
+      },
+    });
+    const app = new Hono();
+    app.get('/test', validateQuery(schema), (c) => {
+      const parsed = c.get('validatedQuery' as never) as { page: number };
+      return c.json({ parsed });
+    });
+
+    // Provided value
+    const res = await app.request(buildRequest('GET', '/test?page=3'));
+    assert.equal(res.status, 200);
+    const body = (await res.json()) as { parsed: { page: number } };
+    assert.equal(typeof body.parsed.page, 'number');
+    assert.equal(body.parsed.page, 3);
+
+    // Default kicks in
+    const res2 = await app.request(buildRequest('GET', '/test'));
+    assert.equal(res2.status, 200);
+    const body2 = (await res2.json()) as { parsed: { page: number } };
+    assert.equal(body2.parsed.page, 1);
+  });
+
+  it('does not coerce string fields even when they look numeric', async () => {
+    const schema = createFakeQuerySchema<{ token?: string; limit: number }>({
+      shape: {
+        token: { def: { type: 'string' } },
+        limit: zodV3Default(zodV4Number()),
+      },
+      parse(raw) {
+        const limit = raw['limit'] === undefined ? 10 : raw['limit'];
+        if (typeof raw['token'] !== 'string' || typeof limit !== 'number') {
+          return {
+            success: false,
+            error: { issues: [{ path: ['limit'], message: 'limit must be a number' }] },
+          };
+        }
+        return { success: true, data: { token: raw['token'], limit } };
+      },
+    });
+    const app = new Hono();
+    app.get('/test', validateQuery(schema), (c) => {
+      const parsed = c.get('validatedQuery' as never) as { token?: string; limit: number };
+      return c.json({ parsed });
+    });
+
+    const res = await app.request(buildRequest('GET', '/test?token=99999&limit=5'));
+    assert.equal(res.status, 200);
+    const body = (await res.json()) as { parsed: { token: string; limit: number } };
+    assert.equal(typeof body.parsed.token, 'string');
+    assert.equal(body.parsed.token, '99999');
+    assert.equal(typeof body.parsed.limit, 'number');
+    assert.equal(body.parsed.limit, 5);
   });
 });
