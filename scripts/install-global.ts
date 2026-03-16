@@ -6,7 +6,8 @@
  *   2. Installs that specific file globally.
  *   3. Cleans up the tarball in a finally-style block (even on failure).
  *
- * Uses spawnSync with args-array for Windows-safe arg handling (no shell interpolation).
+ * Uses spawnSync with args-array and platform-resolved binary (npm.cmd on
+ * Windows) so shell interpolation is never needed.
  */
 
 import { spawnSync, type SpawnSyncReturns } from 'node:child_process';
@@ -18,6 +19,9 @@ import { exit } from '../lib/hydra-process.ts';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(__dirname, '..');
+
+/** Resolve the platform-correct npm binary (npm.cmd on Windows). */
+const NPM = process.platform === 'win32' ? 'npm.cmd' : 'npm';
 
 /**
  * Run a command synchronously, returning trimmed stdout.
@@ -32,8 +36,6 @@ function run(
     cwd: opts.cwd,
     stdio: opts.stdio ?? 'pipe',
     encoding: 'utf8',
-    // Windows needs shell for npm (.cmd shim)
-    shell: process.platform === 'win32',
   });
   if (result.error) throw result.error;
   if (result.status !== 0) {
@@ -50,7 +52,7 @@ let exitCode = 0;
 
 try {
   console.log('[install:global] Packing tarball…');
-  const output = run('npm', ['pack'], { cwd: ROOT });
+  const output = run(NPM, ['pack'], { cwd: ROOT });
 
   // npm pack prints the filename on the last line of stdout
   const filename = output.split('\n').pop()?.trim();
@@ -66,7 +68,7 @@ try {
   }
 
   console.log(`[install:global] Installing ${filename} globally…`);
-  run('npm', ['install', '-g', tgzPath], { cwd: ROOT, stdio: 'inherit' });
+  run(NPM, ['install', '-g', tgzPath], { cwd: ROOT, stdio: 'inherit' });
   console.log('[install:global] Done.');
 } catch (err: unknown) {
   const message = err instanceof Error ? err.message : String(err);
