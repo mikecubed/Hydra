@@ -31,6 +31,8 @@ import type { Clock } from './shared/clock.ts';
 import { SystemClock } from './shared/clock.ts';
 import { createSourceKeyMiddleware, type SourceKeyConfig } from './security/source-key.ts';
 import { validateTlsConfig, isSecure, type TlsConfig } from './security/tls-guard.ts';
+import { DaemonClient, type DaemonClientOptions } from './conversation/daemon-client.ts';
+import { createConversationRoutes } from './conversation/conversation-routes.ts';
 
 export interface GatewayAppDeps {
   clock?: Clock;
@@ -45,6 +47,10 @@ export interface GatewayAppDeps {
   heartbeatConfig?: Partial<DaemonHeartbeatConfig>;
   sourceKeyConfig?: SourceKeyConfig;
   tlsConfig?: TlsConfig;
+  /** Daemon client options for conversation routes (FR-018). */
+  daemonClientOptions?: DaemonClientOptions;
+  /** Pre-built DaemonClient (for testing). Overrides daemonClientOptions. */
+  daemonClient?: DaemonClient;
 }
 
 export interface GatewayApp {
@@ -56,21 +62,52 @@ export interface GatewayApp {
   heartbeat: DaemonHeartbeat;
 }
 
+function resolveSecurityConfigs(deps: GatewayAppDeps): {
+  authRoutesConfig: AuthRoutesConfig;
+  headersConfig: HardenedHeadersConfig;
+} {
+  const secureCookies =
+    deps.authRoutesConfig?.secureCookies ?? (deps.tlsConfig ? isSecure(deps.tlsConfig) : false);
+  const tlsActive =
+    deps.hardenedHeadersConfig?.tlsActive ?? (deps.tlsConfig ? isSecure(deps.tlsConfig) : false);
+  return {
+    authRoutesConfig: { secureCookies },
+    headersConfig: { tlsActive },
+  };
+}
+
+function createProtectedAuthApp(
+  authService: AuthService,
+  sessionService: SessionService,
+  authRoutesConfig: AuthRoutesConfig,
+): Hono<GatewayEnv> {
+  const authRoutes = createAuthRoutes(authService, sessionService, authRoutesConfig);
+  const authApp = new Hono<GatewayEnv>();
+  authApp.use('/logout', createCsrfMiddleware());
+  authApp.use('/reauth', createCsrfMiddleware());
+  authApp.route('/', authRoutes);
+  return authApp;
+}
+
+function createProtectedRouteGroup(
+  child: Hono<GatewayEnv>,
+  sessionService: SessionService,
+  auditService: AuditService,
+): Hono<GatewayEnv> {
+  const protectedApp = new Hono<GatewayEnv>();
+  protectedApp.use('*', createAuthMiddleware(sessionService, auditService));
+  protectedApp.use('*', createCsrfMiddleware());
+  protectedApp.route('/', child);
+  return protectedApp;
+}
+
 export function createGatewayApp(deps: GatewayAppDeps = {}): GatewayApp {
   // TLS validation: non-loopback deployments require cert+key (FR-024)
   if (deps.tlsConfig) {
     validateTlsConfig(deps.tlsConfig);
   }
 
-  // Derive secureCookies from TLS config when not explicitly provided
-  const secureCookies =
-    deps.authRoutesConfig?.secureCookies ?? (deps.tlsConfig ? isSecure(deps.tlsConfig) : false);
-  const resolvedAuthRoutesConfig: AuthRoutesConfig = { secureCookies };
-
-  // Derive tlsActive for HSTS from TLS config when not explicitly provided
-  const tlsActive =
-    deps.hardenedHeadersConfig?.tlsActive ?? (deps.tlsConfig ? isSecure(deps.tlsConfig) : false);
-  const resolvedHeadersConfig: HardenedHeadersConfig = { tlsActive };
+  const resolvedConfigs = resolveSecurityConfigs(deps);
 
   const clock = deps.clock ?? new SystemClock();
   const sessionStore = deps.sessionStore ?? new SessionStore(null);
@@ -97,7 +134,7 @@ export function createGatewayApp(deps: GatewayAppDeps = {}): GatewayApp {
   app.use('*', createSourceKeyMiddleware(deps.sourceKeyConfig));
 
   // Global security headers
-  app.use('*', createHardenedHeaders(resolvedHeadersConfig));
+  app.use('*', createHardenedHeaders(resolvedConfigs.headersConfig));
 
   // Origin guard on all routes
   app.use('*', createOriginGuard(allowedOrigin));
@@ -106,20 +143,22 @@ export function createGatewayApp(deps: GatewayAppDeps = {}): GatewayApp {
   app.use('*', createMutatingRateLimiter(clock));
 
   // Auth routes — login is unauthenticated; logout/reauth need CSRF protection
-  const authRoutes = createAuthRoutes(authService, sessionService, resolvedAuthRoutesConfig);
-  const authApp = new Hono<GatewayEnv>();
-  authApp.use('/logout', createCsrfMiddleware());
-  authApp.use('/reauth', createCsrfMiddleware());
-  authApp.route('/', authRoutes);
-  app.route('/auth', authApp);
+  app.route(
+    '/auth',
+    createProtectedAuthApp(authService, sessionService, resolvedConfigs.authRoutesConfig),
+  );
 
   // Session routes (info/extend) — require valid session + CSRF
   const sessionRoutes = createSessionRoutes(sessionService);
-  const protectedSession = new Hono<GatewayEnv>();
-  protectedSession.use('*', createAuthMiddleware(sessionService, auditService));
-  protectedSession.use('*', createCsrfMiddleware());
-  protectedSession.route('/', sessionRoutes);
-  app.route('/session', protectedSession);
+  app.route('/session', createProtectedRouteGroup(sessionRoutes, sessionService, auditService));
+
+  // Conversation routes (T015, T015b) — require valid session + CSRF.
+  // Routes define their own paths: /conversations/*, /approvals/*, /turns/*, /artifacts/*
+  const daemonClient =
+    deps.daemonClient ??
+    new DaemonClient(deps.daemonClientOptions ?? { baseUrl: 'http://localhost:4173' });
+  const conversationRoutes = createConversationRoutes(daemonClient);
+  app.route('/', createProtectedRouteGroup(conversationRoutes, sessionService, auditService));
 
   return { app, sessionService, authService, auditService, operatorStore, heartbeat };
 }

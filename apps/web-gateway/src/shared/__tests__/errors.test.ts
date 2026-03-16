@@ -33,6 +33,11 @@ describe('createError', () => {
     'CLOCK_UNRELIABLE',
     'CSRF_INVALID',
     'ORIGIN_REJECTED',
+    'CONVERSATION_NOT_FOUND',
+    'TURN_NOT_FOUND',
+    'VALIDATION_FAILED',
+    'WS_INVALID_MESSAGE',
+    'WS_BUFFER_OVERFLOW',
   ];
 
   for (const code of allCodes) {
@@ -53,7 +58,7 @@ describe('createError', () => {
 describe('ERROR_STATUS_MAP', () => {
   it('maps all codes to HTTP status codes', () => {
     const codes = Object.keys(ERROR_STATUS_MAP);
-    assert.equal(codes.length, 14);
+    assert.equal(codes.length, 19);
     for (const code of codes) {
       const status = ERROR_STATUS_MAP[code as ErrorCode];
       assert.ok(status >= 400 && status < 600, `${code} should map to a 4xx/5xx status`);
