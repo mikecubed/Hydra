@@ -1,9 +1,66 @@
-import { describe, it, beforeEach } from 'node:test';
+import { describe, it, beforeEach, afterEach } from 'node:test';
 import assert from 'node:assert/strict';
-import { DaemonHeartbeat } from '../daemon-heartbeat.ts';
+import { DaemonHeartbeat, defaultHealthChecker } from '../daemon-heartbeat.ts';
 import { SessionService } from '../session-service.ts';
 import { SessionStore } from '../session-store.ts';
 import { FakeClock } from '../../shared/clock.ts';
+
+describe('defaultHealthChecker', () => {
+  let originalFetch: typeof globalThis.fetch;
+  let originalClearTimeout: typeof globalThis.clearTimeout;
+
+  beforeEach(() => {
+    originalFetch = globalThis.fetch;
+    originalClearTimeout = globalThis.clearTimeout;
+  });
+
+  afterEach(() => {
+    globalThis.fetch = originalFetch;
+    globalThis.clearTimeout = originalClearTimeout;
+  });
+
+  it('returns true when fetch responds with ok status', async () => {
+    globalThis.fetch = (async () => new Response('ok', { status: 200 })) as typeof fetch;
+    const result = await defaultHealthChecker('http://localhost:9999');
+    assert.equal(result, true);
+  });
+
+  it('returns false when fetch responds with non-ok status', async () => {
+    globalThis.fetch = (async () => new Response('err', { status: 503 })) as typeof fetch;
+    const result = await defaultHealthChecker('http://localhost:9999');
+    assert.equal(result, false);
+  });
+
+  it('returns false and clears timeout when fetch rejects', async () => {
+    let clearTimeoutCalled = false;
+    globalThis.clearTimeout = ((id: Parameters<typeof clearTimeout>[0]) => {
+      clearTimeoutCalled = true;
+      originalClearTimeout(id);
+    }) as typeof clearTimeout;
+
+    globalThis.fetch = (async () => {
+      throw new Error('connection refused');
+    }) as typeof fetch;
+
+    const result = await defaultHealthChecker('http://localhost:9999');
+    assert.equal(result, false);
+    assert.ok(clearTimeoutCalled, 'clearTimeout was not called on rejection path');
+  });
+
+  it('clears timeout on success path', async () => {
+    let clearTimeoutCalled = false;
+    globalThis.clearTimeout = ((id: Parameters<typeof clearTimeout>[0]) => {
+      clearTimeoutCalled = true;
+      originalClearTimeout(id);
+    }) as typeof clearTimeout;
+
+    globalThis.fetch = (async () => new Response('ok', { status: 200 })) as typeof fetch;
+
+    const result = await defaultHealthChecker('http://localhost:9999');
+    assert.equal(result, true);
+    assert.ok(clearTimeoutCalled, 'clearTimeout was not called on success path');
+  });
+});
 
 describe('DaemonHeartbeat', () => {
   let store: SessionStore;

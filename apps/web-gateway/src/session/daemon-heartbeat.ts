@@ -20,16 +20,17 @@ export type HealthChecker = (url: string) => Promise<boolean>;
 
 /** Default production health checker — pings the daemon's /status endpoint. */
 export const defaultHealthChecker: HealthChecker = async (url: string): Promise<boolean> => {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => {
+    controller.abort();
+  }, 5_000);
   try {
-    const controller = new AbortController();
-    const timeout = setTimeout(() => {
-      controller.abort();
-    }, 5_000);
     const res = await fetch(`${url}/status`, { signal: controller.signal });
-    clearTimeout(timeout);
     return res.ok;
   } catch {
     return false;
+  } finally {
+    clearTimeout(timeout);
   }
 };
 
