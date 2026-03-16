@@ -214,18 +214,19 @@ When multiple tracks are ready:
 
 If two tracks drift on a shared interface, stop and reconcile before proceeding.
 
-### 7. Final review and final validation
+### 7. Final review, validation, and PR-readiness gate
 
 After the feature branch contains the merged track work:
 
-1. run a final **GPT-5.4** review over the combined feature-branch diff;
-2. verify:
+1. verify:
    - merged behavior is coherent;
    - no cross-track regressions were introduced;
    - track boundaries did not leave duplicate helpers or dead wiring behind;
    - required docs and task-state updates are present.
-3. run the repo’s quality gates;
-4. push the final feature branch state;
+2. run the repo’s quality gates;
+3. push the final feature branch state;
+4. invoke `final-pr-readiness-gate` on the stable integrated diff before handing off for human
+   review;
 5. clean up merged or abandoned track worktrees once their work is safely integrated or explicitly
    retired;
 6. summarize any remaining issues so the developer can decide whether to continue or stop.
@@ -269,7 +270,7 @@ A batch of tracks is not complete until all are true:
 - integration behavior still works;
 - repo-level quality commands pass;
 - no duplicated helpers or parallel-track drift remains;
-- final combined review is clean or any remaining issues are explicitly reported;
+- `final-pr-readiness-gate` has been run on the stable integrated diff;
 - final feature branch state has been pushed.
 
 ## Quality Gates

@@ -195,31 +195,27 @@ After each fix or decline:
 
 Do not leave silent declines.
 
-### 7. Final PR-wide review
+### 7. Final validation and readiness gate
 
 After all comment threads are handled:
 
-1. run a final **GPT-5.4 review subagent** over the entire PR diff, not just the latest fixes;
-2. look for:
-   - new regressions introduced while resolving comments;
-   - incomplete thread handling;
-   - cross-fix inconsistencies;
-   - missing integration tests;
-   - architectural drift.
+1. run the repo’s actual quality gates on the integrated branch;
+2. ensure linting, formatting, type-checking, and tests pass;
+3. push or prepare the branch so the integrated PR diff is stable;
+4. invoke `final-pr-readiness-gate` on the stable PR diff;
+5. use its Codex findings and final GPT review to decide whether one more targeted fix pass is
+   needed.
 
-If needed, do one final targeted fix pass.
-
-### 8. Final validation, push, and report
+### 8. Final push and report
 
 Before concluding:
 
-1. run the repo’s actual quality gates;
-2. ensure linting, formatting, type-checking, and tests pass;
-3. verify any newly introduced behavior has appropriate tests;
-4. push the updated working branch;
-5. verify the PR reflects the latest comment-resolution work;
-6. make sure thread replies and resolutions are not stranded locally in an unpushed state;
-7. summarize remaining concerns, if any, so the developer can decide whether to continue or stop.
+1. if the readiness gate or any final fix changed the branch again, rerun the repo quality gates;
+2. verify any newly introduced behavior has appropriate tests;
+3. push the updated working branch;
+4. verify the PR reflects the latest comment-resolution work;
+5. make sure thread replies and resolutions are not stranded locally in an unpushed state;
+6. summarize remaining concerns, if any, so the developer can decide whether to continue or stop.
 
 ## Required Gates
 
@@ -249,7 +245,7 @@ A fix is not complete until:
 The PR resolution batch is not complete until:
 
 - all relevant comments are handled;
-- final PR-wide review is clean;
+- `final-pr-readiness-gate` has been run on the stable PR diff;
 - repo quality gates pass;
 - branch has been pushed;
 - any remaining issues are explicitly reported.
