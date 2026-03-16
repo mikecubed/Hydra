@@ -36,19 +36,19 @@
 
 _Shared plumbing that every subsequent phase imports. No external dependencies._
 
-- [ ] T001 [P1] [US6] **TDD: `GatewayErrorResponse` type and `ErrorCategory` enum** — define the five-category structured error shape (`auth`, `session`, `validation`, `daemon`, `rate-limit`) and extend `ErrorCode` union with conversation codes (`CONVERSATION_NOT_FOUND`, `TURN_NOT_FOUND`, `VALIDATION_FAILED`, `WS_INVALID_MESSAGE`, `WS_BUFFER_OVERFLOW`). Write tests asserting category discrimination, `ok: false` literal, and optional fields (`conversationId`, `turnId`, `retryAfterMs`). Implement `apps/web-gateway/src/shared/gateway-error-response.ts`. Extend `apps/web-gateway/src/shared/errors.ts` with new error codes.
+- [x] T001 [P1] [US6] **TDD: `GatewayErrorResponse` type and `ErrorCategory` enum** — define the five-category structured error shape (`auth`, `session`, `validation`, `daemon`, `rate-limit`) and extend `ErrorCode` union with conversation codes (`CONVERSATION_NOT_FOUND`, `TURN_NOT_FOUND`, `VALIDATION_FAILED`, `WS_INVALID_MESSAGE`, `WS_BUFFER_OVERFLOW`). Write tests asserting category discrimination, `ok: false` literal, and optional fields (`conversationId`, `turnId`, `retryAfterMs`). Implement `apps/web-gateway/src/shared/gateway-error-response.ts`. Extend `apps/web-gateway/src/shared/errors.ts` with new error codes.
   - **Depends**: —
   - **Validates**: FR-026, FR-027
 
-- [ ] T002 [P1] [US6] **TDD: `response-translator.ts`** — translate daemon HTTP responses (status codes, `ErrorResponse` bodies from `@hydra/web-contracts`) into `GatewayErrorResponse`. Map every daemon error code to the correct gateway category. Translate fetch failures (network error, timeout) into `{ category: 'daemon', code: 'DAEMON_UNREACHABLE' }`. Write tests for each daemon error code mapping and for daemon-unreachable path. Implement `apps/web-gateway/src/conversation/response-translator.ts`.
+- [x] T002 [P1] [US6] **TDD: `response-translator.ts`** — translate daemon HTTP responses (status codes, `ErrorResponse` bodies from `@hydra/web-contracts`) into `GatewayErrorResponse`. Map every daemon error code to the correct gateway category. Translate fetch failures (network error, timeout) into `{ category: 'daemon', code: 'DAEMON_UNREACHABLE' }`. Write tests for each daemon error code mapping and for daemon-unreachable path. Implement `apps/web-gateway/src/conversation/response-translator.ts`.
   - **Depends**: T001
   - **Validates**: FR-028
 
-- [ ] T003 [P1] [US1, US4] **TDD: `daemon-client.ts`** — typed HTTP client wrapping `fetch()` for all daemon conversation endpoints (19 routes: lifecycle, turns, approvals, work control, artifacts, activities, **plus the per-turn stream replay route** `GET /conversations/:convId/turns/:turnId/stream?lastAcknowledgedSeq=N`). The stream replay method is critical for reconnect — it is the daemon-side surface that T032's fallback path consumes. Each method accepts validated request params, calls the daemon, and returns parsed response or translated `GatewayErrorResponse`. Include configurable timeout (default 5s). Write tests with stubbed `fetch` covering success, daemon 4xx/5xx, timeout, and network failure for representative endpoints **including the stream replay route**. Implement `apps/web-gateway/src/conversation/daemon-client.ts`.
+- [x] T003 [P1] [US1, US4] **TDD: `daemon-client.ts`** — typed HTTP client wrapping `fetch()` for all daemon conversation endpoints (19 routes: lifecycle, turns, approvals, work control, artifacts, activities, **plus the per-turn stream replay route** `GET /conversations/:convId/turns/:turnId/stream?lastAcknowledgedSeq=N`). The stream replay method is critical for reconnect — it is the daemon-side surface that T032's fallback path consumes. Each method accepts validated request params, calls the daemon, and returns parsed response or translated `GatewayErrorResponse`. Include configurable timeout (default 5s). Write tests with stubbed `fetch` covering success, daemon 4xx/5xx, timeout, and network failure for representative endpoints **including the stream replay route**. Implement `apps/web-gateway/src/conversation/daemon-client.ts`.
   - **Depends**: T001, T002
   - **Validates**: FR-018, FR-019, FR-022
 
-- [ ] T004 [P1] [US1, US6] **Quality gate: Phase 0** — run `npm run quality` and `npm test` from monorepo root. Confirm zero regressions, TypeScript strict passes, lint clean.
+- [x] T004 [P1] [US1, US6] **Quality gate: Phase 0** — run `npm run quality` and `npm test` from monorepo root. Confirm zero regressions, TypeScript strict passes, lint clean.
   - **Depends**: T001, T002, T003
   - **Validates**: SC-011
 
@@ -59,19 +59,19 @@ _Shared plumbing that every subsequent phase imports. No external dependencies._
 _Minimal daemon change enabling push delivery. Must land before any gateway
 streaming code. Existing daemon tests must remain green._
 
-- [ ] T005 [P1] [US2] **TDD: `event-bridge.ts`** — typed `EventEmitter` wrapper emitting `stream-event` with `{ conversationId: string, event: StreamEvent }` payload. Write tests asserting: events emitted with correct shape, multiple listeners receive the same event, `removeListener`/`removeAllListeners` stops delivery, no event leaks after cleanup. Implement `lib/daemon/event-bridge.ts`. Tests in `test/event-bridge.test.ts`.
+- [x] T005 [P1] [US2] **TDD: `event-bridge.ts`** — typed `EventEmitter` wrapper emitting `stream-event` with `{ conversationId: string, event: StreamEvent }` payload. Write tests asserting: events emitted with correct shape, multiple listeners receive the same event, `removeListener`/`removeAllListeners` stops delivery, no event leaks after cleanup. Implement `lib/daemon/event-bridge.ts`. Tests in `test/event-bridge.test.ts`.
   - **Depends**: —
   - **Validates**: FR-020
 
-- [ ] T006 [P1] [US2] **TDD: Amend `StreamManager` to emit through event bridge** — add optional `EventBridge` injection to `StreamManager` constructor (default: no-op). After every `state.events.push(event)` in `createStream()`, `emitEvent()`, `completeStream()`, `failStream()`, `cancelStream()`: emit through the bridge with `{ conversationId, event }` (requires `ConversationStore.getTurn(turnId).conversationId` lookup or passing conversationId through stream state). Write tests asserting bridge emission for each event-producing method, including terminal events. Amend `lib/daemon/stream-manager.ts`. Tests in `test/event-bridge.test.ts` or co-located.
+- [x] T006 [P1] [US2] **TDD: Amend `StreamManager` to emit through event bridge** — add optional `EventBridge` injection to `StreamManager` constructor (default: no-op). After every `state.events.push(event)` in `createStream()`, `emitEvent()`, `completeStream()`, `failStream()`, `cancelStream()`: emit through the bridge with `{ conversationId, event }` (requires `ConversationStore.getTurn(turnId).conversationId` lookup or passing conversationId through stream state). Write tests asserting bridge emission for each event-producing method, including terminal events. Amend `lib/daemon/stream-manager.ts`. Tests in `test/event-bridge.test.ts` or co-located.
   - **Depends**: T005
   - **Validates**: FR-020, SC-012
 
-- [ ] T007 [P1] [US2] **Verify zero daemon regressions** — run the full daemon test suite: `test/conversation-routes.test.ts`, `test/conversation-store.test.ts`, `test/conversation-executor.test.ts`, `test/conversation-protocol.integration.test.ts`, `test/stream-manager.test.ts`. All must pass unchanged. The bridge injection is optional so existing tests that don't inject a bridge are unaffected.
+- [x] T007 [P1] [US2] **Verify zero daemon regressions** — run the full daemon test suite: `test/conversation-routes.test.ts`, `test/conversation-store.test.ts`, `test/conversation-executor.test.ts`, `test/conversation-protocol.integration.test.ts`, `test/stream-manager.test.ts`. All must pass unchanged. The bridge injection is optional so existing tests that don't inject a bridge are unaffected.
   - **Depends**: T006
   - **Validates**: SC-011, SC-012
 
-- [ ] T008 [P1] [US2] **Quality gate: Phase 1** — `npm run quality` and `npm test` from monorepo root. Zero regressions.
+- [x] T008 [P1] [US2] **Quality gate: Phase 1** — `npm run quality` and `npm test` from monorepo root. Zero regressions.
   - **Depends**: T007
   - **Validates**: SC-011
 
@@ -82,39 +82,39 @@ streaming code. Existing daemon tests must remain green._
 _REST mediation layer. Delivers US1 (P1). Every route: authenticate → validate →
 mediate → translate → respond._
 
-- [ ] T009 [P1] [US1] **TDD: `request-validator.ts`** — Hono middleware that runs Zod `.safeParse()` on request bodies/query params against the appropriate `@hydra/web-contracts` schema. Returns `GatewayErrorResponse` with `category: 'validation'` and HTTP 400 on failure. Write tests for valid and invalid payloads for representative contracts (CreateConversationRequest, SubmitInstructionRequest, RespondToApprovalRequest). Implement `apps/web-gateway/src/conversation/request-validator.ts`.
+- [x] T009 [P1] [US1] **TDD: `request-validator.ts`** — Hono middleware that runs Zod `.safeParse()` on request bodies/query params against the appropriate `@hydra/web-contracts` schema. Returns `GatewayErrorResponse` with `category: 'validation'` and HTTP 400 on failure. Write tests for valid and invalid payloads for representative contracts (CreateConversationRequest, SubmitInstructionRequest, RespondToApprovalRequest). Implement `apps/web-gateway/src/conversation/request-validator.ts`.
   - **Depends**: T001
   - **Validates**: FR-006, SC-008
 
-- [ ] T010 [P1] [US1] **TDD: Conversation lifecycle routes** — `POST /conversations`, `GET /conversations`, `GET /conversations/:id`, `POST /conversations/:id/resume`, `POST /conversations/:id/archive`. Each test creates a gateway app, sends requests with/without valid sessions, asserts correct daemon mediation via `daemon-client` and response shapes conforming to `@hydra/web-contracts`. Implement `apps/web-gateway/src/conversation/conversation-routes.ts` (lifecycle section).
+- [x] T010 [P1] [US1] **TDD: Conversation lifecycle routes** — `POST /conversations`, `GET /conversations`, `GET /conversations/:id`, `POST /conversations/:id/resume`, `POST /conversations/:id/archive`. Each test creates a gateway app, sends requests with/without valid sessions, asserts correct daemon mediation via `daemon-client` and response shapes conforming to `@hydra/web-contracts`. Implement `apps/web-gateway/src/conversation/conversation-routes.ts` (lifecycle section).
   - **Depends**: T003, T009
   - **Validates**: FR-001, FR-007
 
-- [ ] T011 [P1] [US1] **TDD: Turn submission and history routes** — `POST /conversations/:convId/turns`, `GET /conversations/:convId/turns`. Tests assert instruction submission mediates to daemon, turn history returns paginated results, session-to-operator mapping is passed via `X-Session-Id` header. Implement in `apps/web-gateway/src/conversation/conversation-routes.ts` (turns section).
+- [x] T011 [P1] [US1] **TDD: Turn submission and history routes** — `POST /conversations/:convId/turns`, `GET /conversations/:convId/turns`. Tests assert instruction submission mediates to daemon, turn history returns paginated results, session-to-operator mapping is passed via `X-Session-Id` header. Implement in `apps/web-gateway/src/conversation/conversation-routes.ts` (turns section).
   - **Depends**: T003, T009
   - **Validates**: FR-002, FR-007
 
-- [ ] T012 [P2] [US5] **TDD: Approval routes** — `GET /conversations/:convId/approvals`, `POST /approvals/:approvalId/respond`. Tests assert session validation and that mediated approval calls preserve daemon context correctly: operator identity on approval routes, and `X-Session-Id`/session identity on `POST /approvals/:approvalId/respond` for daemon-side conflict attribution. Implement in `apps/web-gateway/src/conversation/conversation-routes.ts` (approvals section).
+- [x] T012 [P2] [US5] **TDD: Approval routes** — `GET /conversations/:convId/approvals`, `POST /approvals/:approvalId/respond`. Tests assert session validation and that mediated approval calls preserve daemon context correctly: operator identity on approval routes, and `X-Session-Id`/session identity on `POST /approvals/:approvalId/respond` for daemon-side conflict attribution. Implement in `apps/web-gateway/src/conversation/conversation-routes.ts` (approvals section).
   - **Depends**: T003, T009
   - **Validates**: FR-003
 
-- [ ] T013 [P2] [US5] **TDD: Work control routes** — `POST /conversations/:convId/turns/:turnId/cancel`, `POST /conversations/:convId/turns/:turnId/retry`. Tests assert mediation and correct daemon endpoint targeting. Implement in `apps/web-gateway/src/conversation/conversation-routes.ts` (work-control section).
+- [x] T013 [P2] [US5] **TDD: Work control routes** — `POST /conversations/:convId/turns/:turnId/cancel`, `POST /conversations/:convId/turns/:turnId/retry`. Tests assert mediation and correct daemon endpoint targeting. Implement in `apps/web-gateway/src/conversation/conversation-routes.ts` (work-control section).
   - **Depends**: T003, T009
   - **Validates**: FR-004
 
-- [ ] T014 [P1] [US1] **TDD: Artifact and activity routes** — `GET /turns/:turnId/artifacts`, `GET /conversations/:convId/artifacts`, `GET /artifacts/:artifactId`, `GET /turns/:turnId/activities`. Tests assert correct path mapping and response forwarding. Implement in `apps/web-gateway/src/conversation/conversation-routes.ts` (artifacts/activities section).
+- [x] T014 [P1] [US1] **TDD: Artifact and activity routes** — `GET /turns/:turnId/artifacts`, `GET /conversations/:convId/artifacts`, `GET /artifacts/:artifactId`, `GET /turns/:turnId/activities`. Tests assert correct path mapping and response forwarding. Implement in `apps/web-gateway/src/conversation/conversation-routes.ts` (artifacts/activities section).
   - **Depends**: T003, T009
   - **Validates**: FR-005
 
-- [ ] T015 [P1] [US1] **Wire P1 conversation routes into `createGatewayApp`** — add `conversation/` routes under a protected sub-router with `createAuthMiddleware` + `createCsrfMiddleware` (same pattern as `/session` routes in `apps/web-gateway/src/index.ts`). Wire lifecycle (T010), turn (T011), and artifact/activity (T014) routes. Confirm all wired routes require authenticated sessions. Update `apps/web-gateway/src/index.ts`.
+- [x] T015 [P1] [US1] **Wire P1 conversation routes into `createGatewayApp`** — add `conversation/` routes under a protected sub-router with `createAuthMiddleware` + `createCsrfMiddleware` (same pattern as `/session` routes in `apps/web-gateway/src/index.ts`). Wire lifecycle (T010), turn (T011), and artifact/activity (T014) routes. Confirm all wired routes require authenticated sessions. Update `apps/web-gateway/src/index.ts`.
   - **Depends**: T010, T011, T014
   - **Validates**: FR-007, FR-017
 
-- [ ] T015b [P2] [US5] **Wire approval & work-control routes into gateway app** — extend the conversation sub-router created in T015 with approval (T012) and work-control (T013) routes under the same auth/CSRF middleware. Update `apps/web-gateway/src/index.ts`.
+- [x] T015b [P2] [US5] **Wire approval & work-control routes into gateway app** — extend the conversation sub-router created in T015 with approval (T012) and work-control (T013) routes under the same auth/CSRF middleware. Update `apps/web-gateway/src/index.ts`.
   - **Depends**: T015, T012, T013
   - **Validates**: FR-003, FR-004, FR-017
 
-- [ ] T016 [P1] [US1] **Quality gate: Phase 2** — `npm run quality` and `npm test` from monorepo root. Verify REST mediation is end-to-end functional for P1 lifecycle, turn, and artifact routes (approval & work-control routes land in Phase 6 via T015b).
+- [x] T016 [P1] [US1] **Quality gate: Phase 2** — `npm run quality` and `npm test` from monorepo root. Verify REST mediation is end-to-end functional for P1 lifecycle, turn, and artifact routes (approval & work-control routes land in Phase 6 via T015b).
   - **Depends**: T015
   - **Validates**: SC-001 (REST path), SC-004, SC-008, SC-011
 
