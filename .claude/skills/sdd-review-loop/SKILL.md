@@ -22,16 +22,15 @@ The default pairing is:
 You may swap roles if the user asks, but the key rule is: **generator and reviewer should be
 different models**.
 
-## Activation Triggers
+## Invocation Model
 
-Activate this skill when the user asks for things like:
+- `sdd-review-trigger` is the normal entrypoint for this workflow.
+- This skill should usually run only when:
+  - `sdd-review-trigger` explicitly escalates into it; or
+  - the developer invokes `sdd-review-loop` directly on purpose.
+- Do **not** compete with `sdd-review-trigger` for the same natural-language activation phrases.
 
-- "use subagents to spec/plan/tasks this"
-- "have Opus draft it and GPT review it"
-- "iterate on the SDD until it is solid"
-- "generate the spec and have another model critique it"
-- "review and revise the SDD package"
-- "use multi-model review for the plan/tasks"
+If this skill is invoked directly, treat that as an explicit request for the heavy review loop.
 
 ## Workflow
 
@@ -149,6 +148,30 @@ Use explicit stop conditions to avoid infinite loops.
   3. narrower scope.
 - If unresolved disagreement remains, summarize it clearly instead of looping forever.
 
+## Terminal Outcomes
+
+Every artifact must end in one of these explicit states:
+
+1. **accepted**
+   - the gate passed and the workflow can advance;
+2. **accepted with noted follow-ups**
+   - the gate passed, but low-priority follow-ups or future clarifications were recorded;
+3. **blocked and handed back**
+   - the review/revision cap was reached and the artifact still fails its gate;
+4. **stopped by user**
+   - the developer chose to stop after seeing the remaining issues.
+
+If an artifact is **blocked and handed back**, do all of the following before stopping:
+
+- state which gate still fails;
+- list the substantive unresolved issues only;
+- say whether the best next move is:
+  - continue another loop,
+  - narrow scope,
+  - revise the baseline assumptions,
+  - or split the slice;
+- do **not** silently continue into the next SDD stage.
+
 ## Common Failure Modes
 
 Watch for these repeatedly:
@@ -219,6 +242,11 @@ A successful run of this skill should leave behind:
 - a reviewed `plan.md` plus any supporting artifacts;
 - a reviewed, dependency-ordered `tasks.md`;
 - updated roadmap docs if the reviewed result changes the intended sequence or boundaries.
+- a short final synthesis that states:
+  - which artifacts were accepted;
+  - which issues were resolved during review;
+  - which issues remain, if any;
+  - whether the package is ready to implement or needs another directed pass.
 
 ## Final Guidance
 

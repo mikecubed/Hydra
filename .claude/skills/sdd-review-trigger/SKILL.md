@@ -12,6 +12,9 @@ This skill should stay lightweight:
 - keep simple features on the normal `/sdd.specify` → `/sdd.plan` → `/sdd.tasks` path;
 - route high-risk or explicitly multi-model requests into `sdd-review-loop`.
 
+This is the **primary natural-language entrypoint** for SDD review escalation. The heavy
+`sdd-review-loop` should not compete with it for the same activation phrases.
+
 ## Activation Triggers
 
 Activate when the user asks for things like:
@@ -54,17 +57,23 @@ When triggered:
 
 1. Quickly classify the request as **simple** or **high-risk**.
 2. If it is **simple**, continue with the standard SDD workflow.
-3. If it is **high-risk** or the user explicitly asked for multi-model review:
-   - recommend or invoke `sdd-review-loop`;
+3. If the user explicitly asked for multiple models, subagents, cross-checking, or a review/revise
+   loop:
+   - invoke `sdd-review-loop` directly;
    - preserve the user's requested model roles if they specified them;
    - otherwise default to:
-     - Opus 4.6 for generation/revision
-     - GPT-5.4 for review
-4. Keep the escalation reason explicit:
-   - "foundational slice"
-   - "cross-cutting boundary risk"
-   - "explicit multi-model request"
-   - "needs repo-grounded review loop"
+      - Opus 4.6 for generation/revision
+      - GPT-5.4 for review
+4. If the request is auto-classified as **high-risk** but the user did not explicitly ask for the
+   heavier flow:
+   - recommend escalation to `sdd-review-loop`;
+   - explain the risk briefly;
+   - wait for the developer to confirm before invoking the heavier loop.
+5. Keep the escalation reason explicit:
+    - "foundational slice"
+    - "cross-cutting boundary risk"
+    - "explicit multi-model request"
+    - "needs repo-grounded review loop"
 
 ## Guidance
 
@@ -96,4 +105,5 @@ risk of:
 
 - `sdd-feature-workflow` is the lightweight entrypoint that recommends starting with `/sdd.specify`.
 - `sdd-review-trigger` decides whether the request should stay lightweight or be escalated.
-- `sdd-review-loop` contains the heavy multi-model generate-review-revise workflow.
+- `sdd-review-loop` contains the heavy multi-model generate-review-revise workflow and should be
+  called by this trigger when escalation is chosen.
