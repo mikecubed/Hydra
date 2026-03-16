@@ -20,8 +20,8 @@ import type { GatewayEnv } from '../shared/types.ts';
 import {
   CreateConversationRequest,
   ListConversationsRequest,
-  ResumeConversationRequest,
-  SubmitInstructionRequest,
+  ResumeConversationBody,
+  SubmitInstructionBody,
   LoadTurnHistoryRequest,
   RespondToApprovalRequest,
   ListArtifactsForConversationRequest,
@@ -34,7 +34,7 @@ import {
   type GatewayErrorResponse,
 } from '../shared/gateway-error-response.ts';
 
-// Query-only schemas: omit fields that come from URL path params
+// Path-param schemas: omit fields that come from URL path params (path is authoritative)
 const LoadTurnHistoryQuery = LoadTurnHistoryRequest.omit({ conversationId: true });
 const ListArtifactsForConversationQuery = ListArtifactsForConversationRequest.omit({
   conversationId: true,
@@ -116,10 +116,10 @@ function registerLifecycleRoutes(app: Hono<GatewayEnv>, dc: DaemonClient): void 
     handleResult(c, await dc.openConversation(c.req.param('id'))),
   );
 
-  app.post('/conversations/:id/resume', validateBody(ResumeConversationRequest), async (c) => {
+  app.post('/conversations/:id/resume', validateBody(ResumeConversationBody), async (c) => {
     const id = c.req.param('id');
-    const body = c.get('validatedBody' as never) as ResumeConversationRequest;
-    return handleResult(c, await dc.resumeConversation(id, body));
+    const body = c.get('validatedBody' as never) as ResumeConversationBody;
+    return handleResult(c, await dc.resumeConversation(id, { ...body, conversationId: id }));
   });
 
   app.post('/conversations/:id/archive', async (c) =>
@@ -128,11 +128,15 @@ function registerLifecycleRoutes(app: Hono<GatewayEnv>, dc: DaemonClient): void 
 }
 
 function registerTurnRoutes(app: Hono<GatewayEnv>, dc: DaemonClient): void {
-  app.post('/conversations/:convId/turns', validateBody(SubmitInstructionRequest), async (c) => {
+  app.post('/conversations/:convId/turns', validateBody(SubmitInstructionBody), async (c) => {
     const convId = c.req.param('convId');
     const sessionId = c.get('sessionId' as never) as string;
-    const body = c.get('validatedBody' as never) as SubmitInstructionRequest;
-    return handleResult(c, await dc.submitInstruction(convId, body, { sessionId }), 201);
+    const body = c.get('validatedBody' as never) as SubmitInstructionBody;
+    return handleResult(
+      c,
+      await dc.submitInstruction(convId, { ...body, conversationId: convId }, { sessionId }),
+      201,
+    );
   });
 
   app.get('/conversations/:convId/turns', validateQuery(LoadTurnHistoryQuery), async (c) => {

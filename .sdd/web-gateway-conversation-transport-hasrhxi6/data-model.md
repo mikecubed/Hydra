@@ -115,13 +115,13 @@ Structured error shape for all gateway error responses (REST JSON bodies and Web
 
 **ErrorCategory Enum**:
 
-| Category       | Meaning                                                      | HTTP Status | Browser Action                             |
-| -------------- | ------------------------------------------------------------ | ----------- | ------------------------------------------ |
-| `'auth'`       | Authentication failure (invalid credentials, no session)     | 401         | Redirect to login                          |
-| `'session'`    | Session lifecycle problem (expired, invalidated, logged-out) | 401         | Prompt re-auth or redirect                 |
-| `'validation'` | Request payload failed schema validation                     | 400         | Fix request and retry                      |
-| `'daemon'`     | Daemon is unreachable or returned an internal error          | 503         | Show daemon-unavailable state, retry later |
-| `'rate-limit'` | Rate limit exceeded                                          | 429         | Wait `retryAfterMs`, then retry            |
+| Category       | Meaning                                                   | HTTP Status                                              | Browser Action                             |
+| -------------- | --------------------------------------------------------- | -------------------------------------------------------- | ------------------------------------------ |
+| `'auth'`       | Authentication failure (invalid credentials, no session)  | 401                                                      | Redirect to login                          |
+| `'session'`    | Session state conflict (concurrent edit, archived, stale) | 400 / 409 / 410 (varies by daemon response; 409 default) | Show conflict state, prompt user action    |
+| `'validation'` | Request payload failed schema validation                  | 400                                                      | Fix request and retry                      |
+| `'daemon'`     | Daemon is unreachable or returned an internal error       | 503                                                      | Show daemon-unavailable state, retry later |
+| `'rate-limit'` | Rate limit exceeded                                       | 429                                                      | Wait `retryAfterMs`, then retry            |
 
 **Mapping from existing GatewayError codes**:
 
@@ -131,7 +131,7 @@ Structured error shape for all gateway error responses (REST JSON bodies and Web
 | `ACCOUNT_DISABLED`    | `auth`       |
 | `SESSION_EXPIRED`     | `session`    |
 | `SESSION_INVALIDATED` | `session`    |
-| `SESSION_NOT_FOUND`   | `session`    |
+| `SESSION_NOT_FOUND`   | `auth`       |
 | `SESSION_NOT_IDLE`    | `session`    |
 | `IDLE_TIMEOUT`        | `session`    |
 | `BAD_REQUEST`         | `validation` |

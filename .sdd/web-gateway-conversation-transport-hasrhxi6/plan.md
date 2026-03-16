@@ -96,7 +96,7 @@ test/
 - `conversation/` and `transport/` are physically separate modules — REST mediation vs. WebSocket streaming are different concerns with different security, lifecycle, and testing needs.
 - `daemon-client.ts` is the sole point of daemon communication for conversation operations — no route handler calls `fetch()` directly.
 - `event-bridge.ts` lives in `lib/daemon/` because it is a daemon-side amendment (emitter attached to `StreamManager`). The gateway consumes it through the `EventEmitter` interface.
-- No new files in `packages/web-contracts/` — gateway error shape is gateway-internal (FR-026 explicitly states shared contract is a follow-on). Existing conversation schemas are consumed as-is.
+- No new files in `packages/web-contracts/` — gateway error shape is gateway-internal (FR-026 explicitly states shared contract is a follow-on). Existing conversation schemas are consumed as-is. Browser-facing body schemas (`ResumeConversationBody`, `SubmitInstructionBody`) are co-located with their daemon-facing counterparts in the same contract files and re-exported from the barrel — these omit `conversationId` since the path is authoritative for gateway routes.
 
 ## Research Findings
 
@@ -186,23 +186,23 @@ See [research.md](./research.md) for full analysis. Key decisions summarized bel
 
 All routes require authenticated session (`createAuthMiddleware`) and CSRF protection (`createCsrfMiddleware`). Request bodies are validated with Zod schemas from `@hydra/web-contracts`. Error responses use `GatewayErrorResponse` shape.
 
-| Route                                         | Method | Request Schema                                | Response Schema                        | Daemon Endpoint                                    |
-| --------------------------------------------- | ------ | --------------------------------------------- | -------------------------------------- | -------------------------------------------------- |
-| `/conversations`                              | POST   | `CreateConversationRequest`                   | `CreateConversationResponse`           | `POST /conversations`                              |
-| `/conversations`                              | GET    | `ListConversationsRequest` (query)            | `ListConversationsResponse`            | `GET /conversations`                               |
-| `/conversations/:id`                          | GET    | `OpenConversationRequest` (param)             | `OpenConversationResponse`             | `GET /conversations/:id`                           |
-| `/conversations/:id/resume`                   | POST   | `ResumeConversationRequest`                   | `ResumeConversationResponse`           | `POST /conversations/:id/resume`                   |
-| `/conversations/:id/archive`                  | POST   | `ArchiveConversationRequest` (param)          | `ArchiveConversationResponse`          | `POST /conversations/:id/archive`                  |
-| `/conversations/:convId/turns`                | POST   | `SubmitInstructionRequest`                    | `SubmitInstructionResponse`            | `POST /conversations/:convId/turns`                |
-| `/conversations/:convId/turns`                | GET    | `LoadTurnHistoryRequest` (query)              | `LoadTurnHistoryResponse`              | `GET /conversations/:convId/turns`                 |
-| `/conversations/:convId/approvals`            | GET    | `GetPendingApprovalsRequest` (param)          | `GetPendingApprovalsResponse`          | `GET /conversations/:convId/approvals`             |
-| `/approvals/:approvalId/respond`              | POST   | `RespondToApprovalRequest`                    | `RespondToApprovalResponse`            | `POST /approvals/:approvalId/respond`              |
-| `/conversations/:convId/turns/:turnId/cancel` | POST   | `CancelWorkRequest` (params)                  | `CancelWorkResponse`                   | `POST /conversations/:convId/turns/:turnId/cancel` |
-| `/conversations/:convId/turns/:turnId/retry`  | POST   | `RetryTurnRequest` (params)                   | `RetryTurnResponse`                    | `POST /conversations/:convId/turns/:turnId/retry`  |
-| `/turns/:turnId/artifacts`                    | GET    | `ListArtifactsForTurnRequest` (param)         | `ListArtifactsForTurnResponse`         | `GET /turns/:turnId/artifacts`                     |
-| `/conversations/:convId/artifacts`            | GET    | `ListArtifactsForConversationRequest` (query) | `ListArtifactsForConversationResponse` | `GET /conversations/:convId/artifacts`             |
-| `/artifacts/:artifactId`                      | GET    | `GetArtifactContentRequest` (param)           | `GetArtifactContentResponse`           | `GET /artifacts/:artifactId`                       |
-| `/turns/:turnId/activities`                   | GET    | (param)                                       | Activity entries                       | `GET /turns/:turnId/activities`                    |
+| Route                                         | Method | Request Schema                                                              | Response Schema                        | Daemon Endpoint                                    |
+| --------------------------------------------- | ------ | --------------------------------------------------------------------------- | -------------------------------------- | -------------------------------------------------- |
+| `/conversations`                              | POST   | `CreateConversationRequest`                                                 | `CreateConversationResponse`           | `POST /conversations`                              |
+| `/conversations`                              | GET    | `ListConversationsRequest` (query)                                          | `ListConversationsResponse`            | `GET /conversations`                               |
+| `/conversations/:id`                          | GET    | `OpenConversationRequest` (param)                                           | `OpenConversationResponse`             | `GET /conversations/:id`                           |
+| `/conversations/:id/resume`                   | POST   | `ResumeConversationBody` (`:id` injected as `conversationId` for daemon)    | `ResumeConversationResponse`           | `POST /conversations/:id/resume`                   |
+| `/conversations/:id/archive`                  | POST   | `ArchiveConversationRequest` (param)                                        | `ArchiveConversationResponse`          | `POST /conversations/:id/archive`                  |
+| `/conversations/:convId/turns`                | POST   | `SubmitInstructionBody` (`:convId` injected as `conversationId` for daemon) | `SubmitInstructionResponse`            | `POST /conversations/:convId/turns`                |
+| `/conversations/:convId/turns`                | GET    | `LoadTurnHistoryRequest` (query)                                            | `LoadTurnHistoryResponse`              | `GET /conversations/:convId/turns`                 |
+| `/conversations/:convId/approvals`            | GET    | `GetPendingApprovalsRequest` (param)                                        | `GetPendingApprovalsResponse`          | `GET /conversations/:convId/approvals`             |
+| `/approvals/:approvalId/respond`              | POST   | `RespondToApprovalRequest`                                                  | `RespondToApprovalResponse`            | `POST /approvals/:approvalId/respond`              |
+| `/conversations/:convId/turns/:turnId/cancel` | POST   | `CancelWorkRequest` (params)                                                | `CancelWorkResponse`                   | `POST /conversations/:convId/turns/:turnId/cancel` |
+| `/conversations/:convId/turns/:turnId/retry`  | POST   | `RetryTurnRequest` (params)                                                 | `RetryTurnResponse`                    | `POST /conversations/:convId/turns/:turnId/retry`  |
+| `/turns/:turnId/artifacts`                    | GET    | `ListArtifactsForTurnRequest` (param)                                       | `ListArtifactsForTurnResponse`         | `GET /turns/:turnId/artifacts`                     |
+| `/conversations/:convId/artifacts`            | GET    | `ListArtifactsForConversationRequest` (query)                               | `ListArtifactsForConversationResponse` | `GET /conversations/:convId/artifacts`             |
+| `/artifacts/:artifactId`                      | GET    | `GetArtifactContentRequest` (param)                                         | `GetArtifactContentResponse`           | `GET /artifacts/:artifactId`                       |
+| `/turns/:turnId/activities`                   | GET    | (param)                                                                     | Activity entries                       | `GET /turns/:turnId/activities`                    |
 
 ### WebSocket Endpoint
 

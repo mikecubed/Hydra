@@ -190,6 +190,20 @@ describe('translateDaemonResponse', () => {
     assert.equal(result.category, 'rate-limit');
   });
 
+  it('handles HTTP 409 without error body as session error', () => {
+    const result = translateDaemonResponse(409, null);
+    assert.equal(result.category, 'session');
+    assert.equal(result.code, 'SESSION_EXPIRED');
+    assert.equal(result.httpStatus, 409);
+  });
+
+  it('handles HTTP 410 without error body as session error', () => {
+    const result = translateDaemonResponse(410, null);
+    assert.equal(result.category, 'session');
+    assert.equal(result.code, 'SESSION_EXPIRED');
+    assert.equal(result.httpStatus, 410);
+  });
+
   // ── Current daemon sendError envelope: { ok:false, error:<message>, details } ──
 
   it('translates current daemon sendError body (error+details, no message field)', () => {

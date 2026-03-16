@@ -151,6 +151,7 @@ function isApprovalFailureBody(body: unknown): body is ApprovalFailureBody {
 /** Infer category from HTTP status when no structured body is available. */
 function categoryFromStatus(status: number): ErrorCategory {
   if (status === 401 || status === 403) return 'auth';
+  if (status === 409 || status === 410) return 'session';
   if (status === 429) return 'rate-limit';
   if (status >= 400 && status < 500) return 'validation';
   return 'daemon';

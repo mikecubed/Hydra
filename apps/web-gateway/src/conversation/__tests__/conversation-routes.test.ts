@@ -341,10 +341,42 @@ describe('Conversation lifecycle routes (T010)', () => {
     it('returns 400 for missing lastAcknowledgedSeq', async () => {
       const res = await app.request(
         buildRequest('POST', '/conversations/conv-1/resume', {
-          body: JSON.stringify({ conversationId: 'conv-1' }),
+          body: JSON.stringify({}),
         }),
       );
       assert.equal(res.status, 400);
+    });
+
+    it('overwrites body conversationId with path param when they differ', async () => {
+      const res = await app.request(
+        buildRequest('POST', '/conversations/path-id/resume', {
+          body: JSON.stringify({ conversationId: 'body-id', lastAcknowledgedSeq: 3 }),
+        }),
+      );
+      assert.equal(res.status, 200);
+      const callArgs = mockClient.resumeConversation.mock.calls[0].arguments;
+      assert.equal(callArgs[0], 'path-id', 'first arg (path) must be the path param');
+      const body = callArgs[1] as { conversationId: string };
+      assert.equal(
+        body.conversationId,
+        'path-id',
+        'body.conversationId must be overwritten to path param',
+      );
+    });
+
+    it('succeeds when body omits conversationId entirely (path is authoritative)', async () => {
+      const res = await app.request(
+        buildRequest('POST', '/conversations/conv-1/resume', {
+          body: JSON.stringify({ lastAcknowledgedSeq: 7 }),
+        }),
+      );
+      assert.equal(res.status, 200);
+      assert.equal(mockClient.resumeConversation.mock.callCount(), 1);
+      const callArgs = mockClient.resumeConversation.mock.calls[0].arguments;
+      assert.equal(callArgs[0], 'conv-1', 'first arg must be the path param');
+      const body = callArgs[1] as { conversationId: string; lastAcknowledgedSeq: number };
+      assert.equal(body.conversationId, 'conv-1', 'conversationId must be injected from path');
+      assert.equal(body.lastAcknowledgedSeq, 7);
     });
   });
 
@@ -405,6 +437,38 @@ describe('Turn routes (T011)', () => {
       const opts = callArgs[2] as { sessionId: string } | undefined;
       assert.ok(opts, 'third argument with options must be present');
       assert.equal(opts.sessionId, 'test-session-123');
+    });
+
+    it('overwrites body conversationId with path param when they differ', async () => {
+      const res = await app.request(
+        buildRequest('POST', '/conversations/path-conv/turns', {
+          body: JSON.stringify({ conversationId: 'body-conv', instruction: 'do it' }),
+        }),
+      );
+      assert.equal(res.status, 201);
+      const callArgs = mockClient.submitInstruction.mock.calls[0].arguments;
+      assert.equal(callArgs[0], 'path-conv', 'first arg must be path param');
+      const body = callArgs[1] as { conversationId: string };
+      assert.equal(
+        body.conversationId,
+        'path-conv',
+        'body.conversationId must be overwritten to path param',
+      );
+    });
+
+    it('succeeds when body omits conversationId entirely (path is authoritative)', async () => {
+      const res = await app.request(
+        buildRequest('POST', '/conversations/conv-1/turns', {
+          body: JSON.stringify({ instruction: 'do something' }),
+        }),
+      );
+      assert.equal(res.status, 201);
+      assert.equal(mockClient.submitInstruction.mock.callCount(), 1);
+      const callArgs = mockClient.submitInstruction.mock.calls[0].arguments;
+      assert.equal(callArgs[0], 'conv-1', 'first arg must be path param');
+      const body = callArgs[1] as { conversationId: string; instruction: string };
+      assert.equal(body.conversationId, 'conv-1', 'conversationId must be injected from path');
+      assert.equal(body.instruction, 'do something');
     });
   });
 
