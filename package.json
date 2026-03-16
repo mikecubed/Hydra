@@ -16,10 +16,14 @@
   "engines": {
     "node": ">=24.0.0"
   },
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
   "bin": {
-    "hydra": "./bin/hydra-cli.ts",
-    "hydra-client": "./lib/orchestrator-client.ts",
-    "hydra-daemon": "./lib/orchestrator-daemon.ts"
+    "hydra": "./bin/hydra-cli.js",
+    "hydra-client": "./lib/orchestrator-client.js",
+    "hydra-daemon": "./lib/orchestrator-daemon.js"
   },
   "files": [
     "bin/",
@@ -78,22 +82,25 @@
     "typecheck": "tsc --noEmit -p tsconfig.json",
     "quality": "npm run lint && npm run format:check && npm run typecheck && npm run lint:cycles",
     "setup:hooks": "node scripts/setup-hooks.ts",
-    "test": "node --test --experimental-test-module-mocks 'test/**/*.test.{ts,mjs}'",
+    "test": "node --test --experimental-test-module-mocks 'test/**/*.test.{ts,mjs}' 'apps/**/src/**/*.test.ts' 'packages/**/src/**/*.test.ts'",
     "test:coverage": "c8 npm test",
     "test:coverage:check": "node_modules/.bin/c8 check-coverage",
     "test:report": "node --test 'test/**/*.test.{ts,mjs}' --test-reporter=tap --test-reporter-destination=docs/coordination/test-results.tap",
     "package": "node -e \"require('fs').mkdirSync('dist', { recursive: true })\" && npm pack --pack-destination dist",
     "package:dry-run": "npm pack --dry-run",
+    "prepack": "node scripts/build-pack.ts",
+    "postpack": "node scripts/clean-pack.ts",
     "build:exe": "node scripts/build-exe.ts",
     "build:exe:ci": "node scripts/build-exe.ts --ci",
-    "install:global": "npm install -g .",
+    "install:global": "node scripts/install-global.ts",
     "uninstall:global": "npm uninstall -g hydra",
+    "postinstall": "node lib/check-install.ts",
     "prepare": "husky",
     "test:mutation": "stryker run"
   },
   "lint-staged": {
     "*.{ts,mjs}": [
-      "eslint --fix --max-warnings 0",
+      "eslint --fix --max-warnings 0 --no-warn-ignored",
       "prettier --write"
     ],
     "*.md": [
@@ -123,6 +130,7 @@
   "devDependencies": {
     "@a24z/mermaid-parser": "^1.0.0",
     "@eslint/js": "^10.0.1",
+    "@hydra/web-contracts": "*",
     "@stryker-mutator/core": "^9.6.0",
     "@stryker-mutator/typescript-checker": "^9.6.0",
     "@types/madge": "^5.0.3",

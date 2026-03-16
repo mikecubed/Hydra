@@ -21,6 +21,12 @@ import {
   getModelSummary,
   listAgents,
 } from './hydra-agents.ts';
+import { executeAgentWithRecovery } from './hydra-shared/agent-executor.ts';
+import {
+  createConversationExecutor,
+  createApprovalContinuator,
+  type ExecutorDeps,
+} from './daemon/conversation-executor.ts';
 import { registerBuiltInSubAgents } from './hydra-sub-agents.ts';
 import { syncHydraMd } from './hydra-sync-md.ts';
 import {
@@ -52,6 +58,9 @@ import { checkUsage } from './hydra-usage.ts';
 import { resolveVerificationPlan } from './hydra-verification.ts';
 import { handleReadRoute } from './daemon/read-routes.ts';
 import { handleWriteRoute } from './daemon/write-routes.ts';
+import { handleConversationRoute } from './daemon/conversation-routes.ts';
+import { ConversationStore } from './daemon/conversation-store.ts';
+import { StreamManager } from './daemon/stream-manager.ts';
 import { sendJson, sendError, isAuthorized, readJsonBody } from './daemon/http-utils.ts';
 import { printHelp, commandStatus, commandStop } from './daemon/cli-commands.ts';
 import {
@@ -122,6 +131,8 @@ interface DaemonContext {
   eventCount: number;
   writeQueue: Promise<unknown>;
   sseClients: Set<ServerResponse>;
+  conversationStore: ConversationStore;
+  streamManager: StreamManager;
 }
 
 interface DaemonIntervals {
@@ -129,11 +140,13 @@ interface DaemonIntervals {
   metricsInterval: ReturnType<typeof setInterval>;
   archiveInterval: ReturnType<typeof setInterval>;
   staleInterval: ReturnType<typeof setInterval>;
+  streamPurgeInterval: ReturnType<typeof setInterval>;
 }
 
 type VerificationCallback = (error: Error | null, stdout: string, stderr: string) => void;
 
 function createDaemonContext(host: string, port: number): DaemonContext {
+  const conversationStore = new ConversationStore();
   return {
     host,
     port,
@@ -143,6 +156,8 @@ function createDaemonContext(host: string, port: number): DaemonContext {
     eventCount: 0,
     writeQueue: Promise.resolve(),
     sseClients: new Set<ServerResponse>(),
+    conversationStore,
+    streamManager: new StreamManager(conversationStore),
   };
 }
 
@@ -156,6 +171,43 @@ function broadcastEvent(sseClients: Set<ServerResponse>, event: unknown) {
       sseClients.delete(client);
     }
   }
+}
+
+/** Losslessly coerce unknown agent output to a string. */
+function coerceOutput(raw: unknown): string {
+  if (typeof raw === 'string') return raw;
+  if (raw != null) return JSON.stringify(raw);
+  return '';
+}
+
+/**
+ * Build the ExecutorDeps for the conversation executor/continuator from the
+ * daemon context.  Uses `executeAgentWithRecovery` as the real agent backend.
+ */
+function buildExecutorDeps(ctx: DaemonContext): ExecutorDeps {
+  return {
+    conversationStore: ctx.conversationStore,
+    streamManager: ctx.streamManager,
+    executeAgent: async (agent, prompt) => {
+      const result = await executeAgentWithRecovery(agent, prompt);
+      return { ok: result.ok, output: coerceOutput(result.output) };
+    },
+  };
+}
+
+/**
+ * Pre-built conversation route handlers, constructed once per daemon context
+ * rather than per request. Safe to share because executor deps reference
+ * the mutable context (store, streamManager) by closure.
+ */
+function buildConversationHandlers(ctx: DaemonContext) {
+  const deps = buildExecutorDeps(ctx);
+  return {
+    store: ctx.conversationStore,
+    streamManager: ctx.streamManager,
+    executeTurn: createConversationExecutor(deps),
+    continueAfterApproval: createApprovalContinuator(deps),
+  };
 }
 
 function writeStatus(ctx: DaemonContext, extra: Record<string, unknown> = {}) {
@@ -532,6 +584,7 @@ function buildWriteRouteCtx(
 
 async function handleHttpRequest(
   ctx: DaemonContext,
+  convHandlers: ReturnType<typeof buildConversationHandlers>,
   server: http.Server,
   req: IncomingMessage,
   res: ServerResponse,
@@ -548,6 +601,10 @@ async function handleHttpRequest(
 
     if (!isAuthorized(req, ORCH_TOKEN)) {
       sendError(res, 401, 'Unauthorized');
+      return;
+    }
+
+    if (handleConversationRoute(req, res, convHandlers)) {
       return;
     }
 
@@ -778,6 +835,7 @@ function gracefulExit(
   clearInterval(intervals.metricsInterval);
   clearInterval(intervals.archiveInterval);
   clearInterval(intervals.staleInterval);
+  clearInterval(intervals.streamPurgeInterval);
   writeStatus(ctx, { running: false, stoppingAt: nowIso(), signal });
   server.close(() => {
     writeStatus(ctx, { running: false, stoppedAt: nowIso(), signal });
@@ -812,9 +870,12 @@ function startDaemon(options: Record<string, string>) {
   }
 
   const ctx = createDaemonContext(host, port);
+  const convHandlers = buildConversationHandlers(ctx);
 
   // eslint-disable-next-line @typescript-eslint/no-misused-promises -- async HTTP handler, errors caught in try/catch block
-  const server = http.createServer(async (req, res) => handleHttpRequest(ctx, server, req, res));
+  const server = http.createServer(async (req, res) =>
+    handleHttpRequest(ctx, convHandlers, server, req, res),
+  );
 
   server.on('error', (error: Error) => {
     console.error(`Orchestrator server error: ${error.message}`);
@@ -852,12 +913,16 @@ function startDaemon(options: Record<string, string>) {
   const staleInterval = setInterval(() => {
     markStaleTasks(ctx);
   }, 60 * 1000); // 60s — frequent enough for heartbeat timeouts
+  const streamPurgeInterval = setInterval(() => {
+    ctx.streamManager.purgeTerminalStreams();
+  }, 60 * 1000); // 60s — enforce wall-clock retention even when idle
 
   const intervals: DaemonIntervals = {
     statusInterval,
     metricsInterval,
     archiveInterval,
     staleInterval,
+    streamPurgeInterval,
   };
 
   // SIGTERM is not reliably delivered on Windows; use HTTP POST /stop for graceful shutdown there.

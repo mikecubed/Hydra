@@ -93,8 +93,17 @@ export default [
       'n/no-unpublished-import': 'off', // devDeps used in tests/scripts are fine
       'n/no-process-exit': 'error', // use process.exitCode instead
       'n/prefer-node-protocol': 'error', // require node: prefix on builtins
-      'n/hashbang': 'warn', // lib files may have intentional shebangs without being in bin
-      'n/no-unsupported-features/node-builtins': ['error', { ignores: ['fetch'] }], // fetch used intentionally (Node 22 dev runtime)
+      'n/hashbang': [
+        'warn',
+        {
+          convertPath: {
+            'bin/**/*.ts': ['\\.ts$', '.js'],
+            'lib/orchestrator-client.ts': ['\\.ts$', '.js'],
+            'lib/orchestrator-daemon.ts': ['\\.ts$', '.js'],
+          },
+        },
+      ],
+      'n/no-unsupported-features/node-builtins': ['error', { ignores: ['fetch', 'Response'] }], // fetch/Response used intentionally (Node 22 dev runtime, Hono framework)
 
       // ── Unicorn rules (selective) ──────────────────────────────────────────
       'unicorn/prefer-module': 'error',
@@ -129,7 +138,7 @@ export default [
 
   // ─── Test files — relaxed rules ───────────────────────────────────────────
   {
-    files: ['test/**/*.mjs'],
+    files: ['test/**/*.mjs', 'apps/**/__tests__/**/*.mjs', 'packages/**/__tests__/**/*.mjs'],
     rules: {
       'no-shadow': 'off',
       'no-await-in-loop': 'off',
@@ -247,6 +256,9 @@ export default [
         { type: 'bin', pattern: 'bin/**' },
         { type: 'scripts', pattern: 'scripts/**' },
         { type: 'test', pattern: 'test/**' },
+        { type: 'web-app', pattern: 'apps/web/**' },
+        { type: 'web-gateway', pattern: 'apps/web-gateway/**' },
+        { type: 'web-contracts', pattern: 'packages/web-contracts/**' },
       ],
     },
     rules: {
@@ -257,11 +269,27 @@ export default [
           rules: [
             // lib/hydra-shared/ and lib/daemon/ are sub-namespaces of lib/ and may import from it
             { from: 'shared', allow: ['shared', 'lib'] },
-            { from: 'daemon', allow: ['shared', 'daemon', 'lib'] },
+            { from: 'daemon', allow: ['shared', 'daemon', 'lib', 'web-contracts'] },
             { from: 'lib', allow: ['shared', 'daemon', 'lib'] },
             { from: 'bin', allow: ['lib', 'shared', 'daemon'] },
             { from: 'scripts', allow: ['lib', 'shared'] },
-            { from: 'test', allow: ['lib', 'shared', 'daemon', 'bin', 'scripts', 'test'] },
+            {
+              from: 'test',
+              allow: [
+                'lib',
+                'shared',
+                'daemon',
+                'bin',
+                'scripts',
+                'test',
+                'web-app',
+                'web-gateway',
+                'web-contracts',
+              ],
+            },
+            { from: 'web-app', allow: ['web-contracts'] },
+            { from: 'web-gateway', allow: ['web-contracts'] },
+            { from: 'web-contracts', allow: [] },
           ],
         },
       ],
@@ -270,7 +298,7 @@ export default [
 
   // ─── Test files — relax strict TS rules ──────────────────────────────────
   {
-    files: ['test/**/*.ts'],
+    files: ['test/**/*.ts', 'apps/**/__tests__/**/*.ts', 'packages/**/__tests__/**/*.ts'],
     rules: {
       '@typescript-eslint/no-unsafe-assignment': 'off',
       '@typescript-eslint/no-unsafe-member-access': 'off',
@@ -279,7 +307,19 @@ export default [
       '@typescript-eslint/strict-boolean-expressions': 'off',
       'n/no-unsupported-features/node-builtins': [
         'error',
-        { ignores: ['fetch', 'test.describe', 'test.mock.module'] },
+        {
+          ignores: [
+            'fetch',
+            'test',
+            'test.describe',
+            'test.it',
+            'test.beforeEach',
+            'test.afterEach',
+            'test.mock.module',
+            'import.meta.dirname',
+            'Response',
+          ],
+        },
       ],
       'no-shadow': 'off',
       'n/no-unpublished-import': 'off',
@@ -288,6 +328,11 @@ export default [
       complexity: 'off',
       'max-lines-per-function': 'off',
       'max-depth': 'off',
+      'no-await-in-loop': 'off',
+      '@typescript-eslint/no-non-null-assertion': 'off',
+      '@typescript-eslint/restrict-template-expressions': 'off',
+      '@typescript-eslint/require-await': 'off',
+      '@typescript-eslint/no-unnecessary-condition': 'off',
     },
   },
 ];
