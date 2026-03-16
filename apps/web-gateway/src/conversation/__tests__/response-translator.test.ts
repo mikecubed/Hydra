@@ -551,13 +551,15 @@ describe('translateDaemonResponse — real daemon sendError() regression', () =>
 });
 
 describe('translateFetchFailure', () => {
-  it('translates TypeError (network error) into daemon-unreachable', () => {
-    const err = new TypeError('fetch failed');
+  it('translates TypeError (network error) into daemon-unreachable without raw details', () => {
+    const err = new TypeError('fetch failed: connect ECONNREFUSED 127.0.0.1:4173');
     const result = translateFetchFailure(err);
     assert.equal(result.ok, false);
     assert.equal(result.category, 'daemon');
     assert.equal(result.code, 'DAEMON_UNREACHABLE');
-    assert.ok(result.message.includes('unreachable') || result.message.includes('fetch'));
+    assert.equal(result.message, 'Daemon unreachable');
+    assert.ok(!result.message.includes('ECONNREFUSED'), 'must not leak connection details');
+    assert.ok(!result.message.includes('127.0.0.1'), 'must not leak IP addresses');
   });
 
   it('translates AbortError (timeout) into daemon-unreachable', () => {
@@ -566,13 +568,22 @@ describe('translateFetchFailure', () => {
     const result = translateFetchFailure(err);
     assert.equal(result.category, 'daemon');
     assert.equal(result.code, 'DAEMON_UNREACHABLE');
-    assert.ok(result.message.includes('timeout') || result.message.includes('abort'));
+    assert.equal(result.message, 'Daemon request timeout or abort');
   });
 
-  it('translates generic Error into daemon category', () => {
-    const err = new Error('something unexpected');
+  it('translates generic Error into daemon category without raw details', () => {
+    const err = new Error('getaddrinfo ENOTFOUND internal-host.corp.net');
     const result = translateFetchFailure(err);
     assert.equal(result.category, 'daemon');
     assert.equal(result.code, 'DAEMON_UNREACHABLE');
+    assert.equal(result.message, 'Daemon unreachable');
+    assert.ok(!result.message.includes('internal-host'), 'must not leak internal hostnames');
+  });
+
+  it('translates non-Error values into daemon category', () => {
+    const result = translateFetchFailure('random string');
+    assert.equal(result.category, 'daemon');
+    assert.equal(result.code, 'DAEMON_UNREACHABLE');
+    assert.equal(result.message, 'Daemon unreachable');
   });
 });

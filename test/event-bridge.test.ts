@@ -268,6 +268,70 @@ describe('StreamManager + EventBridge — cancelStream', () => {
   });
 });
 
+// ── Listener isolation ───────────────────────────────────────────────────────
+
+describe('EventBridge — listener isolation', () => {
+  it('delivers event to remaining listeners when one throws', () => {
+    const received: StreamEventPayload[] = [];
+    bridge.on('stream-event', () => {
+      throw new Error('boom');
+    });
+    bridge.on('stream-event', (data) => received.push(data));
+
+    const warnMock = mock.method(console, 'warn', () => {});
+    try {
+      const event = makeStreamEvent();
+      bridge.emitStreamEvent('conv-1', event);
+
+      assert.equal(received.length, 1, 'second listener should still receive the event');
+      assert.equal(received[0].conversationId, 'conv-1');
+      assert.deepStrictEqual(received[0].event, event);
+    } finally {
+      warnMock.mock.restore();
+    }
+  });
+
+  it('delivers event to earlier listeners even when a later one throws', () => {
+    const received: StreamEventPayload[] = [];
+    bridge.on('stream-event', (data) => received.push(data));
+    bridge.on('stream-event', () => {
+      throw new Error('boom');
+    });
+
+    const warnMock = mock.method(console, 'warn', () => {});
+    try {
+      bridge.emitStreamEvent('conv-1', makeStreamEvent());
+      assert.equal(received.length, 1, 'first listener should receive the event');
+    } finally {
+      warnMock.mock.restore();
+    }
+  });
+
+  it('logs a warning per throwing listener', () => {
+    const warnMock = mock.method(console, 'warn', () => {});
+    try {
+      bridge.on('stream-event', () => {
+        throw new Error('first boom');
+      });
+      bridge.on('stream-event', () => {
+        throw new Error('second boom');
+      });
+
+      bridge.emitStreamEvent('conv-1', makeStreamEvent({ kind: 'text-delta', turnId: 'turn-99' }));
+
+      assert.equal(warnMock.mock.callCount(), 2, 'one warning per throwing listener');
+      const msg0 = String(warnMock.mock.calls[0].arguments[0]);
+      assert.ok(msg0.includes('[EventBridge]'));
+      assert.ok(msg0.includes('text-delta'));
+      assert.ok(msg0.includes('first boom'));
+      const msg1 = String(warnMock.mock.calls[1].arguments[0]);
+      assert.ok(msg1.includes('second boom'));
+    } finally {
+      warnMock.mock.restore();
+    }
+  });
+});
+
 // ── Throwing-listener resilience ──────────────────────────────────────────────
 
 describe('StreamManager + EventBridge — throwing listener resilience', () => {
@@ -370,7 +434,7 @@ describe('StreamManager + EventBridge — listener-failure observability', () =>
 
       assert.equal(warnMock.mock.callCount(), 1, 'console.warn should be called once');
       const msg = String(warnMock.mock.calls[0].arguments[0]);
-      assert.ok(msg.includes('bridgeEmit'), 'warning should mention bridgeEmit');
+      assert.ok(msg.includes('EventBridge'), 'warning should mention EventBridge');
       assert.ok(msg.includes(turn.id), 'warning should include turnId');
       assert.ok(msg.includes('stream-started'), 'warning should include event kind');
       assert.ok(msg.includes('boom from listener'), 'warning should include error message');

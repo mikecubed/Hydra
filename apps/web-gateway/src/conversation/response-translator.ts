@@ -249,21 +249,16 @@ export function translateDaemonResponse(status: number, body: unknown): GatewayE
 /**
  * Translate a fetch-level failure (network error, timeout, abort)
  * into a GatewayErrorResponse with category 'daemon'.
+ *
+ * Raw error messages are never echoed — they may contain internal
+ * network details (hostnames, IPs, ports) that must not reach clients.
  */
 export function translateFetchFailure(error: unknown): GatewayErrorResponse {
-  let message = 'Daemon unreachable';
-
-  if (error instanceof Error && error.name === 'AbortError') {
-    message = 'Daemon request timeout or abort';
-  } else if (error instanceof TypeError) {
-    message = `Daemon unreachable: ${error.message}`;
-  } else if (error instanceof Error) {
-    message = `Daemon unreachable: ${error.message}`;
-  }
+  const isAbort = error instanceof Error && error.name === 'AbortError';
 
   return createGatewayErrorResponse({
     code: 'DAEMON_UNREACHABLE',
     category: 'daemon',
-    message,
+    message: isAbort ? 'Daemon request timeout or abort' : 'Daemon unreachable',
   });
 }

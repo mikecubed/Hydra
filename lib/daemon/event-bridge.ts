@@ -30,10 +30,24 @@ export interface EventBridgeEvents {
 export class EventBridge {
   private readonly emitter = new EventEmitter();
 
-  /** Emit a stream event with conversation context. */
+  /** Emit a stream event with conversation context.
+   *  Each listener is invoked in isolation — a throwing listener cannot
+   *  prevent subsequent listeners from receiving the event. */
   emitStreamEvent(conversationId: string, event: StreamEvent): void {
     const payload: StreamEventPayload = { conversationId, event };
-    this.emitter.emit('stream-event', payload);
+    const listeners = this.emitter.listeners('stream-event') as Array<
+      (payload: StreamEventPayload) => void
+    >;
+    for (const listener of listeners) {
+      try {
+        listener(payload);
+      } catch (err: unknown) {
+        const detail = err instanceof Error ? err.message : 'unknown error';
+        console.warn(
+          `[EventBridge] stream-event listener error (turn=${event.turnId}, kind=${event.kind}): ${detail}`,
+        );
+      }
+    }
   }
 
   /** Subscribe to stream events. */
