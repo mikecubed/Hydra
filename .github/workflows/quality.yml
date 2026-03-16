@@ -82,7 +82,7 @@ jobs:
         run: |
           echo "Linting changed files:"
           echo "${{ steps.changed-js.outputs.all_changed_files }}"
-          npx --no-install eslint --max-warnings 0 -- ${{ steps.changed-js.outputs.all_changed_files }}
+          npx --no-install eslint --no-warn-ignored --max-warnings 0 -- ${{ steps.changed-js.outputs.all_changed_files }}
 
       # ── ESLint on changed TS files (PR) ───────────────────────────────────
       - name: ESLint (changed TS files)
@@ -90,7 +90,7 @@ jobs:
         run: |
           echo "Linting changed TS files:"
           echo "${{ steps.changed-ts.outputs.all_changed_files }}"
-          npx --no-install eslint --max-warnings 0 -- ${{ steps.changed-ts.outputs.all_changed_files }}
+          npx --no-install eslint --no-warn-ignored --max-warnings 0 -- ${{ steps.changed-ts.outputs.all_changed_files }}
 
       # ── ESLint on full codebase (push to main/dev) ─────────────────────────
       - name: ESLint (full)
