@@ -20,7 +20,7 @@ export type GetActivityEntriesResponse = z.infer<typeof GetActivityEntriesRespon
 
 export const FilterActivityByAgentRequest = z.object({
   turnId: z.string().min(1),
-  agentId: z.string().min(1),
+  agent: z.string().min(1),
 });
 export type FilterActivityByAgentRequest = z.infer<typeof FilterActivityByAgentRequest>;
 

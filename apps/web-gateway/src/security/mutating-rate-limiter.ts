@@ -7,6 +7,7 @@ import type { MiddlewareHandler } from 'hono';
 import { RateLimiter, type RateLimiterConfig } from '../auth/rate-limiter.ts';
 import type { Clock } from '../shared/clock.ts';
 import { createError } from '../shared/errors.ts';
+import { gatewayErrorResponse } from '../shared/types.ts';
 import type { GatewayEnv } from '../shared/types.ts';
 
 const DEFAULT_MUTATING_LIMITS: Partial<RateLimiterConfig> = {
@@ -33,7 +34,7 @@ export function createMutatingRateLimiter(
     const sourceKey = c.get('sourceKey') ?? 'unknown';
     if (!limiter.check(sourceKey)) {
       const err = createError('RATE_LIMITED');
-      return c.json({ code: err.code, message: err.message }, 429);
+      return gatewayErrorResponse(c, err);
     }
     limiter.recordAttempt(sourceKey);
     await next();

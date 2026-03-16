@@ -198,9 +198,14 @@ function registerArtifactActivityRoutes(app: Hono<GatewayEnv>, dc: DaemonClient)
     handleResult(c, await dc.getArtifactContent(c.req.param('artifactId'))),
   );
 
-  app.get('/turns/:turnId/activities', async (c) =>
-    handleResult(c, await dc.getActivityEntries(c.req.param('turnId'))),
-  );
+  app.get('/turns/:turnId/activities', async (c) => {
+    const turnId = c.req.param('turnId');
+    const agent = c.req.query('agentId') ?? c.req.query('agent');
+    if (agent !== undefined && agent !== '') {
+      return handleResult(c, await dc.filterActivityByAgent(turnId, agent));
+    }
+    return handleResult(c, await dc.getActivityEntries(turnId));
+  });
 }
 
 // ── Route factory ────────────────────────────────────────────────────────────

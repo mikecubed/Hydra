@@ -108,6 +108,10 @@ describe('Conversation route wiring (T015, T015b)', () => {
     const req = buildRequest('GET', '/conversations', { headers: { origin: ORIGIN } });
     const res = await gw.app.request(req);
     assert.equal(res.status, 401);
+    const body = (await res.json()) as { ok: boolean; code: string; category: string };
+    assert.equal(body.ok, false);
+    assert.equal(body.code, 'SESSION_NOT_FOUND');
+    assert.equal(body.category, 'auth');
   });
 
   it('rejects unauthenticated POST /conversations', async () => {
@@ -117,6 +121,10 @@ describe('Conversation route wiring (T015, T015b)', () => {
     });
     const res = await gw.app.request(req);
     assert.equal(res.status, 401);
+    const body = (await res.json()) as { ok: boolean; code: string; category: string };
+    assert.equal(body.ok, false);
+    assert.equal(body.code, 'SESSION_NOT_FOUND');
+    assert.equal(body.category, 'auth');
   });
 
   it('rejects POST /conversations without CSRF token', async () => {
@@ -129,8 +137,10 @@ describe('Conversation route wiring (T015, T015b)', () => {
     });
     const res = await gw.app.request(req);
     assert.equal(res.status, 403);
-    const body = (await res.json()) as { code: string };
+    const body = (await res.json()) as { ok: boolean; code: string; category: string };
+    assert.equal(body.ok, false);
     assert.equal(body.code, 'CSRF_INVALID');
+    assert.equal(body.category, 'validation');
   });
 
   // ── Authenticated + CSRF conversation requests ─────────────────────────

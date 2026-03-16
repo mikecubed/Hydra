@@ -74,8 +74,13 @@ export class StreamManager {
     if (!turn) return;
     try {
       this.bridge.emitStreamEvent(turn.conversationId, event);
-    } catch {
+    } catch (err: unknown) {
       // Bridge consumer errors must not break daemon stream operations.
+      // Log a warning so failures are observable and diagnosable.
+      const detail = err instanceof Error ? err.message : 'unknown error';
+      console.warn(
+        `[StreamManager] bridgeEmit listener error (turn=${turnId}, kind=${event.kind}): ${detail}`,
+      );
     }
   }
 

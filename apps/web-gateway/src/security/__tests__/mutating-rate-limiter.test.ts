@@ -41,6 +41,10 @@ describe('Mutating rate limiter', () => {
     }
     const res = await app.request('/test', { method: 'POST' });
     assert.equal(res.status, 429);
+    const body = (await res.json()) as { ok: boolean; code: string; category: string };
+    assert.equal(body.ok, false);
+    assert.equal(body.code, 'RATE_LIMITED');
+    assert.equal(body.category, 'rate-limit');
   });
 
   it('window slides after lockout', async () => {

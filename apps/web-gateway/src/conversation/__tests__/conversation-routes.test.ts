@@ -660,6 +660,33 @@ describe('Artifact and activity routes (T014)', () => {
       assert.equal(mockClient.getActivityEntries.mock.callCount(), 1);
       assert.equal(mockClient.getActivityEntries.mock.calls[0].arguments[0], 't1');
     });
+
+    it('delegates to filterActivityByAgent when ?agent= is provided', async () => {
+      const res = await app.request(buildRequest('GET', '/turns/t1/activities?agent=claude'));
+      assert.equal(res.status, 200);
+      assert.equal(mockClient.filterActivityByAgent.mock.callCount(), 1);
+      assert.equal(mockClient.getActivityEntries.mock.callCount(), 0);
+      const callArgs = mockClient.filterActivityByAgent.mock.calls[0].arguments;
+      assert.equal(callArgs[0], 't1');
+      assert.equal(callArgs[1], 'claude');
+    });
+
+    it('accepts ?agentId= as a browser-facing alias and delegates to filterActivityByAgent', async () => {
+      const res = await app.request(buildRequest('GET', '/turns/t1/activities?agentId=claude'));
+      assert.equal(res.status, 200);
+      assert.equal(mockClient.filterActivityByAgent.mock.callCount(), 1);
+      assert.equal(mockClient.getActivityEntries.mock.callCount(), 0);
+      const callArgs = mockClient.filterActivityByAgent.mock.calls[0].arguments;
+      assert.equal(callArgs[0], 't1');
+      assert.equal(callArgs[1], 'claude');
+    });
+
+    it('ignores empty filter params and calls unfiltered getActivityEntries', async () => {
+      const res = await app.request(buildRequest('GET', '/turns/t1/activities?agentId='));
+      assert.equal(res.status, 200);
+      assert.equal(mockClient.getActivityEntries.mock.callCount(), 1);
+      assert.equal(mockClient.filterActivityByAgent.mock.callCount(), 0);
+    });
   });
 });
 

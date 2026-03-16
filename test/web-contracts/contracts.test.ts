@@ -421,10 +421,10 @@ describe('Multi-Agent Activity contracts', () => {
     assert.ok(GetActivityEntriesRequest.safeParse({ turnId: 'turn-1' }).success);
   });
 
-  it('FilterActivityByAgentRequest requires turnId and agentId', () => {
+  it('FilterActivityByAgentRequest requires turnId and agent', () => {
     assert.ok(!FilterActivityByAgentRequest.safeParse({ turnId: 'turn-1' }).success);
     assert.ok(
-      FilterActivityByAgentRequest.safeParse({ turnId: 'turn-1', agentId: 'claude' }).success,
+      FilterActivityByAgentRequest.safeParse({ turnId: 'turn-1', agent: 'claude' }).success,
     );
   });
 });

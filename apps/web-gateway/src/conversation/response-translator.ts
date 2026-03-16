@@ -157,6 +157,9 @@ function categoryFromStatus(status: number): ErrorCategory {
   return 'daemon';
 }
 
+/** Generic message for 5xx responses — never leaks internal daemon details to the browser. */
+const SANITIZED_5XX_MESSAGE = 'Internal daemon error';
+
 function createGenericStatusError(status: number, message: string): GatewayErrorResponse {
   const category = categoryFromStatus(status);
   const codeMap: Record<string, string> = {
@@ -170,7 +173,7 @@ function createGenericStatusError(status: number, message: string): GatewayError
   return createGatewayErrorResponse({
     code: codeMap[category] ?? 'DAEMON_UNREACHABLE',
     category,
-    message,
+    message: status >= 500 ? SANITIZED_5XX_MESSAGE : message,
     httpStatus: status,
   });
 }
@@ -225,7 +228,7 @@ export function translateDaemonResponse(status: number, body: unknown): GatewayE
     return createGatewayErrorResponse({
       code: body.error,
       category,
-      message: body.message,
+      message: status >= 500 ? SANITIZED_5XX_MESSAGE : body.message,
       conversationId: body.conversationId,
       turnId: body.turnId,
       httpStatus: status,

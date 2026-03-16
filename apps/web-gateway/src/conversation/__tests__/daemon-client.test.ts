@@ -380,14 +380,14 @@ describe('DaemonClient', () => {
   });
 
   describe('filterActivityByAgent', () => {
-    it('sends GET /turns/:turnId/activities?agentId=...', async () => {
+    it('sends GET /turns/:turnId/activities?agent=...', async () => {
       fetchMock.mock.mockImplementation(() => Promise.resolve(okResponse({ activities: [] })));
 
       await client.filterActivityByAgent('t1', 'claude');
 
       const [url] = fetchMock.mock.calls[0].arguments;
       assert.ok((url as string).includes('/turns/t1/activities?'));
-      assert.ok((url as string).includes('agentId=claude'));
+      assert.ok((url as string).includes('agent=claude'));
     });
   });
 

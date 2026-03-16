@@ -42,7 +42,10 @@ describe('Auth middleware', () => {
     const res = await app.request('/protected');
     assert.equal(res.status, 401);
     const body = await jsonBody(res);
+    assert.equal(body.ok, false);
     assert.equal(body.code, 'SESSION_NOT_FOUND');
+    assert.equal(body.category, 'auth');
+    assert.equal(typeof body.message, 'string');
   });
 
   it('rejects request with empty session cookie', async () => {
@@ -51,7 +54,9 @@ describe('Auth middleware', () => {
     });
     assert.equal(res.status, 401);
     const body = await jsonBody(res);
+    assert.equal(body.ok, false);
     assert.equal(body.code, 'SESSION_NOT_FOUND');
+    assert.equal(body.category, 'auth');
   });
 
   it('accepts request with valid session cookie', async () => {
@@ -74,7 +79,9 @@ describe('Auth middleware', () => {
     });
     assert.equal(res.status, 401);
     const body = await jsonBody(res);
+    assert.equal(body.ok, false);
     assert.equal(body.code, 'SESSION_EXPIRED');
+    assert.equal(body.category, 'session');
   });
 
   it('rejects request with invalidated session cookie', async () => {
@@ -107,7 +114,9 @@ describe('Auth middleware', () => {
     });
     assert.equal(res.status, 401);
     const body = await jsonBody(res);
+    assert.equal(body.ok, false);
     assert.equal(body.code, 'IDLE_TIMEOUT');
+    assert.equal(body.category, 'session');
   });
 
   it('rejects request with unknown session ID', async () => {

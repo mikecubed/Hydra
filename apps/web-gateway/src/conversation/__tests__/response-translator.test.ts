@@ -156,6 +156,13 @@ describe('translateDaemonResponse', () => {
     const body = makeDaemonError('INTERNAL_ERROR', 'Something broke');
     const result = translateDaemonResponse(500, body);
     assert.equal(result.category, 'daemon');
+    assert.equal(result.message, 'Internal daemon error');
+  });
+
+  it('preserves non-500 daemon messages in contract error bodies', () => {
+    const body = makeDaemonError('INVALID_INPUT', 'Field X is required');
+    const result = translateDaemonResponse(400, body);
+    assert.equal(result.message, 'Field X is required');
   });
 
   it('preserves turnId from daemon error body', () => {
@@ -171,13 +178,14 @@ describe('translateDaemonResponse', () => {
     const result = translateDaemonResponse(500, body);
     assert.equal(result.category, 'daemon');
     assert.equal(result.code, 'UNKNOWN_CODE');
+    assert.equal(result.message, 'Internal daemon error');
   });
 
   it('handles HTTP 5xx without valid error body as daemon error', () => {
     const result = translateDaemonResponse(502, null);
     assert.equal(result.category, 'daemon');
     assert.equal(result.code, 'DAEMON_UNREACHABLE');
-    assert.ok(result.message.length > 0);
+    assert.equal(result.message, 'Internal daemon error');
   });
 
   it('handles HTTP 401 without error body as auth error', () => {
@@ -501,8 +509,22 @@ describe('translateDaemonResponse — real daemon sendError() regression', () =>
     const result = translateDaemonResponse(500, sendErrorBody('Internal explosion'));
     assert.equal(result.code, 'DAEMON_UNREACHABLE');
     assert.equal(result.category, 'daemon');
-    assert.equal(result.message, 'Internal explosion');
+    assert.equal(result.message, 'Internal daemon error');
     assert.equal(result.httpStatus, 500);
+  });
+
+  it('sanitizes raw daemon text for 502 sendError bodies', () => {
+    const result = translateDaemonResponse(502, sendErrorBody('ECONNREFUSED 127.0.0.1:4173'));
+    assert.equal(result.code, 'DAEMON_UNREACHABLE');
+    assert.equal(result.category, 'daemon');
+    assert.equal(result.message, 'Internal daemon error');
+    assert.equal(result.httpStatus, 502);
+  });
+
+  it('sanitizes raw daemon text for 503 sendError bodies', () => {
+    const result = translateDaemonResponse(503, sendErrorBody('upstream timeout'));
+    assert.equal(result.message, 'Internal daemon error');
+    assert.equal(result.httpStatus, 503);
   });
 
   it('preserves httpStatus for all pattern-matched sendError bodies', () => {

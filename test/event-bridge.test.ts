@@ -4,7 +4,7 @@
  * Covers: event emission with correct shape, multiple listeners, unsubscription,
  * cleanup, typed payload validation, and StreamManager bridge integration.
  */
-import { describe, it, beforeEach } from 'node:test';
+import { describe, it, beforeEach, mock } from 'node:test';
 import assert from 'node:assert/strict';
 import { EventBridge } from '../lib/daemon/event-bridge.ts';
 import { StreamManager } from '../lib/daemon/stream-manager.ts';
@@ -354,6 +354,29 @@ describe('StreamManager + EventBridge — throwing listener resilience', () => {
     const events = sm.getStreamEvents(turn.id);
     const deltas = events.filter((e) => e.kind === 'text-delta');
     assert.equal(deltas.length, 1, 'text-delta should be recorded');
+  });
+});
+
+describe('StreamManager + EventBridge — listener-failure observability', () => {
+  it('logs a warning with turn and event kind when a bridge listener throws', () => {
+    const { eventBridge, sm, turn } = setupBridgedStream();
+    eventBridge.on('stream-event', () => {
+      throw new Error('boom from listener');
+    });
+
+    const warnMock = mock.method(console, 'warn', () => {});
+    try {
+      sm.createStream(turn.id);
+
+      assert.equal(warnMock.mock.callCount(), 1, 'console.warn should be called once');
+      const msg = String(warnMock.mock.calls[0].arguments[0]);
+      assert.ok(msg.includes('bridgeEmit'), 'warning should mention bridgeEmit');
+      assert.ok(msg.includes(turn.id), 'warning should include turnId');
+      assert.ok(msg.includes('stream-started'), 'warning should include event kind');
+      assert.ok(msg.includes('boom from listener'), 'warning should include error message');
+    } finally {
+      warnMock.mock.restore();
+    }
   });
 });
 

@@ -207,7 +207,7 @@ export class DaemonClient {
     turnId: string,
     agentId: string,
   ): Promise<DaemonResult<FilterActivityByAgentResponse>> {
-    return this.get(`/turns/${encodeURIComponent(turnId)}/activities`, { agentId });
+    return this.get(`/turns/${encodeURIComponent(turnId)}/activities`, { agent: agentId });
   }
 
   // ─── Stream Replay (critical for reconnect — consumed by T032) ────────────
