@@ -83,7 +83,7 @@ function registerLifecycleRoutes(app: Hono<GatewayEnv>, dc: DaemonClient): void 
       return sendDaemonError(
         c,
         createGatewayErrorResponse({
-          code: 'VALIDATION_ERROR',
+          code: 'VALIDATION_FAILED',
           category: 'validation',
           message: 'parentConversationId and forkPointTurnId must both be present or both absent',
         }),

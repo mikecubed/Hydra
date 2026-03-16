@@ -236,6 +236,7 @@ describe('Conversation lifecycle routes (T010)', () => {
       );
       assert.equal(res.status, 400);
       const body = (await res.json()) as GatewayErrorResponse;
+      assert.equal(body.code, 'VALIDATION_FAILED');
       assert.equal(body.category, 'validation');
       assert.match(body.message, /parentConversationId.*forkPointTurnId/);
       assert.equal(mockClient.createConversation.mock.callCount(), 0);
@@ -250,6 +251,7 @@ describe('Conversation lifecycle routes (T010)', () => {
       );
       assert.equal(res.status, 400);
       const body = (await res.json()) as GatewayErrorResponse;
+      assert.equal(body.code, 'VALIDATION_FAILED');
       assert.equal(body.category, 'validation');
       assert.match(body.message, /parentConversationId.*forkPointTurnId/);
       assert.equal(mockClient.createConversation.mock.callCount(), 0);

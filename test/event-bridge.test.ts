@@ -122,14 +122,25 @@ describe('EventBridge — unsubscription', () => {
 // ── No event leaks after cleanup ─────────────────────────────────────────────
 
 describe('EventBridge — cleanup', () => {
-  it('dispose removes all listeners and prevents further emissions', () => {
+  it('dispose removes all existing listeners', () => {
     const received: Array<{ conversationId: string; event: StreamEvent }> = [];
     bridge.on('stream-event', (data) => received.push(data));
 
     bridge.dispose();
     bridge.emitStreamEvent('conv-1', makeStreamEvent());
 
-    assert.equal(received.length, 0, 'no events should be delivered after dispose');
+    assert.equal(received.length, 0, 'no events should be delivered to pre-dispose listeners');
+  });
+
+  it('new listeners added after dispose still receive events', () => {
+    bridge.on('stream-event', () => {});
+    bridge.dispose();
+
+    const received: Array<{ conversationId: string; event: StreamEvent }> = [];
+    bridge.on('stream-event', (data) => received.push(data));
+    bridge.emitStreamEvent('conv-1', makeStreamEvent());
+
+    assert.equal(received.length, 1, 'post-dispose listener should receive events');
   });
 
   it('listenerCount returns 0 after dispose', () => {

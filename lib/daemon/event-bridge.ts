@@ -59,7 +59,7 @@ export class EventBridge {
     return this.emitter.listenerCount(eventName);
   }
 
-  /** Remove all listeners and prevent further emissions. */
+  /** Remove all listeners. New listeners added after dispose will still work. */
   dispose(): void {
     this.emitter.removeAllListeners();
   }
