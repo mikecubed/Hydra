@@ -25,13 +25,50 @@ describe('packaging', { timeout: 120_000 }, () => {
   let tgzPath: string;
   /** Resolved path to the installed hydra package inside tmpDir. */
   let hydraPkgDir: string;
+  /** Disposable repo copy where npm pack runs (prepack/postpack mutations stay here). */
+  let repoClone: string;
 
   before(() => {
+    // ── Isolation: copy the repo to a temp dir so prepack/postpack side-effects
+    // (generated .js files, .packfiles, .package.json.bak) never touch the real
+    // working tree.  This prevents races with other tests running concurrently.
+    const excludeTopLevel = new Set([
+      'node_modules',
+      '.git',
+      'test',
+      'coverage',
+      'dist',
+      '.tsbuild',
+      '.build-exe',
+      '.pkg-cache',
+      'apps',
+      'packages',
+    ]);
+
+    repoClone = fs.mkdtempSync(path.join(os.tmpdir(), 'hydra-pack-repo-'));
+    fs.cpSync(ROOT, repoClone, {
+      recursive: true,
+      filter: (src: string) => {
+        const rel = path.relative(ROOT, src);
+        if (rel === '') return true; // root dir itself
+        const topSegment = rel.split(path.sep)[0];
+        return !excludeTopLevel.has(topSegment);
+      },
+    });
+
+    // Symlink node_modules from the real repo (too heavy to copy).
+    const symlinkType = process.platform === 'win32' ? 'junction' : 'dir';
+    fs.symlinkSync(
+      path.join(ROOT, 'node_modules'),
+      path.join(repoClone, 'node_modules'),
+      symlinkType,
+    );
+
     tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'hydra-pack-test-'));
 
-    // Pack the project into a tarball and capture the exact filename from stdout
+    // Pack from the isolated clone — all prepack/postpack mutations stay there
     const packOutput = execSync('npm pack', {
-      cwd: ROOT,
+      cwd: repoClone,
       stdio: 'pipe',
       encoding: 'utf8',
       env: { ...process.env, HUSKY: '0' },
@@ -43,9 +80,13 @@ describe('packaging', { timeout: 120_000 }, () => {
       tgzName.endsWith('.tgz'),
       `Expected npm pack to output a .tgz filename, got: ${packOutput}`,
     );
-    const srcTgz = path.join(ROOT, tgzName);
+    const srcTgz = path.join(repoClone, tgzName);
     tgzPath = path.join(tmpDir, tgzName);
     fs.renameSync(srcTgz, tgzPath);
+
+    // Dispose of the clone now that the tarball is captured
+    fs.rmSync(repoClone, { recursive: true, force: true });
+    repoClone = '';
 
     // Create a minimal package.json and install the tarball
     fs.writeFileSync(
@@ -62,6 +103,9 @@ describe('packaging', { timeout: 120_000 }, () => {
   });
 
   after(() => {
+    if (repoClone) {
+      fs.rmSync(repoClone, { recursive: true, force: true });
+    }
     if (tmpDir) {
       fs.rmSync(tmpDir, { recursive: true, force: true });
     }
@@ -149,7 +193,8 @@ describe('packaging', { timeout: 120_000 }, () => {
   });
 
   it('source repo package.json is restored after pack (not mutated)', () => {
-    // The repo-at-rest package.json should still reference .ts entrypoints.
+    // With isolated packing the real package.json was never touched, but verify
+    // it still references .ts entrypoints as a belt-and-suspenders check.
     const repoPkg = JSON.parse(fs.readFileSync(path.join(ROOT, 'package.json'), 'utf8'));
     assert.ok(
       (repoPkg.scripts.start as string).includes('.ts'),
