@@ -94,7 +94,7 @@ mediate → translate → respond._
   - **Depends**: T003, T009
   - **Validates**: FR-002, FR-007
 
-- [ ] T012 [P2] [US5] **TDD: Approval routes** — `GET /conversations/:convId/approvals`, `POST /approvals/:approvalId/respond`. Tests assert session validation, approval response forwarding with operator identity. Implement in `apps/web-gateway/src/conversation/conversation-routes.ts` (approvals section).
+- [ ] T012 [P2] [US5] **TDD: Approval routes** — `GET /conversations/:convId/approvals`, `POST /approvals/:approvalId/respond`. Tests assert session validation and that mediated approval calls preserve daemon context correctly: operator identity on approval routes, and `X-Session-Id`/session identity on `POST /approvals/:approvalId/respond` for daemon-side conflict attribution. Implement in `apps/web-gateway/src/conversation/conversation-routes.ts` (approvals section).
   - **Depends**: T003, T009
   - **Validates**: FR-003
 
