@@ -7,7 +7,10 @@
     "test": "node --test --experimental-test-module-mocks 'src/**/*.test.ts'"
   },
   "dependencies": {
+    "@hono/node-server": "^1.19.11",
     "@hydra/web-contracts": "*",
-    "hono": "^4.12.8"
+    "hono": "^4.12.8",
+    "ws": "^8.19.0",
+    "zod": "^4.3.6"
   }
 }

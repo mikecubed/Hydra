@@ -10,9 +10,13 @@ describe('SessionStateBroadcaster', () => {
   });
 
   it('registers and broadcasts to connection', () => {
-    const events: Array<{ type: string; newState: string }> = [];
+    const events: Array<{ type: string; previousState: string; newState: string }> = [];
     broadcaster.register('sess-1', (e) => events.push(e));
-    broadcaster.broadcast('sess-1', { type: 'state-change', newState: 'expired' });
+    broadcaster.broadcast('sess-1', {
+      type: 'state-change',
+      previousState: 'active',
+      newState: 'expired',
+    });
     assert.equal(events.length, 1);
     assert.equal(events[0]?.newState, 'expired');
   });
@@ -21,7 +25,11 @@ describe('SessionStateBroadcaster', () => {
     let count = 0;
     broadcaster.register('sess-1', () => count++);
     broadcaster.register('sess-1', () => count++);
-    broadcaster.broadcast('sess-1', { type: 'state-change', newState: 'logged-out' });
+    broadcaster.broadcast('sess-1', {
+      type: 'state-change',
+      previousState: 'active',
+      newState: 'logged-out',
+    });
     assert.equal(count, 2);
   });
 
@@ -30,7 +38,11 @@ describe('SessionStateBroadcaster', () => {
     broadcaster.register('sess-2', () => {
       called = true;
     });
-    broadcaster.broadcast('sess-1', { type: 'state-change', newState: 'expired' });
+    broadcaster.broadcast('sess-1', {
+      type: 'state-change',
+      previousState: 'active',
+      newState: 'expired',
+    });
     assert.equal(called, false);
   });
 
@@ -38,7 +50,11 @@ describe('SessionStateBroadcaster', () => {
     broadcaster.register('sess-1', () => {
       throw new Error('failed');
     });
-    broadcaster.broadcast('sess-1', { type: 'state-change', newState: 'expired' });
+    broadcaster.broadcast('sess-1', {
+      type: 'state-change',
+      previousState: 'active',
+      newState: 'expired',
+    });
     assert.equal(broadcaster.getListenerCount('sess-1'), 0);
   });
 

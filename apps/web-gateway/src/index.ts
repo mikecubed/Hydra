@@ -5,6 +5,7 @@
  * Exported as `createGatewayApp()` so both the production entry point and tests
  * can instantiate a fully-wired stack.
  */
+import type { Server } from 'node:http';
 import { Hono } from 'hono';
 import type { GatewayEnv } from './shared/types.ts';
 import { SessionStore } from './session/session-store.ts';
@@ -33,6 +34,9 @@ import { createSourceKeyMiddleware, type SourceKeyConfig } from './security/sour
 import { validateTlsConfig, isSecure, type TlsConfig } from './security/tls-guard.ts';
 import { DaemonClient, type DaemonClientOptions } from './conversation/daemon-client.ts';
 import { createConversationRoutes } from './conversation/conversation-routes.ts';
+import { SessionStateBroadcaster } from './session/session-state-broadcaster.ts';
+import { ConnectionRegistry } from './transport/connection-registry.ts';
+import { GatewayWsServer } from './transport/ws-server.ts';
 
 export interface GatewayAppDeps {
   clock?: Clock;
@@ -51,6 +55,10 @@ export interface GatewayAppDeps {
   daemonClientOptions?: DaemonClientOptions;
   /** Pre-built DaemonClient (for testing). Overrides daemonClientOptions. */
   daemonClient?: DaemonClient;
+  /** Optional HTTP server for WebSocket upgrade wiring. */
+  server?: Server;
+  sessionStateBroadcaster?: SessionStateBroadcaster;
+  connectionRegistry?: ConnectionRegistry;
 }
 
 export interface GatewayApp {
@@ -60,6 +68,9 @@ export interface GatewayApp {
   auditService: AuditService;
   operatorStore: OperatorStore;
   heartbeat: DaemonHeartbeat;
+  sessionStateBroadcaster: SessionStateBroadcaster;
+  connectionRegistry: ConnectionRegistry;
+  wsServer?: GatewayWsServer;
 }
 
 function resolveSecurityConfigs(deps: GatewayAppDeps): {
@@ -116,9 +127,17 @@ export function createGatewayApp(deps: GatewayAppDeps = {}): GatewayApp {
   const allowedOrigin = deps.allowedOrigin ?? 'http://127.0.0.1:4174';
 
   const auditService = new AuditService(auditStore, clock);
-  const sessionService = new SessionService(sessionStore, clock, deps.sessionConfig, auditService);
+  const sessionStateBroadcaster = deps.sessionStateBroadcaster ?? new SessionStateBroadcaster();
+  const sessionService = new SessionService(
+    sessionStore,
+    clock,
+    deps.sessionConfig,
+    auditService,
+    sessionStateBroadcaster,
+  );
   const rateLimiter = new RateLimiter(clock);
   const authService = new AuthService(operatorStore, rateLimiter, sessionService, auditService);
+  const connectionRegistry = deps.connectionRegistry ?? new ConnectionRegistry();
 
   const heartbeat = new DaemonHeartbeat(
     sessionService,
@@ -160,5 +179,26 @@ export function createGatewayApp(deps: GatewayAppDeps = {}): GatewayApp {
   const conversationRoutes = createConversationRoutes(daemonClient);
   app.route('/', createProtectedRouteGroup(conversationRoutes, sessionService, auditService));
 
-  return { app, sessionService, authService, auditService, operatorStore, heartbeat };
+  const wsServer =
+    deps.server == null
+      ? undefined
+      : new GatewayWsServer({
+          server: deps.server,
+          sessionService,
+          broadcaster: sessionStateBroadcaster,
+          allowedOrigin,
+          connectionRegistry,
+        });
+
+  return {
+    app,
+    sessionService,
+    authService,
+    auditService,
+    operatorStore,
+    heartbeat,
+    sessionStateBroadcaster,
+    connectionRegistry,
+    wsServer,
+  };
 }

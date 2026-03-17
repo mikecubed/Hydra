@@ -2,12 +2,19 @@
  * Session state broadcaster — sessionId → Set<callback> registry.
  * Notifies all connections on state change. Cleans failed callbacks. (FR-016)
  */
+import type { SessionState } from '@hydra/web-contracts';
+import type { SessionTrigger } from './session-state-machine.ts';
 
-export type StateChangeCallback = (event: {
-  type: string;
-  newState: string;
+export interface SessionStateChangeEvent {
+  type: 'state-change';
+  previousState: SessionState;
+  newState: SessionState;
   reason?: string;
-}) => void;
+  trigger?: SessionTrigger;
+  expiresAt?: string;
+}
+
+export type StateChangeCallback = (event: SessionStateChangeEvent) => void;
 
 export class SessionStateBroadcaster {
   private readonly listeners = new Map<string, Set<StateChangeCallback>>();
@@ -29,7 +36,7 @@ export class SessionStateBroadcaster {
     }
   }
 
-  broadcast(sessionId: string, event: { type: string; newState: string; reason?: string }): void {
+  broadcast(sessionId: string, event: SessionStateChangeEvent): void {
     const set = this.listeners.get(sessionId);
     if (!set) return;
 
