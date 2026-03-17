@@ -44,6 +44,7 @@ export class WsMessageHandler {
   readonly #buffer: EventBuffer;
   readonly #daemonClient: MessageHandlerDeps['daemonClient'];
   readonly #bufferHighWaterMark: number;
+  readonly #daemonReplayRetryFloors = new WeakMap<ManagedConnection, Map<string, number>>();
 
   constructor(deps: MessageHandlerDeps) {
     this.#registry = deps.registry;
@@ -87,6 +88,7 @@ export class WsMessageHandler {
 
     if (connection.subscribedConversations.has(conversationId)) {
       connection.replayState.set(conversationId, 'live');
+      this.#clearReplayRetryFloor(connection, conversationId);
       if (
         !this.#sendSubscribed(
           connection,
@@ -120,7 +122,13 @@ export class WsMessageHandler {
 
       // Determine whether buffer can satisfy a replay
       const replayFromSeq = lastAcknowledgedSeq ?? subscribeStartSeq;
-      const canReplay = this.#buffer.hasEventsSince(conversationId, replayFromSeq);
+      const mustBypassBuffer = this.#mustBypassBufferReplay(
+        connection,
+        conversationId,
+        replayFromSeq,
+      );
+      const canReplay =
+        !mustBypassBuffer && this.#buffer.hasEventsSince(conversationId, replayFromSeq);
 
       if (canReplay) {
         this.#startReplaySubscription(connection, conversationId, replayFromSeq);
@@ -170,6 +178,7 @@ export class WsMessageHandler {
 
     connection.pendingEvents.delete(conversationId);
     connection.replayState.set(conversationId, 'live');
+    this.#clearReplayRetryFloor(connection, conversationId);
 
     if (!this.#sendSubscribed(connection, conversationId, currentSeq)) {
       this.#cleanupSubscriptionState(connection, conversationId);
@@ -210,6 +219,7 @@ export class WsMessageHandler {
       this.#abortReplay(
         connection,
         conversationId,
+        lastAcknowledgedSeq,
         'REPLAY_INCOMPLETE',
         'Unable to load turn history for replay',
       );
@@ -232,6 +242,7 @@ export class WsMessageHandler {
       this.#abortReplay(
         connection,
         conversationId,
+        lastAcknowledgedSeq,
         'REPLAY_INCOMPLETE',
         `Stream replay failed for turn(s): ${failedTurnIds.join(', ')}`,
       );
@@ -254,6 +265,7 @@ export class WsMessageHandler {
 
     connection.pendingEvents.delete(conversationId);
     connection.replayState.set(conversationId, 'live');
+    this.#clearReplayRetryFloor(connection, conversationId);
 
     if (!this.#sendSubscribed(connection, conversationId, currentSeq)) {
       this.#cleanupSubscriptionState(connection, conversationId);
@@ -295,12 +307,48 @@ export class WsMessageHandler {
   #abortReplay(
     connection: ManagedConnection,
     conversationId: string,
+    lastAcknowledgedSeq: number,
     code: string,
     message: string,
   ): void {
-    this.#buffer.evictConversation(conversationId);
+    this.#recordReplayRetryFloor(connection, conversationId, lastAcknowledgedSeq);
     this.#sendError(connection, code, message, 'daemon', conversationId);
     this.#cleanupSubscriptionState(connection, conversationId);
+  }
+
+  #mustBypassBufferReplay(
+    connection: ManagedConnection,
+    conversationId: string,
+    replayFromSeq: number,
+  ): boolean {
+    const retryFloor = this.#daemonReplayRetryFloors.get(connection)?.get(conversationId);
+    return retryFloor !== undefined && replayFromSeq <= retryFloor;
+  }
+
+  #recordReplayRetryFloor(
+    connection: ManagedConnection,
+    conversationId: string,
+    replayFromSeq: number,
+  ): void {
+    let connectionFloors = this.#daemonReplayRetryFloors.get(connection);
+    if (connectionFloors === undefined) {
+      connectionFloors = new Map();
+      this.#daemonReplayRetryFloors.set(connection, connectionFloors);
+    }
+
+    const currentFloor = connectionFloors.get(conversationId) ?? Number.NEGATIVE_INFINITY;
+    if (replayFromSeq > currentFloor) {
+      connectionFloors.set(conversationId, replayFromSeq);
+    }
+  }
+
+  #clearReplayRetryFloor(connection: ManagedConnection, conversationId: string): void {
+    const connectionFloors = this.#daemonReplayRetryFloors.get(connection);
+    if (connectionFloors === undefined) return;
+    connectionFloors.delete(conversationId);
+    if (connectionFloors.size === 0) {
+      this.#daemonReplayRetryFloors.delete(connection);
+    }
   }
 
   async #loadTurnsForReplay(
@@ -368,6 +416,7 @@ export class WsMessageHandler {
     connection.replayState.set(conversationId, 'live');
     connection.pendingEvents.set(conversationId, []);
     this.#registry.addSubscription(connection.connectionId, conversationId);
+    this.#clearReplayRetryFloor(connection, conversationId);
 
     const currentSeq = this.#buffer.getHighwaterSeq(conversationId);
     if (!this.#sendSubscribed(connection, conversationId, currentSeq)) {
