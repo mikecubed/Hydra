@@ -37,6 +37,7 @@ function fakeConnection(connectionId: string, sessionId: string): SpyConnection 
     connectionId,
     sessionId,
     subscribedConversations: new Set<string>(),
+    pendingConversations: new Set<string>(),
     lastAckSeq: new Map<string, number>(),
     replayState: new Map(),
     pendingEvents: new Map(),
@@ -194,10 +195,7 @@ describe('EventForwarder', () => {
     it('does not deliver events when no connections are subscribed', () => {
       // Just emit — no subscribers at all
       bridge.emitStreamEvent('conv-1', makeEvent(1));
-      assert.deepEqual(
-        buffer.getEventsSince('conv-1', 0).map((event) => event.seq),
-        [1],
-      );
+      assert.deepEqual(buffer.getEventsSince('conv-1', 0), []);
     });
   });
 
@@ -221,12 +219,31 @@ describe('EventForwarder', () => {
       );
     });
 
-    it('populates buffer even when no connections are subscribed', () => {
+    it('populates buffer while a subscribe is still validating', () => {
+      const conn = fakeConnection('c1', 's1');
+      registry.register(conn);
+      registry.addPendingInterest('c1', 'conv-1');
+
       bridge.emitStreamEvent('conv-1', makeEvent(10));
 
       const buffered = buffer.getEventsSince('conv-1', 0);
       assert.equal(buffered.length, 1);
       assert.equal(buffered[0].seq, 10);
+    });
+
+    it('stops buffering once the last interest is removed', () => {
+      const conn = fakeConnection('c1', 's1');
+      registry.register(conn);
+      registry.addSubscription('c1', 'conv-1');
+
+      bridge.emitStreamEvent('conv-1', makeEvent(1));
+      registry.removeSubscription('c1', 'conv-1');
+      bridge.emitStreamEvent('conv-1', makeEvent(2));
+
+      assert.deepEqual(
+        buffer.getEventsSince('conv-1', 0).map((event) => event.seq),
+        [1],
+      );
     });
   });
 

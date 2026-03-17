@@ -14,6 +14,7 @@ export interface ManagedConnection {
   readonly connectionId: string;
   readonly sessionId: string;
   readonly subscribedConversations: Set<string>;
+  readonly pendingConversations: Set<string>;
   readonly lastAckSeq: Map<string, number>;
   readonly replayState: Map<string, ReplayState>;
   readonly pendingEvents: Map<string, StreamEvent[]>;
@@ -29,6 +30,7 @@ export class ConnectionRegistry {
   private readonly connections = new Map<string, ManagedConnection>();
   private readonly bySession = new Map<string, Set<ManagedConnection>>();
   private readonly byConversation = new Map<string, Set<ManagedConnection>>();
+  private readonly byPendingConversation = new Map<string, Set<ManagedConnection>>();
 
   get size(): number {
     return this.connections.size;
@@ -70,6 +72,16 @@ export class ConnectionRegistry {
       }
     }
 
+    for (const convId of conn.pendingConversations) {
+      const pendingSet = this.byPendingConversation.get(convId);
+      if (pendingSet) {
+        pendingSet.delete(conn);
+        if (pendingSet.size === 0) {
+          this.byPendingConversation.delete(convId);
+        }
+      }
+    }
+
     this.connections.delete(connectionId);
   }
 
@@ -85,6 +97,7 @@ export class ConnectionRegistry {
     const conn = this.connections.get(connectionId);
     if (!conn) return;
 
+    this.removePendingInterest(connectionId, conversationId);
     conn.subscribedConversations.add(conversationId);
 
     let convSet = this.byConversation.get(conversationId);
@@ -93,6 +106,20 @@ export class ConnectionRegistry {
       this.byConversation.set(conversationId, convSet);
     }
     convSet.add(conn);
+  }
+
+  addPendingInterest(connectionId: string, conversationId: string): void {
+    const conn = this.connections.get(connectionId);
+    if (!conn || conn.subscribedConversations.has(conversationId)) return;
+
+    conn.pendingConversations.add(conversationId);
+
+    let pendingSet = this.byPendingConversation.get(conversationId);
+    if (!pendingSet) {
+      pendingSet = new Set();
+      this.byPendingConversation.set(conversationId, pendingSet);
+    }
+    pendingSet.add(conn);
   }
 
   removeSubscription(connectionId: string, conversationId: string): void {
@@ -108,6 +135,28 @@ export class ConnectionRegistry {
         this.byConversation.delete(conversationId);
       }
     }
+  }
+
+  removePendingInterest(connectionId: string, conversationId: string): void {
+    const conn = this.connections.get(connectionId);
+    if (!conn) return;
+
+    conn.pendingConversations.delete(conversationId);
+
+    const pendingSet = this.byPendingConversation.get(conversationId);
+    if (pendingSet) {
+      pendingSet.delete(conn);
+      if (pendingSet.size === 0) {
+        this.byPendingConversation.delete(conversationId);
+      }
+    }
+  }
+
+  hasInterest(conversationId: string): boolean {
+    return (
+      (this.byConversation.get(conversationId)?.size ?? 0) > 0 ||
+      (this.byPendingConversation.get(conversationId)?.size ?? 0) > 0
+    );
   }
 
   closeAllForSession(sessionId: string): void {

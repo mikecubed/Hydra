@@ -15,6 +15,7 @@ function createMockConnection(sessionId: string): ManagedConnection & { sent: Se
     connectionId: `conn-${Math.random().toString(36).slice(2, 8)}`,
     sessionId,
     subscribedConversations: new Set(),
+    pendingConversations: new Set(),
     lastAckSeq: new Map(),
     replayState: new Map(),
     pendingEvents: new Map(),

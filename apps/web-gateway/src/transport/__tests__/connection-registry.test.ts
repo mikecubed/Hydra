@@ -13,6 +13,7 @@ function fakeConnection(
     connectionId,
     sessionId,
     subscribedConversations: new Set(),
+    pendingConversations: new Set(),
     lastAckSeq: new Map(),
     replayState: new Map(),
     pendingEvents: new Map(),
@@ -136,6 +137,33 @@ describe('ConnectionRegistry', () => {
     });
   });
 
+  describe('hasInterest', () => {
+    it('returns true for active subscriptions', () => {
+      const conn = fakeConnection('c1', 's1');
+      registry.register(conn);
+      registry.addSubscription('c1', 'conv-1');
+
+      assert.equal(registry.hasInterest('conv-1'), true);
+    });
+
+    it('returns true for pending subscribe validation', () => {
+      const conn = fakeConnection('c1', 's1');
+      registry.register(conn);
+      registry.addPendingInterest('c1', 'conv-1');
+
+      assert.equal(registry.hasInterest('conv-1'), true);
+    });
+
+    it('returns false once the last pending interest is removed', () => {
+      const conn = fakeConnection('c1', 's1');
+      registry.register(conn);
+      registry.addPendingInterest('c1', 'conv-1');
+      registry.removePendingInterest('c1', 'conv-1');
+
+      assert.equal(registry.hasInterest('conv-1'), false);
+    });
+  });
+
   // ─── addSubscription / removeSubscription ────────────────────────────────
 
   describe('addSubscription', () => {
@@ -189,6 +217,30 @@ describe('ConnectionRegistry', () => {
       assert.doesNotThrow(() => {
         registry.removeSubscription('nonexistent', 'conv-1');
       });
+    });
+  });
+
+  describe('pending interest lifecycle', () => {
+    it('moves a connection from pending to active interest on subscribe', () => {
+      const conn = fakeConnection('c1', 's1');
+      registry.register(conn);
+
+      registry.addPendingInterest('c1', 'conv-1');
+      registry.addSubscription('c1', 'conv-1');
+
+      assert.equal(conn.pendingConversations.has('conv-1'), false);
+      assert.equal(conn.subscribedConversations.has('conv-1'), true);
+      assert.equal(registry.hasInterest('conv-1'), true);
+    });
+
+    it('cleans pending interest when a connection unregisters', () => {
+      const conn = fakeConnection('c1', 's1');
+      registry.register(conn);
+      registry.addPendingInterest('c1', 'conv-1');
+
+      registry.unregister('c1');
+
+      assert.equal(registry.hasInterest('conv-1'), false);
     });
   });
 

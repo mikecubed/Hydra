@@ -42,6 +42,7 @@ function fakeConnection(connectionId: string, sessionId: string): TestConnection
     connectionId,
     sessionId,
     subscribedConversations: new Set(),
+    pendingConversations: new Set(),
     lastAckSeq: new Map(),
     replayState: new Map(),
     pendingEvents: new Map(),
@@ -250,6 +251,7 @@ describe('WsMessageHandler', () => {
 
       // Not subscribed
       assert.ok(!conn.subscribedConversations.has('invalid-conv'));
+      assert.equal(registry.hasInterest('invalid-conv'), false);
     });
 
     it('replays events that arrive while an initial subscribe is waiting on validation', async () => {
@@ -291,6 +293,36 @@ describe('WsMessageHandler', () => {
       assert.equal((conn.sent[2] as { currentSeq: number }).currentSeq, 2);
       assert.equal(conn.replayState.get('conv-1'), 'live');
       assert.equal(conn.subscribedConversations.has('conv-1'), true);
+    });
+
+    it('tracks pending interest while subscribe validation is in flight', async () => {
+      let resolveOpenConversation:
+        | ((value: ReturnType<typeof fakeConversationData>) => void)
+        | undefined;
+      handler = new WsMessageHandler({
+        registry,
+        buffer,
+        daemonClient: {
+          openConversation: async (_conversationId: string) =>
+            new Promise((resolve) => {
+              resolveOpenConversation = resolve as (
+                value: ReturnType<typeof fakeConversationData>,
+              ) => void;
+            }),
+        },
+        bufferHighWaterMark: HIGH_WATER_MARK,
+      });
+
+      const subscribePromise = handler.handleMessage(
+        conn,
+        JSON.stringify({ type: 'subscribe', conversationId: 'conv-1' }),
+      );
+      await Promise.resolve();
+
+      assert.equal(registry.hasInterest('conv-1'), true);
+      resolveOpenConversation?.(fakeConversationData('conv-1'));
+      await subscribePromise;
+      assert.equal(registry.hasInterest('conv-1'), true);
     });
   });
 

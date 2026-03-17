@@ -91,28 +91,37 @@ export class WsMessageHandler {
       return;
     }
 
-    // Validate conversation exists via daemon
-    const result = await this.#daemonClient.openConversation(conversationId);
-    if ('error' in result) {
-      this.#sendError(
-        connection,
-        result.error.code,
-        result.error.message,
-        result.error.category,
-        conversationId,
-      );
-      return;
-    }
+    this.#registry.addPendingInterest(connection.connectionId, conversationId);
 
-    // Determine whether buffer can satisfy a replay
-    const replayFromSeq = lastAcknowledgedSeq ?? subscribeStartSeq;
-    const canReplay = this.#buffer.hasEventsSince(conversationId, replayFromSeq);
+    try {
+      // Validate conversation exists via daemon
+      const result = await this.#daemonClient.openConversation(conversationId);
+      if (connection.isClosed) {
+        return;
+      }
+      if ('error' in result) {
+        this.#sendError(
+          connection,
+          result.error.code,
+          result.error.message,
+          result.error.category,
+          conversationId,
+        );
+        return;
+      }
 
-    if (canReplay) {
-      this.#startReplaySubscription(connection, conversationId, replayFromSeq);
-    } else {
-      // ── no replay (initial subscribe or buffer miss) ────────────────────
-      this.#startLiveSubscription(connection, conversationId);
+      // Determine whether buffer can satisfy a replay
+      const replayFromSeq = lastAcknowledgedSeq ?? subscribeStartSeq;
+      const canReplay = this.#buffer.hasEventsSince(conversationId, replayFromSeq);
+
+      if (canReplay) {
+        this.#startReplaySubscription(connection, conversationId, replayFromSeq);
+      } else {
+        // ── no replay (initial subscribe or buffer miss) ────────────────────
+        this.#startLiveSubscription(connection, conversationId);
+      }
+    } finally {
+      this.#registry.removePendingInterest(connection.connectionId, conversationId);
     }
   }
 

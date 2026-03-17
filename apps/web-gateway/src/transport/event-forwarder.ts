@@ -3,9 +3,10 @@
  * and forwards them to browser clients via WebSocket connections.
  *
  * For each event:
- *   (a) push to EventBuffer (always, regardless of subscribers)
- *   (b) look up subscribed connections via ConnectionRegistry.getByConversation()
- *   (c) per-connection per-conversation replay check:
+ *   (a) skip buffering unless the conversation has active or pending interest
+ *   (b) push to EventBuffer
+ *   (c) look up subscribed connections via ConnectionRegistry.getByConversation()
+ *   (d) per-connection per-conversation replay check:
  *       - if replayState is 'replaying' → queue in pendingEvents
  *       - if 'live' or no entry → send stream-event WS message immediately
  */
@@ -72,7 +73,11 @@ export class EventForwarder {
   }
 
   #handleStreamEvent(conversationId: string, event: StreamEvent): void {
-    // (a) Always buffer
+    if (!this.#registry.hasInterest(conversationId)) {
+      return;
+    }
+
+    // (a) Buffer while the conversation has active or pending listener interest
     this.#buffer.push(conversationId, event);
 
     // (b) Look up subscribed connections
