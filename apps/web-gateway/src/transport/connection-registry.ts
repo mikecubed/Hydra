@@ -17,6 +17,8 @@ export interface ManagedConnection {
   readonly lastAckSeq: Map<string, number>;
   readonly replayState: Map<string, ReplayState>;
   readonly pendingEvents: Map<string, StreamEvent[]>;
+  /** Bytes queued in the underlying WebSocket send buffer (0 when unavailable). */
+  readonly bufferedAmount: number;
   send(message: ServerMessage): void;
   updateAck(conversationId: string, seq: number): void;
   close(code?: number, reason?: string): void;

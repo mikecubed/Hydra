@@ -18,6 +18,7 @@ function createMockConnection(sessionId: string): ManagedConnection & { sent: Se
     lastAckSeq: new Map(),
     replayState: new Map(),
     pendingEvents: new Map(),
+    bufferedAmount: 0,
     sent,
     send(msg: ServerMessage) {
       sent.push(msg);

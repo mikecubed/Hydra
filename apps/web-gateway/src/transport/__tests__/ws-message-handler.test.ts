@@ -6,12 +6,13 @@
  * across conversations on the same connection.
  */
 import { describe, it, beforeEach } from 'node:test';
+import { Buffer } from 'node:buffer';
 import assert from 'node:assert/strict';
 import type { StreamEvent } from '@hydra/web-contracts';
 import type { ManagedConnection } from '../connection-registry.ts';
 import { ConnectionRegistry } from '../connection-registry.ts';
 import { EventBuffer } from '../event-buffer.ts';
-import type { ServerMessage } from '../ws-protocol.ts';
+import { serializeServerMessage, type ServerMessage } from '../ws-protocol.ts';
 import { WsMessageHandler, type MessageHandlerDeps } from '../ws-message-handler.ts';
 
 // ─── helpers ────────────────────────────────────────────────────────────────
@@ -30,16 +31,30 @@ function makeEvent(seq: number, kind: StreamEvent['kind'] = 'text-delta'): Strea
 function fakeConnection(
   connectionId: string,
   sessionId: string,
-): ManagedConnection & { sent: ServerMessage[] } {
+): ManagedConnection & {
+  sent: ServerMessage[];
+  _bufferedAmount: number;
+  closeCode?: number;
+  closeReason?: string;
+} {
   let closed = false;
   const sent: ServerMessage[] = [];
-  const connection: ManagedConnection & { sent: ServerMessage[] } = {
+  const connection: ManagedConnection & {
+    sent: ServerMessage[];
+    _bufferedAmount: number;
+    closeCode?: number;
+    closeReason?: string;
+  } = {
     connectionId,
     sessionId,
     subscribedConversations: new Set(),
     lastAckSeq: new Map(),
     replayState: new Map(),
     pendingEvents: new Map(),
+    _bufferedAmount: 0,
+    get bufferedAmount() {
+      return connection._bufferedAmount;
+    },
     sent,
     send(message: ServerMessage): void {
       sent.push(message);
@@ -50,14 +65,27 @@ function fakeConnection(
         connection.lastAckSeq.set(conversationId, seq);
       }
     },
-    close(): void {
+    close(code?: number, reason?: string): void {
       closed = true;
+      connection.closeCode = code;
+      connection.closeReason = reason;
     },
     get isClosed() {
       return closed;
     },
   };
   return connection;
+}
+
+function streamEventSize(conversationId: string, event: StreamEvent): number {
+  return Buffer.byteLength(
+    serializeServerMessage({
+      type: 'stream-event',
+      conversationId,
+      event,
+    }),
+    'utf8',
+  );
 }
 
 /** Stub DaemonClient that recognises a set of "valid" conversation IDs. */
@@ -93,6 +121,24 @@ function fakeDaemonClient(validIds: Set<string>): MessageHandlerDeps['daemonClie
   };
 }
 
+function fakeConversationData(conversationId: string) {
+  return {
+    data: {
+      conversation: {
+        id: conversationId,
+        status: 'active' as const,
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+        turnCount: 0,
+        pendingInstructionCount: 0,
+      },
+      recentTurns: [],
+      totalTurnCount: 0,
+      pendingApprovals: [],
+    },
+  };
+}
+
 // ─── tests ──────────────────────────────────────────────────────────────────
 
 describe('WsMessageHandler', () => {
@@ -101,15 +147,17 @@ describe('WsMessageHandler', () => {
   let handler: WsMessageHandler;
   let conn: ManagedConnection & { sent: ServerMessage[] };
   const validConvs = new Set(['conv-1', 'conv-2', 'conv-3']);
+  const HIGH_WATER_MARK = 256;
 
   beforeEach(() => {
     registry = new ConnectionRegistry();
-    buffer = new EventBuffer(100);
-    handler = new WsMessageHandler({
-      registry,
-      buffer,
-      daemonClient: fakeDaemonClient(validConvs),
-    });
+      buffer = new EventBuffer(100);
+      handler = new WsMessageHandler({
+        registry,
+        buffer,
+        daemonClient: fakeDaemonClient(validConvs),
+        bufferHighWaterMark: HIGH_WATER_MARK,
+      });
     conn = fakeConnection('c1', 's1');
     registry.register(conn);
   });
@@ -166,6 +214,30 @@ describe('WsMessageHandler', () => {
       assert.equal((conn.sent[0] as { currentSeq: number }).currentSeq, 2);
     });
 
+    it('closes duplicate subscribe when the subscribed acknowledgement would exceed the buffer threshold', async () => {
+      buffer.push('conv-1', makeEvent(1));
+      await handler.handleMessage(conn, JSON.stringify({ type: 'subscribe', conversationId: 'conv-1' }));
+      conn.sent.splice(0);
+
+      const subscribedSize = Buffer.byteLength(
+        serializeServerMessage({
+          type: 'subscribed',
+          conversationId: 'conv-1',
+          currentSeq: 1,
+        }),
+        'utf8',
+      );
+      conn._bufferedAmount = HIGH_WATER_MARK - subscribedSize + 1;
+
+      await handler.handleMessage(conn, JSON.stringify({ type: 'subscribe', conversationId: 'conv-1' }));
+
+      assert.equal(conn.isClosed, true);
+      assert.equal(conn.closeCode, 1008);
+      assert.equal(conn.sent[0].type, 'error');
+      assert.equal((conn.sent[0] as { code: string }).code, 'WS_BUFFER_OVERFLOW');
+      assert.equal(conn.subscribedConversations.has('conv-1'), false);
+    });
+
     it('rejects non-existent conversation with error', async () => {
       const msg = JSON.stringify({ type: 'subscribe', conversationId: 'invalid-conv' });
       await handler.handleMessage(conn, msg);
@@ -178,6 +250,43 @@ describe('WsMessageHandler', () => {
 
       // Not subscribed
       assert.ok(!conn.subscribedConversations.has('invalid-conv'));
+    });
+
+    it('replays events that arrive while an initial subscribe is waiting on validation', async () => {
+      let resolveOpenConversation: ((value: ReturnType<typeof fakeConversationData>) => void) | undefined;
+      handler = new WsMessageHandler({
+        registry,
+        buffer,
+        daemonClient: {
+          openConversation: async (conversationId: string) =>
+            new Promise((resolve) => {
+              resolveOpenConversation = resolve as (value: ReturnType<typeof fakeConversationData>) => void;
+            }),
+        },
+        bufferHighWaterMark: HIGH_WATER_MARK,
+      });
+
+      const subscribePromise = handler.handleMessage(
+        conn,
+        JSON.stringify({ type: 'subscribe', conversationId: 'conv-1' }),
+      );
+      await Promise.resolve();
+
+      buffer.push('conv-1', makeEvent(1));
+      buffer.push('conv-1', makeEvent(2));
+
+      resolveOpenConversation?.(fakeConversationData('conv-1'));
+      await subscribePromise;
+
+      assert.deepEqual(
+        conn.sent.map((message) => message.type),
+        ['stream-event', 'stream-event', 'subscribed'],
+      );
+      assert.equal((conn.sent[0] as { event: StreamEvent }).event.seq, 1);
+      assert.equal((conn.sent[1] as { event: StreamEvent }).event.seq, 2);
+      assert.equal((conn.sent[2] as { currentSeq: number }).currentSeq, 2);
+      assert.equal(conn.replayState.get('conv-1'), 'live');
+      assert.equal(conn.subscribedConversations.has('conv-1'), true);
     });
   });
 
@@ -233,6 +342,56 @@ describe('WsMessageHandler', () => {
       assert.equal((conn.sent[0] as { event: StreamEvent }).event.seq, 3);
       assert.equal(conn.sent[1].type, 'subscribed');
       assert.equal((conn.sent[1] as { currentSeq: number }).currentSeq, 3);
+    });
+
+    it('closes with WS_BUFFER_OVERFLOW when replay delivery would exceed the buffer threshold', async () => {
+      const event = makeEvent(1);
+      buffer.push('conv-1', event);
+      conn._bufferedAmount = HIGH_WATER_MARK - streamEventSize('conv-1', event) + 1;
+
+      const msg = JSON.stringify({
+        type: 'subscribe',
+        conversationId: 'conv-1',
+        lastAcknowledgedSeq: 0,
+      });
+      await handler.handleMessage(conn, msg);
+
+      assert.equal(conn.isClosed, true);
+      assert.equal(conn.closeCode, 1008);
+      assert.equal(conn.closeReason, 'WS_BUFFER_OVERFLOW');
+      assert.equal(conn.sent[0].type, 'error');
+      assert.equal((conn.sent[0] as { code: string }).code, 'WS_BUFFER_OVERFLOW');
+      assert.equal(conn.sent.some((message) => message.type === 'subscribed'), false);
+      assert.equal(conn.replayState.has('conv-1'), false);
+      assert.equal(conn.pendingEvents.has('conv-1'), false);
+      assert.equal(conn.subscribedConversations.has('conv-1'), false);
+      assert.equal(registry.getByConversation('conv-1').size, 0);
+    });
+
+    it('closes with WS_BUFFER_OVERFLOW when the final subscribed message would exceed the buffer threshold', async () => {
+      const event = makeEvent(1);
+      buffer.push('conv-1', event);
+      const subscribedSize = Buffer.byteLength(
+        serializeServerMessage({
+          type: 'subscribed',
+          conversationId: 'conv-1',
+          currentSeq: event.seq,
+        }),
+        'utf8',
+      );
+      conn._bufferedAmount = HIGH_WATER_MARK - subscribedSize + 1;
+
+      const msg = JSON.stringify({
+        type: 'subscribe',
+        conversationId: 'conv-1',
+      });
+      await handler.handleMessage(conn, msg);
+
+      assert.equal(conn.isClosed, true);
+      assert.equal(conn.closeCode, 1008);
+      assert.equal(conn.sent[0].type, 'error');
+      assert.equal((conn.sent[0] as { code: string }).code, 'WS_BUFFER_OVERFLOW');
+      assert.equal(conn.subscribedConversations.has('conv-1'), false);
     });
 
     it('sends only subscribed when lastAcknowledgedSeq equals highwater (nothing to replay)', async () => {
