@@ -800,4 +800,349 @@ describe('T030: End-to-end streaming integration', () => {
       .map((e) => (e.payload as { text: string }).text);
     assert.deepEqual(texts, ['a', 'b', 'c']);
   });
+
+  // ── T033: End-to-end reconnect/resume ──────────────────────────────────
+
+  describe('T033: End-to-end reconnect/resume', () => {
+    it('buffer-hit: full reconnect cycle replays missed events and resumes live streaming', async () => {
+      // (a) authenticate
+      const auth = await loginViaRest();
+
+      // (b) establish WS + subscribe
+      const ws1 = await connectWebSocket(port, { sessionId: auth.sessionId });
+      openSockets.push(ws1);
+      ws1.send(JSON.stringify({ type: 'subscribe', conversationId: CONV_ID }));
+      const sub1 = await waitForMessage(ws1);
+      assert.equal(sub1['type'], 'subscribed');
+
+      // (c) receive some events (full turn)
+      const turn1 = fakeDaemon.emitFullStream(CONV_ID, 'turn-bh-1', ['alpha', 'beta']);
+      const batch1 = await waitForMessages(ws1, turn1.length);
+      assert.equal(batch1.length, turn1.length);
+
+      // Record the seq just before the first event for reconnect
+      const reconnectFromSeq = turn1[0].seq - 1;
+
+      // (d) disconnect
+      ws1.close();
+      await once(ws1, 'close');
+      await waitFor(
+        () => gw.connectionRegistry.getByConversation(CONV_ID).size,
+        (size) => size === 0,
+      );
+
+      // (e) reconnect with new WS on same session
+      const ws2 = await connectWebSocket(port, { sessionId: auth.sessionId });
+      openSockets.push(ws2);
+
+      // (f) send subscribe with lastAcknowledgedSeq
+      ws2.send(
+        JSON.stringify({
+          type: 'subscribe',
+          conversationId: CONV_ID,
+          lastAcknowledgedSeq: reconnectFromSeq,
+        }),
+      );
+
+      // Assert all missed events replayed in order + subscribed confirmation
+      const replayMsgs = await waitForMessages(ws2, turn1.length + 1);
+      const replayed = replayMsgs.slice(0, turn1.length);
+      for (const [i, msg] of replayed.entries()) {
+        assert.equal(msg['type'], 'stream-event');
+        assert.deepEqual(msg['event'], turn1[i]);
+      }
+      assert.equal(replayMsgs[turn1.length]['type'], 'subscribed');
+
+      // (g) live streaming resumes seamlessly
+      const turn2 = fakeDaemon.emitFullStream(CONV_ID, 'turn-bh-2', ['gamma']);
+      const liveMsgs = await waitForMessages(ws2, turn2.length);
+      for (const [i, msg] of liveMsgs.entries()) {
+        assert.equal(msg['type'], 'stream-event');
+        assert.deepEqual(msg['event'], turn2[i]);
+      }
+
+      // SC-003: zero gaps, no duplicates, monotonic across replay + live
+      const allSeqs = [
+        ...replayed.map((m) => (m['event'] as StreamEvent).seq),
+        ...liveMsgs.map((m) => (m['event'] as StreamEvent).seq),
+      ];
+      assertMonotonicSequenceNumbers(allSeqs, 'buffer-hit reconnect: replay + live');
+
+      // Verify contiguity (no gaps)
+      for (let i = 1; i < allSeqs.length; i++) {
+        assert.equal(
+          allSeqs[i],
+          allSeqs[i - 1] + 1,
+          `Gap detected between seq ${String(allSeqs[i - 1])} and ${String(allSeqs[i])}`,
+        );
+      }
+    });
+
+    it('daemon-fallback: replays via daemon when buffer cannot satisfy and resumes live streaming', async () => {
+      // (a) authenticate
+      const auth = await loginViaRest();
+
+      // (b) establish WS + subscribe + receive turn 1 events
+      const ws1 = await connectWebSocket(port, { sessionId: auth.sessionId });
+      openSockets.push(ws1);
+      ws1.send(JSON.stringify({ type: 'subscribe', conversationId: CONV_ID }));
+      await waitForMessage(ws1); // subscribed
+
+      const turn1 = fakeDaemon.emitFullStream(CONV_ID, 'turn-df-1', ['one', 'two']);
+      await waitForMessages(ws1, turn1.length);
+      const lastTurn1Seq = lastItem(turn1).seq;
+
+      // (c) disconnect
+      ws1.close();
+      await once(ws1, 'close');
+      await waitFor(
+        () => gw.connectionRegistry.getByConversation(CONV_ID).size,
+        (s) => s === 0,
+      );
+
+      // Simulate buffer loss (e.g. server restart or buffer overflow)
+      gw.eventBuffer.evictConversation(CONV_ID);
+
+      // Build turn 2 events that the daemon will return during fallback replay
+      const turn2Events: StreamEvent[] = [
+        {
+          seq: lastTurn1Seq + 1,
+          turnId: 'turn-df-2',
+          kind: 'stream-started',
+          payload: { streamId: 'stream-df-2' },
+          timestamp: new Date().toISOString(),
+        },
+        {
+          seq: lastTurn1Seq + 2,
+          turnId: 'turn-df-2',
+          kind: 'text-delta',
+          payload: { text: 'three' },
+          timestamp: new Date().toISOString(),
+        },
+        {
+          seq: lastTurn1Seq + 3,
+          turnId: 'turn-df-2',
+          kind: 'text-delta',
+          payload: { text: 'four' },
+          timestamp: new Date().toISOString(),
+        },
+        {
+          seq: lastTurn1Seq + 4,
+          turnId: 'turn-df-2',
+          kind: 'stream-completed',
+          payload: { responseLength: 9 },
+          timestamp: new Date().toISOString(),
+        },
+      ];
+
+      // Configure wsDaemonClient for daemon-fallback replay
+      fakeDaemon.wsDaemonClient.openConversation = async (convId: string) => {
+        if (convId === CONV_ID) {
+          return {
+            data: {
+              conversation: {
+                id: CONV_ID,
+                status: 'active' as const,
+                createdAt: new Date().toISOString(),
+                updatedAt: new Date().toISOString(),
+                turnCount: 2,
+                pendingInstructionCount: 0,
+              },
+              recentTurns: [],
+              totalTurnCount: 2,
+              pendingApprovals: [],
+            },
+          };
+        }
+        return {
+          error: {
+            ok: false as const,
+            code: 'CONVERSATION_NOT_FOUND',
+            category: 'validation' as const,
+            message: 'Conversation not found',
+          },
+        };
+      };
+
+      fakeDaemon.wsDaemonClient.loadTurnHistory = async () => ({
+        data: {
+          turns: [
+            {
+              id: 'turn-df-1',
+              conversationId: CONV_ID,
+              position: 1,
+              kind: 'operator' as const,
+              attribution: { type: 'operator' as const, label: 'admin' },
+              instruction: 'test',
+              status: 'completed' as const,
+              createdAt: new Date().toISOString(),
+            },
+            {
+              id: 'turn-df-2',
+              conversationId: CONV_ID,
+              position: 2,
+              kind: 'operator' as const,
+              attribution: { type: 'operator' as const, label: 'admin' },
+              instruction: 'test2',
+              status: 'completed' as const,
+              createdAt: new Date().toISOString(),
+            },
+          ],
+          totalCount: 2,
+          hasMore: false,
+        },
+      });
+
+      fakeDaemon.wsDaemonClient.getStreamReplay = async (
+        _convId: string,
+        turnId: string,
+        lastAckSeq: number,
+      ) => {
+        // Turn 1 events: all have seq <= lastTurn1Seq = lastAckSeq, so empty after filter
+        if (turnId === 'turn-df-1') {
+          return { data: { events: turn1.filter((e) => e.seq > lastAckSeq) } };
+        }
+        // Turn 2 events: all have seq > lastTurn1Seq
+        if (turnId === 'turn-df-2') {
+          return { data: { events: turn2Events.filter((e) => e.seq > lastAckSeq) } };
+        }
+        return { data: { events: [] } };
+      };
+
+      // (d) reconnect with new WS on same session
+      const ws2 = await connectWebSocket(port, { sessionId: auth.sessionId });
+      openSockets.push(ws2);
+
+      // (e) send subscribe with lastAcknowledgedSeq
+      ws2.send(
+        JSON.stringify({
+          type: 'subscribe',
+          conversationId: CONV_ID,
+          lastAcknowledgedSeq: lastTurn1Seq,
+        }),
+      );
+
+      // (f) assert all missed events replayed in order (turn 2 events only)
+      const replayMsgs = await waitForMessages(ws2, turn2Events.length + 1);
+      const replayed = replayMsgs.slice(0, turn2Events.length);
+      for (const [i, msg] of replayed.entries()) {
+        assert.equal(msg['type'], 'stream-event');
+        assert.deepEqual(msg['event'], turn2Events[i]);
+      }
+      assert.equal(replayMsgs[turn2Events.length]['type'], 'subscribed');
+
+      // (g) live streaming resumes seamlessly — emit with correct seq continuation
+      const liveStartSeq = lastTurn1Seq + turn2Events.length + 1;
+      const turn3Events: StreamEvent[] = [
+        {
+          seq: liveStartSeq,
+          turnId: 'turn-df-3',
+          kind: 'stream-started',
+          payload: { streamId: 'stream-df-3' },
+          timestamp: new Date().toISOString(),
+        },
+        {
+          seq: liveStartSeq + 1,
+          turnId: 'turn-df-3',
+          kind: 'text-delta',
+          payload: { text: 'live-after-daemon' },
+          timestamp: new Date().toISOString(),
+        },
+        {
+          seq: liveStartSeq + 2,
+          turnId: 'turn-df-3',
+          kind: 'stream-completed',
+          payload: { responseLength: 17 },
+          timestamp: new Date().toISOString(),
+        },
+      ];
+      for (const event of turn3Events) {
+        bridge.emitStreamEvent(CONV_ID, event);
+      }
+      const liveMsgs = await waitForMessages(ws2, turn3Events.length);
+      for (const [i, msg] of liveMsgs.entries()) {
+        assert.equal(msg['type'], 'stream-event');
+        assert.deepEqual(msg['event'], turn3Events[i]);
+      }
+
+      // SC-003: monotonic + no gaps across replay + live
+      const allSeqs = [
+        ...replayed.map((m) => (m['event'] as StreamEvent).seq),
+        ...liveMsgs.map((m) => (m['event'] as StreamEvent).seq),
+      ];
+      assertMonotonicSequenceNumbers(allSeqs, 'daemon-fallback: replay + live');
+      for (let i = 1; i < allSeqs.length; i++) {
+        assert.equal(
+          allSeqs[i],
+          allSeqs[i - 1] + 1,
+          `Gap in daemon-fallback replay+live at seq ${String(allSeqs[i - 1])} → ${String(allSeqs[i])}`,
+        );
+      }
+    });
+
+    it('zero gaps and no duplicates across replay-to-live transition (SC-003)', async () => {
+      const auth = await loginViaRest();
+
+      // Subscribe and receive two turns of events
+      const ws1 = await connectWebSocket(port, { sessionId: auth.sessionId });
+      openSockets.push(ws1);
+      ws1.send(JSON.stringify({ type: 'subscribe', conversationId: CONV_ID }));
+      await waitForMessage(ws1); // subscribed
+
+      const t1 = fakeDaemon.emitFullStream(CONV_ID, 'turn-gap-1', ['a', 'b']);
+      const t2 = fakeDaemon.emitFullStream(CONV_ID, 'turn-gap-2', ['c', 'd']);
+      const allEmitted = [...t1, ...t2];
+      await waitForMessages(ws1, allEmitted.length);
+
+      const beforeAllSeq = t1[0].seq - 1;
+
+      // Disconnect
+      ws1.close();
+      await once(ws1, 'close');
+      await waitFor(
+        () => gw.connectionRegistry.getByConversation(CONV_ID).size,
+        (s) => s === 0,
+      );
+
+      // Reconnect — buffer-hit replay of all events
+      const ws2 = await connectWebSocket(port, { sessionId: auth.sessionId });
+      openSockets.push(ws2);
+      ws2.send(
+        JSON.stringify({
+          type: 'subscribe',
+          conversationId: CONV_ID,
+          lastAcknowledgedSeq: beforeAllSeq,
+        }),
+      );
+
+      const replayMsgs = await waitForMessages(ws2, allEmitted.length + 1);
+      assert.equal(replayMsgs[allEmitted.length]['type'], 'subscribed');
+
+      // Immediately emit a 3rd turn (live events)
+      const t3 = fakeDaemon.emitFullStream(CONV_ID, 'turn-gap-3', ['e']);
+      const liveMsgs = await waitForMessages(ws2, t3.length);
+
+      // Collect all sequence numbers (replay + live)
+      const replaySeqs = replayMsgs
+        .slice(0, allEmitted.length)
+        .map((m) => (m['event'] as StreamEvent).seq);
+      const liveSeqs = liveMsgs.map((m) => (m['event'] as StreamEvent).seq);
+      const allSeqs = [...replaySeqs, ...liveSeqs];
+
+      // Verify zero gaps: each consecutive seq differs by exactly 1
+      for (let i = 1; i < allSeqs.length; i++) {
+        assert.equal(
+          allSeqs[i],
+          allSeqs[i - 1] + 1,
+          `Gap at index ${String(i)}: expected ${String(allSeqs[i - 1] + 1)}, got ${String(allSeqs[i])}`,
+        );
+      }
+
+      // No duplicates: all seqs unique
+      assert.equal(new Set(allSeqs).size, allSeqs.length, 'Duplicate sequence numbers detected');
+
+      // Strictly monotonic
+      assertMonotonicSequenceNumbers(allSeqs, 'zero-gaps replay→live');
+    });
+  });
 });
