@@ -60,7 +60,11 @@ Before running any final gate:
 1. confirm the active branch and its PR target;
 2. make sure the intended code changes are already integrated;
 3. push the branch if needed so the remote PR diff matches local reality;
-4. identify the final review surface:
+4. verify the branch tip includes all remote-only commits and any commits from other batch
+   branches or worktrees that still need to be merged or cherry-picked onto this branch;
+5. confirm any temporary worktrees used for the batch are either already retired or intentionally
+   retained for a known reason;
+6. identify the final review surface:
    - preferably the feature-branch diff against `main`;
    - otherwise the current stable branch diff when no PR exists yet.
 

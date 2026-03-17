@@ -143,6 +143,14 @@ When multiple comments are legitimate:
 
 If comments interact tightly, resolve serially instead.
 
+When this skill uses parallel fix tracks, inherit the worktree lifecycle rules from
+`parallel-implementation-loop`:
+
+- track worktrees are temporary;
+- the active PR branch is the integration branch;
+- only batch-owned worktrees should be removed;
+- dirty worktrees require explicit reconciliation or developer approval before force removal.
+
 ### 4. Implement each accepted fix with Opus 4.6 subagents
 
 For every fix track:
@@ -206,6 +214,15 @@ After all comment threads are handled:
 5. use its Codex findings and final GPT review to decide whether one more targeted fix pass is
    needed.
 
+Before calling the PR diff stable:
+
+1. fetch and verify the active branch tip is not behind the remote branch tip or missing commits
+   from other batch branches or worktrees that should have been merged;
+2. reconcile any missing remote-only fix commits before the final gate;
+3. verify any review-fix worktrees used during this loop are either:
+   - already merged and clean, or
+   - explicitly retained for a known reason.
+
 ### 8. Final push and report
 
 Before concluding:
@@ -216,6 +233,12 @@ Before concluding:
 4. verify the PR reflects the latest comment-resolution work;
 5. make sure thread replies and resolutions are not stranded locally in an unpushed state;
 6. summarize remaining concerns, if any, so the developer can decide whether to continue or stop.
+
+If the loop created temporary worktrees, conclude by:
+
+1. removing clean merged or abandoned review-fix worktrees;
+2. refusing to silently force-remove dirty worktrees unless the developer explicitly asks;
+3. reporting any retained worktrees and why they still exist.
 
 ## Required Gates
 
@@ -248,6 +271,8 @@ The PR resolution batch is not complete until:
 - `final-pr-readiness-gate` has been run on the stable PR diff;
 - repo quality gates pass;
 - branch has been pushed;
+- temporary review-fix worktrees have been cleaned up, or any retained ones are explicitly called
+  out;
 - any remaining issues are explicitly reported.
 
 ## Quality Gates
