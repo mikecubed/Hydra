@@ -28,23 +28,17 @@ function makeEvent(seq: number, kind: StreamEvent['kind'] = 'text-delta'): Strea
 }
 
 /** Track all messages sent through connection.send(). */
-function fakeConnection(
-  connectionId: string,
-  sessionId: string,
-): ManagedConnection & {
+type TestConnection = ManagedConnection & {
   sent: ServerMessage[];
   _bufferedAmount: number;
   closeCode?: number;
   closeReason?: string;
-} {
+};
+
+function fakeConnection(connectionId: string, sessionId: string): TestConnection {
   let closed = false;
   const sent: ServerMessage[] = [];
-  const connection: ManagedConnection & {
-    sent: ServerMessage[];
-    _bufferedAmount: number;
-    closeCode?: number;
-    closeReason?: string;
-  } = {
+  const connection: TestConnection = {
     connectionId,
     sessionId,
     subscribedConversations: new Set(),
@@ -145,19 +139,19 @@ describe('WsMessageHandler', () => {
   let registry: ConnectionRegistry;
   let buffer: EventBuffer;
   let handler: WsMessageHandler;
-  let conn: ManagedConnection & { sent: ServerMessage[] };
+  let conn: TestConnection;
   const validConvs = new Set(['conv-1', 'conv-2', 'conv-3']);
   const HIGH_WATER_MARK = 256;
 
   beforeEach(() => {
     registry = new ConnectionRegistry();
-      buffer = new EventBuffer(100);
-      handler = new WsMessageHandler({
-        registry,
-        buffer,
-        daemonClient: fakeDaemonClient(validConvs),
-        bufferHighWaterMark: HIGH_WATER_MARK,
-      });
+    buffer = new EventBuffer(100);
+    handler = new WsMessageHandler({
+      registry,
+      buffer,
+      daemonClient: fakeDaemonClient(validConvs),
+      bufferHighWaterMark: HIGH_WATER_MARK,
+    });
     conn = fakeConnection('c1', 's1');
     registry.register(conn);
   });
@@ -216,7 +210,10 @@ describe('WsMessageHandler', () => {
 
     it('closes duplicate subscribe when the subscribed acknowledgement would exceed the buffer threshold', async () => {
       buffer.push('conv-1', makeEvent(1));
-      await handler.handleMessage(conn, JSON.stringify({ type: 'subscribe', conversationId: 'conv-1' }));
+      await handler.handleMessage(
+        conn,
+        JSON.stringify({ type: 'subscribe', conversationId: 'conv-1' }),
+      );
       conn.sent.splice(0);
 
       const subscribedSize = Buffer.byteLength(
@@ -229,7 +226,10 @@ describe('WsMessageHandler', () => {
       );
       conn._bufferedAmount = HIGH_WATER_MARK - subscribedSize + 1;
 
-      await handler.handleMessage(conn, JSON.stringify({ type: 'subscribe', conversationId: 'conv-1' }));
+      await handler.handleMessage(
+        conn,
+        JSON.stringify({ type: 'subscribe', conversationId: 'conv-1' }),
+      );
 
       assert.equal(conn.isClosed, true);
       assert.equal(conn.closeCode, 1008);
@@ -253,14 +253,18 @@ describe('WsMessageHandler', () => {
     });
 
     it('replays events that arrive while an initial subscribe is waiting on validation', async () => {
-      let resolveOpenConversation: ((value: ReturnType<typeof fakeConversationData>) => void) | undefined;
+      let resolveOpenConversation:
+        | ((value: ReturnType<typeof fakeConversationData>) => void)
+        | undefined;
       handler = new WsMessageHandler({
         registry,
         buffer,
         daemonClient: {
-          openConversation: async (conversationId: string) =>
+          openConversation: async (_conversationId: string) =>
             new Promise((resolve) => {
-              resolveOpenConversation = resolve as (value: ReturnType<typeof fakeConversationData>) => void;
+              resolveOpenConversation = resolve as (
+                value: ReturnType<typeof fakeConversationData>,
+              ) => void;
             }),
         },
         bufferHighWaterMark: HIGH_WATER_MARK,
@@ -361,7 +365,10 @@ describe('WsMessageHandler', () => {
       assert.equal(conn.closeReason, 'WS_BUFFER_OVERFLOW');
       assert.equal(conn.sent[0].type, 'error');
       assert.equal((conn.sent[0] as { code: string }).code, 'WS_BUFFER_OVERFLOW');
-      assert.equal(conn.sent.some((message) => message.type === 'subscribed'), false);
+      assert.equal(
+        conn.sent.some((message) => message.type === 'subscribed'),
+        false,
+      );
       assert.equal(conn.replayState.has('conv-1'), false);
       assert.equal(conn.pendingEvents.has('conv-1'), false);
       assert.equal(conn.subscribedConversations.has('conv-1'), false);

@@ -11,10 +11,7 @@
  */
 
 import type { StreamEvent } from '@hydra/web-contracts';
-import {
-  DEFAULT_BUFFER_HIGH_WATER_MARK,
-  sendWithBackpressureProtection,
-} from './backpressure.ts';
+import { DEFAULT_BUFFER_HIGH_WATER_MARK, sendWithBackpressureProtection } from './backpressure.ts';
 import type { EventBuffer } from './event-buffer.ts';
 import type { ConnectionRegistry, ManagedConnection } from './connection-registry.ts';
 
@@ -119,10 +116,14 @@ export class EventForwarder {
     }
 
     // 'live' or no entry — send immediately
-    sendWithBackpressureProtection(conn, {
-      type: 'stream-event',
-      conversationId,
-      event,
-    }, this.#highWaterMark);
+    sendWithBackpressureProtection(
+      conn,
+      {
+        type: 'stream-event',
+        conversationId,
+        event,
+      },
+      this.#highWaterMark,
+    );
   }
 }

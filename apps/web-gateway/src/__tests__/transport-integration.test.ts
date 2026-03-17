@@ -52,17 +52,26 @@ async function closeServer(server: Server): Promise<void> {
   });
 }
 
+function rawDataToJson(data: WebSocket.RawData): Record<string, unknown> {
+  if (typeof data === 'string') {
+    return JSON.parse(data) as Record<string, unknown>;
+  }
+
+  if (data instanceof ArrayBuffer) {
+    return JSON.parse(new TextDecoder().decode(new Uint8Array(data))) as Record<string, unknown>;
+  }
+
+  if (Array.isArray(data)) {
+    return JSON.parse(Buffer.concat(data).toString('utf8')) as Record<string, unknown>;
+  }
+
+  const parsed: unknown = JSON.parse(data.toString('utf8'));
+  return parsed as Record<string, unknown>;
+}
+
 async function waitForMessage(ws: WebSocket): Promise<Record<string, unknown>> {
   const [data] = (await once(ws, 'message')) as [WebSocket.RawData];
-  const text =
-    typeof data === 'string'
-      ? data
-      : data instanceof ArrayBuffer
-        ? new TextDecoder().decode(new Uint8Array(data))
-        : Array.isArray(data)
-          ? Buffer.concat(data).toString('utf8')
-          : (data as Buffer).toString('utf8');
-  return JSON.parse(text) as Record<string, unknown>;
+  return rawDataToJson(data);
 }
 
 async function waitForMessages(
@@ -82,15 +91,7 @@ async function waitForMessages(
     }, timeoutMs);
 
     function onMessage(data: WebSocket.RawData) {
-      const text =
-        typeof data === 'string'
-          ? data
-          : data instanceof ArrayBuffer
-            ? new TextDecoder().decode(new Uint8Array(data))
-            : Array.isArray(data)
-              ? Buffer.concat(data).toString('utf8')
-              : (data as Buffer).toString('utf8');
-      messages.push(JSON.parse(text) as Record<string, unknown>);
+      messages.push(rawDataToJson(data));
       if (messages.length === count) {
         clearTimeout(timer);
         ws.off('message', onMessage);
@@ -116,8 +117,30 @@ async function waitFor<T>(
     if (Date.now() - startedAt >= timeoutMs) {
       throw new Error('Timed out waiting for condition');
     }
-    await new Promise((resolve) => setTimeout(resolve, 25));
+    await new Promise((resolve) => {
+      setTimeout(resolve, 25);
+    });
   }
+}
+
+function assertMonotonicSequenceNumbers(seqs: number[], description: string): void {
+  const pairs = seqs.slice(1).entries();
+  for (const [offset, seq] of pairs) {
+    const previous = seqs[offset];
+    assert.ok(
+      seq > previous,
+      `${description}: seq[${String(offset + 1)}]=${String(seq)} should be > seq[${String(offset)}]=${String(previous)}`,
+    );
+  }
+}
+
+function lastItem<T>(items: T[]): T {
+  // eslint-disable-next-line unicorn/prefer-at -- `.at()` conflicts with this package's Node compatibility lint rule.
+  const item = items[items.length - 1];
+  if (item === undefined) {
+    throw new Error('Expected non-empty array');
+  }
+  return item;
 }
 
 async function connectWebSocket(
@@ -403,19 +426,16 @@ describe('T030: End-to-end streaming integration', () => {
     instruction: string,
     auth: { sessionId: string; csrfToken: string },
   ): Promise<Record<string, unknown>> {
-    const res = await fetch(
-      `http://127.0.0.1:${port}/conversations/${conversationId}/turns`,
-      {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Origin: ORIGIN,
-          Cookie: `__session=${auth.sessionId}; __csrf=${auth.csrfToken}`,
-          'X-CSRF-Token': auth.csrfToken,
-        },
-        body: JSON.stringify({ instruction }),
+    const res = await fetch(`http://127.0.0.1:${port}/conversations/${conversationId}/turns`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Origin: ORIGIN,
+        Cookie: `__session=${auth.sessionId}; __csrf=${auth.csrfToken}`,
+        'X-CSRF-Token': auth.csrfToken,
       },
-    );
+      body: JSON.stringify({ instruction }),
+    });
     assert.equal(res.status, 201, `Submit instruction failed: ${String(res.status)}`);
     return (await res.json()) as Record<string, unknown>;
   }
@@ -455,18 +475,16 @@ describe('T030: End-to-end streaming integration', () => {
     // 7. Assert correct event types in order
     assert.equal(wsMessages.length, emitted.length);
     assert.equal((wsMessages[0]['event'] as StreamEvent).kind, 'stream-started');
-    assert.equal((wsMessages[wsMessages.length - 1]['event'] as StreamEvent).kind, 'stream-completed');
+    assert.equal((lastItem(wsMessages)['event'] as StreamEvent).kind, 'stream-completed');
 
-    const textDeltas = wsMessages.filter(
-      (m) => (m['event'] as StreamEvent).kind === 'text-delta',
-    );
+    const textDeltas = wsMessages.filter((m) => (m['event'] as StreamEvent).kind === 'text-delta');
     assert.equal(textDeltas.length, 3);
 
     // 8. Verify every WS message wraps the event correctly
-    for (let i = 0; i < wsMessages.length; i++) {
-      assert.equal(wsMessages[i]['type'], 'stream-event');
-      assert.equal(wsMessages[i]['conversationId'], CONV_ID);
-      assert.deepEqual(wsMessages[i]['event'], emitted[i]);
+    for (const [index, message] of wsMessages.entries()) {
+      assert.equal(message['type'], 'stream-event');
+      assert.equal(message['conversationId'], CONV_ID);
+      assert.deepEqual(message['event'], emitted[index]);
     }
   });
 
@@ -481,20 +499,13 @@ describe('T030: End-to-end streaming integration', () => {
     await waitForMessage(ws); // subscribed
 
     // Emit a longer stream to make monotonicity check meaningful
-    const emitted = fakeDaemon.emitFullStream(CONV_ID, 'turn-mono', [
-      'a', 'b', 'c', 'd', 'e',
-    ]);
+    const emitted = fakeDaemon.emitFullStream(CONV_ID, 'turn-mono', ['a', 'b', 'c', 'd', 'e']);
 
     const wsMessages = await waitForMessages(ws, emitted.length);
     const seqs = wsMessages.map((m) => (m['event'] as StreamEvent).seq);
 
     // Strictly increasing
-    for (let i = 1; i < seqs.length; i++) {
-      assert.ok(
-        seqs[i] > seqs[i - 1],
-        `seq[${String(i)}]=${String(seqs[i])} should be > seq[${String(i - 1)}]=${String(seqs[i - 1])}`,
-      );
-    }
+    assertMonotonicSequenceNumbers(seqs, 'single stream');
   });
 
   // ── Multi-conversation isolation ───────────────────────────────────────
@@ -614,7 +625,7 @@ describe('T030: End-to-end streaming integration', () => {
     assert.equal(wsMessages.length, emitted.length);
 
     // Client acknowledges the last event
-    const lastSeq = (wsMessages[wsMessages.length - 1]['event'] as StreamEvent).seq;
+    const lastSeq = (lastItem(wsMessages)['event'] as StreamEvent).seq;
     ws.send(JSON.stringify({ type: 'ack', conversationId: CONV_ID, seq: lastSeq }));
 
     // Verify ack was recorded on the connection once the async message queue drains
@@ -674,12 +685,7 @@ describe('T030: End-to-end streaming integration', () => {
     const seqs = wsMessages.map((m) => (m['event'] as StreamEvent).seq);
 
     // Globally monotonically increasing across both turns
-    for (let i = 1; i < seqs.length; i++) {
-      assert.ok(
-        seqs[i] > seqs[i - 1],
-        `seq[${String(i)}]=${String(seqs[i])} must be > seq[${String(i - 1)}]=${String(seqs[i - 1])}`,
-      );
-    }
+    assertMonotonicSequenceNumbers(seqs, 'multi-turn stream');
 
     // Verify both turns are represented
     const turnIds = new Set(wsMessages.map((m) => (m['event'] as StreamEvent).turnId));
@@ -721,9 +727,9 @@ describe('T030: End-to-end streaming integration', () => {
 
     // Replayed stream-events arrive before the subscribed message
     const replayedEvents = replayMsgs.slice(0, emitted.length);
-    for (let i = 0; i < replayedEvents.length; i++) {
-      assert.equal(replayedEvents[i]['type'], 'stream-event');
-      assert.deepEqual(replayedEvents[i]['event'], emitted[i]);
+    for (const [index, replayedEvent] of replayedEvents.entries()) {
+      assert.equal(replayedEvent['type'], 'stream-event');
+      assert.deepEqual(replayedEvent['event'], emitted[index]);
     }
 
     const subscribedMsg = replayMsgs[emitted.length];
@@ -744,14 +750,14 @@ describe('T030: End-to-end streaming integration', () => {
     await waitForMessages(ws, emitted.length);
 
     // Verify events are in the buffer
-    const lastSeq = emitted[emitted.length - 1].seq;
+    const lastSeq = lastItem(emitted).seq;
     assert.equal(gw.eventBuffer.getHighwaterSeq(CONV_ID), lastSeq);
 
     // Replay from buffer should return all events
     const replayed = gw.eventBuffer.getEventsSince(CONV_ID, 0);
     assert.equal(replayed.length, emitted.length);
-    for (let i = 0; i < replayed.length; i++) {
-      assert.deepEqual(replayed[i], emitted[i]);
+    for (const [index, replayedEvent] of replayed.entries()) {
+      assert.deepEqual(replayedEvent, emitted[index]);
     }
   });
 
@@ -770,11 +776,11 @@ describe('T030: End-to-end streaming integration', () => {
     const events = wsMessages.map((m) => m['event'] as StreamEvent);
 
     assert.equal(events[0].kind, 'stream-started');
-    assert.equal(events[events.length - 1].kind, 'stream-completed');
+    assert.equal(lastItem(events).kind, 'stream-completed');
 
     // All middle events should be text-deltas
-    for (let i = 1; i < events.length - 1; i++) {
-      assert.equal(events[i].kind, 'text-delta');
+    for (const event of events.slice(1, -1)) {
+      assert.equal(event.kind, 'text-delta');
     }
 
     // text-delta payloads should match

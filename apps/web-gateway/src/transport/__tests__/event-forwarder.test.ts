@@ -358,14 +358,8 @@ describe('EventForwarder', () => {
 
       assert.equal(tab1.sent.length, 1);
       assert.equal(tab2.sent.length, 1);
-      assert.deepStrictEqual(
-        (tab1.sent[0] as { event: StreamEvent }).event,
-        event,
-      );
-      assert.deepStrictEqual(
-        (tab2.sent[0] as { event: StreamEvent }).event,
-        event,
-      );
+      assert.deepStrictEqual((tab1.sent[0] as { event: StreamEvent }).event, event);
+      assert.deepStrictEqual((tab2.sent[0] as { event: StreamEvent }).event, event);
     });
 
     it('delivers a sequence of events to all tabs in the same session', () => {
@@ -549,10 +543,7 @@ describe('EventForwarder', () => {
 
       assert.equal(slow.isClosed, true);
       assert.equal(fast.isClosed, false);
-      assert.equal(
-        fast.sent.filter((m) => m.type === 'stream-event').length,
-        1,
-      );
+      assert.equal(fast.sent.filter((m) => m.type === 'stream-event').length, 1);
     });
 
     it('still buffers the event even when all connections overflow', () => {

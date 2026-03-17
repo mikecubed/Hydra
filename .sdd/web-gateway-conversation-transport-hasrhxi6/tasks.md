@@ -180,19 +180,19 @@ the event buffer and subscription message handling._
   - **Depends**: T005, T018, T019, T025
   - **Validates**: FR-010, FR-011, FR-024, SC-012
 
-- [ ] T028 [P1] [US2] **TDD: Multi-tab event forwarding** — write tests asserting that multiple connections (different tabs, same session) subscribed to the same conversation all receive the same stream events. One tab submits instruction via REST, both tabs see events. Tests in `apps/web-gateway/src/__tests__/event-forwarder.test.ts`.
+- [x] T028 [P1] [US2] **TDD: Multi-tab event forwarding** — write tests asserting that multiple connections (different tabs, same session) subscribed to the same conversation all receive the same stream events. One tab submits instruction via REST, both tabs see events. Tests in `apps/web-gateway/src/__tests__/event-forwarder.test.ts`.
   - **Depends**: T027
   - **Validates**: FR-010 (edge case)
 
-- [ ] T029 [P1] [US2] **TDD: Buffer overflow / backpressure handling** — when a connection's WebSocket send buffer backs up (slow client), the gateway closes the connection with `WS_BUFFER_OVERFLOW` structured error so the browser can reconnect via resume flow. Write tests with artificial backpressure. Implement in `apps/web-gateway/src/transport/event-forwarder.ts`.
+- [x] T029 [P1] [US2] **TDD: Buffer overflow / backpressure handling** — when a connection's WebSocket send buffer backs up (slow client), the gateway closes the connection with `WS_BUFFER_OVERFLOW` structured error so the browser can reconnect via resume flow. Write tests with artificial backpressure. Implement in `apps/web-gateway/src/transport/event-forwarder.ts`.
   - **Depends**: T027
   - **Validates**: FR-013 (edge case)
 
-- [ ] T030 [P1] [US2] **Integration test: end-to-end streaming** — create full gateway app with daemon + event bridge, authenticate, open WebSocket, subscribe to conversation, submit instruction via REST, assert stream events (`stream-started`, `text-delta`, `stream-completed`) arrive through WebSocket as daemon produces them. Verify sequence numbers are monotonic. Implement `apps/web-gateway/src/__tests__/transport-integration.test.ts`.
+- [x] T030 [P1] [US2] **Integration test: end-to-end streaming** — create full gateway app with daemon + event bridge, authenticate, open WebSocket, subscribe to conversation, submit instruction via REST, assert stream events (`stream-started`, `text-delta`, `stream-completed`) arrive through WebSocket as daemon produces them. Verify sequence numbers are monotonic. Implement `apps/web-gateway/src/__tests__/transport-integration.test.ts`.
   - **Depends**: T015, T023, T026, T027
   - **Validates**: SC-001 (full path), SC-002, SC-012
 
-- [ ] T031 [P1] [US2] **Quality gate: Phase 4** — `npm run quality` and `npm test`. Full streaming pipeline functional.
+- [x] T031 [P1] [US2] **Quality gate: Phase 4** — `npm run quality` and `npm test`. Full streaming pipeline functional.
   - **Depends**: T030
   - **Validates**: SC-011
 

@@ -11,10 +11,7 @@
  *   - On invalid message: responds with type:'error' without closing.
  */
 import type { StreamEvent } from '@hydra/web-contracts';
-import {
-  DEFAULT_BUFFER_HIGH_WATER_MARK,
-  sendWithBackpressureProtection,
-} from './backpressure.ts';
+import { DEFAULT_BUFFER_HIGH_WATER_MARK, sendWithBackpressureProtection } from './backpressure.ts';
 import type { ManagedConnection } from './connection-registry.ts';
 import type { ConnectionRegistry } from './connection-registry.ts';
 import type { EventBuffer } from './event-buffer.ts';
@@ -78,12 +75,17 @@ export class WsMessageHandler {
     conversationId: string,
     lastAcknowledgedSeq?: number,
   ): Promise<void> {
-    const subscribeStartSeq =
-      lastAcknowledgedSeq ?? this.#buffer.getHighwaterSeq(conversationId);
+    const subscribeStartSeq = lastAcknowledgedSeq ?? this.#buffer.getHighwaterSeq(conversationId);
 
     if (connection.subscribedConversations.has(conversationId)) {
       connection.replayState.set(conversationId, 'live');
-      if (!this.#sendSubscribed(connection, conversationId, this.#buffer.getHighwaterSeq(conversationId))) {
+      if (
+        !this.#sendSubscribed(
+          connection,
+          conversationId,
+          this.#buffer.getHighwaterSeq(conversationId),
+        )
+      ) {
         this.#cleanupSubscriptionState(connection, conversationId);
       }
       return;
@@ -107,58 +109,76 @@ export class WsMessageHandler {
     const canReplay = this.#buffer.hasEventsSince(conversationId, replayFromSeq);
 
     if (canReplay) {
-      // ── replay barrier ──────────────────────────────────────────────────
-      connection.replayState.set(conversationId, 'replaying');
-      connection.pendingEvents.set(conversationId, []);
-      this.#registry.addSubscription(connection.connectionId, conversationId);
-
-      const buffered = this.#buffer.getEventsSince(conversationId, replayFromSeq);
-
-      // Send each buffered event
-      for (const event of buffered) {
-        if (!this.#sendStreamEvent(connection, conversationId, event)) {
-          this.#cleanupSubscriptionState(connection, conversationId);
-          return;
-        }
-      }
-
-      // Compute last replayed seq
-      const lastReplayedSeq = lastSeq(buffered) ?? replayFromSeq;
-
-      // Flush pending queue (events queued by T027 during replay)
-      const pending = connection.pendingEvents.get(conversationId) ?? [];
-      const seen = new Map<number, StreamEvent>();
-      for (const evt of pending) {
-        if (evt.seq > lastReplayedSeq) {
-          seen.set(evt.seq, evt);
-        }
-      }
-      const toFlush = [...seen.values()].sort((a, b) => a.seq - b.seq);
-      for (const event of toFlush) {
-        if (!this.#sendStreamEvent(connection, conversationId, event)) {
-          this.#cleanupSubscriptionState(connection, conversationId);
-          return;
-        }
-      }
-
-      const currentSeq = lastSeq(toFlush) ?? lastReplayedSeq;
-
-      connection.pendingEvents.delete(conversationId);
-      connection.replayState.set(conversationId, 'live');
-
-      if (!this.#sendSubscribed(connection, conversationId, currentSeq)) {
-        this.#cleanupSubscriptionState(connection, conversationId);
-      }
+      this.#startReplaySubscription(connection, conversationId, replayFromSeq);
     } else {
       // ── no replay (initial subscribe or buffer miss) ────────────────────
-      connection.replayState.set(conversationId, 'live');
-      connection.pendingEvents.set(conversationId, []);
-      this.#registry.addSubscription(connection.connectionId, conversationId);
+      this.#startLiveSubscription(connection, conversationId);
+    }
+  }
 
-      const currentSeq = this.#buffer.getHighwaterSeq(conversationId);
-      if (!this.#sendSubscribed(connection, conversationId, currentSeq)) {
+  #startReplaySubscription(
+    connection: ManagedConnection,
+    conversationId: string,
+    replayFromSeq: number,
+  ): void {
+    connection.replayState.set(conversationId, 'replaying');
+    connection.pendingEvents.set(conversationId, []);
+    this.#registry.addSubscription(connection.connectionId, conversationId);
+
+    const buffered = this.#buffer.getEventsSince(conversationId, replayFromSeq);
+    for (const event of buffered) {
+      if (!this.#sendStreamEvent(connection, conversationId, event)) {
         this.#cleanupSubscriptionState(connection, conversationId);
+        return;
       }
+    }
+
+    const lastReplayedSeq = lastSeq(buffered) ?? replayFromSeq;
+    const currentSeq = this.#flushPendingReplayEvents(connection, conversationId, lastReplayedSeq);
+    if (currentSeq === null) {
+      return;
+    }
+
+    connection.pendingEvents.delete(conversationId);
+    connection.replayState.set(conversationId, 'live');
+
+    if (!this.#sendSubscribed(connection, conversationId, currentSeq)) {
+      this.#cleanupSubscriptionState(connection, conversationId);
+    }
+  }
+
+  #flushPendingReplayEvents(
+    connection: ManagedConnection,
+    conversationId: string,
+    lastReplayedSeq: number,
+  ): number | null {
+    const pending = connection.pendingEvents.get(conversationId) ?? [];
+    const seen = new Map<number, StreamEvent>();
+    for (const event of pending) {
+      if (event.seq > lastReplayedSeq) {
+        seen.set(event.seq, event);
+      }
+    }
+
+    const toFlush = [...seen.values()].sort((a, b) => a.seq - b.seq);
+    for (const event of toFlush) {
+      if (!this.#sendStreamEvent(connection, conversationId, event)) {
+        this.#cleanupSubscriptionState(connection, conversationId);
+        return null;
+      }
+    }
+
+    return lastSeq(toFlush) ?? lastReplayedSeq;
+  }
+
+  #startLiveSubscription(connection: ManagedConnection, conversationId: string): void {
+    connection.replayState.set(conversationId, 'live');
+    connection.pendingEvents.set(conversationId, []);
+    this.#registry.addSubscription(connection.connectionId, conversationId);
+
+    const currentSeq = this.#buffer.getHighwaterSeq(conversationId);
+    if (!this.#sendSubscribed(connection, conversationId, currentSeq)) {
+      this.#cleanupSubscriptionState(connection, conversationId);
     }
   }
 
@@ -178,11 +198,15 @@ export class WsMessageHandler {
     conversationId: string,
     event: StreamEvent,
   ): boolean {
-    return sendWithBackpressureProtection(connection, {
-      type: 'stream-event',
-      conversationId,
-      event,
-    }, this.#bufferHighWaterMark);
+    return sendWithBackpressureProtection(
+      connection,
+      {
+        type: 'stream-event',
+        conversationId,
+        event,
+      },
+      this.#bufferHighWaterMark,
+    );
   }
 
   #sendSubscribed(
@@ -190,11 +214,15 @@ export class WsMessageHandler {
     conversationId: string,
     currentSeq: number,
   ): boolean {
-    return sendWithBackpressureProtection(connection, {
-      type: 'subscribed',
-      conversationId,
-      currentSeq,
-    }, this.#bufferHighWaterMark);
+    return sendWithBackpressureProtection(
+      connection,
+      {
+        type: 'subscribed',
+        conversationId,
+        currentSeq,
+      },
+      this.#bufferHighWaterMark,
+    );
   }
 
   #cleanupSubscriptionState(connection: ManagedConnection, conversationId: string): void {
