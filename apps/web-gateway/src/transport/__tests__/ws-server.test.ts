@@ -63,6 +63,36 @@ async function waitForMessage(ws: WebSocket): Promise<Record<string, unknown>> {
   return JSON.parse(text) as Record<string, unknown>;
 }
 
+async function waitForMessages(
+  ws: WebSocket,
+  count: number,
+): Promise<Array<Record<string, unknown>>> {
+  return await new Promise((resolve) => {
+    const messages: Array<Record<string, unknown>> = [];
+    const onMessage = (data: WebSocket.RawData) => {
+      let payload: Buffer | Uint8Array | string;
+      if (typeof data === 'string') {
+        payload = data;
+      } else if (Array.isArray(data)) {
+        payload = Buffer.concat(data);
+      } else if (data instanceof ArrayBuffer) {
+        payload = new Uint8Array(data);
+      } else {
+        payload = data;
+      }
+
+      const text = typeof payload === 'string' ? payload : new TextDecoder().decode(payload);
+      messages.push(JSON.parse(text) as Record<string, unknown>);
+      if (messages.length === count) {
+        ws.off('message', onMessage);
+        resolve(messages);
+      }
+    };
+
+    ws.on('message', onMessage);
+  });
+}
+
 async function connectWebSocket(
   port: number,
   options: {
@@ -316,6 +346,49 @@ describe('GatewayWsServer', () => {
     assert.equal(message['type'], 'daemon-unavailable');
   });
 
+  it('replays expiring-soon alongside daemon-unavailable for degraded near-expiry reconnects', async () => {
+    const localServer = createServer();
+    const localClock = new FakeClock(Date.now());
+    const localGateway = createGatewayApp({
+      server: localServer,
+      clock: localClock,
+      allowedOrigin: ORIGIN,
+      healthChecker: async () => true,
+      heartbeatConfig: { intervalMs: 60_000 },
+      sessionConfig: {
+        sessionLifetimeMs: 500,
+        warningThresholdMs: 250,
+        maxExtensions: 1,
+        extensionDurationMs: 500,
+        idleTimeoutMs: 5_000,
+      },
+    });
+    const requestListener = getRequestListener(localGateway.app.fetch);
+    localServer.on('request', (request, response) => {
+      void requestListener(request, response);
+    });
+    const localPort = await listen(localServer);
+
+    try {
+      const session = await localGateway.sessionService.create('op-1', '127.0.0.1');
+      localClock.advance(300);
+      await localGateway.sessionService.markDaemonDown(session.id);
+
+      const ws = createWebSocket(localPort, { sessionId: session.id });
+      const messagesPromise = waitForMessages(ws, 2);
+      await once(ws, 'open');
+      const messages = await messagesPromise;
+      openSockets.push(ws);
+
+      assert.equal(messages[0]?.['type'], 'daemon-unavailable');
+      assert.equal(messages[1]?.['type'], 'session-expiring-soon');
+    } finally {
+      localGateway.wsServer?.close();
+      localGateway.heartbeat.stop();
+      await closeServer(localServer);
+    }
+  });
+
   it('returns 500 for non-GatewayError exceptions during validation', async () => {
     const sessionService = gw.sessionService;
     const session = await gw.sessionService.create('op-1', '127.0.0.1');
@@ -471,5 +544,126 @@ describe('GatewayWsServer', () => {
     await waitForCloseOrError(ws);
 
     assert.equal(gw.connectionRegistry.size, 0, 'Registry should be empty after close()');
+  });
+
+  it('closes connected sockets when the idle timeout elapses', async () => {
+    const localServer = createServer();
+    const localGateway = createGatewayApp({
+      server: localServer,
+      allowedOrigin: ORIGIN,
+      healthChecker: async () => true,
+      heartbeatConfig: { intervalMs: 60_000 },
+      sessionConfig: {
+        sessionLifetimeMs: 5_000,
+        warningThresholdMs: 500,
+        maxExtensions: 1,
+        extensionDurationMs: 5_000,
+        idleTimeoutMs: 25,
+      },
+    });
+    const requestListener = getRequestListener(localGateway.app.fetch);
+    localServer.on('request', (request, response) => {
+      void requestListener(request, response);
+    });
+    const localPort = await listen(localServer);
+
+    try {
+      const session = await localGateway.sessionService.create('op-1', '127.0.0.1');
+      const ws = await connectWebSocket(localPort, { sessionId: session.id });
+
+      await waitForCloseOrError(ws);
+      assert.equal(localGateway.connectionRegistry.getBySession(session.id).size, 0);
+    } finally {
+      localGateway.wsServer?.close();
+      localGateway.heartbeat.stop();
+      await closeServer(localServer);
+    }
+  });
+
+  it('refreshes the idle timeout when inbound websocket messages arrive', async () => {
+    const localServer = createServer();
+    const localGateway = createGatewayApp({
+      server: localServer,
+      allowedOrigin: ORIGIN,
+      healthChecker: async () => true,
+      heartbeatConfig: { intervalMs: 60_000 },
+      sessionConfig: {
+        sessionLifetimeMs: 5_000,
+        warningThresholdMs: 500,
+        maxExtensions: 1,
+        extensionDurationMs: 5_000,
+        idleTimeoutMs: 40,
+      },
+    });
+    const requestListener = getRequestListener(localGateway.app.fetch);
+    localServer.on('request', (request, response) => {
+      void requestListener(request, response);
+    });
+    const localPort = await listen(localServer);
+
+    try {
+      const session = await localGateway.sessionService.create('op-1', '127.0.0.1');
+      const ws = await connectWebSocket(localPort, { sessionId: session.id });
+
+      await new Promise<void>((resolve) => {
+        setTimeout(resolve, 20);
+      });
+      ws.send('keepalive');
+      await new Promise<void>((resolve) => {
+        setTimeout(resolve, 25);
+      });
+      assert.equal(ws.readyState, WebSocket.OPEN);
+
+      await waitForCloseOrError(ws);
+    } finally {
+      localGateway.wsServer?.close();
+      localGateway.heartbeat.stop();
+      await closeServer(localServer);
+    }
+  });
+
+  it('keeps sibling session sockets alive when one socket refreshes shared activity', async () => {
+    const localServer = createServer();
+    const localGateway = createGatewayApp({
+      server: localServer,
+      allowedOrigin: ORIGIN,
+      healthChecker: async () => true,
+      heartbeatConfig: { intervalMs: 60_000 },
+      sessionConfig: {
+        sessionLifetimeMs: 5_000,
+        warningThresholdMs: 500,
+        maxExtensions: 1,
+        extensionDurationMs: 5_000,
+        idleTimeoutMs: 50,
+      },
+    });
+    const requestListener = getRequestListener(localGateway.app.fetch);
+    localServer.on('request', (request, response) => {
+      void requestListener(request, response);
+    });
+    const localPort = await listen(localServer);
+
+    try {
+      const session = await localGateway.sessionService.create('op-1', '127.0.0.1');
+      const wsA = await connectWebSocket(localPort, { sessionId: session.id });
+      const wsB = await connectWebSocket(localPort, { sessionId: session.id });
+
+      await new Promise<void>((resolve) => {
+        setTimeout(resolve, 30);
+      });
+      wsA.send('keepalive');
+      await new Promise<void>((resolve) => {
+        setTimeout(resolve, 35);
+      });
+
+      assert.equal(wsA.readyState, WebSocket.OPEN);
+      assert.equal(wsB.readyState, WebSocket.OPEN);
+
+      await Promise.all([waitForCloseOrError(wsA), waitForCloseOrError(wsB)]);
+    } finally {
+      localGateway.wsServer?.close();
+      localGateway.heartbeat.stop();
+      await closeServer(localServer);
+    }
   });
 });

@@ -8,7 +8,7 @@ import type { SessionStateBroadcaster } from '../session/session-state-broadcast
 import type { ConnectionRegistry } from './connection-registry.ts';
 import { SessionWsBridge } from './session-ws-bridge.ts';
 import { WsConnection } from './ws-connection.ts';
-import { WebSocketServer } from 'ws';
+import { WebSocketServer, type WebSocket } from 'ws';
 
 interface GatewayWsServerOptions {
   server: Server;
@@ -75,12 +75,14 @@ export class GatewayWsServer {
   readonly #connectionRegistry: ConnectionRegistry;
   readonly #wsBridge: SessionWsBridge;
   readonly #wss: WebSocketServer;
+  readonly #clock: Clock;
 
   constructor(options: GatewayWsServerOptions) {
     this.#server = options.server;
     this.#sessionService = options.sessionService;
     this.#allowedOrigin = options.allowedOrigin;
     this.#connectionRegistry = options.connectionRegistry;
+    this.#clock = options.clock;
     this.#wsBridge = new SessionWsBridge({
       broadcaster: options.broadcaster,
       registry: options.connectionRegistry,
@@ -101,6 +103,60 @@ export class GatewayWsServer {
       client.terminate();
     }
     this.#wss.close();
+  }
+
+  #bindIdleTimeout(sessionId: string, webSocket: WebSocket, onIdle: () => void): () => void {
+    let idleTimer: ReturnType<typeof setTimeout> | null = null;
+
+    const clearIdleTimer = () => {
+      if (idleTimer != null) {
+        clearTimeout(idleTimer);
+        idleTimer = null;
+      }
+    };
+
+    const closeForIdle = () => {
+      onIdle();
+      webSocket.close(1000, 'Session idle timeout');
+    };
+
+    const scheduleIdleCheck = () => {
+      clearIdleTimer();
+      const session = this.#sessionService.store.get(sessionId);
+      if (session == null || this.#sessionService.isIdle(session)) {
+        closeForIdle();
+        return;
+      }
+
+      const lastActivityMs = new Date(session.lastActivityAt).getTime();
+      if (Number.isNaN(lastActivityMs)) {
+        closeForIdle();
+        return;
+      }
+
+      const elapsedMs = this.#clock.now() - lastActivityMs;
+      const remainingMs = Math.max(this.#sessionService.config.idleTimeoutMs - elapsedMs, 1);
+      idleTimer = setTimeout(() => {
+        scheduleIdleCheck();
+      }, remainingMs);
+    };
+
+    const recordActivity = () => {
+      this.#sessionService.touchActivity(sessionId);
+      scheduleIdleCheck();
+    };
+
+    recordActivity();
+    webSocket.on('message', recordActivity);
+    webSocket.on('ping', recordActivity);
+    webSocket.on('pong', recordActivity);
+
+    return () => {
+      clearIdleTimer();
+      webSocket.off('message', recordActivity);
+      webSocket.off('ping', recordActivity);
+      webSocket.off('pong', recordActivity);
+    };
   }
 
   readonly #handleUpgrade = (request: IncomingMessage, socket: Socket, head: Buffer): void => {
@@ -134,7 +190,18 @@ export class GatewayWsServer {
 
       this.#wss.handleUpgrade(request, socket, head, (webSocket) => {
         const connection = WsConnection.create(session.id, webSocket, this.#connectionRegistry);
-        const cleanup = this.#wsBridge.bindSession(session, connection);
+        const cleanupBridge = this.#wsBridge.bindSession(session, connection);
+        let isCleanedUp = false;
+        const cleanup = () => {
+          if (isCleanedUp) {
+            return;
+          }
+          isCleanedUp = true;
+          this.#connectionRegistry.unregister(connection.connectionId);
+          cleanupIdle();
+          cleanupBridge();
+        };
+        const cleanupIdle = this.#bindIdleTimeout(session.id, webSocket, cleanup);
         webSocket.on('close', cleanup);
       });
     } catch (err) {

@@ -64,7 +64,7 @@ export class SessionWsBridge {
         return;
       case 'daemon-unreachable':
         connection.send({ type: 'daemon-unavailable' });
-        applyExpiry(expiresAt);
+        applyExpiry(expiresAt, true);
         return;
       case 'expired':
       case 'invalidated':
@@ -95,7 +95,7 @@ export class SessionWsBridge {
         return;
       case 'daemon-unreachable':
         connection.send({ type: 'daemon-unavailable' });
-        applyExpiry(event.expiresAt);
+        applyExpiry(event.expiresAt, true);
         return;
       case 'active': {
         const expiryResult = applyExpiry(event.expiresAt, true);
