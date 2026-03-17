@@ -374,14 +374,22 @@ _(Some tasks serve multiple stories — counted under each.)_
 
 ### Phasing & Deployment Notes
 
-**Phases 0–4 (T001–T031)** deliver the P1 user stories and are independently deployable:
+**Phases 0–3 (T001–T024)** are now complete on `main` and provide the deployed
+transport foundation:
 
-1. ✅ **US1** — REST mediation for P1 conversation operations (lifecycle, turns, artifacts/activities; approval & work-control routes deferred to Phase 6)
-2. ✅ **US2** — Real-time streaming from daemon → gateway → browser via WebSocket
-3. ✅ **US3** — WebSocket session binding with full security enforcement
+1. ✅ **US1** — REST mediation for P1 conversation operations (lifecycle, turns,
+   artifacts/activities; approval & work-control routes deferred to Phase 6)
+2. ✅ **US3** — WebSocket session binding with full security enforcement
+3. ✅ **US2 foundation** — authenticated WebSocket transport, connection
+   registry, and session/daemon lifecycle notifications are in place
 
-This provides the minimum transport surface the `web-chat-workspace` slice needs
-to begin building browser UI against REST and live streaming.
+**Phase 4 (T025–T031)** is the next ready batch. It completes the missing P1
+streaming path by wiring daemon stream events through the gateway to subscribed
+browser connections, including buffering, replay-barrier handling, and the first
+end-to-end streaming integration tests.
+
+This Phase 4 batch is the next transport surface the `web-chat-workspace` slice
+needs before browser UI work can rely on live daemon output.
 
 **Phases 5–8 (T032–T061) are required for spec compliance** — they are not optional
 follow-ons. The spec mandates reconnect/resume (FR-022–025, SC-003), structured
@@ -410,10 +418,10 @@ T025 → T026 → T027 ──────────────────→
 
 ## Next Steps
 
-1. **Implement** — work through tasks in order (T001 → T061)
-2. **Attempt direct implementation** — skip formal task tracking and implement with context:
-   - Feature: Web Gateway Conversation Transport
-   - Tech stack: TypeScript 5.9+, Hono 4.x, `ws`, Zod 4.x, `node:test`
-   - Key requirements: REST mediation (FR-001–007), WebSocket streaming (FR-008–013), session binding (FR-014–017), reconnect/resume (FR-022–025), error boundaries (FR-026–028)
-   - Success criteria: SC-001 through SC-012
-3. **Iterate on tasks** — refine dependencies, split/merge tasks, adjust scope
+1. **Implement Phase 4 in order** — start with `T025`, then proceed to `T026`
+   and `T027` once the shared event-buffer contract is stable.
+2. **Parallelize only after `T025` lands** — `T026` (`ws-message-handler.ts`)
+   and `T027` (`event-forwarder.ts`) are the first natural parallel track split,
+   but both depend on the event-buffer API being implemented and reviewed first.
+3. **Close the Phase 4 batch** — finish `T028`–`T031`, then move into Phase 5
+   reconnect/resume work (`T032+`) once end-to-end streaming is green.
