@@ -100,15 +100,15 @@ describe('SessionWsBridge', () => {
   });
 
   describe('invalid expiresAt handling', () => {
-    it('ignores invalid date strings without scheduling a timer', () => {
+    it('fails closed for invalid date strings', () => {
       const session = createSession({ expiresAt: 'not-a-date' });
       const conn = createMockConnection(session.id);
       registry.register(conn);
 
       const cleanup = bridge.bindSession(session, conn as never);
 
-      // No termination message should be sent for invalid dates
-      assert.equal(conn.sent.length, 0, 'No messages should be sent for invalid expiresAt');
+      const terminated = conn.sent.find((m) => m.type === 'session-terminated');
+      assert.ok(terminated, 'Invalid expiresAt should terminate the session');
       cleanup();
     });
 
@@ -124,7 +124,7 @@ describe('SessionWsBridge', () => {
   });
 
   describe('broadcaster events', () => {
-    it('reschedules expiry on expiring-soon event using clock', () => {
+    it('sends expiring-soon before terminating for past expiresAt', () => {
       const session = createSession({ expiresAt: new Date(clock.now() + 60_000).toISOString() });
       const conn = createMockConnection(session.id);
       registry.register(conn);
@@ -140,14 +140,12 @@ describe('SessionWsBridge', () => {
       });
 
       // Should get expiring-soon notification then immediate termination
-      const expiringSoon = conn.sent.find((m) => m.type === 'session-expiring-soon');
-      const terminated = conn.sent.find((m) => m.type === 'session-terminated');
-      assert.ok(expiringSoon, 'Expected session-expiring-soon message');
-      assert.ok(terminated, 'Expected session-terminated for past expiresAt');
+      assert.equal(conn.sent[0]?.type, 'session-expiring-soon');
+      assert.equal(conn.sent[1]?.type, 'session-terminated');
       cleanup();
     });
 
-    it('ignores invalid expiresAt in daemon-unreachable event', () => {
+    it('sends daemon-unavailable before terminating for invalid expiresAt', () => {
       const session = createSession({ expiresAt: new Date(clock.now() + 60_000).toISOString() });
       const conn = createMockConnection(session.id);
       registry.register(conn);
@@ -161,11 +159,8 @@ describe('SessionWsBridge', () => {
         expiresAt: 'garbage-date',
       });
 
-      // Should get daemon-unavailable but no termination (invalid date is ignored)
-      const daemonMsg = conn.sent.find((m) => m.type === 'daemon-unavailable');
-      const terminated = conn.sent.find((m) => m.type === 'session-terminated');
-      assert.ok(daemonMsg, 'Expected daemon-unavailable message');
-      assert.equal(terminated, undefined, 'Should not terminate for invalid expiresAt');
+      assert.equal(conn.sent[0]?.type, 'daemon-unavailable');
+      assert.equal(conn.sent[1]?.type, 'session-terminated');
       cleanup();
     });
   });

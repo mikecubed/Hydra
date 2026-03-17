@@ -45,26 +45,28 @@ export class SessionWsBridge {
       }, 0);
     };
 
-    const scheduleExpiry = (expiresAt?: string) => {
+    const applyExpiry = (expiresAt?: string): 'none' | 'scheduled' | 'terminated' => {
       clearExpiryTimer();
       if (expiresAt == null || expiresAt === '') {
-        return;
+        return 'none';
       }
 
       const expiresAtMs = new Date(expiresAt).getTime();
       if (Number.isNaN(expiresAtMs)) {
-        return;
+        terminateSession('expired', 'Session expired');
+        return 'terminated';
       }
 
       const delayMs = expiresAtMs - this.#clock.now();
       if (delayMs <= 0) {
         terminateSession('expired', 'Session expired');
-        return;
+        return 'terminated';
       }
 
       expiryTimer = setTimeout(() => {
         terminateSession('expired', 'Session expired');
       }, delayMs);
+      return 'scheduled';
     };
 
     const callback = (event: SessionStateChangeEvent) => {
@@ -76,28 +78,29 @@ export class SessionWsBridge {
           return;
         case 'expiring-soon':
           if (event.expiresAt != null) {
-            scheduleExpiry(event.expiresAt);
             connection.send({
               type: 'session-expiring-soon',
               expiresAt: event.expiresAt,
             });
+            applyExpiry(event.expiresAt);
           }
           return;
         case 'daemon-unreachable':
-          scheduleExpiry(event.expiresAt);
           connection.send({ type: 'daemon-unavailable' });
+          applyExpiry(event.expiresAt);
           return;
-        case 'active':
-          scheduleExpiry(event.expiresAt);
-          if (event.previousState === 'daemon-unreachable') {
+        case 'active': {
+          const expiryResult = applyExpiry(event.expiresAt);
+          if (event.previousState === 'daemon-unreachable' && expiryResult !== 'terminated') {
             connection.send({ type: 'daemon-restored' });
           }
           break;
+        }
       }
     };
 
     this.#broadcaster.register(session.id, callback);
-    scheduleExpiry(session.expiresAt);
+    applyExpiry(session.expiresAt);
 
     return () => {
       clearExpiryTimer();
