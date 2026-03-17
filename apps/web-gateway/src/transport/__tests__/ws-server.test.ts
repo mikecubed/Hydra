@@ -6,6 +6,7 @@ import { getRequestListener } from '@hono/node-server';
 import WebSocket from 'ws';
 import { createGatewayApp, type GatewayApp } from '../../index.ts';
 import { FakeClock } from '../../shared/clock.ts';
+import { GatewayError } from '../../shared/errors.ts';
 
 const ORIGIN = 'http://127.0.0.1:4174';
 
@@ -357,8 +358,12 @@ describe('GatewayWsServer', () => {
       const ws = await connectWebSocket(localPort, { sessionId: session.id });
       openSockets.push(ws);
 
-      const message = await waitForMessage(ws);
-      assert.equal(message['type'], 'session-terminated');
+      // Warning timer fires before hard expiry
+      const warning = await waitForMessage(ws);
+      assert.equal(warning['type'], 'session-expiring-soon');
+
+      const termination = await waitForMessage(ws);
+      assert.equal(termination['type'], 'session-terminated');
       await once(ws, 'close');
       assert.equal(localGateway.connectionRegistry.getBySession(session.id).size, 0);
     } finally {
@@ -381,5 +386,90 @@ describe('GatewayWsServer', () => {
     assert.equal(messageB['type'], 'session-terminated');
     await Promise.all([once(wsA, 'close'), once(wsB, 'close')]);
     assert.equal(gw.connectionRegistry.getBySession(session.id).size, 0);
+  });
+
+  it('uses a standard HTTP reason phrase instead of the error message', async () => {
+    const sessionService = gw.sessionService;
+    const session = await sessionService.create('op-1', '127.0.0.1');
+    const originalValidate = sessionService.validate.bind(sessionService);
+    sessionService.validate = async () => {
+      throw new GatewayError('SESSION_EXPIRED', 'Secret internal detail', 401);
+    };
+
+    try {
+      const headers: Record<string, string> = {
+        Origin: ORIGIN,
+        Cookie: `__session=${session.id}`,
+      };
+      const ws = new WebSocket(`ws://127.0.0.1:${port}/ws`, { headers });
+      const [, response] = (await once(ws, 'unexpected-response')) as [
+        unknown,
+        NodeJS.ReadableStream & { statusCode?: number; statusMessage?: string },
+      ];
+
+      // Status line must use standard phrase, not the custom error message
+      assert.equal(response.statusCode, 401);
+      assert.equal(response.statusMessage, 'Unauthorized');
+
+      // JSON body still contains the detailed message
+      const chunks: Buffer[] = [];
+      response.on('data', (chunk: Buffer | string) => {
+        chunks.push(typeof chunk === 'string' ? Buffer.from(chunk) : chunk);
+      });
+      await once(response, 'end');
+      const body = JSON.parse(Buffer.concat(chunks).toString('utf8')) as { message?: string };
+      assert.equal(body.message, 'Secret internal detail');
+    } finally {
+      sessionService.validate = originalValidate;
+    }
+  });
+
+  it('sends session-expiring-soon purely from time progression without explicit validate()', async () => {
+    const localServer = createServer();
+    const localGateway = createGatewayApp({
+      server: localServer,
+      allowedOrigin: ORIGIN,
+      healthChecker: async () => true,
+      heartbeatConfig: { intervalMs: 60_000 },
+      sessionConfig: {
+        sessionLifetimeMs: 500,
+        warningThresholdMs: 250,
+        maxExtensions: 1,
+        extensionDurationMs: 500,
+        idleTimeoutMs: 5_000,
+      },
+    });
+    const requestListener = getRequestListener(localGateway.app.fetch);
+    localServer.on('request', (request, response) => {
+      void requestListener(request, response);
+    });
+    const localPort = await listen(localServer);
+
+    try {
+      const session = await localGateway.sessionService.create('op-1', '127.0.0.1');
+      const ws = await connectWebSocket(localPort, { sessionId: session.id });
+      openSockets.push(ws);
+
+      // No explicit validate() call — warning fires purely from the scheduled timer
+      const message = await waitForMessage(ws);
+      assert.equal(message['type'], 'session-expiring-soon');
+    } finally {
+      localGateway.wsServer?.close();
+      localGateway.heartbeat.stop();
+      await closeServer(localServer);
+    }
+  });
+
+  it('close() drains active connections and clears registry entries', async () => {
+    const session = await gw.sessionService.create('op-1', '127.0.0.1');
+    const ws = await connectWebSocket(port, { sessionId: session.id });
+    // Do not push to openSockets — close() should handle cleanup
+
+    assert.ok(gw.connectionRegistry.size >= 1, 'Connection should be registered');
+
+    gw.wsServer?.close();
+    await waitForCloseOrError(ws);
+
+    assert.equal(gw.connectionRegistry.size, 0, 'Registry should be empty after close()');
   });
 });

@@ -124,6 +124,82 @@ describe('SessionWsBridge', () => {
     });
   });
 
+  describe('warning timer', () => {
+    it('sends session-expiring-soon from timer without explicit validate()', async () => {
+      const warningThresholdMs = 200;
+      const localBridge = new SessionWsBridge({ broadcaster, registry, clock, warningThresholdMs });
+
+      // Session expires 500ms from clock.now(); warning fires at 300ms
+      const expiresAt = new Date(clock.now() + 500).toISOString();
+      const session = createSession({ expiresAt });
+      const conn = createMockConnection(session.id);
+      registry.register(conn);
+
+      const cleanup = localBridge.bindSession(session, conn as never);
+      try {
+        await new Promise<void>((resolve) => {
+          setTimeout(resolve, 400);
+        });
+
+        assert.ok(
+          conn.sent.some((m) => m.type === 'session-expiring-soon'),
+          'Expected session-expiring-soon from warning timer',
+        );
+        assert.ok(
+          !conn.sent.some((m) => m.type === 'session-terminated'),
+          'Expected no termination yet',
+        );
+      } finally {
+        cleanup();
+      }
+    });
+
+    it('does not schedule a warning timer when already in the warning window', () => {
+      const warningThresholdMs = 200;
+      const localBridge = new SessionWsBridge({ broadcaster, registry, clock, warningThresholdMs });
+
+      // Session expires 100ms from now — already within 200ms warning threshold
+      const expiresAt = new Date(clock.now() + 100).toISOString();
+      const session = createSession({ state: 'expiring-soon', expiresAt });
+      const conn = createMockConnection(session.id);
+      registry.register(conn);
+
+      const cleanup = localBridge.bindSession(session, conn as never);
+      try {
+        // The expiring-soon replay message should be sent immediately
+        assert.ok(
+          conn.sent.some((m) => m.type === 'session-expiring-soon'),
+          'Expected replayed session-expiring-soon',
+        );
+      } finally {
+        cleanup();
+      }
+    });
+
+    it('clears the warning timer on cleanup', async () => {
+      const warningThresholdMs = 200;
+      const localBridge = new SessionWsBridge({ broadcaster, registry, clock, warningThresholdMs });
+
+      const expiresAt = new Date(clock.now() + 500).toISOString();
+      const session = createSession({ expiresAt });
+      const conn = createMockConnection(session.id);
+      registry.register(conn);
+
+      const cleanup = localBridge.bindSession(session, conn as never);
+      cleanup();
+
+      // Wait past when warning would have fired
+      await new Promise<void>((resolve) => {
+        setTimeout(resolve, 400);
+      });
+
+      assert.ok(
+        !conn.sent.some((m) => m.type === 'session-expiring-soon'),
+        'Warning timer should have been cleared by cleanup',
+      );
+    });
+  });
+
   describe('broadcaster events', () => {
     it('sends expiring-soon before terminating for past expiresAt', () => {
       const session = createSession({ expiresAt: new Date(clock.now() + 60_000).toISOString() });

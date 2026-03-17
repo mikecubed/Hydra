@@ -12,6 +12,7 @@ interface SessionWsBridgeOptions {
   broadcaster: SessionStateBroadcaster;
   registry: ConnectionRegistry;
   clock: Clock;
+  warningThresholdMs?: number;
 }
 
 type ExpiryOutcome = 'none' | 'scheduled' | 'terminated';
@@ -22,11 +23,13 @@ export class SessionWsBridge {
   readonly #broadcaster: SessionStateBroadcaster;
   readonly #registry: ConnectionRegistry;
   readonly #clock: Clock;
+  readonly #warningThresholdMs: number;
 
   constructor(options: SessionWsBridgeOptions) {
     this.#broadcaster = options.broadcaster;
     this.#registry = options.registry;
     this.#clock = options.clock;
+    this.#warningThresholdMs = options.warningThresholdMs ?? 0;
   }
 
   #emitStateMessage(
@@ -93,11 +96,16 @@ export class SessionWsBridge {
 
   bindSession(session: StoredSession, connection: WsConnection): () => void {
     let expiryTimer: ReturnType<typeof setTimeout> | null = null;
+    let warningTimer: ReturnType<typeof setTimeout> | null = null;
 
-    const clearExpiryTimer = () => {
+    const clearTimers = () => {
       if (expiryTimer != null) {
         clearTimeout(expiryTimer);
         expiryTimer = null;
+      }
+      if (warningTimer != null) {
+        clearTimeout(warningTimer);
+        warningTimer = null;
       }
     };
 
@@ -113,7 +121,7 @@ export class SessionWsBridge {
     };
 
     const applyExpiry: ApplyExpiry = (expiresAt?: string) => {
-      clearExpiryTimer();
+      clearTimers();
       if (expiresAt == null) {
         return 'none';
       }
@@ -132,6 +140,16 @@ export class SessionWsBridge {
       if (delayMs <= 0) {
         terminateSession('expired', 'Session expired');
         return 'terminated';
+      }
+
+      // Schedule warning when the warning window is reached
+      if (this.#warningThresholdMs > 0) {
+        const warningDelayMs = delayMs - this.#warningThresholdMs;
+        if (warningDelayMs > 0) {
+          warningTimer = setTimeout(() => {
+            connection.send({ type: 'session-expiring-soon', expiresAt });
+          }, warningDelayMs);
+        }
       }
 
       expiryTimer = setTimeout(() => {
@@ -154,7 +172,7 @@ export class SessionWsBridge {
     );
 
     return () => {
-      clearExpiryTimer();
+      clearTimers();
       this.#broadcaster.unregister(session.id, callback);
     };
   }

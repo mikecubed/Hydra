@@ -36,6 +36,16 @@ function parseSessionCookie(cookieHeader?: string): string | null {
   return null;
 }
 
+const HTTP_REASON_PHRASES: Record<number, string> = {
+  400: 'Bad Request',
+  401: 'Unauthorized',
+  403: 'Forbidden',
+  404: 'Not Found',
+  429: 'Too Many Requests',
+  500: 'Internal Server Error',
+  503: 'Service Unavailable',
+};
+
 function rejectUpgrade(socket: Socket, error: GatewayError): void {
   const body = JSON.stringify(
     createGatewayErrorResponse({
@@ -44,10 +54,11 @@ function rejectUpgrade(socket: Socket, error: GatewayError): void {
       message: error.message,
     }),
   );
-  const statusCode = String(error.statusCode);
+  const statusCode = error.statusCode;
+  const reasonPhrase = HTTP_REASON_PHRASES[statusCode] ?? 'Error';
   socket.end(
     [
-      `HTTP/1.1 ${statusCode} ${error.message}`,
+      `HTTP/1.1 ${String(statusCode)} ${reasonPhrase}`,
       'Content-Type: application/json',
       `Content-Length: ${String(Buffer.byteLength(body))}`,
       'Connection: close',
@@ -74,6 +85,7 @@ export class GatewayWsServer {
       broadcaster: options.broadcaster,
       registry: options.connectionRegistry,
       clock: options.clock,
+      warningThresholdMs: options.sessionService.config.warningThresholdMs,
     });
     this.#wss = new WebSocketServer({ noServer: true });
     this.#server.on('upgrade', this.#handleUpgrade);
@@ -85,6 +97,9 @@ export class GatewayWsServer {
 
   close(): void {
     this.#server.off('upgrade', this.#handleUpgrade);
+    for (const client of this.#wss.clients) {
+      client.terminate();
+    }
     this.#wss.close();
   }
 
