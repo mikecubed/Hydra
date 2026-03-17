@@ -128,6 +128,12 @@ function createWsDaemonClient(validConversationIds: ReadonlySet<string>) {
         },
       };
     },
+    async loadTurnHistory() {
+      return { data: { turns: [], totalCount: 0, hasMore: false } };
+    },
+    async getStreamReplay() {
+      return { data: { events: [] } };
+    },
   };
 }
 
@@ -347,6 +353,12 @@ describe('GatewayWsServer', () => {
       heartbeatConfig: { intervalMs: 60_000 },
       wsDaemonClient: {
         openConversation: async () => pendingOpen.promise,
+        async loadTurnHistory() {
+          return { data: { turns: [], totalCount: 0, hasMore: false } };
+        },
+        async getStreamReplay() {
+          return { data: { events: [] } };
+        },
       },
       streamEventBridge: new FakeEventBridge(),
     });
@@ -407,6 +419,12 @@ describe('GatewayWsServer', () => {
       heartbeatConfig: { intervalMs: 60_000 },
       wsDaemonClient: {
         openConversation: async () => pendingOpen.promise,
+        async loadTurnHistory() {
+          return { data: { turns: [], totalCount: 0, hasMore: false } };
+        },
+        async getStreamReplay() {
+          return { data: { events: [] } };
+        },
       },
       streamEventBridge: new FakeEventBridge(),
     });
@@ -473,6 +491,12 @@ describe('GatewayWsServer', () => {
         openConversation: async () => {
           openCalls += 1;
           return await pendingOpen.promise;
+        },
+        async loadTurnHistory() {
+          return { data: { turns: [], totalCount: 0, hasMore: false } };
+        },
+        async getStreamReplay() {
+          return { data: { events: [] } };
         },
       },
       streamEventBridge: new FakeEventBridge(),

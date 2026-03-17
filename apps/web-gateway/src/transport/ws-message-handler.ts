@@ -1,11 +1,14 @@
 /**
- * WebSocket message handler (T026).
+ * WebSocket message handler (T026, T032).
  *
  * Handles client→server messages: subscribe, unsubscribe, ack.
  * Implements the replay barrier pattern for reconnect/resume semantics:
  *   - On subscribe with lastAcknowledgedSeq and buffer hit, replays buffered
  *     events, queues concurrent live arrivals, flushes deduplicated pending
  *     events, then transitions to live.
+ *   - On subscribe with lastAcknowledgedSeq and buffer miss, falls back to
+ *     daemon per-turn stream replay (T032): fetches turn history, retrieves
+ *     per-turn events, merges/deduplicates, and sends under the replay barrier.
  *   - On unsubscribe: removes subscription, clears replay/pending state.
  *   - On ack: updates per-conversation lastAckSeq (fire-and-forget).
  *   - On invalid message: responds with type:'error' without closing.
@@ -22,7 +25,10 @@ import type { DaemonClient } from '../conversation/daemon-client.ts';
 export interface MessageHandlerDeps {
   readonly registry: ConnectionRegistry;
   readonly buffer: EventBuffer;
-  readonly daemonClient: Pick<DaemonClient, 'openConversation'>;
+  readonly daemonClient: Pick<
+    DaemonClient,
+    'openConversation' | 'loadTurnHistory' | 'getStreamReplay'
+  >;
   readonly bufferHighWaterMark?: number;
 }
 
@@ -116,9 +122,12 @@ export class WsMessageHandler {
 
       if (canReplay) {
         this.#startReplaySubscription(connection, conversationId, replayFromSeq);
-      } else {
-        // ── no replay (initial subscribe or buffer miss) ────────────────────
+      } else if (lastAcknowledgedSeq === undefined) {
+        // ── initial subscribe (no replay needed) ──────────────────────────
         this.#startLiveSubscription(connection, conversationId);
+      } else {
+        // ── buffer miss on reconnect → daemon fallback (T032) ─────────────
+        await this.#startDaemonReplaySubscription(connection, conversationId, lastAcknowledgedSeq);
       }
     } finally {
       this.#registry.removePendingInterest(connection.connectionId, conversationId);
@@ -151,6 +160,85 @@ export class WsMessageHandler {
     if (currentSeq === null) {
       return;
     }
+
+    connection.pendingEvents.delete(conversationId);
+    connection.replayState.set(conversationId, 'live');
+
+    if (!this.#sendSubscribed(connection, conversationId, currentSeq)) {
+      this.#cleanupSubscriptionState(connection, conversationId);
+    }
+  }
+
+  /**
+   * Daemon fallback replay (T032): fetch missed events from the daemon when
+   * the in-memory EventBuffer cannot satisfy a reconnect replay.
+   *
+   * Loads turn history for the conversation, fetches per-turn stream replay,
+   * merges/deduplicates events by seq, and sends them under the replay barrier.
+   */
+  async #startDaemonReplaySubscription(
+    connection: ManagedConnection,
+    conversationId: string,
+    lastAcknowledgedSeq: number,
+  ): Promise<void> {
+    connection.replayState.set(conversationId, 'replaying');
+    connection.pendingEvents.set(conversationId, []);
+    this.#registry.addSubscription(connection.connectionId, conversationId);
+
+    const historyResult = await this.#daemonClient.loadTurnHistory(conversationId, {
+      conversationId,
+    });
+
+    if (connection.isClosed) return;
+
+    if ('error' in historyResult) {
+      // Daemon unavailable — graceful fallback to live
+      connection.pendingEvents.delete(conversationId);
+      connection.replayState.set(conversationId, 'live');
+      const currentSeq = this.#buffer.getHighwaterSeq(conversationId);
+      if (!this.#sendSubscribed(connection, conversationId, currentSeq)) {
+        this.#cleanupSubscriptionState(connection, conversationId);
+      }
+      return;
+    }
+
+    const replayResults = await Promise.all(
+      historyResult.data.turns.map((turn) =>
+        this.#daemonClient.getStreamReplay(conversationId, turn.id, lastAcknowledgedSeq),
+      ),
+    );
+
+    // Connection may close during async daemon fetches
+    // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
+    if (connection.isClosed) return;
+
+    const allEvents: StreamEvent[] = [];
+    for (const result of replayResults) {
+      if ('data' in result) {
+        allEvents.push(...result.data.events);
+      }
+    }
+
+    // Merge, deduplicate by seq, sort ascending
+    const deduped = new Map<number, StreamEvent>();
+    for (const event of allEvents) {
+      if (event.seq > lastAcknowledgedSeq) {
+        deduped.set(event.seq, event);
+      }
+    }
+    const sorted = [...deduped.values()].sort((a, b) => a.seq - b.seq);
+
+    for (const event of sorted) {
+      if (!this.#sendStreamEvent(connection, conversationId, event)) {
+        this.#cleanupSubscriptionState(connection, conversationId);
+        return;
+      }
+    }
+
+    // Flush pending live events that arrived during daemon fetch
+    const lastReplayedSeq = lastSeq(sorted) ?? lastAcknowledgedSeq;
+    const currentSeq = this.#flushPendingReplayEvents(connection, conversationId, lastReplayedSeq);
+    if (currentSeq === null) return;
 
     connection.pendingEvents.delete(conversationId);
     connection.replayState.set(conversationId, 'live');

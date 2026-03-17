@@ -196,7 +196,7 @@ function createFakeDaemonClient(
   },
 ): {
   daemonClient: DaemonClient;
-  wsDaemonClient: Pick<DaemonClient, 'openConversation'>;
+  wsDaemonClient: Pick<DaemonClient, 'openConversation' | 'loadTurnHistory' | 'getStreamReplay'>;
   submissions: Array<{ conversationId: string; instruction: string; turnId: string }>;
   emitFullStream: (conversationId: string, turnId: string, textChunks: string[]) => StreamEvent[];
 } {
@@ -323,7 +323,18 @@ function createFakeDaemonClient(
     },
   } as unknown as DaemonClient;
 
-  const wsDaemonClient: Pick<DaemonClient, 'openConversation'> = { openConversation };
+  const wsDaemonClient: Pick<
+    DaemonClient,
+    'openConversation' | 'loadTurnHistory' | 'getStreamReplay'
+  > = {
+    openConversation,
+    async loadTurnHistory() {
+      return { data: { turns: [], totalCount: 0, hasMore: false } };
+    },
+    async getStreamReplay() {
+      return { data: { events: [] } };
+    },
+  };
 
   return { daemonClient, wsDaemonClient, submissions, emitFullStream };
 }

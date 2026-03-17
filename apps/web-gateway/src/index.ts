@@ -61,7 +61,7 @@ export interface GatewayAppDeps {
   /** Pre-built DaemonClient (for testing). Overrides daemonClientOptions. */
   daemonClient?: DaemonClient;
   /** Optional narrower daemon client for WebSocket subscribe validation. */
-  wsDaemonClient?: Pick<DaemonClient, 'openConversation'>;
+  wsDaemonClient?: Pick<DaemonClient, 'openConversation' | 'loadTurnHistory' | 'getStreamReplay'>;
   /** Optional HTTP server for WebSocket upgrade wiring. */
   server?: Server;
   sessionStateBroadcaster?: SessionStateBroadcaster;
