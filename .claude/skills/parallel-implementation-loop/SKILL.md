@@ -61,7 +61,7 @@ Before starting parallel tracks:
 
 If in doubt, serialize.
 
-### 1a. Worktrees are disposable track sandboxes, not permanent state
+### 1.1. Worktrees are disposable track sandboxes, not permanent state
 
 When this skill creates track worktrees:
 

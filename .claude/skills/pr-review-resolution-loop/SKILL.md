@@ -216,8 +216,8 @@ After all comment threads are handled:
 
 Before calling the PR diff stable:
 
-1. fetch and verify the active branch is not silently behind a remote branch tip or sibling
-   worktree-owned commit;
+1. fetch and verify the active branch tip is not behind the remote branch tip or missing commits
+   from other batch branches or worktrees that should have been merged;
 2. reconcile any missing remote-only fix commits before the final gate;
 3. verify any review-fix worktrees used during this loop are either:
    - already merged and clean, or
