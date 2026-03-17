@@ -7,8 +7,9 @@
  *     events, queues concurrent live arrivals, flushes deduplicated pending
  *     events, then transitions to live.
  *   - On subscribe with lastAcknowledgedSeq and buffer miss, falls back to
- *     daemon per-turn stream replay (T032): fetches turn history, retrieves
- *     per-turn events, merges/deduplicates, and sends under the replay barrier.
+ *     daemon per-turn stream replay (T032): loads the full turn range for the
+ *     conversation, retrieves per-turn events, merges/deduplicates, and sends
+ *     under the replay barrier.
  *   - On unsubscribe: removes subscription, clears replay/pending state.
  *   - On ack: updates per-conversation lastAckSeq (fire-and-forget).
  *   - On invalid message: responds with type:'error' without closing.
@@ -128,7 +129,12 @@ export class WsMessageHandler {
         this.#startLiveSubscription(connection, conversationId);
       } else {
         // ── buffer miss on reconnect → daemon fallback (T032) ─────────────
-        await this.#startDaemonReplaySubscription(connection, conversationId, lastAcknowledgedSeq);
+        await this.#startDaemonReplaySubscription(
+          connection,
+          conversationId,
+          lastAcknowledgedSeq,
+          result.data.totalTurnCount,
+        );
       }
     } finally {
       this.#registry.removePendingInterest(connection.connectionId, conversationId);
@@ -174,9 +180,9 @@ export class WsMessageHandler {
    * Daemon fallback replay (T032): fetch missed events from the daemon when
    * the in-memory EventBuffer cannot satisfy a reconnect replay.
    *
-   * Pages through the full turn history (the daemon defaults to limit=50 per
-   * page), fetches per-turn stream replay, merges/deduplicates events by seq,
-   * and sends them under the replay barrier.
+   * Loads the full turn range for the conversation using the daemon's
+   * `fromPosition`/`toPosition` contract, fetches per-turn stream replay,
+   * merges/deduplicates events by seq, and sends them under the replay barrier.
    *
    * If any per-turn getStreamReplay call fails, the replay is aborted: an
    * error is sent to the client and subscription state is cleaned up rather
@@ -186,22 +192,29 @@ export class WsMessageHandler {
     connection: ManagedConnection,
     conversationId: string,
     lastAcknowledgedSeq: number,
+    totalTurnCount: number,
   ): Promise<void> {
     connection.replayState.set(conversationId, 'replaying');
     connection.pendingEvents.set(conversationId, []);
     this.#registry.addSubscription(connection.connectionId, conversationId);
 
-    // ── Page through full turn history ──────────────────────────────────
-    const allTurnsResult = await this.#loadAllTurns(connection, conversationId);
-    if (allTurnsResult === null) return; // connection closed during paging
+    const allTurnsResult = await this.#loadTurnsForReplay(
+      connection,
+      conversationId,
+      totalTurnCount,
+    );
+    if (allTurnsResult === null) {
+      return;
+    }
     if ('error' in allTurnsResult) {
-      // Daemon unavailable — graceful fallback to live
-      connection.pendingEvents.delete(conversationId);
-      connection.replayState.set(conversationId, 'live');
-      const currentSeq = this.#buffer.getHighwaterSeq(conversationId);
-      if (!this.#sendSubscribed(connection, conversationId, currentSeq)) {
-        this.#cleanupSubscriptionState(connection, conversationId);
-      }
+      this.#sendError(
+        connection,
+        'REPLAY_INCOMPLETE',
+        'Unable to load turn history for replay',
+        'daemon',
+        conversationId,
+      );
+      this.#cleanupSubscriptionState(connection, conversationId);
       return;
     }
 
@@ -283,38 +296,30 @@ export class WsMessageHandler {
     return [...deduped.values()].sort((a, b) => a.seq - b.seq);
   }
 
-  /**
-   * Page through daemon turn history until hasMore is false or the connection
-   * closes. Returns null when the connection closes mid-paging.
-   */
-  async #loadAllTurns(
+  async #loadTurnsForReplay(
     connection: ManagedConnection,
     conversationId: string,
+    totalTurnCount: number,
   ): Promise<DaemonResult<{ turns: LoadTurnHistoryResponse['turns'] }> | null> {
-    const allTurns: LoadTurnHistoryResponse['turns'] = [];
-    let fromPosition: number | undefined;
-
-    for (;;) {
-      // eslint-disable-next-line no-await-in-loop -- sequential pagination is intentional
-      const result = await this.#daemonClient.loadTurnHistory(conversationId, {
-        conversationId,
-        ...(fromPosition !== undefined && { fromPosition }),
-      });
-
-      if (connection.isClosed) return null;
-      if ('error' in result) return result;
-
-      allTurns.push(...result.data.turns);
-
-      if (!result.data.hasMore || result.data.turns.length === 0) break;
-
-      // Advance past the last turn's position for the next page
-      // eslint-disable-next-line unicorn/prefer-at -- `.at()` conflicts with this package's Node compatibility lint rule.
-      const lastTurn = result.data.turns[result.data.turns.length - 1];
-      fromPosition = lastTurn.position + 1;
+    if (totalTurnCount < 1) {
+      return { data: { turns: [] } };
     }
 
-    return { data: { turns: allTurns } };
+    const result = await this.#daemonClient.loadTurnHistory(conversationId, {
+      conversationId,
+      fromPosition: 1,
+      toPosition: totalTurnCount,
+    });
+
+    if (connection.isClosed) {
+      return null;
+    }
+
+    if ('error' in result) {
+      return result;
+    }
+
+    return { data: { turns: result.data.turns } };
   }
 
   #flushPendingReplayEvents(
