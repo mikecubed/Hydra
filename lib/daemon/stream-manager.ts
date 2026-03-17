@@ -294,6 +294,14 @@ export class StreamManager {
   }
 
   /**
+   * Remove all purge tombstones. Intended for tests that need to simulate
+   * tombstone eviction without reaching into private state.
+   */
+  clearTombstones(): void {
+    this.purgedHighSeqByTurnId.clear();
+  }
+
+  /**
    * Remove terminal streams older than `maxAgeMs` (defaults to configured
    * retention). Active streams are never purged — only completed, failed, or
    * cancelled streams past the retention window are removed.
@@ -327,14 +335,16 @@ export class StreamManager {
       }
     }
 
-    // Hard cap: evict oldest tombstones if the map exceeds the maximum size
+    // Hard cap: evict oldest tombstones if the map exceeds the maximum size.
+    // Map preserves insertion order, and new tombstones are always appended,
+    // so the first entries are the oldest — delete them in O(excess) without
+    // sorting or copying the entire map.
     if (this.purgedHighSeqByTurnId.size > StreamManager.MAX_TOMBSTONES) {
-      const entries = [...this.purgedHighSeqByTurnId.entries()].sort(
-        (a, b) => a[1].purgedAt - b[1].purgedAt,
-      );
-      const excess = entries.length - StreamManager.MAX_TOMBSTONES;
-      for (let i = 0; i < excess; i++) {
-        this.purgedHighSeqByTurnId.delete(entries[i][0]);
+      let excess = this.purgedHighSeqByTurnId.size - StreamManager.MAX_TOMBSTONES;
+      for (const key of this.purgedHighSeqByTurnId.keys()) {
+        if (excess <= 0) break;
+        this.purgedHighSeqByTurnId.delete(key);
+        excess -= 1;
       }
     }
 

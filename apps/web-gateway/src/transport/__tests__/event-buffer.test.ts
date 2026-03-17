@@ -132,6 +132,23 @@ describe('EventBuffer', () => {
       // Highwater must be unchanged
       assert.equal(buf.getHighwaterSeq('c'), 42);
     });
+
+    it('rejects non-JSON-safe payload values on write', () => {
+      assert.throws(
+        () => {
+          buf.push('c', {
+            seq: 7,
+            turnId: 'turn-7',
+            kind: 'text-delta',
+            payload: { bigintValue: 1n as unknown as never },
+            timestamp: new Date().toISOString(),
+          } as StreamEvent);
+        },
+        {
+          name: 'TypeError',
+        },
+      );
+    });
   });
 
   // ─── eviction at boundary ─────────────────────────────────────────────

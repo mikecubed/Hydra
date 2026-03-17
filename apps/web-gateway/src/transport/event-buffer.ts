@@ -5,7 +5,28 @@ import { StreamEvent as StreamEventSchema, type StreamEvent } from '@hydra/web-c
 const DEFAULT_CAPACITY = 1000;
 const DEFAULT_INACTIVE_TIMEOUT_MS = 5 * 60 * 1000;
 
+function cloneJsonValue(value: unknown): unknown {
+  if (value === null || typeof value !== 'object') {
+    return value;
+  }
+  if (Array.isArray(value)) {
+    return value.map((item) => cloneJsonValue(item));
+  }
+  const clone: Record<string, unknown> = {};
+  for (const [key, nestedValue] of Object.entries(value)) {
+    clone[key] = cloneJsonValue(nestedValue);
+  }
+  return clone;
+}
+
 function cloneEvent(event: StreamEvent): StreamEvent {
+  return {
+    ...event,
+    payload: cloneJsonValue(event.payload) as StreamEvent['payload'],
+  };
+}
+
+function normalizeEvent(event: StreamEvent): StreamEvent {
   return StreamEventSchema.parse(JSON.parse(JSON.stringify(event)));
 }
 
@@ -78,7 +99,9 @@ export class EventBuffer {
       }
     }
 
-    ring[head] = cloneEvent(event);
+    // Normalize to the JSON-safe wire shape once on write; internal storage is
+    // trusted from here on, so read paths only need a defensive clone.
+    ring[head] = normalizeEvent(event);
     this.heads.set(conversationId, (head + 1) % this.capacity);
 
     if (size < this.capacity) {
