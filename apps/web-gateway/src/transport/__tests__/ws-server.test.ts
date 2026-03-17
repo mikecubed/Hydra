@@ -82,6 +82,24 @@ async function connectWebSocket(
   return ws;
 }
 
+function createWebSocket(
+  port: number,
+  options: {
+    path?: string;
+    origin?: string;
+    sessionId?: string;
+  } = {},
+): WebSocket {
+  const headers: Record<string, string> = {
+    Origin: options.origin ?? ORIGIN,
+  };
+  if (options.sessionId != null) {
+    headers['Cookie'] = `__session=${options.sessionId}`;
+  }
+
+  return new WebSocket(`ws://127.0.0.1:${port}${options.path ?? '/ws'}`, { headers });
+}
+
 async function expectUnexpectedResponse(
   port: number,
   options: {
@@ -212,6 +230,21 @@ describe('GatewayWsServer', () => {
     assert.equal(message['type'], 'session-expiring-soon');
   });
 
+  it('replays expiring-soon state to sockets that connect after the warning window begins', async () => {
+    const session = await gw.sessionService.create('op-1', '127.0.0.1');
+    clock.advance(50_001);
+    gw.sessionService.touchActivity(session.id);
+    await gw.sessionService.validate(session.id);
+
+    const ws = createWebSocket(port, { sessionId: session.id });
+    const messagePromise = waitForMessage(ws);
+    await once(ws, 'open');
+    openSockets.push(ws);
+
+    const message = await messagePromise;
+    assert.equal(message['type'], 'session-expiring-soon');
+  });
+
   it('broadcasts daemon outage and recovery messages', async () => {
     const session = await gw.sessionService.create('op-1', '127.0.0.1');
     const ws = await connectWebSocket(port, { sessionId: session.id });
@@ -226,6 +259,19 @@ describe('GatewayWsServer', () => {
     await gw.heartbeat.tick();
     const up = await waitForMessage(ws);
     assert.equal(up['type'], 'daemon-restored');
+  });
+
+  it('replays daemon-unavailable state to sockets that connect after daemon failure', async () => {
+    const session = await gw.sessionService.create('op-1', '127.0.0.1');
+    await gw.sessionService.markDaemonDown(session.id);
+
+    const ws = createWebSocket(port, { sessionId: session.id });
+    const messagePromise = waitForMessage(ws);
+    await once(ws, 'open');
+    openSockets.push(ws);
+
+    const message = await messagePromise;
+    assert.equal(message['type'], 'daemon-unavailable');
   });
 
   it('returns 500 for non-GatewayError exceptions during validation', async () => {

@@ -112,13 +112,14 @@ describe('SessionWsBridge', () => {
       cleanup();
     });
 
-    it('ignores empty expiresAt string', () => {
+    it('fails closed for empty expiresAt string', () => {
       const session = createSession({ expiresAt: '' });
       const conn = createMockConnection(session.id);
       registry.register(conn);
 
       const cleanup = bridge.bindSession(session, conn as never);
-      assert.equal(conn.sent.length, 0);
+      const terminated = conn.sent.find((m) => m.type === 'session-terminated');
+      assert.ok(terminated, 'Empty expiresAt should terminate the session');
       cleanup();
     });
   });
