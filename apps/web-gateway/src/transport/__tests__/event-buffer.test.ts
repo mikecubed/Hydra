@@ -384,6 +384,18 @@ describe('EventBuffer', () => {
       // Client at sinceSeq=4: also needs seq 5 which was evicted
       assert.equal(buf.hasEventsSince('c', 4), false);
     });
+
+    it('returns false when an offline gap was recorded after a replay-safe tail', () => {
+      const buf = new EventBuffer(5);
+      buf.push('c', makeEvent(101));
+      buf.push('c', makeEvent(102));
+      buf.markReplaySafeFrom('c', 100);
+      buf.markDroppedSeq('c', 103);
+      buf.push('c', makeEvent(104));
+
+      assert.equal(buf.hasEventsSince('c', 101), false);
+      assert.equal(buf.hasEventsSince('c', 103), true);
+    });
   });
 
   // ─── evictConversation ────────────────────────────────────────────────

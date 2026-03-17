@@ -3,7 +3,9 @@
  * and forwards them to browser clients via WebSocket connections.
  *
  * For each event:
- *   (a) skip buffering unless the conversation has active or pending interest
+ *   (a) skip buffering unless the conversation has active or pending interest;
+ *       if no interest exists, record a replay gap so reconnects can fall back
+ *       to daemon replay instead of silently replaying an incomplete tail
  *   (b) push to EventBuffer
  *   (c) look up subscribed connections via ConnectionRegistry.getByConversation()
  *   (d) per-connection per-conversation replay check:
@@ -74,6 +76,7 @@ export class EventForwarder {
 
   #handleStreamEvent(conversationId: string, event: StreamEvent): void {
     if (!this.#registry.hasInterest(conversationId)) {
+      this.#buffer.markDroppedSeq(conversationId, event.seq);
       return;
     }
 

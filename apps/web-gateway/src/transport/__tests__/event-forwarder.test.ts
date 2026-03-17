@@ -245,6 +245,25 @@ describe('EventForwarder', () => {
         [1],
       );
     });
+
+    it('records an offline replay gap when events arrive with no interest', () => {
+      const conn = fakeConnection('c1', 's1');
+      registry.register(conn);
+      registry.addSubscription('c1', 'conv-1');
+
+      bridge.emitStreamEvent('conv-1', makeEvent(101));
+      bridge.emitStreamEvent('conv-1', makeEvent(102));
+      buffer.markReplaySafeFrom('conv-1', 100);
+
+      registry.removeSubscription('c1', 'conv-1');
+      bridge.emitStreamEvent('conv-1', makeEvent(103));
+
+      registry.addPendingInterest('c1', 'conv-1');
+      bridge.emitStreamEvent('conv-1', makeEvent(104));
+
+      assert.equal(buffer.hasEventsSince('conv-1', 101), false);
+      assert.equal(buffer.hasEventsSince('conv-1', 103), true);
+    });
   });
 
   // ─── replay-state queueing ─────────────────────────────────────────────

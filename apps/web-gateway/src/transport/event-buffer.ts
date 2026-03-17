@@ -109,6 +109,17 @@ export class EventBuffer {
   }
 
   /**
+   * Record that an event with `seq` existed for this conversation but was not
+   * retained in the in-memory replay buffer.
+   */
+  markDroppedSeq(conversationId: string, seq: number): void {
+    const current = this.evictedHighSeqs.get(conversationId) ?? 0;
+    if (seq > current) {
+      this.evictedHighSeqs.set(conversationId, seq);
+    }
+  }
+
+  /**
    * Check whether the buffer can satisfy a replay from `sinceSeq`.
    *
    * Returns `true` when:

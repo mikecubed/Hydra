@@ -2038,5 +2038,158 @@ describe('T030: End-to-end streaming integration', () => {
         );
       }
     });
+
+    it('forces daemon fallback when offline events create a replay gap after disconnect', async () => {
+      const auth = await loginViaRest();
+
+      const ws1 = await connectWebSocket(port, { sessionId: auth.sessionId });
+      openSockets.push(ws1);
+      ws1.send(JSON.stringify({ type: 'subscribe', conversationId: CONV_ID }));
+      await waitForMessage(ws1); // subscribed
+
+      const retainedTail: StreamEvent[] = [
+        {
+          seq: 101,
+          turnId: 'turn-gap-1',
+          kind: 'stream-started',
+          payload: { streamId: 'stream-gap-1' },
+          timestamp: new Date().toISOString(),
+        },
+        {
+          seq: 102,
+          turnId: 'turn-gap-1',
+          kind: 'text-delta',
+          payload: { text: 'retained-tail' },
+          timestamp: new Date().toISOString(),
+        },
+      ];
+
+      for (const event of retainedTail) {
+        bridge.emitStreamEvent(CONV_ID, event);
+      }
+
+      const firstPageMsgs = await waitForMessages(ws1, retainedTail.length);
+      for (const [i, msg] of firstPageMsgs.entries()) {
+        assert.equal(msg['type'], 'stream-event');
+        assert.deepEqual(msg['event'], retainedTail[i]);
+      }
+
+      gw.eventBuffer.markReplaySafeFrom(CONV_ID, 100);
+
+      const lastAckedSeq = 101;
+      ws1.send(JSON.stringify({ type: 'ack', conversationId: CONV_ID, seq: lastAckedSeq }));
+
+      const connections = gw.connectionRegistry.getByConversation(CONV_ID);
+      const connection = [...connections][0];
+      await waitFor(
+        () => connection.lastAckSeq.get(CONV_ID),
+        (seq) => seq === lastAckedSeq,
+      );
+
+      ws1.close();
+      await once(ws1, 'close');
+      await waitFor(
+        () => gw.connectionRegistry.getByConversation(CONV_ID).size,
+        (size) => size === 0,
+      );
+
+      const offlineEvents: StreamEvent[] = [
+        {
+          seq: 103,
+          turnId: 'turn-gap-2',
+          kind: 'text-delta',
+          payload: { text: 'offline-gap' },
+          timestamp: new Date().toISOString(),
+        },
+        {
+          seq: 104,
+          turnId: 'turn-gap-2',
+          kind: 'stream-completed',
+          payload: { responseLength: 11 },
+          timestamp: new Date().toISOString(),
+        },
+      ];
+      for (const event of offlineEvents) {
+        bridge.emitStreamEvent(CONV_ID, event);
+      }
+      assert.equal(gw.eventBuffer.hasEventsSince(CONV_ID, lastAckedSeq), false);
+
+      let daemonReplayCalls = 0;
+      fakeDaemon.wsDaemonClient.openConversation = async () => ({
+        data: {
+          conversation: {
+            id: CONV_ID,
+            status: 'active' as const,
+            createdAt: new Date().toISOString(),
+            updatedAt: new Date().toISOString(),
+            turnCount: 2,
+            pendingInstructionCount: 0,
+          },
+          recentTurns: [],
+          totalTurnCount: 2,
+          pendingApprovals: [],
+        },
+      });
+      fakeDaemon.wsDaemonClient.loadTurnHistory = async () => ({
+        data: {
+          turns: [
+            {
+              id: 'turn-gap-1',
+              conversationId: CONV_ID,
+              position: 1,
+              kind: 'operator' as const,
+              attribution: { type: 'operator' as const, label: 'admin' },
+              instruction: 'first',
+              status: 'completed' as const,
+              createdAt: new Date().toISOString(),
+            },
+            {
+              id: 'turn-gap-2',
+              conversationId: CONV_ID,
+              position: 2,
+              kind: 'operator' as const,
+              attribution: { type: 'operator' as const, label: 'admin' },
+              instruction: 'second',
+              status: 'completed' as const,
+              createdAt: new Date().toISOString(),
+            },
+          ],
+          totalCount: 2,
+          hasMore: false,
+        },
+      });
+      fakeDaemon.wsDaemonClient.getStreamReplay = async (_convId: string, turnId: string) => {
+        daemonReplayCalls += 1;
+        if (turnId === 'turn-gap-1') {
+          return { data: { events: [retainedTail[1]] } };
+        }
+        if (turnId === 'turn-gap-2') {
+          return { data: { events: offlineEvents } };
+        }
+        return { data: { events: [] } };
+      };
+
+      const ws2 = await connectWebSocket(port, { sessionId: auth.sessionId });
+      openSockets.push(ws2);
+      ws2.send(
+        JSON.stringify({
+          type: 'subscribe',
+          conversationId: CONV_ID,
+          lastAcknowledgedSeq: lastAckedSeq,
+        }),
+      );
+
+      const replayMsgs = await waitForMessages(ws2, retainedTail.length + offlineEvents.length);
+      const replayed = replayMsgs.slice(0, replayMsgs.length - 1);
+      assert.equal(lastItem(replayMsgs)?.['type'], 'subscribed');
+      assert.equal(daemonReplayCalls > 0, true);
+
+      const expectedReplay = [retainedTail[1], ...offlineEvents];
+      assert.equal(replayed.length, expectedReplay.length);
+      for (const [i, msg] of replayed.entries()) {
+        assert.equal(msg['type'], 'stream-event');
+        assert.deepEqual(msg['event'], expectedReplay[i]);
+      }
+    });
   });
 });
