@@ -125,27 +125,27 @@ mediate → translate → respond._
 _WebSocket infrastructure with full session security. Delivers US3 (P1) and the
 foundation for US2 streaming. Requires `ws` dependency._
 
-- [ ] T017 [P1] [US3] **Add `ws` dependency** — `npm install ws` and `npm install -D @types/ws` in `apps/web-gateway/`. Verify `npm run quality` passes. Update `apps/web-gateway/package.json`.
+- [x] T017 [P1] [US3] **Add `ws` dependency** — `npm install ws` and `npm install -D @types/ws` in `apps/web-gateway/`. Verify `npm run quality` passes. Update `apps/web-gateway/package.json`.
   - **Depends**: —
   - **Validates**: —
 
-- [ ] T018 [P1] [US2, US3] **TDD: `ws-protocol.ts`** — define Zod schemas for all client→server messages (`subscribe`, `unsubscribe`, `ack`) and server→client messages (`stream-event`, `subscribed`, `unsubscribed`, `session-terminated`, `session-expiring-soon`, `daemon-unavailable`, `daemon-restored`, `error`). Write round-trip parse/serialize tests asserting schema validation accepts valid messages and rejects malformed ones. Implement `apps/web-gateway/src/transport/ws-protocol.ts`.
+- [x] T018 [P1] [US2, US3] **TDD: `ws-protocol.ts`** — define Zod schemas for all client→server messages (`subscribe`, `unsubscribe`, `ack`) and server→client messages (`stream-event`, `subscribed`, `unsubscribed`, `session-terminated`, `session-expiring-soon`, `daemon-unavailable`, `daemon-restored`, `error`). Write round-trip parse/serialize tests asserting schema validation accepts valid messages and rejects malformed ones. Implement `apps/web-gateway/src/transport/ws-protocol.ts`.
   - **Depends**: T001
   - **Validates**: FR-013
 
-- [ ] T019 [P1] [US3] **TDD: `connection-registry.ts`** — `register(connection)`, `unregister(connectionId)`, `getBySession(sessionId)`, `getByConversation(conversationId)`, `addSubscription(connectionId, conversationId)`, `removeSubscription(connectionId, conversationId)`, `closeAllForSession(sessionId)`. Write tests for: indexing correctness, cleanup on disconnect, multi-tab scenarios (multiple connections per session), `closeAllForSession` cleans all indices. Implement `apps/web-gateway/src/transport/connection-registry.ts`.
+- [x] T019 [P1] [US3] **TDD: `connection-registry.ts`** — `register(connection)`, `unregister(connectionId)`, `getBySession(sessionId)`, `getByConversation(conversationId)`, `addSubscription(connectionId, conversationId)`, `removeSubscription(connectionId, conversationId)`, `closeAllForSession(sessionId)`. Write tests for: indexing correctness, cleanup on disconnect, multi-tab scenarios (multiple connections per session), `closeAllForSession` cleans all indices. Implement `apps/web-gateway/src/transport/connection-registry.ts`.
   - **Depends**: —
   - **Validates**: FR-014
 
-- [ ] T020 [P1] [US3] **TDD: `ws-connection.ts`** — per-connection lifecycle model: creation (binds `sessionId` from upgrade request, generates `connectionId` via `crypto.randomUUID()`), state machine (`open` → `closing` → `closed`), message dispatch, close handling with registry cleanup. Write tests for session-binding immutability, state transitions, graceful close. Implement `apps/web-gateway/src/transport/ws-connection.ts`.
+- [x] T020 [P1] [US3] **TDD: `ws-connection.ts`** — per-connection lifecycle model: creation (binds `sessionId` from upgrade request, generates `connectionId` via `crypto.randomUUID()`), state machine (`open` → `closing` → `closed`), message dispatch, close handling with registry cleanup. Write tests for session-binding immutability, state transitions, graceful close. Implement `apps/web-gateway/src/transport/ws-connection.ts`.
   - **Depends**: T019
   - **Validates**: FR-014
 
-- [ ] T021 [P1] [US3] **TDD: `ws-server.ts`** — `ws.WebSocketServer` setup with `noServer: true`, attached to Node.js `http.Server` via `upgrade` event on `/ws` path. Upgrade handler: parse `__session` cookie, validate session via `SessionService.validate()`, validate Origin header against `allowedOrigin`, reject with 401/403 on failure, register connection on success. Write tests for: valid session → connection established, expired session → 401, missing cookie → 401, wrong origin → 403, non-`/ws` upgrade → socket destroyed. Implement `apps/web-gateway/src/transport/ws-server.ts`.
+- [x] T021 [P1] [US3] **TDD: `ws-server.ts`** — `ws.WebSocketServer` setup with `noServer: true`, attached to Node.js `http.Server` via `upgrade` event on `/ws` path. Upgrade handler: parse `__session` cookie, validate session via `SessionService.validate()`, validate Origin header against `allowedOrigin`, reject with 401/403 on failure, register connection on success. Write tests for: valid session → connection established, expired session → 401, missing cookie → 401, wrong origin → 403, non-`/ws` upgrade → socket destroyed. Implement `apps/web-gateway/src/transport/ws-server.ts`.
   - **Depends**: T017, T019, T020
   - **Validates**: FR-008, FR-009, SC-006
 
-- [ ] T022 [P1] [US3] **TDD: Session & daemon lifecycle → WS bridge** — wire the existing `SessionStateBroadcaster` and `DaemonHeartbeat` primitives into WS connection lifecycle. **Plumbing required** (these are not pre-wired — the gateway currently has the building blocks but no WS integration):
+- [x] T022 [P1] [US3] **TDD: Session & daemon lifecycle → WS bridge** — wire the existing `SessionStateBroadcaster` and `DaemonHeartbeat` primitives into WS connection lifecycle. **Plumbing required** (these are not pre-wired — the gateway currently has the building blocks but no WS integration):
   1. On WS connection open: call `SessionStateBroadcaster.register(sessionId, callback)` with a callback that translates session state-change events into WS protocol messages. On connection close: call `SessionStateBroadcaster.unregister(sessionId, callback)`.
   2. The `DaemonHeartbeat` already transitions sessions to `daemon-unreachable` / back to `active` via `SessionService`, which should trigger `SessionStateBroadcaster` callbacks. Verify this end-to-end chain: `DaemonHeartbeat.tick()` → `sessionService.markDaemonDown()` → session state change → `SessionStateBroadcaster.broadcast()` → WS callback → send `daemon-unavailable` message. If any link in this chain is missing (e.g., `SessionService` does not call the broadcaster on state transition), add the missing bridge here.
   3. Map session states to WS messages: terminal states (`expired`, `invalidated`, `logged-out`) → `session-terminated` + close all connections via `ConnectionRegistry.closeAllForSession()`; `expiring-soon` → `session-expiring-soon`; `daemon-unreachable` → `daemon-unavailable`; recovery from `daemon-unreachable` → `daemon-restored`.
@@ -153,11 +153,11 @@ foundation for US2 streaming. Requires `ws` dependency._
   - **Depends**: T019, T021
   - **Validates**: FR-015, FR-016, FR-021, SC-005
 
-- [ ] T023 [P1] [US2, US3] **Wire WebSocket server into gateway app** — extend `createGatewayApp` to accept `server: http.Server` parameter, attach `ws.WebSocketServer`, export connection registry for test access. Update `apps/web-gateway/src/index.ts`. Write integration test: create gateway with HTTP server, establish WebSocket connection with valid session, verify connection appears in registry.
+- [x] T023 [P1] [US2, US3] **Wire WebSocket server into gateway app** — extend `createGatewayApp` to accept `server: http.Server` parameter, attach `ws.WebSocketServer`, export connection registry for test access. Update `apps/web-gateway/src/index.ts`. Write integration test: create gateway with HTTP server, establish WebSocket connection with valid session, verify connection appears in registry.
   - **Depends**: T015, T021, T022
   - **Validates**: FR-008
 
-- [ ] T024 [P1] [US3] **Quality gate: Phase 3** — `npm run quality` and `npm test`. WebSocket handshake, session binding, and lifecycle all passing.
+- [x] T024 [P1] [US3] **Quality gate: Phase 3** — `npm run quality` and `npm test`. WebSocket handshake, session binding, and lifecycle all passing.
   - **Depends**: T023
   - **Validates**: SC-004, SC-005, SC-006, SC-011
 

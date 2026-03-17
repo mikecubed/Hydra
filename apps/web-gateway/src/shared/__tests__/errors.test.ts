@@ -1,6 +1,13 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
-import { GatewayError, createError, ERROR_STATUS_MAP, type ErrorCode } from '../errors.ts';
+import {
+  GatewayError,
+  createError,
+  ERROR_STATUS_MAP,
+  ERROR_CATEGORY_MAP,
+  type ErrorCode,
+} from '../errors.ts';
+import { ERROR_CATEGORIES } from '../gateway-error-response.ts';
 
 describe('GatewayError', () => {
   it('constructs with code, message, and statusCode', () => {
@@ -62,6 +69,23 @@ describe('ERROR_STATUS_MAP', () => {
     for (const code of codes) {
       const status = ERROR_STATUS_MAP[code as ErrorCode];
       assert.ok(status >= 400 && status < 600, `${code} should map to a 4xx/5xx status`);
+    }
+  });
+});
+
+describe('ERROR_CATEGORY_MAP', () => {
+  it('covers every ErrorCode', () => {
+    const statusCodes = Object.keys(ERROR_STATUS_MAP) as ErrorCode[];
+    const categoryCodes = Object.keys(ERROR_CATEGORY_MAP) as ErrorCode[];
+    assert.deepEqual(categoryCodes.sort(), statusCodes.sort());
+  });
+
+  it('maps every code to a valid ErrorCategory', () => {
+    for (const [code, category] of Object.entries(ERROR_CATEGORY_MAP)) {
+      assert.ok(
+        ERROR_CATEGORIES.includes(category),
+        `${code} maps to invalid category: ${category}`,
+      );
     }
   });
 });

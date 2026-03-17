@@ -9,6 +9,7 @@ import type { SessionState } from '@hydra/web-contracts';
 import { transition, isTerminal, type SessionTrigger } from './session-state-machine.ts';
 import { createError } from '../shared/errors.ts';
 import type { AuditService } from '../audit/audit-service.ts';
+import type { SessionStateBroadcaster } from './session-state-broadcaster.ts';
 
 export interface SessionServiceConfig {
   sessionLifetimeMs: number;
@@ -42,17 +43,20 @@ export class SessionService {
   private readonly clock: Clock;
   readonly config: SessionServiceConfig;
   private readonly auditService?: AuditService;
+  private readonly broadcaster?: SessionStateBroadcaster;
 
   constructor(
     store: SessionStore,
     clock: Clock = new SystemClock(),
     config: Partial<SessionServiceConfig> = {},
     auditService?: AuditService,
+    broadcaster?: SessionStateBroadcaster,
   ) {
     this.store = store;
     this.clock = clock;
     this.config = { ...DEFAULT_CONFIG, ...config };
     this.auditService = auditService;
+    this.broadcaster = broadcaster;
   }
 
   async create(operatorId: string, sourceIp: string): Promise<StoredSession> {
@@ -137,6 +141,7 @@ export class SessionService {
   async extend(sessionId: string): Promise<StoredSession> {
     const session = this.store.get(sessionId);
     if (!session) throw createError('SESSION_NOT_FOUND');
+    const previousState = session.state;
 
     if (isTerminal(session.state)) {
       throw createError('SESSION_EXPIRED', `Cannot extend session in '${session.state}' state`);
@@ -204,6 +209,14 @@ export class SessionService {
       throw err;
     }
 
+    this.broadcaster?.broadcast(sessionId, {
+      type: 'state-change',
+      previousState,
+      newState: updated.state,
+      trigger: 'extend',
+      expiresAt: updated.expiresAt,
+    });
+
     return updated;
   }
 
@@ -265,6 +278,18 @@ export class SessionService {
         this.store.update(sessionId, snapshot);
         throw err;
       }
+    }
+
+    const updatedSession = this.store.get(sessionId);
+    if (updatedSession != null) {
+      this.broadcaster?.broadcast(sessionId, {
+        type: 'state-change',
+        previousState: snapshot.state,
+        newState: updatedSession.state,
+        reason,
+        trigger,
+        expiresAt: updatedSession.expiresAt,
+      });
     }
   }
 }

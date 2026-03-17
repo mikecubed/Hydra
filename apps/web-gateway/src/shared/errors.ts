@@ -4,6 +4,8 @@
  * Used across auth/, session/, security/, and conversation/ modules.
  */
 
+import type { ErrorCategory } from './gateway-error-response.ts';
+
 export type AuthErrorCode = 'INVALID_CREDENTIALS' | 'RATE_LIMITED' | 'ACCOUNT_DISABLED';
 
 export type SessionErrorCode =
@@ -62,6 +64,29 @@ export const ERROR_STATUS_MAP: Record<ErrorCode, number> = {
   VALIDATION_FAILED: 400,
   WS_INVALID_MESSAGE: 400,
   WS_BUFFER_OVERFLOW: 503,
+};
+
+/** Map every ErrorCode to its ErrorCategory for structured responses. */
+export const ERROR_CATEGORY_MAP: Record<ErrorCode, ErrorCategory> = {
+  INVALID_CREDENTIALS: 'auth',
+  RATE_LIMITED: 'rate-limit',
+  ACCOUNT_DISABLED: 'auth',
+  SESSION_EXPIRED: 'session',
+  SESSION_INVALIDATED: 'session',
+  SESSION_NOT_FOUND: 'auth',
+  SESSION_NOT_IDLE: 'session',
+  IDLE_TIMEOUT: 'session',
+  BAD_REQUEST: 'validation',
+  INTERNAL_ERROR: 'daemon',
+  DAEMON_UNREACHABLE: 'daemon',
+  CLOCK_UNRELIABLE: 'daemon',
+  CSRF_INVALID: 'validation',
+  ORIGIN_REJECTED: 'auth',
+  CONVERSATION_NOT_FOUND: 'validation',
+  TURN_NOT_FOUND: 'validation',
+  VALIDATION_FAILED: 'validation',
+  WS_INVALID_MESSAGE: 'validation',
+  WS_BUFFER_OVERFLOW: 'daemon',
 };
 
 export function createError(code: ErrorCode, message?: string): GatewayError {

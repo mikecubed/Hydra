@@ -15,6 +15,31 @@ export interface SourceKeyConfig {
   trustedProxies?: string[];
 }
 
+export function resolveSourceKeyFromParts(
+  remoteAddress?: string,
+  forwardedFor?: string,
+  trustedProxies?: ReadonlySet<string>,
+): string {
+  if (
+    trustedProxies != null &&
+    trustedProxies.size > 0 &&
+    remoteAddress != null &&
+    remoteAddress !== '' &&
+    trustedProxies.has(remoteAddress)
+  ) {
+    if (forwardedFor != null && forwardedFor !== '') {
+      const ips = forwardedFor.split(',').map((ip) => ip.trim());
+      for (let i = ips.length - 1; i >= 0; i--) {
+        if (!trustedProxies.has(ips[i])) {
+          return ips[i];
+        }
+      }
+    }
+  }
+
+  return remoteAddress ?? 'unknown';
+}
+
 /**
  * Derive the rate-limit source key from the request.
  *
@@ -31,26 +56,7 @@ export function resolveSourceKey(c: Context, trustedProxies?: ReadonlySet<string
   // eslint-disable-next-line @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-assignment
   const remoteAddress: string | undefined = c.env?.incoming?.socket?.remoteAddress;
 
-  if (
-    trustedProxies != null &&
-    trustedProxies.size > 0 &&
-    remoteAddress != null &&
-    remoteAddress !== '' &&
-    trustedProxies.has(remoteAddress)
-  ) {
-    const forwarded = c.req.header('x-forwarded-for');
-    if (forwarded != null && forwarded !== '') {
-      const ips = forwarded.split(',').map((ip) => ip.trim());
-      // Walk right-to-left — rightmost entries are set by proxies closest to us
-      for (let i = ips.length - 1; i >= 0; i--) {
-        if (!trustedProxies.has(ips[i])) {
-          return ips[i];
-        }
-      }
-    }
-  }
-
-  return remoteAddress ?? 'unknown';
+  return resolveSourceKeyFromParts(remoteAddress, c.req.header('x-forwarded-for'), trustedProxies);
 }
 
 /**
