@@ -71,6 +71,16 @@ export class WsMessageHandler {
     conversationId: string,
     lastAcknowledgedSeq?: number,
   ): Promise<void> {
+    if (connection.subscribedConversations.has(conversationId)) {
+      connection.replayState.set(conversationId, 'live');
+      connection.send({
+        type: 'subscribed',
+        conversationId,
+        currentSeq: this.#buffer.getHighwaterSeq(conversationId),
+      });
+      return;
+    }
+
     // Validate conversation exists via daemon
     const result = await this.#daemonClient.openConversation(conversationId);
     if ('error' in result) {

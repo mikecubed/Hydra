@@ -172,8 +172,10 @@ describe('EventForwarder', () => {
     it('does not deliver events when no connections are subscribed', () => {
       // Just emit — no subscribers at all
       bridge.emitStreamEvent('conv-1', makeEvent(1));
-      // No error, no crash — just a no-op
-      assert.ok(true);
+      assert.deepEqual(
+        buffer.getEventsSince('conv-1', 0).map((event) => event.seq),
+        [1],
+      );
     });
   });
 

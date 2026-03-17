@@ -399,9 +399,11 @@ describe('EventBuffer', () => {
 
     it('is a no-op for unknown conversation', () => {
       const buf = new EventBuffer(10);
-      // Should not throw
-      buf.evictConversation('nonexistent');
-      assert.ok(true);
+      assert.doesNotThrow(() => {
+        buf.evictConversation('nonexistent');
+      });
+      assert.deepEqual(buf.getEventsSince('nonexistent', 0), []);
+      assert.equal(buf.getHighwaterSeq('nonexistent'), 0);
     });
   });
 

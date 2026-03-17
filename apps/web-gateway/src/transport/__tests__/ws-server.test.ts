@@ -161,6 +161,14 @@ async function waitForMessages(
   });
 }
 
+function createDeferred<T>() {
+  let resolve!: (value: T | PromiseLike<T>) => void;
+  const promise = new Promise<T>((resolver) => {
+    resolve = resolver;
+  });
+  return { promise, resolve };
+}
+
 async function connectWebSocket(
   port: number,
   options: {
@@ -323,6 +331,129 @@ describe('GatewayWsServer', () => {
     assert.equal(message['conversationId'], 'conv-1');
     assert.equal(message['currentSeq'], 0);
     assert.equal(gw.connectionRegistry.getByConversation('conv-1').size, 1);
+  });
+
+  it('serializes subscribe then unsubscribe so stale subscribe completion does not leave the connection subscribed', async () => {
+    const localServer = createServer();
+    const pendingOpen =
+      createDeferred<
+        Awaited<ReturnType<ReturnType<typeof createWsDaemonClient>['openConversation']>>
+      >();
+    const localGateway = createGatewayApp({
+      server: localServer,
+      clock,
+      allowedOrigin: ORIGIN,
+      healthChecker: async () => true,
+      heartbeatConfig: { intervalMs: 60_000 },
+      wsDaemonClient: {
+        openConversation: async () => pendingOpen.promise,
+      },
+      streamEventBridge: new FakeEventBridge(),
+    });
+    const requestListener = getRequestListener(localGateway.app.fetch);
+    localServer.on('request', (request, response) => {
+      void requestListener(request, response);
+    });
+    const localPort = await listen(localServer);
+
+    try {
+      const session = await localGateway.sessionService.create('op-1', '127.0.0.1');
+      const ws = await connectWebSocket(localPort, { sessionId: session.id });
+      openSockets.push(ws);
+
+      ws.send(JSON.stringify({ type: 'subscribe', conversationId: 'conv-1' }));
+      ws.send(JSON.stringify({ type: 'unsubscribe', conversationId: 'conv-1' }));
+
+      pendingOpen.resolve({
+        data: {
+          conversation: {
+            id: 'conv-1',
+            status: 'active',
+            createdAt: new Date().toISOString(),
+            updatedAt: new Date().toISOString(),
+            turnCount: 0,
+            pendingInstructionCount: 0,
+          },
+          recentTurns: [],
+          totalTurnCount: 0,
+          pendingApprovals: [],
+        },
+      });
+
+      const messages = await waitForMessages(ws, 2);
+      assert.deepEqual(
+        messages.map((message) => message['type']),
+        ['subscribed', 'unsubscribed'],
+      );
+      assert.equal(localGateway.connectionRegistry.getByConversation('conv-1').size, 0);
+    } finally {
+      localGateway.wsServer?.close();
+      localGateway.heartbeat.stop();
+      await closeServer(localServer);
+    }
+  });
+
+  it('does not replay buffered events twice for duplicate subscribe frames on the same connection', async () => {
+    const localServer = createServer();
+    const pendingOpen =
+      createDeferred<
+        Awaited<ReturnType<ReturnType<typeof createWsDaemonClient>['openConversation']>>
+      >();
+    const localGateway = createGatewayApp({
+      server: localServer,
+      clock,
+      allowedOrigin: ORIGIN,
+      healthChecker: async () => true,
+      heartbeatConfig: { intervalMs: 60_000 },
+      wsDaemonClient: {
+        openConversation: async () => pendingOpen.promise,
+      },
+      streamEventBridge: new FakeEventBridge(),
+    });
+    localGateway.eventBuffer.push('conv-1', makeStreamEvent(1));
+    const requestListener = getRequestListener(localGateway.app.fetch);
+    localServer.on('request', (request, response) => {
+      void requestListener(request, response);
+    });
+    const localPort = await listen(localServer);
+
+    try {
+      const session = await localGateway.sessionService.create('op-1', '127.0.0.1');
+      const ws = await connectWebSocket(localPort, { sessionId: session.id });
+      openSockets.push(ws);
+
+      const subscribe = JSON.stringify({
+        type: 'subscribe',
+        conversationId: 'conv-1',
+        lastAcknowledgedSeq: 0,
+      });
+      ws.send(subscribe);
+      ws.send(subscribe);
+
+      pendingOpen.resolve({
+        data: {
+          conversation: {
+            id: 'conv-1',
+            status: 'active',
+            createdAt: new Date().toISOString(),
+            updatedAt: new Date().toISOString(),
+            turnCount: 0,
+            pendingInstructionCount: 0,
+          },
+          recentTurns: [],
+          totalTurnCount: 0,
+          pendingApprovals: [],
+        },
+      });
+
+      const messages = await waitForMessages(ws, 3);
+      assert.equal(messages.filter((message) => message['type'] === 'stream-event').length, 1);
+      assert.equal(messages.filter((message) => message['type'] === 'subscribed').length, 2);
+    } finally {
+      localGateway.wsServer?.close();
+      localGateway.heartbeat.stop();
+      await closeServer(localServer);
+    }
   });
 
   it('forwards bridge stream events to subscribed websocket clients', async () => {

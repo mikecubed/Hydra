@@ -105,6 +105,7 @@ export class GatewayWsServer {
   readonly #trustedProxies: ReadonlySet<string> | undefined;
   readonly #messageHandler: WsMessageHandler;
   readonly #eventForwarder?: EventForwarder;
+  readonly #messageQueues = new Map<string, Promise<void>>();
 
   constructor(options: GatewayWsServerOptions) {
     this.#server = options.server;
@@ -153,10 +154,28 @@ export class GatewayWsServer {
   }
 
   #handleSocketMessage(connection: WsConnection, data: RawData): void {
-    const rawMessage = rawDataToString(data);
-    void this.#messageHandler.handleMessage(connection, rawMessage).catch(() => {
-      if (!connection.isClosed) {
-        connection.close(1011, 'Message handling failed');
+    const prior = this.#messageQueues.get(connection.connectionId) ?? Promise.resolve();
+    const next = prior
+      .catch(() => {})
+      .then(async () => {
+        const rawMessage = rawDataToString(data);
+        await this.#messageHandler.handleMessage(connection, rawMessage);
+      })
+      .catch((err: unknown) => {
+        const detail = err instanceof Error ? err.message : 'unknown error';
+        console.warn('[GatewayWsServer] message handling failure', {
+          connectionId: connection.connectionId,
+          sessionId: connection.sessionId,
+          detail,
+        });
+        if (!connection.isClosed) {
+          connection.close(1011, 'Message handling failed');
+        }
+      });
+    this.#messageQueues.set(connection.connectionId, next);
+    void next.finally(() => {
+      if (this.#messageQueues.get(connection.connectionId) === next) {
+        this.#messageQueues.delete(connection.connectionId);
       }
     });
   }
@@ -266,6 +285,7 @@ export class GatewayWsServer {
             return;
           }
           isCleanedUp = true;
+          this.#messageQueues.delete(connection.connectionId);
           this.#connectionRegistry.unregister(connection.connectionId);
           cleanupIdle();
           cleanupBridge();

@@ -147,6 +147,25 @@ describe('WsMessageHandler', () => {
       assert.equal((resp as { currentSeq: number }).currentSeq, 10);
     });
 
+    it('treats duplicate subscribe for the same conversation as idempotent', async () => {
+      buffer.push('conv-1', makeEvent(1));
+      buffer.push('conv-1', makeEvent(2));
+
+      const replayingSubscribe = JSON.stringify({
+        type: 'subscribe',
+        conversationId: 'conv-1',
+        lastAcknowledgedSeq: 0,
+      });
+      await handler.handleMessage(conn, replayingSubscribe);
+      conn.sent.splice(0);
+
+      await handler.handleMessage(conn, replayingSubscribe);
+
+      assert.equal(conn.sent.length, 1);
+      assert.equal(conn.sent[0].type, 'subscribed');
+      assert.equal((conn.sent[0] as { currentSeq: number }).currentSeq, 2);
+    });
+
     it('rejects non-existent conversation with error', async () => {
       const msg = JSON.stringify({ type: 'subscribe', conversationId: 'invalid-conv' });
       await handler.handleMessage(conn, msg);

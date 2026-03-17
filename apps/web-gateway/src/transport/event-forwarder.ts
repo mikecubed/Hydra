@@ -70,7 +70,14 @@ export class EventForwarder {
     for (const conn of connections) {
       try {
         this.#forwardToConnection(conn, conversationId, event);
-      } catch {
+      } catch (err) {
+        const detail = err instanceof Error ? err.message : 'unknown error';
+        console.warn('[EventForwarder] stream delivery failure', {
+          connectionId: conn.connectionId,
+          conversationId,
+          seq: event.seq,
+          detail,
+        });
         if (!conn.isClosed) {
           conn.close(1011, 'Stream delivery failed');
         }
