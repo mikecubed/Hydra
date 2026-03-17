@@ -629,7 +629,10 @@ describe('StreamManager — tombstone bounding', () => {
     sm.purgeTerminalStreams(0);
 
     // The tombstone count should be capped
-    assert.ok(sm.tombstoneCount <= 10_000, `tombstones should be capped (got ${String(sm.tombstoneCount)})`);
+    assert.ok(
+      sm.tombstoneCount <= 10_000,
+      `tombstones should be capped (got ${String(sm.tombstoneCount)})`,
+    );
 
     // The very first turn's tombstone should have been evicted
     assert.equal(sm.getPurgedHighSeq(turnIds[0]), undefined, 'oldest tombstone should be evicted');

@@ -10,7 +10,7 @@ function createOverflowMessage(conversationId?: string): ServerMessage {
     ok: false as const,
     code: 'WS_BUFFER_OVERFLOW',
     category: 'daemon',
-    message: 'Event buffer overflow',
+    message: 'WebSocket send buffer exceeded the configured backpressure limit',
     ...(conversationId !== undefined && { conversationId }),
   };
 }

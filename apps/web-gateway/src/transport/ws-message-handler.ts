@@ -34,6 +34,8 @@ export interface MessageHandlerDeps {
   readonly bufferHighWaterMark?: number;
 }
 
+const DAEMON_REPLAY_CONCURRENCY = 8;
+
 function lastSeq(events: ReadonlyArray<StreamEvent>): number | undefined {
   // eslint-disable-next-line unicorn/prefer-at -- `.at()` conflicts with this package's Node compatibility lint rule.
   return events.slice(-1).pop()?.seq;
@@ -228,10 +230,10 @@ export class WsMessageHandler {
 
     const turns = allTurnsResult.data.turns;
 
-    const replayResults = await Promise.all(
-      turns.map((turn) =>
-        this.#daemonClient.getStreamReplay(conversationId, turn.id, lastAcknowledgedSeq),
-      ),
+    const replayResults = await this.#mapTurnsWithConcurrency(
+      turns,
+      DAEMON_REPLAY_CONCURRENCY,
+      (turn) => this.#daemonClient.getStreamReplay(conversationId, turn.id, lastAcknowledgedSeq),
     );
 
     if (connection.isClosed) return;
@@ -277,6 +279,29 @@ export class WsMessageHandler {
     if (!this.#sendSubscribed(connection, conversationId, currentSeq)) {
       this.#cleanupSubscriptionState(connection, conversationId);
     }
+  }
+
+  async #mapTurnsWithConcurrency<T>(
+    turns: LoadTurnHistoryResponse['turns'],
+    concurrency: number,
+    mapper: (turn: LoadTurnHistoryResponse['turns'][number]) => Promise<T>,
+  ): Promise<T[]> {
+    const results: T[] = [];
+    results.length = turns.length;
+    let nextIndex = 0;
+    const workerCount = Math.min(concurrency, turns.length);
+    await Promise.all(
+      Array.from({ length: workerCount }, async function run(): Promise<void> {
+        if (nextIndex >= turns.length) {
+          return;
+        }
+        const currentIndex = nextIndex;
+        nextIndex += 1;
+        results[currentIndex] = await mapper(turns[currentIndex]);
+        return run();
+      }),
+    );
+    return results;
   }
 
   #collectReplayFailures(
@@ -388,7 +413,6 @@ export class WsMessageHandler {
   #startLiveSubscription(connection: ManagedConnection, conversationId: string): void {
     this.#buffer.markConversationActive(conversationId);
     connection.replayState.set(conversationId, 'live');
-    connection.pendingEvents.set(conversationId, []);
     this.#registry.addSubscription(connection.connectionId, conversationId);
 
     const currentSeq = this.#buffer.getHighwaterSeq(conversationId);

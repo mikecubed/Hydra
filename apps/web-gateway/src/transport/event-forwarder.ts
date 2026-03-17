@@ -36,6 +36,8 @@ export interface EventForwarderOptions {
   bufferHighWaterMark?: number;
 }
 
+const MAX_PENDING_REPLAY_EVENTS = 1_000;
+
 export class EventForwarder {
   readonly #bridge: StreamEventBridgeLike;
   readonly #buffer: EventBuffer;
@@ -121,6 +123,18 @@ export class EventForwarder {
       if (!queue) {
         queue = [];
         conn.pendingEvents.set(conversationId, queue);
+      }
+      if (queue.length >= MAX_PENDING_REPLAY_EVENTS) {
+        conn.send({
+          type: 'error',
+          ok: false,
+          code: 'WS_REPLAY_OVERFLOW',
+          category: 'daemon',
+          message: 'Replay backlog exceeded the configured limit before replay completed',
+          conversationId,
+        });
+        conn.close(1008, 'WS_REPLAY_OVERFLOW');
+        return;
       }
       queue.push(event);
       return;

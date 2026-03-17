@@ -121,6 +121,7 @@ export class StreamManager {
       timestamp: nowIso(),
     };
     state.events.push(startEvent);
+    this.store.recordTurnStreamSeq(turnId, startEvent.seq);
     this.bridgeEmit(turnId, startEvent);
 
     this.streams.set(streamId, state);
@@ -153,6 +154,7 @@ export class StreamManager {
       timestamp: nowIso(),
     };
     state.events.push(event);
+    this.store.recordTurnStreamSeq(turnId, event.seq);
     this.bridgeEmit(turnId, event);
     return event;
   }
@@ -182,6 +184,7 @@ export class StreamManager {
       timestamp: nowIso(),
     };
     state.events.push(completedEvent);
+    this.store.recordTurnStreamSeq(turnId, completedEvent.seq);
     this.bridgeEmit(turnId, completedEvent);
     state.status = 'completed';
     state.completedAt = nowIso();
@@ -209,6 +212,7 @@ export class StreamManager {
       timestamp: nowIso(),
     };
     state.events.push(failedEvent);
+    this.store.recordTurnStreamSeq(turnId, failedEvent.seq);
     this.bridgeEmit(turnId, failedEvent);
     state.status = 'failed';
     state.completedAt = nowIso();
@@ -236,6 +240,7 @@ export class StreamManager {
       timestamp: nowIso(),
     };
     state.events.push(cancelEvent);
+    this.store.recordTurnStreamSeq(turnId, cancelEvent.seq);
     this.bridgeEmit(turnId, cancelEvent);
     state.status = 'cancelled';
     state.completedAt = nowIso();

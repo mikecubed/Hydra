@@ -578,6 +578,17 @@ describe('WsMessageHandler', () => {
       assert.equal(conn.sent.length, 1);
       assert.equal(conn.sent[0].type, 'subscribed');
     });
+
+    it('does not allocate pending replay state for a live-only subscribe', async () => {
+      await handler.handleMessage(
+        conn,
+        JSON.stringify({ type: 'subscribe', conversationId: 'conv-1' }),
+      );
+
+      assert.equal(conn.sent.length, 1);
+      assert.equal(conn.sent[0].type, 'subscribed');
+      assert.equal(conn.pendingEvents.has('conv-1'), false);
+    });
   });
 
   // ─── replay barrier: concurrent live events during replay ───────────────
@@ -1194,8 +1205,8 @@ describe('WsMessageHandler', () => {
             },
           };
         },
-        async getStreamReplay(_conversationId, turnId) {
-          return { data: { events: replay.get(turnId) ?? [] } };
+        async getStreamReplay(_conversationId, _turnId) {
+          return { data: { events: replay.get(_turnId) ?? [] } };
         },
       };
       handler = new WsMessageHandler({
@@ -1345,8 +1356,8 @@ describe('WsMessageHandler', () => {
             },
           };
         },
-        async getStreamReplay(_conversationId, turnId) {
-          return { data: { events: replay.get(turnId) ?? [] } };
+        async getStreamReplay(_conversationId, _turnId) {
+          return { data: { events: replay.get(_turnId) ?? [] } };
         },
       };
       handler = new WsMessageHandler({
@@ -1641,6 +1652,60 @@ describe('WsMessageHandler', () => {
       assert.ok(err.message.includes('t1'));
       assert.ok(err.message.includes('t3'));
       assert.ok(!conn.subscribedConversations.has('conv-1'));
+    });
+
+    it('limits concurrent getStreamReplay calls during daemon fallback replay', async () => {
+      const turns = new Map([
+        [
+          'conv-1',
+          Array.from({ length: 20 }, (_, index) =>
+            fakeTurn(`t${String(index + 1)}`, 'conv-1', index + 1),
+          ),
+        ],
+      ]);
+      let inFlight = 0;
+      let maxInFlight = 0;
+      const daemonClient: MessageHandlerDeps['daemonClient'] = {
+        async openConversation(conversationId: string) {
+          return fakeConversationData(conversationId, 20);
+        },
+        async loadTurnHistory() {
+          return {
+            data: {
+              turns: turns.get('conv-1') ?? [],
+              totalCount: 20,
+              hasMore: false,
+            },
+          };
+        },
+        async getStreamReplay(_conversationId, _turnId) {
+          inFlight += 1;
+          maxInFlight = Math.max(maxInFlight, inFlight);
+          await delay(1);
+          inFlight -= 1;
+          return { data: { events: [] } };
+        },
+      };
+      handler = new WsMessageHandler({
+        registry,
+        buffer,
+        daemonClient,
+        bufferHighWaterMark: HIGH_WATER_MARK,
+      });
+
+      const subscribePromise = handler.handleMessage(
+        conn,
+        JSON.stringify({
+          type: 'subscribe',
+          conversationId: 'conv-1',
+          lastAcknowledgedSeq: 1,
+        }),
+      );
+      await subscribePromise;
+
+      assert.equal(maxInFlight, 8);
+      // eslint-disable-next-line unicorn/prefer-at -- `.at()` conflicts with this repo's Node compatibility lint rule.
+      assert.equal(conn.sent.slice(-1).pop()?.type, 'subscribed');
     });
 
     it('does not send subscribed when all getStreamReplay calls fail', async () => {

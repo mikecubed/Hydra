@@ -532,9 +532,33 @@ describe('EventForwarder', () => {
       assert.ok(errorMsg, 'Expected a WS_BUFFER_OVERFLOW error message');
       assert.equal((errorMsg as { code: string }).code, 'WS_BUFFER_OVERFLOW');
       assert.equal((errorMsg as { category: string }).category, 'daemon');
+      assert.equal(
+        (errorMsg as { message: string }).message,
+        'WebSocket send buffer exceeded the configured backpressure limit',
+      );
 
       const streamEvents = conn.sent.filter((m) => m.type === 'stream-event');
       assert.equal(streamEvents.length, 0, 'Should not deliver stream-event on overflow');
+    });
+
+    it('closes replaying connections when pending replay backlog exceeds the limit', () => {
+      const conn = fakeConnection('c1', 's1');
+      conn.replayState.set('conv-1', 'replaying');
+      conn.pendingEvents.set(
+        'conv-1',
+        Array.from({ length: 1_000 }, (_, index) => makeEvent(index + 1)),
+      );
+      bpRegistry.register(conn);
+      bpRegistry.addSubscription('c1', 'conv-1');
+
+      bpBridge.emitStreamEvent('conv-1', makeEvent(1_001));
+
+      assert.equal(conn.isClosed, true);
+      assert.equal(conn.closeCode, 1008);
+      assert.equal(conn.closeReason, 'WS_REPLAY_OVERFLOW');
+      const errorMsg = conn.sent.find((message) => message.type === 'error');
+      assert.ok(errorMsg);
+      assert.equal((errorMsg as { code: string }).code, 'WS_REPLAY_OVERFLOW');
     });
 
     it('delivers normally when bufferedAmount is below the threshold', () => {

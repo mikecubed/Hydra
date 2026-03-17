@@ -267,6 +267,63 @@ describe('Conversation routes — turns', () => {
     const body = res.body as Record<string, unknown>;
     assert.deepEqual(body['events'], []);
   });
+
+  it('GET /conversations/:id/turns/:turnId/stream still returns 410 after purge tombstone eviction for streamed terminal turns', () => {
+    const conv = deps.store.createConversation();
+    const turn = deps.store.appendTurn(conv.id, {
+      kind: 'operator',
+      instruction: 'Hello',
+      attribution: operatorAttribution,
+    });
+    deps.store.updateTurnStatus(turn.id, 'executing');
+    deps.streamManager.createStream(turn.id);
+    deps.streamManager.completeStream(turn.id);
+    deps.streamManager.purgeTerminalStreams(0);
+    (
+      deps.streamManager as unknown as {
+        purgedHighSeqByTurnId: Map<string, { highSeq: number; purgedAt: number }>;
+      }
+    ).purgedHighSeqByTurnId.clear();
+
+    const req = createMockReq('GET', `/conversations/${conv.id}/turns/${turn.id}/stream?since=0`);
+    const res = createMockRes();
+    handleConversationRoute(req, res as unknown as ServerResponse, deps);
+
+    assert.equal(res.statusCode, 410);
+    assert.equal((res.body as Record<string, unknown>)['error'], 'Stream history expired for turn');
+  });
+
+  it('GET /conversations/:id/turns/:turnId/stream returns empty after tombstone eviction when streamed terminal turn is fully acknowledged', () => {
+    const conv = deps.store.createConversation();
+    const turn = deps.store.appendTurn(conv.id, {
+      kind: 'operator',
+      instruction: 'Hello',
+      attribution: operatorAttribution,
+    });
+    deps.store.updateTurnStatus(turn.id, 'executing');
+    deps.streamManager.createStream(turn.id);
+    deps.streamManager.emitEvent(turn.id, 'text-delta', { text: 'chunk' });
+    deps.streamManager.completeStream(turn.id);
+    const allEvents = deps.streamManager.getStreamEvents(turn.id);
+    const finalSeq = allEvents.at(-1)?.seq;
+    assert.notEqual(finalSeq, undefined);
+    deps.streamManager.purgeTerminalStreams(0);
+    (
+      deps.streamManager as unknown as {
+        purgedHighSeqByTurnId: Map<string, { highSeq: number; purgedAt: number }>;
+      }
+    ).purgedHighSeqByTurnId.clear();
+
+    const req = createMockReq(
+      'GET',
+      `/conversations/${conv.id}/turns/${turn.id}/stream?since=${String(finalSeq)}`,
+    );
+    const res = createMockRes();
+    handleConversationRoute(req, res as unknown as ServerResponse, deps);
+
+    assert.equal(res.statusCode, 200);
+    assert.deepEqual((res.body as Record<string, unknown>)['events'], []);
+  });
 });
 
 describe('Conversation routes — approvals', () => {
