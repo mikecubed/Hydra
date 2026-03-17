@@ -149,6 +149,9 @@ export class SessionWsBridge {
           warningTimer = setTimeout(() => {
             connection.send({ type: 'session-expiring-soon', expiresAt });
           }, warningDelayMs);
+        } else {
+          // Already inside the warning window (e.g. rebind/recovery) — emit immediately
+          connection.send({ type: 'session-expiring-soon', expiresAt });
         }
       }
 

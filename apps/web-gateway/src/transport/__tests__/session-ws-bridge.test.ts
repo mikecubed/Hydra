@@ -176,6 +176,69 @@ describe('SessionWsBridge', () => {
       }
     });
 
+    it('emits session-expiring-soon immediately when active session binds inside warning window', () => {
+      const warningThresholdMs = 200;
+      const localBridge = new SessionWsBridge({ broadcaster, registry, clock, warningThresholdMs });
+
+      // Session expires 100ms from now — already within 200ms warning threshold
+      // State is 'active' (e.g. daemon recovery restored an active session near expiry)
+      const expiresAt = new Date(clock.now() + 100).toISOString();
+      const session = createSession({ state: 'active', expiresAt });
+      const conn = createMockConnection(session.id);
+      registry.register(conn);
+
+      const cleanup = localBridge.bindSession(session, conn as never);
+      try {
+        assert.ok(
+          conn.sent.some((m) => m.type === 'session-expiring-soon'),
+          'Expected immediate session-expiring-soon when binding active session inside warning window',
+        );
+        // Should still schedule expiry — not terminate immediately
+        assert.ok(
+          !conn.sent.some((m) => m.type === 'session-terminated'),
+          'Should not terminate immediately; expiry timer should still be pending',
+        );
+      } finally {
+        cleanup();
+      }
+    });
+
+    it('emits session-expiring-soon immediately on daemon recovery inside warning window', () => {
+      const warningThresholdMs = 300;
+      const localBridge = new SessionWsBridge({ broadcaster, registry, clock, warningThresholdMs });
+
+      // Start with a long-lived active session
+      const farExpiry = new Date(clock.now() + 60_000).toISOString();
+      const session = createSession({ state: 'active', expiresAt: farExpiry });
+      const conn = createMockConnection(session.id);
+      registry.register(conn);
+
+      const cleanup = localBridge.bindSession(session, conn as never);
+      try {
+        // Simulate daemon recovery that transitions back to active with near-expiry
+        const nearExpiry = new Date(clock.now() + 150).toISOString();
+        broadcaster.broadcast(session.id, {
+          type: 'state-change',
+          previousState: 'daemon-unreachable',
+          newState: 'active',
+          expiresAt: nearExpiry,
+        });
+
+        // applyExpiry is called for 'active' state — should emit warning immediately
+        assert.ok(
+          conn.sent.some((m) => m.type === 'session-expiring-soon'),
+          'Expected immediate session-expiring-soon after daemon recovery inside warning window',
+        );
+        // daemon-restored should also be sent since previous state was daemon-unreachable
+        assert.ok(
+          conn.sent.some((m) => m.type === 'daemon-restored'),
+          'Expected daemon-restored message',
+        );
+      } finally {
+        cleanup();
+      }
+    });
+
     it('clears the warning timer on cleanup', async () => {
       const warningThresholdMs = 200;
       const localBridge = new SessionWsBridge({ broadcaster, registry, clock, warningThresholdMs });
