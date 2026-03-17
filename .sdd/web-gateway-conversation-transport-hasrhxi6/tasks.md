@@ -206,7 +206,7 @@ _Completes reconnect protocol with daemon fallback for buffer misses. Delivers U
   - **Depends**: T003 (stream replay route coverage), T025, T026 (replay barrier)
   - **Validates**: FR-022, FR-024
 
-- [ ] T033 [P2] [US4] **TDD: End-to-end reconnect flow** — test full reconnect cycle: (a) authenticate + establish WS + subscribe, (b) receive some events, (c) disconnect mid-stream, (d) reconnect with new WS on same session, (e) send `subscribe` with `lastAcknowledgedSeq`, (f) assert all missed events replayed in order, (g) live streaming resumes seamlessly. Test both buffer-hit path and daemon-fallback path. Implement in `apps/web-gateway/src/__tests__/transport-integration.test.ts`.
+- [x] T033 [P2] [US4] **TDD: End-to-end reconnect flow** — test full reconnect cycle: (a) authenticate + establish WS + subscribe, (b) receive some events, (c) disconnect mid-stream, (d) reconnect with new WS on same session, (e) send `subscribe` with `lastAcknowledgedSeq`, (f) assert all missed events replayed in order, (g) live streaming resumes seamlessly. Test both buffer-hit path and daemon-fallback path. Implement in `apps/web-gateway/src/__tests__/transport-integration.test.ts`.
   - **Depends**: T030, T032
   - **Validates**: FR-022, FR-023, SC-003
 
@@ -214,7 +214,7 @@ _Completes reconnect protocol with daemon fallback for buffer misses. Delivers U
   - **Depends**: T033
   - **Validates**: FR-024
 
-- [ ] T035 [P2] [US4] **TDD: Reconnect with invalid session** — reconnect attempt with expired or invalidated session is rejected before any events are replayed (FR-025). Write negative tests: expired session → 401 on WS upgrade, invalidated session → 401 on WS upgrade. Tests in `apps/web-gateway/src/__tests__/ws-connection.test.ts`.
+- [x] T035 [P2] [US4] **TDD: Reconnect with invalid session** — reconnect attempt with expired or invalidated session is rejected before any events are replayed (FR-025). Write negative tests: expired session → 401 on WS upgrade, invalidated session → 401 on WS upgrade. Tests in `apps/web-gateway/src/__tests__/ws-connection.test.ts`.
   - **Depends**: T021, T032
   - **Validates**: FR-025, SC-004
 
@@ -449,18 +449,18 @@ T025 → T026 → T027 ──────────────────→
 
 ## Next Steps
 
-1. **Start Track A first** — `T032` is the next critical-path task, and the
-   rest of Phase 5 should stay in the same replay-focused worktree until
-   reconnect/resume behavior is green.
-2. **Launch only file-isolated parallel tracks** — once Track A has the replay
-   contract under control, Tracks B/C/D can run in separate worktrees using the
-   groupings above. Avoid splitting tasks that share
-   `transport-integration.test.ts`, `ws-message-handler.test.ts`, or
+1. **Continue the serial reconnect critical path** — `T032`, `T033`, and `T035`
+   are complete on `feat/web-gateway-transport-phase4`. The next ready tasks are
+   `T034` and `T036`, which should stay together in the same
+   `transport-integration.test.ts` worktree before closing Phase 5 with `T037`.
+2. **Launch only file-isolated parallel tracks** — `T038`+ can still run later
+   in separate worktrees using the groupings above, but avoid splitting tasks
+   that share `transport-integration.test.ts`, `ws-message-handler.test.ts`, or
    `conversation-routes.test.ts` across multiple concurrent tracks.
 3. **Prefer real transport/runtime wiring in tests** — when Phase 5+ tests can
    use composed gateway/daemon service code, avoid mocking that behavior and
    reserve fakes for true external boundaries only.
-4. **Keep the Phase 4 runtime path stable** — Phase 5+ should extend the now
-   validated streaming path rather than reworking the transport bootstrap,
-   replay-retention guardrails, or inbound backlog protections unless a concrete
-   bug requires it.
+4. **Keep the Phase 4/T032 runtime path stable** — follow-on reconnect work
+   should extend the validated streaming and replay paths rather than reworking
+   transport bootstrap, replay-retention guardrails, or inbound backlog
+   protections unless a concrete bug requires it.
