@@ -168,7 +168,7 @@ foundation for US2 streaming. Requires `ws` dependency._
 _Wires daemon event bridge to WebSocket connections. Delivers US2 (P1). Introduces
 the event buffer and subscription message handling._
 
-- [ ] T025 [P1] [US2, US4] **TDD: `event-buffer.ts`** — bounded per-conversation ring buffer. `push(conversationId, event)`: append, evict oldest if at capacity. `getEventsSince(conversationId, sinceSeq)`: return events with `seq > sinceSeq` in order. `getHighwaterSeq(conversationId)`: return newest seq or 0. `hasEventsSince(conversationId, sinceSeq)`: check buffer coverage. `evictConversation(conversationId)`: remove buffer. Default capacity 1000, configurable. Write tests for: insertion, eviction at boundary, retrieval correctness, empty buffer, seq-based filtering, gap-free ordering guarantee, capacity enforcement. Implement `apps/web-gateway/src/transport/event-buffer.ts`. Tests in `apps/web-gateway/src/__tests__/event-buffer.test.ts`.
+- [x] T025 [P1] [US2, US4] **TDD: `event-buffer.ts`** — bounded per-conversation ring buffer. `push(conversationId, event)`: append, evict oldest if at capacity. `getEventsSince(conversationId, sinceSeq)`: return events with `seq > sinceSeq` in order. `getHighwaterSeq(conversationId)`: return newest seq or 0. `hasEventsSince(conversationId, sinceSeq)`: check buffer coverage. `evictConversation(conversationId)`: remove buffer. Default capacity 1000, configurable. Write tests for: insertion, eviction at boundary, retrieval correctness, empty buffer, seq-based filtering, gap-free ordering guarantee, capacity enforcement. Implement `apps/web-gateway/src/transport/event-buffer.ts`. Tests in `apps/web-gateway/src/__tests__/event-buffer.test.ts`.
   - **Depends**: —
   - **Validates**: FR-022
 
@@ -418,10 +418,11 @@ T025 → T026 → T027 ──────────────────→
 
 ## Next Steps
 
-1. **Implement Phase 4 in order** — start with `T025`, then proceed to `T026`
-   and `T027` once the shared event-buffer contract is stable.
-2. **Parallelize only after `T025` lands** — `T026` (`ws-message-handler.ts`)
-   and `T027` (`event-forwarder.ts`) are the first natural parallel track split,
-   but both depend on the event-buffer API being implemented and reviewed first.
+1. **Implement the next ready split** — `T026` (`ws-message-handler.ts`) and
+   `T027` (`event-forwarder.ts`) are now the active Phase 4 tasks on top of the
+   landed `T025` event-buffer contract.
+2. **Parallelize on isolated tracks** — `T026` and `T027` can now proceed on
+   separate worktrees/branches, with one track owning the subscribe/replay-barrier
+   path and the other owning daemon-event forwarding.
 3. **Close the Phase 4 batch** — finish `T028`–`T031`, then move into Phase 5
    reconnect/resume work (`T032+`) once end-to-end streaming is green.
