@@ -11,6 +11,10 @@
  *   - On invalid message: responds with type:'error' without closing.
  */
 import type { StreamEvent } from '@hydra/web-contracts';
+import {
+  DEFAULT_BUFFER_HIGH_WATER_MARK,
+  sendWithBackpressureProtection,
+} from './backpressure.ts';
 import type { ManagedConnection } from './connection-registry.ts';
 import type { ConnectionRegistry } from './connection-registry.ts';
 import type { EventBuffer } from './event-buffer.ts';
@@ -22,6 +26,7 @@ export interface MessageHandlerDeps {
   readonly registry: ConnectionRegistry;
   readonly buffer: EventBuffer;
   readonly daemonClient: Pick<DaemonClient, 'openConversation'>;
+  readonly bufferHighWaterMark?: number;
 }
 
 function lastSeq(events: ReadonlyArray<StreamEvent>): number | undefined {
@@ -33,11 +38,13 @@ export class WsMessageHandler {
   readonly #registry: ConnectionRegistry;
   readonly #buffer: EventBuffer;
   readonly #daemonClient: MessageHandlerDeps['daemonClient'];
+  readonly #bufferHighWaterMark: number;
 
   constructor(deps: MessageHandlerDeps) {
     this.#registry = deps.registry;
     this.#buffer = deps.buffer;
     this.#daemonClient = deps.daemonClient;
+    this.#bufferHighWaterMark = deps.bufferHighWaterMark ?? DEFAULT_BUFFER_HIGH_WATER_MARK;
   }
 
   async handleMessage(connection: ManagedConnection, rawMessage: string): Promise<void> {
@@ -73,11 +80,9 @@ export class WsMessageHandler {
   ): Promise<void> {
     if (connection.subscribedConversations.has(conversationId)) {
       connection.replayState.set(conversationId, 'live');
-      connection.send({
-        type: 'subscribed',
-        conversationId,
-        currentSeq: this.#buffer.getHighwaterSeq(conversationId),
-      });
+      if (!this.#sendSubscribed(connection, conversationId, this.#buffer.getHighwaterSeq(conversationId))) {
+        this.#cleanupSubscriptionState(connection, conversationId);
+      }
       return;
     }
 
@@ -109,7 +114,10 @@ export class WsMessageHandler {
 
       // Send each buffered event
       for (const event of buffered) {
-        this.#sendStreamEvent(connection, conversationId, event);
+        if (!this.#sendStreamEvent(connection, conversationId, event)) {
+          this.#cleanupSubscriptionState(connection, conversationId);
+          return;
+        }
       }
 
       // Compute last replayed seq
@@ -125,7 +133,10 @@ export class WsMessageHandler {
       }
       const toFlush = [...seen.values()].sort((a, b) => a.seq - b.seq);
       for (const event of toFlush) {
-        this.#sendStreamEvent(connection, conversationId, event);
+        if (!this.#sendStreamEvent(connection, conversationId, event)) {
+          this.#cleanupSubscriptionState(connection, conversationId);
+          return;
+        }
       }
 
       const currentSeq = lastSeq(toFlush) ?? lastReplayedSeq;
@@ -133,11 +144,9 @@ export class WsMessageHandler {
       connection.pendingEvents.delete(conversationId);
       connection.replayState.set(conversationId, 'live');
 
-      connection.send({
-        type: 'subscribed',
-        conversationId,
-        currentSeq,
-      });
+      if (!this.#sendSubscribed(connection, conversationId, currentSeq)) {
+        this.#cleanupSubscriptionState(connection, conversationId);
+      }
     } else {
       // ── no replay (initial subscribe or buffer miss) ────────────────────
       connection.replayState.set(conversationId, 'live');
@@ -145,11 +154,9 @@ export class WsMessageHandler {
       this.#registry.addSubscription(connection.connectionId, conversationId);
 
       const currentSeq = this.#buffer.getHighwaterSeq(conversationId);
-      connection.send({
-        type: 'subscribed',
-        conversationId,
-        currentSeq,
-      });
+      if (!this.#sendSubscribed(connection, conversationId, currentSeq)) {
+        this.#cleanupSubscriptionState(connection, conversationId);
+      }
     }
   }
 
@@ -168,12 +175,30 @@ export class WsMessageHandler {
     connection: ManagedConnection,
     conversationId: string,
     event: StreamEvent,
-  ): void {
-    connection.send({
+  ): boolean {
+    return sendWithBackpressureProtection(connection, {
       type: 'stream-event',
       conversationId,
       event,
-    });
+    }, this.#bufferHighWaterMark);
+  }
+
+  #sendSubscribed(
+    connection: ManagedConnection,
+    conversationId: string,
+    currentSeq: number,
+  ): boolean {
+    return sendWithBackpressureProtection(connection, {
+      type: 'subscribed',
+      conversationId,
+      currentSeq,
+    }, this.#bufferHighWaterMark);
+  }
+
+  #cleanupSubscriptionState(connection: ManagedConnection, conversationId: string): void {
+    this.#registry.removeSubscription(connection.connectionId, conversationId);
+    connection.replayState.delete(conversationId);
+    connection.pendingEvents.delete(conversationId);
   }
 
   #sendError(

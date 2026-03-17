@@ -11,9 +11,12 @@
  */
 
 import type { StreamEvent } from '@hydra/web-contracts';
+import {
+  DEFAULT_BUFFER_HIGH_WATER_MARK,
+  sendWithBackpressureProtection,
+} from './backpressure.ts';
 import type { EventBuffer } from './event-buffer.ts';
 import type { ConnectionRegistry, ManagedConnection } from './connection-registry.ts';
-import type { ServerMessage } from './ws-protocol.ts';
 
 export interface StreamEventPayload {
   readonly conversationId: string;
@@ -28,16 +31,28 @@ export interface StreamEventBridgeLike {
   ): unknown;
 }
 
+export interface EventForwarderOptions {
+  /** Close connections whose WebSocket bufferedAmount exceeds this (bytes). Default: 1 MiB. */
+  bufferHighWaterMark?: number;
+}
+
 export class EventForwarder {
   readonly #bridge: StreamEventBridgeLike;
   readonly #buffer: EventBuffer;
   readonly #registry: ConnectionRegistry;
+  readonly #highWaterMark: number;
   #listener: ((payload: StreamEventPayload) => void) | null = null;
 
-  constructor(bridge: StreamEventBridgeLike, buffer: EventBuffer, registry: ConnectionRegistry) {
+  constructor(
+    bridge: StreamEventBridgeLike,
+    buffer: EventBuffer,
+    registry: ConnectionRegistry,
+    options?: EventForwarderOptions,
+  ) {
     this.#bridge = bridge;
     this.#buffer = buffer;
     this.#registry = registry;
+    this.#highWaterMark = options?.bufferHighWaterMark ?? DEFAULT_BUFFER_HIGH_WATER_MARK;
   }
 
   /** Subscribe to the bridge and begin forwarding events. */
@@ -86,6 +101,10 @@ export class EventForwarder {
   }
 
   #forwardToConnection(conn: ManagedConnection, conversationId: string, event: StreamEvent): void {
+    if (conn.isClosed) {
+      return;
+    }
+
     const state = conn.replayState.get(conversationId);
 
     if (state === 'replaying') {
@@ -100,11 +119,10 @@ export class EventForwarder {
     }
 
     // 'live' or no entry — send immediately
-    const message: ServerMessage = {
+    sendWithBackpressureProtection(conn, {
       type: 'stream-event',
       conversationId,
       event,
-    };
-    conn.send(message);
+    }, this.#highWaterMark);
   }
 }

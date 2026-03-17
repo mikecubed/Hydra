@@ -16,6 +16,7 @@ function fakeConnection(
     lastAckSeq: new Map(),
     replayState: new Map(),
     pendingEvents: new Map(),
+    bufferedAmount: 0,
     send: (_message: ServerMessage) => {},
     updateAck: (conversationId: string, seq: number) => {
       const current = connection.lastAckSeq.get(conversationId) ?? -1;

@@ -62,6 +62,10 @@ export class WsConnection implements ManagedConnection {
     return this.#state === 'closing' || this.#state === 'closed';
   }
 
+  get bufferedAmount(): number {
+    return this.#ws.bufferedAmount;
+  }
+
   send(msg: ServerMessage): void {
     if (this.isClosed || this.#ws.readyState !== WebSocket.OPEN) return;
     this.#ws.send(serializeServerMessage(msg));
