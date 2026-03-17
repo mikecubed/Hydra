@@ -456,6 +456,70 @@ describe('GatewayWsServer', () => {
     }
   });
 
+  it('closes connections that exceed the inbound websocket message queue limit', async () => {
+    const localServer = createServer();
+    const pendingOpen =
+      createDeferred<
+        Awaited<ReturnType<ReturnType<typeof createWsDaemonClient>['openConversation']>>
+      >();
+    let openCalls = 0;
+    const localGateway = createGatewayApp({
+      server: localServer,
+      clock,
+      allowedOrigin: ORIGIN,
+      healthChecker: async () => true,
+      heartbeatConfig: { intervalMs: 60_000 },
+      wsDaemonClient: {
+        openConversation: async () => {
+          openCalls += 1;
+          return await pendingOpen.promise;
+        },
+      },
+      streamEventBridge: new FakeEventBridge(),
+    });
+    const requestListener = getRequestListener(localGateway.app.fetch);
+    localServer.on('request', (request, response) => {
+      void requestListener(request, response);
+    });
+    const localPort = await listen(localServer);
+
+    try {
+      const session = await localGateway.sessionService.create('op-1', '127.0.0.1');
+      const ws = await connectWebSocket(localPort, { sessionId: session.id });
+      openSockets.push(ws);
+
+      for (let index = 0; index < 65; index += 1) {
+        ws.send(JSON.stringify({ type: 'subscribe', conversationId: 'conv-1' }));
+      }
+
+      const message = await waitForMessage(ws);
+      assert.equal(message['type'], 'error');
+      assert.equal(message['code'], 'WS_MESSAGE_QUEUE_OVERFLOW');
+      assert.equal(message['category'], 'rate-limit');
+      await waitForCloseOrError(ws);
+      assert.equal(openCalls, 1);
+    } finally {
+      pendingOpen.resolve({
+        data: {
+          conversation: {
+            id: 'conv-1',
+            status: 'active',
+            createdAt: new Date().toISOString(),
+            updatedAt: new Date().toISOString(),
+            turnCount: 0,
+            pendingInstructionCount: 0,
+          },
+          recentTurns: [],
+          totalTurnCount: 0,
+          pendingApprovals: [],
+        },
+      });
+      localGateway.wsServer?.close();
+      localGateway.heartbeat.stop();
+      await closeServer(localServer);
+    }
+  });
+
   it('forwards bridge stream events to subscribed websocket clients', async () => {
     const session = await gw.sessionService.create('op-1', '127.0.0.1');
     const ws = await connectWebSocket(port, { sessionId: session.id });

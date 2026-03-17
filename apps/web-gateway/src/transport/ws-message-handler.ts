@@ -142,6 +142,10 @@ export class WsMessageHandler {
       }
     }
 
+    // This replay path is intentionally synchronous today: no `await` occurs
+    // between `addSubscription()` above and the transition to `'live'` below.
+    // That means pendingEvents normally stays empty in production unless replay
+    // delivery becomes async in the future.
     const lastReplayedSeq = lastSeq(buffered) ?? replayFromSeq;
     const currentSeq = this.#flushPendingReplayEvents(connection, conversationId, lastReplayedSeq);
     if (currentSeq === null) {

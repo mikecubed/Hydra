@@ -32,6 +32,7 @@ interface GatewayWsServerOptions {
 }
 
 const COOKIE_SEPARATOR = ';';
+const MAX_PENDING_MESSAGES_PER_CONNECTION = 64;
 
 function parseSessionCookie(cookieHeader?: string): string | null {
   if (cookieHeader == null || cookieHeader === '') {
@@ -106,6 +107,7 @@ export class GatewayWsServer {
   readonly #messageHandler: WsMessageHandler;
   readonly #eventForwarder?: EventForwarder;
   readonly #messageQueues = new Map<string, Promise<void>>();
+  readonly #messageQueueDepths = new Map<string, number>();
 
   constructor(options: GatewayWsServerOptions) {
     this.#server = options.server;
@@ -154,6 +156,22 @@ export class GatewayWsServer {
   }
 
   #handleSocketMessage(connection: WsConnection, data: RawData): void {
+    const queuedDepth = this.#messageQueueDepths.get(connection.connectionId) ?? 0;
+    if (queuedDepth >= MAX_PENDING_MESSAGES_PER_CONNECTION) {
+      if (!connection.isClosed) {
+        connection.send({
+          type: 'error',
+          ok: false as const,
+          code: 'WS_MESSAGE_QUEUE_OVERFLOW',
+          category: 'rate-limit',
+          message: 'Too many queued websocket messages',
+        });
+        connection.close(1008, 'WS_MESSAGE_QUEUE_OVERFLOW');
+      }
+      return;
+    }
+
+    this.#messageQueueDepths.set(connection.connectionId, queuedDepth + 1);
     const prior = this.#messageQueues.get(connection.connectionId) ?? Promise.resolve();
     const next = prior
       .catch(() => {})
@@ -174,6 +192,12 @@ export class GatewayWsServer {
       });
     this.#messageQueues.set(connection.connectionId, next);
     void next.finally(() => {
+      const remainingDepth = (this.#messageQueueDepths.get(connection.connectionId) ?? 1) - 1;
+      if (remainingDepth > 0) {
+        this.#messageQueueDepths.set(connection.connectionId, remainingDepth);
+      } else {
+        this.#messageQueueDepths.delete(connection.connectionId);
+      }
       if (this.#messageQueues.get(connection.connectionId) === next) {
         this.#messageQueues.delete(connection.connectionId);
       }
@@ -286,6 +310,7 @@ export class GatewayWsServer {
           }
           isCleanedUp = true;
           this.#messageQueues.delete(connection.connectionId);
+          this.#messageQueueDepths.delete(connection.connectionId);
           this.#connectionRegistry.unregister(connection.connectionId);
           cleanupIdle();
           cleanupBridge();
