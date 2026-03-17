@@ -8,7 +8,11 @@ import { EventForwarder, type StreamEventPayload } from '../event-forwarder.ts';
 
 // ─── helpers ────────────────────────────────────────────────────────────────
 
-function makeEvent(seq: number, turnId = 'turn-1', kind: StreamEvent['kind'] = 'text-delta'): StreamEvent {
+function makeEvent(
+  seq: number,
+  turnId = 'turn-1',
+  kind: StreamEvent['kind'] = 'text-delta',
+): StreamEvent {
   return {
     seq,
     turnId,
@@ -57,7 +61,10 @@ class FakeEventBridge {
     return this;
   }
 
-  removeListener(_eventName: 'stream-event', listener: (payload: StreamEventPayload) => void): this {
+  removeListener(
+    _eventName: 'stream-event',
+    listener: (payload: StreamEventPayload) => void,
+  ): this {
     this.#listeners.delete(listener);
     return this;
   }
@@ -295,13 +302,17 @@ describe('EventForwarder', () => {
 
       // conv-B events sent immediately
       const sentB = conn.sent.filter(
-        (m) => m.type === 'stream-event' && (m as { conversationId: string }).conversationId === 'conv-B',
+        (m) =>
+          m.type === 'stream-event' &&
+          (m as { conversationId: string }).conversationId === 'conv-B',
       );
       assert.equal(sentB.length, 2);
 
       // No conv-A events in sent
       const sentA = conn.sent.filter(
-        (m) => m.type === 'stream-event' && (m as { conversationId: string }).conversationId === 'conv-A',
+        (m) =>
+          m.type === 'stream-event' &&
+          (m as { conversationId: string }).conversationId === 'conv-A',
       );
       assert.equal(sentA.length, 0);
     });

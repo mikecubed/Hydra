@@ -24,6 +24,11 @@ export interface MessageHandlerDeps {
   readonly daemonClient: Pick<DaemonClient, 'openConversation'>;
 }
 
+function lastSeq(events: ReadonlyArray<StreamEvent>): number | undefined {
+  // eslint-disable-next-line unicorn/prefer-at -- `.at()` conflicts with this package's Node compatibility lint rule.
+  return events.slice(-1).pop()?.seq;
+}
+
 export class WsMessageHandler {
   readonly #registry: ConnectionRegistry;
   readonly #buffer: EventBuffer;
@@ -46,7 +51,11 @@ export class WsMessageHandler {
 
     switch (message.type) {
       case 'subscribe':
-        await this.#handleSubscribe(connection, message.conversationId, message.lastAcknowledgedSeq);
+        await this.#handleSubscribe(
+          connection,
+          message.conversationId,
+          message.lastAcknowledgedSeq,
+        );
         break;
       case 'unsubscribe':
         this.#handleUnsubscribe(connection, message.conversationId);
@@ -94,8 +103,7 @@ export class WsMessageHandler {
       }
 
       // Compute last replayed seq
-      const lastReplayedSeq =
-        buffered.length > 0 ? buffered[buffered.length - 1].seq : lastAcknowledgedSeq;
+      const lastReplayedSeq = lastSeq(buffered) ?? lastAcknowledgedSeq;
 
       // Flush pending queue (events queued by T027 during replay)
       const pending = connection.pendingEvents.get(conversationId) ?? [];
@@ -110,7 +118,7 @@ export class WsMessageHandler {
         this.#sendStreamEvent(connection, conversationId, event);
       }
 
-      const currentSeq = toFlush.length > 0 ? toFlush[toFlush.length - 1].seq : lastReplayedSeq;
+      const currentSeq = lastSeq(toFlush) ?? lastReplayedSeq;
 
       connection.pendingEvents.delete(conversationId);
       connection.replayState.set(conversationId, 'live');

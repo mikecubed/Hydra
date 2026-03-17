@@ -241,7 +241,7 @@ describe('WsMessageHandler', () => {
       buffer.push('conv-1', makeEvent(2));
 
       // Intercept send to verify replayState mid-replay
-      let statesDuringReplay: string[] = [];
+      const statesDuringReplay: string[] = [];
       const origSend = conn.send.bind(conn);
       conn.send = (msg: ServerMessage) => {
         if (msg.type === 'stream-event') {
@@ -333,7 +333,7 @@ describe('WsMessageHandler', () => {
       const subB = JSON.stringify({ type: 'subscribe', conversationId: 'conv-2' });
       await handler.handleMessage(conn, subB);
       assert.equal(conn.replayState.get('conv-2'), 'live');
-      conn.sent.length = 0; // reset for clarity
+      conn.sent.splice(0); // reset for clarity
 
       // Now subscribe conv-1 with replay
       const subA = JSON.stringify({
@@ -363,7 +363,7 @@ describe('WsMessageHandler', () => {
       // First subscribe
       const sub = JSON.stringify({ type: 'subscribe', conversationId: 'conv-1' });
       await handler.handleMessage(conn, sub);
-      conn.sent.length = 0;
+      conn.sent.splice(0);
 
       // Then unsubscribe
       const unsub = JSON.stringify({ type: 'unsubscribe', conversationId: 'conv-1' });

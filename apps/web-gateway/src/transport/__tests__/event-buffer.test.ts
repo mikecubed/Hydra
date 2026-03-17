@@ -15,6 +15,11 @@ function makeEvent(seq: number, kind: StreamEvent['kind'] = 'text-delta'): Strea
   };
 }
 
+function lastEvent(events: ReadonlyArray<StreamEvent>): StreamEvent | undefined {
+  // eslint-disable-next-line unicorn/prefer-at -- `.at()` conflicts with this package's Node compatibility lint rule.
+  return events.slice(-1).pop();
+}
+
 // ─── construction ───────────────────────────────────────────────────────────
 
 describe('EventBuffer', () => {
@@ -52,7 +57,7 @@ describe('EventBuffer', () => {
     });
 
     it('rejects NaN capacity', () => {
-      assert.throws(() => new EventBuffer(NaN), {
+      assert.throws(() => new EventBuffer(Number.NaN), {
         name: 'RangeError',
         message: /capacity must be a positive integer/,
       });
@@ -104,12 +109,12 @@ describe('EventBuffer', () => {
 
       // Mutate the original object the caller still holds
       event.seq = 9999;
-      (event.payload as Record<string, unknown>).text = 'corrupted';
+      event.payload['text'] = 'corrupted';
 
       // Buffer contents must be unchanged
       const events = buf.getEventsSince('c', 0);
       assert.equal(events[0].seq, 42);
-      assert.equal((events[0].payload as Record<string, string>).text, 'chunk-42');
+      assert.equal(events[0].payload['text'], 'chunk-42');
 
       // Highwater must be unchanged
       assert.equal(buf.getHighwaterSeq('c'), 42);
@@ -241,14 +246,15 @@ describe('EventBuffer', () => {
       const originalHighwater = buf.getHighwaterSeq('c');
 
       // Mutate the last returned event's seq and payload
-      const last = events[events.length - 1];
+      const last = lastEvent(events);
+      assert.ok(last);
       last.seq = 9999;
-      (last.payload as Record<string, unknown>).text = 'corrupted';
+      last.payload['text'] = 'corrupted';
 
       // Buffer contents must be unchanged
       const fresh = buf.getEventsSince('c', 0);
-      assert.equal(fresh[fresh.length - 1].seq, 5);
-      assert.equal((fresh[fresh.length - 1].payload as Record<string, string>).text, 'chunk-5');
+      assert.equal(lastEvent(fresh)?.seq, 5);
+      assert.equal(lastEvent(fresh)?.payload['text'], 'chunk-5');
 
       // Highwater must be unchanged
       assert.equal(buf.getHighwaterSeq('c'), originalHighwater);
@@ -334,9 +340,9 @@ describe('EventBuffer', () => {
     it('returns true for sparse seqs when evictions do not affect replay', () => {
       const buf = new EventBuffer(2);
       // Push sparse seqs; buffer holds only last 2
-      buf.push('c', makeEvent(5));   // will be evicted
+      buf.push('c', makeEvent(5)); // will be evicted
       buf.push('c', makeEvent(12));
-      buf.push('c', makeEvent(47));  // evicts seq 5
+      buf.push('c', makeEvent(47)); // evicts seq 5
       // Buffer: [12, 47], evictedHigh=5
       // Client at sinceSeq=5: client already has seq 5, buffer has 12,47 → safe
       assert.equal(buf.hasEventsSince('c', 5), true);
@@ -346,9 +352,9 @@ describe('EventBuffer', () => {
 
     it('returns false for sparse seqs when eviction drops unseen events', () => {
       const buf = new EventBuffer(2);
-      buf.push('c', makeEvent(5));   // will be evicted
+      buf.push('c', makeEvent(5)); // will be evicted
       buf.push('c', makeEvent(12));
-      buf.push('c', makeEvent(47));  // evicts seq 5
+      buf.push('c', makeEvent(47)); // evicts seq 5
       // Buffer: [12, 47], evictedHigh=5
       // Client at sinceSeq=3: needs everything > 3, but seq 5 was evicted → NOT safe
       assert.equal(buf.hasEventsSince('c', 3), false);

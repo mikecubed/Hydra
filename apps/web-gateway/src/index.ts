@@ -39,6 +39,8 @@ import { DaemonClient, type DaemonClientOptions } from './conversation/daemon-cl
 import { createConversationRoutes } from './conversation/conversation-routes.ts';
 import { SessionStateBroadcaster } from './session/session-state-broadcaster.ts';
 import { ConnectionRegistry } from './transport/connection-registry.ts';
+import { EventBuffer } from './transport/event-buffer.ts';
+import type { StreamEventBridgeLike } from './transport/event-forwarder.ts';
 import { GatewayWsServer } from './transport/ws-server.ts';
 
 export interface GatewayAppDeps {
@@ -58,10 +60,14 @@ export interface GatewayAppDeps {
   daemonClientOptions?: DaemonClientOptions;
   /** Pre-built DaemonClient (for testing). Overrides daemonClientOptions. */
   daemonClient?: DaemonClient;
+  /** Optional narrower daemon client for WebSocket subscribe validation. */
+  wsDaemonClient?: Pick<DaemonClient, 'openConversation'>;
   /** Optional HTTP server for WebSocket upgrade wiring. */
   server?: Server;
   sessionStateBroadcaster?: SessionStateBroadcaster;
   connectionRegistry?: ConnectionRegistry;
+  eventBuffer?: EventBuffer;
+  streamEventBridge?: StreamEventBridgeLike;
 }
 
 export interface GatewayApp {
@@ -73,6 +79,7 @@ export interface GatewayApp {
   heartbeat: DaemonHeartbeat;
   sessionStateBroadcaster: SessionStateBroadcaster;
   connectionRegistry: ConnectionRegistry;
+  eventBuffer: EventBuffer;
   wsServer?: GatewayWsServer;
 }
 
@@ -115,6 +122,39 @@ function createProtectedRouteGroup(
   return protectedApp;
 }
 
+function createOptionalWsServer(
+  deps: GatewayAppDeps,
+  options: {
+    server?: Server;
+    sessionService: SessionService;
+    sessionStateBroadcaster: SessionStateBroadcaster;
+    allowedOrigin: string;
+    connectionRegistry: ConnectionRegistry;
+    clock: Clock;
+    mutatingLimiter: RateLimiter;
+    daemonClient: DaemonClient;
+    eventBuffer: EventBuffer;
+  },
+): GatewayWsServer | undefined {
+  if (options.server == null) {
+    return undefined;
+  }
+
+  return new GatewayWsServer({
+    server: options.server,
+    sessionService: options.sessionService,
+    broadcaster: options.sessionStateBroadcaster,
+    allowedOrigin: options.allowedOrigin,
+    connectionRegistry: options.connectionRegistry,
+    clock: options.clock,
+    sourceKeyConfig: deps.sourceKeyConfig,
+    mutatingLimiter: options.mutatingLimiter,
+    daemonClient: deps.wsDaemonClient ?? options.daemonClient,
+    eventBuffer: options.eventBuffer,
+    streamEventBridge: deps.streamEventBridge,
+  });
+}
+
 export function createGatewayApp(deps: GatewayAppDeps = {}): GatewayApp {
   // TLS validation: non-loopback deployments require cert+key (FR-024)
   if (deps.tlsConfig) {
@@ -141,6 +181,7 @@ export function createGatewayApp(deps: GatewayAppDeps = {}): GatewayApp {
   const rateLimiter = new RateLimiter(clock);
   const authService = new AuthService(operatorStore, rateLimiter, sessionService, auditService);
   const connectionRegistry = deps.connectionRegistry ?? new ConnectionRegistry();
+  const eventBuffer = deps.eventBuffer ?? new EventBuffer();
 
   const heartbeat = new DaemonHeartbeat(
     sessionService,
@@ -183,19 +224,17 @@ export function createGatewayApp(deps: GatewayAppDeps = {}): GatewayApp {
   const conversationRoutes = createConversationRoutes(daemonClient);
   app.route('/', createProtectedRouteGroup(conversationRoutes, sessionService, auditService));
 
-  const wsServer =
-    deps.server == null
-      ? undefined
-      : new GatewayWsServer({
-          server: deps.server,
-          sessionService,
-          broadcaster: sessionStateBroadcaster,
-          allowedOrigin,
-          connectionRegistry,
-          clock,
-          sourceKeyConfig: deps.sourceKeyConfig,
-          mutatingLimiter,
-        });
+  const wsServer = createOptionalWsServer(deps, {
+    server: deps.server,
+    sessionService,
+    sessionStateBroadcaster,
+    allowedOrigin,
+    connectionRegistry,
+    clock,
+    mutatingLimiter,
+    daemonClient,
+    eventBuffer,
+  });
 
   return {
     app,
@@ -206,6 +245,7 @@ export function createGatewayApp(deps: GatewayAppDeps = {}): GatewayApp {
     heartbeat,
     sessionStateBroadcaster,
     connectionRegistry,
+    eventBuffer,
     wsServer,
   };
 }

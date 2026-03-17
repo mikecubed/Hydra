@@ -7,11 +7,15 @@ import type { SessionService } from '../session/session-service.ts';
 import type { SessionStateBroadcaster } from '../session/session-state-broadcaster.ts';
 import type { SourceKeyConfig } from '../security/source-key.ts';
 import { resolveSourceKeyFromParts } from '../security/source-key.ts';
+import type { DaemonClient } from '../conversation/daemon-client.ts';
 import type { RateLimiter } from '../auth/rate-limiter.ts';
 import type { ConnectionRegistry } from './connection-registry.ts';
+import type { EventBuffer } from './event-buffer.ts';
+import { EventForwarder, type StreamEventBridgeLike } from './event-forwarder.ts';
 import { SessionWsBridge } from './session-ws-bridge.ts';
 import { WsConnection } from './ws-connection.ts';
-import { WebSocketServer, type WebSocket } from 'ws';
+import { WsMessageHandler } from './ws-message-handler.ts';
+import { WebSocketServer, type RawData, type WebSocket } from 'ws';
 
 interface GatewayWsServerOptions {
   server: Server;
@@ -22,6 +26,9 @@ interface GatewayWsServerOptions {
   clock: Clock;
   sourceKeyConfig?: SourceKeyConfig;
   mutatingLimiter: RateLimiter;
+  daemonClient: Pick<DaemonClient, 'openConversation'>;
+  eventBuffer: EventBuffer;
+  streamEventBridge?: StreamEventBridgeLike;
 }
 
 const COOKIE_SEPARATOR = ';';
@@ -73,6 +80,19 @@ function rejectUpgrade(socket: Socket, error: GatewayError): void {
   );
 }
 
+function rawDataToString(data: RawData): string {
+  if (typeof data === 'string') {
+    return data;
+  }
+  if (Array.isArray(data)) {
+    return Buffer.concat(data).toString('utf8');
+  }
+  if (data instanceof ArrayBuffer) {
+    return new TextDecoder().decode(new Uint8Array(data));
+  }
+  return data.toString('utf8');
+}
+
 export class GatewayWsServer {
   readonly #server: Server;
   readonly #sessionService: SessionService;
@@ -83,6 +103,8 @@ export class GatewayWsServer {
   readonly #clock: Clock;
   readonly #mutatingLimiter: RateLimiter;
   readonly #trustedProxies: ReadonlySet<string> | undefined;
+  readonly #messageHandler: WsMessageHandler;
+  readonly #eventForwarder?: EventForwarder;
 
   constructor(options: GatewayWsServerOptions) {
     this.#server = options.server;
@@ -101,6 +123,19 @@ export class GatewayWsServer {
       warningThresholdMs: options.sessionService.config.warningThresholdMs,
     });
     this.#wss = new WebSocketServer({ noServer: true });
+    this.#messageHandler = new WsMessageHandler({
+      registry: options.connectionRegistry,
+      buffer: options.eventBuffer,
+      daemonClient: options.daemonClient,
+    });
+    if (options.streamEventBridge) {
+      this.#eventForwarder = new EventForwarder(
+        options.streamEventBridge,
+        options.eventBuffer,
+        options.connectionRegistry,
+      );
+      this.#eventForwarder.start();
+    }
     this.#server.on('upgrade', this.#handleUpgrade);
   }
 
@@ -110,10 +145,20 @@ export class GatewayWsServer {
 
   close(): void {
     this.#server.off('upgrade', this.#handleUpgrade);
+    this.#eventForwarder?.dispose();
     for (const client of this.#wss.clients) {
       client.terminate();
     }
     this.#wss.close();
+  }
+
+  #handleSocketMessage(connection: WsConnection, data: RawData): void {
+    const rawMessage = rawDataToString(data);
+    void this.#messageHandler.handleMessage(connection, rawMessage).catch(() => {
+      if (!connection.isClosed) {
+        connection.close(1011, 'Message handling failed');
+      }
+    });
   }
 
   #bindIdleTimeout(sessionId: string, webSocket: WebSocket, onIdle: () => void): () => void {
@@ -226,6 +271,9 @@ export class GatewayWsServer {
           cleanupBridge();
         };
         cleanupIdle = this.#bindIdleTimeout(session.id, webSocket, cleanup);
+        webSocket.on('message', (data) => {
+          this.#handleSocketMessage(connection, data);
+        });
         webSocket.on('close', cleanup);
       });
     } catch (err) {

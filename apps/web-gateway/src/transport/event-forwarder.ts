@@ -22,7 +22,10 @@ export interface StreamEventPayload {
 
 export interface StreamEventBridgeLike {
   on(eventName: 'stream-event', listener: (payload: StreamEventPayload) => void): unknown;
-  removeListener(eventName: 'stream-event', listener: (payload: StreamEventPayload) => void): unknown;
+  removeListener(
+    eventName: 'stream-event',
+    listener: (payload: StreamEventPayload) => void,
+  ): unknown;
 }
 
 export class EventForwarder {

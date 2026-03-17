@@ -4,6 +4,13 @@ import type { StreamEvent } from '@hydra/web-contracts';
 
 const DEFAULT_CAPACITY = 1000;
 
+function cloneEvent(event: StreamEvent): StreamEvent {
+  return {
+    ...event,
+    payload: JSON.parse(JSON.stringify(event.payload)) as StreamEvent['payload'],
+  };
+}
+
 // ─── ring buffer (per-conversation) ─────────────────────────────────────────
 
 /**
@@ -16,7 +23,7 @@ const DEFAULT_CAPACITY = 1000;
  */
 export class EventBuffer {
   private readonly capacity: number;
-  private readonly buffers = new Map<string, StreamEvent[]>();
+  private readonly buffers = new Map<string, Array<StreamEvent | undefined>>();
   /** Index of the next write slot inside each conversation's ring. */
   private readonly heads = new Map<string, number>();
   /** Number of events currently stored per conversation (≤ capacity). */
@@ -26,7 +33,7 @@ export class EventBuffer {
 
   constructor(capacity: number = DEFAULT_CAPACITY) {
     if (!Number.isInteger(capacity) || capacity < 1) {
-      throw new RangeError(`capacity must be a positive integer, got ${capacity}`);
+      throw new RangeError(`capacity must be a positive integer, got ${String(capacity)}`);
     }
     this.capacity = capacity;
   }
@@ -37,25 +44,27 @@ export class EventBuffer {
   push(conversationId: string, event: StreamEvent): void {
     let ring = this.buffers.get(conversationId);
     if (!ring) {
-      ring = new Array<StreamEvent>(this.capacity);
+      ring = Array.from({ length: this.capacity });
       this.buffers.set(conversationId, ring);
       this.heads.set(conversationId, 0);
       this.sizes.set(conversationId, 0);
     }
 
-    const head = this.heads.get(conversationId)!;
-    const size = this.sizes.get(conversationId)!;
+    const head = this.heads.get(conversationId) ?? 0;
+    const size = this.sizes.get(conversationId) ?? 0;
 
     // Record the seq of the event about to be overwritten (eviction).
     if (size === this.capacity) {
-      const evictedSeq = ring[head].seq;
-      const prev = this.evictedHighSeqs.get(conversationId) ?? 0;
-      if (evictedSeq > prev) {
-        this.evictedHighSeqs.set(conversationId, evictedSeq);
+      const evictedEvent = ring[head];
+      if (evictedEvent !== undefined) {
+        const prev = this.evictedHighSeqs.get(conversationId) ?? 0;
+        if (evictedEvent.seq > prev) {
+          this.evictedHighSeqs.set(conversationId, evictedEvent.seq);
+        }
       }
     }
 
-    ring[head] = structuredClone(event);
+    ring[head] = cloneEvent(event);
     this.heads.set(conversationId, (head + 1) % this.capacity);
 
     if (size < this.capacity) {
@@ -76,11 +85,12 @@ export class EventBuffer {
     const size = this.sizes.get(conversationId) ?? 0;
     if (size === 0) return 0;
 
-    const ring = this.buffers.get(conversationId)!;
-    const head = this.heads.get(conversationId)!;
+    const ring = this.buffers.get(conversationId);
+    const head = this.heads.get(conversationId) ?? 0;
+    if (!ring) return 0;
     // The newest event is at (head - 1) mod capacity
     const newest = (head - 1 + this.capacity) % this.capacity;
-    return ring[newest].seq;
+    return ring[newest]?.seq ?? 0;
   }
 
   /**
@@ -100,12 +110,13 @@ export class EventBuffer {
     const size = this.sizes.get(conversationId) ?? 0;
     if (size === 0) return false;
 
-    const ring = this.buffers.get(conversationId)!;
-    const head = this.heads.get(conversationId)!;
+    const ring = this.buffers.get(conversationId);
+    const head = this.heads.get(conversationId) ?? 0;
+    if (!ring) return false;
 
     // Newest buffered event
     const newestIdx = (head - 1 + this.capacity) % this.capacity;
-    const newestSeq = ring[newestIdx].seq;
+    const newestSeq = ring[newestIdx]?.seq ?? 0;
 
     // Nothing new for the client.
     if (newestSeq <= sinceSeq) return false;
@@ -146,14 +157,18 @@ export class EventBuffer {
     const size = this.sizes.get(conversationId) ?? 0;
     if (size === 0) return [];
 
-    const ring = this.buffers.get(conversationId)!;
-    const head = this.heads.get(conversationId)!;
+    const ring = this.buffers.get(conversationId);
+    const head = this.heads.get(conversationId) ?? 0;
+    if (!ring) return [];
 
-    const result: StreamEvent[] = new Array(size);
+    const result: StreamEvent[] = [];
     // The oldest element starts at `head` when full, or at index 0 when not yet full.
     const start = size < this.capacity ? 0 : head;
     for (let i = 0; i < size; i++) {
-      result[i] = structuredClone(ring[(start + i) % this.capacity]);
+      const event = ring[(start + i) % this.capacity];
+      if (event !== undefined) {
+        result.push(cloneEvent(event));
+      }
     }
     return result;
   }

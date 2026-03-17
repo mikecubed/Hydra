@@ -3,10 +3,12 @@ import { createServer, type Server } from 'node:http';
 import { afterEach, beforeEach, describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import { getRequestListener } from '@hono/node-server';
+import type { StreamEvent } from '@hydra/web-contracts';
 import WebSocket from 'ws';
 import { createGatewayApp, type GatewayApp } from '../../index.ts';
 import { FakeClock } from '../../shared/clock.ts';
 import { GatewayError } from '../../shared/errors.ts';
+import type { StreamEventPayload } from '../event-forwarder.ts';
 
 const ORIGIN = 'http://127.0.0.1:4174';
 
@@ -61,6 +63,72 @@ async function waitForMessage(ws: WebSocket): Promise<Record<string, unknown>> {
 
   const text = typeof payload === 'string' ? payload : new TextDecoder().decode(payload);
   return JSON.parse(text) as Record<string, unknown>;
+}
+
+class FakeEventBridge {
+  readonly #listeners = new Set<(payload: StreamEventPayload) => void>();
+
+  on(_eventName: 'stream-event', listener: (payload: StreamEventPayload) => void): this {
+    this.#listeners.add(listener);
+    return this;
+  }
+
+  removeListener(
+    _eventName: 'stream-event',
+    listener: (payload: StreamEventPayload) => void,
+  ): this {
+    this.#listeners.delete(listener);
+    return this;
+  }
+
+  emitStreamEvent(conversationId: string, event: StreamEvent): void {
+    const payload: StreamEventPayload = { conversationId, event };
+    for (const listener of this.#listeners) {
+      listener(payload);
+    }
+  }
+}
+
+function makeStreamEvent(seq: number): StreamEvent {
+  return {
+    seq,
+    turnId: `turn-${seq}`,
+    kind: 'text-delta',
+    payload: { text: `chunk-${seq}` },
+    timestamp: new Date().toISOString(),
+  };
+}
+
+function createWsDaemonClient(validConversationIds: ReadonlySet<string>) {
+  return {
+    async openConversation(conversationId: string) {
+      if (validConversationIds.has(conversationId)) {
+        return {
+          data: {
+            conversation: {
+              id: conversationId,
+              status: 'active' as const,
+              createdAt: new Date().toISOString(),
+              updatedAt: new Date().toISOString(),
+              turnCount: 0,
+              pendingInstructionCount: 0,
+            },
+            recentTurns: [],
+            totalTurnCount: 0,
+            pendingApprovals: [],
+          },
+        };
+      }
+      return {
+        error: {
+          ok: false as const,
+          code: 'CONVERSATION_NOT_FOUND',
+          category: 'validation' as const,
+          message: 'Conversation not found',
+        },
+      };
+    },
+  };
 }
 
 async function waitForMessages(
@@ -193,18 +261,22 @@ describe('GatewayWsServer', () => {
   let port: number;
   let clock: FakeClock;
   let healthResult: boolean;
+  let streamEventBridge: FakeEventBridge;
   const openSockets: WebSocket[] = [];
 
   beforeEach(async () => {
     server = createServer();
     clock = new FakeClock(Date.now());
     healthResult = true;
+    streamEventBridge = new FakeEventBridge();
 
     gw = createGatewayApp({
       server,
       clock,
       allowedOrigin: ORIGIN,
       healthChecker: async () => healthResult,
+      wsDaemonClient: createWsDaemonClient(new Set(['conv-1', 'conv-2'])),
+      streamEventBridge,
       heartbeatConfig: { intervalMs: 60_000 },
       sessionConfig: {
         sessionLifetimeMs: 60_000,
@@ -237,6 +309,38 @@ describe('GatewayWsServer', () => {
     openSockets.push(ws);
 
     assert.equal(gw.connectionRegistry.getBySession(session.id).size, 1);
+  });
+
+  it('handles subscribe messages over websocket and updates conversation subscriptions', async () => {
+    const session = await gw.sessionService.create('op-1', '127.0.0.1');
+    const ws = await connectWebSocket(port, { sessionId: session.id });
+    openSockets.push(ws);
+
+    ws.send(JSON.stringify({ type: 'subscribe', conversationId: 'conv-1' }));
+
+    const message = await waitForMessage(ws);
+    assert.equal(message['type'], 'subscribed');
+    assert.equal(message['conversationId'], 'conv-1');
+    assert.equal(message['currentSeq'], 0);
+    assert.equal(gw.connectionRegistry.getByConversation('conv-1').size, 1);
+  });
+
+  it('forwards bridge stream events to subscribed websocket clients', async () => {
+    const session = await gw.sessionService.create('op-1', '127.0.0.1');
+    const ws = await connectWebSocket(port, { sessionId: session.id });
+    openSockets.push(ws);
+
+    ws.send(JSON.stringify({ type: 'subscribe', conversationId: 'conv-1' }));
+    const subscribed = await waitForMessage(ws);
+    assert.equal(subscribed['type'], 'subscribed');
+
+    const event = makeStreamEvent(3);
+    streamEventBridge.emitStreamEvent('conv-1', event);
+
+    const forwarded = await waitForMessage(ws);
+    assert.equal(forwarded['type'], 'stream-event');
+    assert.equal(forwarded['conversationId'], 'conv-1');
+    assert.deepEqual(forwarded['event'], event);
   });
 
   it('rejects missing session cookie with 401', async () => {
