@@ -10,7 +10,7 @@ import { createError } from '../shared/errors.ts';
 import { gatewayErrorResponse } from '../shared/types.ts';
 import type { GatewayEnv } from '../shared/types.ts';
 
-const DEFAULT_MUTATING_LIMITS: Partial<RateLimiterConfig> = {
+export const DEFAULT_MUTATING_LIMITS: Partial<RateLimiterConfig> = {
   maxAttempts: 30,
   windowMs: 60_000,
   lockoutMs: 60_000,
@@ -19,10 +19,13 @@ const DEFAULT_MUTATING_LIMITS: Partial<RateLimiterConfig> = {
 const SAFE_METHODS = new Set(['GET', 'HEAD', 'OPTIONS']);
 
 export function createMutatingRateLimiter(
-  clock: Clock,
+  clockOrLimiter: Clock | RateLimiter,
   config: Partial<RateLimiterConfig> = {},
 ): MiddlewareHandler<GatewayEnv> {
-  const limiter = new RateLimiter(clock, { ...DEFAULT_MUTATING_LIMITS, ...config });
+  const limiter =
+    clockOrLimiter instanceof RateLimiter
+      ? clockOrLimiter
+      : new RateLimiter(clockOrLimiter, { ...DEFAULT_MUTATING_LIMITS, ...config });
 
   return createMiddleware<GatewayEnv>(async (c, next) => {
     if (SAFE_METHODS.has(c.req.method.toUpperCase())) {

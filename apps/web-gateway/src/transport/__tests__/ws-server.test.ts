@@ -277,6 +277,60 @@ describe('GatewayWsServer', () => {
     assert.equal(status, 403);
   });
 
+  it('rate limits repeated websocket upgrades from the same source', async () => {
+    const session = await gw.sessionService.create('op-1', '127.0.0.1');
+
+    for (let index = 0; index < 30; index += 1) {
+      const ws = await connectWebSocket(port, { sessionId: session.id });
+      openSockets.push(ws);
+    }
+
+    const response = await expectUnexpectedResponseBody(port, { sessionId: session.id });
+    assert.equal(response.status, 429);
+    const payload = JSON.parse(response.body) as { code?: string; ok?: boolean };
+    assert.equal(payload.ok, false);
+    assert.equal(payload.code, 'RATE_LIMITED');
+  });
+
+  it('shares the mutating rate-limit budget between HTTP requests and websocket upgrades', async () => {
+    const localServer = createServer();
+    const localGateway = createGatewayApp({
+      server: localServer,
+      allowedOrigin: ORIGIN,
+      healthChecker: async () => true,
+      heartbeatConfig: { intervalMs: 60_000 },
+    });
+    const requestListener = getRequestListener(localGateway.app.fetch);
+    localServer.on('request', (request, response) => {
+      void requestListener(request, response);
+    });
+    const localPort = await listen(localServer);
+
+    try {
+      const session = await localGateway.sessionService.create('op-1', '127.0.0.1');
+
+      for (let index = 0; index < 30; index += 1) {
+        const response = await fetch(`http://127.0.0.1:${localPort}/not-found`, {
+          method: 'POST',
+          headers: {
+            Origin: ORIGIN,
+          },
+        });
+        assert.equal(response.status, 401);
+      }
+
+      const response = await expectUnexpectedResponseBody(localPort, { sessionId: session.id });
+      assert.equal(response.status, 429);
+      const payload = JSON.parse(response.body) as { code?: string; ok?: boolean };
+      assert.equal(payload.ok, false);
+      assert.equal(payload.code, 'RATE_LIMITED');
+    } finally {
+      localGateway.wsServer?.close();
+      localGateway.heartbeat.stop();
+      await closeServer(localServer);
+    }
+  });
+
   it('destroys non-/ws upgrades without registering a connection', async () => {
     const session = await gw.sessionService.create('op-1', '127.0.0.1');
     const ws = new WebSocket(`ws://127.0.0.1:${port}/not-ws`, {

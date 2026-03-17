@@ -5,6 +5,9 @@ import { createGatewayErrorResponse } from '../shared/gateway-error-response.ts'
 import type { Clock } from '../shared/clock.ts';
 import type { SessionService } from '../session/session-service.ts';
 import type { SessionStateBroadcaster } from '../session/session-state-broadcaster.ts';
+import type { SourceKeyConfig } from '../security/source-key.ts';
+import { resolveSourceKeyFromParts } from '../security/source-key.ts';
+import type { RateLimiter } from '../auth/rate-limiter.ts';
 import type { ConnectionRegistry } from './connection-registry.ts';
 import { SessionWsBridge } from './session-ws-bridge.ts';
 import { WsConnection } from './ws-connection.ts';
@@ -17,6 +20,8 @@ interface GatewayWsServerOptions {
   allowedOrigin: string;
   connectionRegistry: ConnectionRegistry;
   clock: Clock;
+  sourceKeyConfig?: SourceKeyConfig;
+  mutatingLimiter: RateLimiter;
 }
 
 const COOKIE_SEPARATOR = ';';
@@ -76,6 +81,8 @@ export class GatewayWsServer {
   readonly #wsBridge: SessionWsBridge;
   readonly #wss: WebSocketServer;
   readonly #clock: Clock;
+  readonly #mutatingLimiter: RateLimiter;
+  readonly #trustedProxies: ReadonlySet<string> | undefined;
 
   constructor(options: GatewayWsServerOptions) {
     this.#server = options.server;
@@ -83,6 +90,10 @@ export class GatewayWsServer {
     this.#allowedOrigin = options.allowedOrigin;
     this.#connectionRegistry = options.connectionRegistry;
     this.#clock = options.clock;
+    this.#mutatingLimiter = options.mutatingLimiter;
+    this.#trustedProxies = options.sourceKeyConfig?.trustedProxies
+      ? new Set(options.sourceKeyConfig.trustedProxies)
+      : undefined;
     this.#wsBridge = new SessionWsBridge({
       broadcaster: options.broadcaster,
       registry: options.connectionRegistry,
@@ -180,6 +191,18 @@ export class GatewayWsServer {
       rejectUpgrade(socket, createError('SESSION_NOT_FOUND'));
       return;
     }
+
+    const forwardedForHeader = request.headers['x-forwarded-for'];
+    const sourceKey = resolveSourceKeyFromParts(
+      request.socket.remoteAddress,
+      typeof forwardedForHeader === 'string' ? forwardedForHeader : forwardedForHeader?.[0],
+      this.#trustedProxies,
+    );
+    if (!this.#mutatingLimiter.check(sourceKey)) {
+      rejectUpgrade(socket, createError('RATE_LIMITED'));
+      return;
+    }
+    this.#mutatingLimiter.recordAttempt(sourceKey);
 
     try {
       const session = await this.#sessionService.validate(sessionId);

@@ -21,7 +21,10 @@ import { createAuthMiddleware } from './auth/auth-middleware.ts';
 import { createOriginGuard } from './security/origin-guard.ts';
 import { createCsrfMiddleware } from './security/csrf-middleware.ts';
 import { createHardenedHeaders, type HardenedHeadersConfig } from './security/hardened-headers.ts';
-import { createMutatingRateLimiter } from './security/mutating-rate-limiter.ts';
+import {
+  createMutatingRateLimiter,
+  DEFAULT_MUTATING_LIMITS,
+} from './security/mutating-rate-limiter.ts';
 import {
   DaemonHeartbeat,
   defaultHealthChecker,
@@ -146,6 +149,7 @@ export function createGatewayApp(deps: GatewayAppDeps = {}): GatewayApp {
     deps.heartbeatConfig,
   );
   heartbeat.start();
+  const mutatingLimiter = new RateLimiter(clock, DEFAULT_MUTATING_LIMITS);
 
   const app = new Hono<GatewayEnv>();
 
@@ -159,7 +163,7 @@ export function createGatewayApp(deps: GatewayAppDeps = {}): GatewayApp {
   app.use('*', createOriginGuard(allowedOrigin));
 
   // Mutating rate limiter
-  app.use('*', createMutatingRateLimiter(clock));
+  app.use('*', createMutatingRateLimiter(mutatingLimiter));
 
   // Auth routes — login is unauthenticated; logout/reauth need CSRF protection
   app.route(
@@ -189,6 +193,8 @@ export function createGatewayApp(deps: GatewayAppDeps = {}): GatewayApp {
           allowedOrigin,
           connectionRegistry,
           clock,
+          sourceKeyConfig: deps.sourceKeyConfig,
+          mutatingLimiter,
         });
 
   return {
