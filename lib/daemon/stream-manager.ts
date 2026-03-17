@@ -45,20 +45,33 @@ const TERMINAL_STREAM_STATUSES: ReadonlySet<StreamStatus> = new Set([
 /** Default retention: 5 minutes after terminal state. */
 const DEFAULT_RETENTION_MS = 5 * 60 * 1000;
 
+/** Tombstone metadata for a purged stream — supports deterministic expiry. */
+interface PurgeTombstone {
+  highSeq: number;
+  purgedAt: number;
+}
+
 // ── StreamManager ────────────────────────────────────────────────────────────
 
 export class StreamManager {
   private readonly streams = new Map<string, StreamState>();
   private readonly streamByTurnId = new Map<string, string>();
-  private readonly purgedHighSeqByTurnId = new Map<string, number>();
+  private readonly purgedHighSeqByTurnId = new Map<string, PurgeTombstone>();
   private seq = 0;
   private readonly store: ConversationStore;
   private readonly retentionMs: number;
   private readonly bridge?: EventBridge;
 
+  /** Tombstone TTL — 2× stream retention gives clients ample time to catch up. */
+  private readonly tombstoneRetentionMs: number;
+
+  /** Hard cap on tombstone entries to prevent unbounded memory growth. */
+  private static readonly MAX_TOMBSTONES = 10_000;
+
   constructor(store: ConversationStore, retentionMs = DEFAULT_RETENTION_MS, bridge?: EventBridge) {
     this.store = store;
     this.retentionMs = retentionMs;
+    this.tombstoneRetentionMs = retentionMs * 2;
     this.bridge = bridge;
   }
 
@@ -267,7 +280,12 @@ export class StreamManager {
   }
 
   getPurgedHighSeq(turnId: string): number | undefined {
-    return this.purgedHighSeqByTurnId.get(turnId);
+    return this.purgedHighSeqByTurnId.get(turnId)?.highSeq;
+  }
+
+  /** Number of purge tombstones currently tracked. */
+  get tombstoneCount(): number {
+    return this.purgedHighSeqByTurnId.size;
   }
 
   /**
@@ -286,12 +304,35 @@ export class StreamManager {
       if (new Date(state.completedAt).getTime() <= cutoff) {
         // eslint-disable-next-line unicorn/prefer-at -- `.at()` conflicts with this repo's Node compatibility lint rule.
         const highSeq = state.events.slice(-1).pop()?.seq ?? 0;
-        this.purgedHighSeqByTurnId.set(state.turnId, highSeq);
+        this.purgedHighSeqByTurnId.set(state.turnId, {
+          highSeq,
+          purgedAt: Date.now(),
+        });
         this.streams.delete(streamId);
         this.streamByTurnId.delete(state.turnId);
         purged += 1;
       }
     }
+
+    // Evict expired tombstones (deterministic TTL-based expiry)
+    const tombstoneCutoff = Date.now() - this.tombstoneRetentionMs;
+    for (const [turnId, tombstone] of this.purgedHighSeqByTurnId) {
+      if (tombstone.purgedAt <= tombstoneCutoff) {
+        this.purgedHighSeqByTurnId.delete(turnId);
+      }
+    }
+
+    // Hard cap: evict oldest tombstones if the map exceeds the maximum size
+    if (this.purgedHighSeqByTurnId.size > StreamManager.MAX_TOMBSTONES) {
+      const entries = [...this.purgedHighSeqByTurnId.entries()].sort(
+        (a, b) => a[1].purgedAt - b[1].purgedAt,
+      );
+      const excess = entries.length - StreamManager.MAX_TOMBSTONES;
+      for (let i = 0; i < excess; i++) {
+        this.purgedHighSeqByTurnId.delete(entries[i][0]);
+      }
+    }
+
     return purged;
   }
 

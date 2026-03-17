@@ -199,7 +199,7 @@ describe('Conversation routes — turns', () => {
     assert.ok(events.length >= 2, 'should have started + text-delta');
   });
 
-  it('GET /conversations/:id/turns/:turnId/stream returns 410 when terminal stream history was purged', () => {
+  it('GET /conversations/:id/turns/:turnId/stream returns 410 when terminal stream history was purged and client is not caught up', () => {
     const conv = deps.store.createConversation();
     const turn = deps.store.appendTurn(conv.id, {
       kind: 'operator',
@@ -218,6 +218,27 @@ describe('Conversation routes — turns', () => {
     assert.equal(res.statusCode, 410);
     const body = res.body as Record<string, unknown>;
     assert.equal(body['error'], 'Stream history expired for turn');
+  });
+
+  it('GET /conversations/:id/turns/:turnId/stream returns 200 empty when terminal turn has no stream and no purge tombstone', () => {
+    const conv = deps.store.createConversation();
+    const turn = deps.store.appendTurn(conv.id, {
+      kind: 'operator',
+      instruction: 'Hello',
+      attribution: operatorAttribution,
+    });
+    // Manually finalize the turn so it's in a terminal state without ever
+    // having created a stream (simulates a turn that completed outside the
+    // stream lifecycle, or whose tombstone has already been evicted).
+    deps.store.finalizeTurn(turn.id, 'completed', 'done');
+
+    const req = createMockReq('GET', `/conversations/${conv.id}/turns/${turn.id}/stream?since=0`);
+    const res = createMockRes();
+    handleConversationRoute(req, res as unknown as ServerResponse, deps);
+
+    assert.equal(res.statusCode, 200);
+    const body = res.body as Record<string, unknown>;
+    assert.deepEqual(body['events'], []);
   });
 
   it('GET /conversations/:id/turns/:turnId/stream returns empty when the purged terminal stream was fully acknowledged', () => {

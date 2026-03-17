@@ -536,11 +536,14 @@ function handleSubscribeToStream(
   if (streamId === undefined) {
     if (turn.status === 'completed' || turn.status === 'failed' || turn.status === 'cancelled') {
       const purgedHighSeq = deps.streamManager.getPurgedHighSeq(turnId);
-      if (purgedHighSeq !== undefined && sinceSeq >= purgedHighSeq) {
-        sendJson(res, 200, { events: [] });
+      // 410 only when a purge tombstone exists and the client has not yet caught up.
+      // No tombstone (e.g. turn completed without a stream, or tombstone already evicted)
+      // → treat as empty.
+      if (purgedHighSeq !== undefined && sinceSeq < purgedHighSeq) {
+        sendError(res, 410, 'Stream history expired for turn');
         return;
       }
-      sendError(res, 410, 'Stream history expired for turn');
+      sendJson(res, 200, { events: [] });
       return;
     }
     sendJson(res, 200, { events: [] });
