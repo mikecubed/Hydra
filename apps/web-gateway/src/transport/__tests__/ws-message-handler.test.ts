@@ -573,6 +573,34 @@ describe('WsMessageHandler', () => {
       assert.equal(conn.sent.length, 1);
       assert.equal(conn.sent[0].type, 'unsubscribed');
     });
+
+    it('closes unsubscribe when the acknowledgement would exceed the buffer threshold', async () => {
+      await handler.handleMessage(
+        conn,
+        JSON.stringify({ type: 'subscribe', conversationId: 'conv-1' }),
+      );
+      conn.sent.splice(0);
+
+      const unsubscribedSize = Buffer.byteLength(
+        serializeServerMessage({
+          type: 'unsubscribed',
+          conversationId: 'conv-1',
+        }),
+        'utf8',
+      );
+      conn._bufferedAmount = HIGH_WATER_MARK - unsubscribedSize + 1;
+
+      await handler.handleMessage(
+        conn,
+        JSON.stringify({ type: 'unsubscribe', conversationId: 'conv-1' }),
+      );
+
+      assert.equal(conn.isClosed, true);
+      assert.equal(conn.closeCode, 1008);
+      assert.equal(conn.sent[0].type, 'error');
+      assert.equal((conn.sent[0] as { code: string }).code, 'WS_BUFFER_OVERFLOW');
+      assert.equal(conn.subscribedConversations.has('conv-1'), false);
+    });
   });
 
   // ─── ack ────────────────────────────────────────────────────────────────
@@ -609,6 +637,27 @@ describe('WsMessageHandler', () => {
       assert.equal(resp.type, 'error');
       assert.equal((resp as { code: string }).code, 'WS_INVALID_MESSAGE');
       assert.equal((resp as { category: string }).category, 'validation');
+    });
+
+    it('closes when an error frame would exceed the buffer threshold', async () => {
+      const invalidJsonErrorSize = Buffer.byteLength(
+        serializeServerMessage({
+          type: 'error',
+          ok: false as const,
+          code: 'WS_INVALID_MESSAGE',
+          category: 'validation',
+          message: 'Invalid JSON',
+        }),
+        'utf8',
+      );
+      conn._bufferedAmount = HIGH_WATER_MARK - invalidJsonErrorSize + 1;
+
+      await handler.handleMessage(conn, '{not valid json}');
+
+      assert.equal(conn.isClosed, true);
+      assert.equal(conn.closeCode, 1008);
+      assert.equal(conn.sent[0].type, 'error');
+      assert.equal((conn.sent[0] as { code: string }).code, 'WS_BUFFER_OVERFLOW');
     });
 
     it('responds with error for missing required fields', async () => {

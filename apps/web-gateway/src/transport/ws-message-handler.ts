@@ -187,10 +187,7 @@ export class WsMessageHandler {
     connection.replayState.delete(conversationId);
     connection.pendingEvents.delete(conversationId);
 
-    connection.send({
-      type: 'unsubscribed',
-      conversationId,
-    });
+    this.#sendUnsubscribed(connection, conversationId);
   }
 
   #sendStreamEvent(
@@ -225,6 +222,17 @@ export class WsMessageHandler {
     );
   }
 
+  #sendUnsubscribed(connection: ManagedConnection, conversationId: string): boolean {
+    return sendWithBackpressureProtection(
+      connection,
+      {
+        type: 'unsubscribed',
+        conversationId,
+      },
+      this.#bufferHighWaterMark,
+    );
+  }
+
   #cleanupSubscriptionState(connection: ManagedConnection, conversationId: string): void {
     this.#registry.removeSubscription(connection.connectionId, conversationId);
     connection.replayState.delete(conversationId);
@@ -235,17 +243,20 @@ export class WsMessageHandler {
     connection: ManagedConnection,
     code: string,
     message: string,
-    category: ServerMessage extends { category: infer C } ? C : string = 'validation',
+    category: Extract<ServerMessage, { type: 'error' }>['category'] = 'validation',
     conversationId?: string,
   ): void {
-    const errorMsg: ServerMessage = {
-      type: 'error',
-      ok: false as const,
-      code,
-      category: category as 'validation',
-      message,
-      ...(conversationId !== undefined && { conversationId }),
-    };
-    connection.send(errorMsg);
+    void sendWithBackpressureProtection(
+      connection,
+      {
+        type: 'error',
+        ok: false as const,
+        code,
+        category,
+        message,
+        ...(conversationId !== undefined && { conversationId }),
+      },
+      this.#bufferHighWaterMark,
+    );
   }
 }

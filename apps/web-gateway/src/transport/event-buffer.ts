@@ -1,14 +1,11 @@
-import type { StreamEvent } from '@hydra/web-contracts';
+import { StreamEvent as StreamEventSchema, type StreamEvent } from '@hydra/web-contracts';
 
 // ─── defaults ───────────────────────────────────────────────────────────────
 
 const DEFAULT_CAPACITY = 1000;
 
 function cloneEvent(event: StreamEvent): StreamEvent {
-  return {
-    ...event,
-    payload: JSON.parse(JSON.stringify(event.payload)) as StreamEvent['payload'],
-  };
+  return StreamEventSchema.parse(JSON.parse(JSON.stringify(event)));
 }
 
 // ─── ring buffer (per-conversation) ─────────────────────────────────────────
