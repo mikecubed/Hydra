@@ -1198,6 +1198,14 @@ describe('T030: End-to-end streaming integration', () => {
       const turn3 = fakeDaemon.emitFullStream(CONV_ID, 'turn-ord-3', ['f', 'g', 'h', 'i']);
       const allOriginal = [...turn1, ...turn2, ...turn3];
       const originalMsgs = await waitForMessages(ws1, allOriginal.length);
+      for (const [i, msg] of originalMsgs.entries()) {
+        assert.equal(msg['type'], 'stream-event');
+        assert.deepEqual(
+          msg['event'],
+          allOriginal[i],
+          `live source order mismatch at index ${String(i)}`,
+        );
+      }
 
       const beforeAllSeq = turn1[0].seq - 1;
 
@@ -1229,7 +1237,7 @@ describe('T030: End-to-end streaming integration', () => {
       for (const [i, msg] of replayed.entries()) {
         assert.equal(msg['type'], 'stream-event');
         const replayedEvent = msg['event'] as StreamEvent;
-        const originalEvent = (originalMsgs[i]['event'] as StreamEvent);
+        const originalEvent = allOriginal[i];
         assert.equal(replayedEvent.seq, originalEvent.seq, `seq mismatch at index ${String(i)}`);
         assert.equal(replayedEvent.kind, originalEvent.kind, `kind mismatch at index ${String(i)}`);
         assert.equal(
