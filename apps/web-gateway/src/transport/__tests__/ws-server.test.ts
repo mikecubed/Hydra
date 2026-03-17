@@ -1043,4 +1043,185 @@ describe('GatewayWsServer', () => {
       await closeServer(localServer);
     }
   });
+
+  // ─── T035: reconnect with invalid session ──────────────────────────────
+  // FR-025: reconnect attempts with expired or invalidated sessions are
+  // rejected before any replay occurs. These tests establish a valid first
+  // connection, transition the session to a terminal state, then attempt a
+  // second WS upgrade and assert rejection with the correct status/code.
+
+  it('rejects reconnect after session expires with 401 SESSION_EXPIRED', async () => {
+    const session = await gw.sessionService.create('op-1', '127.0.0.1');
+
+    // First connection succeeds
+    const ws1 = await connectWebSocket(port, { sessionId: session.id });
+    openSockets.push(ws1);
+    assert.equal(gw.connectionRegistry.getBySession(session.id).size, 1);
+
+    // Close the first connection (simulates browser tab close / network drop)
+    ws1.close();
+    await waitForCloseOrError(ws1);
+    openSockets.splice(openSockets.indexOf(ws1), 1);
+
+    // Advance clock past session lifetime to trigger expiry
+    clock.advance(60_001);
+
+    // Reconnect attempt should be rejected with 401
+    const response = await expectUnexpectedResponseBody(port, { sessionId: session.id });
+    assert.equal(response.status, 401);
+    const payload = JSON.parse(response.body) as { code?: string; ok?: boolean };
+    assert.equal(payload.ok, false);
+    assert.equal(payload.code, 'SESSION_EXPIRED');
+  });
+
+  it('rejects reconnect after session is invalidated with 401 SESSION_INVALIDATED', async () => {
+    const session = await gw.sessionService.create('op-1', '127.0.0.1');
+
+    // First connection succeeds
+    const ws1 = await connectWebSocket(port, { sessionId: session.id });
+    openSockets.push(ws1);
+    assert.equal(gw.connectionRegistry.getBySession(session.id).size, 1);
+
+    // Close the first connection
+    ws1.close();
+    await waitForCloseOrError(ws1);
+    openSockets.splice(openSockets.indexOf(ws1), 1);
+
+    // Invalidate the session (e.g., admin action, concurrent session eviction)
+    await gw.sessionService.invalidate(session.id, 'admin-revoked');
+
+    // Reconnect attempt should be rejected with 401
+    const response = await expectUnexpectedResponseBody(port, { sessionId: session.id });
+    assert.equal(response.status, 401);
+    const payload = JSON.parse(response.body) as { code?: string; ok?: boolean };
+    assert.equal(payload.ok, false);
+    assert.equal(payload.code, 'SESSION_INVALIDATED');
+  });
+
+  it('rejects reconnect after logout with 401 SESSION_NOT_FOUND', async () => {
+    const session = await gw.sessionService.create('op-1', '127.0.0.1');
+
+    // First connection succeeds
+    const ws1 = await connectWebSocket(port, { sessionId: session.id });
+    openSockets.push(ws1);
+
+    // Close the first connection
+    ws1.close();
+    await waitForCloseOrError(ws1);
+    openSockets.splice(openSockets.indexOf(ws1), 1);
+
+    // Log out the session
+    await gw.sessionService.logout(session.id);
+
+    // Reconnect attempt should be rejected with 401
+    const response = await expectUnexpectedResponseBody(port, { sessionId: session.id });
+    assert.equal(response.status, 401);
+    const payload = JSON.parse(response.body) as { code?: string; ok?: boolean };
+    assert.equal(payload.ok, false);
+    // logged-out falls through to SESSION_NOT_FOUND in validate()
+    assert.equal(payload.code, 'SESSION_NOT_FOUND');
+  });
+
+  it('does not register a connection or replay events when reconnecting with an expired session', async () => {
+    const session = await gw.sessionService.create('op-1', '127.0.0.1');
+
+    // First connection: subscribe to a conversation and receive events
+    const ws1 = await connectWebSocket(port, { sessionId: session.id });
+    openSockets.push(ws1);
+    ws1.send(JSON.stringify({ type: 'subscribe', conversationId: 'conv-1' }));
+    await waitForMessage(ws1); // subscribed ack
+
+    // Push an event into the buffer for conv-1
+    streamEventBridge.emitStreamEvent('conv-1', makeStreamEvent(1));
+    await waitForMessage(ws1); // stream-event
+
+    // Close the first connection
+    ws1.close();
+    await waitForCloseOrError(ws1);
+    openSockets.splice(openSockets.indexOf(ws1), 1);
+
+    // Expire the session
+    clock.advance(60_001);
+
+    // Attempt reconnect — should be rejected
+    const status = await expectUnexpectedResponse(port, { sessionId: session.id });
+    assert.equal(status, 401);
+
+    // No connection should be registered for this session
+    assert.equal(gw.connectionRegistry.getBySession(session.id).size, 0);
+  });
+
+  it('does not register a connection when reconnecting with an invalidated session', async () => {
+    const session = await gw.sessionService.create('op-1', '127.0.0.1');
+
+    // First connection
+    const ws1 = await connectWebSocket(port, { sessionId: session.id });
+    openSockets.push(ws1);
+
+    ws1.close();
+    await waitForCloseOrError(ws1);
+    openSockets.splice(openSockets.indexOf(ws1), 1);
+
+    // Invalidate
+    await gw.sessionService.invalidate(session.id, 'security-concern');
+
+    // Attempt reconnect
+    const status = await expectUnexpectedResponse(port, { sessionId: session.id });
+    assert.equal(status, 401);
+
+    // Registry must remain empty — no partial registration
+    assert.equal(gw.connectionRegistry.getBySession(session.id).size, 0);
+  });
+
+  it('rejects expired session reconnect with structured JSON error body', async () => {
+    const session = await gw.sessionService.create('op-1', '127.0.0.1');
+
+    const ws1 = await connectWebSocket(port, { sessionId: session.id });
+    openSockets.push(ws1);
+    ws1.close();
+    await waitForCloseOrError(ws1);
+    openSockets.splice(openSockets.indexOf(ws1), 1);
+
+    clock.advance(60_001);
+
+    const response = await expectUnexpectedResponseBody(port, { sessionId: session.id });
+    assert.equal(response.status, 401);
+    const body = JSON.parse(response.body) as {
+      ok?: boolean;
+      code?: string;
+      category?: string;
+      message?: string;
+    };
+    assert.equal(body.ok, false);
+    assert.equal(body.code, 'SESSION_EXPIRED');
+    assert.equal(body.category, 'session');
+    assert.equal(typeof body.message, 'string');
+    assert.ok(body.message!.length > 0);
+  });
+
+  it('rejects invalidated session reconnect with structured JSON error body', async () => {
+    const session = await gw.sessionService.create('op-1', '127.0.0.1');
+
+    const ws1 = await connectWebSocket(port, { sessionId: session.id });
+    openSockets.push(ws1);
+    ws1.close();
+    await waitForCloseOrError(ws1);
+    openSockets.splice(openSockets.indexOf(ws1), 1);
+
+    await gw.sessionService.invalidate(session.id, 'compromised');
+
+    const response = await expectUnexpectedResponseBody(port, { sessionId: session.id });
+    assert.equal(response.status, 401);
+    const body = JSON.parse(response.body) as {
+      ok?: boolean;
+      code?: string;
+      category?: string;
+      message?: string;
+    };
+    assert.equal(body.ok, false);
+    assert.equal(body.code, 'SESSION_INVALIDATED');
+    assert.equal(body.category, 'session');
+    assert.equal(typeof body.message, 'string');
+    assert.ok(body.message!.length > 0);
+  });
 });
