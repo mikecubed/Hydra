@@ -207,14 +207,12 @@ export class WsMessageHandler {
       return;
     }
     if ('error' in allTurnsResult) {
-      this.#sendError(
+      this.#abortReplay(
         connection,
+        conversationId,
         'REPLAY_INCOMPLETE',
         'Unable to load turn history for replay',
-        'daemon',
-        conversationId,
       );
-      this.#cleanupSubscriptionState(connection, conversationId);
       return;
     }
 
@@ -231,14 +229,12 @@ export class WsMessageHandler {
     // ── Abort on any per-turn replay error ──────────────────────────────
     const failedTurnIds = this.#collectReplayFailures(turns, replayResults);
     if (failedTurnIds.length > 0) {
-      this.#sendError(
+      this.#abortReplay(
         connection,
+        conversationId,
         'REPLAY_INCOMPLETE',
         `Stream replay failed for turn(s): ${failedTurnIds.join(', ')}`,
-        'daemon',
-        conversationId,
       );
-      this.#cleanupSubscriptionState(connection, conversationId);
       return;
     }
 
@@ -296,6 +292,17 @@ export class WsMessageHandler {
     return [...deduped.values()].sort((a, b) => a.seq - b.seq);
   }
 
+  #abortReplay(
+    connection: ManagedConnection,
+    conversationId: string,
+    code: string,
+    message: string,
+  ): void {
+    this.#buffer.evictConversation(conversationId);
+    this.#sendError(connection, code, message, 'daemon', conversationId);
+    this.#cleanupSubscriptionState(connection, conversationId);
+  }
+
   async #loadTurnsForReplay(
     connection: ManagedConnection,
     conversationId: string,
@@ -317,6 +324,17 @@ export class WsMessageHandler {
 
     if ('error' in result) {
       return result;
+    }
+
+    if (result.data.hasMore || result.data.turns.length < totalTurnCount) {
+      return {
+        error: {
+          ok: false,
+          code: 'REPLAY_INCOMPLETE',
+          category: 'daemon',
+          message: 'Turn history replay response was incomplete',
+        },
+      };
     }
 
     return { data: { turns: result.data.turns } };

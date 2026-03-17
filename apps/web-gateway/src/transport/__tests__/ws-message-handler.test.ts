@@ -1129,6 +1129,68 @@ describe('WsMessageHandler', () => {
       assert.ok(!conn.pendingEvents.has('conv-1'));
     });
 
+    it('evicts buffered tail from a failed replay so the next retry still uses daemon fallback', async () => {
+      const failingDaemonClient: MessageHandlerDeps['daemonClient'] = {
+        async openConversation(conversationId: string) {
+          return fakeConversationData(conversationId, 2);
+        },
+        async loadTurnHistory() {
+          buffer.push('conv-1', makeEventForTurn(10, 'live'));
+          return {
+            error: {
+              ok: false as const,
+              code: 'DAEMON_UNAVAILABLE',
+              category: 'daemon' as const,
+              message: 'Daemon unavailable',
+            },
+          };
+        },
+        async getStreamReplay() {
+          return { data: { events: [] } };
+        },
+      };
+      handler = new WsMessageHandler({
+        registry,
+        buffer,
+        daemonClient: failingDaemonClient,
+        bufferHighWaterMark: HIGH_WATER_MARK,
+      });
+
+      const retryMessage = JSON.stringify({
+        type: 'subscribe',
+        conversationId: 'conv-1',
+        lastAcknowledgedSeq: 3,
+      });
+      await handler.handleMessage(conn, retryMessage);
+
+      assert.equal(conn.sent[0].type, 'error');
+      assert.equal(buffer.getHighwaterSeq('conv-1'), 0);
+
+      const retryConn = fakeConnection('c2', 's1');
+      registry.register(retryConn);
+      const turns = new Map([
+        ['conv-1', [fakeTurn('t1', 'conv-1', 1), fakeTurn('t2', 'conv-1', 2)]],
+      ]);
+      const replay = new Map([
+        ['t1', [makeEventForTurn(5, 't1')]],
+        ['t2', [makeEventForTurn(8, 't2'), makeEventForTurn(10, 't2')]],
+      ]);
+      const retryHandler = new WsMessageHandler({
+        registry,
+        buffer,
+        daemonClient: fakeDaemonClientWithHistory(validConvs, turns, replay),
+        bufferHighWaterMark: HIGH_WATER_MARK,
+      });
+
+      await retryHandler.handleMessage(retryConn, retryMessage);
+
+      const seqs = retryConn.sent
+        .filter((message) => message.type === 'stream-event')
+        .map((message) => (message as { event: StreamEvent }).event.seq);
+      assert.deepEqual(seqs, [5, 8, 10]);
+      assert.equal(retryConn.sent[3].type, 'subscribed');
+    });
+
     it('deduplicates events with the same seq from overlapping turns', async () => {
       const turns = new Map([
         ['conv-1', [fakeTurn('t1', 'conv-1', 1), fakeTurn('t2', 'conv-1', 2)]],
@@ -1214,6 +1276,46 @@ describe('WsMessageHandler', () => {
           toPosition: 4,
         },
       ]);
+    });
+
+    it('sends replay error when loadTurnHistory returns an incomplete range', async () => {
+      const daemonClient: MessageHandlerDeps['daemonClient'] = {
+        async openConversation(conversationId: string) {
+          return fakeConversationData(conversationId, 4);
+        },
+        async loadTurnHistory() {
+          return {
+            data: {
+              turns: [fakeTurn('t3', 'conv-1', 3), fakeTurn('t4', 'conv-1', 4)],
+              totalCount: 4,
+              hasMore: true,
+            },
+          };
+        },
+        async getStreamReplay() {
+          return { data: { events: [] } };
+        },
+      };
+      handler = new WsMessageHandler({
+        registry,
+        buffer,
+        daemonClient,
+        bufferHighWaterMark: HIGH_WATER_MARK,
+      });
+
+      await handler.handleMessage(
+        conn,
+        JSON.stringify({
+          type: 'subscribe',
+          conversationId: 'conv-1',
+          lastAcknowledgedSeq: 1,
+        }),
+      );
+
+      assert.equal(conn.sent.length, 1);
+      assert.equal(conn.sent[0].type, 'error');
+      assert.equal((conn.sent[0] as { code: string }).code, 'REPLAY_INCOMPLETE');
+      assert.ok(!conn.subscribedConversations.has('conv-1'));
     });
 
     // ─── per-turn replay failure (Issue 2) ────────────────────────────────
