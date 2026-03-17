@@ -215,6 +215,7 @@ export class GatewayWsServer {
         const connection = WsConnection.create(session.id, webSocket, this.#connectionRegistry);
         const cleanupBridge = this.#wsBridge.bindSession(session, connection);
         let isCleanedUp = false;
+        let cleanupIdle: () => void = () => {};
         const cleanup = () => {
           if (isCleanedUp) {
             return;
@@ -224,7 +225,7 @@ export class GatewayWsServer {
           cleanupIdle();
           cleanupBridge();
         };
-        const cleanupIdle = this.#bindIdleTimeout(session.id, webSocket, cleanup);
+        cleanupIdle = this.#bindIdleTimeout(session.id, webSocket, cleanup);
         webSocket.on('close', cleanup);
       });
     } catch (err) {
