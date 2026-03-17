@@ -219,6 +219,33 @@ describe('Conversation routes — turns', () => {
     const body = res.body as Record<string, unknown>;
     assert.equal(body['error'], 'Stream history expired for turn');
   });
+
+  it('GET /conversations/:id/turns/:turnId/stream returns empty when the purged terminal stream was fully acknowledged', () => {
+    const conv = deps.store.createConversation();
+    const turn = deps.store.appendTurn(conv.id, {
+      kind: 'operator',
+      instruction: 'Hello',
+      attribution: operatorAttribution,
+    });
+    deps.store.updateTurnStatus(turn.id, 'executing');
+    deps.streamManager.createStream(turn.id);
+    deps.streamManager.emitEvent(turn.id, 'text-delta', { text: 'chunk' });
+    deps.streamManager.completeStream(turn.id);
+
+    const highSeq = deps.streamManager.getStreamEvents(turn.id).at(-1)?.seq ?? 0;
+    deps.streamManager.purgeTerminalStreams(0);
+
+    const req = createMockReq(
+      'GET',
+      `/conversations/${conv.id}/turns/${turn.id}/stream?lastAcknowledgedSeq=${String(highSeq)}`,
+    );
+    const res = createMockRes();
+    handleConversationRoute(req, res as unknown as ServerResponse, deps);
+
+    assert.equal(res.statusCode, 200);
+    const body = res.body as Record<string, unknown>;
+    assert.deepEqual(body['events'], []);
+  });
 });
 
 describe('Conversation routes — approvals', () => {

@@ -535,6 +535,11 @@ function handleSubscribeToStream(
   const streamId = deps.streamManager.getStreamId(turnId);
   if (streamId === undefined) {
     if (turn.status === 'completed' || turn.status === 'failed' || turn.status === 'cancelled') {
+      const purgedHighSeq = deps.streamManager.getPurgedHighSeq(turnId);
+      if (purgedHighSeq !== undefined && sinceSeq >= purgedHighSeq) {
+        sendJson(res, 200, { events: [] });
+        return;
+      }
       sendError(res, 410, 'Stream history expired for turn');
       return;
     }
