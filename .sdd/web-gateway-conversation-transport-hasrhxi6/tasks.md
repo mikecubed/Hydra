@@ -210,7 +210,7 @@ _Completes reconnect protocol with daemon fallback for buffer misses. Delivers U
   - **Depends**: T030, T032
   - **Validates**: FR-022, FR-023, SC-003
 
-- [ ] T034 [P2] [US4] **TDD: Replay ordering guarantees** — write tests asserting FR-024: replayed events preserve original ordering and sequence numbers with zero reordering, zero gaps, zero duplicates. Include tests where events arrive during the replay window and where daemon fallback merges events from multiple turns. Tests in `apps/web-gateway/src/__tests__/transport-integration.test.ts`.
+- [x] T034 [P2] [US4] **TDD: Replay ordering guarantees** — write tests asserting FR-024: replayed events preserve original ordering and sequence numbers with zero reordering, zero gaps, zero duplicates. Include tests where events arrive during the replay window and where daemon fallback merges events from multiple turns. Tests in `apps/web-gateway/src/__tests__/transport-integration.test.ts`.
   - **Depends**: T033
   - **Validates**: FR-024
 
@@ -218,11 +218,11 @@ _Completes reconnect protocol with daemon fallback for buffer misses. Delivers U
   - **Depends**: T021, T032
   - **Validates**: FR-025, SC-004
 
-- [ ] T036 [P2] [US4] **TDD: Page refresh scenario** — simulate full page refresh: establish connection, receive events, close connection (page unload), create new connection with same session, subscribe with last ack seq, assert replay + live resume. Tests in `apps/web-gateway/src/__tests__/transport-integration.test.ts`.
+- [x] T036 [P2] [US4] **TDD: Page refresh scenario** — simulate full page refresh: establish connection, receive events, close connection (page unload), create new connection with same session, subscribe with last ack seq, assert replay + live resume. Tests in `apps/web-gateway/src/__tests__/transport-integration.test.ts`.
   - **Depends**: T033
   - **Validates**: FR-023
 
-- [ ] T037 [P2] [US4] **Quality gate: Phase 5** — `npm run quality` and `npm test`. Reconnect/resume fully functional.
+- [x] T037 [P2] [US4] **Quality gate: Phase 5** — `npm run quality` and `npm test`. Reconnect/resume fully functional.
   - **Depends**: T036
   - **Validates**: SC-003, SC-011
 
@@ -449,18 +449,17 @@ T025 → T026 → T027 ──────────────────→
 
 ## Next Steps
 
-1. **Continue the serial reconnect critical path** — `T032`, `T033`, and `T035`
-   are complete on `feat/web-gateway-transport-phase4`. The next ready tasks are
-   `T034` and `T036`, which should stay together in the same
-   `transport-integration.test.ts` worktree before closing Phase 5 with `T037`.
-2. **Launch only file-isolated parallel tracks** — `T038`+ can still run later
+1. **Phase 5 is complete on `feat/web-gateway-transport-phase4`** — `T032`
+   through `T037` now validate reconnect/resume, ordering guarantees, invalid
+   session rejection, and page-refresh recovery on the coordinator branch.
+2. **Launch only file-isolated follow-up tracks** — `T038`+ can now run later
    in separate worktrees using the groupings above, but avoid splitting tasks
    that share `transport-integration.test.ts`, `ws-message-handler.test.ts`, or
    `conversation-routes.test.ts` across multiple concurrent tracks.
-3. **Prefer real transport/runtime wiring in tests** — when Phase 5+ tests can
+3. **Prefer real transport/runtime wiring in tests** — when Phase 6+ tests can
    use composed gateway/daemon service code, avoid mocking that behavior and
    reserve fakes for true external boundaries only.
-4. **Keep the Phase 4/T032 runtime path stable** — follow-on reconnect work
+4. **Keep the Phase 5 runtime path stable** — follow-on transport work
    should extend the validated streaming and replay paths rather than reworking
    transport bootstrap, replay-retention guardrails, or inbound backlog
    protections unless a concrete bug requires it.

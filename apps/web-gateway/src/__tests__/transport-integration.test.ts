@@ -1052,11 +1052,7 @@ describe('T030: End-to-end streaming integration', () => {
 
       // (f) assert all missed events replayed in order, including the in-flight
       // event that arrived while replay was still active.
-      const expectedReplayEvents = [
-        turn1[turn1.length - 1],
-        ...turn2Events,
-        duringReplayEvent,
-      ];
+      const expectedReplayEvents = [lastItem(turn1), ...turn2Events, duringReplayEvent];
       const replayMsgs = await waitForMessages(ws2, expectedReplayEvents.length + 1);
       const replayed = replayMsgs.slice(0, expectedReplayEvents.length);
       for (const [i, msg] of replayed.entries()) {
@@ -1745,7 +1741,11 @@ describe('T030: End-to-end streaming integration', () => {
       // Ordering invariants
       const replayedSeqs = replayed.map((m) => (m['event'] as StreamEvent).seq);
       assertMonotonicSequenceNumbers(replayedSeqs, 'partial-ack replay');
-      assert.equal(replayedSeqs[0], ackSeq + 1, 'Replay should start right after lastAcknowledgedSeq');
+      assert.equal(
+        replayedSeqs[0],
+        ackSeq + 1,
+        'Replay should start right after lastAcknowledgedSeq',
+      );
       for (let i = 1; i < replayedSeqs.length; i++) {
         assert.equal(
           replayedSeqs[i],
@@ -1792,7 +1792,11 @@ describe('T030: End-to-end streaming integration', () => {
       const page1Turn2Msgs = await waitForMessages(ws1, turn2.length);
       for (const [i, msg] of page1Turn2Msgs.entries()) {
         assert.equal(msg['type'], 'stream-event');
-        assert.deepEqual(msg['event'], turn2[i], `pre-refresh live order mismatch at index ${String(i)}`);
+        assert.deepEqual(
+          msg['event'],
+          turn2[i],
+          `pre-refresh live order mismatch at index ${String(i)}`,
+        );
       }
 
       // ── Phase 2: Page unload (user hits F5 / navigates away) ───────────
@@ -1849,11 +1853,7 @@ describe('T030: End-to-end streaming integration', () => {
         );
       }
 
-      assert.equal(
-        new Set(allSeqs).size,
-        allSeqs.length,
-        'Duplicate seq in page-refresh flow',
-      );
+      assert.equal(new Set(allSeqs).size, allSeqs.length, 'Duplicate seq in page-refresh flow');
 
       // Verify the new connection is fully live
       const finalConnections = gw.connectionRegistry.getByConversation(CONV_ID);
@@ -2027,7 +2027,7 @@ describe('T030: End-to-end streaming integration', () => {
       // Full sequence: replay + live is contiguous
       const allSeqs = [
         ...replayed.map((m) => (m['event'] as StreamEvent).seq),
-        (liveMsg['event'] as StreamEvent).seq,
+        liveMsg['event'].seq,
       ];
       assertMonotonicSequenceNumbers(allSeqs, 'page refresh daemon-fallback');
       for (let i = 1; i < allSeqs.length; i++) {
