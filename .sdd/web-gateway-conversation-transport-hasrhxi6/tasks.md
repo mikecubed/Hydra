@@ -202,7 +202,7 @@ the event buffer and subscription message handling._
 
 _Completes reconnect protocol with daemon fallback for buffer misses. Delivers US4 (P2)._
 
-- [ ] T032 [P2] [US4] **TDD: Daemon fallback replay** — when `subscribe` with `lastAcknowledgedSeq` arrives and `EventBuffer.hasEventsSince()` returns false (requested seq < buffer's `oldestSeq`), fall back to daemon per-turn replay: (a) list active/recent turns for the conversation via `daemon-client`, (b) call the daemon-client's stream replay method (wrapping `GET /conversations/:convId/turns/:turnId/stream?lastAcknowledgedSeq=N` — coverage established in T003) for each relevant turn, (c) merge and deduplicate per-turn results into single ordered replay stream keyed by `seq`, (d) forward replayed events to client while maintaining the T026 per-conversation replay barrier (`replayState.get(conversationId)` stays `'replaying'`; live events for this conversation queued by T027), (e) after all daemon-fetched events are sent, flush `pendingEvents.get(conversationId)` and set `replayState.set(conversationId, 'live')`. Write tests for fallback path including multi-turn conversations, turns with no missed events, **and concurrent live event arrival during daemon-sourced replay**. Implement in `apps/web-gateway/src/transport/ws-message-handler.ts` (extend subscribe handler).
+- [x] T032 [P2] [US4] **TDD: Daemon fallback replay** — when `subscribe` with `lastAcknowledgedSeq` arrives and `EventBuffer.hasEventsSince()` returns false (requested seq < buffer's `oldestSeq`), fall back to daemon per-turn replay: (a) list active/recent turns for the conversation via `daemon-client`, (b) call the daemon-client's stream replay method (wrapping `GET /conversations/:convId/turns/:turnId/stream?lastAcknowledgedSeq=N` — coverage established in T003) for each relevant turn, (c) merge and deduplicate per-turn results into single ordered replay stream keyed by `seq`, (d) forward replayed events to client while maintaining the T026 per-conversation replay barrier (`replayState.get(conversationId)` stays `'replaying'`; live events for this conversation queued by T027), (e) after all daemon-fetched events are sent, flush `pendingEvents.get(conversationId)` and set `replayState.set(conversationId, 'live')`. Write tests for fallback path including multi-turn conversations, turns with no missed events, **and concurrent live event arrival during daemon-sourced replay**. Implement in `apps/web-gateway/src/transport/ws-message-handler.ts` (extend subscribe handler).
   - **Depends**: T003 (stream replay route coverage), T025, T026 (replay barrier)
   - **Validates**: FR-022, FR-024
 
@@ -383,13 +383,16 @@ transport foundation:
 3. ✅ **US2 foundation** — authenticated WebSocket transport, connection
    registry, and session/daemon lifecycle notifications are in place
 
-**Phase 4 (T025–T031)** is the next ready batch. It completes the missing P1
-streaming path by wiring daemon stream events through the gateway to subscribed
-browser connections, including buffering, replay-barrier handling, and the first
-end-to-end streaming integration tests.
+**Phase 4 (T025–T031)** is now complete on `feat/web-gateway-transport-phase4`.
+It landed the missing P1 streaming path by wiring daemon stream events through
+the gateway to subscribed browser connections, including buffering,
+replay-barrier handling, backpressure protection, bounded replay retention,
+bounded inbound WebSocket backlog, and the first end-to-end streaming
+integration tests.
 
-This Phase 4 batch is the next transport surface the `web-chat-workspace` slice
-needs before browser UI work can rely on live daemon output.
+This completed Phase 4 batch is the transport surface the
+`web-chat-workspace` slice needs before browser UI work can rely on live daemon
+output.
 
 **Phases 5–8 (T032–T061) are required for spec compliance** — they are not optional
 follow-ons. The spec mandates reconnect/resume (FR-022–025, SC-003), structured
@@ -416,16 +419,48 @@ T018 ──────────────────────┘
 T025 → T026 → T027 ──────────────────→ T032 → T033 → T034/T036
 ```
 
+### Ready Parallel Batch After Phase 4
+
+- **Coordinator branch** — keep the active feature branch/PR as the integration
+  surface for any new transport batch. If Phase 4 lands on `main` first, cut a
+  fresh Phase 5 coordinator branch from `main`; otherwise target the current
+  coordinator branch instead of opening track work directly against `main`.
+- **Track A — reconnect/replay critical path** (`T032`–`T037`) — owns
+  `ws-message-handler.ts`, replay helpers, and the reconnect sections of
+  `transport-integration.test.ts`. Keep this track serial because `T032`
+  establishes the daemon-fallback replay contract that `T033`–`T037` build on.
+- **Track B — control round-trips** (`T038`–`T040`) — owns the approval/cancel/
+  retry additions in `transport-integration.test.ts`. Keep these together in one
+  worktree because they share the same integration harness and daemon-control
+  fixtures.
+- **Track C — artifact forwarding** (`T041`) — owns
+  `event-forwarder.test.ts` and any minimal forwarding changes needed for
+  `artifact-notice` coverage. This is safe to run separately once Track A is not
+  changing the event envelope.
+- **Track D — error and edge-case coverage**, grouped by shared test-file
+  ownership so parallel work does not collide:
+  - `T043`, `T046`, `T047` in `conversation-routes.test.ts`
+  - `T045` in `request-validator.test.ts`
+  - `T044`, `T050` in `ws-connection.test.ts`
+  - `T048`, `T051` in `ws-message-handler.test.ts`
+  - `T049`, `T052` in `transport-integration.test.ts`
+- **Blocked final batch** — `T054`–`T061` stay blocked until reconnect/resume
+  (`T037`) and edge/error coverage (`T053`) are complete.
+
 ## Next Steps
 
-1. **Advance the Phase 4 batch** — `T026` (`ws-message-handler.ts`) and
-   `T027` (`event-forwarder.ts`) are now complete on the coordinator branch, so
-   the next active work is `T028` (`multi-tab event forwarding`),
-   `T029` (`backpressure / overflow handling`), and `T030`
-   (`end-to-end streaming integration`).
-2. **Keep the runtime path stable while extending coverage** — the WebSocket
-   server now wires inbound subscribe/unsubscribe/ack handling and bridge-driven
-   forwarding into the live gateway stack, so the next batch should build on that
-   integrated path rather than reworking the transport bootstrap again.
-3. **Close the Phase 4 batch** — finish `T028`–`T031`, then move into Phase 5
-   reconnect/resume work (`T032+`) once end-to-end streaming is green.
+1. **Start Track A first** — `T032` is the next critical-path task, and the
+   rest of Phase 5 should stay in the same replay-focused worktree until
+   reconnect/resume behavior is green.
+2. **Launch only file-isolated parallel tracks** — once Track A has the replay
+   contract under control, Tracks B/C/D can run in separate worktrees using the
+   groupings above. Avoid splitting tasks that share
+   `transport-integration.test.ts`, `ws-message-handler.test.ts`, or
+   `conversation-routes.test.ts` across multiple concurrent tracks.
+3. **Prefer real transport/runtime wiring in tests** — when Phase 5+ tests can
+   use composed gateway/daemon service code, avoid mocking that behavior and
+   reserve fakes for true external boundaries only.
+4. **Keep the Phase 4 runtime path stable** — Phase 5+ should extend the now
+   validated streaming path rather than reworking the transport bootstrap,
+   replay-retention guardrails, or inbound backlog protections unless a concrete
+   bug requires it.
