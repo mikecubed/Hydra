@@ -26,7 +26,7 @@ interface GatewayWsServerOptions {
   clock: Clock;
   sourceKeyConfig?: SourceKeyConfig;
   mutatingLimiter: RateLimiter;
-  daemonClient: Pick<DaemonClient, 'openConversation'>;
+  daemonClient: Pick<DaemonClient, 'openConversation' | 'loadTurnHistory' | 'getStreamReplay'>;
   eventBuffer: EventBuffer;
   streamEventBridge?: StreamEventBridgeLike;
 }

@@ -408,6 +408,7 @@ describe('StreamManager — retention', () => {
     assert.equal(purged, 1);
     assert.equal(sm.streamCount, 0);
     assert.deepStrictEqual(sm.getStreamEvents(turn.id), []);
+    assert.ok((sm.getPurgedHighSeq(turn.id) ?? 0) > 0);
   });
 
   it('purgeTerminalStreams preserves active streams', () => {

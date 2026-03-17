@@ -198,6 +198,54 @@ describe('Conversation routes — turns', () => {
     const events = (res.body as Record<string, unknown>)['events'] as unknown[];
     assert.ok(events.length >= 2, 'should have started + text-delta');
   });
+
+  it('GET /conversations/:id/turns/:turnId/stream returns 410 when terminal stream history was purged', () => {
+    const conv = deps.store.createConversation();
+    const turn = deps.store.appendTurn(conv.id, {
+      kind: 'operator',
+      instruction: 'Hello',
+      attribution: operatorAttribution,
+    });
+    deps.store.updateTurnStatus(turn.id, 'executing');
+    deps.streamManager.createStream(turn.id);
+    deps.streamManager.completeStream(turn.id);
+    deps.streamManager.purgeTerminalStreams(0);
+
+    const req = createMockReq('GET', `/conversations/${conv.id}/turns/${turn.id}/stream?since=0`);
+    const res = createMockRes();
+    handleConversationRoute(req, res as unknown as ServerResponse, deps);
+
+    assert.equal(res.statusCode, 410);
+    const body = res.body as Record<string, unknown>;
+    assert.equal(body['error'], 'Stream history expired for turn');
+  });
+
+  it('GET /conversations/:id/turns/:turnId/stream returns empty when the purged terminal stream was fully acknowledged', () => {
+    const conv = deps.store.createConversation();
+    const turn = deps.store.appendTurn(conv.id, {
+      kind: 'operator',
+      instruction: 'Hello',
+      attribution: operatorAttribution,
+    });
+    deps.store.updateTurnStatus(turn.id, 'executing');
+    deps.streamManager.createStream(turn.id);
+    deps.streamManager.emitEvent(turn.id, 'text-delta', { text: 'chunk' });
+    deps.streamManager.completeStream(turn.id);
+
+    const highSeq = deps.streamManager.getStreamEvents(turn.id).at(-1)?.seq ?? 0;
+    deps.streamManager.purgeTerminalStreams(0);
+
+    const req = createMockReq(
+      'GET',
+      `/conversations/${conv.id}/turns/${turn.id}/stream?lastAcknowledgedSeq=${String(highSeq)}`,
+    );
+    const res = createMockRes();
+    handleConversationRoute(req, res as unknown as ServerResponse, deps);
+
+    assert.equal(res.statusCode, 200);
+    const body = res.body as Record<string, unknown>;
+    assert.deepEqual(body['events'], []);
+  });
 });
 
 describe('Conversation routes — approvals', () => {

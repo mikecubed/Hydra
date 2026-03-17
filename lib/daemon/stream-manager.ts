@@ -50,6 +50,7 @@ const DEFAULT_RETENTION_MS = 5 * 60 * 1000;
 export class StreamManager {
   private readonly streams = new Map<string, StreamState>();
   private readonly streamByTurnId = new Map<string, string>();
+  private readonly purgedHighSeqByTurnId = new Map<string, number>();
   private seq = 0;
   private readonly store: ConversationStore;
   private readonly retentionMs: number;
@@ -89,6 +90,7 @@ export class StreamManager {
    * @returns The stream id for subscription.
    */
   createStream(turnId: string): string {
+    this.purgedHighSeqByTurnId.delete(turnId);
     const streamId = generateId('stream');
     const state: StreamState = {
       turnId,
@@ -264,6 +266,10 @@ export class StreamManager {
     return this.streamByTurnId.get(turnId);
   }
 
+  getPurgedHighSeq(turnId: string): number | undefined {
+    return this.purgedHighSeqByTurnId.get(turnId);
+  }
+
   /**
    * Remove terminal streams older than `maxAgeMs` (defaults to configured
    * retention). Active streams are never purged — only completed, failed, or
@@ -278,6 +284,9 @@ export class StreamManager {
       if (!TERMINAL_STREAM_STATUSES.has(state.status)) continue;
       if (state.completedAt === undefined) continue;
       if (new Date(state.completedAt).getTime() <= cutoff) {
+        // eslint-disable-next-line unicorn/prefer-at -- `.at()` conflicts with this repo's Node compatibility lint rule.
+        const highSeq = state.events.slice(-1).pop()?.seq ?? 0;
+        this.purgedHighSeqByTurnId.set(state.turnId, highSeq);
         this.streams.delete(streamId);
         this.streamByTurnId.delete(state.turnId);
         purged += 1;

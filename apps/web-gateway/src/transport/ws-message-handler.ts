@@ -1,16 +1,20 @@
 /**
- * WebSocket message handler (T026).
+ * WebSocket message handler (T026, T032).
  *
  * Handles client→server messages: subscribe, unsubscribe, ack.
  * Implements the replay barrier pattern for reconnect/resume semantics:
  *   - On subscribe with lastAcknowledgedSeq and buffer hit, replays buffered
  *     events, queues concurrent live arrivals, flushes deduplicated pending
  *     events, then transitions to live.
+ *   - On subscribe with lastAcknowledgedSeq and buffer miss, falls back to
+ *     daemon per-turn stream replay (T032): loads the full turn range for the
+ *     conversation, retrieves per-turn events, merges/deduplicates, and sends
+ *     under the replay barrier.
  *   - On unsubscribe: removes subscription, clears replay/pending state.
  *   - On ack: updates per-conversation lastAckSeq (fire-and-forget).
  *   - On invalid message: responds with type:'error' without closing.
  */
-import type { StreamEvent } from '@hydra/web-contracts';
+import type { StreamEvent, LoadTurnHistoryResponse } from '@hydra/web-contracts';
 import { DEFAULT_BUFFER_HIGH_WATER_MARK, sendWithBackpressureProtection } from './backpressure.ts';
 import type { ManagedConnection } from './connection-registry.ts';
 import type { ConnectionRegistry } from './connection-registry.ts';
@@ -18,11 +22,15 @@ import type { EventBuffer } from './event-buffer.ts';
 import type { ServerMessage } from './ws-protocol.ts';
 import { parseClientMessage } from './ws-protocol.ts';
 import type { DaemonClient } from '../conversation/daemon-client.ts';
+import type { DaemonResult } from '../conversation/daemon-client.ts';
 
 export interface MessageHandlerDeps {
   readonly registry: ConnectionRegistry;
   readonly buffer: EventBuffer;
-  readonly daemonClient: Pick<DaemonClient, 'openConversation'>;
+  readonly daemonClient: Pick<
+    DaemonClient,
+    'openConversation' | 'loadTurnHistory' | 'getStreamReplay'
+  >;
   readonly bufferHighWaterMark?: number;
 }
 
@@ -116,9 +124,17 @@ export class WsMessageHandler {
 
       if (canReplay) {
         this.#startReplaySubscription(connection, conversationId, replayFromSeq);
-      } else {
-        // ── no replay (initial subscribe or buffer miss) ────────────────────
+      } else if (lastAcknowledgedSeq === undefined) {
+        // ── initial subscribe (no replay needed) ──────────────────────────
         this.#startLiveSubscription(connection, conversationId);
+      } else {
+        // ── buffer miss on reconnect → daemon fallback (T032) ─────────────
+        await this.#startDaemonReplaySubscription(
+          connection,
+          conversationId,
+          lastAcknowledgedSeq,
+          result.data.totalTurnCount,
+        );
       }
     } finally {
       this.#registry.removePendingInterest(connection.connectionId, conversationId);
@@ -158,6 +174,170 @@ export class WsMessageHandler {
     if (!this.#sendSubscribed(connection, conversationId, currentSeq)) {
       this.#cleanupSubscriptionState(connection, conversationId);
     }
+  }
+
+  /**
+   * Daemon fallback replay (T032): fetch missed events from the daemon when
+   * the in-memory EventBuffer cannot satisfy a reconnect replay.
+   *
+   * Loads the full turn range for the conversation using the daemon's
+   * `fromPosition`/`toPosition` contract, fetches per-turn stream replay,
+   * merges/deduplicates events by seq, and sends them under the replay barrier.
+   *
+   * If any per-turn getStreamReplay call fails, the replay is aborted: an
+   * error is sent to the client and subscription state is cleaned up rather
+   * than silently promoting to live with incomplete data.
+   */
+  async #startDaemonReplaySubscription(
+    connection: ManagedConnection,
+    conversationId: string,
+    lastAcknowledgedSeq: number,
+    totalTurnCount: number,
+  ): Promise<void> {
+    connection.replayState.set(conversationId, 'replaying');
+    connection.pendingEvents.set(conversationId, []);
+    this.#registry.addSubscription(connection.connectionId, conversationId);
+
+    const allTurnsResult = await this.#loadTurnsForReplay(
+      connection,
+      conversationId,
+      totalTurnCount,
+    );
+    if (allTurnsResult === null) {
+      return;
+    }
+    if ('error' in allTurnsResult) {
+      this.#abortReplay(
+        connection,
+        conversationId,
+        'REPLAY_INCOMPLETE',
+        'Unable to load turn history for replay',
+      );
+      return;
+    }
+
+    const turns = allTurnsResult.data.turns;
+
+    const replayResults = await Promise.all(
+      turns.map((turn) =>
+        this.#daemonClient.getStreamReplay(conversationId, turn.id, lastAcknowledgedSeq),
+      ),
+    );
+
+    if (connection.isClosed) return;
+
+    // ── Abort on any per-turn replay error ──────────────────────────────
+    const failedTurnIds = this.#collectReplayFailures(turns, replayResults);
+    if (failedTurnIds.length > 0) {
+      this.#abortReplay(
+        connection,
+        conversationId,
+        'REPLAY_INCOMPLETE',
+        `Stream replay failed for turn(s): ${failedTurnIds.join(', ')}`,
+      );
+      return;
+    }
+
+    const sorted = this.#mergeAndDedup(replayResults, lastAcknowledgedSeq);
+
+    for (const event of sorted) {
+      if (!this.#sendStreamEvent(connection, conversationId, event)) {
+        this.#cleanupSubscriptionState(connection, conversationId);
+        return;
+      }
+    }
+
+    // Flush pending live events that arrived during daemon fetch
+    const lastReplayedSeq = lastSeq(sorted) ?? lastAcknowledgedSeq;
+    const currentSeq = this.#flushPendingReplayEvents(connection, conversationId, lastReplayedSeq);
+    if (currentSeq === null) return;
+
+    connection.pendingEvents.delete(conversationId);
+    connection.replayState.set(conversationId, 'live');
+
+    if (!this.#sendSubscribed(connection, conversationId, currentSeq)) {
+      this.#cleanupSubscriptionState(connection, conversationId);
+    }
+  }
+
+  #collectReplayFailures(
+    turns: LoadTurnHistoryResponse['turns'],
+    replayResults: ReadonlyArray<DaemonResult<{ events: StreamEvent[] }>>,
+  ): string[] {
+    const failed: string[] = [];
+    for (const [i, result] of replayResults.entries()) {
+      if ('error' in result) {
+        failed.push(turns[i].id);
+      }
+    }
+    return failed;
+  }
+
+  #mergeAndDedup(
+    replayResults: ReadonlyArray<DaemonResult<{ events: StreamEvent[] }>>,
+    lastAcknowledgedSeq: number,
+  ): StreamEvent[] {
+    const allEvents: StreamEvent[] = [];
+    for (const result of replayResults) {
+      if ('data' in result) {
+        allEvents.push(...result.data.events);
+      }
+    }
+    const deduped = new Map<number, StreamEvent>();
+    for (const event of allEvents) {
+      if (event.seq > lastAcknowledgedSeq) {
+        deduped.set(event.seq, event);
+      }
+    }
+    return [...deduped.values()].sort((a, b) => a.seq - b.seq);
+  }
+
+  #abortReplay(
+    connection: ManagedConnection,
+    conversationId: string,
+    code: string,
+    message: string,
+  ): void {
+    this.#buffer.evictConversation(conversationId);
+    this.#sendError(connection, code, message, 'daemon', conversationId);
+    this.#cleanupSubscriptionState(connection, conversationId);
+  }
+
+  async #loadTurnsForReplay(
+    connection: ManagedConnection,
+    conversationId: string,
+    totalTurnCount: number,
+  ): Promise<DaemonResult<{ turns: LoadTurnHistoryResponse['turns'] }> | null> {
+    if (totalTurnCount < 1) {
+      return { data: { turns: [] } };
+    }
+
+    const result = await this.#daemonClient.loadTurnHistory(conversationId, {
+      conversationId,
+      fromPosition: 1,
+      toPosition: totalTurnCount,
+    });
+
+    if (connection.isClosed) {
+      return null;
+    }
+
+    if ('error' in result) {
+      return result;
+    }
+
+    if (result.data.hasMore || result.data.turns.length < totalTurnCount) {
+      return {
+        error: {
+          ok: false,
+          code: 'REPLAY_INCOMPLETE',
+          category: 'daemon',
+          message: 'Turn history replay response was incomplete',
+        },
+      };
+    }
+
+    return { data: { turns: result.data.turns } };
   }
 
   #flushPendingReplayEvents(
