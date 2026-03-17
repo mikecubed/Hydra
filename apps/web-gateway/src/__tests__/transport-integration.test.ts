@@ -878,7 +878,7 @@ describe('T030: End-to-end streaming integration', () => {
       }
     });
 
-    it('daemon-fallback: replays via daemon when buffer cannot satisfy and resumes live streaming', async () => {
+    it('daemon-fallback: merges buffered overlap, queues in-flight replay events, and resumes live streaming', async () => {
       // (a) authenticate
       const auth = await loginViaRest();
 
@@ -934,6 +934,16 @@ describe('T030: End-to-end streaming integration', () => {
           timestamp: new Date().toISOString(),
         },
       ];
+
+      // Keep one overlapping event in the buffer so daemon fallback must merge
+      // replay results with buffered tail data while still remaining a buffer miss.
+      bridge.emitStreamEvent(CONV_ID, turn2Events[0]);
+
+      let releaseReplay: (() => void) | undefined;
+      const replayGate = new Promise<void>((resolve) => {
+        releaseReplay = resolve;
+      });
+      let replayStarted = false;
 
       // Configure wsDaemonClient for daemon-fallback replay
       fakeDaemon.wsDaemonClient.openConversation = async (convId: string) => {
@@ -998,6 +1008,9 @@ describe('T030: End-to-end streaming integration', () => {
         turnId: string,
         lastAckSeq: number,
       ) => {
+        replayStarted = true;
+        await replayGate;
+
         // Turn 1 events: all have seq <= lastTurn1Seq = lastAckSeq, so empty after filter
         if (turnId === 'turn-df-1') {
           return { data: { events: turn1.filter((e) => e.seq > lastAckSeq) } };
@@ -1018,21 +1031,42 @@ describe('T030: End-to-end streaming integration', () => {
         JSON.stringify({
           type: 'subscribe',
           conversationId: CONV_ID,
-          lastAcknowledgedSeq: lastTurn1Seq,
+          lastAcknowledgedSeq: lastTurn1Seq - 1,
         }),
       );
 
-      // (f) assert all missed events replayed in order (turn 2 events only)
-      const replayMsgs = await waitForMessages(ws2, turn2Events.length + 1);
-      const replayed = replayMsgs.slice(0, turn2Events.length);
+      await waitFor(
+        () => replayStarted,
+        (started) => started,
+      );
+
+      const duringReplayEvent: StreamEvent = {
+        seq: lastTurn1Seq + turn2Events.length + 1,
+        turnId: 'turn-df-live',
+        kind: 'text-delta',
+        payload: { text: 'during-replay' },
+        timestamp: new Date().toISOString(),
+      };
+      bridge.emitStreamEvent(CONV_ID, duringReplayEvent);
+      releaseReplay?.();
+
+      // (f) assert all missed events replayed in order, including the in-flight
+      // event that arrived while replay was still active.
+      const expectedReplayEvents = [
+        turn1[turn1.length - 1],
+        ...turn2Events,
+        duringReplayEvent,
+      ];
+      const replayMsgs = await waitForMessages(ws2, expectedReplayEvents.length + 1);
+      const replayed = replayMsgs.slice(0, expectedReplayEvents.length);
       for (const [i, msg] of replayed.entries()) {
         assert.equal(msg['type'], 'stream-event');
-        assert.deepEqual(msg['event'], turn2Events[i]);
+        assert.deepEqual(msg['event'], expectedReplayEvents[i]);
       }
-      assert.equal(replayMsgs[turn2Events.length]['type'], 'subscribed');
+      assert.equal(replayMsgs[expectedReplayEvents.length]['type'], 'subscribed');
 
       // (g) live streaming resumes seamlessly — emit with correct seq continuation
-      const liveStartSeq = lastTurn1Seq + turn2Events.length + 1;
+      const liveStartSeq = duringReplayEvent.seq + 1;
       const turn3Events: StreamEvent[] = [
         {
           seq: liveStartSeq,
@@ -1071,6 +1105,7 @@ describe('T030: End-to-end streaming integration', () => {
         ...liveMsgs.map((m) => (m['event'] as StreamEvent).seq),
       ];
       assertMonotonicSequenceNumbers(allSeqs, 'daemon-fallback: replay + live');
+      assert.equal(new Set(allSeqs).size, allSeqs.length, 'Duplicate sequence numbers detected');
       for (let i = 1; i < allSeqs.length; i++) {
         assert.equal(
           allSeqs[i],
