@@ -1538,6 +1538,64 @@ describe('WsMessageHandler', () => {
       ]);
     });
 
+    it('uses each turn owner conversation when replaying fork history', async () => {
+      const turns = new Map([
+        ['fork-1', [fakeTurn('parent-turn', 'parent-1', 1), fakeTurn('fork-turn', 'fork-1', 2)]],
+      ]);
+      const replayCalls: Array<{
+        conversationId: string;
+        turnId: string;
+        lastAcknowledgedSeq: number;
+      }> = [];
+      const daemonClient: MessageHandlerDeps['daemonClient'] = {
+        async openConversation(conversationId: string) {
+          return fakeConversationData(conversationId, 2);
+        },
+        async loadTurnHistory() {
+          return {
+            data: {
+              turns: turns.get('fork-1') ?? [],
+              totalCount: 2,
+              hasMore: false,
+            },
+          };
+        },
+        async getStreamReplay(conversationId, turnId, lastAcknowledgedSeq) {
+          replayCalls.push({ conversationId, turnId, lastAcknowledgedSeq });
+          return { data: { events: [] } };
+        },
+      };
+      handler = new WsMessageHandler({
+        registry,
+        buffer,
+        daemonClient,
+        bufferHighWaterMark: HIGH_WATER_MARK,
+      });
+
+      await handler.handleMessage(
+        conn,
+        JSON.stringify({
+          type: 'subscribe',
+          conversationId: 'fork-1',
+          lastAcknowledgedSeq: 3,
+        }),
+      );
+
+      assert.deepEqual(replayCalls, [
+        {
+          conversationId: 'parent-1',
+          turnId: 'parent-turn',
+          lastAcknowledgedSeq: 3,
+        },
+        {
+          conversationId: 'fork-1',
+          turnId: 'fork-turn',
+          lastAcknowledgedSeq: 3,
+        },
+      ]);
+      assert.equal(conn.sent[0].type, 'subscribed');
+    });
+
     it('sends replay error when loadTurnHistory returns an incomplete range', async () => {
       const daemonClient: MessageHandlerDeps['daemonClient'] = {
         async openConversation(conversationId: string) {

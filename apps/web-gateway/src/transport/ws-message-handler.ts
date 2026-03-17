@@ -233,7 +233,8 @@ export class WsMessageHandler {
     const replayResults = await this.#mapTurnsWithConcurrency(
       turns,
       DAEMON_REPLAY_CONCURRENCY,
-      (turn) => this.#daemonClient.getStreamReplay(conversationId, turn.id, lastAcknowledgedSeq),
+      (turn) =>
+        this.#daemonClient.getStreamReplay(turn.conversationId, turn.id, lastAcknowledgedSeq),
     );
 
     if (connection.isClosed) return;
