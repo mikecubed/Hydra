@@ -13,7 +13,7 @@
  *   - On ack: updates per-conversation lastAckSeq (fire-and-forget).
  *   - On invalid message: responds with type:'error' without closing.
  */
-import type { StreamEvent } from '@hydra/web-contracts';
+import type { StreamEvent, LoadTurnHistoryResponse } from '@hydra/web-contracts';
 import { DEFAULT_BUFFER_HIGH_WATER_MARK, sendWithBackpressureProtection } from './backpressure.ts';
 import type { ManagedConnection } from './connection-registry.ts';
 import type { ConnectionRegistry } from './connection-registry.ts';
@@ -21,6 +21,7 @@ import type { EventBuffer } from './event-buffer.ts';
 import type { ServerMessage } from './ws-protocol.ts';
 import { parseClientMessage } from './ws-protocol.ts';
 import type { DaemonClient } from '../conversation/daemon-client.ts';
+import type { DaemonResult } from '../conversation/daemon-client.ts';
 
 export interface MessageHandlerDeps {
   readonly registry: ConnectionRegistry;
@@ -173,8 +174,13 @@ export class WsMessageHandler {
    * Daemon fallback replay (T032): fetch missed events from the daemon when
    * the in-memory EventBuffer cannot satisfy a reconnect replay.
    *
-   * Loads turn history for the conversation, fetches per-turn stream replay,
-   * merges/deduplicates events by seq, and sends them under the replay barrier.
+   * Pages through the full turn history (the daemon defaults to limit=50 per
+   * page), fetches per-turn stream replay, merges/deduplicates events by seq,
+   * and sends them under the replay barrier.
+   *
+   * If any per-turn getStreamReplay call fails, the replay is aborted: an
+   * error is sent to the client and subscription state is cleaned up rather
+   * than silently promoting to live with incomplete data.
    */
   async #startDaemonReplaySubscription(
     connection: ManagedConnection,
@@ -185,13 +191,10 @@ export class WsMessageHandler {
     connection.pendingEvents.set(conversationId, []);
     this.#registry.addSubscription(connection.connectionId, conversationId);
 
-    const historyResult = await this.#daemonClient.loadTurnHistory(conversationId, {
-      conversationId,
-    });
-
-    if (connection.isClosed) return;
-
-    if ('error' in historyResult) {
+    // ── Page through full turn history ──────────────────────────────────
+    const allTurnsResult = await this.#loadAllTurns(connection, conversationId);
+    if (allTurnsResult === null) return; // connection closed during paging
+    if ('error' in allTurnsResult) {
       // Daemon unavailable — graceful fallback to live
       connection.pendingEvents.delete(conversationId);
       connection.replayState.set(conversationId, 'live');
@@ -202,31 +205,31 @@ export class WsMessageHandler {
       return;
     }
 
+    const turns = allTurnsResult.data.turns;
+
     const replayResults = await Promise.all(
-      historyResult.data.turns.map((turn) =>
+      turns.map((turn) =>
         this.#daemonClient.getStreamReplay(conversationId, turn.id, lastAcknowledgedSeq),
       ),
     );
 
-    // Connection may close during async daemon fetches
-    // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
     if (connection.isClosed) return;
 
-    const allEvents: StreamEvent[] = [];
-    for (const result of replayResults) {
-      if ('data' in result) {
-        allEvents.push(...result.data.events);
-      }
+    // ── Abort on any per-turn replay error ──────────────────────────────
+    const failedTurnIds = this.#collectReplayFailures(turns, replayResults);
+    if (failedTurnIds.length > 0) {
+      this.#sendError(
+        connection,
+        'REPLAY_INCOMPLETE',
+        `Stream replay failed for turn(s): ${failedTurnIds.join(', ')}`,
+        'daemon',
+        conversationId,
+      );
+      this.#cleanupSubscriptionState(connection, conversationId);
+      return;
     }
 
-    // Merge, deduplicate by seq, sort ascending
-    const deduped = new Map<number, StreamEvent>();
-    for (const event of allEvents) {
-      if (event.seq > lastAcknowledgedSeq) {
-        deduped.set(event.seq, event);
-      }
-    }
-    const sorted = [...deduped.values()].sort((a, b) => a.seq - b.seq);
+    const sorted = this.#mergeAndDedup(replayResults, lastAcknowledgedSeq);
 
     for (const event of sorted) {
       if (!this.#sendStreamEvent(connection, conversationId, event)) {
@@ -246,6 +249,72 @@ export class WsMessageHandler {
     if (!this.#sendSubscribed(connection, conversationId, currentSeq)) {
       this.#cleanupSubscriptionState(connection, conversationId);
     }
+  }
+
+  #collectReplayFailures(
+    turns: LoadTurnHistoryResponse['turns'],
+    replayResults: ReadonlyArray<DaemonResult<{ events: StreamEvent[] }>>,
+  ): string[] {
+    const failed: string[] = [];
+    for (const [i, result] of replayResults.entries()) {
+      if ('error' in result) {
+        failed.push(turns[i].id);
+      }
+    }
+    return failed;
+  }
+
+  #mergeAndDedup(
+    replayResults: ReadonlyArray<DaemonResult<{ events: StreamEvent[] }>>,
+    lastAcknowledgedSeq: number,
+  ): StreamEvent[] {
+    const allEvents: StreamEvent[] = [];
+    for (const result of replayResults) {
+      if ('data' in result) {
+        allEvents.push(...result.data.events);
+      }
+    }
+    const deduped = new Map<number, StreamEvent>();
+    for (const event of allEvents) {
+      if (event.seq > lastAcknowledgedSeq) {
+        deduped.set(event.seq, event);
+      }
+    }
+    return [...deduped.values()].sort((a, b) => a.seq - b.seq);
+  }
+
+  /**
+   * Page through daemon turn history until hasMore is false or the connection
+   * closes. Returns null when the connection closes mid-paging.
+   */
+  async #loadAllTurns(
+    connection: ManagedConnection,
+    conversationId: string,
+  ): Promise<DaemonResult<{ turns: LoadTurnHistoryResponse['turns'] }> | null> {
+    const allTurns: LoadTurnHistoryResponse['turns'] = [];
+    let fromPosition: number | undefined;
+
+    for (;;) {
+      // eslint-disable-next-line no-await-in-loop -- sequential pagination is intentional
+      const result = await this.#daemonClient.loadTurnHistory(conversationId, {
+        conversationId,
+        ...(fromPosition !== undefined && { fromPosition }),
+      });
+
+      if (connection.isClosed) return null;
+      if ('error' in result) return result;
+
+      allTurns.push(...result.data.turns);
+
+      if (!result.data.hasMore || result.data.turns.length === 0) break;
+
+      // Advance past the last turn's position for the next page
+      // eslint-disable-next-line unicorn/prefer-at -- `.at()` conflicts with this package's Node compatibility lint rule.
+      const lastTurn = result.data.turns[result.data.turns.length - 1];
+      fromPosition = lastTurn.position + 1;
+    }
+
+    return { data: { turns: allTurns } };
   }
 
   #flushPendingReplayEvents(

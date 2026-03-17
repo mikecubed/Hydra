@@ -173,12 +173,20 @@ function fakeTurn(id: string, conversationId: string, position: number) {
 /**
  * Stub DaemonClient with configurable turn history and stream replay.
  * `replayEvents` maps turnId → events that the daemon would return for that turn.
+ * `pageSize` controls pagination: when > 0, loadTurnHistory returns at most
+ * `pageSize` turns per call and sets `hasMore` accordingly.
  */
 function fakeDaemonClientWithHistory(
   validIds: Set<string>,
   turnsByConversation: Map<string, ReturnType<typeof fakeTurn>[]>,
   replayEventsByTurn: Map<string, StreamEvent[]>,
+  opts?: {
+    pageSize?: number;
+    failingTurnIds?: Set<string>;
+  },
 ): MessageHandlerDeps['daemonClient'] {
+  const pageSize = opts?.pageSize ?? 0; // 0 = no pagination
+  const failingTurnIds = opts?.failingTurnIds ?? new Set<string>();
   return {
     async openConversation(conversationId: string) {
       if (validIds.has(conversationId)) {
@@ -193,15 +201,37 @@ function fakeDaemonClientWithHistory(
         },
       };
     },
-    async loadTurnHistory(conversationId: string): Promise<DaemonResult<LoadTurnHistoryResponse>> {
-      const turns = turnsByConversation.get(conversationId) ?? [];
-      return { data: { turns, totalCount: turns.length, hasMore: false } };
+    async loadTurnHistory(
+      conversationId: string,
+      query: { conversationId: string; fromPosition?: number },
+    ): Promise<DaemonResult<LoadTurnHistoryResponse>> {
+      const allTurns = turnsByConversation.get(conversationId) ?? [];
+      const fromPos = query.fromPosition ?? 0;
+      const filtered = allTurns.filter((t) => t.position >= fromPos);
+
+      if (pageSize > 0 && filtered.length > pageSize) {
+        const page = filtered.slice(0, pageSize);
+        return {
+          data: { turns: page, totalCount: allTurns.length, hasMore: true },
+        };
+      }
+      return { data: { turns: filtered, totalCount: allTurns.length, hasMore: false } };
     },
     async getStreamReplay(
       _conversationId: string,
       turnId: string,
       lastAcknowledgedSeq: number,
     ): Promise<DaemonResult<SubscribeToStreamResponse>> {
+      if (failingTurnIds.has(turnId)) {
+        return {
+          error: {
+            ok: false as const,
+            code: 'STREAM_REPLAY_FAILED',
+            category: 'daemon' as const,
+            message: `Stream replay failed for turn ${turnId}`,
+          },
+        };
+      }
       const allEvents = replayEventsByTurn.get(turnId) ?? [];
       const events = allEvents.filter((e) => e.seq > lastAcknowledgedSeq);
       return { data: { events } };
@@ -1114,6 +1144,197 @@ describe('WsMessageHandler', () => {
         .map((m) => (m as { event: StreamEvent }).event.seq);
       assert.deepEqual(seqs, [5, 6, 7]);
       assert.equal(conn.sent[3].type, 'subscribed');
+    });
+
+    // ─── paginated turn history (Issue 1) ─────────────────────────────────
+
+    it('pages through daemon turn history when hasMore is true', async () => {
+      // 4 turns, page size 2 → two pages
+      const turns = new Map([
+        [
+          'conv-1',
+          [
+            fakeTurn('t1', 'conv-1', 1),
+            fakeTurn('t2', 'conv-1', 2),
+            fakeTurn('t3', 'conv-1', 3),
+            fakeTurn('t4', 'conv-1', 4),
+          ],
+        ],
+      ]);
+      const replay = new Map([
+        ['t1', [makeEventForTurn(2, 't1')]],
+        ['t2', [makeEventForTurn(4, 't2')]],
+        ['t3', [makeEventForTurn(6, 't3')]],
+        ['t4', [makeEventForTurn(8, 't4')]],
+      ]);
+      handler = new WsMessageHandler({
+        registry,
+        buffer,
+        daemonClient: fakeDaemonClientWithHistory(validConvs, turns, replay, { pageSize: 2 }),
+        bufferHighWaterMark: HIGH_WATER_MARK,
+      });
+
+      const msg = JSON.stringify({
+        type: 'subscribe',
+        conversationId: 'conv-1',
+        lastAcknowledgedSeq: 1,
+      });
+      await handler.handleMessage(conn, msg);
+
+      // All 4 events from both pages + subscribed
+      const seqs = conn.sent
+        .filter((m) => m.type === 'stream-event')
+        .map((m) => (m as { event: StreamEvent }).event.seq);
+      assert.deepEqual(seqs, [2, 4, 6, 8]);
+      assert.equal(conn.sent[4].type, 'subscribed');
+      assert.equal((conn.sent[4] as { currentSeq: number }).currentSeq, 8);
+      assert.equal(conn.replayState.get('conv-1'), 'live');
+    });
+
+    it('pages through three pages of turn history', async () => {
+      // 5 turns, page size 2 → three pages (2, 2, 1)
+      const turns = new Map([
+        [
+          'conv-1',
+          [
+            fakeTurn('t1', 'conv-1', 1),
+            fakeTurn('t2', 'conv-1', 2),
+            fakeTurn('t3', 'conv-1', 3),
+            fakeTurn('t4', 'conv-1', 4),
+            fakeTurn('t5', 'conv-1', 5),
+          ],
+        ],
+      ]);
+      const replay = new Map([
+        ['t1', [makeEventForTurn(10, 't1')]],
+        ['t2', [makeEventForTurn(20, 't2')]],
+        ['t3', [makeEventForTurn(30, 't3')]],
+        ['t4', [makeEventForTurn(40, 't4')]],
+        ['t5', [makeEventForTurn(50, 't5')]],
+      ]);
+      handler = new WsMessageHandler({
+        registry,
+        buffer,
+        daemonClient: fakeDaemonClientWithHistory(validConvs, turns, replay, { pageSize: 2 }),
+        bufferHighWaterMark: HIGH_WATER_MARK,
+      });
+
+      const msg = JSON.stringify({
+        type: 'subscribe',
+        conversationId: 'conv-1',
+        lastAcknowledgedSeq: 5,
+      });
+      await handler.handleMessage(conn, msg);
+
+      const seqs = conn.sent
+        .filter((m) => m.type === 'stream-event')
+        .map((m) => (m as { event: StreamEvent }).event.seq);
+      assert.deepEqual(seqs, [10, 20, 30, 40, 50]);
+      assert.equal(conn.sent[5].type, 'subscribed');
+      assert.equal((conn.sent[5] as { currentSeq: number }).currentSeq, 50);
+    });
+
+    // ─── per-turn replay failure (Issue 2) ────────────────────────────────
+
+    it('sends error and cleans up when getStreamReplay fails for a turn', async () => {
+      const turns = new Map([
+        ['conv-1', [fakeTurn('t1', 'conv-1', 1), fakeTurn('t2', 'conv-1', 2)]],
+      ]);
+      const replay = new Map([
+        ['t1', [makeEventForTurn(5, 't1')]],
+        ['t2', [makeEventForTurn(8, 't2')]],
+      ]);
+      handler = new WsMessageHandler({
+        registry,
+        buffer,
+        daemonClient: fakeDaemonClientWithHistory(validConvs, turns, replay, {
+          failingTurnIds: new Set(['t2']),
+        }),
+        bufferHighWaterMark: HIGH_WATER_MARK,
+      });
+
+      const msg = JSON.stringify({
+        type: 'subscribe',
+        conversationId: 'conv-1',
+        lastAcknowledgedSeq: 3,
+      });
+      await handler.handleMessage(conn, msg);
+
+      // Should get an error, not subscribed
+      assert.equal(conn.sent.length, 1);
+      assert.equal(conn.sent[0].type, 'error');
+      const err = conn.sent[0] as { code: string; message: string; category: string };
+      assert.equal(err.code, 'REPLAY_INCOMPLETE');
+      assert.equal(err.category, 'daemon');
+      assert.ok(err.message.includes('t2'));
+      // Subscription state must be cleaned up
+      assert.ok(!conn.subscribedConversations.has('conv-1'));
+      assert.ok(!conn.replayState.has('conv-1'));
+      assert.ok(!conn.pendingEvents.has('conv-1'));
+    });
+
+    it('reports all failing turn IDs when multiple getStreamReplay calls fail', async () => {
+      const turns = new Map([
+        [
+          'conv-1',
+          [fakeTurn('t1', 'conv-1', 1), fakeTurn('t2', 'conv-1', 2), fakeTurn('t3', 'conv-1', 3)],
+        ],
+      ]);
+      const replay = new Map([
+        ['t1', [makeEventForTurn(5, 't1')]],
+        ['t2', [makeEventForTurn(8, 't2')]],
+        ['t3', [makeEventForTurn(12, 't3')]],
+      ]);
+      handler = new WsMessageHandler({
+        registry,
+        buffer,
+        daemonClient: fakeDaemonClientWithHistory(validConvs, turns, replay, {
+          failingTurnIds: new Set(['t1', 't3']),
+        }),
+        bufferHighWaterMark: HIGH_WATER_MARK,
+      });
+
+      const msg = JSON.stringify({
+        type: 'subscribe',
+        conversationId: 'conv-1',
+        lastAcknowledgedSeq: 3,
+      });
+      await handler.handleMessage(conn, msg);
+
+      assert.equal(conn.sent.length, 1);
+      assert.equal(conn.sent[0].type, 'error');
+      const err = conn.sent[0] as { code: string; message: string };
+      assert.equal(err.code, 'REPLAY_INCOMPLETE');
+      assert.ok(err.message.includes('t1'));
+      assert.ok(err.message.includes('t3'));
+      assert.ok(!conn.subscribedConversations.has('conv-1'));
+    });
+
+    it('does not send subscribed when all getStreamReplay calls fail', async () => {
+      const turns = new Map([['conv-1', [fakeTurn('t1', 'conv-1', 1)]]]);
+      const replay = new Map([['t1', [makeEventForTurn(5, 't1')]]]);
+      handler = new WsMessageHandler({
+        registry,
+        buffer,
+        daemonClient: fakeDaemonClientWithHistory(validConvs, turns, replay, {
+          failingTurnIds: new Set(['t1']),
+        }),
+        bufferHighWaterMark: HIGH_WATER_MARK,
+      });
+
+      const msg = JSON.stringify({
+        type: 'subscribe',
+        conversationId: 'conv-1',
+        lastAcknowledgedSeq: 3,
+      });
+      await handler.handleMessage(conn, msg);
+
+      // Must NOT have any 'subscribed' message
+      const subscribed = conn.sent.filter((m) => m.type === 'subscribed');
+      assert.equal(subscribed.length, 0);
+      // Must have exactly one error
+      const errors = conn.sent.filter((m) => m.type === 'error');
+      assert.equal(errors.length, 1);
     });
   });
 });
