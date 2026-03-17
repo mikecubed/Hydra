@@ -6,7 +6,7 @@
  */
 import { describe, it, afterEach } from 'node:test';
 import assert from 'node:assert/strict';
-import { execSync } from 'node:child_process';
+import { execFileSync } from 'node:child_process';
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
@@ -18,6 +18,7 @@ import type {
   IMetricsRecorder,
   IConfigStore,
 } from '../lib/types.ts';
+import { stripGitEnv } from '../lib/hydra-shared/git-ops.ts';
 
 // ── IContextProvider ──────────────────────────────────────────────────────────
 
@@ -89,11 +90,13 @@ describe('IGitOperations interface', () => {
     const { createBranch, branchExists, deleteBranch, checkoutBranch } =
       await import('../lib/hydra-shared/git-ops.ts');
     tempDir = mkdtempSync(join(tmpdir(), 'hydra-git-test-'));
-    execSync('git init -b main', { cwd: tempDir, stdio: 'ignore' });
-    execSync('git config user.email "test@test.com"', { cwd: tempDir, stdio: 'ignore' });
-    execSync('git config user.name "Test"', { cwd: tempDir, stdio: 'ignore' });
+    const gitExecOptions = { cwd: tempDir, stdio: 'ignore' as const, env: stripGitEnv() };
+    execFileSync('git', ['init', '-b', 'main'], gitExecOptions);
+    execFileSync('git', ['config', 'user.email', 'test@test.com'], gitExecOptions);
+    execFileSync('git', ['config', 'user.name', 'Test'], gitExecOptions);
     writeFileSync(join(tempDir, 'README.md'), '# test');
-    execSync('git add . && git commit -m "init"', { cwd: tempDir, stdio: 'ignore' });
+    execFileSync('git', ['add', '.'], gitExecOptions);
+    execFileSync('git', ['commit', '-m', 'init'], gitExecOptions);
 
     const branchName = 'feat/test-branch';
     // createBranch checks out the new branch
