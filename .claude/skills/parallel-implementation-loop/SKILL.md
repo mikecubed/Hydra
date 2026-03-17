@@ -61,6 +61,25 @@ Before starting parallel tracks:
 
 If in doubt, serialize.
 
+### 1a. Worktrees are disposable track sandboxes, not permanent state
+
+When this skill creates track worktrees:
+
+1. treat the coordinator feature branch worktree as the only long-lived integration surface;
+2. treat each track worktree as temporary and explicitly owned by the current batch;
+3. never treat the repository's main working tree as a removable track worktree;
+4. record, for every track:
+   - worktree path;
+   - track branch;
+   - owning task(s);
+   - current state (`active`, `merged`, `abandoned`, `blocked`);
+5. before deleting a track worktree, verify one of these is true:
+   - its branch has been safely merged into the coordinator branch;
+   - its work was explicitly abandoned and no changes need to be preserved;
+   - the developer explicitly approved discarding dirty state.
+
+Do **not** force-remove dirty worktrees by default.
+
 ### 2. TDD is mandatory on every track
 
 Every track must follow:
@@ -159,6 +178,13 @@ Each track should:
   - tests added/updated;
   - local validation performed;
   - any uncertainty or unresolved edge case.
+  - whether the worktree is clean, pushed, and ready to retire after merge.
+
+When creating worktrees, also require:
+
+- a deterministic path/name so later cleanup is unambiguous;
+- one track branch per worktree;
+- no manual reuse of an unrelated dirty worktree for a new track.
 
 ### 3. Review each completed track
 
@@ -214,6 +240,13 @@ When multiple tracks are ready:
 
 If two tracks drift on a shared interface, stop and reconcile before proceeding.
 
+After each successful merge:
+
+1. verify the merged track branch is integrated on the coordinator branch;
+2. push the coordinator branch if the track merge changed the integrated review surface;
+3. retire the merged track worktree promptly if it is clean;
+4. if the worktree is dirty or diverged unexpectedly, stop and reconcile it before cleanup.
+
 ### 7. Final review, validation, and PR-readiness gate
 
 After the feature branch contains the merged track work:
@@ -230,6 +263,15 @@ After the feature branch contains the merged track work:
 5. clean up merged or abandoned track worktrees once their work is safely integrated or explicitly
    retired;
 6. summarize any remaining issues so the developer can decide whether to continue or stop.
+
+Worktree cleanup at the end of the batch must follow this checklist:
+
+1. run `git worktree list` and compare it to the track list you created;
+2. remove only track worktrees created for this batch;
+3. never remove the repository's main working tree with `git worktree remove`;
+4. if a leftover worktree is dirty, contains unique commits, or no longer matches the expected track
+   branch, stop and ask the developer before force-removing it;
+5. report which worktrees were removed and which were intentionally retained.
 
 ## Required Gates
 
@@ -272,6 +314,8 @@ A batch of tracks is not complete until all are true:
 - no duplicated helpers or parallel-track drift remains;
 - `final-pr-readiness-gate` has been run on the stable integrated diff;
 - final feature branch state has been pushed.
+- merged or abandoned batch-owned worktrees have been removed, or any retained worktrees are
+  explicitly explained.
 
 ## Quality Gates
 
