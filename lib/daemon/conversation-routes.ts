@@ -532,6 +532,15 @@ function handleSubscribeToStream(
     return;
   }
   const sinceSeq = sinceResult.value ?? 0;
+  const streamId = deps.streamManager.getStreamId(turnId);
+  if (streamId === undefined) {
+    if (turn.status === 'completed' || turn.status === 'failed' || turn.status === 'cancelled') {
+      sendError(res, 410, 'Stream history expired for turn');
+      return;
+    }
+    sendJson(res, 200, { events: [] });
+    return;
+  }
   const events = deps.streamManager.getStreamEventsSince(turnId, sinceSeq);
   sendJson(res, 200, { events });
 }

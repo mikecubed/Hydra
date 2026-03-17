@@ -198,6 +198,27 @@ describe('Conversation routes — turns', () => {
     const events = (res.body as Record<string, unknown>)['events'] as unknown[];
     assert.ok(events.length >= 2, 'should have started + text-delta');
   });
+
+  it('GET /conversations/:id/turns/:turnId/stream returns 410 when terminal stream history was purged', () => {
+    const conv = deps.store.createConversation();
+    const turn = deps.store.appendTurn(conv.id, {
+      kind: 'operator',
+      instruction: 'Hello',
+      attribution: operatorAttribution,
+    });
+    deps.store.updateTurnStatus(turn.id, 'executing');
+    deps.streamManager.createStream(turn.id);
+    deps.streamManager.completeStream(turn.id);
+    deps.streamManager.purgeTerminalStreams(0);
+
+    const req = createMockReq('GET', `/conversations/${conv.id}/turns/${turn.id}/stream?since=0`);
+    const res = createMockRes();
+    handleConversationRoute(req, res as unknown as ServerResponse, deps);
+
+    assert.equal(res.statusCode, 410);
+    const body = res.body as Record<string, unknown>;
+    assert.equal(body['error'], 'Stream history expired for turn');
+  });
 });
 
 describe('Conversation routes — approvals', () => {
