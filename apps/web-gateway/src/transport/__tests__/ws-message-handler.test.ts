@@ -121,6 +121,24 @@ function fakeDaemonClient(validIds: Set<string>): MessageHandlerDeps['daemonClie
   };
 }
 
+function fakeConversationData(conversationId: string) {
+  return {
+    data: {
+      conversation: {
+        id: conversationId,
+        status: 'active' as const,
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+        turnCount: 0,
+        pendingInstructionCount: 0,
+      },
+      recentTurns: [],
+      totalTurnCount: 0,
+      pendingApprovals: [],
+    },
+  };
+}
+
 // ─── tests ──────────────────────────────────────────────────────────────────
 
 describe('WsMessageHandler', () => {
@@ -232,6 +250,43 @@ describe('WsMessageHandler', () => {
 
       // Not subscribed
       assert.ok(!conn.subscribedConversations.has('invalid-conv'));
+    });
+
+    it('replays events that arrive while an initial subscribe is waiting on validation', async () => {
+      let resolveOpenConversation: ((value: ReturnType<typeof fakeConversationData>) => void) | undefined;
+      handler = new WsMessageHandler({
+        registry,
+        buffer,
+        daemonClient: {
+          openConversation: async (conversationId: string) =>
+            new Promise((resolve) => {
+              resolveOpenConversation = resolve as (value: ReturnType<typeof fakeConversationData>) => void;
+            }),
+        },
+        bufferHighWaterMark: HIGH_WATER_MARK,
+      });
+
+      const subscribePromise = handler.handleMessage(
+        conn,
+        JSON.stringify({ type: 'subscribe', conversationId: 'conv-1' }),
+      );
+      await Promise.resolve();
+
+      buffer.push('conv-1', makeEvent(1));
+      buffer.push('conv-1', makeEvent(2));
+
+      resolveOpenConversation?.(fakeConversationData('conv-1'));
+      await subscribePromise;
+
+      assert.deepEqual(
+        conn.sent.map((message) => message.type),
+        ['stream-event', 'stream-event', 'subscribed'],
+      );
+      assert.equal((conn.sent[0] as { event: StreamEvent }).event.seq, 1);
+      assert.equal((conn.sent[1] as { event: StreamEvent }).event.seq, 2);
+      assert.equal((conn.sent[2] as { currentSeq: number }).currentSeq, 2);
+      assert.equal(conn.replayState.get('conv-1'), 'live');
+      assert.equal(conn.subscribedConversations.has('conv-1'), true);
     });
   });
 

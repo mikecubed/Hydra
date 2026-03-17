@@ -78,6 +78,9 @@ export class WsMessageHandler {
     conversationId: string,
     lastAcknowledgedSeq?: number,
   ): Promise<void> {
+    const subscribeStartSeq =
+      lastAcknowledgedSeq ?? this.#buffer.getHighwaterSeq(conversationId);
+
     if (connection.subscribedConversations.has(conversationId)) {
       connection.replayState.set(conversationId, 'live');
       if (!this.#sendSubscribed(connection, conversationId, this.#buffer.getHighwaterSeq(conversationId))) {
@@ -100,9 +103,8 @@ export class WsMessageHandler {
     }
 
     // Determine whether buffer can satisfy a replay
-    const canReplay =
-      lastAcknowledgedSeq !== undefined &&
-      this.#buffer.hasEventsSince(conversationId, lastAcknowledgedSeq);
+    const replayFromSeq = lastAcknowledgedSeq ?? subscribeStartSeq;
+    const canReplay = this.#buffer.hasEventsSince(conversationId, replayFromSeq);
 
     if (canReplay) {
       // ── replay barrier ──────────────────────────────────────────────────
@@ -110,7 +112,7 @@ export class WsMessageHandler {
       connection.pendingEvents.set(conversationId, []);
       this.#registry.addSubscription(connection.connectionId, conversationId);
 
-      const buffered = this.#buffer.getEventsSince(conversationId, lastAcknowledgedSeq);
+      const buffered = this.#buffer.getEventsSince(conversationId, replayFromSeq);
 
       // Send each buffered event
       for (const event of buffered) {
@@ -121,7 +123,7 @@ export class WsMessageHandler {
       }
 
       // Compute last replayed seq
-      const lastReplayedSeq = lastSeq(buffered) ?? lastAcknowledgedSeq;
+      const lastReplayedSeq = lastSeq(buffered) ?? replayFromSeq;
 
       // Flush pending queue (events queued by T027 during replay)
       const pending = connection.pendingEvents.get(conversationId) ?? [];
