@@ -228,6 +228,22 @@ describe('GatewayWsServer', () => {
     assert.equal(up['type'], 'daemon-restored');
   });
 
+  it('returns 500 for non-GatewayError exceptions during validation', async () => {
+    const sessionService = gw.sessionService;
+    const session = await gw.sessionService.create('op-1', '127.0.0.1');
+    const originalValidate = sessionService.validate.bind(sessionService);
+    sessionService.validate = async () => {
+      throw new Error('unexpected database error');
+    };
+
+    try {
+      const status = await expectUnexpectedResponse(port, { sessionId: session.id });
+      assert.equal(status, 500);
+    } finally {
+      sessionService.validate = originalValidate;
+    }
+  });
+
   it('terminates connections when the session lifetime elapses', async () => {
     const localServer = createServer();
     const localGateway = createGatewayApp({

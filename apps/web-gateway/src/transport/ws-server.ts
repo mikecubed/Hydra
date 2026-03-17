@@ -1,7 +1,8 @@
 import type { IncomingMessage, Server } from 'node:http';
 import type { Socket } from 'node:net';
-import { createError, type ErrorCode, type GatewayError } from '../shared/errors.ts';
+import { createError, GatewayError, ERROR_CATEGORY_MAP } from '../shared/errors.ts';
 import { createGatewayErrorResponse } from '../shared/gateway-error-response.ts';
+import type { Clock } from '../shared/clock.ts';
 import type { SessionService } from '../session/session-service.ts';
 import type { SessionStateBroadcaster } from '../session/session-state-broadcaster.ts';
 import type { ConnectionRegistry } from './connection-registry.ts';
@@ -15,6 +16,7 @@ interface GatewayWsServerOptions {
   broadcaster: SessionStateBroadcaster;
   allowedOrigin: string;
   connectionRegistry: ConnectionRegistry;
+  clock: Clock;
 }
 
 const COOKIE_SEPARATOR = ';';
@@ -34,36 +36,11 @@ function parseSessionCookie(cookieHeader?: string): string | null {
   return null;
 }
 
-const ERROR_CATEGORY_BY_CODE: Record<
-  ErrorCode,
-  'auth' | 'session' | 'validation' | 'daemon' | 'rate-limit'
-> = {
-  INVALID_CREDENTIALS: 'auth',
-  RATE_LIMITED: 'rate-limit',
-  ACCOUNT_DISABLED: 'auth',
-  SESSION_EXPIRED: 'session',
-  SESSION_INVALIDATED: 'session',
-  SESSION_NOT_FOUND: 'auth',
-  SESSION_NOT_IDLE: 'session',
-  IDLE_TIMEOUT: 'session',
-  BAD_REQUEST: 'validation',
-  INTERNAL_ERROR: 'daemon',
-  DAEMON_UNREACHABLE: 'daemon',
-  CLOCK_UNRELIABLE: 'daemon',
-  CSRF_INVALID: 'validation',
-  ORIGIN_REJECTED: 'auth',
-  CONVERSATION_NOT_FOUND: 'validation',
-  TURN_NOT_FOUND: 'validation',
-  VALIDATION_FAILED: 'validation',
-  WS_INVALID_MESSAGE: 'validation',
-  WS_BUFFER_OVERFLOW: 'daemon',
-};
-
 function rejectUpgrade(socket: Socket, error: GatewayError): void {
   const body = JSON.stringify(
     createGatewayErrorResponse({
       code: error.code,
-      category: ERROR_CATEGORY_BY_CODE[error.code],
+      category: ERROR_CATEGORY_MAP[error.code],
       message: error.message,
     }),
   );
@@ -97,6 +74,7 @@ export class GatewayWsServer {
     this.#wsBridge = new SessionWsBridge({
       broadcaster: options.broadcaster,
       registry: options.connectionRegistry,
+      clock: options.clock,
     });
     this.#wss = new WebSocketServer({ noServer: true });
     this.#server.on('upgrade', this.#handleUpgrade);
@@ -146,8 +124,8 @@ export class GatewayWsServer {
         webSocket.on('close', cleanup);
       });
     } catch (err) {
-      if (err instanceof Error && 'code' in err && 'statusCode' in err) {
-        rejectUpgrade(socket, err as GatewayError);
+      if (err instanceof GatewayError) {
+        rejectUpgrade(socket, err);
         return;
       }
 

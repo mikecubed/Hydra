@@ -3,21 +3,25 @@ import type {
   SessionStateChangeEvent,
   SessionStateBroadcaster,
 } from '../session/session-state-broadcaster.ts';
+import type { Clock } from '../shared/clock.ts';
 import type { ConnectionRegistry } from './connection-registry.ts';
 import type { WsConnection } from './ws-connection.ts';
 
 interface SessionWsBridgeOptions {
   broadcaster: SessionStateBroadcaster;
   registry: ConnectionRegistry;
+  clock: Clock;
 }
 
 export class SessionWsBridge {
   readonly #broadcaster: SessionStateBroadcaster;
   readonly #registry: ConnectionRegistry;
+  readonly #clock: Clock;
 
   constructor(options: SessionWsBridgeOptions) {
     this.#broadcaster = options.broadcaster;
     this.#registry = options.registry;
+    this.#clock = options.clock;
   }
 
   bindSession(session: StoredSession, connection: WsConnection): () => void {
@@ -47,7 +51,12 @@ export class SessionWsBridge {
         return;
       }
 
-      const delayMs = new Date(expiresAt).getTime() - Date.now();
+      const expiresAtMs = new Date(expiresAt).getTime();
+      if (Number.isNaN(expiresAtMs)) {
+        return;
+      }
+
+      const delayMs = expiresAtMs - this.#clock.now();
       if (delayMs <= 0) {
         terminateSession('expired', 'Session expired');
         return;

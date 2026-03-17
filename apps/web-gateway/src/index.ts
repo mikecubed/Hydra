@@ -188,6 +188,7 @@ export function createGatewayApp(deps: GatewayAppDeps = {}): GatewayApp {
           broadcaster: sessionStateBroadcaster,
           allowedOrigin,
           connectionRegistry,
+          clock,
         });
 
   return {
