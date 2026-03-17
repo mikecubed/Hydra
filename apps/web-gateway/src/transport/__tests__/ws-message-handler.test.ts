@@ -1129,7 +1129,7 @@ describe('WsMessageHandler', () => {
       assert.ok(!conn.pendingEvents.has('conv-1'));
     });
 
-    it('keeps replay failure fallout connection-scoped so other clients keep buffered replay', async () => {
+    it('forces daemon fallback for stale reconnects after a replay failure while newer acks still use buffer', async () => {
       let failReplayLoad = true;
       let loadTurnHistoryCalls = 0;
       const turns = new Map([
@@ -1224,14 +1224,75 @@ describe('WsMessageHandler', () => {
         JSON.stringify({
           type: 'subscribe',
           conversationId: 'conv-1',
-          lastAcknowledgedSeq: 9,
+          lastAcknowledgedSeq: 3,
         }),
       );
       const finalSeqs = finalConn.sent
         .filter((message) => message.type === 'stream-event')
         .map((message) => (message as { event: StreamEvent }).event.seq);
-      assert.deepEqual(finalSeqs, [10]);
-      assert.equal(loadTurnHistoryCalls, 2);
+      assert.deepEqual(finalSeqs, [5, 8, 10]);
+      assert.equal(finalConn.sent[3].type, 'subscribed');
+      assert.equal(loadTurnHistoryCalls, 3);
+    });
+
+    it('uses daemon fallback when only a live tail arrives while reconnect validation is in flight', async () => {
+      const turns = new Map([
+        ['conv-1', [fakeTurn('t1', 'conv-1', 1), fakeTurn('t2', 'conv-1', 2)]],
+      ]);
+      const replay = new Map([
+        ['t1', [makeEventForTurn(5, 't1')]],
+        ['t2', [makeEventForTurn(8, 't2'), makeEventForTurn(10, 't2')]],
+      ]);
+      let resolveOpenConversation: (() => void) | undefined;
+      let loadTurnHistoryCalls = 0;
+      const openConversationStarted = new Promise<void>((resolve) => {
+        resolveOpenConversation = resolve;
+      });
+      const daemonClient: MessageHandlerDeps['daemonClient'] = {
+        async openConversation(conversationId: string) {
+          await openConversationStarted;
+          return fakeConversationData(conversationId, 2);
+        },
+        async loadTurnHistory() {
+          loadTurnHistoryCalls += 1;
+          return {
+            data: {
+              turns: turns.get('conv-1') ?? [],
+              totalCount: 2,
+              hasMore: false,
+            },
+          };
+        },
+        async getStreamReplay(_conversationId, turnId) {
+          return { data: { events: replay.get(turnId) ?? [] } };
+        },
+      };
+      handler = new WsMessageHandler({
+        registry,
+        buffer,
+        daemonClient,
+        bufferHighWaterMark: HIGH_WATER_MARK,
+      });
+
+      const subscribePromise = handler.handleMessage(
+        conn,
+        JSON.stringify({
+          type: 'subscribe',
+          conversationId: 'conv-1',
+          lastAcknowledgedSeq: 3,
+        }),
+      );
+
+      buffer.push('conv-1', makeEventForTurn(10, 'live'));
+      resolveOpenConversation?.();
+      await subscribePromise;
+
+      const seqs = conn.sent
+        .filter((message) => message.type === 'stream-event')
+        .map((message) => (message as { event: StreamEvent }).event.seq);
+      assert.deepEqual(seqs, [5, 8, 10]);
+      assert.equal(conn.sent[3].type, 'subscribed');
+      assert.equal(loadTurnHistoryCalls, 1);
     });
 
     it('deduplicates events with the same seq from overlapping turns', async () => {
