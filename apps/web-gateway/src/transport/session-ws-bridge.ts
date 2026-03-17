@@ -17,7 +17,8 @@ interface SessionWsBridgeOptions {
 
 type ExpiryOutcome = 'none' | 'scheduled' | 'terminated';
 type TerminateSession = (state: 'expired' | 'invalidated' | 'logged-out', reason?: string) => void;
-type ApplyExpiry = (expiresAt?: string) => ExpiryOutcome;
+type ApplyExpiry = (expiresAt?: string, emitImmediateWarning?: boolean) => ExpiryOutcome;
+type SendExpiringSoon = (expiresAt: string) => void;
 
 export class SessionWsBridge {
   readonly #broadcaster: SessionStateBroadcaster;
@@ -32,19 +33,33 @@ export class SessionWsBridge {
     this.#warningThresholdMs = options.warningThresholdMs ?? 0;
   }
 
+  #clearTimer(timer: ReturnType<typeof setTimeout> | null): null {
+    if (timer != null) {
+      clearTimeout(timer);
+    }
+    return null;
+  }
+
+  #closeSessionConnections(sessionId: string): void {
+    setTimeout(() => {
+      this.#registry.closeAllForSession(sessionId);
+    }, 0);
+  }
+
   #emitStateMessage(
     state: SessionState,
     expiresAt: string,
     connection: WsConnection,
+    sendExpiringSoon: SendExpiringSoon,
     applyExpiry: ApplyExpiry,
     terminateSession: TerminateSession,
   ): void {
     switch (state) {
       case 'active':
-        applyExpiry(expiresAt);
+        applyExpiry(expiresAt, true);
         return;
       case 'expiring-soon':
-        connection.send({ type: 'session-expiring-soon', expiresAt });
+        sendExpiringSoon(expiresAt);
         applyExpiry(expiresAt);
         return;
       case 'daemon-unreachable':
@@ -62,6 +77,7 @@ export class SessionWsBridge {
   #handleStateChange(
     event: SessionStateChangeEvent,
     connection: WsConnection,
+    sendExpiringSoon: SendExpiringSoon,
     applyExpiry: ApplyExpiry,
     terminateSession: TerminateSession,
   ): void {
@@ -73,10 +89,7 @@ export class SessionWsBridge {
         return;
       case 'expiring-soon':
         if (event.expiresAt != null) {
-          connection.send({
-            type: 'session-expiring-soon',
-            expiresAt: event.expiresAt,
-          });
+          sendExpiringSoon(event.expiresAt);
           applyExpiry(event.expiresAt);
         }
         return;
@@ -85,7 +98,7 @@ export class SessionWsBridge {
         applyExpiry(event.expiresAt);
         return;
       case 'active': {
-        const expiryResult = applyExpiry(event.expiresAt);
+        const expiryResult = applyExpiry(event.expiresAt, true);
         if (event.previousState === 'daemon-unreachable' && expiryResult !== 'terminated') {
           connection.send({ type: 'daemon-restored' });
         }
@@ -97,16 +110,11 @@ export class SessionWsBridge {
   bindSession(session: StoredSession, connection: WsConnection): () => void {
     let expiryTimer: ReturnType<typeof setTimeout> | null = null;
     let warningTimer: ReturnType<typeof setTimeout> | null = null;
+    let lastWarnedExpiresAt: string | null = null;
 
     const clearTimers = () => {
-      if (expiryTimer != null) {
-        clearTimeout(expiryTimer);
-        expiryTimer = null;
-      }
-      if (warningTimer != null) {
-        clearTimeout(warningTimer);
-        warningTimer = null;
-      }
+      expiryTimer = this.#clearTimer(expiryTimer);
+      warningTimer = this.#clearTimer(warningTimer);
     };
 
     const terminateSession = (state: 'expired' | 'invalidated' | 'logged-out', reason?: string) => {
@@ -115,12 +123,18 @@ export class SessionWsBridge {
         state,
         ...(reason === undefined ? {} : { reason }),
       });
-      setTimeout(() => {
-        this.#registry.closeAllForSession(session.id);
-      }, 0);
+      this.#closeSessionConnections(session.id);
     };
 
-    const applyExpiry: ApplyExpiry = (expiresAt?: string) => {
+    const sendExpiringSoon: SendExpiringSoon = (expiresAt) => {
+      if (lastWarnedExpiresAt === expiresAt) {
+        return;
+      }
+      lastWarnedExpiresAt = expiresAt;
+      connection.send({ type: 'session-expiring-soon', expiresAt });
+    };
+
+    const applyExpiry: ApplyExpiry = (expiresAt?: string, emitImmediateWarning = false) => {
       clearTimers();
       if (expiresAt == null) {
         return 'none';
@@ -147,11 +161,10 @@ export class SessionWsBridge {
         const warningDelayMs = delayMs - this.#warningThresholdMs;
         if (warningDelayMs > 0) {
           warningTimer = setTimeout(() => {
-            connection.send({ type: 'session-expiring-soon', expiresAt });
+            sendExpiringSoon(expiresAt);
           }, warningDelayMs);
-        } else {
-          // Already inside the warning window (e.g. rebind/recovery) — emit immediately
-          connection.send({ type: 'session-expiring-soon', expiresAt });
+        } else if (emitImmediateWarning) {
+          sendExpiringSoon(expiresAt);
         }
       }
 
@@ -162,7 +175,7 @@ export class SessionWsBridge {
     };
 
     const callback = (event: SessionStateChangeEvent) => {
-      this.#handleStateChange(event, connection, applyExpiry, terminateSession);
+      this.#handleStateChange(event, connection, sendExpiringSoon, applyExpiry, terminateSession);
     };
 
     this.#broadcaster.register(session.id, callback);
@@ -170,6 +183,7 @@ export class SessionWsBridge {
       session.state,
       session.expiresAt,
       connection,
+      sendExpiringSoon,
       applyExpiry,
       terminateSession,
     );

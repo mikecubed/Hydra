@@ -167,10 +167,8 @@ describe('SessionWsBridge', () => {
       const cleanup = localBridge.bindSession(session, conn as never);
       try {
         // The expiring-soon replay message should be sent immediately
-        assert.ok(
-          conn.sent.some((m) => m.type === 'session-expiring-soon'),
-          'Expected replayed session-expiring-soon',
-        );
+        const warnings = conn.sent.filter((m) => m.type === 'session-expiring-soon');
+        assert.equal(warnings.length, 1);
       } finally {
         cleanup();
       }
@@ -189,10 +187,8 @@ describe('SessionWsBridge', () => {
 
       const cleanup = localBridge.bindSession(session, conn as never);
       try {
-        assert.ok(
-          conn.sent.some((m) => m.type === 'session-expiring-soon'),
-          'Expected immediate session-expiring-soon when binding active session inside warning window',
-        );
+        const warnings = conn.sent.filter((m) => m.type === 'session-expiring-soon');
+        assert.equal(warnings.length, 1);
         // Should still schedule expiry — not terminate immediately
         assert.ok(
           !conn.sent.some((m) => m.type === 'session-terminated'),
@@ -225,15 +221,45 @@ describe('SessionWsBridge', () => {
         });
 
         // applyExpiry is called for 'active' state — should emit warning immediately
-        assert.ok(
-          conn.sent.some((m) => m.type === 'session-expiring-soon'),
-          'Expected immediate session-expiring-soon after daemon recovery inside warning window',
-        );
+        const warnings = conn.sent.filter((m) => m.type === 'session-expiring-soon');
+        assert.equal(warnings.length, 1);
         // daemon-restored should also be sent since previous state was daemon-unreachable
         assert.ok(
           conn.sent.some((m) => m.type === 'daemon-restored'),
           'Expected daemon-restored message',
         );
+      } finally {
+        cleanup();
+      }
+    });
+
+    it('deduplicates warning messages across recovery and later expiring-soon transition', () => {
+      const warningThresholdMs = 300;
+      const localBridge = new SessionWsBridge({ broadcaster, registry, clock, warningThresholdMs });
+
+      const farExpiry = new Date(clock.now() + 60_000).toISOString();
+      const session = createSession({ state: 'active', expiresAt: farExpiry });
+      const conn = createMockConnection(session.id);
+      registry.register(conn);
+
+      const cleanup = localBridge.bindSession(session, conn as never);
+      try {
+        const nearExpiry = new Date(clock.now() + 150).toISOString();
+        broadcaster.broadcast(session.id, {
+          type: 'state-change',
+          previousState: 'daemon-unreachable',
+          newState: 'active',
+          expiresAt: nearExpiry,
+        });
+        broadcaster.broadcast(session.id, {
+          type: 'state-change',
+          previousState: 'active',
+          newState: 'expiring-soon',
+          expiresAt: nearExpiry,
+        });
+
+        const warnings = conn.sent.filter((m) => m.type === 'session-expiring-soon');
+        assert.equal(warnings.length, 1);
       } finally {
         cleanup();
       }
