@@ -1789,7 +1789,11 @@ describe('T030: End-to-end streaming integration', () => {
       // Turn 2 events arrive right before the user hits F5 — received on ws1
       // but NOT acked (the page unloads before the ack can be sent)
       const turn2 = fakeDaemon.emitFullStream(CONV_ID, 'turn-pr-2', ['new', 'data', 'here']);
-      await waitForMessages(ws1, turn2.length);
+      const page1Turn2Msgs = await waitForMessages(ws1, turn2.length);
+      for (const [i, msg] of page1Turn2Msgs.entries()) {
+        assert.equal(msg['type'], 'stream-event');
+        assert.deepEqual(msg['event'], turn2[i], `pre-refresh live order mismatch at index ${String(i)}`);
+      }
 
       // ── Phase 2: Page unload (user hits F5 / navigates away) ───────────
       ws1.close();
