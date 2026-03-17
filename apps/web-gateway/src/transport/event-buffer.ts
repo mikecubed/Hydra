@@ -3,6 +3,7 @@ import { StreamEvent as StreamEventSchema, type StreamEvent } from '@hydra/web-c
 // ─── defaults ───────────────────────────────────────────────────────────────
 
 const DEFAULT_CAPACITY = 1000;
+const DEFAULT_INACTIVE_TIMEOUT_MS = 5 * 60 * 1000;
 
 function cloneEvent(event: StreamEvent): StreamEvent {
   return StreamEventSchema.parse(JSON.parse(JSON.stringify(event)));
@@ -20,6 +21,7 @@ function cloneEvent(event: StreamEvent): StreamEvent {
  */
 export class EventBuffer {
   private readonly capacity: number;
+  private readonly inactiveTimeoutMs: number;
   private readonly buffers = new Map<string, Array<StreamEvent | undefined>>();
   /** Index of the next write slot inside each conversation's ring. */
   private readonly heads = new Map<string, number>();
@@ -29,18 +31,31 @@ export class EventBuffer {
   private readonly replaySafeSinceSeqs = new Map<string, number>();
   /** Highest `seq` evicted from each conversation's ring (undefined = no evictions). */
   private readonly evictedHighSeqs = new Map<string, number>();
+  /** Cleanup timers for inactive conversation replay state. */
+  private readonly inactiveTimers = new Map<string, ReturnType<typeof setTimeout>>();
 
-  constructor(capacity: number = DEFAULT_CAPACITY) {
+  constructor(
+    capacity: number = DEFAULT_CAPACITY,
+    inactiveTimeoutMs: number = DEFAULT_INACTIVE_TIMEOUT_MS,
+  ) {
     if (!Number.isInteger(capacity) || capacity < 1) {
       throw new RangeError(`capacity must be a positive integer, got ${String(capacity)}`);
     }
+    if (!Number.isInteger(inactiveTimeoutMs) || inactiveTimeoutMs < 1) {
+      throw new RangeError(
+        `inactiveTimeoutMs must be a positive integer, got ${String(inactiveTimeoutMs)}`,
+      );
+    }
     this.capacity = capacity;
+    this.inactiveTimeoutMs = inactiveTimeoutMs;
   }
 
   // ─── writes ─────────────────────────────────────────────────────────────
 
   /** Append an event, evicting the oldest if the buffer is at capacity. */
   push(conversationId: string, event: StreamEvent): void {
+    this.clearInactiveTimer(conversationId);
+
     let ring = this.buffers.get(conversationId);
     if (!ring) {
       ring = Array.from({ length: this.capacity });
@@ -117,6 +132,24 @@ export class EventBuffer {
     if (seq > current) {
       this.evictedHighSeqs.set(conversationId, seq);
     }
+  }
+
+  markConversationActive(conversationId: string): void {
+    this.clearInactiveTimer(conversationId);
+  }
+
+  markConversationInactive(conversationId: string): void {
+    this.clearInactiveTimer(conversationId);
+    if (!this.hasTrackedState(conversationId)) {
+      return;
+    }
+    const timer = setTimeout(() => {
+      this.purgeConversation(conversationId);
+    }, this.inactiveTimeoutMs);
+    if (typeof timer.unref === 'function') {
+      timer.unref();
+    }
+    this.inactiveTimers.set(conversationId, timer);
   }
 
   /**
@@ -217,5 +250,32 @@ export class EventBuffer {
 
     const start = size < this.capacity ? 0 : head;
     return ring[start]?.seq;
+  }
+
+  private hasTrackedState(conversationId: string): boolean {
+    return (
+      this.buffers.has(conversationId) ||
+      this.heads.has(conversationId) ||
+      this.sizes.has(conversationId) ||
+      this.replaySafeSinceSeqs.has(conversationId) ||
+      this.evictedHighSeqs.has(conversationId)
+    );
+  }
+
+  private clearInactiveTimer(conversationId: string): void {
+    const timer = this.inactiveTimers.get(conversationId);
+    if (timer !== undefined) {
+      clearTimeout(timer);
+      this.inactiveTimers.delete(conversationId);
+    }
+  }
+
+  private purgeConversation(conversationId: string): void {
+    this.clearInactiveTimer(conversationId);
+    this.buffers.delete(conversationId);
+    this.heads.delete(conversationId);
+    this.sizes.delete(conversationId);
+    this.replaySafeSinceSeqs.delete(conversationId);
+    this.evictedHighSeqs.delete(conversationId);
   }
 }

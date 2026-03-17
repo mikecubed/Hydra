@@ -98,6 +98,7 @@ export class WsMessageHandler {
       return;
     }
 
+    this.#buffer.markConversationActive(conversationId);
     this.#registry.addPendingInterest(connection.connectionId, conversationId);
 
     try {
@@ -140,6 +141,9 @@ export class WsMessageHandler {
       }
     } finally {
       this.#registry.removePendingInterest(connection.connectionId, conversationId);
+      if (!this.#registry.hasInterest(conversationId)) {
+        this.#buffer.markConversationInactive(conversationId);
+      }
     }
   }
 
@@ -148,6 +152,7 @@ export class WsMessageHandler {
     conversationId: string,
     replayFromSeq: number,
   ): void {
+    this.#buffer.markConversationActive(conversationId);
     connection.replayState.set(conversationId, 'replaying');
     connection.pendingEvents.set(conversationId, []);
     this.#registry.addSubscription(connection.connectionId, conversationId);
@@ -197,6 +202,7 @@ export class WsMessageHandler {
     lastAcknowledgedSeq: number,
     totalTurnCount: number,
   ): Promise<void> {
+    this.#buffer.markConversationActive(conversationId);
     connection.replayState.set(conversationId, 'replaying');
     connection.pendingEvents.set(conversationId, []);
     this.#registry.addSubscription(connection.connectionId, conversationId);
@@ -380,6 +386,7 @@ export class WsMessageHandler {
   }
 
   #startLiveSubscription(connection: ManagedConnection, conversationId: string): void {
+    this.#buffer.markConversationActive(conversationId);
     connection.replayState.set(conversationId, 'live');
     connection.pendingEvents.set(conversationId, []);
     this.#registry.addSubscription(connection.connectionId, conversationId);
@@ -397,6 +404,9 @@ export class WsMessageHandler {
     this.#registry.removeSubscription(connection.connectionId, conversationId);
     connection.replayState.delete(conversationId);
     connection.pendingEvents.delete(conversationId);
+    if (!this.#registry.hasInterest(conversationId)) {
+      this.#buffer.markConversationInactive(conversationId);
+    }
 
     this.#sendUnsubscribed(connection, conversationId);
   }
@@ -448,6 +458,9 @@ export class WsMessageHandler {
     this.#registry.removeSubscription(connection.connectionId, conversationId);
     connection.replayState.delete(conversationId);
     connection.pendingEvents.delete(conversationId);
+    if (!this.#registry.hasInterest(conversationId)) {
+      this.#buffer.markConversationInactive(conversationId);
+    }
   }
 
   #sendError(

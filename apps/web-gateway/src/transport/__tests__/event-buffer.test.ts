@@ -1,5 +1,6 @@
 import { describe, it, beforeEach } from 'node:test';
 import assert from 'node:assert/strict';
+import { setTimeout as delay } from 'node:timers/promises';
 import type { StreamEvent } from '@hydra/web-contracts';
 import { EventBuffer } from '../event-buffer.ts';
 
@@ -35,6 +36,11 @@ describe('EventBuffer', () => {
       assert.ok(buf);
     });
 
+    it('accepts a custom inactive timeout', () => {
+      const buf = new EventBuffer(5, 10);
+      assert.ok(buf);
+    });
+
     it('rejects capacity of 0', () => {
       assert.throws(() => new EventBuffer(0), {
         name: 'RangeError',
@@ -67,6 +73,13 @@ describe('EventBuffer', () => {
       assert.throws(() => new EventBuffer(Infinity), {
         name: 'RangeError',
         message: /capacity must be a positive integer/,
+      });
+    });
+
+    it('rejects inactive timeout of 0', () => {
+      assert.throws(() => new EventBuffer(5, 0), {
+        name: 'RangeError',
+        message: /inactiveTimeoutMs must be a positive integer/,
       });
     });
   });
@@ -442,6 +455,36 @@ describe('EventBuffer', () => {
       });
       assert.deepEqual(buf.getEventsSince('nonexistent', 0), []);
       assert.equal(buf.getHighwaterSeq('nonexistent'), 0);
+    });
+  });
+
+  describe('inactive cleanup', () => {
+    it('purges inactive conversation replay state after the timeout', async () => {
+      const buf = new EventBuffer(10, 1);
+      buf.push('c', makeEvent(1));
+      buf.markReplaySafeFrom('c', 0);
+      buf.markDroppedSeq('c', 2);
+      buf.markConversationInactive('c');
+
+      await delay(10);
+
+      assert.deepEqual(buf.getEventsSince('c', 0), []);
+      assert.equal(buf.getHighwaterSeq('c'), 0);
+      assert.equal(buf.hasEventsSince('c', 0), false);
+    });
+
+    it('cancels inactive cleanup when the conversation becomes active again', async () => {
+      const buf = new EventBuffer(10, 20);
+      buf.push('c', makeEvent(1));
+      buf.markConversationInactive('c');
+      buf.markConversationActive('c');
+
+      await delay(30);
+
+      assert.deepEqual(
+        buf.getEventsSince('c', 0).map((event) => event.seq),
+        [1],
+      );
     });
   });
 

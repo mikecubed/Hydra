@@ -77,8 +77,11 @@ export class EventForwarder {
   #handleStreamEvent(conversationId: string, event: StreamEvent): void {
     if (!this.#registry.hasInterest(conversationId)) {
       this.#buffer.markDroppedSeq(conversationId, event.seq);
+      this.#buffer.markConversationInactive(conversationId);
       return;
     }
+
+    this.#buffer.markConversationActive(conversationId);
 
     // (a) Buffer while the conversation has active or pending listener interest
     this.#buffer.push(conversationId, event);

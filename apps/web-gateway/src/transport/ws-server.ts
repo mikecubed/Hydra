@@ -105,6 +105,7 @@ export class GatewayWsServer {
   readonly #mutatingLimiter: RateLimiter;
   readonly #trustedProxies: ReadonlySet<string> | undefined;
   readonly #messageHandler: WsMessageHandler;
+  readonly #eventBuffer: EventBuffer;
   readonly #eventForwarder?: EventForwarder;
   readonly #messageQueues = new Map<string, Promise<void>>();
   readonly #messageQueueDepths = new Map<string, number>();
@@ -116,6 +117,7 @@ export class GatewayWsServer {
     this.#connectionRegistry = options.connectionRegistry;
     this.#clock = options.clock;
     this.#mutatingLimiter = options.mutatingLimiter;
+    this.#eventBuffer = options.eventBuffer;
     this.#trustedProxies = options.sourceKeyConfig?.trustedProxies
       ? new Set(options.sourceKeyConfig.trustedProxies)
       : undefined;
@@ -309,9 +311,18 @@ export class GatewayWsServer {
             return;
           }
           isCleanedUp = true;
+          const affectedConversations = new Set([
+            ...connection.subscribedConversations,
+            ...connection.pendingConversations,
+          ]);
           this.#messageQueues.delete(connection.connectionId);
           this.#messageQueueDepths.delete(connection.connectionId);
           this.#connectionRegistry.unregister(connection.connectionId);
+          for (const conversationId of affectedConversations) {
+            if (!this.#connectionRegistry.hasInterest(conversationId)) {
+              this.#eventBuffer.markConversationInactive(conversationId);
+            }
+          }
           cleanupIdle();
           cleanupBridge();
         };

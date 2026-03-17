@@ -8,6 +8,7 @@
 import { describe, it, beforeEach } from 'node:test';
 import { Buffer } from 'node:buffer';
 import assert from 'node:assert/strict';
+import { setTimeout as delay } from 'node:timers/promises';
 import type { StreamEvent } from '@hydra/web-contracts';
 import type { ManagedConnection } from '../connection-registry.ts';
 import { ConnectionRegistry } from '../connection-registry.ts';
@@ -725,6 +726,33 @@ describe('WsMessageHandler', () => {
       assert.ok(!conn.replayState.has('conv-1'));
       assert.ok(!conn.pendingEvents.has('conv-1'));
       assert.equal(registry.getByConversation('conv-1').size, 0);
+    });
+
+    it('starts inactive replay-state cleanup when the last subscription is removed', async () => {
+      const localBuffer = new EventBuffer(100, 1);
+      const localHandler = new WsMessageHandler({
+        registry,
+        buffer: localBuffer,
+        daemonClient: fakeDaemonClient(new Set(['conv-1'])),
+        bufferHighWaterMark: HIGH_WATER_MARK,
+      });
+      localBuffer.push('conv-1', makeEvent(1));
+      localBuffer.markReplaySafeFrom('conv-1', 0);
+
+      await localHandler.handleMessage(
+        conn,
+        JSON.stringify({ type: 'subscribe', conversationId: 'conv-1' }),
+      );
+      conn.sent.splice(0);
+
+      await localHandler.handleMessage(
+        conn,
+        JSON.stringify({ type: 'unsubscribe', conversationId: 'conv-1' }),
+      );
+      await delay(10);
+
+      assert.deepEqual(localBuffer.getEventsSince('conv-1', 0), []);
+      assert.equal(localBuffer.getHighwaterSeq('conv-1'), 0);
     });
 
     it('responds unsubscribed even if not currently subscribed', async () => {
