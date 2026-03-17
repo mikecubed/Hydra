@@ -123,6 +123,39 @@ async function expectUnexpectedResponse(
   return response.statusCode ?? 0;
 }
 
+async function expectUnexpectedResponseBody(
+  port: number,
+  options: {
+    path?: string;
+    origin?: string;
+    sessionId?: string;
+  } = {},
+): Promise<{ status: number; body: string }> {
+  const headers: Record<string, string> = {
+    Origin: options.origin ?? ORIGIN,
+  };
+  if (options.sessionId != null) {
+    headers['Cookie'] = `__session=${options.sessionId}`;
+  }
+
+  const ws = new WebSocket(`ws://127.0.0.1:${port}${options.path ?? '/ws'}`, { headers });
+  const [, response] = (await once(ws, 'unexpected-response')) as [
+    unknown,
+    NodeJS.ReadableStream & { statusCode?: number },
+  ];
+
+  const chunks: Buffer[] = [];
+  response.on('data', (chunk: Buffer | string) => {
+    chunks.push(typeof chunk === 'string' ? Buffer.from(chunk) : chunk);
+  });
+  await once(response, 'end');
+
+  return {
+    status: response.statusCode ?? 0,
+    body: Buffer.concat(chunks).toString('utf8'),
+  };
+}
+
 describe('GatewayWsServer', () => {
   let server: Server;
   let gw: GatewayApp;
@@ -178,6 +211,14 @@ describe('GatewayWsServer', () => {
   it('rejects missing session cookie with 401', async () => {
     const status = await expectUnexpectedResponse(port);
     assert.equal(status, 401);
+  });
+
+  it('returns a structured JSON body for rejected upgrades', async () => {
+    const response = await expectUnexpectedResponseBody(port);
+    assert.equal(response.status, 401);
+    const payload = JSON.parse(response.body) as { code?: string; ok?: boolean };
+    assert.equal(payload.ok, false);
+    assert.equal(payload.code, 'SESSION_NOT_FOUND');
   });
 
   it('rejects expired sessions with 401', async () => {

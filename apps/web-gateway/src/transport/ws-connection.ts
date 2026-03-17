@@ -86,7 +86,6 @@ export class WsConnection implements ManagedConnection {
     }
     this.#state = 'closed';
     this.#registry.unregister(this.connectionId);
-    this.#ws.removeAllListeners();
   }
 
   #handleSocketErrored(): void {

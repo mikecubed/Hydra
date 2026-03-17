@@ -45,7 +45,7 @@ function rejectUpgrade(socket: Socket, error: GatewayError): void {
     }),
   );
   const statusCode = String(error.statusCode);
-  socket.write(
+  socket.end(
     [
       `HTTP/1.1 ${statusCode} ${error.message}`,
       'Content-Type: application/json',
@@ -55,7 +55,6 @@ function rejectUpgrade(socket: Socket, error: GatewayError): void {
       body,
     ].join('\r\n'),
   );
-  socket.destroy();
 }
 
 export class GatewayWsServer {

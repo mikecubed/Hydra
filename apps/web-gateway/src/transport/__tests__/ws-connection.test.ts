@@ -255,6 +255,20 @@ describe('WsConnection', () => {
       assert.equal(registry.getBySession('s1').size, 0);
     });
 
+    it('preserves external close listeners registered after creation', () => {
+      const ws = fakeSocket();
+      WsConnection.create('s1', ws as never, registry);
+      let externalCloseCalls = 0;
+
+      ws.on('close', () => {
+        externalCloseCalls += 1;
+      });
+
+      ws.close(1000, 'normal');
+
+      assert.equal(externalCloseCalls, 1);
+    });
+
     it('cleans up on socket error without throwing uncaught', () => {
       const ws = fakeSocket();
       const conn = WsConnection.create('s1', ws as never, registry);
