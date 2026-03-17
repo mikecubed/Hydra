@@ -299,6 +299,7 @@ describe('EventBuffer', () => {
       buf.push('c', makeEvent(1));
       buf.push('c', makeEvent(2));
       buf.push('c', makeEvent(3));
+      buf.markReplaySafeFrom('c', 0);
       // Oldest buffered seq is 1, so sinceSeq=0 is covered (events 1,2,3 available)
       assert.equal(buf.hasEventsSince('c', 0), true);
       assert.equal(buf.hasEventsSince('c', 1), true);
@@ -310,6 +311,7 @@ describe('EventBuffer', () => {
       buf.push('c', makeEvent(1));
       buf.push('c', makeEvent(2));
       buf.push('c', makeEvent(3));
+      buf.markReplaySafeFrom('c', 0);
       // Buffer now holds [2, 3]; sinceSeq=0 means client needs seq=1 which is gone
       assert.equal(buf.hasEventsSince('c', 0), false);
       // sinceSeq=1 → client needs seq>1 → buffer has [2,3] → covered
@@ -323,31 +325,51 @@ describe('EventBuffer', () => {
       assert.equal(buf.hasEventsSince('c', 99), false);
     });
 
-    it('returns true for sparse seqs when no events have been evicted', () => {
+    it('returns false until a replay-safe baseline has been established', () => {
       const buf = new EventBuffer(10);
-      // Sparse global seqs: only some belong to this conversation
       buf.push('c', makeEvent(5));
       buf.push('c', makeEvent(12));
       buf.push('c', makeEvent(47));
-      // Client at sinceSeq=2: buffer has full conversation history, replay is safe
+      assert.equal(buf.hasEventsSince('c', 2), false);
+      assert.equal(buf.hasEventsSince('c', 5), false);
+    });
+
+    it('returns true for sparse seqs when the buffer tail is explicitly known complete', () => {
+      const buf = new EventBuffer(10);
+      buf.push('c', makeEvent(5));
+      buf.push('c', makeEvent(12));
+      buf.push('c', makeEvent(47));
+      buf.markReplaySafeFrom('c', 2);
+
       assert.equal(buf.hasEventsSince('c', 2), true);
-      // Client at sinceSeq=5: events 12,47 are > 5
       assert.equal(buf.hasEventsSince('c', 5), true);
-      // Client at sinceSeq=12: event 47 is > 12
       assert.equal(buf.hasEventsSince('c', 12), true);
     });
 
-    it('returns true for sparse seqs when evictions do not affect replay', () => {
+    it('allows replay when the acknowledgement is already inside the retained tail', () => {
+      const buf = new EventBuffer(10);
+      buf.push('c', makeEvent(10));
+      buf.push('c', makeEvent(12));
+      buf.push('c', makeEvent(15));
+      buf.markReplaySafeFrom('c', 9);
+
+      assert.equal(buf.hasEventsSince('c', 8), false);
+      assert.equal(buf.hasEventsSince('c', 9), true);
+      assert.equal(buf.hasEventsSince('c', 12), true);
+    });
+
+    it('returns true for sparse seqs only when the acknowledgement is within the retained post-eviction tail', () => {
       const buf = new EventBuffer(2);
       // Push sparse seqs; buffer holds only last 2
       buf.push('c', makeEvent(5)); // will be evicted
       buf.push('c', makeEvent(12));
       buf.push('c', makeEvent(47)); // evicts seq 5
+      buf.markReplaySafeFrom('c', 0);
       // Buffer: [12, 47], evictedHigh=5
-      // Client at sinceSeq=5: client already has seq 5, buffer has 12,47 → safe
+      // Client at sinceSeq=5 already covers the evicted seq and the replay-safe floor.
       assert.equal(buf.hasEventsSince('c', 5), true);
-      // Client at sinceSeq=10: client is past the evicted range → safe
-      assert.equal(buf.hasEventsSince('c', 10), true);
+      // Client at sinceSeq=11 is already caught up through the seq before the oldest retained event.
+      assert.equal(buf.hasEventsSince('c', 11), true);
     });
 
     it('returns false for sparse seqs when eviction drops unseen events', () => {
@@ -355,6 +377,7 @@ describe('EventBuffer', () => {
       buf.push('c', makeEvent(5)); // will be evicted
       buf.push('c', makeEvent(12));
       buf.push('c', makeEvent(47)); // evicts seq 5
+      buf.markReplaySafeFrom('c', 0);
       // Buffer: [12, 47], evictedHigh=5
       // Client at sinceSeq=3: needs everything > 3, but seq 5 was evicted → NOT safe
       assert.equal(buf.hasEventsSince('c', 3), false);
@@ -388,12 +411,15 @@ describe('EventBuffer', () => {
       const buf = new EventBuffer(10);
       buf.push('c', makeEvent(1));
       buf.push('c', makeEvent(2));
+      buf.markReplaySafeFrom('c', 0);
       buf.evictConversation('c');
       buf.push('c', makeEvent(3));
       // sinceSeq=0 means client needs everything > 0, but seqs 1 & 2 were
       // explicitly evicted — replay is NOT safe.
       assert.equal(buf.hasEventsSince('c', 0), false);
-      // sinceSeq=2 means client already saw 1 & 2, only needs 3 → safe.
+      // sinceSeq=2 means client only needs the immediate next buffered event.
+      assert.equal(buf.hasEventsSince('c', 2), true);
+      buf.markReplaySafeFrom('c', 2);
       assert.equal(buf.hasEventsSince('c', 2), true);
     });
 

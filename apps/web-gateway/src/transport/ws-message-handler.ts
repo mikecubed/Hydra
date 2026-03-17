@@ -44,8 +44,6 @@ export class WsMessageHandler {
   readonly #buffer: EventBuffer;
   readonly #daemonClient: MessageHandlerDeps['daemonClient'];
   readonly #bufferHighWaterMark: number;
-  readonly #daemonReplayRetryFloors = new Map<string, number>();
-
   constructor(deps: MessageHandlerDeps) {
     this.#registry = deps.registry;
     this.#buffer = deps.buffer;
@@ -85,10 +83,6 @@ export class WsMessageHandler {
     lastAcknowledgedSeq?: number,
   ): Promise<void> {
     const subscribeStartSeq = lastAcknowledgedSeq ?? this.#buffer.getHighwaterSeq(conversationId);
-    const hadSafeReplayBufferAtStart =
-      lastAcknowledgedSeq !== undefined &&
-      !this.#mustBypassBufferReplay(conversationId, lastAcknowledgedSeq) &&
-      this.#buffer.hasEventsSince(conversationId, lastAcknowledgedSeq);
 
     if (connection.subscribedConversations.has(conversationId)) {
       connection.replayState.set(conversationId, 'live');
@@ -125,26 +119,18 @@ export class WsMessageHandler {
 
       // Determine whether buffer can satisfy a replay
       const replayFromSeq = lastAcknowledgedSeq ?? subscribeStartSeq;
-      const mustBypassBuffer = this.#mustBypassBufferReplay(conversationId, replayFromSeq);
       const canReplay =
-        !mustBypassBuffer && this.#buffer.hasEventsSince(conversationId, replayFromSeq);
+        lastAcknowledgedSeq === undefined
+          ? this.#buffer.getHighwaterSeq(conversationId) > subscribeStartSeq
+          : this.#buffer.hasEventsSince(conversationId, replayFromSeq);
 
-      if (lastAcknowledgedSeq !== undefined && !hadSafeReplayBufferAtStart) {
-        this.#recordReplayRetryFloor(conversationId, lastAcknowledgedSeq);
-        await this.#startDaemonReplaySubscription(
-          connection,
-          conversationId,
-          lastAcknowledgedSeq,
-          result.data.totalTurnCount,
-        );
-      } else if (canReplay) {
+      if (canReplay) {
         this.#startReplaySubscription(connection, conversationId, replayFromSeq);
       } else if (lastAcknowledgedSeq === undefined) {
         // ── initial subscribe (no replay needed) ──────────────────────────
         this.#startLiveSubscription(connection, conversationId);
       } else {
         // ── buffer miss on reconnect → daemon fallback (T032) ─────────────
-        this.#recordReplayRetryFloor(conversationId, lastAcknowledgedSeq);
         await this.#startDaemonReplaySubscription(
           connection,
           conversationId,
@@ -186,6 +172,7 @@ export class WsMessageHandler {
 
     connection.pendingEvents.delete(conversationId);
     connection.replayState.set(conversationId, 'live');
+    this.#buffer.markReplaySafeFrom(conversationId, replayFromSeq);
 
     if (!this.#sendSubscribed(connection, conversationId, currentSeq)) {
       this.#cleanupSubscriptionState(connection, conversationId);
@@ -276,6 +263,10 @@ export class WsMessageHandler {
 
     connection.pendingEvents.delete(conversationId);
     connection.replayState.set(conversationId, 'live');
+    const oldestBufferedSeq = this.#buffer.getOldestBufferedSeq(conversationId);
+    if (oldestBufferedSeq !== undefined && oldestBufferedSeq > 0) {
+      this.#buffer.markReplaySafeFrom(conversationId, oldestBufferedSeq - 1);
+    }
 
     if (!this.#sendSubscribed(connection, conversationId, currentSeq)) {
       this.#cleanupSubscriptionState(connection, conversationId);
@@ -319,26 +310,12 @@ export class WsMessageHandler {
   #abortReplay(
     connection: ManagedConnection,
     conversationId: string,
-    lastAcknowledgedSeq: number,
+    _lastAcknowledgedSeq: number,
     code: string,
     message: string,
   ): void {
-    this.#recordReplayRetryFloor(conversationId, lastAcknowledgedSeq);
     this.#sendError(connection, code, message, 'daemon', conversationId);
     this.#cleanupSubscriptionState(connection, conversationId);
-  }
-
-  #mustBypassBufferReplay(conversationId: string, replayFromSeq: number): boolean {
-    const retryFloor = this.#daemonReplayRetryFloors.get(conversationId);
-    return retryFloor !== undefined && replayFromSeq <= retryFloor;
-  }
-
-  #recordReplayRetryFloor(conversationId: string, replayFromSeq: number): void {
-    const currentFloor =
-      this.#daemonReplayRetryFloors.get(conversationId) ?? Number.NEGATIVE_INFINITY;
-    if (replayFromSeq > currentFloor) {
-      this.#daemonReplayRetryFloors.set(conversationId, replayFromSeq);
-    }
   }
 
   async #loadTurnsForReplay(
@@ -408,6 +385,9 @@ export class WsMessageHandler {
     this.#registry.addSubscription(connection.connectionId, conversationId);
 
     const currentSeq = this.#buffer.getHighwaterSeq(conversationId);
+    if (currentSeq > 0) {
+      this.#buffer.markReplaySafeFrom(conversationId, currentSeq);
+    }
     if (!this.#sendSubscribed(connection, conversationId, currentSeq)) {
       this.#cleanupSubscriptionState(connection, conversationId);
     }

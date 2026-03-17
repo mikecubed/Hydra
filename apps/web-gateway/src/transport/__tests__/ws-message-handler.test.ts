@@ -1235,6 +1235,60 @@ describe('WsMessageHandler', () => {
       assert.equal(loadTurnHistoryCalls, 3);
     });
 
+    it('does not treat an empty live subscribe as a replay-safe baseline', async () => {
+      let loadTurnHistoryCalls = 0;
+      const daemonClient: MessageHandlerDeps['daemonClient'] = {
+        async openConversation(conversationId: string) {
+          return fakeConversationData(conversationId, 1);
+        },
+        async loadTurnHistory() {
+          loadTurnHistoryCalls += 1;
+          return {
+            error: {
+              ok: false as const,
+              code: 'DAEMON_UNAVAILABLE',
+              category: 'daemon' as const,
+              message: 'Daemon unavailable',
+            },
+          };
+        },
+        async getStreamReplay() {
+          return { data: { events: [] } };
+        },
+      };
+      handler = new WsMessageHandler({
+        registry,
+        buffer,
+        daemonClient,
+        bufferHighWaterMark: HIGH_WATER_MARK,
+      });
+
+      await handler.handleMessage(
+        conn,
+        JSON.stringify({ type: 'subscribe', conversationId: 'conv-1' }),
+      );
+      assert.equal(conn.sent[0].type, 'subscribed');
+      assert.equal((conn.sent[0] as { currentSeq: number }).currentSeq, 0);
+
+      buffer.push('conv-1', makeEventForTurn(100, 't1'));
+
+      const reconnectingConn = fakeConnection('c4', 's1');
+      registry.register(reconnectingConn);
+      await handler.handleMessage(
+        reconnectingConn,
+        JSON.stringify({
+          type: 'subscribe',
+          conversationId: 'conv-1',
+          lastAcknowledgedSeq: 50,
+        }),
+      );
+
+      assert.equal(loadTurnHistoryCalls, 1);
+      assert.equal(reconnectingConn.sent.length, 1);
+      assert.equal(reconnectingConn.sent[0].type, 'error');
+      assert.equal((reconnectingConn.sent[0] as { code: string }).code, 'REPLAY_INCOMPLETE');
+    });
+
     it('uses daemon fallback when only a live tail arrives while reconnect validation is in flight', async () => {
       const turns = new Map([
         ['conv-1', [fakeTurn('t1', 'conv-1', 1), fakeTurn('t2', 'conv-1', 2)]],

@@ -25,6 +25,8 @@ export class EventBuffer {
   private readonly heads = new Map<string, number>();
   /** Number of events currently stored per conversation (≤ capacity). */
   private readonly sizes = new Map<string, number>();
+  /** Lowest acknowledged seq from which the current buffer tail is known complete. */
+  private readonly replaySafeSinceSeqs = new Map<string, number>();
   /** Highest `seq` evicted from each conversation's ring (undefined = no evictions). */
   private readonly evictedHighSeqs = new Map<string, number>();
 
@@ -90,18 +92,36 @@ export class EventBuffer {
     return ring[newest]?.seq ?? 0;
   }
 
+  /** Return the oldest buffered `seq`, or `undefined` when the buffer is empty. */
+  getOldestBufferedSeq(conversationId: string): number | undefined {
+    return this.getOldestSeq(conversationId);
+  }
+
+  /**
+   * Record that the buffer now has complete replay coverage for any client that
+   * has already acknowledged at least `sinceSeq`.
+   */
+  markReplaySafeFrom(conversationId: string, sinceSeq: number): void {
+    const current = this.replaySafeSinceSeqs.get(conversationId);
+    if (current === undefined || sinceSeq < current) {
+      this.replaySafeSinceSeqs.set(conversationId, sinceSeq);
+    }
+  }
+
   /**
    * Check whether the buffer can satisfy a replay from `sinceSeq`.
    *
    * Returns `true` when:
    *  - the conversation has buffered events, AND
    *  - there is at least one event with seq > sinceSeq, AND
-   *  - no events with seq > sinceSeq have been evicted from the ring
-   *    (i.e. the client hasn't missed any events that were dropped).
+   *  - either the gateway previously established a known-good replay baseline
+   *    for this conversation, or the oldest buffered event is exactly the next
+   *    seq the client needs, AND
+   *  - no buffered events needed by the client were evicted from the ring.
    *
-   * This works correctly with sparse (globally-monotonic) sequence numbers
-   * because it tracks per-conversation eviction metadata rather than assuming
-   * contiguous per-conversation seqs.
+   * This avoids inferring completeness from sparse sequence adjacency. A buffer
+   * that only contains a late-arriving tail is not replay-safe until the
+   * gateway explicitly marks a baseline via `markReplaySafeFrom()`.
    */
   hasEventsSince(conversationId: string, sinceSeq: number): boolean {
     const size = this.sizes.get(conversationId) ?? 0;
@@ -118,13 +138,18 @@ export class EventBuffer {
     // Nothing new for the client.
     if (newestSeq <= sinceSeq) return false;
 
-    // If no events were ever evicted, the buffer holds complete history.
     const evictedHigh = this.evictedHighSeqs.get(conversationId);
-    if (evictedHigh === undefined) return true;
+    if (evictedHigh !== undefined && sinceSeq < evictedHigh) {
+      return false;
+    }
 
-    // Events were evicted.  Replay is safe only if the client already has
-    // everything that was dropped (sinceSeq >= highest evicted seq).
-    return sinceSeq >= evictedHigh;
+    const replaySafeSince = this.replaySafeSinceSeqs.get(conversationId);
+    if (replaySafeSince !== undefined && sinceSeq >= replaySafeSince) {
+      return true;
+    }
+
+    const oldestSeq = this.getOldestSeq(conversationId);
+    return oldestSeq !== undefined && oldestSeq === sinceSeq + 1;
   }
 
   // ─── eviction ───────────────────────────────────────────────────────────
@@ -139,6 +164,7 @@ export class EventBuffer {
     this.buffers.delete(conversationId);
     this.heads.delete(conversationId);
     this.sizes.delete(conversationId);
+    this.replaySafeSinceSeqs.delete(conversationId);
 
     if (tombstone > 0) {
       this.evictedHighSeqs.set(conversationId, tombstone);
@@ -168,5 +194,17 @@ export class EventBuffer {
       }
     }
     return result;
+  }
+
+  private getOldestSeq(conversationId: string): number | undefined {
+    const size = this.sizes.get(conversationId) ?? 0;
+    if (size === 0) return undefined;
+
+    const ring = this.buffers.get(conversationId);
+    const head = this.heads.get(conversationId) ?? 0;
+    if (!ring) return undefined;
+
+    const start = size < this.capacity ? 0 : head;
+    return ring[start]?.seq;
   }
 }
