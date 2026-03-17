@@ -1295,6 +1295,69 @@ describe('WsMessageHandler', () => {
       assert.equal(loadTurnHistoryCalls, 1);
     });
 
+    it('merges buffered events from a new turn that appears between openConversation and turn-history load', async () => {
+      const turns = new Map([
+        ['conv-1', [fakeTurn('t1', 'conv-1', 1), fakeTurn('t2', 'conv-1', 2)]],
+      ]);
+      const replay = new Map([
+        ['t1', [makeEventForTurn(5, 't1')]],
+        ['t2', [makeEventForTurn(8, 't2'), makeEventForTurn(10, 't2')]],
+      ]);
+      let releaseOpenConversation: (() => void) | undefined;
+      let releaseLoadTurnHistory: (() => void) | undefined;
+      const openConversationGate = new Promise<void>((resolve) => {
+        releaseOpenConversation = resolve;
+      });
+      const loadTurnHistoryGate = new Promise<void>((resolve) => {
+        releaseLoadTurnHistory = resolve;
+      });
+      const daemonClient: MessageHandlerDeps['daemonClient'] = {
+        async openConversation(conversationId: string) {
+          await openConversationGate;
+          return fakeConversationData(conversationId, 2);
+        },
+        async loadTurnHistory() {
+          await loadTurnHistoryGate;
+          return {
+            data: {
+              turns: turns.get('conv-1') ?? [],
+              totalCount: 2,
+              hasMore: true,
+            },
+          };
+        },
+        async getStreamReplay(_conversationId, turnId) {
+          return { data: { events: replay.get(turnId) ?? [] } };
+        },
+      };
+      handler = new WsMessageHandler({
+        registry,
+        buffer,
+        daemonClient,
+        bufferHighWaterMark: HIGH_WATER_MARK,
+      });
+
+      const subscribePromise = handler.handleMessage(
+        conn,
+        JSON.stringify({
+          type: 'subscribe',
+          conversationId: 'conv-1',
+          lastAcknowledgedSeq: 3,
+        }),
+      );
+
+      releaseOpenConversation?.();
+      buffer.push('conv-1', makeEventForTurn(11, 't3'));
+      releaseLoadTurnHistory?.();
+      await subscribePromise;
+
+      const seqs = conn.sent
+        .filter((message) => message.type === 'stream-event')
+        .map((message) => (message as { event: StreamEvent }).event.seq);
+      assert.deepEqual(seqs, [5, 8, 10, 11]);
+      assert.equal(conn.sent[4].type, 'subscribed');
+    });
+
     it('deduplicates events with the same seq from overlapping turns', async () => {
       const turns = new Map([
         ['conv-1', [fakeTurn('t1', 'conv-1', 1), fakeTurn('t2', 'conv-1', 2)]],

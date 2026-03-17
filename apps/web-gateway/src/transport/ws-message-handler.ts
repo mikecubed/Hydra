@@ -256,7 +256,11 @@ export class WsMessageHandler {
       return;
     }
 
-    const sorted = this.#mergeAndDedup(replayResults, lastAcknowledgedSeq);
+    const sorted = this.#mergeAndDedup(
+      replayResults,
+      lastAcknowledgedSeq,
+      this.#buffer.getEventsSince(conversationId, lastAcknowledgedSeq),
+    );
 
     for (const event of sorted) {
       if (!this.#sendStreamEvent(connection, conversationId, event)) {
@@ -294,6 +298,7 @@ export class WsMessageHandler {
   #mergeAndDedup(
     replayResults: ReadonlyArray<DaemonResult<{ events: StreamEvent[] }>>,
     lastAcknowledgedSeq: number,
+    extraEvents: ReadonlyArray<StreamEvent> = [],
   ): StreamEvent[] {
     const allEvents: StreamEvent[] = [];
     for (const result of replayResults) {
@@ -301,6 +306,7 @@ export class WsMessageHandler {
         allEvents.push(...result.data.events);
       }
     }
+    allEvents.push(...extraEvents);
     const deduped = new Map<number, StreamEvent>();
     for (const event of allEvents) {
       if (event.seq > lastAcknowledgedSeq) {
@@ -358,7 +364,7 @@ export class WsMessageHandler {
       return result;
     }
 
-    if (result.data.hasMore || result.data.turns.length < totalTurnCount) {
+    if (result.data.turns.length < totalTurnCount) {
       return {
         error: {
           ok: false,
