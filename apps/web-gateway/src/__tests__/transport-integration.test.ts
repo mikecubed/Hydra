@@ -15,7 +15,7 @@ import { createServer, type Server } from 'node:http';
 import { describe, it, beforeEach, afterEach } from 'node:test';
 import assert from 'node:assert/strict';
 import { getRequestListener } from '@hono/node-server';
-import type { StreamEvent } from '@hydra/web-contracts';
+import type { StreamEvent, TurnStatus } from '@hydra/web-contracts';
 import WebSocket from 'ws';
 import { createGatewayApp, type GatewayApp } from '../index.ts';
 import { FakeClock } from '../shared/clock.ts';
@@ -298,8 +298,9 @@ function createFakeDaemonClient(
     id: string,
     conversationId: string,
     position: number,
-    status: string,
+    status: TurnStatus,
     instruction: string,
+    parentTurnId?: string,
   ) => ({
     id,
     conversationId,
@@ -308,6 +309,7 @@ function createFakeDaemonClient(
     attribution: { type: 'operator' as const, label: 'admin' },
     instruction,
     status,
+    ...(parentTurnId ? { parentTurnId } : {}),
     createdAt: new Date().toISOString(),
   });
 
@@ -328,16 +330,7 @@ function createFakeDaemonClient(
       submissions.push({ conversationId, instruction: body.instruction, turnId });
       return {
         data: {
-          turn: {
-            id: turnId,
-            conversationId,
-            position: turnCounter,
-            role: 'user',
-            instruction: body.instruction,
-            status: 'streaming',
-            createdAt: new Date().toISOString(),
-            updatedAt: new Date().toISOString(),
-          },
+          turn: makeTurn(turnId, conversationId, turnCounter, 'executing', body.instruction),
           streamId: `stream-${turnId}`,
         },
       };
@@ -443,8 +436,9 @@ function createFakeDaemonClient(
             newTurnId,
             conversationId,
             turnCounter,
-            'streaming',
+            'executing',
             'retried-instruction',
+            turnId,
           ),
           streamId: `stream-${newTurnId}`,
         },
