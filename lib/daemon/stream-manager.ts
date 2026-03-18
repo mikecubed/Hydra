@@ -70,8 +70,12 @@ export class StreamManager {
 
   constructor(store: ConversationStore, retentionMs = DEFAULT_RETENTION_MS, bridge?: EventBridge) {
     this.store = store;
-    this.retentionMs = retentionMs;
-    this.tombstoneRetentionMs = retentionMs * 2;
+    // Guard against invalid retention values (NaN, negative) to prevent
+    // pathological purge behavior or unbounded growth.
+    this.retentionMs = Number.isFinite(retentionMs)
+      ? Math.max(0, retentionMs)
+      : DEFAULT_RETENTION_MS;
+    this.tombstoneRetentionMs = this.retentionMs * 2;
     this.bridge = bridge;
   }
 
@@ -312,7 +316,8 @@ export class StreamManager {
    * @returns The number of streams purged.
    */
   purgeTerminalStreams(maxAgeMs?: number): number {
-    const cutoff = Date.now() - (maxAgeMs ?? this.retentionMs);
+    const now = Date.now();
+    const cutoff = now - (maxAgeMs ?? this.retentionMs);
     let purged = 0;
     for (const [streamId, state] of this.streams) {
       if (!TERMINAL_STREAM_STATUSES.has(state.status)) continue;
@@ -321,7 +326,7 @@ export class StreamManager {
         const highSeq = state.events.at(-1)?.seq ?? 0;
         this.purgedHighSeqByTurnId.set(state.turnId, {
           highSeq,
-          purgedAt: Date.now(),
+          purgedAt: now,
         });
         this.streams.delete(streamId);
         this.streamByTurnId.delete(state.turnId);
@@ -330,7 +335,7 @@ export class StreamManager {
     }
 
     // Evict expired tombstones (deterministic TTL-based expiry)
-    const tombstoneCutoff = Date.now() - this.tombstoneRetentionMs;
+    const tombstoneCutoff = now - this.tombstoneRetentionMs;
     for (const [turnId, tombstone] of this.purgedHighSeqByTurnId) {
       if (tombstone.purgedAt <= tombstoneCutoff) {
         this.purgedHighSeqByTurnId.delete(turnId);

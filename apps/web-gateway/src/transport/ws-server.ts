@@ -127,7 +127,10 @@ export class GatewayWsServer {
       clock: options.clock,
       warningThresholdMs: options.sessionService.config.warningThresholdMs,
     });
-    this.#wss = new WebSocketServer({ noServer: true });
+    this.#wss = new WebSocketServer({
+      noServer: true,
+      maxPayload: 1024 * 1024, // 1MB limit for inbound messages to prevent DoS
+    });
     this.#messageHandler = new WsMessageHandler({
       registry: options.connectionRegistry,
       buffer: options.eventBuffer,

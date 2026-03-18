@@ -4,7 +4,7 @@
  * Covers: create stream, emit events, complete, fail, subscribe from midpoint,
  * lifecycle signals, and turn content finalization.
  */
-import { describe, it, beforeEach } from 'node:test';
+import { describe, it, beforeEach, mock } from 'node:test';
 import assert from 'node:assert/strict';
 import { StreamManager } from '../lib/daemon/stream-manager.ts';
 import { ConversationStore } from '../lib/daemon/conversation-store.ts';
@@ -585,6 +585,30 @@ describe('StreamManager — tombstone bounding', () => {
     // A subsequent purge pass should evict the expired tombstone
     sm.purgeTerminalStreams(0);
     assert.equal(sm.getPurgedHighSeq(turn.id), undefined, 'tombstone should have been evicted');
+  });
+
+  it('does not evict a freshly created tombstone during the same purge pass', () => {
+    const sm = new StreamManager(store, 1);
+    const conv = store.createConversation();
+    const turn = store.appendTurn(conv.id, {
+      kind: 'operator',
+      instruction: 'A',
+      attribution: operatorAttribution,
+    });
+    store.updateTurnStatus(turn.id, 'executing');
+    sm.createStream(turn.id);
+    sm.completeStream(turn.id);
+
+    const baseNow = Date.now();
+    const timestamps = [baseNow + 5, baseNow + 8, baseNow + 11];
+    const dateNowMock = mock.method(Date, 'now', () => timestamps.shift() ?? baseNow + 11);
+    try {
+      sm.purgeTerminalStreams(0);
+
+      assert.ok(sm.getPurgedHighSeq(turn.id) !== undefined, 'fresh tombstone should survive purge');
+    } finally {
+      dateNowMock.mock.restore();
+    }
   });
 
   it('preserves tombstones within the tombstone retention window', () => {

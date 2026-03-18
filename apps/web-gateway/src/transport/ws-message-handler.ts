@@ -346,14 +346,15 @@ export class WsMessageHandler {
     let nextIndex = 0;
     const workerCount = Math.min(concurrency, turns.length);
     await Promise.all(
-      Array.from({ length: workerCount }, async function run(): Promise<void> {
-        if (nextIndex >= turns.length) {
-          return;
+      Array.from({ length: workerCount }, async () => {
+        while (nextIndex < turns.length) {
+          const currentIndex = nextIndex;
+          nextIndex += 1;
+          // Each worker intentionally processes one claimed turn at a time to
+          // preserve the overall concurrency cap.
+          // eslint-disable-next-line no-await-in-loop
+          results[currentIndex] = await mapper(turns[currentIndex]);
         }
-        const currentIndex = nextIndex;
-        nextIndex += 1;
-        results[currentIndex] = await mapper(turns[currentIndex]);
-        return run();
       }),
     );
     return results;

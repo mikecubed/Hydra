@@ -643,23 +643,7 @@ function resumeAfterApproval(
   }
 }
 
-function isExpectedApprovalResponseEmitError(err: unknown): boolean {
-  if (!(err instanceof Error)) {
-    return false;
-  }
-
-  return (
-    err.message.includes('No active stream') ||
-    err.message.includes('Stream not found') ||
-    err.message.includes('Stream is not active')
-  );
-}
-
-function handleApprovalResponseEmitError(turnId: string, err: unknown): void {
-  if (isExpectedApprovalResponseEmitError(err)) {
-    return;
-  }
-
+function logApprovalResponseEmitError(turnId: string, err: unknown): void {
   const detail = err instanceof Error ? err.message : String(err);
   console.warn(
     `[conversation-routes] Unexpected error emitting approval-response for turn ${turnId}: ${detail}`,
@@ -709,13 +693,15 @@ async function handleRespondToApproval(
 
     if (result.success) {
       // Emit approval-response stream event so subscribers see the response
-      try {
-        deps.streamManager.emitEvent(result.approval.turnId, 'approval-response', {
-          approvalId,
-          response,
-        });
-      } catch (emitErr: unknown) {
-        handleApprovalResponseEmitError(result.approval.turnId, emitErr);
+      if (deps.streamManager.isStreamActive(result.approval.turnId)) {
+        try {
+          deps.streamManager.emitEvent(result.approval.turnId, 'approval-response', {
+            approvalId,
+            response,
+          });
+        } catch (emitErr: unknown) {
+          logApprovalResponseEmitError(result.approval.turnId, emitErr);
+        }
       }
 
       // Resume execution if a continuation handler is wired up
