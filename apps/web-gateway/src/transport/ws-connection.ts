@@ -20,9 +20,11 @@ export class WsConnection implements ManagedConnection {
   readonly connectionId: string;
   readonly subscribedConversations = new Set<string>();
   readonly pendingConversations = new Set<string>();
+  readonly subscribeGenerations = new Map<string, number>();
   readonly lastAckSeq = new Map<string, number>();
   readonly replayState = new Map<string, ReplayState>();
   readonly pendingEvents = new Map<string, StreamEvent[]>();
+  readonly lastDeliveredSeq = new Map<string, number>();
 
   #state: WsConnectionState = 'open';
   readonly #ws: WebSocket;

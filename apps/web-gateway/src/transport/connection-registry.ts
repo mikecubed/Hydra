@@ -15,9 +15,12 @@ export interface ManagedConnection {
   readonly sessionId: string;
   readonly subscribedConversations: Set<string>;
   readonly pendingConversations: Set<string>;
+  readonly subscribeGenerations: Map<string, number>;
   readonly lastAckSeq: Map<string, number>;
   readonly replayState: Map<string, ReplayState>;
   readonly pendingEvents: Map<string, StreamEvent[]>;
+  /** Tracks the highest seq actually delivered (stream-event or subscribed ack) per conversation. */
+  readonly lastDeliveredSeq: Map<string, number>;
   /** Bytes queued in the underlying WebSocket send buffer (0 when unavailable). */
   readonly bufferedAmount: number;
   send(message: ServerMessage): void;

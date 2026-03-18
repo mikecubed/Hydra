@@ -38,9 +38,11 @@ function fakeConnection(connectionId: string, sessionId: string): SpyConnection 
     sessionId,
     subscribedConversations: new Set<string>(),
     pendingConversations: new Set<string>(),
+    subscribeGenerations: new Map<string, number>(),
     lastAckSeq: new Map<string, number>(),
     replayState: new Map(),
     pendingEvents: new Map(),
+    lastDeliveredSeq: new Map(),
     sent: [],
     _bufferedAmount: 0,
     get bufferedAmount() {

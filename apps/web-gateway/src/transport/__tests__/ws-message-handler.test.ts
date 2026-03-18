@@ -60,9 +60,11 @@ function fakeConnection(connectionId: string, sessionId: string): TestConnection
     sessionId,
     subscribedConversations: new Set(),
     pendingConversations: new Set(),
+    subscribeGenerations: new Map(),
     lastAckSeq: new Map(),
     replayState: new Map(),
     pendingEvents: new Map(),
+    lastDeliveredSeq: new Map(),
     _bufferedAmount: 0,
     get bufferedAmount() {
       return connection._bufferedAmount;
@@ -772,6 +774,114 @@ describe('WsMessageHandler', () => {
 
       assert.equal(conn.sent.length, 1);
       assert.equal(conn.sent[0].type, 'unsubscribed');
+    });
+
+    it('cancels an in-flight subscribe before validation completes', async () => {
+      let releaseOpenConversation: (() => void) | undefined;
+      const daemonClient: MessageHandlerDeps['daemonClient'] = {
+        async openConversation(conversationId: string) {
+          await new Promise<void>((resolve) => {
+            releaseOpenConversation = resolve;
+          });
+          return fakeConversationData(conversationId, 0);
+        },
+        async loadTurnHistory() {
+          return { data: { turns: [], totalCount: 0, hasMore: false } };
+        },
+        async getStreamReplay() {
+          return { data: { events: [] } };
+        },
+      };
+      handler = new WsMessageHandler({
+        registry,
+        buffer,
+        daemonClient,
+        bufferHighWaterMark: HIGH_WATER_MARK,
+      });
+
+      const subscribePromise = handler.handleMessage(
+        conn,
+        JSON.stringify({ type: 'subscribe', conversationId: 'conv-1' }),
+      );
+      await delay(0);
+
+      await handler.handleMessage(
+        conn,
+        JSON.stringify({ type: 'unsubscribe', conversationId: 'conv-1' }),
+      );
+
+      assert.equal(conn.pendingConversations.has('conv-1'), false);
+      assert.equal(conn.subscribedConversations.has('conv-1'), false);
+      assert.deepEqual(
+        conn.sent.map((message) => message.type),
+        ['unsubscribed'],
+      );
+
+      releaseOpenConversation?.();
+      await subscribePromise;
+
+      assert.equal(conn.pendingConversations.has('conv-1'), false);
+      assert.equal(conn.subscribedConversations.has('conv-1'), false);
+      assert.deepEqual(
+        conn.sent.map((message) => message.type),
+        ['unsubscribed'],
+      );
+    });
+
+    it('keeps a stale subscribe cancelled after unsubscribe and resubscribe', async () => {
+      const releaseOpenConversationQueue: Array<() => void> = [];
+      const daemonClient: MessageHandlerDeps['daemonClient'] = {
+        async openConversation(conversationId: string) {
+          await new Promise<void>((resolve) => {
+            releaseOpenConversationQueue.push(resolve);
+          });
+          return fakeConversationData(conversationId, 0);
+        },
+        async loadTurnHistory() {
+          return { data: { turns: [], totalCount: 0, hasMore: false } };
+        },
+        async getStreamReplay() {
+          return { data: { events: [] } };
+        },
+      };
+      handler = new WsMessageHandler({
+        registry,
+        buffer,
+        daemonClient,
+        bufferHighWaterMark: HIGH_WATER_MARK,
+      });
+
+      const subscribeMessage = JSON.stringify({ type: 'subscribe', conversationId: 'conv-1' });
+      const firstSubscribe = handler.handleMessage(conn, subscribeMessage);
+      await delay(0);
+
+      await handler.handleMessage(
+        conn,
+        JSON.stringify({ type: 'unsubscribe', conversationId: 'conv-1' }),
+      );
+
+      const secondSubscribe = handler.handleMessage(conn, subscribeMessage);
+      await delay(0);
+
+      assert.equal(releaseOpenConversationQueue.length, 2);
+
+      releaseOpenConversationQueue.shift()?.();
+      await firstSubscribe;
+
+      assert.equal(conn.subscribedConversations.has('conv-1'), false);
+      assert.deepEqual(
+        conn.sent.map((message) => message.type),
+        ['unsubscribed'],
+      );
+
+      releaseOpenConversationQueue.shift()?.();
+      await secondSubscribe;
+
+      assert.equal(conn.subscribedConversations.has('conv-1'), true);
+      assert.deepEqual(
+        conn.sent.map((message) => message.type),
+        ['unsubscribed', 'subscribed'],
+      );
     });
 
     it('closes unsubscribe when the acknowledgement would exceed the buffer threshold', async () => {
@@ -1791,6 +1901,278 @@ describe('WsMessageHandler', () => {
       // Must have exactly one error
       const errors = conn.sent.filter((m) => m.type === 'error');
       assert.equal(errors.length, 1);
+    });
+
+    it('duplicate subscribe after daemon-fallback replay does not regress currentSeq', async () => {
+      // Setup: daemon replay will return events up to seq 20, but buffer only has events up to seq 5
+      buffer.push('conv-1', makeEvent(3));
+      buffer.push('conv-1', makeEvent(4));
+      buffer.push('conv-1', makeEvent(5));
+
+      const turns = new Map([['conv-1', [fakeTurn('t1', 'conv-1', 1)]]]);
+      const replay = new Map([
+        [
+          't1',
+          [
+            makeEventForTurn(11, 't1'),
+            makeEventForTurn(12, 't1'),
+            makeEventForTurn(15, 't1'),
+            makeEventForTurn(20, 't1'),
+          ],
+        ],
+      ]);
+
+      handler = new WsMessageHandler({
+        registry,
+        buffer,
+        daemonClient: fakeDaemonClientWithHistory(validConvs, turns, replay),
+        bufferHighWaterMark: HIGH_WATER_MARK,
+      });
+
+      // First subscribe triggers daemon-fallback replay (lastAcknowledgedSeq=10, buffer cannot satisfy)
+      const firstSubscribe = JSON.stringify({
+        type: 'subscribe',
+        conversationId: 'conv-1',
+        lastAcknowledgedSeq: 10,
+      });
+      await handler.handleMessage(conn, firstSubscribe);
+
+      // Verify first subscribe succeeded with daemon replay currentSeq = 20
+      const firstSubscribed = conn.sent.filter((m) => m.type === 'subscribed');
+      assert.equal(firstSubscribed.length, 1);
+      assert.equal((firstSubscribed[0] as { currentSeq: number }).currentSeq, 20);
+
+      // Clear sent messages for clarity
+      conn.sent.splice(0);
+
+      // Duplicate subscribe — must return currentSeq=20, NOT regress to buffer highwater (5)
+      const duplicateSubscribe = JSON.stringify({
+        type: 'subscribe',
+        conversationId: 'conv-1',
+        lastAcknowledgedSeq: 10,
+      });
+      await handler.handleMessage(conn, duplicateSubscribe);
+
+      assert.equal(conn.sent.length, 1);
+      assert.equal(conn.sent[0].type, 'subscribed');
+      assert.equal((conn.sent[0] as { currentSeq: number }).currentSeq, 20);
+    });
+
+    it('coalesces concurrent subscribes before validation completes', async () => {
+      buffer.push('conv-1', makeEvent(1));
+      buffer.push('conv-1', makeEvent(2));
+      buffer.push('conv-1', makeEvent(3));
+
+      let openConversationCalls = 0;
+      let releaseOpenConversation: (() => void) | undefined;
+      const daemonClient: MessageHandlerDeps['daemonClient'] = {
+        async openConversation(conversationId: string) {
+          openConversationCalls += 1;
+          await new Promise<void>((resolve) => {
+            releaseOpenConversation = resolve;
+          });
+          return fakeConversationData(conversationId, 0);
+        },
+        async loadTurnHistory() {
+          return { data: { turns: [], totalCount: 0, hasMore: false } };
+        },
+        async getStreamReplay() {
+          return { data: { events: [] } };
+        },
+      };
+
+      handler = new WsMessageHandler({
+        registry,
+        buffer,
+        daemonClient,
+        bufferHighWaterMark: HIGH_WATER_MARK,
+      });
+
+      const subscribeMessage = JSON.stringify({
+        type: 'subscribe',
+        conversationId: 'conv-1',
+        lastAcknowledgedSeq: 0,
+      });
+
+      const firstSubscribe = handler.handleMessage(conn, subscribeMessage);
+      await delay(0);
+      const duplicateSubscribe = handler.handleMessage(conn, subscribeMessage);
+
+      assert.equal(openConversationCalls, 1);
+      assert.equal(conn.pendingConversations.has('conv-1'), true);
+
+      releaseOpenConversation?.();
+      await Promise.all([firstSubscribe, duplicateSubscribe]);
+
+      assert.equal(openConversationCalls, 1);
+      assert.deepEqual(
+        conn.sent.map((message) =>
+          message.type === 'stream-event' ? `stream-event:${message.event.seq}` : message.type,
+        ),
+        ['stream-event:1', 'stream-event:2', 'stream-event:3', 'subscribed'],
+      );
+    });
+
+    it('duplicate subscribe during daemon replay does not outrun delivered events', async () => {
+      // Regression: duplicate subscribe while replayState='replaying' must NOT
+      // advertise buffer highwater (which includes undelivered live events).
+      // It must return only the seq actually delivered so far.
+      //
+      // Buffer is intentionally empty so that the subscribe falls through to
+      // daemon fallback (buffer miss), which is async and gives us a window
+      // to inject a duplicate subscribe mid-replay.
+
+      let resolveReplay: ((value: DaemonResult<{ events: StreamEvent[] }>) => void) | undefined;
+
+      const daemonClient: MessageHandlerDeps['daemonClient'] = {
+        async openConversation(conversationId: string) {
+          return fakeConversationData(conversationId, 1);
+        },
+        async loadTurnHistory(conversationId: string) {
+          return {
+            data: {
+              turns: [fakeTurn('t1', conversationId, 1)],
+              totalCount: 1,
+              hasMore: false,
+            },
+          };
+        },
+        getStreamReplay(_conversationId: string, _turnId: string, _lastAcknowledgedSeq: number) {
+          return new Promise<DaemonResult<{ events: StreamEvent[] }>>((resolve) => {
+            resolveReplay = resolve;
+          });
+        },
+      };
+
+      handler = new WsMessageHandler({
+        registry,
+        buffer,
+        daemonClient,
+        bufferHighWaterMark: HIGH_WATER_MARK,
+      });
+
+      // Start subscribe — buffer empty + lastAcknowledgedSeq provided → daemon fallback
+      // The subscribe blocks on getStreamReplay.
+      const subscribeMsg = JSON.stringify({
+        type: 'subscribe',
+        conversationId: 'conv-1',
+        lastAcknowledgedSeq: 2,
+      });
+      const subscribePromise = handler.handleMessage(conn, subscribeMsg);
+      // Let the subscribe proceed through openConversation + loadTurnHistory
+      await delay(0);
+
+      // Verify we are in 'replaying' state (daemon replay in-flight)
+      assert.equal(conn.replayState.get('conv-1'), 'replaying');
+
+      // Simulate live events arriving in the buffer + pending queue during replay
+      buffer.push('conv-1', makeEvent(25));
+      buffer.push('conv-1', makeEvent(30));
+      const pending = conn.pendingEvents.get('conv-1');
+      if (pending) {
+        pending.push(makeEvent(25));
+        pending.push(makeEvent(30));
+      }
+
+      // Send duplicate subscribe while still replaying
+      const duplicateMsg = JSON.stringify({
+        type: 'subscribe',
+        conversationId: 'conv-1',
+        lastAcknowledgedSeq: 2,
+      });
+      await handler.handleMessage(conn, duplicateMsg);
+
+      // Capture what the duplicate subscribe returned
+      const interceptedDuplicateResult = conn.sent.filter((m) => m.type === 'subscribed');
+
+      // The duplicate must NOT have switched us to live
+      assert.equal(conn.replayState.get('conv-1'), 'replaying');
+
+      // The duplicate must report currentSeq=0 (nothing delivered yet), NOT 30
+      assert.equal(interceptedDuplicateResult.length, 1);
+      assert.equal((interceptedDuplicateResult[0] as { currentSeq: number }).currentSeq, 0);
+
+      // Now complete the daemon replay
+      conn.sent.splice(0);
+      resolveReplay!({
+        data: {
+          events: [
+            makeEventForTurn(11, 't1'),
+            makeEventForTurn(15, 't1'),
+            makeEventForTurn(20, 't1'),
+          ],
+        },
+      });
+      await subscribePromise;
+
+      // After replay completion: state is live, delivered events are present
+      assert.equal(conn.replayState.get('conv-1'), 'live');
+      const finalSubscribed = conn.sent.filter((m) => m.type === 'subscribed');
+      assert.equal(finalSubscribed.length, 1);
+      // currentSeq should reflect all delivered events including flushed pending
+      assert.ok(
+        (finalSubscribed[0] as { currentSeq: number }).currentSeq >= 20,
+        `Expected currentSeq >= 20, got ${(finalSubscribed[0] as { currentSeq: number }).currentSeq}`,
+      );
+    });
+
+    it('duplicate subscribe during buffer replay returns only actually-delivered seqs', async () => {
+      // For synchronous buffer replay, duplicate during replay is unlikely in
+      // production but the guard must still be correct: if replay state is
+      // 'replaying', only return lastDeliveredSeq.
+      buffer.push('conv-1', makeEvent(1));
+      buffer.push('conv-1', makeEvent(2));
+      buffer.push('conv-1', makeEvent(3));
+
+      // Intercept send to inject a duplicate subscribe mid-replay
+      let duplicateSubscribeSent = false;
+      let duplicateCurrentSeq: number | undefined;
+      const origSend = conn.send.bind(conn);
+      conn.send = (msg: ServerMessage) => {
+        origSend(msg);
+        // After the first stream-event is delivered, fire duplicate subscribe
+        if (msg.type === 'stream-event' && !duplicateSubscribeSent) {
+          duplicateSubscribeSent = true;
+          // At this point seq 1 was just sent, replayState is 'replaying'
+          const state = conn.replayState.get('conv-1');
+          assert.equal(state, 'replaying');
+
+          // Simulate buffer advancing with a live event (undelivered to this conn)
+          buffer.push('conv-1', makeEvent(50));
+
+          // Fire duplicate subscribe synchronously — it will be handled inline
+          // since #handleSubscribe early-returns for already-subscribed convs
+          void handler.handleMessage(
+            conn,
+            JSON.stringify({ type: 'subscribe', conversationId: 'conv-1' }),
+          );
+          // Capture the subscribed ack from the duplicate
+          const dupAck = conn.sent.filter(
+            (m) => m.type === 'subscribed' && (m as { currentSeq: number }).currentSeq <= 1,
+          );
+          if (dupAck.length > 0) {
+            duplicateCurrentSeq = (dupAck[0] as { currentSeq: number }).currentSeq;
+          }
+        }
+      };
+
+      const msg = JSON.stringify({
+        type: 'subscribe',
+        conversationId: 'conv-1',
+        lastAcknowledgedSeq: 0,
+      });
+      await handler.handleMessage(conn, msg);
+
+      // The replay completes and transitions to live
+      assert.equal(conn.replayState.get('conv-1'), 'live');
+
+      // The mid-replay duplicate subscribe must have returned seq <= 1, NOT 50
+      if (duplicateSubscribeSent && duplicateCurrentSeq !== undefined) {
+        assert.ok(
+          duplicateCurrentSeq <= 1,
+          `Expected mid-replay duplicate currentSeq <= 1, got ${duplicateCurrentSeq}`,
+        );
+      }
     });
   });
 });

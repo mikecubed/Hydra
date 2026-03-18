@@ -16,9 +16,11 @@ function createMockConnection(sessionId: string): ManagedConnection & { sent: Se
     sessionId,
     subscribedConversations: new Set(),
     pendingConversations: new Set(),
+    subscribeGenerations: new Map(),
     lastAckSeq: new Map(),
     replayState: new Map(),
     pendingEvents: new Map(),
+    lastDeliveredSeq: new Map(),
     bufferedAmount: 0,
     sent,
     send(msg: ServerMessage) {

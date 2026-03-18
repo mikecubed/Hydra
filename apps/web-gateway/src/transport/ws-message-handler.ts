@@ -85,27 +85,25 @@ export class WsMessageHandler {
   ): Promise<void> {
     const subscribeStartSeq = lastAcknowledgedSeq ?? this.#buffer.getHighwaterSeq(conversationId);
 
-    if (connection.subscribedConversations.has(conversationId)) {
-      connection.replayState.set(conversationId, 'live');
-      if (
-        !this.#sendSubscribed(
-          connection,
-          conversationId,
-          this.#buffer.getHighwaterSeq(conversationId),
-        )
-      ) {
-        this.#cleanupSubscriptionState(connection, conversationId);
-      }
+    if (connection.pendingConversations.has(conversationId)) {
       return;
     }
 
+    if (this.#handleExistingSubscription(connection, conversationId)) {
+      return;
+    }
+
+    const subscribeGeneration = this.#beginSubscribeAttempt(connection, conversationId);
     this.#buffer.markConversationActive(conversationId);
     this.#registry.addPendingInterest(connection.connectionId, conversationId);
 
     try {
       // Validate conversation exists via daemon
       const result = await this.#daemonClient.openConversation(conversationId);
-      if (connection.isClosed) {
+      if (
+        connection.isClosed ||
+        !this.#isActiveSubscribeAttempt(connection, conversationId, subscribeGeneration)
+      ) {
         return;
       }
       if ('error' in result) {
@@ -138,6 +136,7 @@ export class WsMessageHandler {
           conversationId,
           lastAcknowledgedSeq,
           result.data.totalTurnCount,
+          subscribeGeneration,
         );
       }
     } finally {
@@ -146,6 +145,53 @@ export class WsMessageHandler {
         this.#buffer.markConversationInactive(conversationId);
       }
     }
+  }
+
+  #handleExistingSubscription(connection: ManagedConnection, conversationId: string): boolean {
+    if (!connection.subscribedConversations.has(conversationId)) {
+      return false;
+    }
+
+    const currentSeq = this.#getExistingSubscriptionSeq(connection, conversationId);
+    if (!this.#sendSubscribed(connection, conversationId, currentSeq)) {
+      this.#cleanupSubscriptionState(connection, conversationId);
+    }
+    return true;
+  }
+
+  #getExistingSubscriptionSeq(connection: ManagedConnection, conversationId: string): number {
+    if (connection.replayState.get(conversationId) === 'replaying') {
+      // During active replay: do NOT switch to live or advertise buffer
+      // highwater — that would acknowledge seqs not yet delivered. Return
+      // only the seq actually delivered so far (may be 0 if replay is
+      // still in-flight). The replay completion path will send the real
+      // subscribed ack with the final currentSeq.
+      return connection.lastDeliveredSeq.get(conversationId) ?? 0;
+    }
+
+    // Post-replay (live): safe to include buffer highwater.
+    const bufferSeq = this.#buffer.getHighwaterSeq(conversationId);
+    const deliveredSeq = connection.lastDeliveredSeq.get(conversationId) ?? 0;
+    return Math.max(bufferSeq, deliveredSeq);
+  }
+
+  #beginSubscribeAttempt(connection: ManagedConnection, conversationId: string): number {
+    const nextGeneration = (connection.subscribeGenerations.get(conversationId) ?? 0) + 1;
+    connection.subscribeGenerations.set(conversationId, nextGeneration);
+    return nextGeneration;
+  }
+
+  #isActiveSubscribeAttempt(
+    connection: ManagedConnection,
+    conversationId: string,
+    subscribeGeneration: number,
+  ): boolean {
+    return connection.subscribeGenerations.get(conversationId) === subscribeGeneration;
+  }
+
+  #invalidateSubscribeAttempt(connection: ManagedConnection, conversationId: string): void {
+    const nextGeneration = (connection.subscribeGenerations.get(conversationId) ?? 0) + 1;
+    connection.subscribeGenerations.set(conversationId, nextGeneration);
   }
 
   #startReplaySubscription(
@@ -202,6 +248,7 @@ export class WsMessageHandler {
     conversationId: string,
     lastAcknowledgedSeq: number,
     totalTurnCount: number,
+    subscribeGeneration: number,
   ): Promise<void> {
     this.#buffer.markConversationActive(conversationId);
     connection.replayState.set(conversationId, 'replaying');
@@ -213,6 +260,9 @@ export class WsMessageHandler {
       conversationId,
       totalTurnCount,
     );
+    if (!this.#isActiveSubscribeAttempt(connection, conversationId, subscribeGeneration)) {
+      return;
+    }
     if (allTurnsResult === null) {
       return;
     }
@@ -236,7 +286,12 @@ export class WsMessageHandler {
         this.#daemonClient.getStreamReplay(turn.conversationId, turn.id, lastAcknowledgedSeq),
     );
 
-    if (connection.isClosed) return;
+    if (
+      connection.isClosed ||
+      !this.#isActiveSubscribeAttempt(connection, conversationId, subscribeGeneration)
+    ) {
+      return;
+    }
 
     // ── Abort on any per-turn replay error ──────────────────────────────
     const failedTurnIds = this.#collectReplayFailures(turns, replayResults);
@@ -425,9 +480,12 @@ export class WsMessageHandler {
   }
 
   #handleUnsubscribe(connection: ManagedConnection, conversationId: string): void {
+    this.#invalidateSubscribeAttempt(connection, conversationId);
+    this.#registry.removePendingInterest(connection.connectionId, conversationId);
     this.#registry.removeSubscription(connection.connectionId, conversationId);
     connection.replayState.delete(conversationId);
     connection.pendingEvents.delete(conversationId);
+    connection.lastDeliveredSeq.delete(conversationId);
     if (!this.#registry.hasInterest(conversationId)) {
       this.#buffer.markConversationInactive(conversationId);
     }
@@ -440,7 +498,7 @@ export class WsMessageHandler {
     conversationId: string,
     event: StreamEvent,
   ): boolean {
-    return sendWithBackpressureProtection(
+    const ok = sendWithBackpressureProtection(
       connection,
       {
         type: 'stream-event',
@@ -449,6 +507,13 @@ export class WsMessageHandler {
       },
       this.#bufferHighWaterMark,
     );
+    if (ok) {
+      const prev = connection.lastDeliveredSeq.get(conversationId) ?? 0;
+      if (event.seq > prev) {
+        connection.lastDeliveredSeq.set(conversationId, event.seq);
+      }
+    }
+    return ok;
   }
 
   #sendSubscribed(
@@ -456,6 +521,10 @@ export class WsMessageHandler {
     conversationId: string,
     currentSeq: number,
   ): boolean {
+    const prev = connection.lastDeliveredSeq.get(conversationId) ?? 0;
+    if (currentSeq > prev) {
+      connection.lastDeliveredSeq.set(conversationId, currentSeq);
+    }
     return sendWithBackpressureProtection(
       connection,
       {
@@ -482,6 +551,7 @@ export class WsMessageHandler {
     this.#registry.removeSubscription(connection.connectionId, conversationId);
     connection.replayState.delete(conversationId);
     connection.pendingEvents.delete(conversationId);
+    connection.lastDeliveredSeq.delete(conversationId);
     if (!this.#registry.hasInterest(conversationId)) {
       this.#buffer.markConversationInactive(conversationId);
     }
