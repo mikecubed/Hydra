@@ -2430,6 +2430,12 @@ describe('T030: End-to-end streaming integration', () => {
       const respondResult = await respondToApprovalViaRest(approvalId, 'approve', auth);
       assert.equal(respondResult.status, 200);
       assert.equal(respondResult.body['success'], true);
+      const approvalResponse = respondResult.body['approval'] as Record<string, unknown>;
+      assert.ok(approvalResponse, 'Expected approval in response payload');
+      assert.equal(approvalResponse['id'], approvalId);
+      assert.equal(approvalResponse['turnId'], turnId);
+      assert.equal(approvalResponse['status'], 'responded');
+      assert.equal(approvalResponse['response'], 'approve');
 
       // Daemon emits approval-response event followed by resumed streaming
       const approvalResponseEvent: StreamEvent = {
@@ -2572,6 +2578,11 @@ describe('T030: End-to-end streaming integration', () => {
       const cancelResult = await cancelWorkViaRest(CONV_ID, turnId, auth);
       assert.equal(cancelResult.status, 200);
       assert.equal(cancelResult.body['success'], true);
+      const cancelledTurn = cancelResult.body['turn'] as Record<string, unknown>;
+      assert.ok(cancelledTurn, 'Expected cancelled turn in response payload');
+      assert.equal(cancelledTurn['id'], turnId);
+      assert.equal(cancelledTurn['conversationId'], CONV_ID);
+      assert.equal(cancelledTurn['status'], 'cancelled');
       assert.equal(fakeDaemon.cancelledTurns.length, 1);
       assert.equal(fakeDaemon.cancelledTurns[0].turnId, turnId);
 
@@ -2707,6 +2718,9 @@ describe('T030: End-to-end streaming integration', () => {
       const retryStreamId = retryResult.body['streamId'] as string;
       assert.ok(retryTurn, 'Expected turn in retry response');
       assert.ok(retryStreamId, 'Expected streamId in retry response');
+      assert.equal(retryTurn['conversationId'], CONV_ID);
+      assert.equal(retryTurn['status'], 'executing');
+      assert.equal(retryTurn['parentTurnId'], failedTurnId);
       assert.equal(fakeDaemon.retriedTurns.length, 1);
       assert.equal(fakeDaemon.retriedTurns[0].turnId, failedTurnId);
 

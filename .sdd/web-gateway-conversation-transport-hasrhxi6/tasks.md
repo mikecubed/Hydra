@@ -244,7 +244,7 @@ _Verifies control operations via REST produce correct WebSocket events. Delivers
   - **Depends**: T030, T013, T015b
   - **Validates**: FR-004
 
-- [x] T041 [P2] [US5] **TDD: Artifact notice forwarding** — daemon emits `artifact-notice` stream event during work, assert it arrives through WebSocket with correct typed payload. Tests in `apps/web-gateway/src/__tests__/event-forwarder.test.ts`.
+- [x] T041 [P2] [US5] **TDD: Artifact notice forwarding** — daemon emits `artifact-notice` stream event during work, assert it arrives through WebSocket with correct typed payload. Tests in `apps/web-gateway/src/transport/__tests__/event-forwarder.test.ts`.
   - **Depends**: T027
   - **Validates**: FR-005, FR-010
 
