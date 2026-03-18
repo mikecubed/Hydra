@@ -188,6 +188,15 @@ class FakeEventBridge {
  *  predictable responses. The bridge + sequence generator allow us to simulate
  *  the daemon emitting stream events in response to instruction submission.
  */
+/** Mutable approval state exposed by the fake daemon client. */
+interface FakeApproval {
+  id: string;
+  turnId: string;
+  status: 'pending' | 'responded' | 'expired' | 'stale';
+  prompt: string;
+  response?: string;
+}
+
 function createFakeDaemonClient(
   bridge: FakeEventBridge,
   options: {
@@ -199,10 +208,19 @@ function createFakeDaemonClient(
   wsDaemonClient: Pick<DaemonClient, 'openConversation' | 'loadTurnHistory' | 'getStreamReplay'>;
   submissions: Array<{ conversationId: string; instruction: string; turnId: string }>;
   emitFullStream: (conversationId: string, turnId: string, textChunks: string[]) => StreamEvent[];
+  pendingApprovals: FakeApproval[];
+  cancelledTurns: Array<{ conversationId: string; turnId: string }>;
+  retriedTurns: Array<{ conversationId: string; turnId: string; newTurnId: string }>;
+  nextSeq: () => number;
 } {
   let seq = options.seqStart ?? 1;
   let turnCounter = 0;
   const submissions: Array<{ conversationId: string; instruction: string; turnId: string }> = [];
+  const pendingApprovals: FakeApproval[] = [];
+  const cancelledTurns: Array<{ conversationId: string; turnId: string }> = [];
+  const retriedTurns: Array<{ conversationId: string; turnId: string; newTurnId: string }> = [];
+
+  const nextSeq = (): number => seq++;
 
   const notFoundError: GatewayErrorResponse = {
     ok: false,
@@ -276,6 +294,23 @@ function createFakeDaemonClient(
     return events;
   };
 
+  const makeTurn = (
+    id: string,
+    conversationId: string,
+    position: number,
+    status: string,
+    instruction: string,
+  ) => ({
+    id,
+    conversationId,
+    position,
+    kind: 'operator' as const,
+    attribution: { type: 'operator' as const, label: 'admin' },
+    instruction,
+    status,
+    createdAt: new Date().toISOString(),
+  });
+
   // Minimal DaemonClient fake — only methods used by conversation routes.
   // submitInstruction simulates the daemon accepting and recording the turn.
   const daemonClient = {
@@ -321,6 +356,100 @@ function createFakeDaemonClient(
         },
       };
     },
+    async getPendingApprovals(conversationId: string) {
+      if (!options.validConversationIds.has(conversationId)) {
+        return { error: notFoundError };
+      }
+      return {
+        data: {
+          approvals: pendingApprovals
+            .filter((a) => a.status === 'pending')
+            .map((a) => ({
+              id: a.id,
+              turnId: a.turnId,
+              status: a.status,
+              prompt: a.prompt,
+              context: {},
+              contextHash: `hash-${a.id}`,
+              responseOptions: [
+                { key: 'approve', label: 'Approve' },
+                { key: 'reject', label: 'Reject' },
+              ],
+              createdAt: new Date().toISOString(),
+            })),
+        },
+      };
+    },
+    async respondToApproval(
+      approvalId: string,
+      body: { response: string; acknowledgeStaleness?: boolean; sessionId: string },
+    ) {
+      const approval = pendingApprovals.find((a) => a.id === approvalId);
+      if (!approval) {
+        return {
+          error: {
+            ok: false as const,
+            code: 'APPROVAL_NOT_FOUND',
+            category: 'validation' as const,
+            message: 'Approval not found',
+          },
+        };
+      }
+      approval.status = 'responded';
+      approval.response = body.response;
+      return {
+        data: {
+          success: true,
+          approval: {
+            id: approval.id,
+            turnId: approval.turnId,
+            status: 'responded' as const,
+            prompt: approval.prompt,
+            context: {},
+            contextHash: `hash-${approval.id}`,
+            responseOptions: [
+              { key: 'approve', label: 'Approve' },
+              { key: 'reject', label: 'Reject' },
+            ],
+            response: body.response,
+            respondedAt: new Date().toISOString(),
+            createdAt: new Date().toISOString(),
+          },
+        },
+      };
+    },
+    async cancelWork(conversationId: string, turnId: string) {
+      if (!options.validConversationIds.has(conversationId)) {
+        return { error: notFoundError };
+      }
+      cancelledTurns.push({ conversationId, turnId });
+      return {
+        data: {
+          success: true,
+          turn: makeTurn(turnId, conversationId, 1, 'cancelled', 'cancelled-instruction'),
+        },
+      };
+    },
+    async retryTurn(conversationId: string, turnId: string) {
+      if (!options.validConversationIds.has(conversationId)) {
+        return { error: notFoundError };
+      }
+      turnCounter++;
+      const newTurnId = `turn-${String(turnCounter)}`;
+      retriedTurns.push({ conversationId, turnId, newTurnId });
+      return {
+        data: {
+          turn: makeTurn(
+            newTurnId,
+            conversationId,
+            turnCounter,
+            'streaming',
+            'retried-instruction',
+          ),
+          streamId: `stream-${newTurnId}`,
+        },
+      };
+    },
   } as unknown as DaemonClient;
 
   const wsDaemonClient: Pick<
@@ -336,7 +465,16 @@ function createFakeDaemonClient(
     },
   };
 
-  return { daemonClient, wsDaemonClient, submissions, emitFullStream };
+  return {
+    daemonClient,
+    wsDaemonClient,
+    submissions,
+    emitFullStream,
+    pendingApprovals,
+    cancelledTurns,
+    retriedTurns,
+    nextSeq,
+  };
 }
 
 // ── Test suite ───────────────────────────────────────────────────────────────
@@ -2189,6 +2327,475 @@ describe('T030: End-to-end streaming integration', () => {
       for (const [i, msg] of replayed.entries()) {
         assert.equal(msg['type'], 'stream-event');
         assert.deepEqual(msg['event'], expectedReplay[i]);
+      }
+    });
+  });
+
+  // ── T038: Approval round-trip ──────────────────────────────────────────
+
+  describe('T038: Approval round-trip', () => {
+    async function getApprovalsViaRest(
+      conversationId: string,
+      auth: { sessionId: string; csrfToken: string },
+    ): Promise<{ status: number; body: Record<string, unknown> }> {
+      const res = await fetch(
+        `http://127.0.0.1:${port}/conversations/${conversationId}/approvals`,
+        {
+          headers: {
+            Origin: ORIGIN,
+            Cookie: `__session=${auth.sessionId}; __csrf=${auth.csrfToken}`,
+            'X-CSRF-Token': auth.csrfToken,
+          },
+        },
+      );
+      const body = (await res.json()) as Record<string, unknown>;
+      return { status: res.status, body };
+    }
+
+    async function respondToApprovalViaRest(
+      approvalId: string,
+      response: string,
+      auth: { sessionId: string; csrfToken: string },
+    ): Promise<{ status: number; body: Record<string, unknown> }> {
+      const res = await fetch(`http://127.0.0.1:${port}/approvals/${approvalId}/respond`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Origin: ORIGIN,
+          Cookie: `__session=${auth.sessionId}; __csrf=${auth.csrfToken}`,
+          'X-CSRF-Token': auth.csrfToken,
+        },
+        body: JSON.stringify({ response }),
+      });
+      const body = (await res.json()) as Record<string, unknown>;
+      return { status: res.status, body };
+    }
+
+    it('approval-prompt arrives via WS, REST approval response triggers resumed streaming', async () => {
+      const auth = await loginViaRest();
+      const ws = await connectWebSocket(port, { sessionId: auth.sessionId });
+      openSockets.push(ws);
+
+      // Subscribe to conversation
+      ws.send(JSON.stringify({ type: 'subscribe', conversationId: CONV_ID }));
+      const subMsg = await waitForMessage(ws);
+      assert.equal(subMsg['type'], 'subscribed');
+
+      // Submit instruction that will trigger approval
+      const turnResult = await submitInstructionViaRest(CONV_ID, 'deploy to production', auth);
+      const turnId = (turnResult['turn'] as Record<string, unknown>)['id'] as string;
+
+      // Daemon emits stream-started, then an approval-prompt event
+      const approvalId = 'approval-1';
+      const startedEvent: StreamEvent = {
+        seq: fakeDaemon.nextSeq(),
+        turnId,
+        kind: 'stream-started',
+        payload: { streamId: `stream-${turnId}` },
+        timestamp: new Date().toISOString(),
+      };
+      bridge.emitStreamEvent(CONV_ID, startedEvent);
+
+      const approvalPromptEvent: StreamEvent = {
+        seq: fakeDaemon.nextSeq(),
+        turnId,
+        kind: 'approval-prompt',
+        payload: {
+          approvalId,
+          prompt: 'Approve deployment to production?',
+          options: ['approve', 'reject'],
+        },
+        timestamp: new Date().toISOString(),
+      };
+      bridge.emitStreamEvent(CONV_ID, approvalPromptEvent);
+
+      // Assert both events arrive on WS
+      const earlyMsgs = await waitForMessages(ws, 2);
+      assert.equal(earlyMsgs[0]['type'], 'stream-event');
+      assert.equal((earlyMsgs[0]['event'] as StreamEvent).kind, 'stream-started');
+      assert.equal(earlyMsgs[1]['type'], 'stream-event');
+      assert.equal((earlyMsgs[1]['event'] as StreamEvent).kind, 'approval-prompt');
+      assert.equal((earlyMsgs[1]['event'] as StreamEvent).payload['approvalId'], approvalId);
+
+      // Register the pending approval in the fake so getPendingApprovals returns it
+      fakeDaemon.pendingApprovals.push({
+        id: approvalId,
+        turnId,
+        status: 'pending',
+        prompt: 'Approve deployment to production?',
+      });
+
+      // Verify pending approvals via REST
+      const approvalsResult = await getApprovalsViaRest(CONV_ID, auth);
+      assert.equal(approvalsResult.status, 200);
+      const approvals = approvalsResult.body['approvals'] as Array<Record<string, unknown>>;
+      assert.equal(approvals.length, 1);
+      assert.equal(approvals[0]['id'], approvalId);
+
+      // Respond to approval via REST
+      const respondResult = await respondToApprovalViaRest(approvalId, 'approve', auth);
+      assert.equal(respondResult.status, 200);
+      assert.equal(respondResult.body['success'], true);
+
+      // Daemon emits approval-response event followed by resumed streaming
+      const approvalResponseEvent: StreamEvent = {
+        seq: fakeDaemon.nextSeq(),
+        turnId,
+        kind: 'approval-response',
+        payload: { approvalId, response: 'approve' },
+        timestamp: new Date().toISOString(),
+      };
+      bridge.emitStreamEvent(CONV_ID, approvalResponseEvent);
+
+      const textDelta: StreamEvent = {
+        seq: fakeDaemon.nextSeq(),
+        turnId,
+        kind: 'text-delta',
+        payload: { text: 'Deploying...' },
+        timestamp: new Date().toISOString(),
+      };
+      bridge.emitStreamEvent(CONV_ID, textDelta);
+
+      const completedEvent: StreamEvent = {
+        seq: fakeDaemon.nextSeq(),
+        turnId,
+        kind: 'stream-completed',
+        payload: { responseLength: 12 },
+        timestamp: new Date().toISOString(),
+      };
+      bridge.emitStreamEvent(CONV_ID, completedEvent);
+
+      // Collect the resumed stream events on WS
+      const resumedMsgs = await waitForMessages(ws, 3);
+      assert.equal((resumedMsgs[0]['event'] as StreamEvent).kind, 'approval-response');
+      assert.equal((resumedMsgs[1]['event'] as StreamEvent).kind, 'text-delta');
+      assert.equal((resumedMsgs[1]['event'] as StreamEvent).payload['text'], 'Deploying...');
+      assert.equal((resumedMsgs[2]['event'] as StreamEvent).kind, 'stream-completed');
+
+      // Verify monotonic sequence numbers across the entire flow
+      const allWsMsgs = [...earlyMsgs, ...resumedMsgs];
+      const allSeqs = allWsMsgs.map((m) => (m['event'] as StreamEvent).seq);
+      assertMonotonicSequenceNumbers(allSeqs, 'approval round-trip');
+      for (let i = 1; i < allSeqs.length; i++) {
+        assert.equal(
+          allSeqs[i],
+          allSeqs[i - 1] + 1,
+          `Gap in approval round-trip at seq ${String(allSeqs[i - 1])} → ${String(allSeqs[i])}`,
+        );
+      }
+    });
+
+    it('approval response for unknown approval returns error without affecting WS stream', async () => {
+      const auth = await loginViaRest();
+      const ws = await connectWebSocket(port, { sessionId: auth.sessionId });
+      openSockets.push(ws);
+
+      ws.send(JSON.stringify({ type: 'subscribe', conversationId: CONV_ID }));
+      await waitForMessage(ws); // subscribed
+
+      // Respond to a nonexistent approval
+      const respondResult = await respondToApprovalViaRest('nonexistent-approval', 'approve', auth);
+      assert.ok(respondResult.status >= 400, 'Expected error status for unknown approval');
+
+      // WS should still be usable — emit an event and verify delivery
+      const probeEvent: StreamEvent = {
+        seq: fakeDaemon.nextSeq(),
+        turnId: 'turn-probe',
+        kind: 'text-delta',
+        payload: { text: 'still-alive' },
+        timestamp: new Date().toISOString(),
+      };
+      bridge.emitStreamEvent(CONV_ID, probeEvent);
+
+      const msg = await waitForMessage(ws);
+      assert.equal(msg['type'], 'stream-event');
+      assert.deepEqual(msg['event'], probeEvent);
+    });
+  });
+
+  // ── T039: Cancel round-trip ────────────────────────────────────────────
+
+  describe('T039: Cancel round-trip', () => {
+    async function cancelWorkViaRest(
+      conversationId: string,
+      turnId: string,
+      auth: { sessionId: string; csrfToken: string },
+    ): Promise<{ status: number; body: Record<string, unknown> }> {
+      const res = await fetch(
+        `http://127.0.0.1:${port}/conversations/${conversationId}/turns/${turnId}/cancel`,
+        {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Origin: ORIGIN,
+            Cookie: `__session=${auth.sessionId}; __csrf=${auth.csrfToken}`,
+            'X-CSRF-Token': auth.csrfToken,
+          },
+          body: JSON.stringify({}),
+        },
+      );
+      const body = (await res.json()) as Record<string, unknown>;
+      return { status: res.status, body };
+    }
+
+    it('cancel during streaming: REST cancel succeeds, cancellation event arrives on WS, streaming stops', async () => {
+      const auth = await loginViaRest();
+      const ws = await connectWebSocket(port, { sessionId: auth.sessionId });
+      openSockets.push(ws);
+
+      ws.send(JSON.stringify({ type: 'subscribe', conversationId: CONV_ID }));
+      await waitForMessage(ws); // subscribed
+
+      // Submit instruction and start streaming
+      const turnResult = await submitInstructionViaRest(CONV_ID, 'long running task', auth);
+      const turnId = (turnResult['turn'] as Record<string, unknown>)['id'] as string;
+
+      // Daemon starts streaming
+      const startedEvent: StreamEvent = {
+        seq: fakeDaemon.nextSeq(),
+        turnId,
+        kind: 'stream-started',
+        payload: { streamId: `stream-${turnId}` },
+        timestamp: new Date().toISOString(),
+      };
+      bridge.emitStreamEvent(CONV_ID, startedEvent);
+
+      const delta1: StreamEvent = {
+        seq: fakeDaemon.nextSeq(),
+        turnId,
+        kind: 'text-delta',
+        payload: { text: 'Working on it...' },
+        timestamp: new Date().toISOString(),
+      };
+      bridge.emitStreamEvent(CONV_ID, delta1);
+
+      // Collect the initial streaming events
+      const initialMsgs = await waitForMessages(ws, 2);
+      assert.equal((initialMsgs[0]['event'] as StreamEvent).kind, 'stream-started');
+      assert.equal((initialMsgs[1]['event'] as StreamEvent).kind, 'text-delta');
+
+      // Cancel via REST while streaming is in progress
+      const cancelResult = await cancelWorkViaRest(CONV_ID, turnId, auth);
+      assert.equal(cancelResult.status, 200);
+      assert.equal(cancelResult.body['success'], true);
+      assert.equal(fakeDaemon.cancelledTurns.length, 1);
+      assert.equal(fakeDaemon.cancelledTurns[0].turnId, turnId);
+
+      // Daemon emits cancellation event — streaming terminates
+      const cancellationEvent: StreamEvent = {
+        seq: fakeDaemon.nextSeq(),
+        turnId,
+        kind: 'cancellation',
+        payload: {},
+        timestamp: new Date().toISOString(),
+      };
+      bridge.emitStreamEvent(CONV_ID, cancellationEvent);
+
+      // Assert cancellation event arrives on WS
+      const cancelMsg = await waitForMessage(ws);
+      assert.equal(cancelMsg['type'], 'stream-event');
+      assert.equal((cancelMsg['event'] as StreamEvent).kind, 'cancellation');
+      assert.deepEqual((cancelMsg['event'] as StreamEvent).payload, {});
+
+      // Verify monotonic sequence across started → delta → cancellation
+      const allSeqs = [
+        ...initialMsgs.map((m) => (m['event'] as StreamEvent).seq),
+        (cancelMsg['event'] as StreamEvent).seq,
+      ];
+      assertMonotonicSequenceNumbers(allSeqs, 'cancel round-trip');
+      for (let i = 1; i < allSeqs.length; i++) {
+        assert.equal(
+          allSeqs[i],
+          allSeqs[i - 1] + 1,
+          `Gap in cancel round-trip at seq ${String(allSeqs[i - 1])} → ${String(allSeqs[i])}`,
+        );
+      }
+    });
+
+    it('cancel on a completed turn returns success from daemon without disrupting WS', async () => {
+      const auth = await loginViaRest();
+      const ws = await connectWebSocket(port, { sessionId: auth.sessionId });
+      openSockets.push(ws);
+
+      ws.send(JSON.stringify({ type: 'subscribe', conversationId: CONV_ID }));
+      await waitForMessage(ws); // subscribed
+
+      // Complete a full stream first
+      const turnResult = await submitInstructionViaRest(CONV_ID, 'quick task', auth);
+      const turnId = (turnResult['turn'] as Record<string, unknown>)['id'] as string;
+      const emitted = fakeDaemon.emitFullStream(CONV_ID, turnId, ['done']);
+      await waitForMessages(ws, emitted.length);
+
+      // Cancel the already-completed turn — should still succeed at REST layer
+      const cancelResult = await cancelWorkViaRest(CONV_ID, turnId, auth);
+      assert.equal(cancelResult.status, 200);
+
+      // WS still works — verify with a probe event
+      const probeEvent: StreamEvent = {
+        seq: fakeDaemon.nextSeq(),
+        turnId: 'turn-probe-cancel',
+        kind: 'text-delta',
+        payload: { text: 'ws-still-alive' },
+        timestamp: new Date().toISOString(),
+      };
+      bridge.emitStreamEvent(CONV_ID, probeEvent);
+
+      const msg = await waitForMessage(ws);
+      assert.equal(msg['type'], 'stream-event');
+      assert.deepEqual(msg['event'], probeEvent);
+    });
+  });
+
+  // ── T040: Retry round-trip ─────────────────────────────────────────────
+
+  describe('T040: Retry round-trip', () => {
+    async function retryTurnViaRest(
+      conversationId: string,
+      turnId: string,
+      auth: { sessionId: string; csrfToken: string },
+    ): Promise<{ status: number; body: Record<string, unknown> }> {
+      const res = await fetch(
+        `http://127.0.0.1:${port}/conversations/${conversationId}/turns/${turnId}/retry`,
+        {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Origin: ORIGIN,
+            Cookie: `__session=${auth.sessionId}; __csrf=${auth.csrfToken}`,
+            'X-CSRF-Token': auth.csrfToken,
+          },
+          body: JSON.stringify({}),
+        },
+      );
+      const body = (await res.json()) as Record<string, unknown>;
+      return { status: res.status, body };
+    }
+
+    it('retry after failed turn: REST retry triggers new stream events on WS', async () => {
+      const auth = await loginViaRest();
+      const ws = await connectWebSocket(port, { sessionId: auth.sessionId });
+      openSockets.push(ws);
+
+      ws.send(JSON.stringify({ type: 'subscribe', conversationId: CONV_ID }));
+      await waitForMessage(ws); // subscribed
+
+      // Submit instruction — daemon starts streaming then fails
+      const turnResult = await submitInstructionViaRest(CONV_ID, 'flaky operation', auth);
+      const failedTurnId = (turnResult['turn'] as Record<string, unknown>)['id'] as string;
+
+      const startedEvent: StreamEvent = {
+        seq: fakeDaemon.nextSeq(),
+        turnId: failedTurnId,
+        kind: 'stream-started',
+        payload: { streamId: `stream-${failedTurnId}` },
+        timestamp: new Date().toISOString(),
+      };
+      bridge.emitStreamEvent(CONV_ID, startedEvent);
+
+      const failedEvent: StreamEvent = {
+        seq: fakeDaemon.nextSeq(),
+        turnId: failedTurnId,
+        kind: 'stream-failed',
+        payload: { error: 'Agent crashed', code: 'AGENT_ERROR' },
+        timestamp: new Date().toISOString(),
+      };
+      bridge.emitStreamEvent(CONV_ID, failedEvent);
+
+      // Collect the failure events on WS
+      const failureMsgs = await waitForMessages(ws, 2);
+      assert.equal((failureMsgs[0]['event'] as StreamEvent).kind, 'stream-started');
+      assert.equal((failureMsgs[1]['event'] as StreamEvent).kind, 'stream-failed');
+
+      // Retry via REST
+      const retryResult = await retryTurnViaRest(CONV_ID, failedTurnId, auth);
+      assert.equal(retryResult.status, 200);
+      const retryTurn = retryResult.body['turn'] as Record<string, unknown>;
+      const retryStreamId = retryResult.body['streamId'] as string;
+      assert.ok(retryTurn, 'Expected turn in retry response');
+      assert.ok(retryStreamId, 'Expected streamId in retry response');
+      assert.equal(fakeDaemon.retriedTurns.length, 1);
+      assert.equal(fakeDaemon.retriedTurns[0].turnId, failedTurnId);
+
+      const newTurnId = retryTurn['id'] as string;
+
+      // Daemon emits a fresh stream for the retry turn
+      const retryEvents = fakeDaemon.emitFullStream(CONV_ID, newTurnId, [
+        'Retrying...',
+        'Success!',
+      ]);
+
+      // Collect the retry stream events on WS
+      const retryMsgs = await waitForMessages(ws, retryEvents.length);
+      assert.equal((retryMsgs[0]['event'] as StreamEvent).kind, 'stream-started');
+      assert.equal((lastItem(retryMsgs)['event'] as StreamEvent).kind, 'stream-completed');
+
+      const retryTextDeltas = retryMsgs.filter(
+        (m) => (m['event'] as StreamEvent).kind === 'text-delta',
+      );
+      assert.equal(retryTextDeltas.length, 2);
+      assert.equal((retryTextDeltas[0]['event'] as StreamEvent).payload['text'], 'Retrying...');
+      assert.equal((retryTextDeltas[1]['event'] as StreamEvent).payload['text'], 'Success!');
+
+      // Verify events for the new turn have correct turnId
+      for (const msg of retryMsgs) {
+        assert.equal((msg['event'] as StreamEvent).turnId, newTurnId);
+      }
+
+      // Verify monotonic sequence numbers across original failure + retry
+      const allSeqs = [
+        ...failureMsgs.map((m) => (m['event'] as StreamEvent).seq),
+        ...retryMsgs.map((m) => (m['event'] as StreamEvent).seq),
+      ];
+      assertMonotonicSequenceNumbers(allSeqs, 'retry round-trip');
+      for (let i = 1; i < allSeqs.length; i++) {
+        assert.equal(
+          allSeqs[i],
+          allSeqs[i - 1] + 1,
+          `Gap in retry round-trip at seq ${String(allSeqs[i - 1])} → ${String(allSeqs[i])}`,
+        );
+      }
+    });
+
+    it('retry produces events with different turnId than the original failed turn', async () => {
+      const auth = await loginViaRest();
+      const ws = await connectWebSocket(port, { sessionId: auth.sessionId });
+      openSockets.push(ws);
+
+      ws.send(JSON.stringify({ type: 'subscribe', conversationId: CONV_ID }));
+      await waitForMessage(ws); // subscribed
+
+      // Submit and fail
+      const turnResult = await submitInstructionViaRest(CONV_ID, 'fail then retry', auth);
+      const originalTurnId = (turnResult['turn'] as Record<string, unknown>)['id'] as string;
+
+      const failEvent: StreamEvent = {
+        seq: fakeDaemon.nextSeq(),
+        turnId: originalTurnId,
+        kind: 'stream-failed',
+        payload: { error: 'timeout' },
+        timestamp: new Date().toISOString(),
+      };
+      bridge.emitStreamEvent(CONV_ID, failEvent);
+      await waitForMessage(ws); // stream-failed
+
+      // Retry
+      const retryResult = await retryTurnViaRest(CONV_ID, originalTurnId, auth);
+      assert.equal(retryResult.status, 200);
+      const newTurnId = (retryResult.body['turn'] as Record<string, unknown>)['id'] as string;
+
+      // The new turn must have a different ID
+      assert.notEqual(newTurnId, originalTurnId, 'Retry should create a new turn');
+
+      // Emit retry stream and verify turnId on WS
+      const retryEvents = fakeDaemon.emitFullStream(CONV_ID, newTurnId, ['recovered']);
+      const retryMsgs = await waitForMessages(ws, retryEvents.length);
+
+      for (const msg of retryMsgs) {
+        assert.equal(
+          (msg['event'] as StreamEvent).turnId,
+          newTurnId,
+          'Retry events should reference the new turnId',
+        );
       }
     });
   });
