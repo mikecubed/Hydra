@@ -315,8 +315,7 @@ export class StreamManager {
       if (!TERMINAL_STREAM_STATUSES.has(state.status)) continue;
       if (state.completedAt === undefined) continue;
       if (new Date(state.completedAt).getTime() <= cutoff) {
-        // eslint-disable-next-line unicorn/prefer-at -- `.at()` conflicts with this repo's Node compatibility lint rule.
-        const highSeq = state.events.slice(-1).pop()?.seq ?? 0;
+        const highSeq = state.events.at(-1)?.seq ?? 0;
         this.purgedHighSeqByTurnId.set(state.turnId, {
           highSeq,
           purgedAt: Date.now(),

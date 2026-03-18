@@ -37,8 +37,7 @@ export interface MessageHandlerDeps {
 const DAEMON_REPLAY_CONCURRENCY = 8;
 
 function lastSeq(events: ReadonlyArray<StreamEvent>): number | undefined {
-  // eslint-disable-next-line unicorn/prefer-at -- `.at()` conflicts with this package's Node compatibility lint rule.
-  return events.slice(-1).pop()?.seq;
+  return events.at(-1)?.seq;
 }
 
 export class WsMessageHandler {
