@@ -294,10 +294,13 @@ export class StreamManager {
   }
 
   /**
-   * Remove all purge tombstones. Intended for tests that need to simulate
-   * tombstone eviction without reaching into private state.
+   * Remove all purge tombstones.
+   *
+   * **Test-only** — this is a narrow test seam for simulating tombstone
+   * eviction without reaching into private state.  Not part of the
+   * runtime API; do not call from production code.
    */
-  clearTombstones(): void {
+  _testOnlyClearTombstones(): void {
     this.purgedHighSeqByTurnId.clear();
   }
 

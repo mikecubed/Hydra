@@ -279,7 +279,7 @@ describe('Conversation routes — turns', () => {
     deps.streamManager.createStream(turn.id);
     deps.streamManager.completeStream(turn.id);
     deps.streamManager.purgeTerminalStreams(0);
-    deps.streamManager.clearTombstones();
+    deps.streamManager._testOnlyClearTombstones();
 
     const req = createMockReq('GET', `/conversations/${conv.id}/turns/${turn.id}/stream?since=0`);
     const res = createMockRes();
@@ -304,7 +304,7 @@ describe('Conversation routes — turns', () => {
     const finalSeq = allEvents.at(-1)?.seq;
     assert.notEqual(finalSeq, undefined);
     deps.streamManager.purgeTerminalStreams(0);
-    deps.streamManager.clearTombstones();
+    deps.streamManager._testOnlyClearTombstones();
 
     const req = createMockReq(
       'GET',
