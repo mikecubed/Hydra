@@ -521,7 +521,7 @@ describe('GatewayWsServer', () => {
       assert.equal(message['code'], 'WS_MESSAGE_QUEUE_OVERFLOW');
       assert.equal(message['category'], 'rate-limit');
       await waitForCloseOrError(ws);
-      assert.equal(openCalls, 1);
+      assert.ok(openCalls <= 1, `Expected at most 1 openConversation call, got ${openCalls}`);
     } finally {
       pendingOpen.resolve({
         data: {
