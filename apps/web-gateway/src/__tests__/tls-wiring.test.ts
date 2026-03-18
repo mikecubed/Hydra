@@ -7,7 +7,6 @@
  * - TLS config sets secure cookies and HSTS
  * - secureCookies defaults correctly based on TLS presence
  */
-/* eslint-disable n/no-unsupported-features/node-builtins -- Request is stable in Node 24 */
 import { describe, it, afterEach } from 'node:test';
 import assert from 'node:assert/strict';
 import { createGatewayApp, type GatewayApp } from '../index.ts';

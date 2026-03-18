@@ -5,7 +5,6 @@
  * work-control, artifacts, and activities. Uses a mock DaemonClient
  * injected via the route factory.
  */
-/* eslint-disable n/no-unsupported-features/node-builtins -- Request & test.mock are stable in Node 24 */
 import { describe, it, beforeEach, mock } from 'node:test';
 import assert from 'node:assert/strict';
 import { Hono } from 'hono';

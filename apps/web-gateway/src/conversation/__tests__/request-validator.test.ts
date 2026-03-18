@@ -4,7 +4,6 @@
  * Validates that the middleware runs Zod safeParse on request bodies
  * and returns GatewayErrorResponse with category 'validation' on failure.
  */
-/* eslint-disable n/no-unsupported-features/node-builtins -- Request is stable in Node 24 */
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import { Hono } from 'hono';

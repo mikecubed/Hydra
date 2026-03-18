@@ -4,7 +4,6 @@
  * Exercises origin guard, CSRF, session auth, and route composition
  * through the fully-assembled Hono stack created by createGatewayApp().
  */
-/* eslint-disable n/no-unsupported-features/node-builtins -- Request is stable in Node 24 */
 import { describe, it, beforeEach, afterEach } from 'node:test';
 import assert from 'node:assert/strict';
 import { createGatewayApp, type GatewayApp } from '../index.ts';
