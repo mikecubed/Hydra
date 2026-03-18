@@ -3,7 +3,7 @@
  *
  * Tests the route handler logic using mock HTTP request/response objects.
  */
-import { describe, it, beforeEach } from 'node:test';
+import { describe, it, beforeEach, mock } from 'node:test';
 import assert from 'node:assert/strict';
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import { Readable } from 'node:stream';
@@ -53,28 +53,28 @@ interface MockResponse {
 }
 
 function createMockRes(): MockResponse {
-  const mock: MockResponse = {
+  const responseMock: MockResponse = {
     statusCode: 0,
     body: null,
     headers: {},
     writeHead(statusCode: number, headers: Record<string, string>) {
-      mock.statusCode = statusCode;
-      mock.headers = headers;
+      responseMock.statusCode = statusCode;
+      responseMock.headers = headers;
     },
     end(data: string) {
       try {
-        mock.body = JSON.parse(data);
+        responseMock.body = JSON.parse(data);
       } catch {
-        mock.body = data;
+        responseMock.body = data;
       }
     },
   };
-  return mock;
+  return responseMock;
 }
 
-async function waitForResponse(mock: MockResponse, maxWait = 100): Promise<void> {
+async function waitForResponse(responseMock: MockResponse, maxWait = 100): Promise<void> {
   const start = Date.now();
-  while (mock.body === null && Date.now() - start < maxWait) {
+  while (responseMock.body === null && Date.now() - start < maxWait) {
     await new Promise<void>((resolve) => {
       setTimeout(resolve, 5);
     });
@@ -2740,5 +2740,112 @@ describe('Conversation routes — contract parameter names', () => {
     assert.equal(res.statusCode, 400);
     const body = res.body as Record<string, unknown>;
     assert.ok((body['error'] as string).includes('lastAcknowledgedSeq'));
+  });
+});
+
+// ── approval-response emitEvent error handling ───────────────────────────────
+
+describe('Conversation routes — approval-response emitEvent error handling', () => {
+  it('stream-lifecycle emitEvent failure returns 200 without console.warn', async () => {
+    // No stream created — emitEvent will throw "No active stream for turn"
+    const conv = deps.store.createConversation();
+    const turn = deps.store.appendTurn(conv.id, {
+      kind: 'operator',
+      instruction: 'Deploy',
+      attribution: operatorAttribution,
+    });
+    const approval = deps.store.createApprovalRequest(turn.id, {
+      prompt: 'Approve?',
+      context: {},
+      contextHash: contextHash({ instruction: 'Deploy' }),
+      responseOptions: [{ key: 'ok', label: 'OK' }],
+    });
+
+    const warnMock = mock.method(console, 'warn');
+
+    try {
+      const req = createMockReq(
+        'POST',
+        `/approvals/${approval.id}/respond`,
+        { response: 'ok' },
+        { 'x-session-id': 'sess-1' },
+      );
+      const res = createMockRes();
+      handleConversationRoute(req, res as unknown as ServerResponse, deps);
+      await waitForResponse(res);
+
+      assert.equal(res.statusCode, 200);
+      assert.equal((res.body as Record<string, unknown>)['success'], true);
+      assert.equal(
+        warnMock.mock.callCount(),
+        0,
+        'expected no console.warn for stream-lifecycle errors',
+      );
+    } finally {
+      warnMock.mock.restore();
+    }
+  });
+
+  it('unexpected emitEvent failure is logged but returns 200', async () => {
+    const conv = deps.store.createConversation();
+    const turn = deps.store.appendTurn(conv.id, {
+      kind: 'operator',
+      instruction: 'Deploy',
+      attribution: operatorAttribution,
+    });
+    deps.store.updateTurnStatus(turn.id, 'executing');
+    deps.streamManager.createStream(turn.id);
+
+    const approval = deps.store.createApprovalRequest(turn.id, {
+      prompt: 'Approve?',
+      context: {},
+      contextHash: contextHash({ instruction: 'Deploy' }),
+      responseOptions: [{ key: 'ok', label: 'OK' }],
+    });
+    // Emit the approval prompt so stream is active
+    deps.streamManager.emitEvent(turn.id, 'approval-prompt', { approvalId: approval.id });
+
+    // Sabotage emitEvent to throw an unexpected error on the next call
+    const originalEmit = deps.streamManager.emitEvent.bind(deps.streamManager);
+    let callCount = 0;
+    deps.streamManager.emitEvent = (...args: Parameters<typeof originalEmit>) => {
+      callCount++;
+      if (callCount === 1) {
+        throw new Error('disk I/O exploded');
+      }
+      return originalEmit(...args);
+    };
+
+    const warnMock = mock.method(console, 'warn');
+
+    try {
+      const req = createMockReq(
+        'POST',
+        `/approvals/${approval.id}/respond`,
+        { response: 'ok' },
+        { 'x-session-id': 'sess-1' },
+      );
+      const res = createMockRes();
+      handleConversationRoute(req, res as unknown as ServerResponse, deps);
+      await waitForResponse(res);
+
+      assert.equal(res.statusCode, 200, 'request should still succeed');
+      assert.equal((res.body as Record<string, unknown>)['success'], true);
+      assert.equal(
+        warnMock.mock.callCount(),
+        1,
+        'expected exactly one console.warn for unexpected error',
+      );
+      assert.ok(
+        (warnMock.mock.calls[0].arguments[0] as string).includes('disk I/O exploded'),
+        'warning should contain the original error message',
+      );
+      assert.ok(
+        (warnMock.mock.calls[0].arguments[0] as string).includes('[conversation-routes]'),
+        'warning should include module tag',
+      );
+    } finally {
+      warnMock.mock.restore();
+    }
   });
 });
