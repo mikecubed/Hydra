@@ -168,31 +168,31 @@ foundation for US2 streaming. Requires `ws` dependency._
 _Wires daemon event bridge to WebSocket connections. Delivers US2 (P1). Introduces
 the event buffer and subscription message handling._
 
-- [ ] T025 [P1] [US2, US4] **TDD: `event-buffer.ts`** — bounded per-conversation ring buffer. `push(conversationId, event)`: append, evict oldest if at capacity. `getEventsSince(conversationId, sinceSeq)`: return events with `seq > sinceSeq` in order. `getHighwaterSeq(conversationId)`: return newest seq or 0. `hasEventsSince(conversationId, sinceSeq)`: check buffer coverage. `evictConversation(conversationId)`: remove buffer. Default capacity 1000, configurable. Write tests for: insertion, eviction at boundary, retrieval correctness, empty buffer, seq-based filtering, gap-free ordering guarantee, capacity enforcement. Implement `apps/web-gateway/src/transport/event-buffer.ts`. Tests in `apps/web-gateway/src/__tests__/event-buffer.test.ts`.
+- [x] T025 [P1] [US2, US4] **TDD: `event-buffer.ts`** — bounded per-conversation ring buffer. `push(conversationId, event)`: append, evict oldest if at capacity. `getEventsSince(conversationId, sinceSeq)`: return events with `seq > sinceSeq` in order. `getHighwaterSeq(conversationId)`: return newest seq or 0. `hasEventsSince(conversationId, sinceSeq)`: check buffer coverage. `evictConversation(conversationId)`: remove buffer. Default capacity 1000, configurable. Write tests for: insertion, eviction at boundary, retrieval correctness, empty buffer, seq-based filtering, gap-free ordering guarantee, capacity enforcement. Implement `apps/web-gateway/src/transport/event-buffer.ts`. Tests in `apps/web-gateway/src/__tests__/event-buffer.test.ts`.
   - **Depends**: —
   - **Validates**: FR-022
 
-- [ ] T026 [P1] [US2] **TDD: `ws-message-handler.ts`** — handle `subscribe`, `unsubscribe`, and `ack` messages. On `subscribe`: validate conversationId exists via `daemon-client` existence check, add to `ConnectionRegistry`, respond with `subscribed` + `currentSeq`. **Replay barrier**: if `lastAcknowledgedSeq` is provided and the buffer covers the range, set `replayState.set(conversationId, 'replaying')` before sending buffered events. While the conversation's replay state is `'replaying'`, the event forwarder (T027) MUST queue live events for that conversation in the per-conversation pending queue (`pendingEvents.get(conversationId)`) rather than sending immediately; events for other conversations on the same connection are unaffected. After buffer replay completes, flush the per-conversation pending queue (deduplicate by `seq`, discard any `seq ≤ lastReplayedSeq`), set `replayState.set(conversationId, 'live')`, and resume normal forwarding. On `unsubscribe`: remove from registry, delete `replayState` and `pendingEvents` entries for the conversation, respond `unsubscribed`. On `ack`: update connection's `lastAckSeq`. On invalid message: respond `type: 'error'` without closing connection (FR-013). Write tests for each flow including malformed messages, subscribe-with-seq buffer-hit replay, **concurrent live event arrival during replay (assert held back, then flushed in order)**, **and simultaneous replay on one conversation while another conversation remains live on the same connection**. Implement `apps/web-gateway/src/transport/ws-message-handler.ts`.
+- [x] T026 [P1] [US2] **TDD: `ws-message-handler.ts`** — handle `subscribe`, `unsubscribe`, and `ack` messages. On `subscribe`: validate conversationId exists via `daemon-client` existence check, add to `ConnectionRegistry`, respond with `subscribed` + `currentSeq`. **Replay barrier**: if `lastAcknowledgedSeq` is provided and the buffer covers the range, set `replayState.set(conversationId, 'replaying')` before sending buffered events. While the conversation's replay state is `'replaying'`, the event forwarder (T027) MUST queue live events for that conversation in the per-conversation pending queue (`pendingEvents.get(conversationId)`) rather than sending immediately; events for other conversations on the same connection are unaffected. After buffer replay completes, flush the per-conversation pending queue (deduplicate by `seq`, discard any `seq ≤ lastReplayedSeq`), set `replayState.set(conversationId, 'live')`, and resume normal forwarding. On `unsubscribe`: remove from registry, delete `replayState` and `pendingEvents` entries for the conversation, respond `unsubscribed`. On `ack`: update connection's `lastAckSeq`. On invalid message: respond `type: 'error'` without closing connection (FR-013). Write tests for each flow including malformed messages, subscribe-with-seq buffer-hit replay, **concurrent live event arrival during replay (assert held back, then flushed in order)**, **and simultaneous replay on one conversation while another conversation remains live on the same connection**. Implement `apps/web-gateway/src/transport/ws-message-handler.ts`.
   - **Depends**: T003, T018, T019, T025
   - **Validates**: FR-010, FR-013, FR-022, FR-024
 
-- [ ] T027 [P1] [US2] **TDD: `event-forwarder.ts`** — subscribe to daemon `EventBridge` `stream-event` emissions. For each event: (a) push to `EventBuffer`, (b) look up connections subscribed to `conversationId` via `ConnectionRegistry.getByConversation()`, (c) **check each connection's per-conversation replay state**: if `replayState.get(conversationId)` is `'replaying'` (set by T026's replay barrier), append the event to `pendingEvents.get(conversationId)` instead of sending immediately; if the conversation's state is `'live'` (or has no entry), serialize as `stream-event` WS message per `ws-protocol` and send. Write tests asserting: single subscriber receives event, multiple subscribers all receive, unsubscribed connections excluded, event payload matches daemon `StreamEvent` shape, buffer is populated on every forward, **a conversation in `replaying` state does NOT receive live events until replay completes (events are queued and flushed in order)**, **and a connection replaying conversation A still delivers live events for conversation B without delay**. Implement `apps/web-gateway/src/transport/event-forwarder.ts`.
+- [x] T027 [P1] [US2] **TDD: `event-forwarder.ts`** — subscribe to daemon `EventBridge` `stream-event` emissions. For each event: (a) push to `EventBuffer`, (b) look up connections subscribed to `conversationId` via `ConnectionRegistry.getByConversation()`, (c) **check each connection's per-conversation replay state**: if `replayState.get(conversationId)` is `'replaying'` (set by T026's replay barrier), append the event to `pendingEvents.get(conversationId)` instead of sending immediately; if the conversation's state is `'live'` (or has no entry), serialize as `stream-event` WS message per `ws-protocol` and send. Write tests asserting: single subscriber receives event, multiple subscribers all receive, unsubscribed connections excluded, event payload matches daemon `StreamEvent` shape, buffer is populated on every forward, **a conversation in `replaying` state does NOT receive live events until replay completes (events are queued and flushed in order)**, **and a connection replaying conversation A still delivers live events for conversation B without delay**. Implement `apps/web-gateway/src/transport/event-forwarder.ts`.
   - **Depends**: T005, T018, T019, T025
   - **Validates**: FR-010, FR-011, FR-024, SC-012
 
-- [ ] T028 [P1] [US2] **TDD: Multi-tab event forwarding** — write tests asserting that multiple connections (different tabs, same session) subscribed to the same conversation all receive the same stream events. One tab submits instruction via REST, both tabs see events. Tests in `apps/web-gateway/src/__tests__/event-forwarder.test.ts`.
+- [x] T028 [P1] [US2] **TDD: Multi-tab event forwarding** — write tests asserting that multiple connections (different tabs, same session) subscribed to the same conversation all receive the same stream events. One tab submits instruction via REST, both tabs see events. Tests in `apps/web-gateway/src/__tests__/event-forwarder.test.ts`.
   - **Depends**: T027
   - **Validates**: FR-010 (edge case)
 
-- [ ] T029 [P1] [US2] **TDD: Buffer overflow / backpressure handling** — when a connection's WebSocket send buffer backs up (slow client), the gateway closes the connection with `WS_BUFFER_OVERFLOW` structured error so the browser can reconnect via resume flow. Write tests with artificial backpressure. Implement in `apps/web-gateway/src/transport/event-forwarder.ts`.
+- [x] T029 [P1] [US2] **TDD: Buffer overflow / backpressure handling** — when a connection's WebSocket send buffer backs up (slow client), the gateway closes the connection with `WS_BUFFER_OVERFLOW` structured error so the browser can reconnect via resume flow. Write tests with artificial backpressure. Implement in `apps/web-gateway/src/transport/event-forwarder.ts`.
   - **Depends**: T027
   - **Validates**: FR-013 (edge case)
 
-- [ ] T030 [P1] [US2] **Integration test: end-to-end streaming** — create full gateway app with daemon + event bridge, authenticate, open WebSocket, subscribe to conversation, submit instruction via REST, assert stream events (`stream-started`, `text-delta`, `stream-completed`) arrive through WebSocket as daemon produces them. Verify sequence numbers are monotonic. Implement `apps/web-gateway/src/__tests__/transport-integration.test.ts`.
+- [x] T030 [P1] [US2] **Integration test: end-to-end streaming** — create full gateway app with daemon + event bridge, authenticate, open WebSocket, subscribe to conversation, submit instruction via REST, assert stream events (`stream-started`, `text-delta`, `stream-completed`) arrive through WebSocket as daemon produces them. Verify sequence numbers are monotonic. Implement `apps/web-gateway/src/__tests__/transport-integration.test.ts`.
   - **Depends**: T015, T023, T026, T027
   - **Validates**: SC-001 (full path), SC-002, SC-012
 
-- [ ] T031 [P1] [US2] **Quality gate: Phase 4** — `npm run quality` and `npm test`. Full streaming pipeline functional.
+- [x] T031 [P1] [US2] **Quality gate: Phase 4** — `npm run quality` and `npm test`. Full streaming pipeline functional.
   - **Depends**: T030
   - **Validates**: SC-011
 
@@ -202,27 +202,27 @@ the event buffer and subscription message handling._
 
 _Completes reconnect protocol with daemon fallback for buffer misses. Delivers US4 (P2)._
 
-- [ ] T032 [P2] [US4] **TDD: Daemon fallback replay** — when `subscribe` with `lastAcknowledgedSeq` arrives and `EventBuffer.hasEventsSince()` returns false (requested seq < buffer's `oldestSeq`), fall back to daemon per-turn replay: (a) list active/recent turns for the conversation via `daemon-client`, (b) call the daemon-client's stream replay method (wrapping `GET /conversations/:convId/turns/:turnId/stream?lastAcknowledgedSeq=N` — coverage established in T003) for each relevant turn, (c) merge and deduplicate per-turn results into single ordered replay stream keyed by `seq`, (d) forward replayed events to client while maintaining the T026 per-conversation replay barrier (`replayState.get(conversationId)` stays `'replaying'`; live events for this conversation queued by T027), (e) after all daemon-fetched events are sent, flush `pendingEvents.get(conversationId)` and set `replayState.set(conversationId, 'live')`. Write tests for fallback path including multi-turn conversations, turns with no missed events, **and concurrent live event arrival during daemon-sourced replay**. Implement in `apps/web-gateway/src/transport/ws-message-handler.ts` (extend subscribe handler).
+- [x] T032 [P2] [US4] **TDD: Daemon fallback replay** — when `subscribe` with `lastAcknowledgedSeq` arrives and `EventBuffer.hasEventsSince()` returns false (requested seq < buffer's `oldestSeq`), fall back to daemon per-turn replay: (a) list active/recent turns for the conversation via `daemon-client`, (b) call the daemon-client's stream replay method (wrapping `GET /conversations/:convId/turns/:turnId/stream?lastAcknowledgedSeq=N` — coverage established in T003) for each relevant turn, (c) merge and deduplicate per-turn results into single ordered replay stream keyed by `seq`, (d) forward replayed events to client while maintaining the T026 per-conversation replay barrier (`replayState.get(conversationId)` stays `'replaying'`; live events for this conversation queued by T027), (e) after all daemon-fetched events are sent, flush `pendingEvents.get(conversationId)` and set `replayState.set(conversationId, 'live')`. Write tests for fallback path including multi-turn conversations, turns with no missed events, **and concurrent live event arrival during daemon-sourced replay**. Implement in `apps/web-gateway/src/transport/ws-message-handler.ts` (extend subscribe handler).
   - **Depends**: T003 (stream replay route coverage), T025, T026 (replay barrier)
   - **Validates**: FR-022, FR-024
 
-- [ ] T033 [P2] [US4] **TDD: End-to-end reconnect flow** — test full reconnect cycle: (a) authenticate + establish WS + subscribe, (b) receive some events, (c) disconnect mid-stream, (d) reconnect with new WS on same session, (e) send `subscribe` with `lastAcknowledgedSeq`, (f) assert all missed events replayed in order, (g) live streaming resumes seamlessly. Test both buffer-hit path and daemon-fallback path. Implement in `apps/web-gateway/src/__tests__/transport-integration.test.ts`.
+- [x] T033 [P2] [US4] **TDD: End-to-end reconnect flow** — test full reconnect cycle: (a) authenticate + establish WS + subscribe, (b) receive some events, (c) disconnect mid-stream, (d) reconnect with new WS on same session, (e) send `subscribe` with `lastAcknowledgedSeq`, (f) assert all missed events replayed in order, (g) live streaming resumes seamlessly. Test both buffer-hit path and daemon-fallback path. Implement in `apps/web-gateway/src/__tests__/transport-integration.test.ts`.
   - **Depends**: T030, T032
   - **Validates**: FR-022, FR-023, SC-003
 
-- [ ] T034 [P2] [US4] **TDD: Replay ordering guarantees** — write tests asserting FR-024: replayed events preserve original ordering and sequence numbers with zero reordering, zero gaps, zero duplicates. Include tests where events arrive during the replay window and where daemon fallback merges events from multiple turns. Tests in `apps/web-gateway/src/__tests__/transport-integration.test.ts`.
+- [x] T034 [P2] [US4] **TDD: Replay ordering guarantees** — write tests asserting FR-024: replayed events preserve original ordering and sequence numbers with zero reordering, zero gaps, zero duplicates. Include tests where events arrive during the replay window and where daemon fallback merges events from multiple turns. Tests in `apps/web-gateway/src/__tests__/transport-integration.test.ts`.
   - **Depends**: T033
   - **Validates**: FR-024
 
-- [ ] T035 [P2] [US4] **TDD: Reconnect with invalid session** — reconnect attempt with expired or invalidated session is rejected before any events are replayed (FR-025). Write negative tests: expired session → 401 on WS upgrade, invalidated session → 401 on WS upgrade. Tests in `apps/web-gateway/src/__tests__/ws-connection.test.ts`.
+- [x] T035 [P2] [US4] **TDD: Reconnect with invalid session** — reconnect attempt with expired or invalidated session is rejected before any events are replayed (FR-025). Write negative tests: expired session → 401 on WS upgrade, invalidated session → 401 on WS upgrade. Tests in `apps/web-gateway/src/__tests__/ws-connection.test.ts`.
   - **Depends**: T021, T032
   - **Validates**: FR-025, SC-004
 
-- [ ] T036 [P2] [US4] **TDD: Page refresh scenario** — simulate full page refresh: establish connection, receive events, close connection (page unload), create new connection with same session, subscribe with last ack seq, assert replay + live resume. Tests in `apps/web-gateway/src/__tests__/transport-integration.test.ts`.
+- [x] T036 [P2] [US4] **TDD: Page refresh scenario** — simulate full page refresh: establish connection, receive events, close connection (page unload), create new connection with same session, subscribe with last ack seq, assert replay + live resume. Tests in `apps/web-gateway/src/__tests__/transport-integration.test.ts`.
   - **Depends**: T033
   - **Validates**: FR-023
 
-- [ ] T037 [P2] [US4] **Quality gate: Phase 5** — `npm run quality` and `npm test`. Reconnect/resume fully functional.
+- [x] T037 [P2] [US4] **Quality gate: Phase 5** — `npm run quality` and `npm test`. Reconnect/resume fully functional.
   - **Depends**: T036
   - **Validates**: SC-003, SC-011
 
@@ -374,14 +374,25 @@ _(Some tasks serve multiple stories — counted under each.)_
 
 ### Phasing & Deployment Notes
 
-**Phases 0–4 (T001–T031)** deliver the P1 user stories and are independently deployable:
+**Phases 0–3 (T001–T024)** are now complete on `main` and provide the deployed
+transport foundation:
 
-1. ✅ **US1** — REST mediation for P1 conversation operations (lifecycle, turns, artifacts/activities; approval & work-control routes deferred to Phase 6)
-2. ✅ **US2** — Real-time streaming from daemon → gateway → browser via WebSocket
-3. ✅ **US3** — WebSocket session binding with full security enforcement
+1. ✅ **US1** — REST mediation for P1 conversation operations (lifecycle, turns,
+   artifacts/activities; approval & work-control routes deferred to Phase 6)
+2. ✅ **US3** — WebSocket session binding with full security enforcement
+3. ✅ **US2 foundation** — authenticated WebSocket transport, connection
+   registry, and session/daemon lifecycle notifications are in place
 
-This provides the minimum transport surface the `web-chat-workspace` slice needs
-to begin building browser UI against REST and live streaming.
+**Phase 4 (T025–T031)** is now complete on `feat/web-gateway-transport-phase4`.
+It landed the missing P1 streaming path by wiring daemon stream events through
+the gateway to subscribed browser connections, including buffering,
+replay-barrier handling, backpressure protection, bounded replay retention,
+bounded inbound WebSocket backlog, and the first end-to-end streaming
+integration tests.
+
+This completed Phase 4 batch is the transport surface the
+`web-chat-workspace` slice needs before browser UI work can rely on live daemon
+output.
 
 **Phases 5–8 (T032–T061) are required for spec compliance** — they are not optional
 follow-ons. The spec mandates reconnect/resume (FR-022–025, SC-003), structured
@@ -408,12 +419,47 @@ T018 ──────────────────────┘
 T025 → T026 → T027 ──────────────────→ T032 → T033 → T034/T036
 ```
 
+### Ready Parallel Batch After Phase 4
+
+- **Coordinator branch** — keep the active feature branch/PR as the integration
+  surface for any new transport batch. If Phase 4 lands on `main` first, cut a
+  fresh Phase 5 coordinator branch from `main`; otherwise target the current
+  coordinator branch instead of opening track work directly against `main`.
+- **Track A — reconnect/replay critical path** (`T032`–`T037`) — owns
+  `ws-message-handler.ts`, replay helpers, and the reconnect sections of
+  `transport-integration.test.ts`. Keep this track serial because `T032`
+  establishes the daemon-fallback replay contract that `T033`–`T037` build on.
+- **Track B — control round-trips** (`T038`–`T040`) — owns the approval/cancel/
+  retry additions in `transport-integration.test.ts`. Keep these together in one
+  worktree because they share the same integration harness and daemon-control
+  fixtures.
+- **Track C — artifact forwarding** (`T041`) — owns
+  `event-forwarder.test.ts` and any minimal forwarding changes needed for
+  `artifact-notice` coverage. This is safe to run separately once Track A is not
+  changing the event envelope.
+- **Track D — error and edge-case coverage**, grouped by shared test-file
+  ownership so parallel work does not collide:
+  - `T043`, `T046`, `T047` in `conversation-routes.test.ts`
+  - `T045` in `request-validator.test.ts`
+  - `T044`, `T050` in `ws-connection.test.ts`
+  - `T048`, `T051` in `ws-message-handler.test.ts`
+  - `T049`, `T052` in `transport-integration.test.ts`
+- **Blocked final batch** — `T054`–`T061` stay blocked until reconnect/resume
+  (`T037`) and edge/error coverage (`T053`) are complete.
+
 ## Next Steps
 
-1. **Implement** — work through tasks in order (T001 → T061)
-2. **Attempt direct implementation** — skip formal task tracking and implement with context:
-   - Feature: Web Gateway Conversation Transport
-   - Tech stack: TypeScript 5.9+, Hono 4.x, `ws`, Zod 4.x, `node:test`
-   - Key requirements: REST mediation (FR-001–007), WebSocket streaming (FR-008–013), session binding (FR-014–017), reconnect/resume (FR-022–025), error boundaries (FR-026–028)
-   - Success criteria: SC-001 through SC-012
-3. **Iterate on tasks** — refine dependencies, split/merge tasks, adjust scope
+1. **Phase 5 is complete on `feat/web-gateway-transport-phase4`** — `T032`
+   through `T037` now validate reconnect/resume, ordering guarantees, invalid
+   session rejection, and page-refresh recovery on the coordinator branch.
+2. **Launch only file-isolated follow-up tracks** — `T038`+ can now run later
+   in separate worktrees using the groupings above, but avoid splitting tasks
+   that share `transport-integration.test.ts`, `ws-message-handler.test.ts`, or
+   `conversation-routes.test.ts` across multiple concurrent tracks.
+3. **Prefer real transport/runtime wiring in tests** — when Phase 6+ tests can
+   use composed gateway/daemon service code, avoid mocking that behavior and
+   reserve fakes for true external boundaries only.
+4. **Keep the Phase 5 runtime path stable** — follow-on transport work
+   should extend the validated streaming and replay paths rather than reworking
+   transport bootstrap, replay-retention guardrails, or inbound backlog
+   protections unless a concrete bug requires it.

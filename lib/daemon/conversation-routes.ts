@@ -532,6 +532,27 @@ function handleSubscribeToStream(
     return;
   }
   const sinceSeq = sinceResult.value ?? 0;
+  const streamId = deps.streamManager.getStreamId(turnId);
+  if (streamId === undefined) {
+    if (turn.status === 'completed' || turn.status === 'failed' || turn.status === 'cancelled') {
+      const purgedHighSeq = deps.streamManager.getPurgedHighSeq(turnId);
+      const finalStreamSeq = deps.store.getTurnStreamHighSeq(turnId);
+      // 410 only when a purge tombstone exists and the client has not yet caught up.
+      // If the tombstone was already evicted, preserve expiry semantics using
+      // the last stream sequence persisted on the turn.
+      if (
+        (purgedHighSeq !== undefined && sinceSeq < purgedHighSeq) ||
+        (purgedHighSeq === undefined && finalStreamSeq !== undefined && sinceSeq < finalStreamSeq)
+      ) {
+        sendError(res, 410, 'Stream history expired for turn');
+        return;
+      }
+      sendJson(res, 200, { events: [] });
+      return;
+    }
+    sendJson(res, 200, { events: [] });
+    return;
+  }
   const events = deps.streamManager.getStreamEventsSince(turnId, sinceSeq);
   sendJson(res, 200, { events });
 }
@@ -622,6 +643,13 @@ function resumeAfterApproval(
   }
 }
 
+function logApprovalResponseEmitError(turnId: string, err: unknown): void {
+  const detail = err instanceof Error ? err.message : String(err);
+  console.warn(
+    `[conversation-routes] Unexpected error emitting approval-response for turn ${turnId}: ${detail}`,
+  );
+}
+
 async function handleRespondToApproval(
   approvalId: string,
   req: IncomingMessage,
@@ -665,13 +693,15 @@ async function handleRespondToApproval(
 
     if (result.success) {
       // Emit approval-response stream event so subscribers see the response
-      try {
-        deps.streamManager.emitEvent(result.approval.turnId, 'approval-response', {
-          approvalId,
-          response,
-        });
-      } catch {
-        // Stream may not be active (already completed/failed/cancelled) — non-fatal
+      if (deps.streamManager.isStreamActive(result.approval.turnId)) {
+        try {
+          deps.streamManager.emitEvent(result.approval.turnId, 'approval-response', {
+            approvalId,
+            response,
+          });
+        } catch (emitErr: unknown) {
+          logApprovalResponseEmitError(result.approval.turnId, emitErr);
+        }
       }
 
       // Resume execution if a continuation handler is wired up

@@ -1,4 +1,4 @@
-import { describe, it, beforeEach, afterEach, mock } from 'node:test'; // eslint-disable-line n/no-unsupported-features/node-builtins -- test.mock is stable in Node 24
+import { describe, it, beforeEach, afterEach, mock } from 'node:test';
 import assert from 'node:assert/strict';
 import { DaemonClient } from '../daemon-client.ts';
 
@@ -37,7 +37,6 @@ describe('DaemonClient', () => {
   let client: DaemonClient;
 
   beforeEach(() => {
-    // eslint-disable-next-line n/no-unsupported-features/node-builtins -- test.mock.fn is stable in Node 24
     fetchMock = mock.fn<typeof globalThis.fetch>();
     client = new DaemonClient({ baseUrl, fetchFn: fetchMock, timeoutMs: 5000 });
   });
@@ -489,7 +488,6 @@ describe('DaemonClient', () => {
 
     it('logs TypeError fetch failure via console.warn with structured context', async () => {
       fetchMock.mock.mockImplementation(() => Promise.reject(new TypeError('fetch failed')));
-      // eslint-disable-next-line n/no-unsupported-features/node-builtins -- test.mock.method is stable in Node 24
       const warnMock = mock.method(console, 'warn');
       try {
         await client.createConversation({ title: 'test' });
@@ -510,7 +508,6 @@ describe('DaemonClient', () => {
       const abortError = new Error('The operation was aborted');
       abortError.name = 'AbortError';
       fetchMock.mock.mockImplementation(() => Promise.reject(abortError));
-      // eslint-disable-next-line n/no-unsupported-features/node-builtins -- test.mock.method is stable in Node 24
       const warnMock = mock.method(console, 'warn');
       try {
         await client.openConversation('c1');

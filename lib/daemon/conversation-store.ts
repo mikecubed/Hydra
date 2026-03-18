@@ -79,6 +79,11 @@ interface ApprovalResult {
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
 const TERMINAL_TURN_STATUSES = new Set(['completed', 'failed', 'cancelled']);
+const STREAM_HIGH_SEQ = Symbol('streamHighSeq');
+
+type StoredTurn = TurnType & {
+  [STREAM_HIGH_SEQ]?: number;
+};
 
 function generateId(prefix: string): string {
   return `${prefix}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
@@ -100,7 +105,7 @@ function isResponseDeclared(
 
 export class ConversationStore {
   private readonly conversations = new Map<string, ConversationType>();
-  private readonly turns = new Map<string, TurnType>();
+  private readonly turns = new Map<string, StoredTurn>();
   private readonly turnsByConversation = new Map<string, string[]>();
   private readonly approvals = new Map<string, ApprovalRequestType>();
   private readonly approvalsByTurn = new Map<string, string[]>();
@@ -196,7 +201,7 @@ export class ConversationStore {
     const id = generateId('turn');
     const now = nowIso();
 
-    const turn: TurnType = {
+    const turn: StoredTurn = {
       id,
       conversationId,
       position,
@@ -258,6 +263,16 @@ export class ConversationStore {
   getTurnsByRange(conversationId: string, from: number, to: number): TurnType[] {
     const all = this.getTurns(conversationId);
     return all.filter((t) => t.position >= from && t.position <= to);
+  }
+
+  recordTurnStreamSeq(turnId: string, seq: number): void {
+    const turn = this.turns.get(turnId);
+    if (!turn) throw new Error(`Turn not found: ${turnId}`);
+    turn[STREAM_HIGH_SEQ] = seq;
+  }
+
+  getTurnStreamHighSeq(turnId: string): number | undefined {
+    return this.turns.get(turnId)?.[STREAM_HIGH_SEQ];
   }
 
   updateTurnStatus(turnId: string, status: TurnType['status']): void {

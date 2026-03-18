@@ -4,7 +4,7 @@
  * Covers: create stream, emit events, complete, fail, subscribe from midpoint,
  * lifecycle signals, and turn content finalization.
  */
-import { describe, it, beforeEach } from 'node:test';
+import { describe, it, beforeEach, mock } from 'node:test';
 import assert from 'node:assert/strict';
 import { StreamManager } from '../lib/daemon/stream-manager.ts';
 import { ConversationStore } from '../lib/daemon/conversation-store.ts';
@@ -408,6 +408,7 @@ describe('StreamManager — retention', () => {
     assert.equal(purged, 1);
     assert.equal(sm.streamCount, 0);
     assert.deepStrictEqual(sm.getStreamEvents(turn.id), []);
+    assert.ok((sm.getPurgedHighSeq(turn.id) ?? 0) > 0);
   });
 
   it('purgeTerminalStreams preserves active streams', () => {
@@ -532,5 +533,158 @@ describe('StreamManager — retention', () => {
     });
     streamManager.createStream(turn.id);
     assert.equal(streamManager.streamCount, 1);
+  });
+});
+
+// ── Tombstone retention / bounding ───────────────────────────────────────────
+
+describe('StreamManager — tombstone bounding', () => {
+  it('getPurgedHighSeq returns highSeq from tombstone metadata', () => {
+    const sm = new StreamManager(store, 60_000);
+    const conv = store.createConversation();
+    const turn = store.appendTurn(conv.id, {
+      kind: 'operator',
+      instruction: 'A',
+      attribution: operatorAttribution,
+    });
+    store.updateTurnStatus(turn.id, 'executing');
+    sm.createStream(turn.id);
+    sm.emitEvent(turn.id, 'text-delta', { text: 'chunk' });
+    sm.completeStream(turn.id);
+
+    const highSeq = sm.getStreamEvents(turn.id).at(-1)?.seq ?? 0;
+    sm.purgeTerminalStreams(0);
+
+    assert.equal(sm.getPurgedHighSeq(turn.id), highSeq);
+  });
+
+  it('evicts tombstones older than twice the retention window', async () => {
+    // Use 1ms retention — tombstone TTL = 2ms
+    const sm = new StreamManager(store, 1);
+    const conv = store.createConversation();
+
+    const turn = store.appendTurn(conv.id, {
+      kind: 'operator',
+      instruction: 'A',
+      attribution: operatorAttribution,
+    });
+    store.updateTurnStatus(turn.id, 'executing');
+    sm.createStream(turn.id);
+    // Use large retention to prevent auto-purge from evicting the stream
+    sm.completeStream(turn.id);
+
+    // Force-purge stream; tombstone is freshly created so it survives eviction
+    sm.purgeTerminalStreams(0);
+    assert.ok(sm.getPurgedHighSeq(turn.id) !== undefined, 'tombstone should exist');
+
+    // Wait for tombstone TTL (2ms) to elapse
+    await new Promise<void>((resolve) => {
+      setTimeout(resolve, 10);
+    });
+
+    // A subsequent purge pass should evict the expired tombstone
+    sm.purgeTerminalStreams(0);
+    assert.equal(sm.getPurgedHighSeq(turn.id), undefined, 'tombstone should have been evicted');
+  });
+
+  it('does not evict a freshly created tombstone during the same purge pass', () => {
+    const sm = new StreamManager(store, 1);
+    const conv = store.createConversation();
+    const turn = store.appendTurn(conv.id, {
+      kind: 'operator',
+      instruction: 'A',
+      attribution: operatorAttribution,
+    });
+    store.updateTurnStatus(turn.id, 'executing');
+    sm.createStream(turn.id);
+    sm.completeStream(turn.id);
+
+    const baseNow = Date.now();
+    const timestamps = [baseNow + 5, baseNow + 8, baseNow + 11];
+    const dateNowMock = mock.method(Date, 'now', () => timestamps.shift() ?? baseNow + 11);
+    try {
+      sm.purgeTerminalStreams(0);
+
+      assert.ok(sm.getPurgedHighSeq(turn.id) !== undefined, 'fresh tombstone should survive purge');
+    } finally {
+      dateNowMock.mock.restore();
+    }
+  });
+
+  it('preserves tombstones within the tombstone retention window', () => {
+    // Use 60s retention — tombstone TTL = 120s, nothing expires
+    const sm = new StreamManager(store, 60_000);
+    const conv = store.createConversation();
+
+    const turn = store.appendTurn(conv.id, {
+      kind: 'operator',
+      instruction: 'A',
+      attribution: operatorAttribution,
+    });
+    store.updateTurnStatus(turn.id, 'executing');
+    sm.createStream(turn.id);
+    sm.completeStream(turn.id);
+    sm.purgeTerminalStreams(0);
+
+    // Tombstone should survive since tombstone retention (120s) hasn't elapsed
+    sm.purgeTerminalStreams(0);
+    assert.ok(sm.getPurgedHighSeq(turn.id) !== undefined, 'tombstone should be preserved');
+  });
+
+  it('caps tombstone map at maximum size by evicting oldest entries', () => {
+    const sm = new StreamManager(store, 60_000);
+    const conv = store.createConversation();
+    const turnIds: string[] = [];
+
+    // Create and purge 10_001 streams to exceed the 10_000 cap
+    for (let i = 0; i < 10_001; i++) {
+      const turn = store.appendTurn(conv.id, {
+        kind: 'operator',
+        instruction: `T${String(i)}`,
+        attribution: operatorAttribution,
+      });
+      store.updateTurnStatus(turn.id, 'executing');
+      sm.createStream(turn.id);
+      sm.completeStream(turn.id);
+      turnIds.push(turn.id);
+    }
+
+    // Force-purge all streams
+    sm.purgeTerminalStreams(0);
+
+    // The tombstone count should be capped
+    assert.ok(
+      sm.tombstoneCount <= 10_000,
+      `tombstones should be capped (got ${String(sm.tombstoneCount)})`,
+    );
+
+    // The very first turn's tombstone should have been evicted
+    assert.equal(sm.getPurgedHighSeq(turnIds[0]), undefined, 'oldest tombstone should be evicted');
+
+    // The last turn's tombstone should still be present
+    assert.ok(
+      sm.getPurgedHighSeq(turnIds.at(-1)!) !== undefined,
+      'newest tombstone should be retained',
+    );
+  });
+
+  it('createStream clears any existing tombstone for the turn', () => {
+    const sm = new StreamManager(store, 60_000);
+    const conv = store.createConversation();
+    const turn = store.appendTurn(conv.id, {
+      kind: 'operator',
+      instruction: 'A',
+      attribution: operatorAttribution,
+    });
+    store.updateTurnStatus(turn.id, 'executing');
+    sm.createStream(turn.id);
+    sm.completeStream(turn.id);
+    sm.purgeTerminalStreams(0);
+    assert.ok(sm.getPurgedHighSeq(turn.id) !== undefined, 'tombstone should exist');
+
+    // Re-creating a stream for the same turn clears the tombstone
+    store.updateTurnStatus(turn.id, 'executing');
+    sm.createStream(turn.id);
+    assert.equal(sm.getPurgedHighSeq(turn.id), undefined, 'tombstone should be cleared');
   });
 });

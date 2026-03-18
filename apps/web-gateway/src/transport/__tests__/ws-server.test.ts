@@ -3,10 +3,12 @@ import { createServer, type Server } from 'node:http';
 import { afterEach, beforeEach, describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import { getRequestListener } from '@hono/node-server';
+import type { StreamEvent } from '@hydra/web-contracts';
 import WebSocket from 'ws';
 import { createGatewayApp, type GatewayApp } from '../../index.ts';
 import { FakeClock } from '../../shared/clock.ts';
 import { GatewayError } from '../../shared/errors.ts';
+import type { StreamEventPayload } from '../event-forwarder.ts';
 
 const ORIGIN = 'http://127.0.0.1:4174';
 
@@ -63,6 +65,78 @@ async function waitForMessage(ws: WebSocket): Promise<Record<string, unknown>> {
   return JSON.parse(text) as Record<string, unknown>;
 }
 
+class FakeEventBridge {
+  readonly #listeners = new Set<(payload: StreamEventPayload) => void>();
+
+  on(_eventName: 'stream-event', listener: (payload: StreamEventPayload) => void): this {
+    this.#listeners.add(listener);
+    return this;
+  }
+
+  removeListener(
+    _eventName: 'stream-event',
+    listener: (payload: StreamEventPayload) => void,
+  ): this {
+    this.#listeners.delete(listener);
+    return this;
+  }
+
+  emitStreamEvent(conversationId: string, event: StreamEvent): void {
+    const payload: StreamEventPayload = { conversationId, event };
+    for (const listener of this.#listeners) {
+      listener(payload);
+    }
+  }
+}
+
+function makeStreamEvent(seq: number): StreamEvent {
+  return {
+    seq,
+    turnId: `turn-${seq}`,
+    kind: 'text-delta',
+    payload: { text: `chunk-${seq}` },
+    timestamp: new Date().toISOString(),
+  };
+}
+
+function createWsDaemonClient(validConversationIds: ReadonlySet<string>) {
+  return {
+    async openConversation(conversationId: string) {
+      if (validConversationIds.has(conversationId)) {
+        return {
+          data: {
+            conversation: {
+              id: conversationId,
+              status: 'active' as const,
+              createdAt: new Date().toISOString(),
+              updatedAt: new Date().toISOString(),
+              turnCount: 0,
+              pendingInstructionCount: 0,
+            },
+            recentTurns: [],
+            totalTurnCount: 0,
+            pendingApprovals: [],
+          },
+        };
+      }
+      return {
+        error: {
+          ok: false as const,
+          code: 'CONVERSATION_NOT_FOUND',
+          category: 'validation' as const,
+          message: 'Conversation not found',
+        },
+      };
+    },
+    async loadTurnHistory() {
+      return { data: { turns: [], totalCount: 0, hasMore: false } };
+    },
+    async getStreamReplay() {
+      return { data: { events: [] } };
+    },
+  };
+}
+
 async function waitForMessages(
   ws: WebSocket,
   count: number,
@@ -91,6 +165,14 @@ async function waitForMessages(
 
     ws.on('message', onMessage);
   });
+}
+
+function createDeferred<T>() {
+  let resolve!: (value: T | PromiseLike<T>) => void;
+  const promise = new Promise<T>((resolver) => {
+    resolve = resolver;
+  });
+  return { promise, resolve };
 }
 
 async function connectWebSocket(
@@ -193,18 +275,22 @@ describe('GatewayWsServer', () => {
   let port: number;
   let clock: FakeClock;
   let healthResult: boolean;
+  let streamEventBridge: FakeEventBridge;
   const openSockets: WebSocket[] = [];
 
   beforeEach(async () => {
     server = createServer();
     clock = new FakeClock(Date.now());
     healthResult = true;
+    streamEventBridge = new FakeEventBridge();
 
     gw = createGatewayApp({
       server,
       clock,
       allowedOrigin: ORIGIN,
       healthChecker: async () => healthResult,
+      wsDaemonClient: createWsDaemonClient(new Set(['conv-1', 'conv-2'])),
+      streamEventBridge,
       heartbeatConfig: { intervalMs: 60_000 },
       sessionConfig: {
         sessionLifetimeMs: 60_000,
@@ -237,6 +323,336 @@ describe('GatewayWsServer', () => {
     openSockets.push(ws);
 
     assert.equal(gw.connectionRegistry.getBySession(session.id).size, 1);
+  });
+
+  it('handles subscribe messages over websocket and updates conversation subscriptions', async () => {
+    const session = await gw.sessionService.create('op-1', '127.0.0.1');
+    const ws = await connectWebSocket(port, { sessionId: session.id });
+    openSockets.push(ws);
+
+    ws.send(JSON.stringify({ type: 'subscribe', conversationId: 'conv-1' }));
+
+    const message = await waitForMessage(ws);
+    assert.equal(message['type'], 'subscribed');
+    assert.equal(message['conversationId'], 'conv-1');
+    assert.equal(message['currentSeq'], 0);
+    assert.equal(gw.connectionRegistry.getByConversation('conv-1').size, 1);
+  });
+
+  it('serializes subscribe then unsubscribe so stale subscribe completion does not leave the connection subscribed', async () => {
+    const localServer = createServer();
+    const pendingOpen =
+      createDeferred<
+        Awaited<ReturnType<ReturnType<typeof createWsDaemonClient>['openConversation']>>
+      >();
+    const localGateway = createGatewayApp({
+      server: localServer,
+      clock,
+      allowedOrigin: ORIGIN,
+      healthChecker: async () => true,
+      heartbeatConfig: { intervalMs: 60_000 },
+      wsDaemonClient: {
+        openConversation: async () => pendingOpen.promise,
+        async loadTurnHistory() {
+          return { data: { turns: [], totalCount: 0, hasMore: false } };
+        },
+        async getStreamReplay() {
+          return { data: { events: [] } };
+        },
+      },
+      streamEventBridge: new FakeEventBridge(),
+    });
+    const requestListener = getRequestListener(localGateway.app.fetch);
+    localServer.on('request', (request, response) => {
+      void requestListener(request, response);
+    });
+    const localPort = await listen(localServer);
+
+    try {
+      const session = await localGateway.sessionService.create('op-1', '127.0.0.1');
+      const ws = await connectWebSocket(localPort, { sessionId: session.id });
+      openSockets.push(ws);
+
+      ws.send(JSON.stringify({ type: 'subscribe', conversationId: 'conv-1' }));
+      ws.send(JSON.stringify({ type: 'unsubscribe', conversationId: 'conv-1' }));
+
+      pendingOpen.resolve({
+        data: {
+          conversation: {
+            id: 'conv-1',
+            status: 'active',
+            createdAt: new Date().toISOString(),
+            updatedAt: new Date().toISOString(),
+            turnCount: 0,
+            pendingInstructionCount: 0,
+          },
+          recentTurns: [],
+          totalTurnCount: 0,
+          pendingApprovals: [],
+        },
+      });
+
+      const messages = await waitForMessages(ws, 2);
+      assert.deepEqual(
+        messages.map((message) => message['type']),
+        ['subscribed', 'unsubscribed'],
+      );
+      assert.equal(localGateway.connectionRegistry.getByConversation('conv-1').size, 0);
+    } finally {
+      localGateway.wsServer?.close();
+      localGateway.heartbeat.stop();
+      await closeServer(localServer);
+    }
+  });
+
+  it('does not replay buffered events twice for duplicate subscribe frames on the same connection', async () => {
+    const localServer = createServer();
+    const pendingOpen =
+      createDeferred<
+        Awaited<ReturnType<ReturnType<typeof createWsDaemonClient>['openConversation']>>
+      >();
+    const localGateway = createGatewayApp({
+      server: localServer,
+      clock,
+      allowedOrigin: ORIGIN,
+      healthChecker: async () => true,
+      heartbeatConfig: { intervalMs: 60_000 },
+      wsDaemonClient: {
+        openConversation: async () => pendingOpen.promise,
+        async loadTurnHistory() {
+          return { data: { turns: [], totalCount: 0, hasMore: false } };
+        },
+        async getStreamReplay() {
+          return { data: { events: [] } };
+        },
+      },
+      streamEventBridge: new FakeEventBridge(),
+    });
+    localGateway.eventBuffer.push('conv-1', makeStreamEvent(1));
+    const requestListener = getRequestListener(localGateway.app.fetch);
+    localServer.on('request', (request, response) => {
+      void requestListener(request, response);
+    });
+    const localPort = await listen(localServer);
+
+    try {
+      const session = await localGateway.sessionService.create('op-1', '127.0.0.1');
+      const ws = await connectWebSocket(localPort, { sessionId: session.id });
+      openSockets.push(ws);
+
+      const subscribe = JSON.stringify({
+        type: 'subscribe',
+        conversationId: 'conv-1',
+        lastAcknowledgedSeq: 0,
+      });
+      ws.send(subscribe);
+      ws.send(subscribe);
+
+      pendingOpen.resolve({
+        data: {
+          conversation: {
+            id: 'conv-1',
+            status: 'active',
+            createdAt: new Date().toISOString(),
+            updatedAt: new Date().toISOString(),
+            turnCount: 0,
+            pendingInstructionCount: 0,
+          },
+          recentTurns: [],
+          totalTurnCount: 0,
+          pendingApprovals: [],
+        },
+      });
+
+      const messages = await waitForMessages(ws, 3);
+      assert.equal(messages.filter((message) => message['type'] === 'stream-event').length, 1);
+      assert.equal(messages.filter((message) => message['type'] === 'subscribed').length, 2);
+    } finally {
+      localGateway.wsServer?.close();
+      localGateway.heartbeat.stop();
+      await closeServer(localServer);
+    }
+  });
+
+  it('closes connections that exceed the inbound websocket message queue limit', async () => {
+    const localServer = createServer();
+    const pendingOpen =
+      createDeferred<
+        Awaited<ReturnType<ReturnType<typeof createWsDaemonClient>['openConversation']>>
+      >();
+    let openCalls = 0;
+    const localGateway = createGatewayApp({
+      server: localServer,
+      clock,
+      allowedOrigin: ORIGIN,
+      healthChecker: async () => true,
+      heartbeatConfig: { intervalMs: 60_000 },
+      wsDaemonClient: {
+        openConversation: async () => {
+          openCalls += 1;
+          return await pendingOpen.promise;
+        },
+        async loadTurnHistory() {
+          return { data: { turns: [], totalCount: 0, hasMore: false } };
+        },
+        async getStreamReplay() {
+          return { data: { events: [] } };
+        },
+      },
+      streamEventBridge: new FakeEventBridge(),
+    });
+    const requestListener = getRequestListener(localGateway.app.fetch);
+    localServer.on('request', (request, response) => {
+      void requestListener(request, response);
+    });
+    const localPort = await listen(localServer);
+
+    try {
+      const session = await localGateway.sessionService.create('op-1', '127.0.0.1');
+      const ws = await connectWebSocket(localPort, { sessionId: session.id });
+      openSockets.push(ws);
+
+      for (let index = 0; index < 65; index += 1) {
+        ws.send(JSON.stringify({ type: 'subscribe', conversationId: 'conv-1' }));
+      }
+
+      const message = await waitForMessage(ws);
+      assert.equal(message['type'], 'error');
+      assert.equal(message['code'], 'WS_MESSAGE_QUEUE_OVERFLOW');
+      assert.equal(message['category'], 'rate-limit');
+      await waitForCloseOrError(ws);
+      assert.ok(openCalls <= 1, `Expected at most 1 openConversation call, got ${openCalls}`);
+    } finally {
+      pendingOpen.resolve({
+        data: {
+          conversation: {
+            id: 'conv-1',
+            status: 'active',
+            createdAt: new Date().toISOString(),
+            updatedAt: new Date().toISOString(),
+            turnCount: 0,
+            pendingInstructionCount: 0,
+          },
+          recentTurns: [],
+          totalTurnCount: 0,
+          pendingApprovals: [],
+        },
+      });
+      localGateway.wsServer?.close();
+      localGateway.heartbeat.stop();
+      await closeServer(localServer);
+    }
+  });
+
+  it('does not make daemon calls for queued messages after overflow close', async () => {
+    const localServer = createServer();
+    const pendingOpen =
+      createDeferred<
+        Awaited<ReturnType<ReturnType<typeof createWsDaemonClient>['openConversation']>>
+      >();
+    let openCalls = 0;
+    const localGateway = createGatewayApp({
+      server: localServer,
+      clock,
+      allowedOrigin: ORIGIN,
+      healthChecker: async () => true,
+      heartbeatConfig: { intervalMs: 60_000 },
+      wsDaemonClient: {
+        openConversation: async (conversationId: string) => {
+          openCalls += 1;
+          const result = await pendingOpen.promise;
+          if ('error' in result) {
+            return result;
+          }
+          // Return matching conversation id regardless of which subscribe triggered the call
+          return {
+            data: {
+              conversation: { ...result.data.conversation, id: conversationId },
+              recentTurns: result.data.recentTurns,
+              totalTurnCount: result.data.totalTurnCount,
+              pendingApprovals: result.data.pendingApprovals,
+            },
+          };
+        },
+        async loadTurnHistory() {
+          return { data: { turns: [], totalCount: 0, hasMore: false } };
+        },
+        async getStreamReplay() {
+          return { data: { events: [] } };
+        },
+      },
+      streamEventBridge: new FakeEventBridge(),
+    });
+    const requestListener = getRequestListener(localGateway.app.fetch);
+    localServer.on('request', (request, response) => {
+      void requestListener(request, response);
+    });
+    const localPort = await listen(localServer);
+
+    try {
+      const session = await localGateway.sessionService.create('op-1', '127.0.0.1');
+      const ws = await connectWebSocket(localPort, { sessionId: session.id });
+      openSockets.push(ws);
+
+      // Use distinct conversation ids so each queued message independently
+      // attempts an openConversation daemon call.
+      for (let index = 0; index < 65; index += 1) {
+        ws.send(JSON.stringify({ type: 'subscribe', conversationId: `conv-${index}` }));
+      }
+
+      await waitForCloseOrError(ws);
+
+      // Release the initially blocked daemon call and let all queued handlers drain.
+      pendingOpen.resolve({
+        data: {
+          conversation: {
+            id: 'conv-0',
+            status: 'active',
+            createdAt: new Date().toISOString(),
+            updatedAt: new Date().toISOString(),
+            turnCount: 0,
+            pendingInstructionCount: 0,
+          },
+          recentTurns: [],
+          totalTurnCount: 0,
+          pendingApprovals: [],
+        },
+      });
+
+      // Allow microtask queue to flush so any queued handlers that would
+      // call openConversation have a chance to run.
+      await new Promise<void>((resolve) => {
+        setTimeout(resolve, 50);
+      });
+
+      assert.equal(
+        openCalls,
+        1,
+        'queued handlers must not call openConversation after overflow close',
+      );
+    } finally {
+      localGateway.wsServer?.close();
+      localGateway.heartbeat.stop();
+      await closeServer(localServer);
+    }
+  });
+
+  it('forwards bridge stream events to subscribed websocket clients', async () => {
+    const session = await gw.sessionService.create('op-1', '127.0.0.1');
+    const ws = await connectWebSocket(port, { sessionId: session.id });
+    openSockets.push(ws);
+
+    ws.send(JSON.stringify({ type: 'subscribe', conversationId: 'conv-1' }));
+    const subscribed = await waitForMessage(ws);
+    assert.equal(subscribed['type'], 'subscribed');
+
+    const event = makeStreamEvent(3);
+    streamEventBridge.emitStreamEvent('conv-1', event);
+
+    const forwarded = await waitForMessage(ws);
+    assert.equal(forwarded['type'], 'stream-event');
+    assert.equal(forwarded['conversationId'], 'conv-1');
+    assert.deepEqual(forwarded['event'], event);
   });
 
   it('rejects missing session cookie with 401', async () => {
@@ -719,5 +1135,186 @@ describe('GatewayWsServer', () => {
       localGateway.heartbeat.stop();
       await closeServer(localServer);
     }
+  });
+
+  // ─── T035: reconnect with invalid session ──────────────────────────────
+  // FR-025: reconnect attempts with expired or invalidated sessions are
+  // rejected before any replay occurs. These tests establish a valid first
+  // connection, transition the session to a terminal state, then attempt a
+  // second WS upgrade and assert rejection with the correct status/code.
+
+  it('rejects reconnect after session expires with 401 SESSION_EXPIRED', async () => {
+    const session = await gw.sessionService.create('op-1', '127.0.0.1');
+
+    // First connection succeeds
+    const ws1 = await connectWebSocket(port, { sessionId: session.id });
+    openSockets.push(ws1);
+    assert.equal(gw.connectionRegistry.getBySession(session.id).size, 1);
+
+    // Close the first connection (simulates browser tab close / network drop)
+    ws1.close();
+    await waitForCloseOrError(ws1);
+    openSockets.splice(openSockets.indexOf(ws1), 1);
+
+    // Advance clock past session lifetime to trigger expiry
+    clock.advance(60_001);
+
+    // Reconnect attempt should be rejected with 401
+    const response = await expectUnexpectedResponseBody(port, { sessionId: session.id });
+    assert.equal(response.status, 401);
+    const payload = JSON.parse(response.body) as { code?: string; ok?: boolean };
+    assert.equal(payload.ok, false);
+    assert.equal(payload.code, 'SESSION_EXPIRED');
+  });
+
+  it('rejects reconnect after session is invalidated with 401 SESSION_INVALIDATED', async () => {
+    const session = await gw.sessionService.create('op-1', '127.0.0.1');
+
+    // First connection succeeds
+    const ws1 = await connectWebSocket(port, { sessionId: session.id });
+    openSockets.push(ws1);
+    assert.equal(gw.connectionRegistry.getBySession(session.id).size, 1);
+
+    // Close the first connection
+    ws1.close();
+    await waitForCloseOrError(ws1);
+    openSockets.splice(openSockets.indexOf(ws1), 1);
+
+    // Invalidate the session (e.g., admin action, concurrent session eviction)
+    await gw.sessionService.invalidate(session.id, 'admin-revoked');
+
+    // Reconnect attempt should be rejected with 401
+    const response = await expectUnexpectedResponseBody(port, { sessionId: session.id });
+    assert.equal(response.status, 401);
+    const payload = JSON.parse(response.body) as { code?: string; ok?: boolean };
+    assert.equal(payload.ok, false);
+    assert.equal(payload.code, 'SESSION_INVALIDATED');
+  });
+
+  it('rejects reconnect after logout with 401 SESSION_NOT_FOUND', async () => {
+    const session = await gw.sessionService.create('op-1', '127.0.0.1');
+
+    // First connection succeeds
+    const ws1 = await connectWebSocket(port, { sessionId: session.id });
+    openSockets.push(ws1);
+
+    // Close the first connection
+    ws1.close();
+    await waitForCloseOrError(ws1);
+    openSockets.splice(openSockets.indexOf(ws1), 1);
+
+    // Log out the session
+    await gw.sessionService.logout(session.id);
+
+    // Reconnect attempt should be rejected with 401
+    const response = await expectUnexpectedResponseBody(port, { sessionId: session.id });
+    assert.equal(response.status, 401);
+    const payload = JSON.parse(response.body) as { code?: string; ok?: boolean };
+    assert.equal(payload.ok, false);
+    // logged-out falls through to SESSION_NOT_FOUND in validate()
+    assert.equal(payload.code, 'SESSION_NOT_FOUND');
+  });
+
+  it('does not register a connection or replay events when reconnecting with an expired session', async () => {
+    const session = await gw.sessionService.create('op-1', '127.0.0.1');
+
+    // First connection: subscribe to a conversation and receive events
+    const ws1 = await connectWebSocket(port, { sessionId: session.id });
+    openSockets.push(ws1);
+    ws1.send(JSON.stringify({ type: 'subscribe', conversationId: 'conv-1' }));
+    await waitForMessage(ws1); // subscribed ack
+
+    // Push an event into the buffer for conv-1
+    streamEventBridge.emitStreamEvent('conv-1', makeStreamEvent(1));
+    await waitForMessage(ws1); // stream-event
+
+    // Close the first connection
+    ws1.close();
+    await waitForCloseOrError(ws1);
+    openSockets.splice(openSockets.indexOf(ws1), 1);
+
+    // Expire the session
+    clock.advance(60_001);
+
+    // Attempt reconnect — should be rejected
+    const status = await expectUnexpectedResponse(port, { sessionId: session.id });
+    assert.equal(status, 401);
+
+    // No connection should be registered for this session
+    assert.equal(gw.connectionRegistry.getBySession(session.id).size, 0);
+  });
+
+  it('does not register a connection when reconnecting with an invalidated session', async () => {
+    const session = await gw.sessionService.create('op-1', '127.0.0.1');
+
+    // First connection
+    const ws1 = await connectWebSocket(port, { sessionId: session.id });
+    openSockets.push(ws1);
+
+    ws1.close();
+    await waitForCloseOrError(ws1);
+    openSockets.splice(openSockets.indexOf(ws1), 1);
+
+    // Invalidate
+    await gw.sessionService.invalidate(session.id, 'security-concern');
+
+    // Attempt reconnect
+    const status = await expectUnexpectedResponse(port, { sessionId: session.id });
+    assert.equal(status, 401);
+
+    // Registry must remain empty — no partial registration
+    assert.equal(gw.connectionRegistry.getBySession(session.id).size, 0);
+  });
+
+  it('rejects expired session reconnect with structured JSON error body', async () => {
+    const session = await gw.sessionService.create('op-1', '127.0.0.1');
+
+    const ws1 = await connectWebSocket(port, { sessionId: session.id });
+    openSockets.push(ws1);
+    ws1.close();
+    await waitForCloseOrError(ws1);
+    openSockets.splice(openSockets.indexOf(ws1), 1);
+
+    clock.advance(60_001);
+
+    const response = await expectUnexpectedResponseBody(port, { sessionId: session.id });
+    assert.equal(response.status, 401);
+    const body = JSON.parse(response.body) as {
+      ok?: boolean;
+      code?: string;
+      category?: string;
+      message?: string;
+    };
+    assert.equal(body.ok, false);
+    assert.equal(body.code, 'SESSION_EXPIRED');
+    assert.equal(body.category, 'session');
+    assert.equal(typeof body.message, 'string');
+    assert.ok(body.message!.length > 0);
+  });
+
+  it('rejects invalidated session reconnect with structured JSON error body', async () => {
+    const session = await gw.sessionService.create('op-1', '127.0.0.1');
+
+    const ws1 = await connectWebSocket(port, { sessionId: session.id });
+    openSockets.push(ws1);
+    ws1.close();
+    await waitForCloseOrError(ws1);
+    openSockets.splice(openSockets.indexOf(ws1), 1);
+
+    await gw.sessionService.invalidate(session.id, 'compromised');
+
+    const response = await expectUnexpectedResponseBody(port, { sessionId: session.id });
+    assert.equal(response.status, 401);
+    const body = JSON.parse(response.body) as {
+      ok?: boolean;
+      code?: string;
+      category?: string;
+      message?: string;
+    };
+    assert.equal(body.ok, false);
+    assert.equal(body.code, 'SESSION_INVALIDATED');
+    assert.equal(body.category, 'session');
+    assert.equal(typeof body.message, 'string');
+    assert.ok(body.message!.length > 0);
   });
 });

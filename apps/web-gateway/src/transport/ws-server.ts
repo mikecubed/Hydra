@@ -7,11 +7,15 @@ import type { SessionService } from '../session/session-service.ts';
 import type { SessionStateBroadcaster } from '../session/session-state-broadcaster.ts';
 import type { SourceKeyConfig } from '../security/source-key.ts';
 import { resolveSourceKeyFromParts } from '../security/source-key.ts';
+import type { DaemonClient } from '../conversation/daemon-client.ts';
 import type { RateLimiter } from '../auth/rate-limiter.ts';
 import type { ConnectionRegistry } from './connection-registry.ts';
+import type { EventBuffer } from './event-buffer.ts';
+import { EventForwarder, type StreamEventBridgeLike } from './event-forwarder.ts';
 import { SessionWsBridge } from './session-ws-bridge.ts';
 import { WsConnection } from './ws-connection.ts';
-import { WebSocketServer, type WebSocket } from 'ws';
+import { WsMessageHandler } from './ws-message-handler.ts';
+import { WebSocketServer, type RawData, type WebSocket } from 'ws';
 
 interface GatewayWsServerOptions {
   server: Server;
@@ -22,9 +26,13 @@ interface GatewayWsServerOptions {
   clock: Clock;
   sourceKeyConfig?: SourceKeyConfig;
   mutatingLimiter: RateLimiter;
+  daemonClient: Pick<DaemonClient, 'openConversation' | 'loadTurnHistory' | 'getStreamReplay'>;
+  eventBuffer: EventBuffer;
+  streamEventBridge?: StreamEventBridgeLike;
 }
 
 const COOKIE_SEPARATOR = ';';
+const MAX_PENDING_MESSAGES_PER_CONNECTION = 64;
 
 function parseSessionCookie(cookieHeader?: string): string | null {
   if (cookieHeader == null || cookieHeader === '') {
@@ -73,6 +81,19 @@ function rejectUpgrade(socket: Socket, error: GatewayError): void {
   );
 }
 
+function rawDataToString(data: RawData): string {
+  if (typeof data === 'string') {
+    return data;
+  }
+  if (Array.isArray(data)) {
+    return Buffer.concat(data).toString('utf8');
+  }
+  if (data instanceof ArrayBuffer) {
+    return new TextDecoder().decode(new Uint8Array(data));
+  }
+  return data.toString('utf8');
+}
+
 export class GatewayWsServer {
   readonly #server: Server;
   readonly #sessionService: SessionService;
@@ -83,6 +104,11 @@ export class GatewayWsServer {
   readonly #clock: Clock;
   readonly #mutatingLimiter: RateLimiter;
   readonly #trustedProxies: ReadonlySet<string> | undefined;
+  readonly #messageHandler: WsMessageHandler;
+  readonly #eventBuffer: EventBuffer;
+  readonly #eventForwarder?: EventForwarder;
+  readonly #messageQueues = new Map<string, Promise<void>>();
+  readonly #messageQueueDepths = new Map<string, number>();
 
   constructor(options: GatewayWsServerOptions) {
     this.#server = options.server;
@@ -91,6 +117,7 @@ export class GatewayWsServer {
     this.#connectionRegistry = options.connectionRegistry;
     this.#clock = options.clock;
     this.#mutatingLimiter = options.mutatingLimiter;
+    this.#eventBuffer = options.eventBuffer;
     this.#trustedProxies = options.sourceKeyConfig?.trustedProxies
       ? new Set(options.sourceKeyConfig.trustedProxies)
       : undefined;
@@ -100,7 +127,23 @@ export class GatewayWsServer {
       clock: options.clock,
       warningThresholdMs: options.sessionService.config.warningThresholdMs,
     });
-    this.#wss = new WebSocketServer({ noServer: true });
+    this.#wss = new WebSocketServer({
+      noServer: true,
+      maxPayload: 1024 * 1024, // 1MB limit for inbound messages to prevent DoS
+    });
+    this.#messageHandler = new WsMessageHandler({
+      registry: options.connectionRegistry,
+      buffer: options.eventBuffer,
+      daemonClient: options.daemonClient,
+    });
+    if (options.streamEventBridge) {
+      this.#eventForwarder = new EventForwarder(
+        options.streamEventBridge,
+        options.eventBuffer,
+        options.connectionRegistry,
+      );
+      this.#eventForwarder.start();
+    }
     this.#server.on('upgrade', this.#handleUpgrade);
   }
 
@@ -110,10 +153,61 @@ export class GatewayWsServer {
 
   close(): void {
     this.#server.off('upgrade', this.#handleUpgrade);
+    this.#eventForwarder?.dispose();
     for (const client of this.#wss.clients) {
       client.terminate();
     }
     this.#wss.close();
+  }
+
+  #handleSocketMessage(connection: WsConnection, data: RawData): void {
+    const queuedDepth = this.#messageQueueDepths.get(connection.connectionId) ?? 0;
+    if (queuedDepth >= MAX_PENDING_MESSAGES_PER_CONNECTION) {
+      if (!connection.isClosed) {
+        connection.send({
+          type: 'error',
+          ok: false as const,
+          code: 'WS_MESSAGE_QUEUE_OVERFLOW',
+          category: 'rate-limit',
+          message: 'Too many queued websocket messages',
+        });
+        connection.close(1008, 'WS_MESSAGE_QUEUE_OVERFLOW');
+      }
+      return;
+    }
+
+    this.#messageQueueDepths.set(connection.connectionId, queuedDepth + 1);
+    const prior = this.#messageQueues.get(connection.connectionId) ?? Promise.resolve();
+    const next = prior
+      .catch(() => {})
+      .then(async () => {
+        if (connection.isClosed) return;
+        const rawMessage = rawDataToString(data);
+        await this.#messageHandler.handleMessage(connection, rawMessage);
+      })
+      .catch((err: unknown) => {
+        const detail = err instanceof Error ? err.message : 'unknown error';
+        console.warn('[GatewayWsServer] message handling failure', {
+          connectionId: connection.connectionId,
+          sessionId: connection.sessionId,
+          detail,
+        });
+        if (!connection.isClosed) {
+          connection.close(1011, 'Message handling failed');
+        }
+      });
+    this.#messageQueues.set(connection.connectionId, next);
+    void next.finally(() => {
+      const remainingDepth = (this.#messageQueueDepths.get(connection.connectionId) ?? 1) - 1;
+      if (remainingDepth > 0) {
+        this.#messageQueueDepths.set(connection.connectionId, remainingDepth);
+      } else {
+        this.#messageQueueDepths.delete(connection.connectionId);
+      }
+      if (this.#messageQueues.get(connection.connectionId) === next) {
+        this.#messageQueues.delete(connection.connectionId);
+      }
+    });
   }
 
   #bindIdleTimeout(sessionId: string, webSocket: WebSocket, onIdle: () => void): () => void {
@@ -221,11 +315,25 @@ export class GatewayWsServer {
             return;
           }
           isCleanedUp = true;
+          const affectedConversations = new Set([
+            ...connection.subscribedConversations,
+            ...connection.pendingConversations,
+          ]);
+          this.#messageQueues.delete(connection.connectionId);
+          this.#messageQueueDepths.delete(connection.connectionId);
           this.#connectionRegistry.unregister(connection.connectionId);
+          for (const conversationId of affectedConversations) {
+            if (!this.#connectionRegistry.hasInterest(conversationId)) {
+              this.#eventBuffer.markConversationInactive(conversationId);
+            }
+          }
           cleanupIdle();
           cleanupBridge();
         };
         cleanupIdle = this.#bindIdleTimeout(session.id, webSocket, cleanup);
+        webSocket.on('message', (data) => {
+          this.#handleSocketMessage(connection, data);
+        });
         webSocket.on('close', cleanup);
       });
     } catch (err) {

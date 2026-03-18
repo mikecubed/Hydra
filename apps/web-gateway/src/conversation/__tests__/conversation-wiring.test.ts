@@ -4,7 +4,6 @@
  * Verifies that conversation routes are protected by auth + CSRF middleware
  * and correctly wired into the gateway app factory.
  */
-/* eslint-disable n/no-unsupported-features/node-builtins -- Request is stable in Node 24 */
 import { describe, it, beforeEach, afterEach, mock } from 'node:test';
 import assert from 'node:assert/strict';
 import { createGatewayApp, type GatewayApp } from '../../index.ts';
