@@ -178,6 +178,7 @@ export class GatewayWsServer {
     const next = prior
       .catch(() => {})
       .then(async () => {
+        if (connection.isClosed) return;
         const rawMessage = rawDataToString(data);
         await this.#messageHandler.handleMessage(connection, rawMessage);
       })

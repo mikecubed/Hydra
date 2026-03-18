@@ -544,6 +544,99 @@ describe('GatewayWsServer', () => {
     }
   });
 
+  it('does not make daemon calls for queued messages after overflow close', async () => {
+    const localServer = createServer();
+    const pendingOpen =
+      createDeferred<
+        Awaited<ReturnType<ReturnType<typeof createWsDaemonClient>['openConversation']>>
+      >();
+    let openCalls = 0;
+    const localGateway = createGatewayApp({
+      server: localServer,
+      clock,
+      allowedOrigin: ORIGIN,
+      healthChecker: async () => true,
+      heartbeatConfig: { intervalMs: 60_000 },
+      wsDaemonClient: {
+        openConversation: async (conversationId: string) => {
+          openCalls += 1;
+          const result = await pendingOpen.promise;
+          if ('error' in result) {
+            return result;
+          }
+          // Return matching conversation id regardless of which subscribe triggered the call
+          return {
+            data: {
+              conversation: { ...result.data.conversation, id: conversationId },
+              recentTurns: result.data.recentTurns,
+              totalTurnCount: result.data.totalTurnCount,
+              pendingApprovals: result.data.pendingApprovals,
+            },
+          };
+        },
+        async loadTurnHistory() {
+          return { data: { turns: [], totalCount: 0, hasMore: false } };
+        },
+        async getStreamReplay() {
+          return { data: { events: [] } };
+        },
+      },
+      streamEventBridge: new FakeEventBridge(),
+    });
+    const requestListener = getRequestListener(localGateway.app.fetch);
+    localServer.on('request', (request, response) => {
+      void requestListener(request, response);
+    });
+    const localPort = await listen(localServer);
+
+    try {
+      const session = await localGateway.sessionService.create('op-1', '127.0.0.1');
+      const ws = await connectWebSocket(localPort, { sessionId: session.id });
+      openSockets.push(ws);
+
+      // Use distinct conversation ids so each queued message independently
+      // attempts an openConversation daemon call.
+      for (let index = 0; index < 65; index += 1) {
+        ws.send(JSON.stringify({ type: 'subscribe', conversationId: `conv-${index}` }));
+      }
+
+      await waitForCloseOrError(ws);
+
+      // Release the initially blocked daemon call and let all queued handlers drain.
+      pendingOpen.resolve({
+        data: {
+          conversation: {
+            id: 'conv-0',
+            status: 'active',
+            createdAt: new Date().toISOString(),
+            updatedAt: new Date().toISOString(),
+            turnCount: 0,
+            pendingInstructionCount: 0,
+          },
+          recentTurns: [],
+          totalTurnCount: 0,
+          pendingApprovals: [],
+        },
+      });
+
+      // Allow microtask queue to flush so any queued handlers that would
+      // call openConversation have a chance to run.
+      await new Promise<void>((resolve) => {
+        setTimeout(resolve, 50);
+      });
+
+      assert.equal(
+        openCalls,
+        1,
+        'queued handlers must not call openConversation after overflow close',
+      );
+    } finally {
+      localGateway.wsServer?.close();
+      localGateway.heartbeat.stop();
+      await closeServer(localServer);
+    }
+  });
+
   it('forwards bridge stream events to subscribed websocket clients', async () => {
     const session = await gw.sessionService.create('op-1', '127.0.0.1');
     const ws = await connectWebSocket(port, { sessionId: session.id });
