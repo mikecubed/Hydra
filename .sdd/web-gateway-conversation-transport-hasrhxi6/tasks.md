@@ -324,7 +324,7 @@ _End-to-end verification of all success criteria and final documentation._
   - **Depends**: T016, T024
   - **Validates**: SC-004
 
-- [x] T058 [P1] **Final quality gate** — run `npm run quality` (ESLint, TypeScript strict, coverage thresholds) and `npm test` from monorepo root. Zero regressions across all packages. Assert all SC-011 criteria pass.
+- [x] T058 [P1] **Final quality gate** — run `npm run quality` (ESLint, Prettier format-check, TypeScript strict, cycle detection) and `npm test` from monorepo root. Zero regressions across all packages. Assert all SC-011 criteria pass.
   - **Depends**: T054, T055, T056, T057
   - **Validates**: SC-011
 

@@ -299,13 +299,15 @@ function createFakeDaemonClient(
       turnId,
       events.map((event) => ({ ...event })),
     );
+    const existingTurns = turnsByConversation.get(conversationId) ?? [];
+    const priorTurn = existingTurns.find((t) => t.id === turnId);
     storeTurn(
       makeTurn(
         turnId,
         conversationId,
-        (turnsByConversation.get(conversationId)?.length ?? 0) + 1,
+        priorTurn?.position ?? existingTurns.length + 1,
         'completed',
-        'emitted-stream',
+        priorTurn?.instruction ?? 'emitted-stream',
       ),
     );
 
@@ -3619,12 +3621,15 @@ describe('T030: End-to-end streaming integration', () => {
   });
 
   describe('T056: Disconnect-resume stress (SC-003)', () => {
-    it('random disconnect during multi-event streaming with reconnect produces zero gaps/duplicates across iterations', async () => {
-      const iterations = 3;
+    it('deterministic disconnect at early/mid/late checkpoints with reconnect produces zero gaps/duplicates', async () => {
+      // Deterministic disconnect points covering early, mid, and late replay boundaries.
+      // totalEvents = 10 (started + 8 text-deltas + completed), so valid range is [2, 7]
+      // (must leave ≥2 for replay-gap and ≥1 for post-reconnect live delivery).
+      const disconnectCheckpoints = [2, 5, 7]; // early, mid, late
+      const iterations = disconnectCheckpoints.length;
 
       for (let iter = 0; iter < iterations; iter++) {
         const auth = await loginViaRest();
-        const totalEvents = 10; // started + 8 text-deltas + completed
         const textChunks = Array.from(
           { length: 8 },
           (_, i) => `chunk-${String(i)}-iter-${String(iter)}`,
@@ -3638,8 +3643,8 @@ describe('T030: End-to-end streaming integration', () => {
         ws1.send(JSON.stringify({ type: 'subscribe', conversationId: CONV_ID }));
         await waitForMessage(ws1); // subscribed
 
-        // Leave room for both a replay gap and post-reconnect live production.
-        const disconnectAfter = 2 + Math.floor(Math.random() * (totalEvents - 5));
+        // Deterministic disconnect point for this iteration (early / mid / late).
+        const disconnectAfter = disconnectCheckpoints[iter];
         const preDisconnectMessages: Array<Record<string, unknown>> = [];
 
         const partialPromise = new Promise<void>((resolve, reject) => {
@@ -3938,11 +3943,14 @@ describe('T030: End-to-end streaming integration', () => {
         headers: { Origin: ORIGIN },
       });
 
-      // ws library emits 'error' with unexpected-response when upgrade is rejected
-      const [err] = (await once(ws, 'error')) as [Error];
-      assert.ok(
-        err.message.includes('401'),
-        `SC-004: WS handshake rejected without session cookie — ${err.message}`,
+      const [, response] = (await once(ws, 'unexpected-response')) as [
+        unknown,
+        { statusCode?: number },
+      ];
+      assert.equal(
+        response.statusCode,
+        401,
+        'SC-004: WS handshake rejected without session cookie',
       );
     });
 
@@ -3954,11 +3962,11 @@ describe('T030: End-to-end streaming integration', () => {
         },
       });
 
-      const [err] = (await once(ws, 'error')) as [Error];
-      assert.ok(
-        err.message.includes('401'),
-        `SC-004: WS handshake rejected with invalid session — ${err.message}`,
-      );
+      const [, response] = (await once(ws, 'unexpected-response')) as [
+        unknown,
+        { statusCode?: number },
+      ];
+      assert.equal(response.statusCode, 401, 'SC-004: WS handshake rejected with invalid session');
     });
 
     it('subscribe message type is unreachable without authenticated WS (handshake gate)', async () => {
