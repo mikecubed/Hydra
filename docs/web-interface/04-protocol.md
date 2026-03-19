@@ -137,8 +137,10 @@ Stop receiving events for a conversation.
 
 #### `ack`
 
-Acknowledge receipt of events up to a given sequence number. Fire-and-forget; no server response.
-The gateway uses the ack position internally for replay tracking.
+Acknowledge receipt of events up to a given sequence number on the current WebSocket connection.
+Fire-and-forget; no server response.
+The gateway records the latest acknowledged sequence on that live connection, but reconnect replay is
+driven by the `lastAcknowledgedSeq` value supplied in a later `subscribe` message.
 
 ```json
 {
@@ -551,7 +553,9 @@ sends `daemon-restored`.
 When an operator opens multiple browser tabs, each tab establishes its own WebSocket connection.
 All connections for the same session are tracked independently in the connection registry.
 
-- Each connection maintains independent subscription state, ack positions, and replay state.
+- Each connection maintains independent subscription state and live ack positions.
+- Replay after reconnect is still driven by the `lastAcknowledgedSeq` provided in each new
+  `subscribe` message.
 - Events for a subscribed conversation are delivered to **every** connection subscribed to that
   conversation, not just one.
 - Session-level messages (`session-expiring-soon`, `session-terminated`) are broadcast to all
