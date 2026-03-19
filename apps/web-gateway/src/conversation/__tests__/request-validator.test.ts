@@ -441,6 +441,24 @@ describe('validateBody — CreateConversationRequest malformed bodies', () => {
     await assertValidationError(res);
   });
 
+  it('accepts parentConversationId without forkPointTurnId at schema layer', async () => {
+    const res = await createApp().request(
+      buildRequest('POST', '/conversations', {
+        body: JSON.stringify({ parentConversationId: 'conv-1' }),
+      }),
+    );
+    assert.equal(res.status, 200);
+  });
+
+  it('accepts forkPointTurnId without parentConversationId at schema layer', async () => {
+    const res = await createApp().request(
+      buildRequest('POST', '/conversations', {
+        body: JSON.stringify({ forkPointTurnId: 'turn-1' }),
+      }),
+    );
+    assert.equal(res.status, 200);
+  });
+
   it('rejects a JSON array body', async () => {
     const res = await createApp().request(
       buildRequest('POST', '/conversations', { body: JSON.stringify([1, 2, 3]) }),
