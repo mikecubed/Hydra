@@ -2951,7 +2951,26 @@ describe('T030: End-to-end streaming integration', () => {
       const tabB = await connectWebSocket(port, { sessionId: auth.sessionId });
       openSockets.push(tabB);
       tabB.send(JSON.stringify({ type: 'subscribe', conversationId: CONV_ID }));
-      await waitForMessage(tabB); // subscribed
+
+      // The first message tab B receives MUST be the subscribe ack, not earlyEvent.
+      const subAckB = await waitForMessage(tabB);
+      assert.equal(subAckB['type'], 'subscribed', 'First message to tab B is subscribe ack');
+
+      // Prove earlyEvent was not delivered to tab B: collect any messages that
+      // arrived on the socket before we emit the next event. A short drain window
+      // is sufficient because event delivery is synchronous within the gateway.
+      const spurious = await new Promise<Array<Record<string, unknown>>>((resolve) => {
+        const msgs: Array<Record<string, unknown>> = [];
+        const onMsg = (data: WebSocket.RawData) => {
+          msgs.push(rawDataToJson(data));
+        };
+        tabB.on('message', onMsg);
+        setTimeout(() => {
+          tabB.off('message', onMsg);
+          resolve(msgs);
+        }, 50);
+      });
+      assert.equal(spurious.length, 0, 'Tab B must not receive earlyEvent emitted before join');
 
       // Emit second event — both tabs should receive it
       const lateEvent: StreamEvent = {
@@ -3142,6 +3161,10 @@ describe('T030: End-to-end streaming integration', () => {
 
       // (c) attempt to use old session cookie with new gateway — WS should fail auth.
       //     The new gateway has a fresh SessionStore with no sessions.
+      //     Stale sessions are rejected *before* the WebSocket upgrade completes,
+      //     so the server writes an HTTP 401 response on the raw socket.  The ws
+      //     library surfaces this via the 'unexpected-response' event when a
+      //     listener is attached, giving us the actual HTTP status code.
       const freshWs = new WebSocket(`ws://127.0.0.1:${port}/ws`, {
         headers: {
           Origin: ORIGIN,
@@ -3149,28 +3172,33 @@ describe('T030: End-to-end streaming integration', () => {
         },
       });
 
-      // The ws library emits 'error' before 'close' when the HTTP upgrade is
-      // rejected (e.g. 401). We listen for both to avoid unhandled rejections.
-      const outcome = await new Promise<{ event: string; code?: number }>((resolve) => {
+      const outcome = await new Promise<{
+        event: 'rejected' | 'open';
+        httpStatus?: number;
+      }>((resolve) => {
         freshWs.on('open', () => {
           // Unexpected success — the server should reject the stale session.
-          // Close and let assertion below flag it.
           freshWs.close();
           resolve({ event: 'open' });
         });
-        freshWs.on('error', () => {
-          // Swallow — 'close' will follow.
+        freshWs.on('unexpected-response', (_req: unknown, res: { statusCode: number }) => {
+          resolve({ event: 'rejected', httpStatus: res.statusCode });
+          freshWs.close();
         });
-        freshWs.on('close', (code: number) => {
-          resolve({ event: 'close', code });
+        freshWs.on('error', () => {
+          // Swallow — 'unexpected-response' or 'close' will follow.
         });
       });
 
-      assert.equal(outcome.event, 'close', 'Connection should not succeed with stale session');
-      // ws reports code 1006 for abnormal closures (HTTP 401 upgrade rejection)
-      assert.ok(
-        outcome.code === 1006 || outcome.code === 1008 || outcome.code === 4001,
-        `Expected auth-failure close code, got ${String(outcome.code)}`,
+      assert.equal(
+        outcome.event,
+        'rejected',
+        'Stale session must be rejected before WebSocket upgrade',
+      );
+      assert.equal(
+        outcome.httpStatus,
+        401,
+        `Expected HTTP 401 for stale session, got ${String(outcome.httpStatus)}`,
       );
     });
 
