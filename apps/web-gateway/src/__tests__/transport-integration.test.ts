@@ -220,6 +220,7 @@ function createFakeDaemonClient(
   retriedTurns: Array<{ conversationId: string; turnId: string; newTurnId: string }>;
   nextSeq: () => number;
 } {
+  const validConversationIds = new Set(options.validConversationIds);
   let seq = options.seqStart ?? 1;
   let turnCounter = 0;
   const submissions: Array<{ conversationId: string; instruction: string; turnId: string }> = [];
@@ -239,7 +240,7 @@ function createFakeDaemonClient(
   };
 
   const openConversation = async (conversationId: string) => {
-    if (options.validConversationIds.has(conversationId)) {
+    if (validConversationIds.has(conversationId)) {
       return {
         data: {
           conversation: {
@@ -355,16 +356,45 @@ function createFakeDaemonClient(
     turnsByConversation.set(turn.conversationId, turns);
   };
 
+  const loadTurnHistory = async (
+    conversationId: string,
+    _query: {
+      conversationId: string;
+      fromPosition?: number;
+      toPosition?: number;
+      limit?: number;
+    },
+  ) => {
+    const turns = [...(turnsByConversation.get(conversationId) ?? [])].sort(
+      (left, right) => left.position - right.position,
+    );
+    return { data: { turns, totalCount: turns.length, hasMore: false } };
+  };
+
+  const getStreamReplay = async (
+    _conversationId: string,
+    turnId: string,
+    lastAcknowledgedSeq = 0,
+  ) => {
+    const events =
+      replayEventsByTurn
+        .get(turnId)
+        ?.filter((event) => event.seq > lastAcknowledgedSeq)
+        .map((event) => ({ ...event })) ?? [];
+    return { data: { events } };
+  };
+
   // Minimal DaemonClient fake — only methods used by conversation routes.
   // submitInstruction simulates the daemon accepting and recording the turn.
   const daemonClient = {
     openConversation,
+    loadTurnHistory,
     async submitInstruction(
       conversationId: string,
       body: { instruction: string },
       _opts?: { sessionId: string },
     ) {
-      if (!options.validConversationIds.has(conversationId)) {
+      if (!validConversationIds.has(conversationId)) {
         return { error: notFoundError };
       }
       turnCounter++;
@@ -380,6 +410,7 @@ function createFakeDaemonClient(
     },
     async createConversation(body: { title?: string }) {
       const id = `conv-${String(Date.now())}`;
+      validConversationIds.add(id);
       return {
         data: {
           id,
@@ -393,7 +424,7 @@ function createFakeDaemonClient(
       };
     },
     async getPendingApprovals(conversationId: string) {
-      if (!options.validConversationIds.has(conversationId)) {
+      if (!validConversationIds.has(conversationId)) {
         return { error: notFoundError };
       }
       return {
@@ -456,7 +487,7 @@ function createFakeDaemonClient(
       };
     },
     async cancelWork(conversationId: string, turnId: string) {
-      if (!options.validConversationIds.has(conversationId)) {
+      if (!validConversationIds.has(conversationId)) {
         return { error: notFoundError };
       }
       cancelledTurns.push({ conversationId, turnId });
@@ -468,7 +499,7 @@ function createFakeDaemonClient(
       };
     },
     async retryTurn(conversationId: string, turnId: string) {
-      if (!options.validConversationIds.has(conversationId)) {
+      if (!validConversationIds.has(conversationId)) {
         return { error: notFoundError };
       }
       turnCounter++;
@@ -495,28 +526,8 @@ function createFakeDaemonClient(
     'openConversation' | 'loadTurnHistory' | 'getStreamReplay'
   > = {
     openConversation,
-    async loadTurnHistory(
-      conversationId: string,
-      _query: {
-        conversationId: string;
-        fromPosition?: number;
-        toPosition?: number;
-        limit?: number;
-      },
-    ) {
-      const turns = [...(turnsByConversation.get(conversationId) ?? [])].sort(
-        (left, right) => left.position - right.position,
-      );
-      return { data: { turns, totalCount: turns.length, hasMore: false } };
-    },
-    async getStreamReplay(_conversationId: string, turnId: string, lastAcknowledgedSeq = 0) {
-      const events =
-        replayEventsByTurn
-          .get(turnId)
-          ?.filter((event) => event.seq > lastAcknowledgedSeq)
-          .map((event) => ({ ...event })) ?? [];
-      return { data: { events } };
-    },
+    loadTurnHistory,
+    getStreamReplay,
   };
 
   return {
@@ -3329,93 +3340,6 @@ describe('T030: End-to-end streaming integration', () => {
       const conversationId = createBody['id'] as string;
       assert.ok(conversationId, 'Expected conversation ID from create');
 
-      // The daemon client mock uses `validConversationIds` — add the dynamic id
-      // by monkey-patching openConversation to also accept the newly created id.
-      const origOpen = fakeDaemon.daemonClient.openConversation.bind(fakeDaemon.daemonClient);
-      (
-        fakeDaemon.daemonClient as unknown as { openConversation: typeof origOpen }
-      ).openConversation = async (cid: string) => {
-        if (cid === conversationId) {
-          return {
-            data: {
-              conversation: {
-                id: conversationId,
-                status: 'active' as const,
-                createdAt: new Date().toISOString(),
-                updatedAt: new Date().toISOString(),
-                turnCount: 0,
-                pendingInstructionCount: 0,
-              },
-              recentTurns: [],
-              totalTurnCount: 0,
-              pendingApprovals: [],
-            },
-          };
-        }
-        return origOpen(cid);
-      };
-
-      // Also patch submitInstruction to accept the dynamic conversation
-      const origSubmit = fakeDaemon.daemonClient.submitInstruction.bind(fakeDaemon.daemonClient);
-      let dynamicTurnId = '';
-      let dynamicSubmitCount = 0;
-      (
-        fakeDaemon.daemonClient as unknown as { submitInstruction: typeof origSubmit }
-      ).submitInstruction = async (
-        cid: string,
-        body: { instruction: string },
-        opts?: { sessionId: string },
-      ) => {
-        if (cid === conversationId) {
-          dynamicTurnId = `turn-e2e-${String(Date.now())}`;
-          dynamicSubmitCount += 1;
-          fakeDaemon.submissions.push({
-            conversationId: cid,
-            instruction: body.instruction,
-            turnId: dynamicTurnId,
-          });
-          return {
-            data: {
-              turn: {
-                id: dynamicTurnId,
-                conversationId: cid,
-                position: 1,
-                kind: 'operator' as const,
-                attribution: { type: 'operator' as const, label: 'admin' },
-                instruction: body.instruction,
-                status: 'executing' as const,
-                createdAt: new Date().toISOString(),
-              },
-              streamId: `stream-${dynamicTurnId}`,
-            },
-          };
-        }
-        return origSubmit(cid, body, opts);
-      };
-
-      // Patch wsDaemonClient openConversation for the dynamic id
-      const origWsOpen = fakeDaemon.wsDaemonClient.openConversation.bind(fakeDaemon.wsDaemonClient);
-      fakeDaemon.wsDaemonClient.openConversation = async (cid: string) => {
-        if (cid === conversationId) {
-          return {
-            data: {
-              conversation: {
-                id: conversationId,
-                status: 'active' as const,
-                createdAt: new Date().toISOString(),
-                updatedAt: new Date().toISOString(),
-                turnCount: 0,
-                pendingInstructionCount: 0,
-              },
-              recentTurns: [],
-              totalTurnCount: 0,
-              pendingApprovals: [],
-            },
-          };
-        }
-        return origWsOpen(cid);
-      };
-
       // ── Step 3: Open WebSocket and subscribe ─────────────────────────────
       const ws = await connectWebSocket(port, { sessionId: auth.sessionId });
       openSockets.push(ws);
@@ -3443,9 +3367,18 @@ describe('T030: End-to-end streaming integration', () => {
       assert.equal(submitRes.status, 201, `Submit instruction failed: ${String(submitRes.status)}`);
       const submitBody = (await submitRes.json()) as Record<string, unknown>;
       const turnObj = submitBody['turn'] as Record<string, unknown>;
-      const turnId = (dynamicTurnId || turnObj['id']) as string;
+      const turnId = turnObj['id'] as string;
       assert.ok(turnId, 'Expected turnId from instruction submission');
-      assert.equal(dynamicSubmitCount, 1, 'Gateway mediated exactly one daemon submit call');
+      assert.equal(
+        fakeDaemon.submissions.length,
+        1,
+        'Gateway mediated exactly one daemon submit call',
+      );
+      assert.equal(
+        fakeDaemon.submissions[0]?.conversationId,
+        conversationId,
+        'Gateway submitted work for the created conversation',
+      );
 
       // ── Step 5: Daemon produces stream events → arrive on WS ─────────
       const emitted = fakeDaemon.emitFullStream(conversationId, turnId, [
@@ -3472,32 +3405,6 @@ describe('T030: End-to-end streaming integration', () => {
       }
 
       // ── Step 6: Load turn history via REST ───────────────────────────────
-      // Patch loadTurnHistory on daemonClient so the REST route returns data
-      let dynamicLoadHistoryCount = 0;
-      (
-        fakeDaemon.daemonClient as unknown as { loadTurnHistory: DaemonClient['loadTurnHistory'] }
-      ).loadTurnHistory = async () => {
-        dynamicLoadHistoryCount += 1;
-        return {
-          data: {
-            turns: [
-              {
-                id: turnId,
-                conversationId,
-                position: 1,
-                kind: 'operator' as const,
-                attribution: { type: 'operator' as const, label: 'admin' },
-                instruction: 'implement the feature',
-                status: 'completed' as const,
-                createdAt: new Date().toISOString(),
-              },
-            ],
-            totalCount: 1,
-            hasMore: false,
-          },
-        };
-      };
-
       const historyRes = await fetch(
         `http://127.0.0.1:${port}/conversations/${conversationId}/turns?limit=50`,
         {
@@ -3513,7 +3420,6 @@ describe('T030: End-to-end streaming integration', () => {
       assert.ok(Array.isArray(turns), 'Expected turns array');
       assert.ok(turns.length >= 1, 'Expected at least one turn in history');
       assert.equal(turns[0]['id'], turnId, 'Turn history includes the submitted turn');
-      assert.equal(dynamicLoadHistoryCount, 1, 'Gateway mediated exactly one daemon history call');
 
       // ── Step 7: Browser traffic terminates at the gateway ────────────────
       assert.equal(
@@ -3534,6 +3440,11 @@ describe('T030: End-to-end streaming integration', () => {
       assert.ok(
         fakeDaemon.submissions.some((submission) => submission.turnId === turnId),
         'Gateway, not the browser, mediated daemon work submission',
+      );
+      assert.equal(
+        turns[0]['conversationId'],
+        conversationId,
+        'History came back through gateway mediation',
       );
     });
   });
