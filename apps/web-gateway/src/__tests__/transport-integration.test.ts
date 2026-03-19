@@ -3852,9 +3852,19 @@ describe('T030: End-to-end streaming integration', () => {
         ws1.send(JSON.stringify({ type: 'subscribe', conversationId: CONV_ID }));
         await waitForMessage(ws1); // subscribed
 
-        const emitted = fakeDaemon.emitFullStream(CONV_ID, turnId, textChunks);
-        const targetCount = disconnectAt === 'first' ? 1 : emitted.length;
-        const received = await waitForMessages(ws1, targetCount);
+        let emitted: StreamEvent[];
+        let received: Record<string, unknown>[];
+
+        if (disconnectAt === 'first') {
+          // Plan all events but emit only the first before disconnecting, so the
+          // reconnect path genuinely depends on replay for the remaining stream.
+          emitted = fakeDaemon.planFullStream(CONV_ID, turnId, textChunks);
+          bridge.emitStreamEvent(CONV_ID, emitted[0]);
+          received = await waitForMessages(ws1, 1);
+        } else {
+          emitted = fakeDaemon.emitFullStream(CONV_ID, turnId, textChunks);
+          received = await waitForMessages(ws1, emitted.length);
+        }
 
         const lastReceivedSeq = (lastItem(received)['event'] as StreamEvent).seq;
 
@@ -3864,6 +3874,14 @@ describe('T030: End-to-end streaming integration', () => {
           () => gw.connectionRegistry.getByConversation(CONV_ID).size,
           (s) => s === 0,
         );
+
+        // For 'first': emit the remaining events only after the socket is fully
+        // torn down, ensuring the reconnect must rely on replay/live recovery.
+        if (disconnectAt === 'first') {
+          for (let i = 1; i < emitted.length; i++) {
+            bridge.emitStreamEvent(CONV_ID, emitted[i]);
+          }
+        }
 
         // Reconnect
         const ws2 = await connectWebSocket(port, { sessionId: auth.sessionId });
