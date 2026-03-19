@@ -4049,7 +4049,11 @@ describe('T030: End-to-end streaming integration', () => {
         opened = true;
       });
 
-      await once(ws, 'error'); // rejected upgrade
+      const [, response] = (await once(ws, 'unexpected-response')) as [
+        unknown,
+        { statusCode?: number },
+      ];
+      assert.equal(response.statusCode, 401, 'SC-004: subscribe — handshake rejected with 401');
       assert.equal(opened, false, 'SC-004: subscribe — WS never opened without valid session');
     });
 
@@ -4063,7 +4067,11 @@ describe('T030: End-to-end streaming integration', () => {
         opened = true;
       });
 
-      await once(ws, 'error');
+      const [, response] = (await once(ws, 'unexpected-response')) as [
+        unknown,
+        { statusCode?: number },
+      ];
+      assert.equal(response.statusCode, 401, 'SC-004: unsubscribe — handshake rejected with 401');
       assert.equal(opened, false, 'SC-004: unsubscribe — WS never opened without valid session');
     });
 
@@ -4077,7 +4085,11 @@ describe('T030: End-to-end streaming integration', () => {
         opened = true;
       });
 
-      await once(ws, 'error');
+      const [, response] = (await once(ws, 'unexpected-response')) as [
+        unknown,
+        { statusCode?: number },
+      ];
+      assert.equal(response.statusCode, 401, 'SC-004: ack — handshake rejected with 401');
       assert.equal(opened, false, 'SC-004: ack — WS never opened without valid session');
     });
 
