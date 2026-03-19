@@ -100,17 +100,17 @@ Important scope note:
 Some transport settings are true runtime inputs; others are implementation defaults inside the
 transport modules.
 
-| Setting                                           | Default             | Where defined                     | Exposure                                                                                         |
-| ------------------------------------------------- | ------------------- | --------------------------------- | ------------------------------------------------------------------------------------------------ |
-| Event buffer capacity                             | `1000`              | `EventBuffer` constructor         | Override by injecting a prebuilt `deps.eventBuffer`.                                             |
-| Inactive conversation cleanup timeout             | `300_000` (5m)      | `EventBuffer` constructor         | Override by injecting a prebuilt `deps.eventBuffer`.                                             |
-| Daemon client timeout                             | `5_000`             | `DaemonClient`                    | Override with `deps.daemonClientOptions.timeoutMs` or a prebuilt `deps.daemonClient`.            |
-| WebSocket backpressure high-water mark            | `1_048_576` (1 MiB) | `transport/backpressure.ts`       | Used by `EventForwarder` and `WsMessageHandler`; not currently exposed through `GatewayAppDeps`. |
-| WebSocket hard payload ceiling                    | `1_048_576` (1 MiB) | `transport/ws-server.ts`          | Internal `ws` hard limit.                                                                        |
-| App-level inbound WS message limit                | `8192` (8 KiB)      | `transport/ws-message-handler.ts` | Internal validation limit; oversized messages get `WS_INVALID_MESSAGE`.                          |
-| Pending inbound WS messages per connection        | `64`                | `transport/ws-server.ts`          | Internal queue-depth guard.                                                                      |
-| Pending replay events per connection/conversation | `1000`              | `transport/event-forwarder.ts`    | Internal replay-backlog guard.                                                                   |
-| Daemon replay concurrency                         | `8`                 | `transport/ws-message-handler.ts` | Internal upper bound for concurrent per-turn replay fetches.                                     |
+| Setting                                           | Default             | Where defined                     | Exposure                                                                                                |
+| ------------------------------------------------- | ------------------- | --------------------------------- | ------------------------------------------------------------------------------------------------------- |
+| Event buffer capacity                             | `1000`              | `EventBuffer` constructor         | Override by injecting a prebuilt `deps.eventBuffer`.                                                    |
+| Inactive conversation cleanup timeout             | `300_000` (5m)      | `EventBuffer` constructor         | Override by injecting a prebuilt `deps.eventBuffer`.                                                    |
+| Daemon client timeout                             | `5_000`             | `DaemonClient`                    | Override with `deps.daemonClientOptions.timeoutMs` or a prebuilt `deps.daemonClient`.                   |
+| WebSocket backpressure high-water mark            | `1_048_576` (1 MiB) | `transport/backpressure.ts`       | Used by `EventForwarder` and `WsMessageHandler`; not currently exposed through `GatewayAppDeps`.        |
+| WebSocket hard payload ceiling                    | `1_048_576` (1 MiB) | `transport/ws-server.ts`          | Hard `ws` `maxPayload` ceiling; messages above this are rejected by `ws` before the gateway sees them.  |
+| App-level inbound WS message limit                | `8192` (8 KiB)      | `transport/ws-message-handler.ts` | App-level validation limit applied after the `ws` ceiling; oversized messages get `WS_INVALID_MESSAGE`. |
+| Pending inbound WS messages per connection        | `64`                | `transport/ws-server.ts`          | Internal queue-depth guard.                                                                             |
+| Pending replay events per connection/conversation | `1000`              | `transport/event-forwarder.ts`    | Internal replay-backlog guard.                                                                          |
+| Daemon replay concurrency                         | `8`                 | `transport/ws-message-handler.ts` | Internal upper bound for concurrent per-turn replay fetches.                                            |
 
 ## Session-Termination Timing
 

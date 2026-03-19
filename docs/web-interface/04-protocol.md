@@ -88,8 +88,11 @@ gateway closes it with code `1000` and reason `Session idle timeout`.
 
 ## Message Format
 
-All messages are JSON. The gateway enforces an inbound message size limit of **8,192 bytes**
-(8 KiB). Messages exceeding this limit are rejected before JSON parsing.
+All messages are JSON. The `ws` library enforces a hard **`maxPayload`** ceiling of **1 MiB**
+(1,048,576 bytes). Messages that exceed this ceiling are rejected by `ws` itself — the connection
+is terminated before the gateway ever sees the data. Below that ceiling, the gateway applies an
+additional app-level inbound message size limit of **8,192 bytes** (8 KiB). Messages that pass the
+`ws` ceiling but exceed the 8 KiB limit are rejected with `WS_INVALID_MESSAGE` before JSON parsing.
 
 ### Client → Server Messages
 
@@ -327,16 +330,16 @@ A structured error in response to a client message or an operational failure.
 
 ### Message-Level Errors (sent over WebSocket)
 
-| Code                        | Category     | Closes connection? | Cause                                                       |
-| --------------------------- | ------------ | ------------------ | ----------------------------------------------------------- |
-| `WS_INVALID_MESSAGE`        | `validation` | no                 | Malformed JSON or schema violation                          |
-| `CONVERSATION_NOT_FOUND`    | `validation` | no                 | Unknown conversation ID in subscribe                        |
-| `WS_MESSAGE_QUEUE_OVERFLOW` | `rate-limit` | yes (1008)         | ≥ 64 pending messages on this connection                    |
-| `WS_BUFFER_OVERFLOW`        | `daemon`     | yes (1008)         | Send buffer exceeds 1 MiB high-water mark                   |
-| `WS_REPLAY_OVERFLOW`        | `daemon`     | yes (1008)         | ≥ 1,000 events queued during replay                         |
-| `REPLAY_INCOMPLETE`         | `daemon`     | no                 | Daemon replay failed; resume aborted before replay delivery |
-| `DAEMON_UNREACHABLE`        | `daemon`     | no                 | Daemon not reachable for mediation                          |
-| `INTERNAL_ERROR`            | `daemon`     | no                 | Unexpected gateway error                                    |
+| Code                        | Category     | Closes connection? | Cause                                                                              |
+| --------------------------- | ------------ | ------------------ | ---------------------------------------------------------------------------------- |
+| `WS_INVALID_MESSAGE`        | `validation` | no                 | Malformed JSON or schema violation                                                 |
+| `CONVERSATION_NOT_FOUND`    | `validation` | no                 | Unknown conversation ID in subscribe                                               |
+| `WS_MESSAGE_QUEUE_OVERFLOW` | `rate-limit` | yes (1008)         | ≥ 64 pending messages on this connection                                           |
+| `WS_BUFFER_OVERFLOW`        | `daemon`     | yes (1008)         | Send buffer exceeds 1 MiB high-water mark                                          |
+| `WS_REPLAY_OVERFLOW`        | `daemon`     | yes (1008)         | ≥ 1,000 events queued during replay                                                |
+| `REPLAY_INCOMPLETE`         | `daemon`     | no                 | Daemon replay failed; resume aborted before replay delivery                        |
+| `DAEMON_UNREACHABLE`        | `daemon`     | no                 | Daemon not reachable for mediation                                                 |
+| `INTERNAL_ERROR`            | `daemon`     | yes (1011)         | Unexpected message-handling failure (closes with 1011 / _Message handling failed_) |
 
 ### WebSocket Close Codes
 
