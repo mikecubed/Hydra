@@ -123,6 +123,12 @@ async function waitFor<T>(
   }
 }
 
+async function sleep(ms: number): Promise<void> {
+  await new Promise((resolve) => {
+    setTimeout(resolve, ms);
+  });
+}
+
 function assertMonotonicSequenceNumbers(seqs: number[], description: string): void {
   const pairs = seqs.slice(1).entries();
   for (const [offset, seq] of pairs) {
@@ -207,18 +213,24 @@ function createFakeDaemonClient(
   daemonClient: DaemonClient;
   wsDaemonClient: Pick<DaemonClient, 'openConversation' | 'loadTurnHistory' | 'getStreamReplay'>;
   submissions: Array<{ conversationId: string; instruction: string; turnId: string }>;
+  planFullStream: (conversationId: string, turnId: string, textChunks: string[]) => StreamEvent[];
   emitFullStream: (conversationId: string, turnId: string, textChunks: string[]) => StreamEvent[];
+  commitStreamState: (conversationId: string, turnId: string, events: StreamEvent[]) => void;
   pendingApprovals: FakeApproval[];
   cancelledTurns: Array<{ conversationId: string; turnId: string }>;
   retriedTurns: Array<{ conversationId: string; turnId: string; newTurnId: string }>;
   nextSeq: () => number;
+  updateTurnStatus: (conversationId: string, turnId: string, status: TurnStatus) => void;
 } {
+  const validConversationIds = new Set(options.validConversationIds);
   let seq = options.seqStart ?? 1;
   let turnCounter = 0;
   const submissions: Array<{ conversationId: string; instruction: string; turnId: string }> = [];
   const pendingApprovals: FakeApproval[] = [];
   const cancelledTurns: Array<{ conversationId: string; turnId: string }> = [];
   const retriedTurns: Array<{ conversationId: string; turnId: string; newTurnId: string }> = [];
+  const turnsByConversation = new Map<string, Array<ReturnType<typeof makeTurn>>>();
+  const replayEventsByTurn = new Map<string, StreamEvent[]>();
 
   const nextSeq = (): number => seq++;
 
@@ -230,7 +242,7 @@ function createFakeDaemonClient(
   };
 
   const openConversation = async (conversationId: string) => {
-    if (options.validConversationIds.has(conversationId)) {
+    if (validConversationIds.has(conversationId)) {
       return {
         data: {
           conversation: {
@@ -238,11 +250,11 @@ function createFakeDaemonClient(
             status: 'active' as const,
             createdAt: new Date().toISOString(),
             updatedAt: new Date().toISOString(),
-            turnCount: 0,
+            turnCount: turnsByConversation.get(conversationId)?.length ?? 0,
             pendingInstructionCount: 0,
           },
           recentTurns: [],
-          totalTurnCount: 0,
+          totalTurnCount: turnsByConversation.get(conversationId)?.length ?? 0,
           pendingApprovals: [],
         },
       };
@@ -250,10 +262,8 @@ function createFakeDaemonClient(
     return { error: notFoundError };
   };
 
-  /** Emit a complete stream lifecycle: started → N text-deltas → completed.
-   *  Returns the emitted events for assertion convenience. */
-  const emitFullStream = (
-    conversationId: string,
+  const planFullStream = (
+    _conversationId: string,
     turnId: string,
     textChunks: string[],
   ): StreamEvent[] => {
@@ -267,7 +277,6 @@ function createFakeDaemonClient(
       timestamp: new Date().toISOString(),
     };
     events.push(started);
-    bridge.emitStreamEvent(conversationId, started);
 
     for (const text of textChunks) {
       const delta: StreamEvent = {
@@ -278,7 +287,6 @@ function createFakeDaemonClient(
         timestamp: new Date().toISOString(),
       };
       events.push(delta);
-      bridge.emitStreamEvent(conversationId, delta);
     }
 
     const completed: StreamEvent = {
@@ -289,8 +297,48 @@ function createFakeDaemonClient(
       timestamp: new Date().toISOString(),
     };
     events.push(completed);
-    bridge.emitStreamEvent(conversationId, completed);
 
+    return events;
+  };
+
+  /** Commit stream state: store replay events and mark the turn completed.
+   *  Called by emitFullStream automatically; call directly when manually
+   *  emitting events via planFullStream + bridge.emitStreamEvent. */
+  const commitStreamState = (
+    conversationId: string,
+    turnId: string,
+    events: StreamEvent[],
+  ): void => {
+    replayEventsByTurn.set(
+      turnId,
+      events.map((event) => ({ ...event })),
+    );
+    const existingTurns = turnsByConversation.get(conversationId) ?? [];
+    const priorTurn = existingTurns.find((t) => t.id === turnId);
+    storeTurn(
+      makeTurn(
+        turnId,
+        conversationId,
+        priorTurn?.position ?? existingTurns.length + 1,
+        'completed',
+        priorTurn?.instruction ?? 'emitted-stream',
+        priorTurn?.parentTurnId,
+      ),
+    );
+  };
+
+  /** Emit a complete stream lifecycle: started → N text-deltas → completed.
+   *  Returns the emitted events for assertion convenience. */
+  const emitFullStream = (
+    conversationId: string,
+    turnId: string,
+    textChunks: string[],
+  ): StreamEvent[] => {
+    const events = planFullStream(conversationId, turnId, textChunks);
+    for (const event of events) {
+      bridge.emitStreamEvent(conversationId, event);
+    }
+    commitStreamState(conversationId, turnId, events);
     return events;
   };
 
@@ -313,21 +361,62 @@ function createFakeDaemonClient(
     createdAt: new Date().toISOString(),
   });
 
+  const storeTurn = (turn: ReturnType<typeof makeTurn>): void => {
+    const turns = turnsByConversation.get(turn.conversationId) ?? [];
+    const existingIndex = turns.findIndex((candidate) => candidate['id'] === turn.id);
+    if (existingIndex >= 0) {
+      turns[existingIndex] = turn;
+    } else {
+      turns.push(turn);
+    }
+    turnsByConversation.set(turn.conversationId, turns);
+  };
+
+  const loadTurnHistory = async (
+    conversationId: string,
+    _query: {
+      conversationId: string;
+      fromPosition?: number;
+      toPosition?: number;
+      limit?: number;
+    },
+  ) => {
+    const turns = [...(turnsByConversation.get(conversationId) ?? [])].sort(
+      (left, right) => left.position - right.position,
+    );
+    return { data: { turns, totalCount: turns.length, hasMore: false } };
+  };
+
+  const getStreamReplay = async (
+    _conversationId: string,
+    turnId: string,
+    lastAcknowledgedSeq = 0,
+  ) => {
+    const events =
+      replayEventsByTurn
+        .get(turnId)
+        ?.filter((event) => event.seq > lastAcknowledgedSeq)
+        .map((event) => ({ ...event })) ?? [];
+    return { data: { events } };
+  };
+
   // Minimal DaemonClient fake — only methods used by conversation routes.
   // submitInstruction simulates the daemon accepting and recording the turn.
   const daemonClient = {
     openConversation,
+    loadTurnHistory,
     async submitInstruction(
       conversationId: string,
       body: { instruction: string },
       _opts?: { sessionId: string },
     ) {
-      if (!options.validConversationIds.has(conversationId)) {
+      if (!validConversationIds.has(conversationId)) {
         return { error: notFoundError };
       }
       turnCounter++;
       const turnId = `turn-${String(turnCounter)}`;
       submissions.push({ conversationId, instruction: body.instruction, turnId });
+      storeTurn(makeTurn(turnId, conversationId, turnCounter, 'executing', body.instruction));
       return {
         data: {
           turn: makeTurn(turnId, conversationId, turnCounter, 'executing', body.instruction),
@@ -337,6 +426,7 @@ function createFakeDaemonClient(
     },
     async createConversation(body: { title?: string }) {
       const id = `conv-${String(Date.now())}`;
+      validConversationIds.add(id);
       return {
         data: {
           id,
@@ -350,7 +440,7 @@ function createFakeDaemonClient(
       };
     },
     async getPendingApprovals(conversationId: string) {
-      if (!options.validConversationIds.has(conversationId)) {
+      if (!validConversationIds.has(conversationId)) {
         return { error: notFoundError };
       }
       return {
@@ -413,7 +503,7 @@ function createFakeDaemonClient(
       };
     },
     async cancelWork(conversationId: string, turnId: string) {
-      if (!options.validConversationIds.has(conversationId)) {
+      if (!validConversationIds.has(conversationId)) {
         return { error: notFoundError };
       }
       cancelledTurns.push({ conversationId, turnId });
@@ -425,22 +515,24 @@ function createFakeDaemonClient(
       };
     },
     async retryTurn(conversationId: string, turnId: string) {
-      if (!options.validConversationIds.has(conversationId)) {
+      if (!validConversationIds.has(conversationId)) {
         return { error: notFoundError };
       }
       turnCounter++;
       const newTurnId = `turn-${String(turnCounter)}`;
       retriedTurns.push({ conversationId, turnId, newTurnId });
+      const turn = makeTurn(
+        newTurnId,
+        conversationId,
+        turnCounter,
+        'executing',
+        'retried-instruction',
+        turnId,
+      );
+      storeTurn(turn);
       return {
         data: {
-          turn: makeTurn(
-            newTurnId,
-            conversationId,
-            turnCounter,
-            'executing',
-            'retried-instruction',
-            turnId,
-          ),
+          turn,
           streamId: `stream-${newTurnId}`,
         },
       };
@@ -452,23 +544,30 @@ function createFakeDaemonClient(
     'openConversation' | 'loadTurnHistory' | 'getStreamReplay'
   > = {
     openConversation,
-    async loadTurnHistory() {
-      return { data: { turns: [], totalCount: 0, hasMore: false } };
-    },
-    async getStreamReplay() {
-      return { data: { events: [] } };
-    },
+    loadTurnHistory,
+    getStreamReplay,
+  };
+
+  /** Update only the status of an already-stored turn, preserving all other metadata. */
+  const updateTurnStatus = (conversationId: string, turnId: string, status: TurnStatus): void => {
+    const turns = turnsByConversation.get(conversationId);
+    if (!turns) return;
+    const turn = turns.find((t) => t.id === turnId);
+    if (turn) turn.status = status;
   };
 
   return {
     daemonClient,
     wsDaemonClient,
     submissions,
+    planFullStream,
     emitFullStream,
+    commitStreamState,
     pendingApprovals,
     cancelledTurns,
     retriedTurns,
     nextSeq,
+    updateTurnStatus,
   };
 }
 
@@ -2709,6 +2808,8 @@ describe('T030: End-to-end streaming integration', () => {
       };
       bridge.emitStreamEvent(CONV_ID, failedEvent);
 
+      // Persist the parent turn as failed in fake history
+      fakeDaemon.updateTurnStatus(CONV_ID, failedTurnId, 'failed');
       // Collect the failure events on WS
       const failureMsgs = await waitForMessages(ws, 2);
       assert.equal((failureMsgs[0]['event'] as StreamEvent).kind, 'stream-started');
@@ -2751,6 +2852,30 @@ describe('T030: End-to-end streaming integration', () => {
       for (const msg of retryMsgs) {
         assert.equal((msg['event'] as StreamEvent).turnId, newTurnId);
       }
+
+      // Reload turn history and verify the completed retry turn still has parentTurnId
+      const historyRes = await fakeDaemon.daemonClient.loadTurnHistory(CONV_ID, {
+        conversationId: CONV_ID,
+      });
+      assert.ok(!('error' in historyRes), 'Expected turn history to load successfully');
+      const historyTurns = historyRes.data.turns as Array<Record<string, unknown>>;
+      const completedRetry = historyTurns.find((t) => t['id'] === newTurnId);
+      assert.ok(completedRetry, 'Retry turn should be persisted in turn history');
+      assert.equal(completedRetry['status'], 'completed', 'Retry turn should be completed');
+      assert.equal(
+        completedRetry['parentTurnId'],
+        failedTurnId,
+        'Completed retry turn should preserve parentTurnId in history',
+      );
+
+      // Verify the parent turn is recorded as failed in history
+      const parentTurn = historyTurns.find((t) => t['id'] === failedTurnId);
+      assert.ok(parentTurn, 'Parent turn should be present in turn history');
+      assert.equal(
+        parentTurn['status'],
+        'failed',
+        'Parent turn should be recorded as failed in history',
+      );
 
       // Verify monotonic sequence numbers across original failure + retry
       const allSeqs = [
@@ -3234,6 +3359,803 @@ describe('T030: End-to-end streaming integration', () => {
         gw.eventBuffer.getEventsSince(CONV_ID, 0),
         [],
         'No events in new buffer for any conversation',
+      );
+    });
+  });
+
+  // ══════════════════════════════════════════════════════════════════════════
+  // Phase 8 — Integration Tests (T054 – T057)
+  // ══════════════════════════════════════════════════════════════════════════
+
+  describe('T054: End-to-end transport (SC-001)', () => {
+    it('auth → create conversation → submit instruction → WS stream events → REST turn history → zero direct daemon communication', async () => {
+      // ── Step 1: Authenticate via REST ────────────────────────────────────
+      const auth = await loginViaRest();
+      const gatewayHttpBaseUrl = `http://127.0.0.1:${port}`;
+      const gatewayWsUrl = `ws://127.0.0.1:${port}/ws`;
+
+      // ── Step 2: Create a conversation via REST ───────────────────────────
+      const createRes = await fetch(`http://127.0.0.1:${port}/conversations`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Origin: ORIGIN,
+          Cookie: `__session=${auth.sessionId}; __csrf=${auth.csrfToken}`,
+          'X-CSRF-Token': auth.csrfToken,
+        },
+        body: JSON.stringify({ title: 'E2E Lifecycle Test' }),
+      });
+      assert.equal(
+        createRes.status,
+        201,
+        `Create conversation failed: ${String(createRes.status)}`,
+      );
+      const createBody = (await createRes.json()) as Record<string, unknown>;
+      const conversationId = createBody['id'] as string;
+      assert.ok(conversationId, 'Expected conversation ID from create');
+
+      // ── Step 3: Open WebSocket and subscribe ─────────────────────────────
+      const ws = await connectWebSocket(port, { sessionId: auth.sessionId });
+      openSockets.push(ws);
+      assert.equal(ws.url, gatewayWsUrl, 'Browser WebSocket client connects only to the gateway');
+
+      ws.send(JSON.stringify({ type: 'subscribe', conversationId }));
+      const subMsg = await waitForMessage(ws);
+      assert.equal(subMsg['type'], 'subscribed');
+      assert.equal(subMsg['conversationId'], conversationId);
+
+      // ── Step 4: Submit instruction via REST ──────────────────────────────
+      const submitRes = await fetch(
+        `http://127.0.0.1:${port}/conversations/${conversationId}/turns`,
+        {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Origin: ORIGIN,
+            Cookie: `__session=${auth.sessionId}; __csrf=${auth.csrfToken}`,
+            'X-CSRF-Token': auth.csrfToken,
+          },
+          body: JSON.stringify({ instruction: 'implement the feature' }),
+        },
+      );
+      assert.equal(submitRes.status, 201, `Submit instruction failed: ${String(submitRes.status)}`);
+      const submitBody = (await submitRes.json()) as Record<string, unknown>;
+      const turnObj = submitBody['turn'] as Record<string, unknown>;
+      const turnId = turnObj['id'] as string;
+      assert.ok(turnId, 'Expected turnId from instruction submission');
+      assert.equal(
+        fakeDaemon.submissions.length,
+        1,
+        'Gateway mediated exactly one daemon submit call',
+      );
+      assert.equal(
+        fakeDaemon.submissions[0]?.conversationId,
+        conversationId,
+        'Gateway submitted work for the created conversation',
+      );
+
+      // ── Step 5: Daemon produces stream events → arrive on WS ─────────
+      const emitted = fakeDaemon.emitFullStream(conversationId, turnId, [
+        'Hello ',
+        'from ',
+        'Hydra',
+      ]);
+      const wsMessages = await waitForMessages(ws, emitted.length);
+
+      // Verify correct lifecycle: started → text-deltas → completed
+      assert.equal((wsMessages[0]['event'] as StreamEvent).kind, 'stream-started');
+      for (let i = 1; i < wsMessages.length - 1; i++) {
+        assert.equal((wsMessages[i]['event'] as StreamEvent).kind, 'text-delta');
+      }
+      assert.equal((lastItem(wsMessages)['event'] as StreamEvent).kind, 'stream-completed');
+
+      // Verify monotonic sequence numbers
+      const seqs = wsMessages.map((m) => (m['event'] as StreamEvent).seq);
+      assertMonotonicSequenceNumbers(seqs, 'E2E stream');
+
+      // Verify all events match what the daemon produced
+      for (const [i, msg] of wsMessages.entries()) {
+        assert.deepEqual(msg['event'], emitted[i], `Event[${i}] matches emitted`);
+      }
+
+      // ── Step 6: Load turn history via REST ───────────────────────────────
+      const historyRes = await fetch(
+        `http://127.0.0.1:${port}/conversations/${conversationId}/turns?limit=50`,
+        {
+          headers: {
+            Origin: ORIGIN,
+            Cookie: `__session=${auth.sessionId}; __csrf=${auth.csrfToken}`,
+          },
+        },
+      );
+      assert.equal(historyRes.status, 200, `Turn history failed: ${String(historyRes.status)}`);
+      const historyBody = (await historyRes.json()) as Record<string, unknown>;
+      const turns = historyBody['turns'] as Array<Record<string, unknown>>;
+      assert.ok(Array.isArray(turns), 'Expected turns array');
+      assert.ok(turns.length >= 1, 'Expected at least one turn in history');
+      assert.equal(turns[0]['id'], turnId, 'Turn history includes the submitted turn');
+      assert.equal(
+        turns[0]['instruction'],
+        'implement the feature',
+        'History entry retains the submitted instruction',
+      );
+      assert.equal(
+        turns[0]['status'],
+        'completed',
+        'History entry reflects completed status after stream finished',
+      );
+
+      // ── Step 7: Browser traffic terminates at the gateway ────────────────
+      assert.equal(
+        new URL(createRes.url).origin,
+        gatewayHttpBaseUrl,
+        'Create conversation request targeted the gateway origin',
+      );
+      assert.equal(
+        new URL(submitRes.url).origin,
+        gatewayHttpBaseUrl,
+        'Submit instruction request targeted the gateway origin',
+      );
+      assert.equal(
+        new URL(historyRes.url).origin,
+        gatewayHttpBaseUrl,
+        'Turn history request targeted the gateway origin',
+      );
+      assert.ok(
+        fakeDaemon.submissions.some((submission) => submission.turnId === turnId),
+        'Gateway, not the browser, mediated daemon work submission',
+      );
+      assert.equal(
+        turns[0]['conversationId'],
+        conversationId,
+        'History came back through gateway mediation',
+      );
+    });
+  });
+
+  describe('T055: Latency measurement (SC-002)', () => {
+    it('stream events arrive at browser within 500ms of daemon production under loopback', async () => {
+      const auth = await loginViaRest();
+      const ws = await connectWebSocket(port, { sessionId: auth.sessionId });
+      openSockets.push(ws);
+
+      ws.send(JSON.stringify({ type: 'subscribe', conversationId: CONV_ID }));
+      await waitForMessage(ws); // subscribed
+
+      // Collect arrival timestamps for each event
+      const arrivalTimestamps: number[] = [];
+      const productionTimestamps: number[] = [];
+
+      const eventCount = 5; // started + 3 deltas + completed
+      const textChunks = ['alpha', 'beta', 'gamma'];
+
+      // Set up message collector before emitting
+      const messagesPromise = new Promise<Array<Record<string, unknown>>>((resolve, reject) => {
+        const messages: Array<Record<string, unknown>> = [];
+        const timer = setTimeout(() => {
+          ws.off('message', onMessage);
+          reject(
+            new Error(`Timed out: received ${String(messages.length)} of ${String(eventCount)}`),
+          );
+        }, 5000);
+
+        function onMessage(data: WebSocket.RawData) {
+          arrivalTimestamps.push(Date.now());
+          messages.push(rawDataToJson(data));
+          if (messages.length === eventCount) {
+            clearTimeout(timer);
+            ws.off('message', onMessage);
+            resolve(messages);
+          }
+        }
+
+        ws.on('message', onMessage);
+      });
+
+      // Emit events from fake daemon with precise production timestamps
+      const turnId = 'turn-latency';
+      const events: StreamEvent[] = [];
+
+      const started: StreamEvent = {
+        seq: fakeDaemon.nextSeq(),
+        turnId,
+        kind: 'stream-started',
+        payload: { streamId: `stream-${turnId}` },
+        timestamp: new Date().toISOString(),
+      };
+      productionTimestamps.push(Date.now());
+      events.push(started);
+      bridge.emitStreamEvent(CONV_ID, started);
+
+      for (const text of textChunks) {
+        const delta: StreamEvent = {
+          seq: fakeDaemon.nextSeq(),
+          turnId,
+          kind: 'text-delta',
+          payload: { text },
+          timestamp: new Date().toISOString(),
+        };
+        productionTimestamps.push(Date.now());
+        events.push(delta);
+        bridge.emitStreamEvent(CONV_ID, delta);
+      }
+
+      const completed: StreamEvent = {
+        seq: fakeDaemon.nextSeq(),
+        turnId,
+        kind: 'stream-completed',
+        payload: { responseLength: textChunks.join('').length },
+        timestamp: new Date().toISOString(),
+      };
+      productionTimestamps.push(Date.now());
+      events.push(completed);
+      bridge.emitStreamEvent(CONV_ID, completed);
+
+      const wsMessages = await messagesPromise;
+      assert.equal(wsMessages.length, eventCount, 'Received all expected events');
+
+      // Measure latency: arrival - production for each event
+      const latencies: number[] = [];
+      for (let i = 0; i < eventCount; i++) {
+        const latency = arrivalTimestamps[i] - productionTimestamps[i];
+        latencies.push(latency);
+      }
+
+      // SC-002: every event must arrive within 500ms of production
+      for (const [i, latency] of latencies.entries()) {
+        assert.ok(
+          latency <= 500,
+          `SC-002: Event[${String(i)}] latency ${String(latency)}ms exceeds 500ms threshold`,
+        );
+      }
+
+      // Also verify max latency
+      const maxLatency = Math.max(...latencies);
+      assert.ok(
+        maxLatency <= 500,
+        `SC-002: Max latency ${String(maxLatency)}ms exceeds 500ms threshold`,
+      );
+
+      // Verify events are correct
+      for (const [i, msg] of wsMessages.entries()) {
+        assert.deepEqual(msg['event'], events[i], `Latency event[${i}] matches emitted`);
+      }
+    });
+
+    it('latency stays within 500ms even under burst of rapid sequential events', async () => {
+      const auth = await loginViaRest();
+      const ws = await connectWebSocket(port, { sessionId: auth.sessionId });
+      openSockets.push(ws);
+
+      ws.send(JSON.stringify({ type: 'subscribe', conversationId: CONV_ID }));
+      await waitForMessage(ws); // subscribed
+
+      const burstSize = 20;
+      const arrivalTimestamps: number[] = [];
+      const productionTimestamps: number[] = [];
+
+      const messagesPromise = new Promise<Array<Record<string, unknown>>>((resolve, reject) => {
+        const messages: Array<Record<string, unknown>> = [];
+        const timer = setTimeout(() => {
+          ws.off('message', onMessage);
+          reject(
+            new Error(`Timed out: received ${String(messages.length)} of ${String(burstSize)}`),
+          );
+        }, 5000);
+
+        function onMessage(data: WebSocket.RawData) {
+          arrivalTimestamps.push(Date.now());
+          messages.push(rawDataToJson(data));
+          if (messages.length === burstSize) {
+            clearTimeout(timer);
+            ws.off('message', onMessage);
+            resolve(messages);
+          }
+        }
+
+        ws.on('message', onMessage);
+      });
+
+      // Emit a burst of text-delta events as fast as possible
+      for (let i = 0; i < burstSize; i++) {
+        const delta: StreamEvent = {
+          seq: fakeDaemon.nextSeq(),
+          turnId: 'turn-burst',
+          kind: 'text-delta',
+          payload: { text: `chunk-${String(i)}` },
+          timestamp: new Date().toISOString(),
+        };
+        productionTimestamps.push(Date.now());
+        bridge.emitStreamEvent(CONV_ID, delta);
+      }
+
+      const wsMessages = await messagesPromise;
+      assert.equal(wsMessages.length, burstSize, `Received all ${String(burstSize)} burst events`);
+
+      for (const [i, _msg] of wsMessages.entries()) {
+        const latency = arrivalTimestamps[i] - productionTimestamps[i];
+        assert.ok(
+          latency <= 500,
+          `SC-002 burst: Event[${String(i)}] latency ${String(latency)}ms exceeds 500ms`,
+        );
+      }
+    });
+  });
+
+  describe('T056: Disconnect-resume stress (SC-003)', () => {
+    it('deterministic disconnect at early/mid/late checkpoints with reconnect produces zero gaps/duplicates', async () => {
+      // Deterministic disconnect points covering early, mid, and late replay boundaries.
+      // totalEvents = 10 (started + 8 text-deltas + completed), so valid range is [2, 7]
+      // (must leave ≥2 for replay-gap and ≥1 for post-reconnect live delivery).
+      const disconnectCheckpoints = [2, 5, 7]; // early, mid, late
+      const iterations = disconnectCheckpoints.length;
+
+      for (let iter = 0; iter < iterations; iter++) {
+        const auth = await loginViaRest();
+        const textChunks = Array.from(
+          { length: 8 },
+          (_, i) => `chunk-${String(i)}-iter-${String(iter)}`,
+        );
+        const turnId = `turn-stress-${String(iter)}`;
+
+        // ── Phase A: connect, subscribe, receive some events, disconnect at random point
+        const ws1 = await connectWebSocket(port, { sessionId: auth.sessionId });
+        openSockets.push(ws1);
+
+        ws1.send(JSON.stringify({ type: 'subscribe', conversationId: CONV_ID }));
+        await waitForMessage(ws1); // subscribed
+
+        // Deterministic disconnect point for this iteration (early / mid / late).
+        const disconnectAfter = disconnectCheckpoints[iter];
+        const preDisconnectMessages: Array<Record<string, unknown>> = [];
+
+        const partialPromise = new Promise<void>((resolve, reject) => {
+          const timer = setTimeout(() => {
+            ws1.off('message', onMessage);
+            reject(new Error(`Iter ${String(iter)}: timed out collecting pre-disconnect events`));
+          }, 5000);
+
+          function onMessage(data: WebSocket.RawData) {
+            preDisconnectMessages.push(rawDataToJson(data));
+            if (preDisconnectMessages.length === disconnectAfter) {
+              clearTimeout(timer);
+              ws1.off('message', onMessage);
+              resolve();
+            }
+          }
+
+          ws1.on('message', onMessage);
+        });
+
+        const emitted = fakeDaemon.planFullStream(CONV_ID, turnId, textChunks);
+        const preDisconnectEvents = emitted.slice(0, disconnectAfter);
+        const replayGapEvents = emitted.slice(disconnectAfter, disconnectAfter + 2);
+        const postReconnectEvents = emitted.slice(disconnectAfter + 2);
+
+        for (const event of preDisconnectEvents) {
+          bridge.emitStreamEvent(CONV_ID, event);
+          await sleep(5);
+        }
+
+        // Wait for partial delivery
+        await partialPromise;
+
+        // Record the last acknowledged seq (last received before disconnect)
+        const lastReceivedSeq = (lastItem(preDisconnectMessages)['event'] as StreamEvent).seq;
+
+        // Disconnect
+        ws1.close();
+        await once(ws1, 'close');
+        await waitFor(
+          () => gw.connectionRegistry.getByConversation(CONV_ID).size,
+          (s) => s === 0,
+        );
+
+        for (const event of replayGapEvents) {
+          bridge.emitStreamEvent(CONV_ID, event);
+          await sleep(5);
+        }
+
+        // Commit only the events actually emitted so far (pre-disconnect + gap).
+        // The turn stays 'executing' — it is not complete until the terminal event is produced.
+        const emittedSoFar = [...preDisconnectEvents, ...replayGapEvents];
+        fakeDaemon.commitStreamState(CONV_ID, turnId, emittedSoFar);
+        fakeDaemon.updateTurnStatus(CONV_ID, turnId, 'executing');
+
+        // ── Phase B: reconnect with lastAcknowledgedSeq
+        const ws2 = await connectWebSocket(port, { sessionId: auth.sessionId });
+        openSockets.push(ws2);
+
+        // Wait for daemon-fallback replay (gap events) + subscribed ack.
+        // This ensures ws2 is fully 'live' before we emit postReconnect events,
+        // so no events are dropped due to missing subscription interest.
+        const replayPhase = waitForMessages(
+          ws2,
+          replayGapEvents.length + 1, // gap replay events + subscribed
+          10_000,
+        );
+
+        ws2.send(
+          JSON.stringify({
+            type: 'subscribe',
+            conversationId: CONV_ID,
+            lastAcknowledgedSeq: lastReceivedSeq,
+          }),
+        );
+
+        const replayMessages = await replayPhase;
+
+        // ws2 is now in 'live' mode — collect postReconnect events as they arrive.
+        const livePhase = waitForMessages(ws2, postReconnectEvents.length, 10_000);
+
+        for (const event of postReconnectEvents) {
+          bridge.emitStreamEvent(CONV_ID, event);
+          await sleep(5);
+        }
+
+        // Now that all events (including postReconnect) have been emitted,
+        // commit the complete stream and mark the turn completed.
+        fakeDaemon.commitStreamState(CONV_ID, turnId, emitted);
+
+        const liveMessages = await livePhase;
+        const reconnectMessages = [...replayMessages, ...liveMessages];
+        const subscribedMessages = reconnectMessages.filter(
+          (message) => message['type'] === 'subscribed',
+        );
+        const replayedEvents = reconnectMessages.filter(
+          (message) => message['type'] === 'stream-event',
+        );
+
+        assert.equal(
+          subscribedMessages.length,
+          1,
+          'Reconnect yields exactly one subscribed confirmation',
+        );
+        assert.equal(
+          replayGapEvents.length + postReconnectEvents.length,
+          replayedEvents.length,
+          `Iter ${String(iter)}: reconnect delivers every event after the last ack`,
+        );
+        assert.ok(
+          replayGapEvents.length > 0 && postReconnectEvents.length > 0,
+          `Iter ${String(iter)}: stream continued both during disconnect and after reconnect`,
+        );
+
+        // ── Phase C: merge pre-disconnect + replayed and assert zero gaps/duplicates
+        const preSeqs = preDisconnectMessages.map((m) => (m['event'] as StreamEvent).seq);
+        const replayedSeqs = replayedEvents.map((m) => (m['event'] as StreamEvent).seq);
+        const allReceivedSeqs = [...preSeqs, ...replayedSeqs];
+
+        // Zero duplicates
+        const uniqueSeqs = new Set(allReceivedSeqs);
+        assert.equal(
+          uniqueSeqs.size,
+          allReceivedSeqs.length,
+          `Iter ${String(iter)}: zero duplicates — unique(${String(uniqueSeqs.size)}) === total(${String(allReceivedSeqs.length)})`,
+        );
+
+        // Zero gaps: should cover all emitted sequences
+        const emittedSeqs = emitted.map((e) => e.seq);
+        assert.deepEqual(
+          allReceivedSeqs.sort((a, b) => a - b),
+          emittedSeqs,
+          `Iter ${String(iter)}: zero gaps — all emitted sequences received`,
+        );
+
+        // Monotonic within each phase
+        assertMonotonicSequenceNumbers(preSeqs, `Iter ${String(iter)} pre-disconnect`);
+        if (replayedSeqs.length > 1) {
+          assertMonotonicSequenceNumbers(replayedSeqs, `Iter ${String(iter)} replay`);
+        }
+
+        // Verify event content matches emitted
+        const allReceivedEvents = [
+          ...preDisconnectMessages.map((m) => m['event'] as StreamEvent),
+          ...replayedEvents.map((m) => m['event'] as StreamEvent),
+        ].sort((a, b) => a.seq - b.seq);
+
+        for (const [i, receivedEvent] of allReceivedEvents.entries()) {
+          assert.deepEqual(
+            receivedEvent,
+            emitted[i],
+            `Iter ${String(iter)}: event at seq ${String(receivedEvent.seq)} matches emitted`,
+          );
+        }
+
+        // Clean up for next iteration
+        ws2.close();
+        await once(ws2, 'close');
+        await waitFor(
+          () => gw.connectionRegistry.getByConversation(CONV_ID).size,
+          (s) => s === 0,
+        );
+      }
+    });
+
+    it('disconnect at first event and last event boundary still produces complete replay', async () => {
+      for (const disconnectAt of ['first', 'last'] as const) {
+        const auth = await loginViaRest();
+        const turnId = `turn-boundary-${disconnectAt}`;
+        const textChunks = ['one', 'two', 'three'];
+
+        const ws1 = await connectWebSocket(port, { sessionId: auth.sessionId });
+        openSockets.push(ws1);
+
+        ws1.send(JSON.stringify({ type: 'subscribe', conversationId: CONV_ID }));
+        await waitForMessage(ws1); // subscribed
+
+        let emitted: StreamEvent[];
+        let received: Record<string, unknown>[];
+
+        if (disconnectAt === 'first') {
+          // Plan all events but emit only the first before disconnecting, so the
+          // reconnect path genuinely depends on replay for the remaining stream.
+          emitted = fakeDaemon.planFullStream(CONV_ID, turnId, textChunks);
+          bridge.emitStreamEvent(CONV_ID, emitted[0]);
+          received = await waitForMessages(ws1, 1);
+        } else {
+          emitted = fakeDaemon.emitFullStream(CONV_ID, turnId, textChunks);
+          received = await waitForMessages(ws1, emitted.length);
+        }
+
+        const lastReceivedSeq = (lastItem(received)['event'] as StreamEvent).seq;
+
+        ws1.close();
+        await once(ws1, 'close');
+        await waitFor(
+          () => gw.connectionRegistry.getByConversation(CONV_ID).size,
+          (s) => s === 0,
+        );
+
+        // For 'first': emit the remaining events only after the socket is fully
+        // torn down, ensuring the reconnect must rely on replay/live recovery.
+        if (disconnectAt === 'first') {
+          for (let i = 1; i < emitted.length; i++) {
+            bridge.emitStreamEvent(CONV_ID, emitted[i]);
+          }
+          fakeDaemon.commitStreamState(CONV_ID, turnId, emitted);
+        }
+
+        // Reconnect
+        const ws2 = await connectWebSocket(port, { sessionId: auth.sessionId });
+        openSockets.push(ws2);
+
+        ws2.send(
+          JSON.stringify({
+            type: 'subscribe',
+            conversationId: CONV_ID,
+            lastAcknowledgedSeq: lastReceivedSeq,
+          }),
+        );
+
+        const expectedReplayCount = emitted.filter((e) => e.seq > lastReceivedSeq).length;
+
+        if (expectedReplayCount > 0) {
+          const reconnectMsgs = await waitForMessages(ws2, expectedReplayCount + 1);
+          const replayed = reconnectMsgs.slice(0, expectedReplayCount);
+          assert.equal(reconnectMsgs[expectedReplayCount]['type'], 'subscribed');
+
+          // Merge and verify completeness
+          const allSeqs = [
+            ...received.map((m) => (m['event'] as StreamEvent).seq),
+            ...replayed.map((m) => (m['event'] as StreamEvent).seq),
+          ].sort((a, b) => a - b);
+
+          assert.deepEqual(
+            allSeqs,
+            emitted.map((e) => e.seq),
+            `Boundary=${disconnectAt}: all sequences present`,
+          );
+          assert.equal(
+            new Set(allSeqs).size,
+            allSeqs.length,
+            `Boundary=${disconnectAt}: zero duplicates`,
+          );
+        } else {
+          // disconnectAt === 'last': already received everything, just get subscribed
+          const subMsg = await waitForMessage(ws2);
+          assert.equal(subMsg['type'], 'subscribed');
+        }
+
+        ws2.close();
+        await once(ws2, 'close');
+        await waitFor(
+          () => gw.connectionRegistry.getByConversation(CONV_ID).size,
+          (s) => s === 0,
+        );
+      }
+    });
+  });
+
+  describe('T057: Session-bypass comprehensive (SC-004)', () => {
+    // ── All 15 REST conversation routes ──────────────────────────────────
+
+    const restRoutes: Array<{
+      method: string;
+      path: string;
+      label: string;
+      body?: Record<string, unknown>;
+    }> = [
+      {
+        method: 'POST',
+        path: '/conversations',
+        label: 'createConversation',
+        body: { title: 'test' },
+      },
+      { method: 'GET', path: '/conversations', label: 'listConversations' },
+      { method: 'GET', path: '/conversations/conv-x', label: 'openConversation' },
+      {
+        method: 'POST',
+        path: '/conversations/conv-x/resume',
+        label: 'resumeConversation',
+        body: {},
+      },
+      { method: 'POST', path: '/conversations/conv-x/archive', label: 'archiveConversation' },
+      {
+        method: 'POST',
+        path: '/conversations/conv-x/turns',
+        label: 'submitInstruction',
+        body: { instruction: 'test' },
+      },
+      { method: 'GET', path: '/conversations/conv-x/turns?limit=10', label: 'loadTurnHistory' },
+      { method: 'GET', path: '/conversations/conv-x/approvals', label: 'getPendingApprovals' },
+      {
+        method: 'POST',
+        path: '/approvals/appr-1/respond',
+        label: 'respondToApproval',
+        body: { response: 'approve' },
+      },
+      { method: 'POST', path: '/conversations/conv-x/turns/turn-1/cancel', label: 'cancelWork' },
+      { method: 'POST', path: '/conversations/conv-x/turns/turn-1/retry', label: 'retryTurn' },
+      { method: 'GET', path: '/turns/turn-1/artifacts', label: 'listArtifactsForTurn' },
+      {
+        method: 'GET',
+        path: '/conversations/conv-x/artifacts?limit=10',
+        label: 'listArtifactsForConversation',
+      },
+      { method: 'GET', path: '/artifacts/art-1', label: 'getArtifactContent' },
+      { method: 'GET', path: '/turns/turn-1/activities', label: 'getActivityEntries' },
+    ];
+
+    for (const route of restRoutes) {
+      it(`REST ${route.method} ${route.label} rejects unauthenticated access`, async () => {
+        const res = await fetch(`http://127.0.0.1:${port}${route.path}`, {
+          method: route.method,
+          headers: {
+            'Content-Type': 'application/json',
+            Origin: ORIGIN,
+            // No session cookie — unauthenticated
+          },
+          ...(route.body ? { body: JSON.stringify(route.body) } : {}),
+        });
+
+        assert.ok(
+          res.status === 401 || res.status === 403,
+          `SC-004: ${route.label} must reject unauthenticated — got ${String(res.status)}`,
+        );
+      });
+    }
+
+    // ── All 3 WS message types ───────────────────────────────────────────
+
+    it('WebSocket handshake rejects connection without valid session cookie', async () => {
+      const ws = new WebSocket(`ws://127.0.0.1:${port}/ws`, {
+        headers: { Origin: ORIGIN },
+      });
+
+      const [, response] = (await once(ws, 'unexpected-response')) as [
+        unknown,
+        { statusCode?: number },
+      ];
+      assert.equal(
+        response.statusCode,
+        401,
+        'SC-004: WS handshake rejected without session cookie',
+      );
+    });
+
+    it('WebSocket handshake rejects connection with invalid session cookie', async () => {
+      const ws = new WebSocket(`ws://127.0.0.1:${port}/ws`, {
+        headers: {
+          Origin: ORIGIN,
+          Cookie: '__session=invalid-session-id-that-does-not-exist',
+        },
+      });
+
+      const [, response] = (await once(ws, 'unexpected-response')) as [
+        unknown,
+        { statusCode?: number },
+      ];
+      assert.equal(response.statusCode, 401, 'SC-004: WS handshake rejected with invalid session');
+    });
+
+    it('subscribe message type is unreachable without authenticated WS (handshake gate)', async () => {
+      // The WS upgrade is rejected at the handshake level when the session is
+      // invalid, so subscribe messages can never be sent. Verify the connection
+      // never opens.
+      const ws = new WebSocket(`ws://127.0.0.1:${port}/ws`, {
+        headers: { Origin: ORIGIN },
+      });
+
+      let opened = false;
+      ws.on('open', () => {
+        opened = true;
+      });
+
+      const [, response] = (await once(ws, 'unexpected-response')) as [
+        unknown,
+        { statusCode?: number },
+      ];
+      assert.equal(response.statusCode, 401, 'SC-004: subscribe — handshake rejected with 401');
+      assert.equal(opened, false, 'SC-004: subscribe — WS never opened without valid session');
+    });
+
+    it('unsubscribe message type is unreachable without authenticated WS (handshake gate)', async () => {
+      const ws = new WebSocket(`ws://127.0.0.1:${port}/ws`, {
+        headers: { Origin: ORIGIN },
+      });
+
+      let opened = false;
+      ws.on('open', () => {
+        opened = true;
+      });
+
+      const [, response] = (await once(ws, 'unexpected-response')) as [
+        unknown,
+        { statusCode?: number },
+      ];
+      assert.equal(response.statusCode, 401, 'SC-004: unsubscribe — handshake rejected with 401');
+      assert.equal(opened, false, 'SC-004: unsubscribe — WS never opened without valid session');
+    });
+
+    it('ack message type is unreachable without authenticated WS (handshake gate)', async () => {
+      const ws = new WebSocket(`ws://127.0.0.1:${port}/ws`, {
+        headers: { Origin: ORIGIN },
+      });
+
+      let opened = false;
+      ws.on('open', () => {
+        opened = true;
+      });
+
+      const [, response] = (await once(ws, 'unexpected-response')) as [
+        unknown,
+        { statusCode?: number },
+      ];
+      assert.equal(response.statusCode, 401, 'SC-004: ack — handshake rejected with 401');
+      assert.equal(opened, false, 'SC-004: ack — WS never opened without valid session');
+    });
+
+    // ── Positive control: authenticated access succeeds ──────────────────
+
+    it('authenticated REST request succeeds (positive control)', async () => {
+      const auth = await loginViaRest();
+      const res = await fetch(`http://127.0.0.1:${port}/conversations/${CONV_ID}`, {
+        headers: {
+          Origin: ORIGIN,
+          Cookie: `__session=${auth.sessionId}; __csrf=${auth.csrfToken}`,
+        },
+      });
+      // Should succeed (200) — not be rejected
+      assert.equal(
+        res.status,
+        200,
+        `Positive control: authenticated GET /conversations/:id should succeed, got ${String(res.status)}`,
+      );
+    });
+
+    it('authenticated WebSocket connection succeeds (positive control)', async () => {
+      const auth = await loginViaRest();
+      const ws = await connectWebSocket(port, { sessionId: auth.sessionId });
+      openSockets.push(ws);
+
+      // Connection opened — send subscribe and verify it works
+      ws.send(JSON.stringify({ type: 'subscribe', conversationId: CONV_ID }));
+      const subMsg = await waitForMessage(ws);
+      assert.equal(
+        subMsg['type'],
+        'subscribed',
+        'Positive control: authenticated WS subscribe succeeds',
       );
     });
   });

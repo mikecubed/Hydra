@@ -308,35 +308,35 @@ _Systematic verification of every error category and spec edge case. Delivers US
 
 _End-to-end verification of all success criteria and final documentation._
 
-- [ ] T054 [P1] [US1, US2] **End-to-end transport test** — single comprehensive test exercising the full US1+US2 path: authenticate → create conversation → submit instruction → receive stream events through WebSocket → load turn history via REST → verify zero direct browser-to-daemon communication. Tests in `apps/web-gateway/src/__tests__/transport-integration.test.ts`.
+- [x] T054 [P1] [US1, US2] **End-to-end transport test** — single comprehensive test exercising the full US1+US2 path: authenticate → create conversation → submit instruction → receive stream events through WebSocket → load turn history via REST → verify zero direct browser-to-daemon communication. Tests in `apps/web-gateway/src/__tests__/transport-integration.test.ts`.
   - **Depends**: T031, T037
   - **Validates**: SC-001
 
-- [ ] T055 [P1] [US2] **Latency measurement test** — verify SC-002: timestamp stream events at daemon production and browser receipt; assert ≤ 500ms delta under loopback conditions. Tests in `apps/web-gateway/src/__tests__/transport-integration.test.ts`.
+- [x] T055 [P1] [US2] **Latency measurement test** — verify SC-002: timestamp stream events at daemon production and browser receipt; assert ≤ 500ms delta under loopback conditions. Tests in `apps/web-gateway/src/__tests__/transport-integration.test.ts`.
   - **Depends**: T030
   - **Validates**: SC-002
 
-- [ ] T056 [P2] [US4] **Disconnect-resume stress test** — verify SC-003: disconnect at random points during multi-event streaming, reconnect with last ack seq, assert 100% event replay with zero gaps/duplicates. Run multiple iterations. Tests in `apps/web-gateway/src/__tests__/transport-integration.test.ts`.
+- [x] T056 [P2] [US4] **Disconnect-resume stress test** — verify SC-003: disconnect at random points during multi-event streaming, reconnect with last ack seq, assert 100% event replay with zero gaps/duplicates. Run multiple iterations. Tests in `apps/web-gateway/src/__tests__/transport-integration.test.ts`.
   - **Depends**: T033
   - **Validates**: SC-003
 
-- [ ] T057 [P1] [US3] **Session-bypass comprehensive test** — verify SC-004: every REST conversation route AND every WebSocket message type rejects unauthenticated access. Enumerate all 15 REST routes and all 3 WS message types. Tests in `apps/web-gateway/src/__tests__/transport-integration.test.ts`.
+- [x] T057 [P1] [US3] **Session-bypass comprehensive test** — verify SC-004: every REST conversation route AND every WebSocket message type rejects unauthenticated access. Enumerate all 15 REST routes and all 3 WS message types. Tests in `apps/web-gateway/src/__tests__/transport-integration.test.ts`.
   - **Depends**: T016, T024
   - **Validates**: SC-004
 
-- [ ] T058 [P1] **Final quality gate** — run `npm run quality` (ESLint, TypeScript strict, coverage thresholds) and `npm test` from monorepo root. Zero regressions across all packages. Assert all SC-011 criteria pass.
+- [x] T058 [P1] **Final quality gate** — run `npm run quality` (ESLint, Prettier format-check, TypeScript strict, cycle detection) and `npm test` from monorepo root. Zero regressions across all packages. Assert all SC-011 criteria pass.
   - **Depends**: T054, T055, T056, T057
   - **Validates**: SC-011
 
-- [ ] T059 [P2] **Documentation: WebSocket transport protocol** — document the WebSocket protocol (endpoint, message types, subscribe/unsubscribe/ack flow, reconnect/resume protocol, error handling) in `docs/web-interface/`. Include sequence diagrams for: initial connection, subscription, streaming, reconnect/resume, session expiry.
+- [x] T059 [P2] **Documentation: WebSocket transport protocol** — document the WebSocket protocol (endpoint, message types, subscribe/unsubscribe/ack flow, reconnect/resume protocol, error handling) in `docs/web-interface/`. Include sequence diagrams for: initial connection, subscription, streaming, reconnect/resume, session expiry.
   - **Depends**: T053
   - **Validates**: —
 
-- [ ] T060 [P2] **Documentation: Gateway transport architecture** — update architecture docs with the transport layer: daemon event bridge, connection registry, event buffer, event forwarder pipeline. Document configuration knobs (buffer capacity, daemon client timeout, backpressure threshold). Update `docs/web-interface/` or relevant architecture files.
+- [x] T060 [P2] **Documentation: Gateway transport architecture** — update architecture docs with the transport layer: daemon event bridge, connection registry, event buffer, event forwarder pipeline. Document configuration knobs (buffer capacity, daemon client timeout, backpressure threshold). Update `docs/web-interface/` or relevant architecture files.
   - **Depends**: T053
   - **Validates**: —
 
-- [ ] T061 [P2] **Documentation: Gateway configuration reference** — document all configurable parameters added by this slice: event buffer capacity (default 1000), daemon client timeout (default 5s), WebSocket backpressure threshold, session-termination grace period. Add to gateway config documentation.
+- [x] T061 [P2] **Documentation: Gateway configuration reference** — document all configurable parameters added by this slice: event buffer capacity (default 1000), daemon client timeout (default 5s), WebSocket backpressure threshold, session-termination grace period. Add to gateway config documentation.
   - **Depends**: T053
   - **Validates**: —
 
