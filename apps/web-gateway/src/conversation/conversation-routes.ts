@@ -35,8 +35,8 @@ import {
 } from '../shared/gateway-error-response.ts';
 
 // Path-param schemas: omit fields that come from URL path params (path is authoritative)
-const LoadTurnHistoryQuery = LoadTurnHistoryRequest.omit({ conversationId: true });
-const ListArtifactsForConversationQuery = ListArtifactsForConversationRequest.omit({
+export const LoadTurnHistoryQuery = LoadTurnHistoryRequest.omit({ conversationId: true });
+export const ListArtifactsForConversationQuery = ListArtifactsForConversationRequest.omit({
   conversationId: true,
 });
 

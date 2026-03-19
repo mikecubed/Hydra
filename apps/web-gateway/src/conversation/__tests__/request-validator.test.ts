@@ -18,17 +18,13 @@ import {
   ResumeConversationBody,
   RespondToApprovalRequest,
   ListConversationsRequest,
-  LoadTurnHistoryRequest,
-  ListArtifactsForConversationRequest,
 } from '@hydra/web-contracts';
+import {
+  LoadTurnHistoryQuery,
+  ListArtifactsForConversationQuery,
+} from '../conversation-routes.ts';
 import { validateBody, validateQuery } from '../request-validator.ts';
 import type { GatewayErrorResponse } from '../../shared/gateway-error-response.ts';
-
-// Derived query schemas matching conversation-routes.ts usage
-const LoadTurnHistoryQuery = LoadTurnHistoryRequest.omit({ conversationId: true });
-const ListArtifactsForConversationQuery = ListArtifactsForConversationRequest.omit({
-  conversationId: true,
-});
 
 function buildRequest(
   method: string,
