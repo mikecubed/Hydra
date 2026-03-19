@@ -219,6 +219,7 @@ function createFakeDaemonClient(
   cancelledTurns: Array<{ conversationId: string; turnId: string }>;
   retriedTurns: Array<{ conversationId: string; turnId: string; newTurnId: string }>;
   nextSeq: () => number;
+  updateTurnStatus: (conversationId: string, turnId: string, status: TurnStatus) => void;
 } {
   const validConversationIds = new Set(options.validConversationIds);
   let seq = options.seqStart ?? 1;
@@ -535,6 +536,14 @@ function createFakeDaemonClient(
     getStreamReplay,
   };
 
+  /** Update only the status of an already-stored turn, preserving all other metadata. */
+  const updateTurnStatus = (conversationId: string, turnId: string, status: TurnStatus): void => {
+    const turns = turnsByConversation.get(conversationId);
+    if (!turns) return;
+    const turn = turns.find((t) => t.id === turnId);
+    if (turn) turn.status = status;
+  };
+
   return {
     daemonClient,
     wsDaemonClient,
@@ -545,6 +554,7 @@ function createFakeDaemonClient(
     cancelledTurns,
     retriedTurns,
     nextSeq,
+    updateTurnStatus,
   };
 }
 
@@ -2785,6 +2795,8 @@ describe('T030: End-to-end streaming integration', () => {
       };
       bridge.emitStreamEvent(CONV_ID, failedEvent);
 
+      // Persist the parent turn as failed in fake history
+      fakeDaemon.updateTurnStatus(CONV_ID, failedTurnId, 'failed');
       // Collect the failure events on WS
       const failureMsgs = await waitForMessages(ws, 2);
       assert.equal((failureMsgs[0]['event'] as StreamEvent).kind, 'stream-started');
@@ -2841,6 +2853,15 @@ describe('T030: End-to-end streaming integration', () => {
         completedRetry['parentTurnId'],
         failedTurnId,
         'Completed retry turn should preserve parentTurnId in history',
+      );
+
+      // Verify the parent turn is recorded as failed in history
+      const parentTurn = historyTurns.find((t) => t['id'] === failedTurnId);
+      assert.ok(parentTurn, 'Parent turn should be present in turn history');
+      assert.equal(
+        parentTurn['status'],
+        'failed',
+        'Parent turn should be recorded as failed in history',
       );
 
       // Verify monotonic sequence numbers across original failure + retry
