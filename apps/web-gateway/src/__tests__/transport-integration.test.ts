@@ -385,6 +385,7 @@ function createFakeDaemonClient(
             code: 'APPROVAL_NOT_FOUND',
             category: 'validation' as const,
             message: 'Approval not found',
+            httpStatus: 404,
           },
         };
       }
@@ -2495,7 +2496,9 @@ describe('T030: End-to-end streaming integration', () => {
 
       // Respond to a nonexistent approval
       const respondResult = await respondToApprovalViaRest('nonexistent-approval', 'approve', auth);
-      assert.ok(respondResult.status >= 400, 'Expected error status for unknown approval');
+      assert.equal(respondResult.status, 404, 'Expected 404 for unknown approval');
+      assert.equal(respondResult.body['ok'], false);
+      assert.equal(respondResult.body['code'], 'APPROVAL_NOT_FOUND');
 
       // WS should still be usable — emit an event and verify delivery
       const probeEvent: StreamEvent = {
