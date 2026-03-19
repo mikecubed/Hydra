@@ -6,10 +6,10 @@ directly with the daemon.
 
 ## Transport Overview
 
-| Transport   | Purpose                                                            |
-| ----------- | ------------------------------------------------------------------ |
+| Transport     | Purpose                                                             |
+| ------------- | ------------------------------------------------------------------- |
 | **WebSocket** | Bidirectional channel for streaming events and subscription control |
-| **REST/JSON** | Conversation lifecycle, turn submission, approvals, work control   |
+| **REST/JSON** | Conversation lifecycle, turn submission, approvals, work control    |
 
 The WebSocket carries server→client stream events and accepts client→server subscription
 management. Conversation commands (instruction submission, approval responses, cancel, retry) flow
@@ -19,10 +19,10 @@ via REST endpoints; the WebSocket delivers the resulting events.
 
 ## Connection Endpoint
 
-| Property | Value |
-| -------- | ----- |
-| Path     | `/ws` |
-| Protocol | `wss://` (TLS in production) |
+| Property | Value                                                   |
+| -------- | ------------------------------------------------------- |
+| Path     | `/ws`                                                   |
+| Protocol | `wss://` (TLS in production)                            |
 | Auth     | `__session` cookie + Origin header validated at upgrade |
 
 The gateway exposes a single WebSocket endpoint at `/ws`. All other paths are rejected and the
@@ -108,11 +108,11 @@ previous position.
 }
 ```
 
-| Field                  | Type    | Required | Description                                   |
-| ---------------------- | ------- | -------- | --------------------------------------------- |
-| `type`                 | string  | yes      | Literal `"subscribe"`                         |
-| `conversationId`       | string  | yes      | Non-empty conversation identifier             |
-| `lastAcknowledgedSeq`  | integer | no       | Last seq the client has processed (≥ 0)       |
+| Field                 | Type    | Required | Description                             |
+| --------------------- | ------- | -------- | --------------------------------------- |
+| `type`                | string  | yes      | Literal `"subscribe"`                   |
+| `conversationId`      | string  | yes      | Non-empty conversation identifier       |
+| `lastAcknowledgedSeq` | integer | no       | Last seq the client has processed (≥ 0) |
 
 - **Omitted `lastAcknowledgedSeq`** — initial subscribe; the client goes directly to live mode
   with no replay.
@@ -148,11 +148,11 @@ The gateway uses the ack position internally for replay tracking.
 }
 ```
 
-| Field            | Type    | Required | Description                             |
-| ---------------- | ------- | -------- | --------------------------------------- |
-| `type`           | string  | yes      | Literal `"ack"`                         |
-| `conversationId` | string  | yes      | Non-empty conversation identifier       |
-| `seq`            | integer | yes      | Sequence number being acknowledged (≥ 0)|
+| Field            | Type    | Required | Description                              |
+| ---------------- | ------- | -------- | ---------------------------------------- |
+| `type`           | string  | yes      | Literal `"ack"`                          |
+| `conversationId` | string  | yes      | Non-empty conversation identifier        |
+| `seq`            | integer | yes      | Sequence number being acknowledged (≥ 0) |
 
 ### Server → Client Messages
 
@@ -176,31 +176,31 @@ A conversation stream event forwarded from the daemon.
 }
 ```
 
-| Field                | Type    | Description                                                |
-| -------------------- | ------- | ---------------------------------------------------------- |
-| `event.seq`          | integer | Per-conversation monotonic sequence number, starting at 1  |
-| `event.turnId`       | string  | Turn that produced this event                              |
-| `event.kind`         | string  | One of 13 event kinds (see below)                          |
-| `event.payload`      | object  | Kind-specific data                                         |
-| `event.timestamp`    | string  | ISO 8601 production timestamp                              |
+| Field             | Type    | Description                                               |
+| ----------------- | ------- | --------------------------------------------------------- |
+| `event.seq`       | integer | Per-conversation monotonic sequence number, starting at 1 |
+| `event.turnId`    | string  | Turn that produced this event                             |
+| `event.kind`      | string  | One of 13 event kinds (see below)                         |
+| `event.payload`   | object  | Kind-specific data                                        |
+| `event.timestamp` | string  | ISO 8601 production timestamp                             |
 
 **Stream event kinds** (13 values):
 
-| Kind                 | Description                                  |
-| -------------------- | -------------------------------------------- |
-| `stream-started`     | A new stream has begun for a turn            |
-| `text-delta`         | Incremental text output                      |
-| `status-change`      | Agent or turn status transition              |
-| `activity-marker`    | Agent activity indicator                     |
-| `approval-prompt`    | Daemon requests operator approval            |
-| `approval-response`  | Operator approval response acknowledged      |
-| `artifact-notice`    | An artifact was produced                     |
-| `checkpoint`         | Execution checkpoint                         |
-| `warning`            | Non-fatal warning                            |
-| `error`              | Execution error                              |
-| `cancellation`       | Turn was cancelled                           |
-| `stream-completed`   | Stream finished successfully                 |
-| `stream-failed`      | Stream finished with a failure               |
+| Kind                | Description                             |
+| ------------------- | --------------------------------------- |
+| `stream-started`    | A new stream has begun for a turn       |
+| `text-delta`        | Incremental text output                 |
+| `status-change`     | Agent or turn status transition         |
+| `activity-marker`   | Agent activity indicator                |
+| `approval-prompt`   | Daemon requests operator approval       |
+| `approval-response` | Operator approval response acknowledged |
+| `artifact-notice`   | An artifact was produced                |
+| `checkpoint`        | Execution checkpoint                    |
+| `warning`           | Non-fatal warning                       |
+| `error`             | Execution error                         |
+| `cancellation`      | Turn was cancelled                      |
+| `stream-completed`  | Stream finished successfully            |
+| `stream-failed`     | Stream finished with a failure          |
 
 #### `subscribed`
 
@@ -214,10 +214,10 @@ Sent after subscribe processing completes (after any replay). Confirms the subsc
 }
 ```
 
-| Field            | Type    | Description                                       |
-| ---------------- | ------- | ------------------------------------------------- |
-| `conversationId` | string  | Conversation the client is now subscribed to       |
-| `currentSeq`     | integer | Highest sequence number delivered to this client   |
+| Field            | Type    | Description                                      |
+| ---------------- | ------- | ------------------------------------------------ |
+| `conversationId` | string  | Conversation the client is now subscribed to     |
+| `currentSeq`     | integer | Highest sequence number delivered to this client |
 
 #### `unsubscribed`
 
@@ -233,7 +233,7 @@ Confirms the client is no longer receiving events for a conversation.
 #### `session-expiring-soon`
 
 Warning sent when the bound session enters its expiry window. The browser should extend the
-session (e.g., `POST /auth/extend`) to avoid disconnection.
+session (e.g., `POST /session/extend`) to avoid disconnection.
 
 ```json
 {
@@ -254,10 +254,10 @@ The session has ended. The connection will close shortly after this message.
 }
 ```
 
-| Field    | Type   | Description                                                          |
-| -------- | ------ | -------------------------------------------------------------------- |
-| `state`  | string | One of: `expired`, `invalidated`, `logged-out`                       |
-| `reason` | string | Optional human-readable reason                                       |
+| Field    | Type   | Description                                    |
+| -------- | ------ | ---------------------------------------------- |
+| `state`  | string | One of: `expired`, `invalidated`, `logged-out` |
+| `reason` | string | Optional human-readable reason                 |
 
 #### `daemon-unavailable`
 
@@ -296,16 +296,16 @@ A structured error in response to a client message or an operational failure.
 }
 ```
 
-| Field           | Type    | Required | Description                                             |
-| --------------- | ------- | -------- | ------------------------------------------------------- |
-| `type`          | string  | yes      | Literal `"error"`                                       |
-| `ok`            | boolean | yes      | Always `false`                                          |
-| `code`          | string  | yes      | Machine-readable error code                             |
-| `category`      | string  | yes      | One of: `auth`, `session`, `validation`, `daemon`, `rate-limit` |
-| `message`       | string  | yes      | Human-readable description                              |
-| `conversationId`| string  | no       | If the error relates to a specific conversation         |
-| `turnId`        | string  | no       | If the error relates to a specific turn                 |
-| `retryAfterMs`  | integer | no       | Suggested retry delay in milliseconds                   |
+| Field            | Type    | Required | Description                                                     |
+| ---------------- | ------- | -------- | --------------------------------------------------------------- |
+| `type`           | string  | yes      | Literal `"error"`                                               |
+| `ok`             | boolean | yes      | Always `false`                                                  |
+| `code`           | string  | yes      | Machine-readable error code                                     |
+| `category`       | string  | yes      | One of: `auth`, `session`, `validation`, `daemon`, `rate-limit` |
+| `message`        | string  | yes      | Human-readable description                                      |
+| `conversationId` | string  | no       | If the error relates to a specific conversation                 |
+| `turnId`         | string  | no       | If the error relates to a specific turn                         |
+| `retryAfterMs`   | integer | no       | Suggested retry delay in milliseconds                           |
 
 ---
 
@@ -313,33 +313,35 @@ A structured error in response to a client message or an operational failure.
 
 ### Handshake Errors (HTTP, before WebSocket establishment)
 
-| Code                | Category    | HTTP | Cause                              |
-| ------------------- | ----------- | ---- | ---------------------------------- |
-| `ORIGIN_REJECTED`   | `auth`      | 403  | Origin header does not match       |
-| `SESSION_NOT_FOUND` | `auth`      | 401  | Missing, empty, or invalid session |
-| `IDLE_TIMEOUT`      | `session`   | 401  | Session exceeded idle timeout      |
-| `RATE_LIMITED`      | `rate-limit`| 429  | Too many connections from source IP|
+| Code                  | Category     | HTTP | Cause                                             |
+| --------------------- | ------------ | ---- | ------------------------------------------------- |
+| `ORIGIN_REJECTED`     | `auth`       | 403  | Origin header does not match                      |
+| `SESSION_NOT_FOUND`   | `auth`       | 401  | Missing or empty session cookie                   |
+| `SESSION_EXPIRED`     | `session`    | 401  | Session expired before the WebSocket upgrade      |
+| `SESSION_INVALIDATED` | `session`    | 401  | Session was invalidated before the upgrade        |
+| `IDLE_TIMEOUT`        | `session`    | 401  | Session exceeded idle timeout                     |
+| `RATE_LIMITED`        | `rate-limit` | 429  | Too many connection attempts from the same source |
 
 ### Message-Level Errors (sent over WebSocket)
 
-| Code                          | Category     | Closes connection? | Cause                                      |
-| ----------------------------- | ------------ | ------------------ | ------------------------------------------ |
-| `WS_INVALID_MESSAGE`          | `validation` | no                 | Malformed JSON or schema violation          |
-| `CONVERSATION_NOT_FOUND`      | `validation` | no                 | Unknown conversation ID in subscribe        |
-| `WS_MESSAGE_QUEUE_OVERFLOW`   | `rate-limit` | yes (1008)         | > 64 pending messages on this connection    |
-| `WS_BUFFER_OVERFLOW`          | `daemon`     | yes (1008)         | Send buffer exceeds 1 MiB high-water mark   |
-| `WS_REPLAY_OVERFLOW`          | `daemon`     | yes (1008)         | > 1,000 events queued during replay         |
-| `REPLAY_INCOMPLETE`           | `daemon`     | no                 | Daemon replay failed; partial data possible |
-| `DAEMON_UNREACHABLE`          | `daemon`     | no                 | Daemon not reachable for mediation          |
-| `INTERNAL_ERROR`              | `daemon`     | no                 | Unexpected gateway error                    |
+| Code                        | Category     | Closes connection? | Cause                                                       |
+| --------------------------- | ------------ | ------------------ | ----------------------------------------------------------- |
+| `WS_INVALID_MESSAGE`        | `validation` | no                 | Malformed JSON or schema violation                          |
+| `CONVERSATION_NOT_FOUND`    | `validation` | no                 | Unknown conversation ID in subscribe                        |
+| `WS_MESSAGE_QUEUE_OVERFLOW` | `rate-limit` | yes (1008)         | > 64 pending messages on this connection                    |
+| `WS_BUFFER_OVERFLOW`        | `daemon`     | yes (1008)         | Send buffer exceeds 1 MiB high-water mark                   |
+| `WS_REPLAY_OVERFLOW`        | `daemon`     | yes (1008)         | > 1,000 events queued during replay                         |
+| `REPLAY_INCOMPLETE`         | `daemon`     | no                 | Daemon replay failed; resume aborted before replay delivery |
+| `DAEMON_UNREACHABLE`        | `daemon`     | no                 | Daemon not reachable for mediation                          |
+| `INTERNAL_ERROR`            | `daemon`     | no                 | Unexpected gateway error                                    |
 
 ### WebSocket Close Codes
 
-| Code   | Meaning                                          |
-| ------ | ------------------------------------------------ |
-| `1000` | Normal close (idle timeout, clean shutdown)       |
-| `1008` | Policy violation (overflow, backpressure)         |
-| `1011` | Unexpected server error during message handling   |
+| Code   | Meaning                                         |
+| ------ | ----------------------------------------------- |
+| `1000` | Normal close (idle timeout, clean shutdown)     |
+| `1008` | Policy violation (overflow, backpressure)       |
+| `1011` | Unexpected server error during message handling |
 
 ---
 
@@ -478,8 +480,9 @@ sequenceDiagram
 ```
 
 If any daemon replay request fails, the gateway sends a `REPLAY_INCOMPLETE` error and does **not**
-close the connection. The client should treat partial replay as degraded and may fall back to
-loading full conversation state via REST.
+close the connection, but it also does **not** deliver partial replay data or promote the
+subscription into live mode. The client should treat the resume attempt as aborted and may fall back
+to loading full conversation state via REST before retrying.
 
 ### Replay Barrier
 
@@ -510,7 +513,7 @@ sequenceDiagram
 
     Note over Gateway: Session expiry warning window reached
     Gateway->>Browser: { type: "session-expiring-soon", expiresAt: "2025-01-15T11:00:00Z" }
-    Note over Browser: Extend session via POST /auth/extend
+    Note over Browser: Extend session via POST /session/extend
 
     alt Session extended
         Note over Gateway: New expiry; fresh warning scheduled if needed
@@ -529,11 +532,11 @@ When a session ends (expiry, invalidation, or logout), the gateway:
 
 The `state` field indicates the cause:
 
-| State          | Trigger                              |
-| -------------- | ------------------------------------ |
-| `expired`      | Session TTL exceeded                 |
-| `invalidated`  | Session invalidated by admin action  |
-| `logged-out`   | Operator explicitly logged out       |
+| State         | Trigger                             |
+| ------------- | ----------------------------------- |
+| `expired`     | Session TTL exceeded                |
+| `invalidated` | Session invalidated by admin action |
+| `logged-out`  | Operator explicitly logged out      |
 
 ### Daemon Health Notifications
 
@@ -575,59 +578,59 @@ require an authenticated session and validate request payloads against shared co
 
 ### Conversation Lifecycle
 
-| Method | Path                            | Description          |
-| ------ | ------------------------------- | -------------------- |
-| POST   | `/conversations`                | Create conversation  |
-| GET    | `/conversations`                | List conversations   |
-| GET    | `/conversations/:id`            | Open conversation    |
-| POST   | `/conversations/:id/resume`     | Resume conversation  |
-| POST   | `/conversations/:id/archive`    | Archive conversation |
+| Method | Path                         | Description          |
+| ------ | ---------------------------- | -------------------- |
+| POST   | `/conversations`             | Create conversation  |
+| GET    | `/conversations`             | List conversations   |
+| GET    | `/conversations/:id`         | Open conversation    |
+| POST   | `/conversations/:id/resume`  | Resume conversation  |
+| POST   | `/conversations/:id/archive` | Archive conversation |
 
 ### Turns
 
-| Method | Path                                | Description        |
-| ------ | ----------------------------------- | ------------------ |
-| POST   | `/conversations/:convId/turns`      | Submit instruction  |
-| GET    | `/conversations/:convId/turns`      | List turn history   |
+| Method | Path                           | Description        |
+| ------ | ------------------------------ | ------------------ |
+| POST   | `/conversations/:convId/turns` | Submit instruction |
+| GET    | `/conversations/:convId/turns` | List turn history  |
 
 ### Approvals
 
-| Method | Path                                | Description           |
-| ------ | ----------------------------------- | --------------------- |
-| GET    | `/conversations/:convId/approvals`  | Get pending approvals |
-| POST   | `/approvals/:approvalId/respond`    | Respond to approval   |
+| Method | Path                               | Description           |
+| ------ | ---------------------------------- | --------------------- |
+| GET    | `/conversations/:convId/approvals` | Get pending approvals |
+| POST   | `/approvals/:approvalId/respond`   | Respond to approval   |
 
 ### Work Control
 
-| Method | Path                                              | Description        |
-| ------ | ------------------------------------------------- | ------------------ |
-| POST   | `/conversations/:convId/turns/:turnId/cancel`     | Cancel turn        |
-| POST   | `/conversations/:convId/turns/:turnId/retry`      | Retry turn         |
-| POST   | `/conversations/:id`                              | Fork conversation  |
+| Method | Path                                          | Description                                                                 |
+| ------ | --------------------------------------------- | --------------------------------------------------------------------------- |
+| POST   | `/conversations/:convId/turns/:turnId/cancel` | Cancel turn                                                                 |
+| POST   | `/conversations/:convId/turns/:turnId/retry`  | Retry turn                                                                  |
+| POST   | `/conversations`                              | Fork conversation by providing `parentConversationId` and `forkPointTurnId` |
 
 ### Artifacts and Activities
 
-| Method | Path                                   | Description                     |
-| ------ | -------------------------------------- | ------------------------------- |
-| GET    | `/turns/:turnId/artifacts`             | List artifacts for turn         |
-| GET    | `/conversations/:convId/artifacts`     | List artifacts for conversation |
-| GET    | `/artifacts/:artifactId`               | Get artifact content            |
-| GET    | `/turns/:turnId/activities`            | Get activity entries            |
+| Method | Path                               | Description                     |
+| ------ | ---------------------------------- | ------------------------------- |
+| GET    | `/turns/:turnId/artifacts`         | List artifacts for turn         |
+| GET    | `/conversations/:convId/artifacts` | List artifacts for conversation |
+| GET    | `/artifacts/:artifactId`           | Get artifact content            |
+| GET    | `/turns/:turnId/activities`        | Get activity entries            |
 
 ---
 
 ## Constants and Defaults
 
-| Constant                             | Value           | Description                                      |
-| ------------------------------------ | --------------- | ------------------------------------------------ |
-| Max inbound message size             | 8,192 bytes     | Messages exceeding this are rejected pre-parse    |
-| WebSocket hard max payload           | 1,048,576 bytes | `ws` library ceiling                             |
-| Send buffer high-water mark          | 1,048,576 bytes | Backpressure threshold (configurable)            |
-| Event buffer capacity                | 1,000 events    | Per-conversation ring buffer (configurable)      |
-| Event buffer inactive timeout        | 300,000 ms      | Buffer eviction after 5 min inactivity           |
-| Max pending replay events            | 1,000           | Pending queue cap during replay                  |
-| Max pending inbound messages         | 64              | Per-connection inbound queue depth               |
-| Daemon replay concurrency            | 8               | Parallel per-turn replay fetches                 |
+| Constant                      | Value           | Description                                    |
+| ----------------------------- | --------------- | ---------------------------------------------- |
+| Max inbound message size      | 8,192 bytes     | Messages exceeding this are rejected pre-parse |
+| WebSocket hard max payload    | 1,048,576 bytes | `ws` library ceiling                           |
+| Send buffer high-water mark   | 1,048,576 bytes | Backpressure threshold (configurable)          |
+| Event buffer capacity         | 1,000 events    | Per-conversation ring buffer (configurable)    |
+| Event buffer inactive timeout | 300,000 ms      | Buffer eviction after 5 min inactivity         |
+| Max pending replay events     | 1,000           | Pending queue cap during replay                |
+| Max pending inbound messages  | 64              | Per-connection inbound queue depth             |
+| Daemon replay concurrency     | 8               | Parallel per-turn replay fetches               |
 
 ---
 
