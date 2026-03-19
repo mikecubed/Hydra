@@ -65,7 +65,8 @@ sequenceDiagram
 ```
 
 After a successful upgrade, the connection is idle and ready to receive subscription messages.
-No events flow until the client subscribes to a conversation.
+No conversation stream events flow until the client subscribes to a conversation.
+Session-level messages (e.g. errors, session lifecycle notices) may arrive at any time.
 
 ### Session Binding
 
@@ -330,9 +331,9 @@ A structured error in response to a client message or an operational failure.
 | --------------------------- | ------------ | ------------------ | ----------------------------------------------------------- |
 | `WS_INVALID_MESSAGE`        | `validation` | no                 | Malformed JSON or schema violation                          |
 | `CONVERSATION_NOT_FOUND`    | `validation` | no                 | Unknown conversation ID in subscribe                        |
-| `WS_MESSAGE_QUEUE_OVERFLOW` | `rate-limit` | yes (1008)         | > 64 pending messages on this connection                    |
+| `WS_MESSAGE_QUEUE_OVERFLOW` | `rate-limit` | yes (1008)         | ≥ 64 pending messages on this connection                    |
 | `WS_BUFFER_OVERFLOW`        | `daemon`     | yes (1008)         | Send buffer exceeds 1 MiB high-water mark                   |
-| `WS_REPLAY_OVERFLOW`        | `daemon`     | yes (1008)         | > 1,000 events queued during replay                         |
+| `WS_REPLAY_OVERFLOW`        | `daemon`     | yes (1008)         | ≥ 1,000 events queued during replay                         |
 | `REPLAY_INCOMPLETE`         | `daemon`     | no                 | Daemon replay failed; resume aborted before replay delivery |
 | `DAEMON_UNREACHABLE`        | `daemon`     | no                 | Daemon not reachable for mediation                          |
 | `INTERNAL_ERROR`            | `daemon`     | no                 | Unexpected gateway error                                    |

@@ -215,6 +215,7 @@ function createFakeDaemonClient(
   submissions: Array<{ conversationId: string; instruction: string; turnId: string }>;
   planFullStream: (conversationId: string, turnId: string, textChunks: string[]) => StreamEvent[];
   emitFullStream: (conversationId: string, turnId: string, textChunks: string[]) => StreamEvent[];
+  commitStreamState: (conversationId: string, turnId: string, events: StreamEvent[]) => void;
   pendingApprovals: FakeApproval[];
   cancelledTurns: Array<{ conversationId: string; turnId: string }>;
   retriedTurns: Array<{ conversationId: string; turnId: string; newTurnId: string }>;
@@ -262,7 +263,7 @@ function createFakeDaemonClient(
   };
 
   const planFullStream = (
-    conversationId: string,
+    _conversationId: string,
     turnId: string,
     textChunks: string[],
   ): StreamEvent[] => {
@@ -296,6 +297,18 @@ function createFakeDaemonClient(
       timestamp: new Date().toISOString(),
     };
     events.push(completed);
+
+    return events;
+  };
+
+  /** Commit stream state: store replay events and mark the turn completed.
+   *  Called by emitFullStream automatically; call directly when manually
+   *  emitting events via planFullStream + bridge.emitStreamEvent. */
+  const commitStreamState = (
+    conversationId: string,
+    turnId: string,
+    events: StreamEvent[],
+  ): void => {
     replayEventsByTurn.set(
       turnId,
       events.map((event) => ({ ...event })),
@@ -312,8 +325,6 @@ function createFakeDaemonClient(
         priorTurn?.parentTurnId,
       ),
     );
-
-    return events;
   };
 
   /** Emit a complete stream lifecycle: started → N text-deltas → completed.
@@ -327,6 +338,7 @@ function createFakeDaemonClient(
     for (const event of events) {
       bridge.emitStreamEvent(conversationId, event);
     }
+    commitStreamState(conversationId, turnId, events);
     return events;
   };
 
@@ -550,6 +562,7 @@ function createFakeDaemonClient(
     submissions,
     planFullStream,
     emitFullStream,
+    commitStreamState,
     pendingApprovals,
     cancelledTurns,
     retriedTurns,
@@ -3743,6 +3756,9 @@ describe('T030: End-to-end streaming integration', () => {
           await sleep(5);
         }
 
+        // Commit replay/history state now that pre-disconnect + gap events have been produced.
+        fakeDaemon.commitStreamState(CONV_ID, turnId, emitted);
+
         // ── Phase B: reconnect with lastAcknowledgedSeq
         const ws2 = await connectWebSocket(port, { sessionId: auth.sessionId });
         openSockets.push(ws2);
@@ -3881,6 +3897,7 @@ describe('T030: End-to-end streaming integration', () => {
           for (let i = 1; i < emitted.length; i++) {
             bridge.emitStreamEvent(CONV_ID, emitted[i]);
           }
+          fakeDaemon.commitStreamState(CONV_ID, turnId, emitted);
         }
 
         // Reconnect
