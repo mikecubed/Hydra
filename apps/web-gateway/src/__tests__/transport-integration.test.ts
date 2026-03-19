@@ -308,6 +308,7 @@ function createFakeDaemonClient(
         priorTurn?.position ?? existingTurns.length + 1,
         'completed',
         priorTurn?.instruction ?? 'emitted-stream',
+        priorTurn?.parentTurnId,
       ),
     );
 
@@ -507,16 +508,18 @@ function createFakeDaemonClient(
       turnCounter++;
       const newTurnId = `turn-${String(turnCounter)}`;
       retriedTurns.push({ conversationId, turnId, newTurnId });
+      const turn = makeTurn(
+        newTurnId,
+        conversationId,
+        turnCounter,
+        'executing',
+        'retried-instruction',
+        turnId,
+      );
+      storeTurn(turn);
       return {
         data: {
-          turn: makeTurn(
-            newTurnId,
-            conversationId,
-            turnCounter,
-            'executing',
-            'retried-instruction',
-            turnId,
-          ),
+          turn,
           streamId: `stream-${newTurnId}`,
         },
       };
@@ -2824,6 +2827,21 @@ describe('T030: End-to-end streaming integration', () => {
       for (const msg of retryMsgs) {
         assert.equal((msg['event'] as StreamEvent).turnId, newTurnId);
       }
+
+      // Reload turn history and verify the completed retry turn still has parentTurnId
+      const historyRes = await fakeDaemon.daemonClient.loadTurnHistory(CONV_ID, {
+        conversationId: CONV_ID,
+      });
+      assert.ok(!('error' in historyRes), 'Expected turn history to load successfully');
+      const historyTurns = historyRes.data.turns as Array<Record<string, unknown>>;
+      const completedRetry = historyTurns.find((t) => t['id'] === newTurnId);
+      assert.ok(completedRetry, 'Retry turn should be persisted in turn history');
+      assert.equal(completedRetry['status'], 'completed', 'Retry turn should be completed');
+      assert.equal(
+        completedRetry['parentTurnId'],
+        failedTurnId,
+        'Completed retry turn should preserve parentTurnId in history',
+      );
 
       // Verify monotonic sequence numbers across original failure + retry
       const allSeqs = [
