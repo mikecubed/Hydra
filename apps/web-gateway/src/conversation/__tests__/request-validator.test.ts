@@ -1,8 +1,12 @@
 /**
- * Tests for request-validator middleware (T009).
+ * Tests for request-validator middleware (T009, T045).
  *
  * Validates that the middleware runs Zod safeParse on request bodies
  * and returns GatewayErrorResponse with category 'validation' on failure.
+ *
+ * T045 adds systematic malformed-body coverage for every conversation route
+ * validator so that validation failures consistently return HTTP 400 with
+ * { ok: false, code: 'VALIDATION_FAILED', category: 'validation' }.
  */
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
@@ -10,11 +14,21 @@ import { Hono } from 'hono';
 import {
   CreateConversationRequest,
   SubmitInstructionRequest,
+  SubmitInstructionBody,
+  ResumeConversationBody,
   RespondToApprovalRequest,
   ListConversationsRequest,
+  LoadTurnHistoryRequest,
+  ListArtifactsForConversationRequest,
 } from '@hydra/web-contracts';
 import { validateBody, validateQuery } from '../request-validator.ts';
 import type { GatewayErrorResponse } from '../../shared/gateway-error-response.ts';
+
+// Derived query schemas matching conversation-routes.ts usage
+const LoadTurnHistoryQuery = LoadTurnHistoryRequest.omit({ conversationId: true });
+const ListArtifactsForConversationQuery = ListArtifactsForConversationRequest.omit({
+  conversationId: true,
+});
 
 function buildRequest(
   method: string,
@@ -70,6 +84,29 @@ function createFakeQuerySchema<T extends Record<string, unknown>>(options: {
       return options.parse(data as Record<string, unknown>);
     },
   };
+}
+
+/**
+ * Assert the standard validation-error contract:
+ * HTTP 400, ok: false, category: 'validation', code: 'VALIDATION_FAILED', non-empty message.
+ */
+async function assertValidationError(
+  res: Response,
+  opts: { messagePart?: string } = {},
+): Promise<GatewayErrorResponse> {
+  assert.equal(res.status, 400, `expected HTTP 400, got ${res.status}`);
+  const body = (await res.json()) as GatewayErrorResponse;
+  assert.equal(body.ok, false);
+  assert.equal(body.category, 'validation');
+  assert.equal(body.code, 'VALIDATION_FAILED');
+  assert.ok(body.message.length > 0, 'error message should be non-empty');
+  if (opts.messagePart) {
+    assert.ok(
+      body.message.toLowerCase().includes(opts.messagePart.toLowerCase()),
+      `expected message to mention "${opts.messagePart}", got: "${body.message}"`,
+    );
+  }
+  return body;
 }
 
 describe('validateBody middleware', () => {
@@ -369,5 +406,396 @@ describe('validateQuery numeric coercion — wrapper shapes (Issue 3 fix)', () =
     assert.equal(body.parsed.token, '99999');
     assert.equal(typeof body.parsed.limit, 'number');
     assert.equal(body.parsed.limit, 5);
+  });
+});
+
+// ── T045: Systematic malformed-body coverage per conversation route schema ───
+
+describe('validateBody — CreateConversationRequest malformed bodies', () => {
+  function createApp(): Hono {
+    const app = new Hono();
+    app.post('/conversations', validateBody(CreateConversationRequest), (c) =>
+      c.json({ ok: true }),
+    );
+    return app;
+  }
+
+  it('rejects title as non-string (number)', async () => {
+    const res = await createApp().request(
+      buildRequest('POST', '/conversations', { body: JSON.stringify({ title: 42 }) }),
+    );
+    await assertValidationError(res);
+  });
+
+  it('rejects parentConversationId as empty string (min 1)', async () => {
+    const res = await createApp().request(
+      buildRequest('POST', '/conversations', {
+        body: JSON.stringify({ parentConversationId: '' }),
+      }),
+    );
+    await assertValidationError(res);
+  });
+
+  it('rejects forkPointTurnId as empty string (min 1)', async () => {
+    const res = await createApp().request(
+      buildRequest('POST', '/conversations', {
+        body: JSON.stringify({ forkPointTurnId: '' }),
+      }),
+    );
+    await assertValidationError(res);
+  });
+
+  it('rejects a JSON array body', async () => {
+    const res = await createApp().request(
+      buildRequest('POST', '/conversations', { body: JSON.stringify([1, 2, 3]) }),
+    );
+    await assertValidationError(res);
+  });
+
+  it('rejects a JSON null body', async () => {
+    const res = await createApp().request(
+      buildRequest('POST', '/conversations', { body: JSON.stringify(null) }),
+    );
+    await assertValidationError(res);
+  });
+
+  it('rejects a JSON string body', async () => {
+    const res = await createApp().request(
+      buildRequest('POST', '/conversations', { body: JSON.stringify('hello') }),
+    );
+    await assertValidationError(res);
+  });
+
+  it('rejects a JSON number body', async () => {
+    const res = await createApp().request(
+      buildRequest('POST', '/conversations', { body: JSON.stringify(123) }),
+    );
+    await assertValidationError(res);
+  });
+});
+
+describe('validateBody — SubmitInstructionBody malformed bodies', () => {
+  function createApp(): Hono {
+    const app = new Hono();
+    app.post('/turns', validateBody(SubmitInstructionBody), (c) => c.json({ ok: true }));
+    return app;
+  }
+
+  it('rejects missing instruction field entirely', async () => {
+    const res = await createApp().request(
+      buildRequest('POST', '/turns', { body: JSON.stringify({}) }),
+    );
+    await assertValidationError(res);
+  });
+
+  it('rejects instruction as wrong type (number)', async () => {
+    const res = await createApp().request(
+      buildRequest('POST', '/turns', { body: JSON.stringify({ instruction: 99 }) }),
+    );
+    await assertValidationError(res);
+  });
+
+  it('rejects instruction as empty string (min 1)', async () => {
+    const res = await createApp().request(
+      buildRequest('POST', '/turns', { body: JSON.stringify({ instruction: '' }) }),
+    );
+    await assertValidationError(res);
+  });
+
+  it('rejects instruction as null', async () => {
+    const res = await createApp().request(
+      buildRequest('POST', '/turns', { body: JSON.stringify({ instruction: null }) }),
+    );
+    await assertValidationError(res);
+  });
+
+  it('rejects metadata as non-object (string)', async () => {
+    const res = await createApp().request(
+      buildRequest('POST', '/turns', {
+        body: JSON.stringify({ instruction: 'do something', metadata: 'bad' }),
+      }),
+    );
+    await assertValidationError(res);
+  });
+
+  it('rejects metadata as array', async () => {
+    const res = await createApp().request(
+      buildRequest('POST', '/turns', {
+        body: JSON.stringify({ instruction: 'do something', metadata: [1, 2] }),
+      }),
+    );
+    await assertValidationError(res);
+  });
+
+  it('passes valid body with optional metadata', async () => {
+    const res = await createApp().request(
+      buildRequest('POST', '/turns', {
+        body: JSON.stringify({ instruction: 'do something', metadata: { key: 'value' } }),
+      }),
+    );
+    assert.equal(res.status, 200);
+  });
+});
+
+describe('validateBody — ResumeConversationBody malformed bodies', () => {
+  function createApp(): Hono {
+    const app = new Hono();
+    app.post('/resume', validateBody(ResumeConversationBody), (c) => c.json({ ok: true }));
+    return app;
+  }
+
+  it('rejects empty body — missing required lastAcknowledgedSeq', async () => {
+    const res = await createApp().request(
+      buildRequest('POST', '/resume', { body: JSON.stringify({}) }),
+    );
+    await assertValidationError(res);
+  });
+
+  it('rejects lastAcknowledgedSeq as string', async () => {
+    const res = await createApp().request(
+      buildRequest('POST', '/resume', {
+        body: JSON.stringify({ lastAcknowledgedSeq: 'abc' }),
+      }),
+    );
+    await assertValidationError(res);
+  });
+
+  it('rejects lastAcknowledgedSeq as negative number (nonnegative constraint)', async () => {
+    const res = await createApp().request(
+      buildRequest('POST', '/resume', { body: JSON.stringify({ lastAcknowledgedSeq: -1 }) }),
+    );
+    await assertValidationError(res);
+  });
+
+  it('rejects lastAcknowledgedSeq as float (int constraint)', async () => {
+    const res = await createApp().request(
+      buildRequest('POST', '/resume', { body: JSON.stringify({ lastAcknowledgedSeq: 3.14 }) }),
+    );
+    await assertValidationError(res);
+  });
+
+  it('passes lastAcknowledgedSeq = 0 (nonnegative allows zero)', async () => {
+    const res = await createApp().request(
+      buildRequest('POST', '/resume', { body: JSON.stringify({ lastAcknowledgedSeq: 0 }) }),
+    );
+    assert.equal(res.status, 200);
+  });
+
+  it('passes valid positive integer lastAcknowledgedSeq', async () => {
+    const res = await createApp().request(
+      buildRequest('POST', '/resume', { body: JSON.stringify({ lastAcknowledgedSeq: 42 }) }),
+    );
+    assert.equal(res.status, 200);
+  });
+});
+
+describe('validateBody — RespondToApprovalRequest malformed bodies', () => {
+  function createApp(): Hono {
+    const app = new Hono();
+    app.post('/respond', validateBody(RespondToApprovalRequest), (c) => c.json({ ok: true }));
+    return app;
+  }
+
+  it('rejects missing response field entirely', async () => {
+    const res = await createApp().request(
+      buildRequest('POST', '/respond', { body: JSON.stringify({}) }),
+    );
+    await assertValidationError(res);
+  });
+
+  it('rejects response as wrong type (number)', async () => {
+    const res = await createApp().request(
+      buildRequest('POST', '/respond', { body: JSON.stringify({ response: 123 }) }),
+    );
+    await assertValidationError(res);
+  });
+
+  it('rejects response as wrong type (boolean)', async () => {
+    const res = await createApp().request(
+      buildRequest('POST', '/respond', { body: JSON.stringify({ response: true }) }),
+    );
+    await assertValidationError(res);
+  });
+
+  it('rejects acknowledgeStaleness as wrong type (string)', async () => {
+    const res = await createApp().request(
+      buildRequest('POST', '/respond', {
+        body: JSON.stringify({ response: 'approve', acknowledgeStaleness: 'yes' }),
+      }),
+    );
+    await assertValidationError(res);
+  });
+
+  it('rejects acknowledgeStaleness as wrong type (number)', async () => {
+    const res = await createApp().request(
+      buildRequest('POST', '/respond', {
+        body: JSON.stringify({ response: 'approve', acknowledgeStaleness: 1 }),
+      }),
+    );
+    await assertValidationError(res);
+  });
+});
+
+describe('validateQuery — ListConversationsRequest malformed queries', () => {
+  function createApp(): Hono {
+    const app = new Hono();
+    app.get('/conversations', validateQuery(ListConversationsRequest), (c) =>
+      c.json({ ok: true }),
+    );
+    return app;
+  }
+
+  it('rejects invalid status enum value', async () => {
+    const res = await createApp().request(
+      buildRequest('GET', '/conversations?status=deleted'),
+    );
+    await assertValidationError(res);
+  });
+
+  it('rejects limit = 0 (positive constraint)', async () => {
+    const res = await createApp().request(
+      buildRequest('GET', '/conversations?limit=0'),
+    );
+    await assertValidationError(res);
+  });
+
+  it('rejects limit > 100 (max constraint)', async () => {
+    const res = await createApp().request(
+      buildRequest('GET', '/conversations?limit=101'),
+    );
+    await assertValidationError(res);
+  });
+
+  it('rejects limit as negative number', async () => {
+    const res = await createApp().request(
+      buildRequest('GET', '/conversations?limit=-10'),
+    );
+    await assertValidationError(res);
+  });
+
+  it('rejects limit as non-numeric string', async () => {
+    const res = await createApp().request(
+      buildRequest('GET', '/conversations?limit=abc'),
+    );
+    await assertValidationError(res);
+  });
+});
+
+describe('validateQuery — LoadTurnHistoryQuery malformed queries', () => {
+  function createApp(): Hono {
+    const app = new Hono();
+    app.get('/turns', validateQuery(LoadTurnHistoryQuery), (c) => c.json({ ok: true }));
+    return app;
+  }
+
+  it('rejects limit = 0 (positive constraint)', async () => {
+    const res = await createApp().request(buildRequest('GET', '/turns?limit=0'));
+    await assertValidationError(res);
+  });
+
+  it('rejects limit > 100 (max constraint)', async () => {
+    const res = await createApp().request(buildRequest('GET', '/turns?limit=101'));
+    await assertValidationError(res);
+  });
+
+  it('rejects fromPosition = 0 (positive constraint)', async () => {
+    const res = await createApp().request(buildRequest('GET', '/turns?fromPosition=0'));
+    await assertValidationError(res);
+  });
+
+  it('rejects fromPosition as negative', async () => {
+    const res = await createApp().request(buildRequest('GET', '/turns?fromPosition=-1'));
+    await assertValidationError(res);
+  });
+
+  it('rejects toPosition = 0 (positive constraint)', async () => {
+    const res = await createApp().request(buildRequest('GET', '/turns?toPosition=0'));
+    await assertValidationError(res);
+  });
+
+  it('rejects toPosition as negative', async () => {
+    const res = await createApp().request(buildRequest('GET', '/turns?toPosition=-3'));
+    await assertValidationError(res);
+  });
+
+  it('passes with no query params (all optional, defaults apply)', async () => {
+    const res = await createApp().request(buildRequest('GET', '/turns'));
+    assert.equal(res.status, 200);
+  });
+
+  it('passes with valid fromPosition and toPosition', async () => {
+    const res = await createApp().request(
+      buildRequest('GET', '/turns?fromPosition=1&toPosition=10&limit=50'),
+    );
+    assert.equal(res.status, 200);
+  });
+});
+
+describe('validateQuery — ListArtifactsForConversationQuery malformed queries', () => {
+  function createApp(): Hono {
+    const app = new Hono();
+    app.get('/artifacts', validateQuery(ListArtifactsForConversationQuery), (c) =>
+      c.json({ ok: true }),
+    );
+    return app;
+  }
+
+  it('rejects limit = 0 (positive constraint)', async () => {
+    const res = await createApp().request(buildRequest('GET', '/artifacts?limit=0'));
+    await assertValidationError(res);
+  });
+
+  it('rejects limit > 100 (max constraint)', async () => {
+    const res = await createApp().request(buildRequest('GET', '/artifacts?limit=200'));
+    await assertValidationError(res);
+  });
+
+  it('rejects limit as negative', async () => {
+    const res = await createApp().request(buildRequest('GET', '/artifacts?limit=-5'));
+    await assertValidationError(res);
+  });
+
+  it('passes with no params (all optional, defaults apply)', async () => {
+    const res = await createApp().request(buildRequest('GET', '/artifacts'));
+    assert.equal(res.status, 200);
+  });
+
+  it('passes with kind and cursor as strings', async () => {
+    const res = await createApp().request(
+      buildRequest('GET', '/artifacts?kind=code&cursor=abc123&limit=10'),
+    );
+    assert.equal(res.status, 200);
+  });
+});
+
+describe('validateBody — structural edge cases (non-JSON / wrong content)', () => {
+  function createApp(): Hono {
+    const app = new Hono();
+    app.post('/test', validateBody(SubmitInstructionBody), (c) => c.json({ ok: true }));
+    return app;
+  }
+
+  it('rejects form-encoded body', async () => {
+    const res = await createApp().request(
+      buildRequest('POST', '/test', {
+        body: 'instruction=hello',
+        headers: { 'content-type': 'application/x-www-form-urlencoded' },
+      }),
+    );
+    await assertValidationError(res);
+  });
+
+  it('rejects empty string body', async () => {
+    const res = await createApp().request(
+      buildRequest('POST', '/test', { body: '' }),
+    );
+    await assertValidationError(res);
+  });
+
+  it('rejects body that is a JSON boolean', async () => {
+    const res = await createApp().request(
+      buildRequest('POST', '/test', { body: JSON.stringify(true) }),
+    );
+    await assertValidationError(res);
   });
 });
