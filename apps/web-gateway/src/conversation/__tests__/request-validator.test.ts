@@ -19,10 +19,7 @@ import {
   RespondToApprovalRequest,
   ListConversationsRequest,
 } from '@hydra/web-contracts';
-import {
-  LoadTurnHistoryQuery,
-  ListArtifactsForConversationQuery,
-} from '../conversation-routes.ts';
+import { LoadTurnHistoryQuery, ListArtifactsForConversationQuery } from '../conversation-routes.ts';
 import { validateBody, validateQuery } from '../request-validator.ts';
 import type { GatewayErrorResponse } from '../../shared/gateway-error-response.ts';
 
@@ -653,44 +650,32 @@ describe('validateBody — RespondToApprovalRequest malformed bodies', () => {
 describe('validateQuery — ListConversationsRequest malformed queries', () => {
   function createApp(): Hono {
     const app = new Hono();
-    app.get('/conversations', validateQuery(ListConversationsRequest), (c) =>
-      c.json({ ok: true }),
-    );
+    app.get('/conversations', validateQuery(ListConversationsRequest), (c) => c.json({ ok: true }));
     return app;
   }
 
   it('rejects invalid status enum value', async () => {
-    const res = await createApp().request(
-      buildRequest('GET', '/conversations?status=deleted'),
-    );
+    const res = await createApp().request(buildRequest('GET', '/conversations?status=deleted'));
     await assertValidationError(res);
   });
 
   it('rejects limit = 0 (positive constraint)', async () => {
-    const res = await createApp().request(
-      buildRequest('GET', '/conversations?limit=0'),
-    );
+    const res = await createApp().request(buildRequest('GET', '/conversations?limit=0'));
     await assertValidationError(res);
   });
 
   it('rejects limit > 100 (max constraint)', async () => {
-    const res = await createApp().request(
-      buildRequest('GET', '/conversations?limit=101'),
-    );
+    const res = await createApp().request(buildRequest('GET', '/conversations?limit=101'));
     await assertValidationError(res);
   });
 
   it('rejects limit as negative number', async () => {
-    const res = await createApp().request(
-      buildRequest('GET', '/conversations?limit=-10'),
-    );
+    const res = await createApp().request(buildRequest('GET', '/conversations?limit=-10'));
     await assertValidationError(res);
   });
 
   it('rejects limit as non-numeric string', async () => {
-    const res = await createApp().request(
-      buildRequest('GET', '/conversations?limit=abc'),
-    );
+    const res = await createApp().request(buildRequest('GET', '/conversations?limit=abc'));
     await assertValidationError(res);
   });
 });
@@ -800,9 +785,7 @@ describe('validateBody — structural edge cases (non-JSON / wrong content)', ()
   });
 
   it('rejects empty string body', async () => {
-    const res = await createApp().request(
-      buildRequest('POST', '/test', { body: '' }),
-    );
+    const res = await createApp().request(buildRequest('POST', '/test', { body: '' }));
     await assertValidationError(res);
   });
 

@@ -410,7 +410,11 @@ describe('T044: daemon unavailable — WebSocket path', () => {
     session = await sessionService.create('op-1', '127.0.0.1');
   });
 
-  function connectAndBind(): { ws: ReturnType<typeof fakeSocket>; conn: WsConnection; cleanup: () => void } {
+  function connectAndBind(): {
+    ws: ReturnType<typeof fakeSocket>;
+    conn: WsConnection;
+    cleanup: () => void;
+  } {
     const ws = fakeSocket();
     const conn = WsConnection.create(session.id, ws as never, registry);
     const cleanup = bridge.bindSession(session, conn as never);
@@ -462,7 +466,10 @@ describe('T044: daemon unavailable — WebSocket path', () => {
       const messages = parseSent(ws);
       const types = messages.map((m) => m.type);
 
-      assert.ok(types.includes('daemon-unavailable'), 'Expected daemon-unavailable before recovery');
+      assert.ok(
+        types.includes('daemon-unavailable'),
+        'Expected daemon-unavailable before recovery',
+      );
       assert.ok(types.includes('daemon-restored'), 'Expected daemon-restored after recovery');
       assert.equal(conn.state, 'open', 'Connection must stay open after recovery');
     } finally {
@@ -543,8 +550,14 @@ describe('T044: daemon unavailable — WebSocket path', () => {
       const msgs1 = parseSent(conn1.ws);
       const msgs2 = parseSent(conn2.ws);
 
-      assert.ok(msgs1.some((m) => m.type === 'daemon-restored'), 'Connection 1 should receive daemon-restored');
-      assert.ok(msgs2.some((m) => m.type === 'daemon-restored'), 'Connection 2 should receive daemon-restored');
+      assert.ok(
+        msgs1.some((m) => m.type === 'daemon-restored'),
+        'Connection 1 should receive daemon-restored',
+      );
+      assert.ok(
+        msgs2.some((m) => m.type === 'daemon-restored'),
+        'Connection 2 should receive daemon-restored',
+      );
     } finally {
       conn1.cleanup();
       conn2.cleanup();
@@ -643,7 +656,11 @@ describe('T050: idle WebSocket connection — no subscriptions', () => {
     session = await sessionService.create('op-1', '127.0.0.1');
   });
 
-  function connectIdle(): { ws: ReturnType<typeof fakeSocket>; conn: WsConnection; cleanup: () => void } {
+  function connectIdle(): {
+    ws: ReturnType<typeof fakeSocket>;
+    conn: WsConnection;
+    cleanup: () => void;
+  } {
     const ws = fakeSocket();
     const conn = WsConnection.create(session.id, ws as never, registry);
     const cleanup = bridge.bindSession(session, conn as never);
@@ -727,8 +744,14 @@ describe('T050: idle WebSocket connection — no subscriptions', () => {
       await heartbeat.tick();
 
       const messages = parseSent(ws);
-      assert.ok(messages.some((m) => m.type === 'daemon-unavailable'), 'Should receive daemon-unavailable');
-      assert.ok(messages.some((m) => m.type === 'daemon-restored'), 'Should receive daemon-restored');
+      assert.ok(
+        messages.some((m) => m.type === 'daemon-unavailable'),
+        'Should receive daemon-unavailable',
+      );
+      assert.ok(
+        messages.some((m) => m.type === 'daemon-restored'),
+        'Should receive daemon-restored',
+      );
       assert.equal(conn.state, 'open', 'Idle connection stays open after recovery');
     } finally {
       cleanup();
@@ -798,9 +821,18 @@ describe('T050: idle WebSocket connection — no subscriptions', () => {
       const messages = parseSent(ws);
 
       // Should have lifecycle messages
-      assert.ok(messages.some((m) => m.type === 'daemon-unavailable'), 'daemon-unavailable received');
-      assert.ok(messages.some((m) => m.type === 'daemon-restored'), 'daemon-restored received');
-      assert.ok(messages.some((m) => m.type === 'session-expiring-soon'), 'session-expiring-soon received');
+      assert.ok(
+        messages.some((m) => m.type === 'daemon-unavailable'),
+        'daemon-unavailable received',
+      );
+      assert.ok(
+        messages.some((m) => m.type === 'daemon-restored'),
+        'daemon-restored received',
+      );
+      assert.ok(
+        messages.some((m) => m.type === 'session-expiring-soon'),
+        'session-expiring-soon received',
+      );
 
       // Must NOT have stream events
       assert.ok(

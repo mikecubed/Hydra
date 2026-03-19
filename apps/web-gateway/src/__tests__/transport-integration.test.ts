@@ -2838,11 +2838,7 @@ describe('T030: End-to-end streaming integration', () => {
       assert.ok(turnId, 'Expected turnId from REST submission');
 
       // (e) daemon emits a full stream lifecycle
-      const emitted = fakeDaemon.emitFullStream(CONV_ID, turnId, [
-        'Hello',
-        ' from',
-        ' Hydra',
-      ]);
+      const emitted = fakeDaemon.emitFullStream(CONV_ID, turnId, ['Hello', ' from', ' Hydra']);
 
       // (f) both tabs must receive ALL events
       const [msgsA, msgsB] = await Promise.all([
@@ -2923,8 +2919,16 @@ describe('T030: End-to-end streaming integration', () => {
       const sentinelB = await waitForMessage(tabB);
 
       // The sentinel must be the next message on each tab — no stale duplicates
-      assert.deepEqual(sentinelA['event'], sentinel, 'Tab A next message is sentinel (no duplicates)');
-      assert.deepEqual(sentinelB['event'], sentinel, 'Tab B next message is sentinel (no duplicates)');
+      assert.deepEqual(
+        sentinelA['event'],
+        sentinel,
+        'Tab A next message is sentinel (no duplicates)',
+      );
+      assert.deepEqual(
+        sentinelB['event'],
+        sentinel,
+        'Tab B next message is sentinel (no duplicates)',
+      );
     });
 
     it('multi-tab: second tab joining mid-stream receives only events from join point onward', async () => {
@@ -2983,10 +2987,7 @@ describe('T030: End-to-end streaming integration', () => {
       };
       bridge.emitStreamEvent(CONV_ID, lateEvent);
 
-      const [lateMsgA, lateMsgB] = await Promise.all([
-        waitForMessage(tabA),
-        waitForMessage(tabB),
-      ]);
+      const [lateMsgA, lateMsgB] = await Promise.all([waitForMessage(tabA), waitForMessage(tabB)]);
 
       assert.deepEqual(lateMsgA['event'], lateEvent, 'Tab A sees late event');
       assert.deepEqual(lateMsgB['event'], lateEvent, 'Tab B sees late event');
@@ -2996,28 +2997,41 @@ describe('T030: End-to-end streaming integration', () => {
   // ── T052: Gateway restart contract (FR-022 edge) ──────────────────────
 
   describe('T052: Gateway restart contract', () => {
-    /** After each T052 test tears down the original server, we must restore
-     *  a fresh listening server so the outer afterEach can close it safely. */
-    async function teardownAndRestore(): Promise<void> {
-      gw.wsServer?.close();
-      gw.heartbeat.stop();
-      await closeServer(server);
+    function replaceSharedState(next: {
+      server: Server;
+      bridge: FakeEventBridge;
+      fakeDaemon: ReturnType<typeof createFakeDaemonClient>;
+      gw: GatewayApp;
+      port: number;
+    }): void {
+      server = next.server;
+      bridge = next.bridge;
+      fakeDaemon = next.fakeDaemon;
+      gw = next.gw;
+      port = next.port;
+    }
 
-      // Restore shared state so afterEach doesn't throw ERR_SERVER_NOT_RUNNING
-      server = createServer();
-      bridge = new FakeEventBridge();
-      fakeDaemon = createFakeDaemonClient(bridge, {
+    async function createReplacementState(): Promise<{
+      server: Server;
+      bridge: FakeEventBridge;
+      fakeDaemon: ReturnType<typeof createFakeDaemonClient>;
+      gw: GatewayApp;
+      port: number;
+    }> {
+      const nextServer = createServer();
+      const nextBridge = new FakeEventBridge();
+      const nextFakeDaemon = createFakeDaemonClient(nextBridge, {
         validConversationIds: new Set([CONV_ID, 'conv-e2e-2']),
       });
-      gw = createGatewayApp({
-        server,
+      const nextGw = createGatewayApp({
+        server: nextServer,
         clock: new FakeClock(Date.now()),
         allowedOrigin: ORIGIN,
         healthChecker: async () => true,
         heartbeatConfig: { intervalMs: 60_000 },
-        daemonClient: fakeDaemon.daemonClient,
-        wsDaemonClient: fakeDaemon.wsDaemonClient,
-        streamEventBridge: bridge,
+        daemonClient: nextFakeDaemon.daemonClient,
+        wsDaemonClient: nextFakeDaemon.wsDaemonClient,
+        streamEventBridge: nextBridge,
         sessionConfig: {
           sessionLifetimeMs: 3600_000,
           warningThresholdMs: 600_000,
@@ -3026,11 +3040,29 @@ describe('T030: End-to-end streaming integration', () => {
           idleTimeoutMs: 1800_000,
         },
       });
-      const requestListener = getRequestListener(gw.app.fetch);
-      server.on('request', (req, res) => {
+      const requestListener = getRequestListener(nextGw.app.fetch);
+      nextServer.on('request', (req, res) => {
         void requestListener(req, res);
       });
-      port = await listen(server);
+      const nextPort = await listen(nextServer);
+      return {
+        server: nextServer,
+        bridge: nextBridge,
+        fakeDaemon: nextFakeDaemon,
+        gw: nextGw,
+        port: nextPort,
+      };
+    }
+
+    /** After each T052 test tears down the original server, we must restore
+     *  a fresh listening server so the outer afterEach can close it safely. */
+    async function teardownAndRestore(): Promise<void> {
+      gw.wsServer?.close();
+      gw.heartbeat.stop();
+      await closeServer(server);
+
+      // Restore shared state so afterEach doesn't throw ERR_SERVER_NOT_RUNNING
+      replaceSharedState(await createReplacementState());
     }
 
     it('all WebSocket connections are lost when the HTTP server closes', async () => {
@@ -3061,22 +3093,7 @@ describe('T030: End-to-end streaming integration', () => {
       );
 
       // Restore shared state for afterEach
-      server = createServer();
-      bridge = new FakeEventBridge();
-      fakeDaemon = createFakeDaemonClient(bridge, {
-        validConversationIds: new Set([CONV_ID, 'conv-e2e-2']),
-      });
-      gw = createGatewayApp({
-        server,
-        clock: new FakeClock(Date.now()),
-        allowedOrigin: ORIGIN,
-        healthChecker: async () => true,
-        heartbeatConfig: { intervalMs: 60_000 },
-        daemonClient: fakeDaemon.daemonClient,
-        wsDaemonClient: fakeDaemon.wsDaemonClient,
-        streamEventBridge: bridge,
-      });
-      port = await listen(server);
+      replaceSharedState(await createReplacementState());
     });
 
     it('no connection state survives process restart — registry is empty in new instance', async () => {
@@ -3129,22 +3146,7 @@ describe('T030: End-to-end streaming integration', () => {
       }
 
       // Restore shared state for afterEach
-      server = createServer();
-      bridge = new FakeEventBridge();
-      fakeDaemon = createFakeDaemonClient(bridge, {
-        validConversationIds: new Set([CONV_ID, 'conv-e2e-2']),
-      });
-      gw = createGatewayApp({
-        server,
-        clock: new FakeClock(Date.now()),
-        allowedOrigin: ORIGIN,
-        healthChecker: async () => true,
-        heartbeatConfig: { intervalMs: 60_000 },
-        daemonClient: fakeDaemon.daemonClient,
-        wsDaemonClient: fakeDaemon.wsDaemonClient,
-        streamEventBridge: bridge,
-      });
-      port = await listen(server);
+      replaceSharedState(await createReplacementState());
     });
 
     it('client must reconnect after restart — old session cookie is not recognized by new instance', async () => {
@@ -3216,10 +3218,7 @@ describe('T030: End-to-end streaming integration', () => {
       await waitForMessages(ws, events.length);
 
       // Buffer should have events
-      assert.ok(
-        gw.eventBuffer.getHighwaterSeq(CONV_ID) > 0,
-        'Original gateway buffer has events',
-      );
+      assert.ok(gw.eventBuffer.getHighwaterSeq(CONV_ID) > 0, 'Original gateway buffer has events');
 
       // (b) tear down and restore for afterEach
       await teardownAndRestore();
