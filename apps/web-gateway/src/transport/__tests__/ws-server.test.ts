@@ -9,6 +9,7 @@ import { createGatewayApp, type GatewayApp } from '../../index.ts';
 import { FakeClock } from '../../shared/clock.ts';
 import { GatewayError } from '../../shared/errors.ts';
 import type { StreamEventPayload } from '../event-forwarder.ts';
+import { MAX_INBOUND_MESSAGE_BYTES } from '../ws-message-handler.ts';
 
 const ORIGIN = 'http://127.0.0.1:4174';
 
@@ -337,6 +338,22 @@ describe('GatewayWsServer', () => {
     assert.equal(message['conversationId'], 'conv-1');
     assert.equal(message['currentSeq'], 0);
     assert.equal(gw.connectionRegistry.getByConversation('conv-1').size, 1);
+  });
+
+  it('configures the websocket server max payload to match the inbound message limit', () => {
+    assert.equal(gw.wsServer?.webSocketServer.options.maxPayload, MAX_INBOUND_MESSAGE_BYTES);
+  });
+
+  it('closes connections that send frames larger than the inbound message limit', async () => {
+    const session = await gw.sessionService.create('op-1', '127.0.0.1');
+    const ws = await connectWebSocket(port, { sessionId: session.id });
+    ws.on('error', () => {});
+
+    ws.send('x'.repeat(MAX_INBOUND_MESSAGE_BYTES + 1));
+
+    const [code] = (await once(ws, 'close')) as [number];
+    assert.equal(code, 1009);
+    assert.equal(gw.connectionRegistry.getBySession(session.id).size, 0);
   });
 
   it('serializes subscribe then unsubscribe so stale subscribe completion does not leave the connection subscribed', async () => {

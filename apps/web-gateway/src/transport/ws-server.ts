@@ -14,7 +14,7 @@ import type { EventBuffer } from './event-buffer.ts';
 import { EventForwarder, type StreamEventBridgeLike } from './event-forwarder.ts';
 import { SessionWsBridge } from './session-ws-bridge.ts';
 import { WsConnection } from './ws-connection.ts';
-import { WsMessageHandler } from './ws-message-handler.ts';
+import { MAX_INBOUND_MESSAGE_BYTES, WsMessageHandler } from './ws-message-handler.ts';
 import { WebSocketServer, type RawData, type WebSocket } from 'ws';
 
 interface GatewayWsServerOptions {
@@ -129,7 +129,7 @@ export class GatewayWsServer {
     });
     this.#wss = new WebSocketServer({
       noServer: true,
-      maxPayload: 1024 * 1024, // 1MB limit for inbound messages to prevent DoS
+      maxPayload: MAX_INBOUND_MESSAGE_BYTES,
     });
     this.#messageHandler = new WsMessageHandler({
       registry: options.connectionRegistry,
