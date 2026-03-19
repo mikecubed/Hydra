@@ -328,15 +328,15 @@ _End-to-end verification of all success criteria and final documentation._
   - **Depends**: T054, T055, T056, T057
   - **Validates**: SC-011
 
-- [ ] T059 [P2] **Documentation: WebSocket transport protocol** — document the WebSocket protocol (endpoint, message types, subscribe/unsubscribe/ack flow, reconnect/resume protocol, error handling) in `docs/web-interface/`. Include sequence diagrams for: initial connection, subscription, streaming, reconnect/resume, session expiry.
+- [x] T059 [P2] **Documentation: WebSocket transport protocol** — document the WebSocket protocol (endpoint, message types, subscribe/unsubscribe/ack flow, reconnect/resume protocol, error handling) in `docs/web-interface/`. Include sequence diagrams for: initial connection, subscription, streaming, reconnect/resume, session expiry.
   - **Depends**: T053
   - **Validates**: —
 
-- [ ] T060 [P2] **Documentation: Gateway transport architecture** — update architecture docs with the transport layer: daemon event bridge, connection registry, event buffer, event forwarder pipeline. Document configuration knobs (buffer capacity, daemon client timeout, backpressure threshold). Update `docs/web-interface/` or relevant architecture files.
+- [x] T060 [P2] **Documentation: Gateway transport architecture** — update architecture docs with the transport layer: daemon event bridge, connection registry, event buffer, event forwarder pipeline. Document configuration knobs (buffer capacity, daemon client timeout, backpressure threshold). Update `docs/web-interface/` or relevant architecture files.
   - **Depends**: T053
   - **Validates**: —
 
-- [ ] T061 [P2] **Documentation: Gateway configuration reference** — document all configurable parameters added by this slice: event buffer capacity (default 1000), daemon client timeout (default 5s), WebSocket backpressure threshold, session-termination grace period. Add to gateway config documentation.
+- [x] T061 [P2] **Documentation: Gateway configuration reference** — document all configurable parameters added by this slice: event buffer capacity (default 1000), daemon client timeout (default 5s), WebSocket backpressure threshold, session-termination grace period. Add to gateway config documentation.
   - **Depends**: T053
   - **Validates**: —
 
