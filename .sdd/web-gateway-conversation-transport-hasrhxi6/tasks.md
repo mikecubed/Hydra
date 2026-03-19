@@ -232,23 +232,23 @@ _Completes reconnect protocol with daemon fallback for buffer misses. Delivers U
 
 _Verifies control operations via REST produce correct WebSocket events. Delivers US5 (P2)._
 
-- [ ] T038 [P2] [US5] **TDD: Approval round-trip** — submit instruction that triggers approval (via daemon executor mock), assert `approval-prompt` stream event arrives through WebSocket, submit approval response via REST `POST /approvals/:approvalId/respond`, assert daemon resumes work and resume events flow through WebSocket. Tests in `apps/web-gateway/src/__tests__/transport-integration.test.ts`.
+- [x] T038 [P2] [US5] **TDD: Approval round-trip** — submit instruction that triggers approval (via daemon executor mock), assert `approval-prompt` stream event arrives through WebSocket, submit approval response via REST `POST /approvals/:approvalId/respond`, assert daemon resumes work and resume events flow through WebSocket. Tests in `apps/web-gateway/src/__tests__/transport-integration.test.ts`.
   - **Depends**: T030, T012, T015b
   - **Validates**: FR-003, FR-010
 
-- [ ] T039 [P2] [US5] **TDD: Cancel round-trip** — submit instruction, start receiving stream events, send `POST /conversations/:convId/turns/:turnId/cancel` via REST, assert `cancellation` stream event arrives through WebSocket and stream stops cleanly. Tests in `apps/web-gateway/src/__tests__/transport-integration.test.ts`.
+- [x] T039 [P2] [US5] **TDD: Cancel round-trip** — submit instruction, start receiving stream events, send `POST /conversations/:convId/turns/:turnId/cancel` via REST, assert `cancellation` stream event arrives through WebSocket and stream stops cleanly. Tests in `apps/web-gateway/src/__tests__/transport-integration.test.ts`.
   - **Depends**: T030, T013, T015b
   - **Validates**: FR-004
 
-- [ ] T040 [P2] [US5] **TDD: Retry round-trip** — fail a turn, send `POST /conversations/:convId/turns/:turnId/retry` via REST, assert new stream starts and events flow through WebSocket. Tests in `apps/web-gateway/src/__tests__/transport-integration.test.ts`.
+- [x] T040 [P2] [US5] **TDD: Retry round-trip** — fail a turn, send `POST /conversations/:convId/turns/:turnId/retry` via REST, assert new stream starts and events flow through WebSocket. Tests in `apps/web-gateway/src/__tests__/transport-integration.test.ts`.
   - **Depends**: T030, T013, T015b
   - **Validates**: FR-004
 
-- [ ] T041 [P2] [US5] **TDD: Artifact notice forwarding** — daemon emits `artifact-notice` stream event during work, assert it arrives through WebSocket with correct typed payload. Tests in `apps/web-gateway/src/__tests__/event-forwarder.test.ts`.
+- [x] T041 [P2] [US5] **TDD: Artifact notice forwarding** — daemon emits `artifact-notice` stream event during work, assert it arrives through WebSocket with correct typed payload. Tests in `apps/web-gateway/src/transport/__tests__/event-forwarder.test.ts`.
   - **Depends**: T027
   - **Validates**: FR-005, FR-010
 
-- [ ] T042 [P2] [US5] **Quality gate: Phase 6** — `npm run quality` and `npm test`. Control round-trips verified.
+- [x] T042 [P2] [US5] **Quality gate: Phase 6** — `npm run quality` and `npm test`. Control round-trips verified.
   - **Depends**: T038, T039, T040, T041
   - **Validates**: SC-001 (complete lifecycle), SC-011
 
@@ -449,17 +449,19 @@ T025 → T026 → T027 ──────────────────→
 
 ## Next Steps
 
-1. **Phase 5 is complete on `feat/web-gateway-transport-phase4`** — `T032`
-   through `T037` now validate reconnect/resume, ordering guarantees, invalid
-   session rejection, and page-refresh recovery on the coordinator branch.
-2. **Launch only file-isolated follow-up tracks** — `T038`+ can now run later
-   in separate worktrees using the groupings above, but avoid splitting tasks
-   that share `transport-integration.test.ts`, `ws-message-handler.test.ts`, or
-   `conversation-routes.test.ts` across multiple concurrent tracks.
-3. **Prefer real transport/runtime wiring in tests** — when Phase 6+ tests can
+1. **Phase 6 is complete on `feat/web-gateway-transport-phase6`** — `T038`
+   through `T042` now validate approval, cancel, retry, and artifact notice
+   round-trips on top of the completed Phase 4/5 streaming and reconnect path.
+2. **Start Phase 7 with file-isolated tracks** — the next ready tasks are the
+   error/edge-case batches already grouped above:
+   `T043/T046/T047` (`conversation-routes.test.ts`), `T045`
+   (`request-validator.test.ts`), `T044/T050` (`ws-connection.test.ts`),
+   `T048/T051` (`ws-message-handler.test.ts`), and `T049/T052`
+   (`transport-integration.test.ts`).
+3. **Prefer real transport/runtime wiring in tests** — when Phase 7+ tests can
    use composed gateway/daemon service code, avoid mocking that behavior and
    reserve fakes for true external boundaries only.
-4. **Keep the Phase 5 runtime path stable** — follow-on transport work
-   should extend the validated streaming and replay paths rather than reworking
-   transport bootstrap, replay-retention guardrails, or inbound backlog
+4. **Keep the validated transport path stable** — follow-on work should extend
+   the now-green streaming, replay, and control-operation paths rather than
+   reworking transport bootstrap, replay-retention guardrails, or backlog
    protections unless a concrete bug requires it.

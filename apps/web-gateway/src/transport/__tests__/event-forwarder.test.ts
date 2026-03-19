@@ -24,6 +24,24 @@ function makeEvent(
   };
 }
 
+function makeArtifactNotice(
+  seq: number,
+  turnId = 'turn-1',
+  overrides?: Partial<{ artifactId: string; kind: string; label: string }>,
+): StreamEvent {
+  return {
+    seq,
+    turnId,
+    kind: 'artifact-notice',
+    payload: {
+      artifactId: overrides?.artifactId ?? `artifact-${seq}`,
+      kind: overrides?.kind ?? 'file',
+      label: overrides?.label ?? `output-${seq}.ts`,
+    },
+    timestamp: new Date().toISOString(),
+  };
+}
+
 interface SpyConnection extends ManagedConnection {
   sent: ServerMessage[];
   _bufferedAmount: number;
@@ -649,6 +667,155 @@ describe('EventForwarder', () => {
 
       assert.equal(conn.isClosed, false);
       assert.equal(conn.sent.length, 1);
+    });
+  });
+
+  // ─── T041: artifact-notice forwarding ───────────────────────────────────
+
+  describe('T041: artifact-notice forwarding', () => {
+    it('delivers an artifact-notice event with the correct kind and payload', () => {
+      const conn = fakeConnection('c1', 's1');
+      registry.register(conn);
+      registry.addSubscription('c1', 'conv-1');
+
+      const event = makeArtifactNotice(1, 'turn-1', {
+        artifactId: 'art-abc',
+        kind: 'file',
+        label: 'index.ts',
+      });
+      bridge.emitStreamEvent('conv-1', event);
+
+      assert.equal(conn.sent.length, 1);
+      const msg = conn.sent[0];
+      assert.equal(msg.type, 'stream-event');
+      assert.equal((msg as { conversationId: string }).conversationId, 'conv-1');
+      const delivered = (msg as { event: StreamEvent }).event;
+      assert.equal(delivered.kind, 'artifact-notice');
+      assert.equal(delivered.seq, 1);
+      assert.equal(delivered.turnId, 'turn-1');
+      assert.deepStrictEqual(delivered.payload, {
+        artifactId: 'art-abc',
+        kind: 'file',
+        label: 'index.ts',
+      });
+    });
+
+    it('buffers artifact-notice events alongside text-delta events', () => {
+      const conn = fakeConnection('c1', 's1');
+      registry.register(conn);
+      registry.addSubscription('c1', 'conv-1');
+
+      bridge.emitStreamEvent('conv-1', makeEvent(1));
+      bridge.emitStreamEvent('conv-1', makeArtifactNotice(2));
+      bridge.emitStreamEvent('conv-1', makeEvent(3));
+
+      const buffered = buffer.getEventsSince('conv-1', 0);
+      assert.equal(buffered.length, 3);
+      assert.equal(buffered[0].kind, 'text-delta');
+      assert.equal(buffered[1].kind, 'artifact-notice');
+      assert.equal(buffered[2].kind, 'text-delta');
+    });
+
+    it('queues artifact-notice events during replay state', () => {
+      const conn = fakeConnection('c1', 's1');
+      registry.register(conn);
+      registry.addSubscription('c1', 'conv-1');
+      conn.replayState.set('conv-1', 'replaying');
+      conn.pendingEvents.set('conv-1', []);
+
+      bridge.emitStreamEvent('conv-1', makeArtifactNotice(10));
+      bridge.emitStreamEvent('conv-1', makeArtifactNotice(11));
+
+      assert.equal(conn.sent.length, 0);
+      const pending = conn.pendingEvents.get('conv-1')!;
+      assert.equal(pending.length, 2);
+      assert.equal(pending[0].kind, 'artifact-notice');
+      assert.equal(pending[1].kind, 'artifact-notice');
+    });
+
+    it('forwards artifact-notice to multiple tabs in the same session', () => {
+      const tab1 = fakeConnection('tab-1', 'session-A');
+      const tab2 = fakeConnection('tab-2', 'session-A');
+      registry.register(tab1);
+      registry.register(tab2);
+      registry.addSubscription('tab-1', 'conv-1');
+      registry.addSubscription('tab-2', 'conv-1');
+
+      const event = makeArtifactNotice(5, 'turn-1', {
+        artifactId: 'art-xyz',
+        kind: 'diff',
+        label: 'changes.patch',
+      });
+      bridge.emitStreamEvent('conv-1', event);
+
+      for (const tab of [tab1, tab2]) {
+        assert.equal(tab.sent.length, 1, `${tab.connectionId} should receive 1 event`);
+        const delivered = (tab.sent[0] as { event: StreamEvent }).event;
+        assert.equal(delivered.kind, 'artifact-notice');
+        assert.deepStrictEqual(delivered.payload, event.payload);
+      }
+    });
+
+    it('preserves artifact-notice payload through backpressure-protected delivery', () => {
+      const conn = fakeConnection('c1', 's1');
+      conn._bufferedAmount = 0;
+      registry.register(conn);
+      registry.addSubscription('c1', 'conv-1');
+
+      const event = makeArtifactNotice(1, 'turn-1', {
+        artifactId: 'art-large',
+        kind: 'structured-data',
+        label: 'report.json',
+      });
+      bridge.emitStreamEvent('conv-1', event);
+
+      assert.equal(conn.isClosed, false);
+      assert.equal(conn.sent.length, 1);
+      const delivered = (conn.sent[0] as { event: StreamEvent }).event;
+      assert.equal(delivered.kind, 'artifact-notice');
+      assert.equal((delivered.payload as { artifactId: string }).artifactId, 'art-large');
+      assert.equal((delivered.payload as { kind: string }).kind, 'structured-data');
+      assert.equal((delivered.payload as { label: string }).label, 'report.json');
+    });
+
+    it('closes connection on overflow even for artifact-notice events', () => {
+      const bpBridge = new FakeEventBridge();
+      const bpBuffer = new EventBuffer();
+      const bpRegistry = new ConnectionRegistry();
+      const bpForwarder = new EventForwarder(bpBridge, bpBuffer, bpRegistry, {
+        bufferHighWaterMark: 1024,
+      });
+      bpForwarder.start();
+
+      const conn = fakeConnection('c1', 's1');
+      conn._bufferedAmount = 2048;
+      bpRegistry.register(conn);
+      bpRegistry.addSubscription('c1', 'conv-1');
+
+      bpBridge.emitStreamEvent('conv-1', makeArtifactNotice(1));
+
+      assert.equal(conn.isClosed, true);
+      assert.equal(conn.closeCode, 1008);
+      assert.equal(conn.closeReason, 'WS_BUFFER_OVERFLOW');
+      // Event still buffered despite connection overflow
+      const buffered = bpBuffer.getEventsSince('conv-1', 0);
+      assert.equal(buffered.length, 1);
+      assert.equal(buffered[0].kind, 'artifact-notice');
+
+      bpForwarder.dispose();
+    });
+
+    it('does not deliver artifact-notice to connections without interest', () => {
+      const subscribed = fakeConnection('c1', 's1');
+      const stranger = fakeConnection('c2', 's2');
+      registry.register(subscribed);
+      registry.register(stranger);
+      registry.addSubscription('c1', 'conv-1');
+
+      bridge.emitStreamEvent('conv-1', makeArtifactNotice(1));
+
+      assert.equal(subscribed.sent.length, 1);
+      assert.equal(stranger.sent.length, 0);
     });
   });
 
