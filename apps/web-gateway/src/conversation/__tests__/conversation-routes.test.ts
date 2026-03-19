@@ -836,3 +836,438 @@ describe('Daemon error forwarding', () => {
     assert.equal(res.status, 409);
   });
 });
+
+// ── T043: Daemon unavailable — REST path ─────────────────────────────────────
+
+describe('Daemon unavailable across all REST route categories (T043)', () => {
+  let mockClient: MockDaemonClient;
+  let app: Hono;
+
+  const daemonUnavailableError: DaemonResult<never> = {
+    error: {
+      ok: false,
+      code: 'DAEMON_UNREACHABLE',
+      category: 'daemon',
+      message: 'Daemon unreachable',
+    },
+  };
+
+  function stubAllMethodsUnreachable(client: MockDaemonClient): void {
+    for (const key of Object.keys(client) as Array<keyof MockDaemonClient>) {
+      client[key].mock.mockImplementation(() => Promise.resolve(daemonUnavailableError));
+    }
+  }
+
+  beforeEach(() => {
+    mockClient = createMockDaemonClient();
+    stubAllMethodsUnreachable(mockClient);
+    app = buildTestApp(mockClient);
+  });
+
+  async function assertDaemonUnavailable(res: Response): Promise<void> {
+    assert.equal(res.status, 503, `expected HTTP 503, got ${String(res.status)}`);
+    const body = (await res.json()) as GatewayErrorResponse;
+    assert.equal(body.ok, false);
+    assert.equal(body.category, 'daemon');
+    assert.equal(body.code, 'DAEMON_UNREACHABLE');
+  }
+
+  // ── Lifecycle routes ──
+
+  it('POST /conversations → 503 daemon unavailable', async () => {
+    const res = await app.request(
+      buildRequest('POST', '/conversations', { body: JSON.stringify({}) }),
+    );
+    await assertDaemonUnavailable(res);
+  });
+
+  it('GET /conversations → 503 daemon unavailable', async () => {
+    const res = await app.request(buildRequest('GET', '/conversations'));
+    await assertDaemonUnavailable(res);
+  });
+
+  it('GET /conversations/:id → 503 daemon unavailable', async () => {
+    const res = await app.request(buildRequest('GET', '/conversations/conv-1'));
+    await assertDaemonUnavailable(res);
+  });
+
+  it('POST /conversations/:id/resume → 503 daemon unavailable', async () => {
+    const res = await app.request(
+      buildRequest('POST', '/conversations/conv-1/resume', {
+        body: JSON.stringify({ lastAcknowledgedSeq: 0 }),
+      }),
+    );
+    await assertDaemonUnavailable(res);
+  });
+
+  it('POST /conversations/:id/archive → 503 daemon unavailable', async () => {
+    const res = await app.request(
+      buildRequest('POST', '/conversations/conv-1/archive', { body: JSON.stringify({}) }),
+    );
+    await assertDaemonUnavailable(res);
+  });
+
+  // ── Turn routes ──
+
+  it('POST /conversations/:convId/turns → 503 daemon unavailable', async () => {
+    const res = await app.request(
+      buildRequest('POST', '/conversations/conv-1/turns', {
+        body: JSON.stringify({ instruction: 'test' }),
+      }),
+    );
+    await assertDaemonUnavailable(res);
+  });
+
+  it('GET /conversations/:convId/turns → 503 daemon unavailable', async () => {
+    const res = await app.request(buildRequest('GET', '/conversations/conv-1/turns'));
+    await assertDaemonUnavailable(res);
+  });
+
+  // ── Approval routes ──
+
+  it('GET /conversations/:convId/approvals → 503 daemon unavailable', async () => {
+    const res = await app.request(buildRequest('GET', '/conversations/conv-1/approvals'));
+    await assertDaemonUnavailable(res);
+  });
+
+  it('POST /approvals/:approvalId/respond → 503 daemon unavailable', async () => {
+    const res = await app.request(
+      buildRequest('POST', '/approvals/a1/respond', {
+        body: JSON.stringify({ response: 'approve' }),
+      }),
+    );
+    await assertDaemonUnavailable(res);
+  });
+
+  // ── Work control routes ──
+
+  it('POST /conversations/:convId/turns/:turnId/cancel → 503 daemon unavailable', async () => {
+    const res = await app.request(
+      buildRequest('POST', '/conversations/conv-1/turns/t1/cancel', {
+        body: JSON.stringify({}),
+      }),
+    );
+    await assertDaemonUnavailable(res);
+  });
+
+  it('POST /conversations/:convId/turns/:turnId/retry → 503 daemon unavailable', async () => {
+    const res = await app.request(
+      buildRequest('POST', '/conversations/conv-1/turns/t1/retry', { body: JSON.stringify({}) }),
+    );
+    await assertDaemonUnavailable(res);
+  });
+
+  // ── Artifact and activity routes ──
+
+  it('GET /turns/:turnId/artifacts → 503 daemon unavailable', async () => {
+    const res = await app.request(buildRequest('GET', '/turns/t1/artifacts'));
+    await assertDaemonUnavailable(res);
+  });
+
+  it('GET /conversations/:convId/artifacts → 503 daemon unavailable', async () => {
+    const res = await app.request(buildRequest('GET', '/conversations/conv-1/artifacts'));
+    await assertDaemonUnavailable(res);
+  });
+
+  it('GET /artifacts/:artifactId → 503 daemon unavailable', async () => {
+    const res = await app.request(buildRequest('GET', '/artifacts/art-1'));
+    await assertDaemonUnavailable(res);
+  });
+
+  it('GET /turns/:turnId/activities → 503 daemon unavailable', async () => {
+    const res = await app.request(buildRequest('GET', '/turns/t1/activities'));
+    await assertDaemonUnavailable(res);
+  });
+});
+
+// ── T046: Rate-limit errors on mutating routes ──────────────────────────────
+
+describe('Rate-limit errors on mutating conversation routes (T046)', () => {
+  let mockClient: MockDaemonClient;
+  let app: Hono;
+
+  const rateLimitError: DaemonResult<never> = {
+    error: {
+      ok: false,
+      code: 'RATE_LIMITED',
+      category: 'rate-limit',
+      message: 'Too many requests',
+      retryAfterMs: 15_000,
+    },
+  };
+
+  function stubAllMethodsRateLimited(client: MockDaemonClient): void {
+    for (const key of Object.keys(client) as Array<keyof MockDaemonClient>) {
+      client[key].mock.mockImplementation(() => Promise.resolve(rateLimitError));
+    }
+  }
+
+  beforeEach(() => {
+    mockClient = createMockDaemonClient();
+    stubAllMethodsRateLimited(mockClient);
+    app = buildTestApp(mockClient);
+  });
+
+  async function assertRateLimited(res: Response): Promise<void> {
+    assert.equal(res.status, 429, `expected HTTP 429, got ${String(res.status)}`);
+    const body = (await res.json()) as GatewayErrorResponse;
+    assert.equal(body.ok, false);
+    assert.equal(body.category, 'rate-limit');
+    assert.equal(typeof body.retryAfterMs, 'number', 'retryAfterMs must be present');
+    assert.ok((body.retryAfterMs as number) > 0, 'retryAfterMs must be positive');
+  }
+
+  it('POST /conversations (create) → 429 with retryAfterMs', async () => {
+    const res = await app.request(
+      buildRequest('POST', '/conversations', { body: JSON.stringify({}) }),
+    );
+    await assertRateLimited(res);
+  });
+
+  it('POST /conversations/:id/resume → 429 with retryAfterMs', async () => {
+    const res = await app.request(
+      buildRequest('POST', '/conversations/conv-1/resume', {
+        body: JSON.stringify({ lastAcknowledgedSeq: 0 }),
+      }),
+    );
+    await assertRateLimited(res);
+  });
+
+  it('POST /conversations/:id/archive → 429 with retryAfterMs', async () => {
+    const res = await app.request(
+      buildRequest('POST', '/conversations/conv-1/archive', { body: JSON.stringify({}) }),
+    );
+    await assertRateLimited(res);
+  });
+
+  it('POST /conversations/:convId/turns (submit) → 429 with retryAfterMs', async () => {
+    const res = await app.request(
+      buildRequest('POST', '/conversations/conv-1/turns', {
+        body: JSON.stringify({ instruction: 'test' }),
+      }),
+    );
+    await assertRateLimited(res);
+  });
+
+  it('POST /approvals/:approvalId/respond → 429 with retryAfterMs', async () => {
+    const res = await app.request(
+      buildRequest('POST', '/approvals/a1/respond', {
+        body: JSON.stringify({ response: 'approve' }),
+      }),
+    );
+    await assertRateLimited(res);
+  });
+
+  it('POST /conversations/:convId/turns/:turnId/cancel → 429 with retryAfterMs', async () => {
+    const res = await app.request(
+      buildRequest('POST', '/conversations/conv-1/turns/t1/cancel', {
+        body: JSON.stringify({}),
+      }),
+    );
+    await assertRateLimited(res);
+  });
+
+  it('POST /conversations/:convId/turns/:turnId/retry → 429 with retryAfterMs', async () => {
+    const res = await app.request(
+      buildRequest('POST', '/conversations/conv-1/turns/t1/retry', { body: JSON.stringify({}) }),
+    );
+    await assertRateLimited(res);
+  });
+});
+
+// ── T047: Auth/session errors on REST ────────────────────────────────────────
+
+describe('Auth and session errors on conversation REST routes (T047)', () => {
+  // ── Helper: build app WITHOUT auth middleware (no sessionId) ──
+
+  function buildUnauthenticatedApp(daemonClient: MockDaemonClient): Hono {
+    const app = new Hono();
+    // No auth middleware — sessionId and operatorId are not set
+    app.route('/', createConversationRoutes(daemonClient as unknown as DaemonClient));
+    return app;
+  }
+
+  describe('missing session (no session cookie)', () => {
+    let mockClient: MockDaemonClient;
+    let app: Hono;
+
+    const authError: DaemonResult<never> = {
+      error: {
+        ok: false,
+        code: 'SESSION_NOT_FOUND',
+        category: 'auth',
+        message: 'No valid session found',
+        httpStatus: 401,
+      },
+    };
+
+    beforeEach(() => {
+      mockClient = createMockDaemonClient();
+      // Stub all methods to return auth error (daemon rejects missing session)
+      for (const key of Object.keys(mockClient) as Array<keyof MockDaemonClient>) {
+        mockClient[key].mock.mockImplementation(() => Promise.resolve(authError));
+      }
+      app = buildUnauthenticatedApp(mockClient);
+    });
+
+    it('POST /conversations → 401 auth error without session', async () => {
+      const res = await app.request(
+        buildRequest('POST', '/conversations', { body: JSON.stringify({}) }),
+      );
+      assert.equal(res.status, 401);
+      const body = (await res.json()) as GatewayErrorResponse;
+      assert.equal(body.category, 'auth');
+      assert.equal(body.code, 'SESSION_NOT_FOUND');
+    });
+
+    it('POST /conversations/:convId/turns → 401 auth error without session', async () => {
+      const res = await app.request(
+        buildRequest('POST', '/conversations/conv-1/turns', {
+          body: JSON.stringify({ instruction: 'test' }),
+        }),
+      );
+      assert.equal(res.status, 401);
+      const body = (await res.json()) as GatewayErrorResponse;
+      assert.equal(body.category, 'auth');
+    });
+
+    it('POST /approvals/:approvalId/respond → 401 auth error without session', async () => {
+      const res = await app.request(
+        buildRequest('POST', '/approvals/a1/respond', {
+          body: JSON.stringify({ response: 'approve' }),
+        }),
+      );
+      assert.equal(res.status, 401);
+      const body = (await res.json()) as GatewayErrorResponse;
+      assert.equal(body.category, 'auth');
+    });
+
+    it('GET /conversations → 401 auth error without session', async () => {
+      const res = await app.request(buildRequest('GET', '/conversations'));
+      assert.equal(res.status, 401);
+      const body = (await res.json()) as GatewayErrorResponse;
+      assert.equal(body.category, 'auth');
+    });
+  });
+
+  describe('expired session', () => {
+    let mockClient: MockDaemonClient;
+    let app: Hono;
+
+    const sessionExpiredError: DaemonResult<never> = {
+      error: {
+        ok: false,
+        code: 'SESSION_EXPIRED',
+        category: 'session',
+        message: 'Session has expired',
+        httpStatus: 401,
+      },
+    };
+
+    beforeEach(() => {
+      mockClient = createMockDaemonClient();
+      for (const key of Object.keys(mockClient) as Array<keyof MockDaemonClient>) {
+        mockClient[key].mock.mockImplementation(() => Promise.resolve(sessionExpiredError));
+      }
+      app = buildTestApp(mockClient);
+    });
+
+    it('POST /conversations → session category for expired session', async () => {
+      const res = await app.request(
+        buildRequest('POST', '/conversations', { body: JSON.stringify({}) }),
+      );
+      const body = (await res.json()) as GatewayErrorResponse;
+      assert.equal(body.category, 'session');
+      assert.equal(body.code, 'SESSION_EXPIRED');
+    });
+
+    it('POST /conversations/:convId/turns → session category for expired session', async () => {
+      const res = await app.request(
+        buildRequest('POST', '/conversations/conv-1/turns', {
+          body: JSON.stringify({ instruction: 'test' }),
+        }),
+      );
+      const body = (await res.json()) as GatewayErrorResponse;
+      assert.equal(body.category, 'session');
+      assert.equal(body.code, 'SESSION_EXPIRED');
+    });
+
+    it('GET /conversations/:id → session category for expired session', async () => {
+      const res = await app.request(buildRequest('GET', '/conversations/conv-1'));
+      const body = (await res.json()) as GatewayErrorResponse;
+      assert.equal(body.category, 'session');
+      assert.equal(body.code, 'SESSION_EXPIRED');
+    });
+
+    it('POST /approvals/:approvalId/respond → session category for expired session', async () => {
+      const res = await app.request(
+        buildRequest('POST', '/approvals/a1/respond', {
+          body: JSON.stringify({ response: 'approve' }),
+        }),
+      );
+      const body = (await res.json()) as GatewayErrorResponse;
+      assert.equal(body.category, 'session');
+    });
+  });
+
+  describe('invalidated session', () => {
+    let mockClient: MockDaemonClient;
+    let app: Hono;
+
+    const sessionInvalidatedError: DaemonResult<never> = {
+      error: {
+        ok: false,
+        code: 'SESSION_INVALIDATED',
+        category: 'session',
+        message: 'Session has been invalidated',
+        httpStatus: 401,
+      },
+    };
+
+    beforeEach(() => {
+      mockClient = createMockDaemonClient();
+      for (const key of Object.keys(mockClient) as Array<keyof MockDaemonClient>) {
+        mockClient[key].mock.mockImplementation(() => Promise.resolve(sessionInvalidatedError));
+      }
+      app = buildTestApp(mockClient);
+    });
+
+    it('POST /conversations → session category for invalidated session', async () => {
+      const res = await app.request(
+        buildRequest('POST', '/conversations', { body: JSON.stringify({}) }),
+      );
+      const body = (await res.json()) as GatewayErrorResponse;
+      assert.equal(body.category, 'session');
+      assert.equal(body.code, 'SESSION_INVALIDATED');
+    });
+
+    it('POST /conversations/:convId/turns → session category for invalidated session', async () => {
+      const res = await app.request(
+        buildRequest('POST', '/conversations/conv-1/turns', {
+          body: JSON.stringify({ instruction: 'test' }),
+        }),
+      );
+      const body = (await res.json()) as GatewayErrorResponse;
+      assert.equal(body.category, 'session');
+      assert.equal(body.code, 'SESSION_INVALIDATED');
+    });
+
+    it('GET /conversations → session category for invalidated session', async () => {
+      const res = await app.request(buildRequest('GET', '/conversations'));
+      const body = (await res.json()) as GatewayErrorResponse;
+      assert.equal(body.category, 'session');
+      assert.equal(body.code, 'SESSION_INVALIDATED');
+    });
+
+    it('POST /conversations/:convId/turns/:turnId/cancel → session category for invalidated session', async () => {
+      const res = await app.request(
+        buildRequest('POST', '/conversations/conv-1/turns/t1/cancel', {
+          body: JSON.stringify({}),
+        }),
+      );
+      const body = (await res.json()) as GatewayErrorResponse;
+      assert.equal(body.category, 'session');
+      assert.equal(body.code, 'SESSION_INVALIDATED');
+    });
+  });
+});
