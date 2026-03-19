@@ -1,9 +1,11 @@
 /**
- * Tests for WsMessageHandler (T026).
+ * Tests for WsMessageHandler (T026, T048, T051).
  *
  * Covers: subscribe, unsubscribe, ack, malformed messages,
- * buffer-hit replay, replay barrier, and simultaneous replay/live
- * across conversations on the same connection.
+ * buffer-hit replay, replay barrier, simultaneous replay/live
+ * across conversations on the same connection,
+ * malformed WS message edge cases (T048), and
+ * conversation-not-found subscribe error handling (T051).
  */
 import { describe, it, beforeEach } from 'node:test';
 import { Buffer } from 'node:buffer';
@@ -14,7 +16,11 @@ import type { ManagedConnection } from '../connection-registry.ts';
 import { ConnectionRegistry } from '../connection-registry.ts';
 import { EventBuffer } from '../event-buffer.ts';
 import { serializeServerMessage, type ServerMessage } from '../ws-protocol.ts';
-import { WsMessageHandler, type MessageHandlerDeps } from '../ws-message-handler.ts';
+import {
+  WsMessageHandler,
+  type MessageHandlerDeps,
+  MAX_INBOUND_MESSAGE_BYTES,
+} from '../ws-message-handler.ts';
 import type { DaemonResult } from '../../conversation/daemon-client.ts';
 import type { LoadTurnHistoryResponse, SubscribeToStreamResponse } from '@hydra/web-contracts';
 
@@ -1033,6 +1039,257 @@ describe('WsMessageHandler', () => {
       assert.equal(conn.sent.length, 1);
       assert.equal(conn.sent[0].type, 'error');
       assert.equal((conn.sent[0] as { code: string }).code, 'WS_INVALID_MESSAGE');
+    });
+
+    // ── T048: extended malformed-message edge cases ────────────────────────
+
+    it('includes ok: false, category: validation, and a non-empty message for every malformed variant (T048)', async () => {
+      const malformedPayloads = [
+        '{not valid json}',
+        JSON.stringify({ type: 'subscribe' }), // missing conversationId
+        JSON.stringify({ type: 'unknown-cmd', conversationId: 'c' }),
+        JSON.stringify({ type: 'ack', conversationId: 'c', seq: -1 }),
+        JSON.stringify({ type: 'ack', conversationId: 'c', seq: 3.5 }),
+        JSON.stringify({ type: 'subscribe', conversationId: '' }),
+        JSON.stringify({ type: 'subscribe', conversationId: 'c', extraField: 1 }),
+      ];
+
+      for (const payload of malformedPayloads) {
+        const c = fakeConnection(`c-${Math.random()}`, 's1');
+        registry.register(c);
+        await handler.handleMessage(c, payload);
+
+        assert.equal(c.sent.length, 1, `expected exactly 1 response for payload: ${payload}`);
+        const resp = c.sent[0] as {
+          type: string;
+          ok: boolean;
+          category: string;
+          message: string;
+        };
+        assert.equal(resp.type, 'error');
+        assert.equal(resp.ok, false, `ok should be false for: ${payload}`);
+        assert.equal(resp.category, 'validation', `category should be validation for: ${payload}`);
+        assert.equal(typeof resp.message, 'string');
+        assert.ok(resp.message.length > 0, `message should be non-empty for: ${payload}`);
+      }
+    });
+
+    it('responds with error for non-object JSON literals (T048)', async () => {
+      const nonObjectLiterals = ['"hello"', '42', 'true', 'null', '[1,2,3]'];
+
+      for (const literal of nonObjectLiterals) {
+        const c = fakeConnection(`c-${Math.random()}`, 's1');
+        registry.register(c);
+        await handler.handleMessage(c, literal);
+
+        assert.equal(c.sent.length, 1, `expected 1 error for literal: ${literal}`);
+        assert.equal(c.sent[0].type, 'error');
+        assert.equal((c.sent[0] as { code: string }).code, 'WS_INVALID_MESSAGE');
+        assert.equal((c.sent[0] as { category: string }).category, 'validation');
+        assert.ok(!c.isClosed, `connection should stay open for literal: ${literal}`);
+      }
+    });
+
+    it('responds with error for empty message string (T048)', async () => {
+      await handler.handleMessage(conn, '');
+
+      assert.equal(conn.sent.length, 1);
+      assert.equal(conn.sent[0].type, 'error');
+      assert.equal((conn.sent[0] as { code: string }).code, 'WS_INVALID_MESSAGE');
+      assert.equal((conn.sent[0] as { category: string }).category, 'validation');
+      assert.ok(!conn.isClosed);
+    });
+
+    it('responds with error for wrong field type (conversationId as number) (T048)', async () => {
+      const msg = JSON.stringify({ type: 'subscribe', conversationId: 12345 });
+      await handler.handleMessage(conn, msg);
+
+      assert.equal(conn.sent.length, 1);
+      assert.equal(conn.sent[0].type, 'error');
+      assert.equal((conn.sent[0] as { code: string }).code, 'WS_INVALID_MESSAGE');
+      assert.equal((conn.sent[0] as { category: string }).category, 'validation');
+      assert.ok(!conn.isClosed);
+    });
+
+    it('responds with error for subscribe with lastAcknowledgedSeq as string (T048)', async () => {
+      const msg = JSON.stringify({
+        type: 'subscribe',
+        conversationId: 'conv-1',
+        lastAcknowledgedSeq: 'not-a-number',
+      });
+      await handler.handleMessage(conn, msg);
+
+      assert.equal(conn.sent.length, 1);
+      assert.equal(conn.sent[0].type, 'error');
+      assert.equal((conn.sent[0] as { code: string }).code, 'WS_INVALID_MESSAGE');
+      assert.equal((conn.sent[0] as { category: string }).category, 'validation');
+      assert.ok(!conn.isClosed);
+    });
+
+    it('responds with error for null conversationId (T048)', async () => {
+      const msg = JSON.stringify({ type: 'subscribe', conversationId: null });
+      await handler.handleMessage(conn, msg);
+
+      assert.equal(conn.sent.length, 1);
+      assert.equal(conn.sent[0].type, 'error');
+      assert.equal((conn.sent[0] as { code: string }).code, 'WS_INVALID_MESSAGE');
+      assert.equal((conn.sent[0] as { category: string }).category, 'validation');
+      assert.ok(!conn.isClosed);
+    });
+
+    it('responds with error for oversized message without closing the connection (T048)', async () => {
+      // Build a payload exceeding MAX_INBOUND_MESSAGE_BYTES
+      const oversizedPayload = 'x'.repeat(MAX_INBOUND_MESSAGE_BYTES + 1);
+      await handler.handleMessage(conn, oversizedPayload);
+
+      assert.equal(conn.sent.length, 1);
+      assert.equal(conn.sent[0].type, 'error');
+      assert.equal((conn.sent[0] as { code: string }).code, 'WS_INVALID_MESSAGE');
+      assert.equal((conn.sent[0] as { category: string }).category, 'validation');
+      assert.ok(
+        (conn.sent[0] as { message: string }).message.includes('size'),
+        'error message should mention size',
+      );
+      assert.ok(!conn.isClosed, 'connection should remain open after oversized message');
+    });
+
+    it('accepts valid messages after multiple sequential malformed ones (T048)', async () => {
+      // Send several malformed messages
+      await handler.handleMessage(conn, '{bad-json}');
+      await handler.handleMessage(conn, JSON.stringify({ type: 'bogus' }));
+      await handler.handleMessage(conn, '');
+
+      assert.equal(conn.sent.length, 3, 'should have 3 error responses');
+      assert.ok(!conn.isClosed, 'connection stays open');
+
+      // Now send a valid subscribe
+      const validMsg = JSON.stringify({ type: 'subscribe', conversationId: 'conv-1' });
+      await handler.handleMessage(conn, validMsg);
+
+      // The last message should be a successful subscribed acknowledgement
+      const lastMsg = conn.sent.at(-1)!;
+      assert.equal(lastMsg.type, 'subscribed');
+      assert.equal((lastMsg as { conversationId: string }).conversationId, 'conv-1');
+      assert.ok(!conn.isClosed);
+    });
+  });
+
+  // ─── T051: conversation not found on subscribe ──────────────────────────
+
+  describe('conversation not found on subscribe (T051)', () => {
+    it('returns structured error with CONVERSATION_NOT_FOUND code and validation category', async () => {
+      const msg = JSON.stringify({ type: 'subscribe', conversationId: 'nonexistent-conv' });
+      await handler.handleMessage(conn, msg);
+
+      assert.equal(conn.sent.length, 1);
+      const resp = conn.sent[0] as {
+        type: string;
+        ok: boolean;
+        code: string;
+        category: string;
+        message: string;
+      };
+      assert.equal(resp.type, 'error');
+      assert.equal(resp.ok, false);
+      assert.equal(resp.code, 'CONVERSATION_NOT_FOUND');
+      assert.equal(resp.category, 'validation');
+      assert.equal(typeof resp.message, 'string');
+      assert.ok(resp.message.length > 0);
+    });
+
+    it('includes conversationId in the error response', async () => {
+      const msg = JSON.stringify({ type: 'subscribe', conversationId: 'missing-conv-42' });
+      await handler.handleMessage(conn, msg);
+
+      assert.equal(conn.sent.length, 1);
+      const resp = conn.sent[0] as { conversationId?: string };
+      assert.equal(resp.conversationId, 'missing-conv-42');
+    });
+
+    it('connection remains open after CONVERSATION_NOT_FOUND', async () => {
+      const msg = JSON.stringify({ type: 'subscribe', conversationId: 'no-such-conv' });
+      await handler.handleMessage(conn, msg);
+
+      assert.ok(!conn.isClosed, 'connection must remain open after not-found');
+      assert.ok(
+        !conn.subscribedConversations.has('no-such-conv'),
+        'should not be subscribed to missing conversation',
+      );
+    });
+
+    it('error message does not leak daemon internal details (T051)', async () => {
+      const msg = JSON.stringify({ type: 'subscribe', conversationId: 'secret-conv' });
+      await handler.handleMessage(conn, msg);
+
+      const resp = conn.sent[0] as { message: string; code: string };
+      // Must not contain stack traces, file paths, or internal identifiers
+      assert.ok(!resp.message.includes('/'), 'error message must not contain file paths');
+      assert.ok(!resp.message.includes('at '), 'error message must not contain stack frames');
+      assert.ok(!resp.message.includes('Error:'), 'error message must not contain raw Error names');
+      assert.ok(
+        !resp.message.includes('daemon'),
+        'error message must not reference daemon internals',
+      );
+    });
+
+    it('valid subscribe succeeds after a not-found error on a different conversation', async () => {
+      // First: subscribe to non-existent conversation
+      await handler.handleMessage(
+        conn,
+        JSON.stringify({ type: 'subscribe', conversationId: 'ghost-conv' }),
+      );
+      assert.equal(conn.sent.length, 1);
+      assert.equal(conn.sent[0].type, 'error');
+      assert.ok(!conn.isClosed);
+
+      // Second: subscribe to a valid conversation
+      await handler.handleMessage(
+        conn,
+        JSON.stringify({ type: 'subscribe', conversationId: 'conv-1' }),
+      );
+
+      const lastMsg = conn.sent.at(-1)!;
+      assert.equal(lastMsg.type, 'subscribed');
+      assert.equal((lastMsg as { conversationId: string }).conversationId, 'conv-1');
+      assert.ok(conn.subscribedConversations.has('conv-1'));
+      assert.ok(!conn.isClosed);
+    });
+
+    it('multiple consecutive not-found subscribe attempts do not degrade the connection', async () => {
+      const missingIds = ['missing-1', 'missing-2', 'missing-3', 'missing-4', 'missing-5'];
+      for (const id of missingIds) {
+        await handler.handleMessage(
+          conn,
+          JSON.stringify({ type: 'subscribe', conversationId: id }),
+        );
+      }
+
+      assert.equal(conn.sent.length, missingIds.length);
+      for (const [i, resp] of conn.sent.entries()) {
+        assert.equal(resp.type, 'error', `response ${i} should be error`);
+        assert.equal(
+          (resp as { code: string }).code,
+          'CONVERSATION_NOT_FOUND',
+          `response ${i} should be CONVERSATION_NOT_FOUND`,
+        );
+      }
+      assert.ok(!conn.isClosed, 'connection stays open after multiple not-found errors');
+
+      // Verify no phantom subscriptions
+      for (const id of missingIds) {
+        assert.ok(!conn.subscribedConversations.has(id));
+      }
+      assert.equal(registry.hasInterest('missing-1'), false);
+    });
+
+    it('does not leave pending state after not-found error', async () => {
+      const msg = JSON.stringify({ type: 'subscribe', conversationId: 'phantom-conv' });
+      await handler.handleMessage(conn, msg);
+
+      assert.ok(!conn.pendingConversations.has('phantom-conv'));
+      assert.ok(!conn.subscribedConversations.has('phantom-conv'));
+      assert.ok(!conn.replayState.has('phantom-conv'));
+      assert.ok(!conn.pendingEvents.has('phantom-conv'));
     });
   });
 
