@@ -1032,7 +1032,7 @@ describe('Daemon unavailable across all REST route categories (T043)', () => {
 // ── T046: Rate-limit errors on mutating routes ──────────────────────────────
 //
 // Exercises the real `createMutatingRateLimiter` middleware with a tight
-// threshold (maxAttempts: 2) so the third mutating request on the same
+// threshold (maxAttempts: 3) so the third mutating request on the same
 // source key is rejected with 429 — proving the gateway middleware layer
 // enforces the limit, not the daemon.
 
