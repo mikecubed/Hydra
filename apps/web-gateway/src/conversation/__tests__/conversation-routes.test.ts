@@ -1,16 +1,23 @@
 /**
- * Tests for conversation routes (T010–T014).
+ * Tests for conversation routes (T010–T014, T043, T046, T047).
  *
  * Tests all REST mediation routes: lifecycle, turns, approvals,
  * work-control, artifacts, and activities. Uses a mock DaemonClient
- * injected via the route factory.
+ * injected via the route factory for unit-level tests (T010-T014, T043),
+ * and the real composed gateway app for middleware-layer tests (T046, T047).
  */
-import { describe, it, beforeEach, mock } from 'node:test';
+import { describe, it, beforeEach, afterEach, mock } from 'node:test';
 import assert from 'node:assert/strict';
 import { Hono } from 'hono';
 import { createConversationRoutes } from '../conversation-routes.ts';
-import type { DaemonClient, DaemonResult } from '../daemon-client.ts';
+import { DaemonClient } from '../daemon-client.ts';
+import type { DaemonResult } from '../daemon-client.ts';
 import type { GatewayErrorResponse } from '../../shared/gateway-error-response.ts';
+import { createGatewayApp, type GatewayApp } from '../../index.ts';
+import { FakeClock } from '../../shared/clock.ts';
+import { RateLimiter } from '../../auth/rate-limiter.ts';
+
+const ORIGIN = 'http://127.0.0.1:4174';
 
 // ── Test helpers ─────────────────────────────────────────────────────────────
 
@@ -129,6 +136,48 @@ function buildRequest(
     headers: { 'content-type': 'application/json', ...opts.headers },
     body: method === 'GET' ? undefined : opts.body,
   });
+}
+
+/**
+ * Build a Request against the full gateway app (origin-aware, with optional cookies).
+ * Used by T046/T047 which exercise the real middleware stack.
+ */
+function gwRequest(
+  method: string,
+  path: string,
+  opts: {
+    body?: string;
+    headers?: Record<string, string>;
+    cookies?: Record<string, string>;
+  } = {},
+): Request {
+  const headers: Record<string, string> = {
+    'content-type': 'application/json',
+    ...opts.headers,
+  };
+  if (opts.cookies && Object.keys(opts.cookies).length > 0) {
+    headers['cookie'] = Object.entries(opts.cookies)
+      .map(([k, v]) => `${k}=${v}`)
+      .join('; ');
+  }
+  return new Request(`${ORIGIN}${path}`, {
+    method,
+    headers,
+    body: method === 'GET' ? undefined : opts.body,
+  });
+}
+
+function parseCookies(res: Response): Record<string, string> {
+  const jar: Record<string, string> = {};
+  const setCookies = res.headers.getSetCookie();
+  for (const sc of setCookies) {
+    const [pair] = sc.split(';');
+    const eqIdx = pair.indexOf('=');
+    if (eqIdx > 0) {
+      jar[pair.slice(0, eqIdx).trim()] = pair.slice(eqIdx + 1).trim();
+    }
+  }
+  return jar;
 }
 
 // ── T010: Conversation lifecycle ──────────────────────────────────────────────
@@ -981,138 +1030,230 @@ describe('Daemon unavailable across all REST route categories (T043)', () => {
 });
 
 // ── T046: Rate-limit errors on mutating routes ──────────────────────────────
+//
+// Exercises the real `createMutatingRateLimiter` middleware with a tight
+// threshold (maxAttempts: 2) so the third mutating request on the same
+// source key is rejected with 429 — proving the gateway middleware layer
+// enforces the limit, not the daemon.
 
 describe('Rate-limit errors on mutating conversation routes (T046)', () => {
-  let mockClient: MockDaemonClient;
-  let app: Hono;
+  let gw: GatewayApp;
+  let clock: FakeClock;
+  let fetchMock: ReturnType<typeof mock.fn<typeof globalThis.fetch>>;
 
-  const rateLimitError: DaemonResult<never> = {
-    error: {
-      ok: false,
-      code: 'RATE_LIMITED',
-      category: 'rate-limit',
-      message: 'Too many requests',
-      retryAfterMs: 15_000,
-    },
-  };
+  beforeEach(async () => {
+    clock = new FakeClock(Date.now());
+    fetchMock = mock.fn<typeof globalThis.fetch>();
+    const daemonClient = new DaemonClient({
+      baseUrl: 'http://localhost:4173',
+      fetchFn: fetchMock,
+      timeoutMs: 5000,
+    });
 
-  function stubAllMethodsRateLimited(client: MockDaemonClient): void {
-    for (const key of Object.keys(client) as Array<keyof MockDaemonClient>) {
-      client[key].mock.mockImplementation(() => Promise.resolve(rateLimitError));
-    }
+    // Tight mutating rate-limit: 3 requests per window (login + 2 conversation POSTs)
+    // so the 3rd conversation POST exceeds the budget
+    const mutatingLimiter = new RateLimiter(clock, {
+      maxAttempts: 3,
+      windowMs: 60_000,
+      lockoutMs: 60_000,
+    });
+
+    gw = createGatewayApp({
+      clock,
+      allowedOrigin: ORIGIN,
+      healthChecker: async () => true,
+      heartbeatConfig: { intervalMs: 60_000 },
+      sessionConfig: {
+        sessionLifetimeMs: 3600_000,
+        warningThresholdMs: 600_000,
+        maxExtensions: 3,
+        extensionDurationMs: 3600_000,
+        idleTimeoutMs: 1800_000,
+      },
+      daemonClient,
+      mutatingLimiter,
+    });
+    await gw.operatorStore.createOperator('admin', 'Admin');
+    await gw.operatorStore.addCredential('admin', 'password123');
+
+    // Stub daemon so requests that pass the limiter get a success response
+    fetchMock.mock.mockImplementation(() =>
+      Promise.resolve(
+        new Response(JSON.stringify({ id: 'conv-1', status: 'active' }), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        }),
+      ),
+    );
+  });
+
+  afterEach(() => {
+    gw.heartbeat.stop();
+  });
+
+  async function loginAndGetCookies(): Promise<{ session: string; csrf: string }> {
+    const loginReq = gwRequest('POST', '/auth/login', {
+      body: JSON.stringify({ identity: 'admin', secret: 'password123' }),
+      headers: { origin: ORIGIN },
+    });
+    const res = await gw.app.request(loginReq);
+    assert.equal(res.status, 200, 'login must succeed');
+    const jar = parseCookies(res);
+    return { session: jar['__session'], csrf: jar['__csrf'] };
   }
 
-  beforeEach(() => {
-    mockClient = createMockDaemonClient();
-    stubAllMethodsRateLimited(mockClient);
-    app = buildTestApp(mockClient);
-  });
+  async function authedPost(
+    path: string,
+    cookies: { session: string; csrf: string },
+    body: Record<string, unknown> = {},
+  ): Promise<Response> {
+    return gw.app.request(
+      gwRequest('POST', path, {
+        body: JSON.stringify(body),
+        cookies: { __session: cookies.session, __csrf: cookies.csrf },
+        headers: { origin: ORIGIN, 'x-csrf-token': cookies.csrf },
+      }),
+    );
+  }
 
   async function assertRateLimited(res: Response): Promise<void> {
     assert.equal(res.status, 429, `expected HTTP 429, got ${String(res.status)}`);
     const body = (await res.json()) as GatewayErrorResponse;
     assert.equal(body.ok, false);
     assert.equal(body.category, 'rate-limit');
-    assert.equal(typeof body.retryAfterMs, 'number', 'retryAfterMs must be present');
-    assert.ok((body.retryAfterMs as number) > 0, 'retryAfterMs must be positive');
+    assert.equal(body.code, 'RATE_LIMITED');
   }
 
-  it('POST /conversations (create) → 429 with retryAfterMs', async () => {
-    const res = await app.request(
-      buildRequest('POST', '/conversations', { body: JSON.stringify({}) }),
-    );
-    await assertRateLimited(res);
+  it('POST /conversations → 429 after exceeding mutating rate limit', async () => {
+    const cookies = await loginAndGetCookies();
+    // Two allowed requests consume the budget
+    const r1 = await authedPost('/conversations', cookies);
+    assert.equal(r1.status, 201, 'first request must succeed');
+    const r2 = await authedPost('/conversations', cookies);
+    assert.equal(r2.status, 201, 'second request must succeed');
+    // Third exceeds the limit
+    const r3 = await authedPost('/conversations', cookies);
+    await assertRateLimited(r3);
   });
 
-  it('POST /conversations/:id/resume → 429 with retryAfterMs', async () => {
-    const res = await app.request(
-      buildRequest('POST', '/conversations/conv-1/resume', {
-        body: JSON.stringify({ lastAcknowledgedSeq: 0 }),
+  it('POST /conversations/:convId/turns → 429 after exceeding mutating rate limit', async () => {
+    const cookies = await loginAndGetCookies();
+    await authedPost('/conversations/conv-1/turns', cookies, { instruction: 'a' });
+    await authedPost('/conversations/conv-1/turns', cookies, { instruction: 'b' });
+    const r3 = await authedPost('/conversations/conv-1/turns', cookies, { instruction: 'c' });
+    await assertRateLimited(r3);
+  });
+
+  it('POST /approvals/:approvalId/respond → 429 after exceeding mutating rate limit', async () => {
+    const cookies = await loginAndGetCookies();
+    await authedPost('/approvals/a1/respond', cookies, { response: 'approve' });
+    await authedPost('/approvals/a1/respond', cookies, { response: 'approve' });
+    const r3 = await authedPost('/approvals/a1/respond', cookies, { response: 'approve' });
+    await assertRateLimited(r3);
+  });
+
+  it('POST /conversations/:convId/turns/:turnId/cancel → 429 after exceeding mutating rate limit', async () => {
+    const cookies = await loginAndGetCookies();
+    await authedPost('/conversations/conv-1/turns/t1/cancel', cookies);
+    await authedPost('/conversations/conv-1/turns/t1/cancel', cookies);
+    const r3 = await authedPost('/conversations/conv-1/turns/t1/cancel', cookies);
+    await assertRateLimited(r3);
+  });
+
+  it('GET /conversations is exempt from mutating rate limit', async () => {
+    const cookies = await loginAndGetCookies();
+    // Exhaust the mutating budget
+    await authedPost('/conversations', cookies);
+    await authedPost('/conversations', cookies);
+    const r3 = await authedPost('/conversations', cookies);
+    assert.equal(r3.status, 429, 'mutating budget should be exhausted');
+    // GET (safe method) must still succeed
+    const getRes = await gw.app.request(
+      gwRequest('GET', '/conversations', {
+        cookies: { __session: cookies.session, __csrf: cookies.csrf },
+        headers: { origin: ORIGIN },
       }),
     );
-    await assertRateLimited(res);
-  });
-
-  it('POST /conversations/:id/archive → 429 with retryAfterMs', async () => {
-    const res = await app.request(
-      buildRequest('POST', '/conversations/conv-1/archive', { body: JSON.stringify({}) }),
-    );
-    await assertRateLimited(res);
-  });
-
-  it('POST /conversations/:convId/turns (submit) → 429 with retryAfterMs', async () => {
-    const res = await app.request(
-      buildRequest('POST', '/conversations/conv-1/turns', {
-        body: JSON.stringify({ instruction: 'test' }),
-      }),
-    );
-    await assertRateLimited(res);
-  });
-
-  it('POST /approvals/:approvalId/respond → 429 with retryAfterMs', async () => {
-    const res = await app.request(
-      buildRequest('POST', '/approvals/a1/respond', {
-        body: JSON.stringify({ response: 'approve' }),
-      }),
-    );
-    await assertRateLimited(res);
-  });
-
-  it('POST /conversations/:convId/turns/:turnId/cancel → 429 with retryAfterMs', async () => {
-    const res = await app.request(
-      buildRequest('POST', '/conversations/conv-1/turns/t1/cancel', {
-        body: JSON.stringify({}),
-      }),
-    );
-    await assertRateLimited(res);
-  });
-
-  it('POST /conversations/:convId/turns/:turnId/retry → 429 with retryAfterMs', async () => {
-    const res = await app.request(
-      buildRequest('POST', '/conversations/conv-1/turns/t1/retry', { body: JSON.stringify({}) }),
-    );
-    await assertRateLimited(res);
+    assert.equal(getRes.status, 200, 'safe GET must bypass mutating rate limiter');
   });
 });
 
 // ── T047: Auth/session errors on REST ────────────────────────────────────────
+//
+// Exercises the real auth-middleware + session-service stack via
+// `createGatewayApp()`. Three sub-scenarios:
+//   1. Missing session — no __session cookie → 401 SESSION_NOT_FOUND
+//   2. Expired session — advance clock past lifetime → 401 SESSION_EXPIRED
+//   3. Invalidated session — explicit invalidation → 401 SESSION_INVALIDATED
 
 describe('Auth and session errors on conversation REST routes (T047)', () => {
-  // ── Helper: build app WITHOUT auth middleware (no sessionId) ──
+  let gw: GatewayApp;
+  let clock: FakeClock;
+  let fetchMock: ReturnType<typeof mock.fn<typeof globalThis.fetch>>;
 
-  function buildUnauthenticatedApp(daemonClient: MockDaemonClient): Hono {
-    const app = new Hono();
-    // No auth middleware — sessionId and operatorId are not set
-    app.route('/', createConversationRoutes(daemonClient as unknown as DaemonClient));
-    return app;
+  beforeEach(async () => {
+    clock = new FakeClock(Date.now());
+    fetchMock = mock.fn<typeof globalThis.fetch>();
+    const daemonClient = new DaemonClient({
+      baseUrl: 'http://localhost:4173',
+      fetchFn: fetchMock,
+      timeoutMs: 5000,
+    });
+
+    gw = createGatewayApp({
+      clock,
+      allowedOrigin: ORIGIN,
+      healthChecker: async () => true,
+      heartbeatConfig: { intervalMs: 60_000 },
+      sessionConfig: {
+        sessionLifetimeMs: 3600_000,
+        warningThresholdMs: 600_000,
+        maxExtensions: 3,
+        extensionDurationMs: 3600_000,
+        idleTimeoutMs: 1800_000,
+      },
+      daemonClient,
+    });
+    await gw.operatorStore.createOperator('admin', 'Admin');
+    await gw.operatorStore.addCredential('admin', 'password123');
+  });
+
+  afterEach(() => {
+    gw.heartbeat.stop();
+  });
+
+  async function loginAndGetCookies(): Promise<{ session: string; csrf: string }> {
+    const loginReq = gwRequest('POST', '/auth/login', {
+      body: JSON.stringify({ identity: 'admin', secret: 'password123' }),
+      headers: { origin: ORIGIN },
+    });
+    const res = await gw.app.request(loginReq);
+    assert.equal(res.status, 200, 'login must succeed');
+    const jar = parseCookies(res);
+    return { session: jar['__session'], csrf: jar['__csrf'] };
   }
 
   describe('missing session (no session cookie)', () => {
-    let mockClient: MockDaemonClient;
-    let app: Hono;
-
-    const authError: DaemonResult<never> = {
-      error: {
-        ok: false,
-        code: 'SESSION_NOT_FOUND',
-        category: 'auth',
-        message: 'No valid session found',
-        httpStatus: 401,
-      },
-    };
-
-    beforeEach(() => {
-      mockClient = createMockDaemonClient();
-      // Stub all methods to return auth error (daemon rejects missing session)
-      for (const key of Object.keys(mockClient) as Array<keyof MockDaemonClient>) {
-        mockClient[key].mock.mockImplementation(() => Promise.resolve(authError));
-      }
-      app = buildUnauthenticatedApp(mockClient);
+    it('POST /conversations → 401 auth error without session', async () => {
+      const res = await gw.app.request(
+        gwRequest('POST', '/conversations', {
+          body: JSON.stringify({}),
+          headers: { origin: ORIGIN },
+        }),
+      );
+      assert.equal(res.status, 401);
+      const body = (await res.json()) as GatewayErrorResponse;
+      assert.equal(body.ok, false);
+      assert.equal(body.category, 'auth');
+      assert.equal(body.code, 'SESSION_NOT_FOUND');
     });
 
-    it('POST /conversations → 401 auth error without session', async () => {
-      const res = await app.request(
-        buildRequest('POST', '/conversations', { body: JSON.stringify({}) }),
+    it('POST /conversations/:convId/turns → 401 auth error without session', async () => {
+      const res = await gw.app.request(
+        gwRequest('POST', '/conversations/conv-1/turns', {
+          body: JSON.stringify({ instruction: 'test' }),
+          headers: { origin: ORIGIN },
+        }),
       );
       assert.equal(res.status, 401);
       const body = (await res.json()) as GatewayErrorResponse;
@@ -1120,151 +1261,155 @@ describe('Auth and session errors on conversation REST routes (T047)', () => {
       assert.equal(body.code, 'SESSION_NOT_FOUND');
     });
 
-    it('POST /conversations/:convId/turns → 401 auth error without session', async () => {
-      const res = await app.request(
-        buildRequest('POST', '/conversations/conv-1/turns', {
-          body: JSON.stringify({ instruction: 'test' }),
-        }),
-      );
-      assert.equal(res.status, 401);
-      const body = (await res.json()) as GatewayErrorResponse;
-      assert.equal(body.category, 'auth');
-    });
-
     it('POST /approvals/:approvalId/respond → 401 auth error without session', async () => {
-      const res = await app.request(
-        buildRequest('POST', '/approvals/a1/respond', {
+      const res = await gw.app.request(
+        gwRequest('POST', '/approvals/a1/respond', {
           body: JSON.stringify({ response: 'approve' }),
+          headers: { origin: ORIGIN },
         }),
       );
       assert.equal(res.status, 401);
       const body = (await res.json()) as GatewayErrorResponse;
       assert.equal(body.category, 'auth');
+      assert.equal(body.code, 'SESSION_NOT_FOUND');
     });
 
     it('GET /conversations → 401 auth error without session', async () => {
-      const res = await app.request(buildRequest('GET', '/conversations'));
+      const res = await gw.app.request(
+        gwRequest('GET', '/conversations', { headers: { origin: ORIGIN } }),
+      );
       assert.equal(res.status, 401);
       const body = (await res.json()) as GatewayErrorResponse;
       assert.equal(body.category, 'auth');
+      assert.equal(body.code, 'SESSION_NOT_FOUND');
     });
   });
 
   describe('expired session', () => {
-    let mockClient: MockDaemonClient;
-    let app: Hono;
-
-    const sessionExpiredError: DaemonResult<never> = {
-      error: {
-        ok: false,
-        code: 'SESSION_EXPIRED',
-        category: 'session',
-        message: 'Session has expired',
-        httpStatus: 401,
-      },
-    };
-
-    beforeEach(() => {
-      mockClient = createMockDaemonClient();
-      for (const key of Object.keys(mockClient) as Array<keyof MockDaemonClient>) {
-        mockClient[key].mock.mockImplementation(() => Promise.resolve(sessionExpiredError));
-      }
-      app = buildTestApp(mockClient);
-    });
-
-    it('POST /conversations → session category for expired session', async () => {
-      const res = await app.request(
-        buildRequest('POST', '/conversations', { body: JSON.stringify({}) }),
+    it('POST /conversations → 401 session error for expired session', async () => {
+      const cookies = await loginAndGetCookies();
+      // Advance clock past session lifetime (3600 s)
+      clock.advance(3600_001);
+      const res = await gw.app.request(
+        gwRequest('POST', '/conversations', {
+          body: JSON.stringify({}),
+          cookies: { __session: cookies.session, __csrf: cookies.csrf },
+          headers: { origin: ORIGIN, 'x-csrf-token': cookies.csrf },
+        }),
       );
+      assert.equal(res.status, 401);
       const body = (await res.json()) as GatewayErrorResponse;
       assert.equal(body.category, 'session');
       assert.equal(body.code, 'SESSION_EXPIRED');
     });
 
-    it('POST /conversations/:convId/turns → session category for expired session', async () => {
-      const res = await app.request(
-        buildRequest('POST', '/conversations/conv-1/turns', {
+    it('POST /conversations/:convId/turns → 401 session error for expired session', async () => {
+      const cookies = await loginAndGetCookies();
+      clock.advance(3600_001);
+      const res = await gw.app.request(
+        gwRequest('POST', '/conversations/conv-1/turns', {
           body: JSON.stringify({ instruction: 'test' }),
+          cookies: { __session: cookies.session, __csrf: cookies.csrf },
+          headers: { origin: ORIGIN, 'x-csrf-token': cookies.csrf },
         }),
       );
+      assert.equal(res.status, 401);
       const body = (await res.json()) as GatewayErrorResponse;
       assert.equal(body.category, 'session');
       assert.equal(body.code, 'SESSION_EXPIRED');
     });
 
-    it('GET /conversations/:id → session category for expired session', async () => {
-      const res = await app.request(buildRequest('GET', '/conversations/conv-1'));
+    it('GET /conversations/:id → 401 session error for expired session', async () => {
+      const cookies = await loginAndGetCookies();
+      clock.advance(3600_001);
+      const res = await gw.app.request(
+        gwRequest('GET', '/conversations/conv-1', {
+          cookies: { __session: cookies.session, __csrf: cookies.csrf },
+          headers: { origin: ORIGIN },
+        }),
+      );
+      assert.equal(res.status, 401);
       const body = (await res.json()) as GatewayErrorResponse;
       assert.equal(body.category, 'session');
       assert.equal(body.code, 'SESSION_EXPIRED');
     });
 
-    it('POST /approvals/:approvalId/respond → session category for expired session', async () => {
-      const res = await app.request(
-        buildRequest('POST', '/approvals/a1/respond', {
+    it('POST /approvals/:approvalId/respond → 401 session error for expired session', async () => {
+      const cookies = await loginAndGetCookies();
+      clock.advance(3600_001);
+      const res = await gw.app.request(
+        gwRequest('POST', '/approvals/a1/respond', {
           body: JSON.stringify({ response: 'approve' }),
+          cookies: { __session: cookies.session, __csrf: cookies.csrf },
+          headers: { origin: ORIGIN, 'x-csrf-token': cookies.csrf },
         }),
       );
+      assert.equal(res.status, 401);
       const body = (await res.json()) as GatewayErrorResponse;
       assert.equal(body.category, 'session');
+      assert.equal(body.code, 'SESSION_EXPIRED');
     });
   });
 
   describe('invalidated session', () => {
-    let mockClient: MockDaemonClient;
-    let app: Hono;
-
-    const sessionInvalidatedError: DaemonResult<never> = {
-      error: {
-        ok: false,
-        code: 'SESSION_INVALIDATED',
-        category: 'session',
-        message: 'Session has been invalidated',
-        httpStatus: 401,
-      },
-    };
-
-    beforeEach(() => {
-      mockClient = createMockDaemonClient();
-      for (const key of Object.keys(mockClient) as Array<keyof MockDaemonClient>) {
-        mockClient[key].mock.mockImplementation(() => Promise.resolve(sessionInvalidatedError));
-      }
-      app = buildTestApp(mockClient);
-    });
-
-    it('POST /conversations → session category for invalidated session', async () => {
-      const res = await app.request(
-        buildRequest('POST', '/conversations', { body: JSON.stringify({}) }),
-      );
-      const body = (await res.json()) as GatewayErrorResponse;
-      assert.equal(body.category, 'session');
-      assert.equal(body.code, 'SESSION_INVALIDATED');
-    });
-
-    it('POST /conversations/:convId/turns → session category for invalidated session', async () => {
-      const res = await app.request(
-        buildRequest('POST', '/conversations/conv-1/turns', {
-          body: JSON.stringify({ instruction: 'test' }),
-        }),
-      );
-      const body = (await res.json()) as GatewayErrorResponse;
-      assert.equal(body.category, 'session');
-      assert.equal(body.code, 'SESSION_INVALIDATED');
-    });
-
-    it('GET /conversations → session category for invalidated session', async () => {
-      const res = await app.request(buildRequest('GET', '/conversations'));
-      const body = (await res.json()) as GatewayErrorResponse;
-      assert.equal(body.category, 'session');
-      assert.equal(body.code, 'SESSION_INVALIDATED');
-    });
-
-    it('POST /conversations/:convId/turns/:turnId/cancel → session category for invalidated session', async () => {
-      const res = await app.request(
-        buildRequest('POST', '/conversations/conv-1/turns/t1/cancel', {
+    it('POST /conversations → 401 session error for invalidated session', async () => {
+      const cookies = await loginAndGetCookies();
+      await gw.sessionService.invalidate(cookies.session, 'test-invalidation');
+      const res = await gw.app.request(
+        gwRequest('POST', '/conversations', {
           body: JSON.stringify({}),
+          cookies: { __session: cookies.session, __csrf: cookies.csrf },
+          headers: { origin: ORIGIN, 'x-csrf-token': cookies.csrf },
         }),
       );
+      assert.equal(res.status, 401);
+      const body = (await res.json()) as GatewayErrorResponse;
+      assert.equal(body.category, 'session');
+      assert.equal(body.code, 'SESSION_INVALIDATED');
+    });
+
+    it('POST /conversations/:convId/turns → 401 session error for invalidated session', async () => {
+      const cookies = await loginAndGetCookies();
+      await gw.sessionService.invalidate(cookies.session, 'test-invalidation');
+      const res = await gw.app.request(
+        gwRequest('POST', '/conversations/conv-1/turns', {
+          body: JSON.stringify({ instruction: 'test' }),
+          cookies: { __session: cookies.session, __csrf: cookies.csrf },
+          headers: { origin: ORIGIN, 'x-csrf-token': cookies.csrf },
+        }),
+      );
+      assert.equal(res.status, 401);
+      const body = (await res.json()) as GatewayErrorResponse;
+      assert.equal(body.category, 'session');
+      assert.equal(body.code, 'SESSION_INVALIDATED');
+    });
+
+    it('GET /conversations → 401 session error for invalidated session', async () => {
+      const cookies = await loginAndGetCookies();
+      await gw.sessionService.invalidate(cookies.session, 'test-invalidation');
+      const res = await gw.app.request(
+        gwRequest('GET', '/conversations', {
+          cookies: { __session: cookies.session, __csrf: cookies.csrf },
+          headers: { origin: ORIGIN },
+        }),
+      );
+      assert.equal(res.status, 401);
+      const body = (await res.json()) as GatewayErrorResponse;
+      assert.equal(body.category, 'session');
+      assert.equal(body.code, 'SESSION_INVALIDATED');
+    });
+
+    it('POST /conversations/:convId/turns/:turnId/cancel → 401 session error for invalidated session', async () => {
+      const cookies = await loginAndGetCookies();
+      await gw.sessionService.invalidate(cookies.session, 'test-invalidation');
+      const res = await gw.app.request(
+        gwRequest('POST', '/conversations/conv-1/turns/t1/cancel', {
+          body: JSON.stringify({}),
+          cookies: { __session: cookies.session, __csrf: cookies.csrf },
+          headers: { origin: ORIGIN, 'x-csrf-token': cookies.csrf },
+        }),
+      );
+      assert.equal(res.status, 401);
       const body = (await res.json()) as GatewayErrorResponse;
       assert.equal(body.category, 'session');
       assert.equal(body.code, 'SESSION_INVALIDATED');

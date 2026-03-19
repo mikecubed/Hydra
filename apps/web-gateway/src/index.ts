@@ -60,6 +60,8 @@ export interface GatewayAppDeps {
   daemonClientOptions?: DaemonClientOptions;
   /** Pre-built DaemonClient (for testing). Overrides daemonClientOptions. */
   daemonClient?: DaemonClient;
+  /** Pre-built mutating rate limiter (for testing). Overrides default limits. */
+  mutatingLimiter?: RateLimiter;
   /** Optional narrower daemon client for WebSocket subscribe validation. */
   wsDaemonClient?: Pick<DaemonClient, 'openConversation' | 'loadTurnHistory' | 'getStreamReplay'>;
   /** Optional HTTP server for WebSocket upgrade wiring. */
@@ -190,7 +192,7 @@ export function createGatewayApp(deps: GatewayAppDeps = {}): GatewayApp {
     deps.heartbeatConfig,
   );
   heartbeat.start();
-  const mutatingLimiter = new RateLimiter(clock, DEFAULT_MUTATING_LIMITS);
+  const mutatingLimiter = deps.mutatingLimiter ?? new RateLimiter(clock, DEFAULT_MUTATING_LIMITS);
 
   const app = new Hono<GatewayEnv>();
 
