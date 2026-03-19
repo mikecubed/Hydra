@@ -3756,16 +3756,22 @@ describe('T030: End-to-end streaming integration', () => {
           await sleep(5);
         }
 
-        // Commit replay/history state now that pre-disconnect + gap events have been produced.
-        fakeDaemon.commitStreamState(CONV_ID, turnId, emitted);
+        // Commit only the events actually emitted so far (pre-disconnect + gap).
+        // The turn stays 'executing' — it is not complete until the terminal event is produced.
+        const emittedSoFar = [...preDisconnectEvents, ...replayGapEvents];
+        fakeDaemon.commitStreamState(CONV_ID, turnId, emittedSoFar);
+        fakeDaemon.updateTurnStatus(CONV_ID, turnId, 'executing');
 
         // ── Phase B: reconnect with lastAcknowledgedSeq
         const ws2 = await connectWebSocket(port, { sessionId: auth.sessionId });
         openSockets.push(ws2);
 
-        const reconnectMessagesPromise = waitForMessages(
+        // Wait for daemon-fallback replay (gap events) + subscribed ack.
+        // This ensures ws2 is fully 'live' before we emit postReconnect events,
+        // so no events are dropped due to missing subscription interest.
+        const replayPhase = waitForMessages(
           ws2,
-          emitted.filter((e) => e.seq > lastReceivedSeq).length + 1,
+          replayGapEvents.length + 1, // gap replay events + subscribed
           10_000,
         );
 
@@ -3777,12 +3783,22 @@ describe('T030: End-to-end streaming integration', () => {
           }),
         );
 
+        const replayMessages = await replayPhase;
+
+        // ws2 is now in 'live' mode — collect postReconnect events as they arrive.
+        const livePhase = waitForMessages(ws2, postReconnectEvents.length, 10_000);
+
         for (const event of postReconnectEvents) {
           bridge.emitStreamEvent(CONV_ID, event);
           await sleep(5);
         }
 
-        const reconnectMessages = await reconnectMessagesPromise;
+        // Now that all events (including postReconnect) have been emitted,
+        // commit the complete stream and mark the turn completed.
+        fakeDaemon.commitStreamState(CONV_ID, turnId, emitted);
+
+        const liveMessages = await livePhase;
+        const reconnectMessages = [...replayMessages, ...liveMessages];
         const subscribedMessages = reconnectMessages.filter(
           (message) => message['type'] === 'subscribed',
         );
