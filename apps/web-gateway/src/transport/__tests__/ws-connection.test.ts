@@ -2,6 +2,22 @@ import { describe, it, beforeEach } from 'node:test';
 import assert from 'node:assert/strict';
 import { WsConnection } from '../ws-connection.ts';
 import { ConnectionRegistry } from '../connection-registry.ts';
+import { SessionWsBridge } from '../session-ws-bridge.ts';
+import { SessionStateBroadcaster } from '../../session/session-state-broadcaster.ts';
+import { SessionStore } from '../../session/session-store.ts';
+import { SessionService } from '../../session/session-service.ts';
+import { DaemonHeartbeat, type HealthChecker } from '../../session/daemon-heartbeat.ts';
+import { FakeClock } from '../../shared/clock.ts';
+import {
+  EventForwarder,
+  type StreamEventBridgeLike,
+  type StreamEventPayload,
+} from '../event-forwarder.ts';
+import { EventBuffer } from '../event-buffer.ts';
+import { WsMessageHandler } from '../ws-message-handler.ts';
+import type { StoredSession } from '../../session/session-store.ts';
+import type { ServerMessage } from '../ws-protocol.ts';
+import type { StreamEvent } from '@hydra/web-contracts';
 
 /** Minimal fake WebSocket for testing (mirrors ws.WebSocket surface we use). */
 function fakeSocket() {
@@ -24,6 +40,9 @@ function fakeSocket() {
     },
     get closeReason() {
       return closeReason;
+    },
+    get bufferedAmount() {
+      return 0;
     },
     send(data: string) {
       sent.push(data);
@@ -61,6 +80,85 @@ function fakeSocket() {
     OPEN: 1,
     CLOSING: 2,
     CLOSED: 3,
+  };
+}
+
+/** Parse sent raw JSON strings from a fake socket into ServerMessage objects. */
+function parseSent(ws: ReturnType<typeof fakeSocket>): ServerMessage[] {
+  return ws.sent.map((raw) => JSON.parse(raw) as ServerMessage);
+}
+
+/** Minimal StreamEventBridge fake for driving EventForwarder in tests. */
+class FakeEventBridge implements StreamEventBridgeLike {
+  readonly #listeners = new Set<(payload: StreamEventPayload) => void>();
+
+  on(_eventName: 'stream-event', listener: (payload: StreamEventPayload) => void): this {
+    this.#listeners.add(listener);
+    return this;
+  }
+
+  removeListener(
+    _eventName: 'stream-event',
+    listener: (payload: StreamEventPayload) => void,
+  ): this {
+    this.#listeners.delete(listener);
+    return this;
+  }
+
+  emitStreamEvent(conversationId: string, event: StreamEvent): void {
+    for (const listener of this.#listeners) {
+      listener({ conversationId, event });
+    }
+  }
+}
+
+/** Create a minimal StreamEvent for testing. */
+function makeEvent(seq: number, turnId = 'turn-1'): StreamEvent {
+  return {
+    seq,
+    turnId,
+    kind: 'text-delta',
+    payload: { text: `chunk-${seq}` },
+    timestamp: new Date().toISOString(),
+  };
+}
+
+/** Fake daemon client for WsMessageHandler subscribe tests. */
+function fakeDaemonClient(validConversationIds: Set<string>) {
+  return {
+    async openConversation(conversationId: string) {
+      if (validConversationIds.has(conversationId)) {
+        return {
+          data: {
+            conversation: {
+              id: conversationId,
+              status: 'active' as const,
+              createdAt: new Date().toISOString(),
+              updatedAt: new Date().toISOString(),
+              turnCount: 0,
+              pendingInstructionCount: 0,
+            },
+            recentTurns: [],
+            totalTurnCount: 0,
+            pendingApprovals: [],
+          },
+        };
+      }
+      return {
+        error: {
+          ok: false as const,
+          code: 'CONVERSATION_NOT_FOUND',
+          category: 'validation' as const,
+          message: 'Conversation not found',
+        },
+      };
+    },
+    async loadTurnHistory() {
+      return { data: { turns: [], totalCount: 0, hasMore: false } };
+    },
+    async getStreamReplay() {
+      return { data: { events: [] } };
+    },
   };
 }
 
@@ -278,5 +376,508 @@ describe('WsConnection', () => {
       assert.equal(conn.state, 'closed');
       assert.equal(registry.getBySession('s1').size, 0);
     });
+  });
+});
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// T044 — Daemon unavailable / restored: end-to-end WebSocket path
+// Validates the full chain: DaemonHeartbeat.tick() → SessionService →
+//   SessionStateBroadcaster → SessionWsBridge → WsConnection.send()
+// ═══════════════════════════════════════════════════════════════════════════════
+
+describe('T044: daemon unavailable — WebSocket path', () => {
+  let clock: FakeClock;
+  let store: SessionStore;
+  let broadcaster: SessionStateBroadcaster;
+  let sessionService: SessionService;
+  let registry: ConnectionRegistry;
+  let bridge: SessionWsBridge;
+  let session: StoredSession;
+
+  /** Controllable health checker for DaemonHeartbeat. */
+  let healthResult: boolean;
+  const healthChecker: HealthChecker = async () => healthResult;
+
+  beforeEach(async () => {
+    clock = new FakeClock(1_000_000);
+    store = new SessionStore();
+    broadcaster = new SessionStateBroadcaster();
+    sessionService = new SessionService(store, clock, {}, undefined, broadcaster);
+    registry = new ConnectionRegistry();
+    bridge = new SessionWsBridge({ broadcaster, registry, clock });
+    healthResult = true;
+
+    session = await sessionService.create('op-1', '127.0.0.1');
+  });
+
+  function connectAndBind(): {
+    ws: ReturnType<typeof fakeSocket>;
+    conn: WsConnection;
+    cleanup: () => void;
+  } {
+    const ws = fakeSocket();
+    const conn = WsConnection.create(session.id, ws as never, registry);
+    const cleanup = bridge.bindSession(session, conn as never);
+    return { ws, conn, cleanup };
+  }
+
+  it('delivers daemon-unavailable through the full heartbeat → WS chain', async () => {
+    const { ws, conn, cleanup } = connectAndBind();
+
+    const heartbeat = new DaemonHeartbeat(sessionService, store, healthChecker, {
+      intervalMs: 60_000,
+      daemonUrl: 'http://localhost:0',
+    });
+
+    try {
+      // Daemon goes down
+      healthResult = false;
+      await heartbeat.tick();
+
+      const messages = parseSent(ws);
+      assert.ok(
+        messages.some((m) => m.type === 'daemon-unavailable'),
+        'Expected daemon-unavailable message on the WebSocket',
+      );
+      assert.equal(conn.state, 'open', 'Connection must stay open during grace period');
+    } finally {
+      cleanup();
+      heartbeat.stop();
+    }
+  });
+
+  it('delivers daemon-restored after recovery through the full chain', async () => {
+    const { ws, conn, cleanup } = connectAndBind();
+
+    const heartbeat = new DaemonHeartbeat(sessionService, store, healthChecker, {
+      intervalMs: 60_000,
+      daemonUrl: 'http://localhost:0',
+    });
+
+    try {
+      // Daemon goes down
+      healthResult = false;
+      await heartbeat.tick();
+
+      // Daemon recovers
+      healthResult = true;
+      await heartbeat.tick();
+
+      const messages = parseSent(ws);
+      const types = messages.map((m) => m.type);
+
+      assert.ok(
+        types.includes('daemon-unavailable'),
+        'Expected daemon-unavailable before recovery',
+      );
+      assert.ok(types.includes('daemon-restored'), 'Expected daemon-restored after recovery');
+      assert.equal(conn.state, 'open', 'Connection must stay open after recovery');
+    } finally {
+      cleanup();
+      heartbeat.stop();
+    }
+  });
+
+  it('connection stays open throughout the grace period (no close during daemon-unreachable)', async () => {
+    const { ws, conn, cleanup } = connectAndBind();
+
+    const heartbeat = new DaemonHeartbeat(sessionService, store, healthChecker, {
+      intervalMs: 60_000,
+      daemonUrl: 'http://localhost:0',
+    });
+
+    try {
+      healthResult = false;
+      await heartbeat.tick();
+
+      // Tick again while still down — still no close
+      await heartbeat.tick();
+
+      assert.equal(conn.state, 'open', 'Connection must remain open during daemon outage');
+      assert.equal(ws.readyState, 1, 'Socket must remain in OPEN readyState');
+    } finally {
+      cleanup();
+      heartbeat.stop();
+    }
+  });
+
+  it('multiple connections on the same session all receive daemon-unavailable', async () => {
+    const conn1 = connectAndBind();
+    const conn2 = connectAndBind();
+
+    const heartbeat = new DaemonHeartbeat(sessionService, store, healthChecker, {
+      intervalMs: 60_000,
+      daemonUrl: 'http://localhost:0',
+    });
+
+    try {
+      healthResult = false;
+      await heartbeat.tick();
+
+      const msgs1 = parseSent(conn1.ws);
+      const msgs2 = parseSent(conn2.ws);
+
+      assert.ok(
+        msgs1.some((m) => m.type === 'daemon-unavailable'),
+        'Connection 1 should receive daemon-unavailable',
+      );
+      assert.ok(
+        msgs2.some((m) => m.type === 'daemon-unavailable'),
+        'Connection 2 should receive daemon-unavailable',
+      );
+    } finally {
+      conn1.cleanup();
+      conn2.cleanup();
+      heartbeat.stop();
+    }
+  });
+
+  it('multiple connections on the same session all receive daemon-restored', async () => {
+    const conn1 = connectAndBind();
+    const conn2 = connectAndBind();
+
+    const heartbeat = new DaemonHeartbeat(sessionService, store, healthChecker, {
+      intervalMs: 60_000,
+      daemonUrl: 'http://localhost:0',
+    });
+
+    try {
+      healthResult = false;
+      await heartbeat.tick();
+      healthResult = true;
+      await heartbeat.tick();
+
+      const msgs1 = parseSent(conn1.ws);
+      const msgs2 = parseSent(conn2.ws);
+
+      assert.ok(
+        msgs1.some((m) => m.type === 'daemon-restored'),
+        'Connection 1 should receive daemon-restored',
+      );
+      assert.ok(
+        msgs2.some((m) => m.type === 'daemon-restored'),
+        'Connection 2 should receive daemon-restored',
+      );
+    } finally {
+      conn1.cleanup();
+      conn2.cleanup();
+      heartbeat.stop();
+    }
+  });
+
+  it('daemon-restored is only sent after a preceding daemon-unavailable', async () => {
+    const { ws, cleanup } = connectAndBind();
+
+    const heartbeat = new DaemonHeartbeat(sessionService, store, healthChecker, {
+      intervalMs: 60_000,
+      daemonUrl: 'http://localhost:0',
+    });
+
+    try {
+      // Daemon stays healthy — tick should produce no messages
+      healthResult = true;
+      await heartbeat.tick();
+
+      const messages = parseSent(ws);
+      assert.ok(
+        !messages.some((m) => m.type === 'daemon-restored'),
+        'Should not send daemon-restored when daemon was never down',
+      );
+      assert.ok(
+        !messages.some((m) => m.type === 'daemon-unavailable'),
+        'Should not send daemon-unavailable when daemon is healthy',
+      );
+    } finally {
+      cleanup();
+      heartbeat.stop();
+    }
+  });
+
+  it('daemon down/up cycle ordering: unavailable precedes restored', async () => {
+    const { ws, cleanup } = connectAndBind();
+
+    const heartbeat = new DaemonHeartbeat(sessionService, store, healthChecker, {
+      intervalMs: 60_000,
+      daemonUrl: 'http://localhost:0',
+    });
+
+    try {
+      healthResult = false;
+      await heartbeat.tick();
+      healthResult = true;
+      await heartbeat.tick();
+
+      const messages = parseSent(ws);
+      const unavailableIdx = messages.findIndex((m) => m.type === 'daemon-unavailable');
+      const restoredIdx = messages.findIndex((m) => m.type === 'daemon-restored');
+
+      assert.ok(unavailableIdx >= 0, 'daemon-unavailable must be present');
+      assert.ok(restoredIdx >= 0, 'daemon-restored must be present');
+      assert.ok(
+        unavailableIdx < restoredIdx,
+        `daemon-unavailable (idx ${unavailableIdx}) must arrive before daemon-restored (idx ${restoredIdx})`,
+      );
+    } finally {
+      cleanup();
+      heartbeat.stop();
+    }
+  });
+});
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// T050 — Idle WebSocket connection (no subscriptions)
+// Validates: connection stays alive, receives lifecycle notifications,
+//   receives no stream events.
+// ═══════════════════════════════════════════════════════════════════════════════
+
+describe('T050: idle WebSocket connection — no subscriptions', () => {
+  let clock: FakeClock;
+  let store: SessionStore;
+  let broadcaster: SessionStateBroadcaster;
+  let sessionService: SessionService;
+  let registry: ConnectionRegistry;
+  let bridge: SessionWsBridge;
+  let session: StoredSession;
+
+  beforeEach(async () => {
+    clock = new FakeClock(1_000_000);
+    store = new SessionStore();
+    broadcaster = new SessionStateBroadcaster();
+    sessionService = new SessionService(
+      store,
+      clock,
+      { sessionLifetimeMs: 60_000, warningThresholdMs: 10_000 },
+      undefined,
+      broadcaster,
+    );
+    registry = new ConnectionRegistry();
+    bridge = new SessionWsBridge({ broadcaster, registry, clock });
+
+    session = await sessionService.create('op-1', '127.0.0.1');
+  });
+
+  function connectIdle(): {
+    ws: ReturnType<typeof fakeSocket>;
+    conn: WsConnection;
+    cleanup: () => void;
+  } {
+    const ws = fakeSocket();
+    const conn = WsConnection.create(session.id, ws as never, registry);
+    const cleanup = bridge.bindSession(session, conn as never);
+    // Deliberately send NO subscribe messages — this is the "idle" condition
+    return { ws, conn, cleanup };
+  }
+
+  it('idle connection stays open and valid', () => {
+    const { conn, cleanup } = connectIdle();
+
+    try {
+      assert.equal(conn.state, 'open');
+      assert.equal(conn.isClosed, false);
+      assert.equal(conn.subscribedConversations.size, 0, 'No subscriptions on idle connection');
+    } finally {
+      cleanup();
+    }
+  });
+
+  it('idle connection receives session-expiring-soon via real SessionService path', async () => {
+    const { ws, conn, cleanup } = connectIdle();
+
+    try {
+      // Advance clock into the warning window (50s into a 60s session, 10s warning threshold).
+      // Remaining = 10_000 - 1 = 9_999ms, which is ≤ warningThresholdMs (10_000).
+      clock.advance(50_001);
+
+      // Drive expiring-soon through the real path:
+      //   sessionService.validate() → transitionSession('warn-expiry') → broadcaster → bridge → WS
+      await sessionService.validate(session.id);
+
+      const messages = parseSent(ws);
+      assert.ok(
+        messages.some((m) => m.type === 'session-expiring-soon'),
+        'Idle connection should receive session-expiring-soon via SessionService.validate()',
+      );
+      assert.equal(conn.state, 'open', 'Connection should stay open after expiring-soon');
+    } finally {
+      cleanup();
+    }
+  });
+
+  it('idle connection receives daemon-unavailable notification', async () => {
+    const { ws, conn, cleanup } = connectIdle();
+
+    const healthChecker: HealthChecker = async () => false;
+    const heartbeat = new DaemonHeartbeat(sessionService, store, healthChecker, {
+      intervalMs: 60_000,
+      daemonUrl: 'http://localhost:0',
+    });
+
+    try {
+      await heartbeat.tick();
+
+      const messages = parseSent(ws);
+      assert.ok(
+        messages.some((m) => m.type === 'daemon-unavailable'),
+        'Idle connection should receive daemon-unavailable',
+      );
+      assert.equal(conn.state, 'open', 'Idle connection stays open during daemon outage');
+    } finally {
+      cleanup();
+      heartbeat.stop();
+    }
+  });
+
+  it('idle connection receives daemon-restored after recovery', async () => {
+    const { ws, conn, cleanup } = connectIdle();
+
+    let healthy = true;
+    const healthChecker: HealthChecker = async () => healthy;
+    const heartbeat = new DaemonHeartbeat(sessionService, store, healthChecker, {
+      intervalMs: 60_000,
+      daemonUrl: 'http://localhost:0',
+    });
+
+    try {
+      healthy = false;
+      await heartbeat.tick();
+      healthy = true;
+      await heartbeat.tick();
+
+      const messages = parseSent(ws);
+      assert.ok(
+        messages.some((m) => m.type === 'daemon-unavailable'),
+        'Should receive daemon-unavailable',
+      );
+      assert.ok(
+        messages.some((m) => m.type === 'daemon-restored'),
+        'Should receive daemon-restored',
+      );
+      assert.equal(conn.state, 'open', 'Idle connection stays open after recovery');
+    } finally {
+      cleanup();
+      heartbeat.stop();
+    }
+  });
+
+  it('idle connection does not receive stream-event messages (driven through EventForwarder)', () => {
+    const { ws, conn, cleanup } = connectIdle();
+
+    const eventBridge = new FakeEventBridge();
+    const buffer = new EventBuffer();
+    const forwarder = new EventForwarder(eventBridge, buffer, registry);
+    forwarder.start();
+
+    try {
+      assert.equal(conn.subscribedConversations.size, 0, 'No subscriptions');
+      assert.equal(conn.pendingConversations.size, 0, 'No pending conversations');
+
+      // Emit a real stream event through the EventForwarder pipeline.
+      // The forwarder checks registry.hasInterest() and registry.getByConversation(),
+      // so an unsubscribed connection must not receive it.
+      eventBridge.emitStreamEvent('any-conv', makeEvent(1));
+      eventBridge.emitStreamEvent('another-conv', makeEvent(2));
+
+      const messages = parseSent(ws);
+      assert.ok(
+        !messages.some((m) => m.type === 'stream-event'),
+        'Idle connection must not receive stream events routed through EventForwarder',
+      );
+    } finally {
+      forwarder.dispose();
+      cleanup();
+    }
+  });
+
+  it('idle connection with lifecycle notifications still has no stream events', async () => {
+    const { ws, conn, cleanup } = connectIdle();
+
+    let healthy = true;
+    const healthChecker: HealthChecker = async () => healthy;
+    const heartbeat = new DaemonHeartbeat(sessionService, store, healthChecker, {
+      intervalMs: 60_000,
+      daemonUrl: 'http://localhost:0',
+    });
+
+    // EventForwarder to verify stream-event exclusion under real forwarding
+    const eventBridge = new FakeEventBridge();
+    const buffer = new EventBuffer();
+    const forwarder = new EventForwarder(eventBridge, buffer, registry);
+    forwarder.start();
+
+    try {
+      // Trigger daemon down then up → lifecycle messages arrive
+      healthy = false;
+      await heartbeat.tick();
+      healthy = true;
+      await heartbeat.tick();
+
+      // Trigger expiring-soon through the real SessionService path
+      clock.advance(50_001);
+      await sessionService.validate(session.id);
+
+      // Emit a stream event through the forwarder — idle connection must not receive it
+      eventBridge.emitStreamEvent('some-conv', makeEvent(1));
+
+      const messages = parseSent(ws);
+
+      // Should have lifecycle messages
+      assert.ok(
+        messages.some((m) => m.type === 'daemon-unavailable'),
+        'daemon-unavailable received',
+      );
+      assert.ok(
+        messages.some((m) => m.type === 'daemon-restored'),
+        'daemon-restored received',
+      );
+      assert.ok(
+        messages.some((m) => m.type === 'session-expiring-soon'),
+        'session-expiring-soon received',
+      );
+
+      // Must NOT have stream events
+      assert.ok(
+        !messages.some((m) => m.type === 'stream-event'),
+        'Idle connection must not receive stream events even after lifecycle notifications',
+      );
+
+      assert.equal(conn.state, 'open', 'Connection stays open throughout');
+      assert.equal(conn.subscribedConversations.size, 0, 'Still no subscriptions');
+    } finally {
+      forwarder.dispose();
+      cleanup();
+      heartbeat.stop();
+    }
+  });
+
+  it('idle connection can later subscribe via real WsMessageHandler path', async () => {
+    const { conn, cleanup } = connectIdle();
+
+    const buffer = new EventBuffer();
+    const daemonClient = fakeDaemonClient(new Set(['conv-later']));
+    const handler = new WsMessageHandler({ registry, buffer, daemonClient });
+
+    try {
+      assert.equal(conn.state, 'open');
+      assert.equal(conn.subscribedConversations.size, 0);
+
+      // Drive subscribe through the real WsMessageHandler message path
+      await handler.handleMessage(
+        conn,
+        JSON.stringify({ type: 'subscribe', conversationId: 'conv-later' }),
+      );
+
+      assert.equal(
+        conn.subscribedConversations.size,
+        1,
+        'Subscription added through real WsMessageHandler path',
+      );
+      assert.ok(conn.subscribedConversations.has('conv-later'), 'Subscribed to conv-later');
+      assert.ok(
+        registry.getByConversation('conv-later').size === 1,
+        'Registry reflects the new subscription',
+      );
+    } finally {
+      cleanup();
+    }
   });
 });

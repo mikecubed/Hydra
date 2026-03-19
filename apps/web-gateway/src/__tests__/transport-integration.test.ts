@@ -2810,4 +2810,431 @@ describe('T030: End-to-end streaming integration', () => {
       }
     });
   });
+
+  // ── T049: Multi-tab edge case (FR-010 edge) ────────────────────────────
+
+  describe('T049: Multi-tab edge case', () => {
+    it('two tabs on same session/conversation both receive identical stream events from a single REST submission', async () => {
+      // (a) authenticate — single session represents one browser with two tabs
+      const auth = await loginViaRest();
+
+      // (b) open two WebSocket connections (simulating two browser tabs)
+      const tabA = await connectWebSocket(port, { sessionId: auth.sessionId });
+      openSockets.push(tabA);
+      const tabB = await connectWebSocket(port, { sessionId: auth.sessionId });
+      openSockets.push(tabB);
+
+      // (c) both tabs subscribe to the same conversation
+      tabA.send(JSON.stringify({ type: 'subscribe', conversationId: CONV_ID }));
+      tabB.send(JSON.stringify({ type: 'subscribe', conversationId: CONV_ID }));
+      const subA = await waitForMessage(tabA);
+      const subB = await waitForMessage(tabB);
+      assert.equal(subA['type'], 'subscribed');
+      assert.equal(subB['type'], 'subscribed');
+
+      // (d) ONE tab submits an instruction via REST
+      const turnResult = await submitInstructionViaRest(CONV_ID, 'build the feature', auth);
+      const turnId = (turnResult['turn'] as Record<string, unknown>)['id'] as string;
+      assert.ok(turnId, 'Expected turnId from REST submission');
+
+      // (e) daemon emits a full stream lifecycle
+      const emitted = fakeDaemon.emitFullStream(CONV_ID, turnId, ['Hello', ' from', ' Hydra']);
+
+      // (f) both tabs must receive ALL events
+      const [msgsA, msgsB] = await Promise.all([
+        waitForMessages(tabA, emitted.length),
+        waitForMessages(tabB, emitted.length),
+      ]);
+
+      // (g) NO omission — both received the same count
+      assert.equal(msgsA.length, emitted.length, 'Tab A: no event omission');
+      assert.equal(msgsB.length, emitted.length, 'Tab B: no event omission');
+
+      // (h) NO duplication — each tab received exactly emitted.length messages
+      // (verified by waitForMessages returning exactly that count)
+
+      // (i) identical content — events match 1:1 between tabs AND match emitted
+      for (const [i, emittedEvent] of emitted.entries()) {
+        const eventA = msgsA[i]['event'] as StreamEvent;
+        const eventB = msgsB[i]['event'] as StreamEvent;
+
+        assert.deepEqual(eventA, emittedEvent, `Tab A event[${i}] matches emitted`);
+        assert.deepEqual(eventB, emittedEvent, `Tab B event[${i}] matches emitted`);
+        assert.deepEqual(eventA, eventB, `Tab A and Tab B event[${i}] are identical`);
+      }
+
+      // (j) sequence numbers are monotonically increasing on each tab
+      const seqsA = msgsA.map((m) => (m['event'] as StreamEvent).seq);
+      const seqsB = msgsB.map((m) => (m['event'] as StreamEvent).seq);
+      assertMonotonicSequenceNumbers(seqsA, 'Tab A sequence');
+      assertMonotonicSequenceNumbers(seqsB, 'Tab B sequence');
+
+      // (k) both tabs saw the full lifecycle: started → deltas → completed
+      assert.equal((msgsA[0]['event'] as StreamEvent).kind, 'stream-started');
+      assert.equal((lastItem(msgsA)['event'] as StreamEvent).kind, 'stream-completed');
+      assert.equal((msgsB[0]['event'] as StreamEvent).kind, 'stream-started');
+      assert.equal((lastItem(msgsB)['event'] as StreamEvent).kind, 'stream-completed');
+    });
+
+    it('multi-tab: events are not duplicated when both tabs subscribe before stream starts', async () => {
+      const auth = await loginViaRest();
+
+      const tabA = await connectWebSocket(port, { sessionId: auth.sessionId });
+      openSockets.push(tabA);
+      const tabB = await connectWebSocket(port, { sessionId: auth.sessionId });
+      openSockets.push(tabB);
+
+      // Both subscribe
+      tabA.send(JSON.stringify({ type: 'subscribe', conversationId: CONV_ID }));
+      tabB.send(JSON.stringify({ type: 'subscribe', conversationId: CONV_ID }));
+      await waitForMessage(tabA);
+      await waitForMessage(tabB);
+
+      // Emit a single event
+      const singleEvent: StreamEvent = {
+        seq: fakeDaemon.nextSeq(),
+        turnId: 'turn-dup-check',
+        kind: 'text-delta',
+        payload: { text: 'exactly once' },
+        timestamp: new Date().toISOString(),
+      };
+      bridge.emitStreamEvent(CONV_ID, singleEvent);
+
+      // Each tab receives exactly 1 copy of the event — NOT 2
+      const [msgA, msgB] = await Promise.all([waitForMessage(tabA), waitForMessage(tabB)]);
+      assert.deepEqual(msgA['event'], singleEvent, 'Tab A receives the single event once');
+      assert.deepEqual(msgB['event'], singleEvent, 'Tab B receives the single event once');
+
+      // Verify by emitting a sentinel event and checking no extra messages snuck in
+      const sentinel: StreamEvent = {
+        seq: fakeDaemon.nextSeq(),
+        turnId: 'turn-sentinel',
+        kind: 'text-delta',
+        payload: { text: 'sentinel' },
+        timestamp: new Date().toISOString(),
+      };
+      bridge.emitStreamEvent(CONV_ID, sentinel);
+
+      const sentinelA = await waitForMessage(tabA);
+      const sentinelB = await waitForMessage(tabB);
+
+      // The sentinel must be the next message on each tab — no stale duplicates
+      assert.deepEqual(
+        sentinelA['event'],
+        sentinel,
+        'Tab A next message is sentinel (no duplicates)',
+      );
+      assert.deepEqual(
+        sentinelB['event'],
+        sentinel,
+        'Tab B next message is sentinel (no duplicates)',
+      );
+    });
+
+    it('multi-tab: second tab joining mid-stream receives only events from join point onward', async () => {
+      const auth = await loginViaRest();
+
+      // Tab A subscribes first
+      const tabA = await connectWebSocket(port, { sessionId: auth.sessionId });
+      openSockets.push(tabA);
+      tabA.send(JSON.stringify({ type: 'subscribe', conversationId: CONV_ID }));
+      await waitForMessage(tabA); // subscribed
+
+      // Emit the first half of stream events while only Tab A is subscribed
+      const earlyEvent: StreamEvent = {
+        seq: fakeDaemon.nextSeq(),
+        turnId: 'turn-mid',
+        kind: 'stream-started',
+        payload: { streamId: 'stream-turn-mid' },
+        timestamp: new Date().toISOString(),
+      };
+      bridge.emitStreamEvent(CONV_ID, earlyEvent);
+      const earlyMsgA = await waitForMessage(tabA);
+      assert.deepEqual(earlyMsgA['event'], earlyEvent);
+
+      // Tab B joins mid-stream (no lastAcknowledgedSeq — fresh subscribe)
+      const tabB = await connectWebSocket(port, { sessionId: auth.sessionId });
+      openSockets.push(tabB);
+      tabB.send(JSON.stringify({ type: 'subscribe', conversationId: CONV_ID }));
+
+      // The first message tab B receives MUST be the subscribe ack, not earlyEvent.
+      const subAckB = await waitForMessage(tabB);
+      assert.equal(subAckB['type'], 'subscribed', 'First message to tab B is subscribe ack');
+
+      // Prove earlyEvent was not delivered to tab B: collect any messages that
+      // arrived on the socket before we emit the next event. A short drain window
+      // is sufficient because event delivery is synchronous within the gateway.
+      const spurious = await new Promise<Array<Record<string, unknown>>>((resolve) => {
+        const msgs: Array<Record<string, unknown>> = [];
+        const onMsg = (data: WebSocket.RawData) => {
+          msgs.push(rawDataToJson(data));
+        };
+        tabB.on('message', onMsg);
+        setTimeout(() => {
+          tabB.off('message', onMsg);
+          resolve(msgs);
+        }, 50);
+      });
+      assert.equal(spurious.length, 0, 'Tab B must not receive earlyEvent emitted before join');
+
+      // Emit second event — both tabs should receive it
+      const lateEvent: StreamEvent = {
+        seq: fakeDaemon.nextSeq(),
+        turnId: 'turn-mid',
+        kind: 'text-delta',
+        payload: { text: 'late joiner sees this' },
+        timestamp: new Date().toISOString(),
+      };
+      bridge.emitStreamEvent(CONV_ID, lateEvent);
+
+      const [lateMsgA, lateMsgB] = await Promise.all([waitForMessage(tabA), waitForMessage(tabB)]);
+
+      assert.deepEqual(lateMsgA['event'], lateEvent, 'Tab A sees late event');
+      assert.deepEqual(lateMsgB['event'], lateEvent, 'Tab B sees late event');
+    });
+  });
+
+  // ── T052: Gateway restart contract (FR-022 edge) ──────────────────────
+
+  describe('T052: Gateway restart contract', () => {
+    function replaceSharedState(next: {
+      server: Server;
+      bridge: FakeEventBridge;
+      fakeDaemon: ReturnType<typeof createFakeDaemonClient>;
+      gw: GatewayApp;
+      port: number;
+    }): void {
+      server = next.server;
+      bridge = next.bridge;
+      fakeDaemon = next.fakeDaemon;
+      gw = next.gw;
+      port = next.port;
+    }
+
+    async function createReplacementState(): Promise<{
+      server: Server;
+      bridge: FakeEventBridge;
+      fakeDaemon: ReturnType<typeof createFakeDaemonClient>;
+      gw: GatewayApp;
+      port: number;
+    }> {
+      const nextServer = createServer();
+      const nextBridge = new FakeEventBridge();
+      const nextFakeDaemon = createFakeDaemonClient(nextBridge, {
+        validConversationIds: new Set([CONV_ID, 'conv-e2e-2']),
+      });
+      const nextGw = createGatewayApp({
+        server: nextServer,
+        clock: new FakeClock(Date.now()),
+        allowedOrigin: ORIGIN,
+        healthChecker: async () => true,
+        heartbeatConfig: { intervalMs: 60_000 },
+        daemonClient: nextFakeDaemon.daemonClient,
+        wsDaemonClient: nextFakeDaemon.wsDaemonClient,
+        streamEventBridge: nextBridge,
+        sessionConfig: {
+          sessionLifetimeMs: 3600_000,
+          warningThresholdMs: 600_000,
+          maxExtensions: 3,
+          extensionDurationMs: 3600_000,
+          idleTimeoutMs: 1800_000,
+        },
+      });
+      const requestListener = getRequestListener(nextGw.app.fetch);
+      nextServer.on('request', (req, res) => {
+        void requestListener(req, res);
+      });
+      const nextPort = await listen(nextServer);
+      return {
+        server: nextServer,
+        bridge: nextBridge,
+        fakeDaemon: nextFakeDaemon,
+        gw: nextGw,
+        port: nextPort,
+      };
+    }
+
+    /** After each T052 test tears down the original server, we must restore
+     *  a fresh listening server so the outer afterEach can close it safely. */
+    async function teardownAndRestore(): Promise<void> {
+      gw.wsServer?.close();
+      gw.heartbeat.stop();
+      await closeServer(server);
+
+      // Restore shared state so afterEach doesn't throw ERR_SERVER_NOT_RUNNING
+      replaceSharedState(await createReplacementState());
+    }
+
+    it('all WebSocket connections are lost when the HTTP server closes', async () => {
+      // (a) authenticate and connect
+      const auth = await loginViaRest();
+      const ws = await connectWebSocket(port, { sessionId: auth.sessionId });
+      openSockets.push(ws);
+
+      // (b) subscribe + receive events to prove connection is alive
+      ws.send(JSON.stringify({ type: 'subscribe', conversationId: CONV_ID }));
+      const subMsg = await waitForMessage(ws);
+      assert.equal(subMsg['type'], 'subscribed');
+
+      const liveEvents = fakeDaemon.emitFullStream(CONV_ID, 'turn-pre-restart', ['alive']);
+      const liveMsgs = await waitForMessages(ws, liveEvents.length);
+      assert.equal(liveMsgs.length, liveEvents.length);
+
+      // (c) simulate gateway restart: close WS server + HTTP server
+      gw.wsServer?.close();
+      gw.heartbeat.stop();
+      await closeServer(server);
+
+      // (d) the client WS connection must have been terminated
+      await once(ws, 'close');
+      assert.ok(
+        ws.readyState === WebSocket.CLOSED || ws.readyState === WebSocket.CLOSING,
+        'WebSocket must be CLOSED or CLOSING after server shutdown',
+      );
+
+      // Restore shared state for afterEach
+      replaceSharedState(await createReplacementState());
+    });
+
+    it('no connection state survives process restart — registry is empty in new instance', async () => {
+      // (a) build first gateway instance and populate connections
+      const auth = await loginViaRest();
+      const ws = await connectWebSocket(port, { sessionId: auth.sessionId });
+      openSockets.push(ws);
+
+      ws.send(JSON.stringify({ type: 'subscribe', conversationId: CONV_ID }));
+      await waitForMessage(ws); // subscribed
+
+      // Verify the registry has our connection
+      assert.ok(gw.connectionRegistry.size > 0, 'Registry has connections before restart');
+      assert.ok(
+        gw.connectionRegistry.getByConversation(CONV_ID).size > 0,
+        'Conversation subscription exists before restart',
+      );
+
+      // (b) simulate full restart: tear down the old gateway
+      gw.wsServer?.close();
+      gw.heartbeat.stop();
+      await closeServer(server);
+      await once(ws, 'close');
+
+      // (c) create a brand new gateway instance (simulating process restart)
+      const newGw = createGatewayApp({
+        clock: new FakeClock(Date.now()),
+        allowedOrigin: ORIGIN,
+        healthChecker: async () => true,
+        heartbeatConfig: { intervalMs: 60_000 },
+      });
+
+      try {
+        // (d) verify NO state survived — fresh registry is empty
+        assert.equal(newGw.connectionRegistry.size, 0, 'New gateway has zero connections');
+        assert.equal(
+          newGw.connectionRegistry.getByConversation(CONV_ID).size,
+          0,
+          'No conversation subscriptions in new gateway',
+        );
+
+        // (e) verify the event buffer is also empty (no stale events)
+        assert.equal(
+          newGw.eventBuffer.getHighwaterSeq(CONV_ID),
+          0,
+          'New gateway event buffer has no events from previous instance',
+        );
+      } finally {
+        newGw.heartbeat.stop();
+      }
+
+      // Restore shared state for afterEach
+      replaceSharedState(await createReplacementState());
+    });
+
+    it('client must reconnect after restart — old session cookie is not recognized by new instance', async () => {
+      // (a) authenticate and connect to original gateway
+      const auth = await loginViaRest();
+      const ws = await connectWebSocket(port, { sessionId: auth.sessionId });
+      openSockets.push(ws);
+
+      ws.send(JSON.stringify({ type: 'subscribe', conversationId: CONV_ID }));
+      await waitForMessage(ws); // subscribed
+
+      // (b) tear down original gateway
+      await teardownAndRestore();
+      await once(ws, 'close');
+
+      // (c) attempt to use old session cookie with new gateway — WS should fail auth.
+      //     The new gateway has a fresh SessionStore with no sessions.
+      //     Stale sessions are rejected *before* the WebSocket upgrade completes,
+      //     so the server writes an HTTP 401 response on the raw socket.  The ws
+      //     library surfaces this via the 'unexpected-response' event when a
+      //     listener is attached, giving us the actual HTTP status code.
+      const freshWs = new WebSocket(`ws://127.0.0.1:${port}/ws`, {
+        headers: {
+          Origin: ORIGIN,
+          Cookie: `__session=${auth.sessionId}`,
+        },
+      });
+
+      const outcome = await new Promise<{
+        event: 'rejected' | 'open';
+        httpStatus?: number;
+      }>((resolve) => {
+        freshWs.on('open', () => {
+          // Unexpected success — the server should reject the stale session.
+          freshWs.close();
+          resolve({ event: 'open' });
+        });
+        freshWs.on('unexpected-response', (_req: unknown, res: { statusCode: number }) => {
+          resolve({ event: 'rejected', httpStatus: res.statusCode });
+          freshWs.close();
+        });
+        freshWs.on('error', () => {
+          // Swallow — 'unexpected-response' or 'close' will follow.
+        });
+      });
+
+      assert.equal(
+        outcome.event,
+        'rejected',
+        'Stale session must be rejected before WebSocket upgrade',
+      );
+      assert.equal(
+        outcome.httpStatus,
+        401,
+        `Expected HTTP 401 for stale session, got ${String(outcome.httpStatus)}`,
+      );
+    });
+
+    it('event buffer does not carry over across gateway restart', async () => {
+      // (a) populate buffer in original gateway
+      const auth = await loginViaRest();
+      const ws = await connectWebSocket(port, { sessionId: auth.sessionId });
+      openSockets.push(ws);
+
+      ws.send(JSON.stringify({ type: 'subscribe', conversationId: CONV_ID }));
+      await waitForMessage(ws); // subscribed
+
+      const events = fakeDaemon.emitFullStream(CONV_ID, 'turn-buf-restart', ['data']);
+      await waitForMessages(ws, events.length);
+
+      // Buffer should have events
+      assert.ok(gw.eventBuffer.getHighwaterSeq(CONV_ID) > 0, 'Original gateway buffer has events');
+
+      // (b) tear down and restore for afterEach
+      await teardownAndRestore();
+      await once(ws, 'close');
+
+      // (c) the restored gateway is effectively a fresh instance — verify buffer is empty
+      assert.equal(
+        gw.eventBuffer.getHighwaterSeq(CONV_ID),
+        0,
+        'New gateway has empty event buffer — no state carried over',
+      );
+      assert.deepEqual(
+        gw.eventBuffer.getEventsSince(CONV_ID, 0),
+        [],
+        'No events in new buffer for any conversation',
+      );
+    });
+  });
 });

@@ -258,47 +258,47 @@ _Verifies control operations via REST produce correct WebSocket events. Delivers
 
 _Systematic verification of every error category and spec edge case. Delivers US6 (P2)._
 
-- [ ] T043 [P2] [US6] **TDD: Daemon unavailable — REST path** — stub daemon as unreachable, send conversation requests to each REST route category, assert `GatewayErrorResponse` with `category: 'daemon'`, HTTP 503, `code: 'DAEMON_UNREACHABLE'`. Tests in `apps/web-gateway/src/__tests__/conversation-routes.test.ts`.
+- [x] T043 [P2] [US6] **TDD: Daemon unavailable — REST path** — stub daemon as unreachable, send conversation requests to each REST route category, assert `GatewayErrorResponse` with `category: 'daemon'`, HTTP 503, `code: 'DAEMON_UNREACHABLE'`. Tests in `apps/web-gateway/src/__tests__/conversation-routes.test.ts`.
   - **Depends**: T015
   - **Validates**: FR-021, SC-007
 
-- [ ] T044 [P2] [US6] **TDD: Daemon unavailable — WebSocket path** — establish WebSocket connection, trigger daemon heartbeat failure (mock `DaemonHeartbeat`), assert `daemon-unavailable` event arrives through WebSocket via the `DaemonHeartbeat` → `SessionStateBroadcaster` → WS bridge wired in T022. Connection stays open for grace period. Trigger heartbeat recovery, assert `daemon-restored` event arrives through the same bridge. **Precondition**: T022 must have wired the full chain from `DaemonHeartbeat.tick()` through session state transitions to WS message delivery; this task validates that chain end-to-end, not just the WS message shape. Tests in `apps/web-gateway/src/__tests__/ws-connection.test.ts`.
+- [x] T044 [P2] [US6] **TDD: Daemon unavailable — WebSocket path** — establish WebSocket connection, trigger daemon heartbeat failure (mock `DaemonHeartbeat`), assert `daemon-unavailable` event arrives through WebSocket via the `DaemonHeartbeat` → `SessionStateBroadcaster` → WS bridge wired in T022. Connection stays open for grace period. Trigger heartbeat recovery, assert `daemon-restored` event arrives through the same bridge. **Precondition**: T022 must have wired the full chain from `DaemonHeartbeat.tick()` through session state transitions to WS message delivery; this task validates that chain end-to-end, not just the WS message shape. Tests in `apps/web-gateway/src/__tests__/ws-connection.test.ts`.
   - **Depends**: T022, T023
   - **Validates**: FR-021, SC-007
 
-- [ ] T045 [P2] [US6] **TDD: Validation errors on every REST route** — send malformed request bodies to each conversation REST route, assert `GatewayErrorResponse` with `category: 'validation'`, HTTP 400, `code: 'VALIDATION_FAILED'`. Tests in `apps/web-gateway/src/__tests__/request-validator.test.ts`.
+- [x] T045 [P2] [US6] **TDD: Validation errors on every REST route** — send malformed request bodies to each conversation REST route, assert `GatewayErrorResponse` with `category: 'validation'`, HTTP 400, `code: 'VALIDATION_FAILED'`. Tests in `apps/web-gateway/src/__tests__/request-validator.test.ts`.
   - **Depends**: T015
   - **Validates**: FR-006, SC-008
 
-- [ ] T046 [P2] [US6] **TDD: Rate limit errors** — exceed mutating rate limit on conversation REST routes, assert `GatewayErrorResponse` with `category: 'rate-limit'`, HTTP 429, `retryAfterMs` present. Tests in `apps/web-gateway/src/__tests__/conversation-routes.test.ts`.
+- [x] T046 [P2] [US6] **TDD: Rate limit errors** — exceed mutating rate limit on conversation REST routes, assert `GatewayErrorResponse` with `category: 'rate-limit'`, HTTP 429, `retryAfterMs` present. Tests in `apps/web-gateway/src/__tests__/conversation-routes.test.ts`.
   - **Depends**: T015
   - **Validates**: FR-017, FR-027
 
-- [ ] T047 [P2] [US6] **TDD: Auth/session errors on REST** — send requests without session cookie, with expired session, with invalidated session to conversation REST routes. Assert `GatewayErrorResponse` with `category: 'auth'` or `category: 'session'` as appropriate. Tests in `apps/web-gateway/src/__tests__/conversation-routes.test.ts`.
+- [x] T047 [P2] [US6] **TDD: Auth/session errors on REST** — send requests without session cookie, with expired session, with invalidated session to conversation REST routes. Assert `GatewayErrorResponse` with `category: 'auth'` or `category: 'session'` as appropriate. Tests in `apps/web-gateway/src/__tests__/conversation-routes.test.ts`.
   - **Depends**: T015
   - **Validates**: FR-007, SC-004
 
-- [ ] T048 [P2] [US6] **TDD: Malformed WebSocket messages** — send invalid JSON, unknown message types, messages with missing required fields, and oversized messages through WebSocket. Assert structured `type: 'error'` response with `category: 'validation'` for each, WITHOUT terminating the connection (SC-010). Tests in `apps/web-gateway/src/__tests__/ws-message-handler.test.ts`.
+- [x] T048 [P2] [US6] **TDD: Malformed WebSocket messages** — send invalid JSON, unknown message types, messages with missing required fields, and oversized messages through WebSocket. Assert structured `type: 'error'` response with `category: 'validation'` for each, WITHOUT terminating the connection (SC-010). Tests in `apps/web-gateway/src/__tests__/ws-message-handler.test.ts`.
   - **Depends**: T026
   - **Validates**: FR-013, SC-010
 
-- [ ] T049 [P2] [US2] **TDD: Multi-tab edge case** — two tabs connected to same conversation via same session, one tab submits instruction via REST, both tabs receive all stream events identically. Verify no event duplication or omission. Tests in `apps/web-gateway/src/__tests__/transport-integration.test.ts`.
+- [x] T049 [P2] [US2] **TDD: Multi-tab edge case** — two tabs connected to same conversation via same session, one tab submits instruction via REST, both tabs receive all stream events identically. Verify no event duplication or omission. Tests in `apps/web-gateway/src/__tests__/transport-integration.test.ts`.
   - **Depends**: T030
   - **Validates**: FR-010 (edge case)
 
-- [ ] T050 [P2] [US2] **TDD: Idle WebSocket connection** — connection established and authenticated but no `subscribe` messages sent. Assert connection stays alive and valid, receives session lifecycle notifications (`session-expiring-soon`, `daemon-unavailable`) but no stream events. Tests in `apps/web-gateway/src/__tests__/ws-connection.test.ts`.
+- [x] T050 [P2] [US2] **TDD: Idle WebSocket connection** — connection established and authenticated but no `subscribe` messages sent. Assert connection stays alive and valid, receives session lifecycle notifications (`session-expiring-soon`, `daemon-unavailable`) but no stream events. Tests in `apps/web-gateway/src/__tests__/ws-connection.test.ts`.
   - **Depends**: T022
   - **Validates**: FR-014 (edge case)
 
-- [ ] T051 [P2] [US6] **TDD: Conversation not found on subscribe** — send `subscribe` with non-existent `conversationId` through WebSocket. Assert `CONVERSATION_NOT_FOUND` error via `type: 'error'` message without leaking daemon internals. Connection remains open. Tests in `apps/web-gateway/src/__tests__/ws-message-handler.test.ts`.
+- [x] T051 [P2] [US6] **TDD: Conversation not found on subscribe** — send `subscribe` with non-existent `conversationId` through WebSocket. Assert `CONVERSATION_NOT_FOUND` error via `type: 'error'` message without leaking daemon internals. Connection remains open. Tests in `apps/web-gateway/src/__tests__/ws-message-handler.test.ts`.
   - **Depends**: T026
   - **Validates**: FR-028 (edge case)
 
-- [ ] T052 [P2] [US4] **TDD: Gateway restart contract** — document and test that all WebSocket connections are lost on gateway restart. Browser treats this as disconnection and uses reconnect/resume flow. Test asserts no state survives process restart. Tests in `apps/web-gateway/src/__tests__/transport-integration.test.ts`.
+- [x] T052 [P2] [US4] **TDD: Gateway restart contract** — document and test that all WebSocket connections are lost on gateway restart. Browser treats this as disconnection and uses reconnect/resume flow. Test asserts no state survives process restart. Tests in `apps/web-gateway/src/__tests__/transport-integration.test.ts`.
   - **Depends**: T033
   - **Validates**: FR-022 (edge case)
 
-- [ ] T053 [P2] [US6] **Quality gate: Phase 7** — `npm run quality` and `npm test`. All error boundaries and edge cases verified.
+- [x] T053 [P2] [US6] **Quality gate: Phase 7** — `npm run quality` and `npm test`. All error boundaries and edge cases verified.
   - **Depends**: T052
   - **Validates**: SC-007, SC-008, SC-010, SC-011
 
@@ -449,19 +449,19 @@ T025 → T026 → T027 ──────────────────→
 
 ## Next Steps
 
-1. **Phase 6 is complete on `feat/web-gateway-transport-phase6`** — `T038`
-   through `T042` now validate approval, cancel, retry, and artifact notice
-   round-trips on top of the completed Phase 4/5 streaming and reconnect path.
-2. **Start Phase 7 with file-isolated tracks** — the next ready tasks are the
-   error/edge-case batches already grouped above:
-   `T043/T046/T047` (`conversation-routes.test.ts`), `T045`
-   (`request-validator.test.ts`), `T044/T050` (`ws-connection.test.ts`),
-   `T048/T051` (`ws-message-handler.test.ts`), and `T049/T052`
-   (`transport-integration.test.ts`).
-3. **Prefer real transport/runtime wiring in tests** — when Phase 7+ tests can
-   use composed gateway/daemon service code, avoid mocking that behavior and
-   reserve fakes for true external boundaries only.
-4. **Keep the validated transport path stable** — follow-on work should extend
-   the now-green streaming, replay, and control-operation paths rather than
-   reworking transport bootstrap, replay-retention guardrails, or backlog
-   protections unless a concrete bug requires it.
+1. **Phase 7 is complete on `feat/web-gateway-transport-phase7`** — `T043`
+   through `T053` now verify REST and WebSocket error boundaries, malformed
+   message handling, idle/multi-tab edge cases, and restart behavior on top of
+   the completed transport foundation from Phases 4–6.
+2. **Start Phase 8 from the integrated transport harness** — the next ready
+   tasks are the end-to-end and success-criteria sweeps already grouped above:
+   `T054/T055/T056/T057` in `transport-integration.test.ts`, followed by the
+   final quality gate `T058` and the transport documentation tasks `T059–T061`.
+3. **Keep using real composed gateway/runtime paths in tests** — Phase 7
+   confirmed that the most valuable coverage comes from driving actual auth,
+   rate-limit, session, and WS wiring where feasible and reserving fakes for
+   true external boundaries only.
+4. **Treat transport state as ephemeral across process boundaries** — restart
+   and reconnect tests now codify that connection registries, event buffers, and
+   stale session state must not survive gateway restarts; Phase 8 should extend
+   this verified behavior rather than reintroducing implicit persistence.

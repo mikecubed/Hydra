@@ -14,7 +14,7 @@ import type { EventBuffer } from './event-buffer.ts';
 import { EventForwarder, type StreamEventBridgeLike } from './event-forwarder.ts';
 import { SessionWsBridge } from './session-ws-bridge.ts';
 import { WsConnection } from './ws-connection.ts';
-import { WsMessageHandler } from './ws-message-handler.ts';
+import { MAX_INBOUND_MESSAGE_BYTES, WsMessageHandler } from './ws-message-handler.ts';
 import { WebSocketServer, type RawData, type WebSocket } from 'ws';
 
 interface GatewayWsServerOptions {
@@ -33,6 +33,14 @@ interface GatewayWsServerOptions {
 
 const COOKIE_SEPARATOR = ';';
 const MAX_PENDING_MESSAGES_PER_CONNECTION = 64;
+
+/**
+ * Hard ceiling enforced by the `ws` library to protect against denial-of-service.
+ * App-level policy (MAX_INBOUND_MESSAGE_BYTES) is checked in #handleSocketMessage
+ * before UTF-8 decoding so that oversized messages receive a structured error
+ * without terminating the connection.
+ */
+const WS_HARD_MAX_PAYLOAD = 1_048_576;
 
 function parseSessionCookie(cookieHeader?: string): string | null {
   if (cookieHeader == null || cookieHeader === '') {
@@ -79,6 +87,21 @@ function rejectUpgrade(socket: Socket, error: GatewayError): void {
       body,
     ].join('\r\n'),
   );
+}
+
+function rawDataByteLength(data: RawData): number {
+  if (typeof data === 'string') {
+    return Buffer.byteLength(data, 'utf8');
+  }
+  if (Array.isArray(data)) {
+    let total = 0;
+    for (const buf of data) total += buf.length;
+    return total;
+  }
+  if (data instanceof ArrayBuffer) {
+    return data.byteLength;
+  }
+  return data.length;
 }
 
 function rawDataToString(data: RawData): string {
@@ -129,7 +152,7 @@ export class GatewayWsServer {
     });
     this.#wss = new WebSocketServer({
       noServer: true,
-      maxPayload: 1024 * 1024, // 1MB limit for inbound messages to prevent DoS
+      maxPayload: WS_HARD_MAX_PAYLOAD,
     });
     this.#messageHandler = new WsMessageHandler({
       registry: options.connectionRegistry,
@@ -161,6 +184,19 @@ export class GatewayWsServer {
   }
 
   #handleSocketMessage(connection: WsConnection, data: RawData): void {
+    if (rawDataByteLength(data) > MAX_INBOUND_MESSAGE_BYTES) {
+      if (!connection.isClosed) {
+        connection.send({
+          type: 'error',
+          ok: false as const,
+          code: 'WS_INVALID_MESSAGE',
+          category: 'validation',
+          message: 'Message exceeds maximum allowed size',
+        });
+      }
+      return;
+    }
+
     const queuedDepth = this.#messageQueueDepths.get(connection.connectionId) ?? 0;
     if (queuedDepth >= MAX_PENDING_MESSAGES_PER_CONNECTION) {
       if (!connection.isClosed) {

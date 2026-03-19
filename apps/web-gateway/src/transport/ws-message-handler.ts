@@ -15,6 +15,7 @@
  *   - On invalid message: responds with type:'error' without closing.
  */
 import type { StreamEvent, LoadTurnHistoryResponse } from '@hydra/web-contracts';
+import { Buffer } from 'node:buffer';
 import { DEFAULT_BUFFER_HIGH_WATER_MARK, sendWithBackpressureProtection } from './backpressure.ts';
 import type { ManagedConnection } from './connection-registry.ts';
 import type { ConnectionRegistry } from './connection-registry.ts';
@@ -36,6 +37,14 @@ export interface MessageHandlerDeps {
 
 const DAEMON_REPLAY_CONCURRENCY = 8;
 
+/**
+ * Maximum inbound client message size in bytes. Client→server messages
+ * (subscribe, unsubscribe, ack) are small JSON objects; anything beyond
+ * this threshold is rejected before parsing to prevent downstream issues
+ * such as oversized error frames or excessive memory use.
+ */
+export const MAX_INBOUND_MESSAGE_BYTES = 8192;
+
 function lastSeq(events: ReadonlyArray<StreamEvent>): number | undefined {
   return events.at(-1)?.seq;
 }
@@ -53,6 +62,11 @@ export class WsMessageHandler {
   }
 
   async handleMessage(connection: ManagedConnection, rawMessage: string): Promise<void> {
+    if (Buffer.byteLength(rawMessage, 'utf8') > MAX_INBOUND_MESSAGE_BYTES) {
+      this.#sendError(connection, 'WS_INVALID_MESSAGE', 'Message exceeds maximum allowed size');
+      return;
+    }
+
     const parsed = parseClientMessage(rawMessage);
     if (!parsed.ok) {
       this.#sendError(connection, 'WS_INVALID_MESSAGE', parsed.detail);

@@ -9,6 +9,7 @@ import { createGatewayApp, type GatewayApp } from '../../index.ts';
 import { FakeClock } from '../../shared/clock.ts';
 import { GatewayError } from '../../shared/errors.ts';
 import type { StreamEventPayload } from '../event-forwarder.ts';
+import { MAX_INBOUND_MESSAGE_BYTES } from '../ws-message-handler.ts';
 
 const ORIGIN = 'http://127.0.0.1:4174';
 
@@ -337,6 +338,34 @@ describe('GatewayWsServer', () => {
     assert.equal(message['conversationId'], 'conv-1');
     assert.equal(message['currentSeq'], 0);
     assert.equal(gw.connectionRegistry.getByConversation('conv-1').size, 1);
+  });
+
+  it('configures the websocket server hard max payload above the inbound message limit', () => {
+    const maxPayload = gw.wsServer?.webSocketServer.options.maxPayload;
+    assert.ok(
+      typeof maxPayload === 'number' && maxPayload > MAX_INBOUND_MESSAGE_BYTES,
+      'maxPayload should be a hard ceiling above the app-level inbound message limit',
+    );
+  });
+
+  it('returns a structured error without closing for frames larger than the inbound message limit', async () => {
+    const session = await gw.sessionService.create('op-1', '127.0.0.1');
+    const ws = await connectWebSocket(port, { sessionId: session.id });
+    openSockets.push(ws);
+    ws.on('error', () => {});
+
+    ws.send('x'.repeat(MAX_INBOUND_MESSAGE_BYTES + 1));
+
+    const msg = await waitForMessage(ws);
+    assert.equal(msg['type'], 'error');
+    assert.equal(msg['ok'], false);
+    assert.equal(msg['code'], 'WS_INVALID_MESSAGE');
+    assert.equal(msg['category'], 'validation');
+    assert.ok(
+      typeof msg['message'] === 'string' && msg['message'].includes('size'),
+      'error message should mention size',
+    );
+    assert.equal(ws.readyState, WebSocket.OPEN, 'connection should remain open');
   });
 
   it('serializes subscribe then unsubscribe so stale subscribe completion does not leave the connection subscribed', async () => {
