@@ -11,14 +11,18 @@ for workspace boundary rules, ownership, and governance.
 
 ## Configuration Reference
 
-All gateway behaviour is controlled through `GatewayConfig` (defined in `src/config.ts`).
-Transport-layer modules accept additional constructor-level options described below.
+The gateway's runtime behaviour is configured through **`createGatewayApp(deps)`** (`src/index.ts`).
+Each subsystem accepts its own narrowly-typed config slice via `GatewayAppDeps`, described below.
 
-### Gateway Config (`GatewayConfig`)
+> **`GatewayConfig` / `loadGatewayConfig()`** (`src/config.ts`) is a _centralized validation
+> schema_ that aggregates every knob into one flat object with defaults and range checks.
+> It is **not consumed by `createGatewayApp()`** — it exists as a convenience for standalone
+> validation and tests. Production callers wire each subsystem config independently through
+> `GatewayAppDeps`.
 
-Pass overrides to `loadGatewayConfig(overrides)`. Any field not supplied uses its default.
+### Session & Lifecycle (`sessionConfig`)
 
-#### Session & Lifecycle
+Passed as `deps.sessionConfig` → `SessionService`. Partial overrides merge with defaults.
 
 | Parameter | Type | Default | Description |
 |---|---|---|---|
@@ -29,15 +33,45 @@ Pass overrides to `loadGatewayConfig(overrides)`. Any field not supplied uses it
 | `idleTimeoutMs` | `number` | `1 800 000` (30 min) | Inactivity period after which a WebSocket connection is closed with `Session idle timeout`. Resets on any inbound message, ping, or pong. |
 | `maxConcurrentSessions` | `number` | `5` | Maximum active sessions per operator. |
 
-#### Daemon Heartbeat
+### Daemon Connectivity
+
+The gateway talks to the Hydra daemon over **two independent HTTP paths** with separate URL knobs:
+
+| Subsystem | Deps field | URL parameter | Default | Used for |
+|---|---|---|---|---|
+| **Heartbeat** | `deps.heartbeatConfig` | `daemonUrl` | `http://127.0.0.1:4173` | Periodic `/status` health-check pings (`DaemonHeartbeat`). On failure, sessions transition to `daemon-unreachable` and clients receive a `daemon-unavailable` frame. Recovery triggers `daemon-restored`. |
+| **Conversation** | `deps.daemonClientOptions` | `baseUrl` | `http://localhost:4173` | All conversation HTTP calls — CRUD, turn history, stream replay (`DaemonClient`). |
+
+Both default to the daemon's standard port but are configured separately, so split-brain
+deployments (e.g. heartbeat pointed at a load-balancer VIP, conversation pointed at a
+sidecar) are possible.
+
+**Heartbeat additional parameters:**
 
 | Parameter | Type | Default | Description |
 |---|---|---|---|
-| `heartbeatIntervalMs` | `number` | `10 000` (10 s) | Interval between daemon `/status` health-check pings. On failure, all active sessions transition to `daemon-unreachable` and connected clients receive a `daemon-unavailable` frame. Recovery triggers `daemon-restored`. |
+| `heartbeatConfig.intervalMs` | `number` | `10 000` (10 s) | Interval between `/status` pings. |
 
 The heartbeat's own HTTP probe uses a hard-coded **5 000 ms** abort timeout (`DaemonHeartbeat` → `defaultHealthChecker`).
 
-#### Rate Limiting
+**Conversation additional parameters:**
+
+| Parameter | Type | Default | Description |
+|---|---|---|---|
+| `daemonClientOptions.timeoutMs` | `number` | `5 000` (5 s) | Per-request `AbortController` timeout for all daemon HTTP calls. Timeout produces a `DAEMON_UNAVAILABLE` error. |
+
+### Origin & Network
+
+| Deps field | Type | Default | Description |
+|---|---|---|---|
+| `allowedOrigin` | `string` | `'http://127.0.0.1:4174'` | Expected `Origin` header for WebSocket upgrades and CORS checks (enforced by `createOriginGuard`). |
+| `sourceKeyConfig.trustedProxies` | `string[]` | `[]` | IP allow-list of reverse proxies whose `X-Forwarded-For` headers are trusted for source-key resolution. Empty = use transport-level remote address. |
+| `tlsConfig.bindAddress` | `string` | _(none)_ | Address the HTTP server binds to. Non-loopback addresses require `certPath` + `keyPath`. |
+| `tlsConfig.certPath` / `keyPath` | `string?` | _(none)_ | TLS certificate and key paths. When both are present, auth cookies gain `Secure` flag and HSTS headers are emitted. |
+
+### Rate Limiting
+
+Configured via `authRoutesConfig` (auth rate limiting) and default constructor values (mutating rate limiting).
 
 | Parameter | Type | Default | Description |
 |---|---|---|---|
@@ -47,23 +81,12 @@ The heartbeat's own HTTP probe uses a hard-coded **5 000 ms** abort timeout (`Da
 | `mutatingRateLimitThreshold` | `number` | `30` | Maximum mutating requests (including WebSocket upgrades) per source key per window. |
 | `mutatingRateLimitWindowMs` | `number` | `60 000` (1 min) | Sliding window for `mutatingRateLimitThreshold`. |
 
-#### Audit & Network
-
-| Parameter | Type | Default | Description |
-|---|---|---|---|
-| `auditRetentionDays` | `number` | `90` | Days to retain audit-log entries. |
-| `clockDriftToleranceMs` | `number` | `30 000` (30 s) | Allowed clock skew between gateway and daemon for token / session validation. |
-| `bindAddress` | `string` | `'127.0.0.1'` | Address the HTTP server binds to. |
-| `gatewayOrigin` | `string` | `'http://127.0.0.1:4174'` | Expected `Origin` header for WebSocket upgrades and CORS checks. |
-| `trustedProxies` | `string[]` | `[]` | IP allow-list of reverse proxies whose `X-Forwarded-For` headers are trusted for source-key resolution. Empty = use transport-level remote address. |
-| `certPath` / `keyPath` | `string?` | _(none)_ | Optional TLS certificate and key paths for HTTPS listeners. |
-
 ---
 
 ### Transport-Layer Parameters
 
-These constants and constructor options live in the `src/transport/` modules. They are not part of
-`GatewayConfig` but are injectable at construction time or importable as named constants.
+These constants and constructor options live in the `src/transport/` modules. They are injectable
+at construction time via `GatewayAppDeps` or importable as named constants.
 
 #### Event Buffer (`EventBuffer`)
 
@@ -74,10 +97,7 @@ These constants and constructor options live in the `src/transport/` modules. Th
 
 #### Daemon Client (`DaemonClient`)
 
-| Parameter | Injected via | Default | Description |
-|---|---|---|---|
-| `timeoutMs` | `DaemonClientOptions.timeoutMs` | `5 000` (5 s) | Per-request `AbortController` timeout for all HTTP calls to the daemon (conversation CRUD, turn history, stream replay). Timeout produces a translated `DAEMON_UNAVAILABLE` error to the caller. |
-| `baseUrl` | `DaemonClientOptions.baseUrl` | _(required)_ | Daemon base URL (e.g. `http://localhost:4173`). |
+See [Daemon Connectivity](#daemon-connectivity) above for `baseUrl` and `timeoutMs`.
 
 #### WebSocket Backpressure
 
