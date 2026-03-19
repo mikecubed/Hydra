@@ -8,8 +8,16 @@ import { SessionStore } from '../../session/session-store.ts';
 import { SessionService } from '../../session/session-service.ts';
 import { DaemonHeartbeat, type HealthChecker } from '../../session/daemon-heartbeat.ts';
 import { FakeClock } from '../../shared/clock.ts';
+import {
+  EventForwarder,
+  type StreamEventBridgeLike,
+  type StreamEventPayload,
+} from '../event-forwarder.ts';
+import { EventBuffer } from '../event-buffer.ts';
+import { WsMessageHandler } from '../ws-message-handler.ts';
 import type { StoredSession } from '../../session/session-store.ts';
 import type { ServerMessage } from '../ws-protocol.ts';
+import type { StreamEvent } from '@hydra/web-contracts';
 
 /** Minimal fake WebSocket for testing (mirrors ws.WebSocket surface we use). */
 function fakeSocket() {
@@ -78,6 +86,80 @@ function fakeSocket() {
 /** Parse sent raw JSON strings from a fake socket into ServerMessage objects. */
 function parseSent(ws: ReturnType<typeof fakeSocket>): ServerMessage[] {
   return ws.sent.map((raw) => JSON.parse(raw) as ServerMessage);
+}
+
+/** Minimal StreamEventBridge fake for driving EventForwarder in tests. */
+class FakeEventBridge implements StreamEventBridgeLike {
+  readonly #listeners = new Set<(payload: StreamEventPayload) => void>();
+
+  on(_eventName: 'stream-event', listener: (payload: StreamEventPayload) => void): this {
+    this.#listeners.add(listener);
+    return this;
+  }
+
+  removeListener(
+    _eventName: 'stream-event',
+    listener: (payload: StreamEventPayload) => void,
+  ): this {
+    this.#listeners.delete(listener);
+    return this;
+  }
+
+  emitStreamEvent(conversationId: string, event: StreamEvent): void {
+    for (const listener of this.#listeners) {
+      listener({ conversationId, event });
+    }
+  }
+}
+
+/** Create a minimal StreamEvent for testing. */
+function makeEvent(seq: number, turnId = 'turn-1'): StreamEvent {
+  return {
+    seq,
+    turnId,
+    kind: 'text-delta',
+    payload: { text: `chunk-${seq}` },
+    timestamp: new Date().toISOString(),
+  };
+}
+
+/** Fake daemon client for WsMessageHandler subscribe tests. */
+function fakeDaemonClient(validConversationIds: Set<string>) {
+  return {
+    async openConversation(conversationId: string) {
+      if (validConversationIds.has(conversationId)) {
+        return {
+          data: {
+            conversation: {
+              id: conversationId,
+              status: 'active' as const,
+              createdAt: new Date().toISOString(),
+              updatedAt: new Date().toISOString(),
+              turnCount: 0,
+              pendingInstructionCount: 0,
+            },
+            recentTurns: [],
+            totalTurnCount: 0,
+            pendingApprovals: [],
+          },
+        };
+      }
+      return {
+        error: {
+          ok: false as const,
+          code: 'CONVERSATION_NOT_FOUND',
+          category: 'validation' as const,
+          message: 'Conversation not found',
+        },
+      };
+    },
+    async loadTurnHistory() {
+      return { data: { turns: [], totalCount: 0, hasMore: false } };
+    },
+    async getStreamReplay() {
+      return { data: { events: [] } };
+    },
+  };
 }
 
 describe('WsConnection', () => {
@@ -548,7 +630,13 @@ describe('T050: idle WebSocket connection — no subscriptions', () => {
     clock = new FakeClock(1_000_000);
     store = new SessionStore();
     broadcaster = new SessionStateBroadcaster();
-    sessionService = new SessionService(store, clock, {}, undefined, broadcaster);
+    sessionService = new SessionService(
+      store,
+      clock,
+      { sessionLifetimeMs: 60_000, warningThresholdMs: 10_000 },
+      undefined,
+      broadcaster,
+    );
     registry = new ConnectionRegistry();
     bridge = new SessionWsBridge({ broadcaster, registry, clock });
 
@@ -575,22 +663,22 @@ describe('T050: idle WebSocket connection — no subscriptions', () => {
     }
   });
 
-  it('idle connection receives session-expiring-soon notification', () => {
+  it('idle connection receives session-expiring-soon via real SessionService path', async () => {
     const { ws, conn, cleanup } = connectIdle();
 
     try {
-      const nearExpiry = new Date(clock.now() + 5_000).toISOString();
-      broadcaster.broadcast(session.id, {
-        type: 'state-change',
-        previousState: 'active',
-        newState: 'expiring-soon',
-        expiresAt: nearExpiry,
-      });
+      // Advance clock into the warning window (50s into a 60s session, 10s warning threshold).
+      // Remaining = 10_000 - 1 = 9_999ms, which is ≤ warningThresholdMs (10_000).
+      clock.advance(50_001);
+
+      // Drive expiring-soon through the real path:
+      //   sessionService.validate() → transitionSession('warn-expiry') → broadcaster → bridge → WS
+      await sessionService.validate(session.id);
 
       const messages = parseSent(ws);
       assert.ok(
         messages.some((m) => m.type === 'session-expiring-soon'),
-        'Idle connection should receive session-expiring-soon',
+        'Idle connection should receive session-expiring-soon via SessionService.validate()',
       );
       assert.equal(conn.state, 'open', 'Connection should stay open after expiring-soon');
     } finally {
@@ -648,27 +736,31 @@ describe('T050: idle WebSocket connection — no subscriptions', () => {
     }
   });
 
-  it('idle connection does not receive stream-event messages', async () => {
+  it('idle connection does not receive stream-event messages (driven through EventForwarder)', () => {
     const { ws, conn, cleanup } = connectIdle();
 
+    const eventBridge = new FakeEventBridge();
+    const buffer = new EventBuffer();
+    const forwarder = new EventForwarder(eventBridge, buffer, registry);
+    forwarder.start();
+
     try {
-      // Directly send a stream-event to the connection as if the forwarder would —
-      // but verify the connection has no subscriptions, so the forwarder would never
-      // target it. The registry query for a conversation must not include this connection.
       assert.equal(conn.subscribedConversations.size, 0, 'No subscriptions');
       assert.equal(conn.pendingConversations.size, 0, 'No pending conversations');
-      assert.equal(
-        registry.getByConversation('any-conv').size,
-        0,
-        'Registry has no conversation subscriptions for idle connection',
-      );
+
+      // Emit a real stream event through the EventForwarder pipeline.
+      // The forwarder checks registry.hasInterest() and registry.getByConversation(),
+      // so an unsubscribed connection must not receive it.
+      eventBridge.emitStreamEvent('any-conv', makeEvent(1));
+      eventBridge.emitStreamEvent('another-conv', makeEvent(2));
 
       const messages = parseSent(ws);
       assert.ok(
         !messages.some((m) => m.type === 'stream-event'),
-        'Idle connection must not receive stream events',
+        'Idle connection must not receive stream events routed through EventForwarder',
       );
     } finally {
+      forwarder.dispose();
       cleanup();
     }
   });
@@ -683,6 +775,12 @@ describe('T050: idle WebSocket connection — no subscriptions', () => {
       daemonUrl: 'http://localhost:0',
     });
 
+    // EventForwarder to verify stream-event exclusion under real forwarding
+    const eventBridge = new FakeEventBridge();
+    const buffer = new EventBuffer();
+    const forwarder = new EventForwarder(eventBridge, buffer, registry);
+    forwarder.start();
+
     try {
       // Trigger daemon down then up → lifecycle messages arrive
       healthy = false;
@@ -690,14 +788,12 @@ describe('T050: idle WebSocket connection — no subscriptions', () => {
       healthy = true;
       await heartbeat.tick();
 
-      // Also trigger expiring-soon
-      const nearExpiry = new Date(clock.now() + 5_000).toISOString();
-      broadcaster.broadcast(session.id, {
-        type: 'state-change',
-        previousState: 'active',
-        newState: 'expiring-soon',
-        expiresAt: nearExpiry,
-      });
+      // Trigger expiring-soon through the real SessionService path
+      clock.advance(50_001);
+      await sessionService.validate(session.id);
+
+      // Emit a stream event through the forwarder — idle connection must not receive it
+      eventBridge.emitStreamEvent('some-conv', makeEvent(1));
 
       const messages = parseSent(ws);
 
@@ -715,21 +811,35 @@ describe('T050: idle WebSocket connection — no subscriptions', () => {
       assert.equal(conn.state, 'open', 'Connection stays open throughout');
       assert.equal(conn.subscribedConversations.size, 0, 'Still no subscriptions');
     } finally {
+      forwarder.dispose();
       cleanup();
       heartbeat.stop();
     }
   });
 
-  it('idle connection is still functional and can later accept subscriptions', () => {
+  it('idle connection can later subscribe via real WsMessageHandler path', async () => {
     const { conn, cleanup } = connectIdle();
+
+    const buffer = new EventBuffer();
+    const daemonClient = fakeDaemonClient(new Set(['conv-later']));
+    const handler = new WsMessageHandler({ registry, buffer, daemonClient });
 
     try {
       assert.equal(conn.state, 'open');
       assert.equal(conn.subscribedConversations.size, 0);
 
-      // Simulate what would happen when a subscribe succeeds (registry-level)
-      registry.addSubscription(conn.connectionId, 'conv-later');
-      assert.equal(conn.subscribedConversations.size, 1, 'Can add subscriptions to previously idle connection');
+      // Drive subscribe through the real WsMessageHandler message path
+      await handler.handleMessage(
+        conn,
+        JSON.stringify({ type: 'subscribe', conversationId: 'conv-later' }),
+      );
+
+      assert.equal(
+        conn.subscribedConversations.size,
+        1,
+        'Subscription added through real WsMessageHandler path',
+      );
+      assert.ok(conn.subscribedConversations.has('conv-later'), 'Subscribed to conv-later');
       assert.ok(
         registry.getByConversation('conv-later').size === 1,
         'Registry reflects the new subscription',
