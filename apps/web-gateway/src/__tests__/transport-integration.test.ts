@@ -2904,9 +2904,10 @@ describe('T030: End-to-end streaming integration', () => {
       };
       bridge.emitStreamEvent(CONV_ID, singleEvent);
 
-      // Each tab receives exactly 1 message — NOT 2
-      const [msgA] = await Promise.all([waitForMessage(tabA), waitForMessage(tabB)]);
-      const [msgB] = [await Promise.resolve(msgA)]; // already consumed above
+      // Each tab receives exactly 1 copy of the event — NOT 2
+      const [msgA, msgB] = await Promise.all([waitForMessage(tabA), waitForMessage(tabB)]);
+      assert.deepEqual(msgA['event'], singleEvent, 'Tab A receives the single event once');
+      assert.deepEqual(msgB['event'], singleEvent, 'Tab B receives the single event once');
 
       // Verify by emitting a sentinel event and checking no extra messages snuck in
       const sentinel: StreamEvent = {
