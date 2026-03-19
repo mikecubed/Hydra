@@ -3422,6 +3422,16 @@ describe('T030: End-to-end streaming integration', () => {
       assert.ok(Array.isArray(turns), 'Expected turns array');
       assert.ok(turns.length >= 1, 'Expected at least one turn in history');
       assert.equal(turns[0]['id'], turnId, 'Turn history includes the submitted turn');
+      assert.equal(
+        turns[0]['instruction'],
+        'implement the feature',
+        'History entry retains the submitted instruction',
+      );
+      assert.equal(
+        turns[0]['status'],
+        'completed',
+        'History entry reflects completed status after stream finished',
+      );
 
       // ── Step 7: Browser traffic terminates at the gateway ────────────────
       assert.equal(
