@@ -55,10 +55,10 @@ _Create the real browser app shell in `apps/web/` and establish the shared brows
 
 **Independent Test**: Open an existing conversation, verify ordered transcript rendering, submit a new instruction, and confirm the new turn appears in the correct conversation with no context mix-ups.
 
-- [ ] T007 [P] [US1] **TDD:** implement gateway conversation list/detail/history/create/submit client methods in `apps/web/src/features/chat-workspace/api/gateway-client.ts` and `apps/web/src/features/chat-workspace/__tests__/gateway-client.test.ts`.
-- [ ] T008 [P] [US1] **TDD:** implement per-conversation draft ownership and derived selectors in `apps/web/src/features/chat-workspace/model/composer-drafts.ts` and `apps/web/src/features/chat-workspace/model/selectors.ts`.
-- [ ] T009 [P] [US1] Build the main workspace route and layout shell in `apps/web/src/routes/index.tsx`, `apps/web/src/routes/workspace.tsx`, and `apps/web/src/features/chat-workspace/components/workspace-layout.tsx`.
-- [ ] T010 [US1] Implement conversation browsing and selection in `apps/web/src/features/chat-workspace/components/conversation-list.tsx` and `apps/web/src/features/chat-workspace/model/workspace-store.ts`.
+- [x] T007 [P] [US1] **TDD:** implement gateway conversation list/detail/history/create/submit client methods in `apps/web/src/features/chat-workspace/api/gateway-client.ts` and `apps/web/src/features/chat-workspace/__tests__/gateway-client.test.ts`.
+- [x] T008 [P] [US1] **TDD:** implement per-conversation draft ownership and derived selectors in `apps/web/src/features/chat-workspace/model/composer-drafts.ts` and `apps/web/src/features/chat-workspace/model/selectors.ts`.
+- [x] T009 [P] [US1] Build the main workspace route and layout shell in `apps/web/src/routes/index.tsx`, `apps/web/src/routes/workspace.tsx`, and `apps/web/src/features/chat-workspace/components/workspace-layout.tsx`.
+- [x] T010 [US1] Implement conversation browsing and selection in `apps/web/src/features/chat-workspace/components/conversation-list.tsx` and `apps/web/src/features/chat-workspace/model/workspace-store.ts`.
 - [ ] T011 [US1] Implement historical transcript rendering in `apps/web/src/features/chat-workspace/components/transcript-pane.tsx` and `apps/web/src/features/chat-workspace/components/transcript-turn.tsx`.
 - [ ] T012 [US1] Implement composer submit/create/continue flow in `apps/web/src/features/chat-workspace/components/composer-panel.tsx` and `apps/web/src/features/chat-workspace/model/workspace-store.ts`.
 - [ ] T013 [US1] Add route and transcript coverage in `apps/web/src/features/chat-workspace/__tests__/workspace-route.test.ts` and `apps/web/src/features/chat-workspace/__tests__/transcript-pane.test.ts`.

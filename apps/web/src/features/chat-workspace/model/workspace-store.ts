@@ -10,10 +10,16 @@ export type TranscriptEntryKind = 'turn' | 'prompt' | 'activity-group' | 'system
 export type ContentBlockKind = 'text' | 'code' | 'status' | 'structured';
 export type LineageRelationshipKind = 'follow-up' | 'retry' | 'branch' | null;
 export type EntryControlKind = 'submit-follow-up' | 'cancel' | 'retry' | 'branch' | 'respond';
+export type ConversationStatus = 'active' | 'archived';
 
 export interface WorkspaceConversationRecord {
   readonly id: string;
   readonly title?: string;
+  readonly status?: ConversationStatus;
+  readonly createdAt?: string;
+  readonly updatedAt?: string;
+  readonly turnCount?: number;
+  readonly pendingInstructionCount?: number;
   readonly parentConversationId?: string;
   readonly forkPointTurnId?: string;
 }
@@ -75,6 +81,11 @@ export interface ConversationControlState {
 export interface ConversationViewState {
   readonly conversationId: string;
   readonly title: string;
+  readonly status: ConversationStatus;
+  readonly createdAt: string | null;
+  readonly updatedAt: string | null;
+  readonly turnCount: number;
+  readonly pendingInstructionCount: number;
   readonly lineageSummary: ConversationLineageState | null;
   readonly entries: readonly TranscriptEntryState[];
   readonly hasMoreHistory: boolean;
@@ -173,6 +184,11 @@ function createConversationViewState(
   return {
     conversationId: conversation.id,
     title: conversation.title ?? 'Untitled conversation',
+    status: conversation.status ?? 'active',
+    createdAt: conversation.createdAt ?? null,
+    updatedAt: conversation.updatedAt ?? null,
+    turnCount: conversation.turnCount ?? 0,
+    pendingInstructionCount: conversation.pendingInstructionCount ?? 0,
     lineageSummary: createConversationLineage(conversation),
     entries: [],
     hasMoreHistory: false,
@@ -191,6 +207,55 @@ function createDraftState(conversationId: string): ComposerDraftState {
     draftText: '',
     submitState: 'idle',
     validationMessage: null,
+  };
+}
+
+function resolveConversationText(
+  nextValue: string | undefined,
+  previousValue: string | undefined,
+  fallback: string,
+): string {
+  return nextValue ?? previousValue ?? fallback;
+}
+
+function resolveConversationStatus(
+  nextValue: ConversationStatus | undefined,
+  previousValue: ConversationStatus | undefined,
+): ConversationStatus {
+  return nextValue ?? previousValue ?? 'active';
+}
+
+function resolveConversationTimestamp(
+  nextValue: string | undefined,
+  previousValue: string | null | undefined,
+): string | null {
+  return nextValue ?? previousValue ?? null;
+}
+
+function resolveConversationCount(
+  nextValue: number | undefined,
+  previousValue: number | undefined,
+): number {
+  return nextValue ?? previousValue ?? 0;
+}
+
+function mergeConversationSnapshot(
+  previous: ConversationViewState | undefined,
+  conversation: WorkspaceConversationRecord,
+): Pick<
+  ConversationViewState,
+  'title' | 'status' | 'createdAt' | 'updatedAt' | 'turnCount' | 'pendingInstructionCount'
+> {
+  return {
+    title: resolveConversationText(conversation.title, previous?.title, 'Untitled conversation'),
+    status: resolveConversationStatus(conversation.status, previous?.status),
+    createdAt: resolveConversationTimestamp(conversation.createdAt, previous?.createdAt),
+    updatedAt: resolveConversationTimestamp(conversation.updatedAt, previous?.updatedAt),
+    turnCount: resolveConversationCount(conversation.turnCount, previous?.turnCount),
+    pendingInstructionCount: resolveConversationCount(
+      conversation.pendingInstructionCount,
+      previous?.pendingInstructionCount,
+    ),
   };
 }
 
@@ -256,10 +321,12 @@ function mergeConversationView(
   previous: ConversationViewState | undefined,
   conversation: WorkspaceConversationRecord,
 ): ConversationViewState {
+  const snapshot = mergeConversationSnapshot(previous, conversation);
+
   return {
     ...(previous ?? createConversationViewState(conversation)),
     conversationId: conversation.id,
-    title: conversation.title ?? previous?.title ?? 'Untitled conversation',
+    ...snapshot,
     lineageSummary: createConversationLineage(conversation) ?? previous?.lineageSummary ?? null,
   };
 }
