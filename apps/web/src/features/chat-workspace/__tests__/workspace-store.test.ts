@@ -35,6 +35,18 @@ function createEntry(overrides: Partial<TranscriptEntryState> = {}): TranscriptE
   };
 }
 
+function createArtifact(overrides: Partial<ArtifactViewState> = {}): ArtifactViewState {
+  return {
+    artifactId: 'art-1',
+    turnId: 'turn-1',
+    kind: 'code',
+    label: 'Generated file',
+    availability: 'ready',
+    previewBlocks: [],
+    ...overrides,
+  };
+}
+
 describe('createInitialWorkspaceState', () => {
   it('builds the empty workspace baseline', () => {
     const state = createInitialWorkspaceState();
@@ -127,6 +139,22 @@ describe('reduceWorkspaceState', () => {
     assert.equal(state.drafts.size, 0);
   });
 
+  it('replace-all clears the visible artifact when the active conversation disappears', () => {
+    let state = createInitialWorkspaceState();
+    state = reduceWorkspaceState(state, { type: 'conversation/select', conversationId: 'conv-1' });
+    state = reduceWorkspaceState(state, {
+      type: 'artifact/show',
+      artifact: createArtifact(),
+    });
+    state = reduceWorkspaceState(state, {
+      type: 'conversation/replace-all',
+      conversations: [],
+    });
+
+    assert.equal(state.activeConversationId, null);
+    assert.equal(state.visibleArtifact, null);
+  });
+
   it('preserves draft ownership across multiple conversations', () => {
     let state = createInitialWorkspaceState();
     state = reduceWorkspaceState(state, { type: 'conversation/select', conversationId: 'conv-1' });
@@ -162,6 +190,51 @@ describe('reduceWorkspaceState', () => {
     });
 
     assert.equal(state.drafts.get('conv-1')?.draftText, 'Fixed draft');
+    assert.equal(state.drafts.get('conv-1')?.submitState, 'idle');
+    assert.equal(state.drafts.get('conv-1')?.validationMessage, null);
+  });
+
+  it('clears a submission error when the operator blanks the draft', () => {
+    let state = createInitialWorkspaceState();
+    state = reduceWorkspaceState(state, { type: 'conversation/select', conversationId: 'conv-1' });
+    state = reduceWorkspaceState(state, {
+      type: 'draft/set-text',
+      conversationId: 'conv-1',
+      draftText: 'Need to retry',
+    });
+    state = reduceWorkspaceState(state, {
+      type: 'draft/set-submit-state',
+      conversationId: 'conv-1',
+      submitState: 'error',
+      validationMessage: 'Too long',
+    });
+    state = reduceWorkspaceState(state, {
+      type: 'draft/set-text',
+      conversationId: 'conv-1',
+      draftText: '',
+    });
+
+    assert.equal(state.drafts.get('conv-1')?.draftText, '');
+    assert.equal(state.drafts.get('conv-1')?.submitState, 'idle');
+    assert.equal(state.drafts.get('conv-1')?.validationMessage, null);
+  });
+
+  it('clears a submission error when a blank draft is reasserted', () => {
+    let state = createInitialWorkspaceState();
+    state = reduceWorkspaceState(state, { type: 'conversation/select', conversationId: 'conv-1' });
+    state = reduceWorkspaceState(state, {
+      type: 'draft/set-submit-state',
+      conversationId: 'conv-1',
+      submitState: 'error',
+      validationMessage: 'Too long',
+    });
+    state = reduceWorkspaceState(state, {
+      type: 'draft/set-text',
+      conversationId: 'conv-1',
+      draftText: '',
+    });
+
+    assert.equal(state.drafts.get('conv-1')?.draftText, '');
     assert.equal(state.drafts.get('conv-1')?.submitState, 'idle');
     assert.equal(state.drafts.get('conv-1')?.validationMessage, null);
   });
@@ -254,14 +327,7 @@ describe('reduceWorkspaceState', () => {
   });
 
   it('clears the visible artifact', () => {
-    const artifact: ArtifactViewState = {
-      artifactId: 'art-1',
-      turnId: 'turn-1',
-      kind: 'code',
-      label: 'Generated file',
-      availability: 'ready',
-      previewBlocks: [],
-    };
+    const artifact = createArtifact();
 
     let state = reduceWorkspaceState(createInitialWorkspaceState(), {
       type: 'artifact/show',
@@ -269,6 +335,19 @@ describe('reduceWorkspaceState', () => {
     });
     state = reduceWorkspaceState(state, { type: 'artifact/clear' });
 
+    assert.equal(state.visibleArtifact, null);
+  });
+
+  it('clears the visible artifact when switching conversations', () => {
+    let state = createInitialWorkspaceState();
+    state = reduceWorkspaceState(state, { type: 'conversation/select', conversationId: 'conv-1' });
+    state = reduceWorkspaceState(state, {
+      type: 'artifact/show',
+      artifact: createArtifact(),
+    });
+    state = reduceWorkspaceState(state, { type: 'conversation/select', conversationId: 'conv-2' });
+
+    assert.equal(state.activeConversationId, 'conv-2');
     assert.equal(state.visibleArtifact, null);
   });
 });

@@ -314,6 +314,8 @@ function applyReplaceAllConversations(
     conversationOrder: nextOrder,
     conversations: nextConversations,
     drafts: nextDrafts,
+    visibleArtifact:
+      nextActiveConversationId === state.activeConversationId ? state.visibleArtifact : null,
   };
 }
 
@@ -322,7 +324,7 @@ function applyConversationSelection(
   conversationId: string | null,
 ): WorkspaceState {
   if (conversationId == null) {
-    return { ...state, activeConversationId: null };
+    return { ...state, activeConversationId: null, visibleArtifact: null };
   }
 
   const nextConversations = new Map(state.conversations);
@@ -338,6 +340,7 @@ function applyConversationSelection(
     conversationOrder: withConversationInOrder(state.conversationOrder, conversationId),
     conversations: nextConversations,
     drafts: nextDrafts,
+    visibleArtifact: conversationId === state.activeConversationId ? state.visibleArtifact : null,
   };
 }
 
@@ -387,7 +390,7 @@ function applyDraftText(
   const nextText = draftText;
   const hasMeaningfulEdit = nextText !== current.draftText;
   const shouldClearError =
-    hasMeaningfulEdit && current.submitState === 'error' && nextText.trim() !== '';
+    current.submitState === 'error' && (hasMeaningfulEdit || nextText.trim() === '');
   nextDrafts.set(conversationId, {
     ...current,
     draftText: nextText,
