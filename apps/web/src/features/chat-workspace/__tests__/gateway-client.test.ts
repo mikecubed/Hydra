@@ -62,6 +62,9 @@ function gatewayErrorFixture(overrides: Partial<GatewayErrorBody> = {}): Gateway
 // ─── Fake fetch ─────────────────────────────────────────────────────────────
 
 type FetchFn = (input: string | URL | Request, init?: RequestInit) => Promise<Response>;
+type CapturedHeaders = RequestInit['headers'];
+type CapturedCredentials = RequestInit['credentials'];
+type DocumentShim = { cookie?: string };
 
 function jsonResponse(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), {
@@ -90,7 +93,38 @@ function buildClient(fetchFn: FetchFn, opts?: Partial<GatewayClientOptions>): Ga
 /** Narrow unknown error to GatewayRequestError and return it. */
 function assertGatewayError(err: unknown): GatewayRequestError {
   assert.ok(err instanceof GatewayRequestError);
-  return err as GatewayRequestError;
+  return err;
+}
+
+function stringifyInput(input: string | URL | Request): string {
+  if (typeof input === 'string') {
+    return input;
+  }
+
+  if (input instanceof URL) {
+    return input.toString();
+  }
+
+  return input.url;
+}
+
+function setDocumentCookieForTest(cookie: string | undefined): () => void {
+  const originalDescriptor = Object.getOwnPropertyDescriptor(globalThis, 'document');
+  const value = cookie === undefined ? undefined : ({ cookie } satisfies DocumentShim);
+
+  Object.defineProperty(globalThis, 'document', {
+    configurable: true,
+    value,
+  });
+
+  return () => {
+    if (originalDescriptor) {
+      Object.defineProperty(globalThis, 'document', originalDescriptor);
+      return;
+    }
+
+    delete (globalThis as Record<string, unknown>)['document'];
+  };
 }
 
 // ─── Tests ──────────────────────────────────────────────────────────────────
@@ -105,7 +139,7 @@ describe('GatewayClient', () => {
       let capturedUrl = '';
 
       const client = buildClient(async (input) => {
-        capturedUrl = String(input);
+        capturedUrl = stringifyInput(input);
         return jsonResponse(responseBody);
       });
 
@@ -119,7 +153,7 @@ describe('GatewayClient', () => {
     it('passes status and cursor query params', async () => {
       let capturedUrl = '';
       const client = buildClient(async (input) => {
-        capturedUrl = String(input);
+        capturedUrl = stringifyInput(input);
         return jsonResponse({ conversations: [], totalCount: 0 });
       });
 
@@ -135,7 +169,7 @@ describe('GatewayClient', () => {
       let capturedUrl = '';
       const client = buildClient(
         async (input) => {
-          capturedUrl = String(input);
+          capturedUrl = stringifyInput(input);
           return jsonResponse({ conversations: [], totalCount: 0 });
         },
         { baseUrl: '/gateway' },
@@ -168,9 +202,7 @@ describe('GatewayClient', () => {
     });
 
     it('throws GatewayRequestError with fallback on non-JSON error', async () => {
-      const client = buildClient(async () => {
-        return new Response('Service Unavailable', { status: 503 });
-      });
+      const client = buildClient(async () => new Response('Service Unavailable', { status: 503 }));
 
       await assert.rejects(
         () => client.listConversations(),
@@ -197,7 +229,7 @@ describe('GatewayClient', () => {
       let capturedUrl = '';
 
       const client = buildClient(async (input) => {
-        capturedUrl = String(input);
+        capturedUrl = stringifyInput(input);
         return jsonResponse(responseBody);
       });
 
@@ -232,7 +264,7 @@ describe('GatewayClient', () => {
       let capturedUrl = '';
 
       const client = buildClient(async (input) => {
-        capturedUrl = String(input);
+        capturedUrl = stringifyInput(input);
         return jsonResponse(responseBody);
       });
 
@@ -254,7 +286,7 @@ describe('GatewayClient', () => {
     it('omits undefined query params', async () => {
       let capturedUrl = '';
       const client = buildClient(async (input) => {
-        capturedUrl = String(input);
+        capturedUrl = stringifyInput(input);
         return jsonResponse({ turns: [], totalCount: 0, hasMore: false });
       });
 
@@ -269,7 +301,7 @@ describe('GatewayClient', () => {
       let capturedUrl = '';
       const client = buildClient(
         async (input) => {
-          capturedUrl = String(input);
+          capturedUrl = stringifyInput(input);
           return jsonResponse({ turns: [], totalCount: 0, hasMore: false });
         },
         { baseUrl: '/gateway' },
@@ -347,7 +379,7 @@ describe('GatewayClient', () => {
       let capturedBody = '';
 
       const client = buildClient(async (input, init) => {
-        capturedUrl = String(input);
+        capturedUrl = stringifyInput(input);
         capturedMethod = init?.method ?? '';
         capturedBody = (init?.body as string) ?? '';
         return jsonResponse(responseBody);
@@ -409,7 +441,7 @@ describe('GatewayClient', () => {
 
   describe('request headers', () => {
     it('includes Content-Type and Accept for all requests', async () => {
-      let capturedHeaders: HeadersInit | undefined;
+      let capturedHeaders: CapturedHeaders;
 
       const client = buildClient(async (_input, init) => {
         capturedHeaders = init?.headers;
@@ -425,7 +457,7 @@ describe('GatewayClient', () => {
     });
 
     it('includes credentials: include for cookie-based auth', async () => {
-      let capturedCredentials: RequestCredentials | undefined;
+      let capturedCredentials: CapturedCredentials;
 
       const client = buildClient(async (_input, init) => {
         capturedCredentials = init?.credentials;
@@ -437,7 +469,7 @@ describe('GatewayClient', () => {
     });
 
     it('includes x-csrf-token on createConversation when a token is available', async () => {
-      let capturedHeaders: HeadersInit | undefined;
+      let capturedHeaders: CapturedHeaders;
 
       const client = buildClient(
         async (_input, init) => {
@@ -454,7 +486,7 @@ describe('GatewayClient', () => {
     });
 
     it('includes x-csrf-token on submitInstruction when a token is available', async () => {
-      let capturedHeaders: HeadersInit | undefined;
+      let capturedHeaders: CapturedHeaders;
 
       const client = buildClient(
         async (_input, init) => {
@@ -471,7 +503,7 @@ describe('GatewayClient', () => {
     });
 
     it('omits x-csrf-token on GET requests', async () => {
-      let capturedHeaders: HeadersInit | undefined;
+      let capturedHeaders: CapturedHeaders;
 
       const client = buildClient(
         async (_input, init) => {
@@ -488,7 +520,7 @@ describe('GatewayClient', () => {
     });
 
     it('omits x-csrf-token on POST when no token is available', async () => {
-      let capturedHeaders: HeadersInit | undefined;
+      let capturedHeaders: CapturedHeaders;
 
       const client = buildClient(
         async (_input, init) => {
@@ -502,6 +534,25 @@ describe('GatewayClient', () => {
 
       const headers = new Headers(capturedHeaders);
       assert.equal(headers.has('x-csrf-token'), false);
+    });
+
+    it('treats malformed __csrf cookie values as unavailable', async () => {
+      let capturedHeaders: CapturedHeaders;
+      const restoreDocument = setDocumentCookieForTest('__csrf=%');
+
+      try {
+        const client = buildClient(async (_input, init) => {
+          capturedHeaders = init?.headers;
+          return jsonResponse(conversationFixture());
+        });
+
+        await client.createConversation({ title: 'New chat' });
+
+        const headers = new Headers(capturedHeaders);
+        assert.equal(headers.has('x-csrf-token'), false);
+      } finally {
+        restoreDocument();
+      }
     });
   });
 
@@ -537,7 +588,7 @@ describe('GatewayClient', () => {
         () => client.listConversations(),
         (err: unknown) => {
           assert.ok(err instanceof TypeError);
-          assert.ok((err as TypeError).message.includes('Failed to fetch'));
+          assert.ok(err.message.includes('Failed to fetch'));
           return true;
         },
       );

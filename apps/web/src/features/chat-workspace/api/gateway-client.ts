@@ -66,7 +66,7 @@ export class GatewayRequestError extends Error {
   readonly gatewayError: GatewayErrorBody;
 
   constructor(status: number, gatewayError: GatewayErrorBody) {
-    super(`Gateway ${status}: ${gatewayError.message}`);
+    super(`Gateway ${String(status)}: ${gatewayError.message}`);
     this.name = 'GatewayRequestError';
     this.status = status;
     this.gatewayError = gatewayError;
@@ -81,15 +81,26 @@ const JSON_HEADERS: Record<string, string> = {
 };
 
 function readCsrfTokenFromDocument(): string | null {
-  if (typeof document === 'undefined') {
+  const documentLike = Reflect.get(globalThis, 'document') as { cookie?: string } | undefined;
+  const cookieSource = documentLike?.cookie;
+
+  if (typeof cookieSource !== 'string' || cookieSource === '') {
     return null;
   }
 
-  for (const entry of document.cookie.split(';')) {
+  for (const entry of cookieSource.split(';')) {
     const trimmed = entry.trim();
     if (trimmed.startsWith('__csrf=')) {
       const rawValue = trimmed.slice('__csrf='.length);
-      return rawValue === '' ? null : decodeURIComponent(rawValue);
+      if (rawValue === '') {
+        return null;
+      }
+
+      try {
+        return decodeURIComponent(rawValue);
+      } catch {
+        return null;
+      }
     }
   }
 
@@ -121,15 +132,17 @@ async function extractGatewayError(res: Response): Promise<GatewayErrorBody> {
     ok: false,
     code: 'HTTP_ERROR',
     category: categoryFromStatus(res.status),
-    message: res.statusText || `HTTP ${res.status}`,
+    message: res.statusText === '' ? `HTTP ${String(res.status)}` : res.statusText,
     httpStatus: res.status,
   };
 }
 
+type QueryParamValue = string | number | boolean | null | undefined;
+
 /** Append defined key-value pairs as query params. */
 function appendParams(
   params: URLSearchParams,
-  entries: ReadonlyArray<readonly [string, unknown]>,
+  entries: ReadonlyArray<readonly [string, QueryParamValue]>,
 ): void {
   for (const [key, value] of entries) {
     if (value !== undefined && value !== null) {
@@ -141,13 +154,90 @@ function appendParams(
 function buildRequestUrl(
   baseUrl: string,
   path: string,
-  entries: ReadonlyArray<readonly [string, unknown]>,
+  entries: ReadonlyArray<readonly [string, QueryParamValue]>,
 ): string {
   const url = `${baseUrl}${path}`;
   const params = new URLSearchParams();
   appendParams(params, entries);
   const query = params.toString();
   return query === '' ? url : `${url}?${query}`;
+}
+
+function buildHeaders(method: string, getCsrfToken: () => string | null | undefined): Headers {
+  const headers = new Headers(JSON_HEADERS);
+
+  if (!['GET', 'HEAD', 'OPTIONS'].includes(method.toUpperCase())) {
+    const csrfToken = getCsrfToken();
+    if (csrfToken != null && csrfToken !== '') {
+      headers.set('x-csrf-token', csrfToken);
+    }
+  }
+
+  return headers;
+}
+
+async function requestJson<T>(
+  fetchFn: typeof globalThis.fetch,
+  baseUrl: string,
+  getCsrfToken: () => string | null | undefined,
+  method: string,
+  path: string,
+  body?: unknown,
+): Promise<T> {
+  const init: RequestInit = {
+    method,
+    headers: buildHeaders(method, getCsrfToken),
+    credentials: 'include',
+  };
+
+  if (body !== undefined) {
+    init.body = JSON.stringify(body);
+  }
+
+  const res = await fetchFn(`${baseUrl}${path}`, init);
+  if (!res.ok) {
+    throw new GatewayRequestError(res.status, await extractGatewayError(res));
+  }
+
+  return (await res.json()) as T;
+}
+
+async function getJson<T>(
+  fetchFn: typeof globalThis.fetch,
+  baseUrl: string,
+  getCsrfToken: () => string | null | undefined,
+  path: string,
+): Promise<T> {
+  return requestJson<T>(fetchFn, baseUrl, getCsrfToken, 'GET', path);
+}
+
+async function postJson<T>(
+  fetchFn: typeof globalThis.fetch,
+  baseUrl: string,
+  getCsrfToken: () => string | null | undefined,
+  path: string,
+  body: unknown,
+): Promise<T> {
+  return requestJson<T>(fetchFn, baseUrl, getCsrfToken, 'POST', path, body);
+}
+
+async function fetchQueryJson<T>(
+  fetchFn: typeof globalThis.fetch,
+  getCsrfToken: () => string | null | undefined,
+  method: string,
+  url: string,
+): Promise<T> {
+  const res = await fetchFn(url, {
+    method,
+    headers: buildHeaders(method, getCsrfToken),
+    credentials: 'include',
+  });
+
+  if (!res.ok) {
+    throw new GatewayRequestError(res.status, await extractGatewayError(res));
+  }
+
+  return (await res.json()) as T;
 }
 
 // ─── Factory ────────────────────────────────────────────────────────────────
@@ -157,50 +247,6 @@ export function createGatewayClient(options: GatewayClientOptions): GatewayClien
   const fetchFn = options.fetch ?? globalThis.fetch;
   const getCsrfToken = options.getCsrfToken ?? readCsrfTokenFromDocument;
 
-  function buildHeaders(method: string): Headers {
-    const headers = new Headers(JSON_HEADERS);
-
-    if (!['GET', 'HEAD', 'OPTIONS'].includes(method.toUpperCase())) {
-      const csrfToken = getCsrfToken();
-      if (csrfToken != null && csrfToken !== '') {
-        headers.set('x-csrf-token', csrfToken);
-      }
-    }
-
-    return headers;
-  }
-
-  async function request<T>(method: string, path: string, body?: unknown): Promise<T> {
-    const url = `${baseUrl}${path}`;
-
-    const init: RequestInit = {
-      method,
-      headers: buildHeaders(method),
-      credentials: 'include',
-    };
-
-    if (body !== undefined) {
-      init.body = JSON.stringify(body);
-    }
-
-    const res = await fetchFn(url, init);
-
-    if (!res.ok) {
-      const gatewayError = await extractGatewayError(res);
-      throw new GatewayRequestError(res.status, gatewayError);
-    }
-
-    return (await res.json()) as T;
-  }
-
-  async function get<T>(path: string): Promise<T> {
-    return request<T>('GET', path);
-  }
-
-  async function post<T>(path: string, body: unknown): Promise<T> {
-    return request<T>('POST', path, body);
-  }
-
   return {
     async listConversations(params) {
       const url = buildRequestUrl(baseUrl, '/conversations', [
@@ -208,19 +254,16 @@ export function createGatewayClient(options: GatewayClientOptions): GatewayClien
         ['cursor', params?.cursor],
         ['limit', params?.limit],
       ]);
-      const res = await fetchFn(url, {
-        method: 'GET',
-        headers: buildHeaders('GET'),
-        credentials: 'include',
-      });
-      if (!res.ok) {
-        throw new GatewayRequestError(res.status, await extractGatewayError(res));
-      }
-      return (await res.json()) as ListConversationsResponse;
+      return fetchQueryJson<ListConversationsResponse>(fetchFn, getCsrfToken, 'GET', url);
     },
 
     async openConversation(conversationId) {
-      return get<OpenConversationResponse>(`/conversations/${encodeURIComponent(conversationId)}`);
+      return getJson<OpenConversationResponse>(
+        fetchFn,
+        baseUrl,
+        getCsrfToken,
+        `/conversations/${encodeURIComponent(conversationId)}`,
+      );
     },
 
     async loadHistory(conversationId, params) {
@@ -233,23 +276,24 @@ export function createGatewayClient(options: GatewayClientOptions): GatewayClien
           ['limit', params?.limit],
         ],
       );
-      const res = await fetchFn(url, {
-        method: 'GET',
-        headers: buildHeaders('GET'),
-        credentials: 'include',
-      });
-      if (!res.ok) {
-        throw new GatewayRequestError(res.status, await extractGatewayError(res));
-      }
-      return (await res.json()) as LoadTurnHistoryResponse;
+      return fetchQueryJson<LoadTurnHistoryResponse>(fetchFn, getCsrfToken, 'GET', url);
     },
 
     async createConversation(body) {
-      return post<CreateConversationResponse>('/conversations', body ?? {});
+      return postJson<CreateConversationResponse>(
+        fetchFn,
+        baseUrl,
+        getCsrfToken,
+        '/conversations',
+        body ?? {},
+      );
     },
 
     async submitInstruction(conversationId, body) {
-      return post<SubmitInstructionResponse>(
+      return postJson<SubmitInstructionResponse>(
+        fetchFn,
+        baseUrl,
+        getCsrfToken,
         `/conversations/${encodeURIComponent(conversationId)}/turns`,
         body,
       );
