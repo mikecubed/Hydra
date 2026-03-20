@@ -131,6 +131,21 @@ describe('GatewayClient', () => {
       assert.equal(url.searchParams.get('limit'), '10');
     });
 
+    it('supports a relative baseUrl', async () => {
+      let capturedUrl = '';
+      const client = buildClient(
+        async (input) => {
+          capturedUrl = String(input);
+          return jsonResponse({ conversations: [], totalCount: 0 });
+        },
+        { baseUrl: '/gateway' },
+      );
+
+      await client.listConversations({ status: 'active', limit: 20 });
+
+      assert.equal(capturedUrl, '/gateway/conversations?status=active&limit=20');
+    });
+
     it('throws GatewayRequestError on structured error response', async () => {
       const errBody = gatewayErrorFixture({
         code: 'INTERNAL_ERROR',
@@ -172,7 +187,7 @@ describe('GatewayClient', () => {
   // ── openConversation (detail) ───────────────────────────────────────────
 
   describe('openConversation', () => {
-    it('sends GET to /conversations/:id/open and returns full detail', async () => {
+    it('sends GET to /conversations/:id and returns full detail', async () => {
       const responseBody = {
         conversation: conversationFixture(),
         recentTurns: [turnFixture()],
@@ -188,7 +203,7 @@ describe('GatewayClient', () => {
 
       const result = await client.openConversation('conv-1');
 
-      assert.ok(capturedUrl.endsWith('/conversations/conv-1/open'));
+      assert.ok(capturedUrl.endsWith('/conversations/conv-1'));
       assert.equal(result.conversation.id, 'conv-1');
       assert.equal(result.recentTurns.length, 1);
       assert.equal(result.totalTurnCount, 1);
@@ -212,7 +227,7 @@ describe('GatewayClient', () => {
   // ── loadHistory ─────────────────────────────────────────────────────────
 
   describe('loadHistory', () => {
-    it('sends GET to /conversations/:id/history with query params', async () => {
+    it('sends GET to /conversations/:id/turns with query params', async () => {
       const responseBody = { turns: [turnFixture()], totalCount: 1, hasMore: false };
       let capturedUrl = '';
 
@@ -228,7 +243,7 @@ describe('GatewayClient', () => {
       });
 
       const url = new URL(capturedUrl);
-      assert.ok(url.pathname.endsWith('/conversations/conv-1/history'));
+      assert.ok(url.pathname.endsWith('/conversations/conv-1/turns'));
       assert.equal(url.searchParams.get('fromPosition'), '1');
       assert.equal(url.searchParams.get('toPosition'), '5');
       assert.equal(url.searchParams.get('limit'), '25');
@@ -248,6 +263,21 @@ describe('GatewayClient', () => {
       assert.equal(url.searchParams.has('fromPosition'), false);
       assert.equal(url.searchParams.has('toPosition'), false);
       assert.equal(url.searchParams.has('limit'), false);
+    });
+
+    it('supports a relative baseUrl', async () => {
+      let capturedUrl = '';
+      const client = buildClient(
+        async (input) => {
+          capturedUrl = String(input);
+          return jsonResponse({ turns: [], totalCount: 0, hasMore: false });
+        },
+        { baseUrl: '/gateway' },
+      );
+
+      await client.loadHistory('conv-1', { limit: 10 });
+
+      assert.equal(capturedUrl, '/gateway/conversations/conv-1/turns?limit=10');
     });
   });
 
@@ -404,6 +434,74 @@ describe('GatewayClient', () => {
 
       await client.listConversations();
       assert.equal(capturedCredentials, 'include');
+    });
+
+    it('includes x-csrf-token on createConversation when a token is available', async () => {
+      let capturedHeaders: HeadersInit | undefined;
+
+      const client = buildClient(
+        async (_input, init) => {
+          capturedHeaders = init?.headers;
+          return jsonResponse(conversationFixture());
+        },
+        { getCsrfToken: () => 'csrf-123' },
+      );
+
+      await client.createConversation({ title: 'New chat' });
+
+      const headers = new Headers(capturedHeaders);
+      assert.equal(headers.get('x-csrf-token'), 'csrf-123');
+    });
+
+    it('includes x-csrf-token on submitInstruction when a token is available', async () => {
+      let capturedHeaders: HeadersInit | undefined;
+
+      const client = buildClient(
+        async (_input, init) => {
+          capturedHeaders = init?.headers;
+          return jsonResponse({ turn: turnFixture(), streamId: 'stream-1' });
+        },
+        { getCsrfToken: () => 'csrf-456' },
+      );
+
+      await client.submitInstruction('conv-1', { instruction: 'Ship it' });
+
+      const headers = new Headers(capturedHeaders);
+      assert.equal(headers.get('x-csrf-token'), 'csrf-456');
+    });
+
+    it('omits x-csrf-token on GET requests', async () => {
+      let capturedHeaders: HeadersInit | undefined;
+
+      const client = buildClient(
+        async (_input, init) => {
+          capturedHeaders = init?.headers;
+          return jsonResponse({ conversations: [], totalCount: 0 });
+        },
+        { getCsrfToken: () => 'csrf-789' },
+      );
+
+      await client.listConversations();
+
+      const headers = new Headers(capturedHeaders);
+      assert.equal(headers.has('x-csrf-token'), false);
+    });
+
+    it('omits x-csrf-token on POST when no token is available', async () => {
+      let capturedHeaders: HeadersInit | undefined;
+
+      const client = buildClient(
+        async (_input, init) => {
+          capturedHeaders = init?.headers;
+          return jsonResponse(conversationFixture());
+        },
+        { getCsrfToken: () => null },
+      );
+
+      await client.createConversation({ title: 'New chat' });
+
+      const headers = new Headers(capturedHeaders);
+      assert.equal(headers.has('x-csrf-token'), false);
     });
   });
 

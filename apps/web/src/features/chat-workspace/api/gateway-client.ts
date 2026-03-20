@@ -33,6 +33,8 @@ export interface GatewayClientOptions {
   readonly baseUrl: string;
   /** Injectable fetch for testing. Defaults to globalThis.fetch. */
   readonly fetch?: typeof globalThis.fetch;
+  /** Injectable CSRF token lookup for mutating requests. */
+  readonly getCsrfToken?: () => string | null | undefined;
 }
 
 /** History pagination parameters (all optional). */
@@ -78,6 +80,22 @@ const JSON_HEADERS: Record<string, string> = {
   Accept: 'application/json',
 };
 
+function readCsrfTokenFromDocument(): string | null {
+  if (typeof document === 'undefined') {
+    return null;
+  }
+
+  for (const entry of document.cookie.split(';')) {
+    const trimmed = entry.trim();
+    if (trimmed.startsWith('__csrf=')) {
+      const rawValue = trimmed.slice('__csrf='.length);
+      return rawValue === '' ? null : decodeURIComponent(rawValue);
+    }
+  }
+
+  return null;
+}
+
 /** Map HTTP status ranges to a reasonable default error category. */
 function categoryFromStatus(status: number): ErrorCategory {
   if (status === 401 || status === 403) return 'auth';
@@ -109,12 +127,27 @@ async function extractGatewayError(res: Response): Promise<GatewayErrorBody> {
 }
 
 /** Append defined key-value pairs as query params. */
-function appendParams(url: URL, entries: ReadonlyArray<readonly [string, unknown]>): void {
+function appendParams(
+  params: URLSearchParams,
+  entries: ReadonlyArray<readonly [string, unknown]>,
+): void {
   for (const [key, value] of entries) {
     if (value !== undefined && value !== null) {
-      url.searchParams.set(key, String(value));
+      params.set(key, String(value));
     }
   }
+}
+
+function buildRequestUrl(
+  baseUrl: string,
+  path: string,
+  entries: ReadonlyArray<readonly [string, unknown]>,
+): string {
+  const url = `${baseUrl}${path}`;
+  const params = new URLSearchParams();
+  appendParams(params, entries);
+  const query = params.toString();
+  return query === '' ? url : `${url}?${query}`;
 }
 
 // ─── Factory ────────────────────────────────────────────────────────────────
@@ -122,13 +155,27 @@ function appendParams(url: URL, entries: ReadonlyArray<readonly [string, unknown
 export function createGatewayClient(options: GatewayClientOptions): GatewayClient {
   const { baseUrl } = options;
   const fetchFn = options.fetch ?? globalThis.fetch;
+  const getCsrfToken = options.getCsrfToken ?? readCsrfTokenFromDocument;
+
+  function buildHeaders(method: string): Headers {
+    const headers = new Headers(JSON_HEADERS);
+
+    if (!['GET', 'HEAD', 'OPTIONS'].includes(method.toUpperCase())) {
+      const csrfToken = getCsrfToken();
+      if (csrfToken != null && csrfToken !== '') {
+        headers.set('x-csrf-token', csrfToken);
+      }
+    }
+
+    return headers;
+  }
 
   async function request<T>(method: string, path: string, body?: unknown): Promise<T> {
     const url = `${baseUrl}${path}`;
 
     const init: RequestInit = {
       method,
-      headers: JSON_HEADERS,
+      headers: buildHeaders(method),
       credentials: 'include',
     };
 
@@ -156,18 +203,14 @@ export function createGatewayClient(options: GatewayClientOptions): GatewayClien
 
   return {
     async listConversations(params) {
-      const url = new URL(`${baseUrl}/conversations`);
-      if (params) {
-        appendParams(url, [
-          ['status', params.status],
-          ['cursor', params.cursor],
-          ['limit', params.limit],
-        ]);
-      }
-      // Use the full URL string so query params are included
-      const res = await fetchFn(url.toString(), {
+      const url = buildRequestUrl(baseUrl, '/conversations', [
+        ['status', params?.status],
+        ['cursor', params?.cursor],
+        ['limit', params?.limit],
+      ]);
+      const res = await fetchFn(url, {
         method: 'GET',
-        headers: JSON_HEADERS,
+        headers: buildHeaders('GET'),
         credentials: 'include',
       });
       if (!res.ok) {
@@ -177,23 +220,22 @@ export function createGatewayClient(options: GatewayClientOptions): GatewayClien
     },
 
     async openConversation(conversationId) {
-      return get<OpenConversationResponse>(
-        `/conversations/${encodeURIComponent(conversationId)}/open`,
-      );
+      return get<OpenConversationResponse>(`/conversations/${encodeURIComponent(conversationId)}`);
     },
 
     async loadHistory(conversationId, params) {
-      const url = new URL(`${baseUrl}/conversations/${encodeURIComponent(conversationId)}/history`);
-      if (params) {
-        appendParams(url, [
-          ['fromPosition', params.fromPosition],
-          ['toPosition', params.toPosition],
-          ['limit', params.limit],
-        ]);
-      }
-      const res = await fetchFn(url.toString(), {
+      const url = buildRequestUrl(
+        baseUrl,
+        `/conversations/${encodeURIComponent(conversationId)}/turns`,
+        [
+          ['fromPosition', params?.fromPosition],
+          ['toPosition', params?.toPosition],
+          ['limit', params?.limit],
+        ],
+      );
+      const res = await fetchFn(url, {
         method: 'GET',
-        headers: JSON_HEADERS,
+        headers: buildHeaders('GET'),
         credentials: 'include',
       });
       if (!res.ok) {
