@@ -1,6 +1,7 @@
+import type { JSX } from 'react';
 import { Outlet } from '@tanstack/react-router';
 
-export function AppShell(): React.JSX.Element {
+export function AppShell(): JSX.Element {
   return (
     <div
       style={{

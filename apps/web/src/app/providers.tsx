@@ -1,6 +1,6 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { RouterProvider } from '@tanstack/react-router';
-import { useState } from 'react';
+import { type JSX, useState } from 'react';
 import { createAppRouter } from './router.tsx';
 
 function createWorkspaceQueryClient(): QueryClient {
@@ -14,7 +14,7 @@ function createWorkspaceQueryClient(): QueryClient {
   });
 }
 
-export function AppProviders(): React.JSX.Element {
+export function AppProviders(): JSX.Element {
   const [queryClient] = useState(createWorkspaceQueryClient);
   const [router] = useState(() => createAppRouter(queryClient));
 

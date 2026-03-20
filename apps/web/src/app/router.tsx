@@ -1,3 +1,4 @@
+import type { JSX } from 'react';
 import type { QueryClient } from '@tanstack/react-query';
 import {
   createRootRouteWithContext,
@@ -11,7 +12,7 @@ export interface AppRouterContext {
   readonly queryClient: QueryClient;
 }
 
-function WorkspaceBootstrapPlaceholder(): React.JSX.Element {
+function WorkspaceBootstrapPlaceholder(): JSX.Element {
   return (
     <section aria-labelledby="workspace-bootstrap-heading">
       <h2 id="workspace-bootstrap-heading" style={{ marginTop: 0, fontSize: '1.5rem' }}>

@@ -272,12 +272,15 @@ function applyReplaceAllConversations(
     nextOrder.push(conversation.id);
   }
 
+  const fallbackId: string | null = nextOrder.length > 0 ? nextOrder[0] : null;
   const nextActiveConversationId =
     state.activeConversationId != null && nextConversations.has(state.activeConversationId)
       ? state.activeConversationId
-      : (nextOrder[0] ?? null);
+      : fallbackId;
   const nextDrafts =
-    nextOrder.length === 0 ? state.drafts : withDraft(state.drafts, nextActiveConversationId);
+    nextActiveConversationId == null
+      ? state.drafts
+      : withDraft(state.drafts, nextActiveConversationId);
 
   return {
     ...state,
