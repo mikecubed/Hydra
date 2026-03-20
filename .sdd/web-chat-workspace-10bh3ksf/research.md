@@ -1,0 +1,155 @@
+# Research Findings: Web Chat Workspace
+
+**Date**: 2026-03-20 | **Plan**: [plan.md](./plan.md)
+
+## Decision 1: Keep the first browser workspace entirely in `apps/web/`
+
+### Context
+
+`apps/web/` currently exists only as a placeholder workspace with no real browser implementation. The phase roadmap allows `chat-workspace` to add code in `apps/web` and _potentially_ introduce `packages/web-ui`, but no reusable browser component package exists yet.
+
+### Decision
+
+Implement the first real browser workspace entirely inside `apps/web/`. Defer `packages/web-ui/` and `packages/web-test-helpers/` until repeated component or test patterns actually justify extraction.
+
+### Rationale
+
+1. This slice’s main job is to establish the browser workspace itself, not a reusable UI library.
+2. Premature extraction would require expanding ESLint boundary rules and workspace governance before the component vocabulary is stable.
+3. Keeping the first pass cohesive in one app reduces friction while still respecting the established `apps/web` boundary.
+
+### Alternatives Rejected
+
+| Alternative                                                        | Reason for Rejection                                                                |
+| ------------------------------------------------------------------ | ----------------------------------------------------------------------------------- |
+| Create `packages/web-ui/` immediately                              | Adds package/boundary churn before component reuse is proven.                       |
+| Keep `apps/web` extremely thin and push logic into shared packages | Over-abstracts the first browser slice and obscures the feature’s real state model. |
+
+---
+
+## Decision 2: Use route-driven workspace composition with explicit feature state modules
+
+### Context
+
+The workspace must coordinate conversation selection, transcript rendering, streaming updates, reconnect/sync banners, composer drafts, prompt actions, stale-control handling, and artifact views. The quality rules explicitly warn against hidden state machines in components.
+
+### Decision
+
+Structure the browser app around a route-driven workspace shell, with explicit feature-owned state modules for workspace state, conversation reconciliation, composer drafts, and prompt/control lifecycle.
+
+### Rationale
+
+1. Route ownership clarifies conversation selection and page-refresh behavior.
+2. Explicit state modules make reconnect and duplicate-suppression logic testable outside React component rendering.
+3. Components can remain mostly declarative if state transitions are modeled separately.
+
+### Alternatives Rejected
+
+| Alternative                                    | Reason for Rejection                                                                                             |
+| ---------------------------------------------- | ---------------------------------------------------------------------------------------------------------------- |
+| Scatter state across route and leaf components | Makes reconnect, stale-control, and sync-state logic brittle and hard to test.                                   |
+| Use only generic server-state caching          | Live stream reconciliation and prompt lifecycle require richer local state semantics than request caching alone. |
+
+---
+
+## Decision 3: Separate fetch/query state from live stream reconciliation
+
+### Context
+
+The browser consumes both REST-style gateway routes (conversation lists, history, artifacts, controls) and a live WebSocket stream with reconnect/resume semantics. These two channels have different lifecycle and consistency requirements.
+
+### Decision
+
+Use request/query infrastructure for fetch-oriented data and a dedicated stream adapter plus reconciler for WebSocket event application, replay recovery, and transcript normalization.
+
+### Rationale
+
+1. Query state is well suited to idempotent fetches and invalidation-based refresh.
+2. Stream data must handle ordering, replay, duplicate suppression, and recovery after disconnect.
+3. A dedicated reconciler creates a single place to enforce transcript correctness and operator-visible orientation.
+
+### Alternatives Rejected
+
+| Alternative                                                   | Reason for Rejection                                                                  |
+| ------------------------------------------------------------- | ------------------------------------------------------------------------------------- |
+| Push stream events directly into generic query cache state    | Makes replay barriers, duplicate suppression, and prompt recovery too implicit.       |
+| On reconnect, fully reload all state and ignore event lineage | Loses operator orientation and risks visible duplication or jarring transcript jumps. |
+
+---
+
+## Decision 4: Default to safe text and allowlisted structured artifact rendering
+
+### Context
+
+Hydra transcript content, prompts, and artifacts may contain arbitrary text generated by models or tools. The browser safety requirements explicitly forbid unsafe rendering of streamed content or artifacts.
+
+### Decision
+
+Render transcript and prompt content as safe text by default. Introduce allowlisted structured artifact renderers only for known artifact categories that can be safely presented without executing active content.
+
+### Rationale
+
+1. The safest default is to treat all work output as untrusted.
+2. Operators still need readable, useful artifact views, but safety must dominate convenience.
+3. This approach satisfies the spec’s browser-safe rendering requirement without blocking future richer renderers for known-safe artifact types.
+
+### Alternatives Rejected
+
+| Alternative                                        | Reason for Rejection                                                                |
+| -------------------------------------------------- | ----------------------------------------------------------------------------------- |
+| Render HTML-like transcript content directly       | Creates obvious XSS and unsafe-content risks.                                       |
+| Treat every artifact as a downloadable opaque blob | Too weak for a REPL-grade workspace where artifact inspection is a core experience. |
+
+---
+
+## Decision 5: Make control actions transcript-visible and lineage-aware
+
+### Context
+
+Cancel, retry, branch, and follow-up flows are central to Hydra’s operator workflow. These actions can occur while another session is open or after reconnect, so operators need durable orientation rather than momentary feedback.
+
+### Decision
+
+Represent control actions as visible transcript and lineage changes in the workspace model. Buttons initiate those actions, but the lasting result is reflected in the transcript, conversation lineage summary, and control eligibility state.
+
+### Rationale
+
+1. Transcript-visible outcomes make the workspace trustworthy across refreshes and multi-session convergence.
+2. Retry and branch are inherently lineage actions, not just ephemeral controls.
+3. Follow-up and cancel flows need durable visibility to prevent operator confusion after reconnect.
+
+### Alternatives Rejected
+
+| Alternative                                         | Reason for Rejection                                             |
+| --------------------------------------------------- | ---------------------------------------------------------------- |
+| Confirm control actions only with toasts or banners | Too easy to lose after refresh, reconnect, or long-running work. |
+| Hide lineage in metadata-only side panels           | Makes retry and branch relationships too easy to miss.           |
+
+---
+
+## Decision 6: Test at state, component, and end-to-end workflow layers
+
+### Context
+
+This slice has two high-risk classes of bugs: incorrect internal reconciliation logic and operator-visible browser workflow breakage. Either class can make the workspace appear unreliable even if gateway transport remains correct.
+
+### Decision
+
+Use three test layers:
+
+1. pure state/reconciler tests for deterministic merge and lineage logic;
+2. component/rendering tests for transcript, prompt, and artifact presentation;
+3. end-to-end browser workflow tests for submit, stream, reconnect, prompt response, and control actions.
+
+### Rationale
+
+1. State tests catch logic regressions early and cheaply.
+2. Component tests catch rendering and safe-presentation issues.
+3. End-to-end tests validate that browser behavior matches the intended operator experience across the real gateway transport.
+
+### Alternatives Rejected
+
+| Alternative                 | Reason for Rejection                                               |
+| --------------------------- | ------------------------------------------------------------------ |
+| E2E-only testing            | Too slow and imprecise for reconciliation bugs.                    |
+| Unit/component-only testing | Misses the highest-value browser workflows and reconnect behavior. |
