@@ -2,8 +2,7 @@
  * Tests for the browser-side gateway conversation client.
  *
  * Verifies list, detail (open), history, create, and submit operations,
- * including structured error handling via the gateway error parser
- * and CSRF double-submit token injection.
+ * including structured error handling via the gateway error parser.
  */
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
@@ -85,18 +84,6 @@ function buildClient(fetchFn: FetchFn, opts?: Partial<GatewayClientOptions>): Ga
     baseUrl: BASE_URL,
     fetch: fetchFn,
     ...opts,
-  });
-}
-
-/** Build client with a CSRF token injected via getCsrfToken option. */
-function buildClientWithCsrf(
-  fetchFn: FetchFn,
-  csrfToken: string | undefined,
-): GatewayClient {
-  return createGatewayClient({
-    baseUrl: BASE_URL,
-    fetch: fetchFn,
-    getCsrfToken: () => csrfToken,
   });
 }
 
@@ -185,7 +172,7 @@ describe('GatewayClient', () => {
   // ── openConversation (detail) ───────────────────────────────────────────
 
   describe('openConversation', () => {
-    it('sends GET to /conversations/:id and returns full detail', async () => {
+    it('sends GET to /conversations/:id/open and returns full detail', async () => {
       const responseBody = {
         conversation: conversationFixture(),
         recentTurns: [turnFixture()],
@@ -201,10 +188,7 @@ describe('GatewayClient', () => {
 
       const result = await client.openConversation('conv-1');
 
-      assert.ok(
-        capturedUrl.endsWith('/conversations/conv-1'),
-        `expected URL to end with /conversations/conv-1, got: ${capturedUrl}`,
-      );
+      assert.ok(capturedUrl.endsWith('/conversations/conv-1/open'));
       assert.equal(result.conversation.id, 'conv-1');
       assert.equal(result.recentTurns.length, 1);
       assert.equal(result.totalTurnCount, 1);
@@ -228,7 +212,7 @@ describe('GatewayClient', () => {
   // ── loadHistory ─────────────────────────────────────────────────────────
 
   describe('loadHistory', () => {
-    it('sends GET to /conversations/:convId/turns with query params', async () => {
+    it('sends GET to /conversations/:id/history with query params', async () => {
       const responseBody = { turns: [turnFixture()], totalCount: 1, hasMore: false };
       let capturedUrl = '';
 
@@ -244,10 +228,7 @@ describe('GatewayClient', () => {
       });
 
       const url = new URL(capturedUrl);
-      assert.ok(
-        url.pathname.endsWith('/conversations/conv-1/turns'),
-        `expected pathname to end with /conversations/conv-1/turns, got: ${url.pathname}`,
-      );
+      assert.ok(url.pathname.endsWith('/conversations/conv-1/history'));
       assert.equal(url.searchParams.get('fromPosition'), '1');
       assert.equal(url.searchParams.get('toPosition'), '5');
       assert.equal(url.searchParams.get('limit'), '25');
@@ -443,90 +424,6 @@ describe('GatewayClient', () => {
       const err = new GatewayRequestError(400, gatewayErrorFixture());
       assert.equal(err.name, 'GatewayRequestError');
       assert.ok(err instanceof Error);
-    });
-  });
-
-  // ── CSRF double-submit token ────────────────────────────────────────────
-
-  describe('CSRF double-submit token', () => {
-    it('includes x-csrf-token header on POST when getCsrfToken returns a token', async () => {
-      let capturedHeaders: HeadersInit | undefined;
-
-      const client = buildClientWithCsrf(async (_input, init) => {
-        capturedHeaders = init?.headers;
-        return jsonResponse(conversationFixture());
-      }, 'test-csrf-token');
-
-      await client.createConversation({ title: 'csrf test' });
-
-      assert.ok(capturedHeaders);
-      const headers = new Headers(capturedHeaders);
-      assert.equal(headers.get('x-csrf-token'), 'test-csrf-token');
-    });
-
-    it('omits x-csrf-token header on POST when getCsrfToken returns undefined', async () => {
-      let capturedHeaders: HeadersInit | undefined;
-
-      const client = buildClientWithCsrf(async (_input, init) => {
-        capturedHeaders = init?.headers;
-        return jsonResponse(conversationFixture());
-      }, undefined);
-
-      await client.createConversation({ title: 'no csrf' });
-
-      assert.ok(capturedHeaders);
-      const headers = new Headers(capturedHeaders);
-      assert.equal(headers.get('x-csrf-token'), null);
-    });
-
-    it('does not include x-csrf-token on GET requests', async () => {
-      let capturedHeaders: HeadersInit | undefined;
-
-      const client = buildClientWithCsrf(async (_input, init) => {
-        capturedHeaders = init?.headers;
-        return jsonResponse({ conversations: [], totalCount: 0 });
-      }, 'should-not-appear');
-
-      await client.listConversations();
-
-      assert.ok(capturedHeaders);
-      const headers = new Headers(capturedHeaders);
-      assert.equal(headers.get('x-csrf-token'), null);
-    });
-
-    it('includes x-csrf-token on submitInstruction (POST)', async () => {
-      let capturedHeaders: HeadersInit | undefined;
-
-      const client = buildClientWithCsrf(async (_input, init) => {
-        capturedHeaders = init?.headers;
-        return jsonResponse({ turn: turnFixture(), streamId: 'stream-1' });
-      }, 'submit-csrf');
-
-      await client.submitInstruction('conv-1', { instruction: 'Test' });
-
-      assert.ok(capturedHeaders);
-      const headers = new Headers(capturedHeaders);
-      assert.equal(headers.get('x-csrf-token'), 'submit-csrf');
-    });
-
-    it('does not include x-csrf-token on openConversation (GET)', async () => {
-      let capturedHeaders: HeadersInit | undefined;
-
-      const client = buildClientWithCsrf(async (_input, init) => {
-        capturedHeaders = init?.headers;
-        return jsonResponse({
-          conversation: conversationFixture(),
-          recentTurns: [],
-          totalTurnCount: 0,
-          pendingApprovals: [],
-        });
-      }, 'should-not-appear');
-
-      await client.openConversation('conv-1');
-
-      assert.ok(capturedHeaders);
-      const headers = new Headers(capturedHeaders);
-      assert.equal(headers.get('x-csrf-token'), null);
     });
   });
 

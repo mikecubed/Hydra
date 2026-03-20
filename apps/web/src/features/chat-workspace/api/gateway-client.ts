@@ -33,11 +33,6 @@ export interface GatewayClientOptions {
   readonly baseUrl: string;
   /** Injectable fetch for testing. Defaults to globalThis.fetch. */
   readonly fetch?: typeof globalThis.fetch;
-  /**
-   * Returns the current CSRF token (read from `__csrf` cookie in browser).
-   * Injectable for testing. Defaults to reading `document.cookie`.
-   */
-  readonly getCsrfToken?: () => string | undefined;
 }
 
 /** History pagination parameters (all optional). */
@@ -78,7 +73,10 @@ export class GatewayRequestError extends Error {
 
 // ─── Internals ──────────────────────────────────────────────────────────────
 
-// (Headers are now built dynamically per-request via buildHeaders inside the factory.)
+const JSON_HEADERS: Record<string, string> = {
+  'Content-Type': 'application/json',
+  Accept: 'application/json',
+};
 
 /** Map HTTP status ranges to a reasonable default error category. */
 function categoryFromStatus(status: number): ErrorCategory {
@@ -119,45 +117,18 @@ function appendParams(url: URL, entries: ReadonlyArray<readonly [string, unknown
   }
 }
 
-// ─── CSRF cookie helper ─────────────────────────────────────────────────────
-
-const SAFE_METHODS = new Set(['GET', 'HEAD', 'OPTIONS']);
-
-/** Read the `__csrf` cookie value from `document.cookie`. */
-function readCsrfCookie(): string | undefined {
-  if (typeof document === 'undefined') return undefined;
-  const match = document.cookie.match(/(?:^|;\s*)__csrf=([^;]*)/);
-  return match ? decodeURIComponent(match[1]) : undefined;
-}
-
 // ─── Factory ────────────────────────────────────────────────────────────────
 
 export function createGatewayClient(options: GatewayClientOptions): GatewayClient {
   const { baseUrl } = options;
   const fetchFn = options.fetch ?? globalThis.fetch;
-  const getCsrfToken = options.getCsrfToken ?? readCsrfCookie;
-
-  /** Build headers for a request, adding CSRF token for mutating methods. */
-  function buildHeaders(method: string): Record<string, string> {
-    const headers: Record<string, string> = {
-      'Content-Type': 'application/json',
-      Accept: 'application/json',
-    };
-    if (!SAFE_METHODS.has(method)) {
-      const token = getCsrfToken();
-      if (token) {
-        headers['x-csrf-token'] = token;
-      }
-    }
-    return headers;
-  }
 
   async function request<T>(method: string, path: string, body?: unknown): Promise<T> {
     const url = `${baseUrl}${path}`;
 
     const init: RequestInit = {
       method,
-      headers: buildHeaders(method),
+      headers: JSON_HEADERS,
       credentials: 'include',
     };
 
@@ -196,7 +167,7 @@ export function createGatewayClient(options: GatewayClientOptions): GatewayClien
       // Use the full URL string so query params are included
       const res = await fetchFn(url.toString(), {
         method: 'GET',
-        headers: buildHeaders('GET'),
+        headers: JSON_HEADERS,
         credentials: 'include',
       });
       if (!res.ok) {
@@ -207,12 +178,12 @@ export function createGatewayClient(options: GatewayClientOptions): GatewayClien
 
     async openConversation(conversationId) {
       return get<OpenConversationResponse>(
-        `/conversations/${encodeURIComponent(conversationId)}`,
+        `/conversations/${encodeURIComponent(conversationId)}/open`,
       );
     },
 
     async loadHistory(conversationId, params) {
-      const url = new URL(`${baseUrl}/conversations/${encodeURIComponent(conversationId)}/turns`);
+      const url = new URL(`${baseUrl}/conversations/${encodeURIComponent(conversationId)}/history`);
       if (params) {
         appendParams(url, [
           ['fromPosition', params.fromPosition],
@@ -222,7 +193,7 @@ export function createGatewayClient(options: GatewayClientOptions): GatewayClien
       }
       const res = await fetchFn(url.toString(), {
         method: 'GET',
-        headers: buildHeaders('GET'),
+        headers: JSON_HEADERS,
         credentials: 'include',
       });
       if (!res.ok) {
