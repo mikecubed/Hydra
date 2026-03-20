@@ -9,6 +9,8 @@ import {
 } from '../features/chat-workspace/model/workspace-store.ts';
 import {
   selectActiveConversation,
+  selectActiveEntries,
+  selectActiveLoadState,
   selectConversationList,
 } from '../features/chat-workspace/model/selectors.ts';
 
@@ -88,6 +90,8 @@ export function WorkspaceRoute(): JSX.Element {
       conversations={selectConversationList(state)}
       activeConversationId={state.activeConversationId}
       activeConversation={selectActiveConversation(state)}
+      activeEntries={selectActiveEntries(state)}
+      activeLoadState={selectActiveLoadState(state)}
       isLoadingConversations={isLoadingConversations}
       conversationErrorMessage={conversationErrorMessage}
       onSelectConversation={(conversationId) => {
