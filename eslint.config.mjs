@@ -159,7 +159,7 @@ export default [
 
   // ─── TypeScript files — type-aware strict rules ───────────────────────────
   ...tseslint.config({
-    files: ['**/*.ts'],
+    files: ['**/*.{ts,tsx}'],
     extends: [tseslint.configs.strictTypeChecked],
     languageOptions: {
       parserOptions: {

@@ -7,8 +7,11 @@
     "node": ">=24.0.0"
   },
   "scripts": {
-    "test:browser": "vitest run --environment jsdom \"src/**/*.browser.spec.ts\" --passWithNoTests",
-    "test:browser:watch": "vitest --environment jsdom \"src/**/*.browser.spec.ts\"",
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview",
+    "test:browser": "vitest run --passWithNoTests",
+    "test:browser:watch": "vitest",
     "typecheck:workspace": "tsc --noEmit -p tsconfig.json"
   },
   "dependencies": {
