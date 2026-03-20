@@ -70,6 +70,22 @@ function hasRequiredFields(
   );
 }
 
+/** Return a trimmed string if non-empty, otherwise undefined. */
+function isNonEmptyString(value: unknown): string | undefined {
+  if (typeof value !== 'string') return undefined;
+  const trimmed = value.trim();
+  return trimmed.length > 0 ? trimmed : undefined;
+}
+
+/** Return the value if it is a finite integer within [min, max], otherwise undefined. */
+function isFiniteInt(value: unknown, min: number, max?: number): number | undefined {
+  if (typeof value !== 'number' || !Number.isFinite(value) || !Number.isInteger(value))
+    return undefined;
+  if (value < min) return undefined;
+  if (max !== undefined && value > max) return undefined;
+  return value;
+}
+
 /**
  * Parse an unknown value into a typed GatewayErrorBody.
  * Returns null if the shape does not match expectations.
@@ -77,15 +93,20 @@ function hasRequiredFields(
 export function parseGatewayError(raw: unknown): GatewayErrorBody | null {
   if (!isRecord(raw) || !hasRequiredFields(raw)) return null;
 
+  const conversationId = isNonEmptyString(raw['conversationId']);
+  const turnId = isNonEmptyString(raw['turnId']);
+  const retryAfterMs = isFiniteInt(raw['retryAfterMs'], 0);
+  const httpStatus = isFiniteInt(raw['httpStatus'], 100, 599);
+
   return {
     ok: false,
     code: raw['code'],
     category: raw['category'] as ErrorCategory,
     message: raw['message'],
-    ...(typeof raw['conversationId'] === 'string' && { conversationId: raw['conversationId'] }),
-    ...(typeof raw['turnId'] === 'string' && { turnId: raw['turnId'] }),
-    ...(typeof raw['retryAfterMs'] === 'number' && { retryAfterMs: raw['retryAfterMs'] }),
-    ...(typeof raw['httpStatus'] === 'number' && { httpStatus: raw['httpStatus'] }),
+    ...(conversationId !== undefined && { conversationId }),
+    ...(turnId !== undefined && { turnId }),
+    ...(retryAfterMs !== undefined && { retryAfterMs }),
+    ...(httpStatus !== undefined && { httpStatus }),
   };
 }
 

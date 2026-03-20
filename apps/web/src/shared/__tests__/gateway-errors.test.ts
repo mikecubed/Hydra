@@ -178,6 +178,127 @@ describe('parseGatewayError', () => {
       assert.equal(result.category, cat);
     }
   });
+
+  // ── optional field validation ─────────────────────────────────────────────
+
+  it('ignores empty-string conversationId', () => {
+    const raw = { ok: false, code: 'X', category: 'auth', message: 'M', conversationId: '' };
+    const result = parseGatewayError(raw);
+    assert.ok(result !== null);
+    assert.equal(result.conversationId, undefined);
+  });
+
+  it('ignores whitespace-only conversationId', () => {
+    const raw = { ok: false, code: 'X', category: 'auth', message: 'M', conversationId: '   ' };
+    const result = parseGatewayError(raw);
+    assert.ok(result !== null);
+    assert.equal(result.conversationId, undefined);
+  });
+
+  it('ignores empty-string turnId', () => {
+    const raw = { ok: false, code: 'X', category: 'auth', message: 'M', turnId: '' };
+    const result = parseGatewayError(raw);
+    assert.ok(result !== null);
+    assert.equal(result.turnId, undefined);
+  });
+
+  it('ignores whitespace-only turnId', () => {
+    const raw = { ok: false, code: 'X', category: 'auth', message: 'M', turnId: '  \t ' };
+    const result = parseGatewayError(raw);
+    assert.ok(result !== null);
+    assert.equal(result.turnId, undefined);
+  });
+
+  it('ignores NaN retryAfterMs', () => {
+    const raw = {
+      ok: false,
+      code: 'X',
+      category: 'auth',
+      message: 'M',
+      retryAfterMs: Number.NaN,
+    };
+    const result = parseGatewayError(raw);
+    assert.ok(result !== null);
+    assert.equal(result.retryAfterMs, undefined);
+  });
+
+  it('ignores Infinity retryAfterMs', () => {
+    const raw = { ok: false, code: 'X', category: 'auth', message: 'M', retryAfterMs: Infinity };
+    const result = parseGatewayError(raw);
+    assert.ok(result !== null);
+    assert.equal(result.retryAfterMs, undefined);
+  });
+
+  it('ignores negative retryAfterMs', () => {
+    const raw = { ok: false, code: 'X', category: 'auth', message: 'M', retryAfterMs: -1 };
+    const result = parseGatewayError(raw);
+    assert.ok(result !== null);
+    assert.equal(result.retryAfterMs, undefined);
+  });
+
+  it('ignores non-integer retryAfterMs', () => {
+    const raw = { ok: false, code: 'X', category: 'auth', message: 'M', retryAfterMs: 3.14 };
+    const result = parseGatewayError(raw);
+    assert.ok(result !== null);
+    assert.equal(result.retryAfterMs, undefined);
+  });
+
+  it('accepts zero retryAfterMs', () => {
+    const raw = { ok: false, code: 'X', category: 'auth', message: 'M', retryAfterMs: 0 };
+    const result = parseGatewayError(raw);
+    assert.ok(result !== null);
+    assert.equal(result.retryAfterMs, 0);
+  });
+
+  it('ignores NaN httpStatus', () => {
+    const raw = {
+      ok: false,
+      code: 'X',
+      category: 'auth',
+      message: 'M',
+      httpStatus: Number.NaN,
+    };
+    const result = parseGatewayError(raw);
+    assert.ok(result !== null);
+    assert.equal(result.httpStatus, undefined);
+  });
+
+  it('ignores Infinity httpStatus', () => {
+    const raw = { ok: false, code: 'X', category: 'auth', message: 'M', httpStatus: Infinity };
+    const result = parseGatewayError(raw);
+    assert.ok(result !== null);
+    assert.equal(result.httpStatus, undefined);
+  });
+
+  it('ignores non-integer httpStatus', () => {
+    const raw = { ok: false, code: 'X', category: 'auth', message: 'M', httpStatus: 404.5 };
+    const result = parseGatewayError(raw);
+    assert.ok(result !== null);
+    assert.equal(result.httpStatus, undefined);
+  });
+
+  it('ignores out-of-range httpStatus (below 100)', () => {
+    const raw = { ok: false, code: 'X', category: 'auth', message: 'M', httpStatus: 99 };
+    const result = parseGatewayError(raw);
+    assert.ok(result !== null);
+    assert.equal(result.httpStatus, undefined);
+  });
+
+  it('ignores out-of-range httpStatus (above 599)', () => {
+    const raw = { ok: false, code: 'X', category: 'auth', message: 'M', httpStatus: 600 };
+    const result = parseGatewayError(raw);
+    assert.ok(result !== null);
+    assert.equal(result.httpStatus, undefined);
+  });
+
+  it('accepts valid httpStatus boundaries', () => {
+    for (const status of [100, 200, 404, 500, 599]) {
+      const raw = { ok: false, code: 'X', category: 'auth', message: 'M', httpStatus: status };
+      const result = parseGatewayError(raw);
+      assert.ok(result !== null, `should accept httpStatus ${status}`);
+      assert.equal(result.httpStatus, status);
+    }
+  });
 });
 
 // ─── Category predicates ────────────────────────────────────────────────────
