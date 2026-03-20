@@ -14,7 +14,7 @@ export default [
   {
     ignores: [
       'node_modules/**',
-      'dist/**',
+      '**/dist/**',
       '.build-exe/**',
       '.pkg-cache/**',
       'docs/**',
