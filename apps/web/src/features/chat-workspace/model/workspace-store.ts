@@ -208,6 +208,15 @@ function ensureDraft(
   return drafts.get(conversationId) ?? createDraftState(conversationId);
 }
 
+function withDraft(
+  drafts: ReadonlyMap<string, ComposerDraftState>,
+  conversationId: string,
+): Map<string, ComposerDraftState> {
+  const nextDrafts = new Map(drafts);
+  nextDrafts.set(conversationId, ensureDraft(nextDrafts, conversationId));
+  return nextDrafts;
+}
+
 export function createInitialWorkspaceState(): WorkspaceState {
   return {
     activeConversationId: null,
@@ -263,14 +272,19 @@ function applyReplaceAllConversations(
     nextOrder.push(conversation.id);
   }
 
+  const nextActiveConversationId =
+    state.activeConversationId != null && nextConversations.has(state.activeConversationId)
+      ? state.activeConversationId
+      : (nextOrder[0] ?? null);
+  const nextDrafts =
+    nextOrder.length === 0 ? state.drafts : withDraft(state.drafts, nextActiveConversationId);
+
   return {
     ...state,
-    activeConversationId:
-      state.activeConversationId != null && nextConversations.has(state.activeConversationId)
-        ? state.activeConversationId
-        : (nextOrder[0] ?? null),
+    activeConversationId: nextActiveConversationId,
     conversationOrder: nextOrder,
     conversations: nextConversations,
+    drafts: nextDrafts,
   };
 }
 
@@ -287,8 +301,7 @@ function applyConversationSelection(
     nextConversations.set(conversationId, createConversationViewState({ id: conversationId }));
   }
 
-  const nextDrafts = new Map(state.drafts);
-  nextDrafts.set(conversationId, ensureDraft(nextDrafts, conversationId));
+  const nextDrafts = withDraft(state.drafts, conversationId);
 
   return {
     ...state,
@@ -334,12 +347,18 @@ function applyDraftText(
   conversationId: string,
   draftText: string,
 ): WorkspaceState {
-  const nextDrafts = new Map(state.drafts);
+  const nextDrafts = withDraft(state.drafts, conversationId);
   const current = ensureDraft(nextDrafts, conversationId);
+  const nextText = draftText;
+  const hasMeaningfulEdit = nextText !== current.draftText;
+  const shouldClearError =
+    hasMeaningfulEdit && current.submitState === 'error' && nextText.trim() !== '';
   nextDrafts.set(conversationId, {
     ...current,
-    draftText,
-    validationMessage: draftText.trim() === '' ? null : current.validationMessage,
+    draftText: nextText,
+    submitState: shouldClearError ? 'idle' : current.submitState,
+    validationMessage:
+      nextText.trim() === '' || shouldClearError ? null : current.validationMessage,
   });
   return { ...state, drafts: nextDrafts };
 }

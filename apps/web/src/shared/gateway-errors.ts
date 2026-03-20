@@ -114,11 +114,17 @@ export function isRateLimitError(err: GatewayErrorBody): boolean {
 // ─── Recovery helpers ───────────────────────────────────────────────────────
 
 /**
- * Session error codes that do NOT indicate credential loss.
- * These errors mean the session exists and is valid but cannot accept
- * the request for an operational reason (e.g. another turn is in progress).
+ * Session error codes that mean the browser must re-establish operator auth.
+ *
+ * Conversation routes also reuse the `session` category for stale/conflict
+ * business-rule failures, so category alone is not enough to decide whether
+ * a sign-in redirect is appropriate.
  */
-const NON_REAUTH_SESSION_CODES: ReadonlySet<string> = new Set(['SESSION_NOT_IDLE']);
+const REAUTH_SESSION_CODES: ReadonlySet<string> = new Set([
+  'IDLE_TIMEOUT',
+  'SESSION_EXPIRED',
+  'SESSION_INVALIDATED',
+]);
 
 /** Whether the error suggests the request may succeed if retried later. */
 export function isRetriable(err: GatewayErrorBody): boolean {
@@ -128,13 +134,13 @@ export function isRetriable(err: GatewayErrorBody): boolean {
 /**
  * Whether the error requires the operator to re-authenticate.
  *
- * All `auth` errors require reauth.  `session` errors require reauth
- * unless the specific error code indicates the session is still valid
- * but temporarily unavailable (e.g. SESSION_NOT_IDLE).
+ * All `auth` errors require reauth. `session` errors only require reauth
+ * when the session itself has expired or been invalidated; many other
+ * `session`-category errors are ordinary stale/conflict business rules.
  */
 export function requiresReauth(err: GatewayErrorBody): boolean {
   if (err.category === 'auth') return true;
-  if (err.category === 'session') return !NON_REAUTH_SESSION_CODES.has(err.code);
+  if (err.category === 'session') return REAUTH_SESSION_CODES.has(err.code);
   return false;
 }
 

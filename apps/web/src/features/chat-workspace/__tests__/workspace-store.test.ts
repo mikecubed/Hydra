@@ -93,6 +93,20 @@ describe('reduceWorkspaceState', () => {
     assert.equal(state.drafts.get('conv-2')?.draftText, '');
   });
 
+  it('replace-all seeds a draft for an auto-selected active conversation', () => {
+    const state = reduceWorkspaceState(createInitialWorkspaceState(), {
+      type: 'conversation/replace-all',
+      conversations: [
+        createConversation(),
+        createConversation({ id: 'conv-2', title: 'Second conversation' }),
+      ],
+    });
+
+    assert.equal(state.activeConversationId, 'conv-1');
+    assert.equal(state.drafts.get('conv-1')?.conversationId, 'conv-1');
+    assert.equal(state.drafts.get('conv-1')?.submitState, 'idle');
+  });
+
   it('preserves draft ownership across multiple conversations', () => {
     let state = createInitialWorkspaceState();
     state = reduceWorkspaceState(state, { type: 'conversation/select', conversationId: 'conv-1' });
@@ -110,6 +124,26 @@ describe('reduceWorkspaceState', () => {
 
     assert.equal(state.drafts.get('conv-1')?.draftText, 'First draft');
     assert.equal(state.drafts.get('conv-2')?.draftText, 'Second draft');
+  });
+
+  it('clears a submission error after the operator corrects the draft text', () => {
+    let state = createInitialWorkspaceState();
+    state = reduceWorkspaceState(state, { type: 'conversation/select', conversationId: 'conv-1' });
+    state = reduceWorkspaceState(state, {
+      type: 'draft/set-submit-state',
+      conversationId: 'conv-1',
+      submitState: 'error',
+      validationMessage: 'Too long',
+    });
+    state = reduceWorkspaceState(state, {
+      type: 'draft/set-text',
+      conversationId: 'conv-1',
+      draftText: 'Fixed draft',
+    });
+
+    assert.equal(state.drafts.get('conv-1')?.draftText, 'Fixed draft');
+    assert.equal(state.drafts.get('conv-1')?.submitState, 'idle');
+    assert.equal(state.drafts.get('conv-1')?.validationMessage, null);
   });
 
   it('replaces entries and marks the conversation ready', () => {

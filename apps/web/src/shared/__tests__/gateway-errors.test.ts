@@ -38,6 +38,13 @@ const sessionExpiredError: GatewayErrorBody = {
   message: 'Session has expired',
 };
 
+const idleTimeoutError: GatewayErrorBody = {
+  ok: false,
+  code: 'IDLE_TIMEOUT',
+  category: 'session',
+  message: 'Session timed out due to inactivity',
+};
+
 const rateLimitError: GatewayErrorBody = {
   ok: false,
   code: 'RATE_LIMITED',
@@ -65,6 +72,20 @@ const sessionNotIdleError: GatewayErrorBody = {
   code: 'SESSION_NOT_IDLE',
   category: 'session',
   message: 'Session is not idle',
+};
+
+const staleApprovalError: GatewayErrorBody = {
+  ok: false,
+  code: 'STALE_APPROVAL',
+  category: 'session',
+  message: 'Approval request is stale',
+};
+
+const archivedConversationError: GatewayErrorBody = {
+  ok: false,
+  code: 'CONVERSATION_ARCHIVED',
+  category: 'session',
+  message: 'Conversation is archived',
 };
 
 const errorWithContext: GatewayErrorBody = {
@@ -225,8 +246,28 @@ describe('requiresReauth', () => {
     assert.ok(requiresReauth(sessionExpiredError));
   });
 
+  it('idle timeout errors require re-authentication', () => {
+    assert.ok(requiresReauth(idleTimeoutError));
+  });
+
   it('SESSION_NOT_IDLE does not require re-authentication', () => {
     assert.ok(!requiresReauth(sessionNotIdleError));
+  });
+
+  it('session business-rule errors do not require re-authentication', () => {
+    assert.ok(!requiresReauth(staleApprovalError));
+    assert.ok(!requiresReauth(archivedConversationError));
+  });
+
+  it('unknown session-category conflicts do not require re-authentication by default', () => {
+    assert.ok(
+      !requiresReauth({
+        ok: false,
+        code: 'APPROVAL_ALREADY_RESPONDED',
+        category: 'session',
+        message: 'Approval already responded',
+      }),
+    );
   });
 
   it('daemon errors do not require re-authentication', () => {
