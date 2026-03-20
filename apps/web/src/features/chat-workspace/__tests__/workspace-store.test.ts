@@ -5,6 +5,7 @@ import {
   createInitialWorkspaceState,
   createWorkspaceStore,
   reduceWorkspaceState,
+  type ArtifactViewState,
   type TranscriptEntryState,
   type WorkspaceConversationRecord,
 } from '../model/workspace-store.ts';
@@ -205,6 +206,70 @@ describe('reduceWorkspaceState', () => {
     assert.deepStrictEqual(state.conversationOrder, ['conv-1']);
     assert.equal(state.conversations.get('conv-1')?.entries.length, 1);
     assert.equal(state.conversations.get('conv-1')?.loadState, 'ready');
+  });
+
+  it('merges a partial connection patch without clobbering other fields', () => {
+    const state = reduceWorkspaceState(createInitialWorkspaceState(), {
+      type: 'connection/merge',
+      patch: { transportStatus: 'live', syncStatus: 'syncing' },
+    });
+
+    assert.equal(state.connection.transportStatus, 'live');
+    assert.equal(state.connection.syncStatus, 'syncing');
+    assert.equal(state.connection.sessionStatus, 'active');
+    assert.equal(state.connection.daemonStatus, 'healthy');
+  });
+
+  it('applies successive connection patches additively', () => {
+    let state = createInitialWorkspaceState();
+    state = reduceWorkspaceState(state, {
+      type: 'connection/merge',
+      patch: { transportStatus: 'live' },
+    });
+    state = reduceWorkspaceState(state, {
+      type: 'connection/merge',
+      patch: { daemonStatus: 'unavailable' },
+    });
+
+    assert.equal(state.connection.transportStatus, 'live');
+    assert.equal(state.connection.daemonStatus, 'unavailable');
+  });
+
+  it('sets the visible artifact via artifact/show', () => {
+    const artifact: ArtifactViewState = {
+      artifactId: 'art-1',
+      turnId: 'turn-1',
+      kind: 'code',
+      label: 'Generated file',
+      availability: 'ready',
+      previewBlocks: [],
+    };
+
+    const state = reduceWorkspaceState(createInitialWorkspaceState(), {
+      type: 'artifact/show',
+      artifact,
+    });
+
+    assert.deepStrictEqual(state.visibleArtifact, artifact);
+  });
+
+  it('clears the visible artifact', () => {
+    const artifact: ArtifactViewState = {
+      artifactId: 'art-1',
+      turnId: 'turn-1',
+      kind: 'code',
+      label: 'Generated file',
+      availability: 'ready',
+      previewBlocks: [],
+    };
+
+    let state = reduceWorkspaceState(createInitialWorkspaceState(), {
+      type: 'artifact/show',
+      artifact,
+    });
+    state = reduceWorkspaceState(state, { type: 'artifact/clear' });
+
+    assert.equal(state.visibleArtifact, null);
   });
 });
 

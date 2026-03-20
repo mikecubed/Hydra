@@ -10,7 +10,7 @@
     "dev": "vite",
     "build": "vite build",
     "preview": "vite preview",
-    "test:browser": "vitest run --passWithNoTests",
+    "test:browser": "vitest run",
     "test:browser:watch": "vitest",
     "typecheck:workspace": "tsc --noEmit -p tsconfig.json"
   },
