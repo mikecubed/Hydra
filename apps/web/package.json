@@ -2,5 +2,32 @@
   "name": "@hydra/web",
   "version": "0.0.0",
   "private": true,
-  "type": "module"
+  "type": "module",
+  "engines": {
+    "node": ">=24.0.0"
+  },
+  "scripts": {
+    "test:browser": "vitest run --environment jsdom \"src/**/*.browser.spec.ts\" --passWithNoTests",
+    "test:browser:watch": "vitest --environment jsdom \"src/**/*.browser.spec.ts\"",
+    "typecheck:workspace": "tsc --noEmit -p tsconfig.json"
+  },
+  "dependencies": {
+    "@hydra/web-contracts": "*",
+    "@tanstack/react-query": "^5",
+    "@tanstack/react-router": "^1",
+    "react": "^19",
+    "react-dom": "^19"
+  },
+  "devDependencies": {
+    "@testing-library/jest-dom": "^6",
+    "@testing-library/react": "^16",
+    "@testing-library/user-event": "^14",
+    "@types/react": "^19",
+    "@types/react-dom": "^19",
+    "@vitejs/plugin-react": "^6",
+    "jsdom": "^29",
+    "typescript": "^5.9.3",
+    "vite": "^8",
+    "vitest": "^4"
+  }
 }
