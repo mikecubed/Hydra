@@ -107,6 +107,25 @@ describe('reduceWorkspaceState', () => {
     assert.equal(state.drafts.get('conv-1')?.submitState, 'idle');
   });
 
+  it('replace-all prunes drafts for conversations removed by authoritative refresh', () => {
+    let state = createInitialWorkspaceState();
+    state = reduceWorkspaceState(state, { type: 'conversation/select', conversationId: 'conv-1' });
+    state = reduceWorkspaceState(state, {
+      type: 'draft/set-text',
+      conversationId: 'conv-1',
+      draftText: 'Stale draft',
+    });
+    state = reduceWorkspaceState(state, {
+      type: 'conversation/replace-all',
+      conversations: [],
+    });
+
+    assert.equal(state.activeConversationId, null);
+    assert.deepStrictEqual(state.conversationOrder, []);
+    assert.equal(state.conversations.size, 0);
+    assert.equal(state.drafts.size, 0);
+  });
+
   it('preserves draft ownership across multiple conversations', () => {
     let state = createInitialWorkspaceState();
     state = reduceWorkspaceState(state, { type: 'conversation/select', conversationId: 'conv-1' });
@@ -162,6 +181,30 @@ describe('reduceWorkspaceState', () => {
     assert.equal(state.conversations.get('conv-1')?.entries.length, 1);
     assert.equal(state.conversations.get('conv-1')?.loadState, 'ready');
     assert.equal(state.conversations.get('conv-1')?.hasMoreHistory, true);
+  });
+
+  it('adds unknown conversations to ordered state when load-state arrives first', () => {
+    const state = reduceWorkspaceState(createInitialWorkspaceState(), {
+      type: 'conversation/set-load-state',
+      conversationId: 'conv-1',
+      loadState: 'loading',
+    });
+
+    assert.deepStrictEqual(state.conversationOrder, ['conv-1']);
+    assert.equal(state.conversations.get('conv-1')?.loadState, 'loading');
+  });
+
+  it('adds unknown conversations to ordered state when entries arrive first', () => {
+    const state = reduceWorkspaceState(createInitialWorkspaceState(), {
+      type: 'conversation/replace-entries',
+      conversationId: 'conv-1',
+      entries: [createEntry()],
+      hasMoreHistory: false,
+    });
+
+    assert.deepStrictEqual(state.conversationOrder, ['conv-1']);
+    assert.equal(state.conversations.get('conv-1')?.entries.length, 1);
+    assert.equal(state.conversations.get('conv-1')?.loadState, 'ready');
   });
 });
 

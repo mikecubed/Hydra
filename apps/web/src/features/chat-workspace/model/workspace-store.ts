@@ -217,6 +217,30 @@ function withDraft(
   return nextDrafts;
 }
 
+function withConversationInOrder(
+  conversationOrder: readonly string[],
+  conversationId: string,
+): readonly string[] {
+  return conversationOrder.includes(conversationId)
+    ? conversationOrder
+    : [...conversationOrder, conversationId];
+}
+
+function pruneDrafts(
+  drafts: ReadonlyMap<string, ComposerDraftState>,
+  retainedConversationIds: ReadonlySet<string>,
+): Map<string, ComposerDraftState> {
+  const nextDrafts = new Map<string, ComposerDraftState>();
+
+  for (const [conversationId, draft] of drafts) {
+    if (retainedConversationIds.has(conversationId)) {
+      nextDrafts.set(conversationId, draft);
+    }
+  }
+
+  return nextDrafts;
+}
+
 export function createInitialWorkspaceState(): WorkspaceState {
   return {
     activeConversationId: null,
@@ -277,10 +301,12 @@ function applyReplaceAllConversations(
     state.activeConversationId != null && nextConversations.has(state.activeConversationId)
       ? state.activeConversationId
       : fallbackId;
+  const retainedConversationIds = new Set(nextOrder);
+  const nextDraftsBase = pruneDrafts(state.drafts, retainedConversationIds);
   const nextDrafts =
     nextActiveConversationId == null
-      ? state.drafts
-      : withDraft(state.drafts, nextActiveConversationId);
+      ? nextDraftsBase
+      : withDraft(nextDraftsBase, nextActiveConversationId);
 
   return {
     ...state,
@@ -309,9 +335,7 @@ function applyConversationSelection(
   return {
     ...state,
     activeConversationId: conversationId,
-    conversationOrder: state.conversationOrder.includes(conversationId)
-      ? state.conversationOrder
-      : [...state.conversationOrder, conversationId],
+    conversationOrder: withConversationInOrder(state.conversationOrder, conversationId),
     conversations: nextConversations,
     drafts: nextDrafts,
   };
@@ -325,7 +349,11 @@ function applyConversationLoadState(
   const current = ensureConversation(state.conversations, conversationId);
   const nextConversations = new Map(state.conversations);
   nextConversations.set(conversationId, { ...current, loadState });
-  return { ...state, conversations: nextConversations };
+  return {
+    ...state,
+    conversationOrder: withConversationInOrder(state.conversationOrder, conversationId),
+    conversations: nextConversations,
+  };
 }
 
 function applyConversationEntries(
@@ -342,7 +370,11 @@ function applyConversationEntries(
     hasMoreHistory,
     loadState: 'ready',
   });
-  return { ...state, conversations: nextConversations };
+  return {
+    ...state,
+    conversationOrder: withConversationInOrder(state.conversationOrder, conversationId),
+    conversations: nextConversations,
+  };
 }
 
 function applyDraftText(
