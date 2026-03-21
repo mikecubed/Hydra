@@ -1157,6 +1157,126 @@ describe('StreamClient', () => {
       assert.equal(client.readyState, FakeWebSocket.OPEN);
     });
 
+    it('does not invoke onOpen or flush queue when stale onopen fires from superseded socket', () => {
+      const opens: string[] = [];
+      const client = createStreamClient(defaultOptions());
+      client.connect(noopCallbacks({ onOpen: () => opens.push('first') }));
+      const ws1 = getSocket();
+      ws1.simulateOpen();
+      assert.deepStrictEqual(opens, ['first']);
+
+      // Capture the onopen handler attached to ws1
+      const staleOnopen = ws1.onopen;
+      assert.ok(staleOnopen, 'onopen handler should be attached to ws1');
+
+      // Suppress synchronous close to simulate async browser behavior
+      ws1.close = () => {
+        ws1.readyState = FakeWebSocket.CLOSED;
+      };
+      client.close();
+
+      // Reconnect with a fresh callback tracker
+      const reconnectOpens: string[] = [];
+      lastFakeSocket = null;
+      client.connect(noopCallbacks({ onOpen: () => reconnectOpens.push('reconnect') }));
+      const ws2 = getSocket();
+
+      // Queue a message while CONNECTING on ws2
+      client.subscribe('conv-guarded');
+      assert.equal(ws2.sent.length, 0, 'message should be queued');
+
+      // Stale onopen from the old socket fires — must NOT flush queue or call callback
+      staleOnopen(fakeEvent('open'));
+
+      assert.equal(ws2.sent.length, 0, 'stale onopen must not flush send queue');
+      assert.deepStrictEqual(reconnectOpens, [], 'stale onopen must not invoke onOpen callback');
+
+      // The real open on ws2 should still work
+      ws2.simulateOpen();
+      assert.deepStrictEqual(reconnectOpens, ['reconnect']);
+      assert.equal(ws2.sentMessages.length, 1, 'queued message must flush on real open');
+    });
+
+    it('does not dispatch messages when stale onmessage fires from superseded socket', () => {
+      const events: string[] = [];
+      const client = createStreamClient(defaultOptions());
+      client.connect(noopCallbacks({ onStreamEvent: (cid) => events.push(`first:${cid}`) }));
+      const ws1 = getSocket();
+      ws1.simulateOpen();
+
+      // Capture the onmessage handler attached to ws1
+      const staleOnmessage = ws1.onmessage;
+      assert.ok(staleOnmessage, 'onmessage handler should be attached to ws1');
+
+      ws1.close = () => {
+        ws1.readyState = FakeWebSocket.CLOSED;
+      };
+      client.close();
+
+      // Reconnect
+      const reconnectEvents: string[] = [];
+      lastFakeSocket = null;
+      client.connect(
+        noopCallbacks({ onStreamEvent: (cid) => reconnectEvents.push(`reconnect:${cid}`) }),
+      );
+      const ws2 = getSocket();
+      ws2.simulateOpen();
+
+      // Stale onmessage from old socket — must be silently ignored
+      staleOnmessage(
+        fakeMessageEvent(JSON.stringify(streamEventPayload({ conversationId: 'stale-conv' }))),
+      );
+
+      assert.deepStrictEqual(events, [], 'stale onmessage must not invoke original callbacks');
+      assert.deepStrictEqual(
+        reconnectEvents,
+        [],
+        'stale onmessage must not invoke reconnect callbacks',
+      );
+
+      // Real message on ws2 should still work
+      ws2.simulateMessage(streamEventPayload({ conversationId: 'live-conv' }));
+      assert.deepStrictEqual(reconnectEvents, ['reconnect:live-conv']);
+    });
+
+    it('does not invoke onSocketError when stale onerror fires from superseded socket', () => {
+      const errors: string[] = [];
+      const client = createStreamClient(defaultOptions());
+      client.connect(noopCallbacks({ onSocketError: () => errors.push('first') }));
+      const ws1 = getSocket();
+      ws1.simulateOpen();
+
+      // Capture the onerror handler attached to ws1
+      const staleOnerror = ws1.onerror;
+      assert.ok(staleOnerror, 'onerror handler should be attached to ws1');
+
+      ws1.close = () => {
+        ws1.readyState = FakeWebSocket.CLOSED;
+      };
+      client.close();
+
+      // Reconnect
+      const reconnectErrors: string[] = [];
+      lastFakeSocket = null;
+      client.connect(noopCallbacks({ onSocketError: () => reconnectErrors.push('reconnect') }));
+      const ws2 = getSocket();
+      ws2.simulateOpen();
+
+      // Stale onerror from old socket — must be silently ignored
+      staleOnerror(fakeEvent('error'));
+
+      assert.deepStrictEqual(errors, [], 'stale onerror must not invoke original onSocketError');
+      assert.deepStrictEqual(
+        reconnectErrors,
+        [],
+        'stale onerror must not invoke reconnect onSocketError',
+      );
+
+      // Real error on ws2 should still work
+      ws2.simulateError();
+      assert.deepStrictEqual(reconnectErrors, ['reconnect']);
+    });
+
     it('still invokes onClose callback for the active socket close', () => {
       const closeCalls: Array<{ code: number; reason: string }> = [];
       const client = createStreamClient(defaultOptions());

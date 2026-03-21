@@ -332,14 +332,17 @@ function attachSocketHandlers(
   callbacks: StreamClientCallbacks,
 ): void {
   ws.onopen = () => {
+    if (state.socket !== ws) return;
     flushQueue(state);
     callbacks.onOpen?.();
   };
   ws.onmessage = (ev) => {
+    if (state.socket !== ws) return;
     const raw = typeof ev.data === 'string' ? ev.data : String(ev.data);
     dispatchServerMessage(raw, callbacks);
   };
   ws.onerror = () => {
+    if (state.socket !== ws) return;
     callbacks.onSocketError?.();
   };
   ws.onclose = (ev) => {
