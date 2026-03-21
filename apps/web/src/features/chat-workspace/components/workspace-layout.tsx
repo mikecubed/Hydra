@@ -1,6 +1,11 @@
 import type { JSX } from 'react';
 import { ConversationList } from './conversation-list.tsx';
-import type { ConversationViewState } from '../model/workspace-store.ts';
+import { TranscriptPane } from './transcript-pane.tsx';
+import type {
+  ConversationLoadState,
+  ConversationViewState,
+  TranscriptEntryState,
+} from '../model/workspace-store.ts';
 
 const panelStyle = {
   border: '1px solid rgba(148, 163, 184, 0.2)',
@@ -13,18 +18,26 @@ export interface WorkspaceLayoutProps {
   readonly conversations: readonly ConversationViewState[];
   readonly activeConversationId: string | null;
   readonly activeConversation: ConversationViewState | undefined;
+  readonly activeEntries: readonly TranscriptEntryState[];
+  readonly activeLoadState: ConversationLoadState | null;
+  readonly activeHasMoreHistory: boolean;
   readonly isLoadingConversations: boolean;
   readonly conversationErrorMessage: string | null;
   readonly onSelectConversation: (conversationId: string) => void;
+  readonly onRetryActiveTranscript: () => void;
 }
 
 export function WorkspaceLayout({
   conversations,
   activeConversationId,
   activeConversation,
+  activeEntries,
+  activeLoadState,
+  activeHasMoreHistory,
   isLoadingConversations,
   conversationErrorMessage,
   onSelectConversation,
+  onRetryActiveTranscript,
 }: WorkspaceLayoutProps): JSX.Element {
   const activeTitle = activeConversation?.title ?? 'No conversation selected';
 
@@ -69,10 +82,16 @@ export function WorkspaceLayout({
             <h3 id="workspace-transcript-heading" style={{ marginTop: 0 }}>
               Transcript
             </h3>
-            <p style={{ lineHeight: 1.6, marginBottom: 0 }}>Active conversation: {activeTitle}</p>
-            <p style={{ lineHeight: 1.6, marginBottom: 0 }}>
-              T011 will render authoritative history and streaming turns in this main pane.
+            <p style={{ lineHeight: 1.6, marginBottom: '0.75rem' }}>
+              Active conversation: {activeTitle}
             </p>
+            <TranscriptPane
+              entries={activeEntries}
+              loadState={activeLoadState}
+              hasActiveConversation={activeConversationId != null}
+              hasMoreHistory={activeHasMoreHistory}
+              onRetry={onRetryActiveTranscript}
+            />
           </section>
 
           <section aria-labelledby="workspace-composer-heading" style={panelStyle}>

@@ -58,6 +58,7 @@ export interface TranscriptEntryState {
   readonly entryId: string;
   readonly kind: TranscriptEntryKind;
   readonly turnId: string | null;
+  readonly attributionLabel?: string | null;
   readonly status: string;
   readonly timestamp: string | null;
   readonly contentBlocks: readonly ContentBlockState[];
