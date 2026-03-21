@@ -460,6 +460,37 @@ function applyDraftSubmitState(
   return { ...state, drafts: nextDrafts };
 }
 
+/**
+ * Append a single operator turn (from a submit response) to the transcript.
+ *
+ * Deduplicates by turnId — if the turn is already present (e.g. via stream
+ * replay), the existing entry is kept unchanged. Does not modify
+ * `historyLoaded` or `loadState`, avoiding the race where a full re-fetch
+ * could clobber live stream state.
+ */
+function applyAppendSubmitTurn(
+  state: WorkspaceState,
+  conversationId: string,
+  entry: TranscriptEntryState,
+): WorkspaceState {
+  const current = ensureConversation(state.conversations, conversationId);
+
+  if (entry.turnId != null && current.entries.some((e) => e.turnId === entry.turnId)) {
+    return state;
+  }
+
+  const nextConversations = new Map(state.conversations);
+  nextConversations.set(conversationId, {
+    ...current,
+    entries: [...current.entries, entry],
+  });
+  return {
+    ...state,
+    conversationOrder: withConversationInOrder(state.conversationOrder, conversationId),
+    conversations: nextConversations,
+  };
+}
+
 function applyConnectionPatch(
   state: WorkspaceState,
   patch: Readonly<Partial<WorkspaceConnectionState>>,
@@ -497,6 +528,8 @@ export function reduceWorkspaceState(
       );
     case 'conversation/merge-history':
       return applyMergeHistory(state, action.conversationId, action.entries, action.hasMoreHistory);
+    case 'conversation/append-submit-turn':
+      return applyAppendSubmitTurn(state, action.conversationId, action.entry);
     case 'draft/set-text':
       return applyDraftText(state, action.conversationId, action.draftText);
     case 'draft/set-submit-state':

@@ -201,16 +201,20 @@ describe('workspace continue-mode submit', () => {
     expect(screen.getByText('Hydra is a multi-agent orchestrator.')).toBeInTheDocument();
     expect(screen.getByText('Tell me about Hydra')).toBeInTheDocument();
 
-    // Transcript ownership: history turn + streamed reply are distinct articles
+    // Transcript ownership: history turn + submitted instruction + streamed reply
     const articles = transcriptArticles();
-    expect(articles).toHaveLength(2);
+    expect(articles).toHaveLength(3);
 
     const historyArticle = within(articles[0]);
     expect(historyArticle.getByText('Tell me about Hydra')).toBeInTheDocument();
     expect(historyArticle.getByText('Hydra is a multi-agent orchestrator.')).toBeInTheDocument();
     expect(historyArticle.getByText('Operator')).toBeInTheDocument();
 
-    const agentArticle = within(articles[1]);
+    const submitArticle = within(articles[1]);
+    expect(submitArticle.getByText('Now add tests')).toBeInTheDocument();
+    expect(submitArticle.getByText('Operator')).toBeInTheDocument();
+
+    const agentArticle = within(articles[2]);
     expect(agentArticle.getByText('Tests added for all modules.')).toBeInTheDocument();
     expect(agentArticle.getByText('Codex')).toBeInTheDocument();
 

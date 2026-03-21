@@ -12,10 +12,11 @@ import type {
   CreateConversationResponse,
   SubmitInstructionBody,
   SubmitInstructionResponse,
+  Turn,
 } from '@hydra/web-contracts';
 
 import { isDraftSubmittable } from './composer-drafts.ts';
-import type { WorkspaceStore } from './workspace-types.ts';
+import type { ContentBlockState, TranscriptEntryState, WorkspaceStore } from './workspace-types.ts';
 
 // ─── Public types ───────────────────────────────────────────────────────────
 
@@ -39,6 +40,42 @@ export interface SubmitDraftDeps {
 export type SubmitResult = { readonly ok: true } | { readonly ok: false };
 
 // ─── Submit flows ───────────────────────────────────────────────────────────
+
+/** Convert a gateway Turn into a TranscriptEntryState for the workspace store. */
+function turnToTranscriptEntry(turn: Turn): TranscriptEntryState {
+  const blocks: ContentBlockState[] = [];
+
+  if (turn.instruction != null && turn.instruction !== '') {
+    blocks.push({
+      blockId: `${turn.id}-instruction`,
+      kind: 'text',
+      text: turn.instruction,
+      metadata: null,
+    });
+  }
+
+  if (turn.response != null && turn.response !== '') {
+    blocks.push({
+      blockId: `${turn.id}-response`,
+      kind: 'text',
+      text: turn.response,
+      metadata: null,
+    });
+  }
+
+  return {
+    entryId: turn.id,
+    kind: 'turn',
+    turnId: turn.id,
+    attributionLabel: turn.attribution.label,
+    status: turn.status,
+    timestamp: turn.completedAt ?? turn.createdAt,
+    contentBlocks: blocks,
+    artifacts: [],
+    controls: [],
+    prompt: null,
+  };
+}
 
 /**
  * Continue flow: submit the active draft as an instruction to the
@@ -67,7 +104,16 @@ export async function submitComposerDraft(deps: SubmitDraftDeps): Promise<Submit
   });
 
   try {
-    await client.submitInstruction(conversationId, { instruction });
+    const response = await client.submitInstruction(conversationId, { instruction });
+
+    // Append the authoritative operator turn from the response so the
+    // transcript shows the submitted instruction immediately — even when
+    // historyLoaded is already true and the transcript loader won't re-fetch.
+    store.dispatch({
+      type: 'conversation/append-submit-turn',
+      conversationId,
+      entry: turnToTranscriptEntry(response.turn),
+    });
 
     store.dispatch({ type: 'draft/set-text', conversationId, draftText: '' });
     store.dispatch({

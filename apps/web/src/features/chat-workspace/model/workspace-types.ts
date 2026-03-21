@@ -180,6 +180,11 @@ export type WorkspaceAction =
       readonly hasMoreHistory: boolean;
     }
   | {
+      readonly type: 'conversation/append-submit-turn';
+      readonly conversationId: string;
+      readonly entry: TranscriptEntryState;
+    }
+  | {
       readonly type: 'connection/merge';
       readonly patch: Readonly<Partial<WorkspaceConnectionState>>;
     }
