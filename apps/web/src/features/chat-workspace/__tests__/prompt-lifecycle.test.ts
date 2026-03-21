@@ -164,7 +164,10 @@ describe('prompt lifecycle reducer', () => {
       errorMessage: 'Gateway 409',
     });
     assert.equal(errored.conversations.get('conv-1')?.entries[0].prompt?.status, 'error');
-    assert.equal(errored.conversations.get('conv-1')?.entries[0].prompt?.errorMessage, 'Gateway 409');
+    assert.equal(
+      errored.conversations.get('conv-1')?.entries[0].prompt?.errorMessage,
+      'Gateway 409',
+    );
 
     const hydrated = reduceWorkspaceState(initial, {
       type: 'prompt/hydrate',
@@ -172,11 +175,12 @@ describe('prompt lifecycle reducer', () => {
       turnId: 'turn-1',
       promptId: 'prompt-1',
       allowedResponses: ['approve', 'deny'],
-      contextBlocks: [
-        { blockId: 'ctx-1', kind: 'text', text: 'Need approval', metadata: null },
-      ],
+      contextBlocks: [{ blockId: 'ctx-1', kind: 'text', text: 'Need approval', metadata: null }],
     });
-    assert.deepStrictEqual(hydrated.conversations.get('conv-1')?.entries[0].prompt?.allowedResponses, ['approve', 'deny']);
+    assert.deepStrictEqual(
+      hydrated.conversations.get('conv-1')?.entries[0].prompt?.allowedResponses,
+      ['approve', 'deny'],
+    );
     assert.equal(hydrated.conversations.get('conv-1')?.entries[0].prompt?.contextBlocks.length, 1);
 
     const resolved = reduceWorkspaceState(responding, {
@@ -187,7 +191,10 @@ describe('prompt lifecycle reducer', () => {
       responseSummary: 'approve',
     });
     assert.equal(resolved.conversations.get('conv-1')?.entries[0].prompt?.status, 'resolved');
-    assert.equal(resolved.conversations.get('conv-1')?.entries[0].prompt?.lastResponseSummary, 'approve');
+    assert.equal(
+      resolved.conversations.get('conv-1')?.entries[0].prompt?.lastResponseSummary,
+      'approve',
+    );
 
     const stale = reduceWorkspaceState(initial, {
       type: 'prompt/mark-stale',
@@ -208,7 +215,9 @@ describe('prompt lifecycle reducer', () => {
   });
 
   it('does not regress a resolved prompt back to stale', () => {
-    const resolvedState = stateWithPrompt(makePrompt({ status: 'resolved', lastResponseSummary: 'approve' }));
+    const resolvedState = stateWithPrompt(
+      makePrompt({ status: 'resolved', lastResponseSummary: 'approve' }),
+    );
     const next = reduceWorkspaceState(resolvedState, {
       type: 'prompt/mark-stale',
       conversationId: 'conv-1',
@@ -217,6 +226,9 @@ describe('prompt lifecycle reducer', () => {
       reason: 'late event',
     });
     assert.equal(next.conversations.get('conv-1')?.entries[0].prompt?.status, 'resolved');
-    assert.equal(next.conversations.get('conv-1')?.entries[0].prompt?.lastResponseSummary, 'approve');
+    assert.equal(
+      next.conversations.get('conv-1')?.entries[0].prompt?.lastResponseSummary,
+      'approve',
+    );
   });
 });

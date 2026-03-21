@@ -223,6 +223,10 @@ function filterStringArray(value: unknown): readonly string[] {
   return value.filter((item): item is string => typeof item === 'string');
 }
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null;
+}
+
 function parseContextBlocks(value: unknown): readonly ContentBlockState[] {
   if (!Array.isArray(value)) {
     return [];
@@ -231,8 +235,7 @@ function parseContextBlocks(value: unknown): readonly ContentBlockState[] {
   const blocks: ContentBlockState[] = [];
   for (const block of value) {
     if (
-      typeof block !== 'object' ||
-      block == null ||
+      !isRecord(block) ||
       typeof block['blockId'] !== 'string' ||
       typeof block['kind'] !== 'string'
     ) {
@@ -242,20 +245,17 @@ function parseContextBlocks(value: unknown): readonly ContentBlockState[] {
     blocks.push({
       blockId: block['blockId'],
       kind:
-        block['kind'] === 'code' ||
-        block['kind'] === 'status' ||
-        block['kind'] === 'structured'
+        block['kind'] === 'code' || block['kind'] === 'status' || block['kind'] === 'structured'
           ? block['kind']
           : 'text',
       text: typeof block['text'] === 'string' ? block['text'] : null,
-      metadata:
-        typeof block['metadata'] === 'object' && block['metadata'] != null
-          ? Object.fromEntries(
-              Object.entries(block['metadata']).filter((entry): entry is [string, string] => {
-                return typeof entry[1] === 'string';
-              }),
-            )
-          : null,
+      metadata: isRecord(block['metadata'])
+        ? Object.fromEntries(
+            Object.entries(block['metadata']).filter(
+              (entry): entry is [string, string] => typeof entry[1] === 'string',
+            ),
+          )
+        : null,
     });
   }
   return blocks;

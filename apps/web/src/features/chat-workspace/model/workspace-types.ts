@@ -18,7 +18,13 @@ export type ContentBlockKind = 'text' | 'code' | 'status' | 'structured';
 export type LineageRelationshipKind = 'follow-up' | 'retry' | 'branch' | null;
 export type EntryControlKind = 'submit-follow-up' | 'cancel' | 'retry' | 'branch' | 'respond';
 export type ConversationStatus = 'active' | 'archived';
-export type PromptStatus = 'pending' | 'responding' | 'resolved' | 'stale' | 'unavailable' | 'error';
+export type PromptStatus =
+  | 'pending'
+  | 'responding'
+  | 'resolved'
+  | 'stale'
+  | 'unavailable'
+  | 'error';
 
 // ─── Record & view-state interfaces ─────────────────────────────────────────
 
