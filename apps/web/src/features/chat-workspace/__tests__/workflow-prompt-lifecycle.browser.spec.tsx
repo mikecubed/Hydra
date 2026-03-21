@@ -145,7 +145,7 @@ function streamApprovalPrompt(
 
 // ─── Tests ──────────────────────────────────────────────────────────────────
 
-describe('prompt lifecycle browser workflows', () => {
+describe('prompt lifecycle browser workflows: rendering and success flow', () => {
   // ── 1. Pending prompt appears from stream event ──────────────────────────
 
   it('renders a pending prompt card with context and action buttons from a stream event', async () => {
@@ -214,7 +214,9 @@ describe('prompt lifecycle browser workflows', () => {
     expect(screen.queryByTestId('prompt-stale-message')).not.toBeInTheDocument();
     expect(screen.queryByTestId('prompt-unavailable-message')).not.toBeInTheDocument();
   });
+});
 
+describe('prompt lifecycle browser workflows: response terminal states', () => {
   // ── 3. 409 conflict → stale ─────────────────────────────────────────────
 
   it('marks prompt stale when API returns 409 conflict', async () => {
@@ -287,7 +289,9 @@ describe('prompt lifecycle browser workflows', () => {
     expect(screen.getByText(/no longer available/)).toBeInTheDocument();
     expect(screen.queryByTestId('prompt-actions')).not.toBeInTheDocument();
   });
+});
 
+describe('prompt lifecycle browser workflows: recovery and terminal states', () => {
   // ── 5. API error → retry → resolved ─────────────────────────────────────
 
   it('shows error state after API failure and resolves on retry', async () => {
@@ -361,7 +365,9 @@ describe('prompt lifecycle browser workflows', () => {
     expect(screen.getByTestId('prompt-stale-message')).toBeInTheDocument();
     expect(screen.queryByTestId('prompt-actions')).not.toBeInTheDocument();
   });
+});
 
+describe('prompt lifecycle browser workflows: resumed streaming ownership', () => {
   // ── 7. Streaming resumes after approval response ─────────────────────────
 
   it('continues rendering text-delta events after an approval is resolved', async () => {
@@ -390,10 +396,9 @@ describe('prompt lifecycle browser workflows', () => {
 
     const articles = transcriptArticles();
     expect(articles).toHaveLength(1);
-    expect(within(articles[0] as HTMLElement).getByTestId('prompt-summary')).toBeInTheDocument();
-    expect(
-      within(articles[0] as HTMLElement).getByText('Continuing after approval…'),
-    ).toBeInTheDocument();
+    const [article] = articles;
+    expect(within(article).getByTestId('prompt-summary')).toBeInTheDocument();
+    expect(within(article).getByText('Continuing after approval…')).toBeInTheDocument();
 
     // Stream completes — prompt should stay resolved (not regress to stale)
     act(() => {

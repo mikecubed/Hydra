@@ -203,9 +203,7 @@ export function TranscriptTurn({ entry, onRespondToPrompt }: TranscriptTurnProps
 
       <ArtifactList artifacts={entry.artifacts} />
 
-      {entry.prompt != null && (
-        <PromptCard prompt={entry.prompt} onRespond={onRespondToPrompt} />
-      )}
+      {entry.prompt != null && <PromptCard prompt={entry.prompt} onRespond={onRespondToPrompt} />}
     </article>
   );
 }

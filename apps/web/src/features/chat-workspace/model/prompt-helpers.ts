@@ -68,9 +68,7 @@ export async function respondToPrompt(
 
   // Guard: only pending prompts can be responded to
   const conv = store.getState().conversations.get(conversationId);
-  const entry = conv?.entries.find(
-    (e) => e.turnId === turnId && e.prompt?.promptId === promptId,
-  );
+  const entry = conv?.entries.find((e) => e.turnId === turnId && e.prompt?.promptId === promptId);
 
   if (!entry?.prompt || !isPromptActionable(entry.prompt.status)) {
     return { ok: false, error: 'Prompt is not actionable' };

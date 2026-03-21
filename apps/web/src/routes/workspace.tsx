@@ -489,7 +489,10 @@ function useTranscriptLoader(
         store.dispatch({
           type: 'conversation/merge-history',
           conversationId,
-          entries: applyPendingApprovalsToEntries(response.turns.map(toTranscriptEntry), pendingApprovals.approvals),
+          entries: applyPendingApprovalsToEntries(
+            response.turns.map(toTranscriptEntry),
+            pendingApprovals.approvals,
+          ),
           hasMoreHistory: response.hasMore,
         });
       } catch (err: unknown) {
