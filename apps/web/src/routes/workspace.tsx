@@ -190,16 +190,7 @@ function useStreamSubscription({
 
   // Subscribe / unsubscribe scoped to active conversation
   useEffect(() => {
-    const previousId = activeIdRef.current;
     activeIdRef.current = activeConversationId;
-
-    if (previousId != null && previousId !== activeConversationId) {
-      try {
-        streamClient.unsubscribe(previousId);
-      } catch (err: unknown) {
-        console.warn(`[stream] Failed to unsubscribe from ${previousId}:`, err);
-      }
-    }
 
     if (activeConversationId != null) {
       const convState = stateMapRef.current.get(activeConversationId);

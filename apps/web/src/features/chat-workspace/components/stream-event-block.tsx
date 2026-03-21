@@ -186,11 +186,6 @@ function StreamFailedBody({
 
 // ─── Body dispatcher ────────────────────────────────────────────────────────
 
-/** Compile-time exhaustiveness check. Throws at runtime if reached. */
-function assertNeverKind(kind: never): never {
-  throw new Error(`Unhandled stream event kind: ${String(kind)}`);
-}
-
 function EventBody({
   kind,
   payload,
@@ -221,7 +216,8 @@ function EventBody({
     case 'approval-response':
       return null;
     default:
-      return assertNeverKind(kind);
+      // Forward-compatible: unknown kinds from newer servers render the badge only.
+      return null;
   }
 }
 

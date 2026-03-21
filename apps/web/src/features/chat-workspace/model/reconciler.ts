@@ -188,7 +188,10 @@ function applyStreamFailed(
 ): readonly TranscriptEntryState[] {
   const withEntry = ensureTurnEntry(entries, event.turnId, event.timestamp);
   return replaceTurnEntry(withEntry, event.turnId, (e) => {
-    const reason = typeof event.payload['reason'] === 'string' ? event.payload['reason'] : null;
+    const reason =
+      (typeof event.payload['reason'] === 'string' ? event.payload['reason'] : null) ??
+      (typeof event.payload['error'] === 'string' ? event.payload['error'] : null) ??
+      (typeof event.payload['message'] === 'string' ? event.payload['message'] : null);
     const blocks: ContentBlockState[] = [...e.contentBlocks];
     if (reason !== null) {
       blocks.push({

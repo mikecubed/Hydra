@@ -345,6 +345,81 @@ describe('reconcileStreamEvents', () => {
       assert.ok(errorBlock);
       assert.equal(errorBlock.text, 'connection lost');
     });
+
+    it('falls back to payload.error when reason is absent', () => {
+      const existing = makeEntry({
+        entryId: 'turn-1',
+        turnId: 'turn-1',
+        status: 'streaming',
+        contentBlocks: [],
+      });
+      const event = makeEvent({
+        seq: 5,
+        turnId: 'turn-1',
+        kind: 'stream-failed',
+        payload: { error: 'Legacy error path' },
+      });
+      const { entries } = reconcileStreamEvents([existing], [event], createReconcilerState());
+      const errorBlock = entries[0].contentBlocks.find((b) => b.kind === 'status');
+      assert.ok(errorBlock);
+      assert.equal(errorBlock.text, 'Legacy error path');
+    });
+
+    it('falls back to payload.message when both reason and error are absent', () => {
+      const existing = makeEntry({
+        entryId: 'turn-1',
+        turnId: 'turn-1',
+        status: 'streaming',
+        contentBlocks: [],
+      });
+      const event = makeEvent({
+        seq: 5,
+        turnId: 'turn-1',
+        kind: 'stream-failed',
+        payload: { message: 'Something went wrong' },
+      });
+      const { entries } = reconcileStreamEvents([existing], [event], createReconcilerState());
+      const errorBlock = entries[0].contentBlocks.find((b) => b.kind === 'status');
+      assert.ok(errorBlock);
+      assert.equal(errorBlock.text, 'Something went wrong');
+    });
+
+    it('prefers reason over error and message', () => {
+      const existing = makeEntry({
+        entryId: 'turn-1',
+        turnId: 'turn-1',
+        status: 'streaming',
+        contentBlocks: [],
+      });
+      const event = makeEvent({
+        seq: 5,
+        turnId: 'turn-1',
+        kind: 'stream-failed',
+        payload: { reason: 'primary', error: 'secondary', message: 'tertiary' },
+      });
+      const { entries } = reconcileStreamEvents([existing], [event], createReconcilerState());
+      const errorBlock = entries[0].contentBlocks.find((b) => b.kind === 'status');
+      assert.ok(errorBlock);
+      assert.equal(errorBlock.text, 'primary');
+    });
+
+    it('does not append error block when no reason/error/message is present', () => {
+      const existing = makeEntry({
+        entryId: 'turn-1',
+        turnId: 'turn-1',
+        status: 'streaming',
+        contentBlocks: [],
+      });
+      const event = makeEvent({
+        seq: 5,
+        turnId: 'turn-1',
+        kind: 'stream-failed',
+        payload: {},
+      });
+      const { entries } = reconcileStreamEvents([existing], [event], createReconcilerState());
+      assert.equal(entries[0].status, 'failed');
+      assert.equal(entries[0].contentBlocks.length, 0);
+    });
   });
 
   // ── activity-marker ───────────────────────────────────────────────────

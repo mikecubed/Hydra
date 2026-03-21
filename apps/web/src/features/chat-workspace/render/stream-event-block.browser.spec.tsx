@@ -216,14 +216,14 @@ describe('StreamEventBlock — artifact-notice', () => {
 // ─── unknown/fallback ───────────────────────────────────────────────────────
 
 describe('StreamEventBlock — unknown kinds', () => {
-  it('renders gracefully for an unrecognized event kind', () => {
+  it('renders gracefully for a truly unrecognized event kind', () => {
     const event = createEvent({
-      kind: 'checkpoint' as StreamEventKind,
-      payload: { note: 'snapshot saved' },
+      kind: 'never-seen-before' as StreamEventKind,
+      payload: { note: 'some data' },
     });
 
     render(<StreamEventBlock event={event} />);
-    expect(screen.getByText('checkpoint')).toBeTruthy();
+    expect(screen.getByText('never-seen-before')).toBeTruthy();
   });
 
   it('renders cancellation event', () => {

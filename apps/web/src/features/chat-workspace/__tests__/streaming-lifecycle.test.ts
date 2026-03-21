@@ -970,6 +970,43 @@ describe('contiguous resume frontier (gap safety)', () => {
     // Frontier advances through 1, 2, 3
     assert.equal(sub.serverResumeSeq, 3, 'frontier advances through all consumed seqs');
   });
+
+  it('seq=0 is preserved in highestSeenSeq and advances the resume frontier', () => {
+    const store = storeWithConversation('conv-1');
+    let sub = createStreamSubscriptionState();
+
+    // seq 0: stream-started (consumed)
+    sub = applyStreamEventsToConversation(
+      store,
+      'conv-1',
+      [makeEvent({ seq: 0, turnId: 't1', kind: 'stream-started', payload: {} })],
+      sub,
+    );
+
+    assert.equal(sub.highestSeenSeq, 0, 'highestSeenSeq must track seq 0');
+    assert.equal(sub.serverResumeSeq, 0, 'frontier must advance to seq 0');
+  });
+
+  it('seq=0 followed by seq=1 advances frontier through both', () => {
+    const store = storeWithConversation('conv-1');
+    let sub = createStreamSubscriptionState();
+
+    sub = applyStreamEventsToConversation(
+      store,
+      'conv-1',
+      [makeEvent({ seq: 0, turnId: 't1', kind: 'stream-started', payload: {} })],
+      sub,
+    );
+    sub = applyStreamEventsToConversation(
+      store,
+      'conv-1',
+      [makeEvent({ seq: 1, turnId: 't1', kind: 'text-delta', payload: { text: 'hi' } })],
+      sub,
+    );
+
+    assert.equal(sub.highestSeenSeq, 1);
+    assert.equal(sub.serverResumeSeq, 1, 'frontier covers both seq 0 and seq 1');
+  });
 });
 
 // ─── Ack failure must not advance resume cursor ─────────────────────────────
