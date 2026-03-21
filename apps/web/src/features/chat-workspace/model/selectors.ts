@@ -63,6 +63,21 @@ export function selectCanSubmit(state: WorkspaceState): boolean {
   return isDraftSubmittable(draft);
 }
 
+/**
+ * Whether the operator can submit in create mode (no active conversation).
+ *
+ * Requires: non-empty draft text, not currently submitting, and no
+ * outstanding create error. Mirrors the continue-mode `isDraftSubmittable`
+ * guard but operates on the local React state values instead of store state.
+ */
+export function selectCreateModeCanSubmit(
+  createDraftText: string,
+  createSubmitting: boolean,
+  createError: string | null,
+): boolean {
+  return createDraftText.trim().length > 0 && !createSubmitting && createError == null;
+}
+
 /** Ordered list of conversation view states matching `conversationOrder`. */
 export function selectConversationList(state: WorkspaceState): readonly ConversationViewState[] {
   const result: ConversationViewState[] = [];

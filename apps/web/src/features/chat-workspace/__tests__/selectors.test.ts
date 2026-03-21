@@ -16,6 +16,7 @@ import {
   selectActiveLoadState,
   selectVisibleArtifact,
   selectCanSubmit,
+  selectCreateModeCanSubmit,
   selectConversationList,
 } from '../model/selectors.ts';
 
@@ -255,5 +256,37 @@ describe('selectConversationList', () => {
     const list = selectConversationList(state);
     assert.equal(list[0].conversationId, 'conv-b');
     assert.equal(list[1].conversationId, 'conv-a');
+  });
+});
+
+// ─── selectCreateModeCanSubmit ──────────────────────────────────────────────
+
+describe('selectCreateModeCanSubmit', () => {
+  it('returns true when draft has text, not submitting, no error', () => {
+    assert.equal(selectCreateModeCanSubmit('hello', false, null), true);
+  });
+
+  it('returns false when draft text is empty', () => {
+    assert.equal(selectCreateModeCanSubmit('', false, null), false);
+  });
+
+  it('returns false when draft text is whitespace-only', () => {
+    assert.equal(selectCreateModeCanSubmit('   \n\t', false, null), false);
+  });
+
+  it('returns false when currently submitting', () => {
+    assert.equal(selectCreateModeCanSubmit('hello', true, null), false);
+  });
+
+  it('returns false when there is an outstanding create error', () => {
+    assert.equal(selectCreateModeCanSubmit('hello', false, 'Gateway 503'), false);
+  });
+
+  it('returns false when submitting and error both present', () => {
+    assert.equal(selectCreateModeCanSubmit('hello', true, 'some error'), false);
+  });
+
+  it('returns true for text with leading/trailing whitespace', () => {
+    assert.equal(selectCreateModeCanSubmit('  hello  ', false, null), true);
   });
 });

@@ -1,19 +1,27 @@
 import type { Conversation, Turn } from '@hydra/web-contracts';
-import { useEffect, useMemo, useState, useSyncExternalStore, type JSX } from 'react';
+import { useCallback, useEffect, useMemo, useState, useSyncExternalStore, type JSX } from 'react';
 import { WorkspaceLayout } from '../features/chat-workspace/components/workspace-layout.tsx';
+import { ComposerPanel } from '../features/chat-workspace/components/composer-panel.tsx';
 import { createGatewayClient } from '../features/chat-workspace/api/gateway-client.ts';
+import type { GatewayClient } from '../features/chat-workspace/api/gateway-client.ts';
 import {
   type ContentBlockState,
+  createAndSubmitDraft,
   createWorkspaceStore,
+  submitComposerDraft,
   type TranscriptEntryState,
   type WorkspaceConversationRecord,
+  type WorkspaceState,
   type WorkspaceStore,
 } from '../features/chat-workspace/model/workspace-store.ts';
 import {
   selectActiveConversation,
+  selectActiveDraft,
   selectActiveEntries,
   selectActiveLoadState,
+  selectCanSubmit,
   selectConversationList,
+  selectCreateModeCanSubmit,
 } from '../features/chat-workspace/model/selectors.ts';
 
 function useWorkspaceState(store: WorkspaceStore) {
@@ -80,6 +88,93 @@ function toTranscriptEntry(turn: Turn): TranscriptEntryState {
   };
 }
 
+function useComposerProps(
+  store: WorkspaceStore,
+  client: GatewayClient,
+  state: WorkspaceState,
+  isLoadingConversations: boolean,
+  clearConversationError: () => void,
+) {
+  const [createDraftText, setCreateDraftText] = useState('');
+  const [createSubmitting, setCreateSubmitting] = useState(false);
+  const [createError, setCreateError] = useState<string | null>(null);
+
+  const isCreateMode = !isLoadingConversations && state.activeConversationId == null;
+
+  const draft = selectActiveDraft(state);
+  const activeConversation = selectActiveConversation(state);
+  const continueCanSubmit = selectCanSubmit(state);
+  const createCanSubmit = selectCreateModeCanSubmit(createDraftText, createSubmitting, createError);
+
+  const handleDraftChange = useCallback(
+    (text: string) => {
+      const currentId = store.getState().activeConversationId;
+      if (currentId == null) {
+        if (isLoadingConversations) {
+          return;
+        }
+        setCreateDraftText(text);
+        setCreateError(null);
+        return;
+      }
+      store.dispatch({ type: 'draft/set-text', conversationId: currentId, draftText: text });
+    },
+    [isLoadingConversations, store],
+  );
+
+  const handleSubmit = useCallback(() => {
+    const currentId = store.getState().activeConversationId;
+    if (currentId == null) {
+      if (isLoadingConversations) {
+        return;
+      }
+      setCreateSubmitting(true);
+      setCreateError(null);
+      void createAndSubmitDraft({ store, client }, createDraftText)
+        .then(() => {
+          setCreateDraftText('');
+          clearConversationError();
+        })
+        .catch((err: unknown) => {
+          setCreateError(err instanceof Error ? err.message : 'Failed to create conversation');
+        })
+        .finally(() => {
+          setCreateSubmitting(false);
+        });
+      return;
+    }
+    void submitComposerDraft({ store, client });
+  }, [clearConversationError, client, createDraftText, isLoadingConversations, store]);
+
+  const policyLabel = isLoadingConversations
+    ? 'Loading conversations…'
+    : (activeConversation?.controlState.submissionPolicyLabel ?? 'Ready for operator input');
+
+  const effectiveSubmitState = isCreateMode
+    ? createSubmitting
+      ? ('submitting' as const)
+      : createError != null
+        ? ('error' as const)
+        : ('idle' as const)
+    : (draft?.submitState ?? ('idle' as const));
+
+  return {
+    draftText: isCreateMode ? createDraftText : (draft?.draftText ?? ''),
+    submitState: effectiveSubmitState,
+    validationMessage: isCreateMode ? createError : (draft?.validationMessage ?? null),
+    canSubmit: isCreateMode ? createCanSubmit : !isLoadingConversations && continueCanSubmit,
+    policyLabel,
+    activeConversation,
+    onDraftChange: handleDraftChange,
+    onSubmit: handleSubmit,
+    clearCreateState: () => {
+      setCreateError(null);
+      setCreateDraftText('');
+      setCreateSubmitting(false);
+    },
+  };
+}
+
 export function WorkspaceRoute(): JSX.Element {
   const [store] = useState(() => createWorkspaceStore());
   const state = useWorkspaceState(store);
@@ -121,7 +216,6 @@ export function WorkspaceRoute(): JSX.Element {
     }
 
     void loadConversations();
-
     return () => {
       disposed = true;
     };
@@ -180,6 +274,9 @@ export function WorkspaceRoute(): JSX.Element {
   }, [client, state.activeConversationId, store, transcriptRetryNonce]);
 
   const activeConversation = selectActiveConversation(state);
+  const composer = useComposerProps(store, client, state, isLoadingConversations, () => {
+    setConversationErrorMessage(null);
+  });
 
   return (
     <WorkspaceLayout
@@ -193,10 +290,23 @@ export function WorkspaceRoute(): JSX.Element {
       conversationErrorMessage={conversationErrorMessage}
       onSelectConversation={(conversationId) => {
         store.dispatch({ type: 'conversation/select', conversationId });
+        setConversationErrorMessage(null);
+        composer.clearCreateState();
       }}
       onRetryActiveTranscript={() => {
         setTranscriptRetryNonce((value) => value + 1);
       }}
+      composerSlot={
+        <ComposerPanel
+          draftText={composer.draftText}
+          submitState={composer.submitState}
+          validationMessage={composer.validationMessage}
+          canSubmit={composer.canSubmit}
+          policyLabel={composer.policyLabel}
+          onDraftChange={composer.onDraftChange}
+          onSubmit={composer.onSubmit}
+        />
+      }
     />
   );
 }

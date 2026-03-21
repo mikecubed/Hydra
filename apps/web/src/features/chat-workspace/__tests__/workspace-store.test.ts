@@ -5,9 +5,13 @@ import {
   createInitialWorkspaceState,
   createWorkspaceStore,
   reduceWorkspaceState,
+  submitComposerDraft,
+  createAndSubmitDraft,
   type ArtifactViewState,
+  type SubmitDraftDeps,
   type TranscriptEntryState,
   type WorkspaceConversationRecord,
+  type WorkspaceStore,
 } from '../model/workspace-store.ts';
 
 function createConversation(
@@ -368,5 +372,475 @@ describe('createWorkspaceStore', () => {
 
     assert.deepStrictEqual(notifications, ['conversation/select:conv-3']);
     assert.equal(store.getState().activeConversationId, 'conv-4');
+  });
+});
+
+// ─── Submit flow helpers ────────────────────────────────────────────────────
+
+function createMockClient(
+  overrides: Partial<SubmitDraftDeps['client']> = {},
+): SubmitDraftDeps['client'] {
+  return {
+    createConversation:
+      overrides.createConversation ??
+      (async () => ({
+        id: 'new-conv',
+        title: undefined,
+        status: 'active' as const,
+        createdAt: '2026-04-01T00:00:00.000Z',
+        updatedAt: '2026-04-01T00:00:00.000Z',
+        turnCount: 0,
+        pendingInstructionCount: 0,
+      })),
+    submitInstruction:
+      overrides.submitInstruction ??
+      (async () => ({
+        turn: {
+          id: 'turn-1',
+          conversationId: 'conv-1',
+          position: 1,
+          kind: 'operator' as const,
+          attribution: { type: 'operator' as const, label: 'Operator' },
+          instruction: 'hello',
+          status: 'submitted' as const,
+          createdAt: '2026-04-01T00:00:00.000Z',
+        },
+        streamId: 'stream-1',
+      })),
+  };
+}
+
+function storeWithActiveDraft(conversationId: string, draftText: string): WorkspaceStore {
+  const store = createWorkspaceStore();
+  store.dispatch({ type: 'conversation/select', conversationId });
+  if (draftText !== '') {
+    store.dispatch({ type: 'draft/set-text', conversationId, draftText });
+  }
+  return store;
+}
+
+// ─── submitComposerDraft (continue flow) ────────────────────────────────────
+
+describe('submitComposerDraft', () => {
+  it('submits instruction and clears draft on success', async () => {
+    const store = storeWithActiveDraft('conv-1', 'hello agent');
+    const submitted: Array<{ conversationId: string; instruction: string }> = [];
+
+    const client = createMockClient({
+      submitInstruction: async (convId, body) => {
+        submitted.push({ conversationId: convId, instruction: body.instruction });
+        return {
+          turn: {
+            id: 'turn-1',
+            conversationId: convId,
+            position: 1,
+            kind: 'operator' as const,
+            attribution: { type: 'operator' as const, label: 'Operator' },
+            instruction: body.instruction,
+            status: 'submitted' as const,
+            createdAt: '2026-04-01T00:00:00.000Z',
+          },
+          streamId: 'stream-1',
+        };
+      },
+    });
+
+    await submitComposerDraft({ store, client });
+
+    assert.deepStrictEqual(submitted, [{ conversationId: 'conv-1', instruction: 'hello agent' }]);
+    assert.equal(store.getState().drafts.get('conv-1')?.draftText, '');
+    assert.equal(store.getState().drafts.get('conv-1')?.submitState, 'idle');
+    assert.equal(store.getState().drafts.get('conv-1')?.validationMessage, null);
+  });
+
+  it('transitions through submitting state during request', async () => {
+    const store = storeWithActiveDraft('conv-1', 'check state');
+    const observedStates: string[] = [];
+
+    let resolveSubmit!: () => void;
+    const submitPromise = new Promise<void>((resolve) => {
+      resolveSubmit = resolve;
+    });
+
+    const client = createMockClient({
+      submitInstruction: async () => {
+        observedStates.push(store.getState().drafts.get('conv-1')?.submitState ?? 'missing');
+        resolveSubmit();
+        return {
+          turn: {
+            id: 'turn-1',
+            conversationId: 'conv-1',
+            position: 1,
+            kind: 'operator' as const,
+            attribution: { type: 'operator' as const, label: 'Operator' },
+            instruction: 'check state',
+            status: 'submitted' as const,
+            createdAt: '2026-04-01T00:00:00.000Z',
+          },
+          streamId: 'stream-1',
+        };
+      },
+    });
+
+    const result = submitComposerDraft({ store, client });
+    await submitPromise;
+    assert.deepStrictEqual(observedStates, ['submitting']);
+    await result;
+    assert.equal(store.getState().drafts.get('conv-1')?.submitState, 'idle');
+  });
+
+  it('sets error state when submission fails', async () => {
+    const store = storeWithActiveDraft('conv-1', 'will fail');
+
+    const client = createMockClient({
+      submitInstruction: async () => {
+        throw new Error('Gateway 502: Bad Gateway');
+      },
+    });
+
+    await submitComposerDraft({ store, client });
+
+    const draft = store.getState().drafts.get('conv-1');
+    assert.equal(draft?.submitState, 'error');
+    assert.equal(draft?.validationMessage, 'Gateway 502: Bad Gateway');
+    assert.equal(draft?.draftText, 'will fail');
+  });
+
+  it('preserves draft text on submission error', async () => {
+    const store = storeWithActiveDraft('conv-1', 'precious text');
+
+    const client = createMockClient({
+      submitInstruction: async () => {
+        throw new Error('Network error');
+      },
+    });
+
+    await submitComposerDraft({ store, client });
+
+    assert.equal(store.getState().drafts.get('conv-1')?.draftText, 'precious text');
+  });
+
+  it('does nothing when no active conversation', async () => {
+    const store = createWorkspaceStore();
+    let called = false;
+
+    const client = createMockClient({
+      submitInstruction: async () => {
+        called = true;
+        return {
+          turn: {
+            id: 'turn-1',
+            conversationId: 'conv-1',
+            position: 1,
+            kind: 'operator' as const,
+            attribution: { type: 'operator' as const, label: 'Operator' },
+            instruction: '',
+            status: 'submitted' as const,
+            createdAt: '2026-04-01T00:00:00.000Z',
+          },
+          streamId: 'stream-1',
+        };
+      },
+    });
+
+    await submitComposerDraft({ store, client });
+    assert.equal(called, false);
+  });
+
+  it('does nothing when draft is empty', async () => {
+    const store = storeWithActiveDraft('conv-1', '');
+    let called = false;
+
+    const client = createMockClient({
+      submitInstruction: async () => {
+        called = true;
+        return {
+          turn: {
+            id: 'turn-1',
+            conversationId: 'conv-1',
+            position: 1,
+            kind: 'operator' as const,
+            attribution: { type: 'operator' as const, label: 'Operator' },
+            instruction: '',
+            status: 'submitted' as const,
+            createdAt: '2026-04-01T00:00:00.000Z',
+          },
+          streamId: 'stream-1',
+        };
+      },
+    });
+
+    await submitComposerDraft({ store, client });
+    assert.equal(called, false);
+  });
+
+  it('does nothing when draft is whitespace-only', async () => {
+    const store = storeWithActiveDraft('conv-1', '   \n\t  ');
+    let called = false;
+
+    const client = createMockClient({
+      submitInstruction: async () => {
+        called = true;
+        return {
+          turn: {
+            id: 'turn-1',
+            conversationId: 'conv-1',
+            position: 1,
+            kind: 'operator' as const,
+            attribution: { type: 'operator' as const, label: 'Operator' },
+            instruction: '',
+            status: 'submitted' as const,
+            createdAt: '2026-04-01T00:00:00.000Z',
+          },
+          streamId: 'stream-1',
+        };
+      },
+    });
+
+    await submitComposerDraft({ store, client });
+    assert.equal(called, false);
+  });
+
+  it('does nothing when draft is already submitting', async () => {
+    const store = storeWithActiveDraft('conv-1', 'in flight');
+    store.dispatch({
+      type: 'draft/set-submit-state',
+      conversationId: 'conv-1',
+      submitState: 'submitting',
+      validationMessage: null,
+    });
+
+    let called = false;
+    const client = createMockClient({
+      submitInstruction: async () => {
+        called = true;
+        return {
+          turn: {
+            id: 'turn-1',
+            conversationId: 'conv-1',
+            position: 1,
+            kind: 'operator' as const,
+            attribution: { type: 'operator' as const, label: 'Operator' },
+            instruction: '',
+            status: 'submitted' as const,
+            createdAt: '2026-04-01T00:00:00.000Z',
+          },
+          streamId: 'stream-1',
+        };
+      },
+    });
+
+    await submitComposerDraft({ store, client });
+    assert.equal(called, false);
+  });
+
+  it('trims whitespace from instruction before submitting', async () => {
+    const store = storeWithActiveDraft('conv-1', '  padded text  ');
+    const submitted: string[] = [];
+
+    const client = createMockClient({
+      submitInstruction: async (_convId, body) => {
+        submitted.push(body.instruction);
+        return {
+          turn: {
+            id: 'turn-1',
+            conversationId: 'conv-1',
+            position: 1,
+            kind: 'operator' as const,
+            attribution: { type: 'operator' as const, label: 'Operator' },
+            instruction: body.instruction,
+            status: 'submitted' as const,
+            createdAt: '2026-04-01T00:00:00.000Z',
+          },
+          streamId: 'stream-1',
+        };
+      },
+    });
+
+    await submitComposerDraft({ store, client });
+    assert.deepStrictEqual(submitted, ['padded text']);
+  });
+
+  it('uses generic message for non-Error throws', async () => {
+    const store = storeWithActiveDraft('conv-1', 'will fail');
+
+    const client = createMockClient({
+      submitInstruction: async () => {
+        throw { code: 'UNKNOWN' }; // eslint-disable-line @typescript-eslint/only-throw-error -- testing non-Error throw handling
+      },
+    });
+
+    await submitComposerDraft({ store, client });
+
+    assert.equal(store.getState().drafts.get('conv-1')?.validationMessage, 'Submission failed');
+  });
+});
+
+// ─── createAndSubmitDraft (create flow) ─────────────────────────────────────
+
+describe('createAndSubmitDraft', () => {
+  it('creates a conversation, selects it, and submits the instruction', async () => {
+    const store = createWorkspaceStore();
+    const createdIds: string[] = [];
+    const submitted: Array<{ conversationId: string; instruction: string }> = [];
+
+    const client = createMockClient({
+      createConversation: async () => {
+        createdIds.push('new-conv');
+        return {
+          id: 'new-conv',
+          title: undefined,
+          status: 'active' as const,
+          createdAt: '2026-04-01T00:00:00.000Z',
+          updatedAt: '2026-04-01T00:00:00.000Z',
+          turnCount: 0,
+          pendingInstructionCount: 0,
+        };
+      },
+      submitInstruction: async (convId, body) => {
+        submitted.push({ conversationId: convId, instruction: body.instruction });
+        return {
+          turn: {
+            id: 'turn-1',
+            conversationId: convId,
+            position: 1,
+            kind: 'operator' as const,
+            attribution: { type: 'operator' as const, label: 'Operator' },
+            instruction: body.instruction,
+            status: 'submitted' as const,
+            createdAt: '2026-04-01T00:00:00.000Z',
+          },
+          streamId: 'stream-1',
+        };
+      },
+    });
+
+    await createAndSubmitDraft({ store, client }, 'first message');
+
+    assert.deepStrictEqual(createdIds, ['new-conv']);
+    assert.deepStrictEqual(submitted, [
+      { conversationId: 'new-conv', instruction: 'first message' },
+    ]);
+    assert.equal(store.getState().activeConversationId, 'new-conv');
+    assert.equal(store.getState().drafts.get('new-conv')?.draftText, '');
+    assert.equal(store.getState().drafts.get('new-conv')?.submitState, 'idle');
+  });
+
+  it('does nothing when draft text is empty', async () => {
+    const store = createWorkspaceStore();
+    let called = false;
+
+    const client = createMockClient({
+      createConversation: async () => {
+        called = true;
+        return {
+          id: 'new-conv',
+          title: undefined,
+          status: 'active' as const,
+          createdAt: '2026-04-01T00:00:00.000Z',
+          updatedAt: '2026-04-01T00:00:00.000Z',
+          turnCount: 0,
+          pendingInstructionCount: 0,
+        };
+      },
+    });
+
+    await createAndSubmitDraft({ store, client }, '');
+    assert.equal(called, false);
+  });
+
+  it('does nothing when draft text is whitespace-only', async () => {
+    const store = createWorkspaceStore();
+    let called = false;
+
+    const client = createMockClient({
+      createConversation: async () => {
+        called = true;
+        return {
+          id: 'new-conv',
+          title: undefined,
+          status: 'active' as const,
+          createdAt: '2026-04-01T00:00:00.000Z',
+          updatedAt: '2026-04-01T00:00:00.000Z',
+          turnCount: 0,
+          pendingInstructionCount: 0,
+        };
+      },
+    });
+
+    await createAndSubmitDraft({ store, client }, '   ');
+    assert.equal(called, false);
+  });
+
+  it('throws when createConversation fails', async () => {
+    const store = createWorkspaceStore();
+
+    const client = createMockClient({
+      createConversation: async () => {
+        throw new Error('Gateway 503: Service Unavailable');
+      },
+    });
+
+    await assert.rejects(() => createAndSubmitDraft({ store, client }, 'hello'), {
+      message: 'Gateway 503: Service Unavailable',
+    });
+
+    assert.equal(store.getState().activeConversationId, null);
+  });
+
+  it('records submit error in draft when submit fails after create', async () => {
+    const store = createWorkspaceStore();
+
+    const client = createMockClient({
+      createConversation: async () => ({
+        id: 'new-conv',
+        title: undefined,
+        status: 'active' as const,
+        createdAt: '2026-04-01T00:00:00.000Z',
+        updatedAt: '2026-04-01T00:00:00.000Z',
+        turnCount: 0,
+        pendingInstructionCount: 0,
+      }),
+      submitInstruction: async () => {
+        throw new Error('Rate limited');
+      },
+    });
+
+    await createAndSubmitDraft({ store, client }, 'first message');
+
+    // Conversation was created and selected, but submit failed
+    assert.equal(store.getState().activeConversationId, 'new-conv');
+    assert.equal(store.getState().drafts.get('new-conv')?.submitState, 'error');
+    assert.equal(store.getState().drafts.get('new-conv')?.validationMessage, 'Rate limited');
+    // Draft text should be preserved on error
+    assert.equal(store.getState().drafts.get('new-conv')?.draftText, 'first message');
+  });
+
+  it('trims whitespace from draft text', async () => {
+    const store = createWorkspaceStore();
+    const submitted: string[] = [];
+
+    const client = createMockClient({
+      submitInstruction: async (_convId, body) => {
+        submitted.push(body.instruction);
+        return {
+          turn: {
+            id: 'turn-1',
+            conversationId: 'new-conv',
+            position: 1,
+            kind: 'operator' as const,
+            attribution: { type: 'operator' as const, label: 'Operator' },
+            instruction: body.instruction,
+            status: 'submitted' as const,
+            createdAt: '2026-04-01T00:00:00.000Z',
+          },
+          streamId: 'stream-1',
+        };
+      },
+    });
+
+    await createAndSubmitDraft({ store, client }, '  trimmed  ');
+
+    assert.deepStrictEqual(submitted, ['trimmed']);
   });
 });
