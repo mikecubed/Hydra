@@ -6,7 +6,7 @@
  * Drafts are keyed per conversation and never migrate across conversations.
  */
 
-import type { ComposerDraftState, WorkspaceState } from './workspace-store.ts';
+import type { ComposerDraftState, WorkspaceState } from './workspace-types.ts';
 
 /** Look up the draft for a specific conversation, or `undefined` if none exists. */
 export function getDraft(
