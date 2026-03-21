@@ -343,8 +343,12 @@ function attachSocketHandlers(
     callbacks.onSocketError?.();
   };
   ws.onclose = (ev) => {
-    state.socket = null;
-    state.sendQueue = [];
+    // Only clear shared state if this socket is still the active one.
+    // A delayed close from a superseded socket must not wipe a newer connection.
+    if (state.socket === ws) {
+      state.socket = null;
+      state.sendQueue = [];
+    }
     callbacks.onClose?.(ev.code, ev.reason);
   };
 }

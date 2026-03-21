@@ -1007,6 +1007,114 @@ describe('StreamClient', () => {
     });
   });
 
+  // ─── Stale close from superseded socket (reconnect race) ─────────────
+
+  describe('stale close from superseded socket (reconnect race)', () => {
+    it('does not clear state when a delayed onclose fires from an old socket', () => {
+      const client = createStreamClient(defaultOptions());
+      client.connect(noopCallbacks());
+      const ws1 = getSocket();
+      ws1.simulateOpen();
+
+      // Capture the onclose handler the stream client attached to ws1
+      const staleOnclose = ws1.onclose;
+      assert.ok(staleOnclose, 'onclose handler should be attached');
+
+      // Override ws1.close() to NOT fire onclose synchronously (simulates async browser behavior)
+      ws1.close = () => {
+        ws1.readyState = FakeWebSocket.CLOSED;
+      };
+
+      client.close();
+
+      // Reconnect with a new socket
+      lastFakeSocket = null;
+      client.connect(noopCallbacks());
+      const ws2 = getSocket();
+      ws2.simulateOpen();
+
+      assert.equal(client.readyState, FakeWebSocket.OPEN, 'new socket should be OPEN');
+
+      // Simulate the delayed onclose from the old (superseded) socket
+      staleOnclose(fakeCloseEvent(1000, 'Normal closure'));
+
+      // The new connection must still be alive
+      assert.equal(
+        client.readyState,
+        FakeWebSocket.OPEN,
+        'readyState must still be OPEN after stale close',
+      );
+    });
+
+    it('preserves send queue when stale close fires during CONNECTING', () => {
+      const client = createStreamClient(defaultOptions());
+      client.connect(noopCallbacks());
+      const ws1 = getSocket();
+      ws1.simulateOpen();
+
+      const staleOnclose = ws1.onclose;
+      assert.ok(staleOnclose);
+
+      ws1.close = () => {
+        ws1.readyState = FakeWebSocket.CLOSED;
+      };
+
+      client.close();
+
+      // Reconnect — socket is CONNECTING (not yet open)
+      lastFakeSocket = null;
+      client.connect(noopCallbacks());
+      const ws2 = getSocket();
+
+      // Queue a message while CONNECTING
+      client.subscribe('conv-queued');
+      assert.equal(ws2.sent.length, 0, 'message should be queued, not sent');
+
+      // Stale close from old socket fires
+      staleOnclose(fakeCloseEvent(1000, ''));
+
+      // Queue must survive — open the new socket and verify flush
+      ws2.simulateOpen();
+      assert.equal(ws2.sentMessages.length, 1, 'queued message must flush after stale close');
+      assert.deepStrictEqual(ws2.sentMessages[0], {
+        type: 'subscribe',
+        conversationId: 'conv-queued',
+      });
+    });
+
+    it('allows sends on new connection after stale close', () => {
+      const client = createStreamClient(defaultOptions());
+      client.connect(noopCallbacks());
+      const ws1 = getSocket();
+      ws1.simulateOpen();
+
+      const staleOnclose = ws1.onclose;
+      assert.ok(staleOnclose);
+
+      ws1.close = () => {
+        ws1.readyState = FakeWebSocket.CLOSED;
+      };
+
+      client.close();
+
+      lastFakeSocket = null;
+      client.connect(noopCallbacks());
+      const ws2 = getSocket();
+      ws2.simulateOpen();
+
+      // Stale close fires
+      staleOnclose(fakeCloseEvent(1006, 'Abnormal closure'));
+
+      // New connection should still accept sends
+      client.subscribe('conv-after-stale');
+      assert.equal(ws2.sentMessages.length, 1);
+      assert.deepStrictEqual(ws2.sentMessages[0], {
+        type: 'subscribe',
+        conversationId: 'conv-after-stale',
+      });
+    });
+  });
+
   // ─── Multiple subscriptions ─────────────────────────────────────────
 
   describe('multiple subscribe/unsubscribe in a session', () => {
