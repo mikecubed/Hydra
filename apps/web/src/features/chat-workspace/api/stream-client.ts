@@ -297,6 +297,8 @@ function dispatchServerMessage(raw: string, callbacks: StreamClientCallbacks): v
 interface ClientState {
   socket: WebSocketLike | null;
   sendQueue: string[];
+  /** Socket intentionally closed via close() whose async onclose hasn't fired yet. */
+  pendingCloseSocket: WebSocketLike | null;
 }
 
 function requireSocket(state: ClientState): WebSocketLike {
@@ -346,14 +348,19 @@ function attachSocketHandlers(
     callbacks.onSocketError?.();
   };
   ws.onclose = (ev) => {
-    // Only clear shared state and notify consumers if this socket is still
-    // the active one.  A delayed close from a superseded socket must not
-    // wipe a newer connection *or* surface a stale disconnect to the UI.
     if (state.socket === ws) {
+      // Server-initiated close of the active socket.
       state.socket = null;
       state.sendQueue = [];
       callbacks.onClose?.(ev.code, ev.reason);
+    } else if (state.pendingCloseSocket === ws) {
+      // Client-initiated close() already cleared state.socket; the browser's
+      // async onclose just arrived.  Notify consumers but don't touch the
+      // (possibly new) active socket.
+      state.pendingCloseSocket = null;
+      callbacks.onClose?.(ev.code, ev.reason);
     }
+    // Otherwise this is a stale close from a fully superseded socket — ignore.
   };
 }
 
@@ -369,7 +376,7 @@ export function createStreamClient(options: StreamClientOptions): StreamClient {
   const createWs =
     options.createWebSocket ?? ((url: string) => new WebSocket(url) as WebSocketLike);
 
-  const state: ClientState = { socket: null, sendQueue: [] };
+  const state: ClientState = { socket: null, sendQueue: [], pendingCloseSocket: null };
 
   return {
     connect(callbacks) {
@@ -378,6 +385,8 @@ export function createStreamClient(options: StreamClientOptions): StreamClient {
       }
 
       state.sendQueue = [];
+      // A new connection supersedes any socket pending its async onclose.
+      state.pendingCloseSocket = null;
       const ws = createWs(baseUrl);
       state.socket = ws;
       attachSocketHandlers(state, ws, callbacks);
@@ -400,6 +409,7 @@ export function createStreamClient(options: StreamClientOptions): StreamClient {
     close() {
       if (state.socket === null) return;
       state.sendQueue = [];
+      state.pendingCloseSocket = state.socket;
       state.socket.close();
       state.socket = null;
     },

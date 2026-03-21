@@ -1294,6 +1294,84 @@ describe('StreamClient', () => {
       assert.equal(closeCalls[0].code, 1001);
       assert.equal(closeCalls[0].reason, 'Going away');
     });
+
+    it('invokes onClose when client-initiated close() triggers an async onclose', () => {
+      const closeCalls: Array<{ code: number; reason: string }> = [];
+      const client = createStreamClient(defaultOptions());
+
+      client.connect(
+        noopCallbacks({ onClose: (code, reason) => closeCalls.push({ code, reason }) }),
+      );
+      const ws1 = getSocket();
+      ws1.simulateOpen();
+
+      // Capture the onclose handler before overriding close()
+      const capturedOnclose = ws1.onclose;
+      assert.ok(capturedOnclose, 'onclose handler should be attached');
+
+      // Override close() to NOT fire onclose synchronously (simulates async browser behavior)
+      ws1.close = () => {
+        ws1.readyState = FakeWebSocket.CLOSED;
+      };
+
+      client.close();
+
+      // The socket is now closed, but the browser hasn't fired onclose yet.
+      // When it does, the callback must still be invoked.
+      capturedOnclose(fakeCloseEvent(1000, 'Normal closure'));
+
+      assert.equal(
+        closeCalls.length,
+        1,
+        'onClose must fire for async close of intentionally-closed socket',
+      );
+      assert.equal(closeCalls[0].code, 1000);
+      assert.equal(closeCalls[0].reason, 'Normal closure');
+    });
+
+    it('suppresses async onclose from intentionally-closed socket once a new connection supersedes it', () => {
+      const closeCalls: Array<{ code: number; reason: string }> = [];
+      const client = createStreamClient(defaultOptions());
+
+      client.connect(
+        noopCallbacks({ onClose: (code, reason) => closeCalls.push({ code, reason }) }),
+      );
+      const ws1 = getSocket();
+      ws1.simulateOpen();
+
+      const capturedOnclose = ws1.onclose;
+      assert.ok(capturedOnclose);
+
+      // Suppress synchronous onclose
+      ws1.close = () => {
+        ws1.readyState = FakeWebSocket.CLOSED;
+      };
+      client.close();
+
+      // Reconnect — this supersedes the old socket entirely
+      const reconnectCloseCalls: Array<{ code: number; reason: string }> = [];
+      lastFakeSocket = null;
+      client.connect(
+        noopCallbacks({ onClose: (code, reason) => reconnectCloseCalls.push({ code, reason }) }),
+      );
+      const ws2 = getSocket();
+      ws2.simulateOpen();
+
+      // Now the old socket's async onclose fires — must be suppressed (superseded)
+      capturedOnclose(fakeCloseEvent(1000, 'Normal closure'));
+
+      assert.equal(
+        closeCalls.length,
+        0,
+        'superseded socket onClose must not fire original callback',
+      );
+      assert.equal(
+        reconnectCloseCalls.length,
+        0,
+        'superseded socket onClose must not fire reconnect callback',
+      );
+      assert.equal(client.readyState, FakeWebSocket.OPEN, 'new connection must remain OPEN');
+    });
   });
 
   // ─── Multiple subscriptions ─────────────────────────────────────────
