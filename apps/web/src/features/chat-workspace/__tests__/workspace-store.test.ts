@@ -25,6 +25,7 @@ function createEntry(overrides: Partial<TranscriptEntryState> = {}): TranscriptE
     entryId: 'entry-1',
     kind: 'turn',
     turnId: 'turn-1',
+    attributionLabel: null,
     status: 'completed',
     timestamp: '2026-03-20T00:00:00.000Z',
     contentBlocks: [],

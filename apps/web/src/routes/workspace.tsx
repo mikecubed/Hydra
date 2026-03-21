@@ -70,6 +70,7 @@ function toTranscriptEntry(turn: Turn): TranscriptEntryState {
     entryId: turn.id,
     kind: 'turn',
     turnId: turn.id,
+    attributionLabel: turn.attribution.label,
     status: turn.status,
     timestamp: turn.completedAt ?? turn.createdAt,
     contentBlocks: toContentBlocks(turn),

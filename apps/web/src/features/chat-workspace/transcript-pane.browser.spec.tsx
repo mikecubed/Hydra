@@ -30,6 +30,7 @@ function createEntry(overrides: Partial<TranscriptEntryState> = {}): TranscriptE
     entryId: 'entry-1',
     kind: 'turn',
     turnId: 'turn-1',
+    attributionLabel: null,
     status: 'completed',
     timestamp: '2026-03-20T12:00:00.000Z',
     contentBlocks: [],
@@ -124,6 +125,14 @@ describe('TranscriptTurn', () => {
 
     expect(screen.getByText('in-progress')).toBeTruthy();
   });
+
+  it('shows the attribution label when present', () => {
+    const entry = createEntry({ attributionLabel: 'Codex' });
+
+    render(<TranscriptTurn entry={entry} />);
+
+    expect(screen.getByText('Codex')).toBeTruthy();
+  });
 });
 
 // ─── TranscriptPane ─────────────────────────────────────────────────────────
@@ -196,6 +205,107 @@ describe('TranscriptPane', () => {
 
     expect(await screen.findByText('Summarize the latest changes.')).toBeTruthy();
     expect(screen.getByText('The latest changes add conversation browsing.')).toBeTruthy();
+    expect(screen.getByText('Operator')).toBeTruthy();
+    expect(screen.getByText('Codex')).toBeTruthy();
+  });
+
+  it('replaces transcript history when switching conversations', async () => {
+    const conversations: ListConversationsResponse = {
+      conversations: [
+        {
+          id: 'conv-1',
+          title: 'Primary conversation',
+          status: 'active',
+          createdAt: '2026-03-20T00:00:00.000Z',
+          updatedAt: '2026-03-20T12:00:00.000Z',
+          turnCount: 1,
+          pendingInstructionCount: 0,
+        },
+        {
+          id: 'conv-2',
+          title: 'Release follow-up',
+          status: 'active',
+          createdAt: '2026-03-20T00:05:00.000Z',
+          updatedAt: '2026-03-20T12:05:00.000Z',
+          turnCount: 1,
+          pendingInstructionCount: 0,
+        },
+      ],
+      totalCount: 2,
+    };
+    const firstHistory: LoadTurnHistoryResponse = {
+      turns: [
+        {
+          id: 'turn-1',
+          conversationId: 'conv-1',
+          position: 1,
+          kind: 'operator',
+          attribution: { type: 'operator', label: 'Operator' },
+          instruction: 'First transcript entry',
+          status: 'completed',
+          createdAt: '2026-03-20T12:00:00.000Z',
+          completedAt: '2026-03-20T12:00:10.000Z',
+        },
+      ],
+      totalCount: 1,
+      hasMore: false,
+    };
+    const secondHistory: LoadTurnHistoryResponse = {
+      turns: [
+        {
+          id: 'turn-2',
+          conversationId: 'conv-2',
+          position: 1,
+          kind: 'system',
+          attribution: { type: 'agent', agentId: 'codex', label: 'Codex' },
+          response: 'Second transcript entry',
+          status: 'completed',
+          createdAt: '2026-03-20T12:01:00.000Z',
+          completedAt: '2026-03-20T12:01:10.000Z',
+        },
+      ],
+      totalCount: 1,
+      hasMore: false,
+    };
+
+    fetchSpy.mockImplementation(async (input) => {
+      if (input === '/conversations?status=active&limit=20') {
+        return new Response(JSON.stringify(conversations), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        });
+      }
+
+      if (input === '/conversations/conv-1/turns?limit=50') {
+        return new Response(JSON.stringify(firstHistory), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        });
+      }
+
+      if (input === '/conversations/conv-2/turns?limit=50') {
+        return new Response(JSON.stringify(secondHistory), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        });
+      }
+
+      throw new Error(`Unexpected fetch input: ${String(input)}`);
+    });
+    vi.stubGlobal('fetch', fetchSpy);
+
+    render(<AppProviders />);
+
+    expect(await screen.findByText('First transcript entry')).toBeTruthy();
+
+    screen.getByRole('button', { name: /release follow-up/i }).click();
+
+    expect(await screen.findByText('Second transcript entry')).toBeTruthy();
+    expect(screen.queryByText('First transcript entry')).toBeNull();
+    expect(fetchSpy).toHaveBeenCalledWith(
+      '/conversations/conv-2/turns?limit=50',
+      expect.objectContaining({ credentials: 'include', method: 'GET' }),
+    );
   });
 
   it('shows an empty state when no conversation is active', () => {

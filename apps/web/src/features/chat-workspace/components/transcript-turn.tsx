@@ -65,6 +65,7 @@ export function TranscriptTurn({ entry }: TranscriptTurnProps): JSX.Element {
     <article style={turnStyle}>
       <header style={headerStyle}>
         <span style={kindBadgeStyle}>{entry.kind}</span>
+        {entry.attributionLabel != null && <span>{entry.attributionLabel}</span>}
         <span>{entry.status}</span>
         {entry.timestamp != null && (
           <time dateTime={entry.timestamp}>{formatTimestamp(entry.timestamp)}</time>
