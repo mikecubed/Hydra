@@ -97,7 +97,7 @@ _Status note_: post-Phase-1 maintenance also landed on the active branch, splitt
 - [x] T022 [P] [US3] **TDD:** implement prompt lifecycle state handling in `apps/web/src/features/chat-workspace/model/workspace-store.ts` and `apps/web/src/features/chat-workspace/model/reconciler.ts`.
 - [x] T023 [US3] Implement inline prompt presentation in `apps/web/src/features/chat-workspace/components/prompt-card.tsx` and `apps/web/src/features/chat-workspace/components/transcript-turn.tsx`.
 - [x] T024 [US3] Wire prompt actions and resolved-state visibility in `apps/web/src/features/chat-workspace/components/control-bar.tsx` and `apps/web/src/features/chat-workspace/components/prompt-card.tsx`.
-- [ ] T025 [US3] Add prompt lifecycle coverage in `apps/web/src/features/chat-workspace/__tests__/prompt-card.test.ts` and `apps/web/src/features/chat-workspace/__tests__/workspace-e2e.test.ts`.
+- [x] T025 [US3] Add prompt lifecycle coverage in `apps/web/src/features/chat-workspace/__tests__/prompt-card.test.ts` and `apps/web/src/features/chat-workspace/__tests__/workflow-prompt-lifecycle.browser.spec.tsx` (browser E2E: approve flow, 409 stale, 404 unavailable, error/retry, auto-stale on turn complete, resumed streaming after approval).
 - [ ] T026 [US3] Run the phase quality gate from the repo root with `npm run quality` and `npm test` after inline prompt handling is green.
 
 **Checkpoint**: User Stories 1–3 provide the minimum supervised chat workspace.
