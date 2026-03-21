@@ -5,6 +5,12 @@ import { AppProviders } from '../../app/providers.tsx';
 
 const fetchSpy = vi.fn<typeof fetch>();
 
+const emptyHistoryResponse = {
+  turns: [],
+  totalCount: 0,
+  hasMore: false,
+};
+
 afterEach(() => {
   fetchSpy.mockReset();
   vi.unstubAllGlobals();
@@ -19,6 +25,24 @@ function jsonResponse(body: unknown, status = 200, statusText?: string): Respons
   });
 }
 
+function requestUrl(input: RequestInfo | URL): string {
+  if (typeof input === 'string') {
+    return input;
+  }
+
+  if (input instanceof URL) {
+    return input.toString();
+  }
+
+  return input.url;
+}
+
+function installFetchStub(handler: (url: string, init: RequestInit | undefined) => Response): void {
+  fetchSpy.mockImplementation((input, init) => Promise.resolve(handler(requestUrl(input), init)));
+  vi.stubGlobal('fetch', fetchSpy);
+}
+
+// eslint-disable-next-line max-lines-per-function
 describe('workspace conversation browsing', () => {
   it('clears the initial list error after a successful create flow', async () => {
     const createResponse = {
@@ -43,20 +67,8 @@ describe('workspace conversation browsing', () => {
       },
       streamId: 'stream-1',
     };
-    const emptyHistoryResponse = {
-      turns: [],
-      totalCount: 0,
-      hasMore: false,
-    };
 
-    fetchSpy.mockImplementation(async (input, init) => {
-      const url =
-        typeof input === 'string'
-          ? input
-          : input instanceof URL
-            ? input.toString()
-            : input.url;
-
+    installFetchStub((url, init) => {
       if (url === '/conversations?status=active&limit=20') {
         return jsonResponse({ message: 'Gateway down' }, 503, 'Service Unavailable');
       }
@@ -73,16 +85,16 @@ describe('workspace conversation browsing', () => {
         return jsonResponse(emptyHistoryResponse);
       }
 
-      throw new Error(`Unexpected fetch input: ${String(url)}`);
+      throw new Error(`Unexpected fetch input: ${url}`);
     });
-    vi.stubGlobal('fetch', fetchSpy);
 
     render(<AppProviders />);
 
     expect((await screen.findByRole('alert')).textContent).toContain('Service Unavailable');
 
-    const textbox = screen.getByRole('textbox', { name: /instruction/i });
-    fireEvent.change(textbox, { target: { value: 'Create a conversation anyway' } });
+    fireEvent.change(screen.getByRole('textbox', { name: /instruction/i }), {
+      target: { value: 'Create a conversation anyway' },
+    });
     fireEvent.click(screen.getByRole('button', { name: /send/i }));
 
     expect(await screen.findByRole('button', { name: /fresh conversation/i })).toBeTruthy();
@@ -98,8 +110,8 @@ describe('workspace conversation browsing', () => {
     };
 
     fetchSpy.mockImplementation(
-      async () =>
-        await new Promise<Response>((resolve) => {
+      () =>
+        new Promise<Response>((resolve) => {
           resolveList = resolve;
         }),
     );
@@ -108,10 +120,10 @@ describe('workspace conversation browsing', () => {
     render(<AppProviders />);
 
     const textbox = await screen.findByRole('textbox', { name: /instruction/i });
-    const sendButton = screen.getByRole('button', { name: /send/i }) as HTMLButtonElement;
+    const sendButton = screen.getByRole('button', { name: /send/i });
 
     fireEvent.change(textbox, { target: { value: 'Create the first conversation' } });
-    expect(sendButton.disabled).toBe(true);
+    expect(sendButton.getAttribute('disabled')).not.toBeNull();
     expect(screen.getAllByText('Loading conversations…')).toHaveLength(2);
 
     resolveList?.(jsonResponse(listResponse));
@@ -120,9 +132,7 @@ describe('workspace conversation browsing', () => {
     fireEvent.change(screen.getByRole('textbox', { name: /instruction/i }), {
       target: { value: 'Create the first conversation' },
     });
-    expect((screen.getByRole('button', { name: /send/i }) as HTMLButtonElement).disabled).toBe(
-      false,
-    );
+    expect(screen.getByRole('button', { name: /send/i }).getAttribute('disabled')).toBeNull();
   });
 
   it('loads conversations, auto-selects the first one, and switches visible context', async () => {
@@ -151,28 +161,22 @@ describe('workspace conversation browsing', () => {
       ],
       totalCount: 2,
     };
-    const emptyHistoryResponse = {
-      turns: [],
-      totalCount: 0,
-      hasMore: false,
-    };
 
-    fetchSpy.mockImplementation(async (input) => {
-      if (input === '/conversations?status=active&limit=20') {
+    installFetchStub((url) => {
+      if (url === '/conversations?status=active&limit=20') {
         return jsonResponse(response);
       }
 
-      if (input === '/conversations/conv-1/turns?limit=50') {
+      if (url === '/conversations/conv-1/turns?limit=50') {
         return jsonResponse(emptyHistoryResponse);
       }
 
-      if (input === '/conversations/conv-2/turns?limit=50') {
+      if (url === '/conversations/conv-2/turns?limit=50') {
         return jsonResponse(emptyHistoryResponse);
       }
 
-      throw new Error(`Unexpected fetch input: ${String(input)}`);
+      throw new Error(`Unexpected fetch input: ${url}`);
     });
-    vi.stubGlobal('fetch', fetchSpy);
 
     render(<AppProviders />);
 

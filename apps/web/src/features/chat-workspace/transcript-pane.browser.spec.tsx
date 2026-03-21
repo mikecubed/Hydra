@@ -25,6 +25,23 @@ function codeBlock(text: string, blockId = 'blk-code-1'): ContentBlockState {
   return { blockId, kind: 'code', text, metadata: null };
 }
 
+function requestUrl(input: RequestInfo | URL): string {
+  if (typeof input === 'string') {
+    return input;
+  }
+
+  if (input instanceof URL) {
+    return input.toString();
+  }
+
+  return input.url;
+}
+
+function installFetchStub(handler: (url: string) => Response): void {
+  fetchSpy.mockImplementation((input) => Promise.resolve(handler(requestUrl(input))));
+  vi.stubGlobal('fetch', fetchSpy);
+}
+
 function createEntry(overrides: Partial<TranscriptEntryState> = {}): TranscriptEntryState {
   return {
     entryId: 'entry-1',
@@ -56,10 +73,7 @@ describe('TranscriptTurn', () => {
 
   it('renders multiple content blocks in order', () => {
     const entry = createEntry({
-      contentBlocks: [
-        textBlock('First block', 'blk-1'),
-        textBlock('Second block', 'blk-2'),
-      ],
+      contentBlocks: [textBlock('First block', 'blk-1'), textBlock('Second block', 'blk-2')],
     });
 
     render(<TranscriptTurn entry={entry} />);
@@ -137,6 +151,7 @@ describe('TranscriptTurn', () => {
 
 // ─── TranscriptPane ─────────────────────────────────────────────────────────
 
+// eslint-disable-next-line max-lines-per-function
 describe('TranscriptPane', () => {
   it('loads transcript history for the auto-selected active conversation', async () => {
     const conversations: ListConversationsResponse = {
@@ -182,24 +197,23 @@ describe('TranscriptPane', () => {
       hasMore: false,
     };
 
-    fetchSpy.mockImplementation(async (input) => {
-      if (input === '/conversations?status=active&limit=20') {
+    installFetchStub((url) => {
+      if (url === '/conversations?status=active&limit=20') {
         return new Response(JSON.stringify(conversations), {
           status: 200,
           headers: { 'Content-Type': 'application/json' },
         });
       }
 
-      if (input === '/conversations/conv-1/turns?limit=50') {
+      if (url === '/conversations/conv-1/turns?limit=50') {
         return new Response(JSON.stringify(history), {
           status: 200,
           headers: { 'Content-Type': 'application/json' },
         });
       }
 
-      throw new Error(`Unexpected fetch input: ${String(input)}`);
+      throw new Error(`Unexpected fetch input: ${url}`);
     });
-    vi.stubGlobal('fetch', fetchSpy);
 
     render(<AppProviders />);
 
@@ -242,33 +256,35 @@ describe('TranscriptPane', () => {
       hasMore: true,
     };
 
-    fetchSpy.mockImplementation(async (input) => {
-      if (input === '/conversations?status=active&limit=20') {
+    installFetchStub((url) => {
+      if (url === '/conversations?status=active&limit=20') {
         return new Response(JSON.stringify(conversations), {
           status: 200,
           headers: { 'Content-Type': 'application/json' },
         });
       }
 
-      if (input === '/conversations/conv-1/turns?limit=50') {
+      if (url === '/conversations/conv-1/turns?limit=50') {
         return new Response(JSON.stringify(history), {
           status: 200,
           headers: { 'Content-Type': 'application/json' },
         });
       }
 
-      throw new Error(`Unexpected fetch input: ${String(input)}`);
+      throw new Error(`Unexpected fetch input: ${url}`);
     });
-    vi.stubGlobal('fetch', fetchSpy);
 
     render(<AppProviders />);
 
     expect(await screen.findByText('Newest visible turn')).toBeTruthy();
     expect(
-      screen.getByText('Showing the most recent transcript entries. Older history is not loaded yet.'),
+      screen.getByText(
+        'Showing the most recent transcript entries. Older history is not loaded yet.',
+      ),
     ).toBeTruthy();
   });
 
+  // eslint-disable-next-line max-lines-per-function
   it('replaces transcript history when switching conversations', async () => {
     const conversations: ListConversationsResponse = {
       conversations: [
@@ -328,31 +344,30 @@ describe('TranscriptPane', () => {
       hasMore: false,
     };
 
-    fetchSpy.mockImplementation(async (input) => {
-      if (input === '/conversations?status=active&limit=20') {
+    installFetchStub((url) => {
+      if (url === '/conversations?status=active&limit=20') {
         return new Response(JSON.stringify(conversations), {
           status: 200,
           headers: { 'Content-Type': 'application/json' },
         });
       }
 
-      if (input === '/conversations/conv-1/turns?limit=50') {
+      if (url === '/conversations/conv-1/turns?limit=50') {
         return new Response(JSON.stringify(firstHistory), {
           status: 200,
           headers: { 'Content-Type': 'application/json' },
         });
       }
 
-      if (input === '/conversations/conv-2/turns?limit=50') {
+      if (url === '/conversations/conv-2/turns?limit=50') {
         return new Response(JSON.stringify(secondHistory), {
           status: 200,
           headers: { 'Content-Type': 'application/json' },
         });
       }
 
-      throw new Error(`Unexpected fetch input: ${String(input)}`);
+      throw new Error(`Unexpected fetch input: ${url}`);
     });
-    vi.stubGlobal('fetch', fetchSpy);
 
     render(<AppProviders />);
 
@@ -369,13 +384,7 @@ describe('TranscriptPane', () => {
   });
 
   it('shows an empty state when no conversation is active', () => {
-    render(
-      <TranscriptPane
-        entries={[]}
-        loadState={null}
-        hasActiveConversation={false}
-      />,
-    );
+    render(<TranscriptPane entries={[]} loadState={null} hasActiveConversation={false} />);
 
     expect(screen.getByText('Select a conversation to view its transcript.')).toBeTruthy();
   });
@@ -414,15 +423,15 @@ describe('TranscriptPane', () => {
     };
     let historyAttempts = 0;
 
-    fetchSpy.mockImplementation(async (input) => {
-      if (input === '/conversations?status=active&limit=20') {
+    installFetchStub((url) => {
+      if (url === '/conversations?status=active&limit=20') {
         return new Response(JSON.stringify(conversations), {
           status: 200,
           headers: { 'Content-Type': 'application/json' },
         });
       }
 
-      if (input === '/conversations/conv-1/turns?limit=50') {
+      if (url === '/conversations/conv-1/turns?limit=50') {
         historyAttempts += 1;
         if (historyAttempts === 1) {
           return new Response(JSON.stringify({ message: 'Temporary failure' }), {
@@ -438,9 +447,8 @@ describe('TranscriptPane', () => {
         });
       }
 
-      throw new Error(`Unexpected fetch input: ${String(input)}`);
+      throw new Error(`Unexpected fetch input: ${url}`);
     });
-    vi.stubGlobal('fetch', fetchSpy);
 
     render(<AppProviders />);
 
@@ -452,25 +460,13 @@ describe('TranscriptPane', () => {
   });
 
   it('shows a loading indicator when loadState is loading', () => {
-    render(
-      <TranscriptPane
-        entries={[]}
-        loadState="loading"
-        hasActiveConversation={true}
-      />,
-    );
+    render(<TranscriptPane entries={[]} loadState="loading" hasActiveConversation={true} />);
 
     expect(screen.getByText('Loading transcript…')).toBeTruthy();
   });
 
   it('shows an empty-entries message when conversation has no entries', () => {
-    render(
-      <TranscriptPane
-        entries={[]}
-        loadState="ready"
-        hasActiveConversation={true}
-      />,
-    );
+    render(<TranscriptPane entries={[]} loadState="ready" hasActiveConversation={true} />);
 
     expect(screen.getByText('No messages yet.')).toBeTruthy();
   });
@@ -487,13 +483,7 @@ describe('TranscriptPane', () => {
       }),
     ];
 
-    render(
-      <TranscriptPane
-        entries={entries}
-        loadState="ready"
-        hasActiveConversation={true}
-      />,
-    );
+    render(<TranscriptPane entries={entries} loadState="ready" hasActiveConversation={true} />);
 
     expect(screen.getByText('First turn')).toBeTruthy();
     expect(screen.getByText('Second turn')).toBeTruthy();
@@ -515,13 +505,7 @@ describe('TranscriptPane', () => {
       }),
     ];
 
-    render(
-      <TranscriptPane
-        entries={entries}
-        loadState="ready"
-        hasActiveConversation={true}
-      />,
-    );
+    render(<TranscriptPane entries={entries} loadState="ready" hasActiveConversation={true} />);
 
     const articles = screen.getAllByRole('article');
     expect(articles).toHaveLength(3);
@@ -531,37 +515,19 @@ describe('TranscriptPane', () => {
   });
 
   it('uses the transcript region role for the entries container', () => {
-    render(
-      <TranscriptPane
-        entries={[]}
-        loadState="ready"
-        hasActiveConversation={true}
-      />,
-    );
+    render(<TranscriptPane entries={[]} loadState="ready" hasActiveConversation={true} />);
 
     expect(screen.getByRole('log')).toBeTruthy();
   });
 
   it('shows idle state (no entries message) when loadState is idle with active conversation', () => {
-    render(
-      <TranscriptPane
-        entries={[]}
-        loadState="idle"
-        hasActiveConversation={true}
-      />,
-    );
+    render(<TranscriptPane entries={[]} loadState="idle" hasActiveConversation={true} />);
 
     expect(screen.getByText('No messages yet.')).toBeTruthy();
   });
 
   it('shows error state when loadState is error', () => {
-    render(
-      <TranscriptPane
-        entries={[]}
-        loadState="error"
-        hasActiveConversation={true}
-      />,
-    );
+    render(<TranscriptPane entries={[]} loadState="error" hasActiveConversation={true} />);
 
     expect(screen.getByText('Failed to load transcript.')).toBeTruthy();
   });
