@@ -178,18 +178,33 @@ afterEach(() => {
 // ─── Helpers for common WS handshake ────────────────────────────────────────
 
 /**
- * Open the latest FakeWebSocket and confirm subscription for a conversation.
- * Returns the socket so callers can send further messages.
+ * Open the latest FakeWebSocket, verify the outbound subscribe frame, then
+ * simulate the server's `subscribed` ack.  Returns the socket for further use.
+ *
+ * This proves the app actually sends the correct subscribe message before we
+ * hand-feed the server acknowledgement.
  */
 function openAndSubscribe(conversationId: string, currentSeq = 0): FakeWebSocket {
   const ws = latestSocket();
   act(() => {
     ws.simulateOpen();
   });
+
+  // The client MUST have sent exactly one subscribe frame for this conversation
+  const subFrames = ws.sentMessages.filter(
+    (m) => m['type'] === 'subscribe' && m['conversationId'] === conversationId,
+  );
+  expect(subFrames.length).toBe(1);
+
   act(() => {
     ws.simulateMessage({ type: 'subscribed', conversationId, currentSeq });
   });
   return ws;
+}
+
+/** All `<article>` elements in the DOM (one per transcript entry). */
+function transcriptArticles(): HTMLElement[] {
+  return screen.queryAllByRole('article');
 }
 
 // ─── Tests ──────────────────────────────────────────────────────────────────
@@ -266,6 +281,11 @@ describe('workspace live-stream e2e workflows', () => {
     // Content persists after completion
     expect(screen.getByText('Hello world!')).toBeTruthy();
     expect(screen.getByText('completed')).toBeTruthy();
+
+    // ── Transcript structure: single article with Claude attribution ──
+    const articles = transcriptArticles();
+    expect(articles.length).toBe(1);
+    expect(screen.getByText('Claude')).toBeTruthy();
   });
 
   // ── 2. Conversation switching ───────────────────────────────────────────
@@ -318,6 +338,26 @@ describe('workspace live-stream e2e workflows', () => {
     // Conv-a content should not be visible
     expect(screen.queryByText('Alpha response')).toBeNull();
 
+    // ── Subscription lifecycle: unsubscribe(old) → subscribe(new) ──
+    const unsubA = ws.sentMessages.filter(
+      (m) => m['type'] === 'unsubscribe' && m['conversationId'] === 'conv-a',
+    );
+    expect(unsubA.length).toBeGreaterThanOrEqual(1);
+
+    const subB = ws.sentMessages.filter(
+      (m) => m['type'] === 'subscribe' && m['conversationId'] === 'conv-b',
+    );
+    expect(subB.length).toBe(1);
+
+    // Unsubscribe(conv-a) must precede subscribe(conv-b) in the wire order
+    const unsubAIdx = ws.sentMessages.findIndex(
+      (m) => m['type'] === 'unsubscribe' && m['conversationId'] === 'conv-a',
+    );
+    const subBIdx = ws.sentMessages.findIndex(
+      (m) => m['type'] === 'subscribe' && m['conversationId'] === 'conv-b',
+    );
+    expect(unsubAIdx).toBeLessThan(subBIdx);
+
     // Confirm subscribe to conv-b and stream its own content
     act(() => {
       ws.simulateMessage({ type: 'subscribed', conversationId: 'conv-b', currentSeq: 0 });
@@ -364,7 +404,23 @@ describe('workspace live-stream e2e workflows', () => {
         return jsonResponse(submitResponse('conv-new', 'turn-new', 'Build me a thing'));
       }
       if (url === '/conversations/conv-new/turns?limit=50') {
-        return jsonResponse(EMPTY_HISTORY);
+        // After creation the history includes the submitted operator instruction
+        return jsonResponse({
+          turns: [
+            {
+              id: 'turn-new',
+              conversationId: 'conv-new',
+              position: 1,
+              kind: 'operator',
+              attribution: { type: 'operator', label: 'Operator' },
+              instruction: 'Build me a thing',
+              status: 'submitted',
+              createdAt: '2026-07-01T00:00:01.000Z',
+            },
+          ],
+          totalCount: 1,
+          hasMore: false,
+        });
       }
       throw new Error(`Unexpected fetch: ${url}`);
     });
@@ -412,6 +468,24 @@ describe('workspace live-stream e2e workflows', () => {
     await vi.waitFor(() => {
       expect(screen.queryByText('streaming…')).toBeNull();
     });
+
+    // ── Transcript ownership: operator instruction + agent reply are distinct ──
+    const articles = transcriptArticles();
+    expect(articles.length).toBeGreaterThanOrEqual(2);
+
+    // Operator instruction is a visible entry with correct attribution
+    expect(screen.getByText('Build me a thing')).toBeTruthy();
+    expect(screen.getByText('Operator')).toBeTruthy();
+
+    // Agent reply carries Claude attribution
+    expect(screen.getByText('Claude')).toBeTruthy();
+
+    // Instruction and agent reply live in separate articles (not collapsed)
+    const instructionArticle = screen.getByText('Build me a thing').closest('article');
+    const agentArticle = screen.getByText('Here is your thing.').closest('article');
+    expect(instructionArticle).toBeTruthy();
+    expect(agentArticle).toBeTruthy();
+    expect(instructionArticle).not.toBe(agentArticle);
   });
 
   // ── 4. Continue-mode submit + streaming ─────────────────────────────────
@@ -493,6 +567,25 @@ describe('workspace live-stream e2e workflows', () => {
     expect(await screen.findByText('Tests added for all modules.')).toBeTruthy();
     expect(screen.getByText('Hydra is a multi-agent orchestrator.')).toBeTruthy();
     expect(screen.getByText('Tell me about Hydra')).toBeTruthy();
+
+    // ── Transcript ownership: history turn + streamed reply are distinct ──
+    const articles = transcriptArticles();
+    expect(articles.length).toBeGreaterThanOrEqual(2);
+
+    // History turn carries Operator attribution and contains both instruction + response
+    const historyArticle = screen.getByText('Tell me about Hydra').closest('article');
+    expect(historyArticle).toBeTruthy();
+    expect(historyArticle?.textContent).toContain('Hydra is a multi-agent orchestrator.');
+    expect(historyArticle?.textContent).toContain('Operator');
+
+    // Streamed agent turn carries Codex attribution
+    const agentArticle = screen.getByText('Tests added for all modules.').closest('article');
+    expect(agentArticle).toBeTruthy();
+    expect(agentArticle?.textContent).toContain('Codex');
+
+    // They must be separate articles (streamed text not collapsed into history entry)
+    expect(historyArticle).not.toBe(agentArticle);
+    expect(historyArticle?.textContent).not.toContain('Tests added for all modules.');
   });
 
   // ── 5. Reconnect / resume after abnormal close ─────────────────────────
@@ -552,7 +645,7 @@ describe('workspace live-stream e2e workflows', () => {
 
     // The hook should have re-subscribed with the resume cursor
     const subscribeMsgs = ws2.sentMessages.filter((m) => m['type'] === 'subscribe');
-    expect(subscribeMsgs.length).toBeGreaterThanOrEqual(1);
+    expect(subscribeMsgs.length).toBe(1);
     const sub = subscribeMsgs[0];
     expect(sub['conversationId']).toBe('conv-1');
     // Resume from seq 2 (last successfully acked event)
@@ -583,6 +676,20 @@ describe('workspace live-stream e2e workflows', () => {
     await vi.waitFor(() => {
       expect(screen.queryByText('streaming…')).toBeNull();
     });
+
+    // ── Dedup: single resumed article, no duplicate text ──
+    const articles = transcriptArticles();
+    expect(articles.length).toBe(1);
+
+    // "Before disconnect" text appears in exactly one content paragraph
+    const paras = articles[0].querySelectorAll('p');
+    const matching = Array.from(paras).filter((p) => p.textContent.includes('Before disconnect'));
+    expect(matching.length).toBe(1);
+    expect(matching[0]?.textContent).toBe('Before disconnect and after reconnect');
+
+    // Outbound: subscribe(resume) was the first message on ws2 with correct cursor
+    expect(ws2.sentMessages[0]['type']).toBe('subscribe');
+    expect(ws2.sentMessages[0]['lastAcknowledgedSeq']).toBe(2);
   });
 
   // ── 6. Stream-failed shows error in transcript ──────────────────────────
