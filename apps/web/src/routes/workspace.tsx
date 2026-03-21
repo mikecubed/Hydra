@@ -324,7 +324,7 @@ function applyPendingApprovalsToEntries(
 
   const approvalsByTurnId = new Map(approvals.map((approval) => [approval.turnId, approval]));
   return entries.map((entry) => {
-    if (entry.kind !== 'turn') {
+    if (entry.kind !== 'turn' || entry.turnId == null) {
       return entry;
     }
 

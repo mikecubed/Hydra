@@ -7,6 +7,8 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 
+import type { RespondToApprovalResponse } from '@hydra/web-contracts';
+
 import { GatewayRequestError } from '../api/gateway-client.ts';
 import {
   filterPendingPrompts,
@@ -22,6 +24,7 @@ import type {
   PromptViewState,
   TranscriptEntryState,
   WorkspaceAction,
+  WorkspaceListener,
   WorkspaceState,
   WorkspaceStore,
 } from '../model/workspace-types.ts';
@@ -94,7 +97,7 @@ function createMockStore(initialState: WorkspaceState): WorkspaceStore & {
 } {
   let state = initialState;
   const dispatched: WorkspaceAction[] = [];
-  const listeners = new Set<() => void>();
+  const listeners = new Set<WorkspaceListener>();
 
   return {
     dispatched,
@@ -105,7 +108,7 @@ function createMockStore(initialState: WorkspaceState): WorkspaceStore & {
       dispatched.push(action);
       state = reduceWorkspaceState(state, action);
       for (const listener of listeners) {
-        listener();
+        listener(state, action);
       }
     },
     subscribe(listener) {
@@ -113,6 +116,26 @@ function createMockStore(initialState: WorkspaceState): WorkspaceStore & {
       return () => {
         listeners.delete(listener);
       };
+    },
+  };
+}
+
+function makeApprovalResponse(): RespondToApprovalResponse {
+  return {
+    success: true,
+    approval: {
+      id: 'prompt-1',
+      turnId: 'turn-1',
+      status: 'responded',
+      prompt: 'Approve the change?',
+      context: {},
+      contextHash: 'ctx-1',
+      responseOptions: [
+        { key: 'approve', label: 'Approve' },
+        { key: 'deny', label: 'Deny' },
+      ],
+      response: 'approve',
+      createdAt: '2026-07-01T00:00:00.000Z',
     },
   };
 }
@@ -258,15 +281,12 @@ describe('respondToPrompt', () => {
 
     const mockClient = {
       async respondToApproval() {
-        return {
-          success: true,
-          approval: { id: 'prompt-1', status: 'responded' as const },
-        };
+        return makeApprovalResponse();
       },
     };
 
     const result = await respondToPrompt(
-      { store, client: mockClient as Parameters<typeof respondToPrompt>[0]['client'] },
+      { store, client: mockClient },
       { conversationId: 'conv-1', turnId: 'turn-1', promptId: 'prompt-1', response: 'approve' },
     );
 
@@ -298,7 +318,7 @@ describe('respondToPrompt', () => {
     };
 
     const result = await respondToPrompt(
-      { store, client: mockClient as Parameters<typeof respondToPrompt>[0]['client'] },
+      { store, client: mockClient },
       { conversationId: 'conv-1', turnId: 'turn-1', promptId: 'prompt-1', response: 'approve' },
     );
 
@@ -330,7 +350,7 @@ describe('respondToPrompt', () => {
     };
 
     const result = await respondToPrompt(
-      { store, client: mockClient as Parameters<typeof respondToPrompt>[0]['client'] },
+      { store, client: mockClient },
       { conversationId: 'conv-1', turnId: 'turn-1', promptId: 'prompt-1', response: 'approve' },
     );
 
@@ -381,15 +401,12 @@ describe('respondToPrompt', () => {
 
     const mockClient = {
       async respondToApproval() {
-        return {
-          success: true,
-          approval: { id: 'prompt-1', status: 'responded' as const },
-        };
+        return makeApprovalResponse();
       },
     };
 
     const result = await respondToPrompt(
-      { store, client: mockClient as Parameters<typeof respondToPrompt>[0]['client'] },
+      { store, client: mockClient },
       { conversationId: 'conv-1', turnId: 'turn-1', promptId: 'prompt-1', response: 'approve' },
     );
 
@@ -409,12 +426,12 @@ describe('respondToPrompt', () => {
     const mockClient = {
       async respondToApproval() {
         apiCalled = true;
-        return { success: true, approval: { id: 'prompt-1', status: 'responded' as const } };
+        return makeApprovalResponse();
       },
     };
 
     const result = await respondToPrompt(
-      { store, client: mockClient as Parameters<typeof respondToPrompt>[0]['client'] },
+      { store, client: mockClient },
       { conversationId: 'conv-1', turnId: 'turn-1', promptId: 'prompt-1', response: 'approve' },
     );
 
@@ -431,12 +448,12 @@ describe('respondToPrompt', () => {
     const mockClient = {
       async respondToApproval() {
         apiCalled = true;
-        return { success: true, approval: { id: 'prompt-1', status: 'responded' as const } };
+        return makeApprovalResponse();
       },
     };
 
     const result = await respondToPrompt(
-      { store, client: mockClient as Parameters<typeof respondToPrompt>[0]['client'] },
+      { store, client: mockClient },
       { conversationId: 'conv-1', turnId: 'turn-1', promptId: 'prompt-1', response: 'approve' },
     );
 
@@ -449,12 +466,12 @@ describe('respondToPrompt', () => {
     const store = createMockStore(state);
     const mockClient = {
       async respondToApproval() {
-        return { success: true, approval: { id: 'prompt-1', status: 'responded' as const } };
+        return makeApprovalResponse();
       },
     };
 
     const result = await respondToPrompt(
-      { store, client: mockClient as Parameters<typeof respondToPrompt>[0]['client'] },
+      { store, client: mockClient },
       {
         conversationId: 'nonexistent',
         turnId: 'turn-1',

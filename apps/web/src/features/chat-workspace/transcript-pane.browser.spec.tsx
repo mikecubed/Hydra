@@ -257,7 +257,7 @@ describe('TranscriptPane', () => {
           kind: 'system',
           attribution: { type: 'agent', agentId: 'codex', label: 'Codex' },
           response: 'Waiting for approval before continuing.',
-          status: 'awaiting-approval',
+          status: 'executing',
           createdAt: '2026-03-20T12:00:31.000Z',
           completedAt: '2026-03-20T12:00:45.000Z',
         },
