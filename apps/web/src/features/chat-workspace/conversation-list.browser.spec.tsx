@@ -122,6 +122,7 @@ describe('workspace conversation browsing', () => {
     const textbox = await screen.findByRole('textbox', { name: /instruction/i });
     const sendButton = screen.getByRole('button', { name: /send/i });
 
+    expect(textbox.getAttribute('disabled')).not.toBeNull();
     fireEvent.change(textbox, { target: { value: 'Create the first conversation' } });
     expect(sendButton.getAttribute('disabled')).not.toBeNull();
     expect(screen.getAllByText('Loading conversations…')).toHaveLength(2);
@@ -129,7 +130,9 @@ describe('workspace conversation browsing', () => {
     resolveList?.(jsonResponse(listResponse));
 
     expect(await screen.findByText('Ready for operator input')).toBeTruthy();
-    fireEvent.change(screen.getByRole('textbox', { name: /instruction/i }), {
+    const enabledTextbox = screen.getByRole('textbox', { name: /instruction/i });
+    expect(enabledTextbox.getAttribute('disabled')).toBeNull();
+    fireEvent.change(enabledTextbox, {
       target: { value: 'Create the first conversation' },
     });
     expect(screen.getByRole('button', { name: /send/i }).getAttribute('disabled')).toBeNull();

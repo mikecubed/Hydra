@@ -342,6 +342,7 @@ function useComposerProps(
     validationMessage: isCreateMode ? createError : (draft?.validationMessage ?? null),
     canSubmit,
     policyLabel,
+    disabled: isLoadingConversations && state.activeConversationId == null,
     activeConversation,
     onDraftChange: handleDraftChange,
     onSubmit: handleSubmit,
@@ -403,6 +404,7 @@ export function WorkspaceRoute(): JSX.Element {
           validationMessage={composer.validationMessage}
           canSubmit={composer.canSubmit}
           policyLabel={composer.policyLabel}
+          disabled={composer.disabled}
           onDraftChange={composer.onDraftChange}
           onSubmit={composer.onSubmit}
         />

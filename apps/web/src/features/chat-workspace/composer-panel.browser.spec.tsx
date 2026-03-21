@@ -146,4 +146,18 @@ describe('ComposerPanel submit states', () => {
 
     expect(screen.getByText('Awaiting agent response')).toBeTruthy();
   });
+
+  it('disables the textarea when the disabled prop is true (loading, no active conversation)', () => {
+    renderComposer({ disabled: true, submitState: 'idle', draftText: '' });
+
+    const textarea: HTMLTextAreaElement = screen.getByRole('textbox', { name: /instruction/i });
+    expect(textarea.disabled).toBe(true);
+  });
+
+  it('keeps the textarea enabled when disabled prop is false and not submitting', () => {
+    renderComposer({ disabled: false, submitState: 'idle', draftText: '' });
+
+    const textarea: HTMLTextAreaElement = screen.getByRole('textbox', { name: /instruction/i });
+    expect(textarea.disabled).toBe(false);
+  });
 });

@@ -7,6 +7,7 @@ export interface ComposerPanelProps {
   readonly validationMessage: string | null;
   readonly canSubmit: boolean;
   readonly policyLabel: string;
+  readonly disabled?: boolean;
   readonly onDraftChange: (text: string) => void;
   readonly onSubmit: () => void;
 }
@@ -52,10 +53,12 @@ export function ComposerPanel({
   validationMessage,
   canSubmit,
   policyLabel,
+  disabled = false,
   onDraftChange,
   onSubmit,
 }: ComposerPanelProps): JSX.Element {
   const isSubmitting = submitState === 'submitting';
+  const inputDisabled = disabled || isSubmitting;
   const hasError = submitState === 'error' && validationMessage != null;
 
   function handleKeyDown(event: KeyboardEvent<HTMLTextAreaElement>): void {
@@ -74,7 +77,7 @@ export function ComposerPanel({
         id="composer-instruction"
         style={textareaStyle}
         value={draftText}
-        disabled={isSubmitting}
+        disabled={inputDisabled}
         placeholder="Type an instruction…"
         onChange={(e) => {
           onDraftChange(e.target.value);
