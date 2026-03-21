@@ -54,12 +54,17 @@ export interface EntryControlState {
   readonly reasonDisabled: string | null;
 }
 
+/**
+ * Placeholder prompt reference derived from the `approval-prompt` stream event.
+ *
+ * The daemon emits only `{ approvalId }` — full approval details (allowed
+ * responses, context, etc.) live behind the REST approval-flow contract and
+ * will be hydrated by a later phase.
+ */
 export interface PromptViewState {
   readonly promptId: string;
   readonly parentTurnId: string;
   readonly status: 'pending' | 'responding' | 'resolved' | 'stale' | 'unavailable' | 'error';
-  readonly allowedResponses: readonly string[];
-  readonly contextBlocks: readonly ContentBlockState[];
   readonly lastResponseSummary: string | null;
 }
 

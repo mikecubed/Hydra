@@ -238,15 +238,6 @@ function applyApprovalPrompt(
 ): readonly TranscriptEntryState[] {
   const promptId =
     typeof event.payload['approvalId'] === 'string' ? event.payload['approvalId'] : '';
-  const allowedResponses = Array.isArray(event.payload['allowedResponses'])
-    ? (event.payload['allowedResponses'] as string[])
-    : [];
-  const contextText =
-    typeof event.payload['context'] === 'string' ? event.payload['context'] : null;
-  const contextBlocks: ContentBlockState[] =
-    contextText === null
-      ? []
-      : [{ blockId: `${promptId}-ctx`, kind: 'text', text: contextText, metadata: null }];
 
   const withEntry = ensureTurnEntry(entries, event.turnId, event.timestamp);
   return replaceTurnEntry(withEntry, event.turnId, (e) => ({
@@ -255,8 +246,6 @@ function applyApprovalPrompt(
       promptId,
       parentTurnId: event.turnId,
       status: 'pending' as const,
-      allowedResponses,
-      contextBlocks,
       lastResponseSummary: null,
     },
   }));

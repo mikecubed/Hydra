@@ -400,15 +400,12 @@ describe('reconcileStreamEvents', () => {
         kind: 'approval-prompt',
         payload: {
           approvalId: 'prompt-1',
-          allowedResponses: ['approve', 'reject'],
-          context: 'Delete foo.ts?',
         },
       });
       const { entries } = reconcileStreamEvents([existing], [event], createReconcilerState());
       assert.ok(entries[0].prompt);
       assert.equal(entries[0].prompt?.promptId, 'prompt-1');
       assert.equal(entries[0].prompt?.status, 'pending');
-      assert.deepStrictEqual(entries[0].prompt?.allowedResponses, ['approve', 'reject']);
     });
   });
 
@@ -424,8 +421,6 @@ describe('reconcileStreamEvents', () => {
           promptId: 'prompt-1',
           parentTurnId: 'turn-1',
           status: 'pending',
-          allowedResponses: ['approve', 'reject'],
-          contextBlocks: [],
           lastResponseSummary: null,
         },
       });
@@ -449,8 +444,6 @@ describe('reconcileStreamEvents', () => {
           promptId: 'prompt-1',
           parentTurnId: 'turn-1',
           status: 'pending',
-          allowedResponses: ['approve', 'reject'],
-          contextBlocks: [],
           lastResponseSummary: null,
         },
       });
@@ -474,8 +467,6 @@ describe('reconcileStreamEvents', () => {
           promptId: 'prompt-2',
           parentTurnId: 'turn-1',
           status: 'pending',
-          allowedResponses: ['yes', 'no'],
-          contextBlocks: [],
           lastResponseSummary: null,
         },
       });
@@ -553,8 +544,6 @@ describe('reconcileStreamEvents', () => {
           promptId: 'prompt-2',
           parentTurnId: 'turn-1',
           status: 'pending',
-          allowedResponses: ['approve', 'reject'],
-          contextBlocks: [],
           lastResponseSummary: null,
         },
       });
@@ -596,8 +585,6 @@ describe('reconcileStreamEvents', () => {
         kind: 'approval-prompt',
         payload: {
           approvalId: 'prompt-1',
-          allowedResponses: ['approve', 'reject'],
-          context: 'Run tests?',
         },
       });
       const r2 = reconcileStreamEvents(r1.entries, [prompt], r1.state);
@@ -945,8 +932,6 @@ describe('reconcileStreamEvents', () => {
         kind: 'approval-prompt',
         payload: {
           approvalId: 'p-1',
-          allowedResponses: ['yes'],
-          context: 'Confirm?',
         },
       });
       const { entries } = reconcileStreamEvents(
