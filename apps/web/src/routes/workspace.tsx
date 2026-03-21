@@ -278,6 +278,11 @@ function useComposerProps(
         .then(() => {
           setCreateDraftText('');
           clearConversationError();
+          const s = store.getState();
+          const d = s.drafts.get(s.activeConversationId ?? '');
+          if (d != null && d.submitState !== 'error') {
+            refreshTranscript();
+          }
         })
         .catch((err: unknown) => {
           setCreateError(err instanceof Error ? err.message : 'Failed to create conversation');

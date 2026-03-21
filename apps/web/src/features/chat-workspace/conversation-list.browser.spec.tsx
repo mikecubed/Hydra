@@ -237,4 +237,119 @@ describe('workspace conversation browsing', () => {
       expect.objectContaining({ credentials: 'include', method: 'GET' }),
     );
   });
+
+  // eslint-disable-next-line max-lines-per-function
+  it('refreshes transcript after create-mode submit so the first message is visible', async () => {
+    const existingList: ListConversationsResponse = {
+      conversations: [
+        {
+          id: 'conv-existing',
+          title: 'Existing conversation',
+          status: 'active',
+          createdAt: '2026-03-20T00:00:00.000Z',
+          updatedAt: '2026-03-20T12:00:00.000Z',
+          turnCount: 1,
+          pendingInstructionCount: 0,
+        },
+      ],
+      totalCount: 1,
+    };
+
+    const createResponse = {
+      id: 'conv-created',
+      title: 'Created conversation',
+      status: 'active',
+      createdAt: '2026-03-21T00:00:00.000Z',
+      updatedAt: '2026-03-21T00:00:00.000Z',
+      turnCount: 0,
+      pendingInstructionCount: 0,
+    };
+
+    const submitResponse = {
+      turn: {
+        id: 'turn-first',
+        conversationId: 'conv-created',
+        position: 1,
+        kind: 'operator',
+        attribution: { type: 'operator', label: 'Operator' },
+        instruction: 'Hello Hydra',
+        status: 'submitted',
+        createdAt: '2026-03-21T00:00:01.000Z',
+      },
+      streamId: 'stream-new',
+    };
+
+    const firstTurnEntry = {
+      turns: [
+        {
+          id: 'turn-first',
+          conversationId: 'conv-created',
+          position: 1,
+          kind: 'operator',
+          attribution: { type: 'operator', label: 'Operator' },
+          instruction: 'Hello Hydra',
+          response: '',
+          status: 'submitted',
+          createdAt: '2026-03-21T00:00:01.000Z',
+        },
+      ],
+      totalCount: 1,
+      hasMore: false,
+    };
+
+    let historyCallCount = 0;
+
+    installFetchStub((url, init) => {
+      if (url === '/conversations?status=active&limit=20') {
+        return jsonResponse(existingList);
+      }
+
+      if (url === '/conversations/conv-existing/turns?limit=50') {
+        return jsonResponse(emptyHistoryResponse);
+      }
+
+      if (url === '/conversations' && init?.method === 'POST') {
+        return jsonResponse(createResponse);
+      }
+
+      if (url === '/conversations/conv-created/turns' && init?.method === 'POST') {
+        return jsonResponse(submitResponse);
+      }
+
+      if (url === '/conversations/conv-created/turns?limit=50') {
+        historyCallCount++;
+        // First load races with submit and may return empty;
+        // the post-submit refresh should fetch again with the turn present.
+        if (historyCallCount <= 1) {
+          return jsonResponse(emptyHistoryResponse);
+        }
+        return jsonResponse(firstTurnEntry);
+      }
+
+      throw new Error(`Unexpected fetch input: ${url}`);
+    });
+
+    render(<AppProviders />);
+
+    // Wait for the existing conversation to load and auto-select
+    await screen.findByRole('button', { name: /existing conversation/i });
+
+    // Enter create mode
+    fireEvent.click(screen.getByRole('button', { name: /new conversation/i }));
+
+    // Type and submit
+    fireEvent.change(screen.getByRole('textbox', { name: /instruction/i }), {
+      target: { value: 'Hello Hydra' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: /send/i }));
+
+    // The created conversation should appear and be selected
+    expect(await screen.findByRole('button', { name: /created conversation/i })).toBeTruthy();
+
+    // The transcript should eventually show the submitted instruction
+    expect(await screen.findByText('Hello Hydra')).toBeTruthy();
+
+    // The post-submit refresh must have triggered a second history load
+    expect(historyCallCount).toBeGreaterThanOrEqual(2);
+  });
 });
