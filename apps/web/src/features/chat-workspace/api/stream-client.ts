@@ -24,11 +24,7 @@ import { z } from 'zod';
 import { StreamEvent as StreamEventSchema } from '@hydra/web-contracts';
 import type { StreamEvent } from '@hydra/web-contracts';
 
-import {
-  type GatewayErrorBody,
-  type ErrorCategory,
-  parseGatewayError,
-} from '../../../shared/gateway-errors.ts';
+import { type GatewayErrorBody, parseGatewayError } from '../../../shared/gateway-errors.ts';
 
 // ─── WebSocket-like type (testable) ─────────────────────────────────────────
 
@@ -156,8 +152,7 @@ const ServerSessionExpiringSoon = z.object({
 const ServerDaemonUnavailable = z.object({ type: z.literal('daemon-unavailable') });
 const ServerDaemonRestored = z.object({ type: z.literal('daemon-restored') });
 
-// Error messages are validated by parseGatewayError (existing logic).
-// Schema just confirms type field for routing; body validation is delegated.
+// Error type routing — only used to confirm type field for SERVER_HANDLERS lookup.
 const ServerError = z.object({ type: z.literal('error') }).loose();
 
 // ─── Internals ──────────────────────────────────────────────────────────────
@@ -169,19 +164,11 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 
 /**
  * Validate a gateway error wire shape into a GatewayErrorBody.
- * Falls back to a synthetic body if `parseGatewayError` rejects the shape.
+ * Returns null when the payload does not match the full gateway error shape,
+ * so the caller can route to onParseError instead of silently synthesizing.
  */
-function toGatewayError(raw: Record<string, unknown>): GatewayErrorBody {
-  const parsed = parseGatewayError(raw);
-  if (parsed) return parsed;
-
-  // Synthetic fallback for partially-valid error messages
-  return {
-    ok: false,
-    code: typeof raw['code'] === 'string' ? raw['code'] : 'UNKNOWN',
-    category: 'daemon' as ErrorCategory,
-    message: typeof raw['message'] === 'string' ? raw['message'] : 'Unknown error',
-  };
+function toGatewayError(raw: Record<string, unknown>): GatewayErrorBody | null {
+  return parseGatewayError(raw);
 }
 
 /** Per-type dispatch handlers. Each validates the message shape before dispatching. */
@@ -252,7 +239,9 @@ function handleDaemonRestored(
 function handleError(msg: Record<string, unknown>, cb: StreamClientCallbacks): string | null {
   const result = ServerError.safeParse(msg);
   if (!result.success) return result.error.message;
-  cb.onError?.(toGatewayError(msg));
+  const body = toGatewayError(msg);
+  if (!body) return 'error message does not match expected gateway error shape';
+  cb.onError?.(body);
   return null;
 }
 

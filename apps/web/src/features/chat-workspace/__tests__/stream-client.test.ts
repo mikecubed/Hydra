@@ -750,6 +750,78 @@ describe('StreamClient', () => {
       assert.equal(parseErrors.length, 1, 'should route to onParseError');
     });
 
+    it('fires onParseError when error frame is missing required gateway fields', () => {
+      const parseErrors: Array<{ raw: string; error: string }> = [];
+      const errorCalls: GatewayErrorBody[] = [];
+      const client = createStreamClient(defaultOptions());
+      client.connect(
+        noopCallbacks({
+          onError: (err) => errorCalls.push(err),
+          onParseError: (raw, error) => parseErrors.push({ raw, error }),
+        }),
+      );
+      assert.ok(lastFakeSocket);
+      lastFakeSocket.simulateOpen();
+
+      // Has type: 'error' but missing ok, code, category, message
+      lastFakeSocket.simulateMessage({ type: 'error', garbage: true });
+
+      assert.equal(errorCalls.length, 0, 'should NOT dispatch to onError');
+      assert.equal(parseErrors.length, 1, 'should route to onParseError');
+      assert.ok(parseErrors[0].error.includes('error'));
+    });
+
+    it('fires onParseError when error frame has wrong ok value', () => {
+      const parseErrors: Array<{ raw: string; error: string }> = [];
+      const errorCalls: GatewayErrorBody[] = [];
+      const client = createStreamClient(defaultOptions());
+      client.connect(
+        noopCallbacks({
+          onError: (err) => errorCalls.push(err),
+          onParseError: (raw, error) => parseErrors.push({ raw, error }),
+        }),
+      );
+      assert.ok(lastFakeSocket);
+      lastFakeSocket.simulateOpen();
+
+      // ok should be false, not true
+      lastFakeSocket.simulateMessage({
+        type: 'error',
+        ok: true,
+        code: 'RATE_LIMITED',
+        category: 'rate-limit',
+        message: 'Slow down',
+      });
+
+      assert.equal(errorCalls.length, 0, 'should NOT dispatch to onError');
+      assert.equal(parseErrors.length, 1, 'should route to onParseError');
+    });
+
+    it('fires onParseError when error frame has invalid category', () => {
+      const parseErrors: Array<{ raw: string; error: string }> = [];
+      const errorCalls: GatewayErrorBody[] = [];
+      const client = createStreamClient(defaultOptions());
+      client.connect(
+        noopCallbacks({
+          onError: (err) => errorCalls.push(err),
+          onParseError: (raw, error) => parseErrors.push({ raw, error }),
+        }),
+      );
+      assert.ok(lastFakeSocket);
+      lastFakeSocket.simulateOpen();
+
+      lastFakeSocket.simulateMessage({
+        type: 'error',
+        ok: false,
+        code: 'BAD',
+        category: 'not-a-real-category',
+        message: 'Oops',
+      });
+
+      assert.equal(errorCalls.length, 0, 'should NOT dispatch to onError');
+      assert.equal(parseErrors.length, 1, 'should route to onParseError');
+    });
+
     it('still dispatches valid messages after validation is added', () => {
       const subscribedCalls: Array<{ conversationId: string; currentSeq: number }> = [];
       const client = createStreamClient(defaultOptions());
