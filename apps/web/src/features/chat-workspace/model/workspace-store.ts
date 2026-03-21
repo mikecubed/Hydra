@@ -27,6 +27,7 @@ export type {
   EntryControlKind,
   EntryControlState,
   LineageRelationshipKind,
+  PromptStatus,
   PromptViewState,
   TranscriptEntryKind,
   TranscriptEntryState,

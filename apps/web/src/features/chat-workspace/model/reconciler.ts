@@ -14,6 +14,7 @@ import type { StreamEvent } from '@hydra/web-contracts';
 import type {
   ArtifactReferenceState,
   ContentBlockState,
+  PromptViewState,
   TranscriptEntryState,
 } from './workspace-types.ts';
 
@@ -179,7 +180,11 @@ function applyStreamCompleted(
   const status =
     typeof event.payload['status'] === 'string' ? event.payload['status'] : 'completed';
   const withEntry = ensureTurnEntry(entries, event.turnId, event.timestamp);
-  return replaceTurnEntry(withEntry, event.turnId, (e) => ({ ...e, status }));
+  return replaceTurnEntry(withEntry, event.turnId, (e) => ({
+    ...e,
+    status,
+    prompt: markPromptStale(e.prompt),
+  }));
 }
 
 function applyStreamFailed(
@@ -201,8 +206,88 @@ function applyStreamFailed(
         metadata: null,
       });
     }
-    return { ...e, status: 'failed', contentBlocks: blocks };
+    return {
+      ...e,
+      status: 'failed',
+      contentBlocks: blocks,
+      prompt: markPromptStale(e.prompt),
+    };
   });
+}
+
+function filterStringArray(value: unknown): readonly string[] {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+
+  return value.filter((item): item is string => typeof item === 'string');
+}
+
+function parseContextBlocks(value: unknown): readonly ContentBlockState[] {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+
+  const blocks: ContentBlockState[] = [];
+  for (const block of value) {
+    if (
+      typeof block !== 'object' ||
+      block == null ||
+      typeof block['blockId'] !== 'string' ||
+      typeof block['kind'] !== 'string'
+    ) {
+      continue;
+    }
+
+    blocks.push({
+      blockId: block['blockId'],
+      kind:
+        block['kind'] === 'code' ||
+        block['kind'] === 'status' ||
+        block['kind'] === 'structured'
+          ? block['kind']
+          : 'text',
+      text: typeof block['text'] === 'string' ? block['text'] : null,
+      metadata:
+        typeof block['metadata'] === 'object' && block['metadata'] != null
+          ? Object.fromEntries(
+              Object.entries(block['metadata']).filter((entry): entry is [string, string] => {
+                return typeof entry[1] === 'string';
+              }),
+            )
+          : null,
+    });
+  }
+  return blocks;
+}
+
+function createPromptState(event: StreamEvent): PromptViewState {
+  const promptId =
+    typeof event.payload['approvalId'] === 'string' ? event.payload['approvalId'] : '';
+  return {
+    promptId,
+    parentTurnId: event.turnId,
+    status: 'pending',
+    allowedResponses: filterStringArray(event.payload['allowedResponses']),
+    contextBlocks: parseContextBlocks(event.payload['contextBlocks']),
+    lastResponseSummary: null,
+    errorMessage: null,
+  };
+}
+
+function markPromptStale(prompt: PromptViewState | null): PromptViewState | null {
+  if (prompt == null) {
+    return null;
+  }
+
+  if (prompt.status !== 'pending' && prompt.status !== 'responding') {
+    return prompt;
+  }
+
+  return {
+    ...prompt,
+    status: 'stale',
+  };
 }
 
 function applyActivityMarker(
@@ -246,18 +331,10 @@ function applyApprovalPrompt(
   entries: readonly TranscriptEntryState[],
   event: StreamEvent,
 ): readonly TranscriptEntryState[] {
-  const promptId =
-    typeof event.payload['approvalId'] === 'string' ? event.payload['approvalId'] : '';
-
   const withEntry = ensureTurnEntry(entries, event.turnId, event.timestamp);
   return replaceTurnEntry(withEntry, event.turnId, (e) => ({
     ...e,
-    prompt: {
-      promptId,
-      parentTurnId: event.turnId,
-      status: 'pending' as const,
-      lastResponseSummary: null,
-    },
+    prompt: createPromptState(event),
   }));
 }
 
@@ -277,7 +354,12 @@ function applyApprovalResponse(
     if (!e.prompt) return e;
     return {
       ...e,
-      prompt: { ...e.prompt, status: 'resolved' as const, lastResponseSummary: response },
+      prompt: {
+        ...e.prompt,
+        status: 'resolved',
+        lastResponseSummary: response,
+        errorMessage: null,
+      },
     };
   });
 }
@@ -310,7 +392,11 @@ function applyCancellation(
   event: StreamEvent,
 ): readonly TranscriptEntryState[] {
   const withEntry = ensureTurnEntry(entries, event.turnId, event.timestamp);
-  return replaceTurnEntry(withEntry, event.turnId, (e) => ({ ...e, status: 'cancelled' }));
+  return replaceTurnEntry(withEntry, event.turnId, (e) => ({
+    ...e,
+    status: 'cancelled',
+    prompt: markPromptStale(e.prompt),
+  }));
 }
 
 function applySystemNotice(

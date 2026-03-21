@@ -728,7 +728,10 @@ describe('TranscriptTurn streaming', () => {
         promptId: 'approval-1',
         parentTurnId: 'turn-1',
         status: 'pending',
+        allowedResponses: [],
+        contextBlocks: [],
         lastResponseSummary: null,
+        errorMessage: null,
       },
     });
 
@@ -746,7 +749,10 @@ describe('TranscriptTurn streaming', () => {
         promptId: 'approval-2',
         parentTurnId: 'turn-1',
         status: 'resolved',
+        allowedResponses: [],
+        contextBlocks: [],
         lastResponseSummary: 'Approved with conditions',
+        errorMessage: null,
       },
     });
 
@@ -808,7 +814,10 @@ describe('TranscriptTurn streaming', () => {
         promptId: 'p-1',
         parentTurnId: 'turn-1',
         status: 'pending',
+        allowedResponses: [],
+        contextBlocks: [],
         lastResponseSummary: null,
+        errorMessage: null,
       },
     });
 
