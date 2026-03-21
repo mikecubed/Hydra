@@ -59,7 +59,19 @@ function mergePromptState(
   if (streamPrompt.promptId === restPrompt.promptId) {
     const streamRank = PROMPT_STATUS_RANK[streamPrompt.status];
     const restRank = PROMPT_STATUS_RANK[restPrompt.status];
-    return restRank > streamRank ? restPrompt : streamPrompt;
+    const preferred = restRank > streamRank ? restPrompt : streamPrompt;
+    const fallback = preferred === streamPrompt ? restPrompt : streamPrompt;
+    return {
+      ...preferred,
+      allowedResponses:
+        preferred.allowedResponses.length > 0
+          ? preferred.allowedResponses
+          : fallback.allowedResponses,
+      contextBlocks:
+        preferred.contextBlocks.length > 0 ? preferred.contextBlocks : fallback.contextBlocks,
+      lastResponseSummary: preferred.lastResponseSummary ?? fallback.lastResponseSummary,
+      errorMessage: preferred.errorMessage ?? fallback.errorMessage,
+    };
   }
 
   // Different prompts — stream is more recent

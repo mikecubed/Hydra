@@ -1438,7 +1438,7 @@ describe('existing-conversation history vs live-stream race', () => {
     assert.equal(merged?.historyLoaded, true);
   });
 
-  it('merge-history preserves stream-owned prompt and artifacts on shared turns', () => {
+  it('merge-history preserves stream-owned prompt/artifacts and backfills REST prompt metadata', () => {
     const store = createWorkspaceStore();
     store.dispatch({ type: 'conversation/select', conversationId: 'conv-shared-substate' });
 
@@ -1467,7 +1467,27 @@ describe('existing-conversation history vs live-stream race', () => {
     store.dispatch({
       type: 'conversation/merge-history',
       conversationId: 'conv-shared-substate',
-      entries: [existingTurnEntry('t-shared', 'Complete REST content')],
+      entries: [
+        {
+          ...existingTurnEntry('t-shared', 'Complete REST content'),
+          prompt: {
+            promptId: 'approval-1',
+            parentTurnId: 't-shared',
+            status: 'pending',
+            allowedResponses: ['approve', 'deny'],
+            contextBlocks: [
+              {
+                blockId: 'approval-1-prompt',
+                kind: 'text',
+                text: 'Approve the proposed change?',
+                metadata: null,
+              },
+            ],
+            lastResponseSummary: null,
+            errorMessage: null,
+          },
+        },
+      ],
       hasMoreHistory: false,
     });
 
@@ -1475,6 +1495,8 @@ describe('existing-conversation history vs live-stream race', () => {
     assert.equal(merged?.entries.length, 1, 'shared turn must still deduplicate to one entry');
     assert.equal(merged?.entries[0].contentBlocks[0]?.text, 'Complete REST content');
     assert.equal(merged?.entries[0].prompt?.promptId, 'approval-1');
+    assert.deepEqual(merged?.entries[0].prompt?.allowedResponses, ['approve', 'deny']);
+    assert.equal(merged?.entries[0].prompt?.contextBlocks[0]?.text, 'Approve the proposed change?');
     assert.equal(merged?.entries[0].artifacts.length, 1);
     assert.equal(merged?.entries[0].artifacts[0]?.artifactId, 'artifact-1');
 

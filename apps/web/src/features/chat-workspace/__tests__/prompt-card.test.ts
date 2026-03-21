@@ -341,8 +341,8 @@ describe('respondToPrompt', () => {
       async respondToApproval() {
         throw new GatewayRequestError(409, {
           ok: false,
-          code: 'HTTP_ERROR',
-          category: 'validation',
+          code: 'APPROVAL_STALE',
+          category: 'session',
           message: 'Approval is stale',
           httpStatus: 409,
         });
@@ -363,6 +363,35 @@ describe('respondToPrompt', () => {
     assert.equal(finalPrompt?.status, 'stale');
   });
 
+  it('marks prompt unavailable when 409 reports an already-responded approval', async () => {
+    const state = stateWithPrompt(makePrompt());
+    const store = createMockStore(state);
+
+    const mockClient = {
+      async respondToApproval() {
+        throw new GatewayRequestError(409, {
+          ok: false,
+          code: 'APPROVAL_ALREADY_RESPONDED',
+          category: 'session',
+          message: 'Approval already responded by another session',
+          httpStatus: 409,
+        });
+      },
+    };
+
+    const result = await respondToPrompt(
+      { store, client: mockClient },
+      { conversationId: 'conv-1', turnId: 'turn-1', promptId: 'prompt-1', response: 'approve' },
+    );
+
+    assert.equal(result.ok, false);
+    assert.equal(store.dispatched[0].type, 'prompt/begin-response');
+    assert.equal(store.dispatched[1].type, 'prompt/mark-unavailable');
+
+    const finalPrompt = store.getState().conversations.get('conv-1')?.entries[0].prompt;
+    assert.equal(finalPrompt?.status, 'unavailable');
+  });
+
   it('marks prompt unavailable on 404 gateway miss', async () => {
     const state = stateWithPrompt(makePrompt());
     const store = createMockStore(state);
@@ -380,7 +409,7 @@ describe('respondToPrompt', () => {
     };
 
     const result = await respondToPrompt(
-      { store, client: mockClient as Parameters<typeof respondToPrompt>[0]['client'] },
+      { store, client: mockClient },
       { conversationId: 'conv-1', turnId: 'turn-1', promptId: 'prompt-1', response: 'approve' },
     );
 

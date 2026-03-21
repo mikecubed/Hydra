@@ -1,16 +1,22 @@
-import type { ApprovalRequest, Conversation, Turn } from '@hydra/web-contracts';
+import type { ApprovalRequest, Conversation, StreamEvent, Turn } from '@hydra/web-contracts';
 import {
+  type Dispatch,
   useCallback,
   useEffect,
   useMemo,
+  type RefObject,
   useRef,
+  type SetStateAction,
   useState,
   useSyncExternalStore,
   type JSX,
 } from 'react';
 import { WorkspaceLayout } from '../features/chat-workspace/components/workspace-layout.tsx';
 import { ComposerPanel } from '../features/chat-workspace/components/composer-panel.tsx';
-import { createGatewayClient } from '../features/chat-workspace/api/gateway-client.ts';
+import {
+  GatewayRequestError,
+  createGatewayClient,
+} from '../features/chat-workspace/api/gateway-client.ts';
 import type { GatewayClient } from '../features/chat-workspace/api/gateway-client.ts';
 import {
   createStreamClient,
@@ -52,15 +58,197 @@ function useWorkspaceState(store: WorkspaceStore) {
   );
 }
 
+function shouldRetryApprovalHydration(err: unknown): boolean {
+  if (err instanceof TypeError) {
+    return true;
+  }
+
+  if (!(err instanceof GatewayRequestError)) {
+    return false;
+  }
+
+  return err.status >= 500 || err.gatewayError.category === 'daemon';
+}
+
+async function loadPendingApprovalsForTranscript(
+  client: GatewayClient,
+  conversationId: string,
+  shouldLoadApprovals: boolean,
+  onFailure: (err: unknown) => void,
+): Promise<readonly ApprovalRequest[] | null> {
+  if (!shouldLoadApprovals) {
+    return null;
+  }
+
+  try {
+    const response = await client.getPendingApprovals(conversationId);
+    return response.approvals;
+  } catch (err: unknown) {
+    console.warn(
+      `[useTranscriptLoader] Failed to load pending approvals for conversation ${conversationId}:`,
+      err,
+    );
+    onFailure(err);
+    return null;
+  }
+}
+
+function applyTranscriptLoadResult(
+  store: WorkspaceStore,
+  conversationId: string,
+  response: Awaited<ReturnType<GatewayClient['loadHistory']>> | null,
+  pendingApprovals: readonly ApprovalRequest[] | null,
+): void {
+  if (response != null) {
+    // If streaming already populated the transcript (setting loadState to
+    // 'ready') while the REST call was in flight, merge history with
+    // stream-owned entries instead of skipping entirely. This preserves
+    // authoritative older history AND any live stream entries.
+    store.dispatch({
+      type: 'conversation/merge-history',
+      conversationId,
+      entries: applyPendingApprovalsToEntries(
+        response.turns.map(toTranscriptEntry),
+        pendingApprovals ?? [],
+      ),
+      hasMoreHistory: response.hasMore,
+    });
+    return;
+  }
+
+  if (pendingApprovals == null) {
+    return;
+  }
+
+  const current = store.getState().conversations.get(conversationId);
+  if (current == null) {
+    return;
+  }
+
+  store.dispatch({
+    type: 'conversation/replace-entries',
+    conversationId,
+    entries: applyPendingApprovalsToEntries(current.entries, pendingApprovals),
+    hasMoreHistory: current.hasMoreHistory,
+  });
+}
+
+function markTranscriptLoadError(
+  store: WorkspaceStore,
+  conversationId: string,
+  err: unknown,
+): void {
+  console.error(
+    `[useTranscriptLoader] Failed to load transcript for conversation ${conversationId}:`,
+    err,
+  );
+
+  store.dispatch({
+    type: 'conversation/set-load-state',
+    conversationId,
+    loadState: 'error',
+  });
+}
+
+function createTranscriptLoaderEffect(
+  store: WorkspaceStore,
+  client: GatewayClient,
+  activeConversationId: string | null,
+  hydratedApprovalConversationsRef: RefObject<Set<string>>,
+  approvalRetryCountsRef: RefObject<Map<string, number>>,
+  setRetryNonce: Dispatch<SetStateAction<number>>,
+): () => void {
+  if (activeConversationId == null) {
+    return () => {};
+  }
+
+  const conversationId = activeConversationId;
+  const existing = store.getState().conversations.get(conversationId);
+  const shouldLoadHistory = existing?.historyLoaded !== true;
+  const shouldLoadApprovals = !hydratedApprovalConversationsRef.current.has(conversationId);
+  if (!shouldLoadHistory && !shouldLoadApprovals) {
+    return () => {};
+  }
+
+  const lifecycle = { disposed: false };
+  let retryTimer: ReturnType<typeof setTimeout> | null = null;
+
+  const scheduleApprovalRetry = (err: unknown) => {
+    if (lifecycle.disposed || retryTimer != null || !shouldRetryApprovalHydration(err)) {
+      return;
+    }
+
+    const retryCount = approvalRetryCountsRef.current.get(conversationId) ?? 0;
+    if (retryCount >= APPROVAL_HYDRATION_MAX_RETRIES) {
+      return;
+    }
+
+    approvalRetryCountsRef.current.set(conversationId, retryCount + 1);
+    retryTimer = setTimeout(() => {
+      setRetryNonce((value) => value + 1);
+    }, APPROVAL_RETRY_DELAY_MS);
+  };
+
+  void (async () => {
+    if (shouldLoadHistory) {
+      store.dispatch({
+        type: 'conversation/set-load-state',
+        conversationId,
+        loadState: 'loading',
+      });
+    }
+
+    try {
+      const [response, pendingApprovals] = await Promise.all([
+        shouldLoadHistory
+          ? client.loadHistory(conversationId, { limit: 50 })
+          : Promise.resolve(null),
+        loadPendingApprovalsForTranscript(
+          client,
+          conversationId,
+          shouldLoadApprovals,
+          scheduleApprovalRetry,
+        ),
+      ]);
+      if (lifecycle.disposed) {
+        return;
+      }
+
+      applyTranscriptLoadResult(store, conversationId, response, pendingApprovals);
+
+      if (pendingApprovals != null) {
+        hydratedApprovalConversationsRef.current.add(conversationId);
+        approvalRetryCountsRef.current.delete(conversationId);
+      }
+    } catch (err: unknown) {
+      if (lifecycle.disposed) {
+        return;
+      }
+
+      markTranscriptLoadError(store, conversationId, err);
+    }
+  })();
+
+  return () => {
+    lifecycle.disposed = true;
+    if (retryTimer != null) {
+      clearTimeout(retryTimer);
+    }
+  };
+}
+
 // ─── Stream subscription hook ───────────────────────────────────────────────
 
 const RECONNECT_BASE_DELAY_MS = 1_000;
 const RECONNECT_MAX_DELAY_MS = 30_000;
 const RECONNECT_MAX_ATTEMPTS = 10;
+const APPROVAL_RETRY_DELAY_MS = 1_000;
+const APPROVAL_HYDRATION_MAX_RETRIES = 3;
 
 export interface StreamSubscriptionDeps {
   readonly store: WorkspaceStore;
   readonly streamClient: StreamClient;
+  readonly client: GatewayClient;
   readonly activeConversationId: string | null;
 }
 
@@ -78,6 +266,7 @@ export interface StreamSubscriptionDeps {
 function useStreamSubscription({
   store,
   streamClient,
+  client,
   activeConversationId,
 }: StreamSubscriptionDeps): void {
   // Per-conversation reconciler + seq state — survives conversation switches
@@ -90,6 +279,9 @@ function useStreamSubscription({
   // Tracks a conversation that needs subscribing after the socket failed to
   // send (CLOSING/CLOSED). Fulfilled on the next successful open/reconnect.
   const pendingSubscribeRef = useRef<string | null>(null);
+  const approvalHydrationInFlightRef = useRef(new Set<string>());
+  const approvalHydrationRetryTimersRef = useRef(new Map<string, ReturnType<typeof setTimeout>>());
+  const approvalHydrationRetryCountsRef = useRef(new Map<string, number>());
 
   // Connect / disconnect lifecycle
   // eslint-disable-next-line max-lines-per-function
@@ -101,6 +293,85 @@ function useStreamSubscription({
         clearTimeout(reconnectTimerRef.current);
         reconnectTimerRef.current = null;
       }
+    }
+
+    function clearApprovalHydrationRetry(key: string): void {
+      const timer = approvalHydrationRetryTimersRef.current.get(key);
+      if (timer != null) {
+        clearTimeout(timer);
+        approvalHydrationRetryTimersRef.current.delete(key);
+      }
+    }
+
+    function scheduleApprovalHydrationRetry(
+      conversationId: string,
+      approvalId: string,
+      event: StreamEvent,
+    ): void {
+      const key = `${conversationId}:${approvalId}`;
+      if (approvalHydrationRetryTimersRef.current.has(key)) {
+        return;
+      }
+
+      const retryCount = approvalHydrationRetryCountsRef.current.get(key) ?? 0;
+      if (retryCount >= APPROVAL_HYDRATION_MAX_RETRIES) {
+        return;
+      }
+
+      approvalHydrationRetryCountsRef.current.set(key, retryCount + 1);
+      approvalHydrationRetryTimersRef.current.set(
+        key,
+        setTimeout(() => {
+          approvalHydrationRetryTimersRef.current.delete(key);
+          hydrateLiveApprovalPrompt(conversationId, event);
+        }, APPROVAL_RETRY_DELAY_MS),
+      );
+    }
+
+    function hydrateLiveApprovalPrompt(conversationId: string, event: StreamEvent): void {
+      const approvalId =
+        typeof event.payload['approvalId'] === 'string' ? event.payload['approvalId'] : null;
+      if (approvalId == null || approvalId === '') {
+        return;
+      }
+
+      const key = `${conversationId}:${approvalId}`;
+      if (approvalHydrationInFlightRef.current.has(key)) {
+        return;
+      }
+      approvalHydrationInFlightRef.current.add(key);
+
+      void (async () => {
+        try {
+          const response = await client.getPendingApprovals(conversationId);
+          const approval = response.approvals.find((candidate) => candidate.id === approvalId);
+          if (approval == null) {
+            scheduleApprovalHydrationRetry(conversationId, approvalId, event);
+            return;
+          }
+
+          store.dispatch({
+            type: 'prompt/hydrate',
+            conversationId,
+            turnId: approval.turnId,
+            promptId: approval.id,
+            allowedResponses: approval.responseOptions.map((option) => option.key),
+            contextBlocks: toPromptContextBlocks(approval),
+          });
+          clearApprovalHydrationRetry(key);
+          approvalHydrationRetryCountsRef.current.delete(key);
+        } catch (err: unknown) {
+          console.warn(
+            `[stream] Failed to hydrate approval prompt ${approvalId} for ${conversationId}:`,
+            err,
+          );
+          if (shouldRetryApprovalHydration(err)) {
+            scheduleApprovalHydrationRetry(conversationId, approvalId, event);
+          }
+        } finally {
+          approvalHydrationInFlightRef.current.delete(key);
+        }
+      })();
     }
 
     function scheduleReconnect(): void {
@@ -175,6 +446,9 @@ function useStreamSubscription({
             }
           }
         },
+        onApprovalPromptObserved(conversationId, event) {
+          hydrateLiveApprovalPrompt(conversationId, event);
+        },
       },
     );
 
@@ -184,6 +458,11 @@ function useStreamSubscription({
     return () => {
       intentionalCloseRef.current = true;
       clearReconnectTimer();
+      for (const timer of approvalHydrationRetryTimersRef.current.values()) {
+        clearTimeout(timer);
+      }
+      approvalHydrationRetryTimersRef.current.clear();
+      approvalHydrationRetryCountsRef.current.clear();
       callbacksRef.current = null;
       streamClient.close();
     };
@@ -440,84 +719,21 @@ function useTranscriptLoader(
   activeConversationId: string | null,
 ) {
   const [retryNonce, setRetryNonce] = useState(0);
+  const hydratedApprovalConversationsRef = useRef(new Set<string>());
+  const approvalRetryCountsRef = useRef(new Map<string, number>());
 
-  useEffect(() => {
-    if (activeConversationId == null) {
-      return;
-    }
-
-    const conversationId = activeConversationId;
-    const existing = store.getState().conversations.get(conversationId);
-    if (existing?.historyLoaded === true) {
-      return;
-    }
-
-    let disposed = false;
-
-    async function loadTranscript(): Promise<void> {
-      store.dispatch({
-        type: 'conversation/set-load-state',
-        conversationId,
-        loadState: 'loading',
-      });
-
-      try {
-        const loadPendingApprovals = async () => {
-          try {
-            return await client.getPendingApprovals(conversationId);
-          } catch (err: unknown) {
-            console.warn(
-              `[useTranscriptLoader] Failed to load pending approvals for conversation ${conversationId}:`,
-              err,
-            );
-            return { approvals: [] };
-          }
-        };
-
-        const [response, pendingApprovals] = await Promise.all([
-          client.loadHistory(conversationId, { limit: 50 }),
-          loadPendingApprovals(),
-        ]);
-        if (disposed) {
-          return;
-        }
-
-        // If streaming already populated the transcript (setting loadState
-        // to 'ready') while the REST call was in flight, merge history with
-        // stream-owned entries instead of skipping entirely. This preserves
-        // authoritative older history AND any live stream entries.
-        store.dispatch({
-          type: 'conversation/merge-history',
-          conversationId,
-          entries: applyPendingApprovalsToEntries(
-            response.turns.map(toTranscriptEntry),
-            pendingApprovals.approvals,
-          ),
-          hasMoreHistory: response.hasMore,
-        });
-      } catch (err: unknown) {
-        if (disposed) {
-          return;
-        }
-
-        console.error(
-          `[useTranscriptLoader] Failed to load transcript for conversation ${conversationId}:`,
-          err,
-        );
-
-        store.dispatch({
-          type: 'conversation/set-load-state',
-          conversationId,
-          loadState: 'error',
-        });
-      }
-    }
-
-    void loadTranscript();
-    return () => {
-      disposed = true;
-    };
-  }, [activeConversationId, client, retryNonce, store]);
+  useEffect(
+    () =>
+      createTranscriptLoaderEffect(
+        store,
+        client,
+        activeConversationId,
+        hydratedApprovalConversationsRef,
+        approvalRetryCountsRef,
+        setRetryNonce,
+      ),
+    [activeConversationId, client, retryNonce, store],
+  );
 
   return useCallback(() => {
     setRetryNonce((value) => value + 1);
@@ -672,6 +888,7 @@ export function WorkspaceRoute(): JSX.Element {
   useStreamSubscription({
     store,
     streamClient: wsStreamClient,
+    client,
     activeConversationId: state.activeConversationId,
   });
 

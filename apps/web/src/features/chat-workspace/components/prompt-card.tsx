@@ -204,7 +204,7 @@ export function PromptCard({ prompt, onRespond }: PromptCardProps): JSX.Element 
       {/* Stale/unavailable messaging */}
       {status === 'stale' && (
         <div style={{ fontSize: '0.8rem', color: '#94a3b8' }} data-testid="prompt-stale-message">
-          This approval is no longer actionable — the owning turn has ended.
+          This approval is no longer actionable.
         </div>
       )}
       {status === 'unavailable' && (

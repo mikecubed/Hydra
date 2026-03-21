@@ -95,13 +95,20 @@ export async function respondToPrompt(
       }
 
       if (err.status === 409) {
-        store.dispatch({
-          type: 'prompt/mark-stale',
-          conversationId,
-          turnId,
-          promptId,
-          reason: err.gatewayError.message,
-        });
+        if (
+          err.gatewayError.code === 'APPROVAL_EXPIRED' ||
+          err.gatewayError.code === 'APPROVAL_ALREADY_RESPONDED'
+        ) {
+          store.dispatch({ type: 'prompt/mark-unavailable', conversationId, turnId, promptId });
+        } else {
+          store.dispatch({
+            type: 'prompt/mark-stale',
+            conversationId,
+            turnId,
+            promptId,
+            reason: err.gatewayError.message,
+          });
+        }
         return { ok: false, error: err.message };
       }
     }

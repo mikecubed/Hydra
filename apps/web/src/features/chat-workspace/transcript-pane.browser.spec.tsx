@@ -58,6 +58,109 @@ function createEntry(overrides: Partial<TranscriptEntryState> = {}): TranscriptE
   };
 }
 
+function createSingleConversationList(): ListConversationsResponse {
+  return {
+    conversations: [
+      {
+        id: 'conv-1',
+        title: 'Primary conversation',
+        status: 'active',
+        createdAt: '2026-03-20T00:00:00.000Z',
+        updatedAt: '2026-03-20T12:00:00.000Z',
+        turnCount: 1,
+        pendingInstructionCount: 0,
+      },
+    ],
+    totalCount: 1,
+  };
+}
+
+function createSingleTurnHistory(responseText: string): LoadTurnHistoryResponse {
+  return {
+    turns: [
+      {
+        id: 'turn-1',
+        conversationId: 'conv-1',
+        position: 1,
+        kind: 'system',
+        attribution: { type: 'agent', agentId: 'codex', label: 'Codex' },
+        response: responseText,
+        status: 'executing',
+        createdAt: '2026-03-20T12:00:31.000Z',
+        completedAt: '2026-03-20T12:00:45.000Z',
+      },
+    ],
+    totalCount: 1,
+    hasMore: false,
+  };
+}
+
+function installApprovalRetryScenario(): () => number {
+  const conversations = createSingleConversationList();
+  const history = createSingleTurnHistory('Waiting for approval before continuing.');
+  let approvalCalls = 0;
+
+  installFetchStub((url) => {
+    if (url === '/conversations?status=active&limit=20') {
+      return new Response(JSON.stringify(conversations), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      });
+    }
+
+    if (url === '/conversations/conv-1/turns?limit=50') {
+      return new Response(JSON.stringify(history), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      });
+    }
+
+    if (url === '/conversations/conv-1/approvals') {
+      approvalCalls += 1;
+      if (approvalCalls === 1) {
+        return new Response(
+          JSON.stringify({
+            ok: false,
+            code: 'HTTP_ERROR',
+            category: 'daemon',
+            message: 'Service unavailable',
+            httpStatus: 503,
+          }),
+          {
+            status: 503,
+            headers: { 'Content-Type': 'application/json' },
+          },
+        );
+      }
+
+      return new Response(
+        JSON.stringify({
+          approvals: [
+            {
+              id: 'approval-1',
+              turnId: 'turn-1',
+              status: 'pending',
+              prompt: 'Approve the recovered request?',
+              context: {},
+              contextHash: 'ctx-1',
+              responseOptions: [{ key: 'approve', label: 'Approve' }],
+              createdAt: '2026-03-20T12:00:40.000Z',
+            },
+          ],
+        }),
+        {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        },
+      );
+    }
+
+    throw new Error(`Unexpected fetch input: ${url}`);
+  });
+
+  return () => approvalCalls;
+}
+
 // ─── TranscriptTurn ─────────────────────────────────────────────────────────
 
 describe('TranscriptTurn', () => {
@@ -316,6 +419,19 @@ describe('TranscriptPane', () => {
     expect(screen.getByTestId('approval-prompt')).toBeTruthy();
     expect(screen.getByRole('button', { name: 'approve' })).toBeTruthy();
     expect(screen.getByRole('button', { name: 'deny' })).toBeTruthy();
+  });
+
+  it('retries pending approval hydration after a transient approval fetch failure', async () => {
+    const getApprovalCalls = installApprovalRetryScenario();
+
+    render(<AppProviders />);
+
+    expect(await screen.findByText('Waiting for approval before continuing.')).toBeTruthy();
+    expect(screen.queryByTestId('approval-prompt')).toBeNull();
+
+    await screen.findByText('Approve the recovered request?');
+    expect(screen.getByTestId('approval-prompt')).toBeTruthy();
+    expect(getApprovalCalls()).toBe(2);
   });
 
   it('surfaces when older transcript history has not been loaded yet', async () => {

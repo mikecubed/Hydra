@@ -63,6 +63,26 @@ function approvalPayload(
   };
 }
 
+function approvalRecord(
+  approvalId: string,
+  overrides: Record<string, unknown> = {},
+): Record<string, unknown> {
+  return {
+    id: approvalId,
+    turnId: 'turn-1',
+    status: 'pending',
+    prompt: 'Approve the proposed changes?',
+    context: {},
+    contextHash: 'ctx-hash',
+    responseOptions: [
+      { key: 'approve', label: 'Approve' },
+      { key: 'deny', label: 'Deny' },
+    ],
+    createdAt: '2026-07-01T00:00:00.000Z',
+    ...overrides,
+  };
+}
+
 /** Build a successful RespondToApprovalResponse body. */
 function approvalSuccessBody(approvalId: string, response: string) {
   return {
@@ -97,7 +117,10 @@ function parseRequestBody(init: RequestInit | undefined): Record<string, unknown
  * Install a fetch stub pre-configured with conversation list, empty history,
  * and empty approvals. The `respondHandler` customises the approval-respond endpoint.
  */
-function installDefaultStub(respondHandler?: FetchHandler): void {
+function installDefaultStub(
+  respondHandler?: FetchHandler,
+  approvals: readonly Record<string, unknown>[] = [],
+): void {
   installFetchStub((url, init) => {
     if (url === '/conversations?status=active&limit=20') {
       return jsonResponse({
@@ -109,7 +132,7 @@ function installDefaultStub(respondHandler?: FetchHandler): void {
       return jsonResponse(EMPTY_HISTORY);
     }
     if (url === '/conversations/conv-1/approvals') {
-      return jsonResponse({ approvals: [] });
+      return jsonResponse({ approvals });
     }
     if (url.startsWith('/approvals/') && url.endsWith('/respond') && respondHandler) {
       return respondHandler(url, init);
@@ -130,6 +153,7 @@ function streamApprovalPrompt(
   ws: ReturnType<typeof openAndSubscribe>,
   approvalId = 'p1',
   startSeq = 1,
+  payload: Record<string, unknown> = approvalPayload(approvalId),
 ) {
   act(() => {
     ws.simulateMessage(
@@ -137,9 +161,60 @@ function streamApprovalPrompt(
         attribution: 'Claude',
       }),
     );
-    ws.simulateMessage(
-      streamFrame('conv-1', startSeq + 1, 'turn-1', 'approval-prompt', approvalPayload(approvalId)),
-    );
+    ws.simulateMessage(streamFrame('conv-1', startSeq + 1, 'turn-1', 'approval-prompt', payload));
+  });
+}
+
+function realApprovalPromptPayload(approvalId: string): Record<string, unknown> {
+  return { approvalId };
+}
+
+function approvalErrorResponse(
+  code: string,
+  message: string,
+  httpStatus: number,
+  category = 'session',
+): Response {
+  return jsonResponse(
+    {
+      ok: false,
+      code,
+      category,
+      message,
+      httpStatus,
+    },
+    httpStatus,
+  );
+}
+
+function recordApprovalRequest(
+  requests: Array<{ url: string; init: RequestInit | undefined }>,
+  response: Response,
+): FetchHandler {
+  return (url, init) => {
+    requests.push({ url, init });
+    return response;
+  };
+}
+
+function installLiveHydrationRetryStub(nextApprovalResponse: () => Response): void {
+  installFetchStub((url) => {
+    if (url === '/conversations?status=active&limit=20') {
+      return jsonResponse({
+        conversations: [conversation('conv-1', 'Prompt lifecycle test')],
+        totalCount: 1,
+      });
+    }
+    if (url === '/conversations/conv-1/turns?limit=50') {
+      return jsonResponse(EMPTY_HISTORY);
+    }
+    if (url === '/conversations/conv-1/approvals') {
+      return nextApprovalResponse();
+    }
+    if (url.startsWith('/approvals/') && url.endsWith('/respond')) {
+      return jsonResponse(approvalSuccessBody('p-retry', 'approve'));
+    }
+    throw new Error(`Unexpected fetch: ${url}`);
   });
 }
 
@@ -148,11 +223,25 @@ function streamApprovalPrompt(
 describe('prompt lifecycle browser workflows: rendering and success flow', () => {
   // ── 1. Pending prompt appears from stream event ──────────────────────────
 
-  it('renders a pending prompt card with context and action buttons from a stream event', async () => {
-    installDefaultStub();
+  it('hydrates a live prompt from the real approvalId-only stream payload', async () => {
+    installDefaultStub(undefined, [approvalRecord('p-live')]);
     const ws = await renderAndSubscribe();
 
-    streamApprovalPrompt(ws);
+    streamApprovalPrompt(ws, 'p-live', 1, realApprovalPromptPayload('p-live'));
+
+    const card = await screen.findByTestId('approval-prompt');
+    await screen.findByText('Approve the proposed changes?');
+
+    expect(card).toHaveAttribute('data-prompt-status', 'pending');
+    expect(screen.getByTestId('prompt-action-approve')).toBeInTheDocument();
+    expect(screen.getByTestId('prompt-action-deny')).toBeInTheDocument();
+  });
+
+  it('renders a pending prompt card with context and action buttons from a stream event', async () => {
+    installDefaultStub(undefined, [approvalRecord('p1')]);
+    const ws = await renderAndSubscribe();
+
+    streamApprovalPrompt(ws, 'p1', 1, realApprovalPromptPayload('p1'));
 
     // PromptCard visible with pending status
     const card = await screen.findByTestId('approval-prompt');
@@ -175,13 +264,16 @@ describe('prompt lifecycle browser workflows: rendering and success flow', () =>
 
   it('transitions pending → responding → resolved when user approves', async () => {
     const requests: Array<{ url: string; init: RequestInit | undefined }> = [];
-    installDefaultStub((url, init) => {
-      requests.push({ url, init });
-      return jsonResponse(approvalSuccessBody('p1', 'approve'));
-    });
+    installDefaultStub(
+      (url, init) => {
+        requests.push({ url, init });
+        return jsonResponse(approvalSuccessBody('p1', 'approve'));
+      },
+      [approvalRecord('p1')],
+    );
 
     const ws = await renderAndSubscribe();
-    streamApprovalPrompt(ws);
+    streamApprovalPrompt(ws, 'p1', 1, realApprovalPromptPayload('p1'));
 
     const card = await screen.findByTestId('approval-prompt');
     expect(card).toHaveAttribute('data-prompt-status', 'pending');
@@ -221,22 +313,16 @@ describe('prompt lifecycle browser workflows: response terminal states', () => {
 
   it('marks prompt stale when API returns 409 conflict', async () => {
     const requests: Array<{ url: string; init: RequestInit | undefined }> = [];
-    installDefaultStub((url, init) => {
-      requests.push({ url, init });
-      return jsonResponse(
-        {
-          ok: false,
-          code: 'HTTP_ERROR',
-          category: 'validation',
-          message: 'Approval already responded',
-          httpStatus: 409,
-        },
-        409,
-      );
-    });
+    installDefaultStub(
+      recordApprovalRequest(
+        requests,
+        approvalErrorResponse('APPROVAL_STALE', 'Approval is stale', 409),
+      ),
+      [approvalRecord('p1')],
+    );
 
     const ws = await renderAndSubscribe();
-    streamApprovalPrompt(ws);
+    streamApprovalPrompt(ws, 'p1', 1, realApprovalPromptPayload('p1'));
 
     const card = await screen.findByTestId('approval-prompt');
     fireEvent.click(screen.getByTestId('prompt-action-approve'));
@@ -261,22 +347,35 @@ describe('prompt lifecycle browser workflows: response terminal states', () => {
 
   // ── 4. 404 not found → unavailable ──────────────────────────────────────
 
-  it('marks prompt unavailable when API returns 404', async () => {
-    installDefaultStub(() =>
-      jsonResponse(
-        {
-          ok: false,
-          code: 'NOT_FOUND',
-          category: 'validation',
-          message: 'Approval not found',
-          httpStatus: 404,
-        },
-        404,
-      ),
+  it('marks prompt unavailable when API returns 409 already-responded', async () => {
+    installDefaultStub(
+      () => approvalErrorResponse('APPROVAL_ALREADY_RESPONDED', 'Approval already responded', 409),
+      [approvalRecord('p1')],
     );
 
     const ws = await renderAndSubscribe();
-    streamApprovalPrompt(ws);
+    streamApprovalPrompt(ws, 'p1', 1, realApprovalPromptPayload('p1'));
+
+    const card = await screen.findByTestId('approval-prompt');
+    fireEvent.click(screen.getByTestId('prompt-action-approve'));
+
+    await waitFor(() => {
+      expect(card).toHaveAttribute('data-prompt-status', 'unavailable');
+    });
+
+    expect(screen.getByTestId('prompt-unavailable-message')).toBeInTheDocument();
+    expect(screen.getByText(/no longer available/)).toBeInTheDocument();
+    expect(screen.queryByTestId('prompt-actions')).not.toBeInTheDocument();
+  });
+
+  it('marks prompt unavailable when API returns 404', async () => {
+    installDefaultStub(
+      () => approvalErrorResponse('NOT_FOUND', 'Approval not found', 404, 'validation'),
+      [approvalRecord('p1')],
+    );
+
+    const ws = await renderAndSubscribe();
+    streamApprovalPrompt(ws, 'p1', 1, realApprovalPromptPayload('p1'));
 
     const card = await screen.findByTestId('approval-prompt');
     fireEvent.click(screen.getByTestId('prompt-action-approve'));
@@ -293,6 +392,27 @@ describe('prompt lifecycle browser workflows: response terminal states', () => {
 
 describe('prompt lifecycle browser workflows: recovery and terminal states', () => {
   // ── 5. API error → retry → resolved ─────────────────────────────────────
+
+  it('retries live prompt hydration until approvals become available', async () => {
+    let approvalRequests = 0;
+    installLiveHydrationRetryStub(() => {
+      approvalRequests += 1;
+      if (approvalRequests === 1) {
+        return jsonResponse({ approvals: [] });
+      }
+      return jsonResponse({ approvals: [approvalRecord('p-retry')] });
+    });
+
+    const ws = await renderAndSubscribe();
+    streamApprovalPrompt(ws, 'p-retry', 1, realApprovalPromptPayload('p-retry'));
+
+    const card = await screen.findByTestId('approval-prompt');
+    expect(card).toHaveAttribute('data-prompt-status', 'pending');
+
+    await screen.findByText('Approve the proposed changes?');
+    expect(screen.getByTestId('prompt-action-approve')).toBeInTheDocument();
+    expect(approvalRequests).toBe(2);
+  });
 
   it('shows error state after API failure and resolves on retry', async () => {
     let callCount = 0;
