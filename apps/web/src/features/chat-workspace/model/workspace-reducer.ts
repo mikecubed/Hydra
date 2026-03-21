@@ -616,7 +616,7 @@ function applyPromptBeginResponse(
   promptId: string,
 ): WorkspaceState {
   return applyPromptUpdate(state, conversationId, turnId, promptId, (prompt) => {
-    if (prompt.status !== 'pending') return prompt;
+    if (prompt.status !== 'pending' && prompt.status !== 'error') return prompt;
     return patchPrompt(prompt, { status: 'responding', errorMessage: null });
   });
 }
