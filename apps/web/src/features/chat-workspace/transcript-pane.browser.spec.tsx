@@ -147,6 +147,16 @@ describe('TranscriptTurn', () => {
 
     expect(screen.getByText('Codex')).toBeTruthy();
   });
+
+  it('falls back to the raw ISO string for an invalid timestamp', () => {
+    const entry = createEntry({ timestamp: 'not-a-date' });
+
+    render(<TranscriptTurn entry={entry} />);
+
+    const timeEl = screen.getByRole('article').querySelector('time');
+    expect(timeEl).toBeTruthy();
+    expect(timeEl?.textContent).toBe('not-a-date');
+  });
 });
 
 // ─── TranscriptPane ─────────────────────────────────────────────────────────

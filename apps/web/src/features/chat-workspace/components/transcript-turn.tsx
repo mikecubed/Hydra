@@ -42,12 +42,8 @@ const preStyle = {
 } as const;
 
 function formatTimestamp(iso: string): string {
-  try {
-    const date = new Date(iso);
-    return date.toLocaleString();
-  } catch {
-    return iso;
-  }
+  const date = new Date(iso);
+  return Number.isNaN(date.getTime()) ? iso : date.toLocaleString();
 }
 
 function ContentBlock({ block }: { readonly block: ContentBlockState }): JSX.Element | null {
