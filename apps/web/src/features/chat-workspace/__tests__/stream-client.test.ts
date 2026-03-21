@@ -305,14 +305,10 @@ describe('StreamClient', () => {
       });
     });
 
-    it('throws if called before connect()', () => {
+    it('is a no-op if called before connect()', () => {
       const client = createStreamClient(defaultOptions());
-      assert.throws(
-        () => {
-          client.unsubscribe('conv-1');
-        },
-        (err: Error) => err.message.includes('not connected'),
-      );
+      // Should not throw — unsubscribe silently ignores a disconnected state
+      client.unsubscribe('conv-1');
     });
   });
 
@@ -902,7 +898,7 @@ describe('StreamClient', () => {
       );
     });
 
-    it('throws on unsubscribe() after server-initiated close', () => {
+    it('is a no-op for unsubscribe() after server-initiated close', () => {
       const client = createStreamClient(defaultOptions());
       client.connect(noopCallbacks());
       assert.ok(lastFakeSocket);
@@ -910,12 +906,8 @@ describe('StreamClient', () => {
 
       lastFakeSocket.simulateClose(1001, 'Going away');
 
-      assert.throws(
-        () => {
-          client.unsubscribe('conv-orphan');
-        },
-        (err: Error) => err.message.includes('not connected'),
-      );
+      // Should not throw — unsubscribe silently ignores a disconnected state
+      client.unsubscribe('conv-orphan');
     });
 
     it('throws on ack() after server-initiated close', () => {

@@ -399,6 +399,8 @@ export function createStreamClient(options: StreamClientOptions): StreamClient {
     },
 
     unsubscribe(conversationId) {
+      // After close() or socket teardown, unsubscribe is a safe no-op.
+      if (state.socket === null || state.socket.readyState > WS_OPEN) return;
       sendOrQueue(state, JSON.stringify({ type: 'unsubscribe', conversationId }));
     },
 
