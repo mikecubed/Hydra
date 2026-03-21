@@ -16,6 +16,7 @@ import {
   selectActiveConversation,
   selectActiveDraft,
   selectCanSubmit,
+  selectCreateModeCanSubmit,
   selectConversationList,
 } from '../features/chat-workspace/model/selectors.ts';
 
@@ -45,47 +46,75 @@ function toWorkspaceConversationRecord(conversation: Conversation): WorkspaceCon
 }
 
 function useComposerProps(store: WorkspaceStore, client: GatewayClient, state: WorkspaceState) {
+  // Local state for create mode (no active conversation).
+  const [createDraftText, setCreateDraftText] = useState('');
+  const [createSubmitting, setCreateSubmitting] = useState(false);
   const [createError, setCreateError] = useState<string | null>(null);
+
+  const isCreateMode = state.activeConversationId == null;
 
   const draft = selectActiveDraft(state);
   const activeConversation = selectActiveConversation(state);
-  const canSubmit = selectCanSubmit(state);
+  const continueCanSubmit = selectCanSubmit(state);
+  const createCanSubmit = selectCreateModeCanSubmit(createDraftText, createSubmitting, createError);
 
   const handleDraftChange = useCallback(
     (text: string) => {
-      const conversationId = store.getState().activeConversationId;
-      if (conversationId != null) {
-        store.dispatch({ type: 'draft/set-text', conversationId, draftText: text });
+      const currentId = store.getState().activeConversationId;
+      if (currentId == null) {
+        setCreateDraftText(text);
+        setCreateError(null);
+        return;
       }
+      store.dispatch({ type: 'draft/set-text', conversationId: currentId, draftText: text });
     },
     [store],
   );
 
   const handleSubmit = useCallback(() => {
-    if (state.activeConversationId == null) {
-      const text = draft?.draftText ?? '';
-      void createAndSubmitDraft({ store, client }, text).catch((err: unknown) => {
-        setCreateError(err instanceof Error ? err.message : 'Failed to create conversation');
-      });
+    const currentId = store.getState().activeConversationId;
+    if (currentId == null) {
+      setCreateSubmitting(true);
+      setCreateError(null);
+      void createAndSubmitDraft({ store, client }, createDraftText)
+        .then(() => {
+          setCreateDraftText('');
+        })
+        .catch((err: unknown) => {
+          setCreateError(err instanceof Error ? err.message : 'Failed to create conversation');
+        })
+        .finally(() => {
+          setCreateSubmitting(false);
+        });
       return;
     }
     void submitComposerDraft({ store, client });
-  }, [store, client, state.activeConversationId, draft?.draftText]);
+  }, [store, client, createDraftText]);
 
   const policyLabel =
     activeConversation?.controlState.submissionPolicyLabel ?? 'Ready for operator input';
 
+  const effectiveSubmitState = isCreateMode
+    ? createSubmitting
+      ? ('submitting' as const)
+      : createError != null
+        ? ('error' as const)
+        : ('idle' as const)
+    : (draft?.submitState ?? ('idle' as const));
+
   return {
-    draftText: draft?.draftText ?? '',
-    submitState: draft?.submitState ?? ('idle' as const),
-    validationMessage: createError ?? draft?.validationMessage ?? null,
-    canSubmit,
+    draftText: isCreateMode ? createDraftText : (draft?.draftText ?? ''),
+    submitState: effectiveSubmitState,
+    validationMessage: isCreateMode ? createError : (draft?.validationMessage ?? null),
+    canSubmit: isCreateMode ? createCanSubmit : continueCanSubmit,
     policyLabel,
     activeConversation,
     onDraftChange: handleDraftChange,
     onSubmit: handleSubmit,
-    clearCreateError: () => {
+    clearCreateState: () => {
       setCreateError(null);
+      setCreateDraftText('');
+      setCreateSubmitting(false);
     },
   };
 }
@@ -140,7 +169,7 @@ export function WorkspaceRoute(): JSX.Element {
       conversationErrorMessage={conversationErrorMessage}
       onSelectConversation={(conversationId) => {
         store.dispatch({ type: 'conversation/select', conversationId });
-        composer.clearCreateError();
+        composer.clearCreateState();
       }}
       composerSlot={
         <ComposerPanel
