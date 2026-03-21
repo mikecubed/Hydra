@@ -4,7 +4,7 @@
  *
  * Covers:
  * - Per-conversation state persistence across conversation switches
- * - Subscribe with lastAcknowledgedSeq for replay/resume
+ * - Subscribe with serverResumeSeq for replay/resume
  * - Reconnect flow preserves state and resubscribes correctly
  * - Stream-only updates after submit (no REST clobber)
  * - buildStreamCallbacks routing, ack, and lifecycle hooks
@@ -116,7 +116,7 @@ describe('per-conversation state persistence', () => {
     // Switch back to conv-A — use the preserved state (NOT a fresh state)
     store.dispatch({ type: 'conversation/select', conversationId: 'conv-A' });
     const preservedA = stateMap.get('conv-A')!;
-    assert.equal(preservedA.lastAcknowledgedSeq, 2);
+    assert.equal(preservedA.serverResumeSeq, 2);
 
     // Apply more events using preserved state — dedup works correctly
     const stateA2 = applyStreamEventsToConversation(
@@ -130,7 +130,7 @@ describe('per-conversation state persistence', () => {
     const entries = store.getState().conversations.get('conv-A')?.entries ?? [];
     assert.equal(entries.length, 1);
     assert.equal(entries[0].contentBlocks[0]?.text, 'Hello world');
-    assert.equal(stateA2.lastAcknowledgedSeq, 3);
+    assert.equal(stateA2.serverResumeSeq, 3);
   });
 
   it('replayed/duplicate events are suppressed after conversation switch', () => {
@@ -149,7 +149,7 @@ describe('per-conversation state persistence', () => {
     );
     stateMap.set('conv-A', state1);
 
-    // Simulate switch away and back — server replays from lastAcknowledgedSeq
+    // Simulate switch away and back — server replays from serverResumeSeq
     const preserved = stateMap.get('conv-A')!;
     const state2 = applyStreamEventsToConversation(
       store,
@@ -167,16 +167,16 @@ describe('per-conversation state persistence', () => {
 
     const entries = store.getState().conversations.get('conv-A')?.entries ?? [];
     assert.equal(entries[0].contentBlocks[0]?.text, 'data more');
-    assert.equal(state2.lastAcknowledgedSeq, 3);
+    assert.equal(state2.serverResumeSeq, 3);
   });
 });
 
-// ─── lastAcknowledgedSeq tracking ───────────────────────────────────────────
+// ─── serverResumeSeq tracking ───────────────────────────────────────────────
 
-describe('lastAcknowledgedSeq tracking', () => {
+describe('serverResumeSeq tracking', () => {
   it('starts undefined for a fresh state', () => {
     const state = createStreamSubscriptionState();
-    assert.equal(state.lastAcknowledgedSeq, undefined);
+    assert.equal(state.serverResumeSeq, undefined);
   });
 
   it('tracks max seq across event batches', () => {
@@ -189,7 +189,7 @@ describe('lastAcknowledgedSeq tracking', () => {
       [makeEvent({ seq: 5, turnId: 't1', kind: 'stream-started', payload: {} })],
       state,
     );
-    assert.equal(state.lastAcknowledgedSeq, 5);
+    assert.equal(state.serverResumeSeq, 5);
 
     state = applyStreamEventsToConversation(
       store,
@@ -197,7 +197,7 @@ describe('lastAcknowledgedSeq tracking', () => {
       [makeEvent({ seq: 8, turnId: 't1', kind: 'text-delta', payload: { text: 'hi' } })],
       state,
     );
-    assert.equal(state.lastAcknowledgedSeq, 8);
+    assert.equal(state.serverResumeSeq, 8);
   });
 
   it('handles non-sequential seq values', () => {
@@ -214,7 +214,7 @@ describe('lastAcknowledgedSeq tracking', () => {
       ],
       state,
     );
-    assert.equal(state.lastAcknowledgedSeq, 10);
+    assert.equal(state.serverResumeSeq, 10);
   });
 });
 
@@ -250,7 +250,7 @@ describe('buildStreamCallbacks', () => {
     // Verify state map was updated
     const convState = stateMap.get('conv-1');
     assert.ok(convState);
-    assert.equal(convState.lastAcknowledgedSeq, 1);
+    assert.equal(convState.serverResumeSeq, 1);
 
     // Verify ack was called
     assert.equal(ackCalls.length, 1);
@@ -342,7 +342,7 @@ describe('buildStreamCallbacks', () => {
 // ─── Reconnect state preservation ───────────────────────────────────────────
 
 describe('reconnect state preservation', () => {
-  it('state map retains lastAcknowledgedSeq for resubscribe after reconnect', () => {
+  it('state map retains serverResumeSeq for resubscribe after reconnect', () => {
     const store = storeWithConversation('conv-A');
     const stateMap = new Map<string, StreamSubscriptionState>();
 
@@ -366,9 +366,9 @@ describe('reconnect state preservation', () => {
     );
 
     // Simulate socket drop — stateMap survives
-    assert.equal(stateMap.get('conv-A')?.lastAcknowledgedSeq, 3);
+    assert.equal(stateMap.get('conv-A')?.serverResumeSeq, 3);
 
-    // After reconnect, the hook would resubscribe with lastAcknowledgedSeq=3
+    // After reconnect, the hook would resubscribe with serverResumeSeq=3
     // The server replays from seq 4 onward. Simulate replay:
     callbacks.onStreamEvent!(
       'conv-A',
@@ -377,7 +377,7 @@ describe('reconnect state preservation', () => {
 
     const entries = store.getState().conversations.get('conv-A')?.entries ?? [];
     assert.equal(entries[0].contentBlocks[0]?.text, 'data more end');
-    assert.equal(stateMap.get('conv-A')?.lastAcknowledgedSeq, 4);
+    assert.equal(stateMap.get('conv-A')?.serverResumeSeq, 4);
   });
 
   it('reconnect with replay deduplicates already-seen events', () => {
@@ -399,7 +399,7 @@ describe('reconnect state preservation', () => {
       makeEvent({ seq: 2, turnId: 't1', kind: 'text-delta', payload: { text: 'abc' } }),
     );
 
-    // Simulate reconnect replay — server sends from lastAcknowledgedSeq
+    // Simulate reconnect replay — server sends from serverResumeSeq
     // Events 1–2 are replayed (stale), 3 is new
     callbacks.onStreamEvent!(
       'conv-A',
@@ -458,7 +458,7 @@ describe('submit + stream flow without REST clobber', () => {
     assert.equal(entries[1].turnId, 't-new');
     assert.equal(entries[1].contentBlocks[0]?.text, 'Agent reply');
     assert.equal(entries[1].status, 'streaming');
-    assert.equal(subState.lastAcknowledgedSeq, 2);
+    assert.equal(subState.serverResumeSeq, 2);
   });
 
   it('stream progress is not lost if a stale REST snapshot arrives after streaming', () => {
@@ -510,7 +510,7 @@ describe('submit + stream flow without REST clobber', () => {
     assert.ok(entries.length >= 1);
     // The key assertion: the fix prevents this scenario by not calling
     // refreshTranscript() after submit when streaming is active.
-    assert.equal(subState.lastAcknowledgedSeq, 3);
+    assert.equal(subState.serverResumeSeq, 3);
   });
 });
 
@@ -584,8 +584,8 @@ describe('subscribe/unsubscribe lifecycle', () => {
       makeEvent({ seq: 1, turnId: 't2', kind: 'stream-started', payload: {} }),
     );
 
-    assert.equal(stateMap.get('conv-A')?.lastAcknowledgedSeq, 2);
-    assert.equal(stateMap.get('conv-B')?.lastAcknowledgedSeq, 1);
+    assert.equal(stateMap.get('conv-A')?.serverResumeSeq, 2);
+    assert.equal(stateMap.get('conv-B')?.serverResumeSeq, 1);
     assert.equal(ackCalls.length, 3);
   });
 });
@@ -593,7 +593,7 @@ describe('subscribe/unsubscribe lifecycle', () => {
 // ─── Ack gating for ignored conditional events ─────────────────────────────
 
 describe('ack gating for ignored conditional events', () => {
-  it('does NOT advance lastAcknowledgedSeq for ignored approval-response', () => {
+  it('does NOT advance serverResumeSeq for ignored approval-response', () => {
     const store = storeWithConversation('conv-1');
 
     // Set up a turn with no prompt
@@ -604,7 +604,7 @@ describe('ack gating for ignored conditional events', () => {
       [makeEvent({ seq: 1, turnId: 't1', kind: 'stream-started', payload: {} })],
       sub,
     );
-    assert.equal(sub.lastAcknowledgedSeq, 1);
+    assert.equal(sub.serverResumeSeq, 1);
 
     // Deliver an approval-response with no matching prompt — should be ignored
     sub = applyStreamEventsToConversation(
@@ -621,13 +621,14 @@ describe('ack gating for ignored conditional events', () => {
       sub,
     );
     assert.equal(
-      sub.lastAcknowledgedSeq,
+      sub.serverResumeSeq,
       1,
-      'lastAcknowledgedSeq must not advance for ignored approval-response',
+      'serverResumeSeq must not advance for ignored approval-response',
     );
+    assert.ok(sub.pendingSeqs.has(2), 'ignored seq must be in pendingSeqs');
   });
 
-  it('does NOT advance lastAcknowledgedSeq for mismatched approvalId', () => {
+  it('does NOT advance serverResumeSeq for mismatched approvalId', () => {
     const store = storeWithConversation('conv-1');
 
     // Set up a turn with prompt-2 pending
@@ -646,7 +647,7 @@ describe('ack gating for ignored conditional events', () => {
       ],
       sub,
     );
-    assert.equal(sub.lastAcknowledgedSeq, 2);
+    assert.equal(sub.serverResumeSeq, 2);
 
     // Deliver an approval-response for prompt-1 (mismatched) — should be ignored
     sub = applyStreamEventsToConversation(
@@ -663,10 +664,11 @@ describe('ack gating for ignored conditional events', () => {
       sub,
     );
     assert.equal(
-      sub.lastAcknowledgedSeq,
+      sub.serverResumeSeq,
       2,
-      'lastAcknowledgedSeq must not advance for mismatched approval-response',
+      'serverResumeSeq must not advance for mismatched approval-response',
     );
+    assert.ok(sub.pendingSeqs.has(3), 'mismatched seq must be in pendingSeqs');
   });
 
   it('does NOT call ack for ignored approval-response via buildStreamCallbacks', () => {
@@ -690,7 +692,7 @@ describe('ack gating for ignored conditional events', () => {
     );
     assert.equal(ackCalls.length, 1, 'stream-started must be acked');
 
-    // Deliver an ignored approval-response
+    // Deliver an ignored approval-response — must not be acked
     callbacks.onStreamEvent!(
       'conv-1',
       makeEvent({
@@ -701,7 +703,7 @@ describe('ack gating for ignored conditional events', () => {
       }),
     );
     assert.equal(ackCalls.length, 1, 'ignored approval-response must NOT be acked');
-    assert.equal(stateMap.get('conv-1')?.lastAcknowledgedSeq, 1);
+    assert.equal(stateMap.get('conv-1')?.serverResumeSeq, 1);
   });
 
   it('resumes correctly after ignored event followed by consumed event', () => {
@@ -743,7 +745,9 @@ describe('ack gating for ignored conditional events', () => {
     assert.equal(ackCalls.length, 2);
     assert.deepEqual(ackCalls[0], { conversationId: 'conv-1', seq: 1 });
     assert.deepEqual(ackCalls[1], { conversationId: 'conv-1', seq: 3 });
-    assert.equal(stateMap.get('conv-1')?.lastAcknowledgedSeq, 3);
+    // serverResumeSeq must NOT advance to 3 — the gap at seq 2 blocks it.
+    assert.equal(stateMap.get('conv-1')?.serverResumeSeq, 1);
+    assert.ok(stateMap.get('conv-1')?.pendingSeqs.has(2));
   });
 });
 
@@ -810,7 +814,7 @@ describe('new-conversation REST clobber prevention', () => {
     const final = store.getState().conversations.get('new-conv');
     assert.equal(final?.entries.length, 1, 'streamed entries must not be clobbered');
     assert.equal(final?.entries[0].contentBlocks[0]?.text, 'Agent is typing...');
-    assert.equal(sub.lastAcknowledgedSeq, 2);
+    assert.equal(sub.serverResumeSeq, 2);
   });
 
   it('REST history loads normally when no streaming has occurred', () => {
@@ -839,5 +843,348 @@ describe('new-conversation REST clobber prevention', () => {
     assert.equal(final?.entries.length, 1);
     assert.equal(final?.entries[0].contentBlocks[0]?.text, 'Historical message');
     assert.equal(final?.loadState, 'ready');
+  });
+});
+
+// ─── Contiguous resume frontier ─────────────────────────────────────────────
+
+describe('contiguous resume frontier (gap safety)', () => {
+  it('consumed 1, ignored 2, consumed 3 must NOT resume from 3', () => {
+    const store = storeWithConversation('conv-1');
+    let sub = createStreamSubscriptionState();
+
+    // seq 1: stream-started (consumed)
+    sub = applyStreamEventsToConversation(
+      store,
+      'conv-1',
+      [makeEvent({ seq: 1, turnId: 't1', kind: 'stream-started', payload: {} })],
+      sub,
+    );
+    assert.equal(sub.serverResumeSeq, 1);
+
+    // seq 2: approval-response with no prompt (ignored → pending)
+    sub = applyStreamEventsToConversation(
+      store,
+      'conv-1',
+      [
+        makeEvent({
+          seq: 2,
+          turnId: 't1',
+          kind: 'approval-response',
+          payload: { approvalId: 'p1', response: 'approve' },
+        }),
+      ],
+      sub,
+    );
+    assert.equal(sub.serverResumeSeq, 1, 'gap at seq 2 blocks frontier');
+    assert.ok(sub.pendingSeqs.has(2));
+
+    // seq 3: text-delta (consumed)
+    sub = applyStreamEventsToConversation(
+      store,
+      'conv-1',
+      [makeEvent({ seq: 3, turnId: 't1', kind: 'text-delta', payload: { text: 'hello' } })],
+      sub,
+    );
+    assert.equal(sub.serverResumeSeq, 1, 'frontier must NOT skip over pending seq 2');
+    assert.ok(sub.pendingSeqs.has(2), 'seq 2 remains pending');
+  });
+
+  it('frontier advances past formerly-pending seq on replay', () => {
+    const store = storeWithConversation('conv-1');
+    let sub = createStreamSubscriptionState();
+
+    // First pass: consumed 1, ignored 2 (cross-turn t2), consumed 3 (t1)
+    sub = applyStreamEventsToConversation(
+      store,
+      'conv-1',
+      [makeEvent({ seq: 1, turnId: 't1', kind: 'stream-started', payload: {} })],
+      sub,
+    );
+    sub = applyStreamEventsToConversation(
+      store,
+      'conv-1',
+      [
+        makeEvent({
+          seq: 2,
+          turnId: 't2',
+          kind: 'approval-response',
+          payload: { approvalId: 'p1', response: 'approve' },
+        }),
+      ],
+      sub,
+    );
+    sub = applyStreamEventsToConversation(
+      store,
+      'conv-1',
+      [makeEvent({ seq: 3, turnId: 't1', kind: 'text-delta', payload: { text: 'a' } })],
+      sub,
+    );
+    assert.equal(sub.serverResumeSeq, 1, 'pre-replay: frontier stuck at 1');
+
+    // Set up t2 with a matching prompt via store dispatch (simulates a REST
+    // history load or earlier event that created the entry outside the
+    // reconciler path). Critically, t2 has no reconciler high-water, so seq 2
+    // is NOT stale when replayed.
+    const currentEntries = store.getState().conversations.get('conv-1')?.entries ?? [];
+    store.dispatch({
+      type: 'conversation/replace-entries',
+      conversationId: 'conv-1',
+      entries: [
+        ...currentEntries,
+        {
+          entryId: 't2',
+          kind: 'turn' as const,
+          turnId: 't2',
+          status: 'streaming',
+          timestamp: '2026-07-01T00:00:00.000Z',
+          contentBlocks: [],
+          artifacts: [],
+          controls: [],
+          prompt: {
+            promptId: 'p1',
+            parentTurnId: 't2',
+            status: 'pending' as const,
+            lastResponseSummary: null,
+          },
+        },
+      ],
+      hasMoreHistory: false,
+    });
+
+    // Replay seq 2 — now the prompt exists and t2 has no reconciler hw
+    sub = applyStreamEventsToConversation(
+      store,
+      'conv-1',
+      [
+        makeEvent({
+          seq: 2,
+          turnId: 't2',
+          kind: 'approval-response',
+          payload: { approvalId: 'p1', response: 'approve' },
+        }),
+      ],
+      sub,
+    );
+    assert.ok(!sub.pendingSeqs.has(2), 'seq 2 removed from pending after consumption');
+    // Frontier advances through 1, 2, 3
+    assert.equal(sub.serverResumeSeq, 3, 'frontier advances through all consumed seqs');
+  });
+});
+
+// ─── Ack failure must not advance resume cursor ─────────────────────────────
+
+describe('ack failure resume cursor isolation', () => {
+  it('ack failure must not advance reconnect resume cursor', () => {
+    const store = storeWithConversation('conv-1');
+    const stateMap = new Map<string, StreamSubscriptionState>();
+    let ackShouldFail = false;
+
+    const warnSpy = mock.fn();
+    const originalWarn = console.warn;
+    console.warn = warnSpy;
+
+    try {
+      const callbacks = buildStreamCallbacks(
+        store,
+        stateMap,
+        () => {
+          if (ackShouldFail) throw new Error('ack failed');
+        },
+        { onReconnectNeeded: () => {}, onConnectionEstablished: () => {} },
+      );
+
+      // Process seq 1 successfully
+      callbacks.onStreamEvent!(
+        'conv-1',
+        makeEvent({ seq: 1, turnId: 't1', kind: 'stream-started', payload: {} }),
+      );
+      assert.equal(stateMap.get('conv-1')?.serverResumeSeq, 1);
+
+      // Make ack fail for next event
+      ackShouldFail = true;
+      callbacks.onStreamEvent!(
+        'conv-1',
+        makeEvent({ seq: 2, turnId: 't1', kind: 'text-delta', payload: { text: 'data' } }),
+      );
+
+      // Resume cursor must NOT advance despite event being consumed locally
+      assert.equal(
+        stateMap.get('conv-1')?.serverResumeSeq,
+        1,
+        'resume cursor must stay at 1 after ack failure',
+      );
+      // But reconciler state should still be updated (local dedup works)
+      assert.equal(stateMap.get('conv-1')?.reconcilerState.highWaterSeq.get('t1'), 2);
+      assert.equal(warnSpy.mock.callCount(), 1);
+    } finally {
+      console.warn = originalWarn;
+    }
+  });
+
+  it('resume cursor advances again after ack recovers', () => {
+    const store = storeWithConversation('conv-1');
+    const stateMap = new Map<string, StreamSubscriptionState>();
+    let ackShouldFail = false;
+
+    const warnSpy = mock.fn();
+    const originalWarn = console.warn;
+    console.warn = warnSpy;
+
+    try {
+      const callbacks = buildStreamCallbacks(
+        store,
+        stateMap,
+        () => {
+          if (ackShouldFail) throw new Error('ack failed');
+        },
+        { onReconnectNeeded: () => {}, onConnectionEstablished: () => {} },
+      );
+
+      callbacks.onStreamEvent!(
+        'conv-1',
+        makeEvent({ seq: 1, turnId: 't1', kind: 'stream-started', payload: {} }),
+      );
+      assert.equal(stateMap.get('conv-1')?.serverResumeSeq, 1);
+
+      // Ack fails for seq 2
+      ackShouldFail = true;
+      callbacks.onStreamEvent!(
+        'conv-1',
+        makeEvent({ seq: 2, turnId: 't1', kind: 'text-delta', payload: { text: 'a' } }),
+      );
+      assert.equal(stateMap.get('conv-1')?.serverResumeSeq, 1);
+
+      // Ack recovers for seq 3
+      ackShouldFail = false;
+      callbacks.onStreamEvent!(
+        'conv-1',
+        makeEvent({ seq: 3, turnId: 't1', kind: 'text-delta', payload: { text: 'b' } }),
+      );
+      // Frontier can advance through 2 (not pending, reconciler consumed it) and 3
+      assert.equal(stateMap.get('conv-1')?.serverResumeSeq, 3);
+    } finally {
+      console.warn = originalWarn;
+    }
+  });
+});
+
+// ─── onSubscribed baseline seeding ──────────────────────────────────────────
+
+describe('onSubscribed baseline seeding', () => {
+  it('onSubscribed(currentSeq > 0) seeds resume state before any stream-event', () => {
+    const store = storeWithConversation('conv-1');
+    const stateMap = new Map<string, StreamSubscriptionState>();
+
+    const callbacks = buildStreamCallbacks(store, stateMap, () => {}, {
+      onReconnectNeeded: () => {},
+      onConnectionEstablished: () => {},
+    });
+
+    // Server confirms subscription at currentSeq = 5
+    callbacks.onSubscribed!('conv-1', 5);
+    assert.equal(stateMap.get('conv-1')?.serverResumeSeq, 5);
+  });
+
+  it('onSubscribed does not regress an existing resume cursor', () => {
+    const store = storeWithConversation('conv-1');
+    const stateMap = new Map<string, StreamSubscriptionState>();
+
+    const callbacks = buildStreamCallbacks(store, stateMap, () => {}, {
+      onReconnectNeeded: () => {},
+      onConnectionEstablished: () => {},
+    });
+
+    // Process events to advance resume cursor to 3
+    callbacks.onStreamEvent!(
+      'conv-1',
+      makeEvent({ seq: 1, turnId: 't1', kind: 'stream-started', payload: {} }),
+    );
+    callbacks.onStreamEvent!(
+      'conv-1',
+      makeEvent({ seq: 2, turnId: 't1', kind: 'text-delta', payload: { text: 'x' } }),
+    );
+    callbacks.onStreamEvent!(
+      'conv-1',
+      makeEvent({ seq: 3, turnId: 't1', kind: 'text-delta', payload: { text: 'y' } }),
+    );
+    assert.equal(stateMap.get('conv-1')?.serverResumeSeq, 3);
+
+    // onSubscribed with a lower seq should not regress
+    callbacks.onSubscribed!('conv-1', 1);
+    assert.equal(stateMap.get('conv-1')?.serverResumeSeq, 3, 'must not regress below existing');
+  });
+
+  it('disconnect before any events uses onSubscribed baseline for reconnect', () => {
+    const store = storeWithConversation('conv-1');
+    const stateMap = new Map<string, StreamSubscriptionState>();
+
+    const callbacks = buildStreamCallbacks(store, stateMap, () => {}, {
+      onReconnectNeeded: () => {},
+      onConnectionEstablished: () => {},
+    });
+
+    // Server confirms subscription at seq 10
+    callbacks.onSubscribed!('conv-1', 10);
+
+    // Immediate disconnect — no stream events arrived
+    callbacks.onClose!(1006, 'abnormal');
+
+    // The resume cursor should still be 10 from the baseline
+    assert.equal(
+      stateMap.get('conv-1')?.serverResumeSeq,
+      10,
+      'reconnect must use server-confirmed baseline when no events arrived',
+    );
+  });
+
+  it('reconnect uses correct cursor after gap + onSubscribed scenario', () => {
+    const store = storeWithConversation('conv-1');
+    const stateMap = new Map<string, StreamSubscriptionState>();
+    const ackCalls: Array<{ conversationId: string; seq: number }> = [];
+
+    const callbacks = buildStreamCallbacks(
+      store,
+      stateMap,
+      (id, seq) => {
+        ackCalls.push({ conversationId: id, seq });
+      },
+      { onReconnectNeeded: () => {}, onConnectionEstablished: () => {} },
+    );
+
+    // First session: onSubscribed baseline = 0, then process events with gap
+    callbacks.onSubscribed!('conv-1', 0);
+    callbacks.onStreamEvent!(
+      'conv-1',
+      makeEvent({ seq: 1, turnId: 't1', kind: 'stream-started', payload: {} }),
+    );
+    callbacks.onStreamEvent!(
+      'conv-1',
+      makeEvent({
+        seq: 2,
+        turnId: 't1',
+        kind: 'approval-response',
+        payload: { approvalId: 'nope', response: 'approve' },
+      }),
+    );
+    callbacks.onStreamEvent!(
+      'conv-1',
+      makeEvent({ seq: 3, turnId: 't1', kind: 'text-delta', payload: { text: 'x' } }),
+    );
+
+    // Resume cursor stuck at 1 (gap at 2)
+    assert.equal(stateMap.get('conv-1')?.serverResumeSeq, 1);
+
+    // Simulate reconnect — re-subscribe would pass serverResumeSeq = 1
+    // Server replays from seq 2 onward
+    assert.equal(ackCalls.filter((a) => a.seq === 2).length, 0, 'seq 2 must not have been acked');
+    assert.ok(
+      ackCalls.some((a) => a.seq === 1),
+      'seq 1 was acked',
+    );
+    assert.ok(
+      ackCalls.some((a) => a.seq === 3),
+      'seq 3 was acked',
+    );
   });
 });

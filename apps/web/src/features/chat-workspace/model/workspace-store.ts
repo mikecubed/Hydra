@@ -48,6 +48,7 @@ export type { SubmitDraftDeps, SubmitPort, SubmitResult } from './submit-flow.ts
 export {
   applyStreamEventsToConversation,
   buildStreamCallbacks,
+  computeContiguousResume,
   createStreamSubscriptionState,
 } from './stream-subscription.ts';
 export type { StreamLifecycleHooks, StreamSubscriptionState } from './stream-subscription.ts';

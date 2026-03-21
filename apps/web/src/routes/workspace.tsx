@@ -131,7 +131,7 @@ function useStreamSubscription({
           const activeId = activeIdRef.current;
           if (activeId != null) {
             const convState = stateMapRef.current.get(activeId);
-            streamClient.subscribe(activeId, convState?.lastAcknowledgedSeq);
+            streamClient.subscribe(activeId, convState?.serverResumeSeq);
           }
         } catch (err: unknown) {
           console.warn('[stream] Reconnect attempt failed:', err);
@@ -186,7 +186,7 @@ function useStreamSubscription({
     if (activeConversationId != null) {
       const convState = stateMapRef.current.get(activeConversationId);
       try {
-        streamClient.subscribe(activeConversationId, convState?.lastAcknowledgedSeq);
+        streamClient.subscribe(activeConversationId, convState?.serverResumeSeq);
       } catch (err: unknown) {
         console.warn(`[stream] Failed to subscribe to ${activeConversationId}:`, err);
       }
