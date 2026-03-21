@@ -415,7 +415,7 @@ describe('reconcileStreamEvents', () => {
   // ── approval-response ─────────────────────────────────────────────────
 
   describe('approval-response', () => {
-    it('updates an existing prompt status to resolved', () => {
+    it('resolves prompt when approvalId matches promptId', () => {
       const existing = makeEntry({
         entryId: 'turn-1',
         turnId: 'turn-1',
@@ -433,11 +433,65 @@ describe('reconcileStreamEvents', () => {
         seq: 4,
         turnId: 'turn-1',
         kind: 'approval-response',
-        payload: { promptId: 'prompt-1', response: 'approve' },
+        payload: { approvalId: 'prompt-1', response: 'approve' },
       });
       const { entries } = reconcileStreamEvents([existing], [event], createReconcilerState());
       assert.equal(entries[0].prompt?.status, 'resolved');
       assert.equal(entries[0].prompt?.lastResponseSummary, 'approve');
+    });
+
+    it('ignores approval-response when approvalId does not match promptId', () => {
+      const existing = makeEntry({
+        entryId: 'turn-1',
+        turnId: 'turn-1',
+        status: 'streaming',
+        prompt: {
+          promptId: 'prompt-1',
+          parentTurnId: 'turn-1',
+          status: 'pending',
+          allowedResponses: ['approve', 'reject'],
+          contextBlocks: [],
+          lastResponseSummary: null,
+        },
+      });
+      const event = makeEvent({
+        seq: 4,
+        turnId: 'turn-1',
+        kind: 'approval-response',
+        payload: { approvalId: 'foreign-prompt-99', response: 'approve' },
+      });
+      const { entries } = reconcileStreamEvents([existing], [event], createReconcilerState());
+      assert.equal(entries[0].prompt?.status, 'pending');
+      assert.equal(entries[0].prompt?.lastResponseSummary, null);
+    });
+
+    it('ignores out-of-order approval-response for a different prompt cycle', () => {
+      const existing = makeEntry({
+        entryId: 'turn-1',
+        turnId: 'turn-1',
+        status: 'streaming',
+        prompt: {
+          promptId: 'prompt-2',
+          parentTurnId: 'turn-1',
+          status: 'pending',
+          allowedResponses: ['yes', 'no'],
+          contextBlocks: [],
+          lastResponseSummary: null,
+        },
+      });
+      const staleResponse = makeEvent({
+        seq: 5,
+        turnId: 'turn-1',
+        kind: 'approval-response',
+        payload: { approvalId: 'prompt-1', response: 'yes' },
+      });
+      const { entries } = reconcileStreamEvents(
+        [existing],
+        [staleResponse],
+        createReconcilerState(),
+      );
+      assert.equal(entries[0].prompt?.status, 'pending');
+      assert.equal(entries[0].prompt?.promptId, 'prompt-2');
     });
   });
 

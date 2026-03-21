@@ -266,10 +266,12 @@ function applyApprovalResponse(
   entries: readonly TranscriptEntryState[],
   event: StreamEvent,
 ): readonly TranscriptEntryState[] {
+  const approvalId =
+    typeof event.payload['approvalId'] === 'string' ? event.payload['approvalId'] : '';
   const response = typeof event.payload['response'] === 'string' ? event.payload['response'] : null;
   const withEntry = ensureTurnEntry(entries, event.turnId, event.timestamp);
   return replaceTurnEntry(withEntry, event.turnId, (e) => {
-    if (!e.prompt) return e;
+    if (e.prompt?.promptId !== approvalId) return e;
     return {
       ...e,
       prompt: { ...e.prompt, status: 'resolved' as const, lastResponseSummary: response },
