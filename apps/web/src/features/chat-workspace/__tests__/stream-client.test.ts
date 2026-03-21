@@ -187,6 +187,13 @@ function errorPayload(overrides: Record<string, unknown> = {}) {
 
 // ─── Tests ──────────────────────────────────────────────────────────────────
 
+/** Assert `lastFakeSocket` is set and return it typed (avoids TS narrowing issues). */
+function getSocket(): FakeWebSocket {
+  const sock = lastFakeSocket;
+  assert.ok(sock, 'expected lastFakeSocket to be set');
+  return sock;
+}
+
 describe('StreamClient', () => {
   beforeEach(() => {
     lastFakeSocket = null;
@@ -590,6 +597,179 @@ describe('StreamClient', () => {
     });
   });
 
+  // ─── Schema validation on known server message types ────────────────
+
+  describe('inbound schema validation', () => {
+    it('fires onParseError when subscribed has non-string conversationId', () => {
+      const parseErrors: Array<{ raw: string; error: string }> = [];
+      const subscribedCalls: Array<{ conversationId: string; currentSeq: number }> = [];
+      const client = createStreamClient(defaultOptions());
+      client.connect(
+        noopCallbacks({
+          onSubscribed: (cid, seq) =>
+            subscribedCalls.push({ conversationId: cid, currentSeq: seq }),
+          onParseError: (raw, error) => parseErrors.push({ raw, error }),
+        }),
+      );
+      assert.ok(lastFakeSocket);
+      lastFakeSocket.simulateOpen();
+
+      lastFakeSocket.simulateMessage({ type: 'subscribed', conversationId: 123, currentSeq: 5 });
+
+      assert.equal(subscribedCalls.length, 0, 'should NOT dispatch to onSubscribed');
+      assert.equal(parseErrors.length, 1, 'should route to onParseError');
+      assert.ok(parseErrors[0].error.length > 0);
+    });
+
+    it('fires onParseError when subscribed has non-number currentSeq', () => {
+      const parseErrors: Array<{ raw: string; error: string }> = [];
+      const subscribedCalls: Array<{ conversationId: string; currentSeq: number }> = [];
+      const client = createStreamClient(defaultOptions());
+      client.connect(
+        noopCallbacks({
+          onSubscribed: (cid, seq) =>
+            subscribedCalls.push({ conversationId: cid, currentSeq: seq }),
+          onParseError: (raw, error) => parseErrors.push({ raw, error }),
+        }),
+      );
+      assert.ok(lastFakeSocket);
+      lastFakeSocket.simulateOpen();
+
+      lastFakeSocket.simulateMessage({
+        type: 'subscribed',
+        conversationId: 'conv-1',
+        currentSeq: 'oops',
+      });
+
+      assert.equal(subscribedCalls.length, 0, 'should NOT dispatch to onSubscribed');
+      assert.equal(parseErrors.length, 1, 'should route to onParseError');
+    });
+
+    it('fires onParseError when stream-event has missing event field', () => {
+      const parseErrors: Array<{ raw: string; error: string }> = [];
+      const streamEvents: unknown[] = [];
+      const client = createStreamClient(defaultOptions());
+      client.connect(
+        noopCallbacks({
+          onStreamEvent: (cid, ev) => streamEvents.push({ cid, ev }),
+          onParseError: (raw, error) => parseErrors.push({ raw, error }),
+        }),
+      );
+      assert.ok(lastFakeSocket);
+      lastFakeSocket.simulateOpen();
+
+      lastFakeSocket.simulateMessage({ type: 'stream-event', conversationId: 'conv-1' });
+
+      assert.equal(streamEvents.length, 0, 'should NOT dispatch to onStreamEvent');
+      assert.equal(parseErrors.length, 1, 'should route to onParseError');
+    });
+
+    it('fires onParseError when stream-event has invalid event shape', () => {
+      const parseErrors: Array<{ raw: string; error: string }> = [];
+      const streamEvents: unknown[] = [];
+      const client = createStreamClient(defaultOptions());
+      client.connect(
+        noopCallbacks({
+          onStreamEvent: (cid, ev) => streamEvents.push({ cid, ev }),
+          onParseError: (raw, error) => parseErrors.push({ raw, error }),
+        }),
+      );
+      assert.ok(lastFakeSocket);
+      lastFakeSocket.simulateOpen();
+
+      lastFakeSocket.simulateMessage({
+        type: 'stream-event',
+        conversationId: 'conv-1',
+        event: {
+          seq: 'not-a-number',
+          turnId: 'turn-1',
+          kind: 'text-delta',
+          payload: {},
+          timestamp: '2026-06-01T12:00:00.000Z',
+        },
+      });
+
+      assert.equal(streamEvents.length, 0, 'should NOT dispatch to onStreamEvent');
+      assert.equal(parseErrors.length, 1, 'should route to onParseError');
+    });
+
+    it('fires onParseError when unsubscribed is missing conversationId', () => {
+      const parseErrors: Array<{ raw: string; error: string }> = [];
+      const unsubCalls: string[] = [];
+      const client = createStreamClient(defaultOptions());
+      client.connect(
+        noopCallbacks({
+          onUnsubscribed: (cid) => unsubCalls.push(cid),
+          onParseError: (raw, error) => parseErrors.push({ raw, error }),
+        }),
+      );
+      assert.ok(lastFakeSocket);
+      lastFakeSocket.simulateOpen();
+
+      lastFakeSocket.simulateMessage({ type: 'unsubscribed' });
+
+      assert.equal(unsubCalls.length, 0, 'should NOT dispatch to onUnsubscribed');
+      assert.equal(parseErrors.length, 1, 'should route to onParseError');
+    });
+
+    it('fires onParseError when session-terminated has invalid state', () => {
+      const parseErrors: Array<{ raw: string; error: string }> = [];
+      const sessionCalls: unknown[] = [];
+      const client = createStreamClient(defaultOptions());
+      client.connect(
+        noopCallbacks({
+          onSessionTerminated: (st, reason) => sessionCalls.push({ st, reason }),
+          onParseError: (raw, error) => parseErrors.push({ raw, error }),
+        }),
+      );
+      assert.ok(lastFakeSocket);
+      lastFakeSocket.simulateOpen();
+
+      lastFakeSocket.simulateMessage({ type: 'session-terminated', state: 'bogus', reason: 'x' });
+
+      assert.equal(sessionCalls.length, 0, 'should NOT dispatch to onSessionTerminated');
+      assert.equal(parseErrors.length, 1, 'should route to onParseError');
+    });
+
+    it('fires onParseError when session-expiring-soon has non-string expiresAt', () => {
+      const parseErrors: Array<{ raw: string; error: string }> = [];
+      const expiryCalls: string[] = [];
+      const client = createStreamClient(defaultOptions());
+      client.connect(
+        noopCallbacks({
+          onSessionExpiringSoon: (ea) => expiryCalls.push(ea),
+          onParseError: (raw, error) => parseErrors.push({ raw, error }),
+        }),
+      );
+      assert.ok(lastFakeSocket);
+      lastFakeSocket.simulateOpen();
+
+      lastFakeSocket.simulateMessage({ type: 'session-expiring-soon', expiresAt: 12345 });
+
+      assert.equal(expiryCalls.length, 0, 'should NOT dispatch to onSessionExpiringSoon');
+      assert.equal(parseErrors.length, 1, 'should route to onParseError');
+    });
+
+    it('still dispatches valid messages after validation is added', () => {
+      const subscribedCalls: Array<{ conversationId: string; currentSeq: number }> = [];
+      const client = createStreamClient(defaultOptions());
+      client.connect(
+        noopCallbacks({
+          onSubscribed: (cid, seq) =>
+            subscribedCalls.push({ conversationId: cid, currentSeq: seq }),
+        }),
+      );
+      assert.ok(lastFakeSocket);
+      lastFakeSocket.simulateOpen();
+
+      lastFakeSocket.simulateMessage(subscribedPayload());
+
+      assert.equal(subscribedCalls.length, 1);
+      assert.equal(subscribedCalls[0].conversationId, 'conv-1');
+      assert.equal(subscribedCalls[0].currentSeq, 5);
+    });
+  });
+
   // ─── WebSocket close/error events ───────────────────────────────────
 
   describe('close / error events', () => {
@@ -628,6 +808,130 @@ describe('StreamClient', () => {
       lastFakeSocket.simulateClose(1001, 'Going away');
 
       assert.equal(client.readyState, FakeWebSocket.CLOSED);
+    });
+  });
+
+  // ─── Dead-socket safety ─────────────────────────────────────────────
+
+  describe('dead-socket safety after server-initiated close', () => {
+    it('throws on subscribe() after server-initiated close', () => {
+      const client = createStreamClient(defaultOptions());
+      client.connect(noopCallbacks());
+      assert.ok(lastFakeSocket);
+      lastFakeSocket.simulateOpen();
+
+      lastFakeSocket.simulateClose(1001, 'Going away');
+
+      assert.throws(
+        () => {
+          client.subscribe('conv-orphan');
+        },
+        (err: Error) => err.message.includes('not connected'),
+      );
+    });
+
+    it('throws on unsubscribe() after server-initiated close', () => {
+      const client = createStreamClient(defaultOptions());
+      client.connect(noopCallbacks());
+      assert.ok(lastFakeSocket);
+      lastFakeSocket.simulateOpen();
+
+      lastFakeSocket.simulateClose(1001, 'Going away');
+
+      assert.throws(
+        () => {
+          client.unsubscribe('conv-orphan');
+        },
+        (err: Error) => err.message.includes('not connected'),
+      );
+    });
+
+    it('throws on ack() after server-initiated close', () => {
+      const client = createStreamClient(defaultOptions());
+      client.connect(noopCallbacks());
+      assert.ok(lastFakeSocket);
+      lastFakeSocket.simulateOpen();
+
+      lastFakeSocket.simulateClose(1001, 'Going away');
+
+      assert.throws(
+        () => {
+          client.ack('conv-orphan', 5);
+        },
+        (err: Error) => err.message.includes('not connected'),
+      );
+    });
+
+    it('does not silently queue messages onto a dead socket', () => {
+      const client = createStreamClient(defaultOptions());
+      client.connect(noopCallbacks());
+      assert.ok(lastFakeSocket);
+      const closedSocket = lastFakeSocket;
+      lastFakeSocket.simulateOpen();
+
+      lastFakeSocket.simulateClose(1001, 'Going away');
+
+      // Try to send — should throw, not queue
+      assert.throws(() => {
+        client.subscribe('conv-x');
+      });
+
+      // Reconnect — the orphaned message must NOT appear
+      lastFakeSocket = null;
+      client.connect(noopCallbacks());
+      const reconnected = getSocket();
+      reconnected.simulateOpen();
+
+      assert.equal(reconnected.sentMessages.length, 0, 'reconnect must not flush orphaned queue');
+      // Also verify nothing was sent on the old dead socket after close
+      assert.equal(closedSocket.sent.length, 0, 'dead socket must not receive sends');
+    });
+
+    it('throws on subscribe() when socket is CLOSING', () => {
+      const client = createStreamClient(defaultOptions());
+      client.connect(noopCallbacks());
+      assert.ok(lastFakeSocket);
+      lastFakeSocket.simulateOpen();
+
+      // Simulate CLOSING state (close handshake in progress)
+      lastFakeSocket.readyState = FakeWebSocket.CLOSING;
+
+      assert.throws(
+        () => {
+          client.subscribe('conv-z');
+        },
+        (err: Error) => err.message.includes('closing') || err.message.includes('closed'),
+      );
+    });
+
+    it('still queues messages while CONNECTING (pre-open)', () => {
+      const client = createStreamClient(defaultOptions());
+      client.connect(noopCallbacks());
+      assert.ok(lastFakeSocket);
+
+      // Socket is CONNECTING — queue should work
+      assert.equal(lastFakeSocket.readyState, FakeWebSocket.CONNECTING);
+      client.subscribe('conv-early');
+      assert.equal(lastFakeSocket.sent.length, 0, 'should be queued, not sent');
+
+      lastFakeSocket.simulateOpen();
+      assert.equal(lastFakeSocket.sentMessages.length, 1, 'queued message should flush on open');
+    });
+
+    it('allows reconnect after server-initiated close', () => {
+      const opens: string[] = [];
+      const client = createStreamClient(defaultOptions());
+      client.connect(noopCallbacks({ onOpen: () => opens.push('open') }));
+      assert.ok(lastFakeSocket);
+      lastFakeSocket.simulateOpen();
+      lastFakeSocket.simulateClose(1001, 'Going away');
+
+      // Reconnect should work
+      lastFakeSocket = null;
+      client.connect(noopCallbacks({ onOpen: () => opens.push('reconnect') }));
+      const reconnected = getSocket();
+      reconnected.simulateOpen();
+      assert.deepStrictEqual(opens, ['open', 'reconnect']);
     });
   });
 

@@ -6,14 +6,22 @@
  * shapes defined in the gateway's ws-protocol.ts without importing from
  * the gateway directly (boundary rule).
  *
- * All server message types are dispatched to typed callbacks. Messages
- * that fail JSON parsing or have an unrecognized `type` field fire an
- * optional `onParseError` callback instead of silently swallowing.
+ * All server message types are dispatched to typed callbacks. Known
+ * message shapes are validated with Zod schemas that mirror the server
+ * protocol in a browser-safe way (no gateway imports). Messages that
+ * fail JSON parsing, have an unrecognized `type` field, or fail schema
+ * validation fire an optional `onParseError` callback.
+ *
+ * After a server-initiated close, the socket reference is cleared and
+ * sends throw instead of silently queuing onto a dead socket. Queuing
+ * only occurs while the socket is CONNECTING (pre-open).
  *
  * The WebSocket constructor is injectable via `createWebSocket` for
  * testability — defaults to `globalThis.WebSocket`.
  */
 
+import { z } from 'zod';
+import { StreamEvent as StreamEventSchema } from '@hydra/web-contracts';
 import type { StreamEvent } from '@hydra/web-contracts';
 
 import {
@@ -110,6 +118,47 @@ export interface StreamClient {
 
 const WS_CLOSED = 3;
 const WS_OPEN = 1;
+const WS_CONNECTING = 0;
+
+// ─── Server message schemas (mirror gateway wire shapes, browser-safe) ──────
+
+/** Terminal session states the server may send in session-terminated. */
+const TerminalSessionState = z.enum(['expired', 'invalidated', 'logged-out']);
+
+const ServerStreamEvent = z.object({
+  type: z.literal('stream-event'),
+  conversationId: z.string().min(1),
+  event: StreamEventSchema,
+});
+
+const ServerSubscribed = z.object({
+  type: z.literal('subscribed'),
+  conversationId: z.string().min(1),
+  currentSeq: z.number().int(),
+});
+
+const ServerUnsubscribed = z.object({
+  type: z.literal('unsubscribed'),
+  conversationId: z.string().min(1),
+});
+
+const ServerSessionTerminated = z.object({
+  type: z.literal('session-terminated'),
+  state: TerminalSessionState,
+  reason: z.string().optional(),
+});
+
+const ServerSessionExpiringSoon = z.object({
+  type: z.literal('session-expiring-soon'),
+  expiresAt: z.string().min(1),
+});
+
+const ServerDaemonUnavailable = z.object({ type: z.literal('daemon-unavailable') });
+const ServerDaemonRestored = z.object({ type: z.literal('daemon-restored') });
+
+// Error messages are validated by parseGatewayError (existing logic).
+// Schema just confirms type field for routing; body validation is delegated.
+const ServerError = z.object({ type: z.literal('error') }).loose();
 
 // ─── Internals ──────────────────────────────────────────────────────────────
 
@@ -135,42 +184,82 @@ function toGatewayError(raw: Record<string, unknown>): GatewayErrorBody {
   };
 }
 
-/** Per-type dispatch handlers. Separated to keep cyclomatic complexity low. */
-function handleStreamEvent(msg: Record<string, unknown>, cb: StreamClientCallbacks): void {
-  cb.onStreamEvent?.(msg['conversationId'] as string, msg['event'] as StreamEvent);
+/** Per-type dispatch handlers. Each validates the message shape before dispatching. */
+function handleStreamEvent(msg: Record<string, unknown>, cb: StreamClientCallbacks): string | null {
+  const result = ServerStreamEvent.safeParse(msg);
+  if (!result.success) return result.error.message;
+  cb.onStreamEvent?.(result.data.conversationId, result.data.event);
+  return null;
 }
 
-function handleSubscribed(msg: Record<string, unknown>, cb: StreamClientCallbacks): void {
-  cb.onSubscribed?.(msg['conversationId'] as string, msg['currentSeq'] as number);
+function handleSubscribed(msg: Record<string, unknown>, cb: StreamClientCallbacks): string | null {
+  const result = ServerSubscribed.safeParse(msg);
+  if (!result.success) return result.error.message;
+  cb.onSubscribed?.(result.data.conversationId, result.data.currentSeq);
+  return null;
 }
 
-function handleUnsubscribed(msg: Record<string, unknown>, cb: StreamClientCallbacks): void {
-  cb.onUnsubscribed?.(msg['conversationId'] as string);
+function handleUnsubscribed(
+  msg: Record<string, unknown>,
+  cb: StreamClientCallbacks,
+): string | null {
+  const result = ServerUnsubscribed.safeParse(msg);
+  if (!result.success) return result.error.message;
+  cb.onUnsubscribed?.(result.data.conversationId);
+  return null;
 }
 
-function handleSessionTerminated(msg: Record<string, unknown>, cb: StreamClientCallbacks): void {
-  const state = msg['state'] as 'expired' | 'invalidated' | 'logged-out';
-  const reason = typeof msg['reason'] === 'string' ? msg['reason'] : undefined;
-  cb.onSessionTerminated?.(state, reason);
+function handleSessionTerminated(
+  msg: Record<string, unknown>,
+  cb: StreamClientCallbacks,
+): string | null {
+  const result = ServerSessionTerminated.safeParse(msg);
+  if (!result.success) return result.error.message;
+  cb.onSessionTerminated?.(result.data.state, result.data.reason);
+  return null;
 }
 
-function handleSessionExpiringSoon(msg: Record<string, unknown>, cb: StreamClientCallbacks): void {
-  cb.onSessionExpiringSoon?.(msg['expiresAt'] as string);
+function handleSessionExpiringSoon(
+  msg: Record<string, unknown>,
+  cb: StreamClientCallbacks,
+): string | null {
+  const result = ServerSessionExpiringSoon.safeParse(msg);
+  if (!result.success) return result.error.message;
+  cb.onSessionExpiringSoon?.(result.data.expiresAt);
+  return null;
 }
 
-function handleDaemonUnavailable(_msg: Record<string, unknown>, cb: StreamClientCallbacks): void {
+function handleDaemonUnavailable(
+  msg: Record<string, unknown>,
+  cb: StreamClientCallbacks,
+): string | null {
+  const result = ServerDaemonUnavailable.safeParse(msg);
+  if (!result.success) return result.error.message;
   cb.onDaemonUnavailable?.();
+  return null;
 }
 
-function handleDaemonRestored(_msg: Record<string, unknown>, cb: StreamClientCallbacks): void {
+function handleDaemonRestored(
+  msg: Record<string, unknown>,
+  cb: StreamClientCallbacks,
+): string | null {
+  const result = ServerDaemonRestored.safeParse(msg);
+  if (!result.success) return result.error.message;
   cb.onDaemonRestored?.();
+  return null;
 }
 
-function handleError(msg: Record<string, unknown>, cb: StreamClientCallbacks): void {
+function handleError(msg: Record<string, unknown>, cb: StreamClientCallbacks): string | null {
+  const result = ServerError.safeParse(msg);
+  if (!result.success) return result.error.message;
   cb.onError?.(toGatewayError(msg));
+  return null;
 }
 
-type ServerMessageHandler = (msg: Record<string, unknown>, cb: StreamClientCallbacks) => void;
+type ServerMessageHandler = (
+  msg: Record<string, unknown>,
+  cb: StreamClientCallbacks,
+) => string | null;
 
 const SERVER_HANDLERS: ReadonlyMap<string, ServerMessageHandler> = new Map<
   string,
@@ -207,10 +296,69 @@ function dispatchServerMessage(raw: string, callbacks: StreamClientCallbacks): v
     return;
   }
 
-  handler(parsed, callbacks);
+  const validationError = handler(parsed, callbacks);
+  if (validationError !== null) {
+    callbacks.onParseError?.(raw, `Invalid "${parsed['type']}" message: ${validationError}`);
+  }
 }
 
 // ─── Factory ────────────────────────────────────────────────────────────────
+
+/** Mutable internal state shared between the factory closure and helpers. */
+interface ClientState {
+  socket: WebSocketLike | null;
+  sendQueue: string[];
+}
+
+function requireSocket(state: ClientState): WebSocketLike {
+  if (state.socket === null) {
+    throw new Error('StreamClient is not connected — call connect() first');
+  }
+  return state.socket;
+}
+
+function sendOrQueue(state: ClientState, data: string): void {
+  const ws = requireSocket(state);
+  if (ws.readyState === WS_OPEN) {
+    ws.send(data);
+  } else if (ws.readyState === WS_CONNECTING) {
+    state.sendQueue.push(data);
+  } else {
+    throw new Error('StreamClient socket is closing or closed — cannot send');
+  }
+}
+
+function flushQueue(state: ClientState): void {
+  if (state.socket === null) return;
+  const pending = state.sendQueue;
+  state.sendQueue = [];
+  for (const msg of pending) {
+    state.socket.send(msg);
+  }
+}
+
+function attachSocketHandlers(
+  state: ClientState,
+  ws: WebSocketLike,
+  callbacks: StreamClientCallbacks,
+): void {
+  ws.onopen = () => {
+    flushQueue(state);
+    callbacks.onOpen?.();
+  };
+  ws.onmessage = (ev) => {
+    const raw = typeof ev.data === 'string' ? ev.data : String(ev.data);
+    dispatchServerMessage(raw, callbacks);
+  };
+  ws.onerror = () => {
+    callbacks.onSocketError?.();
+  };
+  ws.onclose = (ev) => {
+    state.socket = null;
+    state.sendQueue = [];
+    callbacks.onClose?.(ev.code, ev.reason);
+  };
+}
 
 /**
  * Create a new stream client instance.
@@ -224,91 +372,43 @@ export function createStreamClient(options: StreamClientOptions): StreamClient {
   const createWs =
     options.createWebSocket ?? ((url: string) => new WebSocket(url) as WebSocketLike);
 
-  let socket: WebSocketLike | null = null;
-  let sendQueue: string[] = [];
-
-  function requireSocket(): WebSocketLike {
-    if (socket === null) {
-      throw new Error('StreamClient is not connected — call connect() first');
-    }
-    return socket;
-  }
-
-  function sendOrQueue(data: string): void {
-    const ws = requireSocket();
-    if (ws.readyState === WS_OPEN) {
-      ws.send(data);
-    } else {
-      sendQueue.push(data);
-    }
-  }
-
-  function flushQueue(): void {
-    if (socket === null) return;
-    const pending = sendQueue;
-    sendQueue = [];
-    for (const msg of pending) {
-      socket.send(msg);
-    }
-  }
+  const state: ClientState = { socket: null, sendQueue: [] };
 
   return {
     connect(callbacks) {
-      if (socket !== null && socket.readyState !== socket.CLOSED) {
+      if (state.socket !== null && state.socket.readyState !== state.socket.CLOSED) {
         throw new Error('StreamClient is already connected — call close() first');
       }
 
-      sendQueue = [];
+      state.sendQueue = [];
       const ws = createWs(baseUrl);
-      socket = ws;
-
-      ws.onopen = () => {
-        flushQueue();
-        callbacks.onOpen?.();
-      };
-
-      ws.onmessage = (ev) => {
-        const raw = typeof ev.data === 'string' ? ev.data : String(ev.data);
-        dispatchServerMessage(raw, callbacks);
-      };
-
-      ws.onerror = () => {
-        callbacks.onSocketError?.();
-      };
-
-      ws.onclose = (ev) => {
-        callbacks.onClose?.(ev.code, ev.reason);
-      };
+      state.socket = ws;
+      attachSocketHandlers(state, ws, callbacks);
     },
 
     subscribe(conversationId, lastAcknowledgedSeq) {
-      const msg: Record<string, unknown> = {
-        type: 'subscribe',
-        conversationId,
-      };
-      if (lastAcknowledgedSeq !== undefined) {
-        msg['lastAcknowledgedSeq'] = lastAcknowledgedSeq;
-      }
-      sendOrQueue(JSON.stringify(msg));
+      const msg: Record<string, unknown> = { type: 'subscribe', conversationId };
+      if (lastAcknowledgedSeq !== undefined) msg['lastAcknowledgedSeq'] = lastAcknowledgedSeq;
+      sendOrQueue(state, JSON.stringify(msg));
     },
 
     unsubscribe(conversationId) {
-      sendOrQueue(JSON.stringify({ type: 'unsubscribe', conversationId }));
+      sendOrQueue(state, JSON.stringify({ type: 'unsubscribe', conversationId }));
     },
 
     ack(conversationId, seq) {
-      sendOrQueue(JSON.stringify({ type: 'ack', conversationId, seq }));
+      sendOrQueue(state, JSON.stringify({ type: 'ack', conversationId, seq }));
     },
 
     close() {
-      if (socket === null) return;
-      sendQueue = [];
-      socket.close();
-      socket = null;
+      if (state.socket === null) return;
+      state.sendQueue = [];
+      state.socket.close();
+      state.socket = null;
     },
 
     get readyState() {
-      return socket?.readyState ?? WS_CLOSED;
+      return state.socket?.readyState ?? WS_CLOSED;
     },
   };
 }
