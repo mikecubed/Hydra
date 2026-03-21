@@ -13,7 +13,6 @@ import {
 
 import type {
   ComposerDraftState,
-  ContentBlockState,
   ConversationLineageState,
   ConversationLoadState,
   ConversationStatus,
@@ -226,6 +225,19 @@ export function createInitialWorkspaceState(): WorkspaceState {
 
 // ─── Per-action reducers ────────────────────────────────────────────────────
 
+type PromptAction = Extract<
+  WorkspaceAction,
+  {
+    readonly type:
+      | 'prompt/begin-response'
+      | 'prompt/response-confirmed'
+      | 'prompt/response-failed'
+      | 'prompt/mark-stale'
+      | 'prompt/mark-unavailable'
+      | 'prompt/hydrate';
+  }
+>;
+
 function mergeConversationView(
   previous: ConversationViewState | undefined,
   conversation: WorkspaceConversationRecord,
@@ -387,18 +399,6 @@ function applyConversationEntries(
  *
  * Sets `historyLoaded: true` so the transcript loader knows not to re-fetch.
  */
-
-function mergePromptState(
-  streamedPrompt: PromptViewState | null,
-  restPrompt: PromptViewState | null,
-): PromptViewState | null {
-  if (streamedPrompt == null) {
-    return restPrompt;
-  }
-
-  return streamedPrompt;
-}
-
 function applyMergeHistory(
   state: WorkspaceState,
   conversationId: string,
@@ -570,7 +570,7 @@ function updatePromptEntry(
   promptId: string,
   updater: (prompt: PromptViewState) => PromptViewState,
 ): TranscriptEntryState {
-  if (entry.kind !== 'turn' || entry.prompt == null || entry.prompt.promptId !== promptId) {
+  if (entry.kind !== 'turn' || entry.prompt?.promptId !== promptId) {
     return entry;
   }
 
@@ -588,15 +588,10 @@ function applyPromptUpdate(
   updater: (prompt: PromptViewState) => PromptViewState,
 ): WorkspaceState {
   const current = ensureConversation(state.conversations, conversationId);
-  let changed = false;
-  const nextEntries = current.entries.map((entry) => {
-    const nextEntry =
-      entry.turnId === turnId ? updatePromptEntry(entry, promptId, updater) : entry;
-    if (nextEntry !== entry) {
-      changed = true;
-    }
-    return nextEntry;
-  });
+  const nextEntries = current.entries.map((entry) =>
+    entry.turnId === turnId ? updatePromptEntry(entry, promptId, updater) : entry,
+  );
+  const changed = nextEntries.some((entry, index) => entry !== current.entries[index]);
 
   if (!changed) {
     return state;
@@ -696,12 +691,61 @@ function applyPromptHydrate(
   );
 }
 
+function isPromptAction(action: WorkspaceAction): action is PromptAction {
+  return action.type.startsWith('prompt/');
+}
+
+function applyPromptAction(state: WorkspaceState, action: PromptAction): WorkspaceState {
+  switch (action.type) {
+    case 'prompt/begin-response':
+      return applyPromptBeginResponse(state, action.conversationId, action.turnId, action.promptId);
+    case 'prompt/response-confirmed':
+      return applyPromptResponseConfirmed(
+        state,
+        action.conversationId,
+        action.turnId,
+        action.promptId,
+        action.responseSummary,
+      );
+    case 'prompt/response-failed':
+      return applyPromptResponseFailed(
+        state,
+        action.conversationId,
+        action.turnId,
+        action.promptId,
+        action.errorMessage,
+      );
+    case 'prompt/mark-stale':
+      return applyPromptMarkStale(state, action.conversationId, action.turnId, action.promptId);
+    case 'prompt/mark-unavailable':
+      return applyPromptMarkUnavailable(
+        state,
+        action.conversationId,
+        action.turnId,
+        action.promptId,
+      );
+    case 'prompt/hydrate':
+      return applyPromptHydrate(
+        state,
+        action.conversationId,
+        action.turnId,
+        action.promptId,
+        action.allowedResponses,
+        action.contextBlocks,
+      );
+  }
+}
+
 // ─── Top-level reducer ──────────────────────────────────────────────────────
 
 export function reduceWorkspaceState(
   state: WorkspaceState,
   action: WorkspaceAction,
 ): WorkspaceState {
+  if (isPromptAction(action)) {
+    return applyPromptAction(state, action);
+  }
+
   switch (action.type) {
     case 'conversation/upsert':
       return applyConversationUpsert(state, action.conversation);
@@ -737,46 +781,5 @@ export function reduceWorkspaceState(
       return { ...state, visibleArtifact: action.artifact };
     case 'artifact/clear':
       return { ...state, visibleArtifact: null };
-    case 'prompt/begin-response':
-      return applyPromptBeginResponse(
-        state,
-        action.conversationId,
-        action.turnId,
-        action.promptId,
-      );
-    case 'prompt/response-confirmed':
-      return applyPromptResponseConfirmed(
-        state,
-        action.conversationId,
-        action.turnId,
-        action.promptId,
-        action.responseSummary,
-      );
-    case 'prompt/response-failed':
-      return applyPromptResponseFailed(
-        state,
-        action.conversationId,
-        action.turnId,
-        action.promptId,
-        action.errorMessage,
-      );
-    case 'prompt/mark-stale':
-      return applyPromptMarkStale(state, action.conversationId, action.turnId, action.promptId);
-    case 'prompt/mark-unavailable':
-      return applyPromptMarkUnavailable(
-        state,
-        action.conversationId,
-        action.turnId,
-        action.promptId,
-      );
-    case 'prompt/hydrate':
-      return applyPromptHydrate(
-        state,
-        action.conversationId,
-        action.turnId,
-        action.promptId,
-        action.allowedResponses,
-        action.contextBlocks,
-      );
   }
 }
