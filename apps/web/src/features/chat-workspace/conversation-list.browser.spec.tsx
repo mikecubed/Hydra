@@ -12,6 +12,77 @@ afterEach(() => {
 });
 
 describe('workspace conversation browsing', () => {
+  it('clears the initial list error after a successful create flow', async () => {
+    const createResponse = {
+      id: 'conv-new',
+      title: 'Fresh conversation',
+      status: 'active',
+      createdAt: '2026-03-21T00:00:00.000Z',
+      updatedAt: '2026-03-21T00:00:00.000Z',
+      turnCount: 0,
+      pendingInstructionCount: 0,
+    };
+    const submitResponse = {
+      turn: {
+        id: 'turn-1',
+        conversationId: 'conv-new',
+        position: 1,
+        kind: 'operator',
+        attribution: { type: 'operator', label: 'Operator' },
+        instruction: 'Create a conversation anyway',
+        status: 'submitted',
+        createdAt: '2026-03-21T00:00:01.000Z',
+      },
+      streamId: 'stream-1',
+    };
+
+    fetchSpy.mockImplementation(async (input, init) => {
+      const url =
+        typeof input === 'string'
+          ? input
+          : input instanceof URL
+            ? input.toString()
+            : input.url;
+
+      if (url === '/conversations?status=active&limit=20') {
+        return new Response(JSON.stringify({ message: 'Gateway down' }), {
+          status: 503,
+          statusText: 'Service Unavailable',
+          headers: { 'Content-Type': 'application/json' },
+        });
+      }
+
+      if (url === '/conversations' && init?.method === 'POST') {
+        return new Response(JSON.stringify(createResponse), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        });
+      }
+
+      if (url === '/conversations/conv-new/turns' && init?.method === 'POST') {
+        return new Response(JSON.stringify(submitResponse), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        });
+      }
+
+      throw new Error(`Unexpected fetch input: ${String(url)}`);
+    });
+    vi.stubGlobal('fetch', fetchSpy);
+
+    render(<AppProviders />);
+
+    expect((await screen.findByRole('alert')).textContent).toContain('Service Unavailable');
+
+    const textbox = screen.getByRole('textbox', { name: /instruction/i });
+    fireEvent.change(textbox, { target: { value: 'Create a conversation anyway' } });
+    fireEvent.click(screen.getByRole('button', { name: /send/i }));
+
+    expect(await screen.findByRole('button', { name: /fresh conversation/i })).toBeTruthy();
+    expect(screen.queryByRole('alert')).toBeNull();
+    expect(screen.getByText('Active conversation: Fresh conversation')).toBeTruthy();
+  });
+
   it('keeps create mode disabled until the initial conversation load completes', async () => {
     let resolveList: ((value: Response) => void) | undefined;
     const listResponse: ListConversationsResponse = {

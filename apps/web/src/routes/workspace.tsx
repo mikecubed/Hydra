@@ -50,6 +50,7 @@ function useComposerProps(
   client: GatewayClient,
   state: WorkspaceState,
   isLoadingConversations: boolean,
+  clearConversationError: () => void,
 ) {
   // Local state for create mode (no active conversation).
   const [createDraftText, setCreateDraftText] = useState('');
@@ -90,6 +91,7 @@ function useComposerProps(
       void createAndSubmitDraft({ store, client }, createDraftText)
         .then(() => {
           setCreateDraftText('');
+          clearConversationError();
         })
         .catch((err: unknown) => {
           setCreateError(err instanceof Error ? err.message : 'Failed to create conversation');
@@ -100,7 +102,7 @@ function useComposerProps(
       return;
     }
     void submitComposerDraft({ store, client });
-  }, [client, createDraftText, isLoadingConversations, store]);
+  }, [clearConversationError, client, createDraftText, isLoadingConversations, store]);
 
   const policyLabel = isLoadingConversations
     ? 'Loading conversations…'
@@ -170,7 +172,9 @@ export function WorkspaceRoute(): JSX.Element {
     };
   }, [client, store]);
 
-  const composer = useComposerProps(store, client, state, isLoadingConversations);
+  const composer = useComposerProps(store, client, state, isLoadingConversations, () => {
+    setConversationErrorMessage(null);
+  });
 
   return (
     <WorkspaceLayout
@@ -181,6 +185,7 @@ export function WorkspaceRoute(): JSX.Element {
       conversationErrorMessage={conversationErrorMessage}
       onSelectConversation={(conversationId) => {
         store.dispatch({ type: 'conversation/select', conversationId });
+        setConversationErrorMessage(null);
         composer.clearCreateState();
       }}
       composerSlot={
