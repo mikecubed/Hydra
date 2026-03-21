@@ -18,6 +18,8 @@ import type {
   LoadTurnHistoryResponse,
   SubmitInstructionBody,
   SubmitInstructionResponse,
+  GetPendingApprovalsResponse,
+  RespondToApprovalResponse,
 } from '@hydra/web-contracts';
 
 import {
@@ -44,6 +46,12 @@ export interface LoadHistoryParams {
   readonly limit?: number;
 }
 
+/** Body for respondToApproval — acknowledgeStaleness defaults to false server-side. */
+export interface RespondToApprovalBody {
+  readonly response: string;
+  readonly acknowledgeStaleness?: boolean;
+}
+
 export interface GatewayClient {
   listConversations(params?: Partial<ListConversationsRequest>): Promise<ListConversationsResponse>;
   openConversation(conversationId: string): Promise<OpenConversationResponse>;
@@ -53,6 +61,11 @@ export interface GatewayClient {
     conversationId: string,
     body: SubmitInstructionBody,
   ): Promise<SubmitInstructionResponse>;
+  getPendingApprovals(conversationId: string): Promise<GetPendingApprovalsResponse>;
+  respondToApproval(
+    approvalId: string,
+    body: RespondToApprovalBody,
+  ): Promise<RespondToApprovalResponse>;
 }
 
 // ─── Error class ────────────────────────────────────────────────────────────
@@ -295,6 +308,25 @@ export function createGatewayClient(options: GatewayClientOptions): GatewayClien
         baseUrl,
         getCsrfToken,
         `/conversations/${encodeURIComponent(conversationId)}/turns`,
+        body,
+      );
+    },
+
+    async getPendingApprovals(conversationId) {
+      return getJson<GetPendingApprovalsResponse>(
+        fetchFn,
+        baseUrl,
+        getCsrfToken,
+        `/conversations/${encodeURIComponent(conversationId)}/approvals`,
+      );
+    },
+
+    async respondToApproval(approvalId, body) {
+      return postJson<RespondToApprovalResponse>(
+        fetchFn,
+        baseUrl,
+        getCsrfToken,
+        `/approvals/${encodeURIComponent(approvalId)}/respond`,
         body,
       );
     },

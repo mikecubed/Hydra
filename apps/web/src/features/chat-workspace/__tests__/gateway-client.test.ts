@@ -1,8 +1,9 @@
 /**
  * Tests for the browser-side gateway conversation client.
  *
- * Verifies list, detail (open), history, create, and submit operations,
- * including structured error handling via the gateway error parser.
+ * Verifies list, detail (open), history, create, submit, approval retrieval,
+ * and approval response operations, including structured error handling via
+ * the gateway error parser.
  */
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
@@ -44,6 +45,23 @@ function turnFixture(overrides: Record<string, unknown> = {}) {
     attribution: { type: 'operator' as const, label: 'Operator' },
     instruction: 'Hello',
     status: 'completed' as const,
+    createdAt: NOW,
+    ...overrides,
+  };
+}
+
+function approvalFixture(overrides: Record<string, unknown> = {}) {
+  return {
+    id: 'approval-1',
+    turnId: 'turn-1',
+    status: 'pending' as const,
+    prompt: 'Allow file write to /etc/hosts?',
+    context: { path: '/etc/hosts' },
+    contextHash: 'hash-abc',
+    responseOptions: [
+      { key: 'allow', label: 'Allow' },
+      { key: 'deny', label: 'Deny' },
+    ],
     createdAt: NOW,
     ...overrides,
   };
@@ -434,6 +452,214 @@ describe('GatewayClient', () => {
           return true;
         },
       );
+    });
+  });
+
+  // ── getPendingApprovals ──────────────────────────────────────────────
+
+  describe('getPendingApprovals', () => {
+    it('sends GET to /conversations/:id/approvals and returns approvals array', async () => {
+      const approval = approvalFixture();
+      const responseBody = { approvals: [approval] };
+      let capturedUrl = '';
+
+      const client = buildClient(async (input) => {
+        capturedUrl = stringifyInput(input);
+        return jsonResponse(responseBody);
+      });
+
+      const result = await client.getPendingApprovals('conv-1');
+
+      assert.ok(capturedUrl.endsWith('/conversations/conv-1/approvals'));
+      assert.equal(result.approvals.length, 1);
+      assert.equal(result.approvals[0].id, 'approval-1');
+      assert.equal(result.approvals[0].status, 'pending');
+    });
+
+    it('returns empty approvals array when none are pending', async () => {
+      const client = buildClient(async () => jsonResponse({ approvals: [] }));
+
+      const result = await client.getPendingApprovals('conv-1');
+      assert.deepStrictEqual(result.approvals, []);
+    });
+
+    it('encodes special characters in conversation ID', async () => {
+      let capturedUrl = '';
+      const client = buildClient(async (input) => {
+        capturedUrl = stringifyInput(input);
+        return jsonResponse({ approvals: [] });
+      });
+
+      await client.getPendingApprovals('conv/special&id');
+      assert.ok(capturedUrl.includes(encodeURIComponent('conv/special&id')));
+    });
+
+    it('throws GatewayRequestError when conversation not found', async () => {
+      const errBody = gatewayErrorFixture();
+      const client = buildClient(async () => errorResponse(errBody, 404));
+
+      await assert.rejects(
+        () => client.getPendingApprovals('nonexistent'),
+        (err: unknown) => {
+          const gErr = assertGatewayError(err);
+          assert.equal(gErr.status, 404);
+          assert.equal(gErr.gatewayError.code, 'NOT_FOUND');
+          return true;
+        },
+      );
+    });
+
+    it('supports a relative baseUrl', async () => {
+      let capturedUrl = '';
+      const client = buildClient(
+        async (input) => {
+          capturedUrl = stringifyInput(input);
+          return jsonResponse({ approvals: [] });
+        },
+        { baseUrl: '/gateway' },
+      );
+
+      await client.getPendingApprovals('conv-1');
+      assert.equal(capturedUrl, '/gateway/conversations/conv-1/approvals');
+    });
+  });
+
+  // ── respondToApproval ─────────────────────────────────────────────
+
+  describe('respondToApproval', () => {
+    it('sends POST to /approvals/:id/respond with response body', async () => {
+      const updatedApproval = approvalFixture({
+        status: 'responded',
+        response: 'allow',
+        respondedAt: NOW,
+      });
+      const responseBody = { success: true, approval: updatedApproval };
+      let capturedUrl = '';
+      let capturedMethod = '';
+      let capturedBody = '';
+
+      const client = buildClient(async (input, init) => {
+        capturedUrl = stringifyInput(input);
+        capturedMethod = init?.method ?? '';
+        capturedBody = (init?.body as string) ?? '';
+        return jsonResponse(responseBody);
+      });
+
+      const result = await client.respondToApproval('approval-1', { response: 'allow' });
+
+      assert.ok(capturedUrl.endsWith('/approvals/approval-1/respond'));
+      assert.equal(capturedMethod, 'POST');
+      const parsed = JSON.parse(capturedBody);
+      assert.equal(parsed.response, 'allow');
+      assert.equal(result.success, true);
+      assert.equal(result.approval.status, 'responded');
+      assert.equal(result.approval.response, 'allow');
+    });
+
+    it('passes acknowledgeStaleness flag in body', async () => {
+      let capturedBody = '';
+      const client = buildClient(async (_input, init) => {
+        capturedBody = (init?.body as string) ?? '';
+        return jsonResponse({
+          success: true,
+          approval: approvalFixture({ status: 'responded', response: 'allow' }),
+        });
+      });
+
+      await client.respondToApproval('approval-1', {
+        response: 'allow',
+        acknowledgeStaleness: true,
+      });
+
+      const parsed = JSON.parse(capturedBody);
+      assert.equal(parsed.response, 'allow');
+      assert.equal(parsed.acknowledgeStaleness, true);
+    });
+
+    it('returns conflict notification when present', async () => {
+      const responseBody = {
+        success: true,
+        approval: approvalFixture({ status: 'responded', response: 'allow' }),
+        conflictNotification: { message: 'Context has changed since approval was created' },
+      };
+      const client = buildClient(async () => jsonResponse(responseBody));
+
+      const result = await client.respondToApproval('approval-1', { response: 'allow' });
+
+      assert.equal(
+        result.conflictNotification?.message,
+        'Context has changed since approval was created',
+      );
+    });
+
+    it('encodes special characters in approval ID', async () => {
+      let capturedUrl = '';
+      const client = buildClient(async (input) => {
+        capturedUrl = stringifyInput(input);
+        return jsonResponse({
+          success: true,
+          approval: approvalFixture({ status: 'responded', response: 'allow' }),
+        });
+      });
+
+      await client.respondToApproval('approval/special&id', { response: 'allow' });
+      assert.ok(capturedUrl.includes(encodeURIComponent('approval/special&id')));
+    });
+
+    it('throws GatewayRequestError on 409 conflict', async () => {
+      const errBody = gatewayErrorFixture({
+        code: 'CONFLICT',
+        category: 'validation',
+        message: 'Approval already responded',
+      });
+      const client = buildClient(async () => errorResponse(errBody, 409));
+
+      await assert.rejects(
+        () => client.respondToApproval('approval-1', { response: 'allow' }),
+        (err: unknown) => {
+          const gErr = assertGatewayError(err);
+          assert.equal(gErr.status, 409);
+          assert.equal(gErr.gatewayError.code, 'CONFLICT');
+          return true;
+        },
+      );
+    });
+
+    it('throws GatewayRequestError on 404 expired approval', async () => {
+      const errBody = gatewayErrorFixture({
+        code: 'NOT_FOUND',
+        message: 'Approval not found or expired',
+      });
+      const client = buildClient(async () => errorResponse(errBody, 404));
+
+      await assert.rejects(
+        () => client.respondToApproval('approval-gone', { response: 'allow' }),
+        (err: unknown) => {
+          const gErr = assertGatewayError(err);
+          assert.equal(gErr.status, 404);
+          return true;
+        },
+      );
+    });
+
+    it('includes CSRF token on POST', async () => {
+      let capturedHeaders: CapturedHeaders;
+
+      const client = buildClient(
+        async (_input, init) => {
+          capturedHeaders = init?.headers;
+          return jsonResponse({
+            success: true,
+            approval: approvalFixture({ status: 'responded', response: 'deny' }),
+          });
+        },
+        { getCsrfToken: () => 'csrf-approval' },
+      );
+
+      await client.respondToApproval('approval-1', { response: 'deny' });
+
+      const headers = new Headers(capturedHeaders);
+      assert.equal(headers.get('x-csrf-token'), 'csrf-approval');
     });
   });
 
