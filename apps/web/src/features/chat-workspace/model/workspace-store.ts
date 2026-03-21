@@ -606,6 +606,11 @@ export async function submitComposerDraft(deps: SubmitDraftDeps): Promise<void> 
       submitState: 'idle',
       validationMessage: null,
     });
+    store.dispatch({
+      type: 'conversation/set-load-state',
+      conversationId,
+      loadState: 'idle',
+    });
   } catch (err: unknown) {
     store.dispatch({
       type: 'draft/set-submit-state',

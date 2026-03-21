@@ -135,6 +135,45 @@ describe('workspace conversation browsing', () => {
     expect(screen.getByRole('button', { name: /send/i }).getAttribute('disabled')).toBeNull();
   });
 
+  it('enters create mode when the New conversation button is clicked', async () => {
+    const response: ListConversationsResponse = {
+      conversations: [
+        {
+          id: 'conv-1',
+          title: 'Existing conversation',
+          status: 'active',
+          createdAt: '2026-03-20T00:00:00.000Z',
+          updatedAt: '2026-03-20T12:00:00.000Z',
+          turnCount: 2,
+          pendingInstructionCount: 0,
+        },
+      ],
+      totalCount: 1,
+    };
+
+    installFetchStub((url) => {
+      if (url === '/conversations?status=active&limit=20') {
+        return jsonResponse(response);
+      }
+
+      if (url === '/conversations/conv-1/turns?limit=50') {
+        return jsonResponse(emptyHistoryResponse);
+      }
+
+      throw new Error(`Unexpected fetch input: ${url}`);
+    });
+
+    render(<AppProviders />);
+
+    const existingButton = await screen.findByRole('button', { name: /existing conversation/i });
+    expect(existingButton.getAttribute('aria-pressed')).toBe('true');
+
+    fireEvent.click(screen.getByRole('button', { name: /new conversation/i }));
+
+    expect(existingButton.getAttribute('aria-pressed')).toBe('false');
+    expect(screen.getByText('Active conversation: No conversation selected')).toBeTruthy();
+  });
+
   it('loads conversations, auto-selects the first one, and switches visible context', async () => {
     const response: ListConversationsResponse = {
       conversations: [

@@ -7,6 +7,7 @@ export interface ConversationListProps {
   readonly isLoading: boolean;
   readonly errorMessage: string | null;
   readonly onSelectConversation: (conversationId: string) => void;
+  readonly onStartNewConversation?: () => void;
 }
 
 const listStyle = {
@@ -36,6 +37,7 @@ export function ConversationList({
   isLoading,
   errorMessage,
   onSelectConversation,
+  onStartNewConversation,
 }: ConversationListProps): JSX.Element {
   if (isLoading) {
     return <p style={{ lineHeight: 1.6, marginBottom: 0 }}>Loading conversations…</p>;
@@ -54,34 +56,56 @@ export function ConversationList({
   }
 
   return (
-    <ul style={listStyle}>
-      {conversations.map((conversation) => {
-        const isActive = conversation.conversationId === activeConversationId;
+    <div style={{ display: 'grid', gap: '0.75rem' }}>
+      {onStartNewConversation != null && (
+        <button
+          type="button"
+          onClick={onStartNewConversation}
+          style={{
+            width: '100%',
+            border: '1px solid rgba(96, 165, 250, 0.5)',
+            borderRadius: '0.75rem',
+            background: 'rgba(30, 64, 175, 0.2)',
+            color: 'inherit',
+            cursor: 'pointer',
+            padding: '0.65rem 0.9rem',
+            textAlign: 'center',
+            fontWeight: 600,
+            fontSize: '0.875rem',
+          }}
+        >
+          New conversation
+        </button>
+      )}
+      <ul style={listStyle}>
+        {conversations.map((conversation) => {
+          const isActive = conversation.conversationId === activeConversationId;
 
-        return (
-          <li key={conversation.conversationId}>
-            <button
-              type="button"
-              aria-pressed={isActive}
-              onClick={() => {
-                onSelectConversation(conversation.conversationId);
-              }}
-              style={{
-                ...buttonStyle,
-                border: isActive
-                  ? '1px solid rgba(96, 165, 250, 0.75)'
-                  : '1px solid rgba(148, 163, 184, 0.2)',
-                background: isActive ? 'rgba(30, 64, 175, 0.35)' : buttonStyle.background,
-              }}
-            >
-              <span style={{ fontSize: '1rem', fontWeight: 600 }}>{conversation.title}</span>
-              <span style={{ color: '#94a3b8', fontSize: '0.875rem' }}>
-                {conversation.turnCount} turns · {conversation.pendingInstructionCount} pending
-              </span>
-            </button>
-          </li>
-        );
-      })}
-    </ul>
+          return (
+            <li key={conversation.conversationId}>
+              <button
+                type="button"
+                aria-pressed={isActive}
+                onClick={() => {
+                  onSelectConversation(conversation.conversationId);
+                }}
+                style={{
+                  ...buttonStyle,
+                  border: isActive
+                    ? '1px solid rgba(96, 165, 250, 0.75)'
+                    : '1px solid rgba(148, 163, 184, 0.2)',
+                  background: isActive ? 'rgba(30, 64, 175, 0.35)' : buttonStyle.background,
+                }}
+              >
+                <span style={{ fontSize: '1rem', fontWeight: 600 }}>{conversation.title}</span>
+                <span style={{ color: '#94a3b8', fontSize: '0.875rem' }}>
+                  {conversation.turnCount} turns · {conversation.pendingInstructionCount} pending
+                </span>
+              </button>
+            </li>
+          );
+        })}
+      </ul>
+    </div>
   );
 }

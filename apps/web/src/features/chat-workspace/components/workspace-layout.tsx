@@ -24,6 +24,7 @@ export interface WorkspaceLayoutProps {
   readonly isLoadingConversations: boolean;
   readonly conversationErrorMessage: string | null;
   readonly onSelectConversation: (conversationId: string) => void;
+  readonly onStartNewConversation: () => void;
   readonly onRetryActiveTranscript: () => void;
   readonly composerSlot?: JSX.Element | null;
 }
@@ -38,6 +39,7 @@ export function WorkspaceLayout({
   isLoadingConversations,
   conversationErrorMessage,
   onSelectConversation,
+  onStartNewConversation,
   onRetryActiveTranscript,
   composerSlot,
 }: WorkspaceLayoutProps): JSX.Element {
@@ -76,6 +78,7 @@ export function WorkspaceLayout({
             isLoading={isLoadingConversations}
             errorMessage={conversationErrorMessage}
             onSelectConversation={onSelectConversation}
+            onStartNewConversation={onStartNewConversation}
           />
         </section>
 

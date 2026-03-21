@@ -37,8 +37,8 @@ function requestUrl(input: RequestInfo | URL): string {
   return input.url;
 }
 
-function installFetchStub(handler: (url: string) => Response): void {
-  fetchSpy.mockImplementation((input) => Promise.resolve(handler(requestUrl(input))));
+function installFetchStub(handler: (url: string, init: RequestInit | undefined) => Response): void {
+  fetchSpy.mockImplementation((input, init) => Promise.resolve(handler(requestUrl(input), init)));
   vi.stubGlobal('fetch', fetchSpy);
 }
 
@@ -540,5 +540,111 @@ describe('TranscriptPane', () => {
     render(<TranscriptPane entries={[]} loadState="error" hasActiveConversation={true} />);
 
     expect(screen.getByText('Failed to load transcript.')).toBeTruthy();
+  });
+
+  // eslint-disable-next-line max-lines-per-function
+  it('refreshes transcript after a successful continue-mode submit', async () => {
+    const conversations: ListConversationsResponse = {
+      conversations: [
+        {
+          id: 'conv-1',
+          title: 'Primary conversation',
+          status: 'active',
+          createdAt: '2026-03-20T00:00:00.000Z',
+          updatedAt: '2026-03-20T12:00:00.000Z',
+          turnCount: 1,
+          pendingInstructionCount: 0,
+        },
+      ],
+      totalCount: 1,
+    };
+    const initialHistory: LoadTurnHistoryResponse = {
+      turns: [
+        {
+          id: 'turn-1',
+          conversationId: 'conv-1',
+          position: 1,
+          kind: 'operator',
+          attribution: { type: 'operator', label: 'Operator' },
+          instruction: 'Initial instruction',
+          status: 'completed',
+          createdAt: '2026-03-20T12:00:00.000Z',
+          completedAt: '2026-03-20T12:00:10.000Z',
+        },
+      ],
+      totalCount: 1,
+      hasMore: false,
+    };
+    const submitResponse = {
+      turn: {
+        id: 'turn-2',
+        conversationId: 'conv-1',
+        position: 2,
+        kind: 'operator',
+        attribution: { type: 'operator', label: 'Operator' },
+        instruction: 'Follow-up instruction',
+        status: 'submitted',
+        createdAt: '2026-03-20T12:01:00.000Z',
+      },
+      streamId: 'stream-2',
+    };
+    const refreshedHistory: LoadTurnHistoryResponse = {
+      turns: [
+        ...initialHistory.turns,
+        {
+          id: 'turn-2',
+          conversationId: 'conv-1',
+          position: 2,
+          kind: 'operator',
+          attribution: { type: 'operator', label: 'Operator' },
+          instruction: 'Follow-up instruction',
+          status: 'submitted',
+          createdAt: '2026-03-20T12:01:00.000Z',
+        },
+      ],
+      totalCount: 2,
+      hasMore: false,
+    };
+
+    let historyCallCount = 0;
+    installFetchStub((url, init) => {
+      if (url === '/conversations?status=active&limit=20') {
+        return new Response(JSON.stringify(conversations), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        });
+      }
+
+      if (url === '/conversations/conv-1/turns?limit=50') {
+        historyCallCount += 1;
+        const body = historyCallCount === 1 ? initialHistory : refreshedHistory;
+        return new Response(JSON.stringify(body), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        });
+      }
+
+      if (url === '/conversations/conv-1/turns' && init?.method === 'POST') {
+        return new Response(JSON.stringify(submitResponse), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        });
+      }
+
+      throw new Error(`Unexpected fetch input: ${url}`);
+    });
+
+    render(<AppProviders />);
+
+    expect(await screen.findByText('Initial instruction')).toBeTruthy();
+
+    fireEvent.change(screen.getByRole('textbox', { name: /instruction/i }), {
+      target: { value: 'Follow-up instruction' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: /send/i }));
+
+    const log = screen.getByRole('log');
+    expect(await within(log).findByText('Follow-up instruction')).toBeTruthy();
+    expect(historyCallCount).toBeGreaterThanOrEqual(2);
   });
 });

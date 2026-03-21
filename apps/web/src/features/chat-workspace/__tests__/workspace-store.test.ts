@@ -844,3 +844,43 @@ describe('createAndSubmitDraft', () => {
     assert.deepStrictEqual(submitted, ['trimmed']);
   });
 });
+
+// ─── submitComposerDraft transcript refresh ─────────────────────────────────
+
+describe('submitComposerDraft transcript refresh', () => {
+  it('resets conversation loadState to idle after successful submit', async () => {
+    const store = storeWithActiveDraft('conv-1', 'hello agent');
+    store.dispatch({
+      type: 'conversation/replace-entries',
+      conversationId: 'conv-1',
+      entries: [createEntry()],
+      hasMoreHistory: false,
+    });
+    assert.equal(store.getState().conversations.get('conv-1')?.loadState, 'ready');
+
+    const client = createMockClient();
+    await submitComposerDraft({ store, client });
+
+    assert.equal(store.getState().conversations.get('conv-1')?.loadState, 'idle');
+  });
+
+  it('does not reset loadState when submit fails', async () => {
+    const store = storeWithActiveDraft('conv-1', 'will fail');
+    store.dispatch({
+      type: 'conversation/replace-entries',
+      conversationId: 'conv-1',
+      entries: [createEntry()],
+      hasMoreHistory: false,
+    });
+    assert.equal(store.getState().conversations.get('conv-1')?.loadState, 'ready');
+
+    const client = createMockClient({
+      submitInstruction: async () => {
+        throw new Error('Gateway down');
+      },
+    });
+    await submitComposerDraft({ store, client });
+
+    assert.equal(store.getState().conversations.get('conv-1')?.loadState, 'ready');
+  });
+});

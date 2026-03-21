@@ -200,10 +200,15 @@ function useTranscriptLoader(
           entries: response.turns.map(toTranscriptEntry),
           hasMoreHistory: response.hasMore,
         });
-      } catch {
+      } catch (err: unknown) {
         if (disposed) {
           return;
         }
+
+        console.error(
+          `[useTranscriptLoader] Failed to load transcript for conversation ${conversationId}:`,
+          err,
+        );
 
         store.dispatch({
           type: 'conversation/set-load-state',
@@ -231,6 +236,7 @@ function useComposerProps(
   state: WorkspaceState,
   isLoadingConversations: boolean,
   clearConversationError: () => void,
+  refreshTranscript: () => void,
 ) {
   const [createDraftText, setCreateDraftText] = useState('');
   const [createSubmitting, setCreateSubmitting] = useState(false);
@@ -282,8 +288,21 @@ function useComposerProps(
       return;
     }
 
-    void submitComposerDraft({ store, client });
-  }, [clearConversationError, client, createDraftText, isLoadingConversations, store]);
+    void submitComposerDraft({ store, client }).then(() => {
+      const s = store.getState();
+      const d = s.drafts.get(s.activeConversationId ?? '');
+      if (d != null && d.submitState !== 'error') {
+        refreshTranscript();
+      }
+    });
+  }, [
+    clearConversationError,
+    client,
+    createDraftText,
+    isLoadingConversations,
+    refreshTranscript,
+    store,
+  ]);
 
   const policyLabel = isLoadingConversations
     ? 'Loading conversations…'
@@ -329,6 +348,7 @@ export function WorkspaceRoute(): JSX.Element {
     state,
     isLoadingConversations,
     clearConversationError,
+    retryActiveTranscript,
   );
 
   return (
@@ -343,6 +363,11 @@ export function WorkspaceRoute(): JSX.Element {
       conversationErrorMessage={conversationErrorMessage}
       onSelectConversation={(conversationId) => {
         store.dispatch({ type: 'conversation/select', conversationId });
+        clearConversationError();
+        composer.clearCreateState();
+      }}
+      onStartNewConversation={() => {
+        store.dispatch({ type: 'conversation/select', conversationId: null });
         clearConversationError();
         composer.clearCreateState();
       }}
