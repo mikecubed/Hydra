@@ -38,12 +38,12 @@
 
 _Create the real browser app shell in `apps/web/` and establish the shared browser-side primitives every story will use._
 
-- [ ] T001 [P] Add browser runtime and testing dependencies plus workspace scripts in `apps/web/package.json`.
-- [ ] T002 [P] Create the browser/Vite scaffold in `apps/web/index.html`, `apps/web/vite.config.ts`, and `apps/web/src/main.tsx`.
-- [ ] T003 [P] Create the top-level app shell and route/provider scaffolding in `apps/web/src/app/router.tsx`, `apps/web/src/app/providers.tsx`, and `apps/web/src/app/app-shell.tsx`.
-- [ ] T004 [P] Create browser-side gateway error and session status vocabularies in `apps/web/src/shared/gateway-errors.ts` and `apps/web/src/shared/session-state.ts`.
-- [ ] T005 [US1, US2, US3, US4, US5, US6, US7] **TDD:** create the initial workspace state container and test harness in `apps/web/src/features/chat-workspace/model/workspace-store.ts` and `apps/web/src/features/chat-workspace/__tests__/workspace-store.test.ts`.
-- [ ] T006 [US1, US2, US3, US4, US5, US6, US7] Run the phase quality gate from the repo root with `npm run quality` and `npm test` after the `apps/web/` bootstrap lands.
+- [x] T001 [P] Add browser runtime and testing dependencies plus workspace scripts in `apps/web/package.json`.
+- [x] T002 [P] Create the browser/Vite scaffold in `apps/web/index.html`, `apps/web/vite.config.ts`, and `apps/web/src/main.tsx`.
+- [x] T003 [P] Create the top-level app shell and route/provider scaffolding in `apps/web/src/app/router.tsx`, `apps/web/src/app/providers.tsx`, and `apps/web/src/app/app-shell.tsx`.
+- [x] T004 [P] Create browser-side gateway error and session status vocabularies in `apps/web/src/shared/gateway-errors.ts` and `apps/web/src/shared/session-state.ts`.
+- [x] T005 [US1, US2, US3, US4, US5, US6, US7] **TDD:** create the initial workspace state container and test harness in `apps/web/src/features/chat-workspace/model/workspace-store.ts` and `apps/web/src/features/chat-workspace/__tests__/workspace-store.test.ts`.
+- [x] T006 [US1, US2, US3, US4, US5, US6, US7] Run the phase quality gate from the repo root with `npm run quality` and `npm test` after the `apps/web/` bootstrap lands.
 
 **Checkpoint**: `apps/web/` is a real browser workspace scaffold with typed entrypoints, providers, and shared state primitives.
 
@@ -66,6 +66,8 @@ _Create the real browser app shell in `apps/web/` and establish the shared brows
 
 **Checkpoint**: User Story 1 is fully functional and independently testable.
 
+_Status note_: post-Phase-1 maintenance also landed on the active branch, splitting the former `workspace-store.ts` god file into `workspace-types.ts`, `workspace-reducer.ts`, and `submit-flow.ts` while preserving the `workspace-store.ts` compatibility surface.
+
 ---
 
 ## Phase 2 — User Story 2: Inline Live Streaming (Priority: P1)
@@ -74,12 +76,12 @@ _Create the real browser app shell in `apps/web/` and establish the shared brows
 
 **Independent Test**: Submit an instruction that emits multiple streaming updates and verify the transcript updates incrementally, in order, before the turn completes.
 
-- [ ] T015 [P] [US2] **TDD:** implement the WebSocket stream adapter for connect/subscribe/ack lifecycle in `apps/web/src/features/chat-workspace/api/stream-client.ts` and `apps/web/src/features/chat-workspace/__tests__/stream-client.test.ts`.
-- [ ] T016 [P] [US2] **TDD:** implement authoritative stream reconciliation and duplicate-safe merge logic in `apps/web/src/features/chat-workspace/model/reconciler.ts` and `apps/web/src/features/chat-workspace/__tests__/reconciler.test.ts`.
-- [ ] T017 [P] [US2] Implement safe stream content blocks in `apps/web/src/features/chat-workspace/render/safe-text.tsx` and `apps/web/src/features/chat-workspace/components/stream-event-block.tsx`.
-- [ ] T018 [US2] Wire active conversation subscriptions and live turn updates through `apps/web/src/features/chat-workspace/model/workspace-store.ts`, `apps/web/src/routes/workspace.tsx`, and `apps/web/src/features/chat-workspace/components/transcript-turn.tsx`.
-- [ ] T019 [US2] Add live-stream browser workflow coverage in `apps/web/src/features/chat-workspace/__tests__/workspace-e2e.test.ts`.
-- [ ] T020 [US2] Run the phase quality gate from the repo root with `npm run quality` and `npm test` after inline streaming is green.
+- [x] T015 [P] [US2] **TDD:** implement the WebSocket stream adapter for connect/subscribe/ack lifecycle in `apps/web/src/features/chat-workspace/api/stream-client.ts` and `apps/web/src/features/chat-workspace/__tests__/stream-client.test.ts`.
+- [x] T016 [P] [US2] **TDD:** implement authoritative stream reconciliation and duplicate-safe merge logic in `apps/web/src/features/chat-workspace/model/reconciler.ts` and `apps/web/src/features/chat-workspace/__tests__/reconciler.test.ts`.
+- [x] T017 [P] [US2] Implement safe stream content blocks in `apps/web/src/features/chat-workspace/render/safe-text.tsx` and `apps/web/src/features/chat-workspace/components/stream-event-block.tsx`.
+- [x] T018 [US2] Wire active conversation subscriptions and live turn updates through `apps/web/src/features/chat-workspace/model/workspace-store.ts`, `apps/web/src/routes/workspace.tsx`, and `apps/web/src/features/chat-workspace/components/transcript-turn.tsx`.
+- [x] T019 [US2] Add live-stream browser workflow coverage in the `workflow-*.browser.spec.tsx` specs under `apps/web/src/features/chat-workspace/__tests__/`.
+- [x] T020 [US2] Run the phase quality gate from the repo root with `npm run quality` and `npm test` after inline streaming is green.
 
 **Checkpoint**: User Stories 1 and 2 work together as a basic REPL-grade chat flow.
 

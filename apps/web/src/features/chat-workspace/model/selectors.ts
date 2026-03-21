@@ -8,13 +8,13 @@
 
 import type {
   ArtifactViewState,
+  ComposerDraftState,
   ConversationLoadState,
   ConversationViewState,
   TranscriptEntryState,
   WorkspaceState,
-} from './workspace-store.ts';
+} from './workspace-types.ts';
 import { getActiveDraft, isDraftSubmittable } from './composer-drafts.ts';
-import type { ComposerDraftState } from './workspace-store.ts';
 
 const EMPTY_ENTRIES: readonly TranscriptEntryState[] = [];
 

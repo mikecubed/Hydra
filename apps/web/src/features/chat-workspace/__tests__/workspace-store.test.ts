@@ -1116,3 +1116,242 @@ describe('SubmitResult regression', () => {
     assert.equal(transcriptRefreshed, false, 'transcript must not be refreshed on submit failure');
   });
 });
+
+// ─── submitComposerDraft appends response turn to transcript ────────────────
+
+describe('submitComposerDraft appends response turn', () => {
+  it('appends the operator turn from the submit response to transcript entries', async () => {
+    const store = storeWithActiveDraft('conv-1', 'hello agent');
+    const client = createMockClient({
+      submitInstruction: async (convId, body) => ({
+        turn: {
+          id: 'turn-submitted',
+          conversationId: convId,
+          position: 2,
+          kind: 'operator' as const,
+          attribution: { type: 'operator' as const, label: 'Operator' },
+          instruction: body.instruction,
+          status: 'submitted' as const,
+          createdAt: '2026-04-01T00:00:01.000Z',
+        },
+        streamId: 'stream-submitted',
+      }),
+    });
+
+    await submitComposerDraft({ store, client });
+
+    const conv = store.getState().conversations.get('conv-1');
+    assert.ok(conv, 'conversation must exist');
+    const turnEntry = conv.entries.find((e) => e.turnId === 'turn-submitted');
+    assert.ok(turnEntry, 'submitted turn must appear in transcript entries');
+    assert.equal(turnEntry.kind, 'turn');
+    assert.equal(turnEntry.status, 'submitted');
+    assert.equal(turnEntry.contentBlocks.length, 1);
+    assert.equal(turnEntry.contentBlocks[0].text, 'hello agent');
+  });
+
+  it('appends the turn even when historyLoaded is already true', async () => {
+    const store = storeWithActiveDraft('conv-1', 'after history');
+
+    // Simulate history already loaded (merge-history sets historyLoaded: true)
+    store.dispatch({
+      type: 'conversation/merge-history',
+      conversationId: 'conv-1',
+      entries: [createEntry({ entryId: 'turn-old', turnId: 'turn-old' })],
+      hasMoreHistory: false,
+    });
+    assert.equal(
+      store.getState().conversations.get('conv-1')?.historyLoaded,
+      true,
+      'precondition: historyLoaded must be true',
+    );
+
+    const client = createMockClient({
+      submitInstruction: async (convId, body) => ({
+        turn: {
+          id: 'turn-new',
+          conversationId: convId,
+          position: 2,
+          kind: 'operator' as const,
+          attribution: { type: 'operator' as const, label: 'Operator' },
+          instruction: body.instruction,
+          status: 'submitted' as const,
+          createdAt: '2026-04-01T00:00:02.000Z',
+        },
+        streamId: 'stream-new',
+      }),
+    });
+
+    await submitComposerDraft({ store, client });
+
+    const conv = store.getState().conversations.get('conv-1');
+    assert.ok(conv, 'conversation must exist');
+    assert.equal(conv.entries.length, 2, 'must have both old + newly submitted entry');
+    assert.equal(conv.entries[0].turnId, 'turn-old');
+    assert.equal(conv.entries[1].turnId, 'turn-new');
+    // historyLoaded must remain true — no re-fetch needed
+    assert.equal(conv.historyLoaded, true);
+  });
+
+  it('does not duplicate turn if already present in entries', async () => {
+    const store = storeWithActiveDraft('conv-1', 'duplicate test');
+
+    // Pre-populate an entry with the same turnId the response will return
+    store.dispatch({
+      type: 'conversation/replace-entries',
+      conversationId: 'conv-1',
+      entries: [createEntry({ entryId: 'turn-dup', turnId: 'turn-dup', status: 'submitted' })],
+      hasMoreHistory: false,
+    });
+
+    const client = createMockClient({
+      submitInstruction: async (convId, body) => ({
+        turn: {
+          id: 'turn-dup',
+          conversationId: convId,
+          position: 1,
+          kind: 'operator' as const,
+          attribution: { type: 'operator' as const, label: 'Operator' },
+          instruction: body.instruction,
+          status: 'submitted' as const,
+          createdAt: '2026-04-01T00:00:00.000Z',
+        },
+        streamId: 'stream-dup',
+      }),
+    });
+
+    await submitComposerDraft({ store, client });
+
+    const conv = store.getState().conversations.get('conv-1');
+    assert.ok(conv, 'conversation must exist');
+    assert.equal(conv.entries.length, 1, 'must not duplicate the turn');
+  });
+
+  it('appends turn in create-and-submit flow', async () => {
+    const store = createWorkspaceStore();
+    const client = createMockClient({
+      createConversation: async () => ({
+        id: 'new-conv',
+        title: undefined,
+        status: 'active' as const,
+        createdAt: '2026-04-01T00:00:00.000Z',
+        updatedAt: '2026-04-01T00:00:00.000Z',
+        turnCount: 0,
+        pendingInstructionCount: 0,
+      }),
+      submitInstruction: async (convId, body) => ({
+        turn: {
+          id: 'turn-create',
+          conversationId: convId,
+          position: 1,
+          kind: 'operator' as const,
+          attribution: { type: 'operator' as const, label: 'Operator' },
+          instruction: body.instruction,
+          status: 'submitted' as const,
+          createdAt: '2026-04-01T00:00:00.000Z',
+        },
+        streamId: 'stream-create',
+      }),
+    });
+
+    const result = await createAndSubmitDraft({ store, client }, 'first message');
+
+    assert.equal(result.ok, true);
+    const conv = store.getState().conversations.get('new-conv');
+    assert.ok(conv, 'new conversation must exist');
+    const turnEntry = conv.entries.find((e) => e.turnId === 'turn-create');
+    assert.ok(turnEntry, 'submitted turn must appear in new conversation');
+    assert.equal(turnEntry.contentBlocks[0].text, 'first message');
+  });
+
+  it('does not append turn when submit fails', async () => {
+    const store = storeWithActiveDraft('conv-1', 'will fail');
+    const client = createMockClient({
+      submitInstruction: async () => {
+        throw new Error('Gateway down');
+      },
+    });
+
+    await submitComposerDraft({ store, client });
+
+    const conv = store.getState().conversations.get('conv-1');
+    assert.ok(conv, 'conversation must exist');
+    assert.equal(conv.entries.length, 0, 'no turn appended on failure');
+  });
+});
+
+// ─── Reducer: conversation/append-submit-turn ───────────────────────────────
+
+describe('conversation/append-submit-turn reducer', () => {
+  it('appends an entry to an existing conversation', () => {
+    let state = createInitialWorkspaceState();
+    state = reduceWorkspaceState(state, {
+      type: 'conversation/upsert',
+      conversation: createConversation(),
+    });
+
+    const entry = createEntry({ entryId: 'turn-appended', turnId: 'turn-appended' });
+    state = reduceWorkspaceState(state, {
+      type: 'conversation/append-submit-turn',
+      conversationId: 'conv-1',
+      entry,
+    });
+
+    const conv = state.conversations.get('conv-1');
+    assert.ok(conv);
+    assert.equal(conv.entries.length, 1);
+    assert.equal(conv.entries[0].turnId, 'turn-appended');
+  });
+
+  it('skips append when turnId already present in entries', () => {
+    let state = createInitialWorkspaceState();
+    state = reduceWorkspaceState(state, {
+      type: 'conversation/upsert',
+      conversation: createConversation(),
+    });
+    const entry = createEntry({ entryId: 'turn-x', turnId: 'turn-x' });
+    state = reduceWorkspaceState(state, {
+      type: 'conversation/replace-entries',
+      conversationId: 'conv-1',
+      entries: [entry],
+      hasMoreHistory: false,
+    });
+
+    // Attempt to append duplicate
+    state = reduceWorkspaceState(state, {
+      type: 'conversation/append-submit-turn',
+      conversationId: 'conv-1',
+      entry: createEntry({ entryId: 'turn-x', turnId: 'turn-x', status: 'executing' }),
+    });
+
+    const conv = state.conversations.get('conv-1');
+    assert.ok(conv);
+    assert.equal(conv.entries.length, 1, 'no duplicate');
+    assert.equal(conv.entries[0].status, 'completed', 'original entry unchanged');
+  });
+
+  it('does not modify historyLoaded flag', () => {
+    let state = createInitialWorkspaceState();
+    state = reduceWorkspaceState(state, {
+      type: 'conversation/upsert',
+      conversation: createConversation(),
+    });
+    // Set historyLoaded via merge-history
+    state = reduceWorkspaceState(state, {
+      type: 'conversation/merge-history',
+      conversationId: 'conv-1',
+      entries: [],
+      hasMoreHistory: false,
+    });
+    assert.equal(state.conversations.get('conv-1')?.historyLoaded, true);
+
+    state = reduceWorkspaceState(state, {
+      type: 'conversation/append-submit-turn',
+      conversationId: 'conv-1',
+      entry: createEntry({ entryId: 'turn-new', turnId: 'turn-new' }),
+    });
+
+    assert.equal(state.conversations.get('conv-1')?.historyLoaded, true);
+    assert.equal(state.conversations.get('conv-1')?.entries.length, 1);
+  });
+});

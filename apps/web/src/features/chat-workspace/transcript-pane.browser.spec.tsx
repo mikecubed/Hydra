@@ -543,7 +543,7 @@ describe('TranscriptPane', () => {
   });
 
   // eslint-disable-next-line max-lines-per-function
-  it('refreshes transcript after a successful continue-mode submit', async () => {
+  it('submits continue-mode instruction and refreshes conversation list', async () => {
     const conversations: ListConversationsResponse = {
       conversations: [
         {
@@ -588,27 +588,12 @@ describe('TranscriptPane', () => {
       },
       streamId: 'stream-2',
     };
-    const refreshedHistory: LoadTurnHistoryResponse = {
-      turns: [
-        ...initialHistory.turns,
-        {
-          id: 'turn-2',
-          conversationId: 'conv-1',
-          position: 2,
-          kind: 'operator',
-          attribution: { type: 'operator', label: 'Operator' },
-          instruction: 'Follow-up instruction',
-          status: 'submitted',
-          createdAt: '2026-03-20T12:01:00.000Z',
-        },
-      ],
-      totalCount: 2,
-      hasMore: false,
-    };
 
-    let historyCallCount = 0;
+    let submitCalled = false;
+    let listCallCount = 0;
     installFetchStub((url, init) => {
       if (url === '/conversations?status=active&limit=20') {
+        listCallCount++;
         return new Response(JSON.stringify(conversations), {
           status: 200,
           headers: { 'Content-Type': 'application/json' },
@@ -616,15 +601,14 @@ describe('TranscriptPane', () => {
       }
 
       if (url === '/conversations/conv-1/turns?limit=50') {
-        historyCallCount += 1;
-        const body = historyCallCount === 1 ? initialHistory : refreshedHistory;
-        return new Response(JSON.stringify(body), {
+        return new Response(JSON.stringify(initialHistory), {
           status: 200,
           headers: { 'Content-Type': 'application/json' },
         });
       }
 
       if (url === '/conversations/conv-1/turns' && init?.method === 'POST') {
+        submitCalled = true;
         return new Response(JSON.stringify(submitResponse), {
           status: 200,
           headers: { 'Content-Type': 'application/json' },
@@ -643,8 +627,197 @@ describe('TranscriptPane', () => {
     });
     fireEvent.click(screen.getByRole('button', { name: /send/i }));
 
-    const log = screen.getByRole('log');
-    expect(await within(log).findByText('Follow-up instruction')).toBeTruthy();
-    expect(historyCallCount).toBeGreaterThanOrEqual(2);
+    // Submit POST was made; transcript update now arrives via WS streaming
+    // (not via REST refresh) to prevent in-flight clobber.
+    await vi.waitFor(() => {
+      expect(submitCalled).toBe(true);
+    });
+
+    // Conversation list should refresh post-submit
+    await vi.waitFor(() => {
+      expect(listCallCount).toBeGreaterThanOrEqual(2);
+    });
+  });
+});
+
+// ─── TranscriptTurn streaming ───────────────────────────────────────────────
+
+// eslint-disable-next-line max-lines-per-function
+describe('TranscriptTurn streaming', () => {
+  it('renders a streaming indicator for entries with status "streaming"', () => {
+    const entry = createEntry({ status: 'streaming' });
+
+    render(<TranscriptTurn entry={entry} />);
+
+    expect(screen.getByText('streaming…')).toBeTruthy();
+    const article = screen.getByRole('article');
+    expect(article.getAttribute('data-streaming')).toBe('true');
+  });
+
+  it('does not render streaming indicator for completed entries', () => {
+    const entry = createEntry({ status: 'completed' });
+
+    render(<TranscriptTurn entry={entry} />);
+
+    expect(screen.queryByText('streaming…')).toBeNull();
+    const article = screen.getByRole('article');
+    expect(article.getAttribute('data-streaming')).toBeNull();
+  });
+
+  it('renders status-kind content blocks with italic styling', () => {
+    const entry = createEntry({
+      contentBlocks: [
+        { blockId: 'blk-status', kind: 'status', text: 'Agent is thinking…', metadata: null },
+      ],
+    });
+
+    render(<TranscriptTurn entry={entry} />);
+
+    const el = screen.getByText('Agent is thinking…');
+    expect(el).toBeTruthy();
+    // SafeText wraps text in <span> inside the <p> container
+    expect(el.closest('p')).toBeTruthy();
+  });
+
+  it('renders text blocks alongside status blocks in order', () => {
+    const entry = createEntry({
+      status: 'streaming',
+      contentBlocks: [
+        textBlock('Partial response', 'blk-text'),
+        { blockId: 'blk-status', kind: 'status', text: 'Processing…', metadata: null },
+      ],
+    });
+
+    render(<TranscriptTurn entry={entry} />);
+
+    expect(screen.getByText('Partial response')).toBeTruthy();
+    expect(screen.getByText('Processing…')).toBeTruthy();
+  });
+
+  it('renders artifact references when present', () => {
+    const entry = createEntry({
+      artifacts: [
+        { artifactId: 'art-1', kind: 'file', label: 'src/index.ts', availability: 'listed' },
+        { artifactId: 'art-2', kind: 'diff', label: 'package.json', availability: 'ready' },
+      ],
+    });
+
+    render(<TranscriptTurn entry={entry} />);
+
+    const list = screen.getByTestId('artifact-list');
+    expect(list).toBeTruthy();
+    const badges = screen.getAllByTestId('artifact-badge');
+    expect(badges.length).toBe(2);
+    expect(screen.getByText('src/index.ts')).toBeTruthy();
+    expect(screen.getByText('package.json')).toBeTruthy();
+    expect(screen.getByText('file')).toBeTruthy();
+    expect(screen.getByText('diff')).toBeTruthy();
+  });
+
+  it('does not render artifact list when artifacts is empty', () => {
+    const entry = createEntry({ artifacts: [] });
+
+    render(<TranscriptTurn entry={entry} />);
+
+    expect(screen.queryByTestId('artifact-list')).toBeNull();
+  });
+
+  it('renders a pending approval prompt', () => {
+    const entry = createEntry({
+      prompt: {
+        promptId: 'approval-1',
+        parentTurnId: 'turn-1',
+        status: 'pending',
+        lastResponseSummary: null,
+      },
+    });
+
+    render(<TranscriptTurn entry={entry} />);
+
+    const promptEl = screen.getByTestId('approval-prompt');
+    expect(promptEl).toBeTruthy();
+    expect(promptEl.getAttribute('data-prompt-status')).toBe('pending');
+    expect(screen.getByText('⏳ Approval pending')).toBeTruthy();
+  });
+
+  it('renders a resolved approval prompt with response summary', () => {
+    const entry = createEntry({
+      prompt: {
+        promptId: 'approval-2',
+        parentTurnId: 'turn-1',
+        status: 'resolved',
+        lastResponseSummary: 'Approved with conditions',
+      },
+    });
+
+    render(<TranscriptTurn entry={entry} />);
+
+    const promptEl = screen.getByTestId('approval-prompt');
+    expect(promptEl.getAttribute('data-prompt-status')).toBe('resolved');
+    expect(screen.getByText('✓ Approval resolved')).toBeTruthy();
+    expect(screen.getByText('Approved with conditions')).toBeTruthy();
+  });
+
+  it('does not render prompt section when prompt is null', () => {
+    const entry = createEntry({ prompt: null });
+
+    render(<TranscriptTurn entry={entry} />);
+
+    expect(screen.queryByTestId('approval-prompt')).toBeNull();
+  });
+
+  it('applies activity-group styling for activity-group entries', () => {
+    const entry = createEntry({
+      kind: 'activity-group',
+      contentBlocks: [
+        { blockId: 'act-1', kind: 'status', text: 'Analyzing files…', metadata: null },
+      ],
+    });
+
+    render(<TranscriptTurn entry={entry} />);
+
+    const article = screen.getByRole('article');
+    expect(article.getAttribute('data-entry-kind')).toBe('activity-group');
+    expect(screen.getByText('Analyzing files…')).toBeTruthy();
+  });
+
+  it('applies system-status styling for system-status entries', () => {
+    const entry = createEntry({
+      kind: 'system-status',
+      status: 'warning',
+      contentBlocks: [
+        { blockId: 'sys-1', kind: 'status', text: 'Rate limit approaching', metadata: null },
+      ],
+    });
+
+    render(<TranscriptTurn entry={entry} />);
+
+    const article = screen.getByRole('article');
+    expect(article.getAttribute('data-entry-kind')).toBe('system-status');
+    expect(screen.getByText('Rate limit approaching')).toBeTruthy();
+  });
+
+  it('renders a complete entry with content blocks, artifacts, and prompt', () => {
+    const entry = createEntry({
+      status: 'streaming',
+      contentBlocks: [textBlock('Working on it...')],
+      artifacts: [
+        { artifactId: 'art-1', kind: 'file', label: 'output.txt', availability: 'listed' },
+      ],
+      prompt: {
+        promptId: 'p-1',
+        parentTurnId: 'turn-1',
+        status: 'pending',
+        lastResponseSummary: null,
+      },
+    });
+
+    render(<TranscriptTurn entry={entry} />);
+
+    // All three sections should be visible
+    expect(screen.getByText('Working on it...')).toBeTruthy();
+    expect(screen.getByTestId('artifact-list')).toBeTruthy();
+    expect(screen.getByText('output.txt')).toBeTruthy();
+    expect(screen.getByTestId('approval-prompt')).toBeTruthy();
   });
 });
