@@ -493,6 +493,35 @@ describe('reconcileStreamEvents', () => {
       assert.equal(entries[0].prompt?.status, 'pending');
       assert.equal(entries[0].prompt?.promptId, 'prompt-2');
     });
+
+    it('does not create a ghost turn entry when no matching turn exists', () => {
+      const event = makeEvent({
+        seq: 1,
+        turnId: 'unknown-turn',
+        kind: 'approval-response',
+        payload: { approvalId: 'prompt-1', response: 'approve' },
+      });
+      const { entries } = reconcileStreamEvents([], [event], createReconcilerState());
+      assert.equal(entries.length, 0, 'approval-response for absent turn must not create entries');
+    });
+
+    it('does not create a ghost turn entry when turnId exists but has no prompt', () => {
+      const existing = makeEntry({
+        entryId: 'turn-1',
+        turnId: 'turn-1',
+        status: 'streaming',
+        prompt: null,
+      });
+      const event = makeEvent({
+        seq: 2,
+        turnId: 'turn-1',
+        kind: 'approval-response',
+        payload: { approvalId: 'prompt-1', response: 'approve' },
+      });
+      const { entries } = reconcileStreamEvents([existing], [event], createReconcilerState());
+      assert.equal(entries.length, 1);
+      assert.equal(entries[0].prompt, null, 'prompt must remain null when no prompt was set');
+    });
   });
 
   // ── artifact-notice ───────────────────────────────────────────────────
