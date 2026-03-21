@@ -45,13 +45,18 @@ function toWorkspaceConversationRecord(conversation: Conversation): WorkspaceCon
   };
 }
 
-function useComposerProps(store: WorkspaceStore, client: GatewayClient, state: WorkspaceState) {
+function useComposerProps(
+  store: WorkspaceStore,
+  client: GatewayClient,
+  state: WorkspaceState,
+  isLoadingConversations: boolean,
+) {
   // Local state for create mode (no active conversation).
   const [createDraftText, setCreateDraftText] = useState('');
   const [createSubmitting, setCreateSubmitting] = useState(false);
   const [createError, setCreateError] = useState<string | null>(null);
 
-  const isCreateMode = state.activeConversationId == null;
+  const isCreateMode = !isLoadingConversations && state.activeConversationId == null;
 
   const draft = selectActiveDraft(state);
   const activeConversation = selectActiveConversation(state);
@@ -62,18 +67,24 @@ function useComposerProps(store: WorkspaceStore, client: GatewayClient, state: W
     (text: string) => {
       const currentId = store.getState().activeConversationId;
       if (currentId == null) {
+        if (isLoadingConversations) {
+          return;
+        }
         setCreateDraftText(text);
         setCreateError(null);
         return;
       }
       store.dispatch({ type: 'draft/set-text', conversationId: currentId, draftText: text });
     },
-    [store],
+    [isLoadingConversations, store],
   );
 
   const handleSubmit = useCallback(() => {
     const currentId = store.getState().activeConversationId;
     if (currentId == null) {
+      if (isLoadingConversations) {
+        return;
+      }
       setCreateSubmitting(true);
       setCreateError(null);
       void createAndSubmitDraft({ store, client }, createDraftText)
@@ -89,10 +100,11 @@ function useComposerProps(store: WorkspaceStore, client: GatewayClient, state: W
       return;
     }
     void submitComposerDraft({ store, client });
-  }, [store, client, createDraftText]);
+  }, [client, createDraftText, isLoadingConversations, store]);
 
-  const policyLabel =
-    activeConversation?.controlState.submissionPolicyLabel ?? 'Ready for operator input';
+  const policyLabel = isLoadingConversations
+    ? 'Loading conversations…'
+    : (activeConversation?.controlState.submissionPolicyLabel ?? 'Ready for operator input');
 
   const effectiveSubmitState = isCreateMode
     ? createSubmitting
@@ -106,7 +118,7 @@ function useComposerProps(store: WorkspaceStore, client: GatewayClient, state: W
     draftText: isCreateMode ? createDraftText : (draft?.draftText ?? ''),
     submitState: effectiveSubmitState,
     validationMessage: isCreateMode ? createError : (draft?.validationMessage ?? null),
-    canSubmit: isCreateMode ? createCanSubmit : continueCanSubmit,
+    canSubmit: isCreateMode ? createCanSubmit : !isLoadingConversations && continueCanSubmit,
     policyLabel,
     activeConversation,
     onDraftChange: handleDraftChange,
@@ -158,7 +170,7 @@ export function WorkspaceRoute(): JSX.Element {
     };
   }, [client, store]);
 
-  const composer = useComposerProps(store, client, state);
+  const composer = useComposerProps(store, client, state, isLoadingConversations);
 
   return (
     <WorkspaceLayout

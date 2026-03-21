@@ -12,6 +12,46 @@ afterEach(() => {
 });
 
 describe('workspace conversation browsing', () => {
+  it('keeps create mode disabled until the initial conversation load completes', async () => {
+    let resolveList: ((value: Response) => void) | undefined;
+    const listResponse: ListConversationsResponse = {
+      conversations: [],
+      totalCount: 0,
+    };
+
+    fetchSpy.mockImplementation(
+      async () =>
+        await new Promise<Response>((resolve) => {
+          resolveList = resolve;
+        }),
+    );
+    vi.stubGlobal('fetch', fetchSpy);
+
+    render(<AppProviders />);
+
+    const textbox = await screen.findByRole('textbox', { name: /instruction/i });
+    const sendButton = screen.getByRole('button', { name: /send/i }) as HTMLButtonElement;
+
+    fireEvent.change(textbox, { target: { value: 'Create the first conversation' } });
+    expect(sendButton.disabled).toBe(true);
+    expect(screen.getAllByText('Loading conversations…')).toHaveLength(2);
+
+    resolveList?.(
+      new Response(JSON.stringify(listResponse), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      }),
+    );
+
+    expect(await screen.findByText('Ready for operator input')).toBeTruthy();
+    fireEvent.change(screen.getByRole('textbox', { name: /instruction/i }), {
+      target: { value: 'Create the first conversation' },
+    });
+    expect((screen.getByRole('button', { name: /send/i }) as HTMLButtonElement).disabled).toBe(
+      false,
+    );
+  });
+
   it('loads conversations, auto-selects the first one, and switches visible context', async () => {
     const response: ListConversationsResponse = {
       conversations: [
