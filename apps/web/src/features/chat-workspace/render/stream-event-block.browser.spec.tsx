@@ -106,15 +106,25 @@ describe('StreamEventBlock — lifecycle events', () => {
     expect(screen.getByText('stream-completed')).toBeTruthy();
   });
 
-  it('renders stream-failed with error message', () => {
+  it('renders stream-failed with reason (daemon-emitted key)', () => {
     const event = createEvent({
       kind: 'stream-failed',
-      payload: { error: 'Connection lost' },
+      payload: { reason: 'Connection lost' },
     });
 
     render(<StreamEventBlock event={event} />);
     expect(screen.getByText('stream-failed')).toBeTruthy();
     expect(screen.getByText('Connection lost')).toBeTruthy();
+  });
+
+  it('renders stream-failed with legacy error key as fallback', () => {
+    const event = createEvent({
+      kind: 'stream-failed',
+      payload: { error: 'Legacy error path' },
+    });
+
+    render(<StreamEventBlock event={event} />);
+    expect(screen.getByText('Legacy error path')).toBeTruthy();
   });
 });
 
@@ -156,7 +166,17 @@ describe('StreamEventBlock — error and warning', () => {
 // ─── activity-marker ────────────────────────────────────────────────────────
 
 describe('StreamEventBlock — activity-marker', () => {
-  it('renders activity summary text', () => {
+  it('renders activity description (daemon-emitted key)', () => {
+    const event = createEvent({
+      kind: 'activity-marker',
+      payload: { agentId: 'gemini', description: 'Analyzing code…' },
+    });
+
+    render(<StreamEventBlock event={event} />);
+    expect(screen.getByText('Analyzing code…')).toBeTruthy();
+  });
+
+  it('renders activity with legacy summary key as fallback', () => {
     const event = createEvent({
       kind: 'activity-marker',
       payload: { summary: 'Claude started analysis' },
@@ -170,14 +190,26 @@ describe('StreamEventBlock — activity-marker', () => {
 // ─── artifact-notice ────────────────────────────────────────────────────────
 
 describe('StreamEventBlock — artifact-notice', () => {
-  it('renders artifact label', () => {
+  it('renders artifact with kind (daemon-emitted key)', () => {
     const event = createEvent({
       kind: 'artifact-notice',
-      payload: { label: 'src/index.ts', artifactKind: 'file' },
+      payload: { artifactId: 'art-1', kind: 'file', label: 'src/index.ts' },
     });
 
     render(<StreamEventBlock event={event} />);
     expect(screen.getByText('src/index.ts')).toBeTruthy();
+    expect(screen.getByText('file')).toBeTruthy();
+  });
+
+  it('renders artifact with legacy artifactKind key as fallback', () => {
+    const event = createEvent({
+      kind: 'artifact-notice',
+      payload: { label: 'README.md', artifactKind: 'diff' },
+    });
+
+    render(<StreamEventBlock event={event} />);
+    expect(screen.getByText('README.md')).toBeTruthy();
+    expect(screen.getByText('diff')).toBeTruthy();
   });
 });
 

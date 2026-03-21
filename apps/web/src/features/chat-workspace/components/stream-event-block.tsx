@@ -145,10 +145,10 @@ function ActivityMarkerBody({
 }: {
   readonly payload: Readonly<Record<string, unknown>>;
 }): JSX.Element {
-  const summary = payloadString(payload, 'summary');
+  const description = payloadString(payload, 'description') ?? payloadString(payload, 'summary');
   return (
     <div style={muted}>
-      <SafeText text={summary} />
+      <SafeText text={description} />
     </div>
   );
 }
@@ -159,7 +159,7 @@ function ArtifactNoticeBody({
   readonly payload: Readonly<Record<string, unknown>>;
 }): JSX.Element {
   const label = payloadString(payload, 'label');
-  const artifactKind = payloadString(payload, 'artifactKind');
+  const artifactKind = payloadString(payload, 'kind') ?? payloadString(payload, 'artifactKind');
   return (
     <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
       {artifactKind != null && <span style={kindBadgeStyle}>{artifactKind}</span>}
@@ -173,10 +173,13 @@ function StreamFailedBody({
 }: {
   readonly payload: Readonly<Record<string, unknown>>;
 }): JSX.Element {
-  const error = payloadString(payload, 'error') ?? payloadString(payload, 'message');
+  const reason =
+    payloadString(payload, 'reason') ??
+    payloadString(payload, 'error') ??
+    payloadString(payload, 'message');
   return (
     <div style={errorStyle}>
-      <SafeText text={error} />
+      <SafeText text={reason} />
     </div>
   );
 }
