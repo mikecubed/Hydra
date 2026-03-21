@@ -5,9 +5,14 @@ import {
   createInitialWorkspaceState,
   createWorkspaceStore,
   reduceWorkspaceState,
+  submitComposerDraft,
+  createAndSubmitDraft,
   type ArtifactViewState,
+  type SubmitDraftDeps,
+  type SubmitResult,
   type TranscriptEntryState,
   type WorkspaceConversationRecord,
+  type WorkspaceStore,
 } from '../model/workspace-store.ts';
 
 function createConversation(
@@ -25,6 +30,7 @@ function createEntry(overrides: Partial<TranscriptEntryState> = {}): TranscriptE
     entryId: 'entry-1',
     kind: 'turn',
     turnId: 'turn-1',
+    attributionLabel: null,
     status: 'completed',
     timestamp: '2026-03-20T00:00:00.000Z',
     contentBlocks: [],
@@ -153,6 +159,144 @@ describe('reduceWorkspaceState', () => {
 
     assert.equal(state.activeConversationId, null);
     assert.equal(state.visibleArtifact, null);
+  });
+
+  it('replace-all preserves explicit create mode and does not auto-select first conversation', () => {
+    let state = createInitialWorkspaceState();
+    // User selects a conversation, then explicitly enters create mode.
+    state = reduceWorkspaceState(state, { type: 'conversation/select', conversationId: 'conv-1' });
+    state = reduceWorkspaceState(state, { type: 'conversation/select', conversationId: null });
+    assert.equal(state.explicitCreateMode, true);
+
+    // Background reload arrives with conversations.
+    state = reduceWorkspaceState(state, {
+      type: 'conversation/replace-all',
+      conversations: [
+        createConversation(),
+        createConversation({ id: 'conv-2', title: 'Second conversation' }),
+      ],
+    });
+
+    // The explicit create mode must survive; activeConversationId stays null.
+    assert.equal(state.activeConversationId, null);
+    assert.equal(state.explicitCreateMode, true);
+  });
+
+  it('replace-all auto-selects first conversation when not in explicit create mode', () => {
+    const state = reduceWorkspaceState(createInitialWorkspaceState(), {
+      type: 'conversation/replace-all',
+      conversations: [
+        createConversation(),
+        createConversation({ id: 'conv-2', title: 'Second conversation' }),
+      ],
+    });
+
+    // Initial load (not explicit create mode) should auto-select.
+    assert.equal(state.explicitCreateMode, false);
+    assert.equal(state.activeConversationId, 'conv-1');
+  });
+
+  it('replace-all retains the active conversation when the refresh payload omits it', () => {
+    let state = createInitialWorkspaceState();
+    // Simulate a just-created conversation that is selected and known locally.
+    state = reduceWorkspaceState(state, {
+      type: 'conversation/upsert',
+      conversation: createConversation({ id: 'conv-new', title: 'Just created' }),
+    });
+    state = reduceWorkspaceState(state, {
+      type: 'conversation/select',
+      conversationId: 'conv-new',
+    });
+
+    // Background list refresh arrives but does NOT include conv-new (stale page).
+    state = reduceWorkspaceState(state, {
+      type: 'conversation/replace-all',
+      conversations: [
+        createConversation({ id: 'conv-a', title: 'Older A' }),
+        createConversation({ id: 'conv-b', title: 'Older B' }),
+      ],
+    });
+
+    // The active conversation must survive — it was already known locally.
+    assert.equal(state.activeConversationId, 'conv-new');
+    assert.ok(state.conversations.has('conv-new'), 'active conversation retained in map');
+    assert.ok(
+      state.conversationOrder.includes('conv-new'),
+      'active conversation retained in order',
+    );
+    // The other conversations from the payload should still be present.
+    assert.ok(state.conversations.has('conv-a'));
+    assert.ok(state.conversations.has('conv-b'));
+  });
+
+  it('replace-all retains the draft of the active conversation when the refresh omits it', () => {
+    let state = createInitialWorkspaceState();
+    state = reduceWorkspaceState(state, {
+      type: 'conversation/upsert',
+      conversation: createConversation({ id: 'conv-new', title: 'Just created' }),
+    });
+    state = reduceWorkspaceState(state, {
+      type: 'conversation/select',
+      conversationId: 'conv-new',
+    });
+    state = reduceWorkspaceState(state, {
+      type: 'draft/set-text',
+      conversationId: 'conv-new',
+      draftText: 'My important draft',
+    });
+
+    // Background refresh omits conv-new.
+    state = reduceWorkspaceState(state, {
+      type: 'conversation/replace-all',
+      conversations: [createConversation({ id: 'conv-a', title: 'Older A' })],
+    });
+
+    // Draft must survive.
+    assert.equal(state.drafts.get('conv-new')?.draftText, 'My important draft');
+  });
+
+  it('replace-all still prunes non-active conversations absent from the payload', () => {
+    let state = createInitialWorkspaceState();
+    // Two conversations exist; conv-1 is active.
+    state = reduceWorkspaceState(state, {
+      type: 'conversation/upsert',
+      conversation: createConversation({ id: 'conv-1', title: 'Active' }),
+    });
+    state = reduceWorkspaceState(state, {
+      type: 'conversation/upsert',
+      conversation: createConversation({ id: 'conv-old', title: 'Stale' }),
+    });
+    state = reduceWorkspaceState(state, {
+      type: 'conversation/select',
+      conversationId: 'conv-1',
+    });
+    state = reduceWorkspaceState(state, {
+      type: 'draft/set-text',
+      conversationId: 'conv-old',
+      draftText: 'Orphaned draft',
+    });
+
+    // Refresh includes conv-1 but NOT conv-old.
+    state = reduceWorkspaceState(state, {
+      type: 'conversation/replace-all',
+      conversations: [createConversation({ id: 'conv-1', title: 'Active refreshed' })],
+    });
+
+    // conv-old and its draft should be pruned (non-active).
+    assert.ok(!state.conversations.has('conv-old'), 'non-active conversation pruned');
+    assert.ok(!state.conversationOrder.includes('conv-old'), 'pruned from order');
+    assert.equal(state.drafts.has('conv-old'), false, 'orphaned draft pruned');
+    // Active conversation stays.
+    assert.equal(state.activeConversationId, 'conv-1');
+  });
+
+  it('selecting a conversation clears explicit create mode', () => {
+    let state = createInitialWorkspaceState();
+    state = reduceWorkspaceState(state, { type: 'conversation/select', conversationId: null });
+    assert.equal(state.explicitCreateMode, true);
+
+    state = reduceWorkspaceState(state, { type: 'conversation/select', conversationId: 'conv-1' });
+    assert.equal(state.explicitCreateMode, false);
   });
 
   it('preserves draft ownership across multiple conversations', () => {
@@ -367,5 +511,608 @@ describe('createWorkspaceStore', () => {
 
     assert.deepStrictEqual(notifications, ['conversation/select:conv-3']);
     assert.equal(store.getState().activeConversationId, 'conv-4');
+  });
+});
+
+// ─── Submit flow helpers ────────────────────────────────────────────────────
+
+function createMockClient(
+  overrides: Partial<SubmitDraftDeps['client']> = {},
+): SubmitDraftDeps['client'] {
+  return {
+    createConversation:
+      overrides.createConversation ??
+      (async () => ({
+        id: 'new-conv',
+        title: undefined,
+        status: 'active' as const,
+        createdAt: '2026-04-01T00:00:00.000Z',
+        updatedAt: '2026-04-01T00:00:00.000Z',
+        turnCount: 0,
+        pendingInstructionCount: 0,
+      })),
+    submitInstruction:
+      overrides.submitInstruction ??
+      (async () => ({
+        turn: {
+          id: 'turn-1',
+          conversationId: 'conv-1',
+          position: 1,
+          kind: 'operator' as const,
+          attribution: { type: 'operator' as const, label: 'Operator' },
+          instruction: 'hello',
+          status: 'submitted' as const,
+          createdAt: '2026-04-01T00:00:00.000Z',
+        },
+        streamId: 'stream-1',
+      })),
+  };
+}
+
+function storeWithActiveDraft(conversationId: string, draftText: string): WorkspaceStore {
+  const store = createWorkspaceStore();
+  store.dispatch({ type: 'conversation/select', conversationId });
+  if (draftText !== '') {
+    store.dispatch({ type: 'draft/set-text', conversationId, draftText });
+  }
+  return store;
+}
+
+// ─── submitComposerDraft (continue flow) ────────────────────────────────────
+
+describe('submitComposerDraft', () => {
+  it('submits instruction and clears draft on success', async () => {
+    const store = storeWithActiveDraft('conv-1', 'hello agent');
+    const submitted: Array<{ conversationId: string; instruction: string }> = [];
+
+    const client = createMockClient({
+      submitInstruction: async (convId, body) => {
+        submitted.push({ conversationId: convId, instruction: body.instruction });
+        return {
+          turn: {
+            id: 'turn-1',
+            conversationId: convId,
+            position: 1,
+            kind: 'operator' as const,
+            attribution: { type: 'operator' as const, label: 'Operator' },
+            instruction: body.instruction,
+            status: 'submitted' as const,
+            createdAt: '2026-04-01T00:00:00.000Z',
+          },
+          streamId: 'stream-1',
+        };
+      },
+    });
+
+    const result = await submitComposerDraft({ store, client });
+
+    assert.deepStrictEqual(submitted, [{ conversationId: 'conv-1', instruction: 'hello agent' }]);
+    assert.equal(store.getState().drafts.get('conv-1')?.draftText, '');
+    assert.equal(store.getState().drafts.get('conv-1')?.submitState, 'idle');
+    assert.equal(store.getState().drafts.get('conv-1')?.validationMessage, null);
+    assert.equal(result.ok, true);
+  });
+
+  it('transitions through submitting state during request', async () => {
+    const store = storeWithActiveDraft('conv-1', 'check state');
+    const observedStates: string[] = [];
+
+    let resolveSubmit!: () => void;
+    const submitPromise = new Promise<void>((resolve) => {
+      resolveSubmit = resolve;
+    });
+
+    const client = createMockClient({
+      submitInstruction: async () => {
+        observedStates.push(store.getState().drafts.get('conv-1')?.submitState ?? 'missing');
+        resolveSubmit();
+        return {
+          turn: {
+            id: 'turn-1',
+            conversationId: 'conv-1',
+            position: 1,
+            kind: 'operator' as const,
+            attribution: { type: 'operator' as const, label: 'Operator' },
+            instruction: 'check state',
+            status: 'submitted' as const,
+            createdAt: '2026-04-01T00:00:00.000Z',
+          },
+          streamId: 'stream-1',
+        };
+      },
+    });
+
+    const result = submitComposerDraft({ store, client });
+    await submitPromise;
+    assert.deepStrictEqual(observedStates, ['submitting']);
+    await result;
+    assert.equal(store.getState().drafts.get('conv-1')?.submitState, 'idle');
+  });
+
+  it('sets error state when submission fails', async () => {
+    const store = storeWithActiveDraft('conv-1', 'will fail');
+
+    const client = createMockClient({
+      submitInstruction: async () => {
+        throw new Error('Gateway 502: Bad Gateway');
+      },
+    });
+
+    const result = await submitComposerDraft({ store, client });
+
+    const draft = store.getState().drafts.get('conv-1');
+    assert.equal(draft?.submitState, 'error');
+    assert.equal(draft?.validationMessage, 'Gateway 502: Bad Gateway');
+    assert.equal(draft?.draftText, 'will fail');
+    assert.equal(result.ok, false);
+  });
+
+  it('preserves draft text on submission error', async () => {
+    const store = storeWithActiveDraft('conv-1', 'precious text');
+
+    const client = createMockClient({
+      submitInstruction: async () => {
+        throw new Error('Network error');
+      },
+    });
+
+    await submitComposerDraft({ store, client });
+
+    assert.equal(store.getState().drafts.get('conv-1')?.draftText, 'precious text');
+  });
+
+  it('does nothing when no active conversation', async () => {
+    const store = createWorkspaceStore();
+    let called = false;
+
+    const client = createMockClient({
+      submitInstruction: async () => {
+        called = true;
+        return {
+          turn: {
+            id: 'turn-1',
+            conversationId: 'conv-1',
+            position: 1,
+            kind: 'operator' as const,
+            attribution: { type: 'operator' as const, label: 'Operator' },
+            instruction: '',
+            status: 'submitted' as const,
+            createdAt: '2026-04-01T00:00:00.000Z',
+          },
+          streamId: 'stream-1',
+        };
+      },
+    });
+
+    const result = await submitComposerDraft({ store, client });
+    assert.equal(called, false);
+    assert.equal(result.ok, false);
+  });
+
+  it('does nothing when draft is empty', async () => {
+    const store = storeWithActiveDraft('conv-1', '');
+    let called = false;
+
+    const client = createMockClient({
+      submitInstruction: async () => {
+        called = true;
+        return {
+          turn: {
+            id: 'turn-1',
+            conversationId: 'conv-1',
+            position: 1,
+            kind: 'operator' as const,
+            attribution: { type: 'operator' as const, label: 'Operator' },
+            instruction: '',
+            status: 'submitted' as const,
+            createdAt: '2026-04-01T00:00:00.000Z',
+          },
+          streamId: 'stream-1',
+        };
+      },
+    });
+
+    await submitComposerDraft({ store, client });
+    assert.equal(called, false);
+  });
+
+  it('does nothing when draft is whitespace-only', async () => {
+    const store = storeWithActiveDraft('conv-1', '   \n\t  ');
+    let called = false;
+
+    const client = createMockClient({
+      submitInstruction: async () => {
+        called = true;
+        return {
+          turn: {
+            id: 'turn-1',
+            conversationId: 'conv-1',
+            position: 1,
+            kind: 'operator' as const,
+            attribution: { type: 'operator' as const, label: 'Operator' },
+            instruction: '',
+            status: 'submitted' as const,
+            createdAt: '2026-04-01T00:00:00.000Z',
+          },
+          streamId: 'stream-1',
+        };
+      },
+    });
+
+    await submitComposerDraft({ store, client });
+    assert.equal(called, false);
+  });
+
+  it('does nothing when draft is already submitting', async () => {
+    const store = storeWithActiveDraft('conv-1', 'in flight');
+    store.dispatch({
+      type: 'draft/set-submit-state',
+      conversationId: 'conv-1',
+      submitState: 'submitting',
+      validationMessage: null,
+    });
+
+    let called = false;
+    const client = createMockClient({
+      submitInstruction: async () => {
+        called = true;
+        return {
+          turn: {
+            id: 'turn-1',
+            conversationId: 'conv-1',
+            position: 1,
+            kind: 'operator' as const,
+            attribution: { type: 'operator' as const, label: 'Operator' },
+            instruction: '',
+            status: 'submitted' as const,
+            createdAt: '2026-04-01T00:00:00.000Z',
+          },
+          streamId: 'stream-1',
+        };
+      },
+    });
+
+    await submitComposerDraft({ store, client });
+    assert.equal(called, false);
+  });
+
+  it('trims whitespace from instruction before submitting', async () => {
+    const store = storeWithActiveDraft('conv-1', '  padded text  ');
+    const submitted: string[] = [];
+
+    const client = createMockClient({
+      submitInstruction: async (_convId, body) => {
+        submitted.push(body.instruction);
+        return {
+          turn: {
+            id: 'turn-1',
+            conversationId: 'conv-1',
+            position: 1,
+            kind: 'operator' as const,
+            attribution: { type: 'operator' as const, label: 'Operator' },
+            instruction: body.instruction,
+            status: 'submitted' as const,
+            createdAt: '2026-04-01T00:00:00.000Z',
+          },
+          streamId: 'stream-1',
+        };
+      },
+    });
+
+    await submitComposerDraft({ store, client });
+    assert.deepStrictEqual(submitted, ['padded text']);
+  });
+
+  it('uses generic message for non-Error throws', async () => {
+    const store = storeWithActiveDraft('conv-1', 'will fail');
+
+    const client = createMockClient({
+      submitInstruction: async () => {
+        throw { code: 'UNKNOWN' }; // eslint-disable-line @typescript-eslint/only-throw-error -- testing non-Error throw handling
+      },
+    });
+
+    await submitComposerDraft({ store, client });
+
+    assert.equal(store.getState().drafts.get('conv-1')?.validationMessage, 'Submission failed');
+  });
+});
+
+// ─── createAndSubmitDraft (create flow) ─────────────────────────────────────
+
+describe('createAndSubmitDraft', () => {
+  it('creates a conversation, selects it, and submits the instruction', async () => {
+    const store = createWorkspaceStore();
+    const createdIds: string[] = [];
+    const submitted: Array<{ conversationId: string; instruction: string }> = [];
+
+    const client = createMockClient({
+      createConversation: async () => {
+        createdIds.push('new-conv');
+        return {
+          id: 'new-conv',
+          title: undefined,
+          status: 'active' as const,
+          createdAt: '2026-04-01T00:00:00.000Z',
+          updatedAt: '2026-04-01T00:00:00.000Z',
+          turnCount: 0,
+          pendingInstructionCount: 0,
+        };
+      },
+      submitInstruction: async (convId, body) => {
+        submitted.push({ conversationId: convId, instruction: body.instruction });
+        return {
+          turn: {
+            id: 'turn-1',
+            conversationId: convId,
+            position: 1,
+            kind: 'operator' as const,
+            attribution: { type: 'operator' as const, label: 'Operator' },
+            instruction: body.instruction,
+            status: 'submitted' as const,
+            createdAt: '2026-04-01T00:00:00.000Z',
+          },
+          streamId: 'stream-1',
+        };
+      },
+    });
+
+    const result = await createAndSubmitDraft({ store, client }, 'first message');
+
+    assert.deepStrictEqual(createdIds, ['new-conv']);
+    assert.deepStrictEqual(submitted, [
+      { conversationId: 'new-conv', instruction: 'first message' },
+    ]);
+    assert.equal(store.getState().activeConversationId, 'new-conv');
+    assert.equal(store.getState().drafts.get('new-conv')?.draftText, '');
+    assert.equal(store.getState().drafts.get('new-conv')?.submitState, 'idle');
+    assert.equal(result.ok, true);
+  });
+
+  it('does nothing when draft text is empty', async () => {
+    const store = createWorkspaceStore();
+    let called = false;
+
+    const client = createMockClient({
+      createConversation: async () => {
+        called = true;
+        return {
+          id: 'new-conv',
+          title: undefined,
+          status: 'active' as const,
+          createdAt: '2026-04-01T00:00:00.000Z',
+          updatedAt: '2026-04-01T00:00:00.000Z',
+          turnCount: 0,
+          pendingInstructionCount: 0,
+        };
+      },
+    });
+
+    const result = await createAndSubmitDraft({ store, client }, '');
+    assert.equal(called, false);
+    assert.equal(result.ok, false);
+  });
+
+  it('does nothing when draft text is whitespace-only', async () => {
+    const store = createWorkspaceStore();
+    let called = false;
+
+    const client = createMockClient({
+      createConversation: async () => {
+        called = true;
+        return {
+          id: 'new-conv',
+          title: undefined,
+          status: 'active' as const,
+          createdAt: '2026-04-01T00:00:00.000Z',
+          updatedAt: '2026-04-01T00:00:00.000Z',
+          turnCount: 0,
+          pendingInstructionCount: 0,
+        };
+      },
+    });
+
+    const result = await createAndSubmitDraft({ store, client }, '   ');
+    assert.equal(called, false);
+    assert.equal(result.ok, false);
+  });
+
+  it('throws when createConversation fails', async () => {
+    const store = createWorkspaceStore();
+
+    const client = createMockClient({
+      createConversation: async () => {
+        throw new Error('Gateway 503: Service Unavailable');
+      },
+    });
+
+    await assert.rejects(() => createAndSubmitDraft({ store, client }, 'hello'), {
+      message: 'Gateway 503: Service Unavailable',
+    });
+
+    assert.equal(store.getState().activeConversationId, null);
+  });
+
+  it('records submit error in draft when submit fails after create', async () => {
+    const store = createWorkspaceStore();
+
+    const client = createMockClient({
+      createConversation: async () => ({
+        id: 'new-conv',
+        title: undefined,
+        status: 'active' as const,
+        createdAt: '2026-04-01T00:00:00.000Z',
+        updatedAt: '2026-04-01T00:00:00.000Z',
+        turnCount: 0,
+        pendingInstructionCount: 0,
+      }),
+      submitInstruction: async () => {
+        throw new Error('Rate limited');
+      },
+    });
+
+    const result = await createAndSubmitDraft({ store, client }, 'first message');
+
+    // Conversation was created and selected, but submit failed
+    assert.equal(store.getState().activeConversationId, 'new-conv');
+    assert.equal(store.getState().drafts.get('new-conv')?.submitState, 'error');
+    assert.equal(store.getState().drafts.get('new-conv')?.validationMessage, 'Rate limited');
+    // Draft text should be preserved on error
+    assert.equal(store.getState().drafts.get('new-conv')?.draftText, 'first message');
+    assert.equal(result.ok, false);
+  });
+
+  it('trims whitespace from draft text', async () => {
+    const store = createWorkspaceStore();
+    const submitted: string[] = [];
+
+    const client = createMockClient({
+      submitInstruction: async (_convId, body) => {
+        submitted.push(body.instruction);
+        return {
+          turn: {
+            id: 'turn-1',
+            conversationId: 'new-conv',
+            position: 1,
+            kind: 'operator' as const,
+            attribution: { type: 'operator' as const, label: 'Operator' },
+            instruction: body.instruction,
+            status: 'submitted' as const,
+            createdAt: '2026-04-01T00:00:00.000Z',
+          },
+          streamId: 'stream-1',
+        };
+      },
+    });
+
+    await createAndSubmitDraft({ store, client }, '  trimmed  ');
+
+    assert.deepStrictEqual(submitted, ['trimmed']);
+  });
+});
+
+// ─── submitComposerDraft transcript refresh ─────────────────────────────────
+
+describe('submitComposerDraft transcript refresh', () => {
+  it('resets conversation loadState to idle after successful submit', async () => {
+    const store = storeWithActiveDraft('conv-1', 'hello agent');
+    store.dispatch({
+      type: 'conversation/replace-entries',
+      conversationId: 'conv-1',
+      entries: [createEntry()],
+      hasMoreHistory: false,
+    });
+    assert.equal(store.getState().conversations.get('conv-1')?.loadState, 'ready');
+
+    const client = createMockClient();
+    await submitComposerDraft({ store, client });
+
+    assert.equal(store.getState().conversations.get('conv-1')?.loadState, 'idle');
+  });
+
+  it('does not reset loadState when submit fails', async () => {
+    const store = storeWithActiveDraft('conv-1', 'will fail');
+    store.dispatch({
+      type: 'conversation/replace-entries',
+      conversationId: 'conv-1',
+      entries: [createEntry()],
+      hasMoreHistory: false,
+    });
+    assert.equal(store.getState().conversations.get('conv-1')?.loadState, 'ready');
+
+    const client = createMockClient({
+      submitInstruction: async () => {
+        throw new Error('Gateway down');
+      },
+    });
+    await submitComposerDraft({ store, client });
+
+    assert.equal(store.getState().conversations.get('conv-1')?.loadState, 'ready');
+  });
+});
+
+// ─── SubmitResult regression: callers must distinguish success from failure ──
+
+describe('SubmitResult regression', () => {
+  it('submitComposerDraft returns ok:true on success', async () => {
+    const store = storeWithActiveDraft('conv-1', 'go');
+    const client = createMockClient();
+    const result: SubmitResult = await submitComposerDraft({ store, client });
+    assert.equal(result.ok, true);
+  });
+
+  it('submitComposerDraft returns ok:false on submit error', async () => {
+    const store = storeWithActiveDraft('conv-1', 'fail');
+    const client = createMockClient({
+      submitInstruction: async () => {
+        throw new Error('boom');
+      },
+    });
+    const result: SubmitResult = await submitComposerDraft({ store, client });
+    assert.equal(result.ok, false);
+  });
+
+  it('createAndSubmitDraft returns ok:false when create succeeds but submit fails', async () => {
+    const store = createWorkspaceStore();
+    const client = createMockClient({
+      createConversation: async () => ({
+        id: 'new-conv',
+        title: undefined,
+        status: 'active' as const,
+        createdAt: '2026-04-01T00:00:00.000Z',
+        updatedAt: '2026-04-01T00:00:00.000Z',
+        turnCount: 0,
+        pendingInstructionCount: 0,
+      }),
+      submitInstruction: async () => {
+        throw new Error('submit failed after create');
+      },
+    });
+
+    const result: SubmitResult = await createAndSubmitDraft({ store, client }, 'hello');
+
+    assert.equal(result.ok, false);
+    // Conversation was created and selected despite submit failure
+    assert.equal(store.getState().activeConversationId, 'new-conv');
+    assert.equal(store.getState().drafts.get('new-conv')?.submitState, 'error');
+    assert.equal(store.getState().drafts.get('new-conv')?.draftText, 'hello');
+  });
+
+  it('create-succeeds-submit-fails must not signal success to callers', async () => {
+    // Simulates the sidebar scenario: list load had an error, then user creates
+    // a new conversation but instruction submit fails. The caller should NOT
+    // clear the sidebar error or reload the list as if everything succeeded.
+    const store = createWorkspaceStore();
+    let sidebarErrorCleared = false;
+    let sidebarReloaded = false;
+    let transcriptRefreshed = false;
+
+    const client = createMockClient({
+      createConversation: async () => ({
+        id: 'new-conv',
+        title: undefined,
+        status: 'active' as const,
+        createdAt: '2026-04-01T00:00:00.000Z',
+        updatedAt: '2026-04-01T00:00:00.000Z',
+        turnCount: 0,
+        pendingInstructionCount: 0,
+      }),
+      submitInstruction: async () => {
+        throw new Error('Rate limited');
+      },
+    });
+
+    const result = await createAndSubmitDraft({ store, client }, 'first message');
+
+    // Simulate what the route handler should do: only clear/reload on ok
+    if (result.ok) {
+      sidebarErrorCleared = true;
+      sidebarReloaded = true;
+      transcriptRefreshed = true;
+    }
+
+    assert.equal(sidebarErrorCleared, false, 'sidebar error must not be cleared on submit failure');
+    assert.equal(sidebarReloaded, false, 'sidebar must not be reloaded on submit failure');
+    assert.equal(transcriptRefreshed, false, 'transcript must not be refreshed on submit failure');
   });
 });

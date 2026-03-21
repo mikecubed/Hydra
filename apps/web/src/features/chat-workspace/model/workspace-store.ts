@@ -2,6 +2,8 @@ import {
   initialConnectionState,
   type WorkspaceConnectionState,
 } from '../../../shared/session-state.ts';
+import { isDraftSubmittable } from './composer-drafts.ts';
+import type { GatewayClient } from '../api/gateway-client.ts';
 
 export type ConversationLoadState = 'idle' | 'loading' | 'ready' | 'error';
 export type DraftSubmitState = 'idle' | 'submitting' | 'error';
@@ -10,10 +12,16 @@ export type TranscriptEntryKind = 'turn' | 'prompt' | 'activity-group' | 'system
 export type ContentBlockKind = 'text' | 'code' | 'status' | 'structured';
 export type LineageRelationshipKind = 'follow-up' | 'retry' | 'branch' | null;
 export type EntryControlKind = 'submit-follow-up' | 'cancel' | 'retry' | 'branch' | 'respond';
+export type ConversationStatus = 'active' | 'archived';
 
 export interface WorkspaceConversationRecord {
   readonly id: string;
   readonly title?: string;
+  readonly status?: ConversationStatus;
+  readonly createdAt?: string;
+  readonly updatedAt?: string;
+  readonly turnCount?: number;
+  readonly pendingInstructionCount?: number;
   readonly parentConversationId?: string;
   readonly forkPointTurnId?: string;
 }
@@ -52,6 +60,7 @@ export interface TranscriptEntryState {
   readonly entryId: string;
   readonly kind: TranscriptEntryKind;
   readonly turnId: string | null;
+  readonly attributionLabel?: string | null;
   readonly status: string;
   readonly timestamp: string | null;
   readonly contentBlocks: readonly ContentBlockState[];
@@ -75,6 +84,11 @@ export interface ConversationControlState {
 export interface ConversationViewState {
   readonly conversationId: string;
   readonly title: string;
+  readonly status: ConversationStatus;
+  readonly createdAt: string | null;
+  readonly updatedAt: string | null;
+  readonly turnCount: number;
+  readonly pendingInstructionCount: number;
   readonly lineageSummary: ConversationLineageState | null;
   readonly entries: readonly TranscriptEntryState[];
   readonly hasMoreHistory: boolean;
@@ -100,6 +114,7 @@ export interface ArtifactViewState {
 
 export interface WorkspaceState {
   readonly activeConversationId: string | null;
+  readonly explicitCreateMode: boolean;
   readonly conversationOrder: readonly string[];
   readonly conversations: ReadonlyMap<string, ConversationViewState>;
   readonly drafts: ReadonlyMap<string, ComposerDraftState>;
@@ -173,6 +188,11 @@ function createConversationViewState(
   return {
     conversationId: conversation.id,
     title: conversation.title ?? 'Untitled conversation',
+    status: conversation.status ?? 'active',
+    createdAt: conversation.createdAt ?? null,
+    updatedAt: conversation.updatedAt ?? null,
+    turnCount: conversation.turnCount ?? 0,
+    pendingInstructionCount: conversation.pendingInstructionCount ?? 0,
     lineageSummary: createConversationLineage(conversation),
     entries: [],
     hasMoreHistory: false,
@@ -191,6 +211,55 @@ function createDraftState(conversationId: string): ComposerDraftState {
     draftText: '',
     submitState: 'idle',
     validationMessage: null,
+  };
+}
+
+function resolveConversationText(
+  nextValue: string | undefined,
+  previousValue: string | undefined,
+  fallback: string,
+): string {
+  return nextValue ?? previousValue ?? fallback;
+}
+
+function resolveConversationStatus(
+  nextValue: ConversationStatus | undefined,
+  previousValue: ConversationStatus | undefined,
+): ConversationStatus {
+  return nextValue ?? previousValue ?? 'active';
+}
+
+function resolveConversationTimestamp(
+  nextValue: string | undefined,
+  previousValue: string | null | undefined,
+): string | null {
+  return nextValue ?? previousValue ?? null;
+}
+
+function resolveConversationCount(
+  nextValue: number | undefined,
+  previousValue: number | undefined,
+): number {
+  return nextValue ?? previousValue ?? 0;
+}
+
+function mergeConversationSnapshot(
+  previous: ConversationViewState | undefined,
+  conversation: WorkspaceConversationRecord,
+): Pick<
+  ConversationViewState,
+  'title' | 'status' | 'createdAt' | 'updatedAt' | 'turnCount' | 'pendingInstructionCount'
+> {
+  return {
+    title: resolveConversationText(conversation.title, previous?.title, 'Untitled conversation'),
+    status: resolveConversationStatus(conversation.status, previous?.status),
+    createdAt: resolveConversationTimestamp(conversation.createdAt, previous?.createdAt),
+    updatedAt: resolveConversationTimestamp(conversation.updatedAt, previous?.updatedAt),
+    turnCount: resolveConversationCount(conversation.turnCount, previous?.turnCount),
+    pendingInstructionCount: resolveConversationCount(
+      conversation.pendingInstructionCount,
+      previous?.pendingInstructionCount,
+    ),
   };
 }
 
@@ -244,6 +313,7 @@ function pruneDrafts(
 export function createInitialWorkspaceState(): WorkspaceState {
   return {
     activeConversationId: null,
+    explicitCreateMode: false,
     conversationOrder: [],
     conversations: new Map(),
     drafts: new Map(),
@@ -256,10 +326,12 @@ function mergeConversationView(
   previous: ConversationViewState | undefined,
   conversation: WorkspaceConversationRecord,
 ): ConversationViewState {
+  const snapshot = mergeConversationSnapshot(previous, conversation);
+
   return {
     ...(previous ?? createConversationViewState(conversation)),
     conversationId: conversation.id,
-    title: conversation.title ?? previous?.title ?? 'Untitled conversation',
+    ...snapshot,
     lineageSummary: createConversationLineage(conversation) ?? previous?.lineageSummary ?? null,
   };
 }
@@ -296,11 +368,26 @@ function applyReplaceAllConversations(
     nextOrder.push(conversation.id);
   }
 
-  const fallbackId: string | null = nextOrder.length > 0 ? nextOrder[0] : null;
-  const nextActiveConversationId =
-    state.activeConversationId != null && nextConversations.has(state.activeConversationId)
-      ? state.activeConversationId
-      : fallbackId;
+  // Retain the active conversation when it was already known locally but
+  // absent from this (possibly stale/paginated) list payload.  An empty
+  // payload is treated as authoritative ("no conversations exist"), so we
+  // only protect the active conversation when the refresh is non-empty.
+  const activeId = state.activeConversationId;
+  const retainedActiveConversation =
+    activeId == null || conversations.length === 0 || nextConversations.has(activeId)
+      ? undefined
+      : state.conversations.get(activeId);
+  if (activeId != null && retainedActiveConversation != null) {
+    nextConversations.set(activeId, retainedActiveConversation);
+    nextOrder.push(activeId);
+  }
+
+  const currentStillExists = activeId != null && nextConversations.has(activeId);
+  let fallbackId: string | null = null;
+  if (!state.explicitCreateMode && nextOrder.length > 0) {
+    fallbackId = nextOrder[0];
+  }
+  const nextActiveConversationId = currentStillExists ? activeId : fallbackId;
   const retainedConversationIds = new Set(nextOrder);
   const nextDraftsBase = pruneDrafts(state.drafts, retainedConversationIds);
   const nextDrafts =
@@ -324,7 +411,12 @@ function applyConversationSelection(
   conversationId: string | null,
 ): WorkspaceState {
   if (conversationId == null) {
-    return { ...state, activeConversationId: null, visibleArtifact: null };
+    return {
+      ...state,
+      activeConversationId: null,
+      explicitCreateMode: true,
+      visibleArtifact: null,
+    };
   }
 
   const nextConversations = new Map(state.conversations);
@@ -337,6 +429,7 @@ function applyConversationSelection(
   return {
     ...state,
     activeConversationId: conversationId,
+    explicitCreateMode: false,
     conversationOrder: withConversationInOrder(state.conversationOrder, conversationId),
     conversations: nextConversations,
     drafts: nextDrafts,
@@ -491,4 +584,103 @@ export function createWorkspaceStore(initialState = createInitialWorkspaceState(
       };
     },
   };
+}
+
+// ─── Async submit orchestration ─────────────────────────────────────────────
+
+export interface SubmitDraftDeps {
+  readonly store: WorkspaceStore;
+  readonly client: Pick<GatewayClient, 'createConversation' | 'submitInstruction'>;
+}
+
+export type SubmitResult = { readonly ok: true } | { readonly ok: false };
+
+/**
+ * Continue flow: submit the active draft as an instruction to the
+ * active conversation. Manages submitting → idle/error transitions.
+ *
+ * No-ops when there is no active conversation, the draft is empty,
+ * or the draft is already in-flight (returns `{ ok: false }`).
+ */
+export async function submitComposerDraft(deps: SubmitDraftDeps): Promise<SubmitResult> {
+  const { store, client } = deps;
+  const state = store.getState();
+  const conversationId = state.activeConversationId;
+
+  if (conversationId == null) return { ok: false };
+
+  const draft = state.drafts.get(conversationId);
+  if (draft == null || !isDraftSubmittable(draft)) return { ok: false };
+
+  const instruction = draft.draftText.trim();
+
+  store.dispatch({
+    type: 'draft/set-submit-state',
+    conversationId,
+    submitState: 'submitting',
+    validationMessage: null,
+  });
+
+  try {
+    await client.submitInstruction(conversationId, { instruction });
+
+    store.dispatch({ type: 'draft/set-text', conversationId, draftText: '' });
+    store.dispatch({
+      type: 'draft/set-submit-state',
+      conversationId,
+      submitState: 'idle',
+      validationMessage: null,
+    });
+    store.dispatch({
+      type: 'conversation/set-load-state',
+      conversationId,
+      loadState: 'idle',
+    });
+    return { ok: true };
+  } catch (err: unknown) {
+    store.dispatch({
+      type: 'draft/set-submit-state',
+      conversationId,
+      submitState: 'error',
+      validationMessage: err instanceof Error ? err.message : 'Submission failed',
+    });
+    return { ok: false };
+  }
+}
+
+/**
+ * Create flow: create a new conversation, select it, and submit the
+ * initial instruction via `submitComposerDraft`.
+ *
+ * No-ops when `draftText` is empty or whitespace-only (returns `{ ok: false }`).
+ * Throws if `createConversation` fails (no conversation to record
+ * the error against). Submit errors after creation are recorded on
+ * the new conversation's draft state via `submitComposerDraft`.
+ */
+export async function createAndSubmitDraft(
+  deps: SubmitDraftDeps,
+  draftText: string,
+): Promise<SubmitResult> {
+  const { store, client } = deps;
+  const instruction = draftText.trim();
+  if (instruction === '') return { ok: false };
+
+  const created = await client.createConversation({});
+
+  store.dispatch({
+    type: 'conversation/upsert',
+    conversation: {
+      id: created.id,
+      title: created.title,
+      status: created.status,
+      createdAt: created.createdAt,
+      updatedAt: created.updatedAt,
+      turnCount: created.turnCount,
+      pendingInstructionCount: created.pendingInstructionCount,
+    },
+  });
+  store.dispatch({ type: 'conversation/select', conversationId: created.id });
+  store.dispatch({ type: 'draft/set-text', conversationId: created.id, draftText: instruction });
+
+  return submitComposerDraft(deps);
 }
