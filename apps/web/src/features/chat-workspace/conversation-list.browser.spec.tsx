@@ -298,10 +298,22 @@ describe('workspace conversation browsing', () => {
     };
 
     let historyCallCount = 0;
+    let listCallCount = 0;
 
     installFetchStub((url, init) => {
       if (url === '/conversations?status=active&limit=20') {
-        return jsonResponse(existingList);
+        listCallCount++;
+        if (listCallCount <= 1) {
+          return jsonResponse(existingList);
+        }
+        // Post-submit reload includes the newly created conversation
+        return jsonResponse({
+          conversations: [
+            ...existingList.conversations,
+            { ...createResponse, turnCount: 1, pendingInstructionCount: 1 },
+          ],
+          totalCount: 2,
+        });
       }
 
       if (url === '/conversations/conv-existing/turns?limit=50') {
@@ -351,5 +363,177 @@ describe('workspace conversation browsing', () => {
 
     // The post-submit refresh must have triggered a second history load
     expect(historyCallCount).toBeGreaterThanOrEqual(2);
+  });
+
+  it('reloads the conversation list after create so pre-existing conversations appear', async () => {
+    const preExisting = {
+      id: 'conv-old',
+      title: 'Pre-existing conversation',
+      status: 'active',
+      createdAt: '2026-03-19T00:00:00.000Z',
+      updatedAt: '2026-03-19T12:00:00.000Z',
+      turnCount: 5,
+      pendingInstructionCount: 0,
+    };
+
+    const createResponse = {
+      id: 'conv-new',
+      title: 'Fresh conversation',
+      status: 'active',
+      createdAt: '2026-03-21T00:00:00.000Z',
+      updatedAt: '2026-03-21T00:00:00.000Z',
+      turnCount: 0,
+      pendingInstructionCount: 0,
+    };
+
+    const submitResponse = {
+      turn: {
+        id: 'turn-1',
+        conversationId: 'conv-new',
+        position: 1,
+        kind: 'operator',
+        attribution: { type: 'operator', label: 'Operator' },
+        instruction: 'Start fresh',
+        status: 'submitted',
+        createdAt: '2026-03-21T00:00:01.000Z',
+      },
+      streamId: 'stream-1',
+    };
+
+    let listCallCount = 0;
+
+    installFetchStub((url, init) => {
+      if (url === '/conversations?status=active&limit=20') {
+        listCallCount++;
+        if (listCallCount <= 1) {
+          // Initial load fails
+          return jsonResponse({ message: 'Gateway down' }, 503, 'Service Unavailable');
+        }
+        // Reload after create succeeds, includes pre-existing + newly created
+        return jsonResponse({
+          conversations: [createResponse, preExisting],
+          totalCount: 2,
+        });
+      }
+
+      if (url === '/conversations' && init?.method === 'POST') {
+        return jsonResponse(createResponse);
+      }
+
+      if (url === '/conversations/conv-new/turns' && init?.method === 'POST') {
+        return jsonResponse(submitResponse);
+      }
+
+      if (url === '/conversations/conv-new/turns?limit=50') {
+        return jsonResponse(emptyHistoryResponse);
+      }
+
+      if (url === '/conversations/conv-old/turns?limit=50') {
+        return jsonResponse(emptyHistoryResponse);
+      }
+
+      throw new Error(`Unexpected fetch input: ${url}`);
+    });
+
+    render(<AppProviders />);
+
+    // Initial list load fails
+    expect((await screen.findByRole('alert')).textContent).toContain('Service Unavailable');
+
+    // Create a conversation despite the failed list load
+    fireEvent.change(screen.getByRole('textbox', { name: /instruction/i }), {
+      target: { value: 'Start fresh' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: /send/i }));
+
+    // After create, the reload returns both conversations
+    expect(await screen.findByRole('button', { name: /pre-existing conversation/i })).toBeTruthy();
+    expect(screen.getByRole('button', { name: /fresh conversation/i })).toBeTruthy();
+    expect(screen.queryByRole('alert')).toBeNull();
+    expect(listCallCount).toBeGreaterThanOrEqual(2);
+  });
+
+  it('refreshes sidebar metadata after a continue-mode submit', async () => {
+    const initialList: ListConversationsResponse = {
+      conversations: [
+        {
+          id: 'conv-1',
+          title: 'Active conversation',
+          status: 'active',
+          createdAt: '2026-03-20T00:00:00.000Z',
+          updatedAt: '2026-03-20T12:00:00.000Z',
+          turnCount: 1,
+          pendingInstructionCount: 0,
+        },
+      ],
+      totalCount: 1,
+    };
+
+    const submitResponse = {
+      turn: {
+        id: 'turn-2',
+        conversationId: 'conv-1',
+        position: 2,
+        kind: 'operator',
+        attribution: { type: 'operator', label: 'Operator' },
+        instruction: 'Follow-up message',
+        status: 'submitted',
+        createdAt: '2026-03-20T13:00:00.000Z',
+      },
+      streamId: 'stream-2',
+    };
+
+    const refreshedList: ListConversationsResponse = {
+      conversations: [
+        {
+          id: 'conv-1',
+          title: 'Active conversation',
+          status: 'active',
+          createdAt: '2026-03-20T00:00:00.000Z',
+          updatedAt: '2026-03-20T13:00:00.000Z',
+          turnCount: 2,
+          pendingInstructionCount: 1,
+        },
+      ],
+      totalCount: 1,
+    };
+
+    let listCallCount = 0;
+
+    installFetchStub((url, init) => {
+      if (url === '/conversations?status=active&limit=20') {
+        listCallCount++;
+        if (listCallCount <= 1) {
+          return jsonResponse(initialList);
+        }
+        return jsonResponse(refreshedList);
+      }
+
+      if (url === '/conversations/conv-1/turns?limit=50') {
+        return jsonResponse(emptyHistoryResponse);
+      }
+
+      if (url === '/conversations/conv-1/turns' && init?.method === 'POST') {
+        return jsonResponse(submitResponse);
+      }
+
+      throw new Error(`Unexpected fetch input: ${url}`);
+    });
+
+    render(<AppProviders />);
+
+    // Wait for list to load with initial turnCount of 1
+    await screen.findByRole('button', { name: /active conversation/i });
+    expect(screen.getByText('1 turns · 0 pending')).toBeTruthy();
+
+    // Submit a follow-up instruction
+    fireEvent.change(screen.getByRole('textbox', { name: /instruction/i }), {
+      target: { value: 'Follow-up message' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: /send/i }));
+
+    // Sidebar metadata should refresh to show updated counts
+    expect(await screen.findByText('2 turns · 1 pending')).toBeTruthy();
+    expect(listCallCount).toBeGreaterThanOrEqual(2);
   });
 });

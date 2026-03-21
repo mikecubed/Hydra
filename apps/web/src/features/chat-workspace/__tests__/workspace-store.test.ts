@@ -9,6 +9,7 @@ import {
   createAndSubmitDraft,
   type ArtifactViewState,
   type SubmitDraftDeps,
+  type SubmitResult,
   type TranscriptEntryState,
   type WorkspaceConversationRecord,
   type WorkspaceStore,
@@ -445,12 +446,13 @@ describe('submitComposerDraft', () => {
       },
     });
 
-    await submitComposerDraft({ store, client });
+    const result = await submitComposerDraft({ store, client });
 
     assert.deepStrictEqual(submitted, [{ conversationId: 'conv-1', instruction: 'hello agent' }]);
     assert.equal(store.getState().drafts.get('conv-1')?.draftText, '');
     assert.equal(store.getState().drafts.get('conv-1')?.submitState, 'idle');
     assert.equal(store.getState().drafts.get('conv-1')?.validationMessage, null);
+    assert.equal(result.ok, true);
   });
 
   it('transitions through submitting state during request', async () => {
@@ -498,12 +500,13 @@ describe('submitComposerDraft', () => {
       },
     });
 
-    await submitComposerDraft({ store, client });
+    const result = await submitComposerDraft({ store, client });
 
     const draft = store.getState().drafts.get('conv-1');
     assert.equal(draft?.submitState, 'error');
     assert.equal(draft?.validationMessage, 'Gateway 502: Bad Gateway');
     assert.equal(draft?.draftText, 'will fail');
+    assert.equal(result.ok, false);
   });
 
   it('preserves draft text on submission error', async () => {
@@ -543,8 +546,9 @@ describe('submitComposerDraft', () => {
       },
     });
 
-    await submitComposerDraft({ store, client });
+    const result = await submitComposerDraft({ store, client });
     assert.equal(called, false);
+    assert.equal(result.ok, false);
   });
 
   it('does nothing when draft is empty', async () => {
@@ -715,7 +719,7 @@ describe('createAndSubmitDraft', () => {
       },
     });
 
-    await createAndSubmitDraft({ store, client }, 'first message');
+    const result = await createAndSubmitDraft({ store, client }, 'first message');
 
     assert.deepStrictEqual(createdIds, ['new-conv']);
     assert.deepStrictEqual(submitted, [
@@ -724,6 +728,7 @@ describe('createAndSubmitDraft', () => {
     assert.equal(store.getState().activeConversationId, 'new-conv');
     assert.equal(store.getState().drafts.get('new-conv')?.draftText, '');
     assert.equal(store.getState().drafts.get('new-conv')?.submitState, 'idle');
+    assert.equal(result.ok, true);
   });
 
   it('does nothing when draft text is empty', async () => {
@@ -745,8 +750,9 @@ describe('createAndSubmitDraft', () => {
       },
     });
 
-    await createAndSubmitDraft({ store, client }, '');
+    const result = await createAndSubmitDraft({ store, client }, '');
     assert.equal(called, false);
+    assert.equal(result.ok, false);
   });
 
   it('does nothing when draft text is whitespace-only', async () => {
@@ -768,8 +774,9 @@ describe('createAndSubmitDraft', () => {
       },
     });
 
-    await createAndSubmitDraft({ store, client }, '   ');
+    const result = await createAndSubmitDraft({ store, client }, '   ');
     assert.equal(called, false);
+    assert.equal(result.ok, false);
   });
 
   it('throws when createConversation fails', async () => {
@@ -806,7 +813,7 @@ describe('createAndSubmitDraft', () => {
       },
     });
 
-    await createAndSubmitDraft({ store, client }, 'first message');
+    const result = await createAndSubmitDraft({ store, client }, 'first message');
 
     // Conversation was created and selected, but submit failed
     assert.equal(store.getState().activeConversationId, 'new-conv');
@@ -814,6 +821,7 @@ describe('createAndSubmitDraft', () => {
     assert.equal(store.getState().drafts.get('new-conv')?.validationMessage, 'Rate limited');
     // Draft text should be preserved on error
     assert.equal(store.getState().drafts.get('new-conv')?.draftText, 'first message');
+    assert.equal(result.ok, false);
   });
 
   it('trims whitespace from draft text', async () => {
@@ -882,5 +890,91 @@ describe('submitComposerDraft transcript refresh', () => {
     await submitComposerDraft({ store, client });
 
     assert.equal(store.getState().conversations.get('conv-1')?.loadState, 'ready');
+  });
+});
+
+// ─── SubmitResult regression: callers must distinguish success from failure ──
+
+describe('SubmitResult regression', () => {
+  it('submitComposerDraft returns ok:true on success', async () => {
+    const store = storeWithActiveDraft('conv-1', 'go');
+    const client = createMockClient();
+    const result: SubmitResult = await submitComposerDraft({ store, client });
+    assert.equal(result.ok, true);
+  });
+
+  it('submitComposerDraft returns ok:false on submit error', async () => {
+    const store = storeWithActiveDraft('conv-1', 'fail');
+    const client = createMockClient({
+      submitInstruction: async () => {
+        throw new Error('boom');
+      },
+    });
+    const result: SubmitResult = await submitComposerDraft({ store, client });
+    assert.equal(result.ok, false);
+  });
+
+  it('createAndSubmitDraft returns ok:false when create succeeds but submit fails', async () => {
+    const store = createWorkspaceStore();
+    const client = createMockClient({
+      createConversation: async () => ({
+        id: 'new-conv',
+        title: undefined,
+        status: 'active' as const,
+        createdAt: '2026-04-01T00:00:00.000Z',
+        updatedAt: '2026-04-01T00:00:00.000Z',
+        turnCount: 0,
+        pendingInstructionCount: 0,
+      }),
+      submitInstruction: async () => {
+        throw new Error('submit failed after create');
+      },
+    });
+
+    const result: SubmitResult = await createAndSubmitDraft({ store, client }, 'hello');
+
+    assert.equal(result.ok, false);
+    // Conversation was created and selected despite submit failure
+    assert.equal(store.getState().activeConversationId, 'new-conv');
+    assert.equal(store.getState().drafts.get('new-conv')?.submitState, 'error');
+    assert.equal(store.getState().drafts.get('new-conv')?.draftText, 'hello');
+  });
+
+  it('create-succeeds-submit-fails must not signal success to callers', async () => {
+    // Simulates the sidebar scenario: list load had an error, then user creates
+    // a new conversation but instruction submit fails. The caller should NOT
+    // clear the sidebar error or reload the list as if everything succeeded.
+    const store = createWorkspaceStore();
+    let sidebarErrorCleared = false;
+    let sidebarReloaded = false;
+    let transcriptRefreshed = false;
+
+    const client = createMockClient({
+      createConversation: async () => ({
+        id: 'new-conv',
+        title: undefined,
+        status: 'active' as const,
+        createdAt: '2026-04-01T00:00:00.000Z',
+        updatedAt: '2026-04-01T00:00:00.000Z',
+        turnCount: 0,
+        pendingInstructionCount: 0,
+      }),
+      submitInstruction: async () => {
+        throw new Error('Rate limited');
+      },
+    });
+
+    const result = await createAndSubmitDraft({ store, client }, 'first message');
+
+    // Simulate what the route handler should do: only clear/reload on ok
+    if (result.ok) {
+      sidebarErrorCleared = true;
+      sidebarReloaded = true;
+      transcriptRefreshed = true;
+    }
+
+    assert.equal(sidebarErrorCleared, false, 'sidebar error must not be cleared on submit failure');
+    assert.equal(sidebarReloaded, false, 'sidebar must not be reloaded on submit failure');
+    assert.equal(transcriptRefreshed, false, 'transcript must not be refreshed on submit failure');
   });
 });

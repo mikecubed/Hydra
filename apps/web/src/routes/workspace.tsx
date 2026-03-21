@@ -152,12 +152,26 @@ function useConversationListLoader(store: WorkspaceStore, client: GatewayClient)
     };
   }, [client, store]);
 
+  const reloadConversationList = useCallback(async () => {
+    try {
+      const response = await client.listConversations({ status: 'active', limit: 20 });
+      store.dispatch({
+        type: 'conversation/replace-all',
+        conversations: response.conversations.map(toWorkspaceConversationRecord),
+      });
+      setConversationErrorMessage(null);
+    } catch {
+      // Best-effort background refresh; don't overwrite existing UI state.
+    }
+  }, [client, store]);
+
   return {
     isLoadingConversations,
     conversationErrorMessage,
     clearConversationError: useCallback(() => {
       setConversationErrorMessage(null);
     }, []),
+    reloadConversationList,
   };
 }
 
@@ -237,6 +251,7 @@ function useComposerProps(
   isLoadingConversations: boolean,
   clearConversationError: () => void,
   refreshTranscript: () => void,
+  reloadConversationList: () => Promise<void>,
 ) {
   const [createDraftText, setCreateDraftText] = useState('');
   const [createSubmitting, setCreateSubmitting] = useState(false);
@@ -275,13 +290,12 @@ function useComposerProps(
       setCreateSubmitting(true);
       setCreateError(null);
       void createAndSubmitDraft({ store, client }, createDraftText)
-        .then(() => {
-          setCreateDraftText('');
-          clearConversationError();
-          const s = store.getState();
-          const d = s.drafts.get(s.activeConversationId ?? '');
-          if (d != null && d.submitState !== 'error') {
+        .then((result) => {
+          if (result.ok) {
+            setCreateDraftText('');
+            clearConversationError();
             refreshTranscript();
+            void reloadConversationList();
           }
         })
         .catch((err: unknown) => {
@@ -293,11 +307,10 @@ function useComposerProps(
       return;
     }
 
-    void submitComposerDraft({ store, client }).then(() => {
-      const s = store.getState();
-      const d = s.drafts.get(s.activeConversationId ?? '');
-      if (d != null && d.submitState !== 'error') {
+    void submitComposerDraft({ store, client }).then((result) => {
+      if (result.ok) {
         refreshTranscript();
+        void reloadConversationList();
       }
     });
   }, [
@@ -306,6 +319,7 @@ function useComposerProps(
     createDraftText,
     isLoadingConversations,
     refreshTranscript,
+    reloadConversationList,
     store,
   ]);
 
@@ -343,8 +357,12 @@ export function WorkspaceRoute(): JSX.Element {
   const [store] = useState(() => createWorkspaceStore());
   const state = useWorkspaceState(store);
   const client = useMemo(() => createGatewayClient({ baseUrl: '' }), []);
-  const { isLoadingConversations, conversationErrorMessage, clearConversationError } =
-    useConversationListLoader(store, client);
+  const {
+    isLoadingConversations,
+    conversationErrorMessage,
+    clearConversationError,
+    reloadConversationList,
+  } = useConversationListLoader(store, client);
   const retryActiveTranscript = useTranscriptLoader(store, client, state.activeConversationId);
   const activeConversation = selectActiveConversation(state);
   const composer = useComposerProps(
@@ -354,6 +372,7 @@ export function WorkspaceRoute(): JSX.Element {
     isLoadingConversations,
     clearConversationError,
     retryActiveTranscript,
+    reloadConversationList,
   );
 
   return (

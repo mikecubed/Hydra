@@ -570,22 +570,24 @@ export interface SubmitDraftDeps {
   readonly client: Pick<GatewayClient, 'createConversation' | 'submitInstruction'>;
 }
 
+export type SubmitResult = { readonly ok: true } | { readonly ok: false };
+
 /**
  * Continue flow: submit the active draft as an instruction to the
  * active conversation. Manages submitting → idle/error transitions.
  *
  * No-ops when there is no active conversation, the draft is empty,
- * or the draft is already in-flight.
+ * or the draft is already in-flight (returns `{ ok: false }`).
  */
-export async function submitComposerDraft(deps: SubmitDraftDeps): Promise<void> {
+export async function submitComposerDraft(deps: SubmitDraftDeps): Promise<SubmitResult> {
   const { store, client } = deps;
   const state = store.getState();
   const conversationId = state.activeConversationId;
 
-  if (conversationId == null) return;
+  if (conversationId == null) return { ok: false };
 
   const draft = state.drafts.get(conversationId);
-  if (draft == null || !isDraftSubmittable(draft)) return;
+  if (draft == null || !isDraftSubmittable(draft)) return { ok: false };
 
   const instruction = draft.draftText.trim();
 
@@ -611,6 +613,7 @@ export async function submitComposerDraft(deps: SubmitDraftDeps): Promise<void> 
       conversationId,
       loadState: 'idle',
     });
+    return { ok: true };
   } catch (err: unknown) {
     store.dispatch({
       type: 'draft/set-submit-state',
@@ -618,6 +621,7 @@ export async function submitComposerDraft(deps: SubmitDraftDeps): Promise<void> 
       submitState: 'error',
       validationMessage: err instanceof Error ? err.message : 'Submission failed',
     });
+    return { ok: false };
   }
 }
 
@@ -625,7 +629,7 @@ export async function submitComposerDraft(deps: SubmitDraftDeps): Promise<void> 
  * Create flow: create a new conversation, select it, and submit the
  * initial instruction via `submitComposerDraft`.
  *
- * No-ops when `draftText` is empty or whitespace-only.
+ * No-ops when `draftText` is empty or whitespace-only (returns `{ ok: false }`).
  * Throws if `createConversation` fails (no conversation to record
  * the error against). Submit errors after creation are recorded on
  * the new conversation's draft state via `submitComposerDraft`.
@@ -633,10 +637,10 @@ export async function submitComposerDraft(deps: SubmitDraftDeps): Promise<void> 
 export async function createAndSubmitDraft(
   deps: SubmitDraftDeps,
   draftText: string,
-): Promise<void> {
+): Promise<SubmitResult> {
   const { store, client } = deps;
   const instruction = draftText.trim();
-  if (instruction === '') return;
+  if (instruction === '') return { ok: false };
 
   const created = await client.createConversation({});
 
@@ -655,5 +659,5 @@ export async function createAndSubmitDraft(
   store.dispatch({ type: 'conversation/select', conversationId: created.id });
   store.dispatch({ type: 'draft/set-text', conversationId: created.id, draftText: instruction });
 
-  await submitComposerDraft(deps);
+  return submitComposerDraft(deps);
 }
