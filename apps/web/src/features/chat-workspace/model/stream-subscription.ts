@@ -179,6 +179,49 @@ export interface StreamLifecycleHooks {
 }
 
 /**
+ * Seed the resume cursor from the server-confirmed subscription baseline.
+ *
+ * On reconnect the server sends replayed stream-events *before* the
+ * subscribed ack.  If those replayed events created pending gaps we must
+ * NOT jump the cursor past the gaps — otherwise the pending seqs would be
+ * skipped on the next reconnect.  Uses the contiguous frontier computation
+ * in that case so gaps continue to block.
+ */
+function seedSubscriptionBaseline(
+  stateMap: Map<string, StreamSubscriptionState>,
+  conversationId: string,
+  currentSeq: number,
+): void {
+  const currentState = stateMap.get(conversationId) ?? createStreamSubscriptionState();
+
+  if (currentState.pendingSeqs.size > 0) {
+    // Replay events already created gaps — respect them.
+    const highestSeen =
+      currentState.highestSeenSeq === undefined
+        ? currentSeq
+        : Math.max(currentState.highestSeenSeq, currentSeq);
+    const safeFrontier = computeContiguousResume(
+      currentState.serverResumeSeq,
+      currentState.pendingSeqs,
+      highestSeen,
+    );
+    stateMap.set(conversationId, {
+      ...currentState,
+      serverResumeSeq: safeFrontier ?? currentState.serverResumeSeq,
+      highestSeenSeq: highestSeen,
+    });
+    return;
+  }
+
+  // No pending gaps — safe to seed / advance from server baseline.
+  const seeded =
+    currentState.serverResumeSeq === undefined
+      ? currentSeq
+      : Math.max(currentState.serverResumeSeq, currentSeq);
+  stateMap.set(conversationId, { ...currentState, serverResumeSeq: seeded });
+}
+
+/**
  * Build StreamClient callbacks that route events into the workspace store.
  *
  * Per-conversation reconciler state is stored in `stateMap` so it survives
@@ -249,15 +292,7 @@ export function buildStreamCallbacks(
       store.dispatch({ type: 'connection/merge', patch: { transportStatus: 'reconnecting' } });
     },
     onSubscribed(conversationId, currentSeq) {
-      // Seed the resume cursor from the server-confirmed baseline. Uses
-      // safe-max so an existing cursor from a prior session is never
-      // regressed below the server's confirmed position.
-      const currentState = stateMap.get(conversationId) ?? createStreamSubscriptionState();
-      const seeded =
-        currentState.serverResumeSeq === undefined
-          ? currentSeq
-          : Math.max(currentState.serverResumeSeq, currentSeq);
-      stateMap.set(conversationId, { ...currentState, serverResumeSeq: seeded });
+      seedSubscriptionBaseline(stateMap, conversationId, currentSeq);
     },
     onDaemonUnavailable() {
       store.dispatch({ type: 'connection/merge', patch: { daemonStatus: 'unavailable' } });

@@ -1187,4 +1187,114 @@ describe('onSubscribed baseline seeding', () => {
       'seq 3 was acked',
     );
   });
+
+  it('replayed events before subscribed with pendingSeqs non-empty do not skip gap', () => {
+    // Regression: reconnect delivers stream-event* before the subscribed ack.
+    // If replayed events create a pending gap, onSubscribed(currentSeq) must
+    // NOT jump the cursor past the gap.
+    //
+    // Scenario: state before onSubscribed(3) is
+    //   serverResumeSeq=1, pendingSeqs={2}, highestSeenSeq=3
+    // The cursor must stay at 1 so seq 2 is replayed on next reconnect.
+    const store = storeWithConversation('conv-1');
+    const stateMap = new Map<string, StreamSubscriptionState>();
+
+    const callbacks = buildStreamCallbacks(store, stateMap, () => {}, {
+      onReconnectNeeded: () => {},
+      onConnectionEstablished: () => {},
+    });
+
+    // Simulate replayed events arriving before subscribed ack
+    callbacks.onStreamEvent!(
+      'conv-1',
+      makeEvent({ seq: 1, turnId: 't1', kind: 'stream-started', payload: {} }),
+    );
+    callbacks.onStreamEvent!(
+      'conv-1',
+      makeEvent({
+        seq: 2,
+        turnId: 't1',
+        kind: 'approval-response',
+        payload: { approvalId: 'missing', response: 'approve' },
+      }),
+    );
+    callbacks.onStreamEvent!(
+      'conv-1',
+      makeEvent({ seq: 3, turnId: 't1', kind: 'text-delta', payload: { text: 'z' } }),
+    );
+
+    // Verify gap is present before onSubscribed
+    assert.equal(stateMap.get('conv-1')?.serverResumeSeq, 1, 'frontier blocked at 1 by gap at 2');
+    assert.ok(stateMap.get('conv-1')?.pendingSeqs.has(2), 'seq 2 is pending');
+
+    // Now the subscribed ack arrives with currentSeq = 3
+    callbacks.onSubscribed!('conv-1', 3);
+
+    // Cursor must NOT have jumped to 3 — gap at 2 still blocks
+    assert.equal(
+      stateMap.get('conv-1')?.serverResumeSeq,
+      1,
+      'onSubscribed must not overwrite gap-blocked frontier',
+    );
+    assert.ok(
+      stateMap.get('conv-1')?.pendingSeqs.has(2),
+      'pending seq 2 must survive onSubscribed',
+    );
+  });
+
+  it('onSubscribed(currentSeq) still seeds resume for cold subscribe (no local events)', () => {
+    // Cold subscribe: no events have been processed yet, pendingSeqs is empty.
+    // onSubscribed should seed the cursor from currentSeq.
+    const store = storeWithConversation('conv-1');
+    const stateMap = new Map<string, StreamSubscriptionState>();
+
+    const callbacks = buildStreamCallbacks(store, stateMap, () => {}, {
+      onReconnectNeeded: () => {},
+      onConnectionEstablished: () => {},
+    });
+
+    assert.equal(stateMap.get('conv-1'), undefined, 'no state before subscribe');
+
+    callbacks.onSubscribed!('conv-1', 7);
+
+    assert.equal(
+      stateMap.get('conv-1')?.serverResumeSeq,
+      7,
+      'cold subscribe must seed cursor from currentSeq',
+    );
+  });
+
+  it('onSubscribed does not regress an already-safe higher cursor', () => {
+    // Already advanced cursor (e.g. from consumed events) must not regress
+    // when onSubscribed arrives with a lower seq.
+    const store = storeWithConversation('conv-1');
+    const stateMap = new Map<string, StreamSubscriptionState>();
+
+    const callbacks = buildStreamCallbacks(store, stateMap, () => {}, {
+      onReconnectNeeded: () => {},
+      onConnectionEstablished: () => {},
+    });
+
+    // Process events to advance cursor to 5
+    for (let seq = 1; seq <= 5; seq++) {
+      callbacks.onStreamEvent!(
+        'conv-1',
+        makeEvent({
+          seq,
+          turnId: 't1',
+          kind: seq === 1 ? 'stream-started' : 'text-delta',
+          payload: seq === 1 ? {} : { text: String(seq) },
+        }),
+      );
+    }
+    assert.equal(stateMap.get('conv-1')?.serverResumeSeq, 5);
+
+    // onSubscribed with a lower seq must not regress
+    callbacks.onSubscribed!('conv-1', 2);
+    assert.equal(
+      stateMap.get('conv-1')?.serverResumeSeq,
+      5,
+      'onSubscribed must not regress an already-higher cursor',
+    );
+  });
 });
