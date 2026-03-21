@@ -130,8 +130,13 @@ export function WorkspaceRoute(): JSX.Element {
       return;
     }
 
-    let disposed = false;
     const conversationId = state.activeConversationId;
+    const existing = store.getState().conversations.get(conversationId);
+    if (existing != null && existing.loadState === 'ready') {
+      return;
+    }
+
+    let disposed = false;
 
     async function loadTranscript(): Promise<void> {
       store.dispatch({
