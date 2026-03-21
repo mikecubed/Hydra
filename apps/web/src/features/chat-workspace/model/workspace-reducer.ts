@@ -356,15 +356,38 @@ function applyMergeHistory(
 ): WorkspaceState {
   const current = ensureConversation(state.conversations, conversationId);
   const nextConversations = new Map(state.conversations);
+  const currentTurnEntries = new Map(
+    current.entries
+      .filter((entry) => entry.kind === 'turn')
+      .map((entry) => [entry.turnId, entry] as const),
+  );
+
+  const mergedRestEntries = restEntries.map((entry) => {
+    if (entry.kind !== 'turn') {
+      return entry;
+    }
+
+    const streamed = currentTurnEntries.get(entry.turnId);
+    if (streamed == null) {
+      return entry;
+    }
+
+    return {
+      ...entry,
+      artifacts: streamed.artifacts.length > 0 ? [...streamed.artifacts] : entry.artifacts,
+      controls: streamed.controls.length > 0 ? [...streamed.controls] : entry.controls,
+      prompt: streamed.prompt ?? entry.prompt,
+    };
+  });
 
   // Build a set of turnIds covered by REST history
   const restTurnIds = new Set<string | null>();
-  for (const entry of restEntries) {
+  for (const entry of mergedRestEntries) {
     restTurnIds.add(entry.turnId);
   }
   // Also index by entryId for non-turn entries (activity-group, system-status)
   const restEntryIds = new Set<string>();
-  for (const entry of restEntries) {
+  for (const entry of mergedRestEntries) {
     restEntryIds.add(entry.entryId);
   }
 
@@ -384,7 +407,7 @@ function applyMergeHistory(
     }
   }
 
-  const merged = [...restEntries, ...streamOnly];
+  const merged = [...mergedRestEntries, ...streamOnly];
 
   nextConversations.set(conversationId, {
     ...current,

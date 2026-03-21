@@ -1398,6 +1398,66 @@ describe('existing-conversation history vs live-stream race', () => {
     assert.equal(merged?.historyLoaded, true);
   });
 
+  it('merge-history preserves stream-owned prompt and artifacts on shared turns', () => {
+    const store = createWorkspaceStore();
+    store.dispatch({ type: 'conversation/select', conversationId: 'conv-shared-substate' });
+
+    let sub = createStreamSubscriptionState();
+    sub = applyStreamEventsToConversation(
+      store,
+      'conv-shared-substate',
+      [
+        makeEvent({ seq: 1, turnId: 't-shared', kind: 'stream-started', payload: {} }),
+        makeEvent({
+          seq: 2,
+          turnId: 't-shared',
+          kind: 'approval-prompt',
+          payload: { approvalId: 'approval-1' },
+        }),
+        makeEvent({
+          seq: 3,
+          turnId: 't-shared',
+          kind: 'artifact-notice',
+          payload: { artifactId: 'artifact-1', kind: 'patch', label: 'Proposed patch' },
+        }),
+      ],
+      sub,
+    );
+
+    store.dispatch({
+      type: 'conversation/merge-history',
+      conversationId: 'conv-shared-substate',
+      entries: [existingTurnEntry('t-shared', 'Complete REST content')],
+      hasMoreHistory: false,
+    });
+
+    let merged = store.getState().conversations.get('conv-shared-substate');
+    assert.equal(merged?.entries.length, 1, 'shared turn must still deduplicate to one entry');
+    assert.equal(merged?.entries[0].contentBlocks[0]?.text, 'Complete REST content');
+    assert.equal(merged?.entries[0].prompt?.promptId, 'approval-1');
+    assert.equal(merged?.entries[0].artifacts.length, 1);
+    assert.equal(merged?.entries[0].artifacts[0]?.artifactId, 'artifact-1');
+
+    sub = applyStreamEventsToConversation(
+      store,
+      'conv-shared-substate',
+      [
+        makeEvent({
+          seq: 4,
+          turnId: 't-shared',
+          kind: 'approval-response',
+          payload: { approvalId: 'approval-1', response: 'approved' },
+        }),
+      ],
+      sub,
+    );
+
+    merged = store.getState().conversations.get('conv-shared-substate');
+    assert.equal(merged?.entries[0].prompt?.status, 'resolved');
+    assert.equal(merged?.entries[0].prompt?.lastResponseSummary, 'approved');
+    assert.equal(sub.serverResumeSeq, 4);
+  });
+
   it('merge-history preserves activity-group entries from stream', () => {
     const store = createWorkspaceStore();
     store.dispatch({ type: 'conversation/select', conversationId: 'conv-activity' });
