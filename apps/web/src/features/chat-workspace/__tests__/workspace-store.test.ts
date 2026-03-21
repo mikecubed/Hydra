@@ -161,6 +161,50 @@ describe('reduceWorkspaceState', () => {
     assert.equal(state.visibleArtifact, null);
   });
 
+  it('replace-all preserves explicit create mode and does not auto-select first conversation', () => {
+    let state = createInitialWorkspaceState();
+    // User selects a conversation, then explicitly enters create mode.
+    state = reduceWorkspaceState(state, { type: 'conversation/select', conversationId: 'conv-1' });
+    state = reduceWorkspaceState(state, { type: 'conversation/select', conversationId: null });
+    assert.equal(state.explicitCreateMode, true);
+
+    // Background reload arrives with conversations.
+    state = reduceWorkspaceState(state, {
+      type: 'conversation/replace-all',
+      conversations: [
+        createConversation(),
+        createConversation({ id: 'conv-2', title: 'Second conversation' }),
+      ],
+    });
+
+    // The explicit create mode must survive; activeConversationId stays null.
+    assert.equal(state.activeConversationId, null);
+    assert.equal(state.explicitCreateMode, true);
+  });
+
+  it('replace-all auto-selects first conversation when not in explicit create mode', () => {
+    const state = reduceWorkspaceState(createInitialWorkspaceState(), {
+      type: 'conversation/replace-all',
+      conversations: [
+        createConversation(),
+        createConversation({ id: 'conv-2', title: 'Second conversation' }),
+      ],
+    });
+
+    // Initial load (not explicit create mode) should auto-select.
+    assert.equal(state.explicitCreateMode, false);
+    assert.equal(state.activeConversationId, 'conv-1');
+  });
+
+  it('selecting a conversation clears explicit create mode', () => {
+    let state = createInitialWorkspaceState();
+    state = reduceWorkspaceState(state, { type: 'conversation/select', conversationId: null });
+    assert.equal(state.explicitCreateMode, true);
+
+    state = reduceWorkspaceState(state, { type: 'conversation/select', conversationId: 'conv-1' });
+    assert.equal(state.explicitCreateMode, false);
+  });
+
   it('preserves draft ownership across multiple conversations', () => {
     let state = createInitialWorkspaceState();
     state = reduceWorkspaceState(state, { type: 'conversation/select', conversationId: 'conv-1' });

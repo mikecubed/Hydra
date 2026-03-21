@@ -160,8 +160,8 @@ function useConversationListLoader(store: WorkspaceStore, client: GatewayClient)
         conversations: response.conversations.map(toWorkspaceConversationRecord),
       });
       setConversationErrorMessage(null);
-    } catch {
-      // Best-effort background refresh; don't overwrite existing UI state.
+    } catch (err: unknown) {
+      console.warn('[reloadConversationList] Background refresh failed:', err);
     }
   }, [client, store]);
 

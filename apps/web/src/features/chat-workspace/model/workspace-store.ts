@@ -114,6 +114,7 @@ export interface ArtifactViewState {
 
 export interface WorkspaceState {
   readonly activeConversationId: string | null;
+  readonly explicitCreateMode: boolean;
   readonly conversationOrder: readonly string[];
   readonly conversations: ReadonlyMap<string, ConversationViewState>;
   readonly drafts: ReadonlyMap<string, ComposerDraftState>;
@@ -312,6 +313,7 @@ function pruneDrafts(
 export function createInitialWorkspaceState(): WorkspaceState {
   return {
     activeConversationId: null,
+    explicitCreateMode: false,
     conversationOrder: [],
     conversations: new Map(),
     drafts: new Map(),
@@ -366,11 +368,13 @@ function applyReplaceAllConversations(
     nextOrder.push(conversation.id);
   }
 
-  const fallbackId: string | null = nextOrder.length > 0 ? nextOrder[0] : null;
-  const nextActiveConversationId =
-    state.activeConversationId != null && nextConversations.has(state.activeConversationId)
-      ? state.activeConversationId
-      : fallbackId;
+  const currentStillExists =
+    state.activeConversationId != null && nextConversations.has(state.activeConversationId);
+  let fallbackId: string | null = null;
+  if (!state.explicitCreateMode && nextOrder.length > 0) {
+    fallbackId = nextOrder[0];
+  }
+  const nextActiveConversationId = currentStillExists ? state.activeConversationId : fallbackId;
   const retainedConversationIds = new Set(nextOrder);
   const nextDraftsBase = pruneDrafts(state.drafts, retainedConversationIds);
   const nextDrafts =
@@ -394,7 +398,12 @@ function applyConversationSelection(
   conversationId: string | null,
 ): WorkspaceState {
   if (conversationId == null) {
-    return { ...state, activeConversationId: null, visibleArtifact: null };
+    return {
+      ...state,
+      activeConversationId: null,
+      explicitCreateMode: true,
+      visibleArtifact: null,
+    };
   }
 
   const nextConversations = new Map(state.conversations);
@@ -407,6 +416,7 @@ function applyConversationSelection(
   return {
     ...state,
     activeConversationId: conversationId,
+    explicitCreateMode: false,
     conversationOrder: withConversationInOrder(state.conversationOrder, conversationId),
     conversations: nextConversations,
     drafts: nextDrafts,

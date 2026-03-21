@@ -1,4 +1,4 @@
-import type { JSX } from 'react';
+import type { JSX, KeyboardEvent } from 'react';
 import type { DraftSubmitState } from '../model/workspace-store.ts';
 
 export interface ComposerPanelProps {
@@ -58,7 +58,7 @@ export function ComposerPanel({
   const isSubmitting = submitState === 'submitting';
   const hasError = submitState === 'error' && validationMessage != null;
 
-  function handleKeyDown(event: React.KeyboardEvent<HTMLTextAreaElement>): void {
+  function handleKeyDown(event: KeyboardEvent<HTMLTextAreaElement>): void {
     if (event.key === 'Enter' && (event.ctrlKey || event.metaKey) && canSubmit) {
       event.preventDefault();
       onSubmit();
