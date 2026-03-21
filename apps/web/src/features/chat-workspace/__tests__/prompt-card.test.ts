@@ -7,6 +7,7 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 
+import { GatewayRequestError } from '../api/gateway-client.ts';
 import {
   filterPendingPrompts,
   getPromptStatusLabel,
@@ -167,8 +168,8 @@ describe('isPromptActionable', () => {
     assert.equal(isPromptActionable('unavailable'), false);
   });
 
-  it('returns false for error', () => {
-    assert.equal(isPromptActionable('error'), false);
+  it('returns true for error so transient failures remain retryable', () => {
+    assert.equal(isPromptActionable('error'), true);
   });
 });
 
@@ -310,6 +311,95 @@ describe('respondToPrompt', () => {
     const finalPrompt = store.getState().conversations.get('conv-1')?.entries[0].prompt;
     assert.equal(finalPrompt?.status, 'error');
     assert.equal(finalPrompt?.errorMessage, 'Gateway 409: conflict');
+  });
+
+  it('marks prompt stale on 409 gateway conflict', async () => {
+    const state = stateWithPrompt(makePrompt());
+    const store = createMockStore(state);
+
+    const mockClient = {
+      async respondToApproval() {
+        throw new GatewayRequestError(409, {
+          ok: false,
+          code: 'HTTP_ERROR',
+          category: 'validation',
+          message: 'Approval is stale',
+          httpStatus: 409,
+        });
+      },
+    };
+
+    const result = await respondToPrompt(
+      { store, client: mockClient as Parameters<typeof respondToPrompt>[0]['client'] },
+      { conversationId: 'conv-1', turnId: 'turn-1', promptId: 'prompt-1', response: 'approve' },
+    );
+
+    assert.equal(result.ok, false);
+    assert.equal(store.dispatched.length, 2);
+    assert.equal(store.dispatched[0].type, 'prompt/begin-response');
+    assert.equal(store.dispatched[1].type, 'prompt/mark-stale');
+
+    const finalPrompt = store.getState().conversations.get('conv-1')?.entries[0].prompt;
+    assert.equal(finalPrompt?.status, 'stale');
+  });
+
+  it('marks prompt unavailable on 404 gateway miss', async () => {
+    const state = stateWithPrompt(makePrompt());
+    const store = createMockStore(state);
+
+    const mockClient = {
+      async respondToApproval() {
+        throw new GatewayRequestError(404, {
+          ok: false,
+          code: 'HTTP_ERROR',
+          category: 'validation',
+          message: 'Approval no longer exists',
+          httpStatus: 404,
+        });
+      },
+    };
+
+    const result = await respondToPrompt(
+      { store, client: mockClient as Parameters<typeof respondToPrompt>[0]['client'] },
+      { conversationId: 'conv-1', turnId: 'turn-1', promptId: 'prompt-1', response: 'approve' },
+    );
+
+    assert.equal(result.ok, false);
+    assert.equal(store.dispatched.length, 2);
+    assert.equal(store.dispatched[0].type, 'prompt/begin-response');
+    assert.equal(store.dispatched[1].type, 'prompt/mark-unavailable');
+
+    const finalPrompt = store.getState().conversations.get('conv-1')?.entries[0].prompt;
+    assert.equal(finalPrompt?.status, 'unavailable');
+  });
+
+  it('retries successfully when prompt starts in error state', async () => {
+    const state = stateWithPrompt(
+      makePrompt({ status: 'error', errorMessage: 'Temporary network failure' }),
+    );
+    const store = createMockStore(state);
+
+    const mockClient = {
+      async respondToApproval() {
+        return {
+          success: true,
+          approval: { id: 'prompt-1', status: 'responded' as const },
+        };
+      },
+    };
+
+    const result = await respondToPrompt(
+      { store, client: mockClient as Parameters<typeof respondToPrompt>[0]['client'] },
+      { conversationId: 'conv-1', turnId: 'turn-1', promptId: 'prompt-1', response: 'approve' },
+    );
+
+    assert.equal(result.ok, true);
+    assert.equal(store.dispatched[0].type, 'prompt/begin-response');
+    assert.equal(store.dispatched[1].type, 'prompt/response-confirmed');
+
+    const finalPrompt = store.getState().conversations.get('conv-1')?.entries[0].prompt;
+    assert.equal(finalPrompt?.status, 'resolved');
+    assert.equal(finalPrompt?.errorMessage, null);
   });
 
   it('rejects when prompt is not pending', async () => {

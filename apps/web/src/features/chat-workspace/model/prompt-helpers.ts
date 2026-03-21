@@ -5,6 +5,7 @@
  * without importing JSX modules.
  */
 
+import { GatewayRequestError } from '../api/gateway-client.ts';
 import type { GatewayClient } from '../api/gateway-client.ts';
 import type { PromptStatus, PromptViewState, WorkspaceStore } from './workspace-types.ts';
 
@@ -26,7 +27,7 @@ export function getPromptStatusLabel(status: PromptStatus): string {
 
 /** Whether the prompt can accept a new response. */
 export function isPromptActionable(status: PromptStatus): boolean {
-  return status === 'pending';
+  return status === 'pending' || status === 'error';
 }
 
 /** Whether the prompt is in a terminal (non-actionable, non-transient) state. */
@@ -89,6 +90,24 @@ export async function respondToPrompt(
     });
     return { ok: true };
   } catch (err: unknown) {
+    if (err instanceof GatewayRequestError) {
+      if (err.status === 404) {
+        store.dispatch({ type: 'prompt/mark-unavailable', conversationId, turnId, promptId });
+        return { ok: false, error: err.message };
+      }
+
+      if (err.status === 409) {
+        store.dispatch({
+          type: 'prompt/mark-stale',
+          conversationId,
+          turnId,
+          promptId,
+          reason: err.gatewayError.message,
+        });
+        return { ok: false, error: err.message };
+      }
+    }
+
     const errorMessage = err instanceof Error ? err.message : 'Failed to submit response';
     store.dispatch({
       type: 'prompt/response-failed',

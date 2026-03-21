@@ -1,4 +1,4 @@
-import type { Conversation, Turn } from '@hydra/web-contracts';
+import type { ApprovalRequest, Conversation, Turn } from '@hydra/web-contracts';
 import {
   useCallback,
   useEffect,
@@ -273,6 +273,81 @@ function toTranscriptEntry(turn: Turn): TranscriptEntryState {
   };
 }
 
+function toPromptContextBlocks(approval: ApprovalRequest): readonly ContentBlockState[] {
+  const blocks: ContentBlockState[] = [
+    {
+      blockId: `${approval.id}-prompt`,
+      kind: 'text',
+      text: approval.prompt,
+      metadata: null,
+    },
+  ];
+
+  if (Object.keys(approval.context).length > 0) {
+    blocks.push({
+      blockId: `${approval.id}-context`,
+      kind: 'structured',
+      text: JSON.stringify(approval.context, null, 2),
+      metadata: null,
+    });
+  }
+
+  return blocks;
+}
+
+function approvalStatusToPromptStatus(
+  status: ApprovalRequest['status'],
+): TranscriptEntryState['prompt'] extends infer T
+  ? T extends { status: infer S }
+    ? S
+    : never
+  : never {
+  switch (status) {
+    case 'responded':
+      return 'resolved';
+    case 'stale':
+      return 'stale';
+    case 'expired':
+      return 'unavailable';
+    case 'pending':
+      return 'pending';
+  }
+}
+
+function applyPendingApprovalsToEntries(
+  entries: readonly TranscriptEntryState[],
+  approvals: readonly ApprovalRequest[],
+): readonly TranscriptEntryState[] {
+  if (approvals.length === 0) {
+    return entries;
+  }
+
+  const approvalsByTurnId = new Map(approvals.map((approval) => [approval.turnId, approval]));
+  return entries.map((entry) => {
+    if (entry.kind !== 'turn') {
+      return entry;
+    }
+
+    const approval = approvalsByTurnId.get(entry.turnId);
+    if (approval == null) {
+      return entry;
+    }
+
+    return {
+      ...entry,
+      prompt: {
+        promptId: approval.id,
+        parentTurnId: approval.turnId,
+        status: approvalStatusToPromptStatus(approval.status),
+        allowedResponses: approval.responseOptions.map((option) => option.key),
+        contextBlocks: toPromptContextBlocks(approval),
+        lastResponseSummary: approval.response ?? null,
+        errorMessage: null,
+      },
+    };
+  });
+}
+
 function resolveComposerSubmitState(
   isCreateMode: boolean,
   draftSubmitState: DraftSubmitState | undefined,
@@ -387,7 +462,22 @@ function useTranscriptLoader(
       });
 
       try {
-        const response = await client.loadHistory(conversationId, { limit: 50 });
+        const loadPendingApprovals = async () => {
+          try {
+            return await client.getPendingApprovals(conversationId);
+          } catch (err: unknown) {
+            console.warn(
+              `[useTranscriptLoader] Failed to load pending approvals for conversation ${conversationId}:`,
+              err,
+            );
+            return { approvals: [] };
+          }
+        };
+
+        const [response, pendingApprovals] = await Promise.all([
+          client.loadHistory(conversationId, { limit: 50 }),
+          loadPendingApprovals(),
+        ]);
         if (disposed) {
           return;
         }
@@ -399,7 +489,7 @@ function useTranscriptLoader(
         store.dispatch({
           type: 'conversation/merge-history',
           conversationId,
-          entries: response.turns.map(toTranscriptEntry),
+          entries: applyPendingApprovalsToEntries(response.turns.map(toTranscriptEntry), pendingApprovals.approvals),
           hasMoreHistory: response.hasMore,
         });
       } catch (err: unknown) {

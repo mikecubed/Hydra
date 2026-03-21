@@ -233,6 +233,91 @@ describe('TranscriptPane', () => {
     expect(screen.getByText('Codex')).toBeTruthy();
   });
 
+  it('renders persisted pending approvals loaded alongside transcript history', async () => {
+    const conversations: ListConversationsResponse = {
+      conversations: [
+        {
+          id: 'conv-1',
+          title: 'Primary conversation',
+          status: 'active',
+          createdAt: '2026-03-20T00:00:00.000Z',
+          updatedAt: '2026-03-20T12:00:00.000Z',
+          turnCount: 1,
+          pendingInstructionCount: 0,
+        },
+      ],
+      totalCount: 1,
+    };
+    const history: LoadTurnHistoryResponse = {
+      turns: [
+        {
+          id: 'turn-1',
+          conversationId: 'conv-1',
+          position: 1,
+          kind: 'system',
+          attribution: { type: 'agent', agentId: 'codex', label: 'Codex' },
+          response: 'Waiting for approval before continuing.',
+          status: 'awaiting-approval',
+          createdAt: '2026-03-20T12:00:31.000Z',
+          completedAt: '2026-03-20T12:00:45.000Z',
+        },
+      ],
+      totalCount: 1,
+      hasMore: false,
+    };
+
+    installFetchStub((url) => {
+      if (url === '/conversations?status=active&limit=20') {
+        return new Response(JSON.stringify(conversations), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        });
+      }
+
+      if (url === '/conversations/conv-1/turns?limit=50') {
+        return new Response(JSON.stringify(history), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        });
+      }
+
+      if (url === '/conversations/conv-1/approvals') {
+        return new Response(
+          JSON.stringify({
+            approvals: [
+              {
+                id: 'approval-1',
+                turnId: 'turn-1',
+                status: 'pending',
+                prompt: 'Approve the proposed file changes?',
+                context: { files: ['src/index.ts'] },
+                contextHash: 'ctx-1',
+                responseOptions: [
+                  { key: 'approve', label: 'Approve' },
+                  { key: 'deny', label: 'Deny' },
+                ],
+                createdAt: '2026-03-20T12:00:40.000Z',
+              },
+            ],
+          }),
+          {
+            status: 200,
+            headers: { 'Content-Type': 'application/json' },
+          },
+        );
+      }
+
+      throw new Error(`Unexpected fetch input: ${url}`);
+    });
+
+    render(<AppProviders />);
+
+    expect(await screen.findByText('Approve the proposed file changes?')).toBeTruthy();
+    expect(screen.getByTestId('approval-prompt')).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'approve' })).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'deny' })).toBeTruthy();
+  });
+
   it('surfaces when older transcript history has not been loaded yet', async () => {
     const conversations: ListConversationsResponse = {
       conversations: [
