@@ -1113,6 +1113,67 @@ describe('StreamClient', () => {
         conversationId: 'conv-after-stale',
       });
     });
+
+    it('does not invoke onClose callback for stale close from superseded socket', () => {
+      const closeCalls: Array<{ code: number; reason: string }> = [];
+      const client = createStreamClient(defaultOptions());
+
+      // First connection
+      client.connect(
+        noopCallbacks({ onClose: (code, reason) => closeCalls.push({ code, reason }) }),
+      );
+      const ws1 = getSocket();
+      ws1.simulateOpen();
+
+      const staleOnclose = ws1.onclose;
+      assert.ok(staleOnclose, 'onclose handler should be attached to ws1');
+
+      // Suppress synchronous close to simulate async browser behavior
+      ws1.close = () => {
+        ws1.readyState = FakeWebSocket.CLOSED;
+      };
+      client.close();
+
+      // Reconnect with a fresh callback tracker
+      const reconnectCloseCalls: Array<{ code: number; reason: string }> = [];
+      lastFakeSocket = null;
+      client.connect(
+        noopCallbacks({ onClose: (code, reason) => reconnectCloseCalls.push({ code, reason }) }),
+      );
+      const ws2 = getSocket();
+      ws2.simulateOpen();
+
+      // Stale close from the old socket fires — must NOT reach any callback
+      staleOnclose(fakeCloseEvent(1000, 'Normal closure'));
+
+      assert.equal(closeCalls.length, 0, 'original onClose callback must not fire for stale close');
+      assert.equal(
+        reconnectCloseCalls.length,
+        0,
+        'reconnect onClose callback must not fire for stale close',
+      );
+
+      // Verify the active connection is still open
+      assert.equal(client.readyState, FakeWebSocket.OPEN);
+    });
+
+    it('still invokes onClose callback for the active socket close', () => {
+      const closeCalls: Array<{ code: number; reason: string }> = [];
+      const client = createStreamClient(defaultOptions());
+
+      client.connect(
+        noopCallbacks({ onClose: (code, reason) => closeCalls.push({ code, reason }) }),
+      );
+      const ws1 = getSocket();
+      ws1.simulateOpen();
+
+      // Active socket close should still fire the callback
+      ws1.onclose?.(fakeCloseEvent(1001, 'Going away'));
+
+      assert.equal(closeCalls.length, 1, 'onClose must fire for active socket');
+      assert.equal(closeCalls[0].code, 1001);
+      assert.equal(closeCalls[0].reason, 'Going away');
+    });
   });
 
   // ─── Multiple subscriptions ─────────────────────────────────────────
