@@ -76,7 +76,7 @@ _Status note_: post-Phase-1 maintenance also landed on the active branch, splitt
 
 **Independent Test**: Submit an instruction that emits multiple streaming updates and verify the transcript updates incrementally, in order, before the turn completes.
 
-- [ ] T015 [P] [US2] **TDD:** implement the WebSocket stream adapter for connect/subscribe/ack lifecycle in `apps/web/src/features/chat-workspace/api/stream-client.ts` and `apps/web/src/features/chat-workspace/__tests__/stream-client.test.ts`.
+- [x] T015 [P] [US2] **TDD:** implement the WebSocket stream adapter for connect/subscribe/ack lifecycle in `apps/web/src/features/chat-workspace/api/stream-client.ts` and `apps/web/src/features/chat-workspace/__tests__/stream-client.test.ts`.
 - [x] T016 [P] [US2] **TDD:** implement authoritative stream reconciliation and duplicate-safe merge logic in `apps/web/src/features/chat-workspace/model/reconciler.ts` and `apps/web/src/features/chat-workspace/__tests__/reconciler.test.ts`.
 - [x] T017 [P] [US2] Implement safe stream content blocks in `apps/web/src/features/chat-workspace/render/safe-text.tsx` and `apps/web/src/features/chat-workspace/components/stream-event-block.tsx`.
 - [ ] T018 [US2] Wire active conversation subscriptions and live turn updates through `apps/web/src/features/chat-workspace/model/workspace-store.ts`, `apps/web/src/routes/workspace.tsx`, and `apps/web/src/features/chat-workspace/components/transcript-turn.tsx`.
