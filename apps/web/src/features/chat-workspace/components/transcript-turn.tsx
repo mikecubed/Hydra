@@ -1,5 +1,11 @@
 import type { JSX } from 'react';
-import type { ContentBlockState, TranscriptEntryState } from '../model/workspace-store.ts';
+import type {
+  ArtifactReferenceState,
+  ContentBlockState,
+  PromptViewState,
+  TranscriptEntryState,
+} from '../model/workspace-store.ts';
+import { SafeText } from '../render/safe-text.tsx';
 
 export interface TranscriptTurnProps {
   readonly entry: TranscriptEntryState;
@@ -17,6 +23,18 @@ const turnStyle = {
 const streamingTurnStyle = {
   ...turnStyle,
   borderColor: 'rgba(56, 189, 248, 0.3)',
+} as const;
+
+const activityGroupStyle = {
+  ...turnStyle,
+  background: 'rgba(30, 41, 59, 0.35)',
+  borderColor: 'rgba(148, 163, 184, 0.08)',
+} as const;
+
+const systemStatusStyle = {
+  ...turnStyle,
+  background: 'rgba(30, 41, 59, 0.25)',
+  borderColor: 'rgba(251, 191, 36, 0.2)',
 } as const;
 
 const headerStyle = {
@@ -60,6 +78,61 @@ const statusBlockStyle = {
   fontStyle: 'italic',
 } as const;
 
+const artifactListStyle = {
+  display: 'flex',
+  flexWrap: 'wrap',
+  gap: '0.4rem',
+  margin: 0,
+  padding: 0,
+  listStyle: 'none',
+} as const;
+
+const artifactBadgeStyle = {
+  display: 'inline-flex',
+  alignItems: 'center',
+  gap: '0.3rem',
+  background: 'rgba(148, 163, 184, 0.1)',
+  border: '1px solid rgba(148, 163, 184, 0.15)',
+  borderRadius: '0.25rem',
+  padding: '0.15rem 0.5rem',
+  fontSize: '0.75rem',
+  color: '#94a3b8',
+} as const;
+
+const artifactKindStyle = {
+  fontFamily: 'monospace',
+  fontSize: '0.7rem',
+  opacity: 0.7,
+} as const;
+
+const promptSectionStyle = {
+  border: '1px solid rgba(251, 191, 36, 0.25)',
+  borderRadius: '0.375rem',
+  background: 'rgba(251, 191, 36, 0.05)',
+  padding: '0.5rem 0.75rem',
+  fontSize: '0.85rem',
+} as const;
+
+const promptResolvedStyle = {
+  ...promptSectionStyle,
+  borderColor: 'rgba(74, 222, 128, 0.25)',
+  background: 'rgba(74, 222, 128, 0.05)',
+} as const;
+
+const promptLabelStyle = {
+  display: 'flex',
+  alignItems: 'center',
+  gap: '0.4rem',
+  fontSize: '0.75rem',
+  color: '#fbbf24',
+  fontWeight: 600,
+} as const;
+
+const promptResolvedLabelStyle = {
+  ...promptLabelStyle,
+  color: '#4ade80',
+} as const;
+
 function formatTimestamp(iso: string): string {
   const date = new Date(iso);
   return Number.isNaN(date.getTime()) ? iso : date.toLocaleString();
@@ -73,7 +146,11 @@ function ContentBlock({ block }: { readonly block: ContentBlockState }): JSX.Ele
   }
 
   if (block.kind === 'status') {
-    return <p style={statusBlockStyle}>{block.text}</p>;
+    return (
+      <p style={statusBlockStyle}>
+        <SafeText text={block.text} />
+      </p>
+    );
   }
 
   if (block.kind === 'structured') {
@@ -81,11 +158,65 @@ function ContentBlock({ block }: { readonly block: ContentBlockState }): JSX.Ele
   }
 
   // kind === 'text'
-  return <p style={{ margin: 0, lineHeight: 1.6 }}>{block.text}</p>;
+  return (
+    <p style={{ margin: 0, lineHeight: 1.6 }}>
+      <SafeText text={block.text} />
+    </p>
+  );
+}
+
+function ArtifactList({
+  artifacts,
+}: {
+  readonly artifacts: readonly ArtifactReferenceState[];
+}): JSX.Element | null {
+  if (artifacts.length === 0) return null;
+
+  return (
+    <ul style={artifactListStyle} data-testid="artifact-list">
+      {artifacts.map((artifact) => (
+        <li key={artifact.artifactId} style={artifactBadgeStyle} data-testid="artifact-badge">
+          <span style={artifactKindStyle}>{artifact.kind}</span>
+          <SafeText text={artifact.label} />
+        </li>
+      ))}
+    </ul>
+  );
+}
+
+function PromptSection({ prompt }: { readonly prompt: PromptViewState }): JSX.Element {
+  const isResolved = prompt.status === 'resolved';
+
+  return (
+    <div
+      style={isResolved ? promptResolvedStyle : promptSectionStyle}
+      data-testid="approval-prompt"
+      data-prompt-status={prompt.status}
+    >
+      <div style={isResolved ? promptResolvedLabelStyle : promptLabelStyle}>
+        <span>{isResolved ? '✓ Approval resolved' : '⏳ Approval pending'}</span>
+      </div>
+      {prompt.lastResponseSummary != null && (
+        <div style={{ marginTop: '0.25rem', fontSize: '0.8rem', color: '#cbd5e1' }}>
+          <SafeText text={prompt.lastResponseSummary} />
+        </div>
+      )}
+    </div>
+  );
 }
 
 function isStreamingStatus(status: string): boolean {
   return status === 'streaming';
+}
+
+function resolveTurnStyle(
+  entry: TranscriptEntryState,
+  streaming: boolean,
+): Record<string, string | number> {
+  if (streaming) return streamingTurnStyle;
+  if (entry.kind === 'activity-group') return activityGroupStyle;
+  if (entry.kind === 'system-status') return systemStatusStyle;
+  return turnStyle;
 }
 
 export function TranscriptTurn({ entry }: TranscriptTurnProps): JSX.Element {
@@ -93,8 +224,9 @@ export function TranscriptTurn({ entry }: TranscriptTurnProps): JSX.Element {
 
   return (
     <article
-      style={streaming ? streamingTurnStyle : turnStyle}
+      style={resolveTurnStyle(entry, streaming)}
       data-streaming={streaming ? 'true' : undefined}
+      data-entry-kind={entry.kind}
     >
       <header style={headerStyle}>
         <span style={kindBadgeStyle}>{entry.kind}</span>
@@ -116,6 +248,10 @@ export function TranscriptTurn({ entry }: TranscriptTurnProps): JSX.Element {
           ))}
         </div>
       )}
+
+      <ArtifactList artifacts={entry.artifacts} />
+
+      {entry.prompt != null && <PromptSection prompt={entry.prompt} />}
     </article>
   );
 }

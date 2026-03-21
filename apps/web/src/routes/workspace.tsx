@@ -381,7 +381,7 @@ function useTranscriptLoader(
 
     const conversationId = activeConversationId;
     const existing = store.getState().conversations.get(conversationId);
-    if (existing?.loadState === 'ready') {
+    if (existing?.historyLoaded === true) {
       return;
     }
 
@@ -401,15 +401,11 @@ function useTranscriptLoader(
         }
 
         // If streaming already populated the transcript (setting loadState
-        // to 'ready') while the REST call was in flight, skip the
-        // destructive replace to avoid clobbering stream-owned entries.
-        const freshConv = store.getState().conversations.get(conversationId);
-        if (freshConv?.loadState === 'ready') {
-          return;
-        }
-
+        // to 'ready') while the REST call was in flight, merge history with
+        // stream-owned entries instead of skipping entirely. This preserves
+        // authoritative older history AND any live stream entries.
         store.dispatch({
-          type: 'conversation/replace-entries',
+          type: 'conversation/merge-history',
           conversationId,
           entries: response.turns.map(toTranscriptEntry),
           hasMoreHistory: response.hasMore,
