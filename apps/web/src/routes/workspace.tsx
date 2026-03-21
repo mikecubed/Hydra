@@ -86,8 +86,12 @@ function useStreamSubscription({
   const reconnectTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const reconnectAttemptRef = useRef(0);
   const callbacksRef = useRef<StreamClientCallbacks | null>(null);
+  // Tracks a conversation that needs subscribing after the socket failed to
+  // send (CLOSING/CLOSED). Fulfilled on the next successful open/reconnect.
+  const pendingSubscribeRef = useRef<string | null>(null);
 
   // Connect / disconnect lifecycle
+  // eslint-disable-next-line max-lines-per-function
   useEffect(() => {
     intentionalCloseRef.current = false;
 
@@ -132,6 +136,7 @@ function useStreamSubscription({
           if (activeId != null) {
             const convState = stateMapRef.current.get(activeId);
             streamClient.subscribe(activeId, convState?.serverResumeSeq);
+            pendingSubscribeRef.current = null;
           }
         } catch (err: unknown) {
           console.warn('[stream] Reconnect attempt failed:', err);
@@ -155,6 +160,19 @@ function useStreamSubscription({
         onConnectionEstablished() {
           reconnectAttemptRef.current = 0;
           clearReconnectTimer();
+
+          // Fulfill deferred subscription from a prior effect-level failure.
+          const pendingId = pendingSubscribeRef.current;
+          if (pendingId != null && pendingId === activeIdRef.current) {
+            pendingSubscribeRef.current = null;
+            const convState = stateMapRef.current.get(pendingId);
+            try {
+              streamClient.subscribe(pendingId, convState?.serverResumeSeq);
+            } catch {
+              // Still not writable — will retry on next reconnect.
+              pendingSubscribeRef.current = pendingId;
+            }
+          }
         },
       },
     );
@@ -187,13 +205,19 @@ function useStreamSubscription({
       const convState = stateMapRef.current.get(activeConversationId);
       try {
         streamClient.subscribe(activeConversationId, convState?.serverResumeSeq);
-      } catch (err: unknown) {
-        console.warn(`[stream] Failed to subscribe to ${activeConversationId}:`, err);
+        pendingSubscribeRef.current = null;
+      } catch (_err: unknown) {
+        // Socket not writable — store the intent for the next open/reconnect.
+        pendingSubscribeRef.current = activeConversationId;
+        console.warn(
+          `[stream] Subscribe deferred for ${activeConversationId} — will retry on next open`,
+        );
       }
     }
 
     return () => {
       if (activeConversationId != null) {
+        pendingSubscribeRef.current = null;
         try {
           streamClient.unsubscribe(activeConversationId);
         } catch (err: unknown) {
