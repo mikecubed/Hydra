@@ -17,7 +17,7 @@
  */
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { AppProviders } from '../../../app/providers.tsx';
 import {
   FakeWebSocket,
@@ -85,6 +85,13 @@ function approvalSuccessBody(approvalId: string, response: string) {
 }
 
 type FetchHandler = (url: string, init: RequestInit | undefined) => Response;
+
+function parseRequestBody(init: RequestInit | undefined): Record<string, unknown> | null {
+  if (typeof init?.body !== 'string') {
+    return null;
+  }
+  return JSON.parse(init.body) as Record<string, unknown>;
+}
 
 /**
  * Install a fetch stub pre-configured with conversation list, empty history,
@@ -167,7 +174,11 @@ describe('prompt lifecycle browser workflows', () => {
   // ── 2. Approve happy path ────────────────────────────────────────────────
 
   it('transitions pending → responding → resolved when user approves', async () => {
-    installDefaultStub(() => jsonResponse(approvalSuccessBody('p1', 'approve')));
+    const requests: Array<{ url: string; init: RequestInit | undefined }> = [];
+    installDefaultStub((url, init) => {
+      requests.push({ url, init });
+      return jsonResponse(approvalSuccessBody('p1', 'approve'));
+    });
 
     const ws = await renderAndSubscribe();
     streamApprovalPrompt(ws);
@@ -186,6 +197,11 @@ describe('prompt lifecycle browser workflows', () => {
       expect(card).toHaveAttribute('data-prompt-status', 'resolved');
     });
 
+    expect(requests).toHaveLength(1);
+    expect(requests[0]?.url).toBe('/approvals/p1/respond');
+    expect(requests[0]?.init?.method).toBe('POST');
+    expect(parseRequestBody(requests[0]?.init)).toEqual({ response: 'approve' });
+
     // Summary displayed
     expect(screen.getByTestId('prompt-summary')).toBeInTheDocument();
     expect(screen.getByText(/Response:/)).toBeInTheDocument();
@@ -202,8 +218,10 @@ describe('prompt lifecycle browser workflows', () => {
   // ── 3. 409 conflict → stale ─────────────────────────────────────────────
 
   it('marks prompt stale when API returns 409 conflict', async () => {
-    installDefaultStub(() =>
-      jsonResponse(
+    const requests: Array<{ url: string; init: RequestInit | undefined }> = [];
+    installDefaultStub((url, init) => {
+      requests.push({ url, init });
+      return jsonResponse(
         {
           ok: false,
           code: 'HTTP_ERROR',
@@ -212,8 +230,8 @@ describe('prompt lifecycle browser workflows', () => {
           httpStatus: 409,
         },
         409,
-      ),
-    );
+      );
+    });
 
     const ws = await renderAndSubscribe();
     streamApprovalPrompt(ws);
@@ -225,6 +243,11 @@ describe('prompt lifecycle browser workflows', () => {
     await waitFor(() => {
       expect(card).toHaveAttribute('data-prompt-status', 'stale');
     });
+
+    expect(requests).toHaveLength(1);
+    expect(requests[0]?.url).toBe('/approvals/p1/respond');
+    expect(requests[0]?.init?.method).toBe('POST');
+    expect(parseRequestBody(requests[0]?.init)).toEqual({ response: 'approve' });
 
     // Stale message visible
     expect(screen.getByTestId('prompt-stale-message')).toBeInTheDocument();
@@ -364,6 +387,13 @@ describe('prompt lifecycle browser workflows', () => {
     });
 
     expect(await screen.findByText('Continuing after approval…')).toBeInTheDocument();
+
+    const articles = transcriptArticles();
+    expect(articles).toHaveLength(1);
+    expect(within(articles[0] as HTMLElement).getByTestId('prompt-summary')).toBeInTheDocument();
+    expect(
+      within(articles[0] as HTMLElement).getByText('Continuing after approval…'),
+    ).toBeInTheDocument();
 
     // Stream completes — prompt should stay resolved (not regress to stale)
     act(() => {
