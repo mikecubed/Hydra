@@ -18,6 +18,7 @@ export type ContentBlockKind = 'text' | 'code' | 'status' | 'structured';
 export type LineageRelationshipKind = 'follow-up' | 'retry' | 'branch' | null;
 export type EntryControlKind = 'submit-follow-up' | 'cancel' | 'retry' | 'branch' | 'respond';
 export type ConversationStatus = 'active' | 'archived';
+export type PromptStatus = 'pending' | 'responding' | 'resolved' | 'stale' | 'unavailable' | 'error';
 
 // ─── Record & view-state interfaces ─────────────────────────────────────────
 
@@ -55,17 +56,27 @@ export interface EntryControlState {
 }
 
 /**
- * Placeholder prompt reference derived from the `approval-prompt` stream event.
+ * Browser-side prompt view state for approval or follow-up requests.
  *
- * The daemon emits only `{ approvalId }` — full approval details (allowed
- * responses, context, etc.) live behind the REST approval-flow contract and
- * will be hydrated by a later phase.
+ * Stream events provide the `promptId` and optional metadata (allowed
+ * responses, explanatory context). Full prompt details may be hydrated
+ * later from the REST approval-flow contract via the `prompt/hydrate`
+ * action. The lifecycle is:
+ *
+ *   pending → responding → resolved  (happy path)
+ *   pending → stale                   (turn ended while prompt was pending)
+ *   responding → error                (response submission failed)
+ *   responding → stale                (turn ended while response in-flight)
+ *   any → unavailable                 (server marks prompt as no longer valid)
  */
 export interface PromptViewState {
   readonly promptId: string;
   readonly parentTurnId: string;
-  readonly status: 'pending' | 'responding' | 'resolved' | 'stale' | 'unavailable' | 'error';
+  readonly status: PromptStatus;
+  readonly allowedResponses: readonly string[];
+  readonly contextBlocks: readonly ContentBlockState[];
   readonly lastResponseSummary: string | null;
+  readonly errorMessage: string | null;
 }
 
 export interface TranscriptEntryState {
@@ -189,7 +200,48 @@ export type WorkspaceAction =
       readonly patch: Readonly<Partial<WorkspaceConnectionState>>;
     }
   | { readonly type: 'artifact/show'; readonly artifact: ArtifactViewState }
-  | { readonly type: 'artifact/clear' };
+  | { readonly type: 'artifact/clear' }
+  | {
+      readonly type: 'prompt/begin-response';
+      readonly conversationId: string;
+      readonly turnId: string;
+      readonly promptId: string;
+    }
+  | {
+      readonly type: 'prompt/response-confirmed';
+      readonly conversationId: string;
+      readonly turnId: string;
+      readonly promptId: string;
+      readonly responseSummary: string | null;
+    }
+  | {
+      readonly type: 'prompt/response-failed';
+      readonly conversationId: string;
+      readonly turnId: string;
+      readonly promptId: string;
+      readonly errorMessage: string | null;
+    }
+  | {
+      readonly type: 'prompt/mark-stale';
+      readonly conversationId: string;
+      readonly turnId: string;
+      readonly promptId: string;
+      readonly reason: string | null;
+    }
+  | {
+      readonly type: 'prompt/mark-unavailable';
+      readonly conversationId: string;
+      readonly turnId: string;
+      readonly promptId: string;
+    }
+  | {
+      readonly type: 'prompt/hydrate';
+      readonly conversationId: string;
+      readonly turnId: string;
+      readonly promptId: string;
+      readonly allowedResponses: readonly string[];
+      readonly contextBlocks: readonly ContentBlockState[];
+    };
 
 export type WorkspaceListener = (state: WorkspaceState, action: WorkspaceAction) => void;
 

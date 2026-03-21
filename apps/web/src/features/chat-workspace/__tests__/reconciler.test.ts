@@ -496,7 +496,10 @@ describe('reconcileStreamEvents', () => {
           promptId: 'prompt-1',
           parentTurnId: 'turn-1',
           status: 'pending',
+          allowedResponses: [],
+          contextBlocks: [],
           lastResponseSummary: null,
+          errorMessage: null,
         },
       });
       const event = makeEvent({
@@ -519,7 +522,10 @@ describe('reconcileStreamEvents', () => {
           promptId: 'prompt-1',
           parentTurnId: 'turn-1',
           status: 'pending',
+          allowedResponses: [],
+          contextBlocks: [],
           lastResponseSummary: null,
+          errorMessage: null,
         },
       });
       const event = makeEvent({
@@ -542,7 +548,10 @@ describe('reconcileStreamEvents', () => {
           promptId: 'prompt-2',
           parentTurnId: 'turn-1',
           status: 'pending',
+          allowedResponses: [],
+          contextBlocks: [],
           lastResponseSummary: null,
+          errorMessage: null,
         },
       });
       const staleResponse = makeEvent({
@@ -619,7 +628,10 @@ describe('reconcileStreamEvents', () => {
           promptId: 'prompt-2',
           parentTurnId: 'turn-1',
           status: 'pending',
+          allowedResponses: [],
+          contextBlocks: [],
           lastResponseSummary: null,
+          errorMessage: null,
         },
       });
       const response = makeEvent({
@@ -1149,7 +1161,10 @@ describe('reconcileStreamEvents', () => {
           promptId: 'prompt-2',
           parentTurnId: 'turn-1',
           status: 'pending',
+          allowedResponses: [],
+          contextBlocks: [],
           lastResponseSummary: null,
+          errorMessage: null,
         },
       });
       const events: StreamEvent[] = [
@@ -1173,7 +1188,10 @@ describe('reconcileStreamEvents', () => {
           promptId: 'prompt-1',
           parentTurnId: 'turn-1',
           status: 'pending',
+          allowedResponses: [],
+          contextBlocks: [],
           lastResponseSummary: null,
+          errorMessage: null,
         },
       });
       const events: StreamEvent[] = [
