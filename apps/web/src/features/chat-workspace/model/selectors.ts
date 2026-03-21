@@ -11,10 +11,12 @@ import type {
   ComposerDraftState,
   ConversationLoadState,
   ConversationViewState,
+  PromptViewState,
   TranscriptEntryState,
   WorkspaceState,
 } from './workspace-types.ts';
 import { getActiveDraft, isDraftSubmittable } from './composer-drafts.ts';
+import { filterPendingPrompts } from './prompt-helpers.ts';
 
 const EMPTY_ENTRIES: readonly TranscriptEntryState[] = [];
 
@@ -76,6 +78,11 @@ export function selectCreateModeCanSubmit(
   createError: string | null,
 ): boolean {
   return createDraftText.trim().length > 0 && !createSubmitting && createError == null;
+}
+
+/** Pending prompts from the active conversation's entries. */
+export function selectPendingPrompts(state: WorkspaceState): readonly PromptViewState[] {
+  return filterPendingPrompts(selectActiveEntries(state));
 }
 
 /** Ordered list of conversation view states matching `conversationOrder`. */

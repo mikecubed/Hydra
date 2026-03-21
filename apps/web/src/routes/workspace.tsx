@@ -39,6 +39,7 @@ import {
   selectConversationList,
   selectCreateModeCanSubmit,
 } from '../features/chat-workspace/model/selectors.ts';
+import { respondToPrompt } from '../features/chat-workspace/model/prompt-helpers.ts';
 
 function useWorkspaceState(store: WorkspaceStore) {
   return useSyncExternalStore(
@@ -537,6 +538,24 @@ function useComposerProps(
   };
 }
 
+function usePromptResponder(store: WorkspaceStore, client: GatewayClient) {
+  return useCallback(
+    (promptId: string, response: string) => {
+      const currentState = store.getState();
+      const conversationId = currentState.activeConversationId;
+      if (conversationId == null) return;
+
+      const conv = currentState.conversations.get(conversationId);
+      const entry = conv?.entries.find((e) => e.prompt?.promptId === promptId);
+      const turnId = entry?.turnId;
+      if (turnId == null) return;
+
+      void respondToPrompt({ store, client }, { conversationId, turnId, promptId, response });
+    },
+    [store, client],
+  );
+}
+
 export function WorkspaceRoute(): JSX.Element {
   const [store] = useState(() => createWorkspaceStore());
   const state = useWorkspaceState(store);
@@ -572,6 +591,7 @@ export function WorkspaceRoute(): JSX.Element {
     clearConversationError,
     reloadConversationList,
   );
+  const handleRespondToPrompt = usePromptResponder(store, client);
 
   return (
     <WorkspaceLayout
@@ -594,6 +614,7 @@ export function WorkspaceRoute(): JSX.Element {
         composer.clearCreateState();
       }}
       onRetryActiveTranscript={retryActiveTranscript}
+      onRespondToPrompt={handleRespondToPrompt}
       composerSlot={
         <ComposerPanel
           draftText={composer.draftText}
