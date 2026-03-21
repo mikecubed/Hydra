@@ -1,11 +1,17 @@
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { cleanup, render, screen, within } from '@testing-library/react';
+import type { ListConversationsResponse, LoadTurnHistoryResponse } from '@hydra/web-contracts';
 
+import { AppProviders } from '../../app/providers.tsx';
 import { TranscriptPane } from './components/transcript-pane.tsx';
 import { TranscriptTurn } from './components/transcript-turn.tsx';
 import type { TranscriptEntryState, ContentBlockState } from './model/workspace-store.ts';
 
+const fetchSpy = vi.fn<typeof fetch>();
+
 afterEach(() => {
+  fetchSpy.mockReset();
+  vi.unstubAllGlobals();
   cleanup();
 });
 
@@ -123,6 +129,75 @@ describe('TranscriptTurn', () => {
 // ─── TranscriptPane ─────────────────────────────────────────────────────────
 
 describe('TranscriptPane', () => {
+  it('loads transcript history for the auto-selected active conversation', async () => {
+    const conversations: ListConversationsResponse = {
+      conversations: [
+        {
+          id: 'conv-1',
+          title: 'Primary conversation',
+          status: 'active',
+          createdAt: '2026-03-20T00:00:00.000Z',
+          updatedAt: '2026-03-20T12:00:00.000Z',
+          turnCount: 2,
+          pendingInstructionCount: 0,
+        },
+      ],
+      totalCount: 1,
+    };
+    const history: LoadTurnHistoryResponse = {
+      turns: [
+        {
+          id: 'turn-1',
+          conversationId: 'conv-1',
+          position: 1,
+          kind: 'operator',
+          attribution: { type: 'operator', label: 'Operator' },
+          instruction: 'Summarize the latest changes.',
+          status: 'completed',
+          createdAt: '2026-03-20T12:00:00.000Z',
+          completedAt: '2026-03-20T12:00:30.000Z',
+        },
+        {
+          id: 'turn-2',
+          conversationId: 'conv-1',
+          position: 2,
+          kind: 'system',
+          attribution: { type: 'agent', agentId: 'codex', label: 'Codex' },
+          response: 'The latest changes add conversation browsing.',
+          status: 'completed',
+          createdAt: '2026-03-20T12:00:31.000Z',
+          completedAt: '2026-03-20T12:00:45.000Z',
+        },
+      ],
+      totalCount: 2,
+      hasMore: false,
+    };
+
+    fetchSpy.mockImplementation(async (input) => {
+      if (input === '/conversations?status=active&limit=20') {
+        return new Response(JSON.stringify(conversations), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        });
+      }
+
+      if (input === '/conversations/conv-1/turns?limit=50') {
+        return new Response(JSON.stringify(history), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        });
+      }
+
+      throw new Error(`Unexpected fetch input: ${String(input)}`);
+    });
+    vi.stubGlobal('fetch', fetchSpy);
+
+    render(<AppProviders />);
+
+    expect(await screen.findByText('Summarize the latest changes.')).toBeTruthy();
+    expect(screen.getByText('The latest changes add conversation browsing.')).toBeTruthy();
+  });
+
   it('shows an empty state when no conversation is active', () => {
     render(
       <TranscriptPane
