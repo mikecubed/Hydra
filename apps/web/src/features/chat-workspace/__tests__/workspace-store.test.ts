@@ -196,6 +196,100 @@ describe('reduceWorkspaceState', () => {
     assert.equal(state.activeConversationId, 'conv-1');
   });
 
+  it('replace-all retains the active conversation when the refresh payload omits it', () => {
+    let state = createInitialWorkspaceState();
+    // Simulate a just-created conversation that is selected and known locally.
+    state = reduceWorkspaceState(state, {
+      type: 'conversation/upsert',
+      conversation: createConversation({ id: 'conv-new', title: 'Just created' }),
+    });
+    state = reduceWorkspaceState(state, {
+      type: 'conversation/select',
+      conversationId: 'conv-new',
+    });
+
+    // Background list refresh arrives but does NOT include conv-new (stale page).
+    state = reduceWorkspaceState(state, {
+      type: 'conversation/replace-all',
+      conversations: [
+        createConversation({ id: 'conv-a', title: 'Older A' }),
+        createConversation({ id: 'conv-b', title: 'Older B' }),
+      ],
+    });
+
+    // The active conversation must survive — it was already known locally.
+    assert.equal(state.activeConversationId, 'conv-new');
+    assert.ok(state.conversations.has('conv-new'), 'active conversation retained in map');
+    assert.ok(
+      state.conversationOrder.includes('conv-new'),
+      'active conversation retained in order',
+    );
+    // The other conversations from the payload should still be present.
+    assert.ok(state.conversations.has('conv-a'));
+    assert.ok(state.conversations.has('conv-b'));
+  });
+
+  it('replace-all retains the draft of the active conversation when the refresh omits it', () => {
+    let state = createInitialWorkspaceState();
+    state = reduceWorkspaceState(state, {
+      type: 'conversation/upsert',
+      conversation: createConversation({ id: 'conv-new', title: 'Just created' }),
+    });
+    state = reduceWorkspaceState(state, {
+      type: 'conversation/select',
+      conversationId: 'conv-new',
+    });
+    state = reduceWorkspaceState(state, {
+      type: 'draft/set-text',
+      conversationId: 'conv-new',
+      draftText: 'My important draft',
+    });
+
+    // Background refresh omits conv-new.
+    state = reduceWorkspaceState(state, {
+      type: 'conversation/replace-all',
+      conversations: [createConversation({ id: 'conv-a', title: 'Older A' })],
+    });
+
+    // Draft must survive.
+    assert.equal(state.drafts.get('conv-new')?.draftText, 'My important draft');
+  });
+
+  it('replace-all still prunes non-active conversations absent from the payload', () => {
+    let state = createInitialWorkspaceState();
+    // Two conversations exist; conv-1 is active.
+    state = reduceWorkspaceState(state, {
+      type: 'conversation/upsert',
+      conversation: createConversation({ id: 'conv-1', title: 'Active' }),
+    });
+    state = reduceWorkspaceState(state, {
+      type: 'conversation/upsert',
+      conversation: createConversation({ id: 'conv-old', title: 'Stale' }),
+    });
+    state = reduceWorkspaceState(state, {
+      type: 'conversation/select',
+      conversationId: 'conv-1',
+    });
+    state = reduceWorkspaceState(state, {
+      type: 'draft/set-text',
+      conversationId: 'conv-old',
+      draftText: 'Orphaned draft',
+    });
+
+    // Refresh includes conv-1 but NOT conv-old.
+    state = reduceWorkspaceState(state, {
+      type: 'conversation/replace-all',
+      conversations: [createConversation({ id: 'conv-1', title: 'Active refreshed' })],
+    });
+
+    // conv-old and its draft should be pruned (non-active).
+    assert.ok(!state.conversations.has('conv-old'), 'non-active conversation pruned');
+    assert.ok(!state.conversationOrder.includes('conv-old'), 'pruned from order');
+    assert.equal(state.drafts.has('conv-old'), false, 'orphaned draft pruned');
+    // Active conversation stays.
+    assert.equal(state.activeConversationId, 'conv-1');
+  });
+
   it('selecting a conversation clears explicit create mode', () => {
     let state = createInitialWorkspaceState();
     state = reduceWorkspaceState(state, { type: 'conversation/select', conversationId: null });

@@ -368,13 +368,26 @@ function applyReplaceAllConversations(
     nextOrder.push(conversation.id);
   }
 
-  const currentStillExists =
-    state.activeConversationId != null && nextConversations.has(state.activeConversationId);
+  // Retain the active conversation when it was already known locally but
+  // absent from this (possibly stale/paginated) list payload.  An empty
+  // payload is treated as authoritative ("no conversations exist"), so we
+  // only protect the active conversation when the refresh is non-empty.
+  const activeId = state.activeConversationId;
+  const retainedActiveConversation =
+    activeId == null || conversations.length === 0 || nextConversations.has(activeId)
+      ? undefined
+      : state.conversations.get(activeId);
+  if (activeId != null && retainedActiveConversation != null) {
+    nextConversations.set(activeId, retainedActiveConversation);
+    nextOrder.push(activeId);
+  }
+
+  const currentStillExists = activeId != null && nextConversations.has(activeId);
   let fallbackId: string | null = null;
   if (!state.explicitCreateMode && nextOrder.length > 0) {
     fallbackId = nextOrder[0];
   }
-  const nextActiveConversationId = currentStillExists ? state.activeConversationId : fallbackId;
+  const nextActiveConversationId = currentStillExists ? activeId : fallbackId;
   const retainedConversationIds = new Set(nextOrder);
   const nextDraftsBase = pruneDrafts(state.drafts, retainedConversationIds);
   const nextDrafts =
