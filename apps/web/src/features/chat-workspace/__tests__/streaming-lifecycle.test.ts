@@ -589,3 +589,255 @@ describe('subscribe/unsubscribe lifecycle', () => {
     assert.equal(ackCalls.length, 3);
   });
 });
+
+// ─── Ack gating for ignored conditional events ─────────────────────────────
+
+describe('ack gating for ignored conditional events', () => {
+  it('does NOT advance lastAcknowledgedSeq for ignored approval-response', () => {
+    const store = storeWithConversation('conv-1');
+
+    // Set up a turn with no prompt
+    let sub = createStreamSubscriptionState();
+    sub = applyStreamEventsToConversation(
+      store,
+      'conv-1',
+      [makeEvent({ seq: 1, turnId: 't1', kind: 'stream-started', payload: {} })],
+      sub,
+    );
+    assert.equal(sub.lastAcknowledgedSeq, 1);
+
+    // Deliver an approval-response with no matching prompt — should be ignored
+    sub = applyStreamEventsToConversation(
+      store,
+      'conv-1',
+      [
+        makeEvent({
+          seq: 2,
+          turnId: 't1',
+          kind: 'approval-response',
+          payload: { approvalId: 'prompt-1', response: 'approve' },
+        }),
+      ],
+      sub,
+    );
+    assert.equal(
+      sub.lastAcknowledgedSeq,
+      1,
+      'lastAcknowledgedSeq must not advance for ignored approval-response',
+    );
+  });
+
+  it('does NOT advance lastAcknowledgedSeq for mismatched approvalId', () => {
+    const store = storeWithConversation('conv-1');
+
+    // Set up a turn with prompt-2 pending
+    let sub = createStreamSubscriptionState();
+    sub = applyStreamEventsToConversation(
+      store,
+      'conv-1',
+      [
+        makeEvent({ seq: 1, turnId: 't1', kind: 'stream-started', payload: {} }),
+        makeEvent({
+          seq: 2,
+          turnId: 't1',
+          kind: 'approval-prompt',
+          payload: { approvalId: 'prompt-2' },
+        }),
+      ],
+      sub,
+    );
+    assert.equal(sub.lastAcknowledgedSeq, 2);
+
+    // Deliver an approval-response for prompt-1 (mismatched) — should be ignored
+    sub = applyStreamEventsToConversation(
+      store,
+      'conv-1',
+      [
+        makeEvent({
+          seq: 3,
+          turnId: 't1',
+          kind: 'approval-response',
+          payload: { approvalId: 'prompt-1', response: 'approve' },
+        }),
+      ],
+      sub,
+    );
+    assert.equal(
+      sub.lastAcknowledgedSeq,
+      2,
+      'lastAcknowledgedSeq must not advance for mismatched approval-response',
+    );
+  });
+
+  it('does NOT call ack for ignored approval-response via buildStreamCallbacks', () => {
+    const store = storeWithConversation('conv-1');
+    const stateMap = new Map<string, StreamSubscriptionState>();
+    const ackCalls: Array<{ conversationId: string; seq: number }> = [];
+
+    const callbacks = buildStreamCallbacks(
+      store,
+      stateMap,
+      (conversationId, seq) => {
+        ackCalls.push({ conversationId, seq });
+      },
+      { onReconnectNeeded: () => {}, onConnectionEstablished: () => {} },
+    );
+
+    // Set up a turn with no prompt
+    callbacks.onStreamEvent!(
+      'conv-1',
+      makeEvent({ seq: 1, turnId: 't1', kind: 'stream-started', payload: {} }),
+    );
+    assert.equal(ackCalls.length, 1, 'stream-started must be acked');
+
+    // Deliver an ignored approval-response
+    callbacks.onStreamEvent!(
+      'conv-1',
+      makeEvent({
+        seq: 2,
+        turnId: 't1',
+        kind: 'approval-response',
+        payload: { approvalId: 'prompt-1', response: 'approve' },
+      }),
+    );
+    assert.equal(ackCalls.length, 1, 'ignored approval-response must NOT be acked');
+    assert.equal(stateMap.get('conv-1')?.lastAcknowledgedSeq, 1);
+  });
+
+  it('resumes correctly after ignored event followed by consumed event', () => {
+    const store = storeWithConversation('conv-1');
+    const stateMap = new Map<string, StreamSubscriptionState>();
+    const ackCalls: Array<{ conversationId: string; seq: number }> = [];
+
+    const callbacks = buildStreamCallbacks(
+      store,
+      stateMap,
+      (conversationId, seq) => {
+        ackCalls.push({ conversationId, seq });
+      },
+      { onReconnectNeeded: () => {}, onConnectionEstablished: () => {} },
+    );
+
+    // Stream started
+    callbacks.onStreamEvent!(
+      'conv-1',
+      makeEvent({ seq: 1, turnId: 't1', kind: 'stream-started', payload: {} }),
+    );
+    // Ignored approval-response (no prompt)
+    callbacks.onStreamEvent!(
+      'conv-1',
+      makeEvent({
+        seq: 2,
+        turnId: 't1',
+        kind: 'approval-response',
+        payload: { approvalId: 'prompt-1', response: 'approve' },
+      }),
+    );
+    // Consumed text-delta
+    callbacks.onStreamEvent!(
+      'conv-1',
+      makeEvent({ seq: 3, turnId: 't1', kind: 'text-delta', payload: { text: 'hello' } }),
+    );
+
+    // Only seq 1 and 3 should be acked (seq 2 was ignored)
+    assert.equal(ackCalls.length, 2);
+    assert.deepEqual(ackCalls[0], { conversationId: 'conv-1', seq: 1 });
+    assert.deepEqual(ackCalls[1], { conversationId: 'conv-1', seq: 3 });
+    assert.equal(stateMap.get('conv-1')?.lastAcknowledgedSeq, 3);
+  });
+});
+
+// ─── New-conversation REST clobber prevention ───────────────────────────────
+
+describe('new-conversation REST clobber prevention', () => {
+  it('streamed transcript survives when delayed history arrives after streaming', () => {
+    // Simulates the create-conversation race: WS events arrive and populate
+    // entries, then a delayed REST loadHistory response tries to clobber.
+    const store = createWorkspaceStore();
+
+    // Step 1: Conversation is created and selected (loadState starts 'idle')
+    store.dispatch({ type: 'conversation/select', conversationId: 'new-conv' });
+    assert.equal(
+      store.getState().conversations.get('new-conv')?.loadState,
+      'idle',
+      'new conversation should start with idle loadState',
+    );
+
+    // Step 2: Transcript loader sets loadState to 'loading' (REST request in flight)
+    store.dispatch({
+      type: 'conversation/set-load-state',
+      conversationId: 'new-conv',
+      loadState: 'loading',
+    });
+
+    // Step 3: WS stream events arrive and populate entries
+    let sub = createStreamSubscriptionState();
+    sub = applyStreamEventsToConversation(
+      store,
+      'new-conv',
+      [
+        makeEvent({ seq: 1, turnId: 't-new', kind: 'stream-started', payload: {} }),
+        makeEvent({
+          seq: 2,
+          turnId: 't-new',
+          kind: 'text-delta',
+          payload: { text: 'Agent is typing...' },
+        }),
+      ],
+      sub,
+    );
+
+    // Streaming dispatched replace-entries → loadState should now be 'ready'
+    const afterStream = store.getState().conversations.get('new-conv');
+    assert.equal(afterStream?.loadState, 'ready', 'streaming must set loadState to ready');
+    assert.equal(afterStream?.entries.length, 1);
+    assert.equal(afterStream?.entries[0].contentBlocks[0]?.text, 'Agent is typing...');
+
+    // Step 4: Delayed REST response arrives — the loadState guard prevents clobber
+    // (This simulates the check added to useTranscriptLoader)
+    const freshConv = store.getState().conversations.get('new-conv');
+    if (freshConv?.loadState !== 'ready') {
+      // This dispatch would clobber — but the guard prevents it
+      store.dispatch({
+        type: 'conversation/replace-entries',
+        conversationId: 'new-conv',
+        entries: [], // empty REST response for brand-new conversation
+        hasMoreHistory: false,
+      });
+    }
+
+    // Step 5: Verify streamed content is intact
+    const final = store.getState().conversations.get('new-conv');
+    assert.equal(final?.entries.length, 1, 'streamed entries must not be clobbered');
+    assert.equal(final?.entries[0].contentBlocks[0]?.text, 'Agent is typing...');
+    assert.equal(sub.lastAcknowledgedSeq, 2);
+  });
+
+  it('REST history loads normally when no streaming has occurred', () => {
+    const store = createWorkspaceStore();
+    store.dispatch({ type: 'conversation/select', conversationId: 'existing-conv' });
+
+    // loadState is 'idle', no streaming → REST should proceed
+    store.dispatch({
+      type: 'conversation/set-load-state',
+      conversationId: 'existing-conv',
+      loadState: 'loading',
+    });
+
+    const freshConv = store.getState().conversations.get('existing-conv');
+    assert.notEqual(freshConv?.loadState, 'ready', 'loadState should still be loading');
+
+    // REST response arrives — should be applied
+    store.dispatch({
+      type: 'conversation/replace-entries',
+      conversationId: 'existing-conv',
+      entries: [existingTurnEntry('t-old', 'Historical message')],
+      hasMoreHistory: true,
+    });
+
+    const final = store.getState().conversations.get('existing-conv');
+    assert.equal(final?.entries.length, 1);
+    assert.equal(final?.entries[0].contentBlocks[0]?.text, 'Historical message');
+    assert.equal(final?.loadState, 'ready');
+  });
+});

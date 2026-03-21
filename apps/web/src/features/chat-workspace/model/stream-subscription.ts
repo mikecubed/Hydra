@@ -57,11 +57,11 @@ export function applyStreamEventsToConversation(
   const conversation = store.getState().conversations.get(conversationId);
   if (conversation == null) return subscriptionState;
 
-  const { entries, state: nextReconcilerState } = reconcileStreamEvents(
-    conversation.entries,
-    events,
-    subscriptionState.reconcilerState,
-  );
+  const {
+    entries,
+    state: nextReconcilerState,
+    consumedSeqs,
+  } = reconcileStreamEvents(conversation.entries, events, subscriptionState.reconcilerState);
 
   // Only dispatch when reconciliation actually mutated the entries array.
   if (entries !== conversation.entries) {
@@ -73,10 +73,13 @@ export function applyStreamEventsToConversation(
     });
   }
 
-  // Track the highest seq for resume on resubscribe
+  // Only advance lastAcknowledgedSeq for events that were actually consumed
+  // by the reconciler. Ignored conditional events (e.g. mismatched
+  // approval-response) must not advance the watermark so they remain
+  // eligible for replay after reconnect/resume.
   let maxSeq = subscriptionState.lastAcknowledgedSeq;
   for (const event of events) {
-    if (maxSeq === undefined || event.seq > maxSeq) {
+    if (consumedSeqs.has(event.seq) && (maxSeq === undefined || event.seq > maxSeq)) {
       maxSeq = event.seq;
     }
   }
@@ -118,10 +121,18 @@ export function buildStreamCallbacks(
       );
       stateMap.set(conversationId, nextState);
 
-      try {
-        ack(conversationId, event.seq);
-      } catch (err: unknown) {
-        console.warn(`[stream] Failed to ack seq ${String(event.seq)} for ${conversationId}:`, err);
+      // Only ack events that were actually consumed by the reconciler.
+      // Ignored conditional events (e.g. mismatched approval-response)
+      // must not be acked so they remain eligible for replay after reconnect.
+      if (nextState.lastAcknowledgedSeq !== currentState.lastAcknowledgedSeq) {
+        try {
+          ack(conversationId, event.seq);
+        } catch (err: unknown) {
+          console.warn(
+            `[stream] Failed to ack seq ${String(event.seq)} for ${conversationId}:`,
+            err,
+          );
+        }
       }
     },
     onOpen() {

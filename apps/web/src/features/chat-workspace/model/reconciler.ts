@@ -28,6 +28,13 @@ export interface ReconcilerState {
 export interface ReconcileResult {
   readonly entries: readonly TranscriptEntryState[];
   readonly state: ReconcilerState;
+  /**
+   * Seq numbers of events that were actually consumed (mutated entries or
+   * are explicit protocol no-ops like `checkpoint`). Ignored conditional
+   * events (e.g. mismatched approval-response) are excluded so callers
+   * can avoid advancing ack watermarks past unconsumed events.
+   */
+  readonly consumedSeqs: ReadonlySet<number>;
 }
 
 export function createReconcilerState(): ReconcilerState {
@@ -387,10 +394,11 @@ export function reconcileStreamEvents(
   events: readonly StreamEvent[],
   state: ReconcilerState,
 ): ReconcileResult {
-  if (events.length === 0) return { entries, state };
+  if (events.length === 0) return { entries, state, consumedSeqs: new Set() };
 
   let current = entries;
   const hwMap = new Map(state.highWaterSeq);
+  const consumedSeqs = new Set<number>();
 
   for (const event of events) {
     if (isStaleEvent(event, { highWaterSeq: hwMap })) continue;
@@ -403,6 +411,7 @@ export function reconcileStreamEvents(
     // approval-response must not consume seq when they didn't match, so
     // they remain eligible on later replay.
     if (current !== prev || event.kind === 'checkpoint') {
+      consumedSeqs.add(event.seq);
       const prevHw = hwMap.get(event.turnId);
       if (prevHw === undefined || event.seq > prevHw) {
         hwMap.set(event.turnId, event.seq);
@@ -410,5 +419,5 @@ export function reconcileStreamEvents(
     }
   }
 
-  return { entries: current, state: { highWaterSeq: hwMap } };
+  return { entries: current, state: { highWaterSeq: hwMap }, consumedSeqs };
 }

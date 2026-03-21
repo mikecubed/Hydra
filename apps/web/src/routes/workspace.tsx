@@ -376,6 +376,14 @@ function useTranscriptLoader(
           return;
         }
 
+        // If streaming already populated the transcript (setting loadState
+        // to 'ready') while the REST call was in flight, skip the
+        // destructive replace to avoid clobbering stream-owned entries.
+        const freshConv = store.getState().conversations.get(conversationId);
+        if (freshConv?.loadState === 'ready') {
+          return;
+        }
+
         store.dispatch({
           type: 'conversation/replace-entries',
           conversationId,

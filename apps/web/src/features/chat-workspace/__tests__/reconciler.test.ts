@@ -1006,4 +1006,111 @@ describe('reconcileStreamEvents', () => {
       assert.equal(entry.status, 'streaming');
     });
   });
+
+  // ── consumedSeqs tracking ─────────────────────────────────────────────
+
+  describe('consumedSeqs', () => {
+    it('includes seq of all mutating events', () => {
+      const events: StreamEvent[] = [
+        makeEvent({ seq: 1, turnId: 'turn-1', kind: 'stream-started', payload: {} }),
+        makeEvent({ seq: 2, turnId: 'turn-1', kind: 'text-delta', payload: { text: 'hi' } }),
+        makeEvent({
+          seq: 3,
+          turnId: 'turn-1',
+          kind: 'stream-completed',
+          payload: { status: 'completed' },
+        }),
+      ];
+      const { consumedSeqs } = reconcileStreamEvents([], events, createReconcilerState());
+      assert.deepStrictEqual([...consumedSeqs].sort(), [1, 2, 3]);
+    });
+
+    it('includes checkpoint seq even though entries are unchanged', () => {
+      const entry = makeEntry({ entryId: 'turn-1', turnId: 'turn-1' });
+      const events: StreamEvent[] = [
+        makeEvent({ seq: 5, turnId: 'turn-1', kind: 'checkpoint', payload: {} }),
+      ];
+      const { consumedSeqs } = reconcileStreamEvents([entry], events, createReconcilerState());
+      assert.ok(consumedSeqs.has(5), 'checkpoint must appear in consumedSeqs');
+    });
+
+    it('excludes stale events that were skipped', () => {
+      const entry = makeEntry({ entryId: 'turn-1', turnId: 'turn-1', status: 'streaming' });
+      const state = stateWithHighWater([['turn-1', 3]]);
+      const events: StreamEvent[] = [
+        makeEvent({ seq: 2, turnId: 'turn-1', kind: 'text-delta', payload: { text: 'old' } }),
+        makeEvent({ seq: 4, turnId: 'turn-1', kind: 'text-delta', payload: { text: 'new' } }),
+      ];
+      const { consumedSeqs } = reconcileStreamEvents([entry], events, state);
+      assert.ok(!consumedSeqs.has(2), 'stale event must not be in consumedSeqs');
+      assert.ok(consumedSeqs.has(4), 'fresh event must be in consumedSeqs');
+    });
+
+    it('excludes ignored approval-response with missing prompt', () => {
+      const entry = makeEntry({
+        entryId: 'turn-1',
+        turnId: 'turn-1',
+        status: 'streaming',
+        prompt: null,
+      });
+      const events: StreamEvent[] = [
+        makeEvent({
+          seq: 5,
+          turnId: 'turn-1',
+          kind: 'approval-response',
+          payload: { approvalId: 'prompt-1', response: 'approve' },
+        }),
+      ];
+      const { consumedSeqs } = reconcileStreamEvents([entry], events, createReconcilerState());
+      assert.ok(!consumedSeqs.has(5), 'ignored approval-response must not be consumed');
+    });
+
+    it('excludes approval-response with mismatched approvalId', () => {
+      const entry = makeEntry({
+        entryId: 'turn-1',
+        turnId: 'turn-1',
+        status: 'streaming',
+        prompt: {
+          promptId: 'prompt-2',
+          parentTurnId: 'turn-1',
+          status: 'pending',
+          lastResponseSummary: null,
+        },
+      });
+      const events: StreamEvent[] = [
+        makeEvent({
+          seq: 5,
+          turnId: 'turn-1',
+          kind: 'approval-response',
+          payload: { approvalId: 'prompt-1', response: 'approve' },
+        }),
+      ];
+      const { consumedSeqs } = reconcileStreamEvents([entry], events, createReconcilerState());
+      assert.ok(!consumedSeqs.has(5), 'mismatched approval-response must not be consumed');
+    });
+
+    it('includes matching approval-response that resolves a prompt', () => {
+      const entry = makeEntry({
+        entryId: 'turn-1',
+        turnId: 'turn-1',
+        status: 'streaming',
+        prompt: {
+          promptId: 'prompt-1',
+          parentTurnId: 'turn-1',
+          status: 'pending',
+          lastResponseSummary: null,
+        },
+      });
+      const events: StreamEvent[] = [
+        makeEvent({
+          seq: 5,
+          turnId: 'turn-1',
+          kind: 'approval-response',
+          payload: { approvalId: 'prompt-1', response: 'approve' },
+        }),
+      ];
+      const { consumedSeqs } = reconcileStreamEvents([entry], events, createReconcilerState());
+      assert.ok(consumedSeqs.has(5), 'matching approval-response must be consumed');
+    });
+  });
 });
