@@ -16,6 +16,7 @@ export interface WorkspaceLayoutProps {
   readonly isLoadingConversations: boolean;
   readonly conversationErrorMessage: string | null;
   readonly onSelectConversation: (conversationId: string) => void;
+  readonly composerSlot?: JSX.Element | null;
 }
 
 export function WorkspaceLayout({
@@ -25,6 +26,7 @@ export function WorkspaceLayout({
   isLoadingConversations,
   conversationErrorMessage,
   onSelectConversation,
+  composerSlot,
 }: WorkspaceLayoutProps): JSX.Element {
   const activeTitle = activeConversation?.title ?? 'No conversation selected';
 
@@ -79,11 +81,9 @@ export function WorkspaceLayout({
             <h3 id="workspace-composer-heading" style={{ marginTop: 0 }}>
               Composer
             </h3>
-            <p style={{ lineHeight: 1.6, marginBottom: 0 }}>Draft belongs to: {activeTitle}</p>
-            <p style={{ lineHeight: 1.6, marginBottom: 0 }}>
-              T012 will connect the active conversation draft, submit flow, and policy messaging
-              here.
-            </p>
+            {composerSlot ?? (
+              <p style={{ lineHeight: 1.6, marginBottom: 0 }}>No active conversation selected.</p>
+            )}
           </section>
         </div>
       </div>

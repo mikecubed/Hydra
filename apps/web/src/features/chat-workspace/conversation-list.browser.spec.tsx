@@ -52,7 +52,8 @@ describe('workspace conversation browsing', () => {
     const primaryButton = await screen.findByRole('button', { name: /primary conversation/i });
     expect(primaryButton.getAttribute('aria-pressed')).toBe('true');
     expect(screen.getByText('Active conversation: Primary conversation')).toBeTruthy();
-    expect(screen.getByText('Draft belongs to: Primary conversation')).toBeTruthy();
+    expect(screen.getByRole('textbox', { name: /instruction/i })).toBeTruthy();
+    expect(screen.getByText('Ready for operator input')).toBeTruthy();
 
     fireEvent.click(screen.getByRole('button', { name: /release follow-up/i }));
 
@@ -60,7 +61,7 @@ describe('workspace conversation browsing', () => {
       screen.getByRole('button', { name: /release follow-up/i }).getAttribute('aria-pressed'),
     ).toBe('true');
     expect(screen.getByText('Active conversation: Release follow-up')).toBeTruthy();
-    expect(screen.getByText('Draft belongs to: Release follow-up')).toBeTruthy();
+    expect(screen.getByRole('textbox', { name: /instruction/i })).toBeTruthy();
     expect(fetchSpy).toHaveBeenCalledWith(
       '/conversations?status=active&limit=20',
       expect.objectContaining({ credentials: 'include', method: 'GET' }),
