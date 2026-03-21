@@ -81,7 +81,7 @@ _Status note_: post-Phase-1 maintenance also landed on the active branch, splitt
 - [x] T017 [P] [US2] Implement safe stream content blocks in `apps/web/src/features/chat-workspace/render/safe-text.tsx` and `apps/web/src/features/chat-workspace/components/stream-event-block.tsx`.
 - [x] T018 [US2] Wire active conversation subscriptions and live turn updates through `apps/web/src/features/chat-workspace/model/workspace-store.ts`, `apps/web/src/routes/workspace.tsx`, and `apps/web/src/features/chat-workspace/components/transcript-turn.tsx`.
 - [x] T019 [US2] Add live-stream browser workflow coverage in `apps/web/src/features/chat-workspace/__tests__/workspace-e2e.test.ts`.
-- [ ] T020 [US2] Run the phase quality gate from the repo root with `npm run quality` and `npm test` after inline streaming is green.
+- [x] T020 [US2] Run the phase quality gate from the repo root with `npm run quality` and `npm test` after inline streaming is green.
 
 **Checkpoint**: User Stories 1 and 2 work together as a basic REPL-grade chat flow.
 
