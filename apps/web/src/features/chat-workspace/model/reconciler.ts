@@ -401,11 +401,18 @@ export function reconcileStreamEvents(
   for (const event of events) {
     if (isStaleEvent(event, { highWaterSeq: hwMap })) continue;
 
+    const prev = current;
     current = applyEvent(current, event);
 
-    const prevHw = hwMap.get(event.turnId);
-    if (prevHw === undefined || event.seq > prevHw) {
-      hwMap.set(event.turnId, event.seq);
+    // Advance high-water when the event mutated entries, or for kinds that
+    // are intentionally no-op (checkpoint). Conditional events like
+    // approval-response must not consume seq when they didn't match, so
+    // they remain eligible on later replay.
+    if (current !== prev || event.kind === 'checkpoint') {
+      const prevHw = hwMap.get(event.turnId);
+      if (prevHw === undefined || event.seq > prevHw) {
+        hwMap.set(event.turnId, event.seq);
+      }
     }
   }
 

@@ -522,6 +522,96 @@ describe('reconcileStreamEvents', () => {
       assert.equal(entries.length, 1);
       assert.equal(entries[0].prompt, null, 'prompt must remain null when no prompt was set');
     });
+
+    it('does not advance highWaterSeq for ignored approval-response (missing prompt)', () => {
+      const existing = makeEntry({
+        entryId: 'turn-1',
+        turnId: 'turn-1',
+        status: 'streaming',
+        prompt: null,
+      });
+      const response = makeEvent({
+        seq: 5,
+        turnId: 'turn-1',
+        kind: 'approval-response',
+        payload: { approvalId: 'prompt-1', response: 'approve' },
+      });
+      const { state } = reconcileStreamEvents([existing], [response], createReconcilerState());
+      assert.equal(
+        state.highWaterSeq.has('turn-1'),
+        false,
+        'no-op approval-response must not consume seq',
+      );
+    });
+
+    it('does not advance highWaterSeq for mismatched approvalId', () => {
+      const existing = makeEntry({
+        entryId: 'turn-1',
+        turnId: 'turn-1',
+        status: 'streaming',
+        prompt: {
+          promptId: 'prompt-2',
+          parentTurnId: 'turn-1',
+          status: 'pending',
+          allowedResponses: ['approve', 'reject'],
+          contextBlocks: [],
+          lastResponseSummary: null,
+        },
+      });
+      const response = makeEvent({
+        seq: 5,
+        turnId: 'turn-1',
+        kind: 'approval-response',
+        payload: { approvalId: 'prompt-1', response: 'approve' },
+      });
+      const { state } = reconcileStreamEvents([existing], [response], createReconcilerState());
+      assert.equal(
+        state.highWaterSeq.has('turn-1'),
+        false,
+        'mismatched approval-response must not consume seq',
+      );
+    });
+
+    it('replays ignored approval-response after prerequisite prompt arrives', () => {
+      // Phase 1: approval-response arrives before its prompt — should be a no-op
+      const existing = makeEntry({
+        entryId: 'turn-1',
+        turnId: 'turn-1',
+        status: 'streaming',
+        prompt: null,
+      });
+      const earlyResponse = makeEvent({
+        seq: 5,
+        turnId: 'turn-1',
+        kind: 'approval-response',
+        payload: { approvalId: 'prompt-1', response: 'approve' },
+      });
+      const r1 = reconcileStreamEvents([existing], [earlyResponse], createReconcilerState());
+      assert.equal(r1.entries[0].prompt, null, 'early response must be ignored');
+
+      // Phase 2: the prompt event arrives, establishing the prompt
+      const prompt = makeEvent({
+        seq: 3,
+        turnId: 'turn-1',
+        kind: 'approval-prompt',
+        payload: {
+          approvalId: 'prompt-1',
+          allowedResponses: ['approve', 'reject'],
+          context: 'Run tests?',
+        },
+      });
+      const r2 = reconcileStreamEvents(r1.entries, [prompt], r1.state);
+      assert.equal(r2.entries[0].prompt?.status, 'pending');
+
+      // Phase 3: replay the same approval-response — must not be stale
+      const r3 = reconcileStreamEvents(r2.entries, [earlyResponse], r2.state);
+      assert.equal(
+        r3.entries[0].prompt?.status,
+        'resolved',
+        'replayed approval-response must resolve the prompt',
+      );
+      assert.equal(r3.entries[0].prompt?.lastResponseSummary, 'approve');
+    });
   });
 
   // ── artifact-notice ───────────────────────────────────────────────────
