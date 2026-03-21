@@ -79,13 +79,12 @@ describe('workspace conversation-switching workflow', () => {
     // Conv-a content should not be visible
     expect(screen.queryByText('Alpha response')).not.toBeInTheDocument();
 
-    // Subscription lifecycle: unsubscribe(old) → subscribe(new)
-    // Two unsubscribe frames are expected: the effect cleanup fires one,
-    // and the new effect body fires a second for the previous conversation.
+    // Subscription lifecycle: cleanup fires unsubscribe(old) → new effect subscribes(new).
+    // Exactly one unsubscribe for the previous conversation.
     const unsubA = ws.sentMessages.filter(
       (m) => m['type'] === 'unsubscribe' && m['conversationId'] === 'conv-a',
     );
-    expect(unsubA).toHaveLength(2);
+    expect(unsubA).toHaveLength(1);
 
     const subB = ws.sentMessages.filter(
       (m) => m['type'] === 'subscribe' && m['conversationId'] === 'conv-b',

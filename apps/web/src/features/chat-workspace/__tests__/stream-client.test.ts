@@ -641,6 +641,30 @@ describe('StreamClient', () => {
       assert.equal(parseErrors.length, 1, 'should route to onParseError');
     });
 
+    it('fires onParseError when subscribed has negative currentSeq', () => {
+      const parseErrors: Array<{ raw: string; error: string }> = [];
+      const subscribedCalls: Array<{ conversationId: string; currentSeq: number }> = [];
+      const client = createStreamClient(defaultOptions());
+      client.connect(
+        noopCallbacks({
+          onSubscribed: (cid, seq) =>
+            subscribedCalls.push({ conversationId: cid, currentSeq: seq }),
+          onParseError: (raw, error) => parseErrors.push({ raw, error }),
+        }),
+      );
+      assert.ok(lastFakeSocket);
+      lastFakeSocket.simulateOpen();
+
+      lastFakeSocket.simulateMessage({
+        type: 'subscribed',
+        conversationId: 'conv-1',
+        currentSeq: -1,
+      });
+
+      assert.equal(subscribedCalls.length, 0, 'should NOT dispatch to onSubscribed');
+      assert.equal(parseErrors.length, 1, 'negative currentSeq should be rejected');
+    });
+
     it('fires onParseError when stream-event has missing event field', () => {
       const parseErrors: Array<{ raw: string; error: string }> = [];
       const streamEvents: unknown[] = [];
@@ -727,6 +751,29 @@ describe('StreamClient', () => {
       assert.equal(parseErrors.length, 1, 'should route to onParseError');
     });
 
+    it('fires onParseError when session-terminated has empty-string reason', () => {
+      const parseErrors: Array<{ raw: string; error: string }> = [];
+      const sessionCalls: unknown[] = [];
+      const client = createStreamClient(defaultOptions());
+      client.connect(
+        noopCallbacks({
+          onSessionTerminated: (st, reason) => sessionCalls.push({ st, reason }),
+          onParseError: (raw, error) => parseErrors.push({ raw, error }),
+        }),
+      );
+      assert.ok(lastFakeSocket);
+      lastFakeSocket.simulateOpen();
+
+      lastFakeSocket.simulateMessage({
+        type: 'session-terminated',
+        state: 'expired',
+        reason: '',
+      });
+
+      assert.equal(sessionCalls.length, 0, 'empty reason should be rejected');
+      assert.equal(parseErrors.length, 1, 'should route to onParseError');
+    });
+
     it('fires onParseError when session-expiring-soon has non-string expiresAt', () => {
       const parseErrors: Array<{ raw: string; error: string }> = [];
       const expiryCalls: string[] = [];
@@ -743,6 +790,28 @@ describe('StreamClient', () => {
       lastFakeSocket.simulateMessage({ type: 'session-expiring-soon', expiresAt: 12345 });
 
       assert.equal(expiryCalls.length, 0, 'should NOT dispatch to onSessionExpiringSoon');
+      assert.equal(parseErrors.length, 1, 'should route to onParseError');
+    });
+
+    it('fires onParseError when session-expiring-soon has non-ISO expiresAt', () => {
+      const parseErrors: Array<{ raw: string; error: string }> = [];
+      const expiryCalls: string[] = [];
+      const client = createStreamClient(defaultOptions());
+      client.connect(
+        noopCallbacks({
+          onSessionExpiringSoon: (ea) => expiryCalls.push(ea),
+          onParseError: (raw, error) => parseErrors.push({ raw, error }),
+        }),
+      );
+      assert.ok(lastFakeSocket);
+      lastFakeSocket.simulateOpen();
+
+      lastFakeSocket.simulateMessage({
+        type: 'session-expiring-soon',
+        expiresAt: 'next-tuesday',
+      });
+
+      assert.equal(expiryCalls.length, 0, 'non-ISO expiresAt should be rejected');
       assert.equal(parseErrors.length, 1, 'should route to onParseError');
     });
 

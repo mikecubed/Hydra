@@ -81,7 +81,7 @@ export function computeContiguousResume(
   highestSeenSeq: number | undefined,
 ): number | undefined {
   if (highestSeenSeq === undefined) return base;
-  const start = (base ?? 0) + 1;
+  const start = base === undefined ? 0 : base + 1;
   if (start > highestSeenSeq) return base;
 
   // Find the lowest pending seq at or above start — the frontier cannot pass it.
@@ -134,10 +134,12 @@ export function applyStreamEventsToConversation(
 
   // Update pendingSeqs and highestSeenSeq from this batch.
   const nextPending = new Set(subscriptionState.pendingSeqs);
-  let highestSeenSeq = subscriptionState.highestSeenSeq ?? 0;
+  let highestSeenSeq = subscriptionState.highestSeenSeq;
 
   for (const event of events) {
-    if (event.seq > highestSeenSeq) highestSeenSeq = event.seq;
+    if (highestSeenSeq === undefined || event.seq > highestSeenSeq) {
+      highestSeenSeq = event.seq;
+    }
 
     // Skip stale events (already below reconciler high-water for this turn).
     if (isStaleEvent(event, subscriptionState.reconcilerState)) continue;
@@ -151,7 +153,7 @@ export function applyStreamEventsToConversation(
     }
   }
 
-  const nextHighestSeen = highestSeenSeq > 0 ? highestSeenSeq : undefined;
+  const nextHighestSeen = highestSeenSeq;
 
   // Advance the contiguous resume cursor through non-pending seqs.
   const serverResumeSeq = computeContiguousResume(

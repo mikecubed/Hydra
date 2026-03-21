@@ -40,7 +40,9 @@ describe('escapeForDisplay', () => {
     expect(escapeForDisplay('<b>"a & b"</b>')).toBe('&lt;b&gt;&quot;a &amp; b&quot;&lt;/b&gt;');
   });
 
-  it('does not double-escape already-escaped entities', () => {
+  it('escapes ampersands inside pre-escaped entities (double-escape)', () => {
+    // escapeForDisplay is not HTML-entity-aware — the '&' in '&amp;' is
+    // treated as a raw ampersand and escaped again, producing '&amp;amp;'.
     expect(escapeForDisplay('&amp;')).toBe('&amp;amp;');
   });
 });

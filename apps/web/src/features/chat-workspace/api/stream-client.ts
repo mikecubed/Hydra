@@ -130,7 +130,7 @@ const ServerStreamEvent = z.object({
 const ServerSubscribed = z.object({
   type: z.literal('subscribed'),
   conversationId: z.string().min(1),
-  currentSeq: z.number().int(),
+  currentSeq: z.number().int().nonnegative(),
 });
 
 const ServerUnsubscribed = z.object({
@@ -141,18 +141,18 @@ const ServerUnsubscribed = z.object({
 const ServerSessionTerminated = z.object({
   type: z.literal('session-terminated'),
   state: TerminalSessionState,
-  reason: z.string().optional(),
+  reason: z.string().min(1).optional(),
 });
 
 const ServerSessionExpiringSoon = z.object({
   type: z.literal('session-expiring-soon'),
-  expiresAt: z.string().min(1),
+  expiresAt: z.iso.datetime(),
 });
 
 const ServerDaemonUnavailable = z.object({ type: z.literal('daemon-unavailable') });
 const ServerDaemonRestored = z.object({ type: z.literal('daemon-restored') });
 
-// Error type routing — only used to confirm type field for SERVER_HANDLERS lookup.
+// Error: confirms type field then routes payload through gateway error parser.
 const ServerError = z.object({ type: z.literal('error') }).loose();
 
 // ─── Internals ──────────────────────────────────────────────────────────────
@@ -245,24 +245,31 @@ function handleError(msg: Record<string, unknown>, cb: StreamClientCallbacks): s
   return null;
 }
 
-type ServerMessageHandler = (
-  msg: Record<string, unknown>,
-  cb: StreamClientCallbacks,
-) => string | null;
+type MessageHandler = (msg: Record<string, unknown>, cb: StreamClientCallbacks) => string | null;
 
-const SERVER_HANDLERS: ReadonlyMap<string, ServerMessageHandler> = new Map<
-  string,
-  ServerMessageHandler
->([
-  ['stream-event', handleStreamEvent],
-  ['subscribed', handleSubscribed],
-  ['unsubscribed', handleUnsubscribed],
-  ['session-terminated', handleSessionTerminated],
-  ['session-expiring-soon', handleSessionExpiringSoon],
-  ['daemon-unavailable', handleDaemonUnavailable],
-  ['daemon-restored', handleDaemonRestored],
-  ['error', handleError],
-]);
+/** Explicit type→handler dispatcher. Returns null for unknown types. */
+function resolveHandler(messageType: string): MessageHandler | null {
+  switch (messageType) {
+    case 'stream-event':
+      return handleStreamEvent;
+    case 'subscribed':
+      return handleSubscribed;
+    case 'unsubscribed':
+      return handleUnsubscribed;
+    case 'session-terminated':
+      return handleSessionTerminated;
+    case 'session-expiring-soon':
+      return handleSessionExpiringSoon;
+    case 'daemon-unavailable':
+      return handleDaemonUnavailable;
+    case 'daemon-restored':
+      return handleDaemonRestored;
+    case 'error':
+      return handleError;
+    default:
+      return null;
+  }
+}
 
 /** Parse, validate, and dispatch a single inbound server message. */
 function dispatchServerMessage(raw: string, callbacks: StreamClientCallbacks): void {
@@ -279,15 +286,16 @@ function dispatchServerMessage(raw: string, callbacks: StreamClientCallbacks): v
     return;
   }
 
-  const handler = SERVER_HANDLERS.get(parsed['type']);
+  const messageType = parsed['type'];
+  const handler = resolveHandler(messageType);
   if (!handler) {
-    callbacks.onParseError?.(raw, `Message has unknown type: "${parsed['type']}"`);
+    callbacks.onParseError?.(raw, `Message has unknown type: "${messageType}"`);
     return;
   }
 
   const validationError = handler(parsed, callbacks);
   if (validationError !== null) {
-    callbacks.onParseError?.(raw, `Invalid "${parsed['type']}" message: ${validationError}`);
+    callbacks.onParseError?.(raw, `Invalid "${messageType}" message: ${validationError}`);
   }
 }
 
