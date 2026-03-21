@@ -7,7 +7,6 @@ import {
   useState,
   useSyncExternalStore,
   type JSX,
-  type RefObject,
 } from 'react';
 import { WorkspaceLayout } from '../features/chat-workspace/components/workspace-layout.tsx';
 import { ComposerPanel } from '../features/chat-workspace/components/composer-panel.tsx';
@@ -19,10 +18,9 @@ import {
   type StreamClientCallbacks,
 } from '../features/chat-workspace/api/stream-client.ts';
 import {
-  applyStreamEventsToConversation,
+  buildStreamCallbacks,
   type ContentBlockState,
   createAndSubmitDraft,
-  createStreamSubscriptionState,
   createWorkspaceStore,
   submitComposerDraft,
   type DraftSubmitState,
@@ -55,72 +53,119 @@ function useWorkspaceState(store: WorkspaceStore) {
 
 // ─── Stream subscription hook ───────────────────────────────────────────────
 
+const RECONNECT_BASE_DELAY_MS = 1_000;
+const RECONNECT_MAX_DELAY_MS = 30_000;
+const RECONNECT_MAX_ATTEMPTS = 10;
+
 export interface StreamSubscriptionDeps {
   readonly store: WorkspaceStore;
   readonly streamClient: StreamClient;
   readonly activeConversationId: string | null;
 }
 
-/** Build StreamClient callbacks that route events into the workspace store. */
-function buildStreamCallbacks(
-  store: WorkspaceStore,
-  subStateRef: RefObject<StreamSubscriptionState>,
-): StreamClientCallbacks {
-  return {
-    onStreamEvent(conversationId, event) {
-      subStateRef.current = applyStreamEventsToConversation(
-        store,
-        conversationId,
-        [event],
-        subStateRef.current,
-      );
-    },
-    onOpen() {
-      store.dispatch({ type: 'connection/merge', patch: { transportStatus: 'live' } });
-    },
-    onClose() {
-      store.dispatch({ type: 'connection/merge', patch: { transportStatus: 'disconnected' } });
-    },
-    onSocketError() {
-      store.dispatch({ type: 'connection/merge', patch: { transportStatus: 'reconnecting' } });
-    },
-    onDaemonUnavailable() {
-      store.dispatch({ type: 'connection/merge', patch: { daemonStatus: 'unavailable' } });
-    },
-    onDaemonRestored() {
-      store.dispatch({ type: 'connection/merge', patch: { daemonStatus: 'healthy' } });
-    },
-    onSessionTerminated(sessionState) {
-      const status = sessionState === 'logged-out' ? 'invalidated' : sessionState;
-      store.dispatch({ type: 'connection/merge', patch: { sessionStatus: status } });
-    },
-    onSessionExpiringSoon() {
-      store.dispatch({ type: 'connection/merge', patch: { sessionStatus: 'expiring-soon' } });
-    },
-  };
-}
-
 /**
  * Manages the StreamClient lifecycle scoped to the active conversation.
  *
  * - Connects the WebSocket on mount, closes on unmount.
- * - Subscribes to the active conversation; unsubscribes on selection change.
- * - Routes stream events through the reconciler into the store.
- * - Resets reconciler state when the active conversation changes.
+ * - Subscribes to the active conversation with resume capability
+ *   (passes lastAcknowledgedSeq to replay missed events).
+ * - Per-conversation reconciler state persists across conversation switches.
+ * - Acknowledges processed events for server-side buffer cleanup.
+ * - Reconnects with exponential backoff on unexpected socket close.
  */
+// eslint-disable-next-line max-lines-per-function
 function useStreamSubscription({
   store,
   streamClient,
   activeConversationId,
 }: StreamSubscriptionDeps): void {
-  const subStateRef = useRef<StreamSubscriptionState>(createStreamSubscriptionState());
+  // Per-conversation reconciler + seq state — survives conversation switches
+  const stateMapRef = useRef<Map<string, StreamSubscriptionState>>(new Map());
   const activeIdRef = useRef<string | null>(null);
+  const intentionalCloseRef = useRef(false);
+  const reconnectTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const reconnectAttemptRef = useRef(0);
+  const callbacksRef = useRef<StreamClientCallbacks | null>(null);
 
   // Connect / disconnect lifecycle
   useEffect(() => {
-    const callbacks = buildStreamCallbacks(store, subStateRef);
+    intentionalCloseRef.current = false;
+
+    function clearReconnectTimer(): void {
+      if (reconnectTimerRef.current != null) {
+        clearTimeout(reconnectTimerRef.current);
+        reconnectTimerRef.current = null;
+      }
+    }
+
+    function scheduleReconnect(): void {
+      clearReconnectTimer();
+
+      if (reconnectAttemptRef.current >= RECONNECT_MAX_ATTEMPTS) {
+        store.dispatch({
+          type: 'connection/merge',
+          patch: { transportStatus: 'disconnected' },
+        });
+        console.warn('[stream] Max reconnect attempts reached');
+        return;
+      }
+
+      const delay = Math.min(
+        RECONNECT_BASE_DELAY_MS * 2 ** reconnectAttemptRef.current,
+        RECONNECT_MAX_DELAY_MS,
+      );
+      reconnectAttemptRef.current += 1;
+
+      store.dispatch({
+        type: 'connection/merge',
+        patch: { transportStatus: 'reconnecting' },
+      });
+
+      reconnectTimerRef.current = setTimeout(() => {
+        const cbs = callbacksRef.current;
+        if (cbs == null) return;
+
+        try {
+          streamClient.connect(cbs);
+
+          const activeId = activeIdRef.current;
+          if (activeId != null) {
+            const convState = stateMapRef.current.get(activeId);
+            streamClient.subscribe(activeId, convState?.lastAcknowledgedSeq);
+          }
+        } catch (err: unknown) {
+          console.warn('[stream] Reconnect attempt failed:', err);
+          scheduleReconnect();
+        }
+      }, delay);
+    }
+
+    const callbacks = buildStreamCallbacks(
+      store,
+      stateMapRef.current,
+      (conversationId, seq) => {
+        streamClient.ack(conversationId, seq);
+      },
+      {
+        onReconnectNeeded() {
+          if (!intentionalCloseRef.current) {
+            scheduleReconnect();
+          }
+        },
+        onConnectionEstablished() {
+          reconnectAttemptRef.current = 0;
+          clearReconnectTimer();
+        },
+      },
+    );
+
+    callbacksRef.current = callbacks;
     streamClient.connect(callbacks);
+
     return () => {
+      intentionalCloseRef.current = true;
+      clearReconnectTimer();
+      callbacksRef.current = null;
       streamClient.close();
     };
   }, [store, streamClient]);
@@ -133,20 +178,17 @@ function useStreamSubscription({
     if (previousId != null && previousId !== activeConversationId) {
       try {
         streamClient.unsubscribe(previousId);
-      } catch {
-        /* closed socket */
+      } catch (err: unknown) {
+        console.warn(`[stream] Failed to unsubscribe from ${previousId}:`, err);
       }
     }
 
-    if (activeConversationId !== previousId) {
-      subStateRef.current = createStreamSubscriptionState();
-    }
-
     if (activeConversationId != null) {
+      const convState = stateMapRef.current.get(activeConversationId);
       try {
-        streamClient.subscribe(activeConversationId);
-      } catch {
-        /* not yet connected */
+        streamClient.subscribe(activeConversationId, convState?.lastAcknowledgedSeq);
+      } catch (err: unknown) {
+        console.warn(`[stream] Failed to subscribe to ${activeConversationId}:`, err);
       }
     }
 
@@ -154,8 +196,8 @@ function useStreamSubscription({
       if (activeConversationId != null) {
         try {
           streamClient.unsubscribe(activeConversationId);
-        } catch {
-          /* cleanup */
+        } catch (err: unknown) {
+          console.warn(`[stream] Cleanup unsubscribe failed for ${activeConversationId}:`, err);
         }
       }
     };
@@ -376,7 +418,6 @@ function useComposerProps(
   state: WorkspaceState,
   isLoadingConversations: boolean,
   clearConversationError: () => void,
-  refreshTranscript: () => void,
   reloadConversationList: () => Promise<void>,
 ) {
   const [createDraftText, setCreateDraftText] = useState('');
@@ -420,7 +461,6 @@ function useComposerProps(
           if (result.ok) {
             setCreateDraftText('');
             clearConversationError();
-            refreshTranscript();
             void reloadConversationList();
           }
         })
@@ -435,7 +475,6 @@ function useComposerProps(
 
     void submitComposerDraft({ store, client }).then((result) => {
       if (result.ok) {
-        refreshTranscript();
         void reloadConversationList();
       }
     });
@@ -444,7 +483,6 @@ function useComposerProps(
     client,
     createDraftText,
     isLoadingConversations,
-    refreshTranscript,
     reloadConversationList,
     store,
   ]);
@@ -513,7 +551,6 @@ export function WorkspaceRoute(): JSX.Element {
     state,
     isLoadingConversations,
     clearConversationError,
-    retryActiveTranscript,
     reloadConversationList,
   );
 

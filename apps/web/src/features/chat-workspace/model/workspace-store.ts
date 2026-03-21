@@ -47,9 +47,10 @@ export type { SubmitDraftDeps, SubmitPort, SubmitResult } from './submit-flow.ts
 // ─── Re-export: stream subscription ─────────────────────────────────────────
 export {
   applyStreamEventsToConversation,
+  buildStreamCallbacks,
   createStreamSubscriptionState,
 } from './stream-subscription.ts';
-export type { StreamSubscriptionState } from './stream-subscription.ts';
+export type { StreamLifecycleHooks, StreamSubscriptionState } from './stream-subscription.ts';
 
 // ─── Store factory (thin wrapper over reducer) ──────────────────────────────
 

@@ -242,7 +242,7 @@ describe('workspace conversation browsing', () => {
   });
 
   // eslint-disable-next-line max-lines-per-function
-  it('refreshes transcript after create-mode submit so the first message is visible', async () => {
+  it('selects created conversation and refreshes list after create-mode submit', async () => {
     const existingList: ListConversationsResponse = {
       conversations: [
         {
@@ -282,25 +282,7 @@ describe('workspace conversation browsing', () => {
       streamId: 'stream-new',
     };
 
-    const firstTurnEntry = {
-      turns: [
-        {
-          id: 'turn-first',
-          conversationId: 'conv-created',
-          position: 1,
-          kind: 'operator',
-          attribution: { type: 'operator', label: 'Operator' },
-          instruction: 'Hello Hydra',
-          response: '',
-          status: 'submitted',
-          createdAt: '2026-03-21T00:00:01.000Z',
-        },
-      ],
-      totalCount: 1,
-      hasMore: false,
-    };
-
-    let historyCallCount = 0;
+    let submitCalled = false;
     let listCallCount = 0;
 
     installFetchStub((url, init) => {
@@ -328,17 +310,13 @@ describe('workspace conversation browsing', () => {
       }
 
       if (url === '/conversations/conv-created/turns' && init?.method === 'POST') {
+        submitCalled = true;
         return jsonResponse(submitResponse);
       }
 
       if (url === '/conversations/conv-created/turns?limit=50') {
-        historyCallCount++;
-        // First load races with submit and may return empty;
-        // the post-submit refresh should fetch again with the turn present.
-        if (historyCallCount <= 1) {
-          return jsonResponse(emptyHistoryResponse);
-        }
-        return jsonResponse(firstTurnEntry);
+        // Initial load — transcript updates now arrive via WS streaming.
+        return jsonResponse(emptyHistoryResponse);
       }
 
       throw new Error(`Unexpected fetch input: ${url}`);
@@ -361,11 +339,16 @@ describe('workspace conversation browsing', () => {
     // The created conversation should appear and be selected
     expect(await screen.findByRole('button', { name: /created conversation/i })).toBeTruthy();
 
-    // The transcript should eventually show the submitted instruction
-    expect(await screen.findByText('Hello Hydra')).toBeTruthy();
+    // Submit POST was made; transcript content now arrives via WS streaming
+    // (not via REST refresh) to prevent in-flight state clobber.
+    await vi.waitFor(() => {
+      expect(submitCalled).toBe(true);
+    });
 
-    // The post-submit refresh must have triggered a second history load
-    expect(historyCallCount).toBeGreaterThanOrEqual(2);
+    // Conversation list should have refreshed
+    await vi.waitFor(() => {
+      expect(listCallCount).toBeGreaterThanOrEqual(2);
+    });
   });
 
   it('reloads the conversation list after create so pre-existing conversations appear', async () => {
