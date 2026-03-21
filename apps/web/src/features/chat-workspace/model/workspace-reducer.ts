@@ -57,6 +57,7 @@ function createConversationViewState(
     entries: [],
     hasMoreHistory: false,
     loadState: 'idle',
+    historyLoaded: false,
     controlState: {
       canSubmit: true,
       submissionPolicyLabel: DEFAULT_SUBMISSION_POLICY_LABEL,
@@ -337,6 +338,68 @@ function applyConversationEntries(
   };
 }
 
+/**
+ * Merge authoritative REST history into the conversation, preserving any
+ * stream-owned entries for turns not present in the REST response.
+ *
+ * REST entries form the base (authoritative history). Stream entries whose
+ * `turnId` does NOT appear in the REST set are appended at the end — these
+ * represent in-flight or recently-started turns the server hasn't persisted yet.
+ *
+ * Sets `historyLoaded: true` so the transcript loader knows not to re-fetch.
+ */
+function applyMergeHistory(
+  state: WorkspaceState,
+  conversationId: string,
+  restEntries: readonly TranscriptEntryState[],
+  hasMoreHistory: boolean,
+): WorkspaceState {
+  const current = ensureConversation(state.conversations, conversationId);
+  const nextConversations = new Map(state.conversations);
+
+  // Build a set of turnIds covered by REST history
+  const restTurnIds = new Set<string | null>();
+  for (const entry of restEntries) {
+    restTurnIds.add(entry.turnId);
+  }
+  // Also index by entryId for non-turn entries (activity-group, system-status)
+  const restEntryIds = new Set<string>();
+  for (const entry of restEntries) {
+    restEntryIds.add(entry.entryId);
+  }
+
+  // Collect stream-only entries: entries currently in state whose turnId
+  // (for kind='turn') or entryId is not covered by the REST response.
+  const streamOnly: TranscriptEntryState[] = [];
+  for (const entry of current.entries) {
+    if (entry.kind === 'turn') {
+      if (!restTurnIds.has(entry.turnId)) {
+        streamOnly.push(entry);
+      }
+    } else {
+      // Non-turn entries (activity-group, system-status) — keep if not in REST
+      if (!restEntryIds.has(entry.entryId)) {
+        streamOnly.push(entry);
+      }
+    }
+  }
+
+  const merged = [...restEntries, ...streamOnly];
+
+  nextConversations.set(conversationId, {
+    ...current,
+    entries: merged,
+    hasMoreHistory,
+    loadState: 'ready',
+    historyLoaded: true,
+  });
+  return {
+    ...state,
+    conversationOrder: withConversationInOrder(state.conversationOrder, conversationId),
+    conversations: nextConversations,
+  };
+}
+
 function applyDraftText(
   state: WorkspaceState,
   conversationId: string,
@@ -409,6 +472,8 @@ export function reduceWorkspaceState(
         action.entries,
         action.hasMoreHistory,
       );
+    case 'conversation/merge-history':
+      return applyMergeHistory(state, action.conversationId, action.entries, action.hasMoreHistory);
     case 'draft/set-text':
       return applyDraftText(state, action.conversationId, action.draftText);
     case 'draft/set-submit-state':

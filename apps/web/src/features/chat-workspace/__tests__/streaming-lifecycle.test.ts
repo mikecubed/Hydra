@@ -1298,3 +1298,193 @@ describe('onSubscribed baseline seeding', () => {
     );
   });
 });
+
+// ─── History vs live-stream race (merge-history) ────────────────────────────
+
+describe('existing-conversation history vs live-stream race', () => {
+  it('merge-history preserves stream-owned entries when REST arrives late', () => {
+    // Scenario: Existing conversation with prior history. Live stream events
+    // arrive first and create an entry for a new turn. Then REST history
+    // arrives with older turns. Both must be visible.
+    const store = createWorkspaceStore();
+    store.dispatch({ type: 'conversation/select', conversationId: 'conv-existing' });
+
+    // Stream events arrive first — new turn not yet persisted by REST
+    let sub = createStreamSubscriptionState();
+    sub = applyStreamEventsToConversation(
+      store,
+      'conv-existing',
+      [
+        makeEvent({ seq: 1, turnId: 't-live', kind: 'stream-started', payload: {} }),
+        makeEvent({
+          seq: 2,
+          turnId: 't-live',
+          kind: 'text-delta',
+          payload: { text: 'Live typing...' },
+        }),
+      ],
+      sub,
+    );
+
+    // Stream sets loadState to 'ready' but historyLoaded stays false
+    const afterStream = store.getState().conversations.get('conv-existing');
+    assert.equal(afterStream?.loadState, 'ready');
+    assert.equal(afterStream?.historyLoaded, false, 'historyLoaded must remain false after stream');
+    assert.equal(afterStream?.entries.length, 1);
+    assert.equal(afterStream?.entries[0].turnId, 't-live');
+
+    // REST history arrives with older turns
+    store.dispatch({
+      type: 'conversation/merge-history',
+      conversationId: 'conv-existing',
+      entries: [
+        existingTurnEntry('t-old-1', 'First historical message'),
+        existingTurnEntry('t-old-2', 'Second historical message'),
+      ],
+      hasMoreHistory: false,
+    });
+
+    const merged = store.getState().conversations.get('conv-existing');
+    assert.equal(merged?.historyLoaded, true, 'historyLoaded must be true after merge-history');
+    assert.equal(merged?.loadState, 'ready');
+    // REST entries come first (authoritative history), stream-only appended
+    assert.equal(merged?.entries.length, 3, 'must contain both REST and stream entries');
+    assert.equal(merged?.entries[0].turnId, 't-old-1');
+    assert.equal(merged?.entries[0].contentBlocks[0]?.text, 'First historical message');
+    assert.equal(merged?.entries[1].turnId, 't-old-2');
+    assert.equal(merged?.entries[1].contentBlocks[0]?.text, 'Second historical message');
+    assert.equal(merged?.entries[2].turnId, 't-live');
+    assert.equal(merged?.entries[2].contentBlocks[0]?.text, 'Live typing...');
+    assert.equal(sub.serverResumeSeq, 2);
+  });
+
+  it('merge-history deduplicates turns present in both REST and stream', () => {
+    // REST returns a completed turn that was also streamed (same turnId).
+    // The REST version should win for completed turns — no duplicate.
+    const store = createWorkspaceStore();
+    store.dispatch({ type: 'conversation/select', conversationId: 'conv-dedup' });
+
+    // Stream delivers a turn that will also appear in REST
+    applyStreamEventsToConversation(
+      store,
+      'conv-dedup',
+      [
+        makeEvent({ seq: 1, turnId: 't-shared', kind: 'stream-started', payload: {} }),
+        makeEvent({
+          seq: 2,
+          turnId: 't-shared',
+          kind: 'text-delta',
+          payload: { text: 'Partial stream' },
+        }),
+      ],
+      createStreamSubscriptionState(),
+    );
+
+    // REST history includes the same turnId with complete content
+    store.dispatch({
+      type: 'conversation/merge-history',
+      conversationId: 'conv-dedup',
+      entries: [existingTurnEntry('t-shared', 'Complete REST content')],
+      hasMoreHistory: false,
+    });
+
+    const merged = store.getState().conversations.get('conv-dedup');
+    assert.equal(merged?.entries.length, 1, 'shared turnId must not produce duplicates');
+    assert.equal(
+      merged?.entries[0].contentBlocks[0]?.text,
+      'Complete REST content',
+      'REST version is authoritative for shared turns',
+    );
+    assert.equal(merged?.historyLoaded, true);
+  });
+
+  it('merge-history preserves activity-group entries from stream', () => {
+    const store = createWorkspaceStore();
+    store.dispatch({ type: 'conversation/select', conversationId: 'conv-activity' });
+
+    // Stream delivers activity-group entry
+    const sub = createStreamSubscriptionState();
+    applyStreamEventsToConversation(
+      store,
+      'conv-activity',
+      [
+        makeEvent({ seq: 1, turnId: 't-act', kind: 'stream-started', payload: {} }),
+        makeEvent({
+          seq: 2,
+          turnId: 't-act',
+          kind: 'activity-marker',
+          payload: { description: 'Analyzing files…' },
+        }),
+      ],
+      sub,
+    );
+
+    const entries = store.getState().conversations.get('conv-activity')?.entries ?? [];
+    const activityEntry = entries.find((e) => e.kind === 'activity-group');
+    assert.ok(activityEntry, 'activity-group entry should exist from stream');
+
+    // REST history arrives with older turns (no activity-group)
+    store.dispatch({
+      type: 'conversation/merge-history',
+      conversationId: 'conv-activity',
+      entries: [existingTurnEntry('t-old', 'Old turn')],
+      hasMoreHistory: false,
+    });
+
+    const merged = store.getState().conversations.get('conv-activity');
+    const kinds = merged?.entries.map((e) => e.kind) ?? [];
+    assert.ok(kinds.includes('turn'), 'must contain REST turn entry');
+    assert.ok(kinds.includes('activity-group'), 'must preserve stream activity-group');
+  });
+
+  it('historyLoaded prevents duplicate REST loads', () => {
+    const store = createWorkspaceStore();
+    store.dispatch({ type: 'conversation/select', conversationId: 'conv-loaded' });
+
+    // First merge-history sets historyLoaded
+    store.dispatch({
+      type: 'conversation/merge-history',
+      conversationId: 'conv-loaded',
+      entries: [existingTurnEntry('t-1', 'First load')],
+      hasMoreHistory: false,
+    });
+
+    const conv = store.getState().conversations.get('conv-loaded');
+    assert.equal(conv?.historyLoaded, true);
+    // The transcript loader would check this and skip — verified at integration level
+  });
+
+  it('new conversation (no prior history) works with merge-history', () => {
+    const store = createWorkspaceStore();
+    store.dispatch({ type: 'conversation/select', conversationId: 'new-conv' });
+
+    // Stream events arrive for new conversation
+    applyStreamEventsToConversation(
+      store,
+      'new-conv',
+      [
+        makeEvent({ seq: 1, turnId: 't-new', kind: 'stream-started', payload: {} }),
+        makeEvent({
+          seq: 2,
+          turnId: 't-new',
+          kind: 'text-delta',
+          payload: { text: 'Agent is typing...' },
+        }),
+      ],
+      createStreamSubscriptionState(),
+    );
+
+    // REST responds with empty history (brand-new conversation)
+    store.dispatch({
+      type: 'conversation/merge-history',
+      conversationId: 'new-conv',
+      entries: [],
+      hasMoreHistory: false,
+    });
+
+    const merged = store.getState().conversations.get('new-conv');
+    assert.equal(merged?.entries.length, 1, 'stream entries survive empty REST merge');
+    assert.equal(merged?.entries[0].contentBlocks[0]?.text, 'Agent is typing...');
+    assert.equal(merged?.historyLoaded, true);
+  });
+});

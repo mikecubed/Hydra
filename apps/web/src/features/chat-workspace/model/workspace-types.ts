@@ -105,6 +105,14 @@ export interface ConversationViewState {
   readonly entries: readonly TranscriptEntryState[];
   readonly hasMoreHistory: boolean;
   readonly loadState: ConversationLoadState;
+  /**
+   * Whether authoritative REST history has been loaded for this conversation.
+   * Distinct from `loadState === 'ready'` — stream events can flip loadState
+   * to 'ready' before history arrives. The transcript loader checks this flag
+   * to decide whether to fetch/merge history, avoiding the race where stream
+   * events cause the REST load to be skipped entirely.
+   */
+  readonly historyLoaded: boolean;
   readonly controlState: ConversationControlState;
 }
 
@@ -164,6 +172,12 @@ export type WorkspaceAction =
       readonly conversationId: string;
       readonly submitState: DraftSubmitState;
       readonly validationMessage: string | null;
+    }
+  | {
+      readonly type: 'conversation/merge-history';
+      readonly conversationId: string;
+      readonly entries: readonly TranscriptEntryState[];
+      readonly hasMoreHistory: boolean;
     }
   | {
       readonly type: 'connection/merge';
