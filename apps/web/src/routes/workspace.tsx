@@ -1,15 +1,32 @@
 import type { Conversation, Turn } from '@hydra/web-contracts';
-import { useCallback, useEffect, useMemo, useState, useSyncExternalStore, type JSX } from 'react';
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  useSyncExternalStore,
+  type JSX,
+  type RefObject,
+} from 'react';
 import { WorkspaceLayout } from '../features/chat-workspace/components/workspace-layout.tsx';
 import { ComposerPanel } from '../features/chat-workspace/components/composer-panel.tsx';
 import { createGatewayClient } from '../features/chat-workspace/api/gateway-client.ts';
 import type { GatewayClient } from '../features/chat-workspace/api/gateway-client.ts';
 import {
+  createStreamClient,
+  type StreamClient,
+  type StreamClientCallbacks,
+} from '../features/chat-workspace/api/stream-client.ts';
+import {
+  applyStreamEventsToConversation,
   type ContentBlockState,
   createAndSubmitDraft,
+  createStreamSubscriptionState,
   createWorkspaceStore,
   submitComposerDraft,
   type DraftSubmitState,
+  type StreamSubscriptionState,
   type TranscriptEntryState,
   type WorkspaceConversationRecord,
   type WorkspaceState,
@@ -34,6 +51,115 @@ function useWorkspaceState(store: WorkspaceStore) {
     () => store.getState(),
     () => store.getState(),
   );
+}
+
+// ─── Stream subscription hook ───────────────────────────────────────────────
+
+export interface StreamSubscriptionDeps {
+  readonly store: WorkspaceStore;
+  readonly streamClient: StreamClient;
+  readonly activeConversationId: string | null;
+}
+
+/** Build StreamClient callbacks that route events into the workspace store. */
+function buildStreamCallbacks(
+  store: WorkspaceStore,
+  subStateRef: RefObject<StreamSubscriptionState>,
+): StreamClientCallbacks {
+  return {
+    onStreamEvent(conversationId, event) {
+      subStateRef.current = applyStreamEventsToConversation(
+        store,
+        conversationId,
+        [event],
+        subStateRef.current,
+      );
+    },
+    onOpen() {
+      store.dispatch({ type: 'connection/merge', patch: { transportStatus: 'live' } });
+    },
+    onClose() {
+      store.dispatch({ type: 'connection/merge', patch: { transportStatus: 'disconnected' } });
+    },
+    onSocketError() {
+      store.dispatch({ type: 'connection/merge', patch: { transportStatus: 'reconnecting' } });
+    },
+    onDaemonUnavailable() {
+      store.dispatch({ type: 'connection/merge', patch: { daemonStatus: 'unavailable' } });
+    },
+    onDaemonRestored() {
+      store.dispatch({ type: 'connection/merge', patch: { daemonStatus: 'healthy' } });
+    },
+    onSessionTerminated(sessionState) {
+      const status = sessionState === 'logged-out' ? 'invalidated' : sessionState;
+      store.dispatch({ type: 'connection/merge', patch: { sessionStatus: status } });
+    },
+    onSessionExpiringSoon() {
+      store.dispatch({ type: 'connection/merge', patch: { sessionStatus: 'expiring-soon' } });
+    },
+  };
+}
+
+/**
+ * Manages the StreamClient lifecycle scoped to the active conversation.
+ *
+ * - Connects the WebSocket on mount, closes on unmount.
+ * - Subscribes to the active conversation; unsubscribes on selection change.
+ * - Routes stream events through the reconciler into the store.
+ * - Resets reconciler state when the active conversation changes.
+ */
+function useStreamSubscription({
+  store,
+  streamClient,
+  activeConversationId,
+}: StreamSubscriptionDeps): void {
+  const subStateRef = useRef<StreamSubscriptionState>(createStreamSubscriptionState());
+  const activeIdRef = useRef<string | null>(null);
+
+  // Connect / disconnect lifecycle
+  useEffect(() => {
+    const callbacks = buildStreamCallbacks(store, subStateRef);
+    streamClient.connect(callbacks);
+    return () => {
+      streamClient.close();
+    };
+  }, [store, streamClient]);
+
+  // Subscribe / unsubscribe scoped to active conversation
+  useEffect(() => {
+    const previousId = activeIdRef.current;
+    activeIdRef.current = activeConversationId;
+
+    if (previousId != null && previousId !== activeConversationId) {
+      try {
+        streamClient.unsubscribe(previousId);
+      } catch {
+        /* closed socket */
+      }
+    }
+
+    if (activeConversationId !== previousId) {
+      subStateRef.current = createStreamSubscriptionState();
+    }
+
+    if (activeConversationId != null) {
+      try {
+        streamClient.subscribe(activeConversationId);
+      } catch {
+        /* not yet connected */
+      }
+    }
+
+    return () => {
+      if (activeConversationId != null) {
+        try {
+          streamClient.unsubscribe(activeConversationId);
+        } catch {
+          /* cleanup */
+        }
+      }
+    };
+  }, [activeConversationId, streamClient]);
 }
 
 function toWorkspaceConversationRecord(conversation: Conversation): WorkspaceConversationRecord {
@@ -358,6 +484,13 @@ export function WorkspaceRoute(): JSX.Element {
   const [store] = useState(() => createWorkspaceStore());
   const state = useWorkspaceState(store);
   const client = useMemo(() => createGatewayClient({ baseUrl: '' }), []);
+  const wsStreamClient = useMemo(
+    () =>
+      createStreamClient({
+        baseUrl: `${location.protocol === 'https:' ? 'wss:' : 'ws:'}//${location.host}/ws`,
+      }),
+    [],
+  );
   const {
     isLoadingConversations,
     conversationErrorMessage,
@@ -365,6 +498,14 @@ export function WorkspaceRoute(): JSX.Element {
     reloadConversationList,
   } = useConversationListLoader(store, client);
   const retryActiveTranscript = useTranscriptLoader(store, client, state.activeConversationId);
+
+  // Wire live stream subscription scoped to active conversation
+  useStreamSubscription({
+    store,
+    streamClient: wsStreamClient,
+    activeConversationId: state.activeConversationId,
+  });
+
   const activeConversation = selectActiveConversation(state);
   const composer = useComposerProps(
     store,

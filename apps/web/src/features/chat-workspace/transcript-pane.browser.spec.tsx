@@ -648,3 +648,56 @@ describe('TranscriptPane', () => {
     expect(historyCallCount).toBeGreaterThanOrEqual(2);
   });
 });
+
+// ─── TranscriptTurn streaming ───────────────────────────────────────────────
+
+describe('TranscriptTurn streaming', () => {
+  it('renders a streaming indicator for entries with status "streaming"', () => {
+    const entry = createEntry({ status: 'streaming' });
+
+    render(<TranscriptTurn entry={entry} />);
+
+    expect(screen.getByText('streaming…')).toBeTruthy();
+    const article = screen.getByRole('article');
+    expect(article.getAttribute('data-streaming')).toBe('true');
+  });
+
+  it('does not render streaming indicator for completed entries', () => {
+    const entry = createEntry({ status: 'completed' });
+
+    render(<TranscriptTurn entry={entry} />);
+
+    expect(screen.queryByText('streaming…')).toBeNull();
+    const article = screen.getByRole('article');
+    expect(article.getAttribute('data-streaming')).toBeNull();
+  });
+
+  it('renders status-kind content blocks with italic styling', () => {
+    const entry = createEntry({
+      contentBlocks: [
+        { blockId: 'blk-status', kind: 'status', text: 'Agent is thinking…', metadata: null },
+      ],
+    });
+
+    render(<TranscriptTurn entry={entry} />);
+
+    const el = screen.getByText('Agent is thinking…');
+    expect(el).toBeTruthy();
+    expect(el.tagName).toBe('P');
+  });
+
+  it('renders text blocks alongside status blocks in order', () => {
+    const entry = createEntry({
+      status: 'streaming',
+      contentBlocks: [
+        textBlock('Partial response', 'blk-text'),
+        { blockId: 'blk-status', kind: 'status', text: 'Processing…', metadata: null },
+      ],
+    });
+
+    render(<TranscriptTurn entry={entry} />);
+
+    expect(screen.getByText('Partial response')).toBeTruthy();
+    expect(screen.getByText('Processing…')).toBeTruthy();
+  });
+});

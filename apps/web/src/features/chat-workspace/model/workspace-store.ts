@@ -42,7 +42,14 @@ export { createInitialWorkspaceState, reduceWorkspaceState } from './workspace-r
 
 // ─── Re-export: submit orchestration ────────────────────────────────────────
 export { submitComposerDraft, createAndSubmitDraft } from './submit-flow.ts';
-export type { SubmitDraftDeps, SubmitResult } from './submit-flow.ts';
+export type { SubmitDraftDeps, SubmitPort, SubmitResult } from './submit-flow.ts';
+
+// ─── Re-export: stream subscription ─────────────────────────────────────────
+export {
+  applyStreamEventsToConversation,
+  createStreamSubscriptionState,
+} from './stream-subscription.ts';
+export type { StreamSubscriptionState } from './stream-subscription.ts';
 
 // ─── Store factory (thin wrapper over reducer) ──────────────────────────────
 

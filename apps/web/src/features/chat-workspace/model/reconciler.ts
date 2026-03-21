@@ -332,6 +332,11 @@ function applySystemNotice(
 
 // ─── Event dispatch ─────────────────────────────────────────────────────────
 
+/** Compile-time exhaustiveness check. Throws at runtime if reached. */
+function assertNeverEventKind(kind: never): never {
+  throw new Error(`Unhandled stream event kind: ${String(kind)}`);
+}
+
 function applyEvent(
   entries: readonly TranscriptEntryState[],
   event: StreamEvent,
@@ -364,7 +369,7 @@ function applyEvent(
     case 'checkpoint':
       return entries;
     default:
-      return entries;
+      return assertNeverEventKind(event.kind);
   }
 }
 
