@@ -1,15 +1,30 @@
 import type { Conversation, Turn } from '@hydra/web-contracts';
-import { useCallback, useEffect, useMemo, useState, useSyncExternalStore, type JSX } from 'react';
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  useSyncExternalStore,
+  type JSX,
+} from 'react';
 import { WorkspaceLayout } from '../features/chat-workspace/components/workspace-layout.tsx';
 import { ComposerPanel } from '../features/chat-workspace/components/composer-panel.tsx';
 import { createGatewayClient } from '../features/chat-workspace/api/gateway-client.ts';
 import type { GatewayClient } from '../features/chat-workspace/api/gateway-client.ts';
 import {
+  createStreamClient,
+  type StreamClient,
+  type StreamClientCallbacks,
+} from '../features/chat-workspace/api/stream-client.ts';
+import {
+  buildStreamCallbacks,
   type ContentBlockState,
   createAndSubmitDraft,
   createWorkspaceStore,
   submitComposerDraft,
   type DraftSubmitState,
+  type StreamSubscriptionState,
   type TranscriptEntryState,
   type WorkspaceConversationRecord,
   type WorkspaceState,
@@ -34,6 +49,159 @@ function useWorkspaceState(store: WorkspaceStore) {
     () => store.getState(),
     () => store.getState(),
   );
+}
+
+// ─── Stream subscription hook ───────────────────────────────────────────────
+
+const RECONNECT_BASE_DELAY_MS = 1_000;
+const RECONNECT_MAX_DELAY_MS = 30_000;
+const RECONNECT_MAX_ATTEMPTS = 10;
+
+export interface StreamSubscriptionDeps {
+  readonly store: WorkspaceStore;
+  readonly streamClient: StreamClient;
+  readonly activeConversationId: string | null;
+}
+
+/**
+ * Manages the StreamClient lifecycle scoped to the active conversation.
+ *
+ * - Connects the WebSocket on mount, closes on unmount.
+ * - Subscribes to the active conversation with resume capability
+ *   (passes lastAcknowledgedSeq to replay missed events).
+ * - Per-conversation reconciler state persists across conversation switches.
+ * - Acknowledges processed events for server-side buffer cleanup.
+ * - Reconnects with exponential backoff on unexpected socket close.
+ */
+// eslint-disable-next-line max-lines-per-function
+function useStreamSubscription({
+  store,
+  streamClient,
+  activeConversationId,
+}: StreamSubscriptionDeps): void {
+  // Per-conversation reconciler + seq state — survives conversation switches
+  const stateMapRef = useRef<Map<string, StreamSubscriptionState>>(new Map());
+  const activeIdRef = useRef<string | null>(null);
+  const intentionalCloseRef = useRef(false);
+  const reconnectTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const reconnectAttemptRef = useRef(0);
+  const callbacksRef = useRef<StreamClientCallbacks | null>(null);
+
+  // Connect / disconnect lifecycle
+  useEffect(() => {
+    intentionalCloseRef.current = false;
+
+    function clearReconnectTimer(): void {
+      if (reconnectTimerRef.current != null) {
+        clearTimeout(reconnectTimerRef.current);
+        reconnectTimerRef.current = null;
+      }
+    }
+
+    function scheduleReconnect(): void {
+      clearReconnectTimer();
+
+      if (reconnectAttemptRef.current >= RECONNECT_MAX_ATTEMPTS) {
+        store.dispatch({
+          type: 'connection/merge',
+          patch: { transportStatus: 'disconnected' },
+        });
+        console.warn('[stream] Max reconnect attempts reached');
+        return;
+      }
+
+      const delay = Math.min(
+        RECONNECT_BASE_DELAY_MS * 2 ** reconnectAttemptRef.current,
+        RECONNECT_MAX_DELAY_MS,
+      );
+      reconnectAttemptRef.current += 1;
+
+      store.dispatch({
+        type: 'connection/merge',
+        patch: { transportStatus: 'reconnecting' },
+      });
+
+      reconnectTimerRef.current = setTimeout(() => {
+        const cbs = callbacksRef.current;
+        if (cbs == null) return;
+
+        try {
+          streamClient.connect(cbs);
+
+          const activeId = activeIdRef.current;
+          if (activeId != null) {
+            const convState = stateMapRef.current.get(activeId);
+            streamClient.subscribe(activeId, convState?.serverResumeSeq);
+          }
+        } catch (err: unknown) {
+          console.warn('[stream] Reconnect attempt failed:', err);
+          scheduleReconnect();
+        }
+      }, delay);
+    }
+
+    const callbacks = buildStreamCallbacks(
+      store,
+      stateMapRef.current,
+      (conversationId, seq) => {
+        streamClient.ack(conversationId, seq);
+      },
+      {
+        onReconnectNeeded() {
+          if (!intentionalCloseRef.current) {
+            scheduleReconnect();
+          }
+        },
+        onConnectionEstablished() {
+          reconnectAttemptRef.current = 0;
+          clearReconnectTimer();
+        },
+      },
+    );
+
+    callbacksRef.current = callbacks;
+    streamClient.connect(callbacks);
+
+    return () => {
+      intentionalCloseRef.current = true;
+      clearReconnectTimer();
+      callbacksRef.current = null;
+      streamClient.close();
+    };
+  }, [store, streamClient]);
+
+  // Subscribe / unsubscribe scoped to active conversation
+  useEffect(() => {
+    const previousId = activeIdRef.current;
+    activeIdRef.current = activeConversationId;
+
+    if (previousId != null && previousId !== activeConversationId) {
+      try {
+        streamClient.unsubscribe(previousId);
+      } catch (err: unknown) {
+        console.warn(`[stream] Failed to unsubscribe from ${previousId}:`, err);
+      }
+    }
+
+    if (activeConversationId != null) {
+      const convState = stateMapRef.current.get(activeConversationId);
+      try {
+        streamClient.subscribe(activeConversationId, convState?.serverResumeSeq);
+      } catch (err: unknown) {
+        console.warn(`[stream] Failed to subscribe to ${activeConversationId}:`, err);
+      }
+    }
+
+    return () => {
+      if (activeConversationId != null) {
+        try {
+          streamClient.unsubscribe(activeConversationId);
+        } catch (err: unknown) {
+          console.warn(`[stream] Cleanup unsubscribe failed for ${activeConversationId}:`, err);
+        }
+      }
+    };
+  }, [activeConversationId, streamClient]);
 }
 
 function toWorkspaceConversationRecord(conversation: Conversation): WorkspaceConversationRecord {
@@ -208,6 +376,14 @@ function useTranscriptLoader(
           return;
         }
 
+        // If streaming already populated the transcript (setting loadState
+        // to 'ready') while the REST call was in flight, skip the
+        // destructive replace to avoid clobbering stream-owned entries.
+        const freshConv = store.getState().conversations.get(conversationId);
+        if (freshConv?.loadState === 'ready') {
+          return;
+        }
+
         store.dispatch({
           type: 'conversation/replace-entries',
           conversationId,
@@ -250,7 +426,6 @@ function useComposerProps(
   state: WorkspaceState,
   isLoadingConversations: boolean,
   clearConversationError: () => void,
-  refreshTranscript: () => void,
   reloadConversationList: () => Promise<void>,
 ) {
   const [createDraftText, setCreateDraftText] = useState('');
@@ -294,7 +469,6 @@ function useComposerProps(
           if (result.ok) {
             setCreateDraftText('');
             clearConversationError();
-            refreshTranscript();
             void reloadConversationList();
           }
         })
@@ -309,7 +483,6 @@ function useComposerProps(
 
     void submitComposerDraft({ store, client }).then((result) => {
       if (result.ok) {
-        refreshTranscript();
         void reloadConversationList();
       }
     });
@@ -318,7 +491,6 @@ function useComposerProps(
     client,
     createDraftText,
     isLoadingConversations,
-    refreshTranscript,
     reloadConversationList,
     store,
   ]);
@@ -358,6 +530,13 @@ export function WorkspaceRoute(): JSX.Element {
   const [store] = useState(() => createWorkspaceStore());
   const state = useWorkspaceState(store);
   const client = useMemo(() => createGatewayClient({ baseUrl: '' }), []);
+  const wsStreamClient = useMemo(
+    () =>
+      createStreamClient({
+        baseUrl: `${location.protocol === 'https:' ? 'wss:' : 'ws:'}//${location.host}/ws`,
+      }),
+    [],
+  );
   const {
     isLoadingConversations,
     conversationErrorMessage,
@@ -365,6 +544,14 @@ export function WorkspaceRoute(): JSX.Element {
     reloadConversationList,
   } = useConversationListLoader(store, client);
   const retryActiveTranscript = useTranscriptLoader(store, client, state.activeConversationId);
+
+  // Wire live stream subscription scoped to active conversation
+  useStreamSubscription({
+    store,
+    streamClient: wsStreamClient,
+    activeConversationId: state.activeConversationId,
+  });
+
   const activeConversation = selectActiveConversation(state);
   const composer = useComposerProps(
     store,
@@ -372,7 +559,6 @@ export function WorkspaceRoute(): JSX.Element {
     state,
     isLoadingConversations,
     clearConversationError,
-    retryActiveTranscript,
     reloadConversationList,
   );
 

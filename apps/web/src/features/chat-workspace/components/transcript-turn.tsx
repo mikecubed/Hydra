@@ -14,6 +14,11 @@ const turnStyle = {
   gap: '0.5rem',
 } as const;
 
+const streamingTurnStyle = {
+  ...turnStyle,
+  borderColor: 'rgba(56, 189, 248, 0.3)',
+} as const;
+
 const headerStyle = {
   display: 'flex',
   alignItems: 'center',
@@ -30,6 +35,12 @@ const kindBadgeStyle = {
   fontFamily: 'monospace',
 } as const;
 
+const streamingBadgeStyle = {
+  ...kindBadgeStyle,
+  background: 'rgba(56, 189, 248, 0.15)',
+  color: '#38bdf8',
+} as const;
+
 const preStyle = {
   margin: 0,
   padding: '0.5rem 0.75rem',
@@ -39,6 +50,14 @@ const preStyle = {
   overflowX: 'auto',
   whiteSpace: 'pre-wrap',
   wordBreak: 'break-word',
+} as const;
+
+const statusBlockStyle = {
+  margin: 0,
+  lineHeight: 1.6,
+  color: '#94a3b8',
+  fontSize: '0.85rem',
+  fontStyle: 'italic',
 } as const;
 
 function formatTimestamp(iso: string): string {
@@ -53,16 +72,38 @@ function ContentBlock({ block }: { readonly block: ContentBlockState }): JSX.Ele
     return <pre style={preStyle}>{block.text}</pre>;
   }
 
+  if (block.kind === 'status') {
+    return <p style={statusBlockStyle}>{block.text}</p>;
+  }
+
+  if (block.kind === 'structured') {
+    return <pre style={preStyle}>{block.text}</pre>;
+  }
+
+  // kind === 'text'
   return <p style={{ margin: 0, lineHeight: 1.6 }}>{block.text}</p>;
 }
 
+function isStreamingStatus(status: string): boolean {
+  return status === 'streaming';
+}
+
 export function TranscriptTurn({ entry }: TranscriptTurnProps): JSX.Element {
+  const streaming = isStreamingStatus(entry.status);
+
   return (
-    <article style={turnStyle}>
+    <article
+      style={streaming ? streamingTurnStyle : turnStyle}
+      data-streaming={streaming ? 'true' : undefined}
+    >
       <header style={headerStyle}>
         <span style={kindBadgeStyle}>{entry.kind}</span>
         {entry.attributionLabel != null && <span>{entry.attributionLabel}</span>}
-        <span>{entry.status}</span>
+        {streaming ? (
+          <span style={streamingBadgeStyle}>streaming…</span>
+        ) : (
+          <span>{entry.status}</span>
+        )}
         {entry.timestamp != null && (
           <time dateTime={entry.timestamp}>{formatTimestamp(entry.timestamp)}</time>
         )}

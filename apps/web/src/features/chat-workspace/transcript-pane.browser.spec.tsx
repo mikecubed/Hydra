@@ -543,7 +543,7 @@ describe('TranscriptPane', () => {
   });
 
   // eslint-disable-next-line max-lines-per-function
-  it('refreshes transcript after a successful continue-mode submit', async () => {
+  it('submits continue-mode instruction and refreshes conversation list', async () => {
     const conversations: ListConversationsResponse = {
       conversations: [
         {
@@ -588,27 +588,12 @@ describe('TranscriptPane', () => {
       },
       streamId: 'stream-2',
     };
-    const refreshedHistory: LoadTurnHistoryResponse = {
-      turns: [
-        ...initialHistory.turns,
-        {
-          id: 'turn-2',
-          conversationId: 'conv-1',
-          position: 2,
-          kind: 'operator',
-          attribution: { type: 'operator', label: 'Operator' },
-          instruction: 'Follow-up instruction',
-          status: 'submitted',
-          createdAt: '2026-03-20T12:01:00.000Z',
-        },
-      ],
-      totalCount: 2,
-      hasMore: false,
-    };
 
-    let historyCallCount = 0;
+    let submitCalled = false;
+    let listCallCount = 0;
     installFetchStub((url, init) => {
       if (url === '/conversations?status=active&limit=20') {
+        listCallCount++;
         return new Response(JSON.stringify(conversations), {
           status: 200,
           headers: { 'Content-Type': 'application/json' },
@@ -616,15 +601,14 @@ describe('TranscriptPane', () => {
       }
 
       if (url === '/conversations/conv-1/turns?limit=50') {
-        historyCallCount += 1;
-        const body = historyCallCount === 1 ? initialHistory : refreshedHistory;
-        return new Response(JSON.stringify(body), {
+        return new Response(JSON.stringify(initialHistory), {
           status: 200,
           headers: { 'Content-Type': 'application/json' },
         });
       }
 
       if (url === '/conversations/conv-1/turns' && init?.method === 'POST') {
+        submitCalled = true;
         return new Response(JSON.stringify(submitResponse), {
           status: 200,
           headers: { 'Content-Type': 'application/json' },
@@ -643,8 +627,68 @@ describe('TranscriptPane', () => {
     });
     fireEvent.click(screen.getByRole('button', { name: /send/i }));
 
-    const log = screen.getByRole('log');
-    expect(await within(log).findByText('Follow-up instruction')).toBeTruthy();
-    expect(historyCallCount).toBeGreaterThanOrEqual(2);
+    // Submit POST was made; transcript update now arrives via WS streaming
+    // (not via REST refresh) to prevent in-flight clobber.
+    await vi.waitFor(() => {
+      expect(submitCalled).toBe(true);
+    });
+
+    // Conversation list should refresh post-submit
+    await vi.waitFor(() => {
+      expect(listCallCount).toBeGreaterThanOrEqual(2);
+    });
+  });
+});
+
+// ─── TranscriptTurn streaming ───────────────────────────────────────────────
+
+describe('TranscriptTurn streaming', () => {
+  it('renders a streaming indicator for entries with status "streaming"', () => {
+    const entry = createEntry({ status: 'streaming' });
+
+    render(<TranscriptTurn entry={entry} />);
+
+    expect(screen.getByText('streaming…')).toBeTruthy();
+    const article = screen.getByRole('article');
+    expect(article.getAttribute('data-streaming')).toBe('true');
+  });
+
+  it('does not render streaming indicator for completed entries', () => {
+    const entry = createEntry({ status: 'completed' });
+
+    render(<TranscriptTurn entry={entry} />);
+
+    expect(screen.queryByText('streaming…')).toBeNull();
+    const article = screen.getByRole('article');
+    expect(article.getAttribute('data-streaming')).toBeNull();
+  });
+
+  it('renders status-kind content blocks with italic styling', () => {
+    const entry = createEntry({
+      contentBlocks: [
+        { blockId: 'blk-status', kind: 'status', text: 'Agent is thinking…', metadata: null },
+      ],
+    });
+
+    render(<TranscriptTurn entry={entry} />);
+
+    const el = screen.getByText('Agent is thinking…');
+    expect(el).toBeTruthy();
+    expect(el.tagName).toBe('P');
+  });
+
+  it('renders text blocks alongside status blocks in order', () => {
+    const entry = createEntry({
+      status: 'streaming',
+      contentBlocks: [
+        textBlock('Partial response', 'blk-text'),
+        { blockId: 'blk-status', kind: 'status', text: 'Processing…', metadata: null },
+      ],
+    });
+
+    render(<TranscriptTurn entry={entry} />);
+
+    expect(screen.getByText('Partial response')).toBeTruthy();
+    expect(screen.getByText('Processing…')).toBeTruthy();
   });
 });

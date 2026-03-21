@@ -7,15 +7,33 @@
  * workspace model layer.
  */
 
+import type {
+  CreateConversationRequest,
+  CreateConversationResponse,
+  SubmitInstructionBody,
+  SubmitInstructionResponse,
+} from '@hydra/web-contracts';
+
 import { isDraftSubmittable } from './composer-drafts.ts';
-import type { GatewayClient } from '../api/gateway-client.ts';
 import type { WorkspaceStore } from './workspace-types.ts';
 
 // ─── Public types ───────────────────────────────────────────────────────────
 
+/**
+ * Model-facing submit port — abstracts away the concrete GatewayClient so
+ * the model layer never types against API adapters directly.
+ */
+export interface SubmitPort {
+  createConversation(body?: CreateConversationRequest): Promise<CreateConversationResponse>;
+  submitInstruction(
+    conversationId: string,
+    body: SubmitInstructionBody,
+  ): Promise<SubmitInstructionResponse>;
+}
+
 export interface SubmitDraftDeps {
   readonly store: WorkspaceStore;
-  readonly client: Pick<GatewayClient, 'createConversation' | 'submitInstruction'>;
+  readonly client: SubmitPort;
 }
 
 export type SubmitResult = { readonly ok: true } | { readonly ok: false };

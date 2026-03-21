@@ -186,6 +186,11 @@ function StreamFailedBody({
 
 // ─── Body dispatcher ────────────────────────────────────────────────────────
 
+/** Compile-time exhaustiveness check. Throws at runtime if reached. */
+function assertNeverKind(kind: never): never {
+  throw new Error(`Unhandled stream event kind: ${String(kind)}`);
+}
+
 function EventBody({
   kind,
   payload,
@@ -216,7 +221,7 @@ function EventBody({
     case 'approval-response':
       return null;
     default:
-      return null;
+      return assertNeverKind(kind);
   }
 }
 
