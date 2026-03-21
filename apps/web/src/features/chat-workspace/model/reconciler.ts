@@ -47,12 +47,12 @@ export function isStaleEvent(event: StreamEvent, state: ReconcilerState): boolea
 
 // ─── Pure helpers ───────────────────────────────────────────────────────────
 
-/** Find the first entry matching a turnId. */
+/** Find the first canonical `kind: 'turn'` entry matching a turnId. */
 export function findEntryByTurnId(
   entries: readonly TranscriptEntryState[],
   turnId: string,
 ): TranscriptEntryState | undefined {
-  return entries.find((e) => e.turnId === turnId);
+  return entries.find((e) => e.kind === 'turn' && e.turnId === turnId);
 }
 
 /**
@@ -110,12 +110,16 @@ function createStreamingEntry(
   };
 }
 
-function replaceEntry(
+/**
+ * Replace the canonical `kind: 'turn'` entry for the given turnId.
+ * Non-turn entries (e.g. activity-group) sharing the same turnId are untouched.
+ */
+function replaceTurnEntry(
   entries: readonly TranscriptEntryState[],
   turnId: string,
   updater: (entry: TranscriptEntryState) => TranscriptEntryState,
 ): readonly TranscriptEntryState[] {
-  return entries.map((e) => (e.turnId === turnId ? updater(e) : e));
+  return entries.map((e) => (e.kind === 'turn' && e.turnId === turnId ? updater(e) : e));
 }
 
 function ensureTurnEntry(
@@ -134,7 +138,7 @@ function applyStreamStarted(
   event: StreamEvent,
 ): readonly TranscriptEntryState[] {
   if (findEntryByTurnId(entries, event.turnId)) {
-    return replaceEntry(entries, event.turnId, (e) => ({ ...e, status: 'streaming' }));
+    return replaceTurnEntry(entries, event.turnId, (e) => ({ ...e, status: 'streaming' }));
   }
   const attribution =
     typeof event.payload['attribution'] === 'string' ? event.payload['attribution'] : undefined;
@@ -149,7 +153,7 @@ function applyTextDelta(
   const blockId =
     typeof event.payload['blockId'] === 'string' ? event.payload['blockId'] : undefined;
   const withEntry = ensureTurnEntry(entries, event.turnId, event.timestamp);
-  return replaceEntry(withEntry, event.turnId, (e) => appendTextDelta(e, text, blockId));
+  return replaceTurnEntry(withEntry, event.turnId, (e) => appendTextDelta(e, text, blockId));
 }
 
 function applyStatusChange(
@@ -158,7 +162,7 @@ function applyStatusChange(
 ): readonly TranscriptEntryState[] {
   const status = typeof event.payload['status'] === 'string' ? event.payload['status'] : 'unknown';
   const withEntry = ensureTurnEntry(entries, event.turnId, event.timestamp);
-  return replaceEntry(withEntry, event.turnId, (e) => ({ ...e, status }));
+  return replaceTurnEntry(withEntry, event.turnId, (e) => ({ ...e, status }));
 }
 
 function applyStreamCompleted(
@@ -168,7 +172,7 @@ function applyStreamCompleted(
   const status =
     typeof event.payload['status'] === 'string' ? event.payload['status'] : 'completed';
   const withEntry = ensureTurnEntry(entries, event.turnId, event.timestamp);
-  return replaceEntry(withEntry, event.turnId, (e) => ({ ...e, status }));
+  return replaceTurnEntry(withEntry, event.turnId, (e) => ({ ...e, status }));
 }
 
 function applyStreamFailed(
@@ -176,14 +180,14 @@ function applyStreamFailed(
   event: StreamEvent,
 ): readonly TranscriptEntryState[] {
   const withEntry = ensureTurnEntry(entries, event.turnId, event.timestamp);
-  return replaceEntry(withEntry, event.turnId, (e) => {
-    const errorMsg = typeof event.payload['error'] === 'string' ? event.payload['error'] : null;
+  return replaceTurnEntry(withEntry, event.turnId, (e) => {
+    const reason = typeof event.payload['reason'] === 'string' ? event.payload['reason'] : null;
     const blocks: ContentBlockState[] = [...e.contentBlocks];
-    if (errorMsg !== null) {
+    if (reason !== null) {
       blocks.push({
         blockId: `${event.turnId}-error`,
         kind: 'status',
-        text: errorMsg,
+        text: reason,
         metadata: null,
       });
     }
@@ -195,21 +199,20 @@ function applyActivityMarker(
   entries: readonly TranscriptEntryState[],
   event: StreamEvent,
 ): readonly TranscriptEntryState[] {
-  const label = typeof event.payload['label'] === 'string' ? event.payload['label'] : '';
+  const description =
+    typeof event.payload['description'] === 'string' ? event.payload['description'] : '';
   const activityId = `${event.turnId}-activity`;
   const newBlock: ContentBlockState = {
     blockId: `${activityId}-${String(event.seq)}`,
     kind: 'status',
-    text: label,
+    text: description,
     metadata: null,
   };
 
-  const existing = entries.find(
-    (e) => e.kind === 'activity-group' && e.turnId === event.turnId,
-  );
+  const existing = entries.find((e) => e.kind === 'activity-group' && e.turnId === event.turnId);
   if (existing) {
-    return replaceEntry(entries, event.turnId, (e) =>
-      e.kind === 'activity-group'
+    return entries.map((e) =>
+      e.kind === 'activity-group' && e.turnId === event.turnId
         ? { ...e, contentBlocks: [...e.contentBlocks, newBlock] }
         : e,
     );
@@ -233,18 +236,20 @@ function applyApprovalPrompt(
   entries: readonly TranscriptEntryState[],
   event: StreamEvent,
 ): readonly TranscriptEntryState[] {
-  const promptId = typeof event.payload['promptId'] === 'string' ? event.payload['promptId'] : '';
+  const promptId =
+    typeof event.payload['approvalId'] === 'string' ? event.payload['approvalId'] : '';
   const allowedResponses = Array.isArray(event.payload['allowedResponses'])
     ? (event.payload['allowedResponses'] as string[])
     : [];
-  const contextText = typeof event.payload['context'] === 'string' ? event.payload['context'] : null;
+  const contextText =
+    typeof event.payload['context'] === 'string' ? event.payload['context'] : null;
   const contextBlocks: ContentBlockState[] =
     contextText === null
       ? []
       : [{ blockId: `${promptId}-ctx`, kind: 'text', text: contextText, metadata: null }];
 
   const withEntry = ensureTurnEntry(entries, event.turnId, event.timestamp);
-  return replaceEntry(withEntry, event.turnId, (e) => ({
+  return replaceTurnEntry(withEntry, event.turnId, (e) => ({
     ...e,
     prompt: {
       promptId,
@@ -263,7 +268,7 @@ function applyApprovalResponse(
 ): readonly TranscriptEntryState[] {
   const response = typeof event.payload['response'] === 'string' ? event.payload['response'] : null;
   const withEntry = ensureTurnEntry(entries, event.turnId, event.timestamp);
-  return replaceEntry(withEntry, event.turnId, (e) => {
+  return replaceTurnEntry(withEntry, event.turnId, (e) => {
     if (!e.prompt) return e;
     return {
       ...e,
@@ -282,7 +287,7 @@ function applyArtifactNotice(
   const label = typeof event.payload['label'] === 'string' ? event.payload['label'] : '';
 
   const withEntry = ensureTurnEntry(entries, event.turnId, event.timestamp);
-  return replaceEntry(withEntry, event.turnId, (e) => {
+  return replaceTurnEntry(withEntry, event.turnId, (e) => {
     const existingIdx = e.artifacts.findIndex((a) => a.artifactId === artifactId);
     const ref: ArtifactReferenceState = { artifactId, kind, label, availability: 'listed' };
 
@@ -300,7 +305,7 @@ function applyCancellation(
   event: StreamEvent,
 ): readonly TranscriptEntryState[] {
   const withEntry = ensureTurnEntry(entries, event.turnId, event.timestamp);
-  return replaceEntry(withEntry, event.turnId, (e) => ({ ...e, status: 'cancelled' }));
+  return replaceTurnEntry(withEntry, event.turnId, (e) => ({ ...e, status: 'cancelled' }));
 }
 
 function applySystemNotice(

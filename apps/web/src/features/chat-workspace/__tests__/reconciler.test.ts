@@ -321,13 +321,13 @@ describe('reconcileStreamEvents', () => {
         seq: 5,
         turnId: 'turn-1',
         kind: 'stream-failed',
-        payload: { error: 'timeout' },
+        payload: { reason: 'timeout' },
       });
       const { entries } = reconcileStreamEvents([existing], [event], createReconcilerState());
       assert.equal(entries[0].status, 'failed');
     });
 
-    it('appends an error content block when error message is present', () => {
+    it('appends an error content block when reason is present', () => {
       const existing = makeEntry({
         entryId: 'turn-1',
         turnId: 'turn-1',
@@ -338,7 +338,7 @@ describe('reconcileStreamEvents', () => {
         seq: 5,
         turnId: 'turn-1',
         kind: 'stream-failed',
-        payload: { error: 'connection lost' },
+        payload: { reason: 'connection lost' },
       });
       const { entries } = reconcileStreamEvents([existing], [event], createReconcilerState());
       const errorBlock = entries[0].contentBlocks.find((b) => b.kind === 'status');
@@ -355,7 +355,7 @@ describe('reconcileStreamEvents', () => {
         seq: 1,
         turnId: 'turn-1',
         kind: 'activity-marker',
-        payload: { label: 'Searching files…' },
+        payload: { description: 'Searching files…' },
       });
       const { entries } = reconcileStreamEvents([], [event], createReconcilerState());
       const activity = entries.find((e) => e.kind === 'activity-group');
@@ -369,13 +369,13 @@ describe('reconcileStreamEvents', () => {
           seq: 1,
           turnId: 'turn-1',
           kind: 'activity-marker',
-          payload: { label: 'Step 1' },
+          payload: { description: 'Step 1' },
         }),
         makeEvent({
           seq: 2,
           turnId: 'turn-1',
           kind: 'activity-marker',
-          payload: { label: 'Step 2' },
+          payload: { description: 'Step 2' },
         }),
       ];
       const { entries } = reconcileStreamEvents([], events, createReconcilerState());
@@ -399,7 +399,7 @@ describe('reconcileStreamEvents', () => {
         turnId: 'turn-1',
         kind: 'approval-prompt',
         payload: {
-          promptId: 'prompt-1',
+          approvalId: 'prompt-1',
           allowedResponses: ['approve', 'reject'],
           context: 'Delete foo.ts?',
         },
@@ -683,13 +683,140 @@ describe('reconcileStreamEvents', () => {
         ],
       });
       const state = stateWithHighWater([['turn-1', 10]]);
-      const events = [
-        makeEvent({ seq: 0, turnId: 'turn-1', kind: 'stream-started', payload: {} }),
-      ];
+      const events = [makeEvent({ seq: 0, turnId: 'turn-1', kind: 'stream-started', payload: {} })];
       const { entries } = reconcileStreamEvents([existing], events, state);
       assert.equal(entries.length, 1);
       assert.equal(entries[0].status, 'completed');
       assert.equal(entries[0].contentBlocks[0].text, 'done');
+    });
+  });
+
+  // ── turn-entry isolation (activity-group must not hijack turn updates) ──
+
+  describe('turn-entry isolation', () => {
+    it('text-delta targets the turn entry, not a pre-existing activity-group', () => {
+      const turnEntry = makeEntry({
+        entryId: 'turn-1',
+        turnId: 'turn-1',
+        kind: 'turn',
+        status: 'streaming',
+        contentBlocks: [],
+      });
+      const activityEntry = makeEntry({
+        entryId: 'turn-1-activity',
+        turnId: 'turn-1',
+        kind: 'activity-group',
+        status: 'active',
+        contentBlocks: [{ blockId: 'act-blk', kind: 'status', text: 'Analyzing…', metadata: null }],
+      });
+      const event = makeEvent({
+        seq: 1,
+        turnId: 'turn-1',
+        kind: 'text-delta',
+        payload: { text: 'Hello' },
+      });
+      const { entries } = reconcileStreamEvents(
+        [turnEntry, activityEntry],
+        [event],
+        createReconcilerState(),
+      );
+      const turn = entries.find((e) => e.kind === 'turn');
+      const activity = entries.find((e) => e.kind === 'activity-group');
+      assert.ok(turn);
+      assert.ok(activity);
+      assert.equal(turn.contentBlocks.length, 1, 'turn entry should have the text delta');
+      assert.equal(turn.contentBlocks[0].text, 'Hello');
+      assert.equal(activity.contentBlocks.length, 1, 'activity-group should be unchanged');
+      assert.equal(activity.contentBlocks[0].text, 'Analyzing…');
+    });
+
+    it('ensureTurnEntry creates a turn entry even when an activity-group already exists', () => {
+      const activityEntry = makeEntry({
+        entryId: 'turn-1-activity',
+        turnId: 'turn-1',
+        kind: 'activity-group',
+        status: 'active',
+        contentBlocks: [],
+      });
+      const event = makeEvent({
+        seq: 1,
+        turnId: 'turn-1',
+        kind: 'text-delta',
+        payload: { text: 'data' },
+      });
+      const { entries } = reconcileStreamEvents([activityEntry], [event], createReconcilerState());
+      const turns = entries.filter((e) => e.kind === 'turn');
+      const activities = entries.filter((e) => e.kind === 'activity-group');
+      assert.equal(turns.length, 1, 'a new turn entry should be created');
+      assert.equal(activities.length, 1, 'activity-group should remain');
+      assert.equal(turns[0].contentBlocks[0].text, 'data');
+    });
+
+    it('approval-prompt attaches to turn, not activity-group', () => {
+      const turnEntry = makeEntry({
+        entryId: 'turn-1',
+        turnId: 'turn-1',
+        kind: 'turn',
+        status: 'streaming',
+      });
+      const activityEntry = makeEntry({
+        entryId: 'turn-1-activity',
+        turnId: 'turn-1',
+        kind: 'activity-group',
+        status: 'active',
+        contentBlocks: [],
+      });
+      const event = makeEvent({
+        seq: 3,
+        turnId: 'turn-1',
+        kind: 'approval-prompt',
+        payload: {
+          approvalId: 'p-1',
+          allowedResponses: ['yes'],
+          context: 'Confirm?',
+        },
+      });
+      const { entries } = reconcileStreamEvents(
+        [activityEntry, turnEntry],
+        [event],
+        createReconcilerState(),
+      );
+      const turn = entries.find((e) => e.kind === 'turn');
+      const activity = entries.find((e) => e.kind === 'activity-group');
+      assert.ok(turn?.prompt, 'turn entry should have the prompt');
+      assert.equal(turn?.prompt?.promptId, 'p-1');
+      assert.equal(activity?.prompt, null, 'activity-group should have no prompt');
+    });
+
+    it('status-change updates only the turn entry, not the activity-group', () => {
+      const turnEntry = makeEntry({
+        entryId: 'turn-1',
+        turnId: 'turn-1',
+        kind: 'turn',
+        status: 'streaming',
+      });
+      const activityEntry = makeEntry({
+        entryId: 'turn-1-activity',
+        turnId: 'turn-1',
+        kind: 'activity-group',
+        status: 'active',
+        contentBlocks: [],
+      });
+      const event = makeEvent({
+        seq: 2,
+        turnId: 'turn-1',
+        kind: 'status-change',
+        payload: { status: 'awaiting-approval' },
+      });
+      const { entries } = reconcileStreamEvents(
+        [turnEntry, activityEntry],
+        [event],
+        createReconcilerState(),
+      );
+      const turn = entries.find((e) => e.kind === 'turn');
+      const activity = entries.find((e) => e.kind === 'activity-group');
+      assert.equal(turn?.status, 'awaiting-approval');
+      assert.equal(activity?.status, 'active', 'activity-group status unchanged');
     });
   });
 
