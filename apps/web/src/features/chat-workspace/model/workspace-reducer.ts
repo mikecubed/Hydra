@@ -681,7 +681,7 @@ function applyPromptHydrate(
   turnId: string,
   promptId: string,
   allowedResponses: readonly string[],
-  contextBlocks: readonly PromptViewState['contextBlocks'],
+  contextBlocks: PromptViewState['contextBlocks'],
 ): WorkspaceState {
   return applyPromptUpdate(state, conversationId, turnId, promptId, (prompt) =>
     patchPrompt(prompt, {
