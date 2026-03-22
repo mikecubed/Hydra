@@ -57,9 +57,12 @@ function mergePromptState(
 
   // Same prompt — prefer the more advanced lifecycle state
   if (streamPrompt.promptId === restPrompt.promptId) {
+    const preserveStreamLifecycle =
+      (streamPrompt.status === 'responding' || streamPrompt.status === 'error') &&
+      (restPrompt.status === 'pending' || restPrompt.status === 'stale');
     const streamRank = PROMPT_STATUS_RANK[streamPrompt.status];
     const restRank = PROMPT_STATUS_RANK[restPrompt.status];
-    const preferred = restRank > streamRank ? restPrompt : streamPrompt;
+    const preferred = preserveStreamLifecycle || restRank <= streamRank ? streamPrompt : restPrompt;
     const fallback = preferred === streamPrompt ? restPrompt : streamPrompt;
     return {
       ...preferred,

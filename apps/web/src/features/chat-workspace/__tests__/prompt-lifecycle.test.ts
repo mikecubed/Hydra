@@ -301,6 +301,34 @@ describe('mergePromptState — approval hydration preserves stream-owned state',
     assert.deepEqual(merged?.allowedResponses, ['approve']);
   });
 
+  it('preserves responding status when REST hydration later reports stale for the same prompt', () => {
+    const stream = makePrompt({ status: 'responding' });
+    const rest = makePrompt({
+      status: 'stale',
+      allowedResponses: ['approve', 'deny'],
+      contextBlocks: [{ blockId: 'b1', kind: 'text', text: 'context', metadata: null }],
+    });
+
+    const merged = mergePromptState(stream, rest);
+    assert.equal(merged?.status, 'responding');
+    assert.deepEqual(merged?.allowedResponses, ['approve', 'deny']);
+    assert.equal(merged?.contextBlocks[0]?.text, 'context');
+  });
+
+  it('preserves error state when REST hydration later reports stale for the same prompt', () => {
+    const stream = makePrompt({ status: 'error', errorMessage: 'Gateway 409' });
+    const rest = makePrompt({
+      status: 'stale',
+      allowedResponses: ['approve'],
+      staleReason: null,
+    });
+
+    const merged = mergePromptState(stream, rest);
+    assert.equal(merged?.status, 'error');
+    assert.equal(merged?.errorMessage, 'Gateway 409');
+    assert.deepEqual(merged?.allowedResponses, ['approve']);
+  });
+
   it('keeps stream-owned prompt when promptIds differ (different cycle)', () => {
     const stream = makePrompt({ promptId: 'prompt-2', status: 'responding' });
     const rest = makePrompt({ promptId: 'prompt-1', status: 'pending' });
