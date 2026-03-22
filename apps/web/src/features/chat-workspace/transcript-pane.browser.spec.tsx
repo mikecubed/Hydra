@@ -676,7 +676,7 @@ describe('TranscriptPane', () => {
     expect(await screen.findByText('Failed to load transcript.')).toBeTruthy();
     fireEvent.click(screen.getByRole('button', { name: /retry transcript load/i }));
 
-    expect(await screen.findByText('Recovered transcript entry')).toBeTruthy();
+    expect(await screen.findByText('Recovered transcript entry')).toBeInTheDocument();
     expect(historyAttempts).toBe(2);
   });
 
@@ -772,7 +772,7 @@ describe('TranscriptPane', () => {
 
     fireEvent.click(screen.getByRole('button', { name: /retry transcript load/i }));
 
-    expect(await screen.findByText('Recovered transcript entry')).toBeTruthy();
+    expect(await screen.findByText('Recovered transcript entry')).toBeInTheDocument();
     await vi.waitFor(() => {
       expect(screen.queryByRole('alert')).toBeNull();
       expect(screen.queryByRole('status')).toBeNull();
