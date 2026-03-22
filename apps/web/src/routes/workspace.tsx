@@ -273,6 +273,7 @@ function useStreamSubscription({
   // eslint-disable-next-line max-lines-per-function
   useEffect(() => {
     intentionalCloseRef.current = false;
+    const lifecycle = { disposed: false };
 
     function clearReconnectTimer(): void {
       if (reconnectTimerRef.current != null) {
@@ -294,6 +295,9 @@ function useStreamSubscription({
       approvalId: string,
       event: StreamEvent,
     ): void {
+      if (lifecycle.disposed) {
+        return;
+      }
       const key = `${conversationId}:${approvalId}`;
       if (approvalHydrationRetryTimersRef.current.has(key)) {
         return;
@@ -312,6 +316,9 @@ function useStreamSubscription({
     }
 
     function hydrateLiveApprovalPrompt(conversationId: string, event: StreamEvent): void {
+      if (lifecycle.disposed) {
+        return;
+      }
       const approvalId =
         typeof event.payload['approvalId'] === 'string' ? event.payload['approvalId'] : null;
       if (approvalId == null || approvalId === '') {
@@ -327,6 +334,9 @@ function useStreamSubscription({
       void (async () => {
         try {
           const response = await client.getPendingApprovals(conversationId);
+          if (lifecycle.disposed) {
+            return;
+          }
           const approval = response.approvals.find((candidate) => candidate.id === approvalId);
           if (approval == null) {
             scheduleApprovalHydrationRetry(conversationId, approvalId, event);
@@ -347,6 +357,9 @@ function useStreamSubscription({
           clearApprovalHydrationRetry(key);
           approvalHydrationRetryCountsRef.current.delete(key);
         } catch (err: unknown) {
+          if (lifecycle.disposed) {
+            return;
+          }
           console.warn(
             `[stream] Failed to hydrate approval prompt ${approvalId} for ${conversationId}:`,
             err,
@@ -442,6 +455,7 @@ function useStreamSubscription({
     streamClient.connect(callbacks);
 
     return () => {
+      lifecycle.disposed = true;
       intentionalCloseRef.current = true;
       clearReconnectTimer();
       for (const timer of approvalHydrationRetryTimersRef.current.values()) {

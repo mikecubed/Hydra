@@ -414,6 +414,42 @@ describe('prompt lifecycle browser workflows: recovery and terminal states', () 
     expect(approvalRequests).toBe(2);
   });
 
+  it('does not schedule or apply live approval hydration retries after unmount', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+
+    let approvalRequests = 0;
+    installLiveHydrationRetryStub(() => {
+      approvalRequests += 1;
+      // Always return empty so a retry would be scheduled
+      return jsonResponse({ approvals: [] });
+    });
+
+    const ws = await renderAndSubscribe();
+    streamApprovalPrompt(ws, 'p-unmount', 1, realApprovalPromptPayload('p-unmount'));
+
+    // Wait for the live hydration getPendingApprovals to resolve (the transcript
+    // loader also hits the approvals endpoint, so the count reaches 2: one from
+    // the loader, one from the live hydration path). Returning empty approvals
+    // causes scheduleApprovalHydrationRetry to arm a 1 000 ms timer.
+    await vi.waitFor(() => {
+      expect(approvalRequests).toBeGreaterThanOrEqual(2);
+    });
+
+    const requestsBeforeUnmount = approvalRequests;
+
+    // Unmount the component — cleanup should set lifecycle.disposed and clear timers.
+    cleanup();
+
+    // Advance well past the retry delay (1 000 ms). If the guard is missing, the
+    // retry timer fires and issues another getPendingApprovals request.
+    act(() => {
+      vi.advanceTimersByTime(5_000);
+    });
+
+    // No additional approval requests should have been made after unmount.
+    expect(approvalRequests).toBe(requestsBeforeUnmount);
+  });
+
   it('shows error state after API failure and resolves on retry', async () => {
     let callCount = 0;
     installDefaultStub(() => {
