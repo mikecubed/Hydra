@@ -51,8 +51,10 @@ export interface StreamSubscriptionState {
    * Seqs received but not consumed by the reconciler (e.g. conditional
    * events like approval-response with no matching prompt). These block
    * the contiguous resume frontier so they remain replay-eligible.
+   * Maps seq → turnId so `sealSubscriptionAfterMerge` can retire gaps
+   * belonging to newly-sealed turns.
    */
-  readonly pendingSeqs: ReadonlySet<number>;
+  readonly pendingSeqs: ReadonlyMap<number, string>;
   /** Highest event seq received for this conversation. Bounds the frontier. */
   readonly highestSeenSeq: number | undefined;
 }
@@ -62,7 +64,7 @@ export function createStreamSubscriptionState(): StreamSubscriptionState {
   return {
     reconcilerState: createReconcilerState(),
     serverResumeSeq: undefined,
-    pendingSeqs: new Set(),
+    pendingSeqs: new Map(),
     highestSeenSeq: undefined,
   };
 }
@@ -79,7 +81,7 @@ export function createStreamSubscriptionState(): StreamSubscriptionState {
  */
 export function computeContiguousResume(
   base: number | undefined,
-  pendingSeqs: ReadonlySet<number>,
+  pendingSeqs: ReadonlyMap<number, string>,
   highestSeenSeq: number | undefined,
 ): number | undefined {
   if (highestSeenSeq === undefined) return base;
@@ -88,7 +90,7 @@ export function computeContiguousResume(
 
   // Find the lowest pending seq at or above start — the frontier cannot pass it.
   let minPending = Infinity;
-  for (const seq of pendingSeqs) {
+  for (const seq of pendingSeqs.keys()) {
     if (seq >= start && seq < minPending) minPending = seq;
   }
 
@@ -148,7 +150,7 @@ export function applyStreamEventsToConversation(
   }
 
   // Update pendingSeqs and highestSeenSeq from this batch.
-  const nextPending = new Set(subscriptionState.pendingSeqs);
+  const nextPending = new Map(subscriptionState.pendingSeqs);
   let highestSeenSeq = subscriptionState.highestSeenSeq;
 
   for (const event of replaySafeEvents) {
@@ -164,7 +166,7 @@ export function applyStreamEventsToConversation(
       nextPending.delete(event.seq);
     } else {
       // Ignored conditional — add to pending so the frontier cannot skip it.
-      nextPending.add(event.seq);
+      nextPending.set(event.seq, event.turnId);
     }
   }
 
@@ -201,7 +203,36 @@ export function sealSubscriptionAfterMerge(
   const current = stateMap.get(conversationId) ?? createStreamSubscriptionState();
   const sealedReconciler = sealAuthoritativeTurns(current.reconcilerState, authoritativeEntries);
   if (sealedReconciler === current.reconcilerState) return;
-  stateMap.set(conversationId, { ...current, reconcilerState: sealedReconciler });
+
+  // Retire pending seqs whose turn was just sealed — those gaps are obsolete
+  // since REST has finalized the turn, so they must not block the frontier.
+  const newlySealed = sealedReconciler.sealedTurns;
+  let pendingSeqs = current.pendingSeqs;
+  if (newlySealed != null && pendingSeqs.size > 0) {
+    let changed = false;
+    const pruned = new Map(pendingSeqs);
+    for (const [seq, turnId] of pruned) {
+      if (newlySealed.has(turnId)) {
+        pruned.delete(seq);
+        changed = true;
+      }
+    }
+    if (changed) pendingSeqs = pruned;
+  }
+
+  // Recompute the contiguous frontier — retired gaps may unblock it.
+  const serverResumeSeq = computeContiguousResume(
+    current.serverResumeSeq,
+    pendingSeqs,
+    current.highestSeenSeq,
+  );
+
+  stateMap.set(conversationId, {
+    ...current,
+    reconcilerState: sealedReconciler,
+    pendingSeqs,
+    serverResumeSeq: serverResumeSeq ?? current.serverResumeSeq,
+  });
 }
 
 // ─── Callback builder ───────────────────────────────────────────────────────

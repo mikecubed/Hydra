@@ -1923,4 +1923,174 @@ describe('sealSubscriptionAfterMerge wiring (transcript-load path)', () => {
     assert.ok(sealed?.has('turn-2'), 'failed turn-2 must be sealed');
     assert.equal(sealed?.has('turn-3') ?? false, false, 'streaming turn-3 must NOT be sealed');
   });
+
+  it('retires pending gaps belonging to newly sealed turns and advances resume cursor', () => {
+    // Regression: sealSubscriptionAfterMerge must clean up pendingSeqs for
+    // turns REST just finalized. Otherwise serverResumeSeq stays pinned
+    // behind an obsolete gap and reconnect replays stale backlog forever.
+
+    const store = storeWithConversation('conv-retire');
+    const stateMap = new Map<string, StreamSubscriptionState>();
+
+    // Step 1: Stream events — seq 1 consumed (turn-a), seq 2 ignored
+    // conditional (turn-a), seq 3 consumed (turn-b)
+    let sub = createStreamSubscriptionState();
+    sub = applyStreamEventsToConversation(
+      store,
+      'conv-retire',
+      [makeEvent({ seq: 1, turnId: 'turn-a', kind: 'stream-started', payload: {} })],
+      sub,
+    );
+    // seq 2: ignored approval-response (no matching prompt) on turn-a
+    sub = applyStreamEventsToConversation(
+      store,
+      'conv-retire',
+      [
+        makeEvent({
+          seq: 2,
+          turnId: 'turn-a',
+          kind: 'approval-response',
+          payload: { approvalId: 'p1', response: 'approve' },
+        }),
+      ],
+      sub,
+    );
+    // seq 3: consumed text-delta on turn-b
+    sub = applyStreamEventsToConversation(
+      store,
+      'conv-retire',
+      [makeEvent({ seq: 3, turnId: 'turn-b', kind: 'stream-started', payload: {} })],
+      sub,
+    );
+    stateMap.set('conv-retire', sub);
+
+    // Verify pre-condition: frontier stuck at 1, seq 2 is pending
+    assert.equal(sub.serverResumeSeq, 1, 'pre-seal: frontier stuck at 1');
+    assert.ok(sub.pendingSeqs.has(2), 'pre-seal: seq 2 is pending');
+
+    // Step 2: REST merge-history finalizes turn-a (but turn-b is still streaming)
+    const restEntries: TranscriptEntryState[] = [
+      {
+        entryId: 'turn-a',
+        kind: 'turn',
+        turnId: 'turn-a',
+        status: 'completed',
+        timestamp: '2026-07-01T00:00:00.000Z',
+        contentBlocks: [
+          { blockId: 'b1', kind: 'text', text: 'REST authoritative', metadata: null },
+        ],
+        artifacts: [],
+        controls: [],
+        prompt: null,
+      },
+      {
+        entryId: 'turn-b',
+        kind: 'turn',
+        turnId: 'turn-b',
+        status: 'streaming',
+        timestamp: '2026-07-01T00:01:00.000Z',
+        contentBlocks: [],
+        artifacts: [],
+        controls: [],
+        prompt: null,
+      },
+    ];
+    store.dispatch({
+      type: 'conversation/merge-history',
+      conversationId: 'conv-retire',
+      entries: restEntries,
+      hasMoreHistory: false,
+    });
+
+    // Step 3: Seal — must retire pending seq 2 (belongs to sealed turn-a)
+    sealSubscriptionAfterMerge(stateMap, 'conv-retire', restEntries);
+
+    const after = stateMap.get('conv-retire')!;
+    assert.ok(!after.pendingSeqs.has(2), 'pending seq 2 must be retired (turn-a is sealed)');
+    assert.equal(after.serverResumeSeq, 3, 'frontier must advance past retired gap to 3');
+  });
+
+  it('preserves pending gaps belonging to non-sealed turns after seal', () => {
+    // Ensure pending gaps for still-active turns are NOT retired.
+    const store = storeWithConversation('conv-keep');
+    const stateMap = new Map<string, StreamSubscriptionState>();
+
+    let sub = createStreamSubscriptionState();
+    // seq 1: consumed on turn-a
+    sub = applyStreamEventsToConversation(
+      store,
+      'conv-keep',
+      [makeEvent({ seq: 1, turnId: 'turn-a', kind: 'stream-started', payload: {} })],
+      sub,
+    );
+    // seq 2: ignored conditional on turn-b (still streaming, NOT sealed)
+    sub = applyStreamEventsToConversation(
+      store,
+      'conv-keep',
+      [
+        makeEvent({
+          seq: 2,
+          turnId: 'turn-b',
+          kind: 'approval-response',
+          payload: { approvalId: 'p1', response: 'approve' },
+        }),
+      ],
+      sub,
+    );
+    // seq 3: consumed on turn-a
+    sub = applyStreamEventsToConversation(
+      store,
+      'conv-keep',
+      [
+        makeEvent({
+          seq: 3,
+          turnId: 'turn-a',
+          kind: 'stream-completed',
+          payload: { status: 'completed' },
+        }),
+      ],
+      sub,
+    );
+    stateMap.set('conv-keep', sub);
+
+    assert.equal(sub.serverResumeSeq, 1, 'pre-seal: frontier stuck at 1');
+    assert.ok(sub.pendingSeqs.has(2), 'pre-seal: seq 2 pending on turn-b');
+
+    // REST finalizes turn-a only; turn-b stays streaming
+    const restEntries: TranscriptEntryState[] = [
+      {
+        entryId: 'turn-a',
+        kind: 'turn',
+        turnId: 'turn-a',
+        status: 'completed',
+        timestamp: '2026-07-01T00:00:00.000Z',
+        contentBlocks: [{ blockId: 'b1', kind: 'text', text: 'done', metadata: null }],
+        artifacts: [],
+        controls: [],
+        prompt: null,
+      },
+      {
+        entryId: 'turn-b',
+        kind: 'turn',
+        turnId: 'turn-b',
+        status: 'streaming',
+        timestamp: '2026-07-01T00:01:00.000Z',
+        contentBlocks: [],
+        artifacts: [],
+        controls: [],
+        prompt: null,
+      },
+    ];
+    store.dispatch({
+      type: 'conversation/merge-history',
+      conversationId: 'conv-keep',
+      entries: restEntries,
+      hasMoreHistory: false,
+    });
+    sealSubscriptionAfterMerge(stateMap, 'conv-keep', restEntries);
+
+    const after = stateMap.get('conv-keep')!;
+    assert.ok(after.pendingSeqs.has(2), 'pending seq 2 must remain (turn-b is NOT sealed)');
+    assert.equal(after.serverResumeSeq, 1, 'frontier must stay at 1 (gap still blocks)');
+  });
 });
