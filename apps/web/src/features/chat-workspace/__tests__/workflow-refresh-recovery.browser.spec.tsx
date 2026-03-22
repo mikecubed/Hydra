@@ -148,8 +148,11 @@ describe('workspace refresh/reconnect recovery workflows', () => {
       ws2.simulateMessage({ type: 'subscribed', conversationId: 'conv-1', currentSeq: 4 });
     });
 
-    // New deltas continue the in-progress stream from where REST snapshot left off
+    // The server may replay the already-authoritative partial before sending new text.
     act(() => {
+      ws2.simulateMessage(
+        streamFrame('conv-1', 4, 'turn-a1', 'text-delta', { text: 'Rehydrated partial: ' }),
+      );
       ws2.simulateMessage(
         streamFrame('conv-1', 5, 'turn-a1', 'text-delta', { text: 'live delta one' }),
       );
@@ -158,10 +161,11 @@ describe('workspace refresh/reconnect recovery workflows', () => {
       );
     });
 
-    // Resumed deltas are visible (not dropped)
+    // Resumed deltas are visible and the pre-refresh text does not reappear.
     await vi.waitFor(() =>
-      expect(screen.getByText(/live delta one and delta two/)).toBeInTheDocument(),
+      expect(screen.getByText(/^live delta one and delta two$/)).toBeInTheDocument(),
     );
+    expect(screen.queryByText('Pre-refresh content')).not.toBeInTheDocument();
 
     // REST-rehydrated text still visible alongside new deltas
     expect(screen.getByText(/Rehydrated partial:/)).toBeInTheDocument();
@@ -177,15 +181,8 @@ describe('workspace refresh/reconnect recovery workflows', () => {
 
     const article = articles[0];
 
-    // Both REST base and WS continuation present in the same article
-    expect(within(article).getByText(/Rehydrated partial:/)).toBeInTheDocument();
-    expect(within(article).getByText(/live delta one and delta two/)).toBeInTheDocument();
-
-    // REST text appears exactly once — guards against duplication from replayed events
-    expect(screen.queryAllByText(/Rehydrated partial:/)).toHaveLength(1);
-
-    // Resumed delta text appears exactly once — guards against double-apply
-    expect(screen.queryAllByText(/live delta one/)).toHaveLength(1);
+    const paragraphTexts = Array.from(article.querySelectorAll('p'), (paragraph) => paragraph.textContent);
+    expect(paragraphTexts).toEqual(['Rehydrated partial: ', 'live delta one and delta two']);
 
     // Turn transitioned to completed after stream-completed
     expect(screen.getByText('completed')).toBeInTheDocument();
@@ -236,7 +233,7 @@ describe('workspace refresh/reconnect recovery workflows', () => {
     const subMsgs = ws.sentMessages.filter((m) => m['type'] === 'subscribe');
     expect(subMsgs).toHaveLength(1);
     act(() => {
-      ws.simulateMessage({ type: 'subscribed', conversationId: 'conv-1', currentSeq: 3 });
+      ws.simulateMessage({ type: 'subscribed', conversationId: 'conv-1', currentSeq: 0 });
     });
 
     // Stream events populate entries before REST loads
