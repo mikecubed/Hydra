@@ -579,11 +579,10 @@ describe('T044: daemon unavailable — WebSocket path', () => {
       await heartbeat.tick();
 
       const messages = parseSent(ws);
-      const postBindMessages = messages.slice(
-        messages.findIndex(
-          (message) => message.type !== 'daemon-restored' && message.type !== 'session-active',
-        ),
+      const startIdx = messages.findIndex(
+        (message) => message.type !== 'daemon-restored' && message.type !== 'session-active',
       );
+      const postBindMessages = startIdx === -1 ? [] : messages.slice(startIdx);
       assert.ok(
         !postBindMessages.some((m) => m.type === 'daemon-restored'),
         'Should not send daemon-restored after bind when daemon was never down',
