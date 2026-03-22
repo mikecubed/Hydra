@@ -261,11 +261,13 @@ function parseContextBlocks(value: unknown): readonly ContentBlockState[] {
   return blocks;
 }
 
-function createPromptState(event: StreamEvent): PromptViewState {
-  const promptId =
-    typeof event.payload['approvalId'] === 'string' ? event.payload['approvalId'] : '';
+function createPromptState(event: StreamEvent): PromptViewState | null {
+  const raw = event.payload['approvalId'];
+  if (typeof raw !== 'string' || raw === '') {
+    return null;
+  }
   return {
-    promptId,
+    promptId: raw,
     parentTurnId: event.turnId,
     status: 'pending',
     allowedResponses: filterStringArray(event.payload['allowedResponses']),
@@ -333,11 +335,27 @@ function applyApprovalPrompt(
   entries: readonly TranscriptEntryState[],
   event: StreamEvent,
 ): readonly TranscriptEntryState[] {
+  const prompt = createPromptState(event);
+  if (prompt == null) {
+    return entries;
+  }
   const withEntry = ensureTurnEntry(entries, event.turnId, event.timestamp);
   return replaceTurnEntry(withEntry, event.turnId, (e) => ({
     ...e,
-    prompt: createPromptState(event),
+    prompt,
   }));
+}
+
+function isConsumedNoopEvent(event: StreamEvent): boolean {
+  if (event.kind === 'checkpoint') {
+    return true;
+  }
+
+  if (event.kind === 'approval-prompt') {
+    return createPromptState(event) == null;
+  }
+
+  return false;
 }
 
 function applyApprovalResponse(
@@ -498,10 +516,10 @@ export function reconcileStreamEvents(
     current = applyEvent(current, event);
 
     // Advance high-water when the event mutated entries, or for kinds that
-    // are intentionally no-op (checkpoint). Conditional events like
+    // are intentionally consumed no-ops. Conditional events like
     // approval-response must not consume seq when they didn't match, so
     // they remain eligible on later replay.
-    if (current !== prev || event.kind === 'checkpoint') {
+    if (current !== prev || isConsumedNoopEvent(event)) {
       consumedSeqs.add(event.seq);
       const prevHw = hwMap.get(event.turnId);
       if (prevHw === undefined || event.seq > prevHw) {

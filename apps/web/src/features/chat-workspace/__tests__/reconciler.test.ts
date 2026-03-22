@@ -3,7 +3,7 @@ import { describe, it } from 'node:test';
 
 import type { StreamEvent } from '@hydra/web-contracts';
 
-import type { TranscriptEntryState } from '../model/workspace-types.ts';
+import type { ContentBlockState, TranscriptEntryState } from '../model/workspace-types.ts';
 import {
   createReconcilerState,
   isStaleEvent,
@@ -481,6 +481,98 @@ describe('reconcileStreamEvents', () => {
       assert.ok(entries[0].prompt);
       assert.equal(entries[0].prompt?.promptId, 'prompt-1');
       assert.equal(entries[0].prompt?.status, 'pending');
+    });
+
+    it('does not attach a prompt when approvalId is missing', () => {
+      const existing = makeEntry({
+        entryId: 'turn-1',
+        turnId: 'turn-1',
+        status: 'streaming',
+      });
+      const event = makeEvent({
+        seq: 3,
+        turnId: 'turn-1',
+        kind: 'approval-prompt',
+        payload: {},
+      });
+      const { entries } = reconcileStreamEvents([existing], [event], createReconcilerState());
+      assert.equal(entries[0].prompt, null, 'prompt must remain null for missing approvalId');
+    });
+
+    it('does not create a ghost turn when approvalId is missing on an empty transcript', () => {
+      const event = makeEvent({
+        seq: 3,
+        turnId: 'turn-1',
+        kind: 'approval-prompt',
+        payload: {},
+      });
+      const result = reconcileStreamEvents([], [event], createReconcilerState());
+      assert.equal(result.entries.length, 0);
+      assert.ok(result.consumedSeqs.has(3));
+      assert.equal(result.state.highWaterSeq.get('turn-1'), 3);
+    });
+
+    it('does not attach a prompt when approvalId is empty string', () => {
+      const existing = makeEntry({
+        entryId: 'turn-1',
+        turnId: 'turn-1',
+        status: 'streaming',
+      });
+      const event = makeEvent({
+        seq: 3,
+        turnId: 'turn-1',
+        kind: 'approval-prompt',
+        payload: { approvalId: '' },
+      });
+      const { entries } = reconcileStreamEvents([existing], [event], createReconcilerState());
+      assert.equal(entries[0].prompt, null, 'prompt must remain null for empty approvalId');
+    });
+
+    it('does not attach a prompt when approvalId is non-string', () => {
+      const existing = makeEntry({
+        entryId: 'turn-1',
+        turnId: 'turn-1',
+        status: 'streaming',
+      });
+      const event = makeEvent({
+        seq: 3,
+        turnId: 'turn-1',
+        kind: 'approval-prompt',
+        payload: { approvalId: 42 },
+      });
+      const { entries } = reconcileStreamEvents([existing], [event], createReconcilerState());
+      assert.equal(entries[0].prompt, null, 'prompt must remain null for non-string approvalId');
+    });
+
+    it('preserves existing prompt when new approval-prompt has invalid approvalId', () => {
+      const existingPrompt = {
+        promptId: 'old-prompt',
+        parentTurnId: 'turn-1',
+        status: 'pending' as const,
+        allowedResponses: [] as readonly string[],
+        contextBlocks: [] as readonly ContentBlockState[],
+        lastResponseSummary: null,
+        errorMessage: null,
+        staleReason: null,
+      };
+      const existing = makeEntry({
+        entryId: 'turn-1',
+        turnId: 'turn-1',
+        status: 'streaming',
+        prompt: existingPrompt,
+      });
+      const event = makeEvent({
+        seq: 3,
+        turnId: 'turn-1',
+        kind: 'approval-prompt',
+        payload: { approvalId: '' },
+      });
+      const { entries } = reconcileStreamEvents([existing], [event], createReconcilerState());
+      assert.deepStrictEqual(
+        entries[0].prompt,
+        existingPrompt,
+        'existing prompt must be preserved',
+      );
     });
   });
 

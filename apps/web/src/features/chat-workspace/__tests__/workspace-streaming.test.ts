@@ -20,6 +20,7 @@ import {
   applyStreamEventsToConversation,
   createStreamSubscriptionState,
 } from '../model/stream-subscription.ts';
+import { claimApprovalHydrationRetry } from '../model/approval-hydration-retries.ts';
 
 // ─── Factories ──────────────────────────────────────────────────────────────
 
@@ -65,6 +66,31 @@ describe('createStreamSubscriptionState', () => {
   it('returns empty reconciler state', () => {
     const state = createStreamSubscriptionState();
     assert.equal(state.reconcilerState.highWaterSeq.size, 0);
+  });
+});
+
+describe('claimApprovalHydrationRetry', () => {
+  it('increments retry count until the budget is exhausted', () => {
+    const retryCounts = new Map<string, number>();
+
+    assert.equal(claimApprovalHydrationRetry(retryCounts, 'conv-1'), true);
+    assert.equal(retryCounts.get('conv-1'), 1);
+
+    assert.equal(claimApprovalHydrationRetry(retryCounts, 'conv-1'), true);
+    assert.equal(retryCounts.get('conv-1'), 2);
+
+    assert.equal(claimApprovalHydrationRetry(retryCounts, 'conv-1'), true);
+    assert.equal(retryCounts.get('conv-1'), 3);
+  });
+
+  it('clears exhausted retry entries so later loader runs get a fresh budget', () => {
+    const retryCounts = new Map<string, number>([['conv-1', 3]]);
+
+    assert.equal(claimApprovalHydrationRetry(retryCounts, 'conv-1'), false);
+    assert.equal(retryCounts.has('conv-1'), false);
+
+    assert.equal(claimApprovalHydrationRetry(retryCounts, 'conv-1'), true);
+    assert.equal(retryCounts.get('conv-1'), 1);
   });
 });
 

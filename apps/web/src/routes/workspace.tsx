@@ -36,6 +36,7 @@ import {
   type WorkspaceState,
   type WorkspaceStore,
 } from '../features/chat-workspace/model/workspace-store.ts';
+import { claimApprovalHydrationRetry } from '../features/chat-workspace/model/approval-hydration-retries.ts';
 import {
   selectActiveConversation,
   selectActiveDraft,
@@ -178,12 +179,9 @@ function createTranscriptLoaderEffect(
       return;
     }
 
-    const retryCount = approvalRetryCountsRef.current.get(conversationId) ?? 0;
-    if (retryCount >= APPROVAL_HYDRATION_MAX_RETRIES) {
+    if (!claimApprovalHydrationRetry(approvalRetryCountsRef.current, conversationId)) {
       return;
     }
-
-    approvalRetryCountsRef.current.set(conversationId, retryCount + 1);
     retryTimer = setTimeout(() => {
       setRetryNonce((value) => value + 1);
     }, APPROVAL_RETRY_DELAY_MS);
@@ -243,7 +241,6 @@ const RECONNECT_BASE_DELAY_MS = 1_000;
 const RECONNECT_MAX_DELAY_MS = 30_000;
 const RECONNECT_MAX_ATTEMPTS = 10;
 const APPROVAL_RETRY_DELAY_MS = 1_000;
-const APPROVAL_HYDRATION_MAX_RETRIES = 3;
 
 export interface StreamSubscriptionDeps {
   readonly store: WorkspaceStore;
@@ -313,12 +310,9 @@ function useStreamSubscription({
         return;
       }
 
-      const retryCount = approvalHydrationRetryCountsRef.current.get(key) ?? 0;
-      if (retryCount >= APPROVAL_HYDRATION_MAX_RETRIES) {
+      if (!claimApprovalHydrationRetry(approvalHydrationRetryCountsRef.current, key)) {
         return;
       }
-
-      approvalHydrationRetryCountsRef.current.set(key, retryCount + 1);
       approvalHydrationRetryTimersRef.current.set(
         key,
         setTimeout(() => {

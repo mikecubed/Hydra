@@ -749,6 +749,60 @@ describe('ack gating for ignored conditional events', () => {
     assert.equal(stateMap.get('conv-1')?.serverResumeSeq, 1);
     assert.ok(stateMap.get('conv-1')?.pendingSeqs.has(2));
   });
+
+  it('does advance serverResumeSeq for invalid approval-prompt no-op events', () => {
+    const store = storeWithConversation('conv-1');
+
+    let sub = createStreamSubscriptionState();
+    sub = applyStreamEventsToConversation(
+      store,
+      'conv-1',
+      [makeEvent({ seq: 1, turnId: 't1', kind: 'stream-started', payload: {} })],
+      sub,
+    );
+    assert.equal(sub.serverResumeSeq, 1);
+
+    sub = applyStreamEventsToConversation(
+      store,
+      'conv-1',
+      [makeEvent({ seq: 2, turnId: 't1', kind: 'approval-prompt', payload: {} })],
+      sub,
+    );
+
+    assert.equal(sub.serverResumeSeq, 2);
+    assert.equal(sub.pendingSeqs.size, 0);
+    assert.equal(store.getState().conversations.get('conv-1')?.entries[0]?.prompt, null);
+  });
+
+  it('acks invalid approval-prompt no-op events via buildStreamCallbacks', () => {
+    const store = storeWithConversation('conv-1');
+    const stateMap = new Map<string, StreamSubscriptionState>();
+    const ackCalls: Array<{ conversationId: string; seq: number }> = [];
+
+    const callbacks = buildStreamCallbacks(
+      store,
+      stateMap,
+      (conversationId, seq) => {
+        ackCalls.push({ conversationId, seq });
+      },
+      { onReconnectNeeded: () => {}, onConnectionEstablished: () => {} },
+    );
+
+    callbacks.onStreamEvent!(
+      'conv-1',
+      makeEvent({ seq: 1, turnId: 't1', kind: 'stream-started', payload: {} }),
+    );
+    callbacks.onStreamEvent!(
+      'conv-1',
+      makeEvent({ seq: 2, turnId: 't1', kind: 'approval-prompt', payload: {} }),
+    );
+
+    assert.deepEqual(ackCalls, [
+      { conversationId: 'conv-1', seq: 1 },
+      { conversationId: 'conv-1', seq: 2 },
+    ]);
+    assert.equal(stateMap.get('conv-1')?.serverResumeSeq, 2);
+  });
 });
 
 // ─── New-conversation REST clobber prevention ───────────────────────────────
