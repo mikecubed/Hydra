@@ -97,13 +97,58 @@ export function appendTextDelta(
     return { ...entry, contentBlocks: blocks };
   }
 
+  const nextText = trimAuthoritativeReplayOverlap(entry, resolvedBlockId, text, blockId);
+  if (nextText.length === 0) {
+    return entry;
+  }
+
   const newBlock: ContentBlockState = {
     blockId: resolvedBlockId,
     kind: 'text',
-    text,
+    text: nextText,
     metadata: null,
   };
   return { ...entry, contentBlocks: [...entry.contentBlocks, newBlock] };
+}
+
+function trimAuthoritativeReplayOverlap(
+  entry: TranscriptEntryState,
+  resolvedBlockId: string,
+  text: string,
+  explicitBlockId: string | undefined,
+): string {
+  if (explicitBlockId !== undefined || entry.status !== 'streaming') {
+    return text;
+  }
+
+  const authoritativeBlock = entry.contentBlocks.find(
+    (block) => block.kind === 'text' && block.blockId === `${String(entry.turnId)}-response`,
+  );
+  if (authoritativeBlock?.text == null || authoritativeBlock.text.length === 0) {
+    return text;
+  }
+
+  const authoritativeText = authoritativeBlock.text;
+  if (resolvedBlockId !== `${String(entry.turnId)}-streaming`) {
+    return text;
+  }
+
+  if (authoritativeText.endsWith(text)) {
+    return '';
+  }
+
+  const overlap = resolveTextOverlap(authoritativeText, text);
+  return overlap === 0 ? text : text.slice(overlap);
+}
+
+function resolveTextOverlap(authoritativeText: string, text: string): number {
+  const maxOverlap = Math.min(authoritativeText.length, text.length);
+  for (let overlap = maxOverlap; overlap > 0; overlap -= 1) {
+    if (authoritativeText.endsWith(text.slice(0, overlap))) {
+      return overlap;
+    }
+  }
+  return 0;
 }
 
 // ─── Internal entry helpers ─────────────────────────────────────────────────

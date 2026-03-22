@@ -280,6 +280,74 @@ describe('workspace refresh/reconnect recovery workflows', () => {
     expect(screen.getByText('completed')).toBeInTheDocument();
   });
 
+  it('does not duplicate replayed text when REST is already ahead for a streaming turn', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+
+    let refreshed = false;
+    installFetchStub((url) => {
+      if (url === '/conversations?status=active&limit=20') {
+        return jsonResponse({
+          conversations: [conversation('conv-1', 'REST ahead')],
+          totalCount: 1,
+        });
+      }
+      if (url === '/conversations/conv-1/turns?limit=50') {
+        if (!refreshed) {
+          return jsonResponse(EMPTY_HISTORY);
+        }
+        return jsonResponse({
+          turns: [
+            agentTurn('turn-a1', 'conv-1', {
+              response: 'Hello',
+              status: 'streaming',
+            }),
+          ],
+          totalCount: 1,
+          hasMore: false,
+        });
+      }
+      throw new Error(`Unexpected fetch: ${url}`);
+    });
+
+    render(<AppProviders />);
+    await screen.findByRole('button', { name: /rest ahead/i });
+
+    const ws1 = openAndSubscribe('conv-1', 0);
+    act(() => {
+      ws1.simulateMessage(
+        streamFrame('conv-1', 1, 'turn-a1', 'stream-started', { attribution: 'Claude' }),
+      );
+      ws1.simulateMessage(streamFrame('conv-1', 2, 'turn-a1', 'text-delta', { text: 'Hello' }));
+    });
+    expect(await screen.findByText('Hello')).toBeInTheDocument();
+
+    refreshed = true;
+    cleanup();
+    resetFakeWebSockets();
+
+    render(<AppProviders />);
+    await screen.findByRole('button', { name: /rest ahead/i });
+    await vi.waitFor(() => expect(screen.getByText('Hello')).toBeInTheDocument());
+
+    const ws2 = latestSocket();
+    act(() => {
+      ws2.simulateOpen();
+      ws2.simulateMessage(streamFrame('conv-1', 3, 'turn-a1', 'text-delta', { text: 'Hello' }));
+      ws2.simulateMessage({ type: 'subscribed', conversationId: 'conv-1', currentSeq: 3 });
+      ws2.simulateMessage(streamFrame('conv-1', 4, 'turn-a1', 'text-delta', { text: ' world' }));
+      ws2.simulateMessage(streamFrame('conv-1', 5, 'turn-a1', 'stream-completed'));
+    });
+
+    await vi.waitFor(() => expect(screen.getByText('completed')).toBeInTheDocument());
+
+    const article = transcriptArticles()[0];
+    const paragraphTexts = Array.from(
+      article.querySelectorAll('p'),
+      (paragraph) => paragraph.textContent,
+    );
+    expect(paragraphTexts).toEqual(['Hello', ' world']);
+  });
+
   it('seals completed turns after REST merge, rejecting subsequent stream replays', async () => {
     vi.useFakeTimers({ shouldAdvanceTime: true });
 

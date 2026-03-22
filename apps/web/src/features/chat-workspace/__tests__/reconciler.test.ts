@@ -134,6 +134,28 @@ describe('appendTextDelta', () => {
     assert.equal(result.contentBlocks[0].blockId, 'turn-42-streaming');
   });
 
+  it('ignores replayed text already present in authoritative streaming REST content', () => {
+    const entry = makeEntry({
+      turnId: 'turn-42',
+      status: 'streaming',
+      contentBlocks: [{ blockId: 'turn-42-response', kind: 'text', text: 'Hello', metadata: null }],
+    });
+    const result = appendTextDelta(entry, 'Hello');
+    assert.deepStrictEqual(result, entry);
+  });
+
+  it('appends only the novel suffix when replay overlaps authoritative REST content', () => {
+    const entry = makeEntry({
+      turnId: 'turn-42',
+      status: 'streaming',
+      contentBlocks: [{ blockId: 'turn-42-response', kind: 'text', text: 'Hello', metadata: null }],
+    });
+    const result = appendTextDelta(entry, 'Hello world');
+    assert.equal(result.contentBlocks.length, 2);
+    assert.equal(result.contentBlocks[1].blockId, 'turn-42-streaming');
+    assert.equal(result.contentBlocks[1].text, ' world');
+  });
+
   it('does not mutate the original entry', () => {
     const entry = makeEntry({
       contentBlocks: [{ blockId: 'blk-1', kind: 'text', text: 'a', metadata: null }],
