@@ -36,8 +36,9 @@ export function selectActiveEntries(state: WorkspaceState): readonly TranscriptE
   const raw = conversation?.entries ?? EMPTY_ENTRIES;
   if (raw.length <= 1) return raw;
 
-  // Fast path: scan for duplicate turnIds before allocating
+  // Fast path: scan for duplicate turnIds or entryIds before allocating
   const seenTurnIds = new Set<string>();
+  const seenEntryIds = new Set<string>();
   let hasDuplicates = false;
   for (const entry of raw) {
     if (entry.kind === 'turn' && entry.turnId != null) {
@@ -47,6 +48,11 @@ export function selectActiveEntries(state: WorkspaceState): readonly TranscriptE
       }
       seenTurnIds.add(entry.turnId);
     }
+    if (seenEntryIds.has(entry.entryId)) {
+      hasDuplicates = true;
+      break;
+    }
+    seenEntryIds.add(entry.entryId);
   }
 
   return hasDuplicates ? deduplicateEntries(raw) : raw;
