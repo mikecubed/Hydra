@@ -1,0 +1,397 @@
+import assert from 'node:assert/strict';
+import { describe, it } from 'node:test';
+
+import type { StreamEvent } from '@hydra/web-contracts';
+
+import { createReconcilerState, reconcileStreamEvents } from '../model/reconciler.ts';
+import {
+  createInitialWorkspaceState,
+  mergePromptState,
+  reduceWorkspaceState,
+} from '../model/workspace-reducer.ts';
+import type {
+  ConversationViewState,
+  PromptViewState,
+  TranscriptEntryState,
+  WorkspaceState,
+} from '../model/workspace-types.ts';
+
+function makeEvent(overrides: Partial<StreamEvent> & { seq: number; turnId: string }): StreamEvent {
+  return {
+    kind: 'text-delta',
+    payload: {},
+    timestamp: '2026-07-01T00:00:00.000Z',
+    ...overrides,
+  };
+}
+
+function makeEntry(overrides: Partial<TranscriptEntryState> = {}): TranscriptEntryState {
+  return {
+    entryId: 'entry-1',
+    kind: 'turn',
+    turnId: 'turn-1',
+    status: 'completed',
+    timestamp: '2026-07-01T00:00:00.000Z',
+    contentBlocks: [],
+    artifacts: [],
+    controls: [],
+    prompt: null,
+    ...overrides,
+  };
+}
+
+function makePrompt(overrides: Partial<PromptViewState> = {}): PromptViewState {
+  return {
+    promptId: 'prompt-1',
+    parentTurnId: 'turn-1',
+    status: 'pending',
+    allowedResponses: [],
+    contextBlocks: [],
+    lastResponseSummary: null,
+    errorMessage: null,
+    staleReason: null,
+    ...overrides,
+  };
+}
+
+function stateWithPrompt(prompt: PromptViewState): WorkspaceState {
+  const entry = makeEntry({ entryId: 'turn-1', turnId: 'turn-1', status: 'streaming', prompt });
+  const conversation: ConversationViewState = {
+    conversationId: 'conv-1',
+    title: 'Test',
+    status: 'active',
+    createdAt: null,
+    updatedAt: null,
+    turnCount: 1,
+    pendingInstructionCount: 0,
+    lineageSummary: null,
+    entries: [entry],
+    hasMoreHistory: false,
+    loadState: 'ready',
+    historyLoaded: true,
+    controlState: {
+      canSubmit: true,
+      submissionPolicyLabel: 'Ready',
+      staleReason: null,
+    },
+  };
+  const base = createInitialWorkspaceState();
+  const conversations = new Map(base.conversations);
+  conversations.set('conv-1', conversation);
+  return {
+    ...base,
+    activeConversationId: 'conv-1',
+    conversationOrder: ['conv-1'],
+    conversations,
+  };
+}
+
+describe('prompt lifecycle reconciler', () => {
+  it('captures approval prompt metadata from stream payloads', () => {
+    const { entries } = reconcileStreamEvents(
+      [makeEntry({ turnId: 'turn-1', status: 'streaming' })],
+      [
+        makeEvent({
+          seq: 1,
+          turnId: 'turn-1',
+          kind: 'approval-prompt',
+          payload: {
+            approvalId: 'p1',
+            allowedResponses: ['approve', 42, 'deny'],
+            contextBlocks: [
+              { blockId: 'ctx-1', kind: 'text', text: 'Approve this change?', metadata: null },
+            ],
+          },
+        }),
+      ],
+      createReconcilerState(),
+    );
+
+    assert.deepStrictEqual(entries[0].prompt, {
+      promptId: 'p1',
+      parentTurnId: 'turn-1',
+      status: 'pending',
+      allowedResponses: [
+        { key: 'approve', label: 'approve' },
+        { key: 'deny', label: 'deny' },
+      ],
+      contextBlocks: [
+        { blockId: 'ctx-1', kind: 'text', text: 'Approve this change?', metadata: null },
+      ],
+      lastResponseSummary: null,
+      errorMessage: null,
+      staleReason: null,
+    });
+  });
+
+  it('marks pending prompts stale when the turn reaches a terminal state', () => {
+    const pending = makeEntry({ prompt: makePrompt(), status: 'streaming' });
+
+    const completed = reconcileStreamEvents(
+      [pending],
+      [makeEvent({ seq: 2, turnId: 'turn-1', kind: 'stream-completed', payload: {} })],
+      createReconcilerState(),
+    );
+    assert.equal(completed.entries[0].prompt?.status, 'stale');
+
+    const cancelled = reconcileStreamEvents(
+      [makeEntry({ prompt: makePrompt({ status: 'responding' }), status: 'streaming' })],
+      [makeEvent({ seq: 3, turnId: 'turn-1', kind: 'cancellation', payload: {} })],
+      createReconcilerState(),
+    );
+    assert.equal(cancelled.entries[0].prompt?.status, 'stale');
+  });
+
+  it('keeps resolved prompts resolved on later terminal events', () => {
+    const { entries } = reconcileStreamEvents(
+      [makeEntry({ prompt: makePrompt({ status: 'resolved', lastResponseSummary: 'approve' }) })],
+      [makeEvent({ seq: 4, turnId: 'turn-1', kind: 'stream-failed', payload: { reason: 'boom' } })],
+      createReconcilerState(),
+    );
+    assert.equal(entries[0].prompt?.status, 'resolved');
+    assert.equal(entries[0].prompt?.lastResponseSummary, 'approve');
+  });
+});
+
+describe('prompt lifecycle reducer', () => {
+  it('transitions prompts through responding, error, resolved, stale, unavailable, and hydrate states', () => {
+    const initial = stateWithPrompt(makePrompt());
+
+    const responding = reduceWorkspaceState(initial, {
+      type: 'prompt/begin-response',
+      conversationId: 'conv-1',
+      turnId: 'turn-1',
+      promptId: 'prompt-1',
+    });
+    assert.equal(responding.conversations.get('conv-1')?.entries[0].prompt?.status, 'responding');
+
+    const errored = reduceWorkspaceState(responding, {
+      type: 'prompt/response-failed',
+      conversationId: 'conv-1',
+      turnId: 'turn-1',
+      promptId: 'prompt-1',
+      errorMessage: 'Gateway 409',
+    });
+    assert.equal(errored.conversations.get('conv-1')?.entries[0].prompt?.status, 'error');
+    assert.equal(
+      errored.conversations.get('conv-1')?.entries[0].prompt?.errorMessage,
+      'Gateway 409',
+    );
+
+    const hydrated = reduceWorkspaceState(initial, {
+      type: 'prompt/hydrate',
+      conversationId: 'conv-1',
+      turnId: 'turn-1',
+      promptId: 'prompt-1',
+      allowedResponses: ['approve', 'deny'],
+      contextBlocks: [{ blockId: 'ctx-1', kind: 'text', text: 'Need approval', metadata: null }],
+    });
+    assert.deepStrictEqual(
+      hydrated.conversations.get('conv-1')?.entries[0].prompt?.allowedResponses,
+      ['approve', 'deny'],
+    );
+    assert.equal(hydrated.conversations.get('conv-1')?.entries[0].prompt?.contextBlocks.length, 1);
+
+    const resolved = reduceWorkspaceState(responding, {
+      type: 'prompt/response-confirmed',
+      conversationId: 'conv-1',
+      turnId: 'turn-1',
+      promptId: 'prompt-1',
+      responseSummary: 'approve',
+    });
+    assert.equal(resolved.conversations.get('conv-1')?.entries[0].prompt?.status, 'resolved');
+    assert.equal(
+      resolved.conversations.get('conv-1')?.entries[0].prompt?.lastResponseSummary,
+      'approve',
+    );
+
+    const stale = reduceWorkspaceState(initial, {
+      type: 'prompt/mark-stale',
+      conversationId: 'conv-1',
+      turnId: 'turn-1',
+      promptId: 'prompt-1',
+      reason: 'Already answered',
+    });
+    assert.equal(stale.conversations.get('conv-1')?.entries[0].prompt?.status, 'stale');
+    assert.equal(
+      stale.conversations.get('conv-1')?.entries[0].prompt?.staleReason,
+      'Already answered',
+    );
+
+    const unavailable = reduceWorkspaceState(initial, {
+      type: 'prompt/mark-unavailable',
+      conversationId: 'conv-1',
+      turnId: 'turn-1',
+      promptId: 'prompt-1',
+    });
+    assert.equal(unavailable.conversations.get('conv-1')?.entries[0].prompt?.status, 'unavailable');
+  });
+
+  it('preserves null staleReason when reason is null', () => {
+    const initial = stateWithPrompt(makePrompt());
+    const stale = reduceWorkspaceState(initial, {
+      type: 'prompt/mark-stale',
+      conversationId: 'conv-1',
+      turnId: 'turn-1',
+      promptId: 'prompt-1',
+      reason: null,
+    });
+    assert.equal(stale.conversations.get('conv-1')?.entries[0].prompt?.status, 'stale');
+    assert.equal(stale.conversations.get('conv-1')?.entries[0].prompt?.staleReason, null);
+  });
+
+  it('resolves a stale prompt when response-confirmed arrives after stream-completed', () => {
+    // Race: pending → responding → stale (stream-completed) → response-confirmed
+    const staleState = stateWithPrompt(makePrompt({ status: 'stale', staleReason: 'turn ended' }));
+    const resolved = reduceWorkspaceState(staleState, {
+      type: 'prompt/response-confirmed',
+      conversationId: 'conv-1',
+      turnId: 'turn-1',
+      promptId: 'prompt-1',
+      responseSummary: 'Approve',
+    });
+    assert.equal(
+      resolved.conversations.get('conv-1')?.entries[0].prompt?.status,
+      'resolved',
+      'stale prompt must transition to resolved when confirmation is authoritative',
+    );
+    assert.equal(
+      resolved.conversations.get('conv-1')?.entries[0].prompt?.lastResponseSummary,
+      'Approve',
+    );
+    assert.equal(
+      resolved.conversations.get('conv-1')?.entries[0].prompt?.staleReason,
+      null,
+      'staleReason must be cleared on resolution',
+    );
+  });
+
+  it('does not regress a resolved prompt back to stale', () => {
+    const resolvedState = stateWithPrompt(
+      makePrompt({ status: 'resolved', lastResponseSummary: 'approve' }),
+    );
+    const next = reduceWorkspaceState(resolvedState, {
+      type: 'prompt/mark-stale',
+      conversationId: 'conv-1',
+      turnId: 'turn-1',
+      promptId: 'prompt-1',
+      reason: 'late event',
+    });
+    assert.equal(next.conversations.get('conv-1')?.entries[0].prompt?.status, 'resolved');
+    assert.equal(
+      next.conversations.get('conv-1')?.entries[0].prompt?.lastResponseSummary,
+      'approve',
+    );
+    assert.equal(next.conversations.get('conv-1')?.entries[0].prompt?.staleReason, null);
+  });
+});
+
+// ─── mergePromptState — approval hydration vs stream-owned state ────────────
+
+describe('mergePromptState — approval hydration preserves stream-owned state', () => {
+  it('preserves responding status and backfills metadata from REST approval', () => {
+    const stream = makePrompt({ status: 'responding', errorMessage: null });
+    const rest = makePrompt({
+      status: 'pending',
+      allowedResponses: ['approve', 'deny'],
+      contextBlocks: [{ blockId: 'b1', kind: 'text', text: 'context', metadata: null }],
+    });
+
+    const merged = mergePromptState(stream, rest);
+    assert.equal(merged?.status, 'responding', 'stream responding must win over REST pending');
+    assert.deepEqual(merged?.allowedResponses, ['approve', 'deny'], 'backfills allowedResponses');
+    assert.equal(merged?.contextBlocks[0]?.text, 'context', 'backfills contextBlocks');
+  });
+
+  it('preserves error status and errorMessage from stream-owned prompt', () => {
+    const stream = makePrompt({ status: 'error', errorMessage: 'Gateway 409' });
+    const rest = makePrompt({
+      status: 'pending',
+      allowedResponses: ['approve', 'deny'],
+      contextBlocks: [{ blockId: 'b1', kind: 'text', text: 'context', metadata: null }],
+    });
+
+    const merged = mergePromptState(stream, rest);
+    assert.equal(merged?.status, 'error');
+    assert.equal(merged?.errorMessage, 'Gateway 409');
+    assert.deepEqual(merged?.allowedResponses, ['approve', 'deny']);
+  });
+
+  it('preserves stale status and staleReason from stream-owned prompt', () => {
+    const stream = makePrompt({ status: 'stale', staleReason: 'turn ended' });
+    const rest = makePrompt({
+      status: 'pending',
+      allowedResponses: ['approve'],
+    });
+
+    const merged = mergePromptState(stream, rest);
+    assert.equal(merged?.status, 'stale');
+    assert.equal(merged?.staleReason, 'turn ended');
+    assert.deepEqual(merged?.allowedResponses, ['approve']);
+  });
+
+  it('upgrades a resolved raw-key summary when REST later hydrates the matching label', () => {
+    const stream = makePrompt({
+      status: 'resolved',
+      lastResponseSummary: 'approve_with_changes',
+      allowedResponses: [{ key: 'approve_with_changes', label: 'approve_with_changes' }],
+    });
+    const rest = makePrompt({
+      status: 'resolved',
+      lastResponseSummary: 'Approve with changes',
+      allowedResponses: [{ key: 'approve_with_changes', label: 'Approve with changes' }],
+    });
+
+    const merged = mergePromptState(stream, rest);
+    assert.equal(merged?.status, 'resolved');
+    assert.equal(merged?.lastResponseSummary, 'Approve with changes');
+  });
+
+  it('preserves responding status when REST hydration later reports stale for the same prompt', () => {
+    const stream = makePrompt({ status: 'responding' });
+    const rest = makePrompt({
+      status: 'stale',
+      allowedResponses: ['approve', 'deny'],
+      contextBlocks: [{ blockId: 'b1', kind: 'text', text: 'context', metadata: null }],
+    });
+
+    const merged = mergePromptState(stream, rest);
+    assert.equal(merged?.status, 'responding');
+    assert.deepEqual(merged?.allowedResponses, ['approve', 'deny']);
+    assert.equal(merged?.contextBlocks[0]?.text, 'context');
+  });
+
+  it('preserves error state when REST hydration later reports stale for the same prompt', () => {
+    const stream = makePrompt({ status: 'error', errorMessage: 'Gateway 409' });
+    const rest = makePrompt({
+      status: 'stale',
+      allowedResponses: ['approve'],
+      staleReason: null,
+    });
+
+    const merged = mergePromptState(stream, rest);
+    assert.equal(merged?.status, 'error');
+    assert.equal(merged?.errorMessage, 'Gateway 409');
+    assert.deepEqual(merged?.allowedResponses, ['approve']);
+  });
+
+  it('keeps stream-owned prompt when promptIds differ (different cycle)', () => {
+    const stream = makePrompt({ promptId: 'prompt-2', status: 'responding' });
+    const rest = makePrompt({ promptId: 'prompt-1', status: 'pending' });
+
+    const merged = mergePromptState(stream, rest);
+    assert.equal(merged?.promptId, 'prompt-2', 'stream prompt from newer cycle preserved');
+    assert.equal(merged?.status, 'responding');
+  });
+
+  it('uses REST prompt when stream has no prompt', () => {
+    const rest = makePrompt({
+      status: 'pending',
+      allowedResponses: ['approve', 'deny'],
+    });
+
+    const merged = mergePromptState(null, rest);
+    assert.equal(merged?.status, 'pending');
+    assert.deepEqual(merged?.allowedResponses, ['approve', 'deny']);
+  });
+});

@@ -18,6 +18,8 @@ import type {
   ConversationStatus,
   ConversationViewState,
   DraftSubmitState,
+  PromptStatus,
+  PromptViewState,
   TranscriptEntryState,
   WorkspaceAction,
   WorkspaceConversationRecord,
@@ -27,6 +29,111 @@ import type {
 // ─── Internal helpers ───────────────────────────────────────────────────────
 
 const DEFAULT_SUBMISSION_POLICY_LABEL = 'Ready for operator input';
+
+/**
+ * Prompt lifecycle status priority for merge conflict resolution.
+ * Higher rank = more advanced in the lifecycle.
+ */
+const PROMPT_STATUS_RANK: Record<PromptStatus, number> = {
+  pending: 0,
+  responding: 1,
+  error: 2,
+  stale: 3,
+  unavailable: 3,
+  resolved: 4,
+};
+
+function shouldPreferFallbackSummary(
+  preferred: PromptViewState,
+  fallback: PromptViewState,
+): boolean {
+  if (
+    preferred.status !== 'resolved' ||
+    fallback.status !== 'resolved' ||
+    preferred.lastResponseSummary == null ||
+    fallback.lastResponseSummary == null ||
+    preferred.lastResponseSummary === fallback.lastResponseSummary
+  ) {
+    return false;
+  }
+
+  return fallback.allowedResponses.some(
+    (choice) =>
+      typeof choice !== 'string' &&
+      choice.key === preferred.lastResponseSummary &&
+      choice.label === fallback.lastResponseSummary,
+  );
+}
+
+const TURN_STATUS_RANK: Readonly<Record<string, number>> = {
+  submitted: 0,
+  executing: 1,
+  streaming: 2,
+  completed: 3,
+  failed: 3,
+  cancelled: 3,
+};
+
+function measureEntryContent(entry: TranscriptEntryState): number {
+  return entry.contentBlocks.reduce(
+    (size, block) => size + block.blockId.length + (block.text?.length ?? 0),
+    0,
+  );
+}
+
+function shouldPreferStreamedTurn(
+  streamed: TranscriptEntryState,
+  rest: TranscriptEntryState,
+): boolean {
+  const streamedRank = TURN_STATUS_RANK[streamed.status] ?? 0;
+  const restRank = TURN_STATUS_RANK[rest.status] ?? 0;
+  if (streamedRank !== restRank) {
+    return streamedRank > restRank;
+  }
+
+  return measureEntryContent(streamed) > measureEntryContent(rest);
+}
+
+/**
+ * Merge two prompt states for the same turn, preferring the more advanced
+ * lifecycle state. Used during history merge where stream and REST may have
+ * different views of the same prompt.
+ */
+function mergePromptState(
+  streamPrompt: PromptViewState | null,
+  restPrompt: PromptViewState | null,
+): PromptViewState | null {
+  if (streamPrompt == null) return restPrompt;
+  if (restPrompt == null) return streamPrompt;
+
+  // Same prompt — prefer the more advanced lifecycle state
+  if (streamPrompt.promptId === restPrompt.promptId) {
+    const preserveStreamLifecycle =
+      (streamPrompt.status === 'responding' || streamPrompt.status === 'error') &&
+      (restPrompt.status === 'pending' || restPrompt.status === 'stale');
+    const streamRank = PROMPT_STATUS_RANK[streamPrompt.status];
+    const restRank = PROMPT_STATUS_RANK[restPrompt.status];
+    const preferred = preserveStreamLifecycle || restRank <= streamRank ? streamPrompt : restPrompt;
+    const fallback = preferred === streamPrompt ? restPrompt : streamPrompt;
+    const lastResponseSummary = shouldPreferFallbackSummary(preferred, fallback)
+      ? fallback.lastResponseSummary
+      : (preferred.lastResponseSummary ?? fallback.lastResponseSummary);
+    return {
+      ...preferred,
+      allowedResponses:
+        preferred.allowedResponses.length > 0
+          ? preferred.allowedResponses
+          : fallback.allowedResponses,
+      contextBlocks:
+        preferred.contextBlocks.length > 0 ? preferred.contextBlocks : fallback.contextBlocks,
+      lastResponseSummary,
+      errorMessage: preferred.errorMessage ?? fallback.errorMessage,
+    };
+  }
+
+  // Different prompts — stream is more recent
+  return streamPrompt;
+}
 
 function createConversationLineage(
   conversation: WorkspaceConversationRecord,
@@ -173,6 +280,8 @@ function pruneDrafts(
 
 // ─── Exported state factory ─────────────────────────────────────────────────
 
+export { mergePromptState };
+
 export function createInitialWorkspaceState(): WorkspaceState {
   return {
     activeConversationId: null,
@@ -186,6 +295,19 @@ export function createInitialWorkspaceState(): WorkspaceState {
 }
 
 // ─── Per-action reducers ────────────────────────────────────────────────────
+
+type PromptAction = Extract<
+  WorkspaceAction,
+  {
+    readonly type:
+      | 'prompt/begin-response'
+      | 'prompt/response-confirmed'
+      | 'prompt/response-failed'
+      | 'prompt/mark-stale'
+      | 'prompt/mark-unavailable'
+      | 'prompt/hydrate';
+  }
+>;
 
 function mergeConversationView(
   previous: ConversationViewState | undefined,
@@ -372,11 +494,14 @@ function applyMergeHistory(
       return entry;
     }
 
+    const preferStreamedTurn = shouldPreferStreamedTurn(streamed, entry);
     return {
       ...entry,
+      status: preferStreamedTurn ? streamed.status : entry.status,
+      contentBlocks: preferStreamedTurn ? [...streamed.contentBlocks] : entry.contentBlocks,
       artifacts: streamed.artifacts.length > 0 ? [...streamed.artifacts] : entry.artifacts,
       controls: streamed.controls.length > 0 ? [...streamed.controls] : entry.controls,
-      prompt: streamed.prompt ?? entry.prompt,
+      prompt: mergePromptState(streamed.prompt, entry.prompt),
     };
   });
 
@@ -504,12 +629,205 @@ function applyConnectionPatch(
   };
 }
 
+function patchPrompt(
+  prompt: PromptViewState,
+  patch: Readonly<Partial<PromptViewState>>,
+): PromptViewState {
+  return {
+    ...prompt,
+    ...patch,
+  };
+}
+
+function updatePromptEntry(
+  entry: TranscriptEntryState,
+  promptId: string,
+  updater: (prompt: PromptViewState) => PromptViewState,
+): TranscriptEntryState {
+  if (entry.kind !== 'turn' || entry.prompt?.promptId !== promptId) {
+    return entry;
+  }
+
+  return {
+    ...entry,
+    prompt: updater(entry.prompt),
+  };
+}
+
+function applyPromptUpdate(
+  state: WorkspaceState,
+  conversationId: string,
+  turnId: string,
+  promptId: string,
+  updater: (prompt: PromptViewState) => PromptViewState,
+): WorkspaceState {
+  const current = ensureConversation(state.conversations, conversationId);
+  const nextEntries = current.entries.map((entry) =>
+    entry.turnId === turnId ? updatePromptEntry(entry, promptId, updater) : entry,
+  );
+  const changed = nextEntries.some((entry, index) => entry !== current.entries[index]);
+
+  if (!changed) {
+    return state;
+  }
+
+  const nextConversations = new Map(state.conversations);
+  nextConversations.set(conversationId, {
+    ...current,
+    entries: nextEntries,
+  });
+  return {
+    ...state,
+    conversationOrder: withConversationInOrder(state.conversationOrder, conversationId),
+    conversations: nextConversations,
+  };
+}
+
+function applyPromptBeginResponse(
+  state: WorkspaceState,
+  conversationId: string,
+  turnId: string,
+  promptId: string,
+): WorkspaceState {
+  return applyPromptUpdate(state, conversationId, turnId, promptId, (prompt) => {
+    if (prompt.status !== 'pending' && prompt.status !== 'error') return prompt;
+    return patchPrompt(prompt, { status: 'responding', errorMessage: null });
+  });
+}
+
+function applyPromptResponseConfirmed(
+  state: WorkspaceState,
+  conversationId: string,
+  turnId: string,
+  promptId: string,
+  responseSummary: string | null,
+): WorkspaceState {
+  return applyPromptUpdate(state, conversationId, turnId, promptId, (prompt) => {
+    if (prompt.status !== 'responding' && prompt.status !== 'stale') return prompt;
+    return patchPrompt(prompt, {
+      status: 'resolved',
+      lastResponseSummary: responseSummary,
+      errorMessage: null,
+      staleReason: null,
+    });
+  });
+}
+
+function applyPromptResponseFailed(
+  state: WorkspaceState,
+  conversationId: string,
+  turnId: string,
+  promptId: string,
+  errorMessage: string | null,
+): WorkspaceState {
+  return applyPromptUpdate(state, conversationId, turnId, promptId, (prompt) => {
+    if (prompt.status !== 'responding') return prompt;
+    return patchPrompt(prompt, { status: 'error', errorMessage });
+  });
+}
+
+function applyPromptMarkStale(
+  state: WorkspaceState,
+  conversationId: string,
+  turnId: string,
+  promptId: string,
+  reason: string | null,
+): WorkspaceState {
+  return applyPromptUpdate(state, conversationId, turnId, promptId, (prompt) => {
+    if (prompt.status !== 'pending' && prompt.status !== 'responding') return prompt;
+    return patchPrompt(prompt, { status: 'stale', staleReason: reason });
+  });
+}
+
+function applyPromptMarkUnavailable(
+  state: WorkspaceState,
+  conversationId: string,
+  turnId: string,
+  promptId: string,
+): WorkspaceState {
+  return applyPromptUpdate(state, conversationId, turnId, promptId, (prompt) => {
+    if (prompt.status === 'resolved') return prompt;
+    return patchPrompt(prompt, { status: 'unavailable' });
+  });
+}
+
+function applyPromptHydrate(
+  state: WorkspaceState,
+  conversationId: string,
+  turnId: string,
+  promptId: string,
+  allowedResponses: PromptViewState['allowedResponses'],
+  contextBlocks: PromptViewState['contextBlocks'],
+): WorkspaceState {
+  return applyPromptUpdate(state, conversationId, turnId, promptId, (prompt) =>
+    patchPrompt(prompt, {
+      allowedResponses: [...allowedResponses],
+      contextBlocks: [...contextBlocks],
+    }),
+  );
+}
+
+function isPromptAction(action: WorkspaceAction): action is PromptAction {
+  return action.type.startsWith('prompt/');
+}
+
+function applyPromptAction(state: WorkspaceState, action: PromptAction): WorkspaceState {
+  switch (action.type) {
+    case 'prompt/begin-response':
+      return applyPromptBeginResponse(state, action.conversationId, action.turnId, action.promptId);
+    case 'prompt/response-confirmed':
+      return applyPromptResponseConfirmed(
+        state,
+        action.conversationId,
+        action.turnId,
+        action.promptId,
+        action.responseSummary,
+      );
+    case 'prompt/response-failed':
+      return applyPromptResponseFailed(
+        state,
+        action.conversationId,
+        action.turnId,
+        action.promptId,
+        action.errorMessage,
+      );
+    case 'prompt/mark-stale':
+      return applyPromptMarkStale(
+        state,
+        action.conversationId,
+        action.turnId,
+        action.promptId,
+        action.reason,
+      );
+    case 'prompt/mark-unavailable':
+      return applyPromptMarkUnavailable(
+        state,
+        action.conversationId,
+        action.turnId,
+        action.promptId,
+      );
+    case 'prompt/hydrate':
+      return applyPromptHydrate(
+        state,
+        action.conversationId,
+        action.turnId,
+        action.promptId,
+        action.allowedResponses,
+        action.contextBlocks,
+      );
+  }
+}
+
 // ─── Top-level reducer ──────────────────────────────────────────────────────
 
 export function reduceWorkspaceState(
   state: WorkspaceState,
   action: WorkspaceAction,
 ): WorkspaceState {
+  if (isPromptAction(action)) {
+    return applyPromptAction(state, action);
+  }
+
   switch (action.type) {
     case 'conversation/upsert':
       return applyConversationUpsert(state, action.conversation);

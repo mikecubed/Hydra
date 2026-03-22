@@ -27,6 +27,7 @@ export type {
   EntryControlKind,
   EntryControlState,
   LineageRelationshipKind,
+  PromptStatus,
   PromptViewState,
   TranscriptEntryKind,
   TranscriptEntryState,
@@ -38,7 +39,11 @@ export type {
 } from './workspace-types.ts';
 
 // ─── Re-export: reducer / state factory ─────────────────────────────────────
-export { createInitialWorkspaceState, reduceWorkspaceState } from './workspace-reducer.ts';
+export {
+  createInitialWorkspaceState,
+  mergePromptState,
+  reduceWorkspaceState,
+} from './workspace-reducer.ts';
 
 // ─── Re-export: submit orchestration ────────────────────────────────────────
 export { submitComposerDraft, createAndSubmitDraft } from './submit-flow.ts';

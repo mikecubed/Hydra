@@ -749,6 +749,60 @@ describe('ack gating for ignored conditional events', () => {
     assert.equal(stateMap.get('conv-1')?.serverResumeSeq, 1);
     assert.ok(stateMap.get('conv-1')?.pendingSeqs.has(2));
   });
+
+  it('does advance serverResumeSeq for invalid approval-prompt no-op events', () => {
+    const store = storeWithConversation('conv-1');
+
+    let sub = createStreamSubscriptionState();
+    sub = applyStreamEventsToConversation(
+      store,
+      'conv-1',
+      [makeEvent({ seq: 1, turnId: 't1', kind: 'stream-started', payload: {} })],
+      sub,
+    );
+    assert.equal(sub.serverResumeSeq, 1);
+
+    sub = applyStreamEventsToConversation(
+      store,
+      'conv-1',
+      [makeEvent({ seq: 2, turnId: 't1', kind: 'approval-prompt', payload: {} })],
+      sub,
+    );
+
+    assert.equal(sub.serverResumeSeq, 2);
+    assert.equal(sub.pendingSeqs.size, 0);
+    assert.equal(store.getState().conversations.get('conv-1')?.entries[0]?.prompt, null);
+  });
+
+  it('acks invalid approval-prompt no-op events via buildStreamCallbacks', () => {
+    const store = storeWithConversation('conv-1');
+    const stateMap = new Map<string, StreamSubscriptionState>();
+    const ackCalls: Array<{ conversationId: string; seq: number }> = [];
+
+    const callbacks = buildStreamCallbacks(
+      store,
+      stateMap,
+      (conversationId, seq) => {
+        ackCalls.push({ conversationId, seq });
+      },
+      { onReconnectNeeded: () => {}, onConnectionEstablished: () => {} },
+    );
+
+    callbacks.onStreamEvent!(
+      'conv-1',
+      makeEvent({ seq: 1, turnId: 't1', kind: 'stream-started', payload: {} }),
+    );
+    callbacks.onStreamEvent!(
+      'conv-1',
+      makeEvent({ seq: 2, turnId: 't1', kind: 'approval-prompt', payload: {} }),
+    );
+
+    assert.deepEqual(ackCalls, [
+      { conversationId: 'conv-1', seq: 1 },
+      { conversationId: 'conv-1', seq: 2 },
+    ]);
+    assert.equal(stateMap.get('conv-1')?.serverResumeSeq, 2);
+  });
 });
 
 // ─── New-conversation REST clobber prevention ───────────────────────────────
@@ -945,7 +999,11 @@ describe('contiguous resume frontier (gap safety)', () => {
             promptId: 'p1',
             parentTurnId: 't2',
             status: 'pending' as const,
+            allowedResponses: [],
+            contextBlocks: [],
             lastResponseSummary: null,
+            errorMessage: null,
+            staleReason: null,
           },
         },
       ],
@@ -1435,7 +1493,7 @@ describe('existing-conversation history vs live-stream race', () => {
     assert.equal(merged?.historyLoaded, true);
   });
 
-  it('merge-history preserves stream-owned prompt and artifacts on shared turns', () => {
+  it('merge-history preserves stream-owned prompt/artifacts and backfills REST prompt metadata', () => {
     const store = createWorkspaceStore();
     store.dispatch({ type: 'conversation/select', conversationId: 'conv-shared-substate' });
 
@@ -1464,7 +1522,28 @@ describe('existing-conversation history vs live-stream race', () => {
     store.dispatch({
       type: 'conversation/merge-history',
       conversationId: 'conv-shared-substate',
-      entries: [existingTurnEntry('t-shared', 'Complete REST content')],
+      entries: [
+        {
+          ...existingTurnEntry('t-shared', 'Complete REST content'),
+          prompt: {
+            promptId: 'approval-1',
+            parentTurnId: 't-shared',
+            status: 'pending',
+            allowedResponses: ['approve', 'deny'],
+            contextBlocks: [
+              {
+                blockId: 'approval-1-prompt',
+                kind: 'text',
+                text: 'Approve the proposed change?',
+                metadata: null,
+              },
+            ],
+            lastResponseSummary: null,
+            errorMessage: null,
+            staleReason: null,
+          },
+        },
+      ],
       hasMoreHistory: false,
     });
 
@@ -1472,6 +1551,8 @@ describe('existing-conversation history vs live-stream race', () => {
     assert.equal(merged?.entries.length, 1, 'shared turn must still deduplicate to one entry');
     assert.equal(merged?.entries[0].contentBlocks[0]?.text, 'Complete REST content');
     assert.equal(merged?.entries[0].prompt?.promptId, 'approval-1');
+    assert.deepEqual(merged?.entries[0].prompt?.allowedResponses, ['approve', 'deny']);
+    assert.equal(merged?.entries[0].prompt?.contextBlocks[0]?.text, 'Approve the proposed change?');
     assert.equal(merged?.entries[0].artifacts.length, 1);
     assert.equal(merged?.entries[0].artifacts[0]?.artifactId, 'artifact-1');
 
@@ -1493,6 +1574,49 @@ describe('existing-conversation history vs live-stream race', () => {
     assert.equal(merged?.entries[0].prompt?.status, 'resolved');
     assert.equal(merged?.entries[0].prompt?.lastResponseSummary, 'approved');
     assert.equal(sub.serverResumeSeq, 4);
+  });
+
+  it('merge-history preserves streamed content when REST returns an older executing snapshot', () => {
+    const store = createWorkspaceStore();
+    store.dispatch({ type: 'conversation/select', conversationId: 'conv-history-race' });
+
+    applyStreamEventsToConversation(
+      store,
+      'conv-history-race',
+      [
+        makeEvent({ seq: 1, turnId: 't-shared', kind: 'stream-started', payload: {} }),
+        makeEvent({
+          seq: 2,
+          turnId: 't-shared',
+          kind: 'text-delta',
+          payload: { text: 'hello ' },
+        }),
+        makeEvent({
+          seq: 3,
+          turnId: 't-shared',
+          kind: 'text-delta',
+          payload: { text: 'world' },
+        }),
+      ],
+      createStreamSubscriptionState(),
+    );
+
+    store.dispatch({
+      type: 'conversation/merge-history',
+      conversationId: 'conv-history-race',
+      entries: [
+        {
+          ...existingTurnEntry('t-shared', 'hello '),
+          status: 'executing',
+        },
+      ],
+      hasMoreHistory: false,
+    });
+
+    const merged = store.getState().conversations.get('conv-history-race');
+    assert.equal(merged?.entries.length, 1);
+    assert.equal(merged?.entries[0].status, 'streaming');
+    assert.equal(merged?.entries[0].contentBlocks[0]?.text, 'hello world');
   });
 
   it('merge-history preserves activity-group entries from stream', () => {

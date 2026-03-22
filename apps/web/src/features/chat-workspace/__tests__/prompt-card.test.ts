@@ -1,0 +1,589 @@
+/**
+ * Tests for prompt card helpers, async respond flow, and prompt selectors.
+ *
+ * Uses node:test — pure logic only, no JSX rendering.
+ */
+
+import assert from 'node:assert/strict';
+import { describe, it } from 'node:test';
+
+import type { RespondToApprovalResponse } from '@hydra/web-contracts';
+
+import { GatewayRequestError } from '../api/gateway-client.ts';
+import {
+  filterPendingPrompts,
+  getPromptStatusLabel,
+  isPromptActionable,
+  isPromptTerminal,
+  resolveResponseLabel,
+  respondToPrompt,
+} from '../model/prompt-helpers.ts';
+import { selectPendingPrompts } from '../model/selectors.ts';
+import { createInitialWorkspaceState, reduceWorkspaceState } from '../model/workspace-reducer.ts';
+import type {
+  ConversationViewState,
+  PromptViewState,
+  TranscriptEntryState,
+  WorkspaceAction,
+  WorkspaceListener,
+  WorkspaceState,
+  WorkspaceStore,
+} from '../model/workspace-types.ts';
+
+// ─── Helpers ────────────────────────────────────────────────────────────────
+
+function makePrompt(overrides: Partial<PromptViewState> = {}): PromptViewState {
+  return {
+    promptId: 'prompt-1',
+    parentTurnId: 'turn-1',
+    status: 'pending',
+    allowedResponses: ['approve', 'deny'],
+    contextBlocks: [],
+    lastResponseSummary: null,
+    errorMessage: null,
+    staleReason: null,
+    ...overrides,
+  };
+}
+
+function makeEntry(overrides: Partial<TranscriptEntryState> = {}): TranscriptEntryState {
+  return {
+    entryId: 'entry-1',
+    kind: 'turn',
+    turnId: 'turn-1',
+    status: 'completed',
+    timestamp: '2026-07-01T00:00:00.000Z',
+    contentBlocks: [],
+    artifacts: [],
+    controls: [],
+    prompt: null,
+    ...overrides,
+  };
+}
+
+function stateWithPrompt(prompt: PromptViewState): WorkspaceState {
+  const entry = makeEntry({
+    entryId: 'turn-1',
+    turnId: 'turn-1',
+    status: 'streaming',
+    prompt,
+  });
+  const conversation: ConversationViewState = {
+    conversationId: 'conv-1',
+    title: 'Test',
+    status: 'active',
+    createdAt: null,
+    updatedAt: null,
+    turnCount: 1,
+    pendingInstructionCount: 0,
+    lineageSummary: null,
+    entries: [entry],
+    hasMoreHistory: false,
+    loadState: 'ready',
+    historyLoaded: true,
+    controlState: { canSubmit: true, submissionPolicyLabel: 'Ready', staleReason: null },
+  };
+  const base = createInitialWorkspaceState();
+  const conversations = new Map(base.conversations);
+  conversations.set('conv-1', conversation);
+  return {
+    ...base,
+    activeConversationId: 'conv-1',
+    conversationOrder: ['conv-1'],
+    conversations,
+  };
+}
+
+function createMockStore(initialState: WorkspaceState): WorkspaceStore & {
+  dispatched: WorkspaceAction[];
+} {
+  let state = initialState;
+  const dispatched: WorkspaceAction[] = [];
+  const listeners = new Set<WorkspaceListener>();
+
+  return {
+    dispatched,
+    getState() {
+      return state;
+    },
+    dispatch(action: WorkspaceAction) {
+      dispatched.push(action);
+      state = reduceWorkspaceState(state, action);
+      for (const listener of listeners) {
+        listener(state, action);
+      }
+    },
+    subscribe(listener) {
+      listeners.add(listener);
+      return () => {
+        listeners.delete(listener);
+      };
+    },
+  };
+}
+
+function makeApprovalResponse(): RespondToApprovalResponse {
+  return {
+    success: true,
+    approval: {
+      id: 'prompt-1',
+      turnId: 'turn-1',
+      status: 'responded',
+      prompt: 'Approve the change?',
+      context: {},
+      contextHash: 'ctx-1',
+      responseOptions: [
+        { key: 'approve', label: 'Approve' },
+        { key: 'deny', label: 'Deny' },
+      ],
+      response: 'approve',
+      createdAt: '2026-07-01T00:00:00.000Z',
+    },
+  };
+}
+
+// ─── getPromptStatusLabel ───────────────────────────────────────────────────
+
+describe('getPromptStatusLabel', () => {
+  it('returns pending label', () => {
+    assert.equal(getPromptStatusLabel('pending'), '⏳ Approval pending');
+  });
+
+  it('returns responding label', () => {
+    assert.equal(getPromptStatusLabel('responding'), '⏳ Submitting response…');
+  });
+
+  it('returns resolved label', () => {
+    assert.equal(getPromptStatusLabel('resolved'), '✓ Approval resolved');
+  });
+
+  it('returns stale label', () => {
+    assert.equal(getPromptStatusLabel('stale'), '⚠ Approval stale');
+  });
+
+  it('returns unavailable label', () => {
+    assert.equal(getPromptStatusLabel('unavailable'), '✕ Approval unavailable');
+  });
+
+  it('returns error label', () => {
+    assert.equal(getPromptStatusLabel('error'), '✕ Response failed');
+  });
+});
+
+// ─── isPromptActionable ─────────────────────────────────────────────────────
+
+describe('isPromptActionable', () => {
+  it('returns true for pending', () => {
+    assert.equal(isPromptActionable('pending'), true);
+  });
+
+  it('returns false for responding', () => {
+    assert.equal(isPromptActionable('responding'), false);
+  });
+
+  it('returns false for resolved', () => {
+    assert.equal(isPromptActionable('resolved'), false);
+  });
+
+  it('returns false for stale', () => {
+    assert.equal(isPromptActionable('stale'), false);
+  });
+
+  it('returns false for unavailable', () => {
+    assert.equal(isPromptActionable('unavailable'), false);
+  });
+
+  it('returns true for error so transient failures remain retryable', () => {
+    assert.equal(isPromptActionable('error'), true);
+  });
+});
+
+// ─── isPromptTerminal ───────────────────────────────────────────────────────
+
+describe('isPromptTerminal', () => {
+  it('returns true for resolved', () => {
+    assert.equal(isPromptTerminal('resolved'), true);
+  });
+
+  it('returns true for stale', () => {
+    assert.equal(isPromptTerminal('stale'), true);
+  });
+
+  it('returns true for unavailable', () => {
+    assert.equal(isPromptTerminal('unavailable'), true);
+  });
+
+  it('returns false for pending', () => {
+    assert.equal(isPromptTerminal('pending'), false);
+  });
+
+  it('returns false for responding', () => {
+    assert.equal(isPromptTerminal('responding'), false);
+  });
+
+  it('returns false for error', () => {
+    assert.equal(isPromptTerminal('error'), false);
+  });
+});
+
+// ─── filterPendingPrompts ───────────────────────────────────────────────────
+
+describe('filterPendingPrompts', () => {
+  it('extracts pending prompts from entries', () => {
+    const entries = [
+      makeEntry({ prompt: makePrompt() }),
+      makeEntry({ entryId: 'entry-2', prompt: makePrompt({ promptId: 'p2', status: 'resolved' }) }),
+      makeEntry({ entryId: 'entry-3', prompt: null }),
+    ];
+    const pending = filterPendingPrompts(entries);
+    assert.equal(pending.length, 1);
+    assert.equal(pending[0].promptId, 'prompt-1');
+  });
+
+  it('returns empty array when no pending prompts', () => {
+    const entries = [
+      makeEntry({ prompt: makePrompt({ status: 'resolved' }) }),
+      makeEntry({ entryId: 'entry-2', prompt: null }),
+    ];
+    assert.deepStrictEqual(filterPendingPrompts(entries), []);
+  });
+
+  it('returns empty for empty entries', () => {
+    assert.deepStrictEqual(filterPendingPrompts([]), []);
+  });
+});
+
+// ─── resolveResponseLabel ───────────────────────────────────────────────────
+
+describe('resolveResponseLabel', () => {
+  it('returns label for matching {key, label} option', () => {
+    const choices = [
+      { key: 'approve', label: 'Approve' },
+      { key: 'approve_with_changes', label: 'Approve with changes' },
+      { key: 'deny', label: 'Deny' },
+    ];
+    assert.equal(resolveResponseLabel(choices, 'approve_with_changes'), 'Approve with changes');
+  });
+
+  it('returns the string itself for plain-string choices', () => {
+    assert.equal(resolveResponseLabel(['approve', 'deny'], 'approve'), 'approve');
+  });
+
+  it('falls back to key when no match is found', () => {
+    assert.equal(
+      resolveResponseLabel([{ key: 'approve', label: 'Approve' }], 'unknown'),
+      'unknown',
+    );
+  });
+
+  it('handles mixed string and object choices', () => {
+    const choices = ['approve', { key: 'deny', label: 'Deny' }] as const;
+    assert.equal(resolveResponseLabel(choices, 'deny'), 'Deny');
+    assert.equal(resolveResponseLabel(choices, 'approve'), 'approve');
+  });
+
+  it('returns key for empty allowedResponses', () => {
+    assert.equal(resolveResponseLabel([], 'approve'), 'approve');
+  });
+});
+
+// ─── selectPendingPrompts ───────────────────────────────────────────────────
+
+describe('selectPendingPrompts', () => {
+  it('returns pending prompts from the active conversation', () => {
+    const state = stateWithPrompt(makePrompt());
+    const pending = selectPendingPrompts(state);
+    assert.equal(pending.length, 1);
+    assert.equal(pending[0].promptId, 'prompt-1');
+  });
+
+  it('returns empty when no prompts are pending', () => {
+    const state = stateWithPrompt(makePrompt({ status: 'resolved' }));
+    assert.deepStrictEqual(selectPendingPrompts(state), []);
+  });
+
+  it('returns empty when no active conversation', () => {
+    const state = createInitialWorkspaceState();
+    assert.deepStrictEqual(selectPendingPrompts(state), []);
+  });
+});
+
+// ─── respondToPrompt ────────────────────────────────────────────────────────
+
+describe('respondToPrompt', () => {
+  it('dispatches begin-response, calls API, then confirms on success', async () => {
+    const state = stateWithPrompt(makePrompt());
+    const store = createMockStore(state);
+
+    const mockClient = {
+      async respondToApproval() {
+        return makeApprovalResponse();
+      },
+    };
+
+    const result = await respondToPrompt(
+      { store, client: mockClient },
+      { conversationId: 'conv-1', turnId: 'turn-1', promptId: 'prompt-1', response: 'approve' },
+    );
+
+    assert.equal(result.ok, true);
+    assert.equal(store.dispatched.length, 2);
+    assert.equal(store.dispatched[0].type, 'prompt/begin-response');
+    assert.equal(store.dispatched[1].type, 'prompt/response-confirmed');
+
+    const confirmed = store.dispatched[1];
+    assert.equal(
+      confirmed.type === 'prompt/response-confirmed' ? confirmed.responseSummary : null,
+      'approve',
+    );
+
+    // Final state should be resolved
+    const finalPrompt = store.getState().conversations.get('conv-1')?.entries[0].prompt;
+    assert.equal(finalPrompt?.status, 'resolved');
+    assert.equal(finalPrompt?.lastResponseSummary, 'approve');
+  });
+
+  it('dispatches begin-response then response-failed on API error', async () => {
+    const state = stateWithPrompt(makePrompt());
+    const store = createMockStore(state);
+
+    const mockClient = {
+      async respondToApproval() {
+        throw new Error('Gateway 409: conflict');
+      },
+    };
+
+    const result = await respondToPrompt(
+      { store, client: mockClient },
+      { conversationId: 'conv-1', turnId: 'turn-1', promptId: 'prompt-1', response: 'approve' },
+    );
+
+    assert.equal(result.ok, false);
+    assert.equal(result.error, 'Gateway 409: conflict');
+    assert.equal(store.dispatched.length, 2);
+    assert.equal(store.dispatched[0].type, 'prompt/begin-response');
+    assert.equal(store.dispatched[1].type, 'prompt/response-failed');
+
+    const finalPrompt = store.getState().conversations.get('conv-1')?.entries[0].prompt;
+    assert.equal(finalPrompt?.status, 'error');
+    assert.equal(finalPrompt?.errorMessage, 'Gateway 409: conflict');
+  });
+
+  it('marks prompt stale on 409 gateway conflict', async () => {
+    const state = stateWithPrompt(makePrompt());
+    const store = createMockStore(state);
+
+    const mockClient = {
+      async respondToApproval() {
+        throw new GatewayRequestError(409, {
+          ok: false,
+          code: 'APPROVAL_STALE',
+          category: 'session',
+          message: 'Approval is stale',
+          httpStatus: 409,
+        });
+      },
+    };
+
+    const result = await respondToPrompt(
+      { store, client: mockClient },
+      { conversationId: 'conv-1', turnId: 'turn-1', promptId: 'prompt-1', response: 'approve' },
+    );
+
+    assert.equal(result.ok, false);
+    assert.equal(store.dispatched.length, 2);
+    assert.equal(store.dispatched[0].type, 'prompt/begin-response');
+    assert.equal(store.dispatched[1].type, 'prompt/mark-stale');
+
+    const finalPrompt = store.getState().conversations.get('conv-1')?.entries[0].prompt;
+    assert.equal(finalPrompt?.status, 'stale');
+    assert.equal(finalPrompt?.staleReason, 'Approval is stale');
+  });
+
+  it('marks prompt unavailable when 409 reports an already-responded approval', async () => {
+    const state = stateWithPrompt(makePrompt());
+    const store = createMockStore(state);
+
+    const mockClient = {
+      async respondToApproval() {
+        throw new GatewayRequestError(409, {
+          ok: false,
+          code: 'APPROVAL_ALREADY_RESPONDED',
+          category: 'session',
+          message: 'Approval already responded by another session',
+          httpStatus: 409,
+        });
+      },
+    };
+
+    const result = await respondToPrompt(
+      { store, client: mockClient },
+      { conversationId: 'conv-1', turnId: 'turn-1', promptId: 'prompt-1', response: 'approve' },
+    );
+
+    assert.equal(result.ok, false);
+    assert.equal(store.dispatched[0].type, 'prompt/begin-response');
+    assert.equal(store.dispatched[1].type, 'prompt/mark-unavailable');
+
+    const finalPrompt = store.getState().conversations.get('conv-1')?.entries[0].prompt;
+    assert.equal(finalPrompt?.status, 'unavailable');
+  });
+
+  it('marks prompt unavailable on 404 gateway miss', async () => {
+    const state = stateWithPrompt(makePrompt());
+    const store = createMockStore(state);
+
+    const mockClient = {
+      async respondToApproval() {
+        throw new GatewayRequestError(404, {
+          ok: false,
+          code: 'HTTP_ERROR',
+          category: 'validation',
+          message: 'Approval no longer exists',
+          httpStatus: 404,
+        });
+      },
+    };
+
+    const result = await respondToPrompt(
+      { store, client: mockClient },
+      { conversationId: 'conv-1', turnId: 'turn-1', promptId: 'prompt-1', response: 'approve' },
+    );
+
+    assert.equal(result.ok, false);
+    assert.equal(store.dispatched.length, 2);
+    assert.equal(store.dispatched[0].type, 'prompt/begin-response');
+    assert.equal(store.dispatched[1].type, 'prompt/mark-unavailable');
+
+    const finalPrompt = store.getState().conversations.get('conv-1')?.entries[0].prompt;
+    assert.equal(finalPrompt?.status, 'unavailable');
+  });
+
+  it('retries successfully when prompt starts in error state', async () => {
+    const state = stateWithPrompt(
+      makePrompt({ status: 'error', errorMessage: 'Temporary network failure' }),
+    );
+    const store = createMockStore(state);
+
+    const mockClient = {
+      async respondToApproval() {
+        return makeApprovalResponse();
+      },
+    };
+
+    const result = await respondToPrompt(
+      { store, client: mockClient },
+      { conversationId: 'conv-1', turnId: 'turn-1', promptId: 'prompt-1', response: 'approve' },
+    );
+
+    assert.equal(result.ok, true);
+    assert.equal(store.dispatched[0].type, 'prompt/begin-response');
+    assert.equal(store.dispatched[1].type, 'prompt/response-confirmed');
+
+    const finalPrompt = store.getState().conversations.get('conv-1')?.entries[0].prompt;
+    assert.equal(finalPrompt?.status, 'resolved');
+    assert.equal(finalPrompt?.errorMessage, null);
+  });
+
+  it('rejects when prompt is not pending', async () => {
+    const state = stateWithPrompt(makePrompt({ status: 'resolved' }));
+    const store = createMockStore(state);
+    let apiCalled = false;
+    const mockClient = {
+      async respondToApproval() {
+        apiCalled = true;
+        return makeApprovalResponse();
+      },
+    };
+
+    const result = await respondToPrompt(
+      { store, client: mockClient },
+      { conversationId: 'conv-1', turnId: 'turn-1', promptId: 'prompt-1', response: 'approve' },
+    );
+
+    assert.equal(result.ok, false);
+    assert.equal(result.error, 'Prompt is not actionable');
+    assert.equal(store.dispatched.length, 0);
+    assert.equal(apiCalled, false);
+  });
+
+  it('rejects when prompt is already responding (prevents duplicates)', async () => {
+    const state = stateWithPrompt(makePrompt({ status: 'responding' }));
+    const store = createMockStore(state);
+    let apiCalled = false;
+    const mockClient = {
+      async respondToApproval() {
+        apiCalled = true;
+        return makeApprovalResponse();
+      },
+    };
+
+    const result = await respondToPrompt(
+      { store, client: mockClient },
+      { conversationId: 'conv-1', turnId: 'turn-1', promptId: 'prompt-1', response: 'approve' },
+    );
+
+    assert.equal(result.ok, false);
+    assert.equal(apiCalled, false);
+  });
+
+  it('rejects when conversation does not exist', async () => {
+    const state = createInitialWorkspaceState();
+    const store = createMockStore(state);
+    const mockClient = {
+      async respondToApproval() {
+        return makeApprovalResponse();
+      },
+    };
+
+    const result = await respondToPrompt(
+      { store, client: mockClient },
+      {
+        conversationId: 'nonexistent',
+        turnId: 'turn-1',
+        promptId: 'prompt-1',
+        response: 'approve',
+      },
+    );
+
+    assert.equal(result.ok, false);
+    assert.equal(store.dispatched.length, 0);
+  });
+
+  it('stores operator-facing label instead of raw key in responseSummary', async () => {
+    const state = stateWithPrompt(
+      makePrompt({
+        allowedResponses: [
+          { key: 'approve_with_changes', label: 'Approve with changes' },
+          { key: 'deny', label: 'Deny' },
+        ],
+      }),
+    );
+    const store = createMockStore(state);
+    const mockClient = {
+      async respondToApproval() {
+        return makeApprovalResponse();
+      },
+    };
+
+    const result = await respondToPrompt(
+      { store, client: mockClient },
+      {
+        conversationId: 'conv-1',
+        turnId: 'turn-1',
+        promptId: 'prompt-1',
+        response: 'approve_with_changes',
+      },
+    );
+
+    assert.equal(result.ok, true);
+    const confirmed = store.dispatched[1];
+    assert.equal(
+      confirmed.type === 'prompt/response-confirmed' ? confirmed.responseSummary : null,
+      'Approve with changes',
+      'responseSummary must store operator-facing label, not raw key',
+    );
+    const finalPrompt = store.getState().conversations.get('conv-1')?.entries[0].prompt;
+    assert.equal(finalPrompt?.lastResponseSummary, 'Approve with changes');
+  });
+});

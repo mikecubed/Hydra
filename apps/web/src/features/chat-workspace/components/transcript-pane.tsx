@@ -8,6 +8,7 @@ export interface TranscriptPaneProps {
   readonly hasActiveConversation: boolean;
   readonly hasMoreHistory?: boolean;
   readonly onRetry?: () => void;
+  readonly onRespondToPrompt?: (promptId: string, response: string) => void;
 }
 
 const paneStyle = {
@@ -27,6 +28,7 @@ export function TranscriptPane({
   hasActiveConversation,
   hasMoreHistory = false,
   onRetry,
+  onRespondToPrompt,
 }: TranscriptPaneProps): JSX.Element {
   if (!hasActiveConversation) {
     return (
@@ -87,7 +89,7 @@ export function TranscriptPane({
         </p>
       )}
       {entries.map((entry) => (
-        <TranscriptTurn key={entry.entryId} entry={entry} />
+        <TranscriptTurn key={entry.entryId} entry={entry} onRespondToPrompt={onRespondToPrompt} />
       ))}
     </div>
   );

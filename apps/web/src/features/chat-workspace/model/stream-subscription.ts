@@ -178,6 +178,8 @@ export interface StreamLifecycleHooks {
   readonly onReconnectNeeded: () => void;
   /** Invoked when the WebSocket connection opens successfully. */
   readonly onConnectionEstablished: () => void;
+  /** Invoked when a live approval prompt is consumed into the transcript. */
+  readonly onApprovalPromptObserved?: (conversationId: string, event: StreamEvent) => void;
 }
 
 /**
@@ -276,6 +278,10 @@ export function buildStreamCallbacks(
       } else {
         // Event was pending (ignored conditional) or stale — update local state, no ack.
         stateMap.set(conversationId, candidateState);
+      }
+
+      if (wasConsumed && event.kind === 'approval-prompt') {
+        lifecycle.onApprovalPromptObserved?.(conversationId, event);
       }
     },
     onOpen() {

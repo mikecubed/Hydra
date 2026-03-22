@@ -26,6 +26,7 @@ export interface WorkspaceLayoutProps {
   readonly onSelectConversation: (conversationId: string) => void;
   readonly onStartNewConversation: () => void;
   readonly onRetryActiveTranscript: () => void;
+  readonly onRespondToPrompt?: (promptId: string, response: string) => void;
   readonly composerSlot?: JSX.Element | null;
 }
 
@@ -41,10 +42,9 @@ export function WorkspaceLayout({
   onSelectConversation,
   onStartNewConversation,
   onRetryActiveTranscript,
+  onRespondToPrompt,
   composerSlot,
 }: WorkspaceLayoutProps): JSX.Element {
-  const activeTitle = activeConversation?.title ?? 'No conversation selected';
-
   return (
     <section
       aria-labelledby="conversation-workspace-heading"
@@ -88,7 +88,7 @@ export function WorkspaceLayout({
               Transcript
             </h3>
             <p style={{ lineHeight: 1.6, marginBottom: '0.75rem' }}>
-              Active conversation: {activeTitle}
+              Active conversation: {activeConversation?.title ?? 'No conversation selected'}
             </p>
             <TranscriptPane
               entries={activeEntries}
@@ -96,6 +96,7 @@ export function WorkspaceLayout({
               hasActiveConversation={activeConversationId != null}
               hasMoreHistory={activeHasMoreHistory}
               onRetry={onRetryActiveTranscript}
+              onRespondToPrompt={onRespondToPrompt}
             />
           </section>
 

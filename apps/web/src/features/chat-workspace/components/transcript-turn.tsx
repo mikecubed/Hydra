@@ -2,13 +2,14 @@ import type { JSX } from 'react';
 import type {
   ArtifactReferenceState,
   ContentBlockState,
-  PromptViewState,
   TranscriptEntryState,
 } from '../model/workspace-store.ts';
 import { SafeText } from '../render/safe-text.tsx';
+import { PromptCard } from './prompt-card.tsx';
 
 export interface TranscriptTurnProps {
   readonly entry: TranscriptEntryState;
+  readonly onRespondToPrompt?: (promptId: string, response: string) => void;
 }
 
 const turnStyle = {
@@ -105,34 +106,6 @@ const artifactKindStyle = {
   opacity: 0.7,
 } as const;
 
-const promptSectionStyle = {
-  border: '1px solid rgba(251, 191, 36, 0.25)',
-  borderRadius: '0.375rem',
-  background: 'rgba(251, 191, 36, 0.05)',
-  padding: '0.5rem 0.75rem',
-  fontSize: '0.85rem',
-} as const;
-
-const promptResolvedStyle = {
-  ...promptSectionStyle,
-  borderColor: 'rgba(74, 222, 128, 0.25)',
-  background: 'rgba(74, 222, 128, 0.05)',
-} as const;
-
-const promptLabelStyle = {
-  display: 'flex',
-  alignItems: 'center',
-  gap: '0.4rem',
-  fontSize: '0.75rem',
-  color: '#fbbf24',
-  fontWeight: 600,
-} as const;
-
-const promptResolvedLabelStyle = {
-  ...promptLabelStyle,
-  color: '#4ade80',
-} as const;
-
 function formatTimestamp(iso: string): string {
   const date = new Date(iso);
   return Number.isNaN(date.getTime()) ? iso : date.toLocaleString();
@@ -184,27 +157,6 @@ function ArtifactList({
   );
 }
 
-function PromptSection({ prompt }: { readonly prompt: PromptViewState }): JSX.Element {
-  const isResolved = prompt.status === 'resolved';
-
-  return (
-    <div
-      style={isResolved ? promptResolvedStyle : promptSectionStyle}
-      data-testid="approval-prompt"
-      data-prompt-status={prompt.status}
-    >
-      <div style={isResolved ? promptResolvedLabelStyle : promptLabelStyle}>
-        <span>{isResolved ? '✓ Approval resolved' : '⏳ Approval pending'}</span>
-      </div>
-      {prompt.lastResponseSummary != null && (
-        <div style={{ marginTop: '0.25rem', fontSize: '0.8rem', color: '#cbd5e1' }}>
-          <SafeText text={prompt.lastResponseSummary} />
-        </div>
-      )}
-    </div>
-  );
-}
-
 function isStreamingStatus(status: string): boolean {
   return status === 'streaming';
 }
@@ -219,7 +171,7 @@ function resolveTurnStyle(
   return turnStyle;
 }
 
-export function TranscriptTurn({ entry }: TranscriptTurnProps): JSX.Element {
+export function TranscriptTurn({ entry, onRespondToPrompt }: TranscriptTurnProps): JSX.Element {
   const streaming = isStreamingStatus(entry.status);
 
   return (
@@ -251,7 +203,7 @@ export function TranscriptTurn({ entry }: TranscriptTurnProps): JSX.Element {
 
       <ArtifactList artifacts={entry.artifacts} />
 
-      {entry.prompt != null && <PromptSection prompt={entry.prompt} />}
+      {entry.prompt != null && <PromptCard prompt={entry.prompt} onRespond={onRespondToPrompt} />}
     </article>
   );
 }

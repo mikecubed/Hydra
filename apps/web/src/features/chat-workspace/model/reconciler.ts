@@ -14,6 +14,8 @@ import type { StreamEvent } from '@hydra/web-contracts';
 import type {
   ArtifactReferenceState,
   ContentBlockState,
+  PromptResponseChoiceState,
+  PromptViewState,
   TranscriptEntryState,
 } from './workspace-types.ts';
 
@@ -179,7 +181,11 @@ function applyStreamCompleted(
   const status =
     typeof event.payload['status'] === 'string' ? event.payload['status'] : 'completed';
   const withEntry = ensureTurnEntry(entries, event.turnId, event.timestamp);
-  return replaceTurnEntry(withEntry, event.turnId, (e) => ({ ...e, status }));
+  return replaceTurnEntry(withEntry, event.turnId, (e) => ({
+    ...e,
+    status,
+    prompt: markPromptStale(e.prompt),
+  }));
 }
 
 function applyStreamFailed(
@@ -201,8 +207,110 @@ function applyStreamFailed(
         metadata: null,
       });
     }
-    return { ...e, status: 'failed', contentBlocks: blocks };
+    return {
+      ...e,
+      status: 'failed',
+      contentBlocks: blocks,
+      prompt: markPromptStale(e.prompt),
+    };
   });
+}
+
+function filterStringArray(value: unknown): readonly string[] {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+
+  return value.filter((item): item is string => typeof item === 'string');
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null;
+}
+
+function parseContextBlocks(value: unknown): readonly ContentBlockState[] {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+
+  const blocks: ContentBlockState[] = [];
+  for (const block of value) {
+    if (
+      !isRecord(block) ||
+      typeof block['blockId'] !== 'string' ||
+      typeof block['kind'] !== 'string'
+    ) {
+      continue;
+    }
+
+    blocks.push({
+      blockId: block['blockId'],
+      kind:
+        block['kind'] === 'code' || block['kind'] === 'status' || block['kind'] === 'structured'
+          ? block['kind']
+          : 'text',
+      text: typeof block['text'] === 'string' ? block['text'] : null,
+      metadata: isRecord(block['metadata'])
+        ? Object.fromEntries(
+            Object.entries(block['metadata']).filter(
+              (entry): entry is [string, string] => typeof entry[1] === 'string',
+            ),
+          )
+        : null,
+    });
+  }
+  return blocks;
+}
+
+function createPromptState(event: StreamEvent): PromptViewState | null {
+  const raw = event.payload['approvalId'];
+  if (typeof raw !== 'string' || raw === '') {
+    return null;
+  }
+  return {
+    promptId: raw,
+    parentTurnId: event.turnId,
+    status: 'pending',
+    allowedResponses: filterStringArray(event.payload['allowedResponses']).map((key) => ({
+      key,
+      label: key,
+    })),
+    contextBlocks: parseContextBlocks(event.payload['contextBlocks']),
+    lastResponseSummary: null,
+    errorMessage: null,
+    staleReason: null,
+  };
+}
+
+function markPromptStale(prompt: PromptViewState | null): PromptViewState | null {
+  if (prompt == null) {
+    return null;
+  }
+
+  if (prompt.status !== 'pending' && prompt.status !== 'responding') {
+    return prompt;
+  }
+
+  return {
+    ...prompt,
+    status: 'stale',
+    staleReason: null,
+  };
+}
+
+/** Resolve operator-facing label for a response key from allowedResponses. */
+function resolveLabel(
+  allowedResponses: readonly PromptResponseChoiceState[],
+  responseKey: string,
+): string {
+  for (const choice of allowedResponses) {
+    if (typeof choice === 'string') {
+      if (choice === responseKey) return choice;
+    } else if (choice.key === responseKey) {
+      return choice.label;
+    }
+  }
+  return responseKey;
 }
 
 function applyActivityMarker(
@@ -246,19 +354,27 @@ function applyApprovalPrompt(
   entries: readonly TranscriptEntryState[],
   event: StreamEvent,
 ): readonly TranscriptEntryState[] {
-  const promptId =
-    typeof event.payload['approvalId'] === 'string' ? event.payload['approvalId'] : '';
-
+  const prompt = createPromptState(event);
+  if (prompt == null) {
+    return entries;
+  }
   const withEntry = ensureTurnEntry(entries, event.turnId, event.timestamp);
   return replaceTurnEntry(withEntry, event.turnId, (e) => ({
     ...e,
-    prompt: {
-      promptId,
-      parentTurnId: event.turnId,
-      status: 'pending' as const,
-      lastResponseSummary: null,
-    },
+    prompt,
   }));
+}
+
+function isConsumedNoopEvent(event: StreamEvent): boolean {
+  if (event.kind === 'checkpoint') {
+    return true;
+  }
+
+  if (event.kind === 'approval-prompt') {
+    return createPromptState(event) == null;
+  }
+
+  return false;
 }
 
 function applyApprovalResponse(
@@ -275,9 +391,15 @@ function applyApprovalResponse(
   const response = typeof event.payload['response'] === 'string' ? event.payload['response'] : null;
   return replaceTurnEntry(entries, event.turnId, (e) => {
     if (!e.prompt) return e;
+    const summary = response == null ? null : resolveLabel(e.prompt.allowedResponses, response);
     return {
       ...e,
-      prompt: { ...e.prompt, status: 'resolved' as const, lastResponseSummary: response },
+      prompt: {
+        ...e.prompt,
+        status: 'resolved',
+        lastResponseSummary: summary,
+        errorMessage: null,
+      },
     };
   });
 }
@@ -310,7 +432,11 @@ function applyCancellation(
   event: StreamEvent,
 ): readonly TranscriptEntryState[] {
   const withEntry = ensureTurnEntry(entries, event.turnId, event.timestamp);
-  return replaceTurnEntry(withEntry, event.turnId, (e) => ({ ...e, status: 'cancelled' }));
+  return replaceTurnEntry(withEntry, event.turnId, (e) => ({
+    ...e,
+    status: 'cancelled',
+    prompt: markPromptStale(e.prompt),
+  }));
 }
 
 function applySystemNotice(
@@ -410,10 +536,10 @@ export function reconcileStreamEvents(
     current = applyEvent(current, event);
 
     // Advance high-water when the event mutated entries, or for kinds that
-    // are intentionally no-op (checkpoint). Conditional events like
+    // are intentionally consumed no-ops. Conditional events like
     // approval-response must not consume seq when they didn't match, so
     // they remain eligible on later replay.
-    if (current !== prev || event.kind === 'checkpoint') {
+    if (current !== prev || isConsumedNoopEvent(event)) {
       consumedSeqs.add(event.seq);
       const prevHw = hwMap.get(event.turnId);
       if (prevHw === undefined || event.seq > prevHw) {
