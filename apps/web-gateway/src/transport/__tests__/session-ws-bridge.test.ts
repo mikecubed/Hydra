@@ -237,6 +237,34 @@ describe('SessionWsBridge', () => {
       }
     });
 
+    it('emits session-active when an expiring session is extended back to active', () => {
+      const nearExpiry = new Date(clock.now() + 5_000).toISOString();
+      const session = createSession({ state: 'expiring-soon', expiresAt: nearExpiry });
+      const conn = createMockConnection(session.id);
+      registry.register(conn);
+
+      const cleanup = bridge.bindSession(session, conn as never);
+      try {
+        const extendedExpiry = new Date(clock.now() + 60_000).toISOString();
+        broadcaster.broadcast(session.id, {
+          type: 'state-change',
+          previousState: 'expiring-soon',
+          newState: 'active',
+          expiresAt: extendedExpiry,
+          trigger: 'extend',
+        });
+
+        assert.ok(
+          conn.sent.some(
+            (message) => message.type === 'session-active' && message.expiresAt === extendedExpiry,
+          ),
+          'Expected session-active message after extension returns to active',
+        );
+      } finally {
+        cleanup();
+      }
+    });
+
     it('deduplicates warning messages across recovery and later expiring-soon transition', () => {
       const warningThresholdMs = 300;
       const localBridge = new SessionWsBridge({ broadcaster, registry, clock, warningThresholdMs });

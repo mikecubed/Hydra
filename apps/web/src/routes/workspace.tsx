@@ -60,6 +60,7 @@ import {
   resolveResponseLabel,
   respondToPrompt,
 } from '../features/chat-workspace/model/prompt-helpers.ts';
+import { canSubmitWork, describeConnectionState } from '../shared/session-state.ts';
 
 function useWorkspaceState(store: WorkspaceStore) {
   return useSyncExternalStore(
@@ -690,6 +691,44 @@ function resolveComposerSubmitState(
   return 'idle';
 }
 
+function resolveComposerPolicyLabel(
+  isLoadingConversations: boolean,
+  connectionCanSubmit: boolean,
+  state: WorkspaceState,
+  activeConversation:
+    | {
+        readonly controlState: {
+          readonly submissionPolicyLabel: string;
+        };
+      }
+    | undefined,
+): string {
+  if (isLoadingConversations) {
+    return 'Loading conversations…';
+  }
+
+  if (!connectionCanSubmit) {
+    return describeConnectionState(state.connection);
+  }
+
+  return activeConversation?.controlState.submissionPolicyLabel ?? 'Ready for operator input';
+}
+
+function resolveComposerCanSubmit(
+  isCreateMode: boolean,
+  isLoadingConversations: boolean,
+  connectionCanSubmit: boolean,
+  continueCanSubmit: boolean,
+  createCanSubmit: boolean,
+): boolean {
+  if (isLoadingConversations && !isCreateMode) {
+    return false;
+  }
+
+  const draftCanSubmit = isCreateMode ? createCanSubmit : continueCanSubmit;
+  return connectionCanSubmit && draftCanSubmit;
+}
+
 function useConversationListLoader(store: WorkspaceStore, client: GatewayClient) {
   const [isLoadingConversations, setIsLoadingConversations] = useState(true);
   const [conversationErrorMessage, setConversationErrorMessage] = useState<string | null>(null);
@@ -798,6 +837,7 @@ function useComposerProps(
   const isCreateMode = !isLoadingConversations && state.activeConversationId == null;
   const draft = selectActiveDraft(state);
   const activeConversation = selectActiveConversation(state);
+  const connectionCanSubmit = canSubmitWork(state.connection);
   const continueCanSubmit = selectCanSubmit(state);
   const createCanSubmit = selectCreateModeCanSubmit(createDraftText, createSubmitting, createError);
 
@@ -858,13 +898,19 @@ function useComposerProps(
     store,
   ]);
 
-  const policyLabel = isLoadingConversations
-    ? 'Loading conversations…'
-    : (activeConversation?.controlState.submissionPolicyLabel ?? 'Ready for operator input');
-  let canSubmit = createCanSubmit;
-  if (!isCreateMode) {
-    canSubmit = isLoadingConversations ? false : continueCanSubmit;
-  }
+  const policyLabel = resolveComposerPolicyLabel(
+    isLoadingConversations,
+    connectionCanSubmit,
+    state,
+    activeConversation,
+  );
+  const canSubmit = resolveComposerCanSubmit(
+    isCreateMode,
+    isLoadingConversations,
+    connectionCanSubmit,
+    continueCanSubmit,
+    createCanSubmit,
+  );
 
   return {
     draftText: isCreateMode ? createDraftText : (draft?.draftText ?? ''),

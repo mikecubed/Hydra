@@ -19,6 +19,7 @@ import {
   submitResponse,
   streamFrame,
   openAndSubscribe,
+  latestSocket,
   transcriptArticles,
 } from './browser-helpers.ts';
 
@@ -118,6 +119,9 @@ describe('workspace create-mode submit', () => {
 
     await vi.waitFor(() => {
       expect(screen.getByRole('textbox', { name: /instruction/i })).toBeInTheDocument();
+    });
+    act(() => {
+      latestSocket().simulateOpen();
     });
 
     fireEvent.change(screen.getByRole('textbox', { name: /instruction/i }), {

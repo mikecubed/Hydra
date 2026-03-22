@@ -3,7 +3,7 @@
  *
  * Client→Server: subscribe, unsubscribe, ack
  * Server→Client: stream-event, subscribed, unsubscribed, session-terminated,
- *                session-expiring-soon, daemon-unavailable, daemon-restored, error
+ *                session-expiring-soon, session-active, daemon-unavailable, daemon-restored, error
  */
 import { StreamEvent } from '@hydra/web-contracts';
 import { z } from 'zod';
@@ -81,6 +81,13 @@ const SessionExpiringSoonMessage = z
   })
   .strict();
 
+const SessionActiveMessage = z
+  .object({
+    type: z.literal('session-active'),
+    expiresAt: z.iso.datetime(),
+  })
+  .strict();
+
 const DaemonUnavailableMessage = z
   .object({
     type: z.literal('daemon-unavailable'),
@@ -112,6 +119,7 @@ export const ServerMessageSchema = z.discriminatedUnion('type', [
   UnsubscribedMessage,
   SessionTerminatedMessage,
   SessionExpiringSoonMessage,
+  SessionActiveMessage,
   DaemonUnavailableMessage,
   DaemonRestoredMessage,
   ErrorMessage,

@@ -77,6 +77,8 @@ export interface StreamClientCallbacks {
   ) => void;
   /** Session nearing expiry — UI may show a warning. */
   onSessionExpiringSoon?: (expiresAt: string) => void;
+  /** Session returned to active after extension or recovery. */
+  onSessionActive?: (expiresAt: string) => void;
   /** Backend daemon is unreachable. */
   onDaemonUnavailable?: () => void;
   /** Backend daemon has recovered. */
@@ -149,6 +151,11 @@ const ServerSessionExpiringSoon = z.object({
   expiresAt: z.iso.datetime(),
 });
 
+const ServerSessionActive = z.object({
+  type: z.literal('session-active'),
+  expiresAt: z.iso.datetime(),
+});
+
 const ServerDaemonUnavailable = z.object({ type: z.literal('daemon-unavailable') });
 const ServerDaemonRestored = z.object({ type: z.literal('daemon-restored') });
 
@@ -216,6 +223,16 @@ function handleSessionExpiringSoon(
   return null;
 }
 
+function handleSessionActive(
+  msg: Record<string, unknown>,
+  cb: StreamClientCallbacks,
+): string | null {
+  const result = ServerSessionActive.safeParse(msg);
+  if (!result.success) return result.error.message;
+  cb.onSessionActive?.(result.data.expiresAt);
+  return null;
+}
+
 function handleDaemonUnavailable(
   msg: Record<string, unknown>,
   cb: StreamClientCallbacks,
@@ -260,6 +277,8 @@ function resolveHandler(messageType: string): MessageHandler | null {
       return handleSessionTerminated;
     case 'session-expiring-soon':
       return handleSessionExpiringSoon;
+    case 'session-active':
+      return handleSessionActive;
     case 'daemon-unavailable':
       return handleDaemonUnavailable;
     case 'daemon-restored':

@@ -505,6 +505,21 @@ describe('StreamClient', () => {
       assert.deepStrictEqual(dates, ['2026-06-01T13:00:00.000Z']);
     });
 
+    it('dispatches session-active to onSessionActive', () => {
+      const dates: string[] = [];
+      const client = createStreamClient(defaultOptions());
+      client.connect(noopCallbacks({ onSessionActive: (expiresAt) => dates.push(expiresAt) }));
+      assert.ok(lastFakeSocket);
+      lastFakeSocket.simulateOpen();
+
+      lastFakeSocket.simulateMessage({
+        type: 'session-active',
+        expiresAt: '2026-06-01T14:00:00.000Z',
+      });
+
+      assert.deepStrictEqual(dates, ['2026-06-01T14:00:00.000Z']);
+    });
+
     it('dispatches daemon-unavailable to onDaemonUnavailable', () => {
       const calls: string[] = [];
       const client = createStreamClient(defaultOptions());
@@ -833,6 +848,28 @@ describe('StreamClient', () => {
       });
 
       assert.equal(expiryCalls.length, 0, 'non-ISO expiresAt should be rejected');
+      assert.equal(parseErrors.length, 1, 'should route to onParseError');
+    });
+
+    it('fires onParseError when session-active has non-ISO expiresAt', () => {
+      const parseErrors: Array<{ raw: string; error: string }> = [];
+      const activeCalls: string[] = [];
+      const client = createStreamClient(defaultOptions());
+      client.connect(
+        noopCallbacks({
+          onSessionActive: (expiresAt) => activeCalls.push(expiresAt),
+          onParseError: (raw, error) => parseErrors.push({ raw, error }),
+        }),
+      );
+      assert.ok(lastFakeSocket);
+      lastFakeSocket.simulateOpen();
+
+      lastFakeSocket.simulateMessage({
+        type: 'session-active',
+        expiresAt: 'next-tuesday',
+      });
+
+      assert.equal(activeCalls.length, 0, 'non-ISO expiresAt should be rejected');
       assert.equal(parseErrors.length, 1, 'should route to onParseError');
     });
 

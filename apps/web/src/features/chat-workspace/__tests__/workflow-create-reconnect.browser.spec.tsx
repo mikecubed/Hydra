@@ -94,16 +94,15 @@ describe('workspace create-flow with deferred subscription', () => {
       ws1.simulateOpen();
     });
 
-    // Simulate abnormal close — socket goes to CLOSED
-    act(() => {
-      ws1.simulateClose(1006, 'abnormal closure');
-    });
-
-    // Submit in create mode while socket is dead
+    // Submit while the workspace is live, then drop the socket before the
+    // create flow finishes so the new conversation must defer subscription.
     fireEvent.change(screen.getByRole('textbox', { name: /instruction/i }), {
       target: { value: 'Build me a thing' },
     });
     fireEvent.click(screen.getByRole('button', { name: /send/i }));
+    act(() => {
+      ws1.simulateClose(1006, 'abnormal closure');
+    });
 
     // Wait for the conversation to be created and selected
     await screen.findByRole('button', { name: /new chat/i });
@@ -180,16 +179,14 @@ describe('workspace create-flow with deferred subscription', () => {
       ws1.simulateOpen();
     });
 
-    // Close socket — triggers reconnect scheduling
-    act(() => {
-      ws1.simulateClose(1006, 'abnormal');
-    });
-
-    // Create new conversation while socket is dead
+    // Submit while live, then drop the socket before the create flow settles.
     fireEvent.change(screen.getByRole('textbox', { name: /instruction/i }), {
       target: { value: 'Build me a thing' },
     });
     fireEvent.click(screen.getByRole('button', { name: /send/i }));
+    act(() => {
+      ws1.simulateClose(1006, 'abnormal');
+    });
     await screen.findByRole('button', { name: /new chat/i });
 
     // Advance timers for reconnect
@@ -227,15 +224,15 @@ describe('workspace create-flow with deferred subscription', () => {
     act(() => {
       ws1.simulateOpen();
     });
-    act(() => {
-      ws1.simulateClose(1006, 'abnormal');
-    });
-
-    // Create conversation
+    // Submit while live, then force reconnect before the new conversation can
+    // subscribe on the original socket.
     fireEvent.change(screen.getByRole('textbox', { name: /instruction/i }), {
       target: { value: 'Build me a thing' },
     });
     fireEvent.click(screen.getByRole('button', { name: /send/i }));
+    act(() => {
+      ws1.simulateClose(1006, 'abnormal');
+    });
     await screen.findByRole('button', { name: /new chat/i });
 
     // Reconnect
@@ -298,15 +295,16 @@ describe('workspace create-flow with deferred subscription', () => {
       act(() => {
         ws1.simulateOpen();
       });
-      act(() => {
-        ws1.simulateClose(1006, 'abnormal');
-      });
 
-      // Create conversation while socket is dead
+      // Submit while live, then force reconnect before the new conversation
+      // can subscribe on the original socket.
       fireEvent.change(screen.getByRole('textbox', { name: /instruction/i }), {
         target: { value: 'Build me a thing' },
       });
       fireEvent.click(screen.getByRole('button', { name: /send/i }));
+      act(() => {
+        ws1.simulateClose(1006, 'abnormal');
+      });
       await screen.findByRole('button', { name: /new chat/i });
 
       // Reconnect and open

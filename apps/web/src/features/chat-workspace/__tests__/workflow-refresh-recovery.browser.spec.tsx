@@ -13,7 +13,7 @@
  */
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { act, cleanup, render, screen, within } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, within } from '@testing-library/react';
 import { AppProviders } from '../../../app/providers.tsx';
 import {
   FakeWebSocket,
@@ -456,6 +456,11 @@ describe('workspace refresh/reconnect recovery workflows', () => {
     });
     expect(await screen.findByText('Working on it…')).toBeInTheDocument();
 
+    fireEvent.change(screen.getByLabelText(/instruction/i), {
+      target: { value: 'Resume work after reconnect' },
+    });
+    expect(screen.getByRole('button', { name: 'Send' })).toBeEnabled();
+
     // Disconnect during active streaming
     act(() => {
       ws1.simulateClose(1006, 'abnormal');
@@ -464,6 +469,7 @@ describe('workspace refresh/reconnect recovery workflows', () => {
     // Banner must show reconnecting status
     const banner = await screen.findByRole('status');
     expect(banner).toHaveTextContent(/reconnecting/i);
+    expect(screen.getByRole('button', { name: 'Send' })).toBeDisabled();
 
     // Advance past reconnect delay
     act(() => {
@@ -491,6 +497,7 @@ describe('workspace refresh/reconnect recovery workflows', () => {
       expect(screen.queryByRole('alert')).toBeNull();
       expect(screen.queryByRole('status')).toBeNull();
     });
+    expect(screen.getByRole('button', { name: 'Send' })).toBeEnabled();
 
     // Pre-disconnect content survived reconnect
     expect(screen.getByText('Working on it…')).toBeInTheDocument();

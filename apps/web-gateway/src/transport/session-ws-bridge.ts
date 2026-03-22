@@ -98,6 +98,9 @@ export class SessionWsBridge {
         applyExpiry(event.expiresAt, true);
         return;
       case 'active': {
+        if (event.expiresAt != null) {
+          connection.send({ type: 'session-active', expiresAt: event.expiresAt });
+        }
         const expiryResult = applyExpiry(event.expiresAt, true);
         if (event.previousState === 'daemon-unreachable' && expiryResult !== 'terminated') {
           connection.send({ type: 'daemon-restored' });

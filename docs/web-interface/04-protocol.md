@@ -248,6 +248,19 @@ session (e.g., `POST /session/extend`) to avoid disconnection.
 }
 ```
 
+#### `session-active`
+
+Recovery signal sent when the bound session returns to `active` after a warning-window extension or
+other session-state recovery. The browser should clear any stale expiry warning and treat the
+session as healthy again using the new authoritative `expiresAt`.
+
+```json
+{
+  "type": "session-active",
+  "expiresAt": "2025-01-15T11:15:00.000Z"
+}
+```
+
 #### `session-terminated`
 
 The session has ended. The connection will close shortly after this message.
@@ -521,6 +534,7 @@ sequenceDiagram
     Note over Browser: Extend session via POST /session/extend
 
     alt Session extended
+        Gateway->>Browser: { type: "session-active", expiresAt: "2025-01-15T11:15:00Z" }
         Note over Gateway: New expiry; fresh warning scheduled if needed
     else Session not extended
         Gateway->>Browser: { type: "session-terminated", state: "expired" }
@@ -561,8 +575,8 @@ All connections for the same session are tracked independently in the connection
   `subscribe` message.
 - Events for a subscribed conversation are delivered to **every** connection subscribed to that
   conversation, not just one.
-- Session-level messages (`session-expiring-soon`, `session-terminated`) are broadcast to all
-  connections for the session.
+- Session-level messages (`session-expiring-soon`, `session-active`, `session-terminated`) are
+  broadcast to all connections for the session.
 
 ---
 

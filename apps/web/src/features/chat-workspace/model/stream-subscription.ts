@@ -216,6 +216,60 @@ export interface StreamLifecycleHooks {
   readonly onApprovalPromptObserved?: (conversationId: string, event: StreamEvent) => void;
 }
 
+function buildConnectionStatusCallbacks(
+  store: WorkspaceStore,
+): Pick<
+  StreamClientCallbacks,
+  | 'onOpen'
+  | 'onClose'
+  | 'onSocketError'
+  | 'onDaemonUnavailable'
+  | 'onDaemonRestored'
+  | 'onSessionTerminated'
+  | 'onSessionExpiringSoon'
+  | 'onSessionActive'
+> {
+  return {
+    onOpen() {
+      store.dispatch({
+        type: 'connection/merge',
+        patch: { transportStatus: 'live', reconnectAttempt: 0 },
+      });
+    },
+    onClose() {
+      store.dispatch({
+        type: 'connection/merge',
+        patch: {
+          transportStatus: 'disconnected',
+          lastDisconnectedAt: new Date().toISOString(),
+        },
+      });
+    },
+    onSocketError() {
+      store.dispatch({ type: 'connection/merge', patch: { transportStatus: 'reconnecting' } });
+    },
+    onDaemonUnavailable() {
+      store.dispatch({ type: 'connection/merge', patch: { daemonStatus: 'unavailable' } });
+    },
+    onDaemonRestored() {
+      store.dispatch({ type: 'connection/merge', patch: { daemonStatus: 'healthy' } });
+    },
+    onSessionTerminated(sessionState) {
+      const status = sessionState === 'logged-out' ? 'invalidated' : sessionState;
+      store.dispatch({ type: 'connection/merge', patch: { sessionStatus: status } });
+    },
+    onSessionExpiringSoon() {
+      store.dispatch({ type: 'connection/merge', patch: { sessionStatus: 'expiring-soon' } });
+    },
+    onSessionActive(expiresAt) {
+      store.dispatch({
+        type: 'connection/merge',
+        patch: { sessionStatus: 'active', lastAuthoritativeUpdate: expiresAt },
+      });
+    },
+  };
+}
+
 /**
  * Seed the resume cursor from the server-confirmed subscription baseline.
  *
@@ -277,6 +331,7 @@ export function buildStreamCallbacks(
   ack: (conversationId: string, seq: number) => void,
   lifecycle: StreamLifecycleHooks,
 ): StreamClientCallbacks {
+  const connectionCallbacks = buildConnectionStatusCallbacks(store);
   return {
     onStreamEvent(conversationId, event) {
       const currentState = stateMap.get(conversationId) ?? createStreamSubscriptionState();
@@ -319,44 +374,25 @@ export function buildStreamCallbacks(
       }
     },
     onOpen() {
-      store.dispatch({
-        type: 'connection/merge',
-        patch: { transportStatus: 'live', reconnectAttempt: 0 },
-      });
+      connectionCallbacks.onOpen?.();
       lifecycle.onConnectionEstablished();
     },
     onClose(code) {
-      store.dispatch({
-        type: 'connection/merge',
-        patch: {
-          transportStatus: 'disconnected',
-          lastDisconnectedAt: new Date().toISOString(),
-        },
-      });
+      connectionCallbacks.onClose?.(code, '');
       // Attempt reconnect for server-initiated or abnormal close.
       // Normal close (1000) means intentional shutdown — no reconnect.
       if (code !== 1000) {
         lifecycle.onReconnectNeeded();
       }
     },
-    onSocketError() {
-      store.dispatch({ type: 'connection/merge', patch: { transportStatus: 'reconnecting' } });
-    },
+    onSocketError: connectionCallbacks.onSocketError,
     onSubscribed(conversationId, currentSeq) {
       seedSubscriptionBaseline(stateMap, conversationId, currentSeq);
     },
-    onDaemonUnavailable() {
-      store.dispatch({ type: 'connection/merge', patch: { daemonStatus: 'unavailable' } });
-    },
-    onDaemonRestored() {
-      store.dispatch({ type: 'connection/merge', patch: { daemonStatus: 'healthy' } });
-    },
-    onSessionTerminated(sessionState) {
-      const status = sessionState === 'logged-out' ? 'invalidated' : sessionState;
-      store.dispatch({ type: 'connection/merge', patch: { sessionStatus: status } });
-    },
-    onSessionExpiringSoon() {
-      store.dispatch({ type: 'connection/merge', patch: { sessionStatus: 'expiring-soon' } });
-    },
+    onDaemonUnavailable: connectionCallbacks.onDaemonUnavailable,
+    onDaemonRestored: connectionCallbacks.onDaemonRestored,
+    onSessionTerminated: connectionCallbacks.onSessionTerminated,
+    onSessionExpiringSoon: connectionCallbacks.onSessionExpiringSoon,
+    onSessionActive: connectionCallbacks.onSessionActive,
   };
 }

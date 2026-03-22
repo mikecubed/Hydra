@@ -827,9 +827,13 @@ describe('GatewayWsServer', () => {
     assert.equal(down['type'], 'daemon-unavailable');
 
     healthResult = true;
+    const recoveryMessagesPromise = waitForMessages(ws, 2);
     await gw.heartbeat.tick();
-    const up = await waitForMessage(ws);
-    assert.equal(up['type'], 'daemon-restored');
+    const recoveryMessages = await recoveryMessagesPromise;
+    assert.deepEqual(
+      recoveryMessages.map((message) => message['type']),
+      ['session-active', 'daemon-restored'],
+    );
   });
 
   it('replays daemon-unavailable state to sockets that connect after daemon failure', async () => {

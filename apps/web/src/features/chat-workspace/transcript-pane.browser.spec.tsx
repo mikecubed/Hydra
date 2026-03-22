@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { cleanup, fireEvent, render, screen, within } from '@testing-library/react';
 import type { ListConversationsResponse, LoadTurnHistoryResponse } from '@hydra/web-contracts';
 
@@ -6,11 +6,21 @@ import { AppProviders } from '../../app/providers.tsx';
 import { TranscriptPane } from './components/transcript-pane.tsx';
 import { TranscriptTurn } from './components/transcript-turn.tsx';
 import type { TranscriptEntryState, ContentBlockState } from './model/workspace-store.ts';
+import {
+  FakeWebSocket,
+  openAndSubscribe,
+  resetFakeWebSockets,
+} from './__tests__/browser-helpers.ts';
 
 const fetchSpy = vi.fn<typeof fetch>();
 
+beforeEach(() => {
+  vi.stubGlobal('WebSocket', FakeWebSocket);
+});
+
 afterEach(() => {
   fetchSpy.mockReset();
+  resetFakeWebSockets();
   vi.unstubAllGlobals();
   cleanup();
 });
@@ -822,6 +832,7 @@ describe('TranscriptPane', () => {
     render(<AppProviders />);
 
     expect(await screen.findByText('Initial instruction')).toBeTruthy();
+    openAndSubscribe('conv-1');
 
     fireEvent.change(screen.getByRole('textbox', { name: /instruction/i }), {
       target: { value: 'Follow-up instruction' },

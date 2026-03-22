@@ -578,6 +578,10 @@ describe('subscribe/unsubscribe lifecycle', () => {
     callbacks.onSessionExpiringSoon!('2026-07-01T00:00:00.000Z');
     assert.equal(store.getState().connection.sessionStatus, 'expiring-soon');
 
+    callbacks.onSessionActive!('2026-07-01T01:00:00.000Z');
+    assert.equal(store.getState().connection.sessionStatus, 'active');
+    assert.equal(store.getState().connection.lastAuthoritativeUpdate, '2026-07-01T01:00:00.000Z');
+
     // eslint-disable-next-line unicorn/no-useless-undefined
     callbacks.onSessionTerminated!('logged-out', undefined);
     assert.equal(store.getState().connection.sessionStatus, 'invalidated');
