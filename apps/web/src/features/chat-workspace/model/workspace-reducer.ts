@@ -43,6 +43,35 @@ const PROMPT_STATUS_RANK: Record<PromptStatus, number> = {
   resolved: 4,
 };
 
+const TURN_STATUS_RANK: Readonly<Record<string, number>> = {
+  submitted: 0,
+  executing: 1,
+  streaming: 2,
+  completed: 3,
+  failed: 3,
+  cancelled: 3,
+};
+
+function measureEntryContent(entry: TranscriptEntryState): number {
+  return entry.contentBlocks.reduce(
+    (size, block) => size + block.blockId.length + (block.text?.length ?? 0),
+    0,
+  );
+}
+
+function shouldPreferStreamedTurn(
+  streamed: TranscriptEntryState,
+  rest: TranscriptEntryState,
+): boolean {
+  const streamedRank = TURN_STATUS_RANK[streamed.status] ?? 0;
+  const restRank = TURN_STATUS_RANK[rest.status] ?? 0;
+  if (streamedRank !== restRank) {
+    return streamedRank > restRank;
+  }
+
+  return measureEntryContent(streamed) > measureEntryContent(rest);
+}
+
 /**
  * Merge two prompt states for the same turn, preferring the more advanced
  * lifecycle state. Used during history merge where stream and REST may have
@@ -440,8 +469,11 @@ function applyMergeHistory(
       return entry;
     }
 
+    const preferStreamedTurn = shouldPreferStreamedTurn(streamed, entry);
     return {
       ...entry,
+      status: preferStreamedTurn ? streamed.status : entry.status,
+      contentBlocks: preferStreamedTurn ? [...streamed.contentBlocks] : entry.contentBlocks,
       artifacts: streamed.artifacts.length > 0 ? [...streamed.artifacts] : entry.artifacts,
       controls: streamed.controls.length > 0 ? [...streamed.controls] : entry.controls,
       prompt: mergePromptState(streamed.prompt, entry.prompt),
@@ -698,7 +730,7 @@ function applyPromptHydrate(
   conversationId: string,
   turnId: string,
   promptId: string,
-  allowedResponses: readonly string[],
+  allowedResponses: PromptViewState['allowedResponses'],
   contextBlocks: PromptViewState['contextBlocks'],
 ): WorkspaceState {
   return applyPromptUpdate(state, conversationId, turnId, promptId, (prompt) =>

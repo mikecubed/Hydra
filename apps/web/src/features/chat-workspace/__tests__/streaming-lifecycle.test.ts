@@ -1576,6 +1576,49 @@ describe('existing-conversation history vs live-stream race', () => {
     assert.equal(sub.serverResumeSeq, 4);
   });
 
+  it('merge-history preserves streamed content when REST returns an older executing snapshot', () => {
+    const store = createWorkspaceStore();
+    store.dispatch({ type: 'conversation/select', conversationId: 'conv-history-race' });
+
+    applyStreamEventsToConversation(
+      store,
+      'conv-history-race',
+      [
+        makeEvent({ seq: 1, turnId: 't-shared', kind: 'stream-started', payload: {} }),
+        makeEvent({
+          seq: 2,
+          turnId: 't-shared',
+          kind: 'text-delta',
+          payload: { text: 'hello ' },
+        }),
+        makeEvent({
+          seq: 3,
+          turnId: 't-shared',
+          kind: 'text-delta',
+          payload: { text: 'world' },
+        }),
+      ],
+      createStreamSubscriptionState(),
+    );
+
+    store.dispatch({
+      type: 'conversation/merge-history',
+      conversationId: 'conv-history-race',
+      entries: [
+        {
+          ...existingTurnEntry('t-shared', 'hello '),
+          status: 'executing',
+        },
+      ],
+      hasMoreHistory: false,
+    });
+
+    const merged = store.getState().conversations.get('conv-history-race');
+    assert.equal(merged?.entries.length, 1);
+    assert.equal(merged?.entries[0].status, 'streaming');
+    assert.equal(merged?.entries[0].contentBlocks[0]?.text, 'hello world');
+  });
+
   it('merge-history preserves activity-group entries from stream', () => {
     const store = createWorkspaceStore();
     store.dispatch({ type: 'conversation/select', conversationId: 'conv-activity' });

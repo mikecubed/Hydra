@@ -1,5 +1,5 @@
-import { afterEach, describe, expect, it } from 'vitest';
-import { cleanup, render, screen } from '@testing-library/react';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import { cleanup, fireEvent, render, screen } from '@testing-library/react';
 
 import { PromptCard } from './prompt-card.tsx';
 import type { ContentBlockState, PromptViewState } from '../model/workspace-types.ts';
@@ -107,5 +107,23 @@ describe('PromptCard — structured context blocks', () => {
     expect(preElements).toHaveLength(1);
     expect(preElements[0].textContent).toBe('  indented\n    content');
     expect(screen.getByTestId('prompt-context').textContent).toContain('Description');
+  });
+});
+
+describe('PromptCard — response option labels', () => {
+  it('renders server-provided labels while responding with the option key', () => {
+    const onRespond = vi.fn();
+    const prompt = makePrompt({
+      allowedResponses: [{ key: 'approve_with_changes', label: 'Approve with changes' }],
+    });
+
+    render(<PromptCard prompt={prompt} onRespond={onRespond} />);
+
+    const action = screen.getByRole('button', { name: 'Approve with changes' });
+    expect(action).toBeInTheDocument();
+    expect(action).toHaveAttribute('data-testid', 'prompt-action-approve_with_changes');
+
+    fireEvent.click(action);
+    expect(onRespond).toHaveBeenCalledWith('prompt-1', 'approve_with_changes');
   });
 });

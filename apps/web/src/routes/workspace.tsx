@@ -351,7 +351,10 @@ function useStreamSubscription({
             conversationId,
             turnId: approval.turnId,
             promptId: approval.id,
-            allowedResponses: approval.responseOptions.map((option) => option.key),
+            allowedResponses: approval.responseOptions.map((option) => ({
+              key: option.key,
+              label: option.label,
+            })),
             contextBlocks: toPromptContextBlocks(approval),
           });
           clearApprovalHydrationRetry(key);
@@ -612,7 +615,10 @@ function applyPendingApprovalsToEntries(
       promptId: approval.id,
       parentTurnId: approval.turnId,
       status: approvalStatusToPromptStatus(approval.status),
-      allowedResponses: approval.responseOptions.map((option) => option.key),
+      allowedResponses: approval.responseOptions.map((option) => ({
+        key: option.key,
+        label: option.label,
+      })),
       contextBlocks: toPromptContextBlocks(approval),
       lastResponseSummary: approval.response ?? null,
       errorMessage: null,

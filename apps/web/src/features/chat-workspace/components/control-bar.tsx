@@ -7,10 +7,11 @@
  */
 
 import type { JSX } from 'react';
+import type { PromptResponseChoiceState } from '../model/workspace-types.ts';
 
 export interface PromptControlBarProps {
   readonly promptId: string;
-  readonly allowedResponses: readonly string[];
+  readonly allowedResponses: readonly PromptResponseChoiceState[];
   readonly onRespond: (promptId: string, response: string) => void;
 }
 
@@ -33,6 +34,17 @@ const buttonStyle = {
   transition: 'border-color 0.15s, background 0.15s',
 } as const;
 
+function resolveResponseOption(response: PromptResponseChoiceState): {
+  key: string;
+  label: string;
+} {
+  if (typeof response === 'string') {
+    return { key: response, label: response };
+  }
+
+  return response;
+}
+
 export function PromptControlBar({
   promptId,
   allowedResponses,
@@ -40,19 +52,22 @@ export function PromptControlBar({
 }: PromptControlBarProps): JSX.Element {
   return (
     <div style={barStyle} data-testid="prompt-actions" role="group" aria-label="Response options">
-      {allowedResponses.map((response) => (
-        <button
-          key={response}
-          type="button"
-          style={buttonStyle}
-          data-testid={`prompt-action-${response}`}
-          onClick={() => {
-            onRespond(promptId, response);
-          }}
-        >
-          {response}
-        </button>
-      ))}
+      {allowedResponses.map((response) => {
+        const option = resolveResponseOption(response);
+        return (
+          <button
+            key={option.key}
+            type="button"
+            style={buttonStyle}
+            data-testid={`prompt-action-${option.key}`}
+            onClick={() => {
+              onRespond(promptId, option.key);
+            }}
+          >
+            {option.label}
+          </button>
+        );
+      })}
     </div>
   );
 }

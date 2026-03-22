@@ -417,8 +417,8 @@ describe('TranscriptPane', () => {
 
     expect(await screen.findByText('Approve the proposed file changes?')).toBeInTheDocument();
     expect(screen.getByTestId('approval-prompt')).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'approve' })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'deny' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Approve' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Deny' })).toBeInTheDocument();
   });
 
   it('retries pending approval hydration after a transient approval fetch failure', async () => {

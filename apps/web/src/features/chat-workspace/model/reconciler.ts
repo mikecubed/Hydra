@@ -270,7 +270,10 @@ function createPromptState(event: StreamEvent): PromptViewState | null {
     promptId: raw,
     parentTurnId: event.turnId,
     status: 'pending',
-    allowedResponses: filterStringArray(event.payload['allowedResponses']),
+    allowedResponses: filterStringArray(event.payload['allowedResponses']).map((key) => ({
+      key,
+      label: key,
+    })),
     contextBlocks: parseContextBlocks(event.payload['contextBlocks']),
     lastResponseSummary: null,
     errorMessage: null,

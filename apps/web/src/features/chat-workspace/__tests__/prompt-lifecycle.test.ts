@@ -111,7 +111,10 @@ describe('prompt lifecycle reconciler', () => {
       promptId: 'p1',
       parentTurnId: 'turn-1',
       status: 'pending',
-      allowedResponses: ['approve', 'deny'],
+      allowedResponses: [
+        { key: 'approve', label: 'approve' },
+        { key: 'deny', label: 'deny' },
+      ],
       contextBlocks: [
         { blockId: 'ctx-1', kind: 'text', text: 'Approve this change?', metadata: null },
       ],

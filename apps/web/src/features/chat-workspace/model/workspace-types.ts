@@ -79,12 +79,19 @@ export interface PromptViewState {
   readonly promptId: string;
   readonly parentTurnId: string;
   readonly status: PromptStatus;
-  readonly allowedResponses: readonly string[];
+  readonly allowedResponses: readonly PromptResponseChoiceState[];
   readonly contextBlocks: readonly ContentBlockState[];
   readonly lastResponseSummary: string | null;
   readonly errorMessage: string | null;
   readonly staleReason: string | null;
 }
+
+export interface PromptResponseOptionState {
+  readonly key: string;
+  readonly label: string;
+}
+
+export type PromptResponseChoiceState = PromptResponseOptionState | string;
 
 export interface TranscriptEntryState {
   readonly entryId: string;
@@ -246,7 +253,7 @@ export type WorkspaceAction =
       readonly conversationId: string;
       readonly turnId: string;
       readonly promptId: string;
-      readonly allowedResponses: readonly string[];
+      readonly allowedResponses: readonly PromptResponseChoiceState[];
       readonly contextBlocks: readonly ContentBlockState[];
     };
 
