@@ -18,6 +18,8 @@ import {
   canSubmitWork,
   isSessionTerminal,
   needsReconnect,
+  isRecovering,
+  hasExhaustedRetries,
   describeConnectionState,
 } from '../session-state.ts';
 
@@ -324,5 +326,125 @@ describe('describeConnectionState', () => {
     };
     const desc = describeConnectionState(state);
     assert.ok(desc.toLowerCase().includes('sync'), `expected "sync" in: "${desc}"`);
+  });
+
+  it('shows reconnect attempt number when reconnecting', () => {
+    const state: WorkspaceConnectionState = {
+      ...initialConnectionState(),
+      transportStatus: 'reconnecting',
+      reconnectAttempt: 3,
+    };
+    const desc = describeConnectionState(state);
+    assert.ok(desc.includes('3'), `expected attempt "3" in: "${desc}"`);
+    assert.ok(desc.toLowerCase().includes('reconnect'), `expected "reconnect" in: "${desc}"`);
+  });
+
+  it('mentions exhausted retries when disconnected with attempts > 0', () => {
+    const state: WorkspaceConnectionState = {
+      ...initialConnectionState(),
+      transportStatus: 'disconnected',
+      reconnectAttempt: 5,
+    };
+    const desc = describeConnectionState(state);
+    assert.ok(desc.toLowerCase().includes('exhaust'), `expected "exhaust" in: "${desc}"`);
+  });
+});
+
+// ─── initialConnectionState includes reconnectAttempt ───────────────────────
+
+describe('initialConnectionState — reconnect fields', () => {
+  it('includes reconnectAttempt: 0', () => {
+    const state = initialConnectionState();
+    assert.equal(state.reconnectAttempt, 0);
+  });
+
+  it('includes lastDisconnectedAt: null', () => {
+    const state = initialConnectionState();
+    assert.equal(state.lastDisconnectedAt, null);
+  });
+});
+
+// ─── isRecovering ───────────────────────────────────────────────────────────
+
+describe('isRecovering', () => {
+  it('returns true when transport is reconnecting and sync is syncing', () => {
+    const state: WorkspaceConnectionState = {
+      ...initialConnectionState(),
+      transportStatus: 'reconnecting',
+      syncStatus: 'syncing',
+    };
+    assert.ok(isRecovering(state));
+  });
+
+  it('returns true when transport is reconnecting and reconnectAttempt > 0', () => {
+    const state: WorkspaceConnectionState = {
+      ...initialConnectionState(),
+      transportStatus: 'reconnecting',
+      reconnectAttempt: 2,
+    };
+    assert.ok(isRecovering(state));
+  });
+
+  it('returns false when transport is live', () => {
+    const state: WorkspaceConnectionState = {
+      ...initialConnectionState(),
+      transportStatus: 'live',
+      syncStatus: 'syncing',
+    };
+    assert.ok(!isRecovering(state));
+  });
+
+  it('returns false when connecting (initial, not reconnect)', () => {
+    assert.ok(!isRecovering(initialConnectionState()));
+  });
+
+  it('returns false when session is terminal even if reconnecting', () => {
+    const state: WorkspaceConnectionState = {
+      ...initialConnectionState(),
+      transportStatus: 'reconnecting',
+      sessionStatus: 'expired',
+      reconnectAttempt: 1,
+    };
+    assert.ok(!isRecovering(state));
+  });
+});
+
+// ─── hasExhaustedRetries ────────────────────────────────────────────────────
+
+describe('hasExhaustedRetries', () => {
+  it('returns true when disconnected with reconnectAttempt > 0', () => {
+    const state: WorkspaceConnectionState = {
+      ...initialConnectionState(),
+      transportStatus: 'disconnected',
+      reconnectAttempt: 5,
+    };
+    assert.ok(hasExhaustedRetries(state));
+  });
+
+  it('returns false when disconnected with reconnectAttempt === 0', () => {
+    const state: WorkspaceConnectionState = {
+      ...initialConnectionState(),
+      transportStatus: 'disconnected',
+      reconnectAttempt: 0,
+    };
+    assert.ok(!hasExhaustedRetries(state));
+  });
+
+  it('returns false when reconnecting (still trying)', () => {
+    const state: WorkspaceConnectionState = {
+      ...initialConnectionState(),
+      transportStatus: 'reconnecting',
+      reconnectAttempt: 3,
+    };
+    assert.ok(!hasExhaustedRetries(state));
+  });
+
+  it('returns false when live', () => {
+    const state: WorkspaceConnectionState = {
+      ...initialConnectionState(),
+      transportStatus: 'live',
+      reconnectAttempt: 0,
+    };
+    assert.ok(!hasExhaustedRetries(state));
   });
 });

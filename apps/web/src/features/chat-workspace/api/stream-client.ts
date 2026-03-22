@@ -89,6 +89,8 @@ export interface StreamClientCallbacks {
   onSocketError?: () => void;
   /** Inbound message that could not be parsed or had an unknown type. */
   onParseError?: (raw: string, error: string) => void;
+  /** Fired at the start of a reconnect attempt, before the new socket opens. */
+  onReconnecting?: () => void;
 }
 
 /** Browser-side WebSocket stream adapter. */
@@ -98,16 +100,26 @@ export interface StreamClient {
    * Throws if already connected — call `close()` first.
    */
   connect(callbacks: StreamClientCallbacks): void;
+  /**
+   * Close the current socket and open a fresh connection, resubscribing
+   * to all tracked conversations with their stored resume sequences.
+   * Fires `onReconnecting` before the new socket is created.
+   */
+  reconnect(callbacks: StreamClientCallbacks): void;
   /** Subscribe to stream events for a conversation. */
   subscribe(conversationId: string, lastAcknowledgedSeq?: number): void;
   /** Unsubscribe from a conversation's stream events. */
   unsubscribe(conversationId: string): void;
   /** Acknowledge receipt of a sequence number. */
   ack(conversationId: string, seq: number): void;
+  /** Update the stored resume sequence for a tracked subscription. */
+  updateSubscriptionSeq(conversationId: string, seq: number): void;
   /** Close the WebSocket connection. Safe to call when not connected. */
   close(): void;
   /** Current WebSocket readyState (CONNECTING, OPEN, CLOSING, CLOSED). */
   readonly readyState: number;
+  /** Snapshot of currently tracked subscriptions (conversationId → resume seq). */
+  readonly activeSubscriptions: ReadonlyMap<string, number | undefined>;
 }
 
 // ─── Constants ──────────────────────────────────────────────────────────────
@@ -307,6 +319,8 @@ interface ClientState {
   sendQueue: string[];
   /** Socket intentionally closed via close() whose async onclose hasn't fired yet. */
   pendingCloseSocket: WebSocketLike | null;
+  /** Tracked subscriptions: conversationId → last known resume seq. */
+  subscriptions: Map<string, number | undefined>;
 }
 
 function requireSocket(state: ClientState): WebSocketLike {
@@ -336,14 +350,27 @@ function flushQueue(state: ClientState): void {
   }
 }
 
+/** Send resubscribe messages for all tracked subscriptions on socket open. */
+function resubscribeAll(state: ClientState): void {
+  for (const [conversationId, lastAcknowledgedSeq] of state.subscriptions) {
+    const msg: Record<string, unknown> = { type: 'subscribe', conversationId };
+    if (lastAcknowledgedSeq !== undefined) msg['lastAcknowledgedSeq'] = lastAcknowledgedSeq;
+    sendOrQueue(state, JSON.stringify(msg));
+  }
+}
+
 function attachSocketHandlers(
   state: ClientState,
   ws: WebSocketLike,
   callbacks: StreamClientCallbacks,
+  resubscribeOnOpen = false,
 ): void {
   ws.onopen = () => {
     if (state.socket !== ws) return;
     flushQueue(state);
+    if (resubscribeOnOpen) {
+      resubscribeAll(state);
+    }
     callbacks.onOpen?.();
   };
   ws.onmessage = (ev) => {
@@ -384,7 +411,21 @@ export function createStreamClient(options: StreamClientOptions): StreamClient {
   const createWs =
     options.createWebSocket ?? ((url: string) => new WebSocket(url) as WebSocketLike);
 
-  const state: ClientState = { socket: null, sendQueue: [], pendingCloseSocket: null };
+  const state: ClientState = {
+    socket: null,
+    sendQueue: [],
+    pendingCloseSocket: null,
+    subscriptions: new Map(),
+  };
+
+  /** Close the current socket silently (no onclose dispatch), clearing the send queue. */
+  function teardownSocket(): void {
+    if (state.socket === null) return;
+    state.sendQueue = [];
+    state.pendingCloseSocket = state.socket;
+    state.socket.close();
+    state.socket = null;
+  }
 
   return {
     connect(callbacks) {
@@ -400,13 +441,24 @@ export function createStreamClient(options: StreamClientOptions): StreamClient {
       attachSocketHandlers(state, ws, callbacks);
     },
 
+    reconnect(callbacks) {
+      callbacks.onReconnecting?.();
+      teardownSocket();
+      state.pendingCloseSocket = null;
+      const ws = createWs(baseUrl);
+      state.socket = ws;
+      attachSocketHandlers(state, ws, callbacks, /* resubscribeOnOpen */ true);
+    },
+
     subscribe(conversationId, lastAcknowledgedSeq) {
+      state.subscriptions.set(conversationId, lastAcknowledgedSeq);
       const msg: Record<string, unknown> = { type: 'subscribe', conversationId };
       if (lastAcknowledgedSeq !== undefined) msg['lastAcknowledgedSeq'] = lastAcknowledgedSeq;
       sendOrQueue(state, JSON.stringify(msg));
     },
 
     unsubscribe(conversationId) {
+      state.subscriptions.delete(conversationId);
       // After close() or socket teardown, unsubscribe is a safe no-op.
       if (state.socket === null || state.socket.readyState > WS_OPEN) return;
       sendOrQueue(state, JSON.stringify({ type: 'unsubscribe', conversationId }));
@@ -416,9 +468,16 @@ export function createStreamClient(options: StreamClientOptions): StreamClient {
       sendOrQueue(state, JSON.stringify({ type: 'ack', conversationId, seq }));
     },
 
+    updateSubscriptionSeq(conversationId, seq) {
+      if (state.subscriptions.has(conversationId)) {
+        state.subscriptions.set(conversationId, seq);
+      }
+    },
+
     close() {
       if (state.socket === null) return;
       state.sendQueue = [];
+      state.subscriptions.clear();
       state.pendingCloseSocket = state.socket;
       state.socket.close();
       state.socket = null;
@@ -426,6 +485,10 @@ export function createStreamClient(options: StreamClientOptions): StreamClient {
 
     get readyState() {
       return state.socket?.readyState ?? WS_CLOSED;
+    },
+
+    get activeSubscriptions(): ReadonlyMap<string, number | undefined> {
+      return new Map(state.subscriptions);
     },
   };
 }
