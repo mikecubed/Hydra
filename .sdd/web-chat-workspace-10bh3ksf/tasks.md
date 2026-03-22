@@ -115,7 +115,7 @@ _Status note_: post-Phase-1 maintenance also landed on the active branch, splitt
 - [x] T029 [US4] Implement reconnect and sync visibility in `apps/web/src/features/chat-workspace/components/connection-banner.tsx` and `apps/web/src/app/app-shell.tsx`.
 - [x] T030 [US4] Tighten authoritative refresh merge and duplicate suppression in `apps/web/src/features/chat-workspace/model/reconciler.ts` and `apps/web/src/features/chat-workspace/model/selectors.ts`.
 - [x] T031 [US4] Add refresh/reconnect workflow coverage in `apps/web/src/features/chat-workspace/__tests__/workflow-refresh-recovery.browser.spec.tsx`.
-- [ ] T032 [US4] Run the phase quality gate from the repo root with `npm run quality` and `npm test` after reconnect recovery is green.
+- [x] T032 [US4] Run the phase quality gate from the repo root with `npm run quality` and `npm test` after reconnect recovery is green.
 
 **Checkpoint**: The workspace remains trustworthy across refresh and transient disconnects.
 

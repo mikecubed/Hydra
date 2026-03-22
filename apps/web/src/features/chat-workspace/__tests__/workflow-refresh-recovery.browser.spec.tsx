@@ -146,9 +146,7 @@ describe('workspace refresh/reconnect recovery workflows', () => {
 
     // Gateway replay arrives before the subscribed ack on refresh/reconnect.
     act(() => {
-      ws2.simulateMessage(
-        streamFrame('conv-1', 4, 'turn-a1', 'text-delta', { text: 'partial: ' }),
-      );
+      ws2.simulateMessage(streamFrame('conv-1', 4, 'turn-a1', 'text-delta', { text: 'partial: ' }));
       ws2.simulateMessage({ type: 'subscribed', conversationId: 'conv-1', currentSeq: 4 });
       ws2.simulateMessage(
         streamFrame('conv-1', 5, 'turn-a1', 'text-delta', { text: 'live delta one' }),
@@ -178,7 +176,10 @@ describe('workspace refresh/reconnect recovery workflows', () => {
 
     const article = articles[0];
 
-    const paragraphTexts = Array.from(article.querySelectorAll('p'), (paragraph) => paragraph.textContent);
+    const paragraphTexts = Array.from(
+      article.querySelectorAll('p'),
+      (paragraph) => paragraph.textContent,
+    );
     expect(paragraphTexts).toEqual(['Rehydrated ', 'partial: live delta one and delta two']);
 
     // Turn transitioned to completed after stream-completed
@@ -428,9 +429,7 @@ describe('workspace refresh/reconnect recovery workflows', () => {
 
     // Continue streaming on the reconnected socket — no gap or duplication
     act(() => {
-      ws2.simulateMessage(
-        streamFrame('conv-1', 3, 'turn-b1', 'text-delta', { text: ' Done!' }),
-      );
+      ws2.simulateMessage(streamFrame('conv-1', 3, 'turn-b1', 'text-delta', { text: ' Done!' }));
       ws2.simulateMessage(streamFrame('conv-1', 4, 'turn-b1', 'stream-completed'));
     });
 
