@@ -30,6 +30,7 @@ import {
   type WorkspaceState,
   type WorkspaceStore,
 } from '../features/chat-workspace/model/workspace-store.ts';
+import { sealSubscriptionAfterMerge } from '../features/chat-workspace/model/stream-subscription.ts';
 import {
   selectActiveConversation,
   selectActiveDraft,
@@ -73,12 +74,17 @@ export interface StreamSubscriptionDeps {
  * - Acknowledges processed events for server-side buffer cleanup.
  * - Reconnects with exponential backoff on unexpected socket close.
  */
+export type SealAfterMergeFn = (
+  conversationId: string,
+  entries: readonly TranscriptEntryState[],
+) => void;
+
 // eslint-disable-next-line max-lines-per-function
 function useStreamSubscription({
   store,
   streamClient,
   activeConversationId,
-}: StreamSubscriptionDeps): void {
+}: StreamSubscriptionDeps): SealAfterMergeFn {
   // Per-conversation reconciler + seq state — survives conversation switches
   const stateMapRef = useRef<Map<string, StreamSubscriptionState>>(new Map());
   const activeIdRef = useRef<string | null>(null);
@@ -223,6 +229,16 @@ function useStreamSubscription({
       }
     };
   }, [activeConversationId, streamClient]);
+
+  // Expose the subscription stateMap so the transcript loader can seal turns
+  // after authoritative REST merges — prevents post-reconnect replays from
+  // mutating REST-finalized turns.
+  return useCallback(
+    (conversationId: string, entries: readonly TranscriptEntryState[]) => {
+      sealSubscriptionAfterMerge(stateMapRef.current, conversationId, entries);
+    },
+    [],
+  );
 }
 
 function toWorkspaceConversationRecord(conversation: Conversation): WorkspaceConversationRecord {
@@ -368,6 +384,7 @@ function useTranscriptLoader(
   store: WorkspaceStore,
   client: GatewayClient,
   activeConversationId: string | null,
+  sealAfterMerge: SealAfterMergeFn,
 ) {
   const [retryNonce, setRetryNonce] = useState(0);
 
@@ -401,12 +418,17 @@ function useTranscriptLoader(
         // to 'ready') while the REST call was in flight, merge history with
         // stream-owned entries instead of skipping entirely. This preserves
         // authoritative older history AND any live stream entries.
+        const mergedEntries = response.turns.map(toTranscriptEntry);
         store.dispatch({
           type: 'conversation/merge-history',
           conversationId,
-          entries: response.turns.map(toTranscriptEntry),
+          entries: mergedEntries,
           hasMoreHistory: response.hasMore,
         });
+
+        // Seal terminal turns in the stream subscription state so
+        // post-reconnect replays cannot mutate REST-finalized turns.
+        sealAfterMerge(conversationId, mergedEntries);
       } catch (err: unknown) {
         if (disposed) {
           return;
@@ -429,7 +451,7 @@ function useTranscriptLoader(
     return () => {
       disposed = true;
     };
-  }, [activeConversationId, client, retryNonce, store]);
+  }, [activeConversationId, client, retryNonce, sealAfterMerge, store]);
 
   return useCallback(() => {
     setRetryNonce((value) => value + 1);
@@ -560,14 +582,22 @@ export function WorkspaceRoute(): JSX.Element {
     clearConversationError,
     reloadConversationList,
   } = useConversationListLoader(store, client);
-  const retryActiveTranscript = useTranscriptLoader(store, client, state.activeConversationId);
 
-  // Wire live stream subscription scoped to active conversation
-  useStreamSubscription({
+  // Wire live stream subscription scoped to active conversation.
+  // Returns a seal callback used by the transcript loader to protect
+  // REST-finalized turns from post-reconnect stream replays.
+  const sealAfterMerge = useStreamSubscription({
     store,
     streamClient: wsStreamClient,
     activeConversationId: state.activeConversationId,
   });
+
+  const retryActiveTranscript = useTranscriptLoader(
+    store,
+    client,
+    state.activeConversationId,
+    sealAfterMerge,
+  );
 
   const activeConversation = selectActiveConversation(state);
   const composer = useComposerProps(
