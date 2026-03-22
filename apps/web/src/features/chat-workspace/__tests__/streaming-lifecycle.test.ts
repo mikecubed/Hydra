@@ -1889,10 +1889,6 @@ describe('sealSubscriptionAfterMerge wiring (transcript-load path)', () => {
     const sealed = stateMap.get('conv-multi')!.reconcilerState.sealedTurns;
     assert.ok(sealed?.has('turn-1'), 'completed turn-1 must be sealed');
     assert.ok(sealed?.has('turn-2'), 'failed turn-2 must be sealed');
-    assert.equal(
-      sealed?.has('turn-3') ?? false,
-      false,
-      'streaming turn-3 must NOT be sealed',
-    );
+    assert.equal(sealed?.has('turn-3') ?? false, false, 'streaming turn-3 must NOT be sealed');
   });
 });

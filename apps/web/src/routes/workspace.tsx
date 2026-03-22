@@ -524,12 +524,9 @@ function useStreamSubscription({
   // Expose the subscription stateMap so the transcript loader can seal turns
   // after authoritative REST merges — prevents post-reconnect replays from
   // mutating REST-finalized turns.
-  return useCallback(
-    (conversationId: string, entries: readonly TranscriptEntryState[]) => {
-      sealSubscriptionAfterMerge(stateMapRef.current, conversationId, entries);
-    },
-    [],
-  );
+  return useCallback((conversationId: string, entries: readonly TranscriptEntryState[]) => {
+    sealSubscriptionAfterMerge(stateMapRef.current, conversationId, entries);
+  }, []);
 }
 
 function toWorkspaceConversationRecord(conversation: Conversation): WorkspaceConversationRecord {

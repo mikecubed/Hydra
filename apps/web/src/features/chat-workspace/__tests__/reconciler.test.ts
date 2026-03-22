@@ -1529,9 +1529,7 @@ describe('mergeAuthoritativeEntries', () => {
         entryId: 'turn-a',
         turnId: 'turn-a',
         status: 'completed',
-        controls: [
-          { controlId: 'c1', kind: 'retry', enabled: true, reasonDisabled: null },
-        ],
+        controls: [{ controlId: 'c1', kind: 'retry', enabled: true, reasonDisabled: null }],
       }),
     ];
     const result = mergeAuthoritativeEntries(rest, current);

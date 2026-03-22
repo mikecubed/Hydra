@@ -1,10 +1,7 @@
 import { afterEach, describe, expect, it } from 'vitest';
 import { cleanup, render, screen } from '@testing-library/react';
 
-import {
-  ConnectionBanner,
-  type ConnectionBannerProps,
-} from './components/connection-banner.tsx';
+import { ConnectionBanner, type ConnectionBannerProps } from './components/connection-banner.tsx';
 import type { WorkspaceConnectionState } from '../../shared/session-state.ts';
 import { initialConnectionState } from '../../shared/session-state.ts';
 
