@@ -9,6 +9,9 @@
  */
 import type { ApprovalRequest } from '@hydra/web-contracts';
 
+import { mergePromptState } from './workspace-reducer.ts';
+import type { PromptViewState } from './workspace-types.ts';
+
 const STATUS_PRIORITY: Record<string, number> = {
   pending: 0,
   stale: 1,
@@ -58,4 +61,34 @@ export function pickBestApprovalPerTurn(
   }
 
   return result;
+}
+
+/**
+ * REST approval hydration may restore a different prompt cycle for the same
+ * turn, but it should not blindly clobber a newer stream-owned prompt. Only
+ * replace a different promptId when REST is restoring a more actionable state
+ * over an older stale/unavailable prompt. For the same promptId, preserve the
+ * existing mergePromptState behavior so richer stream-owned lifecycle state
+ * survives.
+ */
+export function selectHydratedApprovalPrompt(
+  existingPrompt: PromptViewState | null,
+  restPrompt: PromptViewState,
+): PromptViewState {
+  if (existingPrompt == null) {
+    return restPrompt;
+  }
+
+  if (existingPrompt.promptId !== restPrompt.promptId) {
+    if (
+      restPrompt.status === 'pending' &&
+      (existingPrompt.status === 'stale' || existingPrompt.status === 'unavailable')
+    ) {
+      return restPrompt;
+    }
+
+    return existingPrompt;
+  }
+
+  return mergePromptState(existingPrompt, restPrompt) ?? restPrompt;
 }

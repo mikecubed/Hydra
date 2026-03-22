@@ -28,7 +28,6 @@ import {
   type ContentBlockState,
   createAndSubmitDraft,
   createWorkspaceStore,
-  mergePromptState,
   type PromptViewState,
   submitComposerDraft,
   type DraftSubmitState,
@@ -38,7 +37,10 @@ import {
   type WorkspaceState,
   type WorkspaceStore,
 } from '../features/chat-workspace/model/workspace-store.ts';
-import { pickBestApprovalPerTurn } from '../features/chat-workspace/model/approval-selection.ts';
+import {
+  pickBestApprovalPerTurn,
+  selectHydratedApprovalPrompt,
+} from '../features/chat-workspace/model/approval-selection.ts';
 import { claimApprovalHydrationRetry } from '../features/chat-workspace/model/approval-hydration-retries.ts';
 import {
   selectActiveConversation,
@@ -612,7 +614,7 @@ function applyPendingApprovalsToEntries(
 
     return {
       ...entry,
-      prompt: mergePromptState(entry.prompt, restPrompt),
+      prompt: selectHydratedApprovalPrompt(entry.prompt, restPrompt),
     };
   });
 }

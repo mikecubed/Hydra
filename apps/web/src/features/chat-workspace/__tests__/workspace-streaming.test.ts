@@ -13,6 +13,7 @@ import type { StreamEvent } from '@hydra/web-contracts';
 
 import {
   createWorkspaceStore,
+  type PromptViewState,
   type TranscriptEntryState,
   type WorkspaceStore,
 } from '../model/workspace-store.ts';
@@ -21,7 +22,10 @@ import {
   createStreamSubscriptionState,
 } from '../model/stream-subscription.ts';
 import { claimApprovalHydrationRetry } from '../model/approval-hydration-retries.ts';
-import { pickBestApprovalPerTurn } from '../model/approval-selection.ts';
+import {
+  pickBestApprovalPerTurn,
+  selectHydratedApprovalPrompt,
+} from '../model/approval-selection.ts';
 
 import type { ApprovalRequest } from '@hydra/web-contracts';
 
@@ -108,6 +112,20 @@ function makeApproval(overrides: Partial<ApprovalRequest> & { id: string }): App
     contextHash: 'hash-1',
     responseOptions: [{ key: 'approve', label: 'Approve' }],
     createdAt: '2026-03-20T12:00:00.000Z',
+    ...overrides,
+  };
+}
+
+function makePrompt(overrides: Partial<PromptViewState> = {}): PromptViewState {
+  return {
+    promptId: 'prompt-1',
+    parentTurnId: 'turn-1',
+    status: 'pending',
+    allowedResponses: [],
+    contextBlocks: [],
+    lastResponseSummary: null,
+    errorMessage: null,
+    staleReason: null,
     ...overrides,
   };
 }
@@ -240,6 +258,46 @@ describe('pickBestApprovalPerTurn', () => {
     });
     const result = pickBestApprovalPerTurn([staleOld, staleNew, pendingOld]);
     assert.equal(result.get('turn-1')?.id, 'a3');
+  });
+});
+
+describe('selectHydratedApprovalPrompt', () => {
+  it('replaces an older prompt cycle when rest hydration selects a different prompt id', () => {
+    const existing = makePrompt({
+      promptId: 'approval-old',
+      status: 'stale',
+      allowedResponses: [],
+      contextBlocks: [],
+      staleReason: 'superseded',
+    });
+    const rest = makePrompt({
+      promptId: 'approval-new',
+      status: 'pending',
+      allowedResponses: [{ key: 'approve', label: 'Approve' }],
+      contextBlocks: [{ blockId: 'ctx-1', kind: 'text', text: 'Fresh context', metadata: null }],
+    });
+
+    const merged = selectHydratedApprovalPrompt(existing, rest);
+    assert.equal(merged.promptId, 'approval-new');
+    assert.equal(merged.status, 'pending');
+    assert.deepEqual(merged.allowedResponses, [{ key: 'approve', label: 'Approve' }]);
+  });
+
+  it('preserves a different in-flight prompt cycle when rest hydration is not more actionable', () => {
+    const existing = makePrompt({
+      promptId: 'approval-live',
+      status: 'pending',
+      allowedResponses: [{ key: 'approve', label: 'Approve live' }],
+    });
+    const rest = makePrompt({
+      promptId: 'approval-rest',
+      status: 'pending',
+      allowedResponses: [{ key: 'approve', label: 'Approve rest' }],
+    });
+
+    const merged = selectHydratedApprovalPrompt(existing, rest);
+    assert.equal(merged.promptId, 'approval-live');
+    assert.deepEqual(merged.allowedResponses, [{ key: 'approve', label: 'Approve live' }]);
   });
 });
 
