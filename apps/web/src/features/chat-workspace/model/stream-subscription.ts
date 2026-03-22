@@ -279,11 +279,20 @@ export function buildStreamCallbacks(
       }
     },
     onOpen() {
-      store.dispatch({ type: 'connection/merge', patch: { transportStatus: 'live' } });
+      store.dispatch({
+        type: 'connection/merge',
+        patch: { transportStatus: 'live', reconnectAttempt: 0 },
+      });
       lifecycle.onConnectionEstablished();
     },
     onClose(code) {
-      store.dispatch({ type: 'connection/merge', patch: { transportStatus: 'disconnected' } });
+      store.dispatch({
+        type: 'connection/merge',
+        patch: {
+          transportStatus: 'disconnected',
+          lastDisconnectedAt: new Date().toISOString(),
+        },
+      });
       // Attempt reconnect for server-initiated or abnormal close.
       // Normal close (1000) means intentional shutdown — no reconnect.
       if (code !== 1000) {

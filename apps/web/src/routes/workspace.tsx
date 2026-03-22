@@ -108,7 +108,10 @@ function useStreamSubscription({
       if (reconnectAttemptRef.current >= RECONNECT_MAX_ATTEMPTS) {
         store.dispatch({
           type: 'connection/merge',
-          patch: { transportStatus: 'disconnected' },
+          patch: {
+            transportStatus: 'disconnected',
+            reconnectAttempt: reconnectAttemptRef.current,
+          },
         });
         console.warn('[stream] Max reconnect attempts reached');
         return;
@@ -122,7 +125,10 @@ function useStreamSubscription({
 
       store.dispatch({
         type: 'connection/merge',
-        patch: { transportStatus: 'reconnecting' },
+        patch: {
+          transportStatus: 'reconnecting',
+          reconnectAttempt: reconnectAttemptRef.current,
+        },
       });
 
       reconnectTimerRef.current = setTimeout(() => {
