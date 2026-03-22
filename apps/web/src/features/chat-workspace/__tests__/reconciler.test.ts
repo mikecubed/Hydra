@@ -1585,6 +1585,30 @@ describe('mergeAuthoritativeEntries', () => {
     assert.equal(result[0].contentBlocks[0].text, 'REST authoritative content');
   });
 
+  it('preserves streamed content for shared non-terminal turns when REST is stale', () => {
+    const rest = [
+      makeEntry({
+        entryId: 'turn-a',
+        turnId: 'turn-a',
+        status: 'submitted',
+        contentBlocks: [{ blockId: 'blk-1', kind: 'text', text: 'Hel', metadata: null }],
+      }),
+    ];
+    const current = [
+      makeEntry({
+        entryId: 'turn-a',
+        turnId: 'turn-a',
+        status: 'streaming',
+        contentBlocks: [{ blockId: 'blk-1', kind: 'text', text: 'Hello world', metadata: null }],
+      }),
+    ];
+
+    const result = mergeAuthoritativeEntries(rest, current);
+
+    assert.equal(result[0].status, 'streaming');
+    assert.equal(result[0].contentBlocks[0].text, 'Hello world');
+  });
+
   it('appends non-turn stream-only entries (activity-group)', () => {
     const rest = [makeEntry({ entryId: 'turn-a', turnId: 'turn-a', status: 'completed' })];
     const current = [

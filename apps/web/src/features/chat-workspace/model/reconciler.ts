@@ -612,6 +612,24 @@ export function reconcileStreamEvents(
 
 const TERMINAL_STATUSES: ReadonlySet<string> = new Set(['completed', 'failed', 'cancelled']);
 
+function shouldPreserveStreamedTurn(
+  restEntry: TranscriptEntryState,
+  streamedEntry: TranscriptEntryState,
+): boolean {
+  const restTerminal = TERMINAL_STATUSES.has(restEntry.status);
+  const streamedTerminal = TERMINAL_STATUSES.has(streamedEntry.status);
+
+  if (restTerminal) {
+    return false;
+  }
+
+  if (streamedTerminal) {
+    return true;
+  }
+
+  return true;
+}
+
 /**
  * Seal turns whose authoritative status is terminal. Events for sealed turns
  * are unconditionally treated as stale by `isStaleEvent`, preventing
@@ -661,9 +679,12 @@ export function mergeAuthoritativeEntries(
     const streamed = currentTurnMap.get(entry.turnId);
     if (streamed == null) return entry;
 
-    // REST is authoritative for content and status; preserve richer stream metadata
+    const preserveStreamedTurn = shouldPreserveStreamedTurn(entry, streamed);
+
     return {
       ...entry,
+      status: preserveStreamedTurn ? streamed.status : entry.status,
+      contentBlocks: preserveStreamedTurn ? streamed.contentBlocks : entry.contentBlocks,
       artifacts: streamed.artifacts.length > 0 ? streamed.artifacts : entry.artifacts,
       controls: streamed.controls.length > 0 ? streamed.controls : entry.controls,
       prompt: streamed.prompt ?? entry.prompt,
