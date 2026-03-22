@@ -15,6 +15,7 @@ import type {
   WorkspaceState,
 } from './workspace-types.ts';
 import { getActiveDraft, isDraftSubmittable } from './composer-drafts.ts';
+import { deduplicateEntries } from './reconciler.ts';
 
 const EMPTY_ENTRIES: readonly TranscriptEntryState[] = [];
 
@@ -29,10 +30,32 @@ export function selectActiveDraft(state: WorkspaceState): ComposerDraftState | u
   return getActiveDraft(state);
 }
 
-/** Transcript entries for the active conversation, or an empty array. */
+/** Transcript entries for the active conversation, deduplicated as a safety net. */
 export function selectActiveEntries(state: WorkspaceState): readonly TranscriptEntryState[] {
   const conversation = selectActiveConversation(state);
-  return conversation?.entries ?? EMPTY_ENTRIES;
+  const raw = conversation?.entries ?? EMPTY_ENTRIES;
+  if (raw.length <= 1) return raw;
+
+  // Fast path: scan for duplicate turnIds or entryIds before allocating
+  const seenTurnIds = new Set<string>();
+  const seenEntryIds = new Set<string>();
+  let hasDuplicates = false;
+  for (const entry of raw) {
+    if (entry.kind === 'turn' && entry.turnId != null) {
+      if (seenTurnIds.has(entry.turnId)) {
+        hasDuplicates = true;
+        break;
+      }
+      seenTurnIds.add(entry.turnId);
+    }
+    if (seenEntryIds.has(entry.entryId)) {
+      hasDuplicates = true;
+      break;
+    }
+    seenEntryIds.add(entry.entryId);
+  }
+
+  return hasDuplicates ? deduplicateEntries(raw) : raw;
 }
 
 /** Load state of the active conversation, or `null` when nothing is active. */
@@ -88,4 +111,10 @@ export function selectConversationList(state: WorkspaceState): readonly Conversa
     }
   }
   return result;
+}
+
+/** Whether the active conversation's authoritative REST history has been loaded. */
+export function selectIsHistoryLoaded(state: WorkspaceState): boolean {
+  const conversation = selectActiveConversation(state);
+  return conversation?.historyLoaded ?? false;
 }

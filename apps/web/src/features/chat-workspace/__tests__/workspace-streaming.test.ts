@@ -19,6 +19,7 @@ import {
 import {
   applyStreamEventsToConversation,
   createStreamSubscriptionState,
+  sealSubscriptionAfterMerge,
 } from '../model/stream-subscription.ts';
 
 // ─── Factories ──────────────────────────────────────────────────────────────
@@ -278,5 +279,142 @@ describe('applyStreamEventsToConversation', () => {
     const activity = entries.find((e) => e.kind === 'activity-group');
     assert.ok(activity);
     assert.equal(activity.contentBlocks[0]?.text, 'Installing deps');
+  });
+});
+
+// ─── sealSubscriptionAfterMerge ─────────────────────────────────────────────
+
+describe('sealSubscriptionAfterMerge', () => {
+  it('seals terminal turns in the subscription reconciler state', () => {
+    const stateMap = new Map<string, ReturnType<typeof createStreamSubscriptionState>>();
+    stateMap.set('conv-1', createStreamSubscriptionState());
+
+    const restEntries: TranscriptEntryState[] = [
+      {
+        entryId: 'turn-a',
+        kind: 'turn',
+        turnId: 'turn-a',
+        status: 'completed',
+        timestamp: '2026-07-01T00:00:00.000Z',
+        contentBlocks: [],
+        artifacts: [],
+        controls: [],
+        prompt: null,
+      },
+    ];
+
+    sealSubscriptionAfterMerge(stateMap, 'conv-1', restEntries);
+    const sealed = stateMap.get('conv-1')?.reconcilerState.sealedTurns;
+    assert.ok(sealed?.has('turn-a'), 'completed turn must be sealed');
+  });
+
+  it('replayed text-delta after merge is treated as stale', () => {
+    const store = storeWithConversation('conv-1');
+    const stateMap = new Map<string, ReturnType<typeof createStreamSubscriptionState>>();
+
+    // Simulate: stream delivered turn-a, then REST confirmed it completed.
+    let sub = createStreamSubscriptionState();
+    sub = applyStreamEventsToConversation(
+      store,
+      'conv-1',
+      [
+        makeEvent({ seq: 1, turnId: 'turn-a', kind: 'stream-started', payload: {} }),
+        makeEvent({ seq: 2, turnId: 'turn-a', kind: 'text-delta', payload: { text: 'original' } }),
+        makeEvent({
+          seq: 3,
+          turnId: 'turn-a',
+          kind: 'stream-completed',
+          payload: { status: 'completed' },
+        }),
+      ],
+      sub,
+    );
+    stateMap.set('conv-1', sub);
+
+    // Merge REST history (authoritative refresh)
+    const restEntries: TranscriptEntryState[] = [
+      {
+        entryId: 'turn-a',
+        kind: 'turn',
+        turnId: 'turn-a',
+        status: 'completed',
+        timestamp: '2026-07-01T00:00:00.000Z',
+        contentBlocks: [{ blockId: 'b1', kind: 'text', text: 'REST final', metadata: null }],
+        artifacts: [],
+        controls: [],
+        prompt: null,
+      },
+    ];
+    store.dispatch({
+      type: 'conversation/merge-history',
+      conversationId: 'conv-1',
+      entries: restEntries,
+      hasMoreHistory: false,
+    });
+    sealSubscriptionAfterMerge(stateMap, 'conv-1', restEntries);
+
+    // Now replay a text-delta for the sealed turn
+    const sealedSub = stateMap.get('conv-1')!;
+    const afterReplay = applyStreamEventsToConversation(
+      store,
+      'conv-1',
+      [makeEvent({ seq: 99, turnId: 'turn-a', kind: 'text-delta', payload: { text: 'REPLAY' } })],
+      sealedSub,
+    );
+
+    // The replayed event must not have mutated the entry
+    const entries = store.getState().conversations.get('conv-1')?.entries ?? [];
+    const turnA = entries.find((e) => e.turnId === 'turn-a' && e.kind === 'turn');
+    assert.ok(turnA);
+    assert.equal(turnA.contentBlocks[0]?.text, 'REST final', 'sealed turn must not be mutated');
+    // Reconciler must still know the turn is sealed
+    assert.ok(
+      afterReplay.reconcilerState.sealedTurns?.has('turn-a'),
+      'turn must remain sealed after replay',
+    );
+  });
+
+  it('does not seal non-terminal turns (streaming)', () => {
+    const stateMap = new Map<string, ReturnType<typeof createStreamSubscriptionState>>();
+    stateMap.set('conv-1', createStreamSubscriptionState());
+
+    const restEntries: TranscriptEntryState[] = [
+      {
+        entryId: 'turn-live',
+        kind: 'turn',
+        turnId: 'turn-live',
+        status: 'streaming',
+        timestamp: '2026-07-01T00:00:00.000Z',
+        contentBlocks: [],
+        artifacts: [],
+        controls: [],
+        prompt: null,
+      },
+    ];
+
+    sealSubscriptionAfterMerge(stateMap, 'conv-1', restEntries);
+    const sealed = stateMap.get('conv-1')?.reconcilerState.sealedTurns;
+    assert.equal(sealed?.has('turn-live') ?? false, false, 'streaming turn must not be sealed');
+  });
+
+  it('creates subscription state if none exists', () => {
+    const stateMap = new Map<string, ReturnType<typeof createStreamSubscriptionState>>();
+    const restEntries: TranscriptEntryState[] = [
+      {
+        entryId: 'turn-x',
+        kind: 'turn',
+        turnId: 'turn-x',
+        status: 'failed',
+        timestamp: '2026-07-01T00:00:00.000Z',
+        contentBlocks: [],
+        artifacts: [],
+        controls: [],
+        prompt: null,
+      },
+    ];
+
+    sealSubscriptionAfterMerge(stateMap, 'conv-new', restEntries);
+    const sealed = stateMap.get('conv-new')?.reconcilerState.sealedTurns;
+    assert.ok(sealed?.has('turn-x'), 'should seal even when no prior state');
   });
 });

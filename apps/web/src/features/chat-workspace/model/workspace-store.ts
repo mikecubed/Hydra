@@ -50,6 +50,7 @@ export {
   buildStreamCallbacks,
   computeContiguousResume,
   createStreamSubscriptionState,
+  sealSubscriptionAfterMerge,
 } from './stream-subscription.ts';
 export type { StreamLifecycleHooks, StreamSubscriptionState } from './stream-subscription.ts';
 
