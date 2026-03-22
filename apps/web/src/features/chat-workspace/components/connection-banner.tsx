@@ -6,8 +6,10 @@
  * connection degrades.
  *
  * Severity mapping:
- *   alert  (assertive) — terminal session, disconnected, sync error, daemon down
- *   status (polite)    — connecting, reconnecting, syncing, expiring-soon, daemon recovering
+ *   alert  (assertive) — terminal session, sync error, daemon down,
+ *                        exhausted reconnect retries
+ *   status (polite)    — connecting, disconnected, reconnecting, syncing,
+ *                        expiring-soon, daemon recovering
  */
 
 import { createContext, type JSX } from 'react';
