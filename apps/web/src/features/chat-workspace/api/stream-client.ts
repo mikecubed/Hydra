@@ -60,13 +60,31 @@ export interface StreamClientOptions {
 /**
  * Typed callbacks for every server→client message type.
  * All are optional — unset hooks are silently skipped.
+ *
+ * **Ordering note:** Stream-event frames that arrive before the server's
+ * `subscribed` acknowledgement are buffered internally.  When `subscribed`
+ * arrives the buffer is flushed — so `onStreamEvent` may fire one or more
+ * times *before* `onSubscribed` for the same conversation.  After
+ * `onSubscribed`, subsequent stream-events are dispatched immediately in
+ * wire order.  Do not assume `onSubscribed` always precedes `onStreamEvent`.
  */
 export interface StreamClientCallbacks {
   /** Called when the WebSocket connection opens. */
   onOpen?: () => void;
-  /** Incremental stream event for a conversation. */
+  /**
+   * Incremental stream event for a conversation.
+   *
+   * May fire before `onSubscribed` when the server sends stream-event
+   * frames that are buffered until the `subscribed` ack arrives (see
+   * ordering note on {@link StreamClientCallbacks}).
+   */
   onStreamEvent?: (conversationId: string, event: StreamEvent) => void;
-  /** Subscription confirmed with current server-side sequence. */
+  /**
+   * Subscription confirmed with current server-side sequence.
+   *
+   * Any stream-event frames buffered prior to this ack have already been
+   * flushed via `onStreamEvent` by the time this callback fires.
+   */
   onSubscribed?: (conversationId: string, currentSeq: number) => void;
   /** Unsubscription confirmed. */
   onUnsubscribed?: (conversationId: string) => void;

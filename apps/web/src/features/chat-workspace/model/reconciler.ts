@@ -651,11 +651,20 @@ export function sealAuthoritativeTurns(
 /**
  * Merge authoritative REST history with current (stream-reconciled) entries.
  *
- * REST entries form the base. For turns present in both, REST is authoritative
- * for content blocks and status (the server's view is always more current
- * after a reconnect). Stream metadata (artifacts, controls, prompt) is
- * preserved where richer — these are derived from real-time events the
- * server may not include in the REST snapshot.
+ * REST entries form the base ordering. For turns present in both sources
+ * the merge strategy depends on whether the REST turn is terminal
+ * (completed / failed / cancelled):
+ *
+ *  - **Terminal REST turns** are fully authoritative — REST status and
+ *    contentBlocks replace the streamed versions.
+ *  - **Non-terminal REST turns** preserve the streamed status and
+ *    contentBlocks, because the stream is likely ahead of the last REST
+ *    snapshot (e.g. a turn still in-progress may have accumulated more
+ *    content blocks via real-time events).
+ *
+ * In both cases, stream metadata (artifacts, controls, prompt) is kept
+ * where richer — these are derived from real-time events the server may
+ * not include in the REST snapshot.
  *
  * Stream-only entries (turns REST doesn't know about, activity-groups,
  * system-status) are appended at the end.
