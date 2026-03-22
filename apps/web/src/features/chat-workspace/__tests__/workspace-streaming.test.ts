@@ -21,6 +21,9 @@ import {
   createStreamSubscriptionState,
 } from '../model/stream-subscription.ts';
 import { claimApprovalHydrationRetry } from '../model/approval-hydration-retries.ts';
+import { pickBestApprovalPerTurn } from '../model/approval-selection.ts';
+
+import type { ApprovalRequest } from '@hydra/web-contracts';
 
 // ─── Factories ──────────────────────────────────────────────────────────────
 
@@ -91,6 +94,152 @@ describe('claimApprovalHydrationRetry', () => {
 
     assert.equal(claimApprovalHydrationRetry(retryCounts, 'conv-1'), true);
     assert.equal(retryCounts.get('conv-1'), 1);
+  });
+});
+
+// ─── pickBestApprovalPerTurn ─────────────────────────────────────────────────
+
+function makeApproval(overrides: Partial<ApprovalRequest> & { id: string }): ApprovalRequest {
+  return {
+    turnId: 'turn-1',
+    status: 'pending',
+    prompt: 'Approve?',
+    context: {},
+    contextHash: 'hash-1',
+    responseOptions: [{ key: 'approve', label: 'Approve' }],
+    createdAt: '2026-03-20T12:00:00.000Z',
+    ...overrides,
+  };
+}
+
+describe('pickBestApprovalPerTurn', () => {
+  it('returns empty map for empty input', () => {
+    const result = pickBestApprovalPerTurn([]);
+    assert.equal(result.size, 0);
+  });
+
+  it('returns single approval unchanged', () => {
+    const approval = makeApproval({ id: 'a1' });
+    const result = pickBestApprovalPerTurn([approval]);
+    assert.equal(result.size, 1);
+    assert.equal(result.get('turn-1')?.id, 'a1');
+  });
+
+  it('prefers pending over stale for the same turn', () => {
+    const stale = makeApproval({
+      id: 'a1',
+      status: 'stale',
+      createdAt: '2026-03-20T13:00:00.000Z',
+    });
+    const pending = makeApproval({
+      id: 'a2',
+      status: 'pending',
+      createdAt: '2026-03-20T12:00:00.000Z',
+    });
+    // pending wins even though stale is newer
+    const result = pickBestApprovalPerTurn([stale, pending]);
+    assert.equal(result.get('turn-1')?.id, 'a2');
+  });
+
+  it('prefers pending over stale regardless of input order', () => {
+    const pending = makeApproval({ id: 'a2', status: 'pending' });
+    const stale = makeApproval({
+      id: 'a1',
+      status: 'stale',
+      createdAt: '2026-03-20T13:00:00.000Z',
+    });
+    const result = pickBestApprovalPerTurn([pending, stale]);
+    assert.equal(result.get('turn-1')?.id, 'a2');
+  });
+
+  it('within same status, prefers newest createdAt', () => {
+    const older = makeApproval({
+      id: 'a1',
+      status: 'pending',
+      createdAt: '2026-03-20T12:00:00.000Z',
+    });
+    const newer = makeApproval({
+      id: 'a2',
+      status: 'pending',
+      createdAt: '2026-03-20T13:00:00.000Z',
+    });
+    const result = pickBestApprovalPerTurn([older, newer]);
+    assert.equal(result.get('turn-1')?.id, 'a2');
+  });
+
+  it('within same status and timestamp tie, falls back to id compare', () => {
+    const a = makeApproval({
+      id: 'approval-aaa',
+      status: 'pending',
+      createdAt: '2026-03-20T12:00:00.000Z',
+    });
+    const b = makeApproval({
+      id: 'approval-bbb',
+      status: 'pending',
+      createdAt: '2026-03-20T12:00:00.000Z',
+    });
+    // Lexicographically smaller id wins (deterministic)
+    const result = pickBestApprovalPerTurn([b, a]);
+    assert.equal(result.get('turn-1')?.id, 'approval-aaa');
+  });
+
+  it('handles invalid timestamps with id fallback', () => {
+    const a = makeApproval({
+      id: 'approval-aaa',
+      status: 'stale',
+      createdAt: 'not-a-date' as unknown as string,
+    });
+    const b = makeApproval({
+      id: 'approval-bbb',
+      status: 'stale',
+      createdAt: 'also-invalid' as unknown as string,
+    });
+    const result = pickBestApprovalPerTurn([b, a]);
+    assert.equal(result.get('turn-1')?.id, 'approval-aaa');
+  });
+
+  it('handles multiple turns independently', () => {
+    const t1Stale = makeApproval({
+      id: 'a1',
+      turnId: 'turn-1',
+      status: 'stale',
+      createdAt: '2026-03-20T13:00:00.000Z',
+    });
+    const t1Pending = makeApproval({
+      id: 'a2',
+      turnId: 'turn-1',
+      status: 'pending',
+      createdAt: '2026-03-20T12:00:00.000Z',
+    });
+    const t2Only = makeApproval({
+      id: 'a3',
+      turnId: 'turn-2',
+      status: 'stale',
+    });
+    const result = pickBestApprovalPerTurn([t1Stale, t1Pending, t2Only]);
+    assert.equal(result.size, 2);
+    assert.equal(result.get('turn-1')?.id, 'a2');
+    assert.equal(result.get('turn-2')?.id, 'a3');
+  });
+
+  it('three approvals for one turn: stale-old, stale-new, pending-old → pending wins', () => {
+    const staleOld = makeApproval({
+      id: 'a1',
+      status: 'stale',
+      createdAt: '2026-03-20T10:00:00.000Z',
+    });
+    const staleNew = makeApproval({
+      id: 'a2',
+      status: 'stale',
+      createdAt: '2026-03-20T14:00:00.000Z',
+    });
+    const pendingOld = makeApproval({
+      id: 'a3',
+      status: 'pending',
+      createdAt: '2026-03-20T11:00:00.000Z',
+    });
+    const result = pickBestApprovalPerTurn([staleOld, staleNew, pendingOld]);
+    assert.equal(result.get('turn-1')?.id, 'a3');
   });
 });
 

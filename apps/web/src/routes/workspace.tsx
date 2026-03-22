@@ -38,6 +38,7 @@ import {
   type WorkspaceState,
   type WorkspaceStore,
 } from '../features/chat-workspace/model/workspace-store.ts';
+import { pickBestApprovalPerTurn } from '../features/chat-workspace/model/approval-selection.ts';
 import { claimApprovalHydrationRetry } from '../features/chat-workspace/model/approval-hydration-retries.ts';
 import {
   selectActiveConversation,
@@ -584,7 +585,7 @@ function applyPendingApprovalsToEntries(
     return entries;
   }
 
-  const approvalsByTurnId = new Map(approvals.map((approval) => [approval.turnId, approval]));
+  const approvalsByTurnId = pickBestApprovalPerTurn(approvals);
   return entries.map((entry) => {
     if (entry.kind !== 'turn' || entry.turnId == null) {
       return entry;
