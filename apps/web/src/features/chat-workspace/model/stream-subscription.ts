@@ -268,9 +268,7 @@ export interface StreamLifecycleHooks {
   readonly onApprovalPromptObserved?: (conversationId: string, event: StreamEvent) => void;
 }
 
-function buildConnectionStatusCallbacks(
-  store: WorkspaceStore,
-): Pick<
+type ConnectionStatusCallbacks = Pick<
   StreamClientCallbacks,
   | 'onOpen'
   | 'onClose'
@@ -280,7 +278,9 @@ function buildConnectionStatusCallbacks(
   | 'onSessionTerminated'
   | 'onSessionExpiringSoon'
   | 'onSessionActive'
-> {
+>;
+
+function buildConnectionStatusCallbacks(store: WorkspaceStore): ConnectionStatusCallbacks {
   return {
     onOpen() {
       store.dispatch({
@@ -293,7 +293,7 @@ function buildConnectionStatusCallbacks(
         },
       });
     },
-    onClose() {
+    onClose(_code, _reason) {
       store.dispatch({
         type: 'connection/merge',
         patch: {
@@ -323,6 +323,47 @@ function buildConnectionStatusCallbacks(
         type: 'connection/merge',
         patch: { sessionStatus: 'active', lastAuthoritativeUpdate: expiresAt },
       });
+    },
+  };
+}
+
+function composeConnectionStatusCallbacks(
+  store: WorkspaceStore,
+  overrides: Partial<ConnectionStatusCallbacks> = {},
+): ConnectionStatusCallbacks {
+  const defaults = buildConnectionStatusCallbacks(store);
+  return {
+    onOpen() {
+      defaults.onOpen?.();
+      overrides.onOpen?.();
+    },
+    onClose(code, reason) {
+      defaults.onClose?.(code, reason);
+      overrides.onClose?.(code, reason);
+    },
+    onSocketError() {
+      defaults.onSocketError?.();
+      overrides.onSocketError?.();
+    },
+    onDaemonUnavailable() {
+      defaults.onDaemonUnavailable?.();
+      overrides.onDaemonUnavailable?.();
+    },
+    onDaemonRestored() {
+      defaults.onDaemonRestored?.();
+      overrides.onDaemonRestored?.();
+    },
+    onSessionTerminated(state, reason) {
+      defaults.onSessionTerminated?.(state, reason);
+      overrides.onSessionTerminated?.(state, reason);
+    },
+    onSessionExpiringSoon(expiresAt) {
+      defaults.onSessionExpiringSoon?.(expiresAt);
+      overrides.onSessionExpiringSoon?.(expiresAt);
+    },
+    onSessionActive(expiresAt) {
+      defaults.onSessionActive?.(expiresAt);
+      overrides.onSessionActive?.(expiresAt);
     },
   };
 }
@@ -389,8 +430,9 @@ export function buildStreamCallbacks(
   stateMap: Map<string, StreamSubscriptionState>,
   ack: (conversationId: string, seq: number) => void,
   lifecycle: StreamLifecycleHooks,
+  connectionCallbackOverrides: Partial<ConnectionStatusCallbacks> = {},
 ): StreamClientCallbacks {
-  const connectionCallbacks = buildConnectionStatusCallbacks(store);
+  const connectionCallbacks = composeConnectionStatusCallbacks(store, connectionCallbackOverrides);
   return {
     onStreamEvent(conversationId, event) {
       const currentState = stateMap.get(conversationId) ?? createStreamSubscriptionState();
@@ -454,8 +496,8 @@ export function buildStreamCallbacks(
       connectionCallbacks.onOpen?.();
       lifecycle.onConnectionEstablished();
     },
-    onClose(code) {
-      connectionCallbacks.onClose?.(code, '');
+    onClose(code, reason) {
+      connectionCallbacks.onClose?.(code, reason);
       // Attempt reconnect for server-initiated or abnormal close.
       // Normal close (1000) means intentional shutdown — no reconnect.
       if (code !== 1000) {

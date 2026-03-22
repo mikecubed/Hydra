@@ -467,8 +467,9 @@ function applyConversationEntries(
  * stream-owned entries for turns not present in the REST response.
  *
  * Delegates to `mergeAuthoritativeEntries` from the reconciler module for
- * the pure entry-merge algorithm. For actively streaming turns the stream's
- * content and status are preserved; for terminal turns REST is authoritative.
+ * the pure entry-merge algorithm. For non-terminal REST turns the stream's
+ * status and contentBlocks are preserved (the stream is likely ahead of the
+ * last REST snapshot); for terminal turns REST is fully authoritative.
  *
  * Sets `historyLoaded: true` so the transcript loader knows not to re-fetch.
  */

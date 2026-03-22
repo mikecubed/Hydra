@@ -371,6 +371,42 @@ describe('buildStreamCallbacks', () => {
     assert.equal(store.getState().connection.transportStatus, 'disconnected');
   });
 
+  it('forwards WebSocket close reason instead of dropping it', () => {
+    const store = storeWithConversation('conv-1');
+    const closes: Array<{ code: number; reason: string }> = [];
+    const callbacks = buildStreamCallbacks(
+      store,
+      new Map(),
+      () => {},
+      {
+        onReconnectNeeded: () => {},
+        onConnectionEstablished: () => {},
+      },
+      {
+        onClose(code, reason) {
+          closes.push({ code, reason });
+        },
+      },
+    );
+
+    callbacks.onClose!(1006, 'Abnormal closure');
+
+    assert.deepEqual(closes, [{ code: 1006, reason: 'Abnormal closure' }]);
+    assert.equal(store.getState().connection.transportStatus, 'disconnected');
+  });
+
+  it('uses the default connection-status close handler when no override is provided', () => {
+    const store = storeWithConversation('conv-1');
+    const callbacks = buildStreamCallbacks(store, new Map(), () => {}, {
+      onReconnectNeeded: () => {},
+      onConnectionEstablished: () => {},
+    });
+
+    callbacks.onClose!(1006, 'Abnormal closure');
+
+    assert.equal(store.getState().connection.transportStatus, 'disconnected');
+  });
+
   it('logs warning on ack failure instead of swallowing', () => {
     const store = storeWithConversation('conv-1');
     const warnSpy = mock.fn();
