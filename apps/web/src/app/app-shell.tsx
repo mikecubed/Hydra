@@ -1,7 +1,15 @@
-import type { JSX } from 'react';
+import { type JSX, useContext } from 'react';
 import { Outlet } from '@tanstack/react-router';
+import {
+  ConnectionBanner,
+  ConnectionStateContext,
+} from '../features/chat-workspace/components/connection-banner.tsx';
+
+export { ConnectionStateContext };
 
 export function AppShell(): JSX.Element {
+  const connectionState = useContext(ConnectionStateContext);
+
   return (
     <div
       style={{
@@ -13,6 +21,7 @@ export function AppShell(): JSX.Element {
       }}
     >
       <header
+        role="banner"
         style={{
           borderBottom: '1px solid rgba(148, 163, 184, 0.2)',
           padding: '1.5rem 2rem',
@@ -30,6 +39,8 @@ export function AppShell(): JSX.Element {
         </p>
         <h1 style={{ margin: '0.35rem 0 0', fontSize: '1.875rem' }}>Hydra Workspace</h1>
       </header>
+
+      {connectionState != null && <ConnectionBanner connection={connectionState} />}
 
       <main style={{ margin: '0 auto', maxWidth: '72rem', padding: '2rem' }}>
         <Outlet />
