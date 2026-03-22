@@ -14,6 +14,10 @@ import {
 import { WorkspaceLayout } from '../features/chat-workspace/components/workspace-layout.tsx';
 import { ComposerPanel } from '../features/chat-workspace/components/composer-panel.tsx';
 import {
+  ConnectionBanner,
+  ConnectionStateContext,
+} from '../features/chat-workspace/components/connection-banner.tsx';
+import {
   GatewayRequestError,
   createGatewayClient,
 } from '../features/chat-workspace/api/gateway-client.ts';
@@ -923,39 +927,42 @@ export function WorkspaceRoute(): JSX.Element {
   const handleRespondToPrompt = usePromptResponder(store, client);
 
   return (
-    <WorkspaceLayout
-      conversations={selectConversationList(state)}
-      activeConversationId={state.activeConversationId}
-      activeConversation={activeConversation}
-      activeEntries={selectActiveEntries(state)}
-      activeLoadState={selectActiveLoadState(state)}
-      activeHasMoreHistory={activeConversation?.hasMoreHistory ?? false}
-      isLoadingConversations={isLoadingConversations}
-      conversationErrorMessage={conversationErrorMessage}
-      onSelectConversation={(conversationId) => {
-        store.dispatch({ type: 'conversation/select', conversationId });
-        clearConversationError();
-        composer.clearCreateState();
-      }}
-      onStartNewConversation={() => {
-        store.dispatch({ type: 'conversation/select', conversationId: null });
-        clearConversationError();
-        composer.clearCreateState();
-      }}
-      onRetryActiveTranscript={retryActiveTranscript}
-      onRespondToPrompt={handleRespondToPrompt}
-      composerSlot={
-        <ComposerPanel
-          draftText={composer.draftText}
-          submitState={composer.submitState}
-          validationMessage={composer.validationMessage}
-          canSubmit={composer.canSubmit}
-          policyLabel={composer.policyLabel}
-          disabled={composer.disabled}
-          onDraftChange={composer.onDraftChange}
-          onSubmit={composer.onSubmit}
-        />
-      }
-    />
+    <ConnectionStateContext.Provider value={state.connection}>
+      <ConnectionBanner connection={state.connection} />
+      <WorkspaceLayout
+        conversations={selectConversationList(state)}
+        activeConversationId={state.activeConversationId}
+        activeConversation={activeConversation}
+        activeEntries={selectActiveEntries(state)}
+        activeLoadState={selectActiveLoadState(state)}
+        activeHasMoreHistory={activeConversation?.hasMoreHistory ?? false}
+        isLoadingConversations={isLoadingConversations}
+        conversationErrorMessage={conversationErrorMessage}
+        onSelectConversation={(conversationId) => {
+          store.dispatch({ type: 'conversation/select', conversationId });
+          clearConversationError();
+          composer.clearCreateState();
+        }}
+        onStartNewConversation={() => {
+          store.dispatch({ type: 'conversation/select', conversationId: null });
+          clearConversationError();
+          composer.clearCreateState();
+        }}
+        onRetryActiveTranscript={retryActiveTranscript}
+        onRespondToPrompt={handleRespondToPrompt}
+        composerSlot={
+          <ComposerPanel
+            draftText={composer.draftText}
+            submitState={composer.submitState}
+            validationMessage={composer.validationMessage}
+            canSubmit={composer.canSubmit}
+            policyLabel={composer.policyLabel}
+            disabled={composer.disabled}
+            onDraftChange={composer.onDraftChange}
+            onSubmit={composer.onSubmit}
+          />
+        }
+      />
+    </ConnectionStateContext.Provider>
   );
 }
