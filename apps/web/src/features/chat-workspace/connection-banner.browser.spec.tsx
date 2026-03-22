@@ -83,7 +83,7 @@ describe('ConnectionBanner transport states', () => {
 // ─── Visibility: daemon/sync/session-warning states ─────────────────────────
 
 describe('ConnectionBanner daemon/sync states', () => {
-  it('shows a status banner when daemon is unavailable', () => {
+  it('shows an alert banner when daemon is unavailable', () => {
     renderBanner({
       transportStatus: 'live',
       syncStatus: 'idle',

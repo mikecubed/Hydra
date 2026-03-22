@@ -2,8 +2,8 @@
  * Connection status banner — operator-visible reconnect and sync indicator.
  *
  * Pure presentational component. Renders nothing when the workspace is fully
- * operational; shows a dismissible banner with ARIA live region semantics
- * when the connection degrades.
+ * operational; shows a banner with ARIA live region semantics when the
+ * connection degrades.
  *
  * Severity mapping:
  *   alert  (assertive) — terminal session, disconnected, sync error, daemon down
@@ -22,9 +22,10 @@ import {
 // ─── Context for cross-component wiring ─────────────────────────────────────
 
 /**
- * Optional context so the AppShell (root layout) can display the banner
- * without owning the workspace store. The workspace route provides the
- * connection state; the app shell consumes it.
+ * Optional context so layout or sibling components can access the connection
+ * state without owning the workspace store. The workspace route (or another
+ * feature boundary) provides the state; consumers own their own banner /
+ * indicator rendering.
  */
 export const ConnectionStateContext = createContext<WorkspaceConnectionState | null>(null);
 
