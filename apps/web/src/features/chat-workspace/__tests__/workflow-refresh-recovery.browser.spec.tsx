@@ -144,15 +144,12 @@ describe('workspace refresh/reconnect recovery workflows', () => {
     const subMsgs = ws2.sentMessages.filter((m) => m['type'] === 'subscribe');
     expect(subMsgs).toHaveLength(1);
 
-    act(() => {
-      ws2.simulateMessage({ type: 'subscribed', conversationId: 'conv-1', currentSeq: 4 });
-    });
-
-    // The server may replay the already-authoritative partial before sending new text.
+    // Gateway replay arrives before the subscribed ack on refresh/reconnect.
     act(() => {
       ws2.simulateMessage(
         streamFrame('conv-1', 4, 'turn-a1', 'text-delta', { text: 'Rehydrated partial: ' }),
       );
+      ws2.simulateMessage({ type: 'subscribed', conversationId: 'conv-1', currentSeq: 4 });
       ws2.simulateMessage(
         streamFrame('conv-1', 5, 'turn-a1', 'text-delta', { text: 'live delta one' }),
       );
