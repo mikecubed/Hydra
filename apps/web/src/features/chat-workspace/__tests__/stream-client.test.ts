@@ -408,6 +408,7 @@ describe('StreamClient', () => {
       assert.ok(lastFakeSocket);
       lastFakeSocket.simulateOpen();
 
+      lastFakeSocket.simulateMessage(subscribedPayload());
       lastFakeSocket.simulateMessage(streamEventPayload());
 
       assert.equal(events.length, 1);
@@ -431,6 +432,26 @@ describe('StreamClient', () => {
       assert.equal(calls.length, 1);
       assert.equal(calls[0].conversationId, 'conv-1');
       assert.equal(calls[0].currentSeq, 5);
+    });
+
+    it('buffers replayed stream-events until subscribed arrives for the conversation', () => {
+      const calls: string[] = [];
+      const client = createStreamClient(defaultOptions());
+      client.connect(
+        noopCallbacks({
+          onStreamEvent: (_conversationId, event) => calls.push(`event:${event.seq}`),
+          onSubscribed: (conversationId, currentSeq) =>
+            calls.push(`subscribed:${conversationId}:${currentSeq}`),
+        }),
+      );
+      assert.ok(lastFakeSocket);
+      lastFakeSocket.simulateOpen();
+
+      lastFakeSocket.simulateMessage(streamEventPayload());
+      assert.deepStrictEqual(calls, []);
+
+      lastFakeSocket.simulateMessage(subscribedPayload());
+      assert.deepStrictEqual(calls, ['event:1', 'subscribed:conv-1:5']);
     });
 
     it('dispatches unsubscribed to onUnsubscribed', () => {
@@ -1093,6 +1114,7 @@ describe('StreamClient', () => {
       client.connect(noopCallbacks());
       const ws2 = getSocket();
       ws2.simulateOpen();
+      ws2.simulateMessage(subscribedPayload({ conversationId: 'live-conv', currentSeq: 0 }));
 
       assert.equal(client.readyState, FakeWebSocket.OPEN, 'new socket should be OPEN');
 
@@ -1203,6 +1225,7 @@ describe('StreamClient', () => {
       );
       const ws2 = getSocket();
       ws2.simulateOpen();
+      ws2.simulateMessage(subscribedPayload({ conversationId: 'live-conv', currentSeq: 0 }));
 
       // Stale close from the old socket fires — must NOT reach any callback
       staleOnclose(fakeCloseEvent(1000, 'Normal closure'));
@@ -1282,6 +1305,7 @@ describe('StreamClient', () => {
       );
       const ws2 = getSocket();
       ws2.simulateOpen();
+      ws2.simulateMessage(subscribedPayload({ conversationId: 'live-conv', currentSeq: 0 }));
 
       // Stale onmessage from old socket — must be silently ignored
       staleOnmessage(
@@ -1471,6 +1495,12 @@ describe('StreamClient', () => {
 
       client.subscribe('conv-a');
       client.subscribe('conv-b');
+      lastFakeSocket.simulateMessage(
+        subscribedPayload({ conversationId: 'conv-a', currentSeq: 0 }),
+      );
+      lastFakeSocket.simulateMessage(
+        subscribedPayload({ conversationId: 'conv-b', currentSeq: 0 }),
+      );
 
       lastFakeSocket.simulateMessage(streamEventPayload({ conversationId: 'conv-b' }));
       lastFakeSocket.simulateMessage(streamEventPayload({ conversationId: 'conv-a' }));

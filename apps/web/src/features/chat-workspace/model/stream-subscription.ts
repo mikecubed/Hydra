@@ -118,11 +118,24 @@ export function applyStreamEventsToConversation(
   const conversation = store.getState().conversations.get(conversationId);
   if (conversation == null) return subscriptionState;
 
+  const replaySafeEvents = events.filter(
+    (event) =>
+      subscriptionState.serverResumeSeq === undefined ||
+      event.seq > subscriptionState.serverResumeSeq,
+  );
+  if (replaySafeEvents.length === 0) {
+    return subscriptionState;
+  }
+
   const {
     entries,
     state: nextReconcilerState,
     consumedSeqs,
-  } = reconcileStreamEvents(conversation.entries, events, subscriptionState.reconcilerState);
+  } = reconcileStreamEvents(
+    conversation.entries,
+    replaySafeEvents,
+    subscriptionState.reconcilerState,
+  );
 
   // Only dispatch when reconciliation actually mutated the entries array.
   if (entries !== conversation.entries) {
@@ -138,7 +151,7 @@ export function applyStreamEventsToConversation(
   const nextPending = new Set(subscriptionState.pendingSeqs);
   let highestSeenSeq = subscriptionState.highestSeenSeq;
 
-  for (const event of events) {
+  for (const event of replaySafeEvents) {
     if (highestSeenSeq === undefined || event.seq > highestSeenSeq) {
       highestSeenSeq = event.seq;
     }

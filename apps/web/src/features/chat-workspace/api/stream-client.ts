@@ -271,34 +271,6 @@ function resolveHandler(messageType: string): MessageHandler | null {
   }
 }
 
-/** Parse, validate, and dispatch a single inbound server message. */
-function dispatchServerMessage(raw: string, callbacks: StreamClientCallbacks): void {
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(raw) as unknown;
-  } catch {
-    callbacks.onParseError?.(raw, 'Invalid JSON');
-    return;
-  }
-
-  if (!isRecord(parsed) || typeof parsed['type'] !== 'string') {
-    callbacks.onParseError?.(raw, 'Message missing "type" field');
-    return;
-  }
-
-  const messageType = parsed['type'];
-  const handler = resolveHandler(messageType);
-  if (!handler) {
-    callbacks.onParseError?.(raw, `Message has unknown type: "${messageType}"`);
-    return;
-  }
-
-  const validationError = handler(parsed, callbacks);
-  if (validationError !== null) {
-    callbacks.onParseError?.(raw, `Invalid "${messageType}" message: ${validationError}`);
-  }
-}
-
 // ─── Factory ────────────────────────────────────────────────────────────────
 
 /** Mutable internal state shared between the factory closure and helpers. */
@@ -307,6 +279,8 @@ interface ClientState {
   sendQueue: string[];
   /** Socket intentionally closed via close() whose async onclose hasn't fired yet. */
   pendingCloseSocket: WebSocketLike | null;
+  liveSubscriptions: Set<string>;
+  bufferedReplayEvents: Map<string, Array<{ conversationId: string; event: StreamEvent }>>;
 }
 
 function requireSocket(state: ClientState): WebSocketLike {
@@ -336,6 +310,129 @@ function flushQueue(state: ClientState): void {
   }
 }
 
+function bufferReplayEvent(state: ClientState, conversationId: string, event: StreamEvent): void {
+  const queued = state.bufferedReplayEvents.get(conversationId) ?? [];
+  queued.push({ conversationId, event });
+  state.bufferedReplayEvents.set(conversationId, queued);
+}
+
+function flushBufferedReplayEvents(
+  state: ClientState,
+  conversationId: string,
+  callbacks: StreamClientCallbacks,
+): void {
+  const queued = state.bufferedReplayEvents.get(conversationId);
+  if (!queued || queued.length === 0) return;
+  state.bufferedReplayEvents.delete(conversationId);
+  for (const { event } of queued) {
+    callbacks.onStreamEvent?.(conversationId, event);
+  }
+}
+
+function parseInboundRecord(
+  raw: string,
+  callbacks: StreamClientCallbacks,
+): (Record<string, unknown> & { type: string }) | null {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw) as unknown;
+  } catch {
+    callbacks.onParseError?.(raw, 'Invalid JSON');
+    return null;
+  }
+
+  if (!isRecord(parsed) || typeof parsed['type'] !== 'string') {
+    callbacks.onParseError?.(raw, 'Message missing "type" field');
+    return null;
+  }
+
+  return parsed as Record<string, unknown> & { type: string };
+}
+
+function dispatchBufferedStreamEvent(
+  raw: string,
+  parsed: Record<string, unknown>,
+  state: ClientState,
+  callbacks: StreamClientCallbacks,
+): boolean {
+  if (parsed['type'] !== 'stream-event') return false;
+  const result = ServerStreamEvent.safeParse(parsed);
+  if (!result.success) {
+    callbacks.onParseError?.(raw, `Invalid "stream-event" message: ${result.error.message}`);
+    return true;
+  }
+
+  if (state.liveSubscriptions.has(result.data.conversationId)) {
+    callbacks.onStreamEvent?.(result.data.conversationId, result.data.event);
+    return true;
+  }
+
+  bufferReplayEvent(state, result.data.conversationId, result.data.event);
+  return true;
+}
+
+function dispatchBufferedSubscribed(
+  raw: string,
+  parsed: Record<string, unknown>,
+  state: ClientState,
+  callbacks: StreamClientCallbacks,
+): boolean {
+  if (parsed['type'] !== 'subscribed') return false;
+  const result = ServerSubscribed.safeParse(parsed);
+  if (!result.success) {
+    callbacks.onParseError?.(raw, `Invalid "subscribed" message: ${result.error.message}`);
+    return true;
+  }
+
+  state.liveSubscriptions.add(result.data.conversationId);
+  flushBufferedReplayEvents(state, result.data.conversationId, callbacks);
+  callbacks.onSubscribed?.(result.data.conversationId, result.data.currentSeq);
+  return true;
+}
+
+function dispatchBufferedUnsubscribed(
+  raw: string,
+  parsed: Record<string, unknown>,
+  state: ClientState,
+  callbacks: StreamClientCallbacks,
+): boolean {
+  if (parsed['type'] !== 'unsubscribed') return false;
+  const result = ServerUnsubscribed.safeParse(parsed);
+  if (!result.success) {
+    callbacks.onParseError?.(raw, `Invalid "unsubscribed" message: ${result.error.message}`);
+    return true;
+  }
+
+  state.liveSubscriptions.delete(result.data.conversationId);
+  state.bufferedReplayEvents.delete(result.data.conversationId);
+  callbacks.onUnsubscribed?.(result.data.conversationId);
+  return true;
+}
+
+function dispatchInboundMessage(
+  raw: string,
+  state: ClientState,
+  callbacks: StreamClientCallbacks,
+): void {
+  const parsed = parseInboundRecord(raw, callbacks);
+  if (!parsed) return;
+
+  if (dispatchBufferedStreamEvent(raw, parsed, state, callbacks)) return;
+  if (dispatchBufferedSubscribed(raw, parsed, state, callbacks)) return;
+  if (dispatchBufferedUnsubscribed(raw, parsed, state, callbacks)) return;
+
+  const handler = resolveHandler(parsed['type']);
+  if (!handler) {
+    callbacks.onParseError?.(raw, `Message has unknown type: "${parsed['type']}"`);
+    return;
+  }
+
+  const validationError = handler(parsed, callbacks);
+  if (validationError !== null) {
+    callbacks.onParseError?.(raw, `Invalid "${parsed['type']}" message: ${validationError}`);
+  }
+}
+
 function attachSocketHandlers(
   state: ClientState,
   ws: WebSocketLike,
@@ -349,7 +446,7 @@ function attachSocketHandlers(
   ws.onmessage = (ev) => {
     if (state.socket !== ws) return;
     const raw = typeof ev.data === 'string' ? ev.data : String(ev.data);
-    dispatchServerMessage(raw, callbacks);
+    dispatchInboundMessage(raw, state, callbacks);
   };
   ws.onerror = () => {
     if (state.socket !== ws) return;
@@ -360,6 +457,8 @@ function attachSocketHandlers(
       // Server-initiated close of the active socket.
       state.socket = null;
       state.sendQueue = [];
+      state.liveSubscriptions.clear();
+      state.bufferedReplayEvents.clear();
       callbacks.onClose?.(ev.code, ev.reason);
     } else if (state.pendingCloseSocket === ws) {
       // Client-initiated close() already cleared state.socket; the browser's
@@ -388,6 +487,8 @@ export function createStreamClient(options: StreamClientOptions): StreamClient {
     socket: null,
     sendQueue: [],
     pendingCloseSocket: null,
+    liveSubscriptions: new Set(),
+    bufferedReplayEvents: new Map(),
   };
 
   return {
@@ -397,6 +498,8 @@ export function createStreamClient(options: StreamClientOptions): StreamClient {
       }
 
       state.sendQueue = [];
+      state.liveSubscriptions.clear();
+      state.bufferedReplayEvents.clear();
       // A new connection supersedes any socket pending its async onclose.
       state.pendingCloseSocket = null;
       const ws = createWs(baseUrl);
@@ -407,12 +510,16 @@ export function createStreamClient(options: StreamClientOptions): StreamClient {
     subscribe(conversationId, lastAcknowledgedSeq) {
       const msg: Record<string, unknown> = { type: 'subscribe', conversationId };
       if (lastAcknowledgedSeq !== undefined) msg['lastAcknowledgedSeq'] = lastAcknowledgedSeq;
+      state.liveSubscriptions.delete(conversationId);
+      state.bufferedReplayEvents.delete(conversationId);
       sendOrQueue(state, JSON.stringify(msg));
     },
 
     unsubscribe(conversationId) {
       // After close() or socket teardown, unsubscribe is a safe no-op.
       if (state.socket === null || state.socket.readyState > WS_OPEN) return;
+      state.liveSubscriptions.delete(conversationId);
+      state.bufferedReplayEvents.delete(conversationId);
       sendOrQueue(state, JSON.stringify({ type: 'unsubscribe', conversationId }));
     },
 
@@ -423,6 +530,8 @@ export function createStreamClient(options: StreamClientOptions): StreamClient {
     close() {
       if (state.socket === null) return;
       state.sendQueue = [];
+      state.liveSubscriptions.clear();
+      state.bufferedReplayEvents.clear();
       state.pendingCloseSocket = state.socket;
       state.socket.close();
       state.socket = null;

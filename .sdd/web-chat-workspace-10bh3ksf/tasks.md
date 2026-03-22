@@ -114,7 +114,7 @@ _Status note_: post-Phase-1 maintenance also landed on the active branch, splitt
 - [x] T028 [P] [US4] **TDD:** extend reconnect, resubscribe, and replay-aware recovery behavior in `apps/web/src/features/chat-workspace/api/stream-client.ts` and `apps/web/src/features/chat-workspace/__tests__/stream-client.test.ts`.
 - [x] T029 [US4] Implement reconnect and sync visibility in `apps/web/src/features/chat-workspace/components/connection-banner.tsx` and `apps/web/src/app/app-shell.tsx`.
 - [x] T030 [US4] Tighten authoritative refresh merge and duplicate suppression in `apps/web/src/features/chat-workspace/model/reconciler.ts` and `apps/web/src/features/chat-workspace/model/selectors.ts`.
-- [ ] T031 [US4] Add refresh/reconnect workflow coverage in `apps/web/src/features/chat-workspace/__tests__/workspace-e2e.test.ts`.
+- [x] T031 [US4] Add refresh/reconnect workflow coverage in `apps/web/src/features/chat-workspace/__tests__/workflow-refresh-recovery.browser.spec.tsx`.
 - [ ] T032 [US4] Run the phase quality gate from the repo root with `npm run quality` and `npm test` after reconnect recovery is green.
 
 **Checkpoint**: The workspace remains trustworthy across refresh and transient disconnects.
