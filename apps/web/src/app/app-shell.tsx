@@ -1,6 +1,14 @@
 import type { JSX } from 'react';
 import { Outlet } from '@tanstack/react-router';
 
+/**
+ * Root layout shell — renders the app chrome (header + main) and delegates
+ * child route content via `<Outlet />`.
+ *
+ * Connection-status banners are rendered by each route that owns the
+ * connection state (e.g. WorkspaceRoute), not here, because the context
+ * provider lives below the root route in the component tree.
+ */
 export function AppShell(): JSX.Element {
   return (
     <div
@@ -13,6 +21,7 @@ export function AppShell(): JSX.Element {
       }}
     >
       <header
+        role="banner"
         style={{
           borderBottom: '1px solid rgba(148, 163, 184, 0.2)',
           padding: '1.5rem 2rem',
