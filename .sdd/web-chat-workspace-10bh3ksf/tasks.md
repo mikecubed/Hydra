@@ -110,8 +110,8 @@ _Status note_: post-Phase-1 maintenance also landed on the active branch, splitt
 
 **Independent Test**: Disconnect or refresh during an active turn, recover, and verify the transcript converges to authoritative state with clear reconnect/sync visibility.
 
-- [ ] T027 [P] [US4] **TDD:** model operator-visible connection and synchronization states in `apps/web/src/shared/session-state.ts` and `apps/web/src/features/chat-workspace/model/workspace-store.ts`.
-- [ ] T028 [P] [US4] **TDD:** extend reconnect, resubscribe, and replay-aware recovery behavior in `apps/web/src/features/chat-workspace/api/stream-client.ts` and `apps/web/src/features/chat-workspace/__tests__/stream-client.test.ts`.
+- [x] T027 [P] [US4] **TDD:** model operator-visible connection and synchronization states in `apps/web/src/shared/session-state.ts` and `apps/web/src/features/chat-workspace/model/workspace-store.ts`.
+- [x] T028 [P] [US4] **TDD:** extend reconnect, resubscribe, and replay-aware recovery behavior in `apps/web/src/features/chat-workspace/api/stream-client.ts` and `apps/web/src/features/chat-workspace/__tests__/stream-client.test.ts`.
 - [ ] T029 [US4] Implement reconnect and sync visibility in `apps/web/src/features/chat-workspace/components/connection-banner.tsx` and `apps/web/src/app/app-shell.tsx`.
 - [ ] T030 [US4] Tighten authoritative refresh merge and duplicate suppression in `apps/web/src/features/chat-workspace/model/reconciler.ts` and `apps/web/src/features/chat-workspace/model/selectors.ts`.
 - [ ] T031 [US4] Add refresh/reconnect workflow coverage in `apps/web/src/features/chat-workspace/__tests__/workspace-e2e.test.ts`.
