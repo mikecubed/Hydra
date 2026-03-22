@@ -556,6 +556,8 @@ describe('workspace refresh/reconnect recovery workflows', () => {
       ws2.simulateOpen();
     });
     act(() => {
+      ws2.simulateMessage({ type: 'daemon-restored' });
+      ws2.simulateMessage({ type: 'session-active', expiresAt: '2026-08-01T00:00:00.000Z' });
       ws2.simulateMessage({ type: 'subscribed', conversationId: 'conv-1', currentSeq: 0 });
     });
 

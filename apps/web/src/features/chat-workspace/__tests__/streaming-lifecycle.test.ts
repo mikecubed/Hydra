@@ -338,6 +338,41 @@ describe('buildStreamCallbacks', () => {
     assert.equal(store.getState().connection.sessionStatus, 'active');
   });
 
+  it('reconnect after offline backend recovery clears degraded state via bootstrap frames', () => {
+    const store = storeWithConversation('conv-1');
+
+    // Simulate: browser went degraded (daemon down + session expiring), then
+    // disconnected. Backend recovered while browser was offline. Browser
+    // reconnects — the gateway will now emit session-active on fresh bind.
+    store.dispatch({
+      type: 'connection/merge',
+      patch: {
+        transportStatus: 'disconnected',
+        reconnectAttempt: 3,
+        daemonStatus: 'unavailable',
+        sessionStatus: 'expiring-soon',
+      },
+    });
+
+    const callbacks = buildStreamCallbacks(store, new Map(), () => {}, {
+      onReconnectNeeded: () => {},
+      onConnectionEstablished: () => {},
+    });
+
+    // Socket opens — transport live, but daemon/session still degraded.
+    callbacks.onOpen!();
+    assert.equal(store.getState().connection.transportStatus, 'live');
+    assert.equal(store.getState().connection.daemonStatus, 'unavailable');
+    assert.equal(store.getState().connection.sessionStatus, 'expiring-soon');
+
+    // Gateway sends bootstrap frames for an already-recovered active session.
+    callbacks.onDaemonRestored!();
+    callbacks.onSessionActive!('2026-08-01T00:00:00.000Z');
+
+    assert.equal(store.getState().connection.daemonStatus, 'healthy');
+    assert.equal(store.getState().connection.sessionStatus, 'active');
+  });
+
   it('canSubmitWork stays false during reconnect-open window with degraded daemon', () => {
     const store = storeWithConversation('conv-1');
 

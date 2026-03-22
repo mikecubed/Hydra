@@ -579,12 +579,17 @@ describe('T044: daemon unavailable — WebSocket path', () => {
       await heartbeat.tick();
 
       const messages = parseSent(ws);
-      assert.ok(
-        !messages.some((m) => m.type === 'daemon-restored'),
-        'Should not send daemon-restored when daemon was never down',
+      const postBindMessages = messages.slice(
+        messages.findIndex(
+          (message) => message.type !== 'daemon-restored' && message.type !== 'session-active',
+        ),
       );
       assert.ok(
-        !messages.some((m) => m.type === 'daemon-unavailable'),
+        !postBindMessages.some((m) => m.type === 'daemon-restored'),
+        'Should not send daemon-restored after bind when daemon was never down',
+      );
+      assert.ok(
+        !postBindMessages.some((m) => m.type === 'daemon-unavailable'),
         'Should not send daemon-unavailable when daemon is healthy',
       );
     } finally {
@@ -609,13 +614,14 @@ describe('T044: daemon unavailable — WebSocket path', () => {
 
       const messages = parseSent(ws);
       const unavailableIdx = messages.findIndex((m) => m.type === 'daemon-unavailable');
-      const restoredIdx = messages.findIndex((m) => m.type === 'daemon-restored');
+      const recoveryMessages = unavailableIdx >= 0 ? messages.slice(unavailableIdx) : messages;
+      const restoredIdx = recoveryMessages.findIndex((m) => m.type === 'daemon-restored');
 
       assert.ok(unavailableIdx >= 0, 'daemon-unavailable must be present');
       assert.ok(restoredIdx >= 0, 'daemon-restored must be present');
       assert.ok(
-        unavailableIdx < restoredIdx,
-        `daemon-unavailable (idx ${unavailableIdx}) must arrive before daemon-restored (idx ${restoredIdx})`,
+        restoredIdx > 0,
+        `daemon-unavailable must arrive before daemon-restored within recovery messages: ${JSON.stringify(recoveryMessages.map((m) => m.type))}`,
       );
     } finally {
       cleanup();

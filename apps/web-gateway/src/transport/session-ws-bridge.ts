@@ -56,9 +56,12 @@ export class SessionWsBridge {
   ): void {
     switch (state) {
       case 'active':
+        connection.send({ type: 'daemon-restored' });
+        connection.send({ type: 'session-active', expiresAt });
         applyExpiry(expiresAt, true);
         return;
       case 'expiring-soon':
+        connection.send({ type: 'daemon-restored' });
         sendExpiringSoon(expiresAt);
         applyExpiry(expiresAt);
         return;
