@@ -1430,6 +1430,29 @@ describe('sealAuthoritativeTurns', () => {
     const result = sealAuthoritativeTurns(createReconcilerState(), entries);
     assert.equal(result.sealedTurns?.size ?? 0, 0);
   });
+
+  it('returns same state reference when nothing new is sealed (empty entries)', () => {
+    const state = createReconcilerState();
+    const result = sealAuthoritativeTurns(state, []);
+    assert.equal(result, state, 'expected referential identity on no-op');
+  });
+
+  it('returns same state reference when all turns are already sealed', () => {
+    const state: ReconcilerState = {
+      highWaterSeq: new Map(),
+      sealedTurns: new Set(['turn-1']),
+    };
+    const entries = [makeEntry({ turnId: 'turn-1', status: 'completed' })];
+    const result = sealAuthoritativeTurns(state, entries);
+    assert.equal(result, state, 'expected referential identity when turn already sealed');
+  });
+
+  it('returns same state reference when entries have no sealable turns', () => {
+    const state = createReconcilerState();
+    const entries = [makeEntry({ turnId: 'turn-1', status: 'streaming' })];
+    const result = sealAuthoritativeTurns(state, entries);
+    assert.equal(result, state, 'expected referential identity for non-terminal turns');
+  });
 });
 
 // ─── isStaleEvent with sealed turns ─────────────────────────────────────────

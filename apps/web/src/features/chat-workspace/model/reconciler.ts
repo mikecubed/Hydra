@@ -634,17 +634,26 @@ function shouldPreserveStreamedTurn(
  * Seal turns whose authoritative status is terminal. Events for sealed turns
  * are unconditionally treated as stale by `isStaleEvent`, preventing
  * post-reconnect replays from mutating entries REST has already finalized.
+ *
+ * Returns the original `state` by reference when nothing new is sealed,
+ * so callers can use `===` to detect no-ops.
  */
 export function sealAuthoritativeTurns(
   state: ReconcilerState,
   authoritativeEntries: readonly TranscriptEntryState[],
 ): ReconcilerState {
-  const sealed = new Set(state.sealedTurns);
+  const existing = state.sealedTurns;
+  let sealed: Set<string> | undefined;
+
   for (const entry of authoritativeEntries) {
     if (entry.kind === 'turn' && entry.turnId != null && TERMINAL_STATUSES.has(entry.status)) {
+      if (existing?.has(entry.turnId) === true) continue;
+      sealed ??= new Set(existing);
       sealed.add(entry.turnId);
     }
   }
+
+  if (sealed === undefined) return state;
   return { ...state, sealedTurns: sealed };
 }
 
