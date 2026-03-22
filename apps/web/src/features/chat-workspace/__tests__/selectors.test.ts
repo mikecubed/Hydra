@@ -18,6 +18,7 @@ import {
   selectCanSubmit,
   selectCreateModeCanSubmit,
   selectConversationList,
+  selectIsHistoryLoaded,
 } from '../model/selectors.ts';
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
@@ -100,7 +101,7 @@ describe('selectActiveEntries', () => {
     state = reduceWorkspaceState(state, {
       type: 'conversation/replace-entries',
       conversationId: 'conv-1',
-      entries: [createEntry(), createEntry({ entryId: 'entry-2' })],
+      entries: [createEntry(), createEntry({ entryId: 'entry-2', turnId: 'turn-2' })],
       hasMoreHistory: false,
     });
 
@@ -288,5 +289,129 @@ describe('selectCreateModeCanSubmit', () => {
 
   it('returns true for text with leading/trailing whitespace', () => {
     assert.equal(selectCreateModeCanSubmit('  hello  ', false, null), true);
+  });
+});
+
+// ─── selectIsHistoryLoaded ──────────────────────────────────────────────────
+
+describe('selectIsHistoryLoaded', () => {
+  it('returns false when no conversation is active', () => {
+    assert.equal(selectIsHistoryLoaded(createInitialWorkspaceState()), false);
+  });
+
+  it('returns false when historyLoaded is false (default)', () => {
+    const state = stateWithConversation('conv-1');
+    assert.equal(selectIsHistoryLoaded(state), false);
+  });
+
+  it('returns true after merge-history has been dispatched', () => {
+    let state = stateWithConversation('conv-1');
+    state = reduceWorkspaceState(state, {
+      type: 'conversation/merge-history',
+      conversationId: 'conv-1',
+      entries: [createEntry()],
+      hasMoreHistory: false,
+    });
+    assert.equal(selectIsHistoryLoaded(state), true);
+  });
+});
+
+// ─── selectActiveEntries — duplicate suppression ────────────────────────────
+
+describe('selectActiveEntries — duplicate suppression', () => {
+  it('returns same array reference when no duplicates', () => {
+    let state = stateWithConversation('conv-1');
+    const entries = [createEntry({ entryId: 'e1', turnId: 'turn-1' })];
+    state = reduceWorkspaceState(state, {
+      type: 'conversation/replace-entries',
+      conversationId: 'conv-1',
+      entries,
+      hasMoreHistory: false,
+    });
+    const conv = state.conversations.get('conv-1');
+    const selected = selectActiveEntries(state);
+    // Should reference the same array stored in state (no unnecessary copy)
+    assert.equal(selected, conv?.entries);
+  });
+
+  it('deduplicates entries with same turnId', () => {
+    let state = stateWithConversation('conv-1');
+    // Manually construct state with duplicate turnIds (simulating a bug/race)
+    const dupEntries: TranscriptEntryState[] = [
+      createEntry({ entryId: 'e1', turnId: 'turn-1', status: 'completed' }),
+      createEntry({ entryId: 'e2', turnId: 'turn-1', status: 'streaming' }),
+      createEntry({ entryId: 'e3', turnId: 'turn-2', status: 'completed' }),
+    ];
+    state = reduceWorkspaceState(state, {
+      type: 'conversation/replace-entries',
+      conversationId: 'conv-1',
+      entries: dupEntries,
+      hasMoreHistory: false,
+    });
+    const selected = selectActiveEntries(state);
+    assert.equal(selected.length, 2);
+    // First occurrence of turn-1 is kept (entryId 'e1')
+    assert.equal(selected[0].entryId, 'e1');
+    assert.equal(selected[1].entryId, 'e3');
+  });
+
+  it('deduplicates non-turn entries with same entryId', () => {
+    let state = stateWithConversation('conv-1');
+    const dupEntries: TranscriptEntryState[] = [
+      createEntry({ entryId: 'e1', turnId: 'turn-1', status: 'completed' }),
+      createEntry({
+        entryId: 'sys-1',
+        kind: 'system-status',
+        turnId: 'turn-1',
+        status: 'warning',
+      }),
+      createEntry({
+        entryId: 'sys-1',
+        kind: 'system-status',
+        turnId: 'turn-1',
+        status: 'warning',
+      }),
+    ];
+    state = reduceWorkspaceState(state, {
+      type: 'conversation/replace-entries',
+      conversationId: 'conv-1',
+      entries: dupEntries,
+      hasMoreHistory: false,
+    });
+    const selected = selectActiveEntries(state);
+    assert.equal(selected.length, 2, 'duplicate non-turn entry must be removed');
+    assert.equal(selected[0].entryId, 'e1');
+    assert.equal(selected[1].entryId, 'sys-1');
+  });
+
+  it('deduplicates mixed turn and non-turn duplicates', () => {
+    let state = stateWithConversation('conv-1');
+    const dupEntries: TranscriptEntryState[] = [
+      createEntry({ entryId: 'e1', turnId: 'turn-1', status: 'completed' }),
+      createEntry({
+        entryId: 'act-1',
+        kind: 'activity-group',
+        turnId: 'turn-1',
+        status: 'active',
+      }),
+      createEntry({
+        entryId: 'act-1',
+        kind: 'activity-group',
+        turnId: 'turn-1',
+        status: 'active',
+      }),
+      createEntry({ entryId: 'e2', turnId: 'turn-2', status: 'completed' }),
+    ];
+    state = reduceWorkspaceState(state, {
+      type: 'conversation/replace-entries',
+      conversationId: 'conv-1',
+      entries: dupEntries,
+      hasMoreHistory: false,
+    });
+    const selected = selectActiveEntries(state);
+    assert.equal(selected.length, 3, 'duplicate activity-group must be removed');
+    assert.equal(selected[0].entryId, 'e1');
+    assert.equal(selected[1].entryId, 'act-1');
+    assert.equal(selected[2].entryId, 'e2');
   });
 });

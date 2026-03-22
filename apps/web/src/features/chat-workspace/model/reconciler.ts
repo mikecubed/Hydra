@@ -24,6 +24,12 @@ import type {
 /** Per-turn high-water mark tracking for duplicate suppression. */
 export interface ReconcilerState {
   readonly highWaterSeq: ReadonlyMap<string, number>;
+  /**
+   * Turns sealed by authoritative REST history. Events for sealed turns are
+   * unconditionally treated as stale, preventing post-reconnect replays from
+   * mutating entries that REST has already provided in their final form.
+   */
+  readonly sealedTurns?: ReadonlySet<string>;
 }
 
 /** Result of a reconciliation pass. */
@@ -40,16 +46,18 @@ export interface ReconcileResult {
 }
 
 export function createReconcilerState(): ReconcilerState {
-  return { highWaterSeq: new Map() };
+  return { highWaterSeq: new Map(), sealedTurns: new Set() };
 }
 
 // ─── Duplicate detection ────────────────────────────────────────────────────
 
 /**
  * Returns `true` when the event's seq is at or below the high-water mark for
- * its turn — meaning it has already been processed and should be skipped.
+ * its turn, or when the turn has been sealed by an authoritative refresh —
+ * meaning it has already been processed and should be skipped.
  */
 export function isStaleEvent(event: StreamEvent, state: ReconcilerState): boolean {
+  if (state.sealedTurns?.has(event.turnId) === true) return true;
   const hw = state.highWaterSeq.get(event.turnId);
   return hw !== undefined && event.seq <= hw;
 }
@@ -530,7 +538,7 @@ export function reconcileStreamEvents(
   const consumedSeqs = new Set<number>();
 
   for (const event of events) {
-    if (isStaleEvent(event, { highWaterSeq: hwMap })) continue;
+    if (isStaleEvent(event, { highWaterSeq: hwMap, sealedTurns: state.sealedTurns })) continue;
 
     const prev = current;
     current = applyEvent(current, event);
@@ -548,5 +556,124 @@ export function reconcileStreamEvents(
     }
   }
 
-  return { entries: current, state: { highWaterSeq: hwMap }, consumedSeqs };
+  return {
+    entries: current,
+    state: { highWaterSeq: hwMap, sealedTurns: state.sealedTurns },
+    consumedSeqs,
+  };
+}
+
+// ─── Authoritative merge & deduplication ────────────────────────────────────
+
+const TERMINAL_STATUSES: ReadonlySet<string> = new Set(['completed', 'failed', 'cancelled']);
+
+/**
+ * Seal turns whose authoritative status is terminal. Events for sealed turns
+ * are unconditionally treated as stale by `isStaleEvent`, preventing
+ * post-reconnect replays from mutating entries REST has already finalized.
+ */
+export function sealAuthoritativeTurns(
+  state: ReconcilerState,
+  authoritativeEntries: readonly TranscriptEntryState[],
+): ReconcilerState {
+  const sealed = new Set(state.sealedTurns);
+  for (const entry of authoritativeEntries) {
+    if (entry.kind === 'turn' && entry.turnId != null && TERMINAL_STATUSES.has(entry.status)) {
+      sealed.add(entry.turnId);
+    }
+  }
+  return { ...state, sealedTurns: sealed };
+}
+
+/**
+ * Merge authoritative REST history with current (stream-reconciled) entries.
+ *
+ * REST entries form the base. For turns present in both, REST is authoritative
+ * for content blocks and status (the server's view is always more current
+ * after a reconnect). Stream metadata (artifacts, controls, prompt) is
+ * preserved where richer — these are derived from real-time events the
+ * server may not include in the REST snapshot.
+ *
+ * Stream-only entries (turns REST doesn't know about, activity-groups,
+ * system-status) are appended at the end.
+ */
+export function mergeAuthoritativeEntries(
+  restEntries: readonly TranscriptEntryState[],
+  currentEntries: readonly TranscriptEntryState[],
+): readonly TranscriptEntryState[] {
+  // Build lookup maps for current (stream-reconciled) entries
+  const currentTurnMap = new Map<string | null, TranscriptEntryState>();
+  for (const entry of currentEntries) {
+    if (entry.kind === 'turn' && entry.turnId != null) {
+      currentTurnMap.set(entry.turnId, entry);
+    }
+  }
+
+  // Merge: REST is base, with stream metadata preserved for matching turns
+  const merged: TranscriptEntryState[] = restEntries.map((entry) => {
+    if (entry.kind !== 'turn' || entry.turnId == null) return entry;
+
+    const streamed = currentTurnMap.get(entry.turnId);
+    if (streamed == null) return entry;
+
+    // REST is authoritative for content and status; preserve richer stream metadata
+    return {
+      ...entry,
+      artifacts: streamed.artifacts.length > 0 ? streamed.artifacts : entry.artifacts,
+      controls: streamed.controls.length > 0 ? streamed.controls : entry.controls,
+      prompt: streamed.prompt ?? entry.prompt,
+    };
+  });
+
+  // Track what REST covers for dedup
+  const restTurnIds = new Set<string | null>();
+  const restEntryIds = new Set<string>();
+  for (const entry of merged) {
+    if (entry.turnId != null) restTurnIds.add(entry.turnId);
+    restEntryIds.add(entry.entryId);
+  }
+
+  // Append stream-only entries (in-flight turns, activity groups, etc.)
+  for (const entry of currentEntries) {
+    if (entry.kind === 'turn') {
+      if (!restTurnIds.has(entry.turnId)) {
+        merged.push(entry);
+      }
+    } else {
+      if (!restEntryIds.has(entry.entryId)) {
+        merged.push(entry);
+      }
+    }
+  }
+
+  return merged;
+}
+
+/**
+ * Remove duplicate entries, keeping the first occurrence of each turn
+ * (by `turnId`) and each non-turn entry (by `entryId`).
+ *
+ * Intended as a safety net — correctly merged entries should already be
+ * unique. First-occurrence wins because authoritative REST entries precede
+ * stream-only entries in a merged array.
+ */
+export function deduplicateEntries(
+  entries: readonly TranscriptEntryState[],
+): readonly TranscriptEntryState[] {
+  const seenTurnIds = new Set<string>();
+  const seenEntryIds = new Set<string>();
+
+  return entries.filter((entry) => {
+    // Turn-entry dedup: by turnId
+    if (entry.kind === 'turn' && entry.turnId != null) {
+      if (seenTurnIds.has(entry.turnId)) return false;
+      seenTurnIds.add(entry.turnId);
+    }
+
+    // General entryId dedup for all entry kinds
+    if (seenEntryIds.has(entry.entryId)) return false;
+    seenEntryIds.add(entry.entryId);
+
+    return true;
+  });
 }

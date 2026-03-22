@@ -26,6 +26,8 @@ import type {
   WorkspaceState,
 } from './workspace-types.ts';
 
+import { mergeAuthoritativeEntries } from './reconciler.ts';
+
 // ─── Internal helpers ───────────────────────────────────────────────────────
 
 const DEFAULT_SUBMISSION_POLICY_LABEL = 'Ready for operator input';
@@ -464,9 +466,9 @@ function applyConversationEntries(
  * Merge authoritative REST history into the conversation, preserving any
  * stream-owned entries for turns not present in the REST response.
  *
- * REST entries form the base (authoritative history). Stream entries whose
- * `turnId` does NOT appear in the REST set are appended at the end — these
- * represent in-flight or recently-started turns the server hasn't persisted yet.
+ * Delegates to `mergeAuthoritativeEntries` from the reconciler module for
+ * the pure entry-merge algorithm. For actively streaming turns the stream's
+ * content and status are preserved; for terminal turns REST is authoritative.
  *
  * Sets `historyLoaded: true` so the transcript loader knows not to re-fetch.
  */
@@ -478,61 +480,7 @@ function applyMergeHistory(
 ): WorkspaceState {
   const current = ensureConversation(state.conversations, conversationId);
   const nextConversations = new Map(state.conversations);
-  const currentTurnEntries = new Map(
-    current.entries
-      .filter((entry) => entry.kind === 'turn')
-      .map((entry) => [entry.turnId, entry] as const),
-  );
-
-  const mergedRestEntries = restEntries.map((entry) => {
-    if (entry.kind !== 'turn') {
-      return entry;
-    }
-
-    const streamed = currentTurnEntries.get(entry.turnId);
-    if (streamed == null) {
-      return entry;
-    }
-
-    const preferStreamedTurn = shouldPreferStreamedTurn(streamed, entry);
-    return {
-      ...entry,
-      status: preferStreamedTurn ? streamed.status : entry.status,
-      contentBlocks: preferStreamedTurn ? [...streamed.contentBlocks] : entry.contentBlocks,
-      artifacts: streamed.artifacts.length > 0 ? [...streamed.artifacts] : entry.artifacts,
-      controls: streamed.controls.length > 0 ? [...streamed.controls] : entry.controls,
-      prompt: mergePromptState(streamed.prompt, entry.prompt),
-    };
-  });
-
-  // Build a set of turnIds covered by REST history
-  const restTurnIds = new Set<string | null>();
-  for (const entry of mergedRestEntries) {
-    restTurnIds.add(entry.turnId);
-  }
-  // Also index by entryId for non-turn entries (activity-group, system-status)
-  const restEntryIds = new Set<string>();
-  for (const entry of mergedRestEntries) {
-    restEntryIds.add(entry.entryId);
-  }
-
-  // Collect stream-only entries: entries currently in state whose turnId
-  // (for kind='turn') or entryId is not covered by the REST response.
-  const streamOnly: TranscriptEntryState[] = [];
-  for (const entry of current.entries) {
-    if (entry.kind === 'turn') {
-      if (!restTurnIds.has(entry.turnId)) {
-        streamOnly.push(entry);
-      }
-    } else {
-      // Non-turn entries (activity-group, system-status) — keep if not in REST
-      if (!restEntryIds.has(entry.entryId)) {
-        streamOnly.push(entry);
-      }
-    }
-  }
-
-  const merged = [...mergedRestEntries, ...streamOnly];
+  const merged = mergeAuthoritativeEntries(restEntries, current.entries);
 
   nextConversations.set(conversationId, {
     ...current,

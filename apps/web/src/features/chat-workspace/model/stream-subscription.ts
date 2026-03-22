@@ -25,8 +25,10 @@ import {
   createReconcilerState,
   isStaleEvent,
   reconcileStreamEvents,
+  sealAuthoritativeTurns,
   type ReconcilerState,
 } from './reconciler.ts';
+import type { TranscriptEntryState } from './workspace-types.ts';
 import type { WorkspaceStore } from './workspace-types.ts';
 
 // ─── Subscription state ─────────────────────────────────────────────────────
@@ -168,6 +170,25 @@ export function applyStreamEventsToConversation(
     pendingSeqs: nextPending,
     highestSeenSeq: nextHighestSeen,
   };
+}
+
+// ─── Post-merge sealing ─────────────────────────────────────────────────────
+
+/**
+ * Seal terminal turns in the subscription's reconciler state after an
+ * authoritative REST history merge. Callers of `conversation/merge-history`
+ * must also call this so `isStaleEvent` rejects post-reconnect replays
+ * targeting turns REST has already finalized.
+ */
+export function sealSubscriptionAfterMerge(
+  stateMap: Map<string, StreamSubscriptionState>,
+  conversationId: string,
+  authoritativeEntries: readonly TranscriptEntryState[],
+): void {
+  const current = stateMap.get(conversationId) ?? createStreamSubscriptionState();
+  const sealedReconciler = sealAuthoritativeTurns(current.reconcilerState, authoritativeEntries);
+  if (sealedReconciler === current.reconcilerState) return;
+  stateMap.set(conversationId, { ...current, reconcilerState: sealedReconciler });
 }
 
 // ─── Callback builder ───────────────────────────────────────────────────────
