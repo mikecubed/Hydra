@@ -384,9 +384,9 @@ function dispatchBufferedSubscribed(
     return true;
   }
 
-  callbacks.onSubscribed?.(result.data.conversationId, result.data.currentSeq);
   state.liveSubscriptions.add(result.data.conversationId);
   flushBufferedReplayEvents(state, result.data.conversationId, callbacks);
+  callbacks.onSubscribed?.(result.data.conversationId, result.data.currentSeq);
   return true;
 }
 

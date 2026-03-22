@@ -451,7 +451,7 @@ describe('StreamClient', () => {
       assert.deepStrictEqual(calls, []);
 
       lastFakeSocket.simulateMessage(subscribedPayload());
-      assert.deepStrictEqual(calls, ['subscribed:conv-1:5', 'event:1']);
+      assert.deepStrictEqual(calls, ['event:1', 'subscribed:conv-1:5']);
     });
 
     it('dispatches unsubscribed to onUnsubscribed', () => {

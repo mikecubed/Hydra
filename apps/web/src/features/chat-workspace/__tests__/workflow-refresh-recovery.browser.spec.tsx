@@ -84,11 +84,11 @@ describe('workspace refresh/reconnect recovery workflows', () => {
         if (!refreshed) {
           return jsonResponse(EMPTY_HISTORY);
         }
-        // After refresh: server reports turn still in-progress with accumulated partial text
+        // After refresh: REST is slightly stale relative to the replay buffer.
         return jsonResponse({
           turns: [
             agentTurn('turn-a1', 'conv-1', {
-              response: 'Rehydrated partial: ',
+              response: 'Rehydrated ',
               status: 'streaming',
             }),
           ],
@@ -125,8 +125,8 @@ describe('workspace refresh/reconnect recovery workflows', () => {
     render(<AppProviders />);
     await screen.findByRole('button', { name: /live resume/i });
 
-    // REST rehydration: turn still streaming with accumulated partial text
-    await vi.waitFor(() => expect(screen.getByText(/Rehydrated partial:/)).toBeInTheDocument());
+    // REST rehydration: turn still streaming, but behind the replay buffer.
+    await vi.waitFor(() => expect(screen.getByText(/^Rehydrated/)).toBeInTheDocument());
 
     // Turn should still show as streaming (not completed or missing)
     expect(screen.getByText('streaming…')).toBeInTheDocument();
@@ -147,7 +147,7 @@ describe('workspace refresh/reconnect recovery workflows', () => {
     // Gateway replay arrives before the subscribed ack on refresh/reconnect.
     act(() => {
       ws2.simulateMessage(
-        streamFrame('conv-1', 4, 'turn-a1', 'text-delta', { text: 'Rehydrated partial: ' }),
+        streamFrame('conv-1', 4, 'turn-a1', 'text-delta', { text: 'partial: ' }),
       );
       ws2.simulateMessage({ type: 'subscribed', conversationId: 'conv-1', currentSeq: 4 });
       ws2.simulateMessage(
@@ -160,12 +160,12 @@ describe('workspace refresh/reconnect recovery workflows', () => {
 
     // Resumed deltas are visible and the pre-refresh text does not reappear.
     await vi.waitFor(() =>
-      expect(screen.getByText(/^live delta one and delta two$/)).toBeInTheDocument(),
+      expect(screen.getByText(/^partial: live delta one and delta two$/)).toBeInTheDocument(),
     );
     expect(screen.queryByText('Pre-refresh content')).not.toBeInTheDocument();
 
-    // REST-rehydrated text still visible alongside new deltas
-    expect(screen.getByText(/Rehydrated partial:/)).toBeInTheDocument();
+    // REST-rehydrated base remains visible while replay + live deltas build on it.
+    expect(screen.getByText(/^Rehydrated/)).toBeInTheDocument();
 
     // Complete the stream
     act(() => {
@@ -179,7 +179,7 @@ describe('workspace refresh/reconnect recovery workflows', () => {
     const article = articles[0];
 
     const paragraphTexts = Array.from(article.querySelectorAll('p'), (paragraph) => paragraph.textContent);
-    expect(paragraphTexts).toEqual(['Rehydrated partial: ', 'live delta one and delta two']);
+    expect(paragraphTexts).toEqual(['Rehydrated ', 'partial: live delta one and delta two']);
 
     // Turn transitioned to completed after stream-completed
     expect(screen.getByText('completed')).toBeInTheDocument();
