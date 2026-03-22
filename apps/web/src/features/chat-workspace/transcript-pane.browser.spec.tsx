@@ -933,6 +933,7 @@ describe('TranscriptTurn streaming', () => {
         contextBlocks: [],
         lastResponseSummary: null,
         errorMessage: null,
+        staleReason: null,
       },
     });
 
@@ -954,6 +955,7 @@ describe('TranscriptTurn streaming', () => {
         contextBlocks: [],
         lastResponseSummary: 'Approved with conditions',
         errorMessage: null,
+        staleReason: null,
       },
     });
 
@@ -1019,6 +1021,7 @@ describe('TranscriptTurn streaming', () => {
         contextBlocks: [],
         lastResponseSummary: null,
         errorMessage: null,
+        staleReason: null,
       },
     });
 

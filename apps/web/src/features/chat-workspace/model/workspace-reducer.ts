@@ -668,10 +668,11 @@ function applyPromptMarkStale(
   conversationId: string,
   turnId: string,
   promptId: string,
+  reason: string | null,
 ): WorkspaceState {
   return applyPromptUpdate(state, conversationId, turnId, promptId, (prompt) => {
     if (prompt.status !== 'pending' && prompt.status !== 'responding') return prompt;
-    return patchPrompt(prompt, { status: 'stale' });
+    return patchPrompt(prompt, { status: 'stale', staleReason: reason });
   });
 }
 
@@ -728,7 +729,13 @@ function applyPromptAction(state: WorkspaceState, action: PromptAction): Workspa
         action.errorMessage,
       );
     case 'prompt/mark-stale':
-      return applyPromptMarkStale(state, action.conversationId, action.turnId, action.promptId);
+      return applyPromptMarkStale(
+        state,
+        action.conversationId,
+        action.turnId,
+        action.promptId,
+        action.reason,
+      );
     case 'prompt/mark-unavailable':
       return applyPromptMarkUnavailable(
         state,

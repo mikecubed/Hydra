@@ -45,6 +45,7 @@ function makePrompt(overrides: Partial<PromptViewState> = {}): PromptViewState {
     contextBlocks: [],
     lastResponseSummary: null,
     errorMessage: null,
+    staleReason: null,
     ...overrides,
   };
 }
@@ -112,6 +113,7 @@ describe('prompt lifecycle reconciler', () => {
       ],
       lastResponseSummary: null,
       errorMessage: null,
+      staleReason: null,
     });
   });
 
@@ -204,6 +206,10 @@ describe('prompt lifecycle reducer', () => {
       reason: 'Already answered',
     });
     assert.equal(stale.conversations.get('conv-1')?.entries[0].prompt?.status, 'stale');
+    assert.equal(
+      stale.conversations.get('conv-1')?.entries[0].prompt?.staleReason,
+      'Already answered',
+    );
 
     const unavailable = reduceWorkspaceState(initial, {
       type: 'prompt/mark-unavailable',
@@ -212,6 +218,19 @@ describe('prompt lifecycle reducer', () => {
       promptId: 'prompt-1',
     });
     assert.equal(unavailable.conversations.get('conv-1')?.entries[0].prompt?.status, 'unavailable');
+  });
+
+  it('preserves null staleReason when reason is null', () => {
+    const initial = stateWithPrompt(makePrompt());
+    const stale = reduceWorkspaceState(initial, {
+      type: 'prompt/mark-stale',
+      conversationId: 'conv-1',
+      turnId: 'turn-1',
+      promptId: 'prompt-1',
+      reason: null,
+    });
+    assert.equal(stale.conversations.get('conv-1')?.entries[0].prompt?.status, 'stale');
+    assert.equal(stale.conversations.get('conv-1')?.entries[0].prompt?.staleReason, null);
   });
 
   it('does not regress a resolved prompt back to stale', () => {
@@ -230,5 +249,6 @@ describe('prompt lifecycle reducer', () => {
       next.conversations.get('conv-1')?.entries[0].prompt?.lastResponseSummary,
       'approve',
     );
+    assert.equal(next.conversations.get('conv-1')?.entries[0].prompt?.staleReason, null);
   });
 });

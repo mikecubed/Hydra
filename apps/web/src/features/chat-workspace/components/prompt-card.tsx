@@ -115,7 +115,7 @@ const errorMessageStyle = {
 function ContextBlock({ block }: { readonly block: ContentBlockState }): JSX.Element | null {
   if (block.text == null) return null;
 
-  if (block.kind === 'code') {
+  if (block.kind === 'code' || block.kind === 'structured') {
     return (
       <pre
         style={{

@@ -622,6 +622,7 @@ function applyPendingApprovalsToEntries(
         contextBlocks: toPromptContextBlocks(approval),
         lastResponseSummary: approval.response ?? null,
         errorMessage: null,
+        staleReason: null,
       },
     };
   });

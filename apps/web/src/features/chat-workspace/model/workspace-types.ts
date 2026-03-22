@@ -83,6 +83,7 @@ export interface PromptViewState {
   readonly contextBlocks: readonly ContentBlockState[];
   readonly lastResponseSummary: string | null;
   readonly errorMessage: string | null;
+  readonly staleReason: string | null;
 }
 
 export interface TranscriptEntryState {

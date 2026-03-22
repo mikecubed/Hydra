@@ -500,6 +500,7 @@ describe('reconcileStreamEvents', () => {
           contextBlocks: [],
           lastResponseSummary: null,
           errorMessage: null,
+          staleReason: null,
         },
       });
       const event = makeEvent({
@@ -526,6 +527,7 @@ describe('reconcileStreamEvents', () => {
           contextBlocks: [],
           lastResponseSummary: null,
           errorMessage: null,
+          staleReason: null,
         },
       });
       const event = makeEvent({
@@ -552,6 +554,7 @@ describe('reconcileStreamEvents', () => {
           contextBlocks: [],
           lastResponseSummary: null,
           errorMessage: null,
+          staleReason: null,
         },
       });
       const staleResponse = makeEvent({
@@ -632,6 +635,7 @@ describe('reconcileStreamEvents', () => {
           contextBlocks: [],
           lastResponseSummary: null,
           errorMessage: null,
+          staleReason: null,
         },
       });
       const response = makeEvent({
@@ -1165,6 +1169,7 @@ describe('reconcileStreamEvents', () => {
           contextBlocks: [],
           lastResponseSummary: null,
           errorMessage: null,
+          staleReason: null,
         },
       });
       const events: StreamEvent[] = [
@@ -1192,6 +1197,7 @@ describe('reconcileStreamEvents', () => {
           contextBlocks: [],
           lastResponseSummary: null,
           errorMessage: null,
+          staleReason: null,
         },
       });
       const events: StreamEvent[] = [

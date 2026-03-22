@@ -40,6 +40,7 @@ function makePrompt(overrides: Partial<PromptViewState> = {}): PromptViewState {
     contextBlocks: [],
     lastResponseSummary: null,
     errorMessage: null,
+    staleReason: null,
     ...overrides,
   };
 }
@@ -361,6 +362,7 @@ describe('respondToPrompt', () => {
 
     const finalPrompt = store.getState().conversations.get('conv-1')?.entries[0].prompt;
     assert.equal(finalPrompt?.status, 'stale');
+    assert.equal(finalPrompt?.staleReason, 'Approval is stale');
   });
 
   it('marks prompt unavailable when 409 reports an already-responded approval', async () => {

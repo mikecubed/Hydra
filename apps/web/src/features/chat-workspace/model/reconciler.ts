@@ -272,6 +272,7 @@ function createPromptState(event: StreamEvent): PromptViewState {
     contextBlocks: parseContextBlocks(event.payload['contextBlocks']),
     lastResponseSummary: null,
     errorMessage: null,
+    staleReason: null,
   };
 }
 
@@ -287,6 +288,7 @@ function markPromptStale(prompt: PromptViewState | null): PromptViewState | null
   return {
     ...prompt,
     status: 'stale',
+    staleReason: null,
   };
 }
 
