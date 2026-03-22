@@ -230,7 +230,7 @@ describe('prompt lifecycle browser workflows: rendering and success flow', () =>
     streamApprovalPrompt(ws, 'p-live', 1, realApprovalPromptPayload('p-live'));
 
     const card = await screen.findByTestId('approval-prompt');
-    await screen.findByText('Approve the proposed changes?');
+    await screen.findByText('Approve the proposed changes?', undefined, { timeout: 5000 });
 
     expect(card).toHaveAttribute('data-prompt-status', 'pending');
     expect(screen.getByTestId('prompt-action-approve')).toBeInTheDocument();

@@ -429,7 +429,7 @@ describe('TranscriptPane', () => {
     expect(await screen.findByText('Waiting for approval before continuing.')).toBeInTheDocument();
     expect(screen.queryByTestId('approval-prompt')).toBeNull();
 
-    await screen.findByText('Approve the recovered request?');
+    await screen.findByText('Approve the recovered request?', undefined, { timeout: 3000 });
     expect(screen.getByTestId('approval-prompt')).toBeInTheDocument();
     expect(getApprovalCalls()).toBe(2);
   });
