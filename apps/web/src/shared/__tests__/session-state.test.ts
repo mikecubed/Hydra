@@ -85,77 +85,61 @@ describe('initialConnectionState', () => {
 describe('isOperational', () => {
   it('returns true when transport is live, sync is idle, and session is active', () => {
     const state: WorkspaceConnectionState = {
+      ...initialConnectionState(),
       transportStatus: 'live',
-      syncStatus: 'idle',
-      sessionStatus: 'active',
-      daemonStatus: 'healthy',
-      lastAuthoritativeUpdate: null,
     };
     assert.ok(isOperational(state));
   });
 
   it('returns true when sync is recovered', () => {
     const state: WorkspaceConnectionState = {
+      ...initialConnectionState(),
       transportStatus: 'live',
       syncStatus: 'recovered',
-      sessionStatus: 'active',
-      daemonStatus: 'healthy',
-      lastAuthoritativeUpdate: null,
     };
     assert.ok(isOperational(state));
   });
 
   it('returns true when session is expiring-soon (still operational)', () => {
     const state: WorkspaceConnectionState = {
+      ...initialConnectionState(),
       transportStatus: 'live',
-      syncStatus: 'idle',
       sessionStatus: 'expiring-soon',
-      daemonStatus: 'healthy',
-      lastAuthoritativeUpdate: null,
     };
     assert.ok(isOperational(state));
   });
 
   it('returns false when transport is not live', () => {
     const state: WorkspaceConnectionState = {
+      ...initialConnectionState(),
       transportStatus: 'reconnecting',
-      syncStatus: 'idle',
-      sessionStatus: 'active',
-      daemonStatus: 'healthy',
-      lastAuthoritativeUpdate: null,
     };
     assert.ok(!isOperational(state));
   });
 
   it('returns false when sync is in error', () => {
     const state: WorkspaceConnectionState = {
+      ...initialConnectionState(),
       transportStatus: 'live',
       syncStatus: 'error',
-      sessionStatus: 'active',
-      daemonStatus: 'healthy',
-      lastAuthoritativeUpdate: null,
     };
     assert.ok(!isOperational(state));
   });
 
   it('returns false when session is expired', () => {
     const state: WorkspaceConnectionState = {
+      ...initialConnectionState(),
       transportStatus: 'live',
-      syncStatus: 'idle',
       sessionStatus: 'expired',
-      daemonStatus: 'healthy',
-      lastAuthoritativeUpdate: null,
     };
     assert.ok(!isOperational(state));
   });
 
   it('returns false when session is invalidated', () => {
     const state: WorkspaceConnectionState = {
+      ...initialConnectionState(),
       transportStatus: 'live',
-      syncStatus: 'idle',
       sessionStatus: 'invalidated',
-      daemonStatus: 'healthy',
-      lastAuthoritativeUpdate: null,
     };
     assert.ok(!isOperational(state));
   });
@@ -166,44 +150,34 @@ describe('isOperational', () => {
 describe('canSubmitWork', () => {
   it('returns true when operational and daemon is healthy', () => {
     const state: WorkspaceConnectionState = {
+      ...initialConnectionState(),
       transportStatus: 'live',
-      syncStatus: 'idle',
-      sessionStatus: 'active',
-      daemonStatus: 'healthy',
-      lastAuthoritativeUpdate: null,
     };
     assert.ok(canSubmitWork(state));
   });
 
   it('returns false when daemon is unavailable', () => {
     const state: WorkspaceConnectionState = {
+      ...initialConnectionState(),
       transportStatus: 'live',
-      syncStatus: 'idle',
-      sessionStatus: 'active',
       daemonStatus: 'unavailable',
-      lastAuthoritativeUpdate: null,
     };
     assert.ok(!canSubmitWork(state));
   });
 
   it('returns false when daemon is recovering', () => {
     const state: WorkspaceConnectionState = {
+      ...initialConnectionState(),
       transportStatus: 'live',
-      syncStatus: 'idle',
-      sessionStatus: 'active',
       daemonStatus: 'recovering',
-      lastAuthoritativeUpdate: null,
     };
     assert.ok(!canSubmitWork(state));
   });
 
   it('returns false when not operational even if daemon is healthy', () => {
     const state: WorkspaceConnectionState = {
+      ...initialConnectionState(),
       transportStatus: 'disconnected',
-      syncStatus: 'idle',
-      sessionStatus: 'active',
-      daemonStatus: 'healthy',
-      lastAuthoritativeUpdate: null,
     };
     assert.ok(!canSubmitWork(state));
   });
@@ -278,11 +252,8 @@ describe('needsReconnect', () => {
 describe('describeConnectionState', () => {
   it('describes a fully operational state', () => {
     const state: WorkspaceConnectionState = {
+      ...initialConnectionState(),
       transportStatus: 'live',
-      syncStatus: 'idle',
-      sessionStatus: 'active',
-      daemonStatus: 'healthy',
-      lastAuthoritativeUpdate: null,
     };
     const desc = describeConnectionState(state);
     assert.equal(typeof desc, 'string');
