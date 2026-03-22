@@ -28,6 +28,8 @@ import {
   type ContentBlockState,
   createAndSubmitDraft,
   createWorkspaceStore,
+  mergePromptState,
+  type PromptViewState,
   submitComposerDraft,
   type DraftSubmitState,
   type StreamSubscriptionState,
@@ -606,18 +608,20 @@ function applyPendingApprovalsToEntries(
       return entry;
     }
 
+    const restPrompt: PromptViewState = {
+      promptId: approval.id,
+      parentTurnId: approval.turnId,
+      status: approvalStatusToPromptStatus(approval.status),
+      allowedResponses: approval.responseOptions.map((option) => option.key),
+      contextBlocks: toPromptContextBlocks(approval),
+      lastResponseSummary: approval.response ?? null,
+      errorMessage: null,
+      staleReason: null,
+    };
+
     return {
       ...entry,
-      prompt: {
-        promptId: approval.id,
-        parentTurnId: approval.turnId,
-        status: approvalStatusToPromptStatus(approval.status),
-        allowedResponses: approval.responseOptions.map((option) => option.key),
-        contextBlocks: toPromptContextBlocks(approval),
-        lastResponseSummary: approval.response ?? null,
-        errorMessage: null,
-        staleReason: null,
-      },
+      prompt: mergePromptState(entry.prompt, restPrompt),
     };
   });
 }

@@ -223,6 +223,8 @@ function pruneDrafts(
 
 // ─── Exported state factory ─────────────────────────────────────────────────
 
+export { mergePromptState };
+
 export function createInitialWorkspaceState(): WorkspaceState {
   return {
     activeConversationId: null,

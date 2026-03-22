@@ -4,7 +4,11 @@ import { describe, it } from 'node:test';
 import type { StreamEvent } from '@hydra/web-contracts';
 
 import { createReconcilerState, reconcileStreamEvents } from '../model/reconciler.ts';
-import { createInitialWorkspaceState, reduceWorkspaceState } from '../model/workspace-reducer.ts';
+import {
+  createInitialWorkspaceState,
+  mergePromptState,
+  reduceWorkspaceState,
+} from '../model/workspace-reducer.ts';
 import type {
   ConversationViewState,
   PromptViewState,
@@ -250,5 +254,70 @@ describe('prompt lifecycle reducer', () => {
       'approve',
     );
     assert.equal(next.conversations.get('conv-1')?.entries[0].prompt?.staleReason, null);
+  });
+});
+
+// ─── mergePromptState — approval hydration vs stream-owned state ────────────
+
+describe('mergePromptState — approval hydration preserves stream-owned state', () => {
+  it('preserves responding status and backfills metadata from REST approval', () => {
+    const stream = makePrompt({ status: 'responding', errorMessage: null });
+    const rest = makePrompt({
+      status: 'pending',
+      allowedResponses: ['approve', 'deny'],
+      contextBlocks: [{ blockId: 'b1', kind: 'text', text: 'context', metadata: null }],
+    });
+
+    const merged = mergePromptState(stream, rest);
+    assert.equal(merged?.status, 'responding', 'stream responding must win over REST pending');
+    assert.deepEqual(merged?.allowedResponses, ['approve', 'deny'], 'backfills allowedResponses');
+    assert.equal(merged?.contextBlocks[0]?.text, 'context', 'backfills contextBlocks');
+  });
+
+  it('preserves error status and errorMessage from stream-owned prompt', () => {
+    const stream = makePrompt({ status: 'error', errorMessage: 'Gateway 409' });
+    const rest = makePrompt({
+      status: 'pending',
+      allowedResponses: ['approve', 'deny'],
+      contextBlocks: [{ blockId: 'b1', kind: 'text', text: 'context', metadata: null }],
+    });
+
+    const merged = mergePromptState(stream, rest);
+    assert.equal(merged?.status, 'error');
+    assert.equal(merged?.errorMessage, 'Gateway 409');
+    assert.deepEqual(merged?.allowedResponses, ['approve', 'deny']);
+  });
+
+  it('preserves stale status and staleReason from stream-owned prompt', () => {
+    const stream = makePrompt({ status: 'stale', staleReason: 'turn ended' });
+    const rest = makePrompt({
+      status: 'pending',
+      allowedResponses: ['approve'],
+    });
+
+    const merged = mergePromptState(stream, rest);
+    assert.equal(merged?.status, 'stale');
+    assert.equal(merged?.staleReason, 'turn ended');
+    assert.deepEqual(merged?.allowedResponses, ['approve']);
+  });
+
+  it('keeps stream-owned prompt when promptIds differ (different cycle)', () => {
+    const stream = makePrompt({ promptId: 'prompt-2', status: 'responding' });
+    const rest = makePrompt({ promptId: 'prompt-1', status: 'pending' });
+
+    const merged = mergePromptState(stream, rest);
+    assert.equal(merged?.promptId, 'prompt-2', 'stream prompt from newer cycle preserved');
+    assert.equal(merged?.status, 'responding');
+  });
+
+  it('uses REST prompt when stream has no prompt', () => {
+    const rest = makePrompt({
+      status: 'pending',
+      allowedResponses: ['approve', 'deny'],
+    });
+
+    const merged = mergePromptState(null, rest);
+    assert.equal(merged?.status, 'pending');
+    assert.deepEqual(merged?.allowedResponses, ['approve', 'deny']);
   });
 });
