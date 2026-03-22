@@ -273,6 +273,23 @@ describe('buildStreamCallbacks', () => {
     assert.equal(store.getState().connection.transportStatus, 'live');
   });
 
+  it('resets reconnectAttempt to 0 on socket open', () => {
+    const store = storeWithConversation('conv-1');
+    // Simulate a prior reconnecting state with a non-zero attempt count
+    store.dispatch({
+      type: 'connection/merge',
+      patch: { transportStatus: 'reconnecting', reconnectAttempt: 3 },
+    });
+
+    const callbacks = buildStreamCallbacks(store, new Map(), () => {}, {
+      onReconnectNeeded: () => {},
+      onConnectionEstablished: () => {},
+    });
+
+    callbacks.onOpen!();
+    assert.equal(store.getState().connection.reconnectAttempt, 0);
+  });
+
   it('calls onReconnectNeeded on abnormal close', () => {
     const store = storeWithConversation('conv-1');
     let reconnectCalled = false;
@@ -288,6 +305,25 @@ describe('buildStreamCallbacks', () => {
     callbacks.onClose!(1006, 'Abnormal closure');
     assert.equal(reconnectCalled, true);
     assert.equal(store.getState().connection.transportStatus, 'disconnected');
+  });
+
+  it('sets lastDisconnectedAt on close', () => {
+    const store = storeWithConversation('conv-1');
+    assert.equal(store.getState().connection.lastDisconnectedAt, null);
+
+    const callbacks = buildStreamCallbacks(store, new Map(), () => {}, {
+      onReconnectNeeded: () => {},
+      onConnectionEstablished: () => {},
+    });
+
+    const before = new Date().toISOString();
+    callbacks.onClose!(1006, 'Abnormal closure');
+    const after = new Date().toISOString();
+
+    const ts = store.getState().connection.lastDisconnectedAt;
+    assert.ok(ts !== null, 'lastDisconnectedAt should be set');
+    assert.ok(ts >= before, 'timestamp should be at or after test start');
+    assert.ok(ts <= after, 'timestamp should be at or before test end');
   });
 
   it('does NOT reconnect on normal close (code 1000)', () => {

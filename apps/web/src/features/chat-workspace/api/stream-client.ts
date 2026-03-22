@@ -384,7 +384,11 @@ export function createStreamClient(options: StreamClientOptions): StreamClient {
   const createWs =
     options.createWebSocket ?? ((url: string) => new WebSocket(url) as WebSocketLike);
 
-  const state: ClientState = { socket: null, sendQueue: [], pendingCloseSocket: null };
+  const state: ClientState = {
+    socket: null,
+    sendQueue: [],
+    pendingCloseSocket: null,
+  };
 
   return {
     connect(callbacks) {
