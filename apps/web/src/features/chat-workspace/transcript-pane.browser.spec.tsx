@@ -415,10 +415,10 @@ describe('TranscriptPane', () => {
 
     render(<AppProviders />);
 
-    expect(await screen.findByText('Approve the proposed file changes?')).toBeTruthy();
-    expect(screen.getByTestId('approval-prompt')).toBeTruthy();
-    expect(screen.getByRole('button', { name: 'approve' })).toBeTruthy();
-    expect(screen.getByRole('button', { name: 'deny' })).toBeTruthy();
+    expect(await screen.findByText('Approve the proposed file changes?')).toBeInTheDocument();
+    expect(screen.getByTestId('approval-prompt')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'approve' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'deny' })).toBeInTheDocument();
   });
 
   it('retries pending approval hydration after a transient approval fetch failure', async () => {
@@ -426,11 +426,11 @@ describe('TranscriptPane', () => {
 
     render(<AppProviders />);
 
-    expect(await screen.findByText('Waiting for approval before continuing.')).toBeTruthy();
+    expect(await screen.findByText('Waiting for approval before continuing.')).toBeInTheDocument();
     expect(screen.queryByTestId('approval-prompt')).toBeNull();
 
     await screen.findByText('Approve the recovered request?');
-    expect(screen.getByTestId('approval-prompt')).toBeTruthy();
+    expect(screen.getByTestId('approval-prompt')).toBeInTheDocument();
     expect(getApprovalCalls()).toBe(2);
   });
 
