@@ -283,13 +283,15 @@ type ConnectionStatusCallbacks = Pick<
 function buildConnectionStatusCallbacks(store: WorkspaceStore): ConnectionStatusCallbacks {
   return {
     onOpen() {
+      // Only reset transport-layer metadata. Daemon and session status remain
+      // sticky until authoritative lifecycle frames (onDaemonRestored,
+      // onSessionActive) arrive — avoids a brief "healthy" window on reconnect
+      // when the daemon or session is actually still degraded.
       store.dispatch({
         type: 'connection/merge',
         patch: {
           transportStatus: 'live',
           reconnectAttempt: 0,
-          daemonStatus: 'healthy',
-          sessionStatus: 'active',
         },
       });
     },

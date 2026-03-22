@@ -25,6 +25,7 @@ import {
   type TranscriptEntryState,
   type WorkspaceStore,
 } from '../model/workspace-store.ts';
+import { canSubmitWork } from '../../../shared/session-state.ts';
 
 // ─── Factories ──────────────────────────────────────────────────────────────
 
@@ -274,7 +275,7 @@ describe('buildStreamCallbacks', () => {
     assert.equal(store.getState().connection.transportStatus, 'live');
   });
 
-  it('clears stale degraded daemon/session state on socket open', () => {
+  it('preserves degraded daemon/session state on socket open (reconnect-open race)', () => {
     const store = storeWithConversation('conv-1');
     store.dispatch({
       type: 'connection/merge',
@@ -293,13 +294,80 @@ describe('buildStreamCallbacks', () => {
 
     callbacks.onOpen!();
 
-    assert.deepEqual(store.getState().connection, {
-      ...store.getState().connection,
-      transportStatus: 'live',
-      reconnectAttempt: 0,
-      daemonStatus: 'healthy',
-      sessionStatus: 'active',
+    // Transport metadata resets — the socket is factually open.
+    assert.equal(store.getState().connection.transportStatus, 'live');
+    assert.equal(store.getState().connection.reconnectAttempt, 0);
+
+    // Daemon and session stay sticky until authoritative lifecycle frames.
+    assert.equal(store.getState().connection.daemonStatus, 'unavailable');
+    assert.equal(store.getState().connection.sessionStatus, 'expiring-soon');
+  });
+
+  it('daemon/session recover only via authoritative lifecycle frames after reconnect', () => {
+    const store = storeWithConversation('conv-1');
+
+    // Simulate degraded state before reconnect.
+    store.dispatch({
+      type: 'connection/merge',
+      patch: {
+        transportStatus: 'reconnecting',
+        reconnectAttempt: 1,
+        daemonStatus: 'unavailable',
+        sessionStatus: 'expiring-soon',
+      },
     });
+
+    const callbacks = buildStreamCallbacks(store, new Map(), () => {}, {
+      onReconnectNeeded: () => {},
+      onConnectionEstablished: () => {},
+    });
+
+    // Socket opens — transport recovers, but daemon/session remain degraded.
+    callbacks.onOpen!();
+    assert.equal(store.getState().connection.transportStatus, 'live');
+    assert.equal(store.getState().connection.daemonStatus, 'unavailable');
+    assert.equal(store.getState().connection.sessionStatus, 'expiring-soon');
+
+    // Authoritative daemon-restored frame arrives → daemon healthy.
+    callbacks.onDaemonRestored!();
+    assert.equal(store.getState().connection.daemonStatus, 'healthy');
+    assert.equal(store.getState().connection.sessionStatus, 'expiring-soon');
+
+    // Authoritative session-active frame arrives → session active.
+    callbacks.onSessionActive!('2026-07-01T01:00:00.000Z');
+    assert.equal(store.getState().connection.sessionStatus, 'active');
+  });
+
+  it('canSubmitWork stays false during reconnect-open window with degraded daemon', () => {
+    const store = storeWithConversation('conv-1');
+
+    // Simulate daemon-unavailable + reconnecting state.
+    store.dispatch({
+      type: 'connection/merge',
+      patch: {
+        transportStatus: 'reconnecting',
+        reconnectAttempt: 1,
+        daemonStatus: 'unavailable',
+        sessionStatus: 'active',
+      },
+    });
+
+    const callbacks = buildStreamCallbacks(store, new Map(), () => {}, {
+      onReconnectNeeded: () => {},
+      onConnectionEstablished: () => {},
+    });
+
+    // Before open — not submittable (transport not live).
+    assert.equal(canSubmitWork(store.getState().connection), false);
+
+    // Socket opens — transport live, but daemon still unavailable.
+    callbacks.onOpen!();
+    assert.equal(store.getState().connection.transportStatus, 'live');
+    assert.equal(canSubmitWork(store.getState().connection), false);
+
+    // Authoritative daemon-restored → now submittable.
+    callbacks.onDaemonRestored!();
+    assert.equal(canSubmitWork(store.getState().connection), true);
   });
 
   it('resets reconnectAttempt to 0 on socket open', () => {
