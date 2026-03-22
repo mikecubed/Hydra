@@ -169,12 +169,17 @@ function createTranscriptLoaderEffect(
   sealAfterMerge: SealAfterMergeFn,
 ): () => void {
   if (activeConversationId == null) {
+    store.dispatch({ type: 'connection/merge', patch: { syncStatus: 'idle' } });
     return () => {};
   }
 
   const conversationId = activeConversationId;
   const existing = store.getState().conversations.get(conversationId);
   const shouldLoadHistory = existing?.historyLoaded !== true;
+  if (!shouldLoadHistory) {
+    store.dispatch({ type: 'connection/merge', patch: { syncStatus: 'idle' } });
+    return () => {};
+  }
 
   const lifecycle = { disposed: false };
   let retryTimer: ReturnType<typeof setTimeout> | null = null;
@@ -194,6 +199,7 @@ function createTranscriptLoaderEffect(
 
   void (async () => {
     if (shouldLoadHistory) {
+      store.dispatch({ type: 'connection/merge', patch: { syncStatus: 'syncing' } });
       store.dispatch({
         type: 'conversation/set-load-state',
         conversationId,
@@ -214,6 +220,13 @@ function createTranscriptLoaderEffect(
 
       applyTranscriptLoadResult(store, conversationId, response, pendingApprovals);
       if (response != null) {
+        store.dispatch({
+          type: 'connection/merge',
+          patch: {
+            syncStatus:
+              store.getState().connection.transportStatus === 'live' ? 'recovered' : 'idle',
+          },
+        });
         sealAfterMerge(conversationId, response.turns.map(toTranscriptEntry));
       }
 
@@ -226,6 +239,7 @@ function createTranscriptLoaderEffect(
       }
 
       markTranscriptLoadError(store, conversationId, err);
+      store.dispatch({ type: 'connection/merge', patch: { syncStatus: 'error' } });
     }
   })();
 
