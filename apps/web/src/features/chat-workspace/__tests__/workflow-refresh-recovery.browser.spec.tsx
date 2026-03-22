@@ -512,4 +512,57 @@ describe('workspace refresh/reconnect recovery workflows', () => {
     expect(screen.getByText('completed')).toBeInTheDocument();
     expect(transcriptArticles()).toHaveLength(1);
   });
+
+  it('clears stale degraded submit gating when reconnect opens after offline recovery', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+
+    installFetchStub((url) => {
+      if (url === '/conversations?status=active&limit=20') {
+        return jsonResponse({
+          conversations: [conversation('conv-1', 'Offline recovery')],
+          totalCount: 1,
+        });
+      }
+      if (url === '/conversations/conv-1/turns?limit=50') {
+        return jsonResponse(EMPTY_HISTORY);
+      }
+      throw new Error(`Unexpected fetch: ${url}`);
+    });
+
+    render(<AppProviders />);
+    await screen.findByRole('button', { name: /offline recovery/i });
+
+    const ws1 = openAndSubscribe('conv-1', 0);
+    fireEvent.change(screen.getByLabelText(/instruction/i), {
+      target: { value: 'Resume after offline recovery' },
+    });
+    expect(screen.getByRole('button', { name: 'Send' })).toBeEnabled();
+
+    act(() => {
+      ws1.simulateMessage({ type: 'daemon-unavailable' });
+      ws1.simulateClose(1006, 'offline');
+    });
+
+    expect(await screen.findByRole('alert')).toHaveTextContent(/reconnecting/i);
+    expect(screen.getByRole('button', { name: 'Send' })).toBeDisabled();
+
+    act(() => {
+      vi.advanceTimersByTime(1_500);
+    });
+
+    const ws2 = latestSocket();
+    expect(ws2).not.toBe(ws1);
+    act(() => {
+      ws2.simulateOpen();
+    });
+    act(() => {
+      ws2.simulateMessage({ type: 'subscribed', conversationId: 'conv-1', currentSeq: 0 });
+    });
+
+    await vi.waitFor(() => {
+      expect(screen.queryByRole('alert')).toBeNull();
+      expect(screen.queryByRole('status')).toBeNull();
+      expect(screen.getByRole('button', { name: 'Send' })).toBeEnabled();
+    });
+  });
 });

@@ -274,6 +274,34 @@ describe('buildStreamCallbacks', () => {
     assert.equal(store.getState().connection.transportStatus, 'live');
   });
 
+  it('clears stale degraded daemon/session state on socket open', () => {
+    const store = storeWithConversation('conv-1');
+    store.dispatch({
+      type: 'connection/merge',
+      patch: {
+        transportStatus: 'reconnecting',
+        reconnectAttempt: 2,
+        daemonStatus: 'unavailable',
+        sessionStatus: 'expiring-soon',
+      },
+    });
+
+    const callbacks = buildStreamCallbacks(store, new Map(), () => {}, {
+      onReconnectNeeded: () => {},
+      onConnectionEstablished: () => {},
+    });
+
+    callbacks.onOpen!();
+
+    assert.deepEqual(store.getState().connection, {
+      ...store.getState().connection,
+      transportStatus: 'live',
+      reconnectAttempt: 0,
+      daemonStatus: 'healthy',
+      sessionStatus: 'active',
+    });
+  });
+
   it('resets reconnectAttempt to 0 on socket open', () => {
     const store = storeWithConversation('conv-1');
     // Simulate a prior reconnecting state with a non-zero attempt count

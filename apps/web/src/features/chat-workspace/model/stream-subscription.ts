@@ -233,7 +233,12 @@ function buildConnectionStatusCallbacks(
     onOpen() {
       store.dispatch({
         type: 'connection/merge',
-        patch: { transportStatus: 'live', reconnectAttempt: 0 },
+        patch: {
+          transportStatus: 'live',
+          reconnectAttempt: 0,
+          daemonStatus: 'healthy',
+          sessionStatus: 'active',
+        },
       });
     },
     onClose() {

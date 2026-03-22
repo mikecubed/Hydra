@@ -162,7 +162,7 @@ driven by the `lastAcknowledgedSeq` value supplied in a later `subscribe` messag
 
 ### Server → Client Messages
 
-The gateway sends eight message types to the client.
+The gateway sends nine message types to the client.
 
 #### `stream-event`
 
