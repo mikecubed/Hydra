@@ -7,7 +7,12 @@
 
 import { GatewayRequestError } from '../api/gateway-client.ts';
 import type { GatewayClient } from '../api/gateway-client.ts';
-import type { PromptStatus, PromptViewState, WorkspaceStore } from './workspace-types.ts';
+import type {
+  PromptResponseChoiceState,
+  PromptStatus,
+  PromptViewState,
+  WorkspaceStore,
+} from './workspace-types.ts';
 
 // ─── Pure helpers ───────────────────────────────────────────────────────────
 
@@ -33,6 +38,27 @@ export function isPromptActionable(status: PromptStatus): boolean {
 /** Whether the prompt is in a terminal (non-actionable, non-transient) state. */
 export function isPromptTerminal(status: PromptStatus): boolean {
   return status === 'resolved' || status === 'stale' || status === 'unavailable';
+}
+
+/**
+ * Resolve an operator-facing label for a response key.
+ *
+ * When `allowedResponses` carries `{ key, label }` objects the label is
+ * returned; plain-string choices return themselves. Falls back to `key`
+ * when no match is found.
+ */
+export function resolveResponseLabel(
+  allowedResponses: readonly PromptResponseChoiceState[],
+  responseKey: string,
+): string {
+  for (const choice of allowedResponses) {
+    if (typeof choice === 'string') {
+      if (choice === responseKey) return choice;
+    } else if (choice.key === responseKey) {
+      return choice.label;
+    }
+  }
+  return responseKey;
 }
 
 // ─── Async respond flow ─────────────────────────────────────────────────────
@@ -79,12 +105,13 @@ export async function respondToPrompt(
 
   try {
     await client.respondToApproval(promptId, { response });
+    const summary = resolveResponseLabel(entry.prompt.allowedResponses, response);
     store.dispatch({
       type: 'prompt/response-confirmed',
       conversationId,
       turnId,
       promptId,
-      responseSummary: response,
+      responseSummary: summary,
     });
     return { ok: true };
   } catch (err: unknown) {

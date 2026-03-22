@@ -240,6 +240,32 @@ describe('prompt lifecycle reducer', () => {
     assert.equal(stale.conversations.get('conv-1')?.entries[0].prompt?.staleReason, null);
   });
 
+  it('resolves a stale prompt when response-confirmed arrives after stream-completed', () => {
+    // Race: pending → responding → stale (stream-completed) → response-confirmed
+    const staleState = stateWithPrompt(makePrompt({ status: 'stale', staleReason: 'turn ended' }));
+    const resolved = reduceWorkspaceState(staleState, {
+      type: 'prompt/response-confirmed',
+      conversationId: 'conv-1',
+      turnId: 'turn-1',
+      promptId: 'prompt-1',
+      responseSummary: 'Approve',
+    });
+    assert.equal(
+      resolved.conversations.get('conv-1')?.entries[0].prompt?.status,
+      'resolved',
+      'stale prompt must transition to resolved when confirmation is authoritative',
+    );
+    assert.equal(
+      resolved.conversations.get('conv-1')?.entries[0].prompt?.lastResponseSummary,
+      'Approve',
+    );
+    assert.equal(
+      resolved.conversations.get('conv-1')?.entries[0].prompt?.staleReason,
+      null,
+      'staleReason must be cleared on resolution',
+    );
+  });
+
   it('does not regress a resolved prompt back to stale', () => {
     const resolvedState = stateWithPrompt(
       makePrompt({ status: 'resolved', lastResponseSummary: 'approve' }),
@@ -302,6 +328,23 @@ describe('mergePromptState — approval hydration preserves stream-owned state',
     assert.equal(merged?.status, 'stale');
     assert.equal(merged?.staleReason, 'turn ended');
     assert.deepEqual(merged?.allowedResponses, ['approve']);
+  });
+
+  it('upgrades a resolved raw-key summary when REST later hydrates the matching label', () => {
+    const stream = makePrompt({
+      status: 'resolved',
+      lastResponseSummary: 'approve_with_changes',
+      allowedResponses: [{ key: 'approve_with_changes', label: 'approve_with_changes' }],
+    });
+    const rest = makePrompt({
+      status: 'resolved',
+      lastResponseSummary: 'Approve with changes',
+      allowedResponses: [{ key: 'approve_with_changes', label: 'Approve with changes' }],
+    });
+
+    const merged = mergePromptState(stream, rest);
+    assert.equal(merged?.status, 'resolved');
+    assert.equal(merged?.lastResponseSummary, 'Approve with changes');
   });
 
   it('preserves responding status when REST hydration later reports stale for the same prompt', () => {

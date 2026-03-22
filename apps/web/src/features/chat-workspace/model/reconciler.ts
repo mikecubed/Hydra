@@ -14,6 +14,7 @@ import type { StreamEvent } from '@hydra/web-contracts';
 import type {
   ArtifactReferenceState,
   ContentBlockState,
+  PromptResponseChoiceState,
   PromptViewState,
   TranscriptEntryState,
 } from './workspace-types.ts';
@@ -297,6 +298,21 @@ function markPromptStale(prompt: PromptViewState | null): PromptViewState | null
   };
 }
 
+/** Resolve operator-facing label for a response key from allowedResponses. */
+function resolveLabel(
+  allowedResponses: readonly PromptResponseChoiceState[],
+  responseKey: string,
+): string {
+  for (const choice of allowedResponses) {
+    if (typeof choice === 'string') {
+      if (choice === responseKey) return choice;
+    } else if (choice.key === responseKey) {
+      return choice.label;
+    }
+  }
+  return responseKey;
+}
+
 function applyActivityMarker(
   entries: readonly TranscriptEntryState[],
   event: StreamEvent,
@@ -375,12 +391,13 @@ function applyApprovalResponse(
   const response = typeof event.payload['response'] === 'string' ? event.payload['response'] : null;
   return replaceTurnEntry(entries, event.turnId, (e) => {
     if (!e.prompt) return e;
+    const summary = response == null ? null : resolveLabel(e.prompt.allowedResponses, response);
     return {
       ...e,
       prompt: {
         ...e.prompt,
         status: 'resolved',
-        lastResponseSummary: response,
+        lastResponseSummary: summary,
         errorMessage: null,
       },
     };

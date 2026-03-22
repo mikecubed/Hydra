@@ -15,6 +15,7 @@ import {
   getPromptStatusLabel,
   isPromptActionable,
   isPromptTerminal,
+  resolveResponseLabel,
   respondToPrompt,
 } from '../model/prompt-helpers.ts';
 import { selectPendingPrompts } from '../model/selectors.ts';
@@ -249,6 +250,40 @@ describe('filterPendingPrompts', () => {
 
   it('returns empty for empty entries', () => {
     assert.deepStrictEqual(filterPendingPrompts([]), []);
+  });
+});
+
+// ─── resolveResponseLabel ───────────────────────────────────────────────────
+
+describe('resolveResponseLabel', () => {
+  it('returns label for matching {key, label} option', () => {
+    const choices = [
+      { key: 'approve', label: 'Approve' },
+      { key: 'approve_with_changes', label: 'Approve with changes' },
+      { key: 'deny', label: 'Deny' },
+    ];
+    assert.equal(resolveResponseLabel(choices, 'approve_with_changes'), 'Approve with changes');
+  });
+
+  it('returns the string itself for plain-string choices', () => {
+    assert.equal(resolveResponseLabel(['approve', 'deny'], 'approve'), 'approve');
+  });
+
+  it('falls back to key when no match is found', () => {
+    assert.equal(
+      resolveResponseLabel([{ key: 'approve', label: 'Approve' }], 'unknown'),
+      'unknown',
+    );
+  });
+
+  it('handles mixed string and object choices', () => {
+    const choices = ['approve', { key: 'deny', label: 'Deny' }] as const;
+    assert.equal(resolveResponseLabel(choices, 'deny'), 'Deny');
+    assert.equal(resolveResponseLabel(choices, 'approve'), 'approve');
+  });
+
+  it('returns key for empty allowedResponses', () => {
+    assert.equal(resolveResponseLabel([], 'approve'), 'approve');
   });
 });
 
@@ -513,5 +548,42 @@ describe('respondToPrompt', () => {
 
     assert.equal(result.ok, false);
     assert.equal(store.dispatched.length, 0);
+  });
+
+  it('stores operator-facing label instead of raw key in responseSummary', async () => {
+    const state = stateWithPrompt(
+      makePrompt({
+        allowedResponses: [
+          { key: 'approve_with_changes', label: 'Approve with changes' },
+          { key: 'deny', label: 'Deny' },
+        ],
+      }),
+    );
+    const store = createMockStore(state);
+    const mockClient = {
+      async respondToApproval() {
+        return makeApprovalResponse();
+      },
+    };
+
+    const result = await respondToPrompt(
+      { store, client: mockClient },
+      {
+        conversationId: 'conv-1',
+        turnId: 'turn-1',
+        promptId: 'prompt-1',
+        response: 'approve_with_changes',
+      },
+    );
+
+    assert.equal(result.ok, true);
+    const confirmed = store.dispatched[1];
+    assert.equal(
+      confirmed.type === 'prompt/response-confirmed' ? confirmed.responseSummary : null,
+      'Approve with changes',
+      'responseSummary must store operator-facing label, not raw key',
+    );
+    const finalPrompt = store.getState().conversations.get('conv-1')?.entries[0].prompt;
+    assert.equal(finalPrompt?.lastResponseSummary, 'Approve with changes');
   });
 });

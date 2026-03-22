@@ -43,6 +43,28 @@ const PROMPT_STATUS_RANK: Record<PromptStatus, number> = {
   resolved: 4,
 };
 
+function shouldPreferFallbackSummary(
+  preferred: PromptViewState,
+  fallback: PromptViewState,
+): boolean {
+  if (
+    preferred.status !== 'resolved' ||
+    fallback.status !== 'resolved' ||
+    preferred.lastResponseSummary == null ||
+    fallback.lastResponseSummary == null ||
+    preferred.lastResponseSummary === fallback.lastResponseSummary
+  ) {
+    return false;
+  }
+
+  return fallback.allowedResponses.some(
+    (choice) =>
+      typeof choice !== 'string' &&
+      choice.key === preferred.lastResponseSummary &&
+      choice.label === fallback.lastResponseSummary,
+  );
+}
+
 const TURN_STATUS_RANK: Readonly<Record<string, number>> = {
   submitted: 0,
   executing: 1,
@@ -93,6 +115,9 @@ function mergePromptState(
     const restRank = PROMPT_STATUS_RANK[restPrompt.status];
     const preferred = preserveStreamLifecycle || restRank <= streamRank ? streamPrompt : restPrompt;
     const fallback = preferred === streamPrompt ? restPrompt : streamPrompt;
+    const lastResponseSummary = shouldPreferFallbackSummary(preferred, fallback)
+      ? fallback.lastResponseSummary
+      : (preferred.lastResponseSummary ?? fallback.lastResponseSummary);
     return {
       ...preferred,
       allowedResponses:
@@ -101,7 +126,7 @@ function mergePromptState(
           : fallback.allowedResponses,
       contextBlocks:
         preferred.contextBlocks.length > 0 ? preferred.contextBlocks : fallback.contextBlocks,
-      lastResponseSummary: preferred.lastResponseSummary ?? fallback.lastResponseSummary,
+      lastResponseSummary,
       errorMessage: preferred.errorMessage ?? fallback.errorMessage,
     };
   }
@@ -678,11 +703,12 @@ function applyPromptResponseConfirmed(
   responseSummary: string | null,
 ): WorkspaceState {
   return applyPromptUpdate(state, conversationId, turnId, promptId, (prompt) => {
-    if (prompt.status !== 'responding') return prompt;
+    if (prompt.status !== 'responding' && prompt.status !== 'stale') return prompt;
     return patchPrompt(prompt, {
       status: 'resolved',
       lastResponseSummary: responseSummary,
       errorMessage: null,
+      staleReason: null,
     });
   });
 }

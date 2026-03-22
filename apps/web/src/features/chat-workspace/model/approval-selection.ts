@@ -33,6 +33,9 @@ function compareApprovals(a: ApprovalRequest, b: ApprovalRequest): number {
   const aValid = Number.isFinite(aTime);
   const bValid = Number.isFinite(bTime);
 
+  if (aValid && !bValid) return -1;
+  if (!aValid && bValid) return 1;
+
   if (aValid && bValid && aTime !== bTime) {
     // Newer (larger timestamp) wins → sort descending
     return bTime - aTime;

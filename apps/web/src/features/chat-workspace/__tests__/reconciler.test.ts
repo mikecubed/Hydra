@@ -606,6 +606,40 @@ describe('reconcileStreamEvents', () => {
       assert.equal(entries[0].prompt?.lastResponseSummary, 'approve');
     });
 
+    it('stores operator-facing label in lastResponseSummary when allowedResponses has labels', () => {
+      const existing = makeEntry({
+        entryId: 'turn-1',
+        turnId: 'turn-1',
+        status: 'streaming',
+        prompt: {
+          promptId: 'prompt-1',
+          parentTurnId: 'turn-1',
+          status: 'pending',
+          allowedResponses: [
+            { key: 'approve_with_changes', label: 'Approve with changes' },
+            { key: 'deny', label: 'Deny' },
+          ],
+          contextBlocks: [],
+          lastResponseSummary: null,
+          errorMessage: null,
+          staleReason: null,
+        },
+      });
+      const event = makeEvent({
+        seq: 4,
+        turnId: 'turn-1',
+        kind: 'approval-response',
+        payload: { approvalId: 'prompt-1', response: 'approve_with_changes' },
+      });
+      const { entries } = reconcileStreamEvents([existing], [event], createReconcilerState());
+      assert.equal(entries[0].prompt?.status, 'resolved');
+      assert.equal(
+        entries[0].prompt?.lastResponseSummary,
+        'Approve with changes',
+        'must store operator-facing label, not raw key',
+      );
+    });
+
     it('ignores approval-response when approvalId does not match promptId', () => {
       const existing = makeEntry({
         entryId: 'turn-1',

@@ -51,7 +51,10 @@ import {
   selectConversationList,
   selectCreateModeCanSubmit,
 } from '../features/chat-workspace/model/selectors.ts';
-import { respondToPrompt } from '../features/chat-workspace/model/prompt-helpers.ts';
+import {
+  resolveResponseLabel,
+  respondToPrompt,
+} from '../features/chat-workspace/model/prompt-helpers.ts';
 
 function useWorkspaceState(store: WorkspaceStore) {
   return useSyncExternalStore(
@@ -621,7 +624,13 @@ function applyPendingApprovalsToEntries(
         label: option.label,
       })),
       contextBlocks: toPromptContextBlocks(approval),
-      lastResponseSummary: approval.response ?? null,
+      lastResponseSummary:
+        approval.response == null
+          ? null
+          : resolveResponseLabel(
+              approval.responseOptions.map((o) => ({ key: o.key, label: o.label })),
+              approval.response,
+            ),
       errorMessage: null,
       staleReason: null,
     };

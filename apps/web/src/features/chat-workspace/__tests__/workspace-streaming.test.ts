@@ -216,6 +216,22 @@ describe('pickBestApprovalPerTurn', () => {
     assert.equal(result.get('turn-1')?.id, 'approval-aaa');
   });
 
+  it('prefers a valid timestamp over an invalid one before id fallback', () => {
+    const invalid = makeApproval({
+      id: 'approval-aaa',
+      status: 'pending',
+      createdAt: 'not-a-date' as unknown as string,
+    });
+    const valid = makeApproval({
+      id: 'approval-zzz',
+      status: 'pending',
+      createdAt: '2026-03-20T13:00:00.000Z',
+    });
+
+    const result = pickBestApprovalPerTurn([invalid, valid]);
+    assert.equal(result.get('turn-1')?.id, 'approval-zzz');
+  });
+
   it('handles multiple turns independently', () => {
     const t1Stale = makeApproval({
       id: 'a1',
