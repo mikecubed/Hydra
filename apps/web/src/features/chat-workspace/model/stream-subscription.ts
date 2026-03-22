@@ -55,6 +55,12 @@ export interface StreamSubscriptionState {
    * belonging to newly-sealed turns.
    */
   readonly pendingSeqs: ReadonlyMap<number, string>;
+  /**
+   * Consumed seqs whose ACK send failed. These also block the contiguous
+   * resume frontier until a later cumulative ACK succeeds or sealing retires
+   * them for a newly-finalized turn.
+   */
+  readonly unackedSeqs: ReadonlyMap<number, string>;
   /** Highest event seq received for this conversation. Bounds the frontier. */
   readonly highestSeenSeq: number | undefined;
 }
@@ -65,6 +71,7 @@ export function createStreamSubscriptionState(): StreamSubscriptionState {
     reconcilerState: createReconcilerState(),
     serverResumeSeq: undefined,
     pendingSeqs: new Map(),
+    unackedSeqs: new Map(),
     highestSeenSeq: undefined,
   };
 }
@@ -106,7 +113,7 @@ export function computeContiguousResume(
  * Reads the current entries from the store, runs reconciliation, and
  * dispatches `conversation/replace-entries` with the merged result.
  * Returns the updated subscription state with contiguously-advanced
- * `serverResumeSeq` and updated `pendingSeqs`.
+ * `serverResumeSeq`, updated `pendingSeqs`, and preserved `unackedSeqs`.
  *
  * No-ops (returns unchanged state) when the conversation does not exist
  * in the store — the caller should only route events for known conversations.
@@ -175,7 +182,7 @@ export function applyStreamEventsToConversation(
   // Advance the contiguous resume cursor through non-pending seqs.
   const serverResumeSeq = computeContiguousResume(
     subscriptionState.serverResumeSeq,
-    nextPending,
+    new Map([...nextPending, ...subscriptionState.unackedSeqs]),
     nextHighestSeen,
   );
 
@@ -183,6 +190,7 @@ export function applyStreamEventsToConversation(
     reconcilerState: nextReconcilerState,
     serverResumeSeq,
     pendingSeqs: nextPending,
+    unackedSeqs: subscriptionState.unackedSeqs,
     highestSeenSeq: nextHighestSeen,
   };
 }
@@ -208,6 +216,7 @@ export function sealSubscriptionAfterMerge(
   // since REST has finalized the turn, so they must not block the frontier.
   const newlySealed = sealedReconciler.sealedTurns;
   let pendingSeqs = current.pendingSeqs;
+  let unackedSeqs = current.unackedSeqs;
   if (newlySealed != null && pendingSeqs.size > 0) {
     let changed = false;
     const pruned = new Map(pendingSeqs);
@@ -219,11 +228,22 @@ export function sealSubscriptionAfterMerge(
     }
     if (changed) pendingSeqs = pruned;
   }
+  if (newlySealed != null && unackedSeqs.size > 0) {
+    let changed = false;
+    const pruned = new Map(unackedSeqs);
+    for (const [seq, turnId] of pruned) {
+      if (newlySealed.has(turnId)) {
+        pruned.delete(seq);
+        changed = true;
+      }
+    }
+    if (changed) unackedSeqs = pruned;
+  }
 
   // Recompute the contiguous frontier — retired gaps may unblock it.
   const serverResumeSeq = computeContiguousResume(
     current.serverResumeSeq,
-    pendingSeqs,
+    new Map([...pendingSeqs, ...unackedSeqs]),
     current.highestSeenSeq,
   );
 
@@ -231,6 +251,7 @@ export function sealSubscriptionAfterMerge(
     ...current,
     reconcilerState: sealedReconciler,
     pendingSeqs,
+    unackedSeqs,
     serverResumeSeq: serverResumeSeq ?? current.serverResumeSeq,
   });
 }
@@ -322,15 +343,17 @@ function seedSubscriptionBaseline(
 ): void {
   const currentState = stateMap.get(conversationId) ?? createStreamSubscriptionState();
 
-  if (currentState.pendingSeqs.size > 0) {
-    // Replay events already created gaps — respect them.
+  if (currentState.pendingSeqs.size > 0 || currentState.unackedSeqs.size > 0) {
+    // Replay events already created ignored gaps or locally-consumed-but-
+    // unacked seqs — respect them instead of jumping the cursor to the
+    // server baseline.
     const highestSeen =
       currentState.highestSeenSeq === undefined
         ? currentSeq
         : Math.max(currentState.highestSeenSeq, currentSeq);
     const safeFrontier = computeContiguousResume(
       currentState.serverResumeSeq,
-      currentState.pendingSeqs,
+      new Map([...currentState.pendingSeqs, ...currentState.unackedSeqs]),
       highestSeen,
     );
     stateMap.set(conversationId, {
@@ -387,12 +410,30 @@ export function buildStreamCallbacks(
         // Only advance serverResumeSeq after successful ack.
         try {
           ack(conversationId, event.seq);
+          const unackedSeqs = new Map(candidateState.unackedSeqs);
+          for (const seq of unackedSeqs.keys()) {
+            if (seq <= event.seq) {
+              unackedSeqs.delete(seq);
+            }
+          }
+          const serverResumeSeq = computeContiguousResume(
+            currentState.serverResumeSeq,
+            new Map([...candidateState.pendingSeqs, ...unackedSeqs]),
+            candidateState.highestSeenSeq,
+          );
           // Ack succeeded — commit the full candidate state (resume cursor advanced).
-          stateMap.set(conversationId, candidateState);
-        } catch (err: unknown) {
-          // Ack failed — keep reconciler + pendingSeqs but revert resume cursor.
           stateMap.set(conversationId, {
             ...candidateState,
+            unackedSeqs,
+            serverResumeSeq: serverResumeSeq ?? currentState.serverResumeSeq,
+          });
+        } catch (err: unknown) {
+          // Ack failed — keep reconciler + pending state but revert resume cursor.
+          const unackedSeqs = new Map(candidateState.unackedSeqs);
+          unackedSeqs.set(event.seq, event.turnId);
+          stateMap.set(conversationId, {
+            ...candidateState,
+            unackedSeqs,
             serverResumeSeq: currentState.serverResumeSeq,
           });
           console.warn(

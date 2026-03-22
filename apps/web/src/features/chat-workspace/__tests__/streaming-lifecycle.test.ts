@@ -1461,6 +1461,124 @@ describe('onSubscribed baseline seeding', () => {
       'onSubscribed must not regress an already-higher cursor',
     );
   });
+
+  it('onSubscribed does not advance past replayed events whose ack failed', () => {
+    const store = storeWithConversation('conv-1');
+    const stateMap = new Map<string, StreamSubscriptionState>();
+    let ackShouldFail = false;
+    const warnSpy = mock.fn();
+    const originalWarn = console.warn;
+    console.warn = warnSpy;
+
+    try {
+      const callbacks = buildStreamCallbacks(
+        store,
+        stateMap,
+        () => {
+          if (ackShouldFail) {
+            throw new Error('ack failed');
+          }
+        },
+        { onReconnectNeeded: () => {}, onConnectionEstablished: () => {} },
+      );
+
+      callbacks.onSubscribed!('conv-1', 0);
+      assert.equal(stateMap.get('conv-1')?.serverResumeSeq, 0);
+
+      callbacks.onStreamEvent!(
+        'conv-1',
+        makeEvent({ seq: 1, turnId: 't1', kind: 'stream-started', payload: {} }),
+      );
+      assert.equal(stateMap.get('conv-1')?.serverResumeSeq, 1);
+
+      ackShouldFail = true;
+      callbacks.onStreamEvent!(
+        'conv-1',
+        makeEvent({ seq: 2, turnId: 't1', kind: 'text-delta', payload: { text: 'replayed' } }),
+      );
+      assert.equal(
+        stateMap.get('conv-1')?.serverResumeSeq,
+        1,
+        'ack failure must keep the resume cursor pinned before seq 2',
+      );
+      assert.ok(
+        stateMap.get('conv-1')?.unackedSeqs.has(2),
+        'ack-failed seq must remain blocked until a later cumulative ack succeeds',
+      );
+
+      callbacks.onSubscribed!('conv-1', 2);
+
+      assert.equal(
+        stateMap.get('conv-1')?.serverResumeSeq,
+        1,
+        'onSubscribed must not advance past a locally seen seq whose ack failed',
+      );
+      assert.equal(
+        stateMap.get('conv-1')?.highestSeenSeq,
+        2,
+        'server baseline should still update the observed high-water mark',
+      );
+    } finally {
+      console.warn = originalWarn;
+    }
+  });
+
+  it('replayed stale unacked events do not advance the resume cursor before onSubscribed', () => {
+    const store = storeWithConversation('conv-1');
+    const stateMap = new Map<string, StreamSubscriptionState>();
+    let ackShouldFail = false;
+    const ackCalls: number[] = [];
+    const warnSpy = mock.fn();
+    const originalWarn = console.warn;
+    console.warn = warnSpy;
+
+    try {
+      const callbacks = buildStreamCallbacks(
+        store,
+        stateMap,
+        (_conversationId, seq) => {
+          ackCalls.push(seq);
+          if (ackShouldFail) {
+            throw new Error('ack failed');
+          }
+        },
+        { onReconnectNeeded: () => {}, onConnectionEstablished: () => {} },
+      );
+
+      callbacks.onSubscribed!('conv-1', 0);
+      callbacks.onStreamEvent!(
+        'conv-1',
+        makeEvent({ seq: 1, turnId: 't1', kind: 'stream-started', payload: {} }),
+      );
+
+      ackShouldFail = true;
+      callbacks.onStreamEvent!(
+        'conv-1',
+        makeEvent({ seq: 2, turnId: 't1', kind: 'text-delta', payload: { text: 'replayed' } }),
+      );
+      assert.deepEqual(ackCalls, [1, 2]);
+      assert.equal(stateMap.get('conv-1')?.serverResumeSeq, 1);
+
+      // Reconnect replay arrives before subscribed. The replayed event is stale,
+      // must not trigger a second ack, and must not advance the frontier while
+      // seq 2 is still blocked in unackedSeqs.
+      ackShouldFail = false;
+      callbacks.onStreamEvent!(
+        'conv-1',
+        makeEvent({ seq: 2, turnId: 't1', kind: 'text-delta', payload: { text: 'replayed' } }),
+      );
+
+      assert.deepEqual(ackCalls, [1, 2], 'stale replay must not trigger a second ack');
+      assert.ok(stateMap.get('conv-1')?.unackedSeqs.has(2));
+      assert.equal(
+        stateMap.get('conv-1')?.serverResumeSeq,
+        1,
+        'stale replay must not advance the resume cursor across an unacked seq',
+      );
+    } finally {
+      console.warn = originalWarn;
+    }
+  });
 });
 
 // ─── History vs live-stream race (merge-history) ────────────────────────────
