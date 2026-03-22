@@ -33,6 +33,68 @@ afterEach(() => {
   cleanup();
 });
 
+function installRevisitApprovalScenario(): () => number {
+  let convAApprovalFetches = 0;
+
+  installFetchStub((url) => {
+    if (url === '/conversations?status=active&limit=20') {
+      return jsonResponse({
+        conversations: [conversation('conv-a', 'Alpha'), conversation('conv-b', 'Bravo')],
+        totalCount: 2,
+      });
+    }
+    if (url === '/conversations/conv-a/turns?limit=50') {
+      return jsonResponse({
+        turns: [
+          {
+            id: 'turn-a1',
+            conversationId: 'conv-a',
+            position: 1,
+            kind: 'system',
+            attribution: { label: 'Codex' },
+            response: 'Awaiting approval.',
+            status: 'executing',
+            createdAt: '2026-07-01T00:00:00.000Z',
+          },
+        ],
+        hasMore: false,
+      });
+    }
+    if (url === '/conversations/conv-b/turns?limit=50') {
+      return jsonResponse(EMPTY_HISTORY);
+    }
+    if (url === '/conversations/conv-a/approvals') {
+      convAApprovalFetches += 1;
+      if (convAApprovalFetches === 1) {
+        return jsonResponse({ approvals: [] });
+      }
+      return jsonResponse({
+        approvals: [
+          {
+            id: 'approval-a1',
+            turnId: 'turn-a1',
+            status: 'pending',
+            prompt: 'Approve the revisited change?',
+            context: {},
+            contextHash: 'ctx-a1',
+            responseOptions: [
+              { key: 'approve', label: 'Approve' },
+              { key: 'deny', label: 'Deny' },
+            ],
+            createdAt: '2026-07-01T00:00:30.000Z',
+          },
+        ],
+      });
+    }
+    if (url === '/conversations/conv-b/approvals') {
+      return jsonResponse({ approvals: [] });
+    }
+    throw new Error(`Unexpected fetch: ${url}`);
+  });
+
+  return () => convAApprovalFetches;
+}
+
 describe('workspace conversation-switching workflow', () => {
   it('preserves per-conversation streamed state across switches', async () => {
     installFetchStub((url) => {
@@ -120,5 +182,24 @@ describe('workspace conversation-switching workflow', () => {
 
     expect(await screen.findByText('Alpha response')).toBeInTheDocument();
     expect(screen.queryByText('Bravo response')).not.toBeInTheDocument();
+  });
+
+  it('refreshes approvals when revisiting a conversation', async () => {
+    const getConvAApprovalFetches = installRevisitApprovalScenario();
+
+    render(<AppProviders />);
+
+    await screen.findByRole('button', { name: /alpha/i });
+    expect(screen.queryByTestId('approval-prompt')).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: /bravo/i }));
+    await vi.waitFor(() => {
+      expect(screen.getByText('Active conversation: Bravo')).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: /alpha/i }));
+    expect(await screen.findByText('Approve the revisited change?')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Approve' })).toBeInTheDocument();
+    expect(getConvAApprovalFetches()).toBe(2);
   });
 });

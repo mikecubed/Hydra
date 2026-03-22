@@ -76,13 +76,8 @@ function shouldRetryApprovalHydration(err: unknown): boolean {
 async function loadPendingApprovalsForTranscript(
   client: GatewayClient,
   conversationId: string,
-  shouldLoadApprovals: boolean,
   onFailure: (err: unknown) => void,
 ): Promise<readonly ApprovalRequest[] | null> {
-  if (!shouldLoadApprovals) {
-    return null;
-  }
-
   try {
     const response = await client.getPendingApprovals(conversationId);
     return response.approvals;
@@ -157,7 +152,6 @@ function createTranscriptLoaderEffect(
   store: WorkspaceStore,
   client: GatewayClient,
   activeConversationId: string | null,
-  hydratedApprovalConversationsRef: RefObject<Set<string>>,
   approvalRetryCountsRef: RefObject<Map<string, number>>,
   setRetryNonce: Dispatch<SetStateAction<number>>,
 ): () => void {
@@ -168,10 +162,6 @@ function createTranscriptLoaderEffect(
   const conversationId = activeConversationId;
   const existing = store.getState().conversations.get(conversationId);
   const shouldLoadHistory = existing?.historyLoaded !== true;
-  const shouldLoadApprovals = !hydratedApprovalConversationsRef.current.has(conversationId);
-  if (!shouldLoadHistory && !shouldLoadApprovals) {
-    return () => {};
-  }
 
   const lifecycle = { disposed: false };
   let retryTimer: ReturnType<typeof setTimeout> | null = null;
@@ -203,12 +193,7 @@ function createTranscriptLoaderEffect(
         shouldLoadHistory
           ? client.loadHistory(conversationId, { limit: 50 })
           : Promise.resolve(null),
-        loadPendingApprovalsForTranscript(
-          client,
-          conversationId,
-          shouldLoadApprovals,
-          scheduleApprovalRetry,
-        ),
+        loadPendingApprovalsForTranscript(client, conversationId, scheduleApprovalRetry),
       ]);
       if (lifecycle.disposed) {
         return;
@@ -217,7 +202,6 @@ function createTranscriptLoaderEffect(
       applyTranscriptLoadResult(store, conversationId, response, pendingApprovals);
 
       if (pendingApprovals != null) {
-        hydratedApprovalConversationsRef.current.add(conversationId);
         approvalRetryCountsRef.current.delete(conversationId);
       }
     } catch (err: unknown) {
@@ -724,7 +708,6 @@ function useTranscriptLoader(
   activeConversationId: string | null,
 ) {
   const [retryNonce, setRetryNonce] = useState(0);
-  const hydratedApprovalConversationsRef = useRef(new Set<string>());
   const approvalRetryCountsRef = useRef(new Map<string, number>());
 
   useEffect(
@@ -733,7 +716,6 @@ function useTranscriptLoader(
         store,
         client,
         activeConversationId,
-        hydratedApprovalConversationsRef,
         approvalRetryCountsRef,
         setRetryNonce,
       ),
