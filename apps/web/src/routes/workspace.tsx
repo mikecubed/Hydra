@@ -10,7 +10,10 @@ import {
 } from 'react';
 import { WorkspaceLayout } from '../features/chat-workspace/components/workspace-layout.tsx';
 import { ComposerPanel } from '../features/chat-workspace/components/composer-panel.tsx';
-import { ConnectionStateContext } from '../features/chat-workspace/components/connection-banner.tsx';
+import {
+  ConnectionBanner,
+  ConnectionStateContext,
+} from '../features/chat-workspace/components/connection-banner.tsx';
 import { createGatewayClient } from '../features/chat-workspace/api/gateway-client.ts';
 import type { GatewayClient } from '../features/chat-workspace/api/gateway-client.ts';
 import {
@@ -582,6 +585,7 @@ export function WorkspaceRoute(): JSX.Element {
 
   return (
     <ConnectionStateContext.Provider value={state.connection}>
+      <ConnectionBanner connection={state.connection} />
       <WorkspaceLayout
         conversations={selectConversationList(state)}
         activeConversationId={state.activeConversationId}

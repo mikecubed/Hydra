@@ -1,15 +1,15 @@
-import { type JSX, useContext } from 'react';
+import type { JSX } from 'react';
 import { Outlet } from '@tanstack/react-router';
-import {
-  ConnectionBanner,
-  ConnectionStateContext,
-} from '../features/chat-workspace/components/connection-banner.tsx';
 
-export { ConnectionStateContext };
-
+/**
+ * Root layout shell — renders the app chrome (header + main) and delegates
+ * child route content via `<Outlet />`.
+ *
+ * Connection-status banners are rendered by each route that owns the
+ * connection state (e.g. WorkspaceRoute), not here, because the context
+ * provider lives below the root route in the component tree.
+ */
 export function AppShell(): JSX.Element {
-  const connectionState = useContext(ConnectionStateContext);
-
   return (
     <div
       style={{
@@ -39,8 +39,6 @@ export function AppShell(): JSX.Element {
         </p>
         <h1 style={{ margin: '0.35rem 0 0', fontSize: '1.875rem' }}>Hydra Workspace</h1>
       </header>
-
-      {connectionState != null && <ConnectionBanner connection={connectionState} />}
 
       <main style={{ margin: '0 auto', maxWidth: '72rem', padding: '2rem' }}>
         <Outlet />
