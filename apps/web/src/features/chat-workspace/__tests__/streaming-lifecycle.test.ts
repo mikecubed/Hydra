@@ -2409,3 +2409,149 @@ describe('sealSubscriptionAfterMerge wiring (transcript-load path)', () => {
     assert.equal(after.serverResumeSeq, 1, 'frontier must stay at 1 (gap still blocks)');
   });
 });
+
+describe('immediate seal on cancel (race-condition regression)', () => {
+  it('late stream frames are rejected when a cancelled turn is sealed before background reconcile', () => {
+    // Regression: handleCancel must seal the cancelled turn immediately after
+    // reconcileTurnEntry — not only after the background reconcileActiveTranscript
+    // finishes. Otherwise late websocket frames arriving in that window can
+    // resurrect the cancelled turn.
+    //
+    // This test simulates the production sequence:
+    // 1. Stream delivers live frames for a running turn
+    // 2. Cancel response arrives — reconcile entry + immediate seal
+    // 3. Late stream frame arrives for the cancelled turn
+    // 4. Verify the frame is rejected (turn is sealed)
+
+    const store = storeWithConversation('conv-cancel');
+    const stateMap = new Map<string, StreamSubscriptionState>();
+
+    // Step 1: Stream delivers events for a running turn
+    let sub = createStreamSubscriptionState();
+    sub = applyStreamEventsToConversation(
+      store,
+      'conv-cancel',
+      [
+        makeEvent({ seq: 1, turnId: 'turn-cancel', kind: 'stream-started', payload: {} }),
+        makeEvent({
+          seq: 2,
+          turnId: 'turn-cancel',
+          kind: 'text-delta',
+          payload: { text: 'partial output' },
+        }),
+      ],
+      sub,
+    );
+    stateMap.set('conv-cancel', sub);
+
+    // Step 2: Cancel response — seal with a single cancelled entry
+    // (This is what handleCancel should do immediately, NOT wait for
+    // background reconcileActiveTranscript)
+    const cancelledEntry: TranscriptEntryState = {
+      entryId: 'turn-cancel',
+      kind: 'turn',
+      turnId: 'turn-cancel',
+      status: 'cancelled',
+      timestamp: '2026-07-01T00:00:01.000Z',
+      contentBlocks: [{ blockId: 'b1', kind: 'text', text: 'partial output', metadata: null }],
+      artifacts: [],
+      controls: [],
+      prompt: null,
+    };
+    sealSubscriptionAfterMerge(stateMap, 'conv-cancel', [cancelledEntry]);
+
+    // Step 3: Late stream frame arrives for the cancelled turn
+    const sealedSub = stateMap.get('conv-cancel')!;
+    store.dispatch({
+      type: 'conversation/replace-entries',
+      conversationId: 'conv-cancel',
+      entries: [cancelledEntry],
+      hasMoreHistory: false,
+    });
+    applyStreamEventsToConversation(
+      store,
+      'conv-cancel',
+      [
+        makeEvent({
+          seq: 99,
+          turnId: 'turn-cancel',
+          kind: 'text-delta',
+          payload: { text: ' RESURRECTED GARBAGE' },
+        }),
+      ],
+      sealedSub,
+    );
+
+    // Step 4: Verify the late frame was rejected
+    const entries = store.getState().conversations.get('conv-cancel')?.entries ?? [];
+    const turnEntry = entries.find((e) => e.turnId === 'turn-cancel' && e.kind === 'turn');
+    assert.ok(turnEntry, 'cancelled turn must exist');
+    assert.equal(turnEntry.status, 'cancelled', 'turn must remain cancelled');
+    const allText = turnEntry.contentBlocks.map((b) => b.text ?? '').join('');
+    assert.ok(
+      !allText.includes('RESURRECTED GARBAGE'),
+      'sealed cancelled turn must not be mutated by late stream frames',
+    );
+  });
+
+  it('immediate seal of cancelled turn retires pending gaps for that turn', () => {
+    // When a running turn has pending (unconsumed) events and is then
+    // cancelled + sealed immediately, the pending gaps for that turn must
+    // be retired so they don't block the resume cursor.
+
+    const store = storeWithConversation('conv-cancel-gaps');
+    const stateMap = new Map<string, StreamSubscriptionState>();
+
+    let sub = createStreamSubscriptionState();
+    // seq 1: consumed stream-started
+    sub = applyStreamEventsToConversation(
+      store,
+      'conv-cancel-gaps',
+      [makeEvent({ seq: 1, turnId: 'turn-x', kind: 'stream-started', payload: {} })],
+      sub,
+    );
+    // seq 2: ignored conditional event → goes to pendingSeqs
+    sub = applyStreamEventsToConversation(
+      store,
+      'conv-cancel-gaps',
+      [
+        makeEvent({
+          seq: 2,
+          turnId: 'turn-x',
+          kind: 'approval-response',
+          payload: { approvalId: 'p1', response: 'approve' },
+        }),
+      ],
+      sub,
+    );
+    // seq 3: consumed on different turn
+    sub = applyStreamEventsToConversation(
+      store,
+      'conv-cancel-gaps',
+      [makeEvent({ seq: 3, turnId: 'turn-y', kind: 'stream-started', payload: {} })],
+      sub,
+    );
+    stateMap.set('conv-cancel-gaps', sub);
+
+    assert.equal(sub.serverResumeSeq, 1, 'pre-seal: frontier stuck at 1');
+    assert.ok(sub.pendingSeqs.has(2), 'pre-seal: seq 2 pending for turn-x');
+
+    // Immediate seal with just the cancelled turn (no full REST merge)
+    const cancelledEntry: TranscriptEntryState = {
+      entryId: 'turn-x',
+      kind: 'turn',
+      turnId: 'turn-x',
+      status: 'cancelled',
+      timestamp: '2026-07-01T00:00:01.000Z',
+      contentBlocks: [],
+      artifacts: [],
+      controls: [],
+      prompt: null,
+    };
+    sealSubscriptionAfterMerge(stateMap, 'conv-cancel-gaps', [cancelledEntry]);
+
+    const after = stateMap.get('conv-cancel-gaps')!;
+    assert.ok(!after.pendingSeqs.has(2), 'pending seq 2 must be retired (turn-x is sealed)');
+    assert.equal(after.serverResumeSeq, 3, 'frontier must advance past retired gap to 3');
+  });
+});

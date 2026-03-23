@@ -1116,6 +1116,10 @@ function useTurnActions(
           // Immediately reconcile the cancelled turn from authoritative response
           reconcileTurnEntry(store, conversationId, response.turn);
 
+          // Seal the cancelled turn now so late websocket frames are rejected
+          // by isStaleEvent before the background reconcile finishes.
+          sealAfterMerge(conversationId, [toTranscriptEntry(response.turn)]);
+
           // Full authoritative transcript reload in background
           void reconcileActiveTranscript(client, store, conversationId, sealAfterMerge);
           void reloadConversationList();
