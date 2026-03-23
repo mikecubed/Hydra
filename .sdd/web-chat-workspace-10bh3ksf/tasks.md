@@ -127,10 +127,10 @@ _Status note_: post-Phase-1 maintenance also landed on the active branch, splitt
 
 **Independent Test**: Cancel a running turn, retry an eligible turn, branch from a prior turn, and submit a follow-up instruction while preserving visible lineage and authoritative convergence.
 
-- [ ] T033 [P] [US5] **TDD:** extend control-action gateway methods for cancel, retry, branch, and follow-up in `apps/web/src/features/chat-workspace/api/gateway-client.ts` and `apps/web/src/features/chat-workspace/__tests__/gateway-client.test.ts`.
-- [ ] T034 [P] [US5] **TDD:** implement lineage and stale-control modeling in `apps/web/src/features/chat-workspace/model/workspace-store.ts`, `apps/web/src/features/chat-workspace/model/selectors.ts`, and `apps/web/src/features/chat-workspace/components/lineage-badge.tsx`.
-- [ ] T035 [US5] Implement transcript control surfaces in `apps/web/src/features/chat-workspace/components/control-bar.tsx` and `apps/web/src/features/chat-workspace/components/lineage-badge.tsx`.
-- [ ] T036 [US5] Wire cancel/retry/branch/follow-up actions into transcript and composer flow in `apps/web/src/features/chat-workspace/components/transcript-turn.tsx`, `apps/web/src/features/chat-workspace/components/composer-panel.tsx`, and `apps/web/src/routes/workspace.tsx`.
+- [x] T033 [P] [US5] **TDD:** extend control-action gateway methods for cancel, retry, branch, and follow-up in `apps/web/src/features/chat-workspace/api/gateway-client.ts` and `apps/web/src/features/chat-workspace/__tests__/gateway-client.test.ts`.
+- [x] T034 [P] [US5] **TDD:** implement lineage and stale-control modeling in `apps/web/src/features/chat-workspace/model/workspace-store.ts`, `apps/web/src/features/chat-workspace/model/selectors.ts`, and `apps/web/src/features/chat-workspace/components/lineage-badge.tsx`.
+- [x] T035 [US5] Implement transcript control surfaces in `apps/web/src/features/chat-workspace/components/control-bar.tsx` and `apps/web/src/features/chat-workspace/components/lineage-badge.tsx`.
+- [x] T036 [US5] Wire cancel/retry/branch/follow-up actions into transcript and composer flow in `apps/web/src/features/chat-workspace/components/transcript-turn.tsx`, `apps/web/src/features/chat-workspace/components/composer-panel.tsx`, and `apps/web/src/routes/workspace.tsx`.
 - [ ] T037 [US5] Add control-flow browser workflow coverage in `apps/web/src/features/chat-workspace/__tests__/workspace-e2e.test.ts`.
 - [ ] T038 [US5] Run the phase quality gate from the repo root with `npm run quality` and `npm test` after transcript controls are green.
 
