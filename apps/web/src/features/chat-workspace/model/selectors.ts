@@ -235,3 +235,84 @@ export function selectCanFollowUp(state: WorkspaceState, turnId: string): boolea
   const lastCompletedTurn = turnEntries.findLast((candidate) => candidate.status === 'completed');
   return lastCompletedTurn?.turnId === turnId;
 }
+
+// ─── Combined action-flags selector ─────────────────────────────────────────
+
+/** All-false sentinel — avoids allocating a new object on every miss. */
+const NO_ACTION_FLAGS: EntryActionFlags = {
+  canCancel: false,
+  canRetry: false,
+  canBranch: false,
+  canFollowUp: false,
+};
+
+/** Per-entry action eligibility flags, mirroring {@link EntryActionFlags}. */
+export interface EntryActionFlags {
+  readonly canCancel: boolean;
+  readonly canRetry: boolean;
+  readonly canBranch: boolean;
+  readonly canFollowUp: boolean;
+}
+
+/**
+ * Compute all four action-eligibility flags for a given turn in one pass.
+ *
+ * This is a performance-oriented replacement for calling
+ * `selectCanCancel` / `selectCanRetry` / `selectCanBranch` / `selectCanFollowUp`
+ * individually — those each call `selectActiveEntries()`, so calling all four
+ * per entry makes the render loop O(N²). This selector calls it once.
+ */
+export function selectEntryActionFlags(state: WorkspaceState, turnId: string): EntryActionFlags {
+  const entries = selectActiveEntries(state);
+  if (entries.length === 0) return NO_ACTION_FLAGS;
+
+  const entry = entries.find((e) => e.turnId === turnId && e.kind === 'turn');
+  if (entry == null) return NO_ACTION_FLAGS;
+
+  const stale = isConversationStale(state);
+
+  // ── canCancel ──
+  const cancelCtrl = findControlByKind(entry, 'cancel');
+  const canCancel =
+    cancelCtrl == null
+      ? entry.status === 'streaming' || entry.status === 'executing' || entry.status === 'submitted'
+      : cancelCtrl.enabled;
+
+  // ── canRetry ──
+  let canRetry: boolean;
+  const retryCtrl = findControlByKind(entry, 'retry');
+  if (retryCtrl != null) {
+    canRetry = retryCtrl.enabled;
+  } else if (stale) {
+    canRetry = false;
+  } else {
+    canRetry = entry.status === 'completed' || entry.status === 'failed';
+  }
+
+  // ── canBranch ──
+  let canBranch: boolean;
+  const branchCtrl = findControlByKind(entry, 'branch');
+  if (branchCtrl != null) {
+    canBranch = branchCtrl.enabled;
+  } else if (stale) {
+    canBranch = false;
+  } else {
+    canBranch = entry.status === 'completed';
+  }
+
+  // ── canFollowUp ──
+  let canFollowUp: boolean;
+  const followUpCtrl = findControlByKind(entry, 'submit-follow-up');
+  if (followUpCtrl != null) {
+    canFollowUp = followUpCtrl.enabled;
+  } else if (stale || entry.status !== 'completed') {
+    canFollowUp = false;
+  } else {
+    // Only the last completed turn may receive a follow-up.
+    const turnEntries = entries.filter((e) => e.kind === 'turn');
+    const lastCompleted = turnEntries.findLast((c) => c.status === 'completed');
+    canFollowUp = lastCompleted?.turnId === turnId;
+  }
+
+  return { canCancel, canRetry, canBranch, canFollowUp };
+}

@@ -54,10 +54,7 @@ import {
   selectActiveEntries,
   selectActiveLoadState,
   selectCanSubmit,
-  selectCanCancel,
-  selectCanRetry,
-  selectCanBranch,
-  selectCanFollowUp,
+  selectEntryActionFlags,
   selectConversationList,
   selectCreateModeCanSubmit,
 } from '../features/chat-workspace/model/selectors.ts';
@@ -1311,14 +1308,7 @@ function useTurnActions(
         return { canCancel: false, canRetry: false, canBranch: false, canFollowUp: false };
       }
 
-      const state = store.getState();
-      const tid = entry.turnId;
-      return {
-        canCancel: selectCanCancel(state, tid),
-        canRetry: selectCanRetry(state, tid),
-        canBranch: selectCanBranch(state, tid),
-        canFollowUp: selectCanFollowUp(state, tid),
-      };
+      return selectEntryActionFlags(store.getState(), entry.turnId);
     },
     [pendingTurnActionIds, store],
   );
