@@ -595,6 +595,14 @@ function toTranscriptEntry(turn: Turn): TranscriptEntryState {
     attributionLabel: turn.attribution.label,
     status: turn.status,
     timestamp: turn.completedAt ?? turn.createdAt,
+    lineageSummary:
+      turn.parentTurnId == null
+        ? null
+        : {
+            sourceConversationId: null,
+            sourceTurnId: turn.parentTurnId,
+            relationshipKind: 'retry',
+          },
     contentBlocks: toContentBlocks(turn),
     artifacts: [],
     controls: [],

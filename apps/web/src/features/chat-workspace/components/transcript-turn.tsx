@@ -5,6 +5,7 @@ import type {
   TranscriptEntryState,
 } from '../model/workspace-store.ts';
 import { SafeText } from '../render/safe-text.tsx';
+import { LineageBadge } from './lineage-badge.tsx';
 import { PromptCard } from './prompt-card.tsx';
 import { TurnControlBar } from './turn-control-bar.tsx';
 
@@ -25,7 +26,9 @@ export interface TranscriptTurnProps extends TranscriptTurnCallbacks {
 }
 
 const turnStyle = {
-  border: '1px solid rgba(148, 163, 184, 0.15)',
+  borderWidth: '1px',
+  borderStyle: 'solid',
+  borderColor: 'rgba(148, 163, 184, 0.15)',
   borderRadius: '0.5rem',
   background: 'rgba(30, 41, 59, 0.6)',
   padding: '0.75rem 1rem',
@@ -219,6 +222,7 @@ export function TranscriptTurn({
         {entry.timestamp != null && (
           <time dateTime={entry.timestamp}>{formatTimestamp(entry.timestamp)}</time>
         )}
+        <LineageBadge lineage={entry.lineageSummary ?? null} />
       </header>
 
       {entry.contentBlocks.length > 0 && (
