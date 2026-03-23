@@ -241,7 +241,6 @@ export function TranscriptTurn({
 
       {actionableTurnId != null && (
         <TurnControlBar
-          entryId={entry.entryId}
           turnId={actionableTurnId}
           canCancel={canCancel}
           canRetry={canRetry}

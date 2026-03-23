@@ -20,7 +20,6 @@ import type { TurnActionFlags } from './turn-control-logic.ts';
 // ─── Props ──────────────────────────────────────────────────────────────────
 
 export interface TurnControlBarProps extends TurnActionFlags {
-  readonly entryId: string;
   readonly turnId: string;
   readonly onCancel: (turnId: string) => void;
   readonly onRetry: (turnId: string) => void;

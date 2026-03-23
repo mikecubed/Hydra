@@ -131,7 +131,7 @@ _Status note_: post-Phase-1 maintenance also landed on the active branch, splitt
 - [x] T034 [P] [US5] **TDD:** implement lineage and stale-control modeling in `apps/web/src/features/chat-workspace/model/workspace-store.ts`, `apps/web/src/features/chat-workspace/model/selectors.ts`, and `apps/web/src/features/chat-workspace/components/lineage-badge.tsx`.
 - [x] T035 [US5] Implement transcript control surfaces in `apps/web/src/features/chat-workspace/components/control-bar.tsx` and `apps/web/src/features/chat-workspace/components/lineage-badge.tsx`.
 - [x] T036 [US5] Wire cancel/retry/branch/follow-up actions into transcript and composer flow in `apps/web/src/features/chat-workspace/components/transcript-turn.tsx`, `apps/web/src/features/chat-workspace/components/composer-panel.tsx`, and `apps/web/src/routes/workspace.tsx`.
-- [x] T037 [US5] Add control-flow browser workflow coverage in `apps/web/src/features/chat-workspace/__tests__/workspace-e2e.test.ts`.
+- [x] T037 [US5] Add control-flow browser workflow coverage in `apps/web/src/features/chat-workspace/__tests__/workflow-control-actions.browser.spec.tsx`.
 - [x] T038 [US5] Run the phase quality gate from the repo root with `npm run quality` and `npm test` after transcript controls are green.
 
 **Checkpoint**: User Stories 1–5 support a real interactive Hydra workflow in the browser.
