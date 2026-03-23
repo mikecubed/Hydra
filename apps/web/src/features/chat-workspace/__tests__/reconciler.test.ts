@@ -1780,6 +1780,178 @@ describe('mergeAuthoritativeEntries', () => {
     assert.deepStrictEqual(rest, restCopy);
     assert.deepStrictEqual(current, currentCopy);
   });
+
+  it('coerces actionable streamed prompt to stale when REST turn is terminal', () => {
+    const pendingPrompt = {
+      promptId: 'p1',
+      parentTurnId: 'turn-a',
+      status: 'pending' as const,
+      allowedResponses: [{ key: 'approve', label: 'Approve' }],
+      contextBlocks: [],
+      lastResponseSummary: null,
+      errorMessage: null,
+      staleReason: null,
+    };
+
+    const rest = [
+      makeEntry({ entryId: 'turn-a', turnId: 'turn-a', status: 'completed', prompt: null }),
+    ];
+    const current = [
+      makeEntry({
+        entryId: 'turn-a',
+        turnId: 'turn-a',
+        status: 'streaming',
+        prompt: pendingPrompt,
+      }),
+    ];
+
+    const result = mergeAuthoritativeEntries(rest, current);
+
+    assert.notEqual(
+      result[0].prompt,
+      null,
+      'prompt should still be present (coerced, not dropped)',
+    );
+    assert.equal(result[0].prompt!.status, 'stale', 'prompt must be coerced to stale');
+    assert.equal(
+      result[0].prompt!.staleReason,
+      'turn-completed',
+      'staleReason should indicate the turn completed',
+    );
+  });
+
+  it('coerces error-status streamed prompt to stale when REST turn is failed', () => {
+    const errorPrompt = {
+      promptId: 'p2',
+      parentTurnId: 'turn-a',
+      status: 'error' as const,
+      allowedResponses: [],
+      contextBlocks: [],
+      lastResponseSummary: null,
+      errorMessage: 'submission failed',
+      staleReason: null,
+    };
+
+    const rest = [
+      makeEntry({ entryId: 'turn-a', turnId: 'turn-a', status: 'failed', prompt: null }),
+    ];
+    const current = [
+      makeEntry({ entryId: 'turn-a', turnId: 'turn-a', status: 'streaming', prompt: errorPrompt }),
+    ];
+
+    const result = mergeAuthoritativeEntries(rest, current);
+
+    assert.equal(result[0].prompt!.status, 'stale');
+  });
+
+  it('coerces responding streamed prompt to stale when REST turn is terminal', () => {
+    const respondingPrompt = {
+      promptId: 'p2b',
+      parentTurnId: 'turn-a',
+      status: 'responding' as const,
+      allowedResponses: [],
+      contextBlocks: [],
+      lastResponseSummary: null,
+      errorMessage: null,
+      staleReason: null,
+    };
+
+    const rest = [
+      makeEntry({ entryId: 'turn-a', turnId: 'turn-a', status: 'completed', prompt: null }),
+    ];
+    const current = [
+      makeEntry({
+        entryId: 'turn-a',
+        turnId: 'turn-a',
+        status: 'streaming',
+        prompt: respondingPrompt,
+      }),
+    ];
+
+    const result = mergeAuthoritativeEntries(rest, current);
+
+    assert.equal(result[0].prompt!.status, 'stale');
+    assert.equal(result[0].prompt!.staleReason, 'turn-completed');
+  });
+
+  it('preserves terminal (resolved) streamed prompt on terminal REST turn', () => {
+    const resolvedPrompt = {
+      promptId: 'p3',
+      parentTurnId: 'turn-a',
+      status: 'resolved' as const,
+      allowedResponses: [],
+      contextBlocks: [],
+      lastResponseSummary: 'approved',
+      errorMessage: null,
+      staleReason: null,
+    };
+
+    const rest = [
+      makeEntry({ entryId: 'turn-a', turnId: 'turn-a', status: 'completed', prompt: null }),
+    ];
+    const current = [
+      makeEntry({
+        entryId: 'turn-a',
+        turnId: 'turn-a',
+        status: 'completed',
+        prompt: resolvedPrompt,
+      }),
+    ];
+
+    const result = mergeAuthoritativeEntries(rest, current);
+
+    assert.equal(
+      result[0].prompt!.status,
+      'resolved',
+      'resolved prompt should be preserved as-is on terminal turn',
+    );
+  });
+
+  it('does not leave terminal REST turn actionable in pending-prompt selection', () => {
+    const pendingPrompt = {
+      promptId: 'p4',
+      parentTurnId: 'turn-a',
+      status: 'pending' as const,
+      allowedResponses: [{ key: 'approve', label: 'Approve' }],
+      contextBlocks: [],
+      lastResponseSummary: null,
+      errorMessage: null,
+      staleReason: null,
+    };
+
+    for (const terminalStatus of ['completed', 'failed', 'cancelled']) {
+      const rest = [
+        makeEntry({
+          entryId: 'turn-a',
+          turnId: 'turn-a',
+          status: terminalStatus,
+          prompt: null,
+        }),
+      ];
+      const current = [
+        makeEntry({
+          entryId: 'turn-a',
+          turnId: 'turn-a',
+          status: 'streaming',
+          prompt: pendingPrompt,
+        }),
+      ];
+
+      const result = mergeAuthoritativeEntries(rest, current);
+      const promptStatus = result[0].prompt?.status;
+
+      assert.notEqual(
+        promptStatus,
+        'pending',
+        `terminal REST status "${terminalStatus}" must not leave prompt actionable (pending)`,
+      );
+      assert.notEqual(
+        promptStatus,
+        'error',
+        `terminal REST status "${terminalStatus}" must not leave prompt actionable (error)`,
+      );
+    }
+  });
 });
 
 // ─── deduplicateEntries ─────────────────────────────────────────────────────

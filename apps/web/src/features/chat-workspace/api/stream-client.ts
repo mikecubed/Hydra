@@ -316,6 +316,13 @@ interface ClientState {
   sendQueue: string[];
   /** Socket intentionally closed via close() whose async onclose hasn't fired yet. */
   pendingCloseSocket: WebSocketLike | null;
+  /**
+   * Conversations the local client has actively requested via `subscribe()`.
+   * Cleared by `unsubscribe()` / `close()`.  Unlike `liveSubscriptions` this
+   * tracks *intent* rather than server acknowledgement, so a late `subscribed`
+   * ack that arrives after `unsubscribe()` is safely ignored.
+   */
+  requestedSubscriptions: Set<string>;
   liveSubscriptions: Set<string>;
   bufferedReplayEvents: Map<string, Array<{ conversationId: string; event: StreamEvent }>>;
 }
@@ -399,6 +406,9 @@ function dispatchBufferedStreamEvent(
     return true;
   }
 
+  // Drop events for conversations the client no longer wants.
+  if (!state.requestedSubscriptions.has(result.data.conversationId)) return true;
+
   if (state.liveSubscriptions.has(result.data.conversationId)) {
     callbacks.onStreamEvent?.(result.data.conversationId, result.data.event);
     return true;
@@ -421,6 +431,12 @@ function dispatchBufferedSubscribed(
     return true;
   }
 
+  // Ignore late acks for conversations the client has already unsubscribed from.
+  if (!state.requestedSubscriptions.has(result.data.conversationId)) {
+    state.bufferedReplayEvents.delete(result.data.conversationId);
+    return true;
+  }
+
   state.liveSubscriptions.add(result.data.conversationId);
   flushBufferedReplayEvents(state, result.data.conversationId, callbacks);
   callbacks.onSubscribed?.(result.data.conversationId, result.data.currentSeq);
@@ -437,6 +453,12 @@ function dispatchBufferedUnsubscribed(
   const result = ServerUnsubscribed.safeParse(parsed);
   if (!result.success) {
     callbacks.onParseError?.(raw, `Invalid "unsubscribed" message: ${result.error.message}`);
+    return true;
+  }
+
+  // Ignore stale unsubscribe acks for conversations the client has already
+  // re-requested locally. A later subscribe intent owns the current state.
+  if (state.requestedSubscriptions.has(result.data.conversationId)) {
     return true;
   }
 
@@ -494,6 +516,7 @@ function attachSocketHandlers(
       // Server-initiated close of the active socket.
       state.socket = null;
       state.sendQueue = [];
+      state.requestedSubscriptions.clear();
       state.liveSubscriptions.clear();
       state.bufferedReplayEvents.clear();
       callbacks.onClose?.(ev.code, ev.reason);
@@ -524,6 +547,7 @@ export function createStreamClient(options: StreamClientOptions): StreamClient {
     socket: null,
     sendQueue: [],
     pendingCloseSocket: null,
+    requestedSubscriptions: new Set(),
     liveSubscriptions: new Set(),
     bufferedReplayEvents: new Map(),
   };
@@ -535,6 +559,7 @@ export function createStreamClient(options: StreamClientOptions): StreamClient {
       }
 
       state.sendQueue = [];
+      state.requestedSubscriptions.clear();
       state.liveSubscriptions.clear();
       state.bufferedReplayEvents.clear();
       // A new connection supersedes any socket pending its async onclose.
@@ -547,6 +572,7 @@ export function createStreamClient(options: StreamClientOptions): StreamClient {
     subscribe(conversationId, lastAcknowledgedSeq) {
       const msg: Record<string, unknown> = { type: 'subscribe', conversationId };
       if (lastAcknowledgedSeq !== undefined) msg['lastAcknowledgedSeq'] = lastAcknowledgedSeq;
+      state.requestedSubscriptions.add(conversationId);
       state.liveSubscriptions.delete(conversationId);
       state.bufferedReplayEvents.delete(conversationId);
       sendOrQueue(state, JSON.stringify(msg));
@@ -555,6 +581,7 @@ export function createStreamClient(options: StreamClientOptions): StreamClient {
     unsubscribe(conversationId) {
       // After close() or socket teardown, unsubscribe is a safe no-op.
       if (state.socket === null || state.socket.readyState > WS_OPEN) return;
+      state.requestedSubscriptions.delete(conversationId);
       state.liveSubscriptions.delete(conversationId);
       state.bufferedReplayEvents.delete(conversationId);
       sendOrQueue(state, JSON.stringify({ type: 'unsubscribe', conversationId }));
@@ -567,6 +594,7 @@ export function createStreamClient(options: StreamClientOptions): StreamClient {
     close() {
       if (state.socket === null) return;
       state.sendQueue = [];
+      state.requestedSubscriptions.clear();
       state.liveSubscriptions.clear();
       state.bufferedReplayEvents.clear();
       state.pendingCloseSocket = state.socket;

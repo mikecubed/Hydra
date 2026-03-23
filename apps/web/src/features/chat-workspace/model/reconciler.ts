@@ -15,6 +15,7 @@ import type {
   ArtifactReferenceState,
   ContentBlockState,
   PromptResponseChoiceState,
+  PromptStatus,
   PromptViewState,
   TranscriptEntryState,
 } from './workspace-types.ts';
@@ -613,6 +614,29 @@ export function reconcileStreamEvents(
 
 const TERMINAL_STATUSES: ReadonlySet<string> = new Set(['completed', 'failed', 'cancelled']);
 
+/** Prompt statuses that should not survive terminal REST turns unchanged. */
+const ACTIONABLE_PROMPT_STATUSES: ReadonlySet<PromptStatus> = new Set([
+  'pending',
+  'responding',
+  'error',
+]);
+
+/**
+ * When a REST turn is terminal, an actionable prompt from the stream is stale
+ * and must not survive the merge — otherwise the UI would show a pending prompt
+ * card on a completed/failed/cancelled turn after reconnect or refresh.
+ *
+ * Terminal/resolved prompts are preserved as-is (informational, no action).
+ */
+function coercePromptForTerminalTurn(
+  prompt: PromptViewState | null,
+  restIsTerminal: boolean,
+): PromptViewState | null {
+  if (!restIsTerminal || prompt == null) return prompt;
+  if (!ACTIONABLE_PROMPT_STATUSES.has(prompt.status)) return prompt;
+  return { ...prompt, status: 'stale', staleReason: 'turn-completed' };
+}
+
 /**
  * Compute a simple richness metric for the content blocks of a turn entry.
  * Used to break ties when both REST and streamed entries are non-terminal —
@@ -749,7 +773,10 @@ export function mergeAuthoritativeEntries(
       contentBlocks: preserveStreamedTurn ? streamed.contentBlocks : entry.contentBlocks,
       artifacts: streamed.artifacts.length > 0 ? streamed.artifacts : entry.artifacts,
       controls: streamed.controls.length > 0 ? streamed.controls : entry.controls,
-      prompt: mergePromptState(streamed.prompt, entry.prompt),
+      prompt: coercePromptForTerminalTurn(
+        mergePromptState(streamed.prompt, entry.prompt),
+        TERMINAL_STATUSES.has(entry.status),
+      ),
     };
   });
 
