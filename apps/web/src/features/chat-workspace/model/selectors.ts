@@ -239,7 +239,7 @@ export function selectCanFollowUp(state: WorkspaceState, turnId: string): boolea
 // ─── Combined action-flags selector ─────────────────────────────────────────
 
 /** All-false sentinel — avoids allocating a new object on every miss. */
-const NO_ACTION_FLAGS: EntryActionFlags = {
+export const NO_ACTION_FLAGS: EntryActionFlags = {
   canCancel: false,
   canRetry: false,
   canBranch: false,
@@ -315,4 +315,87 @@ export function selectEntryActionFlags(state: WorkspaceState, turnId: string): E
   }
 
   return { canCancel, canRetry, canBranch, canFollowUp };
+}
+
+// ─── Whole-transcript precompute ────────────────────────────────────────────
+
+const EMPTY_ACTION_MAP: ReadonlyMap<string, EntryActionFlags> = new Map();
+
+/**
+ * Precompute action flags for every turn in the active transcript in a single
+ * O(N) pass. Returns a Map keyed by turnId.
+ *
+ * This replaces per-entry calls to {@link selectEntryActionFlags} during
+ * render, eliminating the repeated `selectActiveEntries` scans that made the
+ * old path O(N²).
+ */
+export function precomputeTranscriptActions(
+  state: WorkspaceState,
+): ReadonlyMap<string, EntryActionFlags> {
+  const entries = selectActiveEntries(state);
+  if (entries.length === 0) return EMPTY_ACTION_MAP;
+
+  const stale = isConversationStale(state);
+
+  // Single pass to find the last completed turn (needed for canFollowUp).
+  let lastCompletedTurnId: string | null = null;
+  for (let i = entries.length - 1; i >= 0; i--) {
+    const e = entries[i];
+    if (e.kind === 'turn' && e.status === 'completed' && e.turnId != null) {
+      lastCompletedTurnId = e.turnId;
+      break;
+    }
+  }
+
+  const result = new Map<string, EntryActionFlags>();
+
+  for (const entry of entries) {
+    if (entry.kind !== 'turn' || entry.turnId == null) continue;
+
+    // canCancel
+    const cancelCtrl = findControlByKind(entry, 'cancel');
+    const canCancel =
+      cancelCtrl == null
+        ? entry.status === 'streaming' ||
+          entry.status === 'executing' ||
+          entry.status === 'submitted'
+        : cancelCtrl.enabled;
+
+    // canRetry
+    let canRetry: boolean;
+    const retryCtrl = findControlByKind(entry, 'retry');
+    if (retryCtrl != null) {
+      canRetry = retryCtrl.enabled;
+    } else if (stale) {
+      canRetry = false;
+    } else {
+      canRetry = entry.status === 'completed' || entry.status === 'failed';
+    }
+
+    // canBranch
+    let canBranch: boolean;
+    const branchCtrl = findControlByKind(entry, 'branch');
+    if (branchCtrl != null) {
+      canBranch = branchCtrl.enabled;
+    } else if (stale) {
+      canBranch = false;
+    } else {
+      canBranch = entry.status === 'completed';
+    }
+
+    // canFollowUp
+    let canFollowUp: boolean;
+    const followUpCtrl = findControlByKind(entry, 'submit-follow-up');
+    if (followUpCtrl != null) {
+      canFollowUp = followUpCtrl.enabled;
+    } else if (stale || entry.status !== 'completed') {
+      canFollowUp = false;
+    } else {
+      canFollowUp = lastCompletedTurnId === entry.turnId;
+    }
+
+    result.set(entry.turnId, { canCancel, canRetry, canBranch, canFollowUp });
+  }
+
+  return result;
 }
