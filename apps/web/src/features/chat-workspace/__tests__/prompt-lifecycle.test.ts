@@ -4,11 +4,8 @@ import { describe, it } from 'node:test';
 import type { StreamEvent } from '@hydra/web-contracts';
 
 import { createReconcilerState, reconcileStreamEvents } from '../model/reconciler.ts';
-import {
-  createInitialWorkspaceState,
-  mergePromptState,
-  reduceWorkspaceState,
-} from '../model/workspace-reducer.ts';
+import { mergePromptState } from '../model/prompt-merge.ts';
+import { createInitialWorkspaceState, reduceWorkspaceState } from '../model/workspace-reducer.ts';
 import type {
   ConversationViewState,
   PromptViewState,

@@ -18,7 +18,6 @@ import type {
   ConversationStatus,
   ConversationViewState,
   DraftSubmitState,
-  PromptStatus,
   PromptViewState,
   TranscriptEntryState,
   WorkspaceAction,
@@ -26,116 +25,12 @@ import type {
   WorkspaceState,
 } from './workspace-types.ts';
 
+import { mergePromptState } from './prompt-merge.ts';
 import { mergeAuthoritativeEntries } from './reconciler.ts';
 
 // ─── Internal helpers ───────────────────────────────────────────────────────
 
 const DEFAULT_SUBMISSION_POLICY_LABEL = 'Ready for operator input';
-
-/**
- * Prompt lifecycle status priority for merge conflict resolution.
- * Higher rank = more advanced in the lifecycle.
- */
-const PROMPT_STATUS_RANK: Record<PromptStatus, number> = {
-  pending: 0,
-  responding: 1,
-  error: 2,
-  stale: 3,
-  unavailable: 3,
-  resolved: 4,
-};
-
-function shouldPreferFallbackSummary(
-  preferred: PromptViewState,
-  fallback: PromptViewState,
-): boolean {
-  if (
-    preferred.status !== 'resolved' ||
-    fallback.status !== 'resolved' ||
-    preferred.lastResponseSummary == null ||
-    fallback.lastResponseSummary == null ||
-    preferred.lastResponseSummary === fallback.lastResponseSummary
-  ) {
-    return false;
-  }
-
-  return fallback.allowedResponses.some(
-    (choice) =>
-      typeof choice !== 'string' &&
-      choice.key === preferred.lastResponseSummary &&
-      choice.label === fallback.lastResponseSummary,
-  );
-}
-
-const TURN_STATUS_RANK: Readonly<Record<string, number>> = {
-  submitted: 0,
-  executing: 1,
-  streaming: 2,
-  completed: 3,
-  failed: 3,
-  cancelled: 3,
-};
-
-function measureEntryContent(entry: TranscriptEntryState): number {
-  return entry.contentBlocks.reduce(
-    (size, block) => size + block.blockId.length + (block.text?.length ?? 0),
-    0,
-  );
-}
-
-function shouldPreferStreamedTurn(
-  streamed: TranscriptEntryState,
-  rest: TranscriptEntryState,
-): boolean {
-  const streamedRank = TURN_STATUS_RANK[streamed.status] ?? 0;
-  const restRank = TURN_STATUS_RANK[rest.status] ?? 0;
-  if (streamedRank !== restRank) {
-    return streamedRank > restRank;
-  }
-
-  return measureEntryContent(streamed) > measureEntryContent(rest);
-}
-
-/**
- * Merge two prompt states for the same turn, preferring the more advanced
- * lifecycle state. Used during history merge where stream and REST may have
- * different views of the same prompt.
- */
-function mergePromptState(
-  streamPrompt: PromptViewState | null,
-  restPrompt: PromptViewState | null,
-): PromptViewState | null {
-  if (streamPrompt == null) return restPrompt;
-  if (restPrompt == null) return streamPrompt;
-
-  // Same prompt — prefer the more advanced lifecycle state
-  if (streamPrompt.promptId === restPrompt.promptId) {
-    const preserveStreamLifecycle =
-      (streamPrompt.status === 'responding' || streamPrompt.status === 'error') &&
-      (restPrompt.status === 'pending' || restPrompt.status === 'stale');
-    const streamRank = PROMPT_STATUS_RANK[streamPrompt.status];
-    const restRank = PROMPT_STATUS_RANK[restPrompt.status];
-    const preferred = preserveStreamLifecycle || restRank <= streamRank ? streamPrompt : restPrompt;
-    const fallback = preferred === streamPrompt ? restPrompt : streamPrompt;
-    const lastResponseSummary = shouldPreferFallbackSummary(preferred, fallback)
-      ? fallback.lastResponseSummary
-      : (preferred.lastResponseSummary ?? fallback.lastResponseSummary);
-    return {
-      ...preferred,
-      allowedResponses:
-        preferred.allowedResponses.length > 0
-          ? preferred.allowedResponses
-          : fallback.allowedResponses,
-      contextBlocks:
-        preferred.contextBlocks.length > 0 ? preferred.contextBlocks : fallback.contextBlocks,
-      lastResponseSummary,
-      errorMessage: preferred.errorMessage ?? fallback.errorMessage,
-    };
-  }
-
-  // Different prompts — stream is more recent
-  return streamPrompt;
-}
 
 function createConversationLineage(
   conversation: WorkspaceConversationRecord,

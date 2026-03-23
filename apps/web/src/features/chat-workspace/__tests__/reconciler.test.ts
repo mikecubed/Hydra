@@ -1557,7 +1557,11 @@ describe('mergeAuthoritativeEntries', () => {
           promptId: 'p1',
           parentTurnId: 'turn-a',
           status: 'resolved',
+          allowedResponses: [],
+          contextBlocks: [],
           lastResponseSummary: 'ok',
+          errorMessage: null,
+          staleReason: null,
         },
       }),
     ];

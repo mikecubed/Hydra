@@ -18,6 +18,7 @@ import type {
   PromptViewState,
   TranscriptEntryState,
 } from './workspace-types.ts';
+import { mergePromptState } from './prompt-merge.ts';
 
 // ─── Reconciler state ───────────────────────────────────────────────────────
 
@@ -705,7 +706,7 @@ export function mergeAuthoritativeEntries(
       contentBlocks: preserveStreamedTurn ? streamed.contentBlocks : entry.contentBlocks,
       artifacts: streamed.artifacts.length > 0 ? streamed.artifacts : entry.artifacts,
       controls: streamed.controls.length > 0 ? streamed.controls : entry.controls,
-      prompt: streamed.prompt ?? entry.prompt,
+      prompt: mergePromptState(streamed.prompt, entry.prompt),
     };
   });
 

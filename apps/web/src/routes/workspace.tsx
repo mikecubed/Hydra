@@ -178,7 +178,6 @@ function createTranscriptLoaderEffect(
   const shouldLoadHistory = existing?.historyLoaded !== true;
   if (!shouldLoadHistory) {
     store.dispatch({ type: 'connection/merge', patch: { syncStatus: 'idle' } });
-    return () => {};
   }
 
   const lifecycle = { disposed: false };
@@ -198,14 +197,12 @@ function createTranscriptLoaderEffect(
   };
 
   void (async () => {
-    if (shouldLoadHistory) {
-      store.dispatch({ type: 'connection/merge', patch: { syncStatus: 'syncing' } });
-      store.dispatch({
-        type: 'conversation/set-load-state',
-        conversationId,
-        loadState: 'loading',
-      });
-    }
+    store.dispatch({ type: 'connection/merge', patch: { syncStatus: 'syncing' } });
+    store.dispatch({
+      type: 'conversation/set-load-state',
+      conversationId,
+      loadState: 'loading',
+    });
 
     try {
       const [response, pendingApprovals] = await Promise.all([

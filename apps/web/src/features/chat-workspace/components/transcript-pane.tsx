@@ -38,7 +38,7 @@ export function TranscriptPane({
     );
   }
 
-  if (loadState === 'loading') {
+  if (loadState === 'loading' && entries.length === 0) {
     return (
       <div role="log" style={paneStyle}>
         <p style={emptyStyle}>Loading transcript…</p>
@@ -83,6 +83,7 @@ export function TranscriptPane({
 
   return (
     <div role="log" style={paneStyle}>
+      {loadState === 'loading' && <p style={emptyStyle}>Loading transcript…</p>}
       {hasMoreHistory && (
         <p style={emptyStyle}>
           Showing the most recent transcript entries. Older history is not loaded yet.
