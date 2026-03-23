@@ -237,12 +237,12 @@ export function selectCanFollowUp(state: WorkspaceState, turnId: string): boolea
 // ─── Combined action-flags selector ─────────────────────────────────────────
 
 /** All-false sentinel — avoids allocating a new object on every miss. */
-export const NO_ACTION_FLAGS: EntryActionFlags = {
+export const NO_ACTION_FLAGS: EntryActionFlags = Object.freeze({
   canCancel: false,
   canRetry: false,
   canBranch: false,
   canFollowUp: false,
-};
+});
 
 /** Per-entry action eligibility flags, mirroring {@link EntryActionFlags}. */
 export interface EntryActionFlags {

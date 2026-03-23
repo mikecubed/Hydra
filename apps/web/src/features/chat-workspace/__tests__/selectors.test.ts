@@ -1415,6 +1415,7 @@ describe('precomputeTranscriptActions', () => {
 
 describe('NO_ACTION_FLAGS', () => {
   it('is a frozen all-false sentinel', () => {
+    assert.equal(Object.isFrozen(NO_ACTION_FLAGS), true);
     assert.deepStrictEqual(NO_ACTION_FLAGS, {
       canCancel: false,
       canRetry: false,
