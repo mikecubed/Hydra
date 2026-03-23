@@ -197,12 +197,14 @@ function createTranscriptLoaderEffect(
   };
 
   void (async () => {
-    store.dispatch({ type: 'connection/merge', patch: { syncStatus: 'syncing' } });
-    store.dispatch({
-      type: 'conversation/set-load-state',
-      conversationId,
-      loadState: 'loading',
-    });
+    if (shouldLoadHistory) {
+      store.dispatch({ type: 'connection/merge', patch: { syncStatus: 'syncing' } });
+      store.dispatch({
+        type: 'conversation/set-load-state',
+        conversationId,
+        loadState: 'loading',
+      });
+    }
 
     try {
       const [response, pendingApprovals] = await Promise.all([

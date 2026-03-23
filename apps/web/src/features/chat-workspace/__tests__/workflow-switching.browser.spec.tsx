@@ -202,4 +202,29 @@ describe('workspace conversation-switching workflow', () => {
     expect(screen.getByRole('button', { name: 'Approve' })).toBeInTheDocument();
     expect(getConvAApprovalFetches()).toBe(2);
   });
+
+  it('does not show loading indicator when revisiting a conversation with loaded history', async () => {
+    installRevisitApprovalScenario();
+
+    render(<AppProviders />);
+
+    // Wait for initial load of conv-a (the first selected conversation)
+    await screen.findByRole('button', { name: /alpha/i });
+    await screen.findByText('Awaiting approval.');
+
+    // Switch to conv-b
+    fireEvent.click(screen.getByRole('button', { name: /bravo/i }));
+    await vi.waitFor(() => {
+      expect(screen.getByText('Active conversation: Bravo')).toBeInTheDocument();
+    });
+
+    // Switch back to conv-a — history is already loaded, only approvals refresh.
+    // The transcript must NOT flash a loading state.
+    fireEvent.click(screen.getByRole('button', { name: /alpha/i }));
+    await vi.waitFor(() => {
+      expect(screen.getByText('Active conversation: Alpha')).toBeInTheDocument();
+    });
+    expect(screen.queryByText('Loading transcript…')).not.toBeInTheDocument();
+    expect(screen.getByText('Awaiting approval.')).toBeInTheDocument();
+  });
 });
