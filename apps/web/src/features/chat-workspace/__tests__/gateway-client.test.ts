@@ -13,6 +13,7 @@ import {
   type GatewayClient,
   type GatewayClientOptions,
   GatewayRequestError,
+  type FollowUpBody,
 } from '../api/gateway-client.ts';
 
 import type { GatewayErrorBody } from '../../../shared/gateway-errors.ts';
@@ -799,6 +800,372 @@ describe('GatewayClient', () => {
       const err = new GatewayRequestError(400, gatewayErrorFixture());
       assert.equal(err.name, 'GatewayRequestError');
       assert.ok(err instanceof Error);
+    });
+  });
+
+  // ── cancelTurn ──────────────────────────────────────────────────────────
+
+  describe('cancelTurn', () => {
+    it('sends POST to /conversations/:convId/turns/:turnId/cancel and returns updated turn', async () => {
+      const cancelledTurn = turnFixture({ status: 'cancelled' });
+      const responseBody = { success: true, turn: cancelledTurn };
+      let capturedUrl = '';
+      let capturedMethod = '';
+
+      const client = buildClient(async (input, init) => {
+        capturedUrl = stringifyInput(input);
+        capturedMethod = init?.method ?? '';
+        return jsonResponse(responseBody);
+      });
+
+      const result = await client.cancelTurn('conv-1', 'turn-1');
+
+      assert.ok(capturedUrl.endsWith('/conversations/conv-1/turns/turn-1/cancel'));
+      assert.equal(capturedMethod, 'POST');
+      assert.equal(result.success, true);
+      assert.equal(result.turn.status, 'cancelled');
+    });
+
+    it('includes CSRF token on POST', async () => {
+      let capturedHeaders: CapturedHeaders;
+
+      const client = buildClient(
+        async (_input, init) => {
+          capturedHeaders = init?.headers;
+          return jsonResponse({
+            success: true,
+            turn: turnFixture({ status: 'cancelled' }),
+          });
+        },
+        { getCsrfToken: () => 'csrf-cancel' },
+      );
+
+      await client.cancelTurn('conv-1', 'turn-1');
+
+      const headers = new Headers(capturedHeaders);
+      assert.equal(headers.get('x-csrf-token'), 'csrf-cancel');
+    });
+
+    it('encodes special characters in conversation and turn IDs', async () => {
+      let capturedUrl = '';
+      const client = buildClient(async (input) => {
+        capturedUrl = stringifyInput(input);
+        return jsonResponse({ success: true, turn: turnFixture({ status: 'cancelled' }) });
+      });
+
+      await client.cancelTurn('conv/special', 'turn&special');
+      assert.ok(capturedUrl.includes(encodeURIComponent('conv/special')));
+      assert.ok(capturedUrl.includes(encodeURIComponent('turn&special')));
+    });
+
+    it('throws GatewayRequestError on 409 conflict (turn already completed)', async () => {
+      const errBody = gatewayErrorFixture({
+        code: 'CONFLICT',
+        category: 'validation',
+        message: 'Turn already completed',
+      });
+      const client = buildClient(async () => errorResponse(errBody, 409));
+
+      await assert.rejects(
+        () => client.cancelTurn('conv-1', 'turn-1'),
+        (err: unknown) => {
+          const gErr = assertGatewayError(err);
+          assert.equal(gErr.status, 409);
+          assert.equal(gErr.gatewayError.code, 'CONFLICT');
+          return true;
+        },
+      );
+    });
+
+    it('throws GatewayRequestError on 404 when turn not found', async () => {
+      const errBody = gatewayErrorFixture({
+        code: 'NOT_FOUND',
+        message: 'Turn not found',
+      });
+      const client = buildClient(async () => errorResponse(errBody, 404));
+
+      await assert.rejects(
+        () => client.cancelTurn('conv-1', 'turn-missing'),
+        (err: unknown) => {
+          const gErr = assertGatewayError(err);
+          assert.equal(gErr.status, 404);
+          return true;
+        },
+      );
+    });
+  });
+
+  // ── retryTurn ─────────────────────────────────────────────────────────
+
+  describe('retryTurn', () => {
+    it('sends POST to /conversations/:convId/turns/:turnId/retry and returns new turn + streamId', async () => {
+      const retriedTurn = turnFixture({ id: 'turn-2', status: 'submitted' });
+      const responseBody = { turn: retriedTurn, streamId: 'stream-retry-1' };
+      let capturedUrl = '';
+      let capturedMethod = '';
+
+      const client = buildClient(async (input, init) => {
+        capturedUrl = stringifyInput(input);
+        capturedMethod = init?.method ?? '';
+        return jsonResponse(responseBody);
+      });
+
+      const result = await client.retryTurn('conv-1', 'turn-1');
+
+      assert.ok(capturedUrl.endsWith('/conversations/conv-1/turns/turn-1/retry'));
+      assert.equal(capturedMethod, 'POST');
+      assert.equal(result.turn.id, 'turn-2');
+      assert.equal(result.streamId, 'stream-retry-1');
+    });
+
+    it('includes CSRF token on POST', async () => {
+      let capturedHeaders: CapturedHeaders;
+
+      const client = buildClient(
+        async (_input, init) => {
+          capturedHeaders = init?.headers;
+          return jsonResponse({
+            turn: turnFixture({ id: 'turn-2', status: 'submitted' }),
+            streamId: 'stream-retry',
+          });
+        },
+        { getCsrfToken: () => 'csrf-retry' },
+      );
+
+      await client.retryTurn('conv-1', 'turn-1');
+
+      const headers = new Headers(capturedHeaders);
+      assert.equal(headers.get('x-csrf-token'), 'csrf-retry');
+    });
+
+    it('encodes special characters in conversation and turn IDs', async () => {
+      let capturedUrl = '';
+      const client = buildClient(async (input) => {
+        capturedUrl = stringifyInput(input);
+        return jsonResponse({
+          turn: turnFixture({ status: 'submitted' }),
+          streamId: 'stream-1',
+        });
+      });
+
+      await client.retryTurn('conv/special', 'turn&special');
+      assert.ok(capturedUrl.includes(encodeURIComponent('conv/special')));
+      assert.ok(capturedUrl.includes(encodeURIComponent('turn&special')));
+    });
+
+    it('throws GatewayRequestError on 409 when turn is not retryable', async () => {
+      const errBody = gatewayErrorFixture({
+        code: 'CONFLICT',
+        category: 'validation',
+        message: 'Turn is not in a retryable state',
+      });
+      const client = buildClient(async () => errorResponse(errBody, 409));
+
+      await assert.rejects(
+        () => client.retryTurn('conv-1', 'turn-1'),
+        (err: unknown) => {
+          const gErr = assertGatewayError(err);
+          assert.equal(gErr.status, 409);
+          assert.equal(gErr.gatewayError.code, 'CONFLICT');
+          return true;
+        },
+      );
+    });
+
+    it('throws GatewayRequestError on 404 when turn not found', async () => {
+      const errBody = gatewayErrorFixture();
+      const client = buildClient(async () => errorResponse(errBody, 404));
+
+      await assert.rejects(
+        () => client.retryTurn('conv-1', 'turn-missing'),
+        (err: unknown) => {
+          const gErr = assertGatewayError(err);
+          assert.equal(gErr.status, 404);
+          return true;
+        },
+      );
+    });
+  });
+
+  // ── branchConversation ────────────────────────────────────────────────
+
+  describe('branchConversation', () => {
+    it('sends POST to /conversations with parentConversationId + forkPointTurnId', async () => {
+      const forkedConv = conversationFixture({ id: 'conv-forked' });
+      let capturedUrl = '';
+      let capturedMethod = '';
+      let capturedBody = '';
+
+      const client = buildClient(async (input, init) => {
+        capturedUrl = stringifyInput(input);
+        capturedMethod = init?.method ?? '';
+        capturedBody = (init?.body as string) ?? '';
+        return jsonResponse(forkedConv);
+      });
+
+      const result = await client.branchConversation('conv-1', 'turn-3');
+
+      assert.ok(capturedUrl.endsWith('/conversations'));
+      assert.equal(capturedMethod, 'POST');
+      const parsed = JSON.parse(capturedBody);
+      assert.equal(parsed.parentConversationId, 'conv-1');
+      assert.equal(parsed.forkPointTurnId, 'turn-3');
+      assert.equal(result.id, 'conv-forked');
+    });
+
+    it('passes optional title through to create body', async () => {
+      let capturedBody = '';
+      const client = buildClient(async (_input, init) => {
+        capturedBody = (init?.body as string) ?? '';
+        return jsonResponse(conversationFixture({ id: 'conv-forked' }));
+      });
+
+      await client.branchConversation('conv-1', 'turn-3', { title: 'Branch from turn 3' });
+
+      const parsed = JSON.parse(capturedBody);
+      assert.equal(parsed.parentConversationId, 'conv-1');
+      assert.equal(parsed.forkPointTurnId, 'turn-3');
+      assert.equal(parsed.title, 'Branch from turn 3');
+    });
+
+    it('includes CSRF token on POST', async () => {
+      let capturedHeaders: CapturedHeaders;
+
+      const client = buildClient(
+        async (_input, init) => {
+          capturedHeaders = init?.headers;
+          return jsonResponse(conversationFixture({ id: 'conv-forked' }));
+        },
+        { getCsrfToken: () => 'csrf-branch' },
+      );
+
+      await client.branchConversation('conv-1', 'turn-3');
+
+      const headers = new Headers(capturedHeaders);
+      assert.equal(headers.get('x-csrf-token'), 'csrf-branch');
+    });
+
+    it('throws GatewayRequestError on 404 when source conversation or turn not found', async () => {
+      const errBody = gatewayErrorFixture({
+        code: 'NOT_FOUND',
+        message: 'Source conversation not found',
+      });
+      const client = buildClient(async () => errorResponse(errBody, 404));
+
+      await assert.rejects(
+        () => client.branchConversation('conv-missing', 'turn-1'),
+        (err: unknown) => {
+          const gErr = assertGatewayError(err);
+          assert.equal(gErr.status, 404);
+          return true;
+        },
+      );
+    });
+
+    it('throws GatewayRequestError on 422 when fork point is invalid', async () => {
+      const errBody = gatewayErrorFixture({
+        code: 'INVALID_INPUT',
+        category: 'validation',
+        message: 'Fork point turn does not belong to conversation',
+      });
+      const client = buildClient(async () => errorResponse(errBody, 422));
+
+      await assert.rejects(
+        () => client.branchConversation('conv-1', 'turn-wrong'),
+        (err: unknown) => {
+          const gErr = assertGatewayError(err);
+          assert.equal(gErr.status, 422);
+          assert.equal(gErr.gatewayError.code, 'INVALID_INPUT');
+          return true;
+        },
+      );
+    });
+  });
+
+  // ── followUp ──────────────────────────────────────────────────────────
+
+  describe('followUp', () => {
+    it('sends POST to /conversations/:id/turns with instruction body (same as submitInstruction)', async () => {
+      const followUpTurn = turnFixture({ id: 'turn-follow', instruction: 'Continue with that' });
+      const responseBody = { turn: followUpTurn, streamId: 'stream-follow' };
+      let capturedUrl = '';
+      let capturedMethod = '';
+      let capturedBody = '';
+
+      const client = buildClient(async (input, init) => {
+        capturedUrl = stringifyInput(input);
+        capturedMethod = init?.method ?? '';
+        capturedBody = (init?.body as string) ?? '';
+        return jsonResponse(responseBody);
+      });
+
+      const result = await client.followUp('conv-1', { instruction: 'Continue with that' });
+
+      assert.ok(capturedUrl.endsWith('/conversations/conv-1/turns'));
+      assert.equal(capturedMethod, 'POST');
+      const parsed = JSON.parse(capturedBody);
+      assert.equal(parsed.instruction, 'Continue with that');
+      assert.equal(result.turn.id, 'turn-follow');
+      assert.equal(result.streamId, 'stream-follow');
+    });
+
+    it('passes metadata through to the body', async () => {
+      let capturedBody = '';
+      const client = buildClient(async (_input, init) => {
+        capturedBody = (init?.body as string) ?? '';
+        return jsonResponse({
+          turn: turnFixture(),
+          streamId: 'stream-1',
+        });
+      });
+
+      await client.followUp('conv-1', {
+        instruction: 'Go ahead',
+        metadata: { source: 'control-bar' },
+      });
+
+      const parsed = JSON.parse(capturedBody);
+      assert.equal(parsed.instruction, 'Go ahead');
+      assert.deepStrictEqual(parsed.metadata, { source: 'control-bar' });
+    });
+
+    it('includes CSRF token on POST', async () => {
+      let capturedHeaders: CapturedHeaders;
+
+      const client = buildClient(
+        async (_input, init) => {
+          capturedHeaders = init?.headers;
+          return jsonResponse({
+            turn: turnFixture(),
+            streamId: 'stream-1',
+          });
+        },
+        { getCsrfToken: () => 'csrf-follow' },
+      );
+
+      await client.followUp('conv-1', { instruction: 'Continue' });
+
+      const headers = new Headers(capturedHeaders);
+      assert.equal(headers.get('x-csrf-token'), 'csrf-follow');
+    });
+
+    it('throws GatewayRequestError on validation error', async () => {
+      const errBody = gatewayErrorFixture({
+        code: 'INVALID_INPUT',
+        category: 'validation',
+        message: 'Instruction cannot be empty',
+      });
+      const client = buildClient(async () => errorResponse(errBody, 422));
+
+      await assert.rejects(
+        () => client.followUp('conv-1', { instruction: '' }),
+        (err: unknown) => {
+          const gErr = assertGatewayError(err);
+          assert.equal(gErr.status, 422);
+          assert.equal(gErr.gatewayError.code, 'INVALID_INPUT');
+          return true;
+        },
+      );
     });
   });
 
