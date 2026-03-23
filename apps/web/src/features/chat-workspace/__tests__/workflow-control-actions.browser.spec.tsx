@@ -189,6 +189,7 @@ describe('retry failed turn', () => {
                 position: 2,
                 kind: 'system',
                 attribution: { type: 'agent', label: 'Claude' },
+                parentTurnId: 'turn-1',
                 status: 'executing',
                 createdAt: '2026-07-01T00:01:00.000Z',
               },
@@ -216,6 +217,7 @@ describe('retry failed turn', () => {
             position: 2,
             kind: 'system',
             attribution: { type: 'agent', label: 'Claude' },
+            parentTurnId: 'turn-1',
             status: 'executing',
             createdAt: '2026-07-01T00:01:00.000Z',
           },
@@ -265,6 +267,11 @@ describe('retry failed turn', () => {
 
     // The original failed turn's output should still be present
     expect(screen.getByText('Partial output before crash.')).toBeInTheDocument();
+
+    // Visible retry lineage remains attached to the retried turn
+    const lineageBadges = await screen.findAllByTestId('lineage-badge');
+    expect(lineageBadges.some((badge) => badge.textContent?.includes('retry'))).toBe(true);
+    expect(lineageBadges.some((badge) => badge.textContent?.includes('@turn-1'))).toBe(true);
 
     // Verify ordering — failed turn first, then retry turn
     const articles = transcriptArticles();
@@ -497,12 +504,9 @@ describe('follow-up action', () => {
       expect(submitBody).not.toBeNull();
     });
 
-    // The submit body should use the standard instruction contract
-    // and must NOT contain invented fields like parentTurnId
+    // The submit body should stay inside the standard submit contract
     expect(submitBody).toHaveProperty('instruction', 'Expand on point 2');
-    expect(submitBody).not.toHaveProperty('parentTurnId');
-    expect(submitBody).not.toHaveProperty('parentTurn');
-    expect(submitBody).not.toHaveProperty('replyToTurnId');
+    expect(Object.keys(submitBody!).sort()).toEqual(['instruction']);
 
     await vi.waitFor(() => {
       expect(listCallCount).toBeGreaterThanOrEqual(2);

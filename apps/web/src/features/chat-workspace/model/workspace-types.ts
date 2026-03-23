@@ -100,6 +100,7 @@ export interface TranscriptEntryState {
   readonly attributionLabel?: string | null;
   readonly status: string;
   readonly timestamp: string | null;
+  readonly lineageSummary?: ConversationLineageState | null;
   readonly contentBlocks: readonly ContentBlockState[];
   readonly artifacts: readonly ArtifactReferenceState[];
   readonly controls: readonly EntryControlState[];
