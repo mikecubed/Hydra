@@ -5,15 +5,30 @@ import type {
   TranscriptEntryState,
 } from '../model/workspace-store.ts';
 import { SafeText } from '../render/safe-text.tsx';
+import { LineageBadge } from './lineage-badge.tsx';
 import { PromptCard } from './prompt-card.tsx';
+import { TurnControlBar } from './turn-control-bar.tsx';
 
-export interface TranscriptTurnProps {
-  readonly entry: TranscriptEntryState;
+export interface TranscriptTurnCallbacks {
   readonly onRespondToPrompt?: (promptId: string, response: string) => void;
+  readonly onCancelTurn?: (turnId: string) => void;
+  readonly onRetryTurn?: (turnId: string) => void;
+  readonly onBranchTurn?: (turnId: string) => void;
+  readonly onFollowUpTurn?: (turnId: string) => void;
+}
+
+export interface TranscriptTurnProps extends TranscriptTurnCallbacks {
+  readonly entry: TranscriptEntryState;
+  readonly canCancel?: boolean;
+  readonly canRetry?: boolean;
+  readonly canBranch?: boolean;
+  readonly canFollowUp?: boolean;
 }
 
 const turnStyle = {
-  border: '1px solid rgba(148, 163, 184, 0.15)',
+  borderWidth: '1px',
+  borderStyle: 'solid',
+  borderColor: 'rgba(148, 163, 184, 0.15)',
   borderRadius: '0.5rem',
   background: 'rgba(30, 41, 59, 0.6)',
   padding: '0.75rem 1rem',
@@ -171,8 +186,26 @@ function resolveTurnStyle(
   return turnStyle;
 }
 
-export function TranscriptTurn({ entry, onRespondToPrompt }: TranscriptTurnProps): JSX.Element {
+function noop(): void {
+  /* no-op fallback for optional turn action callbacks */
+}
+
+// eslint-disable-next-line complexity
+export function TranscriptTurn({
+  entry,
+  onRespondToPrompt,
+  canCancel = false,
+  canRetry = false,
+  canBranch = false,
+  canFollowUp = false,
+  onCancelTurn,
+  onRetryTurn,
+  onBranchTurn,
+  onFollowUpTurn,
+}: TranscriptTurnProps): JSX.Element {
   const streaming = isStreamingStatus(entry.status);
+  const hasTurnId = entry.kind === 'turn' && entry.turnId != null;
+  const actionableTurnId = hasTurnId ? entry.turnId : null;
 
   return (
     <article
@@ -191,6 +224,7 @@ export function TranscriptTurn({ entry, onRespondToPrompt }: TranscriptTurnProps
         {entry.timestamp != null && (
           <time dateTime={entry.timestamp}>{formatTimestamp(entry.timestamp)}</time>
         )}
+        <LineageBadge lineage={entry.lineageSummary ?? null} />
       </header>
 
       {entry.contentBlocks.length > 0 && (
@@ -204,6 +238,20 @@ export function TranscriptTurn({ entry, onRespondToPrompt }: TranscriptTurnProps
       <ArtifactList artifacts={entry.artifacts} />
 
       {entry.prompt != null && <PromptCard prompt={entry.prompt} onRespond={onRespondToPrompt} />}
+
+      {actionableTurnId != null && (
+        <TurnControlBar
+          turnId={actionableTurnId}
+          canCancel={canCancel}
+          canRetry={canRetry}
+          canBranch={canBranch}
+          canFollowUp={canFollowUp}
+          onCancel={onCancelTurn ?? noop}
+          onRetry={onRetryTurn ?? noop}
+          onBranch={onBranchTurn ?? noop}
+          onFollowUp={onFollowUpTurn ?? noop}
+        />
+      )}
     </article>
   );
 }

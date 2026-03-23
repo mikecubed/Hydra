@@ -1,14 +1,27 @@
 import type { JSX } from 'react';
 import type { ConversationLoadState, TranscriptEntryState } from '../model/workspace-store.ts';
+import type { TranscriptTurnCallbacks } from './transcript-turn.tsx';
 import { TranscriptTurn } from './transcript-turn.tsx';
 
-export interface TranscriptPaneProps {
+/** Per-entry eligibility flags computed by the parent from selectors. */
+export interface EntryActionFlags {
+  readonly canCancel: boolean;
+  readonly canRetry: boolean;
+  readonly canBranch: boolean;
+  readonly canFollowUp: boolean;
+}
+
+export interface TranscriptPaneProps extends TranscriptTurnCallbacks {
   readonly entries: readonly TranscriptEntryState[];
   readonly loadState: ConversationLoadState | null;
   readonly hasActiveConversation: boolean;
   readonly hasMoreHistory?: boolean;
   readonly onRetry?: () => void;
-  readonly onRespondToPrompt?: (promptId: string, response: string) => void;
+  /**
+   * Resolve per-entry turn action flags. The parent computes eligibility
+   * from store selectors so the pane stays pure.
+   */
+  readonly resolveEntryActions?: (entry: TranscriptEntryState) => EntryActionFlags;
 }
 
 const paneStyle = {
@@ -22,6 +35,14 @@ const emptyStyle = {
   color: '#94a3b8',
 } as const;
 
+const NO_ACTIONS: EntryActionFlags = {
+  canCancel: false,
+  canRetry: false,
+  canBranch: false,
+  canFollowUp: false,
+};
+
+// eslint-disable-next-line max-lines-per-function
 export function TranscriptPane({
   entries,
   loadState,
@@ -29,6 +50,11 @@ export function TranscriptPane({
   hasMoreHistory = false,
   onRetry,
   onRespondToPrompt,
+  onCancelTurn,
+  onRetryTurn,
+  onBranchTurn,
+  onFollowUpTurn,
+  resolveEntryActions,
 }: TranscriptPaneProps): JSX.Element {
   if (!hasActiveConversation) {
     return (
@@ -89,9 +115,24 @@ export function TranscriptPane({
           Showing the most recent transcript entries. Older history is not loaded yet.
         </p>
       )}
-      {entries.map((entry) => (
-        <TranscriptTurn key={entry.entryId} entry={entry} onRespondToPrompt={onRespondToPrompt} />
-      ))}
+      {entries.map((entry) => {
+        const flags = resolveEntryActions?.(entry) ?? NO_ACTIONS;
+        return (
+          <TranscriptTurn
+            key={entry.entryId}
+            entry={entry}
+            onRespondToPrompt={onRespondToPrompt}
+            canCancel={flags.canCancel}
+            canRetry={flags.canRetry}
+            canBranch={flags.canBranch}
+            canFollowUp={flags.canFollowUp}
+            onCancelTurn={onCancelTurn}
+            onRetryTurn={onRetryTurn}
+            onBranchTurn={onBranchTurn}
+            onFollowUpTurn={onFollowUpTurn}
+          />
+        );
+      })}
     </div>
   );
 }

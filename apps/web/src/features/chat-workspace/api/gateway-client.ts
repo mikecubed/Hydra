@@ -20,6 +20,8 @@ import type {
   SubmitInstructionResponse,
   GetPendingApprovalsResponse,
   RespondToApprovalResponse,
+  CancelWorkResponse,
+  RetryTurnResponse,
 } from '@hydra/web-contracts';
 
 import {
@@ -52,6 +54,17 @@ export interface RespondToApprovalBody {
   readonly acknowledgeStaleness?: boolean;
 }
 
+/** Options for branchConversation — only title is supported. */
+export interface BranchConversationOptions {
+  readonly title?: string;
+}
+
+/** Body for followUp — a thin helper over the normal submit contract. */
+export interface FollowUpBody {
+  readonly instruction: string;
+  readonly metadata?: Record<string, unknown>;
+}
+
 export interface GatewayClient {
   listConversations(params?: Partial<ListConversationsRequest>): Promise<ListConversationsResponse>;
   openConversation(conversationId: string): Promise<OpenConversationResponse>;
@@ -66,6 +79,14 @@ export interface GatewayClient {
     approvalId: string,
     body: RespondToApprovalBody,
   ): Promise<RespondToApprovalResponse>;
+  cancelTurn(conversationId: string, turnId: string): Promise<CancelWorkResponse>;
+  retryTurn(conversationId: string, turnId: string): Promise<RetryTurnResponse>;
+  branchConversation(
+    conversationId: string,
+    forkPointTurnId: string,
+    options?: BranchConversationOptions,
+  ): Promise<CreateConversationResponse>;
+  followUp(conversationId: string, body: FollowUpBody): Promise<SubmitInstructionResponse>;
 }
 
 // ─── Error class ────────────────────────────────────────────────────────────
@@ -255,6 +276,7 @@ async function fetchQueryJson<T>(
 
 // ─── Factory ────────────────────────────────────────────────────────────────
 
+// eslint-disable-next-line max-lines-per-function
 export function createGatewayClient(options: GatewayClientOptions): GatewayClient {
   const { baseUrl } = options;
   const fetchFn = options.fetch ?? globalThis.fetch;
@@ -327,6 +349,50 @@ export function createGatewayClient(options: GatewayClientOptions): GatewayClien
         baseUrl,
         getCsrfToken,
         `/approvals/${encodeURIComponent(approvalId)}/respond`,
+        body,
+      );
+    },
+
+    async cancelTurn(conversationId, turnId) {
+      return postJson<CancelWorkResponse>(
+        fetchFn,
+        baseUrl,
+        getCsrfToken,
+        `/conversations/${encodeURIComponent(conversationId)}/turns/${encodeURIComponent(turnId)}/cancel`,
+        {},
+      );
+    },
+
+    async retryTurn(conversationId, turnId) {
+      return postJson<RetryTurnResponse>(
+        fetchFn,
+        baseUrl,
+        getCsrfToken,
+        `/conversations/${encodeURIComponent(conversationId)}/turns/${encodeURIComponent(turnId)}/retry`,
+        {},
+      );
+    },
+
+    async branchConversation(conversationId, forkPointTurnId, branchOptions) {
+      return postJson<CreateConversationResponse>(
+        fetchFn,
+        baseUrl,
+        getCsrfToken,
+        '/conversations',
+        {
+          parentConversationId: conversationId,
+          forkPointTurnId,
+          ...branchOptions,
+        },
+      );
+    },
+
+    async followUp(conversationId, body) {
+      return postJson<SubmitInstructionResponse>(
+        fetchFn,
+        baseUrl,
+        getCsrfToken,
+        `/conversations/${encodeURIComponent(conversationId)}/turns`,
         body,
       );
     },

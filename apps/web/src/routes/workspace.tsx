@@ -41,6 +41,7 @@ import {
   type WorkspaceState,
   type WorkspaceStore,
 } from '../features/chat-workspace/model/workspace-store.ts';
+import { mergeAuthoritativeEntries } from '../features/chat-workspace/model/reconciler.ts';
 import { sealSubscriptionAfterMerge } from '../features/chat-workspace/model/stream-subscription.ts';
 import {
   pickBestApprovalPerTurn,
@@ -53,9 +54,11 @@ import {
   selectActiveEntries,
   selectActiveLoadState,
   selectCanSubmit,
+  selectEntryActionFlags,
   selectConversationList,
   selectCreateModeCanSubmit,
 } from '../features/chat-workspace/model/selectors.ts';
+import type { EntryActionFlags } from '../features/chat-workspace/components/transcript-pane.tsx';
 import {
   resolveResponseLabel,
   respondToPrompt,
@@ -589,6 +592,14 @@ function toTranscriptEntry(turn: Turn): TranscriptEntryState {
     attributionLabel: turn.attribution.label,
     status: turn.status,
     timestamp: turn.completedAt ?? turn.createdAt,
+    lineageSummary:
+      turn.parentTurnId == null
+        ? null
+        : {
+            sourceConversationId: null,
+            sourceTurnId: turn.parentTurnId,
+            relationshipKind: 'retry',
+          },
     contentBlocks: toContentBlocks(turn),
     artifacts: [],
     controls: [],
@@ -834,6 +845,23 @@ function useTranscriptLoader(
   }, []);
 }
 
+function clearFollowUpPolicyLabel(store: WorkspaceStore, conversationId: string): void {
+  const conversation = store.getState().conversations.get(conversationId);
+  if (conversation == null) {
+    return;
+  }
+
+  if (!conversation.controlState.submissionPolicyLabel.startsWith('Follow-up to turn ')) {
+    return;
+  }
+
+  store.dispatch({
+    type: 'conversation/update-control-state',
+    conversationId,
+    patch: { submissionPolicyLabel: 'Ready for operator input' },
+  });
+}
+
 // eslint-disable-next-line max-lines-per-function
 function useComposerProps(
   store: WorkspaceStore,
@@ -899,6 +927,7 @@ function useComposerProps(
 
     void submitComposerDraft({ store, client }).then((result) => {
       if (result.ok) {
+        clearFollowUpPolicyLabel(store, currentId);
         void reloadConversationList();
       }
     });
@@ -966,6 +995,338 @@ function usePromptResponder(store: WorkspaceStore, client: GatewayClient) {
   );
 }
 
+// ─── Turn control helpers ───────────────────────────────────────────────────
+
+/**
+ * Immediately reconcile a single turn entry in the active transcript.
+ * Replaces existing entry by turnId (cancel) or appends if new (retry).
+ */
+function reconcileTurnEntry(store: WorkspaceStore, conversationId: string, turn: Turn): void {
+  const conv = store.getState().conversations.get(conversationId);
+  if (conv == null) return;
+
+  const entry = toTranscriptEntry(turn);
+  const hasCanonicalTurn = conv.entries.some(
+    (existing) => existing.kind === 'turn' && existing.turnId === entry.turnId,
+  );
+  const entries = hasCanonicalTurn
+    ? conv.entries.map((existing) =>
+        existing.kind === 'turn' && existing.turnId === entry.turnId ? entry : existing,
+      )
+    : [...conv.entries, entry];
+
+  store.dispatch({
+    type: 'conversation/replace-entries',
+    conversationId,
+    entries: mergeAuthoritativeEntries(entries, conv.entries),
+    hasMoreHistory: conv.hasMoreHistory,
+  });
+}
+
+/**
+ * Full authoritative transcript reload from the server.
+ * Fire-and-forget — failures are logged but do not propagate.
+ */
+async function reconcileActiveTranscript(
+  client: GatewayClient,
+  store: WorkspaceStore,
+  conversationId: string,
+  sealAfterMerge: SealAfterMergeFn,
+): Promise<void> {
+  try {
+    const response = await client.loadHistory(conversationId, { limit: 50 });
+    const entries = response.turns.map(toTranscriptEntry);
+    store.dispatch({
+      type: 'conversation/merge-history',
+      conversationId,
+      entries,
+      hasMoreHistory: response.hasMore,
+    });
+    sealAfterMerge(conversationId, entries);
+  } catch (err: unknown) {
+    console.warn('[turn-action] Background transcript reconciliation failed:', err);
+  }
+}
+
+// ─── Turn control action hooks ──────────────────────────────────────────────
+
+// eslint-disable-next-line max-lines-per-function
+function useTurnActions(
+  store: WorkspaceStore,
+  client: GatewayClient,
+  reloadConversationList: () => Promise<void>,
+  sealAfterMerge: SealAfterMergeFn,
+) {
+  const pendingTurnActionIdsRef = useRef<ReadonlySet<string>>(new Set());
+  const [pendingTurnActionIds, setPendingTurnActionIds] = useState<ReadonlySet<string>>(
+    () => new Set(),
+  );
+
+  const tryMarkTurnActionPending = useCallback((turnId: string): boolean => {
+    if (pendingTurnActionIdsRef.current.has(turnId)) {
+      return false;
+    }
+
+    const nextPending = new Set(pendingTurnActionIdsRef.current);
+    nextPending.add(turnId);
+    pendingTurnActionIdsRef.current = nextPending;
+    setPendingTurnActionIds(nextPending);
+    return true;
+  }, []);
+
+  const clearTurnActionPending = useCallback((turnId: string): void => {
+    if (!pendingTurnActionIdsRef.current.has(turnId)) {
+      return;
+    }
+
+    const nextPending = new Set(pendingTurnActionIdsRef.current);
+    nextPending.delete(turnId);
+    pendingTurnActionIdsRef.current = nextPending;
+    setPendingTurnActionIds(nextPending);
+  }, []);
+
+  const handleCancel = useCallback(
+    (turnId: string) => {
+      if (!tryMarkTurnActionPending(turnId)) {
+        return;
+      }
+
+      const conversationId = store.getState().activeConversationId;
+      if (conversationId == null) {
+        clearTurnActionPending(turnId);
+        return;
+      }
+
+      const prevControlState = store.getState().conversations.get(conversationId)?.controlState ?? {
+        canSubmit: true,
+        submissionPolicyLabel: 'Ready for operator input',
+        staleReason: null,
+      };
+
+      store.dispatch({
+        type: 'conversation/update-control-state',
+        conversationId,
+        patch: { canSubmit: false, submissionPolicyLabel: 'Cancelling…' },
+      });
+
+      void (async () => {
+        try {
+          const response = await client.cancelTurn(conversationId, turnId);
+
+          // Immediately reconcile the cancelled turn from authoritative response
+          reconcileTurnEntry(store, conversationId, response.turn);
+
+          // Seal the cancelled turn now so late websocket frames are rejected
+          // by isStaleEvent before the background reconcile finishes.
+          sealAfterMerge(conversationId, [toTranscriptEntry(response.turn)]);
+
+          // Full authoritative transcript reload in background
+          void reconcileActiveTranscript(client, store, conversationId, sealAfterMerge);
+          void reloadConversationList();
+
+          // Derive post-cancel state: conversation is ready for new input
+          store.dispatch({
+            type: 'conversation/update-control-state',
+            conversationId,
+            patch: {
+              canSubmit: true,
+              submissionPolicyLabel: 'Ready for operator input',
+              staleReason: null,
+            },
+          });
+        } catch (err: unknown) {
+          console.error('[turn-action] Cancel failed:', err);
+          // Restore previous authoritative control state on failure
+          store.dispatch({
+            type: 'conversation/update-control-state',
+            conversationId,
+            patch: prevControlState,
+          });
+        } finally {
+          clearTurnActionPending(turnId);
+        }
+      })();
+    },
+    [
+      clearTurnActionPending,
+      client,
+      reloadConversationList,
+      sealAfterMerge,
+      store,
+      tryMarkTurnActionPending,
+    ],
+  );
+
+  const handleRetry = useCallback(
+    (turnId: string) => {
+      if (!tryMarkTurnActionPending(turnId)) {
+        return;
+      }
+
+      const conversationId = store.getState().activeConversationId;
+      if (conversationId == null) {
+        clearTurnActionPending(turnId);
+        return;
+      }
+
+      const prevControlState = store.getState().conversations.get(conversationId)?.controlState ?? {
+        canSubmit: true,
+        submissionPolicyLabel: 'Ready for operator input',
+        staleReason: null,
+      };
+
+      store.dispatch({
+        type: 'conversation/update-control-state',
+        conversationId,
+        patch: { canSubmit: false, submissionPolicyLabel: 'Retrying…' },
+      });
+
+      void (async () => {
+        try {
+          const response = await client.retryTurn(conversationId, turnId);
+
+          // Immediately reconcile the new retry turn from authoritative response
+          reconcileTurnEntry(store, conversationId, response.turn);
+
+          // Full authoritative transcript reload in background
+          void reconcileActiveTranscript(client, store, conversationId, sealAfterMerge);
+          void reloadConversationList();
+
+          // Derive post-retry state: conversation is ready for new input
+          store.dispatch({
+            type: 'conversation/update-control-state',
+            conversationId,
+            patch: {
+              canSubmit: true,
+              submissionPolicyLabel: 'Ready for operator input',
+              staleReason: null,
+            },
+          });
+        } catch (err: unknown) {
+          console.error('[turn-action] Retry failed:', err);
+          // Restore previous authoritative control state on failure
+          store.dispatch({
+            type: 'conversation/update-control-state',
+            conversationId,
+            patch: prevControlState,
+          });
+        } finally {
+          clearTurnActionPending(turnId);
+        }
+      })();
+    },
+    [
+      clearTurnActionPending,
+      client,
+      reloadConversationList,
+      sealAfterMerge,
+      store,
+      tryMarkTurnActionPending,
+    ],
+  );
+
+  const handleBranch = useCallback(
+    (turnId: string) => {
+      if (!tryMarkTurnActionPending(turnId)) {
+        return;
+      }
+
+      const conversationId = store.getState().activeConversationId;
+      if (conversationId == null) {
+        clearTurnActionPending(turnId);
+        return;
+      }
+
+      void (async () => {
+        try {
+          const result = await client.branchConversation(conversationId, turnId);
+          // Select the newly created branch conversation
+          store.dispatch({
+            type: 'conversation/upsert',
+            conversation: {
+              id: result.id,
+              title: result.title,
+              status: result.status,
+              createdAt: result.createdAt,
+              updatedAt: result.updatedAt,
+              parentConversationId: conversationId,
+              forkPointTurnId: turnId,
+            },
+          });
+          store.dispatch({
+            type: 'conversation/select',
+            conversationId: result.id,
+          });
+          void reloadConversationList();
+        } catch (err: unknown) {
+          console.error('[turn-action] Branch failed:', err);
+        } finally {
+          clearTurnActionPending(turnId);
+        }
+      })();
+    },
+    [clearTurnActionPending, client, reloadConversationList, store, tryMarkTurnActionPending],
+  );
+
+  const handleFollowUp = useCallback(
+    (turnId: string) => {
+      const conversationId = store.getState().activeConversationId;
+      if (conversationId == null) return;
+
+      // Surface follow-up context in the composer policy label
+      store.dispatch({
+        type: 'conversation/update-control-state',
+        conversationId,
+        patch: { submissionPolicyLabel: `Follow-up to turn ${turnId}` },
+      });
+
+      // Ensure the draft exists for this conversation (no-op if already present)
+      store.dispatch({
+        type: 'draft/set-text',
+        conversationId,
+        draftText: store.getState().drafts.get(conversationId)?.draftText ?? '',
+      });
+
+      // Focus the composer textarea programmatically
+      queueMicrotask(() => {
+        const composerEl = document.getElementById('composer-instruction');
+        if (composerEl instanceof HTMLTextAreaElement) {
+          if (typeof composerEl.scrollIntoView === 'function') {
+            composerEl.scrollIntoView({ block: 'nearest' });
+          }
+          composerEl.focus();
+          composerEl.setSelectionRange(composerEl.value.length, composerEl.value.length);
+        }
+      });
+    },
+    [store],
+  );
+
+  const resolveEntryActions = useCallback(
+    (entry: { readonly turnId: string | null; readonly kind: string }): EntryActionFlags => {
+      if (entry.kind !== 'turn' || entry.turnId == null) {
+        return { canCancel: false, canRetry: false, canBranch: false, canFollowUp: false };
+      }
+
+      if (pendingTurnActionIds.has(entry.turnId)) {
+        return { canCancel: false, canRetry: false, canBranch: false, canFollowUp: false };
+      }
+
+      return selectEntryActionFlags(store.getState(), entry.turnId);
+    },
+    [pendingTurnActionIds, store],
+  );
+
+  return {
+    handleCancel,
+    handleRetry,
+    handleBranch,
+    handleFollowUp,
+    resolveEntryActions,
+  };
+}
+
+// eslint-disable-next-line max-lines-per-function
 export function WorkspaceRoute(): JSX.Element {
   const [store] = useState(() => createWorkspaceStore());
   const state = useWorkspaceState(store);
@@ -1011,6 +1372,7 @@ export function WorkspaceRoute(): JSX.Element {
     reloadConversationList,
   );
   const handleRespondToPrompt = usePromptResponder(store, client);
+  const turnActions = useTurnActions(store, client, reloadConversationList, sealAfterMerge);
 
   return (
     <ConnectionStateContext.Provider value={state.connection}>
@@ -1036,6 +1398,11 @@ export function WorkspaceRoute(): JSX.Element {
         }}
         onRetryActiveTranscript={retryActiveTranscript}
         onRespondToPrompt={handleRespondToPrompt}
+        onCancelTurn={turnActions.handleCancel}
+        onRetryTurn={turnActions.handleRetry}
+        onBranchTurn={turnActions.handleBranch}
+        onFollowUpTurn={turnActions.handleFollowUp}
+        resolveEntryActions={turnActions.resolveEntryActions}
         composerSlot={
           <ComposerPanel
             draftText={composer.draftText}

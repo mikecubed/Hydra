@@ -1569,21 +1569,30 @@ describe('mergeAuthoritativeEntries', () => {
     assert.equal(result[0].prompt?.promptId, 'p1');
   });
 
-  it('preserves stream controls for completed turns in both REST and stream', () => {
+  it('drops stale cancel controls but preserves other terminal controls', () => {
     const rest = [
-      makeEntry({ entryId: 'turn-a', turnId: 'turn-a', status: 'completed', controls: [] }),
+      makeEntry({
+        entryId: 'turn-a',
+        turnId: 'turn-a',
+        status: 'completed',
+        controls: [{ controlId: 'c-branch', kind: 'branch', enabled: true, reasonDisabled: null }],
+      }),
     ];
     const current = [
       makeEntry({
         entryId: 'turn-a',
         turnId: 'turn-a',
         status: 'completed',
-        controls: [{ controlId: 'c1', kind: 'retry', enabled: true, reasonDisabled: null }],
+        controls: [
+          { controlId: 'c-cancel', kind: 'cancel', enabled: true, reasonDisabled: null },
+          { controlId: 'c-retry', kind: 'retry', enabled: false, reasonDisabled: 'not allowed' },
+        ],
       }),
     ];
     const result = mergeAuthoritativeEntries(rest, current);
-    assert.equal(result[0].controls.length, 1);
-    assert.equal(result[0].controls[0].controlId, 'c1');
+    assert.equal(result[0].controls.length, 2);
+    assert.equal(result[0].controls[0].controlId, 'c-retry');
+    assert.equal(result[0].controls[1].controlId, 'c-branch');
   });
 
   it('uses REST content and status for turns in both REST and stream', () => {

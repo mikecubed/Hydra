@@ -1,6 +1,9 @@
 import type { JSX } from 'react';
 import { ConversationList } from './conversation-list.tsx';
+import { LineageBadge } from './lineage-badge.tsx';
 import { TranscriptPane } from './transcript-pane.tsx';
+import type { EntryActionFlags } from './transcript-pane.tsx';
+import type { TranscriptTurnCallbacks } from './transcript-turn.tsx';
 import type {
   ConversationLoadState,
   ConversationViewState,
@@ -14,7 +17,7 @@ const panelStyle = {
   padding: '1rem',
 } as const;
 
-export interface WorkspaceLayoutProps {
+export interface WorkspaceLayoutProps extends TranscriptTurnCallbacks {
   readonly conversations: readonly ConversationViewState[];
   readonly activeConversationId: string | null;
   readonly activeConversation: ConversationViewState | undefined;
@@ -26,10 +29,11 @@ export interface WorkspaceLayoutProps {
   readonly onSelectConversation: (conversationId: string) => void;
   readonly onStartNewConversation: () => void;
   readonly onRetryActiveTranscript: () => void;
-  readonly onRespondToPrompt?: (promptId: string, response: string) => void;
+  readonly resolveEntryActions?: (entry: TranscriptEntryState) => EntryActionFlags;
   readonly composerSlot?: JSX.Element | null;
 }
 
+// eslint-disable-next-line max-lines-per-function
 export function WorkspaceLayout({
   conversations,
   activeConversationId,
@@ -43,6 +47,11 @@ export function WorkspaceLayout({
   onStartNewConversation,
   onRetryActiveTranscript,
   onRespondToPrompt,
+  onCancelTurn,
+  onRetryTurn,
+  onBranchTurn,
+  onFollowUpTurn,
+  resolveEntryActions,
   composerSlot,
 }: WorkspaceLayoutProps): JSX.Element {
   return (
@@ -87,9 +96,23 @@ export function WorkspaceLayout({
             <h3 id="workspace-transcript-heading" style={{ marginTop: 0 }}>
               Transcript
             </h3>
-            <p style={{ lineHeight: 1.6, marginBottom: '0.75rem' }}>
-              Active conversation: {activeConversation?.title ?? 'No conversation selected'}
-            </p>
+            <div
+              style={{
+                lineHeight: 1.6,
+                marginBottom: '0.75rem',
+                display: 'flex',
+                alignItems: 'center',
+                gap: '0.5rem',
+                flexWrap: 'wrap',
+              }}
+            >
+              <span>
+                Active conversation: {activeConversation?.title ?? 'No conversation selected'}
+              </span>
+              {activeConversation != null && (
+                <LineageBadge lineage={activeConversation.lineageSummary} />
+              )}
+            </div>
             <TranscriptPane
               entries={activeEntries}
               loadState={activeLoadState}
@@ -97,6 +120,11 @@ export function WorkspaceLayout({
               hasMoreHistory={activeHasMoreHistory}
               onRetry={onRetryActiveTranscript}
               onRespondToPrompt={onRespondToPrompt}
+              onCancelTurn={onCancelTurn}
+              onRetryTurn={onRetryTurn}
+              onBranchTurn={onBranchTurn}
+              onFollowUpTurn={onFollowUpTurn}
+              resolveEntryActions={resolveEntryActions}
             />
           </section>
 

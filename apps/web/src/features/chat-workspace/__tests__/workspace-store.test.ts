@@ -1355,3 +1355,391 @@ describe('conversation/append-submit-turn reducer', () => {
     assert.equal(state.conversations.get('conv-1')?.entries.length, 1);
   });
 });
+
+// ─── conversation/update-control-state ──────────────────────────────────────
+
+describe('conversation/update-control-state', () => {
+  it('patches canSubmit on the target conversation', () => {
+    let state = createInitialWorkspaceState();
+    state = reduceWorkspaceState(state, {
+      type: 'conversation/select',
+      conversationId: 'conv-1',
+    });
+
+    const before = state.conversations.get('conv-1');
+    assert.equal(before?.controlState.canSubmit, true);
+
+    state = reduceWorkspaceState(state, {
+      type: 'conversation/update-control-state',
+      conversationId: 'conv-1',
+      patch: { canSubmit: false },
+    });
+
+    const after = state.conversations.get('conv-1');
+    assert.equal(after?.controlState.canSubmit, false);
+    // Other fields unchanged
+    assert.equal(after?.controlState.staleReason, null);
+  });
+
+  it('patches staleReason while preserving other fields', () => {
+    let state = createInitialWorkspaceState();
+    state = reduceWorkspaceState(state, {
+      type: 'conversation/select',
+      conversationId: 'conv-1',
+    });
+    state = reduceWorkspaceState(state, {
+      type: 'conversation/update-control-state',
+      conversationId: 'conv-1',
+      patch: { staleReason: 'Session expired', canSubmit: false },
+    });
+
+    const conv = state.conversations.get('conv-1');
+    assert.equal(conv?.controlState.staleReason, 'Session expired');
+    assert.equal(conv?.controlState.canSubmit, false);
+    assert.equal(conv?.controlState.submissionPolicyLabel, 'Ready for operator input');
+  });
+
+  it('patches submissionPolicyLabel', () => {
+    let state = createInitialWorkspaceState();
+    state = reduceWorkspaceState(state, {
+      type: 'conversation/select',
+      conversationId: 'conv-1',
+    });
+    state = reduceWorkspaceState(state, {
+      type: 'conversation/update-control-state',
+      conversationId: 'conv-1',
+      patch: { submissionPolicyLabel: 'Agent is busy' },
+    });
+
+    assert.equal(
+      state.conversations.get('conv-1')?.controlState.submissionPolicyLabel,
+      'Agent is busy',
+    );
+  });
+
+  it('seeds unknown conversations instead of dropping out-of-order patches', () => {
+    const state = createInitialWorkspaceState();
+    const next = reduceWorkspaceState(state, {
+      type: 'conversation/update-control-state',
+      conversationId: 'late-arriving',
+      patch: { canSubmit: false, staleReason: 'Agent busy' },
+    });
+
+    const conv = next.conversations.get('late-arriving');
+    assert.ok(conv, 'conversation must be seeded');
+    assert.equal(conv.controlState.canSubmit, false);
+    assert.equal(conv.controlState.staleReason, 'Agent busy');
+    assert.equal(conv.controlState.submissionPolicyLabel, 'Ready for operator input');
+  });
+
+  it('clears staleReason back to null', () => {
+    let state = createInitialWorkspaceState();
+    state = reduceWorkspaceState(state, {
+      type: 'conversation/select',
+      conversationId: 'conv-1',
+    });
+    state = reduceWorkspaceState(state, {
+      type: 'conversation/update-control-state',
+      conversationId: 'conv-1',
+      patch: { staleReason: 'Stale' },
+    });
+    state = reduceWorkspaceState(state, {
+      type: 'conversation/update-control-state',
+      conversationId: 'conv-1',
+      patch: { staleReason: null, canSubmit: true },
+    });
+
+    const conv = state.conversations.get('conv-1');
+    assert.equal(conv?.controlState.staleReason, null);
+    assert.equal(conv?.controlState.canSubmit, true);
+  });
+});
+
+// ─── entry/update-controls ──────────────────────────────────────────────────
+
+describe('entry/update-controls', () => {
+  it('sets controls on a matching entry', () => {
+    let state = createInitialWorkspaceState();
+    state = reduceWorkspaceState(state, {
+      type: 'conversation/select',
+      conversationId: 'conv-1',
+    });
+    state = reduceWorkspaceState(state, {
+      type: 'conversation/replace-entries',
+      conversationId: 'conv-1',
+      entries: [createEntry({ entryId: 'e1', turnId: 'turn-1' })],
+      hasMoreHistory: false,
+    });
+
+    const controls = [
+      { controlId: 'ctrl-1', kind: 'retry' as const, enabled: true, reasonDisabled: null },
+      { controlId: 'ctrl-2', kind: 'branch' as const, enabled: false, reasonDisabled: 'Not yet' },
+    ];
+
+    state = reduceWorkspaceState(state, {
+      type: 'entry/update-controls',
+      conversationId: 'conv-1',
+      entryId: 'e1',
+      controls,
+    });
+
+    const entry = state.conversations.get('conv-1')?.entries[0];
+    assert.equal(entry?.controls.length, 2);
+    assert.equal(entry?.controls[0].kind, 'retry');
+    assert.equal(entry?.controls[1].enabled, false);
+    assert.equal(entry?.controls[1].reasonDisabled, 'Not yet');
+  });
+
+  it('is a no-op when the entry does not exist', () => {
+    let state = createInitialWorkspaceState();
+    state = reduceWorkspaceState(state, {
+      type: 'conversation/select',
+      conversationId: 'conv-1',
+    });
+    state = reduceWorkspaceState(state, {
+      type: 'conversation/replace-entries',
+      conversationId: 'conv-1',
+      entries: [createEntry({ entryId: 'e1', turnId: 'turn-1' })],
+      hasMoreHistory: false,
+    });
+
+    const before = state;
+    state = reduceWorkspaceState(state, {
+      type: 'entry/update-controls',
+      conversationId: 'conv-1',
+      entryId: 'no-such',
+      controls: [{ controlId: 'c', kind: 'retry', enabled: true, reasonDisabled: null }],
+    });
+
+    assert.equal(state, before);
+  });
+
+  it('replaces existing controls entirely', () => {
+    let state = createInitialWorkspaceState();
+    state = reduceWorkspaceState(state, {
+      type: 'conversation/select',
+      conversationId: 'conv-1',
+    });
+    state = reduceWorkspaceState(state, {
+      type: 'conversation/replace-entries',
+      conversationId: 'conv-1',
+      entries: [
+        createEntry({
+          entryId: 'e1',
+          turnId: 'turn-1',
+          controls: [{ controlId: 'old-1', kind: 'cancel', enabled: true, reasonDisabled: null }],
+        }),
+      ],
+      hasMoreHistory: false,
+    });
+
+    state = reduceWorkspaceState(state, {
+      type: 'entry/update-controls',
+      conversationId: 'conv-1',
+      entryId: 'e1',
+      controls: [{ controlId: 'new-1', kind: 'retry', enabled: true, reasonDisabled: null }],
+    });
+
+    const entry = state.conversations.get('conv-1')?.entries[0];
+    assert.equal(entry?.controls.length, 1);
+    assert.equal(entry?.controls[0].controlId, 'new-1');
+  });
+});
+
+// ─── Lineage always defaults to branch (record-level lineageKind deferred to T035+) ─
+
+describe('lineage relationshipKind from record', () => {
+  it('defaults to branch when parentConversationId and forkPointTurnId are present', () => {
+    const state = reduceWorkspaceState(createInitialWorkspaceState(), {
+      type: 'conversation/upsert',
+      conversation: {
+        id: 'conv-branch',
+        parentConversationId: 'conv-root',
+        forkPointTurnId: 'turn-5',
+      },
+    });
+    assert.equal(
+      state.conversations.get('conv-branch')?.lineageSummary?.relationshipKind,
+      'branch',
+    );
+  });
+
+  it('returns null lineage when parentConversationId is missing', () => {
+    const state = reduceWorkspaceState(createInitialWorkspaceState(), {
+      type: 'conversation/upsert',
+      conversation: {
+        id: 'conv-root',
+        forkPointTurnId: 'turn-5',
+      },
+    });
+    assert.equal(state.conversations.get('conv-root')?.lineageSummary, null);
+  });
+});
+
+// ─── Transcript reconciliation after turn actions ───────────────────────────
+// Focused reducer-level tests validating the mechanisms used by handleCancel
+// and handleRetry for immediate transcript reconciliation (T035/T036).
+
+describe('transcript reconciliation after turn actions', () => {
+  it('replace-entries updates a cancelled turn status in-place', () => {
+    let state = createInitialWorkspaceState();
+    state = reduceWorkspaceState(state, {
+      type: 'conversation/upsert',
+      conversation: createConversation(),
+    });
+    state = reduceWorkspaceState(state, {
+      type: 'conversation/replace-entries',
+      conversationId: 'conv-1',
+      entries: [
+        createEntry({ entryId: 'e1', turnId: 'turn-1', status: 'streaming' }),
+        createEntry({ entryId: 'e2', turnId: 'turn-2', status: 'completed' }),
+      ],
+      hasMoreHistory: false,
+    });
+
+    // Simulate the reconcileTurnEntry helper: replace streaming → cancelled
+    const conv = state.conversations.get('conv-1');
+    assert.ok(conv);
+    const patched = conv.entries.map((e) =>
+      e.turnId === 'turn-1' ? { ...e, status: 'cancelled' } : e,
+    );
+    state = reduceWorkspaceState(state, {
+      type: 'conversation/replace-entries',
+      conversationId: 'conv-1',
+      entries: patched,
+      hasMoreHistory: false,
+    });
+
+    const updated = state.conversations.get('conv-1');
+    assert.equal(updated?.entries[0]?.status, 'cancelled');
+    assert.equal(updated?.entries[1]?.status, 'completed');
+    assert.equal(updated?.entries.length, 2);
+  });
+
+  it('replace-entries appends a new retry turn entry', () => {
+    let state = createInitialWorkspaceState();
+    state = reduceWorkspaceState(state, {
+      type: 'conversation/upsert',
+      conversation: createConversation(),
+    });
+    state = reduceWorkspaceState(state, {
+      type: 'conversation/replace-entries',
+      conversationId: 'conv-1',
+      entries: [createEntry({ entryId: 'e1', turnId: 'turn-1', status: 'failed' })],
+      hasMoreHistory: false,
+    });
+
+    // Simulate the reconcileTurnEntry helper: append new retry turn
+    const conv = state.conversations.get('conv-1');
+    assert.ok(conv);
+    const retryEntry = createEntry({ entryId: 'e2', turnId: 'turn-2', status: 'submitted' });
+    state = reduceWorkspaceState(state, {
+      type: 'conversation/replace-entries',
+      conversationId: 'conv-1',
+      entries: [...conv.entries, retryEntry],
+      hasMoreHistory: false,
+    });
+
+    const updated = state.conversations.get('conv-1');
+    assert.equal(updated?.entries.length, 2);
+    assert.equal(updated?.entries[0]?.status, 'failed');
+    assert.equal(updated?.entries[1]?.status, 'submitted');
+  });
+
+  it('merge-history reconciles a full transcript after cancel', () => {
+    let state = createInitialWorkspaceState();
+    state = reduceWorkspaceState(state, {
+      type: 'conversation/upsert',
+      conversation: createConversation(),
+    });
+    // Stream has an in-flight turn
+    state = reduceWorkspaceState(state, {
+      type: 'conversation/replace-entries',
+      conversationId: 'conv-1',
+      entries: [createEntry({ entryId: 'turn-1', turnId: 'turn-1', status: 'streaming' })],
+      hasMoreHistory: false,
+    });
+
+    // Full authoritative reload shows the turn as cancelled
+    state = reduceWorkspaceState(state, {
+      type: 'conversation/merge-history',
+      conversationId: 'conv-1',
+      entries: [createEntry({ entryId: 'turn-1', turnId: 'turn-1', status: 'cancelled' })],
+      hasMoreHistory: false,
+    });
+
+    const conv = state.conversations.get('conv-1');
+    assert.equal(conv?.entries.length, 1);
+    assert.equal(conv?.entries[0]?.status, 'cancelled');
+    assert.equal(conv?.loadState, 'ready');
+    assert.equal(conv?.historyLoaded, true);
+  });
+
+  it('control-state restore preserves previous state on failure', () => {
+    let state = createInitialWorkspaceState();
+    state = reduceWorkspaceState(state, {
+      type: 'conversation/select',
+      conversationId: 'conv-1',
+    });
+    // Set a non-default state
+    state = reduceWorkspaceState(state, {
+      type: 'conversation/update-control-state',
+      conversationId: 'conv-1',
+      patch: { canSubmit: true, submissionPolicyLabel: 'Agent idle', staleReason: null },
+    });
+
+    const prevControlState = state.conversations.get('conv-1')?.controlState;
+    assert.ok(prevControlState);
+
+    // Simulate locking during action
+    state = reduceWorkspaceState(state, {
+      type: 'conversation/update-control-state',
+      conversationId: 'conv-1',
+      patch: { canSubmit: false, submissionPolicyLabel: 'Cancelling…' },
+    });
+    assert.equal(state.conversations.get('conv-1')?.controlState.canSubmit, false);
+
+    // Simulate failure: restore previous state
+    state = reduceWorkspaceState(state, {
+      type: 'conversation/update-control-state',
+      conversationId: 'conv-1',
+      patch: prevControlState,
+    });
+
+    assert.equal(state.conversations.get('conv-1')?.controlState.canSubmit, true);
+    assert.equal(
+      state.conversations.get('conv-1')?.controlState.submissionPolicyLabel,
+      'Agent idle',
+    );
+  });
+
+  it('merge-history after retry appends new turn and preserves existing entries', () => {
+    let state = createInitialWorkspaceState();
+    state = reduceWorkspaceState(state, {
+      type: 'conversation/upsert',
+      conversation: createConversation(),
+    });
+    state = reduceWorkspaceState(state, {
+      type: 'conversation/replace-entries',
+      conversationId: 'conv-1',
+      entries: [createEntry({ entryId: 'turn-1', turnId: 'turn-1', status: 'failed' })],
+      hasMoreHistory: false,
+    });
+
+    // Full reload after retry contains both original (failed) and new retry turn
+    state = reduceWorkspaceState(state, {
+      type: 'conversation/merge-history',
+      conversationId: 'conv-1',
+      entries: [
+        createEntry({ entryId: 'turn-1', turnId: 'turn-1', status: 'failed' }),
+        createEntry({ entryId: 'turn-2', turnId: 'turn-2', status: 'submitted' }),
+      ],
+      hasMoreHistory: false,
+    });
+
+    const conv = state.conversations.get('conv-1');
+    assert.equal(conv?.entries.length, 2);
+    assert.equal(conv?.entries[0]?.status, 'failed');
+    assert.equal(conv?.entries[1]?.status, 'submitted');
+  });
+});
