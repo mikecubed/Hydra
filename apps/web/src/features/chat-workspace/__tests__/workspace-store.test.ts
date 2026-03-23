@@ -1417,15 +1417,19 @@ describe('conversation/update-control-state', () => {
     );
   });
 
-  it('is a no-op for a non-existent conversation', () => {
+  it('seeds unknown conversations instead of dropping out-of-order patches', () => {
     const state = createInitialWorkspaceState();
     const next = reduceWorkspaceState(state, {
       type: 'conversation/update-control-state',
-      conversationId: 'no-such',
-      patch: { canSubmit: false },
+      conversationId: 'late-arriving',
+      patch: { canSubmit: false, staleReason: 'Agent busy' },
     });
-    // State reference unchanged when conversation not found
-    assert.equal(next, state);
+
+    const conv = next.conversations.get('late-arriving');
+    assert.ok(conv, 'conversation must be seeded');
+    assert.equal(conv.controlState.canSubmit, false);
+    assert.equal(conv.controlState.staleReason, 'Agent busy');
+    assert.equal(conv.controlState.submissionPolicyLabel, 'Ready for operator input');
   });
 
   it('clears staleReason back to null', () => {
@@ -1571,5 +1575,173 @@ describe('lineage relationshipKind from record', () => {
       },
     });
     assert.equal(state.conversations.get('conv-root')?.lineageSummary, null);
+  });
+});
+
+// ─── Transcript reconciliation after turn actions ───────────────────────────
+// Focused reducer-level tests validating the mechanisms used by handleCancel
+// and handleRetry for immediate transcript reconciliation (T035/T036).
+
+describe('transcript reconciliation after turn actions', () => {
+  it('replace-entries updates a cancelled turn status in-place', () => {
+    let state = createInitialWorkspaceState();
+    state = reduceWorkspaceState(state, {
+      type: 'conversation/upsert',
+      conversation: createConversation(),
+    });
+    state = reduceWorkspaceState(state, {
+      type: 'conversation/replace-entries',
+      conversationId: 'conv-1',
+      entries: [
+        createEntry({ entryId: 'e1', turnId: 'turn-1', status: 'streaming' }),
+        createEntry({ entryId: 'e2', turnId: 'turn-2', status: 'completed' }),
+      ],
+      hasMoreHistory: false,
+    });
+
+    // Simulate the reconcileTurnEntry helper: replace streaming → cancelled
+    const conv = state.conversations.get('conv-1');
+    assert.ok(conv);
+    const patched = conv.entries.map((e) =>
+      e.turnId === 'turn-1' ? { ...e, status: 'cancelled' } : e,
+    );
+    state = reduceWorkspaceState(state, {
+      type: 'conversation/replace-entries',
+      conversationId: 'conv-1',
+      entries: patched,
+      hasMoreHistory: false,
+    });
+
+    const updated = state.conversations.get('conv-1');
+    assert.equal(updated?.entries[0]?.status, 'cancelled');
+    assert.equal(updated?.entries[1]?.status, 'completed');
+    assert.equal(updated?.entries.length, 2);
+  });
+
+  it('replace-entries appends a new retry turn entry', () => {
+    let state = createInitialWorkspaceState();
+    state = reduceWorkspaceState(state, {
+      type: 'conversation/upsert',
+      conversation: createConversation(),
+    });
+    state = reduceWorkspaceState(state, {
+      type: 'conversation/replace-entries',
+      conversationId: 'conv-1',
+      entries: [createEntry({ entryId: 'e1', turnId: 'turn-1', status: 'failed' })],
+      hasMoreHistory: false,
+    });
+
+    // Simulate the reconcileTurnEntry helper: append new retry turn
+    const conv = state.conversations.get('conv-1');
+    assert.ok(conv);
+    const retryEntry = createEntry({ entryId: 'e2', turnId: 'turn-2', status: 'submitted' });
+    state = reduceWorkspaceState(state, {
+      type: 'conversation/replace-entries',
+      conversationId: 'conv-1',
+      entries: [...conv.entries, retryEntry],
+      hasMoreHistory: false,
+    });
+
+    const updated = state.conversations.get('conv-1');
+    assert.equal(updated?.entries.length, 2);
+    assert.equal(updated?.entries[0]?.status, 'failed');
+    assert.equal(updated?.entries[1]?.status, 'submitted');
+  });
+
+  it('merge-history reconciles a full transcript after cancel', () => {
+    let state = createInitialWorkspaceState();
+    state = reduceWorkspaceState(state, {
+      type: 'conversation/upsert',
+      conversation: createConversation(),
+    });
+    // Stream has an in-flight turn
+    state = reduceWorkspaceState(state, {
+      type: 'conversation/replace-entries',
+      conversationId: 'conv-1',
+      entries: [createEntry({ entryId: 'turn-1', turnId: 'turn-1', status: 'streaming' })],
+      hasMoreHistory: false,
+    });
+
+    // Full authoritative reload shows the turn as cancelled
+    state = reduceWorkspaceState(state, {
+      type: 'conversation/merge-history',
+      conversationId: 'conv-1',
+      entries: [createEntry({ entryId: 'turn-1', turnId: 'turn-1', status: 'cancelled' })],
+      hasMoreHistory: false,
+    });
+
+    const conv = state.conversations.get('conv-1');
+    assert.equal(conv?.entries.length, 1);
+    assert.equal(conv?.entries[0]?.status, 'cancelled');
+    assert.equal(conv?.loadState, 'ready');
+    assert.equal(conv?.historyLoaded, true);
+  });
+
+  it('control-state restore preserves previous state on failure', () => {
+    let state = createInitialWorkspaceState();
+    state = reduceWorkspaceState(state, {
+      type: 'conversation/select',
+      conversationId: 'conv-1',
+    });
+    // Set a non-default state
+    state = reduceWorkspaceState(state, {
+      type: 'conversation/update-control-state',
+      conversationId: 'conv-1',
+      patch: { canSubmit: true, submissionPolicyLabel: 'Agent idle', staleReason: null },
+    });
+
+    const prevControlState = state.conversations.get('conv-1')?.controlState;
+    assert.ok(prevControlState);
+
+    // Simulate locking during action
+    state = reduceWorkspaceState(state, {
+      type: 'conversation/update-control-state',
+      conversationId: 'conv-1',
+      patch: { canSubmit: false, submissionPolicyLabel: 'Cancelling…' },
+    });
+    assert.equal(state.conversations.get('conv-1')?.controlState.canSubmit, false);
+
+    // Simulate failure: restore previous state
+    state = reduceWorkspaceState(state, {
+      type: 'conversation/update-control-state',
+      conversationId: 'conv-1',
+      patch: prevControlState,
+    });
+
+    assert.equal(state.conversations.get('conv-1')?.controlState.canSubmit, true);
+    assert.equal(
+      state.conversations.get('conv-1')?.controlState.submissionPolicyLabel,
+      'Agent idle',
+    );
+  });
+
+  it('merge-history after retry appends new turn and preserves existing entries', () => {
+    let state = createInitialWorkspaceState();
+    state = reduceWorkspaceState(state, {
+      type: 'conversation/upsert',
+      conversation: createConversation(),
+    });
+    state = reduceWorkspaceState(state, {
+      type: 'conversation/replace-entries',
+      conversationId: 'conv-1',
+      entries: [createEntry({ entryId: 'turn-1', turnId: 'turn-1', status: 'failed' })],
+      hasMoreHistory: false,
+    });
+
+    // Full reload after retry contains both original (failed) and new retry turn
+    state = reduceWorkspaceState(state, {
+      type: 'conversation/merge-history',
+      conversationId: 'conv-1',
+      entries: [
+        createEntry({ entryId: 'turn-1', turnId: 'turn-1', status: 'failed' }),
+        createEntry({ entryId: 'turn-2', turnId: 'turn-2', status: 'submitted' }),
+      ],
+      hasMoreHistory: false,
+    });
+
+    const conv = state.conversations.get('conv-1');
+    assert.equal(conv?.entries.length, 2);
+    assert.equal(conv?.entries[0]?.status, 'failed');
+    assert.equal(conv?.entries[1]?.status, 'submitted');
   });
 });

@@ -10,6 +10,7 @@ import {
   FakeWebSocket,
   openAndSubscribe,
   resetFakeWebSockets,
+  streamFrame,
 } from './__tests__/browser-helpers.ts';
 
 const fetchSpy = vi.fn<typeof fetch>();
@@ -852,6 +853,369 @@ describe('TranscriptPane', () => {
     render(<TranscriptPane entries={[]} loadState="error" hasActiveConversation={true} />);
 
     expect(screen.getByText('Failed to load transcript.')).toBeTruthy();
+  });
+
+  it('renders lineage for a branched conversation selected from turn controls', async () => {
+    const primaryConversation = {
+      id: 'conv-1',
+      title: 'Primary conversation',
+      status: 'active' as const,
+      createdAt: '2026-03-20T00:00:00.000Z',
+      updatedAt: '2026-03-20T12:00:00.000Z',
+      turnCount: 1,
+      pendingInstructionCount: 0,
+    };
+    const branchConversation = {
+      id: 'conv-branch',
+      title: 'Branch conversation',
+      status: 'active' as const,
+      createdAt: '2026-03-20T12:05:00.000Z',
+      updatedAt: '2026-03-20T12:05:00.000Z',
+      turnCount: 0,
+      pendingInstructionCount: 0,
+      parentConversationId: 'conv-1',
+      forkPointTurnId: 'turn-1',
+    };
+    const initialHistory: LoadTurnHistoryResponse = {
+      turns: [
+        {
+          id: 'turn-1',
+          conversationId: 'conv-1',
+          position: 1,
+          kind: 'operator',
+          attribution: { type: 'operator', label: 'Operator' },
+          instruction: 'Original branch point',
+          status: 'completed',
+          createdAt: '2026-03-20T12:00:00.000Z',
+          completedAt: '2026-03-20T12:00:10.000Z',
+        },
+      ],
+      totalCount: 1,
+      hasMore: false,
+    };
+
+    let listCalls = 0;
+    installFetchStub((url, init) => {
+      if (url === '/conversations?status=active&limit=20') {
+        listCalls += 1;
+        return new Response(
+          JSON.stringify({
+            conversations: listCalls === 1 ? [primaryConversation] : [branchConversation, primaryConversation],
+            totalCount: listCalls === 1 ? 1 : 2,
+          }),
+          {
+            status: 200,
+            headers: { 'Content-Type': 'application/json' },
+          },
+        );
+      }
+
+      if (url === '/conversations/conv-1/turns?limit=50') {
+        return new Response(JSON.stringify(initialHistory), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        });
+      }
+
+      if (url === '/conversations/conv-branch/turns?limit=50') {
+        return new Response(
+          JSON.stringify({
+            turns: [],
+            totalCount: 0,
+            hasMore: false,
+          }),
+          {
+            status: 200,
+            headers: { 'Content-Type': 'application/json' },
+          },
+        );
+      }
+
+      if (url === '/conversations/conv-1/approvals' || url === '/conversations/conv-branch/approvals') {
+        return new Response(JSON.stringify({ approvals: [] }), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        });
+      }
+
+      if (url === '/conversations' && init?.method === 'POST') {
+        return new Response(JSON.stringify(branchConversation), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        });
+      }
+
+      throw new Error(`Unexpected fetch input: ${url}`);
+    });
+
+    render(<AppProviders />);
+
+    expect(await screen.findByText('Original branch point')).toBeInTheDocument();
+
+    fireEvent.click(await screen.findByTestId('turn-action-branch'));
+
+    expect(await screen.findByText(/active conversation: branch conversation/i)).toBeInTheDocument();
+    expect(screen.getByTestId('lineage-badge')).toHaveTextContent('branch');
+    expect(screen.getByTestId('lineage-badge')).toHaveTextContent('conv-1');
+    expect(screen.getByTestId('lineage-badge')).toHaveTextContent('@turn-1');
+  });
+
+  it('focuses the composer and surfaces follow-up context from turn controls', async () => {
+    installFetchStub((url) => {
+      if (url === '/conversations?status=active&limit=20') {
+        return new Response(JSON.stringify(createSingleConversationList()), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        });
+      }
+
+      if (url === '/conversations/conv-1/turns?limit=50') {
+        return new Response(
+          JSON.stringify({
+            turns: [
+              {
+                id: 'turn-1',
+                conversationId: 'conv-1',
+                position: 1,
+                kind: 'operator',
+                attribution: { type: 'operator', label: 'Operator' },
+                instruction: 'Completed turn',
+                status: 'completed',
+                createdAt: '2026-03-20T12:00:00.000Z',
+                completedAt: '2026-03-20T12:00:10.000Z',
+              },
+            ],
+            totalCount: 1,
+            hasMore: false,
+          }),
+          {
+            status: 200,
+            headers: { 'Content-Type': 'application/json' },
+          },
+        );
+      }
+
+      if (url === '/conversations/conv-1/approvals') {
+        return new Response(JSON.stringify({ approvals: [] }), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        });
+      }
+
+      throw new Error(`Unexpected fetch input: ${url}`);
+    });
+
+    render(<AppProviders />);
+
+    expect(await screen.findByText('Completed turn')).toBeInTheDocument();
+    openAndSubscribe('conv-1');
+    const composer = screen.getByRole('textbox', { name: /instruction/i });
+    screen.getByRole('button', { name: /primary conversation/i }).focus();
+    fireEvent.click(await screen.findByTestId('turn-action-follow-up'));
+
+    await vi.waitFor(() => {
+      expect(composer).toHaveFocus();
+    });
+  });
+
+  it('reconciles the cancelled turn immediately from the control response', async () => {
+    const historyResponses: LoadTurnHistoryResponse[] = [
+      {
+        turns: [
+          {
+            id: 'turn-1',
+            conversationId: 'conv-1',
+            position: 1,
+            kind: 'system',
+            attribution: { type: 'agent', agentId: 'codex', label: 'Codex' },
+            response: 'Working on it…',
+            status: 'executing',
+            createdAt: '2026-03-20T12:00:00.000Z',
+          },
+        ],
+        totalCount: 1,
+        hasMore: false,
+      },
+      {
+        turns: [
+          {
+            id: 'turn-1',
+            conversationId: 'conv-1',
+            position: 1,
+            kind: 'system',
+            attribution: { type: 'agent', agentId: 'codex', label: 'Codex' },
+            response: 'Cancelled by operator.',
+            status: 'cancelled',
+            createdAt: '2026-03-20T12:00:00.000Z',
+            completedAt: '2026-03-20T12:00:05.000Z',
+          },
+        ],
+        totalCount: 1,
+        hasMore: false,
+      },
+    ];
+    let historyCallCount = 0;
+    let listCallCount = 0;
+
+    installFetchStub((url, init) => {
+      if (url === '/conversations?status=active&limit=20') {
+        listCallCount += 1;
+        return new Response(JSON.stringify(createSingleConversationList()), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        });
+      }
+
+      if (url === '/conversations/conv-1/turns?limit=50') {
+        const response = historyResponses[Math.min(historyCallCount, historyResponses.length - 1)];
+        historyCallCount += 1;
+        return new Response(JSON.stringify(response), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        });
+      }
+
+      if (url === '/conversations/conv-1/approvals') {
+        return new Response(JSON.stringify({ approvals: [] }), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        });
+      }
+
+      if (url === '/conversations/conv-1/turns/turn-1/cancel' && init?.method === 'POST') {
+        return new Response(
+          JSON.stringify({
+            success: true,
+            turn: historyResponses[1].turns[0],
+          }),
+          {
+            status: 200,
+            headers: { 'Content-Type': 'application/json' },
+          },
+        );
+      }
+
+      throw new Error(`Unexpected fetch input: ${url}`);
+    });
+
+    render(<AppProviders />);
+
+    expect(await screen.findByText('Working on it…')).toBeInTheDocument();
+    const ws = openAndSubscribe('conv-1');
+    ws.simulateMessage(
+      streamFrame('conv-1', 1, 'turn-1', 'stream-started', { attribution: 'Codex' }),
+    );
+
+    fireEvent.click(await screen.findByTestId('turn-action-cancel'));
+
+    expect(await screen.findByText('Cancelled by operator.')).toBeInTheDocument();
+    expect(screen.getByText('cancelled')).toBeInTheDocument();
+    await vi.waitFor(() => {
+      expect(listCallCount).toBeGreaterThanOrEqual(2);
+      expect(historyCallCount).toBeGreaterThanOrEqual(2);
+    });
+  });
+
+  it('appends the retried turn before the transcript background refresh finishes', async () => {
+    const historyResponses: LoadTurnHistoryResponse[] = [
+      {
+        turns: [
+          {
+            id: 'turn-1',
+            conversationId: 'conv-1',
+            position: 1,
+            kind: 'system',
+            attribution: { type: 'agent', agentId: 'codex', label: 'Codex' },
+            response: 'Original failure',
+            status: 'failed',
+            createdAt: '2026-03-20T12:00:00.000Z',
+            completedAt: '2026-03-20T12:00:05.000Z',
+          },
+        ],
+        totalCount: 1,
+        hasMore: false,
+      },
+      {
+        turns: [
+          {
+            id: 'turn-1',
+            conversationId: 'conv-1',
+            position: 1,
+            kind: 'system',
+            attribution: { type: 'agent', agentId: 'codex', label: 'Codex' },
+            response: 'Original failure',
+            status: 'failed',
+            createdAt: '2026-03-20T12:00:00.000Z',
+            completedAt: '2026-03-20T12:00:05.000Z',
+          },
+          {
+            id: 'turn-2',
+            conversationId: 'conv-1',
+            position: 2,
+            kind: 'operator',
+            attribution: { type: 'operator', label: 'Operator' },
+            instruction: 'Retry original request',
+            status: 'submitted',
+            createdAt: '2026-03-20T12:01:00.000Z',
+          },
+        ],
+        totalCount: 2,
+        hasMore: false,
+      },
+    ];
+    let historyCallCount = 0;
+
+    installFetchStub((url, init) => {
+      if (url === '/conversations?status=active&limit=20') {
+        return new Response(JSON.stringify(createSingleConversationList()), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        });
+      }
+
+      if (url === '/conversations/conv-1/turns?limit=50') {
+        const response = historyResponses[Math.min(historyCallCount, historyResponses.length - 1)];
+        historyCallCount += 1;
+        return new Response(JSON.stringify(response), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        });
+      }
+
+      if (url === '/conversations/conv-1/approvals') {
+        return new Response(JSON.stringify({ approvals: [] }), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        });
+      }
+
+      if (url === '/conversations/conv-1/turns/turn-1/retry' && init?.method === 'POST') {
+        return new Response(
+          JSON.stringify({
+            streamId: 'stream-2',
+            turn: historyResponses[1].turns[1],
+          }),
+          {
+            status: 200,
+            headers: { 'Content-Type': 'application/json' },
+          },
+        );
+      }
+
+      throw new Error(`Unexpected fetch input: ${url}`);
+    });
+
+    render(<AppProviders />);
+
+    expect(await screen.findByText('Original failure')).toBeInTheDocument();
+
+    fireEvent.click(await screen.findByTestId('turn-action-retry'));
+
+    expect(await screen.findByText('Retry original request')).toBeInTheDocument();
+    await vi.waitFor(() => {
+      expect(screen.getAllByRole('article')).toHaveLength(2);
+      expect(historyCallCount).toBeGreaterThanOrEqual(2);
+    });
   });
 
   // eslint-disable-next-line max-lines-per-function
