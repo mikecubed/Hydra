@@ -25,7 +25,9 @@ export interface TranscriptTurnProps extends TranscriptTurnCallbacks {
 }
 
 const turnStyle = {
-  border: '1px solid rgba(148, 163, 184, 0.15)',
+  borderWidth: '1px',
+  borderStyle: 'solid',
+  borderColor: 'rgba(148, 163, 184, 0.15)',
   borderRadius: '0.5rem',
   background: 'rgba(30, 41, 59, 0.6)',
   padding: '0.75rem 1rem',

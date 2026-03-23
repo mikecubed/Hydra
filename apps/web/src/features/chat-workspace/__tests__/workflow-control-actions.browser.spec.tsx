@@ -433,9 +433,11 @@ describe('follow-up action', () => {
 
   it('does not invent unsupported request fields when submitting follow-up', async () => {
     let submitBody: Record<string, unknown> | null = null;
+    let listCallCount = 0;
 
     installFetchStub((url, init) => {
       if (url === '/conversations?status=active&limit=20') {
+        listCallCount += 1;
         return jsonResponse({
           conversations: [conversation('conv-1', 'Follow-up submit test', { turnCount: 1 })],
           totalCount: 1,
@@ -501,5 +503,9 @@ describe('follow-up action', () => {
     expect(submitBody).not.toHaveProperty('parentTurnId');
     expect(submitBody).not.toHaveProperty('parentTurn');
     expect(submitBody).not.toHaveProperty('replyToTurnId');
+
+    await vi.waitFor(() => {
+      expect(listCallCount).toBeGreaterThanOrEqual(2);
+    });
   });
 });
