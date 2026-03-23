@@ -20,10 +20,12 @@ import {
   buildStreamCallbacks,
   createStreamSubscriptionState,
   createWorkspaceStore,
+  sealSubscriptionAfterMerge,
   type StreamSubscriptionState,
   type TranscriptEntryState,
   type WorkspaceStore,
 } from '../model/workspace-store.ts';
+import { canSubmitWork } from '../../../shared/session-state.ts';
 
 // ─── Factories ──────────────────────────────────────────────────────────────
 
@@ -273,6 +275,153 @@ describe('buildStreamCallbacks', () => {
     assert.equal(store.getState().connection.transportStatus, 'live');
   });
 
+  it('preserves degraded daemon/session state on socket open (reconnect-open race)', () => {
+    const store = storeWithConversation('conv-1');
+    store.dispatch({
+      type: 'connection/merge',
+      patch: {
+        transportStatus: 'reconnecting',
+        reconnectAttempt: 2,
+        daemonStatus: 'unavailable',
+        sessionStatus: 'expiring-soon',
+      },
+    });
+
+    const callbacks = buildStreamCallbacks(store, new Map(), () => {}, {
+      onReconnectNeeded: () => {},
+      onConnectionEstablished: () => {},
+    });
+
+    callbacks.onOpen!();
+
+    // Transport metadata resets — the socket is factually open.
+    assert.equal(store.getState().connection.transportStatus, 'live');
+    assert.equal(store.getState().connection.reconnectAttempt, 0);
+
+    // Daemon and session stay sticky until authoritative lifecycle frames.
+    assert.equal(store.getState().connection.daemonStatus, 'unavailable');
+    assert.equal(store.getState().connection.sessionStatus, 'expiring-soon');
+  });
+
+  it('daemon/session recover only via authoritative lifecycle frames after reconnect', () => {
+    const store = storeWithConversation('conv-1');
+
+    // Simulate degraded state before reconnect.
+    store.dispatch({
+      type: 'connection/merge',
+      patch: {
+        transportStatus: 'reconnecting',
+        reconnectAttempt: 1,
+        daemonStatus: 'unavailable',
+        sessionStatus: 'expiring-soon',
+      },
+    });
+
+    const callbacks = buildStreamCallbacks(store, new Map(), () => {}, {
+      onReconnectNeeded: () => {},
+      onConnectionEstablished: () => {},
+    });
+
+    // Socket opens — transport recovers, but daemon/session remain degraded.
+    callbacks.onOpen!();
+    assert.equal(store.getState().connection.transportStatus, 'live');
+    assert.equal(store.getState().connection.daemonStatus, 'unavailable');
+    assert.equal(store.getState().connection.sessionStatus, 'expiring-soon');
+
+    // Authoritative daemon-restored frame arrives → daemon healthy.
+    callbacks.onDaemonRestored!();
+    assert.equal(store.getState().connection.daemonStatus, 'healthy');
+    assert.equal(store.getState().connection.sessionStatus, 'expiring-soon');
+
+    // Authoritative session-active frame arrives → session active.
+    callbacks.onSessionActive!('2026-07-01T01:00:00.000Z');
+    assert.equal(store.getState().connection.sessionStatus, 'active');
+  });
+
+  it('reconnect after offline backend recovery clears degraded state via bootstrap frames', () => {
+    const store = storeWithConversation('conv-1');
+
+    // Simulate: browser went degraded (daemon down + session expiring), then
+    // disconnected. Backend recovered while browser was offline. Browser
+    // reconnects — the gateway will now emit session-active on fresh bind.
+    store.dispatch({
+      type: 'connection/merge',
+      patch: {
+        transportStatus: 'disconnected',
+        reconnectAttempt: 3,
+        daemonStatus: 'unavailable',
+        sessionStatus: 'expiring-soon',
+      },
+    });
+
+    const callbacks = buildStreamCallbacks(store, new Map(), () => {}, {
+      onReconnectNeeded: () => {},
+      onConnectionEstablished: () => {},
+    });
+
+    // Socket opens — transport live, but daemon/session still degraded.
+    callbacks.onOpen!();
+    assert.equal(store.getState().connection.transportStatus, 'live');
+    assert.equal(store.getState().connection.daemonStatus, 'unavailable');
+    assert.equal(store.getState().connection.sessionStatus, 'expiring-soon');
+
+    // Gateway sends bootstrap frames for an already-recovered active session.
+    callbacks.onDaemonRestored!();
+    callbacks.onSessionActive!('2026-08-01T00:00:00.000Z');
+
+    assert.equal(store.getState().connection.daemonStatus, 'healthy');
+    assert.equal(store.getState().connection.sessionStatus, 'active');
+  });
+
+  it('canSubmitWork stays false during reconnect-open window with degraded daemon', () => {
+    const store = storeWithConversation('conv-1');
+
+    // Simulate daemon-unavailable + reconnecting state.
+    store.dispatch({
+      type: 'connection/merge',
+      patch: {
+        transportStatus: 'reconnecting',
+        reconnectAttempt: 1,
+        daemonStatus: 'unavailable',
+        sessionStatus: 'active',
+      },
+    });
+
+    const callbacks = buildStreamCallbacks(store, new Map(), () => {}, {
+      onReconnectNeeded: () => {},
+      onConnectionEstablished: () => {},
+    });
+
+    // Before open — not submittable (transport not live).
+    assert.equal(canSubmitWork(store.getState().connection), false);
+
+    // Socket opens — transport live, but daemon still unavailable.
+    callbacks.onOpen!();
+    assert.equal(store.getState().connection.transportStatus, 'live');
+    assert.equal(canSubmitWork(store.getState().connection), false);
+
+    // Authoritative daemon-restored → now submittable.
+    callbacks.onDaemonRestored!();
+    assert.equal(canSubmitWork(store.getState().connection), true);
+  });
+
+  it('resets reconnectAttempt to 0 on socket open', () => {
+    const store = storeWithConversation('conv-1');
+    // Simulate a prior reconnecting state with a non-zero attempt count
+    store.dispatch({
+      type: 'connection/merge',
+      patch: { transportStatus: 'reconnecting', reconnectAttempt: 3 },
+    });
+
+    const callbacks = buildStreamCallbacks(store, new Map(), () => {}, {
+      onReconnectNeeded: () => {},
+      onConnectionEstablished: () => {},
+    });
+
+    callbacks.onOpen!();
+    assert.equal(store.getState().connection.reconnectAttempt, 0);
+  });
+
   it('calls onReconnectNeeded on abnormal close', () => {
     const store = storeWithConversation('conv-1');
     let reconnectCalled = false;
@@ -290,6 +439,25 @@ describe('buildStreamCallbacks', () => {
     assert.equal(store.getState().connection.transportStatus, 'disconnected');
   });
 
+  it('sets lastDisconnectedAt on close', () => {
+    const store = storeWithConversation('conv-1');
+    assert.equal(store.getState().connection.lastDisconnectedAt, null);
+
+    const callbacks = buildStreamCallbacks(store, new Map(), () => {}, {
+      onReconnectNeeded: () => {},
+      onConnectionEstablished: () => {},
+    });
+
+    const before = new Date().toISOString();
+    callbacks.onClose!(1006, 'Abnormal closure');
+    const after = new Date().toISOString();
+
+    const ts = store.getState().connection.lastDisconnectedAt;
+    assert.ok(ts !== null, 'lastDisconnectedAt should be set');
+    assert.ok(ts >= before, 'timestamp should be at or after test start');
+    assert.ok(ts <= after, 'timestamp should be at or before test end');
+  });
+
   it('does NOT reconnect on normal close (code 1000)', () => {
     const store = storeWithConversation('conv-1');
     let reconnectCalled = false;
@@ -303,6 +471,42 @@ describe('buildStreamCallbacks', () => {
 
     callbacks.onClose!(1000, 'Normal closure');
     assert.equal(reconnectCalled, false);
+    assert.equal(store.getState().connection.transportStatus, 'disconnected');
+  });
+
+  it('forwards WebSocket close reason instead of dropping it', () => {
+    const store = storeWithConversation('conv-1');
+    const closes: Array<{ code: number; reason: string }> = [];
+    const callbacks = buildStreamCallbacks(
+      store,
+      new Map(),
+      () => {},
+      {
+        onReconnectNeeded: () => {},
+        onConnectionEstablished: () => {},
+      },
+      {
+        onClose(code, reason) {
+          closes.push({ code, reason });
+        },
+      },
+    );
+
+    callbacks.onClose!(1006, 'Abnormal closure');
+
+    assert.deepEqual(closes, [{ code: 1006, reason: 'Abnormal closure' }]);
+    assert.equal(store.getState().connection.transportStatus, 'disconnected');
+  });
+
+  it('uses the default connection-status close handler when no override is provided', () => {
+    const store = storeWithConversation('conv-1');
+    const callbacks = buildStreamCallbacks(store, new Map(), () => {}, {
+      onReconnectNeeded: () => {},
+      onConnectionEstablished: () => {},
+    });
+
+    callbacks.onClose!(1006, 'Abnormal closure');
+
     assert.equal(store.getState().connection.transportStatus, 'disconnected');
   });
 
@@ -540,6 +744,10 @@ describe('subscribe/unsubscribe lifecycle', () => {
 
     callbacks.onSessionExpiringSoon!('2026-07-01T00:00:00.000Z');
     assert.equal(store.getState().connection.sessionStatus, 'expiring-soon');
+
+    callbacks.onSessionActive!('2026-07-01T01:00:00.000Z');
+    assert.equal(store.getState().connection.sessionStatus, 'active');
+    assert.equal(store.getState().connection.lastAuthoritativeUpdate, '2026-07-01T01:00:00.000Z');
 
     // eslint-disable-next-line unicorn/no-useless-undefined
     callbacks.onSessionTerminated!('logged-out', undefined);
@@ -1392,6 +1600,182 @@ describe('onSubscribed baseline seeding', () => {
       'onSubscribed must not regress an already-higher cursor',
     );
   });
+
+  it('onSubscribed does not advance past replayed events whose ack failed', () => {
+    const store = storeWithConversation('conv-1');
+    const stateMap = new Map<string, StreamSubscriptionState>();
+    let ackShouldFail = false;
+    const warnSpy = mock.fn();
+    const originalWarn = console.warn;
+    console.warn = warnSpy;
+
+    try {
+      const callbacks = buildStreamCallbacks(
+        store,
+        stateMap,
+        () => {
+          if (ackShouldFail) {
+            throw new Error('ack failed');
+          }
+        },
+        { onReconnectNeeded: () => {}, onConnectionEstablished: () => {} },
+      );
+
+      callbacks.onSubscribed!('conv-1', 0);
+      assert.equal(stateMap.get('conv-1')?.serverResumeSeq, 0);
+
+      callbacks.onStreamEvent!(
+        'conv-1',
+        makeEvent({ seq: 1, turnId: 't1', kind: 'stream-started', payload: {} }),
+      );
+      assert.equal(stateMap.get('conv-1')?.serverResumeSeq, 1);
+
+      ackShouldFail = true;
+      callbacks.onStreamEvent!(
+        'conv-1',
+        makeEvent({ seq: 2, turnId: 't1', kind: 'text-delta', payload: { text: 'replayed' } }),
+      );
+      assert.equal(
+        stateMap.get('conv-1')?.serverResumeSeq,
+        1,
+        'ack failure must keep the resume cursor pinned before seq 2',
+      );
+      assert.ok(
+        stateMap.get('conv-1')?.unackedSeqs.has(2),
+        'ack-failed seq must remain blocked until a later cumulative ack succeeds',
+      );
+
+      callbacks.onSubscribed!('conv-1', 2);
+
+      assert.equal(
+        stateMap.get('conv-1')?.serverResumeSeq,
+        1,
+        'onSubscribed must not advance past a locally seen seq whose ack failed',
+      );
+      assert.equal(
+        stateMap.get('conv-1')?.highestSeenSeq,
+        2,
+        'server baseline should still update the observed high-water mark',
+      );
+    } finally {
+      console.warn = originalWarn;
+    }
+  });
+
+  it('replayed stale unacked event retries ack and recovers resume cursor', () => {
+    const store = storeWithConversation('conv-1');
+    const stateMap = new Map<string, StreamSubscriptionState>();
+    let ackShouldFail = false;
+    const ackCalls: number[] = [];
+    const warnSpy = mock.fn();
+    const originalWarn = console.warn;
+    console.warn = warnSpy;
+
+    try {
+      const callbacks = buildStreamCallbacks(
+        store,
+        stateMap,
+        (_conversationId, seq) => {
+          ackCalls.push(seq);
+          if (ackShouldFail) {
+            throw new Error('ack failed');
+          }
+        },
+        { onReconnectNeeded: () => {}, onConnectionEstablished: () => {} },
+      );
+
+      callbacks.onSubscribed!('conv-1', 0);
+      callbacks.onStreamEvent!(
+        'conv-1',
+        makeEvent({ seq: 1, turnId: 't1', kind: 'stream-started', payload: {} }),
+      );
+
+      ackShouldFail = true;
+      callbacks.onStreamEvent!(
+        'conv-1',
+        makeEvent({ seq: 2, turnId: 't1', kind: 'text-delta', payload: { text: 'replayed' } }),
+      );
+      assert.deepEqual(ackCalls, [1, 2]);
+      assert.equal(stateMap.get('conv-1')?.serverResumeSeq, 1);
+      assert.ok(stateMap.get('conv-1')?.unackedSeqs.has(2), 'seq 2 in unackedSeqs after failure');
+
+      // Reconnect replay of the same stale event — ack is now healthy.
+      // The stale-replay ACK-retry path should clear unackedSeqs and
+      // advance the resume cursor without needing any newer event.
+      ackShouldFail = false;
+      callbacks.onStreamEvent!(
+        'conv-1',
+        makeEvent({ seq: 2, turnId: 't1', kind: 'text-delta', payload: { text: 'replayed' } }),
+      );
+
+      assert.deepEqual(ackCalls, [1, 2, 2], 'stale replay must retry ack for unacked seq');
+      assert.ok(
+        !stateMap.get('conv-1')?.unackedSeqs.has(2),
+        'successful retry must clear seq from unackedSeqs',
+      );
+      assert.equal(
+        stateMap.get('conv-1')?.serverResumeSeq,
+        2,
+        'resume cursor must advance after successful ack retry',
+      );
+    } finally {
+      console.warn = originalWarn;
+    }
+  });
+
+  it('replayed stale unacked event stays pinned when retry also fails', () => {
+    const store = storeWithConversation('conv-1');
+    const stateMap = new Map<string, StreamSubscriptionState>();
+    const ackCalls: number[] = [];
+    const warnSpy = mock.fn();
+    const originalWarn = console.warn;
+    console.warn = warnSpy;
+
+    try {
+      const callbacks = buildStreamCallbacks(
+        store,
+        stateMap,
+        (_conversationId, seq) => {
+          ackCalls.push(seq);
+          // ack always fails after the first event
+          if (seq >= 2) throw new Error('ack failed');
+        },
+        { onReconnectNeeded: () => {}, onConnectionEstablished: () => {} },
+      );
+
+      callbacks.onSubscribed!('conv-1', 0);
+      callbacks.onStreamEvent!(
+        'conv-1',
+        makeEvent({ seq: 1, turnId: 't1', kind: 'stream-started', payload: {} }),
+      );
+      callbacks.onStreamEvent!(
+        'conv-1',
+        makeEvent({ seq: 2, turnId: 't1', kind: 'text-delta', payload: { text: 'data' } }),
+      );
+      assert.equal(stateMap.get('conv-1')?.serverResumeSeq, 1);
+      assert.ok(stateMap.get('conv-1')?.unackedSeqs.has(2));
+
+      // Replay of stale seq 2 — retry also fails.
+      callbacks.onStreamEvent!(
+        'conv-1',
+        makeEvent({ seq: 2, turnId: 't1', kind: 'text-delta', payload: { text: 'data' } }),
+      );
+
+      assert.deepEqual(ackCalls, [1, 2, 2], 'retry ack must be attempted');
+      assert.ok(
+        stateMap.get('conv-1')?.unackedSeqs.has(2),
+        'unackedSeqs must remain when retry fails',
+      );
+      assert.equal(
+        stateMap.get('conv-1')?.serverResumeSeq,
+        1,
+        'resume cursor must stay pinned when retry fails',
+      );
+      assert.equal(warnSpy.mock.callCount(), 2, 'both ack failures must be logged');
+    } finally {
+      console.warn = originalWarn;
+    }
+  });
 });
 
 // ─── History vs live-stream race (merge-history) ────────────────────────────
@@ -1707,5 +2091,321 @@ describe('existing-conversation history vs live-stream race', () => {
     assert.equal(merged?.entries.length, 1, 'stream entries survive empty REST merge');
     assert.equal(merged?.entries[0].contentBlocks[0]?.text, 'Agent is typing...');
     assert.equal(merged?.historyLoaded, true);
+  });
+});
+
+// ─── Seal-after-merge integration (wiring parity with workspace.tsx) ────────
+
+describe('sealSubscriptionAfterMerge wiring (transcript-load path)', () => {
+  it('seals terminal turns after merge-history so replayed events are rejected', () => {
+    // This test simulates the real production path in useTranscriptLoader:
+    // 1. Stream delivers live events for a turn
+    // 2. REST merge-history arrives with authoritative data
+    // 3. sealSubscriptionAfterMerge is called (as wired in workspace.tsx)
+    // 4. Post-reconnect replay targeting the sealed turn is rejected
+
+    const store = storeWithConversation('conv-seal');
+    const stateMap = new Map<string, StreamSubscriptionState>();
+
+    // Step 1: Stream delivers turn-a
+    let sub = createStreamSubscriptionState();
+    sub = applyStreamEventsToConversation(
+      store,
+      'conv-seal',
+      [
+        makeEvent({ seq: 1, turnId: 'turn-a', kind: 'stream-started', payload: {} }),
+        makeEvent({
+          seq: 2,
+          turnId: 'turn-a',
+          kind: 'text-delta',
+          payload: { text: 'streaming text' },
+        }),
+        makeEvent({
+          seq: 3,
+          turnId: 'turn-a',
+          kind: 'stream-completed',
+          payload: { status: 'completed' },
+        }),
+      ],
+      sub,
+    );
+    stateMap.set('conv-seal', sub);
+
+    // Step 2: REST merge-history (authoritative refresh)
+    const restEntries: TranscriptEntryState[] = [
+      {
+        entryId: 'turn-a',
+        kind: 'turn',
+        turnId: 'turn-a',
+        status: 'completed',
+        timestamp: '2026-07-01T00:00:00.000Z',
+        contentBlocks: [
+          { blockId: 'b1', kind: 'text', text: 'REST authoritative', metadata: null },
+        ],
+        artifacts: [],
+        controls: [],
+        prompt: null,
+      },
+    ];
+    store.dispatch({
+      type: 'conversation/merge-history',
+      conversationId: 'conv-seal',
+      entries: restEntries,
+      hasMoreHistory: false,
+    });
+
+    // Step 3: Seal — this is the call wired into useTranscriptLoader
+    sealSubscriptionAfterMerge(stateMap, 'conv-seal', restEntries);
+
+    // Step 4: Simulate post-reconnect replay targeting the sealed turn
+    const sealedSub = stateMap.get('conv-seal')!;
+    applyStreamEventsToConversation(
+      store,
+      'conv-seal',
+      [
+        makeEvent({
+          seq: 99,
+          turnId: 'turn-a',
+          kind: 'text-delta',
+          payload: { text: 'REPLAYED GARBAGE' },
+        }),
+      ],
+      sealedSub,
+    );
+
+    // Verify: REST-finalized content must not be mutated
+    const entries = store.getState().conversations.get('conv-seal')?.entries ?? [];
+    const turnA = entries.find((e) => e.turnId === 'turn-a' && e.kind === 'turn');
+    assert.ok(turnA, 'turn-a must exist');
+    assert.equal(
+      turnA.contentBlocks[0]?.text,
+      'REST authoritative',
+      'sealed turn must not be mutated by post-reconnect replay',
+    );
+  });
+
+  it('seal covers multiple terminal turns from a single REST merge', () => {
+    const store = storeWithConversation('conv-multi');
+    const stateMap = new Map<string, StreamSubscriptionState>();
+    stateMap.set('conv-multi', createStreamSubscriptionState());
+
+    const restEntries: TranscriptEntryState[] = [
+      {
+        entryId: 'turn-1',
+        kind: 'turn',
+        turnId: 'turn-1',
+        status: 'completed',
+        timestamp: '2026-07-01T00:00:00.000Z',
+        contentBlocks: [{ blockId: 'b1', kind: 'text', text: 'First turn', metadata: null }],
+        artifacts: [],
+        controls: [],
+        prompt: null,
+      },
+      {
+        entryId: 'turn-2',
+        kind: 'turn',
+        turnId: 'turn-2',
+        status: 'failed',
+        timestamp: '2026-07-01T00:01:00.000Z',
+        contentBlocks: [{ blockId: 'b2', kind: 'text', text: 'Failed turn', metadata: null }],
+        artifacts: [],
+        controls: [],
+        prompt: null,
+      },
+      {
+        entryId: 'turn-3',
+        kind: 'turn',
+        turnId: 'turn-3',
+        status: 'streaming',
+        timestamp: '2026-07-01T00:02:00.000Z',
+        contentBlocks: [],
+        artifacts: [],
+        controls: [],
+        prompt: null,
+      },
+    ];
+
+    store.dispatch({
+      type: 'conversation/merge-history',
+      conversationId: 'conv-multi',
+      entries: restEntries,
+      hasMoreHistory: false,
+    });
+    sealSubscriptionAfterMerge(stateMap, 'conv-multi', restEntries);
+
+    const sealed = stateMap.get('conv-multi')!.reconcilerState.sealedTurns;
+    assert.ok(sealed?.has('turn-1'), 'completed turn-1 must be sealed');
+    assert.ok(sealed?.has('turn-2'), 'failed turn-2 must be sealed');
+    assert.equal(sealed?.has('turn-3') ?? false, false, 'streaming turn-3 must NOT be sealed');
+  });
+
+  it('retires pending gaps belonging to newly sealed turns and advances resume cursor', () => {
+    // Regression: sealSubscriptionAfterMerge must clean up pendingSeqs for
+    // turns REST just finalized. Otherwise serverResumeSeq stays pinned
+    // behind an obsolete gap and reconnect replays stale backlog forever.
+
+    const store = storeWithConversation('conv-retire');
+    const stateMap = new Map<string, StreamSubscriptionState>();
+
+    // Step 1: Stream events — seq 1 consumed (turn-a), seq 2 ignored
+    // conditional (turn-a), seq 3 consumed (turn-b)
+    let sub = createStreamSubscriptionState();
+    sub = applyStreamEventsToConversation(
+      store,
+      'conv-retire',
+      [makeEvent({ seq: 1, turnId: 'turn-a', kind: 'stream-started', payload: {} })],
+      sub,
+    );
+    // seq 2: ignored approval-response (no matching prompt) on turn-a
+    sub = applyStreamEventsToConversation(
+      store,
+      'conv-retire',
+      [
+        makeEvent({
+          seq: 2,
+          turnId: 'turn-a',
+          kind: 'approval-response',
+          payload: { approvalId: 'p1', response: 'approve' },
+        }),
+      ],
+      sub,
+    );
+    // seq 3: consumed text-delta on turn-b
+    sub = applyStreamEventsToConversation(
+      store,
+      'conv-retire',
+      [makeEvent({ seq: 3, turnId: 'turn-b', kind: 'stream-started', payload: {} })],
+      sub,
+    );
+    stateMap.set('conv-retire', sub);
+
+    // Verify pre-condition: frontier stuck at 1, seq 2 is pending
+    assert.equal(sub.serverResumeSeq, 1, 'pre-seal: frontier stuck at 1');
+    assert.ok(sub.pendingSeqs.has(2), 'pre-seal: seq 2 is pending');
+
+    // Step 2: REST merge-history finalizes turn-a (but turn-b is still streaming)
+    const restEntries: TranscriptEntryState[] = [
+      {
+        entryId: 'turn-a',
+        kind: 'turn',
+        turnId: 'turn-a',
+        status: 'completed',
+        timestamp: '2026-07-01T00:00:00.000Z',
+        contentBlocks: [
+          { blockId: 'b1', kind: 'text', text: 'REST authoritative', metadata: null },
+        ],
+        artifacts: [],
+        controls: [],
+        prompt: null,
+      },
+      {
+        entryId: 'turn-b',
+        kind: 'turn',
+        turnId: 'turn-b',
+        status: 'streaming',
+        timestamp: '2026-07-01T00:01:00.000Z',
+        contentBlocks: [],
+        artifacts: [],
+        controls: [],
+        prompt: null,
+      },
+    ];
+    store.dispatch({
+      type: 'conversation/merge-history',
+      conversationId: 'conv-retire',
+      entries: restEntries,
+      hasMoreHistory: false,
+    });
+
+    // Step 3: Seal — must retire pending seq 2 (belongs to sealed turn-a)
+    sealSubscriptionAfterMerge(stateMap, 'conv-retire', restEntries);
+
+    const after = stateMap.get('conv-retire')!;
+    assert.ok(!after.pendingSeqs.has(2), 'pending seq 2 must be retired (turn-a is sealed)');
+    assert.equal(after.serverResumeSeq, 3, 'frontier must advance past retired gap to 3');
+  });
+
+  it('preserves pending gaps belonging to non-sealed turns after seal', () => {
+    // Ensure pending gaps for still-active turns are NOT retired.
+    const store = storeWithConversation('conv-keep');
+    const stateMap = new Map<string, StreamSubscriptionState>();
+
+    let sub = createStreamSubscriptionState();
+    // seq 1: consumed on turn-a
+    sub = applyStreamEventsToConversation(
+      store,
+      'conv-keep',
+      [makeEvent({ seq: 1, turnId: 'turn-a', kind: 'stream-started', payload: {} })],
+      sub,
+    );
+    // seq 2: ignored conditional on turn-b (still streaming, NOT sealed)
+    sub = applyStreamEventsToConversation(
+      store,
+      'conv-keep',
+      [
+        makeEvent({
+          seq: 2,
+          turnId: 'turn-b',
+          kind: 'approval-response',
+          payload: { approvalId: 'p1', response: 'approve' },
+        }),
+      ],
+      sub,
+    );
+    // seq 3: consumed on turn-a
+    sub = applyStreamEventsToConversation(
+      store,
+      'conv-keep',
+      [
+        makeEvent({
+          seq: 3,
+          turnId: 'turn-a',
+          kind: 'stream-completed',
+          payload: { status: 'completed' },
+        }),
+      ],
+      sub,
+    );
+    stateMap.set('conv-keep', sub);
+
+    assert.equal(sub.serverResumeSeq, 1, 'pre-seal: frontier stuck at 1');
+    assert.ok(sub.pendingSeqs.has(2), 'pre-seal: seq 2 pending on turn-b');
+
+    // REST finalizes turn-a only; turn-b stays streaming
+    const restEntries: TranscriptEntryState[] = [
+      {
+        entryId: 'turn-a',
+        kind: 'turn',
+        turnId: 'turn-a',
+        status: 'completed',
+        timestamp: '2026-07-01T00:00:00.000Z',
+        contentBlocks: [{ blockId: 'b1', kind: 'text', text: 'done', metadata: null }],
+        artifacts: [],
+        controls: [],
+        prompt: null,
+      },
+      {
+        entryId: 'turn-b',
+        kind: 'turn',
+        turnId: 'turn-b',
+        status: 'streaming',
+        timestamp: '2026-07-01T00:01:00.000Z',
+        contentBlocks: [],
+        artifacts: [],
+        controls: [],
+        prompt: null,
+      },
+    ];
+    store.dispatch({
+      type: 'conversation/merge-history',
+      conversationId: 'conv-keep',
+      entries: restEntries,
+      hasMoreHistory: false,
+    });
+    sealSubscriptionAfterMerge(stateMap, 'conv-keep', restEntries);
+
+    const after = stateMap.get('conv-keep')!;
+    assert.ok(after.pendingSeqs.has(2), 'pending seq 2 must remain (turn-b is NOT sealed)');
+    assert.equal(after.serverResumeSeq, 1, 'frontier must stay at 1 (gap still blocks)');
   });
 });

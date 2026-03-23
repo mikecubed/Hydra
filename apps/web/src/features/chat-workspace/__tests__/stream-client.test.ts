@@ -408,6 +408,8 @@ describe('StreamClient', () => {
       assert.ok(lastFakeSocket);
       lastFakeSocket.simulateOpen();
 
+      client.subscribe('conv-1');
+      lastFakeSocket.simulateMessage(subscribedPayload());
       lastFakeSocket.simulateMessage(streamEventPayload());
 
       assert.equal(events.length, 1);
@@ -426,11 +428,33 @@ describe('StreamClient', () => {
       assert.ok(lastFakeSocket);
       lastFakeSocket.simulateOpen();
 
+      client.subscribe('conv-1');
       lastFakeSocket.simulateMessage(subscribedPayload());
 
       assert.equal(calls.length, 1);
       assert.equal(calls[0].conversationId, 'conv-1');
       assert.equal(calls[0].currentSeq, 5);
+    });
+
+    it('buffers replayed stream-events until subscribed arrives for the conversation', () => {
+      const calls: string[] = [];
+      const client = createStreamClient(defaultOptions());
+      client.connect(
+        noopCallbacks({
+          onStreamEvent: (_conversationId, event) => calls.push(`event:${event.seq}`),
+          onSubscribed: (conversationId, currentSeq) =>
+            calls.push(`subscribed:${conversationId}:${currentSeq}`),
+        }),
+      );
+      assert.ok(lastFakeSocket);
+      lastFakeSocket.simulateOpen();
+
+      client.subscribe('conv-1');
+      lastFakeSocket.simulateMessage(streamEventPayload());
+      assert.deepStrictEqual(calls, []);
+
+      lastFakeSocket.simulateMessage(subscribedPayload());
+      assert.deepStrictEqual(calls, ['event:1', 'subscribed:conv-1:5']);
     });
 
     it('dispatches unsubscribed to onUnsubscribed', () => {
@@ -482,6 +506,21 @@ describe('StreamClient', () => {
       });
 
       assert.deepStrictEqual(dates, ['2026-06-01T13:00:00.000Z']);
+    });
+
+    it('dispatches session-active to onSessionActive', () => {
+      const dates: string[] = [];
+      const client = createStreamClient(defaultOptions());
+      client.connect(noopCallbacks({ onSessionActive: (expiresAt) => dates.push(expiresAt) }));
+      assert.ok(lastFakeSocket);
+      lastFakeSocket.simulateOpen();
+
+      lastFakeSocket.simulateMessage({
+        type: 'session-active',
+        expiresAt: '2026-06-01T14:00:00.000Z',
+      });
+
+      assert.deepStrictEqual(dates, ['2026-06-01T14:00:00.000Z']);
     });
 
     it('dispatches daemon-unavailable to onDaemonUnavailable', () => {
@@ -815,6 +854,28 @@ describe('StreamClient', () => {
       assert.equal(parseErrors.length, 1, 'should route to onParseError');
     });
 
+    it('fires onParseError when session-active has non-ISO expiresAt', () => {
+      const parseErrors: Array<{ raw: string; error: string }> = [];
+      const activeCalls: string[] = [];
+      const client = createStreamClient(defaultOptions());
+      client.connect(
+        noopCallbacks({
+          onSessionActive: (expiresAt) => activeCalls.push(expiresAt),
+          onParseError: (raw, error) => parseErrors.push({ raw, error }),
+        }),
+      );
+      assert.ok(lastFakeSocket);
+      lastFakeSocket.simulateOpen();
+
+      lastFakeSocket.simulateMessage({
+        type: 'session-active',
+        expiresAt: 'next-tuesday',
+      });
+
+      assert.equal(activeCalls.length, 0, 'non-ISO expiresAt should be rejected');
+      assert.equal(parseErrors.length, 1, 'should route to onParseError');
+    });
+
     it('fires onParseError when error frame is missing required gateway fields', () => {
       const parseErrors: Array<{ raw: string; error: string }> = [];
       const errorCalls: GatewayErrorBody[] = [];
@@ -899,6 +960,7 @@ describe('StreamClient', () => {
       assert.ok(lastFakeSocket);
       lastFakeSocket.simulateOpen();
 
+      client.subscribe('conv-1');
       lastFakeSocket.simulateMessage(subscribedPayload());
 
       assert.equal(subscribedCalls.length, 1);
@@ -1093,6 +1155,7 @@ describe('StreamClient', () => {
       client.connect(noopCallbacks());
       const ws2 = getSocket();
       ws2.simulateOpen();
+      ws2.simulateMessage(subscribedPayload({ conversationId: 'live-conv', currentSeq: 0 }));
 
       assert.equal(client.readyState, FakeWebSocket.OPEN, 'new socket should be OPEN');
 
@@ -1203,6 +1266,7 @@ describe('StreamClient', () => {
       );
       const ws2 = getSocket();
       ws2.simulateOpen();
+      ws2.simulateMessage(subscribedPayload({ conversationId: 'live-conv', currentSeq: 0 }));
 
       // Stale close from the old socket fires — must NOT reach any callback
       staleOnclose(fakeCloseEvent(1000, 'Normal closure'));
@@ -1282,6 +1346,8 @@ describe('StreamClient', () => {
       );
       const ws2 = getSocket();
       ws2.simulateOpen();
+      client.subscribe('live-conv');
+      ws2.simulateMessage(subscribedPayload({ conversationId: 'live-conv', currentSeq: 0 }));
 
       // Stale onmessage from old socket — must be silently ignored
       staleOnmessage(
@@ -1471,6 +1537,12 @@ describe('StreamClient', () => {
 
       client.subscribe('conv-a');
       client.subscribe('conv-b');
+      lastFakeSocket.simulateMessage(
+        subscribedPayload({ conversationId: 'conv-a', currentSeq: 0 }),
+      );
+      lastFakeSocket.simulateMessage(
+        subscribedPayload({ conversationId: 'conv-b', currentSeq: 0 }),
+      );
 
       lastFakeSocket.simulateMessage(streamEventPayload({ conversationId: 'conv-b' }));
       lastFakeSocket.simulateMessage(streamEventPayload({ conversationId: 'conv-a' }));
@@ -1518,6 +1590,167 @@ describe('StreamClient', () => {
       assert.equal(lastFakeSocket.sentMessages.length, 2);
       assert.equal((lastFakeSocket.sentMessages[0] as { type: string }).type, 'subscribe');
       assert.equal((lastFakeSocket.sentMessages[1] as { type: string }).type, 'ack');
+    });
+  });
+
+  // ─── Late subscribed ack after unsubscribe ──────────────────────────
+
+  describe('late subscribed ack after unsubscribe', () => {
+    it('ignores late subscribed ack for a conversation that was unsubscribed', () => {
+      const subscribed: string[] = [];
+      const client = createStreamClient(defaultOptions());
+      client.connect(
+        noopCallbacks({
+          onSubscribed: (id) => subscribed.push(id),
+        }),
+      );
+      const sock = getSocket();
+      sock.simulateOpen();
+
+      client.subscribe('conv-1');
+      client.unsubscribe('conv-1');
+
+      // Server sends late "subscribed" ack after we already unsubscribed
+      sock.simulateMessage(subscribedPayload({ conversationId: 'conv-1', currentSeq: 3 }));
+
+      assert.deepStrictEqual(
+        subscribed,
+        [],
+        'onSubscribed must not fire for unsubscribed conversation',
+      );
+    });
+
+    it('does not deliver stream-events for conversations unsubscribed before ack', () => {
+      const events: string[] = [];
+      const client = createStreamClient(defaultOptions());
+      client.connect(
+        noopCallbacks({
+          onStreamEvent: (id) => events.push(id),
+        }),
+      );
+      const sock = getSocket();
+      sock.simulateOpen();
+
+      client.subscribe('conv-1');
+      client.unsubscribe('conv-1');
+
+      // Late ack + event
+      sock.simulateMessage(subscribedPayload({ conversationId: 'conv-1', currentSeq: 0 }));
+      sock.simulateMessage(streamEventPayload({ conversationId: 'conv-1' }));
+
+      assert.deepStrictEqual(events, [], 'stream events must not be delivered after unsubscribe');
+    });
+
+    it('does not flush buffered replay events for unsubscribed conversations', () => {
+      const events: string[] = [];
+      const client = createStreamClient(defaultOptions());
+      client.connect(
+        noopCallbacks({
+          onStreamEvent: (id) => events.push(id),
+        }),
+      );
+      const sock = getSocket();
+      sock.simulateOpen();
+
+      client.subscribe('conv-1');
+
+      // Stream event arrives before ack — buffered
+      sock.simulateMessage(streamEventPayload({ conversationId: 'conv-1' }));
+
+      // Unsubscribe before ack arrives
+      client.unsubscribe('conv-1');
+
+      // Late ack arrives — must NOT flush the buffered event
+      sock.simulateMessage(subscribedPayload({ conversationId: 'conv-1', currentSeq: 0 }));
+
+      assert.deepStrictEqual(events, [], 'buffered events must not flush after unsubscribe');
+    });
+
+    it('still delivers events for conversations that remain subscribed', () => {
+      const events: string[] = [];
+      const subscribed: string[] = [];
+      const client = createStreamClient(defaultOptions());
+      client.connect(
+        noopCallbacks({
+          onStreamEvent: (id) => events.push(id),
+          onSubscribed: (id) => subscribed.push(id),
+        }),
+      );
+      const sock = getSocket();
+      sock.simulateOpen();
+
+      client.subscribe('conv-a');
+      client.subscribe('conv-b');
+
+      // Unsubscribe only conv-a
+      client.unsubscribe('conv-a');
+
+      // Acks for both
+      sock.simulateMessage(subscribedPayload({ conversationId: 'conv-a', currentSeq: 0 }));
+      sock.simulateMessage(subscribedPayload({ conversationId: 'conv-b', currentSeq: 0 }));
+
+      // Events for both
+      sock.simulateMessage(streamEventPayload({ conversationId: 'conv-a' }));
+      sock.simulateMessage(streamEventPayload({ conversationId: 'conv-b' }));
+
+      assert.deepStrictEqual(subscribed, ['conv-b'], 'only conv-b should be acked');
+      assert.deepStrictEqual(events, ['conv-b'], 'only conv-b events should be delivered');
+    });
+
+    it('drops late stream-events arriving after unsubscribe even without late ack', () => {
+      const events: string[] = [];
+      const client = createStreamClient(defaultOptions());
+      client.connect(
+        noopCallbacks({
+          onStreamEvent: (id) => events.push(id),
+        }),
+      );
+      const sock = getSocket();
+      sock.simulateOpen();
+
+      client.subscribe('conv-1');
+      sock.simulateMessage(subscribedPayload({ conversationId: 'conv-1', currentSeq: 0 }));
+
+      // Now live — deliver one event to prove it works
+      sock.simulateMessage(streamEventPayload({ conversationId: 'conv-1' }));
+      assert.deepStrictEqual(events, ['conv-1']);
+
+      // Unsubscribe
+      client.unsubscribe('conv-1');
+
+      // Late event from server before it processes the unsubscribe
+      sock.simulateMessage(streamEventPayload({ conversationId: 'conv-1' }));
+      assert.deepStrictEqual(events, ['conv-1'], 'no new events after unsubscribe');
+    });
+
+    it('ignores stale unsubscribed ack after a same-conversation resubscribe', () => {
+      const events: string[] = [];
+      const subscribed: string[] = [];
+      const unsubscribed: string[] = [];
+      const client = createStreamClient(defaultOptions());
+      client.connect(
+        noopCallbacks({
+          onStreamEvent: (id) => events.push(id),
+          onSubscribed: (id) => subscribed.push(id),
+          onUnsubscribed: (id) => unsubscribed.push(id),
+        }),
+      );
+      const sock = getSocket();
+      sock.simulateOpen();
+
+      client.subscribe('conv-1');
+      sock.simulateMessage(subscribedPayload({ conversationId: 'conv-1', currentSeq: 0 }));
+      client.unsubscribe('conv-1');
+      client.subscribe('conv-1');
+      sock.simulateMessage(subscribedPayload({ conversationId: 'conv-1', currentSeq: 1 }));
+
+      // Old unsubscribe ack arrives late; it must not tear down the new subscription.
+      sock.simulateMessage({ type: 'unsubscribed', conversationId: 'conv-1' });
+      sock.simulateMessage(streamEventPayload({ conversationId: 'conv-1' }));
+
+      assert.deepStrictEqual(subscribed, ['conv-1', 'conv-1']);
+      assert.deepStrictEqual(unsubscribed, [], 'stale unsubscribe ack must be ignored');
+      assert.deepStrictEqual(events, ['conv-1'], 'new subscription must remain live');
     });
   });
 });

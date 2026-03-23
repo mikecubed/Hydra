@@ -808,12 +808,13 @@ describe('GatewayWsServer', () => {
     await gw.sessionService.validate(session.id);
 
     const ws = createWebSocket(port, { sessionId: session.id });
-    const messagePromise = waitForMessage(ws);
+    const messagesPromise = waitForMessages(ws, 2);
     await once(ws, 'open');
     openSockets.push(ws);
 
-    const message = await messagePromise;
-    assert.equal(message['type'], 'session-expiring-soon');
+    const messages = await messagesPromise;
+    assert.equal(messages[0]?.['type'], 'daemon-restored');
+    assert.equal(messages[1]?.['type'], 'session-expiring-soon');
   });
 
   it('broadcasts daemon outage and recovery messages', async () => {
@@ -827,9 +828,13 @@ describe('GatewayWsServer', () => {
     assert.equal(down['type'], 'daemon-unavailable');
 
     healthResult = true;
+    const recoveryMessagesPromise = waitForMessages(ws, 2);
     await gw.heartbeat.tick();
-    const up = await waitForMessage(ws);
-    assert.equal(up['type'], 'daemon-restored');
+    const recoveryMessages = await recoveryMessagesPromise;
+    assert.deepEqual(
+      recoveryMessages.map((message) => message['type']),
+      ['daemon-restored', 'session-active'],
+    );
   });
 
   it('replays daemon-unavailable state to sockets that connect after daemon failure', async () => {

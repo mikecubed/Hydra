@@ -10,6 +10,9 @@ import {
   reconcileStreamEvents,
   findEntryByTurnId,
   appendTextDelta,
+  sealAuthoritativeTurns,
+  mergeAuthoritativeEntries,
+  deduplicateEntries,
   type ReconcilerState,
 } from '../model/reconciler.ts';
 
@@ -129,6 +132,28 @@ describe('appendTextDelta', () => {
     const result = appendTextDelta(entry, 'delta');
     assert.equal(result.contentBlocks.length, 1);
     assert.equal(result.contentBlocks[0].blockId, 'turn-42-streaming');
+  });
+
+  it('ignores replayed text already present in authoritative streaming REST content', () => {
+    const entry = makeEntry({
+      turnId: 'turn-42',
+      status: 'streaming',
+      contentBlocks: [{ blockId: 'turn-42-response', kind: 'text', text: 'Hello', metadata: null }],
+    });
+    const result = appendTextDelta(entry, 'Hello');
+    assert.deepStrictEqual(result, entry);
+  });
+
+  it('appends only the novel suffix when replay overlaps authoritative REST content', () => {
+    const entry = makeEntry({
+      turnId: 'turn-42',
+      status: 'streaming',
+      contentBlocks: [{ blockId: 'turn-42-response', kind: 'text', text: 'Hello', metadata: null }],
+    });
+    const result = appendTextDelta(entry, 'Hello world');
+    assert.equal(result.contentBlocks.length, 2);
+    assert.equal(result.contentBlocks[1].blockId, 'turn-42-streaming');
+    assert.equal(result.contentBlocks[1].text, ' world');
   });
 
   it('does not mutate the original entry', () => {
@@ -1337,5 +1362,657 @@ describe('reconcileStreamEvents', () => {
       const { consumedSeqs } = reconcileStreamEvents([entry], events, createReconcilerState());
       assert.ok(consumedSeqs.has(5), 'matching approval-response must be consumed');
     });
+  });
+});
+
+// ─── sealAuthoritativeTurns ─────────────────────────────────────────────────
+
+describe('sealAuthoritativeTurns', () => {
+  it('seals turns with completed status', () => {
+    const entries = [makeEntry({ turnId: 'turn-1', status: 'completed' })];
+    const result = sealAuthoritativeTurns(createReconcilerState(), entries);
+    assert.ok(result.sealedTurns?.has('turn-1'));
+  });
+
+  it('seals turns with failed status', () => {
+    const entries = [makeEntry({ turnId: 'turn-1', status: 'failed' })];
+    const result = sealAuthoritativeTurns(createReconcilerState(), entries);
+    assert.ok(result.sealedTurns?.has('turn-1'));
+  });
+
+  it('seals turns with cancelled status', () => {
+    const entries = [makeEntry({ turnId: 'turn-1', status: 'cancelled' })];
+    const result = sealAuthoritativeTurns(createReconcilerState(), entries);
+    assert.ok(result.sealedTurns?.has('turn-1'));
+  });
+
+  it('does not seal turns with streaming status', () => {
+    const entries = [makeEntry({ turnId: 'turn-1', status: 'streaming' })];
+    const result = sealAuthoritativeTurns(createReconcilerState(), entries);
+    assert.equal(result.sealedTurns?.has('turn-1') ?? false, false);
+  });
+
+  it('does not seal turns with awaiting-approval status', () => {
+    const entries = [makeEntry({ turnId: 'turn-1', status: 'awaiting-approval' })];
+    const result = sealAuthoritativeTurns(createReconcilerState(), entries);
+    assert.equal(result.sealedTurns?.has('turn-1') ?? false, false);
+  });
+
+  it('does not seal non-turn entries', () => {
+    const entries = [
+      makeEntry({ entryId: 'sys-1', kind: 'system-status', turnId: 'turn-1', status: 'completed' }),
+    ];
+    const result = sealAuthoritativeTurns(createReconcilerState(), entries);
+    assert.equal(result.sealedTurns?.has('turn-1') ?? false, false);
+  });
+
+  it('preserves existing high-water marks', () => {
+    const state = stateWithHighWater([['turn-1', 5]]);
+    const entries = [makeEntry({ turnId: 'turn-2', status: 'completed' })];
+    const result = sealAuthoritativeTurns(state, entries);
+    assert.equal(result.highWaterSeq.get('turn-1'), 5);
+    assert.ok(result.sealedTurns?.has('turn-2'));
+  });
+
+  it('preserves existing sealed turns', () => {
+    const state: ReconcilerState = {
+      highWaterSeq: new Map(),
+      sealedTurns: new Set(['turn-old']),
+    };
+    const entries = [makeEntry({ turnId: 'turn-new', status: 'completed' })];
+    const result = sealAuthoritativeTurns(state, entries);
+    assert.ok(result.sealedTurns?.has('turn-old'));
+    assert.ok(result.sealedTurns?.has('turn-new'));
+  });
+
+  it('skips entries with null turnId', () => {
+    const entries = [makeEntry({ turnId: null, status: 'completed' })];
+    const result = sealAuthoritativeTurns(createReconcilerState(), entries);
+    assert.equal(result.sealedTurns?.size ?? 0, 0);
+  });
+
+  it('returns same state reference when nothing new is sealed (empty entries)', () => {
+    const state = createReconcilerState();
+    const result = sealAuthoritativeTurns(state, []);
+    assert.equal(result, state, 'expected referential identity on no-op');
+  });
+
+  it('returns same state reference when all turns are already sealed', () => {
+    const state: ReconcilerState = {
+      highWaterSeq: new Map(),
+      sealedTurns: new Set(['turn-1']),
+    };
+    const entries = [makeEntry({ turnId: 'turn-1', status: 'completed' })];
+    const result = sealAuthoritativeTurns(state, entries);
+    assert.equal(result, state, 'expected referential identity when turn already sealed');
+  });
+
+  it('returns same state reference when entries have no sealable turns', () => {
+    const state = createReconcilerState();
+    const entries = [makeEntry({ turnId: 'turn-1', status: 'streaming' })];
+    const result = sealAuthoritativeTurns(state, entries);
+    assert.equal(result, state, 'expected referential identity for non-terminal turns');
+  });
+});
+
+// ─── isStaleEvent with sealed turns ─────────────────────────────────────────
+
+describe('isStaleEvent with sealed turns', () => {
+  it('returns true for events targeting a sealed turn', () => {
+    const state: ReconcilerState = {
+      highWaterSeq: new Map(),
+      sealedTurns: new Set(['turn-1']),
+    };
+    const event = makeEvent({ seq: 100, turnId: 'turn-1' });
+    assert.equal(isStaleEvent(event, state), true);
+  });
+
+  it('returns false for events targeting an unsealed turn', () => {
+    const state: ReconcilerState = {
+      highWaterSeq: new Map(),
+      sealedTurns: new Set(['turn-other']),
+    };
+    const event = makeEvent({ seq: 1, turnId: 'turn-1' });
+    assert.equal(isStaleEvent(event, state), false);
+  });
+
+  it('sealed turn check takes precedence over high-water', () => {
+    const state: ReconcilerState = {
+      highWaterSeq: new Map([['turn-1', 0]]),
+      sealedTurns: new Set(['turn-1']),
+    };
+    // seq 100 is above high-water 0, but turn is sealed
+    const event = makeEvent({ seq: 100, turnId: 'turn-1' });
+    assert.equal(isStaleEvent(event, state), true);
+  });
+
+  it('works with empty sealedTurns (backward-compatible)', () => {
+    const state = stateWithHighWater([['turn-1', 5]]);
+    const event = makeEvent({ seq: 3, turnId: 'turn-1' });
+    assert.equal(isStaleEvent(event, state), true);
+  });
+});
+
+// ─── mergeAuthoritativeEntries ──────────────────────────────────────────────
+
+describe('mergeAuthoritativeEntries', () => {
+  it('returns REST entries when no current entries exist', () => {
+    const rest = [
+      makeEntry({ entryId: 'turn-a', turnId: 'turn-a', status: 'completed' }),
+      makeEntry({ entryId: 'turn-b', turnId: 'turn-b', status: 'completed' }),
+    ];
+    const result = mergeAuthoritativeEntries(rest, []);
+    assert.equal(result.length, 2);
+    assert.equal(result[0].turnId, 'turn-a');
+    assert.equal(result[1].turnId, 'turn-b');
+  });
+
+  it('returns current entries when REST is empty', () => {
+    const current = [makeEntry({ entryId: 'turn-a', turnId: 'turn-a', status: 'streaming' })];
+    const result = mergeAuthoritativeEntries([], current);
+    assert.equal(result.length, 1);
+    assert.equal(result[0].turnId, 'turn-a');
+  });
+
+  it('appends stream-only turn entries after REST entries', () => {
+    const rest = [makeEntry({ entryId: 'turn-a', turnId: 'turn-a', status: 'completed' })];
+    const current = [
+      makeEntry({ entryId: 'turn-a', turnId: 'turn-a', status: 'completed' }),
+      makeEntry({ entryId: 'turn-b', turnId: 'turn-b', status: 'streaming' }),
+    ];
+    const result = mergeAuthoritativeEntries(rest, current);
+    assert.equal(result.length, 2);
+    assert.equal(result[0].turnId, 'turn-a');
+    assert.equal(result[1].turnId, 'turn-b');
+    assert.equal(result[1].status, 'streaming');
+  });
+
+  it('preserves stream artifacts for completed turns in both REST and stream', () => {
+    const rest = [
+      makeEntry({ entryId: 'turn-a', turnId: 'turn-a', status: 'completed', artifacts: [] }),
+    ];
+    const current = [
+      makeEntry({
+        entryId: 'turn-a',
+        turnId: 'turn-a',
+        status: 'completed',
+        artifacts: [{ artifactId: 'art-1', kind: 'file', label: 'f.ts', availability: 'listed' }],
+      }),
+    ];
+    const result = mergeAuthoritativeEntries(rest, current);
+    assert.equal(result[0].artifacts.length, 1);
+    assert.equal(result[0].artifacts[0].artifactId, 'art-1');
+  });
+
+  it('preserves stream prompt for completed turns in both REST and stream', () => {
+    const rest = [
+      makeEntry({ entryId: 'turn-a', turnId: 'turn-a', status: 'completed', prompt: null }),
+    ];
+    const current = [
+      makeEntry({
+        entryId: 'turn-a',
+        turnId: 'turn-a',
+        status: 'completed',
+        prompt: {
+          promptId: 'p1',
+          parentTurnId: 'turn-a',
+          status: 'resolved',
+          allowedResponses: [],
+          contextBlocks: [],
+          lastResponseSummary: 'ok',
+          errorMessage: null,
+          staleReason: null,
+        },
+      }),
+    ];
+    const result = mergeAuthoritativeEntries(rest, current);
+    assert.equal(result[0].prompt?.promptId, 'p1');
+  });
+
+  it('preserves stream controls for completed turns in both REST and stream', () => {
+    const rest = [
+      makeEntry({ entryId: 'turn-a', turnId: 'turn-a', status: 'completed', controls: [] }),
+    ];
+    const current = [
+      makeEntry({
+        entryId: 'turn-a',
+        turnId: 'turn-a',
+        status: 'completed',
+        controls: [{ controlId: 'c1', kind: 'retry', enabled: true, reasonDisabled: null }],
+      }),
+    ];
+    const result = mergeAuthoritativeEntries(rest, current);
+    assert.equal(result[0].controls.length, 1);
+    assert.equal(result[0].controls[0].controlId, 'c1');
+  });
+
+  it('uses REST content and status for turns in both REST and stream', () => {
+    const rest = [
+      makeEntry({
+        entryId: 'turn-a',
+        turnId: 'turn-a',
+        status: 'completed',
+        contentBlocks: [
+          { blockId: 'blk-1', kind: 'text', text: 'REST authoritative content', metadata: null },
+        ],
+      }),
+    ];
+    const current = [
+      makeEntry({
+        entryId: 'turn-a',
+        turnId: 'turn-a',
+        status: 'streaming',
+        contentBlocks: [
+          { blockId: 'blk-1', kind: 'text', text: 'stale stream partial', metadata: null },
+        ],
+      }),
+    ];
+    const result = mergeAuthoritativeEntries(rest, current);
+    assert.equal(result[0].status, 'completed');
+    assert.equal(result[0].contentBlocks[0].text, 'REST authoritative content');
+  });
+
+  it('preserves streamed content for shared non-terminal turns when REST is stale', () => {
+    const rest = [
+      makeEntry({
+        entryId: 'turn-a',
+        turnId: 'turn-a',
+        status: 'submitted',
+        contentBlocks: [{ blockId: 'blk-1', kind: 'text', text: 'Hel', metadata: null }],
+      }),
+    ];
+    const current = [
+      makeEntry({
+        entryId: 'turn-a',
+        turnId: 'turn-a',
+        status: 'streaming',
+        contentBlocks: [{ blockId: 'blk-1', kind: 'text', text: 'Hello world', metadata: null }],
+      }),
+    ];
+
+    const result = mergeAuthoritativeEntries(rest, current);
+
+    assert.equal(result[0].status, 'streaming');
+    assert.equal(result[0].contentBlocks[0].text, 'Hello world');
+  });
+
+  it('prefers REST content for non-terminal turns when REST snapshot is richer', () => {
+    const rest = [
+      makeEntry({
+        entryId: 'turn-a',
+        turnId: 'turn-a',
+        status: 'streaming',
+        contentBlocks: [{ blockId: 'blk-1', kind: 'text', text: 'Hello world', metadata: null }],
+      }),
+    ];
+    const current = [
+      makeEntry({
+        entryId: 'turn-a',
+        turnId: 'turn-a',
+        status: 'streaming',
+        contentBlocks: [{ blockId: 'blk-1', kind: 'text', text: 'Hello', metadata: null }],
+      }),
+    ];
+
+    const result = mergeAuthoritativeEntries(rest, current);
+
+    assert.equal(result[0].status, 'streaming');
+    assert.equal(
+      result[0].contentBlocks[0].text,
+      'Hello world',
+      'REST snapshot with richer content should win over stale streamed partial',
+    );
+  });
+
+  it('prefers streamed content when both non-terminal sources have equal richness', () => {
+    const rest = [
+      makeEntry({
+        entryId: 'turn-a',
+        turnId: 'turn-a',
+        status: 'submitted',
+        contentBlocks: [{ blockId: 'blk-1', kind: 'text', text: 'same', metadata: null }],
+      }),
+    ];
+    const current = [
+      makeEntry({
+        entryId: 'turn-a',
+        turnId: 'turn-a',
+        status: 'streaming',
+        contentBlocks: [{ blockId: 'blk-1', kind: 'text', text: 'same', metadata: null }],
+      }),
+    ];
+
+    const result = mergeAuthoritativeEntries(rest, current);
+
+    assert.equal(result[0].status, 'streaming', 'Streamed wins on equal richness');
+    assert.equal(result[0].contentBlocks[0].text, 'same');
+  });
+
+  it('takes REST content but preserves streamed status when streamed is more advanced', () => {
+    const rest = [
+      makeEntry({
+        entryId: 'turn-a',
+        turnId: 'turn-a',
+        status: 'submitted',
+        contentBlocks: [
+          { blockId: 'blk-1', kind: 'text', text: 'Hello world from REST', metadata: null },
+        ],
+      }),
+    ];
+    const current = [
+      makeEntry({
+        entryId: 'turn-a',
+        turnId: 'turn-a',
+        status: 'streaming',
+        contentBlocks: [{ blockId: 'blk-1', kind: 'text', text: 'Hello', metadata: null }],
+      }),
+    ];
+
+    const result = mergeAuthoritativeEntries(rest, current);
+
+    assert.equal(
+      result[0].contentBlocks[0].text,
+      'Hello world from REST',
+      'REST content should win when richer',
+    );
+    assert.equal(
+      result[0].status,
+      'streaming',
+      'Streamed status must be preserved when more advanced, even if REST content wins',
+    );
+  });
+
+  it('appends non-turn stream-only entries (activity-group)', () => {
+    const rest = [makeEntry({ entryId: 'turn-a', turnId: 'turn-a', status: 'completed' })];
+    const current = [
+      makeEntry({ entryId: 'turn-a', turnId: 'turn-a', status: 'completed' }),
+      makeEntry({
+        entryId: 'turn-a-activity',
+        kind: 'activity-group',
+        turnId: 'turn-a',
+        status: 'active',
+      }),
+    ];
+    const result = mergeAuthoritativeEntries(rest, current);
+    assert.equal(result.length, 2);
+    assert.equal(result[1].kind, 'activity-group');
+  });
+
+  it('does not duplicate entries present in both REST and stream', () => {
+    const rest = [
+      makeEntry({ entryId: 'turn-a', turnId: 'turn-a', status: 'completed' }),
+      makeEntry({ entryId: 'turn-b', turnId: 'turn-b', status: 'completed' }),
+    ];
+    const current = [
+      makeEntry({ entryId: 'turn-a', turnId: 'turn-a', status: 'completed' }),
+      makeEntry({ entryId: 'turn-b', turnId: 'turn-b', status: 'completed' }),
+    ];
+    const result = mergeAuthoritativeEntries(rest, current);
+    assert.equal(result.length, 2);
+  });
+
+  it('does not duplicate non-turn entries with matching entryId in REST', () => {
+    const sysEntry = makeEntry({
+      entryId: 'turn-a-warning-1',
+      kind: 'system-status',
+      turnId: 'turn-a',
+      status: 'warning',
+    });
+    const rest = [
+      makeEntry({ entryId: 'turn-a', turnId: 'turn-a', status: 'completed' }),
+      sysEntry,
+    ];
+    const current = [
+      makeEntry({ entryId: 'turn-a', turnId: 'turn-a', status: 'completed' }),
+      sysEntry,
+    ];
+    const result = mergeAuthoritativeEntries(rest, current);
+    const sysEntries = result.filter((e) => e.kind === 'system-status');
+    assert.equal(sysEntries.length, 1);
+  });
+
+  it('does not mutate input arrays', () => {
+    const rest = [makeEntry({ entryId: 'turn-a', turnId: 'turn-a', status: 'completed' })];
+    const current = [makeEntry({ entryId: 'turn-b', turnId: 'turn-b', status: 'streaming' })];
+    const restCopy = [...rest];
+    const currentCopy = [...current];
+    mergeAuthoritativeEntries(rest, current);
+    assert.deepStrictEqual(rest, restCopy);
+    assert.deepStrictEqual(current, currentCopy);
+  });
+
+  it('coerces actionable streamed prompt to stale when REST turn is terminal', () => {
+    const pendingPrompt = {
+      promptId: 'p1',
+      parentTurnId: 'turn-a',
+      status: 'pending' as const,
+      allowedResponses: [{ key: 'approve', label: 'Approve' }],
+      contextBlocks: [],
+      lastResponseSummary: null,
+      errorMessage: null,
+      staleReason: null,
+    };
+
+    const rest = [
+      makeEntry({ entryId: 'turn-a', turnId: 'turn-a', status: 'completed', prompt: null }),
+    ];
+    const current = [
+      makeEntry({
+        entryId: 'turn-a',
+        turnId: 'turn-a',
+        status: 'streaming',
+        prompt: pendingPrompt,
+      }),
+    ];
+
+    const result = mergeAuthoritativeEntries(rest, current);
+
+    assert.notEqual(
+      result[0].prompt,
+      null,
+      'prompt should still be present (coerced, not dropped)',
+    );
+    assert.equal(result[0].prompt!.status, 'stale', 'prompt must be coerced to stale');
+    assert.equal(
+      result[0].prompt!.staleReason,
+      'turn-completed',
+      'staleReason should indicate the turn completed',
+    );
+  });
+
+  it('coerces error-status streamed prompt to stale when REST turn is failed', () => {
+    const errorPrompt = {
+      promptId: 'p2',
+      parentTurnId: 'turn-a',
+      status: 'error' as const,
+      allowedResponses: [],
+      contextBlocks: [],
+      lastResponseSummary: null,
+      errorMessage: 'submission failed',
+      staleReason: null,
+    };
+
+    const rest = [
+      makeEntry({ entryId: 'turn-a', turnId: 'turn-a', status: 'failed', prompt: null }),
+    ];
+    const current = [
+      makeEntry({ entryId: 'turn-a', turnId: 'turn-a', status: 'streaming', prompt: errorPrompt }),
+    ];
+
+    const result = mergeAuthoritativeEntries(rest, current);
+
+    assert.equal(result[0].prompt!.status, 'stale');
+  });
+
+  it('coerces responding streamed prompt to stale when REST turn is terminal', () => {
+    const respondingPrompt = {
+      promptId: 'p2b',
+      parentTurnId: 'turn-a',
+      status: 'responding' as const,
+      allowedResponses: [],
+      contextBlocks: [],
+      lastResponseSummary: null,
+      errorMessage: null,
+      staleReason: null,
+    };
+
+    const rest = [
+      makeEntry({ entryId: 'turn-a', turnId: 'turn-a', status: 'completed', prompt: null }),
+    ];
+    const current = [
+      makeEntry({
+        entryId: 'turn-a',
+        turnId: 'turn-a',
+        status: 'streaming',
+        prompt: respondingPrompt,
+      }),
+    ];
+
+    const result = mergeAuthoritativeEntries(rest, current);
+
+    assert.equal(result[0].prompt!.status, 'stale');
+    assert.equal(result[0].prompt!.staleReason, 'turn-completed');
+  });
+
+  it('preserves terminal (resolved) streamed prompt on terminal REST turn', () => {
+    const resolvedPrompt = {
+      promptId: 'p3',
+      parentTurnId: 'turn-a',
+      status: 'resolved' as const,
+      allowedResponses: [],
+      contextBlocks: [],
+      lastResponseSummary: 'approved',
+      errorMessage: null,
+      staleReason: null,
+    };
+
+    const rest = [
+      makeEntry({ entryId: 'turn-a', turnId: 'turn-a', status: 'completed', prompt: null }),
+    ];
+    const current = [
+      makeEntry({
+        entryId: 'turn-a',
+        turnId: 'turn-a',
+        status: 'completed',
+        prompt: resolvedPrompt,
+      }),
+    ];
+
+    const result = mergeAuthoritativeEntries(rest, current);
+
+    assert.equal(
+      result[0].prompt!.status,
+      'resolved',
+      'resolved prompt should be preserved as-is on terminal turn',
+    );
+  });
+
+  it('does not leave terminal REST turn actionable in pending-prompt selection', () => {
+    const pendingPrompt = {
+      promptId: 'p4',
+      parentTurnId: 'turn-a',
+      status: 'pending' as const,
+      allowedResponses: [{ key: 'approve', label: 'Approve' }],
+      contextBlocks: [],
+      lastResponseSummary: null,
+      errorMessage: null,
+      staleReason: null,
+    };
+
+    for (const terminalStatus of ['completed', 'failed', 'cancelled']) {
+      const rest = [
+        makeEntry({
+          entryId: 'turn-a',
+          turnId: 'turn-a',
+          status: terminalStatus,
+          prompt: null,
+        }),
+      ];
+      const current = [
+        makeEntry({
+          entryId: 'turn-a',
+          turnId: 'turn-a',
+          status: 'streaming',
+          prompt: pendingPrompt,
+        }),
+      ];
+
+      const result = mergeAuthoritativeEntries(rest, current);
+      const promptStatus = result[0].prompt?.status;
+
+      assert.notEqual(
+        promptStatus,
+        'pending',
+        `terminal REST status "${terminalStatus}" must not leave prompt actionable (pending)`,
+      );
+      assert.notEqual(
+        promptStatus,
+        'error',
+        `terminal REST status "${terminalStatus}" must not leave prompt actionable (error)`,
+      );
+    }
+  });
+});
+
+// ─── deduplicateEntries ─────────────────────────────────────────────────────
+
+describe('deduplicateEntries', () => {
+  it('returns entries unchanged when no duplicates', () => {
+    const entries = [
+      makeEntry({ entryId: 'e1', turnId: 'turn-1' }),
+      makeEntry({ entryId: 'e2', turnId: 'turn-2' }),
+    ];
+    const result = deduplicateEntries(entries);
+    assert.equal(result.length, 2);
+    assert.equal(result[0].entryId, 'e1');
+    assert.equal(result[1].entryId, 'e2');
+  });
+
+  it('removes duplicate turn entries by turnId keeping first occurrence', () => {
+    const entries = [
+      makeEntry({ entryId: 'e1', turnId: 'turn-1', status: 'completed' }),
+      makeEntry({ entryId: 'e2', turnId: 'turn-1', status: 'streaming' }),
+    ];
+    const result = deduplicateEntries(entries);
+    assert.equal(result.length, 1);
+    assert.equal(result[0].entryId, 'e1');
+    assert.equal(result[0].status, 'completed');
+  });
+
+  it('removes duplicate non-turn entries by entryId keeping first occurrence', () => {
+    const entries = [
+      makeEntry({ entryId: 'sys-1', kind: 'system-status', turnId: 'turn-1' }),
+      makeEntry({ entryId: 'sys-1', kind: 'system-status', turnId: 'turn-1' }),
+    ];
+    const result = deduplicateEntries(entries);
+    assert.equal(result.length, 1);
+  });
+
+  it('handles empty array', () => {
+    assert.deepStrictEqual(deduplicateEntries([]), []);
+  });
+
+  it('preserves order of unique entries', () => {
+    const entries = [
+      makeEntry({ entryId: 'e3', turnId: 'turn-3' }),
+      makeEntry({ entryId: 'e1', turnId: 'turn-1' }),
+      makeEntry({ entryId: 'e2', turnId: 'turn-2' }),
+    ];
+    const result = deduplicateEntries(entries);
+    assert.equal(result[0].entryId, 'e3');
+    assert.equal(result[1].entryId, 'e1');
+    assert.equal(result[2].entryId, 'e2');
+  });
+
+  it('handles mixed turn and non-turn entries with duplicates', () => {
+    const entries = [
+      makeEntry({ entryId: 'turn-a', turnId: 'turn-a', kind: 'turn' }),
+      makeEntry({ entryId: 'act-1', turnId: 'turn-a', kind: 'activity-group' }),
+      makeEntry({ entryId: 'turn-a-dup', turnId: 'turn-a', kind: 'turn' }),
+    ];
+    const result = deduplicateEntries(entries);
+    assert.equal(result.length, 2);
+    assert.equal(result[0].entryId, 'turn-a');
+    assert.equal(result[1].entryId, 'act-1');
   });
 });

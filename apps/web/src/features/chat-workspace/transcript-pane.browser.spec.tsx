@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { cleanup, fireEvent, render, screen, within } from '@testing-library/react';
 import type { ListConversationsResponse, LoadTurnHistoryResponse } from '@hydra/web-contracts';
 
@@ -6,11 +6,21 @@ import { AppProviders } from '../../app/providers.tsx';
 import { TranscriptPane } from './components/transcript-pane.tsx';
 import { TranscriptTurn } from './components/transcript-turn.tsx';
 import type { TranscriptEntryState, ContentBlockState } from './model/workspace-store.ts';
+import {
+  FakeWebSocket,
+  openAndSubscribe,
+  resetFakeWebSockets,
+} from './__tests__/browser-helpers.ts';
 
 const fetchSpy = vi.fn<typeof fetch>();
 
+beforeEach(() => {
+  vi.stubGlobal('WebSocket', FakeWebSocket);
+});
+
 afterEach(() => {
   fetchSpy.mockReset();
+  resetFakeWebSockets();
   vi.unstubAllGlobals();
   cleanup();
 });
@@ -666,7 +676,108 @@ describe('TranscriptPane', () => {
     expect(await screen.findByText('Failed to load transcript.')).toBeTruthy();
     fireEvent.click(screen.getByRole('button', { name: /retry transcript load/i }));
 
-    expect(await screen.findByText('Recovered transcript entry')).toBeTruthy();
+    expect(await screen.findByText('Recovered transcript entry')).toBeInTheDocument();
+    expect(historyAttempts).toBe(2);
+  });
+
+  // eslint-disable-next-line max-lines-per-function
+  it('disables send while transcript sync is pending or failed, then re-enables after recovery', async () => {
+    const conversations: ListConversationsResponse = {
+      conversations: [
+        {
+          id: 'conv-1',
+          title: 'Primary conversation',
+          status: 'active',
+          createdAt: '2026-03-20T00:00:00.000Z',
+          updatedAt: '2026-03-20T12:00:00.000Z',
+          turnCount: 1,
+          pendingInstructionCount: 0,
+        },
+      ],
+      totalCount: 1,
+    };
+    const history: LoadTurnHistoryResponse = {
+      turns: [
+        {
+          id: 'turn-1',
+          conversationId: 'conv-1',
+          position: 1,
+          kind: 'operator',
+          attribution: { type: 'operator', label: 'Operator' },
+          instruction: 'Recovered transcript entry',
+          status: 'completed',
+          createdAt: '2026-03-20T12:00:00.000Z',
+          completedAt: '2026-03-20T12:00:10.000Z',
+        },
+      ],
+      totalCount: 1,
+      hasMore: false,
+    };
+
+    let resolveFirstHistory: ((response: Response) => void) | undefined;
+    let historyAttempts = 0;
+
+    fetchSpy.mockImplementation((input) => {
+      const url = requestUrl(input);
+      if (url === '/conversations?status=active&limit=20') {
+        return Promise.resolve(
+          new Response(JSON.stringify(conversations), {
+            status: 200,
+            headers: { 'Content-Type': 'application/json' },
+          }),
+        );
+      }
+
+      if (url === '/conversations/conv-1/turns?limit=50') {
+        historyAttempts += 1;
+        if (historyAttempts === 1) {
+          return new Promise<Response>((resolve) => {
+            resolveFirstHistory = resolve;
+          });
+        }
+
+        return Promise.resolve(
+          new Response(JSON.stringify(history), {
+            status: 200,
+            headers: { 'Content-Type': 'application/json' },
+          }),
+        );
+      }
+
+      throw new Error(`Unexpected fetch input: ${url}`);
+    });
+    vi.stubGlobal('fetch', fetchSpy);
+
+    render(<AppProviders />);
+    await screen.findByRole('button', { name: /primary conversation/i });
+    openAndSubscribe('conv-1');
+
+    const instructionBox = screen.getByRole('textbox', { name: /instruction/i });
+    const sendButton = screen.getByRole('button', { name: /send/i });
+    fireEvent.change(instructionBox, { target: { value: 'Follow-up instruction' } });
+
+    expect(await screen.findByRole('status')).toHaveTextContent(/synchronizing workspace/i);
+    expect(sendButton.getAttribute('disabled')).not.toBeNull();
+
+    resolveFirstHistory?.(
+      new Response(JSON.stringify({ message: 'Temporary failure' }), {
+        status: 503,
+        statusText: 'Service Unavailable',
+        headers: { 'Content-Type': 'application/json' },
+      }),
+    );
+
+    expect(await screen.findAllByText(/sync error — transcript may be stale/i)).toHaveLength(2);
+    expect(sendButton.getAttribute('disabled')).not.toBeNull();
+
+    fireEvent.click(screen.getByRole('button', { name: /retry transcript load/i }));
+
+    expect(await screen.findByText('Recovered transcript entry')).toBeInTheDocument();
+    await vi.waitFor(() => {
+      expect(screen.queryByRole('alert')).toBeNull();
+      expect(screen.queryByRole('status')).toBeNull();
+      expect(sendButton.getAttribute('disabled')).toBeNull();
+    });
     expect(historyAttempts).toBe(2);
   });
 
@@ -822,6 +933,7 @@ describe('TranscriptPane', () => {
     render(<AppProviders />);
 
     expect(await screen.findByText('Initial instruction')).toBeTruthy();
+    openAndSubscribe('conv-1');
 
     fireEvent.change(screen.getByRole('textbox', { name: /instruction/i }), {
       target: { value: 'Follow-up instruction' },

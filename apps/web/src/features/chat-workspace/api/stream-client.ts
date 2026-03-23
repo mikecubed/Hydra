@@ -60,13 +60,31 @@ export interface StreamClientOptions {
 /**
  * Typed callbacks for every server→client message type.
  * All are optional — unset hooks are silently skipped.
+ *
+ * **Ordering note:** Stream-event frames that arrive before the server's
+ * `subscribed` acknowledgement are buffered internally.  When `subscribed`
+ * arrives the buffer is flushed — so `onStreamEvent` may fire one or more
+ * times *before* `onSubscribed` for the same conversation.  After
+ * `onSubscribed`, subsequent stream-events are dispatched immediately in
+ * wire order.  Do not assume `onSubscribed` always precedes `onStreamEvent`.
  */
 export interface StreamClientCallbacks {
   /** Called when the WebSocket connection opens. */
   onOpen?: () => void;
-  /** Incremental stream event for a conversation. */
+  /**
+   * Incremental stream event for a conversation.
+   *
+   * May fire before `onSubscribed` when the server sends stream-event
+   * frames that are buffered until the `subscribed` ack arrives (see
+   * ordering note on {@link StreamClientCallbacks}).
+   */
   onStreamEvent?: (conversationId: string, event: StreamEvent) => void;
-  /** Subscription confirmed with current server-side sequence. */
+  /**
+   * Subscription confirmed with current server-side sequence.
+   *
+   * Any stream-event frames buffered prior to this ack have already been
+   * flushed via `onStreamEvent` by the time this callback fires.
+   */
   onSubscribed?: (conversationId: string, currentSeq: number) => void;
   /** Unsubscription confirmed. */
   onUnsubscribed?: (conversationId: string) => void;
@@ -77,6 +95,8 @@ export interface StreamClientCallbacks {
   ) => void;
   /** Session nearing expiry — UI may show a warning. */
   onSessionExpiringSoon?: (expiresAt: string) => void;
+  /** Session returned to active after extension or recovery. */
+  onSessionActive?: (expiresAt: string) => void;
   /** Backend daemon is unreachable. */
   onDaemonUnavailable?: () => void;
   /** Backend daemon has recovered. */
@@ -149,6 +169,11 @@ const ServerSessionExpiringSoon = z.object({
   expiresAt: z.iso.datetime(),
 });
 
+const ServerSessionActive = z.object({
+  type: z.literal('session-active'),
+  expiresAt: z.iso.datetime(),
+});
+
 const ServerDaemonUnavailable = z.object({ type: z.literal('daemon-unavailable') });
 const ServerDaemonRestored = z.object({ type: z.literal('daemon-restored') });
 
@@ -216,6 +241,16 @@ function handleSessionExpiringSoon(
   return null;
 }
 
+function handleSessionActive(
+  msg: Record<string, unknown>,
+  cb: StreamClientCallbacks,
+): string | null {
+  const result = ServerSessionActive.safeParse(msg);
+  if (!result.success) return result.error.message;
+  cb.onSessionActive?.(result.data.expiresAt);
+  return null;
+}
+
 function handleDaemonUnavailable(
   msg: Record<string, unknown>,
   cb: StreamClientCallbacks,
@@ -260,6 +295,8 @@ function resolveHandler(messageType: string): MessageHandler | null {
       return handleSessionTerminated;
     case 'session-expiring-soon':
       return handleSessionExpiringSoon;
+    case 'session-active':
+      return handleSessionActive;
     case 'daemon-unavailable':
       return handleDaemonUnavailable;
     case 'daemon-restored':
@@ -271,34 +308,6 @@ function resolveHandler(messageType: string): MessageHandler | null {
   }
 }
 
-/** Parse, validate, and dispatch a single inbound server message. */
-function dispatchServerMessage(raw: string, callbacks: StreamClientCallbacks): void {
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(raw) as unknown;
-  } catch {
-    callbacks.onParseError?.(raw, 'Invalid JSON');
-    return;
-  }
-
-  if (!isRecord(parsed) || typeof parsed['type'] !== 'string') {
-    callbacks.onParseError?.(raw, 'Message missing "type" field');
-    return;
-  }
-
-  const messageType = parsed['type'];
-  const handler = resolveHandler(messageType);
-  if (!handler) {
-    callbacks.onParseError?.(raw, `Message has unknown type: "${messageType}"`);
-    return;
-  }
-
-  const validationError = handler(parsed, callbacks);
-  if (validationError !== null) {
-    callbacks.onParseError?.(raw, `Invalid "${messageType}" message: ${validationError}`);
-  }
-}
-
 // ─── Factory ────────────────────────────────────────────────────────────────
 
 /** Mutable internal state shared between the factory closure and helpers. */
@@ -307,6 +316,15 @@ interface ClientState {
   sendQueue: string[];
   /** Socket intentionally closed via close() whose async onclose hasn't fired yet. */
   pendingCloseSocket: WebSocketLike | null;
+  /**
+   * Conversations the local client has actively requested via `subscribe()`.
+   * Cleared by `unsubscribe()` / `close()`.  Unlike `liveSubscriptions` this
+   * tracks *intent* rather than server acknowledgement, so a late `subscribed`
+   * ack that arrives after `unsubscribe()` is safely ignored.
+   */
+  requestedSubscriptions: Set<string>;
+  liveSubscriptions: Set<string>;
+  bufferedReplayEvents: Map<string, Array<{ conversationId: string; event: StreamEvent }>>;
 }
 
 function requireSocket(state: ClientState): WebSocketLike {
@@ -336,6 +354,144 @@ function flushQueue(state: ClientState): void {
   }
 }
 
+function bufferReplayEvent(state: ClientState, conversationId: string, event: StreamEvent): void {
+  const queued = state.bufferedReplayEvents.get(conversationId) ?? [];
+  queued.push({ conversationId, event });
+  state.bufferedReplayEvents.set(conversationId, queued);
+}
+
+function flushBufferedReplayEvents(
+  state: ClientState,
+  conversationId: string,
+  callbacks: StreamClientCallbacks,
+): void {
+  const queued = state.bufferedReplayEvents.get(conversationId);
+  if (!queued || queued.length === 0) return;
+  state.bufferedReplayEvents.delete(conversationId);
+  for (const { event } of queued) {
+    callbacks.onStreamEvent?.(conversationId, event);
+  }
+}
+
+function parseInboundRecord(
+  raw: string,
+  callbacks: StreamClientCallbacks,
+): (Record<string, unknown> & { type: string }) | null {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw) as unknown;
+  } catch {
+    callbacks.onParseError?.(raw, 'Invalid JSON');
+    return null;
+  }
+
+  if (!isRecord(parsed) || typeof parsed['type'] !== 'string') {
+    callbacks.onParseError?.(raw, 'Message missing "type" field');
+    return null;
+  }
+
+  return parsed as Record<string, unknown> & { type: string };
+}
+
+function dispatchBufferedStreamEvent(
+  raw: string,
+  parsed: Record<string, unknown>,
+  state: ClientState,
+  callbacks: StreamClientCallbacks,
+): boolean {
+  if (parsed['type'] !== 'stream-event') return false;
+  const result = ServerStreamEvent.safeParse(parsed);
+  if (!result.success) {
+    callbacks.onParseError?.(raw, `Invalid "stream-event" message: ${result.error.message}`);
+    return true;
+  }
+
+  // Drop events for conversations the client no longer wants.
+  if (!state.requestedSubscriptions.has(result.data.conversationId)) return true;
+
+  if (state.liveSubscriptions.has(result.data.conversationId)) {
+    callbacks.onStreamEvent?.(result.data.conversationId, result.data.event);
+    return true;
+  }
+
+  bufferReplayEvent(state, result.data.conversationId, result.data.event);
+  return true;
+}
+
+function dispatchBufferedSubscribed(
+  raw: string,
+  parsed: Record<string, unknown>,
+  state: ClientState,
+  callbacks: StreamClientCallbacks,
+): boolean {
+  if (parsed['type'] !== 'subscribed') return false;
+  const result = ServerSubscribed.safeParse(parsed);
+  if (!result.success) {
+    callbacks.onParseError?.(raw, `Invalid "subscribed" message: ${result.error.message}`);
+    return true;
+  }
+
+  // Ignore late acks for conversations the client has already unsubscribed from.
+  if (!state.requestedSubscriptions.has(result.data.conversationId)) {
+    state.bufferedReplayEvents.delete(result.data.conversationId);
+    return true;
+  }
+
+  state.liveSubscriptions.add(result.data.conversationId);
+  flushBufferedReplayEvents(state, result.data.conversationId, callbacks);
+  callbacks.onSubscribed?.(result.data.conversationId, result.data.currentSeq);
+  return true;
+}
+
+function dispatchBufferedUnsubscribed(
+  raw: string,
+  parsed: Record<string, unknown>,
+  state: ClientState,
+  callbacks: StreamClientCallbacks,
+): boolean {
+  if (parsed['type'] !== 'unsubscribed') return false;
+  const result = ServerUnsubscribed.safeParse(parsed);
+  if (!result.success) {
+    callbacks.onParseError?.(raw, `Invalid "unsubscribed" message: ${result.error.message}`);
+    return true;
+  }
+
+  // Ignore stale unsubscribe acks for conversations the client has already
+  // re-requested locally. A later subscribe intent owns the current state.
+  if (state.requestedSubscriptions.has(result.data.conversationId)) {
+    return true;
+  }
+
+  state.liveSubscriptions.delete(result.data.conversationId);
+  state.bufferedReplayEvents.delete(result.data.conversationId);
+  callbacks.onUnsubscribed?.(result.data.conversationId);
+  return true;
+}
+
+function dispatchInboundMessage(
+  raw: string,
+  state: ClientState,
+  callbacks: StreamClientCallbacks,
+): void {
+  const parsed = parseInboundRecord(raw, callbacks);
+  if (!parsed) return;
+
+  if (dispatchBufferedStreamEvent(raw, parsed, state, callbacks)) return;
+  if (dispatchBufferedSubscribed(raw, parsed, state, callbacks)) return;
+  if (dispatchBufferedUnsubscribed(raw, parsed, state, callbacks)) return;
+
+  const handler = resolveHandler(parsed['type']);
+  if (!handler) {
+    callbacks.onParseError?.(raw, `Message has unknown type: "${parsed['type']}"`);
+    return;
+  }
+
+  const validationError = handler(parsed, callbacks);
+  if (validationError !== null) {
+    callbacks.onParseError?.(raw, `Invalid "${parsed['type']}" message: ${validationError}`);
+  }
+}
+
 function attachSocketHandlers(
   state: ClientState,
   ws: WebSocketLike,
@@ -349,7 +505,7 @@ function attachSocketHandlers(
   ws.onmessage = (ev) => {
     if (state.socket !== ws) return;
     const raw = typeof ev.data === 'string' ? ev.data : String(ev.data);
-    dispatchServerMessage(raw, callbacks);
+    dispatchInboundMessage(raw, state, callbacks);
   };
   ws.onerror = () => {
     if (state.socket !== ws) return;
@@ -360,6 +516,9 @@ function attachSocketHandlers(
       // Server-initiated close of the active socket.
       state.socket = null;
       state.sendQueue = [];
+      state.requestedSubscriptions.clear();
+      state.liveSubscriptions.clear();
+      state.bufferedReplayEvents.clear();
       callbacks.onClose?.(ev.code, ev.reason);
     } else if (state.pendingCloseSocket === ws) {
       // Client-initiated close() already cleared state.socket; the browser's
@@ -384,7 +543,14 @@ export function createStreamClient(options: StreamClientOptions): StreamClient {
   const createWs =
     options.createWebSocket ?? ((url: string) => new WebSocket(url) as WebSocketLike);
 
-  const state: ClientState = { socket: null, sendQueue: [], pendingCloseSocket: null };
+  const state: ClientState = {
+    socket: null,
+    sendQueue: [],
+    pendingCloseSocket: null,
+    requestedSubscriptions: new Set(),
+    liveSubscriptions: new Set(),
+    bufferedReplayEvents: new Map(),
+  };
 
   return {
     connect(callbacks) {
@@ -393,6 +559,9 @@ export function createStreamClient(options: StreamClientOptions): StreamClient {
       }
 
       state.sendQueue = [];
+      state.requestedSubscriptions.clear();
+      state.liveSubscriptions.clear();
+      state.bufferedReplayEvents.clear();
       // A new connection supersedes any socket pending its async onclose.
       state.pendingCloseSocket = null;
       const ws = createWs(baseUrl);
@@ -403,12 +572,18 @@ export function createStreamClient(options: StreamClientOptions): StreamClient {
     subscribe(conversationId, lastAcknowledgedSeq) {
       const msg: Record<string, unknown> = { type: 'subscribe', conversationId };
       if (lastAcknowledgedSeq !== undefined) msg['lastAcknowledgedSeq'] = lastAcknowledgedSeq;
+      state.requestedSubscriptions.add(conversationId);
+      state.liveSubscriptions.delete(conversationId);
+      state.bufferedReplayEvents.delete(conversationId);
       sendOrQueue(state, JSON.stringify(msg));
     },
 
     unsubscribe(conversationId) {
       // After close() or socket teardown, unsubscribe is a safe no-op.
       if (state.socket === null || state.socket.readyState > WS_OPEN) return;
+      state.requestedSubscriptions.delete(conversationId);
+      state.liveSubscriptions.delete(conversationId);
+      state.bufferedReplayEvents.delete(conversationId);
       sendOrQueue(state, JSON.stringify({ type: 'unsubscribe', conversationId }));
     },
 
@@ -419,6 +594,9 @@ export function createStreamClient(options: StreamClientOptions): StreamClient {
     close() {
       if (state.socket === null) return;
       state.sendQueue = [];
+      state.requestedSubscriptions.clear();
+      state.liveSubscriptions.clear();
+      state.bufferedReplayEvents.clear();
       state.pendingCloseSocket = state.socket;
       state.socket.close();
       state.socket = null;

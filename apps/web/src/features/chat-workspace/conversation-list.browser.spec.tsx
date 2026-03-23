@@ -1,7 +1,13 @@
-import { afterEach, describe, expect, it, vi } from 'vitest';
-import { cleanup, fireEvent, render, screen } from '@testing-library/react';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
 import type { ListConversationsResponse } from '@hydra/web-contracts';
 import { AppProviders } from '../../app/providers.tsx';
+import {
+  FakeWebSocket,
+  latestSocket,
+  openAndSubscribe,
+  resetFakeWebSockets,
+} from './__tests__/browser-helpers.ts';
 
 const fetchSpy = vi.fn<typeof fetch>();
 
@@ -11,8 +17,13 @@ const emptyHistoryResponse = {
   hasMore: false,
 };
 
+beforeEach(() => {
+  vi.stubGlobal('WebSocket', FakeWebSocket);
+});
+
 afterEach(() => {
   fetchSpy.mockReset();
+  resetFakeWebSockets();
   vi.unstubAllGlobals();
   cleanup();
 });
@@ -40,6 +51,12 @@ function requestUrl(input: RequestInfo | URL): string {
 function installFetchStub(handler: (url: string, init: RequestInit | undefined) => Response): void {
   fetchSpy.mockImplementation((input, init) => Promise.resolve(handler(requestUrl(input), init)));
   vi.stubGlobal('fetch', fetchSpy);
+}
+
+function openWorkspaceSocket(): void {
+  act(() => {
+    latestSocket().simulateOpen();
+  });
 }
 
 // eslint-disable-next-line max-lines-per-function
@@ -91,6 +108,7 @@ describe('workspace conversation browsing', () => {
     render(<AppProviders />);
 
     expect((await screen.findByRole('alert')).textContent).toContain('Service Unavailable');
+    openWorkspaceSocket();
 
     fireEvent.change(screen.getByRole('textbox', { name: /instruction/i }), {
       target: { value: 'Create a conversation anyway' },
@@ -128,6 +146,10 @@ describe('workspace conversation browsing', () => {
     expect(screen.getAllByText('Loading conversations…')).toHaveLength(2);
 
     resolveList?.(jsonResponse(listResponse));
+    await vi.waitFor(() => {
+      expect(() => latestSocket()).not.toThrow();
+    });
+    openWorkspaceSocket();
 
     expect(await screen.findByText('Ready for operator input')).toBeTruthy();
     const enabledTextbox = screen.getByRole('textbox', { name: /instruction/i });
@@ -223,6 +245,7 @@ describe('workspace conversation browsing', () => {
     render(<AppProviders />);
 
     const primaryButton = await screen.findByRole('button', { name: /primary conversation/i });
+    openAndSubscribe('conv-1');
     expect(primaryButton.getAttribute('aria-pressed')).toBe('true');
     expect(screen.getByText('Active conversation: Primary conversation')).toBeTruthy();
     expect(screen.getByRole('textbox', { name: /instruction/i })).toBeTruthy();
@@ -326,6 +349,7 @@ describe('workspace conversation browsing', () => {
 
     // Wait for the existing conversation to load and auto-select
     await screen.findByRole('button', { name: /existing conversation/i });
+    openAndSubscribe('conv-existing');
 
     // Enter create mode
     fireEvent.click(screen.getByRole('button', { name: /new conversation/i }));
@@ -425,6 +449,7 @@ describe('workspace conversation browsing', () => {
 
     // Initial list load fails
     expect((await screen.findByRole('alert')).textContent).toContain('Service Unavailable');
+    openWorkspaceSocket();
 
     // Create a conversation despite the failed list load
     fireEvent.change(screen.getByRole('textbox', { name: /instruction/i }), {
@@ -511,6 +536,7 @@ describe('workspace conversation browsing', () => {
     // Wait for list to load with initial turnCount of 1
     await screen.findByRole('button', { name: /active conversation/i });
     expect(screen.getByText('1 turns · 0 pending')).toBeTruthy();
+    openAndSubscribe('conv-1');
 
     // Submit a follow-up instruction
     fireEvent.change(screen.getByRole('textbox', { name: /instruction/i }), {

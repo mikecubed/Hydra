@@ -162,7 +162,7 @@ driven by the `lastAcknowledgedSeq` value supplied in a later `subscribe` messag
 
 ### Server → Client Messages
 
-The gateway sends eight message types to the client.
+The gateway sends nine message types to the client.
 
 #### `stream-event`
 
@@ -248,6 +248,27 @@ session (e.g., `POST /session/extend`) to avoid disconnection.
 }
 ```
 
+#### `session-active`
+
+Authoritative session-health signal. Sent in two scenarios:
+
+1. **Recovery** — the bound session returns to `active` after a warning-window extension or other
+   session-state recovery.
+2. **Fresh bind / reconnect bootstrap** — the session is already active when the client connects (or
+   reconnects). The gateway sends `session-active` so the client can treat the included `expiresAt`
+   as the canonical session deadline and clear any stale expiry warnings left over from a previous
+   connection.
+
+In both cases the browser should replace its cached `expiresAt`, clear any `expiring-soon` warning
+banner, and treat the session as healthy.
+
+```json
+{
+  "type": "session-active",
+  "expiresAt": "2025-01-15T11:15:00.000Z"
+}
+```
+
 #### `session-terminated`
 
 The session has ended. The connection will close shortly after this message.
@@ -278,7 +299,11 @@ recovery.
 
 #### `daemon-restored`
 
-The daemon is reachable again after a period of unavailability.
+The daemon is reachable again after a period of unavailability. The gateway also
+sends this message as a bootstrap signal on fresh WebSocket bind (or reconnect)
+when the session is already in a healthy `active` or `expiring-soon` state — this
+lets reconnecting clients clear any stale degraded-daemon UI state left over from
+a prior connection.
 
 ```json
 {
@@ -521,6 +546,7 @@ sequenceDiagram
     Note over Browser: Extend session via POST /session/extend
 
     alt Session extended
+        Gateway->>Browser: { type: "session-active", expiresAt: "2025-01-15T11:15:00Z" }
         Note over Gateway: New expiry; fresh warning scheduled if needed
     else Session not extended
         Gateway->>Browser: { type: "session-terminated", state: "expired" }
@@ -547,7 +573,8 @@ The `state` field indicates the cause:
 
 If the daemon becomes unreachable, the gateway sends `daemon-unavailable` to all active
 connections. Connections remain open during the grace period. When the daemon recovers, the gateway
-sends `daemon-restored`.
+sends `daemon-restored`. The gateway also sends `daemon-restored` as a bootstrap signal on fresh
+bind or reconnect when the session is already healthy, so clients can clear stale degraded state.
 
 ---
 
@@ -561,8 +588,8 @@ All connections for the same session are tracked independently in the connection
   `subscribe` message.
 - Events for a subscribed conversation are delivered to **every** connection subscribed to that
   conversation, not just one.
-- Session-level messages (`session-expiring-soon`, `session-terminated`) are broadcast to all
-  connections for the session.
+- Session-level messages (`session-expiring-soon`, `session-active`, `session-terminated`) are
+  broadcast to all connections for the session.
 
 ---
 

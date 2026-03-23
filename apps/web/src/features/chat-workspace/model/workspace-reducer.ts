@@ -18,7 +18,6 @@ import type {
   ConversationStatus,
   ConversationViewState,
   DraftSubmitState,
-  PromptStatus,
   PromptViewState,
   TranscriptEntryState,
   WorkspaceAction,
@@ -26,114 +25,12 @@ import type {
   WorkspaceState,
 } from './workspace-types.ts';
 
+import { mergePromptState } from './prompt-merge.ts';
+import { mergeAuthoritativeEntries } from './reconciler.ts';
+
 // ─── Internal helpers ───────────────────────────────────────────────────────
 
 const DEFAULT_SUBMISSION_POLICY_LABEL = 'Ready for operator input';
-
-/**
- * Prompt lifecycle status priority for merge conflict resolution.
- * Higher rank = more advanced in the lifecycle.
- */
-const PROMPT_STATUS_RANK: Record<PromptStatus, number> = {
-  pending: 0,
-  responding: 1,
-  error: 2,
-  stale: 3,
-  unavailable: 3,
-  resolved: 4,
-};
-
-function shouldPreferFallbackSummary(
-  preferred: PromptViewState,
-  fallback: PromptViewState,
-): boolean {
-  if (
-    preferred.status !== 'resolved' ||
-    fallback.status !== 'resolved' ||
-    preferred.lastResponseSummary == null ||
-    fallback.lastResponseSummary == null ||
-    preferred.lastResponseSummary === fallback.lastResponseSummary
-  ) {
-    return false;
-  }
-
-  return fallback.allowedResponses.some(
-    (choice) =>
-      typeof choice !== 'string' &&
-      choice.key === preferred.lastResponseSummary &&
-      choice.label === fallback.lastResponseSummary,
-  );
-}
-
-const TURN_STATUS_RANK: Readonly<Record<string, number>> = {
-  submitted: 0,
-  executing: 1,
-  streaming: 2,
-  completed: 3,
-  failed: 3,
-  cancelled: 3,
-};
-
-function measureEntryContent(entry: TranscriptEntryState): number {
-  return entry.contentBlocks.reduce(
-    (size, block) => size + block.blockId.length + (block.text?.length ?? 0),
-    0,
-  );
-}
-
-function shouldPreferStreamedTurn(
-  streamed: TranscriptEntryState,
-  rest: TranscriptEntryState,
-): boolean {
-  const streamedRank = TURN_STATUS_RANK[streamed.status] ?? 0;
-  const restRank = TURN_STATUS_RANK[rest.status] ?? 0;
-  if (streamedRank !== restRank) {
-    return streamedRank > restRank;
-  }
-
-  return measureEntryContent(streamed) > measureEntryContent(rest);
-}
-
-/**
- * Merge two prompt states for the same turn, preferring the more advanced
- * lifecycle state. Used during history merge where stream and REST may have
- * different views of the same prompt.
- */
-function mergePromptState(
-  streamPrompt: PromptViewState | null,
-  restPrompt: PromptViewState | null,
-): PromptViewState | null {
-  if (streamPrompt == null) return restPrompt;
-  if (restPrompt == null) return streamPrompt;
-
-  // Same prompt — prefer the more advanced lifecycle state
-  if (streamPrompt.promptId === restPrompt.promptId) {
-    const preserveStreamLifecycle =
-      (streamPrompt.status === 'responding' || streamPrompt.status === 'error') &&
-      (restPrompt.status === 'pending' || restPrompt.status === 'stale');
-    const streamRank = PROMPT_STATUS_RANK[streamPrompt.status];
-    const restRank = PROMPT_STATUS_RANK[restPrompt.status];
-    const preferred = preserveStreamLifecycle || restRank <= streamRank ? streamPrompt : restPrompt;
-    const fallback = preferred === streamPrompt ? restPrompt : streamPrompt;
-    const lastResponseSummary = shouldPreferFallbackSummary(preferred, fallback)
-      ? fallback.lastResponseSummary
-      : (preferred.lastResponseSummary ?? fallback.lastResponseSummary);
-    return {
-      ...preferred,
-      allowedResponses:
-        preferred.allowedResponses.length > 0
-          ? preferred.allowedResponses
-          : fallback.allowedResponses,
-      contextBlocks:
-        preferred.contextBlocks.length > 0 ? preferred.contextBlocks : fallback.contextBlocks,
-      lastResponseSummary,
-      errorMessage: preferred.errorMessage ?? fallback.errorMessage,
-    };
-  }
-
-  // Different prompts — stream is more recent
-  return streamPrompt;
-}
 
 function createConversationLineage(
   conversation: WorkspaceConversationRecord,
@@ -464,9 +361,10 @@ function applyConversationEntries(
  * Merge authoritative REST history into the conversation, preserving any
  * stream-owned entries for turns not present in the REST response.
  *
- * REST entries form the base (authoritative history). Stream entries whose
- * `turnId` does NOT appear in the REST set are appended at the end — these
- * represent in-flight or recently-started turns the server hasn't persisted yet.
+ * Delegates to `mergeAuthoritativeEntries` from the reconciler module for
+ * the pure entry-merge algorithm. For non-terminal REST turns the stream's
+ * status and contentBlocks are preserved (the stream is likely ahead of the
+ * last REST snapshot); for terminal turns REST is fully authoritative.
  *
  * Sets `historyLoaded: true` so the transcript loader knows not to re-fetch.
  */
@@ -478,61 +376,7 @@ function applyMergeHistory(
 ): WorkspaceState {
   const current = ensureConversation(state.conversations, conversationId);
   const nextConversations = new Map(state.conversations);
-  const currentTurnEntries = new Map(
-    current.entries
-      .filter((entry) => entry.kind === 'turn')
-      .map((entry) => [entry.turnId, entry] as const),
-  );
-
-  const mergedRestEntries = restEntries.map((entry) => {
-    if (entry.kind !== 'turn') {
-      return entry;
-    }
-
-    const streamed = currentTurnEntries.get(entry.turnId);
-    if (streamed == null) {
-      return entry;
-    }
-
-    const preferStreamedTurn = shouldPreferStreamedTurn(streamed, entry);
-    return {
-      ...entry,
-      status: preferStreamedTurn ? streamed.status : entry.status,
-      contentBlocks: preferStreamedTurn ? [...streamed.contentBlocks] : entry.contentBlocks,
-      artifacts: streamed.artifacts.length > 0 ? [...streamed.artifacts] : entry.artifacts,
-      controls: streamed.controls.length > 0 ? [...streamed.controls] : entry.controls,
-      prompt: mergePromptState(streamed.prompt, entry.prompt),
-    };
-  });
-
-  // Build a set of turnIds covered by REST history
-  const restTurnIds = new Set<string | null>();
-  for (const entry of mergedRestEntries) {
-    restTurnIds.add(entry.turnId);
-  }
-  // Also index by entryId for non-turn entries (activity-group, system-status)
-  const restEntryIds = new Set<string>();
-  for (const entry of mergedRestEntries) {
-    restEntryIds.add(entry.entryId);
-  }
-
-  // Collect stream-only entries: entries currently in state whose turnId
-  // (for kind='turn') or entryId is not covered by the REST response.
-  const streamOnly: TranscriptEntryState[] = [];
-  for (const entry of current.entries) {
-    if (entry.kind === 'turn') {
-      if (!restTurnIds.has(entry.turnId)) {
-        streamOnly.push(entry);
-      }
-    } else {
-      // Non-turn entries (activity-group, system-status) — keep if not in REST
-      if (!restEntryIds.has(entry.entryId)) {
-        streamOnly.push(entry);
-      }
-    }
-  }
-
-  const merged = [...mergedRestEntries, ...streamOnly];
+  const merged = mergeAuthoritativeEntries(restEntries, current.entries);
 
   nextConversations.set(conversationId, {
     ...current,

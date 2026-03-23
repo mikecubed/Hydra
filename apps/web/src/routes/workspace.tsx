@@ -14,6 +14,10 @@ import {
 import { WorkspaceLayout } from '../features/chat-workspace/components/workspace-layout.tsx';
 import { ComposerPanel } from '../features/chat-workspace/components/composer-panel.tsx';
 import {
+  ConnectionBanner,
+  ConnectionStateContext,
+} from '../features/chat-workspace/components/connection-banner.tsx';
+import {
   GatewayRequestError,
   createGatewayClient,
 } from '../features/chat-workspace/api/gateway-client.ts';
@@ -37,6 +41,7 @@ import {
   type WorkspaceState,
   type WorkspaceStore,
 } from '../features/chat-workspace/model/workspace-store.ts';
+import { sealSubscriptionAfterMerge } from '../features/chat-workspace/model/stream-subscription.ts';
 import {
   pickBestApprovalPerTurn,
   selectHydratedApprovalPrompt,
@@ -55,6 +60,7 @@ import {
   resolveResponseLabel,
   respondToPrompt,
 } from '../features/chat-workspace/model/prompt-helpers.ts';
+import { canSubmitWork, describeConnectionState } from '../shared/session-state.ts';
 
 function useWorkspaceState(store: WorkspaceStore) {
   return useSyncExternalStore(
@@ -160,14 +166,19 @@ function createTranscriptLoaderEffect(
   activeConversationId: string | null,
   approvalRetryCountsRef: RefObject<Map<string, number>>,
   setRetryNonce: Dispatch<SetStateAction<number>>,
+  sealAfterMerge: SealAfterMergeFn,
 ): () => void {
   if (activeConversationId == null) {
+    store.dispatch({ type: 'connection/merge', patch: { syncStatus: 'idle' } });
     return () => {};
   }
 
   const conversationId = activeConversationId;
   const existing = store.getState().conversations.get(conversationId);
   const shouldLoadHistory = existing?.historyLoaded !== true;
+  if (!shouldLoadHistory) {
+    store.dispatch({ type: 'connection/merge', patch: { syncStatus: 'idle' } });
+  }
 
   const lifecycle = { disposed: false };
   let retryTimer: ReturnType<typeof setTimeout> | null = null;
@@ -187,6 +198,7 @@ function createTranscriptLoaderEffect(
 
   void (async () => {
     if (shouldLoadHistory) {
+      store.dispatch({ type: 'connection/merge', patch: { syncStatus: 'syncing' } });
       store.dispatch({
         type: 'conversation/set-load-state',
         conversationId,
@@ -206,6 +218,16 @@ function createTranscriptLoaderEffect(
       }
 
       applyTranscriptLoadResult(store, conversationId, response, pendingApprovals);
+      if (response != null) {
+        store.dispatch({
+          type: 'connection/merge',
+          patch: {
+            syncStatus:
+              store.getState().connection.transportStatus === 'live' ? 'recovered' : 'idle',
+          },
+        });
+        sealAfterMerge(conversationId, response.turns.map(toTranscriptEntry));
+      }
 
       if (pendingApprovals != null) {
         approvalRetryCountsRef.current.delete(conversationId);
@@ -216,6 +238,7 @@ function createTranscriptLoaderEffect(
       }
 
       markTranscriptLoadError(store, conversationId, err);
+      store.dispatch({ type: 'connection/merge', patch: { syncStatus: 'error' } });
     }
   })();
 
@@ -251,13 +274,18 @@ export interface StreamSubscriptionDeps {
  * - Acknowledges processed events for server-side buffer cleanup.
  * - Reconnects with exponential backoff on unexpected socket close.
  */
+export type SealAfterMergeFn = (
+  conversationId: string,
+  entries: readonly TranscriptEntryState[],
+) => void;
+
 // eslint-disable-next-line max-lines-per-function
 function useStreamSubscription({
   store,
   streamClient,
   client,
   activeConversationId,
-}: StreamSubscriptionDeps): void {
+}: StreamSubscriptionDeps): SealAfterMergeFn {
   // Per-conversation reconciler + seq state — survives conversation switches
   const stateMapRef = useRef<Map<string, StreamSubscriptionState>>(new Map());
   const activeIdRef = useRef<string | null>(null);
@@ -382,7 +410,10 @@ function useStreamSubscription({
       if (reconnectAttemptRef.current >= RECONNECT_MAX_ATTEMPTS) {
         store.dispatch({
           type: 'connection/merge',
-          patch: { transportStatus: 'disconnected' },
+          patch: {
+            transportStatus: 'disconnected',
+            reconnectAttempt: reconnectAttemptRef.current,
+          },
         });
         console.warn('[stream] Max reconnect attempts reached');
         return;
@@ -396,7 +427,10 @@ function useStreamSubscription({
 
       store.dispatch({
         type: 'connection/merge',
-        patch: { transportStatus: 'reconnecting' },
+        patch: {
+          transportStatus: 'reconnecting',
+          reconnectAttempt: reconnectAttemptRef.current,
+        },
       });
 
       reconnectTimerRef.current = setTimeout(() => {
@@ -500,6 +534,13 @@ function useStreamSubscription({
       }
     };
   }, [activeConversationId, streamClient]);
+
+  // Expose the subscription stateMap so the transcript loader can seal turns
+  // after authoritative REST merges — prevents post-reconnect replays from
+  // mutating REST-finalized turns.
+  return useCallback((conversationId: string, entries: readonly TranscriptEntryState[]) => {
+    sealSubscriptionAfterMerge(stateMapRef.current, conversationId, entries);
+  }, []);
 }
 
 function toWorkspaceConversationRecord(conversation: Conversation): WorkspaceConversationRecord {
@@ -663,6 +704,44 @@ function resolveComposerSubmitState(
   return 'idle';
 }
 
+function resolveComposerPolicyLabel(
+  isLoadingConversations: boolean,
+  connectionCanSubmit: boolean,
+  state: WorkspaceState,
+  activeConversation:
+    | {
+        readonly controlState: {
+          readonly submissionPolicyLabel: string;
+        };
+      }
+    | undefined,
+): string {
+  if (isLoadingConversations) {
+    return 'Loading conversations…';
+  }
+
+  if (!connectionCanSubmit) {
+    return describeConnectionState(state.connection);
+  }
+
+  return activeConversation?.controlState.submissionPolicyLabel ?? 'Ready for operator input';
+}
+
+function resolveComposerCanSubmit(
+  isCreateMode: boolean,
+  isLoadingConversations: boolean,
+  connectionCanSubmit: boolean,
+  continueCanSubmit: boolean,
+  createCanSubmit: boolean,
+): boolean {
+  if (isLoadingConversations && !isCreateMode) {
+    return false;
+  }
+
+  const draftCanSubmit = isCreateMode ? createCanSubmit : continueCanSubmit;
+  return connectionCanSubmit && draftCanSubmit;
+}
+
 function useConversationListLoader(store: WorkspaceStore, client: GatewayClient) {
   const [isLoadingConversations, setIsLoadingConversations] = useState(true);
   const [conversationErrorMessage, setConversationErrorMessage] = useState<string | null>(null);
@@ -732,6 +811,7 @@ function useTranscriptLoader(
   store: WorkspaceStore,
   client: GatewayClient,
   activeConversationId: string | null,
+  sealAfterMerge: SealAfterMergeFn,
 ) {
   const [retryNonce, setRetryNonce] = useState(0);
   const approvalRetryCountsRef = useRef(new Map<string, number>());
@@ -744,8 +824,9 @@ function useTranscriptLoader(
         activeConversationId,
         approvalRetryCountsRef,
         setRetryNonce,
+        sealAfterMerge,
       ),
-    [activeConversationId, client, retryNonce, store],
+    [activeConversationId, client, retryNonce, sealAfterMerge, store],
   );
 
   return useCallback(() => {
@@ -769,6 +850,7 @@ function useComposerProps(
   const isCreateMode = !isLoadingConversations && state.activeConversationId == null;
   const draft = selectActiveDraft(state);
   const activeConversation = selectActiveConversation(state);
+  const connectionCanSubmit = canSubmitWork(state.connection);
   const continueCanSubmit = selectCanSubmit(state);
   const createCanSubmit = selectCreateModeCanSubmit(createDraftText, createSubmitting, createError);
 
@@ -829,13 +911,19 @@ function useComposerProps(
     store,
   ]);
 
-  const policyLabel = isLoadingConversations
-    ? 'Loading conversations…'
-    : (activeConversation?.controlState.submissionPolicyLabel ?? 'Ready for operator input');
-  let canSubmit = createCanSubmit;
-  if (!isCreateMode) {
-    canSubmit = isLoadingConversations ? false : continueCanSubmit;
-  }
+  const policyLabel = resolveComposerPolicyLabel(
+    isLoadingConversations,
+    connectionCanSubmit,
+    state,
+    activeConversation,
+  );
+  const canSubmit = resolveComposerCanSubmit(
+    isCreateMode,
+    isLoadingConversations,
+    connectionCanSubmit,
+    continueCanSubmit,
+    createCanSubmit,
+  );
 
   return {
     draftText: isCreateMode ? createDraftText : (draft?.draftText ?? ''),
@@ -895,15 +983,23 @@ export function WorkspaceRoute(): JSX.Element {
     clearConversationError,
     reloadConversationList,
   } = useConversationListLoader(store, client);
-  const retryActiveTranscript = useTranscriptLoader(store, client, state.activeConversationId);
 
-  // Wire live stream subscription scoped to active conversation
-  useStreamSubscription({
+  // Wire live stream subscription scoped to active conversation.
+  // Returns a seal callback used by the transcript loader to protect
+  // REST-finalized turns from post-reconnect stream replays.
+  const sealAfterMerge = useStreamSubscription({
     store,
     streamClient: wsStreamClient,
     client,
     activeConversationId: state.activeConversationId,
   });
+
+  const retryActiveTranscript = useTranscriptLoader(
+    store,
+    client,
+    state.activeConversationId,
+    sealAfterMerge,
+  );
 
   const activeConversation = selectActiveConversation(state);
   const composer = useComposerProps(
@@ -917,39 +1013,42 @@ export function WorkspaceRoute(): JSX.Element {
   const handleRespondToPrompt = usePromptResponder(store, client);
 
   return (
-    <WorkspaceLayout
-      conversations={selectConversationList(state)}
-      activeConversationId={state.activeConversationId}
-      activeConversation={activeConversation}
-      activeEntries={selectActiveEntries(state)}
-      activeLoadState={selectActiveLoadState(state)}
-      activeHasMoreHistory={activeConversation?.hasMoreHistory ?? false}
-      isLoadingConversations={isLoadingConversations}
-      conversationErrorMessage={conversationErrorMessage}
-      onSelectConversation={(conversationId) => {
-        store.dispatch({ type: 'conversation/select', conversationId });
-        clearConversationError();
-        composer.clearCreateState();
-      }}
-      onStartNewConversation={() => {
-        store.dispatch({ type: 'conversation/select', conversationId: null });
-        clearConversationError();
-        composer.clearCreateState();
-      }}
-      onRetryActiveTranscript={retryActiveTranscript}
-      onRespondToPrompt={handleRespondToPrompt}
-      composerSlot={
-        <ComposerPanel
-          draftText={composer.draftText}
-          submitState={composer.submitState}
-          validationMessage={composer.validationMessage}
-          canSubmit={composer.canSubmit}
-          policyLabel={composer.policyLabel}
-          disabled={composer.disabled}
-          onDraftChange={composer.onDraftChange}
-          onSubmit={composer.onSubmit}
-        />
-      }
-    />
+    <ConnectionStateContext.Provider value={state.connection}>
+      <ConnectionBanner connection={state.connection} />
+      <WorkspaceLayout
+        conversations={selectConversationList(state)}
+        activeConversationId={state.activeConversationId}
+        activeConversation={activeConversation}
+        activeEntries={selectActiveEntries(state)}
+        activeLoadState={selectActiveLoadState(state)}
+        activeHasMoreHistory={activeConversation?.hasMoreHistory ?? false}
+        isLoadingConversations={isLoadingConversations}
+        conversationErrorMessage={conversationErrorMessage}
+        onSelectConversation={(conversationId) => {
+          store.dispatch({ type: 'conversation/select', conversationId });
+          clearConversationError();
+          composer.clearCreateState();
+        }}
+        onStartNewConversation={() => {
+          store.dispatch({ type: 'conversation/select', conversationId: null });
+          clearConversationError();
+          composer.clearCreateState();
+        }}
+        onRetryActiveTranscript={retryActiveTranscript}
+        onRespondToPrompt={handleRespondToPrompt}
+        composerSlot={
+          <ComposerPanel
+            draftText={composer.draftText}
+            submitState={composer.submitState}
+            validationMessage={composer.validationMessage}
+            canSubmit={composer.canSubmit}
+            policyLabel={composer.policyLabel}
+            disabled={composer.disabled}
+            onDraftChange={composer.onDraftChange}
+            onSubmit={composer.onSubmit}
+          />
+        }
+      />
+    </ConnectionStateContext.Provider>
   );
 }

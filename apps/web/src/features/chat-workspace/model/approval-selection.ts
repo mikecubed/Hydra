@@ -9,7 +9,7 @@
  */
 import type { ApprovalRequest } from '@hydra/web-contracts';
 
-import { mergePromptState } from './workspace-reducer.ts';
+import { mergePromptState } from './prompt-merge.ts';
 import type { PromptViewState } from './workspace-types.ts';
 
 const STATUS_PRIORITY: Record<string, number> = {
