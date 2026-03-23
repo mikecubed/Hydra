@@ -29,6 +29,8 @@ import {
   selectCanCancel,
   selectCanFollowUp,
   selectEntryActionFlags,
+  precomputeTranscriptActions,
+  NO_ACTION_FLAGS,
 } from '../model/selectors.ts';
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
@@ -1227,5 +1229,197 @@ describe('selectEntryActionFlags', () => {
     assert.equal(flags.canRetry, false, 'stale blocks retry');
     assert.equal(flags.canBranch, false, 'stale blocks branch');
     assert.equal(flags.canFollowUp, false, 'stale blocks follow-up');
+  });
+});
+
+// ─── precomputeTranscriptActions (whole-transcript precompute) ───────────────
+
+describe('precomputeTranscriptActions', () => {
+  it('returns an empty map when there are no entries', () => {
+    const state = stateWithConversation('conv-1');
+    const map = precomputeTranscriptActions(state);
+    assert.equal(map.size, 0);
+  });
+
+  it('returns an empty map when there is no active conversation', () => {
+    const state = createInitialWorkspaceState();
+    const map = precomputeTranscriptActions(state);
+    assert.equal(map.size, 0);
+  });
+
+  it('computes flags for a single completed turn', () => {
+    let state = stateWithConversation('conv-1');
+    state = reduceWorkspaceState(state, {
+      type: 'conversation/replace-entries',
+      conversationId: 'conv-1',
+      entries: [createEntry({ entryId: 'e1', turnId: 'turn-1', status: 'completed' })],
+      hasMoreHistory: false,
+    });
+    const map = precomputeTranscriptActions(state);
+    assert.equal(map.size, 1);
+    const flags = map.get('turn-1');
+    assert.ok(flags != null);
+    assert.equal(flags.canCancel, false);
+    assert.equal(flags.canRetry, true);
+    assert.equal(flags.canBranch, true);
+    assert.equal(flags.canFollowUp, true, 'last completed turn gets follow-up');
+  });
+
+  it('computes flags for a streaming turn', () => {
+    let state = stateWithConversation('conv-1');
+    state = reduceWorkspaceState(state, {
+      type: 'conversation/replace-entries',
+      conversationId: 'conv-1',
+      entries: [createEntry({ entryId: 'e1', turnId: 'turn-1', status: 'streaming' })],
+      hasMoreHistory: false,
+    });
+    const map = precomputeTranscriptActions(state);
+    const flags = map.get('turn-1');
+    assert.ok(flags != null);
+    assert.equal(flags.canCancel, true);
+    assert.equal(flags.canRetry, false);
+    assert.equal(flags.canBranch, false);
+    assert.equal(flags.canFollowUp, false);
+  });
+
+  it('computes flags for a failed turn', () => {
+    let state = stateWithConversation('conv-1');
+    state = reduceWorkspaceState(state, {
+      type: 'conversation/replace-entries',
+      conversationId: 'conv-1',
+      entries: [createEntry({ entryId: 'e1', turnId: 'turn-1', status: 'failed' })],
+      hasMoreHistory: false,
+    });
+    const map = precomputeTranscriptActions(state);
+    const flags = map.get('turn-1');
+    assert.ok(flags != null);
+    assert.equal(flags.canCancel, false);
+    assert.equal(flags.canRetry, true);
+    assert.equal(flags.canBranch, false);
+    assert.equal(flags.canFollowUp, false);
+  });
+
+  it('only grants canFollowUp to the last completed turn', () => {
+    let state = stateWithConversation('conv-1');
+    state = reduceWorkspaceState(state, {
+      type: 'conversation/replace-entries',
+      conversationId: 'conv-1',
+      entries: [
+        createEntry({ entryId: 'e1', turnId: 'turn-1', status: 'completed' }),
+        createEntry({ entryId: 'e2', turnId: 'turn-2', status: 'completed' }),
+        createEntry({ entryId: 'e3', turnId: 'turn-3', status: 'completed' }),
+      ],
+      hasMoreHistory: false,
+    });
+    const map = precomputeTranscriptActions(state);
+    assert.equal(map.size, 3);
+    assert.equal(map.get('turn-1')!.canFollowUp, false);
+    assert.equal(map.get('turn-2')!.canFollowUp, false);
+    assert.equal(map.get('turn-3')!.canFollowUp, true);
+  });
+
+  it('agrees with per-entry selectEntryActionFlags for every turn', () => {
+    let state = stateWithConversation('conv-1');
+    state = reduceWorkspaceState(state, {
+      type: 'conversation/replace-entries',
+      conversationId: 'conv-1',
+      entries: [
+        createEntry({ entryId: 'e1', turnId: 'turn-1', status: 'completed' }),
+        createEntry({ entryId: 'e2', turnId: 'turn-2', status: 'streaming' }),
+        createEntry({ entryId: 'e3', turnId: 'turn-3', status: 'failed' }),
+      ],
+      hasMoreHistory: false,
+    });
+    const map = precomputeTranscriptActions(state);
+    for (const [turnId, precomputed] of map) {
+      const perEntry = selectEntryActionFlags(state, turnId);
+      assert.deepStrictEqual(precomputed, perEntry, `mismatch for ${turnId}`);
+    }
+  });
+
+  it('respects explicit controls', () => {
+    const controls: readonly EntryControlState[] = [
+      { controlId: 'ctrl-1', kind: 'retry', enabled: false, reasonDisabled: 'quota' },
+      { controlId: 'ctrl-2', kind: 'cancel', enabled: true, reasonDisabled: null },
+    ];
+    let state = stateWithConversation('conv-1');
+    state = reduceWorkspaceState(state, {
+      type: 'conversation/replace-entries',
+      conversationId: 'conv-1',
+      entries: [createEntry({ entryId: 'e1', turnId: 'turn-1', status: 'completed', controls })],
+      hasMoreHistory: false,
+    });
+    const map = precomputeTranscriptActions(state);
+    const flags = map.get('turn-1')!;
+    assert.equal(flags.canRetry, false, 'retry control disabled');
+    assert.equal(flags.canCancel, true, 'cancel control enabled');
+  });
+
+  it('blocks all non-cancel flags for a stale conversation', () => {
+    let state = stateWithConversation('conv-1');
+    state = reduceWorkspaceState(state, {
+      type: 'conversation/replace-entries',
+      conversationId: 'conv-1',
+      entries: [createEntry({ entryId: 'e1', turnId: 'turn-1', status: 'completed' })],
+      hasMoreHistory: false,
+    });
+    state = reduceWorkspaceState(state, {
+      type: 'conversation/update-control-state',
+      conversationId: 'conv-1',
+      patch: { staleReason: 'Session expired' },
+    });
+    const map = precomputeTranscriptActions(state);
+    const flags = map.get('turn-1')!;
+    assert.equal(flags.canRetry, false);
+    assert.equal(flags.canBranch, false);
+    assert.equal(flags.canFollowUp, false);
+  });
+
+  it('skips non-turn entries', () => {
+    let state = stateWithConversation('conv-1');
+    state = reduceWorkspaceState(state, {
+      type: 'conversation/replace-entries',
+      conversationId: 'conv-1',
+      entries: [
+        createEntry({ entryId: 'e1', kind: 'prompt', turnId: null, status: 'completed' }),
+        createEntry({ entryId: 'e2', turnId: 'turn-1', status: 'completed' }),
+      ],
+      hasMoreHistory: false,
+    });
+    const map = precomputeTranscriptActions(state);
+    assert.equal(map.size, 1, 'only turn entry in map');
+    assert.ok(map.has('turn-1'));
+  });
+
+  it('handles deduped entries correctly', () => {
+    let state = stateWithConversation('conv-1');
+    state = reduceWorkspaceState(state, {
+      type: 'conversation/replace-entries',
+      conversationId: 'conv-1',
+      entries: [
+        createEntry({ entryId: 'e1', turnId: 'turn-1', status: 'completed' }),
+        createEntry({ entryId: 'e1-dup', turnId: 'turn-1', status: 'streaming' }),
+      ],
+      hasMoreHistory: false,
+    });
+    const map = precomputeTranscriptActions(state);
+    // Dedup keeps e1 (completed) — should agree with per-entry selector
+    const flags = map.get('turn-1')!;
+    assert.equal(flags.canRetry, selectCanRetry(state, 'turn-1'));
+    assert.equal(flags.canBranch, selectCanBranch(state, 'turn-1'));
+    assert.equal(flags.canCancel, selectCanCancel(state, 'turn-1'));
+  });
+});
+
+// ─── NO_ACTION_FLAGS export ─────────────────────────────────────────────────
+
+describe('NO_ACTION_FLAGS', () => {
+  it('is a frozen all-false sentinel', () => {
+    assert.deepStrictEqual(NO_ACTION_FLAGS, {
+      canCancel: false,
+      canRetry: false,
+      canBranch: false,
+      canFollowUp: false,
+    });
   });
 });

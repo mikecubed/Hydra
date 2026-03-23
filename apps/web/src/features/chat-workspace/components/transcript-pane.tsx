@@ -1,15 +1,9 @@
 import type { JSX } from 'react';
 import type { ConversationLoadState, TranscriptEntryState } from '../model/workspace-store.ts';
+import type { EntryActionFlags } from '../model/selectors.ts';
+import { NO_ACTION_FLAGS } from '../model/selectors.ts';
 import type { TranscriptTurnCallbacks } from './transcript-turn.tsx';
 import { TranscriptTurn } from './transcript-turn.tsx';
-
-/** Per-entry eligibility flags computed by the parent from selectors. */
-export interface EntryActionFlags {
-  readonly canCancel: boolean;
-  readonly canRetry: boolean;
-  readonly canBranch: boolean;
-  readonly canFollowUp: boolean;
-}
 
 export interface TranscriptPaneProps extends TranscriptTurnCallbacks {
   readonly entries: readonly TranscriptEntryState[];
@@ -34,13 +28,6 @@ const emptyStyle = {
   marginBottom: 0,
   color: '#94a3b8',
 } as const;
-
-const NO_ACTIONS: EntryActionFlags = {
-  canCancel: false,
-  canRetry: false,
-  canBranch: false,
-  canFollowUp: false,
-};
 
 // eslint-disable-next-line max-lines-per-function
 export function TranscriptPane({
@@ -116,7 +103,7 @@ export function TranscriptPane({
         </p>
       )}
       {entries.map((entry) => {
-        const flags = resolveEntryActions?.(entry) ?? NO_ACTIONS;
+        const flags = resolveEntryActions?.(entry) ?? NO_ACTION_FLAGS;
         return (
           <TranscriptTurn
             key={entry.entryId}

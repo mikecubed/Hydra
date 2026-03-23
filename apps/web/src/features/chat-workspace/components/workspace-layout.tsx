@@ -2,7 +2,7 @@ import type { JSX } from 'react';
 import { ConversationList } from './conversation-list.tsx';
 import { LineageBadge } from './lineage-badge.tsx';
 import { TranscriptPane } from './transcript-pane.tsx';
-import type { EntryActionFlags } from './transcript-pane.tsx';
+import type { EntryActionFlags } from '../model/selectors.ts';
 import type { TranscriptTurnCallbacks } from './transcript-turn.tsx';
 import type {
   ConversationLoadState,
