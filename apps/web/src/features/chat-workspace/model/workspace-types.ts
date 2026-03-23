@@ -255,6 +255,17 @@ export type WorkspaceAction =
       readonly promptId: string;
       readonly allowedResponses: readonly PromptResponseChoiceState[];
       readonly contextBlocks: readonly ContentBlockState[];
+    }
+  | {
+      readonly type: 'conversation/update-control-state';
+      readonly conversationId: string;
+      readonly patch: Readonly<Partial<ConversationControlState>>;
+    }
+  | {
+      readonly type: 'entry/update-controls';
+      readonly conversationId: string;
+      readonly entryId: string;
+      readonly controls: readonly EntryControlState[];
     };
 
 export type WorkspaceListener = (state: WorkspaceState, action: WorkspaceAction) => void;

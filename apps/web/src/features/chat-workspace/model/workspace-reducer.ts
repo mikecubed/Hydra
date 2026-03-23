@@ -13,11 +13,13 @@ import {
 
 import type {
   ComposerDraftState,
+  ConversationControlState,
   ConversationLineageState,
   ConversationLoadState,
   ConversationStatus,
   ConversationViewState,
   DraftSubmitState,
+  EntryControlState,
   PromptViewState,
   TranscriptEntryState,
   WorkspaceAction,
@@ -611,6 +613,42 @@ function applyPromptHydrate(
   );
 }
 
+function applyUpdateControlState(
+  state: WorkspaceState,
+  conversationId: string,
+  patch: Readonly<Partial<ConversationControlState>>,
+): WorkspaceState {
+  const current = state.conversations.get(conversationId);
+  if (current == null) return state;
+
+  const nextConversations = new Map(state.conversations);
+  nextConversations.set(conversationId, {
+    ...current,
+    controlState: { ...current.controlState, ...patch },
+  });
+  return { ...state, conversations: nextConversations };
+}
+
+function applyEntryUpdateControls(
+  state: WorkspaceState,
+  conversationId: string,
+  entryId: string,
+  controls: readonly EntryControlState[],
+): WorkspaceState {
+  const current = state.conversations.get(conversationId);
+  if (current == null) return state;
+
+  const nextEntries = current.entries.map((entry) =>
+    entry.entryId === entryId ? { ...entry, controls } : entry,
+  );
+  const changed = nextEntries.some((entry, index) => entry !== current.entries[index]);
+  if (!changed) return state;
+
+  const nextConversations = new Map(state.conversations);
+  nextConversations.set(conversationId, { ...current, entries: nextEntries });
+  return { ...state, conversations: nextConversations };
+}
+
 function isPromptAction(action: WorkspaceAction): action is PromptAction {
   return action.type.startsWith('prompt/');
 }
@@ -707,5 +745,14 @@ export function reduceWorkspaceState(
       return { ...state, visibleArtifact: action.artifact };
     case 'artifact/clear':
       return { ...state, visibleArtifact: null };
+    case 'conversation/update-control-state':
+      return applyUpdateControlState(state, action.conversationId, action.patch);
+    case 'entry/update-controls':
+      return applyEntryUpdateControls(
+        state,
+        action.conversationId,
+        action.entryId,
+        action.controls,
+      );
   }
 }
