@@ -14,6 +14,8 @@ import type { StreamEvent } from '@hydra/web-contracts';
 import type {
   ArtifactReferenceState,
   ContentBlockState,
+  EntryControlKind,
+  EntryControlState,
   PromptResponseChoiceState,
   PromptStatus,
   PromptViewState,
@@ -614,6 +616,27 @@ export function reconcileStreamEvents(
 
 const TERMINAL_STATUSES: ReadonlySet<string> = new Set(['completed', 'failed', 'cancelled']);
 
+function mergeTerminalControls(
+  restControls: readonly EntryControlState[],
+  streamedControls: readonly EntryControlState[],
+): readonly EntryControlState[] {
+  const mergedByKind = new Map<EntryControlKind, EntryControlState>();
+
+  for (const control of streamedControls) {
+    if (control.kind === 'cancel') {
+      continue;
+    }
+
+    mergedByKind.set(control.kind, control);
+  }
+
+  for (const control of restControls) {
+    mergedByKind.set(control.kind, control);
+  }
+
+  return [...mergedByKind.values()];
+}
+
 /** Prompt statuses that should not survive terminal REST turns unchanged. */
 const ACTIONABLE_PROMPT_STATUSES: ReadonlySet<PromptStatus> = new Set([
   'pending',
@@ -767,15 +790,19 @@ export function mergeAuthoritativeEntries(
         !TERMINAL_STATUSES.has(streamed.status) &&
         isStrictlyMoreAdvanced(streamed.status, entry.status));
 
+    let controls = entry.controls;
+    if (streamed.controls.length > 0) {
+      controls = TERMINAL_STATUSES.has(entry.status)
+        ? mergeTerminalControls(entry.controls, streamed.controls)
+        : streamed.controls;
+    }
+
     return {
       ...entry,
       status: preserveStreamedStatus ? streamed.status : entry.status,
       contentBlocks: preserveStreamedTurn ? streamed.contentBlocks : entry.contentBlocks,
       artifacts: streamed.artifacts.length > 0 ? streamed.artifacts : entry.artifacts,
-      controls:
-        streamed.controls.length > 0 && !TERMINAL_STATUSES.has(entry.status)
-          ? streamed.controls
-          : entry.controls,
+      controls,
       prompt: coercePromptForTerminalTurn(
         mergePromptState(streamed.prompt, entry.prompt),
         TERMINAL_STATUSES.has(entry.status),

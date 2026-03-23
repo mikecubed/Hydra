@@ -139,6 +139,8 @@ describe('cancel in-progress turn', () => {
       expect(screen.getByText('cancelled')).toBeInTheDocument();
     });
 
+    expect(screen.queryByTestId('turn-action-cancel')).not.toBeInTheDocument();
+
     // Verify: the cancel POST was actually sent
     expect(cancelPosted).toBe(true);
 
