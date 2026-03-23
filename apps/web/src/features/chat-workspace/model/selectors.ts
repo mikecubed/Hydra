@@ -212,9 +212,7 @@ export function selectCanCancel(state: WorkspaceState, turnId: string): boolean 
   const control = findControlByKind(entry, 'cancel');
   if (control != null) return control.enabled;
 
-  return (
-    entry.status === 'streaming' || entry.status === 'executing' || entry.status === 'submitted'
-  );
+  return isCancellableStatus(entry.status);
 }
 
 /** Whether a follow-up can be submitted after the given turn (last completed turn, conversation not stale). */
@@ -254,6 +252,51 @@ export interface EntryActionFlags {
   readonly canFollowUp: boolean;
 }
 
+function isCancellableStatus(status: TranscriptEntryState['status']): boolean {
+  return status === 'streaming' || status === 'executing' || status === 'submitted';
+}
+
+function computeRetryFlag(entry: TranscriptEntryState, stale: boolean): boolean {
+  const retryCtrl = findControlByKind(entry, 'retry');
+  if (retryCtrl != null) return retryCtrl.enabled;
+  if (stale) return false;
+  return entry.status === 'completed' || entry.status === 'failed';
+}
+
+function computeBranchFlag(entry: TranscriptEntryState, stale: boolean): boolean {
+  const branchCtrl = findControlByKind(entry, 'branch');
+  if (branchCtrl != null) return branchCtrl.enabled;
+  if (stale) return false;
+  return entry.status === 'completed';
+}
+
+function computeFollowUpFlag(
+  entry: TranscriptEntryState,
+  stale: boolean,
+  lastCompletedTurnId: string | null,
+): boolean {
+  const followUpCtrl = findControlByKind(entry, 'submit-follow-up');
+  if (followUpCtrl != null) return followUpCtrl.enabled;
+  if (stale || entry.status !== 'completed') return false;
+  return lastCompletedTurnId === entry.turnId;
+}
+
+function computeEntryActionFlags(
+  entry: TranscriptEntryState,
+  stale: boolean,
+  lastCompletedTurnId: string | null,
+): EntryActionFlags {
+  const cancelCtrl = findControlByKind(entry, 'cancel');
+  const canCancel = cancelCtrl == null ? isCancellableStatus(entry.status) : cancelCtrl.enabled;
+
+  return {
+    canCancel,
+    canRetry: computeRetryFlag(entry, stale),
+    canBranch: computeBranchFlag(entry, stale),
+    canFollowUp: computeFollowUpFlag(entry, stale, lastCompletedTurnId),
+  };
+}
+
 /**
  * Compute all four action-eligibility flags for a given turn in one pass.
  *
@@ -270,51 +313,9 @@ export function selectEntryActionFlags(state: WorkspaceState, turnId: string): E
   if (entry == null) return NO_ACTION_FLAGS;
 
   const stale = isConversationStale(state);
-
-  // ── canCancel ──
-  const cancelCtrl = findControlByKind(entry, 'cancel');
-  const canCancel =
-    cancelCtrl == null
-      ? entry.status === 'streaming' || entry.status === 'executing' || entry.status === 'submitted'
-      : cancelCtrl.enabled;
-
-  // ── canRetry ──
-  let canRetry: boolean;
-  const retryCtrl = findControlByKind(entry, 'retry');
-  if (retryCtrl != null) {
-    canRetry = retryCtrl.enabled;
-  } else if (stale) {
-    canRetry = false;
-  } else {
-    canRetry = entry.status === 'completed' || entry.status === 'failed';
-  }
-
-  // ── canBranch ──
-  let canBranch: boolean;
-  const branchCtrl = findControlByKind(entry, 'branch');
-  if (branchCtrl != null) {
-    canBranch = branchCtrl.enabled;
-  } else if (stale) {
-    canBranch = false;
-  } else {
-    canBranch = entry.status === 'completed';
-  }
-
-  // ── canFollowUp ──
-  let canFollowUp: boolean;
-  const followUpCtrl = findControlByKind(entry, 'submit-follow-up');
-  if (followUpCtrl != null) {
-    canFollowUp = followUpCtrl.enabled;
-  } else if (stale || entry.status !== 'completed') {
-    canFollowUp = false;
-  } else {
-    // Only the last completed turn may receive a follow-up.
-    const turnEntries = entries.filter((e) => e.kind === 'turn');
-    const lastCompleted = turnEntries.findLast((c) => c.status === 'completed');
-    canFollowUp = lastCompleted?.turnId === turnId;
-  }
-
-  return { canCancel, canRetry, canBranch, canFollowUp };
+  const turnEntries = entries.filter((e) => e.kind === 'turn');
+  const lastCompleted = turnEntries.findLast((candidate) => candidate.status === 'completed');
+  return computeEntryActionFlags(entry, stale, lastCompleted?.turnId ?? null);
 }
 
 // ─── Whole-transcript precompute ────────────────────────────────────────────
@@ -351,50 +352,7 @@ export function precomputeTranscriptActions(
 
   for (const entry of entries) {
     if (entry.kind !== 'turn' || entry.turnId == null) continue;
-
-    // canCancel
-    const cancelCtrl = findControlByKind(entry, 'cancel');
-    const canCancel =
-      cancelCtrl == null
-        ? entry.status === 'streaming' ||
-          entry.status === 'executing' ||
-          entry.status === 'submitted'
-        : cancelCtrl.enabled;
-
-    // canRetry
-    let canRetry: boolean;
-    const retryCtrl = findControlByKind(entry, 'retry');
-    if (retryCtrl != null) {
-      canRetry = retryCtrl.enabled;
-    } else if (stale) {
-      canRetry = false;
-    } else {
-      canRetry = entry.status === 'completed' || entry.status === 'failed';
-    }
-
-    // canBranch
-    let canBranch: boolean;
-    const branchCtrl = findControlByKind(entry, 'branch');
-    if (branchCtrl != null) {
-      canBranch = branchCtrl.enabled;
-    } else if (stale) {
-      canBranch = false;
-    } else {
-      canBranch = entry.status === 'completed';
-    }
-
-    // canFollowUp
-    let canFollowUp: boolean;
-    const followUpCtrl = findControlByKind(entry, 'submit-follow-up');
-    if (followUpCtrl != null) {
-      canFollowUp = followUpCtrl.enabled;
-    } else if (stale || entry.status !== 'completed') {
-      canFollowUp = false;
-    } else {
-      canFollowUp = lastCompletedTurnId === entry.turnId;
-    }
-
-    result.set(entry.turnId, { canCancel, canRetry, canBranch, canFollowUp });
+    result.set(entry.turnId, computeEntryActionFlags(entry, stale, lastCompletedTurnId));
   }
 
   return result;

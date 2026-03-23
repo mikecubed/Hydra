@@ -70,6 +70,132 @@ const FAILED_TURN = {
   completedAt: '2026-07-01T00:00:05.000Z',
 };
 
+function resolveFetchUrl(input: RequestInfo | URL): string {
+  if (typeof input === 'string') return input;
+  if (input instanceof URL) return input.toString();
+  return input.url;
+}
+
+function installDeferredCancelFetchStub(
+  title: string,
+  backgroundReloadGate: Promise<Response>,
+): { wasCancelPosted: () => boolean; transcriptReloadCount: () => number } {
+  let cancelPosted = false;
+  let transcriptReloadCount = 0;
+
+  const handler = (url: string, init: RequestInit | undefined): Response | Promise<Response> => {
+    if (url === '/conversations?status=active&limit=20') {
+      return jsonResponse({
+        conversations: [conversation('conv-1', title)],
+        totalCount: 1,
+      });
+    }
+    if (url === '/conversations/conv-1/turns?limit=50') {
+      transcriptReloadCount += 1;
+      if (cancelPosted && transcriptReloadCount > 1) {
+        return backgroundReloadGate;
+      }
+      return jsonResponse({
+        turns: [BASE_TURN],
+        totalCount: 1,
+        hasMore: false,
+      });
+    }
+    if (url === '/conversations/conv-1/turns/turn-1/cancel' && init?.method === 'POST') {
+      cancelPosted = true;
+      return jsonResponse({
+        success: true,
+        turn: { ...BASE_TURN, status: 'cancelled' },
+      });
+    }
+    if (url === '/conversations/conv-1/approvals') {
+      return jsonResponse({ approvals: [] });
+    }
+    throw new Error(`Unexpected fetch: ${url}`);
+  };
+
+  fetchSpy.mockImplementation((input, init) =>
+    Promise.resolve(handler(resolveFetchUrl(input), init)),
+  );
+  vi.stubGlobal('fetch', fetchSpy);
+
+  return {
+    wasCancelPosted: () => cancelPosted,
+    transcriptReloadCount: () => transcriptReloadCount,
+  };
+}
+
+function assertCancelledWithoutGhostContent(): void {
+  expect(screen.getByText('cancelled')).toBeInTheDocument();
+  expect(screen.queryByText('executing')).not.toBeInTheDocument();
+  expect(screen.queryByText('GHOST CONTENT')).not.toBeInTheDocument();
+}
+
+async function runCancelSealRegressionScenario(): Promise<void> {
+  let resolveBackgroundReload!: (value: Response) => void;
+  const backgroundReloadGate = new Promise<Response>((resolve) => {
+    resolveBackgroundReload = resolve;
+  });
+
+  const fetchState = installDeferredCancelFetchStub('Seal regression', backgroundReloadGate);
+
+  render(<AppProviders />);
+
+  await screen.findByRole('button', { name: /seal regression/i });
+  const ws = openAndSubscribe('conv-1');
+  expect(await screen.findByText('executing')).toBeInTheDocument();
+
+  act(() => {
+    ws.simulateMessage(
+      streamFrame('conv-1', 1, 'turn-1', 'stream-started', { attribution: 'Claude' }),
+    );
+    ws.simulateMessage(
+      streamFrame('conv-1', 2, 'turn-1', 'text-delta', { text: 'Pre-cancel output' }),
+    );
+  });
+
+  expect(await screen.findByText('Pre-cancel output')).toBeInTheDocument();
+
+  const cancelBtn = await screen.findByTestId('turn-action-cancel');
+  fireEvent.click(cancelBtn);
+
+  await vi.waitFor(() => {
+    expect(fetchState.wasCancelPosted()).toBe(true);
+  });
+  await vi.waitFor(() => {
+    expect(screen.getByText('cancelled')).toBeInTheDocument();
+  });
+
+  act(() => {
+    ws.simulateMessage(streamFrame('conv-1', 3, 'turn-1', 'text-delta', { text: 'GHOST CONTENT' }));
+  });
+  assertCancelledWithoutGhostContent();
+
+  act(() => {
+    ws.simulateMessage(streamFrame('conv-1', 4, 'turn-1', 'stream-completed'));
+  });
+  assertCancelledWithoutGhostContent();
+
+  const articles = transcriptArticles();
+  expect(articles).toHaveLength(1);
+  expect(within(articles[0]).getByText('cancelled')).toBeInTheDocument();
+
+  resolveBackgroundReload(
+    jsonResponse({
+      turns: [{ ...BASE_TURN, status: 'cancelled' }],
+      totalCount: 1,
+      hasMore: false,
+    }),
+  );
+
+  await vi.waitFor(() => {
+    expect(fetchState.transcriptReloadCount()).toBeGreaterThanOrEqual(2);
+  });
+
+  assertCancelledWithoutGhostContent();
+  expect(transcriptArticles()).toHaveLength(1);
+}
+
 // ─── 1. Cancel in-progress turn ─────────────────────────────────────────────
 
 describe('cancel in-progress turn', () => {
@@ -153,145 +279,8 @@ describe('cancel in-progress turn', () => {
     expect(within(articles[0]).getByText('cancelled')).toBeInTheDocument();
   });
 
-  // eslint-disable-next-line max-lines-per-function
   it('seals cancelled turn so late websocket frames cannot resurrect it', async () => {
-    // Regression: proves that the immediate seal placed by handleCancel()
-    // blocks a late WS text-delta frame injected *before* background transcript
-    // reconciliation completes. Without the seal, the stale frame would mutate
-    // the cancelled entry back to a live-streaming state.
-
-    // Deferred promise for the background transcript reload — we resolve it
-    // manually *after* the late WS frame, simulating real-world race timing.
-    let resolveBackgroundReload!: (value: Response) => void;
-    const backgroundReloadGate = new Promise<Response>((resolve) => {
-      resolveBackgroundReload = resolve;
-    });
-
-    let cancelPosted = false;
-    let transcriptReloadCount = 0;
-
-    // Wire up fetch stub with deferred response for background reconcile.
-    // We cannot use installFetchStub because its handler returns Response
-    // synchronously — here the background reload must return a pending promise.
-    const handler = (url: string, init: RequestInit | undefined): Response | Promise<Response> => {
-      if (url === '/conversations?status=active&limit=20') {
-        return jsonResponse({
-          conversations: [conversation('conv-1', 'Seal regression')],
-          totalCount: 1,
-        });
-      }
-      if (url === '/conversations/conv-1/turns?limit=50') {
-        transcriptReloadCount += 1;
-        // The 2nd+ transcript reload is the background reconcile triggered by
-        // handleCancel — gate it behind a promise we control.
-        if (cancelPosted && transcriptReloadCount > 1) {
-          return backgroundReloadGate;
-        }
-        return jsonResponse({
-          turns: [BASE_TURN],
-          totalCount: 1,
-          hasMore: false,
-        });
-      }
-      if (url === '/conversations/conv-1/turns/turn-1/cancel' && init?.method === 'POST') {
-        cancelPosted = true;
-        return jsonResponse({
-          success: true,
-          turn: { ...BASE_TURN, status: 'cancelled' },
-        });
-      }
-      if (url === '/conversations/conv-1/approvals') {
-        return jsonResponse({ approvals: [] });
-      }
-      throw new Error(`Unexpected fetch: ${url}`);
-    };
-
-    fetchSpy.mockImplementation((input, init) => {
-      const url = typeof input === 'string' ? input : input instanceof URL ? input.toString() : input.url;
-      return Promise.resolve(handler(url, init));
-    });
-    vi.stubGlobal('fetch', fetchSpy);
-
-    render(<AppProviders />);
-
-    await screen.findByRole('button', { name: /seal regression/i });
-    const ws = openAndSubscribe('conv-1');
-
-    // Turn is executing with streaming content
-    expect(await screen.findByText('executing')).toBeInTheDocument();
-
-    // Simulate some streaming content arriving before cancel
-    act(() => {
-      ws.simulateMessage(
-        streamFrame('conv-1', 1, 'turn-1', 'stream-started', { attribution: 'Claude' }),
-      );
-      ws.simulateMessage(
-        streamFrame('conv-1', 2, 'turn-1', 'text-delta', { text: 'Pre-cancel output' }),
-      );
-    });
-
-    expect(await screen.findByText('Pre-cancel output')).toBeInTheDocument();
-
-    // Click cancel
-    const cancelBtn = await screen.findByTestId('turn-action-cancel');
-    fireEvent.click(cancelBtn);
-
-    // Wait for the cancel POST to fire and the turn to transition to cancelled
-    await vi.waitFor(() => {
-      expect(cancelPosted).toBe(true);
-    });
-    await vi.waitFor(() => {
-      expect(screen.getByText('cancelled')).toBeInTheDocument();
-    });
-
-    // ─── KEY REGRESSION WINDOW ───
-    // The background reconcile is still in-flight (gated). Inject a late
-    // websocket text-delta for the now-sealed cancelled turn. In a buggy
-    // implementation this would resurrect the turn to a streaming state.
-    act(() => {
-      ws.simulateMessage(
-        streamFrame('conv-1', 3, 'turn-1', 'text-delta', { text: 'GHOST CONTENT' }),
-      );
-    });
-
-    // The ghost content must NOT appear — the seal rejects the stale frame
-    expect(screen.queryByText('GHOST CONTENT')).not.toBeInTheDocument();
-
-    // The turn must still be cancelled, not reverted to executing/streaming
-    expect(screen.getByText('cancelled')).toBeInTheDocument();
-    expect(screen.queryByText('executing')).not.toBeInTheDocument();
-
-    // Also inject a stream-completed frame — must also be rejected
-    act(() => {
-      ws.simulateMessage(streamFrame('conv-1', 4, 'turn-1', 'stream-completed'));
-    });
-
-    // Still cancelled, still no ghost content
-    expect(screen.getByText('cancelled')).toBeInTheDocument();
-    expect(screen.queryByText('GHOST CONTENT')).not.toBeInTheDocument();
-
-    // Exactly one transcript article — no duplicates from rejected frames
-    const articles = transcriptArticles();
-    expect(articles).toHaveLength(1);
-    expect(within(articles[0]).getByText('cancelled')).toBeInTheDocument();
-
-    // Now release the background reconcile — confirms cancelled state
-    resolveBackgroundReload(
-      jsonResponse({
-        turns: [{ ...BASE_TURN, status: 'cancelled' }],
-        totalCount: 1,
-        hasMore: false,
-      }),
-    );
-
-    // After background reconcile completes, cancelled state persists
-    await vi.waitFor(() => {
-      expect(transcriptReloadCount).toBeGreaterThanOrEqual(2);
-    });
-
-    expect(screen.getByText('cancelled')).toBeInTheDocument();
-    expect(screen.queryByText('GHOST CONTENT')).not.toBeInTheDocument();
-    expect(transcriptArticles()).toHaveLength(1);
+    await runCancelSealRegressionScenario();
   });
 });
 
