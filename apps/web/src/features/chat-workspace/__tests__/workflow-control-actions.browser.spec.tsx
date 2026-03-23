@@ -8,6 +8,7 @@
  *
  * Covers:
  *   1. Cancel in-progress turn via transcript controls
+ *   1b. Cancel seal regression — late WS frames blocked by immediate seal
  *   2. Retry a failed turn — new turn appears and streaming continues
  *   3. Branch a completed turn — new conversation created with lineage badge
  *   4. Follow-up action — routes operator into composer flow
@@ -68,6 +69,132 @@ const FAILED_TURN = {
   response: 'Partial output before crash.',
   completedAt: '2026-07-01T00:00:05.000Z',
 };
+
+function resolveFetchUrl(input: RequestInfo | URL): string {
+  if (typeof input === 'string') return input;
+  if (input instanceof URL) return input.toString();
+  return input.url;
+}
+
+function installDeferredCancelFetchStub(
+  title: string,
+  backgroundReloadGate: Promise<Response>,
+): { wasCancelPosted: () => boolean; transcriptReloadCount: () => number } {
+  let cancelPosted = false;
+  let transcriptReloadCount = 0;
+
+  const handler = (url: string, init: RequestInit | undefined): Response | Promise<Response> => {
+    if (url === '/conversations?status=active&limit=20') {
+      return jsonResponse({
+        conversations: [conversation('conv-1', title)],
+        totalCount: 1,
+      });
+    }
+    if (url === '/conversations/conv-1/turns?limit=50') {
+      transcriptReloadCount += 1;
+      if (cancelPosted && transcriptReloadCount > 1) {
+        return backgroundReloadGate;
+      }
+      return jsonResponse({
+        turns: [BASE_TURN],
+        totalCount: 1,
+        hasMore: false,
+      });
+    }
+    if (url === '/conversations/conv-1/turns/turn-1/cancel' && init?.method === 'POST') {
+      cancelPosted = true;
+      return jsonResponse({
+        success: true,
+        turn: { ...BASE_TURN, status: 'cancelled' },
+      });
+    }
+    if (url === '/conversations/conv-1/approvals') {
+      return jsonResponse({ approvals: [] });
+    }
+    throw new Error(`Unexpected fetch: ${url}`);
+  };
+
+  fetchSpy.mockImplementation((input, init) =>
+    Promise.resolve(handler(resolveFetchUrl(input), init)),
+  );
+  vi.stubGlobal('fetch', fetchSpy);
+
+  return {
+    wasCancelPosted: () => cancelPosted,
+    transcriptReloadCount: () => transcriptReloadCount,
+  };
+}
+
+function assertCancelledWithoutGhostContent(): void {
+  expect(screen.getByText('cancelled')).toBeInTheDocument();
+  expect(screen.queryByText('executing')).not.toBeInTheDocument();
+  expect(screen.queryByText('GHOST CONTENT')).not.toBeInTheDocument();
+}
+
+async function runCancelSealRegressionScenario(): Promise<void> {
+  let resolveBackgroundReload!: (value: Response) => void;
+  const backgroundReloadGate = new Promise<Response>((resolve) => {
+    resolveBackgroundReload = resolve;
+  });
+
+  const fetchState = installDeferredCancelFetchStub('Seal regression', backgroundReloadGate);
+
+  render(<AppProviders />);
+
+  await screen.findByRole('button', { name: /seal regression/i });
+  const ws = openAndSubscribe('conv-1');
+  expect(await screen.findByText('executing')).toBeInTheDocument();
+
+  act(() => {
+    ws.simulateMessage(
+      streamFrame('conv-1', 1, 'turn-1', 'stream-started', { attribution: 'Claude' }),
+    );
+    ws.simulateMessage(
+      streamFrame('conv-1', 2, 'turn-1', 'text-delta', { text: 'Pre-cancel output' }),
+    );
+  });
+
+  expect(await screen.findByText('Pre-cancel output')).toBeInTheDocument();
+
+  const cancelBtn = await screen.findByTestId('turn-action-cancel');
+  fireEvent.click(cancelBtn);
+
+  await vi.waitFor(() => {
+    expect(fetchState.wasCancelPosted()).toBe(true);
+  });
+  await vi.waitFor(() => {
+    expect(screen.getByText('cancelled')).toBeInTheDocument();
+  });
+
+  act(() => {
+    ws.simulateMessage(streamFrame('conv-1', 3, 'turn-1', 'text-delta', { text: 'GHOST CONTENT' }));
+  });
+  assertCancelledWithoutGhostContent();
+
+  act(() => {
+    ws.simulateMessage(streamFrame('conv-1', 4, 'turn-1', 'stream-completed'));
+  });
+  assertCancelledWithoutGhostContent();
+
+  const articles = transcriptArticles();
+  expect(articles).toHaveLength(1);
+  expect(within(articles[0]).getByText('cancelled')).toBeInTheDocument();
+
+  resolveBackgroundReload(
+    jsonResponse({
+      turns: [{ ...BASE_TURN, status: 'cancelled' }],
+      totalCount: 1,
+      hasMore: false,
+    }),
+  );
+
+  await vi.waitFor(() => {
+    expect(fetchState.transcriptReloadCount()).toBeGreaterThanOrEqual(2);
+  });
+
+  assertCancelledWithoutGhostContent();
+  expect(transcriptArticles()).toHaveLength(1);
+}
 
 // ─── 1. Cancel in-progress turn ─────────────────────────────────────────────
 
@@ -150,6 +277,10 @@ describe('cancel in-progress turn', () => {
 
     // The single article should show the cancelled state
     expect(within(articles[0]).getByText('cancelled')).toBeInTheDocument();
+  });
+
+  it('seals cancelled turn so late websocket frames cannot resurrect it', async () => {
+    await runCancelSealRegressionScenario();
   });
 });
 

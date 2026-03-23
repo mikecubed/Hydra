@@ -54,11 +54,12 @@ import {
   selectActiveEntries,
   selectActiveLoadState,
   selectCanSubmit,
-  selectEntryActionFlags,
   selectConversationList,
   selectCreateModeCanSubmit,
+  precomputeTranscriptActions,
+  NO_ACTION_FLAGS,
+  type EntryActionFlags,
 } from '../features/chat-workspace/model/selectors.ts';
-import type { EntryActionFlags } from '../features/chat-workspace/components/transcript-pane.tsx';
 import {
   resolveResponseLabel,
   respondToPrompt,
@@ -1056,6 +1057,7 @@ function useTurnActions(
   client: GatewayClient,
   reloadConversationList: () => Promise<void>,
   sealAfterMerge: SealAfterMergeFn,
+  actionMap: ReadonlyMap<string, EntryActionFlags>,
 ) {
   const pendingTurnActionIdsRef = useRef<ReadonlySet<string>>(new Set());
   const [pendingTurnActionIds, setPendingTurnActionIds] = useState<ReadonlySet<string>>(
@@ -1305,16 +1307,16 @@ function useTurnActions(
   const resolveEntryActions = useCallback(
     (entry: { readonly turnId: string | null; readonly kind: string }): EntryActionFlags => {
       if (entry.kind !== 'turn' || entry.turnId == null) {
-        return { canCancel: false, canRetry: false, canBranch: false, canFollowUp: false };
+        return NO_ACTION_FLAGS;
       }
 
       if (pendingTurnActionIds.has(entry.turnId)) {
-        return { canCancel: false, canRetry: false, canBranch: false, canFollowUp: false };
+        return NO_ACTION_FLAGS;
       }
 
-      return selectEntryActionFlags(store.getState(), entry.turnId);
+      return actionMap.get(entry.turnId) ?? NO_ACTION_FLAGS;
     },
-    [pendingTurnActionIds, store],
+    [actionMap, pendingTurnActionIds],
   );
 
   return {
@@ -1372,7 +1374,18 @@ export function WorkspaceRoute(): JSX.Element {
     reloadConversationList,
   );
   const handleRespondToPrompt = usePromptResponder(store, client);
-  const turnActions = useTurnActions(store, client, reloadConversationList, sealAfterMerge);
+  const activeEntries = useMemo(() => selectActiveEntries(state), [state]);
+  const actionMap = useMemo(
+    () => precomputeTranscriptActions(state, activeEntries),
+    [state, activeEntries],
+  );
+  const turnActions = useTurnActions(
+    store,
+    client,
+    reloadConversationList,
+    sealAfterMerge,
+    actionMap,
+  );
 
   return (
     <ConnectionStateContext.Provider value={state.connection}>
@@ -1381,7 +1394,7 @@ export function WorkspaceRoute(): JSX.Element {
         conversations={selectConversationList(state)}
         activeConversationId={state.activeConversationId}
         activeConversation={activeConversation}
-        activeEntries={selectActiveEntries(state)}
+        activeEntries={activeEntries}
         activeLoadState={selectActiveLoadState(state)}
         activeHasMoreHistory={activeConversation?.hasMoreHistory ?? false}
         isLoadingConversations={isLoadingConversations}
