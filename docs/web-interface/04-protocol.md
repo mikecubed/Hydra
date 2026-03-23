@@ -250,9 +250,17 @@ session (e.g., `POST /session/extend`) to avoid disconnection.
 
 #### `session-active`
 
-Recovery signal sent when the bound session returns to `active` after a warning-window extension or
-other session-state recovery. The browser should clear any stale expiry warning and treat the
-session as healthy again using the new authoritative `expiresAt`.
+Authoritative session-health signal. Sent in two scenarios:
+
+1. **Recovery** — the bound session returns to `active` after a warning-window extension or other
+   session-state recovery.
+2. **Fresh bind / reconnect bootstrap** — the session is already active when the client connects (or
+   reconnects). The gateway sends `session-active` so the client can treat the included `expiresAt`
+   as the canonical session deadline and clear any stale expiry warnings left over from a previous
+   connection.
+
+In both cases the browser should replace its cached `expiresAt`, clear any `expiring-soon` warning
+banner, and treat the session as healthy.
 
 ```json
 {

@@ -415,6 +415,70 @@ function seedSubscriptionBaseline(
   stateMap.set(conversationId, { ...currentState, serverResumeSeq: seeded });
 }
 
+function applyAckSuccess(
+  stateMap: Map<string, StreamSubscriptionState>,
+  conversationId: string,
+  currentState: StreamSubscriptionState,
+  candidateState: StreamSubscriptionState,
+  ackedSeq: number,
+): void {
+  const unackedSeqs = new Map(candidateState.unackedSeqs);
+  for (const seq of unackedSeqs.keys()) {
+    if (seq <= ackedSeq) {
+      unackedSeqs.delete(seq);
+    }
+  }
+  const serverResumeSeq = computeContiguousResume(
+    currentState.serverResumeSeq,
+    new Map([...candidateState.pendingSeqs, ...unackedSeqs]),
+    candidateState.highestSeenSeq,
+  );
+  stateMap.set(conversationId, {
+    ...candidateState,
+    unackedSeqs,
+    serverResumeSeq: serverResumeSeq ?? currentState.serverResumeSeq,
+  });
+}
+
+function applyAckFailure(
+  stateMap: Map<string, StreamSubscriptionState>,
+  conversationId: string,
+  currentState: StreamSubscriptionState,
+  candidateState: StreamSubscriptionState,
+  event: StreamEvent,
+  err: unknown,
+): void {
+  const unackedSeqs = new Map(candidateState.unackedSeqs);
+  unackedSeqs.set(event.seq, event.turnId);
+  stateMap.set(conversationId, {
+    ...candidateState,
+    unackedSeqs,
+    serverResumeSeq: currentState.serverResumeSeq,
+  });
+  console.warn(`[stream] Failed to ack seq ${String(event.seq)} for ${conversationId}:`, err);
+}
+
+function retryStaleAck(
+  stateMap: Map<string, StreamSubscriptionState>,
+  conversationId: string,
+  currentState: StreamSubscriptionState,
+  candidateState: StreamSubscriptionState,
+  ack: (conversationId: string, seq: number) => void,
+  event: StreamEvent,
+): void {
+  try {
+    ack(conversationId, event.seq);
+    applyAckSuccess(stateMap, conversationId, currentState, candidateState, event.seq);
+  } catch (retryErr: unknown) {
+    // Retry also failed — leave state pinned as before.
+    stateMap.set(conversationId, candidateState);
+    console.warn(
+      `[stream] Retry ack failed for stale seq ${String(event.seq)} (${conversationId}):`,
+      retryErr,
+    );
+  }
+}
+
 /**
  * Build StreamClient callbacks that route events into the workspace store.
  *
@@ -454,39 +518,18 @@ export function buildStreamCallbacks(
         // Only advance serverResumeSeq after successful ack.
         try {
           ack(conversationId, event.seq);
-          const unackedSeqs = new Map(candidateState.unackedSeqs);
-          for (const seq of unackedSeqs.keys()) {
-            if (seq <= event.seq) {
-              unackedSeqs.delete(seq);
-            }
-          }
-          const serverResumeSeq = computeContiguousResume(
-            currentState.serverResumeSeq,
-            new Map([...candidateState.pendingSeqs, ...unackedSeqs]),
-            candidateState.highestSeenSeq,
-          );
-          // Ack succeeded — commit the full candidate state (resume cursor advanced).
-          stateMap.set(conversationId, {
-            ...candidateState,
-            unackedSeqs,
-            serverResumeSeq: serverResumeSeq ?? currentState.serverResumeSeq,
-          });
+          applyAckSuccess(stateMap, conversationId, currentState, candidateState, event.seq);
         } catch (err: unknown) {
-          // Ack failed — keep reconciler + pending state but revert resume cursor.
-          const unackedSeqs = new Map(candidateState.unackedSeqs);
-          unackedSeqs.set(event.seq, event.turnId);
-          stateMap.set(conversationId, {
-            ...candidateState,
-            unackedSeqs,
-            serverResumeSeq: currentState.serverResumeSeq,
-          });
-          console.warn(
-            `[stream] Failed to ack seq ${String(event.seq)} for ${conversationId}:`,
-            err,
-          );
+          applyAckFailure(stateMap, conversationId, currentState, candidateState, event, err);
         }
+      } else if (currentState.unackedSeqs.has(event.seq)) {
+        // Stale replay of an event whose ACK previously failed — retry the
+        // ACK to unblock the resume frontier.  Without this the seq stays in
+        // unackedSeqs forever, pins serverResumeSeq, and causes infinite
+        // replays on every reconnect.
+        retryStaleAck(stateMap, conversationId, currentState, candidateState, ack, event);
       } else {
-        // Event was pending (ignored conditional) or stale — update local state, no ack.
+        // Event was pending (ignored conditional) or stale without ack debt — no ack.
         stateMap.set(conversationId, candidateState);
       }
 

@@ -1662,7 +1662,7 @@ describe('onSubscribed baseline seeding', () => {
     }
   });
 
-  it('replayed stale unacked events do not advance the resume cursor before onSubscribed', () => {
+  it('replayed stale unacked event retries ack and recovers resume cursor', () => {
     const store = storeWithConversation('conv-1');
     const stateMap = new Map<string, StreamSubscriptionState>();
     let ackShouldFail = false;
@@ -1697,23 +1697,81 @@ describe('onSubscribed baseline seeding', () => {
       );
       assert.deepEqual(ackCalls, [1, 2]);
       assert.equal(stateMap.get('conv-1')?.serverResumeSeq, 1);
+      assert.ok(stateMap.get('conv-1')?.unackedSeqs.has(2), 'seq 2 in unackedSeqs after failure');
 
-      // Reconnect replay arrives before subscribed. The replayed event is stale,
-      // must not trigger a second ack, and must not advance the frontier while
-      // seq 2 is still blocked in unackedSeqs.
+      // Reconnect replay of the same stale event — ack is now healthy.
+      // The stale-replay ACK-retry path should clear unackedSeqs and
+      // advance the resume cursor without needing any newer event.
       ackShouldFail = false;
       callbacks.onStreamEvent!(
         'conv-1',
         makeEvent({ seq: 2, turnId: 't1', kind: 'text-delta', payload: { text: 'replayed' } }),
       );
 
-      assert.deepEqual(ackCalls, [1, 2], 'stale replay must not trigger a second ack');
+      assert.deepEqual(ackCalls, [1, 2, 2], 'stale replay must retry ack for unacked seq');
+      assert.ok(
+        !stateMap.get('conv-1')?.unackedSeqs.has(2),
+        'successful retry must clear seq from unackedSeqs',
+      );
+      assert.equal(
+        stateMap.get('conv-1')?.serverResumeSeq,
+        2,
+        'resume cursor must advance after successful ack retry',
+      );
+    } finally {
+      console.warn = originalWarn;
+    }
+  });
+
+  it('replayed stale unacked event stays pinned when retry also fails', () => {
+    const store = storeWithConversation('conv-1');
+    const stateMap = new Map<string, StreamSubscriptionState>();
+    const ackCalls: number[] = [];
+    const warnSpy = mock.fn();
+    const originalWarn = console.warn;
+    console.warn = warnSpy;
+
+    try {
+      const callbacks = buildStreamCallbacks(
+        store,
+        stateMap,
+        (_conversationId, seq) => {
+          ackCalls.push(seq);
+          // ack always fails after the first event
+          if (seq >= 2) throw new Error('ack failed');
+        },
+        { onReconnectNeeded: () => {}, onConnectionEstablished: () => {} },
+      );
+
+      callbacks.onSubscribed!('conv-1', 0);
+      callbacks.onStreamEvent!(
+        'conv-1',
+        makeEvent({ seq: 1, turnId: 't1', kind: 'stream-started', payload: {} }),
+      );
+      callbacks.onStreamEvent!(
+        'conv-1',
+        makeEvent({ seq: 2, turnId: 't1', kind: 'text-delta', payload: { text: 'data' } }),
+      );
+      assert.equal(stateMap.get('conv-1')?.serverResumeSeq, 1);
       assert.ok(stateMap.get('conv-1')?.unackedSeqs.has(2));
+
+      // Replay of stale seq 2 — retry also fails.
+      callbacks.onStreamEvent!(
+        'conv-1',
+        makeEvent({ seq: 2, turnId: 't1', kind: 'text-delta', payload: { text: 'data' } }),
+      );
+
+      assert.deepEqual(ackCalls, [1, 2, 2], 'retry ack must be attempted');
+      assert.ok(
+        stateMap.get('conv-1')?.unackedSeqs.has(2),
+        'unackedSeqs must remain when retry fails',
+      );
       assert.equal(
         stateMap.get('conv-1')?.serverResumeSeq,
         1,
-        'stale replay must not advance the resume cursor across an unacked seq',
+        'resume cursor must stay pinned when retry fails',
       );
+      assert.equal(warnSpy.mock.callCount(), 2, 'both ack failures must be logged');
     } finally {
       console.warn = originalWarn;
     }
