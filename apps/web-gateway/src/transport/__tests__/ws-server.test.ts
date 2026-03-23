@@ -833,7 +833,7 @@ describe('GatewayWsServer', () => {
     const recoveryMessages = await recoveryMessagesPromise;
     assert.deepEqual(
       recoveryMessages.map((message) => message['type']),
-      ['session-active', 'daemon-restored'],
+      ['daemon-restored', 'session-active'],
     );
   });
 

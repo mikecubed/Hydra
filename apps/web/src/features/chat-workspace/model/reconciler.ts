@@ -613,6 +613,38 @@ export function reconcileStreamEvents(
 
 const TERMINAL_STATUSES: ReadonlySet<string> = new Set(['completed', 'failed', 'cancelled']);
 
+/**
+ * Compute a simple richness metric for the content blocks of a turn entry.
+ * Used to break ties when both REST and streamed entries are non-terminal —
+ * the entry with more total text content wins, as it is likely the more
+ * up-to-date snapshot.
+ */
+function contentRichness(entry: TranscriptEntryState): number {
+  let total = 0;
+  for (const block of entry.contentBlocks) {
+    if (block.text != null) {
+      total += block.text.length;
+    }
+  }
+  return total;
+}
+
+/**
+ * Non-terminal status rank for lifecycle progression ordering. Higher rank
+ * means the turn has progressed further. Used to avoid downgrading a live
+ * streamed status badge when REST content is richer.
+ */
+const NON_TERMINAL_RANK: ReadonlyMap<string, number> = new Map([
+  ['submitted', 0],
+  ['executing', 1],
+  ['streaming', 1],
+]);
+
+/** Returns true when `a` represents a strictly more advanced non-terminal status than `b`. */
+function isStrictlyMoreAdvanced(a: string, b: string): boolean {
+  return (NON_TERMINAL_RANK.get(a) ?? 0) > (NON_TERMINAL_RANK.get(b) ?? 0);
+}
+
 function shouldPreserveStreamedTurn(
   restEntry: TranscriptEntryState,
   streamedEntry: TranscriptEntryState,
@@ -628,7 +660,9 @@ function shouldPreserveStreamedTurn(
     return true;
   }
 
-  return true;
+  // Both non-terminal: prefer whichever has richer content, falling back to
+  // streamed when equal (stream is the live source during normal operation).
+  return contentRichness(streamedEntry) >= contentRichness(restEntry);
 }
 
 /**
@@ -667,10 +701,10 @@ export function sealAuthoritativeTurns(
  *
  *  - **Terminal REST turns** are fully authoritative — REST status and
  *    contentBlocks replace the streamed versions.
- *  - **Non-terminal REST turns** preserve the streamed status and
- *    contentBlocks, because the stream is likely ahead of the last REST
- *    snapshot (e.g. a turn still in-progress may have accumulated more
- *    content blocks via real-time events).
+ *  - **Non-terminal REST turns** compare content richness (total text length)
+ *    between REST and streamed entries. The richer content source wins. Status
+ *    is evaluated independently — the more advanced non-terminal status is kept
+ *    to avoid downgrading a live streamed badge (e.g. 'streaming' → 'submitted').
  *
  * In both cases, stream metadata (artifacts, controls, prompt) is kept
  * where richer — these are derived from real-time events the server may
@@ -700,9 +734,18 @@ export function mergeAuthoritativeEntries(
 
     const preserveStreamedTurn = shouldPreserveStreamedTurn(entry, streamed);
 
+    // When REST content is richer (preserveStreamedTurn=false) but both are
+    // non-terminal, the streamed status may still be more advanced. Preserve
+    // it to avoid downgrading live status badges (e.g. 'streaming' → 'submitted').
+    const preserveStreamedStatus =
+      preserveStreamedTurn ||
+      (!TERMINAL_STATUSES.has(entry.status) &&
+        !TERMINAL_STATUSES.has(streamed.status) &&
+        isStrictlyMoreAdvanced(streamed.status, entry.status));
+
     return {
       ...entry,
-      status: preserveStreamedTurn ? streamed.status : entry.status,
+      status: preserveStreamedStatus ? streamed.status : entry.status,
       contentBlocks: preserveStreamedTurn ? streamed.contentBlocks : entry.contentBlocks,
       artifacts: streamed.artifacts.length > 0 ? streamed.artifacts : entry.artifacts,
       controls: streamed.controls.length > 0 ? streamed.controls : entry.controls,

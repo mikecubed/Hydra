@@ -46,6 +46,50 @@ export class SessionWsBridge {
     }, 0);
   }
 
+  #shouldEmitDeferredWarning(expiresAt: string, outcome: ExpiryOutcome): boolean {
+    if (outcome !== 'scheduled' || this.#warningThresholdMs <= 0) {
+      return false;
+    }
+    const remainingMs = new Date(expiresAt).getTime() - this.#clock.now();
+    return remainingMs > 0 && remainingMs <= this.#warningThresholdMs;
+  }
+
+  #emitActiveBootstrap(
+    expiresAt: string,
+    connection: WsConnection,
+    sendExpiringSoon: SendExpiringSoon,
+    applyExpiry: ApplyExpiry,
+    includeDaemonRestored: boolean,
+  ): void {
+    const outcome = applyExpiry(expiresAt);
+    if (outcome === 'terminated') {
+      return;
+    }
+
+    if (includeDaemonRestored) {
+      connection.send({ type: 'daemon-restored' });
+    }
+    connection.send({ type: 'session-active', expiresAt });
+
+    if (this.#shouldEmitDeferredWarning(expiresAt, outcome)) {
+      sendExpiringSoon(expiresAt);
+    }
+  }
+
+  #emitExpiringSoonBootstrap(
+    expiresAt: string,
+    connection: WsConnection,
+    sendExpiringSoon: SendExpiringSoon,
+    applyExpiry: ApplyExpiry,
+  ): void {
+    const outcome = applyExpiry(expiresAt);
+    if (outcome === 'terminated') {
+      return;
+    }
+    connection.send({ type: 'daemon-restored' });
+    sendExpiringSoon(expiresAt);
+  }
+
   #emitStateMessage(
     state: SessionState,
     expiresAt: string,
@@ -56,14 +100,10 @@ export class SessionWsBridge {
   ): void {
     switch (state) {
       case 'active':
-        connection.send({ type: 'daemon-restored' });
-        connection.send({ type: 'session-active', expiresAt });
-        applyExpiry(expiresAt, true);
+        this.#emitActiveBootstrap(expiresAt, connection, sendExpiringSoon, applyExpiry, true);
         return;
       case 'expiring-soon':
-        connection.send({ type: 'daemon-restored' });
-        sendExpiringSoon(expiresAt);
-        applyExpiry(expiresAt);
+        this.#emitExpiringSoonBootstrap(expiresAt, connection, sendExpiringSoon, applyExpiry);
         return;
       case 'daemon-unreachable':
         connection.send({ type: 'daemon-unavailable' });
@@ -100,16 +140,16 @@ export class SessionWsBridge {
         connection.send({ type: 'daemon-unavailable' });
         applyExpiry(event.expiresAt, true);
         return;
-      case 'active': {
+      case 'active':
         if (event.expiresAt != null) {
-          connection.send({ type: 'session-active', expiresAt: event.expiresAt });
+          this.#emitActiveBootstrap(
+            event.expiresAt,
+            connection,
+            sendExpiringSoon,
+            applyExpiry,
+            event.previousState === 'daemon-unreachable',
+          );
         }
-        const expiryResult = applyExpiry(event.expiresAt, true);
-        if (event.previousState === 'daemon-unreachable' && expiryResult !== 'terminated') {
-          connection.send({ type: 'daemon-restored' });
-        }
-        break;
-      }
     }
   }
 

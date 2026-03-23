@@ -1636,6 +1636,92 @@ describe('mergeAuthoritativeEntries', () => {
     assert.equal(result[0].contentBlocks[0].text, 'Hello world');
   });
 
+  it('prefers REST content for non-terminal turns when REST snapshot is richer', () => {
+    const rest = [
+      makeEntry({
+        entryId: 'turn-a',
+        turnId: 'turn-a',
+        status: 'streaming',
+        contentBlocks: [{ blockId: 'blk-1', kind: 'text', text: 'Hello world', metadata: null }],
+      }),
+    ];
+    const current = [
+      makeEntry({
+        entryId: 'turn-a',
+        turnId: 'turn-a',
+        status: 'streaming',
+        contentBlocks: [{ blockId: 'blk-1', kind: 'text', text: 'Hello', metadata: null }],
+      }),
+    ];
+
+    const result = mergeAuthoritativeEntries(rest, current);
+
+    assert.equal(result[0].status, 'streaming');
+    assert.equal(
+      result[0].contentBlocks[0].text,
+      'Hello world',
+      'REST snapshot with richer content should win over stale streamed partial',
+    );
+  });
+
+  it('prefers streamed content when both non-terminal sources have equal richness', () => {
+    const rest = [
+      makeEntry({
+        entryId: 'turn-a',
+        turnId: 'turn-a',
+        status: 'submitted',
+        contentBlocks: [{ blockId: 'blk-1', kind: 'text', text: 'same', metadata: null }],
+      }),
+    ];
+    const current = [
+      makeEntry({
+        entryId: 'turn-a',
+        turnId: 'turn-a',
+        status: 'streaming',
+        contentBlocks: [{ blockId: 'blk-1', kind: 'text', text: 'same', metadata: null }],
+      }),
+    ];
+
+    const result = mergeAuthoritativeEntries(rest, current);
+
+    assert.equal(result[0].status, 'streaming', 'Streamed wins on equal richness');
+    assert.equal(result[0].contentBlocks[0].text, 'same');
+  });
+
+  it('takes REST content but preserves streamed status when streamed is more advanced', () => {
+    const rest = [
+      makeEntry({
+        entryId: 'turn-a',
+        turnId: 'turn-a',
+        status: 'submitted',
+        contentBlocks: [
+          { blockId: 'blk-1', kind: 'text', text: 'Hello world from REST', metadata: null },
+        ],
+      }),
+    ];
+    const current = [
+      makeEntry({
+        entryId: 'turn-a',
+        turnId: 'turn-a',
+        status: 'streaming',
+        contentBlocks: [{ blockId: 'blk-1', kind: 'text', text: 'Hello', metadata: null }],
+      }),
+    ];
+
+    const result = mergeAuthoritativeEntries(rest, current);
+
+    assert.equal(
+      result[0].contentBlocks[0].text,
+      'Hello world from REST',
+      'REST content should win when richer',
+    );
+    assert.equal(
+      result[0].status,
+      'streaming',
+      'Streamed status must be preserved when more advanced, even if REST content wins',
+    );
+  });
+
   it('appends non-turn stream-only entries (activity-group)', () => {
     const rest = [makeEntry({ entryId: 'turn-a', turnId: 'turn-a', status: 'completed' })];
     const current = [

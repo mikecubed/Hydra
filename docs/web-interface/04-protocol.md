@@ -299,7 +299,11 @@ recovery.
 
 #### `daemon-restored`
 
-The daemon is reachable again after a period of unavailability.
+The daemon is reachable again after a period of unavailability. The gateway also
+sends this message as a bootstrap signal on fresh WebSocket bind (or reconnect)
+when the session is already in a healthy `active` or `expiring-soon` state — this
+lets reconnecting clients clear any stale degraded-daemon UI state left over from
+a prior connection.
 
 ```json
 {
@@ -569,7 +573,8 @@ The `state` field indicates the cause:
 
 If the daemon becomes unreachable, the gateway sends `daemon-unavailable` to all active
 connections. Connections remain open during the grace period. When the daemon recovers, the gateway
-sends `daemon-restored`.
+sends `daemon-restored`. The gateway also sends `daemon-restored` as a bootstrap signal on fresh
+bind or reconnect when the session is already healthy, so clients can clear stale degraded state.
 
 ---
 

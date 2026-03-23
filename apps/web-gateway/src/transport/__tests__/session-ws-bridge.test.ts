@@ -126,6 +126,120 @@ describe('SessionWsBridge', () => {
       assert.ok(terminated, 'Empty expiresAt should terminate the session');
       cleanup();
     });
+
+    it('does not emit session-active before termination for invalid active session', () => {
+      const session = createSession({ state: 'active', expiresAt: 'not-a-date' });
+      const conn = createMockConnection(session.id);
+      registry.register(conn);
+
+      const cleanup = bridge.bindSession(session, conn as never);
+      try {
+        const types = conn.sent.map((m) => m.type);
+        assert.ok(types.includes('session-terminated'), 'Expected session-terminated');
+        assert.ok(
+          !types.includes('session-active'),
+          'session-active must not be emitted before termination for invalid expiry',
+        );
+        assert.ok(
+          !types.includes('daemon-restored'),
+          'daemon-restored must not be emitted before termination for invalid expiry',
+        );
+      } finally {
+        cleanup();
+      }
+    });
+
+    it('does not emit session-active before termination for past active session', () => {
+      const pastExpiry = new Date(clock.now() - 1000).toISOString();
+      const session = createSession({ state: 'active', expiresAt: pastExpiry });
+      const conn = createMockConnection(session.id);
+      registry.register(conn);
+
+      const cleanup = bridge.bindSession(session, conn as never);
+      try {
+        const types = conn.sent.map((m) => m.type);
+        assert.ok(types.includes('session-terminated'), 'Expected session-terminated');
+        assert.ok(
+          !types.includes('session-active'),
+          'session-active must not be emitted before termination for past expiry',
+        );
+      } finally {
+        cleanup();
+      }
+    });
+
+    it('does not emit session-active on state-change to active with invalid expiry', () => {
+      const session = createSession({ expiresAt: new Date(clock.now() + 60_000).toISOString() });
+      const conn = createMockConnection(session.id);
+      registry.register(conn);
+
+      const cleanup = bridge.bindSession(session, conn as never);
+      try {
+        // Clear initial messages
+        conn.sent.length = 0;
+
+        broadcaster.broadcast(session.id, {
+          type: 'state-change',
+          previousState: 'daemon-unreachable',
+          newState: 'active',
+          expiresAt: 'garbage-date',
+        });
+
+        const types = conn.sent.map((m) => m.type);
+        assert.ok(types.includes('session-terminated'), 'Expected session-terminated');
+        assert.ok(
+          !types.includes('session-active'),
+          'session-active must not precede termination for invalid expiry on state-change',
+        );
+        assert.ok(
+          !types.includes('daemon-restored'),
+          'daemon-restored must not precede termination for invalid expiry on state-change',
+        );
+      } finally {
+        cleanup();
+      }
+    });
+
+    it('does not emit bootstrap frames for expiring-soon session with invalid expiry', () => {
+      const session = createSession({ state: 'expiring-soon', expiresAt: 'not-a-date' });
+      const conn = createMockConnection(session.id);
+      registry.register(conn);
+
+      const cleanup = bridge.bindSession(session, conn as never);
+      try {
+        const types = conn.sent.map((m) => m.type);
+        assert.ok(types.includes('session-terminated'), 'Expected session-terminated');
+        assert.ok(
+          !types.includes('daemon-restored'),
+          'daemon-restored must not be emitted for expiring-soon with invalid expiry',
+        );
+        assert.ok(
+          !types.includes('session-expiring-soon'),
+          'session-expiring-soon must not be emitted for expiring-soon with invalid expiry',
+        );
+      } finally {
+        cleanup();
+      }
+    });
+
+    it('does not emit bootstrap frames for expiring-soon session with past expiry', () => {
+      const pastExpiry = new Date(clock.now() - 1000).toISOString();
+      const session = createSession({ state: 'expiring-soon', expiresAt: pastExpiry });
+      const conn = createMockConnection(session.id);
+      registry.register(conn);
+
+      const cleanup = bridge.bindSession(session, conn as never);
+      try {
+        const types = conn.sent.map((m) => m.type);
+        assert.ok(types.includes('session-terminated'), 'Expected session-terminated');
+        assert.ok(
+          !types.includes('daemon-restored'),
+          'daemon-restored must not be emitted for expiring-soon with past expiry',
+        );
+      } finally {
+        cleanup();
+      }
+    });
   });
 
   describe('warning timer', () => {
@@ -191,8 +305,10 @@ describe('SessionWsBridge', () => {
 
       const cleanup = localBridge.bindSession(session, conn as never);
       try {
-        const warnings = conn.sent.filter((m) => m.type === 'session-expiring-soon');
-        assert.equal(warnings.length, 1);
+        // Correct ordering: bootstrap frames first, then warning last so the
+        // client's final visible state is 'expiring-soon'.
+        const types = conn.sent.map((m) => m.type);
+        assert.deepEqual(types, ['daemon-restored', 'session-active', 'session-expiring-soon']);
         // Should still schedule expiry — not terminate immediately
         assert.ok(
           !conn.sent.some((m) => m.type === 'session-terminated'),
@@ -215,6 +331,8 @@ describe('SessionWsBridge', () => {
 
       const cleanup = localBridge.bindSession(session, conn as never);
       try {
+        const initialCount = conn.sent.length;
+
         // Simulate daemon recovery that transitions back to active with near-expiry
         const nearExpiry = new Date(clock.now() + 150).toISOString();
         broadcaster.broadcast(session.id, {
@@ -224,14 +342,13 @@ describe('SessionWsBridge', () => {
           expiresAt: nearExpiry,
         });
 
-        // applyExpiry is called for 'active' state — should emit warning immediately
-        const warnings = conn.sent.filter((m) => m.type === 'session-expiring-soon');
-        assert.equal(warnings.length, 1);
-        // daemon-restored should also be sent since previous state was daemon-unreachable
-        assert.ok(
-          conn.sent.some((m) => m.type === 'daemon-restored'),
-          'Expected daemon-restored message',
-        );
+        // Verify correct ordering: daemon-restored, session-active, then warning last
+        const postBroadcast = conn.sent.slice(initialCount).map((m) => m.type);
+        assert.deepEqual(postBroadcast, [
+          'daemon-restored',
+          'session-active',
+          'session-expiring-soon',
+        ]);
       } finally {
         cleanup();
       }
