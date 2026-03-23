@@ -506,5 +506,8 @@ describe('follow-up action', () => {
     await vi.waitFor(() => {
       expect(listCallCount).toBeGreaterThanOrEqual(2);
     });
+
+    expect(screen.queryByText(/Follow-up to turn turn-1/)).not.toBeInTheDocument();
+    expect(screen.getByText('Ready for operator input')).toBeInTheDocument();
   });
 });

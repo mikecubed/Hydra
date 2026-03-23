@@ -848,6 +848,23 @@ function useTranscriptLoader(
   }, []);
 }
 
+function clearFollowUpPolicyLabel(store: WorkspaceStore, conversationId: string): void {
+  const conversation = store.getState().conversations.get(conversationId);
+  if (conversation == null) {
+    return;
+  }
+
+  if (!conversation.controlState.submissionPolicyLabel.startsWith('Follow-up to turn ')) {
+    return;
+  }
+
+  store.dispatch({
+    type: 'conversation/update-control-state',
+    conversationId,
+    patch: { submissionPolicyLabel: 'Ready for operator input' },
+  });
+}
+
 // eslint-disable-next-line max-lines-per-function
 function useComposerProps(
   store: WorkspaceStore,
@@ -913,6 +930,7 @@ function useComposerProps(
 
     void submitComposerDraft({ store, client }).then((result) => {
       if (result.ok) {
+        clearFollowUpPolicyLabel(store, currentId);
         void reloadConversationList();
       }
     });
