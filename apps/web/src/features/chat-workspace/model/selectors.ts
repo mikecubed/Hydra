@@ -212,7 +212,9 @@ export function selectCanCancel(state: WorkspaceState, turnId: string): boolean 
   const control = findControlByKind(entry, 'cancel');
   if (control != null) return control.enabled;
 
-  return entry.status === 'streaming';
+  return (
+    entry.status === 'streaming' || entry.status === 'executing' || entry.status === 'submitted'
+  );
 }
 
 /** Whether a follow-up can be submitted after the given turn (last completed turn, conversation not stale). */
@@ -230,6 +232,6 @@ export function selectCanFollowUp(state: WorkspaceState, turnId: string): boolea
   if (entries.length === 0) return false;
 
   const turnEntries = entries.filter((e) => e.kind === 'turn');
-  const lastTurn = turnEntries.at(-1);
-  return lastTurn?.turnId === turnId;
+  const lastCompletedTurn = turnEntries.findLast((candidate) => candidate.status === 'completed');
+  return lastCompletedTurn?.turnId === turnId;
 }

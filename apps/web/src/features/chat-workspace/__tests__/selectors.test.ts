@@ -765,6 +765,17 @@ describe('selectCanCancel', () => {
     assert.equal(selectCanCancel(state, 'turn-1'), true);
   });
 
+  it('returns true for an executing turn restored from history', () => {
+    let state = stateWithConversation('conv-1');
+    state = reduceWorkspaceState(state, {
+      type: 'conversation/replace-entries',
+      conversationId: 'conv-1',
+      entries: [createEntry({ entryId: 'e1', turnId: 'turn-1', status: 'executing' })],
+      hasMoreHistory: false,
+    });
+    assert.equal(selectCanCancel(state, 'turn-1'), true);
+  });
+
   it('returns false for a completed turn', () => {
     let state = stateWithConversation('conv-1');
     state = reduceWorkspaceState(state, {
@@ -836,6 +847,21 @@ describe('selectCanFollowUp', () => {
       entries: [
         createEntry({ entryId: 'e1', turnId: 'turn-1', status: 'completed' }),
         createEntry({ entryId: 'e2', turnId: 'turn-2', status: 'completed' }),
+      ],
+      hasMoreHistory: false,
+    });
+    assert.equal(selectCanFollowUp(state, 'turn-2'), true);
+  });
+
+  it('returns true for the latest completed turn even when a later turn is failed', () => {
+    let state = stateWithConversation('conv-1');
+    state = reduceWorkspaceState(state, {
+      type: 'conversation/replace-entries',
+      conversationId: 'conv-1',
+      entries: [
+        createEntry({ entryId: 'e1', turnId: 'turn-1', status: 'completed' }),
+        createEntry({ entryId: 'e2', turnId: 'turn-2', status: 'completed' }),
+        createEntry({ entryId: 'e3', turnId: 'turn-3', status: 'failed' }),
       ],
       hasMoreHistory: false,
     });

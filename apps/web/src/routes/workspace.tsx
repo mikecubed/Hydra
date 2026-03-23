@@ -1060,10 +1060,45 @@ function useTurnActions(
   reloadConversationList: () => Promise<void>,
   sealAfterMerge: SealAfterMergeFn,
 ) {
+  const pendingTurnActionIdsRef = useRef<ReadonlySet<string>>(new Set());
+  const [pendingTurnActionIds, setPendingTurnActionIds] = useState<ReadonlySet<string>>(
+    () => new Set(),
+  );
+
+  const tryMarkTurnActionPending = useCallback((turnId: string): boolean => {
+    if (pendingTurnActionIdsRef.current.has(turnId)) {
+      return false;
+    }
+
+    const nextPending = new Set(pendingTurnActionIdsRef.current);
+    nextPending.add(turnId);
+    pendingTurnActionIdsRef.current = nextPending;
+    setPendingTurnActionIds(nextPending);
+    return true;
+  }, []);
+
+  const clearTurnActionPending = useCallback((turnId: string): void => {
+    if (!pendingTurnActionIdsRef.current.has(turnId)) {
+      return;
+    }
+
+    const nextPending = new Set(pendingTurnActionIdsRef.current);
+    nextPending.delete(turnId);
+    pendingTurnActionIdsRef.current = nextPending;
+    setPendingTurnActionIds(nextPending);
+  }, []);
+
   const handleCancel = useCallback(
     (turnId: string) => {
+      if (!tryMarkTurnActionPending(turnId)) {
+        return;
+      }
+
       const conversationId = store.getState().activeConversationId;
-      if (conversationId == null) return;
+      if (conversationId == null) {
+        clearTurnActionPending(turnId);
+        return;
+      }
 
       const prevControlState = store.getState().conversations.get(conversationId)?.controlState ?? {
         canSubmit: true,
@@ -1106,16 +1141,32 @@ function useTurnActions(
             conversationId,
             patch: prevControlState,
           });
+        } finally {
+          clearTurnActionPending(turnId);
         }
       })();
     },
-    [store, client, reloadConversationList, sealAfterMerge],
+    [
+      clearTurnActionPending,
+      client,
+      reloadConversationList,
+      sealAfterMerge,
+      store,
+      tryMarkTurnActionPending,
+    ],
   );
 
   const handleRetry = useCallback(
     (turnId: string) => {
+      if (!tryMarkTurnActionPending(turnId)) {
+        return;
+      }
+
       const conversationId = store.getState().activeConversationId;
-      if (conversationId == null) return;
+      if (conversationId == null) {
+        clearTurnActionPending(turnId);
+        return;
+      }
 
       const prevControlState = store.getState().conversations.get(conversationId)?.controlState ?? {
         canSubmit: true,
@@ -1158,16 +1209,32 @@ function useTurnActions(
             conversationId,
             patch: prevControlState,
           });
+        } finally {
+          clearTurnActionPending(turnId);
         }
       })();
     },
-    [store, client, reloadConversationList, sealAfterMerge],
+    [
+      clearTurnActionPending,
+      client,
+      reloadConversationList,
+      sealAfterMerge,
+      store,
+      tryMarkTurnActionPending,
+    ],
   );
 
   const handleBranch = useCallback(
     (turnId: string) => {
+      if (!tryMarkTurnActionPending(turnId)) {
+        return;
+      }
+
       const conversationId = store.getState().activeConversationId;
-      if (conversationId == null) return;
+      if (conversationId == null) {
+        clearTurnActionPending(turnId);
+        return;
+      }
 
       void (async () => {
         try {
@@ -1192,10 +1259,12 @@ function useTurnActions(
           void reloadConversationList();
         } catch (err: unknown) {
           console.error('[turn-action] Branch failed:', err);
+        } finally {
+          clearTurnActionPending(turnId);
         }
       })();
     },
-    [store, client, reloadConversationList],
+    [clearTurnActionPending, client, reloadConversationList, store, tryMarkTurnActionPending],
   );
 
   const handleFollowUp = useCallback(
@@ -1238,6 +1307,10 @@ function useTurnActions(
         return { canCancel: false, canRetry: false, canBranch: false, canFollowUp: false };
       }
 
+      if (pendingTurnActionIds.has(entry.turnId)) {
+        return { canCancel: false, canRetry: false, canBranch: false, canFollowUp: false };
+      }
+
       const state = store.getState();
       const tid = entry.turnId;
       return {
@@ -1247,7 +1320,7 @@ function useTurnActions(
         canFollowUp: selectCanFollowUp(state, tid),
       };
     },
-    [store],
+    [pendingTurnActionIds, store],
   );
 
   return {

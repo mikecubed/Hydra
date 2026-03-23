@@ -119,22 +119,11 @@ describe('cancel in-progress turn', () => {
     // Wait for the conversation to load and the executing turn to appear
     await screen.findByRole('button', { name: /cancel test/i });
 
-    const ws = openAndSubscribe('conv-1');
+    openAndSubscribe('conv-1');
 
-    // Simulate a streaming turn so the entry has status 'streaming' → canCancel
-    act(() => {
-      ws.simulateMessage(
-        streamFrame('conv-1', 1, 'turn-1', 'stream-started', { attribution: 'Claude' }),
-      );
-      ws.simulateMessage(
-        streamFrame('conv-1', 2, 'turn-1', 'text-delta', { text: 'Working on it…' }),
-      );
-    });
+    expect(await screen.findByText('executing')).toBeInTheDocument();
 
-    // The streaming badge should appear
-    expect(await screen.findByText('streaming…')).toBeInTheDocument();
-
-    // The Cancel button should be visible on the streaming turn
+    // The Cancel button should already be visible on an authoritative in-flight turn.
     const cancelBtn = await screen.findByTestId('turn-action-cancel');
     expect(cancelBtn).toBeInTheDocument();
 
@@ -143,7 +132,7 @@ describe('cancel in-progress turn', () => {
 
     // After cancel POST, the transcript should converge to 'cancelled' status
     await vi.waitFor(() => {
-      expect(screen.queryByText('streaming…')).not.toBeInTheDocument();
+      expect(screen.queryByText('executing')).not.toBeInTheDocument();
     });
 
     await vi.waitFor(() => {
@@ -169,6 +158,7 @@ describe('retry failed turn', () => {
   // eslint-disable-next-line max-lines-per-function
   it('sends retry POST, appends new turn, and streaming continues on retried turn', async () => {
     let retryPosted = false;
+    let retryPostCount = 0;
 
     installFetchStub((url, init) => {
       if (url === '/conversations?status=active&limit=20') {
@@ -206,6 +196,7 @@ describe('retry failed turn', () => {
       // Retry endpoint
       if (url === '/conversations/conv-1/turns/turn-1/retry' && init?.method === 'POST') {
         retryPosted = true;
+        retryPostCount += 1;
         return jsonResponse({
           turn: {
             id: 'turn-retry-1',
@@ -241,11 +232,13 @@ describe('retry failed turn', () => {
 
     // Click retry
     fireEvent.click(retryBtn);
+    fireEvent.click(retryBtn);
 
     // Wait for the retry POST to fire and new turn to reconcile
     await vi.waitFor(() => {
       expect(retryPosted).toBe(true);
     });
+    expect(retryPostCount).toBe(1);
 
     // Now the new turn appears via reconcileTurnEntry — simulate streaming on it
     act(() => {
@@ -284,6 +277,7 @@ describe('retry failed turn', () => {
 describe('branch completed turn', () => {
   it('creates a new conversation, selects it, and shows lineage badge', async () => {
     let branchPosted = false;
+    let branchPostCount = 0;
 
     installFetchStub((url, init) => {
       if (url === '/conversations?status=active&limit=20') {
@@ -317,6 +311,7 @@ describe('branch completed turn', () => {
         const body = JSON.parse(init.body as string) as Record<string, unknown>;
         if (body['parentConversationId'] === 'conv-1' && body['forkPointTurnId'] === 'turn-1') {
           branchPosted = true;
+          branchPostCount += 1;
           return jsonResponse({
             id: 'conv-branch',
             title: 'Branch of Branch test',
@@ -357,11 +352,13 @@ describe('branch completed turn', () => {
 
     // Click branch
     fireEvent.click(branchBtn);
+    fireEvent.click(branchBtn);
 
     // Wait for the branch POST and conversation selection
     await vi.waitFor(() => {
       expect(branchPosted).toBe(true);
     });
+    expect(branchPostCount).toBe(1);
 
     // The new branch conversation should be selected (title in active indicator)
     await vi.waitFor(() => {
