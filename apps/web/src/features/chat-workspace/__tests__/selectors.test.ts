@@ -1247,6 +1247,27 @@ describe('precomputeTranscriptActions', () => {
     assert.equal(map.size, 0);
   });
 
+  it('empty-case result cannot be mutated to contaminate future callers', () => {
+    const state = stateWithConversation('conv-1');
+    const first = precomputeTranscriptActions(state);
+    assert.equal(first.size, 0);
+
+    // Force runtime mutation on the returned map
+    const mutable = first as Map<string, unknown>;
+    mutable.set('injected', {
+      canCancel: true,
+      canRetry: true,
+      canBranch: true,
+      canFollowUp: true,
+    });
+
+    // Second call must still return a clean empty map (no shared singleton)
+    const second = precomputeTranscriptActions(state);
+    assert.equal(second.size, 0);
+    assert.equal(second.has('injected'), false);
+    assert.notStrictEqual(first, second, 'each empty call returns a distinct map');
+  });
+
   it('computes flags for a single completed turn', () => {
     let state = stateWithConversation('conv-1');
     state = reduceWorkspaceState(state, {

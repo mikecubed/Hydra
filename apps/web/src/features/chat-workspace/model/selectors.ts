@@ -320,8 +320,6 @@ export function selectEntryActionFlags(state: WorkspaceState, turnId: string): E
 
 // ─── Whole-transcript precompute ────────────────────────────────────────────
 
-const EMPTY_ACTION_MAP: ReadonlyMap<string, EntryActionFlags> = new Map();
-
 /**
  * Precompute action flags for every turn in the active transcript in a single
  * O(N) pass. Returns a Map keyed by turnId.
@@ -335,7 +333,7 @@ export function precomputeTranscriptActions(
   entries?: readonly TranscriptEntryState[],
 ): ReadonlyMap<string, EntryActionFlags> {
   const resolved = entries ?? selectActiveEntries(state);
-  if (resolved.length === 0) return EMPTY_ACTION_MAP;
+  if (resolved.length === 0) return new Map();
 
   const stale = isConversationStale(state);
 
