@@ -618,15 +618,17 @@ function applyUpdateControlState(
   conversationId: string,
   patch: Readonly<Partial<ConversationControlState>>,
 ): WorkspaceState {
-  const current = state.conversations.get(conversationId);
-  if (current == null) return state;
-
+  const current = ensureConversation(state.conversations, conversationId);
   const nextConversations = new Map(state.conversations);
   nextConversations.set(conversationId, {
     ...current,
     controlState: { ...current.controlState, ...patch },
   });
-  return { ...state, conversations: nextConversations };
+  return {
+    ...state,
+    conversationOrder: withConversationInOrder(state.conversationOrder, conversationId),
+    conversations: nextConversations,
+  };
 }
 
 function applyEntryUpdateControls(

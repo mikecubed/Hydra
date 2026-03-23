@@ -13,7 +13,6 @@ import {
   type GatewayClient,
   type GatewayClientOptions,
   GatewayRequestError,
-  type FollowUpBody,
 } from '../api/gateway-client.ts';
 
 import type { GatewayErrorBody } from '../../../shared/gateway-errors.ts';
