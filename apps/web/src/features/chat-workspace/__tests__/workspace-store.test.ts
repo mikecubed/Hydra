@@ -1355,3 +1355,221 @@ describe('conversation/append-submit-turn reducer', () => {
     assert.equal(state.conversations.get('conv-1')?.entries.length, 1);
   });
 });
+
+// ─── conversation/update-control-state ──────────────────────────────────────
+
+describe('conversation/update-control-state', () => {
+  it('patches canSubmit on the target conversation', () => {
+    let state = createInitialWorkspaceState();
+    state = reduceWorkspaceState(state, {
+      type: 'conversation/select',
+      conversationId: 'conv-1',
+    });
+
+    const before = state.conversations.get('conv-1');
+    assert.equal(before?.controlState.canSubmit, true);
+
+    state = reduceWorkspaceState(state, {
+      type: 'conversation/update-control-state',
+      conversationId: 'conv-1',
+      patch: { canSubmit: false },
+    });
+
+    const after = state.conversations.get('conv-1');
+    assert.equal(after?.controlState.canSubmit, false);
+    // Other fields unchanged
+    assert.equal(after?.controlState.staleReason, null);
+  });
+
+  it('patches staleReason while preserving other fields', () => {
+    let state = createInitialWorkspaceState();
+    state = reduceWorkspaceState(state, {
+      type: 'conversation/select',
+      conversationId: 'conv-1',
+    });
+    state = reduceWorkspaceState(state, {
+      type: 'conversation/update-control-state',
+      conversationId: 'conv-1',
+      patch: { staleReason: 'Session expired', canSubmit: false },
+    });
+
+    const conv = state.conversations.get('conv-1');
+    assert.equal(conv?.controlState.staleReason, 'Session expired');
+    assert.equal(conv?.controlState.canSubmit, false);
+    assert.equal(conv?.controlState.submissionPolicyLabel, 'Ready for operator input');
+  });
+
+  it('patches submissionPolicyLabel', () => {
+    let state = createInitialWorkspaceState();
+    state = reduceWorkspaceState(state, {
+      type: 'conversation/select',
+      conversationId: 'conv-1',
+    });
+    state = reduceWorkspaceState(state, {
+      type: 'conversation/update-control-state',
+      conversationId: 'conv-1',
+      patch: { submissionPolicyLabel: 'Agent is busy' },
+    });
+
+    assert.equal(
+      state.conversations.get('conv-1')?.controlState.submissionPolicyLabel,
+      'Agent is busy',
+    );
+  });
+
+  it('is a no-op for a non-existent conversation', () => {
+    const state = createInitialWorkspaceState();
+    const next = reduceWorkspaceState(state, {
+      type: 'conversation/update-control-state',
+      conversationId: 'no-such',
+      patch: { canSubmit: false },
+    });
+    // State reference unchanged when conversation not found
+    assert.equal(next, state);
+  });
+
+  it('clears staleReason back to null', () => {
+    let state = createInitialWorkspaceState();
+    state = reduceWorkspaceState(state, {
+      type: 'conversation/select',
+      conversationId: 'conv-1',
+    });
+    state = reduceWorkspaceState(state, {
+      type: 'conversation/update-control-state',
+      conversationId: 'conv-1',
+      patch: { staleReason: 'Stale' },
+    });
+    state = reduceWorkspaceState(state, {
+      type: 'conversation/update-control-state',
+      conversationId: 'conv-1',
+      patch: { staleReason: null, canSubmit: true },
+    });
+
+    const conv = state.conversations.get('conv-1');
+    assert.equal(conv?.controlState.staleReason, null);
+    assert.equal(conv?.controlState.canSubmit, true);
+  });
+});
+
+// ─── entry/update-controls ──────────────────────────────────────────────────
+
+describe('entry/update-controls', () => {
+  it('sets controls on a matching entry', () => {
+    let state = createInitialWorkspaceState();
+    state = reduceWorkspaceState(state, {
+      type: 'conversation/select',
+      conversationId: 'conv-1',
+    });
+    state = reduceWorkspaceState(state, {
+      type: 'conversation/replace-entries',
+      conversationId: 'conv-1',
+      entries: [createEntry({ entryId: 'e1', turnId: 'turn-1' })],
+      hasMoreHistory: false,
+    });
+
+    const controls = [
+      { controlId: 'ctrl-1', kind: 'retry' as const, enabled: true, reasonDisabled: null },
+      { controlId: 'ctrl-2', kind: 'branch' as const, enabled: false, reasonDisabled: 'Not yet' },
+    ];
+
+    state = reduceWorkspaceState(state, {
+      type: 'entry/update-controls',
+      conversationId: 'conv-1',
+      entryId: 'e1',
+      controls,
+    });
+
+    const entry = state.conversations.get('conv-1')?.entries[0];
+    assert.equal(entry?.controls.length, 2);
+    assert.equal(entry?.controls[0].kind, 'retry');
+    assert.equal(entry?.controls[1].enabled, false);
+    assert.equal(entry?.controls[1].reasonDisabled, 'Not yet');
+  });
+
+  it('is a no-op when the entry does not exist', () => {
+    let state = createInitialWorkspaceState();
+    state = reduceWorkspaceState(state, {
+      type: 'conversation/select',
+      conversationId: 'conv-1',
+    });
+    state = reduceWorkspaceState(state, {
+      type: 'conversation/replace-entries',
+      conversationId: 'conv-1',
+      entries: [createEntry({ entryId: 'e1', turnId: 'turn-1' })],
+      hasMoreHistory: false,
+    });
+
+    const before = state;
+    state = reduceWorkspaceState(state, {
+      type: 'entry/update-controls',
+      conversationId: 'conv-1',
+      entryId: 'no-such',
+      controls: [{ controlId: 'c', kind: 'retry', enabled: true, reasonDisabled: null }],
+    });
+
+    assert.equal(state, before);
+  });
+
+  it('replaces existing controls entirely', () => {
+    let state = createInitialWorkspaceState();
+    state = reduceWorkspaceState(state, {
+      type: 'conversation/select',
+      conversationId: 'conv-1',
+    });
+    state = reduceWorkspaceState(state, {
+      type: 'conversation/replace-entries',
+      conversationId: 'conv-1',
+      entries: [
+        createEntry({
+          entryId: 'e1',
+          turnId: 'turn-1',
+          controls: [
+            { controlId: 'old-1', kind: 'cancel', enabled: true, reasonDisabled: null },
+          ],
+        }),
+      ],
+      hasMoreHistory: false,
+    });
+
+    state = reduceWorkspaceState(state, {
+      type: 'entry/update-controls',
+      conversationId: 'conv-1',
+      entryId: 'e1',
+      controls: [{ controlId: 'new-1', kind: 'retry', enabled: true, reasonDisabled: null }],
+    });
+
+    const entry = state.conversations.get('conv-1')?.entries[0];
+    assert.equal(entry?.controls.length, 1);
+    assert.equal(entry?.controls[0].controlId, 'new-1');
+  });
+});
+
+// ─── Lineage always defaults to branch (record-level lineageKind deferred to T035+) ─
+
+describe('lineage relationshipKind from record', () => {
+  it('defaults to branch when parentConversationId and forkPointTurnId are present', () => {
+    const state = reduceWorkspaceState(createInitialWorkspaceState(), {
+      type: 'conversation/upsert',
+      conversation: {
+        id: 'conv-branch',
+        parentConversationId: 'conv-root',
+        forkPointTurnId: 'turn-5',
+      },
+    });
+    assert.equal(
+      state.conversations.get('conv-branch')?.lineageSummary?.relationshipKind,
+      'branch',
+    );
+  });
+
+  it('returns null lineage when parentConversationId is missing', () => {
+    const state = reduceWorkspaceState(createInitialWorkspaceState(), {
+      type: 'conversation/upsert',
+      conversation: {
+        id: 'conv-root',
+        forkPointTurnId: 'turn-5',
+      },
+    });
+    assert.equal(state.conversations.get('conv-root')?.lineageSummary, null);
+  });
+});

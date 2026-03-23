@@ -5,6 +5,7 @@ import {
   createInitialWorkspaceState,
   reduceWorkspaceState,
   type ArtifactViewState,
+  type EntryControlState,
   type TranscriptEntryState,
   type WorkspaceState,
 } from '../model/workspace-store.ts';
@@ -19,6 +20,14 @@ import {
   selectCreateModeCanSubmit,
   selectConversationList,
   selectIsHistoryLoaded,
+  selectConversationLineage,
+  selectEntryControls,
+  selectConversationStaleReason,
+  selectIsTurnStale,
+  selectCanRetry,
+  selectCanBranch,
+  selectCanCancel,
+  selectCanFollowUp,
 } from '../model/selectors.ts';
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
@@ -413,5 +422,620 @@ describe('selectActiveEntries — duplicate suppression', () => {
     assert.equal(selected[0].entryId, 'e1');
     assert.equal(selected[1].entryId, 'act-1');
     assert.equal(selected[2].entryId, 'e2');
+  });
+});
+
+// ─── selectConversationLineage ──────────────────────────────────────────────
+
+describe('selectConversationLineage', () => {
+  it('returns lineage for a branched conversation', () => {
+    let state = createInitialWorkspaceState();
+    state = reduceWorkspaceState(state, {
+      type: 'conversation/upsert',
+      conversation: {
+        id: 'conv-branch',
+        parentConversationId: 'conv-root',
+        forkPointTurnId: 'turn-5',
+      },
+    });
+    state = reduceWorkspaceState(state, {
+      type: 'conversation/select',
+      conversationId: 'conv-branch',
+    });
+
+    const lineage = selectConversationLineage(state);
+    assert.notEqual(lineage, null);
+    assert.equal(lineage?.sourceConversationId, 'conv-root');
+    assert.equal(lineage?.sourceTurnId, 'turn-5');
+    assert.equal(lineage?.relationshipKind, 'branch');
+  });
+
+  it('returns null for a root conversation', () => {
+    const state = stateWithConversation('conv-root');
+    assert.equal(selectConversationLineage(state), null);
+  });
+
+  it('returns null when no conversation is active', () => {
+    assert.equal(selectConversationLineage(createInitialWorkspaceState()), null);
+  });
+});
+
+// ─── selectEntryControls ────────────────────────────────────────────────────
+
+describe('selectEntryControls', () => {
+  it('returns controls for a matching entry', () => {
+    const controls: readonly EntryControlState[] = [
+      { controlId: 'ctrl-1', kind: 'retry', enabled: true, reasonDisabled: null },
+      { controlId: 'ctrl-2', kind: 'branch', enabled: true, reasonDisabled: null },
+    ];
+    let state = stateWithConversation('conv-1');
+    state = reduceWorkspaceState(state, {
+      type: 'conversation/replace-entries',
+      conversationId: 'conv-1',
+      entries: [createEntry({ entryId: 'e1', turnId: 'turn-1', controls })],
+      hasMoreHistory: false,
+    });
+
+    const result = selectEntryControls(state, 'e1');
+    assert.equal(result.length, 2);
+    assert.equal(result[0].kind, 'retry');
+    assert.equal(result[1].kind, 'branch');
+  });
+
+  it('returns empty array for non-existent entry', () => {
+    const state = stateWithConversation('conv-1');
+    assert.deepStrictEqual(selectEntryControls(state, 'no-such'), []);
+  });
+
+  it('returns empty array when no conversation is active', () => {
+    assert.deepStrictEqual(selectEntryControls(createInitialWorkspaceState(), 'e1'), []);
+  });
+});
+
+// ─── selectConversationStaleReason ──────────────────────────────────────────
+
+describe('selectConversationStaleReason', () => {
+  it('returns null for a fresh conversation', () => {
+    const state = stateWithConversation('conv-1');
+    assert.equal(selectConversationStaleReason(state), null);
+  });
+
+  it('returns the stale reason after update-control-state', () => {
+    let state = stateWithConversation('conv-1');
+    state = reduceWorkspaceState(state, {
+      type: 'conversation/update-control-state',
+      conversationId: 'conv-1',
+      patch: { staleReason: 'Session expired' },
+    });
+    assert.equal(selectConversationStaleReason(state), 'Session expired');
+  });
+
+  it('returns null when no conversation is active', () => {
+    assert.equal(selectConversationStaleReason(createInitialWorkspaceState()), null);
+  });
+});
+
+// ─── selectIsTurnStale ──────────────────────────────────────────────────────
+
+describe('selectIsTurnStale', () => {
+  it('returns false for a completed turn with no stale entry controls', () => {
+    let state = stateWithConversation('conv-1');
+    state = reduceWorkspaceState(state, {
+      type: 'conversation/replace-entries',
+      conversationId: 'conv-1',
+      entries: [createEntry({ entryId: 'e1', turnId: 'turn-1', status: 'completed' })],
+      hasMoreHistory: false,
+    });
+    assert.equal(selectIsTurnStale(state, 'turn-1'), false);
+  });
+
+  it('returns true for a turn with status stale', () => {
+    let state = stateWithConversation('conv-1');
+    state = reduceWorkspaceState(state, {
+      type: 'conversation/replace-entries',
+      conversationId: 'conv-1',
+      entries: [createEntry({ entryId: 'e1', turnId: 'turn-1', status: 'stale' })],
+      hasMoreHistory: false,
+    });
+    assert.equal(selectIsTurnStale(state, 'turn-1'), true);
+  });
+
+  it('returns false for a non-existent turn', () => {
+    const state = stateWithConversation('conv-1');
+    assert.equal(selectIsTurnStale(state, 'no-such'), false);
+  });
+});
+
+// ─── selectCanRetry ─────────────────────────────────────────────────────────
+
+describe('selectCanRetry', () => {
+  it('returns true for a completed turn entry', () => {
+    let state = stateWithConversation('conv-1');
+    state = reduceWorkspaceState(state, {
+      type: 'conversation/replace-entries',
+      conversationId: 'conv-1',
+      entries: [createEntry({ entryId: 'e1', turnId: 'turn-1', status: 'completed' })],
+      hasMoreHistory: false,
+    });
+    assert.equal(selectCanRetry(state, 'turn-1'), true);
+  });
+
+  it('returns true for a failed turn entry', () => {
+    let state = stateWithConversation('conv-1');
+    state = reduceWorkspaceState(state, {
+      type: 'conversation/replace-entries',
+      conversationId: 'conv-1',
+      entries: [createEntry({ entryId: 'e1', turnId: 'turn-1', status: 'failed' })],
+      hasMoreHistory: false,
+    });
+    assert.equal(selectCanRetry(state, 'turn-1'), true);
+  });
+
+  it('returns false for an error-status turn (reconciler never produces this)', () => {
+    let state = stateWithConversation('conv-1');
+    state = reduceWorkspaceState(state, {
+      type: 'conversation/replace-entries',
+      conversationId: 'conv-1',
+      entries: [createEntry({ entryId: 'e1', turnId: 'turn-1', status: 'error' })],
+      hasMoreHistory: false,
+    });
+    assert.equal(selectCanRetry(state, 'turn-1'), false);
+  });
+
+  it('returns false for a streaming turn', () => {
+    let state = stateWithConversation('conv-1');
+    state = reduceWorkspaceState(state, {
+      type: 'conversation/replace-entries',
+      conversationId: 'conv-1',
+      entries: [createEntry({ entryId: 'e1', turnId: 'turn-1', status: 'streaming' })],
+      hasMoreHistory: false,
+    });
+    assert.equal(selectCanRetry(state, 'turn-1'), false);
+  });
+
+  it('returns false when conversation is stale', () => {
+    let state = stateWithConversation('conv-1');
+    state = reduceWorkspaceState(state, {
+      type: 'conversation/replace-entries',
+      conversationId: 'conv-1',
+      entries: [createEntry({ entryId: 'e1', turnId: 'turn-1', status: 'completed' })],
+      hasMoreHistory: false,
+    });
+    state = reduceWorkspaceState(state, {
+      type: 'conversation/update-control-state',
+      conversationId: 'conv-1',
+      patch: { staleReason: 'Session expired' },
+    });
+    assert.equal(selectCanRetry(state, 'turn-1'), false);
+  });
+
+  it('returns false for a non-turn entry', () => {
+    let state = stateWithConversation('conv-1');
+    state = reduceWorkspaceState(state, {
+      type: 'conversation/replace-entries',
+      conversationId: 'conv-1',
+      entries: [
+        createEntry({
+          entryId: 'e1',
+          kind: 'system-status',
+          turnId: null,
+          status: 'completed',
+        }),
+      ],
+      hasMoreHistory: false,
+    });
+    assert.equal(selectCanRetry(state, 'turn-1'), false);
+  });
+
+  it('returns false when entry has a disabled retry control despite eligible status', () => {
+    let state = stateWithConversation('conv-1');
+    state = reduceWorkspaceState(state, {
+      type: 'conversation/replace-entries',
+      conversationId: 'conv-1',
+      entries: [
+        createEntry({
+          entryId: 'e1',
+          turnId: 'turn-1',
+          status: 'completed',
+          controls: [
+            { controlId: 'c1', kind: 'retry', enabled: false, reasonDisabled: 'Rate limited' },
+          ],
+        }),
+      ],
+      hasMoreHistory: false,
+    });
+    assert.equal(selectCanRetry(state, 'turn-1'), false);
+  });
+
+  it('returns true when entry has an enabled retry control', () => {
+    let state = stateWithConversation('conv-1');
+    state = reduceWorkspaceState(state, {
+      type: 'conversation/replace-entries',
+      conversationId: 'conv-1',
+      entries: [
+        createEntry({
+          entryId: 'e1',
+          turnId: 'turn-1',
+          status: 'completed',
+          controls: [
+            { controlId: 'c1', kind: 'retry', enabled: true, reasonDisabled: null },
+          ],
+        }),
+      ],
+      hasMoreHistory: false,
+    });
+    assert.equal(selectCanRetry(state, 'turn-1'), true);
+  });
+});
+
+// ─── selectCanBranch ────────────────────────────────────────────────────────
+
+describe('selectCanBranch', () => {
+  it('returns true for a completed turn entry', () => {
+    let state = stateWithConversation('conv-1');
+    state = reduceWorkspaceState(state, {
+      type: 'conversation/replace-entries',
+      conversationId: 'conv-1',
+      entries: [createEntry({ entryId: 'e1', turnId: 'turn-1', status: 'completed' })],
+      hasMoreHistory: false,
+    });
+    assert.equal(selectCanBranch(state, 'turn-1'), true);
+  });
+
+  it('returns false for a streaming turn', () => {
+    let state = stateWithConversation('conv-1');
+    state = reduceWorkspaceState(state, {
+      type: 'conversation/replace-entries',
+      conversationId: 'conv-1',
+      entries: [createEntry({ entryId: 'e1', turnId: 'turn-1', status: 'streaming' })],
+      hasMoreHistory: false,
+    });
+    assert.equal(selectCanBranch(state, 'turn-1'), false);
+  });
+
+  it('returns false when conversation is stale', () => {
+    let state = stateWithConversation('conv-1');
+    state = reduceWorkspaceState(state, {
+      type: 'conversation/replace-entries',
+      conversationId: 'conv-1',
+      entries: [createEntry({ entryId: 'e1', turnId: 'turn-1', status: 'completed' })],
+      hasMoreHistory: false,
+    });
+    state = reduceWorkspaceState(state, {
+      type: 'conversation/update-control-state',
+      conversationId: 'conv-1',
+      patch: { staleReason: 'Server disconnect' },
+    });
+    assert.equal(selectCanBranch(state, 'turn-1'), false);
+  });
+
+  it('returns false when entry has a disabled branch control despite eligible status', () => {
+    let state = stateWithConversation('conv-1');
+    state = reduceWorkspaceState(state, {
+      type: 'conversation/replace-entries',
+      conversationId: 'conv-1',
+      entries: [
+        createEntry({
+          entryId: 'e1',
+          turnId: 'turn-1',
+          status: 'completed',
+          controls: [
+            { controlId: 'c1', kind: 'branch', enabled: false, reasonDisabled: 'Branching unavailable' },
+          ],
+        }),
+      ],
+      hasMoreHistory: false,
+    });
+    assert.equal(selectCanBranch(state, 'turn-1'), false);
+  });
+
+  it('returns true when entry has an enabled branch control', () => {
+    let state = stateWithConversation('conv-1');
+    state = reduceWorkspaceState(state, {
+      type: 'conversation/replace-entries',
+      conversationId: 'conv-1',
+      entries: [
+        createEntry({
+          entryId: 'e1',
+          turnId: 'turn-1',
+          status: 'completed',
+          controls: [
+            { controlId: 'c1', kind: 'branch', enabled: true, reasonDisabled: null },
+          ],
+        }),
+      ],
+      hasMoreHistory: false,
+    });
+    assert.equal(selectCanBranch(state, 'turn-1'), true);
+  });
+});
+
+// ─── selectCanCancel ────────────────────────────────────────────────────────
+
+describe('selectCanCancel', () => {
+  it('returns true for a streaming turn', () => {
+    let state = stateWithConversation('conv-1');
+    state = reduceWorkspaceState(state, {
+      type: 'conversation/replace-entries',
+      conversationId: 'conv-1',
+      entries: [createEntry({ entryId: 'e1', turnId: 'turn-1', status: 'streaming' })],
+      hasMoreHistory: false,
+    });
+    assert.equal(selectCanCancel(state, 'turn-1'), true);
+  });
+
+  it('returns false for a completed turn', () => {
+    let state = stateWithConversation('conv-1');
+    state = reduceWorkspaceState(state, {
+      type: 'conversation/replace-entries',
+      conversationId: 'conv-1',
+      entries: [createEntry({ entryId: 'e1', turnId: 'turn-1', status: 'completed' })],
+      hasMoreHistory: false,
+    });
+    assert.equal(selectCanCancel(state, 'turn-1'), false);
+  });
+
+  it('returns false for a non-existent turn', () => {
+    const state = stateWithConversation('conv-1');
+    assert.equal(selectCanCancel(state, 'no-such'), false);
+  });
+
+  it('returns false when entry has a disabled cancel control despite streaming status', () => {
+    let state = stateWithConversation('conv-1');
+    state = reduceWorkspaceState(state, {
+      type: 'conversation/replace-entries',
+      conversationId: 'conv-1',
+      entries: [
+        createEntry({
+          entryId: 'e1',
+          turnId: 'turn-1',
+          status: 'streaming',
+          controls: [
+            { controlId: 'c1', kind: 'cancel', enabled: false, reasonDisabled: 'Cancel unavailable' },
+          ],
+        }),
+      ],
+      hasMoreHistory: false,
+    });
+    assert.equal(selectCanCancel(state, 'turn-1'), false);
+  });
+
+  it('returns true when entry has an enabled cancel control', () => {
+    let state = stateWithConversation('conv-1');
+    state = reduceWorkspaceState(state, {
+      type: 'conversation/replace-entries',
+      conversationId: 'conv-1',
+      entries: [
+        createEntry({
+          entryId: 'e1',
+          turnId: 'turn-1',
+          status: 'streaming',
+          controls: [
+            { controlId: 'c1', kind: 'cancel', enabled: true, reasonDisabled: null },
+          ],
+        }),
+      ],
+      hasMoreHistory: false,
+    });
+    assert.equal(selectCanCancel(state, 'turn-1'), true);
+  });
+});
+
+// ─── selectCanFollowUp ─────────────────────────────────────────────────────
+
+describe('selectCanFollowUp', () => {
+  it('returns true for the last completed turn', () => {
+    let state = stateWithConversation('conv-1');
+    state = reduceWorkspaceState(state, {
+      type: 'conversation/replace-entries',
+      conversationId: 'conv-1',
+      entries: [
+        createEntry({ entryId: 'e1', turnId: 'turn-1', status: 'completed' }),
+        createEntry({ entryId: 'e2', turnId: 'turn-2', status: 'completed' }),
+      ],
+      hasMoreHistory: false,
+    });
+    assert.equal(selectCanFollowUp(state, 'turn-2'), true);
+  });
+
+  it('returns false for a non-last completed turn', () => {
+    let state = stateWithConversation('conv-1');
+    state = reduceWorkspaceState(state, {
+      type: 'conversation/replace-entries',
+      conversationId: 'conv-1',
+      entries: [
+        createEntry({ entryId: 'e1', turnId: 'turn-1', status: 'completed' }),
+        createEntry({ entryId: 'e2', turnId: 'turn-2', status: 'completed' }),
+      ],
+      hasMoreHistory: false,
+    });
+    assert.equal(selectCanFollowUp(state, 'turn-1'), false);
+  });
+
+  it('returns false when conversation is stale', () => {
+    let state = stateWithConversation('conv-1');
+    state = reduceWorkspaceState(state, {
+      type: 'conversation/replace-entries',
+      conversationId: 'conv-1',
+      entries: [createEntry({ entryId: 'e1', turnId: 'turn-1', status: 'completed' })],
+      hasMoreHistory: false,
+    });
+    state = reduceWorkspaceState(state, {
+      type: 'conversation/update-control-state',
+      conversationId: 'conv-1',
+      patch: { staleReason: 'Timeout' },
+    });
+    assert.equal(selectCanFollowUp(state, 'turn-1'), false);
+  });
+
+  it('returns false for a streaming turn', () => {
+    let state = stateWithConversation('conv-1');
+    state = reduceWorkspaceState(state, {
+      type: 'conversation/replace-entries',
+      conversationId: 'conv-1',
+      entries: [createEntry({ entryId: 'e1', turnId: 'turn-1', status: 'streaming' })],
+      hasMoreHistory: false,
+    });
+    assert.equal(selectCanFollowUp(state, 'turn-1'), false);
+  });
+
+  it('uses deduped entries — duplicate turns do not skew last-turn check', () => {
+    let state = stateWithConversation('conv-1');
+    // Duplicate turn-2 entries: raw entries have turn-2 appearing twice.
+    // Without dedup, the last turn entry might be the duplicate, giving a
+    // false positive for turn-1 or incorrect result for turn-2.
+    const entries: TranscriptEntryState[] = [
+      createEntry({ entryId: 'e1', turnId: 'turn-1', status: 'completed' }),
+      createEntry({ entryId: 'e2', turnId: 'turn-2', status: 'completed' }),
+      createEntry({ entryId: 'e2-dup', turnId: 'turn-2', status: 'completed' }),
+    ];
+    state = reduceWorkspaceState(state, {
+      type: 'conversation/replace-entries',
+      conversationId: 'conv-1',
+      entries,
+      hasMoreHistory: false,
+    });
+    // turn-2 is the last turn — follow-up allowed
+    assert.equal(selectCanFollowUp(state, 'turn-2'), true);
+    // turn-1 is not the last turn — follow-up blocked
+    assert.equal(selectCanFollowUp(state, 'turn-1'), false);
+  });
+
+  it('returns false when entry has a disabled submit-follow-up control despite eligible status', () => {
+    let state = stateWithConversation('conv-1');
+    state = reduceWorkspaceState(state, {
+      type: 'conversation/replace-entries',
+      conversationId: 'conv-1',
+      entries: [
+        createEntry({
+          entryId: 'e1',
+          turnId: 'turn-1',
+          status: 'completed',
+          controls: [
+            { controlId: 'c1', kind: 'submit-follow-up', enabled: false, reasonDisabled: 'Follow-up limit reached' },
+          ],
+        }),
+      ],
+      hasMoreHistory: false,
+    });
+    assert.equal(selectCanFollowUp(state, 'turn-1'), false);
+  });
+
+  it('returns true when entry has an enabled submit-follow-up control', () => {
+    let state = stateWithConversation('conv-1');
+    state = reduceWorkspaceState(state, {
+      type: 'conversation/replace-entries',
+      conversationId: 'conv-1',
+      entries: [
+        createEntry({
+          entryId: 'e1',
+          turnId: 'turn-1',
+          status: 'completed',
+          controls: [
+            { controlId: 'c1', kind: 'submit-follow-up', enabled: true, reasonDisabled: null },
+          ],
+        }),
+      ],
+      hasMoreHistory: false,
+    });
+    assert.equal(selectCanFollowUp(state, 'turn-1'), true);
+  });
+});
+
+// ─── Deduplication safety: lineage & control selectors use canonical entries ─
+
+describe('lineage/control selectors — dedup safety', () => {
+  it('selectEntryControls reads deduped entries, not raw', () => {
+    const controls: readonly EntryControlState[] = [
+      { controlId: 'ctrl-1', kind: 'retry', enabled: true, reasonDisabled: null },
+    ];
+    const dupeControls: readonly EntryControlState[] = [
+      { controlId: 'ctrl-dup', kind: 'branch', enabled: true, reasonDisabled: null },
+    ];
+    let state = stateWithConversation('conv-1');
+    // Duplicate turnId — dedup keeps the first occurrence and drops the second.
+    // If raw entries were used, looking up 'e1-dup' would find the ghost entry.
+    const entries: TranscriptEntryState[] = [
+      createEntry({ entryId: 'e1', turnId: 'turn-1', status: 'completed', controls }),
+      createEntry({ entryId: 'e1-dup', turnId: 'turn-1', status: 'streaming', controls: dupeControls }),
+    ];
+    state = reduceWorkspaceState(state, {
+      type: 'conversation/replace-entries',
+      conversationId: 'conv-1',
+      entries,
+      hasMoreHistory: false,
+    });
+    // After dedup, only e1 survives — controls should come from e1
+    const result = selectEntryControls(state, 'e1');
+    assert.equal(result.length, 1);
+    assert.equal(result[0].kind, 'retry');
+    // The duplicate's entryId must not be findable in deduped entries
+    const dupResult = selectEntryControls(state, 'e1-dup');
+    assert.deepStrictEqual(dupResult, [], 'ghost duplicate entry must not be visible');
+  });
+
+  it('selectIsTurnStale reads deduped entries', () => {
+    let state = stateWithConversation('conv-1');
+    // First entry is stale, duplicate overrides with completed — dedup keeps first
+    const entries: TranscriptEntryState[] = [
+      createEntry({ entryId: 'e1', turnId: 'turn-1', status: 'stale' }),
+      createEntry({ entryId: 'e1-dup', turnId: 'turn-1', status: 'completed' }),
+    ];
+    state = reduceWorkspaceState(state, {
+      type: 'conversation/replace-entries',
+      conversationId: 'conv-1',
+      entries,
+      hasMoreHistory: false,
+    });
+    // Dedup keeps e1 (stale) — the selector should see stale
+    assert.equal(selectIsTurnStale(state, 'turn-1'), true);
+  });
+
+  it('selectCanRetry reads deduped entries', () => {
+    let state = stateWithConversation('conv-1');
+    const entries: TranscriptEntryState[] = [
+      createEntry({ entryId: 'e1', turnId: 'turn-1', status: 'failed' }),
+      createEntry({ entryId: 'e1-dup', turnId: 'turn-1', status: 'streaming' }),
+    ];
+    state = reduceWorkspaceState(state, {
+      type: 'conversation/replace-entries',
+      conversationId: 'conv-1',
+      entries,
+      hasMoreHistory: false,
+    });
+    // Dedup keeps e1 (failed) — retry should be allowed
+    assert.equal(selectCanRetry(state, 'turn-1'), true);
+  });
+
+  it('selectCanBranch reads deduped entries', () => {
+    let state = stateWithConversation('conv-1');
+    const entries: TranscriptEntryState[] = [
+      createEntry({ entryId: 'e1', turnId: 'turn-1', status: 'completed' }),
+      createEntry({ entryId: 'e1-dup', turnId: 'turn-1', status: 'streaming' }),
+    ];
+    state = reduceWorkspaceState(state, {
+      type: 'conversation/replace-entries',
+      conversationId: 'conv-1',
+      entries,
+      hasMoreHistory: false,
+    });
+    // Dedup keeps e1 (completed) — branch should be allowed
+    assert.equal(selectCanBranch(state, 'turn-1'), true);
+  });
+
+  it('selectCanCancel reads deduped entries', () => {
+    let state = stateWithConversation('conv-1');
+    const entries: TranscriptEntryState[] = [
+      createEntry({ entryId: 'e1', turnId: 'turn-1', status: 'streaming' }),
+      createEntry({ entryId: 'e1-dup', turnId: 'turn-1', status: 'completed' }),
+    ];
+    state = reduceWorkspaceState(state, {
+      type: 'conversation/replace-entries',
+      conversationId: 'conv-1',
+      entries,
+      hasMoreHistory: false,
+    });
+    // Dedup keeps e1 (streaming) — cancel should be allowed
+    assert.equal(selectCanCancel(state, 'turn-1'), true);
   });
 });
