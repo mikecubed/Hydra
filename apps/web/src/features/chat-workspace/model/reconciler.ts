@@ -772,7 +772,10 @@ export function mergeAuthoritativeEntries(
       status: preserveStreamedStatus ? streamed.status : entry.status,
       contentBlocks: preserveStreamedTurn ? streamed.contentBlocks : entry.contentBlocks,
       artifacts: streamed.artifacts.length > 0 ? streamed.artifacts : entry.artifacts,
-      controls: streamed.controls.length > 0 ? streamed.controls : entry.controls,
+      controls:
+        streamed.controls.length > 0 && !TERMINAL_STATUSES.has(entry.status)
+          ? streamed.controls
+          : entry.controls,
       prompt: coercePromptForTerminalTurn(
         mergePromptState(streamed.prompt, entry.prompt),
         TERMINAL_STATUSES.has(entry.status),

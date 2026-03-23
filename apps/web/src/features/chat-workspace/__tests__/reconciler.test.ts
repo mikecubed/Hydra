@@ -1569,7 +1569,7 @@ describe('mergeAuthoritativeEntries', () => {
     assert.equal(result[0].prompt?.promptId, 'p1');
   });
 
-  it('preserves stream controls for completed turns in both REST and stream', () => {
+  it('does not preserve stale stream controls for terminal REST turns', () => {
     const rest = [
       makeEntry({ entryId: 'turn-a', turnId: 'turn-a', status: 'completed', controls: [] }),
     ];
@@ -1582,8 +1582,7 @@ describe('mergeAuthoritativeEntries', () => {
       }),
     ];
     const result = mergeAuthoritativeEntries(rest, current);
-    assert.equal(result[0].controls.length, 1);
-    assert.equal(result[0].controls[0].controlId, 'c1');
+    assert.equal(result[0].controls.length, 0, 'terminal REST clears stale streamed controls');
   });
 
   it('uses REST content and status for turns in both REST and stream', () => {
