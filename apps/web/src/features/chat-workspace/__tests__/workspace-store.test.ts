@@ -1527,9 +1527,7 @@ describe('entry/update-controls', () => {
         createEntry({
           entryId: 'e1',
           turnId: 'turn-1',
-          controls: [
-            { controlId: 'old-1', kind: 'cancel', enabled: true, reasonDisabled: null },
-          ],
+          controls: [{ controlId: 'old-1', kind: 'cancel', enabled: true, reasonDisabled: null }],
         }),
       ],
       hasMoreHistory: false,

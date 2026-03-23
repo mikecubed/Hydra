@@ -10,9 +10,7 @@ afterEach(() => {
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
 
-function makeLineage(
-  overrides: Partial<ConversationLineageState> = {},
-): ConversationLineageState {
+function makeLineage(overrides: Partial<ConversationLineageState> = {}): ConversationLineageState {
   return {
     sourceConversationId: 'conv-root',
     sourceTurnId: 'turn-5',
@@ -31,9 +29,7 @@ describe('LineageBadge', () => {
   });
 
   it('renders the source conversation reference', () => {
-    render(
-      <LineageBadge lineage={makeLineage({ sourceConversationId: 'conv-parent' })} />,
-    );
+    render(<LineageBadge lineage={makeLineage({ sourceConversationId: 'conv-parent' })} />);
     expect(screen.getByTestId('lineage-badge')).toHaveTextContent('conv-parent');
   });
 
@@ -60,9 +56,7 @@ describe('LineageBadge', () => {
   });
 
   it('includes the source turn reference', () => {
-    render(
-      <LineageBadge lineage={makeLineage({ sourceTurnId: 'turn-42' })} />,
-    );
+    render(<LineageBadge lineage={makeLineage({ sourceTurnId: 'turn-42' })} />);
     expect(screen.getByTestId('lineage-badge')).toHaveTextContent('turn-42');
   });
 });

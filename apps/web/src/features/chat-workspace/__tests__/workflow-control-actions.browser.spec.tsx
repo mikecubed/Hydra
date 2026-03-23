@@ -100,10 +100,7 @@ describe('cancel in-progress turn', () => {
         });
       }
       // Cancel endpoint
-      if (
-        url === '/conversations/conv-1/turns/turn-1/cancel' &&
-        init?.method === 'POST'
-      ) {
+      if (url === '/conversations/conv-1/turns/turn-1/cancel' && init?.method === 'POST') {
         cancelPosted = true;
         return jsonResponse({
           success: true,
@@ -167,7 +164,9 @@ describe('cancel in-progress turn', () => {
 
 // ─── 2. Retry failed turn ──────────────────────────────────────────────────
 
+// eslint-disable-next-line max-lines-per-function
 describe('retry failed turn', () => {
+  // eslint-disable-next-line max-lines-per-function
   it('sends retry POST, appends new turn, and streaming continues on retried turn', async () => {
     let retryPosted = false;
 
@@ -205,10 +204,7 @@ describe('retry failed turn', () => {
         });
       }
       // Retry endpoint
-      if (
-        url === '/conversations/conv-1/turns/turn-1/retry' &&
-        init?.method === 'POST'
-      ) {
+      if (url === '/conversations/conv-1/turns/turn-1/retry' && init?.method === 'POST') {
         retryPosted = true;
         return jsonResponse({
           turn: {
@@ -270,17 +266,15 @@ describe('retry failed turn', () => {
 
     // Visible retry lineage remains attached to the retried turn
     const lineageBadges = await screen.findAllByTestId('lineage-badge');
-    expect(lineageBadges.some((badge) => badge.textContent?.includes('retry'))).toBe(true);
-    expect(lineageBadges.some((badge) => badge.textContent?.includes('@turn-1'))).toBe(true);
+    expect(lineageBadges.some((badge) => badge.textContent.includes('retry'))).toBe(true);
+    expect(lineageBadges.some((badge) => badge.textContent.includes('@turn-1'))).toBe(true);
 
     // Verify ordering — failed turn first, then retry turn
     const articles = transcriptArticles();
     expect(articles.length).toBeGreaterThanOrEqual(2);
 
     // No duplicate: we should not see multiple entries for the same turn
-    const retryEntries = articles.filter((a) =>
-      within(a).queryByText('Retried successfully!'),
-    );
+    const retryEntries = articles.filter((a) => within(a).queryByText('Retried successfully!'));
     expect(retryEntries).toHaveLength(1);
   });
 });
@@ -371,9 +365,7 @@ describe('branch completed turn', () => {
 
     // The new branch conversation should be selected (title in active indicator)
     await vi.waitFor(() => {
-      expect(
-        screen.getByText('Active conversation: Branch of Branch test'),
-      ).toBeInTheDocument();
+      expect(screen.getByText('Active conversation: Branch of Branch test')).toBeInTheDocument();
     });
 
     // The lineage badge should be visible for the branched conversation
@@ -385,6 +377,7 @@ describe('branch completed turn', () => {
 
 // ─── 4. Follow-up action ────────────────────────────────────────────────────
 
+// eslint-disable-next-line max-lines-per-function
 describe('follow-up action', () => {
   it('routes operator back to composer with follow-up context label', async () => {
     installFetchStub((url) => {
@@ -500,13 +493,15 @@ describe('follow-up action', () => {
     fireEvent.click(screen.getByRole('button', { name: /send/i }));
 
     // Wait for submit POST to fire
-    await vi.waitFor(() => {
-      expect(submitBody).not.toBeNull();
+    const body = await vi.waitFor(() => {
+      if (submitBody == null) {
+        throw new Error('Expected follow-up submit body to be captured');
+      }
+      return submitBody;
     });
 
-    // The submit body should stay inside the standard submit contract
-    expect(submitBody).toHaveProperty('instruction', 'Expand on point 2');
-    expect(Object.keys(submitBody!).sort()).toEqual(['instruction']);
+    expect(body).toHaveProperty('instruction', 'Expand on point 2');
+    expect(Object.keys(body).sort()).toEqual(['instruction']);
 
     await vi.waitFor(() => {
       expect(listCallCount).toBeGreaterThanOrEqual(2);

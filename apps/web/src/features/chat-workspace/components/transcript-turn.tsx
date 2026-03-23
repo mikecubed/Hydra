@@ -190,6 +190,7 @@ function noop(): void {
   /* no-op fallback for optional turn action callbacks */
 }
 
+// eslint-disable-next-line complexity
 export function TranscriptTurn({
   entry,
   onRespondToPrompt,
@@ -204,6 +205,7 @@ export function TranscriptTurn({
 }: TranscriptTurnProps): JSX.Element {
   const streaming = isStreamingStatus(entry.status);
   const hasTurnId = entry.kind === 'turn' && entry.turnId != null;
+  const actionableTurnId = hasTurnId ? entry.turnId : null;
 
   return (
     <article
@@ -237,10 +239,10 @@ export function TranscriptTurn({
 
       {entry.prompt != null && <PromptCard prompt={entry.prompt} onRespond={onRespondToPrompt} />}
 
-      {hasTurnId && (
+      {actionableTurnId != null && (
         <TurnControlBar
           entryId={entry.entryId}
-          turnId={entry.turnId!}
+          turnId={actionableTurnId}
           canCancel={canCancel}
           canRetry={canRetry}
           canBranch={canBranch}

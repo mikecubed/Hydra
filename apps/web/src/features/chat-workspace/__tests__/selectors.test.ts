@@ -657,9 +657,7 @@ describe('selectCanRetry', () => {
           entryId: 'e1',
           turnId: 'turn-1',
           status: 'completed',
-          controls: [
-            { controlId: 'c1', kind: 'retry', enabled: true, reasonDisabled: null },
-          ],
+          controls: [{ controlId: 'c1', kind: 'retry', enabled: true, reasonDisabled: null }],
         }),
       ],
       hasMoreHistory: false,
@@ -720,7 +718,12 @@ describe('selectCanBranch', () => {
           turnId: 'turn-1',
           status: 'completed',
           controls: [
-            { controlId: 'c1', kind: 'branch', enabled: false, reasonDisabled: 'Branching unavailable' },
+            {
+              controlId: 'c1',
+              kind: 'branch',
+              enabled: false,
+              reasonDisabled: 'Branching unavailable',
+            },
           ],
         }),
       ],
@@ -739,9 +742,7 @@ describe('selectCanBranch', () => {
           entryId: 'e1',
           turnId: 'turn-1',
           status: 'completed',
-          controls: [
-            { controlId: 'c1', kind: 'branch', enabled: true, reasonDisabled: null },
-          ],
+          controls: [{ controlId: 'c1', kind: 'branch', enabled: true, reasonDisabled: null }],
         }),
       ],
       hasMoreHistory: false,
@@ -791,7 +792,12 @@ describe('selectCanCancel', () => {
           turnId: 'turn-1',
           status: 'streaming',
           controls: [
-            { controlId: 'c1', kind: 'cancel', enabled: false, reasonDisabled: 'Cancel unavailable' },
+            {
+              controlId: 'c1',
+              kind: 'cancel',
+              enabled: false,
+              reasonDisabled: 'Cancel unavailable',
+            },
           ],
         }),
       ],
@@ -810,9 +816,7 @@ describe('selectCanCancel', () => {
           entryId: 'e1',
           turnId: 'turn-1',
           status: 'streaming',
-          controls: [
-            { controlId: 'c1', kind: 'cancel', enabled: true, reasonDisabled: null },
-          ],
+          controls: [{ controlId: 'c1', kind: 'cancel', enabled: true, reasonDisabled: null }],
         }),
       ],
       hasMoreHistory: false,
@@ -912,7 +916,12 @@ describe('selectCanFollowUp', () => {
           turnId: 'turn-1',
           status: 'completed',
           controls: [
-            { controlId: 'c1', kind: 'submit-follow-up', enabled: false, reasonDisabled: 'Follow-up limit reached' },
+            {
+              controlId: 'c1',
+              kind: 'submit-follow-up',
+              enabled: false,
+              reasonDisabled: 'Follow-up limit reached',
+            },
           ],
         }),
       ],
@@ -957,7 +966,12 @@ describe('lineage/control selectors — dedup safety', () => {
     // If raw entries were used, looking up 'e1-dup' would find the ghost entry.
     const entries: TranscriptEntryState[] = [
       createEntry({ entryId: 'e1', turnId: 'turn-1', status: 'completed', controls }),
-      createEntry({ entryId: 'e1-dup', turnId: 'turn-1', status: 'streaming', controls: dupeControls }),
+      createEntry({
+        entryId: 'e1-dup',
+        turnId: 'turn-1',
+        status: 'streaming',
+        controls: dupeControls,
+      }),
     ];
     state = reduceWorkspaceState(state, {
       type: 'conversation/replace-entries',

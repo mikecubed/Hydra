@@ -73,12 +73,7 @@ export function TurnControlBar(props: TurnControlBarProps): JSX.Element | null {
   if (!hasTurnActions(actions)) return null;
 
   return (
-    <div
-      style={barStyle}
-      data-testid="turn-actions"
-      role="group"
-      aria-label="Turn control actions"
-    >
+    <div style={barStyle} data-testid="turn-actions" role="group" aria-label="Turn control actions">
       {actions.cancel && (
         <button
           type="button"

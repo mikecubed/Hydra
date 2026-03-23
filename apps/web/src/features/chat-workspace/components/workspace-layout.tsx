@@ -33,6 +33,7 @@ export interface WorkspaceLayoutProps extends TranscriptTurnCallbacks {
   readonly composerSlot?: JSX.Element | null;
 }
 
+// eslint-disable-next-line max-lines-per-function
 export function WorkspaceLayout({
   conversations,
   activeConversationId,
@@ -106,8 +107,7 @@ export function WorkspaceLayout({
               }}
             >
               <span>
-                Active conversation:{' '}
-                {activeConversation?.title ?? 'No conversation selected'}
+                Active conversation: {activeConversation?.title ?? 'No conversation selected'}
               </span>
               {activeConversation != null && (
                 <LineageBadge lineage={activeConversation.lineageSummary} />

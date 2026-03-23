@@ -33,7 +33,7 @@ function formatRelationshipLabel(kind: string): string {
 }
 
 export function LineageBadge({ lineage }: LineageBadgeProps): JSX.Element | null {
-  if (lineage == null || lineage.relationshipKind == null) return null;
+  if (lineage?.relationshipKind == null) return null;
 
   return (
     <span data-testid="lineage-badge" style={badgeStyle}>

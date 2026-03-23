@@ -704,6 +704,7 @@ function applyPromptAction(state: WorkspaceState, action: PromptAction): Workspa
 
 // ─── Top-level reducer ──────────────────────────────────────────────────────
 
+// eslint-disable-next-line complexity
 export function reduceWorkspaceState(
   state: WorkspaceState,
   action: WorkspaceAction,

@@ -855,6 +855,7 @@ describe('TranscriptPane', () => {
     expect(screen.getByText('Failed to load transcript.')).toBeTruthy();
   });
 
+  // eslint-disable-next-line max-lines-per-function
   it('renders lineage for a branched conversation selected from turn controls', async () => {
     const primaryConversation = {
       id: 'conv-1',
@@ -900,7 +901,8 @@ describe('TranscriptPane', () => {
         listCalls += 1;
         return new Response(
           JSON.stringify({
-            conversations: listCalls === 1 ? [primaryConversation] : [branchConversation, primaryConversation],
+            conversations:
+              listCalls === 1 ? [primaryConversation] : [branchConversation, primaryConversation],
             totalCount: listCalls === 1 ? 1 : 2,
           }),
           {
@@ -931,7 +933,10 @@ describe('TranscriptPane', () => {
         );
       }
 
-      if (url === '/conversations/conv-1/approvals' || url === '/conversations/conv-branch/approvals') {
+      if (
+        url === '/conversations/conv-1/approvals' ||
+        url === '/conversations/conv-branch/approvals'
+      ) {
         return new Response(JSON.stringify({ approvals: [] }), {
           status: 200,
           headers: { 'Content-Type': 'application/json' },
@@ -954,7 +959,9 @@ describe('TranscriptPane', () => {
 
     fireEvent.click(await screen.findByTestId('turn-action-branch'));
 
-    expect(await screen.findByText(/active conversation: branch conversation/i)).toBeInTheDocument();
+    expect(
+      await screen.findByText(/active conversation: branch conversation/i),
+    ).toBeInTheDocument();
     expect(screen.getByTestId('lineage-badge')).toHaveTextContent('branch');
     expect(screen.getByTestId('lineage-badge')).toHaveTextContent('conv-1');
     expect(screen.getByTestId('lineage-badge')).toHaveTextContent('@turn-1');
@@ -1018,6 +1025,7 @@ describe('TranscriptPane', () => {
     });
   });
 
+  // eslint-disable-next-line max-lines-per-function
   it('reconciles the cancelled turn immediately from the control response', async () => {
     const historyResponses: LoadTurnHistoryResponse[] = [
       {
@@ -1116,6 +1124,7 @@ describe('TranscriptPane', () => {
     });
   });
 
+  // eslint-disable-next-line max-lines-per-function
   it('appends the retried turn before the transcript background refresh finishes', async () => {
     const historyResponses: LoadTurnHistoryResponse[] = [
       {

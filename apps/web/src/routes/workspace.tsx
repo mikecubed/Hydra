@@ -986,11 +986,7 @@ function usePromptResponder(store: WorkspaceStore, client: GatewayClient) {
  * Immediately reconcile a single turn entry in the active transcript.
  * Replaces existing entry by turnId (cancel) or appends if new (retry).
  */
-function reconcileTurnEntry(
-  store: WorkspaceStore,
-  conversationId: string,
-  turn: Turn,
-): void {
+function reconcileTurnEntry(store: WorkspaceStore, conversationId: string, turn: Turn): void {
   const conv = store.getState().conversations.get(conversationId);
   if (conv == null) return;
 
@@ -1039,6 +1035,7 @@ async function reconcileActiveTranscript(
 
 // ─── Turn control action hooks ──────────────────────────────────────────────
 
+// eslint-disable-next-line max-lines-per-function
 function useTurnActions(
   store: WorkspaceStore,
   client: GatewayClient,
@@ -1077,7 +1074,11 @@ function useTurnActions(
           store.dispatch({
             type: 'conversation/update-control-state',
             conversationId,
-            patch: { canSubmit: true, submissionPolicyLabel: 'Ready for operator input', staleReason: null },
+            patch: {
+              canSubmit: true,
+              submissionPolicyLabel: 'Ready for operator input',
+              staleReason: null,
+            },
           });
         } catch (err: unknown) {
           console.error('[turn-action] Cancel failed:', err);
@@ -1125,7 +1126,11 @@ function useTurnActions(
           store.dispatch({
             type: 'conversation/update-control-state',
             conversationId,
-            patch: { canSubmit: true, submissionPolicyLabel: 'Ready for operator input', staleReason: null },
+            patch: {
+              canSubmit: true,
+              submissionPolicyLabel: 'Ready for operator input',
+              staleReason: null,
+            },
           });
         } catch (err: unknown) {
           console.error('[turn-action] Retry failed:', err);
@@ -1236,6 +1241,7 @@ function useTurnActions(
   };
 }
 
+// eslint-disable-next-line max-lines-per-function
 export function WorkspaceRoute(): JSX.Element {
   const [store] = useState(() => createWorkspaceStore());
   const state = useWorkspaceState(store);

@@ -42,6 +42,7 @@ const NO_ACTIONS: EntryActionFlags = {
   canFollowUp: false,
 };
 
+// eslint-disable-next-line max-lines-per-function
 export function TranscriptPane({
   entries,
   loadState,

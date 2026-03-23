@@ -276,6 +276,7 @@ async function fetchQueryJson<T>(
 
 // ─── Factory ────────────────────────────────────────────────────────────────
 
+// eslint-disable-next-line max-lines-per-function
 export function createGatewayClient(options: GatewayClientOptions): GatewayClient {
   const { baseUrl } = options;
   const fetchFn = options.fetch ?? globalThis.fetch;
@@ -372,7 +373,7 @@ export function createGatewayClient(options: GatewayClientOptions): GatewayClien
       );
     },
 
-    async branchConversation(conversationId, forkPointTurnId, options) {
+    async branchConversation(conversationId, forkPointTurnId, branchOptions) {
       return postJson<CreateConversationResponse>(
         fetchFn,
         baseUrl,
@@ -381,7 +382,7 @@ export function createGatewayClient(options: GatewayClientOptions): GatewayClien
         {
           parentConversationId: conversationId,
           forkPointTurnId,
-          ...options,
+          ...branchOptions,
         },
       );
     },

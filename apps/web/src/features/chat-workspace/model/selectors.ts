@@ -134,9 +134,7 @@ export function selectIsHistoryLoaded(state: WorkspaceState): boolean {
 const EMPTY_CONTROLS: readonly EntryControlState[] = [];
 
 /** Lineage summary for the active conversation, or `null`. */
-export function selectConversationLineage(
-  state: WorkspaceState,
-): ConversationLineageState | null {
+export function selectConversationLineage(state: WorkspaceState): ConversationLineageState | null {
   return selectActiveConversation(state)?.lineageSummary ?? null;
 }
 
@@ -232,6 +230,6 @@ export function selectCanFollowUp(state: WorkspaceState, turnId: string): boolea
   if (entries.length === 0) return false;
 
   const turnEntries = entries.filter((e) => e.kind === 'turn');
-  const lastTurn = turnEntries[turnEntries.length - 1];
+  const lastTurn = turnEntries.at(-1);
   return lastTurn?.turnId === turnId;
 }
