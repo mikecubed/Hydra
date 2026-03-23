@@ -1374,7 +1374,11 @@ export function WorkspaceRoute(): JSX.Element {
     reloadConversationList,
   );
   const handleRespondToPrompt = usePromptResponder(store, client);
-  const actionMap = useMemo(() => precomputeTranscriptActions(state), [state]);
+  const activeEntries = useMemo(() => selectActiveEntries(state), [state]);
+  const actionMap = useMemo(
+    () => precomputeTranscriptActions(state, activeEntries),
+    [state, activeEntries],
+  );
   const turnActions = useTurnActions(
     store,
     client,
@@ -1390,7 +1394,7 @@ export function WorkspaceRoute(): JSX.Element {
         conversations={selectConversationList(state)}
         activeConversationId={state.activeConversationId}
         activeConversation={activeConversation}
-        activeEntries={selectActiveEntries(state)}
+        activeEntries={activeEntries}
         activeLoadState={selectActiveLoadState(state)}
         activeHasMoreHistory={activeConversation?.hasMoreHistory ?? false}
         isLoadingConversations={isLoadingConversations}

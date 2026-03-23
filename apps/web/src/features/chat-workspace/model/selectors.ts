@@ -204,7 +204,7 @@ export function selectCanBranch(state: WorkspaceState, turnId: string): boolean 
   return entry.status === 'completed';
 }
 
-/** Whether the given turn can be cancelled (currently streaming). */
+/** Whether the given turn can be cancelled (streaming, executing, or submitted). */
 export function selectCanCancel(state: WorkspaceState, turnId: string): boolean {
   const entry = findTurnEntry(state, turnId);
   if (entry == null) return false;
@@ -332,16 +332,17 @@ const EMPTY_ACTION_MAP: ReadonlyMap<string, EntryActionFlags> = new Map();
  */
 export function precomputeTranscriptActions(
   state: WorkspaceState,
+  entries?: readonly TranscriptEntryState[],
 ): ReadonlyMap<string, EntryActionFlags> {
-  const entries = selectActiveEntries(state);
-  if (entries.length === 0) return EMPTY_ACTION_MAP;
+  const resolved = entries ?? selectActiveEntries(state);
+  if (resolved.length === 0) return EMPTY_ACTION_MAP;
 
   const stale = isConversationStale(state);
 
   // Single pass to find the last completed turn (needed for canFollowUp).
   let lastCompletedTurnId: string | null = null;
-  for (let i = entries.length - 1; i >= 0; i--) {
-    const e = entries[i];
+  for (let i = resolved.length - 1; i >= 0; i--) {
+    const e = resolved[i];
     if (e.kind === 'turn' && e.status === 'completed' && e.turnId != null) {
       lastCompletedTurnId = e.turnId;
       break;
@@ -350,7 +351,7 @@ export function precomputeTranscriptActions(
 
   const result = new Map<string, EntryActionFlags>();
 
-  for (const entry of entries) {
+  for (const entry of resolved) {
     if (entry.kind !== 'turn' || entry.turnId == null) continue;
     result.set(entry.turnId, computeEntryActionFlags(entry, stale, lastCompletedTurnId));
   }
