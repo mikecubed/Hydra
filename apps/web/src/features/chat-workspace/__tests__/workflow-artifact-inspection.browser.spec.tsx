@@ -31,6 +31,7 @@ afterEach(() => {
   resetFakeWebSockets();
   fetchSpy.mockReset();
   vi.unstubAllGlobals();
+  vi.useRealTimers();
   cleanup();
 });
 
@@ -143,5 +144,105 @@ describe('workspace artifact hydration workflows', () => {
 
     await screen.findByText('second.txt');
     expect(listCounts.get('turn-2')).toBe(1);
+  });
+
+  // eslint-disable-next-line max-lines-per-function -- mixed success/failure retry regression
+  it('retries failed hydration turns after sibling turns succeed', async () => {
+    let turn2Attempts = 0;
+
+    // eslint-disable-next-line max-lines-per-function -- focused route fetch scenario
+    fetchSpy.mockImplementation((input) => {
+      const url = requestUrl(input);
+      if (url === '/conversations?status=active&limit=20') {
+        return Promise.resolve(
+          jsonResponse({
+            conversations: [conversation('conv-1', 'Artifact retry')],
+            totalCount: 1,
+          }),
+        );
+      }
+      if (url === '/conversations/conv-1/turns?limit=50') {
+        return Promise.resolve(
+          jsonResponse({
+            turns: [
+              {
+                id: 'turn-1',
+                conversationId: 'conv-1',
+                position: 1,
+                kind: 'agent',
+                attribution: { type: 'agent', label: 'Claude' },
+                response: 'First turn',
+                status: 'completed',
+                createdAt: '2026-07-01T00:00:01.000Z',
+                completedAt: '2026-07-01T00:00:02.000Z',
+              },
+              {
+                id: 'turn-2',
+                conversationId: 'conv-1',
+                position: 2,
+                kind: 'agent',
+                attribution: { type: 'agent', label: 'Claude' },
+                response: 'Second turn',
+                status: 'completed',
+                createdAt: '2026-07-01T00:00:03.000Z',
+                completedAt: '2026-07-01T00:00:04.000Z',
+              },
+            ],
+            totalCount: 2,
+            hasMore: false,
+          }),
+        );
+      }
+      if (url === '/conversations/conv-1/approvals') {
+        return Promise.resolve(jsonResponse({ approvals: [] }));
+      }
+      if (url === '/turns/turn-1/artifacts') {
+        return Promise.resolve(
+          jsonResponse({
+            artifacts: [
+              {
+                id: 'art-1',
+                turnId: 'turn-1',
+                kind: 'file',
+                label: 'first.txt',
+                size: 5,
+                createdAt: '2026-07-01T00:00:05.000Z',
+              },
+            ],
+          }),
+        );
+      }
+      if (url === '/turns/turn-2/artifacts') {
+        turn2Attempts++;
+        if (turn2Attempts === 1) {
+          return Promise.reject(new Error('transient'));
+        }
+        return Promise.resolve(
+          jsonResponse({
+            artifacts: [
+              {
+                id: 'art-2',
+                turnId: 'turn-2',
+                kind: 'file',
+                label: 'second.txt',
+                size: 6,
+                createdAt: '2026-07-01T00:00:06.000Z',
+              },
+            ],
+          }),
+        );
+      }
+      return Promise.reject(new Error(`Unexpected fetch: ${url}`));
+    });
+    vi.stubGlobal('fetch', fetchSpy);
+
+    render(<AppProviders />);
+
+    await screen.findByRole('button', { name: /artifact retry/i });
+    await screen.findByText('first.txt');
+    expect(screen.queryByText('second.txt')).toBeNull();
+
+    await screen.findByText('second.txt', undefined, { timeout: 2_500 });
+    expect(turn2Attempts).toBe(2);
   });
 });

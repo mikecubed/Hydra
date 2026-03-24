@@ -13,7 +13,7 @@ import type {
   ArtifactViewState,
   WorkspaceAction,
 } from './workspace-types.ts';
-import { isCodeLikeArtifact } from '../render/artifact-render-utils.ts';
+import { classifyArtifactKind } from '../render/artifact-render-utils.ts';
 
 /**
  * Map an array of REST `Artifact` objects to `ArtifactReferenceState[]`.
@@ -36,13 +36,20 @@ export function hydrateEntryArtifacts(
  * and its fetched content string.
  *
  * The content is placed in a single preview block whose kind is determined
- * by the artifact's classification (code-like → 'code', otherwise → 'text').
+ * by the artifact's classification (code → 'code', data → 'structured',
+ * prose → 'text').
  */
 export function buildArtifactViewFromContent(
   artifact: Artifact,
   content: string,
 ): ArtifactViewState {
-  const blockKind = isCodeLikeArtifact(artifact.kind) ? 'code' : 'text';
+  const classification = classifyArtifactKind(artifact.kind);
+  let blockKind: 'code' | 'structured' | 'text' = 'text';
+  if (classification === 'code') {
+    blockKind = 'code';
+  } else if (classification === 'data') {
+    blockKind = 'structured';
+  }
 
   return {
     artifactId: artifact.id,

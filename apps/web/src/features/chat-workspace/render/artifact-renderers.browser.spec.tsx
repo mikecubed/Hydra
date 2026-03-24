@@ -248,6 +248,18 @@ describe('ArtifactPreview', () => {
     expect(pre?.style.fontFamily).toBe('monospace');
   });
 
+  it('renders structured-data blocks within artifacts with monospace', () => {
+    const artifact = makeArtifact({
+      kind: 'structured-data',
+      previewBlocks: [makeBlock({ kind: 'structured', text: '{"ok":true}' })],
+    });
+    const { container } = render(<ArtifactPreview artifact={artifact} />);
+    const pre = container.querySelector('pre');
+    expect(pre).toBeTruthy();
+    expect(pre?.style.fontFamily).toBe('monospace');
+    expect(pre?.textContent).toContain('{"ok":true}');
+  });
+
   it('applies data-testid to preview container', () => {
     render(<ArtifactPreview artifact={makeArtifact()} />);
     expect(screen.getByTestId('artifact-preview')).toBeTruthy();

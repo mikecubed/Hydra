@@ -1348,6 +1348,7 @@ function useTurnActions(
  * that transient failures for individual turns do not permanently suppress
  * retries. Failed turns remain eligible for hydration on subsequent renders.
  */
+// eslint-disable-next-line max-lines-per-function -- route-level hydration coordination
 function useArtifactHydration(
   store: WorkspaceStore,
   client: GatewayClient,
@@ -1357,6 +1358,7 @@ function useArtifactHydration(
   const hydratedTurnsByConversationRef = useRef(new Map<string, Set<string>>());
   const pendingTurnsByConversationRef = useRef(new Map<string, Set<string>>());
   const retryTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const retryConversationRef = useRef<string | null>(null);
   const [retryNonce, setRetryNonce] = useState(0);
 
   useEffect(() => {
@@ -1393,7 +1395,6 @@ function useArtifactHydration(
     }
 
     const conversationId = activeConversationId;
-    let disposed = false;
 
     void hydrateConversationArtifacts(
       conversationId,
@@ -1407,21 +1408,30 @@ function useArtifactHydration(
       for (const turnId of turnIds) {
         pendingTurns.delete(turnId);
       }
-      if (disposed || failedTurns.size === 0 || retryTimerRef.current != null) {
+      if (
+        failedTurns.size === 0 ||
+        retryTimerRef.current != null ||
+        store.getState().activeConversationId !== conversationId
+      ) {
         return;
       }
 
+      retryConversationRef.current = conversationId;
       retryTimerRef.current = setTimeout(() => {
         retryTimerRef.current = null;
+        retryConversationRef.current = null;
+        if (store.getState().activeConversationId !== conversationId) {
+          return;
+        }
         setRetryNonce((value) => value + 1);
       }, 1_000);
     });
 
     return () => {
-      disposed = true;
-      if (retryTimerRef.current != null) {
+      if (retryTimerRef.current != null && retryConversationRef.current !== conversationId) {
         clearTimeout(retryTimerRef.current);
         retryTimerRef.current = null;
+        retryConversationRef.current = null;
       }
     };
   }, [activeConversationId, client, entries, retryNonce, store]);
@@ -1432,6 +1442,7 @@ function useArtifactHydration(
         clearTimeout(retryTimerRef.current);
         retryTimerRef.current = null;
       }
+      retryConversationRef.current = null;
     },
     [],
   );

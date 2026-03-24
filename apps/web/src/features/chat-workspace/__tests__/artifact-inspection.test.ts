@@ -179,6 +179,34 @@ describe('buildArtifactViewFromContent', () => {
     const result = buildArtifactViewFromContent(artifact, 'Step 1: ...');
     assert.equal(result.previewBlocks[0].kind, 'text');
   });
+
+  it('uses structured block kind for test-result artifacts', () => {
+    const artifact = {
+      id: 'art-1',
+      turnId: 'turn-1',
+      kind: 'test-result' as const,
+      label: 'result.json',
+      size: 10,
+      createdAt: '2026-01-01T00:00:00Z',
+    };
+
+    const result = buildArtifactViewFromContent(artifact, '{"passed":true}');
+    assert.equal(result.previewBlocks[0].kind, 'structured');
+  });
+
+  it('uses structured block kind for structured-data artifacts', () => {
+    const artifact = {
+      id: 'art-1',
+      turnId: 'turn-1',
+      kind: 'structured-data' as const,
+      label: 'summary.json',
+      size: 10,
+      createdAt: '2026-01-01T00:00:00Z',
+    };
+
+    const result = buildArtifactViewFromContent(artifact, '{"items":[1,2]}');
+    assert.equal(result.previewBlocks[0].kind, 'structured');
+  });
 });
 
 // ─── Reducer: entry/hydrate-artifacts ───────────────────────────────────────
