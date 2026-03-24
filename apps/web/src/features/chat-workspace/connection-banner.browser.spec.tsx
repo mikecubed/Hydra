@@ -18,9 +18,14 @@ function connectionState(
 function renderBanner(
   overrides: Partial<WorkspaceConnectionState> = {},
   convergenceHint?: string | null,
+  staleControlReason?: string | null,
 ) {
   return render(
-    <ConnectionBanner connection={connectionState(overrides)} convergenceHint={convergenceHint} />,
+    <ConnectionBanner
+      connection={connectionState(overrides)}
+      convergenceHint={convergenceHint}
+      staleControlReason={staleControlReason}
+    />,
   );
 }
 
@@ -195,6 +200,47 @@ describe('ConnectionBanner stale-control awareness', () => {
     expect(el).toBeInTheDocument();
     expect(el).toHaveTextContent(/disconnected/i);
     expect(el).toHaveTextContent(/another session/i);
+  });
+
+  it('shows a warning banner when staleControlReason is provided on an operational connection', () => {
+    renderBanner(
+      { transportStatus: 'live', syncStatus: 'idle', daemonStatus: 'healthy' },
+      null,
+      'Task was cancelled by another session',
+    );
+    const el = screen.getByRole('status');
+    expect(el).toBeInTheDocument();
+    expect(el).toHaveTextContent(/cancelled by another session/i);
+    // Warning severity → polite (not assertive)
+    expect(el).toHaveAttribute('aria-live', 'polite');
+  });
+
+  it('staleControlReason takes precedence over convergenceHint when both are present', () => {
+    renderBanner(
+      { transportStatus: 'live', syncStatus: 'idle', daemonStatus: 'healthy' },
+      'Controls updated by another session',
+      'Task was cancelled by another session',
+    );
+    const el = screen.getByRole('status');
+    expect(el).toBeInTheDocument();
+    // staleControlReason message wins
+    expect(el).toHaveTextContent(/cancelled by another session/i);
+    // convergenceHint message is NOT displayed
+    expect(el).not.toHaveTextContent(/controls updated/i);
+  });
+
+  it('staleControlReason appends to connection message on a degraded connection', () => {
+    renderBanner(
+      { transportStatus: 'disconnected', reconnectAttempt: 5 },
+      'Controls updated by another session',
+      'Task was cancelled by another session',
+    );
+    const el = screen.getByRole('alert');
+    expect(el).toBeInTheDocument();
+    // Connection message + staleControlReason (not convergenceHint)
+    expect(el).toHaveTextContent(/disconnected/i);
+    expect(el).toHaveTextContent(/cancelled by another session/i);
+    expect(el).not.toHaveTextContent(/controls updated/i);
   });
 });
 
