@@ -29,7 +29,11 @@ import type {
 } from './workspace-types.ts';
 
 import { mergePromptState } from './prompt-merge.ts';
-import { mergeAuthoritativeEntries } from './reconciler.ts';
+import {
+  detectConvergenceDrift,
+  invalidateStaleEntryControls,
+  mergeAuthoritativeEntries,
+} from './reconciler.ts';
 
 // ─── Internal helpers ───────────────────────────────────────────────────────
 
@@ -369,6 +373,12 @@ function applyConversationEntries(
  * status and contentBlocks are preserved (the stream is likely ahead of the
  * last REST snapshot); for terminal turns REST is fully authoritative.
  *
+ * After merging, detects convergence drift (turn-status changes that indicate
+ * another session acted) and:
+ *  - Invalidates stale entry controls with an explicit reason.
+ *  - Updates `controlState.staleReason` when external changes are detected,
+ *    or clears it when no drift occurred (convergence complete).
+ *
  * Sets `historyLoaded: true` so the transcript loader knows not to re-fetch.
  */
 function applyMergeHistory(
@@ -379,7 +389,17 @@ function applyMergeHistory(
 ): WorkspaceState {
   const current = ensureConversation(state.conversations, conversationId);
   const nextConversations = new Map(state.conversations);
-  const merged = mergeAuthoritativeEntries(restEntries, current.entries);
+  const rawMerged = mergeAuthoritativeEntries(restEntries, current.entries);
+
+  // Detect convergence drift and invalidate stale controls
+  const drift = detectConvergenceDrift(current.entries, rawMerged);
+  const merged = drift.hasExternalChanges
+    ? invalidateStaleEntryControls(current.entries, rawMerged)
+    : rawMerged;
+
+  const staleReason = drift.hasExternalChanges
+    ? 'State changed by another session'
+    : null;
 
   nextConversations.set(conversationId, {
     ...current,
@@ -387,6 +407,10 @@ function applyMergeHistory(
     hasMoreHistory,
     loadState: 'ready',
     historyLoaded: true,
+    controlState: {
+      ...current.controlState,
+      staleReason,
+    },
   });
   return {
     ...state,

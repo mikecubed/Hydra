@@ -15,6 +15,8 @@ import {
   type WorkspaceStore,
 } from '../model/workspace-store.ts';
 
+import { invalidateStaleEntryControls } from '../model/reconciler.ts';
+
 function createConversation(
   overrides: Partial<WorkspaceConversationRecord> = {},
 ): WorkspaceConversationRecord {
@@ -1741,5 +1743,710 @@ describe('transcript reconciliation after turn actions', () => {
     assert.equal(conv?.entries.length, 2);
     assert.equal(conv?.entries[0]?.status, 'failed');
     assert.equal(conv?.entries[1]?.status, 'submitted');
+  });
+});
+
+// ─── invalidateStaleEntryControls (unit) ────────────────────────────────────
+
+describe('invalidateStaleEntryControls', () => {
+  it('disables enabled controls when entry status diverged', () => {
+    const preMerge = [
+      createEntry({
+        entryId: 'turn-1',
+        turnId: 'turn-1',
+        status: 'streaming',
+        controls: [
+          { controlId: 'ctrl-cancel', kind: 'cancel', enabled: true, reasonDisabled: null },
+        ],
+      }),
+    ];
+    const postMerge = [
+      createEntry({
+        entryId: 'turn-1',
+        turnId: 'turn-1',
+        status: 'completed',
+        controls: [
+          { controlId: 'ctrl-cancel', kind: 'cancel', enabled: true, reasonDisabled: null },
+        ],
+      }),
+    ];
+
+    const result = invalidateStaleEntryControls(preMerge, postMerge);
+    assert.notEqual(result, postMerge, 'should return a new array');
+    assert.equal(result[0].controls[0].enabled, false);
+    assert.ok(result[0].controls[0].reasonDisabled);
+  });
+
+  it('returns same reference when no controls need invalidation', () => {
+    const preMerge = [
+      createEntry({ entryId: 'turn-1', turnId: 'turn-1', status: 'completed' }),
+    ];
+    const postMerge = [
+      createEntry({ entryId: 'turn-1', turnId: 'turn-1', status: 'completed' }),
+    ];
+
+    const result = invalidateStaleEntryControls(preMerge, postMerge);
+    assert.equal(result, postMerge);
+  });
+
+  it('skips entries without controls', () => {
+    const preMerge = [
+      createEntry({ entryId: 'turn-1', turnId: 'turn-1', status: 'streaming' }),
+    ];
+    const postMerge = [
+      createEntry({ entryId: 'turn-1', turnId: 'turn-1', status: 'completed' }),
+    ];
+
+    const result = invalidateStaleEntryControls(preMerge, postMerge);
+    assert.equal(result, postMerge);
+  });
+
+  it('preserves already-disabled controls', () => {
+    const preMerge = [
+      createEntry({
+        entryId: 'turn-1',
+        turnId: 'turn-1',
+        status: 'streaming',
+        controls: [
+          { controlId: 'ctrl-branch', kind: 'branch', enabled: false, reasonDisabled: 'Not available' },
+        ],
+      }),
+    ];
+    const postMerge = [
+      createEntry({
+        entryId: 'turn-1',
+        turnId: 'turn-1',
+        status: 'completed',
+        controls: [
+          { controlId: 'ctrl-branch', kind: 'branch', enabled: false, reasonDisabled: 'Not available' },
+        ],
+      }),
+    ];
+
+    const result = invalidateStaleEntryControls(preMerge, postMerge);
+    assert.equal(result, postMerge, 'no enabled controls to invalidate');
+    assert.equal(result[0].controls[0].reasonDisabled, 'Not available');
+  });
+
+  it('skips entries whose status did not change', () => {
+    const preMerge = [
+      createEntry({
+        entryId: 'turn-1',
+        turnId: 'turn-1',
+        status: 'completed',
+        controls: [
+          { controlId: 'ctrl-retry', kind: 'retry', enabled: true, reasonDisabled: null },
+        ],
+      }),
+    ];
+    const postMerge = [
+      createEntry({
+        entryId: 'turn-1',
+        turnId: 'turn-1',
+        status: 'completed',
+        controls: [
+          { controlId: 'ctrl-retry', kind: 'retry', enabled: true, reasonDisabled: null },
+        ],
+      }),
+    ];
+
+    const result = invalidateStaleEntryControls(preMerge, postMerge);
+    assert.equal(result, postMerge);
+    assert.equal(result[0].controls[0].enabled, true);
+  });
+
+  it('skips entries only present in the post-merge set (new from REST)', () => {
+    const preMerge: TranscriptEntryState[] = [];
+    const postMerge = [
+      createEntry({
+        entryId: 'turn-1',
+        turnId: 'turn-1',
+        status: 'completed',
+        controls: [
+          { controlId: 'ctrl-retry', kind: 'retry', enabled: true, reasonDisabled: null },
+        ],
+      }),
+    ];
+
+    const result = invalidateStaleEntryControls(preMerge, postMerge);
+    assert.equal(result, postMerge);
+  });
+
+  it('invalidates only the entries whose status changed in a mixed batch', () => {
+    const preMerge = [
+      createEntry({
+        entryId: 'turn-1',
+        turnId: 'turn-1',
+        status: 'streaming',
+        controls: [
+          { controlId: 'c1', kind: 'cancel', enabled: true, reasonDisabled: null },
+        ],
+      }),
+      createEntry({
+        entryId: 'turn-2',
+        turnId: 'turn-2',
+        status: 'completed',
+        controls: [
+          { controlId: 'c2', kind: 'retry', enabled: true, reasonDisabled: null },
+        ],
+      }),
+    ];
+    const postMerge = [
+      createEntry({
+        entryId: 'turn-1',
+        turnId: 'turn-1',
+        status: 'completed',
+        controls: [
+          { controlId: 'c1', kind: 'cancel', enabled: true, reasonDisabled: null },
+        ],
+      }),
+      createEntry({
+        entryId: 'turn-2',
+        turnId: 'turn-2',
+        status: 'completed',
+        controls: [
+          { controlId: 'c2', kind: 'retry', enabled: true, reasonDisabled: null },
+        ],
+      }),
+    ];
+
+    const result = invalidateStaleEntryControls(preMerge, postMerge);
+    assert.notEqual(result, postMerge);
+    // turn-1: status changed → controls invalidated
+    assert.equal(result[0].controls[0].enabled, false);
+    // turn-2: status unchanged → controls preserved
+    assert.equal(result[1].controls[0].enabled, true);
+  });
+});
+
+// ─── Multi-session convergence — merge-history stale-control invalidation ───
+
+describe('multi-session convergence — merge-history invalidation', () => {
+  it('invalidates entry controls when authoritative merge changes entry status', () => {
+    let state = createInitialWorkspaceState();
+    state = reduceWorkspaceState(state, {
+      type: 'conversation/upsert',
+      conversation: createConversation(),
+    });
+    state = reduceWorkspaceState(state, {
+      type: 'conversation/replace-entries',
+      conversationId: 'conv-1',
+      entries: [
+        createEntry({
+          entryId: 'turn-1',
+          turnId: 'turn-1',
+          status: 'streaming',
+          controls: [
+            { controlId: 'ctrl-cancel', kind: 'cancel', enabled: true, reasonDisabled: null },
+          ],
+        }),
+      ],
+      hasMoreHistory: false,
+    });
+
+    // Authoritative merge: another session completed the turn
+    state = reduceWorkspaceState(state, {
+      type: 'conversation/merge-history',
+      conversationId: 'conv-1',
+      entries: [
+        createEntry({ entryId: 'turn-1', turnId: 'turn-1', status: 'completed' }),
+      ],
+      hasMoreHistory: false,
+    });
+
+    const entry = state.conversations.get('conv-1')?.entries[0];
+    assert.ok(entry);
+    assert.equal(entry.controls.length, 1);
+    assert.equal(entry.controls[0].enabled, false);
+    assert.ok(entry.controls[0].reasonDisabled, 'must provide a reason');
+  });
+
+  it('sets conversation staleReason when controls are invalidated by merge', () => {
+    let state = createInitialWorkspaceState();
+    state = reduceWorkspaceState(state, {
+      type: 'conversation/select',
+      conversationId: 'conv-1',
+    });
+    state = reduceWorkspaceState(state, {
+      type: 'conversation/replace-entries',
+      conversationId: 'conv-1',
+      entries: [
+        createEntry({
+          entryId: 'turn-1',
+          turnId: 'turn-1',
+          status: 'streaming',
+          controls: [
+            { controlId: 'ctrl-cancel', kind: 'cancel', enabled: true, reasonDisabled: null },
+          ],
+        }),
+      ],
+      hasMoreHistory: false,
+    });
+
+    state = reduceWorkspaceState(state, {
+      type: 'conversation/merge-history',
+      conversationId: 'conv-1',
+      entries: [
+        createEntry({ entryId: 'turn-1', turnId: 'turn-1', status: 'completed' }),
+      ],
+      hasMoreHistory: false,
+    });
+
+    const conv = state.conversations.get('conv-1');
+    assert.ok(conv?.controlState.staleReason, 'must set a stale reason');
+  });
+
+  it('does not invalidate controls when authoritative status matches local', () => {
+    let state = createInitialWorkspaceState();
+    state = reduceWorkspaceState(state, {
+      type: 'conversation/upsert',
+      conversation: createConversation(),
+    });
+    state = reduceWorkspaceState(state, {
+      type: 'conversation/replace-entries',
+      conversationId: 'conv-1',
+      entries: [
+        createEntry({
+          entryId: 'turn-1',
+          turnId: 'turn-1',
+          status: 'completed',
+          controls: [
+            { controlId: 'ctrl-retry', kind: 'retry', enabled: true, reasonDisabled: null },
+          ],
+        }),
+      ],
+      hasMoreHistory: false,
+    });
+
+    state = reduceWorkspaceState(state, {
+      type: 'conversation/merge-history',
+      conversationId: 'conv-1',
+      entries: [
+        createEntry({ entryId: 'turn-1', turnId: 'turn-1', status: 'completed' }),
+      ],
+      hasMoreHistory: false,
+    });
+
+    const entry = state.conversations.get('conv-1')?.entries[0];
+    assert.ok(entry);
+    assert.equal(entry.controls[0].enabled, true);
+    assert.equal(entry.controls[0].reasonDisabled, null);
+  });
+
+  it('does not set staleReason when no controls are invalidated', () => {
+    let state = createInitialWorkspaceState();
+    state = reduceWorkspaceState(state, {
+      type: 'conversation/select',
+      conversationId: 'conv-1',
+    });
+    state = reduceWorkspaceState(state, {
+      type: 'conversation/replace-entries',
+      conversationId: 'conv-1',
+      entries: [
+        createEntry({ entryId: 'turn-1', turnId: 'turn-1', status: 'completed' }),
+      ],
+      hasMoreHistory: false,
+    });
+
+    state = reduceWorkspaceState(state, {
+      type: 'conversation/merge-history',
+      conversationId: 'conv-1',
+      entries: [
+        createEntry({ entryId: 'turn-1', turnId: 'turn-1', status: 'completed' }),
+      ],
+      hasMoreHistory: false,
+    });
+
+    assert.equal(state.conversations.get('conv-1')?.controlState.staleReason, null);
+  });
+
+  it('preserves already-disabled controls during invalidation', () => {
+    let state = createInitialWorkspaceState();
+    state = reduceWorkspaceState(state, {
+      type: 'conversation/upsert',
+      conversation: createConversation(),
+    });
+    state = reduceWorkspaceState(state, {
+      type: 'conversation/replace-entries',
+      conversationId: 'conv-1',
+      entries: [
+        createEntry({
+          entryId: 'turn-1',
+          turnId: 'turn-1',
+          status: 'streaming',
+          controls: [
+            {
+              controlId: 'ctrl-branch',
+              kind: 'branch',
+              enabled: false,
+              reasonDisabled: 'Not available yet',
+            },
+          ],
+        }),
+      ],
+      hasMoreHistory: false,
+    });
+
+    state = reduceWorkspaceState(state, {
+      type: 'conversation/merge-history',
+      conversationId: 'conv-1',
+      entries: [
+        createEntry({ entryId: 'turn-1', turnId: 'turn-1', status: 'completed' }),
+      ],
+      hasMoreHistory: false,
+    });
+
+    const entry = state.conversations.get('conv-1')?.entries[0];
+    assert.ok(entry);
+    assert.equal(entry.controls[0].enabled, false);
+    assert.equal(entry.controls[0].reasonDisabled, 'Not available yet');
+  });
+
+  it('invalidates only changed entries in a multi-entry merge', () => {
+    let state = createInitialWorkspaceState();
+    state = reduceWorkspaceState(state, {
+      type: 'conversation/upsert',
+      conversation: createConversation(),
+    });
+    state = reduceWorkspaceState(state, {
+      type: 'conversation/replace-entries',
+      conversationId: 'conv-1',
+      entries: [
+        createEntry({
+          entryId: 'turn-1',
+          turnId: 'turn-1',
+          status: 'streaming',
+          controls: [
+            { controlId: 'c1', kind: 'cancel', enabled: true, reasonDisabled: null },
+          ],
+        }),
+        createEntry({
+          entryId: 'turn-2',
+          turnId: 'turn-2',
+          status: 'completed',
+          controls: [
+            { controlId: 'c2', kind: 'retry', enabled: true, reasonDisabled: null },
+          ],
+        }),
+      ],
+      hasMoreHistory: false,
+    });
+
+    state = reduceWorkspaceState(state, {
+      type: 'conversation/merge-history',
+      conversationId: 'conv-1',
+      entries: [
+        createEntry({ entryId: 'turn-1', turnId: 'turn-1', status: 'completed' }),
+        createEntry({ entryId: 'turn-2', turnId: 'turn-2', status: 'completed' }),
+      ],
+      hasMoreHistory: false,
+    });
+
+    const entries = state.conversations.get('conv-1')?.entries;
+    assert.ok(entries);
+    // turn-1: status changed streaming→completed, controls invalidated
+    assert.equal(entries[0].controls[0].enabled, false);
+    // turn-2: status unchanged, controls preserved
+    assert.equal(entries[1].controls[0].enabled, true);
+  });
+});
+
+// ─── Multi-session convergence & stale-control invalidation ─────────────────
+
+describe('multi-session convergence: stale-control invalidation', () => {
+  it('disables entry cancel control when authoritative merge shows turn cancelled externally', () => {
+    let state = createInitialWorkspaceState();
+    state = reduceWorkspaceState(state, {
+      type: 'conversation/upsert',
+      conversation: createConversation(),
+    });
+    // Local session: turn is streaming with cancel enabled
+    state = reduceWorkspaceState(state, {
+      type: 'conversation/replace-entries',
+      conversationId: 'conv-1',
+      entries: [
+        createEntry({
+          entryId: 'turn-1',
+          turnId: 'turn-1',
+          status: 'streaming',
+          controls: [
+            { controlId: 'ctrl-cancel', kind: 'cancel', enabled: true, reasonDisabled: null },
+          ],
+        }),
+      ],
+      hasMoreHistory: false,
+    });
+
+    // Another session cancelled the turn — authoritative merge arrives
+    state = reduceWorkspaceState(state, {
+      type: 'conversation/merge-history',
+      conversationId: 'conv-1',
+      entries: [
+        createEntry({
+          entryId: 'turn-1',
+          turnId: 'turn-1',
+          status: 'cancelled',
+          controls: [],
+        }),
+      ],
+      hasMoreHistory: false,
+    });
+
+    const conv = state.conversations.get('conv-1');
+    const turn = conv?.entries[0];
+    assert.equal(turn?.status, 'cancelled');
+    // Cancel control must be present but disabled with an explicit reason
+    const cancelCtrl = turn?.controls.find((c) => c.kind === 'cancel');
+    assert.ok(cancelCtrl, 'cancel control must still be present (disabled, not silently stripped)');
+    assert.equal(cancelCtrl?.enabled, false);
+    assert.ok(
+      cancelCtrl?.reasonDisabled != null && cancelCtrl.reasonDisabled.length > 0,
+      'reasonDisabled must explain why control is stale',
+    );
+  });
+
+  it('sets conversation controlState.staleReason when merge detects external status changes', () => {
+    let state = createInitialWorkspaceState();
+    state = reduceWorkspaceState(state, {
+      type: 'conversation/upsert',
+      conversation: createConversation(),
+    });
+    state = reduceWorkspaceState(state, {
+      type: 'conversation/replace-entries',
+      conversationId: 'conv-1',
+      entries: [
+        createEntry({ entryId: 'turn-1', turnId: 'turn-1', status: 'streaming' }),
+      ],
+      hasMoreHistory: false,
+    });
+
+    // Authoritative merge shows turn completed by another session
+    state = reduceWorkspaceState(state, {
+      type: 'conversation/merge-history',
+      conversationId: 'conv-1',
+      entries: [
+        createEntry({ entryId: 'turn-1', turnId: 'turn-1', status: 'completed' }),
+      ],
+      hasMoreHistory: false,
+    });
+
+    const conv = state.conversations.get('conv-1');
+    assert.ok(
+      conv?.controlState.staleReason != null,
+      'staleReason must indicate external state change',
+    );
+  });
+
+  it('does not set staleReason when merge produces no external status changes', () => {
+    let state = createInitialWorkspaceState();
+    state = reduceWorkspaceState(state, {
+      type: 'conversation/upsert',
+      conversation: createConversation(),
+    });
+    state = reduceWorkspaceState(state, {
+      type: 'conversation/replace-entries',
+      conversationId: 'conv-1',
+      entries: [
+        createEntry({ entryId: 'turn-1', turnId: 'turn-1', status: 'completed' }),
+      ],
+      hasMoreHistory: false,
+    });
+
+    // Same authoritative state — no drift
+    state = reduceWorkspaceState(state, {
+      type: 'conversation/merge-history',
+      conversationId: 'conv-1',
+      entries: [
+        createEntry({ entryId: 'turn-1', turnId: 'turn-1', status: 'completed' }),
+      ],
+      hasMoreHistory: false,
+    });
+
+    const conv = state.conversations.get('conv-1');
+    assert.equal(conv?.controlState.staleReason, null);
+  });
+
+  it('disables enabled retry/branch controls on turns that became terminal externally', () => {
+    let state = createInitialWorkspaceState();
+    state = reduceWorkspaceState(state, {
+      type: 'conversation/upsert',
+      conversation: createConversation(),
+    });
+    // Local session thinks turn is still running with action controls
+    state = reduceWorkspaceState(state, {
+      type: 'conversation/replace-entries',
+      conversationId: 'conv-1',
+      entries: [
+        createEntry({
+          entryId: 'turn-1',
+          turnId: 'turn-1',
+          status: 'streaming',
+          controls: [
+            { controlId: 'c-cancel', kind: 'cancel', enabled: true, reasonDisabled: null },
+            { controlId: 'c-retry', kind: 'retry', enabled: true, reasonDisabled: null },
+          ],
+        }),
+      ],
+      hasMoreHistory: false,
+    });
+
+    // Authoritative merge: turn failed externally, REST provides fresh controls
+    state = reduceWorkspaceState(state, {
+      type: 'conversation/merge-history',
+      conversationId: 'conv-1',
+      entries: [
+        createEntry({
+          entryId: 'turn-1',
+          turnId: 'turn-1',
+          status: 'failed',
+          controls: [
+            { controlId: 'c-retry-rest', kind: 'retry', enabled: true, reasonDisabled: null },
+          ],
+        }),
+      ],
+      hasMoreHistory: false,
+    });
+
+    const conv = state.conversations.get('conv-1');
+    const turn = conv?.entries[0];
+    assert.equal(turn?.status, 'failed');
+    // Cancel should be disabled (turn is terminal)
+    const cancelCtrl = turn?.controls.find((c) => c.kind === 'cancel');
+    assert.ok(cancelCtrl, 'cancel control preserved as disabled');
+    assert.equal(cancelCtrl?.enabled, false);
+    // REST-provided retry should be present
+    const retryCtrl = turn?.controls.find((c) => c.kind === 'retry');
+    assert.ok(retryCtrl, 'retry control from REST must be present');
+  });
+
+  it('marks actionable prompts stale when turn becomes terminal via external merge', () => {
+    let state = createInitialWorkspaceState();
+    state = reduceWorkspaceState(state, {
+      type: 'conversation/upsert',
+      conversation: createConversation(),
+    });
+    state = reduceWorkspaceState(state, {
+      type: 'conversation/replace-entries',
+      conversationId: 'conv-1',
+      entries: [
+        createEntry({
+          entryId: 'turn-1',
+          turnId: 'turn-1',
+          status: 'streaming',
+          prompt: {
+            promptId: 'p1',
+            parentTurnId: 'turn-1',
+            status: 'pending',
+            allowedResponses: [{ key: 'approve', label: 'Approve' }],
+            contextBlocks: [],
+            lastResponseSummary: null,
+            errorMessage: null,
+            staleReason: null,
+          },
+        }),
+      ],
+      hasMoreHistory: false,
+    });
+
+    // Another session resolved the prompt, turn completed
+    state = reduceWorkspaceState(state, {
+      type: 'conversation/merge-history',
+      conversationId: 'conv-1',
+      entries: [
+        createEntry({ entryId: 'turn-1', turnId: 'turn-1', status: 'completed', prompt: null }),
+      ],
+      hasMoreHistory: false,
+    });
+
+    const conv = state.conversations.get('conv-1');
+    const turn = conv?.entries[0];
+    // Prompt should be stale (not pending) since turn is terminal
+    assert.ok(
+      turn?.prompt == null || turn?.prompt?.status === 'stale',
+      'prompt must be stale or absent after external terminal merge',
+    );
+  });
+
+  it('preserves resolved prompt state through convergence merge', () => {
+    let state = createInitialWorkspaceState();
+    state = reduceWorkspaceState(state, {
+      type: 'conversation/upsert',
+      conversation: createConversation(),
+    });
+    state = reduceWorkspaceState(state, {
+      type: 'conversation/replace-entries',
+      conversationId: 'conv-1',
+      entries: [
+        createEntry({
+          entryId: 'turn-1',
+          turnId: 'turn-1',
+          status: 'completed',
+          prompt: {
+            promptId: 'p1',
+            parentTurnId: 'turn-1',
+            status: 'resolved',
+            allowedResponses: [],
+            contextBlocks: [],
+            lastResponseSummary: 'Approved',
+            errorMessage: null,
+            staleReason: null,
+          },
+        }),
+      ],
+      hasMoreHistory: false,
+    });
+
+    // Same terminal state arrives from REST
+    state = reduceWorkspaceState(state, {
+      type: 'conversation/merge-history',
+      conversationId: 'conv-1',
+      entries: [
+        createEntry({ entryId: 'turn-1', turnId: 'turn-1', status: 'completed', prompt: null }),
+      ],
+      hasMoreHistory: false,
+    });
+
+    const conv = state.conversations.get('conv-1');
+    const turn = conv?.entries[0];
+    assert.equal(turn?.prompt?.status, 'resolved', 'resolved prompt preserved through convergence');
+    assert.equal(turn?.prompt?.lastResponseSummary, 'Approved');
+  });
+
+  it('clears staleReason when fresh merge shows no new drift', () => {
+    let state = createInitialWorkspaceState();
+    state = reduceWorkspaceState(state, {
+      type: 'conversation/upsert',
+      conversation: createConversation(),
+    });
+    // First: external change causes staleReason to be set
+    state = reduceWorkspaceState(state, {
+      type: 'conversation/replace-entries',
+      conversationId: 'conv-1',
+      entries: [
+        createEntry({ entryId: 'turn-1', turnId: 'turn-1', status: 'streaming' }),
+      ],
+      hasMoreHistory: false,
+    });
+    state = reduceWorkspaceState(state, {
+      type: 'conversation/merge-history',
+      conversationId: 'conv-1',
+      entries: [
+        createEntry({ entryId: 'turn-1', turnId: 'turn-1', status: 'completed' }),
+      ],
+      hasMoreHistory: false,
+    });
+    assert.ok(state.conversations.get('conv-1')?.controlState.staleReason != null);
+
+    // Second merge with no new changes — staleReason should be cleared
+    state = reduceWorkspaceState(state, {
+      type: 'conversation/merge-history',
+      conversationId: 'conv-1',
+      entries: [
+        createEntry({ entryId: 'turn-1', turnId: 'turn-1', status: 'completed' }),
+      ],
+      hasMoreHistory: false,
+    });
+
+    assert.equal(state.conversations.get('conv-1')?.controlState.staleReason, null);
   });
 });

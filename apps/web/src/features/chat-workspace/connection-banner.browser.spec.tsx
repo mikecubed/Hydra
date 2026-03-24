@@ -15,11 +15,16 @@ function connectionState(
   return { ...initialConnectionState(), ...overrides };
 }
 
-function renderBanner(overrides: Partial<WorkspaceConnectionState> = {}) {
-  const props: ConnectionBannerProps = {
-    connection: connectionState(overrides),
-  };
-  return render(<ConnectionBanner {...props} />);
+function renderBanner(
+  overrides: Partial<WorkspaceConnectionState> = {},
+  convergenceHint?: string | null,
+) {
+  return render(
+    <ConnectionBanner
+      connection={connectionState(overrides)}
+      convergenceHint={convergenceHint}
+    />,
+  );
 }
 
 // ─── Visibility: hidden when operational ────────────────────────────────────
@@ -153,5 +158,111 @@ describe('ConnectionBanner accessibility', () => {
     renderBanner({ transportStatus: 'disconnected', reconnectAttempt: 3 });
     const el = screen.getByRole('alert');
     expect(el).toHaveAttribute('aria-live', 'assertive');
+  });
+});
+
+// ─── Stale-control awareness ────────────────────────────────────────────────
+
+describe('ConnectionBanner stale-control awareness', () => {
+  it('shows a status banner when convergenceHint is provided and connection is operational', () => {
+    renderBanner(
+      { transportStatus: 'live', syncStatus: 'idle', daemonStatus: 'healthy' },
+      'Another session modified this conversation',
+    );
+    const el = screen.getByRole('status');
+    expect(el).toBeInTheDocument();
+    expect(el).toHaveTextContent(/another session/i);
+  });
+
+  it('renders nothing when convergenceHint is null and connection is operational', () => {
+    renderBanner(
+      { transportStatus: 'live', syncStatus: 'idle', daemonStatus: 'healthy' },
+      null,
+    );
+    expect(screen.queryByRole('alert')).toBeNull();
+    expect(screen.queryByRole('status')).toBeNull();
+  });
+
+  it('uses polite aria-live for convergence hint (not assertive)', () => {
+    renderBanner(
+      { transportStatus: 'live', syncStatus: 'idle', daemonStatus: 'healthy' },
+      'Controls may be outdated',
+    );
+    const el = screen.getByRole('status');
+    expect(el).toHaveAttribute('aria-live', 'polite');
+  });
+
+  it('combines connection message with convergence hint when both present', () => {
+    renderBanner(
+      { transportStatus: 'disconnected', reconnectAttempt: 5 },
+      'Another session modified this conversation',
+    );
+    const el = screen.getByRole('alert');
+    expect(el).toBeInTheDocument();
+    expect(el).toHaveTextContent(/disconnected/i);
+    expect(el).toHaveTextContent(/another session/i);
+  });
+});
+
+// ─── Multi-session convergence hint ─────────────────────────────────────────
+
+describe('ConnectionBanner convergence hint', () => {
+  it('shows convergence hint when provided on an operational connection', () => {
+    const props: ConnectionBannerProps = {
+      connection: connectionState({
+        transportStatus: 'live',
+        syncStatus: 'idle',
+        daemonStatus: 'healthy',
+      }),
+      convergenceHint: 'Controls updated by another session',
+    };
+    render(<ConnectionBanner {...props} />);
+    const el = screen.getByRole('status');
+    expect(el).toBeInTheDocument();
+    expect(el).toHaveTextContent(/another session/i);
+  });
+
+  it('renders nothing when fully operational with no convergence hint', () => {
+    const props: ConnectionBannerProps = {
+      connection: connectionState({
+        transportStatus: 'live',
+        syncStatus: 'idle',
+        daemonStatus: 'healthy',
+      }),
+      convergenceHint: null,
+    };
+    render(<ConnectionBanner {...props} />);
+    expect(screen.queryByRole('alert')).toBeNull();
+    expect(screen.queryByRole('status')).toBeNull();
+  });
+
+  it('shows convergence hint alongside degraded connection message', () => {
+    const props: ConnectionBannerProps = {
+      connection: connectionState({
+        transportStatus: 'live',
+        syncStatus: 'syncing',
+        daemonStatus: 'healthy',
+      }),
+      convergenceHint: 'Some controls are stale',
+    };
+    render(<ConnectionBanner {...props} />);
+    const el = screen.getByRole('status');
+    expect(el).toBeInTheDocument();
+    // Should show both sync message and convergence hint
+    expect(el).toHaveTextContent(/stale/i);
+  });
+
+  it('uses info severity for convergence-only banner', () => {
+    const props: ConnectionBannerProps = {
+      connection: connectionState({
+        transportStatus: 'live',
+        syncStatus: 'idle',
+        daemonStatus: 'healthy',
+      }),
+      convergenceHint: 'Workspace synchronized from another session',
+    };
+    render(<ConnectionBanner {...props} />);
+    const el = screen.getByRole('status');
+    expect(el).toHaveAttribute('aria-live', 'polite');
   });
 });

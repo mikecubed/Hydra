@@ -712,6 +712,33 @@ function shouldPreserveStreamedTurn(
   return contentRichness(streamedEntry) >= contentRichness(restEntry);
 }
 
+function shouldPreserveStreamedStatus(
+  restStatus: string,
+  streamedStatus: string,
+  preserveStreamedTurn: boolean,
+): boolean {
+  const restTerminal = TERMINAL_STATUSES.has(restStatus);
+  const streamedTerminal = TERMINAL_STATUSES.has(streamedStatus);
+
+  if (restTerminal) {
+    return false;
+  }
+
+  if (streamedTerminal) {
+    return true;
+  }
+
+  if (isStrictlyMoreAdvanced(restStatus, streamedStatus)) {
+    return false;
+  }
+
+  if (isStrictlyMoreAdvanced(streamedStatus, restStatus)) {
+    return true;
+  }
+
+  return preserveStreamedTurn;
+}
+
 /**
  * Seal turns whose authoritative status is terminal. Events for sealed turns
  * are unconditionally treated as stale by `isStaleEvent`, preventing
@@ -784,11 +811,11 @@ export function mergeAuthoritativeEntries(
     // When REST content is richer (preserveStreamedTurn=false) but both are
     // non-terminal, the streamed status may still be more advanced. Preserve
     // it to avoid downgrading live status badges (e.g. 'streaming' → 'submitted').
-    const preserveStreamedStatus =
-      preserveStreamedTurn ||
-      (!TERMINAL_STATUSES.has(entry.status) &&
-        !TERMINAL_STATUSES.has(streamed.status) &&
-        isStrictlyMoreAdvanced(streamed.status, entry.status));
+    const preserveStreamedStatus = shouldPreserveStreamedStatus(
+      entry.status,
+      streamed.status,
+      preserveStreamedTurn,
+    );
 
     let controls = entry.controls;
     if (streamed.controls.length > 0) {
@@ -861,4 +888,135 @@ export function deduplicateEntries(
 
     return true;
   });
+}
+
+// ─── Multi-session convergence ──────────────────────────────────────────────
+
+/** Summary of turn-status changes between pre-merge and post-merge entries. */
+export interface ConvergenceDrift {
+  readonly turnStatusChanges: ReadonlyMap<string, { readonly from: string; readonly to: string }>;
+  readonly hasExternalChanges: boolean;
+}
+
+/**
+ * Detect convergence drift by comparing turn statuses before and after an
+ * authoritative merge. Only tracks turns that existed in both snapshots and
+ * whose status changed — new turns (added by the merge) are not drift.
+ */
+export function detectConvergenceDrift(
+  beforeEntries: readonly TranscriptEntryState[],
+  afterEntries: readonly TranscriptEntryState[],
+): ConvergenceDrift {
+  const beforeMap = new Map<string, string>();
+  for (const e of beforeEntries) {
+    if (e.kind === 'turn' && e.turnId != null) {
+      beforeMap.set(e.turnId, e.status);
+    }
+  }
+
+  const turnStatusChanges = new Map<string, { from: string; to: string }>();
+  for (const e of afterEntries) {
+    if (e.kind !== 'turn' || e.turnId == null) continue;
+    const beforeStatus = beforeMap.get(e.turnId);
+    if (beforeStatus != null && beforeStatus !== e.status) {
+      turnStatusChanges.set(e.turnId, { from: beforeStatus, to: e.status });
+    }
+  }
+
+  return {
+    turnStatusChanges,
+    hasExternalChanges: turnStatusChanges.size > 0,
+  };
+}
+
+const STALE_CONTROL_REASON = 'Already acted on in another session';
+
+/**
+ * After an authoritative merge, entry-level controls that reference actions
+ * no longer valid must be explicitly disabled with a reason rather than
+ * silently stripped, so the operator understands why controls are unavailable.
+ *
+ * The merge algorithm (`mergeTerminalControls`) strips cancel controls from
+ * terminal turns. This function restores them as disabled with an explicit
+ * reason, and disables any other enabled controls that became stale.
+ *
+ * - Turns that transitioned to terminal have their enabled controls disabled.
+ * - Controls that were present in `previousEntries` but stripped during merge
+ *   are re-added as disabled with a stale reason.
+ * - Already-disabled controls are preserved as-is.
+ * - Non-terminal entries are untouched.
+ *
+ * Returns `mergedEntries` by reference when no changes are needed.
+ */
+export function invalidateStaleEntryControls(
+  previousEntries: readonly TranscriptEntryState[],
+  mergedEntries: readonly TranscriptEntryState[],
+): readonly TranscriptEntryState[] {
+  // Build maps for previous turn entries (status + controls)
+  const prevTurnMap = new Map<string, TranscriptEntryState>();
+  for (const e of previousEntries) {
+    if (e.kind === 'turn' && e.turnId != null) {
+      prevTurnMap.set(e.turnId, e);
+    }
+  }
+
+  // Find turns that changed to terminal
+  const changedToTerminal = new Set<string>();
+  for (const e of mergedEntries) {
+    if (e.kind !== 'turn' || e.turnId == null) continue;
+    if (!TERMINAL_STATUSES.has(e.status)) continue;
+    const prev = prevTurnMap.get(e.turnId);
+    // Only invalidate controls on turns that existed before and were non-terminal
+    if (prev != null && !TERMINAL_STATUSES.has(prev.status)) {
+      changedToTerminal.add(e.turnId);
+    }
+  }
+
+  if (changedToTerminal.size === 0) return mergedEntries;
+
+  let changed = false;
+  const result = mergedEntries.map((entry) => {
+    if (entry.kind !== 'turn' || entry.turnId == null) return entry;
+    if (!changedToTerminal.has(entry.turnId)) return entry;
+
+    const prev = prevTurnMap.get(entry.turnId);
+    const prevControlsByKind = new Map<EntryControlKind, EntryControlState>();
+    if (prev != null) {
+      for (const c of prev.controls) {
+        prevControlsByKind.set(c.kind, c);
+      }
+    }
+
+    // Disable any still-enabled controls
+    const updatedControls: EntryControlState[] = entry.controls.map((control) =>
+      control.enabled
+        ? { ...control, enabled: false, reasonDisabled: STALE_CONTROL_REASON }
+        : control,
+    );
+
+    // Build set of control kinds present after merge
+    const mergedKinds = new Set(entry.controls.map((c) => c.kind));
+
+    // Re-add controls that were present before but stripped during merge
+    for (const [kind, prevControl] of prevControlsByKind) {
+      if (!mergedKinds.has(kind)) {
+        updatedControls.push({
+          ...prevControl,
+          enabled: false,
+          reasonDisabled: STALE_CONTROL_REASON,
+        });
+      }
+    }
+
+    const controlsChanged =
+      updatedControls.length !== entry.controls.length ||
+      updatedControls.some((c, i) => c !== entry.controls[i]);
+
+    if (!controlsChanged) return entry;
+
+    changed = true;
+    return { ...entry, controls: updatedControls };
+  });
+
+  return changed ? result : mergedEntries;
 }

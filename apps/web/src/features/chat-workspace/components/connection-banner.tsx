@@ -35,6 +35,10 @@ export const ConnectionStateContext = createContext<WorkspaceConnectionState | n
 
 export interface ConnectionBannerProps {
   readonly connection: WorkspaceConnectionState;
+  /** Stale-control reason from multi-session convergence (warning severity). */
+  readonly staleControlReason?: string | null;
+  /** General convergence hint for informational display (info severity). */
+  readonly convergenceHint?: string | null;
 }
 
 type BannerSeverity = 'info' | 'warning' | 'error';
@@ -95,12 +99,42 @@ function isFullyQuiet(connection: WorkspaceConnectionState): boolean {
 /**
  * Displays a connection status banner when the workspace is not fully
  * operational. Returns `null` when everything is healthy.
+ *
+ * When `staleControlReason` is provided (controls invalidated by another
+ * session), a warning-severity banner is shown even on a fully operational
+ * connection. Connection-level issues take precedence over stale-control
+ * messaging. `convergenceHint` provides lighter informational messaging.
  */
-export function ConnectionBanner({ connection }: ConnectionBannerProps): JSX.Element | null {
-  if (isFullyQuiet(connection)) return null;
+export function ConnectionBanner({
+  connection,
+  staleControlReason,
+  convergenceHint,
+}: ConnectionBannerProps): JSX.Element | null {
+  const hasStale = staleControlReason != null && staleControlReason.length > 0;
+  const hasHint = convergenceHint != null && convergenceHint.length > 0;
+  const hasExtraMessage = hasStale || hasHint;
+  const quiet = isFullyQuiet(connection);
 
-  const severity = deriveSeverity(connection);
-  const message = describeConnectionState(connection);
+  if (quiet && !hasExtraMessage) return null;
+
+  // Connection issues always take precedence over stale-control/convergence messaging
+  const connectionSeverity = deriveSeverity(connection);
+  let severity: BannerSeverity;
+  if (!quiet) {
+    severity = connectionSeverity;
+  } else if (hasStale) {
+    severity = 'warning';
+  } else {
+    severity = 'info';
+  }
+
+  const connectionMessage = quiet ? null : describeConnectionState(connection);
+  const extraMessage = hasStale ? staleControlReason : hasHint ? convergenceHint : null;
+  const message = connectionMessage != null
+    ? extraMessage != null
+      ? `${connectionMessage} · ${extraMessage}`
+      : connectionMessage
+    : (extraMessage ?? 'Connected');
   const isAlert = severity === 'error';
 
   const severityStyle = SEVERITY_STYLES[severity];
