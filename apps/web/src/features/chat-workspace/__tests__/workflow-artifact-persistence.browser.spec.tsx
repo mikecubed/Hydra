@@ -186,12 +186,80 @@ function installTwoConversationScenario(): void {
 }
 
 /**
- * Wait for artifact badge to appear in the first transcript article,
+ * Install a refresh scenario where reopening the artifact conversation after
+ * refresh requires an explicit selection. conv-2 is listed first so the route
+ * initially lands there after a fresh mount.
+ */
+function installRefreshReopenScenario(): void {
+  fetchSpy.mockImplementation((input: string | URL | Request) => {
+    const url =
+      typeof input === 'string' ? input : input instanceof URL ? input.toString() : input.url;
+
+    if (url === '/conversations?status=active&limit=20') {
+      return Promise.resolve(
+        jsonResponse({
+          conversations: [
+            conversation('conv-2', 'Other work'),
+            conversation('conv-1', 'Artifact story'),
+          ],
+          totalCount: 2,
+        }),
+      );
+    }
+    if (url === '/conversations/conv-1/turns?limit=50') {
+      return Promise.resolve(
+        jsonResponse({
+          turns: [
+            completedTurn('turn-1', 'conv-1', 1, 'First turn output'),
+            completedTurn('turn-2', 'conv-1', 2, 'Second turn output'),
+          ],
+          totalCount: 2,
+          hasMore: false,
+        }),
+      );
+    }
+    if (url === '/conversations/conv-2/turns?limit=50') {
+      return Promise.resolve(
+        jsonResponse({
+          turns: [completedTurn('turn-x', 'conv-2', 1, 'Other conversation turn')],
+          totalCount: 1,
+          hasMore: false,
+        }),
+      );
+    }
+    if (url === '/conversations/conv-1/approvals' || url === '/conversations/conv-2/approvals') {
+      return Promise.resolve(jsonResponse({ approvals: [] }));
+    }
+    if (url === '/turns/turn-1/artifacts') {
+      return Promise.resolve(jsonResponse(TURN_1_ARTIFACTS_RESPONSE));
+    }
+    if (url === '/turns/turn-2/artifacts' || url === '/turns/turn-x/artifacts') {
+      return Promise.resolve(jsonResponse({ artifacts: [] }));
+    }
+    if (url === '/artifacts/art-main') {
+      return Promise.resolve(jsonResponse(ARTIFACT_CONTENT_RESPONSE));
+    }
+    return Promise.reject(new Error(`Unexpected fetch: ${url}`));
+  });
+  vi.stubGlobal('fetch', fetchSpy);
+}
+
+async function findTurnArticle(turnOutput: string): Promise<HTMLElement> {
+  await screen.findByText(turnOutput);
+  const article = transcriptArticles().find((candidate) => candidate.textContent?.includes(turnOutput));
+  if (article == null) {
+    throw new Error(`Expected transcript article for turn output: ${turnOutput}`);
+  }
+  return article;
+}
+
+/**
+ * Wait for artifact badge to appear on the specified transcript turn,
  * click it, and wait for the artifact panel to show with content.
  */
-async function openArtifactFromTurn(): Promise<void> {
-  // Wait for artifact hydration — badge appears on turn-1
-  const badge = await screen.findByTestId('artifact-badge');
+async function openArtifactFromTurn(turnOutput = 'First turn output'): Promise<void> {
+  const article = await findTurnArticle(turnOutput);
+  const badge = await within(article).findByTestId('artifact-badge');
   expect(badge).toHaveTextContent('main.ts');
 
   // Click the badge to trigger getArtifactContent fetch
@@ -241,11 +309,12 @@ describe('workspace artifact persistence workflows', () => {
 
   // eslint-disable-next-line max-lines-per-function -- multi-phase workflow test
   it('artifacts remain accessible after full page refresh', async () => {
-    installArtifactScenario();
+    installRefreshReopenScenario();
 
     // Phase 1: initial render — open artifact
     render(<AppProviders />);
     await screen.findByRole('button', { name: /artifact story/i });
+    fireEvent.click(screen.getByRole('button', { name: /artifact story/i }));
     openAndSubscribe('conv-1', 0);
     await screen.findByText('First turn output');
     await openArtifactFromTurn();
@@ -260,11 +329,16 @@ describe('workspace artifact persistence workflows', () => {
     fetchSpy.mockReset();
 
     // Re-install the same scenario (fresh server state, same data)
-    installArtifactScenario();
+    installRefreshReopenScenario();
     render(<AppProviders />);
 
-    // Conversation reloads
+    // Fresh mount lands on the other conversation first; reopen Artifact story
     await screen.findByRole('button', { name: /artifact story/i });
+    await screen.findByText('Other conversation turn');
+    fireEvent.click(screen.getByRole('button', { name: /artifact story/i }));
+    await vi.waitFor(() => {
+      expect(screen.getByText('Active conversation: Artifact story')).toBeInTheDocument();
+    });
     openAndSubscribe('conv-1', 0);
 
     // REST history rehydrates turns
