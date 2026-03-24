@@ -468,7 +468,7 @@ describe('hydrateConversationArtifacts', () => {
       },
     };
 
-    const failed = await hydrateConversationArtifacts(
+    const result = await hydrateConversationArtifacts(
       'conv-1',
       ['t1', 't2'],
       mockClient,
@@ -478,7 +478,8 @@ describe('hydrateConversationArtifacts', () => {
 
     assert.ok(hydratedTurns.has('t1'), 'successful turn should be hydrated');
     assert.ok(!hydratedTurns.has('t2'), 'failed turn must NOT be hydrated');
-    assert.ok(failed.has('t2'), 'failed turn should be in returned set');
+    assert.ok(result.retryableFailures.has('t2'), 'failed turn should be retryable');
+    assert.equal(result.terminalFailures.size, 0);
     assert.equal(dispatched.length, 1, 'only successful turn dispatches');
   });
 
@@ -543,7 +544,7 @@ describe('hydrateConversationArtifacts', () => {
       },
     };
 
-    const failed = await hydrateConversationArtifacts(
+    const result = await hydrateConversationArtifacts(
       'conv-1',
       ['t1'],
       mockClient,
@@ -551,7 +552,8 @@ describe('hydrateConversationArtifacts', () => {
       hydratedTurns,
     );
 
-    assert.equal(failed.size, 0);
+    assert.equal(result.retryableFailures.size, 0);
+    assert.ok(result.terminalFailures.has('t1'));
     assert.ok(!hydratedTurns.has('t1'));
     assert.equal(dispatched.length, 0);
   });

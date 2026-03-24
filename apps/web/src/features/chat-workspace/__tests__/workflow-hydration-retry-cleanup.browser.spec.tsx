@@ -11,6 +11,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { cleanup, render, screen, fireEvent, act } from '@testing-library/react';
 
 import { AppProviders } from '../../../app/providers.tsx';
+import { GatewayRequestError } from '../api/gateway-client.ts';
 import {
   FakeWebSocket,
   resetFakeWebSockets,
@@ -209,5 +210,79 @@ describe('hydration retry timer cleanup on conversation switch', () => {
 
     // At least one timer-triggered retry must have fired.
     expect(turn1ArtifactAttempts).toBeGreaterThan(countAfterRerender);
+  });
+
+  it('suppresses permanent failures across same-conversation rerenders', async () => {
+    let turn1ArtifactAttempts = 0;
+
+    fetchSpy.mockImplementation((input) => {
+      const url = requestUrl(input);
+      if (url === '/conversations?status=active&limit=20') {
+        return Promise.resolve(
+          jsonResponse({
+            conversations: [conversation('conv-1', 'Retry conv')],
+            totalCount: 1,
+          }),
+        );
+      }
+      if (url === '/conversations/conv-1/turns?limit=50') {
+        return Promise.resolve(
+          jsonResponse({
+            turns: [
+              {
+                id: 'turn-1',
+                conversationId: 'conv-1',
+                position: 1,
+                kind: 'agent',
+                attribution: { type: 'agent', label: 'Claude' },
+                response: 'Historical turn',
+                status: 'completed',
+                createdAt: '2026-07-01T00:00:01.000Z',
+                completedAt: '2026-07-01T00:00:02.000Z',
+              },
+            ],
+            totalCount: 1,
+            hasMore: false,
+          }),
+        );
+      }
+      if (url === '/conversations/conv-1/approvals') {
+        return Promise.resolve(jsonResponse({ approvals: [] }));
+      }
+      if (url === '/turns/turn-1/artifacts') {
+        turn1ArtifactAttempts++;
+        return Promise.reject(
+          new GatewayRequestError(404, {
+            ok: false,
+            code: 'TURN_NOT_FOUND',
+            category: 'validation',
+            message: 'Turn not found',
+            httpStatus: 404,
+          }),
+        );
+      }
+      if (url.startsWith('/turns/') && url.endsWith('/artifacts')) {
+        return Promise.resolve(jsonResponse({ artifacts: [] }));
+      }
+      return Promise.reject(new Error(`Unexpected fetch: ${url}`));
+    });
+    vi.stubGlobal('fetch', fetchSpy);
+
+    render(<AppProviders />);
+    await screen.findByRole('button', { name: /retry conv/i });
+    const ws = openAndSubscribe('conv-1', 0);
+
+    expect(turn1ArtifactAttempts).toBe(1);
+
+    act(() => {
+      ws.simulateMessage(streamFrame('conv-1', 1, 'turn-live', 'stream-started'));
+      ws.simulateMessage(
+        streamFrame('conv-1', 2, 'turn-live', 'text-delta', { text: 'live rerender' }),
+      );
+      vi.advanceTimersByTime(3_000);
+    });
+
+    await screen.findByText('live rerender');
+    expect(turn1ArtifactAttempts).toBe(1);
   });
 });

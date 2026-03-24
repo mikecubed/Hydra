@@ -1348,6 +1348,7 @@ function useTurnActions(
  * that transient failures for individual turns do not permanently suppress
  * retries. Failed turns remain eligible for hydration on subsequent renders.
  */
+// eslint-disable-next-line max-lines-per-function -- route-level hydration coordination
 function useArtifactHydration(
   store: WorkspaceStore,
   client: GatewayClient,
@@ -1356,6 +1357,7 @@ function useArtifactHydration(
 ): void {
   const hydratedTurnsByConversationRef = useRef(new Map<string, Set<string>>());
   const pendingTurnsByConversationRef = useRef(new Map<string, Set<string>>());
+  const terminalFailuresByConversationRef = useRef(new Map<string, Set<string>>());
   const retryTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const retryConversationRef = useRef<string | null>(null);
   const [retryNonce, setRetryNonce] = useState(0);
@@ -1369,19 +1371,24 @@ function useArtifactHydration(
       hydratedTurnsByConversationRef.current.get(activeConversationId) ?? new Set<string>();
     const pendingTurns =
       pendingTurnsByConversationRef.current.get(activeConversationId) ?? new Set<string>();
+    const terminalFailures =
+      terminalFailuresByConversationRef.current.get(activeConversationId) ?? new Set<string>();
     hydratedTurnsByConversationRef.current.set(activeConversationId, hydratedTurns);
     pendingTurnsByConversationRef.current.set(activeConversationId, pendingTurns);
+    terminalFailuresByConversationRef.current.set(activeConversationId, terminalFailures);
 
     // Collect turn entries that need artifact hydration — skip turns that
     // already have artifacts (hydrated via stream or a previous pass) and
-    // turns that were successfully hydrated in an earlier invocation.
+    // turns that were successfully hydrated or hit a terminal failure in an
+    // earlier invocation.
     const turnIds = entries.flatMap((entry) => {
       if (
         entry.kind !== 'turn' ||
         entry.turnId == null ||
         entry.artifacts.length > 0 ||
         hydratedTurns.has(entry.turnId) ||
-        pendingTurns.has(entry.turnId)
+        pendingTurns.has(entry.turnId) ||
+        terminalFailures.has(entry.turnId)
       ) {
         return [];
       }
@@ -1403,12 +1410,15 @@ function useArtifactHydration(
         store.dispatch(action);
       },
       hydratedTurns,
-    ).then((failedTurns) => {
+    ).then(({ retryableFailures, terminalFailures: nextTerminalFailures }) => {
       for (const turnId of turnIds) {
         pendingTurns.delete(turnId);
       }
+      for (const turnId of nextTerminalFailures) {
+        terminalFailures.add(turnId);
+      }
       if (
-        failedTurns.size === 0 ||
+        retryableFailures.size === 0 ||
         retryTimerRef.current != null ||
         store.getState().activeConversationId !== conversationId
       ) {
