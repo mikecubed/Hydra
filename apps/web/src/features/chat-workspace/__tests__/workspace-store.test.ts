@@ -1778,24 +1778,16 @@ describe('invalidateStaleEntryControls', () => {
   });
 
   it('returns same reference when no controls need invalidation', () => {
-    const preMerge = [
-      createEntry({ entryId: 'turn-1', turnId: 'turn-1', status: 'completed' }),
-    ];
-    const postMerge = [
-      createEntry({ entryId: 'turn-1', turnId: 'turn-1', status: 'completed' }),
-    ];
+    const preMerge = [createEntry({ entryId: 'turn-1', turnId: 'turn-1', status: 'completed' })];
+    const postMerge = [createEntry({ entryId: 'turn-1', turnId: 'turn-1', status: 'completed' })];
 
     const result = invalidateStaleEntryControls(preMerge, postMerge);
     assert.equal(result, postMerge);
   });
 
   it('skips entries without controls', () => {
-    const preMerge = [
-      createEntry({ entryId: 'turn-1', turnId: 'turn-1', status: 'streaming' }),
-    ];
-    const postMerge = [
-      createEntry({ entryId: 'turn-1', turnId: 'turn-1', status: 'completed' }),
-    ];
+    const preMerge = [createEntry({ entryId: 'turn-1', turnId: 'turn-1', status: 'streaming' })];
+    const postMerge = [createEntry({ entryId: 'turn-1', turnId: 'turn-1', status: 'completed' })];
 
     const result = invalidateStaleEntryControls(preMerge, postMerge);
     assert.equal(result, postMerge);
@@ -1808,7 +1800,12 @@ describe('invalidateStaleEntryControls', () => {
         turnId: 'turn-1',
         status: 'streaming',
         controls: [
-          { controlId: 'ctrl-branch', kind: 'branch', enabled: false, reasonDisabled: 'Not available' },
+          {
+            controlId: 'ctrl-branch',
+            kind: 'branch',
+            enabled: false,
+            reasonDisabled: 'Not available',
+          },
         ],
       }),
     ];
@@ -1818,7 +1815,12 @@ describe('invalidateStaleEntryControls', () => {
         turnId: 'turn-1',
         status: 'completed',
         controls: [
-          { controlId: 'ctrl-branch', kind: 'branch', enabled: false, reasonDisabled: 'Not available' },
+          {
+            controlId: 'ctrl-branch',
+            kind: 'branch',
+            enabled: false,
+            reasonDisabled: 'Not available',
+          },
         ],
       }),
     ];
@@ -1834,9 +1836,7 @@ describe('invalidateStaleEntryControls', () => {
         entryId: 'turn-1',
         turnId: 'turn-1',
         status: 'completed',
-        controls: [
-          { controlId: 'ctrl-retry', kind: 'retry', enabled: true, reasonDisabled: null },
-        ],
+        controls: [{ controlId: 'ctrl-retry', kind: 'retry', enabled: true, reasonDisabled: null }],
       }),
     ];
     const postMerge = [
@@ -1844,9 +1844,7 @@ describe('invalidateStaleEntryControls', () => {
         entryId: 'turn-1',
         turnId: 'turn-1',
         status: 'completed',
-        controls: [
-          { controlId: 'ctrl-retry', kind: 'retry', enabled: true, reasonDisabled: null },
-        ],
+        controls: [{ controlId: 'ctrl-retry', kind: 'retry', enabled: true, reasonDisabled: null }],
       }),
     ];
 
@@ -1862,9 +1860,7 @@ describe('invalidateStaleEntryControls', () => {
         entryId: 'turn-1',
         turnId: 'turn-1',
         status: 'completed',
-        controls: [
-          { controlId: 'ctrl-retry', kind: 'retry', enabled: true, reasonDisabled: null },
-        ],
+        controls: [{ controlId: 'ctrl-retry', kind: 'retry', enabled: true, reasonDisabled: null }],
       }),
     ];
 
@@ -1878,17 +1874,13 @@ describe('invalidateStaleEntryControls', () => {
         entryId: 'turn-1',
         turnId: 'turn-1',
         status: 'streaming',
-        controls: [
-          { controlId: 'c1', kind: 'cancel', enabled: true, reasonDisabled: null },
-        ],
+        controls: [{ controlId: 'c1', kind: 'cancel', enabled: true, reasonDisabled: null }],
       }),
       createEntry({
         entryId: 'turn-2',
         turnId: 'turn-2',
         status: 'completed',
-        controls: [
-          { controlId: 'c2', kind: 'retry', enabled: true, reasonDisabled: null },
-        ],
+        controls: [{ controlId: 'c2', kind: 'retry', enabled: true, reasonDisabled: null }],
       }),
     ];
     const postMerge = [
@@ -1896,17 +1888,13 @@ describe('invalidateStaleEntryControls', () => {
         entryId: 'turn-1',
         turnId: 'turn-1',
         status: 'completed',
-        controls: [
-          { controlId: 'c1', kind: 'cancel', enabled: true, reasonDisabled: null },
-        ],
+        controls: [{ controlId: 'c1', kind: 'cancel', enabled: true, reasonDisabled: null }],
       }),
       createEntry({
         entryId: 'turn-2',
         turnId: 'turn-2',
         status: 'completed',
-        controls: [
-          { controlId: 'c2', kind: 'retry', enabled: true, reasonDisabled: null },
-        ],
+        controls: [{ controlId: 'c2', kind: 'retry', enabled: true, reasonDisabled: null }],
       }),
     ];
 
@@ -1948,9 +1936,7 @@ describe('multi-session convergence — merge-history invalidation', () => {
     state = reduceWorkspaceState(state, {
       type: 'conversation/merge-history',
       conversationId: 'conv-1',
-      entries: [
-        createEntry({ entryId: 'turn-1', turnId: 'turn-1', status: 'completed' }),
-      ],
+      entries: [createEntry({ entryId: 'turn-1', turnId: 'turn-1', status: 'completed' })],
       hasMoreHistory: false,
     });
 
@@ -1986,9 +1972,7 @@ describe('multi-session convergence — merge-history invalidation', () => {
     state = reduceWorkspaceState(state, {
       type: 'conversation/merge-history',
       conversationId: 'conv-1',
-      entries: [
-        createEntry({ entryId: 'turn-1', turnId: 'turn-1', status: 'completed' }),
-      ],
+      entries: [createEntry({ entryId: 'turn-1', turnId: 'turn-1', status: 'completed' })],
       hasMoreHistory: false,
     });
 
@@ -2021,9 +2005,7 @@ describe('multi-session convergence — merge-history invalidation', () => {
     state = reduceWorkspaceState(state, {
       type: 'conversation/merge-history',
       conversationId: 'conv-1',
-      entries: [
-        createEntry({ entryId: 'turn-1', turnId: 'turn-1', status: 'completed' }),
-      ],
+      entries: [createEntry({ entryId: 'turn-1', turnId: 'turn-1', status: 'completed' })],
       hasMoreHistory: false,
     });
 
@@ -2042,18 +2024,14 @@ describe('multi-session convergence — merge-history invalidation', () => {
     state = reduceWorkspaceState(state, {
       type: 'conversation/replace-entries',
       conversationId: 'conv-1',
-      entries: [
-        createEntry({ entryId: 'turn-1', turnId: 'turn-1', status: 'completed' }),
-      ],
+      entries: [createEntry({ entryId: 'turn-1', turnId: 'turn-1', status: 'completed' })],
       hasMoreHistory: false,
     });
 
     state = reduceWorkspaceState(state, {
       type: 'conversation/merge-history',
       conversationId: 'conv-1',
-      entries: [
-        createEntry({ entryId: 'turn-1', turnId: 'turn-1', status: 'completed' }),
-      ],
+      entries: [createEntry({ entryId: 'turn-1', turnId: 'turn-1', status: 'completed' })],
       hasMoreHistory: false,
     });
 
@@ -2090,9 +2068,7 @@ describe('multi-session convergence — merge-history invalidation', () => {
     state = reduceWorkspaceState(state, {
       type: 'conversation/merge-history',
       conversationId: 'conv-1',
-      entries: [
-        createEntry({ entryId: 'turn-1', turnId: 'turn-1', status: 'completed' }),
-      ],
+      entries: [createEntry({ entryId: 'turn-1', turnId: 'turn-1', status: 'completed' })],
       hasMoreHistory: false,
     });
 
@@ -2116,17 +2092,13 @@ describe('multi-session convergence — merge-history invalidation', () => {
           entryId: 'turn-1',
           turnId: 'turn-1',
           status: 'streaming',
-          controls: [
-            { controlId: 'c1', kind: 'cancel', enabled: true, reasonDisabled: null },
-          ],
+          controls: [{ controlId: 'c1', kind: 'cancel', enabled: true, reasonDisabled: null }],
         }),
         createEntry({
           entryId: 'turn-2',
           turnId: 'turn-2',
           status: 'completed',
-          controls: [
-            { controlId: 'c2', kind: 'retry', enabled: true, reasonDisabled: null },
-          ],
+          controls: [{ controlId: 'c2', kind: 'retry', enabled: true, reasonDisabled: null }],
         }),
       ],
       hasMoreHistory: false,
@@ -2214,9 +2186,7 @@ describe('multi-session convergence: stale-control invalidation', () => {
     state = reduceWorkspaceState(state, {
       type: 'conversation/replace-entries',
       conversationId: 'conv-1',
-      entries: [
-        createEntry({ entryId: 'turn-1', turnId: 'turn-1', status: 'streaming' }),
-      ],
+      entries: [createEntry({ entryId: 'turn-1', turnId: 'turn-1', status: 'streaming' })],
       hasMoreHistory: false,
     });
 
@@ -2224,9 +2194,7 @@ describe('multi-session convergence: stale-control invalidation', () => {
     state = reduceWorkspaceState(state, {
       type: 'conversation/merge-history',
       conversationId: 'conv-1',
-      entries: [
-        createEntry({ entryId: 'turn-1', turnId: 'turn-1', status: 'completed' }),
-      ],
+      entries: [createEntry({ entryId: 'turn-1', turnId: 'turn-1', status: 'completed' })],
       hasMoreHistory: false,
     });
 
@@ -2246,9 +2214,7 @@ describe('multi-session convergence: stale-control invalidation', () => {
     state = reduceWorkspaceState(state, {
       type: 'conversation/replace-entries',
       conversationId: 'conv-1',
-      entries: [
-        createEntry({ entryId: 'turn-1', turnId: 'turn-1', status: 'completed' }),
-      ],
+      entries: [createEntry({ entryId: 'turn-1', turnId: 'turn-1', status: 'completed' })],
       hasMoreHistory: false,
     });
 
@@ -2256,9 +2222,7 @@ describe('multi-session convergence: stale-control invalidation', () => {
     state = reduceWorkspaceState(state, {
       type: 'conversation/merge-history',
       conversationId: 'conv-1',
-      entries: [
-        createEntry({ entryId: 'turn-1', turnId: 'turn-1', status: 'completed' }),
-      ],
+      entries: [createEntry({ entryId: 'turn-1', turnId: 'turn-1', status: 'completed' })],
       hasMoreHistory: false,
     });
 
@@ -2422,17 +2386,13 @@ describe('multi-session convergence: stale-control invalidation', () => {
     state = reduceWorkspaceState(state, {
       type: 'conversation/replace-entries',
       conversationId: 'conv-1',
-      entries: [
-        createEntry({ entryId: 'turn-1', turnId: 'turn-1', status: 'streaming' }),
-      ],
+      entries: [createEntry({ entryId: 'turn-1', turnId: 'turn-1', status: 'streaming' })],
       hasMoreHistory: false,
     });
     state = reduceWorkspaceState(state, {
       type: 'conversation/merge-history',
       conversationId: 'conv-1',
-      entries: [
-        createEntry({ entryId: 'turn-1', turnId: 'turn-1', status: 'completed' }),
-      ],
+      entries: [createEntry({ entryId: 'turn-1', turnId: 'turn-1', status: 'completed' })],
       hasMoreHistory: false,
     });
     assert.ok(state.conversations.get('conv-1')?.controlState.staleReason != null);
@@ -2441,9 +2401,7 @@ describe('multi-session convergence: stale-control invalidation', () => {
     state = reduceWorkspaceState(state, {
       type: 'conversation/merge-history',
       conversationId: 'conv-1',
-      entries: [
-        createEntry({ entryId: 'turn-1', turnId: 'turn-1', status: 'completed' }),
-      ],
+      entries: [createEntry({ entryId: 'turn-1', turnId: 'turn-1', status: 'completed' })],
       hasMoreHistory: false,
     });
 

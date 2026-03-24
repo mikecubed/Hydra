@@ -20,10 +20,7 @@ function renderBanner(
   convergenceHint?: string | null,
 ) {
   return render(
-    <ConnectionBanner
-      connection={connectionState(overrides)}
-      convergenceHint={convergenceHint}
-    />,
+    <ConnectionBanner connection={connectionState(overrides)} convergenceHint={convergenceHint} />,
   );
 }
 
@@ -175,10 +172,7 @@ describe('ConnectionBanner stale-control awareness', () => {
   });
 
   it('renders nothing when convergenceHint is null and connection is operational', () => {
-    renderBanner(
-      { transportStatus: 'live', syncStatus: 'idle', daemonStatus: 'healthy' },
-      null,
-    );
+    renderBanner({ transportStatus: 'live', syncStatus: 'idle', daemonStatus: 'healthy' }, null);
     expect(screen.queryByRole('alert')).toBeNull();
     expect(screen.queryByRole('status')).toBeNull();
   });

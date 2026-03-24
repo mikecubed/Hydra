@@ -160,10 +160,10 @@ _Status note_: post-Phase-1 maintenance also landed on the active branch, splitt
 
 **Independent Test**: Use the same conversation in two sessions, trigger control actions in one session, and verify the other converges while stale controls are not silently accepted; also confirm recent-context usability for large histories.
 
-- [ ] T044 [P] [US7] Improve recent-context usability for large histories in `apps/web/src/features/chat-workspace/model/selectors.ts` and `apps/web/src/features/chat-workspace/components/transcript-pane.tsx`.
-- [ ] T045 [P] [US7] Implement multi-session convergence and stale-control invalidation in `apps/web/src/features/chat-workspace/model/workspace-store.ts`, `apps/web/src/features/chat-workspace/model/reconciler.ts`, and `apps/web/src/features/chat-workspace/components/connection-banner.tsx`.
-- [ ] T046 [US7] Add large-history and multi-session convergence coverage in `apps/web/src/features/chat-workspace/__tests__/workspace-e2e.test.ts` and `apps/web/src/features/chat-workspace/__tests__/workspace-store.test.ts`.
-- [ ] T047 [US7] Run the phase quality gate from the repo root with `npm run quality` and `npm test` after large-history and multi-session handling is green.
+- [x] T044 [P] [US7] Improve recent-context usability for large histories in `apps/web/src/features/chat-workspace/model/selectors.ts` and `apps/web/src/features/chat-workspace/components/transcript-pane.tsx`.
+- [x] T045 [P] [US7] Implement multi-session convergence and stale-control invalidation in `apps/web/src/features/chat-workspace/model/workspace-store.ts`, `apps/web/src/features/chat-workspace/model/reconciler.ts`, and `apps/web/src/features/chat-workspace/components/connection-banner.tsx`.
+- [x] T046 [US7] Add large-history and multi-session convergence coverage in `apps/web/src/features/chat-workspace/transcript-pane.browser.spec.tsx`, `apps/web/src/features/chat-workspace/connection-banner.browser.spec.tsx`, and `apps/web/src/features/chat-workspace/__tests__/workspace-store.test.ts`.
+- [x] T047 [US7] Run the phase quality gate from the repo root with `npm run quality` and `npm test` after large-history and multi-session handling is green.
 
 **Checkpoint**: The workspace behaves like a durable operator surface rather than a fragile single-tab demo.
 

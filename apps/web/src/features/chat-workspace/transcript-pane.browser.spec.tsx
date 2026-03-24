@@ -506,6 +506,147 @@ describe('TranscriptPane', () => {
     ).toBeTruthy();
   });
 
+  it('windows the live workspace to the most recent loaded entries for large transcripts', async () => {
+    const conversations: ListConversationsResponse = {
+      conversations: [
+        {
+          id: 'conv-1',
+          title: 'Primary conversation',
+          status: 'active',
+          createdAt: '2026-03-20T00:00:00.000Z',
+          updatedAt: '2026-03-20T12:00:00.000Z',
+          turnCount: 51,
+          pendingInstructionCount: 0,
+        },
+      ],
+      totalCount: 1,
+    };
+    const history: LoadTurnHistoryResponse = {
+      turns: Array.from({ length: 51 }, (_, index) => {
+        const entryNumber = String(index + 1);
+        const minuteText = String(index).padStart(2, '0');
+        return {
+          id: `turn-${entryNumber}`,
+          conversationId: 'conv-1',
+          position: index + 1,
+          kind: 'system' as const,
+          attribution: { type: 'agent' as const, agentId: 'codex', label: 'Codex' },
+          response: `Historical entry ${entryNumber}`,
+          status: 'completed' as const,
+          createdAt: `2026-03-20T12:${minuteText}:00.000Z`,
+          completedAt: `2026-03-20T12:${minuteText}:30.000Z`,
+        };
+      }),
+      totalCount: 51,
+      hasMore: false,
+    };
+
+    installFetchStub((url) => {
+      if (url === '/conversations?status=active&limit=20') {
+        return new Response(JSON.stringify(conversations), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        });
+      }
+
+      if (url === '/conversations/conv-1/turns?limit=50') {
+        return new Response(JSON.stringify(history), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        });
+      }
+
+      throw new Error(`Unexpected fetch input: ${url}`);
+    });
+
+    render(<AppProviders />);
+
+    expect(await screen.findByText('Historical entry 51')).toBeInTheDocument();
+    expect(screen.queryByText('Historical entry 1')).toBeNull();
+    expect(screen.getByTestId('transcript-orientation')).toHaveTextContent(
+      'Showing the most recent 50 of 51 loaded entries.',
+    );
+  });
+
+  it('surfaces a stale-control banner after authoritative convergence detects another session', async () => {
+    const conversations: ListConversationsResponse = {
+      conversations: [
+        {
+          id: 'conv-1',
+          title: 'Primary conversation',
+          status: 'active',
+          createdAt: '2026-03-20T00:00:00.000Z',
+          updatedAt: '2026-03-20T12:00:00.000Z',
+          turnCount: 1,
+          pendingInstructionCount: 0,
+        },
+      ],
+      totalCount: 1,
+    };
+    const authoritativeHistory: LoadTurnHistoryResponse = {
+      turns: [
+        {
+          id: 'turn-1',
+          conversationId: 'conv-1',
+          position: 1,
+          kind: 'system',
+          attribution: { type: 'agent', agentId: 'codex', label: 'Codex' },
+          response: 'Resumed by another session',
+          status: 'executing',
+          createdAt: '2026-03-20T12:00:31.000Z',
+          completedAt: '2026-03-20T12:00:45.000Z',
+        },
+      ],
+      totalCount: 1,
+      hasMore: false,
+    };
+
+    let resolveHistory = (_value: Response): void => {
+      throw new Error('Expected the transcript history request to be pending');
+    };
+
+    fetchSpy.mockImplementation((input) => {
+      const url = requestUrl(input);
+      if (url === '/conversations?status=active&limit=20') {
+        return Promise.resolve(
+          new Response(JSON.stringify(conversations), {
+            status: 200,
+            headers: { 'Content-Type': 'application/json' },
+          }),
+        );
+      }
+
+      if (url === '/conversations/conv-1/turns?limit=50') {
+        return new Promise<Response>((resolve) => {
+          resolveHistory = resolve;
+        });
+      }
+
+      throw new Error(`Unexpected fetch input: ${url}`);
+    });
+    vi.stubGlobal('fetch', fetchSpy);
+
+    render(<AppProviders />);
+    await screen.findByRole('button', { name: /primary conversation/i });
+
+    const ws = openAndSubscribe('conv-1');
+    ws.simulateMessage(
+      streamFrame('conv-1', 1, 'turn-1', 'stream-started', { attribution: 'Codex' }),
+    );
+    ws.simulateMessage(
+      streamFrame('conv-1', 2, 'turn-1', 'status-change', { status: 'submitted' }),
+    );
+
+    resolveHistory(
+      new Response(JSON.stringify(authoritativeHistory), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      }),
+    );
+
+    expect(await screen.findByText('State changed by another session')).toBeInTheDocument();
+  });
+
   // eslint-disable-next-line max-lines-per-function
   it('replaces transcript history when switching conversations', async () => {
     const conversations: ListConversationsResponse = {
@@ -1522,15 +1663,17 @@ describe('TranscriptTurn streaming', () => {
 
 // ─── Large history orientation ──────────────────────────────────────────────
 
+// eslint-disable-next-line max-lines-per-function
 describe('TranscriptPane large history orientation', () => {
   it('shows hidden entry count when hiddenEntryCount is provided', () => {
-    const entries = Array.from({ length: 5 }, (_, i) =>
-      createEntry({
-        entryId: `e-${i}`,
-        turnId: `t-${i}`,
-        contentBlocks: [textBlock(`Message ${i}`, `blk-${i}`)],
-      }),
-    );
+    const entries = Array.from({ length: 5 }, (_, i) => {
+      const indexText = String(i);
+      return createEntry({
+        entryId: `e-${indexText}`,
+        turnId: `t-${indexText}`,
+        contentBlocks: [textBlock(`Message ${indexText}`, `blk-${indexText}`)],
+      });
+    });
 
     render(
       <TranscriptPane

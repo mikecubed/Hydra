@@ -38,11 +38,13 @@ function orientationMessage(
   hasMoreHistory: boolean,
 ): string {
   const total = visibleCount + hiddenEntryCount;
+  const visibleText = String(visibleCount);
+  const totalText = String(total);
   if (hiddenEntryCount > 0 && hasMoreHistory) {
-    return `Showing the most recent ${visibleCount} of ${total} loaded entries. Additional older history is available on the server.`;
+    return `Showing the most recent ${visibleText} of ${totalText} loaded entries. Additional older history is available on the server.`;
   }
   if (hiddenEntryCount > 0) {
-    return `Showing the most recent ${visibleCount} of ${total} loaded entries.`;
+    return `Showing the most recent ${visibleText} of ${totalText} loaded entries.`;
   }
   // Only hasMoreHistory, no client-side windowing
   return 'Showing the most recent transcript entries. Older history is not loaded yet.';

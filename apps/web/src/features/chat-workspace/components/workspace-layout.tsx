@@ -24,6 +24,7 @@ export interface WorkspaceLayoutProps extends TranscriptTurnCallbacks {
   readonly activeConversationId: string | null;
   readonly activeConversation: ConversationViewState | undefined;
   readonly activeEntries: readonly TranscriptEntryState[];
+  readonly activeHiddenEntryCount?: number;
   readonly activeLoadState: ConversationLoadState | null;
   readonly activeHasMoreHistory: boolean;
   readonly isLoadingConversations: boolean;
@@ -43,6 +44,7 @@ export function WorkspaceLayout({
   activeConversationId,
   activeConversation,
   activeEntries,
+  activeHiddenEntryCount = 0,
   activeLoadState,
   activeHasMoreHistory,
   isLoadingConversations,
@@ -125,6 +127,7 @@ export function WorkspaceLayout({
               loadState={activeLoadState}
               hasActiveConversation={activeConversationId != null}
               hasMoreHistory={activeHasMoreHistory}
+              hiddenEntryCount={activeHiddenEntryCount}
               onRetry={onRetryActiveTranscript}
               onRespondToPrompt={onRespondToPrompt}
               onCancelTurn={onCancelTurn}

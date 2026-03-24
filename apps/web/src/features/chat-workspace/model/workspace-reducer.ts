@@ -397,9 +397,7 @@ function applyMergeHistory(
     ? invalidateStaleEntryControls(current.entries, rawMerged)
     : rawMerged;
 
-  const staleReason = drift.hasExternalChanges
-    ? 'State changed by another session'
-    : null;
+  const staleReason = drift.hasExternalChanges ? 'State changed by another session' : null;
 
   nextConversations.set(conversationId, {
     ...current,

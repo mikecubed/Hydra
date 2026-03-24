@@ -974,7 +974,6 @@ export function invalidateStaleEntryControls(
 
   if (changedToTerminal.size === 0) return mergedEntries;
 
-  let changed = false;
   const result = mergedEntries.map((entry) => {
     if (entry.kind !== 'turn' || entry.turnId == null) return entry;
     if (!changedToTerminal.has(entry.turnId)) return entry;
@@ -1014,9 +1013,8 @@ export function invalidateStaleEntryControls(
 
     if (!controlsChanged) return entry;
 
-    changed = true;
     return { ...entry, controls: updatedControls };
   });
 
-  return changed ? result : mergedEntries;
+  return result.some((entry, index) => entry !== mergedEntries[index]) ? result : mergedEntries;
 }

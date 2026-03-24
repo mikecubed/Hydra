@@ -2060,21 +2060,15 @@ describe('deduplicateEntries', () => {
 
 describe('detectConvergenceDrift', () => {
   it('returns no drift when entries are identical', () => {
-    const entries = [
-      makeEntry({ entryId: 'turn-a', turnId: 'turn-a', status: 'completed' }),
-    ];
+    const entries = [makeEntry({ entryId: 'turn-a', turnId: 'turn-a', status: 'completed' })];
     const drift = detectConvergenceDrift(entries, entries);
     assert.equal(drift.hasExternalChanges, false);
     assert.equal(drift.turnStatusChanges.size, 0);
   });
 
   it('detects a status change from streaming to cancelled', () => {
-    const before = [
-      makeEntry({ entryId: 'turn-a', turnId: 'turn-a', status: 'streaming' }),
-    ];
-    const after = [
-      makeEntry({ entryId: 'turn-a', turnId: 'turn-a', status: 'cancelled' }),
-    ];
+    const before = [makeEntry({ entryId: 'turn-a', turnId: 'turn-a', status: 'streaming' })];
+    const after = [makeEntry({ entryId: 'turn-a', turnId: 'turn-a', status: 'cancelled' })];
     const drift = detectConvergenceDrift(before, after);
     assert.equal(drift.hasExternalChanges, true);
     const change = drift.turnStatusChanges.get('turn-a');
@@ -2109,9 +2103,7 @@ describe('detectConvergenceDrift', () => {
   });
 
   it('ignores new turns that did not exist before the merge', () => {
-    const before = [
-      makeEntry({ entryId: 'turn-a', turnId: 'turn-a', status: 'completed' }),
-    ];
+    const before = [makeEntry({ entryId: 'turn-a', turnId: 'turn-a', status: 'completed' })];
     const after = [
       makeEntry({ entryId: 'turn-a', turnId: 'turn-a', status: 'completed' }),
       makeEntry({ entryId: 'turn-b', turnId: 'turn-b', status: 'streaming' }),
@@ -2125,9 +2117,7 @@ describe('detectConvergenceDrift', () => {
 
 describe('invalidateStaleEntryControls', () => {
   it('disables enabled cancel control on terminal entries with a stale reason', () => {
-    const before = [
-      makeEntry({ entryId: 'turn-a', turnId: 'turn-a', status: 'streaming' }),
-    ];
+    const before = [makeEntry({ entryId: 'turn-a', turnId: 'turn-a', status: 'streaming' })];
     const merged = [
       makeEntry({
         entryId: 'turn-a',
@@ -2152,7 +2142,12 @@ describe('invalidateStaleEntryControls', () => {
         turnId: 'turn-a',
         status: 'completed',
         controls: [
-          { controlId: 'c-retry', kind: 'retry' as const, enabled: false, reasonDisabled: 'original reason' },
+          {
+            controlId: 'c-retry',
+            kind: 'retry' as const,
+            enabled: false,
+            reasonDisabled: 'original reason',
+          },
         ],
       }),
     ];
