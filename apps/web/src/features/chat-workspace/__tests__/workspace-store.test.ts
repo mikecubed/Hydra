@@ -2012,7 +2012,8 @@ describe('multi-session convergence — merge-history invalidation', () => {
 
     const entry = state.conversations.get('conv-1')?.entries[0];
     assert.ok(entry);
-    assert.equal(entry.controls.length, 0);
+    assert.equal(entry.controls[0].enabled, true);
+    assert.equal(entry.controls[0].reasonDisabled, null);
   });
 
   it('does not set staleReason when no controls are invalidated', () => {
@@ -2118,8 +2119,8 @@ describe('multi-session convergence — merge-history invalidation', () => {
     assert.ok(entries);
     // turn-1: status changed streaming→completed, cancel becomes stale
     assert.equal(entries[0].controls[0].enabled, false);
-    // turn-2: terminal status already matched, so authoritative control removal wins
-    assert.equal(entries[1].controls.length, 0);
+    // turn-2: terminal status already matched, so existing terminal retry remains available
+    assert.equal(entries[1].controls[0].enabled, true);
   });
 });
 
@@ -2447,8 +2448,33 @@ describe('multi-session convergence: stale-control invalidation', () => {
     const conv = state.conversations.get('conv-1');
     const olderTurn = conv?.entries.find((entry) => entry.turnId === 'turn-1');
     const followUpCtrl = olderTurn?.controls.find((control) => control.kind === 'submit-follow-up');
-    assert.equal(followUpCtrl, undefined, 'streamed-only follow-up control should be removed');
+    assert.ok(followUpCtrl, 'stale follow-up control should remain visible but disabled');
+    assert.equal(followUpCtrl?.enabled, false);
+    assert.equal(followUpCtrl?.reasonDisabled, 'Already acted on in another session');
     assert.equal(selectCanFollowUp(state, 'turn-1'), false);
+    assert.equal(conv?.controlState.staleReason, 'State changed by another session');
+  });
+
+  it('preserves unrelated control-state reasons across merge-history refreshes', () => {
+    let state = createInitialWorkspaceState();
+    state = reduceWorkspaceState(state, {
+      type: 'conversation/upsert',
+      conversation: createConversation(),
+    });
+    state = reduceWorkspaceState(state, {
+      type: 'conversation/update-control-state',
+      conversationId: 'conv-1',
+      patch: { staleReason: 'Session expired' },
+    });
+
+    state = reduceWorkspaceState(state, {
+      type: 'conversation/merge-history',
+      conversationId: 'conv-1',
+      entries: [createEntry({ entryId: 'turn-1', turnId: 'turn-1', status: 'completed' })],
+      hasMoreHistory: false,
+    });
+
+    assert.equal(state.conversations.get('conv-1')?.controlState.staleReason, 'Session expired');
   });
 
   it('marks actionable prompts stale when turn becomes terminal via external merge', () => {

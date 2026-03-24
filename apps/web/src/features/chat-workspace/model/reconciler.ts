@@ -621,10 +621,14 @@ function mergeTerminalControls(
   streamedControls: readonly EntryControlState[],
 ): readonly EntryControlState[] {
   const mergedByKind = new Map<EntryControlKind, EntryControlState>();
-  const restKinds = new Set(restControls.map((control) => control.kind));
 
   for (const control of streamedControls) {
-    if (control.kind === 'cancel' || control.enabled || restKinds.has(control.kind)) {
+    if (
+      control.kind === 'cancel' ||
+      (control.kind === 'submit-follow-up' &&
+        control.enabled &&
+        !restControls.some((restControl) => restControl.kind === control.kind))
+    ) {
       continue;
     }
 
@@ -899,6 +903,23 @@ export interface ConvergenceDrift {
   readonly hasExternalChanges: boolean;
 }
 
+function hasEnabledControlLoss(
+  previousEntry: TranscriptEntryState,
+  mergedEntry: TranscriptEntryState,
+): boolean {
+  const mergedByKind = new Map(
+    mergedEntry.controls.map((control) => [control.kind, control] as const),
+  );
+  return previousEntry.controls.some((control) => {
+    if (!control.enabled) {
+      return false;
+    }
+
+    const mergedControl = mergedByKind.get(control.kind);
+    return mergedControl?.enabled !== true;
+  });
+}
+
 /**
  * Detect convergence drift by comparing turn statuses before and after an
  * authoritative merge.
@@ -970,23 +991,24 @@ export function invalidateStaleEntryControls(
     }
   }
 
-  // Find turns that changed to terminal
-  const changedToTerminal = new Set<string>();
+  const turnsNeedingInvalidation = new Set<string>();
   for (const e of mergedEntries) {
     if (e.kind !== 'turn' || e.turnId == null) continue;
-    if (!TERMINAL_STATUSES.has(e.status)) continue;
     const prev = prevTurnMap.get(e.turnId);
-    // Only invalidate controls on turns that existed before and were non-terminal
-    if (prev != null && !TERMINAL_STATUSES.has(prev.status)) {
-      changedToTerminal.add(e.turnId);
+    if (prev == null) continue;
+
+    const changedToTerminal =
+      !TERMINAL_STATUSES.has(prev.status) && TERMINAL_STATUSES.has(e.status);
+    if (changedToTerminal || hasEnabledControlLoss(prev, e)) {
+      turnsNeedingInvalidation.add(e.turnId);
     }
   }
 
-  if (changedToTerminal.size === 0) return mergedEntries;
+  if (turnsNeedingInvalidation.size === 0) return mergedEntries;
 
   const result = mergedEntries.map((entry) => {
     if (entry.kind !== 'turn' || entry.turnId == null) return entry;
-    if (!changedToTerminal.has(entry.turnId)) return entry;
+    if (!turnsNeedingInvalidation.has(entry.turnId)) return entry;
 
     const prev = prevTurnMap.get(entry.turnId);
     const prevControlsByKind = new Map<EntryControlKind, EntryControlState>();
@@ -995,10 +1017,12 @@ export function invalidateStaleEntryControls(
         prevControlsByKind.set(c.kind, c);
       }
     }
+    const changedToTerminal =
+      prev != null && !TERMINAL_STATUSES.has(prev.status) && TERMINAL_STATUSES.has(entry.status);
 
     // Cancel controls are always stale once a turn reaches terminal state.
     const updatedControls: EntryControlState[] = entry.controls.map((control) =>
-      control.kind === 'cancel' && control.enabled
+      changedToTerminal && control.kind === 'cancel' && control.enabled
         ? { ...control, enabled: false, reasonDisabled: STALE_CONTROL_REASON }
         : control,
     );
@@ -1050,21 +1074,12 @@ export function hasActionableControlInvalidation(
 
   for (const entry of mergedEntries) {
     if (entry.kind !== 'turn' || entry.turnId == null) continue;
-    if (!TERMINAL_STATUSES.has(entry.status)) continue;
 
     const prev = prevTurnMap.get(entry.turnId);
-    if (prev == null || TERMINAL_STATUSES.has(prev.status)) continue;
+    if (prev == null) continue;
 
-    const mergedByKind = new Map(entry.controls.map((control) => [control.kind, control] as const));
-    for (const control of prev.controls) {
-      if (!control.enabled) {
-        continue;
-      }
-
-      const mergedControl = mergedByKind.get(control.kind);
-      if (mergedControl?.enabled !== true) {
-        return true;
-      }
+    if (hasEnabledControlLoss(prev, entry)) {
+      return true;
     }
   }
 

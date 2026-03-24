@@ -388,19 +388,25 @@ function applyMergeHistory(
   restEntries: readonly TranscriptEntryState[],
   hasMoreHistory: boolean,
 ): WorkspaceState {
+  const convergenceStaleReason = 'State changed by another session';
   const current = ensureConversation(state.conversations, conversationId);
   const nextConversations = new Map(state.conversations);
   const rawMerged = mergeAuthoritativeEntries(restEntries, current.entries);
 
   // Detect convergence drift and invalidate stale controls
   const drift = detectConvergenceDrift(current.entries, rawMerged);
-  const merged = drift.hasExternalChanges
-    ? invalidateStaleEntryControls(current.entries, rawMerged)
-    : rawMerged;
-  const controlsInvalidated =
-    drift.hasExternalChanges && hasActionableControlInvalidation(current.entries, rawMerged);
+  const controlsInvalidated = hasActionableControlInvalidation(current.entries, rawMerged);
+  const merged =
+    drift.hasExternalChanges || controlsInvalidated
+      ? invalidateStaleEntryControls(current.entries, rawMerged)
+      : rawMerged;
 
-  const staleReason = controlsInvalidated ? 'State changed by another session' : null;
+  let staleReason = current.controlState.staleReason;
+  if (controlsInvalidated) {
+    staleReason = convergenceStaleReason;
+  } else if (staleReason === convergenceStaleReason) {
+    staleReason = null;
+  }
 
   nextConversations.set(conversationId, {
     ...current,
