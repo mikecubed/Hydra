@@ -1,17 +1,38 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { cleanup, fireEvent, render, screen, within } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, within } from '@testing-library/react';
 import type { ListConversationsResponse, LoadTurnHistoryResponse } from '@hydra/web-contracts';
 
 import { AppProviders } from '../../app/providers.tsx';
 import { TranscriptPane } from './components/transcript-pane.tsx';
 import { TranscriptTurn } from './components/transcript-turn.tsx';
-import type { TranscriptEntryState, ContentBlockState } from './model/workspace-store.ts';
+import type {
+  TranscriptEntryState,
+  ContentBlockState,
+  WorkspaceStore,
+} from './model/workspace-store.ts';
 import {
   FakeWebSocket,
   openAndSubscribe,
   resetFakeWebSockets,
   streamFrame,
 } from './__tests__/browser-helpers.ts';
+
+// Capture the workspace store created during render so tests can dispatch
+// actions (e.g. seeding entry controls) that aren't reachable through DOM
+// interaction alone.
+let _capturedStore: WorkspaceStore | null = null;
+
+vi.mock('./model/workspace-store.ts', async (importOriginal) => {
+  const mod = await importOriginal<typeof import('./model/workspace-store.ts')>();
+  return {
+    ...mod,
+    createWorkspaceStore: (...args: Parameters<typeof mod.createWorkspaceStore>) => {
+      const store = mod.createWorkspaceStore(...args);
+      _capturedStore = store;
+      return store;
+    },
+  };
+});
 
 const fetchSpy = vi.fn<typeof fetch>();
 
@@ -20,6 +41,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  _capturedStore = null;
   fetchSpy.mockReset();
   resetFakeWebSockets();
   vi.unstubAllGlobals();
@@ -575,7 +597,7 @@ describe('TranscriptPane', () => {
     );
   });
 
-  it('surfaces a stale-control banner after authoritative convergence detects another session', async () => {
+  it('surfaces a stale-control banner after authoritative convergence invalidates controls', async () => {
     const conversations: ListConversationsResponse = {
       conversations: [
         {
@@ -652,6 +674,20 @@ describe('TranscriptPane', () => {
     ws.simulateMessage(
       streamFrame('conv-1', 2, 'turn-1', 'status-change', { status: 'submitted' }),
     );
+
+    // Seed a cancel control on the stream entry so the authoritative merge has
+    // something to actually invalidate.  Without entry-level controls the
+    // reducer correctly suppresses staleReason (reference-equality fast path).
+    act(() => {
+      _capturedStore!.dispatch({
+        type: 'entry/update-controls',
+        conversationId: 'conv-1',
+        entryId: 'turn-1',
+        controls: [
+          { controlId: 'ctrl-cancel', kind: 'cancel', enabled: true, reasonDisabled: null },
+        ],
+      });
+    });
 
     resolveHistory(
       new Response(JSON.stringify(authoritativeHistory), {
