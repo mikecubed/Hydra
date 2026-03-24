@@ -41,6 +41,7 @@ export function TranscriptPane({
   onRetryTurn,
   onBranchTurn,
   onFollowUpTurn,
+  onArtifactSelect,
   resolveEntryActions,
 }: TranscriptPaneProps): JSX.Element {
   if (!hasActiveConversation) {
@@ -117,6 +118,7 @@ export function TranscriptPane({
             onRetryTurn={onRetryTurn}
             onBranchTurn={onBranchTurn}
             onFollowUpTurn={onFollowUpTurn}
+            onArtifactSelect={onArtifactSelect}
           />
         );
       })}

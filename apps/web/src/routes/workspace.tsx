@@ -32,6 +32,7 @@ import {
   type ContentBlockState,
   createAndSubmitDraft,
   createWorkspaceStore,
+  type ArtifactViewState,
   type PromptViewState,
   submitComposerDraft,
   type DraftSubmitState,
@@ -56,6 +57,7 @@ import {
   selectCanSubmit,
   selectConversationList,
   selectCreateModeCanSubmit,
+  selectVisibleArtifact,
   precomputeTranscriptActions,
   NO_ACTION_FLAGS,
   type EntryActionFlags,
@@ -65,6 +67,10 @@ import {
   respondToPrompt,
 } from '../features/chat-workspace/model/prompt-helpers.ts';
 import { canSubmitWork, describeConnectionState } from '../shared/session-state.ts';
+import {
+  hydrateConversationArtifacts,
+  fetchArtifactContent,
+} from '../features/chat-workspace/model/artifact-hydration.ts';
 
 function useWorkspaceState(store: WorkspaceStore) {
   return useSyncExternalStore(
@@ -1328,6 +1334,104 @@ function useTurnActions(
   };
 }
 
+// ─── Artifact hydration hook ────────────────────────────────────────────────
+
+/**
+ * Browser-side artifact hydration hook.
+ *
+ * After REST history load (where Turn payloads do not include artifacts),
+ * hydrate artifact references by querying `listArtifactsForTurn` for each turn.
+ * This makes artifacts discoverable after refresh/reopen, not only during live
+ * streaming.
+ *
+ * Tracks hydration at the *turn* level rather than the conversation level so
+ * that transient failures for individual turns do not permanently suppress
+ * retries. Failed turns remain eligible for hydration on subsequent renders.
+ */
+function useArtifactHydration(
+  store: WorkspaceStore,
+  client: GatewayClient,
+  activeConversationId: string | null,
+  entries: readonly TranscriptEntryState[],
+): void {
+  const hydratedTurnsByConversationRef = useRef(new Map<string, Set<string>>());
+  const pendingTurnsByConversationRef = useRef(new Map<string, Set<string>>());
+  const retryTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const [retryNonce, setRetryNonce] = useState(0);
+
+  useEffect(() => {
+    if (activeConversationId == null) return;
+
+    const conversation = store.getState().conversations.get(activeConversationId);
+    if (conversation == null || !conversation.historyLoaded) return;
+    const hydratedTurns =
+      hydratedTurnsByConversationRef.current.get(activeConversationId) ?? new Set<string>();
+    const pendingTurns =
+      pendingTurnsByConversationRef.current.get(activeConversationId) ?? new Set<string>();
+    hydratedTurnsByConversationRef.current.set(activeConversationId, hydratedTurns);
+    pendingTurnsByConversationRef.current.set(activeConversationId, pendingTurns);
+
+    // Collect turn entries that need artifact hydration — skip turns that
+    // already have artifacts (hydrated via stream or a previous pass) and
+    // turns that were successfully hydrated in an earlier invocation.
+    const turnIds = entries
+      .filter(
+        (e) =>
+          e.kind === 'turn' &&
+          e.turnId != null &&
+          e.artifacts.length === 0 &&
+          !hydratedTurns.has(e.turnId) &&
+          !pendingTurns.has(e.turnId),
+      )
+      .map((e) => e.turnId!);
+
+    if (turnIds.length === 0) return;
+    for (const turnId of turnIds) {
+      pendingTurns.add(turnId);
+    }
+
+    const conversationId = activeConversationId;
+    let disposed = false;
+
+    void hydrateConversationArtifacts(
+      conversationId,
+      turnIds,
+      client,
+      (action) => store.dispatch(action),
+      hydratedTurns,
+    ).then((failedTurns) => {
+      for (const turnId of turnIds) {
+        pendingTurns.delete(turnId);
+      }
+      if (disposed || failedTurns.size === 0 || retryTimerRef.current != null) {
+        return;
+      }
+
+      retryTimerRef.current = setTimeout(() => {
+        retryTimerRef.current = null;
+        setRetryNonce((value) => value + 1);
+      }, 1_000);
+    });
+
+    return () => {
+      disposed = true;
+      if (retryTimerRef.current != null) {
+        clearTimeout(retryTimerRef.current);
+        retryTimerRef.current = null;
+      }
+    };
+  }, [activeConversationId, client, entries, retryNonce, store]);
+
+  useEffect(() => {
+    return () => {
+      if (retryTimerRef.current != null) {
+        clearTimeout(retryTimerRef.current);
+        retryTimerRef.current = null;
+      }
+    };
+  }, []);
+}
+
 // eslint-disable-next-line max-lines-per-function
 export function WorkspaceRoute(): JSX.Element {
   const [store] = useState(() => createWorkspaceStore());
@@ -1387,6 +1491,57 @@ export function WorkspaceRoute(): JSX.Element {
     actionMap,
   );
 
+  // ── Artifact hydration: populate artifact references on REST-loaded turns ──
+  useArtifactHydration(store, client, state.activeConversationId, activeEntries);
+
+  // ── Artifact inspection: select / show / close ─────────────────────────────
+  const visibleArtifact = selectVisibleArtifact(state);
+
+  // Monotonically-increasing request counter: every new selection, panel close,
+  // or conversation switch bumps this so in-flight fetches become stale.
+  const artifactRequestRef = useRef(0);
+
+  // Invalidate in-flight artifact fetches when the active conversation changes.
+  useEffect(() => {
+    artifactRequestRef.current++;
+  }, [state.activeConversationId]);
+
+  const handleArtifactSelect = useCallback(
+    (artifactId: string, turnId: string) => {
+      const requestId = ++artifactRequestRef.current;
+
+      // Show a loading placeholder immediately
+      const entry = activeEntries.find((e) => e.turnId === turnId);
+      const ref = entry?.artifacts.find((a) => a.artifactId === artifactId);
+      const loadingArtifact: ArtifactViewState = {
+        artifactId,
+        turnId,
+        kind: ref?.kind ?? 'file',
+        label: ref?.label ?? artifactId,
+        availability: 'loading',
+        previewBlocks: [],
+      };
+      store.dispatch({ type: 'artifact/show', artifact: loadingArtifact });
+
+      // Fetch full content in background with staleness guard
+      void fetchArtifactContent(
+        artifactId,
+        requestId,
+        () => artifactRequestRef.current,
+        () => store.getState().activeConversationId === state.activeConversationId,
+        client,
+        (action) => store.dispatch(action),
+        loadingArtifact,
+      );
+    },
+    [activeEntries, client, state.activeConversationId, store],
+  );
+
+  const handleCloseArtifact = useCallback(() => {
+    artifactRequestRef.current++;
+    store.dispatch({ type: 'artifact/clear' });
+  }, [store]);
+
   return (
     <ConnectionStateContext.Provider value={state.connection}>
       <ConnectionBanner connection={state.connection} />
@@ -1400,11 +1555,13 @@ export function WorkspaceRoute(): JSX.Element {
         isLoadingConversations={isLoadingConversations}
         conversationErrorMessage={conversationErrorMessage}
         onSelectConversation={(conversationId) => {
+          artifactRequestRef.current++;
           store.dispatch({ type: 'conversation/select', conversationId });
           clearConversationError();
           composer.clearCreateState();
         }}
         onStartNewConversation={() => {
+          artifactRequestRef.current++;
           store.dispatch({ type: 'conversation/select', conversationId: null });
           clearConversationError();
           composer.clearCreateState();
@@ -1415,7 +1572,10 @@ export function WorkspaceRoute(): JSX.Element {
         onRetryTurn={turnActions.handleRetry}
         onBranchTurn={turnActions.handleBranch}
         onFollowUpTurn={turnActions.handleFollowUp}
+        onArtifactSelect={handleArtifactSelect}
         resolveEntryActions={turnActions.resolveEntryActions}
+        visibleArtifact={visibleArtifact}
+        onCloseArtifact={handleCloseArtifact}
         composerSlot={
           <ComposerPanel
             draftText={composer.draftText}

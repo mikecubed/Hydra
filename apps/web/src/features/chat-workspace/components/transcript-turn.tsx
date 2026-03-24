@@ -15,6 +15,7 @@ export interface TranscriptTurnCallbacks {
   readonly onRetryTurn?: (turnId: string) => void;
   readonly onBranchTurn?: (turnId: string) => void;
   readonly onFollowUpTurn?: (turnId: string) => void;
+  readonly onArtifactSelect?: (artifactId: string, turnId: string) => void;
 }
 
 export interface TranscriptTurnProps extends TranscriptTurnCallbacks {
@@ -113,6 +114,8 @@ const artifactBadgeStyle = {
   padding: '0.15rem 0.5rem',
   fontSize: '0.75rem',
   color: '#94a3b8',
+  cursor: 'pointer',
+  fontFamily: 'inherit',
 } as const;
 
 const artifactKindStyle = {
@@ -155,17 +158,32 @@ function ContentBlock({ block }: { readonly block: ContentBlockState }): JSX.Ele
 
 function ArtifactList({
   artifacts,
+  turnId,
+  onArtifactSelect,
 }: {
   readonly artifacts: readonly ArtifactReferenceState[];
+  readonly turnId: string | null;
+  readonly onArtifactSelect?: (artifactId: string, turnId: string) => void;
 }): JSX.Element | null {
   if (artifacts.length === 0) return null;
 
   return (
     <ul style={artifactListStyle} data-testid="artifact-list">
       {artifacts.map((artifact) => (
-        <li key={artifact.artifactId} style={artifactBadgeStyle} data-testid="artifact-badge">
-          <span style={artifactKindStyle}>{artifact.kind}</span>
-          <SafeText text={artifact.label} />
+        <li key={artifact.artifactId}>
+          <button
+            type="button"
+            style={artifactBadgeStyle}
+            data-testid="artifact-badge"
+            onClick={
+              onArtifactSelect != null && turnId != null
+                ? () => onArtifactSelect(artifact.artifactId, turnId)
+                : undefined
+            }
+          >
+            <span style={artifactKindStyle}>{artifact.kind}</span>
+            <SafeText text={artifact.label} />
+          </button>
         </li>
       ))}
     </ul>
@@ -202,6 +220,7 @@ export function TranscriptTurn({
   onRetryTurn,
   onBranchTurn,
   onFollowUpTurn,
+  onArtifactSelect,
 }: TranscriptTurnProps): JSX.Element {
   const streaming = isStreamingStatus(entry.status);
   const hasTurnId = entry.kind === 'turn' && entry.turnId != null;
@@ -235,7 +254,7 @@ export function TranscriptTurn({
         </div>
       )}
 
-      <ArtifactList artifacts={entry.artifacts} />
+      <ArtifactList artifacts={entry.artifacts} turnId={entry.turnId} onArtifactSelect={onArtifactSelect} />
 
       {entry.prompt != null && <PromptCard prompt={entry.prompt} onRespond={onRespondToPrompt} />}
 
