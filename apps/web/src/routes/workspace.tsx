@@ -1359,7 +1359,6 @@ function useArtifactHydration(
   const pendingTurnsByConversationRef = useRef(new Map<string, Set<string>>());
   const terminalFailuresByConversationRef = useRef(new Map<string, Set<string>>());
   const retryTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const retryConversationRef = useRef<string | null>(null);
   const [retryNonce, setRetryNonce] = useState(0);
 
   useEffect(() => {
@@ -1425,10 +1424,8 @@ function useArtifactHydration(
         return;
       }
 
-      retryConversationRef.current = conversationId;
       retryTimerRef.current = setTimeout(() => {
         retryTimerRef.current = null;
-        retryConversationRef.current = null;
         if (store.getState().activeConversationId !== conversationId) {
           return;
         }
@@ -1449,7 +1446,6 @@ function useArtifactHydration(
         clearTimeout(retryTimerRef.current);
         retryTimerRef.current = null;
       }
-      retryConversationRef.current = null;
     },
     [activeConversationId],
   );

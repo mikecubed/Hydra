@@ -1,8 +1,9 @@
 /**
  * Safe artifact renderers for the chat workspace.
  *
- * Provides reusable renderer primitives that the later artifact panel (T041)
- * will consume. All content is rendered safely — no raw HTML injection, no
+ * Provides reusable renderer primitives consumed by the artifact panel
+ * (ArtifactPanel → ArtifactPreview) and inline transcript rendering.
+ * All content is rendered safely — no raw HTML injection, no
  * dangerouslySetInnerHTML, no active content execution. Every text value
  * passes through React's built-in JSX escaping or the SafeText component.
  *
