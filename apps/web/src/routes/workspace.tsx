@@ -32,6 +32,7 @@ import {
   type ContentBlockState,
   createAndSubmitDraft,
   createWorkspaceStore,
+  type ArtifactViewState,
   type PromptViewState,
   submitComposerDraft,
   type DraftSubmitState,
@@ -56,6 +57,7 @@ import {
   selectCanSubmit,
   selectConversationList,
   selectCreateModeCanSubmit,
+  selectVisibleArtifact,
   precomputeTranscriptActions,
   NO_ACTION_FLAGS,
   type EntryActionFlags,
@@ -65,6 +67,10 @@ import {
   respondToPrompt,
 } from '../features/chat-workspace/model/prompt-helpers.ts';
 import { canSubmitWork, describeConnectionState } from '../shared/session-state.ts';
+import {
+  hydrateConversationArtifacts,
+  fetchArtifactContent,
+} from '../features/chat-workspace/model/artifact-hydration.ts';
 
 function useWorkspaceState(store: WorkspaceStore) {
   return useSyncExternalStore(
@@ -1328,6 +1334,199 @@ function useTurnActions(
   };
 }
 
+// ─── Artifact hydration hook ────────────────────────────────────────────────
+
+/**
+ * Browser-side artifact hydration hook.
+ *
+ * After REST history load (where Turn payloads do not include artifacts),
+ * hydrate artifact references by querying `listArtifactsForTurn` for each turn.
+ * This makes artifacts discoverable after refresh/reopen, not only during live
+ * streaming.
+ *
+ * Tracks hydration at the *turn* level rather than the conversation level so
+ * that transient failures for individual turns do not permanently suppress
+ * retries. Failed turns remain eligible for hydration on subsequent renders.
+ */
+// eslint-disable-next-line max-lines-per-function -- route-level hydration coordination
+function useArtifactHydration(
+  store: WorkspaceStore,
+  client: GatewayClient,
+  activeConversationId: string | null,
+  entries: readonly TranscriptEntryState[],
+): void {
+  const hydratedTurnsByConversationRef = useRef(new Map<string, Set<string>>());
+  const liveHydrationKeysByConversationRef = useRef(new Map<string, Map<string, string>>());
+  const pendingTurnsByConversationRef = useRef(new Map<string, Set<string>>());
+  const terminalFailuresByConversationRef = useRef(new Map<string, Set<string>>());
+  const retryTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const [retryNonce, setRetryNonce] = useState(0);
+
+  const buildLiveHydrationKey = (entry: TranscriptEntryState): string =>
+    `${entry.status}:${String(entry.artifacts.length)}`;
+
+  // eslint-disable-next-line max-lines-per-function -- hydration state machine spans retry/terminal/live cases
+  useEffect(() => {
+    if (activeConversationId == null) return;
+
+    const conversation = store.getState().conversations.get(activeConversationId);
+    if (conversation?.historyLoaded !== true) return;
+    const hydratedTurns =
+      hydratedTurnsByConversationRef.current.get(activeConversationId) ?? new Set<string>();
+    const liveHydrationKeys =
+      liveHydrationKeysByConversationRef.current.get(activeConversationId) ??
+      new Map<string, string>();
+    const pendingTurns =
+      pendingTurnsByConversationRef.current.get(activeConversationId) ?? new Set<string>();
+    const terminalFailures =
+      terminalFailuresByConversationRef.current.get(activeConversationId) ?? new Set<string>();
+    hydratedTurnsByConversationRef.current.set(activeConversationId, hydratedTurns);
+    liveHydrationKeysByConversationRef.current.set(activeConversationId, liveHydrationKeys);
+    pendingTurnsByConversationRef.current.set(activeConversationId, pendingTurns);
+    terminalFailuresByConversationRef.current.set(activeConversationId, terminalFailures);
+
+    // Collect turn entries that need artifact hydration — terminal turns are
+    // hydrated once and then pinned in hydratedTurns, while live turns track a
+    // lightweight status/artifact-count signature so refresh recovery can
+    // backfill missed artifact notices without refetching on every text delta.
+    const turnsToHydrate = entries.flatMap((entry) => {
+      if (
+        entry.kind !== 'turn' ||
+        entry.turnId == null ||
+        pendingTurns.has(entry.turnId) ||
+        terminalFailures.has(entry.turnId)
+      ) {
+        return [];
+      }
+
+      const isTerminal =
+        entry.status === 'completed' || entry.status === 'failed' || entry.status === 'cancelled';
+      if (isTerminal) {
+        return hydratedTurns.has(entry.turnId) ? [] : [{ turnId: entry.turnId, isTerminal: true }];
+      }
+
+      const liveHydrationKey = buildLiveHydrationKey(entry);
+      return liveHydrationKeys.get(entry.turnId) === liveHydrationKey
+        ? []
+        : [{ turnId: entry.turnId, isTerminal: false }];
+    });
+
+    const turnIds = turnsToHydrate.map(({ turnId }) => turnId);
+    const terminalTurnIds = new Set(
+      turnsToHydrate.filter(({ isTerminal }) => isTerminal).map(({ turnId }) => turnId),
+    );
+
+    if (turnIds.length === 0) return;
+    for (const turnId of turnIds) {
+      pendingTurns.add(turnId);
+    }
+
+    const conversationId = activeConversationId;
+
+    void hydrateConversationArtifacts(conversationId, turnIds, client, (action) => {
+      store.dispatch(action);
+    }).then(
+      // eslint-disable-next-line complexity -- terminal/live success handling shares one coordination path
+      ({ successfulTurns, retryableFailures, terminalFailures: nextTerminalFailures }) => {
+        // Re-resolve per-conversation structures from refs so writes land in
+        // the *current* Maps/Sets, not stale captures from before a potential
+        // conversation switch (liveHydrationKeys is cleared on switch for
+        // reopen-recovery; pendingTurns survives but may have been replaced).
+        const resolvedPending = pendingTurnsByConversationRef.current.get(conversationId);
+        const resolvedLiveKeys = liveHydrationKeysByConversationRef.current.get(conversationId);
+
+        for (const turnId of turnIds) {
+          resolvedPending?.delete(turnId);
+        }
+        for (const turnId of nextTerminalFailures) {
+          terminalFailures.add(turnId);
+          resolvedLiveKeys?.delete(turnId);
+        }
+
+        const latestEntries =
+          store
+            .getState()
+            .conversations.get(conversationId)
+            ?.entries.filter(
+              (entry): entry is TranscriptEntryState =>
+                entry.kind === 'turn' && entry.turnId != null,
+            ) ?? [];
+        const latestTurnsById = new Map(latestEntries.map((entry) => [entry.turnId, entry]));
+
+        let shouldRecheckTerminalTurns = false;
+        for (const turnId of successfulTurns) {
+          const latestEntry = latestTurnsById.get(turnId);
+          if (latestEntry == null) {
+            resolvedLiveKeys?.delete(turnId);
+            continue;
+          }
+
+          const isTerminal =
+            latestEntry.status === 'completed' ||
+            latestEntry.status === 'failed' ||
+            latestEntry.status === 'cancelled';
+          if (isTerminal) {
+            resolvedLiveKeys?.delete(turnId);
+            if (terminalTurnIds.has(turnId)) {
+              hydratedTurns.add(turnId);
+            } else {
+              shouldRecheckTerminalTurns = true;
+            }
+          } else {
+            resolvedLiveKeys?.set(turnId, buildLiveHydrationKey(latestEntry));
+          }
+        }
+
+        if (
+          shouldRecheckTerminalTurns &&
+          retryTimerRef.current == null &&
+          store.getState().activeConversationId === conversationId
+        ) {
+          setRetryNonce((value) => value + 1);
+        }
+
+        if (
+          retryableFailures.size === 0 ||
+          retryTimerRef.current != null ||
+          store.getState().activeConversationId !== conversationId
+        ) {
+          return;
+        }
+
+        retryTimerRef.current = setTimeout(() => {
+          retryTimerRef.current = null;
+          if (store.getState().activeConversationId !== conversationId) {
+            return;
+          }
+          setRetryNonce((value) => value + 1);
+        }, 1_000);
+      },
+    );
+
+    // No timer cleanup here — same-conversation rerenders (entries changing)
+    // must not cancel a pending retry.  Conversation-switch and unmount
+    // cleanup is handled by the dedicated effect below.
+  }, [activeConversationId, client, entries, retryNonce, store]);
+
+  // Clear the retry timer only when the active conversation changes or on
+  // unmount — NOT on same-conversation rerenders that merely update entries.
+  useEffect(
+    () => () => {
+      if (retryTimerRef.current != null) {
+        clearTimeout(retryTimerRef.current);
+        retryTimerRef.current = null;
+      }
+      if (activeConversationId != null) {
+        liveHydrationKeysByConversationRef.current.delete(activeConversationId);
+        // pendingTurns intentionally kept — in-flight hydration Promises still
+        // reference this Set, and a quick switch-back must see turns as pending
+        // to avoid issuing duplicate listArtifactsForTurn requests.
+      }
+    },
+    [activeConversationId],
+  );
+}
+
 // eslint-disable-next-line max-lines-per-function
 export function WorkspaceRoute(): JSX.Element {
   const [store] = useState(() => createWorkspaceStore());
@@ -1387,6 +1586,59 @@ export function WorkspaceRoute(): JSX.Element {
     actionMap,
   );
 
+  // ── Artifact hydration: populate artifact references on REST-loaded turns ──
+  useArtifactHydration(store, client, state.activeConversationId, activeEntries);
+
+  // ── Artifact inspection: select / show / close ─────────────────────────────
+  const visibleArtifact = selectVisibleArtifact(state);
+
+  // Monotonically-increasing request counter: every new selection, panel close,
+  // or conversation switch bumps this so in-flight fetches become stale.
+  const artifactRequestRef = useRef(0);
+
+  // Invalidate in-flight artifact fetches when the active conversation changes.
+  useEffect(() => {
+    artifactRequestRef.current++;
+  }, [state.activeConversationId]);
+
+  const handleArtifactSelect = useCallback(
+    (artifactId: string, turnId: string) => {
+      const requestId = ++artifactRequestRef.current;
+
+      // Show a loading placeholder immediately
+      const entry = activeEntries.find((e) => e.turnId === turnId);
+      const ref = entry?.artifacts.find((a) => a.artifactId === artifactId);
+      const loadingArtifact: ArtifactViewState = {
+        artifactId,
+        turnId,
+        kind: ref?.kind ?? 'file',
+        label: ref?.label ?? artifactId,
+        availability: 'loading',
+        previewBlocks: [],
+      };
+      store.dispatch({ type: 'artifact/show', artifact: loadingArtifact });
+
+      // Fetch full content in background with staleness guard
+      void fetchArtifactContent(
+        artifactId,
+        requestId,
+        () => artifactRequestRef.current,
+        () => store.getState().activeConversationId === state.activeConversationId,
+        client,
+        (action) => {
+          store.dispatch(action);
+        },
+        loadingArtifact,
+      );
+    },
+    [activeEntries, client, state.activeConversationId, store],
+  );
+
+  const handleCloseArtifact = useCallback(() => {
+    artifactRequestRef.current++;
+    store.dispatch({ type: 'artifact/clear' });
+  }, [store]);
+
   return (
     <ConnectionStateContext.Provider value={state.connection}>
       <ConnectionBanner connection={state.connection} />
@@ -1400,11 +1652,13 @@ export function WorkspaceRoute(): JSX.Element {
         isLoadingConversations={isLoadingConversations}
         conversationErrorMessage={conversationErrorMessage}
         onSelectConversation={(conversationId) => {
+          artifactRequestRef.current++;
           store.dispatch({ type: 'conversation/select', conversationId });
           clearConversationError();
           composer.clearCreateState();
         }}
         onStartNewConversation={() => {
+          artifactRequestRef.current++;
           store.dispatch({ type: 'conversation/select', conversationId: null });
           clearConversationError();
           composer.clearCreateState();
@@ -1415,7 +1669,10 @@ export function WorkspaceRoute(): JSX.Element {
         onRetryTurn={turnActions.handleRetry}
         onBranchTurn={turnActions.handleBranch}
         onFollowUpTurn={turnActions.handleFollowUp}
+        onArtifactSelect={handleArtifactSelect}
         resolveEntryActions={turnActions.resolveEntryActions}
+        visibleArtifact={visibleArtifact}
+        onCloseArtifact={handleCloseArtifact}
         composerSlot={
           <ComposerPanel
             draftText={composer.draftText}

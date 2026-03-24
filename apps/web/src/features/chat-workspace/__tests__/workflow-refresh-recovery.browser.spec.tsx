@@ -63,6 +63,16 @@ function agentTurn(
   };
 }
 
+function requestUrl(input: string | URL | Request): string {
+  if (typeof input === 'string') {
+    return input;
+  }
+  if (input instanceof URL) {
+    return input.toString();
+  }
+  return input.url;
+}
+
 // ─── Tests ──────────────────────────────────────────────────────────────────
 
 // eslint-disable-next-line max-lines-per-function
@@ -185,6 +195,378 @@ describe('workspace refresh/reconnect recovery workflows', () => {
     // Turn transitioned to completed after stream-completed
     expect(screen.getByText('completed')).toBeInTheDocument();
     expect(screen.queryByText('streaming…')).not.toBeInTheDocument();
+  });
+
+  it('recovers streamed artifact notices for an active turn after refresh without replay', async () => {
+    let refreshed = false;
+    installFetchStub((url) => {
+      if (url === '/conversations?status=active&limit=20') {
+        return jsonResponse({
+          conversations: [conversation('conv-1', 'Artifact refresh')],
+          totalCount: 1,
+        });
+      }
+      if (url === '/conversations/conv-1/turns?limit=50') {
+        if (!refreshed) {
+          return jsonResponse(EMPTY_HISTORY);
+        }
+        return jsonResponse({
+          turns: [
+            agentTurn('turn-a1', 'conv-1', {
+              response: 'Still working…',
+              status: 'streaming',
+            }),
+          ],
+          totalCount: 1,
+          hasMore: false,
+        });
+      }
+      if (url === '/conversations/conv-1/approvals') {
+        return jsonResponse({ approvals: [] });
+      }
+      if (url === '/turns/turn-a1/artifacts') {
+        return jsonResponse({
+          artifacts: [
+            {
+              id: 'art-1',
+              turnId: 'turn-a1',
+              kind: 'log',
+              label: 'midstream.log',
+              size: 42,
+              createdAt: '2026-07-01T00:00:05.000Z',
+            },
+          ],
+        });
+      }
+      throw new Error(`Unexpected fetch: ${url}`);
+    });
+
+    render(<AppProviders />);
+    await screen.findByRole('button', { name: /artifact refresh/i });
+
+    const ws1 = openAndSubscribe('conv-1', 0);
+    act(() => {
+      ws1.simulateMessage(
+        streamFrame('conv-1', 1, 'turn-a1', 'stream-started', { attribution: 'Claude' }),
+      );
+      ws1.simulateMessage(
+        streamFrame('conv-1', 2, 'turn-a1', 'artifact-notice', {
+          artifactId: 'art-1',
+          kind: 'log',
+          label: 'midstream.log',
+        }),
+      );
+    });
+
+    expect(await screen.findByText('midstream.log')).toBeInTheDocument();
+
+    refreshed = true;
+    cleanup();
+    resetFakeWebSockets();
+
+    render(<AppProviders />);
+    await screen.findByRole('button', { name: /artifact refresh/i });
+
+    await vi.waitFor(() => expect(screen.getByText('Still working…')).toBeInTheDocument());
+    await vi.waitFor(() => expect(screen.getByText('midstream.log')).toBeInTheDocument());
+    expect(screen.getByText('streaming…')).toBeInTheDocument();
+  });
+
+  // eslint-disable-next-line max-lines-per-function -- multi-phase hydration race coverage
+  it('reruns terminal artifact hydration when a live fetch resolves after stream completion', async () => {
+    let resolveFirstArtifacts: ((response: Response) => void) | null = null;
+    let artifactRequestCount = 0;
+
+    fetchSpy.mockImplementation((input: string | URL | Request) => {
+      const url = requestUrl(input);
+
+      if (url === '/conversations?status=active&limit=20') {
+        return Promise.resolve(
+          jsonResponse({
+            conversations: [conversation('conv-1', 'Terminal refresh')],
+            totalCount: 1,
+          }),
+        );
+      }
+      if (url === '/conversations/conv-1/turns?limit=50') {
+        return Promise.resolve(
+          jsonResponse({
+            turns: [
+              agentTurn('turn-a1', 'conv-1', {
+                response: 'Still working…',
+                status: 'streaming',
+              }),
+            ],
+            totalCount: 1,
+            hasMore: false,
+          }),
+        );
+      }
+      if (url === '/conversations/conv-1/approvals') {
+        return Promise.resolve(jsonResponse({ approvals: [] }));
+      }
+      if (url === '/turns/turn-a1/artifacts') {
+        artifactRequestCount += 1;
+        if (artifactRequestCount === 1) {
+          return new Promise<Response>((resolve) => {
+            resolveFirstArtifacts = resolve;
+          });
+        }
+        return Promise.resolve(
+          jsonResponse({
+            artifacts: [
+              {
+                id: 'art-1',
+                turnId: 'turn-a1',
+                kind: 'log',
+                label: 'midstream.log',
+                size: 42,
+                createdAt: '2026-07-01T00:00:05.000Z',
+              },
+              {
+                id: 'art-2',
+                turnId: 'turn-a1',
+                kind: 'structured-data',
+                label: 'final.json',
+                size: 84,
+                createdAt: '2026-07-01T00:00:06.000Z',
+              },
+            ],
+          }),
+        );
+      }
+      return Promise.reject(new Error(`Unexpected fetch: ${url}`));
+    });
+    vi.stubGlobal('fetch', fetchSpy);
+
+    render(<AppProviders />);
+    await screen.findByRole('button', { name: /terminal refresh/i });
+    await vi.waitFor(() => expect(screen.getByText('Still working…')).toBeInTheDocument());
+    await vi.waitFor(() => {
+      expect(resolveFirstArtifacts).not.toBeNull();
+    });
+
+    const ws = latestSocket();
+    act(() => {
+      ws.simulateOpen();
+      ws.simulateMessage({ type: 'subscribed', conversationId: 'conv-1', currentSeq: 0 });
+      ws.simulateMessage(streamFrame('conv-1', 1, 'turn-a1', 'stream-completed'));
+    });
+    expect(await screen.findByText('completed')).toBeInTheDocument();
+
+    act(() => {
+      // eslint-disable-next-line @typescript-eslint/no-non-null-assertion -- controlled by waitFor above
+      resolveFirstArtifacts!(
+        jsonResponse({
+          artifacts: [
+            {
+              id: 'art-1',
+              turnId: 'turn-a1',
+              kind: 'log',
+              label: 'midstream.log',
+              size: 42,
+              createdAt: '2026-07-01T00:00:05.000Z',
+            },
+          ],
+        }),
+      );
+    });
+
+    await vi.waitFor(() => expect(screen.getByText('midstream.log')).toBeInTheDocument());
+    await vi.waitFor(() => expect(screen.getByText('final.json')).toBeInTheDocument());
+    expect(artifactRequestCount).toBe(2);
+  });
+
+  it('rehydrates active-turn artifacts after switching away and back without replay', async () => {
+    let conv1ArtifactRequests = 0;
+
+    installFetchStub((url) => {
+      if (url === '/conversations?status=active&limit=20') {
+        return jsonResponse({
+          conversations: [
+            conversation('conv-1', 'Artifact switch'),
+            conversation('conv-2', 'Other conversation'),
+          ],
+          totalCount: 2,
+        });
+      }
+      if (url === '/conversations/conv-1/turns?limit=50') {
+        return jsonResponse({
+          turns: [
+            agentTurn('turn-a1', 'conv-1', {
+              response: 'Still working…',
+              status: 'streaming',
+            }),
+          ],
+          totalCount: 1,
+          hasMore: false,
+        });
+      }
+      if (url === '/conversations/conv-2/turns?limit=50') {
+        return jsonResponse({
+          turns: [
+            agentTurn('turn-b1', 'conv-2', {
+              response: 'Second conversation',
+              status: 'streaming',
+            }),
+          ],
+          totalCount: 1,
+          hasMore: false,
+        });
+      }
+      if (url === '/conversations/conv-1/approvals' || url === '/conversations/conv-2/approvals') {
+        return jsonResponse({ approvals: [] });
+      }
+      if (url === '/turns/turn-a1/artifacts') {
+        conv1ArtifactRequests += 1;
+        return jsonResponse({
+          artifacts:
+            conv1ArtifactRequests === 1
+              ? []
+              : [
+                  {
+                    id: 'art-1',
+                    turnId: 'turn-a1',
+                    kind: 'log',
+                    label: 'midstream.log',
+                    size: 42,
+                    createdAt: '2026-07-01T00:00:05.000Z',
+                  },
+                ],
+        });
+      }
+      throw new Error(`Unexpected fetch: ${url}`);
+    });
+
+    render(<AppProviders />);
+    const conv1Button = await screen.findByRole('button', { name: /artifact switch/i });
+    const conv2Button = await screen.findByRole('button', { name: /other conversation/i });
+
+    await vi.waitFor(() => expect(screen.getByText('Still working…')).toBeInTheDocument());
+    await vi.waitFor(() => {
+      expect(conv1ArtifactRequests).toBe(1);
+    });
+    expect(screen.queryByText('midstream.log')).not.toBeInTheDocument();
+
+    fireEvent.click(conv2Button);
+    await vi.waitFor(() => expect(screen.getByText('Second conversation')).toBeInTheDocument());
+
+    fireEvent.click(conv1Button);
+    await vi.waitFor(() => expect(screen.getByText('Still working…')).toBeInTheDocument());
+    await vi.waitFor(() => expect(screen.getByText('midstream.log')).toBeInTheDocument());
+    expect(conv1ArtifactRequests).toBe(2);
+  });
+
+  // Regression: quick switch away/back before hydration Promise settles must not
+  // issue a duplicate listArtifactsForTurn request (GitHub PR #175 review thread).
+  // eslint-disable-next-line max-lines-per-function -- deferred-resolve fetch stub spans many lines
+  it('does not duplicate listArtifactsForTurn on quick switch away/back before hydration settles', async () => {
+    let artifactRequestCount = 0;
+    let resolveArtifact: ((r: Response) => void) | null = null;
+
+    fetchSpy.mockImplementation((input: string | URL | Request) => {
+      const url = requestUrl(input);
+      if (url === '/conversations?status=active&limit=20') {
+        return Promise.resolve(
+          jsonResponse({
+            conversations: [
+              conversation('conv-1', 'Hydration race'),
+              conversation('conv-2', 'Other chat'),
+            ],
+            totalCount: 2,
+          }),
+        );
+      }
+      if (url === '/conversations/conv-1/turns?limit=50') {
+        return Promise.resolve(
+          jsonResponse({
+            turns: [
+              agentTurn('turn-a1', 'conv-1', {
+                response: 'Working…',
+                status: 'streaming',
+              }),
+            ],
+            totalCount: 1,
+            hasMore: false,
+          }),
+        );
+      }
+      if (url === '/conversations/conv-2/turns?limit=50') {
+        return Promise.resolve(
+          jsonResponse({
+            turns: [
+              agentTurn('turn-b1', 'conv-2', {
+                response: 'Chat B',
+                status: 'streaming',
+              }),
+            ],
+            totalCount: 1,
+            hasMore: false,
+          }),
+        );
+      }
+      if (url === '/conversations/conv-1/approvals' || url === '/conversations/conv-2/approvals') {
+        return Promise.resolve(jsonResponse({ approvals: [] }));
+      }
+      if (url === '/turns/turn-a1/artifacts') {
+        artifactRequestCount += 1;
+        return new Promise<Response>((resolve) => {
+          resolveArtifact = resolve;
+        });
+      }
+      if (url === '/turns/turn-b1/artifacts') {
+        return Promise.resolve(jsonResponse({ artifacts: [] }));
+      }
+      return Promise.reject(new Error(`Unexpected fetch: ${url}`));
+    });
+    vi.stubGlobal('fetch', fetchSpy);
+
+    render(<AppProviders />);
+    const conv1Button = await screen.findByRole('button', { name: /hydration race/i });
+    const conv2Button = await screen.findByRole('button', { name: /other chat/i });
+
+    // Wait for conv-1 history to load and artifact hydration to start (unsettled)
+    await vi.waitFor(() => expect(screen.getByText('Working…')).toBeInTheDocument());
+    await vi.waitFor(() => {
+      expect(artifactRequestCount).toBe(1);
+    });
+    expect(resolveArtifact).not.toBeNull();
+
+    // Switch away to conv-2 while hydration is in-flight
+    fireEvent.click(conv2Button);
+    await vi.waitFor(() => expect(screen.getByText('Chat B')).toBeInTheDocument());
+
+    // Switch back to conv-1 before the first hydration settles
+    fireEvent.click(conv1Button);
+    await vi.waitFor(() => expect(screen.getByText('Working…')).toBeInTheDocument());
+
+    // The quick switch-back must NOT issue a second artifact request
+    expect(artifactRequestCount).toBe(1);
+
+    // Resolve the original in-flight hydration
+    act(() => {
+      // eslint-disable-next-line @typescript-eslint/no-non-null-assertion -- guarded by expect above
+      resolveArtifact!(
+        jsonResponse({
+          artifacts: [
+            {
+              id: 'art-race',
+              turnId: 'turn-a1',
+              kind: 'log',
+              label: 'race-resolved.log',
+              size: 10,
+              createdAt: '2026-07-01T00:00:05.000Z',
+            },
+          ],
+        }),
+      );
+    });
+
+    // Artifact should appear — the resolved Promise wrote to current ref structures
+    await vi.waitFor(() => expect(screen.getByText('race-resolved.log')).toBeInTheDocument());
+
+    // Still only 1 artifact request total — no duplicate
+    expect(artifactRequestCount).toBe(1);
   });
 
   it('overwrites stream-populated entries when REST authoritative merge arrives later', async () => {

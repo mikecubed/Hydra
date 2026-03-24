@@ -2,9 +2,11 @@ import type { JSX } from 'react';
 import { ConversationList } from './conversation-list.tsx';
 import { LineageBadge } from './lineage-badge.tsx';
 import { TranscriptPane } from './transcript-pane.tsx';
+import { ArtifactPanel } from './artifact-panel.tsx';
 import type { EntryActionFlags } from '../model/selectors.ts';
 import type { TranscriptTurnCallbacks } from './transcript-turn.tsx';
 import type {
+  ArtifactViewState,
   ConversationLoadState,
   ConversationViewState,
   TranscriptEntryState,
@@ -31,6 +33,8 @@ export interface WorkspaceLayoutProps extends TranscriptTurnCallbacks {
   readonly onRetryActiveTranscript: () => void;
   readonly resolveEntryActions?: (entry: TranscriptEntryState) => EntryActionFlags;
   readonly composerSlot?: JSX.Element | null;
+  readonly visibleArtifact?: ArtifactViewState | null;
+  readonly onCloseArtifact?: () => void;
 }
 
 // eslint-disable-next-line max-lines-per-function
@@ -51,8 +55,11 @@ export function WorkspaceLayout({
   onRetryTurn,
   onBranchTurn,
   onFollowUpTurn,
+  onArtifactSelect,
   resolveEntryActions,
   composerSlot,
+  visibleArtifact,
+  onCloseArtifact,
 }: WorkspaceLayoutProps): JSX.Element {
   return (
     <section
@@ -124,9 +131,14 @@ export function WorkspaceLayout({
               onRetryTurn={onRetryTurn}
               onBranchTurn={onBranchTurn}
               onFollowUpTurn={onFollowUpTurn}
+              onArtifactSelect={onArtifactSelect}
               resolveEntryActions={resolveEntryActions}
             />
           </section>
+
+          {visibleArtifact != null && onCloseArtifact != null && (
+            <ArtifactPanel artifact={visibleArtifact} onClose={onCloseArtifact} />
+          )}
 
           <section aria-labelledby="workspace-composer-heading" style={panelStyle}>
             <h3 id="workspace-composer-heading" style={{ marginTop: 0 }}>

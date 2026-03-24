@@ -1168,6 +1168,179 @@ describe('GatewayClient', () => {
     });
   });
 
+  // ── listArtifactsForTurn ─────────────────────────────────────────────────
+
+  describe('listArtifactsForTurn', () => {
+    const artifactFixture = (overrides: Record<string, unknown> = {}) => ({
+      id: 'art-1',
+      turnId: 'turn-1',
+      kind: 'file' as const,
+      label: 'main.ts',
+      size: 1024,
+      createdAt: NOW,
+      ...overrides,
+    });
+
+    it('sends GET to /turns/:turnId/artifacts and returns artifacts', async () => {
+      const artifacts = [artifactFixture()];
+      const responseBody = { artifacts };
+      let capturedUrl = '';
+
+      const client = buildClient(async (input) => {
+        capturedUrl = stringifyInput(input);
+        return jsonResponse(responseBody);
+      });
+
+      const result = await client.listArtifactsForTurn('turn-1');
+
+      assert.ok(capturedUrl.endsWith('/turns/turn-1/artifacts'));
+      assert.equal(result.artifacts.length, 1);
+      assert.equal(result.artifacts[0].id, 'art-1');
+      assert.equal(result.artifacts[0].kind, 'file');
+    });
+
+    it('encodes the turnId path parameter', async () => {
+      let capturedUrl = '';
+      const client = buildClient(async (input) => {
+        capturedUrl = stringifyInput(input);
+        return jsonResponse({ artifacts: [] });
+      });
+
+      await client.listArtifactsForTurn('turn/special&chars');
+
+      assert.ok(capturedUrl.includes('/turns/turn%2Fspecial%26chars/artifacts'));
+    });
+
+    it('throws GatewayRequestError when turn not found', async () => {
+      const errBody = gatewayErrorFixture({
+        code: 'NOT_FOUND',
+        message: 'Turn not found',
+      });
+      const client = buildClient(async () => errorResponse(errBody, 404));
+
+      await assert.rejects(
+        () => client.listArtifactsForTurn('nonexistent'),
+        (err: unknown) => {
+          const gErr = assertGatewayError(err);
+          assert.equal(gErr.status, 404);
+          assert.equal(gErr.gatewayError.code, 'NOT_FOUND');
+          return true;
+        },
+      );
+    });
+
+    it('uses GET method without CSRF header', async () => {
+      let capturedHeaders: CapturedHeaders;
+      const client = buildClient(
+        async (_input, init) => {
+          capturedHeaders = init?.headers;
+          return jsonResponse({ artifacts: [] });
+        },
+        { getCsrfToken: () => 'csrf-tok' },
+      );
+
+      await client.listArtifactsForTurn('turn-1');
+
+      const headers = new Headers(capturedHeaders);
+      assert.equal(headers.has('x-csrf-token'), false);
+    });
+  });
+
+  // ── getArtifactContent ─────────────────────────────────────────────────
+
+  describe('getArtifactContent', () => {
+    const artifactWithContentFixture = (overrides: Record<string, unknown> = {}) => ({
+      artifact: {
+        id: 'art-1',
+        turnId: 'turn-1',
+        kind: 'file' as const,
+        label: 'main.ts',
+        size: 42,
+        createdAt: NOW,
+      },
+      content: 'console.log("hello");',
+      ...overrides,
+    });
+
+    it('sends GET to /artifacts/:artifactId and returns artifact with content', async () => {
+      const responseBody = artifactWithContentFixture();
+      let capturedUrl = '';
+
+      const client = buildClient(async (input) => {
+        capturedUrl = stringifyInput(input);
+        return jsonResponse(responseBody);
+      });
+
+      const result = await client.getArtifactContent('art-1');
+
+      assert.ok(capturedUrl.endsWith('/artifacts/art-1'));
+      assert.equal(result.artifact.id, 'art-1');
+      assert.equal(result.content, 'console.log("hello");');
+    });
+
+    it('encodes the artifactId path parameter', async () => {
+      let capturedUrl = '';
+      const client = buildClient(async (input) => {
+        capturedUrl = stringifyInput(input);
+        return jsonResponse(artifactWithContentFixture());
+      });
+
+      await client.getArtifactContent('art/special&id');
+
+      assert.ok(capturedUrl.includes('/artifacts/art%2Fspecial%26id'));
+    });
+
+    it('throws GatewayRequestError when artifact not found', async () => {
+      const errBody = gatewayErrorFixture({
+        code: 'NOT_FOUND',
+        message: 'Artifact not found',
+      });
+      const client = buildClient(async () => errorResponse(errBody, 404));
+
+      await assert.rejects(
+        () => client.getArtifactContent('nonexistent'),
+        (err: unknown) => {
+          const gErr = assertGatewayError(err);
+          assert.equal(gErr.status, 404);
+          assert.equal(gErr.gatewayError.code, 'NOT_FOUND');
+          return true;
+        },
+      );
+    });
+
+    it('throws GatewayRequestError with fallback on non-JSON error', async () => {
+      const client = buildClient(
+        async () => new Response('Internal Server Error', { status: 500 }),
+      );
+
+      await assert.rejects(
+        () => client.getArtifactContent('art-1'),
+        (err: unknown) => {
+          const gErr = assertGatewayError(err);
+          assert.equal(gErr.status, 500);
+          assert.equal(gErr.gatewayError.category, 'daemon');
+          return true;
+        },
+      );
+    });
+
+    it('uses GET method without CSRF header', async () => {
+      let capturedHeaders: CapturedHeaders;
+      const client = buildClient(
+        async (_input, init) => {
+          capturedHeaders = init?.headers;
+          return jsonResponse(artifactWithContentFixture());
+        },
+        { getCsrfToken: () => 'csrf-tok' },
+      );
+
+      await client.getArtifactContent('art-1');
+
+      const headers = new Headers(capturedHeaders);
+      assert.equal(headers.has('x-csrf-token'), false);
+    });
+  });
+
   // ── Network failure ─────────────────────────────────────────────────────
 
   describe('network failure', () => {
