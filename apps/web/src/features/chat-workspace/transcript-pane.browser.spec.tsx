@@ -1519,3 +1519,125 @@ describe('TranscriptTurn streaming', () => {
     expect(screen.getByTestId('approval-prompt')).toBeTruthy();
   });
 });
+
+// ─── Large history orientation ──────────────────────────────────────────────
+
+describe('TranscriptPane large history orientation', () => {
+  it('shows hidden entry count when hiddenEntryCount is provided', () => {
+    const entries = Array.from({ length: 5 }, (_, i) =>
+      createEntry({
+        entryId: `e-${i}`,
+        turnId: `t-${i}`,
+        contentBlocks: [textBlock(`Message ${i}`, `blk-${i}`)],
+      }),
+    );
+
+    render(
+      <TranscriptPane
+        entries={entries}
+        loadState="ready"
+        hasActiveConversation={true}
+        hasMoreHistory={false}
+        hiddenEntryCount={45}
+      />,
+    );
+
+    const orientation = screen.getByTestId('transcript-orientation');
+    expect(orientation).toBeTruthy();
+    expect(orientation.textContent).toContain('5');
+    expect(orientation.textContent).toContain('50');
+  });
+
+  it('shows combined orientation when both hasMoreHistory and hiddenEntryCount', () => {
+    const entries = [
+      createEntry({
+        entryId: 'e-0',
+        turnId: 't-0',
+        contentBlocks: [textBlock('Latest message')],
+      }),
+    ];
+
+    render(
+      <TranscriptPane
+        entries={entries}
+        loadState="ready"
+        hasActiveConversation={true}
+        hasMoreHistory={true}
+        hiddenEntryCount={20}
+      />,
+    );
+
+    const orientation = screen.getByTestId('transcript-orientation');
+    expect(orientation).toBeTruthy();
+    // Should mention both hidden entries and server history
+    expect(orientation.textContent).toContain('1');
+    expect(orientation.textContent).toContain('21');
+    expect(orientation.textContent).toMatch(/older history/i);
+  });
+
+  it('preserves existing hasMoreHistory message when no hiddenEntryCount', () => {
+    const entries = [
+      createEntry({
+        entryId: 'e-0',
+        turnId: 't-0',
+        contentBlocks: [textBlock('Visible turn')],
+      }),
+    ];
+
+    render(
+      <TranscriptPane
+        entries={entries}
+        loadState="ready"
+        hasActiveConversation={true}
+        hasMoreHistory={true}
+      />,
+    );
+
+    const orientation = screen.getByTestId('transcript-orientation');
+    expect(orientation).toBeTruthy();
+    expect(orientation.textContent).toMatch(/older history/i);
+  });
+
+  it('shows no orientation banner for small fully-loaded histories', () => {
+    const entries = [
+      createEntry({
+        entryId: 'e-0',
+        turnId: 't-0',
+        contentBlocks: [textBlock('Only message')],
+      }),
+    ];
+
+    render(
+      <TranscriptPane
+        entries={entries}
+        loadState="ready"
+        hasActiveConversation={true}
+        hasMoreHistory={false}
+        hiddenEntryCount={0}
+      />,
+    );
+
+    expect(screen.queryByTestId('transcript-orientation')).toBeNull();
+  });
+
+  it('shows no orientation banner when hiddenEntryCount is omitted and hasMoreHistory is false', () => {
+    const entries = [
+      createEntry({
+        entryId: 'e-0',
+        turnId: 't-0',
+        contentBlocks: [textBlock('Message')],
+      }),
+    ];
+
+    render(
+      <TranscriptPane
+        entries={entries}
+        loadState="ready"
+        hasActiveConversation={true}
+        hasMoreHistory={false}
+      />,
+    );
+
+    expect(screen.queryByTestId('transcript-orientation')).toBeNull();
+  });
+});
