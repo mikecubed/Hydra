@@ -559,16 +559,17 @@ describe('TranscriptPane', () => {
       ],
       totalCount: 1,
     };
-    // Return exactly 50 turns for a limit=50 request (realistic pagination).
-    // totalCount=51 and hasMore=true indicate one older turn exists server-side.
+    // Model a real /turns?limit=50 response for a 51-turn conversation: the
+    // REST payload contains the most recent 50 turns (positions 2..51), with
+    // hasMore=true indicating there is still one older turn on the server.
     const history: LoadTurnHistoryResponse = {
       turns: Array.from({ length: 50 }, (_, index) => {
-        const entryNumber = String(index + 1);
+        const entryNumber = String(index + 2);
         const minuteText = String(index).padStart(2, '0');
         return {
           id: `turn-${entryNumber}`,
           conversationId: 'conv-1',
-          position: index + 1,
+          position: index + 2,
           kind: 'system' as const,
           attribution: { type: 'agent' as const, agentId: 'codex', label: 'Codex' },
           response: `Historical entry ${entryNumber}`,
@@ -604,20 +605,21 @@ describe('TranscriptPane', () => {
     // Wait for the initial 50 REST entries to render.
     expect(await screen.findByText('Historical entry 50')).toBeInTheDocument();
 
-    // Stream in a 51st entry via WebSocket so client-side count exceeds the
-    // visible window (50), exercising client-side windowing realistically.
+    // Stream in a new live turn so the client now has 51 loaded entries, which
+    // exercises client-side windowing without an impossible REST payload.
     const ws = openAndSubscribe('conv-1');
     act(() => {
       ws.simulateMessage(
-        streamFrame('conv-1', 1, 'turn-51', 'stream-started', { attribution: 'Codex' }),
+        streamFrame('conv-1', 1, 'turn-52', 'stream-started', { attribution: 'Codex' }),
       );
       ws.simulateMessage(
-        streamFrame('conv-1', 2, 'turn-51', 'text-delta', { text: 'Streamed entry 51' }),
+        streamFrame('conv-1', 2, 'turn-52', 'text-delta', { text: 'Streamed entry 52' }),
       );
     });
 
-    expect(await screen.findByText('Streamed entry 51')).toBeInTheDocument();
-    expect(screen.queryByText('Historical entry 1')).toBeNull();
+    expect(await screen.findByText('Streamed entry 52')).toBeInTheDocument();
+    expect(screen.getByText('Historical entry 51')).toBeInTheDocument();
+    expect(screen.queryByText('Historical entry 2')).toBeNull();
     expect(screen.getByTestId('transcript-orientation')).toHaveTextContent(
       'Showing the most recent 50 of 51 loaded entries.',
     );
