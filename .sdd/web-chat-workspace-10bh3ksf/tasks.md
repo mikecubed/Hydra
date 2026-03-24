@@ -148,7 +148,7 @@ _Status note_: post-Phase-1 maintenance also landed on the active branch, splitt
 - [x] T040 [P] [US6] **TDD:** implement safe artifact renderers in `apps/web/src/features/chat-workspace/render/artifact-renderers.tsx` and `apps/web/src/features/chat-workspace/__tests__/artifact-panel.test.ts`.
 - [x] T041 [US6] Implement artifact panel integration in `apps/web/src/features/chat-workspace/components/artifact-panel.tsx`, `apps/web/src/features/chat-workspace/components/transcript-turn.tsx`, and `apps/web/src/features/chat-workspace/components/workspace-layout.tsx`.
 - [x] T042 [US6] Add artifact persistence and refresh workflow coverage in `apps/web/src/features/chat-workspace/__tests__/workflow-artifact-persistence.browser.spec.tsx`.
-- [ ] T043 [US6] Run the phase quality gate from the repo root with `npm run quality` and `npm test` after artifact inspection is green.
+- [x] T043 [US6] Run the phase quality gate from the repo root with `npm run quality` and `npm test` after artifact inspection is green.
 
 **Checkpoint**: Artifacts are first-class outputs inside the workspace rather than external detours.
 
