@@ -31,6 +31,7 @@ import type {
 import { mergePromptState } from './prompt-merge.ts';
 import {
   detectConvergenceDrift,
+  hasActionableControlInvalidation,
   invalidateStaleEntryControls,
   mergeAuthoritativeEntries,
 } from './reconciler.ts';
@@ -396,9 +397,10 @@ function applyMergeHistory(
   const merged = drift.hasExternalChanges
     ? invalidateStaleEntryControls(current.entries, rawMerged)
     : rawMerged;
+  const controlsInvalidated =
+    drift.hasExternalChanges && hasActionableControlInvalidation(current.entries, rawMerged);
 
-  const staleReason =
-    drift.hasExternalChanges && merged !== rawMerged ? 'State changed by another session' : null;
+  const staleReason = controlsInvalidated ? 'State changed by another session' : null;
 
   nextConversations.set(conversationId, {
     ...current,

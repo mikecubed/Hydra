@@ -1027,3 +1027,42 @@ export function invalidateStaleEntryControls(
 
   return result.some((entry, index) => entry !== mergedEntries[index]) ? result : mergedEntries;
 }
+
+/**
+ * Whether convergence to a terminal turn would invalidate controls the operator
+ * could still act on.
+ *
+ * This is narrower than "controls changed": preserving already-disabled
+ * controls across an authoritative merge should not mark the whole
+ * conversation stale.
+ */
+export function hasActionableControlInvalidation(
+  previousEntries: readonly TranscriptEntryState[],
+  mergedEntries: readonly TranscriptEntryState[],
+): boolean {
+  const prevTurnMap = new Map<string, TranscriptEntryState>();
+  for (const entry of previousEntries) {
+    if (entry.kind === 'turn' && entry.turnId != null) {
+      prevTurnMap.set(entry.turnId, entry);
+    }
+  }
+
+  for (const entry of mergedEntries) {
+    if (entry.kind !== 'turn' || entry.turnId == null) continue;
+    if (!TERMINAL_STATUSES.has(entry.status)) continue;
+
+    const prev = prevTurnMap.get(entry.turnId);
+    if (prev == null || TERMINAL_STATUSES.has(prev.status)) continue;
+
+    const mergedKinds = new Set(entry.controls.map((control) => control.kind));
+    if (entry.controls.some((control) => control.enabled)) {
+      return true;
+    }
+
+    if (prev.controls.some((control) => control.enabled && !mergedKinds.has(control.kind))) {
+      return true;
+    }
+  }
+
+  return false;
+}

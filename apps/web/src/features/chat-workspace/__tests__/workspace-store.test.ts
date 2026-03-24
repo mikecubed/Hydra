@@ -2243,6 +2243,48 @@ describe('multi-session convergence: stale-control invalidation', () => {
     );
   });
 
+  it('does not set staleReason when convergence only preserves already-disabled controls', () => {
+    let state = createInitialWorkspaceState();
+    state = reduceWorkspaceState(state, {
+      type: 'conversation/upsert',
+      conversation: createConversation(),
+    });
+    state = reduceWorkspaceState(state, {
+      type: 'conversation/replace-entries',
+      conversationId: 'conv-1',
+      entries: [
+        createEntry({
+          entryId: 'turn-1',
+          turnId: 'turn-1',
+          status: 'streaming',
+          controls: [
+            {
+              controlId: 'ctrl-cancel',
+              kind: 'cancel',
+              enabled: false,
+              reasonDisabled: 'Already stopping',
+            },
+          ],
+        }),
+      ],
+      hasMoreHistory: false,
+    });
+
+    state = reduceWorkspaceState(state, {
+      type: 'conversation/merge-history',
+      conversationId: 'conv-1',
+      entries: [createEntry({ entryId: 'turn-1', turnId: 'turn-1', status: 'completed' })],
+      hasMoreHistory: false,
+    });
+
+    const conv = state.conversations.get('conv-1');
+    assert.equal(
+      conv?.controlState.staleReason,
+      null,
+      'already-disabled controls should be preserved without marking the conversation stale',
+    );
+  });
+
   it('does not set staleReason when merge produces no external status changes', () => {
     let state = createInitialWorkspaceState();
     state = reduceWorkspaceState(state, {
