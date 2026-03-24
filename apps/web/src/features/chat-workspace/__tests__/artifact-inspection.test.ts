@@ -529,6 +529,61 @@ describe('hydrateConversationArtifacts', () => {
     assert.equal(dispatched.length, 0, 'no dispatch for empty artifacts');
   });
 
+  it('backfills missing artifacts on a turn that already has streamed artifacts without duplicating', async () => {
+    // Regression: useArtifactHydration previously skipped turns with
+    // entry.artifacts.length > 0, so partial streamed artifact lists were
+    // never completed from the server. This test proves the full pipeline
+    // (hydrateConversationArtifacts → reducer dedup) works for partial turns.
+    const store = createWorkspaceStore();
+    const streamedArtifact: ArtifactReferenceState = {
+      artifactId: 'streamed-art',
+      kind: 'file',
+      label: 'streamed.ts',
+      availability: 'listed',
+    };
+    const entry = makeEntry({ entryId: 'e1', turnId: 't1', artifacts: [streamedArtifact] });
+    seedConversationWithEntries(store, 'conv-1', [entry]);
+
+    const hydratedTurns = new Set<string>();
+    const mockClient: HydrationClient = {
+      async listArtifactsForTurn() {
+        return {
+          artifacts: [
+            // Server returns the already-streamed artifact AND a new one
+            makeArtifact('streamed-art', 't1'),
+            makeArtifact('server-only-art', 't1'),
+          ],
+        };
+      },
+    };
+
+    await hydrateConversationArtifacts(
+      'conv-1',
+      ['t1'],
+      mockClient,
+      (action) => {
+        store.dispatch(action);
+      },
+      hydratedTurns,
+    );
+
+    const updated = store.getState().conversations.get('conv-1')!.entries[0];
+    assert.equal(
+      updated.artifacts.length,
+      2,
+      'should have both streamed and server-only artifacts',
+    );
+    assert.ok(
+      updated.artifacts.some((a) => a.artifactId === 'streamed-art'),
+      'original streamed artifact preserved',
+    );
+    assert.ok(
+      updated.artifacts.some((a) => a.artifactId === 'server-only-art'),
+      'server-only artifact backfilled',
+    );
+    assert.ok(hydratedTurns.has('t1'), 'turn marked as hydrated');
+  });
+
   it('does not retry permanent gateway failures', async () => {
     const hydratedTurns = new Set<string>();
     const dispatched: unknown[] = [];

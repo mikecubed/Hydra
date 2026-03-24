@@ -1377,14 +1377,15 @@ function useArtifactHydration(
     terminalFailuresByConversationRef.current.set(activeConversationId, terminalFailures);
 
     // Collect turn entries that need artifact hydration — skip turns that
-    // already have artifacts (hydrated via stream or a previous pass) and
-    // turns that were successfully hydrated or hit a terminal failure in an
-    // earlier invocation.
+    // were successfully hydrated or hit a terminal failure in an earlier
+    // invocation. Turns that already have *some* artifacts (e.g. from
+    // streamed artifact-notice events) are still eligible so the server
+    // can backfill any missing references. The reducer deduplicates by
+    // artifactId, so dispatching for partially-populated turns is safe.
     const turnIds = entries.flatMap((entry) => {
       if (
         entry.kind !== 'turn' ||
         entry.turnId == null ||
-        entry.artifacts.length > 0 ||
         hydratedTurns.has(entry.turnId) ||
         pendingTurns.has(entry.turnId) ||
         terminalFailures.has(entry.turnId)
