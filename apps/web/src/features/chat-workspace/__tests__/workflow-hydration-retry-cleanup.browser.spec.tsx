@@ -126,7 +126,7 @@ describe('hydration retry timer cleanup on conversation switch', () => {
   });
 
   it('preserves the retry timer across same-conversation rerenders', async () => {
-    let artifactRequestCount = 0;
+    let turn1ArtifactAttempts = 0;
 
     fetchSpy.mockImplementation((input) => {
       const url = requestUrl(input);
@@ -163,24 +163,14 @@ describe('hydration retry timer cleanup on conversation switch', () => {
         return Promise.resolve(jsonResponse({ approvals: [] }));
       }
       if (url === '/turns/turn-1/artifacts') {
-        artifactRequestCount++;
-        if (artifactRequestCount === 1) {
-          return Promise.reject(new Error('transient network error'));
-        }
-        return Promise.resolve(
-          jsonResponse({
-            artifacts: [
-              {
-                id: 'art-1',
-                turnId: 'turn-1',
-                kind: 'file',
-                label: 'artifact.txt',
-                size: 10,
-                createdAt: '2026-07-01T00:00:03.000Z',
-              },
-            ],
-          }),
-        );
+        turn1ArtifactAttempts++;
+        // Always reject — the timer-driven retry is the only path to more
+        // attempts after the effect-re-run attempt settles.
+        return Promise.reject(new Error('transient network error'));
+      }
+      // Streaming turn artifact lookups — return empty (no artifacts yet)
+      if (url.startsWith('/turns/') && url.endsWith('/artifacts')) {
+        return Promise.resolve(jsonResponse({ artifacts: [] }));
       }
       return Promise.reject(new Error(`Unexpected fetch: ${url}`));
     });
@@ -190,8 +180,13 @@ describe('hydration retry timer cleanup on conversation switch', () => {
     await screen.findByRole('button', { name: /retry conv/i });
     const ws = openAndSubscribe('conv-1', 0);
 
-    expect(artifactRequestCount).toBe(1);
+    // Initial hydration failed — retry timer now scheduled.
+    expect(turn1ArtifactAttempts).toBeGreaterThanOrEqual(1);
 
+    // Trigger a same-conversation rerender by streaming a new turn.
+    // This changes activeEntries, re-running the useArtifactHydration effect.
+    // With the old unconditional-cleanup bug, this would clear the pending
+    // retry timer; the fix scopes cleanup to conversation changes only.
     act(() => {
       ws.simulateMessage(streamFrame('conv-1', 1, 'turn-live', 'stream-started'));
       ws.simulateMessage(
@@ -201,11 +196,18 @@ describe('hydration retry timer cleanup on conversation switch', () => {
 
     await screen.findByText('live rerender');
 
+    // Capture count after the rerender (the effect re-run may have already
+    // made an immediate re-attempt for turn-1).
+    const countAfterRerender = turn1ArtifactAttempts;
+
+    // Advance well past the 1 s retry delay.  If the timer survived the
+    // same-conversation rerender it fires `setRetryNonce`, re-running the
+    // effect and making at least one more artifact request.
     act(() => {
-      vi.advanceTimersByTime(1_100);
+      vi.advanceTimersByTime(3_000);
     });
 
-    await screen.findByText('artifact.txt');
-    expect(artifactRequestCount).toBe(2);
+    // At least one timer-triggered retry must have fired.
+    expect(turn1ArtifactAttempts).toBeGreaterThan(countAfterRerender);
   });
 });

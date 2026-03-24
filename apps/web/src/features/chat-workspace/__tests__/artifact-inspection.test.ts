@@ -23,10 +23,12 @@ import {
   buildArtifactViewFromContent,
   hydrateConversationArtifacts,
   fetchArtifactContent,
+  isRetryableArtifactHydrationError,
   type HydrationClient,
   type ArtifactContentClient,
   type HydrationDispatch,
 } from '../model/artifact-hydration.ts';
+import { GatewayRequestError } from '../api/gateway-client.ts';
 
 // ─── Test helpers ───────────────────────────────────────────────────────────
 
@@ -335,6 +337,28 @@ describe('reducer entry/hydrate-artifacts', () => {
     const updated = store.getState().conversations.get('conv-1')!.entries[0];
     assert.equal(updated.artifacts.length, 1);
   });
+
+  it('only patches canonical turn entries for a matching turnId', () => {
+    const store = createWorkspaceStore();
+    const turnEntry = makeEntry({ entryId: 'turn-entry', turnId: 't1', kind: 'turn' });
+    const activityGroup = makeEntry({
+      entryId: 'activity-entry',
+      turnId: 't1',
+      kind: 'activity-group',
+    });
+    seedConversationWithEntries(store, 'conv-1', [turnEntry, activityGroup]);
+
+    store.dispatch({
+      type: 'entry/hydrate-artifacts',
+      conversationId: 'conv-1',
+      turnId: 't1',
+      artifacts: [{ artifactId: 'art-1', kind: 'file', label: 'main.ts', availability: 'listed' }],
+    });
+
+    const entries = store.getState().conversations.get('conv-1')!.entries;
+    assert.equal(entries[0]?.artifacts.length, 1);
+    assert.equal(entries[1]?.artifacts.length, 0);
+  });
 });
 
 // ─── Store: artifact show / clear round-trip ────────────────────────────────
@@ -502,6 +526,62 @@ describe('hydrateConversationArtifacts', () => {
 
     assert.ok(hydratedTurns.has('t1'), 'turn with 0 artifacts is still marked hydrated');
     assert.equal(dispatched.length, 0, 'no dispatch for empty artifacts');
+  });
+
+  it('does not retry permanent gateway failures', async () => {
+    const hydratedTurns = new Set<string>();
+    const dispatched: unknown[] = [];
+    const mockClient: HydrationClient = {
+      async listArtifactsForTurn() {
+        throw new GatewayRequestError(404, {
+          ok: false,
+          code: 'TURN_NOT_FOUND',
+          category: 'validation',
+          message: 'Turn not found',
+          httpStatus: 404,
+        });
+      },
+    };
+
+    const failed = await hydrateConversationArtifacts(
+      'conv-1',
+      ['t1'],
+      mockClient,
+      (action) => dispatched.push(action),
+      hydratedTurns,
+    );
+
+    assert.equal(failed.size, 0);
+    assert.ok(!hydratedTurns.has('t1'));
+    assert.equal(dispatched.length, 0);
+  });
+});
+
+describe('isRetryableArtifactHydrationError', () => {
+  it('retries unknown transport failures', () => {
+    assert.equal(isRetryableArtifactHydrationError(new Error('socket reset')), true);
+  });
+
+  it('retries transient gateway statuses', () => {
+    const error = new GatewayRequestError(503, {
+      ok: false,
+      code: 'DAEMON_UNAVAILABLE',
+      category: 'daemon',
+      message: 'Service unavailable',
+      httpStatus: 503,
+    });
+    assert.equal(isRetryableArtifactHydrationError(error), true);
+  });
+
+  it('does not retry permanent gateway statuses', () => {
+    const error = new GatewayRequestError(404, {
+      ok: false,
+      code: 'TURN_NOT_FOUND',
+      category: 'validation',
+      message: 'Turn not found',
+      httpStatus: 404,
+    });
+    assert.equal(isRetryableArtifactHydrationError(error), false);
   });
 });
 

@@ -83,14 +83,16 @@ describe('ArtifactPanel', () => {
 
   it('renders artifact preview when artifact is provided', () => {
     render(<ArtifactPanel artifact={makeArtifactView()} onClose={vi.fn()} />);
-    expect(screen.getByTestId('artifact-panel')).toBeTruthy();
-    expect(screen.getByTestId('artifact-preview')).toBeTruthy();
-    expect(screen.getByText('main.ts')).toBeTruthy();
+    expect(screen.getByTestId('artifact-panel').getAttribute('aria-label')).toBe(
+      'Artifact: main.ts',
+    );
+    expect(screen.getByTestId('artifact-preview').tagName).toBe('DIV');
+    expect(screen.getByText('main.ts').textContent).toBe('main.ts');
   });
 
   it('renders a close button', () => {
     render(<ArtifactPanel artifact={makeArtifactView()} onClose={vi.fn()} />);
-    expect(screen.getByTestId('artifact-panel-close')).toBeTruthy();
+    expect(screen.getByTestId('artifact-panel-close').tagName).toBe('BUTTON');
   });
 
   it('fires onClose when close button is clicked', () => {
@@ -103,13 +105,13 @@ describe('ArtifactPanel', () => {
   it('renders loading state for loading artifact', () => {
     const artifact = makeArtifactView({ availability: 'loading', previewBlocks: [] });
     render(<ArtifactPanel artifact={artifact} onClose={vi.fn()} />);
-    expect(screen.getByTestId('artifact-loading')).toBeTruthy();
+    expect(screen.getByTestId('artifact-loading').textContent).toContain('Loading');
   });
 
   it('renders error state for errored artifact', () => {
     const artifact = makeArtifactView({ availability: 'error', previewBlocks: [] });
     render(<ArtifactPanel artifact={artifact} onClose={vi.fn()} />);
-    expect(screen.getByTestId('artifact-error')).toBeTruthy();
+    expect(screen.getByTestId('artifact-error').textContent).toContain('Failed to load artifact');
   });
 
   it('applies aria-label for accessibility', () => {

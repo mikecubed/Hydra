@@ -662,7 +662,7 @@ function applyHydrateArtifacts(
   if (current == null) return state;
 
   const nextEntries = current.entries.map((entry) => {
-    if (entry.turnId !== turnId) return entry;
+    if (entry.kind !== 'turn' || entry.turnId !== turnId) return entry;
 
     const existingIds = new Set(entry.artifacts.map((a) => a.artifactId));
     const newArtifacts = artifacts.filter((a) => !existingIds.has(a.artifactId));

@@ -75,6 +75,20 @@ export interface HydrationClient {
   listArtifactsForTurn(turnId: string): Promise<{ artifacts: readonly Artifact[] }>;
 }
 
+export function isRetryableArtifactHydrationError(error: unknown): boolean {
+  if (typeof error !== 'object' || error === null) {
+    return true;
+  }
+
+  const statusValue: unknown = Reflect.get(error, 'status');
+  const status = statusValue;
+  if (typeof status !== 'number') {
+    return true;
+  }
+
+  return status === 408 || status === 409 || status === 425 || status === 429 || status >= 500;
+}
+
 /** Minimal dispatch surface needed for hydration and artifact selection. */
 export interface HydrationDispatch {
   (action: WorkspaceAction): void;
@@ -84,7 +98,8 @@ export interface HydrationDispatch {
  * Hydrate artifact references for a set of turns in a conversation.
  *
  * Only marks a turn as hydrated (in `hydratedTurns`) on success.
- * Failed turns are *not* recorded, so a subsequent call can retry them.
+ * Failed turns are *not* recorded, so a subsequent call can retry transient
+ * failures. Permanent failures are excluded from the returned retry set.
  *
  * @returns The set of turn IDs that failed hydration.
  */
@@ -95,7 +110,7 @@ export async function hydrateConversationArtifacts(
   dispatch: HydrationDispatch,
   hydratedTurns: Set<string>,
 ): Promise<ReadonlySet<string>> {
-  const failed = new Set<string>();
+  const retryableFailures = new Set<string>();
   await Promise.all(
     turnIds.map(async (turnId) => {
       try {
@@ -110,12 +125,14 @@ export async function hydrateConversationArtifacts(
           });
         }
         hydratedTurns.add(turnId);
-      } catch {
-        failed.add(turnId);
+      } catch (err: unknown) {
+        if (isRetryableArtifactHydrationError(err)) {
+          retryableFailures.add(turnId);
+        }
       }
     }),
   );
-  return failed;
+  return retryableFailures;
 }
 
 /** Minimal client surface needed for artifact content fetch. */

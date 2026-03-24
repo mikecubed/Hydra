@@ -50,27 +50,27 @@ function makeArtifact(overrides: Partial<ArtifactViewState> = {}): ArtifactViewS
 describe('ArtifactKindBadge', () => {
   it('renders the human-readable label for file kind', () => {
     render(<ArtifactKindBadge kind="file" />);
-    expect(screen.getByText('File')).toBeTruthy();
+    expect(screen.getByText('File').textContent).toBe('File');
   });
 
   it('renders the human-readable label for diff kind', () => {
     render(<ArtifactKindBadge kind="diff" />);
-    expect(screen.getByText('Diff')).toBeTruthy();
+    expect(screen.getByText('Diff').textContent).toBe('Diff');
   });
 
   it('renders the human-readable label for test-result kind', () => {
     render(<ArtifactKindBadge kind="test-result" />);
-    expect(screen.getByText('Test Result')).toBeTruthy();
+    expect(screen.getByText('Test Result').textContent).toBe('Test Result');
   });
 
   it('renders a title-cased fallback for unknown kinds', () => {
     render(<ArtifactKindBadge kind="custom-thing" />);
-    expect(screen.getByText('Custom Thing')).toBeTruthy();
+    expect(screen.getByText('Custom Thing').textContent).toBe('Custom Thing');
   });
 
   it('applies data-testid with kind suffix', () => {
     render(<ArtifactKindBadge kind="log" />);
-    expect(screen.getByTestId('artifact-kind-badge-log')).toBeTruthy();
+    expect(screen.getByTestId('artifact-kind-badge-log').textContent).toBe('Log');
   });
 });
 
@@ -79,7 +79,7 @@ describe('ArtifactKindBadge', () => {
 describe('ArtifactContentBlock', () => {
   it('renders plain text safely', () => {
     render(<ArtifactContentBlock kind="text" text="Hello, operator." />);
-    expect(screen.getByText('Hello, operator.')).toBeTruthy();
+    expect(screen.getByText('Hello, operator.').textContent).toBe('Hello, operator.');
   });
 
   it('renders null text as empty', () => {
@@ -105,7 +105,7 @@ describe('ArtifactContentBlock', () => {
   it('uses monospace font for code blocks', () => {
     const { container } = render(<ArtifactContentBlock kind="code" text="const x = 1;" />);
     const pre = container.querySelector('pre');
-    expect(pre).toBeTruthy();
+    expect(pre?.tagName).toBe('PRE');
     expect(pre?.style.fontFamily).toBe('monospace');
   });
 
@@ -114,7 +114,7 @@ describe('ArtifactContentBlock', () => {
       <ArtifactContentBlock kind="structured" text='{"key": "value"}' />,
     );
     const pre = container.querySelector('pre');
-    expect(pre).toBeTruthy();
+    expect(pre?.tagName).toBe('PRE');
     expect(pre?.style.fontFamily).toBe('monospace');
   });
 
@@ -126,7 +126,7 @@ describe('ArtifactContentBlock', () => {
 
   it('applies data-testid when provided', () => {
     render(<ArtifactContentBlock kind="text" text="hello" data-testid="block-1" />);
-    expect(screen.getByTestId('block-1')).toBeTruthy();
+    expect(screen.getByTestId('block-1').textContent).toBe('hello');
   });
 
   it('renders multiline text with preserved whitespace', () => {
@@ -142,17 +142,17 @@ describe('ArtifactContentBlock', () => {
 describe('ArtifactHeader', () => {
   it('renders the artifact label', () => {
     render(<ArtifactHeader label="main.ts" kind="file" />);
-    expect(screen.getByText('main.ts')).toBeTruthy();
+    expect(screen.getByText('main.ts').textContent).toBe('main.ts');
   });
 
   it('renders the kind badge', () => {
     render(<ArtifactHeader label="output.log" kind="log" />);
-    expect(screen.getByTestId('artifact-kind-badge-log')).toBeTruthy();
+    expect(screen.getByTestId('artifact-kind-badge-log').textContent).toBe('Log');
   });
 
   it('renders summary when provided', () => {
     render(<ArtifactHeader label="plan.md" kind="plan" summary="Implementation plan" />);
-    expect(screen.getByText('Implementation plan')).toBeTruthy();
+    expect(screen.getByText('Implementation plan').textContent).toBe('Implementation plan');
   });
 
   it('omits summary element when not provided', () => {
@@ -172,7 +172,7 @@ describe('ArtifactHeader', () => {
 
   it('applies data-testid to header container', () => {
     render(<ArtifactHeader label="test" kind="file" />);
-    expect(screen.getByTestId('artifact-header')).toBeTruthy();
+    expect(screen.getByTestId('artifact-header').tagName).toBe('DIV');
   });
 });
 
@@ -182,8 +182,8 @@ describe('ArtifactHeader', () => {
 describe('ArtifactPreview', () => {
   it('renders header with label and kind', () => {
     render(<ArtifactPreview artifact={makeArtifact()} />);
-    expect(screen.getByText('main.ts')).toBeTruthy();
-    expect(screen.getByTestId('artifact-kind-badge-file')).toBeTruthy();
+    expect(screen.getByText('main.ts').textContent).toBe('main.ts');
+    expect(screen.getByTestId('artifact-kind-badge-file').textContent).toBe('File');
   });
 
   it('renders all preview blocks', () => {
@@ -194,33 +194,35 @@ describe('ArtifactPreview', () => {
       ],
     });
     render(<ArtifactPreview artifact={artifact} />);
-    expect(screen.getByText('First block')).toBeTruthy();
-    expect(screen.getByText('Second block')).toBeTruthy();
+    expect(screen.getByText('First block').textContent).toBe('First block');
+    expect(screen.getByText('Second block').textContent).toBe('Second block');
   });
 
   it('renders empty state when no preview blocks exist', () => {
     const artifact = makeArtifact({ previewBlocks: [] });
     const { container } = render(<ArtifactPreview artifact={artifact} />);
-    expect(screen.getByText('main.ts')).toBeTruthy();
-    expect(container.querySelector('[data-testid="artifact-empty"]')).toBeTruthy();
+    expect(screen.getByText('main.ts').textContent).toBe('main.ts');
+    expect(container.querySelector('[data-testid="artifact-empty"]')?.textContent).toContain(
+      'No preview available',
+    );
   });
 
   it('shows loading indicator when availability is loading', () => {
     const artifact = makeArtifact({ availability: 'loading' });
     render(<ArtifactPreview artifact={artifact} />);
-    expect(screen.getByTestId('artifact-loading')).toBeTruthy();
+    expect(screen.getByTestId('artifact-loading').textContent).toContain('Loading');
   });
 
   it('shows unavailable message when availability is unavailable', () => {
     const artifact = makeArtifact({ availability: 'unavailable' });
     render(<ArtifactPreview artifact={artifact} />);
-    expect(screen.getByTestId('artifact-unavailable')).toBeTruthy();
+    expect(screen.getByTestId('artifact-unavailable').textContent).toContain('unavailable');
   });
 
   it('shows error state when availability is error', () => {
     const artifact = makeArtifact({ availability: 'error' });
     render(<ArtifactPreview artifact={artifact} />);
-    expect(screen.getByTestId('artifact-error')).toBeTruthy();
+    expect(screen.getByTestId('artifact-error').textContent).toContain('Failed to load artifact');
   });
 
   it('does not inject HTML from artifact label', () => {
@@ -244,7 +246,7 @@ describe('ArtifactPreview', () => {
     });
     const { container } = render(<ArtifactPreview artifact={artifact} />);
     const pre = container.querySelector('pre');
-    expect(pre).toBeTruthy();
+    expect(pre?.tagName).toBe('PRE');
     expect(pre?.style.fontFamily).toBe('monospace');
   });
 
@@ -255,14 +257,14 @@ describe('ArtifactPreview', () => {
     });
     const { container } = render(<ArtifactPreview artifact={artifact} />);
     const pre = container.querySelector('pre');
-    expect(pre).toBeTruthy();
+    expect(pre?.tagName).toBe('PRE');
     expect(pre?.style.fontFamily).toBe('monospace');
     expect(pre?.textContent).toContain('{"ok":true}');
   });
 
   it('applies data-testid to preview container', () => {
     render(<ArtifactPreview artifact={makeArtifact()} />);
-    expect(screen.getByTestId('artifact-preview')).toBeTruthy();
+    expect(screen.getByTestId('artifact-preview').tagName).toBe('DIV');
   });
 
   it('sets data-artifact-kind attribute on container', () => {
@@ -274,8 +276,12 @@ describe('ArtifactPreview', () => {
   it('shows listed placeholder when availability is listed', () => {
     const artifact = makeArtifact({ availability: 'listed', previewBlocks: [] });
     render(<ArtifactPreview artifact={artifact} />);
-    expect(screen.getByTestId('artifact-listed')).toBeTruthy();
-    expect(screen.getByText('Artifact announced — content pending.')).toBeTruthy();
+    expect(screen.getByTestId('artifact-listed').textContent).toContain(
+      'Artifact announced — content pending.',
+    );
+    expect(screen.getByText('Artifact announced — content pending.').textContent).toBe(
+      'Artifact announced — content pending.',
+    );
   });
 
   it('shows listed placeholder even when preview blocks exist', () => {
@@ -284,7 +290,9 @@ describe('ArtifactPreview', () => {
       previewBlocks: [makeBlock({ blockId: 'b-1', text: 'should not render' })],
     });
     render(<ArtifactPreview artifact={artifact} />);
-    expect(screen.getByTestId('artifact-listed')).toBeTruthy();
+    expect(screen.getByTestId('artifact-listed').textContent).toContain(
+      'Artifact announced — content pending.',
+    );
     expect(screen.queryByText('should not render')).toBeNull();
   });
 
@@ -299,7 +307,7 @@ describe('ArtifactPreview', () => {
       previewBlocks: [makeBlock({ blockId: 'b-1', text: 'visible content' })],
     });
     render(<ArtifactPreview artifact={artifact} />);
-    expect(screen.getByText('visible content')).toBeTruthy();
+    expect(screen.getByText('visible content').textContent).toBe('visible content');
     expect(screen.queryByTestId('artifact-listed')).toBeNull();
   });
 });
