@@ -32,6 +32,7 @@ import {
   type ContentBlockState,
   createAndSubmitDraft,
   createWorkspaceStore,
+  type ArtifactViewState,
   type PromptViewState,
   submitComposerDraft,
   type DraftSubmitState,
@@ -56,6 +57,7 @@ import {
   selectCanSubmit,
   selectConversationList,
   selectCreateModeCanSubmit,
+  selectVisibleArtifact,
   precomputeTranscriptActions,
   NO_ACTION_FLAGS,
   type EntryActionFlags,
@@ -65,6 +67,10 @@ import {
   respondToPrompt,
 } from '../features/chat-workspace/model/prompt-helpers.ts';
 import { canSubmitWork, describeConnectionState } from '../shared/session-state.ts';
+import {
+  hydrateEntryArtifacts,
+  buildArtifactViewFromContent,
+} from '../features/chat-workspace/model/artifact-hydration.ts';
 
 function useWorkspaceState(store: WorkspaceStore) {
   return useSyncExternalStore(
@@ -1328,6 +1334,66 @@ function useTurnActions(
   };
 }
 
+// ─── Artifact hydration hook ────────────────────────────────────────────────
+
+/**
+ * After transcript loads from REST (which gives `artifacts: []` on every turn),
+ * hydrate artifact references by querying `listArtifactsForTurn` for each turn.
+ * This makes artifacts discoverable after refresh/reopen, not only during live
+ * streaming.
+ *
+ * Runs once per conversation when entries first appear (loadState becomes 'ready'
+ * and entries have turn entries without artifacts).
+ */
+function useArtifactHydration(
+  store: WorkspaceStore,
+  client: GatewayClient,
+  activeConversationId: string | null,
+  entries: readonly TranscriptEntryState[],
+): void {
+  const hydratedConversationsRef = useRef(new Set<string>());
+
+  useEffect(() => {
+    if (activeConversationId == null) return;
+    if (hydratedConversationsRef.current.has(activeConversationId)) return;
+
+    const conversation = store.getState().conversations.get(activeConversationId);
+    if (conversation == null || !conversation.historyLoaded) return;
+
+    // Collect turn entries that need artifact hydration
+    const turnEntries = entries.filter(
+      (e) => e.kind === 'turn' && e.turnId != null && e.artifacts.length === 0,
+    );
+    if (turnEntries.length === 0) {
+      hydratedConversationsRef.current.add(activeConversationId);
+      return;
+    }
+
+    hydratedConversationsRef.current.add(activeConversationId);
+    const conversationId = activeConversationId;
+
+    void (async () => {
+      for (const entry of turnEntries) {
+        if (entry.turnId == null) continue;
+        try {
+          const response = await client.listArtifactsForTurn(entry.turnId);
+          if (response.artifacts.length > 0) {
+            const refs = hydrateEntryArtifacts(response.artifacts);
+            store.dispatch({
+              type: 'entry/hydrate-artifacts',
+              conversationId,
+              turnId: entry.turnId,
+              artifacts: refs,
+            });
+          }
+        } catch {
+          // Artifact hydration is best-effort; skip failed turns silently
+        }
+      }
+    })();
+  }, [activeConversationId, client, entries, store]);
+}
+
 // eslint-disable-next-line max-lines-per-function
 export function WorkspaceRoute(): JSX.Element {
   const [store] = useState(() => createWorkspaceStore());
@@ -1387,6 +1453,49 @@ export function WorkspaceRoute(): JSX.Element {
     actionMap,
   );
 
+  // ── Artifact hydration: populate artifact references on REST-loaded turns ──
+  useArtifactHydration(store, client, state.activeConversationId, activeEntries);
+
+  // ── Artifact inspection: select / show / close ─────────────────────────────
+  const visibleArtifact = selectVisibleArtifact(state);
+
+  const handleArtifactSelect = useCallback(
+    (artifactId: string, turnId: string) => {
+      // Show a loading placeholder immediately
+      const entry = activeEntries.find((e) => e.turnId === turnId);
+      const ref = entry?.artifacts.find((a) => a.artifactId === artifactId);
+      const loadingArtifact: ArtifactViewState = {
+        artifactId,
+        turnId,
+        kind: ref?.kind ?? 'file',
+        label: ref?.label ?? artifactId,
+        availability: 'loading',
+        previewBlocks: [],
+      };
+      store.dispatch({ type: 'artifact/show', artifact: loadingArtifact });
+
+      // Fetch full content in background
+      void (async () => {
+        try {
+          const response = await client.getArtifactContent(artifactId);
+          const artifactView = buildArtifactViewFromContent(response.artifact, response.content);
+          store.dispatch({ type: 'artifact/show', artifact: artifactView });
+        } catch (err: unknown) {
+          console.warn('[artifact-select] Failed to load artifact content:', err);
+          store.dispatch({
+            type: 'artifact/show',
+            artifact: { ...loadingArtifact, availability: 'error' },
+          });
+        }
+      })();
+    },
+    [activeEntries, client, store],
+  );
+
+  const handleCloseArtifact = useCallback(() => {
+    store.dispatch({ type: 'artifact/clear' });
+  }, [store]);
+
   return (
     <ConnectionStateContext.Provider value={state.connection}>
       <ConnectionBanner connection={state.connection} />
@@ -1415,7 +1524,10 @@ export function WorkspaceRoute(): JSX.Element {
         onRetryTurn={turnActions.handleRetry}
         onBranchTurn={turnActions.handleBranch}
         onFollowUpTurn={turnActions.handleFollowUp}
+        onArtifactSelect={handleArtifactSelect}
         resolveEntryActions={turnActions.resolveEntryActions}
+        visibleArtifact={visibleArtifact}
+        onCloseArtifact={handleCloseArtifact}
         composerSlot={
           <ComposerPanel
             draftText={composer.draftText}

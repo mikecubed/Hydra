@@ -267,6 +267,12 @@ export type WorkspaceAction =
       readonly conversationId: string;
       readonly entryId: string;
       readonly controls: readonly EntryControlState[];
+    }
+  | {
+      readonly type: 'entry/hydrate-artifacts';
+      readonly conversationId: string;
+      readonly turnId: string;
+      readonly artifacts: readonly ArtifactReferenceState[];
     };
 
 export type WorkspaceListener = (state: WorkspaceState, action: WorkspaceAction) => void;

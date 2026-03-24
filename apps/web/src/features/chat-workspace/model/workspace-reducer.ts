@@ -12,6 +12,7 @@ import {
 } from '../../../shared/session-state.ts';
 
 import type {
+  ArtifactReferenceState,
   ComposerDraftState,
   ConversationControlState,
   ConversationLineageState,
@@ -651,6 +652,34 @@ function applyEntryUpdateControls(
   return { ...state, conversations: nextConversations };
 }
 
+function applyHydrateArtifacts(
+  state: WorkspaceState,
+  conversationId: string,
+  turnId: string,
+  artifacts: readonly ArtifactReferenceState[],
+): WorkspaceState {
+  const current = state.conversations.get(conversationId);
+  if (current == null) return state;
+
+  let changed = false;
+  const nextEntries = current.entries.map((entry) => {
+    if (entry.turnId !== turnId) return entry;
+
+    const existingIds = new Set(entry.artifacts.map((a) => a.artifactId));
+    const newArtifacts = artifacts.filter((a) => !existingIds.has(a.artifactId));
+    if (newArtifacts.length === 0) return entry;
+
+    changed = true;
+    return { ...entry, artifacts: [...entry.artifacts, ...newArtifacts] };
+  });
+
+  if (!changed) return state;
+
+  const nextConversations = new Map(state.conversations);
+  nextConversations.set(conversationId, { ...current, entries: nextEntries });
+  return { ...state, conversations: nextConversations };
+}
+
 function isPromptAction(action: WorkspaceAction): action is PromptAction {
   return action.type.startsWith('prompt/');
 }
@@ -756,6 +785,13 @@ export function reduceWorkspaceState(
         action.conversationId,
         action.entryId,
         action.controls,
+      );
+    case 'entry/hydrate-artifacts':
+      return applyHydrateArtifacts(
+        state,
+        action.conversationId,
+        action.turnId,
+        action.artifacts,
       );
   }
 }
