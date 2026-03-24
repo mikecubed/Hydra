@@ -1699,6 +1699,34 @@ describe('mergeAuthoritativeEntries', () => {
     assert.equal(result[0].contentBlocks[0].text, 'same');
   });
 
+  it('keeps an authoritative non-terminal status advance even when content richness is equal', () => {
+    const rest = [
+      makeEntry({
+        entryId: 'turn-a',
+        turnId: 'turn-a',
+        status: 'executing',
+        contentBlocks: [{ blockId: 'blk-1', kind: 'text', text: 'same', metadata: null }],
+      }),
+    ];
+    const current = [
+      makeEntry({
+        entryId: 'turn-a',
+        turnId: 'turn-a',
+        status: 'submitted',
+        contentBlocks: [{ blockId: 'blk-1', kind: 'text', text: 'same', metadata: null }],
+      }),
+    ];
+
+    const result = mergeAuthoritativeEntries(rest, current);
+
+    assert.equal(
+      result[0].status,
+      'executing',
+      'authoritative progress from another session must remain visible after merge',
+    );
+    assert.equal(result[0].contentBlocks[0].text, 'same');
+  });
+
   it('takes REST content but preserves streamed status when streamed is more advanced', () => {
     const rest = [
       makeEntry({

@@ -712,6 +712,33 @@ function shouldPreserveStreamedTurn(
   return contentRichness(streamedEntry) >= contentRichness(restEntry);
 }
 
+function shouldPreserveStreamedStatus(
+  restStatus: string,
+  streamedStatus: string,
+  preserveStreamedTurn: boolean,
+): boolean {
+  const restTerminal = TERMINAL_STATUSES.has(restStatus);
+  const streamedTerminal = TERMINAL_STATUSES.has(streamedStatus);
+
+  if (restTerminal) {
+    return false;
+  }
+
+  if (streamedTerminal) {
+    return true;
+  }
+
+  if (isStrictlyMoreAdvanced(restStatus, streamedStatus)) {
+    return false;
+  }
+
+  if (isStrictlyMoreAdvanced(streamedStatus, restStatus)) {
+    return true;
+  }
+
+  return preserveStreamedTurn;
+}
+
 /**
  * Seal turns whose authoritative status is terminal. Events for sealed turns
  * are unconditionally treated as stale by `isStaleEvent`, preventing
@@ -784,11 +811,11 @@ export function mergeAuthoritativeEntries(
     // When REST content is richer (preserveStreamedTurn=false) but both are
     // non-terminal, the streamed status may still be more advanced. Preserve
     // it to avoid downgrading live status badges (e.g. 'streaming' → 'submitted').
-    const preserveStreamedStatus =
-      preserveStreamedTurn ||
-      (!TERMINAL_STATUSES.has(entry.status) &&
-        !TERMINAL_STATUSES.has(streamed.status) &&
-        isStrictlyMoreAdvanced(streamed.status, entry.status));
+    const preserveStreamedStatus = shouldPreserveStreamedStatus(
+      entry.status,
+      streamed.status,
+      preserveStreamedTurn,
+    );
 
     let controls = entry.controls;
     if (streamed.controls.length > 0) {
