@@ -22,6 +22,8 @@ import type {
   RespondToApprovalResponse,
   CancelWorkResponse,
   RetryTurnResponse,
+  ListArtifactsForTurnResponse,
+  GetArtifactContentResponse,
 } from '@hydra/web-contracts';
 
 import {
@@ -87,6 +89,8 @@ export interface GatewayClient {
     options?: BranchConversationOptions,
   ): Promise<CreateConversationResponse>;
   followUp(conversationId: string, body: FollowUpBody): Promise<SubmitInstructionResponse>;
+  listArtifactsForTurn(turnId: string): Promise<ListArtifactsForTurnResponse>;
+  getArtifactContent(artifactId: string): Promise<GetArtifactContentResponse>;
 }
 
 // ─── Error class ────────────────────────────────────────────────────────────
@@ -394,6 +398,24 @@ export function createGatewayClient(options: GatewayClientOptions): GatewayClien
         getCsrfToken,
         `/conversations/${encodeURIComponent(conversationId)}/turns`,
         body,
+      );
+    },
+
+    async listArtifactsForTurn(turnId) {
+      return getJson<ListArtifactsForTurnResponse>(
+        fetchFn,
+        baseUrl,
+        getCsrfToken,
+        `/turns/${encodeURIComponent(turnId)}/artifacts`,
+      );
+    },
+
+    async getArtifactContent(artifactId) {
+      return getJson<GetArtifactContentResponse>(
+        fetchFn,
+        baseUrl,
+        getCsrfToken,
+        `/artifacts/${encodeURIComponent(artifactId)}`,
       );
     },
   };
