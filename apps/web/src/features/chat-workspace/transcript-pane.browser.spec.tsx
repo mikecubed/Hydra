@@ -5,6 +5,7 @@ import type { ListConversationsResponse, LoadTurnHistoryResponse } from '@hydra/
 import { AppProviders } from '../../app/providers.tsx';
 import { TranscriptPane } from './components/transcript-pane.tsx';
 import { TranscriptTurn } from './components/transcript-turn.tsx';
+import type * as WorkspaceStoreModule from './model/workspace-store.ts';
 import type {
   TranscriptEntryState,
   ContentBlockState,
@@ -23,7 +24,7 @@ import {
 let _capturedStore: WorkspaceStore | null = null;
 
 vi.mock('./model/workspace-store.ts', async (importOriginal) => {
-  const mod = await importOriginal<typeof import('./model/workspace-store.ts')>();
+  const mod: typeof WorkspaceStoreModule = await importOriginal();
   return {
     ...mod,
     createWorkspaceStore: (...args: Parameters<typeof mod.createWorkspaceStore>) => {
@@ -126,6 +127,14 @@ function createSingleTurnHistory(responseText: string): LoadTurnHistoryResponse 
     totalCount: 1,
     hasMore: false,
   };
+}
+
+function capturedStore(): WorkspaceStore {
+  if (_capturedStore == null) {
+    throw new Error('Expected workspace store to be captured during render');
+  }
+
+  return _capturedStore;
 }
 
 function installApprovalRetryScenario(): () => number {
@@ -598,20 +607,7 @@ describe('TranscriptPane', () => {
   });
 
   it('surfaces a stale-control banner after authoritative convergence invalidates controls', async () => {
-    const conversations: ListConversationsResponse = {
-      conversations: [
-        {
-          id: 'conv-1',
-          title: 'Primary conversation',
-          status: 'active',
-          createdAt: '2026-03-20T00:00:00.000Z',
-          updatedAt: '2026-03-20T12:00:00.000Z',
-          turnCount: 1,
-          pendingInstructionCount: 0,
-        },
-      ],
-      totalCount: 1,
-    };
+    const conversations = createSingleConversationList();
     const authoritativeHistory: LoadTurnHistoryResponse = {
       turns: [
         {
@@ -679,7 +675,7 @@ describe('TranscriptPane', () => {
     // something to actually invalidate.  Without entry-level controls the
     // reducer correctly suppresses staleReason (reference-equality fast path).
     act(() => {
-      _capturedStore!.dispatch({
+      capturedStore().dispatch({
         type: 'entry/update-controls',
         conversationId: 'conv-1',
         entryId: 'turn-1',
