@@ -1355,6 +1355,7 @@ function useArtifactHydration(
   entries: readonly TranscriptEntryState[],
 ): void {
   const hydratedTurnsByConversationRef = useRef(new Map<string, Set<string>>());
+  const pendingTurnsByConversationRef = useRef(new Map<string, Set<string>>());
   const retryTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [retryNonce, setRetryNonce] = useState(0);
 
@@ -1365,7 +1366,10 @@ function useArtifactHydration(
     if (conversation == null || !conversation.historyLoaded) return;
     const hydratedTurns =
       hydratedTurnsByConversationRef.current.get(activeConversationId) ?? new Set<string>();
+    const pendingTurns =
+      pendingTurnsByConversationRef.current.get(activeConversationId) ?? new Set<string>();
     hydratedTurnsByConversationRef.current.set(activeConversationId, hydratedTurns);
+    pendingTurnsByConversationRef.current.set(activeConversationId, pendingTurns);
 
     // Collect turn entries that need artifact hydration — skip turns that
     // already have artifacts (hydrated via stream or a previous pass) and
@@ -1376,11 +1380,15 @@ function useArtifactHydration(
           e.kind === 'turn' &&
           e.turnId != null &&
           e.artifacts.length === 0 &&
-          !hydratedTurns.has(e.turnId),
+          !hydratedTurns.has(e.turnId) &&
+          !pendingTurns.has(e.turnId),
       )
       .map((e) => e.turnId!);
 
     if (turnIds.length === 0) return;
+    for (const turnId of turnIds) {
+      pendingTurns.add(turnId);
+    }
 
     const conversationId = activeConversationId;
     let disposed = false;
@@ -1392,6 +1400,9 @@ function useArtifactHydration(
       (action) => store.dispatch(action),
       hydratedTurns,
     ).then((failedTurns) => {
+      for (const turnId of turnIds) {
+        pendingTurns.delete(turnId);
+      }
       if (disposed || failedTurns.size === 0 || retryTimerRef.current != null) {
         return;
       }
@@ -1404,6 +1415,10 @@ function useArtifactHydration(
 
     return () => {
       disposed = true;
+      if (retryTimerRef.current != null) {
+        clearTimeout(retryTimerRef.current);
+        retryTimerRef.current = null;
+      }
     };
   }, [activeConversationId, client, entries, retryNonce, store]);
 
