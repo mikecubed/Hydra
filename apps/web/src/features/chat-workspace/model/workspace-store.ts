@@ -59,6 +59,10 @@ export {
 } from './stream-subscription.ts';
 export type { StreamLifecycleHooks, StreamSubscriptionState } from './stream-subscription.ts';
 
+// ─── Re-export: multi-session convergence ───────────────────────────────────
+export { detectConvergenceDrift, invalidateStaleEntryControls } from './reconciler.ts';
+export type { ConvergenceDrift } from './reconciler.ts';
+
 // ─── Store factory (thin wrapper over reducer) ──────────────────────────────
 
 import { createInitialWorkspaceState, reduceWorkspaceState } from './workspace-reducer.ts';
