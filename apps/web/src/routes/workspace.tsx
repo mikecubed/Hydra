@@ -1428,12 +1428,19 @@ function useArtifactHydration(
     }).then(
       // eslint-disable-next-line complexity -- terminal/live success handling shares one coordination path
       ({ successfulTurns, retryableFailures, terminalFailures: nextTerminalFailures }) => {
+        // Re-resolve per-conversation structures from refs so writes land in
+        // the *current* Maps/Sets, not stale captures from before a potential
+        // conversation switch (liveHydrationKeys is cleared on switch for
+        // reopen-recovery; pendingTurns survives but may have been replaced).
+        const resolvedPending = pendingTurnsByConversationRef.current.get(conversationId);
+        const resolvedLiveKeys = liveHydrationKeysByConversationRef.current.get(conversationId);
+
         for (const turnId of turnIds) {
-          pendingTurns.delete(turnId);
+          resolvedPending?.delete(turnId);
         }
         for (const turnId of nextTerminalFailures) {
           terminalFailures.add(turnId);
-          liveHydrationKeys.delete(turnId);
+          resolvedLiveKeys?.delete(turnId);
         }
 
         const latestEntries =
@@ -1450,7 +1457,7 @@ function useArtifactHydration(
         for (const turnId of successfulTurns) {
           const latestEntry = latestTurnsById.get(turnId);
           if (latestEntry == null) {
-            liveHydrationKeys.delete(turnId);
+            resolvedLiveKeys?.delete(turnId);
             continue;
           }
 
@@ -1459,14 +1466,14 @@ function useArtifactHydration(
             latestEntry.status === 'failed' ||
             latestEntry.status === 'cancelled';
           if (isTerminal) {
-            liveHydrationKeys.delete(turnId);
+            resolvedLiveKeys?.delete(turnId);
             if (terminalTurnIds.has(turnId)) {
               hydratedTurns.add(turnId);
             } else {
               shouldRecheckTerminalTurns = true;
             }
           } else {
-            liveHydrationKeys.set(turnId, buildLiveHydrationKey(latestEntry));
+            resolvedLiveKeys?.set(turnId, buildLiveHydrationKey(latestEntry));
           }
         }
 
@@ -1511,7 +1518,9 @@ function useArtifactHydration(
       }
       if (activeConversationId != null) {
         liveHydrationKeysByConversationRef.current.delete(activeConversationId);
-        pendingTurnsByConversationRef.current.delete(activeConversationId);
+        // pendingTurns intentionally kept — in-flight hydration Promises still
+        // reference this Set, and a quick switch-back must see turns as pending
+        // to avoid issuing duplicate listArtifactsForTurn requests.
       }
     },
     [activeConversationId],

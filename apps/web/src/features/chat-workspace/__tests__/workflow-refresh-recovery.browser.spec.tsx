@@ -457,6 +457,118 @@ describe('workspace refresh/reconnect recovery workflows', () => {
     expect(conv1ArtifactRequests).toBe(2);
   });
 
+  // Regression: quick switch away/back before hydration Promise settles must not
+  // issue a duplicate listArtifactsForTurn request (GitHub PR #175 review thread).
+  // eslint-disable-next-line max-lines-per-function -- deferred-resolve fetch stub spans many lines
+  it('does not duplicate listArtifactsForTurn on quick switch away/back before hydration settles', async () => {
+    let artifactRequestCount = 0;
+    let resolveArtifact: ((r: Response) => void) | null = null;
+
+    fetchSpy.mockImplementation((input: string | URL | Request) => {
+      const url = requestUrl(input);
+      if (url === '/conversations?status=active&limit=20') {
+        return Promise.resolve(
+          jsonResponse({
+            conversations: [
+              conversation('conv-1', 'Hydration race'),
+              conversation('conv-2', 'Other chat'),
+            ],
+            totalCount: 2,
+          }),
+        );
+      }
+      if (url === '/conversations/conv-1/turns?limit=50') {
+        return Promise.resolve(
+          jsonResponse({
+            turns: [
+              agentTurn('turn-a1', 'conv-1', {
+                response: 'Working…',
+                status: 'streaming',
+              }),
+            ],
+            totalCount: 1,
+            hasMore: false,
+          }),
+        );
+      }
+      if (url === '/conversations/conv-2/turns?limit=50') {
+        return Promise.resolve(
+          jsonResponse({
+            turns: [
+              agentTurn('turn-b1', 'conv-2', {
+                response: 'Chat B',
+                status: 'streaming',
+              }),
+            ],
+            totalCount: 1,
+            hasMore: false,
+          }),
+        );
+      }
+      if (url === '/conversations/conv-1/approvals' || url === '/conversations/conv-2/approvals') {
+        return Promise.resolve(jsonResponse({ approvals: [] }));
+      }
+      if (url === '/turns/turn-a1/artifacts') {
+        artifactRequestCount += 1;
+        return new Promise<Response>((resolve) => {
+          resolveArtifact = resolve;
+        });
+      }
+      if (url === '/turns/turn-b1/artifacts') {
+        return Promise.resolve(jsonResponse({ artifacts: [] }));
+      }
+      return Promise.reject(new Error(`Unexpected fetch: ${url}`));
+    });
+    vi.stubGlobal('fetch', fetchSpy);
+
+    render(<AppProviders />);
+    const conv1Button = await screen.findByRole('button', { name: /hydration race/i });
+    const conv2Button = await screen.findByRole('button', { name: /other chat/i });
+
+    // Wait for conv-1 history to load and artifact hydration to start (unsettled)
+    await vi.waitFor(() => expect(screen.getByText('Working…')).toBeInTheDocument());
+    await vi.waitFor(() => {
+      expect(artifactRequestCount).toBe(1);
+    });
+    expect(resolveArtifact).not.toBeNull();
+
+    // Switch away to conv-2 while hydration is in-flight
+    fireEvent.click(conv2Button);
+    await vi.waitFor(() => expect(screen.getByText('Chat B')).toBeInTheDocument());
+
+    // Switch back to conv-1 before the first hydration settles
+    fireEvent.click(conv1Button);
+    await vi.waitFor(() => expect(screen.getByText('Working…')).toBeInTheDocument());
+
+    // The quick switch-back must NOT issue a second artifact request
+    expect(artifactRequestCount).toBe(1);
+
+    // Resolve the original in-flight hydration
+    act(() => {
+      // eslint-disable-next-line @typescript-eslint/no-non-null-assertion -- guarded by expect above
+      resolveArtifact!(
+        jsonResponse({
+          artifacts: [
+            {
+              id: 'art-race',
+              turnId: 'turn-a1',
+              kind: 'log',
+              label: 'race-resolved.log',
+              size: 10,
+              createdAt: '2026-07-01T00:00:05.000Z',
+            },
+          ],
+        }),
+      );
+    });
+
+    // Artifact should appear — the resolved Promise wrote to current ref structures
+    await vi.waitFor(() => expect(screen.getByText('race-resolved.log')).toBeInTheDocument());
+
+    // Still only 1 artifact request total — no duplicate
+    expect(artifactRequestCount).toBe(1);
+  });
+
   it('overwrites stream-populated entries when REST authoritative merge arrives later', async () => {
     vi.useFakeTimers({ shouldAdvanceTime: true });
 
