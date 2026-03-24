@@ -150,8 +150,11 @@ function installTwoConversationScenario(): void {
     if (url === '/conversations/conv-1/turns?limit=50') {
       return Promise.resolve(
         jsonResponse({
-          turns: [completedTurn('turn-1', 'conv-1', 1, 'First turn output')],
-          totalCount: 1,
+          turns: [
+            completedTurn('turn-1', 'conv-1', 1, 'First turn output'),
+            completedTurn('turn-2', 'conv-1', 2, 'Second turn output'),
+          ],
+          totalCount: 2,
           hasMore: false,
         }),
       );
@@ -289,7 +292,8 @@ describe('workspace artifact persistence workflows', () => {
     await screen.findByText('Second turn output');
 
     // Artifact hydration: badge appears on turn-1 (via listArtifactsForTurn)
-    const badge = await screen.findByTestId('artifact-badge');
+    const turnArticle = await findTurnArticle('First turn output');
+    const badge = await within(turnArticle).findByTestId('artifact-badge');
     expect(badge).toHaveTextContent('main.ts');
 
     // Click badge → getArtifactContent fetch → panel opens
@@ -346,7 +350,8 @@ describe('workspace artifact persistence workflows', () => {
     await screen.findByText('Second turn output');
 
     // Artifact hydration runs again — badge reappears on turn-1
-    const badge = await screen.findByTestId('artifact-badge');
+    const turnArticle = await findTurnArticle('First turn output');
+    const badge = await within(turnArticle).findByTestId('artifact-badge');
     expect(badge).toHaveTextContent('main.ts');
 
     // Click badge → content loads from getArtifactContent (fresh fetch)
@@ -355,9 +360,9 @@ describe('workspace artifact persistence workflows', () => {
     expect(screen.getByText('console.log("hello world");')).toBeInTheDocument();
 
     // Turn context preserved — articles correspond to original turns
-    const articles = transcriptArticles();
-    expect(articles.length).toBeGreaterThanOrEqual(1);
-    expect(within(articles[0]!).getByText('First turn output')).toBeInTheDocument();
+    expect(turnArticle).toHaveTextContent('First turn output');
+    const secondTurnArticle = await findTurnArticle('Second turn output');
+    expect(within(secondTurnArticle).queryByTestId('artifact-badge')).toBeNull();
   });
 
   // eslint-disable-next-line max-lines-per-function -- multi-phase workflow test
@@ -407,13 +412,17 @@ describe('workspace artifact persistence workflows', () => {
     await screen.findByText('First turn output');
 
     // Artifact badge remains accessible from the same turn context
-    const badge = await screen.findByTestId('artifact-badge');
+    const turnArticle = await findTurnArticle('First turn output');
+    const badge = await within(turnArticle).findByTestId('artifact-badge');
     expect(badge).toHaveTextContent('main.ts');
 
     // Click badge again → content loads via getArtifactContent
     fireEvent.click(badge);
     await screen.findByTestId('artifact-panel');
     expect(screen.getByText('console.log("hello world");')).toBeInTheDocument();
+
+    const secondTurnArticle = await findTurnArticle('Second turn output');
+    expect(within(secondTurnArticle).queryByTestId('artifact-badge')).toBeNull();
   });
 
   it('artifact panel shows loading state before content arrives', async () => {
