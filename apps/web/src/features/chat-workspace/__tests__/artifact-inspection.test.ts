@@ -518,6 +518,7 @@ describe('fetchArtifactContent', () => {
       'art-1',
       1,
       () => currentId,
+      () => true,
       mockClient,
       (action) => dispatched.push(action),
       loadingArtifact,
@@ -544,6 +545,7 @@ describe('fetchArtifactContent', () => {
       'art-1',
       1,
       () => currentId,
+      () => true,
       mockClient,
       (action) => dispatched.push(action),
       loadingArtifact,
@@ -567,6 +569,7 @@ describe('fetchArtifactContent', () => {
       'art-1',
       1,
       () => currentId,
+      () => true,
       mockClient,
       (action) => dispatched.push(action),
       loadingArtifact,
@@ -589,6 +592,7 @@ describe('fetchArtifactContent', () => {
       'art-1',
       1,
       () => currentId,
+      () => true,
       mockClient,
       (action) => dispatched.push(action),
       loadingArtifact,
@@ -610,6 +614,7 @@ describe('fetchArtifactContent', () => {
       'art-1',
       1,
       () => currentId,
+      () => true,
       mockClient,
       (action) => dispatched.push(action),
       loadingArtifact,
@@ -619,5 +624,26 @@ describe('fetchArtifactContent', () => {
     const action = dispatched[0] as { type: string; artifact: ArtifactViewState };
     assert.equal(action.type, 'artifact/show');
     assert.equal(action.artifact.availability, 'error');
+  });
+
+  it('drops response when the active conversation changed even if requestId still matches', async () => {
+    const dispatched: unknown[] = [];
+    const mockClient: ArtifactContentClient = {
+      async getArtifactContent(artifactId) {
+        return makeContentResponse(artifactId);
+      },
+    };
+
+    await fetchArtifactContent(
+      'art-1',
+      1,
+      () => 1,
+      () => false,
+      mockClient,
+      (action) => dispatched.push(action),
+      loadingArtifact,
+    );
+
+    assert.equal(dispatched.length, 0, 'conversation switch must suppress stale response');
   });
 });

@@ -128,17 +128,18 @@ export async function fetchArtifactContent(
   artifactId: string,
   requestId: number,
   getCurrentRequestId: () => number,
+  isSelectionCurrent: () => boolean,
   client: ArtifactContentClient,
   dispatch: HydrationDispatch,
   loadingArtifact: ArtifactViewState,
 ): Promise<void> {
   try {
     const response = await client.getArtifactContent(artifactId);
-    if (getCurrentRequestId() !== requestId) return;
+    if (getCurrentRequestId() !== requestId || !isSelectionCurrent()) return;
     const artifactView = buildArtifactViewFromContent(response.artifact, response.content);
     dispatch({ type: 'artifact/show', artifact: artifactView });
   } catch (err: unknown) {
-    if (getCurrentRequestId() !== requestId) return;
+    if (getCurrentRequestId() !== requestId || !isSelectionCurrent()) return;
     console.warn('[artifact-select] Failed to load artifact content:', err);
     dispatch({
       type: 'artifact/show',

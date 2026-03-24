@@ -1354,13 +1354,18 @@ function useArtifactHydration(
   activeConversationId: string | null,
   entries: readonly TranscriptEntryState[],
 ): void {
-  const hydratedTurnsRef = useRef(new Set<string>());
+  const hydratedTurnsByConversationRef = useRef(new Map<string, Set<string>>());
+  const retryTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const [retryNonce, setRetryNonce] = useState(0);
 
   useEffect(() => {
     if (activeConversationId == null) return;
 
     const conversation = store.getState().conversations.get(activeConversationId);
     if (conversation == null || !conversation.historyLoaded) return;
+    const hydratedTurns =
+      hydratedTurnsByConversationRef.current.get(activeConversationId) ?? new Set<string>();
+    hydratedTurnsByConversationRef.current.set(activeConversationId, hydratedTurns);
 
     // Collect turn entries that need artifact hydration — skip turns that
     // already have artifacts (hydrated via stream or a previous pass) and
@@ -1371,22 +1376,45 @@ function useArtifactHydration(
           e.kind === 'turn' &&
           e.turnId != null &&
           e.artifacts.length === 0 &&
-          !hydratedTurnsRef.current.has(e.turnId),
+          !hydratedTurns.has(e.turnId),
       )
       .map((e) => e.turnId!);
 
     if (turnIds.length === 0) return;
 
     const conversationId = activeConversationId;
+    let disposed = false;
 
     void hydrateConversationArtifacts(
       conversationId,
       turnIds,
       client,
       (action) => store.dispatch(action),
-      hydratedTurnsRef.current,
-    );
-  }, [activeConversationId, client, entries, store]);
+      hydratedTurns,
+    ).then((failedTurns) => {
+      if (disposed || failedTurns.size === 0 || retryTimerRef.current != null) {
+        return;
+      }
+
+      retryTimerRef.current = setTimeout(() => {
+        retryTimerRef.current = null;
+        setRetryNonce((value) => value + 1);
+      }, 1_000);
+    });
+
+    return () => {
+      disposed = true;
+    };
+  }, [activeConversationId, client, entries, retryNonce, store]);
+
+  useEffect(() => {
+    return () => {
+      if (retryTimerRef.current != null) {
+        clearTimeout(retryTimerRef.current);
+        retryTimerRef.current = null;
+      }
+    };
+  }, []);
 }
 
 // eslint-disable-next-line max-lines-per-function
@@ -1485,12 +1513,13 @@ export function WorkspaceRoute(): JSX.Element {
         artifactId,
         requestId,
         () => artifactRequestRef.current,
+        () => store.getState().activeConversationId === state.activeConversationId,
         client,
         (action) => store.dispatch(action),
         loadingArtifact,
       );
     },
-    [activeEntries, client, store],
+    [activeEntries, client, state.activeConversationId, store],
   );
 
   const handleCloseArtifact = useCallback(() => {
@@ -1511,11 +1540,13 @@ export function WorkspaceRoute(): JSX.Element {
         isLoadingConversations={isLoadingConversations}
         conversationErrorMessage={conversationErrorMessage}
         onSelectConversation={(conversationId) => {
+          artifactRequestRef.current++;
           store.dispatch({ type: 'conversation/select', conversationId });
           clearConversationError();
           composer.clearCreateState();
         }}
         onStartNewConversation={() => {
+          artifactRequestRef.current++;
           store.dispatch({ type: 'conversation/select', conversationId: null });
           clearConversationError();
           composer.clearCreateState();
