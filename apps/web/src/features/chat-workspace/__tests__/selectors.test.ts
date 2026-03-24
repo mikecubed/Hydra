@@ -30,7 +30,11 @@ import {
   selectCanFollowUp,
   selectEntryActionFlags,
   precomputeTranscriptActions,
+  selectRecentEntries,
+  selectTranscriptSummary,
+  DEFAULT_VISIBLE_WINDOW,
   NO_ACTION_FLAGS,
+  type TranscriptSummary,
 } from '../model/selectors.ts';
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
@@ -1429,6 +1433,197 @@ describe('precomputeTranscriptActions', () => {
     assert.equal(flags.canRetry, selectCanRetry(state, 'turn-1'));
     assert.equal(flags.canBranch, selectCanBranch(state, 'turn-1'));
     assert.equal(flags.canCancel, selectCanCancel(state, 'turn-1'));
+  });
+});
+
+// ─── selectRecentEntries ────────────────────────────────────────────────────
+
+describe('selectRecentEntries', () => {
+  it('returns all entries when within the visible window', () => {
+    let state = stateWithConversation('conv-1');
+    const entries = Array.from({ length: 3 }, (_, i) =>
+      createEntry({ entryId: `e-${i}`, turnId: `t-${i}`, status: 'completed' }),
+    );
+    state = reduceWorkspaceState(state, {
+      type: 'conversation/replace-entries',
+      conversationId: 'conv-1',
+      entries,
+      hasMoreHistory: false,
+    });
+    const result = selectRecentEntries(state);
+    assert.equal(result.length, 3);
+    assert.equal(result[0].entryId, 'e-0');
+    assert.equal(result[2].entryId, 'e-2');
+  });
+
+  it('returns only the most recent entries when exceeding the window', () => {
+    let state = stateWithConversation('conv-1');
+    const entries = Array.from({ length: 20 }, (_, i) =>
+      createEntry({ entryId: `e-${i}`, turnId: `t-${i}`, status: 'completed' }),
+    );
+    state = reduceWorkspaceState(state, {
+      type: 'conversation/replace-entries',
+      conversationId: 'conv-1',
+      entries,
+      hasMoreHistory: false,
+    });
+    const result = selectRecentEntries(state, 5);
+    assert.equal(result.length, 5);
+    assert.equal(result[0].entryId, 'e-15');
+    assert.equal(result[4].entryId, 'e-19');
+  });
+
+  it('returns empty array when no active conversation', () => {
+    const state = createInitialWorkspaceState();
+    const result = selectRecentEntries(state);
+    assert.equal(result.length, 0);
+  });
+
+  it('uses DEFAULT_VISIBLE_WINDOW when no maxVisible is given', () => {
+    let state = stateWithConversation('conv-1');
+    const count = DEFAULT_VISIBLE_WINDOW + 10;
+    const entries = Array.from({ length: count }, (_, i) =>
+      createEntry({ entryId: `e-${i}`, turnId: `t-${i}`, status: 'completed' }),
+    );
+    state = reduceWorkspaceState(state, {
+      type: 'conversation/replace-entries',
+      conversationId: 'conv-1',
+      entries,
+      hasMoreHistory: false,
+    });
+    const result = selectRecentEntries(state);
+    assert.equal(result.length, DEFAULT_VISIBLE_WINDOW);
+    // Should be the tail entries
+    assert.equal(result[0].entryId, `e-10`);
+  });
+
+  it('preserves deduplication from selectActiveEntries', () => {
+    let state = stateWithConversation('conv-1');
+    state = reduceWorkspaceState(state, {
+      type: 'conversation/replace-entries',
+      conversationId: 'conv-1',
+      entries: [
+        createEntry({ entryId: 'e-0', turnId: 't-0', status: 'completed' }),
+        createEntry({ entryId: 'e-dup', turnId: 't-0', status: 'streaming' }),
+        createEntry({ entryId: 'e-1', turnId: 't-1', status: 'completed' }),
+      ],
+      hasMoreHistory: false,
+    });
+    const result = selectRecentEntries(state, 2);
+    assert.equal(result.length, 2);
+    // Dedup removes e-dup, leaving [e-0, e-1], window of 2 returns both
+    assert.equal(result[0].entryId, 'e-0');
+    assert.equal(result[1].entryId, 'e-1');
+  });
+});
+
+// ─── selectTranscriptSummary ────────────────────────────────────────────────
+
+describe('selectTranscriptSummary', () => {
+  it('returns zero counts when no active conversation', () => {
+    const state = createInitialWorkspaceState();
+    const summary: TranscriptSummary = selectTranscriptSummary(state);
+    assert.equal(summary.totalLoaded, 0);
+    assert.equal(summary.visibleCount, 0);
+    assert.equal(summary.hiddenCount, 0);
+    assert.equal(summary.hasMoreHistory, false);
+    assert.equal(summary.oldestVisibleTimestamp, null);
+  });
+
+  it('reports no hidden entries for small transcripts', () => {
+    let state = stateWithConversation('conv-1');
+    state = reduceWorkspaceState(state, {
+      type: 'conversation/replace-entries',
+      conversationId: 'conv-1',
+      entries: [
+        createEntry({ entryId: 'e-0', turnId: 't-0', timestamp: '2026-03-20T01:00:00.000Z' }),
+        createEntry({ entryId: 'e-1', turnId: 't-1', timestamp: '2026-03-20T02:00:00.000Z' }),
+      ],
+      hasMoreHistory: false,
+    });
+    const summary = selectTranscriptSummary(state);
+    assert.equal(summary.totalLoaded, 2);
+    assert.equal(summary.visibleCount, 2);
+    assert.equal(summary.hiddenCount, 0);
+    assert.equal(summary.hasMoreHistory, false);
+    assert.equal(summary.oldestVisibleTimestamp, '2026-03-20T01:00:00.000Z');
+  });
+
+  it('reports hidden entries when entries exceed the window', () => {
+    let state = stateWithConversation('conv-1');
+    const entries = Array.from({ length: 20 }, (_, i) =>
+      createEntry({
+        entryId: `e-${i}`,
+        turnId: `t-${i}`,
+        timestamp: `2026-03-20T${String(i).padStart(2, '0')}:00:00.000Z`,
+      }),
+    );
+    state = reduceWorkspaceState(state, {
+      type: 'conversation/replace-entries',
+      conversationId: 'conv-1',
+      entries,
+      hasMoreHistory: false,
+    });
+    const summary = selectTranscriptSummary(state, 5);
+    assert.equal(summary.totalLoaded, 20);
+    assert.equal(summary.visibleCount, 5);
+    assert.equal(summary.hiddenCount, 15);
+    assert.equal(summary.hasMoreHistory, false);
+    assert.equal(summary.oldestVisibleTimestamp, '2026-03-20T15:00:00.000Z');
+  });
+
+  it('includes hasMoreHistory from conversation state', () => {
+    let state = stateWithConversation('conv-1');
+    state = reduceWorkspaceState(state, {
+      type: 'conversation/replace-entries',
+      conversationId: 'conv-1',
+      entries: [createEntry({ entryId: 'e-0', turnId: 't-0' })],
+      hasMoreHistory: true,
+    });
+    const summary = selectTranscriptSummary(state);
+    assert.equal(summary.hasMoreHistory, true);
+    assert.equal(summary.totalLoaded, 1);
+    assert.equal(summary.hiddenCount, 0);
+  });
+
+  it('combines windowing hidden count with server hasMoreHistory', () => {
+    let state = stateWithConversation('conv-1');
+    const entries = Array.from({ length: 10 }, (_, i) =>
+      createEntry({ entryId: `e-${i}`, turnId: `t-${i}` }),
+    );
+    state = reduceWorkspaceState(state, {
+      type: 'conversation/replace-entries',
+      conversationId: 'conv-1',
+      entries,
+      hasMoreHistory: true,
+    });
+    const summary = selectTranscriptSummary(state, 3);
+    assert.equal(summary.totalLoaded, 10);
+    assert.equal(summary.visibleCount, 3);
+    assert.equal(summary.hiddenCount, 7);
+    assert.equal(summary.hasMoreHistory, true);
+  });
+
+  it('reports null oldest timestamp for empty transcripts', () => {
+    let state = stateWithConversation('conv-1');
+    state = reduceWorkspaceState(state, {
+      type: 'conversation/replace-entries',
+      conversationId: 'conv-1',
+      entries: [],
+      hasMoreHistory: false,
+    });
+    const summary = selectTranscriptSummary(state);
+    assert.equal(summary.oldestVisibleTimestamp, null);
+  });
+});
+
+// ─── DEFAULT_VISIBLE_WINDOW ─────────────────────────────────────────────────
+
+describe('DEFAULT_VISIBLE_WINDOW', () => {
+  it('is a positive integer', () => {
+    assert.equal(typeof DEFAULT_VISIBLE_WINDOW, 'number');
+    assert.ok(DEFAULT_VISIBLE_WINDOW > 0);
+    assert.equal(DEFAULT_VISIBLE_WINDOW, Math.floor(DEFAULT_VISIBLE_WINDOW));
   });
 });
 
