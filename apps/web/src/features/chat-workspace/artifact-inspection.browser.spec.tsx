@@ -169,5 +169,30 @@ describe('TranscriptTurn artifact badges', () => {
     render(<TranscriptTurn entry={entry} />);
     const badges = screen.getAllByTestId('artifact-badge');
     expect(badges.length).toBe(1);
+    // Should render as a non-interactive span, not a button
+    expect(badges[0]?.tagName).toBe('SPAN');
+    expect(badges[0]?.getAttribute('aria-disabled')).toBe('true');
+  });
+
+  it('renders non-interactive span when turnId is null', () => {
+    const entry = makeEntry({
+      turnId: null,
+      artifacts: [makeArtifactRef()],
+    });
+    render(<TranscriptTurn entry={entry} onArtifactSelect={vi.fn()} />);
+    const badge = screen.getByTestId('artifact-badge');
+    expect(badge.tagName).toBe('SPAN');
+    expect(badge.getAttribute('aria-disabled')).toBe('true');
+  });
+
+  it('non-interactive badges are not focusable via keyboard', () => {
+    const entry = makeEntry({
+      artifacts: [makeArtifactRef()],
+    });
+    render(<TranscriptTurn entry={entry} />);
+    const badge = screen.getByTestId('artifact-badge');
+    // Spans are not keyboard-focusable by default (no tabIndex)
+    expect(badge.getAttribute('tabindex')).toBeNull();
+    expect(badge.tagName).not.toBe('BUTTON');
   });
 });

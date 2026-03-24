@@ -29,7 +29,7 @@ export const ARTIFACT_KIND_LABELS: Readonly<Record<string, string>> = {
  * Falls back to title-casing the raw kind string for unknown kinds.
  */
 export function artifactKindToLabel(kind: string): string {
-  if (kind in ARTIFACT_KIND_LABELS) {
+  if (Object.prototype.hasOwnProperty.call(ARTIFACT_KIND_LABELS, kind)) {
     return ARTIFACT_KIND_LABELS[kind];
   }
   if (kind === '') return '';
@@ -61,7 +61,10 @@ const KIND_CLASSIFICATION: Readonly<Record<string, ArtifactClassification>> = {
  * - `prose` — standard text flow (plan, unknown)
  */
 export function classifyArtifactKind(kind: string): ArtifactClassification {
-  return KIND_CLASSIFICATION[kind] ?? 'prose';
+  if (Object.prototype.hasOwnProperty.call(KIND_CLASSIFICATION, kind)) {
+    return KIND_CLASSIFICATION[kind];
+  }
+  return 'prose';
 }
 
 /**

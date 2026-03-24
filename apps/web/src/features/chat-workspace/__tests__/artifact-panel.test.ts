@@ -76,6 +76,22 @@ describe('artifactKindToLabel', () => {
     const label = artifactKindToLabel('');
     assert.equal(typeof label, 'string');
   });
+
+  it('falls back for __proto__ key (prototype chain safety)', () => {
+    const label = artifactKindToLabel('__proto__');
+    // __proto__ is NOT an own property of ARTIFACT_KIND_LABELS, so title-case fallback runs
+    assert.equal(label, '__proto__');
+  });
+
+  it('falls back for constructor key (prototype chain safety)', () => {
+    const label = artifactKindToLabel('constructor');
+    assert.equal(label, 'Constructor');
+  });
+
+  it('falls back for toString key (prototype chain safety)', () => {
+    const label = artifactKindToLabel('toString');
+    assert.equal(label, 'ToString');
+  });
 });
 
 // ─── classifyArtifactKind ───────────────────────────────────────────────────
@@ -111,6 +127,18 @@ describe('classifyArtifactKind', () => {
 
   it('falls back to prose for unknown kinds', () => {
     assert.equal(classifyArtifactKind('mystery'), 'prose');
+  });
+
+  it('falls back to prose for __proto__ (prototype chain safety)', () => {
+    assert.equal(classifyArtifactKind('__proto__'), 'prose');
+  });
+
+  it('falls back to prose for constructor (prototype chain safety)', () => {
+    assert.equal(classifyArtifactKind('constructor'), 'prose');
+  });
+
+  it('falls back to prose for toString (prototype chain safety)', () => {
+    assert.equal(classifyArtifactKind('toString'), 'prose');
   });
 });
 

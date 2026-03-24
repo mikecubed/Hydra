@@ -1348,7 +1348,6 @@ function useTurnActions(
  * that transient failures for individual turns do not permanently suppress
  * retries. Failed turns remain eligible for hydration on subsequent renders.
  */
-// eslint-disable-next-line max-lines-per-function -- route-level hydration coordination
 function useArtifactHydration(
   store: WorkspaceStore,
   client: GatewayClient,
@@ -1427,15 +1426,13 @@ function useArtifactHydration(
       }, 1_000);
     });
 
-    return () => {
-      if (retryTimerRef.current != null && retryConversationRef.current !== conversationId) {
-        clearTimeout(retryTimerRef.current);
-        retryTimerRef.current = null;
-        retryConversationRef.current = null;
-      }
-    };
+    // No timer cleanup here — same-conversation rerenders (entries changing)
+    // must not cancel a pending retry.  Conversation-switch and unmount
+    // cleanup is handled by the dedicated effect below.
   }, [activeConversationId, client, entries, retryNonce, store]);
 
+  // Clear the retry timer only when the active conversation changes or on
+  // unmount — NOT on same-conversation rerenders that merely update entries.
   useEffect(
     () => () => {
       if (retryTimerRef.current != null) {
@@ -1444,7 +1441,7 @@ function useArtifactHydration(
       }
       retryConversationRef.current = null;
     },
-    [],
+    [activeConversationId],
   );
 }
 

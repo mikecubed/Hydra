@@ -104,7 +104,7 @@ const artifactListStyle = {
   listStyle: 'none',
 } as const;
 
-const artifactBadgeStyle = {
+const artifactBadgeBaseStyle = {
   display: 'inline-flex',
   alignItems: 'center',
   gap: '0.3rem',
@@ -114,8 +114,17 @@ const artifactBadgeStyle = {
   padding: '0.15rem 0.5rem',
   fontSize: '0.75rem',
   color: '#94a3b8',
-  cursor: 'pointer',
   fontFamily: 'inherit',
+} as const;
+
+const artifactBadgeInteractiveStyle = {
+  ...artifactBadgeBaseStyle,
+  cursor: 'pointer',
+} as const;
+
+const artifactBadgeInertStyle = {
+  ...artifactBadgeBaseStyle,
+  cursor: 'default',
 } as const;
 
 const artifactKindStyle = {
@@ -167,25 +176,30 @@ function ArtifactList({
 }): JSX.Element | null {
   if (artifacts.length === 0) return null;
 
+  const interactive = onArtifactSelect != null && turnId != null;
+
   return (
     <ul style={artifactListStyle} data-testid="artifact-list">
       {artifacts.map((artifact) => (
         <li key={artifact.artifactId}>
-          <button
-            type="button"
-            style={artifactBadgeStyle}
-            data-testid="artifact-badge"
-            onClick={
-              onArtifactSelect != null && turnId != null
-                ? () => {
-                    onArtifactSelect(artifact.artifactId, turnId);
-                  }
-                : undefined
-            }
-          >
-            <span style={artifactKindStyle}>{artifact.kind}</span>
-            <SafeText text={artifact.label} />
-          </button>
+          {interactive ? (
+            <button
+              type="button"
+              style={artifactBadgeInteractiveStyle}
+              data-testid="artifact-badge"
+              onClick={() => {
+                onArtifactSelect(artifact.artifactId, turnId);
+              }}
+            >
+              <span style={artifactKindStyle}>{artifact.kind}</span>
+              <SafeText text={artifact.label} />
+            </button>
+          ) : (
+            <span style={artifactBadgeInertStyle} data-testid="artifact-badge" aria-disabled="true">
+              <span style={artifactKindStyle}>{artifact.kind}</span>
+              <SafeText text={artifact.label} />
+            </span>
+          )}
         </li>
       ))}
     </ul>
