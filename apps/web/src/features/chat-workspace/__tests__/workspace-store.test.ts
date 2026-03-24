@@ -2177,7 +2177,44 @@ describe('multi-session convergence: stale-control invalidation', () => {
     );
   });
 
-  it('sets conversation controlState.staleReason when merge detects external status changes', () => {
+  it('sets conversation controlState.staleReason when merge actually invalidates controls', () => {
+    let state = createInitialWorkspaceState();
+    state = reduceWorkspaceState(state, {
+      type: 'conversation/upsert',
+      conversation: createConversation(),
+    });
+    state = reduceWorkspaceState(state, {
+      type: 'conversation/replace-entries',
+      conversationId: 'conv-1',
+      entries: [
+        createEntry({
+          entryId: 'turn-1',
+          turnId: 'turn-1',
+          status: 'streaming',
+          controls: [
+            { controlId: 'ctrl-cancel', kind: 'cancel', enabled: true, reasonDisabled: null },
+          ],
+        }),
+      ],
+      hasMoreHistory: false,
+    });
+
+    // Authoritative merge shows turn completed by another session — controls get invalidated
+    state = reduceWorkspaceState(state, {
+      type: 'conversation/merge-history',
+      conversationId: 'conv-1',
+      entries: [createEntry({ entryId: 'turn-1', turnId: 'turn-1', status: 'completed' })],
+      hasMoreHistory: false,
+    });
+
+    const conv = state.conversations.get('conv-1');
+    assert.ok(
+      conv?.controlState.staleReason != null,
+      'staleReason must indicate external state change',
+    );
+  });
+
+  it('does not set staleReason when drift exists but no controls were actually invalidated', () => {
     let state = createInitialWorkspaceState();
     state = reduceWorkspaceState(state, {
       type: 'conversation/upsert',
@@ -2190,7 +2227,7 @@ describe('multi-session convergence: stale-control invalidation', () => {
       hasMoreHistory: false,
     });
 
-    // Authoritative merge shows turn completed by another session
+    // Authoritative merge shows turn completed — drift exists but no controls to invalidate
     state = reduceWorkspaceState(state, {
       type: 'conversation/merge-history',
       conversationId: 'conv-1',
@@ -2199,9 +2236,10 @@ describe('multi-session convergence: stale-control invalidation', () => {
     });
 
     const conv = state.conversations.get('conv-1');
-    assert.ok(
-      conv?.controlState.staleReason != null,
-      'staleReason must indicate external state change',
+    assert.equal(
+      conv?.controlState.staleReason,
+      null,
+      'staleReason must be null when no controls were actually invalidated',
     );
   });
 
@@ -2412,11 +2450,20 @@ describe('multi-session convergence: stale-control invalidation', () => {
       type: 'conversation/upsert',
       conversation: createConversation(),
     });
-    // First: external change causes staleReason to be set
+    // First: external change with controls causes staleReason to be set
     state = reduceWorkspaceState(state, {
       type: 'conversation/replace-entries',
       conversationId: 'conv-1',
-      entries: [createEntry({ entryId: 'turn-1', turnId: 'turn-1', status: 'streaming' })],
+      entries: [
+        createEntry({
+          entryId: 'turn-1',
+          turnId: 'turn-1',
+          status: 'streaming',
+          controls: [
+            { controlId: 'ctrl-cancel', kind: 'cancel', enabled: true, reasonDisabled: null },
+          ],
+        }),
+      ],
       hasMoreHistory: false,
     });
     state = reduceWorkspaceState(state, {
