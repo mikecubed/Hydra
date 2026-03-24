@@ -95,6 +95,7 @@ export interface HydrationDispatch {
 }
 
 export interface ArtifactHydrationResult {
+  readonly successfulTurns: ReadonlySet<string>;
   readonly retryableFailures: ReadonlySet<string>;
   readonly terminalFailures: ReadonlySet<string>;
 }
@@ -102,9 +103,8 @@ export interface ArtifactHydrationResult {
 /**
  * Hydrate artifact references for a set of turns in a conversation.
  *
- * Only marks a turn as hydrated (in `hydratedTurns`) on success.
- * Failed turns are *not* recorded, so a subsequent call can retry transient
- * failures. Permanent failures are excluded from the returned retry set.
+ * Reports successful, retryable-failure, and terminal-failure turn IDs so the
+ * caller can decide how to cache hydration state for terminal vs live turns.
  *
  * @returns Retryable and terminal failure turn IDs.
  */
@@ -113,8 +113,8 @@ export async function hydrateConversationArtifacts(
   turnIds: readonly string[],
   client: HydrationClient,
   dispatch: HydrationDispatch,
-  hydratedTurns: Set<string>,
 ): Promise<ArtifactHydrationResult> {
+  const successfulTurns = new Set<string>();
   const retryableFailures = new Set<string>();
   const terminalFailures = new Set<string>();
   await Promise.all(
@@ -130,7 +130,7 @@ export async function hydrateConversationArtifacts(
             artifacts: refs,
           });
         }
-        hydratedTurns.add(turnId);
+        successfulTurns.add(turnId);
       } catch (err: unknown) {
         if (isRetryableArtifactHydrationError(err)) {
           retryableFailures.add(turnId);
@@ -140,7 +140,7 @@ export async function hydrateConversationArtifacts(
       }
     }),
   );
-  return { retryableFailures, terminalFailures };
+  return { successfulTurns, retryableFailures, terminalFailures };
 }
 
 /** Minimal client surface needed for artifact content fetch. */

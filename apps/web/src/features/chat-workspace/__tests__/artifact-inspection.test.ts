@@ -437,7 +437,6 @@ describe('hydrateConversationArtifacts', () => {
   }
 
   it('marks successful turns as hydrated', async () => {
-    const hydratedTurns = new Set<string>();
     const dispatched: unknown[] = [];
     const mockClient: HydrationClient = {
       async listArtifactsForTurn(turnId) {
@@ -445,21 +444,19 @@ describe('hydrateConversationArtifacts', () => {
       },
     };
 
-    await hydrateConversationArtifacts(
+    const result = await hydrateConversationArtifacts(
       'conv-1',
       ['t1', 't2'],
       mockClient,
       (action) => dispatched.push(action),
-      hydratedTurns,
     );
 
-    assert.ok(hydratedTurns.has('t1'));
-    assert.ok(hydratedTurns.has('t2'));
+    assert.ok(result.successfulTurns.has('t1'));
+    assert.ok(result.successfulTurns.has('t2'));
     assert.equal(dispatched.length, 2);
   });
 
   it('does NOT mark failed turns as hydrated', async () => {
-    const hydratedTurns = new Set<string>();
     const dispatched: unknown[] = [];
     const mockClient: HydrationClient = {
       async listArtifactsForTurn(turnId) {
@@ -473,18 +470,16 @@ describe('hydrateConversationArtifacts', () => {
       ['t1', 't2'],
       mockClient,
       (action) => dispatched.push(action),
-      hydratedTurns,
     );
 
-    assert.ok(hydratedTurns.has('t1'), 'successful turn should be hydrated');
-    assert.ok(!hydratedTurns.has('t2'), 'failed turn must NOT be hydrated');
+    assert.ok(result.successfulTurns.has('t1'), 'successful turn should be reported');
+    assert.ok(!result.successfulTurns.has('t2'), 'failed turn must NOT be reported successful');
     assert.ok(result.retryableFailures.has('t2'), 'failed turn should be retryable');
     assert.equal(result.terminalFailures.size, 0);
     assert.equal(dispatched.length, 1, 'only successful turn dispatches');
   });
 
   it('allows retry of previously failed turns on second call', async () => {
-    const hydratedTurns = new Set<string>();
     const dispatched: unknown[] = [];
     let callCount = 0;
     const mockClient: HydrationClient = {
@@ -497,19 +492,28 @@ describe('hydrateConversationArtifacts', () => {
     const dispatch: HydrationDispatch = (action) => dispatched.push(action);
 
     // First pass: t1 succeeds, t2 fails
-    await hydrateConversationArtifacts('conv-1', ['t1', 't2'], mockClient, dispatch, hydratedTurns);
-    assert.ok(!hydratedTurns.has('t2'), 'failed turn not hydrated after first pass');
+    const firstResult = await hydrateConversationArtifacts(
+      'conv-1',
+      ['t1', 't2'],
+      mockClient,
+      dispatch,
+    );
+    assert.ok(!firstResult.successfulTurns.has('t2'), 'failed turn not hydrated after first pass');
 
     // Second pass: only retry un-hydrated turns (t2)
-    const retryTurns = ['t1', 't2'].filter((id) => !hydratedTurns.has(id));
+    const retryTurns = ['t1', 't2'].filter((id) => !firstResult.successfulTurns.has(id));
     assert.deepEqual(retryTurns, ['t2']);
 
-    await hydrateConversationArtifacts('conv-1', retryTurns, mockClient, dispatch, hydratedTurns);
-    assert.ok(hydratedTurns.has('t2'), 't2 should be hydrated after retry');
+    const secondResult = await hydrateConversationArtifacts(
+      'conv-1',
+      retryTurns,
+      mockClient,
+      dispatch,
+    );
+    assert.ok(secondResult.successfulTurns.has('t2'), 't2 should be hydrated after retry');
   });
 
   it('does not dispatch for turns with zero artifacts', async () => {
-    const hydratedTurns = new Set<string>();
     const dispatched: unknown[] = [];
     const mockClient: HydrationClient = {
       async listArtifactsForTurn() {
@@ -517,15 +521,14 @@ describe('hydrateConversationArtifacts', () => {
       },
     };
 
-    await hydrateConversationArtifacts(
-      'conv-1',
-      ['t1'],
-      mockClient,
-      (action) => dispatched.push(action),
-      hydratedTurns,
+    const result = await hydrateConversationArtifacts('conv-1', ['t1'], mockClient, (action) =>
+      dispatched.push(action),
     );
 
-    assert.ok(hydratedTurns.has('t1'), 'turn with 0 artifacts is still marked hydrated');
+    assert.ok(
+      result.successfulTurns.has('t1'),
+      'turn with 0 artifacts is still reported successful',
+    );
     assert.equal(dispatched.length, 0, 'no dispatch for empty artifacts');
   });
 
@@ -544,7 +547,6 @@ describe('hydrateConversationArtifacts', () => {
     const entry = makeEntry({ entryId: 'e1', turnId: 't1', artifacts: [streamedArtifact] });
     seedConversationWithEntries(store, 'conv-1', [entry]);
 
-    const hydratedTurns = new Set<string>();
     const mockClient: HydrationClient = {
       async listArtifactsForTurn() {
         return {
@@ -557,15 +559,9 @@ describe('hydrateConversationArtifacts', () => {
       },
     };
 
-    await hydrateConversationArtifacts(
-      'conv-1',
-      ['t1'],
-      mockClient,
-      (action) => {
-        store.dispatch(action);
-      },
-      hydratedTurns,
-    );
+    const result = await hydrateConversationArtifacts('conv-1', ['t1'], mockClient, (action) => {
+      store.dispatch(action);
+    });
 
     const updated = store.getState().conversations.get('conv-1')!.entries[0];
     assert.equal(
@@ -581,11 +577,10 @@ describe('hydrateConversationArtifacts', () => {
       updated.artifacts.some((a) => a.artifactId === 'server-only-art'),
       'server-only artifact backfilled',
     );
-    assert.ok(hydratedTurns.has('t1'), 'turn marked as hydrated');
+    assert.ok(result.successfulTurns.has('t1'), 'turn reported as successfully hydrated');
   });
 
   it('does not retry permanent gateway failures', async () => {
-    const hydratedTurns = new Set<string>();
     const dispatched: unknown[] = [];
     const mockClient: HydrationClient = {
       async listArtifactsForTurn() {
@@ -599,17 +594,13 @@ describe('hydrateConversationArtifacts', () => {
       },
     };
 
-    const result = await hydrateConversationArtifacts(
-      'conv-1',
-      ['t1'],
-      mockClient,
-      (action) => dispatched.push(action),
-      hydratedTurns,
+    const result = await hydrateConversationArtifacts('conv-1', ['t1'], mockClient, (action) =>
+      dispatched.push(action),
     );
 
+    assert.equal(result.successfulTurns.size, 0);
     assert.equal(result.retryableFailures.size, 0);
     assert.ok(result.terminalFailures.has('t1'));
-    assert.ok(!hydratedTurns.has('t1'));
     assert.equal(dispatched.length, 0);
   });
 });

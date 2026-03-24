@@ -1356,11 +1356,16 @@ function useArtifactHydration(
   entries: readonly TranscriptEntryState[],
 ): void {
   const hydratedTurnsByConversationRef = useRef(new Map<string, Set<string>>());
+  const liveHydrationKeysByConversationRef = useRef(new Map<string, Map<string, string>>());
   const pendingTurnsByConversationRef = useRef(new Map<string, Set<string>>());
   const terminalFailuresByConversationRef = useRef(new Map<string, Set<string>>());
   const retryTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [retryNonce, setRetryNonce] = useState(0);
 
+  const buildLiveHydrationKey = (entry: TranscriptEntryState): string =>
+    `${entry.status}:${String(entry.artifacts.length)}`;
+
+  // eslint-disable-next-line max-lines-per-function -- hydration state machine spans retry/terminal/live cases
   useEffect(() => {
     if (activeConversationId == null) return;
 
@@ -1368,36 +1373,48 @@ function useArtifactHydration(
     if (conversation?.historyLoaded !== true) return;
     const hydratedTurns =
       hydratedTurnsByConversationRef.current.get(activeConversationId) ?? new Set<string>();
+    const liveHydrationKeys =
+      liveHydrationKeysByConversationRef.current.get(activeConversationId) ??
+      new Map<string, string>();
     const pendingTurns =
       pendingTurnsByConversationRef.current.get(activeConversationId) ?? new Set<string>();
     const terminalFailures =
       terminalFailuresByConversationRef.current.get(activeConversationId) ?? new Set<string>();
     hydratedTurnsByConversationRef.current.set(activeConversationId, hydratedTurns);
+    liveHydrationKeysByConversationRef.current.set(activeConversationId, liveHydrationKeys);
     pendingTurnsByConversationRef.current.set(activeConversationId, pendingTurns);
     terminalFailuresByConversationRef.current.set(activeConversationId, terminalFailures);
 
-    // Collect turn entries that need artifact hydration — skip turns that
-    // were successfully hydrated or hit a terminal failure in an earlier
-    // invocation. Turns that already have *some* artifacts (e.g. from
-    // streamed artifact-notice events) are still eligible once the turn is
-    // terminal so the server can backfill any missing references. The reducer
-    // deduplicates by artifactId, so dispatching for partially-populated
-    // terminal turns is safe.
-    const turnIds = entries.flatMap((entry) => {
+    // Collect turn entries that need artifact hydration — terminal turns are
+    // hydrated once and then pinned in hydratedTurns, while live turns track a
+    // lightweight status/artifact-count signature so refresh recovery can
+    // backfill missed artifact notices without refetching on every text delta.
+    const turnsToHydrate = entries.flatMap((entry) => {
       if (
         entry.kind !== 'turn' ||
         entry.turnId == null ||
-        (entry.status !== 'completed' &&
-          entry.status !== 'failed' &&
-          entry.status !== 'cancelled') ||
-        hydratedTurns.has(entry.turnId) ||
         pendingTurns.has(entry.turnId) ||
         terminalFailures.has(entry.turnId)
       ) {
         return [];
       }
-      return [entry.turnId];
+
+      const isTerminal =
+        entry.status === 'completed' || entry.status === 'failed' || entry.status === 'cancelled';
+      if (isTerminal) {
+        return hydratedTurns.has(entry.turnId) ? [] : [{ turnId: entry.turnId, isTerminal: true }];
+      }
+
+      const liveHydrationKey = buildLiveHydrationKey(entry);
+      return liveHydrationKeys.get(entry.turnId) === liveHydrationKey
+        ? []
+        : [{ turnId: entry.turnId, isTerminal: false }];
     });
+
+    const turnIds = turnsToHydrate.map(({ turnId }) => turnId);
+    const terminalTurnIds = new Set(
+      turnsToHydrate.filter(({ isTerminal }) => isTerminal).map(({ turnId }) => turnId),
+    );
 
     if (turnIds.length === 0) return;
     for (const turnId of turnIds) {
@@ -1406,37 +1423,78 @@ function useArtifactHydration(
 
     const conversationId = activeConversationId;
 
-    void hydrateConversationArtifacts(
-      conversationId,
-      turnIds,
-      client,
-      (action) => {
-        store.dispatch(action);
-      },
-      hydratedTurns,
-    ).then(({ retryableFailures, terminalFailures: nextTerminalFailures }) => {
-      for (const turnId of turnIds) {
-        pendingTurns.delete(turnId);
-      }
-      for (const turnId of nextTerminalFailures) {
-        terminalFailures.add(turnId);
-      }
-      if (
-        retryableFailures.size === 0 ||
-        retryTimerRef.current != null ||
-        store.getState().activeConversationId !== conversationId
-      ) {
-        return;
-      }
+    void hydrateConversationArtifacts(conversationId, turnIds, client, (action) => {
+      store.dispatch(action);
+    }).then(
+      // eslint-disable-next-line complexity -- terminal/live success handling shares one coordination path
+      ({ successfulTurns, retryableFailures, terminalFailures: nextTerminalFailures }) => {
+        for (const turnId of turnIds) {
+          pendingTurns.delete(turnId);
+        }
+        for (const turnId of nextTerminalFailures) {
+          terminalFailures.add(turnId);
+          liveHydrationKeys.delete(turnId);
+        }
 
-      retryTimerRef.current = setTimeout(() => {
-        retryTimerRef.current = null;
-        if (store.getState().activeConversationId !== conversationId) {
+        const latestEntries =
+          store
+            .getState()
+            .conversations.get(conversationId)
+            ?.entries.filter(
+              (entry): entry is TranscriptEntryState =>
+                entry.kind === 'turn' && entry.turnId != null,
+            ) ?? [];
+        const latestTurnsById = new Map(latestEntries.map((entry) => [entry.turnId, entry]));
+
+        let shouldRecheckTerminalTurns = false;
+        for (const turnId of successfulTurns) {
+          const latestEntry = latestTurnsById.get(turnId);
+          if (latestEntry == null) {
+            liveHydrationKeys.delete(turnId);
+            continue;
+          }
+
+          const isTerminal =
+            latestEntry.status === 'completed' ||
+            latestEntry.status === 'failed' ||
+            latestEntry.status === 'cancelled';
+          if (isTerminal) {
+            liveHydrationKeys.delete(turnId);
+            if (terminalTurnIds.has(turnId)) {
+              hydratedTurns.add(turnId);
+            } else {
+              shouldRecheckTerminalTurns = true;
+            }
+          } else {
+            liveHydrationKeys.set(turnId, buildLiveHydrationKey(latestEntry));
+          }
+        }
+
+        if (
+          shouldRecheckTerminalTurns &&
+          retryTimerRef.current == null &&
+          store.getState().activeConversationId === conversationId
+        ) {
+          setRetryNonce((value) => value + 1);
+        }
+
+        if (
+          retryableFailures.size === 0 ||
+          retryTimerRef.current != null ||
+          store.getState().activeConversationId !== conversationId
+        ) {
           return;
         }
-        setRetryNonce((value) => value + 1);
-      }, 1_000);
-    });
+
+        retryTimerRef.current = setTimeout(() => {
+          retryTimerRef.current = null;
+          if (store.getState().activeConversationId !== conversationId) {
+            return;
+          }
+          setRetryNonce((value) => value + 1);
+        }, 1_000);
+      },
+    );
 
     // No timer cleanup here — same-conversation rerenders (entries changing)
     // must not cancel a pending retry.  Conversation-switch and unmount
@@ -1450,6 +1508,10 @@ function useArtifactHydration(
       if (retryTimerRef.current != null) {
         clearTimeout(retryTimerRef.current);
         retryTimerRef.current = null;
+      }
+      if (activeConversationId != null) {
+        liveHydrationKeysByConversationRef.current.delete(activeConversationId);
+        pendingTurnsByConversationRef.current.delete(activeConversationId);
       }
     },
     [activeConversationId],
