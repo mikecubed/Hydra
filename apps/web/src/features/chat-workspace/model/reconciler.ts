@@ -1035,7 +1035,10 @@ export function invalidateStaleEntryControls(
         updatedControls.push({
           ...prevControl,
           enabled: false,
-          reasonDisabled: STALE_CONTROL_REASON,
+          reasonDisabled:
+            prevControl.enabled || prevControl.reasonDisabled == null
+              ? STALE_CONTROL_REASON
+              : prevControl.reasonDisabled,
         });
       }
     }

@@ -2163,6 +2163,31 @@ describe('invalidateStaleEntryControls', () => {
     assert.equal(result[0].controls[0].reasonDisabled, 'original reason');
   });
 
+  it('preserves existing disable reasons when stripped controls were already disabled', () => {
+    const before = [
+      makeEntry({
+        entryId: 'turn-a',
+        turnId: 'turn-a',
+        status: 'streaming',
+        controls: [
+          {
+            controlId: 'c-cancel',
+            kind: 'cancel' as const,
+            enabled: false,
+            reasonDisabled: 'session expired',
+          },
+        ],
+      }),
+    ];
+    const merged = [
+      makeEntry({ entryId: 'turn-a', turnId: 'turn-a', status: 'completed', controls: [] }),
+    ];
+
+    const result = invalidateStaleEntryControls(before, merged);
+    assert.equal(result[0].controls[0].enabled, false);
+    assert.equal(result[0].controls[0].reasonDisabled, 'session expired');
+  });
+
   it('does not touch controls on non-terminal entries', () => {
     const merged = [
       makeEntry({

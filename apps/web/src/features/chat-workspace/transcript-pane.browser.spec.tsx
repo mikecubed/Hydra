@@ -531,6 +531,13 @@ describe('TranscriptPane', () => {
         });
       }
 
+      if (url === '/conversations/conv-1/approvals') {
+        return new Response(JSON.stringify({ approvals: [] }), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        });
+      }
+
       throw new Error(`Unexpected fetch input: ${url}`);
     });
 
