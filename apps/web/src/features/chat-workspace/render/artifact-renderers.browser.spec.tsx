@@ -98,9 +98,7 @@ describe('ArtifactContentBlock', () => {
   });
 
   it('preserves angle brackets as visible text in code blocks', () => {
-    const { container } = render(
-      <ArtifactContentBlock kind="code" text="<div>hello</div>" />,
-    );
+    const { container } = render(<ArtifactContentBlock kind="code" text="<div>hello</div>" />);
     expect(container.textContent).toContain('<div>hello</div>');
   });
 
@@ -121,24 +119,18 @@ describe('ArtifactContentBlock', () => {
   });
 
   it('renders status blocks with italic styling', () => {
-    const { container } = render(
-      <ArtifactContentBlock kind="status" text="Running tests..." />,
-    );
+    const { container } = render(<ArtifactContentBlock kind="status" text="Running tests..." />);
     const el = container.firstElementChild;
     expect(el?.getAttribute('style')).toContain('italic');
   });
 
   it('applies data-testid when provided', () => {
-    render(
-      <ArtifactContentBlock kind="text" text="hello" data-testid="block-1" />,
-    );
+    render(<ArtifactContentBlock kind="text" text="hello" data-testid="block-1" />);
     expect(screen.getByTestId('block-1')).toBeTruthy();
   });
 
   it('renders multiline text with preserved whitespace', () => {
-    const { container } = render(
-      <ArtifactContentBlock kind="text" text={'line1\nline2\nline3'} />,
-    );
+    const { container } = render(<ArtifactContentBlock kind="text" text={'line1\nline2\nline3'} />);
     expect(container.textContent).toContain('line1');
     expect(container.textContent).toContain('line2');
     expect(container.textContent).toContain('line3');
@@ -174,13 +166,7 @@ describe('ArtifactHeader', () => {
   });
 
   it('escapes HTML in summary text', () => {
-    render(
-      <ArtifactHeader
-        label="test"
-        kind="file"
-        summary='<script>alert("xss")</script>'
-      />,
-    );
+    render(<ArtifactHeader label="test" kind="file" summary='<script>alert("xss")</script>' />);
     expect(document.querySelector('script')).toBeNull();
   });
 
@@ -192,6 +178,7 @@ describe('ArtifactHeader', () => {
 
 // ─── ArtifactPreview ────────────────────────────────────────────────────────
 
+// eslint-disable-next-line max-lines-per-function -- scenario-rich renderer coverage
 describe('ArtifactPreview', () => {
   it('renders header with label and kind', () => {
     render(<ArtifactPreview artifact={makeArtifact()} />);

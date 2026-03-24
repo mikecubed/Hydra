@@ -124,7 +124,7 @@ describe('hydrateEntryArtifacts', () => {
         createdAt: '2026-01-01T00:00:00Z',
       },
     ]);
-    assert.equal(result[0]!.availability, 'listed');
+    assert.equal(result[0].availability, 'listed');
   });
 });
 
@@ -149,7 +149,7 @@ describe('buildArtifactViewFromContent', () => {
     assert.equal(result.label, 'main.ts');
     assert.equal(result.availability, 'ready');
     assert.equal(result.previewBlocks.length, 1);
-    assert.equal(result.previewBlocks[0]!.text, content);
+    assert.equal(result.previewBlocks[0].text, content);
   });
 
   it('uses code block kind for code-like artifacts', () => {
@@ -163,7 +163,7 @@ describe('buildArtifactViewFromContent', () => {
     };
 
     const result = buildArtifactViewFromContent(artifact, '+ added line');
-    assert.equal(result.previewBlocks[0]!.kind, 'code');
+    assert.equal(result.previewBlocks[0].kind, 'code');
   });
 
   it('uses text block kind for prose artifacts', () => {
@@ -177,7 +177,7 @@ describe('buildArtifactViewFromContent', () => {
     };
 
     const result = buildArtifactViewFromContent(artifact, 'Step 1: ...');
-    assert.equal(result.previewBlocks[0]!.kind, 'text');
+    assert.equal(result.previewBlocks[0].kind, 'text');
   });
 });
 
@@ -200,9 +200,9 @@ describe('reducer entry/hydrate-artifacts', () => {
       artifacts,
     });
 
-    const updated = store.getState().conversations.get('conv-1')!.entries[0]!;
+    const updated = store.getState().conversations.get('conv-1')!.entries[0];
     assert.equal(updated.artifacts.length, 1);
-    assert.equal(updated.artifacts[0]!.artifactId, 'art-1');
+    assert.equal(updated.artifacts[0].artifactId, 'art-1');
   });
 
   it('does not affect entries in other conversations', () => {
@@ -226,7 +226,7 @@ describe('reducer entry/hydrate-artifacts', () => {
       artifacts: [{ artifactId: 'art-1', kind: 'file', label: 'f.ts', availability: 'listed' }],
     });
 
-    const conv2Entry = store.getState().conversations.get('conv-2')!.entries[0]!;
+    const conv2Entry = store.getState().conversations.get('conv-2')!.entries[0];
     assert.equal(conv2Entry.artifacts.length, 0);
   });
 
@@ -275,12 +275,10 @@ describe('reducer entry/hydrate-artifacts', () => {
       type: 'entry/hydrate-artifacts',
       conversationId: 'conv-1',
       turnId: 't1',
-      artifacts: [
-        { artifactId: 'new-art', kind: 'file', label: 'new.ts', availability: 'listed' },
-      ],
+      artifacts: [{ artifactId: 'new-art', kind: 'file', label: 'new.ts', availability: 'listed' }],
     });
 
-    const updated = store.getState().conversations.get('conv-1')!.entries[0]!;
+    const updated = store.getState().conversations.get('conv-1')!.entries[0];
     assert.equal(updated.artifacts.length, 2);
     // Existing kept
     assert.ok(updated.artifacts.some((a) => a.artifactId === 'existing-art'));
@@ -306,7 +304,7 @@ describe('reducer entry/hydrate-artifacts', () => {
       artifacts: [{ artifactId: 'art-1', kind: 'file', label: 'main.ts', availability: 'listed' }],
     });
 
-    const updated = store.getState().conversations.get('conv-1')!.entries[0]!;
+    const updated = store.getState().conversations.get('conv-1')!.entries[0];
     assert.equal(updated.artifacts.length, 1);
   });
 });
@@ -507,7 +505,7 @@ describe('fetchArtifactContent', () => {
 
   it('dispatches artifact/show when request is still current', async () => {
     const dispatched: unknown[] = [];
-    let currentId = 1;
+    const currentId = 1;
     const mockClient: ArtifactContentClient = {
       async getArtifactContent(artifactId) {
         return makeContentResponse(artifactId);

@@ -661,7 +661,6 @@ function applyHydrateArtifacts(
   const current = state.conversations.get(conversationId);
   if (current == null) return state;
 
-  let changed = false;
   const nextEntries = current.entries.map((entry) => {
     if (entry.turnId !== turnId) return entry;
 
@@ -669,11 +668,11 @@ function applyHydrateArtifacts(
     const newArtifacts = artifacts.filter((a) => !existingIds.has(a.artifactId));
     if (newArtifacts.length === 0) return entry;
 
-    changed = true;
     return { ...entry, artifacts: [...entry.artifacts, ...newArtifacts] };
   });
 
-  if (!changed) return state;
+  const hasChanges = nextEntries.some((entry, index) => entry !== current.entries[index]);
+  if (!hasChanges) return state;
 
   const nextConversations = new Map(state.conversations);
   nextConversations.set(conversationId, { ...current, entries: nextEntries });
@@ -787,11 +786,6 @@ export function reduceWorkspaceState(
         action.controls,
       );
     case 'entry/hydrate-artifacts':
-      return applyHydrateArtifacts(
-        state,
-        action.conversationId,
-        action.turnId,
-        action.artifacts,
-      );
+      return applyHydrateArtifacts(state, action.conversationId, action.turnId, action.artifacts);
   }
 }

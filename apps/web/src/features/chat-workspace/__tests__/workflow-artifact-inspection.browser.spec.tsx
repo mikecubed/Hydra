@@ -17,6 +17,12 @@ import {
   conversation,
 } from './browser-helpers.ts';
 
+function requestUrl(input: string | URL | Request): string {
+  if (typeof input === 'string') return input;
+  if (input instanceof URL) return input.toString();
+  return input.url;
+}
+
 beforeEach(() => {
   vi.stubGlobal('WebSocket', FakeWebSocket);
 });
@@ -28,51 +34,54 @@ afterEach(() => {
   cleanup();
 });
 
+// eslint-disable-next-line max-lines-per-function -- compact single-scenario regression file
 describe('workspace artifact hydration workflows', () => {
+  // eslint-disable-next-line max-lines-per-function -- multi-step route hydration regression
   it('does not duplicate in-flight artifact hydration requests across rerenders', async () => {
     const listCounts = new Map<string, number>();
-    let resolveSecondTurnArtifacts: ((response: Response) => void) | null = null;
+    let resolveSecondTurnArtifacts = (_response: Response): void => {
+      throw new Error('Expected turn-2 artifact hydration request to be pending');
+    };
 
     fetchSpy.mockImplementation((input) => {
-      const url =
-        typeof input === 'string' ? input : input instanceof URL ? input.toString() : input.url;
+      const url = requestUrl(input);
       if (url === '/conversations?status=active&limit=20') {
         return Promise.resolve(
           jsonResponse({
-          conversations: [conversation('conv-1', 'Artifact hydration')],
-          totalCount: 1,
+            conversations: [conversation('conv-1', 'Artifact hydration')],
+            totalCount: 1,
           }),
         );
       }
       if (url === '/conversations/conv-1/turns?limit=50') {
         return Promise.resolve(
           jsonResponse({
-          turns: [
-            {
-              id: 'turn-1',
-              conversationId: 'conv-1',
-              position: 1,
-              kind: 'agent',
-              attribution: { type: 'agent', label: 'Claude' },
-              response: 'First turn',
-              status: 'completed',
-              createdAt: '2026-07-01T00:00:01.000Z',
-              completedAt: '2026-07-01T00:00:02.000Z',
-            },
-            {
-              id: 'turn-2',
-              conversationId: 'conv-1',
-              position: 2,
-              kind: 'agent',
-              attribution: { type: 'agent', label: 'Claude' },
-              response: 'Second turn',
-              status: 'completed',
-              createdAt: '2026-07-01T00:00:03.000Z',
-              completedAt: '2026-07-01T00:00:04.000Z',
-            },
-          ],
-          totalCount: 2,
-          hasMore: false,
+            turns: [
+              {
+                id: 'turn-1',
+                conversationId: 'conv-1',
+                position: 1,
+                kind: 'agent',
+                attribution: { type: 'agent', label: 'Claude' },
+                response: 'First turn',
+                status: 'completed',
+                createdAt: '2026-07-01T00:00:01.000Z',
+                completedAt: '2026-07-01T00:00:02.000Z',
+              },
+              {
+                id: 'turn-2',
+                conversationId: 'conv-1',
+                position: 2,
+                kind: 'agent',
+                attribution: { type: 'agent', label: 'Claude' },
+                response: 'Second turn',
+                status: 'completed',
+                createdAt: '2026-07-01T00:00:03.000Z',
+                completedAt: '2026-07-01T00:00:04.000Z',
+              },
+            ],
+            totalCount: 2,
+            hasMore: false,
           }),
         );
       }
@@ -116,10 +125,7 @@ describe('workspace artifact hydration workflows', () => {
       expect(listCounts.get('turn-2')).toBe(1);
     });
 
-    if (resolveSecondTurnArtifacts == null) {
-      throw new Error('Expected turn-2 artifact hydration request to be pending');
-    }
-    const resolveArtifacts: (response: Response) => void = resolveSecondTurnArtifacts;
+    const resolveArtifacts = resolveSecondTurnArtifacts;
     resolveArtifacts(
       jsonResponse({
         artifacts: [

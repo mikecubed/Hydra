@@ -68,7 +68,7 @@ export function ArtifactKindBadge({ kind }: ArtifactKindBadgeProps): JSX.Element
 // ─── ArtifactContentBlock ───────────────────────────────────────────────────
 
 export interface ArtifactContentBlockProps {
-  readonly kind: ContentBlockKind | string;
+  readonly kind: ContentBlockKind;
   readonly text: string | null | undefined;
   readonly 'data-testid'?: string;
 }

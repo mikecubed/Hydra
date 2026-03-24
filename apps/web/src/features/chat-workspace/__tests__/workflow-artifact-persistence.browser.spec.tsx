@@ -45,6 +45,8 @@ function completedTurn(
   position: number,
   response: string,
 ): Record<string, unknown> {
+  const createdSecond = String(position).padStart(2, '0');
+  const completedSecond = String(position + 1).padStart(2, '0');
   return {
     id,
     conversationId,
@@ -53,8 +55,8 @@ function completedTurn(
     attribution: { type: 'agent', label: 'Claude' },
     response,
     status: 'completed',
-    createdAt: `2026-07-01T00:00:0${position}.000Z`,
-    completedAt: `2026-07-01T00:00:0${position + 1}.000Z`,
+    createdAt: `2026-07-01T00:00:${createdSecond}.000Z`,
+    completedAt: `2026-07-01T00:00:${completedSecond}.000Z`,
   };
 }
 
@@ -80,6 +82,12 @@ const TURN_2_ARTIFACTS_RESPONSE = {
   artifacts: [] as unknown[],
 };
 
+function requestUrl(input: string | URL | Request): string {
+  if (typeof input === 'string') return input;
+  if (input instanceof URL) return input.toString();
+  return input.url;
+}
+
 // ─── Helpers ────────────────────────────────────────────────────────────────
 
 /**
@@ -88,8 +96,7 @@ const TURN_2_ARTIFACTS_RESPONSE = {
  */
 function installArtifactScenario(): void {
   fetchSpy.mockImplementation((input: string | URL | Request) => {
-    const url =
-      typeof input === 'string' ? input : input instanceof URL ? input.toString() : input.url;
+    const url = requestUrl(input);
 
     if (url === '/conversations?status=active&limit=20') {
       return Promise.resolve(
@@ -133,8 +140,7 @@ function installArtifactScenario(): void {
  */
 function installTwoConversationScenario(): void {
   fetchSpy.mockImplementation((input: string | URL | Request) => {
-    const url =
-      typeof input === 'string' ? input : input instanceof URL ? input.toString() : input.url;
+    const url = requestUrl(input);
 
     if (url === '/conversations?status=active&limit=20') {
       return Promise.resolve(
@@ -195,8 +201,7 @@ function installTwoConversationScenario(): void {
  */
 function installRefreshReopenScenario(): void {
   fetchSpy.mockImplementation((input: string | URL | Request) => {
-    const url =
-      typeof input === 'string' ? input : input instanceof URL ? input.toString() : input.url;
+    const url = requestUrl(input);
 
     if (url === '/conversations?status=active&limit=20') {
       return Promise.resolve(
@@ -249,7 +254,9 @@ function installRefreshReopenScenario(): void {
 
 async function findTurnArticle(turnOutput: string): Promise<HTMLElement> {
   await screen.findByText(turnOutput);
-  const article = transcriptArticles().find((candidate) => candidate.textContent?.includes(turnOutput));
+  const article = transcriptArticles().find((candidate) =>
+    candidate.textContent.includes(turnOutput),
+  );
   if (article == null) {
     throw new Error(`Expected transcript article for turn output: ${turnOutput}`);
   }
@@ -276,6 +283,7 @@ async function openArtifactFromTurn(turnOutput = 'First turn output'): Promise<v
 
 // ─── Tests ──────────────────────────────────────────────────────────────────
 
+// eslint-disable-next-line max-lines-per-function -- scenario-focused workflow coverage file
 describe('workspace artifact persistence workflows', () => {
   it('hydrates artifacts from listArtifactsForTurn and opens content via getArtifactContent', async () => {
     installArtifactScenario();
@@ -302,16 +310,12 @@ describe('workspace artifact persistence workflows', () => {
     expect(screen.getByText('console.log("hello world");')).toBeInTheDocument();
 
     // Verify the correct API calls were made
-    const fetchCalls = fetchSpy.mock.calls.map((c) => {
-      const input = c[0] as string | URL | Request;
-      return typeof input === 'string' ? input : input instanceof URL ? input.toString() : input.url;
-    });
+    const fetchCalls = fetchSpy.mock.calls.map(([input]) => requestUrl(input));
     expect(fetchCalls).toContain('/turns/turn-1/artifacts');
     expect(fetchCalls).toContain('/turns/turn-2/artifacts');
     expect(fetchCalls).toContain('/artifacts/art-main');
   });
 
-  // eslint-disable-next-line max-lines-per-function -- multi-phase workflow test
   it('artifacts remain accessible after full page refresh', async () => {
     installRefreshReopenScenario();
 
@@ -365,7 +369,6 @@ describe('workspace artifact persistence workflows', () => {
     expect(within(secondTurnArticle).queryByTestId('artifact-badge')).toBeNull();
   });
 
-  // eslint-disable-next-line max-lines-per-function -- multi-phase workflow test
   it('artifacts remain accessible after switching away and reopening conversation', async () => {
     installTwoConversationScenario();
 
@@ -426,11 +429,12 @@ describe('workspace artifact persistence workflows', () => {
   });
 
   it('artifact panel shows loading state before content arrives', async () => {
-    let resolveContent: ((r: Response) => void) | null = null;
+    let resolveContent = (_response: Response): void => {
+      throw new Error('Expected delayed artifact content request to be pending');
+    };
 
     fetchSpy.mockImplementation((input: string | URL | Request) => {
-      const url =
-        typeof input === 'string' ? input : input instanceof URL ? input.toString() : input.url;
+      const url = requestUrl(input);
 
       if (url === '/conversations?status=active&limit=20') {
         return Promise.resolve(
@@ -479,9 +483,8 @@ describe('workspace artifact persistence workflows', () => {
     expect(screen.getByTestId('artifact-loading')).toBeInTheDocument();
 
     // Resolve the content fetch
-    expect(resolveContent).not.toBeNull();
     act(() => {
-      resolveContent!(jsonResponse(ARTIFACT_CONTENT_RESPONSE));
+      resolveContent(jsonResponse(ARTIFACT_CONTENT_RESPONSE));
     });
 
     // Loading state replaced by content

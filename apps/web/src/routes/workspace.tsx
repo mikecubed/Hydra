@@ -1363,7 +1363,7 @@ function useArtifactHydration(
     if (activeConversationId == null) return;
 
     const conversation = store.getState().conversations.get(activeConversationId);
-    if (conversation == null || !conversation.historyLoaded) return;
+    if (conversation?.historyLoaded !== true) return;
     const hydratedTurns =
       hydratedTurnsByConversationRef.current.get(activeConversationId) ?? new Set<string>();
     const pendingTurns =
@@ -1374,16 +1374,18 @@ function useArtifactHydration(
     // Collect turn entries that need artifact hydration — skip turns that
     // already have artifacts (hydrated via stream or a previous pass) and
     // turns that were successfully hydrated in an earlier invocation.
-    const turnIds = entries
-      .filter(
-        (e) =>
-          e.kind === 'turn' &&
-          e.turnId != null &&
-          e.artifacts.length === 0 &&
-          !hydratedTurns.has(e.turnId) &&
-          !pendingTurns.has(e.turnId),
-      )
-      .map((e) => e.turnId!);
+    const turnIds = entries.flatMap((entry) => {
+      if (
+        entry.kind !== 'turn' ||
+        entry.turnId == null ||
+        entry.artifacts.length > 0 ||
+        hydratedTurns.has(entry.turnId) ||
+        pendingTurns.has(entry.turnId)
+      ) {
+        return [];
+      }
+      return [entry.turnId];
+    });
 
     if (turnIds.length === 0) return;
     for (const turnId of turnIds) {
@@ -1397,7 +1399,9 @@ function useArtifactHydration(
       conversationId,
       turnIds,
       client,
-      (action) => store.dispatch(action),
+      (action) => {
+        store.dispatch(action);
+      },
       hydratedTurns,
     ).then((failedTurns) => {
       for (const turnId of turnIds) {
@@ -1422,14 +1426,15 @@ function useArtifactHydration(
     };
   }, [activeConversationId, client, entries, retryNonce, store]);
 
-  useEffect(() => {
-    return () => {
+  useEffect(
+    () => () => {
       if (retryTimerRef.current != null) {
         clearTimeout(retryTimerRef.current);
         retryTimerRef.current = null;
       }
-    };
-  }, []);
+    },
+    [],
+  );
 }
 
 // eslint-disable-next-line max-lines-per-function
@@ -1530,7 +1535,9 @@ export function WorkspaceRoute(): JSX.Element {
         () => artifactRequestRef.current,
         () => store.getState().activeConversationId === state.activeConversationId,
         client,
-        (action) => store.dispatch(action),
+        (action) => {
+          store.dispatch(action);
+        },
         loadingArtifact,
       );
     },

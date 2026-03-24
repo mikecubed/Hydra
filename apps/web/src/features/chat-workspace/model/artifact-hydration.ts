@@ -89,31 +89,31 @@ export async function hydrateConversationArtifacts(
   hydratedTurns: Set<string>,
 ): Promise<ReadonlySet<string>> {
   const failed = new Set<string>();
-  for (const turnId of turnIds) {
-    try {
-      const response = await client.listArtifactsForTurn(turnId);
-      if (response.artifacts.length > 0) {
-        const refs = hydrateEntryArtifacts(response.artifacts);
-        dispatch({
-          type: 'entry/hydrate-artifacts',
-          conversationId,
-          turnId,
-          artifacts: refs,
-        });
+  await Promise.all(
+    turnIds.map(async (turnId) => {
+      try {
+        const response = await client.listArtifactsForTurn(turnId);
+        if (response.artifacts.length > 0) {
+          const refs = hydrateEntryArtifacts(response.artifacts);
+          dispatch({
+            type: 'entry/hydrate-artifacts',
+            conversationId,
+            turnId,
+            artifacts: refs,
+          });
+        }
+        hydratedTurns.add(turnId);
+      } catch {
+        failed.add(turnId);
       }
-      hydratedTurns.add(turnId);
-    } catch {
-      failed.add(turnId);
-    }
-  }
+    }),
+  );
   return failed;
 }
 
 /** Minimal client surface needed for artifact content fetch. */
 export interface ArtifactContentClient {
-  getArtifactContent(
-    artifactId: string,
-  ): Promise<{ artifact: Artifact; content: string }>;
+  getArtifactContent(artifactId: string): Promise<{ artifact: Artifact; content: string }>;
 }
 
 /**

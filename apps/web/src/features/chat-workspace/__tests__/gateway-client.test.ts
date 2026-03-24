@@ -1230,7 +1230,7 @@ describe('GatewayClient', () => {
     });
 
     it('uses GET method without CSRF header', async () => {
-      let capturedHeaders: CapturedHeaders = undefined;
+      let capturedHeaders: CapturedHeaders;
       const client = buildClient(
         async (_input, init) => {
           capturedHeaders = init?.headers;
@@ -1309,7 +1309,9 @@ describe('GatewayClient', () => {
     });
 
     it('throws GatewayRequestError with fallback on non-JSON error', async () => {
-      const client = buildClient(async () => new Response('Internal Server Error', { status: 500 }));
+      const client = buildClient(
+        async () => new Response('Internal Server Error', { status: 500 }),
+      );
 
       await assert.rejects(
         () => client.getArtifactContent('art-1'),
@@ -1323,7 +1325,7 @@ describe('GatewayClient', () => {
     });
 
     it('uses GET method without CSRF header', async () => {
-      let capturedHeaders: CapturedHeaders = undefined;
+      let capturedHeaders: CapturedHeaders;
       const client = buildClient(
         async (_input, init) => {
           capturedHeaders = init?.headers;

@@ -30,7 +30,7 @@ export const ARTIFACT_KIND_LABELS: Readonly<Record<string, string>> = {
  */
 export function artifactKindToLabel(kind: string): string {
   if (kind in ARTIFACT_KIND_LABELS) {
-    return ARTIFACT_KIND_LABELS[kind]!;
+    return ARTIFACT_KIND_LABELS[kind];
   }
   if (kind === '') return '';
   return kind
@@ -111,7 +111,7 @@ const STRUCTURED_STYLE: CSSProperties = {
 /**
  * Return the inline style object for a given content block kind.
  */
-export function contentBlockStyle(kind: ContentBlockKind | string): CSSProperties {
+export function contentBlockStyle(kind: ContentBlockKind): CSSProperties {
   switch (kind) {
     case 'code':
       return CODE_STYLE;

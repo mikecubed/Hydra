@@ -177,7 +177,9 @@ function ArtifactList({
             data-testid="artifact-badge"
             onClick={
               onArtifactSelect != null && turnId != null
-                ? () => onArtifactSelect(artifact.artifactId, turnId)
+                ? () => {
+                    onArtifactSelect(artifact.artifactId, turnId);
+                  }
                 : undefined
             }
           >
@@ -254,7 +256,11 @@ export function TranscriptTurn({
         </div>
       )}
 
-      <ArtifactList artifacts={entry.artifacts} turnId={entry.turnId} onArtifactSelect={onArtifactSelect} />
+      <ArtifactList
+        artifacts={entry.artifacts}
+        turnId={entry.turnId}
+        onArtifactSelect={onArtifactSelect}
+      />
 
       {entry.prompt != null && <PromptCard prompt={entry.prompt} onRespond={onRespondToPrompt} />}
 

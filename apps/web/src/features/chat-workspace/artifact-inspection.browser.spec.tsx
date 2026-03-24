@@ -130,7 +130,7 @@ describe('TranscriptTurn artifact badges', () => {
     const badges = screen.getAllByTestId('artifact-badge');
     expect(badges.length).toBe(1);
     // Should be a button element
-    expect(badges[0]!.tagName).toBe('BUTTON');
+    expect(badges[0]?.tagName).toBe('BUTTON');
   });
 
   it('fires onArtifactSelect with artifactId and turnId when badge clicked', () => {
@@ -156,7 +156,9 @@ describe('TranscriptTurn artifact badges', () => {
     const badges = screen.getAllByTestId('artifact-badge');
     expect(badges.length).toBe(2);
 
-    fireEvent.click(badges[1]!);
+    const secondBadge = badges.at(1);
+    if (secondBadge === undefined) throw new Error('Expected second artifact badge');
+    fireEvent.click(secondBadge);
     expect(onArtifactSelect).toHaveBeenCalledWith('art-b', 'turn-1');
   });
 
