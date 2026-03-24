@@ -559,8 +559,10 @@ describe('TranscriptPane', () => {
       ],
       totalCount: 1,
     };
+    // Return exactly 50 turns for a limit=50 request (realistic pagination).
+    // totalCount=51 and hasMore=true indicate one older turn exists server-side.
     const history: LoadTurnHistoryResponse = {
-      turns: Array.from({ length: 51 }, (_, index) => {
+      turns: Array.from({ length: 50 }, (_, index) => {
         const entryNumber = String(index + 1);
         const minuteText = String(index).padStart(2, '0');
         return {
@@ -576,7 +578,7 @@ describe('TranscriptPane', () => {
         };
       }),
       totalCount: 51,
-      hasMore: false,
+      hasMore: true,
     };
 
     installFetchStub((url) => {
@@ -599,7 +601,22 @@ describe('TranscriptPane', () => {
 
     render(<AppProviders />);
 
-    expect(await screen.findByText('Historical entry 51')).toBeInTheDocument();
+    // Wait for the initial 50 REST entries to render.
+    expect(await screen.findByText('Historical entry 50')).toBeInTheDocument();
+
+    // Stream in a 51st entry via WebSocket so client-side count exceeds the
+    // visible window (50), exercising client-side windowing realistically.
+    const ws = openAndSubscribe('conv-1');
+    act(() => {
+      ws.simulateMessage(
+        streamFrame('conv-1', 1, 'turn-51', 'stream-started', { attribution: 'Codex' }),
+      );
+      ws.simulateMessage(
+        streamFrame('conv-1', 2, 'turn-51', 'text-delta', { text: 'Streamed entry 51' }),
+      );
+    });
+
+    expect(await screen.findByText('Streamed entry 51')).toBeInTheDocument();
     expect(screen.queryByText('Historical entry 1')).toBeNull();
     expect(screen.getByTestId('transcript-orientation')).toHaveTextContent(
       'Showing the most recent 50 of 51 loaded entries.',

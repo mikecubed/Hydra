@@ -967,15 +967,14 @@ const STALE_CONTROL_REASON = 'Already acted on in another session';
  * no longer valid must be explicitly disabled with a reason rather than
  * silently stripped, so the operator understands why controls are unavailable.
  *
- * The merge algorithm (`mergeTerminalControls`) strips cancel controls from
- * terminal turns. This function restores them as disabled with an explicit
- * reason, and disables any other enabled controls that became stale.
- *
- * - Turns that transitioned to terminal have their enabled controls disabled.
+ * - Turns that transitioned to terminal have their cancel controls disabled
+ *   (cancel is always stale once a turn reaches terminal state).
  * - Controls that were present in `previousEntries` but stripped during merge
- *   are re-added as disabled with a stale reason.
- * - Already-disabled controls are preserved as-is.
- * - Non-terminal entries are untouched.
+ *   are re-added as disabled with a stale reason, preserving operator
+ *   visibility into what actions were previously available.
+ * - Authoritative terminal controls already present in `mergedEntries` are
+ *   preserved as-is (they are the source of truth for the final state).
+ * - Already-disabled controls and non-terminal entries are untouched.
  *
  * Returns `mergedEntries` by reference when no changes are needed.
  */

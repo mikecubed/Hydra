@@ -374,11 +374,15 @@ function applyConversationEntries(
  * status and contentBlocks are preserved (the stream is likely ahead of the
  * last REST snapshot); for terminal turns REST is fully authoritative.
  *
- * After merging, detects convergence drift (turn-status changes that indicate
- * another session acted) and:
- *  - Invalidates stale entry controls with an explicit reason.
- *  - Updates `controlState.staleReason` when external changes are detected,
- *    or clears it when no drift occurred (convergence complete).
+ * After merging, detects convergence drift and actionable control
+ * invalidation (enabled controls that became stale):
+ *  - Stale entry-level controls are invalidated (disabled with a reason)
+ *    whenever external drift *or* actionable invalidation is detected.
+ *  - The conversation-level `controlState.staleReason` is only set when
+ *    actionable invalidation occurs (i.e. the operator had controls that
+ *    are no longer valid), and only cleared when the specific convergence
+ *    reason is no longer applicable — other staleReason values are left
+ *    intact.
  *
  * Sets `historyLoaded: true` so the transcript loader knows not to re-fetch.
  */
