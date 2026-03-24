@@ -21,6 +21,11 @@ import {
 import {
   hydrateEntryArtifacts,
   buildArtifactViewFromContent,
+  hydrateConversationArtifacts,
+  fetchArtifactContent,
+  type HydrationClient,
+  type ArtifactContentClient,
+  type HydrationDispatch,
 } from '../model/artifact-hydration.ts';
 
 // ─── Test helpers ───────────────────────────────────────────────────────────
@@ -364,5 +369,255 @@ describe('artifact show/clear store integration', () => {
     store.dispatch({ type: 'conversation/select', conversationId: 'conv-2' });
 
     assert.equal(store.getState().visibleArtifact, null);
+  });
+});
+
+// ─── hydrateConversationArtifacts — retry after transient failure ────────────
+
+describe('hydrateConversationArtifacts', () => {
+  function makeArtifact(id: string, turnId: string) {
+    return {
+      id,
+      turnId,
+      kind: 'file' as const,
+      label: `${id}.ts`,
+      size: 100,
+      createdAt: '2026-01-01T00:00:00Z',
+    };
+  }
+
+  it('marks successful turns as hydrated', async () => {
+    const hydratedTurns = new Set<string>();
+    const dispatched: unknown[] = [];
+    const mockClient: HydrationClient = {
+      async listArtifactsForTurn(turnId) {
+        return { artifacts: [makeArtifact(`art-${turnId}`, turnId)] };
+      },
+    };
+
+    await hydrateConversationArtifacts(
+      'conv-1',
+      ['t1', 't2'],
+      mockClient,
+      (action) => dispatched.push(action),
+      hydratedTurns,
+    );
+
+    assert.ok(hydratedTurns.has('t1'));
+    assert.ok(hydratedTurns.has('t2'));
+    assert.equal(dispatched.length, 2);
+  });
+
+  it('does NOT mark failed turns as hydrated', async () => {
+    const hydratedTurns = new Set<string>();
+    const dispatched: unknown[] = [];
+    const mockClient: HydrationClient = {
+      async listArtifactsForTurn(turnId) {
+        if (turnId === 't2') throw new Error('network timeout');
+        return { artifacts: [makeArtifact(`art-${turnId}`, turnId)] };
+      },
+    };
+
+    const failed = await hydrateConversationArtifacts(
+      'conv-1',
+      ['t1', 't2'],
+      mockClient,
+      (action) => dispatched.push(action),
+      hydratedTurns,
+    );
+
+    assert.ok(hydratedTurns.has('t1'), 'successful turn should be hydrated');
+    assert.ok(!hydratedTurns.has('t2'), 'failed turn must NOT be hydrated');
+    assert.ok(failed.has('t2'), 'failed turn should be in returned set');
+    assert.equal(dispatched.length, 1, 'only successful turn dispatches');
+  });
+
+  it('allows retry of previously failed turns on second call', async () => {
+    const hydratedTurns = new Set<string>();
+    const dispatched: unknown[] = [];
+    let callCount = 0;
+    const mockClient: HydrationClient = {
+      async listArtifactsForTurn(turnId) {
+        callCount++;
+        if (turnId === 't2' && callCount <= 2) throw new Error('transient');
+        return { artifacts: [makeArtifact(`art-${turnId}`, turnId)] };
+      },
+    };
+    const dispatch: HydrationDispatch = (action) => dispatched.push(action);
+
+    // First pass: t1 succeeds, t2 fails
+    await hydrateConversationArtifacts('conv-1', ['t1', 't2'], mockClient, dispatch, hydratedTurns);
+    assert.ok(!hydratedTurns.has('t2'), 'failed turn not hydrated after first pass');
+
+    // Second pass: only retry un-hydrated turns (t2)
+    const retryTurns = ['t1', 't2'].filter((id) => !hydratedTurns.has(id));
+    assert.deepEqual(retryTurns, ['t2']);
+
+    await hydrateConversationArtifacts('conv-1', retryTurns, mockClient, dispatch, hydratedTurns);
+    assert.ok(hydratedTurns.has('t2'), 't2 should be hydrated after retry');
+  });
+
+  it('does not dispatch for turns with zero artifacts', async () => {
+    const hydratedTurns = new Set<string>();
+    const dispatched: unknown[] = [];
+    const mockClient: HydrationClient = {
+      async listArtifactsForTurn() {
+        return { artifacts: [] };
+      },
+    };
+
+    await hydrateConversationArtifacts(
+      'conv-1',
+      ['t1'],
+      mockClient,
+      (action) => dispatched.push(action),
+      hydratedTurns,
+    );
+
+    assert.ok(hydratedTurns.has('t1'), 'turn with 0 artifacts is still marked hydrated');
+    assert.equal(dispatched.length, 0, 'no dispatch for empty artifacts');
+  });
+});
+
+// ─── fetchArtifactContent — stale response guard ────────────────────────────
+
+describe('fetchArtifactContent', () => {
+  const loadingArtifact: ArtifactViewState = {
+    artifactId: 'art-1',
+    turnId: 'turn-1',
+    kind: 'file',
+    label: 'main.ts',
+    availability: 'loading',
+    previewBlocks: [],
+  };
+
+  function makeContentResponse(id: string) {
+    return {
+      artifact: {
+        id,
+        turnId: 'turn-1',
+        kind: 'file' as const,
+        label: 'main.ts',
+        size: 42,
+        createdAt: '2026-01-01T00:00:00Z',
+      },
+      content: `content-of-${id}`,
+    };
+  }
+
+  it('dispatches artifact/show when request is still current', async () => {
+    const dispatched: unknown[] = [];
+    let currentId = 1;
+    const mockClient: ArtifactContentClient = {
+      async getArtifactContent(artifactId) {
+        return makeContentResponse(artifactId);
+      },
+    };
+
+    await fetchArtifactContent(
+      'art-1',
+      1,
+      () => currentId,
+      mockClient,
+      (action) => dispatched.push(action),
+      loadingArtifact,
+    );
+
+    assert.equal(dispatched.length, 1);
+    const action = dispatched[0] as { type: string; artifact: ArtifactViewState };
+    assert.equal(action.type, 'artifact/show');
+    assert.equal(action.artifact.availability, 'ready');
+  });
+
+  it('drops stale response when requestId no longer matches (panel closed)', async () => {
+    const dispatched: unknown[] = [];
+    let currentId = 1;
+    const mockClient: ArtifactContentClient = {
+      async getArtifactContent(artifactId) {
+        // Simulate panel close during fetch
+        currentId = 2;
+        return makeContentResponse(artifactId);
+      },
+    };
+
+    await fetchArtifactContent(
+      'art-1',
+      1,
+      () => currentId,
+      mockClient,
+      (action) => dispatched.push(action),
+      loadingArtifact,
+    );
+
+    assert.equal(dispatched.length, 0, 'stale response must not dispatch');
+  });
+
+  it('drops stale response when a newer artifact was selected', async () => {
+    const dispatched: unknown[] = [];
+    let currentId = 1;
+    const mockClient: ArtifactContentClient = {
+      async getArtifactContent(artifactId) {
+        // Simulate new selection during fetch
+        currentId = 3;
+        return makeContentResponse(artifactId);
+      },
+    };
+
+    await fetchArtifactContent(
+      'art-1',
+      1,
+      () => currentId,
+      mockClient,
+      (action) => dispatched.push(action),
+      loadingArtifact,
+    );
+
+    assert.equal(dispatched.length, 0, 'superseded selection must not dispatch');
+  });
+
+  it('drops stale error when requestId no longer matches', async () => {
+    const dispatched: unknown[] = [];
+    let currentId = 1;
+    const mockClient: ArtifactContentClient = {
+      async getArtifactContent() {
+        currentId = 5;
+        throw new Error('network error');
+      },
+    };
+
+    await fetchArtifactContent(
+      'art-1',
+      1,
+      () => currentId,
+      mockClient,
+      (action) => dispatched.push(action),
+      loadingArtifact,
+    );
+
+    assert.equal(dispatched.length, 0, 'stale error must not dispatch');
+  });
+
+  it('dispatches error state when fetch fails and request is current', async () => {
+    const dispatched: unknown[] = [];
+    const currentId = 1;
+    const mockClient: ArtifactContentClient = {
+      async getArtifactContent() {
+        throw new Error('server error');
+      },
+    };
+
+    await fetchArtifactContent(
+      'art-1',
+      1,
+      () => currentId,
+      mockClient,
+      (action) => dispatched.push(action),
+      loadingArtifact,
+    );
+
+    assert.equal(dispatched.length, 1);
+    const action = dispatched[0] as { type: string; artifact: ArtifactViewState };
+    assert.equal(action.type, 'artifact/show');
+    assert.equal(action.artifact.availability, 'error');
   });
 });
