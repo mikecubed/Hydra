@@ -10,6 +10,8 @@ export interface TranscriptPaneProps extends TranscriptTurnCallbacks {
   readonly loadState: ConversationLoadState | null;
   readonly hasActiveConversation: boolean;
   readonly hasMoreHistory?: boolean;
+  /** Number of loaded entries hidden by client-side windowing. */
+  readonly hiddenEntryCount?: number;
   readonly onRetry?: () => void;
   /**
    * Resolve per-entry turn action flags. The parent computes eligibility
@@ -29,12 +31,32 @@ const emptyStyle = {
   color: '#94a3b8',
 } as const;
 
+/** Build the orientation message for large-history transcripts. */
+function orientationMessage(
+  visibleCount: number,
+  hiddenEntryCount: number,
+  hasMoreHistory: boolean,
+): string {
+  const total = visibleCount + hiddenEntryCount;
+  const visibleText = String(visibleCount);
+  const totalText = String(total);
+  if (hiddenEntryCount > 0 && hasMoreHistory) {
+    return `Showing the most recent ${visibleText} of ${totalText} loaded entries. Additional older history is available on the server.`;
+  }
+  if (hiddenEntryCount > 0) {
+    return `Showing the most recent ${visibleText} of ${totalText} loaded entries.`;
+  }
+  // Only hasMoreHistory, no client-side windowing
+  return 'Showing the most recent transcript entries. Older history is not loaded yet.';
+}
+
 // eslint-disable-next-line max-lines-per-function
 export function TranscriptPane({
   entries,
   loadState,
   hasActiveConversation,
   hasMoreHistory = false,
+  hiddenEntryCount = 0,
   onRetry,
   onRespondToPrompt,
   onCancelTurn,
@@ -98,9 +120,9 @@ export function TranscriptPane({
   return (
     <div role="log" style={paneStyle}>
       {loadState === 'loading' && <p style={emptyStyle}>Loading transcript…</p>}
-      {hasMoreHistory && (
-        <p style={emptyStyle}>
-          Showing the most recent transcript entries. Older history is not loaded yet.
+      {(hasMoreHistory || hiddenEntryCount > 0) && (
+        <p style={emptyStyle} data-testid="transcript-orientation">
+          {orientationMessage(entries.length, hiddenEntryCount, hasMoreHistory)}
         </p>
       )}
       {entries.map((entry) => {

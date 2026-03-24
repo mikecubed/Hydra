@@ -29,7 +29,12 @@ import type {
 } from './workspace-types.ts';
 
 import { mergePromptState } from './prompt-merge.ts';
-import { mergeAuthoritativeEntries } from './reconciler.ts';
+import {
+  detectConvergenceDrift,
+  hasActionableControlInvalidation,
+  invalidateStaleEntryControls,
+  mergeAuthoritativeEntries,
+} from './reconciler.ts';
 
 // ─── Internal helpers ───────────────────────────────────────────────────────
 
@@ -369,6 +374,16 @@ function applyConversationEntries(
  * status and contentBlocks are preserved (the stream is likely ahead of the
  * last REST snapshot); for terminal turns REST is fully authoritative.
  *
+ * After merging, detects convergence drift and actionable control
+ * invalidation (enabled controls that became stale):
+ *  - Stale entry-level controls are invalidated (disabled with a reason)
+ *    whenever external drift *or* actionable invalidation is detected.
+ *  - The conversation-level `controlState.staleReason` is only set when
+ *    actionable invalidation occurs (i.e. the operator had controls that
+ *    are no longer valid), and only cleared when the specific convergence
+ *    reason is no longer applicable — other staleReason values are left
+ *    intact.
+ *
  * Sets `historyLoaded: true` so the transcript loader knows not to re-fetch.
  */
 function applyMergeHistory(
@@ -377,9 +392,25 @@ function applyMergeHistory(
   restEntries: readonly TranscriptEntryState[],
   hasMoreHistory: boolean,
 ): WorkspaceState {
+  const convergenceStaleReason = 'State changed by another session';
   const current = ensureConversation(state.conversations, conversationId);
   const nextConversations = new Map(state.conversations);
-  const merged = mergeAuthoritativeEntries(restEntries, current.entries);
+  const rawMerged = mergeAuthoritativeEntries(restEntries, current.entries);
+
+  // Detect convergence drift and invalidate stale controls
+  const drift = detectConvergenceDrift(current.entries, rawMerged);
+  const controlsInvalidated = hasActionableControlInvalidation(current.entries, rawMerged);
+  const merged =
+    drift.hasExternalChanges || controlsInvalidated
+      ? invalidateStaleEntryControls(current.entries, rawMerged)
+      : rawMerged;
+
+  let staleReason = current.controlState.staleReason;
+  if (controlsInvalidated) {
+    staleReason = convergenceStaleReason;
+  } else if (staleReason === convergenceStaleReason) {
+    staleReason = null;
+  }
 
   nextConversations.set(conversationId, {
     ...current,
@@ -387,6 +418,10 @@ function applyMergeHistory(
     hasMoreHistory,
     loadState: 'ready',
     historyLoaded: true,
+    controlState: {
+      ...current.controlState,
+      staleReason,
+    },
   });
   return {
     ...state,

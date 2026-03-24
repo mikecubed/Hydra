@@ -50,13 +50,15 @@ import {
 } from '../features/chat-workspace/model/approval-selection.ts';
 import { claimApprovalHydrationRetry } from '../features/chat-workspace/model/approval-hydration-retries.ts';
 import {
+  DEFAULT_VISIBLE_WINDOW,
   selectActiveConversation,
   selectActiveDraft,
-  selectActiveEntries,
   selectActiveLoadState,
   selectCanSubmit,
   selectConversationList,
   selectCreateModeCanSubmit,
+  selectRecentEntries,
+  selectTranscriptSummary,
   selectVisibleArtifact,
   precomputeTranscriptActions,
   NO_ACTION_FLAGS,
@@ -1573,7 +1575,11 @@ export function WorkspaceRoute(): JSX.Element {
     reloadConversationList,
   );
   const handleRespondToPrompt = usePromptResponder(store, client);
-  const activeEntries = useMemo(() => selectActiveEntries(state), [state]);
+  const activeEntries = useMemo(() => selectRecentEntries(state, DEFAULT_VISIBLE_WINDOW), [state]);
+  const activeTranscriptSummary = useMemo(
+    () => selectTranscriptSummary(state, DEFAULT_VISIBLE_WINDOW),
+    [state],
+  );
   const actionMap = useMemo(
     () => precomputeTranscriptActions(state, activeEntries),
     [state, activeEntries],
@@ -1641,12 +1647,16 @@ export function WorkspaceRoute(): JSX.Element {
 
   return (
     <ConnectionStateContext.Provider value={state.connection}>
-      <ConnectionBanner connection={state.connection} />
+      <ConnectionBanner
+        connection={state.connection}
+        staleControlReason={activeConversation?.controlState.staleReason ?? null}
+      />
       <WorkspaceLayout
         conversations={selectConversationList(state)}
         activeConversationId={state.activeConversationId}
         activeConversation={activeConversation}
         activeEntries={activeEntries}
+        activeHiddenEntryCount={activeTranscriptSummary.hiddenCount}
         activeLoadState={selectActiveLoadState(state)}
         activeHasMoreHistory={activeConversation?.hasMoreHistory ?? false}
         isLoadingConversations={isLoadingConversations}

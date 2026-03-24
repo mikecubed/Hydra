@@ -356,3 +356,75 @@ export function precomputeTranscriptActions(
 
   return result;
 }
+
+// ─── Recent-context usability for large histories ───────────────────────────
+
+/** Default number of most-recent entries shown when the transcript is long. */
+export const DEFAULT_VISIBLE_WINDOW = 50;
+
+/**
+ * View-model summarising the active transcript's visible window for the UI.
+ *
+ * Components use this to render context banners (e.g. "Showing X of Y entries")
+ * without duplicating windowing or history-flag logic.
+ */
+export interface TranscriptSummary {
+  /** Number of entries currently visible (after windowing). */
+  readonly visibleCount: number;
+  /** Total entries loaded in the client for this conversation. */
+  readonly totalLoaded: number;
+  /** Entries loaded but hidden by the visible window. */
+  readonly hiddenCount: number;
+  /** Whether the server has older history not yet fetched. */
+  readonly hasMoreHistory: boolean;
+  /** ISO timestamp of the oldest visible entry, or `null` if empty. */
+  readonly oldestVisibleTimestamp: string | null;
+}
+
+/**
+ * Return only the most-recent `maxVisible` entries from the active transcript.
+ *
+ * When the entry count is within the window the original (deduped) array is
+ * returned as-is — no allocation.  Delegates to {@link selectActiveEntries}
+ * so deduplication is preserved.
+ */
+export function selectRecentEntries(
+  state: WorkspaceState,
+  maxVisible: number = DEFAULT_VISIBLE_WINDOW,
+): readonly TranscriptEntryState[] {
+  const entries = selectActiveEntries(state);
+  if (entries.length <= maxVisible) return entries;
+  return entries.slice(entries.length - maxVisible);
+}
+
+/**
+ * Derive a {@link TranscriptSummary} for the active conversation.
+ *
+ * Accepts an optional `maxVisible` override (defaults to
+ * {@link DEFAULT_VISIBLE_WINDOW}).  The component can pass the same value it
+ * uses for {@link selectRecentEntries} to keep the two in sync.
+ */
+export function selectTranscriptSummary(
+  state: WorkspaceState,
+  maxVisible: number = DEFAULT_VISIBLE_WINDOW,
+): TranscriptSummary {
+  const allEntries = selectActiveEntries(state);
+  const conversation = selectActiveConversation(state);
+  const hasMoreHistory = conversation?.hasMoreHistory ?? false;
+
+  const totalLoaded = allEntries.length;
+  const visibleCount = Math.min(totalLoaded, maxVisible);
+  const hiddenCount = totalLoaded - visibleCount;
+
+  const visible =
+    totalLoaded <= maxVisible ? allEntries : allEntries.slice(totalLoaded - maxVisible);
+  const oldestVisibleTimestamp = visible.length > 0 ? (visible[0].timestamp ?? null) : null;
+
+  return {
+    visibleCount,
+    totalLoaded,
+    hiddenCount,
+    hasMoreHistory,
+    oldestVisibleTimestamp,
+  };
+}

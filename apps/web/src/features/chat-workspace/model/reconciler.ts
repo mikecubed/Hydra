@@ -623,7 +623,12 @@ function mergeTerminalControls(
   const mergedByKind = new Map<EntryControlKind, EntryControlState>();
 
   for (const control of streamedControls) {
-    if (control.kind === 'cancel') {
+    if (
+      control.kind === 'cancel' ||
+      (control.kind === 'submit-follow-up' &&
+        control.enabled &&
+        !restControls.some((restControl) => restControl.kind === control.kind))
+    ) {
       continue;
     }
 
@@ -712,6 +717,33 @@ function shouldPreserveStreamedTurn(
   return contentRichness(streamedEntry) >= contentRichness(restEntry);
 }
 
+function shouldPreserveStreamedStatus(
+  restStatus: string,
+  streamedStatus: string,
+  preserveStreamedTurn: boolean,
+): boolean {
+  const restTerminal = TERMINAL_STATUSES.has(restStatus);
+  const streamedTerminal = TERMINAL_STATUSES.has(streamedStatus);
+
+  if (restTerminal) {
+    return false;
+  }
+
+  if (streamedTerminal) {
+    return true;
+  }
+
+  if (isStrictlyMoreAdvanced(restStatus, streamedStatus)) {
+    return false;
+  }
+
+  if (isStrictlyMoreAdvanced(streamedStatus, restStatus)) {
+    return true;
+  }
+
+  return preserveStreamedTurn;
+}
+
 /**
  * Seal turns whose authoritative status is terminal. Events for sealed turns
  * are unconditionally treated as stale by `isStaleEvent`, preventing
@@ -784,11 +816,11 @@ export function mergeAuthoritativeEntries(
     // When REST content is richer (preserveStreamedTurn=false) but both are
     // non-terminal, the streamed status may still be more advanced. Preserve
     // it to avoid downgrading live status badges (e.g. 'streaming' → 'submitted').
-    const preserveStreamedStatus =
-      preserveStreamedTurn ||
-      (!TERMINAL_STATUSES.has(entry.status) &&
-        !TERMINAL_STATUSES.has(streamed.status) &&
-        isStrictlyMoreAdvanced(streamed.status, entry.status));
+    const preserveStreamedStatus = shouldPreserveStreamedStatus(
+      entry.status,
+      streamed.status,
+      preserveStreamedTurn,
+    );
 
     let controls = entry.controls;
     if (streamed.controls.length > 0) {
@@ -861,4 +893,197 @@ export function deduplicateEntries(
 
     return true;
   });
+}
+
+// ─── Multi-session convergence ──────────────────────────────────────────────
+
+/** Summary of turn-status changes between pre-merge and post-merge entries. */
+export interface ConvergenceDrift {
+  readonly turnStatusChanges: ReadonlyMap<string, { readonly from: string; readonly to: string }>;
+  readonly hasExternalChanges: boolean;
+}
+
+function hasEnabledControlLoss(
+  previousEntry: TranscriptEntryState,
+  mergedEntry: TranscriptEntryState,
+): boolean {
+  const mergedByKind = new Map(
+    mergedEntry.controls.map((control) => [control.kind, control] as const),
+  );
+  return previousEntry.controls.some((control) => {
+    if (!control.enabled) {
+      return false;
+    }
+
+    const mergedControl = mergedByKind.get(control.kind);
+    return mergedControl?.enabled !== true;
+  });
+}
+
+/**
+ * Detect convergence drift by comparing turn statuses before and after an
+ * authoritative merge.
+ *
+ * Only tracks turns that existed in both snapshots and transitioned from a
+ * non-terminal status to a terminal one. Routine non-terminal lifecycle
+ * progress (for example `submitted -> executing`) is expected during normal
+ * convergence and must not be treated as an external invalidation event.
+ */
+export function detectConvergenceDrift(
+  beforeEntries: readonly TranscriptEntryState[],
+  afterEntries: readonly TranscriptEntryState[],
+): ConvergenceDrift {
+  const beforeMap = new Map<string, string>();
+  for (const e of beforeEntries) {
+    if (e.kind === 'turn' && e.turnId != null) {
+      beforeMap.set(e.turnId, e.status);
+    }
+  }
+
+  const turnStatusChanges = new Map<string, { from: string; to: string }>();
+  for (const e of afterEntries) {
+    if (e.kind !== 'turn' || e.turnId == null) continue;
+    const beforeStatus = beforeMap.get(e.turnId);
+    if (
+      beforeStatus != null &&
+      beforeStatus !== e.status &&
+      !TERMINAL_STATUSES.has(beforeStatus) &&
+      TERMINAL_STATUSES.has(e.status)
+    ) {
+      turnStatusChanges.set(e.turnId, { from: beforeStatus, to: e.status });
+    }
+  }
+
+  return {
+    turnStatusChanges,
+    hasExternalChanges: turnStatusChanges.size > 0,
+  };
+}
+
+const STALE_CONTROL_REASON = 'Already acted on in another session';
+
+/**
+ * After an authoritative merge, entry-level controls that reference actions
+ * no longer valid must be explicitly disabled with a reason rather than
+ * silently stripped, so the operator understands why controls are unavailable.
+ *
+ * - Turns that transitioned to terminal have their cancel controls disabled
+ *   (cancel is always stale once a turn reaches terminal state).
+ * - Controls that were present in `previousEntries` but stripped during merge
+ *   are re-added as disabled with a stale reason, preserving operator
+ *   visibility into what actions were previously available.
+ * - Authoritative terminal controls already present in `mergedEntries` are
+ *   preserved as-is (they are the source of truth for the final state).
+ * - Already-disabled controls and non-terminal entries are untouched.
+ *
+ * Returns `mergedEntries` by reference when no changes are needed.
+ */
+export function invalidateStaleEntryControls(
+  previousEntries: readonly TranscriptEntryState[],
+  mergedEntries: readonly TranscriptEntryState[],
+): readonly TranscriptEntryState[] {
+  // Build maps for previous turn entries (status + controls)
+  const prevTurnMap = new Map<string, TranscriptEntryState>();
+  for (const e of previousEntries) {
+    if (e.kind === 'turn' && e.turnId != null) {
+      prevTurnMap.set(e.turnId, e);
+    }
+  }
+
+  const turnsNeedingInvalidation = new Set<string>();
+  for (const e of mergedEntries) {
+    if (e.kind !== 'turn' || e.turnId == null) continue;
+    const prev = prevTurnMap.get(e.turnId);
+    if (prev == null) continue;
+
+    const changedToTerminal =
+      !TERMINAL_STATUSES.has(prev.status) && TERMINAL_STATUSES.has(e.status);
+    if (changedToTerminal || hasEnabledControlLoss(prev, e)) {
+      turnsNeedingInvalidation.add(e.turnId);
+    }
+  }
+
+  if (turnsNeedingInvalidation.size === 0) return mergedEntries;
+
+  const result = mergedEntries.map((entry) => {
+    if (entry.kind !== 'turn' || entry.turnId == null) return entry;
+    if (!turnsNeedingInvalidation.has(entry.turnId)) return entry;
+
+    const prev = prevTurnMap.get(entry.turnId);
+    const prevControlsByKind = new Map<EntryControlKind, EntryControlState>();
+    if (prev != null) {
+      for (const c of prev.controls) {
+        prevControlsByKind.set(c.kind, c);
+      }
+    }
+    const changedToTerminal =
+      prev != null && !TERMINAL_STATUSES.has(prev.status) && TERMINAL_STATUSES.has(entry.status);
+
+    // Cancel controls are always stale once a turn reaches terminal state.
+    const updatedControls: EntryControlState[] = entry.controls.map((control) =>
+      changedToTerminal && control.kind === 'cancel' && control.enabled
+        ? { ...control, enabled: false, reasonDisabled: STALE_CONTROL_REASON }
+        : control,
+    );
+
+    // Build set of control kinds present after merge
+    const mergedKinds = new Set(entry.controls.map((c) => c.kind));
+
+    // Re-add controls that were present before but stripped during merge
+    for (const [kind, prevControl] of prevControlsByKind) {
+      if (!mergedKinds.has(kind)) {
+        updatedControls.push({
+          ...prevControl,
+          enabled: false,
+          reasonDisabled:
+            prevControl.enabled || prevControl.reasonDisabled == null
+              ? STALE_CONTROL_REASON
+              : prevControl.reasonDisabled,
+        });
+      }
+    }
+
+    const controlsChanged =
+      updatedControls.length !== entry.controls.length ||
+      updatedControls.some((c, i) => c !== entry.controls[i]);
+
+    if (!controlsChanged) return entry;
+
+    return { ...entry, controls: updatedControls };
+  });
+
+  return result.some((entry, index) => entry !== mergedEntries[index]) ? result : mergedEntries;
+}
+
+/**
+ * Whether convergence to a terminal turn would invalidate controls the operator
+ * could still act on.
+ *
+ * This is narrower than "controls changed": preserving already-disabled
+ * controls across an authoritative merge should not mark the whole
+ * conversation stale.
+ */
+export function hasActionableControlInvalidation(
+  previousEntries: readonly TranscriptEntryState[],
+  mergedEntries: readonly TranscriptEntryState[],
+): boolean {
+  const prevTurnMap = new Map<string, TranscriptEntryState>();
+  for (const entry of previousEntries) {
+    if (entry.kind === 'turn' && entry.turnId != null) {
+      prevTurnMap.set(entry.turnId, entry);
+    }
+  }
+
+  for (const entry of mergedEntries) {
+    if (entry.kind !== 'turn' || entry.turnId == null) continue;
+
+    const prev = prevTurnMap.get(entry.turnId);
+    if (prev == null) continue;
+
+    if (hasEnabledControlLoss(prev, entry)) {
+      return true;
+    }
+  }
+
+  return false;
 }

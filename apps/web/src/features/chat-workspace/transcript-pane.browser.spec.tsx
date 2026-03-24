@@ -1,17 +1,39 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { cleanup, fireEvent, render, screen, within } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, within } from '@testing-library/react';
 import type { ListConversationsResponse, LoadTurnHistoryResponse } from '@hydra/web-contracts';
 
 import { AppProviders } from '../../app/providers.tsx';
 import { TranscriptPane } from './components/transcript-pane.tsx';
 import { TranscriptTurn } from './components/transcript-turn.tsx';
-import type { TranscriptEntryState, ContentBlockState } from './model/workspace-store.ts';
+import type * as WorkspaceStoreModule from './model/workspace-store.ts';
+import type {
+  TranscriptEntryState,
+  ContentBlockState,
+  WorkspaceStore,
+} from './model/workspace-store.ts';
 import {
   FakeWebSocket,
   openAndSubscribe,
   resetFakeWebSockets,
   streamFrame,
 } from './__tests__/browser-helpers.ts';
+
+// Capture the workspace store created during render so tests can dispatch
+// actions (e.g. seeding entry controls) that aren't reachable through DOM
+// interaction alone.
+let _capturedStore: WorkspaceStore | null = null;
+
+vi.mock('./model/workspace-store.ts', async (importOriginal) => {
+  const mod: typeof WorkspaceStoreModule = await importOriginal();
+  return {
+    ...mod,
+    createWorkspaceStore: (...args: Parameters<typeof mod.createWorkspaceStore>) => {
+      const store = mod.createWorkspaceStore(...args);
+      _capturedStore = store;
+      return store;
+    },
+  };
+});
 
 const fetchSpy = vi.fn<typeof fetch>();
 
@@ -20,6 +42,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  _capturedStore = null;
   fetchSpy.mockReset();
   resetFakeWebSockets();
   vi.unstubAllGlobals();
@@ -104,6 +127,14 @@ function createSingleTurnHistory(responseText: string): LoadTurnHistoryResponse 
     totalCount: 1,
     hasMore: false,
   };
+}
+
+function capturedStore(): WorkspaceStore {
+  if (_capturedStore == null) {
+    throw new Error('Expected workspace store to be captured during render');
+  }
+
+  return _capturedStore;
 }
 
 function installApprovalRetryScenario(): () => number {
@@ -336,6 +367,13 @@ describe('TranscriptPane', () => {
         });
       }
 
+      if (url === '/conversations/conv-1/approvals') {
+        return new Response(JSON.stringify({ approvals: [] }), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        });
+      }
+
       throw new Error(`Unexpected fetch input: ${url}`);
     });
 
@@ -493,6 +531,13 @@ describe('TranscriptPane', () => {
         });
       }
 
+      if (url === '/conversations/conv-1/approvals') {
+        return new Response(JSON.stringify({ approvals: [] }), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        });
+      }
+
       throw new Error(`Unexpected fetch input: ${url}`);
     });
 
@@ -504,6 +549,176 @@ describe('TranscriptPane', () => {
         'Showing the most recent transcript entries. Older history is not loaded yet.',
       ),
     ).toBeTruthy();
+  });
+
+  it('windows the live workspace to the most recent loaded entries for large transcripts', async () => {
+    const conversations: ListConversationsResponse = {
+      conversations: [
+        {
+          id: 'conv-1',
+          title: 'Primary conversation',
+          status: 'active',
+          createdAt: '2026-03-20T00:00:00.000Z',
+          updatedAt: '2026-03-20T12:00:00.000Z',
+          turnCount: 51,
+          pendingInstructionCount: 0,
+        },
+      ],
+      totalCount: 1,
+    };
+    // Model a real /turns?limit=50 response for a 51-turn conversation: the
+    // REST payload contains the most recent 50 turns (positions 2..51), with
+    // hasMore=true indicating there is still one older turn on the server.
+    const history: LoadTurnHistoryResponse = {
+      turns: Array.from({ length: 50 }, (_, index) => {
+        const entryNumber = String(index + 2);
+        const minuteText = String(index).padStart(2, '0');
+        return {
+          id: `turn-${entryNumber}`,
+          conversationId: 'conv-1',
+          position: index + 2,
+          kind: 'system' as const,
+          attribution: { type: 'agent' as const, agentId: 'codex', label: 'Codex' },
+          response: `Historical entry ${entryNumber}`,
+          status: 'completed' as const,
+          createdAt: `2026-03-20T12:${minuteText}:00.000Z`,
+          completedAt: `2026-03-20T12:${minuteText}:30.000Z`,
+        };
+      }),
+      totalCount: 51,
+      hasMore: true,
+    };
+
+    installFetchStub((url) => {
+      if (url === '/conversations?status=active&limit=20') {
+        return new Response(JSON.stringify(conversations), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        });
+      }
+
+      if (url === '/conversations/conv-1/turns?limit=50') {
+        return new Response(JSON.stringify(history), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        });
+      }
+
+      throw new Error(`Unexpected fetch input: ${url}`);
+    });
+
+    render(<AppProviders />);
+
+    // Wait for the initial 50 REST entries to render.
+    expect(await screen.findByText('Historical entry 50')).toBeInTheDocument();
+
+    // Stream in a new live turn so the client now has 51 loaded entries, which
+    // exercises client-side windowing without an impossible REST payload.
+    const ws = openAndSubscribe('conv-1');
+    act(() => {
+      ws.simulateMessage(
+        streamFrame('conv-1', 1, 'turn-52', 'stream-started', { attribution: 'Codex' }),
+      );
+      ws.simulateMessage(
+        streamFrame('conv-1', 2, 'turn-52', 'text-delta', { text: 'Streamed entry 52' }),
+      );
+    });
+
+    expect(await screen.findByText('Streamed entry 52')).toBeInTheDocument();
+    expect(screen.getByText('Historical entry 51')).toBeInTheDocument();
+    expect(screen.queryByText('Historical entry 2')).toBeNull();
+    expect(screen.getByTestId('transcript-orientation')).toHaveTextContent(
+      'Showing the most recent 50 of 51 loaded entries.',
+    );
+  });
+
+  it('surfaces a stale-control banner after authoritative convergence invalidates controls', async () => {
+    const conversations = createSingleConversationList();
+    const authoritativeHistory: LoadTurnHistoryResponse = {
+      turns: [
+        {
+          id: 'turn-1',
+          conversationId: 'conv-1',
+          position: 1,
+          kind: 'system',
+          attribution: { type: 'agent', agentId: 'codex', label: 'Codex' },
+          response: 'Resumed by another session',
+          status: 'completed',
+          createdAt: '2026-03-20T12:00:31.000Z',
+          completedAt: '2026-03-20T12:00:45.000Z',
+        },
+      ],
+      totalCount: 1,
+      hasMore: false,
+    };
+
+    let resolveHistory = (_value: Response): void => {
+      throw new Error('Expected the transcript history request to be pending');
+    };
+
+    fetchSpy.mockImplementation((input) => {
+      const url = requestUrl(input);
+      if (url === '/conversations?status=active&limit=20') {
+        return Promise.resolve(
+          new Response(JSON.stringify(conversations), {
+            status: 200,
+            headers: { 'Content-Type': 'application/json' },
+          }),
+        );
+      }
+
+      if (url === '/conversations/conv-1/turns?limit=50') {
+        return new Promise<Response>((resolve) => {
+          resolveHistory = resolve;
+        });
+      }
+
+      if (url === '/conversations/conv-1/approvals') {
+        return Promise.resolve(
+          new Response(JSON.stringify({ approvals: [] }), {
+            status: 200,
+            headers: { 'Content-Type': 'application/json' },
+          }),
+        );
+      }
+
+      throw new Error(`Unexpected fetch input: ${url}`);
+    });
+    vi.stubGlobal('fetch', fetchSpy);
+
+    render(<AppProviders />);
+    await screen.findByRole('button', { name: /primary conversation/i });
+
+    const ws = openAndSubscribe('conv-1');
+    ws.simulateMessage(
+      streamFrame('conv-1', 1, 'turn-1', 'stream-started', { attribution: 'Codex' }),
+    );
+    ws.simulateMessage(
+      streamFrame('conv-1', 2, 'turn-1', 'status-change', { status: 'submitted' }),
+    );
+
+    // Seed a cancel control on the stream entry so the authoritative merge has
+    // something to actually invalidate.  Without entry-level controls the
+    // reducer correctly suppresses staleReason (reference-equality fast path).
+    act(() => {
+      capturedStore().dispatch({
+        type: 'entry/update-controls',
+        conversationId: 'conv-1',
+        entryId: 'turn-1',
+        controls: [
+          { controlId: 'ctrl-cancel', kind: 'cancel', enabled: true, reasonDisabled: null },
+        ],
+      });
+    });
+
+    resolveHistory(
+      new Response(JSON.stringify(authoritativeHistory), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      }),
+    );
+
+    expect(await screen.findByText('State changed by another session')).toBeInTheDocument();
   });
 
   // eslint-disable-next-line max-lines-per-function
@@ -1517,5 +1732,129 @@ describe('TranscriptTurn streaming', () => {
     expect(screen.getByTestId('artifact-list')).toBeTruthy();
     expect(screen.getByText('output.txt')).toBeTruthy();
     expect(screen.getByTestId('approval-prompt')).toBeTruthy();
+  });
+});
+
+// ─── Large history orientation ──────────────────────────────────────────────
+
+// eslint-disable-next-line max-lines-per-function
+describe('TranscriptPane large history orientation', () => {
+  it('shows hidden entry count when hiddenEntryCount is provided', () => {
+    const entries = Array.from({ length: 5 }, (_, i) => {
+      const indexText = String(i);
+      return createEntry({
+        entryId: `e-${indexText}`,
+        turnId: `t-${indexText}`,
+        contentBlocks: [textBlock(`Message ${indexText}`, `blk-${indexText}`)],
+      });
+    });
+
+    render(
+      <TranscriptPane
+        entries={entries}
+        loadState="ready"
+        hasActiveConversation={true}
+        hasMoreHistory={false}
+        hiddenEntryCount={45}
+      />,
+    );
+
+    const orientation = screen.getByTestId('transcript-orientation');
+    expect(orientation).toBeInTheDocument();
+    expect(orientation.textContent).toContain('5');
+    expect(orientation.textContent).toContain('50');
+  });
+
+  it('shows combined orientation when both hasMoreHistory and hiddenEntryCount', () => {
+    const entries = [
+      createEntry({
+        entryId: 'e-0',
+        turnId: 't-0',
+        contentBlocks: [textBlock('Latest message')],
+      }),
+    ];
+
+    render(
+      <TranscriptPane
+        entries={entries}
+        loadState="ready"
+        hasActiveConversation={true}
+        hasMoreHistory={true}
+        hiddenEntryCount={20}
+      />,
+    );
+
+    const orientation = screen.getByTestId('transcript-orientation');
+    expect(orientation).toBeInTheDocument();
+    // Should mention both hidden entries and server history
+    expect(orientation.textContent).toContain('1');
+    expect(orientation.textContent).toContain('21');
+    expect(orientation.textContent).toMatch(/older history/i);
+  });
+
+  it('preserves existing hasMoreHistory message when no hiddenEntryCount', () => {
+    const entries = [
+      createEntry({
+        entryId: 'e-0',
+        turnId: 't-0',
+        contentBlocks: [textBlock('Visible turn')],
+      }),
+    ];
+
+    render(
+      <TranscriptPane
+        entries={entries}
+        loadState="ready"
+        hasActiveConversation={true}
+        hasMoreHistory={true}
+      />,
+    );
+
+    const orientation = screen.getByTestId('transcript-orientation');
+    expect(orientation).toBeInTheDocument();
+    expect(orientation.textContent).toMatch(/older history/i);
+  });
+
+  it('shows no orientation banner for small fully-loaded histories', () => {
+    const entries = [
+      createEntry({
+        entryId: 'e-0',
+        turnId: 't-0',
+        contentBlocks: [textBlock('Only message')],
+      }),
+    ];
+
+    render(
+      <TranscriptPane
+        entries={entries}
+        loadState="ready"
+        hasActiveConversation={true}
+        hasMoreHistory={false}
+        hiddenEntryCount={0}
+      />,
+    );
+
+    expect(screen.queryByTestId('transcript-orientation')).toBeNull();
+  });
+
+  it('shows no orientation banner when hiddenEntryCount is omitted and hasMoreHistory is false', () => {
+    const entries = [
+      createEntry({
+        entryId: 'e-0',
+        turnId: 't-0',
+        contentBlocks: [textBlock('Message')],
+      }),
+    ];
+
+    render(
+      <TranscriptPane
+        entries={entries}
+        loadState="ready"
+        hasActiveConversation={true}
+        hasMoreHistory={false}
+      />,
+    );
+
+    expect(screen.queryByTestId('transcript-orientation')).toBeNull();
   });
 });

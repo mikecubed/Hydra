@@ -13,6 +13,8 @@ import {
   sealAuthoritativeTurns,
   mergeAuthoritativeEntries,
   deduplicateEntries,
+  detectConvergenceDrift,
+  invalidateStaleEntryControls,
   type ReconcilerState,
 } from '../model/reconciler.ts';
 
@@ -1697,6 +1699,34 @@ describe('mergeAuthoritativeEntries', () => {
     assert.equal(result[0].contentBlocks[0].text, 'same');
   });
 
+  it('keeps an authoritative non-terminal status advance even when content richness is equal', () => {
+    const rest = [
+      makeEntry({
+        entryId: 'turn-a',
+        turnId: 'turn-a',
+        status: 'executing',
+        contentBlocks: [{ blockId: 'blk-1', kind: 'text', text: 'same', metadata: null }],
+      }),
+    ];
+    const current = [
+      makeEntry({
+        entryId: 'turn-a',
+        turnId: 'turn-a',
+        status: 'submitted',
+        contentBlocks: [{ blockId: 'blk-1', kind: 'text', text: 'same', metadata: null }],
+      }),
+    ];
+
+    const result = mergeAuthoritativeEntries(rest, current);
+
+    assert.equal(
+      result[0].status,
+      'executing',
+      'authoritative progress from another session must remain visible after merge',
+    );
+    assert.equal(result[0].contentBlocks[0].text, 'same');
+  });
+
   it('takes REST content but preserves streamed status when streamed is more advanced', () => {
     const rest = [
       makeEntry({
@@ -2023,5 +2053,161 @@ describe('deduplicateEntries', () => {
     assert.equal(result.length, 2);
     assert.equal(result[0].entryId, 'turn-a');
     assert.equal(result[1].entryId, 'act-1');
+  });
+});
+
+// ─── detectConvergenceDrift ─────────────────────────────────────────────────
+
+describe('detectConvergenceDrift', () => {
+  it('returns no drift when entries are identical', () => {
+    const entries = [makeEntry({ entryId: 'turn-a', turnId: 'turn-a', status: 'completed' })];
+    const drift = detectConvergenceDrift(entries, entries);
+    assert.equal(drift.hasExternalChanges, false);
+    assert.equal(drift.turnStatusChanges.size, 0);
+  });
+
+  it('detects a status change from streaming to cancelled', () => {
+    const before = [makeEntry({ entryId: 'turn-a', turnId: 'turn-a', status: 'streaming' })];
+    const after = [makeEntry({ entryId: 'turn-a', turnId: 'turn-a', status: 'cancelled' })];
+    const drift = detectConvergenceDrift(before, after);
+    assert.equal(drift.hasExternalChanges, true);
+    const change = drift.turnStatusChanges.get('turn-a');
+    assert.ok(change);
+    assert.equal(change.from, 'streaming');
+    assert.equal(change.to, 'cancelled');
+  });
+
+  it('detects multiple status changes across turns', () => {
+    const before = [
+      makeEntry({ entryId: 'turn-a', turnId: 'turn-a', status: 'streaming' }),
+      makeEntry({ entryId: 'turn-b', turnId: 'turn-b', status: 'submitted' }),
+    ];
+    const after = [
+      makeEntry({ entryId: 'turn-a', turnId: 'turn-a', status: 'completed' }),
+      makeEntry({ entryId: 'turn-b', turnId: 'turn-b', status: 'failed' }),
+    ];
+    const drift = detectConvergenceDrift(before, after);
+    assert.equal(drift.hasExternalChanges, true);
+    assert.equal(drift.turnStatusChanges.size, 2);
+  });
+
+  it('ignores routine non-terminal lifecycle progress during convergence', () => {
+    const before = [makeEntry({ entryId: 'turn-a', turnId: 'turn-a', status: 'submitted' })];
+    const after = [makeEntry({ entryId: 'turn-a', turnId: 'turn-a', status: 'executing' })];
+    const drift = detectConvergenceDrift(before, after);
+    assert.equal(drift.hasExternalChanges, false);
+    assert.equal(drift.turnStatusChanges.size, 0);
+  });
+
+  it('ignores non-turn entries', () => {
+    const before = [
+      makeEntry({ entryId: 'sys-1', kind: 'system-status', turnId: 'turn-a', status: 'info' }),
+    ];
+    const after = [
+      makeEntry({ entryId: 'sys-1', kind: 'system-status', turnId: 'turn-a', status: 'warning' }),
+    ];
+    const drift = detectConvergenceDrift(before, after);
+    assert.equal(drift.hasExternalChanges, false);
+  });
+
+  it('ignores new turns that did not exist before the merge', () => {
+    const before = [makeEntry({ entryId: 'turn-a', turnId: 'turn-a', status: 'completed' })];
+    const after = [
+      makeEntry({ entryId: 'turn-a', turnId: 'turn-a', status: 'completed' }),
+      makeEntry({ entryId: 'turn-b', turnId: 'turn-b', status: 'streaming' }),
+    ];
+    const drift = detectConvergenceDrift(before, after);
+    assert.equal(drift.hasExternalChanges, false);
+  });
+});
+
+// ─── invalidateStaleEntryControls ───────────────────────────────────────────
+
+describe('invalidateStaleEntryControls', () => {
+  it('disables enabled cancel control on terminal entries with a stale reason', () => {
+    const before = [makeEntry({ entryId: 'turn-a', turnId: 'turn-a', status: 'streaming' })];
+    const merged = [
+      makeEntry({
+        entryId: 'turn-a',
+        turnId: 'turn-a',
+        status: 'cancelled',
+        controls: [
+          { controlId: 'c-cancel', kind: 'cancel' as const, enabled: true, reasonDisabled: null },
+        ],
+      }),
+    ];
+    const result = invalidateStaleEntryControls(before, merged);
+    const cancelCtrl = result[0].controls.find((c) => c.kind === 'cancel');
+    assert.ok(cancelCtrl);
+    assert.equal(cancelCtrl.enabled, false);
+    assert.ok(cancelCtrl.reasonDisabled != null && cancelCtrl.reasonDisabled.length > 0);
+  });
+
+  it('preserves already-disabled controls unchanged', () => {
+    const merged = [
+      makeEntry({
+        entryId: 'turn-a',
+        turnId: 'turn-a',
+        status: 'completed',
+        controls: [
+          {
+            controlId: 'c-retry',
+            kind: 'retry' as const,
+            enabled: false,
+            reasonDisabled: 'original reason',
+          },
+        ],
+      }),
+    ];
+    const result = invalidateStaleEntryControls([], merged);
+    assert.equal(result[0].controls[0].reasonDisabled, 'original reason');
+  });
+
+  it('preserves existing disable reasons when stripped controls were already disabled', () => {
+    const before = [
+      makeEntry({
+        entryId: 'turn-a',
+        turnId: 'turn-a',
+        status: 'streaming',
+        controls: [
+          {
+            controlId: 'c-cancel',
+            kind: 'cancel' as const,
+            enabled: false,
+            reasonDisabled: 'session expired',
+          },
+        ],
+      }),
+    ];
+    const merged = [
+      makeEntry({ entryId: 'turn-a', turnId: 'turn-a', status: 'completed', controls: [] }),
+    ];
+
+    const result = invalidateStaleEntryControls(before, merged);
+    assert.equal(result[0].controls[0].enabled, false);
+    assert.equal(result[0].controls[0].reasonDisabled, 'session expired');
+  });
+
+  it('does not touch controls on non-terminal entries', () => {
+    const merged = [
+      makeEntry({
+        entryId: 'turn-a',
+        turnId: 'turn-a',
+        status: 'streaming',
+        controls: [
+          { controlId: 'c-cancel', kind: 'cancel' as const, enabled: true, reasonDisabled: null },
+        ],
+      }),
+    ];
+    const result = invalidateStaleEntryControls([], merged);
+    assert.equal(result[0].controls[0].enabled, true);
+  });
+
+  it('returns entries by reference when no changes needed', () => {
+    const merged = [
+      makeEntry({ entryId: 'turn-a', turnId: 'turn-a', status: 'completed', controls: [] }),
+    ];
+    const result = invalidateStaleEntryControls([], merged);
+    assert.equal(result, merged);
   });
 });
