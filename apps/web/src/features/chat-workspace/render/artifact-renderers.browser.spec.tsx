@@ -271,4 +271,36 @@ describe('ArtifactPreview', () => {
     const el = screen.getByTestId('artifact-preview');
     expect(el.getAttribute('data-artifact-kind')).toBe('patch');
   });
+
+  it('shows listed placeholder when availability is listed', () => {
+    const artifact = makeArtifact({ availability: 'listed', previewBlocks: [] });
+    render(<ArtifactPreview artifact={artifact} />);
+    expect(screen.getByTestId('artifact-listed')).toBeTruthy();
+    expect(screen.getByText('Artifact announced — content pending.')).toBeTruthy();
+  });
+
+  it('shows listed placeholder even when preview blocks exist', () => {
+    const artifact = makeArtifact({
+      availability: 'listed',
+      previewBlocks: [makeBlock({ blockId: 'b-1', text: 'should not render' })],
+    });
+    render(<ArtifactPreview artifact={artifact} />);
+    expect(screen.getByTestId('artifact-listed')).toBeTruthy();
+    expect(screen.queryByText('should not render')).toBeNull();
+  });
+
+  it('does not show listed placeholder when availability is ready', () => {
+    render(<ArtifactPreview artifact={makeArtifact()} />);
+    expect(screen.queryByTestId('artifact-listed')).toBeNull();
+  });
+
+  it('renders content blocks only when availability is ready', () => {
+    const artifact = makeArtifact({
+      availability: 'ready',
+      previewBlocks: [makeBlock({ blockId: 'b-1', text: 'visible content' })],
+    });
+    render(<ArtifactPreview artifact={artifact} />);
+    expect(screen.getByText('visible content')).toBeTruthy();
+    expect(screen.queryByTestId('artifact-listed')).toBeNull();
+  });
 });

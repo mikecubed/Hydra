@@ -206,7 +206,13 @@ export function ArtifactPreview({ artifact }: ArtifactPreviewProps): JSX.Element
         </div>
       )}
 
-      {(availability === 'ready' || availability === 'listed') && (
+      {availability === 'listed' && (
+        <div style={STATE_MSG_STYLE} data-testid="artifact-listed">
+          Artifact announced — content pending.
+        </div>
+      )}
+
+      {availability === 'ready' && (
         <>
           {previewBlocks.length === 0 && (
             <div style={STATE_MSG_STYLE} data-testid="artifact-empty">
