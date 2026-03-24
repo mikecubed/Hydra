@@ -1379,13 +1379,17 @@ function useArtifactHydration(
     // Collect turn entries that need artifact hydration — skip turns that
     // were successfully hydrated or hit a terminal failure in an earlier
     // invocation. Turns that already have *some* artifacts (e.g. from
-    // streamed artifact-notice events) are still eligible so the server
-    // can backfill any missing references. The reducer deduplicates by
-    // artifactId, so dispatching for partially-populated turns is safe.
+    // streamed artifact-notice events) are still eligible once the turn is
+    // terminal so the server can backfill any missing references. The reducer
+    // deduplicates by artifactId, so dispatching for partially-populated
+    // terminal turns is safe.
     const turnIds = entries.flatMap((entry) => {
       if (
         entry.kind !== 'turn' ||
         entry.turnId == null ||
+        (entry.status !== 'completed' &&
+          entry.status !== 'failed' &&
+          entry.status !== 'cancelled') ||
         hydratedTurns.has(entry.turnId) ||
         pendingTurns.has(entry.turnId) ||
         terminalFailures.has(entry.turnId)
