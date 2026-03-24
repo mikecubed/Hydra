@@ -2230,6 +2230,36 @@ describe('multi-session convergence: stale-control invalidation', () => {
     assert.equal(conv?.controlState.staleReason, null);
   });
 
+  it('does not mark the conversation stale for ordinary non-terminal progress', () => {
+    let state = createInitialWorkspaceState();
+    state = reduceWorkspaceState(state, {
+      type: 'conversation/upsert',
+      conversation: createConversation(),
+    });
+    state = reduceWorkspaceState(state, {
+      type: 'conversation/replace-entries',
+      conversationId: 'conv-1',
+      entries: [
+        createEntry({ entryId: 'turn-running', turnId: 'turn-running', status: 'submitted' }),
+        createEntry({ entryId: 'turn-old', turnId: 'turn-old', status: 'completed' }),
+      ],
+      hasMoreHistory: false,
+    });
+
+    state = reduceWorkspaceState(state, {
+      type: 'conversation/merge-history',
+      conversationId: 'conv-1',
+      entries: [
+        createEntry({ entryId: 'turn-running', turnId: 'turn-running', status: 'executing' }),
+        createEntry({ entryId: 'turn-old', turnId: 'turn-old', status: 'completed' }),
+      ],
+      hasMoreHistory: false,
+    });
+
+    const conv = state.conversations.get('conv-1');
+    assert.equal(conv?.controlState.staleReason, null);
+  });
+
   it('disables enabled retry/branch controls on turns that became terminal externally', () => {
     let state = createInitialWorkspaceState();
     state = reduceWorkspaceState(state, {

@@ -2091,6 +2091,14 @@ describe('detectConvergenceDrift', () => {
     assert.equal(drift.turnStatusChanges.size, 2);
   });
 
+  it('ignores routine non-terminal lifecycle progress during convergence', () => {
+    const before = [makeEntry({ entryId: 'turn-a', turnId: 'turn-a', status: 'submitted' })];
+    const after = [makeEntry({ entryId: 'turn-a', turnId: 'turn-a', status: 'executing' })];
+    const drift = detectConvergenceDrift(before, after);
+    assert.equal(drift.hasExternalChanges, false);
+    assert.equal(drift.turnStatusChanges.size, 0);
+  });
+
   it('ignores non-turn entries', () => {
     const before = [
       makeEntry({ entryId: 'sys-1', kind: 'system-status', turnId: 'turn-a', status: 'info' }),

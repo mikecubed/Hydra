@@ -336,6 +336,13 @@ describe('TranscriptPane', () => {
         });
       }
 
+      if (url === '/conversations/conv-1/approvals') {
+        return new Response(JSON.stringify({ approvals: [] }), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        });
+      }
+
       throw new Error(`Unexpected fetch input: ${url}`);
     });
 
@@ -592,7 +599,7 @@ describe('TranscriptPane', () => {
           kind: 'system',
           attribution: { type: 'agent', agentId: 'codex', label: 'Codex' },
           response: 'Resumed by another session',
-          status: 'executing',
+          status: 'completed',
           createdAt: '2026-03-20T12:00:31.000Z',
           completedAt: '2026-03-20T12:00:45.000Z',
         },
@@ -620,6 +627,15 @@ describe('TranscriptPane', () => {
         return new Promise<Response>((resolve) => {
           resolveHistory = resolve;
         });
+      }
+
+      if (url === '/conversations/conv-1/approvals') {
+        return Promise.resolve(
+          new Response(JSON.stringify({ approvals: [] }), {
+            status: 200,
+            headers: { 'Content-Type': 'application/json' },
+          }),
+        );
       }
 
       throw new Error(`Unexpected fetch input: ${url}`);

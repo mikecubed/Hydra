@@ -900,8 +900,12 @@ export interface ConvergenceDrift {
 
 /**
  * Detect convergence drift by comparing turn statuses before and after an
- * authoritative merge. Only tracks turns that existed in both snapshots and
- * whose status changed — new turns (added by the merge) are not drift.
+ * authoritative merge.
+ *
+ * Only tracks turns that existed in both snapshots and transitioned from a
+ * non-terminal status to a terminal one. Routine non-terminal lifecycle
+ * progress (for example `submitted -> executing`) is expected during normal
+ * convergence and must not be treated as an external invalidation event.
  */
 export function detectConvergenceDrift(
   beforeEntries: readonly TranscriptEntryState[],
@@ -918,7 +922,12 @@ export function detectConvergenceDrift(
   for (const e of afterEntries) {
     if (e.kind !== 'turn' || e.turnId == null) continue;
     const beforeStatus = beforeMap.get(e.turnId);
-    if (beforeStatus != null && beforeStatus !== e.status) {
+    if (
+      beforeStatus != null &&
+      beforeStatus !== e.status &&
+      !TERMINAL_STATUSES.has(beforeStatus) &&
+      TERMINAL_STATUSES.has(e.status)
+    ) {
       turnStatusChanges.set(e.turnId, { from: beforeStatus, to: e.status });
     }
   }
