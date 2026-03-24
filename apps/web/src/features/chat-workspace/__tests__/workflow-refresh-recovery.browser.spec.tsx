@@ -326,7 +326,7 @@ describe('workspace refresh/reconnect recovery workflows', () => {
               {
                 id: 'art-2',
                 turnId: 'turn-a1',
-                kind: 'json',
+                kind: 'structured-data',
                 label: 'final.json',
                 size: 84,
                 createdAt: '2026-07-01T00:00:06.000Z',
