@@ -1734,7 +1734,7 @@ describe('TranscriptPane large history orientation', () => {
     );
 
     const orientation = screen.getByTestId('transcript-orientation');
-    expect(orientation).toBeTruthy();
+    expect(orientation).toBeInTheDocument();
     expect(orientation.textContent).toContain('5');
     expect(orientation.textContent).toContain('50');
   });
@@ -1759,7 +1759,7 @@ describe('TranscriptPane large history orientation', () => {
     );
 
     const orientation = screen.getByTestId('transcript-orientation');
-    expect(orientation).toBeTruthy();
+    expect(orientation).toBeInTheDocument();
     // Should mention both hidden entries and server history
     expect(orientation.textContent).toContain('1');
     expect(orientation.textContent).toContain('21');
@@ -1785,7 +1785,7 @@ describe('TranscriptPane large history orientation', () => {
     );
 
     const orientation = screen.getByTestId('transcript-orientation');
-    expect(orientation).toBeTruthy();
+    expect(orientation).toBeInTheDocument();
     expect(orientation.textContent).toMatch(/older history/i);
   });
 

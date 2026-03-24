@@ -16,6 +16,7 @@ import {
 } from '../model/workspace-store.ts';
 
 import { invalidateStaleEntryControls } from '../model/reconciler.ts';
+import { selectCanFollowUp } from '../model/selectors.ts';
 
 function createConversation(
   overrides: Partial<WorkspaceConversationRecord> = {},
@@ -2011,8 +2012,7 @@ describe('multi-session convergence — merge-history invalidation', () => {
 
     const entry = state.conversations.get('conv-1')?.entries[0];
     assert.ok(entry);
-    assert.equal(entry.controls[0].enabled, true);
-    assert.equal(entry.controls[0].reasonDisabled, null);
+    assert.equal(entry.controls.length, 0);
   });
 
   it('does not set staleReason when no controls are invalidated', () => {
@@ -2078,7 +2078,7 @@ describe('multi-session convergence — merge-history invalidation', () => {
     assert.equal(entry.controls[0].reasonDisabled, 'Not available yet');
   });
 
-  it('invalidates only changed entries in a multi-entry merge', () => {
+  it('applies terminal control convergence per entry in a multi-entry merge', () => {
     let state = createInitialWorkspaceState();
     state = reduceWorkspaceState(state, {
       type: 'conversation/upsert',
@@ -2116,10 +2116,10 @@ describe('multi-session convergence — merge-history invalidation', () => {
 
     const entries = state.conversations.get('conv-1')?.entries;
     assert.ok(entries);
-    // turn-1: status changed streaming→completed, controls invalidated
+    // turn-1: status changed streaming→completed, cancel becomes stale
     assert.equal(entries[0].controls[0].enabled, false);
-    // turn-2: status unchanged, controls preserved
-    assert.equal(entries[1].controls[0].enabled, true);
+    // turn-2: terminal status already matched, so authoritative control removal wins
+    assert.equal(entries[1].controls.length, 0);
   });
 });
 
@@ -2340,7 +2340,7 @@ describe('multi-session convergence: stale-control invalidation', () => {
     assert.equal(conv?.controlState.staleReason, null);
   });
 
-  it('disables enabled retry/branch controls on turns that became terminal externally', () => {
+  it('preserves authoritative terminal retry/branch/follow-up controls on external completion', () => {
     let state = createInitialWorkspaceState();
     state = reduceWorkspaceState(state, {
       type: 'conversation/upsert',
@@ -2364,7 +2364,7 @@ describe('multi-session convergence: stale-control invalidation', () => {
       hasMoreHistory: false,
     });
 
-    // Authoritative merge: turn failed externally, REST provides fresh controls
+    // Authoritative merge: turn failed externally, REST provides fresh terminal controls
     state = reduceWorkspaceState(state, {
       type: 'conversation/merge-history',
       conversationId: 'conv-1',
@@ -2375,6 +2375,13 @@ describe('multi-session convergence: stale-control invalidation', () => {
           status: 'failed',
           controls: [
             { controlId: 'c-retry-rest', kind: 'retry', enabled: true, reasonDisabled: null },
+            { controlId: 'c-branch-rest', kind: 'branch', enabled: true, reasonDisabled: null },
+            {
+              controlId: 'c-follow-up-rest',
+              kind: 'submit-follow-up',
+              enabled: true,
+              reasonDisabled: null,
+            },
           ],
         }),
       ],
@@ -2388,9 +2395,60 @@ describe('multi-session convergence: stale-control invalidation', () => {
     const cancelCtrl = turn?.controls.find((c) => c.kind === 'cancel');
     assert.ok(cancelCtrl, 'cancel control preserved as disabled');
     assert.equal(cancelCtrl?.enabled, false);
-    // REST-provided retry should be present
+    // REST-provided terminal actions must stay enabled
     const retryCtrl = turn?.controls.find((c) => c.kind === 'retry');
     assert.ok(retryCtrl, 'retry control from REST must be present');
+    assert.equal(retryCtrl?.enabled, true, 'authoritative terminal retry must stay enabled');
+    const branchCtrl = turn?.controls.find((c) => c.kind === 'branch');
+    assert.ok(branchCtrl, 'branch control from REST must be present');
+    assert.equal(branchCtrl?.enabled, true);
+    const followUpCtrl = turn?.controls.find((c) => c.kind === 'submit-follow-up');
+    assert.ok(followUpCtrl, 'follow-up control from REST must be present');
+    assert.equal(followUpCtrl?.enabled, true);
+  });
+
+  it('removes stale follow-up eligibility when another session appends a newer turn', () => {
+    let state = createInitialWorkspaceState();
+    state = reduceWorkspaceState(state, {
+      type: 'conversation/upsert',
+      conversation: createConversation(),
+    });
+    state = reduceWorkspaceState(state, {
+      type: 'conversation/replace-entries',
+      conversationId: 'conv-1',
+      entries: [
+        createEntry({
+          entryId: 'turn-1',
+          turnId: 'turn-1',
+          status: 'completed',
+          controls: [
+            {
+              controlId: 'c-follow-up',
+              kind: 'submit-follow-up',
+              enabled: true,
+              reasonDisabled: null,
+            },
+          ],
+        }),
+      ],
+      hasMoreHistory: false,
+    });
+
+    state = reduceWorkspaceState(state, {
+      type: 'conversation/merge-history',
+      conversationId: 'conv-1',
+      entries: [
+        createEntry({ entryId: 'turn-1', turnId: 'turn-1', status: 'completed' }),
+        createEntry({ entryId: 'turn-2', turnId: 'turn-2', status: 'submitted' }),
+      ],
+      hasMoreHistory: false,
+    });
+
+    const conv = state.conversations.get('conv-1');
+    const olderTurn = conv?.entries.find((entry) => entry.turnId === 'turn-1');
+    const followUpCtrl = olderTurn?.controls.find((control) => control.kind === 'submit-follow-up');
+    assert.equal(followUpCtrl, undefined, 'streamed-only follow-up control should be removed');
+    assert.equal(selectCanFollowUp(state, 'turn-1'), false);
   });
 
   it('marks actionable prompts stale when turn becomes terminal via external merge', () => {

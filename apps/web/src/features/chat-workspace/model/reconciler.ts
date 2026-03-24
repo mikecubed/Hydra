@@ -621,9 +621,10 @@ function mergeTerminalControls(
   streamedControls: readonly EntryControlState[],
 ): readonly EntryControlState[] {
   const mergedByKind = new Map<EntryControlKind, EntryControlState>();
+  const restKinds = new Set(restControls.map((control) => control.kind));
 
   for (const control of streamedControls) {
-    if (control.kind === 'cancel') {
+    if (control.kind === 'cancel' || control.enabled || restKinds.has(control.kind)) {
       continue;
     }
 
@@ -995,9 +996,9 @@ export function invalidateStaleEntryControls(
       }
     }
 
-    // Disable any still-enabled controls
+    // Cancel controls are always stale once a turn reaches terminal state.
     const updatedControls: EntryControlState[] = entry.controls.map((control) =>
-      control.enabled
+      control.kind === 'cancel' && control.enabled
         ? { ...control, enabled: false, reasonDisabled: STALE_CONTROL_REASON }
         : control,
     );
@@ -1054,13 +1055,16 @@ export function hasActionableControlInvalidation(
     const prev = prevTurnMap.get(entry.turnId);
     if (prev == null || TERMINAL_STATUSES.has(prev.status)) continue;
 
-    const mergedKinds = new Set(entry.controls.map((control) => control.kind));
-    if (entry.controls.some((control) => control.enabled)) {
-      return true;
-    }
+    const mergedByKind = new Map(entry.controls.map((control) => [control.kind, control] as const));
+    for (const control of prev.controls) {
+      if (!control.enabled) {
+        continue;
+      }
 
-    if (prev.controls.some((control) => control.enabled && !mergedKinds.has(control.kind))) {
-      return true;
+      const mergedControl = mergedByKind.get(control.kind);
+      if (mergedControl?.enabled !== true) {
+        return true;
+      }
     }
   }
 
