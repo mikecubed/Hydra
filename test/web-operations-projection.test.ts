@@ -258,7 +258,7 @@ describe('projectQueueSnapshot', () => {
   });
 
   describe('ordering', () => {
-    it('orders active before waiting before blocked before completed', () => {
+    it('orders active before blocked before waiting before completed', () => {
       const state = makeState({
         tasks: [
           makeTask({ id: 'done-1', status: 'done', updatedAt: '2025-01-01T04:00:00.000Z' }),

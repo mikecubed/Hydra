@@ -494,7 +494,7 @@ describe('hydra daemon state-machine characterization', () => {
         '/task/update',
         {
           taskId: first.json.task.id,
-          status: 'failed',
+          status: 'bogus',
         },
       );
       assert.equal(invalidStatus.response.status, 400);

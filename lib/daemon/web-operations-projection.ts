@@ -28,7 +28,7 @@ const TERMINAL_STATUSES: ReadonlySet<WorkItemStatus> = new Set([
 ]);
 
 export function normalizeTaskStatus(status: string): WorkItemStatus {
-  return status in DAEMON_TO_WORK_ITEM_STATUS
+  return Object.hasOwn(DAEMON_TO_WORK_ITEM_STATUS, status)
     ? DAEMON_TO_WORK_ITEM_STATUS[status as TaskStatus]
     : 'waiting';
 }

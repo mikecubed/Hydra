@@ -1749,19 +1749,18 @@ export function WorkspaceRoute(): JSX.Element {
           <OperationsPanelShell
             snapshotStatus={selectOpsSnapshotStatus(opsState)}
             freshness={selectOpsFreshness(opsState)}
-            availability={selectOpsAvailability(opsState)}
           >
             <QueuePanel
               items={selectFilteredQueueItems(opsState)}
               snapshotStatus={selectOpsSnapshotStatus(opsState)}
-               availability={selectOpsAvailability(opsState)}
-               selectedWorkItemId={selectSelectedWorkItemId(opsState)}
-               onSelectItem={(workItemId) => {
-                 dispatchOps({ type: 'selection/select', workItemId });
-               }}
-               hasPendingControl={(workItemId) =>
-                 selectHasPendingControl(opsState, workItemId)
-               }
+              availability={selectOpsAvailability(opsState)}
+              selectedWorkItemId={selectSelectedWorkItemId(opsState)}
+              onSelectItem={(workItemId) => {
+                dispatchOps({ type: 'selection/select', workItemId });
+              }}
+              hasPendingControl={(workItemId) =>
+                selectHasPendingControl(opsState, workItemId)
+              }
             />
           </OperationsPanelShell>
         }

@@ -5,7 +5,7 @@
  * metadata, and pending-control indicator. Follows the inline-style pattern
  * established by prompt-card.tsx in the chat workspace.
  */
-import type { JSX } from 'react';
+import type { CSSProperties, JSX } from 'react';
 import type { RiskSignalSeverity, WorkItemStatus, WorkQueueItemView } from '@hydra/web-contracts';
 
 export interface QueueItemCardProps {
@@ -66,9 +66,16 @@ const selectedRingStyle = '0 0 0 2px rgba(56, 189, 248, 0.5)' as const;
 function resolveCardStyle(
   status: WorkItemStatus,
   isSelected: boolean,
-): React.CSSProperties {
+): CSSProperties {
   const palette = statusColors[status];
   return {
+    // Button reset
+    appearance: 'none',
+    font: 'inherit',
+    color: 'inherit',
+    textAlign: 'left',
+    width: '100%',
+    // Card styles
     border: `1px solid ${palette.border}`,
     borderRadius: '0.375rem',
     background: palette.bg,
@@ -80,7 +87,7 @@ function resolveCardStyle(
   };
 }
 
-const badgeBase: React.CSSProperties = {
+const badgeBase: CSSProperties = {
   fontSize: '0.7rem',
   fontWeight: 600,
   textTransform: 'uppercase',
@@ -105,18 +112,18 @@ function StatusBadge({ status }: { readonly status: WorkItemStatus }): JSX.Eleme
   );
 }
 
-const pendingBadgeStyle: React.CSSProperties = {
+const pendingBadgeStyle: CSSProperties = {
   fontSize: '0.7rem',
   color: '#fbbf24',
   fontStyle: 'italic',
 };
 
-const metaStyle: React.CSSProperties = {
+const metaStyle: CSSProperties = {
   fontSize: '0.75rem',
   color: '#94a3b8',
 };
 
-const hintStyle: React.CSSProperties = {
+const hintStyle: CSSProperties = {
   fontSize: '0.7rem',
   color: '#64748b',
 };
@@ -128,9 +135,9 @@ export function QueueItemCard({
   onSelect,
 }: QueueItemCardProps): JSX.Element {
   return (
-    <article
-      role="button"
-      aria-selected={isSelected}
+    <button
+      type="button"
+      aria-current={isSelected || undefined}
       onClick={onSelect}
       style={resolveCardStyle(item.status, isSelected)}
     >
@@ -166,6 +173,6 @@ export function QueueItemCard({
       {item.relatedConversationId != null && (
         <span style={hintStyle}>Linked to conversation</span>
       )}
-    </article>
+    </button>
   );
 }

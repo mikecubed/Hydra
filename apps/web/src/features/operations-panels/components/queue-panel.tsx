@@ -27,6 +27,9 @@ export interface QueuePanelProps {
 const listStyle = {
   display: 'grid',
   gap: '0.5rem',
+  margin: 0,
+  padding: 0,
+  listStyle: 'none',
 } as const;
 
 export function QueuePanel({
@@ -42,18 +45,19 @@ export function QueuePanel({
   }
 
   return (
-    <div role="list" style={listStyle}>
+    <ul aria-label="Work queue" style={listStyle}>
       {items.map((item) => (
-        <QueueItemCard
-          key={item.id}
-          item={item}
-          isSelected={item.id === selectedWorkItemId}
-          hasPendingControl={hasPendingControl(item.id)}
-          onSelect={() => {
-            onSelectItem(item.id);
-          }}
-        />
+        <li key={item.id}>
+          <QueueItemCard
+            item={item}
+            isSelected={item.id === selectedWorkItemId}
+            hasPendingControl={hasPendingControl(item.id)}
+            onSelect={() => {
+              onSelectItem(item.id);
+            }}
+          />
+        </li>
       ))}
-    </div>
+    </ul>
   );
 }

@@ -107,7 +107,7 @@ describe('QueueItemCard', () => {
     expect(screen.getByText('paused')).toBeInTheDocument();
   });
 
-  it('has aria-selected true when selected', () => {
+  it('has aria-current true when selected', () => {
     render(
       <QueueItemCard
         item={makeItem()}
@@ -116,7 +116,19 @@ describe('QueueItemCard', () => {
         onSelect={vi.fn()}
       />,
     );
-    expect(screen.getByRole('button')).toHaveAttribute('aria-selected', 'true');
+    expect(screen.getByRole('button')).toHaveAttribute('aria-current', 'true');
+  });
+
+  it('omits aria-current when not selected', () => {
+    render(
+      <QueueItemCard
+        item={makeItem()}
+        isSelected={false}
+        hasPendingControl={false}
+        onSelect={vi.fn()}
+      />,
+    );
+    expect(screen.getByRole('button')).not.toHaveAttribute('aria-current');
   });
 
   it('shows owner label when present', () => {
@@ -205,7 +217,7 @@ describe('QueueItemCard interactions', () => {
 // ─── QueuePanel ─────────────────────────────────────────────────────────────
 
 describe('QueuePanel', () => {
-  it('renders queue item cards for each item', () => {
+  it('renders queue item cards inside a list', () => {
     const items = [makeItem({ id: 'wi-1', title: 'Task A' }), makeItem({ id: 'wi-2', title: 'Task B' })];
     render(
       <QueuePanel
@@ -217,6 +229,8 @@ describe('QueuePanel', () => {
         hasPendingControl={() => false}
       />,
     );
+    expect(screen.getByRole('list')).toBeInTheDocument();
+    expect(screen.getAllByRole('listitem')).toHaveLength(2);
     expect(screen.getByText('Task A')).toBeInTheDocument();
     expect(screen.getByText('Task B')).toBeInTheDocument();
   });
@@ -235,7 +249,7 @@ describe('QueuePanel', () => {
     expect(screen.getByTestId('operations-empty-state')).toHaveTextContent(/no work items/i);
   });
 
-  it('highlights the selected item', () => {
+  it('highlights the selected item via aria-current', () => {
     const items = [makeItem({ id: 'wi-1' }), makeItem({ id: 'wi-2', title: 'Second' })];
     render(
       <QueuePanel
@@ -248,8 +262,8 @@ describe('QueuePanel', () => {
       />,
     );
     const buttons = screen.getAllByRole('button');
-    expect(buttons[0]).toHaveAttribute('aria-selected', 'true');
-    expect(buttons[1]).toHaveAttribute('aria-selected', 'false');
+    expect(buttons[0]).toHaveAttribute('aria-current', 'true');
+    expect(buttons[1]).not.toHaveAttribute('aria-current');
   });
 
   it('calls onSelectItem with item id when card is clicked', () => {
@@ -275,7 +289,7 @@ describe('QueuePanel', () => {
 describe('OperationsPanelShell', () => {
   it('renders heading and children', () => {
     render(
-      <OperationsPanelShell snapshotStatus="ready" freshness="live" availability="ready">
+      <OperationsPanelShell snapshotStatus="ready" freshness="live">
         <p>Queue content</p>
       </OperationsPanelShell>,
     );
@@ -285,7 +299,7 @@ describe('OperationsPanelShell', () => {
 
   it('shows freshness badge', () => {
     render(
-      <OperationsPanelShell snapshotStatus="ready" freshness="stale" availability="ready">
+      <OperationsPanelShell snapshotStatus="ready" freshness="stale">
         <p>Content</p>
       </OperationsPanelShell>,
     );
@@ -294,7 +308,7 @@ describe('OperationsPanelShell', () => {
 
   it('shows live freshness badge', () => {
     render(
-      <OperationsPanelShell snapshotStatus="ready" freshness="live" availability="ready">
+      <OperationsPanelShell snapshotStatus="ready" freshness="live">
         <p>Content</p>
       </OperationsPanelShell>,
     );
@@ -303,7 +317,7 @@ describe('OperationsPanelShell', () => {
 
   it('shows refreshing indicator when snapshot is loading', () => {
     render(
-      <OperationsPanelShell snapshotStatus="loading" freshness="refreshing" availability="ready">
+      <OperationsPanelShell snapshotStatus="loading" freshness="refreshing">
         <p>Content</p>
       </OperationsPanelShell>,
     );
@@ -312,7 +326,7 @@ describe('OperationsPanelShell', () => {
 
   it('labels section with operations heading', () => {
     render(
-      <OperationsPanelShell snapshotStatus="idle" freshness="stale" availability="empty">
+      <OperationsPanelShell snapshotStatus="idle" freshness="stale">
         <p>Content</p>
       </OperationsPanelShell>,
     );

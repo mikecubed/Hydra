@@ -5,21 +5,19 @@
  * indicator. Children (currently the QueuePanel) are rendered below
  * the header.
  */
-import type { JSX, ReactNode } from 'react';
+import type { CSSProperties, JSX, ReactNode } from 'react';
 import type {
   SnapshotStatus,
-  WorkspaceAvailability,
   WorkspaceFreshness,
 } from '@hydra/web-contracts';
 
 export interface OperationsPanelShellProps {
   readonly snapshotStatus: SnapshotStatus;
   readonly freshness: WorkspaceFreshness;
-  readonly availability: WorkspaceAvailability;
   readonly children: ReactNode;
 }
 
-const shellStyle: React.CSSProperties = {
+const shellStyle: CSSProperties = {
   border: '1px solid rgba(148, 163, 184, 0.2)',
   borderRadius: '0.75rem',
   background: 'rgba(15, 23, 42, 0.55)',
@@ -28,13 +26,13 @@ const shellStyle: React.CSSProperties = {
   gap: '0.75rem',
 };
 
-const headerStyle: React.CSSProperties = {
+const headerStyle: CSSProperties = {
   display: 'flex',
   justifyContent: 'space-between',
   alignItems: 'center',
 };
 
-const freshnessBadgeBase: React.CSSProperties = {
+const freshnessBadgeBase: CSSProperties = {
   fontSize: '0.65rem',
   fontWeight: 600,
   textTransform: 'uppercase',
@@ -43,7 +41,7 @@ const freshnessBadgeBase: React.CSSProperties = {
   borderRadius: '0.25rem',
 };
 
-const freshnessStyles: Record<WorkspaceFreshness, React.CSSProperties> = {
+const freshnessStyles: Record<WorkspaceFreshness, CSSProperties> = {
   live: {
     ...freshnessBadgeBase,
     color: '#4ade80',
@@ -64,7 +62,7 @@ const freshnessStyles: Record<WorkspaceFreshness, React.CSSProperties> = {
   },
 };
 
-const loadingLabelStyle: React.CSSProperties = {
+const loadingLabelStyle: CSSProperties = {
   fontSize: '0.75rem',
   color: '#38bdf8',
   fontStyle: 'italic',
