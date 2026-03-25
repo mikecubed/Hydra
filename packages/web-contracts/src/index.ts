@@ -111,3 +111,61 @@ export {
 } from './contracts/multi-agent-activity.ts';
 
 export { ErrorCode, ErrorResponse } from './contracts/error.ts';
+
+// ─── Operations Panels contracts (Phase 3 — web-hydra-operations-panels) ────
+
+export {
+  WorkItemStatus,
+  DetailAvailability,
+  RiskSignalKind,
+  RiskSignalSeverity,
+  RiskSignal,
+  WorkQueueItemView,
+  CheckpointStatus,
+  CheckpointRecordView,
+  DaemonHealthStatus,
+  HealthDetailsAvailability,
+  DaemonHealthView,
+  BudgetSeverity,
+  BudgetScope,
+  BudgetStatusView,
+  RoutingHistoryEntry,
+  RoutingDecisionView,
+  AgentAssignmentState,
+  AgentAssignmentView,
+  CouncilExecutionStatus,
+  CouncilTransitionView,
+  CouncilExecutionView,
+  ControlKind,
+  ControlAvailability,
+  ControlAuthority,
+  ControlOptionView,
+  OperationalControlView,
+  PendingControlRequest,
+  SnapshotStatus,
+  WorkspaceFreshness,
+  WorkspaceAvailability,
+} from './operations.ts';
+
+export {
+  GetOperationsSnapshotRequest,
+  GetOperationsSnapshotResponse,
+  GetWorkItemDetailRequest,
+  GetWorkItemDetailResponse,
+  GetWorkItemCheckpointsRequest,
+  GetWorkItemCheckpointsResponse,
+  GetWorkItemExecutionRequest,
+  GetWorkItemExecutionResponse,
+  GetWorkItemControlsRequest,
+  GetWorkItemControlsResponse,
+} from './contracts/operations-read.ts';
+
+export {
+  ControlOutcome,
+  SubmitControlActionRequest,
+  SubmitControlActionBody,
+  SubmitControlActionResponse,
+  BatchControlDiscoveryRequest,
+  WorkItemControlEntry,
+  BatchControlDiscoveryResponse,
+} from './contracts/operations-control.ts';

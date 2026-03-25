@@ -38,12 +38,12 @@
 
 _Create the browser-safe operations vocabulary before daemon, gateway, or browser behavior expands._
 
-- [ ] T001 [P] **TDD:** add operations schema and conformance coverage in `packages/web-contracts/src/__tests__/operations-contracts.test.ts` and `test/web-contracts/operations-contracts.test.ts`.
-- [ ] T002 [P] Define shared operations entity schemas and inferred types in `packages/web-contracts/src/operations.ts`.
-- [ ] T003 [P] Define operations snapshot/detail read contracts in `packages/web-contracts/src/contracts/operations-read.ts`.
-- [ ] T004 [P] Define daemon-authorized control request/result contracts in `packages/web-contracts/src/contracts/operations-control.ts`.
-- [ ] T005 Update append-only shared exports and contract registry in `packages/web-contracts/src/index.ts` and `packages/web-contracts/CONTRACTS.md`.
-- [ ] T006 Create operations module scaffolding and top-of-file JSDoc summaries in `apps/web-gateway/src/operations/daemon-operations-client.ts`, `apps/web-gateway/src/operations/operations-routes.ts`, `apps/web-gateway/src/operations/request-validator.ts`, `apps/web-gateway/src/operations/response-translator.ts`, `apps/web/src/features/operations-panels/api/operations-client.ts`, and `apps/web/src/features/operations-panels/model/operations-types.ts`.
+- [x] T001 [P] **TDD:** add operations schema and conformance coverage in `packages/web-contracts/src/__tests__/operations-contracts.test.ts` and `test/web-contracts/operations-contracts.test.ts`.
+- [x] T002 [P] Define shared operations entity schemas and inferred types in `packages/web-contracts/src/operations.ts`.
+- [x] T003 [P] Define operations snapshot/detail read contracts in `packages/web-contracts/src/contracts/operations-read.ts`.
+- [x] T004 [P] Define daemon-authorized control request/result contracts in `packages/web-contracts/src/contracts/operations-control.ts`.
+- [x] T005 Update append-only shared exports and contract registry in `packages/web-contracts/src/index.ts` and `packages/web-contracts/CONTRACTS.md`.
+- [x] T006 Create operations module scaffolding and top-of-file JSDoc summaries in `apps/web-gateway/src/operations/daemon-operations-client.ts`, `apps/web-gateway/src/operations/operations-routes.ts`, `apps/web-gateway/src/operations/request-validator.ts`, `apps/web-gateway/src/operations/response-translator.ts`, `apps/web/src/features/operations-panels/api/operations-client.ts`, and `apps/web/src/features/operations-panels/model/operations-types.ts`.
 
 **Checkpoint**: Shared operations DTOs exist, are exported append-only, and give daemon/gateway/browser code a stable contract foundation.
 
