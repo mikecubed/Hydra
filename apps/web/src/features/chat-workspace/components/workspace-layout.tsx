@@ -36,6 +36,8 @@ export interface WorkspaceLayoutProps extends TranscriptTurnCallbacks {
   readonly composerSlot?: JSX.Element | null;
   readonly visibleArtifact?: ArtifactViewState | null;
   readonly onCloseArtifact?: () => void;
+  /** Optional operations panel rendered beside the chat workspace. */
+  readonly operationsPanelSlot?: JSX.Element | null;
 }
 
 // eslint-disable-next-line max-lines-per-function
@@ -62,8 +64,9 @@ export function WorkspaceLayout({
   composerSlot,
   visibleArtifact,
   onCloseArtifact,
+  operationsPanelSlot,
 }: WorkspaceLayoutProps): JSX.Element {
-  return (
+  const chatSection = (
     <section
       aria-labelledby="conversation-workspace-heading"
       style={{ display: 'grid', gap: '1.5rem' }}
@@ -154,5 +157,23 @@ export function WorkspaceLayout({
         </div>
       </div>
     </section>
+  );
+
+  if (operationsPanelSlot == null) {
+    return chatSection;
+  }
+
+  return (
+    <div
+      style={{
+        display: 'grid',
+        gridTemplateColumns: '1fr minmax(16rem, 20rem)',
+        gap: '1.5rem',
+        alignItems: 'start',
+      }}
+    >
+      {chatSection}
+      <aside aria-label="Operations sidebar">{operationsPanelSlot}</aside>
+    </div>
   );
 }

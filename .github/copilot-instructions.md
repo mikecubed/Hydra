@@ -23,7 +23,7 @@ Operator Console (REPL)
 2. **ESM only** — all files use `import`/`export`. Never use `require()` or CommonJS.
 3. **No build step** — pure ESM, runs directly with `node`. No compilation needed.
 4. **Quality gates must pass** — ESLint, Prettier, and TypeScript type-check run on every PR. Run `npm run quality` before pushing.
-5. **Git hooks install automatically** via the `prepare` script when you run `npm install` or `npm ci`. `pre-commit` runs lint-staged (auto-fixes ESLint + Prettier on staged `.mjs` files, auto-formats `.json/.md/.yml/.yaml`); `pre-push` runs the full test suite and blocks the push on failure. Use `npm run setup:hooks` only to manually reinstall or verify hooks.
+5. **Git hooks install automatically** via the `prepare` script when you run `npm install` or `npm ci`. `pre-commit` runs lint-staged (auto-fixes ESLint + Prettier on staged `.ts/.tsx/.mjs` files, auto-formats `.json/.md/.yml/.yaml`); `pre-push` runs the full test suite and blocks the push on failure. Use `npm run setup:hooks` only to manually reinstall or verify hooks.
 6. **Update docs before committing** — see [Documentation Requirements](#documentation-requirements).
 7. **Built-in physical agent names** are `claude`, `gemini`, `codex`, `local`. All agent names (including custom agents) must be lowercase (`a-z0-9-`).
 

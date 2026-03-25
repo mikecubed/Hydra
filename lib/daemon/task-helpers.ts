@@ -8,7 +8,14 @@ import { getAgent, KNOWN_OWNERS, listAgents, resolvePhysicalAgent } from '../hyd
 import { getAgentInstructionFile } from '../hydra-sync-md.ts';
 import type { TaskEntry, HydraStateShape, BlockerEntry, HandoffEntry } from '../types.ts';
 
-export const STATUS_VALUES = new Set(['todo', 'in_progress', 'blocked', 'done', 'cancelled']);
+export const STATUS_VALUES = new Set([
+  'todo',
+  'in_progress',
+  'blocked',
+  'done',
+  'failed',
+  'cancelled',
+]);
 
 /**
  * Generate the next sequential ID for a prefix (e.g. 'T' → 'T001', 'T002', …).

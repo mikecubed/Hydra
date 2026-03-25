@@ -161,7 +161,7 @@ export type TaskType =
   | 'security';
 
 /** Task lifecycle status values from STATUS_VALUES in orchestrator-daemon.mjs */
-export type TaskStatus = 'todo' | 'in_progress' | 'blocked' | 'done' | 'cancelled';
+export type TaskStatus = 'todo' | 'in_progress' | 'blocked' | 'done' | 'failed' | 'cancelled';
 
 /** Shape of a task record as stored in daemon state.tasks[] */
 export interface TaskState {

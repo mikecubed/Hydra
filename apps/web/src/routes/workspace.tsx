@@ -73,6 +73,7 @@ import {
   hydrateConversationArtifacts,
   fetchArtifactContent,
 } from '../features/chat-workspace/model/artifact-hydration.ts';
+import { WorkspaceOperationsPanel } from '../features/operations-panels/components/workspace-operations-panel.tsx';
 
 function useWorkspaceState(store: WorkspaceStore) {
   return useSyncExternalStore(
@@ -1534,6 +1535,7 @@ export function WorkspaceRoute(): JSX.Element {
   const [store] = useState(() => createWorkspaceStore());
   const state = useWorkspaceState(store);
   const client = useMemo(() => createGatewayClient({ baseUrl: '' }), []);
+
   const wsStreamClient = useMemo(
     () =>
       createStreamClient({
@@ -1695,6 +1697,7 @@ export function WorkspaceRoute(): JSX.Element {
             onSubmit={composer.onSubmit}
           />
         }
+        operationsPanelSlot={<WorkspaceOperationsPanel />}
       />
     </ConnectionStateContext.Provider>
   );

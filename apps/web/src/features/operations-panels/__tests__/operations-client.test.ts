@@ -10,6 +10,7 @@ import assert from 'node:assert/strict';
 import {
   createOperationsClient,
   OperationsRequestError,
+  OperationsResponseValidationError,
   type OperationsClient,
   type OperationsClientOptions,
 } from '../api/operations-client.ts';
@@ -162,6 +163,31 @@ describe('OperationsClient', () => {
         const gatewayError = assertOperationsError(err);
         assert.equal(gatewayError.status, 403);
         assert.equal(gatewayError.gatewayError.category, 'auth');
+        return true;
+      },
+    );
+  });
+
+  it('throws OperationsResponseValidationError on invalid snapshot payloads', async () => {
+    const client = buildClient(async () =>
+      jsonResponse({
+        queue: [],
+        health: {
+          status: 'healthy',
+          summary: 'not-contract-valid',
+        },
+        budget: null,
+        availability: 'ready',
+        lastSynchronizedAt: NOW,
+        nextCursor: null,
+      }),
+    );
+
+    await assert.rejects(
+      () => client.getSnapshot(),
+      (err: unknown) => {
+        assert.ok(err instanceof OperationsResponseValidationError);
+        assert.match(err.message, /Invalid operations snapshot response/u);
         return true;
       },
     );

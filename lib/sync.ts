@@ -99,7 +99,7 @@ const COORD_DIR = config.coordDir;
 const STATE_PATH = config.statePath;
 const LOG_PATH = config.logPath;
 
-const STATUS_VALUES = new Set(['todo', 'in_progress', 'blocked', 'done', 'cancelled']);
+const STATUS_VALUES = new Set(['todo', 'in_progress', 'blocked', 'done', 'failed', 'cancelled']);
 
 function nowIso() {
   return new Date().toISOString();

@@ -30,7 +30,7 @@ Never commit directly to `main`.
 
 Git hooks install automatically when you run `npm install` or `npm ci` (via the `prepare` script). They enforce quality on every commit and push:
 
-- **`pre-commit`** — runs lint-staged: auto-fixes ESLint + Prettier on staged `.ts/.mjs` files; validates Mermaid blocks and formats staged `.md` files; auto-formats staged `.json/.yml/.yaml` files. Fixes are staged automatically.
+- **`pre-commit`** — runs lint-staged: auto-fixes ESLint + Prettier on staged `.ts/.tsx/.mjs` files; validates Mermaid blocks and formats staged `.md` files; auto-formats staged `.json/.yml/.yaml` files. Fixes are staged automatically.
 - **`pre-push`** — runs the full test suite (`npm test`). Push is blocked if any tests fail.
 
 Run the full quality check manually before opening a PR:

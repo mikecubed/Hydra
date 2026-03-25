@@ -90,7 +90,7 @@ npm run setup:hooks         # Install/verify git pre-commit and pre-push hooks
 
 **Git hooks (Husky v9 + lint-staged)** — install automatically when you run `npm install` or `npm ci` (via the `prepare` script). Use `npm run setup:hooks` only to manually reinstall or verify.
 
-- `pre-commit` — runs lint-staged: ESLint `--fix` + Prettier **auto-write** on staged `.ts`/`.mjs` files; Mermaid validation + Prettier on staged `.md`; Prettier auto-write on staged `.json/.yml/.yaml`.
+- `pre-commit` — runs lint-staged: ESLint `--fix` + Prettier **auto-write** on staged `.ts/.tsx/.mjs` files; Mermaid validation + Prettier on staged `.md`; Prettier auto-write on staged `.json/.yml/.yaml`.
 - `pre-push` — runs the full `npm test` suite. Push is blocked if tests fail.
 
 **Always run `npm run quality` before opening a PR.** This runs lint + format:check + typecheck + lint:cycles in full (no auto-fix) so you catch issues before CI does.

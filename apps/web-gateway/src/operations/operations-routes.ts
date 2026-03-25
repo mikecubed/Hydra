@@ -1,18 +1,60 @@
 /**
  * Operations routes — authenticated gateway surface for operations panels.
  *
- * Phase 0 provides only the route module scaffold so later phases can add
- * snapshot/detail/control mediation without mixing concerns into conversation
- * transport files.
+ * Phase 1 provides queue-visibility snapshot reads (US1, T010) using the
+ * DaemonOperationsClient as the sole daemon communication point. Routes
+ * validate query params via shared Zod middleware and translate daemon errors
+ * into the five-category GatewayErrorResponse shape.
  */
 import { Hono } from 'hono';
+import type { Context } from 'hono';
+import type { ContentfulStatusCode } from 'hono/utils/http-status';
 import type { GatewayEnv } from '../shared/types.ts';
-import type { DaemonOperationsClient } from './daemon-operations-client.ts';
+import { GetOperationsSnapshotRequest } from '@hydra/web-contracts';
+import type { DaemonOperationsClient, DaemonOperationsResult } from './daemon-operations-client.ts';
+import type { ErrorCategory, GatewayErrorResponse } from '../shared/gateway-error-response.ts';
+import { validateOperationsQuery } from './request-validator.ts';
 
 export interface OperationsRoutesDeps {
   readonly daemonClient: DaemonOperationsClient;
 }
 
-export function createOperationsRoutes(_deps: OperationsRoutesDeps): Hono<GatewayEnv> {
-  return new Hono<GatewayEnv>();
+const CATEGORY_STATUS_MAP: Record<ErrorCategory, number> = {
+  auth: 401,
+  session: 409,
+  validation: 400,
+  daemon: 503,
+  'rate-limit': 429,
+};
+
+function sendDaemonError(c: Context<GatewayEnv>, error: GatewayErrorResponse): Response {
+  const status = error.httpStatus ?? CATEGORY_STATUS_MAP[error.category];
+  return c.json(error, status as ContentfulStatusCode);
+}
+
+function handleResult<T>(
+  c: Context<GatewayEnv>,
+  result: DaemonOperationsResult<T>,
+  successStatus = 200,
+): Response {
+  if ('error' in result) {
+    return sendDaemonError(c, result.error);
+  }
+  return c.json(result.data, successStatus as ContentfulStatusCode);
+}
+
+export function createOperationsRoutes(deps: OperationsRoutesDeps): Hono<GatewayEnv> {
+  const app = new Hono<GatewayEnv>();
+  const dc = deps.daemonClient;
+
+  app.get(
+    '/operations/snapshot',
+    validateOperationsQuery(GetOperationsSnapshotRequest),
+    async (c) => {
+      const query = c.get('validatedQuery' as never) as Partial<GetOperationsSnapshotRequest>;
+      return handleResult(c, await dc.getOperationsSnapshot(query));
+    },
+  );
+
+  return app;
 }
