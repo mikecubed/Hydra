@@ -11,7 +11,7 @@ import {
   loadAgentFixture,
   makeFailureResult,
   makeSuccessResult,
-} from './helpers/mock-agent.mjs';
+} from './helpers/mock-agent.ts';
 
 const ALL_AGENTS = ['claude', 'gemini', 'codex', 'copilot'];
 const EXPECTED_TANDEM_PAIRS = {

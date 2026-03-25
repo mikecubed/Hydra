@@ -9,7 +9,7 @@ const PIPED_STDIO_SUPPORTED = (() => {
       stdio: ['ignore', 'pipe', 'pipe'],
       windowsHide: true,
     });
-    return !(r.error && String(r.error?.code || '') === 'EPERM');
+    return !(r.error && ((r.error as NodeJS.ErrnoException)?.code ?? '') === 'EPERM');
   } catch {
     return false;
   }
@@ -48,25 +48,33 @@ test(
     const client = new MCPClient(process.execPath, ['-e', script]);
 
     // Start should call initialize and get a response
-    const initResult = await client.start();
+    const initResult = (await client.start()) as Record<string, unknown>;
     assert.ok(initResult, 'Start should return init result');
-    assert.equal(initResult.echo, 'initialize');
-    assert.equal(initResult.params.clientInfo.name, 'hydra');
+    assert.equal(initResult['echo'], 'initialize');
+    assert.equal(
+      ((initResult['params'] as Record<string, unknown>)['clientInfo'] as Record<string, unknown>)[
+        'name'
+      ],
+      'hydra',
+    );
 
     // isAlive should be true
     assert.ok(client.isAlive());
     assert.ok(client.uptimeMs() >= 0);
 
     // Call a tool
-    const toolResult = await client.callTool('test-tool', { prompt: 'hello' });
+    const toolResult = (await client.callTool('test-tool', {
+      prompt: 'hello',
+    })) as Record<string, unknown>;
     assert.ok(toolResult);
-    assert.equal(toolResult.echo, 'tools/call');
-    assert.equal(toolResult.params.name, 'test-tool');
-    assert.equal(toolResult.params.arguments.prompt, 'hello');
+    assert.equal(toolResult['echo'], 'tools/call');
+    const toolParams = toolResult['params'] as Record<string, unknown>;
+    assert.equal(toolParams['name'], 'test-tool');
+    assert.equal((toolParams['arguments'] as Record<string, unknown>)['prompt'], 'hello');
 
     // List tools
-    const listResult = await client.listTools();
-    assert.equal(listResult.echo, 'tools/list');
+    const listResult = (await client.listTools()) as Record<string, unknown>;
+    assert.equal(listResult['echo'], 'tools/list');
 
     // Close
     await client.close();
@@ -89,11 +97,11 @@ test(
     try {
       await client.start();
       assert.fail('Should have thrown');
-    } catch (err) {
+    } catch (err: unknown) {
       assert.ok(
-        err.message.includes('exited') ||
-          err.message.includes('timed out') ||
-          err.message.includes('MCP'),
+        (err as Error).message.includes('exited') ||
+          (err as Error).message.includes('timed out') ||
+          (err as Error).message.includes('MCP'),
       );
     }
 
@@ -107,7 +115,7 @@ test('MCPClient rejects calls when not started', async () => {
   try {
     await client.call('test', {});
     assert.fail('Should have thrown');
-  } catch (err) {
-    assert.match(err.message, /not started/i);
+  } catch (err: unknown) {
+    assert.match((err as Error).message, /not started/i);
   }
 });

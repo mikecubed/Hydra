@@ -85,7 +85,7 @@ describe('worktreeIsolation dispatch guard', () => {
     const cfg = loadHydraConfig();
     // Guard check: if this is false, the worktree creation block is skipped
     assert.strictEqual(
-      Boolean(cfg.routing?.worktreeIsolation?.enabled),
+      cfg.routing?.worktreeIsolation?.enabled ?? false,
       false,
       'Guard condition must be false by default — no worktrees created unless opt-in',
     );
@@ -99,7 +99,7 @@ describe('worktreeIsolation dispatch guard', () => {
     assert.strictEqual(typeof iso.enabled, 'boolean', 'enabled must be boolean');
     assert.strictEqual(typeof iso.cleanupOnSuccess, 'boolean', 'cleanupOnSuccess must be boolean');
     assert.strictEqual(typeof iso.worktreeDir, 'string', 'worktreeDir must be string');
-    assert.ok(iso.worktreeDir.length > 0, 'worktreeDir must not be empty');
+    assert.ok(iso.worktreeDir!.length > 0, 'worktreeDir must not be empty');
   });
 
   it('worktreeIsolation is nested under routing (not top-level)', () => {

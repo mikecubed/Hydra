@@ -4,7 +4,10 @@ import assert from 'node:assert/strict';
 // These tests verify module structure and error handling without making real API calls.
 
 describe('hydra-anthropic', () => {
-  let streamAnthropicCompletion;
+  let streamAnthropicCompletion: (
+    messages: Array<{ role: string; content: string }>,
+    cfg: Record<string, unknown>,
+  ) => Promise<unknown>;
 
   beforeEach(async () => {
     const mod = await import('../lib/hydra-anthropic.ts');
@@ -49,7 +52,10 @@ describe('hydra-anthropic', () => {
 });
 
 describe('hydra-google', () => {
-  let streamGoogleCompletion;
+  let streamGoogleCompletion: (
+    messages: Array<{ role: string; content: string }>,
+    cfg: Record<string, unknown>,
+  ) => Promise<unknown>;
 
   beforeEach(async () => {
     const mod = await import('../lib/hydra-google.ts');
@@ -97,7 +103,8 @@ describe('hydra-google', () => {
 });
 
 describe('hydra-concierge multi-provider exports', () => {
-  let concierge;
+  // eslint-disable-next-line @typescript-eslint/consistent-type-imports
+  let concierge: typeof import('../lib/hydra-concierge.ts');
 
   beforeEach(async () => {
     concierge = await import('../lib/hydra-concierge.ts');
@@ -149,6 +156,7 @@ describe('hydra-concierge multi-provider exports', () => {
   it('switchConciergeModel handles flash alias', () => {
     concierge.switchConciergeModel('flash');
     const ap = concierge.getActiveProvider();
+    assert.ok(ap);
     assert.equal(ap.provider, 'google');
     assert.equal(ap.model, 'gemini-3-flash-preview');
   });
@@ -156,6 +164,7 @@ describe('hydra-concierge multi-provider exports', () => {
   it('switchConciergeModel handles full model ID', () => {
     concierge.switchConciergeModel('gpt-5.2-codex');
     const ap = concierge.getActiveProvider();
+    assert.ok(ap);
     assert.equal(ap.provider, 'openai');
     assert.equal(ap.model, 'gpt-5.2-codex');
   });

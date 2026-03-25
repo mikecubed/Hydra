@@ -8,7 +8,7 @@ import path from 'node:path';
 const TEMP_HUB = path.join(os.tmpdir(), `hydra-hub-test-${process.pid}`);
 
 // Patch the module to use our temp dir by setting the env var before import
-process.env.HYDRA_HUB_OVERRIDE = TEMP_HUB;
+process.env['HYDRA_HUB_OVERRIDE'] = TEMP_HUB;
 
 const {
   hubPath,
@@ -22,7 +22,7 @@ const {
 
 test.after(() => {
   fs.rmSync(TEMP_HUB, { recursive: true, force: true });
-  delete process.env.HYDRA_HUB_OVERRIDE;
+  delete process.env['HYDRA_HUB_OVERRIDE'];
 });
 
 test('hubPath returns a string', () => {
@@ -49,7 +49,7 @@ test('listSessions returns registered session', () => {
     focus: 'list test',
   });
   const sessions = listSessions({ cwd: '/e/Dev/ListTest' });
-  assert.ok(sessions.some((s) => s.id === id));
+  assert.ok(sessions.some((s) => s['id'] === id));
 });
 
 test('listSessions normalizes cwd: Windows and Unix paths match', () => {
@@ -60,7 +60,7 @@ test('listSessions normalizes cwd: Windows and Unix paths match', () => {
     focus: 'norm test',
   });
   const sessions = listSessions({ cwd: '/e/Dev/NormTest' }); // Unix-style
-  assert.ok(sessions.some((s) => s.project === 'NormTest'));
+  assert.ok(sessions.some((s) => s['project'] === 'NormTest'));
 });
 
 test('updateSession patches fields and touches lastUpdate', async () => {
@@ -70,16 +70,18 @@ test('updateSession patches fields and touches lastUpdate', async () => {
     project: 'UpdTest',
     focus: 'update test',
   });
-  const before = listSessions({ cwd: '/e/Dev/UpdTest' }).find((s) => s.id === id).startedAt;
-  await new Promise((r) => {
+  const before = listSessions({ cwd: '/e/Dev/UpdTest' }).find((s) => s['id'] === id)![
+    'startedAt'
+  ] as number;
+  await new Promise<void>((r) => {
     setTimeout(r, 10);
   });
   updateSession(id, { focus: 'updated focus', files: ['src/foo.ts'] });
   const sessions = listSessions({ cwd: '/e/Dev/UpdTest' });
-  const s = sessions.find((s) => s.id === id);
-  assert.equal(s.focus, 'updated focus');
-  assert.deepEqual(s.files, ['src/foo.ts']);
-  assert.ok(s.lastUpdate > before, 'lastUpdate must be strictly after startedAt');
+  const sess = sessions.find((s) => s['id'] === id)!;
+  assert.equal(sess['focus'], 'updated focus');
+  assert.deepEqual(sess['files'], ['src/foo.ts']);
+  assert.ok((sess['lastUpdate'] as number) > before, 'lastUpdate must be strictly after startedAt');
 });
 
 test('deregisterSession removes the file', () => {
@@ -91,7 +93,7 @@ test('deregisterSession removes the file', () => {
   });
   deregisterSession(id);
   const sessions = listSessions({ cwd: '/e/Dev/DelTest' });
-  assert.ok(!sessions.some((s) => s.id === id));
+  assert.ok(!sessions.some((s) => s['id'] === id));
 });
 
 test('checkConflicts detects file overlap in same project', () => {
@@ -143,7 +145,7 @@ test('listSessions does not filter when no cwd given', () => {
     focus: 'all',
   });
   const all = listSessions();
-  assert.ok(all.some((s) => s.id === id));
+  assert.ok(all.some((s) => s['id'] === id));
 });
 
 test('logActivity appends a valid JSON line to activity.ndjson', () => {
@@ -156,7 +158,7 @@ test('logActivity appends a valid JSON line to activity.ndjson', () => {
   const activityPath = path.join(TEMP_HUB, 'activity.ndjson');
   assert.ok(fs.existsSync(activityPath), 'activity.ndjson should exist');
   const lines = fs.readFileSync(activityPath, 'utf8').trim().split('\n').filter(Boolean);
-  const last = JSON.parse(lines.at(-1));
+  const last = JSON.parse(lines.at(-1)!);
   assert.equal(last.event, 'test');
   assert.equal(last.agent, 'claude-code');
   assert.ok(last.at, 'should have at timestamp');
@@ -164,7 +166,13 @@ test('logActivity appends a valid JSON line to activity.ndjson', () => {
 
 test('logActivity does not throw on invalid input', () => {
   // Should silently swallow — no assertion needed beyond not throwing
-  assert.doesNotThrow(() => logActivity(null));
-  assert.doesNotThrow(() => logActivity());
-  assert.doesNotThrow(() => logActivity({ circular: undefined }));
+  assert.doesNotThrow(() => {
+    logActivity(null as unknown as Record<string, unknown>);
+  });
+  assert.doesNotThrow(() => {
+    logActivity(undefined as unknown as Record<string, unknown>);
+  });
+  assert.doesNotThrow(() => {
+    logActivity({ circular: undefined });
+  });
 });
