@@ -292,6 +292,8 @@ describe('Operations route wiring — auth/CSRF (T009/T010)', () => {
 
   it('GET /operations/snapshot with valid session succeeds', async () => {
     const cookies = await login(gw);
+    const validateMock = mock.method(gw.sessionService, 'validate');
+    const touchActivityMock = mock.method(gw.sessionService, 'touchActivity');
     fetchMock.mock.mockImplementation(() =>
       Promise.resolve(
         new Response(
@@ -316,5 +318,7 @@ describe('Operations route wiring — auth/CSRF (T009/T010)', () => {
     assert.equal(res.status, 200);
     const body = (await res.json()) as { queue: unknown[] };
     assert.ok(Array.isArray(body.queue));
+    assert.equal(validateMock.mock.callCount(), 1);
+    assert.equal(touchActivityMock.mock.callCount(), 1);
   });
 });

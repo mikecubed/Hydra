@@ -233,7 +233,8 @@ export function createGatewayApp(deps: GatewayAppDeps = {}): GatewayApp {
     deps.daemonClient ??
     new DaemonClient(deps.daemonClientOptions ?? { baseUrl: 'http://localhost:4173' });
   const conversationRoutes = createConversationRoutes(daemonClient);
-  app.route('/', createProtectedRouteGroup(conversationRoutes, sessionService, auditService));
+  const protectedRootRoutes = new Hono<GatewayEnv>();
+  protectedRootRoutes.route('/', conversationRoutes);
 
   // Operations routes (T010 — US1 queue visibility) — require valid session + CSRF.
   // Routes define their own paths: /operations/*
@@ -242,7 +243,8 @@ export function createGatewayApp(deps: GatewayAppDeps = {}): GatewayApp {
     deps.operationsClient ??
     new DaemonOperationsClient(deps.operationsClientOptions ?? { baseUrl: defaultOpsBaseUrl });
   const operationsRoutes = createOperationsRoutes({ daemonClient: operationsClient });
-  app.route('/', createProtectedRouteGroup(operationsRoutes, sessionService, auditService));
+  protectedRootRoutes.route('/', operationsRoutes);
+  app.route('/', createProtectedRouteGroup(protectedRootRoutes, sessionService, auditService));
 
   const wsServer = createOptionalWsServer(deps, {
     server: deps.server,
