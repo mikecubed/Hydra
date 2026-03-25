@@ -25,11 +25,11 @@ import {
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
-function makeTmpDir() {
+function makeTmpDir(): string {
   return fs.mkdtempSync(path.join(os.tmpdir(), 'hydra-setup-test-'));
 }
 
-function rmDir(dir) {
+function rmDir(dir: string): void {
   fs.rmSync(dir, { recursive: true, force: true });
 }
 
@@ -96,31 +96,31 @@ describe('resolveNodePath', () => {
 
 describe('buildMcpServerEntry', () => {
   it('returns claude entry with correct structure', () => {
-    const entry = buildMcpServerEntry('claude');
+    const entry = buildMcpServerEntry('claude') as Record<string, unknown>;
     const nodePath = resolveNodePath();
-    assert.strictEqual(entry.type, 'stdio');
-    assert.strictEqual(entry.command, nodePath);
-    assert.ok(Array.isArray(entry.args));
-    assert.ok(entry.args.length >= 1);
-    assert.ok(entry.args[0].endsWith('hydra-mcp-server.ts'));
-    assert.ok(!entry.args[0].includes('\\'), 'args should use forward slashes');
+    assert.strictEqual(entry['type'], 'stdio');
+    assert.strictEqual(entry['command'], nodePath);
+    assert.ok(Array.isArray(entry['args']));
+    assert.ok((entry['args'] as string[]).length >= 1);
+    assert.ok((entry['args'] as string[])[0].endsWith('hydra-mcp-server.ts'));
+    assert.ok(!(entry['args'] as string[])[0].includes('\\'), 'args should use forward slashes');
     assert.ok('env' in entry);
-    assert.deepStrictEqual(entry.env, {});
+    assert.deepStrictEqual(entry['env'], {});
   });
 
   it('returns gemini entry with timeout and description', () => {
-    const entry = buildMcpServerEntry('gemini');
+    const entry = buildMcpServerEntry('gemini') as Record<string, unknown>;
     const nodePath = resolveNodePath();
-    assert.strictEqual(entry.command, nodePath);
-    assert.ok(Array.isArray(entry.args));
-    assert.strictEqual(entry.timeout, 600000);
-    assert.strictEqual(typeof entry.description, 'string');
+    assert.strictEqual(entry['command'], nodePath);
+    assert.ok(Array.isArray(entry['args']));
+    assert.strictEqual(entry['timeout'], 600000);
+    assert.strictEqual(typeof entry['description'], 'string');
     // Gemini entries should NOT have 'type' field
-    assert.strictEqual(entry.type, undefined);
+    assert.strictEqual(entry['type'], undefined);
   });
 
   it('returns codex entry as array for CLI command', () => {
-    const entry = buildMcpServerEntry('codex');
+    const entry = buildMcpServerEntry('codex') as string[];
     const nodePath = resolveNodePath();
     assert.ok(Array.isArray(entry));
     assert.strictEqual(entry[0], nodePath);
@@ -131,7 +131,7 @@ describe('buildMcpServerEntry', () => {
 // ── readJsonFile ────────────────────────────────────────────────────────────
 
 describe('readJsonFile', () => {
-  let tmpDir;
+  let tmpDir: string;
 
   beforeEach(() => {
     tmpDir = makeTmpDir();
@@ -181,17 +181,22 @@ describe('detectInstalledCLIs', () => {
 
   it('each value is a boolean', () => {
     const result = detectInstalledCLIs();
-    assert.strictEqual(typeof result.claude, 'boolean');
-    assert.strictEqual(typeof result.gemini, 'boolean');
-    assert.strictEqual(typeof result.codex, 'boolean');
-    assert.strictEqual(typeof result.copilot, 'boolean');
+    assert.strictEqual(typeof result['claude'], 'boolean');
+    assert.strictEqual(typeof result['gemini'], 'boolean');
+    assert.strictEqual(typeof result['codex'], 'boolean');
+    assert.strictEqual(typeof result['copilot'], 'boolean');
   });
 
   it('includes all physical spawn agents from registry (not just hardcoded 4)', () => {
     // Register a custom CLI agent
     registerAgent('test-cli-agent', {
       type: AGENT_TYPE.PHYSICAL,
-      features: { executeMode: 'spawn' },
+      features: {
+        executeMode: 'spawn' as const,
+        jsonOutput: false,
+        stdinPrompt: false,
+        reasoningEffort: false,
+      },
     });
     try {
       const result = detectInstalledCLIs();
@@ -216,7 +221,12 @@ describe('detectInstalledCLIs', () => {
     registerAgent('my-wrapper', {
       type: AGENT_TYPE.PHYSICAL,
       cli: 'claude', // points to 'claude' binary which may or may not be installed
-      features: { executeMode: 'spawn' },
+      features: {
+        executeMode: 'spawn' as const,
+        jsonOutput: false,
+        stdinPrompt: false,
+        reasoningEffort: false,
+      },
     });
     try {
       const result = detectInstalledCLIs();
@@ -232,8 +242,8 @@ describe('detectInstalledCLIs', () => {
 // ── mergeClaudeConfig ───────────────────────────────────────────────────────
 
 describe('mergeClaudeConfig', () => {
-  let tmpDir;
-  let configPath;
+  let tmpDir: string;
+  let configPath: string;
 
   beforeEach(() => {
     tmpDir = makeTmpDir();
@@ -298,8 +308,8 @@ describe('mergeClaudeConfig', () => {
 // ── mergeGeminiConfig ───────────────────────────────────────────────────────
 
 describe('mergeGeminiConfig', () => {
-  let tmpDir;
-  let configPath;
+  let tmpDir: string;
+  let configPath: string;
 
   beforeEach(() => {
     tmpDir = makeTmpDir();
@@ -351,8 +361,8 @@ describe('mergeGeminiConfig', () => {
 // ── unmergeClaudeConfig ─────────────────────────────────────────────────────
 
 describe('unmergeClaudeConfig', () => {
-  let tmpDir;
-  let configPath;
+  let tmpDir: string;
+  let configPath: string;
 
   beforeEach(() => {
     tmpDir = makeTmpDir();
@@ -402,8 +412,8 @@ describe('unmergeClaudeConfig', () => {
 // ── unmergeGeminiConfig ─────────────────────────────────────────────────────
 
 describe('unmergeGeminiConfig', () => {
-  let tmpDir;
-  let configPath;
+  let tmpDir: string;
+  let configPath: string;
 
   beforeEach(() => {
     tmpDir = makeTmpDir();
@@ -480,7 +490,7 @@ describe('generateHydraMdTemplate', () => {
 // ── main(init) ──────────────────────────────────────────────────────────────
 
 describe('main init', () => {
-  let tmpDir;
+  let tmpDir: string;
 
   beforeEach(() => {
     tmpDir = makeTmpDir();
@@ -614,7 +624,7 @@ describe('unregisterCodexMcp', () => {
 
 // ── registerCustomAgentMcp ────────────────────────────────────────────────────
 describe('registerCustomAgentMcp', () => {
-  let tmpDir;
+  let tmpDir: string;
 
   beforeEach(() => {
     tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'hydra-mcp-test-'));

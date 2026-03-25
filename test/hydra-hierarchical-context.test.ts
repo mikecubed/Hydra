@@ -12,7 +12,7 @@ import { tmpdir } from 'node:os';
 
 // ── Helper: create a unique temp directory tree ───────────────────────────────
 
-function makeTmpTree(structure) {
+function makeTmpTree(structure: Record<string, string>): string {
   const root = join(
     tmpdir(),
     `hydra-ctx-test-${Date.now()}-${Math.random().toString(36).slice(2)}`,
@@ -28,7 +28,7 @@ function makeTmpTree(structure) {
   return root;
 }
 
-function cleanTmp(root) {
+function cleanTmp(root: string): void {
   try {
     rmSync(root, { recursive: true, force: true });
   } catch {
@@ -66,7 +66,7 @@ describe('extractPathsFromPrompt', () => {
     const result = extractPathsFromPrompt(
       'Edit src/foo/bar.ts — the main logic is in src/foo/bar.ts.',
     );
-    const count = result.filter((p) => p === 'src/foo/bar.ts').length;
+    const count = result.filter((p: string) => p === 'src/foo/bar.ts').length;
     assert.equal(count, 1, 'Duplicate path should appear only once');
   });
 });
@@ -162,6 +162,11 @@ describe('compileHierarchicalContext', () => {
 
 // ── buildAgentContext (wired behavior) ────────────────────────────────────────
 
+interface ProjectConfig {
+  projectRoot: string;
+  projectName: string;
+}
+
 describe('buildAgentContext', () => {
   it('returns root-only context when no promptText is provided', () => {
     const root = makeTmpTree({
@@ -169,7 +174,7 @@ describe('buildAgentContext', () => {
       'package.json': '{"name":"test-project"}',
     });
     try {
-      const projectConfig = { projectRoot: root, projectName: 'test-project' };
+      const projectConfig: ProjectConfig = { projectRoot: root, projectName: 'test-project' };
       // No promptText → should fall through to base context only
       const result = buildAgentContext('claude', {}, projectConfig, null);
       // Must not contain the scoped context header
@@ -189,7 +194,7 @@ describe('buildAgentContext', () => {
       'package.json': '{"name":"test-project"}',
     });
     try {
-      const projectConfig = { projectRoot: root, projectName: 'test-project' };
+      const projectConfig: ProjectConfig = { projectRoot: root, projectName: 'test-project' };
       const prompt = `Please update the function in src/foo/bar.ts to handle null input.`;
       const result = buildAgentContext('claude', {}, projectConfig, prompt);
       // Scoped context header must appear before root context
@@ -220,7 +225,7 @@ describe('buildAgentContext', () => {
       // No HYDRA.md in src/
     });
     try {
-      const projectConfig = { projectRoot: root, projectName: 'test-project' };
+      const projectConfig: ProjectConfig = { projectRoot: root, projectName: 'test-project' };
       const prompt = `Please update src/foo/bar.ts.`;
       const result = buildAgentContext('claude', {}, projectConfig, prompt);
       assert.ok(

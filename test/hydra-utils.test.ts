@@ -13,6 +13,7 @@ import {
   sanitizeOwner,
   normalizeTask,
   dedupeTasks,
+  type NormalizedTask,
   classifyPrompt,
   selectTandemPair,
   parseTestOutput,
@@ -26,8 +27,8 @@ import {
 test('parseArgs parses key=value pairs', () => {
   const argv = ['node', 'script.mjs', 'prompt=hello world', 'mode=auto'];
   const { options, positionals } = parseArgs(argv);
-  assert.equal(options.prompt, 'hello world');
-  assert.equal(options.mode, 'auto');
+  assert.equal(options['prompt'], 'hello world');
+  assert.equal(options['mode'], 'auto');
   assert.equal(positionals.length, 0);
 });
 
@@ -42,7 +43,7 @@ test('parseArgs handles positional arguments', () => {
 test('parseArgs handles values with equals signs', () => {
   const argv = ['node', 'script.mjs', 'prompt=a=b=c'];
   const { options } = parseArgs(argv);
-  assert.equal(options.prompt, 'a=b=c');
+  assert.equal(options['prompt'], 'a=b=c');
 });
 
 test('parseArgs handles empty argv', () => {
@@ -57,8 +58,8 @@ test('parseArgsWithCommand extracts command', () => {
   const argv = ['node', 'script.mjs', 'task:add', 'title=Fix bug', 'owner=claude'];
   const { command, options, positionals } = parseArgsWithCommand(argv);
   assert.equal(command, 'task:add');
-  assert.equal(options.title, 'Fix bug');
-  assert.equal(options.owner, 'claude');
+  assert.equal(options['title'], 'Fix bug');
+  assert.equal(options['owner'], 'claude');
   assert.equal(positionals.length, 0);
 });
 
@@ -139,7 +140,8 @@ test('parseList handles mixed separators and trims', () => {
 test('parseList returns empty for null/empty', () => {
   assert.deepEqual(parseList(null), []);
   assert.deepEqual(parseList(''), []);
-  assert.deepEqual(parseList(), []);
+  // eslint-disable-next-line unicorn/no-useless-undefined -- explicitly testing undefined input
+  assert.deepEqual(parseList(undefined), []);
 });
 
 test('parseList passes through arrays', () => {
@@ -227,13 +229,13 @@ test('sanitizeOwner defaults unknown to unassigned', () => {
 // ── normalizeTask ────────────────────────────────────────────────────────────
 
 test('normalizeTask extracts title and owner', () => {
-  const task = normalizeTask({ title: 'Fix login', owner: 'claude' });
+  const task = normalizeTask({ title: 'Fix login', owner: 'claude' })!;
   assert.equal(task.title, 'Fix login');
   assert.equal(task.owner, 'claude');
 });
 
 test('normalizeTask uses "task" field as title fallback', () => {
-  const task = normalizeTask({ task: 'Build feature' });
+  const task = normalizeTask({ task: 'Build feature' })!;
   assert.equal(task.title, 'Build feature');
 });
 
@@ -253,13 +255,13 @@ test('normalizeTask extracts definition_of_done and rationale', () => {
     title: 'Test',
     definition_of_done: 'All tests pass',
     rationale: 'Improves reliability',
-  });
+  })!;
   assert.equal(task.done, 'All tests pass');
   assert.equal(task.rationale, 'Improves reliability');
 });
 
 test('normalizeTask uses fallback owner', () => {
-  const task = normalizeTask({ title: 'Task' }, 'codex');
+  const task = normalizeTask({ title: 'Task' }, 'codex')!;
   assert.equal(task.owner, 'codex');
 });
 
@@ -271,7 +273,7 @@ test('dedupeTasks removes duplicates by owner+title', () => {
     { owner: 'claude', title: 'Fix bug' },
     { owner: 'gemini', title: 'Fix bug' },
   ];
-  const result = dedupeTasks(tasks);
+  const result = dedupeTasks(tasks as unknown as (NormalizedTask | null | undefined)[]);
   assert.equal(result.length, 2);
 });
 
@@ -280,13 +282,13 @@ test('dedupeTasks is case-insensitive for titles', () => {
     { owner: 'claude', title: 'Fix Bug' },
     { owner: 'claude', title: 'fix bug' },
   ];
-  const result = dedupeTasks(tasks);
+  const result = dedupeTasks(tasks as unknown as (NormalizedTask | null | undefined)[]);
   assert.equal(result.length, 1);
 });
 
 test('dedupeTasks skips null entries', () => {
   const tasks = [null, { owner: 'claude', title: 'Task' }, null];
-  const result = dedupeTasks(tasks);
+  const result = dedupeTasks(tasks as unknown as (NormalizedTask | null | undefined)[]);
   assert.equal(result.length, 1);
 });
 
@@ -296,7 +298,7 @@ test('dedupeTasks preserves order (keeps first)', () => {
     { owner: 'gemini', title: 'B' },
     { owner: 'claude', title: 'a' },
   ];
-  const result = dedupeTasks(tasks);
+  const result = dedupeTasks(tasks as unknown as (NormalizedTask | null | undefined)[]);
   assert.equal(result.length, 2);
   assert.equal(result[0].title, 'A');
   assert.equal(result[1].title, 'B');
@@ -368,7 +370,7 @@ test('classifyPrompt confidence is between 0 and 1', () => {
 
 test('classifyPrompt returns routeStrategy field', () => {
   const result = classifyPrompt('fix the login bug');
-  assert.ok(['single', 'tandem', 'council'].includes(result.routeStrategy));
+  assert.ok(['single', 'tandem', 'council'].includes(result.routeStrategy!));
   assert.ok('tandemPair' in result);
 });
 
@@ -414,7 +416,7 @@ test('classifyPrompt detects review and fix as tandem indicator', () => {
 // ── selectTandemPair ─────────────────────────────────────────────────────────
 
 test('selectTandemPair returns correct pair for each task type', () => {
-  const pairs = {
+  const pairs: Record<string, { lead: string; follow: string }> = {
     planning: { lead: 'claude', follow: 'codex' },
     architecture: { lead: 'claude', follow: 'gemini' },
     review: { lead: 'gemini', follow: 'copilot' },
@@ -430,8 +432,8 @@ test('selectTandemPair returns correct pair for each task type', () => {
 test('selectTandemPair respects agent filter', () => {
   const result = selectTandemPair('planning', 'claude', ['claude', 'gemini']);
   // planning lead=claude, follow=codex, but codex not available → swap follow
-  assert.equal(result.lead, 'claude');
-  assert.equal(result.follow, 'gemini');
+  assert.equal(result!.lead, 'claude');
+  assert.equal(result!.follow, 'gemini');
 });
 
 test('selectTandemPair degrades to null when only 1 agent available', () => {

@@ -2,8 +2,8 @@
   "include": ["lib/**/*.ts"],
   "exclude": ["lib/**/*.d.ts"],
   "reporter": ["text", "lcov"],
-  "lines": 64,
-  "statements": 64,
-  "branches": 64,
-  "functions": 62
+  "lines": 65,
+  "statements": 65,
+  "branches": 65,
+  "functions": 63
 }

@@ -201,3 +201,130 @@ describe('PROTECTED_FILES guardrail for executor module', () => {
     assert.ok(PROTECTED_FILES.has('lib/hydra-evolve.ts'));
   });
 });
+
+// ── formatDuration edge cases ────────────────────────────────────────────────
+
+describe('formatDuration — additional edge cases', () => {
+  it('formats negative values gracefully (floor to 0s or negative)', () => {
+    // Math.floor(-1) = -1, but negative ms is unusual — just verify no crash
+    const result = formatDuration(-1);
+    assert.equal(typeof result, 'string');
+  });
+
+  it('formats exactly 1 hour', () => {
+    assert.strictEqual(formatDuration(3_600_000), '1h 0m');
+  });
+
+  it('formats 1 hour 30 minutes', () => {
+    assert.strictEqual(formatDuration(5_400_000), '1h 30m');
+  });
+
+  it('formats multi-hour durations', () => {
+    assert.strictEqual(formatDuration(7_200_000), '2h 0m');
+  });
+
+  it('formats 2 hours 15 minutes', () => {
+    assert.strictEqual(formatDuration(8_100_000), '2h 15m');
+  });
+
+  it('formats large values (24h)', () => {
+    assert.strictEqual(formatDuration(86_400_000), '24h 0m');
+  });
+
+  it('rounds down milliseconds within a second', () => {
+    assert.strictEqual(formatDuration(999), '0s');
+    assert.strictEqual(formatDuration(1001), '1s');
+  });
+});
+
+// ── DEFAULT_PHASE_TIMEOUTS — additional assertions ──────────────────────────
+
+describe('DEFAULT_PHASE_TIMEOUTS — additional checks', () => {
+  it('all values are at least 1 minute (60_000 ms)', () => {
+    for (const [key, value] of Object.entries(DEFAULT_PHASE_TIMEOUTS)) {
+      assert.ok(value >= 60_000, `${key} should be at least 60s, got ${String(value)}`);
+    }
+  });
+
+  it('has exactly 6 phase timeout keys', () => {
+    assert.equal(Object.keys(DEFAULT_PHASE_TIMEOUTS).length, 6);
+  });
+
+  it('plan timeout is shorter than or equal to implement timeout', () => {
+    assert.ok(DEFAULT_PHASE_TIMEOUTS.planTimeoutMs <= DEFAULT_PHASE_TIMEOUTS.implementTimeoutMs);
+  });
+
+  it('implement timeout is the longest', () => {
+    const max = Math.max(...Object.values(DEFAULT_PHASE_TIMEOUTS));
+    assert.equal(max, DEFAULT_PHASE_TIMEOUTS.implementTimeoutMs);
+  });
+});
+
+// ── disabledAgents — additional operations ──────────────────────────────────
+
+describe('disabledAgents — extended operations', () => {
+  beforeEach(() => {
+    disabledAgents.clear();
+  });
+
+  it('supports adding multiple agents', () => {
+    disabledAgents.add('codex');
+    disabledAgents.add('gemini');
+    assert.equal(disabledAgents.size, 2);
+    assert.ok(disabledAgents.has('codex'));
+    assert.ok(disabledAgents.has('gemini'));
+  });
+
+  it('adding the same agent twice keeps size at 1', () => {
+    disabledAgents.add('claude');
+    disabledAgents.add('claude');
+    assert.equal(disabledAgents.size, 1);
+  });
+
+  it('delete removes a specific agent', () => {
+    disabledAgents.add('codex');
+    disabledAgents.add('gemini');
+    disabledAgents.delete('codex');
+    assert.equal(disabledAgents.size, 1);
+    assert.ok(!disabledAgents.has('codex'));
+    assert.ok(disabledAgents.has('gemini'));
+  });
+
+  it('is iterable', () => {
+    disabledAgents.add('claude');
+    disabledAgents.add('codex');
+    const names = [...disabledAgents];
+    assert.equal(names.length, 2);
+    assert.ok(names.includes('claude'));
+    assert.ok(names.includes('codex'));
+  });
+});
+
+// ── recordInvestigation — edge cases ────────────────────────────────────────
+
+describe('recordInvestigation — edge cases', () => {
+  beforeEach(() => {
+    sessionInvestigations.count = 0;
+    sessionInvestigations.healed = 0;
+    sessionInvestigations.diagnoses.length = 0;
+  });
+
+  it('handles missing retryRecommendation gracefully', () => {
+    recordInvestigation('test', { diagnosis: 'fixable', explanation: 'no retry field' });
+    assert.strictEqual(sessionInvestigations.count, 1);
+    assert.strictEqual(sessionInvestigations.healed, 0);
+  });
+
+  it('handles multiple investigations in sequence', () => {
+    for (let i = 0; i < 5; i++) {
+      recordInvestigation('test', {
+        diagnosis: 'transient',
+        explanation: `attempt ${String(i)}`,
+        retryRecommendation: { retryPhase: true },
+      });
+    }
+    assert.strictEqual(sessionInvestigations.count, 5);
+    assert.strictEqual(sessionInvestigations.healed, 5);
+    assert.strictEqual(sessionInvestigations.diagnoses.length, 5);
+  });
+});

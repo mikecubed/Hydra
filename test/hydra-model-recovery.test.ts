@@ -12,8 +12,7 @@ import {
 import { _resetRegistry, initAgentRegistry } from '../lib/hydra-agents.ts';
 import { _setTestConfigPath, invalidateConfigCache, saveHydraConfig } from '../lib/hydra-config.ts';
 
-/** @type {string} */
-let _tmpDir;
+let _tmpDir: string;
 
 // Redirect config writes to a temp dir so the real hydra.config.json is never mutated
 beforeEach(() => {
@@ -37,130 +36,137 @@ afterEach(() => {
 
 // ── detectModelError ────────────────────────────────────────────────────────
 
+interface AgentResult {
+  ok?: boolean;
+  output: string;
+  stderr: string;
+  error: string | null;
+}
+
 describe('detectModelError', () => {
   it('returns isModelError: false for successful results', () => {
-    const result = { ok: true, output: 'hello', stderr: '', error: null };
-    const detection = detectModelError('codex', result);
+    const result: AgentResult = { ok: true, output: 'hello', stderr: '', error: null };
+    const detection = detectModelError('codex', result as unknown as Record<string, unknown>);
     assert.equal(detection.isModelError, false);
     assert.equal(detection.failedModel, null);
   });
 
   it('returns isModelError: false for non-model errors', () => {
-    const result = {
+    const result: AgentResult = {
       ok: false,
       output: '',
       stderr: 'ENOENT: file not found',
       error: 'Exit code 1',
     };
-    const detection = detectModelError('codex', result);
+    const detection = detectModelError('codex', result as unknown as Record<string, unknown>);
     assert.equal(detection.isModelError, false);
   });
 
   it('detects Codex "model is not supported" error', () => {
-    const result = {
+    const result: AgentResult = {
       ok: false,
       output: '',
       stderr: 'Error: The model `gpt-999` is not supported on your plan.',
       error: 'Exit code 1',
     };
-    const detection = detectModelError('codex', result);
+    const detection = detectModelError('codex', result as unknown as Record<string, unknown>);
     assert.equal(detection.isModelError, true);
     assert.equal(detection.failedModel, 'gpt-999');
     assert.ok(detection.errorMessage.length > 0);
   });
 
   it('detects OpenAI "model does not exist" error', () => {
-    const result = {
+    const result: AgentResult = {
       ok: false,
       output: '',
       stderr: 'The model `gpt-5.2` does not exist or you do not have access to it.',
       error: 'Exit code 1',
     };
-    const detection = detectModelError('codex', result);
+    const detection = detectModelError('codex', result as unknown as Record<string, unknown>);
     assert.equal(detection.isModelError, true);
     assert.equal(detection.failedModel, 'gpt-5.2');
   });
 
   it('detects Anthropic "model is not available" error', () => {
-    const result = {
+    const result: AgentResult = {
       ok: false,
       output: '',
       stderr: 'model is not available: claude-opus-5',
       error: 'Exit code 1',
     };
-    const detection = detectModelError('claude', result);
+    const detection = detectModelError('claude', result as unknown as Record<string, unknown>);
     assert.equal(detection.isModelError, true);
   });
 
   it('detects Anthropic "invalid_model" error', () => {
-    const result = {
+    const result: AgentResult = {
       ok: false,
       output: 'invalid_model: the requested model is invalid',
       stderr: '',
       error: 'Exit code 1',
     };
-    const detection = detectModelError('claude', result);
+    const detection = detectModelError('claude', result as unknown as Record<string, unknown>);
     assert.equal(detection.isModelError, true);
   });
 
   it('detects Google "Model not found" error', () => {
-    const result = {
+    const result: AgentResult = {
       ok: false,
       output: '',
       stderr: 'Error: Model not found: models/gemini-999',
       error: 'Exit code 1',
     };
-    const detection = detectModelError('gemini', result);
+    const detection = detectModelError('gemini', result as unknown as Record<string, unknown>);
     assert.equal(detection.isModelError, true);
     assert.equal(detection.failedModel, 'gemini-999');
   });
 
   it('detects Google "PERMISSION_DENIED" model error', () => {
-    const result = {
+    const result: AgentResult = {
       ok: false,
       output: '',
       stderr: 'PERMISSION_DENIED: you do not have access to model gemini-ultra',
       error: 'Exit code 1',
     };
-    const detection = detectModelError('gemini', result);
+    const detection = detectModelError('gemini', result as unknown as Record<string, unknown>);
     assert.equal(detection.isModelError, true);
   });
 
   it('detects generic "unsupported model" error', () => {
-    const result = {
+    const result: AgentResult = {
       ok: false,
       output: '',
       stderr: 'unsupported model: custom-model-v1',
       error: 'Exit code 1',
     };
-    const detection = detectModelError('codex', result);
+    const detection = detectModelError('codex', result as unknown as Record<string, unknown>);
     assert.equal(detection.isModelError, true);
   });
 
   it('detects error in output field (not just stderr)', () => {
-    const result = {
+    const result: AgentResult = {
       ok: false,
       output: '{"error": "model_not_found: gpt-999"}',
       stderr: '',
       error: 'Exit code 1',
     };
-    const detection = detectModelError('codex', result);
+    const detection = detectModelError('codex', result as unknown as Record<string, unknown>);
     assert.equal(detection.isModelError, true);
   });
 
   it('detects error in error field', () => {
-    const result = {
+    const result: AgentResult = {
       ok: false,
       output: '',
       stderr: '',
       error: 'model is not supported',
     };
-    const detection = detectModelError('codex', result);
+    const detection = detectModelError('codex', result as unknown as Record<string, unknown>);
     assert.equal(detection.isModelError, true);
   });
 
   it('returns null result gracefully', () => {
-    const detection = detectModelError('codex', null);
+    const detection = detectModelError('codex', null as unknown as Record<string, unknown>);
     assert.equal(detection.isModelError, false);
   });
 });
@@ -201,7 +207,7 @@ describe('getFallbackCandidates', () => {
 
   it('deduplicates candidates', () => {
     const candidates = getFallbackCandidates('codex', 'nonexistent-model');
-    const ids = candidates.map((c) => c.id.toLowerCase());
+    const ids = candidates.map((c: Record<string, unknown>) => (c['id'] as string).toLowerCase());
     const unique = new Set(ids);
     assert.equal(ids.length, unique.size, 'no duplicate model IDs');
   });

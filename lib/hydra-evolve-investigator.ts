@@ -378,7 +378,7 @@ interface ParsedDiagnosis {
   };
 }
 
-function parseInvestigatorResponse(raw: string): DiagnosisResult {
+export function parseInvestigatorResponse(raw: string): DiagnosisResult {
   // Try to extract JSON from the response (may have markdown fencing)
   let text = raw.trim();
 

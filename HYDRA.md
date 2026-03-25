@@ -30,7 +30,7 @@ The daemon runs on `localhost:4173` and exposes an HTTP API for task management,
 
 - **ESM + TypeScript** — `"type": "module"` in `package.json`. Runtime entrypoints and source files are now primarily `.ts`, using `import`/`export` only. Do not add CommonJS.
 - **No compile step for normal runtime** — Hydra runs directly with Node.js 24+ and native TypeScript support. `tsc` is used for type-checking, not for emitting build artifacts during normal development.
-- **Mixed repo during migration** — both `.ts` and some legacy `.mjs` files still exist. Prefer `.ts` for new or updated runtime code unless a file is intentionally still legacy.
+- **Pure TypeScript** — all source and test files are `.ts`. The only `.mjs` file is `eslint.config.mjs` (required by ESLint v10).
 - **Import paths** — use explicit file extensions that match the real source file, including `.ts` imports where applicable. `tsconfig.json` enables `allowImportingTsExtensions`.
 - **Type-checking config** — use `tsconfig.json`, not `jsconfig.json`. It checks `lib/`, `bin/`, `scripts/`, and `test/`.
 - **Agent names** are always lowercase: `claude`, `gemini`, `codex`, `local`, `copilot`. Never capitalized internally.
@@ -122,4 +122,4 @@ import assert from 'node:assert/strict';
 Run all tests: `npm test`
 Run a single file: `node --test test/hydra-ui.test.ts`
 
-Integration tests (`*.integration.test.ts` and any remaining legacy `.mjs` integration tests) spin up the daemon on an ephemeral port.
+Integration tests (`*.integration.test.ts`) spin up the daemon on an ephemeral port.
