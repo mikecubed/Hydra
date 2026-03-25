@@ -16,6 +16,81 @@ The key areas are:
 - **Gateway error handling** — typed parsing, category classification, and recovery helpers for
   structured gateway error responses.
 
+## Using the Current Web App
+
+The current browser surface is best understood as a **chat workspace with an operations sidebar**.
+It is usable today, but it is still an operator-facing development surface rather than a polished
+product walkthrough.
+
+### What exists today
+
+- **Conversation workspace** at `/workspace`
+  - conversation list in the left column
+  - transcript in the main panel
+  - composer for sending new instructions
+- **Turn actions**
+  - cancel when a turn is cancellable
+  - retry / branch for completed or failed turns
+  - follow-up on the latest completed turn
+- **Artifact inspector**
+  - select an artifact from the transcript to open the side panel
+  - close the panel to return to the normal transcript/composer flow
+- **Connection/session banners**
+  - visible status for reconnecting, daemon recovery, expired sessions, and related issues
+- **Operations sidebar (Phase 1)**
+  - authoritative queue visibility
+  - work-item ordering and status labels
+  - queue selection state
+  - empty/loading/live sidebar states
+
+### What is not there yet
+
+- no dedicated browser login screen
+- no full work-item detail panel for checkpoints/execution progress yet
+- no browser-side operational controls yet
+- no complete end-user walkthrough in the product itself
+
+### How to run it
+
+The browser app expects the web gateway and static assets to be served from the **same origin**.
+
+For real use, serve the built frontend behind the gateway (or a reverse proxy in front of both) so
+these all share one origin:
+
+- browser assets
+- REST routes such as `/conversations/*`, `/approvals/*`, `/artifacts/*`, `/operations/*`
+- WebSocket endpoint at `/ws`
+
+Standalone `npm run dev` in `apps/web` is still useful for frontend iteration, but API and WebSocket
+behavior will fail unless you provide your own proxy to the gateway.
+
+### How to use it in its current state
+
+1. Open the app; the index route redirects to `/workspace`.
+2. Make sure you already have a valid authenticated browser session through the gateway-backed
+   environment.
+3. Use the **Conversations** panel to:
+   - pick an existing conversation
+   - start a new conversation
+4. Use the **Transcript** panel to:
+   - read streamed turn output
+   - inspect prompts and system/activity entries
+   - trigger turn actions when they are available
+5. Use the **Composer** panel to send a new instruction.
+   - Click **Send**, or press `Ctrl+Enter` / `Cmd+Enter`.
+6. If a transcript entry exposes artifacts, open them in the **Artifact Inspector** side panel.
+7. Use the **Operations** sidebar to monitor the current work queue.
+   - It is read-only in the current phase.
+   - It reflects loading, empty, and live states based on the latest snapshot.
+
+### Current operator expectations
+
+- The daemon and gateway remain authoritative.
+- The browser is a safe view/edit surface for the delivered chat workflow, not a second control
+  plane.
+- If connection, session, or daemon health degrades, expect the banner state to explain why the UI
+  is limited.
+
 ## Source Layout
 
 ```

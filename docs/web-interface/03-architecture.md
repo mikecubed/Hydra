@@ -1,8 +1,9 @@
 # Architecture
 
-> **Status:** The web chat workspace slice is delivered through Phase 8. The browser workspace,
-> gateway transport layer, and shared contracts are implemented and tested. Hydra-native operations
-> panels, controlled mutations, and later hardening phases remain planned.
+> **Status:** The web chat workspace slice is delivered, and operations panels Phase 1 queue
+> visibility is also implemented. The browser workspace, gateway transport layer, shared contracts,
+> and read-only queue sidebar are implemented and tested. Later operations detail/control phases and
+> additional hardening remain planned.
 
 ## High-Level Shape
 
@@ -10,6 +11,7 @@
 flowchart TB
     subgraph Browser[apps/web — delivered]
         Workspace[Chat workspace\nconversation list · transcript · composer · artifacts]
+        OpsSidebar[Operations sidebar\nqueue visibility]
         ConnState[Connection state\ntransport · sync · session · daemon]
         Approvals[Approval handling\nprompt cards · response controls]
     end
@@ -42,20 +44,20 @@ flowchart TB
 
 ## Responsibility Split
 
-| Component                | Delivered responsibilities                                                                                                                                                                                      |
-| ------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `apps/web`               | Chat workspace (conversation list, transcript, composer, artifact panel), approval prompts, turn actions (cancel/retry/branch/follow-up), connection-state banners, reconnect UX                                |
-| `apps/web-gateway`       | Auth (login/logout/reauth), browser sessions with idle + expiry management, WebSocket session transport with replay, REST conversation routes, CSRF/origin/rate-limit enforcement, daemon proxying, audit trail |
-| `packages/web-contracts` | Zod schemas for conversation/turn payloads, nested stream events, approvals, artifacts, activities, attribution, sessions, auth, audit events, and browser-facing REST request/response contracts               |
-| Hydra daemon             | Source of truth for orchestration state, task lifecycle, sessions, durable events, config/workflow mutations                                                                                                    |
+| Component                | Delivered responsibilities                                                                                                                                                                                                 |
+| ------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `apps/web`               | Chat workspace (conversation list, transcript, composer, artifact panel), approval prompts, turn actions (cancel/retry/branch/follow-up), connection-state banners, reconnect UX, and a read-only operations queue sidebar |
+| `apps/web-gateway`       | Auth (login/logout/reauth), browser sessions with idle + expiry management, WebSocket session transport with replay, REST conversation routes, CSRF/origin/rate-limit enforcement, daemon proxying, audit trail            |
+| `packages/web-contracts` | Zod schemas for conversation/turn payloads, nested stream events, approvals, artifacts, activities, attribution, sessions, auth, audit events, and browser-facing REST request/response contracts                          |
+| Hydra daemon             | Source of truth for orchestration state, task lifecycle, sessions, durable events, config/workflow mutations                                                                                                               |
 
 ### Planned (not yet delivered)
 
-| Surface                 | Planned scope                                                                                   |
-| ----------------------- | ----------------------------------------------------------------------------------------------- |
-| Hydra operations panels | Task queue, checkpoints, routing/mode/agent controls, budgets, daemon health, council views     |
-| Session and settings    | Operator preferences, config read/write surfaces                                                |
-| Controlled mutations    | Safe config writes through daemon-owned APIs, approved workflow-launch surfaces, audit surfaces |
+| Surface                 | Planned scope                                                                                                                        |
+| ----------------------- | ------------------------------------------------------------------------------------------------------------------------------------ |
+| Hydra operations panels | Later phases: checkpoints, routing/mode/agent controls, budgets, daemon health, and council views beyond the delivered queue sidebar |
+| Session and settings    | Operator preferences, config read/write surfaces                                                                                     |
+| Controlled mutations    | Safe config writes through daemon-owned APIs, approved workflow-launch surfaces, audit surfaces                                      |
 
 ## Architectural Rules
 
@@ -98,7 +100,9 @@ AppProviders (QueryClient + Router)
         │   │   └── TurnControlBar (cancel / retry / branch / follow-up)
         │   └── ConnectionBanner   (live-region status: info / warning / error)
         ├── ComposerPanel          (textarea + send button, Ctrl+Enter, validation)
-        └── ArtifactPanel          (closeable aside for artifact content inspection)
+        ├── ArtifactPanel          (closeable aside for artifact content inspection)
+        └── WorkspaceOperationsPanel
+            └── QueuePanel         (read-only operations queue sidebar)
 ```
 
 ### State Management
