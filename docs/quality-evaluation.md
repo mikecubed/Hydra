@@ -190,8 +190,8 @@ All 19 tests are placeholder stubs for the worktree isolation feature (`routing.
    - All files under 200 lines, mechanical conversion with type annotations
 
 6. **Implement worktree isolation test stubs (19 todo tests)** ✅
-   - Created `test/hydra-worktree-isolation-lifecycle.test.ts` with 19 real tests
-   - Covers createTaskWorktree (4), mergeTaskWorktree (4), cleanupTaskWorktree (3), daemon integration (5), cleanup/review (3)
+   - Replaced the 19 todo stubs with 19 real assertions across `test/hydra-worktree-isolation-lifecycle.test.ts` and `test/hydra-worktree-route-coverage.test.ts`
+   - Covers createTaskWorktree (4), mergeTaskWorktree (4), cleanupTaskWorktree (3), route-level claim/result behavior (6), cleanup/review (2)
    - Removed todo stubs from original file — 0 todo tests remaining
 
 7. **Add tests for shared infrastructure** ✅

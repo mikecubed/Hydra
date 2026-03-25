@@ -223,6 +223,27 @@ describe('handleWriteRoute worktree coverage', () => {
     assert.equal(task['worktreeBranch'], 'hydra/task/T_1');
   });
 
+  it('creates a worktree for tandem-mode claims', async () => {
+    _setTestConfig({ routing: { worktreeIsolation: { enabled: true, cleanupOnSuccess: true } } });
+    const state = makeState();
+    let createCalls = 0;
+    const ctx = makeWriteCtx(
+      'POST',
+      '/task/claim',
+      state,
+      { agent: 'codex', title: 'new task', mode: 'tandem' },
+      {
+        createTaskWorktree: (taskId: string) => {
+          createCalls += 1;
+          return `/tmp/${taskId}`;
+        },
+      },
+    );
+
+    await handleWriteRoute(ctx);
+    assert.equal(createCalls, 1);
+  });
+
   it('creates a worktree for council-mode claims', async () => {
     _setTestConfig({ routing: { worktreeIsolation: { enabled: true, cleanupOnSuccess: true } } });
     const state = makeState();

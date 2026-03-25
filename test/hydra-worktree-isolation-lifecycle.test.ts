@@ -6,12 +6,11 @@
  *   1-4:   createTaskWorktree
  *   5-8:   mergeTaskWorktree
  *   9-11:  cleanupTaskWorktree
- *   12-16: daemon integration (write-routes claim/result logic)
- *   17-19: cleanup/review
+ *   12-13: cleanup/review
  *
  * Tests 1-11 mock git-ops.ts and hydra-config.ts via mock.module() to test
  * the daemon worktree helpers without touching the real filesystem or git.
- * Tests 12-19 add supplementary data-shape and cleanup assertions. Real daemon
+ * Tests 12-19 add supplementary cleanup and review assertions. Real daemon
  * route coverage for claim/result worktree behavior lives in
  * hydra-worktree-route-coverage.test.ts.
  */
@@ -138,23 +137,6 @@ mock.module('../lib/hydra-shared/git-ops.ts', {
 // Eagerly import the module under test (goes through mocked deps)
 const { createTaskWorktree, mergeTaskWorktree, cleanupTaskWorktree } =
   await import('../lib/daemon/worktree.ts');
-
-// ── Stub factory for daemon integration tests ───────────────────────────────
-
-function fakeConfig(overrides: Record<string, unknown> = {}) {
-  return {
-    routing: {
-      worktreeIsolation: {
-        enabled: false,
-        worktreeDir: '.hydra/worktrees',
-        cleanupOnSuccess: true,
-        ...((overrides['worktreeIsolation'] as Record<string, unknown>) ?? {}),
-      },
-      ...((overrides['routing'] as Record<string, unknown>) ?? {}),
-    },
-    ...overrides,
-  };
-}
 
 // ── 1-4: createTaskWorktree ─────────────────────────────────────────────────
 
@@ -360,102 +342,7 @@ describe('cleanupTaskWorktree', () => {
   });
 });
 
-// ── 12-16: Daemon integration (write-routes logic) ──────────────────────────
-//
-// The daemon integration tests verify the conditional logic in write-routes.ts
-// around worktree creation on /task/claim and merge on /task/result. Since
-// spinning up a full daemon is heavyweight for unit tests, we test the extracted
-// helper functions and conditional logic patterns from write-routes.ts.
-
-describe('daemon integration — worktree claim/result logic', () => {
-  // Reimplements the checkClaimWorktreeCondition from write-routes.ts
-  function checkClaimWorktreeCondition(
-    isNewTask: boolean,
-    createFn: unknown,
-    body: Record<string, unknown>,
-    mode: string,
-  ): boolean {
-    if (!isNewTask || typeof createFn !== 'function') return false;
-    return body['worktree'] === true || mode === 'tandem' || mode === 'council';
-  }
-
-  it('enabled: false means /task/claim does NOT call createTaskWorktree', () => {
-    const cfg = fakeConfig();
-    assert.strictEqual(cfg.routing.worktreeIsolation.enabled, false);
-
-    // The daemon checks cfg.routing.worktreeIsolation.enabled before calling
-    // createTaskWorktree. With enabled=false, the call is skipped entirely.
-    const shouldCreate = cfg.routing.worktreeIsolation.enabled;
-    assert.strictEqual(shouldCreate, false, 'No worktree should be created when enabled=false');
-  });
-
-  it('enabled: true with mode=tandem creates worktree on /task/claim', () => {
-    const createFn = () => '/fake/path';
-    const condition = checkClaimWorktreeCondition(true, createFn, { agent: 'claude' }, 'tandem');
-    assert.strictEqual(condition, true, 'tandem mode should trigger worktree creation');
-
-    const cfg = fakeConfig({ worktreeIsolation: { enabled: true } });
-    assert.strictEqual(cfg.routing.worktreeIsolation.enabled, true);
-  });
-
-  it('enabled: true with mode=council creates worktree on /task/claim', () => {
-    const createFn = () => '/fake/path';
-    const condition = checkClaimWorktreeCondition(true, createFn, { agent: 'gemini' }, 'council');
-    assert.strictEqual(condition, true, 'council mode should trigger worktree creation');
-
-    const cfg = fakeConfig({ worktreeIsolation: { enabled: true } });
-    assert.strictEqual(cfg.routing.worktreeIsolation.enabled, true);
-  });
-
-  it('task completion with worktreePath calls mergeTaskWorktree via /task/result', () => {
-    // write-routes checks completedTask.worktreePath != null before merging
-    const completedTask = { worktreePath: '/tmp/fake/task-T050', status: 'done' };
-    const mergeFn = () => ({ ok: true });
-
-    const shouldMerge = completedTask.worktreePath != null && typeof mergeFn === 'function';
-    assert.strictEqual(shouldMerge, true, 'Should trigger merge when worktreePath is set');
-
-    const noWorktreeTask = { worktreePath: null, status: 'done' };
-    const shouldNotMerge = noWorktreeTask.worktreePath != null;
-    assert.strictEqual(shouldNotMerge, false, 'Should skip merge when worktreePath is null');
-  });
-
-  it('clean merge on task result calls cleanupTaskWorktree when cleanupOnSuccess: true', () => {
-    const mergeResult = { ok: true };
-    const cfg = fakeConfig({ worktreeIsolation: { cleanupOnSuccess: true, enabled: true } });
-
-    let cleanupCalled = false;
-    const cleanupFn = () => {
-      cleanupCalled = true;
-    };
-
-    // Simulate the write-routes logic
-    if (mergeResult.ok) {
-      if (cfg.routing.worktreeIsolation.cleanupOnSuccess) {
-        cleanupFn();
-      }
-    }
-    assert.strictEqual(cleanupCalled, true, 'cleanup should be called on clean merge');
-
-    // Verify cleanupOnSuccess: false prevents cleanup
-    const cfgNoCleanup = fakeConfig({
-      worktreeIsolation: { cleanupOnSuccess: false, enabled: true },
-    });
-    let cleanupCalled2 = false;
-    const cleanupFn2 = () => {
-      cleanupCalled2 = true;
-    };
-
-    if (mergeResult.ok) {
-      if (cfgNoCleanup.routing.worktreeIsolation.cleanupOnSuccess) {
-        cleanupFn2();
-      }
-    }
-    assert.strictEqual(cleanupCalled2, false, 'cleanup should NOT be called when disabled');
-  });
-});
-
-// ── 17-19: Cleanup / review ─────────────────────────────────────────────────
+// ── 12-13: Cleanup / review ─────────────────────────────────────────────────
 
 describe('cleanup and review — worktree conflict handling', () => {
   beforeEach(() => {
@@ -463,29 +350,6 @@ describe('cleanup and review — worktree conflict handling', () => {
   });
   afterEach(() => {
     rmTmpDir(tmpDir);
-  });
-
-  it('conflict merge sets worktreeConflict: true on task, does NOT delete worktree', () => {
-    // Simulate the write-routes conflict handling from handleWorktreeMerge
-    const mergeResult = { ok: false, conflict: true };
-    const task: Record<string, unknown> = {
-      id: 'T060',
-      worktreePath: '/tmp/fake/task-T060',
-    };
-
-    let cleanupCalled = false;
-    const cleanupFn = () => {
-      cleanupCalled = true;
-    };
-
-    if (mergeResult.ok) {
-      cleanupFn();
-    } else if (mergeResult.conflict) {
-      task['worktreeConflict'] = true;
-    }
-
-    assert.strictEqual(task['worktreeConflict'], true, 'Should set worktreeConflict: true');
-    assert.strictEqual(cleanupCalled, false, 'Should NOT call cleanup on conflict');
   });
 
   it(':cleanup scanner finds task-* dirs older than 24h in .hydra/worktrees/', async () => {
