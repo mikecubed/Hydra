@@ -9,6 +9,8 @@ import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 
 import {
+  GetOperationsSnapshotRequest,
+  SubmitControlActionResponse,
   WorkItemStatus,
   WorkQueueItemView,
   CheckpointStatus,
@@ -30,7 +32,7 @@ import {
   SnapshotStatus,
   WorkspaceFreshness,
   WorkspaceAvailability,
-} from '../../packages/web-contracts/src/operations.ts';
+} from '../../packages/web-contracts/src/index.ts';
 
 const NOW = '2025-07-14T00:00:00.000Z';
 
@@ -341,5 +343,44 @@ describe('RiskSignal conformance', () => {
         assert.ok(result.success, `${kind}/${severity} should be valid`);
       }
     }
+  });
+});
+
+describe('Operations read contract conformance', () => {
+  it('accepts repeated status filters using shared work-item status vocabulary', () => {
+    const result = GetOperationsSnapshotRequest.safeParse({
+      statusFilter: ['waiting', 'active', 'paused'],
+    });
+    assert.ok(result.success);
+    assert.deepStrictEqual(result.data.statusFilter, ['waiting', 'active', 'paused']);
+  });
+});
+
+describe('Operations control contract conformance', () => {
+  it('rejects browser-local pendingRequest on authoritative mutation responses', () => {
+    const result = SubmitControlActionResponse.safeParse({
+      outcome: 'accepted',
+      control: {
+        controlId: 'ctrl-1',
+        kind: 'routing',
+        label: 'Route',
+        availability: 'accepted',
+        authority: 'granted',
+        reason: null,
+        options: [],
+        expectedRevision: 'rev-1',
+        lastResolvedAt: NOW,
+      },
+      workItemId: 'wq-1',
+      resolvedAt: NOW,
+      pendingRequest: {
+        requestId: 'req-1',
+        workItemId: 'wq-1',
+        controlId: 'ctrl-1',
+        submittedAt: NOW,
+        requestedOptionId: 'opt-1',
+      },
+    });
+    assert.ok(!result.success);
   });
 });

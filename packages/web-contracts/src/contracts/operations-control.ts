@@ -10,12 +10,7 @@
  * silently applying them.
  */
 import { z } from 'zod';
-import {
-  OperationalControlView,
-  ControlKind,
-  DetailAvailability,
-  PendingControlRequest,
-} from '../operations.ts';
+import { OperationalControlView, ControlKind, DetailAvailability } from '../operations.ts';
 
 export const ControlOutcome = z.enum(['accepted', 'rejected', 'stale', 'superseded']);
 export type ControlOutcome = z.infer<typeof ControlOutcome>;
@@ -44,7 +39,6 @@ export const SubmitControlActionResponse = z
     workItemId: z.string().min(1),
     resolvedAt: z.iso.datetime(),
     message: z.string().min(1).optional(),
-    pendingRequest: PendingControlRequest.nullable().optional(),
   })
   .strict();
 export type SubmitControlActionResponse = z.infer<typeof SubmitControlActionResponse>;

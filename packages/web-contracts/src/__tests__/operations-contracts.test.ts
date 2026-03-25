@@ -37,6 +37,15 @@ import {
   WorkspaceFreshness,
   WorkspaceAvailability,
 } from '../operations.ts';
+import {
+  GetOperationsSnapshotRequest,
+  GetOperationsSnapshotResponse,
+} from '../contracts/operations-read.ts';
+import {
+  SubmitControlActionResponse,
+  WorkItemControlEntry,
+} from '../contracts/operations-control.ts';
+import * as webContracts from '../index.ts';
 
 const NOW = '2025-07-14T00:00:00.000Z';
 
@@ -724,5 +733,96 @@ describe('PendingControlRequest', () => {
 
   it('rejects unknown fields (strict)', () => {
     assert.ok(!PendingControlRequest.safeParse({ ...valid, extra: true }).success);
+  });
+});
+
+describe('Operations read contracts', () => {
+  it('accepts repeated work-item statuses in snapshot filters', () => {
+    const result = GetOperationsSnapshotRequest.safeParse({
+      statusFilter: ['active', 'paused'],
+      limit: 10,
+      cursor: 'cursor-1',
+    });
+    assert.ok(result.success);
+    assert.deepStrictEqual(result.data.statusFilter, ['active', 'paused']);
+  });
+
+  it('accepts a valid operations snapshot response', () => {
+    const result = GetOperationsSnapshotResponse.safeParse({
+      queue: [],
+      health: null,
+      budget: null,
+      availability: 'ready',
+      lastSynchronizedAt: NOW,
+      nextCursor: null,
+    });
+    assert.ok(result.success);
+  });
+});
+
+describe('Operations control contracts', () => {
+  it('accepts authoritative control responses without browser-local pending state', () => {
+    const result = SubmitControlActionResponse.safeParse({
+      outcome: 'accepted',
+      control: {
+        controlId: 'ctrl-1',
+        kind: 'routing',
+        label: 'Route work item',
+        availability: 'accepted',
+        authority: 'granted',
+        reason: null,
+        options: [],
+        expectedRevision: 'rev-2',
+        lastResolvedAt: NOW,
+      },
+      workItemId: 'wq-1',
+      resolvedAt: NOW,
+      message: 'Rerouted to Claude',
+    });
+    assert.ok(result.success);
+  });
+
+  it('rejects browser-local pending state on authoritative control responses', () => {
+    const result = SubmitControlActionResponse.safeParse({
+      outcome: 'accepted',
+      control: {
+        controlId: 'ctrl-1',
+        kind: 'routing',
+        label: 'Route work item',
+        availability: 'accepted',
+        authority: 'granted',
+        reason: null,
+        options: [],
+        expectedRevision: 'rev-2',
+        lastResolvedAt: NOW,
+      },
+      workItemId: 'wq-1',
+      resolvedAt: NOW,
+      pendingRequest: {
+        requestId: 'req-1',
+        workItemId: 'wq-1',
+        controlId: 'ctrl-1',
+        submittedAt: NOW,
+        requestedOptionId: 'opt-1',
+      },
+    });
+    assert.ok(!result.success);
+  });
+
+  it('accepts detail-scoped control discovery entries', () => {
+    const result = WorkItemControlEntry.safeParse({
+      workItemId: 'wq-1',
+      controls: [],
+      availability: 'partial',
+    });
+    assert.ok(result.success);
+  });
+});
+
+describe('Operations contract barrel exports', () => {
+  it('re-exports the read and control contracts from the package index', () => {
+    assert.equal(webContracts.GetOperationsSnapshotRequest, GetOperationsSnapshotRequest);
+    assert.equal(webContracts.SubmitControlActionResponse, SubmitControlActionResponse);
+    assert.equal(webContracts.WorkItemControlEntry, WorkItemControlEntry);
   });
 });

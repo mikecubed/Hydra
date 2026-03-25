@@ -11,12 +11,13 @@ import type {
   GetWorkItemDetailResponse,
   PendingControlRequest,
   SnapshotStatus,
+  WorkItemStatus,
   WorkspaceAvailability,
   WorkspaceFreshness,
 } from '@hydra/web-contracts';
 
 export interface OperationsFiltersState {
-  readonly statusFilter: readonly string[];
+  readonly statusFilter: readonly WorkItemStatus[];
 }
 
 export interface OperationsSelectionState {
