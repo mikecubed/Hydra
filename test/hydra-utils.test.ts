@@ -140,7 +140,7 @@ test('parseList handles mixed separators and trims', () => {
 test('parseList returns empty for null/empty', () => {
   assert.deepEqual(parseList(null), []);
   assert.deepEqual(parseList(''), []);
-  assert.deepEqual(parseList(undefined as unknown as null), []);
+  assert.deepEqual(parseList(), []);
 });
 
 test('parseList passes through arrays', () => {

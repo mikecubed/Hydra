@@ -42,9 +42,9 @@ ESLint v10 with `no-var`, `prefer-const`, `eqeqeq`, `no-eval`, `node:` protocol,
 
 **Status: Clean**
 
-All `.ts` files pass Prettier checks.
+All Prettier-supported files in the repo (`.ts`, `.json`, `.md`, `.yml`, etc.) pass formatting checks.
 
-**CI enforcement:** Format check runs in the `lint` job. **Currently blocking.**
+**CI enforcement:** `npm run format:check` (`prettier --check .`) runs in the `lint` job. **Currently blocking.**
 
 ---
 
