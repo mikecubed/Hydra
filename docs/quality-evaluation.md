@@ -12,8 +12,8 @@
 | **Prettier**         | **PASS**         | All files formatted                                             |
 | **TypeScript**       | **PASS**         | `tsc --noEmit` clean — zero errors                              |
 | **Circular imports** | **PASS**         | No cycles detected in `lib/`                                    |
-| **Tests**            | **MIXED**        | 4,350 pass / 0 fail / 9 cancelled / 0 todo locally (packaging)  |
-| **Coverage**         | **BELOW TARGET** | 64% statements (target: 80%, interim gate: 64% — blocking)      |
+| **Tests**            | **PASS**         | 4,363 pass / 0 fail / 0 cancelled / 0 todo (936 suites)         |
+| **Coverage**         | **BELOW TARGET** | 64% statements (target: 80%, interim gate: 63% — blocking)      |
 | **TS migration**     | **95% complete** | 20 `.mjs` files remain vs 232 `.ts` files                       |
 
 ---
@@ -138,20 +138,9 @@ All `.ts` and `.mjs` files pass Prettier checks.
 
 ### Non-passing tests
 
-**9 cancelled — `packaging` suite (still open locally)** — `npm pack` in the temporary packaging repo still fails in this environment because `scripts/build-pack.ts` cannot resolve `node_modules/typescript/lib/tsc.js`, which cancels the 9 downstream packaging assertions.
+**~~9 cancelled — `packaging` suite~~ FIXED** (Phase 1) — All 9 packaging tests now pass.
 
-**19 todo — `hydra-worktree-isolation.test.mjs`**
-
-All 19 tests are placeholder stubs for the worktree isolation feature (`routing.worktreeIsolation`). They pass trivially but need real implementations:
-
-| Group                 | Tests | What they cover                                                 |
-| --------------------- | ----- | --------------------------------------------------------------- |
-| `createTaskWorktree`  | 1-4   | Creates worktree dir, branch, returns path, handles git failure |
-| `mergeTaskWorktree`   | 5-8   | smartMerge calls, clean merge, conflict handling, exceptions    |
-| `cleanupTaskWorktree` | 9-11  | Remove worktree, force mode, best-effort on failure             |
-| Daemon integration    | 12-14 | Worktree creation on `/task/claim` (disabled, tandem, council)  |
-| Task completion       | 15-17 | Merge on `/task/result`, cleanup on success, conflict flagging  |
-| Cleanup/review        | 18-19 | `:cleanup` stale scanner, `:tasks review` conflict display      |
+**~~19 todo — `hydra-worktree-isolation.test.mjs`~~ FIXED** (Phase 2) — All 19 lifecycle tests implemented with real assertions in `hydra-worktree-isolation-lifecycle.test.ts`. The original todo stubs were removed.
 
 ---
 

@@ -33,10 +33,9 @@ function makeMockExecutor(output: string, ok = true): IAgentExecutor {
 
 describe('setDispatchExecutor', () => {
   // Store the original executor so we can restore it after tests
-  let original: IAgentExecutor;
+  let original: IAgentExecutor | undefined;
 
   afterEach(() => {
-    // Restore original executor if it was captured
     if (original) {
       setDispatchExecutor(original);
     }

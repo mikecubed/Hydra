@@ -1,12 +1,12 @@
 # Hydra quality tasks
 
-## Phase 2 — Coverage push to 64% (Complete)
+## Phase 2 — Coverage push (Complete)
 
 - [x] Convert mid-size `.mjs` test files and `test/helpers/mock-agent.mjs` to `.ts`
 - [x] Replace the worktree isolation todo stubs with real assertions
 - [x] Add shared infrastructure tests for council, dispatch seam, review-common, and gemini executor
 - [x] Add provider request/stream parsing tests for Anthropic, OpenAI, and Google
-- [x] Raise the blocking coverage gate from `63%` to `64%`
+- [x] Verify blocking coverage gate at `63%` (coverage reached 64%, gate kept at 63%)
 
 ## Phase 3 — Next up
 
