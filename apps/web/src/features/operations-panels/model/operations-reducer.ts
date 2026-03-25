@@ -8,7 +8,6 @@
 
 import type {
   BatchControlDiscoveryResponse,
-  ControlOutcome,
   GetOperationsSnapshotResponse,
   GetWorkItemDetailResponse,
   PendingControlRequest,
@@ -31,7 +30,6 @@ export type OperationsAction =
   | {
       readonly type: 'controls/submit-resolved';
       readonly workItemId: string;
-      readonly outcome: ControlOutcome;
     }
   | {
       readonly type: 'controls/discovery-loaded';
@@ -59,6 +57,18 @@ export function createInitialOperationsState(): OperationsWorkspaceState {
       pendingByWorkItem: new Map(),
       discovery: null,
     },
+  };
+}
+
+/**
+ * Route-mount initializer — starts as loading/refreshing so the first paint
+ * reflects the pending snapshot fetch rather than briefly flashing idle state.
+ */
+export function createRouteInitialOperationsState(): OperationsWorkspaceState {
+  return {
+    ...createInitialOperationsState(),
+    snapshotStatus: 'loading',
+    freshness: 'refreshing',
   };
 }
 

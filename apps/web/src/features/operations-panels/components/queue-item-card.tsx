@@ -154,9 +154,9 @@ export function QueueItemCard({
 
       {item.riskSignals.length > 0 && (
         <div style={{ display: 'flex', gap: '0.4rem', flexWrap: 'wrap' }}>
-          {item.riskSignals.map((signal, idx) => (
+          {item.riskSignals.map((signal) => (
             <span
-              key={`${signal.kind}-${String(idx)}`}
+              key={`${signal.kind}-${signal.scope}`}
               style={{
                 fontSize: '0.7rem',
                 color: riskSeverityColors[signal.severity],

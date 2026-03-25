@@ -19,6 +19,7 @@ import type {
 
 import {
   createInitialOperationsState,
+  createRouteInitialOperationsState,
   reduceOperationsState,
   type OperationsAction,
 } from '../model/operations-reducer.ts';
@@ -119,6 +120,19 @@ describe('createInitialOperationsState', () => {
     assert.equal(state.selection.detailAvailability, null);
     assert.equal(state.controls.pendingByWorkItem.size, 0);
     assert.equal(state.controls.discovery, null);
+  });
+});
+
+// ─── createRouteInitialOperationsState ──────────────────────────────────────
+
+describe('createRouteInitialOperationsState', () => {
+  it('starts as loading/refreshing so first paint shows the loading state', () => {
+    const state = createRouteInitialOperationsState();
+
+    assert.equal(state.snapshotStatus, 'loading');
+    assert.equal(state.freshness, 'refreshing');
+    assert.equal(state.snapshot, null);
+    assert.equal(state.availability, 'empty');
   });
 });
 
@@ -389,7 +403,7 @@ describe('controls lifecycle', () => {
 
     const state = applyActions(createInitialOperationsState(), [
       { type: 'controls/submit-pending', pending },
-      { type: 'controls/submit-resolved', workItemId: 'wq-1', outcome: 'accepted' },
+      { type: 'controls/submit-resolved', workItemId: 'wq-1' },
     ]);
 
     assert.equal(state.controls.pendingByWorkItem.size, 0);
@@ -406,7 +420,7 @@ describe('controls lifecycle', () => {
 
     const state = applyActions(createInitialOperationsState(), [
       { type: 'controls/submit-pending', pending },
-      { type: 'controls/submit-resolved', workItemId: 'wq-1', outcome: 'stale' },
+      { type: 'controls/submit-resolved', workItemId: 'wq-1' },
     ]);
 
     assert.equal(state.controls.pendingByWorkItem.size, 0);
@@ -416,7 +430,6 @@ describe('controls lifecycle', () => {
     const state = reduceOperationsState(createInitialOperationsState(), {
       type: 'controls/submit-resolved',
       workItemId: 'wq-999',
-      outcome: 'accepted',
     });
 
     assert.equal(state.controls.pendingByWorkItem.size, 0);

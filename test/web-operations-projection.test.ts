@@ -113,6 +113,12 @@ describe('projectQueueSnapshot', () => {
       const result = projectQueueSnapshot(state);
       assert.equal(result.lastSynchronizedAt, updatedAt);
     });
+
+    it('returns null lastSynchronizedAt when the daemon state timestamp is empty', () => {
+      const state = makeState({ updatedAt: '' });
+      const result = projectQueueSnapshot(state);
+      assert.equal(result.lastSynchronizedAt, null);
+    });
   });
 
   describe('single task projection', () => {
@@ -131,6 +137,25 @@ describe('projectQueueSnapshot', () => {
       assert.equal(item.ownerLabel, 'codex');
       assert.equal(item.updatedAt, now);
       assert.equal(item.detailAvailability, 'partial');
+    });
+
+    it('falls back to daemon state updatedAt when task updatedAt is empty', () => {
+      const stateTs = '2026-06-15T10:00:00.000Z';
+      const state = makeState({
+        tasks: [makeTask({ id: 'task-empty-ts', updatedAt: '' })],
+        updatedAt: stateTs,
+      });
+      const result = projectQueueSnapshot(state);
+      assert.equal(result.queue[0].updatedAt, stateTs);
+    });
+
+    it('falls back to epoch when both task and state updatedAt are empty', () => {
+      const state = makeState({
+        tasks: [makeTask({ id: 'task-epoch', updatedAt: '' })],
+        updatedAt: '',
+      });
+      const result = projectQueueSnapshot(state);
+      assert.equal(result.queue[0].updatedAt, '1970-01-01T00:00:00.000Z');
     });
 
     it('projects an in_progress task as active', () => {
@@ -311,6 +336,33 @@ describe('projectQueueSnapshot', () => {
       const result = projectQueueSnapshot(state);
       const ids = result.queue.map((item) => item.id);
       assert.deepStrictEqual(ids, ['todo-new', 'todo-mid', 'todo-old']);
+    });
+
+    it('orders deterministically when some tasks have empty updatedAt', () => {
+      const stateTs = '2026-06-15T10:00:00.000Z';
+      const state = makeState({
+        tasks: [
+          makeTask({ id: 'todo-empty', status: 'todo', updatedAt: '' }),
+          makeTask({ id: 'todo-dated', status: 'todo', updatedAt: '2026-06-15T12:00:00.000Z' }),
+          makeTask({ id: 'todo-empty2', status: 'todo', updatedAt: '' }),
+        ],
+        updatedAt: stateTs,
+      });
+      const result = projectQueueSnapshot(state);
+      const ids = result.queue.map((item) => item.id);
+      // todo-dated (12:00) is newest, then both fallbacks share stateTs (10:00) — stable order
+      assert.equal(ids[0], 'todo-dated');
+      // Both empty-updatedAt tasks get the same fallback timestamp; their relative order is stable
+      assert.ok(ids.includes('todo-empty'));
+      assert.ok(ids.includes('todo-empty2'));
+      // All updatedAt values are valid ISO datetimes (not empty)
+      for (const item of result.queue) {
+        assert.ok(item.updatedAt !== '', `updatedAt must not be empty for ${item.id}`);
+        assert.ok(
+          !Number.isNaN(new Date(item.updatedAt).getTime()),
+          `updatedAt must parse for ${item.id}`,
+        );
+      }
     });
   });
 

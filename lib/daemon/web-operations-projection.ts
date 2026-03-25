@@ -94,15 +94,27 @@ function buildRiskSignals(task: TaskEntry, normalized: WorkItemStatus): readonly
 
 // ── Projection ─────────────────────────────────────────────────────────────
 
+/** Deterministic epoch fallback when neither task nor daemon state carry a timestamp. */
+const EPOCH_FALLBACK = '1970-01-01T00:00:00.000Z';
+
+function resolveStateUpdatedAt(updatedAt: string | null | undefined): string {
+  return updatedAt != null && updatedAt !== '' ? updatedAt : EPOCH_FALLBACK;
+}
+
+function resolveLastSynchronizedAt(updatedAt: string | null | undefined): string | null {
+  return updatedAt != null && updatedAt !== '' ? updatedAt : null;
+}
+
 function projectTaskToQueueItem(
   task: TaskEntry,
   activeSession: ActiveSessionEntry | null | undefined,
+  stateUpdatedAt: string,
 ): WorkQueueItemView {
   const status = resolveProjectedStatus(task, activeSession);
   const checkpoints = task.checkpoints ?? [];
   const lastCheckpoint = checkpoints.at(-1) ?? null;
   const ownerLabel = task.owner === '' ? null : task.owner;
-  const updatedAt = task.updatedAt === '' ? new Date().toISOString() : task.updatedAt;
+  const updatedAt = task.updatedAt === '' ? stateUpdatedAt : task.updatedAt;
 
   return {
     id: task.id,
@@ -134,22 +146,53 @@ export interface QueueSnapshotResult {
   nextCursor: string | null;
 }
 
+function filterQueueItems(
+  items: readonly WorkQueueItemView[],
+  statusFilter: readonly WorkItemStatus[] | undefined,
+): WorkQueueItemView[] {
+  if (statusFilter == null || statusFilter.length === 0) {
+    return [...items];
+  }
+
+  const filterSet = new Set<WorkItemStatus>(statusFilter);
+  return items.filter((item) => filterSet.has(item.status));
+}
+
+function paginateQueueItems(
+  items: readonly WorkQueueItemView[],
+  cursor: string | undefined,
+  limit: number | undefined,
+): { items: WorkQueueItemView[]; nextCursor: string | null } {
+  let nextItems = [...items];
+
+  if (cursor != null && cursor !== '') {
+    const cursorIndex = nextItems.findIndex((item) => item.id === cursor);
+    if (cursorIndex >= 0) {
+      nextItems = nextItems.slice(cursorIndex + 1);
+    }
+  }
+
+  if (limit == null || limit <= 0 || nextItems.length <= limit) {
+    return { items: nextItems, nextCursor: null };
+  }
+
+  return {
+    items: nextItems.slice(0, limit),
+    nextCursor: nextItems[limit - 1].id,
+  };
+}
+
 export function projectQueueSnapshot(
   state: HydraStateShape,
   options: QueueSnapshotOptions = {},
 ): QueueSnapshotResult {
-  const { statusFilter, limit } = options;
+  const stateUpdatedAt = resolveStateUpdatedAt(state.updatedAt);
 
-  let items: WorkQueueItemView[] = state.tasks.map((task) =>
-    projectTaskToQueueItem(task, state.activeSession),
+  const projectedItems: WorkQueueItemView[] = state.tasks.map((task) =>
+    projectTaskToQueueItem(task, state.activeSession, stateUpdatedAt),
   );
 
-  if (statusFilter != null && statusFilter.length > 0) {
-    const filterSet = new Set<WorkItemStatus>(statusFilter);
-    items = items.filter((item) => filterSet.has(item.status));
-  }
-
-  items.sort(compareQueueItems);
+  const items = filterQueueItems(projectedItems, options.statusFilter).sort(compareQueueItems);
 
   // Assign position numbers: non-terminal items get sequential positions
   let position = 0;
@@ -162,27 +205,20 @@ export function projectQueueSnapshot(
     }
   }
 
-  if (options.cursor != null && options.cursor !== '') {
-    const cursorIndex = items.findIndex((item) => item.id === options.cursor);
-    if (cursorIndex >= 0) {
-      items = items.slice(cursorIndex + 1);
-    }
-  }
+  const { items: pagedItems, nextCursor } = paginateQueueItems(
+    items,
+    options.cursor,
+    options.limit,
+  );
 
-  let nextCursor: string | null = null;
-  if (limit != null && limit > 0 && items.length > limit) {
-    nextCursor = items[limit - 1].id;
-    items = items.slice(0, limit);
-  }
-
-  const availability = items.length > 0 || state.tasks.length > 0 ? 'ready' : 'empty';
+  const availability = pagedItems.length > 0 || state.tasks.length > 0 ? 'ready' : 'empty';
 
   return {
-    queue: items,
+    queue: pagedItems,
     health: null, // daemon health projection is a later US
     budget: null, // budget projection is a later US
     availability,
-    lastSynchronizedAt: state.updatedAt ?? null,
+    lastSynchronizedAt: resolveLastSynchronizedAt(state.updatedAt),
     nextCursor,
   };
 }

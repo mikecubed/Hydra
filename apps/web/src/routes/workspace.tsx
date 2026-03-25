@@ -75,7 +75,7 @@ import {
   fetchArtifactContent,
 } from '../features/chat-workspace/model/artifact-hydration.ts';
 import {
-  createInitialOperationsState,
+  createRouteInitialOperationsState,
   reduceOperationsState,
 } from '../features/operations-panels/model/operations-reducer.ts';
 import { createOperationsClient } from '../features/operations-panels/api/operations-client.ts';
@@ -1556,7 +1556,7 @@ export function WorkspaceRoute(): JSX.Element {
   const [opsState, dispatchOps] = useReducer(
     reduceOperationsState,
     undefined,
-    createInitialOperationsState,
+    createRouteInitialOperationsState,
   );
 
   useEffect(() => {
