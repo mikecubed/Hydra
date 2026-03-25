@@ -11,8 +11,9 @@
  *
  * Tests 1-11 mock git-ops.ts and hydra-config.ts via mock.module() to test
  * the daemon worktree helpers without touching the real filesystem or git.
- * Tests 12-19 verify the conditional logic patterns from write-routes.ts and
- * hydra-cleanup.ts using in-process simulation and temp directories.
+ * Tests 12-19 add supplementary data-shape and cleanup assertions. Real daemon
+ * route coverage for claim/result worktree behavior lives in
+ * hydra-worktree-route-coverage.test.ts.
  */
 
 import { describe, it, mock, beforeEach, afterEach } from 'node:test';
@@ -529,23 +530,27 @@ describe('cleanup and review — worktree conflict handling', () => {
     assert.strictEqual(nonTaskItem, undefined, 'Non-task dir should not be scanned');
   });
 
-  it(':tasks review shows conflict worktrees when daemon tasks have worktreeConflict: true', () => {
+  it(':tasks review conflict display falls back to hydra/task/{id} when worktreePath is missing', () => {
     const tasks = [
-      { id: 'T080', status: 'done', worktreePath: '/tmp/fake/task-T080', worktreeConflict: true },
-      { id: 'T081', status: 'done', worktreePath: null, worktreeConflict: false },
+      {
+        id: 'T080',
+        title: 'Conflict with path',
+        worktreePath: '/tmp/fake/task-T080',
+        worktreeConflict: true,
+      },
+      { id: 'T081', title: 'Conflict without path', worktreePath: null, worktreeConflict: true },
       {
         id: 'T082',
-        status: 'in_progress',
+        title: 'No conflict',
         worktreePath: '/tmp/fake/task-T082',
         worktreeConflict: false,
       },
     ];
 
-    // The :tasks review filters for worktreeConflict tasks to show manual resolution UI
-    const conflictTasks = tasks.filter((t) => t.worktreeConflict && t.worktreePath != null);
+    const conflictTasks = tasks.filter((t) => t.worktreeConflict);
+    const renderedPaths = conflictTasks.map((t) => t.worktreePath ?? `hydra/task/${t.id}`);
 
-    assert.strictEqual(conflictTasks.length, 1, 'Expected exactly one conflict task');
-    assert.strictEqual(conflictTasks[0].id, 'T080');
-    assert.ok(conflictTasks[0].worktreePath!.includes('task-T080'));
+    assert.strictEqual(conflictTasks.length, 2, 'Expected both conflict tasks to be shown');
+    assert.deepStrictEqual(renderedPaths, ['/tmp/fake/task-T080', 'hydra/task/T081']);
   });
 });

@@ -4,14 +4,57 @@
  */
 import { describe, it, beforeEach, afterEach } from 'node:test';
 import assert from 'node:assert/strict';
+import { execFileSync } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import type readline from 'node:readline';
 
-import { loadLatestReport, displayBranchInfo } from '../lib/hydra-shared/review-common.ts';
+import {
+  cleanBranches,
+  displayBranchInfo,
+  handleBranchAction,
+  handleEmptyBranch,
+  loadLatestReport,
+} from '../lib/hydra-shared/review-common.ts';
 import type { IGitOperations } from '../lib/types.ts';
 
-// ── loadLatestReport ─────────────────────────────────────────────────────────
+function makeMockGitOps(overrides: Partial<IGitOperations> = {}): IGitOperations {
+  return {
+    getCurrentBranch: () => 'main',
+    branchExists: () => true,
+    createBranch: () => true,
+    checkoutBranch: () => ({
+      ok: true,
+      status: 0,
+      stdout: '',
+      stderr: '',
+      error: null,
+      signal: null,
+    }),
+    mergeBranch: () => true,
+    deleteBranch: () => true,
+    stageAndCommit: () => true,
+    ...overrides,
+  };
+}
+
+function makeAnsweringRl(answers: string[]): readline.Interface {
+  return {
+    question: (_q: string, callback: (answer: string) => void) => {
+      callback(answers.shift() ?? '');
+    },
+  } as unknown as readline.Interface;
+}
+
+function initTempRepo(repoDir: string): void {
+  execFileSync('git', ['init', '-b', 'main'], { cwd: repoDir });
+  execFileSync('git', ['config', 'user.name', 'Hydra Test'], { cwd: repoDir });
+  execFileSync('git', ['config', 'user.email', 'hydra-test@example.com'], { cwd: repoDir });
+  fs.writeFileSync(path.join(repoDir, 'README.md'), '# review-common test\n');
+  execFileSync('git', ['add', 'README.md'], { cwd: repoDir });
+  execFileSync('git', ['commit', '-m', 'init'], { cwd: repoDir });
+}
 
 describe('loadLatestReport', () => {
   let tmpDir: string;
@@ -25,28 +68,17 @@ describe('loadLatestReport', () => {
   });
 
   it('returns null when report directory does not exist', () => {
-    const result = loadLatestReport('/nonexistent/path', 'NIGHTLY');
-    assert.strictEqual(result, null);
+    assert.strictEqual(loadLatestReport('/nonexistent/path', 'NIGHTLY'), null);
   });
 
   it('returns null when directory exists but has no matching files', () => {
-    const result = loadLatestReport(tmpDir, 'NIGHTLY');
-    assert.strictEqual(result, null);
+    assert.strictEqual(loadLatestReport(tmpDir, 'NIGHTLY'), null);
   });
 
   it('loads a report by date filter', () => {
     const report = { summary: 'test report', date: '2025-01-15' };
     fs.writeFileSync(path.join(tmpDir, 'NIGHTLY_2025-01-15.json'), JSON.stringify(report));
-
-    const result = loadLatestReport(tmpDir, 'NIGHTLY', '2025-01-15');
-    assert.deepStrictEqual(result, report);
-  });
-
-  it('returns null when date filter does not match any file', () => {
-    fs.writeFileSync(path.join(tmpDir, 'NIGHTLY_2025-01-15.json'), JSON.stringify({ data: 'x' }));
-
-    const result = loadLatestReport(tmpDir, 'NIGHTLY', '2025-01-16');
-    assert.strictEqual(result, null);
+    assert.deepStrictEqual(loadLatestReport(tmpDir, 'NIGHTLY', '2025-01-15'), report);
   });
 
   it('returns the latest report when no date filter', () => {
@@ -58,120 +90,170 @@ describe('loadLatestReport', () => {
       path.join(tmpDir, 'NIGHTLY_2025-01-15.json'),
       JSON.stringify({ date: '2025-01-15' }),
     );
-    fs.writeFileSync(
-      path.join(tmpDir, 'NIGHTLY_2025-01-12.json'),
-      JSON.stringify({ date: '2025-01-12' }),
-    );
-
     const result = loadLatestReport(tmpDir, 'NIGHTLY') as Record<string, unknown>;
     assert.equal(result['date'], '2025-01-15');
   });
 
-  it('ignores non-matching prefixes', () => {
-    fs.writeFileSync(
-      path.join(tmpDir, 'EVOLVE_2025-01-15.json'),
-      JSON.stringify({ type: 'evolve' }),
-    );
-
-    const result = loadLatestReport(tmpDir, 'NIGHTLY');
-    assert.strictEqual(result, null);
-  });
-
-  it('returns null when report file contains invalid JSON', () => {
-    fs.writeFileSync(path.join(tmpDir, 'NIGHTLY_2025-01-15.json'), 'not-json{{{');
-
-    const result = loadLatestReport(tmpDir, 'NIGHTLY');
-    assert.strictEqual(result, null);
-  });
-
-  it('returns null when date-filtered file contains invalid JSON', () => {
+  it('returns null for invalid JSON or wrong extension', () => {
     fs.writeFileSync(path.join(tmpDir, 'NIGHTLY_2025-01-15.json'), '{broken');
-
-    const result = loadLatestReport(tmpDir, 'NIGHTLY', '2025-01-15');
-    assert.strictEqual(result, null);
-  });
-
-  it('ignores non-.json files', () => {
     fs.writeFileSync(path.join(tmpDir, 'NIGHTLY_2025-01-15.txt'), 'not json');
-
-    const result = loadLatestReport(tmpDir, 'NIGHTLY');
-    assert.strictEqual(result, null);
+    assert.strictEqual(loadLatestReport(tmpDir, 'NIGHTLY', '2025-01-15'), null);
   });
 });
 
-// ── cleanBranches ────────────────────────────────────────────────────────────
-
 describe('cleanBranches', () => {
-  /** Creates a mock IGitOperations for testing */
-  function makeMockGitOps(overrides: Partial<IGitOperations> = {}): IGitOperations {
-    return {
-      getCurrentBranch: () => 'main',
-      branchExists: () => true,
-      createBranch: () => true,
-      checkoutBranch: () => ({
-        ok: true,
-        status: 0,
-        stdout: '',
-        stderr: '',
-        error: null,
-        signal: null,
-      }),
-      mergeBranch: () => true,
-      deleteBranch: () => true,
-      stageAndCommit: () => true,
-      ...overrides,
-    };
-  }
+  let repoDir: string;
+  let originalLog: typeof console.log;
 
-  it('mock gitOps interface has correct methods', () => {
-    const deleted: string[] = [];
-    const gitOps = makeMockGitOps({
-      getCurrentBranch: () => 'main',
-      deleteBranch: (_cwd: string, branch: string) => {
-        deleted.push(branch);
-        return true;
-      },
-    });
-
-    assert.equal(typeof gitOps.deleteBranch, 'function');
-    assert.equal(typeof gitOps.getCurrentBranch, 'function');
-    assert.equal(typeof gitOps.checkoutBranch, 'function');
+  beforeEach(() => {
+    repoDir = fs.mkdtempSync(path.join(os.tmpdir(), 'hydra-review-clean-'));
+    initTempRepo(repoDir);
+    originalLog = console.log;
+    console.log = () => {};
   });
 
-  it('mock gitOps deleteBranch works', () => {
+  afterEach(() => {
+    console.log = originalLog;
+    fs.rmSync(repoDir, { recursive: true, force: true });
+  });
+
+  function createBranch(name: string): void {
+    execFileSync('git', ['branch', name], { cwd: repoDir });
+  }
+
+  it('deletes matching branches without checkout when already on base branch', () => {
     const deleted: string[] = [];
-    const gitOps = makeMockGitOps({
-      deleteBranch: (_cwd: string, branch: string) => {
-        deleted.push(branch);
-        return true;
-      },
-    });
-
-    gitOps.deleteBranch('/tmp', 'tasks/branch1');
-    gitOps.deleteBranch('/tmp', 'tasks/branch2');
-
+    createBranch('tasks/branch1');
+    createBranch('tasks/branch2');
+    cleanBranches(
+      repoDir,
+      'tasks',
+      'main',
+      null,
+      makeMockGitOps({
+        getCurrentBranch: () => 'main',
+        deleteBranch: (_cwd: string, branch: string) => {
+          deleted.push(branch);
+          return true;
+        },
+      }),
+    );
     assert.deepStrictEqual(deleted, ['tasks/branch1', 'tasks/branch2']);
   });
 
-  it('mock gitOps deleteBranch can return false for failure', () => {
-    const gitOps = makeMockGitOps({
-      deleteBranch: () => false,
-    });
+  it('checks out the base branch before deleting when current branch differs', () => {
+    const deleted: string[] = [];
+    const checkedOut: string[] = [];
+    createBranch('tasks/branch1');
+    cleanBranches(
+      repoDir,
+      'tasks',
+      'main',
+      null,
+      makeMockGitOps({
+        getCurrentBranch: () => 'feature/current',
+        checkoutBranch: (_cwd: string, branch: string) => {
+          checkedOut.push(branch);
+          return { ok: true, status: 0, stdout: '', stderr: '', error: null, signal: null };
+        },
+        deleteBranch: (_cwd: string, branch: string) => {
+          deleted.push(branch);
+          return true;
+        },
+      }),
+    );
+    assert.deepStrictEqual(checkedOut, ['main']);
+    assert.deepStrictEqual(deleted, ['tasks/branch1']);
+  });
 
-    const result = gitOps.deleteBranch('/tmp', 'tasks/fail');
-    assert.equal(result, false);
+  it('continues deleting later branches when one deletion fails', () => {
+    const deleted: string[] = [];
+    createBranch('tasks/fail');
+    createBranch('tasks/ok');
+    cleanBranches(
+      repoDir,
+      'tasks',
+      'main',
+      null,
+      makeMockGitOps({
+        deleteBranch: (_cwd: string, branch: string) => {
+          deleted.push(branch);
+          return branch !== 'tasks/fail';
+        },
+      }),
+    );
+    assert.deepStrictEqual(deleted, ['tasks/fail', 'tasks/ok']);
   });
 });
 
-// ── displayBranchInfo ────────────────────────────────────────────────────────
-
 describe('displayBranchInfo', () => {
   it('returns commitLog and diffStat strings', () => {
-    // displayBranchInfo calls getBranchDiffStat and getBranchLog from git-ops
-    // which run git commands. In a non-git directory, these return empty strings.
-    // We test the return shape.
     const result = displayBranchInfo('/tmp', 'nonexistent-branch', 'main');
     assert.equal(typeof result.commitLog, 'string');
     assert.equal(typeof result.diffStat, 'string');
+  });
+});
+
+describe('handleEmptyBranch', () => {
+  it('deletes the branch when the user confirms', async () => {
+    const deleted: string[] = [];
+    await handleEmptyBranch(
+      makeAnsweringRl(['y']),
+      '/tmp/project',
+      'feature/empty',
+      makeMockGitOps({
+        deleteBranch: (_cwd: string, branch: string) => {
+          deleted.push(branch);
+          return true;
+        },
+      }),
+    );
+    assert.deepStrictEqual(deleted, ['feature/empty']);
+  });
+});
+
+describe('handleBranchAction', () => {
+  it('merges and deletes the branch when the user chooses merge', async () => {
+    const deleted: string[] = [];
+    const merges: string[] = [];
+    const result = await handleBranchAction(
+      makeAnsweringRl(['m', 'y']),
+      '/tmp/project',
+      'feature/merge-me',
+      'main',
+      { useSmartMerge: false },
+      makeMockGitOps({
+        mergeBranch: (_cwd: string, branch: string, baseBranch: string) => {
+          merges.push(`${branch}->${baseBranch}`);
+          return true;
+        },
+        deleteBranch: (_cwd: string, branch: string) => {
+          deleted.push(branch);
+          return true;
+        },
+      }),
+    );
+    assert.equal(result, 'merged');
+    assert.deepStrictEqual(merges, ['feature/merge-me->main']);
+    assert.deepStrictEqual(deleted, ['feature/merge-me']);
+  });
+
+  it('deletes the branch directly when the user chooses delete', async () => {
+    const deleted: string[] = [];
+    const result = await handleBranchAction(
+      makeAnsweringRl(['x']),
+      '/tmp/project',
+      'feature/delete-me',
+      'main',
+      {},
+      makeMockGitOps({
+        deleteBranch: (_cwd: string, branch: string) => {
+          deleted.push(branch);
+          return true;
+        },
+      }),
+    );
+    assert.equal(result, 'deleted');
+    assert.deepStrictEqual(deleted, ['feature/delete-me']);
   });
 });

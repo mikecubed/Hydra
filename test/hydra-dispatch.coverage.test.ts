@@ -1,5 +1,8 @@
 /**
- * Coverage tests for lib/hydra-dispatch.ts — setDispatchExecutor and related paths.
+ * Executor seam tests for lib/hydra-dispatch.ts.
+ *
+ * These assertions intentionally cover the exported executor override seam, not
+ * the full live dispatch pipeline.
  */
 import { describe, it, afterEach } from 'node:test';
 import assert from 'node:assert/strict';

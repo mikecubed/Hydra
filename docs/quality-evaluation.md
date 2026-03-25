@@ -196,13 +196,14 @@ All 19 tests are placeholder stubs for the worktree isolation feature (`routing.
 
 7. **Add tests for shared infrastructure** ✅
    - `gemini-executor.ts` (46% → 73%): OAuth config, token cache, error paths
-   - `review-common.ts` (40% → 51%): report loading, branch display, git ops DI
+   - `review-common.ts` (40% → 51%): report loading, branch cleanup, and branch action flows
    - `hydra-council.ts` (39% → 43%): 76 tests for pure extraction/synthesis functions
-   - `hydra-dispatch.ts` (31%): setDispatchExecutor swap/restore
+   - `hydra-dispatch.ts`: executor override seam swap/restore coverage
+   - Added handler-level worktree route coverage for `/task/claim` and `/task/result`
 
 8. **Add tests for provider modules** ✅
-   - `hydra-anthropic.ts` (46%), `hydra-openai.ts` (54%), `hydra-google.ts` (40%): existence, missing-key error handling
-   - 9 tests covering error paths for all three providers
+   - `hydra-anthropic.ts`, `hydra-openai.ts`, `hydra-google.ts`: missing-key guards plus streamed success-path request/response coverage
+   - Added request-shape and SSE parsing assertions for all three providers
 
 9. **Raise CI gate to 64%** ✅
    - Coverage reached 64% (target was 75% — remaining gap requires deeper testing of large modules)
