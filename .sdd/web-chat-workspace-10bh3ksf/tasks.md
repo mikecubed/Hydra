@@ -171,9 +171,9 @@ _Status note_: post-Phase-1 maintenance also landed on the active branch, splitt
 
 ## Phase 8 — Docs, Hardening, and Final Validation
 
-- [ ] T048 [P] Update browser workspace usage and package docs in `apps/web/README.md`.
-- [ ] T049 [P] Update browser workspace architecture and protocol docs in `docs/web-interface/03-architecture.md` and `docs/web-interface/04-protocol.md`.
-- [ ] T050 Run final root validation with `npm run quality` and `npm test`, then reconcile any last browser-workspace doc or test gaps.
+- [x] T048 [P] Update browser workspace usage and package docs in `apps/web/README.md`.
+- [x] T049 [P] Update browser workspace architecture and protocol docs in `docs/web-interface/03-architecture.md` and `docs/web-interface/04-protocol.md`.
+- [x] T050 Run final root validation with `npm run quality` and `npm test`, then reconcile any last browser-workspace doc or test gaps.
 
 ---
 
