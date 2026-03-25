@@ -8,13 +8,18 @@
     "command": "node --test --experimental-test-module-mocks 'test/**/*.test.{ts,mjs}'"
   },
   "coverageAnalysis": "off",
-  "mutate": ["lib/hydra-shared/**/*.ts", "!lib/hydra-shared/**/*.test.ts"],
+  "mutate": [
+    "lib/hydra-shared/**/*.ts",
+    "lib/daemon/**/*.ts",
+    "!lib/hydra-shared/**/*.test.ts",
+    "!lib/daemon/**/*.test.ts"
+  ],
   "checkers": ["typescript"],
   "tsconfigFile": "tsconfig.json",
   "thresholds": {
-    "high": 60,
+    "high": 70,
     "low": 40,
-    "break": null
+    "break": 60
   },
   "timeoutMS": 60000,
   "concurrency": 2

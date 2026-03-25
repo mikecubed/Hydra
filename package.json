@@ -96,7 +96,9 @@
     "uninstall:global": "npm uninstall -g hydra",
     "postinstall": "node lib/check-install.ts",
     "prepare": "husky",
-    "test:mutation": "stryker run"
+    "test:mutation": "stryker run",
+    "test:coverage:per-file": "node --experimental-strip-types scripts/check-per-file-coverage.ts",
+    "test:new-file-policy": "node --experimental-strip-types scripts/check-new-file-tests.ts"
   },
   "lint-staged": {
     "*.{ts,mjs}": [
