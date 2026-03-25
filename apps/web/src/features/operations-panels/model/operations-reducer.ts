@@ -254,7 +254,7 @@ export function reduceOperationsState(
       return reduceControlsSubmitResolved(state, action.workItemId);
     case 'controls/discovery-loaded':
       return reduceControlsDiscoveryLoaded(state, action.discovery);
+    default:
+      return assertNever(action);
   }
-
-  return assertNever(action);
 }

@@ -8,93 +8,156 @@
 import { describe, it, beforeEach, afterEach, mock } from 'node:test';
 import assert from 'node:assert/strict';
 import { Hono } from 'hono';
+import type {
+  DaemonOperationsClient as DaemonOperationsClientShape,
+  DaemonOperationsResult,
+} from '../daemon-operations-client.ts';
+import { DaemonOperationsClient } from '../daemon-operations-client.ts';
+import type { OperationalControlView, WorkQueueItemView } from '@hydra/web-contracts';
 import { createOperationsRoutes } from '../operations-routes.ts';
-import type { DaemonOperationsClient, DaemonOperationsResult } from '../daemon-operations-client.ts';
 import type { GatewayErrorResponse } from '../../shared/gateway-error-response.ts';
 import { createGatewayApp, type GatewayApp } from '../../index.ts';
 import { FakeClock } from '../../shared/clock.ts';
 
 const ORIGIN = 'http://127.0.0.1:4174';
+const NOW = '2026-03-22T10:00:00.000Z';
 
 // ── Mock helpers ──────────────────────────────────────────────────────────────
 
-type MockOpsClient = {
-  [K in keyof DaemonOperationsClient]: ReturnType<typeof mock.fn>;
+type MockOpsClient = DaemonOperationsClient & {
+  getOperationsSnapshot: ReturnType<
+    typeof mock.fn<DaemonOperationsClientShape['getOperationsSnapshot']>
+  >;
+  getWorkItemDetail: ReturnType<typeof mock.fn<DaemonOperationsClientShape['getWorkItemDetail']>>;
+  getWorkItemCheckpoints: ReturnType<
+    typeof mock.fn<DaemonOperationsClientShape['getWorkItemCheckpoints']>
+  >;
+  getWorkItemExecution: ReturnType<
+    typeof mock.fn<DaemonOperationsClientShape['getWorkItemExecution']>
+  >;
+  getWorkItemControls: ReturnType<
+    typeof mock.fn<DaemonOperationsClientShape['getWorkItemControls']>
+  >;
+  submitControlAction: ReturnType<
+    typeof mock.fn<DaemonOperationsClientShape['submitControlAction']>
+  >;
+  discoverControls: ReturnType<typeof mock.fn<DaemonOperationsClientShape['discoverControls']>>;
 };
 
-function createMockOpsClient(): MockOpsClient {
+function makeQueueItem(overrides: Partial<WorkQueueItemView> = {}): WorkQueueItemView {
   return {
-    getOperationsSnapshot: mock.fn(() =>
-      Promise.resolve({
-        data: {
-          queue: [],
-          health: null,
-          budget: null,
-          availability: 'empty',
-          lastSynchronizedAt: null,
-          nextCursor: null,
-        },
-      }),
-    ),
-    getWorkItemDetail: mock.fn(() =>
-      Promise.resolve({
-        data: {
-          item: { id: 'wi-1' },
-          checkpoints: [],
-          routing: null,
-          assignments: [],
-          council: null,
-          controls: [],
-          itemBudget: null,
-          availability: 'ready',
-        },
-      }),
-    ),
-    getWorkItemCheckpoints: mock.fn(() =>
+    id: 'wi-1',
+    title: 'Item',
+    status: 'active',
+    position: 0,
+    relatedConversationId: null,
+    relatedSessionId: null,
+    ownerLabel: null,
+    lastCheckpointSummary: null,
+    updatedAt: NOW,
+    riskSignals: [],
+    detailAvailability: 'ready',
+    ...overrides,
+  };
+}
+
+function makeControl(overrides: Partial<OperationalControlView> = {}): OperationalControlView {
+  return {
+    controlId: 'ctrl-1',
+    kind: 'routing',
+    label: 'Route override',
+    availability: 'actionable',
+    authority: 'granted',
+    reason: null,
+    options: [],
+    expectedRevision: 'rev-1',
+    lastResolvedAt: null,
+    ...overrides,
+  };
+}
+
+function createMockOpsClient(): MockOpsClient {
+  const client = new DaemonOperationsClient({ baseUrl: 'http://daemon.invalid' }) as MockOpsClient;
+  client.getOperationsSnapshot = mock.fn<DaemonOperationsClientShape['getOperationsSnapshot']>(() =>
+    Promise.resolve({
+      data: {
+        queue: [],
+        availability: 'empty',
+        health: null,
+        lastSynchronizedAt: null,
+        budget: null,
+        nextCursor: null,
+      },
+    }),
+  );
+  client.getWorkItemDetail = mock.fn<DaemonOperationsClientShape['getWorkItemDetail']>(() =>
+    Promise.resolve({
+      data: {
+        item: makeQueueItem(),
+        checkpoints: [],
+        routing: null,
+        assignments: [],
+        council: null,
+        controls: [makeControl()],
+        itemBudget: null,
+        availability: 'ready',
+      },
+    }),
+  );
+  client.getWorkItemCheckpoints = mock.fn<DaemonOperationsClientShape['getWorkItemCheckpoints']>(
+    () =>
       Promise.resolve({
         data: { workItemId: 'wi-1', checkpoints: [], availability: 'ready' },
       }),
-    ),
-    getWorkItemExecution: mock.fn(() =>
-      Promise.resolve({
-        data: {
-          workItemId: 'wi-1',
-          routing: null,
-          assignments: [],
-          council: null,
-          availability: 'ready',
-        },
-      }),
-    ),
-    getWorkItemControls: mock.fn(() =>
-      Promise.resolve({
-        data: { workItemId: 'wi-1', controls: [], availability: 'ready' },
-      }),
-    ),
-    submitControlAction: mock.fn(() =>
-      Promise.resolve({ data: { ok: true } }),
-    ),
-    discoverControls: mock.fn(() =>
-      Promise.resolve({ data: { results: [] } }),
-    ),
-  } as unknown as MockOpsClient;
+  );
+  client.getWorkItemExecution = mock.fn<DaemonOperationsClientShape['getWorkItemExecution']>(() =>
+    Promise.resolve({
+      data: {
+        workItemId: 'wi-1',
+        routing: null,
+        assignments: [],
+        council: null,
+        availability: 'ready',
+      },
+    }),
+  );
+  client.getWorkItemControls = mock.fn<DaemonOperationsClientShape['getWorkItemControls']>(() =>
+    Promise.resolve({
+      data: { workItemId: 'wi-1', controls: [makeControl()], availability: 'ready' },
+    }),
+  );
+  client.submitControlAction = mock.fn<DaemonOperationsClientShape['submitControlAction']>(() =>
+    Promise.resolve({
+      data: {
+        outcome: 'accepted',
+        control: makeControl({ availability: 'accepted', lastResolvedAt: NOW }),
+        workItemId: 'wi-1',
+        resolvedAt: NOW,
+      },
+    }),
+  );
+  client.discoverControls = mock.fn<DaemonOperationsClientShape['discoverControls']>(() =>
+    Promise.resolve({
+      data: {
+        items: [{ workItemId: 'wi-1', controls: [makeControl()], availability: 'ready' }],
+      },
+    }),
+  );
+  return client;
 }
 
 /**
  * Build a Hono app with operations routes pre-wired.
  * Simulates auth middleware context variables.
  */
-function buildTestApp(opsClient: MockOpsClient): Hono {
+function buildTestApp(opsClient: DaemonOperationsClient): Hono {
   const app = new Hono();
   app.use('*', async (c, next) => {
     c.set('operatorId' as never, 'test-operator' as never);
     c.set('sessionId' as never, 'test-session-123' as never);
     await next();
   });
-  app.route(
-    '/',
-    createOperationsRoutes({ daemonClient: opsClient as unknown as DaemonOperationsClient }),
-  );
+  app.route('/', createOperationsRoutes({ daemonClient: opsClient }));
   return app;
 }
 
@@ -155,9 +218,7 @@ describe('Operations snapshot routes (T009/T010 — US1)', () => {
     });
 
     it('returns 400 on invalid limit query param', async () => {
-      const res = await app.request(
-        buildRequest('GET', '/operations/snapshot?limit=-1'),
-      );
+      const res = await app.request(buildRequest('GET', '/operations/snapshot?limit=-1'));
       assert.equal(res.status, 400);
       const body = (await res.json()) as GatewayErrorResponse;
       assert.equal(body.category, 'validation');
@@ -268,8 +329,16 @@ describe('Operations route wiring — auth/CSRF (T009/T010)', () => {
         extensionDurationMs: 3600_000,
         idleTimeoutMs: 1800_000,
       },
-      daemonClientOptions: { baseUrl: 'http://localhost:4173', fetchFn: fetchMock, timeoutMs: 5000 },
-      operationsClientOptions: { baseUrl: 'http://localhost:4173', fetchFn: fetchMock, timeoutMs: 5000 },
+      daemonClientOptions: {
+        baseUrl: 'http://localhost:4173',
+        fetchFn: fetchMock,
+        timeoutMs: 5000,
+      },
+      operationsClientOptions: {
+        baseUrl: 'http://localhost:4173',
+        fetchFn: fetchMock,
+        timeoutMs: 5000,
+      },
     });
     await gw.operatorStore.createOperator('admin', 'Admin');
     await gw.operatorStore.addCredential('admin', 'password123');

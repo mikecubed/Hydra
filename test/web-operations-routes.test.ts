@@ -55,12 +55,22 @@ function makeReadCtx(
     }`,
   );
   const captured: { statusCode: number; data: unknown } = { statusCode: 0, data: null };
-  const req = new EventEmitter() as IncomingMessage;
-  (req as unknown as Record<string, unknown>)['headers'] = {};
-  const res = new EventEmitter() as ServerResponse;
-  (res as unknown as Record<string, unknown>)['writeHead'] = () => {};
-  (res as unknown as Record<string, unknown>)['write'] = () => {};
-  (res as unknown as Record<string, unknown>)['end'] = () => {};
+  const req = new EventEmitter() as IncomingMessage & {
+    headers: Record<string, string>;
+  };
+  req.headers = {};
+  const res = new EventEmitter() as ServerResponse & {
+    writeHead: (
+      statusCode: number,
+      statusMessage?: string | Record<string, string>,
+      headers?: Record<string, string>,
+    ) => ServerResponse;
+    write: () => boolean;
+    end: () => ServerResponse;
+  };
+  res.writeHead = () => res;
+  res.write = () => true;
+  res.end = () => res;
 
   const sendJson = (_r: ServerResponse, code: number, data: unknown) => {
     captured.statusCode = code;
