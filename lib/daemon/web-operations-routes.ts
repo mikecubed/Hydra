@@ -29,37 +29,54 @@ function isValidStatus(value: string): value is WorkItemStatus {
   return false;
 }
 
-function parseStatusFilter(raw: string | null): readonly WorkItemStatus[] | undefined {
-  if (raw == null || raw === '') return undefined;
-  const statuses = raw
-    .split(',')
-    .map((s) => s.trim())
-    .filter(isValidStatus);
-  return statuses.length > 0 ? statuses : undefined;
-}
-
-function parseStatusFilters(searchParams: URLSearchParams): readonly WorkItemStatus[] | undefined {
+function parseStatusFilters(
+  searchParams: URLSearchParams,
+): { statuses: readonly WorkItemStatus[] | undefined } | { invalid: string } {
   const rawValues = searchParams.getAll('statusFilter');
   if (rawValues.length === 0) {
-    return undefined;
+    return { statuses: undefined };
   }
 
-  const parsed = rawValues.flatMap((raw) => parseStatusFilter(raw) ?? []);
-  return parsed.length > 0 ? parsed : undefined;
+  const tokens: string[] = [];
+  for (const raw of rawValues) {
+    for (const token of raw.split(',')) {
+      const trimmed = token.trim();
+      if (trimmed === '') {
+        return { invalid: raw };
+      }
+      tokens.push(trimmed);
+    }
+  }
+
+  for (const token of tokens) {
+    if (!isValidStatus(token)) {
+      return { invalid: token };
+    }
+  }
+
+  return { statuses: tokens as unknown as readonly WorkItemStatus[] };
 }
 
 function parseLimit(raw: string | null): number | undefined {
   if (raw == null || raw === '') return undefined;
+  if (!/^\d+$/.test(raw)) return undefined;
   const n = Number.parseInt(raw, 10);
   return Number.isFinite(n) && n > 0 ? n : undefined;
 }
 
 function handleSnapshot(ctx: ReadRouteCtx): boolean {
-  const { res, sendJson, readState, requestUrl } = ctx;
+  const { res, sendJson, sendError, readState, requestUrl } = ctx;
+
+  const statusResult = parseStatusFilters(requestUrl.searchParams);
+  if ('invalid' in statusResult) {
+    sendError(res, 400, `Invalid statusFilter value: ${statusResult.invalid}`);
+    return true;
+  }
+
   const state = readState();
 
   const options: QueueSnapshotOptions = {
-    statusFilter: parseStatusFilters(requestUrl.searchParams),
+    statusFilter: statusResult.statuses,
     limit: parseLimit(requestUrl.searchParams.get('limit')),
     cursor: requestUrl.searchParams.get('cursor') ?? undefined,
   };

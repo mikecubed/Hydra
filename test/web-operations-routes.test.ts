@@ -267,6 +267,47 @@ describe('handleOperationsReadRoute', () => {
         ['task-2', 'task-1'],
       );
     });
+
+    it('returns 400 for an invalid statusFilter value', () => {
+      const state = makeState({ tasks: [makeTask()] });
+      const ctx = makeReadCtx('GET', '/operations/snapshot', state, {
+        statusFilter: 'bogus',
+      });
+      const handled = handleOperationsReadRoute(ctx);
+      assert.equal(handled, true);
+      assert.equal(ctx.captured.statusCode, 400);
+    });
+
+    it('returns 400 when statusFilter mixes valid and invalid tokens', () => {
+      const state = makeState({ tasks: [makeTask()] });
+      const ctx = makeReadCtx('GET', '/operations/snapshot', state, {
+        statusFilter: 'active,bogus',
+      });
+      const handled = handleOperationsReadRoute(ctx);
+      assert.equal(handled, true);
+      assert.equal(ctx.captured.statusCode, 400);
+    });
+
+    it('returns 400 when repeated statusFilter params contain an invalid token', () => {
+      const state = makeState({ tasks: [makeTask()] });
+      const ctx = makeReadCtx('GET', '/operations/snapshot', state, {
+        statusFilter: 'active',
+      });
+      ctx.requestUrl.searchParams.append('statusFilter', 'nope');
+      const handled = handleOperationsReadRoute(ctx);
+      assert.equal(handled, true);
+      assert.equal(ctx.captured.statusCode, 400);
+    });
+
+    it('returns 400 for empty statusFilter tokens', () => {
+      const state = makeState({ tasks: [makeTask()] });
+      const ctx = makeReadCtx('GET', '/operations/snapshot', state, {
+        statusFilter: 'active,',
+      });
+      const handled = handleOperationsReadRoute(ctx);
+      assert.equal(handled, true);
+      assert.equal(ctx.captured.statusCode, 400);
+    });
   });
 
   describe('query param: limit', () => {
@@ -295,6 +336,23 @@ describe('handleOperationsReadRoute', () => {
       const data = ctx.captured.data as Record<string, unknown>;
       const queue = data['queue'] as unknown[];
       assert.equal(queue.length, 2);
+    });
+
+    it('ignores partially numeric limit values like "10abc"', () => {
+      const state = makeState({
+        tasks: Array.from({ length: 11 }, (_, index) =>
+          makeTask({
+            id: `task-${String(index + 1)}`,
+            updatedAt: `2025-01-01T${String(index).padStart(2, '0')}:00:00.000Z`,
+          }),
+        ),
+      });
+      const ctx = makeReadCtx('GET', '/operations/snapshot', state, { limit: '10abc' });
+      handleOperationsReadRoute(ctx);
+      const data = ctx.captured.data as Record<string, unknown>;
+      const queue = data['queue'] as unknown[];
+      assert.equal(queue.length, 11);
+      assert.equal(data['nextCursor'], null);
     });
 
     it('applies cursor before limit when paginating', () => {
