@@ -22,6 +22,13 @@ function makeSseResponse(lines: string[], headers: Record<string, string> = {}):
   return new Response(stream, { status: 200, headers });
 }
 
+function expectStringBody(body: RequestInit['body'] | undefined): string {
+  if (typeof body !== 'string') {
+    throw new Error('expected fetch body to be a string');
+  }
+  return body;
+}
+
 describe('streamAnthropicCompletion', () => {
   let savedKey: string | undefined;
 
@@ -70,11 +77,7 @@ describe('streamAnthropicCompletion', () => {
         streamed += chunk;
       },
     );
-    const rawBody = calls[0]?.body;
-    if (typeof rawBody !== 'string') {
-      assert.fail('expected fetch body to be a string');
-    }
-    const body = JSON.parse(rawBody);
+    const body = JSON.parse(expectStringBody(calls[0]?.body));
     assert.equal(streamed, 'Hello world');
     assert.equal(result.fullResponse, 'Hello world');
     assert.deepStrictEqual(result.usage, { prompt_tokens: 11, completion_tokens: 7 });
@@ -125,11 +128,7 @@ describe('streamCompletion (OpenAI)', () => {
         streamed += chunk;
       },
     );
-    const rawBody = calls[0]?.body;
-    if (typeof rawBody !== 'string') {
-      assert.fail('expected fetch body to be a string');
-    }
-    const body = JSON.parse(rawBody);
+    const body = JSON.parse(expectStringBody(calls[0]?.body));
     assert.equal(streamed, 'Hydra dispatch');
     assert.equal(result.fullResponse, 'Hydra dispatch');
     assert.deepStrictEqual(result.usage, {
@@ -190,11 +189,7 @@ describe('streamGoogleCompletion', () => {
         streamed += chunk;
       },
     );
-    const rawBody = calls[0]?.body;
-    if (typeof rawBody !== 'string') {
-      assert.fail('expected fetch body to be a string');
-    }
-    const body = JSON.parse(rawBody);
+    const body = JSON.parse(expectStringBody(calls[0]?.body));
     assert.equal(streamed, 'Gemini output');
     assert.equal(result.fullResponse, 'Gemini output');
     assert.deepStrictEqual(result.usage, { prompt_tokens: 5, completion_tokens: 6 });
