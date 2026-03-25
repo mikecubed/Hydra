@@ -14,6 +14,7 @@
 /* eslint-disable @typescript-eslint/strict-boolean-expressions, @typescript-eslint/no-non-null-assertion -- T7A: standard JS truthiness; type narrowing tracked as follow-up */
 /* eslint-disable @typescript-eslint/no-unnecessary-type-assertion, @typescript-eslint/no-unnecessary-type-conversion -- T7A: operator uses || for truthiness-based defaults */
 /* eslint-disable @typescript-eslint/no-misused-promises, require-atomic-updates -- T7A: CLI entry point */
+/* eslint-disable @typescript-eslint/explicit-module-boundary-types -- T7A: _testExports aggregates internal functions */
 /* eslint-disable no-await-in-loop, @typescript-eslint/no-base-to-string -- T7A: sequential processing */
 
 /* eslint-disable unicorn/no-new-array, no-control-regex -- T7A: intentional patterns */
@@ -2736,8 +2737,40 @@ async function main() {
   await runOneShotHandoff(opts);
 }
 
+// ── Test-only exports ────────────────────────────────────────────────────────
+// Prefixed with _ to signal test-only usage (same pattern as _resetRegistry, _setTestConfig).
+// Uses Record<string, unknown> to avoid triggering explicit-module-boundary-types on internal fns.
+
+export const _testExports: Record<string, unknown> = {
+  dispatchLineCommand,
+  displaySitrepResult,
+  printSessionTokenSection,
+  printProviderUsageSection,
+  handleSyncCommand,
+  handleConfirmCommand,
+  handleDryRunCommand,
+  handleCancelCommand,
+  handleResumeSelection,
+  handleForgeList,
+  handleForgeInfo,
+  handleForgeDelete,
+  createPasteState,
+  flushPasteBuffer,
+  bufferPasteLine,
+  classifyAutoRoute,
+  handleCmdHelpSuffix,
+  handleAwarePlain,
+  buildCmdOpts,
+  scheduleStatusGhostUpgrade,
+  updateAutoStatusBar,
+  printAutoDispatchHeader,
+  updateTaskActivities,
+  bindActivityEventHandler,
+  showLoopWelcome,
+};
+
 const _isMainModule =
-  path.resolve(process.argv[1]) === path.resolve(fileURLToPath(import.meta.url));
+  path.resolve(process.argv[1] ?? '') === path.resolve(fileURLToPath(import.meta.url));
 
 if (_isMainModule) {
   main().catch((err: unknown) => {
