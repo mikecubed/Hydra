@@ -76,6 +76,34 @@ function reduceSnapshotSuccess(
   state: OperationsWorkspaceState,
   snapshot: GetOperationsSnapshotResponse,
 ): OperationsWorkspaceState {
+  const selectedWorkItemId = state.selection.selectedWorkItemId;
+  let selection = state.selection;
+
+  if (selectedWorkItemId !== null) {
+    const selectedItem = snapshot.queue.find((item) => item.id === selectedWorkItemId) ?? null;
+
+    if (selectedItem === null) {
+      selection = {
+        selectedWorkItemId: null,
+        detail: null,
+        detailAvailability: null,
+      };
+    } else {
+      selection = {
+        ...state.selection,
+        detail:
+          state.selection.detail == null
+            ? null
+            : {
+                ...state.selection.detail,
+                item: selectedItem,
+                availability: selectedItem.detailAvailability,
+              },
+        detailAvailability: selectedItem.detailAvailability,
+      };
+    }
+  }
+
   return {
     ...state,
     snapshotStatus: 'ready',
@@ -83,6 +111,7 @@ function reduceSnapshotSuccess(
     freshness: 'live',
     availability: snapshot.availability,
     lastSynchronizedAt: snapshot.lastSynchronizedAt,
+    selection,
   };
 }
 

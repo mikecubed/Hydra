@@ -208,6 +208,52 @@ describe('snapshot lifecycle', () => {
     assert.equal(state.lastSynchronizedAt, LATER);
   });
 
+  it('clears selection and detail when the selected work item disappears on refresh', () => {
+    const first = makeSnapshotResponse({
+      queue: [makeQueueItem({ id: 'wq-1', status: 'active', detailAvailability: 'ready' })],
+    });
+    const detail = makeDetailResponse({
+      item: makeQueueItem({ id: 'wq-1', status: 'active', detailAvailability: 'ready' }),
+    });
+
+    const state = applyActions(createInitialOperationsState(), [
+      { type: 'snapshot/success', snapshot: first },
+      { type: 'selection/select', workItemId: 'wq-1' },
+      { type: 'selection/detail-loaded', detail },
+      { type: 'snapshot/success', snapshot: makeSnapshotResponse({ queue: [] }) },
+    ]);
+
+    assert.equal(state.selection.selectedWorkItemId, null);
+    assert.equal(state.selection.detail, null);
+    assert.equal(state.selection.detailAvailability, null);
+  });
+
+  it('reconciles selected detail from refreshed snapshot queue data', () => {
+    const first = makeSnapshotResponse({
+      queue: [makeQueueItem({ id: 'wq-1', status: 'active', detailAvailability: 'ready' })],
+    });
+    const detail = makeDetailResponse({
+      item: makeQueueItem({ id: 'wq-1', status: 'active', detailAvailability: 'ready' }),
+      availability: 'ready',
+    });
+    const second = makeSnapshotResponse({
+      queue: [makeQueueItem({ id: 'wq-1', status: 'completed', detailAvailability: 'unavailable' })],
+      lastSynchronizedAt: LATER,
+    });
+
+    const state = applyActions(createInitialOperationsState(), [
+      { type: 'snapshot/success', snapshot: first },
+      { type: 'selection/select', workItemId: 'wq-1' },
+      { type: 'selection/detail-loaded', detail },
+      { type: 'snapshot/success', snapshot: second },
+    ]);
+
+    assert.equal(state.selection.selectedWorkItemId, 'wq-1');
+    assert.equal(state.selection.detail?.item.status, 'completed');
+    assert.equal(state.selection.detail?.availability, 'unavailable');
+    assert.equal(state.selection.detailAvailability, 'unavailable');
+  });
+
   it('sets availability from the snapshot response', () => {
     const snapshot = makeSnapshotResponse({ availability: 'partial' });
     const state = applyActions(createInitialOperationsState(), [
