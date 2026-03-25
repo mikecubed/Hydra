@@ -44,29 +44,29 @@ describe('PeakEWMA', () => {
 
 describe('compose', () => {
   it('applies layers outside-in', async () => {
-    const order = [];
+    const order: string[] = [];
 
-    const layer1 = async (ctx, next) => {
+    const layer1 = async (_ctx: unknown, next: () => Promise<unknown>) => {
       order.push('layer1-before');
       const result = await next();
       order.push('layer1-after');
       return result;
     };
 
-    const layer2 = async (ctx, next) => {
+    const layer2 = async (_ctx: unknown, next: () => Promise<unknown>) => {
       order.push('layer2-before');
       const result = await next();
       order.push('layer2-after');
       return result;
     };
 
-    const core = async (_ctx) => {
+    const core = async (_ctx: unknown) => {
       order.push('core');
       return { value: 42 };
     };
 
     const fn = compose([layer1, layer2], core);
-    const result = await fn({});
+    const result = await fn({} as Parameters<typeof fn>[0]);
 
     assert.deepEqual(order, [
       'layer1-before',
@@ -79,11 +79,11 @@ describe('compose', () => {
   });
 
   it('propagates errors through layers', async () => {
-    const layer = async (ctx, next) => {
+    const layer = async (_ctx: unknown, next: () => Promise<unknown>) => {
       try {
         return await next();
-      } catch (err) {
-        err.wrapped = true;
+      } catch (err: unknown) {
+        (err as Error & { wrapped: boolean }).wrapped = true;
         throw err;
       }
     };
@@ -94,10 +94,10 @@ describe('compose', () => {
 
     const fn = compose([layer], core);
     await assert.rejects(
-      () => fn({}),
-      (err) => {
-        assert.equal(err.message, 'core error');
-        assert.equal(err.wrapped, true);
+      () => fn({} as Parameters<typeof fn>[0]),
+      (err: unknown) => {
+        assert.equal((err as Error).message, 'core error');
+        assert.equal((err as Error & { wrapped: boolean }).wrapped, true);
         return true;
       },
     );

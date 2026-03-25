@@ -12,7 +12,7 @@ import {
 } from '../lib/hydra-agents.ts';
 import { loadHydraConfig, _setTestConfig, invalidateConfigCache } from '../lib/hydra-config.ts';
 
-const ROUTING_MODES = ['economy', 'balanced', 'performance'];
+const ROUTING_MODES = ['economy', 'balanced', 'performance'] as const;
 
 /** Enable local in config (in-memory only — no disk write to avoid concurrent test races). */
 function enableLocal() {
@@ -22,7 +22,7 @@ function enableLocal() {
 }
 
 /** Restore original config. */
-function restoreConfig(_original) {
+function restoreConfig(_original: ReturnType<typeof loadHydraConfig>) {
   invalidateConfigCache();
 }
 

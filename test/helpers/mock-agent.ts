@@ -5,18 +5,59 @@ import { fileURLToPath } from 'node:url';
 const HELPERS_DIR = path.dirname(fileURLToPath(import.meta.url));
 const FIXTURES_DIR = path.resolve(HELPERS_DIR, '../fixtures/agent-responses');
 
-function deepClone(value) {
+interface AgentResult {
+  ok: boolean;
+  output: string;
+  stdout: string;
+  stderr: string;
+  error: string | null;
+  exitCode: number;
+  signal: string | null;
+  durationMs: number;
+  timedOut: boolean;
+  [key: string]: unknown;
+}
+
+interface FixtureResponse {
+  ok: boolean;
+  output?: string;
+  stdout?: string;
+  stderr?: string;
+  error?: string | null;
+  exitCode?: number;
+  signal?: string | null;
+  durationMs?: number;
+  timedOut?: boolean;
+  [key: string]: unknown;
+}
+
+interface RawFixtureEntry {
+  id?: string;
+  matchPattern: string | RegExp | null;
+  response: FixtureResponse;
+  [key: string]: unknown;
+}
+
+interface NormalizedFixtureEntry {
+  id: string;
+  matchPattern: RegExp | null;
+  response: FixtureResponse;
+  [key: string]: unknown;
+}
+
+function deepClone<T>(value: T): T {
   if (value === null || value === undefined) {
     return value;
   }
   if (typeof structuredClone === 'function') {
     return structuredClone(value);
   }
+  // eslint-disable-next-line @typescript-eslint/no-unsafe-return
   return JSON.parse(JSON.stringify(value));
 }
 
-export function makeSuccessResult(output, opts = {}) {
-  const text = String(output ?? '');
+export function makeSuccessResult(output: unknown, opts: Partial<AgentResult> = {}): AgentResult {
+  const text = typeof output === 'string' ? output : '';
   return {
     ok: true,
     output: text,
@@ -31,8 +72,8 @@ export function makeSuccessResult(output, opts = {}) {
   };
 }
 
-export function makeFailureResult(error, opts = {}) {
-  const text = String(error ?? 'Mock execution failed');
+export function makeFailureResult(error: unknown, opts: Partial<AgentResult> = {}): AgentResult {
+  const text = typeof error === 'string' ? error : 'Mock execution failed';
   return {
     ok: false,
     output: '',
@@ -47,12 +88,16 @@ export function makeFailureResult(error, opts = {}) {
   };
 }
 
-function normalizeFixtureEntry(agent, entry, index) {
+function normalizeFixtureEntry(
+  agent: string,
+  entry: RawFixtureEntry,
+  index: number,
+): NormalizedFixtureEntry {
   if (!entry || typeof entry !== 'object') {
     throw new Error(`Fixture entry ${index} for ${agent} must be an object`);
   }
 
-  const id = String(entry.id || `entry-${index}`);
+  const id = entry.id ?? `entry-${index}`;
   const { matchPattern } = entry;
 
   if (
@@ -81,7 +126,7 @@ function normalizeFixtureEntry(agent, entry, index) {
   };
 }
 
-function validateFixtures(agent, entries) {
+function validateFixtures(agent: string, entries: RawFixtureEntry[]): NormalizedFixtureEntry[] {
   if (!Array.isArray(entries) || entries.length === 0) {
     throw new Error(`Fixture list for ${agent} must be a non-empty array`);
   }
@@ -90,7 +135,7 @@ function validateFixtures(agent, entries) {
   const defaultEntry = normalized.find((entry) => entry.id === 'default');
   const nullMatchEntries = normalized.filter((entry) => entry.matchPattern === null);
 
-  if (!defaultEntry || defaultEntry.matchPattern !== null) {
+  if (defaultEntry?.matchPattern !== null) {
     throw new Error(
       `Fixture list for ${agent} must include a default entry with matchPattern null (id "default")`,
     );
@@ -105,32 +150,35 @@ function validateFixtures(agent, entries) {
   return normalized;
 }
 
-function cloneResult(result) {
-  const cloned = deepClone(result);
+function cloneResult(result: FixtureResponse): AgentResult {
+  const cloned = deepClone(result) as AgentResult;
   if (cloned.error === undefined) {
-    cloned.error = cloned.ok ? null : cloned.stderr || 'Mock execution failed';
+    cloned.error = cloned.ok ? null : (cloned.stderr ?? 'Mock execution failed');
   }
   return cloned;
 }
 
-function normalizeResponse(response) {
-  const output = String(response.output ?? '');
+function normalizeResponse(response: FixtureResponse): AgentResult {
+  const output = typeof response.output === 'string' ? response.output : '';
   const error = response.error ?? response.stderr ?? 'Mock execution failed';
+  const errorStr = typeof error === 'string' ? error : 'Mock execution failed';
 
   return cloneResult(
-    response.ok ? makeSuccessResult(output, response) : makeFailureResult(String(error), response),
+    response.ok
+      ? makeSuccessResult(output, response as Partial<AgentResult>)
+      : makeFailureResult(errorStr, response as Partial<AgentResult>),
   );
 }
 
-export async function loadAgentFixture(agent) {
+export async function loadAgentFixture(agent: string): Promise<NormalizedFixtureEntry[]> {
   const fixturePath = path.join(FIXTURES_DIR, `${agent}.json`);
   try {
     const raw = await fs.readFile(fixturePath, 'utf8');
-    const parsed = JSON.parse(raw);
+    const parsed = JSON.parse(raw) as RawFixtureEntry[];
     return validateFixtures(agent, parsed);
-  } catch (err) {
+  } catch (err: unknown) {
     throw new Error(
-      `Unable to load mock fixture for ${agent} from ${fixturePath}: ${err.message}`,
+      `Unable to load mock fixture for ${agent} from ${fixturePath}: ${(err as Error).message}`,
       {
         cause: err,
       },
@@ -138,7 +186,9 @@ export async function loadAgentFixture(agent) {
   }
 }
 
-export function createMockExecuteAgent(fixtureMap) {
+export function createMockExecuteAgent(
+  fixtureMap: Record<string, RawFixtureEntry[]>,
+): (agent: string, prompt: string, opts?: Record<string, unknown>) => Promise<AgentResult> {
   if (!fixtureMap || typeof fixtureMap !== 'object') {
     throw new Error('createMockExecuteAgent requires a fixture map object');
   }
@@ -147,7 +197,11 @@ export function createMockExecuteAgent(fixtureMap) {
     Object.entries(fixtureMap).map(([agent, entries]) => [agent, validateFixtures(agent, entries)]),
   );
 
-  return async function mockExecuteAgent(agent, prompt, opts = {}) {
+  return async function mockExecuteAgent(
+    agent: string,
+    prompt: string,
+    opts: Record<string, unknown> = {},
+  ): Promise<AgentResult> {
     void opts;
 
     const fixtures = validatedMap[agent];
@@ -155,12 +209,12 @@ export function createMockExecuteAgent(fixtureMap) {
       throw new Error(`Unknown mock agent "${agent}"`);
     }
 
-    const promptText = String(prompt ?? '');
+    const promptText = prompt ?? '';
     const matched = fixtures.find(
       (entry) => entry.matchPattern instanceof RegExp && entry.matchPattern.test(promptText),
     );
     const fallback = fixtures.find((entry) => entry.id === 'default');
-    const selected = matched || fallback;
+    const selected = matched ?? fallback;
 
     if (!selected) {
       throw new Error(`No default fixture available for ${agent}`);

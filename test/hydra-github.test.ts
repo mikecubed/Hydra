@@ -15,7 +15,15 @@ import {
 } from '../lib/hydra-github.ts';
 import { parseRemoteUrl } from '../lib/hydra-shared/git-ops.ts';
 
-// ── parseRemoteUrl ──────────────────────────────────────────────────────────
+// Suppress unused import warnings — we verify these are functions below
+void isGhAuthenticated;
+void createPR;
+void getPR;
+void mergePR;
+void closePR;
+void pushBranchAndCreatePR;
+
+// -- parseRemoteUrl -----------------------------------------------------------
 
 describe('parseRemoteUrl', () => {
   it('parses SSH URLs', () => {
@@ -60,7 +68,7 @@ describe('parseRemoteUrl', () => {
   });
 });
 
-// ── getGitHubConfig ─────────────────────────────────────────────────────────
+// -- getGitHubConfig ----------------------------------------------------------
 
 describe('getGitHubConfig', () => {
   it('returns default shape', () => {
@@ -83,7 +91,7 @@ describe('getGitHubConfig', () => {
   });
 });
 
-// ── Export verification ─────────────────────────────────────────────────────
+// -- Export verification ------------------------------------------------------
 
 describe('hydra-github exports', () => {
   it('exports all expected functions', () => {
@@ -101,7 +109,7 @@ describe('hydra-github exports', () => {
   });
 });
 
-// ── isGhAvailable ───────────────────────────────────────────────────────────
+// -- isGhAvailable ------------------------------------------------------------
 
 describe('isGhAvailable', () => {
   it('returns a boolean', () => {
@@ -110,7 +118,7 @@ describe('isGhAvailable', () => {
   });
 });
 
-// ── gh executor ─────────────────────────────────────────────────────────────
+// -- gh executor --------------------------------------------------------------
 
 describe('gh executor', () => {
   it('returns object with status property', () => {
@@ -121,7 +129,7 @@ describe('gh executor', () => {
   });
 });
 
-// ── git-ops remote helpers ──────────────────────────────────────────────────
+// -- git-ops remote helpers ---------------------------------------------------
 
 describe('git-ops remote helpers', () => {
   it('exports all remote sync functions', async () => {
@@ -136,7 +144,7 @@ describe('git-ops remote helpers', () => {
   });
 });
 
-// ── gh-dependent tests (skipped if gh not installed) ────────────────────────
+// -- gh-dependent tests (skipped if gh not installed) -------------------------
 
 const ghInstalled = isGhAvailable();
 

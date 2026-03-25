@@ -7,23 +7,23 @@ import {
 } from '../lib/hydra-concierge-providers.ts';
 
 describe('detectAvailableProviders', () => {
-  const saved = {};
+  const saved: Record<string, string | undefined> = {};
 
   beforeEach(() => {
-    saved.OPENAI_API_KEY = process.env.OPENAI_API_KEY;
-    saved.ANTHROPIC_API_KEY = process.env.ANTHROPIC_API_KEY;
-    saved.GEMINI_API_KEY = process.env.GEMINI_API_KEY;
-    saved.GOOGLE_API_KEY = process.env.GOOGLE_API_KEY;
-    delete process.env.OPENAI_API_KEY;
-    delete process.env.ANTHROPIC_API_KEY;
-    delete process.env.GEMINI_API_KEY;
-    delete process.env.GOOGLE_API_KEY;
+    saved['OPENAI_API_KEY'] = process.env['OPENAI_API_KEY'];
+    saved['ANTHROPIC_API_KEY'] = process.env['ANTHROPIC_API_KEY'];
+    saved['GEMINI_API_KEY'] = process.env['GEMINI_API_KEY'];
+    saved['GOOGLE_API_KEY'] = process.env['GOOGLE_API_KEY'];
+    delete process.env['OPENAI_API_KEY'];
+    delete process.env['ANTHROPIC_API_KEY'];
+    delete process.env['GEMINI_API_KEY'];
+    delete process.env['GOOGLE_API_KEY'];
   });
 
   afterEach(() => {
     for (const [k, v] of Object.entries(saved)) {
       if (v === undefined) {
-        delete process.env[k];
+        Reflect.deleteProperty(process.env, k);
       } else {
         process.env[k] = v;
       }
@@ -36,37 +36,37 @@ describe('detectAvailableProviders', () => {
   });
 
   it('detects OpenAI when key is set', () => {
-    process.env.OPENAI_API_KEY = 'sk-test';
+    process.env['OPENAI_API_KEY'] = 'sk-test';
     const providers = detectAvailableProviders();
     assert.equal(providers.length, 1);
     assert.equal(providers[0].provider, 'openai');
   });
 
   it('detects Anthropic when key is set', () => {
-    process.env.ANTHROPIC_API_KEY = 'sk-ant-test';
+    process.env['ANTHROPIC_API_KEY'] = 'sk-ant-test';
     const providers = detectAvailableProviders();
     assert.equal(providers.length, 1);
     assert.equal(providers[0].provider, 'anthropic');
   });
 
   it('detects Google via GEMINI_API_KEY', () => {
-    process.env.GEMINI_API_KEY = 'AIza-test';
+    process.env['GEMINI_API_KEY'] = 'AIza-test';
     const providers = detectAvailableProviders();
     assert.equal(providers.length, 1);
     assert.equal(providers[0].provider, 'google');
   });
 
   it('detects Google via GOOGLE_API_KEY fallback', () => {
-    process.env.GOOGLE_API_KEY = 'AIza-test2';
+    process.env['GOOGLE_API_KEY'] = 'AIza-test2';
     const providers = detectAvailableProviders();
     assert.equal(providers.length, 1);
     assert.equal(providers[0].provider, 'google');
   });
 
   it('detects multiple providers', () => {
-    process.env.OPENAI_API_KEY = 'sk-test';
-    process.env.ANTHROPIC_API_KEY = 'sk-ant-test';
-    process.env.GEMINI_API_KEY = 'AIza-test';
+    process.env['OPENAI_API_KEY'] = 'sk-test';
+    process.env['ANTHROPIC_API_KEY'] = 'sk-ant-test';
+    process.env['GEMINI_API_KEY'] = 'AIza-test';
     const providers = detectAvailableProviders();
     assert.equal(providers.length, 3);
     const names = providers.map((p) => p.provider);
@@ -77,21 +77,21 @@ describe('detectAvailableProviders', () => {
 });
 
 describe('buildFallbackChain', () => {
-  const saved = {};
+  const saved: Record<string, string | undefined> = {};
 
   beforeEach(() => {
-    saved.OPENAI_API_KEY = process.env.OPENAI_API_KEY;
-    saved.ANTHROPIC_API_KEY = process.env.ANTHROPIC_API_KEY;
-    saved.GEMINI_API_KEY = process.env.GEMINI_API_KEY;
-    delete process.env.OPENAI_API_KEY;
-    delete process.env.ANTHROPIC_API_KEY;
-    delete process.env.GEMINI_API_KEY;
+    saved['OPENAI_API_KEY'] = process.env['OPENAI_API_KEY'];
+    saved['ANTHROPIC_API_KEY'] = process.env['ANTHROPIC_API_KEY'];
+    saved['GEMINI_API_KEY'] = process.env['GEMINI_API_KEY'];
+    delete process.env['OPENAI_API_KEY'];
+    delete process.env['ANTHROPIC_API_KEY'];
+    delete process.env['GEMINI_API_KEY'];
   });
 
   afterEach(() => {
     for (const [k, v] of Object.entries(saved)) {
       if (v === undefined) {
-        delete process.env[k];
+        Reflect.deleteProperty(process.env, k);
       } else {
         process.env[k] = v;
       }
@@ -99,7 +99,7 @@ describe('buildFallbackChain', () => {
   });
 
   it('returns chain with availability flags', () => {
-    process.env.OPENAI_API_KEY = 'sk-test';
+    process.env['OPENAI_API_KEY'] = 'sk-test';
     const chain = buildFallbackChain();
     assert.ok(chain.length >= 1);
     const openai = chain.find((e) => e.provider === 'openai');

@@ -1,5 +1,5 @@
 /**
- * Tests for hydra-doctor.mjs — failure diagnosis and triage layer.
+ * Tests for hydra-doctor — failure diagnosis and triage layer.
  */
 
 import { describe, it, beforeEach, afterEach } from 'node:test';
@@ -7,9 +7,9 @@ import assert from 'node:assert/strict';
 
 import { isDoctorEnabled, diagnose, getDoctorStats, resetDoctor } from '../lib/hydra-doctor.ts';
 
-// ── Helpers ─────────────────────────────────────────────────────────────────
+// -- Helpers ------------------------------------------------------------------
 
-function makeFailure(overrides = {}) {
+function makeFailure(overrides: Record<string, unknown> = {}) {
   return {
     pipeline: 'evolve',
     phase: 'agent',
@@ -25,7 +25,7 @@ function makeFailure(overrides = {}) {
   };
 }
 
-// ── Tests ───────────────────────────────────────────────────────────────────
+// -- Tests --------------------------------------------------------------------
 
 describe('hydra-doctor', () => {
   beforeEach(() => {
@@ -116,11 +116,11 @@ describe('hydra-doctor', () => {
     });
 
     it('increments total stat across multiple calls', async () => {
-      // Rate limit → always ignored
+      // Rate limit -> always ignored
       await diagnose(makeFailure({ error: '429 rate limit' }));
-      // Unknown error → depends on investigator
+      // Unknown error -> depends on investigator
       await diagnose(makeFailure({ error: 'mystery error XYZ' }));
-      // Timeout → depends on investigator
+      // Timeout -> depends on investigator
       await diagnose(makeFailure({ timedOut: true, error: 'timeout' }));
 
       const stats = getDoctorStats();
@@ -149,7 +149,7 @@ describe('hydra-doctor', () => {
       const r3 = await diagnose(failure);
       assert.equal(r3.recurring, false);
 
-      // Fourth sees 3 prior matching entries → recurring
+      // Fourth sees 3 prior matching entries -> recurring
       const r4 = await diagnose(failure);
       assert.equal(r4.recurring, true);
       // Recurring should escalate — not ignore

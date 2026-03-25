@@ -9,7 +9,7 @@ import {
   getConfigReference,
 } from '../lib/hydra-codebase-context.ts';
 
-// ── detectCodebaseQuery ─────────────────────────────────────────────────────
+// -- detectCodebaseQuery ------------------------------------------------------
 
 test('codebase: detects "how does dispatch work?" -> dispatch topic', () => {
   const r = detectCodebaseQuery('How does dispatch work?');
@@ -67,15 +67,15 @@ test('codebase: non-codebase prompts return false', () => {
 
 test('codebase: empty/null input returns false', () => {
   assert.equal(detectCodebaseQuery('').isCodebaseQuery, false);
-  assert.equal(detectCodebaseQuery(null).isCodebaseQuery, false);
-  assert.equal(detectCodebaseQuery().isCodebaseQuery, false);
+  assert.equal(detectCodebaseQuery(null as unknown as string).isCodebaseQuery, false);
+  assert.equal(detectCodebaseQuery(undefined as unknown as string).isCodebaseQuery, false);
 });
 
 test('codebase: short input returns false', () => {
   assert.equal(detectCodebaseQuery('hi').isCodebaseQuery, false);
 });
 
-// ── loadCodebaseContext ─────────────────────────────────────────────────────
+// -- loadCodebaseContext ------------------------------------------------------
 
 test('codebase: loadCodebaseContext returns sections and module index', () => {
   const ctx = loadCodebaseContext();
@@ -107,7 +107,7 @@ test('codebase: module index includes key modules', () => {
   );
 });
 
-// ── getTopicContext ─────────────────────────────────────────────────────────
+// -- getTopicContext -----------------------------------------------------------
 
 test('codebase: getTopicContext returns content for dispatch', () => {
   const result = getTopicContext('dispatch');
@@ -132,7 +132,7 @@ test('codebase: getTopicContext enforces size budget', () => {
   assert.ok(result.length <= 5100); // 5000 + small margin
 });
 
-// ── getBaselineContext ───────────────────────────────────────────────────────
+// -- getBaselineContext --------------------------------------------------------
 
 test('codebase: getBaselineContext returns comprehensive baseline', () => {
   const result = getBaselineContext();
@@ -143,7 +143,7 @@ test('codebase: getBaselineContext returns comprehensive baseline', () => {
   assert.ok(result.includes('Config sections'));
 });
 
-// ── getConfigReference ──────────────────────────────────────────────────────
+// -- getConfigReference -------------------------------------------------------
 
 test('codebase: getConfigReference returns config for concierge', () => {
   const result = getConfigReference('concierge');
@@ -156,7 +156,7 @@ test('codebase: getConfigReference returns null for unknown topic', () => {
   assert.equal(result, null);
 });
 
-// ── searchKnowledgeBase ─────────────────────────────────────────────────────
+// -- searchKnowledgeBase ------------------------------------------------------
 
 test('codebase: searchKnowledgeBase returns string (may be empty if no KB)', () => {
   const result = searchKnowledgeBase('orchestration');
