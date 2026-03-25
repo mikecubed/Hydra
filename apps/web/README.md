@@ -40,8 +40,9 @@ The workspace uses **same-origin REST** (`baseUrl: ''`) and **same-origin WebSoc
 (`${location.host}/ws`) with cookie-based session auth. There is no Vite proxy configured to
 forward these requests. In practice this means:
 
-- **Production / integration use** — the built app must be served behind the web-gateway (or an
-  equivalent reverse proxy) that places the API, WebSocket, and static assets on the same origin.
+- **Production / integration use** — the built app must be served by a same-origin static
+  host/reverse proxy that fronts the web gateway so the API routes, WebSocket endpoint, and static
+  assets all share one origin.
 - **Standalone `npm run dev` / `npm run preview`** — useful for frontend iteration (component
   development, styling, routing) but API and WebSocket calls will fail unless you provide your own
   proxy that forwards the gateway routes (`/auth/*`, `/session/*`, `/conversations/*`,
