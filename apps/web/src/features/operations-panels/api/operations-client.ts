@@ -55,6 +55,33 @@ export interface OperationsClient {
 
 type QueryValue = string | number | boolean | null | undefined | readonly string[];
 
+function readCsrfTokenFromDocument(): string | null {
+  const documentLike = Reflect.get(globalThis, 'document') as { cookie?: string } | undefined;
+  const cookieSource = documentLike?.cookie;
+
+  if (typeof cookieSource !== 'string' || cookieSource === '') {
+    return null;
+  }
+
+  for (const entry of cookieSource.split(';')) {
+    const trimmed = entry.trim();
+    if (trimmed.startsWith('__csrf=')) {
+      const rawValue = trimmed.slice('__csrf='.length);
+      if (rawValue === '') {
+        return null;
+      }
+
+      try {
+        return decodeURIComponent(rawValue);
+      } catch {
+        return null;
+      }
+    }
+  }
+
+  return null;
+}
+
 function appendQuery(search: URLSearchParams, key: string, value: QueryValue): void {
   if (value == null) return;
   if (Array.isArray(value)) {
@@ -85,20 +112,35 @@ async function extractGatewayError(response: Response): Promise<GatewayErrorBody
   };
 }
 
+function buildRequestUrl(
+  baseUrl: string,
+  path: string,
+  query?: Record<string, QueryValue>,
+): string {
+  const url = `${baseUrl}${path}`;
+  if (query == null) {
+    return url;
+  }
+
+  const params = new URLSearchParams();
+  for (const [key, value] of Object.entries(query)) {
+    appendQuery(params, key, value);
+  }
+  const queryString = params.toString();
+  return queryString === '' ? url : `${url}?${queryString}`;
+}
+
 export function createOperationsClient(options: OperationsClientOptions): OperationsClient {
   const baseUrl = options.baseUrl.replace(/\/$/, '');
   const fetchFn = options.fetch ?? globalThis.fetch;
-  const getCsrfToken = options.getCsrfToken ?? (() => null);
+  const getCsrfToken = options.getCsrfToken ?? readCsrfTokenFromDocument;
 
   async function request<T>(
     path: string,
     init: RequestInit = {},
     query?: Record<string, QueryValue>,
   ): Promise<T> {
-    const url = new URL(`${baseUrl}${path}`);
-    if (query != null) {
-      for (const [key, value] of Object.entries(query)) appendQuery(url.searchParams, key, value);
-    }
+    const url = buildRequestUrl(baseUrl, path, query);
 
     const headers = new Headers(init.headers ?? {});
     headers.set('Accept', 'application/json');
@@ -108,7 +150,7 @@ export function createOperationsClient(options: OperationsClientOptions): Operat
       if (csrfToken != null && csrfToken !== '') headers.set('x-csrf-token', csrfToken);
     }
 
-    const response = await fetchFn(url.toString(), {
+    const response = await fetchFn(url, {
       ...init,
       credentials: 'include',
       headers,

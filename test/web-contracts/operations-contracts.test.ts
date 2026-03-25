@@ -9,6 +9,7 @@ import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 
 import {
+  GetWorkItemCheckpointsResponse,
   GetOperationsSnapshotRequest,
   SubmitControlActionResponse,
   WorkItemStatus,
@@ -300,10 +301,10 @@ describe('OperationalControlView conformance', () => {
         kind: 'routing',
         label: 'Route',
         availability,
-        authority: 'granted',
+        authority: availability === 'actionable' ? 'granted' : 'forbidden',
         reason: null,
         options: [],
-        expectedRevision: null,
+        expectedRevision: availability === 'actionable' ? 'rev-1' : null,
         lastResolvedAt: null,
       });
       assert.ok(result.success, `availability ${availability} should be accepted`);
@@ -325,6 +326,22 @@ describe('OperationalControlView conformance', () => {
       });
       assert.ok(result.success, `kind ${kind} should be accepted`);
     }
+  });
+
+  it('actionable controls require both granted authority and expectedRevision', () => {
+    assert.ok(
+      !OperationalControlView.safeParse({
+        controlId: 'ctrl-1',
+        kind: 'routing',
+        label: 'Route',
+        availability: 'actionable',
+        authority: 'forbidden',
+        reason: null,
+        options: [],
+        expectedRevision: null,
+        lastResolvedAt: null,
+      }).success,
+    );
   });
 });
 
@@ -353,6 +370,32 @@ describe('Operations read contract conformance', () => {
     });
     assert.ok(result.success);
     assert.deepStrictEqual(result.data.statusFilter, ['waiting', 'active', 'paused']);
+  });
+
+  it('rejects out-of-order checkpoint sequences', () => {
+    const result = GetWorkItemCheckpointsResponse.safeParse({
+      workItemId: 'wq-1',
+      checkpoints: [
+        {
+          id: 'cp-2',
+          sequence: 2,
+          label: 'Second',
+          status: 'reached',
+          timestamp: NOW,
+          detail: null,
+        },
+        {
+          id: 'cp-1',
+          sequence: 1,
+          label: 'First',
+          status: 'reached',
+          timestamp: NOW,
+          detail: null,
+        },
+      ],
+      availability: 'ready',
+    });
+    assert.ok(!result.success);
   });
 });
 

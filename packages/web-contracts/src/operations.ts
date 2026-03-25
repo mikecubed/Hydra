@@ -244,6 +244,23 @@ export const OperationalControlView = z
     expectedRevision: z.string().min(1).nullable(),
     lastResolvedAt: z.iso.datetime().nullable(),
   })
+  .superRefine((control, ctx) => {
+    if (control.availability === 'actionable' && control.expectedRevision === null) {
+      ctx.addIssue({
+        code: 'custom',
+        path: ['expectedRevision'],
+        message: 'Actionable controls require an expectedRevision token.',
+      });
+    }
+
+    if (control.availability === 'actionable' && control.authority !== 'granted') {
+      ctx.addIssue({
+        code: 'custom',
+        path: ['authority'],
+        message: 'Actionable controls require granted authority.',
+      });
+    }
+  })
   .strict();
 export type OperationalControlView = z.infer<typeof OperationalControlView>;
 

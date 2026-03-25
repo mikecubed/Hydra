@@ -38,6 +38,7 @@ import {
   WorkspaceAvailability,
 } from '../operations.ts';
 import {
+  GetWorkItemDetailResponse,
   GetOperationsSnapshotRequest,
   GetOperationsSnapshotResponse,
 } from '../contracts/operations-read.ts';
@@ -687,6 +688,22 @@ describe('OperationalControlView', () => {
   it('rejects unknown fields (strict)', () => {
     assert.ok(!OperationalControlView.safeParse({ ...valid, extra: true }).success);
   });
+
+  it('rejects actionable controls without an expected revision', () => {
+    const result = OperationalControlView.safeParse({
+      ...valid,
+      expectedRevision: null,
+    });
+    assert.ok(!result.success);
+  });
+
+  it('rejects actionable controls without granted authority', () => {
+    const result = OperationalControlView.safeParse({
+      ...valid,
+      authority: 'forbidden',
+    });
+    assert.ok(!result.success);
+  });
 });
 
 describe('ControlOptionView', () => {
@@ -757,6 +774,49 @@ describe('Operations read contracts', () => {
       nextCursor: null,
     });
     assert.ok(result.success);
+  });
+
+  it('rejects out-of-order checkpoint sequences in detail responses', () => {
+    const result = GetWorkItemDetailResponse.safeParse({
+      item: {
+        id: 'wq-1',
+        title: 'Task',
+        status: 'active',
+        position: 1,
+        relatedConversationId: null,
+        relatedSessionId: null,
+        ownerLabel: null,
+        lastCheckpointSummary: null,
+        updatedAt: NOW,
+        riskSignals: [],
+        detailAvailability: 'ready',
+      },
+      checkpoints: [
+        {
+          id: 'cp-2',
+          sequence: 2,
+          label: 'Second',
+          status: 'reached',
+          timestamp: NOW,
+          detail: null,
+        },
+        {
+          id: 'cp-1',
+          sequence: 1,
+          label: 'First',
+          status: 'reached',
+          timestamp: NOW,
+          detail: null,
+        },
+      ],
+      routing: null,
+      assignments: [],
+      council: null,
+      controls: [],
+      itemBudget: null,
+      availability: 'ready',
+    });
+    assert.ok(!result.success);
   });
 });
 

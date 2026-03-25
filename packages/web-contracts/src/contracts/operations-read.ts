@@ -25,6 +25,15 @@ import {
 
 const SnapshotStatusFilter = z.array(WorkItemStatus).readonly();
 
+function hasMonotonicCheckpointSequence(checkpoints: readonly CheckpointRecordView[]): boolean {
+  for (let index = 1; index < checkpoints.length; index += 1) {
+    if (checkpoints[index - 1].sequence > checkpoints[index].sequence) {
+      return false;
+    }
+  }
+  return true;
+}
+
 export const GetOperationsSnapshotRequest = z
   .object({
     statusFilter: SnapshotStatusFilter.optional(),
@@ -64,6 +73,15 @@ export const GetWorkItemDetailResponse = z
     itemBudget: BudgetStatusView.nullable(),
     availability: DetailAvailability,
   })
+  .superRefine((detail, ctx) => {
+    if (!hasMonotonicCheckpointSequence(detail.checkpoints)) {
+      ctx.addIssue({
+        code: 'custom',
+        path: ['checkpoints'],
+        message: 'Checkpoint sequences must be monotonic.',
+      });
+    }
+  })
   .strict();
 export type GetWorkItemDetailResponse = z.infer<typeof GetWorkItemDetailResponse>;
 
@@ -79,6 +97,15 @@ export const GetWorkItemCheckpointsResponse = z
     workItemId: z.string().min(1),
     checkpoints: z.array(CheckpointRecordView).readonly(),
     availability: DetailAvailability,
+  })
+  .superRefine((detail, ctx) => {
+    if (!hasMonotonicCheckpointSequence(detail.checkpoints)) {
+      ctx.addIssue({
+        code: 'custom',
+        path: ['checkpoints'],
+        message: 'Checkpoint sequences must be monotonic.',
+      });
+    }
   })
   .strict();
 export type GetWorkItemCheckpointsResponse = z.infer<typeof GetWorkItemCheckpointsResponse>;
