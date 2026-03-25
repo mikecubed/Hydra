@@ -618,14 +618,16 @@ parse their request bodies locally.
 
 ### Auth
 
-These routes are unprotected (login) or require only session validation (logout, reauth). Login
-sets `__session` (HttpOnly) and `__csrf` cookies on success.
+These routes cover pre-auth login plus session-bound auth maintenance. Login sets `__session`
+(HttpOnly) and `__csrf` cookies on success. Logout is CSRF-protected but safely clears cookies even
+when no session cookie is present. Reauth is CSRF-protected and requires an idle session plus fresh
+credentials.
 
-| Method | Path           | Description                                     |
-| ------ | -------------- | ----------------------------------------------- |
-| POST   | `/auth/login`  | Authenticate; sets session + CSRF cookies       |
-| POST   | `/auth/logout` | End session; clears cookies (requires CSRF)     |
-| POST   | `/auth/reauth` | Re-authenticate an idle session (requires CSRF) |
+| Method | Path           | Description                                                   |
+| ------ | -------------- | ------------------------------------------------------------- |
+| POST   | `/auth/login`  | Authenticate; sets session + CSRF cookies                     |
+| POST   | `/auth/logout` | Clear auth cookies and end the session when one exists (CSRF) |
+| POST   | `/auth/reauth` | Re-authenticate an idle session with fresh credentials (CSRF) |
 
 ### Session
 
