@@ -198,9 +198,9 @@ export function projectQueueSnapshot(
   let position = 0;
   for (const item of items) {
     if (TERMINAL_STATUSES.has(item.status)) {
-      (item as { position: number | null }).position = null;
+      item.position = null;
     } else {
-      (item as { position: number | null }).position = position;
+      item.position = position;
       position += 1;
     }
   }

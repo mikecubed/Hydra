@@ -9,7 +9,7 @@ import type { ReadRouteCtx } from '../types.ts';
 import { projectQueueSnapshot, type QueueSnapshotOptions } from './web-operations-projection.ts';
 import type { WorkItemStatus } from '@hydra/web-contracts';
 
-const VALID_STATUSES: ReadonlySet<string> = new Set([
+const VALID_STATUSES = [
   'waiting',
   'active',
   'paused',
@@ -17,14 +17,24 @@ const VALID_STATUSES: ReadonlySet<string> = new Set([
   'completed',
   'failed',
   'cancelled',
-]);
+] as const satisfies readonly WorkItemStatus[];
+
+function isValidStatus(value: string): value is WorkItemStatus {
+  for (const status of VALID_STATUSES) {
+    if (status === value) {
+      return true;
+    }
+  }
+
+  return false;
+}
 
 function parseStatusFilter(raw: string | null): readonly WorkItemStatus[] | undefined {
   if (raw == null || raw === '') return undefined;
   const statuses = raw
     .split(',')
     .map((s) => s.trim())
-    .filter((s) => VALID_STATUSES.has(s)) as WorkItemStatus[];
+    .filter(isValidStatus);
   return statuses.length > 0 ? statuses : undefined;
 }
 
