@@ -44,7 +44,8 @@ forward these requests. In practice this means:
   equivalent reverse proxy) that places the API, WebSocket, and static assets on the same origin.
 - **Standalone `npm run dev` / `npm run preview`** — useful for frontend iteration (component
   development, styling, routing) but API and WebSocket calls will fail unless you provide your own
-  proxy that forwards `/api/*` and `/ws` to the gateway.
+  proxy that forwards the gateway routes (`/auth/*`, `/session/*`, `/conversations/*`,
+  `/approvals/*`, `/turns/*`, `/artifacts/*`) and `/ws` to the gateway.
 
 ## Scripts
 
@@ -71,15 +72,16 @@ Two distinct test paths exist:
 
 ## Technology Stack
 
-| Layer         | Choice                                         |
-| ------------- | ---------------------------------------------- |
-| Framework     | React 19 (StrictMode)                          |
-| Bundler       | Vite 8 with `@vitejs/plugin-react`             |
-| Routing       | TanStack Router (type-safe, intent preloading) |
-| Server state  | TanStack React Query                           |
-| Schema / DTOs | Zod (via `@hydra/web-contracts`)               |
-| Testing       | Vitest 4, Testing Library (React + user-event) |
-| Test env      | jsdom                                          |
+| Layer         | Choice                                                        |
+| ------------- | ------------------------------------------------------------- |
+| Framework     | React 19 (StrictMode)                                         |
+| Bundler       | Vite 8 with `@vitejs/plugin-react`                            |
+| Routing       | TanStack Router (type-safe, intent preloading)                |
+| State model   | Custom reducer/store for workspace state                      |
+| Query layer   | TanStack React Query provider available for REST cache wiring |
+| Schema / DTOs | Zod (via `@hydra/web-contracts`)                              |
+| Testing       | Vitest 4, Testing Library (React + user-event)                |
+| Test env      | jsdom                                                         |
 
 ## Workspace Boundaries
 
