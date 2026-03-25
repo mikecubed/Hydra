@@ -37,6 +37,11 @@ import { createSourceKeyMiddleware, type SourceKeyConfig } from './security/sour
 import { validateTlsConfig, isSecure, type TlsConfig } from './security/tls-guard.ts';
 import { DaemonClient, type DaemonClientOptions } from './conversation/daemon-client.ts';
 import { createConversationRoutes } from './conversation/conversation-routes.ts';
+import {
+  DaemonOperationsClient,
+  type DaemonOperationsClientOptions,
+} from './operations/daemon-operations-client.ts';
+import { createOperationsRoutes } from './operations/operations-routes.ts';
 import { SessionStateBroadcaster } from './session/session-state-broadcaster.ts';
 import { ConnectionRegistry } from './transport/connection-registry.ts';
 import { EventBuffer } from './transport/event-buffer.ts';
@@ -60,6 +65,10 @@ export interface GatewayAppDeps {
   daemonClientOptions?: DaemonClientOptions;
   /** Pre-built DaemonClient (for testing). Overrides daemonClientOptions. */
   daemonClient?: DaemonClient;
+  /** Pre-built operations DaemonOperationsClient (for testing). */
+  operationsClient?: DaemonOperationsClient;
+  /** Daemon operations client options (defaults to daemonClientOptions.baseUrl). */
+  operationsClientOptions?: DaemonOperationsClientOptions;
   /** Pre-built mutating rate limiter (for testing). Overrides default limits. */
   mutatingLimiter?: RateLimiter;
   /** Optional narrower daemon client for WebSocket subscribe validation. */
@@ -225,6 +234,15 @@ export function createGatewayApp(deps: GatewayAppDeps = {}): GatewayApp {
     new DaemonClient(deps.daemonClientOptions ?? { baseUrl: 'http://localhost:4173' });
   const conversationRoutes = createConversationRoutes(daemonClient);
   app.route('/', createProtectedRouteGroup(conversationRoutes, sessionService, auditService));
+
+  // Operations routes (T010 — US1 queue visibility) — require valid session + CSRF.
+  // Routes define their own paths: /operations/*
+  const defaultOpsBaseUrl = deps.daemonClientOptions?.baseUrl ?? 'http://localhost:4173';
+  const operationsClient =
+    deps.operationsClient ??
+    new DaemonOperationsClient(deps.operationsClientOptions ?? { baseUrl: defaultOpsBaseUrl });
+  const operationsRoutes = createOperationsRoutes({ daemonClient: operationsClient });
+  app.route('/', createProtectedRouteGroup(operationsRoutes, sessionService, auditService));
 
   const wsServer = createOptionalWsServer(deps, {
     server: deps.server,
