@@ -7,12 +7,15 @@
 > **Scope note — Hydra-native control surfaces after the chat workspace.** The
 > existing browser workspace already covers conversations, transcript
 > streaming, approvals, reconnect UX, turn controls, and artifact inspection.
-> This slice adds operational visibility and control surfaces on top of that
-> workspace: queue and checkpoint awareness, routing and mode controls, agent
-> and council visibility, budget awareness, daemon health, and multi-agent
-> execution views. The daemon remains authoritative for orchestration state and
-> durable mutations, and the gateway remains an adapter rather than a second
-> control plane.
+> This slice adds operational visibility on top of that workspace by defining
+> the browser/gateway/daemon contract surface needed for queue awareness,
+> checkpoint visibility, routing and mode visibility, agent and council
+> visibility, budget awareness, daemon health, and multi-agent execution
+> views. Any browser control in this slice is limited to a daemon-owned,
+> allowlisted set of work-item-scoped operational actions; this slice does not
+> create a general browser command plane or durable configuration editor. The
+> daemon remains authoritative for orchestration state and durable mutations,
+> and the gateway remains an adapter rather than a second control plane.
 
 ## User Scenarios & Testing _(mandatory)_
 
@@ -59,7 +62,7 @@ The operator can monitor daemon health and execution budgets from the same brows
 **Acceptance Scenarios**:
 
 1. **Given** the daemon is healthy and work budgets are within normal range, **When** the operator views the operations panels, **Then** the health and budget surfaces communicate a normal state without requiring extra investigation.
-2. **Given** a budget threshold is nearing or exceeded for a work item or session, **When** the authoritative state reflects that warning, **Then** the operations panels show the warning with enough context for the operator to understand which work is affected.
+2. **Given** the daemon can attribute a budget threshold warning to a specific work item or session, **When** the authoritative state reflects that warning, **Then** the operations panels show the warning with enough context for the operator to understand which work is affected. If the daemon cannot yet attribute the warning beyond global scope, **Then** the operations panels must present the warning as global and avoid inventing finer scope.
 3. **Given** the daemon becomes unavailable or degraded, **When** the browser receives that state, **Then** the operations panels clearly separate system-health degradation from conversation-specific failures.
 
 ---
@@ -82,16 +85,16 @@ For active or recent work, the operator can see how Hydra chose to route the wor
 
 ### User Story 5 — Operator Uses Safe Operational Controls from the Browser (Priority: P2)
 
-When Hydra permits it, the operator can change eligible routing, mode, agent, or council-related controls from the browser and receive authoritative confirmation of the result. The browser makes it clear which controls are available, which are read-only, and when a requested change was rejected, superseded, or became stale.
+When Hydra exposes an allowlisted operational control for a specific work item, the operator can request that eligible routing, mode, agent, or council-related action from the browser and receive authoritative confirmation of the result. The browser makes it clear which controls are available, which are read-only, and when a requested change was rejected, superseded, or became stale.
 
 **Why this priority**: Phase 3 includes operational controls, but those controls must remain subordinate to daemon authority. Operators need safe, explicit control surfaces that never pretend the browser owns orchestration state.
 
-**Independent Test**: Expose a set of allowed and disallowed control changes, perform an eligible control change, and verify the browser reflects acceptance, rejection, staleness, and resulting authoritative state correctly.
+**Independent Test**: Expose a daemon-owned set of allowed and disallowed work-item control actions, perform an eligible control change, and verify the browser reflects discovery, pending state, acceptance, rejection, staleness, and resulting authoritative state correctly.
 
 **Acceptance Scenarios**:
 
-1. **Given** a work item allows a routing, mode, agent, or council-related change, **When** the operator requests the change from the browser, **Then** the operations panels show that the request is pending until the authoritative result is known and then reflect the resulting state.
-2. **Given** a visible control is not currently eligible, **When** the operator inspects the operations panels, **Then** the browser marks that control as unavailable or read-only rather than inviting an unsafe action.
+1. **Given** a work item exposes an allowlisted routing, mode, agent, or council-related control action, **When** the operator requests that action from the browser, **Then** the operations panels show that the request is pending until the authoritative result is known and then reflect the resulting state.
+2. **Given** a visible control is not currently eligible or not granted to the current operator, **When** the operator inspects the operations panels, **Then** the browser marks that control as unavailable or read-only rather than inviting an unsafe action.
 3. **Given** another session or system event changes the same control first, **When** the operator attempts the now-stale action, **Then** the browser explains that the action is no longer valid and converges to the authoritative state.
 
 ---
@@ -128,17 +131,19 @@ The operator can visualize how multiple agents or council participants contribut
 ### Functional Requirements
 
 - **FR-001**: The system MUST provide Hydra-native operations panels within the browser workspace that add operational visibility beyond the existing conversation transcript and artifact experience.
+- **FR-001A**: This slice MUST define the typed browser/gateway/daemon contract surfaces required for operational reads in this phase, including authoritative queue, checkpoint, routing or mode visibility, agent or council visibility, budget, and daemon-health payloads, instead of assuming those surfaces already exist.
 - **FR-002**: The system MUST present the authoritative task or work queue state, including at least waiting, active, paused, blocked, completed, failed, and cancelled items, without requiring the operator to inspect each conversation individually.
 - **FR-003**: The system MUST show each visible work item's relationship to its relevant conversation, session, or execution context when such a relationship exists.
 - **FR-004**: The system MUST present ordered checkpoint history and current checkpoint status for eligible work items.
 - **FR-005**: The system MUST distinguish active progress, waiting-for-input states, recovery states, and terminal states so operators can tell whether work is progressing or stalled.
 - **FR-006**: The system MUST present daemon health in a way that distinguishes healthy, degraded, unavailable, and recovering conditions.
-- **FR-007**: The system MUST present budget status in a way that distinguishes normal, warning, exceeded, and unavailable budget conditions, and MUST identify the affected scope when known.
+- **FR-007**: The system MUST present budget status in a way that distinguishes normal, warning, exceeded, and unavailable budget conditions, and MUST identify the affected scope when known. When authoritative non-global attribution is not available yet, the system MUST surface global budget posture and mark finer scope as unavailable rather than inferring it.
 - **FR-008**: The system MUST make routing, execution mode, selected agent, and council or multi-agent participation visible for eligible work items.
 - **FR-009**: The system MUST preserve visible history when routing, mode, selected agent, or council participation changes during execution.
 - **FR-010**: The system MUST provide a browser-safe operational view of council and multi-agent execution that allows an operator to understand contributors, major transitions, and current overall status.
-- **FR-011**: The system MUST make it explicit which operational controls are currently actionable, read-only, unavailable, or stale.
-- **FR-012**: When the daemon allows a routing, mode, agent, or council-related change, the system MUST let the operator request that change from the browser and MUST reflect the authoritative result.
+- **FR-011**: The system MUST make it explicit which daemon-owned operational controls are currently actionable, pending, read-only, unavailable, stale, accepted, or rejected for each eligible work item.
+- **FR-012**: When the daemon exposes an allowlisted work-item-scoped routing, mode, agent, or council-related control action for this slice, the system MUST let the operator request that action from the browser and MUST reflect the authoritative result.
+- **FR-012A**: This slice MUST define how eligible operational controls are discovered, how their current eligibility and operator authority are communicated to the browser, and how accepted, rejected, superseded, or stale outcomes are returned by the daemon-authoritative control surface.
 - **FR-013**: The system MUST not present the browser or gateway as the source of truth for orchestration state; visible state changes and control outcomes MUST reconcile to the daemon-authoritative result.
 - **FR-014**: The system MUST converge to authoritative queue, checkpoint, control, budget, and health state after reconnect, refresh, or concurrent browser activity without silently preserving stale local assumptions.
 - **FR-015**: The system MUST distinguish global daemon conditions from work-item-specific conditions so operators can tell whether an issue affects the whole system or a single execution.
@@ -180,17 +185,23 @@ This slice depends on and does NOT re-own the following:
 - **web-gateway-conversation-transport** — browser-to-daemon mediation, live synchronization, replay, and recovery behavior that this slice builds upon.
 - **web-chat-workspace** — conversation transcript, streaming rendering, approvals, reconnect UX, turn controls, and artifact inspection that this slice extends rather than replaces.
 
+This slice additionally owns the first browser-facing operational contract family needed for Hydra-native operations panels:
+
+- **operations read contracts for the web surface** — typed browser/gateway/daemon payloads for authoritative queue, checkpoint, budget, health, routing or mode visibility, and multi-agent or council visibility required by this feature.
+- **scoped operational control contracts for the web surface** — a daemon-owned, allowlisted discovery and execution surface for work-item-scoped routing, mode, agent, or council-related actions that are explicitly included in this slice. This does not imply a broad command catalog or durable configuration editing surface.
+
 ## Assumptions
 
 - The browser workspace delivered by earlier slices remains the operator's primary entry point, and these operations panels are an additional surface within that experience rather than a separate product.
-- The daemon can provide authoritative operational state for queue, checkpoints, controls, budgets, health, and multi-agent execution, even if some browser-facing details require further contract definition during planning.
-- Operational controls in this slice are limited to safe, daemon-authorized routing, mode, agent, and council-related changes; broader destructive or durable configuration mutations remain outside this scope.
+- This slice may require new daemon and gateway read models or typed contracts for queue, checkpoints, budgets, health, routing or mode visibility, and multi-agent execution because those browser-facing operational surfaces are not yet delivered.
+- Operational controls in this slice are limited to safe, daemon-authorized, work-item-scoped routing, mode, agent, and council-related actions discovered through an explicit allowlist; broader destructive, durable, or configuration-level mutations remain outside this scope.
 - Multi-session and reconnect behavior continue to follow the established authoritative-sync model rather than introducing browser-owned offline orchestration.
 
 ## Out of Scope
 
 - **Re-specifying the chat workspace** — conversation lists, transcript rendering, approvals, reconnect UX, turn controls, and artifact inspection are already covered by `web-chat-workspace`.
 - **Creating a second browser control plane** — the browser and gateway do not become the authoritative owner of orchestration state or durable mutations.
+- **Delivering a general command catalog** — broader command discovery and execution across Hydra remain separate from the scoped operational controls defined for this slice.
 - **Controlled configuration editing or workflow launches** — broader safe-mutation experiences belong to `web-controlled-mutations`.
 - **Packaging, release hardening, or broad accessibility completion work** — final hardening and packaging belong to `web-hardening-and-packaging`.
 - **Direct browser coupling to Hydra core internals** — this slice must preserve the existing web boundary rules rather than letting browser code depend directly on Hydra core internals.

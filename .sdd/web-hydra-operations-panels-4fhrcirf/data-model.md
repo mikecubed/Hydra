@@ -24,7 +24,7 @@ Top-level browser-owned state for the operations companion surface.
 
 ### 2. WorkQueueItemView
 
-Browser-safe projection of one operator-visible work item.
+Browser-safe projection of one operator-visible Hydra task/work item. This entity is daemon-owned and is distinct from the existing per-conversation instruction queue contracts.
 
 | Field                   | Type                                                                         | Validation / meaning                               |
 | ----------------------- | ---------------------------------------------------------------------------- | -------------------------------------------------- |
@@ -67,18 +67,18 @@ Authoritative daemon health for the workspace.
 
 ### 5. BudgetStatusView
 
-Authoritative budget posture for global or item-local scope.
+Authoritative budget posture for global scope and, when daemon attribution exists, finer session/work-item scope.
 
-| Field      | Type                                           | Meaning                                 |
-| ---------- | ---------------------------------------------- | --------------------------------------- |
-| `status`   | `normal \| warning \| exceeded \| unavailable` | Severity tier                           |
-| `scope`    | `global \| work-item \| session`               | Affected scope                          |
-| `scopeId`  | `string \| null`                               | Item/session identifier when non-global |
-| `summary`  | `string`                                       | Operator-facing summary                 |
-| `used`     | `number \| null`                               | Best-known current usage                |
-| `limit`    | `number \| null`                               | Best-known limit                        |
-| `unit`     | `string \| null`                               | e.g. tokens, budget points              |
-| `complete` | `boolean`                                      | Whether the projection is complete      |
+| Field      | Type                                           | Meaning                                                            |
+| ---------- | ---------------------------------------------- | ------------------------------------------------------------------ |
+| `status`   | `normal \| warning \| exceeded \| unavailable` | Severity tier                                                      |
+| `scope`    | `global \| work-item \| session`               | Affected scope; non-global values require daemon-owned attribution |
+| `scopeId`  | `string \| null`                               | Item/session identifier when non-global                            |
+| `summary`  | `string`                                       | Operator-facing summary                                            |
+| `used`     | `number \| null`                               | Best-known current usage                                           |
+| `limit`    | `number \| null`                               | Best-known limit                                                   |
+| `unit`     | `string \| null`                               | e.g. tokens, budget points                                         |
+| `complete` | `boolean`                                      | Whether the projection is complete                                 |
 
 ### 6. RoutingDecisionView
 
@@ -119,16 +119,17 @@ Browser-safe multi-agent/council execution summary.
 
 Authoritative description of one browser-visible control.
 
-| Field              | Type                                                                                 | Meaning                                                 |
-| ------------------ | ------------------------------------------------------------------------------------ | ------------------------------------------------------- |
-| `controlId`        | `string`                                                                             | Stable identifier                                       |
-| `kind`             | `routing \| mode \| agent \| council`                                                | Supported control family in this slice                  |
-| `label`            | `string`                                                                             | Operator-facing label                                   |
-| `availability`     | `actionable \| pending \| read-only \| unavailable \| stale \| accepted \| rejected` | Required spec vocabulary                                |
-| `reason`           | `string \| null`                                                                     | Why not actionable, or why a request was rejected/stale |
-| `options`          | `readonly ControlOptionView[]`                                                       | Allowed daemon-authored choices                         |
-| `expectedRevision` | `string \| null`                                                                     | Optimistic concurrency token                            |
-| `lastResolvedAt`   | `string \| null`                                                                     | Latest authoritative result timestamp                   |
+| Field              | Type                                                                                               | Meaning                                                 |
+| ------------------ | -------------------------------------------------------------------------------------------------- | ------------------------------------------------------- |
+| `controlId`        | `string`                                                                                           | Stable identifier                                       |
+| `kind`             | `routing \| mode \| agent \| council`                                                              | Supported control family in this slice                  |
+| `label`            | `string`                                                                                           | Operator-facing label                                   |
+| `availability`     | `actionable \| pending \| read-only \| unavailable \| stale \| accepted \| rejected \| superseded` | Required spec vocabulary                                |
+| `authority`        | `granted \| forbidden \| unavailable`                                                              | Whether the current operator is authorized to use it    |
+| `reason`           | `string \| null`                                                                                   | Why not actionable, or why a request was rejected/stale |
+| `options`          | `readonly ControlOptionView[]`                                                                     | Allowed daemon-authored choices                         |
+| `expectedRevision` | `string \| null`                                                                                   | Optimistic concurrency token                            |
+| `lastResolvedAt`   | `string \| null`                                                                                   | Latest authoritative result timestamp                   |
 
 ### 10. PendingControlRequest
 
@@ -171,6 +172,8 @@ These are small contract-level value objects used by the primary entities above.
 
 The daemon projection layer, not the browser or gateway, maps core state into browser statuses.
 
+The authoritative source for a `WorkQueueItemView` is a Hydra daemon task/work item. Existing per-conversation queue entries may be linked as related context, but they do not define the operations queue itself.
+
 Examples of source inputs likely used together:
 
 - `TaskEntry.status` (`todo`, `in_progress`, `blocked`, `done`, `cancelled`)
@@ -198,9 +201,13 @@ Every read model must distinguish:
 - `unavailable` — authoritative surface cannot currently provide data
 - `ready` — complete enough for normal rendering
 
+### Routing and council projection ownership
+
+Routing/mode history, agent assignment history, and council execution history must come from a daemon-owned operational projection. The browser and gateway may render or forward those records, but they must not synthesize history from raw config values, transcript activity, or partial session state.
+
 ### Control concurrency
 
-Each control mutation request carries an `expectedRevision` (or equivalent authoritative version token).
+Each control mutation request carries an `expectedRevision` (or equivalent authoritative version token), and every actionable control must first be discovered from an authoritative daemon eligibility surface that also reports operator authority.
 
 Possible authoritative outcomes:
 
@@ -217,6 +224,8 @@ The browser may show `pending` locally while waiting, but final UI state must co
 - Ordered checkpoint sequences must be monotonic
 - `scopeId` is required when `BudgetStatusView.scope !== 'global'`
 - `expectedRevision` is required for actionable controls
+- `authority = 'granted'` is required before a control may be rendered as actionable
+- `superseded` is a valid authoritative control availability/result state
 - `participants` and `transitions` may be empty only when execution detail availability is `unavailable` or the work item is not multi-agent
 - Browser-local pending control records must be purged on authoritative resolution or full snapshot replacement
 

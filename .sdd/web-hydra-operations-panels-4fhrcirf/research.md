@@ -22,6 +22,7 @@ The repository already delivers a browser chat workspace in `apps/web/`, a valid
 
 - `packages/web-contracts/` currently defines conversation, turn, stream, approval, artifact, activity, session, and auth contracts.
 - Queue-related conversation contracts already exist (`ManageQueueRequest`, `ManageQueueResponse`), but there is no browser-safe contract family for workspace-wide operations views.
+- The repo therefore has two queue concepts today: daemon task/work state and per-conversation instruction queues. This slice must use daemon task/work state as the source for the operations queue and treat conversation queue data only as linked context when available.
 - The daemon already exposes useful ingredients in `lib/daemon/read-routes.ts` and `lib/daemon/conversation-routes.ts`:
   - `/task/:id/checkpoints`
   - `/summary`
@@ -88,11 +89,15 @@ The browser spec requires statuses like `waiting`, `active`, `paused`, `blocked`
 
 ### Health and budget scope separation
 
-The current daemon has useful health/runtime inputs in `/health`, `/self`, and `/stats`, but those routes expose mixed operational detail. The plan resolves this by projecting a browser-safe `DaemonHealthView` and `BudgetStatusView` with explicit `scope` so the browser can distinguish global degradation from work-item warnings.
+The current daemon has useful health/runtime inputs in `/health`, `/self`, and `/stats`, but those routes expose mixed operational detail. The plan resolves this by projecting a browser-safe `DaemonHealthView` and `BudgetStatusView` with explicit `scope` so the browser can distinguish global degradation from work-item warnings. Because current browser-visible budget data is aggregate-first, any session/work-item scope must be added as explicit daemon-owned attribution work rather than assumed from existing routes.
 
 ### Routing/mode/agent/council visibility
 
-Current daemon/core structures contain routing mode, models, and council-related data, but not in a stable browser DTO family. The plan resolves this by defining dedicated operations detail contracts and allowing daemon-side projection helpers to pull from existing runtime/config/task sources without exposing those raw structures directly.
+Current daemon/core structures contain routing mode, models, and council-related data, but not in a stable browser DTO family. The plan resolves this by defining dedicated operations detail contracts and requiring daemon-side projection helpers to build a browser-safe history/read model from existing runtime/config/task sources without exposing those raw structures directly.
+
+### Control discovery and eligibility
+
+Current daemon/browser surfaces do not expose an authoritative control-discovery or eligibility contract for routing/mode/agent/council actions. The plan resolves this by making discovery, eligibility, authority, and concurrency tokens first-class daemon-owned contract work rather than a browser or gateway heuristic.
 
 ## Resulting Planning Direction
 

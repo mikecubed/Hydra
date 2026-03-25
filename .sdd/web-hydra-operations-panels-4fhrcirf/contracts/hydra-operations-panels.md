@@ -26,7 +26,7 @@ Returns the top-level operations surface for the workspace.
 - `availability: 'ready' | 'empty' | 'partial' | 'unavailable'`
 - `lastSynchronizedAt: string | null`
 
-This is the main polling endpoint used to keep the queue, health, and budget panels current.
+This is the main polling endpoint used to keep the queue, health, and budget panels current. The `queue` represents daemon-projected Hydra task/work items, not the existing per-conversation instruction queue.
 
 #### B. Work Item Detail
 
@@ -45,7 +45,7 @@ Returns detail for the currently selected work item.
 - `itemBudget: BudgetStatusView | null`
 - `availability: 'ready' | 'partial' | 'unavailable'`
 
-This avoids many fine-grained browser calls and keeps cross-panel detail synchronized.
+This avoids many fine-grained browser calls and keeps cross-panel detail synchronized. The `routing`, `assignments`, and `council` records must come from a daemon-owned operations projection/history rather than raw passthrough of existing config or activity routes.
 
 #### C. Optional Focused Detail Routes
 
@@ -81,7 +81,7 @@ Used only for daemon-authorized routing/mode/agent/council-related changes.
 - `resolvedAt: string`
 - `message?: string`
 
-The response must represent the authoritative outcome, not merely acceptance of receipt.
+The response must represent the authoritative outcome, not merely acceptance of receipt. The paired read/detail surface must also expose control discovery, current eligibility, and operator authority so the browser never decides actionability on its own.
 
 ## Reused Existing Contracts
 
@@ -110,7 +110,8 @@ A later slice can add operations streaming if the polling model proves insuffici
 2. **Explicit availability states** — never encode empty vs partial vs unavailable with null alone.
 3. **No raw core payload leakage** — avoid passing through daemon `state`, `self`, or `stats` shapes directly.
 4. **Optimistic concurrency required for controls** — actionable control mutations need an authoritative version token.
-5. **Append-only shared exports** — update `packages/web-contracts/src/index.ts` and `CONTRACTS.md` without breaking existing consumers.
+5. **Control discovery is part of the contract** — actionable status, operator authority, and stale/superseded behavior must be daemon-authored.
+6. **Append-only shared exports** — update `packages/web-contracts/src/index.ts` and `CONTRACTS.md` without breaking existing consumers.
 
 ## Testing Expectations
 

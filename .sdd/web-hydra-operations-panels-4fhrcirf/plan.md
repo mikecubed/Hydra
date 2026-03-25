@@ -5,7 +5,7 @@
 
 ## Summary
 
-This plan adds Phase 3 Hydra-native operations surfaces to the existing browser workspace without re-owning the delivered chat workspace. The browser gains queue visibility, checkpoint history, daemon health, budget awareness, routing/mode/agent/council visibility, multi-agent execution detail, and daemon-authorized operational controls as a companion surface inside `apps/web/`. The daemon remains the source of truth for operational state and control eligibility, the gateway remains a validating mediation layer, and shared browser-safe contracts in `packages/web-contracts/` define the projection consumed by the browser.
+This plan adds Phase 3 Hydra-native operations surfaces to the existing browser workspace without re-owning the delivered chat workspace. The browser gains queue visibility, checkpoint history, daemon health, budget awareness, routing/mode/agent/council visibility, multi-agent execution detail, and daemon-authorized operational controls as a companion surface inside `apps/web/`. The daemon remains the source of truth for operational state and control eligibility, the gateway remains a validating mediation layer, and shared browser-safe contracts in `packages/web-contracts/` define the projection consumed by the browser. In this slice, a browser-visible `WorkQueueItemView` is a daemon-owned projection of a Hydra task/work item, not a rebranding of the existing per-conversation instruction queue; conversation queue data may be linked when relevant, but it is not the primary source of the operations queue.
 
 > **Scope note.** This slice extends the existing workspace route and layout; it does not redesign transcript rendering, approvals, reconnect semantics, artifact inspection, or conversation ownership already delivered by `web-chat-workspace`. The new work is an adjacent operations feature that consumes daemon-authoritative state and surfaces it in browser-native panels.
 
@@ -30,6 +30,13 @@ This slice depends on and does NOT re-own the following existing deliverables:
 **Performance Goals**: Operations panels converge within one normal synchronization cycle after authoritative changes; detail panels stay interactive with dozens of recent work items; control requests show pending/accepted/rejected/stale outcomes without duplicate success presentation  
 **Constraints**: Preserve workspace boundaries (`apps/web` and `apps/web-gateway` consume shared contracts only); do not let gateway become a second control plane; do not re-own chat workspace concerns; no unsafe inference of authoritative state in browser/gateway; operational controls remain daemon-authorized and concurrency-safe  
 **Scale/Scope**: Single authenticated operator, multi-tab/browser recovery, active queue plus recent completed work, mixed single-agent and council execution, partial-data and degraded-daemon scenarios
+
+## Authoritative Source Decisions
+
+- **Operations queue authority**: The operations queue is derived from daemon task/work state, normalized into a browser-safe `WorkQueueItemView`. It is intentionally distinct from the existing per-conversation instruction queue contracts under `work-control`.
+- **Conversation linkage**: `relatedConversationId` and `relatedSessionId` are optional relationship hints attached by the daemon projection when that linkage is already known from authoritative runtime/session state. The browser does not infer these links.
+- **Routing/mode/agent/council history**: This slice must create a daemon-owned operational projection/history for those surfaces rather than implying that current raw config, activity, or session fields already form a browser-safe read model.
+- **Budget attribution**: Global budget posture is mandatory in this slice. Per-session or per-work-item budget scope remains part of this feature only when daemon-owned attribution can be produced authoritatively during Phase 2; the plan must not assume that finer-grained accounting already exists.
 
 ## Project Structure
 
@@ -148,19 +155,19 @@ See [research.md](./research.md) for full analysis. Key decisions summarized bel
 ### Decision 3: Define browser-safe operations contracts before UI or gateway implementation
 
 - **Chosen**: Add dedicated operations entities and contract families in `packages/web-contracts/` for queue snapshots, item detail, checkpoint history, execution participants, health/budget views, and control requests/results.
-- **Rationale**: The current shared contracts cover conversation/turn/activity/artifact flows, but they do not define browser-safe queue/health/control vocabulary. Formal contracts prevent browser/gateway duplication and keep daemon-owned projection semantics explicit.
+- **Rationale**: The current shared contracts cover conversation/turn/activity/artifact flows, but they do not define browser-safe queue/health/control vocabulary. Formal contracts prevent browser/gateway duplication and keep daemon-owned projection semantics explicit, including the fact that the operations queue is task/work-item based rather than conversation-queue based.
 - **Alternatives rejected**: reusing raw daemon `/state`, `/summary`, `/stats`, or `/self` payloads directly in the browser; inventing browser-only ad hoc types inside `apps/web`.
 
 ### Decision 4: Keep the daemon authoritative for both read models and control eligibility
 
-- **Chosen**: Add daemon-owned operations projection endpoints that normalize raw task/session/runtime state into browser-safe DTOs, and add daemon-owned control endpoints that determine eligibility, concurrency checks, and final outcomes.
-- **Rationale**: The browser and gateway cannot safely infer paused vs blocked vs stale control semantics from partial state. Centralizing normalization and eligibility in the daemon preserves authority and avoids the gateway becoming a policy engine.
+- **Chosen**: Add daemon-owned operations projection endpoints that normalize raw task/session/runtime state into browser-safe DTOs, create an authoritative routing/mode/agent/council history view, and add daemon-owned control endpoints that determine eligibility, concurrency checks, and final outcomes.
+- **Rationale**: The browser and gateway cannot safely infer paused vs blocked vs stale control semantics from partial state. Centralizing normalization, history, and eligibility in the daemon preserves authority and avoids the gateway becoming a policy engine.
 - **Alternatives rejected**: computing queue state in the gateway from multiple daemon endpoints; letting the browser mark controls actionable based only on local heuristics.
 
 ### Decision 5: Stage the feature read-first, then add safe controls
 
-- **Chosen**: Implement read-only operations visibility first (queue, checkpoints, health/budget, routing/participants), then layer daemon-authorized controls with optimistic concurrency and explicit pending/stale/rejected states.
-- **Rationale**: The highest-value stories are operator comprehension and visibility. Sequencing controls after read models reduces risk and gives later control work a stable projection surface.
+- **Chosen**: Implement read-only operations visibility first (queue, checkpoints, health/budget, routing/participants), then layer daemon-authorized controls with optimistic concurrency and explicit pending/stale/rejected/superseded states.
+- **Rationale**: The highest-value stories are operator comprehension and visibility. Sequencing controls after read models reduces risk and gives later control work a stable projection surface, including a daemon-authored control discovery/eligibility contract before any browser mutation affordance ships.
 - **Alternatives rejected**: shipping control affordances before authoritative eligibility data exists; bundling all control mutations into the same first pass.
 
 ### Decision 6: Preserve the existing chat regression surface and test at four layers
@@ -185,7 +192,7 @@ This slice introduces meaningful browser-facing operational entities and project
 | **AgentAssignmentView**      | Current or historical contributor assignment                                 | participant id, label, role, start/end timing, current state                                                     |
 | **CouncilExecutionView**     | Summary/timeline of multi-agent execution                                    | participant list, stage summaries, overall status, final outcome                                                 |
 | **DaemonHealthView**         | Authoritative workspace-visible daemon health                                | status, observedAt, scope, recovery message                                                                      |
-| **BudgetStatusView**         | Authoritative budget posture for workspace/global or per-item scope          | status, scope, current usage summary, limit/exceeded metadata, completeness flag                                 |
+| **BudgetStatusView**         | Authoritative budget posture for workspace/global and optional finer scopes  | status, scope, current usage summary, limit/exceeded metadata, completeness flag                                 |
 
 ## Interface Contracts
 
@@ -195,10 +202,10 @@ Full contract-family notes are documented in [contracts/hydra-operations-panels.
 
 1. **Operations Read Contracts**
    - workspace snapshot for queue + health + budget overview
-   - per-item detail for checkpoints, routing/mode, assignments, council execution, control eligibility
+   - per-item detail for checkpoints, routing/mode, assignments, council execution, and control eligibility
    - explicit empty/unavailable/partial-data states
 2. **Operations Control Contracts**
-   - daemon-authorized requests for routing/mode/agent/council-related changes only
+   - daemon-authorized control discovery plus requests for routing/mode/agent/council-related changes only
    - optimistic concurrency fields for stale request detection
    - normalized accepted/rejected/stale/superseded outcomes
 3. **Existing Reused Contracts**
@@ -210,13 +217,13 @@ Full contract-family notes are documented in [contracts/hydra-operations-panels.
 
 ### Phase 1: Shared Operations Vocabulary and Contracts
 
-Define browser-safe operations entities in `packages/web-contracts/` and document them in the contract registry. Cover queue-item status vocabulary, health/budget severity, partial-data semantics, checkpoint records, routing/assignment/council detail, and control request/result schemas. Tests prove validation, backwards-compatible parse behavior, and append-only barrel exports.
+Define browser-safe operations entities in `packages/web-contracts/` and document them in the contract registry. Cover the task-based operations queue vocabulary, relationship-link semantics, health/budget severity, partial-data semantics, checkpoint records, routing/assignment/council detail, control discovery/eligibility, and control request/result schemas. Tests prove validation, backwards-compatible parse behavior, and append-only barrel exports.
 
 **Delivers**: Contract foundation for FR-001 through FR-016; task-generation-ready API surface.
 
 ### Phase 2: Daemon-Owned Operations Projection Surface
 
-Add a daemon-side projection layer that reads existing authoritative task/session/runtime state and emits browser-safe operations DTOs instead of exposing raw `/state`, `/self`, or `/stats` structures directly. Normalize current Hydra task/session vocabulary into operator-facing statuses, join related conversation/session context when known, expose ordered checkpoint history, and surface health/budget/routing/council detail through explicit read endpoints.
+Add a daemon-side projection layer that reads existing authoritative task/session/runtime state and emits browser-safe operations DTOs instead of exposing raw `/state`, `/self`, or `/stats` structures directly. Normalize current Hydra task/session vocabulary into operator-facing statuses, define how Hydra tasks become browser work items, join related conversation/session context when known, expose ordered checkpoint history, create a daemon-owned routing/mode/agent/council projection/history view, and surface health/budget detail through explicit read endpoints. If finer-grained budget attribution is not yet authoritatively available, Phase 2 must either add that accounting or mark non-global scopes as unavailable rather than inventing them in the gateway/browser.
 
 **Delivers**: FR-002 through FR-010, FR-013 through FR-016 with daemon authority preserved.
 
@@ -234,7 +241,7 @@ Implement the `operations-panels` browser feature and compose it into `workspace
 
 ### Phase 5: Safe Operational Controls
 
-Add explicit control affordances for daemon-authorized routing/mode/agent/council changes only. The browser shows actionable/read-only/unavailable states, sends control requests with concurrency tokens, keeps controls pending until the authoritative response returns, and then refetches snapshot/detail state so stale local assumptions are cleared.
+Add explicit control affordances for daemon-authorized routing/mode/agent/council changes only. The daemon must expose control discovery, current eligibility, operator authority, and concurrency tokens before the browser renders an actionable control. The browser shows actionable/read-only/unavailable states, sends control requests with concurrency tokens, keeps controls pending until the authoritative response returns, and then refetches snapshot/detail state so stale local assumptions are cleared.
 
 **Delivers**: User Story 5, FR-011 through FR-014.
 

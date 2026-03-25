@@ -78,11 +78,12 @@ _Create the browser-safe operations vocabulary before daemon, gateway, or browse
 - [ ] T016 [P] [US2] **TDD:** extend daemon detail projection coverage for checkpoint ordering, waiting states, recovery states, and partial-data markers in `test/web-operations-projection.test.ts` and `test/web-operations-routes.test.ts`.
 - [ ] T017 [US2] Implement daemon work-item detail projection for checkpoints and availability semantics in `lib/daemon/web-operations-projection.ts` and `lib/daemon/web-operations-routes.ts`.
 - [ ] T018 [P] [US2] **TDD:** extend gateway detail-route coverage for selected work-item reads in `apps/web-gateway/src/operations/__tests__/daemon-operations-client.test.ts` and `apps/web-gateway/src/operations/__tests__/operations-routes.test.ts`.
-- [ ] T019 [P] [US2] **TDD:** add browser selected-item state and detail-sync coverage in `apps/web/src/features/operations-panels/__tests__/operations-reducer.test.ts` and `apps/web/src/features/operations-panels/__tests__/sync-controller.test.ts`.
-- [ ] T020 [P] [US2] Implement detail fetch orchestration and selected-work-item synchronization in `apps/web/src/features/operations-panels/model/sync-controller.ts`, `apps/web/src/features/operations-panels/model/operations-reducer.ts`, and `apps/web/src/features/operations-panels/model/selectors.ts`.
-- [ ] T021 [US2] Implement checkpoint detail rendering in `apps/web/src/features/operations-panels/components/checkpoint-panel.tsx` and `apps/web/src/features/operations-panels/components/operations-panel-shell.tsx`.
-- [ ] T022 [US2] Add checkpoint workflow coverage in `apps/web/src/features/operations-panels/__tests__/checkpoint-panel.browser.spec.tsx` and `apps/web/src/features/operations-panels/__tests__/workspace-operations.integration.test.tsx`.
-- [ ] T023 [US2] Run the phase quality gate from the repo root with `npm run quality` and `npm test` after checkpoint detail is green.
+- [ ] T019 [US2] Implement gateway work-item detail mediation, validation, and route wiring for `GET /operations/work-items/:workItemId` in `apps/web-gateway/src/operations/daemon-operations-client.ts`, `apps/web-gateway/src/operations/request-validator.ts`, and `apps/web-gateway/src/operations/operations-routes.ts`.
+- [ ] T020 [P] [US2] **TDD:** add browser selected-item state, detail-client, and detail-sync coverage in `apps/web/src/features/operations-panels/__tests__/operations-client.test.ts`, `apps/web/src/features/operations-panels/__tests__/operations-reducer.test.ts`, and `apps/web/src/features/operations-panels/__tests__/sync-controller.test.ts`.
+- [ ] T021 [P] [US2] Implement browser detail client, fetch orchestration, and selected-work-item synchronization in `apps/web/src/features/operations-panels/api/operations-client.ts`, `apps/web/src/features/operations-panels/model/sync-controller.ts`, `apps/web/src/features/operations-panels/model/operations-reducer.ts`, and `apps/web/src/features/operations-panels/model/selectors.ts`.
+- [ ] T022 [US2] Implement checkpoint detail rendering in `apps/web/src/features/operations-panels/components/checkpoint-panel.tsx` and `apps/web/src/features/operations-panels/components/operations-panel-shell.tsx`.
+- [ ] T023 [US2] Add checkpoint workflow coverage in `apps/web/src/features/operations-panels/__tests__/checkpoint-panel.browser.spec.tsx` and `apps/web/src/features/operations-panels/__tests__/workspace-operations.integration.test.tsx`.
+- [ ] T024 [US2] Run the phase quality gate from the repo root with `npm run quality` and `npm test` after checkpoint detail is green.
 
 **Checkpoint**: User Stories 1 and 2 work together as an authoritative queue + progress surface.
 
@@ -94,12 +95,12 @@ _Create the browser-safe operations vocabulary before daemon, gateway, or browse
 
 **Independent Test**: Simulate healthy, degraded, unavailable, warning, and exceeded states; verify the browser separates global daemon conditions from local work-item warnings and explicit unavailable/partial states.
 
-- [ ] T024 [P] [US3] **TDD:** extend daemon projection coverage for health/budget scope separation and unavailable states in `test/web-operations-projection.test.ts` and `test/web-operations-routes.test.ts`.
-- [ ] T025 [US3] Implement daemon health and budget projections in `lib/daemon/web-operations-projection.ts` and `lib/daemon/web-operations-routes.ts`.
-- [ ] T026 [P] [US3] **TDD:** add browser health/budget and risk-badge coverage in `apps/web/src/features/operations-panels/__tests__/health-budget.browser.spec.tsx` and `apps/web/src/features/operations-panels/__tests__/operations-reducer.test.ts`.
-- [ ] T027 [US3] Implement health and budget panels plus queue risk signals in `apps/web/src/features/operations-panels/components/health-budget-panel.tsx`, `apps/web/src/features/operations-panels/components/queue-item-card.tsx`, and `apps/web/src/features/operations-panels/components/operations-panel-shell.tsx`.
-- [ ] T028 [US3] Add global-vs-item risk regression coverage in `apps/web/src/features/operations-panels/__tests__/workspace-operations.integration.test.tsx` and `apps/web-gateway/src/operations/__tests__/operations-routes.test.ts`.
-- [ ] T029 [US3] Run the phase quality gate from the repo root with `npm run quality` and `npm test` after health and budget surfaces are green.
+- [ ] T025 [P] [US3] **TDD:** extend daemon projection coverage for health/budget scope separation and unavailable states in `test/web-operations-projection.test.ts` and `test/web-operations-routes.test.ts`.
+- [ ] T026 [US3] Implement daemon health and budget projections in `lib/daemon/web-operations-projection.ts` and `lib/daemon/web-operations-routes.ts`, treating global budget posture as the required baseline and marking non-global scopes unavailable until daemon attribution exists.
+- [ ] T027 [P] [US3] **TDD:** add browser health/budget and risk-badge coverage in `apps/web/src/features/operations-panels/__tests__/health-budget.browser.spec.tsx` and `apps/web/src/features/operations-panels/__tests__/operations-reducer.test.ts`.
+- [ ] T028 [US3] Implement health and budget panels plus queue risk signals in `apps/web/src/features/operations-panels/components/health-budget-panel.tsx`, `apps/web/src/features/operations-panels/components/queue-item-card.tsx`, and `apps/web/src/features/operations-panels/components/operations-panel-shell.tsx`.
+- [ ] T029 [US3] Add global-vs-item risk regression coverage in `apps/web/src/features/operations-panels/__tests__/workspace-operations.integration.test.tsx` and `apps/web-gateway/src/operations/__tests__/operations-routes.test.ts`.
+- [ ] T030 [US3] Run the phase quality gate from the repo root with `npm run quality` and `npm test` after health and budget surfaces are green.
 
 **Checkpoint**: User Stories 1–3 provide the minimum read-only operator surface for queue, progress, and risk.
 
@@ -111,12 +112,13 @@ _Create the browser-safe operations vocabulary before daemon, gateway, or browse
 
 **Independent Test**: Run work that changes route, mode, or assignments during execution; verify the selected work item preserves current values and visible history for prior routing and participant decisions.
 
-- [ ] T030 [P] [US4] **TDD:** extend daemon detail projection coverage for routing history, assignment history, and council summaries in `test/web-operations-projection.test.ts` and `test/web-operations-routes.test.ts`.
-- [ ] T031 [US4] Implement daemon routing, assignment, and council detail projection in `lib/daemon/web-operations-projection.ts` and `lib/daemon/web-operations-routes.ts`.
-- [ ] T032 [P] [US4] **TDD:** add browser routing and execution-detail coverage in `apps/web/src/features/operations-panels/__tests__/routing-panel.browser.spec.tsx` and `apps/web/src/features/operations-panels/__tests__/execution-panel.browser.spec.tsx`.
-- [ ] T033 [P] [US4] Implement routing and execution detail panels in `apps/web/src/features/operations-panels/components/routing-panel.tsx`, `apps/web/src/features/operations-panels/components/execution-panel.tsx`, and `apps/web/src/features/operations-panels/components/operations-panel-shell.tsx`.
-- [ ] T034 [US4] Add routing and participant-history convergence coverage in `apps/web/src/features/operations-panels/__tests__/workspace-operations.integration.test.tsx`.
-- [ ] T035 [US4] Run the phase quality gate from the repo root with `npm run quality` and `npm test` after routing and execution visibility is green.
+- [ ] T031 [P] [US4] **TDD:** extend daemon detail projection coverage for routing history, assignment history, and council summaries in `test/web-operations-projection.test.ts` and `test/web-operations-routes.test.ts`.
+- [ ] T032 [US4] Implement daemon-side routing, assignment, and council history capture in the authoritative runtime/state modules that observe those transitions, then expose that history to `lib/daemon/web-operations-projection.ts` without synthesizing it in the gateway or browser.
+- [ ] T033 [US4] Implement daemon routing, assignment, and council detail projection in `lib/daemon/web-operations-projection.ts` and `lib/daemon/web-operations-routes.ts`.
+- [ ] T034 [P] [US4] **TDD:** add browser routing and execution-detail coverage in `apps/web/src/features/operations-panels/__tests__/routing-panel.browser.spec.tsx` and `apps/web/src/features/operations-panels/__tests__/execution-panel.browser.spec.tsx`.
+- [ ] T035 [P] [US4] Implement routing and execution detail panels in `apps/web/src/features/operations-panels/components/routing-panel.tsx`, `apps/web/src/features/operations-panels/components/execution-panel.tsx`, and `apps/web/src/features/operations-panels/components/operations-panel-shell.tsx`.
+- [ ] T036 [US4] Add routing and participant-history convergence coverage in `apps/web/src/features/operations-panels/__tests__/workspace-operations.integration.test.tsx`.
+- [ ] T037 [US4] Run the phase quality gate from the repo root with `npm run quality` and `npm test` after routing and execution visibility is green.
 
 **Checkpoint**: User Stories 1–4 expose Hydra’s read-only operational posture without violating browser/gateway boundaries.
 
@@ -128,15 +130,16 @@ _Create the browser-safe operations vocabulary before daemon, gateway, or browse
 
 **Independent Test**: Attempt allowed, disallowed, and stale control changes from the browser; verify pending UI, authoritative outcome messaging, and refetched state all match daemon decisions with no false-success presentation.
 
-- [ ] T036 [P] [US5] **TDD:** add daemon control-route coverage for actionable, read-only, rejected, stale, and superseded outcomes in `test/web-operations-routes.test.ts`.
-- [ ] T037 [US5] Implement daemon-authorized control mutations and revision checks in `lib/daemon/web-operations-controls.ts`, `lib/daemon/web-operations-routes.ts`, and `lib/daemon/write-routes.ts`.
-- [ ] T038 [P] [US5] **TDD:** extend gateway control mediation coverage for validation and outcome translation in `apps/web-gateway/src/operations/__tests__/daemon-operations-client.test.ts` and `apps/web-gateway/src/operations/__tests__/operations-routes.test.ts`.
-- [ ] T039 [US5] Implement gateway control mediation and structured stale/rejected translation in `apps/web-gateway/src/operations/daemon-operations-client.ts`, `apps/web-gateway/src/operations/operations-routes.ts`, and `apps/web-gateway/src/operations/response-translator.ts`.
-- [ ] T040 [P] [US5] **TDD:** add browser control pending/result coverage in `apps/web/src/features/operations-panels/__tests__/control-strip.browser.spec.tsx` and `apps/web/src/features/operations-panels/__tests__/control-actions.test.ts`.
-- [ ] T041 [P] [US5] Implement pending control bookkeeping and authoritative refetch handling in `apps/web/src/features/operations-panels/model/control-actions.ts`, `apps/web/src/features/operations-panels/model/sync-controller.ts`, and `apps/web/src/features/operations-panels/model/operations-reducer.ts`.
-- [ ] T042 [US5] Implement control-strip UI and route wiring in `apps/web/src/features/operations-panels/components/control-strip.tsx`, `apps/web/src/features/operations-panels/components/operations-panel-shell.tsx`, and `apps/web/src/routes/workspace.tsx`.
-- [ ] T043 [US5] Add stale-control and multi-session control convergence coverage in `apps/web/src/features/operations-panels/__tests__/workspace-operations.integration.test.tsx` and `apps/web-gateway/src/operations/__tests__/operations-routes.test.ts`.
-- [ ] T044 [US5] Run the phase quality gate from the repo root with `npm run quality` and `npm test` after safe operational controls are green.
+- [ ] T038 [P] [US5] **TDD:** add daemon control-route coverage for control discovery, operator authority, actionable/read-only states, and rejected/stale/superseded outcomes in `test/web-operations-routes.test.ts`.
+- [ ] T039 [US5] Implement daemon-authored control discovery, authority, eligibility, and revision-token reads in `lib/daemon/web-operations-controls.ts`, `lib/daemon/web-operations-projection.ts`, and `lib/daemon/web-operations-routes.ts`.
+- [ ] T040 [US5] Implement daemon-authorized control mutations and revision checks in `lib/daemon/web-operations-controls.ts`, `lib/daemon/web-operations-routes.ts`, and `lib/daemon/write-routes.ts`.
+- [ ] T041 [P] [US5] **TDD:** extend gateway control mediation coverage for detail-read control hydration, validation, and outcome translation in `apps/web-gateway/src/operations/__tests__/daemon-operations-client.test.ts` and `apps/web-gateway/src/operations/__tests__/operations-routes.test.ts`.
+- [ ] T042 [US5] Implement gateway control discovery hydration plus control mediation and structured stale/rejected translation in `apps/web-gateway/src/operations/daemon-operations-client.ts`, `apps/web-gateway/src/operations/operations-routes.ts`, and `apps/web-gateway/src/operations/response-translator.ts`.
+- [ ] T043 [P] [US5] **TDD:** add browser control discovery, authority, pending, and result coverage in `apps/web/src/features/operations-panels/__tests__/control-strip.browser.spec.tsx`, `apps/web/src/features/operations-panels/__tests__/control-actions.test.ts`, and `apps/web/src/features/operations-panels/__tests__/operations-client.test.ts`.
+- [ ] T044 [P] [US5] Implement control discovery hydration, pending control bookkeeping, and authoritative refetch handling in `apps/web/src/features/operations-panels/api/operations-client.ts`, `apps/web/src/features/operations-panels/model/control-actions.ts`, `apps/web/src/features/operations-panels/model/sync-controller.ts`, and `apps/web/src/features/operations-panels/model/operations-reducer.ts`.
+- [ ] T045 [US5] Implement control-strip UI and route wiring in `apps/web/src/features/operations-panels/components/control-strip.tsx`, `apps/web/src/features/operations-panels/components/operations-panel-shell.tsx`, and `apps/web/src/routes/workspace.tsx`.
+- [ ] T046 [US5] Add stale-control and multi-session control convergence coverage in `apps/web/src/features/operations-panels/__tests__/workspace-operations.integration.test.tsx` and `apps/web-gateway/src/operations/__tests__/operations-routes.test.ts`.
+- [ ] T047 [US5] Run the phase quality gate from the repo root with `npm run quality` and `npm test` after safe operational controls are green.
 
 **Checkpoint**: User Story 5 adds daemon-authorized controls without making the browser or gateway look authoritative.
 
@@ -148,11 +151,11 @@ _Create the browser-safe operations vocabulary before daemon, gateway, or browse
 
 **Independent Test**: Observe a many-participant council flow across refresh or concurrent tabs; verify the execution view remains legible, operations state converges within one sync cycle, and existing chat-workspace behavior does not regress.
 
-- [ ] T045 [P] [US6] **TDD:** add dense execution-visualization and partial-data recovery coverage in `apps/web/src/features/operations-panels/__tests__/execution-panel.browser.spec.tsx` and `apps/web/src/features/operations-panels/__tests__/workspace-operations.integration.test.tsx`.
-- [ ] T046 [P] [US6] Implement dense multi-agent and council timeline rendering plus availability affordances in `apps/web/src/features/operations-panels/components/execution-panel.tsx`, `apps/web/src/features/operations-panels/components/empty-state-card.tsx`, and `apps/web/src/features/operations-panels/model/selectors.ts`.
-- [ ] T047 [P] [US6] Add refresh, reconnect, and multi-tab regression coverage for operations polling alongside existing chat flows in `apps/web/src/features/operations-panels/__tests__/workspace-operations.integration.test.tsx`, `apps/web/src/features/chat-workspace/__tests__/workflow-refresh-recovery.browser.spec.tsx`, and `apps/web/src/features/chat-workspace/__tests__/workflow-control-actions.browser.spec.tsx`.
-- [ ] T048 [US6] Harden workspace composition so operations synchronization preserves chat ownership and orientation in `apps/web/src/routes/workspace.tsx`, `apps/web/src/features/chat-workspace/components/workspace-layout.tsx`, and `apps/web/src/shared/session-state.ts`.
-- [ ] T049 [US6] Run the phase quality gate from the repo root with `npm run quality` and `npm test` after multi-agent visualization and regression hardening is green.
+- [ ] T048 [P] [US6] **TDD:** add dense execution-visualization and partial-data recovery coverage in `apps/web/src/features/operations-panels/__tests__/execution-panel.browser.spec.tsx` and `apps/web/src/features/operations-panels/__tests__/workspace-operations.integration.test.tsx`.
+- [ ] T049 [P] [US6] Implement dense multi-agent and council timeline rendering plus availability affordances in `apps/web/src/features/operations-panels/components/execution-panel.tsx`, `apps/web/src/features/operations-panels/components/empty-state-card.tsx`, and `apps/web/src/features/operations-panels/model/selectors.ts`.
+- [ ] T050 [P] [US6] Add refresh, reconnect, and multi-tab regression coverage for operations polling alongside existing chat flows in `apps/web/src/features/operations-panels/__tests__/workspace-operations.integration.test.tsx`, `apps/web/src/features/chat-workspace/__tests__/workflow-refresh-recovery.browser.spec.tsx`, and `apps/web/src/features/chat-workspace/__tests__/workflow-control-actions.browser.spec.tsx`.
+- [ ] T051 [US6] Harden workspace composition so operations synchronization preserves chat ownership and orientation in `apps/web/src/routes/workspace.tsx`, `apps/web/src/features/chat-workspace/components/workspace-layout.tsx`, and `apps/web/src/shared/session-state.ts`.
+- [ ] T052 [US6] Run the phase quality gate from the repo root with `npm run quality` and `npm test` after multi-agent visualization and regression hardening is green.
 
 **Checkpoint**: The operations panels behave like a trustworthy companion surface rather than a fragile sidecar.
 
@@ -160,9 +163,9 @@ _Create the browser-safe operations vocabulary before daemon, gateway, or browse
 
 ## Phase 7 — Docs, Final Validation & Release Readiness
 
-- [ ] T050 [P] Update browser workspace and architecture docs for operations panels in `apps/web/README.md` and `docs/web-interface/03-architecture.md`.
-- [ ] T051 [P] Update protocol, phase-roadmap, and boundary documentation for operations snapshot/detail/control routes in `docs/web-interface/04-protocol.md`, `docs/web-interface/06-phases-and-sdd.md`, and `docs/web-interface/07-boundaries-and-governance.md`.
-- [ ] T052 Run final validation with `npm run quality`, `npm test`, and `npm run test:browser -w @hydra/web`, then reconcile any last operations-panels doc or regression gaps.
+- [ ] T053 [P] Update browser workspace and architecture docs for operations panels in `apps/web/README.md` and `docs/web-interface/03-architecture.md`.
+- [ ] T054 [P] Update protocol, phase-roadmap, and boundary documentation for operations snapshot/detail/control routes in `docs/web-interface/04-protocol.md`, `docs/web-interface/06-phases-and-sdd.md`, and `docs/web-interface/07-boundaries-and-governance.md`.
+- [ ] T055 Run final validation with `npm run quality`, `npm test`, and `npm run test:browser -w @hydra/web`, then reconcile any last operations-panels doc or regression gaps.
 
 ---
 
@@ -184,22 +187,22 @@ _Create the browser-safe operations vocabulary before daemon, gateway, or browse
 - `T001` → `T005` must land before `T007` onward
 - `T006` can start with `T002`–`T004`, but the operations modules should not grow behavior until `T005` is complete
 - `T007` → `T010` establish daemon/gateway snapshot reads before browser queue work in `T011`–`T014`
-- `T016` and `T018` both depend on `T008`–`T014`
-- `T024` depends on the daemon detail surface from `T017`; `T026` depends on browser state from `T020`–`T022`
-- `T030` depends on the shared detail contracts and daemon detail projection from US2/US3
-- `T036` → `T043` depend on US4 detail surfaces plus Phase 0 control contracts
-- `T045` → `T049` should wait until the intended read/control scope is stable so regression coverage targets the final panel composition
-- `T050`–`T052` should land last
+- `T016`, `T018`, and `T020` all depend on `T008`–`T014`
+- `T025` depends on the daemon detail surface from `T017`; `T027` depends on browser state from `T021`–`T023`
+- `T031`–`T033` depend on the shared detail contracts and daemon detail projection from US2/US3, with `T032` establishing the authoritative history source before `T033`
+- `T038` → `T046` depend on US4 detail surfaces plus Phase 0 control contracts, with `T039` and `T042` establishing control discovery/authority before mutation UI is considered complete
+- `T048` → `T052` should wait until the intended read/control scope is stable so regression coverage targets the final panel composition
+- `T053`–`T055` should land last
 
 ### Parallel Execution Examples
 
 - **Phase 0**: `T001`, `T002`, `T003`, and `T004` can run in parallel, then converge in `T005`
 - **US1**: `T007`, `T009`, and `T011` can run in parallel once Phase 0 is done, then converge in `T008`, `T010`, and `T012`–`T014`
-- **US2**: `T016`, `T018`, and `T019` can run in parallel before `T020`–`T022`
-- **US3**: `T024` and `T026` can run in parallel before `T027`
-- **US4**: `T030` and `T032` can run in parallel before `T033`
-- **US5**: `T036`, `T038`, and `T040` can run in parallel before `T041`–`T043`
-- **US6**: `T045`, `T046`, and `T047` can run in parallel before `T048`
+- **US2**: `T016`, `T018`, and `T020` can run in parallel before `T017`, `T019`, and `T021`–`T023`
+- **US3**: `T025` and `T027` can run in parallel before `T026`, `T028`, and `T029`
+- **US4**: `T031` and `T034` can run in parallel while `T032` establishes history capture, then converge in `T033`, `T035`, and `T036`
+- **US5**: `T038`, `T041`, and `T043` can run in parallel before `T039`, `T040`, `T042`, and `T044`–`T046`
+- **US6**: `T048`, `T049`, and `T050` can run in parallel before `T051`
 
 ## Suggested MVP Scope
 
