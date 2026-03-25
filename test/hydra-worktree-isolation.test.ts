@@ -117,39 +117,5 @@ describe('worktreeIsolation dispatch guard', () => {
   });
 });
 
-// Integration-level stubs — these document intended behaviour but require a
-// real git repo and are not run automatically.
-
-describe('worktree lifecycle dispatch hooks (integration stubs)', () => {
-  it.todo('createTaskWorktree creates worktree at .hydra/worktrees/task-{id}');
-  it.todo('createTaskWorktree creates branch named hydra/task/{id}');
-  it.todo('createTaskWorktree returns absolute path on success');
-  it.todo('createTaskWorktree returns null and logs warning on git failure');
-  it.todo('mergeTaskWorktree calls smartMerge(projectRoot, hydra/task/{id}, currentBranch)');
-  it.todo('mergeTaskWorktree returns { ok: true } on clean merge');
-  it.todo('mergeTaskWorktree returns { ok: false, conflict: true } and logs warning on conflict');
-  it.todo('mergeTaskWorktree returns { ok: false, error } on exception');
-  it.todo('cleanupTaskWorktree removes worktree and deletes branch');
-  it.todo(
-    'cleanupTaskWorktree force=true passes --force to worktree remove and -D to branch delete',
-  );
-  it.todo('cleanupTaskWorktree does not throw on git failure (best-effort cleanup)');
-  it.todo(
-    'worktreeIsolation.enabled: false means /task/claim does NOT call createTaskWorktree (daemon integration)',
-  );
-  it.todo(
-    'worktreeIsolation.enabled: true with mode=tandem creates worktree on /task/claim for new task',
-  );
-  it.todo(
-    'worktreeIsolation.enabled: true with mode=council creates worktree on /task/claim for new task',
-  );
-  it.todo(
-    'task completion with worktreePath calls mergeTaskWorktree via /task/result (daemon integration)',
-  );
-  it.todo('clean merge on task result calls cleanupTaskWorktree when cleanupOnSuccess: true');
-  it.todo(
-    'conflict merge on task result sets worktreeConflict: true on task, does NOT delete worktree',
-  );
-  it.todo(':cleanup scanner finds task-* dirs older than 24h in .hydra/worktrees/');
-  it.todo(':tasks review shows conflict worktrees when daemon tasks have worktreeConflict: true');
-});
+// Lifecycle tests (createTaskWorktree, mergeTaskWorktree, cleanupTaskWorktree,
+// daemon integration, cleanup/review) are in hydra-worktree-isolation-lifecycle.test.ts.
