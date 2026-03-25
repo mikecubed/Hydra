@@ -1,24 +1,28 @@
-# Target Architecture
+# Architecture
+
+> **Status:** Phases 0–2 delivered. The browser chat workspace, gateway transport layer, and shared
+> contracts are implemented and tested. Hydra-native operations panels, controlled mutations, and
+> hardening phases remain planned.
 
 ## High-Level Shape
 
 ```mermaid
 flowchart TB
-    subgraph Browser[apps/web]
-        Workspace[Conversation workspace]
-        Panels[Hydra panels\nqueue, budgets, council, artifacts]
-        Settings[Session and settings surfaces]
+    subgraph Browser[apps/web — delivered]
+        Workspace[Chat workspace\nconversation list · transcript · composer · artifacts]
+        ConnState[Connection state\ntransport · sync · session · daemon]
+        Approvals[Approval handling\nprompt cards · response controls]
     end
 
-    subgraph Gateway[apps/web-gateway]
+    subgraph Gateway[apps/web-gateway — delivered]
         Auth[Browser auth and sessions]
         Socket[WebSocket session transport]
-        Api[REST/BFF routes]
-        Static[Static asset delivery]
+        Api[REST conversation routes]
+        Audit[Audit trail]
     end
 
-    subgraph Contracts[packages/web-contracts]
-        Schemas[Shared schemas\nand event types]
+    subgraph Contracts[packages/web-contracts — delivered]
+        Schemas[Shared Zod schemas\nconversation · turn · stream · approval · artifact · session]
     end
 
     subgraph Daemon[Hydra daemon + core runtime]
@@ -38,12 +42,20 @@ flowchart TB
 
 ## Responsibility Split
 
-| Component                | Responsibility                                                                                               |
-| ------------------------ | ------------------------------------------------------------------------------------------------------------ |
-| `apps/web`               | Browser UX, conversation workspace, artifacts, approvals, reconnect UX, Hydra-specific operator panels       |
-| `apps/web-gateway`       | Auth, browser sessions, WebSocket termination, REST routes, static serving, protocol translation             |
-| `packages/web-contracts` | Shared schemas and DTOs for requests, events, approvals, artifacts, and snapshots                            |
-| Hydra daemon             | Source of truth for orchestration state, task lifecycle, sessions, durable events, config/workflow mutations |
+| Component                | Delivered responsibilities                                                                                                                                                                                      |
+| ------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `apps/web`               | Chat workspace (conversation list, transcript, composer, artifact panel), approval prompts, turn actions (cancel/retry/branch/follow-up), connection-state banners, reconnect UX                                |
+| `apps/web-gateway`       | Auth (login/logout/reauth), browser sessions with idle + expiry management, WebSocket session transport with replay, REST conversation routes, CSRF/origin/rate-limit enforcement, daemon proxying, audit trail |
+| `packages/web-contracts` | Zod schemas for conversation/turn payloads, nested stream events, approvals, artifacts, activities, attribution, sessions, auth, audit events, and browser-facing REST request/response contracts               |
+| Hydra daemon             | Source of truth for orchestration state, task lifecycle, sessions, durable events, config/workflow mutations                                                                                                    |
+
+### Planned (not yet delivered)
+
+| Surface                 | Planned scope                                                                                   |
+| ----------------------- | ----------------------------------------------------------------------------------------------- |
+| Hydra operations panels | Task queue, checkpoints, routing/mode/agent controls, budgets, daemon health, council views     |
+| Session and settings    | Operator preferences, config read/write surfaces                                                |
+| Controlled mutations    | Safe config writes through daemon-owned APIs, approved workflow-launch surfaces, audit surfaces |
 
 ## Architectural Rules
 
@@ -62,6 +74,91 @@ flowchart TB
 4. **The browser should feel native, not terminal-emulated.**
    Build browser-safe flows for approvals, artifacts, retries, and reconnect behavior instead of
    trying to mirror raw TTY interactions.
+
+## Browser Workspace Surface
+
+The delivered browser workspace (`apps/web`) is a React 19 + Vite single-page application that
+provides multi-conversation chat, streaming output, approval handling, artifact inspection, and
+turn-level control actions. TanStack Router manages routes and TanStack Query is available for REST
+cache management; shared REST DTOs and nested `StreamEvent` payloads come from
+`@hydra/web-contracts`, while the WebSocket transport envelopes are validated in the browser/gateway
+transport layer.
+
+### Component Hierarchy
+
+```text
+AppProviders (QueryClient + Router)
+└── AppShell (header + content outlet)
+    └── WorkspaceRoute
+        ├── ConversationList       (sidebar: list + new-conversation button)
+        ├── TranscriptPane         (turn entries + streaming blocks)
+        │   ├── TranscriptTurn     (header, content blocks, artifacts, prompt card)
+        │   │   ├── StreamEventBlock
+        │   │   ├── PromptCard + PromptControlBar
+        │   │   └── TurnControlBar (cancel / retry / branch / follow-up)
+        │   └── ConnectionBanner   (live-region status: info / warning / error)
+        ├── ComposerPanel          (textarea + send button, Ctrl+Enter, validation)
+        └── ArtifactPanel          (closeable aside for artifact content inspection)
+```
+
+### State Management
+
+The workspace uses a pure reducer (`workspace-reducer.ts`) with no framework state library.
+External side effects (REST calls, WebSocket subscription) are orchestrated by dedicated flow
+modules that dispatch actions into the reducer.
+
+**Key top-level state fields:**
+
+| Field                  | Description                                                        |
+| ---------------------- | ------------------------------------------------------------------ |
+| `activeConversationId` | Currently selected conversation                                    |
+| `conversationOrder`    | Ordered conversation IDs for sidebar/render traversal              |
+| `conversations`        | Map of per-conversation view state (entries, load state, controls) |
+| `drafts`               | Map of per-conversation composer drafts                            |
+| `explicitCreateMode`   | Whether the UI is in explicit new-conversation mode                |
+| `visibleArtifact`      | Currently inspected artifact (if any)                              |
+| `connection`           | Multi-dimensional connection health (see below)                    |
+
+Each conversation holds its transcript entries (turns, prompts, activity groups, system status
+messages), load state, history-pagination flag, control state (submission policy), and optional
+lineage summary for forked conversations.
+
+### Connection State Model
+
+Connection health is modeled as four orthogonal dimensions so the UI can show precise operator
+feedback without conflating unrelated failure modes:
+
+| Dimension         | Values                                               | Purpose                |
+| ----------------- | ---------------------------------------------------- | ---------------------- |
+| `transportStatus` | `connecting`, `live`, `reconnecting`, `disconnected` | WebSocket link state   |
+| `syncStatus`      | `idle`, `syncing`, `recovered`, `error`              | Replay/resume progress |
+| `sessionStatus`   | `active`, `expiring-soon`, `expired`, `invalidated`  | Browser session health |
+| `daemonStatus`    | `healthy`, `unavailable`, `recovering`               | Daemon reachability    |
+
+The `ConnectionBanner` component renders an ARIA live-region banner whose severity (info, warning,
+error) is derived from these dimensions.
+
+### Gateway Communication Pattern
+
+The workspace follows a strict split:
+
+- **REST** for commands: create/open/list conversations, submit instructions, respond to approvals,
+  cancel/retry turns, branch conversations, and fetch artifacts.
+- **WebSocket** for delivery: stream events during turn execution, session lifecycle notices
+  (expiring-soon, terminated, active), daemon health (unavailable, restored), subscription
+  confirmations.
+
+The `GatewayClient` (REST) and `StreamClient` (WebSocket) are instantiated per workspace mount.
+The `StreamClient` validates the shared `StreamEvent` payload plus local transport-envelope schemas
+before dispatching messages to the reconciler.
+
+### Stream Reconciliation
+
+Incoming stream events are merged into transcript state by a deterministic reconciler
+(`reconciler.ts`) that maintains per-turn high-water marks for duplicate suppression and tracks
+sealed (completed/failed/cancelled) turns. A contiguous-frontier model in the stream subscription
+layer ensures that the server-side resume sequence advances only through consecutively consumed
+events, so gaps trigger replay on reconnect rather than silent data loss.
 
 ## Gateway Transport Layer
 
