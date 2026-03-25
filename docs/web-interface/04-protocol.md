@@ -1,5 +1,9 @@
 # WebSocket Transport Protocol
 
+> **Status:** Implemented. The protocol described here is live between `apps/web` (browser) and
+> `apps/web-gateway` (gateway). The browser workspace uses this protocol for all real-time event
+> delivery and subscription management.
+
 This document describes the implemented WebSocket transport protocol between the browser and the
 Hydra web gateway. The gateway mediates all conversation streaming — the browser never communicates
 directly with the daemon.
@@ -607,8 +611,32 @@ sends messages faster than the gateway can process them, the gateway sends
 
 ## Complementary REST Endpoints
 
-The WebSocket carries streaming events; conversation commands flow via REST. All REST endpoints
-require an authenticated session and validate request payloads against shared contract schemas.
+The WebSocket carries streaming events; conversation commands flow via REST. Protected
+conversation/session routes require an authenticated session. Most browser-facing conversation DTOs
+are validated against shared contract schemas, while the auth routes are the notable exception and
+parse their request bodies locally.
+
+### Auth
+
+These routes cover pre-auth login plus session-bound auth maintenance. Login sets `__session`
+(HttpOnly) and `__csrf` cookies on success. Logout is CSRF-protected but safely clears cookies even
+when no session cookie is present. Reauth is CSRF-protected and requires an idle session plus fresh
+credentials.
+
+| Method | Path           | Description                                                   |
+| ------ | -------------- | ------------------------------------------------------------- |
+| POST   | `/auth/login`  | Authenticate; sets session + CSRF cookies                     |
+| POST   | `/auth/logout` | Clear auth cookies and end the session when one exists (CSRF) |
+| POST   | `/auth/reauth` | Re-authenticate an idle session with fresh credentials (CSRF) |
+
+### Session
+
+Requires an authenticated session. CSRF validation applies to the mutating route.
+
+| Method | Path              | Description                                   |
+| ------ | ----------------- | --------------------------------------------- |
+| GET    | `/session/info`   | Return session state, expiry, and operator ID |
+| POST   | `/session/extend` | Extend session lifetime (max 3 extensions)    |
 
 ### Conversation Lifecycle
 
@@ -681,7 +709,9 @@ require an authenticated session and validate request payloads against shared co
 
 ## Protocol Design Rules
 
-- Every request and event shape is defined through `packages/web-contracts` Zod schemas.
+- Shared REST DTOs and nested stream-event payloads are defined through
+  `packages/web-contracts` Zod schemas, while the WebSocket transport envelopes are defined in the
+  browser/gateway transport layer.
 - Browser optimism must never become the source of truth for conversation or task state — the
   daemon is authoritative.
 - Reconnect and replay semantics are designed into the protocol, not left to ad hoc client behavior.
