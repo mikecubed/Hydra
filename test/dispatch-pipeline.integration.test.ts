@@ -14,7 +14,7 @@ import {
 } from './helpers/mock-agent.ts';
 
 const ALL_AGENTS = ['claude', 'gemini', 'codex', 'copilot'];
-const EXPECTED_TANDEM_PAIRS = {
+const EXPECTED_TANDEM_PAIRS: Record<string, { lead: string; follow: string }> = {
   planning: { lead: 'claude', follow: 'codex' },
   architecture: { lead: 'claude', follow: 'gemini' },
   review: { lead: 'gemini', follow: 'copilot' },
@@ -47,28 +47,28 @@ const mockExecuteAgent = createMockExecuteAgent({
   codex: codexFixtures,
 });
 
-function assertExecuteResultShape(result) {
-  assert.equal(typeof result.ok, 'boolean');
-  assert.equal(typeof result.output, 'string');
-  assert.equal(typeof result.stdout, 'string');
-  assert.equal(typeof result.stderr, 'string');
-  assert.ok(result.error === null || typeof result.error === 'string');
-  assert.ok(typeof result.exitCode === 'number' || result.exitCode === null);
-  assert.equal(result.signal, null);
-  assert.equal(typeof result.durationMs, 'number');
-  assert.equal(result.timedOut, false);
+function assertExecuteResultShape(result: Record<string, unknown>): void {
+  assert.equal(typeof result['ok'], 'boolean');
+  assert.equal(typeof result['output'], 'string');
+  assert.equal(typeof result['stdout'], 'string');
+  assert.equal(typeof result['stderr'], 'string');
+  assert.ok(result['error'] === null || typeof result['error'] === 'string');
+  assert.ok(typeof result['exitCode'] === 'number' || result['exitCode'] === null);
+  assert.equal(result['signal'], null);
+  assert.equal(typeof result['durationMs'], 'number');
+  assert.equal(result['timedOut'], false);
 }
 
-async function withNoProcessSpawning(run) {
+async function withNoProcessSpawning(run: () => Promise<void>): Promise<void> {
   const originalSpawn = childProcess.spawn;
   const originalSpawnSync = childProcess.spawnSync;
-  const spawnCalls = [];
+  const spawnCalls: Array<{ method: string; args: unknown[] }> = [];
 
-  childProcess.spawn = (...args) => {
+  childProcess.spawn = (...args: unknown[]) => {
     spawnCalls.push({ method: 'spawn', args });
     throw new Error('Unexpected child_process.spawn during in-process pipeline test');
   };
-  childProcess.spawnSync = (...args) => {
+  childProcess.spawnSync = (...args: unknown[]) => {
     spawnCalls.push({ method: 'spawnSync', args });
     throw new Error('Unexpected child_process.spawnSync during in-process pipeline test');
   };
@@ -85,7 +85,7 @@ async function withNoProcessSpawning(run) {
   assert.deepEqual(spawnCalls, [], 'simulated mock-agent flows must not spawn child processes');
 }
 
-async function walkFiles(dir) {
+async function walkFiles(dir: string): Promise<string[]> {
   const entries = await fs.readdir(dir, { withFileTypes: true });
   const files = await Promise.all(
     entries.map(async (entry) => {
@@ -106,22 +106,28 @@ test('fixture JSON stays static, hand-authored, and compact', async () => {
   for (const fileName of fixtureFiles) {
     const filePath = path.join(FIXTURE_DIR, fileName);
     const raw = await fs.readFile(filePath, 'utf8');
-    const parsed = JSON.parse(raw);
+    const parsed = JSON.parse(raw) as Record<string, unknown>[];
 
     totalBytes += Buffer.byteLength(raw);
 
     assert.equal(Array.isArray(parsed), true, `${fileName} must export an array`);
     assert.ok(parsed.length >= 3, `${fileName} must contain at least three fixture entries`);
     assert.ok(
-      parsed.some((entry) => entry.matchPattern === null),
+      parsed.some((entry: Record<string, unknown>) => entry['matchPattern'] === null),
       `${fileName} must include a null-matchPattern default entry`,
     );
     assert.ok(
-      parsed.some((entry) => entry.matchPattern && entry.response?.ok === true),
+      parsed.some(
+        (entry: Record<string, unknown>) =>
+          entry['matchPattern'] && (entry['response'] as Record<string, unknown>)?.['ok'] === true,
+      ),
       `${fileName} must include a prompt-matched success entry`,
     );
     assert.ok(
-      parsed.some((entry) => entry.response?.ok === false),
+      parsed.some(
+        (entry: Record<string, unknown>) =>
+          (entry['response'] as Record<string, unknown>)?.['ok'] === false,
+      ),
       `${fileName} must include a failure entry`,
     );
   }
@@ -136,19 +142,33 @@ test('loadAgentFixture resolves all static agent fixture sets with validated def
   assert.ok(claudeFixtures.length >= 3);
   assert.ok(geminiFixtures.length >= 3);
   assert.ok(codexFixtures.length >= 3);
-  assert.equal(claudeFixtures.find((entry) => entry.id === 'default')?.matchPattern, null);
-  assert.equal(geminiFixtures.find((entry) => entry.id === 'default')?.matchPattern, null);
-  assert.equal(codexFixtures.find((entry) => entry.id === 'default')?.matchPattern, null);
   assert.equal(
-    claudeFixtures.find((entry) => entry.id === 'architecture')?.matchPattern instanceof RegExp,
+    claudeFixtures.find((entry: Record<string, unknown>) => entry['id'] === 'default')
+      ?.matchPattern,
+    null,
+  );
+  assert.equal(
+    geminiFixtures.find((entry: Record<string, unknown>) => entry['id'] === 'default')
+      ?.matchPattern,
+    null,
+  );
+  assert.equal(
+    codexFixtures.find((entry: Record<string, unknown>) => entry['id'] === 'default')?.matchPattern,
+    null,
+  );
+  assert.equal(
+    claudeFixtures.find((entry: Record<string, unknown>) => entry['id'] === 'architecture')
+      ?.matchPattern instanceof RegExp,
     true,
   );
   assert.equal(
-    geminiFixtures.find((entry) => entry.id === 'review')?.matchPattern instanceof RegExp,
+    geminiFixtures.find((entry: Record<string, unknown>) => entry['id'] === 'review')
+      ?.matchPattern instanceof RegExp,
     true,
   );
   assert.equal(
-    codexFixtures.find((entry) => entry.id === 'implementation')?.matchPattern instanceof RegExp,
+    codexFixtures.find((entry: Record<string, unknown>) => entry['id'] === 'implementation')
+      ?.matchPattern instanceof RegExp,
     true,
   );
 });
@@ -271,7 +291,7 @@ describe('classifyPrompt route strategy', () => {
     const result = classifyPrompt(prompt);
 
     assert.ok(['simple', 'moderate', 'complex'].includes(result.tier));
-    assert.ok(['single', 'tandem', 'council'].includes(result.routeStrategy));
+    assert.ok(['single', 'tandem', 'council'].includes(result.routeStrategy!));
   });
 
   it('returns a valid classification object for an empty prompt', () => {
@@ -315,7 +335,7 @@ describe('mock agent invocation', () => {
     assertExecuteResultShape(result);
     assert.equal(result.ok, false);
     assert.equal(result.exitCode, 1);
-    assert.equal(result.errorCategory, 'rate-limit');
+    assert.equal(result['errorCategory'], 'rate-limit');
     assert.equal(result.error, 'Error: 429 Too Many Requests');
     assert.match(result.stderr, /429/i);
   });
@@ -325,7 +345,7 @@ describe('mock agent invocation', () => {
 
     assertExecuteResultShape(result);
     assert.equal(result.ok, true);
-    assert.deepEqual(result.tokenUsage, {
+    assert.deepEqual(result['tokenUsage'], {
       inputTokens: 220,
       outputTokens: 140,
       totalTokens: 360,
@@ -348,22 +368,22 @@ describe('mock agent invocation', () => {
     const second = await mockExecuteAgent('codex', 'implement the feature', {});
 
     assert.notStrictEqual(first, second);
-    assert.notStrictEqual(first.tokenUsage, second.tokenUsage);
+    assert.notStrictEqual(first['tokenUsage'], second['tokenUsage']);
 
     first.output = 'mutated';
-    first.tokenUsage.totalTokens = 999;
+    (first['tokenUsage'] as Record<string, unknown>)['totalTokens'] = 999;
 
     const third = await mockExecuteAgent('codex', 'implement the feature', {});
     assert.equal(
       second.output,
       'Implementation result: added the requested behavior, covered the main edge cases, and kept the changes scoped to the documented entry points.',
     );
-    assert.equal(second.tokenUsage.totalTokens, 360);
+    assert.equal((second['tokenUsage'] as Record<string, unknown>)['totalTokens'], 360);
     assert.equal(
       third.output,
       'Implementation result: added the requested behavior, covered the main edge cases, and kept the changes scoped to the documented entry points.',
     );
-    assert.equal(third.tokenUsage.totalTokens, 360);
+    assert.equal((third['tokenUsage'] as Record<string, unknown>)['totalTokens'], 360);
   });
 
   it('throws for unknown agents instead of returning undefined', async () => {
@@ -430,7 +450,7 @@ describe('mock agent invocation', () => {
 
     assertExecuteResultShape(result);
     assert.equal(result.ok, false);
-    assert.equal(result.errorCategory, 'runtime');
+    assert.equal(result['errorCategory'], 'runtime');
   });
 });
 

@@ -30,11 +30,8 @@
   },
   "include": [
     "lib/**/*.ts",
-    "lib/**/*.mjs",
     "bin/**/*.ts",
-    "bin/**/*.mjs",
     "scripts/**/*.ts",
-    "scripts/**/*.mjs",
     "test/**/*.ts",
     "packages/**/*.ts",
     "apps/**/*.ts"

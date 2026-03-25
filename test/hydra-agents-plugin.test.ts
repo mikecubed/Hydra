@@ -46,7 +46,7 @@ describe('Agent Plugin Interface', () => {
   // ── feature flags ─────────────────────────────────────────────────────────
   describe('feature flags', () => {
     it('claude: spawn, jsonOutput=true, stdinPrompt=true, reasoningEffort=false', () => {
-      const a = getAgent('claude');
+      const a = getAgent('claude')!;
       assert.equal(a.features.executeMode, 'spawn');
       assert.equal(a.features.jsonOutput, true);
       assert.equal(a.features.stdinPrompt, true);
@@ -54,7 +54,7 @@ describe('Agent Plugin Interface', () => {
     });
 
     it('gemini: spawn, jsonOutput=true, stdinPrompt=false, reasoningEffort=false', () => {
-      const a = getAgent('gemini');
+      const a = getAgent('gemini')!;
       assert.equal(a.features.executeMode, 'spawn');
       assert.equal(a.features.jsonOutput, true);
       assert.equal(a.features.stdinPrompt, false);
@@ -62,7 +62,7 @@ describe('Agent Plugin Interface', () => {
     });
 
     it('codex: spawn, jsonOutput=true, stdinPrompt=true, reasoningEffort=true', () => {
-      const a = getAgent('codex');
+      const a = getAgent('codex')!;
       assert.equal(a.features.executeMode, 'spawn');
       assert.equal(a.features.jsonOutput, true);
       assert.equal(a.features.stdinPrompt, true);
@@ -70,7 +70,7 @@ describe('Agent Plugin Interface', () => {
     });
 
     it('local: api, all feature flags false', () => {
-      const a = getAgent('local');
+      const a = getAgent('local')!;
       assert.equal(a.features.executeMode, 'api');
       assert.equal(a.features.jsonOutput, false);
       assert.equal(a.features.stdinPrompt, false);
@@ -89,9 +89,9 @@ describe('Agent Plugin Interface', () => {
         displayName: 'Test Agent',
         cli: 'test-cli',
         invoke: {
-          nonInteractive: (p) => ['test-cli', [p]],
-          interactive: (p) => ['test-cli', [p]],
-          headless: (p) => ['test-cli', [p]],
+          nonInteractive: (p: string) => ['test-cli', [p]],
+          interactive: (p: string) => ['test-cli', [p]],
+          headless: (p: string) => ['test-cli', [p]],
         },
       });
     });
@@ -106,7 +106,7 @@ describe('Agent Plugin Interface', () => {
     });
 
     it('fills all plugin fields with defaults', () => {
-      const a = getAgent(TEST_AGENT);
+      const a = getAgent(TEST_AGENT)!;
       assert.ok(a, 'agent must be registered');
       assert.equal(a.features.executeMode, 'spawn');
       assert.equal(a.features.jsonOutput, false);
@@ -120,12 +120,12 @@ describe('Agent Plugin Interface', () => {
       assert.equal(typeof a.economyModel, 'function');
       assert.equal(a.economyModel(), null);
       assert.equal(typeof a.readInstructions, 'function');
-      assert.equal(a.readInstructions('CLAUDE.md'), 'Read CLAUDE.md first.');
+      assert.equal(a.readInstructions!('CLAUDE.md'), 'Read CLAUDE.md first.');
       assert.deepEqual(a.taskRules, []);
     });
 
     it('parseOutput default returns passthrough', () => {
-      const a = getAgent(TEST_AGENT);
+      const a = getAgent(TEST_AGENT)!;
       const result = a.parseOutput('hello world');
       assert.deepEqual(result, { output: 'hello world', tokenUsage: null, costUsd: null });
     });
@@ -139,7 +139,7 @@ describe('Agent Plugin Interface', () => {
         customType: 'api',
         invoke: { nonInteractive: null, interactive: null, headless: null },
       });
-      const a = getAgent(apiAgent);
+      const a = getAgent(apiAgent)!;
       assert.equal(a.features.executeMode, 'api');
       unregisterAgent(apiAgent);
     });
@@ -147,7 +147,7 @@ describe('Agent Plugin Interface', () => {
 
   // ── claude.parseOutput ────────────────────────────────────────────────────
   describe('claude.parseOutput', () => {
-    const claude = () => getAgent('claude');
+    const claude = () => getAgent('claude')!;
 
     it('extracts output + token usage from valid result JSON', () => {
       const stdout = JSON.stringify({
@@ -196,7 +196,7 @@ describe('Agent Plugin Interface', () => {
 
   // ── codex.parseOutput ─────────────────────────────────────────────────────
   describe('codex.parseOutput', () => {
-    const codex = () => getAgent('codex');
+    const codex = () => getAgent('codex')!;
 
     it('accumulates message content across JSONL lines', () => {
       const lines = [
@@ -206,9 +206,9 @@ describe('Agent Plugin Interface', () => {
       ];
       const result = codex().parseOutput(lines.join('\n'));
       assert.equal(result.output, 'Hello world');
-      assert.equal(result.tokenUsage.inputTokens, 20);
-      assert.equal(result.tokenUsage.outputTokens, 10);
-      assert.equal(result.tokenUsage.totalTokens, 30);
+      assert.equal(result.tokenUsage!.inputTokens, 20);
+      assert.equal(result.tokenUsage!.outputTokens, 10);
+      assert.equal(result.tokenUsage!.totalTokens, 30);
     });
 
     it('skips non-JSON lines without throwing', () => {
@@ -229,26 +229,26 @@ describe('Agent Plugin Interface', () => {
         JSON.stringify({ usage: { input_tokens: 20, output_tokens: 8 } }),
       ];
       const result = codex().parseOutput(lines.join('\n'));
-      assert.equal(result.tokenUsage.inputTokens, 30);
-      assert.equal(result.tokenUsage.outputTokens, 13);
-      assert.equal(result.tokenUsage.totalTokens, 43);
+      assert.equal(result.tokenUsage!.inputTokens, 30);
+      assert.equal(result.tokenUsage!.outputTokens, 13);
+      assert.equal(result.tokenUsage!.totalTokens, 43);
     });
   });
 
   // ── modelBelongsTo ────────────────────────────────────────────────────────
   describe('modelBelongsTo', () => {
     it('claude owns claude- prefixed models', () => {
-      assert.equal(getAgent('claude').modelBelongsTo('claude-opus-4-6'), true);
-      assert.equal(getAgent('claude').modelBelongsTo('gpt-5'), false);
+      assert.equal(getAgent('claude')!.modelBelongsTo('claude-opus-4-6'), true);
+      assert.equal(getAgent('claude')!.modelBelongsTo('gpt-5'), false);
     });
 
     it('gemini owns gemini- prefixed models', () => {
-      assert.equal(getAgent('gemini').modelBelongsTo('gemini-3-pro-preview'), true);
-      assert.equal(getAgent('gemini').modelBelongsTo('claude-opus-4-6'), false);
+      assert.equal(getAgent('gemini')!.modelBelongsTo('gemini-3-pro-preview'), true);
+      assert.equal(getAgent('gemini')!.modelBelongsTo('claude-opus-4-6'), false);
     });
 
     it('codex owns gpt-, o1, o3, o4, o5, codex prefixed models', () => {
-      const codex = getAgent('codex');
+      const codex = getAgent('codex')!;
       assert.equal(codex.modelBelongsTo('gpt-5.4'), true);
       assert.equal(codex.modelBelongsTo('o4-mini'), true);
       assert.equal(codex.modelBelongsTo('o3-large'), true);
@@ -257,9 +257,9 @@ describe('Agent Plugin Interface', () => {
     });
 
     it('local only matches its configured model, not arbitrary model IDs', () => {
-      const local = getAgent('local');
+      const local = getAgent('local')!;
       const cfg = loadHydraConfig();
-      const configuredModel = cfg.local?.model;
+      const configuredModel = cfg.local?.model as string | undefined;
       // Matches exactly the configured model (case-insensitive)
       if (configuredModel) {
         assert.equal(local.modelBelongsTo(configuredModel), true);
@@ -275,46 +275,46 @@ describe('Agent Plugin Interface', () => {
   // ── economyModel ──────────────────────────────────────────────────────────
   describe('economyModel', () => {
     it('claude returns fixed economy model', () => {
-      assert.equal(getAgent('claude').economyModel(), 'claude-sonnet-4-5-20250929');
+      assert.equal(getAgent('claude')!.economyModel(), 'claude-sonnet-4-5-20250929');
     });
 
     it('gemini returns fixed economy model', () => {
-      assert.equal(getAgent('gemini').economyModel(), 'gemini-3-flash-preview');
+      assert.equal(getAgent('gemini')!.economyModel(), 'gemini-3-flash-preview');
     });
 
     it('codex uses handoffModel from budgetCfg when provided', () => {
       assert.equal(
-        getAgent('codex').economyModel({ handoffModel: 'o4-mini-custom' }),
+        getAgent('codex')!.economyModel({ handoffModel: 'o4-mini-custom' }),
         'o4-mini-custom',
       );
     });
 
     it('codex defaults to o4-mini when no budgetCfg', () => {
-      assert.equal(getAgent('codex').economyModel(), 'o4-mini');
+      assert.equal(getAgent('codex')!.economyModel(), 'o4-mini');
     });
 
     it('local returns null', () => {
-      assert.equal(getAgent('local').economyModel(), null);
+      assert.equal(getAgent('local')!.economyModel(), null);
     });
   });
 
   // ── taskRules ─────────────────────────────────────────────────────────────
   describe('taskRules', () => {
     it('claude has a taskRules array with one entry', () => {
-      const rules = getAgent('claude').taskRules;
+      const rules = getAgent('claude')!.taskRules;
       assert.ok(Array.isArray(rules));
       assert.ok(rules.length > 0);
       assert.ok(rules[0].includes('Codex'), 'claude rule should mention Codex');
     });
 
     it('codex has a taskRules array', () => {
-      const rules = getAgent('codex').taskRules;
+      const rules = getAgent('codex')!.taskRules;
       assert.ok(Array.isArray(rules));
       assert.ok(rules.length > 0);
     });
 
     it('local has empty taskRules', () => {
-      assert.deepEqual(getAgent('local').taskRules, []);
+      assert.deepEqual(getAgent('local')!.taskRules, []);
     });
   });
 });

@@ -26,7 +26,7 @@ Key points: ESM + TypeScript, `picocolors` for terminal colors, explicit `.ts` i
 
 ## Current Implementation Conventions
 
-- Prefer `.ts` for new or updated runtime code unless you are working in a file that intentionally remains legacy `.mjs`.
+- All source and test files are `.ts`. The only `.mjs` file is `eslint.config.mjs` (required by ESLint v10).
 - Keep ESM imports/exports only. Do not introduce CommonJS.
 - Use explicit `.ts` import extensions when importing TypeScript source files.
 - Use `request()` from `hydra-utils.ts` for daemon calls and `cross-spawn` for external CLIs.

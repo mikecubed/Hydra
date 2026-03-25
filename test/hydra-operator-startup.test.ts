@@ -63,3 +63,77 @@ describe('findWindowsTerminal (non-Windows)', () => {
     assert.equal(findWindowsTerminal(), null);
   });
 });
+
+// ── extractHandoffAgents additional edge cases ──────────────────────────────
+
+describe('extractHandoffAgents — edge cases', () => {
+  it('returns [] when handoffs contains items with missing "to"', () => {
+    const result = extractHandoffAgents({
+      published: { handoffs: [{ from: 'gemini' }, {}] },
+    });
+    assert.deepEqual(result, []);
+  });
+
+  it('returns [] when handoffs contains items with empty "to"', () => {
+    const result = extractHandoffAgents({
+      published: { handoffs: [{ to: '' }] },
+    });
+    assert.deepEqual(result, []);
+  });
+
+  it('handles handoffs array with mixed valid and missing to fields', () => {
+    const result = extractHandoffAgents({
+      published: { handoffs: [{ to: 'claude' }, { from: 'gemini' }, { to: 'codex' }] },
+    });
+    assert.ok(result.includes('claude'));
+    assert.ok(result.includes('codex'));
+  });
+
+  it('returns [] when published.handoffs is not an array', () => {
+    assert.deepEqual(extractHandoffAgents({ published: { handoffs: 'not-array' } }), []);
+    assert.deepEqual(extractHandoffAgents({ published: { handoffs: 42 } }), []);
+    assert.deepEqual(extractHandoffAgents({ published: { handoffs: null } }), []);
+  });
+
+  it('handles deeply nested result objects', () => {
+    const result = extractHandoffAgents({
+      published: {
+        handoffs: [{ to: 'gemini', payload: { nested: { deep: true } } }],
+      },
+    });
+    assert.deepEqual(result, ['gemini']);
+  });
+
+  it('handles single handoff', () => {
+    const result = extractHandoffAgents({
+      published: { handoffs: [{ to: 'claude' }] },
+    });
+    assert.deepEqual(result, ['claude']);
+    assert.equal(result.length, 1);
+  });
+
+  it('handles multiple unique agents', () => {
+    const result = extractHandoffAgents({
+      published: {
+        handoffs: [{ to: 'claude' }, { to: 'gemini' }, { to: 'codex' }],
+      },
+    });
+    assert.equal(result.length, 3);
+  });
+});
+
+// ── findPowerShell / findWindowsTerminal additional tests ────────────────────
+
+describe('findPowerShell — platform behavior', () => {
+  it('returns string or null', () => {
+    const result = findPowerShell();
+    assert.ok(result === null || typeof result === 'string');
+  });
+});
+
+describe('findWindowsTerminal — platform behavior', () => {
+  it('returns string or null', () => {
+    const result = findWindowsTerminal();
+    assert.ok(result === null || typeof result === 'string');
+  });
+});

@@ -3,7 +3,7 @@
  *
  * Strategy: register disposable test agents that invoke `process.execPath` (node)
  * with inline `-e` scripts. This exercises the full spawn pipeline without
- * hitting real agent CLIs, matching the pattern used by the existing .mjs suite.
+ * hitting real agent CLIs.
  */
 
 import { describe, it, beforeEach, afterEach, mock } from 'node:test';

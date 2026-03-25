@@ -9,6 +9,7 @@ import {
   getRecentActivity,
   clearActivityLog,
   formatDigestForPrompt,
+  type ActivityDigest,
 } from '../lib/hydra-activity.ts';
 
 // ── detectSituationalQuery ──────────────────────────────────────────────────
@@ -76,7 +77,7 @@ test('activity: non-situational prompt returns false', () => {
 test('activity: empty/null input returns false', () => {
   assert.equal(detectSituationalQuery('').isSituational, false);
   assert.equal(detectSituationalQuery(null).isSituational, false);
-  assert.equal(detectSituationalQuery().isSituational, false);
+  assert.equal(detectSituationalQuery(undefined as unknown as string).isSituational, false);
 });
 
 // ── Annotations ─────────────────────────────────────────────────────────────
@@ -172,8 +173,47 @@ test('activity: ring buffer enforces max size', () => {
 
 // ── formatDigestForPrompt ───────────────────────────────────────────────────
 
+interface AgentDigest {
+  name: string;
+  status: string;
+  action: string;
+  taskTitle: string | null;
+  model: string | null;
+  phase: string | null;
+  step: string | null;
+  execMode: string | null;
+  elapsedMs: number;
+  pendingHandoffs: unknown[];
+  worker?: unknown;
+  metrics?: unknown;
+}
+
+interface TaskDigest {
+  id: string;
+  status: string;
+  owner: string;
+  title: string;
+  type?: string;
+  blockedBy?: unknown[];
+}
+
+interface DigestData {
+  generatedAt?: string;
+  session?: Record<string, unknown>;
+  agents: AgentDigest[];
+  activeTasks: TaskDigest[];
+  recentCompletions: Array<Record<string, unknown>>;
+  pendingHandoffs: unknown[];
+  recentHandoffs: Array<Record<string, unknown>>;
+  recentDecisions: unknown[];
+  lastDispatch: Record<string, unknown> | null;
+  activityLog: Array<Record<string, unknown>>;
+  counts?: unknown;
+  metrics: Record<string, unknown>;
+}
+
 test('activity: formatDigestForPrompt produces valid output', () => {
-  const digest = {
+  const digest: DigestData = {
     generatedAt: new Date().toISOString(),
     session: { status: 'active', startedAt: new Date().toISOString(), focus: 'testing' },
     agents: [
@@ -240,7 +280,7 @@ test('activity: formatDigestForPrompt produces valid output', () => {
     metrics: { totalCalls: 5, totalTokens: 50000, totalCost: 0.42 },
   };
 
-  const output = formatDigestForPrompt(digest);
+  const output = formatDigestForPrompt(digest as unknown as ActivityDigest);
   assert.ok(output.startsWith('=== ACTIVITY DIGEST ==='));
   assert.ok(output.endsWith('=== END DIGEST ==='));
   assert.ok(output.includes('claude [working]'));
@@ -250,7 +290,7 @@ test('activity: formatDigestForPrompt produces valid output', () => {
 });
 
 test('activity: formatDigestForPrompt respects maxChars', () => {
-  const digest = {
+  const digest: DigestData = {
     agents: [],
     activeTasks: [],
     recentCompletions: [],
@@ -261,12 +301,12 @@ test('activity: formatDigestForPrompt respects maxChars', () => {
     activityLog: [],
     metrics: {},
   };
-  const output = formatDigestForPrompt(digest, { maxChars: 100 });
+  const output = formatDigestForPrompt(digest as unknown as ActivityDigest, { maxChars: 100 });
   assert.ok(output.length <= 120); // some margin for truncation footer
 });
 
 test('activity: formatDigestForPrompt respects focus filter', () => {
-  const digest = {
+  const digest: DigestData = {
     agents: [
       {
         name: 'claude',
@@ -306,7 +346,7 @@ test('activity: formatDigestForPrompt respects focus filter', () => {
     metrics: {},
   };
 
-  const focused = formatDigestForPrompt(digest, { focus: 'claude' });
+  const focused = formatDigestForPrompt(digest as unknown as ActivityDigest, { focus: 'claude' });
   assert.ok(focused.includes('claude [working]'));
   // Gemini agent line should not appear when focus is 'claude'
   assert.ok(!focused.includes('gemini [idle]'));

@@ -36,7 +36,7 @@ import { DISPATCH_PREFERENCE_ORDER } from './hydra-routing-constants.ts';
 
 // ── Agent Type Enum ──────────────────────────────────────────────────────────
 
-export const AGENT_TYPE = { PHYSICAL: 'physical', VIRTUAL: 'virtual' };
+export const AGENT_TYPE = { PHYSICAL: 'physical', VIRTUAL: 'virtual' } as const;
 
 // ── Private Registry ─────────────────────────────────────────────────────────
 
@@ -750,7 +750,7 @@ function buildAgentPluginFields(
 export function registerAgent(name: string, def: Partial<AgentDef>): AgentDef {
   const lower = name.toLowerCase();
   validateAgentRegistration(name, lower, def);
-  const type = (def.type ?? AGENT_TYPE.PHYSICAL) as AgentDef['type'];
+  const type = def.type ?? AGENT_TYPE.PHYSICAL;
   const defaultExecuteMode = def.customType === 'api' ? ('api' as const) : ('spawn' as const);
   const cli = resolveAgentCliField(lower, type, def);
   const entry: AgentDef = {

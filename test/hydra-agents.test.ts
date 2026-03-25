@@ -95,6 +95,7 @@ test('each physical agent has required fields', () => {
   _setTestConfig({ copilot: { enabled: false } });
   try {
     for (const [name, agent] of Object.entries(AGENTS)) {
+      if (!agent) continue;
       assert.ok(agent.label, `${name} should have a label`);
       assert.ok(agent.invoke, `${name} should have invoke methods`);
 
@@ -161,8 +162,9 @@ test('each physical agent has required fields', () => {
 
 test('all physical agents have affinity scores for all task types', () => {
   for (const [name, agent] of Object.entries(AGENTS)) {
+    if (!agent) continue;
     for (const taskType of TASK_TYPES) {
-      const score = agent.taskAffinity[taskType];
+      const score = agent.taskAffinity[taskType as keyof typeof agent.taskAffinity];
       assert.ok(typeof score === 'number', `${name} should have affinity for ${taskType}`);
       assert.ok(
         score >= 0 && score <= 1,
@@ -173,14 +175,14 @@ test('all physical agents have affinity scores for all task types', () => {
 });
 
 test('agent context tiers are assigned correctly', () => {
-  assert.equal(AGENTS.claude.contextTier, 'medium');
-  assert.equal(AGENTS.gemini.contextTier, 'large');
-  assert.equal(AGENTS.codex.contextTier, 'minimal');
+  assert.equal(AGENTS['claude']!.contextTier, 'medium');
+  assert.equal(AGENTS['gemini']!.contextTier, 'large');
+  assert.equal(AGENTS['codex']!.contextTier, 'minimal');
 });
 
 test('agent council roles are distinct', () => {
   const roles = [...AGENT_NAMES]
-    .map((n) => getAgent(n).councilRole)
+    .map((n) => getAgent(n)!.councilRole)
     .filter((role) => role !== null);
   assert.equal(new Set(roles).size, roles.length, 'Council roles should be unique');
 });
@@ -203,7 +205,7 @@ test('getAgent returns agent config for known agents', () => {
 test('getAgent returns null for unknown agents', () => {
   assert.equal(getAgent('nonexistent'), null);
   assert.equal(getAgent(''), null);
-  assert.equal(getAgent(null), null);
+  assert.equal(getAgent(null as unknown as string), null);
 });
 
 // ── bestAgentFor ─────────────────────────────────────────────────────────────
@@ -298,7 +300,7 @@ test('classifyTask uses notes for classification', () => {
 // ── invoke methods ───────────────────────────────────────────────────────────
 
 test('claude invoke produces correct CLI args', () => {
-  const [cmd, args] = AGENTS.claude.invoke.nonInteractive('hello world');
+  const [cmd, args] = AGENTS['claude']!.invoke!.nonInteractive!('hello world');
   assert.equal(cmd, 'claude');
   assert.ok(args.includes('-p'));
   assert.ok(args.includes('hello world'));
@@ -306,7 +308,7 @@ test('claude invoke produces correct CLI args', () => {
 });
 
 test('gemini invoke produces correct CLI args', () => {
-  const [cmd, args] = AGENTS.gemini.invoke.nonInteractive('test prompt');
+  const [cmd, args] = AGENTS['gemini']!.invoke!.nonInteractive!('test prompt');
   assert.equal(cmd, 'gemini');
   assert.ok(args.includes('-p'));
   assert.ok(args.includes('test prompt'));
@@ -314,12 +316,14 @@ test('gemini invoke produces correct CLI args', () => {
 
 test('codex invoke requires cwd option', () => {
   assert.throws(() => {
-    AGENTS.codex.invoke.nonInteractive('test prompt');
+    AGENTS['codex']!.invoke!.nonInteractive!('test prompt');
   }, /cwd/i);
 });
 
 test('codex invoke produces correct CLI args with cwd', () => {
-  const [cmd, args] = AGENTS.codex.invoke.nonInteractive('test prompt', { cwd: '/tmp/project' });
+  const [cmd, args] = AGENTS['codex']!.invoke!.nonInteractive!('test prompt', {
+    cwd: '/tmp/project',
+  });
   assert.equal(cmd, 'codex');
   assert.ok(args.includes('exec'));
   assert.ok(args.includes('-C'));
@@ -330,7 +334,7 @@ test('codex invoke produces correct CLI args with cwd', () => {
 
 test('registerAgent registers a virtual agent', () => {
   const def = {
-    type: 'virtual',
+    type: 'virtual' as const,
     baseAgent: 'claude',
     displayName: 'Test Virtual',
     rolePrompt: 'You are a test agent.',
@@ -410,7 +414,7 @@ test('resolvePhysicalAgent follows virtual → physical chain', () => {
 
 test('resolvePhysicalAgent returns null for unknown agents', () => {
   assert.equal(resolvePhysicalAgent('unknown'), null);
-  assert.equal(resolvePhysicalAgent(null), null);
+  assert.equal(resolvePhysicalAgent(null as unknown as string), null);
 });
 
 // ── listAgents ───────────────────────────────────────────────────────────────
@@ -460,7 +464,7 @@ test('getPhysicalAgentNames returns only physical agents', () => {
   for (const name of [...CLOUD_AGENT_NAMES, 'local']) {
     assert.ok(names.includes(name), `physical agent names should include ${name}`);
   }
-  assert.ok(names.every((name) => getAgent(name)?.type === 'physical'));
+  assert.ok(names.every((name: string) => getAgent(name)?.type === 'physical'));
 });
 
 test('getAllAgentNames includes virtual agents when registered', () => {
@@ -558,7 +562,7 @@ test('each AFFINITY_PRESETS entry covers all 10 task types with numbers', () => 
   for (const [presetName, affinity] of Object.entries(AFFINITY_PRESETS)) {
     for (const tt of TASK_TYPES) {
       assert.strictEqual(
-        typeof affinity[tt],
+        typeof affinity[tt as keyof typeof affinity],
         'number',
         `preset "${presetName}" missing task type: ${tt}`,
       );
@@ -569,12 +573,12 @@ test('each AFFINITY_PRESETS entry covers all 10 task types with numbers', () => 
 // ── Custom physical agents (CLI + API) ────────────────────────────────────────
 
 describe('initAgentRegistry — custom physical agents', () => {
-  let tmpDir;
+  let tmpDir: string;
 
   const CUSTOM_AGENTS = [
     {
       name: 'test-cli-agent',
-      type: 'cli',
+      type: 'cli' as const,
       displayName: 'Test CLI',
       invoke: {
         nonInteractive: { cmd: 'echo', args: ['{prompt}'] },
@@ -599,7 +603,7 @@ describe('initAgentRegistry — custom physical agents', () => {
     },
     {
       name: 'test-api-agent',
-      type: 'api',
+      type: 'api' as const,
       displayName: 'Test API',
       baseUrl: 'http://localhost:9999/v1',
       model: 'test-model',
@@ -668,9 +672,10 @@ describe('initAgentRegistry — custom physical agents', () => {
   it('entry with invalid type is silently skipped', () => {
     const withBadEntry = [
       ...CUSTOM_AGENTS,
-      { name: 'bad-type-agent', type: 'invalid', displayName: 'Bad' },
+      { name: 'bad-type-agent', type: 'invalid' as const, displayName: 'Bad' },
     ];
-    saveHydraConfig({ agents: { customAgents: withBadEntry } });
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    saveHydraConfig({ agents: { customAgents: withBadEntry as any } });
     _resetRegistry();
     initAgentRegistry();
 

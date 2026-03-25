@@ -19,11 +19,17 @@ import {
 
 // ── Helpers ─────────────────────────────────────────────────────────────────
 
-function tmpDir() {
+function tmpDir(): string {
   return fs.mkdtempSync(path.join(os.tmpdir(), 'hydra-sug-test-'));
 }
 
-function emptySuggestions() {
+interface SuggestionsData {
+  version: number;
+  entries: Array<Record<string, unknown>>;
+  stats: Record<string, unknown>;
+}
+
+function emptySuggestions(): SuggestionsData {
   return { version: 1, entries: [], stats: {} };
 }
 
@@ -34,7 +40,7 @@ test('loadSuggestions returns empty object for missing file', () => {
   const sg = loadSuggestions(dir);
   assert.equal(sg.version, 1);
   assert.deepEqual(sg.entries, []);
-  assert.equal(sg.stats.totalPending, 0);
+  assert.equal(sg.stats!['totalPending'], 0);
   fs.rmSync(dir, { recursive: true });
 });
 
@@ -78,9 +84,9 @@ test('saveSuggestions writes file and computes stats', () => {
   saveSuggestions(dir, sg);
 
   const raw = fs.readFileSync(path.join(dir, 'SUGGESTIONS.json'), 'utf8');
-  const loaded = JSON.parse(raw);
+  const loaded = JSON.parse(raw) as SuggestionsData;
   assert.equal(loaded.entries.length, 2);
-  assert.equal(loaded.stats.totalPending, 2);
+  assert.equal(loaded.stats?.['totalPending'], 2);
   fs.rmSync(dir, { recursive: true });
 });
 
@@ -90,13 +96,13 @@ test('addSuggestion generates sequential IDs', () => {
   const sg = emptySuggestions();
   const a = addSuggestion(sg, { title: 'First', description: 'A' });
   const b = addSuggestion(sg, { title: 'Second', description: 'B' });
-  assert.equal(a.id, 'SUG_001');
-  assert.equal(b.id, 'SUG_002');
+  assert.equal(a!.id, 'SUG_001');
+  assert.equal(b!.id, 'SUG_002');
 });
 
 test('addSuggestion sets default fields', () => {
   const sg = emptySuggestions();
-  const entry = addSuggestion(sg, { title: 'Test' });
+  const entry = addSuggestion(sg, { title: 'Test' })!;
   assert.equal(entry.status, 'pending');
   assert.equal(entry.source, 'user:manual');
   assert.equal(entry.priority, 'medium');
@@ -139,7 +145,7 @@ test('addSuggestion ignores abandoned entries during dedup', () => {
     title: 'Implement repository map generator for token-budgeted summaries',
     description: 'Same long description about repo maps',
   });
-  removeSuggestion(sg, first.id);
+  removeSuggestion(sg, first!.id!);
   const retry = addSuggestion(sg, {
     title: 'Implement repository map generator for token-budgeted summaries',
     description: 'Same long description about repo maps',
@@ -153,7 +159,7 @@ test('addSuggestion ignores abandoned entries during dedup', () => {
 test('updateSuggestion merges fields', () => {
   const sg = emptySuggestions();
   addSuggestion(sg, { title: 'Test' });
-  const updated = updateSuggestion(sg, 'SUG_001', { status: 'exploring', attempts: 1 });
+  const updated = updateSuggestion(sg, 'SUG_001', { status: 'exploring', attempts: 1 })!;
   assert.equal(updated.status, 'exploring');
   assert.equal(updated.attempts, 1);
   assert.equal(updated.title, 'Test');
@@ -170,7 +176,7 @@ test('removeSuggestion sets status to abandoned', () => {
   const sg = emptySuggestions();
   addSuggestion(sg, { title: 'Doomed' });
   removeSuggestion(sg, 'SUG_001');
-  assert.equal(sg.entries[0].status, 'abandoned');
+  assert.equal(sg.entries[0]['status'], 'abandoned');
 });
 
 // ── getPendingSuggestions ────────────────────────────────────────────────────
@@ -220,7 +226,7 @@ test('getSuggestionById finds entry', () => {
   const sg = emptySuggestions();
   addSuggestion(sg, { title: 'Find me' });
   const found = getSuggestionById(sg, 'SUG_001');
-  assert.equal(found.title, 'Find me');
+  assert.equal(found!.title, 'Find me');
 });
 
 test('getSuggestionById returns null for missing ID', () => {
@@ -254,7 +260,7 @@ test('searchSuggestions filters by status opt', () => {
   addSuggestion(sg, { title: 'Two', description: 'B' });
   updateSuggestion(sg, 'SUG_002', { status: 'completed' });
 
-  const results = searchSuggestions(sg, null, { status: 'pending' });
+  const results = searchSuggestions(sg, undefined, { status: 'pending' });
   assert.equal(results.length, 1);
   assert.equal(results[0].id, 'SUG_001');
 });
@@ -264,7 +270,7 @@ test('searchSuggestions filters by area opt', () => {
   addSuggestion(sg, { title: 'A', description: 'a', area: 'testing-reliability' });
   addSuggestion(sg, { title: 'B', description: 'b', area: 'ai-coding-tools' });
 
-  const results = searchSuggestions(sg, null, { area: 'testing-reliability' });
+  const results = searchSuggestions(sg, undefined, { area: 'testing-reliability' });
   assert.equal(results.length, 1);
   assert.equal(results[0].area, 'testing-reliability');
 });
@@ -273,7 +279,7 @@ test('searchSuggestions filters by area opt', () => {
 
 test('createSuggestionFromRound creates suggestion from rejected round', () => {
   const sg = emptySuggestions();
-  const roundResult = {
+  const roundResult: Record<string, unknown> = {
     round: 2,
     area: 'ai-coding-tools',
     verdict: 'reject',
@@ -282,7 +288,7 @@ test('createSuggestionFromRound creates suggestion from rejected round', () => {
       diagnoses: [{ diagnosis: 'transient', explanation: 'codex timed out' }],
     },
   };
-  const deliberation = {
+  const deliberation: Record<string, string> = {
     selectedImprovement:
       'Implement a lightweight repository map generator that produces token-budgeted codebase summaries',
   };
@@ -294,11 +300,11 @@ test('createSuggestionFromRound creates suggestion from rejected round', () => {
   });
 
   assert.notEqual(created, null);
-  assert.equal(created.source, 'auto:rejected-round');
-  assert.equal(created.area, 'ai-coding-tools');
-  assert.equal(created.priority, 'high'); // transient failures get high priority
-  assert.equal(created.specPath, 'docs/coordination/evolve/specs/ROUND_2_SPEC.md');
-  assert.ok(created.sourceRef.includes('evolve_2026-02-09_abc'));
+  assert.equal(created!.source, 'auto:rejected-round');
+  assert.equal(created!.area, 'ai-coding-tools');
+  assert.equal(created!.priority, 'high'); // transient failures get high priority
+  assert.equal(created!.specPath, 'docs/coordination/evolve/specs/ROUND_2_SPEC.md');
+  assert.ok(created!.sourceRef!.includes('evolve_2026-02-09_abc'));
 });
 
 test('createSuggestionFromRound returns null for empty improvement', () => {
@@ -327,11 +333,16 @@ test('createSuggestionFromRound returns null for short improvement', () => {
 
 test('createSuggestionFromRound deduplicates', () => {
   const sg = emptySuggestions();
-  const delib = {
+  const delib: Record<string, string> = {
     selectedImprovement:
       'Implement a lightweight repository map generator that produces token-budgeted summaries',
   };
-  const round = { round: 1, area: 'ai-coding-tools', verdict: 'reject', score: 1 };
+  const round: Record<string, unknown> = {
+    round: 1,
+    area: 'ai-coding-tools',
+    verdict: 'reject',
+    score: 1,
+  };
 
   createSuggestionFromRound(sg, round, delib);
   const dupe = createSuggestionFromRound(sg, round, delib);
@@ -357,7 +368,7 @@ test('createSuggestionFromRound sets deferred source for skipped rounds', () => 
       source: 'auto:deferred',
     },
   );
-  assert.equal(created.source, 'auto:deferred');
+  assert.equal(created!.source, 'auto:deferred');
 });
 
 // ── getSuggestionStats ──────────────────────────────────────────────────────
@@ -407,6 +418,6 @@ test('round-trip: save and reload preserves data', () => {
   assert.equal(loaded.entries.length, 1);
   assert.equal(loaded.entries[0].title, 'Judge quality gate');
   assert.equal(loaded.entries[0].priority, 'high');
-  assert.equal(loaded.stats.totalPending, 1);
+  assert.equal(loaded.stats!['totalPending'], 1);
   fs.rmSync(dir, { recursive: true });
 });

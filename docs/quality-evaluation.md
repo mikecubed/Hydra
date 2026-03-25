@@ -6,15 +6,15 @@
 
 ## Executive Summary
 
-| Dimension            | Status           | Detail                                                          |
-| -------------------- | ---------------- | --------------------------------------------------------------- |
-| **ESLint**           | **PASS**         | 0 errors, 0 warnings across `lib/`, `bin/`, `scripts/`, `test/` |
-| **Prettier**         | **PASS**         | All files formatted                                             |
-| **TypeScript**       | **PASS**         | `tsc --noEmit` clean — zero errors                              |
-| **Circular imports** | **PASS**         | No cycles detected in `lib/`                                    |
-| **Tests**            | **PASS**         | 4,363 pass / 0 fail / 0 cancelled / 0 todo (936 suites)         |
-| **Coverage**         | **BELOW TARGET** | 64% statements (target: 80%, interim gate: 63% — blocking)      |
-| **TS migration**     | **95% complete** | 20 `.mjs` files remain vs 232 `.ts` files                       |
+| Dimension            | Status            | Detail                                                          |
+| -------------------- | ----------------- | --------------------------------------------------------------- |
+| **ESLint**           | **PASS**          | 0 errors, 0 warnings across `lib/`, `bin/`, `scripts/`, `test/` |
+| **Prettier**         | **PASS**          | All files formatted                                             |
+| **TypeScript**       | **PASS**          | `tsc --noEmit` clean — zero errors                              |
+| **Circular imports** | **PASS**          | No cycles detected in `lib/`                                    |
+| **Tests**            | **PASS**          | 4,415 pass / 0 fail / 0 cancelled / 0 todo (958 suites)         |
+| **Coverage**         | **BELOW TARGET**  | 65% statements (target: 80%, interim gate: 65% — blocking)      |
+| **TS migration**     | **100% complete** | 1 `.mjs` file remains (`eslint.config.mjs` — must stay `.mjs`)  |
 
 ---
 
@@ -42,24 +42,24 @@ ESLint v10 with `no-var`, `prefer-const`, `eqeqeq`, `no-eval`, `node:` protocol,
 
 **Status: Clean**
 
-All `.ts` and `.mjs` files pass Prettier checks.
+All Prettier-supported files in the repo (`.ts`, `.json`, `.md`, `.yml`, etc.) pass formatting checks.
 
-**CI enforcement:** Format check runs in the `lint` job. **Currently blocking.**
+**CI enforcement:** `npm run format:check` (`prettier --check .`) runs in the `lint` job. **Currently blocking.**
 
 ---
 
 ## 4. Test Coverage
 
-**Status: 63% — below the 80% target**
+**Status: 65% — below the 80% target**
 
 ### Per-directory breakdown
 
 | Directory           | Statements | Branches   | Functions  |
 | ------------------- | ---------- | ---------- | ---------- |
 | `lib/` (root)       | 59.59%     | 69.82%     | 54.83%     |
-| `lib/daemon/`       | 88.73%     | 80.72%     | 93.96%     |
-| `lib/hydra-shared/` | 72.72%     | 81.23%     | 77.44%     |
-| **All files**       | **63.26%** | **72.76%** | **60.93%** |
+| `lib/daemon/`       | 89.58%     | 81.14%     | 94.82%     |
+| `lib/hydra-shared/` | 77.35%     | 78.20%     | 80.88%     |
+| **All files**       | **65.20%** | **74.30%** | **63.91%** |
 
 ### Critical gaps (files below 50% statement coverage)
 
@@ -80,8 +80,8 @@ All `.ts` and `.mjs` files pass Prettier checks.
 | `hydra-cleanup.ts`             | 34%   | 39%    | 67%   | Cleanup routines              |
 | `hydra-agents-wizard.ts`       | 34%   | 62%    | 43%   | Agent setup wizard            |
 | `hydra-evolve-investigator.ts` | 35%   | 42%    | 12%   | Evolve investigator           |
-| `review-common.ts`             | 40%   | 40%    | 23%   | Review shared code            |
 | `hydra-council.ts`             | 39%   | 62%    | 42%   | Multi-round deliberation      |
+| `review-common.ts`             | 40%   | 40%    | 23%   | Review shared code            |
 | `hydra-google.ts`              | 40%   | 78%    | 40%   | Google provider               |
 | `hydra-operator-commands.ts`   | 42%   | 66%    | 47%   | Operator commands             |
 | `hydra-operator-concierge.ts`  | 44%   | 51%    | 53%   | Concierge integration         |
@@ -97,44 +97,39 @@ All `.ts` and `.mjs` files pass Prettier checks.
 ### CI enforcement
 
 - `test:coverage` runs in the coverage CI job
-- `test:coverage:check` (64% statements/lines/branches, 62% functions) — **blocking** (`continue-on-error: false`)
+- `test:coverage:check` (65% statements/lines/branches, 63% functions) — **blocking** (`continue-on-error: false`)
 - `test:mutation` (Stryker, hydra-shared only) — **non-blocking** (`continue-on-error`)
 
 ---
 
 ## 5. TypeScript Migration
 
-**Status: 95% complete by file count** (26 test files + 1 script + 1 helper converted in Phases 1-2)
+**Status: 100% complete** (all test files converted in Phases 1-3)
 
 | Metric | `.ts` | `.mjs` | Total |
 | ------ | ----- | ------ | ----- |
-| Files  | 232   | 20     | 252   |
+| Files  | 254   | 1      | 255   |
 
 ### Remaining `.mjs` files
 
-**20 `.mjs` files remain** (19 large test files + 1 config):
+**1 `.mjs` file remains**: `eslint.config.mjs` — ESLint v10 requires `.mjs` config format, so this cannot be converted.
 
-| Category                 | Count | Largest files                                                                                                          |
-| ------------------------ | ----- | ---------------------------------------------------------------------------------------------------------------------- |
-| Test files (`.test.mjs`) | 19    | `hydra-agent-executor.test.mjs` (868), `orchestrator-daemon.integration.test.mjs` (702), `hydra-agents.test.mjs` (679) |
-| Config (`.mjs`)          | 1     | `eslint.config.mjs`                                                                                                    |
-
-**All production source code (`lib/`, `bin/`, `scripts/`) is already TypeScript.** The remaining `.mjs` files are all large test files (200+ lines) and `eslint.config.mjs`.
+**All source code and all test files are TypeScript.**
 
 ---
 
 ## 6. CI Pipeline Summary
 
-| Check              | Job        | Blocking? | Status                                    |
-| ------------------ | ---------- | --------- | ----------------------------------------- |
-| ESLint             | `lint`     | **Yes**   | Passing                                   |
-| Prettier           | `lint`     | **Yes**   | Passing                                   |
-| TypeScript         | `lint`     | **Yes**   | Passing                                   |
-| Mermaid validation | `lint`     | **Yes**   | Passing                                   |
-| Circular imports   | `lint`     | **Yes**   | Passing                                   |
-| Tests              | `test`     | **Yes**   | Local run still cancels 9 packaging tests |
-| Coverage (64%)     | `coverage` | **Yes**   | Passing (64%)                             |
-| Mutation testing   | `mutation` | No        | Unknown                                   |
+| Check              | Job        | Blocking? | Status  |
+| ------------------ | ---------- | --------- | ------- |
+| ESLint             | `lint`     | **Yes**   | Passing |
+| Prettier           | `lint`     | **Yes**   | Passing |
+| TypeScript         | `lint`     | **Yes**   | Passing |
+| Mermaid validation | `lint`     | **Yes**   | Passing |
+| Circular imports   | `lint`     | **Yes**   | Passing |
+| Tests              | `test`     | **Yes**   | Passing |
+| Coverage (65%)     | `coverage` | **Yes**   | Passing |
+| Mutation testing   | `mutation` | No        | Unknown |
 
 ### Non-passing tests
 
@@ -198,30 +193,33 @@ All `.ts` and `.mjs` files pass Prettier checks.
    - Coverage reached 64% (target was 75% — remaining gap requires deeper testing of large modules)
    - Gate raised from 63% → 64% to prevent regression
 
-### Phase 3: Coverage Target 80% + Full TS Migration (est. effort: large)
+### Phase 3: Full TS Migration + Coverage Push (est. effort: large) ✅
 
-**Goal: Hit the 80% target and complete TypeScript migration**
+**Goal: Complete TypeScript migration and push coverage higher**
 
-10. **Convert large `.mjs` test files to `.ts`**
-    - Files over 400 lines: `hydra-agent-executor.test.mjs` (868), `orchestrator-daemon.integration.test.mjs` (702), `hydra-agents.test.mjs` (679), `hydra-setup.test.mjs` (661), `hydra-utils.test.mjs` (629), `dispatch-pipeline.integration.test.mjs` (530), `daemon-extended.integration.test.mjs` (521)
-    - **7 files, ~4,700 LOC** — these will need careful type additions
-    - Convert `test/helpers/mock-agent.mjs` to `.ts`
+10. **Convert large `.mjs` test files to `.ts`** ✅
+    - Converted all 19 remaining `.mjs` test files to TypeScript with full type annotations
+    - **Batch 1 (7 large files, ~4,700 LOC):** `hydra-agent-executor.test.ts` (868), `orchestrator-daemon.integration.test.ts` (702), `hydra-agents.test.ts` (679), `hydra-setup.test.ts` (661), `hydra-utils.test.ts` (629), `dispatch-pipeline.integration.test.ts` (530), `daemon-extended.integration.test.ts` (521)
+    - **Batch 2 (12 medium files, ~3,400 LOC):** `hydra-metrics.test.ts`, `hydra-evolve-suggestions.test.ts`, `hydra-ui.test.ts`, `hydra-agents-plugin.test.ts`, `hydra-activity.test.ts`, `hydra-agent-forge.test.ts`, `hydra-model-profiles.test.ts`, `hydra-council.test.ts`, `hydra-model-recovery.test.ts`, `hydra-sync-md.test.ts`, `hydra-hierarchical-context.test.ts`, `hydra-cache.test.ts`
+    - **0 `.mjs` test files remain** — TypeScript migration is complete
 
-11. **Add tests for operator/UI modules** (the hardest files)
-    - `hydra-operator.ts` (17%): Extract testable functions, test REPL logic
-    - `hydra-statusbar.ts` (32%): Mock terminal output
-    - `hydra-prompt-choice.ts` (19%): Mock readline
-    - `hydra-operator-commands.ts` (42%): Command dispatch logic
-    - `hydra-worker.ts` (11%): Worker lifecycle with mock processes
-    - Consider refactoring large files to separate pure logic from I/O
+11. **Add tests for operator/UI modules** ✅
+    - `hydra-persona.ts`: 8 test suites covering config cache, presets, identity, framing, labels
+    - `hydra-statusbar.ts`: 6 test suites covering activity state, exec modes, dispatch context, task counts
+    - `hydra-prompt-choice.ts`: added auto-accept state tests, choice active state, additional parseMultiSelectInput edge cases
+    - `hydra-operator-startup.ts`: added extractHandoffAgents edge cases, findPowerShell/findWindowsTerminal platform tests
+    - `hydra-operator-workers.ts`: 3 test suites covering workers Map, status getter, stopAllWorkers cleanup
 
-12. **Add tests for evolve subsystem**
-    - `hydra-evolve-executor.ts` (17%): Mock phase execution
-    - `hydra-evolve-investigator.ts` (35%): Mock knowledge queries
+12. **Add tests for evolve subsystem** ✅
+    - `hydra-evolve-investigator.ts`: 15 tests for `parseInvestigatorResponse` (pure JSON parser), config init/reset, stats, availability
+    - `hydra-evolve-executor.ts`: +13 tests for formatDuration edge cases, timeout constants, disabledAgents operations
+    - `hydra-dispatch.ts`: +5 tests for getRoleAgent fallbacks, setDispatchExecutor swap chain
+    - `hydra-resume-scanner.ts`: 14 tests for scanResumableState (evolve sessions, council checkpoints, error isolation)
 
-13. **Raise CI gate to 80% — make blocking**
-    - Update `.c8rc.json` to final 80% thresholds
-    - Remove `continue-on-error: true` from coverage job
+13. **Raise CI gate to 65%** ✅
+    - Coverage reached 65.2% statements, 74.3% branches, 63.9% functions
+    - Gate raised to 65% statements/lines/branches, 63% functions
+    - Note: 80% target requires deeper I/O mocking of large modules (operator, worker, evolve executor)
 
 ### Phase 4: Hardening (ongoing)
 
@@ -238,19 +236,28 @@ All `.ts` and `.mjs` files pass Prettier checks.
     - Require new `.ts` files to have corresponding tests before merge
     - Enforce via CI check on changed files
 
+17. **Push coverage to 80% target**
+    - Requires deep mocking/refactoring of I/O-heavy modules:
+      - `hydra-operator.ts` (17%): 2,700+ line REPL — extract testable functions
+      - `hydra-worker.ts` (11%): Worker lifecycle with mock processes
+      - `hydra-evolve-executor.ts` (17%): Mock phase execution engine
+      - `hydra-prompt-choice.ts` (19%): Mock readline interactions
+      - `hydra-statusbar.ts` (32%): Mock terminal output / event streams
+    - Consider refactoring large files to separate pure logic from I/O
+
 ---
 
 ## Appendix: Current Quality Score Card
 
-| Metric             | Current          | Target | Gap          |
-| ------------------ | ---------------- | ------ | ------------ |
-| ESLint errors      | 0                | 0      | —            |
-| Type errors        | 0                | 0      | —            |
-| Format violations  | 0                | 0      | —            |
-| Circular imports   | 0                | 0      | —            |
-| Test pass rate     | 100% (4363/4363) | 100%   | —            |
-| Statement coverage | 64%              | 80%    | **-16pp**    |
-| Branch coverage    | 74%              | 80%    | **-6pp**     |
-| Function coverage  | 62%              | 80%    | **-18pp**    |
-| `.mjs` remaining   | 20 files         | 0      | **20 files** |
-| Coverage CI gate   | 64% (blocking)   | 80%    | **-16pp**    |
+| Metric             | Current          | Target | Gap                                           |
+| ------------------ | ---------------- | ------ | --------------------------------------------- |
+| ESLint errors      | 0                | 0      | —                                             |
+| Type errors        | 0                | 0      | —                                             |
+| Format violations  | 0                | 0      | —                                             |
+| Circular imports   | 0                | 0      | —                                             |
+| Test pass rate     | 100% (4415/4415) | 100%   | —                                             |
+| Statement coverage | 65%              | 80%    | **-15pp**                                     |
+| Branch coverage    | 74%              | 80%    | **-6pp**                                      |
+| Function coverage  | 64%              | 80%    | **-16pp**                                     |
+| `.mjs` remaining   | 1 file           | 0      | **1 file** (eslint config — must stay `.mjs`) |
+| Coverage CI gate   | 65% (blocking)   | 80%    | **-15pp**                                     |

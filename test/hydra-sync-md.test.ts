@@ -14,11 +14,11 @@ import {
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
-function makeTmpDir() {
+function makeTmpDir(): string {
   return fs.mkdtempSync(path.join(os.tmpdir(), 'hydra-sync-test-'));
 }
 
-function rmDir(dir) {
+function rmDir(dir: string): void {
   fs.rmSync(dir, { recursive: true, force: true });
 }
 
@@ -126,7 +126,7 @@ Gemini specific.
 // ── syncHydraMd ──────────────────────────────────────────────────────────────
 
 describe('syncHydraMd', () => {
-  let tmpDir;
+  let tmpDir: string;
 
   beforeEach(() => {
     tmpDir = makeTmpDir();
@@ -181,7 +181,7 @@ describe('syncHydraMd', () => {
 // ── hasHydraMd ───────────────────────────────────────────────────────────────
 
 describe('hasHydraMd', () => {
-  let tmpDir;
+  let tmpDir: string;
 
   beforeEach(() => {
     tmpDir = makeTmpDir();
@@ -203,7 +203,7 @@ describe('hasHydraMd', () => {
 // ── getAgentInstructionFile ──────────────────────────────────────────────────
 
 describe('getAgentInstructionFile', () => {
-  let tmpDir;
+  let tmpDir: string;
 
   beforeEach(() => {
     tmpDir = makeTmpDir();
