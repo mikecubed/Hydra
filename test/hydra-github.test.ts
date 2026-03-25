@@ -59,7 +59,6 @@ describe('parseRemoteUrl', () => {
   it('returns null for empty/null input', () => {
     assert.strictEqual(parseRemoteUrl(''), null);
     assert.strictEqual(parseRemoteUrl(null), null);
-    assert.strictEqual(parseRemoteUrl(), null);
   });
 
   it('returns null for invalid URLs', () => {

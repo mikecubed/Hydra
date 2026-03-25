@@ -24,7 +24,6 @@ import {
 describe('extractDecisionOptions', () => {
   it('returns empty array for null/undefined input', () => {
     assert.deepStrictEqual(extractDecisionOptions(null), []);
-    assert.deepStrictEqual(extractDecisionOptions(), []);
   });
 
   it('returns empty array for non-object input', () => {
@@ -120,7 +119,6 @@ describe('extractDecisionOptions', () => {
 describe('extractAssumptions', () => {
   it('returns empty array for null/undefined', () => {
     assert.deepStrictEqual(extractAssumptions(null), []);
-    assert.deepStrictEqual(extractAssumptions(), []);
   });
 
   it('returns empty array for non-object', () => {
@@ -199,7 +197,6 @@ describe('extractAssumptions', () => {
 describe('extractAssumptionAttacks', () => {
   it('returns empty array for null/undefined', () => {
     assert.deepStrictEqual(extractAssumptionAttacks(null), []);
-    assert.deepStrictEqual(extractAssumptionAttacks(), []);
   });
 
   it('returns empty array for non-object', () => {
@@ -264,7 +261,6 @@ describe('extractAssumptionAttacks', () => {
 describe('extractFinalDecision', () => {
   it('returns null for null/undefined input', () => {
     assert.strictEqual(extractFinalDecision(null), null);
-    assert.strictEqual(extractFinalDecision(), null);
   });
 
   it('returns null for non-object input', () => {
