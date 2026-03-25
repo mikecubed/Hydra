@@ -7,6 +7,8 @@
     "node": ">=24.0.0"
   },
   "scripts": {
+    "start": "node src/server.ts",
+    "start:with-web": "npm --workspace @hydra/web run build && node src/server.ts",
     "test": "node --test --experimental-test-module-mocks 'src/**/*.test.ts'"
   },
   "dependencies": {

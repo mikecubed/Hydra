@@ -64,6 +64,37 @@ these all share one origin:
 Standalone `npm run dev` in `apps/web` is still useful for frontend iteration, but API and WebSocket
 behavior will fail unless you provide your own proxy to the gateway.
 
+### Full local stack commands
+
+To run the browser, gateway, and daemon together in a way that supports a real same-origin browser
+session:
+
+1. Start the Hydra daemon from the repo root:
+
+   ```bash
+   npm start
+   ```
+
+2. In a second terminal, build and serve the web app through the gateway on `http://127.0.0.1:4174`:
+
+   ```bash
+   HYDRA_WEB_OPERATOR_ID=admin \
+   HYDRA_WEB_OPERATOR_SECRET=password123 \
+   npm --workspace @hydra/web-gateway run start:with-web
+   ```
+
+3. Open `http://127.0.0.1:4174/workspace`.
+
+Notes:
+
+- The gateway serves the built frontend from `apps/web/dist`, proxies browser API calls to the
+  daemon at `http://127.0.0.1:4173`, and owns the WebSocket endpoint at `/ws`.
+- The seeded operator is for local development only. Operator, session, and audit state are stored
+  under `~/.hydra/web-gateway` by default.
+- There is still **no dedicated browser login screen**, so a fully interactive browser session
+  depends on either existing session cookies or the next auth/UI slice. The command above gives you
+  the correct same-origin stack for end-to-end wiring and API/session testing today.
+
 ### How to use it in its current state
 
 1. Open the app; the index route redirects to `/workspace`.

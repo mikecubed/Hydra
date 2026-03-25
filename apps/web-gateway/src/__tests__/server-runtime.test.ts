@@ -1,0 +1,105 @@
+import { afterEach, describe, it } from 'node:test';
+import assert from 'node:assert/strict';
+import { mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { join } from 'node:path';
+import { tmpdir } from 'node:os';
+import {
+  createStaticAssetResponse,
+  isGatewayRoute,
+  resolveGatewayServerConfig,
+} from '../server-runtime.ts';
+
+describe('resolveGatewayServerConfig', () => {
+  it('uses local defaults', () => {
+    const config = resolveGatewayServerConfig({});
+
+    assert.equal(config.host, '127.0.0.1');
+    assert.equal(config.port, 4174);
+    assert.equal(config.publicOrigin, 'http://127.0.0.1:4174');
+    assert.equal(config.daemonUrl, 'http://127.0.0.1:4173');
+    assert.equal(config.operatorId, null);
+    assert.equal(config.operatorSecret, null);
+  });
+
+  it('applies env overrides and validates seeded operator pairing', () => {
+    const config = resolveGatewayServerConfig({
+      HYDRA_WEB_GATEWAY_HOST: 'localhost',
+      HYDRA_WEB_GATEWAY_PORT: '4300',
+      HYDRA_WEB_GATEWAY_ORIGIN: 'http://localhost:4300',
+      HYDRA_DAEMON_URL: 'http://localhost:4999',
+      HYDRA_WEB_OPERATOR_ID: 'admin',
+      HYDRA_WEB_OPERATOR_SECRET: 'password123',
+      HYDRA_WEB_OPERATOR_DISPLAY_NAME: 'Admin User',
+    });
+
+    assert.equal(config.port, 4300);
+    assert.equal(config.publicOrigin, 'http://localhost:4300');
+    assert.equal(config.daemonUrl, 'http://localhost:4999');
+    assert.equal(config.operatorId, 'admin');
+    assert.equal(config.operatorDisplayName, 'Admin User');
+  });
+
+  it('rejects partial operator seed configuration', () => {
+    assert.throws(
+      () =>
+        resolveGatewayServerConfig({
+          HYDRA_WEB_OPERATOR_ID: 'admin',
+        }),
+      /must either both be set or both be unset/,
+    );
+  });
+});
+
+describe('isGatewayRoute', () => {
+  it('detects API and websocket paths', () => {
+    assert.equal(isGatewayRoute('/auth/login'), true);
+    assert.equal(isGatewayRoute('/conversations/abc'), true);
+    assert.equal(isGatewayRoute('/ws'), true);
+    assert.equal(isGatewayRoute('/workspace'), false);
+  });
+});
+
+describe('createStaticAssetResponse', () => {
+  let tempDir: string | null = null;
+
+  afterEach(async () => {
+    const cleanupDir = tempDir;
+    tempDir = null;
+    if (cleanupDir != null) {
+      await rm(cleanupDir, { recursive: true, force: true });
+    }
+  });
+
+  it('serves direct assets and SPA fallback from the static dir', async () => {
+    tempDir = await mkdtemp(join(tmpdir(), 'hydra-web-static-'));
+    await writeFile(join(tempDir, 'index.html'), '<!doctype html><div id="app"></div>');
+    await writeFile(join(tempDir, 'app.js'), 'console.log("hydra");');
+
+    const assetResponse = await createStaticAssetResponse(tempDir, '/app.js');
+    assert.ok(assetResponse);
+    assert.equal(assetResponse.status, 200);
+    assert.match(await assetResponse.text(), /hydra/);
+
+    const routeResponse = await createStaticAssetResponse(tempDir, '/workspace');
+    assert.ok(routeResponse);
+    assert.equal(routeResponse.status, 200);
+    assert.match(await routeResponse.text(), /id="app"/);
+  });
+
+  it('returns null for gateway-owned routes', async () => {
+    tempDir = await mkdtemp(join(tmpdir(), 'hydra-web-static-'));
+    await writeFile(join(tempDir, 'index.html'), '<!doctype html>');
+
+    const response = await createStaticAssetResponse(tempDir, '/auth/login');
+    assert.equal(response, null);
+  });
+
+  it('reports missing frontend builds clearly', async () => {
+    tempDir = await mkdtemp(join(tmpdir(), 'hydra-web-static-'));
+
+    const response = await createStaticAssetResponse(tempDir, '/workspace');
+    assert.ok(response);
+    assert.equal(response.status, 503);
+    assert.match(await response.text(), /Run `npm --workspace @hydra\/web run build` first/);
+  });
+});
