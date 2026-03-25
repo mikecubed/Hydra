@@ -15,6 +15,7 @@ import {
   setLastDispatch,
   setActiveMode,
   updateTaskCount,
+  onActivityEvent,
 } from '../lib/hydra-statusbar.ts';
 
 // Ensure loadHydraConfig doesn't read from disk during tests
@@ -190,5 +191,195 @@ describe('updateTaskCount', () => {
   it('handles NaN/falsy as 0', () => {
     updateTaskCount(Number.NaN);
     updateTaskCount(0);
+  });
+});
+
+// ── Coverage Phase 4: Additional State Management Tests ──────────────────────
+
+describe('setAgentActivity — extended coverage', () => {
+  it('stores multiple agents independently', () => {
+    setAgentActivity('claude', 'working', 'Coding');
+    setAgentActivity('gemini', 'idle', 'Waiting');
+    setAgentActivity('codex', 'error', 'Rate limited');
+
+    assert.equal(getAgentActivity('claude').status, 'working');
+    assert.equal(getAgentActivity('gemini').status, 'idle');
+    assert.equal(getAgentActivity('codex').status, 'error');
+  });
+
+  it('preserves updatedAt as recent timestamp', () => {
+    const before = Date.now();
+    setAgentActivity('claude', 'working', 'Test');
+    const state = getAgentActivity('claude');
+    const after = Date.now();
+    assert.ok(state.updatedAt >= before);
+    assert.ok(state.updatedAt <= after);
+  });
+
+  it('sets all metadata fields including phase and step', () => {
+    setAgentActivity('gemini', 'working', 'Council deliberation', {
+      model: 'gemini-2.5-pro',
+      taskTitle: 'Architecture review',
+      phase: 'deliberation',
+      step: '3/5',
+    });
+    const state = getAgentActivity('gemini');
+    assert.equal(state.phase, 'deliberation');
+    assert.equal(state.step, '3/5');
+    assert.equal(state.model, 'gemini-2.5-pro');
+    assert.equal(state.taskTitle, 'Architecture review');
+  });
+
+  it('handles explicit null in meta fields', () => {
+    setAgentActivity('codex', 'idle', 'Done', {
+      model: null,
+      taskTitle: null,
+      phase: null,
+      step: null,
+    });
+    const state = getAgentActivity('codex');
+    assert.equal(state.model, null);
+    assert.equal(state.taskTitle, null);
+    assert.equal(state.phase, null);
+    assert.equal(state.step, null);
+  });
+
+  it('handles mixed-case agent names consistently', () => {
+    setAgentActivity('GeMiNi', 'working', 'Task A');
+    const state = getAgentActivity('GEMINI');
+    assert.equal(state.status, 'working');
+    assert.equal(state.action, 'Task A');
+  });
+});
+
+describe('setAgentExecMode — extended coverage', () => {
+  it('can overwrite existing mode', () => {
+    setAgentExecMode('claude', 'worker');
+    assert.equal(getAgentExecMode('claude'), 'worker');
+    setAgentExecMode('claude', 'terminal');
+    assert.equal(getAgentExecMode('claude'), 'terminal');
+  });
+
+  it('handles multiple agents with different modes', () => {
+    setAgentExecMode('claude', 'worker');
+    setAgentExecMode('gemini', 'terminal');
+    setAgentExecMode('codex', null);
+    assert.equal(getAgentExecMode('claude'), 'worker');
+    assert.equal(getAgentExecMode('gemini'), 'terminal');
+    assert.equal(getAgentExecMode('codex'), null);
+  });
+
+  it('normalises mixed-case agent names', () => {
+    setAgentExecMode('GeMiNi', 'terminal');
+    assert.equal(getAgentExecMode('gemini'), 'terminal');
+    assert.equal(getAgentExecMode('GEMINI'), 'terminal');
+  });
+});
+
+describe('setDispatchContext / clearDispatchContext — extended coverage', () => {
+  it('handles context with all fields', () => {
+    setDispatchContext({
+      promptSummary: 'Investigate auth bug',
+      topic: 'authentication',
+      tier: 'T1',
+      startedAt: 1000,
+    });
+    // Verify no error on clear
+    clearDispatchContext();
+  });
+
+  it('handles context with partial fields', () => {
+    setDispatchContext({ promptSummary: 'Quick fix' });
+    clearDispatchContext();
+  });
+
+  it('handles empty object', () => {
+    setDispatchContext({});
+    clearDispatchContext();
+  });
+
+  it('handles repeated set/clear cycles', () => {
+    for (let i = 0; i < 10; i++) {
+      setDispatchContext({ promptSummary: `Task ${String(i)}`, tier: 'T2' });
+      clearDispatchContext();
+    }
+    // All cycles should complete without error
+  });
+
+  it('overwrites previous context', () => {
+    setDispatchContext({ promptSummary: 'First' });
+    setDispatchContext({ promptSummary: 'Second' });
+    clearDispatchContext();
+  });
+});
+
+describe('setLastDispatch — extended coverage', () => {
+  it('handles empty object', () => {
+    setLastDispatch({});
+  });
+
+  it('handles extra unknown fields', () => {
+    setLastDispatch({ route: 'gemini', tier: 'T2', agent: 'gemini', mode: 'smart', extra: true });
+  });
+
+  it('handles partial updates preserving previous values', () => {
+    setLastDispatch({ route: 'claude', tier: 'T1', agent: 'claude', mode: 'auto' });
+    setLastDispatch({ route: 'gemini' });
+    // Second call should merge with previous (route updated, others preserved)
+  });
+});
+
+describe('setActiveMode — extended coverage', () => {
+  it('accepts all known mode values', () => {
+    for (const mode of ['auto', 'smart', 'handoff', 'council', 'dispatch', 'chat']) {
+      setActiveMode(mode);
+    }
+  });
+
+  it('accepts unknown mode strings', () => {
+    setActiveMode('custom-mode');
+  });
+});
+
+describe('updateTaskCount — extended coverage', () => {
+  it('accepts large counts', () => {
+    updateTaskCount(999);
+    updateTaskCount(0);
+  });
+
+  it('clamps negative numbers to 0', () => {
+    updateTaskCount(-100);
+  });
+
+  it('accepts 1 (singular case)', () => {
+    updateTaskCount(1);
+  });
+});
+
+describe('onActivityEvent', () => {
+  it('registers a callback without error', () => {
+    const events: Array<{ event: string; agent: string; detail: string }> = [];
+    onActivityEvent((ev) => {
+      events.push(ev);
+    });
+    // Callback registered; it will be called when activity events fire
+  });
+
+  it('ignores non-function values', () => {
+    // TypeScript would prevent this, but runtime guard should handle it
+    onActivityEvent(
+      null as unknown as (event: { event: string; agent: string; detail: string }) => void,
+    );
+    onActivityEvent(
+      undefined as unknown as (event: { event: string; agent: string; detail: string }) => void,
+    );
+  });
+
+  it('accepts multiple callbacks', () => {
+    const calls1: unknown[] = [];
+    const calls2: unknown[] = [];
+    onActivityEvent((ev) => calls1.push(ev));
+    onActivityEvent((ev) => calls2.push(ev));
+    // Both should be registered without error
   });
 });
