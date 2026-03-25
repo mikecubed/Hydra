@@ -3,6 +3,7 @@
  */
 
 import { buildSelfSnapshot } from '../hydra-self.ts';
+import { handleOperationsReadRoute } from './web-operations-routes.ts';
 import type {
   ReadRouteCtx,
   TaskEntry,
@@ -626,6 +627,10 @@ export async function handleReadRoute(ctx: ReadRouteCtx): Promise<boolean> {
 
   if (route.startsWith('/task/') && route.endsWith('/checkpoints')) {
     return handleTaskCheckpoints(ctx);
+  }
+
+  if (route.startsWith('/operations/')) {
+    return handleOperationsReadRoute(ctx);
   }
 
   return false;
