@@ -141,6 +141,24 @@ describe('projectQueueSnapshot', () => {
       assert.equal(result.queue[0].status, 'active');
     });
 
+    it('projects an in_progress task as paused when its owning active session is paused', () => {
+      const state = makeState({
+        tasks: [makeTask({ id: 'task-2', status: 'in_progress', owner: 'codex' })],
+        activeSession: {
+          id: 'session-1',
+          focus: 'Queue visibility',
+          owner: 'codex',
+          status: 'paused',
+          startedAt: '2026-03-25T00:00:00.000Z',
+          updatedAt: '2026-03-25T00:01:00.000Z',
+          pauseReason: 'Awaiting operator input',
+          pausedAt: '2026-03-25T00:01:00.000Z',
+        },
+      });
+      const result = projectQueueSnapshot(state);
+      assert.equal(result.queue[0].status, 'paused');
+    });
+
     it('projects a done task as completed', () => {
       const state = makeState({
         tasks: [makeTask({ id: 'task-3', status: 'done' })],
@@ -320,6 +338,31 @@ describe('projectQueueSnapshot', () => {
       });
       const result = projectQueueSnapshot(state, { statusFilter: ['waiting', 'active'] });
       assert.equal(result.queue.length, 2);
+    });
+
+    it('filters paused items when the owning active session is paused', () => {
+      const state = makeState({
+        tasks: [
+          makeTask({ id: 'paused-1', status: 'in_progress', owner: 'codex' }),
+          makeTask({ id: 'active-1', status: 'in_progress', owner: 'claude' }),
+        ],
+        activeSession: {
+          id: 'session-1',
+          focus: 'Paused work',
+          owner: 'codex',
+          status: 'paused',
+          startedAt: '2026-03-25T00:00:00.000Z',
+          updatedAt: '2026-03-25T00:01:00.000Z',
+          pauseReason: 'Waiting',
+          pausedAt: '2026-03-25T00:01:00.000Z',
+        },
+      });
+      const result = projectQueueSnapshot(state, { statusFilter: ['paused'] });
+      assert.deepStrictEqual(
+        result.queue.map((item) => item.id),
+        ['paused-1'],
+      );
+      assert.equal(result.queue[0].status, 'paused');
     });
 
     it('returns all items when no filter is set', () => {

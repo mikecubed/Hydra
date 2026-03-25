@@ -42,8 +42,10 @@ describe('workspace operations panel hydration', () => {
       ],
       health: {
         status: 'healthy',
-        summary: 'Daemon healthy',
-        checkedAt: '2026-07-01T00:00:00.000Z',
+        scope: 'global',
+        observedAt: '2026-07-01T00:00:00.000Z',
+        message: 'Daemon healthy',
+        detailsAvailability: 'ready',
       },
       budget: null,
       availability: 'ready',

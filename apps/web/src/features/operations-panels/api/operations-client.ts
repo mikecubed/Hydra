@@ -8,8 +8,8 @@
 import type {
   BatchControlDiscoveryRequest,
   BatchControlDiscoveryResponse,
+  GetOperationsSnapshotResponse as GetOperationsSnapshotResponseType,
   GetOperationsSnapshotRequest,
-  GetOperationsSnapshotResponse,
   GetWorkItemControlsResponse,
   GetWorkItemDetailResponse,
   GetWorkItemExecutionResponse,
@@ -17,6 +17,7 @@ import type {
   SubmitControlActionBody,
   SubmitControlActionResponse,
 } from '@hydra/web-contracts';
+import { GetOperationsSnapshotResponse } from '@hydra/web-contracts';
 import { type GatewayErrorBody, parseGatewayError } from '../../../shared/gateway-errors.ts';
 
 export interface OperationsClientOptions {
@@ -37,10 +38,28 @@ export class OperationsRequestError extends Error {
   }
 }
 
+export class OperationsResponseValidationError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'OperationsResponseValidationError';
+  }
+}
+
+function parseSnapshotResponse(body: unknown): GetOperationsSnapshotResponseType {
+  const parsed = GetOperationsSnapshotResponse.safeParse(body);
+  if (!parsed.success) {
+    throw new OperationsResponseValidationError(
+      `Invalid operations snapshot response: ${parsed.error.message}`,
+    );
+  }
+
+  return parsed.data;
+}
+
 export interface OperationsClient {
   getSnapshot(
     query?: Partial<GetOperationsSnapshotRequest>,
-  ): Promise<GetOperationsSnapshotResponse>;
+  ): Promise<GetOperationsSnapshotResponseType>;
   getWorkItemDetail(workItemId: string): Promise<GetWorkItemDetailResponse>;
   getWorkItemCheckpoints(workItemId: string): Promise<GetWorkItemCheckpointsResponse>;
   getWorkItemExecution(workItemId: string): Promise<GetWorkItemExecutionResponse>;
@@ -139,6 +158,7 @@ export function createOperationsClient(options: OperationsClientOptions): Operat
     path: string,
     init: RequestInit = {},
     query?: Record<string, QueryValue>,
+    parse?: (body: unknown) => T,
   ): Promise<T> {
     const url = buildRequestUrl(baseUrl, path, query);
 
@@ -160,15 +180,17 @@ export function createOperationsClient(options: OperationsClientOptions): Operat
       throw new OperationsRequestError(response.status, await extractGatewayError(response));
     }
 
-    return (await response.json()) as T;
+    const body = (await response.json()) as unknown;
+    return parse == null ? (body as T) : parse(body);
   }
 
   return {
     getSnapshot(query = {}) {
-      return request<GetOperationsSnapshotResponse>(
+      return request<GetOperationsSnapshotResponseType>(
         '/operations/snapshot',
         { method: 'GET' },
         query,
+        parseSnapshotResponse,
       );
     },
     getWorkItemDetail(workItemId) {

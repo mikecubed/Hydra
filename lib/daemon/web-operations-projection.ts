@@ -7,7 +7,7 @@
  * inferring state from raw internals.
  */
 
-import type { HydraStateShape, TaskEntry, TaskStatus } from '../types.ts';
+import type { ActiveSessionEntry, HydraStateShape, TaskEntry, TaskStatus } from '../types.ts';
 import type { WorkItemStatus, WorkQueueItemView, RiskSignal } from '@hydra/web-contracts';
 
 // ── Status Normalization ───────────────────────────────────────────────────
@@ -31,6 +31,21 @@ export function normalizeTaskStatus(status: string): WorkItemStatus {
   return status in DAEMON_TO_WORK_ITEM_STATUS
     ? DAEMON_TO_WORK_ITEM_STATUS[status as TaskStatus]
     : 'waiting';
+}
+
+function resolveProjectedStatus(
+  task: TaskEntry,
+  activeSession: ActiveSessionEntry | null | undefined,
+): WorkItemStatus {
+  if (
+    task.status === 'in_progress' &&
+    activeSession?.status === 'paused' &&
+    activeSession.owner === task.owner
+  ) {
+    return 'paused';
+  }
+
+  return normalizeTaskStatus(task.status);
 }
 
 // ── Ordering ───────────────────────────────────────────────────────────────
@@ -79,8 +94,11 @@ function buildRiskSignals(task: TaskEntry, normalized: WorkItemStatus): readonly
 
 // ── Projection ─────────────────────────────────────────────────────────────
 
-function projectTaskToQueueItem(task: TaskEntry): WorkQueueItemView {
-  const status = normalizeTaskStatus(task.status);
+function projectTaskToQueueItem(
+  task: TaskEntry,
+  activeSession: ActiveSessionEntry | null | undefined,
+): WorkQueueItemView {
+  const status = resolveProjectedStatus(task, activeSession);
   const checkpoints = task.checkpoints ?? [];
   const lastCheckpoint = checkpoints.at(-1) ?? null;
   const ownerLabel = task.owner === '' ? null : task.owner;
@@ -122,7 +140,9 @@ export function projectQueueSnapshot(
 ): QueueSnapshotResult {
   const { statusFilter, limit } = options;
 
-  let items: WorkQueueItemView[] = state.tasks.map((task) => projectTaskToQueueItem(task));
+  let items: WorkQueueItemView[] = state.tasks.map((task) =>
+    projectTaskToQueueItem(task, state.activeSession),
+  );
 
   if (statusFilter != null && statusFilter.length > 0) {
     const filterSet = new Set<WorkItemStatus>(statusFilter);
