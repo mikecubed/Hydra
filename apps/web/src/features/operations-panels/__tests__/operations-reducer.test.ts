@@ -113,10 +113,7 @@ function applyActions(
   state: OperationsWorkspaceState,
   actions: readonly OperationsAction[],
 ): OperationsWorkspaceState {
-  return actions.reduce(
-    (s, action) => reduceOperationsState(s, action),
-    state,
-  );
+  return actions.reduce((s, action) => reduceOperationsState(s, action), state);
 }
 
 // ─── createInitialOperationsState ───────────────────────────────────────────
@@ -237,7 +234,9 @@ describe('snapshot lifecycle', () => {
       availability: 'ready',
     });
     const second = makeSnapshotResponse({
-      queue: [makeQueueItem({ id: 'wq-1', status: 'completed', detailAvailability: 'unavailable' })],
+      queue: [
+        makeQueueItem({ id: 'wq-1', status: 'completed', detailAvailability: 'unavailable' }),
+      ],
       lastSynchronizedAt: LATER,
     });
 
@@ -663,13 +662,6 @@ describe('selectControlsForSelectedItem', () => {
 // ─── Edge cases ─────────────────────────────────────────────────────────────
 
 describe('edge cases', () => {
-  it('unknown action returns state unchanged', () => {
-    const state = createInitialOperationsState();
-    // @ts-expect-error — intentionally passing an unknown action type
-    const next = reduceOperationsState(state, { type: 'unknown/action' });
-    assert.equal(next, state);
-  });
-
   it('deselecting when nothing is selected is a no-op', () => {
     const state = createInitialOperationsState();
     const next = reduceOperationsState(state, { type: 'selection/deselect' });

@@ -223,6 +223,10 @@ function reduceControlsDiscoveryLoaded(
   };
 }
 
+function assertNever(action: never): never {
+  throw new Error(`Unhandled operations action: ${JSON.stringify(action)}`);
+}
+
 // ─── Top-level reducer ──────────────────────────────────────────────────────
 
 export function reduceOperationsState(
@@ -250,7 +254,7 @@ export function reduceOperationsState(
       return reduceControlsSubmitResolved(state, action.workItemId);
     case 'controls/discovery-loaded':
       return reduceControlsDiscoveryLoaded(state, action.discovery);
-    default:
-      return state;
   }
+
+  return assertNever(action);
 }
