@@ -166,14 +166,21 @@ function createOptionalWsServer(
   });
 }
 
-export function createGatewayApp(deps: GatewayAppDeps = {}): GatewayApp {
-  // TLS validation: non-loopback deployments require cert+key (FR-024)
-  if (deps.tlsConfig) {
-    validateTlsConfig(deps.tlsConfig);
-  }
+interface GatewayRuntime {
+  clock: Clock;
+  allowedOrigin: string;
+  operatorStore: OperatorStore;
+  auditService: AuditService;
+  sessionService: SessionService;
+  authService: AuthService;
+  heartbeat: DaemonHeartbeat;
+  sessionStateBroadcaster: SessionStateBroadcaster;
+  connectionRegistry: ConnectionRegistry;
+  eventBuffer: EventBuffer;
+  mutatingLimiter: RateLimiter;
+}
 
-  const resolvedConfigs = resolveSecurityConfigs(deps);
-
+function createGatewayRuntime(deps: GatewayAppDeps): GatewayRuntime {
   const clock = deps.clock ?? new SystemClock();
   const sessionStore = deps.sessionStore ?? new SessionStore(null);
   const operatorStore = deps.operatorStore ?? new OperatorStore(null);
@@ -193,7 +200,6 @@ export function createGatewayApp(deps: GatewayAppDeps = {}): GatewayApp {
   const authService = new AuthService(operatorStore, rateLimiter, sessionService, auditService);
   const connectionRegistry = deps.connectionRegistry ?? new ConnectionRegistry();
   const eventBuffer = deps.eventBuffer ?? new EventBuffer();
-
   const heartbeat = new DaemonHeartbeat(
     sessionService,
     sessionStore,
@@ -201,73 +207,121 @@ export function createGatewayApp(deps: GatewayAppDeps = {}): GatewayApp {
     deps.heartbeatConfig,
   );
   heartbeat.start();
-  const mutatingLimiter = deps.mutatingLimiter ?? new RateLimiter(clock, DEFAULT_MUTATING_LIMITS);
-
-  const app = new Hono<GatewayEnv>();
-
-  // Source-key middleware — must run before any rate limiter
-  app.use('*', createSourceKeyMiddleware(deps.sourceKeyConfig));
-
-  // Global security headers
-  app.use('*', createHardenedHeaders(resolvedConfigs.headersConfig));
-
-  // Origin guard on all routes
-  app.use('*', createOriginGuard(allowedOrigin));
-
-  // Mutating rate limiter
-  app.use('*', createMutatingRateLimiter(mutatingLimiter));
-
-  // Auth routes — login is unauthenticated; logout/reauth need CSRF protection
-  app.route(
-    '/auth',
-    createProtectedAuthApp(authService, sessionService, resolvedConfigs.authRoutesConfig),
-  );
-
-  // Session routes (info/extend) — require valid session + CSRF
-  const sessionRoutes = createSessionRoutes(sessionService);
-  app.route('/session', createProtectedRouteGroup(sessionRoutes, sessionService, auditService));
-
-  // Conversation routes (T015, T015b) — require valid session + CSRF.
-  // Routes define their own paths: /conversations/*, /approvals/*, /turns/*, /artifacts/*
-  const daemonClient =
-    deps.daemonClient ??
-    new DaemonClient(deps.daemonClientOptions ?? { baseUrl: 'http://localhost:4173' });
-  const conversationRoutes = createConversationRoutes(daemonClient);
-  const protectedRootRoutes = new Hono<GatewayEnv>();
-  protectedRootRoutes.route('/', conversationRoutes);
-
-  // Operations routes (T010 — US1 queue visibility) — require valid session + CSRF.
-  // Routes define their own paths: /operations/*
-  const defaultOpsBaseUrl = deps.daemonClientOptions?.baseUrl ?? 'http://localhost:4173';
-  const operationsClient =
-    deps.operationsClient ??
-    new DaemonOperationsClient(deps.operationsClientOptions ?? { baseUrl: defaultOpsBaseUrl });
-  const operationsRoutes = createOperationsRoutes({ daemonClient: operationsClient });
-  protectedRootRoutes.route('/', operationsRoutes);
-  app.route('/', createProtectedRouteGroup(protectedRootRoutes, sessionService, auditService));
-
-  const wsServer = createOptionalWsServer(deps, {
-    server: deps.server,
-    sessionService,
-    sessionStateBroadcaster,
-    allowedOrigin,
-    connectionRegistry,
-    clock,
-    mutatingLimiter,
-    daemonClient,
-    eventBuffer,
-  });
 
   return {
-    app,
+    clock,
+    allowedOrigin,
+    operatorStore,
+    auditService,
     sessionService,
     authService,
-    auditService,
-    operatorStore,
     heartbeat,
     sessionStateBroadcaster,
     connectionRegistry,
     eventBuffer,
+    mutatingLimiter: deps.mutatingLimiter ?? new RateLimiter(clock, DEFAULT_MUTATING_LIMITS),
+  };
+}
+
+function applyGatewayMiddleware(
+  app: Hono<GatewayEnv>,
+  deps: GatewayAppDeps,
+  headersConfig: HardenedHeadersConfig,
+  allowedOrigin: string,
+  mutatingLimiter: RateLimiter,
+): void {
+  app.use('*', createSourceKeyMiddleware(deps.sourceKeyConfig));
+  app.use('*', createHardenedHeaders(headersConfig));
+  app.use('*', createOriginGuard(allowedOrigin));
+  app.use('*', createMutatingRateLimiter(mutatingLimiter));
+}
+
+function createProtectedRootRoutes(
+  deps: GatewayAppDeps,
+  daemonClient: DaemonClient,
+): Hono<GatewayEnv> {
+  const protectedRootRoutes = new Hono<GatewayEnv>();
+  protectedRootRoutes.route('/', createConversationRoutes(daemonClient));
+
+  const defaultOpsBaseUrl = deps.daemonClientOptions?.baseUrl ?? 'http://localhost:4173';
+  const operationsClient =
+    deps.operationsClient ??
+    new DaemonOperationsClient(deps.operationsClientOptions ?? { baseUrl: defaultOpsBaseUrl });
+  protectedRootRoutes.route('/', createOperationsRoutes({ daemonClient: operationsClient }));
+
+  return protectedRootRoutes;
+}
+
+function registerGatewayRoutes(
+  app: Hono<GatewayEnv>,
+  deps: GatewayAppDeps,
+  runtime: GatewayRuntime,
+  authRoutesConfig: AuthRoutesConfig,
+): DaemonClient {
+  app.route(
+    '/auth',
+    createProtectedAuthApp(runtime.authService, runtime.sessionService, authRoutesConfig),
+  );
+
+  const sessionRoutes = createSessionRoutes(runtime.sessionService);
+  app.route(
+    '/session',
+    createProtectedRouteGroup(sessionRoutes, runtime.sessionService, runtime.auditService),
+  );
+
+  const daemonClient =
+    deps.daemonClient ??
+    new DaemonClient(deps.daemonClientOptions ?? { baseUrl: 'http://localhost:4173' });
+  const protectedRootRoutes = createProtectedRootRoutes(deps, daemonClient);
+  app.route(
+    '/',
+    createProtectedRouteGroup(protectedRootRoutes, runtime.sessionService, runtime.auditService),
+  );
+
+  return daemonClient;
+}
+
+export function createGatewayApp(deps: GatewayAppDeps = {}): GatewayApp {
+  // TLS validation: non-loopback deployments require cert+key (FR-024)
+  if (deps.tlsConfig) {
+    validateTlsConfig(deps.tlsConfig);
+  }
+
+  const resolvedConfigs = resolveSecurityConfigs(deps);
+  const runtime = createGatewayRuntime(deps);
+
+  const app = new Hono<GatewayEnv>();
+  applyGatewayMiddleware(
+    app,
+    deps,
+    resolvedConfigs.headersConfig,
+    runtime.allowedOrigin,
+    runtime.mutatingLimiter,
+  );
+  const daemonClient = registerGatewayRoutes(app, deps, runtime, resolvedConfigs.authRoutesConfig);
+
+  const wsServer = createOptionalWsServer(deps, {
+    server: deps.server,
+    sessionService: runtime.sessionService,
+    sessionStateBroadcaster: runtime.sessionStateBroadcaster,
+    allowedOrigin: runtime.allowedOrigin,
+    connectionRegistry: runtime.connectionRegistry,
+    clock: runtime.clock,
+    mutatingLimiter: runtime.mutatingLimiter,
+    daemonClient,
+    eventBuffer: runtime.eventBuffer,
+  });
+
+  return {
+    app,
+    sessionService: runtime.sessionService,
+    authService: runtime.authService,
+    auditService: runtime.auditService,
+    operatorStore: runtime.operatorStore,
+    heartbeat: runtime.heartbeat,
+    sessionStateBroadcaster: runtime.sessionStateBroadcaster,
+    connectionRegistry: runtime.connectionRegistry,
+    eventBuffer: runtime.eventBuffer,
     wsServer,
   };
 }

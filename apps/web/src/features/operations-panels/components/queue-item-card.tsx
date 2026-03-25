@@ -63,10 +63,7 @@ const riskSeverityColors: Record<RiskSignalSeverity, string> = {
 
 const selectedRingStyle = '0 0 0 2px rgba(56, 189, 248, 0.5)' as const;
 
-function resolveCardStyle(
-  status: WorkItemStatus,
-  isSelected: boolean,
-): CSSProperties {
+function resolveBaseCardStyle(status: WorkItemStatus): CSSProperties {
   const palette = statusColors[status];
   return {
     // Button reset
@@ -83,7 +80,7 @@ function resolveCardStyle(
     cursor: 'pointer',
     display: 'grid',
     gap: '0.3rem',
-    boxShadow: isSelected ? selectedRingStyle : 'none',
+    boxShadow: 'none',
   };
 }
 
@@ -134,12 +131,17 @@ export function QueueItemCard({
   hasPendingControl,
   onSelect,
 }: QueueItemCardProps): JSX.Element {
+  const baseCardStyle = resolveBaseCardStyle(item.status);
+  const cardStyle = isSelected
+    ? { ...baseCardStyle, boxShadow: selectedRingStyle }
+    : baseCardStyle;
+
   return (
     <button
       type="button"
       aria-current={isSelected || undefined}
       onClick={onSelect}
-      style={resolveCardStyle(item.status, isSelected)}
+      style={cardStyle}
     >
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
         <span style={{ fontWeight: 600, fontSize: '0.85rem' }}>{item.title}</span>

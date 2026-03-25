@@ -82,7 +82,7 @@ describe('EmptyStateCard', () => {
 
 // ─── QueueItemCard ──────────────────────────────────────────────────────────
 
-describe('QueueItemCard', () => {
+describe('QueueItemCard basics', () => {
   it('renders item title', () => {
     render(
       <QueueItemCard
@@ -106,7 +106,9 @@ describe('QueueItemCard', () => {
     );
     expect(screen.getByText('paused')).toBeInTheDocument();
   });
+});
 
+describe('QueueItemCard selection', () => {
   it('has aria-current true when selected', () => {
     render(
       <QueueItemCard
@@ -117,6 +119,20 @@ describe('QueueItemCard', () => {
       />,
     );
     expect(screen.getByRole('button')).toHaveAttribute('aria-current', 'true');
+  });
+
+  it('applies the selected ring when selected', () => {
+    render(
+      <QueueItemCard
+        item={makeItem()}
+        isSelected={true}
+        hasPendingControl={false}
+        onSelect={vi.fn()}
+      />,
+    );
+    expect(screen.getByRole('button')).toHaveStyle({
+      boxShadow: '0 0 0 2px rgba(56, 189, 248, 0.5)',
+    });
   });
 
   it('omits aria-current when not selected', () => {
@@ -130,7 +146,9 @@ describe('QueueItemCard', () => {
     );
     expect(screen.getByRole('button')).not.toHaveAttribute('aria-current');
   });
+});
 
+describe('QueueItemCard metadata labels', () => {
   it('shows owner label when present', () => {
     render(
       <QueueItemCard
