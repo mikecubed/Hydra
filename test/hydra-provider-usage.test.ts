@@ -26,7 +26,10 @@ describe('estimateCost', () => {
   });
 
   it('returns 0 for unknown model', () => {
-    const cost = estimateCost('nonexistent-model-xyz', { prompt_tokens: 1000, completion_tokens: 500 });
+    const cost = estimateCost('nonexistent-model-xyz', {
+      prompt_tokens: 1000,
+      completion_tokens: 500,
+    });
     assert.equal(cost, 0);
   });
 
@@ -40,7 +43,10 @@ describe('estimateCost', () => {
     const rates = (COST_PER_1K as Record<string, { input: number; output: number }>)[knownModel];
     const cost = estimateCost(knownModel, { prompt_tokens: 1000, completion_tokens: 1000 });
     const expected = rates.input + rates.output; // 1000/1000 * rate = rate
-    assert.ok(Math.abs(cost - expected) < 0.0001, `expected ~${String(expected)}, got ${String(cost)}`);
+    assert.ok(
+      Math.abs(cost - expected) < 0.0001,
+      `expected ~${String(expected)}, got ${String(cost)}`,
+    );
   });
 
   it('calculates cost using inputTokens/outputTokens aliases', () => {

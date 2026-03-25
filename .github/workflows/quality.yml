@@ -196,7 +196,7 @@ jobs:
         run: npm run test:coverage:check
         env:
           HUSKY: '0'
-        # Interim gate: 65% coverage — blocking. Raise thresholds as coverage improves.
+        # Interim gate: 63% coverage — blocking. Raise thresholds as coverage improves.
         # Ultimate target: 80% (see docs/quality-evaluation.md roadmap).
 
   audit:

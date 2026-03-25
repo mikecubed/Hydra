@@ -177,10 +177,7 @@ describe('scanOldArtifacts', () => {
 
 describe('enrichCleanupWithSitrep', () => {
   it('returns items as-is (pass-through)', async () => {
-    const items: ActionItem[] = [
-      makeMockItem({ id: 'a' }),
-      makeMockItem({ id: 'b' }),
-    ];
+    const items: ActionItem[] = [makeMockItem({ id: 'a' }), makeMockItem({ id: 'b' })];
     const enriched = await enrichCleanupWithSitrep(items);
     assert.deepEqual(enriched, items);
   });
@@ -209,11 +206,7 @@ describe('executeCleanupAction — delete branch', () => {
       meta: { branch: 'evolve/test-branch' },
     });
 
-    const result = await executeCleanupAction(
-      item,
-      { projectRoot: '/tmp/fake' },
-      mockGitOps,
-    );
+    const result = await executeCleanupAction(item, { projectRoot: '/tmp/fake' }, mockGitOps);
 
     assert.equal(result.ok, true);
     assert.equal(result.output, 'Branch deleted');
@@ -231,11 +224,7 @@ describe('executeCleanupAction — delete branch', () => {
       meta: { branch: 'tasks/old' },
     });
 
-    const result = await executeCleanupAction(
-      item,
-      { projectRoot: '/tmp/fake' },
-      mockGitOps,
-    );
+    const result = await executeCleanupAction(item, { projectRoot: '/tmp/fake' }, mockGitOps);
 
     assert.equal(result.ok, false);
     assert.ok(result.output?.includes('Failed'));

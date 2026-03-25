@@ -104,25 +104,22 @@ All `.ts` and `.mjs` files pass Prettier checks.
 
 ## 5. TypeScript Migration
 
-**Status: 89% complete by file count, 89% by LOC**
+**Status: 91% complete by file count** (6 test files + 1 script converted in Phase 1)
 
-| Metric        | `.ts`  | `.mjs` | Total   |
-| ------------- | ------ | ------ | ------- |
-| Files         | 205    | 46     | 251     |
-| Lines of code | 92,081 | 11,518 | 103,599 |
-| Percentage    | 88.9%  | 11.1%  | —       |
+| Metric | `.ts` | `.mjs` | Total |
+| ------ | ----- | ------ | ----- |
+| Files  | 212   | 40     | 252   |
 
 ### Remaining `.mjs` files
 
-**All 46 `.mjs` files are tests or test helpers** (45 test files + 1 script):
+**All 40 `.mjs` files are tests or test helpers** (39 test files + 1 helper):
 
 | Category                 | Count | Largest files                                                                                                          |
 | ------------------------ | ----- | ---------------------------------------------------------------------------------------------------------------------- |
-| Test files (`.test.mjs`) | 44    | `hydra-agent-executor.test.mjs` (868), `orchestrator-daemon.integration.test.mjs` (702), `hydra-agents.test.mjs` (679) |
+| Test files (`.test.mjs`) | 39    | `hydra-agent-executor.test.mjs` (868), `orchestrator-daemon.integration.test.mjs` (702), `hydra-agents.test.mjs` (679) |
 | Test helpers             | 1     | `test/helpers/mock-agent.mjs` (171)                                                                                    |
-| Scripts                  | 1     | `scripts/detect-cycles.mjs` (34)                                                                                       |
 
-**All production source code (`lib/`, `bin/`) is already TypeScript.** The migration only affects test files and one utility script.
+**All production source code (`lib/`, `bin/`, `scripts/`) is already TypeScript.** The migration only affects test files and one test helper.
 
 ---
 
