@@ -1,6 +1,5 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
-import { _setTestConfig } from '../lib/hydra-config.ts';
 import {
   extractHandoffAgents,
   findPowerShell,

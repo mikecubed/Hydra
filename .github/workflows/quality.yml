@@ -44,6 +44,7 @@ jobs:
         with:
           files: |
             **/*.js
+            **/*.mjs
 
       - name: Get changed TS files (PR)
         id: changed-ts
@@ -60,6 +61,7 @@ jobs:
         with:
           files: |
             **/*.js
+            **/*.mjs
             **/*.ts
             **/*.json
             **/*.md

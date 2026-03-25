@@ -99,7 +99,7 @@
     "test:mutation": "stryker run"
   },
   "lint-staged": {
-    "*.ts": [
+    "*.{ts,mjs}": [
       "eslint --fix --max-warnings 0 --no-warn-ignored",
       "prettier --write"
     ],

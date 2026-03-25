@@ -140,7 +140,8 @@ test('parseList handles mixed separators and trims', () => {
 test('parseList returns empty for null/empty', () => {
   assert.deepEqual(parseList(null), []);
   assert.deepEqual(parseList(''), []);
-  assert.deepEqual(parseList(), []);
+  // eslint-disable-next-line unicorn/no-useless-undefined -- explicitly testing undefined input
+  assert.deepEqual(parseList(undefined), []);
 });
 
 test('parseList passes through arrays', () => {
