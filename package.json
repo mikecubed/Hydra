@@ -82,10 +82,10 @@
     "typecheck": "tsc --noEmit -p tsconfig.json",
     "quality": "npm run lint && npm run format:check && npm run typecheck && npm run lint:cycles && npm --workspace @hydra/web run typecheck:workspace",
     "setup:hooks": "node scripts/setup-hooks.ts",
-    "test": "node --test --experimental-test-module-mocks 'test/**/*.test.{ts,mjs}' 'apps/**/src/**/*.test.ts' 'packages/**/src/**/*.test.ts' && npm --workspace @hydra/web run test:browser",
+    "test": "node --test --experimental-test-module-mocks 'test/**/*.test.ts' 'apps/**/src/**/*.test.ts' 'packages/**/src/**/*.test.ts' && npm --workspace @hydra/web run test:browser",
     "test:coverage": "c8 npm test",
     "test:coverage:check": "node_modules/.bin/c8 check-coverage",
-    "test:report": "node --test 'test/**/*.test.{ts,mjs}' --test-reporter=tap --test-reporter-destination=docs/coordination/test-results.tap",
+    "test:report": "node --test 'test/**/*.test.ts' --test-reporter=tap --test-reporter-destination=docs/coordination/test-results.tap",
     "package": "node -e \"require('fs').mkdirSync('dist', { recursive: true })\" && npm pack --pack-destination dist",
     "package:dry-run": "npm pack --dry-run",
     "prepack": "node scripts/build-pack.ts",
@@ -99,7 +99,7 @@
     "test:mutation": "stryker run"
   },
   "lint-staged": {
-    "*.{ts,mjs}": [
+    "*.ts": [
       "eslint --fix --max-warnings 0 --no-warn-ignored",
       "prettier --write"
     ],

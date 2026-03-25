@@ -90,7 +90,7 @@ npm run setup:hooks         # Install/verify git pre-commit and pre-push hooks
 
 **Git hooks (Husky v9 + lint-staged)** — install automatically when you run `npm install` or `npm ci` (via the `prepare` script). Use `npm run setup:hooks` only to manually reinstall or verify.
 
-- `pre-commit` — runs lint-staged: ESLint `--fix` + Prettier **auto-write** on staged `.ts/.mjs` files; Mermaid validation + Prettier on staged `.md`; Prettier auto-write on staged `.json/.yml/.yaml`.
+- `pre-commit` — runs lint-staged: ESLint `--fix` + Prettier **auto-write** on staged `.ts` files; Mermaid validation + Prettier on staged `.md`; Prettier auto-write on staged `.json/.yml/.yaml`.
 - `pre-push` — runs the full `npm test` suite. Push is blocked if tests fail.
 
 **Always run `npm run quality` before opening a PR.** This runs lint + format:check + typecheck + lint:cycles in full (no auto-fix) so you catch issues before CI does.
@@ -129,7 +129,7 @@ flowchart TD
 
 - **ESM + TypeScript** (`"type": "module"` in package.json). Runtime code is primarily `.ts` with `import`/`export`; avoid CommonJS and prefer `.ts` for new code.
 - **No build step for normal development** — Node.js 24+ runs the TypeScript sources directly. `tsc` is used for verification, not for emitted runtime artifacts.
-- **Mixed `.ts` and legacy `.mjs` repo** — prefer existing patterns in the file you are editing, but default to `.ts` for new runtime modules and tests.
+- **Pure TypeScript repo** — all source and test files are `.ts`. The only `.mjs` file is `eslint.config.mjs` (required by ESLint v10).
 - **Import extensions must match source files** — `.ts` files import other `.ts` files with explicit `.ts` extensions.
 - **Four dependencies**: `picocolors` (terminal colors), `cross-spawn` (cross-platform spawning), `@modelcontextprotocol/sdk` (MCP server), `zod` (schema validation for MCP tools). Optional peer: `@opentelemetry/api` (tracing, no-op when absent).
 - **Agent names** are always lowercase strings: `claude`, `gemini`, `codex`, `local`, `copilot`, plus any user-defined names from `agents.customAgents[]`. `local` is the 4th built-in physical agent (API-backed via `hydra-local.ts`, no CLI). `copilot` is the 5th built-in physical agent (GitHub Copilot CLI, requires active subscription and browser-based device-flow auth). Custom agents are registered via `:agents add` (wizard) or directly in `hydra.config.json`; type `cli` spawns a local CLI tool, type `api` calls an OpenAI-compatible endpoint. CLI agents missing from PATH fall back to cloud transparently via `executeAgentWithRecovery`. Config: `agents.customAgents[]` (see `hydra-agents-wizard.ts`), `local.enabled`, `.baseUrl`, `.model`, `.budgetGate`. `routing.mode` (`economy`|`balanced`|`performance`) shifts affinity toward `local` in economy mode.
@@ -154,7 +154,7 @@ import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 ```
 
-Integration tests (`*.integration.test.ts`, plus any remaining legacy `.mjs` tests) spin up the daemon on an ephemeral port and test HTTP endpoints.
+Integration tests (`*.integration.test.ts`) spin up the daemon on an ephemeral port and test HTTP endpoints.
 
 ## MCP Tool Escalation
 

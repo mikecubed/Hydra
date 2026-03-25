@@ -36,14 +36,13 @@ jobs:
         env:
           HUSKY: '0'
 
-      # ── On pull requests: only check changed .mjs files ───────────────────
+      # ── On pull requests: only check changed JS/TS files ──────────────────
       - name: Get changed JS files (PR)
         id: changed-js
         if: github.event_name == 'pull_request'
         uses: tj-actions/changed-files@v46
         with:
           files: |
-            **/*.mjs
             **/*.js
 
       - name: Get changed TS files (PR)
@@ -60,7 +59,6 @@ jobs:
         uses: tj-actions/changed-files@v46
         with:
           files: |
-            **/*.mjs
             **/*.js
             **/*.ts
             **/*.json
