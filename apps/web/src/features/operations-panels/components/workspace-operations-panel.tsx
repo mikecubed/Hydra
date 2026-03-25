@@ -27,8 +27,6 @@ function useOperationsPanelState() {
   useEffect(() => {
     const lifecycle = { disposed: false };
 
-    dispatch({ type: 'snapshot/request' });
-
     void (async () => {
       try {
         const snapshot = await operationsClient.getSnapshot();

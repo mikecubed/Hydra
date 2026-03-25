@@ -47,10 +47,14 @@ export function createOperationsRoutes(deps: OperationsRoutesDeps): Hono<Gateway
   const app = new Hono<GatewayEnv>();
   const dc = deps.daemonClient;
 
-  app.get('/operations/snapshot', validateOperationsQuery(GetOperationsSnapshotRequest), async (c) => {
-    const query = c.get('validatedQuery' as never) as Partial<GetOperationsSnapshotRequest>;
-    return handleResult(c, await dc.getOperationsSnapshot(query));
-  });
+  app.get(
+    '/operations/snapshot',
+    validateOperationsQuery(GetOperationsSnapshotRequest),
+    async (c) => {
+      const query = c.get('validatedQuery' as never) as Partial<GetOperationsSnapshotRequest>;
+      return handleResult(c, await dc.getOperationsSnapshot(query));
+    },
+  );
 
   return app;
 }

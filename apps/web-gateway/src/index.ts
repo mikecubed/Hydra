@@ -243,10 +243,16 @@ function createProtectedRootRoutes(
   const protectedRootRoutes = new Hono<GatewayEnv>();
   protectedRootRoutes.route('/', createConversationRoutes(daemonClient));
 
-  const defaultOpsBaseUrl = deps.daemonClientOptions?.baseUrl ?? 'http://localhost:4173';
+  const defaultOpsOptions: DaemonOperationsClientOptions = {
+    baseUrl: deps.daemonClientOptions?.baseUrl ?? 'http://localhost:4173',
+    ...(deps.daemonClientOptions?.fetchFn != null && { fetchFn: deps.daemonClientOptions.fetchFn }),
+    ...(deps.daemonClientOptions?.timeoutMs != null && {
+      timeoutMs: deps.daemonClientOptions.timeoutMs,
+    }),
+  };
   const operationsClient =
     deps.operationsClient ??
-    new DaemonOperationsClient(deps.operationsClientOptions ?? { baseUrl: defaultOpsBaseUrl });
+    new DaemonOperationsClient(deps.operationsClientOptions ?? defaultOpsOptions);
   protectedRootRoutes.route('/', createOperationsRoutes({ daemonClient: operationsClient }));
 
   return protectedRootRoutes;

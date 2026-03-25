@@ -236,7 +236,10 @@ describe('QueueItemCard interactions', () => {
 
 describe('QueuePanel', () => {
   it('renders queue item cards inside a list', () => {
-    const items = [makeItem({ id: 'wi-1', title: 'Task A' }), makeItem({ id: 'wi-2', title: 'Task B' })];
+    const items = [
+      makeItem({ id: 'wi-1', title: 'Task A' }),
+      makeItem({ id: 'wi-2', title: 'Task B' }),
+    ];
     render(
       <QueuePanel
         items={items}

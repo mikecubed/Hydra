@@ -19,11 +19,7 @@ function okResponse(body: unknown): Response {
   return jsonResponse(200, body);
 }
 
-function daemonError(
-  status: number,
-  error: string,
-  message: string,
-): Response {
+function daemonError(status: number, error: string, message: string): Response {
   return jsonResponse(status, { ok: false, error, message });
 }
 
@@ -45,7 +41,10 @@ describe('DaemonOperationsClient', () => {
 
   describe('configuration', () => {
     it('strips trailing slash from baseUrl', () => {
-      const c = new DaemonOperationsClient({ baseUrl: 'http://localhost:4173/', fetchFn: fetchMock });
+      const c = new DaemonOperationsClient({
+        baseUrl: 'http://localhost:4173/',
+        fetchFn: fetchMock,
+      });
       fetchMock.mock.mockImplementation(() => Promise.resolve(okResponse({ queue: [] })));
       void c.getOperationsSnapshot();
       const [url] = fetchMock.mock.calls[0].arguments;
@@ -182,9 +181,7 @@ describe('DaemonOperationsClient', () => {
     });
 
     it('encodes special characters in workItemId', async () => {
-      fetchMock.mock.mockImplementation(() =>
-        Promise.resolve(okResponse({ item: { id: 'a/b' } })),
-      );
+      fetchMock.mock.mockImplementation(() => Promise.resolve(okResponse({ item: { id: 'a/b' } })));
 
       await client.getWorkItemDetail('a/b');
 
