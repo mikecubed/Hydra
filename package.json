@@ -21,9 +21,9 @@
     "packages/*"
   ],
   "bin": {
-    "hydra": "./bin/hydra-cli.js",
-    "hydra-client": "./lib/orchestrator-client.js",
-    "hydra-daemon": "./lib/orchestrator-daemon.js"
+    "hydra": "./bin/hydra-cli.ts",
+    "hydra-client": "./lib/orchestrator-client.ts",
+    "hydra-daemon": "./lib/orchestrator-daemon.ts"
   },
   "files": [
     "bin/",
