@@ -63,6 +63,10 @@ describe('normalizeTaskStatus', () => {
     assert.equal(normalizeTaskStatus('done'), 'completed');
   });
 
+  it('maps failed → failed', () => {
+    assert.equal(normalizeTaskStatus('failed'), 'failed');
+  });
+
   it('maps cancelled → cancelled', () => {
     assert.equal(normalizeTaskStatus('cancelled'), 'cancelled');
   });
@@ -74,7 +78,7 @@ describe('normalizeTaskStatus', () => {
 
 describe('DAEMON_TO_WORK_ITEM_STATUS', () => {
   it('covers all daemon task statuses', () => {
-    const expected = ['todo', 'in_progress', 'blocked', 'done', 'cancelled'];
+    const expected = ['todo', 'in_progress', 'blocked', 'done', 'failed', 'cancelled'];
     for (const status of expected) {
       assert.ok(
         status in DAEMON_TO_WORK_ITEM_STATUS,
@@ -143,6 +147,14 @@ describe('projectQueueSnapshot', () => {
       });
       const result = projectQueueSnapshot(state);
       assert.equal(result.queue[0].status, 'completed');
+    });
+
+    it('projects a failed task as failed', () => {
+      const state = makeState({
+        tasks: [makeTask({ id: 'task-4', status: 'failed' })],
+      });
+      const result = projectQueueSnapshot(state);
+      assert.equal(result.queue[0].status, 'failed');
     });
   });
 

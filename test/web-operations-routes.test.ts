@@ -151,15 +151,15 @@ describe('handleOperationsReadRoute', () => {
   });
 
   describe('GET /operations/snapshot', () => {
-    it('returns ok: true with queue array', () => {
+    it('returns queue array without an extra wrapper key', () => {
       const state = makeState({
         tasks: [makeTask({ id: 'task-1', title: 'Build it' })],
       });
       const ctx = makeReadCtx('GET', '/operations/snapshot', state);
       handleOperationsReadRoute(ctx);
       const data = ctx.captured.data as Record<string, unknown>;
-      assert.equal(data['ok'], true);
       assert.ok(Array.isArray(data['queue']), 'queue should be an array');
+      assert.ok(!('ok' in data));
     });
 
     it('returns availability field', () => {

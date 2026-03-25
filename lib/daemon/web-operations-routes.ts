@@ -56,15 +56,7 @@ function handleSnapshot(ctx: ReadRouteCtx): boolean {
 
   const snapshot = projectQueueSnapshot(state, options);
 
-  sendJson(res, 200, {
-    ok: true,
-    queue: snapshot.queue,
-    health: snapshot.health,
-    budget: snapshot.budget,
-    availability: snapshot.availability,
-    lastSynchronizedAt: snapshot.lastSynchronizedAt,
-    nextCursor: snapshot.nextCursor,
-  });
+  sendJson(res, 200, snapshot);
   return true;
 }
 

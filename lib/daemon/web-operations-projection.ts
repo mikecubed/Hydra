@@ -17,6 +17,7 @@ export const DAEMON_TO_WORK_ITEM_STATUS: Readonly<Record<TaskStatus, WorkItemSta
   in_progress: 'active',
   blocked: 'blocked',
   done: 'completed',
+  failed: 'failed',
   cancelled: 'cancelled',
 };
 
