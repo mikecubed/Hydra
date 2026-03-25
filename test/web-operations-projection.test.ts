@@ -12,7 +12,6 @@ import {
   projectQueueSnapshot,
   normalizeTaskStatus,
   DAEMON_TO_WORK_ITEM_STATUS,
-  type QueueSnapshotOptions,
 } from '../lib/daemon/web-operations-projection.ts';
 
 // ── Helpers ────────────────────────────────────────────────────────────────
@@ -103,6 +102,13 @@ describe('projectQueueSnapshot', () => {
       assert.equal(result.health, null);
       assert.equal(result.budget, null);
     });
+
+    it('uses the daemon state updatedAt as lastSynchronizedAt', () => {
+      const updatedAt = '2026-03-25T00:00:00.000Z';
+      const state = makeState({ updatedAt });
+      const result = projectQueueSnapshot(state);
+      assert.equal(result.lastSynchronizedAt, updatedAt);
+    });
   });
 
   describe('single task projection', () => {
@@ -141,7 +147,7 @@ describe('projectQueueSnapshot', () => {
   });
 
   describe('relationship hints', () => {
-    it('sets relatedSessionId from active session', () => {
+    it('leaves relatedSessionId null when no authoritative task-session linkage exists', () => {
       const state = makeState({
         tasks: [makeTask({ id: 'task-1' })],
         activeSession: {
@@ -152,15 +158,6 @@ describe('projectQueueSnapshot', () => {
           startedAt: new Date().toISOString(),
           updatedAt: new Date().toISOString(),
         },
-      });
-      const result = projectQueueSnapshot(state);
-      assert.equal(result.queue[0].relatedSessionId, 'session-abc');
-    });
-
-    it('sets relatedSessionId to null when no active session', () => {
-      const state = makeState({
-        tasks: [makeTask({ id: 'task-1' })],
-        activeSession: null,
       });
       const result = projectQueueSnapshot(state);
       assert.equal(result.queue[0].relatedSessionId, null);
@@ -346,6 +343,53 @@ describe('projectQueueSnapshot', () => {
       const result = projectQueueSnapshot(state, { limit: 10 });
       assert.equal(result.nextCursor, null);
     });
+
+    it('returns only items after the cursor in sorted order', () => {
+      const state = makeState({
+        tasks: [
+          makeTask({
+            id: 'task-active',
+            status: 'in_progress',
+            updatedAt: '2026-03-25T00:00:03.000Z',
+          }),
+          makeTask({ id: 'task-waiting', status: 'todo', updatedAt: '2026-03-25T00:00:02.000Z' }),
+          makeTask({ id: 'task-done', status: 'done', updatedAt: '2026-03-25T00:00:01.000Z' }),
+        ],
+      });
+      const result = projectQueueSnapshot(state, { cursor: 'task-active' });
+      assert.deepStrictEqual(
+        result.queue.map((item) => item.id),
+        ['task-waiting', 'task-done'],
+      );
+    });
+
+    it('preserves global queue positions after applying cursor pagination', () => {
+      const state = makeState({
+        tasks: [
+          makeTask({
+            id: 'task-active-1',
+            status: 'in_progress',
+            updatedAt: '2026-03-25T00:00:03.000Z',
+          }),
+          makeTask({
+            id: 'task-active-2',
+            status: 'in_progress',
+            updatedAt: '2026-03-25T00:00:02.000Z',
+          }),
+          makeTask({ id: 'task-waiting', status: 'todo', updatedAt: '2026-03-25T00:00:01.000Z' }),
+        ],
+      });
+      const result = projectQueueSnapshot(state, {
+        cursor: 'task-active-1',
+        limit: 1,
+      });
+      assert.deepStrictEqual(
+        result.queue.map((item) => item.id),
+        ['task-active-2'],
+      );
+      assert.equal(result.queue[0].position, 1);
+      assert.equal(result.nextCursor, 'task-active-2');
+    });
   });
 
   describe('availability', () => {
@@ -365,16 +409,13 @@ describe('projectQueueSnapshot', () => {
   });
 
   describe('lastSynchronizedAt', () => {
-    it('returns an ISO timestamp', () => {
+    it('returns the daemon state timestamp', () => {
       const state = makeState({
         tasks: [makeTask({ id: 'task-1' })],
+        updatedAt: '2026-03-25T12:34:56.000Z',
       });
       const result = projectQueueSnapshot(state);
-      assert.ok(result.lastSynchronizedAt !== null);
-      assert.ok(
-        /^\d{4}-\d{2}-\d{2}T/.test(result.lastSynchronizedAt),
-        'should be ISO format',
-      );
+      assert.equal(result.lastSynchronizedAt, '2026-03-25T12:34:56.000Z');
     });
   });
 });

@@ -51,9 +51,7 @@ function makeReadCtx(
 ): ReadRouteCtx & { captured: { statusCode: number; data: unknown } } {
   const url = new URL(
     `http://localhost${routePath}${
-      Object.keys(searchParams).length > 0
-        ? `?${new URLSearchParams(searchParams).toString()}`
-        : ''
+      Object.keys(searchParams).length > 0 ? `?${new URLSearchParams(searchParams).toString()}` : ''
     }`,
   );
   const captured: { statusCode: number; data: unknown } = { statusCode: 0, data: null };
@@ -131,81 +129,81 @@ function makeReadCtx(
 
 describe('handleOperationsReadRoute', () => {
   describe('route matching', () => {
-    it('handles /operations/snapshot route', async () => {
+    it('handles /operations/snapshot route', () => {
       const state = makeState({ tasks: [makeTask()] });
       const ctx = makeReadCtx('GET', '/operations/snapshot', state);
-      const handled = await handleOperationsReadRoute(ctx);
+      const handled = handleOperationsReadRoute(ctx);
       assert.equal(handled, true);
       assert.equal(ctx.captured.statusCode, 200);
     });
 
-    it('returns false for non-operations routes', async () => {
+    it('returns false for non-operations routes', () => {
       const ctx = makeReadCtx('GET', '/health', makeState());
-      const handled = await handleOperationsReadRoute(ctx);
+      const handled = handleOperationsReadRoute(ctx);
       assert.equal(handled, false);
     });
 
-    it('returns false for non-GET methods', async () => {
+    it('returns false for non-GET methods', () => {
       const ctx = makeReadCtx('POST', '/operations/snapshot', makeState());
-      const handled = await handleOperationsReadRoute(ctx);
+      const handled = handleOperationsReadRoute(ctx);
       assert.equal(handled, false);
     });
   });
 
   describe('GET /operations/snapshot', () => {
-    it('returns ok: true with queue array', async () => {
+    it('returns ok: true with queue array', () => {
       const state = makeState({
         tasks: [makeTask({ id: 'task-1', title: 'Build it' })],
       });
       const ctx = makeReadCtx('GET', '/operations/snapshot', state);
-      await handleOperationsReadRoute(ctx);
+      handleOperationsReadRoute(ctx);
       const data = ctx.captured.data as Record<string, unknown>;
       assert.equal(data['ok'], true);
       assert.ok(Array.isArray(data['queue']), 'queue should be an array');
     });
 
-    it('returns availability field', async () => {
+    it('returns availability field', () => {
       const state = makeState({ tasks: [makeTask()] });
       const ctx = makeReadCtx('GET', '/operations/snapshot', state);
-      await handleOperationsReadRoute(ctx);
+      handleOperationsReadRoute(ctx);
       const data = ctx.captured.data as Record<string, unknown>;
       assert.equal(data['availability'], 'ready');
     });
 
-    it('returns empty availability for empty queue', async () => {
+    it('returns empty availability for empty queue', () => {
       const ctx = makeReadCtx('GET', '/operations/snapshot', makeState());
-      await handleOperationsReadRoute(ctx);
+      handleOperationsReadRoute(ctx);
       const data = ctx.captured.data as Record<string, unknown>;
       assert.equal(data['availability'], 'empty');
     });
 
-    it('returns health and budget fields', async () => {
+    it('returns health and budget fields', () => {
       const ctx = makeReadCtx('GET', '/operations/snapshot', makeState());
-      await handleOperationsReadRoute(ctx);
+      handleOperationsReadRoute(ctx);
       const data = ctx.captured.data as Record<string, unknown>;
       assert.ok('health' in data, 'should have health field');
       assert.ok('budget' in data, 'should have budget field');
     });
 
-    it('returns lastSynchronizedAt as ISO string', async () => {
+    it('returns lastSynchronizedAt as ISO string', () => {
       const state = makeState({ tasks: [makeTask()] });
       const ctx = makeReadCtx('GET', '/operations/snapshot', state);
-      await handleOperationsReadRoute(ctx);
+      handleOperationsReadRoute(ctx);
       const data = ctx.captured.data as Record<string, unknown>;
       assert.ok(typeof data['lastSynchronizedAt'] === 'string');
     });
 
-    it('returns nextCursor as null when all items fit', async () => {
+    it('returns nextCursor as null when all items fit', () => {
       const state = makeState({ tasks: [makeTask()] });
       const ctx = makeReadCtx('GET', '/operations/snapshot', state);
-      await handleOperationsReadRoute(ctx);
+      handleOperationsReadRoute(ctx);
       const data = ctx.captured.data as Record<string, unknown>;
       assert.equal(data['nextCursor'], null);
     });
   });
 
   describe('query param: statusFilter', () => {
-    it('filters queue items by comma-separated status values', async () => {
+    it('filters queue items by comma-separated status values', () => {
       const state = makeState({
         tasks: [
           makeTask({ id: 'task-1', status: 'todo' }),
@@ -216,13 +214,13 @@ describe('handleOperationsReadRoute', () => {
       const ctx = makeReadCtx('GET', '/operations/snapshot', state, {
         statusFilter: 'active',
       });
-      await handleOperationsReadRoute(ctx);
+      handleOperationsReadRoute(ctx);
       const data = ctx.captured.data as Record<string, unknown>;
       const queue = data['queue'] as unknown[];
       assert.equal(queue.length, 1);
     });
 
-    it('accepts multiple status values', async () => {
+    it('accepts multiple status values', () => {
       const state = makeState({
         tasks: [
           makeTask({ id: 'task-1', status: 'todo' }),
@@ -233,15 +231,36 @@ describe('handleOperationsReadRoute', () => {
       const ctx = makeReadCtx('GET', '/operations/snapshot', state, {
         statusFilter: 'waiting,active',
       });
-      await handleOperationsReadRoute(ctx);
+      handleOperationsReadRoute(ctx);
       const data = ctx.captured.data as Record<string, unknown>;
       const queue = data['queue'] as unknown[];
       assert.equal(queue.length, 2);
     });
+
+    it('accepts repeated statusFilter query params from gateway-style requests', () => {
+      const state = makeState({
+        tasks: [
+          makeTask({ id: 'task-1', status: 'todo' }),
+          makeTask({ id: 'task-2', status: 'in_progress' }),
+          makeTask({ id: 'task-3', status: 'done' }),
+        ],
+      });
+      const ctx = makeReadCtx('GET', '/operations/snapshot', state, {
+        statusFilter: 'active',
+      });
+      ctx.requestUrl.searchParams.append('statusFilter', 'waiting');
+      handleOperationsReadRoute(ctx);
+      const data = ctx.captured.data as Record<string, unknown>;
+      const queue = data['queue'] as Array<Record<string, unknown>>;
+      assert.deepStrictEqual(
+        queue.map((item) => item['id']),
+        ['task-2', 'task-1'],
+      );
+    });
   });
 
   describe('query param: limit', () => {
-    it('limits the number of returned items', async () => {
+    it('limits the number of returned items', () => {
       const state = makeState({
         tasks: [
           makeTask({ id: 'task-1', updatedAt: '2025-01-01T00:00:00.000Z' }),
@@ -250,33 +269,63 @@ describe('handleOperationsReadRoute', () => {
         ],
       });
       const ctx = makeReadCtx('GET', '/operations/snapshot', state, { limit: '2' });
-      await handleOperationsReadRoute(ctx);
+      handleOperationsReadRoute(ctx);
       const data = ctx.captured.data as Record<string, unknown>;
       const queue = data['queue'] as unknown[];
       assert.equal(queue.length, 2);
       assert.ok(data['nextCursor'] !== null, 'nextCursor should be set when truncated');
     });
 
-    it('ignores invalid limit values', async () => {
+    it('ignores invalid limit values', () => {
       const state = makeState({
         tasks: [makeTask({ id: 'task-1' }), makeTask({ id: 'task-2' })],
       });
       const ctx = makeReadCtx('GET', '/operations/snapshot', state, { limit: 'abc' });
-      await handleOperationsReadRoute(ctx);
+      handleOperationsReadRoute(ctx);
       const data = ctx.captured.data as Record<string, unknown>;
       const queue = data['queue'] as unknown[];
       assert.equal(queue.length, 2);
     });
+
+    it('applies cursor before limit when paginating', () => {
+      const state = makeState({
+        tasks: [
+          makeTask({
+            id: 'task-active-1',
+            status: 'in_progress',
+            updatedAt: '2026-03-25T00:00:03.000Z',
+          }),
+          makeTask({
+            id: 'task-active-2',
+            status: 'in_progress',
+            updatedAt: '2026-03-25T00:00:02.000Z',
+          }),
+          makeTask({ id: 'task-waiting', status: 'todo', updatedAt: '2026-03-25T00:00:01.000Z' }),
+        ],
+      });
+      const ctx = makeReadCtx('GET', '/operations/snapshot', state, {
+        cursor: 'task-active-1',
+        limit: '1',
+      });
+      handleOperationsReadRoute(ctx);
+      const data = ctx.captured.data as Record<string, unknown>;
+      const queue = data['queue'] as Array<Record<string, unknown>>;
+      assert.deepStrictEqual(
+        queue.map((item) => item['id']),
+        ['task-active-2'],
+      );
+      assert.equal(data['nextCursor'], 'task-active-2');
+    });
   });
 
   describe('projected item shape', () => {
-    it('includes all WorkQueueItemView fields', async () => {
+    it('includes all WorkQueueItemView fields', () => {
       const now = new Date().toISOString();
       const state = makeState({
         tasks: [makeTask({ id: 'task-1', title: 'Do stuff', owner: 'gemini', updatedAt: now })],
       });
       const ctx = makeReadCtx('GET', '/operations/snapshot', state);
-      await handleOperationsReadRoute(ctx);
+      handleOperationsReadRoute(ctx);
       const data = ctx.captured.data as Record<string, unknown>;
       const queue = data['queue'] as Record<string, unknown>[];
       const item = queue[0];

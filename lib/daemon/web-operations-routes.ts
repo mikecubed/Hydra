@@ -28,6 +28,16 @@ function parseStatusFilter(raw: string | null): readonly WorkItemStatus[] | unde
   return statuses.length > 0 ? statuses : undefined;
 }
 
+function parseStatusFilters(searchParams: URLSearchParams): readonly WorkItemStatus[] | undefined {
+  const rawValues = searchParams.getAll('statusFilter');
+  if (rawValues.length === 0) {
+    return undefined;
+  }
+
+  const parsed = rawValues.flatMap((raw) => parseStatusFilter(raw) ?? []);
+  return parsed.length > 0 ? parsed : undefined;
+}
+
 function parseLimit(raw: string | null): number | undefined {
   if (raw == null || raw === '') return undefined;
   const n = Number.parseInt(raw, 10);
@@ -39,7 +49,7 @@ function handleSnapshot(ctx: ReadRouteCtx): boolean {
   const state = readState();
 
   const options: QueueSnapshotOptions = {
-    statusFilter: parseStatusFilter(requestUrl.searchParams.get('statusFilter')),
+    statusFilter: parseStatusFilters(requestUrl.searchParams),
     limit: parseLimit(requestUrl.searchParams.get('limit')),
     cursor: requestUrl.searchParams.get('cursor') ?? undefined,
   };
@@ -62,7 +72,7 @@ const OPERATIONS_ROUTES: ReadonlyMap<string, (ctx: ReadRouteCtx) => boolean> = n
   ['/operations/snapshot', handleSnapshot],
 ]);
 
-export async function handleOperationsReadRoute(ctx: ReadRouteCtx): Promise<boolean> {
+export function handleOperationsReadRoute(ctx: ReadRouteCtx): boolean {
   if (ctx.method !== 'GET') return false;
 
   const handler = OPERATIONS_ROUTES.get(ctx.route);

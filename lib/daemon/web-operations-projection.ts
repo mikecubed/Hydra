@@ -27,7 +27,9 @@ const TERMINAL_STATUSES: ReadonlySet<WorkItemStatus> = new Set([
 ]);
 
 export function normalizeTaskStatus(status: string): WorkItemStatus {
-  return DAEMON_TO_WORK_ITEM_STATUS[status as TaskStatus] ?? 'waiting';
+  return status in DAEMON_TO_WORK_ITEM_STATUS
+    ? DAEMON_TO_WORK_ITEM_STATUS[status as TaskStatus]
+    : 'waiting';
 }
 
 // ── Ordering ───────────────────────────────────────────────────────────────
@@ -43,7 +45,7 @@ const STATUS_ORDER: Readonly<Record<WorkItemStatus, number>> = {
 };
 
 function compareQueueItems(a: WorkQueueItemView, b: WorkQueueItemView): number {
-  const statusDiff = (STATUS_ORDER[a.status] ?? 99) - (STATUS_ORDER[b.status] ?? 99);
+  const statusDiff = STATUS_ORDER[a.status] - STATUS_ORDER[b.status];
   if (statusDiff !== 0) return statusDiff;
   return new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime();
 }
@@ -66,7 +68,7 @@ function buildRiskSignals(task: TaskEntry, normalized: WorkItemStatus): readonly
     signals.push({
       kind: 'waiting',
       severity: 'info',
-      summary: `Blocked by ${task.blockedBy.length} task(s): ${task.blockedBy.join(', ')}`,
+      summary: `Blocked by ${String(task.blockedBy.length)} task(s): ${task.blockedBy.join(', ')}`,
       scope: `task:${task.id}`,
     });
   }
@@ -76,13 +78,12 @@ function buildRiskSignals(task: TaskEntry, normalized: WorkItemStatus): readonly
 
 // ── Projection ─────────────────────────────────────────────────────────────
 
-function projectTaskToQueueItem(
-  task: TaskEntry,
-  sessionId: string | null,
-): WorkQueueItemView {
+function projectTaskToQueueItem(task: TaskEntry): WorkQueueItemView {
   const status = normalizeTaskStatus(task.status);
   const checkpoints = task.checkpoints ?? [];
-  const lastCheckpoint = checkpoints.length > 0 ? checkpoints[checkpoints.length - 1] : null;
+  const lastCheckpoint = checkpoints.at(-1) ?? null;
+  const ownerLabel = task.owner === '' ? null : task.owner;
+  const updatedAt = task.updatedAt === '' ? new Date().toISOString() : task.updatedAt;
 
   return {
     id: task.id,
@@ -90,10 +91,10 @@ function projectTaskToQueueItem(
     status,
     position: null, // assigned after ordering
     relatedConversationId: null, // not yet tracked in daemon state
-    relatedSessionId: sessionId,
-    ownerLabel: task.owner || null,
+    relatedSessionId: null, // set only when daemon has authoritative linkage
+    ownerLabel,
     lastCheckpointSummary: lastCheckpoint?.note ?? null,
-    updatedAt: task.updatedAt || new Date().toISOString(),
+    updatedAt,
     riskSignals: buildRiskSignals(task, status),
     detailAvailability: 'partial', // full detail requires per-item query (US2)
   };
@@ -119,11 +120,8 @@ export function projectQueueSnapshot(
   options: QueueSnapshotOptions = {},
 ): QueueSnapshotResult {
   const { statusFilter, limit } = options;
-  const sessionId = state.activeSession?.id ?? null;
 
-  let items: WorkQueueItemView[] = state.tasks.map((task) =>
-    projectTaskToQueueItem(task, sessionId),
-  );
+  let items: WorkQueueItemView[] = state.tasks.map((task) => projectTaskToQueueItem(task));
 
   if (statusFilter != null && statusFilter.length > 0) {
     const filterSet = new Set<WorkItemStatus>(statusFilter);
@@ -143,6 +141,13 @@ export function projectQueueSnapshot(
     }
   }
 
+  if (options.cursor != null && options.cursor !== '') {
+    const cursorIndex = items.findIndex((item) => item.id === options.cursor);
+    if (cursorIndex >= 0) {
+      items = items.slice(cursorIndex + 1);
+    }
+  }
+
   let nextCursor: string | null = null;
   if (limit != null && limit > 0 && items.length > limit) {
     nextCursor = items[limit - 1].id;
@@ -156,7 +161,7 @@ export function projectQueueSnapshot(
     health: null, // daemon health projection is a later US
     budget: null, // budget projection is a later US
     availability,
-    lastSynchronizedAt: new Date().toISOString(),
+    lastSynchronizedAt: state.updatedAt ?? null,
     nextCursor,
   };
 }
