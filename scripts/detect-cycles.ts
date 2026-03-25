@@ -20,7 +20,7 @@ try {
   if (cycles.length === 0) {
     console.log('✅ No circular imports detected in lib/');
   } else {
-    console.warn(`⚠️  Found ${cycles.length} circular import(s) in lib/:`);
+    console.warn(`⚠️  Found ${String(cycles.length)} circular import(s) in lib/:`);
     for (const cycle of cycles) {
       console.warn(`  - ${cycle.join(' → ')}`);
     }

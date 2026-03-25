@@ -169,9 +169,9 @@ jobs:
         run: npm run lint:cycles
 
   check-coverage:
-    name: Coverage Gate (warn-only)
+    name: Coverage Gate (63%)
     runs-on: ubuntu-latest
-    continue-on-error: true
+    continue-on-error: false
     permissions:
       contents: read
     steps:
@@ -196,9 +196,8 @@ jobs:
         run: npm run test:coverage:check
         env:
           HUSKY: '0'
-        # Aspirational goal: 80% coverage across lines/statements/branches/functions.
-        # This job is continue-on-error — it will show a warning in CI but never block
-        # merges. Raise the thresholds in .c8rc.json as coverage improves.
+        # Interim gate: 65% coverage — blocking. Raise thresholds as coverage improves.
+        # Ultimate target: 80% (see docs/quality-evaluation.md roadmap).
 
   audit:
     name: Dependency Audit (warn-only)
