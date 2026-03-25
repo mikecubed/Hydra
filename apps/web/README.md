@@ -37,7 +37,7 @@ src/
 ## Same-Origin Requirement
 
 The workspace uses **same-origin REST** (`baseUrl: ''`) and **same-origin WebSocket**
-(`${location.host}/ws`) with cookie-based session auth. There is no Vite proxy configured to
+(`ws(s)://${location.host}/ws`) with cookie-based session auth. There is no Vite proxy configured to
 forward these requests. In practice this means:
 
 - **Production / integration use** — the built app must be served by a same-origin static
