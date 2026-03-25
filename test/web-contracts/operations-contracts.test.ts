@@ -194,6 +194,10 @@ describe('BudgetStatusView refinement conformance', () => {
     assert.ok(BudgetStatusView.safeParse({ ...base, scope: 'global', scopeId: null }).success);
   });
 
+  it('global scope rejects non-null scopeId', () => {
+    assert.ok(!BudgetStatusView.safeParse({ ...base, scope: 'global', scopeId: 'bad-id' }).success);
+  });
+
   it('work-item scope requires non-null scopeId', () => {
     assert.ok(!BudgetStatusView.safeParse({ ...base, scope: 'work-item', scopeId: null }).success);
     assert.ok(BudgetStatusView.safeParse({ ...base, scope: 'work-item', scopeId: 'wq-1' }).success);

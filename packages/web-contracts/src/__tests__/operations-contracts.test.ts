@@ -419,6 +419,15 @@ describe('BudgetStatusView', () => {
     assert.ok(!result.success, 'scopeId required for non-global scope');
   });
 
+  it('rejects global scope with non-null scopeId', () => {
+    const result = BudgetStatusView.safeParse({
+      ...globalBudget,
+      scope: 'global',
+      scopeId: 'should-not-exist',
+    });
+    assert.ok(!result.success, 'global scope must not carry a scopeId');
+  });
+
   it('accepts nullable numeric fields', () => {
     const result = BudgetStatusView.safeParse({
       ...globalBudget,

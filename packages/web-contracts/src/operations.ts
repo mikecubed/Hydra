@@ -117,10 +117,13 @@ export const BudgetStatusView = z
   .strict()
   .refine(
     (data) => {
-      if (data.scope !== 'global') return data.scopeId !== null;
-      return true;
+      if (data.scope === 'global') return data.scopeId === null;
+      return data.scopeId !== null;
     },
-    { message: 'scopeId is required when scope is not global', path: ['scopeId'] },
+    {
+      message: 'scopeId must be null for global scope and required for non-global scope',
+      path: ['scopeId'],
+    },
   );
 export type BudgetStatusView = z.infer<typeof BudgetStatusView>;
 
