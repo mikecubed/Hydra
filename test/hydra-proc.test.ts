@@ -12,23 +12,23 @@ import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawnSyncCapture } from '../lib/hydra-proc.ts';
 
-// ── helpers ──────────────────────────────────────────────────────────────────
+// -- helpers ------------------------------------------------------------------
 
-function withNoPipes(fn) {
-  const prev = process.env.HYDRA_NO_PIPES;
-  process.env.HYDRA_NO_PIPES = '1';
+function withNoPipes<T>(fn: () => T): T {
+  const prev = process.env['HYDRA_NO_PIPES'];
+  process.env['HYDRA_NO_PIPES'] = '1';
   try {
     return fn();
   } finally {
     if (prev === undefined) {
-      delete process.env.HYDRA_NO_PIPES;
+      delete process.env['HYDRA_NO_PIPES'];
     } else {
-      process.env.HYDRA_NO_PIPES = prev;
+      process.env['HYDRA_NO_PIPES'] = prev;
     }
   }
 }
 
-// ── pipe path (normal) ───────────────────────────────────────────────────────
+// -- pipe path (normal) -------------------------------------------------------
 
 describe('spawnSyncCapture (pipe path)', () => {
   it('captures stdout', () => {
@@ -66,7 +66,7 @@ describe('spawnSyncCapture (pipe path)', () => {
   });
 });
 
-// ── file-backed fallback path (HYDRA_NO_PIPES=1) ─────────────────────────────
+// -- file-backed fallback path (HYDRA_NO_PIPES=1) -----------------------------
 
 describe('spawnSyncCapture (file-backed fallback, HYDRA_NO_PIPES=1)', () => {
   it('captures stdout via temp files', () => {

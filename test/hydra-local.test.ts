@@ -45,6 +45,7 @@ describe('local agent registration', () => {
     const { listAgents } = await import('../lib/hydra-agents.ts');
     const agents = listAgents();
     const local = agents.find((a) => a.name === 'local');
+    assert.ok(local);
     assert.strictEqual(local.taskAffinity.research, 0.0);
   });
 
@@ -70,7 +71,7 @@ describe('local agent registration', () => {
 
   it('bestAgentFor never returns local for research in any mode', async () => {
     const { bestAgentFor } = await import('../lib/hydra-agents.ts');
-    for (const mode of ['economy', 'balanced', 'performance']) {
+    for (const mode of ['economy', 'balanced', 'performance'] as const) {
       const agent = bestAgentFor('research', { mode });
       assert.notStrictEqual(agent, 'local', `local must not win research in ${mode} mode`);
     }
@@ -79,7 +80,7 @@ describe('local agent registration', () => {
   it('bestAgentFor returns cloud agent for implementation in balanced mode', async () => {
     const { bestAgentFor } = await import('../lib/hydra-agents.ts');
     const agent = bestAgentFor('implementation', { mode: 'balanced' });
-    // In balanced mode, local gets no boost: local=0.82 vs codex=0.85 → codex wins
+    // In balanced mode, local gets no boost: local=0.82 vs codex=0.85 -> codex wins
     assert.notStrictEqual(agent, 'local');
   });
 });

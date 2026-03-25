@@ -11,15 +11,17 @@ import {
   unregisterAgent,
 } from '../lib/hydra-agents.ts';
 import { loadHydraConfig, _setTestConfig, invalidateConfigCache } from '../lib/hydra-config.ts';
-import { createMockExecuteAgent, loadAgentFixture } from './helpers/mock-agent.mjs';
+import { createMockExecuteAgent, loadAgentFixture } from './helpers/mock-agent.ts';
 
 const require = createRequire(import.meta.url);
-const fsModule = require('node:fs');
-const childProcess = require('node:child_process');
+// eslint-disable-next-line @typescript-eslint/consistent-type-imports
+const fsModule = require('node:fs') as typeof import('node:fs');
+// eslint-disable-next-line @typescript-eslint/consistent-type-imports
+const childProcess = require('node:child_process') as typeof import('node:child_process');
 
-const ROUTING_MODES = ['economy', 'balanced', 'performance'];
+const ROUTING_MODES = ['economy', 'balanced', 'performance'] as const;
 
-let mockExecuteAgent;
+let mockExecuteAgent: Awaited<ReturnType<typeof createMockExecuteAgent>>;
 
 before(async () => {
   const [claudeFixtures, geminiFixtures, codexFixtures] = await Promise.all([
@@ -47,28 +49,28 @@ after(() => {
 
 describe('mock agent isolation', () => {
   test('mockExecuteAgent stays fully in-process after fixtures are loaded', async () => {
-    const activity = [];
+    const activity: { method: string; args: unknown[] }[] = [];
     const originalReadFile = fsModule.promises.readFile;
     const originalReadFileSync = fsModule.readFileSync;
     const originalSpawn = childProcess.spawn;
     const originalSpawnSync = childProcess.spawnSync;
 
-    fsModule.promises.readFile = async (...args) => {
+    fsModule.promises.readFile = (async (...args: unknown[]) => {
       activity.push({ method: 'readFile', args });
       throw new Error('Unexpected fs.promises.readFile during mock execution');
-    };
-    fsModule.readFileSync = (...args) => {
+    }) as typeof fsModule.promises.readFile;
+    fsModule.readFileSync = ((...args: unknown[]) => {
       activity.push({ method: 'readFileSync', args });
       throw new Error('Unexpected fs.readFileSync during mock execution');
-    };
-    childProcess.spawn = (...args) => {
+    }) as typeof fsModule.readFileSync;
+    childProcess.spawn = ((...args: unknown[]) => {
       activity.push({ method: 'spawn', args });
       throw new Error('Unexpected child_process.spawn during mock execution');
-    };
-    childProcess.spawnSync = (...args) => {
+    }) as typeof childProcess.spawn;
+    childProcess.spawnSync = ((...args: unknown[]) => {
       activity.push({ method: 'spawnSync', args });
       throw new Error('Unexpected child_process.spawnSync during mock execution');
-    };
+    }) as typeof childProcess.spawnSync;
 
     try {
       const fallbackResult = await mockExecuteAgent(

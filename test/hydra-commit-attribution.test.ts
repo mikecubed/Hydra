@@ -11,7 +11,7 @@ import os from 'node:os';
 import { buildSafetyPrompt } from '../lib/hydra-shared/guardrails.ts';
 import { stageAndCommit, git } from '../lib/hydra-shared/git-ops.ts';
 
-// ── buildSafetyPrompt attribution tests ─────────────────────────────────────
+// -- buildSafetyPrompt attribution tests --------------------------------------
 
 describe('buildSafetyPrompt — attribution', () => {
   const baseOpts = {
@@ -66,7 +66,7 @@ describe('buildSafetyPrompt — attribution', () => {
     const result = buildSafetyPrompt('test-branch', {
       runner: 'test-runner',
       reportName: 'test-report',
-      protectedFiles: new Set([]),
+      protectedFiles: new Set<string>([]),
       blockedCommands: [],
     });
     assert.ok(
@@ -77,10 +77,10 @@ describe('buildSafetyPrompt — attribution', () => {
   });
 });
 
-// ── stageAndCommit trailer tests ────────────────────────────────────────────
+// -- stageAndCommit trailer tests ---------------------------------------------
 
 describe('stageAndCommit — trailers', () => {
-  let tmpDir;
+  let tmpDir: string;
 
   beforeEach(() => {
     tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'hydra-attr-test-'));

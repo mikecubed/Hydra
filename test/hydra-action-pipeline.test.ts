@@ -1,5 +1,5 @@
 /**
- * Tests for hydra-action-pipeline.mjs — pipeline flow with mock scanners/executors.
+ * Tests for hydra-action-pipeline — pipeline flow with mock scanners/executors.
  * Tests the non-interactive parts (scan, dedup, execute logic).
  */
 

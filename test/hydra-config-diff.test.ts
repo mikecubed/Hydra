@@ -9,7 +9,7 @@ import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import { diffConfig } from '../lib/hydra-config.ts';
 
-// ── Helpers ──────────────────────────────────────────────────────────────────
+// -- Helpers ------------------------------------------------------------------
 
 /**
  * Build a minimal fake DEFAULT_CONFIG for isolated unit testing.
@@ -35,7 +35,7 @@ function makeDefault() {
   };
 }
 
-// ── Tests ─────────────────────────────────────────────────────────────────────
+// -- Tests --------------------------------------------------------------------
 
 describe('diffConfig()', () => {
   it('returns correct shape { missing, stale, typeMismatches }', () => {
@@ -60,7 +60,7 @@ describe('diffConfig()', () => {
   it('fully matching config — no missing, no stale, no type mismatches', () => {
     const def = makeDefault();
     // Deep clone so we use an identical but separate object
-    const user = JSON.parse(JSON.stringify(def));
+    const user = JSON.parse(JSON.stringify(def)) as Record<string, unknown>;
     const { missing, stale, typeMismatches } = diffConfig(user, def);
 
     assert.equal(missing.length, 0, 'no keys should be missing');
@@ -70,7 +70,10 @@ describe('diffConfig()', () => {
 
   it('stale top-level key in user config is reported in stale', () => {
     const def = makeDefault();
-    const user = { ...JSON.parse(JSON.stringify(def)), legacyOption: true };
+    const user = {
+      ...(JSON.parse(JSON.stringify(def)) as Record<string, unknown>),
+      legacyOption: true,
+    };
     const { stale } = diffConfig(user, def);
 
     const stalePaths = stale.map((s) => s.path);
@@ -79,8 +82,8 @@ describe('diffConfig()', () => {
 
   it('stale nested key in user config section is reported in stale', () => {
     const def = makeDefault();
-    const user = JSON.parse(JSON.stringify(def));
-    user.routing.oldFlag = 'removed-in-v3';
+    const user = JSON.parse(JSON.stringify(def)) as Record<string, unknown>;
+    (user['routing'] as Record<string, unknown>)['oldFlag'] = 'removed-in-v3';
     const { stale } = diffConfig(user, def);
 
     const stalePaths = stale.map((s) => s.path);
@@ -92,20 +95,21 @@ describe('diffConfig()', () => {
 
   it('type mismatch at top level is reported in typeMismatches', () => {
     const def = makeDefault();
-    const user = { ...JSON.parse(JSON.stringify(def)), mode: 42 }; // expected string, got number
+    const user = { ...(JSON.parse(JSON.stringify(def)) as Record<string, unknown>), mode: 42 }; // expected string, got number
     const { typeMismatches } = diffConfig(user, def);
 
     const mismatchPaths = typeMismatches.map((m) => m.path);
     assert.ok(mismatchPaths.includes('mode'), 'mode type mismatch should be reported');
     const mismatch = typeMismatches.find((m) => m.path === 'mode');
+    assert.ok(mismatch);
     assert.equal(mismatch.expectedType, 'string');
     assert.equal(mismatch.gotType, 'number');
   });
 
   it('type mismatch at nested level is reported in typeMismatches', () => {
     const def = makeDefault();
-    const user = JSON.parse(JSON.stringify(def));
-    user.routing.councilGate = 'yes'; // expected boolean, got string
+    const user = JSON.parse(JSON.stringify(def)) as Record<string, unknown>;
+    (user['routing'] as Record<string, unknown>)['councilGate'] = 'yes'; // expected boolean, got string
     const { typeMismatches } = diffConfig(user, def);
 
     const mismatchPaths = typeMismatches.map((m) => m.path);
@@ -114,14 +118,15 @@ describe('diffConfig()', () => {
       'routing.councilGate type mismatch should be reported',
     );
     const mismatch = typeMismatches.find((m) => m.path === 'routing.councilGate');
+    assert.ok(mismatch);
     assert.equal(mismatch.expectedType, 'boolean');
     assert.equal(mismatch.gotType, 'string');
   });
 
   it('partial section — user has routing but missing routing.intentGate', () => {
     const def = makeDefault();
-    const user = JSON.parse(JSON.stringify(def));
-    delete user.routing.intentGate;
+    const user = JSON.parse(JSON.stringify(def)) as Record<string, unknown>;
+    Reflect.deleteProperty(user['routing'] as Record<string, unknown>, 'intentGate');
     const { missing } = diffConfig(user, def);
 
     const missingPaths = missing.map((m) => m.path);
@@ -145,7 +150,10 @@ describe('diffConfig()', () => {
 
   it('stale items include the userValue', () => {
     const def = makeDefault();
-    const user = { ...JSON.parse(JSON.stringify(def)), deprecatedKey: { old: true } };
+    const user = {
+      ...(JSON.parse(JSON.stringify(def)) as Record<string, unknown>),
+      deprecatedKey: { old: true },
+    };
     const { stale } = diffConfig(user, def);
 
     const item = stale.find((s) => s.path === 'deprecatedKey');
@@ -176,7 +184,7 @@ describe('diffConfig()', () => {
     assert.ok(Array.isArray(result.missing));
     assert.ok(Array.isArray(result.stale));
     assert.ok(Array.isArray(result.typeMismatches));
-    // version and mode exist in both → not missing, not stale
+    // version and mode exist in both -> not missing, not stale
     const missingPaths = result.missing.map((m) => m.path);
     assert.ok(!missingPaths.includes('version'), 'version should not be missing');
     assert.ok(!missingPaths.includes('mode'), 'mode should not be missing');

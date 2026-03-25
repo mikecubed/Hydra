@@ -12,7 +12,7 @@ import {
 import { initAgentRegistry, _resetRegistry } from '../lib/hydra-agents.ts';
 
 describe('hydra-eval', () => {
-  let tmpDir;
+  let tmpDir: string;
 
   beforeEach(() => {
     tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'hydra-eval-'));
@@ -78,7 +78,7 @@ describe('hydra-eval', () => {
       const result = evaluateRouting(corpus);
       assert.equal(result.total, 2);
       assert.ok(result.accuracy >= 0 && result.accuracy <= 100);
-      assert.ok(result.perStrategy.single.total >= 0);
+      assert.ok(result.perStrategy['single'].total >= 0);
     });
 
     it('tracks mismatches', () => {
@@ -144,13 +144,17 @@ describe('hydra-eval', () => {
             prompt: 'test',
             expectedRoute: 'council',
             actualRoute: 'single',
+            expectedTaskType: undefined,
+            actualTaskType: 'implementation',
             routeMatch: false,
             taskTypeMatch: true,
+            confidence: undefined,
+            reason: undefined,
           },
         ],
       };
 
-      const { jsonPath, mdPath } = generateEvalReport(routingResults);
+      const { jsonPath, mdPath } = generateEvalReport(routingResults, null);
       assert.ok(fs.existsSync(jsonPath), 'JSON report should exist');
       assert.ok(fs.existsSync(mdPath), 'MD report should exist');
 

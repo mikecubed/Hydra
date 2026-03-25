@@ -54,8 +54,8 @@ describe('buildCustomAgentEntry', () => {
     });
     assert.strictEqual(entry.name, 'copilot');
     assert.strictEqual(entry.type, 'cli');
-    assert.deepStrictEqual(entry.invoke.headless.cmd, 'gh');
-    assert.deepStrictEqual(entry.invoke.headless.args, ['copilot', 'suggest', '-p', '{prompt}']);
+    assert.deepStrictEqual(entry.invoke!.headless!.cmd, 'gh');
+    assert.deepStrictEqual(entry.invoke!.headless!.args, ['copilot', 'suggest', '-p', '{prompt}']);
     assert.deepStrictEqual(entry.taskAffinity, AFFINITY_PRESETS['code-focused']);
   });
 

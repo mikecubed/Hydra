@@ -4,7 +4,7 @@
  * Extracted command handler functions from hydra-operator.ts.
  * Each handler receives a CommandContext and returns Promise<void>.
  */
-/* eslint-disable @typescript-eslint/no-explicit-any, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-argument, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-return -- T7A: operator uses polymorphic any for dynamic dispatch */
+/* eslint-disable @typescript-eslint/no-explicit-any, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-argument, @typescript-eslint/no-unsafe-call -- T7A: operator uses polymorphic any for dynamic dispatch */
 /* eslint-disable @typescript-eslint/strict-boolean-expressions, @typescript-eslint/no-non-null-assertion -- T7A: standard JS truthiness; type narrowing tracked as follow-up */
 /* eslint-disable @typescript-eslint/require-await, @typescript-eslint/no-misused-promises -- T7A: handlers are async for uniform call-site API; child.on callbacks */
 
@@ -42,6 +42,7 @@ import {
 import { setActiveMode } from './hydra-statusbar.ts';
 import { promptChoice } from './hydra-prompt-choice.ts';
 import { isGhAvailable, listPRs, getPR, pushBranchAndCreatePR } from './hydra-github.ts';
+import { formatConflictWorktrees } from './hydra-worktree-conflicts.ts';
 import pc from 'picocolors';
 
 export interface CommandContext {
@@ -299,28 +300,21 @@ function runTasksReview(ctx: CommandContext): void {
   child.on('close', async () => {
     try {
       const { state } = (await request('GET', ctx.baseUrl, '/state')) as any;
-      const conflictTasks = (state.tasks ?? []).filter((t: any) => t.worktreeConflict);
-      if (conflictTasks.length > 0) {
+      const conflicts = formatConflictWorktrees(state.tasks ?? [], ctx.config.projectRoot);
+      if (conflicts.length > 0) {
         console.log('');
         console.log(sectionHeader('Conflict Worktrees'));
         console.log(
-          `  ${WARNING('\u26A0')}  ${String(conflictTasks.length)} task worktree${conflictTasks.length > 1 ? 's' : ''} have merge conflicts and were preserved for manual resolution:`,
+          `  ${WARNING('\u26A0')}  ${String(conflicts.length)} task worktree${conflicts.length > 1 ? 's' : ''} have merge conflicts and were preserved for manual resolution:`,
         );
         console.log('');
-        for (const t of conflictTasks) {
-          const relPath = t.worktreePath
-            ? path.relative(ctx.config.projectRoot, t.worktreePath)
-            : `hydra/task/${String(t.id)}`;
-          console.log(`  ${ACCENT(t.id)} ${DIM(t.title ?? '(no title)')}`);
-          console.log(`    ${DIM('Worktree:')} ${relPath}`);
-          console.log(
-            `    ${DIM('Branch:')}   ${String(t.worktreeBranch ?? `hydra/task/${String(t.id)}`)}`,
-          );
+        for (const t of conflicts) {
+          console.log(`  ${ACCENT(t.id)} ${DIM(t.title)}`);
+          console.log(`    ${DIM('Worktree:')} ${t.relPath}`);
+          console.log(`    ${DIM('Branch:')}   ${t.branch}`);
           console.log('');
           console.log(`    ${DIM('Inspect:')}  git worktree list`);
-          console.log(
-            `    ${DIM('Diff:')}     git diff ${String(t.worktreeBranch ?? `hydra/task/${String(t.id)}`)}`,
-          );
+          console.log(`    ${DIM('Diff:')}     git diff ${t.branch}`);
           console.log('');
         }
         console.log(
