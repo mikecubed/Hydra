@@ -21,9 +21,9 @@
     "packages/*"
   ],
   "bin": {
-    "hydra": "./bin/hydra-cli.js",
-    "hydra-client": "./lib/orchestrator-client.js",
-    "hydra-daemon": "./lib/orchestrator-daemon.js"
+    "hydra": "./bin/hydra-cli.ts",
+    "hydra-client": "./lib/orchestrator-client.ts",
+    "hydra-daemon": "./lib/orchestrator-daemon.ts"
   },
   "files": [
     "bin/",
@@ -76,7 +76,7 @@
     "lint:fix": "eslint . --fix --max-warnings 0",
     "lint:complexity": "node scripts/complexity-report.ts",
     "lint:mermaid": "node scripts/lint-mermaid.ts",
-    "lint:cycles": "node scripts/detect-cycles.mjs",
+    "lint:cycles": "node scripts/detect-cycles.ts",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
     "typecheck": "tsc --noEmit -p tsconfig.json",

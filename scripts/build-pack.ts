@@ -99,8 +99,23 @@ console.log('[prepack] Patching package.json for published artifact…');
 fs.copyFileSync(PKG_PATH, PKG_BACKUP);
 
 const pkg = JSON.parse(fs.readFileSync(PKG_PATH, 'utf8')) as {
+  bin?: Record<string, string>;
   scripts?: Record<string, string>;
 };
+
+// Rewrite bin entries (.ts → .js) so the published package points to compiled JS.
+if (pkg.bin) {
+  let binPatchCount = 0;
+  for (const [key, value] of Object.entries(pkg.bin)) {
+    if (typeof value !== 'string') continue;
+    const rewritten = value.replace(/\.ts$/, '.js');
+    if (rewritten !== value) {
+      pkg.bin[key] = rewritten;
+      binPatchCount += 1;
+    }
+  }
+  console.log(`[prepack] Rewrote ${String(binPatchCount)} bin entries (.ts → .js).`);
+}
 
 if (pkg.scripts) {
   let scriptPatchCount = 0;
