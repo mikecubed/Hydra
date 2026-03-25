@@ -63,9 +63,7 @@ export function selectSelectedDetail(
 }
 
 /** The active status filter. */
-export function selectStatusFilter(
-  state: OperationsWorkspaceState,
-): readonly WorkItemStatus[] {
+export function selectStatusFilter(state: OperationsWorkspaceState): readonly WorkItemStatus[] {
   return state.filters.statusFilter;
 }
 

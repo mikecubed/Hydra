@@ -34,10 +34,7 @@ function resolveMessage(
   return 'No matching work items.';
 }
 
-export function EmptyStateCard({
-  snapshotStatus,
-  availability,
-}: EmptyStateCardProps): JSX.Element {
+export function EmptyStateCard({ snapshotStatus, availability }: EmptyStateCardProps): JSX.Element {
   return (
     <div data-testid="operations-empty-state" style={cardStyle}>
       <p style={{ margin: 0, lineHeight: 1.6, fontSize: '0.85rem', color: '#94a3b8' }}>

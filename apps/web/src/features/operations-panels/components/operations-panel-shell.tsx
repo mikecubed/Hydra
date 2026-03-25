@@ -6,10 +6,7 @@
  * the header.
  */
 import type { CSSProperties, JSX, ReactNode } from 'react';
-import type {
-  SnapshotStatus,
-  WorkspaceFreshness,
-} from '@hydra/web-contracts';
+import type { SnapshotStatus, WorkspaceFreshness } from '@hydra/web-contracts';
 
 export interface OperationsPanelShellProps {
   readonly snapshotStatus: SnapshotStatus;
@@ -68,11 +65,7 @@ const loadingLabelStyle: CSSProperties = {
   fontStyle: 'italic',
 };
 
-function FreshnessBadge({
-  freshness,
-}: {
-  readonly freshness: WorkspaceFreshness;
-}): JSX.Element {
+function FreshnessBadge({ freshness }: { readonly freshness: WorkspaceFreshness }): JSX.Element {
   return <span style={freshnessStyles[freshness]}>{freshness}</span>;
 }
 

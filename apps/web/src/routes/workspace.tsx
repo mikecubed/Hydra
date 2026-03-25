@@ -1697,9 +1697,7 @@ export function WorkspaceRoute(): JSX.Element {
             onSubmit={composer.onSubmit}
           />
         }
-        operationsPanelSlot={
-          <WorkspaceOperationsPanel />
-        }
+        operationsPanelSlot={<WorkspaceOperationsPanel />}
       />
     </ConnectionStateContext.Provider>
   );

@@ -132,9 +132,7 @@ export function QueueItemCard({
   onSelect,
 }: QueueItemCardProps): JSX.Element {
   const baseCardStyle = resolveBaseCardStyle(item.status);
-  const cardStyle = isSelected
-    ? { ...baseCardStyle, boxShadow: selectedRingStyle }
-    : baseCardStyle;
+  const cardStyle = isSelected ? { ...baseCardStyle, boxShadow: selectedRingStyle } : baseCardStyle;
 
   return (
     <button
@@ -172,9 +170,7 @@ export function QueueItemCard({
 
       {hasPendingControl && <span style={pendingBadgeStyle}>Control pending</span>}
 
-      {item.relatedConversationId != null && (
-        <span style={hintStyle}>Linked to conversation</span>
-      )}
+      {item.relatedConversationId != null && <span style={hintStyle}>Linked to conversation</span>}
     </button>
   );
 }
