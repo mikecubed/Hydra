@@ -45,8 +45,8 @@ test('stripAnsi passes plain text unchanged', () => {
 });
 
 test('stripAnsi handles null/undefined gracefully', () => {
-  assert.equal(stripAnsi(null), '');
-  assert.equal(stripAnsi(), '');
+  assert.equal(stripAnsi(null as unknown as string), '');
+  assert.equal(stripAnsi(undefined as unknown as string), '');
 });
 
 // ── formatElapsed ────────────────────────────────────────────────────────────
@@ -74,8 +74,8 @@ test('formatElapsed formats hours correctly', () => {
 
 test('formatElapsed handles negative and null', () => {
   assert.equal(formatElapsed(-1), '0s');
-  assert.equal(formatElapsed(null), '0s');
-  assert.equal(formatElapsed(), '0s');
+  assert.equal(formatElapsed(null as unknown as number), '0s');
+  assert.equal(formatElapsed(undefined as unknown as number), '0s');
 });
 
 // ── shortModelName ───────────────────────────────────────────────────────────
@@ -104,8 +104,8 @@ test('shortModelName extracts OpenAI/Codex model names', () => {
 
 test('shortModelName handles null/empty', () => {
   assert.equal(shortModelName(''), '');
-  assert.equal(shortModelName(null), '');
-  assert.equal(shortModelName(), '');
+  assert.equal(shortModelName(null as unknown as string), '');
+  assert.equal(shortModelName(undefined as unknown as string), '');
 });
 
 test('shortModelName strips common prefixes for unknown models', () => {
@@ -142,8 +142,8 @@ test('extractTopic takes first clause on semicolons', () => {
 
 test('extractTopic returns empty for null/empty', () => {
   assert.equal(extractTopic(''), '');
-  assert.equal(extractTopic(null), '');
-  assert.equal(extractTopic(), '');
+  assert.equal(extractTopic(null as unknown as string), '');
+  assert.equal(extractTopic(undefined as unknown as string), '');
 });
 
 // ── phaseNarrative ───────────────────────────────────────────────────────────
@@ -182,9 +182,9 @@ test('AGENT_COLORS.claude renders orange (truecolor) or yellow (fallback) and pr
   // In truecolor terminals the escape 38;2;232;134;58 is emitted; in others picocolors
   // emits a yellow code or no code at all (NO_COLOR / non-TTY). Either way the text is present.
   const isTruecolor =
-    process.env.COLORTERM === 'truecolor' ||
-    process.env.COLORTERM === '24bit' ||
-    Boolean(process.env.WT_SESSION);
+    process.env['COLORTERM'] === 'truecolor' ||
+    process.env['COLORTERM'] === '24bit' ||
+    Boolean(process.env['WT_SESSION']);
   if (isTruecolor) {
     assert.ok(
       colored.includes('38;2;232;134;58'),
@@ -195,7 +195,7 @@ test('AGENT_COLORS.claude renders orange (truecolor) or yellow (fallback) and pr
 
 test('AGENT_COLORS produce strings containing the input text', () => {
   for (const [name, fn] of Object.entries(AGENT_COLORS)) {
-    const result = fn('hello');
+    const result = (fn as (s: string) => string)('hello');
     assert.ok(result.includes('hello'), `${name} color function should wrap text`);
   }
 });
@@ -242,7 +242,7 @@ test('colorAgent defaults to white for unknown agents', () => {
 
 test('colorAgent handles null/empty', () => {
   // colorAgent uses String(name), so null becomes "null"
-  const result = colorAgent(null);
+  const result = colorAgent(null as unknown as string);
   assert.equal(stripAnsi(result), 'null');
   const empty = colorAgent('');
   assert.equal(stripAnsi(empty), '');
@@ -268,7 +268,7 @@ test('agentBadge works for all agents', () => {
 // ── formatAgentStatus ────────────────────────────────────────────────────────
 
 test('formatAgentStatus includes health icon, agent icon, and action text', () => {
-  const result = formatAgentStatus('claude', 'working', 'Calling sonnet...');
+  const result = formatAgentStatus('claude', 'working', 'Calling sonnet...', 80);
   const stripped = stripAnsi(result);
   assert.ok(stripped.includes('CLAUDE'));
   assert.ok(stripped.includes('Calling sonnet...'));
@@ -387,7 +387,7 @@ test('relativeTime shows minutes for older timestamps', () => {
 });
 
 test('relativeTime shows "never" for null', () => {
-  assert.ok(stripAnsi(relativeTime(null)).includes('never'));
+  assert.ok(stripAnsi(relativeTime(null as unknown as string)).includes('never'));
 });
 
 // ── Semantic color exports ───────────────────────────────────────────────────

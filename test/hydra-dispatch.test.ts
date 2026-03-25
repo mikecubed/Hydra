@@ -1,6 +1,7 @@
 import { describe, it, beforeEach, afterEach } from 'node:test';
 import assert from 'node:assert/strict';
-import { getRoleAgent } from '../lib/hydra-dispatch.ts';
+import { getRoleAgent, setDispatchExecutor } from '../lib/hydra-dispatch.ts';
+import type { IAgentExecutor } from '../lib/hydra-shared/agent-executor.ts';
 import { _setTestConfig, invalidateConfigCache } from '../lib/hydra-config.ts';
 
 // ── getRoleAgent ──────────────────────────────────────────────────────────────
@@ -103,5 +104,113 @@ describe('getRoleAgent', () => {
     } catch (err) {
       assert.match(String(err), /No agents available/);
     }
+  });
+
+  it('returns codex when only codex is installed', () => {
+    const clis: Record<string, boolean | undefined> = {
+      claude: false,
+      gemini: false,
+      codex: true,
+      copilot: false,
+    };
+    const agent = getRoleAgent('coordinator', clis);
+    assert.equal(agent, 'codex');
+  });
+
+  it('uses role-configured agent when it matches installed CLIs', () => {
+    _setTestConfig({
+      roles: {
+        coordinator: { agent: 'gemini', model: null },
+        critic: { agent: 'gemini', model: null },
+        synthesizer: { agent: 'codex', model: null },
+      },
+    });
+    const clis: Record<string, boolean | undefined> = {
+      claude: true,
+      gemini: true,
+      codex: true,
+    };
+    // coordinator is configured as gemini, should use gemini
+    assert.equal(getRoleAgent('coordinator', clis), 'gemini');
+  });
+
+  it('falls back for unknown role name', () => {
+    const clis: Record<string, boolean | undefined> = {
+      claude: true,
+      gemini: true,
+      codex: true,
+    };
+    // Unknown role has no configured agent — should fall back to preference order
+    const agent = getRoleAgent('unknown_role', clis);
+    assert.equal(typeof agent, 'string');
+    assert.ok(agent.length > 0);
+  });
+});
+
+// ── setDispatchExecutor ──────────────────────────────────────────────────────
+
+describe('setDispatchExecutor', () => {
+  it('returns the previous executor', () => {
+    const mockExecutor: IAgentExecutor = {
+      executeAgentWithRecovery: null as unknown as IAgentExecutor['executeAgentWithRecovery'],
+      executeAgent: async () => ({
+        ok: true,
+        output: 'mock',
+        stderr: '',
+        exitCode: 0,
+        signal: null,
+        durationMs: 0,
+        timedOut: false,
+        error: null,
+        command: 'mock',
+        args: [],
+        promptSnippet: '',
+      }),
+    };
+    const prev = setDispatchExecutor(mockExecutor);
+    assert.ok(prev !== null && prev !== undefined);
+    assert.equal(typeof prev.executeAgent, 'function');
+    // Restore original
+    setDispatchExecutor(prev);
+  });
+
+  it('swaps executor — second call returns the mock', () => {
+    const mockA: IAgentExecutor = {
+      executeAgentWithRecovery: null as unknown as IAgentExecutor['executeAgentWithRecovery'],
+      executeAgent: async () => ({
+        ok: true,
+        output: 'A',
+        stderr: '',
+        exitCode: 0,
+        signal: null,
+        durationMs: 0,
+        timedOut: false,
+        error: null,
+        command: 'a',
+        args: [],
+        promptSnippet: '',
+      }),
+    };
+    const mockB: IAgentExecutor = {
+      executeAgentWithRecovery: null as unknown as IAgentExecutor['executeAgentWithRecovery'],
+      executeAgent: async () => ({
+        ok: true,
+        output: 'B',
+        stderr: '',
+        exitCode: 0,
+        signal: null,
+        durationMs: 0,
+        timedOut: false,
+        error: null,
+        command: 'b',
+        args: [],
+        promptSnippet: '',
+      }),
+    };
+    const original = setDispatchExecutor(mockA);
+    const prevA = setDispatchExecutor(mockB);
+    assert.equal(prevA, mockA);
+    // Restore
+    setDispatchExecutor(original);
   });
 });

@@ -14,7 +14,7 @@ import {
 } from '../lib/hydra-cache.ts';
 
 describe('LRUCache', () => {
-  let cache;
+  let cache: InstanceType<typeof LRUCache>;
   beforeEach(() => {
     cache = new LRUCache({ maxEntries: 3, ttlSec: 60 });
   });
@@ -52,7 +52,7 @@ describe('LRUCache', () => {
     cache = new LRUCache({ maxEntries: 10, ttlSec: 0 }); // 0 sec TTL
     cache.set('x', 42, 1); // 1ms TTL
     // Immediately expired
-    const _before = cache.get('x');
+    /* const _before = */ cache.get('x');
     // Wait briefly
     const start = Date.now();
     while (Date.now() - start < 5) {
@@ -182,9 +182,9 @@ describe('getCacheStats', () => {
     setCached('routing', 'a', 1);
     getCached('routing', 'a');
     const stats = getCacheStats();
-    assert.ok(stats.routing);
-    assert.equal(stats.routing.size, 1);
-    assert.equal(stats.routing.hits, 1);
+    assert.ok(stats['routing']);
+    assert.equal(stats['routing'].size, 1);
+    assert.equal(stats['routing'].hits, 1);
   });
 });
 

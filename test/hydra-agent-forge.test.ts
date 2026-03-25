@@ -12,23 +12,23 @@ import {
   removeForgedAgent,
   generateSamplePrompt,
   _setTestForgeDir,
+  type ForgeSpec,
 } from '../lib/hydra-agent-forge.ts';
 import { TASK_TYPES, getAgent, _resetRegistry, initAgentRegistry } from '../lib/hydra-agents.ts';
 import { registerBuiltInSubAgents } from '../lib/hydra-sub-agents.ts';
 import { _setTestConfigPath, invalidateConfigCache, saveHydraConfig } from '../lib/hydra-config.ts';
 
 // ── Test isolation: redirect config + forge writes to a tmp directory ──────────
-/** @type {string} */
-let _tmpDir;
+let _tmpDir: string;
 
-function setupTmp() {
+function setupTmp(): void {
   _tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'hydra-forge-test-'));
   _setTestConfigPath(path.join(_tmpDir, 'hydra.config.json'));
   _setTestForgeDir(path.join(_tmpDir, 'forge'));
   saveHydraConfig({});
 }
 
-function teardownTmp() {
+function teardownTmp(): void {
   _setTestConfigPath(null);
   _setTestForgeDir(null);
   invalidateConfigCache();
@@ -40,7 +40,7 @@ function teardownTmp() {
 // ── validateAgentSpec ─────────────────────────────────────────────────────────
 
 test('validateAgentSpec: valid spec passes', () => {
-  const spec = {
+  const spec: Record<string, unknown> = {
     name: 'test-agent',
     displayName: 'Test Agent',
     baseAgent: 'claude',
@@ -57,7 +57,7 @@ test('validateAgentSpec: valid spec passes', () => {
 });
 
 test('validateAgentSpec: rejects invalid name', () => {
-  const spec = {
+  const spec: Record<string, unknown> = {
     name: 'INVALID NAME!',
     baseAgent: 'claude',
     taskAffinity: Object.fromEntries(TASK_TYPES.map((t) => [t, 0.5])),
@@ -65,18 +65,18 @@ test('validateAgentSpec: rejects invalid name', () => {
   };
   const result = validateAgentSpec(spec);
   assert.ok(!result.valid);
-  assert.ok(result.errors.some((e) => e.includes('Invalid name')));
+  assert.ok(result.errors.some((e: string) => e.includes('Invalid name')));
 });
 
 test('validateAgentSpec: rejects missing baseAgent', () => {
-  const spec = {
+  const spec: Record<string, unknown> = {
     name: 'test-agent',
     taskAffinity: Object.fromEntries(TASK_TYPES.map((t) => [t, 0.5])),
     rolePrompt: 'A'.repeat(200),
   };
   const result = validateAgentSpec(spec);
   assert.ok(!result.valid);
-  assert.ok(result.errors.some((e) => e.includes('baseAgent')));
+  assert.ok(result.errors.some((e: string) => e.includes('baseAgent')));
 });
 
 test('validateAgentSpec: rejects non-physical baseAgent', () => {
@@ -85,7 +85,7 @@ test('validateAgentSpec: rejects non-physical baseAgent', () => {
   initAgentRegistry();
   registerBuiltInSubAgents();
 
-  const spec = {
+  const spec: Record<string, unknown> = {
     name: 'bad-base',
     baseAgent: 'security-reviewer',
     taskAffinity: Object.fromEntries(TASK_TYPES.map((t) => [t, 0.5])),
@@ -93,11 +93,11 @@ test('validateAgentSpec: rejects non-physical baseAgent', () => {
   };
   const result = validateAgentSpec(spec);
   assert.ok(!result.valid);
-  assert.ok(result.errors.some((e) => e.includes('must be a physical agent')));
+  assert.ok(result.errors.some((e: string) => e.includes('must be a physical agent')));
 });
 
 test('validateAgentSpec: rejects collision with physical agent', () => {
-  const spec = {
+  const spec: Record<string, unknown> = {
     name: 'claude',
     baseAgent: 'gemini',
     taskAffinity: Object.fromEntries(TASK_TYPES.map((t) => [t, 0.5])),
@@ -105,33 +105,33 @@ test('validateAgentSpec: rejects collision with physical agent', () => {
   };
   const result = validateAgentSpec(spec);
   assert.ok(!result.valid);
-  assert.ok(result.errors.some((e) => e.includes('collides')));
+  assert.ok(result.errors.some((e: string) => e.includes('collides')));
 });
 
 test('validateAgentSpec: rejects missing rolePrompt', () => {
-  const spec = {
+  const spec: Record<string, unknown> = {
     name: 'no-prompt',
     baseAgent: 'claude',
     taskAffinity: Object.fromEntries(TASK_TYPES.map((t) => [t, 0.5])),
   };
   const result = validateAgentSpec(spec);
   assert.ok(!result.valid);
-  assert.ok(result.errors.some((e) => e.includes('rolePrompt')));
+  assert.ok(result.errors.some((e: string) => e.includes('rolePrompt')));
 });
 
 test('validateAgentSpec: rejects missing taskAffinity', () => {
-  const spec = {
+  const spec: Record<string, unknown> = {
     name: 'no-affinity',
     baseAgent: 'claude',
     rolePrompt: 'A'.repeat(200),
   };
   const result = validateAgentSpec(spec);
   assert.ok(!result.valid);
-  assert.ok(result.errors.some((e) => e.includes('taskAffinity')));
+  assert.ok(result.errors.some((e: string) => e.includes('taskAffinity')));
 });
 
 test('validateAgentSpec: warns on short rolePrompt', () => {
-  const spec = {
+  const spec: Record<string, unknown> = {
     name: 'short-prompt',
     baseAgent: 'claude',
     taskAffinity: Object.fromEntries(TASK_TYPES.map((t) => [t, 0.5])),
@@ -139,11 +139,11 @@ test('validateAgentSpec: warns on short rolePrompt', () => {
   };
   const result = validateAgentSpec(spec);
   assert.ok(result.valid); // warnings don't make it invalid
-  assert.ok(result.warnings.some((w) => w.includes('very short')));
+  assert.ok(result.warnings.some((w: string) => w.includes('very short')));
 });
 
 test('validateAgentSpec: warns on missing affinities', () => {
-  const spec = {
+  const spec: Record<string, unknown> = {
     name: 'partial-affinity',
     baseAgent: 'claude',
     taskAffinity: { implementation: 0.9 },
@@ -151,21 +151,21 @@ test('validateAgentSpec: warns on missing affinities', () => {
   };
   const result = validateAgentSpec(spec);
   assert.ok(result.valid);
-  assert.ok(result.warnings.some((w) => w.includes('Missing affinity')));
+  assert.ok(result.warnings.some((w: string) => w.includes('Missing affinity')));
 });
 
 test('validateAgentSpec: warns on high affinity where base is weak', () => {
-  const spec = {
+  const spec: Record<string, unknown> = {
     name: 'bad-affinity',
     baseAgent: 'codex',
     taskAffinity: Object.fromEntries(TASK_TYPES.map((t) => [t, 0.3])),
     rolePrompt: 'A'.repeat(200),
   };
   // Codex is weak at architecture (0.15) — set high affinity to trigger warning
-  spec.taskAffinity.architecture = 0.95;
+  (spec['taskAffinity'] as Record<string, number>)['architecture'] = 0.95;
   const result = validateAgentSpec(spec);
   assert.ok(result.valid);
-  assert.ok(result.warnings.some((w) => w.includes('underperform')));
+  assert.ok(result.warnings.some((w: string) => w.includes('underperform')));
 });
 
 // ── analyzeCodebase ───────────────────────────────────────────────────────────
@@ -191,7 +191,7 @@ test('analyzeCodebase detects this project correctly', () => {
 // ── generateSamplePrompt ──────────────────────────────────────────────────────
 
 test('generateSamplePrompt returns a string matching top affinity', () => {
-  const spec = {
+  const spec: Record<string, unknown> = {
     taskAffinity: {
       testing: 0.95,
       implementation: 0.5,
@@ -231,7 +231,7 @@ test('persist and remove a forged agent round-trip', () => {
   try {
     const testName = 'forge-test-roundtrip';
 
-    const spec = {
+    const spec: Record<string, unknown> = {
       name: testName,
       displayName: 'Forge Test Roundtrip',
       baseAgent: 'claude',
@@ -245,7 +245,7 @@ test('persist and remove a forged agent round-trip', () => {
     };
 
     // Persist
-    persistForgedAgent(spec, {
+    persistForgedAgent(spec as unknown as ForgeSpec, {
       description: 'Unit test round-trip',
       phasesRun: ['analyze', 'design', 'critique', 'refine'],
     });
@@ -264,7 +264,7 @@ test('persist and remove a forged agent round-trip', () => {
     // Verify in listForgedAgents
     const list = listForgedAgents();
     assert.ok(
-      list.some((a) => a.name === testName),
+      list.some((a: Record<string, unknown>) => a['name'] === testName),
       'Should appear in listForgedAgents',
     );
 

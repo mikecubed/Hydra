@@ -1,11 +1,17 @@
 /**
- * Tests for hydra-prompt-choice — multi-select parsing and confirmActionPlan.
+ * Tests for hydra-prompt-choice — multi-select parsing, auto-accept state, and choice state.
  */
 
-import { describe, it } from 'node:test';
+import { describe, it, afterEach } from 'node:test';
 import assert from 'node:assert/strict';
 
-import { parseMultiSelectInput } from '../lib/hydra-prompt-choice.ts';
+import {
+  parseMultiSelectInput,
+  setAutoAccept,
+  resetAutoAccept,
+  isAutoAccepting,
+  isChoiceActive,
+} from '../lib/hydra-prompt-choice.ts';
 
 describe('parseMultiSelectInput', () => {
   it('returns "all" for "a" input', () => {
@@ -66,5 +72,65 @@ describe('parseMultiSelectInput', () => {
 
   it('returns sorted indices', () => {
     assert.deepEqual(parseMultiSelectInput('5,1,3', 5), [0, 2, 4]);
+  });
+
+  it('handles maxIndex of 1 (single choice)', () => {
+    assert.deepEqual(parseMultiSelectInput('1', 1), [0]);
+    assert.equal(parseMultiSelectInput('2', 1), null);
+  });
+
+  it('handles tab-separated input', () => {
+    assert.deepEqual(parseMultiSelectInput('1\t3', 5), [0, 2]);
+  });
+
+  it('returns null for negative numbers', () => {
+    assert.equal(parseMultiSelectInput('-1', 5), null);
+  });
+
+  it('parseInt truncates decimal — "1.5" parses as 1', () => {
+    // parseInt('1.5', 10) === 1, which is valid
+    assert.deepEqual(parseMultiSelectInput('1.5', 5), [0]);
+  });
+});
+
+// ── Auto-Accept State ────────────────────────────────────────────────────────
+
+describe('auto-accept state', () => {
+  afterEach(() => {
+    resetAutoAccept();
+  });
+
+  it('isAutoAccepting defaults to false', () => {
+    assert.equal(isAutoAccepting(), false);
+  });
+
+  it('setAutoAccept(true) enables auto-accept', () => {
+    setAutoAccept(true);
+    assert.equal(isAutoAccepting(), true);
+  });
+
+  it('setAutoAccept(false) disables auto-accept', () => {
+    setAutoAccept(true);
+    setAutoAccept(false);
+    assert.equal(isAutoAccepting(), false);
+  });
+
+  it('resetAutoAccept resets to false', () => {
+    setAutoAccept(true);
+    resetAutoAccept();
+    assert.equal(isAutoAccepting(), false);
+  });
+});
+
+// ── Choice Active State ──────────────────────────────────────────────────────
+
+describe('isChoiceActive', () => {
+  it('returns a boolean', () => {
+    assert.equal(typeof isChoiceActive(), 'boolean');
+  });
+
+  it('returns false when no choice prompt is active', () => {
+    // Outside of a promptChoice call, this should be false
+    assert.equal(isChoiceActive(), false);
   });
 });

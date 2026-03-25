@@ -10,19 +10,27 @@ import {
   computeAdversarialResumePoint,
 } from '../lib/hydra-council.ts';
 
+interface StepConfig {
+  agent: string;
+  phase: string;
+  promptLabel: string;
+}
+
+interface TranscriptEntry {
+  agent: string;
+  phase: string;
+  parsed?: Record<string, unknown>;
+  round?: number;
+}
+
 test('buildStepPrompt adds structured convergence instructions', () => {
-  const prompt = buildStepPrompt(
-    {
-      agent: 'gemini',
-      phase: 'critique',
-      promptLabel:
-        'Review this plan critically. Identify risks, edge cases, missed files, and regressions. Cite specific code.',
-    },
-    'Redesign the task routing system',
-    [],
-    1,
-    2,
-  );
+  const stepConfig: StepConfig = {
+    agent: 'gemini',
+    phase: 'critique',
+    promptLabel:
+      'Review this plan critically. Identify risks, edge cases, missed files, and regressions. Cite specific code.',
+  };
+  const prompt = buildStepPrompt(stepConfig, 'Redesign the task routing system', [], 1, 2);
 
   assert.match(prompt, /Decision criteria for convergence:/);
   assert.match(prompt, /Do not use majority vote/i);
@@ -32,7 +40,7 @@ test('buildStepPrompt adds structured convergence instructions', () => {
 });
 
 test('synthesizeCouncilTranscript follows final synthesis over positive council votes', () => {
-  const transcript = [
+  const transcript: TranscriptEntry[] = [
     {
       agent: 'claude',
       phase: 'propose',
@@ -125,11 +133,17 @@ test('synthesizeCouncilTranscript follows final synthesis over positive council 
 
   assert.equal(report.recommendedMode, 'handoff');
   assert.equal(report.recommendedNextAction, 'handoff');
-  assert.equal(report.finalDecision?.owner, 'codex');
-  assert.equal(report.finalDecision?.reversibleFirstStep, 'Implement the flag gate and ship dark.');
+  assert.equal((report.finalDecision as Record<string, unknown>)?.['owner'], 'codex');
+  assert.equal(
+    (report.finalDecision as Record<string, unknown>)?.['reversibleFirstStep'],
+    'Implement the flag gate and ship dark.',
+  );
   assert.match(report.recommendationRationale, /decision_next_action=handoff/);
-  assert.equal(report.councilVotes.filter((item) => item.vote).length, 3);
-  assert.equal(report.tasks[0].owner, 'codex');
+  assert.equal(
+    report.councilVotes.filter((item) => (item as Record<string, unknown>)['vote']).length,
+    3,
+  );
+  assert.equal((report.tasks as Record<string, unknown>[])[0]['owner'], 'codex');
 });
 
 test('deriveCouncilRecommendation keeps council open for human decisions', () => {
@@ -140,7 +154,9 @@ test('deriveCouncilRecommendation keeps council open for human decisions', () =>
       nextAction: 'human_decision',
     },
     assumptions: [],
-    questions: [{ to: 'human', question: 'Which product tradeoff matters more?' }],
+    questions: [
+      { to: 'human', question: 'Which product tradeoff matters more?' } as { to: string },
+    ],
     risks: [],
     disagreements: [],
     councilVotes: [],
@@ -154,7 +170,7 @@ test('deriveCouncilRecommendation keeps council open for human decisions', () =>
 // ─── Adversarial: ATTACK schema tests ───────────────────────────────────────
 
 test('extractAssumptionAttacks maps attack_vector/target_agent (new schema)', () => {
-  const parsed = {
+  const parsed: Record<string, unknown> = {
     assumption_attacks: [
       {
         attack_vector: 'The cache never invalidates under concurrent writes',
@@ -166,12 +182,15 @@ test('extractAssumptionAttacks maps attack_vector/target_agent (new schema)', ()
   };
   const attacks = extractAssumptionAttacks(parsed);
   assert.equal(attacks.length, 1);
-  assert.equal(attacks[0].challenge, 'The cache never invalidates under concurrent writes');
-  assert.equal(attacks[0].assumption, 'claude');
+  assert.equal(
+    (attacks[0] as Record<string, unknown>)['challenge'],
+    'The cache never invalidates under concurrent writes',
+  );
+  assert.equal((attacks[0] as Record<string, unknown>)['assumption'], 'claude');
 });
 
 test('extractAssumptionAttacks backward-compat with challenge/target (old schema)', () => {
-  const parsed = {
+  const parsed: Record<string, unknown> = {
     assumption_attacks: [
       {
         challenge: 'The lock is not held across retries',
@@ -183,12 +202,15 @@ test('extractAssumptionAttacks backward-compat with challenge/target (old schema
   };
   const attacks = extractAssumptionAttacks(parsed);
   assert.equal(attacks.length, 1);
-  assert.equal(attacks[0].challenge, 'The lock is not held across retries');
-  assert.equal(attacks[0].assumption, 'gemini');
+  assert.equal(
+    (attacks[0] as Record<string, unknown>)['challenge'],
+    'The lock is not held across retries',
+  );
+  assert.equal((attacks[0] as Record<string, unknown>)['assumption'], 'gemini');
 });
 
 test('extractAssumptionAttacks prefers attack_vector over challenge when both present', () => {
-  const parsed = {
+  const parsed: Record<string, unknown> = {
     assumption_attacks: [
       {
         attack_vector: 'primary attack',
@@ -199,8 +221,8 @@ test('extractAssumptionAttacks prefers attack_vector over challenge when both pr
     ],
   };
   const attacks = extractAssumptionAttacks(parsed);
-  assert.equal(attacks[0].challenge, 'primary attack');
-  assert.equal(attacks[0].assumption, 'codex');
+  assert.equal((attacks[0] as Record<string, unknown>)['challenge'], 'primary attack');
+  assert.equal((attacks[0] as Record<string, unknown>)['assumption'], 'codex');
 });
 
 // ─── Adversarial: resolveActiveAgents ───────────────────────────────────────
@@ -234,14 +256,16 @@ test('computeAdversarialResumePoint returns round 1, phase 0 for empty transcrip
 });
 
 test('computeAdversarialResumePoint advances to next phase within same round', () => {
-  const transcript = [{ round: 1, agent: 'claude', phase: 'diverge' }];
+  const transcript: Array<{ round: number; agent: string; phase: string }> = [
+    { round: 1, agent: 'claude', phase: 'diverge' },
+  ];
   const { startRound, startPhaseIdx } = computeAdversarialResumePoint(transcript);
   assert.equal(startRound, 1);
   assert.equal(startPhaseIdx, 1); // next = attack
 });
 
 test('computeAdversarialResumePoint advances to next round after synthesize', () => {
-  const transcript = [
+  const transcript: Array<{ round: number; agent: string; phase: string }> = [
     { round: 1, agent: 'claude', phase: 'diverge' },
     { round: 1, agent: 'claude', phase: 'attack' },
     { round: 1, agent: 'claude', phase: 'synthesize' },
@@ -252,7 +276,7 @@ test('computeAdversarialResumePoint advances to next round after synthesize', ()
 });
 
 test('computeAdversarialResumePoint returns Infinity when implement already done', () => {
-  const transcript = [
+  const transcript: Array<{ round: number; agent: string; phase: string }> = [
     { round: 1, agent: 'claude', phase: 'synthesize' },
     { round: 1, agent: 'codex', phase: 'implement' },
   ];
