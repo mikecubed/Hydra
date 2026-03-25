@@ -122,7 +122,7 @@ function cliCodex() {
 }
 
 /** Parse one-per-line model IDs from noisy CLI output. */
-function parseModelLines(raw: string | null | undefined): string[] | null {
+export function parseModelLines(raw: string | null | undefined): string[] | null {
   if (raw == null || raw === '') return null;
   const ids = raw
     .split('\n')
