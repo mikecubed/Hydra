@@ -82,26 +82,25 @@ function reduceSnapshotSuccess(
   if (selectedWorkItemId !== null) {
     const selectedItem = snapshot.queue.find((item) => item.id === selectedWorkItemId) ?? null;
 
-    if (selectedItem === null) {
-      selection = {
-        selectedWorkItemId: null,
-        detail: null,
-        detailAvailability: null,
-      };
-    } else {
-      selection = {
-        ...state.selection,
-        detail:
-          state.selection.detail == null
-            ? null
-            : {
-                ...state.selection.detail,
-                item: selectedItem,
-                availability: selectedItem.detailAvailability,
-              },
-        detailAvailability: selectedItem.detailAvailability,
-      };
-    }
+    selection =
+      selectedItem === null
+        ? {
+            selectedWorkItemId: null,
+            detail: null,
+            detailAvailability: null,
+          }
+        : {
+            ...state.selection,
+            detail:
+              state.selection.detail == null
+                ? null
+                : {
+                    ...state.selection.detail,
+                    item: selectedItem,
+                    availability: selectedItem.detailAvailability,
+                  },
+            detailAvailability: selectedItem.detailAvailability,
+          };
   }
 
   return {

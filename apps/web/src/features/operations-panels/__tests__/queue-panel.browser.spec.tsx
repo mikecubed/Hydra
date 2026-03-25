@@ -142,7 +142,9 @@ describe('QueueItemCard', () => {
     );
     expect(screen.getByText('Tests passing')).toBeInTheDocument();
   });
+});
 
+describe('QueueItemCard metadata', () => {
   it('renders risk signal summaries', () => {
     render(
       <QueueItemCard
@@ -182,7 +184,9 @@ describe('QueueItemCard', () => {
     );
     expect(screen.getByText(/linked to conversation/i)).toBeInTheDocument();
   });
+});
 
+describe('QueueItemCard interactions', () => {
   it('fires onSelect when clicked', () => {
     const onSelect = vi.fn();
     render(

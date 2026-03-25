@@ -67,7 +67,7 @@ function resolveCardStyle(
   status: WorkItemStatus,
   isSelected: boolean,
 ): React.CSSProperties {
-  const palette = statusColors[status] ?? statusColors.cancelled;
+  const palette = statusColors[status];
   return {
     border: `1px solid ${palette.border}`,
     borderRadius: '0.375rem',
@@ -90,7 +90,7 @@ const badgeBase: React.CSSProperties = {
 };
 
 function StatusBadge({ status }: { readonly status: WorkItemStatus }): JSX.Element {
-  const palette = statusColors[status] ?? statusColors.cancelled;
+  const palette = statusColors[status];
   return (
     <span
       style={{
@@ -149,10 +149,10 @@ export function QueueItemCard({
         <div style={{ display: 'flex', gap: '0.4rem', flexWrap: 'wrap' }}>
           {item.riskSignals.map((signal, idx) => (
             <span
-              key={`${signal.kind}-${idx}`}
+              key={`${signal.kind}-${String(idx)}`}
               style={{
                 fontSize: '0.7rem',
-                color: riskSeverityColors[signal.severity] ?? '#94a3b8',
+                color: riskSeverityColors[signal.severity],
               }}
             >
               {signal.summary}

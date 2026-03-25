@@ -49,7 +49,9 @@ export function QueuePanel({
           item={item}
           isSelected={item.id === selectedWorkItemId}
           hasPendingControl={hasPendingControl(item.id)}
-          onSelect={() => onSelectItem(item.id)}
+          onSelect={() => {
+            onSelectItem(item.id);
+          }}
         />
       ))}
     </div>
