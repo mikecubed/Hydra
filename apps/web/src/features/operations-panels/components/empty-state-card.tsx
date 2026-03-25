@@ -29,6 +29,7 @@ function resolveMessage(
     return 'Unable to load operations snapshot. The daemon may be unavailable.';
   if (snapshotStatus === 'idle') return 'Operations snapshot has not been requested yet.';
   if (availability === 'empty') return 'No work items in the queue.';
+  if (availability === 'partial') return 'Operations data is partially available right now.';
   if (availability === 'unavailable') return 'Operations data is currently unavailable.';
   return 'No matching work items.';
 }

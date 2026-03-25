@@ -78,6 +78,7 @@ import {
   createInitialOperationsState,
   reduceOperationsState,
 } from '../features/operations-panels/model/operations-reducer.ts';
+import { createOperationsClient } from '../features/operations-panels/api/operations-client.ts';
 import {
   selectAvailability as selectOpsAvailability,
   selectFilteredQueueItems,
@@ -1549,13 +1550,39 @@ export function WorkspaceRoute(): JSX.Element {
   const [store] = useState(() => createWorkspaceStore());
   const state = useWorkspaceState(store);
   const client = useMemo(() => createGatewayClient({ baseUrl: '' }), []);
+  const operationsClient = useMemo(() => createOperationsClient({ baseUrl: '' }), []);
 
-  // Operations panels state (Phase 1 — UI shell, no polling yet)
+  // Operations panels state (Phase 1 — initial snapshot hydration for queue visibility)
   const [opsState, dispatchOps] = useReducer(
     reduceOperationsState,
     undefined,
     createInitialOperationsState,
   );
+
+  useEffect(() => {
+    const lifecycle = { disposed: false };
+
+    dispatchOps({ type: 'snapshot/request' });
+
+    void (async () => {
+      try {
+        const snapshot = await operationsClient.getSnapshot();
+        if (lifecycle.disposed) {
+          return;
+        }
+        dispatchOps({ type: 'snapshot/success', snapshot });
+      } catch {
+        if (lifecycle.disposed) {
+          return;
+        }
+        dispatchOps({ type: 'snapshot/failure' });
+      }
+    })();
+
+    return () => {
+      lifecycle.disposed = true;
+    };
+  }, [operationsClient]);
 
   const wsStreamClient = useMemo(
     () =>
@@ -1727,14 +1754,14 @@ export function WorkspaceRoute(): JSX.Element {
             <QueuePanel
               items={selectFilteredQueueItems(opsState)}
               snapshotStatus={selectOpsSnapshotStatus(opsState)}
-              availability={selectOpsAvailability(opsState)}
-              selectedWorkItemId={selectSelectedWorkItemId(opsState)}
-              onSelectItem={(workItemId) =>
-                dispatchOps({ type: 'selection/select', workItemId })
-              }
-              hasPendingControl={(workItemId) =>
-                selectHasPendingControl(opsState, workItemId)
-              }
+               availability={selectOpsAvailability(opsState)}
+               selectedWorkItemId={selectSelectedWorkItemId(opsState)}
+               onSelectItem={(workItemId) => {
+                 dispatchOps({ type: 'selection/select', workItemId });
+               }}
+               hasPendingControl={(workItemId) =>
+                 selectHasPendingControl(opsState, workItemId)
+               }
             />
           </OperationsPanelShell>
         }

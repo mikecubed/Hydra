@@ -9,7 +9,7 @@
  * - OperationsPanelShell: heading, freshness badge, loading indicator, children
  */
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { cleanup, fireEvent, render, screen, within } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen } from '@testing-library/react';
 
 import type { WorkQueueItemView } from '@hydra/web-contracts';
 
@@ -67,6 +67,11 @@ describe('EmptyStateCard', () => {
   it('shows unavailable message when data is unavailable', () => {
     render(<EmptyStateCard snapshotStatus="ready" availability="unavailable" />);
     expect(screen.getByTestId('operations-empty-state')).toHaveTextContent(/unavailable/i);
+  });
+
+  it('shows partial-data message when visibility is incomplete', () => {
+    render(<EmptyStateCard snapshotStatus="ready" availability="partial" />);
+    expect(screen.getByTestId('operations-empty-state')).toHaveTextContent(/partially available/i);
   });
 
   it('shows no-match message for ready+ready (filtered to empty)', () => {
