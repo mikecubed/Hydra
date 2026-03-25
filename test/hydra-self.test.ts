@@ -11,11 +11,13 @@ test('self: getGitInfo returns null for non-repo dirs', () => {
 
 test('self: buildSelfSnapshot includes hydra version + models', () => {
   const s = buildSelfSnapshot({ projectRoot: HYDRA_ROOT });
-  assert.ok(s.generatedAt);
-  assert.ok(s.hydra);
-  assert.ok(s.hydra.version);
-  assert.ok(s.models);
-  assert.equal(s.project.root, HYDRA_ROOT);
+  assert.ok(s['generatedAt']);
+  assert.ok(s['hydra']);
+  const hydra = s['hydra'] as Record<string, unknown>;
+  assert.ok(hydra['version']);
+  assert.ok(s['models']);
+  const project = s['project'] as Record<string, unknown>;
+  assert.equal(project['root'], HYDRA_ROOT);
 });
 
 test('self: formatSelfSnapshotForPrompt returns bounded block', () => {

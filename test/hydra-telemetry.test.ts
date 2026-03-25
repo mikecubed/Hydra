@@ -25,7 +25,7 @@ describe('hydra-telemetry (no-op mode — OTel not installed)', () => {
   it('startAgentSpan returns no-op span', async () => {
     const span = await startAgentSpan('claude', 'test-model');
     assert.ok(span);
-    assert.equal(span._noop, true);
+    assert.equal((span as Record<string, unknown>)['_noop'], true);
     assert.equal(span.isRecording(), false);
     // Should not throw
     span.setAttribute('key', 'value');
@@ -42,7 +42,7 @@ describe('hydra-telemetry (no-op mode — OTel not installed)', () => {
   it('startProviderSpan returns no-op span', async () => {
     const span = await startProviderSpan('openai', 'gpt-5.2');
     assert.ok(span);
-    assert.equal(span._noop, true);
+    assert.equal((span as Record<string, unknown>)['_noop'], true);
   });
 
   it('endProviderSpan handles no-op span gracefully', async () => {
@@ -53,7 +53,7 @@ describe('hydra-telemetry (no-op mode — OTel not installed)', () => {
   it('startPipelineSpan returns no-op span', async () => {
     const span = await startPipelineSpan('council');
     assert.ok(span);
-    assert.equal(span._noop, true);
+    assert.equal((span as Record<string, unknown>)['_noop'], true);
   });
 
   it('endPipelineSpan handles no-op span gracefully', async () => {
@@ -63,8 +63,8 @@ describe('hydra-telemetry (no-op mode — OTel not installed)', () => {
   });
 
   it('handles null span in end functions', async () => {
-    await endAgentSpan(null, { ok: true });
-    await endProviderSpan(null, null);
-    await endPipelineSpan(null);
+    await endAgentSpan(null as never, { ok: true });
+    await endProviderSpan(null as never, null);
+    await endPipelineSpan(null as never);
   });
 });

@@ -1,5 +1,5 @@
 /**
- * Tests for hydra-prompt-choice.mjs — multi-select parsing and confirmActionPlan.
+ * Tests for hydra-prompt-choice — multi-select parsing and confirmActionPlan.
  */
 
 import { describe, it } from 'node:test';
