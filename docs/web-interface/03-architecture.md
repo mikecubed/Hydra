@@ -1,8 +1,8 @@
 # Architecture
 
-> **Status:** Phases 0–2 delivered. The browser chat workspace, gateway transport layer, and shared
-> contracts are implemented and tested. Hydra-native operations panels, controlled mutations, and
-> hardening phases remain planned.
+> **Status:** The web chat workspace slice is delivered through Phase 8. The browser workspace,
+> gateway transport layer, and shared contracts are implemented and tested. Hydra-native operations
+> panels, controlled mutations, and later hardening phases remain planned.
 
 ## High-Level Shape
 
