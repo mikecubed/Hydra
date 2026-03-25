@@ -24,6 +24,35 @@ interface ZodLikeError {
   issues: ReadonlyArray<{ path: ReadonlyArray<PropertyKey>; message: string }>;
 }
 
+const ZOD_WRAPPER_TYPES = new Set<string>([
+  'optional',
+  'default',
+  'nullable',
+  'readonly',
+  'ZodOptional',
+  'ZodDefault',
+  'ZodNullable',
+  'ZodReadonly',
+]);
+
+function getZodFieldType(schema: unknown): string | undefined {
+  if (schema === null || typeof schema !== 'object') return undefined;
+  const obj = schema as Record<string, unknown>;
+  const def = (obj['def'] ?? obj['_def']) as Record<string, unknown> | undefined;
+  if (!def) return undefined;
+  const fieldType = def['type'] ?? def['typeName'];
+  return typeof fieldType === 'string' ? fieldType : undefined;
+}
+
+function getZodInnerType(schema: unknown): unknown {
+  if (schema === null || typeof schema !== 'object') return undefined;
+  const obj = schema as Record<string, unknown>;
+  const def = (obj['def'] ?? obj['_def']) as Record<string, unknown> | undefined;
+  if (!def) return undefined;
+  const innerType = def['innerType'] ?? def['inner'] ?? def['type_'] ?? def['element'];
+  return innerType;
+}
+
 /**
  * Detect whether a Zod schema field is a numeric type (possibly wrapped in
  * optional, default, or nullable).
@@ -34,23 +63,19 @@ interface ZodLikeError {
  * This may need updating if Zod changes its internal layout.
  */
 function isZodNumericType(schema: unknown): boolean {
-  if (schema === null || typeof schema !== 'object') return false;
-  const obj = schema as Record<string, unknown>;
-  const def = (obj['def'] ?? obj['_def']) as Record<string, unknown> | undefined;
-  if (!def) return false;
-  const fieldType = (def['type'] ?? def['typeName']) as string | undefined;
+  const fieldType = getZodFieldType(schema);
   if (fieldType === 'number' || fieldType === 'ZodNumber') return true;
-  const wrapperTypes = [
-    'optional',
-    'default',
-    'nullable',
-    'ZodOptional',
-    'ZodDefault',
-    'ZodNullable',
-  ];
-  if (fieldType !== undefined && wrapperTypes.includes(fieldType)) {
-    const inner = def['innerType'] ?? def['inner'] ?? def['type_'];
-    return isZodNumericType(inner);
+  if (fieldType !== undefined && ZOD_WRAPPER_TYPES.has(fieldType)) {
+    return isZodNumericType(getZodInnerType(schema));
+  }
+  return false;
+}
+
+function isZodArrayType(schema: unknown): boolean {
+  const fieldType = getZodFieldType(schema);
+  if (fieldType === 'array' || fieldType === 'ZodArray') return true;
+  if (fieldType !== undefined && ZOD_WRAPPER_TYPES.has(fieldType)) {
+    return isZodArrayType(getZodInnerType(schema));
   }
   return false;
 }
@@ -61,12 +86,27 @@ function isZodNumericType(schema: unknown): boolean {
  */
 function coerceNumericFields(
   schema: ShapedSchema<unknown>,
-  raw: Record<string, string>,
+  raw: Record<string, string | readonly string[]>,
 ): Record<string, unknown> {
   const shape = schema.shape;
   const result: Record<string, unknown> = {};
   for (const [key, value] of Object.entries(raw)) {
-    if (shape && key in shape && isZodNumericType(shape[key])) {
+    const fieldSchema = shape?.[key];
+    if (Array.isArray(value)) {
+      if (fieldSchema !== undefined && isZodArrayType(fieldSchema)) {
+        const innerSchema = getZodInnerType(fieldSchema);
+        const mappedValues: unknown[] = value.map((item): unknown => {
+          if (isZodNumericType(innerSchema)) {
+            const num = Number(item);
+            return item !== '' && !Number.isNaN(num) ? num : item;
+          }
+          return item;
+        });
+        result[key] = mappedValues;
+      } else {
+        result[key] = value.at(-1);
+      }
+    } else if (fieldSchema !== undefined && isZodNumericType(fieldSchema)) {
       const num = Number(value);
       result[key] = value !== '' && !Number.isNaN(num) ? num : value;
     } else {
@@ -131,7 +171,14 @@ export function validateBody<T>(schema: ParseableSchema<T>): MiddlewareHandler {
  */
 export function validateQuery<T>(schema: ParseableSchema<T>): MiddlewareHandler {
   return createMiddleware(async (c, next) => {
-    const rawQuery = c.req.query();
+    const url = new URL(c.req.url);
+    const rawQuery: Record<string, string | readonly string[]> = {};
+    for (const key of new Set(url.searchParams.keys())) {
+      const values = url.searchParams.getAll(key);
+      const fieldSchema = (schema as ShapedSchema<unknown>).shape?.[key];
+      rawQuery[key] =
+        fieldSchema !== undefined && isZodArrayType(fieldSchema) ? values : (values.at(-1) ?? '');
+    }
 
     // Only coerce fields the schema declares as numeric — opaque strings like cursor stay intact
     const coerced = coerceNumericFields(schema as ShapedSchema<unknown>, rawQuery);

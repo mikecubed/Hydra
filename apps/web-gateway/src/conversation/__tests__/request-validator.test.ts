@@ -57,6 +57,14 @@ function zodV3Default(inner: Record<string, unknown>): Record<string, unknown> {
   return { _def: { typeName: 'ZodDefault', inner } };
 }
 
+function zodV4Array(element: Record<string, unknown>): Record<string, unknown> {
+  return { def: { type: 'array', element } };
+}
+
+function zodV4Readonly(innerType: Record<string, unknown>): Record<string, unknown> {
+  return { def: { type: 'readonly', innerType } };
+}
+
 function createFakeQuerySchema<T extends Record<string, unknown>>(options: {
   shape: Record<string, unknown>;
   parse: (
@@ -399,6 +407,45 @@ describe('validateQuery numeric coercion — wrapper shapes (Issue 3 fix)', () =
     assert.equal(body.parsed.token, '99999');
     assert.equal(typeof body.parsed.limit, 'number');
     assert.equal(body.parsed.limit, 5);
+  });
+
+  it('preserves repeated query params for schema-declared array fields', async () => {
+    const schema = createFakeQuerySchema<{ statusFilter: string[]; limit: number }>({
+      shape: {
+        statusFilter: zodV4Readonly(zodV4Array({ def: { type: 'string' } })),
+        limit: zodV4Optional(zodV4Number()),
+      },
+      parse(raw) {
+        if (!Array.isArray(raw['statusFilter']) || typeof raw['limit'] !== 'number') {
+          return {
+            success: false,
+            error: {
+              issues: [{ path: ['statusFilter'], message: 'statusFilter must be an array' }],
+            },
+          };
+        }
+        return {
+          success: true,
+          data: {
+            statusFilter: raw['statusFilter'] as string[],
+            limit: raw['limit'],
+          },
+        };
+      },
+    });
+    const app = new Hono();
+    app.get('/test', validateQuery(schema), (c) => {
+      const parsed = c.get('validatedQuery' as never) as { statusFilter: string[]; limit: number };
+      return c.json({ parsed });
+    });
+
+    const res = await app.request(
+      buildRequest('GET', '/test?statusFilter=active&statusFilter=paused&limit=2'),
+    );
+    assert.equal(res.status, 200);
+    const body = (await res.json()) as { parsed: { statusFilter: string[]; limit: number } };
+    assert.deepStrictEqual(body.parsed.statusFilter, ['active', 'paused']);
+    assert.equal(body.parsed.limit, 2);
   });
 });
 

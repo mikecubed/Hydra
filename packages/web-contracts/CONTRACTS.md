@@ -21,8 +21,11 @@
 
 ## Contract Registry
 
-| Name             | Version | Status | Consumers    | File                |
-| ---------------- | ------- | ------ | ------------ | ------------------- |
-| Vocabulary stubs | v0      | draft  | all surfaces | `src/vocabulary.ts` |
+| Name                         | Version | Status | Consumers                | File                                  |
+| ---------------------------- | ------- | ------ | ------------------------ | ------------------------------------- |
+| Vocabulary stubs             | v0      | draft  | all surfaces             | `src/vocabulary.ts`                   |
+| Operations entities          | v0      | draft  | daemon, gateway, browser | `src/operations.ts`                   |
+| Operations read contracts    | v0      | draft  | daemon, gateway, browser | `src/contracts/operations-read.ts`    |
+| Operations control contracts | v0      | draft  | daemon, gateway, browser | `src/contracts/operations-control.ts` |
 
 <!-- Example row: | SessionContract | v1 | stable | gateway, browser | `src/session-contract-v1.ts` | -->
