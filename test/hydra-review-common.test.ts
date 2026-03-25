@@ -47,13 +47,23 @@ function makeAnsweringRl(answers: string[]): readline.Interface {
   } as unknown as readline.Interface;
 }
 
+/** Env override that strips parent git vars so temp repos work during hooks. */
+const CLEAN_GIT_ENV = (() => {
+  const env = { ...process.env };
+  Reflect.deleteProperty(env, 'GIT_DIR');
+  Reflect.deleteProperty(env, 'GIT_WORK_TREE');
+  Reflect.deleteProperty(env, 'GIT_INDEX_FILE');
+  return env;
+})();
+
 function initTempRepo(repoDir: string): void {
-  execFileSync('git', ['init', '-b', 'main'], { cwd: repoDir });
-  execFileSync('git', ['config', 'user.name', 'Hydra Test'], { cwd: repoDir });
-  execFileSync('git', ['config', 'user.email', 'hydra-test@example.com'], { cwd: repoDir });
+  const opts = { cwd: repoDir, env: CLEAN_GIT_ENV };
+  execFileSync('git', ['init', '-b', 'main'], opts);
+  execFileSync('git', ['config', 'user.name', 'Hydra Test'], opts);
+  execFileSync('git', ['config', 'user.email', 'hydra-test@example.com'], opts);
   fs.writeFileSync(path.join(repoDir, 'README.md'), '# review-common test\n');
-  execFileSync('git', ['add', 'README.md'], { cwd: repoDir });
-  execFileSync('git', ['commit', '-m', 'init'], { cwd: repoDir });
+  execFileSync('git', ['add', 'README.md'], opts);
+  execFileSync('git', ['commit', '-m', 'init'], opts);
 }
 
 describe('loadLatestReport', () => {
@@ -118,7 +128,7 @@ describe('cleanBranches', () => {
   });
 
   function createBranch(name: string): void {
-    execFileSync('git', ['branch', name], { cwd: repoDir });
+    execFileSync('git', ['branch', name], { cwd: repoDir, env: CLEAN_GIT_ENV });
   }
 
   it('deletes matching branches without checkout when already on base branch', () => {
