@@ -12,7 +12,7 @@
 | **Prettier**         | **PASS**         | All files formatted                                             |
 | **TypeScript**       | **PASS**         | `tsc --noEmit` clean — zero errors                              |
 | **Circular imports** | **PASS**         | No cycles detected in `lib/`                                    |
-| **Tests**            | **PASS**         | 4,363 pass / 0 fail / 0 cancelled / 0 todo (936 suites)         |
+| **Tests**            | **MIXED**        | 4,350 pass / 0 fail / 9 cancelled / 0 todo locally (packaging)  |
 | **Coverage**         | **BELOW TARGET** | 64% statements (target: 80%, interim gate: 64% — blocking)      |
 | **TS migration**     | **95% complete** | 20 `.mjs` files remain vs 232 `.ts` files                       |
 
@@ -97,7 +97,7 @@ All `.ts` and `.mjs` files pass Prettier checks.
 ### CI enforcement
 
 - `test:coverage` runs in the coverage CI job
-- `test:coverage:check` (63% threshold) — **blocking** (`continue-on-error: false`)
+- `test:coverage:check` (64% statements/lines/branches, 62% functions) — **blocking** (`continue-on-error: false`)
 - `test:mutation` (Stryker, hydra-shared only) — **non-blocking** (`continue-on-error`)
 
 ---
@@ -117,7 +117,7 @@ All `.ts` and `.mjs` files pass Prettier checks.
 | Category                 | Count | Largest files                                                                                                          |
 | ------------------------ | ----- | ---------------------------------------------------------------------------------------------------------------------- |
 | Test files (`.test.mjs`) | 19    | `hydra-agent-executor.test.mjs` (868), `orchestrator-daemon.integration.test.mjs` (702), `hydra-agents.test.mjs` (679) |
-| Test helpers             | 1     | `test/helpers/mock-agent.mjs` (171)                                                                                    |
+| Config (`.mjs`)          | 1     | `eslint.config.mjs`                                                                                                    |
 
 **All production source code (`lib/`, `bin/`, `scripts/`) is already TypeScript.** The remaining `.mjs` files are all large test files (200+ lines) and `eslint.config.mjs`.
 
@@ -125,20 +125,20 @@ All `.ts` and `.mjs` files pass Prettier checks.
 
 ## 6. CI Pipeline Summary
 
-| Check              | Job        | Blocking? | Status                        |
-| ------------------ | ---------- | --------- | ----------------------------- |
-| ESLint             | `lint`     | **Yes**   | Passing                       |
-| Prettier           | `lint`     | **Yes**   | Passing                       |
-| TypeScript         | `lint`     | **Yes**   | Passing                       |
-| Mermaid validation | `lint`     | **Yes**   | Passing                       |
-| Circular imports   | `lint`     | **Yes**   | Passing                       |
-| Tests              | `test`     | **Yes**   | Passing (0 cancelled, 0 todo) |
-| Coverage (64%)     | `coverage` | **Yes**   | Passing (64%)                 |
-| Mutation testing   | `mutation` | No        | Unknown                       |
+| Check              | Job        | Blocking? | Status                                    |
+| ------------------ | ---------- | --------- | ----------------------------------------- |
+| ESLint             | `lint`     | **Yes**   | Passing                                   |
+| Prettier           | `lint`     | **Yes**   | Passing                                   |
+| TypeScript         | `lint`     | **Yes**   | Passing                                   |
+| Mermaid validation | `lint`     | **Yes**   | Passing                                   |
+| Circular imports   | `lint`     | **Yes**   | Passing                                   |
+| Tests              | `test`     | **Yes**   | Local run still cancels 9 packaging tests |
+| Coverage (64%)     | `coverage` | **Yes**   | Passing (64%)                             |
+| Mutation testing   | `mutation` | No        | Unknown                                   |
 
 ### Non-passing tests
 
-**~~9 cancelled — `packaging` suite~~ FIXED** — All 9 packaging tests now pass after fixing `package.json` bin entries to point to `.ts` source at rest, with prepack rewriting to `.js` during `npm pack`.
+**9 cancelled — `packaging` suite (still open locally)** — `npm pack` in the temporary packaging repo still fails in this environment because `scripts/build-pack.ts` cannot resolve `node_modules/typescript/lib/tsc.js`, which cancels the 9 downstream packaging assertions.
 
 **19 todo — `hydra-worktree-isolation.test.mjs`**
 
@@ -171,13 +171,13 @@ All 19 tests are placeholder stubs for the worktree isolation feature (`routing.
    - `hydra-output-history.ts` (48% → 95%): ring buffer, ANSI stripping, scroll filter
    - `hydra-provider-usage.ts` (45% → 61%): estimateCost, recording, summaries
 
-3. **Fix packaging test suite (9 cancelled tests)** ✅
-   - Root cause: `package.json` bin entries pointed to `.js` files that don't exist at rest
-   - Fix: bin entries now point to `.ts` source; prepack rewrites to `.js` during `npm pack`
-   - Result: all 9 packaging tests passing
+3. **Reduce packaging suite failures (9 cancelled tests)** ⚠️ Partial
+   - Landed fix: `package.json` bin entries now point to `.ts` source at rest, with prepack rewriting to `.js` during `npm pack`
+   - Remaining issue: the local packaging temp repo still fails before assertions run because `scripts/build-pack.ts` cannot resolve `node_modules/typescript/lib/tsc.js`
+   - Result: the original bin-entry mismatch is fixed, but the 9 packaging assertions still cancel locally in this environment
 
 4. **Set an interim CI coverage gate** ✅
-   - Set `.c8rc.json` thresholds to 63% statements/lines/branches, 60% functions
+   - Set `.c8rc.json` thresholds to 64% statements/lines/branches, 62% functions
    - Changed `coverage` CI job to **blocking** (`continue-on-error: false`)
    - Note: target was 65% but current coverage is 64% — gate set at achievable level to enforce non-regression
 

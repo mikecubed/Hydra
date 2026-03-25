@@ -1,6 +1,6 @@
 /**
- * Worktree isolation lifecycle tests — implements the 19 integration stubs
- * from hydra-worktree-isolation.test.mjs.
+ * Worktree isolation lifecycle tests — replaces the former placeholder stubs
+ * from hydra-worktree-isolation.test.ts.
  *
  * Tests are grouped into:
  *   1-4:   createTaskWorktree
@@ -10,7 +10,7 @@
  *
  * Tests 1-11 mock git-ops.ts and hydra-config.ts via mock.module() to test
  * the daemon worktree helpers without touching the real filesystem or git.
- * Tests 12-19 add supplementary cleanup and review assertions. Real daemon
+ * Tests 12-13 add supplementary cleanup and review assertions. Real daemon
  * route coverage for claim/result worktree behavior lives in
  * hydra-worktree-route-coverage.test.ts.
  */
@@ -137,16 +137,13 @@ mock.module('../lib/hydra-shared/git-ops.ts', {
 // Eagerly import the module under test (goes through mocked deps)
 const { createTaskWorktree, mergeTaskWorktree, cleanupTaskWorktree } =
   await import('../lib/daemon/worktree.ts');
+const { formatConflictWorktrees } = await import('../lib/hydra-worktree-conflicts.ts');
 
 // ── 1-4: createTaskWorktree ─────────────────────────────────────────────────
 
 describe('createTaskWorktree', () => {
   beforeEach(() => {
-    tmpDir = createTmpDir();
     resetMockState();
-  });
-  afterEach(() => {
-    rmTmpDir(tmpDir);
   });
 
   it('creates worktree at .hydra/worktrees/task-{id}', () => {
@@ -210,11 +207,7 @@ describe('createTaskWorktree', () => {
 
 describe('mergeTaskWorktree', () => {
   beforeEach(() => {
-    tmpDir = createTmpDir();
     resetMockState();
-  });
-  afterEach(() => {
-    rmTmpDir(tmpDir);
   });
 
   it('calls smartMerge(projectRoot, hydra/task/{id}, currentBranch)', () => {
@@ -279,11 +272,7 @@ describe('mergeTaskWorktree', () => {
 
 describe('cleanupTaskWorktree', () => {
   beforeEach(() => {
-    tmpDir = createTmpDir();
     resetMockState();
-  });
-  afterEach(() => {
-    rmTmpDir(tmpDir);
   });
 
   it('removes worktree and deletes branch', () => {
@@ -394,27 +383,60 @@ describe('cleanup and review — worktree conflict handling', () => {
     assert.strictEqual(nonTaskItem, undefined, 'Non-task dir should not be scanned');
   });
 
-  it(':tasks review conflict display falls back to hydra/task/{id} when worktreePath is missing', () => {
+  it(':tasks review conflict display uses formatConflictWorktrees with fallback logic', () => {
+    const projectRoot = '/home/user/project';
     const tasks = [
       {
         id: 'T080',
         title: 'Conflict with path',
-        worktreePath: '/tmp/fake/task-T080',
+        worktreePath: '/home/user/project/.hydra/worktrees/task-T080',
         worktreeConflict: true,
+        worktreeBranch: 'hydra/task/T080',
       },
-      { id: 'T081', title: 'Conflict without path', worktreePath: null, worktreeConflict: true },
+      {
+        id: 'T081',
+        title: 'Conflict without path',
+        worktreePath: null,
+        worktreeConflict: true,
+        worktreeBranch: null,
+      },
       {
         id: 'T082',
         title: 'No conflict',
-        worktreePath: '/tmp/fake/task-T082',
+        worktreePath: '/home/user/project/.hydra/worktrees/task-T082',
         worktreeConflict: false,
+      },
+      {
+        id: 'T083',
+        worktreeConflict: true,
+        worktreePath: null,
+        worktreeBranch: null,
       },
     ];
 
-    const conflictTasks = tasks.filter((t) => t.worktreeConflict);
-    const renderedPaths = conflictTasks.map((t) => t.worktreePath ?? `hydra/task/${t.id}`);
+    const conflicts = formatConflictWorktrees(tasks, projectRoot);
 
-    assert.strictEqual(conflictTasks.length, 2, 'Expected both conflict tasks to be shown');
-    assert.deepStrictEqual(renderedPaths, ['/tmp/fake/task-T080', 'hydra/task/T081']);
+    assert.strictEqual(conflicts.length, 3, 'Only conflict tasks should be included');
+
+    assert.strictEqual(conflicts[0].id, 'T080');
+    assert.strictEqual(conflicts[0].relPath, '.hydra/worktrees/task-T080');
+    assert.strictEqual(conflicts[0].branch, 'hydra/task/T080');
+    assert.strictEqual(conflicts[0].title, 'Conflict with path');
+
+    assert.strictEqual(conflicts[1].id, 'T081');
+    assert.strictEqual(
+      conflicts[1].relPath,
+      'hydra/task/T081',
+      'Missing path falls back to branch-style',
+    );
+    assert.strictEqual(
+      conflicts[1].branch,
+      'hydra/task/T081',
+      'Missing branch falls back to hydra/task/{id}',
+    );
+
+    assert.strictEqual(conflicts[2].id, 'T083');
+    assert.strictEqual(conflicts[2].title, '(no title)', 'Missing title falls back to (no title)');
+    assert.strictEqual(conflicts[2].relPath, 'hydra/task/T083');
   });
 });

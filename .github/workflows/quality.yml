@@ -169,7 +169,7 @@ jobs:
         run: npm run lint:cycles
 
   check-coverage:
-    name: Coverage Gate (64%)
+    name: Coverage Gate (64% / 62% funcs)
     runs-on: ubuntu-latest
     continue-on-error: false
     permissions:
@@ -196,7 +196,7 @@ jobs:
         run: npm run test:coverage:check
         env:
           HUSKY: '0'
-        # Interim gate: 64% coverage — blocking. Raise thresholds as coverage improves.
+        # Interim gate: 64% lines/statements/branches and 62% functions — blocking.
         # Ultimate target: 80% (see docs/quality-evaluation.md roadmap).
 
   audit:
