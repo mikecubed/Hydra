@@ -365,6 +365,16 @@ describe('projectQueueSnapshot', () => {
     assert.equal(budgetOnly.health, null);
     assert.equal(budgetOnly.budget?.status, 'normal');
   });
+
+  it('projects unavailable health and budget when probes fail and marks the snapshot partial', () => {
+    const state = makeState({ tasks: [makeTask({ id: 'task-1' })] });
+
+    const result = projectQueueSnapshot(state, {}, { statusData: null, usage: null });
+
+    assert.equal(result.health?.status, 'unavailable');
+    assert.equal(result.budget?.status, 'unavailable');
+    assert.equal(result.availability, 'partial');
+  });
 });
 
 // ── Checkpoint Projection ──────────────────────────────────────────────────
@@ -1046,6 +1056,19 @@ describe('projectDaemonHealth', () => {
   it('observedAt is a valid ISO datetime', () => {
     const health = projectDaemonHealth({ running: true, updatedAt: '2025-01-01T00:00:00.000Z' });
     assert.equal(health.observedAt, '2025-01-01T00:00:00.000Z');
+  });
+
+  it('falls back to a generated ISO timestamp when updatedAt is malformed', () => {
+    const health = projectDaemonHealth({
+      running: true,
+      activeSessionId: 'session-1',
+      updatedAt: 'not-a-date',
+      stateUpdatedAt: '2025-01-01T00:00:00.000Z',
+    });
+
+    assert.equal(health.status, 'degraded');
+    assert.notEqual(health.observedAt, 'not-a-date');
+    assert.ok(Number.isFinite(Date.parse(health.observedAt)));
   });
 
   it('detailsAvailability is partial when not running', () => {

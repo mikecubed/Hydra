@@ -121,7 +121,15 @@ function parseStatusTimestamp(value: unknown): number | null {
 
 function resolveObservedAt(statusData: Record<string, unknown> | null): string {
   const updatedAt = statusData?.['updatedAt'];
-  return typeof updatedAt === 'string' && updatedAt !== '' ? updatedAt : new Date().toISOString();
+  if (
+    typeof updatedAt === 'string' &&
+    updatedAt !== '' &&
+    parseStatusTimestamp(updatedAt) !== null
+  ) {
+    return updatedAt;
+  }
+
+  return new Date().toISOString();
 }
 
 function isRecoveringDaemon(statusData: Record<string, unknown>, observedAtMs: number): boolean {
@@ -353,6 +361,19 @@ export function projectGlobalBudget(usage: UsageCheckResult): BudgetStatusView {
   };
 }
 
+export function projectUnavailableGlobalBudget(): BudgetStatusView {
+  return {
+    status: 'unavailable',
+    scope: 'global',
+    scopeId: null,
+    summary: 'Budget data is not available',
+    used: null,
+    limit: null,
+    unit: null,
+    complete: false,
+  };
+}
+
 export function projectItemBudget(workItemId: string): BudgetStatusView {
   return {
     status: 'unavailable',
@@ -511,11 +532,29 @@ export function projectQueueSnapshot(
     options.limit,
   );
 
-  const availability = pagedItems.length > 0 || state.tasks.length > 0 ? 'ready' : 'empty';
+  let availability: QueueSnapshotResult['availability'] =
+    pagedItems.length > 0 || state.tasks.length > 0 ? 'ready' : 'empty';
 
-  const health =
-    healthBudgetCtx?.statusData == null ? null : projectDaemonHealth(healthBudgetCtx.statusData);
-  const budget = healthBudgetCtx?.usage == null ? null : projectGlobalBudget(healthBudgetCtx.usage);
+  const statusData = healthBudgetCtx?.statusData;
+  const usage = healthBudgetCtx?.usage;
+  const health = statusData === undefined ? null : projectDaemonHealth(statusData);
+
+  let budget: BudgetStatusView | null;
+  if (usage === undefined) {
+    budget = null;
+  } else if (usage === null) {
+    budget = projectUnavailableGlobalBudget();
+  } else {
+    budget = projectGlobalBudget(usage);
+  }
+
+  if (
+    health?.detailsAvailability === 'partial' ||
+    health?.detailsAvailability === 'unavailable' ||
+    budget?.status === 'unavailable'
+  ) {
+    availability = 'partial';
+  }
 
   return {
     queue: pagedItems,

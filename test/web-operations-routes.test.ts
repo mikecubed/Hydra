@@ -451,7 +451,7 @@ describe('handleOperationsReadRoute', () => {
       assert.equal(budget['status'], 'exceeded');
     });
 
-    it('still returns queue data when readStatus throws', () => {
+    it('still returns queue data and explicit unavailable health when readStatus throws', () => {
       const state = makeState({ tasks: [makeTask({ id: 'task-1' })] });
       const ctx = makeReadCtx(
         'GET',
@@ -478,15 +478,18 @@ describe('handleOperationsReadRoute', () => {
       const data = ctx.captured.data as Record<string, unknown>;
       const queue = data['queue'] as Array<Record<string, unknown>>;
       const budget = data['budget'] as Record<string, unknown>;
+      const health = data['health'] as Record<string, unknown>;
       assert.equal(ctx.captured.statusCode, 200);
       assert.equal(queue[0]['id'], 'task-1');
-      assert.equal(data['health'], null);
+      assert.equal(data['availability'], 'partial');
+      assert.equal(health['scope'], 'global');
+      assert.equal(health['status'], 'unavailable');
       assert.equal(budget['scope'], 'global');
       assert.equal(budget['status'], 'normal');
       assert.ok(warnings.some((warning) => warning.includes('readStatus probe failed')));
     });
 
-    it('still returns queue data when checkUsage throws', () => {
+    it('still returns queue data and explicit unavailable budget when checkUsage throws', () => {
       const state = makeState({ tasks: [makeTask({ id: 'task-1' })] });
       const ctx = makeReadCtx(
         'GET',
@@ -513,11 +516,14 @@ describe('handleOperationsReadRoute', () => {
       const data = ctx.captured.data as Record<string, unknown>;
       const queue = data['queue'] as Array<Record<string, unknown>>;
       const health = data['health'] as Record<string, unknown>;
+      const budget = data['budget'] as Record<string, unknown>;
       assert.equal(ctx.captured.statusCode, 200);
       assert.equal(queue[0]['id'], 'task-1');
-      assert.equal(data['budget'], null);
+      assert.equal(data['availability'], 'partial');
       assert.equal(health['scope'], 'global');
       assert.equal(health['status'], 'healthy');
+      assert.equal(budget['scope'], 'global');
+      assert.equal(budget['status'], 'unavailable');
       assert.ok(warnings.some((warning) => warning.includes('checkUsage probe failed')));
     });
   });
