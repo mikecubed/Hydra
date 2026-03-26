@@ -650,3 +650,301 @@ describe('detail-sync lifecycle', () => {
     assert.equal(state.selection.detailFetchStatus, 'idle');
   });
 });
+
+// ─── Health and budget snapshot lifecycle ────────────────────────────────────
+
+describe('health and budget snapshot lifecycle', () => {
+  it('snapshot with health data is accessible via state.snapshot.health', () => {
+    const health = {
+      status: 'healthy' as const,
+      scope: 'global' as const,
+      observedAt: NOW,
+      message: null,
+      detailsAvailability: 'ready' as const,
+    };
+    const snapshot = makeSnapshotResponse({ health });
+    const state = applyActions(createInitialOperationsState(), [
+      { type: 'snapshot/request' },
+      { type: 'snapshot/success', snapshot },
+    ]);
+
+    assert.deepEqual(state.snapshot?.health, health);
+  });
+
+  it('snapshot with budget data is accessible via state.snapshot.budget', () => {
+    const budget = {
+      status: 'normal' as const,
+      scope: 'global' as const,
+      scopeId: null,
+      summary: 'Token usage within limits',
+      used: 5000,
+      limit: 100000,
+      unit: 'tokens',
+      complete: true,
+    };
+    const snapshot = makeSnapshotResponse({ budget });
+    const state = applyActions(createInitialOperationsState(), [
+      { type: 'snapshot/request' },
+      { type: 'snapshot/success', snapshot },
+    ]);
+
+    assert.deepEqual(state.snapshot?.budget, budget);
+  });
+
+  it('snapshot with null health and budget stores them as null', () => {
+    const snapshot = makeSnapshotResponse({ health: null, budget: null });
+    const state = applyActions(createInitialOperationsState(), [
+      { type: 'snapshot/request' },
+      { type: 'snapshot/success', snapshot },
+    ]);
+
+    assert.equal(state.snapshot?.health, null);
+    assert.equal(state.snapshot?.budget, null);
+  });
+
+  it('health transitions across snapshot refreshes', () => {
+    const healthySnapshot = makeSnapshotResponse({
+      health: {
+        status: 'healthy',
+        scope: 'global',
+        observedAt: NOW,
+        message: null,
+        detailsAvailability: 'ready',
+      },
+    });
+    const degradedSnapshot = makeSnapshotResponse({
+      health: {
+        status: 'degraded',
+        scope: 'global',
+        observedAt: LATER,
+        message: 'Agent pool reduced',
+        detailsAvailability: 'partial',
+      },
+      lastSynchronizedAt: LATER,
+    });
+
+    const state = applyActions(createInitialOperationsState(), [
+      { type: 'snapshot/success', snapshot: healthySnapshot },
+      { type: 'snapshot/request' },
+      { type: 'snapshot/success', snapshot: degradedSnapshot },
+    ]);
+
+    assert.equal(state.snapshot?.health?.status, 'degraded');
+    assert.equal(state.snapshot?.health?.message, 'Agent pool reduced');
+  });
+
+  it('budget transitions from normal to warning across refreshes', () => {
+    const normalBudget = makeSnapshotResponse({
+      budget: {
+        status: 'normal',
+        scope: 'global',
+        scopeId: null,
+        summary: 'Within limits',
+        used: 5000,
+        limit: 100000,
+        unit: 'tokens',
+        complete: true,
+      },
+    });
+    const warningBudget = makeSnapshotResponse({
+      budget: {
+        status: 'warning',
+        scope: 'global',
+        scopeId: null,
+        summary: 'Approaching limit',
+        used: 85000,
+        limit: 100000,
+        unit: 'tokens',
+        complete: true,
+      },
+      lastSynchronizedAt: LATER,
+    });
+
+    const state = applyActions(createInitialOperationsState(), [
+      { type: 'snapshot/success', snapshot: normalBudget },
+      { type: 'snapshot/request' },
+      { type: 'snapshot/success', snapshot: warningBudget },
+    ]);
+
+    assert.equal(state.snapshot?.budget?.status, 'warning');
+    assert.equal(state.snapshot?.budget?.summary, 'Approaching limit');
+  });
+
+  it('budget transitions to exceeded state', () => {
+    const snapshot = makeSnapshotResponse({
+      budget: {
+        status: 'exceeded',
+        scope: 'global',
+        scopeId: null,
+        summary: 'Daily budget exceeded',
+        used: 120000,
+        limit: 100000,
+        unit: 'tokens',
+        complete: true,
+      },
+    });
+
+    const state = applyActions(createInitialOperationsState(), [
+      { type: 'snapshot/request' },
+      { type: 'snapshot/success', snapshot },
+    ]);
+
+    assert.equal(state.snapshot?.budget?.status, 'exceeded');
+  });
+
+  it('budget with unavailable status is stored correctly', () => {
+    const snapshot = makeSnapshotResponse({
+      budget: {
+        status: 'unavailable',
+        scope: 'global',
+        scopeId: null,
+        summary: 'Budget data unavailable',
+        used: null,
+        limit: null,
+        unit: null,
+        complete: false,
+      },
+    });
+
+    const state = applyActions(createInitialOperationsState(), [
+      { type: 'snapshot/request' },
+      { type: 'snapshot/success', snapshot },
+    ]);
+
+    assert.equal(state.snapshot?.budget?.status, 'unavailable');
+    assert.equal(state.snapshot?.budget?.complete, false);
+  });
+
+  it('snapshot failure preserves previous health/budget data', () => {
+    const snapshot = makeSnapshotResponse({
+      health: {
+        status: 'healthy',
+        scope: 'global',
+        observedAt: NOW,
+        message: null,
+        detailsAvailability: 'ready',
+      },
+      budget: {
+        status: 'normal',
+        scope: 'global',
+        scopeId: null,
+        summary: 'Within limits',
+        used: 5000,
+        limit: 100000,
+        unit: 'tokens',
+        complete: true,
+      },
+    });
+
+    const state = applyActions(createInitialOperationsState(), [
+      { type: 'snapshot/success', snapshot },
+      { type: 'snapshot/request' },
+      { type: 'snapshot/failure' },
+    ]);
+
+    assert.equal(state.snapshot?.health?.status, 'healthy');
+    assert.equal(state.snapshot?.budget?.status, 'normal');
+    assert.equal(state.snapshotStatus, 'error');
+    assert.equal(state.freshness, 'stale');
+  });
+});
+
+// ─── Item-level budget in detail responses ──────────────────────────────────
+
+describe('item-level budget in detail responses', () => {
+  it('detail response with itemBudget is accessible via selection.detail', () => {
+    const itemBudget = {
+      status: 'warning' as const,
+      scope: 'work-item' as const,
+      scopeId: 'wq-1',
+      summary: 'Work item over 80%',
+      used: 8500,
+      limit: 10000,
+      unit: 'tokens',
+      complete: true,
+    };
+    const detail = makeDetailResponse({
+      item: makeQueueItem({ id: 'wq-1' }),
+      itemBudget,
+    });
+
+    const state = applyActions(createInitialOperationsState(), [
+      { type: 'selection/select', workItemId: 'wq-1' },
+      { type: 'selection/detail-loaded', detail },
+    ]);
+
+    assert.deepEqual(state.selection.detail?.itemBudget, itemBudget);
+  });
+
+  it('detail response with null itemBudget stores null', () => {
+    const detail = makeDetailResponse({
+      item: makeQueueItem({ id: 'wq-1' }),
+      itemBudget: null,
+    });
+
+    const state = applyActions(createInitialOperationsState(), [
+      { type: 'selection/select', workItemId: 'wq-1' },
+      { type: 'selection/detail-loaded', detail },
+    ]);
+
+    assert.equal(state.selection.detail?.itemBudget, null);
+  });
+});
+
+// ─── Risk signals in queue items through reducer ────────────────────────────
+
+describe('risk signals in queue items through reducer', () => {
+  it('stores risk signals on queue items from snapshot', () => {
+    const snapshot = makeSnapshotResponse({
+      queue: [
+        makeQueueItem({
+          id: 'wq-1',
+          riskSignals: [
+            { kind: 'budget', severity: 'warning', summary: 'Budget 80%', scope: 'global' },
+            { kind: 'health', severity: 'critical', summary: 'Agent down', scope: 'global' },
+          ],
+        }),
+      ],
+    });
+
+    const state = applyActions(createInitialOperationsState(), [
+      { type: 'snapshot/success', snapshot },
+    ]);
+
+    assert.equal(state.snapshot?.queue[0].riskSignals.length, 2);
+    assert.equal(state.snapshot?.queue[0].riskSignals[0].kind, 'budget');
+    assert.equal(state.snapshot?.queue[0].riskSignals[1].severity, 'critical');
+  });
+
+  it('snapshot refresh updates risk signals on existing items', () => {
+    const first = makeSnapshotResponse({
+      queue: [
+        makeQueueItem({
+          id: 'wq-1',
+          riskSignals: [
+            { kind: 'budget', severity: 'warning', summary: 'Budget 80%', scope: 'global' },
+          ],
+        }),
+      ],
+    });
+    const second = makeSnapshotResponse({
+      queue: [
+        makeQueueItem({
+          id: 'wq-1',
+          riskSignals: [
+            { kind: 'budget', severity: 'critical', summary: 'Budget exceeded', scope: 'global' },
+          ],
+        }),
+      ],
+      lastSynchronizedAt: LATER,
+    });
+
+    const state = applyActions(createInitialOperationsState(), [
+      { type: 'snapshot/success', snapshot: first },
+      { type: 'snapshot/success', snapshot: second },
+    ]);
+
+    assert.equal(state.snapshot?.queue[0].riskSignals[0].severity, 'critical');
+    assert.equal(state.snapshot?.queue[0].riskSignals[0].summary, 'Budget exceeded');
+  });
+});

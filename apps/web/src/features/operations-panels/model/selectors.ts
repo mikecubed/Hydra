@@ -7,6 +7,7 @@
  */
 
 import type {
+  BudgetStatusView,
   CheckpointRecordView,
   DaemonHealthView,
   DetailAvailability,
@@ -83,6 +84,16 @@ export function selectAvailability(state: OperationsWorkspaceState): WorkspaceAv
 /** Daemon health from the latest snapshot, or null. */
 export function selectHealthStatus(state: OperationsWorkspaceState): DaemonHealthView | null {
   return state.snapshot?.health ?? null;
+}
+
+/** Global budget posture from the latest snapshot, or null. */
+export function selectBudgetStatus(state: OperationsWorkspaceState): BudgetStatusView | null {
+  return state.snapshot?.budget ?? null;
+}
+
+/** Item-level budget from the currently selected item's detail, or null. */
+export function selectItemBudget(state: OperationsWorkspaceState): BudgetStatusView | null {
+  return state.selection.detail?.itemBudget ?? null;
 }
 
 /** Whether a control action is pending for the given work item. */
