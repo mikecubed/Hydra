@@ -18,9 +18,9 @@ import type {
 } from '@hydra/web-contracts';
 import type { GatewayErrorResponse } from '../shared/gateway-error-response.ts';
 import {
-  translateDaemonResponse,
-  translateFetchFailure,
-} from '../conversation/response-translator.ts';
+  translateOperationsDaemonResponse,
+  translateOperationsFetchFailure,
+} from './response-translator.ts';
 
 export type DaemonOperationsResult<T> = { data: T } | { error: GatewayErrorResponse };
 
@@ -134,11 +134,11 @@ export class DaemonOperationsClient {
       const response = await this.fetchFn(url, { ...init, signal: controller.signal });
       const payload = await response.json().catch(() => null);
       if (!response.ok) {
-        return { error: translateDaemonResponse(response.status, payload) };
+        return { error: translateOperationsDaemonResponse(response.status, payload) };
       }
       return { data: payload as T };
     } catch (err) {
-      return { error: translateFetchFailure(err) };
+      return { error: translateOperationsFetchFailure(err) };
     } finally {
       clearTimeout(timer);
     }
