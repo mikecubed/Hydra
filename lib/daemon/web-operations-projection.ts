@@ -155,8 +155,10 @@ function resolveBudgetSeverity(
   limit: number | null,
   percent: number | null,
 ): BudgetSeverity {
+  // Prefer numeric comparison when both used and limit are available;
+  // fall back to percent-based check only when numeric fields are missing.
   const isExceeded =
-    (used !== null && limit !== null && used >= limit) || (percent !== null && percent >= 100);
+    used !== null && limit !== null ? used >= limit : percent !== null && percent >= 100;
 
   if (isExceeded) {
     return 'exceeded';

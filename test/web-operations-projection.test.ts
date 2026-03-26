@@ -1139,6 +1139,20 @@ describe('projectGlobalBudget', () => {
     assert.equal(budget.status, 'exceeded');
   });
 
+  it('does not mark exceeded when percent rounds to 100 but used < limit', () => {
+    const budget = projectGlobalBudget(
+      makeUsage({ level: 'critical', percent: 100.0, used: 9_990, budget: 10_000 }),
+    );
+    assert.equal(budget.status, 'warning');
+  });
+
+  it('falls back to percent-based exceeded when numeric fields are unavailable', () => {
+    const budget = projectGlobalBudget(
+      makeUsage({ level: 'critical', percent: 100, used: undefined, budget: undefined }),
+    );
+    assert.equal(budget.status, 'exceeded');
+  });
+
   it('validates against BudgetStatusView schema for normal', () => {
     const budget = projectGlobalBudget(makeUsage());
     const parsed = BudgetStatusViewSchema.safeParse(budget);
