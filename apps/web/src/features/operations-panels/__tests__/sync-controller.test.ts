@@ -299,6 +299,36 @@ describe('createSyncController', () => {
     assert.equal(dispatched[1].type, 'selection/detail-failed');
   });
 
+  it('dispatches detail-failed when response ID mismatches requested ID', async () => {
+    // Simulates the real client's ID mismatch validation error
+    const deferred = createDeferredFetch<GetWorkItemDetailResponse>();
+    const client = createMockClient(() => deferred.promise);
+    const dispatched: OperationsAction[] = [];
+
+    const controller = createSyncController({
+      client,
+      dispatch: (action) => dispatched.push(action),
+    });
+
+    controller.syncDetail('wq-1');
+    deferred.reject(
+      new Error('Work item detail ID mismatch: requested "wq-1" but received "wq-WRONG"'),
+    );
+    try {
+      await deferred.promise;
+    } catch {
+      // expected — client rejects on ID mismatch
+    }
+    await new Promise<void>((r) => {
+      setTimeout(r, 0);
+    });
+
+    // Must transition to error, not stay stuck in loading
+    assert.equal(dispatched.length, 2);
+    assert.equal(dispatched[0].type, 'selection/detail-loading');
+    assert.equal(dispatched[1].type, 'selection/detail-failed');
+  });
+
   it('does not dispatch detail-failed for abort errors', async () => {
     const client = createMockClient(
       (_id, options) =>

@@ -67,6 +67,20 @@ function parseDetailResponse(body: unknown): GetWorkItemDetailResponseType {
   return parsed.data;
 }
 
+function parseDetailResponseForId(
+  requestedId: string,
+): (body: unknown) => GetWorkItemDetailResponseType {
+  return (body) => {
+    const detail = parseDetailResponse(body);
+    if (detail.item.id !== requestedId) {
+      throw new OperationsResponseValidationError(
+        `Work item detail ID mismatch: requested "${requestedId}" but received "${detail.item.id}"`,
+      );
+    }
+    return detail;
+  };
+}
+
 export interface OperationsClient {
   getSnapshot(
     query?: Partial<GetOperationsSnapshotRequest>,
@@ -212,7 +226,7 @@ export function createOperationsClient(options: OperationsClientOptions): Operat
         `/operations/work-items/${encodeURIComponent(workItemId)}`,
         { method: 'GET', signal: fetchOptions?.signal },
         undefined,
-        parseDetailResponse,
+        parseDetailResponseForId(workItemId),
       );
     },
     getWorkItemCheckpoints(workItemId) {

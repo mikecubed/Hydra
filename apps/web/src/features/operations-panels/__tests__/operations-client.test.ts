@@ -427,6 +427,44 @@ describe('OperationsClient', () => {
     );
   });
 
+  it('throws OperationsResponseValidationError when response ID mismatches requested ID', async () => {
+    const client = buildClient(async () =>
+      jsonResponse({
+        item: {
+          id: 'wq-OTHER',
+          title: 'Wrong Item',
+          status: 'active',
+          position: 0,
+          relatedConversationId: null,
+          relatedSessionId: null,
+          ownerLabel: null,
+          lastCheckpointSummary: null,
+          updatedAt: NOW,
+          riskSignals: [],
+          detailAvailability: 'ready',
+        },
+        checkpoints: [],
+        routing: null,
+        assignments: [],
+        council: null,
+        controls: [],
+        itemBudget: null,
+        availability: 'ready',
+      }),
+    );
+
+    await assert.rejects(
+      () => client.getWorkItemDetail('wq-1'),
+      (err: unknown) => {
+        assert.ok(err instanceof OperationsResponseValidationError);
+        assert.match(err.message, /ID mismatch/u);
+        assert.match(err.message, /wq-1/u);
+        assert.match(err.message, /wq-OTHER/u);
+        return true;
+      },
+    );
+  });
+
   it('throws OperationsResponseValidationError on invalid snapshot payloads', async () => {
     const client = buildClient(async () =>
       jsonResponse({
