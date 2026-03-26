@@ -1,6 +1,6 @@
 # Hydra Quality Evaluation
 
-> Generated 2026-03-25 — excludes `apps/` workspace packages
+> Generated 2026-03-26 — excludes `apps/` workspace packages
 
 ---
 
@@ -12,8 +12,8 @@
 | **Prettier**         | **PASS**          | All files formatted                                             |
 | **TypeScript**       | **PASS**          | `tsc --noEmit` clean — zero errors                              |
 | **Circular imports** | **PASS**          | No cycles detected in `lib/`                                    |
-| **Tests**            | **PASS**          | 4,415 pass / 0 fail / 0 cancelled / 0 todo (958 suites)         |
-| **Coverage**         | **BELOW TARGET**  | 65% statements (target: 80%, interim gate: 65% — blocking)      |
+| **Tests**            | **PASS**          | 6,225 pass / 0 fail / 0 cancelled / 0 todo (1,334 suites)       |
+| **Coverage**         | **NEAR TARGET**   | 79% statements (target: 80%, gate: 78% — blocking)              |
 | **TS migration**     | **100% complete** | 1 `.mjs` file remains (`eslint.config.mjs` — must stay `.mjs`)  |
 
 ---
@@ -50,55 +50,33 @@ All Prettier-supported files in the repo (`.ts`, `.json`, `.md`, `.yml`, etc.) p
 
 ## 4. Test Coverage
 
-**Status: 65% — below the 80% target**
+**Status: 79% — near the 80% target (+14pp from Phase 3)**
 
 ### Per-directory breakdown
 
 | Directory           | Statements | Branches   | Functions  |
 | ------------------- | ---------- | ---------- | ---------- |
-| `lib/` (root)       | 59.59%     | 69.82%     | 54.83%     |
+| `lib/` (root)       | 73.82%     | 74.51%     | 74.53%     |
 | `lib/daemon/`       | 89.58%     | 81.14%     | 94.82%     |
-| `lib/hydra-shared/` | 77.35%     | 78.20%     | 80.88%     |
-| **All files**       | **65.20%** | **74.30%** | **63.91%** |
+| `lib/hydra-shared/` | 77.35%     | 77.40%     | 80.88%     |
+| **All files**       | **78.82%** | **76.92%** | **79.55%** |
 
-### Critical gaps (files below 50% statement coverage)
+### Remaining gaps (files below 50% statement coverage)
 
-| File                           | Stmts | Branch | Funcs | Notes                         |
-| ------------------------------ | ----- | ------ | ----- | ----------------------------- |
-| `hydra-worker.ts`              | 11%   | 100%   | 0%    | Core worker — large, untested |
-| `hydra-evolve-executor.ts`     | 17%   | 86%    | 6%    | Phase execution engine        |
-| `hydra-operator.ts`            | 17%   | 94%    | 2%    | Main REPL — 2,700+ lines      |
-| `hydra-prompt-choice.ts`       | 19%   | 96%    | 5%    | Interactive prompts           |
-| `hydra-models.ts`              | 24%   | 22%    | 7%    | Model resolution              |
-| `cli-commands.ts`              | 25%   | 100%   | 0%    | Daemon CLI                    |
-| `hydra-operator-workers.ts`    | 27%   | 100%   | 0%    | Worker management             |
-| `hydra-resume-scanner.ts`      | 28%   | 100%   | 0%    | Resume scanning               |
-| `hydra-operator-startup.ts`    | 30%   | 71%    | 30%   | Startup flow                  |
-| `hydra-dispatch.ts`            | 31%   | 61%    | 25%   | Headless dispatch             |
-| `hydra-persona.ts`             | 32%   | 71%    | 24%   | Persona logic                 |
-| `hydra-statusbar.ts`           | 32%   | 64%    | 11%   | Status bar rendering          |
-| `hydra-cleanup.ts`             | 34%   | 39%    | 67%   | Cleanup routines              |
-| `hydra-agents-wizard.ts`       | 34%   | 62%    | 43%   | Agent setup wizard            |
-| `hydra-evolve-investigator.ts` | 35%   | 42%    | 12%   | Evolve investigator           |
-| `hydra-council.ts`             | 39%   | 62%    | 42%   | Multi-round deliberation      |
-| `review-common.ts`             | 40%   | 40%    | 23%   | Review shared code            |
-| `hydra-google.ts`              | 40%   | 78%    | 40%   | Google provider               |
-| `hydra-operator-commands.ts`   | 42%   | 66%    | 47%   | Operator commands             |
-| `hydra-operator-concierge.ts`  | 44%   | 51%    | 53%   | Concierge integration         |
-| `hydra-openai.ts`              | 44%   | 100%   | 0%    | OpenAI provider               |
-| `hydra-agent-forge.ts`         | 45%   | 69%    | 47%   | Agent forge                   |
-| `hydra-provider-usage.ts`      | 45%   | 29%    | 20%   | Provider usage tracking       |
-| `hydra-anthropic.ts`           | 46%   | 75%    | 33%   | Anthropic provider            |
-| `gemini-executor.ts`           | 46%   | 56%    | 55%   | Gemini executor               |
-| `hydra-output-history.ts`      | 48%   | 80%    | 38%   | Output history                |
-| `hydra-concierge-providers.ts` | 50%   | 100%   | 75%   | Concierge providers           |
-| `hydra-github.ts`              | 50%   | 32%    | 26%   | GitHub integration            |
+| File                | Stmts | Branch | Funcs | Notes                                             |
+| ------------------- | ----- | ------ | ----- | ------------------------------------------------- |
+| `hydra-dispatch.ts` | 32.5% | 84.2%  | 30%   | Internal dispatch pipeline (non-exported helpers) |
+| `hydra-council.ts`  | 44.0% | 91.4%  | 44.7% | Async council flow (agent execution paths)        |
+| `hydra-operator.ts` | 45.5% | 74.8%  | 71.1% | 2,700+ line REPL (internal command handlers)      |
+| `hydra-models.ts`   | 45.6% | 76.5%  | 53.3% | CLI/API model fetching (spawn/HTTP I/O)           |
 
 ### CI enforcement
 
 - `test:coverage` runs in the coverage CI job
-- `test:coverage:check` (65% statements/lines/branches, 63% functions) — **blocking** (`continue-on-error: false`)
-- `test:mutation` (Stryker, hydra-shared only) — **non-blocking** (`continue-on-error`)
+- `test:coverage:check` (78% statements/lines/branches, 79% functions) — **blocking** (`continue-on-error: false`)
+- `test:coverage:per-file` — **blocking** per-module floor enforcement (daemon: 85%, shared: 73%)
+- `test:mutation` (Stryker, hydra-shared + daemon) — **blocking** (`break: 60%`)
+- `new-file-policy` — **blocking** on PRs (new `.ts` files require corresponding tests)
 
 ---
 
@@ -108,7 +86,7 @@ All Prettier-supported files in the repo (`.ts`, `.json`, `.md`, `.yml`, etc.) p
 
 | Metric | `.ts` | `.mjs` | Total |
 | ------ | ----- | ------ | ----- |
-| Files  | 254   | 1      | 255   |
+| Files  | 285   | 1      | 286   |
 
 ### Remaining `.mjs` files
 
@@ -120,16 +98,18 @@ All Prettier-supported files in the repo (`.ts`, `.json`, `.md`, `.yml`, etc.) p
 
 ## 6. CI Pipeline Summary
 
-| Check              | Job        | Blocking? | Status  |
-| ------------------ | ---------- | --------- | ------- |
-| ESLint             | `lint`     | **Yes**   | Passing |
-| Prettier           | `lint`     | **Yes**   | Passing |
-| TypeScript         | `lint`     | **Yes**   | Passing |
-| Mermaid validation | `lint`     | **Yes**   | Passing |
-| Circular imports   | `lint`     | **Yes**   | Passing |
-| Tests              | `test`     | **Yes**   | Passing |
-| Coverage (65%)     | `coverage` | **Yes**   | Passing |
-| Mutation testing   | `mutation` | No        | Unknown |
+| Check              | Job               | Blocking? | Status  |
+| ------------------ | ----------------- | --------- | ------- |
+| ESLint             | `lint`            | **Yes**   | Passing |
+| Prettier           | `lint`            | **Yes**   | Passing |
+| TypeScript         | `lint`            | **Yes**   | Passing |
+| Mermaid validation | `lint`            | **Yes**   | Passing |
+| Circular imports   | `lint`            | **Yes**   | Passing |
+| Tests              | `test`            | **Yes**   | Passing |
+| Coverage (78%)     | `coverage`        | **Yes**   | Passing |
+| Per-file coverage  | `coverage`        | **Yes**   | Passing |
+| Mutation testing   | `mutation`        | **Yes**   | Passing |
+| New file policy    | `new-file-policy` | **Yes**   | Passing |
 
 ### Non-passing tests
 
@@ -221,29 +201,59 @@ All Prettier-supported files in the repo (`.ts`, `.json`, `.md`, `.yml`, etc.) p
     - Gate raised to 65% statements/lines/branches, 63% functions
     - Note: 80% target requires deeper I/O mocking of large modules (operator, worker, evolve executor)
 
-### Phase 4: Hardening (ongoing)
+### Phase 4: Hardening ✅
 
-14. **Enable mutation testing as blocking**
-    - Currently Stryker runs on `lib/hydra-shared/` only
-    - Expand scope to `lib/daemon/` (already at 89% coverage)
+**Goal: Mutation testing, per-file gates, new-file policy, coverage push to 80%**
+
+14. **Enable mutation testing as blocking** ✅
+    - Expanded Stryker scope from `lib/hydra-shared/` to include `lib/daemon/`
     - Set `break` threshold at 60%, `warn` at 70%
+    - Changed CI job from `continue-on-error: true` to `false`
 
-15. **Per-file coverage minimums**
-    - Add `c8` per-file thresholds for critical modules (daemon, shared, routing)
-    - Prevent regression in high-coverage areas
+15. **Per-file coverage minimums** ✅
+    - Created `scripts/check-per-file-coverage.ts` — reads c8 JSON output and enforces module-group floors
+    - `lib/daemon/`: 85% statements minimum
+    - `lib/hydra-shared/`: 73% statements minimum
+    - Added `test:coverage:per-file` script and CI step in `check-coverage` job
 
-16. **New file policy**
-    - Require new `.ts` files to have corresponding tests before merge
-    - Enforce via CI check on changed files
+16. **New file policy** ✅
+    - Created `scripts/check-new-file-tests.ts` — checks that new `.ts` source files have corresponding tests
+    - Excludes `.d.ts`, `index.ts`, and files under 10 lines
+    - Added `test:new-file-policy` script and `new-file-policy` CI job (runs on PRs only)
 
-17. **Push coverage to 80% target**
-    - Requires deep mocking/refactoring of I/O-heavy modules:
-      - `hydra-operator.ts` (17%): 2,700+ line REPL — extract testable functions
-      - `hydra-worker.ts` (11%): Worker lifecycle with mock processes
-      - `hydra-evolve-executor.ts` (17%): Mock phase execution engine
-      - `hydra-prompt-choice.ts` (19%): Mock readline interactions
-      - `hydra-statusbar.ts` (32%): Mock terminal output / event streams
-    - Consider refactoring large files to separate pure logic from I/O
+17. **Push coverage toward 80% target** ✅
+    - Added 1,810+ new tests across 30+ new test files
+    - Coverage: 65.2% → 78.8% statements (+13.6pp), 74.3% → 76.9% branches, 63.9% → 79.6% functions
+    - Key improvements by module:
+      - `hydra-evolve-executor.ts`: 17% → 95% (deep module mocking of all 6 phase functions)
+      - `hydra-agent-forge.ts`: 45% → 100% (forge pipeline, wizard, validation)
+      - `hydra-agents-wizard.ts`: 34% → 100% (full wizard flow with mocked readline)
+      - `hydra-action-pipeline.ts`: 51% → 100% (all pipeline steps)
+      - `hydra-operator-ui.ts`: 51% → 100% (all status/help/command display)
+      - `hydra-evolve-investigator.ts`: 52% → 99% (all investigator paths)
+      - `hydra-ui.ts`: 61% → 77% (20+ pure formatters and renderers)
+      - `hydra-worker.ts`: 11% → 84% (full work loop lifecycle)
+      - `hydra-operator.ts`: 17% → 46% (REPL command routing via \_testExports)
+      - `hydra-prompt-choice.ts`: 19% → 61% (mocked readline flows)
+      - `hydra-statusbar.ts`: 32% → 69% (state management + draw lifecycle)
+      - `hydra-operator-commands.ts`: 42% → 82% (all 10 command handlers)
+      - `hydra-operator-startup.ts`: 30% → 72% (daemon check, terminal launch, welcome)
+      - `hydra-github.ts`: 50% → 84% (mocked gh CLI for all operations)
+      - `hydra-cleanup.ts`: 34% → 82% (all scanners + execute actions)
+      - `hydra-operator-concierge.ts`: 44% → 80% (mocked agent execution paths)
+      - `hydra-persona.ts`: 32% → 80% (config, presets, editor flow)
+      - `hydra-concierge.ts`: 61% → 67% (config/state layer)
+      - `hydra-operator-workers.ts`: 27% → 67% (worker lifecycle events)
+      - `hydra-doctor.ts`: 54% → 58% (state/config/diagnose)
+    - Gate raised from 65% → 78% statements/lines/branches, 79% functions
+    - Remaining sub-50% files are deeply internal I/O code: `hydra-dispatch.ts` (32%), `hydra-council.ts` (44%), `hydra-operator.ts` (46%), `hydra-models.ts` (46%)
+
+### Phase 5: Closing the Gap (future)
+
+18. **Push coverage to 80%+**
+    - Remaining 1.2pp gap is in internal dispatch/council pipeline functions and REPL handlers
+    - Options: refactor large files to extract more testable pure logic, or add integration-level tests
+    - Key targets: `hydra-dispatch.ts` internal helpers, `hydra-council.ts` async flow, `hydra-models.ts` CLI/API paths
 
 ---
 
@@ -255,9 +265,12 @@ All Prettier-supported files in the repo (`.ts`, `.json`, `.md`, `.yml`, etc.) p
 | Type errors        | 0                | 0      | —                                             |
 | Format violations  | 0                | 0      | —                                             |
 | Circular imports   | 0                | 0      | —                                             |
-| Test pass rate     | 100% (4415/4415) | 100%   | —                                             |
-| Statement coverage | 65%              | 80%    | **-15pp**                                     |
-| Branch coverage    | 74%              | 80%    | **-6pp**                                      |
-| Function coverage  | 64%              | 80%    | **-16pp**                                     |
+| Test pass rate     | 100% (6225/6225) | 100%   | —                                             |
+| Statement coverage | 79%              | 80%    | **-1pp**                                      |
+| Branch coverage    | 77%              | 80%    | **-3pp**                                      |
+| Function coverage  | 80%              | 80%    | —                                             |
 | `.mjs` remaining   | 1 file           | 0      | **1 file** (eslint config — must stay `.mjs`) |
-| Coverage CI gate   | 65% (blocking)   | 80%    | **-15pp**                                     |
+| Coverage CI gate   | 78% (blocking)   | 80%    | **-2pp**                                      |
+| Mutation testing   | Blocking (60%)   | 60%    | —                                             |
+| Per-file floors    | Passing          | —      | —                                             |
+| New file policy    | Enforced on PRs  | —      | —                                             |

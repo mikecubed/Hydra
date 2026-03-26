@@ -55,6 +55,7 @@ const mockFormatResetTime = mock.fn((s: number) => `${String(s)}s`);
 
 mock.module('../lib/hydra-utils.ts', {
   namedExports: {
+    // @ts-expect-error spread in mock context
     request: (...args: unknown[]) => mockRequestFn(...args),
     short: (s: string | undefined, n?: number) => (s == null ? '' : s.slice(0, n ?? 200)),
   },
@@ -90,15 +91,20 @@ mock.module('../lib/hydra-config.ts', {
 
 mock.module('../lib/hydra-shared/agent-executor.ts', {
   namedExports: {
+    // @ts-expect-error spread in mock context
     executeAgent: (...args: unknown[]) => mockExecuteAgentFn(...args),
   },
 });
 
 mock.module('../lib/hydra-model-recovery.ts', {
   namedExports: {
+    // @ts-expect-error spread in mock context
     detectModelError: (...args: unknown[]) => mockDetectModelError(...args),
+    // @ts-expect-error spread in mock context
     recoverFromModelError: (...args: unknown[]) => mockRecoverFromModelError(...args),
+    // @ts-expect-error spread in mock context
     detectCodexError: (...args: unknown[]) => mockDetectCodexError(...args),
+    // @ts-expect-error spread in mock context
     detectUsageLimitError: (...args: unknown[]) => mockDetectUsageLimitError(...args),
     formatResetTime: (s: number) => mockFormatResetTime(s),
     isModelRecoveryEnabled: () => true,
@@ -169,7 +175,14 @@ describe('hydra-worker-deep', () => {
       assert.equal(w.permissionMode, 'auto-edit');
       // Restore
       mockLoadConfigFn.mock.mockImplementation(() => ({
-        workers: { pollIntervalMs: 10, maxOutputBufferKB: 8, autoChain: true },
+        workers: {
+          permissionMode: 'auto-edit',
+          pollIntervalMs: 10,
+          maxOutputBufferKB: 8,
+          autoChain: true,
+          heartbeatIntervalMs: 50000,
+          concurrency: { adaptivePolling: true, maxInFlight: 3 },
+        },
       }));
     });
   });
@@ -342,8 +355,8 @@ describe('hydra-worker-deep', () => {
       await w._executeAgent('test prompt');
       assert.equal(mockExecuteAgentFn.mock.callCount(), 1);
       const callArgs = mockExecuteAgentFn.mock.calls[0]?.arguments;
-      assert.equal(callArgs?.[0], 'claude');
-      assert.equal(callArgs?.[1], 'test prompt');
+      assert.equal((callArgs as any)?.[0], 'claude');
+      assert.equal((callArgs as any)?.[1], 'test prompt');
     });
   });
 
@@ -398,6 +411,7 @@ describe('hydra-worker-deep', () => {
       w.on('task:complete', () => events.push('complete'));
 
       let pollCount = 0;
+      // @ts-expect-error mock implementation with flexible signature
       mockRequestFn.mock.mockImplementation(async (_m: unknown, _b: unknown, path: unknown) => {
         if (typeof path === 'string' && path.startsWith('/next')) {
           pollCount++;
@@ -438,6 +452,7 @@ describe('hydra-worker-deep', () => {
       w.on('task:complete', () => events.push('complete'));
 
       let pollCount = 0;
+      // @ts-expect-error mock implementation with flexible signature
       mockRequestFn.mock.mockImplementation(async (_m: unknown, _b: unknown, path: unknown) => {
         if (typeof path === 'string' && path.startsWith('/next')) {
           pollCount++;
@@ -480,6 +495,7 @@ describe('hydra-worker-deep', () => {
       w._failedTasks.add('t-fail');
 
       let pollCount = 0;
+      // @ts-expect-error mock implementation with flexible signature
       mockRequestFn.mock.mockImplementation(async (_m: unknown, _b: unknown, path: unknown) => {
         if (typeof path === 'string' && path.startsWith('/next')) {
           pollCount++;
@@ -512,6 +528,7 @@ describe('hydra-worker-deep', () => {
       // Return a valid task action so _resolveWorkItem is called.
       // Then make _executeAgent throw to trigger the catch block.
       let pollCount = 0;
+      // @ts-expect-error mock implementation with flexible signature
       mockRequestFn.mock.mockImplementation(async (_m: unknown, _b: unknown, path: unknown) => {
         if (typeof path === 'string' && path.startsWith('/next')) {
           pollCount++;
@@ -545,6 +562,7 @@ describe('hydra-worker-deep', () => {
       w.autoChain = false;
 
       let pollCount = 0;
+      // @ts-expect-error mock implementation with flexible signature
       mockRequestFn.mock.mockImplementation(async (_m: unknown, _b: unknown, path: unknown) => {
         if (typeof path === 'string' && path.startsWith('/next')) {
           pollCount++;
@@ -590,10 +608,14 @@ describe('hydra-worker-deep', () => {
         isModelError: true,
         failedModel: 'old-model',
       }));
-      mockRecoverFromModelError.mock.mockImplementation(async () => ({
-        recovered: true,
-        newModel: 'new-model',
-      }));
+      // eslint-disable-next-line @typescript-eslint/no-unsafe-return
+      mockRecoverFromModelError.mock.mockImplementation(
+        async () =>
+          ({
+            recovered: true,
+            newModel: 'new-model',
+          }) as any,
+      );
 
       const progressEvents: string[] = [];
       w.on('task:progress', (e: { output: string }) => progressEvents.push(e.output));
@@ -608,6 +630,7 @@ describe('hydra-worker-deep', () => {
       w.autoChain = true;
 
       let pollCount = 0;
+      // @ts-expect-error mock implementation with flexible signature
       mockRequestFn.mock.mockImplementation(async (_m: unknown, _b: unknown, path: unknown) => {
         if (typeof path === 'string' && path.startsWith('/next')) {
           pollCount++;
@@ -651,6 +674,7 @@ describe('hydra-worker-deep', () => {
       w.autoChain = false;
 
       let pollCount = 0;
+      // @ts-expect-error mock implementation with flexible signature
       mockRequestFn.mock.mockImplementation(async (_m: unknown, _b: unknown, path: unknown) => {
         if (typeof path === 'string' && path.startsWith('/next')) {
           pollCount++;
@@ -714,6 +738,7 @@ describe('hydra-worker-deep', () => {
       w.autoChain = false;
 
       let pollCount = 0;
+      // @ts-expect-error mock implementation with flexible signature
       mockRequestFn.mock.mockImplementation(async (_m: unknown, _b: unknown, path: unknown) => {
         if (typeof path === 'string' && path.startsWith('/next')) {
           pollCount++;
@@ -833,6 +858,8 @@ describe('hydra-worker-deep', () => {
       mockRequestFn.mock.mockImplementation(async () => ({}));
       mockDetectUsageLimitError.mock.mockImplementation(() => ({
         isUsageLimit: false,
+        errorMessage: '',
+        resetInSeconds: 0,
       }));
 
       await (w as any)._finalizeTask('t-err', 'Fail', {
@@ -883,6 +910,7 @@ describe('hydra-worker-deep', () => {
     );
     mockLoadConfigFn.mock.mockImplementation(() => ({
       workers: {
+        permissionMode: 'auto-edit',
         pollIntervalMs: 10,
         maxOutputBufferKB: 8,
         autoChain: true,

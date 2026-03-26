@@ -1,4 +1,4 @@
-/* eslint-disable no-control-regex, @typescript-eslint/no-deprecated, @typescript-eslint/no-unused-vars, @typescript-eslint/unbound-method -- test mocking patterns */
+/* eslint-disable no-control-regex, @typescript-eslint/no-deprecated, @typescript-eslint/unbound-method -- test mocking patterns */
 /**
  * Deep coverage tests for lib/hydra-statusbar.ts
  *
@@ -109,7 +109,6 @@ const {
   destroyStatusBar,
   startPolling,
   stopPolling,
-  startEventStream,
   stopEventStream,
 } = await import('../lib/hydra-statusbar.ts');
 

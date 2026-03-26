@@ -30,7 +30,7 @@ const mockGetModelSummary = mock.fn(() => ({
 const mockGetMode = mock.fn(() => 'balanced');
 const mockCheckUsage = mock.fn(() => ({ todayTokens: 0, model: '' }));
 const mockGetSessionUsage = mock.fn(() => ({ callCount: 0, totalTokens: 0, costUsd: 0 }));
-const mockSyncHydraMd = mock.fn(() => ({ synced: [] }));
+const mockSyncHydraMd = mock.fn(() => ({ synced: [] as string[] }));
 const mockPrintNextSteps = mock.fn();
 const mockLoadProviderUsage = mock.fn();
 const mockRefreshExternalUsage = mock.fn(async () => {});
@@ -125,7 +125,7 @@ mock.module('../lib/hydra-ui.ts', {
 
 mock.module('../lib/hydra-sync-md.ts', {
   namedExports: {
-    syncHydraMd: (...args: unknown[]) => mockSyncHydraMd(...(args as [string])),
+    syncHydraMd: () => mockSyncHydraMd(),
   },
 });
 
@@ -281,7 +281,7 @@ describe('hydra-operator-startup-deep', () => {
 
     it('extracts unique valid agent names from handoffs', () => {
       mockGetAgent.mock.mockImplementation((name: string) => {
-        if (['claude', 'gemini'].includes(name)) return { name, type: 'physical' };
+        if (['claude', 'gemini'].includes(name)) return { name, rolePrompt: '', type: 'physical' };
         return null;
       });
       const result = extractHandoffAgents({
@@ -399,6 +399,7 @@ describe('hydra-operator-startup-deep', () => {
       mockGetModelSummary.mock.mockImplementation(() => ({
         _mode: 'performance',
         claude: { active: 'claude-opus-4', isOverride: true, reasoningEffort: 'high' },
+        gemini: { active: 'gemini-2.5-pro', isOverride: false },
       }));
       mockRequest.mock.mockImplementation(async () => ({
         activeSession: { status: 'active' },
