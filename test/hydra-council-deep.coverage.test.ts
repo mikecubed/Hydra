@@ -283,7 +283,7 @@ describe('hydra-council deep coverage', () => {
   describe('extractDecisionOptions', () => {
     it('returns empty array for null/undefined', () => {
       assert.deepStrictEqual(extractDecisionOptions(null), []);
-      assert.deepStrictEqual(extractDecisionOptions(), []);
+      assert.deepStrictEqual(extractDecisionOptions(undefined), []);
     });
 
     it('returns empty array for non-object', () => {
@@ -362,7 +362,7 @@ describe('hydra-council deep coverage', () => {
   describe('extractAssumptions', () => {
     it('returns empty for null/undefined/non-object', () => {
       assert.deepStrictEqual(extractAssumptions(null), []);
-      assert.deepStrictEqual(extractAssumptions(), []);
+      assert.deepStrictEqual(extractAssumptions(undefined), []);
       assert.deepStrictEqual(extractAssumptions(42), []);
     });
 
@@ -453,7 +453,7 @@ describe('hydra-council deep coverage', () => {
   describe('extractAssumptionAttacks', () => {
     it('returns empty for null/undefined', () => {
       assert.deepStrictEqual(extractAssumptionAttacks(null), []);
-      assert.deepStrictEqual(extractAssumptionAttacks(), []);
+      assert.deepStrictEqual(extractAssumptionAttacks(undefined), []);
     });
 
     it('extracts from assumption_attacks key', () => {
@@ -519,7 +519,7 @@ describe('hydra-council deep coverage', () => {
   describe('extractFinalDecision', () => {
     it('returns null for null/undefined/non-object', () => {
       assert.equal(extractFinalDecision(null), null);
-      assert.equal(extractFinalDecision(), null);
+      assert.equal(extractFinalDecision(undefined), null);
       assert.equal(extractFinalDecision(42), null);
     });
 

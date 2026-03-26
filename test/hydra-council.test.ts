@@ -310,7 +310,7 @@ test('COUNCIL_DECISION_CRITERIA entries have both key and label', () => {
 
 test('extractDecisionOptions returns empty for null/undefined', () => {
   assert.deepEqual(extractDecisionOptions(null), []);
-  assert.deepEqual(extractDecisionOptions(), []);
+  assert.deepEqual(extractDecisionOptions(undefined), []);
   assert.deepEqual(extractDecisionOptions('not an object'), []);
 });
 
@@ -397,7 +397,7 @@ test('extractDecisionOptions normalizes tradeoffs with camelCase keys', () => {
 
 test('extractAssumptions returns empty for null/undefined', () => {
   assert.deepEqual(extractAssumptions(null), []);
-  assert.deepEqual(extractAssumptions(), []);
+  assert.deepEqual(extractAssumptions(undefined), []);
 });
 
 test('extractAssumptions extracts from assumptions key', () => {
@@ -466,7 +466,7 @@ test('extractAssumptions deduplicates by assumption text', () => {
 
 test('extractAssumptionAttacks returns empty for null/undefined', () => {
   assert.deepEqual(extractAssumptionAttacks(null), []);
-  assert.deepEqual(extractAssumptionAttacks(), []);
+  assert.deepEqual(extractAssumptionAttacks(undefined), []);
 });
 
 test('extractAssumptionAttacks extracts from assumption_challenges key', () => {
@@ -514,7 +514,7 @@ test('extractAssumptionAttacks skips empty items', () => {
 
 test('extractFinalDecision returns null for null/undefined', () => {
   assert.equal(extractFinalDecision(null), null);
-  assert.equal(extractFinalDecision(), null);
+  assert.equal(extractFinalDecision(undefined), null);
   assert.equal(extractFinalDecision('string'), null);
 });
 

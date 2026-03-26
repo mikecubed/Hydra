@@ -67,7 +67,7 @@ describe('parseModelLines', () => {
   });
 
   it('returns null for undefined input', () => {
-    assert.equal(parseModelLines(), null);
+    assert.equal(parseModelLines(undefined), null);
   });
 
   it('returns null for empty string', () => {
