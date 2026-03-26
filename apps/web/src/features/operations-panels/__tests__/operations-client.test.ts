@@ -314,6 +314,119 @@ describe('OperationsClient', () => {
     assert.equal(result.workItemId, 'wq-1');
   });
 
+  it('throws OperationsResponseValidationError on invalid detail payloads', async () => {
+    const client = buildClient(async () =>
+      jsonResponse({
+        item: { id: 'wq-1', title: 'Task A', status: 'INVALID_STATUS' },
+        checkpoints: [],
+        routing: null,
+        assignments: [],
+        council: null,
+        controls: [],
+        itemBudget: null,
+        availability: 'ready',
+      }),
+    );
+
+    await assert.rejects(
+      () => client.getWorkItemDetail('wq-1'),
+      (err: unknown) => {
+        assert.ok(err instanceof OperationsResponseValidationError);
+        assert.match(err.message, /Invalid work item detail response/u);
+        return true;
+      },
+    );
+  });
+
+  it('throws OperationsResponseValidationError on non-monotonic checkpoint sequences', async () => {
+    const client = buildClient(async () =>
+      jsonResponse({
+        item: {
+          id: 'wq-1',
+          title: 'Task A',
+          status: 'active',
+          position: 0,
+          relatedConversationId: null,
+          relatedSessionId: null,
+          ownerLabel: null,
+          lastCheckpointSummary: null,
+          updatedAt: NOW,
+          riskSignals: [],
+          detailAvailability: 'ready',
+        },
+        checkpoints: [
+          {
+            id: 'cp-1',
+            sequence: 5,
+            label: 'Later',
+            status: 'reached',
+            timestamp: NOW,
+            detail: null,
+          },
+          {
+            id: 'cp-2',
+            sequence: 2,
+            label: 'Earlier',
+            status: 'reached',
+            timestamp: NOW,
+            detail: null,
+          },
+        ],
+        routing: null,
+        assignments: [],
+        council: null,
+        controls: [],
+        itemBudget: null,
+        availability: 'ready',
+      }),
+    );
+
+    await assert.rejects(
+      () => client.getWorkItemDetail('wq-1'),
+      (err: unknown) => {
+        assert.ok(err instanceof OperationsResponseValidationError);
+        assert.match(err.message, /Invalid work item detail response/u);
+        return true;
+      },
+    );
+  });
+
+  it('throws OperationsResponseValidationError when detail payload has extra fields', async () => {
+    const client = buildClient(async () =>
+      jsonResponse({
+        item: {
+          id: 'wq-1',
+          title: 'Task A',
+          status: 'active',
+          position: 0,
+          relatedConversationId: null,
+          relatedSessionId: null,
+          ownerLabel: null,
+          lastCheckpointSummary: null,
+          updatedAt: NOW,
+          riskSignals: [],
+          detailAvailability: 'ready',
+        },
+        checkpoints: [],
+        routing: null,
+        assignments: [],
+        council: null,
+        controls: [],
+        itemBudget: null,
+        availability: 'ready',
+        unexpectedField: 'should fail strict',
+      }),
+    );
+
+    await assert.rejects(
+      () => client.getWorkItemDetail('wq-1'),
+      (err: unknown) => {
+        assert.ok(err instanceof OperationsResponseValidationError);
+        return true;
+      },
+    );
+  });
+
   it('throws OperationsResponseValidationError on invalid snapshot payloads', async () => {
     const client = buildClient(async () =>
       jsonResponse({

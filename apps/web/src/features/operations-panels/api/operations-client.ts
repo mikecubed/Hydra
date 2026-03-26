@@ -11,13 +11,13 @@ import type {
   GetOperationsSnapshotResponse as GetOperationsSnapshotResponseType,
   GetOperationsSnapshotRequest,
   GetWorkItemControlsResponse,
-  GetWorkItemDetailResponse,
+  GetWorkItemDetailResponse as GetWorkItemDetailResponseType,
   GetWorkItemExecutionResponse,
   GetWorkItemCheckpointsResponse,
   SubmitControlActionBody,
   SubmitControlActionResponse,
 } from '@hydra/web-contracts';
-import { GetOperationsSnapshotResponse } from '@hydra/web-contracts';
+import { GetOperationsSnapshotResponse, GetWorkItemDetailResponse } from '@hydra/web-contracts';
 import { type GatewayErrorBody, parseGatewayError } from '../../../shared/gateway-errors.ts';
 
 export interface OperationsClientOptions {
@@ -56,6 +56,17 @@ function parseSnapshotResponse(body: unknown): GetOperationsSnapshotResponseType
   return parsed.data;
 }
 
+function parseDetailResponse(body: unknown): GetWorkItemDetailResponseType {
+  const parsed = GetWorkItemDetailResponse.safeParse(body);
+  if (!parsed.success) {
+    throw new OperationsResponseValidationError(
+      `Invalid work item detail response: ${parsed.error.message}`,
+    );
+  }
+
+  return parsed.data;
+}
+
 export interface OperationsClient {
   getSnapshot(
     query?: Partial<GetOperationsSnapshotRequest>,
@@ -63,7 +74,7 @@ export interface OperationsClient {
   getWorkItemDetail(
     workItemId: string,
     options?: { readonly signal?: AbortSignal },
-  ): Promise<GetWorkItemDetailResponse>;
+  ): Promise<GetWorkItemDetailResponseType>;
   getWorkItemCheckpoints(workItemId: string): Promise<GetWorkItemCheckpointsResponse>;
   getWorkItemExecution(workItemId: string): Promise<GetWorkItemExecutionResponse>;
   getWorkItemControls(workItemId: string): Promise<GetWorkItemControlsResponse>;
@@ -197,9 +208,11 @@ export function createOperationsClient(options: OperationsClientOptions): Operat
       );
     },
     getWorkItemDetail(workItemId, fetchOptions) {
-      return request<GetWorkItemDetailResponse>(
+      return request<GetWorkItemDetailResponseType>(
         `/operations/work-items/${encodeURIComponent(workItemId)}`,
         { method: 'GET', signal: fetchOptions?.signal },
+        undefined,
+        parseDetailResponse,
       );
     },
     getWorkItemCheckpoints(workItemId) {

@@ -589,4 +589,64 @@ describe('detail-sync lifecycle', () => {
     assert.equal(state.selection.detail?.checkpoints[0].label, 'Init');
     assert.equal(state.selection.detail?.checkpoints[1].status, 'waiting');
   });
+
+  it('detail-loading on a previously loaded item clears stale detail', () => {
+    const detail = makeDetailResponse({
+      item: makeQueueItem({ id: 'wq-1' }),
+      checkpoints: [
+        { id: 'cp-1', sequence: 0, label: 'Init', status: 'reached', timestamp: NOW, detail: null },
+      ],
+    });
+
+    const state = applyActions(createInitialOperationsState(), [
+      { type: 'selection/select', workItemId: 'wq-1' },
+      { type: 'selection/detail-loaded', detail },
+      { type: 'selection/detail-loading' },
+    ]);
+
+    assert.equal(state.selection.selectedWorkItemId, 'wq-1');
+    assert.equal(state.selection.detail, null);
+    assert.equal(state.selection.detailFetchStatus, 'loading');
+  });
+
+  it('detail-failed on a previously loaded item clears stale detail', () => {
+    const detail = makeDetailResponse({
+      item: makeQueueItem({ id: 'wq-1' }),
+      checkpoints: [
+        { id: 'cp-1', sequence: 0, label: 'Init', status: 'reached', timestamp: NOW, detail: null },
+      ],
+    });
+
+    const state = applyActions(createInitialOperationsState(), [
+      { type: 'selection/select', workItemId: 'wq-1' },
+      { type: 'selection/detail-loaded', detail },
+      { type: 'selection/detail-failed' },
+    ]);
+
+    assert.equal(state.selection.selectedWorkItemId, 'wq-1');
+    assert.equal(state.selection.detail, null);
+    assert.equal(state.selection.detailFetchStatus, 'error');
+  });
+
+  it('full refetch cycle replaces stale detail with fresh data', () => {
+    const oldDetail = makeDetailResponse({
+      item: makeQueueItem({ id: 'wq-1', title: 'Old' }),
+      availability: 'partial',
+    });
+    const newDetail = makeDetailResponse({
+      item: makeQueueItem({ id: 'wq-1', title: 'New' }),
+      availability: 'ready',
+    });
+
+    const state = applyActions(createInitialOperationsState(), [
+      { type: 'selection/select', workItemId: 'wq-1' },
+      { type: 'selection/detail-loaded', detail: oldDetail },
+      { type: 'selection/detail-loading' },
+      { type: 'selection/detail-loaded', detail: newDetail },
+    ]);
+
+    assert.equal(state.selection.detail?.item.title, 'New');
+    assert.equal(state.selection.detailAvailability, 'ready');
+    assert.equal(state.selection.detailFetchStatus, 'idle');
+  });
 });

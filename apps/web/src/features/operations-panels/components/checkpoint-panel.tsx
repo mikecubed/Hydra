@@ -110,12 +110,18 @@ function formatTimestamp(iso: string): string {
   }
 }
 
+function resolveStatusNotice(fetchStatus: DetailFetchStatus): string | null {
+  if (fetchStatus === 'loading') return 'Loading checkpoint data\u2026';
+  if (fetchStatus === 'error') return 'Failed to load checkpoint data.';
+  return null;
+}
+
 function resolveEmptyMessage(
   availability: DetailAvailability | null,
   fetchStatus: DetailFetchStatus,
 ): string {
-  if (fetchStatus === 'loading') return 'Loading checkpoint data\u2026';
-  if (fetchStatus === 'error') return 'Failed to load checkpoint data.';
+  const notice = resolveStatusNotice(fetchStatus);
+  if (notice !== null) return notice;
   if (availability === 'partial') return 'Checkpoint data is partially available.';
   if (availability === 'unavailable') return 'Checkpoint data is currently unavailable.';
   return 'No checkpoints recorded yet.';
@@ -181,11 +187,16 @@ export function CheckpointPanel({
   detailAvailability,
   detailFetchStatus,
 }: CheckpointPanelProps): JSX.Element {
+  const statusNotice = resolveStatusNotice(detailFetchStatus);
+
   return (
     <div style={panelStyle} data-testid="checkpoint-panel">
       <h4 style={headingStyle}>Checkpoints</h4>
+      {statusNotice !== null && <p style={emptyStyle}>{statusNotice}</p>}
       {checkpoints.length === 0 ? (
-        <p style={emptyStyle}>{resolveEmptyMessage(detailAvailability, detailFetchStatus)}</p>
+        statusNotice === null && (
+          <p style={emptyStyle}>{resolveEmptyMessage(detailAvailability, detailFetchStatus)}</p>
+        )
       ) : (
         <ol aria-label="Checkpoint timeline" style={listStyle}>
           {checkpoints.map((cp) => (

@@ -167,7 +167,11 @@ describe('CheckpointPanel rendering', () => {
     expect(screen.getByText('reached')).toBeInTheDocument();
     expect(screen.getByText('waiting')).toBeInTheDocument();
   });
+});
 
+// ─── Checkpoint entry details ───────────────────────────────────────────────
+
+describe('CheckpointPanel entry details', () => {
   it('shows detail text when checkpoint has detail', () => {
     const checkpoints = [makeCheckpoint({ id: 'cp-1', detail: 'Waiting for CI pipeline' })];
 
@@ -212,6 +216,39 @@ describe('CheckpointPanel rendering', () => {
 
     expect(screen.getByTestId('checkpoint-cp-alpha')).toBeInTheDocument();
     expect(screen.getByTestId('checkpoint-cp-beta')).toBeInTheDocument();
+  });
+});
+
+// ─── Loading / error states with existing checkpoints ───────────────────────
+
+describe('CheckpointPanel stale-data indicators', () => {
+  it('shows loading notice when refetching with existing checkpoints', () => {
+    const checkpoints = [makeCheckpoint({ id: 'cp-1', label: 'Init' })];
+    render(
+      <CheckpointPanel
+        checkpoints={checkpoints}
+        detailAvailability="ready"
+        detailFetchStatus="loading"
+      />,
+    );
+    expect(screen.getByTestId('checkpoint-panel')).toHaveTextContent(/loading checkpoint data/i);
+    // Checkpoint entries should still be visible alongside the notice
+    expect(screen.getByTestId('checkpoint-cp-1')).toBeInTheDocument();
+  });
+
+  it('shows error notice when refetch failed with existing checkpoints', () => {
+    const checkpoints = [makeCheckpoint({ id: 'cp-1', label: 'Init' })];
+    render(
+      <CheckpointPanel
+        checkpoints={checkpoints}
+        detailAvailability="ready"
+        detailFetchStatus="error"
+      />,
+    );
+    expect(screen.getByTestId('checkpoint-panel')).toHaveTextContent(
+      /failed to load checkpoint data/i,
+    );
+    expect(screen.getByTestId('checkpoint-cp-1')).toBeInTheDocument();
   });
 });
 

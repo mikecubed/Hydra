@@ -190,6 +190,7 @@ function reduceSelectionDetailLoading(state: OperationsWorkspaceState): Operatio
     ...state,
     selection: {
       ...state.selection,
+      detail: null,
       detailFetchStatus: 'loading',
     },
   };
@@ -223,6 +224,7 @@ function reduceSelectionDetailFailed(state: OperationsWorkspaceState): Operation
     ...state,
     selection: {
       ...state.selection,
+      detail: null,
       detailFetchStatus: 'error',
     },
   };
