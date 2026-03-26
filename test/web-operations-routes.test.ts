@@ -803,7 +803,7 @@ describe('handleOperationsReadRoute', () => {
       assert.equal(checkpoints[2]['sequence'], 2);
     });
 
-    it('returns routing as null (not yet tracked)', () => {
+    it('returns routing as null when no routingHistory on task', () => {
       const state = makeState({ tasks: [makeTask({ id: 'task-1' })] });
       const ctx = makeReadCtx('GET', '/operations/work-items/task-1', state);
       handleOperationsReadRoute(ctx);
@@ -811,7 +811,112 @@ describe('handleOperationsReadRoute', () => {
       assert.equal(data['routing'], null);
     });
 
-    it('returns empty assignments array', () => {
+    it('returns populated routing when task has routingHistory', () => {
+      const state = makeState({
+        tasks: [
+          makeTask({
+            id: 'task-1',
+            routingHistory: [
+              {
+                route: 'claude',
+                mode: 'council',
+                changedAt: '2025-06-01T10:00:00.000Z',
+                reason: 'Architecture analysis',
+              },
+            ],
+          }),
+        ],
+      });
+      const ctx = makeReadCtx('GET', '/operations/work-items/task-1', state);
+      handleOperationsReadRoute(ctx);
+      const data = ctx.captured.data as Record<string, unknown>;
+      const routing = data['routing'] as Record<string, unknown>;
+      assert.notEqual(routing, null);
+      assert.equal(routing['currentRoute'], 'claude');
+      assert.equal(routing['currentMode'], 'council');
+      assert.ok(Array.isArray(routing['history']));
+    });
+
+    it('skips malformed history entries without failing the route', () => {
+      const state = makeState({
+        tasks: [
+          makeTask({
+            id: 'task-1',
+            routingHistory: [null],
+            assignmentHistory: [null],
+            councilHistory: {
+              status: 'completed',
+              participants: [null],
+              transitions: [null],
+              finalOutcome: 'Done',
+            },
+          }),
+        ],
+      });
+      const ctx = makeReadCtx('GET', '/operations/work-items/task-1', state);
+      handleOperationsReadRoute(ctx);
+      const data = ctx.captured.data as Record<string, unknown>;
+      assert.equal(ctx.captured.statusCode, 200);
+      assert.equal(data['routing'], null);
+      assert.deepStrictEqual(data['assignments'], []);
+      const council = data['council'] as Record<string, unknown>;
+      assert.deepStrictEqual(council['participants'], []);
+      assert.deepStrictEqual(council['transitions'], []);
+    });
+
+    it('normalizes invalid history timestamps to contract-safe values', () => {
+      const state = makeState({
+        tasks: [
+          makeTask({
+            id: 'task-1',
+            routingHistory: [
+              {
+                route: 'claude',
+                mode: 'council',
+                changedAt: '2025-06-01 10:00:00Z',
+                reason: 'Non-ISO timestamp',
+              },
+            ],
+            assignmentHistory: [
+              {
+                agent: 'codex',
+                role: 'implementer',
+                state: 'active',
+                startedAt: '2025-06-01 10:00:00Z',
+                endedAt: null,
+              },
+            ],
+            councilHistory: {
+              status: 'completed',
+              participants: [],
+              transitions: [
+                {
+                  label: 'Round 1',
+                  status: 'completed',
+                  timestamp: '2025-06-01 10:00:00Z',
+                  detail: 'Non-ISO timestamp',
+                },
+              ],
+              finalOutcome: 'Done',
+            },
+          }),
+        ],
+      });
+      const ctx = makeReadCtx('GET', '/operations/work-items/task-1', state);
+      handleOperationsReadRoute(ctx);
+      const data = ctx.captured.data as Record<string, unknown>;
+      const routing = data['routing'] as Record<string, unknown>;
+      const assignments = data['assignments'] as Array<Record<string, unknown>>;
+      const council = data['council'] as Record<string, unknown>;
+      const transitions = council['transitions'] as Array<Record<string, unknown>>;
+
+      assert.equal(ctx.captured.statusCode, 200);
+      assert.equal(routing['changedAt'], '1970-01-01T00:00:00.000Z');
+      assert.equal(assignments[0]['startedAt'], null);
+      assert.equal(transitions[0]['timestamp'], '1970-01-01T00:00:00.000Z');
+    });
+
+    it('returns empty assignments array when no assignmentHistory', () => {
       const state = makeState({ tasks: [makeTask({ id: 'task-1' })] });
       const ctx = makeReadCtx('GET', '/operations/work-items/task-1', state);
       handleOperationsReadRoute(ctx);
@@ -819,12 +924,78 @@ describe('handleOperationsReadRoute', () => {
       assert.deepStrictEqual(data['assignments'], []);
     });
 
-    it('returns council as null', () => {
+    it('returns populated assignments when task has assignmentHistory', () => {
+      const state = makeState({
+        tasks: [
+          makeTask({
+            id: 'task-1',
+            assignmentHistory: [
+              {
+                agent: 'codex',
+                role: 'implementer',
+                state: 'active',
+                startedAt: '2025-06-01T10:00:00.000Z',
+                endedAt: null,
+              },
+            ],
+          }),
+        ],
+      });
+      const ctx = makeReadCtx('GET', '/operations/work-items/task-1', state);
+      handleOperationsReadRoute(ctx);
+      const data = ctx.captured.data as Record<string, unknown>;
+      const assignments = data['assignments'] as Array<Record<string, unknown>>;
+      assert.equal(assignments.length, 1);
+      assert.equal(assignments[0]['participantId'], 'codex');
+      assert.equal(assignments[0]['state'], 'active');
+    });
+
+    it('returns council as null when no councilHistory', () => {
       const state = makeState({ tasks: [makeTask({ id: 'task-1' })] });
       const ctx = makeReadCtx('GET', '/operations/work-items/task-1', state);
       handleOperationsReadRoute(ctx);
       const data = ctx.captured.data as Record<string, unknown>;
       assert.equal(data['council'], null);
+    });
+
+    it('returns populated council when task has councilHistory', () => {
+      const state = makeState({
+        tasks: [
+          makeTask({
+            id: 'task-1',
+            councilHistory: {
+              status: 'completed',
+              participants: [
+                {
+                  agent: 'claude',
+                  role: 'architect',
+                  state: 'completed',
+                  startedAt: '2025-06-01T10:00:00.000Z',
+                  endedAt: '2025-06-01T11:00:00.000Z',
+                },
+              ],
+              transitions: [
+                {
+                  label: 'Round 1',
+                  status: 'completed',
+                  timestamp: '2025-06-01T10:30:00.000Z',
+                  detail: 'Design review',
+                },
+              ],
+              finalOutcome: 'Consensus reached',
+            },
+          }),
+        ],
+      });
+      const ctx = makeReadCtx('GET', '/operations/work-items/task-1', state);
+      handleOperationsReadRoute(ctx);
+      const data = ctx.captured.data as Record<string, unknown>;
+      const council = data['council'] as Record<string, unknown>;
+      assert.notEqual(council, null);
+      assert.equal(council['status'], 'completed');
+      assert.equal(council['finalOutcome'], 'Consensus reached');
+      const participants = council['participants'] as unknown[];
+      assert.equal(participants.length, 1);
     });
 
     it('returns empty controls array', () => {
@@ -847,12 +1018,57 @@ describe('handleOperationsReadRoute', () => {
       assert.equal(itemBudget['scopeId'], 'task-1');
     });
 
-    it('returns availability as partial', () => {
+    it('returns availability as partial when no history data', () => {
       const state = makeState({ tasks: [makeTask({ id: 'task-1' })] });
       const ctx = makeReadCtx('GET', '/operations/work-items/task-1', state);
       handleOperationsReadRoute(ctx);
       const data = ctx.captured.data as Record<string, unknown>;
       assert.equal(data['availability'], 'partial');
+    });
+
+    it('returns availability as ready when all history data is populated', () => {
+      const state = makeState({
+        tasks: [
+          makeTask({
+            id: 'task-1',
+            routingHistory: [
+              {
+                route: 'claude',
+                mode: 'council',
+                changedAt: '2025-06-01T10:00:00.000Z',
+                reason: 'Architecture',
+              },
+            ],
+            assignmentHistory: [
+              {
+                agent: 'claude',
+                role: 'architect',
+                state: 'active',
+                startedAt: '2025-06-01T10:00:00.000Z',
+                endedAt: null,
+              },
+            ],
+            councilHistory: {
+              status: 'active',
+              participants: [
+                {
+                  agent: 'claude',
+                  role: 'architect',
+                  state: 'active',
+                  startedAt: '2025-06-01T10:00:00.000Z',
+                  endedAt: null,
+                },
+              ],
+              transitions: [],
+              finalOutcome: null,
+            },
+          }),
+        ],
+      });
+      const ctx = makeReadCtx('GET', '/operations/work-items/task-1', state);
+      handleOperationsReadRoute(ctx);
+      const data = ctx.captured.data as Record<string, unknown>;
+      assert.equal(data['availability'], 'ready');
     });
 
     it('returns false for non-GET methods on work-item route', () => {

@@ -7,6 +7,7 @@
  * inferring state from raw internals.
  */
 
+import { z } from 'zod';
 import type { ActiveSessionEntry, HydraStateShape, TaskEntry, TaskStatus } from '../types.ts';
 import type { UsageCheckResult } from '../types.ts';
 import type {
@@ -21,6 +22,13 @@ import type {
   HealthDetailsAvailability,
   BudgetStatusView,
   BudgetSeverity,
+  RoutingDecisionView,
+  RoutingHistoryEntry,
+  AgentAssignmentView,
+  AgentAssignmentState,
+  CouncilExecutionView,
+  CouncilExecutionStatus,
+  CouncilTransitionView,
 } from '@hydra/web-contracts';
 
 // ── Status Normalization ───────────────────────────────────────────────────
@@ -628,17 +636,242 @@ export function projectCheckpoints(task: TaskEntry): readonly CheckpointRecordVi
   }));
 }
 
+// ── Routing History Projection ──────────────────────────────────────────────
+
+const VALID_ASSIGNMENT_STATES: ReadonlySet<string> = new Set([
+  'active',
+  'waiting',
+  'completed',
+  'failed',
+  'cancelled',
+]);
+
+function isValidAssignmentState(value: unknown): value is AgentAssignmentState {
+  return typeof value === 'string' && VALID_ASSIGNMENT_STATES.has(value);
+}
+
+function safeString(value: unknown): string | null {
+  return typeof value === 'string' && value !== '' ? value : null;
+}
+
+const ISO_DATETIME = z.iso.datetime();
+
+function safeIsoTimestamp(value: unknown): string | null {
+  if (typeof value !== 'string' || value === '') return null;
+  return ISO_DATETIME.safeParse(value).success ? value : null;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return value != null && typeof value === 'object' && !Array.isArray(value);
+}
+
+interface RawRoutingEntry {
+  route?: unknown;
+  mode?: unknown;
+  changedAt?: unknown;
+  reason?: unknown;
+}
+
+function isRawRoutingArray(value: unknown): value is RawRoutingEntry[] {
+  return Array.isArray(value);
+}
+
+function toRawRoutingEntry(value: unknown): RawRoutingEntry | null {
+  return isRecord(value) ? value : null;
+}
+
+function projectRoutingHistory(task: TaskEntry): RoutingDecisionView | null {
+  const raw = task['routingHistory'];
+  if (!isRawRoutingArray(raw) || raw.length === 0) return null;
+
+  const history: RoutingHistoryEntry[] = raw.flatMap((entry, index) => {
+    const normalized = toRawRoutingEntry(entry);
+    if (normalized == null) {
+      return [];
+    }
+
+    return [
+      {
+        id: `${task.id}-rt-${String(index)}`,
+        route: safeString(normalized.route),
+        mode: safeString(normalized.mode),
+        changedAt: safeIsoTimestamp(normalized.changedAt) ?? EPOCH_FALLBACK,
+        reason: safeString(normalized.reason),
+      },
+    ];
+  });
+
+  if (history.length === 0) {
+    return null;
+  }
+
+  const latest = history.at(-1);
+  if (latest == null) {
+    return null;
+  }
+
+  return {
+    currentMode: latest.mode,
+    currentRoute: latest.route,
+    changedAt: latest.changedAt,
+    history,
+  };
+}
+
+// ── Assignment History Projection ──────────────────────────────────────────
+
+interface RawAssignmentEntry {
+  agent?: unknown;
+  role?: unknown;
+  state?: unknown;
+  startedAt?: unknown;
+  endedAt?: unknown;
+}
+
+function isRawAssignmentArray(value: unknown): value is RawAssignmentEntry[] {
+  return Array.isArray(value);
+}
+
+function toRawAssignmentEntry(value: unknown): RawAssignmentEntry | null {
+  return isRecord(value) ? value : null;
+}
+
+function projectAssignments(task: TaskEntry): readonly AgentAssignmentView[] {
+  const raw = task['assignmentHistory'];
+  if (!isRawAssignmentArray(raw) || raw.length === 0) return [];
+
+  return raw.flatMap((entry) => {
+    const normalized = toRawAssignmentEntry(entry);
+    if (normalized == null) {
+      return [];
+    }
+
+    const agent = safeString(normalized.agent) ?? 'unknown';
+    return [
+      {
+        participantId: agent,
+        label: agent,
+        role: safeString(normalized.role),
+        state: isValidAssignmentState(normalized.state) ? normalized.state : 'waiting',
+        startedAt: safeIsoTimestamp(normalized.startedAt),
+        endedAt: safeIsoTimestamp(normalized.endedAt),
+      },
+    ];
+  });
+}
+
+// ── Council Execution Projection ───────────────────────────────────────────
+
+const VALID_COUNCIL_STATUSES: ReadonlySet<string> = new Set([
+  'active',
+  'waiting',
+  'completed',
+  'failed',
+  'cancelled',
+]);
+
+function isValidCouncilStatus(value: unknown): value is CouncilExecutionStatus {
+  return typeof value === 'string' && VALID_COUNCIL_STATUSES.has(value);
+}
+
+interface RawCouncilHistory {
+  status?: unknown;
+  participants?: unknown;
+  transitions?: unknown;
+  finalOutcome?: unknown;
+}
+
+function isRawCouncilHistory(value: unknown): value is RawCouncilHistory {
+  return value != null && typeof value === 'object' && !Array.isArray(value);
+}
+
+function projectCouncilParticipants(raw: unknown): readonly AgentAssignmentView[] {
+  if (!Array.isArray(raw)) return [];
+  return raw.flatMap((entry) => {
+    const normalized = toRawAssignmentEntry(entry);
+    if (normalized == null) {
+      return [];
+    }
+
+    const agent = safeString(normalized.agent) ?? 'unknown';
+    return [
+      {
+        participantId: agent,
+        label: agent,
+        role: safeString(normalized.role),
+        state: isValidAssignmentState(normalized.state) ? normalized.state : 'waiting',
+        startedAt: safeIsoTimestamp(normalized.startedAt),
+        endedAt: safeIsoTimestamp(normalized.endedAt),
+      },
+    ];
+  });
+}
+
+interface RawTransitionEntry {
+  label?: unknown;
+  status?: unknown;
+  timestamp?: unknown;
+  detail?: unknown;
+}
+
+function projectCouncilTransitions(
+  task: TaskEntry,
+  raw: unknown,
+): readonly CouncilTransitionView[] {
+  if (!Array.isArray(raw)) return [];
+  return raw.flatMap((entry, index) => {
+    const normalized = isRecord(entry) ? (entry as RawTransitionEntry) : null;
+    if (normalized == null) {
+      return [];
+    }
+
+    return [
+      {
+        id: `${task.id}-ct-${String(index)}`,
+        label: safeString(normalized.label) ?? `Transition ${String(index)}`,
+        status: safeString(normalized.status) ?? 'waiting',
+        timestamp: safeIsoTimestamp(normalized.timestamp) ?? EPOCH_FALLBACK,
+        detail: safeString(normalized.detail),
+      },
+    ];
+  });
+}
+
+function projectCouncilExecution(task: TaskEntry): CouncilExecutionView | null {
+  const raw = task['councilHistory'];
+  if (!isRawCouncilHistory(raw)) return null;
+
+  return {
+    status: isValidCouncilStatus(raw.status) ? raw.status : 'waiting',
+    participants: projectCouncilParticipants(raw.participants),
+    transitions: projectCouncilTransitions(task, raw.transitions),
+    finalOutcome: safeString(raw.finalOutcome),
+  };
+}
+
 // ── Work Item Detail Projection ────────────────────────────────────────────
 
 export interface WorkItemDetailResult {
   item: WorkQueueItemView;
   checkpoints: readonly CheckpointRecordView[];
-  routing: null;
-  assignments: readonly [];
-  council: null;
+  routing: RoutingDecisionView | null;
+  assignments: readonly AgentAssignmentView[];
+  council: CouncilExecutionView | null;
   controls: readonly [];
   itemBudget: BudgetStatusView;
   availability: DetailAvailability;
+}
+
+function resolveDetailAvailability(
+  routing: RoutingDecisionView | null,
+  assignments: readonly AgentAssignmentView[],
+  council: CouncilExecutionView | null,
+): DetailAvailability {
+  const councilRequired = routing?.currentMode === 'council' || council !== null;
+  if (routing !== null && assignments.length > 0 && (!councilRequired || council !== null)) {
+    return 'ready';
+  }
+  return 'partial';
 }
 
 export function projectWorkItemDetail(
@@ -662,14 +895,18 @@ export function projectWorkItemDetail(
   if (item == null) return null; // unreachable — task exists so its projection exists
   const checkpoints = projectCheckpoints(task);
 
+  const routing = projectRoutingHistory(task);
+  const assignments = projectAssignments(task);
+  const council = projectCouncilExecution(task);
+
   return {
     item,
     checkpoints,
-    routing: null, // not yet tracked in daemon state
-    assignments: [], // not yet tracked in daemon state
-    council: null, // not yet tracked in daemon state
-    controls: [], // not yet tracked in daemon state
+    routing,
+    assignments,
+    council,
+    controls: [],
     itemBudget: projectItemBudget(workItemId),
-    availability: 'partial', // routing/assignments/council are untracked → partial
+    availability: resolveDetailAvailability(routing, assignments, council),
   };
 }
