@@ -50,30 +50,22 @@ function makeRouting(overrides: Partial<RoutingDecisionView> = {}): RoutingDecis
 
 describe('RoutingPanel loading and error states', () => {
   it('shows loading message when detailFetchStatus is loading', () => {
-    render(
-      <RoutingPanel routing={null} detailAvailability={null} detailFetchStatus="loading" />,
-    );
+    render(<RoutingPanel routing={null} detailAvailability={null} detailFetchStatus="loading" />);
     expect(screen.getByTestId('routing-panel')).toHaveTextContent(/loading routing data/i);
   });
 
   it('shows error message when detailFetchStatus is error', () => {
-    render(
-      <RoutingPanel routing={null} detailAvailability={null} detailFetchStatus="error" />,
-    );
+    render(<RoutingPanel routing={null} detailAvailability={null} detailFetchStatus="error" />);
     expect(screen.getByTestId('routing-panel')).toHaveTextContent(/failed to load routing data/i);
   });
 
   it('does not show "no routing" while loading', () => {
-    render(
-      <RoutingPanel routing={null} detailAvailability={null} detailFetchStatus="loading" />,
-    );
+    render(<RoutingPanel routing={null} detailAvailability={null} detailFetchStatus="loading" />);
     expect(screen.getByTestId('routing-panel')).not.toHaveTextContent(/no routing/i);
   });
 
   it('does not show "no routing" after error', () => {
-    render(
-      <RoutingPanel routing={null} detailAvailability={null} detailFetchStatus="error" />,
-    );
+    render(<RoutingPanel routing={null} detailAvailability={null} detailFetchStatus="error" />);
     expect(screen.getByTestId('routing-panel')).not.toHaveTextContent(/no routing/i);
   });
 });
@@ -82,16 +74,12 @@ describe('RoutingPanel loading and error states', () => {
 
 describe('RoutingPanel empty states', () => {
   it('shows "no routing" when routing is null with ready availability', () => {
-    render(
-      <RoutingPanel routing={null} detailAvailability="ready" detailFetchStatus="idle" />,
-    );
+    render(<RoutingPanel routing={null} detailAvailability="ready" detailFetchStatus="idle" />);
     expect(screen.getByTestId('routing-panel')).toHaveTextContent(/no routing/i);
   });
 
   it('shows "no routing" when routing is null with partial availability', () => {
-    render(
-      <RoutingPanel routing={null} detailAvailability="partial" detailFetchStatus="idle" />,
-    );
+    render(<RoutingPanel routing={null} detailAvailability="partial" detailFetchStatus="idle" />);
     expect(screen.getByTestId('routing-panel')).toHaveTextContent(/no routing/i);
   });
 
@@ -103,9 +91,7 @@ describe('RoutingPanel empty states', () => {
   });
 
   it('shows default message when availability is null and fetch is idle', () => {
-    render(
-      <RoutingPanel routing={null} detailAvailability={null} detailFetchStatus="idle" />,
-    );
+    render(<RoutingPanel routing={null} detailAvailability={null} detailFetchStatus="idle" />);
     expect(screen.getByTestId('routing-panel')).toHaveTextContent(/no routing/i);
   });
 });
@@ -114,9 +100,7 @@ describe('RoutingPanel empty states', () => {
 
 describe('RoutingPanel heading', () => {
   it('renders the heading', () => {
-    render(
-      <RoutingPanel routing={null} detailAvailability="ready" detailFetchStatus="idle" />,
-    );
+    render(<RoutingPanel routing={null} detailAvailability="ready" detailFetchStatus="idle" />);
     expect(screen.getByRole('heading', { name: /routing/i })).toBeInTheDocument();
   });
 });
@@ -171,6 +155,7 @@ describe('RoutingPanel current route and mode', () => {
 
 // ─── History entries ────────────────────────────────────────────────────────
 
+/* eslint-disable max-lines-per-function -- broad DOM coverage for routing history states is kept in one scenario block */
 describe('RoutingPanel history entries', () => {
   it('renders history entries in a list', () => {
     const history = [
@@ -192,9 +177,7 @@ describe('RoutingPanel history entries', () => {
   });
 
   it('renders route and mode for each history entry', () => {
-    const history = [
-      makeHistoryEntry({ id: 'rh-1', route: 'codex', mode: 'economy' }),
-    ];
+    const history = [makeHistoryEntry({ id: 'rh-1', route: 'codex', mode: 'economy' })];
 
     render(
       <RoutingPanel
@@ -210,9 +193,7 @@ describe('RoutingPanel history entries', () => {
   });
 
   it('renders reason when present in history entry', () => {
-    const history = [
-      makeHistoryEntry({ id: 'rh-1', reason: 'Capacity rebalancing' }),
-    ];
+    const history = [makeHistoryEntry({ id: 'rh-1', reason: 'Capacity rebalancing' })];
 
     render(
       <RoutingPanel
@@ -226,9 +207,7 @@ describe('RoutingPanel history entries', () => {
   });
 
   it('omits reason text when reason is null', () => {
-    const history = [
-      makeHistoryEntry({ id: 'rh-1', reason: null }),
-    ];
+    const history = [makeHistoryEntry({ id: 'rh-1', reason: null })];
 
     render(
       <RoutingPanel
@@ -243,9 +222,7 @@ describe('RoutingPanel history entries', () => {
   });
 
   it('handles null route in history entry', () => {
-    const history = [
-      makeHistoryEntry({ id: 'rh-1', route: null, mode: 'balanced' }),
-    ];
+    const history = [makeHistoryEntry({ id: 'rh-1', route: null, mode: 'balanced' })];
 
     render(
       <RoutingPanel
@@ -260,9 +237,7 @@ describe('RoutingPanel history entries', () => {
   });
 
   it('handles null mode in history entry', () => {
-    const history = [
-      makeHistoryEntry({ id: 'rh-1', route: 'claude', mode: null }),
-    ];
+    const history = [makeHistoryEntry({ id: 'rh-1', route: 'claude', mode: null })];
 
     render(
       <RoutingPanel
@@ -305,6 +280,7 @@ describe('RoutingPanel history entries', () => {
     expect(screen.getByTestId('routing-history-rh-beta')).toBeInTheDocument();
   });
 });
+/* eslint-enable max-lines-per-function */
 
 // ─── Loading with existing data ─────────────────────────────────────────────
 

@@ -186,6 +186,7 @@ describe('ExecutionPanel heading', () => {
 
 // ─── Agent assignments ──────────────────────────────────────────────────────
 
+/* eslint-disable max-lines-per-function -- assignment matrix coverage is intentionally grouped to keep the panel contract readable */
 describe('ExecutionPanel agent assignments', () => {
   it('renders assignment entries in a list', () => {
     const assignments = [
@@ -246,9 +247,7 @@ describe('ExecutionPanel agent assignments', () => {
   });
 
   it('handles null role in assignment', () => {
-    const assignments = [
-      makeAssignment({ participantId: 'p-1', label: 'local', role: null }),
-    ];
+    const assignments = [makeAssignment({ participantId: 'p-1', label: 'local', role: null })];
 
     render(
       <ExecutionPanel
@@ -295,6 +294,7 @@ describe('ExecutionPanel agent assignments', () => {
     expect(screen.queryByRole('list', { name: /agent assignments/i })).not.toBeInTheDocument();
   });
 });
+/* eslint-enable max-lines-per-function */
 
 // ─── All assignment states render ───────────────────────────────────────────
 
@@ -324,6 +324,7 @@ describe('ExecutionPanel assignment state coverage', () => {
 
 // ─── Council execution ──────────────────────────────────────────────────────
 
+/* eslint-disable max-lines-per-function -- council rendering permutations are exercised together for one UI contract surface */
 describe('ExecutionPanel council execution', () => {
   it('renders council section when council is present', () => {
     render(
@@ -405,9 +406,7 @@ describe('ExecutionPanel council execution', () => {
   });
 
   it('renders transition detail text when present', () => {
-    const transitions = [
-      makeTransition({ id: 'ct-1', detail: 'Agents reached consensus' }),
-    ];
+    const transitions = [makeTransition({ id: 'ct-1', detail: 'Agents reached consensus' })];
 
     render(
       <ExecutionPanel
@@ -422,9 +421,7 @@ describe('ExecutionPanel council execution', () => {
   });
 
   it('omits transition detail when null', () => {
-    const transitions = [
-      makeTransition({ id: 'ct-1', detail: null }),
-    ];
+    const transitions = [makeTransition({ id: 'ct-1', detail: null })];
 
     render(
       <ExecutionPanel
@@ -470,6 +467,7 @@ describe('ExecutionPanel council execution', () => {
     expect(screen.queryByTestId('council-outcome')).not.toBeInTheDocument();
   });
 });
+/* eslint-enable max-lines-per-function */
 
 // ─── Council status coverage ────────────────────────────────────────────────
 

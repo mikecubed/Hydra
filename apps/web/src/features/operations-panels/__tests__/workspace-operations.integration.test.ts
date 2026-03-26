@@ -11,9 +11,12 @@ import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 
 import type {
+  AgentAssignmentView,
   CheckpointRecordView,
+  CouncilExecutionView,
   GetOperationsSnapshotResponse,
   GetWorkItemDetailResponse,
+  RoutingDecisionView,
   WorkQueueItemView,
 } from '@hydra/web-contracts';
 
@@ -35,7 +38,10 @@ import {
   selectItemBudget,
   selectQueueItems,
   selectSelectedCheckpoints,
+  selectSelectedCouncil,
   selectSelectedDetail,
+  selectSelectedAssignments,
+  selectSelectedRouting,
   selectSelectedWorkItemId,
   selectSnapshotStatus,
 } from '../model/selectors.ts';
@@ -98,6 +104,67 @@ function makeCheckpoint(overrides: Partial<CheckpointRecordView> = {}): Checkpoi
     status: 'reached',
     timestamp: '2026-06-01T12:00:00.000Z',
     detail: null,
+    ...overrides,
+  };
+}
+
+function makeRouting(overrides: Partial<RoutingDecisionView> = {}): RoutingDecisionView {
+  return {
+    currentRoute: 'codex',
+    currentMode: 'auto',
+    changedAt: '2026-06-01T12:00:00.000Z',
+    history: [
+      {
+        id: 'route-1',
+        route: 'codex',
+        mode: 'auto',
+        changedAt: '2026-06-01T12:00:00.000Z',
+        reason: 'Fast path',
+      },
+    ],
+    ...overrides,
+  };
+}
+
+function makeAssignment(overrides: Partial<AgentAssignmentView> = {}): AgentAssignmentView {
+  return {
+    participantId: 'codex',
+    label: 'codex',
+    role: 'implementer',
+    state: 'active',
+    startedAt: '2026-06-01T12:00:00.000Z',
+    endedAt: null,
+    ...overrides,
+  };
+}
+
+function makeCouncil(overrides: Partial<CouncilExecutionView> = {}): CouncilExecutionView {
+  return {
+    status: 'completed',
+    participants: [
+      makeAssignment({
+        participantId: 'claude',
+        label: 'claude',
+        role: 'architect',
+        state: 'completed',
+      }),
+      makeAssignment({
+        participantId: 'gemini',
+        label: 'gemini',
+        role: 'analyst',
+        state: 'completed',
+      }),
+    ],
+    transitions: [
+      {
+        id: 'transition-1',
+        label: 'Council decision',
+        status: 'completed',
+        timestamp: '2026-06-01T12:05:00.000Z',
+        detail: 'Consensus reached',
+      },
+    ],
+    finalOutcome: 'Ship with codex implementation.',
     ...overrides,
   };
 }
@@ -452,6 +519,116 @@ describe('workspace operations integration', () => {
     assert.equal(selectSelectedWorkItemId(state), null);
     assert.equal(selectHasDetail(state), false);
     assert.deepEqual(selectSelectedCheckpoints(state), []);
+  });
+
+  it('detail-loaded exposes routing, assignment, and council history through the selected-item selectors', () => {
+    const items = [makeQueueItem({ id: 'wi-1', detailAvailability: 'ready' })];
+    const detail = makeDetailResponse({
+      item: items[0],
+      routing: makeRouting(),
+      assignments: [makeAssignment()],
+      council: makeCouncil(),
+    });
+
+    const state = applyActions(createInitialOperationsState(), [
+      { type: 'snapshot/success', snapshot: makeSnapshot({ queue: items }) },
+      { type: 'selection/select', workItemId: 'wi-1' },
+      { type: 'selection/detail-loaded', detail },
+    ]);
+
+    assert.equal(selectSelectedRouting(state)?.currentRoute, 'codex');
+    assert.equal(selectSelectedAssignments(state).length, 1);
+    assert.equal(selectSelectedAssignments(state)[0]?.participantId, 'codex');
+    assert.equal(selectSelectedCouncil(state)?.participants.length, 2);
+    assert.equal(selectSelectedCouncil(state)?.finalOutcome, 'Ship with codex implementation.');
+  });
+
+  it('snapshot refresh preserves loaded routing and participant history until a newer detail response arrives', () => {
+    const queueItems = [
+      makeQueueItem({ id: 'wi-1', status: 'active', detailAvailability: 'ready' }),
+    ];
+    const loadedDetail = makeDetailResponse({
+      item: queueItems[0],
+      routing: makeRouting({ currentRoute: 'codex' }),
+      assignments: [makeAssignment({ participantId: 'codex', label: 'codex', state: 'active' })],
+      council: makeCouncil(),
+    });
+    const refreshedQueueItems = [
+      makeQueueItem({ id: 'wi-1', status: 'paused', detailAvailability: 'partial' }),
+    ];
+    const refreshedDetail = makeDetailResponse({
+      item: refreshedQueueItems[0],
+      routing: makeRouting({
+        currentRoute: 'claude',
+        currentMode: 'council',
+        history: [
+          {
+            id: 'route-2',
+            route: 'claude',
+            mode: 'council',
+            changedAt: '2026-06-01T12:10:00.000Z',
+            reason: 'Council reroute',
+          },
+        ],
+      }),
+      assignments: [
+        makeAssignment({ participantId: 'claude', label: 'claude', role: 'architect' }),
+      ],
+      council: makeCouncil({
+        participants: [
+          makeAssignment({
+            participantId: 'claude',
+            label: 'claude',
+            role: 'architect',
+            state: 'completed',
+          }),
+          makeAssignment({
+            participantId: 'gemini',
+            label: 'gemini',
+            role: 'analyst',
+            state: 'completed',
+          }),
+          makeAssignment({
+            participantId: 'codex',
+            label: 'codex',
+            role: 'implementer',
+            state: 'completed',
+          }),
+        ],
+        finalOutcome: 'Route through council-approved claude handoff.',
+      }),
+      availability: 'ready',
+    });
+
+    const preservedState = applyActions(createInitialOperationsState(), [
+      { type: 'snapshot/success', snapshot: makeSnapshot({ queue: queueItems }) },
+      { type: 'selection/select', workItemId: 'wi-1' },
+      { type: 'selection/detail-loaded', detail: loadedDetail },
+      {
+        type: 'snapshot/success',
+        snapshot: makeSnapshot({ queue: refreshedQueueItems, availability: 'partial' }),
+      },
+    ]);
+
+    assert.equal(selectSelectedDetail(preservedState)?.item.status, 'paused');
+    assert.equal(selectDetailAvailability(preservedState), 'partial');
+    assert.equal(selectSelectedRouting(preservedState)?.currentRoute, 'codex');
+    assert.equal(selectSelectedAssignments(preservedState)[0]?.participantId, 'codex');
+    assert.equal(selectSelectedCouncil(preservedState)?.participants.length, 2);
+
+    const convergedState = applyActions(preservedState, [
+      { type: 'selection/detail-loaded', detail: refreshedDetail },
+    ]);
+
+    assert.equal(selectDetailAvailability(convergedState), 'ready');
+    assert.equal(selectSelectedRouting(convergedState)?.currentRoute, 'claude');
+    assert.equal(selectSelectedRouting(convergedState)?.currentMode, 'council');
+    assert.equal(selectSelectedAssignments(convergedState)[0]?.participantId, 'claude');
+    assert.equal(selectSelectedCouncil(convergedState)?.participants.length, 3);
+    assert.equal(
+      selectSelectedCouncil(convergedState)?.finalOutcome,
+      'Route through council-approved claude handoff.',
+    );
   });
 
   // ─── Detail fetch status lifecycle ──────────────────────────────────────

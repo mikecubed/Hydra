@@ -123,9 +123,7 @@ export function selectSelectedCheckpoints(
 }
 
 /** Routing decision from the currently selected item's detail, or null. */
-export function selectSelectedRouting(
-  state: OperationsWorkspaceState,
-): RoutingDecisionView | null {
+export function selectSelectedRouting(state: OperationsWorkspaceState): RoutingDecisionView | null {
   return state.selection.detail?.routing ?? null;
 }
 

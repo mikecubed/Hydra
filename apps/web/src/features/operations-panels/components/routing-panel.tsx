@@ -145,7 +145,7 @@ function CurrentRoutingSection({
         <span style={currentLabelStyle}>Route</span>
         <span
           data-testid="routing-current-route"
-          style={routing.currentRoute !== null ? currentValueStyle : nullValueStyle}
+          style={routing.currentRoute === null ? nullValueStyle : currentValueStyle}
         >
           {routing.currentRoute ?? 'none'}
         </span>
@@ -154,7 +154,7 @@ function CurrentRoutingSection({
         <span style={currentLabelStyle}>Mode</span>
         <span
           data-testid="routing-current-mode"
-          style={routing.currentMode !== null ? currentValueStyle : nullValueStyle}
+          style={routing.currentMode === null ? nullValueStyle : currentValueStyle}
         >
           {routing.currentMode ?? 'none'}
         </span>
@@ -163,11 +163,7 @@ function CurrentRoutingSection({
   );
 }
 
-function HistoryEntryRow({
-  entry,
-}: {
-  readonly entry: RoutingHistoryEntry;
-}): JSX.Element {
+function HistoryEntryRow({ entry }: { readonly entry: RoutingHistoryEntry }): JSX.Element {
   return (
     <div style={entryStyle} data-testid={`routing-history-${entry.id}`}>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>

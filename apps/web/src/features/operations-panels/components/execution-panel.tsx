@@ -19,36 +19,34 @@ import type { DetailFetchStatus } from '../model/operations-types.ts';
 
 // ─── Agent state colour map ─────────────────────────────────────────────────
 
-const agentStateColors: Record<
-  AgentAssignmentState,
-  { text: string; border: string; bg: string }
-> = {
-  active: {
-    text: '#38bdf8',
-    border: 'rgba(56, 189, 248, 0.25)',
-    bg: 'rgba(56, 189, 248, 0.05)',
-  },
-  waiting: {
-    text: '#fbbf24',
-    border: 'rgba(251, 191, 36, 0.25)',
-    bg: 'rgba(251, 191, 36, 0.05)',
-  },
-  completed: {
-    text: '#4ade80',
-    border: 'rgba(74, 222, 128, 0.25)',
-    bg: 'rgba(74, 222, 128, 0.05)',
-  },
-  failed: {
-    text: '#f87171',
-    border: 'rgba(248, 113, 113, 0.25)',
-    bg: 'rgba(248, 113, 113, 0.05)',
-  },
-  cancelled: {
-    text: '#94a3b8',
-    border: 'rgba(148, 163, 184, 0.2)',
-    bg: 'rgba(148, 163, 184, 0.03)',
-  },
-};
+const agentStateColors: Record<AgentAssignmentState, { text: string; border: string; bg: string }> =
+  {
+    active: {
+      text: '#38bdf8',
+      border: 'rgba(56, 189, 248, 0.25)',
+      bg: 'rgba(56, 189, 248, 0.05)',
+    },
+    waiting: {
+      text: '#fbbf24',
+      border: 'rgba(251, 191, 36, 0.25)',
+      bg: 'rgba(251, 191, 36, 0.05)',
+    },
+    completed: {
+      text: '#4ade80',
+      border: 'rgba(74, 222, 128, 0.25)',
+      bg: 'rgba(74, 222, 128, 0.05)',
+    },
+    failed: {
+      text: '#f87171',
+      border: 'rgba(248, 113, 113, 0.25)',
+      bg: 'rgba(248, 113, 113, 0.05)',
+    },
+    cancelled: {
+      text: '#94a3b8',
+      border: 'rgba(148, 163, 184, 0.2)',
+      bg: 'rgba(148, 163, 184, 0.03)',
+    },
+  };
 
 // ─── Council status colour map ──────────────────────────────────────────────
 
@@ -188,11 +186,7 @@ function resolveEmptyMessage(
 
 // ─── Sub-components ─────────────────────────────────────────────────────────
 
-function AssignmentStateBadge({
-  state,
-}: {
-  readonly state: AgentAssignmentState;
-}): JSX.Element {
+function AssignmentStateBadge({ state }: { readonly state: AgentAssignmentState }): JSX.Element {
   const palette = agentStateColors[state];
   return (
     <span
@@ -231,9 +225,7 @@ function AssignmentEntry({
         </span>
         <AssignmentStateBadge state={assignment.state} />
       </div>
-      {assignment.role != null && (
-        <span style={metaStyle}>{assignment.role}</span>
-      )}
+      {assignment.role != null && <span style={metaStyle}>{assignment.role}</span>}
       {assignment.startedAt != null && (
         <span style={metaStyle}>{formatTimestamp(assignment.startedAt)}</span>
       )}
@@ -241,11 +233,7 @@ function AssignmentEntry({
   );
 }
 
-function CouncilStatusBadge({
-  status,
-}: {
-  readonly status: CouncilExecutionStatus;
-}): JSX.Element {
+function CouncilStatusBadge({ status }: { readonly status: CouncilExecutionStatus }): JSX.Element {
   const palette = councilStatusColors[status];
   return (
     <span
@@ -291,11 +279,7 @@ function TransitionEntry({
   );
 }
 
-function CouncilSection({
-  council,
-}: {
-  readonly council: CouncilExecutionView;
-}): JSX.Element {
+function CouncilSection({ council }: { readonly council: CouncilExecutionView }): JSX.Element {
   const palette = councilStatusColors[council.status];
   const resolvedSectionStyle: CSSProperties = {
     ...councilSectionStyle,
