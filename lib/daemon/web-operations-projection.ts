@@ -677,7 +677,10 @@ function isRawRoutingArray(value: unknown): value is RawRoutingEntry[] {
 }
 
 function toRawRoutingEntry(value: unknown): RawRoutingEntry | null {
-  return isRecord(value) ? value : null;
+  if (!isRecord(value)) return null;
+  // Require a real routing target; changedAt may still fall back if malformed.
+  if (safeString(value['route']) == null) return null;
+  return value;
 }
 
 function projectRoutingHistory(task: TaskEntry): RoutingDecisionView | null {
@@ -733,7 +736,10 @@ function isRawAssignmentArray(value: unknown): value is RawAssignmentEntry[] {
 }
 
 function toRawAssignmentEntry(value: unknown): RawAssignmentEntry | null {
-  return isRecord(value) ? value : null;
+  if (!isRecord(value)) return null;
+  // Require a non-empty agent string to count as a real assignment.
+  if (safeString(value['agent']) == null) return null;
+  return value;
 }
 
 function projectAssignments(task: TaskEntry): readonly AgentAssignmentView[] {
