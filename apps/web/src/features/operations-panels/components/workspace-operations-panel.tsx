@@ -64,10 +64,18 @@ function useOperationsPanelState() {
     };
   }, [operationsClient]);
 
-  const handleSelectItem = useCallback((workItemId: string) => {
-    dispatch({ type: 'selection/select', workItemId });
-    syncControllerRef.current?.syncDetail(workItemId);
-  }, []);
+  const selectedWorkItemId = state.selection.selectedWorkItemId;
+  const handleSelectItem = useCallback(
+    (workItemId: string) => {
+      if (workItemId === selectedWorkItemId) {
+        return;
+      }
+
+      dispatch({ type: 'selection/select', workItemId });
+      syncControllerRef.current?.syncDetail(workItemId);
+    },
+    [selectedWorkItemId],
+  );
 
   return { state, dispatch, handleSelectItem };
 }

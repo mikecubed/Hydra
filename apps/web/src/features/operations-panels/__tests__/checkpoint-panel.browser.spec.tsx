@@ -79,11 +79,11 @@ describe('CheckpointPanel empty states', () => {
     expect(screen.getByTestId('checkpoint-panel')).toHaveTextContent(/no checkpoints/i);
   });
 
-  it('shows partial message when availability is partial', () => {
+  it('shows "no checkpoints" when availability is partial but the list is empty', () => {
     render(
       <CheckpointPanel checkpoints={[]} detailAvailability="partial" detailFetchStatus="idle" />,
     );
-    expect(screen.getByTestId('checkpoint-panel')).toHaveTextContent(/partially available/i);
+    expect(screen.getByTestId('checkpoint-panel')).toHaveTextContent(/no checkpoints/i);
   });
 
   it('shows unavailable message when availability is unavailable', () => {

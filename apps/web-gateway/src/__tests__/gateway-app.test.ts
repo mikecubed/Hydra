@@ -220,6 +220,21 @@ describe('Gateway app integration', () => {
     assert.ok(res.headers.get('referrer-policy'));
   });
 
+  it('GET /healthz returns machine-readable daemon health', async () => {
+    const res = await gw.app.request(buildRequest('GET', '/healthz'));
+    assert.equal(res.status, 200);
+    assert.deepEqual(await res.json(), { ok: true, daemonHealthy: true });
+  });
+
+  it('GET /healthz returns 503 when the daemon heartbeat is unhealthy', async () => {
+    healthResult = false;
+    await gw.heartbeat.tick();
+
+    const res = await gw.app.request(buildRequest('GET', '/healthz'));
+    assert.equal(res.status, 503);
+    assert.deepEqual(await res.json(), { ok: false, daemonHealthy: false });
+  });
+
   // ── Logout ───────────────────────────────────────────────────────────────
 
   it('logout clears cookies and invalidates session', async () => {

@@ -1,6 +1,6 @@
 import { afterEach, describe, it } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import {
@@ -101,5 +101,18 @@ describe('createStaticAssetResponse', () => {
     assert.ok(response);
     assert.equal(response.status, 503);
     assert.match(await response.text(), /Run `npm --workspace @hydra\/web run build` first/);
+  });
+
+  it('does not silently swallow unexpected filesystem read errors', async () => {
+    tempDir = await mkdtemp(join(tmpdir(), 'hydra-web-static-'));
+    await writeFile(join(tempDir, 'index.html'), '<!doctype html><div id="app"></div>');
+    await mkdir(join(tempDir, 'workspace'));
+    assert.ok(tempDir);
+    const staticDir = tempDir;
+
+    await assert.rejects(
+      () => createStaticAssetResponse(staticDir, '/workspace'),
+      /EISDIR|illegal operation on a directory/i,
+    );
   });
 });

@@ -49,6 +49,93 @@ async function writeResponse(
   nodeResponse.end(payload);
 }
 
+function attachRequestHandler(
+  server: ReturnType<typeof createServer>,
+  requestListener: ReturnType<typeof getRequestListener>,
+  config: ReturnType<typeof resolveGatewayServerConfig>,
+): void {
+  server.on('request', (request: IncomingMessage, response: ServerResponse) => {
+    void (async () => {
+      try {
+        const requestUrl = new URL(request.url ?? '/', config.publicOrigin);
+        if (request.method === 'GET' || request.method === 'HEAD') {
+          const staticResponse = await createStaticAssetResponse(
+            config.staticDir,
+            requestUrl.pathname,
+          );
+          if (staticResponse != null) {
+            await writeResponse(staticResponse, response, request.method);
+            return;
+          }
+        }
+
+        await requestListener(request, response);
+      } catch (err) {
+        console.error('Failed to handle gateway request', err);
+        if (!response.headersSent) {
+          response.statusCode = 500;
+          response.setHeader('content-type', 'text/plain; charset=utf-8');
+        }
+        response.end('Internal Server Error');
+      }
+    })();
+  });
+}
+
+async function listen(
+  server: ReturnType<typeof createServer>,
+  config: ReturnType<typeof resolveGatewayServerConfig>,
+): Promise<void> {
+  await new Promise<void>((resolve, reject) => {
+    server.once('error', reject);
+    server.listen(config.port, config.host, () => {
+      server.off('error', reject);
+      resolve();
+    });
+  });
+}
+
+function logStartup(config: ReturnType<typeof resolveGatewayServerConfig>): void {
+  console.log(`Hydra web gateway listening on ${config.publicOrigin}`);
+  console.log(`Daemon upstream: ${config.daemonUrl}`);
+  console.log(`Static assets: ${config.staticDir}`);
+  if (config.operatorId == null) {
+    console.log(
+      'No operator seed configured. Existing session or stored operator data is required.',
+    );
+  } else {
+    console.log(`Seeded operator: ${config.operatorId}`);
+  }
+}
+
+function registerShutdown(
+  server: ReturnType<typeof createServer>,
+  gateway: ReturnType<typeof createGatewayApp>,
+  sessionStore: SessionStore,
+): void {
+  const shutdown = async (): Promise<void> => {
+    gateway.wsServer?.close();
+    gateway.heartbeat.stop();
+    await Promise.allSettled([sessionStore.snapshot()]);
+    await new Promise<void>((resolve, reject) => {
+      server.close((err) => {
+        if (err != null) {
+          reject(err);
+          return;
+        }
+        resolve();
+      });
+    });
+  };
+
+  process.once('SIGINT', () => {
+    void shutdown();
+  });
+  process.once('SIGTERM', () => {
+    void shutdown();
+  });
+}
+
 async function main(): Promise<void> {
   const config = resolveGatewayServerConfig();
   const operatorStore = new OperatorStore(config.operatorsPath);
@@ -69,65 +156,10 @@ async function main(): Promise<void> {
     heartbeatConfig: { daemonUrl: config.daemonUrl },
   });
 
-  const requestListener = getRequestListener(gateway.app.fetch);
-  server.on('request', (request: IncomingMessage, response: ServerResponse) => {
-    void (async () => {
-      const requestUrl = new URL(request.url ?? '/', config.publicOrigin);
-      if (request.method === 'GET' || request.method === 'HEAD') {
-        const staticResponse = await createStaticAssetResponse(
-          config.staticDir,
-          requestUrl.pathname,
-        );
-        if (staticResponse != null) {
-          await writeResponse(staticResponse, response, request.method);
-          return;
-        }
-      }
-
-      await requestListener(request, response);
-    })();
-  });
-
-  await new Promise<void>((resolve, reject) => {
-    server.once('error', reject);
-    server.listen(config.port, config.host, () => {
-      server.off('error', reject);
-      resolve();
-    });
-  });
-
-  console.log(`Hydra web gateway listening on ${config.publicOrigin}`);
-  console.log(`Daemon upstream: ${config.daemonUrl}`);
-  console.log(`Static assets: ${config.staticDir}`);
-  if (config.operatorId == null) {
-    console.log(
-      'No operator seed configured. Existing session or stored operator data is required.',
-    );
-  } else {
-    console.log(`Seeded operator: ${config.operatorId}`);
-  }
-
-  const shutdown = async (): Promise<void> => {
-    gateway.wsServer?.close();
-    gateway.heartbeat.stop();
-    await Promise.allSettled([sessionStore.snapshot()]);
-    await new Promise<void>((resolve, reject) => {
-      server.close((error) => {
-        if (error != null) {
-          reject(error);
-          return;
-        }
-        resolve();
-      });
-    });
-  };
-
-  process.once('SIGINT', () => {
-    void shutdown();
-  });
-  process.once('SIGTERM', () => {
-    void shutdown();
-  });
+  attachRequestHandler(server, getRequestListener(gateway.app.fetch), config);
+  await listen(server, config);
+  logStartup(config);
+  registerShutdown(server, gateway, sessionStore);
 }
 
 await main();

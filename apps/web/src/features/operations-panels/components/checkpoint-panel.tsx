@@ -122,7 +122,6 @@ function resolveEmptyMessage(
 ): string {
   const notice = resolveStatusNotice(fetchStatus);
   if (notice !== null) return notice;
-  if (availability === 'partial') return 'Checkpoint data is partially available.';
   if (availability === 'unavailable') return 'Checkpoint data is currently unavailable.';
   return 'No checkpoints recorded yet.';
 }

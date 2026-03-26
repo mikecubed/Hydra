@@ -304,6 +304,16 @@ export function createGatewayApp(deps: GatewayAppDeps = {}): GatewayApp {
     runtime.allowedOrigin,
     runtime.mutatingLimiter,
   );
+  app.get('/healthz', (context) => {
+    const daemonHealthy = runtime.heartbeat.isDaemonHealthy();
+    return context.json(
+      {
+        ok: daemonHealthy,
+        daemonHealthy,
+      },
+      daemonHealthy ? 200 : 503,
+    );
+  });
   const daemonClient = registerGatewayRoutes(app, deps, runtime, resolvedConfigs.authRoutesConfig);
 
   const wsServer = createOptionalWsServer(deps, {

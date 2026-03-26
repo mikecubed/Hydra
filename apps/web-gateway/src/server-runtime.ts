@@ -154,8 +154,17 @@ async function readStaticFile(filePath: string): Promise<Response | null> {
           : 'public, max-age=31536000, immutable',
       },
     });
-  } catch {
-    return null;
+  } catch (err) {
+    if (
+      typeof err === 'object' &&
+      err !== null &&
+      'code' in err &&
+      (err.code === 'ENOENT' || err.code === 'ENOTDIR')
+    ) {
+      return null;
+    }
+
+    throw err;
   }
 }
 
