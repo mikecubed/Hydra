@@ -175,12 +175,10 @@ const {
 // ── Tests ───────────────────────────────────────────────────────────────────
 
 describe('hydra-operator-startup-deep', () => {
-  let origPlatform: string;
   let consoleLogs: string[];
   let origConsoleLog: typeof console.log;
 
   beforeEach(() => {
-    origPlatform = process.platform;
     consoleLogs = [];
     origConsoleLog = console.log;
     console.log = (...args: unknown[]) => consoleLogs.push(args.join(' '));
@@ -194,7 +192,6 @@ describe('hydra-operator-startup-deep', () => {
 
   afterEach(() => {
     console.log = origConsoleLog;
-    Object.defineProperty(process, 'platform', { value: origPlatform });
   });
 
   describe('ensureDaemon', () => {

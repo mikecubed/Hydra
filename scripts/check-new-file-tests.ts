@@ -8,7 +8,7 @@
 //   npm run test:new-file-policy -- origin/main     # explicit base
 //   node --experimental-strip-types scripts/check-new-file-tests.ts [base]
 
-import { execSync } from 'node:child_process';
+import { execFileSync } from 'node:child_process';
 import { readFileSync, statSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -20,12 +20,13 @@ const baseBranch = process.argv[2] ?? 'main';
 
 function getNewFiles(): string[] | undefined {
   // Get list of newly added files (diff-filter=A means "added only")
+  // Uses execFileSync with argument array to avoid command injection via baseBranch.
   try {
-    const output = execSync(`git diff --name-only --diff-filter=A ${baseBranch}...HEAD`, {
-      cwd: repoRoot,
-      encoding: 'utf8',
-      stdio: ['pipe', 'pipe', 'pipe'],
-    });
+    const output = execFileSync(
+      'git',
+      ['diff', '--name-only', '--diff-filter=A', `${baseBranch}...HEAD`],
+      { cwd: repoRoot, encoding: 'utf8', stdio: ['pipe', 'pipe', 'pipe'] },
+    );
     return output
       .trim()
       .split('\n')
@@ -35,11 +36,11 @@ function getNewFiles(): string[] | undefined {
   }
 
   try {
-    const output = execSync(`git diff --name-only --diff-filter=A ${baseBranch} HEAD`, {
-      cwd: repoRoot,
-      encoding: 'utf8',
-      stdio: ['pipe', 'pipe', 'pipe'],
-    });
+    const output = execFileSync(
+      'git',
+      ['diff', '--name-only', '--diff-filter=A', baseBranch, 'HEAD'],
+      { cwd: repoRoot, encoding: 'utf8', stdio: ['pipe', 'pipe', 'pipe'] },
+    );
     return output
       .trim()
       .split('\n')

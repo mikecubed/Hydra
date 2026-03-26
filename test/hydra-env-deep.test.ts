@@ -101,7 +101,7 @@ describe('hydra-env — env variable behavior', () => {
     // process.env[key] ??= value (only set if not already defined)
     assert.equal(process.env[key], origVal);
 
-    // Cleanup
-    process.env[key] = undefined;
+    // Cleanup — Reflect.deleteProperty avoids coercing undefined to "undefined"
+    Reflect.deleteProperty(process.env, key);
   });
 });

@@ -121,8 +121,8 @@ function cliCodex() {
   return null;
 }
 
-/** Parse one-per-line model IDs from noisy CLI output. */
-export function parseModelLines(raw: string | null | undefined): string[] | null {
+/** Parse one-per-line model IDs from noisy CLI output. Internal helper. */
+function parseModelLines(raw: string | null | undefined): string[] | null {
   if (raw == null || raw === '') return null;
   const ids = raw
     .split('\n')
@@ -317,6 +317,9 @@ async function main() {
 }
 
 // Only run when invoked directly (not when imported by hydra-models-select.mjs)
+/** @internal Test-only export — not part of the public API. */
+export const _testExports = { parseModelLines } as const;
+
 const __self = new URL(import.meta.url).pathname.replace(/^\/([A-Z]:)/, '$1');
 const __argv1 = path.resolve(process.argv[1] === '' ? '' : process.argv[1]);
 if (__argv1 === path.resolve(__self)) {

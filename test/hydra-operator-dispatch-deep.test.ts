@@ -291,12 +291,11 @@ describe('runCrossVerification', () => {
     assert.deepEqual(result.suggestions, ['improve X']);
   });
 
-  it('returns null when verifier equals producer', async () => {
-    // Mock getVerifier returns same agent
+  it('runs verification when verifier differs from producer', async () => {
+    // Default getVerifier returns 'gemini' for 'claude', so verification proceeds
     const result = await mod.runCrossVerification('claude', 'output', 'prompt', null, {
       executeAgent: mock.fn(async () => ({ ok: true, output: '{}', stdout: '{}' })),
     } as unknown as Parameters<typeof mod.runCrossVerification>[4]);
-    // The mock getVerifier returns 'gemini' for 'claude', so this should work
     assert.ok(result !== null);
   });
 

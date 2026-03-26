@@ -10,7 +10,9 @@
  */
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
-import { fetchModels, parseModelLines } from '../lib/hydra-models.ts';
+import { fetchModels, _testExports } from '../lib/hydra-models.ts';
+
+const { parseModelLines } = _testExports;
 
 // ── fetchModels — unknown agent (fast path) ───────────────────────────────────
 

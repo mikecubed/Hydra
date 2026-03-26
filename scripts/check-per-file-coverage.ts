@@ -76,12 +76,16 @@ function computeResults(coverageData: Record<string, CoverageEntry>): GroupResul
     let coveredStatements = 0;
 
     for (const [filePath, entry] of Object.entries(coverageData)) {
-      // Normalize absolute paths to relative from repo root
-      const relativePath = path.relative(repoRoot, filePath);
+      // Normalize paths for consistent matching:
+      // - If the coverage key is absolute, make it relative to the repo root.
+      // - If it's already relative, use it as-is.
+      // - Normalize path separators to '/' to match floor.prefix on all platforms.
+      const relativePath = path.isAbsolute(filePath) ? path.relative(repoRoot, filePath) : filePath;
+      const normalizedPath = relativePath.split(path.sep).join('/');
 
-      if (!relativePath.startsWith(floor.prefix)) continue;
-      if (relativePath.endsWith('.d.ts')) continue;
-      if (relativePath.endsWith('.test.ts')) continue;
+      if (!normalizedPath.startsWith(floor.prefix)) continue;
+      if (normalizedPath.endsWith('.d.ts')) continue;
+      if (normalizedPath.endsWith('.test.ts')) continue;
 
       const statementCounts = Object.values(entry.s);
       totalStatements += statementCounts.length;
