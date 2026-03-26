@@ -353,6 +353,18 @@ describe('projectQueueSnapshot', () => {
       assert.deepStrictEqual(result.queue[0].riskSignals, []);
     });
   });
+
+  it('projects health and budget independently when only one probe succeeds', () => {
+    const state = makeState({ tasks: [makeTask({ id: 'task-1' })] });
+
+    const healthOnly = projectQueueSnapshot(state, {}, { statusData: { running: true } });
+    assert.equal(healthOnly.health?.status, 'healthy');
+    assert.equal(healthOnly.budget, null);
+
+    const budgetOnly = projectQueueSnapshot(state, {}, { usage: makeUsage() });
+    assert.equal(budgetOnly.health, null);
+    assert.equal(budgetOnly.budget?.status, 'normal');
+  });
 });
 
 // ── Checkpoint Projection ──────────────────────────────────────────────────
@@ -1057,6 +1069,41 @@ describe('projectGlobalBudget', () => {
     assert.equal(budget.limit, 1000);
     assert.equal(budget.unit, 'tokens');
     assert.equal(budget.complete, true);
+  });
+
+  it('aggregates daemon-wide totals from tracked agents when available', () => {
+    const budget = projectGlobalBudget(
+      makeUsage({
+        todayTokens: 1300,
+        percent: 85,
+        used: 850,
+        budget: 1000,
+        agents: {
+          claude: { todayTokens: 800, budget: 1000 },
+          codex: { todayTokens: 500, budget: 2000 },
+        },
+      }),
+    );
+    assert.equal(budget.used, 1300);
+    assert.equal(budget.limit, 3000);
+    assert.equal(budget.complete, true);
+    assert.equal(budget.status, 'normal');
+  });
+
+  it('marks aggregate budget as incomplete when some agent budgets are unavailable', () => {
+    const budget = projectGlobalBudget(
+      makeUsage({
+        todayTokens: 1300,
+        percent: 85,
+        agents: {
+          claude: { todayTokens: 800, budget: 1000 },
+          codex: { todayTokens: 500, budget: null },
+        },
+      }),
+    );
+    assert.equal(budget.used, 1300);
+    assert.equal(budget.limit, null);
+    assert.equal(budget.complete, false);
   });
 
   it('marks incomplete when numeric data missing', () => {

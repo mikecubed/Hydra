@@ -366,10 +366,12 @@ describe('handleOperationsReadRoute', () => {
 
       const data = ctx.captured.data as Record<string, unknown>;
       const queue = data['queue'] as Array<Record<string, unknown>>;
+      const budget = data['budget'] as Record<string, unknown>;
       assert.equal(ctx.captured.statusCode, 200);
       assert.equal(queue[0]['id'], 'task-1');
       assert.equal(data['health'], null);
-      assert.ok(data['budget'] !== undefined);
+      assert.equal(budget['scope'], 'global');
+      assert.equal(budget['status'], 'normal');
     });
 
     it('still returns queue data when checkUsage throws', () => {
@@ -390,10 +392,12 @@ describe('handleOperationsReadRoute', () => {
 
       const data = ctx.captured.data as Record<string, unknown>;
       const queue = data['queue'] as Array<Record<string, unknown>>;
+      const health = data['health'] as Record<string, unknown>;
       assert.equal(ctx.captured.statusCode, 200);
       assert.equal(queue[0]['id'], 'task-1');
       assert.equal(data['budget'], null);
-      assert.ok(data['health'] !== undefined);
+      assert.equal(health['scope'], 'global');
+      assert.equal(health['status'], 'healthy');
     });
   });
 

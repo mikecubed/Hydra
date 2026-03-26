@@ -104,8 +104,7 @@ function handleSnapshot(ctx: ReadRouteCtx): boolean {
 
   const statusData = tryReadStatus(readStatus);
   const usage = tryCheckUsage(checkUsage);
-  const healthBudgetCtx: HealthBudgetContext | null =
-    statusData === null || usage === null ? null : { statusData, usage };
+  const healthBudgetCtx: HealthBudgetContext | null = { statusData, usage };
 
   const snapshot = projectQueueSnapshot(state, options, healthBudgetCtx);
 

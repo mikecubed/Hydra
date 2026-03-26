@@ -181,11 +181,95 @@ function resolveBudgetSummary(severity: BudgetSeverity, percent: number | null):
   return 'Budget usage is within normal limits';
 }
 
+function coerceNumber(value: unknown): number | null {
+  return typeof value === 'number' && Number.isFinite(value) ? value : null;
+}
+
+function roundBudgetPercent(value: number): number {
+  return Math.round(value * 10) / 10;
+}
+
+function resolveFallbackBudgetNumbers(usage: UsageCheckResult): {
+  used: number | null;
+  limit: number | null;
+  percent: number | null;
+  complete: boolean;
+} {
+  const used = coerceNumber(usage.used);
+  const limit = coerceNumber(usage.budget);
+  return {
+    used,
+    limit,
+    percent: coerceNumber(usage.percent),
+    complete: used !== null && limit !== null,
+  };
+}
+
+function collectTrackedAgentBudgetNumbers(rawAgents: Record<string, unknown>): {
+  agentCount: number;
+  trackedCount: number;
+  totalLimit: number;
+  totalUsedFromAgents: number;
+} {
+  let agentCount = 0;
+  let trackedCount = 0;
+  let totalLimit = 0;
+  let totalUsedFromAgents = 0;
+
+  for (const entry of Object.values(rawAgents)) {
+    if (entry == null || typeof entry !== 'object') {
+      continue;
+    }
+
+    const agentEntry = entry as Record<string, unknown>;
+    agentCount += 1;
+    const agentBudget = coerceNumber(agentEntry['budget']);
+    const agentTodayTokens =
+      coerceNumber(agentEntry['todayTokens']) ?? coerceNumber(agentEntry['used']) ?? 0;
+    totalUsedFromAgents += agentTodayTokens;
+
+    if (agentBudget !== null && agentBudget > 0) {
+      trackedCount += 1;
+      totalLimit += agentBudget;
+    }
+  }
+
+  return { agentCount, trackedCount, totalLimit, totalUsedFromAgents };
+}
+
+function resolveAggregateBudgetNumbers(usage: UsageCheckResult): {
+  used: number | null;
+  limit: number | null;
+  percent: number | null;
+  complete: boolean;
+} {
+  const rawAgents = usage.agents;
+  if (rawAgents == null || typeof rawAgents !== 'object') {
+    return resolveFallbackBudgetNumbers(usage);
+  }
+
+  const { agentCount, trackedCount, totalLimit, totalUsedFromAgents } =
+    collectTrackedAgentBudgetNumbers(rawAgents);
+
+  if (agentCount === 0) {
+    return resolveFallbackBudgetNumbers(usage);
+  }
+
+  const totalUsed = coerceNumber(usage.todayTokens) ?? totalUsedFromAgents;
+  const complete = trackedCount === agentCount && totalLimit > 0;
+  const limit = complete ? totalLimit : null;
+  const percent = complete ? roundBudgetPercent((totalUsed / totalLimit) * 100) : null;
+
+  return {
+    used: totalUsed,
+    limit,
+    percent: percent ?? coerceNumber(usage.percent),
+    complete,
+  };
+}
+
 export function projectGlobalBudget(usage: UsageCheckResult): BudgetStatusView {
-  const used = typeof usage.used === 'number' ? usage.used : null;
-  const limit = typeof usage.budget === 'number' ? usage.budget : null;
-  const percent = typeof usage.percent === 'number' ? usage.percent : null;
-  const hasNumericData = used !== null && limit !== null;
+  const { used, limit, percent, complete } = resolveAggregateBudgetNumbers(usage);
   const severity = resolveBudgetSeverity(usage, used, limit, percent);
   const summary = resolveBudgetSummary(severity, percent);
 
@@ -196,8 +280,8 @@ export function projectGlobalBudget(usage: UsageCheckResult): BudgetStatusView {
     summary,
     used,
     limit,
-    unit: hasNumericData ? 'tokens' : null,
-    complete: hasNumericData,
+    unit: used !== null && limit !== null ? 'tokens' : null,
+    complete,
   };
 }
 
@@ -217,8 +301,8 @@ export function projectItemBudget(workItemId: string): BudgetStatusView {
 // ── Health/Budget Context ──────────────────────────────────────────────────
 
 export interface HealthBudgetContext {
-  statusData: Record<string, unknown>;
-  usage: UsageCheckResult;
+  statusData?: Record<string, unknown> | null;
+  usage?: UsageCheckResult | null;
 }
 
 // ── Projection ─────────────────────────────────────────────────────────────
@@ -333,17 +417,6 @@ function assignQueuePositions(items: WorkQueueItemView[]): void {
   }
 }
 
-function resolveHealthBudgetContext(
-  statusData: Record<string, unknown> | null,
-  usage: UsageCheckResult | null,
-): HealthBudgetContext | null {
-  if (statusData === null || usage === null) {
-    return null;
-  }
-
-  return { statusData, usage };
-}
-
 export function projectQueueSnapshot(
   state: HydraStateShape,
   options: QueueSnapshotOptions = {},
@@ -372,17 +445,9 @@ export function projectQueueSnapshot(
 
   const availability = pagedItems.length > 0 || state.tasks.length > 0 ? 'ready' : 'empty';
 
-  const resolvedHealthBudgetCtx = resolveHealthBudgetContext(
-    healthBudgetCtx?.statusData ?? null,
-    healthBudgetCtx?.usage ?? null,
-  );
-  let health: DaemonHealthView | null = null;
-  let budget: BudgetStatusView | null = null;
-
-  if (resolvedHealthBudgetCtx !== null) {
-    health = projectDaemonHealth(resolvedHealthBudgetCtx.statusData);
-    budget = projectGlobalBudget(resolvedHealthBudgetCtx.usage);
-  }
+  const health =
+    healthBudgetCtx?.statusData == null ? null : projectDaemonHealth(healthBudgetCtx.statusData);
+  const budget = healthBudgetCtx?.usage == null ? null : projectGlobalBudget(healthBudgetCtx.usage);
 
   return {
     queue: pagedItems,
