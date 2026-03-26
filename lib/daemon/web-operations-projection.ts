@@ -123,6 +123,9 @@ function projectTaskToQueueItem(
   const ownerLabel = task.owner === '' ? null : task.owner;
   const updatedAt = task.updatedAt === '' ? stateUpdatedAt : task.updatedAt;
 
+  const lastSummary =
+    lastCheckpoint == null ? '' : resolveCheckpointLabel(lastCheckpoint as Record<string, unknown>);
+
   return {
     id: task.id,
     title: task.title,
@@ -131,7 +134,7 @@ function projectTaskToQueueItem(
     relatedConversationId: null, // not yet tracked in daemon state
     relatedSessionId: null, // set only when daemon has authoritative linkage
     ownerLabel,
-    lastCheckpointSummary: lastCheckpoint?.note ?? null,
+    lastCheckpointSummary: lastSummary === '' ? null : lastSummary,
     updatedAt,
     riskSignals: buildRiskSignals(task, status),
     detailAvailability: 'partial', // full detail requires per-item query (US2)
@@ -247,15 +250,42 @@ function resolveCheckpointStatus(raw: unknown): CheckpointStatus {
   return 'reached';
 }
 
+/**
+ * Resolve the human-readable label from a checkpoint entry.
+ *
+ * The daemon persists checkpoints with `{ name, savedAt, context, agent }` but
+ * some legacy/test paths use `{ note, at, detail }`. We accept both shapes.
+ */
+function resolveCheckpointLabel(entry: Record<string, unknown>): string {
+  const note = entry['note'];
+  if (typeof note === 'string' && note !== '') return note;
+  const name = entry['name'];
+  return typeof name === 'string' ? name : '';
+}
+
+function resolveCheckpointTimestamp(entry: Record<string, unknown>): string {
+  const at = entry['at'];
+  if (typeof at === 'string' && at !== '') return at;
+  const savedAt = entry['savedAt'];
+  return typeof savedAt === 'string' ? savedAt : EPOCH_FALLBACK;
+}
+
+function resolveCheckpointDetail(entry: Record<string, unknown>): string | null {
+  const detail = entry['detail'];
+  if (typeof detail === 'string') return detail;
+  const context = entry['context'];
+  return typeof context === 'string' && context !== '' ? context : null;
+}
+
 export function projectCheckpoints(task: TaskEntry): readonly CheckpointRecordView[] {
   const entries = task.checkpoints ?? [];
   return entries.map((entry, index) => ({
     id: `${task.id}-cp-${String(index)}`,
     sequence: index,
-    label: entry.note,
+    label: resolveCheckpointLabel(entry),
     status: resolveCheckpointStatus(entry['status']),
-    timestamp: entry.at,
-    detail: typeof entry['detail'] === 'string' ? entry['detail'] : null,
+    timestamp: resolveCheckpointTimestamp(entry),
+    detail: resolveCheckpointDetail(entry),
   }));
 }
 

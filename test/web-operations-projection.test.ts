@@ -253,6 +253,36 @@ describe('projectQueueSnapshot', () => {
       const result = projectQueueSnapshot(state);
       assert.equal(result.queue[0].lastCheckpointSummary, null);
     });
+
+    it('extracts last checkpoint name as lastCheckpointSummary for daemon-persisted shape', () => {
+      const state = makeState({
+        tasks: [
+          makeTask({
+            id: 'task-1',
+            checkpoints: [
+              {
+                note: '',
+                at: '',
+                name: 'First pass',
+                savedAt: '2025-07-01T00:00:00.000Z',
+                context: '',
+                agent: 'codex',
+              },
+              {
+                note: '',
+                at: '',
+                name: 'Final review',
+                savedAt: '2025-07-01T01:00:00.000Z',
+                context: '',
+                agent: 'claude',
+              },
+            ] as unknown as Array<{ note: string; at: string }>,
+          }),
+        ],
+      });
+      const result = projectQueueSnapshot(state);
+      assert.equal(result.queue[0].lastCheckpointSummary, 'Final review');
+    });
   });
 
   describe('risk signals', () => {
@@ -432,6 +462,92 @@ describe('projectCheckpoints', () => {
     });
     const result = projectCheckpoints(task);
     assert.equal(result[0].detail, null);
+  });
+
+  // ── Daemon-persisted checkpoint shape { name, savedAt, context, agent } ──
+
+  it('normalizes daemon-persisted shape: name → label, savedAt → timestamp', () => {
+    const task = makeTask({
+      id: 'task-1',
+      checkpoints: [
+        {
+          note: '',
+          at: '',
+          name: 'Implement routing',
+          savedAt: '2025-07-01T09:30:00.000Z',
+          context: '',
+          agent: 'codex',
+        },
+      ] as unknown as Array<{ note: string; at: string }>,
+    });
+    const result = projectCheckpoints(task);
+    assert.equal(result[0].label, 'Implement routing');
+    assert.equal(result[0].timestamp, '2025-07-01T09:30:00.000Z');
+  });
+
+  it('maps context → detail for daemon-persisted checkpoints', () => {
+    const task = makeTask({
+      id: 'task-1',
+      checkpoints: [
+        {
+          note: '',
+          at: '',
+          name: 'Design review',
+          savedAt: '2025-07-01T10:00:00.000Z',
+          context: 'Reviewed module boundaries',
+          agent: 'claude',
+        },
+      ] as unknown as Array<{ note: string; at: string }>,
+    });
+    const result = projectCheckpoints(task);
+    assert.equal(result[0].detail, 'Reviewed module boundaries');
+  });
+
+  it('sets detail to null when daemon context is empty', () => {
+    const task = makeTask({
+      id: 'task-1',
+      checkpoints: [
+        {
+          note: '',
+          at: '',
+          name: 'Quick save',
+          savedAt: '2025-07-01T11:00:00.000Z',
+          context: '',
+          agent: 'gemini',
+        },
+      ] as unknown as Array<{ note: string; at: string }>,
+    });
+    const result = projectCheckpoints(task);
+    assert.equal(result[0].detail, null);
+  });
+
+  it('prefers note/at when both legacy and daemon fields are present', () => {
+    const task = makeTask({
+      id: 'task-1',
+      checkpoints: [
+        {
+          note: 'Legacy label',
+          at: '2025-01-01T00:00:00.000Z',
+          name: 'Daemon label',
+          savedAt: '2025-07-01T12:00:00.000Z',
+        },
+      ] as unknown as Array<{ note: string; at: string }>,
+    });
+    const result = projectCheckpoints(task);
+    assert.equal(result[0].label, 'Legacy label');
+    assert.equal(result[0].timestamp, '2025-01-01T00:00:00.000Z');
+  });
+
+  it('falls back to epoch when neither at nor savedAt is present', () => {
+    const task = makeTask({
+      id: 'task-1',
+      checkpoints: [{ note: '', at: '', name: 'Orphan', context: '' }] as unknown as Array<{
+        note: string;
+        at: string;
+      }>,
+    });
+    const result = projectCheckpoints(task);
+    assert.equal(result[0].timestamp, '1970-01-01T00:00:00.000Z');
   });
 });
 

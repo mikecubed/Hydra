@@ -412,12 +412,12 @@ describe('handleOperationsReadRoute', () => {
     });
   });
 
-  // ── GET /operations/work-item/:id ──────────────────────────────────────
+  // ── GET /operations/work-items/:id ──────────────────────────────────────
 
-  describe('GET /operations/work-item/:id', () => {
+  describe('GET /operations/work-items/:id', () => {
     it('handles the work-item detail route', () => {
       const state = makeState({ tasks: [makeTask({ id: 'task-1' })] });
-      const ctx = makeReadCtx('GET', '/operations/work-item/task-1', state);
+      const ctx = makeReadCtx('GET', '/operations/work-items/task-1', state);
       const handled = handleOperationsReadRoute(ctx);
       assert.equal(handled, true);
       assert.equal(ctx.captured.statusCode, 200);
@@ -425,7 +425,7 @@ describe('handleOperationsReadRoute', () => {
 
     it('returns 404 when work item is not found', () => {
       const state = makeState({ tasks: [] });
-      const ctx = makeReadCtx('GET', '/operations/work-item/nonexistent', state);
+      const ctx = makeReadCtx('GET', '/operations/work-items/nonexistent', state);
       const handled = handleOperationsReadRoute(ctx);
       assert.equal(handled, true);
       assert.equal(ctx.captured.statusCode, 404);
@@ -436,7 +436,7 @@ describe('handleOperationsReadRoute', () => {
       const state = makeState({
         tasks: [makeTask({ id: 'task-1', title: 'Build feature', owner: 'codex', updatedAt: now })],
       });
-      const ctx = makeReadCtx('GET', '/operations/work-item/task-1', state);
+      const ctx = makeReadCtx('GET', '/operations/work-items/task-1', state);
       handleOperationsReadRoute(ctx);
       const data = ctx.captured.data as Record<string, unknown>;
       const item = data['item'] as Record<string, unknown>;
@@ -458,7 +458,7 @@ describe('handleOperationsReadRoute', () => {
           }),
         ],
       });
-      const ctx = makeReadCtx('GET', '/operations/work-item/task-1', state);
+      const ctx = makeReadCtx('GET', '/operations/work-items/task-1', state);
       handleOperationsReadRoute(ctx);
       const data = ctx.captured.data as Record<string, unknown>;
       const checkpoints = data['checkpoints'] as unknown[];
@@ -478,7 +478,7 @@ describe('handleOperationsReadRoute', () => {
           }),
         ],
       });
-      const ctx = makeReadCtx('GET', '/operations/work-item/task-1', state);
+      const ctx = makeReadCtx('GET', '/operations/work-items/task-1', state);
       handleOperationsReadRoute(ctx);
       const data = ctx.captured.data as Record<string, unknown>;
       const checkpoints = data['checkpoints'] as Array<Record<string, unknown>>;
@@ -489,7 +489,7 @@ describe('handleOperationsReadRoute', () => {
 
     it('returns routing as null (not yet tracked)', () => {
       const state = makeState({ tasks: [makeTask({ id: 'task-1' })] });
-      const ctx = makeReadCtx('GET', '/operations/work-item/task-1', state);
+      const ctx = makeReadCtx('GET', '/operations/work-items/task-1', state);
       handleOperationsReadRoute(ctx);
       const data = ctx.captured.data as Record<string, unknown>;
       assert.equal(data['routing'], null);
@@ -497,7 +497,7 @@ describe('handleOperationsReadRoute', () => {
 
     it('returns empty assignments array', () => {
       const state = makeState({ tasks: [makeTask({ id: 'task-1' })] });
-      const ctx = makeReadCtx('GET', '/operations/work-item/task-1', state);
+      const ctx = makeReadCtx('GET', '/operations/work-items/task-1', state);
       handleOperationsReadRoute(ctx);
       const data = ctx.captured.data as Record<string, unknown>;
       assert.deepStrictEqual(data['assignments'], []);
@@ -505,7 +505,7 @@ describe('handleOperationsReadRoute', () => {
 
     it('returns council as null', () => {
       const state = makeState({ tasks: [makeTask({ id: 'task-1' })] });
-      const ctx = makeReadCtx('GET', '/operations/work-item/task-1', state);
+      const ctx = makeReadCtx('GET', '/operations/work-items/task-1', state);
       handleOperationsReadRoute(ctx);
       const data = ctx.captured.data as Record<string, unknown>;
       assert.equal(data['council'], null);
@@ -513,7 +513,7 @@ describe('handleOperationsReadRoute', () => {
 
     it('returns empty controls array', () => {
       const state = makeState({ tasks: [makeTask({ id: 'task-1' })] });
-      const ctx = makeReadCtx('GET', '/operations/work-item/task-1', state);
+      const ctx = makeReadCtx('GET', '/operations/work-items/task-1', state);
       handleOperationsReadRoute(ctx);
       const data = ctx.captured.data as Record<string, unknown>;
       assert.deepStrictEqual(data['controls'], []);
@@ -521,7 +521,7 @@ describe('handleOperationsReadRoute', () => {
 
     it('returns itemBudget as null', () => {
       const state = makeState({ tasks: [makeTask({ id: 'task-1' })] });
-      const ctx = makeReadCtx('GET', '/operations/work-item/task-1', state);
+      const ctx = makeReadCtx('GET', '/operations/work-items/task-1', state);
       handleOperationsReadRoute(ctx);
       const data = ctx.captured.data as Record<string, unknown>;
       assert.equal(data['itemBudget'], null);
@@ -529,7 +529,7 @@ describe('handleOperationsReadRoute', () => {
 
     it('returns availability as partial', () => {
       const state = makeState({ tasks: [makeTask({ id: 'task-1' })] });
-      const ctx = makeReadCtx('GET', '/operations/work-item/task-1', state);
+      const ctx = makeReadCtx('GET', '/operations/work-items/task-1', state);
       handleOperationsReadRoute(ctx);
       const data = ctx.captured.data as Record<string, unknown>;
       assert.equal(data['availability'], 'partial');
@@ -537,7 +537,7 @@ describe('handleOperationsReadRoute', () => {
 
     it('returns false for non-GET methods on work-item route', () => {
       const state = makeState({ tasks: [makeTask({ id: 'task-1' })] });
-      const ctx = makeReadCtx('POST', '/operations/work-item/task-1', state);
+      const ctx = makeReadCtx('POST', '/operations/work-items/task-1', state);
       const handled = handleOperationsReadRoute(ctx);
       assert.equal(handled, false);
     });
@@ -558,7 +558,7 @@ describe('handleOperationsReadRoute', () => {
           }),
         ],
       });
-      const ctx = makeReadCtx('GET', '/operations/work-item/task-1', state);
+      const ctx = makeReadCtx('GET', '/operations/work-items/task-1', state);
       handleOperationsReadRoute(ctx);
       const data = ctx.captured.data as Record<string, unknown>;
       const checkpoints = data['checkpoints'] as Array<Record<string, unknown>>;
@@ -576,20 +576,55 @@ describe('handleOperationsReadRoute', () => {
           }),
         ],
       });
-      const ctx = makeReadCtx('GET', '/operations/work-item/task-1', state);
+      const ctx = makeReadCtx('GET', '/operations/work-items/task-1', state);
       handleOperationsReadRoute(ctx);
       const data = ctx.captured.data as Record<string, unknown>;
       const checkpoints = data['checkpoints'] as Array<Record<string, unknown>>;
       assert.equal(checkpoints[0]['status'], 'waiting');
     });
+
+    it('accepts singular /operations/work-item/ for backward compatibility', () => {
+      const state = makeState({ tasks: [makeTask({ id: 'task-1' })] });
+      const ctx = makeReadCtx('GET', '/operations/work-item/task-1', state);
+      const handled = handleOperationsReadRoute(ctx);
+      assert.equal(handled, true);
+      assert.equal(ctx.captured.statusCode, 200);
+    });
+
+    it('projects daemon-persisted checkpoint shape (name/savedAt/context/agent)', () => {
+      const state = makeState({
+        tasks: [
+          makeTask({
+            id: 'task-1',
+            checkpoints: [
+              {
+                note: '',
+                at: '',
+                name: 'Implement parser',
+                savedAt: '2025-06-01T10:00:00.000Z',
+                context: 'Added AST nodes',
+                agent: 'codex',
+              },
+            ] as unknown as Array<{ note: string; at: string }>,
+          }),
+        ],
+      });
+      const ctx = makeReadCtx('GET', '/operations/work-items/task-1', state);
+      handleOperationsReadRoute(ctx);
+      const data = ctx.captured.data as Record<string, unknown>;
+      const checkpoints = data['checkpoints'] as Array<Record<string, unknown>>;
+      assert.equal(checkpoints[0]['label'], 'Implement parser');
+      assert.equal(checkpoints[0]['timestamp'], '2025-06-01T10:00:00.000Z');
+      assert.equal(checkpoints[0]['detail'], 'Added AST nodes');
+    });
   });
 
-  // ── GET /operations/work-item/:id/checkpoints ──────────────────────────
+  // ── GET /operations/work-items/:id/checkpoints ──────────────────────────
 
-  describe('GET /operations/work-item/:id/checkpoints', () => {
+  describe('GET /operations/work-items/:id/checkpoints', () => {
     it('handles the checkpoints sub-route', () => {
       const state = makeState({ tasks: [makeTask({ id: 'task-1' })] });
-      const ctx = makeReadCtx('GET', '/operations/work-item/task-1/checkpoints', state);
+      const ctx = makeReadCtx('GET', '/operations/work-items/task-1/checkpoints', state);
       const handled = handleOperationsReadRoute(ctx);
       assert.equal(handled, true);
       assert.equal(ctx.captured.statusCode, 200);
@@ -597,7 +632,7 @@ describe('handleOperationsReadRoute', () => {
 
     it('returns 404 when work item is not found', () => {
       const state = makeState({ tasks: [] });
-      const ctx = makeReadCtx('GET', '/operations/work-item/missing/checkpoints', state);
+      const ctx = makeReadCtx('GET', '/operations/work-items/missing/checkpoints', state);
       const handled = handleOperationsReadRoute(ctx);
       assert.equal(handled, true);
       assert.equal(ctx.captured.statusCode, 404);
@@ -615,7 +650,7 @@ describe('handleOperationsReadRoute', () => {
           }),
         ],
       });
-      const ctx = makeReadCtx('GET', '/operations/work-item/task-1/checkpoints', state);
+      const ctx = makeReadCtx('GET', '/operations/work-items/task-1/checkpoints', state);
       handleOperationsReadRoute(ctx);
       const data = ctx.captured.data as Record<string, unknown>;
       assert.equal(data['workItemId'], 'task-1');
@@ -632,7 +667,7 @@ describe('handleOperationsReadRoute', () => {
           }),
         ],
       });
-      const ctx = makeReadCtx('GET', '/operations/work-item/task-1/checkpoints', state);
+      const ctx = makeReadCtx('GET', '/operations/work-items/task-1/checkpoints', state);
       handleOperationsReadRoute(ctx);
       const data = ctx.captured.data as Record<string, unknown>;
       assert.equal(data['availability'], 'ready');
@@ -640,7 +675,7 @@ describe('handleOperationsReadRoute', () => {
 
     it('returns partial availability when task has no checkpoints', () => {
       const state = makeState({ tasks: [makeTask({ id: 'task-1' })] });
-      const ctx = makeReadCtx('GET', '/operations/work-item/task-1/checkpoints', state);
+      const ctx = makeReadCtx('GET', '/operations/work-items/task-1/checkpoints', state);
       handleOperationsReadRoute(ctx);
       const data = ctx.captured.data as Record<string, unknown>;
       assert.equal(data['availability'], 'partial');
@@ -658,12 +693,20 @@ describe('handleOperationsReadRoute', () => {
           }),
         ],
       });
-      const ctx = makeReadCtx('GET', '/operations/work-item/task-1/checkpoints', state);
+      const ctx = makeReadCtx('GET', '/operations/work-items/task-1/checkpoints', state);
       handleOperationsReadRoute(ctx);
       const data = ctx.captured.data as Record<string, unknown>;
       const checkpoints = data['checkpoints'] as Array<Record<string, unknown>>;
       assert.equal(checkpoints[0]['sequence'], 0);
       assert.equal(checkpoints[1]['sequence'], 1);
+    });
+
+    it('accepts singular /operations/work-item/ for backward compatibility', () => {
+      const state = makeState({ tasks: [makeTask({ id: 'task-1' })] });
+      const ctx = makeReadCtx('GET', '/operations/work-item/task-1/checkpoints', state);
+      const handled = handleOperationsReadRoute(ctx);
+      assert.equal(handled, true);
+      assert.equal(ctx.captured.statusCode, 200);
     });
   });
 });

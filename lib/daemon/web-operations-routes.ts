@@ -131,11 +131,18 @@ const OPERATIONS_ROUTES: ReadonlyMap<string, (ctx: ReadRouteCtx) => boolean> = n
   ['/operations/snapshot', handleSnapshot],
 ]);
 
-const WORK_ITEM_PREFIX = '/operations/work-item/';
+const WORK_ITEMS_PREFIX = '/operations/work-items/';
+const WORK_ITEM_PREFIX_COMPAT = '/operations/work-item/';
 
 function matchWorkItemRoute(route: string): { workItemId: string; sub: string } | null {
-  if (!route.startsWith(WORK_ITEM_PREFIX)) return null;
-  const rest = route.slice(WORK_ITEM_PREFIX.length);
+  let rest: string;
+  if (route.startsWith(WORK_ITEMS_PREFIX)) {
+    rest = route.slice(WORK_ITEMS_PREFIX.length);
+  } else if (route.startsWith(WORK_ITEM_PREFIX_COMPAT)) {
+    rest = route.slice(WORK_ITEM_PREFIX_COMPAT.length);
+  } else {
+    return null;
+  }
   if (rest === '') return null;
   const slashIndex = rest.indexOf('/');
   if (slashIndex === -1) return { workItemId: rest, sub: '' };
