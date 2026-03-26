@@ -7,15 +7,22 @@
 
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
-import type { HydraStateShape, TaskEntry } from '../lib/types.ts';
+import type { HydraStateShape, TaskEntry, UsageCheckResult } from '../lib/types.ts';
 import {
   projectQueueSnapshot,
   normalizeTaskStatus,
   DAEMON_TO_WORK_ITEM_STATUS,
   projectCheckpoints,
   projectWorkItemDetail,
+  projectDaemonHealth,
+  projectGlobalBudget,
+  projectItemBudget,
 } from '../lib/daemon/web-operations-projection.ts';
-import { CheckpointRecordView as CheckpointRecordViewSchema } from '@hydra/web-contracts';
+import {
+  CheckpointRecordView as CheckpointRecordViewSchema,
+  DaemonHealthView as DaemonHealthViewSchema,
+  BudgetStatusView as BudgetStatusViewSchema,
+} from '@hydra/web-contracts';
 
 // ── Helpers ────────────────────────────────────────────────────────────────
 
@@ -43,6 +50,21 @@ function makeState(overrides: Partial<HydraStateShape> = {}): HydraStateShape {
     childSessions: [],
     activeSession: null,
     updatedAt: new Date().toISOString(),
+    ...overrides,
+  };
+}
+
+function makeUsage(overrides: Partial<UsageCheckResult> = {}): UsageCheckResult {
+  return {
+    level: 'normal',
+    percent: 10,
+    todayTokens: 100,
+    message: 'ok',
+    confidence: 1,
+    model: 'test',
+    budget: 1000,
+    used: 100,
+    remaining: 900,
     ...overrides,
   };
 }
@@ -756,11 +778,15 @@ describe('projectWorkItemDetail', () => {
     assert.deepStrictEqual(result.controls, []);
   });
 
-  it('sets itemBudget to null (not yet tracked)', () => {
+  it('returns unavailable item budget (per-item attribution not yet available)', () => {
     const state = makeState({ tasks: [makeTask({ id: 'task-1' })] });
     const result = projectWorkItemDetail(state, 'task-1');
     assert.ok(result !== null);
-    assert.equal(result.itemBudget, null);
+    assert.notEqual(result.itemBudget, null);
+    assert.equal(result.itemBudget.status, 'unavailable');
+    assert.equal(result.itemBudget.scope, 'work-item');
+    assert.equal(result.itemBudget.scopeId, 'task-1');
+    assert.equal(result.itemBudget.complete, false);
   });
 
   it('sets availability to partial when checkpoints exist but routing/assignments are not tracked', () => {
@@ -944,6 +970,252 @@ describe('snapshot vs detail position consistency', () => {
     assert.ok(detail !== null);
     assert.equal(snapshot.queue[0].position, 0);
     assert.equal(detail.item.position, 0);
+  });
+});
+
+// ── Daemon Health Projection ───────────────────────────────────────────────
+
+describe('projectDaemonHealth', () => {
+  it('returns healthy when daemon reports running', () => {
+    const health = projectDaemonHealth({ running: true, updatedAt: '2025-01-01T00:00:00.000Z' });
+    assert.equal(health.status, 'healthy');
+    assert.equal(health.scope, 'global');
+    assert.equal(health.detailsAvailability, 'ready');
+    assert.equal(health.message, null);
+  });
+
+  it('returns unavailable when daemon reports not running', () => {
+    const health = projectDaemonHealth({ running: false });
+    assert.equal(health.status, 'unavailable');
+    assert.equal(health.scope, 'global');
+    assert.notEqual(health.message, null);
+  });
+
+  it('returns unavailable when status data is empty', () => {
+    const health = projectDaemonHealth({});
+    assert.equal(health.status, 'unavailable');
+    assert.equal(health.detailsAvailability, 'unavailable');
+  });
+
+  it('scope is always global', () => {
+    const health = projectDaemonHealth({ running: true });
+    assert.equal(health.scope, 'global');
+  });
+
+  it('observedAt is a valid ISO datetime', () => {
+    const health = projectDaemonHealth({ running: true });
+    assert.doesNotThrow(() => new Date(health.observedAt));
+    assert.ok(health.observedAt.endsWith('Z'));
+  });
+
+  it('detailsAvailability is partial when not running', () => {
+    const health = projectDaemonHealth({ running: false });
+    assert.equal(health.detailsAvailability, 'partial');
+  });
+
+  it('validates against DaemonHealthView schema when healthy', () => {
+    const health = projectDaemonHealth({ running: true });
+    const parsed = DaemonHealthViewSchema.safeParse(health);
+    assert.ok(parsed.success, `Schema validation failed: ${JSON.stringify(parsed.error?.issues)}`);
+  });
+
+  it('validates against DaemonHealthView schema when unavailable', () => {
+    const health = projectDaemonHealth({});
+    const parsed = DaemonHealthViewSchema.safeParse(health);
+    assert.ok(parsed.success, `Schema validation failed: ${JSON.stringify(parsed.error?.issues)}`);
+  });
+});
+
+// ── Global Budget Projection ───────────────────────────────────────────────
+
+describe('projectGlobalBudget', () => {
+  it('maps normal level to normal severity', () => {
+    const budget = projectGlobalBudget(makeUsage({ level: 'normal' }));
+    assert.equal(budget.status, 'normal');
+  });
+
+  it('maps warning level to warning severity', () => {
+    const budget = projectGlobalBudget(makeUsage({ level: 'warning', percent: 85 }));
+    assert.equal(budget.status, 'warning');
+  });
+
+  it('maps critical level to warning severity when budget remains', () => {
+    const budget = projectGlobalBudget(makeUsage({ level: 'critical', percent: 95, used: 9500, budget: 10000 }));
+    assert.equal(budget.status, 'warning');
+  });
+
+  it('maps unknown level to unavailable severity', () => {
+    const budget = projectGlobalBudget(makeUsage({ level: 'unknown-level' }));
+    assert.equal(budget.status, 'unavailable');
+  });
+
+  it('includes numeric data when available', () => {
+    const budget = projectGlobalBudget(makeUsage({ used: 500, budget: 1000 }));
+    assert.equal(budget.used, 500);
+    assert.equal(budget.limit, 1000);
+    assert.equal(budget.unit, 'tokens');
+    assert.equal(budget.complete, true);
+  });
+
+  it('marks incomplete when numeric data missing', () => {
+    const budget = projectGlobalBudget(makeUsage({ used: undefined, budget: undefined }));
+    assert.equal(budget.used, null);
+    assert.equal(budget.limit, null);
+    assert.equal(budget.unit, null);
+    assert.equal(budget.complete, false);
+  });
+
+  it('scope is always global with null scopeId', () => {
+    const budget = projectGlobalBudget(makeUsage());
+    assert.equal(budget.scope, 'global');
+    assert.equal(budget.scopeId, null);
+  });
+
+  it('summary reflects warning severity with percent', () => {
+    const budget = projectGlobalBudget(makeUsage({ level: 'warning', percent: 85 }));
+    assert.ok(budget.summary.includes('85'));
+  });
+
+  it('summary reflects exceeded severity only when usage is actually exhausted', () => {
+    const budget = projectGlobalBudget(
+      makeUsage({ level: 'critical', percent: 100, used: 10_000, budget: 10_000 }),
+    );
+    assert.ok(budget.summary.toLowerCase().includes('exceeded'));
+  });
+
+  it('maps to exceeded severity when usage reaches the budget limit', () => {
+    const budget = projectGlobalBudget(
+      makeUsage({ level: 'critical', percent: 100, used: 10_000, budget: 10_000 }),
+    );
+    assert.equal(budget.status, 'exceeded');
+  });
+
+  it('validates against BudgetStatusView schema for normal', () => {
+    const budget = projectGlobalBudget(makeUsage());
+    const parsed = BudgetStatusViewSchema.safeParse(budget);
+    assert.ok(parsed.success, `Schema validation failed: ${JSON.stringify(parsed.error?.issues)}`);
+  });
+
+  it('validates against BudgetStatusView schema for warning', () => {
+    const budget = projectGlobalBudget(makeUsage({ level: 'warning', percent: 85 }));
+    const parsed = BudgetStatusViewSchema.safeParse(budget);
+    assert.ok(parsed.success, `Schema validation failed: ${JSON.stringify(parsed.error?.issues)}`);
+  });
+
+  it('validates against BudgetStatusView schema for exceeded', () => {
+    const budget = projectGlobalBudget(makeUsage({ level: 'critical' }));
+    const parsed = BudgetStatusViewSchema.safeParse(budget);
+    assert.ok(parsed.success, `Schema validation failed: ${JSON.stringify(parsed.error?.issues)}`);
+  });
+
+  it('validates against BudgetStatusView schema for unavailable', () => {
+    const budget = projectGlobalBudget(makeUsage({ level: 'unknown' }));
+    const parsed = BudgetStatusViewSchema.safeParse(budget);
+    assert.ok(parsed.success, `Schema validation failed: ${JSON.stringify(parsed.error?.issues)}`);
+  });
+});
+
+// ── Item Budget Projection ─────────────────────────────────────────────────
+
+describe('projectItemBudget', () => {
+  it('returns unavailable status', () => {
+    const budget = projectItemBudget('task-1');
+    assert.equal(budget.status, 'unavailable');
+  });
+
+  it('has work-item scope with correct scopeId', () => {
+    const budget = projectItemBudget('task-1');
+    assert.equal(budget.scope, 'work-item');
+    assert.equal(budget.scopeId, 'task-1');
+  });
+
+  it('marks data as incomplete', () => {
+    const budget = projectItemBudget('task-1');
+    assert.equal(budget.complete, false);
+    assert.equal(budget.used, null);
+    assert.equal(budget.limit, null);
+    assert.equal(budget.unit, null);
+  });
+
+  it('summary describes unavailable attribution', () => {
+    const budget = projectItemBudget('task-1');
+    assert.ok(budget.summary.length > 0);
+  });
+
+  it('validates against BudgetStatusView schema', () => {
+    const budget = projectItemBudget('task-1');
+    const parsed = BudgetStatusViewSchema.safeParse(budget);
+    assert.ok(parsed.success, `Schema validation failed: ${JSON.stringify(parsed.error?.issues)}`);
+  });
+});
+
+// ── Snapshot with Health/Budget Context ─────────────────────────────────────
+
+describe('projectQueueSnapshot with health/budget context', () => {
+  it('populates health when context provided', () => {
+    const state = makeState({ tasks: [makeTask()] });
+    const result = projectQueueSnapshot(state, {}, {
+      statusData: { running: true },
+      usage: makeUsage(),
+    });
+    assert.notEqual(result.health, null);
+    assert.equal(result.health!.status, 'healthy');
+    assert.equal(result.health!.scope, 'global');
+  });
+
+  it('populates budget when context provided', () => {
+    const state = makeState({ tasks: [makeTask()] });
+    const result = projectQueueSnapshot(state, {}, {
+      statusData: { running: true },
+      usage: makeUsage({ level: 'warning', percent: 85 }),
+    });
+    assert.notEqual(result.budget, null);
+    assert.equal(result.budget!.status, 'warning');
+    assert.equal(result.budget!.scope, 'global');
+  });
+
+  it('keeps critical-threshold snapshot budget at warning while budget remains', () => {
+    const state = makeState({ tasks: [makeTask()] });
+    const result = projectQueueSnapshot(state, {}, {
+      statusData: { running: true },
+      usage: makeUsage({ level: 'critical', percent: 95, used: 9500, budget: 10_000 }),
+    });
+    assert.notEqual(result.budget, null);
+    assert.equal(result.budget!.status, 'warning');
+  });
+
+  it('reflects unavailable health in snapshot', () => {
+    const state = makeState({ tasks: [makeTask()] });
+    const result = projectQueueSnapshot(state, {}, {
+      statusData: { running: false },
+      usage: makeUsage(),
+    });
+    assert.notEqual(result.health, null);
+    assert.equal(result.health!.status, 'unavailable');
+  });
+
+  it('leaves health/budget null when no context provided', () => {
+    const state = makeState();
+    const result = projectQueueSnapshot(state);
+    assert.equal(result.health, null);
+    assert.equal(result.budget, null);
+  });
+
+  it('separates global budget from per-item scope', () => {
+    const state = makeState({ tasks: [makeTask({ id: 'task-1' })] });
+    const snapshot = projectQueueSnapshot(state, {}, {
+      statusData: { running: true },
+      usage: makeUsage({ level: 'warning', percent: 80 }),
+    });
+    assert.notEqual(snapshot.budget, null);
+    assert.equal(snapshot.budget!.scope, 'global');
+    assert.equal(snapshot.budget!.scopeId, null);
+
+    const detail = projectWorkItemDetail(state, 'task-1');
+    assert.ok(detail !== null);
+    assert.equal(detail.itemBudget.scope, 'work-item');
+    assert.equal(detail.itemBudget.scopeId, 'task-1');
+    assert.equal(detail.itemBudget.status, 'unavailable');
   });
 });
 
