@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useReducer, type JSX } from 'react';
+import { useCallback, useEffect, useMemo, useReducer, useRef, type JSX } from 'react';
 
 import { createOperationsClient } from '../api/operations-client.ts';
 import {
@@ -7,12 +7,17 @@ import {
 } from '../model/operations-reducer.ts';
 import {
   selectAvailability,
+  selectDetailAvailability,
+  selectDetailFetchStatus,
   selectFilteredQueueItems,
   selectFreshness,
   selectHasPendingControl,
+  selectSelectedCheckpoints,
   selectSelectedWorkItemId,
   selectSnapshotStatus,
 } from '../model/selectors.ts';
+import { createSyncController } from '../model/sync-controller.ts';
+import { CheckpointPanel } from './checkpoint-panel.tsx';
 import { OperationsPanelShell } from './operations-panel-shell.tsx';
 import { QueuePanel } from './queue-panel.tsx';
 
@@ -23,6 +28,14 @@ function useOperationsPanelState() {
     undefined,
     createRouteInitialOperationsState,
   );
+
+  const syncControllerRef = useRef<ReturnType<typeof createSyncController> | null>(null);
+
+  // Initialize sync controller once
+  syncControllerRef.current ??= createSyncController({
+    client: operationsClient,
+    dispatch,
+  });
 
   useEffect(() => {
     const lifecycle = { disposed: false };
@@ -46,28 +59,48 @@ function useOperationsPanelState() {
 
     return () => {
       lifecycle.disposed = true;
+      syncControllerRef.current?.dispose();
+      syncControllerRef.current = null;
     };
   }, [operationsClient]);
 
-  return { state, dispatch };
+  const handleSelectItem = useCallback((workItemId: string) => {
+    dispatch({ type: 'selection/select', workItemId });
+    syncControllerRef.current?.syncDetail(workItemId);
+  }, []);
+
+  return { state, dispatch, handleSelectItem };
 }
 
 export function WorkspaceOperationsPanel(): JSX.Element {
-  const { state, dispatch } = useOperationsPanelState();
+  const { state, handleSelectItem } = useOperationsPanelState();
+
+  const selectedWorkItemId = selectSelectedWorkItemId(state);
+  const checkpoints = selectSelectedCheckpoints(state);
+  const detailAvailability = selectDetailAvailability(state);
+  const detailFetchStatus = selectDetailFetchStatus(state);
+
+  const detailPanel =
+    selectedWorkItemId === null ? undefined : (
+      <CheckpointPanel
+        checkpoints={checkpoints}
+        detailAvailability={detailAvailability}
+        detailFetchStatus={detailFetchStatus}
+      />
+    );
 
   return (
     <OperationsPanelShell
       snapshotStatus={selectSnapshotStatus(state)}
       freshness={selectFreshness(state)}
+      detailPanel={detailPanel}
     >
       <QueuePanel
         items={selectFilteredQueueItems(state)}
         snapshotStatus={selectSnapshotStatus(state)}
         availability={selectAvailability(state)}
-        selectedWorkItemId={selectSelectedWorkItemId(state)}
-        onSelectItem={(workItemId) => {
-          dispatch({ type: 'selection/select', workItemId });
-        }}
+        selectedWorkItemId={selectedWorkItemId}
+        onSelectItem={handleSelectItem}
         hasPendingControl={(workItemId) => selectHasPendingControl(state, workItemId)}
       />
     </OperationsPanelShell>

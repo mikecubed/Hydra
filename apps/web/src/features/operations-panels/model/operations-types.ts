@@ -16,6 +16,8 @@ import type {
   WorkspaceFreshness,
 } from '@hydra/web-contracts';
 
+export type DetailFetchStatus = 'idle' | 'loading' | 'error';
+
 export interface OperationsFiltersState {
   readonly statusFilter: readonly WorkItemStatus[];
 }
@@ -24,6 +26,7 @@ export interface OperationsSelectionState {
   readonly selectedWorkItemId: string | null;
   readonly detail: GetWorkItemDetailResponse | null;
   readonly detailAvailability: DetailAvailability | null;
+  readonly detailFetchStatus: DetailFetchStatus;
 }
 
 export interface OperationsControlState {
