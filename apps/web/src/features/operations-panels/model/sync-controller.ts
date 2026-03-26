@@ -19,6 +19,13 @@ export interface SyncControllerOptions {
 export interface SyncController {
   /** Trigger detail fetch for the given work item. Aborts any in-flight fetch. */
   syncDetail(workItemId: string): void;
+  /**
+   * Post-control reconciliation: refetch detail only if the controlled item
+   * is still the selected item. Never aborts an in-flight fetch for a
+   * different item — prevents stale control responses from clobbering the
+   * active detail view.
+   */
+  reconcileDetail(workItemId: string, currentSelectedId: string | null): void;
   /** Cancel any in-flight detail fetch (e.g. on deselect). */
   cancelSync(): void;
   /** Fetch batch control discovery for the given work item IDs. */
@@ -90,6 +97,12 @@ export function createSyncController(options: SyncControllerOptions): SyncContro
     currentRequestId += 1;
   }
 
+  function reconcileDetail(workItemId: string, currentSelectedId: string | null): void {
+    if (lifecycle.disposed) return;
+    if (currentSelectedId !== workItemId) return;
+    syncDetail(workItemId);
+  }
+
   function dispose(): void {
     lifecycle.disposed = true;
     abortCurrent();
@@ -97,5 +110,5 @@ export function createSyncController(options: SyncControllerOptions): SyncContro
     discoveryRequestId += 1;
   }
 
-  return { syncDetail, cancelSync, syncControlDiscovery, dispose };
+  return { syncDetail, reconcileDetail, cancelSync, syncControlDiscovery, dispose };
 }

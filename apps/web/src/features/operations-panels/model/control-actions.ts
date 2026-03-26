@@ -19,6 +19,7 @@ export interface SubmitControlOptions {
   readonly requestedOptionId: string;
   readonly expectedRevision: string;
   readonly onRefetchDetail?: (workItemId: string) => void;
+  readonly onRefetchSnapshot?: () => void;
 }
 
 function generateRequestId(): string {
@@ -46,6 +47,7 @@ export async function submitControl(
     requestedOptionId,
     expectedRevision,
     onRefetchDetail,
+    onRefetchSnapshot,
   } = options;
 
   const requestId = generateRequestId();
@@ -77,6 +79,7 @@ export async function submitControl(
   // Trigger authoritative refetch for all outcomes so the browser
   // never shows stale optimistic state.
   onRefetchDetail?.(workItemId);
+  onRefetchSnapshot?.();
 
   return response;
 }

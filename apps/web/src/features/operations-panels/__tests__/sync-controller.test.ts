@@ -405,4 +405,131 @@ describe('createSyncController', () => {
 
     controller.dispose();
   });
+
+  // ─── Issue 2: reconcileDetail ───────────────────────────────────────────
+
+  describe('reconcileDetail', () => {
+    it('fetches detail when workItemId matches currentSelectedId', async () => {
+      const detail = makeDetailResponse({ item: makeQueueItem({ id: 'wq-1' }) });
+      const deferred = createDeferredFetch<GetWorkItemDetailResponse>();
+      const client = createMockClient(() => deferred.promise);
+      const dispatched: OperationsAction[] = [];
+
+      const controller = createSyncController({
+        client,
+        dispatch: (action) => dispatched.push(action),
+      });
+
+      controller.reconcileDetail('wq-1', 'wq-1');
+
+      // Should dispatch detail-loading and start fetch
+      assert.equal(dispatched.length, 1);
+      assert.equal(dispatched[0].type, 'selection/detail-loading');
+
+      deferred.resolve(detail);
+      await deferred.promise;
+      await new Promise<void>((r) => { setTimeout(r, 0); });
+
+      assert.equal(dispatched.length, 2);
+      assert.equal(dispatched[1].type, 'selection/detail-loaded');
+    });
+
+    it('skips fetch when workItemId differs from currentSelectedId', async () => {
+      let fetchCalled = false;
+      const client = createMockClient(() => {
+        fetchCalled = true;
+        return Promise.resolve(makeDetailResponse());
+      });
+      const dispatched: OperationsAction[] = [];
+
+      const controller = createSyncController({
+        client,
+        dispatch: (action) => dispatched.push(action),
+      });
+
+      // Control resolved for A, but user already selected B
+      controller.reconcileDetail('wq-A', 'wq-B');
+      await new Promise<void>((r) => { setTimeout(r, 0); });
+
+      assert.equal(fetchCalled, false, 'should not fetch detail for non-selected item');
+      assert.equal(dispatched.length, 0, 'should not dispatch any actions');
+    });
+
+    it('skips fetch when currentSelectedId is null', async () => {
+      let fetchCalled = false;
+      const client = createMockClient(() => {
+        fetchCalled = true;
+        return Promise.resolve(makeDetailResponse());
+      });
+      const dispatched: OperationsAction[] = [];
+
+      const controller = createSyncController({
+        client,
+        dispatch: (action) => dispatched.push(action),
+      });
+
+      controller.reconcileDetail('wq-A', null);
+      await new Promise<void>((r) => { setTimeout(r, 0); });
+
+      assert.equal(fetchCalled, false);
+      assert.equal(dispatched.length, 0);
+    });
+
+    it('does not abort in-flight fetch for a different item', async () => {
+      const deferredB = createDeferredFetch<GetWorkItemDetailResponse>();
+      const detailB = makeDetailResponse({ item: makeQueueItem({ id: 'wq-B' }) });
+      let bSignal: AbortSignal | undefined;
+
+      const client = createMockClient((workItemId, options) => {
+        if (workItemId === 'wq-B') {
+          bSignal = options?.signal;
+          return deferredB.promise;
+        }
+        return Promise.resolve(makeDetailResponse({ item: makeQueueItem({ id: workItemId }) }));
+      });
+      const dispatched: OperationsAction[] = [];
+
+      const controller = createSyncController({
+        client,
+        dispatch: (action) => dispatched.push(action),
+      });
+
+      // User selects B — B is now in-flight
+      controller.syncDetail('wq-B');
+      assert.ok(bSignal, 'B fetch should have started');
+      assert.equal(bSignal.aborted, false);
+
+      // Control for A resolves, but user is on B
+      controller.reconcileDetail('wq-A', 'wq-B');
+
+      // B's fetch must NOT be aborted
+      assert.equal(bSignal.aborted, false, 'B fetch must not be aborted by reconcile for A');
+
+      deferredB.resolve(detailB);
+      await deferredB.promise;
+      await new Promise<void>((r) => { setTimeout(r, 0); });
+
+      const loaded = dispatched.filter((a) => a.type === 'selection/detail-loaded');
+      assert.equal(loaded.length, 1);
+      if (loaded[0].type === 'selection/detail-loaded') {
+        assert.equal(loaded[0].detail.item.id, 'wq-B');
+      }
+    });
+
+    it('is a no-op after dispose', async () => {
+      const client = createMockClient(() => Promise.resolve(makeDetailResponse()));
+      const dispatched: OperationsAction[] = [];
+
+      const controller = createSyncController({
+        client,
+        dispatch: (action) => dispatched.push(action),
+      });
+
+      controller.dispose();
+      controller.reconcileDetail('wq-1', 'wq-1');
+      await new Promise<void>((r) => { setTimeout(r, 0); });
+
+      assert.equal(dispatched.length, 0);
+    });
+  });
 });

@@ -318,4 +318,104 @@ describe('submitControl', () => {
       assert.equal(pending.pending.requestedOptionId, 'opt-1');
     }
   });
+
+  // ─── Issue 1: onRefetchSnapshot ─────────────────────────────────────────
+
+  it('calls onRefetchSnapshot on accepted outcome', async () => {
+    let snapshotRefetched = false;
+    const client = createMockClient(async () => makeAcceptedResponse());
+
+    await submitControl({
+      client,
+      dispatch: () => {},
+      workItemId: 'wq-1',
+      controlId: 'ctrl-1',
+      requestedOptionId: 'opt-1',
+      expectedRevision: 'rev-1',
+      onRefetchSnapshot: () => { snapshotRefetched = true; },
+    });
+
+    assert.equal(snapshotRefetched, true);
+  });
+
+  it('calls onRefetchSnapshot on rejected outcome', async () => {
+    let snapshotRefetched = false;
+    const client = createMockClient(async () =>
+      makeAcceptedResponse({ outcome: 'rejected' }),
+    );
+
+    await submitControl({
+      client,
+      dispatch: () => {},
+      workItemId: 'wq-1',
+      controlId: 'ctrl-1',
+      requestedOptionId: 'opt-1',
+      expectedRevision: 'rev-1',
+      onRefetchSnapshot: () => { snapshotRefetched = true; },
+    });
+
+    assert.equal(snapshotRefetched, true);
+  });
+
+  it('calls onRefetchSnapshot on stale outcome', async () => {
+    let snapshotRefetched = false;
+    const client = createMockClient(async () =>
+      makeAcceptedResponse({ outcome: 'stale' }),
+    );
+
+    await submitControl({
+      client,
+      dispatch: () => {},
+      workItemId: 'wq-1',
+      controlId: 'ctrl-1',
+      requestedOptionId: 'opt-1',
+      expectedRevision: 'rev-1',
+      onRefetchSnapshot: () => { snapshotRefetched = true; },
+    });
+
+    assert.equal(snapshotRefetched, true);
+  });
+
+  it('does not call onRefetchSnapshot on HTTP error', async () => {
+    let snapshotRefetched = false;
+    const client = createMockClient(async () => {
+      throw new Error('Network failure');
+    });
+
+    try {
+      await submitControl({
+        client,
+        dispatch: () => {},
+        workItemId: 'wq-1',
+        controlId: 'ctrl-1',
+        requestedOptionId: 'opt-1',
+        expectedRevision: 'rev-1',
+        onRefetchSnapshot: () => { snapshotRefetched = true; },
+      });
+    } catch {
+      // expected
+    }
+
+    assert.equal(snapshotRefetched, false);
+  });
+
+  it('calls both onRefetchDetail and onRefetchSnapshot on success', async () => {
+    let detailRefetched = false;
+    let snapshotRefetched = false;
+    const client = createMockClient(async () => makeAcceptedResponse());
+
+    await submitControl({
+      client,
+      dispatch: () => {},
+      workItemId: 'wq-1',
+      controlId: 'ctrl-1',
+      requestedOptionId: 'opt-1',
+      expectedRevision: 'rev-1',
+      onRefetchDetail: () => { detailRefetched = true; },
+      onRefetchSnapshot: () => { snapshotRefetched = true; },
+    });
+
+    assert.equal(detailRefetched, true);
+    assert.equal(snapshotRefetched, true);
+  });
 });

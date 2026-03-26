@@ -42,44 +42,40 @@ function useOperationsPanelState() {
 
   const syncControllerRef = useRef<ReturnType<typeof createSyncController> | null>(null);
 
+  // Track current selection via ref so async control callbacks read
+  // the live value rather than a stale closure capture.
+  const selectedWorkItemIdRef = useRef<string | null>(null);
+  selectedWorkItemIdRef.current = state.selection.selectedWorkItemId;
+
   // Initialize sync controller once
   syncControllerRef.current ??= createSyncController({
     client: operationsClient,
     dispatch,
   });
 
-  useEffect(() => {
-    const lifecycle = { disposed: false };
+  const fetchSnapshot = useCallback(async () => {
+    dispatch({ type: 'snapshot/request' });
+    try {
+      const snapshot = await operationsClient.getSnapshot();
+      dispatch({ type: 'snapshot/success', snapshot });
 
-    void (async () => {
-      try {
-        const snapshot = await operationsClient.getSnapshot();
-        if (lifecycle.disposed) {
-          return;
-        }
-
-        dispatch({ type: 'snapshot/success', snapshot });
-
-        // Hydrate control discovery for visible queue items
-        const workItemIds = snapshot.queue.map((item) => item.id);
-        if (workItemIds.length > 0) {
-          syncControllerRef.current?.syncControlDiscovery(workItemIds);
-        }
-      } catch {
-        if (lifecycle.disposed) {
-          return;
-        }
-
-        dispatch({ type: 'snapshot/failure' });
+      const workItemIds = snapshot.queue.map((item) => item.id);
+      if (workItemIds.length > 0) {
+        syncControllerRef.current?.syncControlDiscovery(workItemIds);
       }
-    })();
+    } catch {
+      dispatch({ type: 'snapshot/failure' });
+    }
+  }, [operationsClient]);
+
+  useEffect(() => {
+    void fetchSnapshot();
 
     return () => {
-      lifecycle.disposed = true;
       syncControllerRef.current?.dispose();
       syncControllerRef.current = null;
     };
-  }, [operationsClient]);
+  }, [fetchSnapshot]);
 
   const selectedWorkItemId = state.selection.selectedWorkItemId;
   const selectedDetail = state.selection.detail;
@@ -111,11 +107,14 @@ function useOperationsPanelState() {
         requestedOptionId: optionId,
         expectedRevision,
         onRefetchDetail: (id) => {
-          syncControllerRef.current?.syncDetail(id);
+          syncControllerRef.current?.reconcileDetail(id, selectedWorkItemIdRef.current);
+        },
+        onRefetchSnapshot: () => {
+          void fetchSnapshot();
         },
       });
     },
-    [operationsClient, selectedWorkItemId],
+    [fetchSnapshot, operationsClient, selectedWorkItemId],
   );
 
   return { state, dispatch, handleSelectItem, handleSubmitControl };
