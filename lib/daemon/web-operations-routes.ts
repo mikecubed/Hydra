@@ -67,10 +67,16 @@ function parseLimit(raw: string | null): number | undefined {
   return Number.isFinite(n) && n > 0 ? n : undefined;
 }
 
+function warnProbeFailure(probeName: 'readStatus' | 'checkUsage', error: unknown): void {
+  const detail = error instanceof Error ? error.message : String(error);
+  console.warn(`[operations] ${probeName} probe failed: ${detail}`);
+}
+
 function tryReadStatus(readStatus: ReadRouteCtx['readStatus']): Record<string, unknown> | null {
   try {
     return readStatus();
-  } catch {
+  } catch (err) {
+    warnProbeFailure('readStatus', err);
     return null;
   }
 }
@@ -80,7 +86,8 @@ function tryCheckUsage(
 ): ReturnType<ReadRouteCtx['checkUsage']> | null {
   try {
     return checkUsage();
-  } catch {
+  } catch (err) {
+    warnProbeFailure('checkUsage', err);
     return null;
   }
 }

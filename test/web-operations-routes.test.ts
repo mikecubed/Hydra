@@ -141,6 +141,14 @@ function makeReadCtx(
   };
 }
 
+function captureWarningText(message: unknown): string {
+  if (typeof message === 'string') {
+    return message;
+  }
+
+  return message instanceof Error ? message.message : '';
+}
+
 // ── Route Matching ─────────────────────────────────────────────────────────
 
 describe('handleOperationsReadRoute', () => {
@@ -361,8 +369,16 @@ describe('handleOperationsReadRoute', () => {
           },
         },
       );
-
-      handleOperationsReadRoute(ctx);
+      const warnings: string[] = [];
+      const originalWarn = console.warn;
+      console.warn = (message?: unknown) => {
+        warnings.push(captureWarningText(message));
+      };
+      try {
+        handleOperationsReadRoute(ctx);
+      } finally {
+        console.warn = originalWarn;
+      }
 
       const data = ctx.captured.data as Record<string, unknown>;
       const queue = data['queue'] as Array<Record<string, unknown>>;
@@ -372,6 +388,7 @@ describe('handleOperationsReadRoute', () => {
       assert.equal(data['health'], null);
       assert.equal(budget['scope'], 'global');
       assert.equal(budget['status'], 'normal');
+      assert.ok(warnings.some((warning) => warning.includes('readStatus probe failed')));
     });
 
     it('still returns queue data when checkUsage throws', () => {
@@ -387,8 +404,16 @@ describe('handleOperationsReadRoute', () => {
           },
         },
       );
-
-      handleOperationsReadRoute(ctx);
+      const warnings: string[] = [];
+      const originalWarn = console.warn;
+      console.warn = (message?: unknown) => {
+        warnings.push(captureWarningText(message));
+      };
+      try {
+        handleOperationsReadRoute(ctx);
+      } finally {
+        console.warn = originalWarn;
+      }
 
       const data = ctx.captured.data as Record<string, unknown>;
       const queue = data['queue'] as Array<Record<string, unknown>>;
@@ -398,6 +423,7 @@ describe('handleOperationsReadRoute', () => {
       assert.equal(data['budget'], null);
       assert.equal(health['scope'], 'global');
       assert.equal(health['status'], 'healthy');
+      assert.ok(warnings.some((warning) => warning.includes('checkUsage probe failed')));
     });
   });
 
