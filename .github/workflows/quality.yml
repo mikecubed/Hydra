@@ -169,7 +169,7 @@ jobs:
         run: npm run lint:cycles
 
   check-coverage:
-    name: Coverage Gate (64% / 62% funcs)
+    name: Coverage Gate (78% / 79% funcs)
     runs-on: ubuntu-latest
     continue-on-error: false
     permissions:
@@ -196,17 +196,16 @@ jobs:
         run: npm run test:coverage:check
         env:
           HUSKY: '0'
-        # Interim gate: 64% lines/statements/branches and 62% functions — blocking.
+        # Gate: 78% lines/statements/branches, 79% functions — blocking.
         # Ultimate target: 80% (see docs/quality-evaluation.md roadmap).
 
       - name: Check per-file coverage floors
         run: npm run test:coverage:per-file
 
   audit:
-    name: Dependency Audit (warn-only)
+    name: Dependency Audit
     runs-on: ubuntu-latest
-    # warn-only until vulnerability baseline is established; flip to false once clean
-    continue-on-error: true
+    continue-on-error: false
     permissions:
       contents: read
     steps:
