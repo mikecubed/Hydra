@@ -89,7 +89,7 @@ function computeResults(coverageData: Record<string, CoverageEntry>): GroupResul
       // - If it's already relative, use it as-is.
       // - Normalize path separators to '/' to match floor.prefix on all platforms.
       const relativePath = path.isAbsolute(filePath) ? path.relative(repoRoot, filePath) : filePath;
-      const normalizedPath = relativePath.split(path.sep).join('/');
+      const normalizedPath = relativePath.replace(/[\\/]/g, '/');
 
       if (!normalizedPath.startsWith(floor.prefix)) continue;
       if (normalizedPath.endsWith('.d.ts')) continue;

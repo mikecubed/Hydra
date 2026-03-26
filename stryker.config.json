@@ -12,7 +12,9 @@
     "lib/hydra-shared/**/*.ts",
     "lib/daemon/**/*.ts",
     "!lib/hydra-shared/**/*.test.ts",
-    "!lib/daemon/**/*.test.ts"
+    "!lib/hydra-shared/**/*.d.ts",
+    "!lib/daemon/**/*.test.ts",
+    "!lib/daemon/**/*.d.ts"
   ],
   "checkers": ["typescript"],
   "tsconfigFile": "tsconfig.json",

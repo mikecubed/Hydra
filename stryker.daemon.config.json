@@ -8,7 +8,7 @@
     "command": "node --test --experimental-test-module-mocks 'test/**/*.test.{ts,mjs}'"
   },
   "coverageAnalysis": "off",
-  "mutate": ["lib/daemon/**/*.ts", "!lib/daemon/**/*.test.ts"],
+  "mutate": ["lib/daemon/**/*.ts", "!lib/daemon/**/*.test.ts", "!lib/daemon/**/*.d.ts"],
   "checkers": ["typescript"],
   "tsconfigFile": "tsconfig.json",
   "thresholds": {
