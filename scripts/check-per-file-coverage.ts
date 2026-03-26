@@ -10,7 +10,7 @@
 // Expects coverage data to have been generated already (e.g. via `npm run test:coverage`).
 // Runs `c8 report --reporter=json` and then reads ./coverage/coverage-final.json.
 
-import { execSync } from 'node:child_process';
+import { execFileSync } from 'node:child_process';
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -47,7 +47,7 @@ const MODULE_FLOORS: ModuleFloor[] = [
 function loadCoverageData(): Record<string, CoverageEntry> | undefined {
   // Generate the JSON coverage report from existing c8 data
   try {
-    execSync('npx c8 report --reporter=json', {
+    execFileSync('npx', ['--no-install', 'c8', 'report', '--reporter=json', '--all'], {
       cwd: repoRoot,
       stdio: ['pipe', 'pipe', 'pipe'],
       encoding: 'utf8',

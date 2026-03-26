@@ -203,9 +203,11 @@ jobs:
         run: npm run test:coverage:per-file
 
   audit:
-    name: Dependency Audit
+    name: Dependency Audit (warn-only)
     runs-on: ubuntu-latest
-    continue-on-error: false
+    # Warn-only: new upstream advisories can land at any time and block unrelated PRs.
+    # Flip to false only after establishing an allowlist/baseline process.
+    continue-on-error: true
     permissions:
       contents: read
     steps:

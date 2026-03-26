@@ -326,10 +326,8 @@ describe('hydra-doctor', () => {
       await diagnose(makeFailure({ error: '429 rate limit' }));
       assert.ok(getDoctorLog().length >= 1);
       resetDoctor();
-      // After reset, getDoctorLog calls initDoctor which reloads from file
-      // but resetDoctor also cleans session entries from file
-      // getDoctorLog calls initDoctor which reloads from file
-      // but resetDoctor also cleans session entries from file
+      // After reset, getDoctorLog() calls initDoctor(), which may reload log entries
+      // from disk, but resetDoctor() also clears session entries from that file.
       getDoctorLog();
       // Log may or may not be empty depending on pre-existing file entries,
       // but session stats should be zero
