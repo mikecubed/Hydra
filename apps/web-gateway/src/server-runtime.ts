@@ -15,8 +15,20 @@ const GATEWAY_ROUTE_PREFIXES = [
   '/turns',
   '/artifacts',
   '/operations',
+  '/healthz',
   '/ws',
 ] as const;
+
+function buildStaticSecurityHeaders(tlsActive: boolean): Record<string, string> {
+  const connectSrc = tlsActive ? "'self' wss:" : "'self' ws: wss:";
+  return {
+    'content-security-policy': `default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; connect-src ${connectSrc}; frame-ancestors 'none'`,
+    'x-content-type-options': 'nosniff',
+    'x-frame-options': 'DENY',
+    'referrer-policy': 'strict-origin-when-cross-origin',
+    ...(tlsActive ? { 'strict-transport-security': 'max-age=31536000; includeSubDomains' } : {}),
+  };
+}
 
 export interface GatewayServerConfig {
   host: string;
@@ -31,6 +43,23 @@ export interface GatewayServerConfig {
   operatorId: string | null;
   operatorDisplayName: string | null;
   operatorSecret: string | null;
+}
+
+function readOptionalNonEmptyEnv(
+  env: NodeJS.ProcessEnv,
+  key: 'HYDRA_WEB_OPERATOR_ID' | 'HYDRA_WEB_OPERATOR_SECRET',
+): string | null {
+  const raw = env[key];
+  if (raw == null) {
+    return null;
+  }
+
+  const value = raw.trim();
+  if (value === '') {
+    throw new Error(`${key} must not be empty when set`);
+  }
+
+  return value;
 }
 
 function parsePort(rawPort: string | undefined): number {
@@ -66,9 +95,13 @@ export function resolveGatewayServerConfig(
   const stateDirEnv = env['HYDRA_WEB_STATE_DIR'];
   const stateDir =
     stateDirEnv != null && stateDirEnv !== '' ? resolve(stateDirEnv) : DEFAULT_STATE_DIR;
-  const operatorId = env['HYDRA_WEB_OPERATOR_ID'] ?? null;
-  const operatorDisplayName = env['HYDRA_WEB_OPERATOR_DISPLAY_NAME'] ?? operatorId;
-  const operatorSecret = env['HYDRA_WEB_OPERATOR_SECRET'] ?? null;
+  const operatorId = readOptionalNonEmptyEnv(env, 'HYDRA_WEB_OPERATOR_ID');
+  const operatorDisplayNameRaw = env['HYDRA_WEB_OPERATOR_DISPLAY_NAME']?.trim();
+  const operatorDisplayName =
+    operatorDisplayNameRaw != null && operatorDisplayNameRaw !== ''
+      ? operatorDisplayNameRaw
+      : operatorId;
+  const operatorSecret = readOptionalNonEmptyEnv(env, 'HYDRA_WEB_OPERATOR_SECRET');
 
   if ((operatorId == null) !== (operatorSecret == null)) {
     throw new Error(
@@ -142,7 +175,7 @@ function contentTypeFor(filePath: string): string {
   }
 }
 
-async function readStaticFile(filePath: string): Promise<Response | null> {
+async function readStaticFile(filePath: string, tlsActive: boolean): Promise<Response | null> {
   try {
     const body = await readFile(filePath);
     return new Response(body, {
@@ -152,6 +185,7 @@ async function readStaticFile(filePath: string): Promise<Response | null> {
         'cache-control': filePath.endsWith('/index.html')
           ? 'no-cache'
           : 'public, max-age=31536000, immutable',
+        ...buildStaticSecurityHeaders(tlsActive),
       },
     });
   } catch (err) {
@@ -171,7 +205,9 @@ async function readStaticFile(filePath: string): Promise<Response | null> {
 export async function createStaticAssetResponse(
   staticDir: string,
   pathname: string,
+  options: { tlsActive?: boolean } = {},
 ): Promise<Response | null> {
+  const tlsActive = options.tlsActive ?? false;
   if (isGatewayRoute(pathname)) {
     return null;
   }
@@ -181,7 +217,7 @@ export async function createStaticAssetResponse(
     return new Response('Not found', { status: 404 });
   }
 
-  const directAsset = await readStaticFile(requestedFilePath);
+  const directAsset = await readStaticFile(requestedFilePath, tlsActive);
   if (directAsset != null) {
     return directAsset;
   }
@@ -191,7 +227,7 @@ export async function createStaticAssetResponse(
   }
 
   const indexPath = resolve(staticDir, 'index.html');
-  const appShell = await readStaticFile(indexPath);
+  const appShell = await readStaticFile(indexPath, tlsActive);
   if (appShell != null) {
     return appShell;
   }

@@ -187,3 +187,77 @@ it('does not refetch detail when clicking the already-selected work item', async
   });
   expect(screen.getByText('Checkpoint ready')).toBeInTheDocument();
 });
+
+it('retries detail fetch when clicking the already-selected work item after a failure', async () => {
+  const item = makeHydrationItem();
+  const detail: GetWorkItemDetailResponse = {
+    item,
+    checkpoints: [
+      {
+        id: 'cp-1',
+        sequence: 0,
+        label: 'Checkpoint ready',
+        status: 'reached',
+        timestamp: '2026-07-01T00:00:05.000Z',
+        detail: null,
+      },
+    ],
+    routing: null,
+    assignments: [],
+    council: null,
+    controls: [],
+    itemBudget: null,
+    availability: 'partial',
+  };
+  let detailFetches = 0;
+
+  installFetchStub((url) => {
+    if (url === '/conversations?status=active&limit=20') {
+      return jsonResponse({ conversations: [], totalCount: 0 });
+    }
+
+    if (url === '/operations/snapshot') {
+      return jsonResponse({
+        queue: [item],
+        health: null,
+        budget: null,
+        availability: 'ready',
+        lastSynchronizedAt: '2026-07-01T00:00:00.000Z',
+        nextCursor: null,
+      });
+    }
+
+    if (url === '/operations/work-items/wi-42') {
+      detailFetches += 1;
+      if (detailFetches === 1) {
+        return new Response(
+          JSON.stringify({
+            ok: false,
+            code: 'DAEMON_UNREACHABLE',
+            category: 'daemon',
+            message: 'Daemon unreachable',
+          }),
+          {
+            status: 503,
+            headers: { 'content-type': 'application/json' },
+          },
+        );
+      }
+
+      return jsonResponse(detail);
+    }
+
+    throw new Error(`Unexpected fetch: ${url}`);
+  });
+
+  render(<AppProviders />);
+
+  const queueItem = await screen.findByText('Investigate queue hydration');
+  fireEvent.click(queueItem);
+  expect(await screen.findByText('Failed to load checkpoint data.')).toBeInTheDocument();
+  expect(detailFetches).toBe(1);
+
+  fireEvent.click(queueItem);
+  expect(await screen.findByText('Checkpoint ready')).toBeInTheDocument();
+  expect(detailFetches).toBe(2);
+});

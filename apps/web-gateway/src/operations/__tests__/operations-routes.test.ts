@@ -305,9 +305,7 @@ describe('Work-item detail routes (T018/T019 — US2)', () => {
 
     it('returns 400 for empty workItemId', async () => {
       const res = await app.request(buildRequest('GET', '/operations/work-items/'));
-      // Hono treats trailing-slash as a different route — expect 404 (no match)
-      // OR the validation should catch empty param
-      assert.ok(res.status === 400 || res.status === 404);
+      assert.equal(res.status, 404);
     });
 
     it('returns full detail payload including checkpoints and controls', async () => {

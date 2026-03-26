@@ -40,7 +40,7 @@ export class DaemonHeartbeat {
   private readonly config: DaemonHeartbeatConfig;
   private readonly checkHealth: HealthChecker;
   private timer: ReturnType<typeof setInterval> | null = null;
-  private daemonHealthy = true;
+  private daemonHealthy: boolean | null = null;
 
   constructor(
     sessionService: SessionService,
@@ -55,6 +55,11 @@ export class DaemonHeartbeat {
   }
 
   start(): void {
+    if (this.timer != null) {
+      return;
+    }
+
+    void this.tick();
     this.timer = setInterval(() => void this.tick(), this.config.intervalMs);
   }
 
@@ -66,19 +71,24 @@ export class DaemonHeartbeat {
   }
 
   isDaemonHealthy(): boolean {
-    return this.daemonHealthy;
+    return this.daemonHealthy === true;
   }
 
   async tick(): Promise<void> {
     const healthy = await this.checkHealth(this.config.daemonUrl);
+    const previousHealth = this.daemonHealthy;
+    this.daemonHealthy = healthy;
 
-    if (!healthy && this.daemonHealthy) {
-      // Daemon went down
-      this.daemonHealthy = false;
+    if (!healthy) {
+      if (previousHealth === false) {
+        return;
+      }
+
       await this.transitionAllActive('daemon-down');
-    } else if (healthy && !this.daemonHealthy) {
-      // Daemon recovered
-      this.daemonHealthy = true;
+      return;
+    }
+
+    if (previousHealth === false) {
       await this.transitionAllDaemonUnreachable('daemon-up');
     }
   }

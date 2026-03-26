@@ -62,6 +62,7 @@ function attachRequestHandler(
           const staticResponse = await createStaticAssetResponse(
             config.staticDir,
             requestUrl.pathname,
+            { tlsActive: requestUrl.protocol === 'https:' },
           );
           if (staticResponse != null) {
             await writeResponse(staticResponse, response, request.method);

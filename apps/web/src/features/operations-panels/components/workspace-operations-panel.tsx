@@ -65,16 +65,21 @@ function useOperationsPanelState() {
   }, [operationsClient]);
 
   const selectedWorkItemId = state.selection.selectedWorkItemId;
+  const selectedDetail = state.selection.detail;
+  const detailFetchStatus = state.selection.detailFetchStatus;
   const handleSelectItem = useCallback(
     (workItemId: string) => {
       if (workItemId === selectedWorkItemId) {
+        if (selectedDetail === null && detailFetchStatus !== 'loading') {
+          syncControllerRef.current?.syncDetail(workItemId);
+        }
         return;
       }
 
       dispatch({ type: 'selection/select', workItemId });
       syncControllerRef.current?.syncDetail(workItemId);
     },
-    [selectedWorkItemId],
+    [detailFetchStatus, selectedDetail, selectedWorkItemId],
   );
 
   return { state, dispatch, handleSelectItem };

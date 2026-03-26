@@ -48,11 +48,32 @@ describe('resolveGatewayServerConfig', () => {
       /must either both be set or both be unset/,
     );
   });
+
+  it('rejects blank seeded operator credentials', () => {
+    assert.throws(
+      () =>
+        resolveGatewayServerConfig({
+          HYDRA_WEB_OPERATOR_ID: '   ',
+          HYDRA_WEB_OPERATOR_SECRET: 'password123',
+        }),
+      /HYDRA_WEB_OPERATOR_ID must not be empty when set/,
+    );
+
+    assert.throws(
+      () =>
+        resolveGatewayServerConfig({
+          HYDRA_WEB_OPERATOR_ID: 'admin',
+          HYDRA_WEB_OPERATOR_SECRET: '   ',
+        }),
+      /HYDRA_WEB_OPERATOR_SECRET must not be empty when set/,
+    );
+  });
 });
 
 describe('isGatewayRoute', () => {
   it('detects API and websocket paths', () => {
     assert.equal(isGatewayRoute('/auth/login'), true);
+    assert.equal(isGatewayRoute('/healthz'), true);
     assert.equal(isGatewayRoute('/conversations/abc'), true);
     assert.equal(isGatewayRoute('/ws'), true);
     assert.equal(isGatewayRoute('/workspace'), false);
@@ -84,6 +105,10 @@ describe('createStaticAssetResponse', () => {
     assert.ok(routeResponse);
     assert.equal(routeResponse.status, 200);
     assert.match(await routeResponse.text(), /id="app"/);
+    assert.match(routeResponse.headers.get('content-security-policy') ?? '', /default-src 'self'/);
+    assert.equal(routeResponse.headers.get('x-content-type-options'), 'nosniff');
+    assert.equal(routeResponse.headers.get('x-frame-options'), 'DENY');
+    assert.equal(routeResponse.headers.get('referrer-policy'), 'strict-origin-when-cross-origin');
   });
 
   it('returns null for gateway-owned routes', async () => {
@@ -91,6 +116,14 @@ describe('createStaticAssetResponse', () => {
     await writeFile(join(tempDir, 'index.html'), '<!doctype html>');
 
     const response = await createStaticAssetResponse(tempDir, '/auth/login');
+    assert.equal(response, null);
+  });
+
+  it('reserves /healthz for the gateway instead of the SPA fallback', async () => {
+    tempDir = await mkdtemp(join(tmpdir(), 'hydra-web-static-'));
+    await writeFile(join(tempDir, 'index.html'), '<!doctype html>');
+
+    const response = await createStaticAssetResponse(tempDir, '/healthz');
     assert.equal(response, null);
   });
 
