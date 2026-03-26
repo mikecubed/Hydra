@@ -14,11 +14,7 @@ import type { GatewayEnv } from '../shared/types.ts';
 import { GetOperationsSnapshotRequest } from '@hydra/web-contracts';
 import type { DaemonOperationsClient, DaemonOperationsResult } from './daemon-operations-client.ts';
 import type { ErrorCategory, GatewayErrorResponse } from '../shared/gateway-error-response.ts';
-import {
-  parseOperationsQuery,
-  validateOperationsQuery,
-  validateWorkItemId,
-} from './request-validator.ts';
+import { parseOperationsQuery, validateWorkItemId } from './request-validator.ts';
 
 export interface OperationsRoutesDeps {
   readonly daemonClient: DaemonOperationsClient;
@@ -53,19 +49,15 @@ export function createOperationsRoutes(deps: OperationsRoutesDeps): Hono<Gateway
   const dc = deps.daemonClient;
 
   // US1 — queue visibility snapshot
-  app.get(
-    '/operations/snapshot',
-    validateOperationsQuery(GetOperationsSnapshotRequest),
-    async (c) => {
-      const queryResult = parseOperationsQuery(GetOperationsSnapshotRequest, c.req.url);
-      if ('error' in queryResult) {
-        return sendDaemonError(c, queryResult.error);
-      }
+  app.get('/operations/snapshot', async (c) => {
+    const queryResult = parseOperationsQuery(GetOperationsSnapshotRequest, c.req.url);
+    if ('error' in queryResult) {
+      return sendDaemonError(c, queryResult.error);
+    }
 
-      const query = queryResult.data;
-      return handleResult(c, await dc.getOperationsSnapshot(query));
-    },
-  );
+    const query = queryResult.data;
+    return handleResult(c, await dc.getOperationsSnapshot(query));
+  });
 
   // US2 — selected work-item detail
   app.get('/operations/work-items/:workItemId', async (c) => {
