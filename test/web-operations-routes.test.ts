@@ -96,20 +96,22 @@ function makeReadCtx(
     sendError,
     writeStatus: () => {},
     readStatus: ctxOverrides.readStatus ?? (() => ({ running: true })),
-    checkUsage: ctxOverrides.checkUsage ?? (() => ({
-      level: 'normal',
-      percent: 10,
-      todayTokens: 100,
-      message: 'ok',
-      confidence: 1,
-      model: 'test',
-      budget: 1000,
-      used: 100,
-      remaining: 900,
-      resetAt: '',
-      resetInMs: 0,
-      agents: {},
-    })),
+    checkUsage:
+      ctxOverrides.checkUsage ??
+      (() => ({
+        level: 'normal',
+        percent: 10,
+        todayTokens: 100,
+        message: 'ok',
+        confidence: 1,
+        model: 'test',
+        budget: 1000,
+        used: 100,
+        remaining: 900,
+        resetAt: '',
+        resetInMs: 0,
+        agents: {},
+      })),
     getModelSummary: () => ({
       claude: { active: 'claude-opus-4-6', isDefault: true },
     }),
@@ -241,22 +243,28 @@ describe('handleOperationsReadRoute', () => {
 
     it('snapshot budget reflects warning usage level', () => {
       const state = makeState({ tasks: [makeTask()] });
-      const ctx = makeReadCtx('GET', '/operations/snapshot', state, {}, {
-        checkUsage: () => ({
-          level: 'warning',
-          percent: 85,
-          todayTokens: 850,
-          message: 'approaching limit',
-          confidence: 1,
-          model: 'test',
-          budget: 1000,
-          used: 850,
-          remaining: 150,
-          resetAt: '',
-          resetInMs: 0,
-          agents: {},
-        }),
-      });
+      const ctx = makeReadCtx(
+        'GET',
+        '/operations/snapshot',
+        state,
+        {},
+        {
+          checkUsage: () => ({
+            level: 'warning',
+            percent: 85,
+            todayTokens: 850,
+            message: 'approaching limit',
+            confidence: 1,
+            model: 'test',
+            budget: 1000,
+            used: 850,
+            remaining: 150,
+            resetAt: '',
+            resetInMs: 0,
+            agents: {},
+          }),
+        },
+      );
       handleOperationsReadRoute(ctx);
       const data = ctx.captured.data as Record<string, unknown>;
       const budget = data['budget'] as Record<string, unknown>;
@@ -265,9 +273,15 @@ describe('handleOperationsReadRoute', () => {
 
     it('snapshot health reflects unavailable daemon', () => {
       const state = makeState({ tasks: [makeTask()] });
-      const ctx = makeReadCtx('GET', '/operations/snapshot', state, {}, {
-        readStatus: () => ({ running: false }),
-      });
+      const ctx = makeReadCtx(
+        'GET',
+        '/operations/snapshot',
+        state,
+        {},
+        {
+          readStatus: () => ({ running: false }),
+        },
+      );
       handleOperationsReadRoute(ctx);
       const data = ctx.captured.data as Record<string, unknown>;
       const health = data['health'] as Record<string, unknown>;
@@ -276,22 +290,28 @@ describe('handleOperationsReadRoute', () => {
 
     it('snapshot budget keeps critical-threshold usage as warning while budget remains', () => {
       const state = makeState({ tasks: [makeTask()] });
-      const ctx = makeReadCtx('GET', '/operations/snapshot', state, {}, {
-        checkUsage: () => ({
-          level: 'critical',
-          percent: 95,
-          todayTokens: 9500,
-          message: 'over budget',
-          confidence: 1,
-          model: 'test',
-          budget: 10000,
-          used: 9500,
-          remaining: 500,
-          resetAt: '',
-          resetInMs: 0,
-          agents: {},
-        }),
-      });
+      const ctx = makeReadCtx(
+        'GET',
+        '/operations/snapshot',
+        state,
+        {},
+        {
+          checkUsage: () => ({
+            level: 'critical',
+            percent: 95,
+            todayTokens: 9500,
+            message: 'over budget',
+            confidence: 1,
+            model: 'test',
+            budget: 10000,
+            used: 9500,
+            remaining: 500,
+            resetAt: '',
+            resetInMs: 0,
+            agents: {},
+          }),
+        },
+      );
       handleOperationsReadRoute(ctx);
       const data = ctx.captured.data as Record<string, unknown>;
       const budget = data['budget'] as Record<string, unknown>;
@@ -300,22 +320,28 @@ describe('handleOperationsReadRoute', () => {
 
     it('snapshot budget reflects exceeded status when budget is fully consumed', () => {
       const state = makeState({ tasks: [makeTask()] });
-      const ctx = makeReadCtx('GET', '/operations/snapshot', state, {}, {
-        checkUsage: () => ({
-          level: 'critical',
-          percent: 100,
-          todayTokens: 10_000,
-          message: 'budget exhausted',
-          confidence: 1,
-          model: 'test',
-          budget: 10_000,
-          used: 10_000,
-          remaining: 0,
-          resetAt: '',
-          resetInMs: 0,
-          agents: {},
-        }),
-      });
+      const ctx = makeReadCtx(
+        'GET',
+        '/operations/snapshot',
+        state,
+        {},
+        {
+          checkUsage: () => ({
+            level: 'critical',
+            percent: 100,
+            todayTokens: 10_000,
+            message: 'budget exhausted',
+            confidence: 1,
+            model: 'test',
+            budget: 10_000,
+            used: 10_000,
+            remaining: 0,
+            resetAt: '',
+            resetInMs: 0,
+            agents: {},
+          }),
+        },
+      );
       handleOperationsReadRoute(ctx);
       const data = ctx.captured.data as Record<string, unknown>;
       const budget = data['budget'] as Record<string, unknown>;
@@ -324,11 +350,17 @@ describe('handleOperationsReadRoute', () => {
 
     it('still returns queue data when readStatus throws', () => {
       const state = makeState({ tasks: [makeTask({ id: 'task-1' })] });
-      const ctx = makeReadCtx('GET', '/operations/snapshot', state, {}, {
-        readStatus: () => {
-          throw new Error('status failed');
+      const ctx = makeReadCtx(
+        'GET',
+        '/operations/snapshot',
+        state,
+        {},
+        {
+          readStatus: () => {
+            throw new Error('status failed');
+          },
         },
-      });
+      );
 
       handleOperationsReadRoute(ctx);
 
@@ -342,11 +374,17 @@ describe('handleOperationsReadRoute', () => {
 
     it('still returns queue data when checkUsage throws', () => {
       const state = makeState({ tasks: [makeTask({ id: 'task-1' })] });
-      const ctx = makeReadCtx('GET', '/operations/snapshot', state, {}, {
-        checkUsage: () => {
-          throw new Error('usage failed');
+      const ctx = makeReadCtx(
+        'GET',
+        '/operations/snapshot',
+        state,
+        {},
+        {
+          checkUsage: () => {
+            throw new Error('usage failed');
+          },
         },
-      });
+      );
 
       handleOperationsReadRoute(ctx);
 

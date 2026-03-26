@@ -107,9 +107,7 @@ function buildRiskSignals(task: TaskEntry, normalized: WorkItemStatus): readonly
 
 // ── Health Projection ──────────────────────────────────────────────────────
 
-export function projectDaemonHealth(
-  statusData: Record<string, unknown> | null,
-): DaemonHealthView {
+export function projectDaemonHealth(statusData: Record<string, unknown> | null): DaemonHealthView {
   const observedAt = new Date().toISOString();
 
   if (statusData === null) {

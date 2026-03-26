@@ -75,7 +75,9 @@ function tryReadStatus(readStatus: ReadRouteCtx['readStatus']): Record<string, u
   }
 }
 
-function tryCheckUsage(checkUsage: ReadRouteCtx['checkUsage']): ReturnType<ReadRouteCtx['checkUsage']> | null {
+function tryCheckUsage(
+  checkUsage: ReadRouteCtx['checkUsage'],
+): ReturnType<ReadRouteCtx['checkUsage']> | null {
   try {
     return checkUsage();
   } catch {

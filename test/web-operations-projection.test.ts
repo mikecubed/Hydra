@@ -1040,7 +1040,9 @@ describe('projectGlobalBudget', () => {
   });
 
   it('maps critical level to warning severity when budget remains', () => {
-    const budget = projectGlobalBudget(makeUsage({ level: 'critical', percent: 95, used: 9500, budget: 10000 }));
+    const budget = projectGlobalBudget(
+      makeUsage({ level: 'critical', percent: 95, used: 9500, budget: 10000 }),
+    );
     assert.equal(budget.status, 'warning');
   });
 
@@ -1154,10 +1156,14 @@ describe('projectItemBudget', () => {
 describe('projectQueueSnapshot with health/budget context', () => {
   it('populates health when context provided', () => {
     const state = makeState({ tasks: [makeTask()] });
-    const result = projectQueueSnapshot(state, {}, {
-      statusData: { running: true },
-      usage: makeUsage(),
-    });
+    const result = projectQueueSnapshot(
+      state,
+      {},
+      {
+        statusData: { running: true },
+        usage: makeUsage(),
+      },
+    );
     assert.notEqual(result.health, null);
     assert.equal(result.health!.status, 'healthy');
     assert.equal(result.health!.scope, 'global');
@@ -1165,10 +1171,14 @@ describe('projectQueueSnapshot with health/budget context', () => {
 
   it('populates budget when context provided', () => {
     const state = makeState({ tasks: [makeTask()] });
-    const result = projectQueueSnapshot(state, {}, {
-      statusData: { running: true },
-      usage: makeUsage({ level: 'warning', percent: 85 }),
-    });
+    const result = projectQueueSnapshot(
+      state,
+      {},
+      {
+        statusData: { running: true },
+        usage: makeUsage({ level: 'warning', percent: 85 }),
+      },
+    );
     assert.notEqual(result.budget, null);
     assert.equal(result.budget!.status, 'warning');
     assert.equal(result.budget!.scope, 'global');
@@ -1176,20 +1186,28 @@ describe('projectQueueSnapshot with health/budget context', () => {
 
   it('keeps critical-threshold snapshot budget at warning while budget remains', () => {
     const state = makeState({ tasks: [makeTask()] });
-    const result = projectQueueSnapshot(state, {}, {
-      statusData: { running: true },
-      usage: makeUsage({ level: 'critical', percent: 95, used: 9500, budget: 10_000 }),
-    });
+    const result = projectQueueSnapshot(
+      state,
+      {},
+      {
+        statusData: { running: true },
+        usage: makeUsage({ level: 'critical', percent: 95, used: 9500, budget: 10_000 }),
+      },
+    );
     assert.notEqual(result.budget, null);
     assert.equal(result.budget!.status, 'warning');
   });
 
   it('reflects unavailable health in snapshot', () => {
     const state = makeState({ tasks: [makeTask()] });
-    const result = projectQueueSnapshot(state, {}, {
-      statusData: { running: false },
-      usage: makeUsage(),
-    });
+    const result = projectQueueSnapshot(
+      state,
+      {},
+      {
+        statusData: { running: false },
+        usage: makeUsage(),
+      },
+    );
     assert.notEqual(result.health, null);
     assert.equal(result.health!.status, 'unavailable');
   });
@@ -1203,10 +1221,14 @@ describe('projectQueueSnapshot with health/budget context', () => {
 
   it('separates global budget from per-item scope', () => {
     const state = makeState({ tasks: [makeTask({ id: 'task-1' })] });
-    const snapshot = projectQueueSnapshot(state, {}, {
-      statusData: { running: true },
-      usage: makeUsage({ level: 'warning', percent: 80 }),
-    });
+    const snapshot = projectQueueSnapshot(
+      state,
+      {},
+      {
+        statusData: { running: true },
+        usage: makeUsage({ level: 'warning', percent: 80 }),
+      },
+    );
     assert.notEqual(snapshot.budget, null);
     assert.equal(snapshot.budget!.scope, 'global');
     assert.equal(snapshot.budget!.scopeId, null);

@@ -177,10 +177,21 @@ function BudgetSection({ budget }: { readonly budget: BudgetStatusView }): JSX.E
     background: palette.bg,
   };
 
-  const hasUsageBreakdown = budget.used != null && budget.limit != null;
-  const formattedUsed = hasUsageBreakdown ? formatNumber(budget.used) : null;
-  const formattedLimit = hasUsageBreakdown ? formatNumber(budget.limit) : null;
   const unitSuffix = budget.unit === null ? '' : ` ${budget.unit}`;
+  let usageBreakdown: JSX.Element | null = null;
+  const used = budget.used;
+  const limit = budget.limit;
+
+  if (used !== null && limit !== null) {
+    const formattedUsed = formatNumber(used);
+    const formattedLimit = formatNumber(limit);
+    usageBreakdown = (
+      <span data-testid="budget-usage" style={metaStyle}>
+        {formattedUsed} / {formattedLimit}
+        {unitSuffix}
+      </span>
+    );
+  }
 
   return (
     <div style={resolvedSectionStyle}>
@@ -201,12 +212,7 @@ function BudgetSection({ budget }: { readonly budget: BudgetStatusView }): JSX.E
       <span data-testid="budget-summary" style={metaStyle}>
         {budget.summary}
       </span>
-      {hasUsageBreakdown && (
-        <span data-testid="budget-usage" style={metaStyle}>
-          {formattedUsed} / {formattedLimit}
-          {unitSuffix}
-        </span>
-      )}
+      {usageBreakdown}
       {budget.complete ? null : (
         <span data-testid="budget-incomplete" style={hintStyle}>
           Budget data incomplete

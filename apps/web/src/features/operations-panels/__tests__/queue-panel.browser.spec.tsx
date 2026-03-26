@@ -188,7 +188,7 @@ describe('QueueItemCard metadata', () => {
         onSelect={vi.fn()}
       />,
     );
-    expect(screen.getByText('Budget 80% used')).toBeInTheDocument();
+    expect(screen.getByText(/Global\s*:\s*Budget 80% used/)).toBeInTheDocument();
   });
 
   it('shows pending control indicator', () => {

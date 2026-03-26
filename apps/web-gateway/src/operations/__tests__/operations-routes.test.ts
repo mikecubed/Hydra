@@ -255,6 +255,48 @@ describe('Operations snapshot routes (T009/T010 — US1)', () => {
       assert.equal(res.status, 200);
       assert.equal(mockClient.getOperationsSnapshot.mock.callCount(), 1);
     });
+
+    it('preserves global health and budget fields from daemon snapshot data', async () => {
+      mockClient.getOperationsSnapshot.mock.mockImplementation(() =>
+        Promise.resolve({
+          data: {
+            queue: [makeQueueItem()],
+            availability: 'ready',
+            health: {
+              status: 'degraded',
+              scope: 'global',
+              observedAt: NOW,
+              message: 'Background probes are delayed',
+              detailsAvailability: 'partial',
+            },
+            budget: {
+              status: 'warning',
+              scope: 'global',
+              scopeId: null,
+              summary: 'Budget usage at 85%',
+              used: 8500,
+              limit: 10_000,
+              unit: 'tokens',
+              complete: true,
+            },
+            lastSynchronizedAt: NOW,
+            nextCursor: null,
+          },
+        }),
+      );
+
+      const res = await app.request(buildRequest('GET', '/operations/snapshot'));
+      assert.equal(res.status, 200);
+      const body = (await res.json()) as {
+        health: { scope: string; status: string };
+        budget: { scope: string; scopeId: string | null; status: string };
+      };
+      assert.equal(body.health.scope, 'global');
+      assert.equal(body.health.status, 'degraded');
+      assert.equal(body.budget.scope, 'global');
+      assert.equal(body.budget.scopeId, null);
+      assert.equal(body.budget.status, 'warning');
+    });
   });
 });
 
@@ -333,6 +375,41 @@ describe('Work-item detail routes (T018/T019 — US2)', () => {
       assert.equal(res.status, 200);
       const callArgs = mockClient.getWorkItemDetail.mock.calls[0].arguments;
       assert.equal(callArgs[0], 'task/123');
+    });
+
+    it('returns item-scoped budget detail without promoting it to global scope', async () => {
+      mockClient.getWorkItemDetail.mock.mockImplementation(() =>
+        Promise.resolve({
+          data: {
+            item: makeQueueItem({ id: 'wi-42' }),
+            checkpoints: [],
+            routing: null,
+            assignments: [],
+            council: null,
+            controls: [],
+            itemBudget: {
+              status: 'unavailable',
+              scope: 'work-item',
+              scopeId: 'wi-42',
+              summary: 'Per-item budget attribution is not yet available',
+              used: null,
+              limit: null,
+              unit: null,
+              complete: false,
+            },
+            availability: 'partial',
+          },
+        }),
+      );
+
+      const res = await app.request(buildRequest('GET', '/operations/work-items/wi-42'));
+      assert.equal(res.status, 200);
+      const body = (await res.json()) as {
+        itemBudget: { scope: string; scopeId: string | null; status: string };
+      };
+      assert.equal(body.itemBudget.scope, 'work-item');
+      assert.equal(body.itemBudget.scopeId, 'wi-42');
+      assert.equal(body.itemBudget.status, 'unavailable');
     });
 
     it('returns daemon 404 error as validation category', async () => {
