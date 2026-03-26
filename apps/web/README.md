@@ -41,13 +41,13 @@ product walkthrough.
   - authoritative queue visibility in the sidebar
   - work-item ordering and status labels
   - queue selection state
-  - read-only checkpoint detail/progress panel for the selected work item
+  - read-only checkpoint detail panel for the selected work item
   - empty/loading/live sidebar states
 
 ### What is not there yet
 
 - no dedicated browser login screen
-- no browser-side operational controls beyond the current read-only checkpoint detail/progress view
+- no browser-side operational controls beyond the current read-only checkpoint detail view
 - no complete end-user walkthrough in the product itself
 
 ### How to run it
@@ -111,7 +111,7 @@ Notes:
    - Click **Send**, or press `Ctrl+Enter` / `Cmd+Enter`.
 6. If a transcript entry exposes artifacts, open them in the **Artifact Inspector** side panel.
 7. Use the **Operations** sidebar to monitor the current work queue and select a work item to
-   inspect its checkpoint detail and progress.
+   inspect its checkpoint detail.
    - The panels are read-only in the current phase.
    - They reflect loading, empty, and live states based on the latest snapshot.
 

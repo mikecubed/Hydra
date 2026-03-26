@@ -2,7 +2,7 @@
 
 > **Status:** The web chat workspace slice is delivered, and operations panels through Phase 2 are
 > implemented. The browser workspace, gateway transport layer, shared contracts, read-only queue
-> sidebar, and checkpoint detail/progress panel are implemented and tested. Later operations control
+> sidebar, and checkpoint detail panel are implemented and tested. Later operations control
 > phases (routing, mode, agent, budget, council views) and additional hardening remain planned.
 
 ## High-Level Shape
@@ -44,12 +44,12 @@ flowchart TB
 
 ## Responsibility Split
 
-| Component                | Delivered responsibilities                                                                                                                                                                                                                                 |
-| ------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `apps/web`               | Chat workspace (conversation list, transcript, composer, artifact panel), approval prompts, turn actions (cancel/retry/branch/follow-up), connection-state banners, reconnect UX, read-only operations queue sidebar, and checkpoint detail/progress panel |
-| `apps/web-gateway`       | Auth (login/logout/reauth), browser sessions with idle + expiry management, WebSocket session transport with replay, REST conversation routes, CSRF/origin/rate-limit enforcement, daemon proxying, audit trail                                            |
-| `packages/web-contracts` | Zod schemas for conversation/turn payloads, nested stream events, approvals, artifacts, activities, attribution, sessions, auth, audit events, and browser-facing REST request/response contracts                                                          |
-| Hydra daemon             | Source of truth for orchestration state, task lifecycle, sessions, durable events, config/workflow mutations                                                                                                                                               |
+| Component                | Delivered responsibilities                                                                                                                                                                                                                        |
+| ------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `apps/web`               | Chat workspace (conversation list, transcript, composer, artifact panel), approval prompts, turn actions (cancel/retry/branch/follow-up), connection-state banners, reconnect UX, read-only operations queue sidebar, and checkpoint detail panel |
+| `apps/web-gateway`       | Auth (login/logout/reauth), browser sessions with idle + expiry management, WebSocket session transport with replay, REST conversation routes, CSRF/origin/rate-limit enforcement, daemon proxying, audit trail                                   |
+| `packages/web-contracts` | Zod schemas for conversation/turn payloads, nested stream events, approvals, artifacts, activities, attribution, sessions, auth, audit events, and browser-facing REST request/response contracts                                                 |
+| Hydra daemon             | Source of truth for orchestration state, task lifecycle, sessions, durable events, config/workflow mutations                                                                                                                                      |
 
 ### Planned (not yet delivered)
 
@@ -103,7 +103,7 @@ AppProviders (QueryClient + Router)
         ├── ArtifactPanel          (closeable aside for artifact content inspection)
         └── WorkspaceOperationsPanel
             ├── QueuePanel         (read-only operations queue sidebar)
-            └── CheckpointPanel    (work-item detail with checkpoint/progress view)
+            └── CheckpointPanel    (work-item detail with checkpoint timeline view)
 ```
 
 ### State Management
