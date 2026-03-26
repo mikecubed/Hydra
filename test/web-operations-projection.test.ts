@@ -15,6 +15,7 @@ import {
   projectCheckpoints,
   projectWorkItemDetail,
 } from '../lib/daemon/web-operations-projection.ts';
+import { CheckpointRecordView as CheckpointRecordViewSchema } from '@hydra/web-contracts';
 
 // ── Helpers ────────────────────────────────────────────────────────────────
 
@@ -549,6 +550,124 @@ describe('projectCheckpoints', () => {
     const result = projectCheckpoints(task);
     assert.equal(result[0].timestamp, '1970-01-01T00:00:00.000Z');
   });
+
+  // ── Empty-string normalization (regression: contract-violating empty strings) ──
+
+  it('normalizes empty-string name to fallback label when note is also empty', () => {
+    const task = makeTask({
+      id: 'task-1',
+      checkpoints: [
+        {
+          note: '',
+          at: '',
+          name: '',
+          savedAt: '2025-07-01T09:30:00.000Z',
+          context: '',
+          agent: 'codex',
+        },
+      ] as unknown as Array<{ note: string; at: string }>,
+    });
+    const result = projectCheckpoints(task);
+    assert.equal(result[0].label, '(checkpoint)');
+  });
+
+  it('normalizes empty-string savedAt to epoch when at is also empty', () => {
+    const task = makeTask({
+      id: 'task-1',
+      checkpoints: [
+        {
+          note: '',
+          at: '',
+          name: 'Checkpoint A',
+          savedAt: '',
+          context: '',
+        },
+      ] as unknown as Array<{ note: string; at: string }>,
+    });
+    const result = projectCheckpoints(task);
+    assert.equal(result[0].timestamp, '1970-01-01T00:00:00.000Z');
+  });
+
+  it('normalizes empty-string detail to null instead of empty string', () => {
+    const task = makeTask({
+      id: 'task-1',
+      checkpoints: [{ note: 'Has empty detail', at: '2025-01-01T00:00:00.000Z', detail: '' }],
+    });
+    const result = projectCheckpoints(task);
+    assert.equal(result[0].detail, null);
+  });
+
+  it('normalizes all-empty daemon-shaped checkpoint to valid contract values', () => {
+    const task = makeTask({
+      id: 'task-1',
+      checkpoints: [
+        { note: '', at: '', name: '', savedAt: '', context: '', agent: 'claude' },
+      ] as unknown as Array<{ note: string; at: string }>,
+    });
+    const result = projectCheckpoints(task);
+    assert.equal(result[0].label, '(checkpoint)');
+    assert.equal(result[0].timestamp, '1970-01-01T00:00:00.000Z');
+    assert.equal(result[0].detail, null);
+    assert.equal(result[0].status, 'reached');
+    assert.equal(result[0].id, 'task-1-cp-0');
+    assert.equal(result[0].sequence, 0);
+  });
+
+  it('normalizes mixed legacy+daemon checkpoint with all-empty strings', () => {
+    const task = makeTask({
+      id: 'task-1',
+      checkpoints: [
+        { note: '', at: '', name: '', savedAt: '', detail: '', context: '' },
+      ] as unknown as Array<{ note: string; at: string }>,
+    });
+    const result = projectCheckpoints(task);
+    assert.equal(result[0].label, '(checkpoint)');
+    assert.equal(result[0].timestamp, '1970-01-01T00:00:00.000Z');
+    assert.equal(result[0].detail, null);
+  });
+
+  it('prefers non-empty name when note is empty', () => {
+    const task = makeTask({
+      id: 'task-1',
+      checkpoints: [
+        { note: '', at: '2025-06-01T00:00:00.000Z', name: 'Valid name' },
+      ] as unknown as Array<{ note: string; at: string }>,
+    });
+    const result = projectCheckpoints(task);
+    assert.equal(result[0].label, 'Valid name');
+  });
+
+  it('prefers non-empty detail over empty context', () => {
+    const task = makeTask({
+      id: 'task-1',
+      checkpoints: [
+        {
+          note: 'Test',
+          at: '2025-01-01T00:00:00.000Z',
+          detail: 'Real detail',
+          context: '',
+        },
+      ] as unknown as Array<{ note: string; at: string }>,
+    });
+    const result = projectCheckpoints(task);
+    assert.equal(result[0].detail, 'Real detail');
+  });
+
+  it('falls back to non-empty context when detail is empty string', () => {
+    const task = makeTask({
+      id: 'task-1',
+      checkpoints: [
+        {
+          note: 'Test',
+          at: '2025-01-01T00:00:00.000Z',
+          detail: '',
+          context: 'Context value',
+        },
+      ] as unknown as Array<{ note: string; at: string }>,
+    });
+    const result = projectCheckpoints(task);
+    assert.equal(result[0].detail, 'Context value');
+  });
 });
 
 // ── Work Item Detail Projection ────────────────────────────────────────────
@@ -717,5 +836,50 @@ describe('projectWorkItemDetail', () => {
     const result = projectWorkItemDetail(state, 'task-1');
     assert.ok(result !== null);
     assert.equal(result.item.detailAvailability, 'partial');
+  });
+});
+
+// ── Contract Validation (empty-string regression) ──────────────────────────
+
+describe('checkpoint contract validation', () => {
+  it('all-empty daemon-shaped checkpoint passes CheckpointRecordView schema', () => {
+    const task = makeTask({
+      id: 'task-1',
+      checkpoints: [
+        { note: '', at: '', name: '', savedAt: '', context: '', agent: 'codex' },
+      ] as unknown as Array<{ note: string; at: string }>,
+    });
+    const result = projectCheckpoints(task);
+    const parsed = CheckpointRecordViewSchema.safeParse(result[0]);
+    assert.ok(parsed.success, `Schema validation failed: ${JSON.stringify(parsed.error?.issues)}`);
+  });
+
+  it('empty-detail legacy checkpoint passes CheckpointRecordView schema', () => {
+    const task = makeTask({
+      id: 'task-1',
+      checkpoints: [{ note: 'Test', at: '2025-01-01T00:00:00.000Z', detail: '' }],
+    });
+    const result = projectCheckpoints(task);
+    const parsed = CheckpointRecordViewSchema.safeParse(result[0]);
+    assert.ok(parsed.success, `Schema validation failed: ${JSON.stringify(parsed.error?.issues)}`);
+  });
+
+  it('well-formed daemon checkpoint passes CheckpointRecordView schema', () => {
+    const task = makeTask({
+      id: 'task-1',
+      checkpoints: [
+        {
+          note: '',
+          at: '',
+          name: 'Review complete',
+          savedAt: '2025-07-01T12:00:00.000Z',
+          context: 'Approved with minor notes',
+          agent: 'claude',
+        },
+      ] as unknown as Array<{ note: string; at: string }>,
+    });
+    const result = projectCheckpoints(task);
+    const parsed = CheckpointRecordViewSchema.safeParse(result[0]);
+    assert.ok(parsed.success, `Schema validation failed: ${JSON.stringify(parsed.error?.issues)}`);
   });
 });

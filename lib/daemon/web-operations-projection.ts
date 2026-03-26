@@ -256,25 +256,31 @@ function resolveCheckpointStatus(raw: unknown): CheckpointStatus {
  * The daemon persists checkpoints with `{ name, savedAt, context, agent }` but
  * some legacy/test paths use `{ note, at, detail }`. We accept both shapes.
  */
+/** Deterministic fallback when neither legacy `note` nor daemon `name` carry a value. */
+const UNNAMED_CHECKPOINT_LABEL = '(checkpoint)';
+
 function resolveCheckpointLabel(entry: Record<string, unknown>): string {
   const note = entry['note'];
   if (typeof note === 'string' && note !== '') return note;
   const name = entry['name'];
-  return typeof name === 'string' ? name : '';
+  if (typeof name === 'string' && name !== '') return name;
+  return UNNAMED_CHECKPOINT_LABEL;
 }
 
 function resolveCheckpointTimestamp(entry: Record<string, unknown>): string {
   const at = entry['at'];
   if (typeof at === 'string' && at !== '') return at;
   const savedAt = entry['savedAt'];
-  return typeof savedAt === 'string' ? savedAt : EPOCH_FALLBACK;
+  if (typeof savedAt === 'string' && savedAt !== '') return savedAt;
+  return EPOCH_FALLBACK;
 }
 
 function resolveCheckpointDetail(entry: Record<string, unknown>): string | null {
   const detail = entry['detail'];
-  if (typeof detail === 'string') return detail;
+  if (typeof detail === 'string' && detail !== '') return detail;
   const context = entry['context'];
-  return typeof context === 'string' && context !== '' ? context : null;
+  if (typeof context === 'string' && context !== '') return context;
+  return null;
 }
 
 export function projectCheckpoints(task: TaskEntry): readonly CheckpointRecordView[] {
