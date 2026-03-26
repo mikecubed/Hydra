@@ -116,9 +116,7 @@ export function OperationsPanelShell({
         {hasDetail && (
           <div data-testid="detail-panel-slot" style={detailStackStyle}>
             {detailPanel}
-            {hasControlStrip && (
-              <div data-testid="control-strip-slot">{controlStripSlot}</div>
-            )}
+            {hasControlStrip && <div data-testid="control-strip-slot">{controlStripSlot}</div>}
           </div>
         )}
       </div>

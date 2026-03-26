@@ -107,18 +107,23 @@ function createMockClient(
   } as unknown as OperationsClient;
 }
 
-function createSnapshotMockClient(
-  getSnapshotImpl: () => Promise<GetOperationsSnapshotResponse>,
-): OperationsClient {
+function createSnapshotMockClient(getSnapshotImpl: () => Promise<GetOperationsSnapshotResponse>): {
+  client: OperationsClient;
+  discoverControlsMock: ReturnType<typeof mock.fn>;
+} {
+  const discoverControlsMock = mock.fn(() => Promise.resolve({ controls: {} }));
   return {
-    getSnapshot: mock.fn(getSnapshotImpl),
-    getWorkItemDetail: mock.fn(() => Promise.reject(new Error('not implemented'))),
-    getWorkItemCheckpoints: mock.fn(() => Promise.reject(new Error('not implemented'))),
-    getWorkItemExecution: mock.fn(() => Promise.reject(new Error('not implemented'))),
-    getWorkItemControls: mock.fn(() => Promise.reject(new Error('not implemented'))),
-    submitControlAction: mock.fn(() => Promise.reject(new Error('not implemented'))),
-    discoverControls: mock.fn(() => Promise.resolve({ controls: {} })),
-  } as unknown as OperationsClient;
+    client: {
+      getSnapshot: mock.fn(getSnapshotImpl),
+      getWorkItemDetail: mock.fn(() => Promise.reject(new Error('not implemented'))),
+      getWorkItemCheckpoints: mock.fn(() => Promise.reject(new Error('not implemented'))),
+      getWorkItemExecution: mock.fn(() => Promise.reject(new Error('not implemented'))),
+      getWorkItemControls: mock.fn(() => Promise.reject(new Error('not implemented'))),
+      submitControlAction: mock.fn(() => Promise.reject(new Error('not implemented'))),
+      discoverControls: discoverControlsMock,
+    } as unknown as OperationsClient,
+    discoverControlsMock,
+  };
 }
 
 // ─── Tests ──────────────────────────────────────────────────────────────────
@@ -461,7 +466,9 @@ describe('createSyncController', () => {
 
       deferred.resolve(detail);
       await deferred.promise;
-      await new Promise<void>((r) => { setTimeout(r, 0); });
+      await new Promise<void>((r) => {
+        setTimeout(r, 0);
+      });
 
       assert.equal(dispatched.length, 2);
       assert.equal(dispatched[1].type, 'selection/detail-loaded');
@@ -482,7 +489,9 @@ describe('createSyncController', () => {
 
       // Control resolved for A, but user already selected B
       controller.reconcileDetail('wq-A', 'wq-B');
-      await new Promise<void>((r) => { setTimeout(r, 0); });
+      await new Promise<void>((r) => {
+        setTimeout(r, 0);
+      });
 
       assert.equal(fetchCalled, false, 'should not fetch detail for non-selected item');
       assert.equal(dispatched.length, 0, 'should not dispatch any actions');
@@ -502,7 +511,9 @@ describe('createSyncController', () => {
       });
 
       controller.reconcileDetail('wq-A', null);
-      await new Promise<void>((r) => { setTimeout(r, 0); });
+      await new Promise<void>((r) => {
+        setTimeout(r, 0);
+      });
 
       assert.equal(fetchCalled, false);
       assert.equal(dispatched.length, 0);
@@ -540,7 +551,9 @@ describe('createSyncController', () => {
 
       deferredB.resolve(detailB);
       await deferredB.promise;
-      await new Promise<void>((r) => { setTimeout(r, 0); });
+      await new Promise<void>((r) => {
+        setTimeout(r, 0);
+      });
 
       const loaded = dispatched.filter((a) => a.type === 'selection/detail-loaded');
       assert.equal(loaded.length, 1);
@@ -560,7 +573,9 @@ describe('createSyncController', () => {
 
       controller.dispose();
       controller.reconcileDetail('wq-1', 'wq-1');
-      await new Promise<void>((r) => { setTimeout(r, 0); });
+      await new Promise<void>((r) => {
+        setTimeout(r, 0);
+      });
 
       assert.equal(dispatched.length, 0);
     });
@@ -571,7 +586,7 @@ describe('createSyncController', () => {
   describe('fetchSnapshot', () => {
     it('dispatches snapshot/request then snapshot/success on successful fetch', async () => {
       const snapshot = makeSnapshotResponse({ queue: [] });
-      const client = createSnapshotMockClient(() => Promise.resolve(snapshot));
+      const { client } = createSnapshotMockClient(() => Promise.resolve(snapshot));
       const dispatched: OperationsAction[] = [];
 
       const controller = createSyncController({
@@ -608,7 +623,7 @@ describe('createSyncController', () => {
       const deferredNew = createDeferredFetch<GetOperationsSnapshotResponse>();
 
       let callCount = 0;
-      const client = createSnapshotMockClient(() => {
+      const { client } = createSnapshotMockClient(() => {
         callCount += 1;
         return callCount === 1 ? deferredOld.promise : deferredNew.promise;
       });
@@ -655,7 +670,7 @@ describe('createSyncController', () => {
       const deferredNew = createDeferredFetch<GetOperationsSnapshotResponse>();
 
       let callCount = 0;
-      const client = createSnapshotMockClient(() => {
+      const { client } = createSnapshotMockClient(() => {
         callCount += 1;
         return callCount === 1 ? deferredOld.promise : deferredNew.promise;
       });
@@ -693,7 +708,7 @@ describe('createSyncController', () => {
     });
 
     it('dispatches snapshot/failure on error', async () => {
-      const client = createSnapshotMockClient(() =>
+      const { client } = createSnapshotMockClient(() =>
         Promise.reject(new Error('Network failure')),
       );
       const dispatched: OperationsAction[] = [];
@@ -717,7 +732,9 @@ describe('createSyncController', () => {
       const snapshot = makeSnapshotResponse({
         queue: [makeQueueItem({ id: 'wq-1' }), makeQueueItem({ id: 'wq-2' })],
       });
-      const client = createSnapshotMockClient(() => Promise.resolve(snapshot));
+      const { client, discoverControlsMock } = createSnapshotMockClient(() =>
+        Promise.resolve(snapshot),
+      );
       const dispatched: OperationsAction[] = [];
 
       const controller = createSyncController({
@@ -730,15 +747,15 @@ describe('createSyncController', () => {
         setTimeout(r, 0);
       });
 
-      const discoveryActions = dispatched.filter(
-        (a) => a.type === 'controls/discovery-loaded',
-      );
+      const discoveryActions = dispatched.filter((a) => a.type === 'controls/discovery-loaded');
       assert.equal(discoveryActions.length, 0);
-      assert.equal(client.discoverControls.mock.calls.length, 0);
+      assert.equal(discoverControlsMock.mock.calls.length, 0);
     });
 
     it('hydrates control discovery only when requested explicitly', async () => {
-      const client = createSnapshotMockClient(() => Promise.resolve(makeSnapshotResponse()));
+      const { client, discoverControlsMock } = createSnapshotMockClient(() =>
+        Promise.resolve(makeSnapshotResponse()),
+      );
       const dispatched: OperationsAction[] = [];
 
       const controller = createSyncController({
@@ -751,17 +768,13 @@ describe('createSyncController', () => {
         setTimeout(r, 0);
       });
 
-      const discoveryActions = dispatched.filter(
-        (a) => a.type === 'controls/discovery-loaded',
-      );
+      const discoveryActions = dispatched.filter((a) => a.type === 'controls/discovery-loaded');
       assert.equal(discoveryActions.length, 1);
-      assert.equal(client.discoverControls.mock.calls.length, 1);
+      assert.equal(discoverControlsMock.mock.calls.length, 1);
     });
 
     it('is a no-op after dispose', async () => {
-      const client = createSnapshotMockClient(() =>
-        Promise.resolve(makeSnapshotResponse()),
-      );
+      const { client } = createSnapshotMockClient(() => Promise.resolve(makeSnapshotResponse()));
       const dispatched: OperationsAction[] = [];
 
       const controller = createSyncController({

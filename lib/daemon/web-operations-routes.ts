@@ -15,10 +15,7 @@ import {
   type QueueSnapshotOptions,
   type HealthBudgetContext,
 } from './web-operations-projection.ts';
-import {
-  discoverControls,
-  type ControlContext,
-} from './web-operations-controls.ts';
+import { discoverControls, type ControlContext } from './web-operations-controls.ts';
 import type { WorkItemStatus, ControlKind } from '@hydra/web-contracts';
 import { loadHydraConfig } from '../hydra-config.ts';
 

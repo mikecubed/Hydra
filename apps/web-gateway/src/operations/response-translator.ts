@@ -32,11 +32,11 @@ export function translateOperationsDaemonResponse(
   status: number,
   payload: unknown,
 ): GatewayErrorResponse {
-  if (payload && typeof payload === 'object') {
+  if (payload !== null && typeof payload === 'object') {
     const body = payload as { ok?: boolean; error?: string; message?: string };
     if (body.ok === false && typeof body.error === 'string') {
-      const mapping = CONTROL_DAEMON_ERROR_MAP[body.error];
-      if (mapping) {
+      if (Object.hasOwn(CONTROL_DAEMON_ERROR_MAP, body.error)) {
+        const mapping = CONTROL_DAEMON_ERROR_MAP[body.error];
         return createGatewayErrorResponse({
           code: mapping.code,
           category: mapping.category,

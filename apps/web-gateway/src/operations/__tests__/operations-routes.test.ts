@@ -719,9 +719,7 @@ describe('Work-item controls routes (T041/T042 — US5)', () => {
     });
 
     it('passes workItemIds to daemon client', async () => {
-      await app.request(
-        buildRequest('POST', '/operations/controls/discover', { body: validBody }),
-      );
+      await app.request(buildRequest('POST', '/operations/controls/discover', { body: validBody }));
 
       const callArgs = mockClient.discoverControls.mock.calls[0].arguments;
       assert.deepStrictEqual(callArgs[0].workItemIds, ['wi-1', 'wi-2']);

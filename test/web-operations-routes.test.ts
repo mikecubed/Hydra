@@ -1438,7 +1438,13 @@ function makeWriteCtx(
       mergeTaskWorktree: () => ({}),
       cleanupTaskWorktree: () => {},
       sseClients: new Set(),
-      readArchive: () => ({ snapshots: [], lastArchiveAt: null, tasks: [], handoffs: [], blockers: [] }),
+      readArchive: () => ({
+        snapshots: [],
+        lastArchiveAt: null,
+        tasks: [],
+        handoffs: [],
+        blockers: [],
+      }),
       getMetricsSummary: () => ({}),
       getEventCount: () => 0,
     } as Parameters<typeof handleWriteRoute>[0],
@@ -1473,7 +1479,11 @@ describe('Control Discovery (T038/T039)', () => {
         const config = makeControlConfig();
         const controls = discoverControls(task, config);
         for (const control of controls) {
-          assert.equal(control.availability, 'read-only', `Expected read-only for status=${status}`);
+          assert.equal(
+            control.availability,
+            'read-only',
+            `Expected read-only for status=${status}`,
+          );
           assert.equal(
             control.authority,
             'unavailable',
@@ -1534,7 +1544,9 @@ describe('Control Discovery (T038/T039)', () => {
       const task = makeTask({
         id: 'task-1',
         status: 'in_progress',
-        routingHistory: [{ route: 'claude', mode: 'council', changedAt: '2025-01-15T12:00:00Z', reason: 'test' }],
+        routingHistory: [
+          { route: 'claude', mode: 'council', changedAt: '2025-01-15T12:00:00Z', reason: 'test' },
+        ],
       });
       const config = makeControlConfig();
       const controls = discoverControls(task, config);
@@ -2010,8 +2022,8 @@ describe('Control Mutations (T038/T040)', () => {
         '/operations/work-items/task-1/controls/task-1%3Aagent',
         state,
         {
-        requestedOptionId: 'agent-gemini',
-        expectedRevision: revision,
+          requestedOptionId: 'agent-gemini',
+          expectedRevision: revision,
         },
       );
       const handled = await handleWriteRoute(ctx);
@@ -2029,8 +2041,8 @@ describe('Control Mutations (T038/T040)', () => {
         '/operations/work-items/task-1/controls/task-1%3Arouting',
         state,
         {
-        requestedOptionId: 'routing-economy',
-        expectedRevision: 'stale-revision',
+          requestedOptionId: 'routing-economy',
+          expectedRevision: 'stale-revision',
         },
       );
       const handled = await handleWriteRoute(ctx);
@@ -2048,8 +2060,8 @@ describe('Control Mutations (T038/T040)', () => {
         '/operations/work-items/task-1/controls/task-1%3Arouting',
         state,
         {
-        requestedOptionId: 'routing-economy',
-        expectedRevision: computeRevisionToken(task),
+          requestedOptionId: 'routing-economy',
+          expectedRevision: computeRevisionToken(task),
         },
       );
       const handled = await handleWriteRoute(ctx);
@@ -2067,8 +2079,8 @@ describe('Control Mutations (T038/T040)', () => {
         '/operations/work-items/task-1/controls/task-1%3Aagent',
         state,
         {
-        requestedOptionId: 'agent-claude',
-        expectedRevision: computeRevisionToken(task),
+          requestedOptionId: 'agent-claude',
+          expectedRevision: computeRevisionToken(task),
         },
       );
       const handled = await handleWriteRoute(ctx);
@@ -2107,8 +2119,8 @@ describe('Control Mutations (T038/T040)', () => {
         '/operations/work-items/task-1/controls/task-1%3Aagent',
         state,
         {
-        requestedOptionId: 'agent-codex',
-        expectedRevision: revision,
+          requestedOptionId: 'agent-codex',
+          expectedRevision: revision,
         },
       );
       await handleWriteRoute(ctx);
@@ -2130,8 +2142,8 @@ describe('Control Mutations (T038/T040)', () => {
         '/operations/work-items/task-1/controls/task-1%3Aagent',
         state,
         {
-        requestedOptionId: 'agent-gemini',
-        expectedRevision: revision,
+          requestedOptionId: 'agent-gemini',
+          expectedRevision: revision,
         },
       );
       await handleWriteRoute(ctx);

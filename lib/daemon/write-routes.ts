@@ -1550,7 +1550,12 @@ async function handleBatchControlDiscovery(ctx: WriteRouteCtx): Promise<boolean>
     kindFilter = normalized;
   }
 
-  const items = discoverControlsBatch(readState(), workItemIds, buildWriteControlContext(ctx), kindFilter);
+  const items = discoverControlsBatch(
+    readState(),
+    workItemIds,
+    buildWriteControlContext(ctx),
+    kindFilter,
+  );
   sendJson(res, 200, { items });
   return true;
 }

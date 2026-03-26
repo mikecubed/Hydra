@@ -10,19 +10,12 @@
  * but all final state comes from daemon refetch/reconciliation.
  */
 import type { CSSProperties, JSX } from 'react';
-import type {
-  ControlAvailability,
-  OperationalControlView,
-} from '@hydra/web-contracts';
+import type { ControlAvailability, OperationalControlView } from '@hydra/web-contracts';
 
 export interface ControlStripProps {
   readonly controls: readonly OperationalControlView[];
   readonly hasPendingControl: boolean;
-  readonly onSubmitControl: (
-    controlId: string,
-    optionId: string,
-    expectedRevision: string,
-  ) => void;
+  readonly onSubmitControl: (controlId: string, optionId: string, expectedRevision: string) => void;
 }
 
 // ─── Styles ─────────────────────────────────────────────────────────────────

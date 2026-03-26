@@ -8,17 +8,11 @@
 import { describe, it, mock } from 'node:test';
 import assert from 'node:assert/strict';
 
-import type {
-  OperationalControlView,
-  SubmitControlActionResponse,
-} from '@hydra/web-contracts';
+import type { OperationalControlView, SubmitControlActionResponse } from '@hydra/web-contracts';
 
 import type { OperationsClient } from '../api/operations-client.ts';
 import type { OperationsAction } from '../model/operations-reducer.ts';
-import {
-  submitControl,
-  type SubmitControlOptions,
-} from '../model/control-actions.ts';
+import { submitControl, type SubmitControlOptions } from '../model/control-actions.ts';
 
 // ─── Fixtures ───────────────────────────────────────────────────────────────
 
@@ -55,8 +49,7 @@ function makeAcceptedResponse(
 }
 
 function createMockClient(
-  submitFn: OperationsClient['submitControlAction'] = () =>
-    Promise.resolve(makeAcceptedResponse()),
+  submitFn: OperationsClient['submitControlAction'] = () => Promise.resolve(makeAcceptedResponse()),
 ): OperationsClient {
   return {
     getSnapshot: mock.fn(() => Promise.reject(new Error('not implemented'))),
@@ -121,9 +114,7 @@ describe('submitControl', () => {
   });
 
   it('returns the outcome from the gateway response', async () => {
-    const client = createMockClient(async () =>
-      makeAcceptedResponse({ outcome: 'rejected' }),
-    );
+    const client = createMockClient(async () => makeAcceptedResponse({ outcome: 'rejected' }));
     const dispatched: OperationsAction[] = [];
 
     const result = await submitControl({
@@ -140,9 +131,7 @@ describe('submitControl', () => {
 
   it('dispatches controls/submit-resolved even when outcome is rejected', async () => {
     const dispatched: OperationsAction[] = [];
-    const client = createMockClient(async () =>
-      makeAcceptedResponse({ outcome: 'rejected' }),
-    );
+    const client = createMockClient(async () => makeAcceptedResponse({ outcome: 'rejected' }));
 
     await submitControl({
       client,
@@ -158,9 +147,7 @@ describe('submitControl', () => {
 
   it('dispatches controls/submit-resolved on stale outcome', async () => {
     const dispatched: OperationsAction[] = [];
-    const client = createMockClient(async () =>
-      makeAcceptedResponse({ outcome: 'stale' }),
-    );
+    const client = createMockClient(async () => makeAcceptedResponse({ outcome: 'stale' }));
 
     await submitControl({
       client,
@@ -176,9 +163,7 @@ describe('submitControl', () => {
 
   it('dispatches controls/submit-resolved on superseded outcome', async () => {
     const dispatched: OperationsAction[] = [];
-    const client = createMockClient(async () =>
-      makeAcceptedResponse({ outcome: 'superseded' }),
-    );
+    const client = createMockClient(async () => makeAcceptedResponse({ outcome: 'superseded' }));
 
     await submitControl({
       client,
@@ -229,7 +214,9 @@ describe('submitControl', () => {
       controlId: 'ctrl-1',
       requestedOptionId: 'opt-1',
       expectedRevision: 'rev-1',
-      onRefetchDetail: (id) => { refetchedId = id; },
+      onRefetchDetail: (id) => {
+        refetchedId = id;
+      },
     });
 
     assert.equal(refetchedId, 'wq-1');
@@ -237,9 +224,7 @@ describe('submitControl', () => {
 
   it('calls onRefetchDetail on rejected outcome for authoritative reconciliation', async () => {
     let refetchedId: string | null = null;
-    const client = createMockClient(async () =>
-      makeAcceptedResponse({ outcome: 'rejected' }),
-    );
+    const client = createMockClient(async () => makeAcceptedResponse({ outcome: 'rejected' }));
 
     await submitControl({
       client,
@@ -248,7 +233,9 @@ describe('submitControl', () => {
       controlId: 'ctrl-1',
       requestedOptionId: 'opt-1',
       expectedRevision: 'rev-1',
-      onRefetchDetail: (id) => { refetchedId = id; },
+      onRefetchDetail: (id) => {
+        refetchedId = id;
+      },
     });
 
     assert.equal(refetchedId, 'wq-1');
@@ -256,9 +243,7 @@ describe('submitControl', () => {
 
   it('calls onRefetchDetail on stale outcome', async () => {
     let refetchedId: string | null = null;
-    const client = createMockClient(async () =>
-      makeAcceptedResponse({ outcome: 'stale' }),
-    );
+    const client = createMockClient(async () => makeAcceptedResponse({ outcome: 'stale' }));
 
     await submitControl({
       client,
@@ -267,7 +252,9 @@ describe('submitControl', () => {
       controlId: 'ctrl-1',
       requestedOptionId: 'opt-1',
       expectedRevision: 'rev-1',
-      onRefetchDetail: (id) => { refetchedId = id; },
+      onRefetchDetail: (id) => {
+        refetchedId = id;
+      },
     });
 
     assert.equal(refetchedId, 'wq-1');
@@ -287,7 +274,9 @@ describe('submitControl', () => {
         controlId: 'ctrl-1',
         requestedOptionId: 'opt-1',
         expectedRevision: 'rev-1',
-        onRefetchDetail: () => { refetchCalled = true; },
+        onRefetchDetail: () => {
+          refetchCalled = true;
+        },
       });
     } catch {
       // expected
@@ -332,7 +321,9 @@ describe('submitControl', () => {
       controlId: 'ctrl-1',
       requestedOptionId: 'opt-1',
       expectedRevision: 'rev-1',
-      onRefetchSnapshot: () => { snapshotRefetched = true; },
+      onRefetchSnapshot: () => {
+        snapshotRefetched = true;
+      },
     });
 
     assert.equal(snapshotRefetched, true);
@@ -340,9 +331,7 @@ describe('submitControl', () => {
 
   it('calls onRefetchSnapshot on rejected outcome', async () => {
     let snapshotRefetched = false;
-    const client = createMockClient(async () =>
-      makeAcceptedResponse({ outcome: 'rejected' }),
-    );
+    const client = createMockClient(async () => makeAcceptedResponse({ outcome: 'rejected' }));
 
     await submitControl({
       client,
@@ -351,7 +340,9 @@ describe('submitControl', () => {
       controlId: 'ctrl-1',
       requestedOptionId: 'opt-1',
       expectedRevision: 'rev-1',
-      onRefetchSnapshot: () => { snapshotRefetched = true; },
+      onRefetchSnapshot: () => {
+        snapshotRefetched = true;
+      },
     });
 
     assert.equal(snapshotRefetched, true);
@@ -359,9 +350,7 @@ describe('submitControl', () => {
 
   it('calls onRefetchSnapshot on stale outcome', async () => {
     let snapshotRefetched = false;
-    const client = createMockClient(async () =>
-      makeAcceptedResponse({ outcome: 'stale' }),
-    );
+    const client = createMockClient(async () => makeAcceptedResponse({ outcome: 'stale' }));
 
     await submitControl({
       client,
@@ -370,7 +359,9 @@ describe('submitControl', () => {
       controlId: 'ctrl-1',
       requestedOptionId: 'opt-1',
       expectedRevision: 'rev-1',
-      onRefetchSnapshot: () => { snapshotRefetched = true; },
+      onRefetchSnapshot: () => {
+        snapshotRefetched = true;
+      },
     });
 
     assert.equal(snapshotRefetched, true);
@@ -390,7 +381,9 @@ describe('submitControl', () => {
         controlId: 'ctrl-1',
         requestedOptionId: 'opt-1',
         expectedRevision: 'rev-1',
-        onRefetchSnapshot: () => { snapshotRefetched = true; },
+        onRefetchSnapshot: () => {
+          snapshotRefetched = true;
+        },
       });
     } catch {
       // expected
@@ -411,8 +404,12 @@ describe('submitControl', () => {
       controlId: 'ctrl-1',
       requestedOptionId: 'opt-1',
       expectedRevision: 'rev-1',
-      onRefetchDetail: () => { detailRefetched = true; },
-      onRefetchSnapshot: () => { snapshotRefetched = true; },
+      onRefetchDetail: () => {
+        detailRefetched = true;
+      },
+      onRefetchSnapshot: () => {
+        snapshotRefetched = true;
+      },
     });
 
     assert.equal(detailRefetched, true);
@@ -460,7 +457,9 @@ describe('submitControl', () => {
       controlId: 'ctrl-1',
       requestedOptionId: 'opt-1',
       expectedRevision: 'rev-1',
-      onRefetchSnapshot: () => { snapshotRefetched = true; },
+      onRefetchSnapshot: () => {
+        snapshotRefetched = true;
+      },
     }).catch(() => {
       // Caller catches rejection — mirrors component fix
     });
