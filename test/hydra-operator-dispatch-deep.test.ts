@@ -489,6 +489,73 @@ describe('publishMiniRoundDelegation', () => {
     });
     assert.ok(result.tasks.length > 0);
   });
+
+  it('omits council metadata from decision payload when report is null', async () => {
+    mockRequest.mock.resetCalls();
+    await mod.publishMiniRoundDelegation({
+      baseUrl: 'http://localhost:4173',
+      from: 'human',
+      agents: ['claude'],
+      promptText: 'Null report test',
+      report: null,
+    });
+    // Find the /decision call among all request() calls
+    const decisionCall = mockRequest.mock.calls.find((call) => call.arguments[2] === '/decision');
+    assert.ok(decisionCall, 'Expected a /decision request call');
+    const payload = decisionCall.arguments[3] as Record<string, unknown>;
+    assert.equal(
+      payload['councilParticipants'],
+      undefined,
+      'councilParticipants must be omitted when report is null',
+    );
+    assert.equal(
+      payload['councilTransitions'],
+      undefined,
+      'councilTransitions must be omitted when report is null',
+    );
+    assert.equal(
+      payload['councilFinalOutcome'],
+      undefined,
+      'councilFinalOutcome must be omitted when report is null',
+    );
+    assert.equal(
+      payload['councilStatus'],
+      undefined,
+      'councilStatus must be omitted when report is null',
+    );
+  });
+
+  it('includes council metadata in decision payload when report is provided', async () => {
+    mockRequest.mock.resetCalls();
+    await mod.publishMiniRoundDelegation({
+      baseUrl: 'http://localhost:4173',
+      from: 'human',
+      agents: ['claude', 'gemini'],
+      promptText: 'Real report test',
+      report: {
+        tasks: [{ owner: 'claude', title: 'Implement' }],
+        consensus: 'All agreed',
+        recommendedMode: 'handoff',
+        recommendationRationale: 'Straightforward task',
+      },
+    });
+    const decisionCall = mockRequest.mock.calls.find((call) => call.arguments[2] === '/decision');
+    assert.ok(decisionCall, 'Expected a /decision request call');
+    const payload = decisionCall.arguments[3] as Record<string, unknown>;
+    assert.ok(
+      Array.isArray(payload['councilParticipants']),
+      'councilParticipants should be present when report exists',
+    );
+    assert.ok(
+      Array.isArray(payload['councilTransitions']),
+      'councilTransitions should be present when report exists',
+    );
+    assert.equal(payload['councilStatus'], 'completed');
+    assert.ok(
+      typeof payload['councilFinalOutcome'] === 'string',
+      'councilFinalOutcome should be a string when report exists',
+    );
+  });
 });
 
 // ── publishTandemDelegation ───────────────────────────────────────────────────

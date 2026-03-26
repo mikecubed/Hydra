@@ -1523,6 +1523,56 @@ describe('projectWorkItemDetail routing history', () => {
     assert.equal(result.routing, null);
   });
 
+  it('treats empty object {} routing entries as invalid and returns null routing', () => {
+    const state = makeState({
+      tasks: [makeTask({ id: 'task-1', routingHistory: [{}] })],
+    });
+    const result = projectWorkItemDetail(state, 'task-1');
+    assert.ok(result !== null);
+    assert.equal(result.routing, null, 'Empty {} should not produce a valid routing projection');
+  });
+
+  it('treats timestamp-only routing entries as invalid and returns null routing', () => {
+    const state = makeState({
+      tasks: [
+        makeTask({
+          id: 'task-1',
+          routingHistory: [{ changedAt: '2025-06-01T10:00:00.000Z' }],
+        }),
+      ],
+    });
+    const result = projectWorkItemDetail(state, 'task-1');
+    assert.ok(result !== null);
+    assert.equal(
+      result.routing,
+      null,
+      'Timestamp-only routing should not produce a valid routing projection',
+    );
+  });
+
+  it('filters out empty object entries while keeping valid ones', () => {
+    const state = makeState({
+      tasks: [
+        makeTask({
+          id: 'task-1',
+          routingHistory: [
+            {},
+            {
+              route: 'claude',
+              mode: 'auto',
+              changedAt: '2025-06-01T10:00:00.000Z',
+              reason: 'real entry',
+            },
+          ],
+        }),
+      ],
+    });
+    const result = projectWorkItemDetail(state, 'task-1');
+    assert.ok(result !== null && result.routing !== null);
+    assert.equal(result.routing.history.length, 1);
+    assert.equal(result.routing.currentRoute, 'claude');
+  });
+
   it('falls back invalid routing timestamps to the epoch', () => {
     const state = makeState({
       tasks: [
@@ -1652,6 +1702,43 @@ describe('projectWorkItemDetail assignment history', () => {
     const result = projectWorkItemDetail(state, 'task-1');
     assert.ok(result !== null);
     assert.deepStrictEqual(result.assignments, []);
+  });
+
+  it('treats empty object {} assignment entries as invalid and returns empty assignments', () => {
+    const state = makeState({
+      tasks: [makeTask({ id: 'task-1', assignmentHistory: [{}] })],
+    });
+    const result = projectWorkItemDetail(state, 'task-1');
+    assert.ok(result !== null);
+    assert.deepStrictEqual(
+      result.assignments,
+      [],
+      'Empty {} should not produce a valid assignment',
+    );
+  });
+
+  it('filters out empty object assignment entries while keeping valid ones', () => {
+    const state = makeState({
+      tasks: [
+        makeTask({
+          id: 'task-1',
+          assignmentHistory: [
+            {},
+            {
+              agent: 'gemini',
+              role: 'analyst',
+              state: 'active',
+              startedAt: '2025-06-01T10:00:00.000Z',
+              endedAt: null,
+            },
+          ],
+        }),
+      ],
+    });
+    const result = projectWorkItemDetail(state, 'task-1');
+    assert.ok(result !== null);
+    assert.equal(result.assignments.length, 1);
+    assert.equal(result.assignments[0].participantId, 'gemini');
   });
 
   it('drops invalid assignment timestamps instead of returning contract-invalid strings', () => {
@@ -2007,6 +2094,52 @@ describe('projectWorkItemDetail availability with history', () => {
     const state = makeState({ tasks: [makeTask({ id: 'task-1' })] });
     const result = projectWorkItemDetail(state, 'task-1');
     assert.ok(result !== null);
+    assert.equal(result.availability, 'partial');
+  });
+
+  it('returns partial (not ready) when routing and assignment histories contain only empty objects', () => {
+    const state = makeState({
+      tasks: [
+        makeTask({
+          id: 'task-1',
+          routingHistory: [{}],
+          assignmentHistory: [{}],
+        }),
+      ],
+    });
+    const result = projectWorkItemDetail(state, 'task-1');
+    assert.ok(result !== null);
+    assert.equal(result.routing, null, 'Empty {} routing should not project');
+    assert.deepStrictEqual(result.assignments, [], 'Empty {} assignment should not project');
+    assert.equal(
+      result.availability,
+      'partial',
+      'Availability must not be ready when histories contain only empty objects',
+    );
+  });
+
+  it('returns partial when routing history has only timestamps but assignments are valid', () => {
+    const state = makeState({
+      tasks: [
+        makeTask({
+          id: 'task-1',
+          routingHistory: [{ changedAt: '2025-06-01T10:00:00.000Z' }],
+          assignmentHistory: [
+            {
+              agent: 'claude',
+              role: 'architect',
+              state: 'active',
+              startedAt: '2025-06-01T10:00:00.000Z',
+              endedAt: null,
+            },
+          ],
+        }),
+      ],
+    });
+    const result = projectWorkItemDetail(state, 'task-1');
+    assert.ok(result !== null);
+    assert.equal(result.routing, null);
+    assert.equal(result.assignments.length, 1);
     assert.equal(result.availability, 'partial');
   });
 });
