@@ -145,8 +145,14 @@ function matchWorkItemRoute(route: string): { workItemId: string; sub: string } 
   }
   if (rest === '') return null;
   const slashIndex = rest.indexOf('/');
-  if (slashIndex === -1) return { workItemId: rest, sub: '' };
-  return { workItemId: rest.slice(0, slashIndex), sub: rest.slice(slashIndex) };
+  const raw = slashIndex === -1 ? rest : rest.slice(0, slashIndex);
+  const sub = slashIndex === -1 ? '' : rest.slice(slashIndex);
+  try {
+    return { workItemId: decodeURIComponent(raw), sub };
+  } catch {
+    // Malformed percent-encoding — treat as literal
+    return { workItemId: raw, sub };
+  }
 }
 
 export function handleOperationsReadRoute(ctx: ReadRouteCtx): boolean {

@@ -709,4 +709,68 @@ describe('handleOperationsReadRoute', () => {
       assert.equal(ctx.captured.statusCode, 200);
     });
   });
+
+  describe('URL-encoded work-item IDs', () => {
+    it('decodes encoded colon in detail route', () => {
+      const id = 'ns:task-1';
+      const state = makeState({ tasks: [makeTask({ id })] });
+      const ctx = makeReadCtx('GET', `/operations/work-items/${encodeURIComponent(id)}`, state);
+      const handled = handleOperationsReadRoute(ctx);
+      assert.equal(handled, true);
+      assert.equal(ctx.captured.statusCode, 200);
+      const data = ctx.captured.data as Record<string, unknown>;
+      const item = data['item'] as Record<string, unknown>;
+      assert.equal(item['id'], id);
+    });
+
+    it('decodes encoded slash in detail route', () => {
+      const id = 'scope/task-2';
+      const state = makeState({ tasks: [makeTask({ id })] });
+      const ctx = makeReadCtx('GET', `/operations/work-items/${encodeURIComponent(id)}`, state);
+      const handled = handleOperationsReadRoute(ctx);
+      assert.equal(handled, true);
+      assert.equal(ctx.captured.statusCode, 200);
+      const data = ctx.captured.data as Record<string, unknown>;
+      const item = data['item'] as Record<string, unknown>;
+      assert.equal(item['id'], id);
+    });
+
+    it('decodes encoded colon in checkpoints route', () => {
+      const id = 'ns:task-3';
+      const state = makeState({ tasks: [makeTask({ id })] });
+      const ctx = makeReadCtx(
+        'GET',
+        `/operations/work-items/${encodeURIComponent(id)}/checkpoints`,
+        state,
+      );
+      const handled = handleOperationsReadRoute(ctx);
+      assert.equal(handled, true);
+      assert.equal(ctx.captured.statusCode, 200);
+      const data = ctx.captured.data as Record<string, unknown>;
+      assert.equal(data['workItemId'], id);
+    });
+
+    it('decodes encoded slash in checkpoints route', () => {
+      const id = 'scope/task-4';
+      const state = makeState({ tasks: [makeTask({ id })] });
+      const ctx = makeReadCtx(
+        'GET',
+        `/operations/work-items/${encodeURIComponent(id)}/checkpoints`,
+        state,
+      );
+      const handled = handleOperationsReadRoute(ctx);
+      assert.equal(handled, true);
+      assert.equal(ctx.captured.statusCode, 200);
+      const data = ctx.captured.data as Record<string, unknown>;
+      assert.equal(data['workItemId'], id);
+    });
+
+    it('handles malformed percent-encoding gracefully', () => {
+      const state = makeState({ tasks: [makeTask({ id: '%ZZbad' })] });
+      const ctx = makeReadCtx('GET', '/operations/work-items/%ZZbad', state);
+      const handled = handleOperationsReadRoute(ctx);
+      assert.equal(handled, true);
+      assert.equal(ctx.captured.statusCode, 200);
+    });
+  });
 });
