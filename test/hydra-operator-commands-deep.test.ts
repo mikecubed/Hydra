@@ -15,9 +15,6 @@ import assert from 'node:assert/strict';
 // ── Suppress console output to prevent IPC serialization errors in CI ────────
 // Node's test runner serializes worker output across IPC; complex objects from
 // mocked modules can trigger "Unable to deserialize cloned data" errors.
-const _origLog = console.log;
-const _origWarn = console.warn;
-const _origError = console.error;
 console.log = () => {};
 console.warn = () => {};
 console.error = () => {};
