@@ -67,7 +67,10 @@ function parseLimit(raw: string | null): number | undefined {
   return Number.isFinite(n) && n > 0 ? n : undefined;
 }
 
-function warnProbeFailure(probeName: 'readStatus' | 'checkUsage', error: unknown): void {
+function warnProbeFailure(
+  probeName: 'readStatus' | 'checkUsage' | 'writeStatus',
+  error: unknown,
+): void {
   const detail = error instanceof Error ? error.message : String(error);
   console.warn(`[operations] ${probeName} probe failed: ${detail}`);
 }
@@ -92,8 +95,17 @@ function tryCheckUsage(
   }
 }
 
+function tryWriteStatus(writeStatus: ReadRouteCtx['writeStatus']): void {
+  try {
+    writeStatus();
+  } catch (err) {
+    warnProbeFailure('writeStatus', err);
+  }
+}
+
 function handleSnapshot(ctx: ReadRouteCtx): boolean {
-  const { res, sendJson, sendError, readState, requestUrl, readStatus, checkUsage } = ctx;
+  const { res, sendJson, sendError, readState, requestUrl, readStatus, checkUsage, writeStatus } =
+    ctx;
 
   const statusResult = parseStatusFilters(requestUrl.searchParams);
   if ('invalid' in statusResult) {
@@ -109,6 +121,8 @@ function handleSnapshot(ctx: ReadRouteCtx): boolean {
     cursor: requestUrl.searchParams.get('cursor') ?? undefined,
   };
 
+  // Best-effort refresh before reading — soft-fail preserves existing behavior
+  tryWriteStatus(writeStatus);
   const statusData = tryReadStatus(readStatus);
   const usage = tryCheckUsage(checkUsage);
   const healthBudgetCtx: HealthBudgetContext | null = { statusData, usage };

@@ -226,6 +226,50 @@ describe('handleOperationsReadRoute', () => {
     });
   });
 
+  describe('snapshot refreshes status before reading', () => {
+    it('calls writeStatus before readStatus', () => {
+      const callOrder: string[] = [];
+      const state = makeState({ tasks: [makeTask()] });
+      const ctx = makeReadCtx('GET', '/operations/snapshot', state, {}, {
+        readStatus: () => {
+          callOrder.push('readStatus');
+          return { running: true };
+        },
+      });
+      ctx.writeStatus = () => {
+        callOrder.push('writeStatus');
+      };
+      handleOperationsReadRoute(ctx);
+      assert.ok(callOrder.includes('writeStatus'), 'writeStatus should be called');
+      assert.ok(
+        callOrder.indexOf('writeStatus') < callOrder.indexOf('readStatus'),
+        'writeStatus should be called before readStatus',
+      );
+    });
+
+    it('still returns snapshot when writeStatus throws', () => {
+      const state = makeState({ tasks: [makeTask({ id: 'task-1' })] });
+      const ctx = makeReadCtx('GET', '/operations/snapshot', state);
+      ctx.writeStatus = () => {
+        throw new Error('write failed');
+      };
+      const warnings: string[] = [];
+      const originalWarn = console.warn;
+      console.warn = (message?: unknown) => {
+        warnings.push(captureWarningText(message));
+      };
+      try {
+        handleOperationsReadRoute(ctx);
+      } finally {
+        console.warn = originalWarn;
+      }
+      assert.equal(ctx.captured.statusCode, 200);
+      const data = ctx.captured.data as Record<string, unknown>;
+      assert.ok(Array.isArray(data['queue']));
+      assert.ok(warnings.some((w) => w.includes('writeStatus')));
+    });
+  });
+
   describe('snapshot health and budget fields', () => {
     it('snapshot includes populated health from daemon status', () => {
       const state = makeState({ tasks: [makeTask()] });
