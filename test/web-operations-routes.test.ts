@@ -230,12 +230,18 @@ describe('handleOperationsReadRoute', () => {
     it('calls writeStatus before readStatus', () => {
       const callOrder: string[] = [];
       const state = makeState({ tasks: [makeTask()] });
-      const ctx = makeReadCtx('GET', '/operations/snapshot', state, {}, {
-        readStatus: () => {
-          callOrder.push('readStatus');
-          return { running: true };
+      const ctx = makeReadCtx(
+        'GET',
+        '/operations/snapshot',
+        state,
+        {},
+        {
+          readStatus: () => {
+            callOrder.push('readStatus');
+            return { running: true };
+          },
         },
-      });
+      );
       ctx.writeStatus = () => {
         callOrder.push('writeStatus');
       };

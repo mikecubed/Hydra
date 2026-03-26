@@ -174,9 +174,7 @@ describe('HealthBudgetPanel — budget posture', () => {
         budget={makeBudget({ used: 1234567, limit: 9876543, unit: 'tokens' })}
       />,
     );
-    expect(screen.getByTestId('budget-usage')).toHaveTextContent(
-      '1,234,567 / 9,876,543 tokens',
-    );
+    expect(screen.getByTestId('budget-usage')).toHaveTextContent('1,234,567 / 9,876,543 tokens');
   });
 
   it('hides usage breakdown when used or limit are null', () => {
