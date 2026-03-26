@@ -7,17 +7,20 @@ import {
 } from '../model/operations-reducer.ts';
 import {
   selectAvailability,
+  selectBudgetStatus,
   selectDetailAvailability,
   selectDetailFetchStatus,
   selectFilteredQueueItems,
   selectFreshness,
   selectHasPendingControl,
+  selectHealthStatus,
   selectSelectedCheckpoints,
   selectSelectedWorkItemId,
   selectSnapshotStatus,
 } from '../model/selectors.ts';
 import { createSyncController } from '../model/sync-controller.ts';
 import { CheckpointPanel } from './checkpoint-panel.tsx';
+import { HealthBudgetPanel } from './health-budget-panel.tsx';
 import { OperationsPanelShell } from './operations-panel-shell.tsx';
 import { QueuePanel } from './queue-panel.tsx';
 
@@ -92,6 +95,8 @@ export function WorkspaceOperationsPanel(): JSX.Element {
   const checkpoints = selectSelectedCheckpoints(state);
   const detailAvailability = selectDetailAvailability(state);
   const detailFetchStatus = selectDetailFetchStatus(state);
+  const health = selectHealthStatus(state);
+  const budget = selectBudgetStatus(state);
 
   const detailPanel =
     selectedWorkItemId === null ? undefined : (
@@ -102,11 +107,17 @@ export function WorkspaceOperationsPanel(): JSX.Element {
       />
     );
 
+  const healthBudgetPanel =
+    health == null && budget == null ? undefined : (
+      <HealthBudgetPanel health={health} budget={budget} />
+    );
+
   return (
     <OperationsPanelShell
       snapshotStatus={selectSnapshotStatus(state)}
       freshness={selectFreshness(state)}
       detailPanel={detailPanel}
+      healthBudgetPanel={healthBudgetPanel}
     >
       <QueuePanel
         items={selectFilteredQueueItems(state)}
