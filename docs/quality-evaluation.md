@@ -108,7 +108,8 @@ All Prettier-supported files in the repo (`.ts`, `.json`, `.md`, `.yml`, etc.) p
 | Tests              | `test`            | **Yes**   | Passing |
 | Coverage (78%)     | `coverage`        | **Yes**   | Passing |
 | Per-file coverage  | `coverage`        | **Yes**   | Passing |
-| Mutation testing   | `mutation`        | **Yes**   | Passing |
+| Mutation (shared)  | `mutation-shared` | **Yes**   | Passing |
+| Mutation (daemon)  | `mutation-daemon` | **Yes**   | Passing |
 | New file policy    | `new-file-policy` | **Yes**   | Passing |
 
 ### Non-passing tests

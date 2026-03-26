@@ -253,9 +253,10 @@ jobs:
             revert
           requireScope: false
 
-  mutation-testing:
-    name: Mutation Testing
+  mutation-shared:
+    name: Mutation Testing (hydra-shared)
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     continue-on-error: false
     permissions:
       contents: read
@@ -269,8 +270,30 @@ jobs:
         run: npm ci
         env:
           HUSKY: '0'
-      - name: Run mutation tests
-        run: npm run test:mutation
+      - name: Run mutation tests (hydra-shared)
+        run: npm run test:mutation:shared
+        env:
+          HUSKY: '0'
+
+  mutation-daemon:
+    name: Mutation Testing (daemon)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    continue-on-error: false
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - name: Install dependencies
+        run: npm ci
+        env:
+          HUSKY: '0'
+      - name: Run mutation tests (daemon)
+        run: npm run test:mutation:daemon
         env:
           HUSKY: '0'
 

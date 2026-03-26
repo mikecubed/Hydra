@@ -1,0 +1,21 @@
+{
+  "$schema": "./node_modules/@stryker-mutator/core/schema/stryker-schema.json",
+  "packageManager": "npm",
+  "reporters": ["html", "clear-text", "progress"],
+  "testRunner": "command",
+  "testRunnerNodeArgs": ["--experimental-test-module-mocks"],
+  "commandRunner": {
+    "command": "node --test --experimental-test-module-mocks 'test/**/*.test.{ts,mjs}'"
+  },
+  "coverageAnalysis": "off",
+  "mutate": ["lib/daemon/**/*.ts", "!lib/daemon/**/*.test.ts"],
+  "checkers": ["typescript"],
+  "tsconfigFile": "tsconfig.json",
+  "thresholds": {
+    "high": 70,
+    "low": 40,
+    "break": 60
+  },
+  "timeoutMS": 60000,
+  "concurrency": 2
+}

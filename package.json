@@ -97,6 +97,8 @@
     "postinstall": "node lib/check-install.ts",
     "prepare": "husky",
     "test:mutation": "stryker run",
+    "test:mutation:shared": "stryker run --configFile stryker.shared.config.json",
+    "test:mutation:daemon": "stryker run --configFile stryker.daemon.config.json",
     "test:coverage:per-file": "node --experimental-strip-types scripts/check-per-file-coverage.ts",
     "test:new-file-policy": "node --experimental-strip-types scripts/check-new-file-tests.ts"
   },
