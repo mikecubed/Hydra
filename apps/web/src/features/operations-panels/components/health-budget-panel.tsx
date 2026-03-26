@@ -112,7 +112,7 @@ const hintStyle: CSSProperties = {
 // ─── Formatters ─────────────────────────────────────────────────────────────
 
 function formatNumber(value: number): string {
-  return value.toLocaleString();
+  return value.toLocaleString('en-US');
 }
 
 // ─── Health section ─────────────────────────────────────────────────────────

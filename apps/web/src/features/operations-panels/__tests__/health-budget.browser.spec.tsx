@@ -164,8 +164,19 @@ describe('HealthBudgetPanel — budget posture', () => {
         budget={makeBudget({ used: 85000, limit: 100000, unit: 'tokens' })}
       />,
     );
-    expect(screen.getByTestId('budget-usage')).toHaveTextContent(/85,?000/);
-    expect(screen.getByTestId('budget-usage')).toHaveTextContent(/100,?000/);
+    expect(screen.getByTestId('budget-usage')).toHaveTextContent('85,000 / 100,000 tokens');
+  });
+
+  it('formats large numbers with en-US locale grouping', () => {
+    render(
+      <HealthBudgetPanel
+        health={null}
+        budget={makeBudget({ used: 1234567, limit: 9876543, unit: 'tokens' })}
+      />,
+    );
+    expect(screen.getByTestId('budget-usage')).toHaveTextContent(
+      '1,234,567 / 9,876,543 tokens',
+    );
   });
 
   it('hides usage breakdown when used or limit are null', () => {
