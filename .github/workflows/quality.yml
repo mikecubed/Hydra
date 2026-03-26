@@ -308,9 +308,9 @@ jobs:
         if: github.event_name == 'pull_request' && steps.changed-mutate.outputs.files == ''
         run: echo "No ${{ matrix.scope }} files changed — skipping."
 
-      # On push to main/dev: run full scope for this matrix entry
+      # On push to main only: run full scope for this matrix entry
       - name: Run mutation tests (full scope)
-        if: github.event_name == 'push'
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
         run: npm run test:mutation:${{ matrix.scope }}
         env:
           HUSKY: '0'
