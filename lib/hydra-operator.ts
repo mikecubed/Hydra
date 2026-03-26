@@ -14,7 +14,7 @@
 /* eslint-disable @typescript-eslint/strict-boolean-expressions, @typescript-eslint/no-non-null-assertion -- T7A: standard JS truthiness; type narrowing tracked as follow-up */
 /* eslint-disable @typescript-eslint/no-unnecessary-type-assertion, @typescript-eslint/no-unnecessary-type-conversion -- T7A: operator uses || for truthiness-based defaults */
 /* eslint-disable @typescript-eslint/no-misused-promises, require-atomic-updates -- T7A: CLI entry point */
-/* eslint-disable @typescript-eslint/explicit-module-boundary-types -- T7A: _testExports aggregates internal functions */
+/* eslint-disable @typescript-eslint/explicit-module-boundary-types -- T7A: 2700+ line legacy module; typing all internal handlers is a follow-up */
 /* eslint-disable no-await-in-loop, @typescript-eslint/no-base-to-string -- T7A: sequential processing */
 
 /* eslint-disable unicorn/no-new-array, no-control-regex -- T7A: intentional patterns */

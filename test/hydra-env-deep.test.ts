@@ -1,8 +1,8 @@
 /**
- * Deep coverage tests for lib/hydra-env.ts.
+ * Deep coverage tests for lib/hydra-env.ts public API surface.
  *
- * Tests loadEnvFile with various .env file contents and edge cases.
- * Uses mock.module to override fs for controlled file reading.
+ * Focuses on envFileExists behavior and loadEnvFile's idempotent guard / API shape.
+ * Uses mock.module to override fs for controlled file existence and access.
  */
 import { describe, it, mock, afterEach } from 'node:test';
 import assert from 'node:assert/strict';

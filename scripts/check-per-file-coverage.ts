@@ -7,8 +7,8 @@
 //   npm run test:coverage:per-file
 //   node --experimental-strip-types scripts/check-per-file-coverage.ts
 //
-// Expects c8 coverage data in ./coverage/tmp/ (the default v8 output directory).
-// Generates a JSON summary via `c8 report --reporter=json`.
+// Expects coverage data to have been generated already (e.g. via `npm run test:coverage`).
+// Runs `c8 report --reporter=json` and then reads ./coverage/coverage-final.json.
 
 import { execSync } from 'node:child_process';
 import { readFileSync } from 'node:fs';
@@ -27,7 +27,8 @@ interface CoverageEntry {
 interface ModuleFloor {
   glob: string;
   prefix: string;
-  minStatements: number;
+  /** Statement coverage floor as a percentage (0–100), not a raw statement count. */
+  minStatementPct: number;
 }
 
 interface GroupResult {
@@ -39,8 +40,8 @@ interface GroupResult {
 }
 
 const MODULE_FLOORS: ModuleFloor[] = [
-  { glob: 'lib/daemon/**/*.ts', prefix: 'lib/daemon/', minStatements: 85 },
-  { glob: 'lib/hydra-shared/**/*.ts', prefix: 'lib/hydra-shared/', minStatements: 73 },
+  { glob: 'lib/daemon/**/*.ts', prefix: 'lib/daemon/', minStatementPct: 85 },
+  { glob: 'lib/hydra-shared/**/*.ts', prefix: 'lib/hydra-shared/', minStatementPct: 73 },
 ];
 
 function loadCoverageData(): Record<string, CoverageEntry> | undefined {
@@ -98,7 +99,7 @@ function computeResults(coverageData: Record<string, CoverageEntry>): GroupResul
       totalStatements,
       coveredStatements,
       percentage,
-      passed: percentage >= floor.minStatements,
+      passed: percentage >= floor.minStatementPct,
     });
   }
 
@@ -115,7 +116,7 @@ function printReport(results: GroupResult[]): boolean {
     const pct = result.percentage.toFixed(2);
 
     console.log(
-      `${icon} ${result.floor.glob}: ${pct}% statements (floor: ${String(result.floor.minStatements)}%)`,
+      `${icon} ${result.floor.glob}: ${pct}% statements (floor: ${String(result.floor.minStatementPct)}%)`,
     );
     console.log(
       `      ${String(result.coveredStatements)}/${String(result.totalStatements)} statements covered`,
@@ -124,7 +125,7 @@ function printReport(results: GroupResult[]): boolean {
     if (!result.passed) {
       allPassed = false;
       console.log(
-        `      BELOW FLOOR by ${(result.floor.minStatements - result.percentage).toFixed(2)} percentage points`,
+        `      BELOW FLOOR by ${(result.floor.minStatementPct - result.percentage).toFixed(2)} percentage points`,
       );
     }
     console.log();
