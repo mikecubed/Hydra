@@ -168,6 +168,118 @@ describe('OperationsClient', () => {
     );
   });
 
+  it('fetches work item detail with encoded work item ID', async () => {
+    let capturedUrl = '';
+    const detailBody = {
+      item: {
+        id: 'wq-1',
+        title: 'Task A',
+        status: 'active',
+        position: 0,
+        relatedConversationId: null,
+        relatedSessionId: null,
+        ownerLabel: null,
+        lastCheckpointSummary: null,
+        updatedAt: NOW,
+        riskSignals: [],
+        detailAvailability: 'ready',
+      },
+      checkpoints: [],
+      routing: null,
+      assignments: [],
+      council: null,
+      controls: [],
+      itemBudget: null,
+      availability: 'ready',
+    };
+
+    const client = buildClient(async (input) => {
+      capturedUrl = stringifyInput(input);
+      return jsonResponse(detailBody);
+    });
+
+    const detail = await client.getWorkItemDetail('wq-1');
+    assert.equal(capturedUrl, `${BASE_URL}/operations/work-items/wq-1`);
+    assert.equal(detail.item.id, 'wq-1');
+    assert.equal(detail.availability, 'ready');
+  });
+
+  it('URL-encodes work item IDs containing special characters', async () => {
+    let capturedUrl = '';
+    const client = buildClient(async (input) => {
+      capturedUrl = stringifyInput(input);
+      return jsonResponse({
+        item: {
+          id: 'wq/special item',
+          title: 'Special',
+          status: 'active',
+          position: 0,
+          relatedConversationId: null,
+          relatedSessionId: null,
+          ownerLabel: null,
+          lastCheckpointSummary: null,
+          updatedAt: NOW,
+          riskSignals: [],
+          detailAvailability: 'ready',
+        },
+        checkpoints: [],
+        routing: null,
+        assignments: [],
+        council: null,
+        controls: [],
+        itemBudget: null,
+        availability: 'ready',
+      });
+    });
+
+    await client.getWorkItemDetail('wq/special item');
+    assert.equal(capturedUrl, `${BASE_URL}/operations/work-items/wq%2Fspecial%20item`);
+  });
+
+  it('fetches work item checkpoints', async () => {
+    let capturedUrl = '';
+    const client = buildClient(async (input) => {
+      capturedUrl = stringifyInput(input);
+      return jsonResponse({
+        workItemId: 'wq-1',
+        checkpoints: [
+          {
+            id: 'cp-1',
+            sequence: 0,
+            label: 'Init',
+            status: 'reached',
+            timestamp: NOW,
+            detail: null,
+          },
+        ],
+        availability: 'ready',
+      });
+    });
+
+    const result = await client.getWorkItemCheckpoints('wq-1');
+    assert.equal(capturedUrl, `${BASE_URL}/operations/work-items/wq-1/checkpoints`);
+    assert.equal(result.checkpoints.length, 1);
+    assert.equal(result.checkpoints[0].id, 'cp-1');
+  });
+
+  it('fetches work item execution', async () => {
+    let capturedUrl = '';
+    const client = buildClient(async (input) => {
+      capturedUrl = stringifyInput(input);
+      return jsonResponse({
+        workItemId: 'wq-1',
+        routing: null,
+        assignments: [],
+        council: null,
+        availability: 'ready',
+      });
+    });
+
+    const result = await client.getWorkItemExecution('wq-1');
+    assert.equal(capturedUrl, `${BASE_URL}/operations/work-items/wq-1/execution`);
+    assert.equal(result.workItemId, 'wq-1');
+  });
+
   it('throws OperationsResponseValidationError on invalid snapshot payloads', async () => {
     const client = buildClient(async () =>
       jsonResponse({

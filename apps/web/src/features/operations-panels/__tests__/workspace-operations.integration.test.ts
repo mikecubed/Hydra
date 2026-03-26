@@ -1,14 +1,21 @@
 /**
- * T014 — Workspace × operations integration tests.
+ * T014 / T023 — Workspace × operations integration tests.
  *
  * Pure-state integration tests verifying that the operations reducer,
  * selectors, and initial state produce the correct derived values for
- * the UI layer. Uses node:test (no DOM, no vitest).
+ * the UI layer. Includes detail-sync workflows: selection triggers detail
+ * fetch, checkpoint data flows through selectors, and snapshot refresh
+ * reconciles detail state. Uses node:test (no DOM, no vitest).
  */
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 
-import type { GetOperationsSnapshotResponse, WorkQueueItemView } from '@hydra/web-contracts';
+import type {
+  CheckpointRecordView,
+  GetOperationsSnapshotResponse,
+  GetWorkItemDetailResponse,
+  WorkQueueItemView,
+} from '@hydra/web-contracts';
 
 import {
   createInitialOperationsState,
@@ -17,10 +24,14 @@ import {
 } from '../model/operations-reducer.ts';
 import {
   selectAvailability,
+  selectDetailAvailability,
   selectFilteredQueueItems,
   selectFreshness,
   selectHasPendingControl,
+  selectHasDetail,
   selectQueueItems,
+  selectSelectedCheckpoints,
+  selectSelectedDetail,
   selectSelectedWorkItemId,
   selectSnapshotStatus,
 } from '../model/selectors.ts';
@@ -55,6 +66,34 @@ function makeSnapshot(
     availability: 'ready',
     lastSynchronizedAt: '2026-06-01T12:00:00.000Z',
     nextCursor: null,
+    ...overrides,
+  };
+}
+
+function makeDetailResponse(
+  overrides: Partial<GetWorkItemDetailResponse> = {},
+): GetWorkItemDetailResponse {
+  return {
+    item: makeQueueItem(),
+    checkpoints: [],
+    routing: null,
+    assignments: [],
+    council: null,
+    controls: [],
+    itemBudget: null,
+    availability: 'ready',
+    ...overrides,
+  };
+}
+
+function makeCheckpoint(overrides: Partial<CheckpointRecordView> = {}): CheckpointRecordView {
+  return {
+    id: 'cp-1',
+    sequence: 0,
+    label: 'Init',
+    status: 'reached',
+    timestamp: '2026-06-01T12:00:00.000Z',
+    detail: null,
     ...overrides,
   };
 }
@@ -230,5 +269,121 @@ describe('workspace operations integration', () => {
 
     assert.equal(selectSnapshotStatus(state), 'error');
     assert.equal(selectQueueItems(state).length, 1);
+  });
+
+  // ─── Detail selection + checkpoint workflow ─────────────────────────────
+
+  it('selecting an item and loading detail makes checkpoints available via selector', () => {
+    const items = [makeQueueItem({ id: 'wi-1' })];
+    const checkpoints = [
+      makeCheckpoint({ id: 'cp-1', sequence: 0, label: 'Init' }),
+      makeCheckpoint({ id: 'cp-2', sequence: 1, label: 'Tests pass', status: 'waiting' }),
+    ];
+    const detail = makeDetailResponse({
+      item: makeQueueItem({ id: 'wi-1' }),
+      checkpoints,
+    });
+
+    const state = applyActions(createInitialOperationsState(), [
+      { type: 'snapshot/success', snapshot: makeSnapshot({ queue: items }) },
+      { type: 'selection/select', workItemId: 'wi-1' },
+      { type: 'selection/detail-loaded', detail },
+    ]);
+
+    assert.equal(selectSelectedWorkItemId(state), 'wi-1');
+    assert.equal(selectHasDetail(state), true);
+    assert.equal(selectDetailAvailability(state), 'ready');
+
+    const cps = selectSelectedCheckpoints(state);
+    assert.equal(cps.length, 2);
+    assert.equal(cps[0].label, 'Init');
+    assert.equal(cps[1].label, 'Tests pass');
+  });
+
+  it('deselecting clears detail and checkpoint selectors', () => {
+    const items = [makeQueueItem({ id: 'wi-1' })];
+    const detail = makeDetailResponse({
+      item: makeQueueItem({ id: 'wi-1' }),
+      checkpoints: [makeCheckpoint()],
+    });
+
+    const state = applyActions(createInitialOperationsState(), [
+      { type: 'snapshot/success', snapshot: makeSnapshot({ queue: items }) },
+      { type: 'selection/select', workItemId: 'wi-1' },
+      { type: 'selection/detail-loaded', detail },
+      { type: 'selection/deselect' },
+    ]);
+
+    assert.equal(selectSelectedWorkItemId(state), null);
+    assert.equal(selectHasDetail(state), false);
+    assert.deepEqual(selectSelectedCheckpoints(state), []);
+    assert.equal(selectDetailAvailability(state), null);
+  });
+
+  it('switching selection clears previous detail checkpoints', () => {
+    const items = [makeQueueItem({ id: 'wi-1' }), makeQueueItem({ id: 'wi-2' })];
+    const detail = makeDetailResponse({
+      item: makeQueueItem({ id: 'wi-1' }),
+      checkpoints: [makeCheckpoint({ id: 'cp-1', label: 'Step 1' })],
+    });
+
+    const state = applyActions(createInitialOperationsState(), [
+      { type: 'snapshot/success', snapshot: makeSnapshot({ queue: items }) },
+      { type: 'selection/select', workItemId: 'wi-1' },
+      { type: 'selection/detail-loaded', detail },
+      { type: 'selection/select', workItemId: 'wi-2' },
+    ]);
+
+    assert.equal(selectSelectedWorkItemId(state), 'wi-2');
+    assert.equal(selectHasDetail(state), false);
+    assert.deepEqual(selectSelectedCheckpoints(state), []);
+  });
+
+  it('snapshot refresh reconciles detail item when item remains', () => {
+    const items = [makeQueueItem({ id: 'wi-1', status: 'active' })];
+    const detail = makeDetailResponse({
+      item: makeQueueItem({ id: 'wi-1', status: 'active' }),
+      checkpoints: [makeCheckpoint()],
+    });
+    const updatedItems = [
+      makeQueueItem({ id: 'wi-1', status: 'paused', detailAvailability: 'partial' }),
+    ];
+
+    const state = applyActions(createInitialOperationsState(), [
+      { type: 'snapshot/success', snapshot: makeSnapshot({ queue: items }) },
+      { type: 'selection/select', workItemId: 'wi-1' },
+      { type: 'selection/detail-loaded', detail },
+      { type: 'snapshot/success', snapshot: makeSnapshot({ queue: updatedItems }) },
+    ]);
+
+    assert.equal(selectSelectedWorkItemId(state), 'wi-1');
+    assert.equal(selectHasDetail(state), true);
+    const loadedDetail = selectSelectedDetail(state);
+    assert.equal(loadedDetail?.item.status, 'paused');
+    assert.equal(selectDetailAvailability(state), 'partial');
+    // Checkpoints are preserved from the detail response
+    assert.equal(selectSelectedCheckpoints(state).length, 1);
+  });
+
+  it('snapshot refresh clears detail when selected item disappears', () => {
+    const items = [makeQueueItem({ id: 'wi-1' }), makeQueueItem({ id: 'wi-2' })];
+    const detail = makeDetailResponse({
+      item: makeQueueItem({ id: 'wi-1' }),
+      checkpoints: [makeCheckpoint()],
+    });
+
+    const state = applyActions(createInitialOperationsState(), [
+      { type: 'snapshot/success', snapshot: makeSnapshot({ queue: items }) },
+      { type: 'selection/select', workItemId: 'wi-1' },
+      { type: 'selection/detail-loaded', detail },
+      {
+        type: 'snapshot/success',
+        snapshot: makeSnapshot({ queue: [makeQueueItem({ id: 'wi-2' })] }),
+      },
+    ]);
+
+    assert.equal(selectSelectedWorkItemId(state), null);
+    assert.equal(selectHasDetail(state), false);
+    assert.deepEqual(selectSelectedCheckpoints(state), []);
   });
 });

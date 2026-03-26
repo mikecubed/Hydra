@@ -464,3 +464,129 @@ describe('edge cases', () => {
     assert.equal(next, state);
   });
 });
+
+// ─── Detail-sync: selection + detail lifecycle ──────────────────────────────
+
+describe('detail-sync lifecycle', () => {
+  it('selecting an item clears any previously loaded detail', () => {
+    const detailA = makeDetailResponse({ item: makeQueueItem({ id: 'wq-1' }) });
+    const state = applyActions(createInitialOperationsState(), [
+      { type: 'selection/select', workItemId: 'wq-1' },
+      { type: 'selection/detail-loaded', detail: detailA },
+      { type: 'selection/select', workItemId: 'wq-2' },
+    ]);
+
+    assert.equal(state.selection.selectedWorkItemId, 'wq-2');
+    assert.equal(state.selection.detail, null);
+    assert.equal(state.selection.detailAvailability, null);
+  });
+
+  it('detail-loaded updates detailAvailability from the response', () => {
+    const detail = makeDetailResponse({
+      item: makeQueueItem({ id: 'wq-1' }),
+      availability: 'partial',
+    });
+    const state = applyActions(createInitialOperationsState(), [
+      { type: 'selection/select', workItemId: 'wq-1' },
+      { type: 'selection/detail-loaded', detail },
+    ]);
+
+    assert.equal(state.selection.detailAvailability, 'partial');
+  });
+
+  it('snapshot refresh reconciles detail.item from queue data', () => {
+    const initialSnapshot = makeSnapshotResponse({
+      queue: [makeQueueItem({ id: 'wq-1', status: 'active', lastCheckpointSummary: 'v1' })],
+    });
+    const detail = makeDetailResponse({
+      item: makeQueueItem({ id: 'wq-1', status: 'active', lastCheckpointSummary: 'v1' }),
+    });
+    const updatedSnapshot = makeSnapshotResponse({
+      queue: [
+        makeQueueItem({
+          id: 'wq-1',
+          status: 'paused',
+          lastCheckpointSummary: 'v2',
+          detailAvailability: 'partial',
+        }),
+      ],
+    });
+
+    const state = applyActions(createInitialOperationsState(), [
+      { type: 'snapshot/success', snapshot: initialSnapshot },
+      { type: 'selection/select', workItemId: 'wq-1' },
+      { type: 'selection/detail-loaded', detail },
+      { type: 'snapshot/success', snapshot: updatedSnapshot },
+    ]);
+
+    assert.equal(state.selection.selectedWorkItemId, 'wq-1');
+    assert.equal(state.selection.detail?.item.status, 'paused');
+    assert.equal(state.selection.detail?.item.lastCheckpointSummary, 'v2');
+    assert.equal(state.selection.detailAvailability, 'partial');
+  });
+
+  it('snapshot refresh clears detail when selected item is removed', () => {
+    const snapshot = makeSnapshotResponse({
+      queue: [makeQueueItem({ id: 'wq-1' })],
+    });
+    const detail = makeDetailResponse({ item: makeQueueItem({ id: 'wq-1' }) });
+
+    const state = applyActions(createInitialOperationsState(), [
+      { type: 'snapshot/success', snapshot },
+      { type: 'selection/select', workItemId: 'wq-1' },
+      { type: 'selection/detail-loaded', detail },
+      { type: 'snapshot/success', snapshot: makeSnapshotResponse({ queue: [] }) },
+    ]);
+
+    assert.equal(state.selection.selectedWorkItemId, null);
+    assert.equal(state.selection.detail, null);
+  });
+
+  it('snapshot refresh preserves null detail when no detail was loaded yet', () => {
+    const snapshot = makeSnapshotResponse({
+      queue: [makeQueueItem({ id: 'wq-1' })],
+    });
+
+    const state = applyActions(createInitialOperationsState(), [
+      { type: 'snapshot/success', snapshot },
+      { type: 'selection/select', workItemId: 'wq-1' },
+      { type: 'snapshot/success', snapshot },
+    ]);
+
+    assert.equal(state.selection.selectedWorkItemId, 'wq-1');
+    assert.equal(state.selection.detail, null);
+  });
+
+  it('detail-loaded with checkpoint data is preserved through selection', () => {
+    const detail = makeDetailResponse({
+      item: makeQueueItem({ id: 'wq-1' }),
+      checkpoints: [
+        {
+          id: 'cp-1',
+          sequence: 0,
+          label: 'Init',
+          status: 'reached',
+          timestamp: NOW,
+          detail: null,
+        },
+        {
+          id: 'cp-2',
+          sequence: 1,
+          label: 'Tests pass',
+          status: 'waiting',
+          timestamp: LATER,
+          detail: 'Waiting for CI',
+        },
+      ],
+    });
+
+    const state = applyActions(createInitialOperationsState(), [
+      { type: 'selection/select', workItemId: 'wq-1' },
+      { type: 'selection/detail-loaded', detail },
+    ]);
+
+    assert.equal(state.selection.detail?.checkpoints.length, 2);
+    assert.equal(state.selection.detail?.checkpoints[0].label, 'Init');
+    assert.equal(state.selection.detail?.checkpoints[1].status, 'waiting');
+  });
+});

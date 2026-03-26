@@ -7,7 +7,9 @@
  */
 
 import type {
+  CheckpointRecordView,
   DaemonHealthView,
+  DetailAvailability,
   OperationalControlView,
   SnapshotStatus,
   WorkItemStatus,
@@ -21,6 +23,7 @@ import type { OperationsWorkspaceState } from './operations-types.ts';
 
 const EMPTY_QUEUE: readonly WorkQueueItemView[] = [];
 const EMPTY_CONTROLS: readonly OperationalControlView[] = [];
+const EMPTY_CHECKPOINTS: readonly CheckpointRecordView[] = [];
 
 /** Current snapshot polling status. */
 export function selectSnapshotStatus(state: OperationsWorkspaceState): SnapshotStatus {
@@ -95,4 +98,23 @@ export function selectControlsForSelectedItem(
   state: OperationsWorkspaceState,
 ): readonly OperationalControlView[] {
   return state.selection.detail?.controls ?? EMPTY_CONTROLS;
+}
+
+/** Checkpoints from the currently selected item's detail, or empty. */
+export function selectSelectedCheckpoints(
+  state: OperationsWorkspaceState,
+): readonly CheckpointRecordView[] {
+  return state.selection.detail?.checkpoints ?? EMPTY_CHECKPOINTS;
+}
+
+/** Detail availability for the selected item, or null when no item is selected. */
+export function selectDetailAvailability(
+  state: OperationsWorkspaceState,
+): DetailAvailability | null {
+  return state.selection.detailAvailability;
+}
+
+/** Whether a detail response has been loaded for the selected item. */
+export function selectHasDetail(state: OperationsWorkspaceState): boolean {
+  return state.selection.detail !== null;
 }
