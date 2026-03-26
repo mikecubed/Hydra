@@ -204,6 +204,40 @@ describe('OperationsClient', () => {
     assert.equal(detail.availability, 'ready');
   });
 
+  it('forwards AbortSignal to fetch when provided', async () => {
+    let capturedSignal: AbortSignal | null | undefined = null;
+    const client = buildClient(async (_input, init) => {
+      capturedSignal = init?.signal;
+      return jsonResponse({
+        item: {
+          id: 'wq-1',
+          title: 'Task A',
+          status: 'active',
+          position: 0,
+          relatedConversationId: null,
+          relatedSessionId: null,
+          ownerLabel: null,
+          lastCheckpointSummary: null,
+          updatedAt: NOW,
+          riskSignals: [],
+          detailAvailability: 'ready',
+        },
+        checkpoints: [],
+        routing: null,
+        assignments: [],
+        council: null,
+        controls: [],
+        itemBudget: null,
+        availability: 'ready',
+      });
+    });
+
+    const abortController = new AbortController();
+    await client.getWorkItemDetail('wq-1', { signal: abortController.signal });
+    assert.ok(capturedSignal instanceof AbortSignal, 'AbortSignal should be forwarded to fetch');
+    assert.equal(capturedSignal.aborted, false);
+  });
+
   it('URL-encodes work item IDs containing special characters', async () => {
     let capturedUrl = '';
     const client = buildClient(async (input) => {

@@ -25,7 +25,9 @@ export type OperationsAction =
   | { readonly type: 'filters/set-status'; readonly statusFilter: readonly WorkItemStatus[] }
   | { readonly type: 'selection/select'; readonly workItemId: string }
   | { readonly type: 'selection/deselect' }
+  | { readonly type: 'selection/detail-loading' }
   | { readonly type: 'selection/detail-loaded'; readonly detail: GetWorkItemDetailResponse }
+  | { readonly type: 'selection/detail-failed' }
   | { readonly type: 'controls/submit-pending'; readonly pending: PendingControlRequest }
   | {
       readonly type: 'controls/submit-resolved';
@@ -52,6 +54,7 @@ export function createInitialOperationsState(): OperationsWorkspaceState {
       selectedWorkItemId: null,
       detail: null,
       detailAvailability: null,
+      detailFetchStatus: 'idle',
     },
     controls: {
       pendingByWorkItem: new Map(),
@@ -98,6 +101,7 @@ function reduceSnapshotSuccess(
             selectedWorkItemId: null,
             detail: null,
             detailAvailability: null,
+            detailFetchStatus: 'idle' as const,
           }
         : {
             ...state.selection,
@@ -156,6 +160,7 @@ function reduceSelectionSelect(
       selectedWorkItemId: workItemId,
       detail: null,
       detailAvailability: null,
+      detailFetchStatus: 'idle',
     },
   };
 }
@@ -171,6 +176,21 @@ function reduceSelectionDeselect(state: OperationsWorkspaceState): OperationsWor
       selectedWorkItemId: null,
       detail: null,
       detailAvailability: null,
+      detailFetchStatus: 'idle',
+    },
+  };
+}
+
+function reduceSelectionDetailLoading(state: OperationsWorkspaceState): OperationsWorkspaceState {
+  if (state.selection.selectedWorkItemId === null) {
+    return state;
+  }
+
+  return {
+    ...state,
+    selection: {
+      ...state.selection,
+      detailFetchStatus: 'loading',
     },
   };
 }
@@ -189,6 +209,21 @@ function reduceSelectionDetailLoaded(
       ...state.selection,
       detail,
       detailAvailability: detail.availability,
+      detailFetchStatus: 'idle',
+    },
+  };
+}
+
+function reduceSelectionDetailFailed(state: OperationsWorkspaceState): OperationsWorkspaceState {
+  if (state.selection.selectedWorkItemId === null) {
+    return state;
+  }
+
+  return {
+    ...state,
+    selection: {
+      ...state.selection,
+      detailFetchStatus: 'error',
     },
   };
 }
@@ -256,8 +291,12 @@ export function reduceOperationsState(
       return reduceSelectionSelect(state, action.workItemId);
     case 'selection/deselect':
       return reduceSelectionDeselect(state);
+    case 'selection/detail-loading':
+      return reduceSelectionDetailLoading(state);
     case 'selection/detail-loaded':
       return reduceSelectionDetailLoaded(state, action.detail);
+    case 'selection/detail-failed':
+      return reduceSelectionDetailFailed(state);
     case 'controls/submit-pending':
       return reduceControlsSubmitPending(state, action.pending);
     case 'controls/submit-resolved':

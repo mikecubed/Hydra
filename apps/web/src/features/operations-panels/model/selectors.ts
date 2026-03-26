@@ -19,7 +19,7 @@ import type {
   GetWorkItemDetailResponse,
 } from '@hydra/web-contracts';
 
-import type { OperationsWorkspaceState } from './operations-types.ts';
+import type { DetailFetchStatus, OperationsWorkspaceState } from './operations-types.ts';
 
 const EMPTY_QUEUE: readonly WorkQueueItemView[] = [];
 const EMPTY_CONTROLS: readonly OperationalControlView[] = [];
@@ -117,4 +117,9 @@ export function selectDetailAvailability(
 /** Whether a detail response has been loaded for the selected item. */
 export function selectHasDetail(state: OperationsWorkspaceState): boolean {
   return state.selection.detail !== null;
+}
+
+/** Fetch status for the selected item's detail request. */
+export function selectDetailFetchStatus(state: OperationsWorkspaceState): DetailFetchStatus {
+  return state.selection.detailFetchStatus;
 }

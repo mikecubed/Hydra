@@ -60,7 +60,10 @@ export interface OperationsClient {
   getSnapshot(
     query?: Partial<GetOperationsSnapshotRequest>,
   ): Promise<GetOperationsSnapshotResponseType>;
-  getWorkItemDetail(workItemId: string): Promise<GetWorkItemDetailResponse>;
+  getWorkItemDetail(
+    workItemId: string,
+    options?: { readonly signal?: AbortSignal },
+  ): Promise<GetWorkItemDetailResponse>;
   getWorkItemCheckpoints(workItemId: string): Promise<GetWorkItemCheckpointsResponse>;
   getWorkItemExecution(workItemId: string): Promise<GetWorkItemExecutionResponse>;
   getWorkItemControls(workItemId: string): Promise<GetWorkItemControlsResponse>;
@@ -193,10 +196,10 @@ export function createOperationsClient(options: OperationsClientOptions): Operat
         parseSnapshotResponse,
       );
     },
-    getWorkItemDetail(workItemId) {
+    getWorkItemDetail(workItemId, fetchOptions) {
       return request<GetWorkItemDetailResponse>(
         `/operations/work-items/${encodeURIComponent(workItemId)}`,
-        { method: 'GET' },
+        { method: 'GET', signal: fetchOptions?.signal },
       );
     },
     getWorkItemCheckpoints(workItemId) {

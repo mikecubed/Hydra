@@ -2,6 +2,7 @@
  * T023 — Checkpoint panel browser specs.
  *
  * Covers:
+ * - CheckpointPanel: loading and error states from detailFetchStatus
  * - CheckpointPanel: empty states for all availability values
  * - CheckpointPanel: renders checkpoint timeline with status badges
  * - CheckpointPanel: shows detail text when present
@@ -34,26 +35,70 @@ function makeCheckpoint(overrides: Partial<CheckpointRecordView> = {}): Checkpoi
   };
 }
 
+// ─── Loading / error states ─────────────────────────────────────────────────
+
+describe('CheckpointPanel loading and error states', () => {
+  it('shows loading message when detailFetchStatus is loading', () => {
+    render(
+      <CheckpointPanel checkpoints={[]} detailAvailability={null} detailFetchStatus="loading" />,
+    );
+    expect(screen.getByTestId('checkpoint-panel')).toHaveTextContent(/loading checkpoint data/i);
+  });
+
+  it('shows error message when detailFetchStatus is error', () => {
+    render(
+      <CheckpointPanel checkpoints={[]} detailAvailability={null} detailFetchStatus="error" />,
+    );
+    expect(screen.getByTestId('checkpoint-panel')).toHaveTextContent(
+      /failed to load checkpoint data/i,
+    );
+  });
+
+  it('does not show "no checkpoints" while loading', () => {
+    render(
+      <CheckpointPanel checkpoints={[]} detailAvailability={null} detailFetchStatus="loading" />,
+    );
+    expect(screen.getByTestId('checkpoint-panel')).not.toHaveTextContent(/no checkpoints/i);
+  });
+
+  it('does not show "no checkpoints" after error', () => {
+    render(
+      <CheckpointPanel checkpoints={[]} detailAvailability={null} detailFetchStatus="error" />,
+    );
+    expect(screen.getByTestId('checkpoint-panel')).not.toHaveTextContent(/no checkpoints/i);
+  });
+});
+
 // ─── Empty states ───────────────────────────────────────────────────────────
 
 describe('CheckpointPanel empty states', () => {
   it('shows "no checkpoints" when list is empty with ready availability', () => {
-    render(<CheckpointPanel checkpoints={[]} detailAvailability="ready" />);
+    render(
+      <CheckpointPanel checkpoints={[]} detailAvailability="ready" detailFetchStatus="idle" />,
+    );
     expect(screen.getByTestId('checkpoint-panel')).toHaveTextContent(/no checkpoints/i);
   });
 
   it('shows partial message when availability is partial', () => {
-    render(<CheckpointPanel checkpoints={[]} detailAvailability="partial" />);
+    render(
+      <CheckpointPanel checkpoints={[]} detailAvailability="partial" detailFetchStatus="idle" />,
+    );
     expect(screen.getByTestId('checkpoint-panel')).toHaveTextContent(/partially available/i);
   });
 
   it('shows unavailable message when availability is unavailable', () => {
-    render(<CheckpointPanel checkpoints={[]} detailAvailability="unavailable" />);
+    render(
+      <CheckpointPanel
+        checkpoints={[]}
+        detailAvailability="unavailable"
+        detailFetchStatus="idle"
+      />,
+    );
     expect(screen.getByTestId('checkpoint-panel')).toHaveTextContent(/unavailable/i);
   });
 
-  it('shows default message when availability is null', () => {
-    render(<CheckpointPanel checkpoints={[]} detailAvailability={null} />);
+  it('shows default message when availability is null and fetch is idle', () => {
+    render(<CheckpointPanel checkpoints={[]} detailAvailability={null} detailFetchStatus="idle" />);
     expect(screen.getByTestId('checkpoint-panel')).toHaveTextContent(/no checkpoints/i);
   });
 });
@@ -62,7 +107,9 @@ describe('CheckpointPanel empty states', () => {
 
 describe('CheckpointPanel rendering', () => {
   it('renders the heading', () => {
-    render(<CheckpointPanel checkpoints={[]} detailAvailability="ready" />);
+    render(
+      <CheckpointPanel checkpoints={[]} detailAvailability="ready" detailFetchStatus="idle" />,
+    );
     expect(screen.getByRole('heading', { name: /checkpoints/i })).toBeInTheDocument();
   });
 
@@ -72,7 +119,13 @@ describe('CheckpointPanel rendering', () => {
       makeCheckpoint({ id: 'cp-2', sequence: 1, label: 'Build', status: 'waiting' }),
     ];
 
-    render(<CheckpointPanel checkpoints={checkpoints} detailAvailability="ready" />);
+    render(
+      <CheckpointPanel
+        checkpoints={checkpoints}
+        detailAvailability="ready"
+        detailFetchStatus="idle"
+      />,
+    );
 
     const list = screen.getByRole('list', { name: /checkpoint timeline/i });
     expect(list).toBeInTheDocument();
@@ -85,7 +138,13 @@ describe('CheckpointPanel rendering', () => {
       makeCheckpoint({ id: 'cp-2', sequence: 1, label: 'Tests passing' }),
     ];
 
-    render(<CheckpointPanel checkpoints={checkpoints} detailAvailability="ready" />);
+    render(
+      <CheckpointPanel
+        checkpoints={checkpoints}
+        detailAvailability="ready"
+        detailFetchStatus="idle"
+      />,
+    );
 
     expect(screen.getByText('Environment setup')).toBeInTheDocument();
     expect(screen.getByText('Tests passing')).toBeInTheDocument();
@@ -97,7 +156,13 @@ describe('CheckpointPanel rendering', () => {
       makeCheckpoint({ id: 'cp-2', sequence: 1, status: 'waiting', label: 'Pending' }),
     ];
 
-    render(<CheckpointPanel checkpoints={checkpoints} detailAvailability="ready" />);
+    render(
+      <CheckpointPanel
+        checkpoints={checkpoints}
+        detailAvailability="ready"
+        detailFetchStatus="idle"
+      />,
+    );
 
     expect(screen.getByText('reached')).toBeInTheDocument();
     expect(screen.getByText('waiting')).toBeInTheDocument();
@@ -106,13 +171,25 @@ describe('CheckpointPanel rendering', () => {
   it('shows detail text when checkpoint has detail', () => {
     const checkpoints = [makeCheckpoint({ id: 'cp-1', detail: 'Waiting for CI pipeline' })];
 
-    render(<CheckpointPanel checkpoints={checkpoints} detailAvailability="ready" />);
+    render(
+      <CheckpointPanel
+        checkpoints={checkpoints}
+        detailAvailability="ready"
+        detailFetchStatus="idle"
+      />,
+    );
     expect(screen.getByText('Waiting for CI pipeline')).toBeInTheDocument();
   });
 
   it('omits detail text when checkpoint detail is null', () => {
     const checkpoints = [makeCheckpoint({ id: 'cp-1', detail: null })];
-    render(<CheckpointPanel checkpoints={checkpoints} detailAvailability="ready" />);
+    render(
+      <CheckpointPanel
+        checkpoints={checkpoints}
+        detailAvailability="ready"
+        detailFetchStatus="idle"
+      />,
+    );
 
     const entry = screen.getByTestId('checkpoint-cp-1');
     // Should only have label, badge, and timestamp — no italic detail
@@ -125,7 +202,13 @@ describe('CheckpointPanel rendering', () => {
       makeCheckpoint({ id: 'cp-beta', sequence: 1, label: 'Beta' }),
     ];
 
-    render(<CheckpointPanel checkpoints={checkpoints} detailAvailability="ready" />);
+    render(
+      <CheckpointPanel
+        checkpoints={checkpoints}
+        detailAvailability="ready"
+        detailFetchStatus="idle"
+      />,
+    );
 
     expect(screen.getByTestId('checkpoint-cp-alpha')).toBeInTheDocument();
     expect(screen.getByTestId('checkpoint-cp-beta')).toBeInTheDocument();
@@ -143,7 +226,13 @@ describe('CheckpointPanel status coverage', () => {
         makeCheckpoint({ id: `cp-${status}`, status, label: `${status} checkpoint` }),
       ];
 
-      render(<CheckpointPanel checkpoints={checkpoints} detailAvailability="ready" />);
+      render(
+        <CheckpointPanel
+          checkpoints={checkpoints}
+          detailAvailability="ready"
+          detailFetchStatus="idle"
+        />,
+      );
       expect(screen.getByText(status)).toBeInTheDocument();
       expect(screen.getByText(`${status} checkpoint`)).toBeInTheDocument();
     });

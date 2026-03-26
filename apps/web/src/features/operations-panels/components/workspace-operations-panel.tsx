@@ -8,6 +8,7 @@ import {
 import {
   selectAvailability,
   selectDetailAvailability,
+  selectDetailFetchStatus,
   selectFilteredQueueItems,
   selectFreshness,
   selectHasPendingControl,
@@ -77,10 +78,15 @@ export function WorkspaceOperationsPanel(): JSX.Element {
   const selectedWorkItemId = selectSelectedWorkItemId(state);
   const checkpoints = selectSelectedCheckpoints(state);
   const detailAvailability = selectDetailAvailability(state);
+  const detailFetchStatus = selectDetailFetchStatus(state);
 
   const detailPanel =
     selectedWorkItemId === null ? undefined : (
-      <CheckpointPanel checkpoints={checkpoints} detailAvailability={detailAvailability} />
+      <CheckpointPanel
+        checkpoints={checkpoints}
+        detailAvailability={detailAvailability}
+        detailFetchStatus={detailFetchStatus}
+      />
     );
 
   return (

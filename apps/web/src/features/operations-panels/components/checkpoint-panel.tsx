@@ -11,6 +11,7 @@ import type {
   CheckpointStatus,
   DetailAvailability,
 } from '@hydra/web-contracts';
+import type { DetailFetchStatus } from '../model/operations-types.ts';
 
 // ─── Status colour map ──────────────────────────────────────────────────────
 
@@ -109,7 +110,12 @@ function formatTimestamp(iso: string): string {
   }
 }
 
-function resolveEmptyMessage(availability: DetailAvailability | null): string {
+function resolveEmptyMessage(
+  availability: DetailAvailability | null,
+  fetchStatus: DetailFetchStatus,
+): string {
+  if (fetchStatus === 'loading') return 'Loading checkpoint data\u2026';
+  if (fetchStatus === 'error') return 'Failed to load checkpoint data.';
   if (availability === 'partial') return 'Checkpoint data is partially available.';
   if (availability === 'unavailable') return 'Checkpoint data is currently unavailable.';
   return 'No checkpoints recorded yet.';
@@ -167,17 +173,19 @@ function CheckpointEntry({
 export interface CheckpointPanelProps {
   readonly checkpoints: readonly CheckpointRecordView[];
   readonly detailAvailability: DetailAvailability | null;
+  readonly detailFetchStatus: DetailFetchStatus;
 }
 
 export function CheckpointPanel({
   checkpoints,
   detailAvailability,
+  detailFetchStatus,
 }: CheckpointPanelProps): JSX.Element {
   return (
     <div style={panelStyle} data-testid="checkpoint-panel">
       <h4 style={headingStyle}>Checkpoints</h4>
       {checkpoints.length === 0 ? (
-        <p style={emptyStyle}>{resolveEmptyMessage(detailAvailability)}</p>
+        <p style={emptyStyle}>{resolveEmptyMessage(detailAvailability, detailFetchStatus)}</p>
       ) : (
         <ol aria-label="Checkpoint timeline" style={listStyle}>
           {checkpoints.map((cp) => (

@@ -2,10 +2,11 @@
  * T020 — Sync controller tests.
  *
  * Verifies that createSyncController correctly orchestrates detail fetching:
- * - Dispatches selection/detail-loaded on successful fetch
- * - Cancels stale fetches when selection changes rapidly
+ * - Dispatches selection/detail-loading then selection/detail-loaded on success
+ * - Aborts in-flight HTTP requests when selection changes rapidly
+ * - Dispatches selection/detail-failed on non-abort errors
  * - Ignores results after dispose
- * - cancelSync prevents in-flight from dispatching
+ * - cancelSync aborts in-flight and prevents dispatch
  */
 import { describe, it, mock } from 'node:test';
 import assert from 'node:assert/strict';
@@ -71,7 +72,10 @@ function createDeferredFetch<T>(): DeferredFetch<T> {
 }
 
 function createMockClient(
-  getWorkItemDetailImpl: (workItemId: string) => Promise<GetWorkItemDetailResponse>,
+  getWorkItemDetailImpl: (
+    workItemId: string,
+    options?: { readonly signal?: AbortSignal },
+  ) => Promise<GetWorkItemDetailResponse>,
 ): OperationsClient {
   return {
     getSnapshot: mock.fn(() => Promise.reject(new Error('not implemented'))),
@@ -87,7 +91,7 @@ function createMockClient(
 // ─── Tests ──────────────────────────────────────────────────────────────────
 
 describe('createSyncController', () => {
-  it('dispatches selection/detail-loaded on successful fetch', async () => {
+  it('dispatches detail-loading then detail-loaded on successful fetch', async () => {
     const detail = makeDetailResponse({ item: makeQueueItem({ id: 'wq-1' }) });
     const deferred = createDeferredFetch<GetWorkItemDetailResponse>();
     const client = createMockClient(() => deferred.promise);
@@ -99,6 +103,11 @@ describe('createSyncController', () => {
     });
 
     controller.syncDetail('wq-1');
+
+    // detail-loading should be dispatched synchronously
+    assert.equal(dispatched.length, 1);
+    assert.equal(dispatched[0].type, 'selection/detail-loading');
+
     deferred.resolve(detail);
     await deferred.promise;
 
@@ -107,22 +116,33 @@ describe('createSyncController', () => {
       setTimeout(r, 0);
     });
 
-    assert.equal(dispatched.length, 1);
-    assert.equal(dispatched[0].type, 'selection/detail-loaded');
-    if (dispatched[0].type === 'selection/detail-loaded') {
-      assert.deepEqual(dispatched[0].detail, detail);
+    assert.equal(dispatched.length, 2);
+    assert.equal(dispatched[1].type, 'selection/detail-loaded');
+    if (dispatched[1].type === 'selection/detail-loaded') {
+      assert.deepEqual(dispatched[1].detail, detail);
     }
   });
 
-  it('cancels stale fetch when selection changes rapidly', async () => {
+  it('aborts the previous HTTP request when selection changes rapidly', async () => {
     const detailA = makeDetailResponse({ item: makeQueueItem({ id: 'wq-A' }) });
     const detailB = makeDetailResponse({ item: makeQueueItem({ id: 'wq-B' }) });
+    const abortedSignals: boolean[] = [];
     const deferredA = createDeferredFetch<GetWorkItemDetailResponse>();
     const deferredB = createDeferredFetch<GetWorkItemDetailResponse>();
 
     let callCount = 0;
-    const client = createMockClient((workItemId) => {
+    const client = createMockClient((workItemId, options) => {
       callCount += 1;
+      // Record the signal's aborted state at the time of resolution
+      if (options?.signal) {
+        const signal = options.signal;
+        // Track abort events
+        const idx = abortedSignals.length;
+        abortedSignals.push(false);
+        signal.addEventListener('abort', () => {
+          abortedSignals[idx] = true;
+        });
+      }
       if (workItemId === 'wq-A') return deferredA.promise;
       return deferredB.promise;
     });
@@ -137,7 +157,11 @@ describe('createSyncController', () => {
     controller.syncDetail('wq-A');
     controller.syncDetail('wq-B');
 
-    // Resolve both — only B should dispatch
+    // The first request's signal should have been aborted
+    assert.equal(abortedSignals[0], true, 'first request signal should be aborted');
+    assert.equal(abortedSignals[1], false, 'second request signal should not be aborted');
+
+    // Resolve both — only B should dispatch detail-loaded
     deferredA.resolve(detailA);
     deferredB.resolve(detailB);
     await Promise.all([deferredA.promise, deferredB.promise]);
@@ -146,10 +170,55 @@ describe('createSyncController', () => {
     });
 
     assert.equal(callCount, 2);
-    assert.equal(dispatched.length, 1);
-    if (dispatched[0].type === 'selection/detail-loaded') {
-      assert.equal(dispatched[0].detail.item.id, 'wq-B');
+    // detail-loading (A) + detail-loading (B) + detail-loaded (B)
+    const loadedActions = dispatched.filter((a) => a.type === 'selection/detail-loaded');
+    assert.equal(loadedActions.length, 1);
+    if (loadedActions[0].type === 'selection/detail-loaded') {
+      assert.equal(loadedActions[0].detail.item.id, 'wq-B');
     }
+  });
+
+  it('passes AbortSignal to the client and aborts on cancelSync', async () => {
+    let capturedSignal: AbortSignal | undefined;
+    const deferred = createDeferredFetch<GetWorkItemDetailResponse>();
+    const client = createMockClient((_id, options) => {
+      capturedSignal = options?.signal;
+      return deferred.promise;
+    });
+    const dispatched: OperationsAction[] = [];
+
+    const controller = createSyncController({
+      client,
+      dispatch: (action) => dispatched.push(action),
+    });
+
+    controller.syncDetail('wq-1');
+    assert.ok(capturedSignal, 'signal should be passed to client');
+    assert.equal(capturedSignal.aborted, false);
+
+    controller.cancelSync();
+    assert.equal(capturedSignal.aborted, true, 'signal should be aborted after cancelSync');
+  });
+
+  it('passes AbortSignal to the client and aborts on dispose', async () => {
+    let capturedSignal: AbortSignal | undefined;
+    const deferred = createDeferredFetch<GetWorkItemDetailResponse>();
+    const client = createMockClient((_id, options) => {
+      capturedSignal = options?.signal;
+      return deferred.promise;
+    });
+
+    const controller = createSyncController({
+      client,
+      dispatch: () => {},
+    });
+
+    controller.syncDetail('wq-1');
+    assert.ok(capturedSignal, 'signal should be passed to client');
+    assert.equal(capturedSignal.aborted, false);
+
+    controller.dispose();
+    assert.equal(capturedSignal.aborted, true, 'signal should be aborted after dispose');
   });
 
   it('does not dispatch after dispose', async () => {
@@ -164,6 +233,10 @@ describe('createSyncController', () => {
     });
 
     controller.syncDetail('wq-1');
+    // Remove the detail-loading action so we can assert only on post-dispose behavior
+    const loadingCount = dispatched.filter((a) => a.type === 'selection/detail-loading').length;
+    assert.equal(loadingCount, 1);
+
     controller.dispose();
     deferred.resolve(detail);
     await deferred.promise;
@@ -171,10 +244,12 @@ describe('createSyncController', () => {
       setTimeout(r, 0);
     });
 
-    assert.equal(dispatched.length, 0);
+    // Only the initial detail-loading should be present, no detail-loaded
+    assert.equal(dispatched.length, 1);
+    assert.equal(dispatched[0].type, 'selection/detail-loading');
   });
 
-  it('does not dispatch after cancelSync', async () => {
+  it('does not dispatch detail-loaded after cancelSync', async () => {
     const detail = makeDetailResponse();
     const deferred = createDeferredFetch<GetWorkItemDetailResponse>();
     const client = createMockClient(() => deferred.promise);
@@ -193,10 +268,12 @@ describe('createSyncController', () => {
       setTimeout(r, 0);
     });
 
-    assert.equal(dispatched.length, 0);
+    // Only detail-loading should be dispatched, not detail-loaded
+    assert.equal(dispatched.length, 1);
+    assert.equal(dispatched[0].type, 'selection/detail-loading');
   });
 
-  it('does not dispatch when detail fetch rejects', async () => {
+  it('dispatches detail-failed when detail fetch rejects with non-abort error', async () => {
     const deferred = createDeferredFetch<GetWorkItemDetailResponse>();
     const client = createMockClient(() => deferred.promise);
     const dispatched: OperationsAction[] = [];
@@ -217,7 +294,40 @@ describe('createSyncController', () => {
       setTimeout(r, 0);
     });
 
-    assert.equal(dispatched.length, 0);
+    assert.equal(dispatched.length, 2);
+    assert.equal(dispatched[0].type, 'selection/detail-loading');
+    assert.equal(dispatched[1].type, 'selection/detail-failed');
+  });
+
+  it('does not dispatch detail-failed for abort errors', async () => {
+    const client = createMockClient(
+      (_id, options) =>
+        // Simulate an immediate abort
+        new Promise((_resolve, reject) => {
+          if (options?.signal) {
+            options.signal.addEventListener('abort', () => {
+              reject(new DOMException('The operation was aborted.', 'AbortError'));
+            });
+          }
+        }),
+    );
+    const dispatched: OperationsAction[] = [];
+
+    const controller = createSyncController({
+      client,
+      dispatch: (action) => dispatched.push(action),
+    });
+
+    controller.syncDetail('wq-1');
+    controller.cancelSync();
+
+    await new Promise<void>((r) => {
+      setTimeout(r, 10);
+    });
+
+    // Only detail-loading — no detail-failed for abort
+    assert.equal(dispatched.length, 1);
+    assert.equal(dispatched[0].type, 'selection/detail-loading');
   });
 
   it('ignores syncDetail calls after dispose', async () => {
@@ -236,5 +346,33 @@ describe('createSyncController', () => {
     });
 
     assert.equal(dispatched.length, 0);
+  });
+
+  it('does not fan out uncontrolled requests on rapid selection', async () => {
+    const signals: AbortSignal[] = [];
+    const client = createMockClient((_id, options) => {
+      if (options?.signal) signals.push(options.signal);
+      // Never resolve — simulates slow network
+      return new Promise<GetWorkItemDetailResponse>(() => {});
+    });
+
+    const controller = createSyncController({
+      client,
+      dispatch: () => {},
+    });
+
+    // Rapidly select 10 different items
+    for (let i = 0; i < 10; i++) {
+      controller.syncDetail(`wq-${String(i)}`);
+    }
+
+    // All but the last signal should be aborted
+    assert.equal(signals.length, 10);
+    for (let i = 0; i < 9; i++) {
+      assert.equal(signals[i].aborted, true, `signal ${String(i)} should be aborted`);
+    }
+    assert.equal(signals[9].aborted, false, 'last signal should still be active');
+
+    controller.dispose();
   });
 });

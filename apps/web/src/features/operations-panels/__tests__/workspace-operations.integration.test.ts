@@ -25,6 +25,7 @@ import {
 import {
   selectAvailability,
   selectDetailAvailability,
+  selectDetailFetchStatus,
   selectFilteredQueueItems,
   selectFreshness,
   selectHasPendingControl,
@@ -385,5 +386,80 @@ describe('workspace operations integration', () => {
     assert.equal(selectSelectedWorkItemId(state), null);
     assert.equal(selectHasDetail(state), false);
     assert.deepEqual(selectSelectedCheckpoints(state), []);
+  });
+
+  // ─── Detail fetch status lifecycle ──────────────────────────────────────
+
+  it('detailFetchStatus is idle initially', () => {
+    const state = createInitialOperationsState();
+    assert.equal(selectDetailFetchStatus(state), 'idle');
+  });
+
+  it('detail-loading sets detailFetchStatus to loading', () => {
+    const items = [makeQueueItem({ id: 'wi-1' })];
+    const state = applyActions(createInitialOperationsState(), [
+      { type: 'snapshot/success', snapshot: makeSnapshot({ queue: items }) },
+      { type: 'selection/select', workItemId: 'wi-1' },
+      { type: 'selection/detail-loading' },
+    ]);
+
+    assert.equal(selectDetailFetchStatus(state), 'loading');
+    assert.equal(selectHasDetail(state), false);
+  });
+
+  it('detail-loaded resets detailFetchStatus to idle', () => {
+    const items = [makeQueueItem({ id: 'wi-1' })];
+    const detail = makeDetailResponse({ item: makeQueueItem({ id: 'wi-1' }) });
+
+    const state = applyActions(createInitialOperationsState(), [
+      { type: 'snapshot/success', snapshot: makeSnapshot({ queue: items }) },
+      { type: 'selection/select', workItemId: 'wi-1' },
+      { type: 'selection/detail-loading' },
+      { type: 'selection/detail-loaded', detail },
+    ]);
+
+    assert.equal(selectDetailFetchStatus(state), 'idle');
+    assert.equal(selectHasDetail(state), true);
+  });
+
+  it('detail-failed sets detailFetchStatus to error', () => {
+    const items = [makeQueueItem({ id: 'wi-1' })];
+
+    const state = applyActions(createInitialOperationsState(), [
+      { type: 'snapshot/success', snapshot: makeSnapshot({ queue: items }) },
+      { type: 'selection/select', workItemId: 'wi-1' },
+      { type: 'selection/detail-loading' },
+      { type: 'selection/detail-failed' },
+    ]);
+
+    assert.equal(selectDetailFetchStatus(state), 'error');
+    assert.equal(selectHasDetail(state), false);
+  });
+
+  it('switching selection resets detailFetchStatus to idle', () => {
+    const items = [makeQueueItem({ id: 'wi-1' }), makeQueueItem({ id: 'wi-2' })];
+
+    const state = applyActions(createInitialOperationsState(), [
+      { type: 'snapshot/success', snapshot: makeSnapshot({ queue: items }) },
+      { type: 'selection/select', workItemId: 'wi-1' },
+      { type: 'selection/detail-loading' },
+      { type: 'selection/select', workItemId: 'wi-2' },
+    ]);
+
+    assert.equal(selectDetailFetchStatus(state), 'idle');
+  });
+
+  it('deselecting resets detailFetchStatus to idle from error', () => {
+    const items = [makeQueueItem({ id: 'wi-1' })];
+
+    const state = applyActions(createInitialOperationsState(), [
+      { type: 'snapshot/success', snapshot: makeSnapshot({ queue: items }) },
+      { type: 'selection/select', workItemId: 'wi-1' },
+      { type: 'selection/detail-loading' },
+      { type: 'selection/detail-failed' },
+      { type: 'selection/deselect' },
+    ]);
+
+    assert.equal(selectDetailFetchStatus(state), 'idle');
   });
 });
