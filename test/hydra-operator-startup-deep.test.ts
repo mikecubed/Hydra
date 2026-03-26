@@ -240,14 +240,13 @@ describe('hydra-operator-startup-deep', () => {
   });
 
   describe('findPowerShell', () => {
-    it('returns null on non-windows', () => {
-      // process.platform is already linux in this env
+    it('returns null on non-windows', { skip: process.platform === 'win32' }, () => {
       assert.equal(findPowerShell(), null);
     });
   });
 
   describe('findWindowsTerminal', () => {
-    it('returns null on non-windows', () => {
+    it('returns null on non-windows', { skip: process.platform === 'win32' }, () => {
       assert.equal(findWindowsTerminal(), null);
     });
   });

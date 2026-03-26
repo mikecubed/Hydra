@@ -25,9 +25,9 @@ interface CoverageEntry {
 }
 
 interface ModuleFloor {
-  glob: string;
+  /** Path prefix used for matching coverage keys (e.g. 'lib/daemon/'). */
   prefix: string;
-  /** Statement coverage floor as a percentage (0–100), not a raw statement count. */
+  /** Statement coverage floor as a percentage (0–100). */
   minStatementPct: number;
 }
 
@@ -40,8 +40,8 @@ interface GroupResult {
 }
 
 const MODULE_FLOORS: ModuleFloor[] = [
-  { glob: 'lib/daemon/**/*.ts', prefix: 'lib/daemon/', minStatementPct: 85 },
-  { glob: 'lib/hydra-shared/**/*.ts', prefix: 'lib/hydra-shared/', minStatementPct: 73 },
+  { prefix: 'lib/daemon/', minStatementPct: 85 },
+  { prefix: 'lib/hydra-shared/', minStatementPct: 73 },
 ];
 
 function loadCoverageData(): Record<string, CoverageEntry> | undefined {
@@ -52,9 +52,16 @@ function loadCoverageData(): Record<string, CoverageEntry> | undefined {
       stdio: ['pipe', 'pipe', 'pipe'],
       encoding: 'utf8',
     });
-  } catch {
+  } catch (err_: unknown) {
     console.error('Failed to generate c8 JSON report.');
     console.error('Make sure you have run `npm run test:coverage` first.');
+    if (err_ != null && typeof err_ === 'object') {
+      const details = err_ as { message?: string; stderr?: string };
+      if (details.message != null && details.message !== '')
+        console.error(`c8 error: ${details.message}`);
+      if (details.stderr != null && details.stderr !== '')
+        console.error(`c8 stderr:\n${details.stderr}`);
+    }
     return undefined;
   }
 
@@ -93,13 +100,20 @@ function computeResults(coverageData: Record<string, CoverageEntry>): GroupResul
       coveredStatements += statementCounts.filter((count) => count > 0).length;
     }
 
+    if (totalStatements === 0) {
+      console.error(
+        `WARNING: No files matched "${floor.prefix}" in coverage report. ` +
+          'Check path normalization and c8 config.',
+      );
+    }
+
     const percentage = totalStatements > 0 ? (coveredStatements / totalStatements) * 100 : 0;
     results.push({
       floor,
       totalStatements,
       coveredStatements,
       percentage,
-      passed: percentage >= floor.minStatementPct,
+      passed: totalStatements > 0 && percentage >= floor.minStatementPct,
     });
   }
 
@@ -116,7 +130,7 @@ function printReport(results: GroupResult[]): boolean {
     const pct = result.percentage.toFixed(2);
 
     console.log(
-      `${icon} ${result.floor.glob}: ${pct}% statements (floor: ${String(result.floor.minStatementPct)}%)`,
+      `${icon} ${result.floor.prefix}: ${pct}% statements (floor: ${String(result.floor.minStatementPct)}%)`,
     );
     console.log(
       `      ${String(result.coveredStatements)}/${String(result.totalStatements)} statements covered`,
@@ -124,9 +138,13 @@ function printReport(results: GroupResult[]): boolean {
 
     if (!result.passed) {
       allPassed = false;
-      console.log(
-        `      BELOW FLOOR by ${(result.floor.minStatementPct - result.percentage).toFixed(2)} percentage points`,
-      );
+      if (result.totalStatements === 0) {
+        console.log('      NO FILES MATCHED — check coverage paths');
+      } else {
+        console.log(
+          `      BELOW FLOOR by ${(result.floor.minStatementPct - result.percentage).toFixed(2)} percentage points`,
+        );
+      }
     }
     console.log();
   }

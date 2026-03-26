@@ -18,6 +18,12 @@ const repoRoot = path.resolve(scriptDir, '..');
 
 const baseBranch = process.argv[2] ?? 'main';
 
+if (baseBranch.startsWith('-') || /\s/.test(baseBranch)) {
+  console.error(`Invalid base branch ref: "${baseBranch}"`);
+  console.error('The base branch name must not start with "-" or contain whitespace.');
+  process.exitCode = 1;
+}
+
 function getNewFiles(): string[] | undefined {
   // Get list of newly added files (diff-filter=A means "added only")
   // Uses execFileSync with argument array to avoid command injection via baseBranch.

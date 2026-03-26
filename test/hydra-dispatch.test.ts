@@ -320,7 +320,7 @@ describe('getRoleAgent — empty/null preferred agent', () => {
 
 describe('setDispatchExecutor — round-trip restore', () => {
   it('restoring previous executor returns the mock that was swapped in', () => {
-    const mock: IAgentExecutor = {
+    const mockExecutor: IAgentExecutor = {
       executeAgentWithRecovery: null as unknown as IAgentExecutor['executeAgentWithRecovery'],
       executeAgent: async () => ({
         ok: true,
@@ -336,13 +336,13 @@ describe('setDispatchExecutor — round-trip restore', () => {
         promptSnippet: '',
       }),
     };
-    const original = setDispatchExecutor(mock);
+    const original = setDispatchExecutor(mockExecutor);
     const displaced = setDispatchExecutor(original);
-    assert.equal(displaced, mock, 'displaced should be the mock we installed');
+    assert.equal(displaced, mockExecutor, 'displaced should be the mock we installed');
   });
 
   it('original executor has executeAgentWithRecovery method', () => {
-    const mock: IAgentExecutor = {
+    const mockExecutor: IAgentExecutor = {
       executeAgentWithRecovery: null as unknown as IAgentExecutor['executeAgentWithRecovery'],
       executeAgent: async () => ({
         ok: true,
@@ -358,7 +358,7 @@ describe('setDispatchExecutor — round-trip restore', () => {
         promptSnippet: '',
       }),
     };
-    const original = setDispatchExecutor(mock);
+    const original = setDispatchExecutor(mockExecutor);
     assert.equal(typeof original.executeAgentWithRecovery, 'function');
     // Restore
     setDispatchExecutor(original);
