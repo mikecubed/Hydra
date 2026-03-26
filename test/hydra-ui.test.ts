@@ -543,7 +543,7 @@ test('formatTaskLine handles undefined fields gracefully', () => {
 });
 
 test('formatTaskLine returns empty for undefined', () => {
-  assert.equal(formatTaskLine(undefined), '');
+  assert.equal(formatTaskLine(), '');
 });
 
 // ── formatHandoffLine ────────────────────────────────────────────────────────
@@ -577,7 +577,7 @@ test('formatHandoffLine shows ack when acknowledgedAt is set', () => {
 
 test('formatHandoffLine returns empty for null', () => {
   assert.equal(formatHandoffLine(null), '');
-  assert.equal(formatHandoffLine(undefined), '');
+  assert.equal(formatHandoffLine(), '');
 });
 
 test('formatHandoffLine handles missing fields', () => {

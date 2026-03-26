@@ -443,7 +443,7 @@ function extractCouncilSignal(parsed: unknown) {
   return { vote, reason };
 }
 
-export function extractDecisionOptions(parsed: unknown): unknown[] {
+export function extractDecisionOptions(parsed?: unknown): unknown[] {
   if (parsed == null || typeof parsed !== 'object') {
     return [];
   }
@@ -499,7 +499,7 @@ function normalizeAssumptionItem(item: unknown): {
   };
 }
 
-export function extractAssumptions(parsed: unknown): unknown[] {
+export function extractAssumptions(parsed?: unknown): unknown[] {
   if (parsed == null || typeof parsed !== 'object') {
     return [];
   }
@@ -543,7 +543,7 @@ function normalizeAttackItem(item: unknown): {
   };
 }
 
-export function extractAssumptionAttacks(parsed: unknown): unknown[] {
+export function extractAssumptionAttacks(parsed?: unknown): unknown[] {
   if (parsed == null || typeof parsed !== 'object') {
     return [];
   }
@@ -643,7 +643,7 @@ function extractDecisionFields(p: Record<string, unknown>) {
 }
 
 export function extractFinalDecision(
-  parsed: unknown,
+  parsed?: unknown,
   fallback: { agent?: string; phase?: string } = {},
 ): {
   summary: string;
