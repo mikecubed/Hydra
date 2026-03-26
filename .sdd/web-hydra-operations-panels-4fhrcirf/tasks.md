@@ -95,12 +95,12 @@ _Create the browser-safe operations vocabulary before daemon, gateway, or browse
 
 **Independent Test**: Simulate healthy, degraded, unavailable, warning, and exceeded states; verify the browser separates global daemon conditions from local work-item warnings and explicit unavailable/partial states.
 
-- [ ] T025 [P] [US3] **TDD:** extend daemon projection coverage for health/budget scope separation and unavailable states in `test/web-operations-projection.test.ts` and `test/web-operations-routes.test.ts`.
-- [ ] T026 [US3] Implement daemon health and budget projections in `lib/daemon/web-operations-projection.ts` and `lib/daemon/web-operations-routes.ts`, treating global budget posture as the required baseline and marking non-global scopes unavailable until daemon attribution exists.
-- [ ] T027 [P] [US3] **TDD:** add browser health/budget and risk-badge coverage in `apps/web/src/features/operations-panels/__tests__/health-budget.browser.spec.tsx` and `apps/web/src/features/operations-panels/__tests__/operations-reducer.test.ts`.
-- [ ] T028 [US3] Implement health and budget panels plus queue risk signals in `apps/web/src/features/operations-panels/components/health-budget-panel.tsx`, `apps/web/src/features/operations-panels/components/queue-item-card.tsx`, and `apps/web/src/features/operations-panels/components/operations-panel-shell.tsx`.
-- [ ] T029 [US3] Add global-vs-item risk regression coverage in `apps/web/src/features/operations-panels/__tests__/workspace-operations.integration.test.ts` and `apps/web-gateway/src/operations/__tests__/operations-routes.test.ts`.
-- [ ] T030 [US3] Run the phase quality gate from the repo root with `npm run quality` and `npm test` after health and budget surfaces are green.
+- [x] T025 [P] [US3] **TDD:** extend daemon projection coverage for health/budget scope separation and unavailable states in `test/web-operations-projection.test.ts` and `test/web-operations-routes.test.ts`.
+- [x] T026 [US3] Implement daemon health and budget projections in `lib/daemon/web-operations-projection.ts` and `lib/daemon/web-operations-routes.ts`, treating global budget posture as the required baseline and marking non-global scopes unavailable until daemon attribution exists.
+- [x] T027 [P] [US3] **TDD:** add browser health/budget and risk-badge coverage in `apps/web/src/features/operations-panels/__tests__/health-budget.browser.spec.tsx` and `apps/web/src/features/operations-panels/__tests__/operations-reducer.test.ts`.
+- [x] T028 [US3] Implement health and budget panels plus queue risk signals in `apps/web/src/features/operations-panels/components/health-budget-panel.tsx`, `apps/web/src/features/operations-panels/components/queue-item-card.tsx`, and `apps/web/src/features/operations-panels/components/operations-panel-shell.tsx`.
+- [x] T029 [US3] Add global-vs-item risk regression coverage in `apps/web/src/features/operations-panels/__tests__/workspace-operations.integration.test.ts` and `apps/web-gateway/src/operations/__tests__/operations-routes.test.ts`.
+- [x] T030 [US3] Run the phase quality gate from the repo root with `npm run quality` and `npm test` after health and budget surfaces are green.
 
 **Checkpoint**: User Stories 1–3 provide the minimum read-only operator surface for queue, progress, and risk.
 

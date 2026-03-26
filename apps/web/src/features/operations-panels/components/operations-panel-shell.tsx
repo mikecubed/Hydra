@@ -12,6 +12,7 @@ export interface OperationsPanelShellProps {
   readonly freshness: WorkspaceFreshness;
   readonly children: ReactNode;
   readonly detailPanel?: ReactNode;
+  readonly healthBudgetPanel?: ReactNode;
 }
 
 const shellStyle: CSSProperties = {
@@ -85,8 +86,10 @@ export function OperationsPanelShell({
   freshness,
   children,
   detailPanel,
+  healthBudgetPanel,
 }: OperationsPanelShellProps): JSX.Element {
   const hasDetail = detailPanel != null;
+  const hasHealthBudget = healthBudgetPanel != null;
 
   return (
     <section aria-labelledby="operations-panel-heading" style={shellStyle}>
@@ -99,6 +102,7 @@ export function OperationsPanelShell({
           {snapshotStatus === 'loading' && <span style={loadingLabelStyle}>Refreshing…</span>}
         </div>
       </header>
+      {hasHealthBudget && <div data-testid="health-budget-slot">{healthBudgetPanel}</div>}
       <div style={hasDetail ? splitLayoutStyle : contentLayoutStyle}>
         <div>{children}</div>
         {hasDetail && <div data-testid="detail-panel-slot">{detailPanel}</div>}

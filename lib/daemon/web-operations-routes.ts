@@ -11,6 +11,7 @@ import {
   projectCheckpoints,
   projectWorkItemDetail,
   type QueueSnapshotOptions,
+  type HealthBudgetContext,
 } from './web-operations-projection.ts';
 import type { WorkItemStatus } from '@hydra/web-contracts';
 
@@ -66,8 +67,45 @@ function parseLimit(raw: string | null): number | undefined {
   return Number.isFinite(n) && n > 0 ? n : undefined;
 }
 
+function warnProbeFailure(
+  probeName: 'readStatus' | 'checkUsage' | 'writeStatus',
+  error: unknown,
+): void {
+  const detail = error instanceof Error ? error.message : String(error);
+  console.warn(`[operations] ${probeName} probe failed: ${detail}`);
+}
+
+function tryReadStatus(readStatus: ReadRouteCtx['readStatus']): Record<string, unknown> | null {
+  try {
+    return readStatus();
+  } catch (err) {
+    warnProbeFailure('readStatus', err);
+    return null;
+  }
+}
+
+function tryCheckUsage(
+  checkUsage: ReadRouteCtx['checkUsage'],
+): ReturnType<ReadRouteCtx['checkUsage']> | null {
+  try {
+    return checkUsage();
+  } catch (err) {
+    warnProbeFailure('checkUsage', err);
+    return null;
+  }
+}
+
+function tryWriteStatus(writeStatus: ReadRouteCtx['writeStatus']): void {
+  try {
+    writeStatus();
+  } catch (err) {
+    warnProbeFailure('writeStatus', err);
+  }
+}
+
 function handleSnapshot(ctx: ReadRouteCtx): boolean {
-  const { res, sendJson, sendError, readState, requestUrl } = ctx;
+  const { res, sendJson, sendError, readState, requestUrl, readStatus, checkUsage, writeStatus } =
+    ctx;
 
   const statusResult = parseStatusFilters(requestUrl.searchParams);
   if ('invalid' in statusResult) {
@@ -83,7 +121,13 @@ function handleSnapshot(ctx: ReadRouteCtx): boolean {
     cursor: requestUrl.searchParams.get('cursor') ?? undefined,
   };
 
-  const snapshot = projectQueueSnapshot(state, options);
+  // Best-effort refresh before reading — soft-fail preserves existing behavior
+  tryWriteStatus(writeStatus);
+  const statusData = tryReadStatus(readStatus);
+  const usage = tryCheckUsage(checkUsage);
+  const healthBudgetCtx: HealthBudgetContext | null = { statusData, usage };
+
+  const snapshot = projectQueueSnapshot(state, options, healthBudgetCtx);
 
   sendJson(res, 200, snapshot);
   return true;

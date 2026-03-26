@@ -24,12 +24,15 @@ import {
 } from '../model/operations-reducer.ts';
 import {
   selectAvailability,
+  selectBudgetStatus,
   selectDetailAvailability,
   selectDetailFetchStatus,
   selectFilteredQueueItems,
   selectFreshness,
   selectHasPendingControl,
   selectHasDetail,
+  selectHealthStatus,
+  selectItemBudget,
   selectQueueItems,
   selectSelectedCheckpoints,
   selectSelectedDetail,
@@ -270,6 +273,69 @@ describe('workspace operations integration', () => {
 
     assert.equal(selectSnapshotStatus(state), 'error');
     assert.equal(selectQueueItems(state).length, 1);
+  });
+
+  it('keeps global health and budget separate from item-scoped risk signals', () => {
+    const items = [
+      makeQueueItem({
+        id: 'wi-1',
+        riskSignals: [
+          { kind: 'budget', severity: 'warning', summary: 'Over budget', scope: 'task:wi-1' },
+        ],
+      }),
+      makeQueueItem({ id: 'wi-2', riskSignals: [] }),
+    ];
+    const detail = makeDetailResponse({
+      item: items[0],
+      itemBudget: {
+        status: 'unavailable',
+        scope: 'work-item',
+        scopeId: 'wi-1',
+        summary: 'Per-item budget attribution is not yet available',
+        used: null,
+        limit: null,
+        unit: null,
+        complete: false,
+      },
+    });
+
+    const state = applyActions(createInitialOperationsState(), [
+      {
+        type: 'snapshot/success',
+        snapshot: makeSnapshot({
+          queue: items,
+          health: {
+            status: 'degraded',
+            scope: 'global',
+            observedAt: '2026-06-01T12:00:00.000Z',
+            message: 'Background probes are delayed',
+            detailsAvailability: 'partial',
+          },
+          budget: {
+            status: 'warning',
+            scope: 'global',
+            scopeId: null,
+            summary: 'Budget usage at 85%',
+            used: 8500,
+            limit: 10_000,
+            unit: 'tokens',
+            complete: true,
+          },
+        }),
+      },
+      { type: 'selection/select', workItemId: 'wi-1' },
+      { type: 'selection/detail-loaded', detail },
+    ]);
+
+    assert.equal(selectHealthStatus(state)?.scope, 'global');
+    assert.equal(selectBudgetStatus(state)?.scope, 'global');
+    assert.equal(selectBudgetStatus(state)?.status, 'warning');
+    assert.equal(selectItemBudget(state)?.scope, 'work-item');
+    assert.equal(selectItemBudget(state)?.scopeId, 'wi-1');
+    assert.deepEqual(selectQueueItems(state)[0].riskSignals, [
+      { kind: 'budget', severity: 'warning', summary: 'Over budget', scope: 'task:wi-1' },
+    ]);
+    assert.deepEqual(selectQueueItems(state)[1].riskSignals, []);
   });
 
   // ─── Detail selection + checkpoint workflow ─────────────────────────────

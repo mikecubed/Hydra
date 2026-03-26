@@ -125,6 +125,22 @@ const hintStyle: CSSProperties = {
   color: '#64748b',
 };
 
+function formatRiskScopeLabel(scope: string): string {
+  if (scope === 'global') {
+    return 'Global';
+  }
+
+  if (scope === 'work-item' || scope.startsWith('task:')) {
+    return 'Work item';
+  }
+
+  if (scope === 'session' || scope.startsWith('session:')) {
+    return 'Session';
+  }
+
+  return 'Scoped';
+}
+
 export function QueueItemCard({
   item,
   isSelected,
@@ -154,17 +170,22 @@ export function QueueItemCard({
 
       {item.riskSignals.length > 0 && (
         <div style={{ display: 'flex', gap: '0.4rem', flexWrap: 'wrap' }}>
-          {item.riskSignals.map((signal) => (
-            <span
-              key={`${signal.kind}-${signal.scope}`}
-              style={{
-                fontSize: '0.7rem',
-                color: riskSeverityColors[signal.severity],
-              }}
-            >
-              {signal.summary}
-            </span>
-          ))}
+          {item.riskSignals.map((signal) => {
+            const scopeLabel = formatRiskScopeLabel(signal.scope);
+            return (
+              <span
+                key={`${signal.kind}-${signal.scope}-${signal.severity}-${signal.summary}`}
+                data-testid={`risk-badge-${signal.kind}-${signal.scope}`}
+                aria-label={`${scopeLabel} risk: ${signal.summary}`}
+                style={{
+                  fontSize: '0.7rem',
+                  color: riskSeverityColors[signal.severity],
+                }}
+              >
+                {scopeLabel}: {signal.summary}
+              </span>
+            );
+          })}
         </div>
       )}
 
