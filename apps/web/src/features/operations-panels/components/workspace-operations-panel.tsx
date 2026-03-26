@@ -14,15 +14,20 @@ import {
   selectFreshness,
   selectHasPendingControl,
   selectHealthStatus,
+  selectSelectedAssignments,
   selectSelectedCheckpoints,
+  selectSelectedCouncil,
+  selectSelectedRouting,
   selectSelectedWorkItemId,
   selectSnapshotStatus,
 } from '../model/selectors.ts';
 import { createSyncController } from '../model/sync-controller.ts';
 import { CheckpointPanel } from './checkpoint-panel.tsx';
+import { ExecutionPanel } from './execution-panel.tsx';
 import { HealthBudgetPanel } from './health-budget-panel.tsx';
 import { OperationsPanelShell } from './operations-panel-shell.tsx';
 import { QueuePanel } from './queue-panel.tsx';
+import { RoutingPanel } from './routing-panel.tsx';
 
 function useOperationsPanelState() {
   const operationsClient = useMemo(() => createOperationsClient({ baseUrl: '' }), []);
@@ -93,6 +98,9 @@ export function WorkspaceOperationsPanel(): JSX.Element {
 
   const selectedWorkItemId = selectSelectedWorkItemId(state);
   const checkpoints = selectSelectedCheckpoints(state);
+  const routing = selectSelectedRouting(state);
+  const assignments = selectSelectedAssignments(state);
+  const council = selectSelectedCouncil(state);
   const detailAvailability = selectDetailAvailability(state);
   const detailFetchStatus = selectDetailFetchStatus(state);
   const health = selectHealthStatus(state);
@@ -100,11 +108,24 @@ export function WorkspaceOperationsPanel(): JSX.Element {
 
   const detailPanel =
     selectedWorkItemId === null ? undefined : (
-      <CheckpointPanel
-        checkpoints={checkpoints}
-        detailAvailability={detailAvailability}
-        detailFetchStatus={detailFetchStatus}
-      />
+      <>
+        <RoutingPanel
+          routing={routing}
+          detailAvailability={detailAvailability}
+          detailFetchStatus={detailFetchStatus}
+        />
+        <ExecutionPanel
+          assignments={assignments}
+          council={council}
+          detailAvailability={detailAvailability}
+          detailFetchStatus={detailFetchStatus}
+        />
+        <CheckpointPanel
+          checkpoints={checkpoints}
+          detailAvailability={detailAvailability}
+          detailFetchStatus={detailFetchStatus}
+        />
+      </>
     );
 
   const healthBudgetPanel =
