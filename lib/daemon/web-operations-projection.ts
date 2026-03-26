@@ -220,9 +220,14 @@ export function projectQueueSnapshot(
     projectTaskToQueueItem(task, state.activeSession, stateUpdatedAt),
   );
 
-  const items = filterQueueItems(projectedItems, options.statusFilter).sort(compareQueueItems);
+  // Sort and assign positions on the FULL queue first so that position numbers
+  // are globally consistent with projectWorkItemDetail (which also uses the
+  // full sorted queue).  Filtering and pagination happen afterwards and
+  // preserve the already-assigned positions.
+  projectedItems.sort(compareQueueItems);
+  assignQueuePositions(projectedItems);
 
-  assignQueuePositions(items);
+  const items = filterQueueItems(projectedItems, options.statusFilter);
 
   const { items: pagedItems, nextCursor } = paginateQueueItems(
     items,

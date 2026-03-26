@@ -5,7 +5,10 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import type { HydraStateShape, TaskEntry } from '../lib/types.ts';
-import { projectQueueSnapshot } from '../lib/daemon/web-operations-projection.ts';
+import {
+  projectQueueSnapshot,
+  projectWorkItemDetail,
+} from '../lib/daemon/web-operations-projection.ts';
 
 function makeTask(overrides: Partial<TaskEntry> = {}): TaskEntry {
   return {
@@ -274,6 +277,106 @@ describe('projectQueueSnapshot ordering and paging', () => {
       });
       const result = projectQueueSnapshot(state);
       assert.equal(result.lastSynchronizedAt, '2026-03-25T12:34:56.000Z');
+    });
+  });
+
+  describe('filtered snapshot vs detail position consistency', () => {
+    it('status-filtered snapshot positions match detail positions', () => {
+      const state = makeState({
+        tasks: [
+          makeTask({
+            id: 'active-1',
+            status: 'in_progress',
+            updatedAt: '2026-03-25T00:00:03.000Z',
+          }),
+          makeTask({ id: 'waiting-1', status: 'todo', updatedAt: '2026-03-25T00:00:02.000Z' }),
+          makeTask({ id: 'waiting-2', status: 'todo', updatedAt: '2026-03-25T00:00:01.000Z' }),
+          makeTask({
+            id: 'done-1',
+            status: 'done',
+            updatedAt: '2026-03-25T00:00:04.000Z',
+          }),
+        ],
+      });
+
+      // Filter to only waiting items — their positions must still reflect the
+      // global queue, not a re-indexed filtered subset.
+      const snapshot = projectQueueSnapshot(state, { statusFilter: ['waiting'] });
+      assert.equal(snapshot.queue.length, 2);
+
+      for (const snapshotItem of snapshot.queue) {
+        const detail = projectWorkItemDetail(state, snapshotItem.id);
+        assert.ok(detail, `detail must exist for ${snapshotItem.id}`);
+        assert.equal(
+          snapshotItem.position,
+          detail.item.position,
+          `position mismatch for ${snapshotItem.id}: snapshot=${String(snapshotItem.position)} detail=${String(detail.item.position)}`,
+        );
+      }
+    });
+
+    it('positions are globally ordered even when some statuses are filtered out', () => {
+      const state = makeState({
+        tasks: [
+          makeTask({
+            id: 'active-1',
+            status: 'in_progress',
+            updatedAt: '2026-03-25T00:00:05.000Z',
+          }),
+          makeTask({
+            id: 'active-2',
+            status: 'in_progress',
+            updatedAt: '2026-03-25T00:00:04.000Z',
+          }),
+          makeTask({ id: 'waiting-1', status: 'todo', updatedAt: '2026-03-25T00:00:03.000Z' }),
+          makeTask({ id: 'waiting-2', status: 'todo', updatedAt: '2026-03-25T00:00:02.000Z' }),
+          makeTask({
+            id: 'done-1',
+            status: 'done',
+            updatedAt: '2026-03-25T00:00:01.000Z',
+          }),
+        ],
+      });
+
+      // Filter to active only — positions should NOT restart at 0 if there
+      // were higher-priority items above them in the global queue.
+      const activeOnly = projectQueueSnapshot(state, { statusFilter: ['active'] });
+      const positions = activeOnly.queue.map((item) => item.position);
+
+      // Active items are highest priority, so they should be 0, 1.
+      assert.deepStrictEqual(positions, [0, 1]);
+
+      // Filter to waiting only — positions should continue from where active left off.
+      const waitingOnly = projectQueueSnapshot(state, { statusFilter: ['waiting'] });
+      const waitingPositions = waitingOnly.queue.map((item) => item.position);
+      assert.deepStrictEqual(waitingPositions, [2, 3]);
+
+      // Verify each against detail
+      for (const item of [...activeOnly.queue, ...waitingOnly.queue]) {
+        const detail = projectWorkItemDetail(state, item.id);
+        assert.ok(detail);
+        assert.equal(item.position, detail.item.position, `position mismatch for ${item.id}`);
+      }
+    });
+
+    it('terminal items show null position in both filtered snapshot and detail', () => {
+      const state = makeState({
+        tasks: [
+          makeTask({ id: 'active-1', status: 'in_progress' }),
+          makeTask({ id: 'done-1', status: 'done' }),
+          makeTask({ id: 'failed-1', status: 'failed' }),
+        ],
+      });
+
+      const snapshot = projectQueueSnapshot(state, { statusFilter: ['completed', 'failed'] });
+      assert.equal(snapshot.queue.length, 2);
+
+      for (const snapshotItem of snapshot.queue) {
+        assert.equal(snapshotItem.position, null, `expected null position for ${snapshotItem.id}`);
+        const detail = projectWorkItemDetail(state, snapshotItem.id);
+        assert.ok(detail);
+        assert.equal(detail.item.position, null);
+      }
     });
   });
 });
