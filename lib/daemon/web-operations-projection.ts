@@ -192,6 +192,24 @@ function paginateQueueItems(
   };
 }
 
+/**
+ * Assign sequential position numbers to a **sorted** list of queue items.
+ * Non-terminal items receive 0-based positions; terminal items keep `null`.
+ *
+ * Extracted so that both snapshot and detail projections use the same logic.
+ */
+function assignQueuePositions(items: WorkQueueItemView[]): void {
+  let pos = 0;
+  for (const item of items) {
+    if (TERMINAL_STATUSES.has(item.status)) {
+      item.position = null;
+    } else {
+      item.position = pos;
+      pos += 1;
+    }
+  }
+}
+
 export function projectQueueSnapshot(
   state: HydraStateShape,
   options: QueueSnapshotOptions = {},
@@ -204,16 +222,7 @@ export function projectQueueSnapshot(
 
   const items = filterQueueItems(projectedItems, options.statusFilter).sort(compareQueueItems);
 
-  // Assign position numbers: non-terminal items get sequential positions
-  let position = 0;
-  for (const item of items) {
-    if (TERMINAL_STATUSES.has(item.status)) {
-      item.position = null;
-    } else {
-      item.position = position;
-      position += 1;
-    }
-  }
+  assignQueuePositions(items);
 
   const { items: pagedItems, nextCursor } = paginateQueueItems(
     items,
@@ -316,7 +325,17 @@ export function projectWorkItemDetail(
   if (task == null) return null;
 
   const stateUpdatedAt = resolveStateUpdatedAt(state.updatedAt);
-  const item = projectTaskToQueueItem(task, state.activeSession, stateUpdatedAt);
+
+  // Project ALL items and assign positions with the same ordering used by
+  // projectQueueSnapshot so the detail position is always consistent.
+  const allItems: WorkQueueItemView[] = state.tasks.map((t) =>
+    projectTaskToQueueItem(t, state.activeSession, stateUpdatedAt),
+  );
+  allItems.sort(compareQueueItems);
+  assignQueuePositions(allItems);
+
+  const item = allItems.find((i) => i.id === workItemId);
+  if (item == null) return null; // unreachable — task exists so its projection exists
   const checkpoints = projectCheckpoints(task);
 
   return {

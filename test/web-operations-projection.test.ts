@@ -839,6 +839,97 @@ describe('projectWorkItemDetail', () => {
   });
 });
 
+// ── Snapshot / Detail Position Consistency ──────────────────────────────────
+
+describe('snapshot vs detail position consistency', () => {
+  const now = new Date();
+
+  function ts(minutesAgo: number): string {
+    return new Date(now.getTime() - minutesAgo * 60_000).toISOString();
+  }
+
+  it('detail position matches snapshot position for a non-terminal item', () => {
+    const state = makeState({
+      tasks: [
+        makeTask({ id: 'task-a', status: 'in_progress', updatedAt: ts(1) }),
+        makeTask({ id: 'task-b', status: 'todo', updatedAt: ts(5) }),
+        makeTask({ id: 'task-c', status: 'todo', updatedAt: ts(3) }),
+      ],
+    });
+
+    const snapshot = projectQueueSnapshot(state);
+    const detail = projectWorkItemDetail(state, 'task-b');
+
+    assert.ok(detail !== null);
+    const snapshotItem = snapshot.queue.find((i) => i.id === 'task-b');
+    assert.ok(snapshotItem != null, 'task-b should appear in snapshot');
+    assert.equal(detail.item.position, snapshotItem.position);
+    assert.equal(typeof detail.item.position, 'number');
+  });
+
+  it('detail position is null for a terminal item, matching snapshot', () => {
+    const state = makeState({
+      tasks: [
+        makeTask({ id: 'task-a', status: 'in_progress', updatedAt: ts(1) }),
+        makeTask({ id: 'task-done', status: 'done', updatedAt: ts(2) }),
+      ],
+    });
+
+    const snapshot = projectQueueSnapshot(state);
+    const detail = projectWorkItemDetail(state, 'task-done');
+
+    assert.ok(detail !== null);
+    const snapshotItem = snapshot.queue.find((i) => i.id === 'task-done');
+    assert.ok(snapshotItem != null);
+    assert.equal(detail.item.position, null);
+    assert.equal(snapshotItem.position, null);
+  });
+
+  it('all non-terminal items agree on position across snapshot and detail', () => {
+    const state = makeState({
+      tasks: [
+        makeTask({ id: 't1', status: 'in_progress', updatedAt: ts(10) }),
+        makeTask({ id: 't2', status: 'todo', updatedAt: ts(2) }),
+        makeTask({
+          id: 't3',
+          status: 'blocked',
+          owner: 'gemini',
+          updatedAt: ts(5),
+          blockedBy: ['t1'],
+        }),
+        makeTask({ id: 't4', status: 'done', updatedAt: ts(1) }),
+        makeTask({ id: 't5', status: 'failed', updatedAt: ts(0) }),
+        makeTask({ id: 't6', status: 'todo', updatedAt: ts(8) }),
+      ],
+    });
+
+    const snapshot = projectQueueSnapshot(state);
+
+    for (const snapshotItem of snapshot.queue) {
+      const detail = projectWorkItemDetail(state, snapshotItem.id);
+      assert.ok(detail !== null, `detail for ${snapshotItem.id} should exist`);
+      assert.equal(
+        detail.item.position,
+        snapshotItem.position,
+        `position mismatch for ${snapshotItem.id}: detail=${String(detail.item.position)} snapshot=${String(snapshotItem.position)}`,
+      );
+    }
+  });
+
+  it('single-item queue returns position 0 in both snapshot and detail', () => {
+    const state = makeState({
+      tasks: [makeTask({ id: 'only-task', status: 'todo', updatedAt: ts(0) })],
+    });
+
+    const snapshot = projectQueueSnapshot(state);
+    const detail = projectWorkItemDetail(state, 'only-task');
+
+    assert.ok(detail !== null);
+    assert.equal(snapshot.queue[0].position, 0);
+    assert.equal(detail.item.position, 0);
+  });
+});
+
 // ── Contract Validation (empty-string regression) ──────────────────────────
 
 describe('checkpoint contract validation', () => {
