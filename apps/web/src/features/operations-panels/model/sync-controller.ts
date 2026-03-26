@@ -1,6 +1,7 @@
 /**
  * Detail-sync controller — orchestrates work-item detail fetching
- * when the browser selection changes.
+ * when the browser selection changes, and control discovery hydration
+ * for the visible queue.
  *
  * Pure orchestration: accepts an OperationsClient and a dispatch callback,
  * tracks the current fetch to prevent stale responses from racing, and
@@ -20,6 +21,8 @@ export interface SyncController {
   syncDetail(workItemId: string): void;
   /** Cancel any in-flight detail fetch (e.g. on deselect). */
   cancelSync(): void;
+  /** Fetch batch control discovery for the given work item IDs. */
+  syncControlDiscovery(workItemIds: readonly string[]): void;
   /** Dispose the controller — aborts in-flight and prevents future fetches. */
   dispose(): void;
 }
@@ -28,6 +31,7 @@ export function createSyncController(options: SyncControllerOptions): SyncContro
   const { client, dispatch } = options;
   let currentRequestId = 0;
   let currentAbortController: AbortController | null = null;
+  let discoveryRequestId = 0;
   const lifecycle = { disposed: false };
 
   function abortCurrent(): void {
@@ -64,6 +68,23 @@ export function createSyncController(options: SyncControllerOptions): SyncContro
     })();
   }
 
+  function syncControlDiscovery(workItemIds: readonly string[]): void {
+    if (lifecycle.disposed || workItemIds.length === 0) return;
+
+    discoveryRequestId += 1;
+    const myRequestId = discoveryRequestId;
+
+    void (async () => {
+      try {
+        const discovery = await client.discoverControls({ workItemIds });
+        if (lifecycle.disposed || myRequestId !== discoveryRequestId) return;
+        dispatch({ type: 'controls/discovery-loaded', discovery });
+      } catch {
+        // Discovery is best-effort — silently drop errors
+      }
+    })();
+  }
+
   function cancelSync(): void {
     abortCurrent();
     currentRequestId += 1;
@@ -73,7 +94,8 @@ export function createSyncController(options: SyncControllerOptions): SyncContro
     lifecycle.disposed = true;
     abortCurrent();
     currentRequestId += 1;
+    discoveryRequestId += 1;
   }
 
-  return { syncDetail, cancelSync, dispose };
+  return { syncDetail, cancelSync, syncControlDiscovery, dispose };
 }

@@ -13,6 +13,7 @@ export interface OperationsPanelShellProps {
   readonly children: ReactNode;
   readonly detailPanel?: ReactNode;
   readonly healthBudgetPanel?: ReactNode;
+  readonly controlStripSlot?: ReactNode;
 }
 
 const shellStyle: CSSProperties = {
@@ -92,9 +93,11 @@ export function OperationsPanelShell({
   children,
   detailPanel,
   healthBudgetPanel,
+  controlStripSlot,
 }: OperationsPanelShellProps): JSX.Element {
   const hasDetail = detailPanel != null;
   const hasHealthBudget = healthBudgetPanel != null;
+  const hasControlStrip = controlStripSlot != null;
 
   return (
     <section aria-labelledby="operations-panel-heading" style={shellStyle}>
@@ -113,6 +116,9 @@ export function OperationsPanelShell({
         {hasDetail && (
           <div data-testid="detail-panel-slot" style={detailStackStyle}>
             {detailPanel}
+            {hasControlStrip && (
+              <div data-testid="control-strip-slot">{controlStripSlot}</div>
+            )}
           </div>
         )}
       </div>

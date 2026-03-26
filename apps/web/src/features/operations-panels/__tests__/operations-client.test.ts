@@ -466,6 +466,232 @@ describe('OperationsClient', () => {
     );
   });
 
+  // ─── T043: Control discovery, authority, pending, and result coverage ────
+
+  it('calls discoverControls with the correct URL and body', async () => {
+    let capturedUrl = '';
+    let capturedBody: unknown = null;
+    const client = buildClient(async (input, init) => {
+      capturedUrl = stringifyInput(input);
+      capturedBody = JSON.parse((init?.body as string) ?? '{}') as unknown;
+      return jsonResponse({
+        items: [
+          {
+            workItemId: 'wq-1',
+            controls: [
+              {
+                controlId: 'ctrl-1',
+                kind: 'routing',
+                label: 'Route',
+                availability: 'actionable',
+                authority: 'granted',
+                reason: null,
+                options: [{ optionId: 'opt-1', label: 'A', selected: false, available: true }],
+                expectedRevision: 'rev-1',
+                lastResolvedAt: null,
+              },
+            ],
+            availability: 'ready',
+          },
+        ],
+      });
+    });
+
+    const result = await client.discoverControls({ workItemIds: ['wq-1'] });
+    assert.equal(capturedUrl, `${BASE_URL}/operations/controls/discover`);
+    assert.deepEqual(capturedBody, { workItemIds: ['wq-1'] });
+    assert.equal(result.items.length, 1);
+    assert.equal(result.items[0].workItemId, 'wq-1');
+    assert.equal(result.items[0].controls.length, 1);
+  });
+
+  it('calls getWorkItemControls with the correct URL', async () => {
+    let capturedUrl = '';
+    const client = buildClient(async (input) => {
+      capturedUrl = stringifyInput(input);
+      return jsonResponse({
+        workItemId: 'wq-1',
+        controls: [],
+        availability: 'ready',
+      });
+    });
+
+    const result = await client.getWorkItemControls('wq-1');
+    assert.equal(capturedUrl, `${BASE_URL}/operations/work-items/wq-1/controls`);
+    assert.equal(result.workItemId, 'wq-1');
+    assert.deepEqual(result.controls, []);
+  });
+
+  it('submits a control action and returns the outcome', async () => {
+    let capturedUrl = '';
+    let capturedBody: unknown = null;
+    const client = buildClient(async (input, init) => {
+      capturedUrl = stringifyInput(input);
+      capturedBody = JSON.parse((init?.body as string) ?? '{}') as unknown;
+      return jsonResponse({
+        outcome: 'accepted',
+        control: {
+          controlId: 'ctrl-1',
+          kind: 'routing',
+          label: 'Route',
+          availability: 'accepted',
+          authority: 'granted',
+          reason: null,
+          options: [],
+          expectedRevision: 'rev-2',
+          lastResolvedAt: NOW,
+        },
+        workItemId: 'wq-1',
+        resolvedAt: NOW,
+      });
+    });
+
+    const result = await client.submitControlAction('wq-1', 'ctrl-1', {
+      requestedOptionId: 'opt-1',
+      expectedRevision: 'rev-1',
+    });
+    assert.equal(capturedUrl, `${BASE_URL}/operations/work-items/wq-1/controls/ctrl-1`);
+    assert.deepEqual(capturedBody, { requestedOptionId: 'opt-1', expectedRevision: 'rev-1' });
+    assert.equal(result.outcome, 'accepted');
+    assert.equal(result.control.controlId, 'ctrl-1');
+  });
+
+  it('returns rejected outcome for unauthorized control action', async () => {
+    const client = buildClient(async () =>
+      jsonResponse({
+        outcome: 'rejected',
+        control: {
+          controlId: 'ctrl-1',
+          kind: 'routing',
+          label: 'Route',
+          availability: 'read-only',
+          authority: 'forbidden',
+          reason: 'Operator lacks authority',
+          options: [],
+          expectedRevision: null,
+          lastResolvedAt: NOW,
+        },
+        workItemId: 'wq-1',
+        resolvedAt: NOW,
+        message: 'Not authorized',
+      }),
+    );
+
+    const result = await client.submitControlAction('wq-1', 'ctrl-1', {
+      requestedOptionId: 'opt-1',
+      expectedRevision: 'rev-1',
+    });
+    assert.equal(result.outcome, 'rejected');
+    assert.equal(result.control.authority, 'forbidden');
+  });
+
+  it('returns stale outcome when expectedRevision is outdated', async () => {
+    const client = buildClient(async () =>
+      jsonResponse({
+        outcome: 'stale',
+        control: {
+          controlId: 'ctrl-1',
+          kind: 'routing',
+          label: 'Route',
+          availability: 'actionable',
+          authority: 'granted',
+          reason: null,
+          options: [{ optionId: 'opt-1', label: 'A', selected: true, available: true }],
+          expectedRevision: 'rev-3',
+          lastResolvedAt: NOW,
+        },
+        workItemId: 'wq-1',
+        resolvedAt: NOW,
+        message: 'Revision outdated',
+      }),
+    );
+
+    const result = await client.submitControlAction('wq-1', 'ctrl-1', {
+      requestedOptionId: 'opt-1',
+      expectedRevision: 'rev-1',
+    });
+    assert.equal(result.outcome, 'stale');
+  });
+
+  it('returns superseded outcome when another control took precedence', async () => {
+    const client = buildClient(async () =>
+      jsonResponse({
+        outcome: 'superseded',
+        control: {
+          controlId: 'ctrl-1',
+          kind: 'routing',
+          label: 'Route',
+          availability: 'read-only',
+          authority: 'granted',
+          reason: 'Superseded by ctrl-2',
+          options: [],
+          expectedRevision: null,
+          lastResolvedAt: NOW,
+        },
+        workItemId: 'wq-1',
+        resolvedAt: NOW,
+      }),
+    );
+
+    const result = await client.submitControlAction('wq-1', 'ctrl-1', {
+      requestedOptionId: 'opt-1',
+      expectedRevision: 'rev-1',
+    });
+    assert.equal(result.outcome, 'superseded');
+  });
+
+  it('throws OperationsRequestError on control discovery HTTP errors', async () => {
+    const client = buildClient(async () =>
+      errorResponse(
+        {
+          ok: false,
+          code: 'NOT_FOUND',
+          category: 'validation',
+          message: 'Work item not found',
+          httpStatus: 404,
+        },
+        404,
+      ),
+    );
+
+    await assert.rejects(
+      () => client.discoverControls({ workItemIds: ['wq-missing'] }),
+      (err: unknown) => {
+        const gatewayError = assertOperationsError(err);
+        assert.equal(gatewayError.status, 404);
+        return true;
+      },
+    );
+  });
+
+  it('throws OperationsRequestError on control submit HTTP errors', async () => {
+    const client = buildClient(async () =>
+      errorResponse(
+        {
+          ok: false,
+          code: 'CONFLICT',
+          category: 'validation',
+          message: 'Revision conflict',
+          httpStatus: 409,
+        },
+        409,
+      ),
+    );
+
+    await assert.rejects(
+      () =>
+        client.submitControlAction('wq-1', 'ctrl-1', {
+          requestedOptionId: 'opt-1',
+          expectedRevision: 'rev-1',
+        }),
+      (err: unknown) => {
+        const gatewayError = assertOperationsError(err);
+        assert.equal(gatewayError.status, 409);
+        return true;
+      },
+    );
+  });
+
   it('throws OperationsResponseValidationError on invalid snapshot payloads', async () => {
     const client = buildClient(async () =>
       jsonResponse({
