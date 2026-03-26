@@ -98,19 +98,18 @@ All Prettier-supported files in the repo (`.ts`, `.json`, `.md`, `.yml`, etc.) p
 
 ## 6. CI Pipeline Summary
 
-| Check              | Job               | Blocking? | Status  |
-| ------------------ | ----------------- | --------- | ------- |
-| ESLint             | `lint`            | **Yes**   | Passing |
-| Prettier           | `lint`            | **Yes**   | Passing |
-| TypeScript         | `lint`            | **Yes**   | Passing |
-| Mermaid validation | `lint`            | **Yes**   | Passing |
-| Circular imports   | `lint`            | **Yes**   | Passing |
-| Tests              | `test`            | **Yes**   | Passing |
-| Coverage (78%)     | `coverage`        | **Yes**   | Passing |
-| Per-file coverage  | `coverage`        | **Yes**   | Passing |
-| Mutation (shared)  | `mutation-shared` | **Yes**   | Passing |
-| Mutation (daemon)  | `mutation-daemon` | **Yes**   | Passing |
-| New file policy    | `new-file-policy` | **Yes**   | Passing |
+| Check              | Job                | Blocking? | Status  |
+| ------------------ | ------------------ | --------- | ------- |
+| ESLint             | `lint`             | **Yes**   | Passing |
+| Prettier           | `lint`             | **Yes**   | Passing |
+| TypeScript         | `lint`             | **Yes**   | Passing |
+| Mermaid validation | `lint`             | **Yes**   | Passing |
+| Circular imports   | `lint`             | **Yes**   | Passing |
+| Tests              | `test`             | **Yes**   | Passing |
+| Coverage (78%)     | `coverage`         | **Yes**   | Passing |
+| Per-file coverage  | `coverage`         | **Yes**   | Passing |
+| Mutation testing   | `mutation-testing` | **Yes**   | Passing |
+| New file policy    | `new-file-policy`  | **Yes**   | Passing |
 
 ### Non-passing tests
 
