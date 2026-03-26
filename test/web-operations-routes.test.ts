@@ -346,6 +346,51 @@ describe('handleOperationsReadRoute', () => {
       assert.equal(health['status'], 'unavailable');
     });
 
+    it('snapshot health reflects recovering daemon after startup', () => {
+      const state = makeState({ tasks: [makeTask()] });
+      const ctx = makeReadCtx(
+        'GET',
+        '/operations/snapshot',
+        state,
+        {},
+        {
+          readStatus: () => ({
+            running: true,
+            uptimeSec: 20,
+            updatedAt: '2025-01-01T00:00:20.000Z',
+          }),
+        },
+      );
+      handleOperationsReadRoute(ctx);
+      const data = ctx.captured.data as Record<string, unknown>;
+      const health = data['health'] as Record<string, unknown>;
+      assert.equal(health['status'], 'recovering');
+    });
+
+    it('snapshot health reflects degraded daemon when active-session telemetry is stale', () => {
+      const state = makeState({ tasks: [makeTask()] });
+      const ctx = makeReadCtx(
+        'GET',
+        '/operations/snapshot',
+        state,
+        {},
+        {
+          readStatus: () => ({
+            running: true,
+            uptimeSec: 300,
+            activeSessionId: 'session-1',
+            updatedAt: '2025-01-01T00:05:00.000Z',
+            stateUpdatedAt: '2025-01-01T00:00:00.000Z',
+            lastEventAt: '2025-01-01T00:01:00.000Z',
+          }),
+        },
+      );
+      handleOperationsReadRoute(ctx);
+      const data = ctx.captured.data as Record<string, unknown>;
+      const health = data['health'] as Record<string, unknown>;
+      assert.equal(health['status'], 'degraded');
+    });
+
     it('snapshot budget keeps critical-threshold usage as warning while budget remains', () => {
       const state = makeState({ tasks: [makeTask()] });
       const ctx = makeReadCtx(

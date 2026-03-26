@@ -989,11 +989,40 @@ describe('snapshot vs detail position consistency', () => {
 
 describe('projectDaemonHealth', () => {
   it('returns healthy when daemon reports running', () => {
-    const health = projectDaemonHealth({ running: true, updatedAt: '2025-01-01T00:00:00.000Z' });
+    const health = projectDaemonHealth({
+      running: true,
+      uptimeSec: 600,
+      updatedAt: '2025-01-01T00:00:00.000Z',
+    });
     assert.equal(health.status, 'healthy');
     assert.equal(health.scope, 'global');
     assert.equal(health.detailsAvailability, 'ready');
     assert.equal(health.message, null);
+  });
+
+  it('returns recovering when daemon recently started', () => {
+    const health = projectDaemonHealth({
+      running: true,
+      uptimeSec: 15,
+      updatedAt: '2025-01-01T00:00:15.000Z',
+    });
+    assert.equal(health.status, 'recovering');
+    assert.equal(health.detailsAvailability, 'partial');
+    assert.equal(health.message, 'Daemon is recovering after startup');
+  });
+
+  it('returns degraded when an active session has stale telemetry', () => {
+    const health = projectDaemonHealth({
+      running: true,
+      uptimeSec: 600,
+      activeSessionId: 'session-1',
+      updatedAt: '2025-01-01T00:05:00.000Z',
+      stateUpdatedAt: '2025-01-01T00:00:00.000Z',
+      lastEventAt: '2025-01-01T00:01:00.000Z',
+    });
+    assert.equal(health.status, 'degraded');
+    assert.equal(health.detailsAvailability, 'partial');
+    assert.equal(health.message, 'Daemon is running, but active-session telemetry is stale');
   });
 
   it('returns unavailable when daemon reports not running', () => {
@@ -1015,9 +1044,8 @@ describe('projectDaemonHealth', () => {
   });
 
   it('observedAt is a valid ISO datetime', () => {
-    const health = projectDaemonHealth({ running: true });
-    assert.doesNotThrow(() => new Date(health.observedAt));
-    assert.ok(health.observedAt.endsWith('Z'));
+    const health = projectDaemonHealth({ running: true, updatedAt: '2025-01-01T00:00:00.000Z' });
+    assert.equal(health.observedAt, '2025-01-01T00:00:00.000Z');
   });
 
   it('detailsAvailability is partial when not running', () => {

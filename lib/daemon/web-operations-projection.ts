@@ -107,8 +107,60 @@ function buildRiskSignals(task: TaskEntry, normalized: WorkItemStatus): readonly
 
 // ── Health Projection ──────────────────────────────────────────────────────
 
+const RECOVERING_UPTIME_THRESHOLD_SEC = 60;
+const ACTIVE_SESSION_STALE_THRESHOLD_MS = 2 * 60 * 1000;
+
+function parseStatusTimestamp(value: unknown): number | null {
+  if (typeof value !== 'string' || value === '') {
+    return null;
+  }
+
+  const parsed = Date.parse(value);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+function resolveObservedAt(statusData: Record<string, unknown> | null): string {
+  const updatedAt = statusData?.['updatedAt'];
+  return typeof updatedAt === 'string' && updatedAt !== '' ? updatedAt : new Date().toISOString();
+}
+
+function isRecoveringDaemon(statusData: Record<string, unknown>, observedAtMs: number): boolean {
+  const uptimeSec = statusData['uptimeSec'];
+  if (typeof uptimeSec === 'number' && uptimeSec < RECOVERING_UPTIME_THRESHOLD_SEC) {
+    return true;
+  }
+
+  const startedAtMs = parseStatusTimestamp(statusData['startedAt']);
+  return (
+    startedAtMs !== null && observedAtMs - startedAtMs < RECOVERING_UPTIME_THRESHOLD_SEC * 1000
+  );
+}
+
+function resolveDegradedReason(
+  statusData: Record<string, unknown>,
+  observedAtMs: number,
+): string | null {
+  if (statusData['activeSessionId'] == null) {
+    return null;
+  }
+
+  const freshnessCandidates = [
+    parseStatusTimestamp(statusData['stateUpdatedAt']),
+    parseStatusTimestamp(statusData['lastEventAt']),
+  ].filter((value): value is number => value !== null);
+
+  if (freshnessCandidates.length === 0) {
+    return 'Daemon is running, but active-session telemetry is unavailable';
+  }
+
+  const freshestTimestamp = Math.max(...freshnessCandidates);
+  return observedAtMs - freshestTimestamp > ACTIVE_SESSION_STALE_THRESHOLD_MS
+    ? 'Daemon is running, but active-session telemetry is stale'
+    : null;
+}
+
 export function projectDaemonHealth(statusData: Record<string, unknown> | null): DaemonHealthView {
-  const observedAt = new Date().toISOString();
+  const observedAt = resolveObservedAt(statusData);
 
   if (statusData === null) {
     return {
@@ -121,13 +173,27 @@ export function projectDaemonHealth(statusData: Record<string, unknown> | null):
   }
 
   const running = statusData['running'];
+  const observedAtMs = Date.parse(observedAt);
 
   let status: DaemonHealthStatus;
   let message: string | null = null;
   let detailsAvailability: HealthDetailsAvailability = 'ready';
 
   if (running === true) {
-    status = 'healthy';
+    if (isRecoveringDaemon(statusData, observedAtMs)) {
+      status = 'recovering';
+      message = 'Daemon is recovering after startup';
+      detailsAvailability = 'partial';
+    } else {
+      const degradedReason = resolveDegradedReason(statusData, observedAtMs);
+      if (degradedReason === null) {
+        status = 'healthy';
+      } else {
+        status = 'degraded';
+        message = degradedReason;
+        detailsAvailability = 'partial';
+      }
+    }
   } else if (running === false) {
     status = 'unavailable';
     message = 'Daemon is not running';
