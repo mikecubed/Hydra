@@ -11,13 +11,13 @@ import type {
   GetOperationsSnapshotResponse as GetOperationsSnapshotResponseType,
   GetOperationsSnapshotRequest,
   GetWorkItemControlsResponse,
-  GetWorkItemDetailResponse,
+  GetWorkItemDetailResponse as GetWorkItemDetailResponseType,
   GetWorkItemExecutionResponse,
   GetWorkItemCheckpointsResponse,
   SubmitControlActionBody,
   SubmitControlActionResponse,
 } from '@hydra/web-contracts';
-import { GetOperationsSnapshotResponse } from '@hydra/web-contracts';
+import { GetOperationsSnapshotResponse, GetWorkItemDetailResponse } from '@hydra/web-contracts';
 import { type GatewayErrorBody, parseGatewayError } from '../../../shared/gateway-errors.ts';
 
 export interface OperationsClientOptions {
@@ -56,11 +56,39 @@ function parseSnapshotResponse(body: unknown): GetOperationsSnapshotResponseType
   return parsed.data;
 }
 
+function parseDetailResponse(body: unknown): GetWorkItemDetailResponseType {
+  const parsed = GetWorkItemDetailResponse.safeParse(body);
+  if (!parsed.success) {
+    throw new OperationsResponseValidationError(
+      `Invalid work item detail response: ${parsed.error.message}`,
+    );
+  }
+
+  return parsed.data;
+}
+
+function parseDetailResponseForId(
+  requestedId: string,
+): (body: unknown) => GetWorkItemDetailResponseType {
+  return (body) => {
+    const detail = parseDetailResponse(body);
+    if (detail.item.id !== requestedId) {
+      throw new OperationsResponseValidationError(
+        `Work item detail ID mismatch: requested "${requestedId}" but received "${detail.item.id}"`,
+      );
+    }
+    return detail;
+  };
+}
+
 export interface OperationsClient {
   getSnapshot(
     query?: Partial<GetOperationsSnapshotRequest>,
   ): Promise<GetOperationsSnapshotResponseType>;
-  getWorkItemDetail(workItemId: string): Promise<GetWorkItemDetailResponse>;
+  getWorkItemDetail(
+    workItemId: string,
+    options?: { readonly signal?: AbortSignal },
+  ): Promise<GetWorkItemDetailResponseType>;
   getWorkItemCheckpoints(workItemId: string): Promise<GetWorkItemCheckpointsResponse>;
   getWorkItemExecution(workItemId: string): Promise<GetWorkItemExecutionResponse>;
   getWorkItemControls(workItemId: string): Promise<GetWorkItemControlsResponse>;
@@ -193,10 +221,12 @@ export function createOperationsClient(options: OperationsClientOptions): Operat
         parseSnapshotResponse,
       );
     },
-    getWorkItemDetail(workItemId) {
-      return request<GetWorkItemDetailResponse>(
+    getWorkItemDetail(workItemId, fetchOptions) {
+      return request<GetWorkItemDetailResponseType>(
         `/operations/work-items/${encodeURIComponent(workItemId)}`,
-        { method: 'GET' },
+        { method: 'GET', signal: fetchOptions?.signal },
+        undefined,
+        parseDetailResponseForId(workItemId),
       );
     },
     getWorkItemCheckpoints(workItemId) {

@@ -2,9 +2,10 @@
  * Operations routes — authenticated gateway surface for operations panels.
  *
  * Phase 1 provides queue-visibility snapshot reads (US1, T010) using the
- * DaemonOperationsClient as the sole daemon communication point. Routes
- * validate query params via shared Zod middleware and translate daemon errors
- * into the five-category GatewayErrorResponse shape.
+ * DaemonOperationsClient as the sole daemon communication point. Phase 2 adds
+ * work-item detail reads (US2, T019). Routes validate query/path params via
+ * shared Zod middleware and translate daemon errors into the five-category
+ * GatewayErrorResponse shape.
  */
 import { Hono } from 'hono';
 import type { Context } from 'hono';
@@ -13,7 +14,7 @@ import type { GatewayEnv } from '../shared/types.ts';
 import { GetOperationsSnapshotRequest } from '@hydra/web-contracts';
 import type { DaemonOperationsClient, DaemonOperationsResult } from './daemon-operations-client.ts';
 import type { ErrorCategory, GatewayErrorResponse } from '../shared/gateway-error-response.ts';
-import { validateOperationsQuery } from './request-validator.ts';
+import { parseOperationsQuery, validateWorkItemId } from './request-validator.ts';
 
 export interface OperationsRoutesDeps {
   readonly daemonClient: DaemonOperationsClient;
@@ -47,14 +48,25 @@ export function createOperationsRoutes(deps: OperationsRoutesDeps): Hono<Gateway
   const app = new Hono<GatewayEnv>();
   const dc = deps.daemonClient;
 
-  app.get(
-    '/operations/snapshot',
-    validateOperationsQuery(GetOperationsSnapshotRequest),
-    async (c) => {
-      const query = c.get('validatedQuery' as never) as Partial<GetOperationsSnapshotRequest>;
-      return handleResult(c, await dc.getOperationsSnapshot(query));
-    },
-  );
+  // US1 — queue visibility snapshot
+  app.get('/operations/snapshot', async (c) => {
+    const queryResult = parseOperationsQuery(GetOperationsSnapshotRequest, c.req.url);
+    if ('error' in queryResult) {
+      return sendDaemonError(c, queryResult.error);
+    }
+
+    const query = queryResult.data;
+    return handleResult(c, await dc.getOperationsSnapshot(query));
+  });
+
+  // US2 — selected work-item detail
+  app.get('/operations/work-items/:workItemId', async (c) => {
+    const paramResult = validateWorkItemId(c.req.param('workItemId'));
+    if ('error' in paramResult) {
+      return sendDaemonError(c, paramResult.error);
+    }
+    return handleResult(c, await dc.getWorkItemDetail(paramResult.data));
+  });
 
   return app;
 }

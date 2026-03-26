@@ -79,6 +79,11 @@ describe('DaemonHeartbeat', () => {
     return new DaemonHeartbeat(service, store, async () => healthResult);
   }
 
+  it('starts unhealthy until the first successful probe completes', () => {
+    const hb = createHeartbeat();
+    assert.equal(hb.isDaemonHealthy(), false);
+  });
+
   it('healthy daemon keeps sessions active', async () => {
     const session = await service.create('op-1', '127.0.0.1');
     const hb = createHeartbeat();
@@ -104,6 +109,16 @@ describe('DaemonHeartbeat', () => {
 
     healthResult = true;
     await hb.tick();
+    assert.equal(store.get(session.id)?.state, 'active');
+  });
+
+  it('first healthy probe restores persisted daemon-unreachable sessions after restart', async () => {
+    const session = await service.create('op-1', '127.0.0.1');
+    store.update(session.id, { state: 'daemon-unreachable' });
+
+    const hb = createHeartbeat();
+    await hb.tick();
+
     assert.equal(store.get(session.id)?.state, 'active');
   });
 

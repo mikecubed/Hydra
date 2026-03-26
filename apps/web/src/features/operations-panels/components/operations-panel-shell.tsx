@@ -1,9 +1,8 @@
 /**
  * Operations panel shell — top-level container for the operations sidebar.
  *
- * Renders the section heading, freshness badge, and optional loading
- * indicator. Children (currently the QueuePanel) are rendered below
- * the header.
+ * Renders the section heading, freshness badge, optional loading indicator,
+ * and a two-panel layout: queue list (children) and optional detail panel.
  */
 import type { CSSProperties, JSX, ReactNode } from 'react';
 import type { SnapshotStatus, WorkspaceFreshness } from '@hydra/web-contracts';
@@ -12,6 +11,7 @@ export interface OperationsPanelShellProps {
   readonly snapshotStatus: SnapshotStatus;
   readonly freshness: WorkspaceFreshness;
   readonly children: ReactNode;
+  readonly detailPanel?: ReactNode;
 }
 
 const shellStyle: CSSProperties = {
@@ -65,6 +65,17 @@ const loadingLabelStyle: CSSProperties = {
   fontStyle: 'italic',
 };
 
+const contentLayoutStyle: CSSProperties = {
+  display: 'grid',
+  gap: '0.75rem',
+};
+
+const splitLayoutStyle: CSSProperties = {
+  display: 'grid',
+  gridTemplateColumns: '1fr 1fr',
+  gap: '0.75rem',
+};
+
 function FreshnessBadge({ freshness }: { readonly freshness: WorkspaceFreshness }): JSX.Element {
   return <span style={freshnessStyles[freshness]}>{freshness}</span>;
 }
@@ -73,7 +84,10 @@ export function OperationsPanelShell({
   snapshotStatus,
   freshness,
   children,
+  detailPanel,
 }: OperationsPanelShellProps): JSX.Element {
+  const hasDetail = detailPanel != null;
+
   return (
     <section aria-labelledby="operations-panel-heading" style={shellStyle}>
       <header style={headerStyle}>
@@ -85,7 +99,10 @@ export function OperationsPanelShell({
           {snapshotStatus === 'loading' && <span style={loadingLabelStyle}>Refreshing…</span>}
         </div>
       </header>
-      {children}
+      <div style={hasDetail ? splitLayoutStyle : contentLayoutStyle}>
+        <div>{children}</div>
+        {hasDetail && <div data-testid="detail-panel-slot">{detailPanel}</div>}
+      </div>
     </section>
   );
 }

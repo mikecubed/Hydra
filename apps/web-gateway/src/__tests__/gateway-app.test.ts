@@ -220,6 +220,47 @@ describe('Gateway app integration', () => {
     assert.ok(res.headers.get('referrer-policy'));
   });
 
+  it('GET /healthz returns 503 until the first successful heartbeat', async () => {
+    const coldStartGateway = createGatewayApp({
+      clock: new FakeClock(Date.now()),
+      allowedOrigin: ORIGIN,
+      healthChecker: async () => false,
+      heartbeatConfig: { intervalMs: 60_000 },
+      sessionConfig: {
+        sessionLifetimeMs: 3600_000,
+        warningThresholdMs: 600_000,
+        maxExtensions: 3,
+        extensionDurationMs: 3600_000,
+        idleTimeoutMs: 1800_000,
+      },
+    });
+
+    try {
+      const res = await coldStartGateway.app.request(buildRequest('GET', '/healthz'));
+      assert.equal(res.status, 503);
+      assert.deepEqual(await res.json(), { ok: false, daemonHealthy: false });
+    } finally {
+      coldStartGateway.heartbeat.stop();
+    }
+  });
+
+  it('GET /healthz returns machine-readable daemon health after a successful heartbeat', async () => {
+    await gw.heartbeat.tick();
+
+    const res = await gw.app.request(buildRequest('GET', '/healthz'));
+    assert.equal(res.status, 200);
+    assert.deepEqual(await res.json(), { ok: true, daemonHealthy: true });
+  });
+
+  it('GET /healthz returns 503 when the daemon heartbeat is unhealthy', async () => {
+    healthResult = false;
+    await gw.heartbeat.tick();
+
+    const res = await gw.app.request(buildRequest('GET', '/healthz'));
+    assert.equal(res.status, 503);
+    assert.deepEqual(await res.json(), { ok: false, daemonHealthy: false });
+  });
+
   // ── Logout ───────────────────────────────────────────────────────────────
 
   it('logout clears cookies and invalidates session', async () => {

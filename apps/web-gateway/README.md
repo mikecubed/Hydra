@@ -9,6 +9,49 @@ for workspace boundary rules, ownership, and governance.
 
 ---
 
+## Local Startup Commands
+
+Run these from the repo root when you want the browser and gateway up together against the local
+daemon:
+
+1. Start the daemon:
+
+   ```bash
+   npm start
+   ```
+
+2. In a second terminal, build the browser and start the gateway:
+
+   ```bash
+   HYDRA_WEB_OPERATOR_ID=admin \
+   HYDRA_WEB_OPERATOR_SECRET=password123 \
+   npm --workspace @hydra/web-gateway run start:with-web
+   ```
+
+This starts the gateway on `http://127.0.0.1:4174`, serves the built browser bundle from
+`apps/web/dist`, points daemon-facing calls at `http://127.0.0.1:4173`, and seeds a local operator
+record if one does not already exist in `~/.hydra/web-gateway/operators.json`.
+
+If the web bundle is already built, you can skip the build step and run:
+
+```bash
+npm --workspace @hydra/web-gateway run start
+```
+
+Environment variables supported by `src/server.ts`:
+
+| Variable                          | Default                 | Purpose                                       |
+| --------------------------------- | ----------------------- | --------------------------------------------- |
+| `HYDRA_WEB_GATEWAY_HOST`          | `127.0.0.1`             | Bind address for the local gateway server     |
+| `HYDRA_WEB_GATEWAY_PORT`          | `4174`                  | HTTP port for the same-origin browser surface |
+| `HYDRA_WEB_GATEWAY_ORIGIN`        | `http://127.0.0.1:4174` | Origin enforced by gateway origin checks      |
+| `HYDRA_DAEMON_URL`                | `http://127.0.0.1:4173` | Upstream daemon base URL                      |
+| `HYDRA_WEB_STATIC_DIR`            | `apps/web/dist`         | Built frontend directory to serve             |
+| `HYDRA_WEB_STATE_DIR`             | `~/.hydra/web-gateway`  | Local operator/session/audit state directory  |
+| `HYDRA_WEB_OPERATOR_ID`           | unset                   | Optional operator id to seed for local dev    |
+| `HYDRA_WEB_OPERATOR_DISPLAY_NAME` | same as operator id     | Optional display name for the seeded operator |
+| `HYDRA_WEB_OPERATOR_SECRET`       | unset                   | Optional password for the seeded operator     |
+
 ## Runtime Configuration Surface
 
 The gateway is assembled through **`createGatewayApp(deps)`** in `src/index.ts`.

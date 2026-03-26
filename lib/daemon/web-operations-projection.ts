@@ -8,7 +8,14 @@
  */
 
 import type { ActiveSessionEntry, HydraStateShape, TaskEntry, TaskStatus } from '../types.ts';
-import type { WorkItemStatus, WorkQueueItemView, RiskSignal } from '@hydra/web-contracts';
+import type {
+  WorkItemStatus,
+  WorkQueueItemView,
+  RiskSignal,
+  CheckpointStatus,
+  CheckpointRecordView,
+  DetailAvailability,
+} from '@hydra/web-contracts';
 
 // ── Status Normalization ───────────────────────────────────────────────────
 
@@ -116,6 +123,9 @@ function projectTaskToQueueItem(
   const ownerLabel = task.owner === '' ? null : task.owner;
   const updatedAt = task.updatedAt === '' ? stateUpdatedAt : task.updatedAt;
 
+  const lastSummary =
+    lastCheckpoint == null ? '' : resolveCheckpointLabel(lastCheckpoint as Record<string, unknown>);
+
   return {
     id: task.id,
     title: task.title,
@@ -124,7 +134,8 @@ function projectTaskToQueueItem(
     relatedConversationId: null, // not yet tracked in daemon state
     relatedSessionId: null, // set only when daemon has authoritative linkage
     ownerLabel,
-    lastCheckpointSummary: lastCheckpoint?.note ?? null,
+    lastCheckpointSummary:
+      lastSummary === '' || lastSummary === UNNAMED_CHECKPOINT_LABEL ? null : lastSummary,
     updatedAt,
     riskSignals: buildRiskSignals(task, status),
     detailAvailability: 'partial', // full detail requires per-item query (US2)
@@ -182,6 +193,24 @@ function paginateQueueItems(
   };
 }
 
+/**
+ * Assign sequential position numbers to a **sorted** list of queue items.
+ * Non-terminal items receive 0-based positions; terminal items keep `null`.
+ *
+ * Extracted so that both snapshot and detail projections use the same logic.
+ */
+function assignQueuePositions(items: WorkQueueItemView[]): void {
+  let pos = 0;
+  for (const item of items) {
+    if (TERMINAL_STATUSES.has(item.status)) {
+      item.position = null;
+    } else {
+      item.position = pos;
+      pos += 1;
+    }
+  }
+}
+
 export function projectQueueSnapshot(
   state: HydraStateShape,
   options: QueueSnapshotOptions = {},
@@ -192,18 +221,14 @@ export function projectQueueSnapshot(
     projectTaskToQueueItem(task, state.activeSession, stateUpdatedAt),
   );
 
-  const items = filterQueueItems(projectedItems, options.statusFilter).sort(compareQueueItems);
+  // Sort and assign positions on the FULL queue first so that position numbers
+  // are globally consistent with projectWorkItemDetail (which also uses the
+  // full sorted queue).  Filtering and pagination happen afterwards and
+  // preserve the already-assigned positions.
+  projectedItems.sort(compareQueueItems);
+  assignQueuePositions(projectedItems);
 
-  // Assign position numbers: non-terminal items get sequential positions
-  let position = 0;
-  for (const item of items) {
-    if (TERMINAL_STATUSES.has(item.status)) {
-      item.position = null;
-    } else {
-      item.position = position;
-      position += 1;
-    }
-  }
+  const items = filterQueueItems(projectedItems, options.statusFilter);
 
   const { items: pagedItems, nextCursor } = paginateQueueItems(
     items,
@@ -220,5 +245,113 @@ export function projectQueueSnapshot(
     availability,
     lastSynchronizedAt: resolveLastSynchronizedAt(state.updatedAt),
     nextCursor,
+  };
+}
+
+// ── Checkpoint Projection ──────────────────────────────────────────────────
+
+const VALID_CHECKPOINT_STATUSES: ReadonlySet<string> = new Set([
+  'reached',
+  'waiting',
+  'resumed',
+  'recovered',
+  'skipped',
+]);
+
+function resolveCheckpointStatus(raw: unknown): CheckpointStatus {
+  if (typeof raw === 'string' && VALID_CHECKPOINT_STATUSES.has(raw)) {
+    return raw as CheckpointStatus;
+  }
+  return 'reached';
+}
+
+/**
+ * Resolve the human-readable label from a checkpoint entry.
+ *
+ * The daemon persists checkpoints with `{ name, savedAt, context, agent }` but
+ * some legacy/test paths use `{ note, at, detail }`. We accept both shapes.
+ */
+/** Deterministic fallback when neither legacy `note` nor daemon `name` carry a value. */
+const UNNAMED_CHECKPOINT_LABEL = '(checkpoint)';
+
+function resolveCheckpointLabel(entry: Record<string, unknown>): string {
+  const note = entry['note'];
+  if (typeof note === 'string' && note !== '') return note;
+  const name = entry['name'];
+  if (typeof name === 'string' && name !== '') return name;
+  return UNNAMED_CHECKPOINT_LABEL;
+}
+
+function resolveCheckpointTimestamp(entry: Record<string, unknown>): string {
+  const at = entry['at'];
+  if (typeof at === 'string' && at !== '') return at;
+  const savedAt = entry['savedAt'];
+  if (typeof savedAt === 'string' && savedAt !== '') return savedAt;
+  return EPOCH_FALLBACK;
+}
+
+function resolveCheckpointDetail(entry: Record<string, unknown>): string | null {
+  const detail = entry['detail'];
+  if (typeof detail === 'string' && detail !== '') return detail;
+  const context = entry['context'];
+  if (typeof context === 'string' && context !== '') return context;
+  return null;
+}
+
+export function projectCheckpoints(task: TaskEntry): readonly CheckpointRecordView[] {
+  const entries = task.checkpoints ?? [];
+  return entries.map((entry, index) => ({
+    id: `${task.id}-cp-${String(index)}`,
+    sequence: index,
+    label: resolveCheckpointLabel(entry),
+    status: resolveCheckpointStatus(entry['status']),
+    timestamp: resolveCheckpointTimestamp(entry),
+    detail: resolveCheckpointDetail(entry),
+  }));
+}
+
+// ── Work Item Detail Projection ────────────────────────────────────────────
+
+export interface WorkItemDetailResult {
+  item: WorkQueueItemView;
+  checkpoints: readonly CheckpointRecordView[];
+  routing: null;
+  assignments: readonly [];
+  council: null;
+  controls: readonly [];
+  itemBudget: null;
+  availability: DetailAvailability;
+}
+
+export function projectWorkItemDetail(
+  state: HydraStateShape,
+  workItemId: string,
+): WorkItemDetailResult | null {
+  const task = state.tasks.find((t) => t.id === workItemId);
+  if (task == null) return null;
+
+  const stateUpdatedAt = resolveStateUpdatedAt(state.updatedAt);
+
+  // Project ALL items and assign positions with the same ordering used by
+  // projectQueueSnapshot so the detail position is always consistent.
+  const allItems: WorkQueueItemView[] = state.tasks.map((t) =>
+    projectTaskToQueueItem(t, state.activeSession, stateUpdatedAt),
+  );
+  allItems.sort(compareQueueItems);
+  assignQueuePositions(allItems);
+
+  const item = allItems.find((i) => i.id === workItemId);
+  if (item == null) return null; // unreachable — task exists so its projection exists
+  const checkpoints = projectCheckpoints(task);
+
+  return {
+    item,
+    checkpoints,
+    routing: null, // not yet tracked in daemon state
+    assignments: [], // not yet tracked in daemon state
+    council: null, // not yet tracked in daemon state
+    controls: [], // not yet tracked in daemon state
+    itemBudget: null, // not yet tracked in daemon state
+    availability: 'partial', // routing/assignments/council are untracked → partial
   };
 }

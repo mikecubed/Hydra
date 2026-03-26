@@ -128,6 +128,36 @@ function formatZodErrors(error: ZodLikeError): string {
     .join('; ');
 }
 
+type QueryParseResult<T> = { data: T } | { error: ReturnType<typeof createGatewayErrorResponse> };
+
+function parseQueryAgainstSchema<T>(
+  schema: ParseableSchema<T>,
+  urlText: string,
+): QueryParseResult<T> {
+  const url = new URL(urlText);
+  const rawQuery: Record<string, string | readonly string[]> = {};
+  for (const key of new Set(url.searchParams.keys())) {
+    const values = url.searchParams.getAll(key);
+    const fieldSchema = (schema as ShapedSchema<unknown>).shape?.[key];
+    rawQuery[key] =
+      fieldSchema !== undefined && isZodArrayType(fieldSchema) ? values : (values.at(-1) ?? '');
+  }
+
+  const coerced = coerceNumericFields(schema as ShapedSchema<unknown>, rawQuery);
+  const result = schema.safeParse(coerced);
+  if (!result.success) {
+    return {
+      error: createGatewayErrorResponse({
+        code: 'VALIDATION_FAILED',
+        category: 'validation',
+        message: formatZodErrors(result.error),
+      }),
+    };
+  }
+
+  return { data: result.data };
+}
+
 /**
  * Middleware that validates the JSON request body against a Zod schema.
  * On success, sets `validatedBody` in the Hono context.
@@ -171,30 +201,17 @@ export function validateBody<T>(schema: ParseableSchema<T>): MiddlewareHandler {
  */
 export function validateQuery<T>(schema: ParseableSchema<T>): MiddlewareHandler {
   return createMiddleware(async (c, next) => {
-    const url = new URL(c.req.url);
-    const rawQuery: Record<string, string | readonly string[]> = {};
-    for (const key of new Set(url.searchParams.keys())) {
-      const values = url.searchParams.getAll(key);
-      const fieldSchema = (schema as ShapedSchema<unknown>).shape?.[key];
-      rawQuery[key] =
-        fieldSchema !== undefined && isZodArrayType(fieldSchema) ? values : (values.at(-1) ?? '');
-    }
-
-    // Only coerce fields the schema declares as numeric — opaque strings like cursor stay intact
-    const coerced = coerceNumericFields(schema as ShapedSchema<unknown>, rawQuery);
-
-    const result = schema.safeParse(coerced);
-    if (!result.success) {
-      const errorResponse = createGatewayErrorResponse({
-        code: 'VALIDATION_FAILED',
-        category: 'validation',
-        message: formatZodErrors(result.error),
-      });
-      return c.json(errorResponse, 400 as ContentfulStatusCode);
+    const result = parseQueryAgainstSchema(schema, c.req.url);
+    if ('error' in result) {
+      return c.json(result.error, 400 as ContentfulStatusCode);
     }
 
     c.set('validatedQuery' as never, result.data as never);
     await next();
     return; // eslint-disable-line no-useless-return
   });
+}
+
+export function parseQuery<T>(schema: ParseableSchema<T>, urlText: string): QueryParseResult<T> {
+  return parseQueryAgainstSchema(schema, urlText);
 }
