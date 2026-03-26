@@ -468,7 +468,7 @@ export async function publishMiniRoundDelegation({
     }
   }
 
-  const decision = await request<DecisionPublishResponse>('POST', baseUrl, '/decision', {
+  const decisionPayload: Record<string, unknown> = {
     title: `Hydra Mini Round: ${short(promptText, 90)}`,
     owner: from,
     rationale: short(report?.consensus ?? 'Mini-round completed without explicit consensus.', 600),
@@ -476,24 +476,35 @@ export async function publishMiniRoundDelegation({
     route: 'mini-round',
     mode: recommendedMode,
     taskIds: createdTasks.flatMap((task) => (task.id === '' ? [] : [task.id])),
-    councilParticipants: agents.map((agent) => ({
+  };
+
+  // Only attach council metadata when a real mini-round report was produced.
+  if (report != null) {
+    decisionPayload['councilParticipants'] = agents.map((agent) => ({
       agent,
       role: null,
       state: 'completed',
       startedAt: null,
       endedAt: null,
-    })),
-    councilTransitions: [
+    }));
+    decisionPayload['councilTransitions'] = [
       {
         label: 'Mini-round recommendation',
         status: 'completed',
         timestamp: new Date().toISOString(),
-        detail: short(String(report?.recommendationRationale ?? report?.consensus ?? ''), 220),
+        detail: short(String(report.recommendationRationale ?? report.consensus ?? ''), 220),
       },
-    ],
-    councilFinalOutcome: short(String(report?.consensus ?? ''), 220),
-    councilStatus: 'completed',
-  });
+    ];
+    decisionPayload['councilFinalOutcome'] = short(String(report.consensus ?? ''), 220);
+    decisionPayload['councilStatus'] = 'completed';
+  }
+
+  const decision = await request<DecisionPublishResponse>(
+    'POST',
+    baseUrl,
+    '/decision',
+    decisionPayload,
+  );
 
   const handoffs: HandoffPublishSummary[] = [];
   for (const agent of agents) {
