@@ -303,7 +303,7 @@ describe('Work-item detail routes (T018/T019 — US2)', () => {
       assert.equal(body.category, 'daemon');
     });
 
-    it('returns 400 for empty workItemId', async () => {
+    it('returns 404 for empty workItemId', async () => {
       const res = await app.request(buildRequest('GET', '/operations/work-items/'));
       assert.equal(res.status, 404);
     });

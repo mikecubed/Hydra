@@ -53,11 +53,11 @@ flowchart TB
 
 ### Planned (not yet delivered)
 
-| Surface                 | Planned scope                                                                                                                        |
-| ----------------------- | ------------------------------------------------------------------------------------------------------------------------------------ |
-| Hydra operations panels | Later phases: checkpoints, routing/mode/agent controls, budgets, daemon health, and council views beyond the delivered queue sidebar |
-| Session and settings    | Operator preferences, config read/write surfaces                                                                                     |
-| Controlled mutations    | Safe config writes through daemon-owned APIs, approved workflow-launch surfaces, audit surfaces                                      |
+| Surface                 | Planned scope                                                                                                                                       |
+| ----------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Hydra operations panels | Queue sidebar and checkpoint detail panel delivered (Phase 2). Later phases: routing/mode/agent controls, budgets, daemon health, and council views |
+| Session and settings    | Operator preferences, config read/write surfaces                                                                                                    |
+| Controlled mutations    | Safe config writes through daemon-owned APIs, approved workflow-launch surfaces, audit surfaces                                                     |
 
 ## Architectural Rules
 
@@ -102,7 +102,8 @@ AppProviders (QueryClient + Router)
         ├── ComposerPanel          (textarea + send button, Ctrl+Enter, validation)
         ├── ArtifactPanel          (closeable aside for artifact content inspection)
         └── WorkspaceOperationsPanel
-            └── QueuePanel         (read-only operations queue sidebar)
+            ├── QueuePanel         (read-only operations queue sidebar)
+            └── CheckpointPanel    (work-item detail with checkpoint/progress view)
 ```
 
 ### State Management

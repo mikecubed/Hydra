@@ -46,7 +46,7 @@ product walkthrough.
 ### What is not there yet
 
 - no dedicated browser login screen
-- no full work-item detail panel for checkpoints/execution progress yet
+- no browser-side operational controls for checkpoints beyond read-only detail/progress
 - no browser-side operational controls yet
 - no complete end-user walkthrough in the product itself
 
