@@ -608,7 +608,7 @@ describe('hydra-worker-deep', () => {
         isModelError: true,
         failedModel: 'old-model',
       }));
-      // eslint-disable-next-line @typescript-eslint/no-unsafe-return
+      /* eslint-disable @typescript-eslint/no-unsafe-return */
       mockRecoverFromModelError.mock.mockImplementation(
         async () =>
           ({
@@ -616,6 +616,7 @@ describe('hydra-worker-deep', () => {
             newModel: 'new-model',
           }) as any,
       );
+      /* eslint-enable @typescript-eslint/no-unsafe-return */
 
       const progressEvents: string[] = [];
       w.on('task:progress', (e: { output: string }) => progressEvents.push(e.output));
