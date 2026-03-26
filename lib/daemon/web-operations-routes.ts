@@ -1,8 +1,10 @@
 /**
- * Operations read routes — REST endpoints for operations panel snapshot queries.
+ * Operations read routes — REST endpoints for operations panel snapshot queries
+ * and daemon-authoritative control discovery.
  *
  * These handlers project daemon state through web-operations-projection and
- * return browser-safe DTOs conforming to the operations read contracts.
+ * web-operations-controls, returning browser-safe DTOs conforming to the
+ * operations read and control contracts.
  */
 
 import type { ReadRouteCtx } from '../types.ts';
@@ -13,7 +15,14 @@ import {
   type QueueSnapshotOptions,
   type HealthBudgetContext,
 } from './web-operations-projection.ts';
-import type { WorkItemStatus } from '@hydra/web-contracts';
+import {
+  discoverControls,
+  discoverControlsBatch,
+  computeRevisionToken,
+  type ControlContext,
+} from './web-operations-controls.ts';
+import type { WorkItemStatus, ControlKind } from '@hydra/web-contracts';
+import { loadHydraConfig } from '../hydra-config.ts';
 
 const VALID_STATUSES = [
   'waiting',
@@ -133,10 +142,38 @@ function handleSnapshot(ctx: ReadRouteCtx): boolean {
   return true;
 }
 
+// ── Control Context ───────────────────────────────────────────────────────────
+
+const VALID_CONTROL_KINDS = new Set(['routing', 'mode', 'agent', 'council']);
+
+function isValidControlKind(value: string): value is ControlKind {
+  return VALID_CONTROL_KINDS.has(value);
+}
+
+function buildControlContext(ctx: ReadRouteCtx): ControlContext {
+  return {
+    loadConfig: () => {
+      try {
+        const config = loadHydraConfig();
+        const raw = config as Record<string, unknown>;
+        const mode = typeof raw['mode'] === 'string' ? raw['mode'] : 'auto';
+        const routing = raw['routing'] as Record<string, unknown> | undefined;
+        const routingMode = typeof routing?.['mode'] === 'string' ? routing['mode'] : 'balanced';
+        return { mode, routing: { mode: routingMode } };
+      } catch {
+        return { mode: 'auto', routing: { mode: 'balanced' } };
+      }
+    },
+    agentNames: Object.keys(ctx.getModelSummary()),
+    nowIso: () => new Date().toISOString(),
+  };
+}
+
 function handleWorkItemDetail(ctx: ReadRouteCtx, workItemId: string): boolean {
   const { res, sendJson, sendError, readState } = ctx;
   const state = readState();
-  const detail = projectWorkItemDetail(state, workItemId);
+  const controlConfig = buildControlContext(ctx);
+  const detail = projectWorkItemDetail(state, workItemId, controlConfig);
 
   if (detail == null) {
     sendError(res, 404, `Work item not found: ${workItemId}`);
@@ -144,6 +181,74 @@ function handleWorkItemDetail(ctx: ReadRouteCtx, workItemId: string): boolean {
   }
 
   sendJson(res, 200, detail);
+  return true;
+}
+
+// ── Control Discovery Routes ──────────────────────────────────────────────────
+
+function handleWorkItemControls(ctx: ReadRouteCtx, workItemId: string): boolean {
+  const { res, sendJson, sendError, readState, requestUrl } = ctx;
+  const state = readState();
+  const task = state.tasks.find((t) => t.id === workItemId);
+
+  if (task == null) {
+    sendError(res, 404, `Work item not found: ${workItemId}`);
+    return true;
+  }
+
+  const controlConfig = buildControlContext(ctx);
+  let controls = discoverControls(task, controlConfig);
+
+  const kindParam = requestUrl.searchParams.get('kind');
+  if (kindParam != null && kindParam !== '') {
+    if (!isValidControlKind(kindParam)) {
+      sendError(res, 400, `Invalid control kind: ${kindParam}`);
+      return true;
+    }
+    controls = controls.filter((c) => c.kind === kindParam);
+  }
+
+  const revision = computeRevisionToken(task);
+
+  sendJson(res, 200, {
+    workItemId,
+    controls,
+    revision,
+    availability: 'ready',
+  });
+  return true;
+}
+
+function handleBatchControlDiscovery(ctx: ReadRouteCtx): boolean {
+  const { res, sendJson, sendError, readState, requestUrl } = ctx;
+
+  const idsParam = requestUrl.searchParams.get('workItemIds');
+  if (idsParam == null || idsParam.trim() === '') {
+    sendError(res, 400, 'Query parameter "workItemIds" is required');
+    return true;
+  }
+
+  const workItemIds = idsParam.split(',').map((s) => s.trim()).filter(Boolean);
+  if (workItemIds.length === 0) {
+    sendError(res, 400, 'Query parameter "workItemIds" must contain at least one ID');
+    return true;
+  }
+
+  const kindParam = requestUrl.searchParams.get('kindFilter');
+  let kindFilter: ControlKind | undefined;
+  if (kindParam != null && kindParam !== '') {
+    if (!isValidControlKind(kindParam)) {
+      sendError(res, 400, `Invalid kindFilter: ${kindParam}`);
+      return true;
+    }
+    kindFilter = kindParam;
+  }
+
+  const state = readState();
+  const controlConfig = buildControlContext(ctx);
+  const items = discoverControlsBatch(state, workItemIds, controlConfig, kindFilter);
+
+  sendJson(res, 200, { items });
   return true;
 }
 
@@ -170,6 +275,7 @@ function handleWorkItemCheckpoints(ctx: ReadRouteCtx, workItemId: string): boole
 
 const OPERATIONS_ROUTES: ReadonlyMap<string, (ctx: ReadRouteCtx) => boolean> = new Map([
   ['/operations/snapshot', handleSnapshot],
+  ['/operations/controls', handleBatchControlDiscovery],
 ]);
 
 const WORK_ITEMS_PREFIX = '/operations/work-items/';
@@ -206,6 +312,7 @@ export function handleOperationsReadRoute(ctx: ReadRouteCtx): boolean {
   if (match != null) {
     if (match.sub === '') return handleWorkItemDetail(ctx, match.workItemId);
     if (match.sub === '/checkpoints') return handleWorkItemCheckpoints(ctx, match.workItemId);
+    if (match.sub === '/controls') return handleWorkItemControls(ctx, match.workItemId);
   }
 
   return false;

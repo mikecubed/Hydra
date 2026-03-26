@@ -29,7 +29,9 @@ import type {
   CouncilExecutionView,
   CouncilExecutionStatus,
   CouncilTransitionView,
+  OperationalControlView,
 } from '@hydra/web-contracts';
+import { discoverControls, type ControlContext } from './web-operations-controls.ts';
 
 // ── Status Normalization ───────────────────────────────────────────────────
 
@@ -863,7 +865,7 @@ export interface WorkItemDetailResult {
   routing: RoutingDecisionView | null;
   assignments: readonly AgentAssignmentView[];
   council: CouncilExecutionView | null;
-  controls: readonly [];
+  controls: readonly OperationalControlView[];
   itemBudget: BudgetStatusView;
   availability: DetailAvailability;
 }
@@ -883,6 +885,7 @@ function resolveDetailAvailability(
 export function projectWorkItemDetail(
   state: HydraStateShape,
   workItemId: string,
+  controlConfig?: ControlContext | null,
 ): WorkItemDetailResult | null {
   const task = state.tasks.find((t) => t.id === workItemId);
   if (task == null) return null;
@@ -905,13 +908,16 @@ export function projectWorkItemDetail(
   const assignments = projectAssignments(task);
   const council = projectCouncilExecution(task);
 
+  const controls: readonly OperationalControlView[] =
+    controlConfig == null ? [] : discoverControls(task, controlConfig);
+
   return {
     item,
     checkpoints,
     routing,
     assignments,
     council,
-    controls: [],
+    controls,
     itemBudget: projectItemBudget(workItemId),
     availability: resolveDetailAvailability(routing, assignments, council),
   };

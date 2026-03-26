@@ -1,0 +1,439 @@
+/**
+ * Operations Controls — daemon-authoritative control discovery, eligibility,
+ * authority, revision tokens, and mutation execution.
+ *
+ * The daemon is the sole authority for which controls are actionable, what
+ * options are available, and whether a mutation request is accepted, rejected,
+ * stale, or superseded. The browser and gateway never infer eligibility.
+ */
+
+import crypto from 'node:crypto';
+import type { HydraStateShape, TaskEntry } from '../types.ts';
+import type {
+  ControlKind,
+  ControlAvailability,
+  ControlAuthority,
+  OperationalControlView,
+  DetailAvailability,
+} from '@hydra/web-contracts';
+import type {
+  ControlOutcome,
+  SubmitControlActionRequest,
+  WorkItemControlEntry,
+} from '@hydra/web-contracts';
+
+// ── Types ─────────────────────────────────────────────────────────────────────
+
+export interface ControlMutationResult {
+  outcome: ControlOutcome;
+  control: OperationalControlView;
+  workItemId: string;
+  resolvedAt: string;
+  message?: string;
+}
+
+export interface ControlContext {
+  loadConfig: () => { mode: string; routing: { mode: string } };
+  agentNames: readonly string[];
+  nowIso: () => string;
+}
+
+// ── Revision Tokens ───────────────────────────────────────────────────────────
+
+/**
+ * Compute a deterministic revision token from the task's mutable control-relevant
+ * fields. This token changes whenever routing, mode, owner, or status mutates,
+ * providing optimistic concurrency for control mutations.
+ */
+export function computeRevisionToken(task: TaskEntry): string {
+  const parts = [
+    task.id,
+    task.owner,
+    task.status,
+    task.updatedAt,
+    JSON.stringify((task as Record<string, unknown>)['routingHistory'] ?? ''),
+  ];
+  // Use a fast non-crypto hash for revision — deterministic is key, not secrecy.
+  // crypto.createHash is available in Node.js without external deps.
+  return crypto.createHash('sha256').update(parts.join('|')).digest('hex').slice(0, 16);
+}
+
+// ── Terminal / Non-Actionable Detection ───────────────────────────────────────
+
+const TERMINAL_TASK_STATUSES = new Set(['done', 'failed', 'cancelled']);
+
+function isTerminalTask(task: TaskEntry): boolean {
+  return TERMINAL_TASK_STATUSES.has(task.status);
+}
+
+// ── Option Builders ───────────────────────────────────────────────────────────
+
+interface ControlOption {
+  optionId: string;
+  label: string;
+  selected: boolean;
+  available: boolean;
+}
+
+function buildRoutingModeOptions(task: TaskEntry, config: ControlContext): ControlOption[] {
+  const modes = ['auto', 'smart', 'council', 'dispatch', 'chat'];
+  const routingHistory = (task as Record<string, unknown>)['routingHistory'];
+  let currentMode: string | null = null;
+  if (Array.isArray(routingHistory) && routingHistory.length > 0) {
+    const latest: unknown = routingHistory.at(-1);
+    if (latest != null && typeof latest === 'object') {
+      const entry = latest as Record<string, unknown>;
+      if (typeof entry['mode'] === 'string' && entry['mode'] !== '') {
+        currentMode = entry['mode'];
+      }
+    }
+  }
+  if (currentMode == null) {
+    try {
+      currentMode = config.loadConfig().mode;
+    } catch {
+      currentMode = 'auto';
+    }
+  }
+
+  return modes.map((mode) => ({
+    optionId: `mode-${mode}`,
+    label: mode.charAt(0).toUpperCase() + mode.slice(1),
+    selected: mode === currentMode,
+    available: !isTerminalTask(task),
+  }));
+}
+
+function buildAgentOptions(task: TaskEntry, config: ControlContext): ControlOption[] {
+  const currentOwner = task.owner;
+  return config.agentNames.map((agent) => ({
+    optionId: `agent-${agent}`,
+    label: agent,
+    selected: agent === currentOwner,
+    available: !isTerminalTask(task),
+  }));
+}
+
+function buildRoutingStrategyOptions(task: TaskEntry, config: ControlContext): ControlOption[] {
+  const strategies = ['economy', 'balanced', 'performance'];
+  let current = 'balanced';
+  try {
+    current = config.loadConfig().routing.mode;
+  } catch {
+    // Use default when config is unavailable
+  }
+  return strategies.map((s) => ({
+    optionId: `routing-${s}`,
+    label: s.charAt(0).toUpperCase() + s.slice(1),
+    selected: s === current,
+    available: !isTerminalTask(task),
+  }));
+}
+
+function buildCouncilOptions(task: TaskEntry): ControlOption[] {
+  const councilHistory = (task as Record<string, unknown>)['councilHistory'];
+  const hasCouncil = councilHistory != null;
+  return [
+    {
+      optionId: 'council-request',
+      label: 'Request Council',
+      selected: hasCouncil,
+      available: !isTerminalTask(task) && !hasCouncil,
+    },
+  ];
+}
+
+// ── Control Discovery ─────────────────────────────────────────────────────────
+
+interface ControlSpec {
+  kind: ControlKind;
+  label: string;
+  buildOptions: (task: TaskEntry, config: ControlContext) => ControlOption[];
+}
+
+const CONTROL_SPECS: readonly ControlSpec[] = [
+  { kind: 'routing', label: 'Routing Strategy', buildOptions: buildRoutingStrategyOptions },
+  { kind: 'mode', label: 'Dispatch Mode', buildOptions: buildRoutingModeOptions },
+  { kind: 'agent', label: 'Agent Assignment', buildOptions: buildAgentOptions },
+  { kind: 'council', label: 'Council Deliberation', buildOptions: buildCouncilOptions },
+];
+
+function resolveAvailability(task: TaskEntry): ControlAvailability {
+  if (isTerminalTask(task)) return 'read-only';
+  return 'actionable';
+}
+
+function resolveAuthority(task: TaskEntry): ControlAuthority {
+  if (isTerminalTask(task)) return 'unavailable';
+  return 'granted';
+}
+
+function resolveReason(task: TaskEntry): string | null {
+  if (isTerminalTask(task)) return `Work item is ${task.status}`;
+  return null;
+}
+
+/**
+ * Discover all controls for a single work item.
+ * Each control includes daemon-authoritative eligibility, authority,
+ * options, and a revision token for optimistic concurrency.
+ */
+export function discoverControls(
+  task: TaskEntry,
+  config: ControlContext,
+): readonly OperationalControlView[] {
+  const availability = resolveAvailability(task);
+  const authority = resolveAuthority(task);
+  const reason = resolveReason(task);
+  const revision = availability === 'actionable' ? computeRevisionToken(task) : null;
+
+  return CONTROL_SPECS.map((spec) => ({
+    controlId: `${task.id}:${spec.kind}`,
+    kind: spec.kind,
+    label: spec.label,
+    availability,
+    authority,
+    reason,
+    options: spec.buildOptions(task, config),
+    expectedRevision: revision,
+    lastResolvedAt: null,
+  }));
+}
+
+/**
+ * Discover controls for multiple work items in batch.
+ */
+export function discoverControlsBatch(
+  state: HydraStateShape,
+  workItemIds: readonly string[],
+  config: ControlContext,
+  kindFilter?: ControlKind,
+): readonly WorkItemControlEntry[] {
+  return workItemIds.map((workItemId) => {
+    const task = state.tasks.find((t) => t.id === workItemId);
+    if (task == null) {
+      return {
+        workItemId,
+        controls: [],
+        availability: 'unavailable' as DetailAvailability,
+      };
+    }
+    let controls = discoverControls(task, config);
+    if (kindFilter != null) {
+      controls = controls.filter((c) => c.kind === kindFilter);
+    }
+    return {
+      workItemId,
+      controls,
+      availability: 'ready' as DetailAvailability,
+    };
+  });
+}
+
+// ── Control Mutations ─────────────────────────────────────────────────────────
+
+function buildResult(
+  outcome: ControlOutcome,
+  control: OperationalControlView,
+  workItemId: string,
+  resolvedAt: string,
+  message?: string,
+): ControlMutationResult {
+  return { outcome, control, workItemId, resolvedAt, message };
+}
+
+function findCurrentControl(
+  task: TaskEntry,
+  controlId: string,
+  config: ControlContext,
+): OperationalControlView | undefined {
+  return discoverControls(task, config).find((c) => c.controlId === controlId);
+}
+
+/**
+ * Execute a control mutation against daemon state.
+ * Validates revision token, eligibility, and option availability.
+ * Returns the authoritative outcome.
+ */
+export function executeControlMutation(
+  state: HydraStateShape,
+  request: SubmitControlActionRequest,
+  config: ControlContext,
+): ControlMutationResult {
+  const { workItemId, controlId, requestedOptionId, expectedRevision } = request;
+  const now = config.nowIso();
+
+  const task = state.tasks.find((t) => t.id === workItemId);
+  if (task == null) {
+    return buildResult('rejected', buildRejectedControl(controlId, 'Work item not found'), workItemId, now, `Work item ${workItemId} not found`);
+  }
+
+  const kind = extractKindFromControlId(controlId, workItemId);
+  if (kind == null) {
+    return buildResult('rejected', buildRejectedControl(controlId, 'Invalid control ID'), workItemId, now, `Invalid control ID: ${controlId}`);
+  }
+
+  if (expectedRevision !== computeRevisionToken(task)) {
+    const ctrl = findCurrentControl(task, controlId, config) ?? buildStaleControl(controlId, kind);
+    return buildResult('stale', ctrl, workItemId, now, 'Revision token mismatch — the work item state has changed since the last read');
+  }
+
+  if (isTerminalTask(task)) {
+    const ctrl = findCurrentControl(task, controlId, config) ?? buildRejectedControl(controlId, `Work item is ${task.status}`);
+    return buildResult('rejected', ctrl, workItemId, now, `Work item is ${task.status} and cannot be mutated`);
+  }
+
+  const spec = CONTROL_SPECS.find((s) => s.kind === kind);
+  if (spec == null) {
+    return buildResult('rejected', buildRejectedControl(controlId, 'Unknown control kind'), workItemId, now, `Unknown control kind: ${kind}`);
+  }
+
+  const options = spec.buildOptions(task, config);
+  const requestedOption = options.find((o) => o.optionId === requestedOptionId);
+  if (requestedOption == null) {
+    return buildResult('rejected', buildRejectedControl(controlId, 'Unknown option'), workItemId, now, `Unknown option: ${requestedOptionId}`);
+  }
+
+  if (!requestedOption.available) {
+    return buildResult('rejected', buildRejectedControl(controlId, 'Option not available'), workItemId, now, `Option ${requestedOptionId} is not available`);
+  }
+
+  if (requestedOption.selected) {
+    const ctrl = findCurrentControl(task, controlId, config) ?? buildAcceptedControl(controlId, kind, now);
+    return buildResult('superseded', ctrl, workItemId, now, 'Requested option is already the current value');
+  }
+
+  applyControlMutation(task, kind, requestedOptionId, config);
+
+  const updatedControl = findCurrentControl(task, controlId, config);
+
+  return buildResult(
+    'accepted',
+    updatedControl ?? buildAcceptedControl(controlId, kind, now),
+    workItemId,
+    now,
+    `Control ${kind} updated successfully`,
+  );
+}
+
+// ── Mutation Applicators ──────────────────────────────────────────────────────
+
+function applyControlMutation(
+  task: TaskEntry,
+  kind: ControlKind,
+  optionId: string,
+  config: ControlContext,
+): void {
+  const now = config.nowIso();
+  switch (kind) {
+    case 'mode': {
+      const mode = optionId.replace('mode-', '');
+      appendRoutingHistoryEntry(task, now, task.owner, mode, `Dispatch mode changed to ${mode}`);
+      break;
+    }
+    case 'agent': {
+      const agent = optionId.replace('agent-', '');
+      task.owner = agent;
+      appendRoutingHistoryEntry(task, now, agent, null, `Agent reassigned to ${agent}`);
+      break;
+    }
+    case 'routing': {
+      const strategy = optionId.replace('routing-', '');
+      appendRoutingHistoryEntry(
+        task,
+        now,
+        task.owner,
+        null,
+        `Routing strategy changed to ${strategy}`,
+      );
+      break;
+    }
+    case 'council': {
+      // Mark council as requested
+      (task as Record<string, unknown>)['councilHistory'] = {
+        status: 'waiting',
+        participants: [],
+        transitions: [],
+        finalOutcome: null,
+      };
+      appendRoutingHistoryEntry(task, now, task.owner, 'council', 'Council deliberation requested');
+      break;
+    }
+  }
+  task.updatedAt = now;
+}
+
+function appendRoutingHistoryEntry(
+  task: TaskEntry,
+  now: string,
+  route: string,
+  mode: string | null,
+  reason: string,
+): void {
+  const existing: unknown = (task as Record<string, unknown>)['routingHistory'];
+  const history: Record<string, unknown>[] = Array.isArray(existing)
+    ? (existing as Record<string, unknown>[])
+    : [];
+  history.push({ route, mode, changedAt: now, reason });
+  (task as Record<string, unknown>)['routingHistory'] = history;
+}
+
+// ── Control View Builders ─────────────────────────────────────────────────────
+
+function extractKindFromControlId(
+  controlId: string,
+  workItemId: string,
+): ControlKind | null {
+  const prefix = `${workItemId}:`;
+  if (!controlId.startsWith(prefix)) return null;
+  const kind = controlId.slice(prefix.length);
+  const validKinds = new Set(['routing', 'mode', 'agent', 'council']);
+  if (!validKinds.has(kind)) return null;
+  return kind as ControlKind;
+}
+
+function buildRejectedControl(controlId: string, reason: string): OperationalControlView {
+  return {
+    controlId,
+    kind: 'routing',
+    label: 'Unknown',
+    availability: 'rejected',
+    authority: 'unavailable',
+    reason,
+    options: [],
+    expectedRevision: null,
+    lastResolvedAt: null,
+  };
+}
+
+function buildStaleControl(controlId: string, kind: ControlKind): OperationalControlView {
+  return {
+    controlId,
+    kind,
+    label: 'Unknown',
+    availability: 'stale',
+    authority: 'unavailable',
+    reason: 'Revision mismatch',
+    options: [],
+    expectedRevision: null,
+    lastResolvedAt: null,
+  };
+}
+
+function buildAcceptedControl(
+  controlId: string,
+  kind: ControlKind,
+  resolvedAt: string,
+): OperationalControlView {
+  return {
+    controlId,
+    kind,
+    label: 'Unknown',
+    availability: 'accepted',
+    authority: 'granted',
+    reason: null,
+    options: [],
+    expectedRevision: null,
+    lastResolvedAt: resolvedAt,
+  };
+}

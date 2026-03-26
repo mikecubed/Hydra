@@ -12,6 +12,8 @@ import {
   updateSession as hubUpdate,
 } from '../hydra-hub.ts';
 import { exit } from '../hydra-process.ts';
+import { executeControlMutation, type ControlContext } from './web-operations-controls.ts';
+import { loadHydraConfig as loadConfig } from '../hydra-config.ts';
 
 // ── Mutation helpers ──────────────────────────────────────────────────────────
 
@@ -1418,6 +1420,77 @@ function handleShutdown(ctx: WriteRouteCtx): Promise<boolean> {
   return Promise.resolve(true);
 }
 
+// ── Operations Control Mutation ───────────────────────────────────────────────
+
+function buildWriteControlContext(ctx: WriteRouteCtx): ControlContext {
+  return {
+    loadConfig: () => {
+      try {
+        const config = loadConfig();
+        const raw = config as Record<string, unknown>;
+        const mode = typeof raw['mode'] === 'string' ? raw['mode'] : 'auto';
+        const routing = raw['routing'] as Record<string, unknown> | undefined;
+        const routingMode = typeof routing?.['mode'] === 'string' ? routing['mode'] : 'balanced';
+        return { mode, routing: { mode: routingMode } };
+      } catch {
+        return { mode: 'auto', routing: { mode: 'balanced' } };
+      }
+    },
+    agentNames: ctx.AGENT_NAMES,
+    nowIso: ctx.nowIso,
+  };
+}
+
+async function handleOperationsControlAction(ctx: WriteRouteCtx): Promise<boolean> {
+  const { req, res, sendJson, sendError } = ctx;
+  const body = await ctx.readJsonBody(req);
+
+  const workItemId = ((body['workItemId'] as string | null | undefined) ?? '').trim();
+  const controlId = ((body['controlId'] as string | null | undefined) ?? '').trim();
+  const requestedOptionId = ((body['requestedOptionId'] as string | null | undefined) ?? '').trim();
+  const expectedRevision = ((body['expectedRevision'] as string | null | undefined) ?? '').trim();
+  const requestIdRaw = ((body['requestId'] as string | null | undefined) ?? '').trim();
+  const requestId = requestIdRaw === '' ? undefined : requestIdRaw;
+
+  if (workItemId === '') {
+    sendError(res, 400, 'Field "workItemId" is required');
+    return true;
+  }
+  if (controlId === '') {
+    sendError(res, 400, 'Field "controlId" is required');
+    return true;
+  }
+  if (requestedOptionId === '') {
+    sendError(res, 400, 'Field "requestedOptionId" is required');
+    return true;
+  }
+  if (expectedRevision === '') {
+    sendError(res, 400, 'Field "expectedRevision" is required');
+    return true;
+  }
+
+  const controlConfig = buildWriteControlContext(ctx);
+
+  const result = await ctx.enqueueMutation(
+    `operations:control workItemId=${workItemId} controlId=${controlId}`,
+    (state: HydraStateShape) =>
+      executeControlMutation(
+        state,
+        { workItemId, controlId, requestedOptionId, expectedRevision, requestId },
+        controlConfig,
+      ),
+    { event: 'operations:control', workItemId, controlId, requestedOptionId },
+  );
+
+  let httpStatus = 200;
+  if (result.outcome === 'stale') {
+    httpStatus = 409;
+  }
+
+  sendJson(res, httpStatus, result);
+  return true;
+}
+
 // ── Dispatcher ────────────────────────────────────────────────────────────────
 
 const POST_ROUTES: Partial<Record<string, (ctx: WriteRouteCtx) => Promise<boolean>>> = {
@@ -1442,6 +1515,7 @@ const POST_ROUTES: Partial<Record<string, (ctx: WriteRouteCtx) => Promise<boolea
   '/dead-letter/retry': handleDeadLetterRetry,
   '/admin/compact': handleAdminCompact,
   '/shutdown': handleShutdown,
+  '/operations/control': handleOperationsControlAction,
 };
 
 export async function handleWriteRoute(ctx: WriteRouteCtx): Promise<boolean> {
