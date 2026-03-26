@@ -134,7 +134,8 @@ function projectTaskToQueueItem(
     relatedConversationId: null, // not yet tracked in daemon state
     relatedSessionId: null, // set only when daemon has authoritative linkage
     ownerLabel,
-    lastCheckpointSummary: lastSummary === '' ? null : lastSummary,
+    lastCheckpointSummary:
+      lastSummary === '' || lastSummary === UNNAMED_CHECKPOINT_LABEL ? null : lastSummary,
     updatedAt,
     riskSignals: buildRiskSignals(task, status),
     detailAvailability: 'partial', // full detail requires per-item query (US2)

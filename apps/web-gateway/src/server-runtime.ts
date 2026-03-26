@@ -2,6 +2,7 @@ import { readFile } from 'node:fs/promises';
 import { dirname, extname, relative, resolve } from 'node:path';
 import { homedir } from 'node:os';
 import { fileURLToPath } from 'node:url';
+import { z } from 'zod';
 
 const MODULE_DIR = dirname(fileURLToPath(import.meta.url));
 const DEFAULT_STATIC_DIR = resolve(MODULE_DIR, '../../web/dist');
@@ -45,21 +46,73 @@ export interface GatewayServerConfig {
   operatorSecret: string | null;
 }
 
-function readOptionalNonEmptyEnv(
-  env: NodeJS.ProcessEnv,
-  key: 'HYDRA_WEB_OPERATOR_ID' | 'HYDRA_WEB_OPERATOR_SECRET',
-): string | null {
-  const raw = env[key];
-  if (raw == null) {
-    return null;
+const OptionalTrimmedString = z
+  .string()
+  .transform((value) => value.trim())
+  .optional()
+  .transform((value) => (value == null || value === '' ? undefined : value));
+
+const RequiredNonEmptyTrimmedString = z.string().transform((value, context) => {
+  const trimmed = value.trim();
+  if (trimmed === '') {
+    context.addIssue({
+      code: 'custom',
+      message: 'must not be empty when set',
+    });
+    return z.NEVER;
   }
 
-  const value = raw.trim();
-  if (value === '') {
-    throw new Error(`${key} must not be empty when set`);
+  return trimmed;
+});
+
+const GatewayServerEnvSchema = z
+  .object({
+    HYDRA_WEB_GATEWAY_HOST: OptionalTrimmedString,
+    HYDRA_WEB_GATEWAY_PORT: OptionalTrimmedString,
+    HYDRA_WEB_GATEWAY_ORIGIN: OptionalTrimmedString,
+    HYDRA_DAEMON_URL: OptionalTrimmedString,
+    HYDRA_WEB_STATIC_DIR: OptionalTrimmedString,
+    HYDRA_WEB_STATE_DIR: OptionalTrimmedString,
+    HYDRA_WEB_OPERATOR_ID: z
+      .union([RequiredNonEmptyTrimmedString, z.undefined()])
+      .optional()
+      .transform((value) => value ?? undefined),
+    HYDRA_WEB_OPERATOR_DISPLAY_NAME: OptionalTrimmedString,
+    HYDRA_WEB_OPERATOR_SECRET: z
+      .union([RequiredNonEmptyTrimmedString, z.undefined()])
+      .optional()
+      .transform((value) => value ?? undefined),
+  })
+  .superRefine((env, context) => {
+    if ((env.HYDRA_WEB_OPERATOR_ID == null) !== (env.HYDRA_WEB_OPERATOR_SECRET == null)) {
+      context.addIssue({
+        code: 'custom',
+        message:
+          'HYDRA_WEB_OPERATOR_ID and HYDRA_WEB_OPERATOR_SECRET must either both be set or both be unset',
+      });
+    }
+  });
+
+function formatEnvIssues(error: z.ZodError, env: NodeJS.ProcessEnv): string {
+  if (error.issues.length === 0) {
+    return 'Invalid gateway server environment';
   }
 
-  return value;
+  const firstIssue = error.issues[0];
+  const field = firstIssue.path[0];
+  if (typeof field === 'string') {
+    const rawValue = env[field];
+    if (
+      (field === 'HYDRA_WEB_OPERATOR_ID' || field === 'HYDRA_WEB_OPERATOR_SECRET') &&
+      rawValue?.trim() === ''
+    ) {
+      return `${field} must not be empty when set`;
+    }
+
+    return `${field} ${firstIssue.message}`;
+  }
+
+  return firstIssue.message;
 }
 
 function parsePort(rawPort: string | undefined): number {
@@ -85,29 +138,29 @@ function resolveOrigin(host: string, port: number, explicitOrigin: string | unde
 export function resolveGatewayServerConfig(
   env: NodeJS.ProcessEnv = process.env,
 ): GatewayServerConfig {
-  const host = env['HYDRA_WEB_GATEWAY_HOST'] ?? '127.0.0.1';
-  const port = parsePort(env['HYDRA_WEB_GATEWAY_PORT']);
-  const publicOrigin = resolveOrigin(host, port, env['HYDRA_WEB_GATEWAY_ORIGIN']);
-  const daemonUrl = env['HYDRA_DAEMON_URL'] ?? 'http://127.0.0.1:4173';
-  const staticDirEnv = env['HYDRA_WEB_STATIC_DIR'];
+  const parsedEnv = GatewayServerEnvSchema.safeParse(env);
+  if (!parsedEnv.success) {
+    throw new Error(formatEnvIssues(parsedEnv.error, env));
+  }
+
+  const validatedEnv = parsedEnv.data;
+  const host = validatedEnv.HYDRA_WEB_GATEWAY_HOST ?? '127.0.0.1';
+  const port = parsePort(validatedEnv.HYDRA_WEB_GATEWAY_PORT);
+  const publicOrigin = resolveOrigin(host, port, validatedEnv.HYDRA_WEB_GATEWAY_ORIGIN);
+  const daemonUrl = validatedEnv.HYDRA_DAEMON_URL ?? 'http://127.0.0.1:4173';
+  const staticDirEnv = validatedEnv.HYDRA_WEB_STATIC_DIR;
   const staticDir =
     staticDirEnv != null && staticDirEnv !== '' ? resolve(staticDirEnv) : DEFAULT_STATIC_DIR;
-  const stateDirEnv = env['HYDRA_WEB_STATE_DIR'];
+  const stateDirEnv = validatedEnv.HYDRA_WEB_STATE_DIR;
   const stateDir =
     stateDirEnv != null && stateDirEnv !== '' ? resolve(stateDirEnv) : DEFAULT_STATE_DIR;
-  const operatorId = readOptionalNonEmptyEnv(env, 'HYDRA_WEB_OPERATOR_ID');
-  const operatorDisplayNameRaw = env['HYDRA_WEB_OPERATOR_DISPLAY_NAME']?.trim();
+  const operatorId = validatedEnv.HYDRA_WEB_OPERATOR_ID ?? null;
+  const operatorDisplayNameRaw = validatedEnv.HYDRA_WEB_OPERATOR_DISPLAY_NAME;
   const operatorDisplayName =
     operatorDisplayNameRaw != null && operatorDisplayNameRaw !== ''
       ? operatorDisplayNameRaw
       : operatorId;
-  const operatorSecret = readOptionalNonEmptyEnv(env, 'HYDRA_WEB_OPERATOR_SECRET');
-
-  if ((operatorId == null) !== (operatorSecret == null)) {
-    throw new Error(
-      'HYDRA_WEB_OPERATOR_ID and HYDRA_WEB_OPERATOR_SECRET must either both be set or both be unset',
-    );
-  }
+  const operatorSecret = validatedEnv.HYDRA_WEB_OPERATOR_SECRET ?? null;
 
   return {
     host,

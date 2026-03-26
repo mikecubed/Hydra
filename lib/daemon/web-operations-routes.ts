@@ -42,24 +42,21 @@ function parseStatusFilters(
     return { statuses: undefined };
   }
 
-  const tokens: string[] = [];
+  const tokens: WorkItemStatus[] = [];
   for (const raw of rawValues) {
     for (const token of raw.split(',')) {
       const trimmed = token.trim();
       if (trimmed === '') {
         return { invalid: raw };
       }
+      if (!isValidStatus(trimmed)) {
+        return { invalid: trimmed };
+      }
       tokens.push(trimmed);
     }
   }
 
-  for (const token of tokens) {
-    if (!isValidStatus(token)) {
-      return { invalid: token };
-    }
-  }
-
-  return { statuses: tokens as unknown as readonly WorkItemStatus[] };
+  return { statuses: tokens };
 }
 
 function parseLimit(raw: string | null): number | undefined {

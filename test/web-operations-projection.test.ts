@@ -284,6 +284,23 @@ describe('projectQueueSnapshot', () => {
       const result = projectQueueSnapshot(state);
       assert.equal(result.queue[0].lastCheckpointSummary, 'Final review');
     });
+
+    it('keeps lastCheckpointSummary null when the latest checkpoint has no visible label', () => {
+      const state = makeState({
+        tasks: [
+          makeTask({
+            id: 'task-1',
+            title: 'Task 1',
+            status: 'in_progress',
+            checkpoints: [{ name: '', note: '', at: '', savedAt: '2026-03-01T12:00:00.000Z' }],
+          }),
+        ],
+      });
+
+      const result = projectQueueSnapshot(state);
+
+      assert.equal(result.queue[0].lastCheckpointSummary, null);
+    });
   });
 
   describe('risk signals', () => {

@@ -12,6 +12,7 @@ import { createGatewayErrorResponse } from '../shared/gateway-error-response.ts'
 import type { GatewayErrorResponse } from '../shared/gateway-error-response.ts';
 
 export {
+  parseQuery as parseOperationsQuery,
   validateBody as validateOperationsBody,
   validateQuery as validateOperationsQuery,
 } from '../conversation/request-validator.ts';

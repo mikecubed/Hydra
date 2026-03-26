@@ -112,6 +112,16 @@ describe('DaemonHeartbeat', () => {
     assert.equal(store.get(session.id)?.state, 'active');
   });
 
+  it('first healthy probe restores persisted daemon-unreachable sessions after restart', async () => {
+    const session = await service.create('op-1', '127.0.0.1');
+    store.update(session.id, { state: 'daemon-unreachable' });
+
+    const hb = createHeartbeat();
+    await hb.tick();
+
+    assert.equal(store.get(session.id)?.state, 'active');
+  });
+
   it('expiring-soon session transitions to daemon-unreachable on outage', async () => {
     const session = await service.create('op-1', '127.0.0.1');
     const hb = createHeartbeat();

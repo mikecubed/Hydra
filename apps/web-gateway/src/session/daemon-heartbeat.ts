@@ -88,7 +88,7 @@ export class DaemonHeartbeat {
       return;
     }
 
-    if (previousHealth === false) {
+    if (previousHealth !== true) {
       await this.transitionAllDaemonUnreachable('daemon-up');
     }
   }
