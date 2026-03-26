@@ -8,7 +8,14 @@
  */
 
 import type { ActiveSessionEntry, HydraStateShape, TaskEntry, TaskStatus } from '../types.ts';
-import type { WorkItemStatus, WorkQueueItemView, RiskSignal } from '@hydra/web-contracts';
+import type {
+  WorkItemStatus,
+  WorkQueueItemView,
+  RiskSignal,
+  CheckpointStatus,
+  CheckpointRecordView,
+  DetailAvailability,
+} from '@hydra/web-contracts';
 
 // ── Status Normalization ───────────────────────────────────────────────────
 
@@ -220,5 +227,70 @@ export function projectQueueSnapshot(
     availability,
     lastSynchronizedAt: resolveLastSynchronizedAt(state.updatedAt),
     nextCursor,
+  };
+}
+
+// ── Checkpoint Projection ──────────────────────────────────────────────────
+
+const VALID_CHECKPOINT_STATUSES: ReadonlySet<string> = new Set([
+  'reached',
+  'waiting',
+  'resumed',
+  'recovered',
+  'skipped',
+]);
+
+function resolveCheckpointStatus(raw: unknown): CheckpointStatus {
+  if (typeof raw === 'string' && VALID_CHECKPOINT_STATUSES.has(raw)) {
+    return raw as CheckpointStatus;
+  }
+  return 'reached';
+}
+
+export function projectCheckpoints(task: TaskEntry): readonly CheckpointRecordView[] {
+  const entries = task.checkpoints ?? [];
+  return entries.map((entry, index) => ({
+    id: `${task.id}-cp-${String(index)}`,
+    sequence: index,
+    label: entry.note,
+    status: resolveCheckpointStatus(entry['status']),
+    timestamp: entry.at,
+    detail: typeof entry['detail'] === 'string' ? entry['detail'] : null,
+  }));
+}
+
+// ── Work Item Detail Projection ────────────────────────────────────────────
+
+export interface WorkItemDetailResult {
+  item: WorkQueueItemView;
+  checkpoints: readonly CheckpointRecordView[];
+  routing: null;
+  assignments: readonly [];
+  council: null;
+  controls: readonly [];
+  itemBudget: null;
+  availability: DetailAvailability;
+}
+
+export function projectWorkItemDetail(
+  state: HydraStateShape,
+  workItemId: string,
+): WorkItemDetailResult | null {
+  const task = state.tasks.find((t) => t.id === workItemId);
+  if (task == null) return null;
+
+  const stateUpdatedAt = resolveStateUpdatedAt(state.updatedAt);
+  const item = projectTaskToQueueItem(task, state.activeSession, stateUpdatedAt);
+  const checkpoints = projectCheckpoints(task);
+
+  return {
+    item,
+    checkpoints,
+    routing: null, // not yet tracked in daemon state
+    assignments: [], // not yet tracked in daemon state
+    council: null, // not yet tracked in daemon state
+    controls: [], // not yet tracked in daemon state
+    itemBudget: null, // not yet tracked in daemon state
+    availability: 'partial', // routing/assignments/council are untracked → partial
   };
 }

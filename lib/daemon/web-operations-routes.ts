@@ -6,7 +6,12 @@
  */
 
 import type { ReadRouteCtx } from '../types.ts';
-import { projectQueueSnapshot, type QueueSnapshotOptions } from './web-operations-projection.ts';
+import {
+  projectQueueSnapshot,
+  projectCheckpoints,
+  projectWorkItemDetail,
+  type QueueSnapshotOptions,
+} from './web-operations-projection.ts';
 import type { WorkItemStatus } from '@hydra/web-contracts';
 
 const VALID_STATUSES = [
@@ -87,15 +92,67 @@ function handleSnapshot(ctx: ReadRouteCtx): boolean {
   return true;
 }
 
+function handleWorkItemDetail(ctx: ReadRouteCtx, workItemId: string): boolean {
+  const { res, sendJson, sendError, readState } = ctx;
+  const state = readState();
+  const detail = projectWorkItemDetail(state, workItemId);
+
+  if (detail == null) {
+    sendError(res, 404, `Work item not found: ${workItemId}`);
+    return true;
+  }
+
+  sendJson(res, 200, detail);
+  return true;
+}
+
+function handleWorkItemCheckpoints(ctx: ReadRouteCtx, workItemId: string): boolean {
+  const { res, sendJson, sendError, readState } = ctx;
+  const state = readState();
+  const task = state.tasks.find((t) => t.id === workItemId);
+
+  if (task == null) {
+    sendError(res, 404, `Work item not found: ${workItemId}`);
+    return true;
+  }
+
+  const checkpoints = projectCheckpoints(task);
+  const availability = checkpoints.length > 0 ? 'ready' : 'partial';
+
+  sendJson(res, 200, {
+    workItemId,
+    checkpoints,
+    availability,
+  });
+  return true;
+}
+
 const OPERATIONS_ROUTES: ReadonlyMap<string, (ctx: ReadRouteCtx) => boolean> = new Map([
   ['/operations/snapshot', handleSnapshot],
 ]);
+
+const WORK_ITEM_PREFIX = '/operations/work-item/';
+
+function matchWorkItemRoute(route: string): { workItemId: string; sub: string } | null {
+  if (!route.startsWith(WORK_ITEM_PREFIX)) return null;
+  const rest = route.slice(WORK_ITEM_PREFIX.length);
+  if (rest === '') return null;
+  const slashIndex = rest.indexOf('/');
+  if (slashIndex === -1) return { workItemId: rest, sub: '' };
+  return { workItemId: rest.slice(0, slashIndex), sub: rest.slice(slashIndex) };
+}
 
 export function handleOperationsReadRoute(ctx: ReadRouteCtx): boolean {
   if (ctx.method !== 'GET') return false;
 
   const handler = OPERATIONS_ROUTES.get(ctx.route);
   if (handler != null) return handler(ctx);
+
+  const match = matchWorkItemRoute(ctx.route);
+  if (match != null) {
+    if (match.sub === '') return handleWorkItemDetail(ctx, match.workItemId);
+    if (match.sub === '/checkpoints') return handleWorkItemCheckpoints(ctx, match.workItemId);
+  }
 
   return false;
 }

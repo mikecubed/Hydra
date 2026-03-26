@@ -12,6 +12,8 @@ import {
   projectQueueSnapshot,
   normalizeTaskStatus,
   DAEMON_TO_WORK_ITEM_STATUS,
+  projectCheckpoints,
+  projectWorkItemDetail,
 } from '../lib/daemon/web-operations-projection.ts';
 
 // ── Helpers ────────────────────────────────────────────────────────────────
@@ -280,5 +282,324 @@ describe('projectQueueSnapshot', () => {
       const result = projectQueueSnapshot(state);
       assert.deepStrictEqual(result.queue[0].riskSignals, []);
     });
+  });
+});
+
+// ── Checkpoint Projection ──────────────────────────────────────────────────
+
+describe('projectCheckpoints', () => {
+  it('returns empty array when task has no checkpoints', () => {
+    const task = makeTask({ id: 'task-1' });
+    const result = projectCheckpoints(task);
+    assert.deepStrictEqual(result, []);
+  });
+
+  it('assigns monotonic sequence numbers starting from 0', () => {
+    const task = makeTask({
+      id: 'task-1',
+      checkpoints: [
+        { note: 'First', at: '2025-01-01T00:00:00.000Z' },
+        { note: 'Second', at: '2025-01-01T01:00:00.000Z' },
+        { note: 'Third', at: '2025-01-01T02:00:00.000Z' },
+      ],
+    });
+    const result = projectCheckpoints(task);
+    assert.equal(result.length, 3);
+    assert.equal(result[0].sequence, 0);
+    assert.equal(result[1].sequence, 1);
+    assert.equal(result[2].sequence, 2);
+  });
+
+  it('generates deterministic checkpoint IDs from task id and sequence', () => {
+    const task = makeTask({
+      id: 'task-42',
+      checkpoints: [
+        { note: 'Start', at: '2025-01-01T00:00:00.000Z' },
+        { note: 'Done', at: '2025-01-01T01:00:00.000Z' },
+      ],
+    });
+    const result = projectCheckpoints(task);
+    assert.equal(result[0].id, 'task-42-cp-0');
+    assert.equal(result[1].id, 'task-42-cp-1');
+  });
+
+  it('maps note → label and at → timestamp', () => {
+    const task = makeTask({
+      id: 'task-1',
+      checkpoints: [{ note: 'Halfway done', at: '2025-06-01T12:00:00.000Z' }],
+    });
+    const result = projectCheckpoints(task);
+    assert.equal(result[0].label, 'Halfway done');
+    assert.equal(result[0].timestamp, '2025-06-01T12:00:00.000Z');
+  });
+
+  it('defaults checkpoint status to reached', () => {
+    const task = makeTask({
+      id: 'task-1',
+      checkpoints: [{ note: 'Basic checkpoint', at: '2025-01-01T00:00:00.000Z' }],
+    });
+    const result = projectCheckpoints(task);
+    assert.equal(result[0].status, 'reached');
+  });
+
+  it('preserves explicit checkpoint status when present', () => {
+    const task = makeTask({
+      id: 'task-1',
+      checkpoints: [
+        { note: 'Recovered after failure', at: '2025-01-01T00:00:00.000Z', status: 'recovered' },
+      ],
+    });
+    const result = projectCheckpoints(task);
+    assert.equal(result[0].status, 'recovered');
+  });
+
+  it('maps waiting status on checkpoints', () => {
+    const task = makeTask({
+      id: 'task-1',
+      checkpoints: [
+        { note: 'Waiting for review', at: '2025-01-01T00:00:00.000Z', status: 'waiting' },
+      ],
+    });
+    const result = projectCheckpoints(task);
+    assert.equal(result[0].status, 'waiting');
+  });
+
+  it('maps resumed status on checkpoints', () => {
+    const task = makeTask({
+      id: 'task-1',
+      checkpoints: [
+        { note: 'Resumed after pause', at: '2025-01-01T00:00:00.000Z', status: 'resumed' },
+      ],
+    });
+    const result = projectCheckpoints(task);
+    assert.equal(result[0].status, 'resumed');
+  });
+
+  it('maps skipped status on checkpoints', () => {
+    const task = makeTask({
+      id: 'task-1',
+      checkpoints: [
+        { note: 'Skipped optimization', at: '2025-01-01T00:00:00.000Z', status: 'skipped' },
+      ],
+    });
+    const result = projectCheckpoints(task);
+    assert.equal(result[0].status, 'skipped');
+  });
+
+  it('falls back to reached for unknown checkpoint statuses', () => {
+    const task = makeTask({
+      id: 'task-1',
+      checkpoints: [{ note: 'Weird status', at: '2025-01-01T00:00:00.000Z', status: 'bogus' }],
+    });
+    const result = projectCheckpoints(task);
+    assert.equal(result[0].status, 'reached');
+  });
+
+  it('preserves checkpoint ordering (input order = sequence order)', () => {
+    const task = makeTask({
+      id: 'task-1',
+      checkpoints: [
+        { note: 'C', at: '2025-01-01T03:00:00.000Z' },
+        { note: 'A', at: '2025-01-01T01:00:00.000Z' },
+        { note: 'B', at: '2025-01-01T02:00:00.000Z' },
+      ],
+    });
+    const result = projectCheckpoints(task);
+    assert.deepStrictEqual(
+      result.map((cp) => cp.label),
+      ['C', 'A', 'B'],
+    );
+    assert.equal(result[0].sequence, 0);
+    assert.equal(result[1].sequence, 1);
+    assert.equal(result[2].sequence, 2);
+  });
+
+  it('maps detail field from checkpoint when present', () => {
+    const task = makeTask({
+      id: 'task-1',
+      checkpoints: [
+        { note: 'With detail', at: '2025-01-01T00:00:00.000Z', detail: 'Extra info here' },
+      ],
+    });
+    const result = projectCheckpoints(task);
+    assert.equal(result[0].detail, 'Extra info here');
+  });
+
+  it('sets detail to null when not present on checkpoint', () => {
+    const task = makeTask({
+      id: 'task-1',
+      checkpoints: [{ note: 'No detail', at: '2025-01-01T00:00:00.000Z' }],
+    });
+    const result = projectCheckpoints(task);
+    assert.equal(result[0].detail, null);
+  });
+});
+
+// ── Work Item Detail Projection ────────────────────────────────────────────
+
+describe('projectWorkItemDetail', () => {
+  it('returns null when task is not found', () => {
+    const state = makeState({ tasks: [] });
+    const result = projectWorkItemDetail(state, 'nonexistent');
+    assert.equal(result, null);
+  });
+
+  it('returns detail with projected item for existing task', () => {
+    const state = makeState({
+      tasks: [makeTask({ id: 'task-1', title: 'Do stuff', status: 'in_progress' })],
+    });
+    const result = projectWorkItemDetail(state, 'task-1');
+    assert.ok(result !== null);
+    assert.equal(result.item.id, 'task-1');
+    assert.equal(result.item.title, 'Do stuff');
+    assert.equal(result.item.status, 'active');
+  });
+
+  it('includes projected checkpoints in monotonic order', () => {
+    const state = makeState({
+      tasks: [
+        makeTask({
+          id: 'task-1',
+          checkpoints: [
+            { note: 'Step 1', at: '2025-01-01T00:00:00.000Z' },
+            { note: 'Step 2', at: '2025-01-01T01:00:00.000Z' },
+          ],
+        }),
+      ],
+    });
+    const result = projectWorkItemDetail(state, 'task-1');
+    assert.ok(result !== null);
+    assert.equal(result.checkpoints.length, 2);
+    assert.equal(result.checkpoints[0].sequence, 0);
+    assert.equal(result.checkpoints[1].sequence, 1);
+    assert.equal(result.checkpoints[0].label, 'Step 1');
+    assert.equal(result.checkpoints[1].label, 'Step 2');
+  });
+
+  it('sets routing to null (not yet tracked)', () => {
+    const state = makeState({ tasks: [makeTask({ id: 'task-1' })] });
+    const result = projectWorkItemDetail(state, 'task-1');
+    assert.ok(result !== null);
+    assert.equal(result.routing, null);
+  });
+
+  it('returns empty assignments array (not yet tracked)', () => {
+    const state = makeState({ tasks: [makeTask({ id: 'task-1' })] });
+    const result = projectWorkItemDetail(state, 'task-1');
+    assert.ok(result !== null);
+    assert.deepStrictEqual(result.assignments, []);
+  });
+
+  it('sets council to null (not yet tracked)', () => {
+    const state = makeState({ tasks: [makeTask({ id: 'task-1' })] });
+    const result = projectWorkItemDetail(state, 'task-1');
+    assert.ok(result !== null);
+    assert.equal(result.council, null);
+  });
+
+  it('returns empty controls array (not yet tracked)', () => {
+    const state = makeState({ tasks: [makeTask({ id: 'task-1' })] });
+    const result = projectWorkItemDetail(state, 'task-1');
+    assert.ok(result !== null);
+    assert.deepStrictEqual(result.controls, []);
+  });
+
+  it('sets itemBudget to null (not yet tracked)', () => {
+    const state = makeState({ tasks: [makeTask({ id: 'task-1' })] });
+    const result = projectWorkItemDetail(state, 'task-1');
+    assert.ok(result !== null);
+    assert.equal(result.itemBudget, null);
+  });
+
+  it('sets availability to partial when checkpoints exist but routing/assignments are not tracked', () => {
+    const state = makeState({
+      tasks: [
+        makeTask({
+          id: 'task-1',
+          checkpoints: [{ note: 'Started', at: '2025-01-01T00:00:00.000Z' }],
+        }),
+      ],
+    });
+    const result = projectWorkItemDetail(state, 'task-1');
+    assert.ok(result !== null);
+    assert.equal(result.availability, 'partial');
+  });
+
+  it('sets availability to partial even when no checkpoints exist', () => {
+    const state = makeState({ tasks: [makeTask({ id: 'task-1' })] });
+    const result = projectWorkItemDetail(state, 'task-1');
+    assert.ok(result !== null);
+    assert.equal(result.availability, 'partial');
+  });
+
+  it('projects paused status for in_progress task with paused session', () => {
+    const state = makeState({
+      tasks: [makeTask({ id: 'task-1', status: 'in_progress', owner: 'codex' })],
+      activeSession: {
+        id: 'session-1',
+        focus: 'Test',
+        owner: 'codex',
+        status: 'paused',
+        startedAt: '2025-01-01T00:00:00.000Z',
+        updatedAt: '2025-01-01T00:01:00.000Z',
+        pauseReason: 'Waiting',
+        pausedAt: '2025-01-01T00:01:00.000Z',
+      },
+    });
+    const result = projectWorkItemDetail(state, 'task-1');
+    assert.ok(result !== null);
+    assert.equal(result.item.status, 'paused');
+  });
+
+  it('includes risk signals on the projected item', () => {
+    const state = makeState({
+      tasks: [makeTask({ id: 'task-1', status: 'in_progress', stale: true })],
+    });
+    const result = projectWorkItemDetail(state, 'task-1');
+    assert.ok(result !== null);
+    const staleSignals = result.item.riskSignals.filter((s) => s.kind === 'stale');
+    assert.equal(staleSignals.length, 1);
+  });
+
+  it('includes checkpoints with recovery status', () => {
+    const state = makeState({
+      tasks: [
+        makeTask({
+          id: 'task-1',
+          checkpoints: [
+            { note: 'Started', at: '2025-01-01T00:00:00.000Z' },
+            { note: 'Recovered', at: '2025-01-01T01:00:00.000Z', status: 'recovered' },
+          ],
+        }),
+      ],
+    });
+    const result = projectWorkItemDetail(state, 'task-1');
+    assert.ok(result !== null);
+    assert.equal(result.checkpoints[1].status, 'recovered');
+  });
+
+  it('includes checkpoints with waiting status', () => {
+    const state = makeState({
+      tasks: [
+        makeTask({
+          id: 'task-1',
+          checkpoints: [
+            { note: 'Awaiting input', at: '2025-01-01T00:00:00.000Z', status: 'waiting' },
+          ],
+        }),
+      ],
+    });
+    const result = projectWorkItemDetail(state, 'task-1');
+    assert.ok(result !== null);
+    assert.equal(result.checkpoints[0].status, 'waiting');
+  });
+
+  it('sets detailAvailability to partial on projected item', () => {
+    const state = makeState({
+      tasks: [makeTask({ id: 'task-1' })],
+    });
+    const result = projectWorkItemDetail(state, 'task-1');
+    assert.ok(result !== null);
+    assert.equal(result.item.detailAvailability, 'partial');
   });
 });
