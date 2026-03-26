@@ -5,7 +5,7 @@
  * These functions handle building agent message briefs and publishing tasks/handoffs
  * to the Hydra daemon via HTTP.
  */
-/* eslint-disable @typescript-eslint/no-explicit-any, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-argument, @typescript-eslint/no-unsafe-return -- T7A: dispatch uses polymorphic any for dynamic agent routing */
+/* eslint-disable @typescript-eslint/no-explicit-any, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-argument -- T7A: dispatch uses polymorphic any for dynamic agent routing */
 /* eslint-disable @typescript-eslint/strict-boolean-expressions -- T7A: standard JS truthiness; type narrowing tracked as follow-up */
 /* eslint-disable no-await-in-loop -- sequential task creation required by daemon ordering */
 
@@ -50,6 +50,30 @@ export interface DispatchClassification {
   reason?: string;
   tier?: string;
   tandemPair?: TandemPair | null;
+}
+
+interface PublishedTaskSummary {
+  id: string;
+  owner: string;
+}
+
+interface TaskAddResponse {
+  task?: {
+    id?: string;
+    owner?: string;
+  } | null;
+}
+
+interface DecisionPublishResponse {
+  decision: unknown;
+}
+
+interface HandoffPublishSummary {
+  to?: string;
+}
+
+interface HandoffPublishResponse {
+  handoff: HandoffPublishSummary;
 }
 
 // ── Brief Builders (pure string construction) ────────────────────────────────
@@ -398,6 +422,7 @@ export async function publishFastPathDelegation({
   };
 }
 
+// eslint-disable-next-line max-lines-per-function, complexity -- publish keeps task creation, decision metadata, and handoffs in one linear flow
 export async function publishMiniRoundDelegation({
   baseUrl,
   from,
@@ -410,7 +435,11 @@ export async function publishMiniRoundDelegation({
   agents: string[];
   promptText: string;
   report: MiniRoundReport | null;
-}): Promise<{ decision: any; tasks: any[]; handoffs: any[] }> {
+}): Promise<{
+  decision: unknown;
+  tasks: PublishedTaskSummary[];
+  handoffs: HandoffPublishSummary[];
+}> {
   const normalizedTasks = (Array.isArray(report?.tasks) ? report.tasks : [])
     .map((item) => normalizeTask(item))
     .filter((t): t is NonNullable<ReturnType<typeof normalizeTask>> => t !== null);
@@ -424,37 +453,61 @@ export async function publishMiniRoundDelegation({
           rationale: 'Generated fallback task because mini-round had no explicit allocations.',
         }));
 
-  const createdTasks = [];
+  const createdTasks: PublishedTaskSummary[] = [];
+  const recommendedMode = String(report?.recommendedMode ?? 'handoff');
   for (const task of tasksToCreate) {
-    const created = (await request('POST', baseUrl, '/task/add', {
+    const created = await request<TaskAddResponse>('POST', baseUrl, '/task/add', {
       title: task.title,
       owner: task.owner,
       status: 'todo',
+      mode: recommendedMode,
       notes: task.rationale ? `Mini-round rationale: ${task.rationale}` : '',
-    })) as any;
-    createdTasks.push(created.task);
+    });
+    if (typeof created.task?.id === 'string' && typeof created.task.owner === 'string') {
+      createdTasks.push({ id: created.task.id, owner: created.task.owner });
+    }
   }
 
-  const decision = (await request('POST', baseUrl, '/decision', {
+  const decision = await request<DecisionPublishResponse>('POST', baseUrl, '/decision', {
     title: `Hydra Mini Round: ${short(promptText, 90)}`,
     owner: from,
     rationale: short(report?.consensus ?? 'Mini-round completed without explicit consensus.', 600),
-    impact: `recommended=${String(report?.recommendedMode ?? 'handoff')}; tasks=${String(createdTasks.length)}`,
-  })) as any;
+    impact: `recommended=${recommendedMode}; tasks=${String(createdTasks.length)}`,
+    route: 'mini-round',
+    mode: recommendedMode,
+    taskIds: createdTasks.flatMap((task) => (task.id === '' ? [] : [task.id])),
+    councilParticipants: agents.map((agent) => ({
+      agent,
+      role: null,
+      state: 'completed',
+      startedAt: null,
+      endedAt: null,
+    })),
+    councilTransitions: [
+      {
+        label: 'Mini-round recommendation',
+        status: 'completed',
+        timestamp: new Date().toISOString(),
+        detail: short(String(report?.recommendationRationale ?? report?.consensus ?? ''), 220),
+      },
+    ],
+    councilFinalOutcome: short(String(report?.consensus ?? ''), 220),
+    councilStatus: 'completed',
+  });
 
-  const handoffs = [];
+  const handoffs: HandoffPublishSummary[] = [];
   for (const agent of agents) {
     const agentTaskIds = createdTasks
-      .filter((task: any) => task.owner === agent || task.owner === 'unassigned')
+      .filter((task) => task.owner === agent || task.owner === 'unassigned')
       .map((task) => task.id);
     const summary = buildMiniRoundBrief(agent, promptText, report);
-    const handoff = (await request('POST', baseUrl, '/handoff', {
+    const handoff = await request<HandoffPublishResponse>('POST', baseUrl, '/handoff', {
       from,
       to: agent,
       summary,
       nextStep: 'Acknowledge and execute top-priority delegated task.',
       tasks: agentTaskIds,
-    })) as any;
+    });
     handoffs.push(handoff.handoff);
   }
 

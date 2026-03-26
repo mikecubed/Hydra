@@ -112,13 +112,13 @@ _Create the browser-safe operations vocabulary before daemon, gateway, or browse
 
 **Independent Test**: Run work that changes route, mode, or assignments during execution; verify the selected work item preserves current values and visible history for prior routing and participant decisions.
 
-- [ ] T031 [P] [US4] **TDD:** extend daemon detail projection coverage for routing history, assignment history, and council summaries in `test/web-operations-projection.test.ts` and `test/web-operations-routes.test.ts`.
-- [ ] T032 [US4] Implement daemon-side routing, assignment, and council history capture in the authoritative runtime/state modules that observe those transitions, then expose that history to `lib/daemon/web-operations-projection.ts` without synthesizing it in the gateway or browser.
-- [ ] T033 [US4] Implement daemon routing, assignment, and council detail projection in `lib/daemon/web-operations-projection.ts` and `lib/daemon/web-operations-routes.ts`.
-- [ ] T034 [P] [US4] **TDD:** add browser routing and execution-detail coverage in `apps/web/src/features/operations-panels/__tests__/routing-panel.browser.spec.tsx` and `apps/web/src/features/operations-panels/__tests__/execution-panel.browser.spec.tsx`.
-- [ ] T035 [P] [US4] Implement routing and execution detail panels in `apps/web/src/features/operations-panels/components/routing-panel.tsx`, `apps/web/src/features/operations-panels/components/execution-panel.tsx`, and `apps/web/src/features/operations-panels/components/operations-panel-shell.tsx`.
-- [ ] T036 [US4] Add routing and participant-history convergence coverage in `apps/web/src/features/operations-panels/__tests__/workspace-operations.integration.test.ts`.
-- [ ] T037 [US4] Run the phase quality gate from the repo root with `npm run quality` and `npm test` after routing and execution visibility is green.
+- [x] T031 [P] [US4] **TDD:** extend daemon detail projection coverage for routing history, assignment history, and council summaries in `test/web-operations-projection.test.ts` and `test/web-operations-routes.test.ts`.
+- [x] T032 [US4] Implement daemon-side routing, assignment, and council history capture in the authoritative runtime/state modules that observe those transitions, then expose that history to `lib/daemon/web-operations-projection.ts` without synthesizing it in the gateway or browser.
+- [x] T033 [US4] Implement daemon routing, assignment, and council detail projection in `lib/daemon/web-operations-projection.ts` and `lib/daemon/web-operations-routes.ts`.
+- [x] T034 [P] [US4] **TDD:** add browser routing and execution-detail coverage in `apps/web/src/features/operations-panels/__tests__/routing-panel.browser.spec.tsx` and `apps/web/src/features/operations-panels/__tests__/execution-panel.browser.spec.tsx`.
+- [x] T035 [P] [US4] Implement routing and execution detail panels in `apps/web/src/features/operations-panels/components/routing-panel.tsx`, `apps/web/src/features/operations-panels/components/execution-panel.tsx`, and `apps/web/src/features/operations-panels/components/operations-panel-shell.tsx`.
+- [x] T036 [US4] Add routing and participant-history convergence coverage in `apps/web/src/features/operations-panels/__tests__/workspace-operations.integration.test.ts`.
+- [x] T037 [US4] Run the phase quality gate from the repo root with `npm run quality` and `npm test` after routing and execution visibility is green.
 
 **Checkpoint**: User Stories 1–4 expose Hydra’s read-only operational posture without violating browser/gateway boundaries.
 

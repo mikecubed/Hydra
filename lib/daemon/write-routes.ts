@@ -15,6 +15,227 @@ import { exit } from '../hydra-process.ts';
 
 // ── Mutation helpers ──────────────────────────────────────────────────────────
 
+const ASSIGNMENT_STATE_BY_TASK_STATUS: Readonly<Record<string, string>> = {
+  todo: 'waiting',
+  in_progress: 'active',
+  blocked: 'waiting',
+  done: 'completed',
+  failed: 'failed',
+  cancelled: 'cancelled',
+};
+
+function ensureHistoryList(task: TaskEntry, key: string): Record<string, unknown>[] {
+  const existing = (task as Record<string, unknown>)[key];
+  if (Array.isArray(existing)) {
+    const isValid = (entry: unknown): entry is Record<string, unknown> =>
+      entry != null && typeof entry === 'object' && !Array.isArray(entry);
+    if (existing.every(isValid)) return existing;
+    const cleaned = existing.filter(isValid);
+    (task as Record<string, unknown>)[key] = cleaned;
+    return cleaned;
+  }
+
+  const next: Record<string, unknown>[] = [];
+  (task as Record<string, unknown>)[key] = next;
+  return next;
+}
+
+function appendRoutingHistory(
+  task: TaskEntry,
+  now: string,
+  route: string,
+  mode: string | null,
+  reason: string,
+): void {
+  const history = ensureHistoryList(task, 'routingHistory');
+  history.push({
+    route,
+    mode,
+    changedAt: now,
+    reason,
+  });
+  (task as Record<string, unknown>)['routingHistory'] = history;
+}
+
+function closeLatestAssignment(
+  task: TaskEntry,
+  now: string,
+  state: string,
+  options: { forceEndedAt?: boolean } = {},
+): void {
+  const history = ensureHistoryList(task, 'assignmentHistory');
+  const latest = history.at(-1);
+  if (latest == null) {
+    return;
+  }
+
+  latest['state'] = state;
+  if (
+    latest['endedAt'] == null &&
+    (options.forceEndedAt === true || ['completed', 'failed', 'cancelled'].includes(state))
+  ) {
+    latest['endedAt'] = now;
+  }
+}
+
+function appendAssignmentHistory(
+  task: TaskEntry,
+  now: string,
+  agent: string,
+  state: string,
+  reasonRole: string | null = null,
+): void {
+  const history = ensureHistoryList(task, 'assignmentHistory');
+  history.push({
+    agent,
+    role: reasonRole,
+    state,
+    startedAt: now,
+    endedAt: ['completed', 'failed', 'cancelled'].includes(state) ? now : null,
+  });
+  (task as Record<string, unknown>)['assignmentHistory'] = history;
+}
+
+function syncAssignmentState(task: TaskEntry, now: string): void {
+  const targetState = ASSIGNMENT_STATE_BY_TASK_STATUS[task.status] ?? 'waiting';
+  const history = ensureHistoryList(task, 'assignmentHistory');
+  const latest = history.at(-1);
+  if (latest == null) {
+    if (task.owner !== '' && task.owner !== 'unassigned') {
+      appendAssignmentHistory(task, now, task.owner, targetState);
+    }
+    return;
+  }
+
+  latest['state'] = targetState;
+  latest['endedAt'] = ['completed', 'failed', 'cancelled'].includes(targetState)
+    ? (latest['endedAt'] ?? now)
+    : null;
+}
+
+function normalizeStringArray(value: unknown): string[] {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+
+  return value
+    .filter((entry): entry is string => typeof entry === 'string' && entry.trim() !== '')
+    .map((entry) => entry.trim());
+}
+
+function normalizeCouncilParticipants(value: unknown): Record<string, unknown>[] {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+
+  return value.flatMap((entry) => {
+    if (typeof entry === 'string' && entry.trim() !== '') {
+      return [
+        {
+          agent: entry.trim(),
+          role: null,
+          state: 'completed',
+          startedAt: null,
+          endedAt: null,
+        },
+      ];
+    }
+
+    if (entry != null && typeof entry === 'object' && !Array.isArray(entry)) {
+      return [entry as Record<string, unknown>];
+    }
+
+    return [];
+  });
+}
+
+function normalizeCouncilTransitions(value: unknown, now: string): Record<string, unknown>[] {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+
+  return value.flatMap((entry, index) => {
+    if (entry == null || typeof entry !== 'object' || Array.isArray(entry)) {
+      return [];
+    }
+
+    const raw = entry as Record<string, unknown>;
+    return [
+      {
+        label:
+          typeof raw['label'] === 'string' && raw['label'].trim() !== ''
+            ? raw['label']
+            : `Transition ${String(index + 1)}`,
+        status:
+          typeof raw['status'] === 'string' && raw['status'].trim() !== ''
+            ? raw['status']
+            : 'completed',
+        timestamp:
+          typeof raw['timestamp'] === 'string' && raw['timestamp'].trim() !== ''
+            ? raw['timestamp']
+            : now,
+        detail:
+          typeof raw['detail'] === 'string' && raw['detail'].trim() !== '' ? raw['detail'] : null,
+      },
+    ];
+  });
+}
+
+function setCouncilHistory(task: TaskEntry, body: Record<string, unknown>, now: string): void {
+  const participants = normalizeCouncilParticipants(body['councilParticipants']);
+  const transitions = normalizeCouncilTransitions(body['councilTransitions'], now);
+  const finalOutcome =
+    typeof body['councilFinalOutcome'] === 'string' && body['councilFinalOutcome'].trim() !== ''
+      ? body['councilFinalOutcome']
+      : null;
+  let status: string | null = null;
+  if (typeof body['councilStatus'] === 'string' && body['councilStatus'].trim() !== '') {
+    status = body['councilStatus'];
+  } else if (transitions.length > 0 || finalOutcome != null) {
+    status = 'completed';
+  } else if (participants.length > 0) {
+    status = 'active';
+  }
+
+  if (
+    participants.length === 0 &&
+    transitions.length === 0 &&
+    finalOutcome == null &&
+    status == null
+  ) {
+    return;
+  }
+
+  (task as Record<string, unknown>)['councilHistory'] = {
+    status: status ?? 'active',
+    participants,
+    transitions,
+    finalOutcome,
+  };
+}
+
+function annotateTaskHistory(
+  task: TaskEntry,
+  body: Record<string, unknown>,
+  reason: string,
+  now: string,
+): void {
+  const mode =
+    typeof body['mode'] === 'string' && body['mode'].trim() !== '' ? body['mode'].trim() : null;
+
+  if (task.owner !== '' && task.owner !== 'unassigned') {
+    appendRoutingHistory(task, now, task.owner, mode, reason);
+    appendAssignmentHistory(
+      task,
+      now,
+      task.owner,
+      ASSIGNMENT_STATE_BY_TASK_STATUS[task.status] ?? 'waiting',
+    );
+  }
+
+  setCouncilHistory(task, body, now);
+}
+
 function validateClaimToken(existing: TaskEntry, body: Record<string, unknown>): void {
   if (body['claimToken'] == null || body['force'] === true) return;
   const stored = (existing as Record<string, unknown>)['claimToken'];
@@ -68,6 +289,7 @@ function applyResultStatus(
   if (task.status !== 'in_progress' || task.owner !== agent) return;
   if (resultStatus === 'completed' || resultStatus === 'done') {
     task.status = 'done';
+    closeLatestAssignment(task, nowIso(), 'completed');
     autoUnblock(state, taskId);
   } else if (resultStatus === 'error') {
     const currentFailCount = (task as Record<string, unknown>)['failCount'] as number | undefined;
@@ -77,11 +299,13 @@ function applyResultStatus(
       if (!Array.isArray((state as Record<string, unknown>)['deadLetter']))
         (state as Record<string, unknown>)['deadLetter'] = [];
       (task as Record<string, unknown>)['status'] = 'cancelled';
+      closeLatestAssignment(task, nowIso(), 'cancelled');
       (task as Record<string, unknown>)['deadLetteredAt'] = nowIso();
       ((state as Record<string, unknown>)['deadLetter'] as unknown[]).push({ ...task });
       state.tasks = state.tasks.filter((t: TaskEntry) => t.id !== taskId);
     } else {
       task.status = 'blocked';
+      syncAssignmentState(task, nowIso());
       (task as Record<string, unknown>)['blockedReason'] =
         output.slice(0, 500) === '' ? 'Agent reported error' : output.slice(0, 500);
     }
@@ -177,11 +401,12 @@ async function applyWorktreeMerge(
 
 // ── Mutation factories ────────────────────────────────────────────────────────
 
+/* eslint-disable complexity -- queued task mutations intentionally bundle related state updates atomically */
 function mutateTaskClaim(
   body: Record<string, unknown>,
   agent: string,
   ctx: WriteRouteCtx,
-): (state: HydraStateShape) => Record<string, unknown> {
+): (state: HydraStateShape) => TaskEntry {
   const { parseList, nextId, nowIso } = ctx;
   return (state: HydraStateShape) => {
     const taskId = ((body['taskId'] as string | null | undefined) ?? '').trim();
@@ -197,6 +422,8 @@ function mutateTaskClaim(
       if (existing.status === 'in_progress' && existing.owner !== agent) {
         throw new Error(`Task ${taskId} is already in progress by ${existing.owner}.`);
       }
+      const previousOwner = existing.owner;
+      const previousStatus = existing.status;
       existing.owner = agent;
       existing.status = 'in_progress';
       (existing as Record<string, unknown>)['claimToken'] = crypto.randomUUID();
@@ -204,23 +431,54 @@ function mutateTaskClaim(
       if (notes !== '') {
         existing.notes = existing.notes === '' ? notes : `${existing.notes}\n${notes}`;
       }
+      const mode =
+        typeof body['mode'] === 'string' && body['mode'].trim() !== '' ? body['mode'].trim() : null;
+      appendRoutingHistory(
+        existing,
+        nowIso(),
+        agent,
+        mode,
+        previousOwner === agent ? 'Task claimed for execution' : `Task reassigned to ${agent}`,
+      );
+      if (previousOwner === agent) {
+        closeLatestAssignment(
+          existing,
+          nowIso(),
+          ASSIGNMENT_STATE_BY_TASK_STATUS[previousStatus] ?? 'waiting',
+          {
+            forceEndedAt: true,
+          },
+        );
+      } else {
+        closeLatestAssignment(
+          existing,
+          nowIso(),
+          ASSIGNMENT_STATE_BY_TASK_STATUS[previousStatus] ?? 'waiting',
+          { forceEndedAt: true },
+        );
+      }
       existing.updatedAt = nowIso();
-      return existing as unknown as Record<string, unknown>;
+      existing.owner = agent;
+      existing.status = 'in_progress';
+      appendAssignmentHistory(existing, nowIso(), agent, 'active');
+      return existing;
     }
     if (title === '') throw new Error('Either taskId or title is required.');
     const claimBlockedBy = parseList(body['blockedBy'] ?? []);
-    const newTask: Record<string, unknown> = {
+    const newTask: TaskEntry = {
       id: nextId('T', state.tasks),
       title,
       owner: agent,
       status: 'in_progress',
+      type: '',
       claimToken: crypto.randomUUID(),
       files,
       notes,
       blockedBy: claimBlockedBy,
       updatedAt: nowIso(),
     };
-    state.tasks.push(newTask as unknown as TaskEntry);
+    annotateTaskHistory(newTask, body, 'Task created via claim', nowIso());
+    state.tasks.push(newTask);
     return newTask;
   };
 }
@@ -237,9 +495,30 @@ function mutateTaskUpdate(
     validateClaimToken(existing, body);
     if (body['title'] !== undefined) existing.title = body['title'] as string;
     if (body['owner'] !== undefined) {
+      const previousOwner = existing.owner;
       const owner = (body['owner'] as string).toLowerCase();
       ensureKnownAgent(owner);
       existing.owner = owner;
+      if (previousOwner !== owner) {
+        closeLatestAssignment(
+          existing,
+          nowIso(),
+          ASSIGNMENT_STATE_BY_TASK_STATUS[existing.status] ?? 'waiting',
+          { forceEndedAt: true },
+        );
+        appendRoutingHistory(existing, nowIso(), owner, null, `Task reassigned to ${owner}`);
+        appendAssignmentHistory(
+          existing,
+          nowIso(),
+          owner,
+          ASSIGNMENT_STATE_BY_TASK_STATUS[existing.status] ?? 'waiting',
+        );
+      }
+    }
+    if (body['mode'] !== undefined && existing.owner !== '' && existing.owner !== 'unassigned') {
+      const mode =
+        typeof body['mode'] === 'string' && body['mode'].trim() !== '' ? body['mode'].trim() : null;
+      appendRoutingHistory(existing, nowIso(), existing.owner, mode, 'Dispatch mode updated');
     }
     if (body['blockedBy'] !== undefined) {
       const proposed = parseList(body['blockedBy']);
@@ -253,6 +532,7 @@ function mutateTaskUpdate(
     if (body['status'] !== undefined) {
       ensureKnownStatus(body['status'] as string);
       (existing as Record<string, unknown>)['status'] = body['status'] as string;
+      syncAssignmentState(existing, nowIso());
     }
     if (body['files'] !== undefined) existing.files = parseList(body['files']);
     if (body['notes'] !== undefined) {
@@ -270,6 +550,7 @@ function mutateTaskUpdate(
     return existing;
   };
 }
+/* eslint-enable complexity */
 
 function mutateTaskResult(
   body: Record<string, unknown>,
@@ -537,6 +818,7 @@ async function handleTaskAdd(ctx: WriteRouteCtx): Promise<boolean> {
         blockedBy,
         updatedAt: nowIso(),
       };
+      annotateTaskHistory(item as TaskEntry, body, 'Task created', nowIso());
       state.tasks.push(item as unknown as TaskEntry);
       return item;
     },
@@ -586,7 +868,7 @@ async function handleTaskClaim(ctx: WriteRouteCtx): Promise<boolean> {
     mutateTaskClaim(body, agent, ctx),
     { event: 'task_claim', agent, title: claimTitle.slice(0, 80) },
   );
-  const taskId = task['id'] as string;
+  const taskId = task.id;
   const dispatchMode = ((body['mode'] as string | null | undefined) ?? '').toLowerCase();
   const isNewTask = body['taskId'] == null || body['taskId'] === '';
   if (checkClaimWorktreeCondition(isNewTask, createTaskWorktree, body, dispatchMode)) {
@@ -615,13 +897,14 @@ async function handleTaskClaim(ctx: WriteRouteCtx): Promise<boolean> {
     }
   }
   try {
+    const hubCwd = projectRoot ?? process.cwd();
     hubRegister({
       id: `daemon_${taskId}`,
-      agent: task['owner'] as string,
-      cwd: projectRoot as string,
-      project: path.basename(projectRoot as string),
-      focus: task['title'] as string,
-      files: task['files'] as string[],
+      agent: task.owner,
+      cwd: hubCwd,
+      project: path.basename(hubCwd),
+      focus: task.title,
+      files: task.files,
       taskId,
       status: 'working',
     });
@@ -816,6 +1099,32 @@ async function handleDecision(ctx: WriteRouteCtx): Promise<boolean> {
         createdAt: nowIso(),
       };
       state.decisions.push(item);
+      const taskIds = normalizeStringArray(body['taskIds']);
+      for (const taskId of taskIds) {
+        const task = state.tasks.find((entry: TaskEntry) => entry.id === taskId);
+        if (task == null) {
+          continue;
+        }
+        const mode =
+          typeof body['mode'] === 'string' && body['mode'].trim() !== ''
+            ? body['mode'].trim()
+            : 'council';
+        const route =
+          typeof body['route'] === 'string' && body['route'].trim() !== ''
+            ? body['route'].trim()
+            : 'council';
+        appendRoutingHistory(task, nowIso(), route, mode, title);
+        setCouncilHistory(
+          task,
+          {
+            councilParticipants: body['councilParticipants'],
+            councilTransitions: body['councilTransitions'],
+            councilFinalOutcome: body['councilFinalOutcome'] ?? rationale,
+            councilStatus: body['councilStatus'],
+          },
+          nowIso(),
+        );
+      }
       return item;
     },
     { event: 'decision', title: title.slice(0, 80) },

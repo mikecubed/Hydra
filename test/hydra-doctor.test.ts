@@ -37,11 +37,11 @@ function makeFailure(overrides: Record<string, unknown> = {}) {
 
 describe('hydra-doctor', () => {
   beforeEach(() => {
-    resetDoctor();
+    resetDoctor({ clearPersistent: true });
   });
 
   afterEach(() => {
-    resetDoctor();
+    resetDoctor({ clearPersistent: true });
   });
 
   describe('isDoctorEnabled()', () => {
@@ -280,7 +280,7 @@ describe('hydra-doctor', () => {
     });
 
     it('auto-initializes if not already initialized', () => {
-      resetDoctor(); // ensure uninitialized state
+      resetDoctor({ clearPersistent: true }); // ensure uninitialized state
       const log = getDoctorLog();
       assert.ok(Array.isArray(log));
     });
@@ -315,9 +315,9 @@ describe('hydra-doctor', () => {
 
   describe('resetDoctor() thorough', () => {
     it('can be called multiple times safely', () => {
-      resetDoctor();
-      resetDoctor();
-      resetDoctor();
+      resetDoctor({ clearPersistent: true });
+      resetDoctor({ clearPersistent: true });
+      resetDoctor({ clearPersistent: true });
       const stats = getDoctorStats();
       assert.equal(stats.total, 0);
     });
@@ -325,12 +325,11 @@ describe('hydra-doctor', () => {
     it('clears log entries', async () => {
       await diagnose(makeFailure({ error: '429 rate limit' }));
       assert.ok(getDoctorLog().length >= 1);
-      resetDoctor();
-      // After reset, getDoctorLog() calls initDoctor(), which may reload log entries
-      // from disk, but resetDoctor() also clears session entries from that file.
+      resetDoctor({ clearPersistent: true });
+      // After reset, getDoctorLog() re-initializes from the persistent log.
+      // The test-only persistent clear keeps the sandbox isolated from prior runs.
       getDoctorLog();
-      // Log may or may not be empty depending on pre-existing file entries,
-      // but session stats should be zero
+      assert.equal(getDoctorLog().length, 0);
       assert.equal(getDoctorStats().total, 0);
     });
   });

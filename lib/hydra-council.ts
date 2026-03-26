@@ -1469,6 +1469,7 @@ function makeTranscriptEntry(
     round,
     agent,
     phase,
+    timestamp: new Date().toISOString(),
     ok: result.ok,
     rawText: result.stdout ?? '',
     parsed: parseJsonLoose(result.stdout ?? ''),
@@ -1500,6 +1501,7 @@ async function executeParallelPhase(
         round,
         agent,
         phase,
+        timestamp: new Date().toISOString(),
         ok: true,
         rawText: '{}',
         parsed:
@@ -1555,6 +1557,7 @@ async function executeSynthesizePhase(
       round,
       agent: synthesizeAgent,
       phase: 'synthesize',
+      timestamp: new Date().toISOString(),
       ok: true,
       rawText: '{}',
       parsed: {
@@ -1823,6 +1826,7 @@ function createReport(opts: MainOptions) {
       round: number;
       agent: string;
       phase: string;
+      timestamp?: string;
       ok: boolean;
       rawText: string;
       parsed: unknown;
@@ -2047,6 +2051,7 @@ async function executeSequentialPhase(
       round,
       agent: step.agent,
       phase: step.phase,
+      timestamp: new Date().toISOString(),
       ok: true,
       rawText: JSON.stringify(parsed),
       parsed: parsed as unknown,
@@ -2081,6 +2086,7 @@ async function executeSequentialPhase(
     round,
     agent: step.agent,
     phase: step.phase,
+    timestamp: new Date().toISOString(),
     ok: result.ok,
     rawText: result.stdout ?? '',
     parsed,
@@ -2105,6 +2111,81 @@ async function publishCouncilResults(report: CouncilReport, opts: MainOptions): 
   localReport.published = publishResult;
 }
 
+function buildCouncilParticipants(
+  agents: string[],
+  transcript: unknown[],
+): Array<Record<string, unknown>> {
+  const transcriptEntries = transcript.filter(
+    (entry): entry is Record<string, unknown> =>
+      entry != null && typeof entry === 'object' && !Array.isArray(entry),
+  );
+  return agents.map((agent) => {
+    const agentEntries = transcriptEntries.filter((entry) => entry['agent'] === agent);
+    const failed = agentEntries.some((entry) => entry['ok'] === false);
+    const startedAt =
+      typeof agentEntries[0]?.['timestamp'] === 'string' ? agentEntries[0]['timestamp'] : null;
+    const endedAt =
+      typeof agentEntries.at(-1)?.['timestamp'] === 'string'
+        ? agentEntries.at(-1)?.['timestamp']
+        : null;
+    let state: 'completed' | 'failed' | 'waiting' = 'waiting';
+    if (failed) {
+      state = 'failed';
+    } else if (agentEntries.length > 0) {
+      state = 'completed';
+    }
+    return {
+      agent,
+      role: null,
+      state,
+      startedAt,
+      endedAt,
+    };
+  });
+}
+
+function stringifyCouncilField(value: unknown, fallback: string): string {
+  if (typeof value === 'string' && value.trim() !== '') {
+    return value;
+  }
+
+  if (typeof value === 'number' || typeof value === 'boolean') {
+    return String(value);
+  }
+
+  return fallback;
+}
+
+function buildCouncilTransitions(transcript: unknown[]): Array<Record<string, unknown>> {
+  return transcript
+    .filter(
+      (entry): entry is Record<string, unknown> =>
+        entry != null && typeof entry === 'object' && !Array.isArray(entry),
+    )
+    .map((entry) => ({
+      label: `Round ${stringifyCouncilField(entry['round'], '?')} - ${stringifyCouncilField(entry['agent'], 'unknown')} ${stringifyCouncilField(entry['phase'], 'phase')}`,
+      status: entry['ok'] === false ? 'failed' : 'completed',
+      timestamp:
+        typeof entry['timestamp'] === 'string' && entry['timestamp'].trim() !== ''
+          ? entry['timestamp']
+          : new Date().toISOString(),
+      detail: short(
+        typeof entry['rawText'] === 'string' && entry['rawText'].trim() !== ''
+          ? entry['rawText']
+          : JSON.stringify(entry['parsed'] ?? ''),
+        220,
+      ),
+    }));
+}
+
+function resolveCouncilStatus(transcript: unknown[]): 'completed' | 'failed' {
+  const transcriptEntries = transcript.filter(
+    (entry): entry is Record<string, unknown> =>
+      entry != null && typeof entry === 'object' && !Array.isArray(entry),
+  );
+  return transcriptEntries.some((entry) => entry['ok'] === false) ? 'failed' : 'completed';
+}
+
 async function executePublish(
   report: CouncilReport,
   opts: MainOptions,
@@ -2115,6 +2196,10 @@ async function executePublish(
       throw new Error('Hydra daemon is not healthy.');
     }
 
+    const publishAgents = opts.agentsFilter ?? AGENT_NAMES;
+    const councilParticipants = buildCouncilParticipants(publishAgents, report.transcript);
+    const councilTransitions = buildCouncilTransitions(report.transcript);
+    const councilStatus = resolveCouncilStatus(report.transcript);
     const createdTasks: unknown[] = [];
     for (const task of report.tasks) {
       // eslint-disable-next-line no-await-in-loop
@@ -2122,6 +2207,7 @@ async function executePublish(
         title: task.title,
         owner: task.owner,
         status: 'todo',
+        mode: 'council',
         notes:
           task.rationale != null && task.rationale !== ''
             ? `Council rationale: ${task.rationale}`
@@ -2140,10 +2226,19 @@ async function executePublish(
           ? 'Council completed without explicit consensus.'
           : councilRationale,
       impact: `Rounds=${String(opts.rounds)}; Tasks=${String(createdTasks.length)}; Flow=Claude\u2192Gemini\u2192Claude\u2192Codex; next=${report.recommendedNextAction}`,
+      route: 'council',
+      mode: 'council',
+      taskIds: (createdTasks as Array<{ id?: string }>).flatMap((task) =>
+        typeof task.id === 'string' && task.id !== '' ? [task.id] : [],
+      ),
+      councilParticipants,
+      councilTransitions,
+      councilFinalOutcome:
+        report.finalDecision?.summary ?? (councilRationale === '' ? null : councilRationale),
+      councilStatus,
     });
 
     const handoffs: unknown[] = [];
-    const publishAgents = opts.agentsFilter ?? AGENT_NAMES;
     for (const agent of publishAgents) {
       const agentTaskIds = (createdTasks as Array<{ owner?: string; id?: string }>)
         .filter((t) => t.owner === agent || t.owner === 'unassigned')

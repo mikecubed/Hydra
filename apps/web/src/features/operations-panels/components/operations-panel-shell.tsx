@@ -77,6 +77,11 @@ const splitLayoutStyle: CSSProperties = {
   gap: '0.75rem',
 };
 
+const detailStackStyle: CSSProperties = {
+  display: 'grid',
+  gap: '0.75rem',
+};
+
 function FreshnessBadge({ freshness }: { readonly freshness: WorkspaceFreshness }): JSX.Element {
   return <span style={freshnessStyles[freshness]}>{freshness}</span>;
 }
@@ -105,7 +110,11 @@ export function OperationsPanelShell({
       {hasHealthBudget && <div data-testid="health-budget-slot">{healthBudgetPanel}</div>}
       <div style={hasDetail ? splitLayoutStyle : contentLayoutStyle}>
         <div>{children}</div>
-        {hasDetail && <div data-testid="detail-panel-slot">{detailPanel}</div>}
+        {hasDetail && (
+          <div data-testid="detail-panel-slot" style={detailStackStyle}>
+            {detailPanel}
+          </div>
+        )}
       </div>
     </section>
   );

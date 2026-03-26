@@ -7,11 +7,14 @@
  */
 
 import type {
+  AgentAssignmentView,
   BudgetStatusView,
   CheckpointRecordView,
+  CouncilExecutionView,
   DaemonHealthView,
   DetailAvailability,
   OperationalControlView,
+  RoutingDecisionView,
   SnapshotStatus,
   WorkItemStatus,
   WorkQueueItemView,
@@ -25,6 +28,7 @@ import type { DetailFetchStatus, OperationsWorkspaceState } from './operations-t
 const EMPTY_QUEUE: readonly WorkQueueItemView[] = [];
 const EMPTY_CONTROLS: readonly OperationalControlView[] = [];
 const EMPTY_CHECKPOINTS: readonly CheckpointRecordView[] = [];
+const EMPTY_ASSIGNMENTS: readonly AgentAssignmentView[] = [];
 
 /** Current snapshot polling status. */
 export function selectSnapshotStatus(state: OperationsWorkspaceState): SnapshotStatus {
@@ -116,6 +120,25 @@ export function selectSelectedCheckpoints(
   state: OperationsWorkspaceState,
 ): readonly CheckpointRecordView[] {
   return state.selection.detail?.checkpoints ?? EMPTY_CHECKPOINTS;
+}
+
+/** Routing decision from the currently selected item's detail, or null. */
+export function selectSelectedRouting(state: OperationsWorkspaceState): RoutingDecisionView | null {
+  return state.selection.detail?.routing ?? null;
+}
+
+/** Agent assignments from the currently selected item's detail, or empty. */
+export function selectSelectedAssignments(
+  state: OperationsWorkspaceState,
+): readonly AgentAssignmentView[] {
+  return state.selection.detail?.assignments ?? EMPTY_ASSIGNMENTS;
+}
+
+/** Council execution from the currently selected item's detail, or null. */
+export function selectSelectedCouncil(
+  state: OperationsWorkspaceState,
+): CouncilExecutionView | null {
+  return state.selection.detail?.council ?? null;
 }
 
 /** Detail availability for the selected item, or null when no item is selected. */

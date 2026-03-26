@@ -472,6 +472,41 @@ describe('StreamManager — retention', () => {
     assert.equal(sm.streamCount, 0);
   });
 
+  it('auto-purges expired older streams but keeps the just-completed stream when retention is positive', async () => {
+    const sm = new StreamManager(store, 1);
+    const conv = store.createConversation();
+
+    const turnA = store.appendTurn(conv.id, {
+      kind: 'operator',
+      instruction: 'A',
+      attribution: operatorAttribution,
+    });
+    store.updateTurnStatus(turnA.id, 'executing');
+    sm.createStream(turnA.id);
+    sm.completeStream(turnA.id);
+
+    await new Promise<void>((resolve) => {
+      setTimeout(resolve, 10);
+    });
+
+    const turnB = store.appendTurn(conv.id, {
+      kind: 'operator',
+      instruction: 'B',
+      attribution: operatorAttribution,
+    });
+    store.updateTurnStatus(turnB.id, 'executing');
+    sm.createStream(turnB.id);
+    sm.completeStream(turnB.id);
+
+    assert.ok(sm.getPurgedHighSeq(turnA.id) !== undefined, 'older stream should be auto-purged');
+    assert.equal(
+      sm.getPurgedHighSeq(turnB.id),
+      undefined,
+      'fresh stream should survive auto-purge',
+    );
+    assert.equal(sm.streamCount, 1, 'only the freshly completed stream should remain retained');
+  });
+
   it('auto-purges on failStream', () => {
     const sm = new StreamManager(store, 0);
     const conv = store.createConversation();

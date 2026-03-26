@@ -685,6 +685,28 @@ describe('handleWriteRoute', () => {
     assert.equal(state.tasks.length, 1);
   });
 
+  it('POST /task/add seeds routing and assignment history from real task state', async () => {
+    const state = makeState();
+    const ctx = makeWriteCtx('POST', '/task/add', state, {
+      title: 'Council-created task',
+      owner: 'codex',
+      status: 'todo',
+      mode: 'council',
+    });
+
+    await handleWriteRoute(ctx);
+
+    const created = state.tasks[0] as Record<string, unknown>;
+    const routingHistory = created['routingHistory'] as Array<Record<string, unknown>>;
+    const assignmentHistory = created['assignmentHistory'] as Array<Record<string, unknown>>;
+    assert.equal(routingHistory.length, 1);
+    assert.equal(routingHistory[0]?.['route'], 'codex');
+    assert.equal(routingHistory[0]?.['mode'], 'council');
+    assert.equal(assignmentHistory.length, 1);
+    assert.equal(assignmentHistory[0]?.['agent'], 'codex');
+    assert.equal(assignmentHistory[0]?.['state'], 'waiting');
+  });
+
   it('POST /task/result with resultStatus error × 3 moves task to deadLetter', async () => {
     const task = makeTask({
       id: 't_dlq',
@@ -746,6 +768,181 @@ describe('handleWriteRoute', () => {
     assert.ok(typeof returned['claimToken'] === 'string', 'should have claimToken');
   });
 
+  it('POST /task/claim appends active assignment and routing history for real execution', async () => {
+    const task = makeTask({
+      id: 't_claim_hist',
+      title: 'History-bearing task',
+      status: 'todo',
+      owner: 'codex',
+      routingHistory: [
+        {
+          route: 'codex',
+          mode: 'council',
+          changedAt: '2026-03-01T00:00:00.000Z',
+          reason: 'Task created',
+        },
+      ],
+      assignmentHistory: [
+        {
+          agent: 'codex',
+          role: null,
+          state: 'waiting',
+          startedAt: '2026-03-01T00:00:00.000Z',
+          endedAt: null,
+        },
+      ],
+    });
+    const state = makeState({ tasks: [task] });
+    const ctx = makeWriteCtx('POST', '/task/claim', state, {
+      taskId: 't_claim_hist',
+      agent: 'gemini',
+      mode: 'balanced',
+    });
+
+    await handleWriteRoute(ctx);
+
+    const updated = state.tasks[0] as Record<string, unknown>;
+    const routingHistory = updated['routingHistory'] as Array<Record<string, unknown>>;
+    const assignmentHistory = updated['assignmentHistory'] as Array<Record<string, unknown>>;
+    assert.equal(routingHistory.at(-1)?.['route'], 'gemini');
+    assert.equal(routingHistory.at(-1)?.['mode'], 'balanced');
+    assert.equal(assignmentHistory[0]?.['state'], 'waiting');
+    assert.equal(typeof assignmentHistory[0]?.['endedAt'], 'string');
+    assert.equal(assignmentHistory.at(-1)?.['agent'], 'gemini');
+    assert.equal(assignmentHistory.at(-1)?.['state'], 'active');
+  });
+
+  it('POST /task/claim by the same agent closes the prior waiting interval before reopening work', async () => {
+    const task = makeTask({
+      id: 't_same_agent_reclaim',
+      title: 'Same-agent reclaim task',
+      status: 'blocked',
+      owner: 'codex',
+      routingHistory: [
+        {
+          route: 'codex',
+          mode: 'auto',
+          changedAt: '2026-03-01T00:00:00.000Z',
+          reason: 'Task created',
+        },
+      ],
+      assignmentHistory: [
+        {
+          agent: 'codex',
+          role: null,
+          state: 'waiting',
+          startedAt: '2026-03-01T00:00:00.000Z',
+          endedAt: null,
+        },
+      ],
+    });
+    const state = makeState({ tasks: [task] });
+    const ctx = makeWriteCtx('POST', '/task/claim', state, {
+      taskId: 't_same_agent_reclaim',
+      agent: 'codex',
+      mode: 'auto',
+    });
+
+    await handleWriteRoute(ctx);
+
+    const assignmentHistory = (state.tasks[0] as Record<string, unknown>)[
+      'assignmentHistory'
+    ] as Array<Record<string, unknown>>;
+    assert.equal(assignmentHistory.length, 2);
+    assert.equal(assignmentHistory[0]?.['state'], 'waiting');
+    assert.equal(typeof assignmentHistory[0]?.['endedAt'], 'string');
+    assert.equal(assignmentHistory[1]?.['agent'], 'codex');
+    assert.equal(assignmentHistory[1]?.['state'], 'active');
+    assert.equal(assignmentHistory[1]?.['endedAt'], null);
+  });
+
+  it('POST /task/update syncs assignment state and routing history on reassignment', async () => {
+    const task = makeTask({
+      id: 't_update_hist',
+      title: 'Update history task',
+      status: 'in_progress',
+      owner: 'codex',
+      routingHistory: [
+        {
+          route: 'codex',
+          mode: 'auto',
+          changedAt: '2026-03-01T00:00:00.000Z',
+          reason: 'Task created',
+        },
+      ],
+      assignmentHistory: [
+        {
+          agent: 'codex',
+          role: null,
+          state: 'active',
+          startedAt: '2026-03-01T00:00:00.000Z',
+          endedAt: null,
+        },
+      ],
+    });
+    const state = makeState({ tasks: [task] });
+    const ctx = makeWriteCtx('POST', '/task/update', state, {
+      taskId: 't_update_hist',
+      owner: 'claude',
+      status: 'blocked',
+    });
+
+    await handleWriteRoute(ctx);
+
+    const updated = state.tasks[0] as Record<string, unknown>;
+    const routingHistory = updated['routingHistory'] as Array<Record<string, unknown>>;
+    const assignmentHistory = updated['assignmentHistory'] as Array<Record<string, unknown>>;
+    assert.equal(routingHistory.at(-1)?.['route'], 'claude');
+    assert.equal(assignmentHistory[0]?.['state'], 'active');
+    assert.equal(typeof assignmentHistory[0]?.['endedAt'], 'string');
+    assert.equal(assignmentHistory.at(-1)?.['agent'], 'claude');
+    assert.equal(assignmentHistory.at(-1)?.['state'], 'waiting');
+  });
+
+  it('POST /decision can attach council metadata onto targeted tasks', async () => {
+    const task = makeTask({
+      id: 't_decision_hist',
+      title: 'Decision-linked task',
+      status: 'todo',
+      owner: 'codex',
+      routingHistory: [],
+      assignmentHistory: [],
+    });
+    const state = makeState({ tasks: [task] });
+    const ctx = makeWriteCtx('POST', '/decision', state, {
+      title: 'Hydra Council: ship the panel',
+      owner: 'human',
+      rationale: 'Consensus reached',
+      impact: 'Tasks=1',
+      taskIds: ['t_decision_hist'],
+      route: 'council',
+      mode: 'council',
+      councilParticipants: ['claude', 'gemini', 'codex'],
+      councilTransitions: [
+        {
+          label: 'Refine',
+          status: 'completed',
+          detail: 'Consensus',
+          timestamp: '2026-03-01T00:00:00.000Z',
+        },
+      ],
+      councilFinalOutcome: 'Proceed with codex implementation.',
+      councilStatus: 'completed',
+    });
+
+    await handleWriteRoute(ctx);
+
+    const updated = state.tasks[0] as Record<string, unknown>;
+    const routingHistory = updated['routingHistory'] as Array<Record<string, unknown>>;
+    const councilHistory = updated['councilHistory'] as Record<string, unknown>;
+    assert.equal(routingHistory.at(-1)?.['route'], 'council');
+    assert.equal(routingHistory.at(-1)?.['mode'], 'council');
+    assert.equal(councilHistory['status'], 'completed');
+    assert.equal((councilHistory['participants'] as unknown[]).length, 3);
+    assert.equal((councilHistory['transitions'] as unknown[]).length, 1);
+    assert.equal(councilHistory['finalOutcome'], 'Proceed with codex implementation.');
+  });
+
   it('POST /task/claim conflict: claiming already in_progress task by different agent rejects', async () => {
     const task = makeTask({
       id: 't_busy',
@@ -789,6 +986,111 @@ describe('handleWriteRoute', () => {
     await handleWriteRoute(resumeCtx);
     assert.equal(resumeCtx.captured.statusCode, 200);
     assert.equal((state.activeSession as { status: string }).status, 'active');
+  });
+
+  it('ensureHistoryList persists cleaned assignmentHistory when malformed entries exist', async () => {
+    const task = makeTask({
+      id: 't_malformed_ah',
+      title: 'Task with malformed assignment history',
+      status: 'in_progress',
+      owner: 'claude',
+      assignmentHistory: [
+        {
+          agent: 'claude',
+          role: 'architect',
+          state: 'active',
+          startedAt: '2026-03-01T00:00:00.000Z',
+          endedAt: null,
+        },
+        null,
+        'garbage-string',
+        42,
+        [1, 2, 3],
+        {
+          agent: 'gemini',
+          role: 'analyst',
+          state: 'waiting',
+          startedAt: '2026-03-01T01:00:00.000Z',
+          endedAt: null,
+        },
+      ],
+      routingHistory: [
+        {
+          route: 'claude',
+          mode: 'auto',
+          changedAt: '2026-03-01T00:00:00.000Z',
+          reason: 'Task created',
+        },
+      ],
+    } as Partial<TaskEntry>);
+    const state = makeState({ tasks: [task] });
+
+    // /task/update triggers syncAssignmentState which calls ensureHistoryList
+    const ctx = makeWriteCtx('POST', '/task/update', state, {
+      taskId: 't_malformed_ah',
+      status: 'done',
+    });
+    await handleWriteRoute(ctx);
+
+    const persisted = state.tasks[0] as Record<string, unknown>;
+    const assignmentHistory = persisted['assignmentHistory'] as Array<Record<string, unknown>>;
+    // Malformed entries (null, string, number, array) must be removed from persisted state
+    for (const entry of assignmentHistory) {
+      assert.equal(typeof entry, 'object');
+      assert.ok(entry != null, 'null entries should be cleaned');
+      assert.ok(!Array.isArray(entry), 'array entries should be cleaned');
+    }
+    assert.equal(assignmentHistory.length, 2, 'only valid record entries should remain');
+    assert.equal(assignmentHistory[0]?.['agent'], 'claude');
+    assert.equal(assignmentHistory[1]?.['agent'], 'gemini');
+  });
+
+  it('ensureHistoryList persists cleaned routingHistory when malformed entries exist', async () => {
+    const task = makeTask({
+      id: 't_malformed_rh',
+      title: 'Task with malformed routing history',
+      status: 'todo',
+      owner: 'codex',
+      routingHistory: [
+        {
+          route: 'codex',
+          mode: 'auto',
+          changedAt: '2026-03-01T00:00:00.000Z',
+          reason: 'Task created',
+        },
+        null,
+        'stale-string',
+      ],
+      assignmentHistory: [
+        {
+          agent: 'codex',
+          role: null,
+          state: 'waiting',
+          startedAt: '2026-03-01T00:00:00.000Z',
+          endedAt: null,
+        },
+      ],
+    } as Partial<TaskEntry>);
+    const state = makeState({ tasks: [task] });
+
+    const ctx = makeWriteCtx('POST', '/task/claim', state, {
+      taskId: 't_malformed_rh',
+      agent: 'gemini',
+      mode: 'balanced',
+    });
+    await handleWriteRoute(ctx);
+
+    const persisted = state.tasks[0] as Record<string, unknown>;
+    const routingHistory = persisted['routingHistory'] as Array<Record<string, unknown>>;
+    // All entries in persisted state must be valid objects
+    for (const entry of routingHistory) {
+      assert.equal(typeof entry, 'object');
+      assert.ok(entry != null);
+      assert.ok(!Array.isArray(entry));
+    }
+    // Original had 1 valid + 2 malformed; after claim appends 1 more = 2 valid total
+    assert.equal(routingHistory[0]?.['route'], 'codex');
+    assert.equal(routingHistory.at(-1)?.['route'], 'gemini');
   });
 
   it('POST /handoff + POST /handoff/ack round-trip', async () => {

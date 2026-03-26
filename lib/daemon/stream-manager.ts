@@ -196,7 +196,7 @@ export class StreamManager {
     // Finalize the turn
     this.store.finalizeTurn(turnId, 'completed', response === '' ? undefined : response);
 
-    this.purgeExpiredStreams();
+    this.purgeExpiredStreams(this.retentionMs > 0 ? turnId : undefined);
   }
 
   /**
@@ -223,7 +223,7 @@ export class StreamManager {
 
     this.store.finalizeTurn(turnId, 'failed', reason);
 
-    this.purgeExpiredStreams();
+    this.purgeExpiredStreams(this.retentionMs > 0 ? turnId : undefined);
   }
 
   /**
@@ -251,7 +251,7 @@ export class StreamManager {
 
     this.store.finalizeTurn(turnId, 'cancelled');
 
-    this.purgeExpiredStreams();
+    this.purgeExpiredStreams(this.retentionMs > 0 ? turnId : undefined);
   }
 
   /**
@@ -315,13 +315,14 @@ export class StreamManager {
    *
    * @returns The number of streams purged.
    */
-  purgeTerminalStreams(maxAgeMs?: number): number {
+  private purgeTerminalStreamsInternal(maxAgeMs?: number, skipTurnId?: string): number {
     const now = Date.now();
     const cutoff = now - (maxAgeMs ?? this.retentionMs);
     let purged = 0;
     for (const [streamId, state] of this.streams) {
       if (!TERMINAL_STREAM_STATUSES.has(state.status)) continue;
       if (state.completedAt === undefined) continue;
+      if (state.turnId === skipTurnId) continue;
       if (new Date(state.completedAt).getTime() <= cutoff) {
         const highSeq = state.events.at(-1)?.seq ?? 0;
         this.purgedHighSeqByTurnId.set(state.turnId, {
@@ -358,6 +359,10 @@ export class StreamManager {
     return purged;
   }
 
+  purgeTerminalStreams(maxAgeMs?: number): number {
+    return this.purgeTerminalStreamsInternal(maxAgeMs);
+  }
+
   /** Number of streams currently tracked (active + retained terminal). */
   get streamCount(): number {
     return this.streams.size;
@@ -367,7 +372,7 @@ export class StreamManager {
    * Internal: purge expired streams after each terminal transition.
    * Uses the instance retention setting.
    */
-  private purgeExpiredStreams(): void {
-    this.purgeTerminalStreams();
+  private purgeExpiredStreams(skipTurnId?: string): void {
+    this.purgeTerminalStreamsInternal(undefined, skipTurnId);
   }
 }
